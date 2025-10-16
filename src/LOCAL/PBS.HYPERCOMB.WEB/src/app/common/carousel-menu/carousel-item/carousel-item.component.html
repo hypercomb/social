@@ -1,0 +1,16 @@
+@if (hive) {
+  <div
+    (click)="change(hive.name)"
+    [style.background-color]="backgroundColor"
+    class="carousel-item"
+  >
+    <div class="image-wrapper">
+      @if (imageUrl()) {
+        <img [src]="imageUrl()" alt="carousel-item" />
+      }
+      @if (!imageUrl()) {
+        <span>{{ hive.name }}</span>
+      }
+    </div>
+  </div>
+}

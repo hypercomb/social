@@ -1,0 +1,81 @@
+// Design Tokens - Core values that form our design system
+
+// Spacing System (based on 8px grid)
+$spacing-unit: 0.5rem; // 8px
+$spacing: (
+  'xxs': $spacing-unit * 0.5,  // 4px
+  'xs':  $spacing-unit,        // 8px
+  'sm':  $spacing-unit * 1.5,  // 12px
+  'md':  $spacing-unit * 2,    // 16px
+  'lg':  $spacing-unit * 3,    // 24px
+  'xl':  $spacing-unit * 4,    // 32px
+  'xxl': $spacing-unit * 6     // 48px
+);
+
+// Layout Constants
+$header-height: 2.75rem;    // 44px
+$footer-height: 7rem;       // 112px
+$sidebar-width: 18.75rem;   // 300px
+
+// Typography
+$font-family-primary: 'Baloo 2', sans-serif;
+$font-family-mono: 'Roboto Mono', monospace;
+
+$font-sizes: (
+  'xs': 0.75rem,    // 12px
+  'sm': 0.875rem,   // 14px
+  'base': 1rem,     // 16px
+  'md': 1.15rem,    // 18.4px
+  'lg': 1.25rem,    // 20px
+  'xl': 1.5rem,     // 24px
+  'xxl': 2rem       // 32px
+);
+
+// Colors
+$colors: (
+  'background': (
+    'primary': #111111,
+    'secondary': rgba(0, 0, 0, 0.2),
+    'overlay': rgba(0, 0, 0, 0.85)
+  ),
+  'text': (
+    'primary': whitesmoke,
+    'secondary': #e0e0e0,
+    'muted': rgba(255, 255, 255, 0.7)
+  ),
+  'accent': (
+    'primary': #0b87f7,
+    'secondary': #6c5ce7,
+    'success': #00b894,
+    'warning': #fdcb6e,
+    'error': #d63031
+  ),
+  'border': rgba(255, 255, 255, 0.1)
+);
+
+// Z-index system
+$z-index: (
+  'base': 1,
+  'canvas': 5,
+  'sidebar': 8,
+  'header': 10,
+  'modal': 20,
+  'tooltip': 30,
+  'overlay': 40
+);
+
+// Border radius
+$border-radius: (
+  'sm': 0.25rem,  // 4px
+  'md': 0.5rem,   // 8px
+  'lg': 1rem      // 16px
+);
+
+// Transitions
+$transition-speed: (
+  'fast': 150ms,
+  'base': 300ms,
+  'slow': 500ms
+);
+
+$transition-timing: cubic-bezier(0.4, 0, 0.2, 1); 

@@ -1,0 +1,37 @@
+<div class="carousel-container">
+  @if(isVisibile()) {
+    <div class="carousel-menu">
+    <div class="top">
+      @for (hive of upper; track hive.name) {
+        <div
+          [hive]="hive"
+          (click)="changeHiveByName(hive.name)"
+          app-carousel-item
+          (change-hive)="jumpTo($event)"
+          class="small-tile"
+        ></div>
+      }
+    </div>
+
+    <div class="middle">
+      <div
+        [hive]="current()"
+        app-carousel-item
+        (change-hive)="jumpTo($event)"
+        class="middle-tile"
+      ></div>
+    </div>
+
+    <div class="bottom">
+      @for (hive of lower; track hive.name) {
+        <div
+          [hive]="hive"
+          (click)="changeHiveByName(hive.name)"
+          app-carousel-item
+          (change-hive)="jumpTo($event)"
+          class="small-tile"></div>
+      }
+    </div>
+  </div>
+  }
+</div>

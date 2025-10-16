@@ -1,0 +1,126 @@
+@use "../../styles/shared" as shared;
+@use "../../shared/page-layout" as layout;
+
+
+.help-page {
+  @extend .fullscreen-page;
+
+  .help-section {
+    background: layout.$surface-dark;
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+
+    h3 {
+      color: layout.$text-glow;
+      font-size: 1.25rem;
+      margin-bottom: 1rem;
+      font-weight: normal;
+    }
+
+    ul {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+
+      li {
+        display: flex;
+        align-items: flex-start;
+        gap: 1rem;
+
+        .key {
+          background: layout.$key-background;
+          padding: 0.4rem 0.8rem;
+          border-radius: 4px;
+          font-family: monospace;
+          font-size: 0.9rem;
+          color: layout.$text-secondary;
+          min-width: fit-content;
+          white-space: nowrap;
+        }
+
+        .description {
+          color: layout.$text-secondary;
+          font-size: 0.9rem;
+          flex: 1;
+          padding-top: 0.4rem;
+        }
+
+        .sub-features {
+          margin: 0.5rem 0 0 1rem;
+          padding-left: 3rem;
+          border-left: 1px solid rgba(255, 255, 255, 0.1);
+          margin-top: 1rem;
+          margin-left: 0rem;
+
+          li {
+            margin: 0.5rem 0;
+            padding: 0;
+            font-size: 0.85rem;
+            color: layout.$text-secondary;
+            display: list-item;
+            list-style-type: disc;
+
+            &:before {
+              display: none;
+            }
+          }
+        }
+
+        // Use opacity for transitions
+        transition: opacity 0.15s ease;
+
+        &:hover {
+          opacity: 0.9;
+        }
+      }
+    }
+  }
+
+  .footer {
+    margin-top: 2rem;
+    padding: 1rem;
+    text-align: center;
+    color: layout.$text-secondary;
+    font-size: 0.9rem;
+
+    a {
+      color: layout.$text-glow;
+      text-decoration: none;
+
+      &:hover {
+        text-decoration: underline;
+      }
+    }
+  }
+}
+
+// Media queries for responsiveness
+@media (max-width: 768px) {
+  .help-page {
+    .help-section {
+      padding: 1rem;
+
+      h3 {
+        font-size: 1.1rem;
+      }
+
+      ul li {
+        flex-direction: column;
+        gap: 0.5rem;
+
+        .key {
+          font-size: 0.85rem;
+        }
+
+        .description {
+          font-size: 0.85rem;
+          padding-top: 0;
+        }
+      }
+    }
+  }
+}

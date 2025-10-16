@@ -1,0 +1,140 @@
+
+$active: green;
+$drop-down-padding: 1em;
+$menu-color: rgb(7, 27, 44);
+$lite-links: whitesmoke;
+$standard-link-height: 1.5em;
+$header-height: 3.2em;
+$hexagon-height: 400px;
+$cos30: 0.866025; // Cosine of 30 degrees to 6 decimal places
+$hexagon-width: $hexagon-height * $cos30; // Automatically calculates width in pixels
+$control-bar-background: #111;
+$hypercomb-icons: 'hypercomb-icons';
+
+
+@mixin fixed-flex-control-simple {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 100%;
+    background-color: transparent;
+    height: 100%;
+    display: flex;
+    justify-content: center;
+    display: flex;
+    flex-direction: column;
+}
+
+
+/* in your src/styles.scss or src/styles.css */
+@font-face {
+    font-family: 'Belanosima';
+    src: local('Belanosima'),
+        url('../../../assets/fonts/Belanosima/Belanosima-Regular.ttf') format('truetype');
+    font-weight: normal;
+    font-style: normal;
+}
+
+@font-face {
+    font-family: 'Tenali_Ramakrishna';
+    src: local('Tenali_Ramakrishna'),
+        url('../../../assets/fonts/Tenali_Ramakrishna/TenaliRamakrishna-Regular.ttf') format('truetype');
+    font-weight: normal;
+    font-style: normal;
+}
+
+@font-face {
+    font-family: 'Baloo 2';
+    src: local('Baloo 2'),
+        url('../../../assets/fonts/Baloo2/Baloo2.ttf') format('truetype');
+    font-weight: normal;
+    font-style: normal;
+}
+
+@font-face {
+    font-family: 'Adobe Clean Light';
+    src: local('Adobe Clean Light'),
+        url('../../../assets/fonts/AdobeClean/AdobeCleanLight.otf') format('opentype');
+    font-weight: normal;
+    font-style: normal;
+}
+
+@font-face {
+    font-family: 'Montserrat';
+    src: local('Montserrat'),
+        url('../../../assets/fonts/Montserrat-Regular/Montserrat-Regular.ttf') format('truetype');
+    font-weight: normal;
+    font-style: normal;
+}
+
+@font-face {
+    font-family: 'hypercomb-icons';
+    src: local('hypercomb-icons'),
+        url('../../../assets/fonts/hypercomb/hypercomb-icons.ttf') format('truetype');
+    font-weight: normal;
+    font-style: normal;
+}
+
+@font-face {
+    font-family: 'Lato-Regular';
+    src: local('Lato-Regular'),
+        url('../../../assets/fonts/Lato/Lato-Regular.ttf') format('truetype');
+    font-weight: normal;
+    font-style: normal;
+}
+
+
+.no-select {
+    -webkit-touch-callout: none;
+    /* iOS Safari */
+    -webkit-user-select: none;
+    /* Safari */
+    -khtml-user-select: none;
+    /* Konqueror HTML */
+    -moz-user-select: none;
+    /* Old versions of Firefox */
+    -ms-user-select: none;
+    /* Internet Explorer/Edge */
+    user-select: none;
+    /* Non-prefixed version, currently
+                                    supported by Chrome, Edge, Opera and Firefox */
+}
+
+// Shared input styles
+@mixin modern-input {
+    background-color: rgba(17, 17, 17, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: whitesmoke;
+    font-family: 'Baloo 2', sans-serif;
+    transition: all 0.2s ease;
+
+    &:focus-within {
+        border-color: rgba(255, 255, 255, 0.3);
+        background-color: rgba(35, 35, 35, 0.95);
+        outline: none;
+    }
+
+    &::placeholder {
+        color: rgba(255, 255, 255, 0.5);
+        font-family: 'Baloo 2', sans-serif;
+    }
+}
+
+// Shared button styles
+@mixin icon-button {
+    padding: 0.5rem;
+    color: rgba(255, 255, 255, 0.7);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border-radius: 4px;
+    background: none;
+    border: none;
+
+    &:hover {
+        color: whitesmoke;
+        background-color: rgba(255, 255, 255, 0.1);
+    }
+}
+
+

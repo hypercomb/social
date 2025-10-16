@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="22.96023mm"
+   height="89.084869mm"
+   viewBox="0 0 22.960229 89.08487"
+   version="1.1"
+   id="svg5"
+   sodipodi:docname="tile-icons-background.svg"
+   inkscape:version="1.1.2 (b8e25be833, 2022-02-05)"
+   inkscape:export-filename="C:\Projects\PBS-2\Hypercomb\PBS.HYPERCOMB\PBS.Hypercomb.Web\src\assets\svg\tile-icons-background.png"
+   inkscape:export-xdpi="73.812698"
+   inkscape:export-ydpi="73.812698"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview7"
+     pagecolor="#505050"
+     bordercolor="#eeeeee"
+     borderopacity="1"
+     inkscape:pageshadow="0"
+     inkscape:pageopacity="0"
+     inkscape:pagecheckerboard="0"
+     inkscape:document-units="mm"
+     showgrid="false"
+     inkscape:zoom="0.77771465"
+     inkscape:cx="-425.60597"
+     inkscape:cy="430.10634"
+     inkscape:window-width="3440"
+     inkscape:window-height="1346"
+     inkscape:window-x="-11"
+     inkscape:window-y="-11"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="layer1" />
+  <defs
+     id="defs2" />
+  <g
+     inkscape:label="Layer 1"
+     inkscape:groupmode="layer"
+     id="layer1"
+     transform="translate(-133.28178,-100.58174)">
+    <path
+       id="rect1072"
+       style="opacity:0.8;fill:#3465a4;fill-opacity:1;stroke:#eeeeec;stroke-width:0.3;stroke-miterlimit:4;stroke-dasharray:none;paint-order:markers fill stroke;stop-color:#000000"
+       d="m 133.58178,101.0986 22.36023,12.77254 v 62.85309 l -22.36023,12.43233 z"
+       sodipodi:nodetypes="ccccc" />
+  </g>
+</svg>

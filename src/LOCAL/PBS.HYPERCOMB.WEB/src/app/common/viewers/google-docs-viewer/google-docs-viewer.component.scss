@@ -1,0 +1,9 @@
+@use '../viewer.scss' as viewer;
+
+$spacer: 2.8em;
+
+iframe {
+    margin-top: $spacer;
+    height: calc(100vh - $spacer * 2);
+    width: 100vw;
+}

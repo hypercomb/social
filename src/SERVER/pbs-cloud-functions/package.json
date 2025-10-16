@@ -1,0 +1,26 @@
+{
+  "engines": {
+    "node": ">=22 <23"
+  },
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "clean": "rimraf dist",
+    "build": "tsc -p tsconfig.json",
+    "prestart": "npm run clean && npm run build",
+    "start": "func start --verbose",
+    "debug": "func start --language-worker -- \"--inspect=9229\""
+  },
+  "dependencies": {
+    "@azure/functions": "^4.6.0",
+    "@azure/storage-blob": "^12.28.0",
+    "@azure/cosmos": "^4.5.0",
+    "axios": "^1.11.0",
+    "css-select": "^5.1.0",
+    "htmlparser2": "^10.0.0",
+    "hypercomb-validation": "^1.1.0",
+    "jwks-rsa": "^3.2.0",
+    "open-graph-scraper": "^6.10.0",
+    "sharp": "^0.34.3"
+  }
+}

@@ -1,0 +1,20 @@
+<!-- The Modal -->
+<div id="genericModal" class="modal">
+  <!-- Modal content -->
+  <div class="modal-content">
+    <div class="input-group">
+      <input #textInput type="text" [placeholder]="placeholder" [(ngModel)]="value" tabindex="0" submit-on-enter (enterPressed)="submitValue()" />
+      <button (click)="reset()" type="button" class="close-btn" tabindex="0">Cancel</button>
+      <button (click)="$event.preventDefault();submitValue();" type="button" class="submit-btn" tabindex="0" submit-on-enter (enterPressed)="submitValue()">{{buttonName}}</button>
+    </div>
+
+
+    @if (mode !== aiPromptMode) {
+      <div class="input-group">
+        <div app-welcome-message></div>
+      </div>
+    }
+  </div>
+</div>
+
+

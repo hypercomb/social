@@ -1,0 +1,27 @@
+$carousel-item-width: 3.5em;
+$carousel-item-height: 4.1em;
+
+.carousel-item {
+    position: relative;
+    display: flex; // Add flexbox for alignment
+    align-items: center; // Center vertically
+    justify-content: center; // Optional: Center horizontally (if needed)
+    transition: transform 0.5s, opacity 0.5s;
+    cursor: pointer;
+    gap: .25em;
+    border-radius: .25em;
+
+    .image-wrapper {
+        height: $carousel-item-height;
+        width: $carousel-item-width;
+        overflow: hidden; // Ensures the image doesn't extend outside the border radius
+
+        img {
+            width: $carousel-item-width;
+            height: $carousel-item-height;
+            object-fit: cover; // Ensures the image fills the container
+            object-position: center; // Centers the image
+            transition: transform 0.5s;
+        }
+    }
+}

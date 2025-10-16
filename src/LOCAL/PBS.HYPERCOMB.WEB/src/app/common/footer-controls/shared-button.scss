@@ -1,0 +1,30 @@
+button {
+    padding: 10px 20px;
+    font-size: 16px;
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    cursor: pointer;
+    border-radius: 5px;
+    display: flex;
+    align-items: center; /* Align text in the middle */
+    pointer-events: all;
+  }
+  
+  button:hover {
+    background-color: #45a049;
+  }
+  
+  .main-label {
+    font-size: 16px; /* Main button text */
+    margin-right: 10px;
+    vertical-align: middle; /* Align to middle */
+  }
+  
+  .shortcut-label {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.7); /* Lighter color */
+    font-style: italic;
+    vertical-align: middle; /* Align to middle */
+  }
+  

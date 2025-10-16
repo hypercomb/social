@@ -1,0 +1,9 @@
+<div class="container">
+  <app-layout-sidebar></app-layout-sidebar>
+  <div class="layout-designer" (dragover)="onDragOver($event)" (drop)="onDrop($event)">
+    <!-- Display dropped SVGs -->
+    @for (svg of droppedItems; track svg) {
+      <div class="dropped-item" [innerHTML]="svg"></div>
+    }
+  </div>
+</div>

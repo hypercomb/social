@@ -1,0 +1,10 @@
+<div class="sidebar">
+  <input type="text" placeholder="Search items" (input)="filterItems($event)">
+  <div class="item-list">
+    @for (item of filteredItems; track item) {
+      <div class="item" draggable="true" (dragstart)="onDragStart($event, item)">
+        <div [innerHTML]="item.resizedSvg"></div>
+      </div>
+    }
+  </div>
+</div>

@@ -1,0 +1,6 @@
+<div class="button-container">
+  @if (!isNewHive) {
+    <button class="save-branch" (click)="onSaveAsBranchClicked($event);$event.preventDefault();">save as branch</button>
+  }
+  <button class="save" (click)="onSaveClicked($event);$event.preventDefault();">save {{ saveName }}</button>
+</div>

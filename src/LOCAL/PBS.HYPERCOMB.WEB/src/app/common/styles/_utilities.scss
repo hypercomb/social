@@ -1,0 +1,60 @@
+@use 'tokens' as tokens;
+
+// Spacing Utilities
+@each $key, $value in $spacing {
+  .m-#{tokens.$key}  { margin: $value !important; }
+  .mt-#{$key} { margin-top: $value !important; }
+  .mb-#{$key} { margin-bottom: $value !important; }
+  .ml-#{$key} { margin-left: $value !important; }
+  .mr-#{$key} { margin-right: $value !important; }
+  
+  .p-#{$key}  { padding: $value !important; }
+  .pt-#{$key} { padding-top: $value !important; }
+  .pb-#{$key} { padding-bottom: $value !important; }
+  .pl-#{$key} { padding-left: $value !important; }
+  .pr-#{$key} { padding-right: $value !important; }
+}
+
+// Typography Utilities
+@each $key, $value in $font-sizes {
+  .text-#{$key} { font-size: $value !important; }
+}
+
+// Display Utilities
+.d-none { display: none !important; }
+.d-flex { display: flex !important; }
+.d-grid { display: grid !important; }
+.d-block { display: block !important; }
+
+// Flex Utilities
+.flex-row { flex-direction: row !important; }
+.flex-column { flex-direction: column !important; }
+.justify-start { justify-content: flex-start !important; }
+.justify-center { justify-content: center !important; }
+.justify-end { justify-content: flex-end !important; }
+.align-start { align-items: flex-start !important; }
+.align-center { align-items: center !important; }
+.align-end { align-items: flex-end !important; }
+
+// Position Utilities
+.position-relative { position: relative !important; }
+.position-absolute { position: absolute !important; }
+.position-fixed { position: fixed !important; }
+
+// Text Utilities
+.text-truncate {
+  @include truncate;
+}
+
+.text-center { text-align: center !important; }
+.text-left { text-align: left !important; }
+.text-right { text-align: right !important; }
+
+// Interactive Utilities
+.clickable {
+  @include interactive;
+}
+
+// Visibility
+.visible { visibility: visible !important; }
+.invisible { visibility: hidden !important; } 

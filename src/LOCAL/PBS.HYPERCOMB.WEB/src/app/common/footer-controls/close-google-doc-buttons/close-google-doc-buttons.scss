@@ -1,0 +1,10 @@
+@use '../shared-button';
+
+div { 
+    display: flex;
+    gap: .25em;
+  }
+
+  button { 
+    padding: .25em 1.5em;
+  }

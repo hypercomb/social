@@ -1,0 +1,41 @@
+// Mixin for the container layout
+@mixin container-layout {
+  height: 100%;
+  display: flex;
+  justify-content: left;
+  align-items: left;
+  flex-direction: row;
+  font-family: 'Montserrat';
+  font-size: medium;
+  z-index: 50;
+  width: 14em;
+}
+
+@mixin inner-style {
+  width: 100%; // Default width for mobile-first approach
+  max-width: 20rem; // Default max-width
+  height: calc(100vh - 8em);
+  background-color: #151515;
+  color: white;
+  display: flex;
+  flex-direction: column;
+
+  @media (max-width: 759px) {
+    width: 100%;
+  }
+
+  @media (min-width: 1024px) {
+    width: 100%;
+    max-width:20em;
+    height: calc(100vh - 6.8em);
+  }
+
+  >div::first-child {
+    flex: 0 0 auto;
+    height: 2em;
+  }
+
+  >div:last-child {
+    flex: 1;
+  }
+}

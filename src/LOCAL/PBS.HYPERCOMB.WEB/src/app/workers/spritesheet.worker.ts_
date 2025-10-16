@@ -1,0 +1,45 @@
+﻿// /// <reference lib="webworker" />
+
+// self.onmessage = async (event) => {
+//     const { spriteUrls, positions, width, height } = event.data
+
+//     // Calculate canvas size for the spritesheet based on given positions
+
+//     const SPRITE_WIDTH = width
+//     const SPRITE_HEIGHT = height
+//     const canvasWidth = Math.max(...positions.map(p => p.x)) + SPRITE_WIDTH
+//     const canvasHeight = Math.max(...positions.map(p => p.y)) + SPRITE_HEIGHT
+
+//     // Create OffscreenCanvas in the worker
+//     const offscreenCanvas = new OffscreenCanvas(canvasWidth, canvasHeight)
+//     console.log('render', "Width:", canvasWidth, "Height:", canvasHeight)
+
+//     const context = offscreenCanvas.getContext('2d')
+//     if (!context) {
+//         throw new Error('Failed to get 2D context for OffscreenCanvas')
+//     }
+
+//     // Loop through each sprite URL and its position, drawing onto the canvas
+//     for (let i = 0; i < spriteUrls.length; i++) {
+//         const url = spriteUrls[i]
+//         const { x, y } = positions[i] // Use the provided position data
+
+//         try {
+//             const imageBitmap = await fetch(url)
+//                 .then(response => response.blob())
+//                 .then(blob => createImageBitmap(blob))
+//             context.drawImage(imageBitmap, x, y, SPRITE_WIDTH, SPRITE_HEIGHT)
+//         } catch (error) {
+//             console.error(`Failed to load sprite from URL: ${url}`, error)
+//         }
+//     }
+
+//     // Convert the completed OffscreenCanvas to a Blob and send back to the main thread
+//     const spritesheetBlob = await offscreenCanvas.convertToBlob({ type: 'image/png' })
+//     const url = URL.createObjectURL(spritesheetBlob)
+//     self.postMessage({ url })
+// }
+
+
+
+

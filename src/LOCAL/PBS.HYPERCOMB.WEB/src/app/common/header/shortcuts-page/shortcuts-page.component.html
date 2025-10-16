@@ -1,0 +1,81 @@
+<div class="shortcuts-page">
+  <div class="page-header">
+    <h2>Keyboard Shortcuts</h2>
+    <button class="back-button" (click)="close()">
+      <i class="fa-solid fa-times"></i>
+      Close
+    </button>
+  </div>
+
+  <div class="page-content">
+    <!-- Navigation Section -->
+    <div class="shortcuts-section">
+      <h3>Navigation & View</h3>
+      <ul>
+        @for (shortcut of navigationShortcuts; track shortcut) {
+          <li>
+            <span class="key">{{ formatKeys(shortcut) }}</span>
+            <span class="description">{{ shortcut.description }}</span>
+          </li>
+        }
+      </ul>
+    </div>
+
+    <!-- Tile Operations -->
+    <div class="shortcuts-section">
+      <h3>Tile Operations</h3>
+      <ul>
+        @for (shortcut of tileShortcuts; track shortcut) {
+          <li>
+            <span class="key">{{ formatKeys(shortcut) }}</span>
+            <span class="description">{{ shortcut.description }}</span>
+          </li>
+        }
+      </ul>
+    </div>
+
+    <!-- Clipboard Operations -->
+    <div class="shortcuts-section">
+      <h3>Clipboard Operations</h3>
+      <ul>
+        @for (shortcut of clipboardShortcuts; track shortcut) {
+          <li>
+            <span class="key">{{ formatKeys(shortcut) }}</span>
+            <span class="description">{{ shortcut.description }}</span>
+          </li>
+        }
+      </ul>
+    </div>
+
+    <!-- Advanced Features -->
+    <div class="shortcuts-section">
+      <h3>Advanced Features</h3>
+      <ul>
+        @for (shortcut of advancedShortcuts; track shortcut) {
+          <li>
+            <span class="key">{{ formatKeys(shortcut) }}</span>
+            <span class="description">{{ shortcut.description }}</span>
+          </li>
+        }
+      </ul>
+    </div>
+
+    <!-- Destructive Operations -->
+    <div class="shortcuts-section destructive">
+      <h3>Destructive Operations</h3>
+      <ul>
+        @for (shortcut of destructiveShortcuts; track shortcut) {
+          <li>
+            <div
+              class="risk-indicator"
+              [class.warning]="shortcut.risk === 'warning'"
+              [class.danger]="shortcut.risk === 'danger'"
+            >!</div>
+            <span class="key">{{ formatKeys(shortcut) }}</span>
+            <span class="description">{{ shortcut.description }}</span>
+          </li>
+        }
+      </ul>
+    </div>
+  </div>
+</div>

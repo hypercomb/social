@@ -1,0 +1,82 @@
+<div class="hexagon-tile-editor">
+  <div class="container">
+    <div class="left-container">
+      <div class="header">
+        <mat-icon class="home-icon">home</mat-icon>
+        <h1>{{ editorKind() }}</h1>
+      </div>
+
+      <div class="form-group">
+        <label for="tileCaption">Name</label>
+        <input
+          id="tileCaption"
+          class="input"
+          type="text"
+          [ngModel]="editCell!.name"
+          (ngModelChange)="onCaptionChange($event)"
+          app-space-continuation
+          #name
+          submit-on-enter
+          (enterPressed)="save($event)"
+          placeholder="Cell Name"
+        />
+      </div>
+
+      <div class="form-group">
+        <label class="share" for="connection">
+          <div>Link</div>
+          <div>(Hyperlink/Share Code)</div>
+        </label>
+        <input
+          id="connection"
+          submit-on-enter
+          (enterPressed)="save($event)"
+          class="input"
+          type="text"
+          [ngModel]="editCell!.link"
+          (ngModelChange)="onLinkChange($event)"
+          placeholder="Connection (Hyperlink/Share Code)"
+        />
+      </div>
+
+      <div class="form-group">
+        <div class="border-and-upload">
+          <label class="border-color-label">Choose Border Color</label>
+        </div>
+        <div app-swatch-panel></div>
+      </div>
+
+      <div class="actions">
+        <div class="branch button-row">
+          @if (isComponentReady()) {
+            <app-editor-actions></app-editor-actions>
+          }
+        </div>
+        <div class="button-row">
+          <button
+            matTooltip="delete button!"
+            id="delete-button"
+            style="width: 5em"
+            (click)="delete(editCell!)"
+            class="delete"
+          >
+            {{ deleteText }}
+          </button>
+          <button (click)="cancel($event)" class="cancel">cancel</button>
+          <app-save-branch-button
+            (save-clicked)="save($event)"
+            (save-as-branch-clicked)="saveAsBranch($event)"
+          ></app-save-branch-button>
+        </div>
+        <span class="delete-warning">
+          delete will remove tile and sub-tiles permanently
+        </span>
+      </div>
+    </div>
+
+    <div class="right-container">
+      <div app-tile-image></div>
+    </div>
+
+  </div>
+</div>

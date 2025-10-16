@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   sodipodi:docname="branch-color.svg"
+   id="Layer_2"
+   data-name="Layer 2"
+   viewBox="0 0 259.5 300.34"
+   version="1.1"
+   inkscape:version="1.1.2 (b8e25be833, 2022-02-05)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     inkscape:zoom="1.8395818"
+     inkscape:cx="132.09524"
+     inkscape:cy="139.43386"
+     inkscape:window-width="3440"
+     inkscape:window-height="1346"
+     inkscape:window-x="-11"
+     inkscape:window-y="-11"
+     inkscape:window-maximized="1"
+     id="namedview1137"
+     pagecolor="#505050"
+     bordercolor="#eeeeee"
+     borderopacity="1"
+     inkscape:pageshadow="0"
+     inkscape:pageopacity="0"
+     inkscape:pagecheckerboard="0"
+     showgrid="false"
+     inkscape:current-layer="Layer_2" />
+  <defs
+     id="defs1131">
+    <style
+       id="style1129">
+      .cls-1, .cls-2 {
+        fill: #05285b;
+        stroke-width: 0px;
+      }
+
+      .cls-2 {
+        isolation: isolate;
+        opacity: .6;
+      }
+    </style>
+    <filter
+       inkscape:label="In and Out"
+       inkscape:menu="Shadows and Glows"
+       inkscape:menu-tooltip="Inner colorized shadow, outer black shadow"
+       style="color-interpolation-filters:sRGB;"
+       id="filter261755"
+       x="-0.043889935"
+       y="-0.038185579"
+       width="1.1095076"
+       height="1.0952755">
+      <feGaussianBlur
+         result="result0"
+         in="SourceAlpha"
+         stdDeviation="4"
+         id="feGaussianBlur261749" />
+      <feOffset
+         dx="5"
+         dy="5"
+         result="result4"
+         id="feOffset261751" />
+      <feComposite
+         in2="result4"
+         in="SourceGraphic"
+         operator="xor"
+         result="result3"
+         id="feComposite261753" />
+    </filter>
+  </defs>
+  <path
+     id="branch-color"
+     d="M 129.75,0.04499567 64.744142,37.576246 l -65.00585981,37.53125 0.003906,75.060544 -0.003906,75.0625 65.00585981,37.5293 65.005858,37.53516 65.00586,-37.53516 65.00586,-37.5293 -0.002,-75.0625 0.002,-75.060544 -65.00586,-37.53125 z m 0,16.66210933 57.78711,33.369141 57.79297,33.363281 -0.002,66.728513 0.002,66.73242 -57.79297,33.35938 -57.78711,33.36914 -57.787108,-33.36914 -57.792969,-33.35938 0.002,-66.73242 -0.002,-66.728513 57.792969,-33.363281 z" />
+</svg>

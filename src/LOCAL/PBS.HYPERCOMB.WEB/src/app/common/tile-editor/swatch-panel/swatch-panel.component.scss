@@ -1,0 +1,27 @@
+.swatch {
+    position: relative; // Ensures positioning context for the canvas overlay
+    width: 22em;    
+    > img {
+        border-radius: .4em;
+        background-color: white;
+        padding: .4em;
+    
+        display: block; // Ensures no unexpected gaps
+    } 
+
+    .responsive-palette {
+        width: 100%;
+        height: auto;
+    }
+
+    canvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        border-radius: .4em;
+        width: 22em; // Match the img width to ensure pixel-perfect overlay
+        height: auto;
+        pointer-events: none; // Allows clicks to pass through to the img
+        visibility: hidden; // Keep hidden unless needed for debugging
+    }
+}

@@ -1,0 +1,49 @@
+<div #chatwindow class="chat-window" [class.open]="isOpen" tabindex="0">
+  <!-- Toggle Button -->
+  <div class="chat-toggle">
+    <i class="fas" [class.fa-chevron-right]="!isOpen" [class.fa-chevron-left]="isOpen"></i>
+  </div>
+
+  <!-- Chat Panel -->
+  <div class="chat-panel" [style.width.px]="panelWidth">
+    <!-- Messages -->
+    <div class="messages-container">
+      @for (message of messages; track message) {
+        <div class="message" [class.user-message]="message.isUser" [class.ai-message]="!message.isUser">
+          <div class="message-content">{{ message.content }}</div>
+          <!-- Show instructions if any -->
+        </div>
+      }
+    </div>
+
+    <!-- Input Area -->
+    <div class="input-container">
+      <div class="input-wrapper">
+        <textarea
+          class="message-input"
+          placeholder="Ask about database operations..."
+          [(ngModel)]="newMessage"
+          (keydown.enter)="$event.preventDefault(); sendMessage()"
+        ></textarea>
+
+        <!-- Actions -->
+        <div class="actions-row">
+
+          <!-- Send -->
+          <button class="send-button" (click)="sendMessage()">
+            <i class="fas fa-paper-plane"></i>
+            <span>Send</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Drag Handle (FIXED QUOTE) -->
+    <!-- <div
+    class="drag-handle"
+    cdkDrag
+    cdkDragLockAxis="x"
+  (cdkDragMoved)="onDragMoved($event)"></div>
+  -->
+</div>
+</div>

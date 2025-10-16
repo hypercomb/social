@@ -1,0 +1,21 @@
+{
+  "name": "pbs-keycloak-backchannel-functions",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "clean": "rimraf dist",
+    "prestart": "npm run clean && npm run build",
+    "start": "func start",
+    "start:debug": "func start --language-worker -- \"--inspect=9229\"",
+    "test": "echo \"No tests yet...\""
+  },
+  "dependencies": {
+    "@azure/functions": "^4.0.0",
+    "axios": "^1.6.7",
+    "hypercomb-validation": "^1.1.0",
+    "keycloak-connect": "^23.0.4",
+    "recurly": "^4.46.0"
+  }
+}

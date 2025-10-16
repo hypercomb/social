@@ -1,0 +1,12 @@
+<div class="container">
+  <h2>Hive Images</h2>
+  <button (click)="loadImages()" [disabled]="loading()">Load Images</button>
+
+  <p class="status">{{ message() }}</p>
+
+  <div class="grid">
+    <div class="thumb" *ngFor="let img of images()">
+      <img [src]="img.blob ? (URL.createObjectURL(img.blob)) : ''" alt="Hive image" />  
+    </div>
+  </div>
+</div>

@@ -1,0 +1,14 @@
+<div class="icon-container" draggable="false">
+    <!-- <div  class="icon crop-edges" (click)="captureTrimmed()">
+        <span class="icon-crop-edges">%</span>
+    </div> -->
+    <div  class="icon eye-dropper" (click)="chooseColor()">
+        <span class="icon-eye-dropper">0</span>
+    </div>
+    <div class="icon" (click)="googleImageSearch()">
+        <span class="icon-google-search">)</span>
+    </div>
+    <div [class.selected]="es.context()!.isBranch" class="icon" (click)="toggleBranch()">
+        <span class="icon-toggle-branch">1</span>
+    </div>
+</div>

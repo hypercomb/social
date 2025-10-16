@@ -1,0 +1,82 @@
+@use './common/styles/shared.scss' as shared;
+
+.canvas-layer {
+  position: absolute;
+  background-color: rebeccapurple;
+  width: 100vw;
+  height: 100%;
+
+}
+
+.controls {
+  position: fixed;
+  left: 0; // Optionally, set the left position as needed
+  width: 100vw;
+  height: 7em;
+  bottom: 0;
+  background-color: shared.$control-bar-background; // Add a background color or styles as needed
+
+  button {
+    background-color: aqua;
+  }
+
+  background-color: transparent;
+  pointer-events: none;
+}
+
+[app-header-bar] {
+  pointer-events: none;
+  opacity: .85;
+}
+
+app-json-viewer {
+  padding: 10px;
+  height: 100vh;
+  background-color: #f5f5f5;
+  box-shadow: 2px 0px 5px rgba(0, 0, 0, 0.2);
+}
+
+[app-tile-editor] {
+  height: 100%;
+  display: flex;
+}
+
+app-layout-designer {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+app-main-menu {
+  display: flex;
+}
+
+app-loading-overlay {
+  background-color: #040204;
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  align-items: center;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+}
+
+.sidebar {
+  position: fixed;
+  top: 2.75em; // Below header
+  left: 0;
+  width: 300px;
+  height: calc(100vh - 2.75em - 7em); // Account for header and footer
+  background-color: rgba(0, 0, 0, 0.2);
+  z-index: 8;
+  overflow: hidden; // Important to contain the chat
+  pointer-events: all;
+}
+
+.hidden {
+  display: none;
+}

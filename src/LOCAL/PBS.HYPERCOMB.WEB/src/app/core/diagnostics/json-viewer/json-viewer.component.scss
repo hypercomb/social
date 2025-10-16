@@ -1,0 +1,20 @@
+/* json-debug-panel.component.css */
+
+.json-debug-panel {
+    position: fixed; /* Fixed relative to the viewport */
+    left: 0;         /* Align to the left side of the viewport */
+    top: 0;          /* Align to the top of the viewport */
+    width: 300px;    /* Set a fixed width */
+    max-height: 100vh; /* Maximum height */
+    overflow-y: auto; /* Enable vertical scrolling if content is taller than the viewport */
+    z-index: 1000;   /* Ensure it's above other content */
+    height: 100vh;;
+  }
+  
+  pre {
+    white-space: pre-wrap;
+    margin: 0;
+    background-color: #f5f5f5;
+    border: 1px solid #ddd;
+    padding: 10px;
+  }
