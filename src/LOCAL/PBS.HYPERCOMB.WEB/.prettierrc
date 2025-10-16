@@ -1,0 +1,6 @@
+{
+    "semi": false,
+    "prettier.printWidth": 800,
+    "typescript.preferences.quoteStyle": "single",
+    "prettier.proseWrap": "never"
+}

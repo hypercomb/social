@@ -1,0 +1,28 @@
+<div class="history-container">
+  <h2>browser history management</h2>
+
+  <div class="controls">
+    <button (click)="addState()">add new state</button>
+    <button (click)="replaceState()">replace current state</button>
+    <button (click)="removeLast()">remove last (go back)</button>
+  </div>
+
+  <p><strong>count:</strong> {{ count() }}</p>
+
+  @if (historyStack().length > 0) {
+    <div>
+      <h3>current history stack:</h3>
+      <ul>
+        @for (s of historyStack(); track s.hiveId) {
+          <li>
+            <strong>hiveId:</strong> {{ s.hiveId }}<br>
+            title: {{ s.title }}<br>
+            data: {{ s.data || '—' }}
+          </li>
+        }
+      </ul>
+    </div>
+  } @else {
+    <p>no history states yet. click "add new state" to start.</p>
+  }
+</div>

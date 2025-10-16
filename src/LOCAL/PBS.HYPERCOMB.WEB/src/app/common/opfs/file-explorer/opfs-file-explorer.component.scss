@@ -1,0 +1,78 @@
+.opfs-explorer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 80vh;
+  padding: 1rem;
+
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    width: 1000px;
+    max-width: 100vw;
+
+    .path {
+      flex: 1;
+      font-family: monospace;
+      color: #bbb;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+
+  .table-container {
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    width: 1000px;
+    max-width: 100vw;
+    background: #fff;
+    border-radius: 6px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    padding: 0;
+    max-height: 60vh;
+    overflow: auto;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+
+    .icon-cell {
+      width: 40px;
+      max-width: 40px;
+      text-align: left;
+      padding-right: 0;
+      color: #ccc;
+      mat-icon {
+        font-size: 22px;
+        vertical-align: middle;
+        transition: color 0.2s;
+      }
+      &:hover mat-icon {
+        color: #fff;
+      }
+    }
+
+    .name-cell {
+      text-align: left;
+      max-width: 200px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .delete-cell {
+      width: 50px;
+      text-align: right;
+    }
+
+    .clickable:hover {
+      background: rgba(255, 255, 255, 0.08);
+    }
+  }
+}

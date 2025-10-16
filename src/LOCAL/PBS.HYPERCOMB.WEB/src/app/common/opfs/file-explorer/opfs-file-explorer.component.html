@@ -1,0 +1,45 @@
+<div class="opfs-explorer">
+  <h3>📂 OPFS Explorer</h3>
+
+  <div class="toolbar">
+    <button mat-button color="primary" (click)="goBack()" [disabled]="currentPath() === '/'">
+      <mat-icon>arrow_back</mat-icon> Back
+    </button>
+    <span class="path">{{ currentPath() }}</span>
+    <button mat-icon-button color="accent" (click)="refresh()">
+      <mat-icon>refresh</mat-icon>
+    </button>
+  </div>
+  <div class="table-container">
+    <table mat-table [dataSource]="entries()" class="mat-elevation-z1">
+      <!-- icon -->
+      <ng-container matColumnDef="icon">
+        <th mat-header-cell *matHeaderCellDef></th>
+        <td mat-cell *matCellDef="let e" class="icon-cell" (click)="e.kind === 'directory' ? open(e) : viewFile(e)">
+          <mat-icon>{{ e.kind === 'directory' ? 'folder' : 'insert_drive_file' }}</mat-icon>
+        </td>
+      </ng-container>
+
+      <!-- name -->
+      <ng-container matColumnDef="name">
+        <th mat-header-cell *matHeaderCellDef> Name </th>
+        <td mat-cell *matCellDef="let e" (click)="e.kind === 'directory' ? open(e) : viewFile(e)" class="clickable name-cell">
+          {{ e.name }}
+        </td>
+      </ng-container>
+
+      <!-- delete -->
+      <ng-container matColumnDef="delete">
+        <th mat-header-cell *matHeaderCellDef></th>
+        <td mat-cell *matCellDef="let e" class="delete-cell">
+          <button mat-icon-button color="warn" (click)="deleteEntry(e); $event.stopPropagation()">
+            <mat-icon>delete</mat-icon>
+          </button>
+        </td>
+      </ng-container>
+
+      <tr mat-header-row *matHeaderRowDef="['icon', 'name', 'delete']"></tr>
+      <tr mat-row *matRowDef="let row; columns: ['icon', 'name', 'delete']"></tr>
+    </table>
+  </div>
+</div>

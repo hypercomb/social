@@ -1,0 +1,34 @@
+@use '../tile-editor-shared.scss' as editor;
+
+.button-container {
+    display: inline-flex;
+    flex: 1 1 auto; // Allow the container to grow and shrink based on the parent
+    border: 1px solid #000;
+    border-radius: 5px;
+    overflow: hidden;
+    font-size: editor.$button-font-size;
+}
+
+.button-container button {
+    border: none;
+    padding: editor.$editor-button;
+    cursor: pointer;
+    background-color: #f0f0f0;
+    font-size: editor.$button-font-size;
+    flex: 1 1 auto; // Allow buttons to grow and shrink within the container
+    color:white;
+}
+
+.button-container .save {
+    border-right: 1px solid #000;
+    background-color: green;
+}
+
+.button-container .save-branch {
+    background-color:cornflowerblue;
+    width: 0em;
+}
+
+.button-container button:hover {
+    background-color: #ddd;
+}

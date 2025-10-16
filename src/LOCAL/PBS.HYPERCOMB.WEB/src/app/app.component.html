@@ -1,0 +1,79 @@
+<!-- Main application container -->
+<div class="application" #application>
+  <!-- Header section -->
+  <div app-header-bar></div>
+
+  @if (isYoutubeViewerActive()) {
+    <app-youtube-viewer></app-youtube-viewer>
+  }
+
+  <!-- Main content area -->
+  <div class="controls" app-controls></div>
+  <div class="viewport">
+    <app-shell></app-shell>
+  </div>
+
+  <!-- Conditional help and shortcuts pages -->
+  <div [class.hidden]="!isHelpPageActive" app-help-page></div>
+  <div [class.hidden]="!isShortcutPageActive" app-shortcuts-page></div>
+
+  <!-- Carousel menu (non-mobile only) -->
+  @if (!state.isMobile) {
+    <div app-carousel-menu></div>
+  }
+</div>
+
+@if(!hasCells())
+{
+  <app-initial-cell></app-initial-cell>
+}
+
+<!-- Chat window (outside main application) -->
+@if (isChatWindowMode) {
+  <app-chat-window></app-chat-window>
+}
+
+<!-- Overlays and utilities -->
+@if (loading) {
+  <app-loading-overlay></app-loading-overlay>
+}
+@if (!loading) {
+  <ng-container app-custom-cursor></ng-container>
+}
+<app-oauth-callback></app-oauth-callback>
+
+
+@if (isSelectionMode()) {
+  <ng-container app-selection-watcher></ng-container>
+}
+
+<!-- Tile editor -->
+@if (es.isEditing()) {
+  <div app-tile-editor></div>
+}
+
+<!-- Viewers -->
+@if (notifyLocked) {
+  <!-- <app-locked-notification></app-locked-notification> -->
+}
+@if (json) {
+  <app-json-viewer [jsonData]="json"></app-json-viewer>
+}
+@if (isPhotoViewerActive) {
+  <app-photo-viewer></app-photo-viewer>
+}
+
+@if (isShowingGoogleDocument || true) {
+  <!-- <app-google-docs-viewer></app-google-docs-viewer> -->
+}
+
+<!-- Commented-out components -->
+<!-- <app-virtual-keyboard></app-virtual-keyboard> -->
+
+@if(false){
+<div app-confirm-delete-dialog> </div>
+}
+
+@if(isOpfsMode){
+<app-opfs-file-explorer></app-opfs-file-explorer>
+}

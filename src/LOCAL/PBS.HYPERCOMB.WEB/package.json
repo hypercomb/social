@@ -1,0 +1,51 @@
+{
+  "name": "pbs-hypercomb-web",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "ng": "ng",
+    "start": "ng serve --configuration fast-dev --port=4200",
+    "debug": "ng serve --configuration debug-ts --port=4200",
+    "debug:full": "ng serve --configuration=full-debug --port=4200",
+    "build": "ng build",
+    "watch": "ng build --watch --configuration development",
+    "prod": "ng build --watch --configuration production",
+    "production": "ng serve --configuration production --port=4200",
+    "test": "ng test",
+    "lint": "eslint \"src/**/*.{ts,tsx}\" --fix"
+  },
+  "dependencies": {
+    "@lmstudio/sdk": "^1.0.1",
+    "@microsoft/signalr": "^8.0.0",
+    "@angular/youtube-player": "20.2.1",
+    "@pixi/unsafe-eval": "^7.4.3",
+    "angular-auth-oidc-client": "16.0.1",
+    "angular-tooltips": "^1.2.2",
+    "awesome-notifications": "^3.1.3",
+    "cursor-effects": "^1.0.13",
+    "dexie": "^4.0.1-beta.11",
+    "dexie-cloud-addon": "^4.0.1-beta.57",
+    "downloadjs": "^1.4.7",
+    "eventemitter3": "^5.0.1",
+    "guid-typescript": "^1.0.9",
+    "hammerjs": "^2.0.8",
+    "hotkeys-js": "^3.9.5",
+    "jszip": "^3.10.1",
+    "kioskboard": "^2.3.0",
+    "konva": "^9.3.12",
+    "notyf": "^3.10.0",
+    "openai": "^4.25.0",
+    "photoviewer": "^3.8.1",
+    "pixi-filters": "^5.2.1",
+    "pixi.js": "^8.5.2",
+    "process": "^0.11.10",
+    "requirejs": "^2.3.6",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^8.42.0",
+    "@typescript-eslint/parser": "^8.42.0",
+    "eslint": "^9.34.0",
+    "eslint-plugin-unused-imports": "^4.2.0"
+  }
+}

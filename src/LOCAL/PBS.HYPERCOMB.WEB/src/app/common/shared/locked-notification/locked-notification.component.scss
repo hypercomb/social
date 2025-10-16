@@ -1,0 +1,35 @@
+@use '../../viewers/viewer.scss' as viewer;
+@use '../../styles/shared.scss' as shared;
+
+*{
+        pointer-events: none;
+}
+span {
+    color: gold;
+    text-align: center;
+}
+
+.locked {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    border-radius: 1em;
+    padding: 1em;
+    background-color: #333;
+    opacity: .8;
+    border-radius: .5em;
+    font-size: 8em;
+
+    span.icon {
+        font-family: "hypercomb-icons";
+        opacity: .8;
+    }
+
+    animation: fadeOut .8s ease forwards;
+
+    @keyframes fadeOut {
+        to {
+            opacity: 0;
+        }
+    }
+}

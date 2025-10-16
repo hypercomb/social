@@ -1,0 +1,54 @@
+<div class="container header" (mouseover)="onHover(true)" (mouseout)="onHover(false)">
+    <div class="header__content">
+
+        @if(!state.isMobile) {
+        <div class="header__left">
+            <!-- <button class="header__icon-btn">
+                <span class="icon" (click)="toggleChat()">5</span>
+            </button> -->
+        </div>
+        }
+
+        <!-- Mobile name -->
+        @if(state.isMobile) {
+        <div class="mobile-name">
+            <div class="name">{{ caption() }}</div>
+            <div class="mobile-actions">
+                <span class="icon common-font" (click)="openLink()" data-tooltip="view">view</span>
+            </div>
+        </div>
+        }
+
+        @if(!state.isMobile) {
+        <div id="name" [class.hovered]="isHovered" (mouseenter)="showEdit=true" (mouseleave)="showEdit=false"
+            class="header__caption">
+            <div (click)="edit($event)">
+                @if(!isEditingCaption()) {
+                <span>{{ caption() }}</span>
+                }
+                @if(isEditingCaption()) {
+                <input [(ngModel)]="name" placeholder="name" /> 
+                }
+            </div>
+        </div>
+        }
+
+        @if(!state.isMobile) {
+        <div class="right side">
+            @if(showCount()) {
+            <div class="count-display">
+                <i class="icon">E</i>
+                <span class="count">{{ cellCount() }}</span>
+            </div>
+            }
+            <div class="search">
+                <input app-focus-watcher type="search" [(ngModel)]="searchFilter" (focusChange)="onFocusChanged($event)"
+                    (ngModelChange)="onSearchTextChange($event)" placeholder="Search">
+            </div>
+            <div class="menu-container">
+                <div app-icon-menu></div>
+            </div>
+        </div>
+        }
+    </div>
+</div>

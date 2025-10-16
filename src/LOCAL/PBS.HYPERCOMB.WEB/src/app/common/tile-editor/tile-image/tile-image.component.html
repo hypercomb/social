@@ -1,0 +1,8 @@
+<div class="tile-image-container" app-drag-and-drop>
+  @if (this.es.rendered() && !this.es.context()) {
+    <div class="placeholder-image" [class.hidden]="!this.es.context()">
+      <img src="assets/placeholder-tile.png" alt="Drop image here" />
+    </div>
+  }
+  <div #tilearea class="container" [class.hidden]="!this.es.rendered()"></div>
+</div>

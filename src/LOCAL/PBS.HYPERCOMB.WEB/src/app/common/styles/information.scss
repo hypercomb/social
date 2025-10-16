@@ -1,0 +1,46 @@
+
+.information-page { 
+  position: fixed;
+  height: calc(100% - 2.95em);
+  bottom: 0; /* Extend to the bottom of the viewport */
+  width: 100vw;
+  color: whitesmoke;
+  font-family: 'Baloo 2';
+  font-size: .8rem; /* Adjust font size based on viewport width */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start; /* Align content from the top */
+  overflow-y: auto; /* Enable scrolling for overflow content */
+}
+
+ul {
+  line-height: 1.4;
+  margin: 0 auto;
+}
+
+ul li:not(:last-child) {
+  margin-bottom: 1em;
+}
+
+.sub-list { 
+  > li:first-child { 
+      margin-top: 1em;
+      margin-bottom: 1em;
+  }
+  line-height: 1.2;
+  margin-left: 1.2em;
+}
+
+.help-page { 
+  background-color: #335380;
+}
+
+/* Media query for high-density (Retina) displays */
+@media only screen and (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+  
+  .information-page {
+    top: 9vh; 
+      font-size: calc(1.5em + 1vw); /* Slightly larger font for better readability on Retina displays */
+  }
+}

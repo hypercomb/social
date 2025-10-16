@@ -1,0 +1,5 @@
+// navigation shouldn't leave the page when at the the root
+// create a stack that when you put on an item it ads navigation state
+// when you click the back button the address changes to the next stack item
+// when you reach the fist stack (history shoudl be in sync) item that make sure you don't leave the page (nothing happens maybe a small viausl cue)  
+// 

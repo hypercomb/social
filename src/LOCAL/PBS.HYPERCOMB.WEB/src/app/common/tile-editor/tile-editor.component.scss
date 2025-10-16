@@ -1,0 +1,222 @@
+@use '../styles/shared.scss' as shared;
+@use './tile-editor-shared.scss' as editor;
+
+$font-size: small;
+$padding: .75em 2em;
+
+app-save-branch-button {
+    flex: 1 1 auto;
+    display: flex;
+}
+
+.hexagon-tile-editor {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background-color: #1e1e1e;
+    color: #fff;
+    padding: 20px;
+    border-radius: 10px;
+    width: 54em;
+    margin: 0 auto;
+    align-self: center;
+    height: 27.2em;
+}
+
+.container {
+    display: flex;
+    width: 100%;
+    font-family: 'Montserrat';
+    font-size: .64em;
+    gap: 1em;
+    height: 100%;
+}
+
+.left-container {
+    flex-grow: 1;
+    padding-right: 10px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.right-container {
+    width: 346px;
+    /* Fixed width for the right container */
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    margin-top: 1.5em;
+}
+
+.header,
+.form-group {
+    flex: 0 1 auto;
+}
+
+.actions {
+    // flex: 0 0 8em;
+    margin-top: auto;
+}
+
+.header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 16px;
+
+    .home-icon {
+        color: #fff;
+        font-size: 24px;
+        width: 24px;
+        height: 24px;
+    }
+
+    h2 {
+        margin: 0;
+        color: #fff;
+    }
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    margin-bottom: 15px;
+}
+
+.form-group label {
+    margin-bottom: 5px;
+    font-size: medium;
+}
+
+.form-group input {
+    padding: 10px;
+    border: none;
+    border-radius: 5px;
+
+}
+
+.button-group {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    margin-bottom: 20px;
+}
+
+.button-group button {
+    background-color: #2a2a2a;
+    color: #fff;
+    padding: $padding;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: editor.$button-font-size;
+}
+
+.actions {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+}
+
+.actions .button-row {
+    display: flex;
+    justify-content: right;
+    width: 100%;
+    gap: .6em;
+}
+
+.actions button {
+    background-color: #4caf50;
+    color: #fff;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: $font-size;
+}
+
+.actions .save-branch {
+    background-color: #2196f3;
+}
+
+.actions .delete {
+    background-color: #f44336;
+}
+
+.actions .cancel {
+    background-color: orange;
+}
+
+.actions .delete-warning {
+    font-size: 12px;
+    color: #888;
+    text-align: center;
+    align-self: flex-start;
+}
+
+.toggle-add-cells-button {
+    zoom: .7;
+    align-self: center;
+    ;
+}
+
+.image {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 100px;
+    height: 100px;
+    position: relative;
+}
+
+.hexagon {
+    width: 100px;
+    height: 55px;
+    background-color: #ffeb3b;
+    position: relative;
+    margin: 27.5px 0;
+}
+
+.hexagon:before,
+.hexagon:after {
+    content: "";
+    position: absolute;
+    width: 0;
+    border-left: 50px solid transparent;
+    border-right: 50px solid transparent;
+}
+
+.hexagon:before {
+    bottom: 100%;
+    border-bottom: 27.5px solid #ffeb3b;
+}
+
+.hexagon:after {
+    top: 100%;
+    border-top: 27.5px solid #ffeb3b;
+}
+
+.share {
+    display: flex;
+    flex-direction: row;
+    width: 100%;
+    ;
+    justify-content: space-between;
+    align-items: center;
+
+    > :last-child {
+        font-size: x-small;
+    }
+}
+
+.border-color-label { 
+    font-size: medium;
+}
+
+.border-and-upload { 
+    display:flex;
+    justify-content: space-between
+}

@@ -1,0 +1,52 @@
+.carousel-menu {
+  position: fixed;
+  top: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end; // right-align tiles
+  padding-right: 2em; // give extra space for scaled middle tile
+  height: calc(100vh - 5.5em);
+  margin-top: 2.75em;
+
+  .top,
+  .bottom {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex: 1 1 50%;
+    gap: 0.4em;
+    overflow: hidden;
+  }
+
+  .top {
+    justify-content: flex-end;
+  }
+
+  .bottom {
+    justify-content: flex-start;
+  }
+
+  .middle {
+    flex: 0 0 auto;
+    display: flex;
+    justify-content: flex-end; // keep middle tile aligned with rest
+    align-items: center;
+    margin: 0.9em 0;
+    border-radius: 0.25em;
+    z-index: 2;
+  }
+
+  .middle-tile {
+    transform: scale(1.3);
+    border: 2px solid #007bff;
+    border-radius: 0.25em;
+    transition: transform 0.3s, opacity 0.3s;
+  }
+
+  .small-tile {
+    transform: scale(1);
+    opacity: 0.6;
+    transition: transform 0.3s, opacity 0.3s;
+  }
+}

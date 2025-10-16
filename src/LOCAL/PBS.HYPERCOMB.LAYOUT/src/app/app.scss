@@ -1,0 +1,41 @@
+@use "variables" as *;
+
+.viewport {
+  display: grid;
+  grid-template-rows: $header-height 1fr $footer-height;
+  grid-template-columns: 100%;
+  min-height: 100vh; // ensures full height scaling
+  min-height: 100dvh; // modern viewport unit for mobile browsers
+  width: 100%;
+  
+  header {
+    background: $bg-header;
+    color: $text-light;
+    display: flex;
+    align-items: center;
+    padding-inline: 1rem;
+    font-size: clamp(0.9rem, 2vw, 1rem);
+    
+  }
+
+  main {
+    background: $bg-main;
+    color: $text-dark;
+    padding: 1rem;
+    overflow-y: auto; // allow scroll only in main content
+  }
+
+  footer {
+    background: $bg-footer;
+    color: $text-light;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: clamp(0.8rem, 1.5vw, 0.9rem);
+  }
+}
+
+app-header,
+app-footer {
+  width: 100%;
+}

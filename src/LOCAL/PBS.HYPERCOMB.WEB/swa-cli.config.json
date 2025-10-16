@@ -1,0 +1,13 @@
+{
+  "$schema": "https://aka.ms/azure/static-web-apps-cli/schema",
+  "configurations": {
+    "swa": {
+      "appLocation": "C:\\Projects\\HYPERCOMB\\PBS.HYPERCOMB\\PBS.Hypercomb.Web",
+      "apiLocation": "http://localhost:7231/api",
+      "outputLocation": "C:\\Projects\\HYPERCOMB\\PBS.HYPERCOMB\\PBS.Hypercomb.Web\\dist",
+      "appBuildCommand": "ng serve -o --port=4200",
+      "run": "ng serve -o --port=4200",
+      "appDevserverUrl": "https://localhost:4200"
+    }
+  }
+}

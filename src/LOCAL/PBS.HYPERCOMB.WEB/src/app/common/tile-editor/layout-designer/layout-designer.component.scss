@@ -1,0 +1,31 @@
+
+  .draggable-svg {
+    position: absolute;
+  }
+  
+  .container {
+    display: flex;
+    height: 100vh;
+    background-color: rebeccapurple;
+  }
+
+  app-sidebar {
+    flex: 0 0 200px;
+  }
+
+  .layout-designer {
+    width: 100Vh;
+    height: 400px;
+    border: 1px solid #ccc;
+    position: relative;
+    background-color: #f9f9f9;
+  }
+  
+  .dropped-item {
+    position: absolute;
+    font-size: 0;
+    svg { 
+        font-size: medium;
+    }
+
+  }

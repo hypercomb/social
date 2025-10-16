@@ -1,0 +1,113 @@
+@use './app/common/styles/shared.scss' as shared;
+
+/* You can add global styles to this file, and also import other style files */
+body,
+html,
+canvas {
+    overflow: hidden;
+    padding: 0;
+    margin: 0 auto;
+    box-sizing: border-box;
+    height: 100%;
+}
+
+
+body {
+    background:hsl(228, 17%, 17%);
+    border: 0 solid orange;
+}
+
+::placeholder {
+    color: #bbbbd5;
+    font-family: sans-serif;
+    pointer-events: none;
+    font-size: .8em;
+}
+
+*:focus {
+    outline: none;
+}
+
+.cropper-face {
+    background-image: url(/assets/hex-clip.png);
+    background-size: contain;
+    opacity: .3;
+}
+
+.crop-button {
+    width: 100%;
+    padding: .2em;
+    font-size: x-large;
+    font-family: cursive;
+    border: 2px solid ghostwhite;
+}
+
+.link-label {
+    width: 100%;
+    padding: .8em;
+    background-color: aliceblue;
+    font-size: x-small;
+    font-family: sans-serif;
+    text-overflow: ellipsis;
+}
+
+.canvas-container {
+    margin: 0 auto !important;
+}
+
+
+
+
+svg.svg-inline--fa.fa-triangle-exclamation.fa-fw {
+    /* fill: red !important; */
+    color: rgb(255, 179, 0);
+    font-size: 4em;
+}
+
+div.awn-popup-title {
+    font-size: 1.4em !important;
+}
+
+.awn-popup-content {
+    font-size: 1.3em;
+}
+
+
+
+.awn-popup-async-block {
+    font-family: 'Adobe Clean Light';
+    font-size: x-small;
+}
+.awn-popup-wrapper, .awn-popup-async-block { 
+    padding: 1em !important;
+    border: .05em solid black !important;
+}
+.awn-popup-body {
+    font-family: 'Adobe Clean Light';
+    font-size: small !important;
+    background-color: #1b1c1f77 !important;
+}
+
+.awn-popup-confirm {
+    background-color: #1b1c1f !important;
+    color: whitesmoke;
+    font-family: 'Adobe Clean Light';
+    box-shadow: 8px 11px 18px 3px rgba(0, 0, 0, 0.65);
+    -webkit-box-shadow: 8px 11px 18px 3px rgba(0, 0, 0, 0.65);
+    -moz-box-shadow: 8px 11px 18px 3px rgba(0, 0, 0, 0.65);
+    border: .05em solid rgba(255, 215, 0, 0.2);
+
+}
+.awn-popup-loading-dots,
+.awn-popup-loading-dots:before,
+.awn-popup-loading-dots:after {
+  border-radius: 50%;
+  width: 1px !important;
+  height: 1px !important;
+  animation-fill-mode: forwards;
+  background: #fff;
+  animation: awn-loading-dots .5s infinite ease-in-out;
+}
+
+html, body { height: 100%; }
+body { margin: 0; font-family: Roboto, "Helvetica Neue", sans-serif; }

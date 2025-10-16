@@ -1,0 +1,45 @@
+@use 'tokens';
+@use 'mixins';
+@use 'utilities';
+
+// Global Styles
+html, body {
+  margin: 0;
+  padding: 0;
+  font-family: $font-family-primary;
+  font-size: map-get($font-sizes, 'base');
+  line-height: 1.5;
+  color: map-get(map-get($colors, 'text'), 'primary');
+  background-color: map-get(map-get($colors, 'background'), 'primary');
+}
+
+// Reset default styles
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+// Base component styles
+.app-container {
+  min-height: 100vh;
+  @include flex(column);
+}
+
+.content-container {
+  flex: 1;
+  position: relative;
+}
+
+// Common component styles
+.card {
+  @include card;
+}
+
+.scrollable-container {
+  @include scrollable;
+}
+
+.interactive-element {
+  @include interactive;
+} 

@@ -1,0 +1,20 @@
+.container {
+    display: flex;
+    justify-content: space-between; /* Centers the content horizontally */
+    align-items: stretch;    /* Keeps all columns the same height */
+  }
+
+.column {
+    flex-grow: 1; /* Allows all columns to grow */
+  }
+  
+  .left,
+  .right {
+    flex-basis: auto; /* Allows left and right columns to adjust their width automatically */
+    max-width: max-content; /* Ensures columns don't shrink smaller than their content */
+  }
+  
+  .center {
+    flex: 1 1 0; /* Center column grows with the remaining space */
+    text-align: center; /* Centers the content inside the center column */
+  }

@@ -1,0 +1,19 @@
+<!-- app.component.html -->
+<div class="app viewport">
+  @if(showHeader){
+  <header>
+    <app-header></app-header>
+  </header>
+  }
+
+  <main>
+    <router-outlet></router-outlet>
+  </main>
+
+  @if(showFooter){
+  <footer>
+    <app-footer></app-footer>
+  </footer>
+  }
+</div>
+

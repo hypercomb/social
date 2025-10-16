@@ -1,0 +1,78 @@
+@use "../../styles/shared" as shared;
+
+.tile-image-container {
+    position: relative;
+    width: shared.$hexagon-width;
+    height: shared.$hexagon-height;
+    min-width: shared.$hexagon-width;
+    min-height: shared.$hexagon-height;
+}
+
+.container {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: shared.$hexagon-width;
+    height: shared.$hexagon-height;
+    min-width: shared.$hexagon-width;
+    min-height: shared.$hexagon-height;
+    z-index: 1;
+    pointer-events: auto;
+}
+
+.container.hidden {
+    left: -10000px;
+}
+
+.placeholder-image {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: shared.$hexagon-width;
+  height: shared.$hexagon-height;
+  min-width: shared.$hexagon-width;
+  min-height: shared.$hexagon-height;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 0;
+  pointer-events: auto;
+  background-color: rgba(30, 30, 30, 0.5);
+
+  img {
+    width: 50%;
+    height: 50%;
+    opacity: 0.5;
+    object-fit: contain;
+
+    // 🚫 prevent browser from treating the image itself as a draggable source
+    pointer-events: none;
+    -webkit-user-drag: none; // chrome/webkit
+  }
+}
+
+
+.tile-image {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: shared.$hexagon-width;
+    height: shared.$hexagon-height;
+    opacity: 1;
+}
+
+.result-image {
+    opacity: .5;
+}
+
+.tile-frame {
+    background-size: contain;
+}
+
+.background-image,
+.result-image {
+    width: shared.$hexagon-width;
+    height: shared.$hexagon-height;
+    background-repeat: no-repeat;
+    background-position: center;
+}
