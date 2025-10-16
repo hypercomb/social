@@ -3,7 +3,7 @@ import { toCell, safeDate } from "src/app/core/mappers/to-cell"
 import { toCellEntity } from "src/app/core/mappers/to-cell-entity"
 import { CellEntity } from "src/app/database/model/i-tile-entity"
 import { IEntityFactoryPort } from "../ports/i-entity-factory-port"
-import { Cell, NewCell, Hive, Ghost, ClipboardCell, Pathway } from "src/app/cells/cell"
+import { Cell, NewCell, Hive, Ghost, ClipboardCell, Pathway, CellKind } from "src/app/cells/cell"
 
 @Injectable({ providedIn: "root" })
 export class CellFactory implements IEntityFactoryPort<CellEntity, Cell> {
@@ -24,13 +24,14 @@ export class CellFactory implements IEntityFactoryPort<CellEntity, Cell> {
     }
 
     // Explicit creation methods for each type
-    public createCell(params: Partial<NewCell> & { cellId: number }): Cell {
-        return new Cell({
+    public createCell(params: Partial<NewCell> & { cellId: number }, kind: CellKind): Cell {
+        const cell =  new Cell({
             ...params,
-            kind: "Cell",
             cellId: params.cellId,
             dateCreated: safeDate(new Date()),
         })
+        cell.setKind(kind)
+        return cell
     }
 
     public createHive(params: Partial<Cell> & { cellId: number }): Hive {

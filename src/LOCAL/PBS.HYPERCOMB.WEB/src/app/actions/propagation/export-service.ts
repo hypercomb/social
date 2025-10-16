@@ -7,7 +7,7 @@ import * as download from "downloadjs"
 @Injectable({ providedIn: "root" })
 export class DatabaseExportService extends DatabaseService {
   private readonly database = inject(DatabaseService)
-  
+
 
   // export full Dexie database
   public async export(): Promise<Blob> {
