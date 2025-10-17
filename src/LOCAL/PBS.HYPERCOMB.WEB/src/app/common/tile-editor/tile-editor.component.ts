@@ -16,7 +16,7 @@ import { ImageCaptureService } from 'src/app/unsorted/image-services/image-captu
 import { cacheId, isHive, isNewHive } from 'src/app/cells/models/cell-filters'
 import { Cell, EditCell } from 'src/app/cells/cell'
 import { Events } from 'src/app/helper/events/events'
-import { ServiceBase } from 'src/app/core/mixins/abstraction/service-base'
+import { Hypercomb } from 'src/app/core/mixins/abstraction/hypercomb.base'
 import { CellFactory } from 'src/app/inversion-of-control/factory/cell-factory'
 import { HIVE_HYDRATION, MODIFY_COMB_SVC } from 'src/app/shared/tokens/i-comb-service.token'
 import { ImagePersistenceService } from './tile-image/image-persistence-service'
@@ -40,7 +40,7 @@ import { PointerState } from 'src/app/state/input/pointer-state'
     TileImageComponent
   ]
 })
-export class TileEditorComponent extends ServiceBase {
+export class TileEditorComponent extends Hypercomb {
   @ViewChild('name') name!: ElementRef<HTMLInputElement>
 
   // ─────────────────────────────────────────────
@@ -117,7 +117,6 @@ export class TileEditorComponent extends ServiceBase {
 
   constructor() {
     super()
-    this.hydration.invalidate()
 
     effect(() => {
       const ctx = this.es.context()

@@ -5,14 +5,14 @@ import { CellFactory } from "src/app/inversion-of-control/factory/cell-factory"
 import { CellOptions } from "src/app/core/models/enumerations"
 import { BlobService } from "./blob-service"
 import { cacheId } from "src/app/cells/models/cell-filters"
-import { DataServiceBase } from "src/app/actions/service-base-classes"
+import { HypercombData } from "src/app/actions/hypercomb-data"
 import { CenterTileService } from "src/app/cells/behaviors/center-tile-service"
 import { TILE_FACTORY } from "src/app/shared/tokens/i-hypercomb.token"
 
 @Injectable({
   providedIn: 'root'
 })
-export class InitialTileService extends DataServiceBase {
+export class InitialTileService extends HypercombData {
   private readonly blob = inject(BlobService)
   private readonly center = inject(CenterTileService)
   private readonly factory = {

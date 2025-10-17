@@ -1,5 +1,5 @@
 ﻿// import { Injectable, Injector } from "@angular/core"
-// import { DataServiceBase } from "src/app/actions/command.base"
+// import { HypercombData } from "src/app/actions/command.base"
 // import { SerializationService } from "src/app/database/persistence/serialization-service"
 // import { HypercombState } from "src/app/state/core/hypercomb-state"
 // import { CellManager } from "src/app/tile/management/tile-manager"
@@ -10,7 +10,7 @@
 // @Injectable({
 //     providedIn: 'root'
 // })
-// export abstract class MessageHandler extends DataServiceBase {
+// export abstract class MessageHandler extends HypercombData {
 
 //     private subscription?: (...args: any[]) => void
 //     protected get AllowCollaboration(): boolean { return window.localStorage.getItem("AllowCollaboration") == "true" }

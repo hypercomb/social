@@ -1,6 +1,6 @@
-﻿import { ServiceBase } from "src/app/core/mixins/abstraction/service-base"
+﻿import { Hypercomb } from "src/app/core/mixins/abstraction/hypercomb.base"
 
-export abstract class ReceiveFileBase extends ServiceBase {
+export abstract class ReceiveFileBase extends Hypercomb {
 
     protected readonly files: string = 'Files'
     protected readonly plain: string = 'text/plain'

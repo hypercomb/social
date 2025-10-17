@@ -1,5 +1,5 @@
 ﻿import { Injectable } from "@angular/core"
-import { DataServiceBase } from "../actions/service-base-classes"
+import { HypercombData } from "../actions/hypercomb-data"
 import { Cell } from "../cells/cell"
 
 // Interface defining all available database operations
@@ -15,7 +15,7 @@ export interface IDatabaseOperations {
 }
 
 @Injectable({ providedIn: 'root' })
-export class DatabaseAdapter extends DataServiceBase implements IDatabaseOperations {
+export class DatabaseAdapter extends HypercombData implements IDatabaseOperations {
 
   // Implement all interface methods by delegating to database service
   public async store(data: Cell): Promise<Cell> {

@@ -4,10 +4,10 @@ import { Action } from "../action-models"
 import { CombStore } from "src/app/cells/storage/comb-store"
 import { HiveService } from "src/app/hive/storage/hive-service"
 import { ShowContext } from "../action-contexts"
-import { ServiceBase } from "src/app/core/mixins/abstraction/service-base"
+import { Hypercomb } from "src/app/core/mixins/abstraction/hypercomb.base"
 
 @Injectable({ providedIn: "root" })
-export class ShowHiveAction extends ServiceBase implements Action<ShowContext> {
+export class ShowHiveAction extends Hypercomb implements Action<ShowContext> {
   category?: string | undefined
   risk?: "none" | "danger" | "warning" | undefined
   

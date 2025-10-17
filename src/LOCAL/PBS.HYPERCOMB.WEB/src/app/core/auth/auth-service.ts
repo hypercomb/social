@@ -1,10 +1,10 @@
 ﻿import { Injectable, inject, effect } from "@angular/core"
 import { Router } from "@angular/router"
 import { OidcSecurityService } from "angular-auth-oidc-client"
-import { ServiceBase } from "../mixins/abstraction/service-base"
+import { Hypercomb } from "../mixins/abstraction/hypercomb.base"
 
 @Injectable({ providedIn: 'root' })
-export class Autservice extends ServiceBase {
+export class Autservice extends Hypercomb {
     private readonly router = inject(Router)
 
     constructor() {

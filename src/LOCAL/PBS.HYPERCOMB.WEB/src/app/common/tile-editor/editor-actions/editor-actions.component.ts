@@ -2,9 +2,9 @@
 import { Component, inject } from '@angular/core'
 import { Searcservice } from 'src/app/database/utility/search-service'
 import { CellOptions, HypercombMode } from 'src/app/core/models/enumerations'
-import { ServiceBase } from 'src/app/core/mixins/abstraction/service-base'
 import { EditorService } from 'src/app/state/interactivity/editor-service'
 import { ColorPicker } from 'src/app/unsorted/utility/color-picker'
+import { Hypercomb } from 'src/app/core/mixins/abstraction/hypercomb.base'
 
 @Component({
   standalone: true,
@@ -12,7 +12,7 @@ import { ColorPicker } from 'src/app/unsorted/utility/color-picker'
   templateUrl: './editor-actions.component.html',
   styleUrls: ['./editor-actions.component.scss']
 })
-export class EditorActionsComponent extends ServiceBase {
+export class EditorActionsComponent extends Hypercomb {
   public readonly es = inject(EditorService)
   private readonly colorPicker = inject(ColorPicker)
   private readonly searcservice = inject(Searcservice)

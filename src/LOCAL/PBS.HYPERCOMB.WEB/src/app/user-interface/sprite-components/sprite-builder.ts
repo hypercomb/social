@@ -1,12 +1,12 @@
 ﻿// src/app/sprites/sprite-builder.ts
 import { Container } from 'pixi.js'
-import { ServiceBase } from 'src/app/core/mixins/abstraction/service-base'
+import { Hypercomb } from 'src/app/core/mixins/abstraction/hypercomb.base'
 
 /**
  * abstract contract for sprite builders
  * keeps the API consistent across all implementations
  */
-export abstract class SpriteBuilder<T> extends ServiceBase {
+export abstract class SpriteBuilder<T> extends Hypercomb {
     /** optionally decide if we can build this type */
     public async canBuild(_params: T): Promise<boolean> {
         return true

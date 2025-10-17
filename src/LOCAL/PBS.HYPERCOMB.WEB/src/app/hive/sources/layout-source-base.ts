@@ -1,8 +1,8 @@
-﻿import { DataServiceBase } from "src/app/actions/service-base-classes";
+﻿import { HypercombData } from "src/app/actions/hypercomb-data";
 import { Cell } from "src/app/cells/cell";
 
 
-export abstract class LayoutSourceBase extends DataServiceBase implements ILayoutSource {
+export abstract class LayoutSourceBase extends HypercombData implements ILayoutSource {
 
     abstract getTiles(state: any): Promise<Cell[]>
     abstract canLayout(state: any): Promise<boolean>

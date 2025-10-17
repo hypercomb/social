@@ -2,12 +2,12 @@
 import { Injectable, effect, inject } from '@angular/core'
 
 // app imports
-import { ServiceBase } from '../../service-base'
+import { Hypercomb } from '../../service-base'
 import { DatabaseService } from '../database-service'
 import { ImageDatabase } from '../images/image-database'
 
 @Injectable({ providedIn: 'root' })
-export class DatabaseMaintenanceService extends ServiceBase {
+export class DatabaseMaintenanceService extends Hypercomb {
     // injects (one-line)
     private readonly db = inject(DatabaseService)
     private readonly images = inject(ImageDatabase)

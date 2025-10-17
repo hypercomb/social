@@ -1,14 +1,14 @@
 ﻿import { HttpClient, HttpHeaders } from "@angular/common/http"
 import { Injectable, inject } from "@angular/core"
 import { firstValueFrom } from "rxjs"
-import { ServiceBase } from "src/app/core/mixins/abstraction/service-base"
+import { Hypercomb } from "src/app/core/mixins/abstraction/hypercomb.base"
 import { Constants } from "src/app/unsorted/constants"
 import { ImageDownloadService } from "./temp-downloader"
 
 @Injectable({
   providedIn: 'root'
 })
-export class ThumbnailExporter extends ServiceBase {
+export class ThumbnailExporter extends Hypercomb {
   public readonly download = inject(ImageDownloadService)
   public readonly http = inject(HttpClient)
 

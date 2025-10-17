@@ -1,9 +1,9 @@
 ﻿// ports/i-tile-runtime-port.ts
 
 import { Injectable } from "@angular/core"
-import { DataServiceBase } from "src/app/actions/service-base-classes"
+import { HypercombData } from "src/app/actions/hypercomb-data"
 
-export abstract class TileRuntimePort extends DataServiceBase {
+export abstract class TileRuntimePort extends HypercombData {
   abstract getHashCode(uniqueId: string): string
 }
 

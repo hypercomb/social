@@ -1,7 +1,7 @@
 ﻿import { Component, OnInit, inject } from "@angular/core"
 import { ImageDatabase } from "src/app/database/images/image-database"
 import { IdentifierService } from "src/app/database/utility/identifier-service"
-import { ServiceBase } from "src/app/core/mixins/abstraction/service-base"
+import { Hypercomb } from "src/app/core/mixins/abstraction/hypercomb.base"
 import { MousewheelZoomService } from "src/app/pixi/mousewheel-zoom-service"
 import { RenderScheduler } from "src/app/unsorted/controller/render-scheduler"
 import { AxialService } from "src/app/unsorted/utility/axial-service"
@@ -27,7 +27,7 @@ if (!environment.production) {
   templateUrl: './shell.component.html',
   styleUrls: ['./shell.component.scss']
 })
-export class ShellComponent extends ServiceBase implements OnInit {
+export class ShellComponent extends Hypercomb implements OnInit {
   private readonly pixiService = inject(PixiManager)
   private readonly pointerstate = inject(PointerState)
   private readonly axialService = inject(AxialService)

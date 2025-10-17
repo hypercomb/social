@@ -1,13 +1,13 @@
 ﻿import { inject, Injectable } from '@angular/core'
 import { Assets } from 'pixi.js'
 import { cacheId } from '../models/cell-filters'
-import { DataServiceBase } from 'src/app/actions/service-base-classes'
+import { HypercombData } from 'src/app/actions/hypercomb-data'
 import { Cell } from '../cell'
 import { COMB_STORE, SELECTIONS } from 'src/app/shared/tokens/i-comb-store.token'
 import { CELL_REPOSITORY } from 'src/app/shared/tokens/i-cell-repository.token'
 
 @Injectable({ providedIn: 'root' })
-export class CellManager extends DataServiceBase {
+export class CellManager extends HypercombData {
   private readonly repository = inject(CELL_REPOSITORY)
   private readonly selections = inject(SELECTIONS)
   private readonly store = inject(COMB_STORE)

@@ -5,11 +5,11 @@ import { CellFactory } from "src/app/inversion-of-control/factory/cell-factory"
 import { ContextMenuService } from "src/app/navigation/menus/context-menu-service"
 import { CellContext } from "src/app/actions/action-contexts"
 import { Action } from "src/app/actions/action-models"
-import { ServiceBase } from "src/app/core/mixins/abstraction/service-base"
+import { Hypercomb } from "src/app/core/mixins/abstraction/hypercomb.base"
 import { TILE_FACTORY } from "src/app/shared/tokens/i-hypercomb.token"
 
 @Injectable({ providedIn: "root" })
-export class RenderClipboardCommand extends ServiceBase implements Action<CellContext> {
+export class RenderClipboardCommand extends Hypercomb implements Action<CellContext> {
   public id = "clipboard.render"
   public label = "Render Clipboard"
   public description = "Render a cell while in clipboard mode"

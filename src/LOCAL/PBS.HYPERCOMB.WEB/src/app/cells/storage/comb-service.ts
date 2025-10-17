@@ -5,7 +5,6 @@ import { PointerState } from 'src/app/state/input/pointer-state'
 import { effect } from 'src/app/performance/effect-profiler'
 import { DataOrchestratorBase } from './data-orchestration-base'
 import { ICellService, IModifyComb, IHiveHydration } from 'src/app/shared/tokens/i-comb-service.token'
-import { COMB_STORE } from 'src/app/shared/tokens/i-comb-store.token'
 import { toCellEntity } from 'src/app/core/mappers/to-cell-entity'
 import { CellOptions } from '../models/cell-options'
 import { safeDate, toCell } from 'src/app/core/mappers/to-cell'
@@ -25,10 +24,10 @@ export class CombService extends DataOrchestratorBase implements ICellService, I
   // ─────────────────────────────────────────────
   // internal state
   // ─────────────────────────────────────────────
+  private currentToken: string | null = null
   private readonly _ready = signal(false)
   private readonly _lastCreated = signal<Cell | null>(null)
   private readonly _selectedCells = signal<Cell[]>([])
-  private hydratedEnqueued = new Set<number>()
   private lastHive: number = -1
 
   // ─────────────────────────────────────────────
@@ -39,48 +38,58 @@ export class CombService extends DataOrchestratorBase implements ICellService, I
   public readonly selectedCells = this._selectedCells.asReadonly()
 
   // ─────────────────────────────────────────────
-  // lifecycle / initialization
+  // lifecycle - MAIN ENTRY POINT for hive display 
   // ─────────────────────────────────────────────
   constructor() {
     super()
 
-    // enqueue hive cells after hydration (once per comb)
     effect(() => {
       if (!this.ready()) return
       const top = this.stack.top()
-      if (!top?.cell || this.lastHive === top.cell.cellId) return
+      if (!top?.cell) return
 
       const cell = top.cell
+      // only react when the "hive" truly changes
+      if (this.lastHive === cell.cellId) return
+
+      // rotate render context + invalidate visual registries
       this.lastHive = cell.cellId
+      this.rotateToken()
+      this.comb.store.invalidate()
 
-      // skip if already hydrated
-      if (this.hydratedEnqueued.has(cell.cellId)) return
-
-      // get any already-loaded children
+      // check memory first
       const children = this.comb.store.cells().filter(c => c.sourceId === cell.cellId)
-
-      // lazy hydrate if not loaded yet
-      if (!children.length) {
-        ; (async () => {
-          const rows = await this.repository.fetchBySourceId(cell.cellId)
-          const mapped = await Promise.all(rows.map(r => this.query.decorateWithImage(<Cell>toCell(r))))
-
-          if (mapped.length) {
-            this.staging.stageMerge(mapped)
-            this.comb.store.enqueueHot(mapped as Cell[])
-          }
-          this.hydratedEnqueued.add(cell.cellId)
-        })()
+      if (children.length) {
+        this.staging.stageCells(children)
+        this.comb.store.enqueueHot(children)
         return
       }
 
-      // already have children in memory
-      this.comb.store.enqueueHot(children)
-      this.hydratedEnqueued.add(cell.cellId)
+      // lazy hydrate children
+      ;(async () => {
+        const rows = await this.repository.fetchBySourceId(cell.cellId)
+        const mapped = await Promise.all(rows.map(r => this.query.decorateWithImage(<Cell>toCell(r))))
+        if (mapped.length) {
+          this.staging.stageMerge(mapped)
+          this.comb.store.enqueueHot(mapped as Cell[])
+        }
+      })()
     })
 
     // cleanup navigation state on pointer up
     this.ps.onUp(() => this.stack.doneNavigating())
+  }
+
+  // ─────────────────────────────────────────────
+  // token control
+  // ─────────────────────────────────────────────
+  private rotateToken(): void {
+    // first run can stay null; next runs carry real tokens
+    this.currentToken = (globalThis as any)?.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`
+  }
+
+  public getToken(): string | null {
+    return this.currentToken
   }
 
   // ─────────────────────────────────────────────
@@ -90,19 +99,23 @@ export class CombService extends DataOrchestratorBase implements ICellService, I
     this._ready.set(true)
   }
 
-  public flush(): { hot: any; cold: any } {
-    return this.comb.store.flush()
+  // scheduler reads token off this flush
+  public flush(): { hot: any; cold: any; token?: string | null } {
+    const result = this.comb.store.flush()
+    return { ...result, token: this.currentToken }
   }
 
+  // responsive invalidation: rotate token; scheduler will cancel on next flush
   public invalidate(): void {
     const entry = this.stack.top()
     if (!entry?.cell) return
+    this.rotateToken()
     this.comb.store.invalidate()
-    this.hydratedEnqueued.clear()
   }
 
+  // optional soft reset (keep data, just rotate context if needed)
   public reset(): void {
-    this.hydratedEnqueued.clear()
+    this.rotateToken()
   }
 
   // ─────────────────────────────────────────────
@@ -115,17 +128,15 @@ export class CombService extends DataOrchestratorBase implements ICellService, I
     newCell.image = image
     newCell.setKind(kind)
     this.ensureValidKind(newCell)
-    //const result = await this.addCell(newCell, image)
-    return <Cell>{} /// result
+    return <Cell>{} // call addCell(newCell, image) elsewhere when ready to persist
   }
 
   public async addCell(newcell: NewCell | Ghost, image: IHiveImage): Promise<Cell> {
-
     this.ensureValidKind(newcell)
     const entity = toCellEntity(newcell)
-    const cell = newcell.kind === 'Ghost' ?
-      (newcell as unknown as Cell) :
-      <Cell>toCell(await this.repository.add(entity, image))
+    const cell = newcell.kind === 'Ghost'
+      ? (newcell as unknown as Cell)
+      : <Cell>toCell(await this.repository.add(entity, image))
 
     this.staging.stageAdd(cell)
     this._lastCreated.set(cell)
@@ -157,9 +168,7 @@ export class CombService extends DataOrchestratorBase implements ICellService, I
     cell.options.update(o => o | CellOptions.Deleted)
     cell.dateDeleted = safeDate(new Date()) || ''
 
-    const ghost = cell.kind === 'Ghost'
-
-    if (!ghost) {
+    if (cell.kind !== 'Ghost') {
       await this.repository.update(toCellEntity(cell))
     }
 
@@ -247,7 +256,7 @@ export class CombService extends DataOrchestratorBase implements ICellService, I
   }
 
   public invalidateTile(cellId: number): void {
-    this.hydratedEnqueued.delete(cellId)
+    // no hydratedEnqueued any more — scheduler token handles context
     this.staging.stageRemove(cellId)
     this.staging.invalidateTile(cellId)
   }

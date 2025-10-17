@@ -2,12 +2,12 @@
 
 import { Injectable, inject, computed } from "@angular/core"
 import { HypercombMode, POLICY } from "src/app/core/models/enumerations"
-import { ServiceBase } from "src/app/core/mixins/abstraction/service-base"
+import { Hypercomb } from "src/app/core/mixins/abstraction/hypercomb.base"
 import { EditorService } from "src/app/state/interactivity/editor-service"
 import { ContextMenuService } from "./context-menu-service"
 
 @Injectable({ providedIn: 'root' })
-export class PolicyRegistrations extends ServiceBase {
+export class PolicyRegistrations extends Hypercomb {
   private readonly es = inject(EditorService)
   private readonly contextmenu = inject(ContextMenuService)
   public initialize = () => {

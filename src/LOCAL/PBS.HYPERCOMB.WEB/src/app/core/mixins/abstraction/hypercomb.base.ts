@@ -19,8 +19,8 @@ import { EditorService } from 'src/app/state/interactivity/editor-service'
 import { CELL_CREATOR, CELL_FACTORY } from 'src/app/inversion-of-control/tokens/tile-factory.token'
 import { CombImageFactory } from 'src/app/common/tile-editor/tile-image/cell-image-factory'
 
-export function ServiceMixin<TBase extends AbstractCtor>(Base: TBase) {
-    abstract class ServiceMixinClass extends Base {
+export function HypercombMixin<TBase extends AbstractCtor>(Base: TBase) {
+    abstract class HypercombMixinClass extends Base {
         public readonly injector = inject(Injector)
         protected readonly debug = inject(DebugService)
 
@@ -71,13 +71,13 @@ export function ServiceMixin<TBase extends AbstractCtor>(Base: TBase) {
     }
 
     // ðŸ‘‡ cast through unknown so TS doesn't complain about constructor compatibility
-    return ServiceMixinClass as unknown as AbstractCtor<InstanceType<TBase> & ServiceMixinClass>
+    return HypercombMixinClass as unknown as AbstractCtor<InstanceType<TBase> & HypercombMixinClass>
 }
 
 // expose a concrete base so you don't have to re-mixin everywhere
-export abstract class ServiceBase extends ServiceMixin(class { }) { }
+export abstract class Hypercomb extends HypercombMixin(class { }) { }
 
-export abstract class LayoutServiceBase extends ServiceMixin(class { }) {
+export abstract class HypercombLayout extends HypercombMixin(class { }) {
     protected readonly es = inject(EditorService)
     protected readonly ps = inject(PointerState)
     protected readonly detector = inject(CoordinateDetector)

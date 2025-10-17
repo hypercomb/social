@@ -1,10 +1,10 @@
 ﻿import { Injectable } from '@angular/core'
-import { ServiceBase } from '../../core/mixins/abstraction/service-base'
+import { Hypercomb } from '../../core/mixins/abstraction/hypercomb.base'
 
 @Injectable({
   providedIn: 'root'
 })
-export class DropDiagnosticsService extends ServiceBase {
+export class DropDiagnosticsService extends Hypercomb {
 
   public show = (event: DragEvent) => {
     const items = Array.from(event.dataTransfer?.items || []).map((item) => ({

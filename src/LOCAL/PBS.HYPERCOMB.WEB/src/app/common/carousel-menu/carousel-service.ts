@@ -1,10 +1,10 @@
 import { Injectable, computed, signal, inject, untracked } from '@angular/core'
 import { Router } from '@angular/router'
-import { ServiceBase } from 'src/app/core/mixins/abstraction/service-base'
+import { Hypercomb } from 'src/app/core/mixins/abstraction/hypercomb.base'
 import { IDexieHive } from 'src/app/hive/hive-models'
 
 @Injectable({ providedIn: 'root' })
-export class CarouselService extends ServiceBase {
+export class CarouselService extends Hypercomb {
   private readonly router = inject(Router)
 
   private readonly _items = signal<IDexieHive[]>([])

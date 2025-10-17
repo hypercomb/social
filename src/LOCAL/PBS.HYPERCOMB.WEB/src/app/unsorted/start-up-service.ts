@@ -37,7 +37,6 @@ import { BackupService } from '../database/persistence/backup-service'
 // hive
 import { HiveRouteWatcher } from '../hive/name-resolvers/hive-route-watcher'
 import { HiveService } from '../hive/storage/hive-service'
-import { HiveViewService } from '../hive/hive-view-service'
 
 // input and interactivity
 import { KeyboardShortcutListener } from '../interactivity/keyboard/keyboard-shortcut-listener'
@@ -61,6 +60,7 @@ import { EventDispatcher } from '../helper/events/event-dispatcher'
 import { StateHub } from '../state/core/state-hub'
 import { GhostTileService } from '../cells/creation/ghost-tile-service'
 import { RiftAction } from '../actions/navigation/path'
+import { PositionSynchronizer } from '../hive/hive-view-service'
 
 // app
 @Injectable({ providedIn: 'root' })
@@ -77,11 +77,11 @@ export class StartUpService {
     // hive
     inject(HiveRouteWatcher),
     inject(HiveService),
-    inject(HiveViewService),
 
     // state
     inject(StateHub),
     inject(EventDispatcher),
+    inject(PositionSynchronizer),
 
     // shortcuts
     inject(GlobalShortcutRegistry),

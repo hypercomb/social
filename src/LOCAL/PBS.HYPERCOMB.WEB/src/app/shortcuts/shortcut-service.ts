@@ -1,6 +1,6 @@
 ﻿import { Injectable, computed, effect, inject, signal } from "@angular/core"
 import { environment } from "src/environments/environment"
-import { ServiceBase } from "../core/mixins/abstraction/service-base"
+import { Hypercomb } from "../core/mixins/abstraction/hypercomb.base"
 import { defaultShortcuts } from "./layouts/default-shortcuts"
 import { globalShortcuts } from "./layouts/global-shortcuts"
 import { IShortcut, IShortcutKey, IShortcutOverride } from "./shortcut-model"
@@ -10,7 +10,7 @@ import { CoordinateDetector } from "../helper/detection/coordinate-detector"
 import { PayloadInfuser } from "./payload-infuser"
 
 @Injectable({ providedIn: 'root' })
-export class ShortcutService extends ServiceBase {
+export class ShortcutService extends Hypercomb {
   private readonly detector = inject(CoordinateDetector)
   private readonly infuser = inject(PayloadInfuser)
   private readonly registry = inject(ShortcutRegistry)

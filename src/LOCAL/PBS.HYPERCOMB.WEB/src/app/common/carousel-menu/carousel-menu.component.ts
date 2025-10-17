@@ -2,7 +2,7 @@
 import { debounced } from '../debounce-service'
 import { SearchFilterService } from '../header/header-bar/search-filter-service'
 import { CarouselItemComponent } from './carousel-item/carousel-item.component'
-import { DataServiceBase } from 'src/app/actions/service-base-classes'
+import { HypercombData } from 'src/app/actions/hypercomb-data'
 import { simplify } from 'src/app/shared/services/name-simplifier'
 import { HIVE_STATE } from 'src/app/shared/tokens/i-hive-store.token'
 import { WheelState } from '../mouse/wheel-state'
@@ -21,7 +21,7 @@ import { ACTION_REGISTRY } from 'src/app/shared/tokens/i-hypercomb.token'
   styleUrls: ['./carousel-menu.component.scss'],
   imports: [CarouselItemComponent],
 })
-export class CarouselMenuComponent extends DataServiceBase implements OnInit {
+export class CarouselMenuComponent extends HypercombData implements OnInit {
   private readonly registry = inject(ACTION_REGISTRY)
   private readonly coordinator = inject(HiveLoader)
   private readonly filter = inject(SearchFilterService)

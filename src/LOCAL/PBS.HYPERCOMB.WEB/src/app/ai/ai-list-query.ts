@@ -3,14 +3,14 @@
 
 import { Injectable, inject } from '@angular/core'
 import { LMStudioClient } from '@lmstudio/sdk'
-import { DataServiceBase } from '../actions/service-base-classes'
+import { HypercombData } from '../actions/hypercomb-data'
 import { IOpenAiQuery } from './i-open-ai-query'
 import { CellFactory } from '../inversion-of-control/factory/cell-factory'
 import { focused } from '../state/interactivity/focus-cell'
 import { COMB_SERVICE } from '../shared/tokens/i-cell-repository.token'
 
 @Injectable({ providedIn: 'root' })
-export class AiListQuery extends DataServiceBase implements IOpenAiQuery {
+export class AiListQuery extends HypercombData implements IOpenAiQuery {
   private readonly td_factory = inject(CellFactory)
   private readonly modify = inject(COMB_SERVICE)
 

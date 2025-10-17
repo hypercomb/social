@@ -1,12 +1,12 @@
 ﻿import { inject, Injectable } from '@angular/core'
 import { JsonHierarchyImporter } from 'src/app/database/json-hierarchy-importer'
-import { ServiceBase } from '../../core/mixins/abstraction/service-base'
+import { Hypercomb } from '../../core/mixins/abstraction/hypercomb.base'
 import { IDropDispatcher } from './i-drop-dispatcher'
 
 @Injectable({
     providedIn: 'root'
 })
-export class JsonArrayDropDispatcher extends ServiceBase implements IDropDispatcher {
+export class JsonArrayDropDispatcher extends Hypercomb implements IDropDispatcher {
     private jsonHierarchyImporter = inject(JsonHierarchyImporter)
 
     canDispatch(event: DragEvent): boolean {

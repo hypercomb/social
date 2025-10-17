@@ -1,12 +1,12 @@
 ﻿import { Injectable } from '@angular/core'
 import { DataUtilityService } from '../data-utility-services'
-import { DataServiceBase } from 'src/app/actions/service-base-classes'
+import { HypercombData } from 'src/app/actions/hypercomb-data'
 import { Cell } from 'src/app/cells/cell'
 
 @Injectable({
   providedIn: 'root'
 })
-export class DataImporter extends DataServiceBase {
+export class DataImporter extends HypercombData {
   constructor(private dataUtilityService: DataUtilityService) {
     super()
   }

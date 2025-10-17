@@ -1,7 +1,7 @@
 ﻿import { Component, HostListener, inject } from '@angular/core'
 import { SelectionService } from 'src/app/cells/selection/selection-service'
 import { ClipboardService } from 'src/app/clipboard/clipboard-service'
-import { ServiceBase } from 'src/app/core/mixins/abstraction/service-base'
+import { Hypercomb } from 'src/app/core/mixins/abstraction/hypercomb.base'
 import { CLIPBOARD_STATE } from 'src/app/shared/tokens/i-hypercomb.token'
 
 @Component({
@@ -10,7 +10,7 @@ import { CLIPBOARD_STATE } from 'src/app/shared/tokens/i-hypercomb.token'
   templateUrl: './paste-clipboard-button.component.html',
   styleUrls: ['./paste-clipboard-button.component.scss']
 })
-export class PasteClipboardButtonComponent extends ServiceBase {
+export class PasteClipboardButtonComponent extends Hypercomb {
   private readonly selections = inject(SelectionService)
 
   public get count(): number { return this.cbs.activeItems.length }
