@@ -22,13 +22,6 @@ jobs:
           submodules: true
           lfs: false
 
-      # 2️⃣ Use the correct Node version required by your package.json
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20.19.0
-          cache: 'npm'
-
       - name: Debug show working directory and files
         run: |
           echo "Current working directory:"
@@ -42,6 +35,13 @@ jobs:
           echo ""
           echo "Full nested structure (first two levels):"
           ls -R | head -n 200
+          
+      # 2️⃣ Use the correct Node version required by your package.json
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.19.0
+          cache: 'npm'
 
 
       # 3️⃣ Build & Deploy using Azure Static Web Apps Action
