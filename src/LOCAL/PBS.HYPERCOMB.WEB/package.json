@@ -24,7 +24,6 @@
     "awesome-notifications": "^3.1.3",
     "cursor-effects": "^1.0.13",
     "dexie": "^4.0.1-beta.11",
-    "dexie-cloud-addon": "^4.0.1-beta.57",
     "downloadjs": "^1.4.7",
     "eventemitter3": "^5.0.1",
     "guid-typescript": "^1.0.9",
