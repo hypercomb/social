@@ -27,7 +27,7 @@ jobs:
           azure_static_web_apps_api_token: ${{ secrets.STATIC_WEBSITE_DEVELOPMENT_DEPLOYMENT_TOKEN }}
           repo_token: ${{ secrets.GITHUB_TOKEN }} # enables PR comments/status updates
           action: upload
-          app_location: PBS.HYPERCOMB/PBS.Hypercomb.Web    # source folder (no leading slash)
+          app_location: src/local/pbs.hypercomb.web   # source folder (no leading slash)
           api_location: ""                                # no API in this project
           output_location: dist/PBS-Hypercomb-Web         # must match angular.json outputPath exactly
           app_build_command: npm ci && npm run build      # consistent with main
