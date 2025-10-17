@@ -2,7 +2,7 @@
 
 import { CellEntity } from 'src/app/database/model/i-tile-entity'
 import { createEntityFactoryToken } from './entity-factory.token'
-import { Cell, CellKind, ClipboardCell, Ghost, Hive, NewCell, Pathway } from 'src/app/cells/cell'
+import { Cell, CellKind, ClipboardCell, Ghost, Hive, NewCell, Path } from 'src/app/cells/cell'
 import { InjectionToken } from '@angular/core'
 
 export interface ICreateCells {
@@ -10,7 +10,7 @@ export interface ICreateCells {
     createClipboard(params: Partial<Cell> & { cellId: number }): Promise<ClipboardCell>
     createHive: (params: Partial<Cell> & { cellId: number }) => Promise<Hive>
     createGhost: (params?: Partial<NewCell>) => Promise<Ghost>
-    createPathway(params: Partial<Cell> & { cellId: number }): Promise<Pathway>
+    createPathway(params: Partial<Cell> & { cellId: number }): Promise<Path>
     newCell: (params: Partial<NewCell>) => NewCell
 
 }

@@ -3,7 +3,7 @@ import { toCell, safeDate } from "src/app/core/mappers/to-cell"
 import { toCellEntity } from "src/app/core/mappers/to-cell-entity"
 import { CellEntity } from "src/app/database/model/i-tile-entity"
 import { IEntityFactoryPort } from "../ports/i-entity-factory-port"
-import { Cell, NewCell, Hive, Ghost, ClipboardCell, Pathway, CellKind } from "src/app/cells/cell"
+import { Cell, NewCell, Hive, Ghost, ClipboardCell, Path, CellKind } from "src/app/cells/cell"
 import { ICreateCells } from "../tokens/tile-factory.token"
 import { BlobService } from "src/app/hive/rendering/blob-service"
 import { COMB_IMG_FACTORY } from "src/app/shared/tokens/i-hive-images.token"
@@ -70,10 +70,10 @@ export class CellFactory implements IEntityFactoryPort<CellEntity, Cell>, ICreat
         })
     }
 
-    public async createPathway(params: Partial<Cell> & { cellId: number }): Promise<Pathway> {
-        return new Pathway({
+    public async createPathway(params: Partial<Cell> & { cellId: number }): Promise<Path> {
+        return new Path({
             ...params,
-            kind: "Pathway",
+            kind: "Path",
             cellId: params.cellId,
             dateCreated: safeDate(new Date()),
         })

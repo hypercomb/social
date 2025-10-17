@@ -1,17 +1,15 @@
 ﻿// actions/delete-pathway.action.ts
-import { Injectable, inject } from "@angular/core"
+import { Injectable } from "@angular/core"
 import { HypercombMode } from "src/app/core/models/enumerations"
 import { Cell } from "src/app/cells/cell"
-import { COMB_SERVICE } from "src/app/shared/tokens/i-comb-store.token"
 import { CellContext } from "src/app/actions/action-contexts"
 import { ActionBase } from "src/app/actions/action.base"
 
 @Injectable({ providedIn: "root" })
 export class DeletePathwayAction extends ActionBase<CellContext> {
-    private readonly tiles = inject(COMB_SERVICE)
 
     public override id = "layout.deletePathway"
-    public override label = "Delete Pathway"
+    public override label = "Delete Path"
     public override description = "Delete a hypercell tile (linked to hypercomb.io or localhost)"
     public override category = "Editing"
     public override risk: "danger" = "danger"
@@ -31,6 +29,6 @@ export class DeletePathwayAction extends ActionBase<CellContext> {
         const active = payload.cell
         if (!active) return
 
-        await this.tiles.(active)
+        await this.modify.removeCell(active)
     }
 }

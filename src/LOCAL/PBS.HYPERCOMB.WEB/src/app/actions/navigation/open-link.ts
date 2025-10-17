@@ -1,6 +1,6 @@
 ﻿// actions/open-link.action.ts
 import { Injectable, inject } from "@angular/core"
-import { HypercombMode } from "../../core/models/enumerations"
+import { HypercombMode, POLICY } from "../../core/models/enumerations"
 import { LinkNavigationService } from "../../navigation/link-navigation-service"
 import { CellContext } from "../action-contexts"
 import { ActionBase } from "../action.base"
@@ -21,6 +21,11 @@ export class OpenLinkAction extends ActionBase<CellContext> {
     allowed &&= this.state.hasMode(HypercombMode.Normal)
     allowed &&= !cell?.isBranch
     allowed &&= !this.state.isViewingClipboard
+    // Block openLink if any command mode is active (policy)
+    const policy = this.policy;
+    if (policy && policy.has && policy.has(POLICY.CommbandModeActive)) {
+      return false;
+    }
     return allowed
   }
 

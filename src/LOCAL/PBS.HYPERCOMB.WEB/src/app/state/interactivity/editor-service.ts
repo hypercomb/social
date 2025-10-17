@@ -1,7 +1,8 @@
-﻿import { Injectable, signal, computed, inject } from "@angular/core"
+﻿
+import { Injectable, signal, computed, inject } from "@angular/core"
 import { EditorMode } from "src/app/core/models/enumerations"
 import { Cell, EditCell } from "src/app/cells/cell"
-import { isNewHive } from "src/app/cells/models/cell-filters"
+import { isNewHive, isHive } from "src/app/cells/models/cell-filters"
 import { IHiveImage } from "src/app/core/models/i-hive-image"
 import { ImageService } from "src/app/database/images/image-service"
 
@@ -23,6 +24,17 @@ export class EditorService {
   private readonly _branchTile = signal<Cell | null>(null)
   private readonly _backgroundTile = signal<Cell | null>(null)
   public readonly isEditing = computed(() => this._context() !== null)
+
+  // editor operation is derived from kind and cellId
+  public readonly operation = computed(() => {
+    const ctx = this._context();
+    if (!ctx) return 'edit-cell';
+    if (ctx.kind === 'Hive') {
+      return ctx.cellId == null ? 'new-hive' : 'edit-hive';
+    } else {
+      return ctx.cellId == null ? 'new-cell' : 'edit-cell';
+    }
+  });
 
   // readonly selectors
   public readonly mode = this._mode.asReadonly()

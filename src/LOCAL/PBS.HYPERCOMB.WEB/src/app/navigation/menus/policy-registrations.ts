@@ -54,6 +54,13 @@ export class PolicyRegistrations extends ServiceBase {
     // showing context menu
     const isContextMenuVisible = computed(() => this.contextmenu.isVisible())
     this.policy.registerSignal(POLICY.ShowingContextMenu, isContextMenuVisible, this.injector)
+  
+    // Register CommbandModeActive policy: true if any command mode is active
+    this.policy.registerSignal(
+      POLICY.CommbandModeActive,
+      computed(() => (this.state.mode() & HypercombMode.CommandModes) !== 0),
+      this.injector
+    )
   }
 }
 

@@ -76,7 +76,6 @@ export enum HypercombMode {
     
 }
 
-
 export enum DocumentType {
     None,
     Google
@@ -99,6 +98,7 @@ export enum POLICY {
     ShiftDown = "keyboard:shift-down",
     AltDown = "keyboard:alt-down",
     SelectingTiles = "layout:selecting-tiles",
+    CommbandModeActive = "command-mode-active",
     NormalMode = "layout:normal-mode",
     ShiftNotPressed = "keyboard:shift-not-pressed",
     NoActiveTile = "layout:no-active-tile",

@@ -53,23 +53,33 @@
           }
         </div>
         <div class="button-row">
-          <button
-            matTooltip="delete button!"
-            id="delete-button"
-            style="width: 5em"
-            (click)="delete(editCell!)"
-            class="delete"
-          >
-            {{ deleteText }}
-          </button>
-          <button (click)="cancel($event)" class="cancel">cancel</button>
+          @if (operation() === 'edit-hive' || operation() === 'edit-cell') {
+            <button
+              matTooltip="delete button!"
+              id="delete-button"
+              style="width: 7em"
+              (click)="delete(editCell!)"
+              class="delete"
+            >
+              {{ deleteText }}
+            </button>
+          }
+          <button (click)="cancel($event)" class="cancel">Cancel</button>
           <app-save-branch-button
+            *ngIf="operation() === 'edit-cell' || operation() === 'edit-hive'"
             (save-clicked)="save($event)"
             (save-as-branch-clicked)="saveAsBranch($event)"
           ></app-save-branch-button>
+          <button
+            *ngIf="operation() === 'new-hive' || operation() === 'new-cell'"
+            (click)="save($event)"
+            class="save"
+          >
+            Save
+          </button>
         </div>
         <span class="delete-warning">
-          delete will remove tile and sub-tiles permanently
+          {{ deleteWarning }}
         </span>
       </div>
     </div>

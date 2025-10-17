@@ -19,7 +19,7 @@ export type CellKind =
   | "Ghost"
   | "Hive"
   | "Clipboard"
-  | "Pathway"
+  | "Path"
 
 /** pre-persist DTO (no cellId yet) */
 export class NewCell extends CellFlags {
@@ -151,10 +151,10 @@ export class Ghost extends NewCell {
   }
 }
 
-export class Pathway extends Cell {
+export class Path extends Cell {
   constructor(params: Partial<Cell> & { cellId: number }) {
     super(params)
-    this.setKind("Pathway")
+    this.setKind("Path")
   }
 }
 

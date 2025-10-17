@@ -9,11 +9,12 @@ import { YoutubeViewerComponent } from './common/media/view-youtube/youtube-view
 import { ShellComponent } from './common/shell/shell.component'
 import { TileEditorComponent } from './common/tile-editor/tile-editor.component'
 import { CustomCursorDirective } from './core/directives/custom-cursor-directive'
-import { HypercombMode } from './core/models/enumerations'
+import { HypercombMode, POLICY } from './core/models/enumerations'
 import { CoordinateDetector } from './helper/detection/coordinate-detector'
 import { EditorService } from './state/interactivity/editor-service'
 import { Events } from './helper/events/events'
 import { ServiceBase } from './core/mixins/abstraction/service-base'
+import { PolicyService } from './navigation/menus/policy-service'
 import { COMB_STORE } from './shared/tokens/i-comb-store.token'
 import { SELECTIONS } from './shared/tokens/i-selection.token'
 import { OpfsFileExplorerComponent } from './common/opfs/file-explorer/opfs-file-explorer.component'
@@ -44,6 +45,7 @@ import { OpfsFileExplorerComponent } from './common/opfs/file-explorer/opfs-file
   ]
 })
 export class AppComponent extends ServiceBase implements OnInit {
+
   private readonly store = inject(COMB_STORE)
   public readonly detector = inject(CoordinateDetector)
   public readonly es = inject(EditorService)
@@ -79,9 +81,15 @@ export class AppComponent extends ServiceBase implements OnInit {
   public get isShowingGoogleDocument(): boolean { return this.state.hasMode(HypercombMode.ViewingGoogleDocument) }
   public get isPromptModeActive(): boolean { return this.state.hasMode(HypercombMode.AiPrompt) }
   public get isPhotoViewerActive(): boolean { return this.state.hasMode(HypercombMode.ViewingPhoto) }
-  public get isOpfsMode(): boolean { return this.state.hasMode(HypercombMode.OpfsFileExplorer) } 
-  
+  public get isOpfsMode(): boolean { return this.state.hasMode(HypercombMode.OpfsFileExplorer) }
+
   ngOnInit() {
+    // Register CommandModeBlockOpenLink policy: true if any command mode is active
+    this.policy.registerSignal(
+      POLICY.CommbandModeActive,
+      computed(() => (this.state.mode() & HypercombMode.CommandModes) !== 0),
+      this.injector
+    );
 
     // this.oidc.checkAuth().subscribe({
     //   next: async ({ isAuthenticated, userData }) => {

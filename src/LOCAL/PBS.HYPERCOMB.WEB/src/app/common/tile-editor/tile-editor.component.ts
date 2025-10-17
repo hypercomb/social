@@ -1,4 +1,5 @@
 ﻿import { Component, computed, effect, ElementRef, inject, ViewChild } from '@angular/core'
+import { CommonModule } from '@angular/common'
 import { FormsModule } from '@angular/forms'
 import { MatIconModule } from '@angular/material/icon'
 import { Assets } from 'pixi.js'
@@ -21,7 +22,7 @@ import { HIVE_HYDRATION, MODIFY_COMB_SVC } from 'src/app/shared/tokens/i-comb-se
 import { ImagePersistenceService } from './tile-image/image-persistence-service'
 import { PointerState } from 'src/app/state/input/pointer-state'
 
-export type EditorKind = 'new cell' | 'edit cell' | 'new hive' | 'edit hive'
+
 
 @Component({
   standalone: true,
@@ -29,6 +30,7 @@ export type EditorKind = 'new cell' | 'edit cell' | 'new hive' | 'edit hive'
   templateUrl: './tile-editor.component.html',
   styleUrls: ['./tile-editor.component.scss'],
   imports: [
+    CommonModule,
     FormsModule,
     MatIconModule,
     EditorActionsComponent,
@@ -73,17 +75,44 @@ export class TileEditorComponent extends ServiceBase {
     POLICY.MovingTiles
   )
 
-  public readonly editorKind = computed<EditorKind>(() => {
-    const cell = this.es.context()
-    if (!cell) return 'new cell'
-    if (isHive(cell)) return isNewHive(cell) ? 'new hive' : 'edit hive'
-    return isNewHive(cell) ? 'new cell' : 'edit cell'
+
+  public readonly operation = this.es.operation
+
+  public readonly editorKind = computed(() => {
+    switch (this.operation()) {
+      case 'edit-hive': return 'Edit Hive';
+      case 'edit-cell': return 'Edit Tile';
+      case 'new-hive': return 'New Hive';
+      case 'new-cell': return 'New Tile';
+      default: return 'Edit';
+    }
   })
 
+
   public get deleteText(): string {
-    const cell = this.editCell
-    if (!cell) return 'delete'
-    return isHive(cell) ? 'delete hive' : 'delete'
+    switch (this.operation()) {
+      case 'edit-hive':
+      case 'new-hive':
+        return 'Delete Hive';
+      case 'edit-cell':
+      case 'new-cell':
+        return 'Delete Tile';
+      default:
+        return 'Delete';
+    }
+  }
+
+  public get deleteWarning(): string {
+    switch (this.operation()) {
+      case 'edit-hive':
+      case 'new-hive':
+        return 'Delete will remove hive and all sub-tiles permanently.';
+      case 'edit-cell':
+      case 'new-cell':
+        return 'Delete will remove tile permanently.';
+      default:
+        return '';
+    }
   }
 
   constructor() {
@@ -151,6 +180,7 @@ export class TileEditorComponent extends ServiceBase {
   // ─────────────────────────────────────────────
   // save pipeline
   // ─────────────────────────────────────────────
+
   public save = async (event: any): Promise<void> => {
     const cell = this.editCell!
     await Assets.unload(cacheId(cell))
@@ -170,7 +200,7 @@ export class TileEditorComponent extends ServiceBase {
     await this.modify.updateCell(cell)
 
     // optional: handle navigation after save
-    // if (newHive) this.utility.changeLocation(cell.hive)
+    // if (this.operation() === 'new-hive') this.utility.changeLocation(cell.hive)
     this.manager.complete()
   }
 

@@ -77,7 +77,7 @@ export function isHive(cell: Cell): boolean {
 }
 
 export function isPathway(cell: Cell): boolean {
-    return cell.kind === "Pathway"
+    return cell.kind === "Path"
 }
 
 export function isSelected(cell: Cell): boolean {
