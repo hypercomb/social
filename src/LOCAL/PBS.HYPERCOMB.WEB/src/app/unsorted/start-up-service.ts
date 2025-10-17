@@ -17,7 +17,6 @@ import { ImportOpfsHiveAction } from '../actions/propagation/import-opfs-hive'
 import { LockCellAction } from '../actions/cells/lock-cell.action'
 import { MouseLockCheckAction } from '../actions/debug/debug-mouselocked'
 import { OpenLinkAction } from '../actions/navigation/open-link'
-import { PathwayAction } from '../actions/navigation/path'
 import { RebuildHierarchyAction } from '../actions/propagation/rebuild-hierarchies'
 import { RenameHiveAction } from '../actions/hives/rename-hive'
 import { ShowHiveAction } from '../actions/modes/show-hive'
@@ -61,6 +60,7 @@ import { ShortcutService } from '../shortcuts/shortcut-service'
 import { EventDispatcher } from '../helper/events/event-dispatcher'
 import { StateHub } from '../state/core/state-hub'
 import { GhostTileService } from '../cells/creation/ghost-tile-service'
+import { RiftAction } from '../actions/navigation/path'
 
 // app
 @Injectable({ providedIn: 'root' })
@@ -120,7 +120,7 @@ export class StartUpService {
     inject(LockCellAction),
     inject(MouseLockCheckAction),
     inject(OpenLinkAction),
-    inject(PathwayAction),
+    inject(RiftAction),
     inject(RebuildHierarchyAction),
     inject(RenameHiveAction),
     inject(ShowHiveAction),

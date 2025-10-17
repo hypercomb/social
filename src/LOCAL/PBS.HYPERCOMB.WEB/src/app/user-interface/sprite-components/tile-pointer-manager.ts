@@ -3,7 +3,7 @@ import { CellContext, BaseContext } from "src/app/actions/action-contexts"
 import { ViewPhotoAction } from "src/app/actions/cells/view-photo"
 import { BackHiveAction } from "src/app/actions/navigation/back"
 import { BranchAction } from "src/app/actions/navigation/branch"
-import { PathwayAction } from "src/app/actions/navigation/path"
+import { RiftAction } from "src/app/actions/navigation/path"
 import { SelectionMoveManager } from "src/app/cells/selection/selection-move-manager"
 import { POLICY } from "src/app/core/models/enumerations"
 import { CoordinateDetector } from "src/app/helper/detection/coordinate-detector"
@@ -25,7 +25,7 @@ export class TilePointerManager extends PixiServiceBase {
   private readonly selectionMove = inject(SelectionMoveManager)
 
   // actions ordered by priority
-  private readonly leftActions = [inject(BranchAction), inject(PathwayAction), inject(ViewPhotoAction)] as const
+  private readonly leftActions = [inject(BranchAction), inject(RiftAction), inject(ViewPhotoAction)] as const
   private readonly rightActions = [inject(BackHiveAction)] as const
 
   // gate: block clicks when moving tiles or control is pressed

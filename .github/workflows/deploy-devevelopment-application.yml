@@ -1,0 +1,46 @@
+name: Azure Static Web Apps CI/CD (Development)
+
+on:
+  push:
+    branches:
+      - development
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    branches:
+      - development
+
+jobs:
+  build_and_deploy_job:
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed')
+    runs-on: ubuntu-latest
+    name: Build and Deploy Job
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          lfs: false
+
+      # Oryx will build using Node from package.json "engines".
+      - name: Build & Deploy
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          static_website_development_deployment_token: ${{ secrets.STATIC_WEBSITE_DEVELOPMENT_DEPLOYMENT_TOKEN }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }} # enables PR comments/status updates
+          action: upload
+          app_location: PBS.HYPERCOMB/PBS.Hypercomb.Web    # source folder (no leading slash)
+          api_location: ""                                # no API in this project
+          output_location: dist/PBS-Hypercomb-Web         # must match angular.json outputPath exactly
+          app_build_command: npm ci && npm run build      # consistent with main
+
+  close_pull_request_job:
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    name: Close Pull Request Job
+    steps:
+      - name: Close Pull Request
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          static_website_development_deployment_token: ${{ secrets.STATIC_WEBSITE_DEVELOPMENT_DEPLOYMENT_TOKEN }}
+          action: close
+
+

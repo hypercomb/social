@@ -23,7 +23,7 @@ export class RenderScheduler {
   private readonly inFlight = new Set<number>()
 
   private renderJob: Promise<void> | null = null
-  private budgetPerFrame = 8
+  private budgetPerFrame = 4
 
   /** hook scheduler into pixi ticker */
   public hook(app: Application): void {
@@ -84,6 +84,7 @@ export class RenderScheduler {
         )
       )
       this.debug.log("render", `culled=${cold.length}`)
+      return
     }
 
     // render hot tiles sequentially within budget

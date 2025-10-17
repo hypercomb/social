@@ -14,7 +14,7 @@ const getPath = (link: string): string | null => {
 }
 
 @Injectable({ providedIn: "root" })
-export class PathwayAction extends ActionBase<CellContext> {
+export class RiftAction extends ActionBase<CellContext> {
   private readonly honeycomb = inject(HoneycombService)
 
   public id = "cell.path"
