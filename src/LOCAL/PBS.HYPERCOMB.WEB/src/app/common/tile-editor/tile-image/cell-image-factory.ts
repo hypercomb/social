@@ -1,12 +1,14 @@
 ﻿import { Injectable } from '@angular/core'
 import { IHiveImage } from 'src/app/core/models/i-hive-image'
 import { HiveImage } from 'src/app/database/repository/hive-image'
+import { ICombImageFactory } from 'src/app/shared/tokens/i-hive-images.token'
 
 @Injectable({ providedIn: 'root' })
-export class HiveImageFactory {
-    private defaultScale = 1
+export class CombImageFactory implements ICombImageFactory {
+    private defaultScale = 1        
 
-    public create(blob: Blob, cellId: number): IHiveImage {
+    
+    public async create(blob: Blob, cellId: number): Promise<IHiveImage> {
         return new HiveImage({
             cellId,
             blob,

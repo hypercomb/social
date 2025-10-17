@@ -1,7 +1,5 @@
 ﻿import { Injectable, inject } from "@angular/core"
-import { HierarchyRestorationService } from './hierarchy/data-hierarchy-organizer'
 import { Cell } from "../cells/cell"
-import { NewTileService } from "../cells/creation/new-tile-service"
 import { CellFactory } from "../inversion-of-control/factory/cell-factory"
 import { AxialService } from "../unsorted/utility/axial-service"
 import { DataServiceBase } from "../actions/service-base-classes"
@@ -13,9 +11,8 @@ import { HoneycombService } from "../hive/honeycomb-service"
 export class JsonHierarchyImporter extends DataServiceBase {
 
     private readonly axial = inject(AxialService)
-    private readonly restoration = inject(HierarchyRestorationService)
+
     private readonly honeycomb = inject(HoneycombService)
-    private readonly new_tiles = inject(NewTileService)
     private readonly td_factor = inject(CellFactory)
 
     public clearTempIdentifiers = async (cell: Cell[]) => {
@@ -27,10 +24,10 @@ export class JsonHierarchyImporter extends DataServiceBase {
 
     public createTiles = async (inputData: any[]) => {
 
-        const data = this.stack.top()!
-        const sourceId = data.cellId
-        const hive = data?.hive
-        await this.restoration.restore(hive, inputData)
+        // const data = this.stack.top()!
+        // const sourceId = data.cellId
+        // const hive = data?.hive
+        // await this.restoration.restore(hive, inputData)
 
         // const indexes = this.layout.indexes
         // const updates: Cell[] = []

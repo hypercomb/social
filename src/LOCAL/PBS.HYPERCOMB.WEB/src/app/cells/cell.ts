@@ -89,7 +89,9 @@ export class NewCell extends CellFlags {
 
   constructor(params: Partial<NewCell> = {}) {
     super()
-    Object.assign(this, params)
+    const { kind, ...rest}= params
+    Object.assign(this, rest)
+    
     this.dateCreated = params.dateCreated ?? new Date().toISOString()
     this.updatedAt = params.updatedAt ?? new Date().toISOString()
     this.hive = this.hive?.toLowerCase?.() ?? ""

@@ -10,7 +10,6 @@ import { ContextStack } from "src/app/unsorted/controller/context-stack"
 export class HypercombState {
 
   private readonly stack = inject(ContextStack)
-
   public awake = false
   public controlsHovered: any
   public hiveUser: any
@@ -18,7 +17,7 @@ export class HypercombState {
   public checkMouseLock: boolean = false
   public _cancelled = signal(false)
   public readonly cancelled = this._cancelled.asReadonly()
-  
+  public get scoutName(): string | undefined { return this.scout()?.name }
   public get isMobile(): boolean {
     const ua = /Mobi|Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
     const touchCapable = 'ontouchstart' in window || navigator.maxTouchPoints > 0

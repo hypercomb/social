@@ -38,7 +38,7 @@ export class CoordinateDetector implements ICoordinateDetector {
     if (idx === undefined) return undefined
     return this.combstore.lookupTileByIndex(idx)
   })
- 
+
   public readonly activeCell = computed(() => {
     const idx = this.coordinate()?.index
     if (idx === undefined) return undefined
@@ -67,20 +67,24 @@ export class CoordinateDetector implements ICoordinateDetector {
       const pos = this.pointer.position()
       if (!pos) return
 
-      // move +1 / -1 px on x axis
-      const newPos = new Point(pos.x + this.jiggleDir, pos.y)
-      this.jiggleDir *= -1
+      // instantly move offscreen and back to trigger re-detection
+      const offLeft = new Point(-10000, pos.y)
+      const offRight = new Point(10000, pos.y)
 
-      // update signals
-      this.pointer.position.set(newPos)
+      // go offscreen left then right and return to original instantly
+      this.pointer.position.set(offLeft)
+      this.pointer.refresh()
+      this.pointer.position.set(offRight)
+      this.pointer.refresh()
+      this.pointer.position.set(pos)
+      this.pointer.refresh()
 
       // recompute local and force detect
-      this.pointer.refresh()
       const local = this.pointer.localPosition()
-
       if (local) this.detect(local)
-    }, 100) // every 100ms, adjust to taste
+    }, 100) // adjust interval to tune responsiveness
   }
+
 
 
   public detect(local: Point): void {

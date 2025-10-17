@@ -1,5 +1,5 @@
 ﻿// i-entity-factory-port.ts
-import { Cell, NewCell } from "src/app/cells/cell"
+import { Cell, CellKind, ClipboardCell, Ghost, Hive, NewCell, Pathway } from "src/app/cells/cell"
 import { CellEntity } from "src/app/database/model/i-tile-entity"
 
 /**

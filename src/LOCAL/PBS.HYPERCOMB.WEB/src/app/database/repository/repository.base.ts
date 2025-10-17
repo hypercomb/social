@@ -10,7 +10,7 @@ import { IRepostioryBase, QUERY_HELPER } from "src/app/shared/tokens/i-cell-repo
 import { IHiveImage } from "src/app/core/models/i-hive-image"
 import { ImageDatabase } from "../images/image-database"
 import { CELL_FACTORY } from "src/app/inversion-of-control/tokens/tile-factory.token"
-import { ICellIdentifier } from "../model/i-tile-identifiers"
+import { isNew } from "src/app/cells/models/cell-filters"
 
 export abstract class RepositoryBase<TEntity extends CellEntity, TDomain = TEntity>
   implements IRepostioryBase<TEntity> {
@@ -64,14 +64,14 @@ export abstract class RepositoryBase<TEntity extends CellEntity, TDomain = TEnti
   // ────────────────────────────────
   // save convenience
   // ────────────────────────────────
-  public async save(entity: TEntity): Promise<TEntity> {
+  public async save(entity: TEntity, image:IHiveImage): Promise<TEntity> {
     if (this.isGhost(entity)) {
       // Ghosts never persisted, just return it
       return entity
     }
 
     if (!entity.cellId) {
-      return this.add(entity)
+      return this.add(entity,image)
     } else {
       await this.update(entity)
       return entity
@@ -81,12 +81,37 @@ export abstract class RepositoryBase<TEntity extends CellEntity, TDomain = TEnti
   // ────────────────────────────────
   // persistence
   // ────────────────────────────────
-  public add = async (entity: TEntity): Promise<TEntity> => {
+  public async add(entity: TEntity, image: IHiveImage): Promise<TEntity> {
     if (this.isGhost(entity)) return entity
+
     entity.dateCreated = safeDate(new Date()) || ''
+
     await this.cell_db.add(entity)
     this.idService.markAsUsed(entity.cellId)
-    return entity as TEntity
+
+    // ensure a small image record exists
+    await this.ensureImageRecord(entity, image)
+
+    return entity
+  }
+
+  private ensureImageRecord = async (entity: TEntity, image: IHiveImage): Promise<void> => {
+
+    // detect whether update or insert is needed
+    let isNewImage =  false
+    if (image.id != null) {
+      const existing = await this.imageDb.get(image.id)
+      isNewImage = !existing || existing.blob.size !== image.blob.size
+    } else {
+      isNewImage = true
+    }
+
+    // save the image if new or changed
+    await this.imageDb.put(image)
+
+    // we have an id now
+    entity.smallImageId = image.id!
+    await this.save(entity,image)
   }
 
   public async update(entity: TEntity): Promise<number> {

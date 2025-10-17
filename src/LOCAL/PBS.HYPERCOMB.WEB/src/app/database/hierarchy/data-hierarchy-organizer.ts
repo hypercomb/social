@@ -22,21 +22,22 @@ export class HierarchyRestorationService extends DataServiceBase {
         const db = this.ds.db()!
         await db.transaction('rw', db.table(DBTables.Cells), async () => {
 
-            // set the identifier fields from the old item
-            await Promise.all(hiveData.map(async item => {
+            // // set the identifier fields from the old item
+            // await Promise.all(hiveData.map(async item => {
 
-                const restorable = new RestorableTileData(item)
+            //     const restorable = new RestorableTileData(item)
 
-                // create tiles
-                const cell = new Cell(item)
-                cell.hive = hiveName
+            //     // create tiles
+            //     const cell = new Cell(item)
+            //     cell.hive = hiveName
 
-                const { id,cellId, ...dataWithoutIds } = <any>cell
-                const newCell = await this.modify.addCell(dataWithoutIds)
+            //     const { id,cellId, ...dataWithoutIds } = <any>cell
+            //     const newCell = await this.modify.addCell(dataWithoutIds)
 
-                restorable.newItem = newCell
-                restorableList.push(restorable)
-            }))
+            //     restorable.newItem = newCell
+            //     restorableList.push(restorable)
+            // }))
+            throw new Error("Not implemented")
 
             await this.restoreSourceIdentifiers(restorableList)
 

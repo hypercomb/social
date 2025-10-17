@@ -1,12 +1,19 @@
-﻿import { Injectable } from "@angular/core"
+﻿import { inject, Injectable } from "@angular/core"
 import { toCell, safeDate } from "src/app/core/mappers/to-cell"
 import { toCellEntity } from "src/app/core/mappers/to-cell-entity"
 import { CellEntity } from "src/app/database/model/i-tile-entity"
 import { IEntityFactoryPort } from "../ports/i-entity-factory-port"
 import { Cell, NewCell, Hive, Ghost, ClipboardCell, Pathway, CellKind } from "src/app/cells/cell"
+import { ICreateCells } from "../tokens/tile-factory.token"
+import { BlobService } from "src/app/hive/rendering/blob-service"
+import { COMB_IMG_FACTORY } from "src/app/shared/tokens/i-hive-images.token"
+import { IHiveImage } from "src/app/core/models/i-hive-image"
 
 @Injectable({ providedIn: "root" })
-export class CellFactory implements IEntityFactoryPort<CellEntity, Cell> {
+export class CellFactory implements IEntityFactoryPort<CellEntity, Cell>, ICreateCells {
+    private readonly factory = inject(COMB_IMG_FACTORY)
+    private readonly blobs = inject(BlobService)
+
     public map<T extends Cell | NewCell>(entity: CellEntity): T {
         return toCell(entity) as T
     }
@@ -24,8 +31,8 @@ export class CellFactory implements IEntityFactoryPort<CellEntity, Cell> {
     }
 
     // Explicit creation methods for each type
-    public createCell(params: Partial<NewCell> & { cellId: number }, kind: CellKind): Cell {
-        const cell =  new Cell({
+    public async create(params: Partial<NewCell> & { cellId: number }, kind: CellKind): Promise<Cell> {
+        const cell = new Cell({
             ...params,
             cellId: params.cellId,
             dateCreated: safeDate(new Date()),
@@ -34,7 +41,7 @@ export class CellFactory implements IEntityFactoryPort<CellEntity, Cell> {
         return cell
     }
 
-    public createHive(params: Partial<Cell> & { cellId: number }): Hive {
+    public async createHive(params: Partial<Cell> & { cellId: number }): Promise<Hive> {
         return new Hive({
             ...params,
             kind: "Hive",
@@ -43,24 +50,27 @@ export class CellFactory implements IEntityFactoryPort<CellEntity, Cell> {
         })
     }
 
-    public createGhost(params: Partial<NewCell> = {}): Ghost {
+    public async createGhost(params: Partial<NewCell> = {}): Promise<Ghost>  {
+
+        const blob = await this.blobs.getInitialBlob()
+        const image =  <IHiveImage> await this.factory.create(blob, -1)  // use -1 as temp cellId
         return new Ghost({
             ...params,
-            kind: "Ghost",
             dateCreated: safeDate(new Date()),
+            image,
         })
     }
 
-    public createClipboard(params: Partial<Cell> & { cellId: number }): ClipboardCell {
+    public async createClipboard(params: Partial<Cell> & { cellId: number }): Promise<ClipboardCell> {
         return new ClipboardCell({
             ...params,
             kind: "Clipboard",
-            cellId: params.cellId,
+            cellId: params.cellId ,
             dateCreated: safeDate(new Date()),
         })
     }
 
-    public createPathway(params: Partial<Cell> & { cellId: number }): Pathway {
+    public async createPathway(params: Partial<Cell> & { cellId: number }): Promise<Pathway> {
         return new Pathway({
             ...params,
             kind: "Pathway",

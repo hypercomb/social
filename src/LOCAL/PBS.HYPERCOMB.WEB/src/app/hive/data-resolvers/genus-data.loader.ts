@@ -4,18 +4,20 @@ import { Hive, NewCell } from "src/app/cells/cell"
 import { HiveScout } from "../hive-scout"
 import { MODIFY_COMB_SVC } from "src/app/shared/tokens/i-comb-service.token"
 import { CellOptions } from "src/app/cells/models/cell-options"
-import { QUERY_HIVE_SVC } from "src/app/shared/tokens/i-comb-query.token"
 import { HiveLoaderBase } from "./i-data-resolver"
 import { OpfsHiveService } from "../storage/opfs-hive-service"
+import { IHiveImage } from "src/app/core/models/i-hive-image"
+import { BlobService } from "../rendering/blob-service"
 
 @Injectable({ providedIn: "root" })
 export class GenusBootstrapper extends HiveLoaderBase {
+  private readonly blobs = inject(BlobService)
   private readonly modify = inject(MODIFY_COMB_SVC)
   private readonly opfs = inject(OpfsHiveService)
   public override enabled(scout: HiveScout): boolean {
     return scout.type === 'Genus'
   }
-  
+
   async load(scout: HiveScout) {
     this.logDataResolution(`GenusBootstrapper bootstrapping for ${scout.name}`)
     if (!scout.name) {
@@ -35,7 +37,9 @@ export class GenusBootstrapper extends HiveLoaderBase {
       newHive.options.set(CellOptions.Active)
 
       // 2. persist hive to database
-      const created = (await this.modify.addCell(newHive)) as Hive
+      const initial = await this.blobs.getInitialBlob()
+      const image = <IHiveImage>{ cellId: 0, blob: initial, scale: 1, x: 0, y: 0, getBlob: async () => initial }
+      const created = await this.modify.addCell(newHive, image) as Hive
 
       // 3. create the first child cell under that hive
       const firstCell = new NewCell({
@@ -47,7 +51,7 @@ export class GenusBootstrapper extends HiveLoaderBase {
       })
       firstCell.options.set(CellOptions.Active)
 
-      await this.modify.addCell(firstCell)
+      await this.modify.addCell(firstCell, image)
     }
     this.logDataResolution(`GenusBootstrapper bootstrapped hive: ${scout.name}`)
   }

@@ -1,6 +1,6 @@
 ﻿import { Injectable, signal, computed, inject } from "@angular/core"
 import { EditorMode } from "src/app/core/models/enumerations"
-import { Cell, EditCell, NewCell } from "src/app/cells/cell"
+import { Cell, EditCell } from "src/app/cells/cell"
 import { isNewHive } from "src/app/cells/models/cell-filters"
 import { IHiveImage } from "src/app/core/models/i-hive-image"
 import { ImageService } from "src/app/database/images/image-service"
@@ -10,14 +10,13 @@ export class EditorService {
 
 
   private readonly images = inject(ImageService)
-  
+
   // internal state
   private readonly _mode = signal<EditorMode>(EditorMode.None)
   private readonly _context = signal<EditCell | null>(null)
   private readonly _dragOver = signal(false)
   private readonly _initialScale = signal<number | undefined>(undefined)
   private readonly _selectedColor = signal<string | null>(null)
-  private readonly _tileColor = signal<string | null>(null)
   private readonly _debug = signal(false)
   // tile visuals
   private readonly _borderColorTile = signal<Cell | null>(null)
@@ -36,7 +35,6 @@ export class EditorService {
   public readonly backgroundTile = this._backgroundTile.asReadonly()
   public readonly debug = this._debug.asReadonly()
 
-
   // derived properties
   public readonly isSwatchMode = computed(() => (this._mode() & EditorMode.Swatch) !== 0)
   public isNewHive = computed(() => {
@@ -47,6 +45,9 @@ export class EditorService {
 
   public rendered = signal(false)
 
+  public clearContext = async () => {
+    this._context.set(null)
+  }
 
   // setters
   public setMode(mode: EditorMode) {
@@ -63,9 +64,9 @@ export class EditorService {
     Object.assign(context, cell)
     context.originalImage = <IHiveImage>{ ...cell.image }
     context.image = <IHiveImage>{ ...cell.image }
-    const large  = await this.images.loadForCell(cell, 'large')
+    const large = await this.images.loadForCell(cell, 'large')
     context.largeImage = large || cell.image
-    
+
     this._context.set(context)
   }
 
@@ -99,9 +100,9 @@ export class EditorService {
     this._debug.set(false)
   }
 
-    reset() {
-      this._branchTile.set(null)
-      this._backgroundTile.set(null)
-      this._borderColorTile.set(null)
-    }
+  reset() {
+    this._branchTile.set(null)
+    this._backgroundTile.set(null)
+    this._borderColorTile.set(null)
+  }
 }

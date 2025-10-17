@@ -1,7 +1,7 @@
 ﻿import { Component, computed, effect, ElementRef, inject, ViewChild } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import { MatIconModule } from '@angular/material/icon'
-import { Assets } from 'pixi.js'
+import { Assets, FederatedPointerEvent } from 'pixi.js'
 import { AiSearchPath, AlignMiddle, BranchPath } from 'src/app/unsorted/path'
 import { CellOptions, POLICY } from 'src/app/core/models/enumerations'
 import { EditorActionsComponent } from './editor-actions/editor-actions.component'
@@ -20,6 +20,7 @@ import { CellFactory } from 'src/app/inversion-of-control/factory/cell-factory'
 import { WheelState } from '../mouse/wheel-state'
 import { MODIFY_COMB_SVC } from 'src/app/shared/tokens/i-comb-service.token'
 import { ImagePersistenceService } from './tile-image/image-persistence-service'
+import { PointerState } from 'src/app/state/input/pointer-state'
 
 export type EditorKind = 'new cell' | 'edit cell' | 'new hive' | 'edit hive'
 
@@ -51,6 +52,7 @@ export class TileEditorComponent extends ServiceBase {
   public readonly persistence = inject(ImagePersistenceService)
   private readonly manager = inject(HexagonEditManager)
 
+  private readonly ps = inject(PointerState)
   // ─────────────────────────────────────────────
   // local state
   // ─────────────────────────────────────────────
@@ -84,6 +86,21 @@ export class TileEditorComponent extends ServiceBase {
 
   constructor() {
     super()
+
+    effect(() => {
+      const ctx = this.es.context()
+      const seq = this.ps.downSeq()
+      if (!ctx || seq === 0) return
+
+      const e = this.ps.pointerDownEvent()
+      if (!e) return
+
+      // uncomment for right-click only:  
+      if (e.button !== 2) return
+
+      // invalidate the editor context; reactive cleanup handles the rest
+      this.es.setContext?.(null) ?? this.es.clearContext?.()
+    })
 
     // sync local editCell whenever editor context changes
     effect(() => {

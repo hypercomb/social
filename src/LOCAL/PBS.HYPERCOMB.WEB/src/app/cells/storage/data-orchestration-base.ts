@@ -1,6 +1,7 @@
 import { inject, signal } from '@angular/core'
 import { Cell } from 'src/app/cells/cell'
 import { ServiceBase } from 'src/app/core/mixins/abstraction/service-base'
+import { CELL_CREATOR } from 'src/app/inversion-of-control/tokens/tile-factory.token'
 import { CELL_REPOSITORY } from 'src/app/shared/tokens/i-cell-repository.token'
 import { COMB_STORE, STAGING_ST } from 'src/app/shared/tokens/i-comb-store.token'
 import { HIVE_STORE } from 'src/app/shared/tokens/i-hive-store.token'
@@ -11,8 +12,11 @@ import { HIVE_STORE } from 'src/app/shared/tokens/i-hive-store.token'
  */
 export abstract class DataOrchestratorBase extends ServiceBase {
   protected readonly staging = inject(STAGING_ST)
-  protected readonly combStore = inject(COMB_STORE)
-  protected readonly hiveStore = inject(HIVE_STORE)
+  protected readonly comb = {
+    factory: inject(CELL_CREATOR),
+    store: inject(COMB_STORE)
+  }
+  protected readonly hive = { store: inject(HIVE_STORE) }
   protected readonly repository = inject(CELL_REPOSITORY)
 
   private readonly _hydrated = signal(false)
@@ -51,7 +55,7 @@ export abstract class DataOrchestratorBase extends ServiceBase {
   // ─────────────────────────────────────────────
   protected async hydrateFlow(fetcher: () => Promise<Cell[]>): Promise<Cell[]> {
     if (this.isFetching()) return []
-    if (this.isHydrated()) return this.combStore.cells()
+    if (this.isHydrated()) return this.comb.store.cells()
 
     this.markFetching()
     try {

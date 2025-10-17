@@ -22,6 +22,9 @@ export class DebugService {
     'editor',
     'actions',
     'debug',
+    'layout',
+    'comb',
+    'storage  ',
   ]
 
   private readonly enabledSet = new Set(this.enabled)

@@ -149,7 +149,6 @@ export class CombStore extends ServiceBase implements ICombStore, IStaging {
   public hasTile = (cellId: number): boolean =>
     this.tileRegistry.has(cellId)
 
-
   // -----------------------------------------------------------
   // staging (single hive only)
   // -----------------------------------------------------------
@@ -166,9 +165,6 @@ export class CombStore extends ServiceBase implements ICombStore, IStaging {
   }
 
   public stageAdd(cell: Cell): void {
-    if (cell.name == 'revolucion') {
-      console.log('staging revolucion')
-    }
     this._cells.update(arr => [...arr, cell])
     this.bumpFlushSeq()
   }

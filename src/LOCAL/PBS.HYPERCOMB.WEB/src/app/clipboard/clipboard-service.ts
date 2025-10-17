@@ -5,6 +5,7 @@ import { Cell } from "../cells/cell"
 import { MODIFY_COMB_SVC } from "../shared/tokens/i-comb-service.token"
 import { CLIPBOARD_REPOSITORY } from "../shared/tokens/i-clipboard-repository"
 import { CELL_REPOSITORY } from "../shared/tokens/i-cell-repository.token"
+import { IHiveImage } from "../core/models/i-hive-image"
 
 @Injectable({ providedIn: "root" })
 export class ClipboardService {
@@ -41,8 +42,8 @@ export class ClipboardService {
             hive: active.hive,
             sourceId: active.cellId!,
         })
-
-        await this.modify.addCell(clone)
+        const { image, ...rest} = clone
+        await this.modify.addCell(<Cell>rest, <IHiveImage>image)
         // children auto-refresh via ClipboardStore effect
     }
 

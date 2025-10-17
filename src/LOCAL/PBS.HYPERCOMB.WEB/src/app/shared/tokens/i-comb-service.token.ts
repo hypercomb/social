@@ -1,5 +1,6 @@
 import { InjectionToken, Signal } from "@angular/core"
-import { Cell, NewCell } from "src/app/cells/cell"
+import { Cell, CellKind, NewCell } from "src/app/cells/cell"
+import { IHiveImage } from "src/app/core/models/i-hive-image"
 
 export interface ICombState {
     selectedCells: Signal<Cell[]>
@@ -7,10 +8,10 @@ export interface ICombState {
 
 export interface IModifyComb {
     updateSilent(cell: Cell)
-    create(params: Partial<NewCell>): Promise<Cell>
+    create(params: Partial<NewCell>, kind: CellKind): Promise<Cell>
     deleteAll(cell: Cell, hierarchy: Cell[]): Promise<void>
     bulkPut(dataArray: Cell[])
-    addCell(newCell: NewCell): Promise<Cell>
+    addCell(newCell: NewCell, image:IHiveImage): Promise<Cell>
     updateCell(cell: Cell): Promise<number>
     removeCell(cell: Cell): Promise<void>
 }

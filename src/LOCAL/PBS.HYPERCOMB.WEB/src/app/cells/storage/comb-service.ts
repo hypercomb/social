@@ -1,5 +1,5 @@
 ﻿import { Injectable, inject, signal } from '@angular/core'
-import { Cell, Ghost, NewCell } from '../cell'
+import { Cell, CellKind, Ghost, NewCell } from '../cell'
 import { combId } from '../models/cell-filters'
 import { PointerState } from 'src/app/state/input/pointer-state'
 import { effect } from 'src/app/performance/effect-profiler'
@@ -9,18 +9,18 @@ import { COMB_STORE } from 'src/app/shared/tokens/i-comb-store.token'
 import { toCellEntity } from 'src/app/core/mappers/to-cell-entity'
 import { CellOptions } from '../models/cell-options'
 import { safeDate, toCell } from 'src/app/core/mappers/to-cell'
-import { CellFactory } from 'src/app/inversion-of-control/factory/cell-factory'
 import { CombQueryService } from './comb-query-service'
+import { IHiveImage } from 'src/app/core/models/i-hive-image'
+import { BlobService } from 'src/app/hive/rendering/blob-service'
 
 @Injectable({ providedIn: 'root' })
 export class CombService extends DataOrchestratorBase implements ICellService, IModifyComb, IHiveHydration {
   // ─────────────────────────────────────────────
   // dependencies
   // ─────────────────────────────────────────────
-  private readonly combstore = inject(COMB_STORE)
+  private blobs = inject(BlobService)
   private readonly query = inject(CombQueryService)
   private readonly ps = inject(PointerState)
-  private readonly factory = inject(CellFactory)
 
   // ─────────────────────────────────────────────
   // internal state
@@ -57,17 +57,17 @@ export class CombService extends DataOrchestratorBase implements ICellService, I
       if (this.hydratedEnqueued.has(cell.cellId)) return
 
       // get any already-loaded children
-      const children = this.combstore.cells().filter(c => c.sourceId === cell.cellId)
+      const children = this.comb.store.cells().filter(c => c.sourceId === cell.cellId)
 
       // lazy hydrate if not loaded yet
       if (!children.length) {
-        ;(async () => {
+        ; (async () => {
           const rows = await this.repository.fetchBySourceId(cell.cellId)
           const mapped = await Promise.all(rows.map(r => this.query.decorateWithImage(<Cell>toCell(r))))
 
           if (mapped.length) {
             this.staging.stageMerge(mapped)
-            this.combstore.enqueueHot(mapped as Cell[])
+            this.comb.store.enqueueHot(mapped as Cell[])
           }
           this.hydratedEnqueued.add(cell.cellId)
         })()
@@ -75,7 +75,7 @@ export class CombService extends DataOrchestratorBase implements ICellService, I
       }
 
       // already have children in memory
-      this.combstore.enqueueHot(children)
+      this.comb.store.enqueueHot(children)
       this.hydratedEnqueued.add(cell.cellId)
     })
 
@@ -91,13 +91,13 @@ export class CombService extends DataOrchestratorBase implements ICellService, I
   }
 
   public flush(): { hot: any; cold: any } {
-    return this.combStore.flush()
+    return this.comb.store.flush()
   }
 
   public invalidate(): void {
     const entry = this.stack.top()
     if (!entry?.cell) return
-    this.combstore.invalidate()
+    this.comb.store.invalidate()
     this.hydratedEnqueued.clear()
   }
 
@@ -108,21 +108,24 @@ export class CombService extends DataOrchestratorBase implements ICellService, I
   // ─────────────────────────────────────────────
   // creation
   // ─────────────────────────────────────────────
-  public async create(params: Partial<NewCell>): Promise<Cell> {
-    const newCell = this.factory.newCell(params)
+  public async create(params: Partial<NewCell>, kind: CellKind): Promise<Cell> {
+    const newCell = this.comb.factory.newCell(params)
+    const initial = await this.blobs.getInitialBlob()
+    const image = <IHiveImage>{ blob: initial, scale: 1, x: 0, y: 0, getBlob: async () => initial }
+    newCell.image = image
+    newCell.setKind(kind)
     this.ensureValidKind(newCell)
-    const entity = this.factory.unmap(newCell)
-    const newEntity = await this.repository.add(entity)
-    return this.factory.map<Cell>(newEntity)
+    //const result = await this.addCell(newCell, image)
+    return <Cell>{} /// result
   }
 
-  public async addCell(newcell: NewCell | Ghost): Promise<Cell> {
+  public async addCell(newcell: NewCell | Ghost, image: IHiveImage): Promise<Cell> {
+
     this.ensureValidKind(newcell)
     const entity = toCellEntity(newcell)
-    const cell =
-      newcell.kind !== 'Ghost'
-        ? <Cell>toCell(await this.repository.add(entity))
-        : (newcell as unknown as Cell)
+    const cell = newcell.kind === 'Ghost' ?
+      (newcell as unknown as Cell) :
+      <Cell>toCell(await this.repository.add(entity, image))
 
     this.staging.stageAdd(cell)
     this._lastCreated.set(cell)
@@ -137,6 +140,7 @@ export class CombService extends DataOrchestratorBase implements ICellService, I
     this.ensureValidKind(cell)
     const result = await this.repository.update(toCellEntity(cell))
     this.staging.stageReplace(cell)
+    this.comb.store.enqueueHot([cell])
     return result
   }
 
@@ -149,10 +153,16 @@ export class CombService extends DataOrchestratorBase implements ICellService, I
   // ─────────────────────────────────────────────
   // removal / cleanup
   // ─────────────────────────────────────────────
-  public async removeCell(cell: Cell): Promise<void> {
+  public async removeCell(cell: Cell) {
     cell.options.update(o => o | CellOptions.Deleted)
     cell.dateDeleted = safeDate(new Date()) || ''
-    await this.repository.update(toCellEntity(cell))
+
+    const ghost = cell.kind === 'Ghost'
+
+    if (!ghost) {
+      await this.repository.update(toCellEntity(cell))
+    }
+
     this.staging.stageRemove(cell.cellId!)
   }
 
@@ -210,7 +220,7 @@ export class CombService extends DataOrchestratorBase implements ICellService, I
   // ─────────────────────────────────────────────
   public async hydrate(): Promise<Cell[]> {
     if (this.isFetching()) return []
-    if (this.isHydrated()) return this.combstore.cells()
+    if (this.isHydrated()) return this.comb.store.cells()
 
     this.markFetching()
     try {

@@ -35,12 +35,12 @@ export class HiveRouteWatcher {
 
                 // get the current route + fragment
                 const tree = this.router.parseUrl(this.router.url)
-                const name = tree.root.children["primary"]?.segments[0]?.path
+                const firstPart = tree.root.children["primary"]?.segments[0]?.path
                 const fragment = tree.fragment ?? ""
-                const hiveName = fragment ? `${name}#${fragment}` : name
+                const name = fragment ? `${firstPart}#${fragment}` : firstPart
 
                 // load set and activate the hive
-                const scout = await this.loader.resolve(hiveName)
+                const scout = await this.loader.resolve(name)
                 this.state.setScout(scout) // set the scout
                 await this.loader.load(scout) // hydrate + stage
                 await this.loader.activate(scout)

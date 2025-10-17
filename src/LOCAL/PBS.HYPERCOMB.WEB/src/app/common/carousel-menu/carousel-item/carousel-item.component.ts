@@ -1,10 +1,9 @@
-﻿import { AfterViewInit, ChangeDetectionStrategy, Component, EventEmitter, inject, Input, Output, signal, effect } from '@angular/core'
+﻿import { ChangeDetectionStrategy, Component, EventEmitter, inject, Input, Output, signal, effect } from '@angular/core'
 import { IDexieHive } from 'src/app/hive/hive-models'
 import { HiveService } from 'src/app/hive/storage/hive-service'
-import { HiveImageFactory } from '../../tile-editor/tile-image/tile-image-factory'
 import { BlobService } from 'src/app/hive/rendering/blob-service'
 import { SETTINGS_SVC } from 'src/app/shared/tokens/i-hypercomb.token'
-import { OpfsManager } from "src/app/common/opfs/opfs-manager";
+import { OpfsManager } from "src/app/common/opfs/opfs-manager"
 
 @Component({
   standalone: true,

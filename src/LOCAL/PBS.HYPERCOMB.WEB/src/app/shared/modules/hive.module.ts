@@ -19,11 +19,12 @@ import { LiveDbDataLoader } from "src/app/hive/data-resolvers/live-db-data.loade
 import { FirstOpfsNameResolver } from "src/app/hive/name-resolvers/first-opfs-name-resolver"
 import { FirstOpfsLoader } from "src/app/hive/data-resolvers/first-opfs-loader"
 import { OpfsHiveLoader } from "src/app/hive/data-resolvers/opfs-hive-loader"
+import { Hive } from "src/app/cells/cell"
 
 @NgModule({
     providers: [
         // factory
-        { provide: HIVE_FACTORY, useClass: HiveFactory },
+        { provide: HIVE_FACTORY, useExisting: HiveFactory },
         { provide: REFRESH_HIVE_PORT, useExisting: HiveFactory },
         { provide: HIVE_STORE, useExisting: HiveStore },
         { provide: HIVE_STATE, useExisting: HiveStore },

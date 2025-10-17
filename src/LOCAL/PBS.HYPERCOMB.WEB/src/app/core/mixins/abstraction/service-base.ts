@@ -1,7 +1,6 @@
 ﻿// service-mixin.ts
 
 import { inject, Injector } from '@angular/core'
-import { Container } from 'pixi.js'
 import { DebugService } from '../../diagnostics/debug-service'
 import { EventDispatcher } from '../../../helper/events/event-dispatcher'
 import { ContextStack } from '../../../unsorted/controller/context-stack'
@@ -12,12 +11,13 @@ import { Settings } from '../../../unsorted/settings'
 import { HiveState } from 'src/app/hive/hive-state'
 import { AbstractCtor } from 'src/app/core/mixins/mixin-helpers'
 import { PolicyService } from 'src/app/navigation/menus/policy-service'
-import { ContextMenuService } from 'src/app/navigation/menus/context-menu-service'
 import { PointerState } from 'src/app/state/input/pointer-state'
-import { TILE_SERVICE } from 'src/app/shared/tokens/i-hypercomb.token'
 import { CoordinateDetector } from 'src/app/helper/detection/coordinate-detector'
 import { HIVE_HYDRATION, MODIFY_COMB_SVC } from 'src/app/shared/tokens/i-comb-service.token'
-import { STAGING_ST } from 'src/app/shared/tokens/i-comb-store.token'
+import { COMB_STORE, STAGING_ST } from 'src/app/shared/tokens/i-comb-store.token'
+import { EditorService } from 'src/app/state/interactivity/editor-service'
+import { CELL_CREATOR, CELL_FACTORY } from 'src/app/inversion-of-control/tokens/tile-factory.token'
+import { CombImageFactory } from 'src/app/common/tile-editor/tile-image/cell-image-factory'
 
 export function ServiceMixin<TBase extends AbstractCtor>(Base: TBase) {
     abstract class ServiceMixinClass extends Base {
@@ -78,11 +78,24 @@ export function ServiceMixin<TBase extends AbstractCtor>(Base: TBase) {
 export abstract class ServiceBase extends ServiceMixin(class { }) { }
 
 export abstract class LayoutServiceBase extends ServiceMixin(class { }) {
+    protected readonly es = inject(EditorService)
     protected readonly ps = inject(PointerState)
     protected readonly detector = inject(CoordinateDetector)
-    protected readonly comb = { 
-        modify: inject(MODIFY_COMB_SVC)
+    protected readonly hive = { 
+        image: { 
+            factory: inject(CombImageFactory)
+        }
     }
+    protected readonly cell = { 
+        creator: inject(CELL_CREATOR),
+        factory: inject(CELL_FACTORY)
+    }
+
+    protected readonly comb = { 
+        modify: inject(MODIFY_COMB_SVC),
+        store: inject(COMB_STORE)
+    }
+    
     protected readonly hydration = inject(HIVE_HYDRATION)
     protected readonly staging = inject(STAGING_ST)
 }

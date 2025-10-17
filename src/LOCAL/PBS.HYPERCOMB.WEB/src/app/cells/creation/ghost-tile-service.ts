@@ -1,13 +1,18 @@
-import { effect, Injectable } from "@angular/core";
-import { LayoutServiceBase } from "src/app/core/mixins/abstraction/service-base";
+import { Injectable, effect } from '@angular/core'
+import { LayoutServiceBase } from 'src/app/core/mixins/abstraction/service-base'
+import { Cell, Ghost } from 'c:/Projects/hypercomb/social/src/LOCAL/PBS.HYPERCOMB.WEB/src/app/cells/cell'
 
 @Injectable({ providedIn: 'root' })
 export class GhostTileService extends LayoutServiceBase {
-
     private lastSeq = 0
 
+    private ghost: Ghost | undefined = undefined
     constructor() {
         super()
+
+        // ────────────────────────────────
+        // create a real cell on pointerdown
+        // ────────────────────────────────
         effect(async () => {
             const seq = this.ps.downSeq()
             if (seq === 0 || seq === this.lastSeq) return
@@ -23,20 +28,45 @@ export class GhostTileService extends LayoutServiceBase {
             }
 
             const cell = this.stack.cell()
-            const created = await this.comb.modify.create({
-                hive: cell?.hive,
-                index: coordinate.index,
-                sourceId: cell?.cellId,
-                name: 'New Tile',
-                kind: 'Cell',
-            })
+            const created = await this.comb.modify.create(
+                {
+                    hive: cell?.hive,
+                    index: coordinate.index,
+                    sourceId: cell?.cellId,
+                    name: 'New Tile'
+                },
+                'Cell'
+            )
 
-            // add to container 
             if (created) {
-                this.debug.log('layout', `ghost tile created at ${coordinate.Location.x},${coordinate.Location.y}`)
+                this.debug.log('layout', `tile created at ${coordinate.Location.x},${coordinate.Location.y}`)
             }
 
             await this.comb.modify.updateCell(created)
+            await this.comb.store.enqueueHot([created] as Cell[])
+        })
+
+        // ────────────────────────────────
+        // show or move the staged ghost tile
+        // ────────────────────────────────
+        effect(async () => {
+
+            const coordinate = this.detector.emptyCoordinate()
+            if (!coordinate) return
+            this.debug.log('layout', `ghost effect triggered for empty coordinate:${coordinate.index}}`)
+            this.ghost = await this.cell.creator.createGhost({})
+            const { ghost, ghost: { image } } = this
+            await this.comb.modify.addCell(ghost, image!)
+        })
+
+        // ────────────────────────────────
+        // hide ghost when pointer released
+        // ────────────────────────────────
+        effect(async () => {
+            const seq = this.ps.upSeq()
+            if (seq === 0 || !this.ghost) return
+
+            await this.comb.modify.removeCell(<Cell>this.ghost)
         })
     }
 }
