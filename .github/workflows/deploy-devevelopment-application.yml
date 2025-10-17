@@ -6,7 +6,7 @@ on:
       - development
   pull_request:
     types: [opened, synchronize, reopened, closed]
-    branches:
+    branches: 
       - development
 
 jobs:
