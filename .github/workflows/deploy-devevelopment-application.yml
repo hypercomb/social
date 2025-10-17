@@ -22,20 +22,6 @@ jobs:
           submodules: true
           lfs: false
 
-      - name: Debug show working directory and files
-        run: |
-          echo "Current working directory:"
-          pwd
-          echo ""
-          echo "Listing of current directory:"
-          ls -al
-          echo ""
-          echo "Repo root structure:"
-          ls -al /home/runner/work
-          echo ""
-          echo "Full nested structure (first two levels):"
-          ls -R | head -n 200
-
       # 2️⃣ Use the correct Node version required by your package.json
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -66,3 +52,20 @@ jobs:
         with:
           azure_static_web_apps_api_token: ${{ secrets.STATIC_WEBSITE_DEVELOPMENT_DEPLOYMENT_TOKEN }}
           action: close
+
+
+
+          
+      # - name: Debug show working directory and files
+      #   run: |
+      #     echo "Current working directory:"
+      #     pwd
+      #     echo ""
+      #     echo "Listing of current directory:"
+      #     ls -al
+      #     echo ""
+      #     echo "Repo root structure:"
+      #     ls -al /home/runner/work
+      #     echo ""
+      #     echo "Full nested structure (first two levels):"
+      #     ls -R | head -n 200
