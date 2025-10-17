@@ -69,7 +69,7 @@ export class CoordinateDetector implements ICoordinateDetector {
 
       // instantly move offscreen and back to trigger re-detection
       const offLeft = new Point(-10000, pos.y)
-      const offRight = new Point(10000, pos.y)
+      const offRight = new Point(10000, pos.y)  
 
       // go offscreen left then right and return to original instantly
       this.pointer.position.set(offLeft)

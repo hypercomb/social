@@ -4,13 +4,11 @@ import { Cell } from "src/app/cells/cell"
 import { PolicyService } from "src/app/navigation/menus/policy-service"
 import { EditorService } from "src/app/state/interactivity/editor-service"
 import { PixiDataServiceBase } from "src/app/database/pixi-data-service-base"
-import { COMB_STORE } from "src/app/shared/tokens/i-comb-store.token"
 
 @Injectable({ providedIn: 'root' })
 export class HexagonEditManager extends PixiDataServiceBase {
     private readonly es = inject(EditorService)
     private readonly policy = inject(PolicyService)
-    private readonly store = inject(COMB_STORE)
 
     // policies
     public readonly isBlocked = this.policy.any(
@@ -36,18 +34,20 @@ export class HexagonEditManager extends PixiDataServiceBase {
     public beginEditing = (cell: Cell) => {
         if (!cell.image) throw new Error('Cannot edit a cell without an image!')
         this.es.setContext(cell)
-    }   
+    }
 
-    public complete = (cell: Cell) => {
+    public complete = () => {
         this.es.setContext(null)   // end editing session by clearing context
+        const current = this.stack.cell()!
+        this.stack.push(current)  // refresh the stack to clear any edit artifacts
     }
 
     public cancel = () => {
-        this.es.setContext(null)   // cancel editing → no context
+        this.complete()
     }
 
     public deleted = (cell: Cell) => {
-        this.es.setContext(null)   // deleted tile → clear context
+        this.complete()
     }
 
 }

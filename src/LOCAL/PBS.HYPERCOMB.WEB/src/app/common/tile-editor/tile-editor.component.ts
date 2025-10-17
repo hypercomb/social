@@ -1,7 +1,7 @@
 ﻿import { Component, computed, effect, ElementRef, inject, ViewChild } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import { MatIconModule } from '@angular/material/icon'
-import { Assets, FederatedPointerEvent } from 'pixi.js'
+import { Assets } from 'pixi.js'
 import { AiSearchPath, AlignMiddle, BranchPath } from 'src/app/unsorted/path'
 import { CellOptions, POLICY } from 'src/app/core/models/enumerations'
 import { EditorActionsComponent } from './editor-actions/editor-actions.component'
@@ -17,8 +17,7 @@ import { Cell, EditCell } from 'src/app/cells/cell'
 import { Events } from 'src/app/helper/events/events'
 import { ServiceBase } from 'src/app/core/mixins/abstraction/service-base'
 import { CellFactory } from 'src/app/inversion-of-control/factory/cell-factory'
-import { WheelState } from '../mouse/wheel-state'
-import { MODIFY_COMB_SVC } from 'src/app/shared/tokens/i-comb-service.token'
+import { HIVE_HYDRATION, MODIFY_COMB_SVC } from 'src/app/shared/tokens/i-comb-service.token'
 import { ImagePersistenceService } from './tile-image/image-persistence-service'
 import { PointerState } from 'src/app/state/input/pointer-state'
 
@@ -46,8 +45,11 @@ export class TileEditorComponent extends ServiceBase {
   // dependencies
   // ─────────────────────────────────────────────
   private readonly captureService = inject(ImageCaptureService)
+  
   private readonly factory = inject(CellFactory)
-  private readonly modifyComb = inject(MODIFY_COMB_SVC)
+  private readonly hydration = inject(HIVE_HYDRATION)
+  private readonly modify = inject(MODIFY_COMB_SVC)
+
   public readonly es = inject(EditorService)
   public readonly persistence = inject(ImagePersistenceService)
   private readonly manager = inject(HexagonEditManager)
@@ -86,6 +88,7 @@ export class TileEditorComponent extends ServiceBase {
 
   constructor() {
     super()
+    this.hydration.invalidate()
 
     effect(() => {
       const ctx = this.es.context()
@@ -126,7 +129,7 @@ export class TileEditorComponent extends ServiceBase {
   }
 
   public delete = async (cell: Cell): Promise<void> => {
-    await this.modifyComb.removeCell(cell)
+    await this.modify.removeCell(cell)
     this.manager.deleted(cell)
   }
 
@@ -164,11 +167,11 @@ export class TileEditorComponent extends ServiceBase {
     }
 
     await Assets.unload(cacheId(cell))
-    await this.modifyComb.updateCell(cell)
+    await this.modify.updateCell(cell)
 
     // optional: handle navigation after save
     // if (newHive) this.utility.changeLocation(cell.hive)
-    this.manager.complete(cell)
+    this.manager.complete()
   }
 
   public saveAsBranch = async (event: MouseEvent): Promise<void> => {
@@ -176,4 +179,5 @@ export class TileEditorComponent extends ServiceBase {
     cell.options.update(o => o | CellOptions.Branch)
     await this.save(event)
   }
+
 }

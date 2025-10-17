@@ -23,7 +23,7 @@ export class RenderScheduler {
   private readonly inFlight = new Set<number>()
 
   private renderJob: Promise<void> | null = null
-  private budgetPerFrame = 4
+  private budgetPerFrame = 8
 
   /** hook scheduler into pixi ticker */
   public hook(app: Application): void {
