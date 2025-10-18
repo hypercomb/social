@@ -2,7 +2,7 @@
 import { inject, Signal } from "@angular/core"
 import { Action } from "./action-models"
 import { CoordinateDetector } from "../helper/detection/coordinate-detector"
-import { ContextStack } from "../unsorted/controller/context-stack"
+import { ContextStack } from "../core/controller/context-stack"
 import { Cell } from "../cells/cell"
 import { HypercombState } from "../state/core/hypercomb-state"
 import { PolicyService } from "../navigation/menus/policy-service"

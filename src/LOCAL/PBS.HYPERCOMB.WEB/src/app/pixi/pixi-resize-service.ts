@@ -1,6 +1,6 @@
 ﻿import { Injectable, inject } from "@angular/core"
 import { PixiDataServiceBase } from "src/app/database/pixi-data-service-base"
-import { RenderScheduler } from "src/app/unsorted/controller/render-scheduler"
+import { RenderScheduler } from "src/app/core/controller/render-scheduler"
 import { Cell } from "src/app/cells/cell"
 
 @Injectable({ providedIn: 'root' })

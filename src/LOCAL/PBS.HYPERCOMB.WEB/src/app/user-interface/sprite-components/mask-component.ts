@@ -1,7 +1,7 @@
 ﻿import { Injectable } from '@angular/core'
 import { Assets, Container, Sprite } from 'pixi.js'
-import { LocalAssets } from 'src/app/unsorted/constants'
 import { SpriteBuilder } from './sprite-builder'
+import { LocalAssets } from 'src/app/unsorted/constants'
 
 @Injectable({
     providedIn: 'root'

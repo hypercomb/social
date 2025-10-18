@@ -1,10 +1,7 @@
-﻿import { inject, Injectable } from "@angular/core"
+﻿import { Injectable } from "@angular/core"
 import { Container, RenderTexture, RenderOptions } from "pixi.js"
 import { PixiDataServiceBase } from "src/app/database/pixi-data-service-base"
-import { PixiManager } from "src/app/pixi/pixi-manager"
 import { BorderColorSprite } from "src/app/user-interface/sprite-components/border-color-sprite"
-
-declare const window: Window
 
 @Injectable({
   providedIn: 'root'

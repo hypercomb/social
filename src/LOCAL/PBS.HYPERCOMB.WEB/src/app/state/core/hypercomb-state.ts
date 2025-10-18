@@ -4,7 +4,7 @@ import { Cell } from "src/app/cells/cell"
 // import { AuthState } from "src/app/auth/auth-state"
 import { HypercombMode } from "src/app/core/models/enumerations"
 import { HiveScout } from "src/app/hive/hive-scout"
-import { ContextStack } from "src/app/unsorted/controller/context-stack"
+import { ContextStack } from "src/app/core/controller/context-stack"
 
 
 @Injectable({ providedIn: 'root' })

@@ -1,5 +1,5 @@
 import { Injectable, inject, effect } from "@angular/core"
-import { ContextStack } from "../unsorted/controller/context-stack"
+import { ContextStack } from "../core/controller/context-stack"
 import { CombQueryService } from "../cells/storage/comb-query-service"
 import { CombStore } from "../cells/storage/comb-store"
 import { PixiManager } from "../pixi/pixi-manager"

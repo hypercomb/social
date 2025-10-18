@@ -4,9 +4,9 @@ import { firstValueFrom } from 'rxjs'
 
 import { SerializationService } from 'src/app/database/persistence/serialization-service'
 import { Constants } from 'src/app/unsorted/constants'
-import { FileDispatchBase } from 'src/app/unsorted/external/file-drop-base'
 import { IDropDispatcher } from './i-drop-dispatcher'
 import { ImageSourceParser } from './image-element-source-parser'
+import { FileDispatchBase } from 'src/app/unsorted/external/file-drop-base'
 
 @Injectable({ providedIn: 'root' })
 export class ImageSrcDropDispatcher extends FileDispatchBase implements IDropDispatcher {

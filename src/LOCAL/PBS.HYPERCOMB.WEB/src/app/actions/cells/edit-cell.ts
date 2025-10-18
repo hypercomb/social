@@ -1,6 +1,6 @@
 ﻿// edit-tile.action.ts
 import { Injectable, inject } from "@angular/core"
-import { HexagonEditManager } from "../../unsorted/hexagons/hexagon-edit-manager"
+import { HexagonEditManager } from "../../layout/hexagons/hexagon-edit-manager"
 import { CellContext } from "../action-contexts"
 import { ActionBase } from "../action.base"
 

@@ -3,7 +3,7 @@
 import { inject, Injector } from '@angular/core'
 import { DebugService } from '../../diagnostics/debug-service'
 import { EventDispatcher } from '../../../helper/events/event-dispatcher'
-import { ContextStack } from '../../../unsorted/controller/context-stack'
+import { ContextStack } from '../../controller/context-stack'
 import { KeyboardState } from '../../../interactivity/keyboard/keyboard-state'
 import { HypercombState } from '../../../state/core/hypercomb-state'
 import { LayoutState } from '../../../layout/layout-state'

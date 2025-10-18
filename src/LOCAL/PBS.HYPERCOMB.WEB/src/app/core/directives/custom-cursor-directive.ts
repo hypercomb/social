@@ -1,11 +1,10 @@
 ﻿// custom-cursor.directive.ts
 // note: subscriptions moved to ngOnInit writes to canvas deferred until the pixi canvas exists
 
-import { DestroyRef, Directive, effect, inject } from '@angular/core'
+import { Directive, effect, inject } from '@angular/core'
 import { HypercombMode } from '../models/enumerations'
 import { PixiServiceBase } from 'src/app/pixi/pixi-service-base'
 import { ModeChangeService } from 'src/app/unsorted/mode-change-service'
-
 
 @Directive({
   standalone: true,
