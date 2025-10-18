@@ -29,6 +29,7 @@ export class TileFactory extends PixiDataServiceBase implements ITileFactory {
         if (cell.cellId == null) {
             throw new Error(`TileFactory.create requires a persisted Cell with a valid TileId`)
         }
+        
         const { cellId } = this.stack.top()!
 
         // clone the blob

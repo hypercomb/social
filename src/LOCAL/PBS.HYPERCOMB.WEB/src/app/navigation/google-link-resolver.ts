@@ -1,11 +1,11 @@
 ﻿import { Injectable, inject } from "@angular/core"
 import { HypercombMode } from "../core/models/enumerations"
-import { ServiceBase } from "../core/mixins/abstraction/service-base"
+import { Hypercomb } from "../core/mixins/abstraction/hypercomb.base"
 import { GoogleState } from "../state/feature/google-state"
 import { ILinkResolver, IGoogleLink } from "./i-navigation-interfaces"
 
 @Injectable({ providedIn: 'root' })
-export class GoogleLinkResolver extends ServiceBase implements ILinkResolver {
+export class GoogleLinkResolver extends Hypercomb implements ILinkResolver {
     private readonly googleState = inject(GoogleState)
 
     public resolve(link: string) {

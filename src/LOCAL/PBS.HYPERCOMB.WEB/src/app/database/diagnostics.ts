@@ -1,10 +1,10 @@
 ﻿import { Injectable, Injector } from '@angular/core'
-import { DataServiceBase } from './pixi-data-service-base'
+import { HypercombData } from './pixi-data-service-base'
 
 @Injectable({
     providedIn: 'root'
 })
-export class Diagnostics extends DataServiceBase {
+export class Diagnostics extends HypercombData {
     constructor(injector: Injector) {
         super(injector)
     }

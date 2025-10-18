@@ -1,6 +1,6 @@
 import { inject, signal } from '@angular/core'
 import { Cell } from 'src/app/cells/cell'
-import { ServiceBase } from 'src/app/core/mixins/abstraction/service-base'
+import { Hypercomb } from 'src/app/core/mixins/abstraction/hypercomb.base'
 import { CELL_CREATOR } from 'src/app/inversion-of-control/tokens/tile-factory.token'
 import { CELL_REPOSITORY } from 'src/app/shared/tokens/i-cell-repository.token'
 import { COMB_STORE, STAGING_ST } from 'src/app/shared/tokens/i-comb-store.token'
@@ -10,7 +10,7 @@ import { HIVE_STORE } from 'src/app/shared/tokens/i-hive-store.token'
  * base class for coordinating repository → staging → combstore flow
  * simplified for single-hive repositories
  */
-export abstract class DataOrchestratorBase extends ServiceBase {
+export abstract class DataOrchestratorBase extends Hypercomb {
   protected readonly staging = inject(STAGING_ST)
   protected readonly comb = {
     factory: inject(CELL_CREATOR),

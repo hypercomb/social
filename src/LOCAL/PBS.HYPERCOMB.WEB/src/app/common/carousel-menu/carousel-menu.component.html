@@ -1,37 +1,41 @@
 <div class="carousel-container">
-  @if(isVisibile()) {
+  <ng-container *ngIf="isVisible()">
     <div class="carousel-menu">
-    <div class="top">
-      @for (hive of upper; track hive.name) {
+      <div class="top">
+        <ng-container *ngFor="let hive of upper; trackBy: trackByName">
+          <div
+            [hive]="hive"
+            (click)="changeHiveByName(hive.name)"
+            app-carousel-item
+            (change-hive)="jumpTo($event)"
+            class="small-tile"
+            [attr.data-hive]="hive.name"
+          ></div>
+        </ng-container>
+      </div>
+
+      <div class="middle">
         <div
-          [hive]="hive"
-          (click)="changeHiveByName(hive.name)"
+          [hive]="current()"
           app-carousel-item
           (change-hive)="jumpTo($event)"
-          class="small-tile"
+          class="middle-tile"
+          [attr.data-hive]="middleTile ? middleTile.name : ''"
         ></div>
-      }
-    </div>
+      </div>
 
-    <div class="middle">
-      <div
-        [hive]="current()"
-        app-carousel-item
-        (change-hive)="jumpTo($event)"
-        class="middle-tile"
-      ></div>
+      <div class="bottom">
+        <ng-container *ngFor="let hive of lower; trackBy: trackByName">
+          <div
+            [hive]="hive"
+            (click)="changeHiveByName(hive.name)"
+            app-carousel-item
+            (change-hive)="jumpTo($event)"
+            class="small-tile"
+            [attr.data-hive]="hive.name"
+          ></div>
+        </ng-container>
+      </div>
     </div>
-
-    <div class="bottom">
-      @for (hive of lower; track hive.name) {
-        <div
-          [hive]="hive"
-          (click)="changeHiveByName(hive.name)"
-          app-carousel-item
-          (change-hive)="jumpTo($event)"
-          class="small-tile"></div>
-      }
-    </div>
-  </div>
-  }
+  </ng-container>
 </div>

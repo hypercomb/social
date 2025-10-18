@@ -1,6 +1,6 @@
 ﻿import { Injectable, signal, computed, Signal, WritableSignal } from "@angular/core"
 import { Point } from "pixi.js"
-import { ServiceBase } from "src/app/core/mixins/abstraction/service-base"
+import { Hypercomb } from "src/app/core/mixins/abstraction/hypercomb.base"
 import { StateDebugRegistry } from "src/app/unsorted/utility/debug-registry"
 import { Cell } from "../cell"
 import { Tile } from "../models/tile"
@@ -13,7 +13,7 @@ import { ICombStore, IStaging } from "src/app/shared/tokens/i-comb-store.token"
  * manages one hive’s cells, tiles, and runtime staging
  */
 @Injectable() // provided in CombModule
-export class CombStore extends ServiceBase implements ICombStore, IStaging {
+export class CombStore extends Hypercomb implements ICombStore, IStaging {
   // registries
   private readonly tileRegistry = new Map<number, Tile>()
   private readonly dataRegistry = new Map<number, Cell>()
@@ -48,7 +48,6 @@ export class CombStore extends ServiceBase implements ICombStore, IStaging {
     return this._cells().filter(c => c.sourceId === parentCellId)
   }
 
-
   // -----------------------------------------------------------
   // flush queues for scheduler
   // -----------------------------------------------------------
@@ -70,6 +69,8 @@ export class CombStore extends ServiceBase implements ICombStore, IStaging {
     if (current.length > 0) {
       this.cold.update(list => [...list, ...current])
     }
+    this.dataRegistry.clear()
+    this.tileRegistry.clear()
   }
 
   // -----------------------------------------------------------
@@ -157,9 +158,6 @@ export class CombStore extends ServiceBase implements ICombStore, IStaging {
   }
 
   public stageCells(cells: Cell[]): void {
-    if (cells.find(c => c.name == 'revolucion')) {
-      console.log('staging revolucion')
-    }
     this._cells.set(cells)
     this.bumpFlushSeq()
   }

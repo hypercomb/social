@@ -1,6 +1,6 @@
 ﻿import { Component, ElementRef, HostListener, ViewChild, computed, signal, effect, inject } from '@angular/core'
 import { DomSanitizer } from '@angular/platform-browser'
-import { ServiceBase } from 'src/app/core/mixins/abstraction/service-base'
+import { Hypercomb } from 'src/app/core/mixins/abstraction/hypercomb.base'
 import { HypercombMode } from 'src/app/core/models/enumerations'
 import { Events } from 'src/app/helper/events/events'
 import { GoogleState } from 'src/app/state/feature/google-state'
@@ -11,7 +11,7 @@ import { GoogleState } from 'src/app/state/feature/google-state'
   templateUrl: './google-docs-viewer.component.html',
   styleUrls: ['./google-docs-viewer.component.scss']
 })
-export class GoogleDocsViewerComponent extends ServiceBase {
+export class GoogleDocsViewerComponent extends Hypercomb {
   @ViewChild('doc', { static: false }) doc!: ElementRef<HTMLIFrameElement>
 private googleState = inject( GoogleState)
 

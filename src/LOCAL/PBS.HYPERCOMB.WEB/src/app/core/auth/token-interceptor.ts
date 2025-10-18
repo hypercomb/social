@@ -3,10 +3,10 @@ import { Injectable, inject } from "@angular/core"
 import { OidcSecurityService } from "angular-auth-oidc-client"
 import { Observable, switchMap } from "rxjs"
 import { Constants } from "src/app/unsorted/constants"
-import { ServiceBase } from "../mixins/abstraction/service-base"
+import { Hypercomb } from "../mixins/abstraction/hypercomb.base"
 
 @Injectable()
-export class OidcTokenInterceptor extends ServiceBase implements HttpInterceptor {
+export class OidcTokenInterceptor extends Hypercomb implements HttpInterceptor {
     private secureEndpoints: string[] = [Constants.jsonAiQuery, Constants.imageGeneration, Constants.publishQuery, Constants.storeImage, Constants.validateQuery]
     private oidcSecurityService = inject(OidcSecurityService)
 

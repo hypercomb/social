@@ -1,6 +1,6 @@
 ﻿// import { hiveId } from 'src/app/tile/models/tile-filters';
 // import { Injectable, inject, computed } from "@angular/core"
-// import { DataServiceBase } from "src/app/database/data-service-base"
+// import { HypercombData } from "src/app/database/data-service-base"
 // import { HypercombMode, CellOptions } from "src/app/models/enumerations"
 // import { Cell } from "src/app/models/tile-data"
 // import { ClipboardState } from "src/app/clipboard/clipboard-state"
@@ -17,7 +17,7 @@
 // import { ClipboardRepository } from "src/app/clipboard/clipboard-database"
 
 // @Injectable({ providedIn: 'root' })
-// export class ClipboardService extends WithWorkspaceMixin(DataServiceBase) {
+// export class ClipboardService extends WithWorkspaceMixin(HypercombData) {
 //   private readonly db = inject(ClipboardRepository)
 
 //   // state + utilities

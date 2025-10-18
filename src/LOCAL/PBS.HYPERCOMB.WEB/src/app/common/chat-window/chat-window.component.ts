@@ -3,7 +3,7 @@ import { AfterViewInit, Component, effect, ElementRef, inject, OnDestroy, OnInit
 import { FormsModule } from '@angular/forms'
 import { environment } from 'src/environments/environment'
 import { HypercombMode } from '../../core/models/enumerations'
-import { DataServiceBase } from 'src/app/actions/service-base-classes'
+import { HypercombData } from 'src/app/actions/hypercomb-data'
 // import { AiService } from 'src/app/ai/ai-service'
 import { COMB_SERVICE } from 'src/app/shared/tokens/i-comb-service.token'
 
@@ -19,7 +19,7 @@ interface ChatMessage {
   templateUrl: './chat-window.component.html',
   styleUrls: ['./chat-window.component.scss']
 })
-export class ChatWindowComponent extends DataServiceBase implements OnInit, OnDestroy, AfterViewInit {
+export class ChatWindowComponent extends HypercombData implements OnInit, OnDestroy, AfterViewInit {
 
 
   @ViewChild('chatwindow', { static: true }) chatwindowRef!: ElementRef<HTMLDivElement>

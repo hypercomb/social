@@ -13,10 +13,11 @@ import { TileImageComponent } from './tile-image/tile-image.component'
 import { EditorService } from 'src/app/state/interactivity/editor-service'
 import { HexagonEditManager } from 'src/app/unsorted/hexagons/hexagon-edit-manager'
 import { ImageCaptureService } from 'src/app/unsorted/image-services/image-capture-service'
-import { cacheId, isHive, isNewHive } from 'src/app/cells/models/cell-filters'
+import { isHive, isNewHive } from 'src/app/cells/models/cell-filters'
+import { HypercombState } from 'src/app/state/core/hypercomb-state'
 import { Cell, EditCell } from 'src/app/cells/cell'
 import { Events } from 'src/app/helper/events/events'
-import { ServiceBase } from 'src/app/core/mixins/abstraction/service-base'
+import { Hypercomb } from 'src/app/core/mixins/abstraction/hypercomb.base'
 import { CellFactory } from 'src/app/inversion-of-control/factory/cell-factory'
 import { HIVE_HYDRATION, MODIFY_COMB_SVC } from 'src/app/shared/tokens/i-comb-service.token'
 import { ImagePersistenceService } from './tile-image/image-persistence-service'
@@ -40,23 +41,20 @@ import { PointerState } from 'src/app/state/input/pointer-state'
     TileImageComponent
   ]
 })
-export class TileEditorComponent extends ServiceBase {
+export class TileEditorComponent extends Hypercomb {
   @ViewChild('name') name!: ElementRef<HTMLInputElement>
 
   // ─────────────────────────────────────────────
   // dependencies
   // ─────────────────────────────────────────────
   private readonly captureService = inject(ImageCaptureService)
-  
   private readonly factory = inject(CellFactory)
-  private readonly hydration = inject(HIVE_HYDRATION)
   private readonly modify = inject(MODIFY_COMB_SVC)
-
   public readonly es = inject(EditorService)
   public readonly persistence = inject(ImagePersistenceService)
   private readonly manager = inject(HexagonEditManager)
-
   private readonly ps = inject(PointerState)
+
   // ─────────────────────────────────────────────
   // local state
   // ─────────────────────────────────────────────
@@ -117,7 +115,6 @@ export class TileEditorComponent extends ServiceBase {
 
   constructor() {
     super()
-    this.hydration.invalidate()
 
     effect(() => {
       const ctx = this.es.context()
@@ -182,8 +179,8 @@ export class TileEditorComponent extends ServiceBase {
   // ─────────────────────────────────────────────
 
   public save = async (event: any): Promise<void> => {
-    const cell = this.editCell!
-    await Assets.unload(cacheId(cell))
+  const cell = this.editCell!
+  await Assets.unload(this.state.cacheId(cell))
 
     // capture and persist the working (small) snapshot
     if (!cell.image || cell.imageDirty) {
@@ -196,7 +193,7 @@ export class TileEditorComponent extends ServiceBase {
       await this.persistence.saveLargeIfChanged(cell, cell.largeImage)
     }
 
-    await Assets.unload(cacheId(cell))
+  await Assets.unload(this.state.cacheId(cell))
     await this.modify.updateCell(cell)
 
     // optional: handle navigation after save

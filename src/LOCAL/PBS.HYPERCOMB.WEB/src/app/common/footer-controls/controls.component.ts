@@ -4,7 +4,7 @@ import { ZoomService } from '../../pixi/zoom-service'
 import { PasteClipboardButtonComponent } from './paste-clipboard-button/paste-clipboard-button.component'
 import { Component, OnInit, inject } from '@angular/core'
 import { HypercombMode } from 'src/app/core/models/enumerations'
-import { ServiceBase } from 'src/app/core/mixins/abstraction/service-base'
+import { Hypercomb } from 'src/app/core/mixins/abstraction/hypercomb.base'
 import { EditorService } from 'src/app/state/interactivity/editor-service'
 import { Constants } from 'src/app/unsorted/constants'
 import { TouchDetectionService } from 'src/app/unsorted/mobile/touch-detection-service'
@@ -27,7 +27,7 @@ import { ACTION_REGISTRY } from 'src/app/shared/tokens/i-hypercomb.token'
   templateUrl: './controls.component.html',
   styleUrls: ['./controls.component.scss']
 })
-export class ControlsComponent extends ServiceBase implements OnInit {
+export class ControlsComponent extends Hypercomb implements OnInit {
   private readonly registry = inject(ACTION_REGISTRY)
   public clipboard = { 
     hasItems: () => false,

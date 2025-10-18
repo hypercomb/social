@@ -47,36 +47,50 @@ export class CombService extends DataOrchestratorBase implements ICellService, I
     // enqueue hive cells after hydration (once per comb)
     effect(() => {
       if (!this.ready()) return
+
       const top = this.stack.top()
-      if (!top?.cell || this.lastHive === top.cell.cellId) return
+      if (!top?.cell) return
 
-      const cell = top.cell
-      this.lastHive = cell.cellId
+      const parent = top.cell
 
-      // skip if already hydrated
-      if (this.hydratedEnqueued.has(cell.cellId)) return
+      // prevent duplicate hydration
+      if (this.hydratedEnqueued.has(parent.cellId)) return
+      if (this.lastHive === parent.cellId) return
 
-      // get any already-loaded children
-      const children = this.comb.store.cells().filter(c => c.sourceId === cell.cellId)
+      this.lastHive = parent.cellId
 
-      // lazy hydrate if not loaded yet
-      if (!children.length) {
-        ; (async () => {
-          const rows = await this.repository.fetchBySourceId(cell.cellId)
-          const mapped = await Promise.all(rows.map(r => this.query.decorateWithImage(<Cell>toCell(r))))
+      // find any children already in memory
+      const existing = this.comb.store.cells().filter(c => c.sourceId === parent.cellId)
 
-          if (mapped.length) {
-            this.staging.stageMerge(mapped)
-            this.comb.store.enqueueHot(mapped as Cell[])
-          }
-          this.hydratedEnqueued.add(cell.cellId)
-        })()
+      if (existing.length) {
+        this.comb.store.enqueueHot(existing)
+        this.hydratedEnqueued.add(parent.cellId)
         return
       }
 
-      // already have children in memory
-      this.comb.store.enqueueHot(children)
-      this.hydratedEnqueued.add(cell.cellId)
+      // lazy load and hydrate once
+      ;(async () => {
+        try {
+          const rows = await this.repository.fetchBySourceId(parent.cellId)
+          if (!rows?.length) {
+            this.hydratedEnqueued.add(parent.cellId)
+            return
+          }
+
+          const decorated = await Promise.all(
+            rows.map(r => this.query.decorateWithImage(<Cell>toCell(r)))
+          )
+
+          if (decorated.length) {
+            this.staging.stageMerge(decorated)
+            this.comb.store.enqueueHot(decorated as Cell[])
+          }
+
+          this.hydratedEnqueued.add(parent.cellId)
+        } catch (err) {
+          console.warn(`[CombService] failed to hydrate hive ${parent.cellId}:`, err)
+        }
+      })()
     })
 
     // cleanup navigation state on pointer up
@@ -115,17 +129,15 @@ export class CombService extends DataOrchestratorBase implements ICellService, I
     newCell.image = image
     newCell.setKind(kind)
     this.ensureValidKind(newCell)
-    //const result = await this.addCell(newCell, image)
-    return <Cell>{} /// result
+    return <Cell>{}
   }
 
   public async addCell(newcell: NewCell | Ghost, image: IHiveImage): Promise<Cell> {
-
     this.ensureValidKind(newcell)
     const entity = toCellEntity(newcell)
-    const cell = newcell.kind === 'Ghost' ?
-      (newcell as unknown as Cell) :
-      <Cell>toCell(await this.repository.add(entity, image))
+    const cell = newcell.kind === 'Ghost'
+      ? (newcell as unknown as Cell)
+      : <Cell>toCell(await this.repository.add(entity, image))
 
     this.staging.stageAdd(cell)
     this._lastCreated.set(cell)
@@ -156,7 +168,6 @@ export class CombService extends DataOrchestratorBase implements ICellService, I
   public async removeCell(cell: Cell) {
     cell.options.update(o => o | CellOptions.Deleted)
     cell.dateDeleted = safeDate(new Date()) || ''
-
     const ghost = cell.kind === 'Ghost'
 
     if (!ghost) {

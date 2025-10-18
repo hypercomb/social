@@ -6,10 +6,10 @@ import { ILinkResolver } from './i-navigation-interfaces'
 import { YouTubeLinkResolver } from './youtube-link-resolver'
 import { Cell } from '../cells/cell'
 import { COMB_STORE } from '../shared/tokens/i-comb-store.token'
-import { ServiceBase } from '../core/mixins/abstraction/service-base'
+import { Hypercomb } from '../core/mixins/abstraction/hypercomb.base'
 
 @Injectable({ providedIn: 'root' })
-export class LinkNavigationService extends ServiceBase {
+export class LinkNavigationService extends Hypercomb {
     private readonly store = inject(COMB_STORE)
     private readonly es = inject(EditorService)
     private _cancelled = false

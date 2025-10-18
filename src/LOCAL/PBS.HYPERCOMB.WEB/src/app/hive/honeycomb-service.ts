@@ -2,13 +2,13 @@
 import { Router } from "@angular/router"
 import { HexagonEditManager } from "../unsorted/hexagons/hexagon-edit-manager"
 import { LocatorService } from "../unsorted/utility/locator-service"
-import { DataServiceBase } from "../actions/service-base-classes"
+import { HypercombData } from "../actions/hypercomb-data"
 import { Cell } from "../cells/cell"
 import { HIVE_STATE } from "../shared/tokens/i-hive-store.token"
 import { Tile } from "../cells/models/tile"
 
 @Injectable({ providedIn: "root" })
-export class HoneycombService extends DataServiceBase {
+export class HoneycombService extends HypercombData {
     private readonly locator = inject(LocatorService)
     private readonly router = inject(Router)
     private readonly store = inject(HIVE_STATE)

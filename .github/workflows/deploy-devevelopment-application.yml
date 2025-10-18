@@ -2,12 +2,10 @@ name: Azure Static Web Apps CI/CD (Development)
 
 on:
   push:
-    branches:
-      - development
+    branches: [development]
   pull_request:
     types: [opened, synchronize, reopened, closed]
-    branches:
-      - development
+    branches: [development]
 
 jobs:
   build_and_deploy_job:
@@ -16,45 +14,46 @@ jobs:
     name: Build and Deploy Job
 
     steps:
-      # 1️⃣ Checkout repository
       - uses: actions/checkout@v4
         with:
           submodules: true
           lfs: false
 
-      - name: Debug show working directory and files
+      - name: Debug File System
         run: |
-          echo "Current working directory:"
-          pwd
-          echo ""
-          echo "Listing of current directory:"
-          ls -al
-          echo ""
-          echo "Repo root structure:"
-          ls -al /home/runner/work
-          echo ""
-          echo "Full nested structure (first two levels):"
-          ls -R | head -n 200
+          ls -l src/LOCAL/PBS.HYPERCOMB.WEB/package-lock.json || echo "package-lock.json not found"
+          npm config get cache
 
-      # 2️⃣ Use the correct Node version required by your package.json
-      - name: Set up Node.js
+      - name: Use Node 22.12.0
         uses: actions/setup-node@v4
         with:
-          node-version: 20.19.0
+          node-version: '22.12.0'
           cache: 'npm'
+          cache-dependency-path: '**/package-lock.json' # Use glob for flexibility
 
+      - name: Install dependencies
+        working-directory: src/LOCAL/PBS.HYPERCOMB.WEB
+        run: npm ci
 
-      # 3️⃣ Build & Deploy using Azure Static Web Apps Action
-      - name: Build & Deploy
+      - name: Build (Angular CLI by path)
+        working-directory: src/LOCAL/PBS.HYPERCOMB.WEB
+        run: |
+          if [ ! -f node_modules/@angular/cli/bin/ng ]; then
+            npm i -D @angular/cli@20.3.3
+          fi
+          node node_modules/@angular/cli/bin/ng build --configuration production
+
+      - name: Verify build output
+        run: ls -al src/LOCAL/PBS.HYPERCOMB.WEB/dist || true
+
+      - name: Upload to Azure Static Web Apps
         uses: Azure/static-web-apps-deploy@v1
         with:
           azure_static_web_apps_api_token: ${{ secrets.STATIC_WEBSITE_DEVELOPMENT_DEPLOYMENT_TOKEN }}
-          repo_token: ${{ secrets.GITHUB_TOKEN }} # enables PR comments/status updates
           action: upload
-          app_location: src/LOCAL/PBS.HYPERCOMB.WEB      # Angular source folder
-          api_location: ""                               # no API
-          output_location: dist/PBS-Hypercomb-Web        # matches angular.json outputPath
-          app_build_command: npm ci && npm run build     # explicit build step
+          skip_app_build: true
+          app_location: src/LOCAL/PBS.HYPERCOMB.WEB/dist/PBS-Hypercomb-Web
+          api_location: ""
 
   close_pull_request_job:
     if: github.event_name == 'pull_request' && github.event.action == 'closed'
@@ -66,3 +65,4 @@ jobs:
         with:
           azure_static_web_apps_api_token: ${{ secrets.STATIC_WEBSITE_DEVELOPMENT_DEPLOYMENT_TOKEN }}
           action: close
+          app_location: src/LOCAL/PBS.HYPERCOMB.WEB/dist/PBS-Hypercomb-Web

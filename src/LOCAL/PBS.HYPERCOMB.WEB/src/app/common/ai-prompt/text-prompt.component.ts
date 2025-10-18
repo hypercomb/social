@@ -6,7 +6,7 @@
   templateUrl: './text-prompt.component.html',
   styleUrls: ['./text-prompt.component.scss']
 })
-export class TextPromptComponent extends ServiceBase implements AfterViewInit {
+export class TextPromptComponent extends Hypercomb implements AfterViewInit {
 
   @Input() buttonName: string = 'Submit'
   @Input() placeholder: string = 'Enter text here...'

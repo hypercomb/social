@@ -6,11 +6,11 @@ import { IHiveGuide } from './i-hive-resolver'
 import { HiveScout } from '../hive-scout'
 import { HIVE_HYDRATION } from 'src/app/shared/tokens/i-comb-service.token'
 import { IDexieHive } from '../hive-models'
-import { ServiceBase } from 'src/app/core/mixins/abstraction/service-base'
+import { Hypercomb } from 'src/app/core/mixins/abstraction/hypercomb.base'
 import { CarouselService } from 'src/app/common/carousel-menu/carousel-service'
 
 @Injectable({ providedIn: 'root' })
-export class HiveLoader extends ServiceBase {
+export class HiveLoader extends Hypercomb {
 
   private readonly controller = inject(HIVE_CONTROLLER_ST)
   private readonly resolvers = inject<IHiveGuide[]>(HIVE_NAME_RESOLVERS) ?? []

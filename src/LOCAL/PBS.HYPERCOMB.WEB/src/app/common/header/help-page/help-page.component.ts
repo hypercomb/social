@@ -1,5 +1,5 @@
 ﻿import { Component } from '@angular/core'
-import { ServiceBase } from 'src/app/core/mixins/abstraction/service-base'
+import { Hypercomb } from 'src/app/core/mixins/abstraction/hypercomb.base'
 import { Events } from 'src/app/helper/events/events'
 
 @Component({
@@ -8,7 +8,7 @@ import { Events } from 'src/app/helper/events/events'
   templateUrl: './help-page.component.html',
   styleUrls: ['./help-page.component.scss']
 })
-export class HelpPageComponent extends ServiceBase {
+export class HelpPageComponent extends Hypercomb {
   constructor() {
     super()
 

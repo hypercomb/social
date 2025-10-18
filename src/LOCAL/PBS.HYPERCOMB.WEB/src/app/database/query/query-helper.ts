@@ -2,7 +2,7 @@
 import { Injectable, inject } from "@angular/core"
 import { DatabaseService } from "../database-service"
 import { takeFlagMasksFromWhere, toMask } from "./tile-persistence-filters"
-import { ServiceBase } from "src/app/core/mixins/abstraction/service-base"
+import { Hypercomb } from "src/app/core/mixins/abstraction/hypercomb.base"
 import { IQueryHelper } from "src/app/shared/tokens/i-cell-repository.token"
 import { CellEntity } from "../model/i-tile-entity"
 
@@ -23,7 +23,7 @@ export interface TileQueryOptions {
 
 
 @Injectable({ providedIn: "root" })
-export class QueryHelper extends ServiceBase implements IQueryHelper {
+export class QueryHelper extends Hypercomb implements IQueryHelper {
     private readonly database = inject(DatabaseService)
 
     // normalize ergonomic args into a single where clause

@@ -1,6 +1,6 @@
 ﻿import { Component, HostListener, inject } from '@angular/core'
 import { HypercombMode } from 'src/app/core/models/enumerations'
-import { ServiceBase } from 'src/app/core/mixins/abstraction/service-base'
+import { Hypercomb } from 'src/app/core/mixins/abstraction/hypercomb.base'
 import { IShortcut } from 'src/app/shortcuts/shortcut-model'
 import { ShortcutService } from 'src/app/shortcuts/shortcut-service'
 import { Events } from 'src/app/helper/events/events'
@@ -12,7 +12,7 @@ import { Events } from 'src/app/helper/events/events'
   templateUrl: './shortcuts-page.component.html',
   styleUrls: ['./shortcuts-page.component.scss']
 })
-export class ShortcutsPageComponent extends ServiceBase {
+export class ShortcutsPageComponent extends Hypercomb {
   private readonly shortcuts = inject(ShortcutService)
 
   public navigationShortcuts: IShortcut[]

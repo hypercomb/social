@@ -1,6 +1,6 @@
 ﻿import { AfterViewInit, Component, inject } from '@angular/core'
 import { YouTubePlayerModule } from '@angular/youtube-player'
-import { ServiceBase } from 'src/app/core/mixins/abstraction/service-base'
+import { Hypercomb } from 'src/app/core/mixins/abstraction/hypercomb.base'
 import { YoutubeService } from 'src/app/navigation/youtube-service'
 import { ScreenService } from 'src/app/unsorted/utility/screen-service'
 
@@ -10,7 +10,7 @@ import { ScreenService } from 'src/app/unsorted/utility/screen-service'
   templateUrl: './youtube-viewer.component.html',
   styleUrl: './youtube-viewer.component.scss'
 })
-export class YoutubeViewerComponent extends ServiceBase implements AfterViewInit {
+export class YoutubeViewerComponent extends Hypercomb implements AfterViewInit {
   private readonly youtubeService = inject(YoutubeService)
   private readonly screen = inject(ScreenService)
 

@@ -2,13 +2,13 @@
 import { Cell } from "../cells/cell"
 import { CellFactory } from "../inversion-of-control/factory/cell-factory"
 import { AxialService } from "../unsorted/utility/axial-service"
-import { DataServiceBase } from "../actions/service-base-classes"
+import { HypercombData } from "../actions/hypercomb-data"
 import { HoneycombService } from "../hive/honeycomb-service"
 
 @Injectable({
     providedIn: 'root'
 })
-export class JsonHierarchyImporter extends DataServiceBase {
+export class JsonHierarchyImporter extends HypercombData {
 
     private readonly axial = inject(AxialService)
 

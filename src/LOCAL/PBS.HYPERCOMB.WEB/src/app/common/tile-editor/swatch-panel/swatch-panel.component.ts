@@ -1,5 +1,5 @@
 ﻿import { AfterViewInit, Component, ElementRef, OnDestroy, ViewChild, effect, inject, signal } from '@angular/core'
-import { ServiceBase } from 'src/app/core/mixins/abstraction/service-base'
+import { Hypercomb } from 'src/app/core/mixins/abstraction/hypercomb.base'
 import { PointerState } from 'src/app/state/input/pointer-state'
 import { EditorService } from 'src/app/state/interactivity/editor-service'
 import { fromEvent, Subscription } from 'rxjs'
@@ -10,7 +10,7 @@ import { fromEvent, Subscription } from 'rxjs'
   templateUrl: './swatch-panel.component.html',
   styleUrls: ['./swatch-panel.component.scss']
 })
-export class SwatchPanelComponent extends ServiceBase implements AfterViewInit, OnDestroy {
+export class SwatchPanelComponent extends Hypercomb implements AfterViewInit, OnDestroy {
   @ViewChild('colorPalette', { static: true }) colorPalette!: ElementRef<HTMLImageElement>
   @ViewChild('canvas', { static: true }) canvas!: ElementRef<HTMLCanvasElement>
 

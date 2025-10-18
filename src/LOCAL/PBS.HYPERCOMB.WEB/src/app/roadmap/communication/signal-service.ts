@@ -1,11 +1,11 @@
 ﻿// import { Injectable } from "@angular/core"
-// import { ServiceBase } from "src/app/services/abstraction/service-base"
+// import { Hypercomb } from "src/app/services/abstraction/service-base"
 // import { Constants } from "src/app/unsorted/constants"
 
 // @Injectable({
 //   providedIn: 'root'
 // })
-// export class SignalRService extends ServiceBase {
+// export class SignalRService extends Hypercomb {
 //   private hubConnection!: HubConnection
 
 //   public startConnection() {

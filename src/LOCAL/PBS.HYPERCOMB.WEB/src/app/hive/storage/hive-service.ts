@@ -1,12 +1,12 @@
 ﻿// src/app/hives/hive-service.ts
 import { Injectable, inject } from "@angular/core"
-import { DataServiceBase } from "src/app/actions/service-base-classes"
+import { HypercombData } from "src/app/actions/hypercomb-data"
 import { HIVE_CONTROLLER_ST } from "src/app/shared/tokens/i-hive-store.token"
 import { IDexieHive } from "../hive-models"
 import { OpfsHiveService } from "./opfs-hive-service"
 
 @Injectable({ providedIn: "root" })
-export class HiveService extends DataServiceBase {
+export class HiveService extends HypercombData {
   private readonly opfs = inject(OpfsHiveService)
   private readonly controller = inject(HIVE_CONTROLLER_ST)
 

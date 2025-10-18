@@ -56,7 +56,11 @@ export class DatabaseImportService {
 
   public async importByName(fileName: string): Promise<void> {
     const hive = await this.opfs.loadHive(fileName)
-    await this.importDirect(hive?.file!)
+    if (!hive || !hive.file) {
+      this.debug.log('import', `⚠️ OPFS hive not found: ${fileName}, skipping importByName`)
+      return
+    }
+    await this.importDirect(hive.file)
   }
   /**
    * Import a database JSON blob directly using Dexie-export-import.

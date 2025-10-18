@@ -1,13 +1,13 @@
 ﻿// import { Injectable, inject } from "@angular/core"
 // import AWN, { AwnOptions } from 'awesome-notifications'
 // import { HypercombMode } from "src/app/core/models/enumerations"
-// import { ServiceMixin } from "src/app/core/mixins/abstraction/service-base"
+// import { HypercombMixin } from "src/app/core/mixins/abstraction/service-base"
 // import { HypercombState } from "src/app/state/core/hypercomb-state"
 
 // @Injectable({
 //     providedIn: 'root'
 // })
-// export class NotificationService extends ServiceMixin(AWN) {
+// export class NotificationService extends HypercombMixin(AWN) {
 
 //     constructor() {
 //         super({ durations: { info: 0, success: 0, warning: 0 } })

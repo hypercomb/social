@@ -15,12 +15,6 @@ export type CacheKeyOptions = {
     version?: number | string
     styleKey?: string
 }
-
-export function cacheId(cell: Cell): string {
-    const base = (cell as any).cellId ?? (cell as any).id ?? 'unknown'
-    return String(base)
-}
-
 export function cacheKey(cell: Cell, opts: CacheKeyOptions = {}): string {
     const id = cacheId(cell)
     const version = opts.version ?? (cell as any).updatedAt ?? (cell as any).version ?? 0

@@ -5,7 +5,7 @@ import { environment } from 'src/environments/environment'
 import { FocusWatcherDirective } from '../focus-watcher'
 import { IconMenuComponent } from '../icon-menu/icon-menu.component'
 import { SearchFilterService } from './search-filter-service'
-import { DataServiceBase } from 'src/app/actions/service-base-classes'
+import { HypercombData } from 'src/app/actions/hypercomb-data'
 import { HypercombMode, POLICY } from 'src/app/core/models/enumerations'
 import { CoordinateDetector } from 'src/app/helper/detection/coordinate-detector'
 import { LinkNavigationService } from 'src/app/navigation/link-navigation-service'
@@ -23,7 +23,7 @@ import { COMB_STORE } from 'src/app/shared/tokens/i-comb-store.token'
   styleUrls: ['./header-bar.component.scss'],
   imports: [IconMenuComponent, FocusWatcherDirective, FormsModule],
 })
-export class HeaderBarComponent extends DataServiceBase {
+export class HeaderBarComponent extends HypercombData {
   private readonly es = inject(EditorService)
   private readonly manager = inject(HexagonEditManager)
   private readonly navigation = inject(LinkNavigationService)

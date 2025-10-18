@@ -2,13 +2,13 @@
 import * as download from 'downloadjs'
 import JSZip from 'jszip'
 import { DataExporter } from './data-exporter'
-import { DataServiceBase } from 'src/app/actions/service-base-classes'
+import { HypercombData } from 'src/app/actions/hypercomb-data'
 
 
 @Injectable({
   providedIn: 'root'
 })
-export class BackupService extends DataServiceBase {
+export class BackupService extends HypercombData {
   private readonly dataExporter = inject(DataExporter)
 
   public backup = async (name: string) => {

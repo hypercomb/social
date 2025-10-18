@@ -1,5 +1,6 @@
 ﻿import { Injectable, Signal, computed, inject, signal } from "@angular/core"
 import { single } from "rxjs"
+import { Cell } from "src/app/cells/cell"
 // import { AuthState } from "src/app/auth/auth-state"
 import { HypercombMode } from "src/app/core/models/enumerations"
 import { HiveScout } from "src/app/hive/hive-scout"
@@ -8,6 +9,13 @@ import { ContextStack } from "src/app/unsorted/controller/context-stack"
 
 @Injectable({ providedIn: 'root' })
 export class HypercombState {
+  private _batchCompleteSeq = signal(0)
+  public readonly batchCompleteSeq = this._batchCompleteSeq.asReadonly()
+
+  public setBatchComplete(): void {
+    // bump value to always change, triggering dependent effects
+    this._batchCompleteSeq.update(v => v + 1)
+  }
 
   private readonly stack = inject(ContextStack)
   public awake = false
@@ -170,11 +178,11 @@ export class HypercombState {
     this._lastResetMode.set(next)
     this._lastChangedMode.set(next)
   }
-  
+
   public cancelOperation() {
     this._cancelled.set(true)
   }
-  
+
   public setMode(mode: HypercombMode) {
     const prev = this._mode()
     const next = prev | mode
@@ -195,6 +203,12 @@ export class HypercombState {
 
   public toggleToolMode(mode: HypercombMode) {
     this.hasMode(mode) ? this.removeMode(mode) : this.setToolMode(mode)
+  }
+
+
+
+  public cacheId(cell: Cell): string {
+    return `${this.scout.name}-${cell.cellId}`
   }
 }
 

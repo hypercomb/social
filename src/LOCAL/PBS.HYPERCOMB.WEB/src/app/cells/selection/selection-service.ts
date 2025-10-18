@@ -3,7 +3,8 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop'
 import { fromEvent } from 'rxjs'
 import { CellOptions } from 'src/app/core/models/enumerations'
 import { Cell } from '../cell'
-import { cacheId, isSelected } from '../models/cell-filters'
+import { isSelected } from '../models/cell-filters'
+import { HypercombState } from 'src/app/state/core/hypercomb-state'
 import { COMB_STORE } from 'src/app/shared/tokens/i-comb-store.token'
 import { PixiServiceBase } from 'src/app/pixi/pixi-service-base'
 import { Assets } from 'pixi.js'
@@ -16,6 +17,7 @@ export class SelectionService extends PixiServiceBase implements ISelections {
   private readonly destroyRef = inject(DestroyRef)
   private readonly factory = inject(TILE_FACTORY)
   private readonly store = inject(COMB_STORE)
+  private readonly hs = inject(HypercombState)
 
   // override lets clipboard mode (or other tools) bypass Ctrl requirement
   private readonly override = signal(false)
@@ -136,8 +138,8 @@ export class SelectionService extends PixiServiceBase implements ISelections {
   private async invalidate(cell: Cell) {
     // remove old cache + force Pixi redraw
     let tile = this.store.lookupTile(cell.cellId)
-    const key = cacheId(cell)
-    Assets.cache.remove(key)
+  const key = this.hs.cacheId(cell)
+  Assets.cache.remove(key)
 
     tile?.invalidate()
     tile = await this.factory.create(cell)

@@ -18,9 +18,10 @@ import { COMB_STORE, STAGING_ST } from 'src/app/shared/tokens/i-comb-store.token
 import { EditorService } from 'src/app/state/interactivity/editor-service'
 import { CELL_CREATOR, CELL_FACTORY } from 'src/app/inversion-of-control/tokens/tile-factory.token'
 import { CombImageFactory } from 'src/app/common/tile-editor/tile-image/cell-image-factory'
+import { QUERY_COMB_SVC } from 'src/app/shared/tokens/i-comb-query.token'
 
-export function ServiceMixin<TBase extends AbstractCtor>(Base: TBase) {
-    abstract class ServiceMixinClass extends Base {
+export function HypercombMixin<TBase extends AbstractCtor>(Base: TBase) {
+    abstract class HypercombMixinClass extends Base {
         public readonly injector = inject(Injector)
         protected readonly debug = inject(DebugService)
 
@@ -71,31 +72,32 @@ export function ServiceMixin<TBase extends AbstractCtor>(Base: TBase) {
     }
 
     // ðŸ‘‡ cast through unknown so TS doesn't complain about constructor compatibility
-    return ServiceMixinClass as unknown as AbstractCtor<InstanceType<TBase> & ServiceMixinClass>
+    return HypercombMixinClass as unknown as AbstractCtor<InstanceType<TBase> & HypercombMixinClass>
 }
 
 // expose a concrete base so you don't have to re-mixin everywhere
-export abstract class ServiceBase extends ServiceMixin(class { }) { }
+export abstract class Hypercomb extends HypercombMixin(class { }) { }
 
-export abstract class LayoutServiceBase extends ServiceMixin(class { }) {
+export abstract class HypercombLayout extends HypercombMixin(class { }) {
     protected readonly es = inject(EditorService)
     protected readonly ps = inject(PointerState)
     protected readonly detector = inject(CoordinateDetector)
-    protected readonly hive = { 
-        image: { 
+    protected readonly hive = {
+        image: {
             factory: inject(CombImageFactory)
         }
     }
-    protected readonly cell = { 
+    protected readonly cell = {
         creator: inject(CELL_CREATOR),
         factory: inject(CELL_FACTORY)
     }
 
-    protected readonly comb = { 
+    protected readonly comb = {
         modify: inject(MODIFY_COMB_SVC),
-        store: inject(COMB_STORE)
+        store: inject(COMB_STORE),
+        query: inject(QUERY_COMB_SVC)
     }
-    
+
     protected readonly hydration = inject(HIVE_HYDRATION)
     protected readonly staging = inject(STAGING_ST)
 }

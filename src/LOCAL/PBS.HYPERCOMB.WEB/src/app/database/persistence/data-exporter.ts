@@ -1,9 +1,9 @@
 ﻿import { inject, Injectable } from '@angular/core'
-import { DataServiceBase } from 'src/app/actions/service-base-classes'
+import { HypercombData } from 'src/app/actions/hypercomb-data'
 import { QUERY_HIVE_SVC } from 'src/app/shared/tokens/i-comb-query.token';
 
 @Injectable({ providedIn: 'root' })
-export class DataExporter extends DataServiceBase {
+export class DataExporter extends HypercombData {
 
     private readonly query = inject(QUERY_HIVE_SVC)
 

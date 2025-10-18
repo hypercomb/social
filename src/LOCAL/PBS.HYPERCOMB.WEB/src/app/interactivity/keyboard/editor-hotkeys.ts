@@ -2,11 +2,11 @@
 
 import { Injectable, inject } from "@angular/core"
 import { HypercombMode } from "src/app/core/models/enumerations"
-import { ServiceBase } from "src/app/core/mixins/abstraction/service-base"
+import { Hypercomb } from "src/app/core/mixins/abstraction/hypercomb.base"
 import { KeyboardState } from "./keyboard-state"
 
 @Injectable({ providedIn: 'root' })
-export class EditorHotkeys extends ServiceBase {
+export class EditorHotkeys extends Hypercomb {
     private readonly ks = inject(KeyboardState)
     constructor() {
         super()
