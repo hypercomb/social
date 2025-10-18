@@ -55,8 +55,9 @@ export class CombService extends DataOrchestratorBase implements ICellService, I
 
       // rotate render context + invalidate visual registries
       this.lastHive = cell.cellId
-      this.rotateToken()
       this.comb.store.invalidate()
+      this.rotateToken()
+
 
       // check memory first
       const children = this.comb.store.cells().filter(c => c.sourceId === cell.cellId)

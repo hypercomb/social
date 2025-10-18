@@ -69,6 +69,8 @@ export class CombStore extends Hypercomb implements ICombStore, IStaging {
     if (current.length > 0) {
       this.cold.update(list => [...list, ...current])
     }
+    this.dataRegistry.clear()
+    this.tileRegistry.clear()
   }
 
   // -----------------------------------------------------------

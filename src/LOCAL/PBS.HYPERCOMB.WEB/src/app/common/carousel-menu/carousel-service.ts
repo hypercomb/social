@@ -91,10 +91,10 @@ export class CarouselService extends Hypercomb {
     const items = this._items()
     if (items.length <= 1) return
 
+    // Move first item to end
     this._previous.set(items[0])
-    this._items.set([items[items.length - 1], ...items.slice(0, -1)])
-
-    this._changeSeq.update(v => v + 1) // 🔹 trigger stream reload
+    this._items.set([...items.slice(1), items[0]])
+    this._changeSeq.update(v => v + 1)
   }
 
   /** rotate carousel backward (previous hive up) */
@@ -102,10 +102,10 @@ export class CarouselService extends Hypercomb {
     const items = this._items()
     if (items.length <= 1) return
 
+    // Move last item to front
     this._previous.set(items[0])
-    this._items.set([...items.slice(1), items[0]])
-
-    this._changeSeq.update(v => v + 1) // 🔹 trigger stream reload
+    this._items.set([items[items.length - 1], ...items.slice(0, -1)])
+    this._changeSeq.update(v => v + 1)
   }
 
   /** expose ordered list for stream loader */

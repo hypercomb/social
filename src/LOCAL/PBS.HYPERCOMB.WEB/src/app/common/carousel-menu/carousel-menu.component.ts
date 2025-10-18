@@ -36,7 +36,7 @@ export class CarouselMenuComponent extends HypercombData implements OnInit {
   private readonly wheelState = inject(WheelState)
   private readonly carousel = inject(CarouselService)
   private readonly debouncedFilter = debounced(() => this.filter.value(), 300)
-  private readonly textureStream = inject(PassiveTextureStreamer)
+  // private readonly textureStream = inject(PassiveTextureStreamer)
 
   public current = computed(() => this.carousel.current())
   public searchValue = ''
@@ -69,12 +69,12 @@ export class CarouselMenuComponent extends HypercombData implements OnInit {
       initialized = true
 
       // 🐝 preload textures for the first hive
-      console.debug('[CarouselMenu] starting initial passive texture stream')
-      void this.textureStream.streamForCarousel({
-        current: this.current()!,
-        upper: this.carousel.upper(),
-        lower: this.carousel.lower()
-      })
+      // console.debug('[CarouselMenu] starting initial passive texture stream')
+      // void this.textureStream.streamForCarousel({
+      //   current: this.current()!,
+      //   upper: this.carousel.upper(),
+      //   lower: this.carousel.lower()
+      // })
     })
 
     this.initializeWheelControl()
@@ -142,11 +142,11 @@ export class CarouselMenuComponent extends HypercombData implements OnInit {
     this.updateMenu()
 
     // 🐝  DON'T AWAIT - passive preload for current + neighbors
-    void this.textureStream.streamForCarousel({
-      current: this.current()!,
-      upper: this.carousel.upper(),
-      lower: this.carousel.lower()
-    })
+    // void this.textureStream.streamForCarousel({
+    //   current: this.current()!,
+    //   upper: this.carousel.upper(),
+    //   lower: this.carousel.lower()
+    // })
   }
 
 
