@@ -19,7 +19,7 @@ jobs:
           submodules: true
           lfs: false
 
-      # use node 22.12 to satisfy ">=22 <23" engine warnings
+      # node 22 satisfies ">=22 <23" engines
       - name: Use Node 22.12.0
         uses: actions/setup-node@v4
         with:
@@ -27,39 +27,29 @@ jobs:
           cache: 'npm'
           cache-dependency-path: src/LOCAL/PBS.HYPERCOMB.WEB/package-lock.json
 
-      - name: Show Node and NPM
-        run: |
-          node -v
-          npm -v
-
-      # install deps in the app folder
-      - name: Install
+      - name: Install dependencies
         working-directory: src/LOCAL/PBS.HYPERCOMB.WEB
         run: npm ci
 
-      # ensure angular cli exists locally (fixes "npx could not determine executable to run")
-      - name: Ensure Angular CLI
+      # make sure CLI exists; then run it directly (no npx)
+      - name: Build (Angular CLI by path)
         working-directory: src/LOCAL/PBS.HYPERCOMB.WEB
         run: |
-          npm ls @angular/cli || npm i -D @angular/cli@20.3.3
-          npx --yes @angular/cli@20.3.3 ng version
-
-      # build using the local cli bin directly (avoids npx quirks on npm v10)
-      - name: Build
-        working-directory: src/LOCAL/PBS.HYPERCOMB.WEB
-        run: node node_modules/@angular/cli/bin/ng build --configuration production
+          if [ ! -f node_modules/@angular/cli/bin/ng ]; then
+            npm i -D @angular/cli@20.3.3
+          fi
+          node node_modules/@angular/cli/bin/ng build --configuration production
 
       - name: Verify build output
         run: ls -al src/LOCAL/PBS.HYPERCOMB.WEB/dist || true
 
-      # upload the built artifacts only (no Oryx build)
       - name: Upload to Azure Static Web Apps
         uses: Azure/static-web-apps-deploy@v1
         with:
           azure_static_web_apps_api_token: ${{ secrets.STATIC_WEBSITE_DEVELOPMENT_DEPLOYMENT_TOKEN }}
           action: upload
           skip_app_build: true
-          # IMPORTANT: this must match angular.json -> projects.<app>.architect.build.options.outputPath
+          # match angular.json -> options.outputPath exactly (case-sensitive)
           app_location: src/LOCAL/PBS.HYPERCOMB.WEB/dist/PBS-Hypercomb-Web
           api_location: ""
 
@@ -73,3 +63,4 @@ jobs:
         with:
           azure_static_web_apps_api_token: ${{ secrets.STATIC_WEBSITE_DEVELOPMENT_DEPLOYMENT_TOKEN }}
           action: close
+          app_location: src/LOCAL/PBS.HYPERCOMB.WEB/dist/PBS-Hypercomb-Web
