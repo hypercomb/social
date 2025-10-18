@@ -1,8 +1,9 @@
 ﻿
 import { Injectable, Injector, signal } from "@angular/core"
-import { FileDispatchBase } from "src/app/unsorted/external/file-drop-base"
+
 import { CoordinateDetector } from "../detection/coordinate-detector"
 import { IDropDispatcher } from "./i-drop-dispatcher"
+import { FileDispatchBase } from "src/app/unsorted/external/file-drop-base"
 
 @Injectable({ providedIn: 'root' })
 export class FileDropDispatcher extends FileDispatchBase implements IDropDispatcher {

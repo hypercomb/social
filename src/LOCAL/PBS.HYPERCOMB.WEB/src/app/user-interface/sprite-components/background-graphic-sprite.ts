@@ -1,8 +1,8 @@
 ﻿import { Injectable } from '@angular/core'
 import { Graphics } from 'pixi.js'
 import { SpriteBuilder } from './sprite-builder'
-import { StateDebugRegistry } from 'src/app/unsorted/utility/debug-registry'
 import { Cell } from 'src/app/cells/cell'
+import { StateDebugRegistry } from 'src/app/services/debug-registry'
 
 @Injectable({
     providedIn: 'root'

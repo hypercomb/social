@@ -2,8 +2,8 @@
 
 import { inject, DestroyRef, Signal } from "@angular/core"
 import { ActionContext } from "src/app/actions/action-contexts"
-import { ActionRegistry } from "src/app/actions/action-registry"
 import { AbstractCtor } from "src/app/core/mixins/mixin-helpers"
+import { ACTION_REGISTRY } from "src/app/shared/tokens/i-hypercomb.token"
 
 export function CommandMixin<TBase extends AbstractCtor>(Base: TBase) {
     abstract class CommandMixinClass extends Base {

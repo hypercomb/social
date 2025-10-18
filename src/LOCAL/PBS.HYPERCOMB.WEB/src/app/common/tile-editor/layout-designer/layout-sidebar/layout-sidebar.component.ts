@@ -20,7 +20,6 @@ export class LayoutSidebarComponent implements OnInit {
   filteredItems: SvgItem[] = [...this.items]
 
   constructor(
-    private svgFormatter: SvgFormatter,
     private sanitizer: DomSanitizer
   ) { }
 
@@ -36,22 +35,23 @@ export class LayoutSidebarComponent implements OnInit {
   }
 
   async loadAndResizeSVGs() {
-    for (const item of this.items) {
-      try {
-        const response = await fetch(item.svgPath)
-        if (!response.ok) {
-          console.error(`Failed to fetch ${item.svgPath}: ${response.statusText}`)
-          continue
-        }
-        const svgText = await response.text()
-        const resizedSvg = this.svgFormatter.resizeAndCenterSVG(svgText, 100, 100)
-        item.resizedSvg = this.sanitizer.bypassSecurityTrustHtml(resizedSvg)
-      } catch (error) {
-        console.error(`Error processing ${item.svgPath}:`, error)
-        // Skip this item if there's an error
-        continue
-      }
-    }
+    // for (const item of this.items) {
+    //   try {
+    //     const response = await fetch(item.svgPath)
+    //     if (!response.ok) {
+    //       console.error(`Failed to fetch ${item.svgPath}: ${response.statusText}`)
+    //       continue
+    //     }
+    //     const svgText = await response.text()
+    //     const resizedSvg = this.svgFormatter.resizeAndCenterSVG(svgText, 100, 100)
+    //     item.resizedSvg = this.sanitizer.bypassSecurityTrustHtml(resizedSvg)
+    //   } catch (error) {
+    //     console.error(`Error processing ${item.svgPath}:`, error)
+    //     // Skip this item if there's an error
+    //     continue
+    //   }
+    // }
+    throw new Error('SVG loading not implemented')  
   }
 
   onDragStart(event: DragEvent, item: SvgItem) {

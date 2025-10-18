@@ -10,7 +10,7 @@ import { COMB_STORE } from "src/app/shared/tokens/i-comb-store.token"
 import { PointerState } from "src/app/state/input/pointer-state"
 import { EditorService } from "src/app/state/interactivity/editor-service"
 import { HiveEvents, Constants, LocalAssets } from "src/app/unsorted/constants"
-import { HexagonEditManager } from "src/app/unsorted/hexagons/hexagon-edit-manager"
+import { HexagonEditManager } from "src/app/layout/hexagons/hexagon-edit-manager"
 import { CoordinateLocator } from "src/app/unsorted/utility/coordinate-locator"
 
 

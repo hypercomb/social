@@ -4,7 +4,7 @@ import { HypercombMode } from 'src/app/core/models/enumerations'
 import { ViewportService } from 'src/app/pixi/viewport-service'
 import { Hypercomb } from 'src/app/core/mixins/abstraction/hypercomb.base'
 import { environment } from '../../../../environments/environment'
-import { TouchDetectionService } from 'src/app/unsorted/mobile/touch-detection-service'
+import { TouchDetectionService } from 'src/app/core/mobile/touch-detection-service'
 import { ScreenService } from 'src/app/unsorted/utility/screen-service'
 import { QUERY_COMB_SVC } from 'src/app/shared/tokens/i-comb-query.token'
 

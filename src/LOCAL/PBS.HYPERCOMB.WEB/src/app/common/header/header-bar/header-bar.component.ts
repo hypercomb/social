@@ -1,6 +1,5 @@
 ﻿import { Component, computed, effect, inject } from '@angular/core'
 import { FormsModule } from '@angular/forms'
-import { Preferences } from 'src/app/unsorted/preferences'
 import { environment } from 'src/environments/environment'
 import { FocusWatcherDirective } from '../focus-watcher'
 import { IconMenuComponent } from '../icon-menu/icon-menu.component'
@@ -10,8 +9,8 @@ import { HypercombMode, POLICY } from 'src/app/core/models/enumerations'
 import { CoordinateDetector } from 'src/app/helper/detection/coordinate-detector'
 import { LinkNavigationService } from 'src/app/navigation/link-navigation-service'
 import { EditorService } from 'src/app/state/interactivity/editor-service'
-import { HexagonEditManager } from 'src/app/unsorted/hexagons/hexagon-edit-manager'
-import { TouchDetectionService } from 'src/app/unsorted/mobile/touch-detection-service'
+import { HexagonEditManager } from 'src/app/layout/hexagons/hexagon-edit-manager'
+import { TouchDetectionService } from 'src/app/core/mobile/touch-detection-service'
 import { ScreenService } from 'src/app/unsorted/utility/screen-service'
 import { COMB_SERVICE } from 'src/app/shared/tokens/i-comb-service.token'
 import { COMB_STORE } from 'src/app/shared/tokens/i-comb-store.token'
@@ -27,7 +26,6 @@ export class HeaderBarComponent extends HypercombData {
   private readonly es = inject(EditorService)
   private readonly manager = inject(HexagonEditManager)
   private readonly navigation = inject(LinkNavigationService)
-  private readonly preferences = inject(Preferences)
   private readonly screen = inject(ScreenService)
   private readonly search = inject(SearchFilterService)
   public readonly detector = inject(CoordinateDetector)
@@ -54,12 +52,10 @@ export class HeaderBarComponent extends HypercombData {
   public readonly isEditingCaption = computed(() => this.state.hasMode(HypercombMode.EditingCaption))
   public readonly link = computed(() => environment.production ? this.ls.link : this.ls.information)
   public readonly isDoubleClickIconAllowed = computed(() =>
-    this.preferences.showDoubleClickIcon &&
     !this.es.isEditing() &&
     !this.screen.isFullScreen()
   )
   public readonly isTabEditAllowed = computed(() =>
-    this.preferences.showTabEditIcon &&
     !this.es.isEditing() &&
     !this.screen.isFullScreen()
   )

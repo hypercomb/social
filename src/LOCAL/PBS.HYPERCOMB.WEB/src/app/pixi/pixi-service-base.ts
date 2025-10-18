@@ -7,7 +7,7 @@ import { Settings } from "../unsorted/settings"
 import { DebugService } from "../core/diagnostics/debug-service"
 import { KeyboardState } from "../interactivity/keyboard/keyboard-state"
 import { HypercombState } from "../state/core/hypercomb-state"
-import { ContextStack } from "../unsorted/controller/context-stack"
+import { ContextStack } from "../core/controller/context-stack"
 import { StorageManager } from "../helper/storage-manager"
 import { COMB_SERVICE } from "../shared/tokens/i-comb-service.token"
 

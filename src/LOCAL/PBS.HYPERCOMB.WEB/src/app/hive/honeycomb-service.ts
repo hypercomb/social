@@ -1,6 +1,6 @@
 ﻿import { Injectable, inject, effect } from "@angular/core"
 import { Router } from "@angular/router"
-import { HexagonEditManager } from "../unsorted/hexagons/hexagon-edit-manager"
+import { HexagonEditManager } from "../layout/hexagons/hexagon-edit-manager"
 import { LocatorService } from "../unsorted/utility/locator-service"
 import { HypercombData } from "../actions/hypercomb-data"
 import { Cell } from "../cells/cell"

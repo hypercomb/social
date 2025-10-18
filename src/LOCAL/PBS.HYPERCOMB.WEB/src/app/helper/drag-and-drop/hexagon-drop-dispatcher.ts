@@ -1,6 +1,6 @@
 ﻿import { Injectable } from '@angular/core'
 import { Constants, HiveEvents } from 'src/app/unsorted/constants'
-import { FileDispatchBase } from 'src/app/unsorted/external/file-drop-base'
+import { FileDispatchBase } from 'src/app/helper/external/file-drop-base'
 import { IDropDispatcher } from './i-drop-dispatcher'
 import { HexagonDropEvent } from '../events/event-interfaces'
 

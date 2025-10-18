@@ -3,7 +3,7 @@ import { PixiDataServiceBase } from "src/app/database/pixi-data-service-base"
 import { LinkNavigationService } from "src/app/navigation/link-navigation-service"
 import { PointerState } from "src/app/state/input/pointer-state"
 import { EventDispatcher } from "../helper/events/event-dispatcher"
-import { LayoutManager } from "../unsorted/controller/layout-manager"
+import { LayoutManager } from "../core/controller/layout-manager"
 import { KeyboardService } from "../interactivity/keyboard/keyboard-service"
 import { SELECTIONS } from "../shared/tokens/i-selection.token"
 

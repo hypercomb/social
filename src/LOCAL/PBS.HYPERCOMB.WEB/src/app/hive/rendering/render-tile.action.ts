@@ -42,7 +42,12 @@ export class RenderTileAction extends ActionBase<CellContext> {
   // public api required by scheduler
   // ─────────────────────────────────────────────────────────────
 
-  public override enabled = async (_: CellContext): Promise<boolean> => true
+  public override enabled = async (payload: CellContext): Promise<boolean> => {
+    // Check if the cell is editable
+    const cell = payload.cell
+    if(cell.kind === 'Hive') return false
+    return true
+  }
 
   // render or update one tile, deduped by cellId, into its layer container
   public run = async (payload: CellContext): Promise<void> => {
