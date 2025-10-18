@@ -2,12 +2,10 @@ name: Azure Static Web Apps CI/CD (Development)
 
 on:
   push:
-    branches:
-      - development
+    branches: [development]
   pull_request:
     types: [opened, synchronize, reopened, closed]
-    branches: 
-      - development
+    branches: [development]
 
 jobs:
   build_and_deploy_job:
@@ -16,23 +14,40 @@ jobs:
     name: Build and Deploy Job
 
     steps:
-      # 1️⃣ Checkout repository
+      # 1) checkout
       - uses: actions/checkout@v4
         with:
           submodules: true
           lfs: false
 
-      # 3️⃣ Build & Deploy using Azure Static Web Apps Action
-      - name: Build & Deploy
+      # 2) use the required Node for Angular 20
+      - name: Use Node 20.19.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.0'
+          cache: 'npm'
+          cache-dependency-path: src/LOCAL/PBS.HYPERCOMB.WEB/package-lock.json
+
+      # 3) install deps in the app folder (ensures local @angular/cli is available)
+      - name: Install
+        working-directory: src/LOCAL/PBS.HYPERCOMB.WEB
+        run: npm ci
+
+      # 4) build with the local CLI (npx guarantees it uses node_modules/.bin/ng)
+      - name: Build
+        working-directory: src/LOCAL/PBS.HYPERCOMB.WEB
+        run: npx ng build --configuration production
+
+      # 5) upload ONLY (skip SWA's internal build/Oryx)
+      - name: Upload to Azure Static Web Apps
         uses: Azure/static-web-apps-deploy@v1
         with:
           azure_static_web_apps_api_token: ${{ secrets.STATIC_WEBSITE_DEVELOPMENT_DEPLOYMENT_TOKEN }}
-          repo_token: ${{ secrets.GITHUB_TOKEN }} # enables PR comments/status updates
           action: upload
-          app_location: src/LOCAL/PBS.HYPERCOMB.WEB      # Angular source folder
-          api_location: ""                               # no API
-          output_location: dist/PBS-Hypercomb-Web        # matches angular.json outputPath
-          app_build_command: npm ci && npm run build     # explicit build step
+          skip_app_build: true
+          # IMPORTANT: point to the built output. Make sure this path matches angular.json outputPath.
+          app_location: src/LOCAL/PBS.HYPERCOMB.WEB/dist/PBS-Hypercomb-Web
+          api_location: ""
 
   close_pull_request_job:
     if: github.event_name == 'pull_request' && github.event.action == 'closed'
@@ -44,20 +59,3 @@ jobs:
         with:
           azure_static_web_apps_api_token: ${{ secrets.STATIC_WEBSITE_DEVELOPMENT_DEPLOYMENT_TOKEN }}
           action: close
-
-
-
-          
-      # - name: Debug show working directory and files
-      #   run: |
-      #     echo "Current working directory:"
-      #     pwd
-      #     echo ""
-      #     echo "Listing of current directory:"
-      #     ls -al
-      #     echo ""
-      #     echo "Repo root structure:"
-      #     ls -al /home/runner/work
-      #     echo ""
-      #     echo "Full nested structure (first two levels):"
-      #     ls -R | head -n 200
