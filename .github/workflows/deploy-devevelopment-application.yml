@@ -63,3 +63,4 @@ jobs:
         with:
           azure_static_web_apps_api_token: ${{ secrets.STATIC_WEBSITE_DEVELOPMENT_DEPLOYMENT_TOKEN }}
           action: close
+          app_location: src/LOCAL/PBS.HYPERCOMB.WEB/dist/PBS-Hypercomb-Web
