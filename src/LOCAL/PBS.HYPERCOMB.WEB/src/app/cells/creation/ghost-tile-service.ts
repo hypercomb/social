@@ -1,6 +1,6 @@
 import { Injectable, effect } from '@angular/core'
 import { HypercombLayout } from 'src/app/core/mixins/abstraction/hypercomb.base'
-import { Cell, Ghost } from 'c:/Projects/hypercomb/social/src/LOCAL/PBS.HYPERCOMB.WEB/src/app/cells/cell'
+import { Cell, Ghost } from '../cell'
 
 @Injectable({ providedIn: 'root' })
 export class GhostTileService extends HypercombLayout {
