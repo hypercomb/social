@@ -29,7 +29,7 @@ export class RenderScheduler {
   private readonly inFlight = new Set<number>()
 
   private renderJob: Promise<void> | null = null
-  private budgetPerFrame = 4
+  
 
   /** hook scheduler into pixi ticker */
   public hook(app: Application): void {
@@ -120,7 +120,7 @@ export class RenderScheduler {
     // render hot tiles within per-frame budget
     let processed = 0
     while (hot.length > 0) {
-      const slice = hot.splice(0, this.budgetPerFrame)
+      const slice = hot.splice(0, 100000)// uncapped until issues arise - this.budgetPerFrame
 
       for (const cell of slice) {
         const id = cell.cellId

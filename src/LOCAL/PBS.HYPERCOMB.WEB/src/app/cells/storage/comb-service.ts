@@ -11,6 +11,7 @@ import { safeDate, toCell } from 'src/app/core/mappers/to-cell'
 import { CombQueryService } from './comb-query-service'
 import { IHiveImage } from 'src/app/core/models/i-hive-image'
 import { BlobService } from 'src/app/hive/rendering/blob-service'
+import { PositionSynchronizer } from 'src/app/hive/position-synchronizer'
 
 @Injectable({ providedIn: 'root' })
 export class CombService extends DataOrchestratorBase implements ICellService, IModifyComb, IHiveHydration {
@@ -20,6 +21,7 @@ export class CombService extends DataOrchestratorBase implements ICellService, I
   private blobs = inject(BlobService)
   private readonly query = inject(CombQueryService)
   private readonly ps = inject(PointerState)
+  private readonly synchronizer = inject(PositionSynchronizer)
 
   // ─────────────────────────────────────────────
   // internal state
@@ -42,7 +44,6 @@ export class CombService extends DataOrchestratorBase implements ICellService, I
   // ─────────────────────────────────────────────
   constructor() {
     super()
-
     effect(() => {
       if (!this.ready()) return
       const top = this.stack.top()

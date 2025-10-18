@@ -4,7 +4,6 @@ import { fromRender } from "src/app/actions/action-contexts"
 import { CellFactory } from "src/app/inversion-of-control/factory/cell-factory"
 import { CellOptions } from "src/app/core/models/enumerations"
 import { BlobService } from "./blob-service"
-import { cacheId } from "src/app/cells/models/cell-filters"
 import { HypercombData } from "src/app/actions/hypercomb-data"
 import { CenterTileService } from "src/app/cells/behaviors/center-tile-service"
 import { TILE_FACTORY } from "src/app/shared/tokens/i-hypercomb.token"
@@ -44,8 +43,11 @@ export class InitialTileService extends HypercombData {
       this.container.removeChild(tile)
 
       // fetch blob + clear cache
-      cell.blob = await this.blob.getBlob(cell)
-      Assets.cache.remove(cacheId(cell))
+      const b = await this.blob.getBlob(cell)
+      if (b) {
+        cell.blob = b
+        Assets.cache.remove(this.state.cacheId(cell))
+      }
 
       // get action with context
       const context = fromRender(cell)

@@ -1,4 +1,5 @@
 ﻿import { Component, computed, effect, HostListener, inject, OnInit } from '@angular/core'
+import { NgIf, NgForOf } from '@angular/common'
 import { debounced } from '../debounce-service'
 import { SearchFilterService } from '../header/header-bar/search-filter-service'
 import { CarouselItemComponent } from './carousel-item/carousel-item.component'
@@ -13,48 +14,52 @@ import { IDexieHive } from 'src/app/hive/hive-models'
 import { HiveLoader } from 'src/app/hive/name-resolvers/hive-loader'
 import { ExportDatabaseAction } from 'src/app/actions/propagation/export-database'
 import { ACTION_REGISTRY } from 'src/app/shared/tokens/i-hypercomb.token'
+import { COMB_STORE } from 'src/app/shared/tokens/i-comb-store.token'
+import { PassiveTextureStreamer } from 'src/app/hive/rendering/passive-texture-steamer'
 
 @Component({
   standalone: true,
   selector: '[app-carousel-menu]',
   templateUrl: './carousel-menu.component.html',
   styleUrls: ['./carousel-menu.component.scss'],
-  imports: [CarouselItemComponent],
+  imports: [CarouselItemComponent, NgIf, NgForOf],
 })
 export class CarouselMenuComponent extends HypercombData implements OnInit {
+  private readonly comb = {
+    store: inject(COMB_STORE)
+  }
   private readonly registry = inject(ACTION_REGISTRY)
   private readonly coordinator = inject(HiveLoader)
   private readonly filter = inject(SearchFilterService)
   private readonly editor = inject(EditorService)
   private readonly hivestate = inject(HIVE_STATE)
-  private readonly debouncedFilter = debounced(() => this.filter.value(), 300)
   private readonly wheelState = inject(WheelState)
   private readonly carousel = inject(CarouselService)
+  private readonly debouncedFilter = debounced(() => this.filter.value(), 300)
+  private readonly textureStream = inject(PassiveTextureStreamer)
 
   public current = computed(() => this.carousel.current())
   public searchValue = ''
+  // ─────────────────────────────────────────────
+  // derived signals
+  // ─────────────────────────────────────────────
+  public readonly isAllowed = computed(() => this.hivestate.items().length > 1 && !this.editor.isEditing())
+  public readonly isVisible = computed(() => !this.editor.isEditing())
+
   public upper: IDexieHive[] = []
   public lower: IDexieHive[] = []
-  public jumpTo = (name: string): void => this.carousel.jumpTo(name)
   public middleTile!: IDexieHive
+  public jumpTo = (name: string): void => this.carousel.jumpTo(name)
 
-  private lastPulse = 0
   private wheelLocked = false
+  private lastPulse = 0
 
-  ngOnInit() {
-    this.updateTileLimit()
-  }
-  @HostListener('window:resize')
-  onResize() {
-    this.updateTileLimit()
-  }
-
+  // ─────────────────────────────────────────────
+  // lifecycle
+  // ─────────────────────────────────────────────
   constructor() {
     super()
-
     let initialized = false
-
-    // initial load set the items
     effect(() => {
       const items = this.hivestate.items()
       if (initialized || items.length === 0) return
@@ -62,137 +67,155 @@ export class CarouselMenuComponent extends HypercombData implements OnInit {
       this.carousel.setItems(items)
       this.updateMenu()
       initialized = true
+
+      // 🐝 preload textures for the first hive
+      console.debug('[CarouselMenu] starting initial passive texture stream')
+      void this.textureStream.streamForCarousel({
+        current: this.current()!,
+        upper: this.carousel.upper(),
+        lower: this.carousel.lower()
+      })
     })
 
-    // wheel scroll logic
+    this.initializeWheelControl()
+    this.initializeFilterWatcher()
+    this.initializeScoutWatcher()
+    if (!environment.production) this.debugWatchCurrentHive()
+  }
+
+  ngOnInit(): void {
+    this.updateTileLimit()
+  }
+
+  @HostListener('window:resize')
+  onResize(): void {
+    this.updateTileLimit()
+  }
+
+
+  private initializeWheelControl(): void {
     effect(() => {
       const pulse = this.wheelState.pulse()
       if (pulse === 0 || pulse === this.lastPulse || this.wheelLocked) return
 
-      // throttle: ignore scrolls that happen too fast
       const now = performance.now()
-      if (now - this.lastPulse < 150) return // 150ms between scroll actions
-
+      if (now - this.lastPulse < 150) return // throttle
       this.lastPulse = now
       this.wheelLocked = true
 
       const dir = this.wheelState.deltaY > 0 ? 1 : -1
-      const run = async () => {
-        if (dir > 0) {
-          await this.cycleBackward()
-        } else {
-          await this.cycleForward()
-        }
-        // small unlock delay to avoid double pulses
-        setTimeout(() => (this.wheelLocked = false), 100)
-      }
+      void (dir > 0 ? this.cycleBackward() : this.cycleForward())
 
-      void run()
+      // unlock after a small delay
+      setTimeout(() => (this.wheelLocked = false), 100)
     })
-
-
-    // search filter clears
-    effect(() => void this.debouncedFilter())
-
-    let last = ''
-    // initialize index from scout
-    effect(() => {
-      void (async () => {
-        const hiveName = this.state.scout()?.name
-        if (!hiveName || last === hiveName) return
-          last = hiveName
-        this.carousel.setHive(hiveName)
-        this.updateMenu()
-        this.wheelLocked = false  
-      })()
-    })
-
-    // debug
-    if (!environment.production) {
-      effect(() => console.log('current hive:', this.current()?.name ?? '(none)'))
-    }
   }
 
-  public isAllowed = computed(() => this.hivestate.items().length > 1 && !this.editor.isEditing())
+  private initializeFilterWatcher(): void {
+    effect(() => void this.debouncedFilter())
+  }
 
-  public isVisibile = computed(() => !this.editor.isEditing())
+  private initializeScoutWatcher(): void {
+    let lastHive = ''
+    effect(() => {
+      const hiveName = this.state.scout()?.name
+      if (!hiveName || lastHive === hiveName) return
+      lastHive = hiveName
+      this.carousel.setHive(hiveName)
+      this.updateMenu()
+      this.wheelLocked = false
+    })
+  }
 
-  private async applyHeadChange() {
+  private debugWatchCurrentHive(): void {
+    effect(() => console.log('current hive:', this.current()?.name ?? '(none)'))
+  }
+
+
+  // ─────────────────────────────────────────────
+  // navigation
+  // ─────────────────────────────────────────────
+  private async applyHeadChange(): Promise<void> {
     if (!this.current()) return
+
     await this.changeHive()
     this.updateMenu()
+
+    // 🐝  DON'T AWAIT - passive preload for current + neighbors
+    void this.textureStream.streamForCarousel({
+      current: this.current()!,
+      upper: this.carousel.upper(),
+      lower: this.carousel.lower()
+    })
   }
 
-  public cycleForward = async () => {
-    console.log(this.isAllowed())
-    this.carousel.next() // <-- should be next, not previous
-    await this.applyHeadChange()
-  }
 
-  public cycleBackward = async () => {
-    if (!this.isAllowed()) return
-    this.carousel.previous() // <-- should be previous, not next
-    await this.applyHeadChange()
-  }
-
-  // change by name → rotate, then change hive
-  public changeHiveByName = (hiveName: string) => {
+  public changeHiveByName = (hiveName: string): void => {
     if (!hiveName) return
-    this.carousel.jumpTo(hiveName)
+    this.carousel.setHive(hiveName)   // ensures selected hive moves to head
   }
 
-  public changeHive = async () => {
 
+  public cycleForward = async (): Promise<void> => {
+    if (!this.isAllowed()) return
+    this.carousel.next()
+    await this.applyHeadChange()
+  }
+
+  public cycleBackward = async (): Promise<void> => {
+    if (!this.isAllowed()) return
+    this.carousel.previous()
+    await this.applyHeadChange()
+  }
+
+  public async changeHive(): Promise<void> {
     this.filter.clear()
     const hiveName = this.current()?.name
     if (!hiveName) return
 
-    await this.registry.invoke(ExportDatabaseAction.ActionId, {}) // auto-export current hive before switching
+    await this.registry.invoke(ExportDatabaseAction.ActionId, {})
 
     const realm = await this.coordinator.resolve(hiveName)
-
     if (!realm) throw new Error(`Failed to resolve hive: ${hiveName}`)
 
     const [baseName, fragment] = hiveName.split('#')
-    const url = `/${baseName}${fragment ? `#${fragment}` : ''}` // define url
-    this.carousel.jumpTo(url) // update carousel state
-
+    const url = `/${baseName}${fragment ? `#${fragment}` : ''}`
+    this.carousel.jumpTo(url)
     this.updateMenu()
   }
 
-  private updateMenu() {
+  // ─────────────────────────────────────────────
+  // layout
+  // ─────────────────────────────────────────────
+  private updateMenu(): void {
     const current = this.carousel.current()
     const items = this.hivestate.items()
 
     if (!current) {
-      this.middleTile = items[0] // fallback if list is empty, or skip rendering in template
-
+      this.middleTile = items[0]
       this.upper = []
       this.lower = []
       return
     }
 
     this.middleTile = current
-
     this.upper = this.carousel.upper()
-    console.log(this.carousel.upper())
     this.lower = this.carousel.lower()
+    console.debug('[CarouselMenu] updateMenu:', { current: this.middleTile?.name, upper: this.upper?.length, lower: this.lower?.length })
   }
 
-  private updateTileLimit() {
-    const windowHeight = window.innerHeight - 90 // for header and footer 
-    console.log(window.innerHeight)
-    const tileHeight = 72 // 4.6 em with gap plus tile height
+  public trackByName(index: number, item: IDexieHive): string {
+    return item?.name ?? index.toString()
+  }
 
-    // number of tiles that fit above OR below the middle
-    const tilesPerSide = Math.floor(((windowHeight / 2) - 65.5) / tileHeight) // minus the middle tile 
-
-    console.log(tilesPerSide)
-
+  private updateTileLimit(): void {
+    const windowHeight = window.innerHeight - 90
+    const tileHeight = 72
+    const tilesPerSide = Math.floor(((windowHeight / 2) - 65.5) / tileHeight)
     this.carousel.setTileLimit(tilesPerSide)
   }
 
-  private findTargetHiveIndex = async (target: string): Promise<number> => {
+  private async findTargetHiveIndex(target: string): Promise<number> {
     const list = this.hivestate.items()
     for (let i = 0; i < list.length; i++) {
       const normalized = await simplify(list[i].name)
@@ -201,4 +224,3 @@ export class CarouselMenuComponent extends HypercombData implements OnInit {
     return -1
   }
 }
-

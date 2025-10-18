@@ -60,7 +60,7 @@ import { EventDispatcher } from '../helper/events/event-dispatcher'
 import { StateHub } from '../state/core/state-hub'
 import { GhostTileService } from '../cells/creation/ghost-tile-service'
 import { RiftAction } from '../actions/navigation/path'
-import { PositionSynchronizer } from '../hive/hive-view-service'
+import { PositionSynchronizer } from '../hive/position-synchronizer'
 
 // app
 @Injectable({ providedIn: 'root' })

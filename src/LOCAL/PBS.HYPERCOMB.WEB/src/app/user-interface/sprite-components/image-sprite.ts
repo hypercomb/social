@@ -1,6 +1,6 @@
 ﻿import { Injectable } from '@angular/core'
 import { Sprite, Texture } from 'pixi.js'
-import { cacheId } from '../../cells/models/cell-filters'
+// cacheId now provided by HypercombState via this.state.cacheId
 import { BaseSpriteBuilder } from './image-sprite-base'
 import { Cell } from 'src/app/cells/cell'
 
@@ -21,7 +21,7 @@ export class ImageSprite extends BaseSpriteBuilder<Cell> {
 
             if (!cell.blob) return sprite
 
-            this.debug.log('render', `ImageSprite: building sprite for tile: ${cell.name} (${cacheId(cell)}) ${++ImageSprite.count}`)
+            this.debug.log('render', `ImageSprite: building sprite for tile: ${cell.name} (${this.state.cacheId(cell)}) ${++ImageSprite.count}`)
 
             // Load the texture from the Blob URL
             const texture = await Texture.from(bitmap)
