@@ -19,19 +19,22 @@ jobs:
           submodules: true
           lfs: false
 
-      # node 22 satisfies ">=22 <23" engines
+      - name: Debug File System
+        run: |
+          ls -l src/LOCAL/PBS.HYPERCOMB.WEB/package-lock.json || echo "package-lock.json not found"
+          npm config get cache
+
       - name: Use Node 22.12.0
         uses: actions/setup-node@v4
         with:
           node-version: '22.12.0'
           cache: 'npm'
-          cache-dependency-path: src/LOCAL/PBS.HYPERCOMB.WEB/package-lock.json
+          cache-dependency-path: '**/package-lock.json' # Use glob for flexibility
 
       - name: Install dependencies
         working-directory: src/LOCAL/PBS.HYPERCOMB.WEB
         run: npm ci
 
-      # make sure CLI exists; then run it directly (no npx)
       - name: Build (Angular CLI by path)
         working-directory: src/LOCAL/PBS.HYPERCOMB.WEB
         run: |
@@ -49,7 +52,6 @@ jobs:
           azure_static_web_apps_api_token: ${{ secrets.STATIC_WEBSITE_DEVELOPMENT_DEPLOYMENT_TOKEN }}
           action: upload
           skip_app_build: true
-          # match angular.json -> options.outputPath exactly (case-sensitive)
           app_location: src/LOCAL/PBS.HYPERCOMB.WEB/dist/PBS-Hypercomb-Web
           api_location: ""
 
