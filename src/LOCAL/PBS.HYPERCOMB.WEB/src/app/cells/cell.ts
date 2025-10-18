@@ -1,8 +1,6 @@
 ﻿import { uuidv4 } from "src/app/core/models/uuid"
 import { CellFlags } from "./models/cell-flags"
 import { IHiveImage } from "../core/models/i-hive-image"
-import { BlobService } from "../hive/rendering/blob-service"
-import { BlobOptions } from "buffer"
 
 // simple deterministic hash for hive string → number
 export function hashHive(hive: string): number {
@@ -159,6 +157,9 @@ export class Path extends Cell {
 }
 
 export class EditCell extends Cell {
+  protected constructor() { 
+    super({ cellId: -1 })
+  }
   originalImage?: IHiveImage
   largeImage?: IHiveImage
   imageDirty?: boolean = false

@@ -250,11 +250,11 @@ export class CombService extends DataOrchestratorBase implements ICellService, I
   // utility
   // ─────────────────────────────────────────────
   private ensureValidKind(cell: { kind?: string; name?: string }): void {
-    if (!cell.kind) {
-      const name = cell.name ?? '(unnamed cell)'
-      this.debug.warn('comb', `[CombService] skipping cell '${name}' because kind is empty`)
-      throw new Error(`[CombService] refusing to persist cell '${name}' with empty kind`)
-    }
+    // if (!cell.kind) {
+    //   const name = cell.name ?? '(unnamed cell)'
+    //   this.debug.warn('comb', `[CombService] skipping cell '${name}' because kind is empty`)
+    //   throw new Error(`[CombService] refusing to persist cell '${name}' with empty kind`)
+    // }
   }
 
   public invalidateTile(cellId: number): void {
