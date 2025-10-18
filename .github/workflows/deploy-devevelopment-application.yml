@@ -42,6 +42,7 @@ jobs:
         with:
           node-version: 20.19.0
           cache: 'npm'
+          cache-dependency-path: 'src/package-lock.json'
 
 
       # 3️⃣ Build & Deploy using Azure Static Web Apps Action
@@ -51,10 +52,10 @@ jobs:
           azure_static_web_apps_api_token: ${{ secrets.STATIC_WEBSITE_DEVELOPMENT_DEPLOYMENT_TOKEN }}
           repo_token: ${{ secrets.GITHUB_TOKEN }} # enables PR comments/status updates
           action: upload
-          app_location: src/LOCAL/PBS.HYPERCOMB.WEB      # Angular source folder
+          app_location: src                              # Workspace root
           api_location: ""                               # no API
-          output_location: dist/PBS-Hypercomb-Web        # matches angular.json outputPath
-          app_build_command: npm ci && npm run build     # explicit build step
+          output_location: LOCAL/PBS.HYPERCOMB.WEB/dist/PBS-Hypercomb-Web  # matches angular.json outputPath from workspace root
+          app_build_command: npm ci && npm run build --workspace=pbs-hypercomb-web     # Build specific workspace
 
   close_pull_request_job:
     if: github.event_name == 'pull_request' && github.event.action == 'closed'
