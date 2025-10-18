@@ -38,8 +38,8 @@ import { BackupService } from '../database/persistence/backup-service'
 import { HiveRouteWatcher } from '../hive/name-resolvers/hive-route-watcher'
 import { HiveService } from '../hive/storage/hive-service'
 
-// input and interactivity
-import { KeyboardShortcutListener } from '../interactivity/keyboard/keyboard-shortcut-listener'
+  // input and interactivity
+  import { KeyboardShortcutListener } from '../interactivity/keyboard/keyboard-shortcut-listener'
 import { PointerBindingService } from '../state/input/pointer-binding-service'
 import { TouchContextSwitchService } from '../pixi/touch-context-switch-services'
 import { TouchPanningService } from '../pixi/touch-panning-service'
