@@ -15,7 +15,6 @@ import { HiveLoader } from 'src/app/hive/name-resolvers/hive-loader'
 import { ExportDatabaseAction } from 'src/app/actions/propagation/export-database'
 import { ACTION_REGISTRY } from 'src/app/shared/tokens/i-hypercomb.token'
 import { COMB_STORE } from 'src/app/shared/tokens/i-comb-store.token'
-import { PassiveTextureStreamer } from 'src/app/hive/rendering/passive-texture-steamer'
 
 @Component({
   standalone: true,
