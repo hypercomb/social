@@ -10,7 +10,7 @@ import { COMB_STORE } from "src/app/shared/tokens/i-comb-store.token"
 import { PointerState } from "src/app/state/input/pointer-state"
 import { EditorService } from "src/app/state/interactivity/editor-service"
 import { HiveEvents, Constants, LocalAssets } from "src/app/unsorted/constants"
-import { HexagonEditManager } from "src/app/layout/hexagons/hexagon-edit-manager"
+import { CellEditor } from "src/app/layout/hexagons/cell-editor"
 import { CoordinateLocator } from "src/app/unsorted/utility/coordinate-locator"
 
 
@@ -25,7 +25,7 @@ export class OpenGrapservice extends ReceiveFileBase {
     private readonly es = inject(EditorService)
     private readonly http = inject(HttpClient)
     private readonly locator = inject(CoordinateLocator)
-    private readonly manager = inject(HexagonEditManager)
+    private readonly manager = inject(CellEditor)
     private readonly ps = inject(PointerState)
     private readonly store = inject(COMB_STORE)
 

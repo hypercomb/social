@@ -8,7 +8,6 @@ import * as download from "downloadjs"
 export class DatabaseExportService extends DatabaseService {
   private readonly database = inject(DatabaseService)
 
-
   // export full Dexie database
   public async export(): Promise<Blob> {
     return await exportDB(this.database.db()!, { prettyJson: true })

@@ -2,14 +2,14 @@
 import { Injectable, inject } from "@angular/core"
 import { Router } from "@angular/router"
 import { HypercombMode } from "../../core/models/enumerations"
-import { HexagonEditManager } from "../../layout/hexagons/hexagon-edit-manager"
 import { CellContext } from "../action-contexts"
 import { ActionBase } from "../action.base"
+import { CellEditor } from "src/app/unsorted/hexagons/cell-editor"
 
 @Injectable({ providedIn: "root" })
 export class ShowHiveAction extends ActionBase<CellContext>  {
   public id = "show.hive"
-  private readonly manager = inject(HexagonEditManager)
+  private readonly manager = inject(CellEditor)
   private readonly router = inject(Router)
 
   public  override enabled = async (ctx: CellContext): Promise<boolean> => {

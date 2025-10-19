@@ -6,7 +6,7 @@ import { EditorService } from "src/app/state/interactivity/editor-service"
 import { PixiDataServiceBase } from "src/app/database/pixi-data-service-base"
 
 @Injectable({ providedIn: 'root' })
-export class HexagonEditManager extends PixiDataServiceBase {
+export class CellEditor extends PixiDataServiceBase {
     private readonly es = inject(EditorService)
     private readonly policy = inject(PolicyService)
 
@@ -46,7 +46,7 @@ export class HexagonEditManager extends PixiDataServiceBase {
         this.complete()
     }
 
-    public deleted = (cell: Cell) => {
+    public delete = (cell: Cell) => {
         this.complete()
     }
 

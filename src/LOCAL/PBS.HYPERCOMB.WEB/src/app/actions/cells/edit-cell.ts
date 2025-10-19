@@ -1,8 +1,8 @@
 ﻿// edit-tile.action.ts
 import { Injectable, inject } from "@angular/core"
-import { HexagonEditManager } from "../../layout/hexagons/hexagon-edit-manager"
 import { CellContext } from "../action-contexts"
 import { ActionBase } from "../action.base"
+import { CellEditor } from "src/app/unsorted/hexagons/cell-editor"
 
 
 @Injectable({ providedIn: "root" })
@@ -14,7 +14,7 @@ export class EditTileAction extends ActionBase<CellContext> {
   public override category = "Editing"
   public override risk: "warning" = "warning"
 
-  private readonly manager = inject(HexagonEditManager)
+  private readonly manager = inject(CellEditor)
 
   public override enabled = async (payload: CellContext): Promise<boolean> => {
     const up = <MouseEvent>payload.event

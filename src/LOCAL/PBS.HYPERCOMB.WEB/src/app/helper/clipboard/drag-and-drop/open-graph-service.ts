@@ -9,7 +9,7 @@ import { EditorService } from "src/app/state/interactivity/editor-service"
 import { NewTileService } from "src/app/tile/creation/new-tile-service"
 import { CombStore } from "src/app/cells/storage/comb-store"
 import { HiveEvents, Constants, LocalAssets } from "src/app/unsorted/constants"
-import { HexagonEditManager } from "src/app/layout/hexagons/hexagon-edit-manager"
+import { CellEditor } from "src/app/layout/hexagons/cell-editor"
 import { CoordinateLocator } from "src/app/unsorted/utility/coordinate-locator"
 import { CoordinateDetector } from "../../detection/coordinate-detector"
 import { OpenGraphResult } from "../../drag-and-drop/open-graph-interfaces"
@@ -25,7 +25,7 @@ export class OpenGrapservice extends ReceiveFileBase {
     private readonly es = inject(EditorService)
     private readonly http = inject(HttpClient)
     private readonly locator = inject(CoordinateLocator)
-    private readonly manager = inject(HexagonEditManager)
+    private readonly manager = inject(CellEditor)
     private readonly ps = inject(PointerState)
     private readonly store = inject(CombStore)
     private readonly new_tiles = inject(NewTileService)

@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common'
 import { FormsModule } from '@angular/forms'
 import { MatIconModule } from '@angular/material/icon'
 import { Assets } from 'pixi.js'
+import { AiSearchPath, AlignMiddle, BranchPath } from 'src/app/unsorted/path'
 import { CellOptions, POLICY } from 'src/app/core/models/enumerations'
 import { EditorActionsComponent } from './editor-actions/editor-actions.component'
 import { SaveBranchButtonComponent } from './save-branch-button/save-branch-button.component'
@@ -10,18 +11,16 @@ import { SpaceContinuationDirective } from './space-continuation.directive'
 import { SwatchPanelComponent } from './swatch-panel/swatch-panel.component'
 import { TileImageComponent } from './tile-image/tile-image.component'
 import { EditorService } from 'src/app/state/interactivity/editor-service'
-import { HexagonEditManager } from 'src/app/layout/hexagons/hexagon-edit-manager'
-import { ImageCaptureService } from 'src/app/helper/image-capture-service'
-import { isHive, isNewHive } from 'src/app/cells/models/cell-filters'
-import { HypercombState } from 'src/app/state/core/hypercomb-state'
+import { CellEditor } from 'src/app/unsorted/hexagons/cell-editor'
 import { Cell, EditCell } from 'src/app/cells/cell'
 import { Events } from 'src/app/helper/events/events'
 import { Hypercomb } from 'src/app/core/mixins/abstraction/hypercomb.base'
 import { CellFactory } from 'src/app/inversion-of-control/factory/cell-factory'
-import { HIVE_HYDRATION, MODIFY_COMB_SVC } from 'src/app/shared/tokens/i-comb-service.token'
+import { MODIFY_COMB_SVC } from 'src/app/shared/tokens/i-comb-service.token'
 import { ImagePersistenceService } from './tile-image/image-persistence-service'
 import { PointerState } from 'src/app/state/input/pointer-state'
-import { AiSearchPath, AlignMiddle, BranchPath } from 'src/app/unsorted/path'
+import { ImageCaptureManager } from './tile-image/image-capture-service'
+import { HiveService } from 'src/app/hive/storage/hive-service'
 
 
 
@@ -47,14 +46,16 @@ export class TileEditorComponent extends Hypercomb {
   // ─────────────────────────────────────────────
   // dependencies
   // ─────────────────────────────────────────────
-  private readonly captureService = inject(ImageCaptureService)
-  private readonly factory = inject(CellFactory)
-  private readonly modify = inject(MODIFY_COMB_SVC)
   public readonly es = inject(EditorService)
+  private readonly factory = inject(CellFactory)
+  private readonly hexagonEditor = inject(CellEditor)
+  public readonly hivesvc = inject(HiveService)
+  public readonly manager = inject(ImageCaptureManager)
+  private readonly modify = inject(MODIFY_COMB_SVC)
   public readonly persistence = inject(ImagePersistenceService)
-  private readonly manager = inject(HexagonEditManager)
-  private readonly ps = inject(PointerState)
 
+  private readonly ps = inject(PointerState)
+  
   // ─────────────────────────────────────────────
   // local state
   // ─────────────────────────────────────────────
@@ -151,12 +152,16 @@ export class TileEditorComponent extends Hypercomb {
   public cancel = async (event: MouseEvent): Promise<void> => {
     event.stopPropagation()
     event.preventDefault()
-    this.manager.cancel()
+    this.hexagonEditor.cancel()
   }
 
   public delete = async (cell: Cell): Promise<void> => {
+
     await this.modify.removeCell(cell)
-    this.manager.deleted(cell)
+    this.hexagonEditor.delete(cell)
+
+    const hiveName = this.state.scout.name
+    await this.hivesvc.moveHiveToHistory(hiveName);
   }
 
   // ─────────────────────────────────────────────
@@ -184,7 +189,7 @@ export class TileEditorComponent extends Hypercomb {
 
     // capture and persist the working (small) snapshot
     if (!cell.image || cell.imageDirty) {
-      const snapshot = await this.captureService.capture()
+       const snapshot = await this.manager.capture()
       await this.persistence.saveSmall(cell, snapshot)
     }
 
@@ -198,7 +203,7 @@ export class TileEditorComponent extends Hypercomb {
 
     // optional: handle navigation after save
     // if (this.operation() === 'new-hive') this.utility.changeLocation(cell.hive)
-    this.manager.complete()
+    this.hexagonEditor.complete()
   }
 
   public saveAsBranch = async (event: MouseEvent): Promise<void> => {

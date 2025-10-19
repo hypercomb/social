@@ -15,12 +15,36 @@ export class HiveService extends HypercombData {
   // store mutations
   public next = () => this.controller.next()
   public prev = () => this.controller.prev()
-  
+
   public setActive = (hiveName: string): void => {
     // only trigger if new hive
     if (this.lastActivatedName !== hiveName) {
       this.controller.setActive(hiveName)
     }
+  }
+
+  public async moveHiveToHistory(hiveName: string): Promise<void> {
+    const opfsRoot = await navigator.storage.getDirectory();
+    const hiveDir = await opfsRoot.getDirectoryHandle('hive');
+    const historyDir = await opfsRoot.getDirectoryHandle('history', { create: true });
+
+    // Find the file
+    const hiveFile = await hiveDir.getFileHandle(hiveName);
+
+    // Create a timestamp
+    const now = new Date();
+    const datestamp = now.toISOString().replace(/[:.]/g, '-')
+    const historyFileName = `${hiveName}]-[${datestamp}`
+
+    // Copy file contents
+    const file = await hiveFile.getFile()
+    const historyFile = await historyDir.getFileHandle(historyFileName, { create: true });
+    const writable = await historyFile.createWritable();
+    await writable.write(await file.arrayBuffer());
+    await writable.close();
+
+    // Remove the original
+    await hiveDir.removeEntry(hiveName);
   }
 
 
