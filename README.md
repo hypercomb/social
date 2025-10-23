@@ -1,15 +1,17 @@
-# Hypercomb - Operating System for Humanity
+# Hypercomb – Operating System for Humanity
 
-# Features
-### zero friction (almost!)
-### 100% human curated
-### human intelligence
-### censorship proof
-### content fingerprinting
-### host content anywhere
-### website only (no apps)
-### always fully featured
-### energy efficient
+---
 
-## 
+## Features
 
+- Zero friction (almost!)
+- 100% human curated
+- Human intelligence
+- Censorship proof
+- Content fingerprinting
+- Host content anywhere
+- Website only (no apps)
+- Always fully featured
+- Energy efficient
+
+## Colony/
