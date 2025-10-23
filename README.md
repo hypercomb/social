@@ -1,2 +1,15 @@
-# social
-A modular social (networking / community) backend and frontend suite built by Hypercomb — offers APIs, UI components, and integrations to power user profiles, feeds, posts, comments, likes, messaging, and social graph capabilities.
+# Hypercomb - Operating System for Humanity
+
+# Features
+### zero friction (almost!)
+### 100% human curated
+### human intelligence
+### censorship proof
+### content fingerprinting
+### host content anywhere
+### website only (no apps)
+### always fully featured
+### energy efficient
+
+## 
+
