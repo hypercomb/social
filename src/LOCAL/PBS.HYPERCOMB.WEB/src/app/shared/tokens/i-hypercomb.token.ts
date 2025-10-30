@@ -14,6 +14,7 @@ export interface IActionRegistry {
     register<TPayload = unknown>(instance: ActionBase<TPayload>): void
 }
 
+export interface ICarouselService { }
 
 export interface ICoordinateDetector {
     coordinate: Signal<AxialCoordinate | undefined>;
@@ -47,7 +48,7 @@ export enum TOKEN_LIST {
     ACTION_REGISTRY = "ACTION_REGISTRY",
     DETECTOR_STATE = "DETECTOR_STATE",
     CLIPBOARD_STATE = "CLIPBOARD_STATE",
-    MENU_DETECTOR = "MENU_DETECTOR",
+    CAROUSEL_SVC = "CAROUSEL_SVC",
     CONTEXT_MENU = "CONTEXT_MENU",
     COORDINATE_DETECTOR = "COORDINATE_DETECTOR"
 }
@@ -59,7 +60,7 @@ export const ACTION_REGISTRY = new InjectionToken<IActionRegistry>(TOKEN_LIST.AC
 export const CONTEXT_MENU = new InjectionToken<IContextMenu>(TOKEN_LIST.CONTEXT_MENU)
 export const CLIPBOARD_STATE = new InjectionToken<IClipboardState>(TOKEN_LIST.CLIPBOARD_STATE)
 export const DETECTOR_STATE = new InjectionToken<CoordinateDetector>(TOKEN_LIST.DETECTOR_STATE)
-export const MENU_DETECTOR = new InjectionToken<CarouselService>(TOKEN_LIST.MENU_DETECTOR)
+export const CAROUSEL_SVC = new InjectionToken<CarouselService>(TOKEN_LIST.CAROUSEL_SVC)
 export const COORDINATE_DETECTOR = new InjectionToken<ICoordinateDetector>(TOKEN_LIST.COORDINATE_DETECTOR)
 export const SETTINGS_SVC = new InjectionToken<ISettingsService>("SETTINGS_SVC")
 export const TILE_SERVICE = new InjectionToken<ITileService>("TILE_SERVICE")

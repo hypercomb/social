@@ -6,7 +6,7 @@ import { IDexieHive } from 'src/app/hive/hive-models'
 @Injectable({ providedIn: 'root' })
 export class CarouselService extends Hypercomb {
   private readonly router = inject(Router)
-
+  private first = true
   // ─────────────────────────────────────────────
   // internal signals
   // ─────────────────────────────────────────────
@@ -67,9 +67,14 @@ export class CarouselService extends Hypercomb {
   /** navigates to a hive by full name or fragment */
   public jumpTo = (name: string): void => {
     if (!name) return
+    
+    // initialized
+    this.first = false
+
     const [base, fragment] = name.split('#')
     const url = `/${base}${fragment ? `#${fragment}` : ''}`
     this.router.navigateByUrl(url)
+
   }
 
   /** reorders list so that given hive becomes head (index 0) */

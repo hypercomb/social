@@ -28,11 +28,12 @@ export class HeaderBarComponent extends HypercombData {
   private readonly navigation = inject(LinkNavigationService)
   private readonly screen = inject(ScreenService)
   private readonly search = inject(SearchFilterService)
+  private readonly _isCaptionBlocked = this.policy.any(POLICY.EditInProgress)
+  private readonly _Hypercomb = 'Hypercomb'
   public readonly detector = inject(CoordinateDetector)
   public readonly touch = inject(TouchDetectionService)
   public readonly store = inject(COMB_STORE)
   public readonly cellstate = inject(COMB_SERVICE)
-
 
   public readonly name = computed(() => {
     const cell = this.stack.cell()
@@ -72,34 +73,31 @@ export class HeaderBarComponent extends HypercombData {
     return `${name} index: ${coordinate.index} : ${coordinate.Location}`
   })
 
+  constructor() {
+    super()
+    effect(() => {
+      const text = this.search.value().toLowerCase()
+      this.searchFilter = text
+    })
 
+    effect(() => {
+      const ev = this.ks.keyUp()
+      if (!ev) return
+
+      if (this.ks.when(ev).key('i', { alt: true, ctrl: false, shift: false })) {
+        ev.preventDefault()
+        ev.stopPropagation()
+        this.state.toggleToolMode(HypercombMode.ShowChat)
+      }
+    })
+
+  }
 
   public readonly cellCount = computed(() => this.stack.size())
-  public readonly showCount = computed(() => this.cellCount()> 0)
+  public readonly showCount = computed(() => this.cellCount() > 0)
   public readonly iconsVisible = computed(() =>
     !this.screen.isFullScreen() || !this.touch.supportsEdit()
   )
-
-  private readonly _isCaptionBlocked = this.policy.any(POLICY.EditInProgress)
-
-  private readonly _Hypercomb = 'Hypercomb'
-
-  // store effects in private readonly fields
-  private readonly _filterEffect = effect(() => {
-    const text = this.search.value().toLowerCase()
-    this.searchFilter = text
-  })
-
-  private readonly _keyboardEffect = effect(() => {
-    const ev = this.ks.keyUp()
-    if (!ev) return
-
-    if (this.ks.when(ev).key('i', { alt: true, ctrl: false, shift: false })) {
-      ev.preventDefault()
-      ev.stopPropagation()
-      this.state.toggleToolMode(HypercombMode.ShowChat)
-    }
-  })
 
   public openLink() {
     this.navigation.openLink()

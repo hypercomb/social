@@ -9,11 +9,10 @@ import { HIVE_STATE } from 'src/app/shared/tokens/i-hive-store.token'
 import { WheelState } from '../mouse/wheel-state'
 import { environment } from 'src/environments/environment'
 import { EditorService } from 'src/app/state/interactivity/editor-service'
-import { CarouselService } from './carousel-service'
 import { IDexieHive } from 'src/app/hive/hive-models'
 import { HiveLoader } from 'src/app/hive/name-resolvers/hive-loader'
 import { ExportDatabaseAction } from 'src/app/actions/propagation/export-database'
-import { ACTION_REGISTRY } from 'src/app/shared/tokens/i-hypercomb.token'
+import { ACTION_REGISTRY, CAROUSEL_SVC } from 'src/app/shared/tokens/i-hypercomb.token'
 import { COMB_STORE } from 'src/app/shared/tokens/i-comb-store.token'
 
 @Component({
@@ -21,7 +20,7 @@ import { COMB_STORE } from 'src/app/shared/tokens/i-comb-store.token'
   selector: '[app-carousel-menu]',
   templateUrl: './carousel-menu.component.html',
   styleUrls: ['./carousel-menu.component.scss'],
-  imports: [CarouselItemComponent, NgIf, NgForOf],
+  imports: [CarouselItemComponent],
 })
 export class CarouselMenuComponent extends HypercombData implements OnInit {
   private readonly comb = {
@@ -33,7 +32,7 @@ export class CarouselMenuComponent extends HypercombData implements OnInit {
   private readonly editor = inject(EditorService)
   private readonly hivestate = inject(HIVE_STATE)
   private readonly wheelState = inject(WheelState)
-  private readonly carousel = inject(CarouselService)
+  private readonly carousel = inject(CAROUSEL_SVC)
   private readonly debouncedFilter = debounced(() => this.filter.value(), 300)
   // private readonly textureStream = inject(PassiveTextureStreamer)
 

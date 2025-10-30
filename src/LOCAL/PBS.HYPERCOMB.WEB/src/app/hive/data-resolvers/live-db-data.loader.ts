@@ -4,14 +4,14 @@ import { HiveScout } from "../hive-scout"
 import { QUERY_COMB_SVC } from "src/app/shared/tokens/i-comb-query.token"
 import { HIVE_CONTROLLER_ST } from "src/app/shared/tokens/i-hive-store.token"
 import { Hive } from "src/app/cells/cell"
-import { CarouselService } from "src/app/common/carousel-menu/carousel-service"
 import { IHiveLoader, HiveLoaderBase } from "./i-data-resolver"
+import { CAROUSEL_SVC } from "src/app/shared/tokens/i-hypercomb.token"
 
 @Injectable({ providedIn: "root" })
 export class LiveDbDataLoader extends HiveLoaderBase implements IHiveLoader {
     private readonly query = inject(QUERY_COMB_SVC)
     private readonly controller = inject(HIVE_CONTROLLER_ST)
-    private readonly carousel = inject(CarouselService)
+    private readonly carousel = inject(CAROUSEL_SVC)
 
     public enabled(scout: HiveScout): boolean {
         this.logDataResolution(`LiveDbDataLoader enabled for ${scout.name}`)

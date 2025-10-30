@@ -7,7 +7,7 @@ import { HiveScout } from '../hive-scout'
 import { HIVE_HYDRATION } from 'src/app/shared/tokens/i-comb-service.token'
 import { IDexieHive } from '../hive-models'
 import { Hypercomb } from 'src/app/core/mixins/abstraction/hypercomb.base'
-import { CarouselService } from 'src/app/common/carousel-menu/carousel-service'
+import { CAROUSEL_SVC } from 'src/app/shared/tokens/i-hypercomb.token'
 
 @Injectable({ providedIn: 'root' })
 export class HiveLoader extends Hypercomb {
@@ -17,7 +17,7 @@ export class HiveLoader extends Hypercomb {
   private readonly loaders = inject<IHiveLoader[]>(HIVE_DATA_RESOLVERS) ?? []
   private readonly hydration = inject(HIVE_HYDRATION)
   private readonly store = inject(HIVE_STORE)
-  private readonly carousel = inject(CarouselService)
+  private readonly carousel = inject(CAROUSEL_SVC)
   private lastResolved: HiveScout | null = null
 
   // ─────────────────────────────────────────────
