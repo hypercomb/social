@@ -72,14 +72,13 @@ We explore it together.
 ---
 
 ## 🔒 Why the Hive is Safe
-
-Only bees who are inside the hive right now can follow the path.  
+A hive is not a static container. 
+A hive is a living path. 
+You don’t “view content.” You follow someone through meaning.
+Only bees who are inside the hive right now can follow the path. 
 Every bee has their own look, so everyone knows who is who.  
-The flying instructions are only shared inside the hive.
-
-No one outside can see where we are flying.
-
----
+The flying instructions are only shared inside the hive. 
+No one outside can see where we are flying except our own followers in real-time.
 
 ---
 
@@ -90,7 +89,8 @@ This section explains the **exact security architecture**, **simply and precisel
 Hypercomb’s navigation is built on a **single 1-byte instruction**:
 
 
-
+bits:  7 6 | 5 4 | 3 | 2 1 0
+       M M | P P | D | N N N
 
 | Field | Meaning |
 |------|---------|
