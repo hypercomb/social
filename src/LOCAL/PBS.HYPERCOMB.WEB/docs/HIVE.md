@@ -13,7 +13,7 @@ The Hive **exists only while we are here together.**
 
 ---
 
-## 🐝 How Bees Move
+## 🐝 How Bees Movecd 
 
 Bees move using tiny **1-byte flying instructions** sent in real time.
 
