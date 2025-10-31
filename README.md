@@ -1,6 +1,4 @@
-# 🐝 Hypercomb  
-Beeing in the Hive
----
+# 🐝 Hypercomb  - Beeing in the Hive
 
 ## 🌼 What is Hypercomb?
 
