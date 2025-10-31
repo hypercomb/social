@@ -1,27 +1,55 @@
-# PBSHypercombWeb
+# 🐝 Hypercomb — Beeing in the Hive
 
-This project was generated with [Angular CLI](https://github.com/angular/angular-cli) version 13.3.4.
+hypercomb is a living, real-time knowledge space. meaning is shared by **moving together**, not by storing.  
+**presence = permission** • **1-byte steps** • **no global storage** • **optional dna for publishing**
 
-## Development server
+---
 
-Run `ng serve` for a dev server. Navigate to `http://localhost:4200/`. The application will automatically reload if you change any of the source files.
+## 🌼 What is Hypercomb?
+imagine a garden of ideas—every flower a discovery, every bee a participant.  
+a hive is not a profile, feed, or file; a hive is **presence**—a path we walk together in real time.
 
-## Code scaffolding
+---
 
-Run `ng generate component component-name` to generate a new component. You can also use `ng generate directive|pipe|service|class|guard|interface|enum|module`.
+## 🌱 Start Here
+- **The Hive** → [The Hive](./docs/HIVE.md)  
+- **Social Governance** → [Social Governance](./docs/SOCIAL-GOVERNANCE.md)  
+- **DNA (Optional Publishing)** → [DNA](./docs/DNA.md)
 
-## Build
+> **about dna**  
+> by default, nothing is stored. when a path should persist, it can be wrapped as a tiny byte-stream **path capsule (dna)** and, if desired, anchored to a public chain. who decides to publish is **policy-driven and pluggable** (creator opt-in • creator + cohort • community threshold) without changing the live protocol.
 
-Run `ng build` to build the project. The build artifacts will be stored in the `dist/` directory.
+---
 
-## Running unit tests
+## ⚙️ For Developers
+- **Architecture** → [Architecture](./docs/ARCHITECTURE.md)  
+- **Byte Protocol (1-byte navigation)** → [Byte Protocol](./docs/BYTE-PROTOCOL.md)  
+- **Session Nonce (live security)** → [Session Nonce](./docs/SECURITY.md)  
+- **Meadow Log (local memory)** → [Meadow Log](./docs/MEADOW-LOG.md)  
+- **Glossary** → [Glossary](./docs/GLOSSARY.md)
 
-Run `ng test` to execute the unit tests via [Karma](https://karma-runner.github.io).
+---
 
-## Running end-to-end tests
+## 🛡️ Governance & Safety
+- **Code of Conduct** → [Code of Conduct](./docs/CODE-OF-CONDUCT.md)  
+- **Security Policy** → [Security](./docs/SECURITY.md)  
+- **Stewardship Pledge (never for sale, always open)** → [Stewardship](./docs/STEWARDSHIP.md)  
+- **Trademarks** → [Trademarks](./docs/TRADEMARKS.md)
 
-Run `ng e2e` to execute the end-to-end tests via a platform of your choice. To use this command, you need to first add a package that implements end-to-end testing capabilities.
+---
 
-## Further help
+## 🤝 Contribute
+see: [Contributing](./docs/CONTRIBUTING.md)  
+sign your commits with the Developer Certificate of Origin (`git commit -s`) → [DCO](./docs/DEVELOPER-CERTIFICATE-OF-ORIGIN.md)
 
-To get more help on the Angular CLI use `ng help` or go check out the [Angular CLI Overview and Command Reference](https://angular.io/cli) page.
+---
+
+## 📜 Licensing
+- **code**: AGPL-3.0-only → [LICENSE.md](./docs/LICENSE.md)  
+- **docs/media**: CC BY-SA 4.0 → [LICENSE-DOCS.md](./docs/LICENSE-DOCS.md)
+
+public instances must link to their **corresponding source** (agpl requirement).
+
+---
+
+🐝 **the hive grows when we grow together.**
