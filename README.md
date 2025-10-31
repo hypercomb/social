@@ -1,6 +1,5 @@
 # 🐝 Hypercomb  
-A Shared Garden of Ideas
-
+Beeing in the Hive
 ---
 
 ## 🌼 What is Hypercomb?
