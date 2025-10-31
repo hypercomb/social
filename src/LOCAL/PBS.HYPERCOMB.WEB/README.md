@@ -9,7 +9,7 @@ hypercomb is a living, real-time knowledge space. meaning is shared by **moving 
 imagine a garden of ideas—every flower a discovery, every bee a participant.  
 a hive is not a profile, feed, or file; a hive is **presence**—a path we walk together in real time.
 
----
+--- 
 
 ## 🌱 Start Here
 - **The Hive** → [The Hive](./docs/HIVE.md)  
