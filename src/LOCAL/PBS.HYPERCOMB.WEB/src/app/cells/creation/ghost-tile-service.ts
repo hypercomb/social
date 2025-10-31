@@ -30,6 +30,7 @@ export class GhostTileService extends HypercombLayout {
             const cell = this.stack.cell()
             const created = await this.comb.modify.create(
                 {
+                    kind: 'Ghost',
                     hive: cell?.hive,
                     index: coordinate.index,
                     sourceId: cell?.cellId,
