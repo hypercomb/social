@@ -5,13 +5,10 @@
 Imagine a giant garden full of flowers.  
 Each flower holds something someone learned.  
 Maybe a picture, a story, a song, or a discovery.
-
 All your friends are little bees.  
 You are a bee too.  
 Every bee looks different, so we always know who is who.
-
 We fly together through the garden.
-
 This garden is called the **Hive**.
 
 ---
