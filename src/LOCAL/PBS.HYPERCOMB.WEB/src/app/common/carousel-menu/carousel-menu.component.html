@@ -1,8 +1,8 @@
 <div class="carousel-container">
-  <ng-container *ngIf="isVisible()">
+  @if (isVisible()) {
     <div class="carousel-menu">
       <div class="top">
-        <ng-container *ngFor="let hive of upper; trackBy: trackByName">
+        @for (hive of upper; track hive.name) {
           <div
             [hive]="hive"
             (click)="changeHiveByName(hive.name)"
@@ -11,7 +11,7 @@
             class="small-tile"
             [attr.data-hive]="hive.name"
           ></div>
-        </ng-container>
+        }
       </div>
 
       <div class="middle">
@@ -25,7 +25,7 @@
       </div>
 
       <div class="bottom">
-        <ng-container *ngFor="let hive of lower; trackBy: trackByName">
+        @for (hive of lower; track hive.name) {
           <div
             [hive]="hive"
             (click)="changeHiveByName(hive.name)"
@@ -34,8 +34,8 @@
             class="small-tile"
             [attr.data-hive]="hive.name"
           ></div>
-        </ng-container>
+        }
       </div>
     </div>
-  </ng-container>
+  }
 </div>
