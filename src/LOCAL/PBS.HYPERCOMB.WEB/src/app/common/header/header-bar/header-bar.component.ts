@@ -64,13 +64,13 @@ export class HeaderBarComponent extends HypercombData {
   public caption = computed(() => {
     const coordinate = this.detector.coordinate()
     const tile = this.detector.activeTile()
-    if (!coordinate) return 'Hypercomb'
+    if (!coordinate) return this.stack.hiveName()
 
     // lookup cell name if tile is present, otherwise fall back to coordinate only
     const cell = tile ? this.store.lookupData(tile.cellId) : undefined
-    const name = cell?.name ?? 'Hypercomb'
+    const name = cell?.name ?? this.stack.hiveName()
 
-    return `${name} index: ${coordinate.index} : ${coordinate.Location}`
+    return `${name}` //  index: ${coordinate.index} : ${coordinate.Location}
   })
 
   constructor() {

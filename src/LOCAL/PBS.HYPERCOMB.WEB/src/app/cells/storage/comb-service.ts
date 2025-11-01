@@ -148,7 +148,7 @@ export class CombService extends DataOrchestratorBase implements ICellService, I
   // updates
   // ─────────────────────────────────────────────
   public async updateCell(cell: Cell): Promise<number> {
-    if (cell.kind === 'Ghost') return 0
+    if (cell.kind === 'Ghost' || !cell.kind) return 0
     this.ensureValidKind(cell)
     const result = await this.repository.update(toCellEntity(cell))
     this.staging.stageReplace(cell)
