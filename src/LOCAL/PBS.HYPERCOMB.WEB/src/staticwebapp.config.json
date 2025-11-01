@@ -1,5 +1,6 @@
 {
   "routes": [
+    { "route": "/assets/*", "serve": "/assets/*" },
     {
       "route": "/api/*",
       "allowedRoles": ["authenticated"]

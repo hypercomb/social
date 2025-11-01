@@ -17,7 +17,6 @@ export class SettingsRepository extends RepositoryBase<any> {
         return record?.value as T
     }
 
-th
     // ─────────────────────────────────────────────
     // set setting by key
     // ─────────────────────────────────────────────

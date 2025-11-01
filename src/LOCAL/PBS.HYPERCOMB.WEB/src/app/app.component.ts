@@ -17,6 +17,7 @@ import { Hypercomb } from './core/mixins/abstraction/hypercomb.base'
 import { COMB_STORE } from './shared/tokens/i-comb-store.token'
 import { SELECTIONS } from './shared/tokens/i-selection.token'
 import { OpfsFileExplorerComponent } from './common/opfs/file-explorer/opfs-file-explorer.component'
+import { SampleDataLoaderService } from './database/sample-data-loader.service'
 
 @Component({
   standalone: true,
@@ -49,6 +50,7 @@ export class AppComponent extends Hypercomb implements OnInit {
   public readonly detector = inject(CoordinateDetector)
   public readonly es = inject(EditorService)
   private readonly selections = inject(SELECTIONS)
+  private readonly sampleDataLoader = inject(SampleDataLoaderService)
   public readonly isMoveEnabled = computed(() => (this.state.mode() & HypercombMode.Move) !== 0)
   public readonly isYoutubeViewerActive = computed(() =>
     (this.state.mode() & HypercombMode.YoutubeViewer) === HypercombMode.YoutubeViewer
@@ -82,7 +84,9 @@ export class AppComponent extends Hypercomb implements OnInit {
   public get isPhotoViewerActive(): boolean { return this.state.hasMode(HypercombMode.ViewingPhoto) }
   public get isOpfsMode(): boolean { return this.state.hasMode(HypercombMode.OpfsFileExplorer) }
 
-  ngOnInit() {
+  async ngOnInit() {
+    await this.sampleDataLoader.loadSampleDataIfNeeded();
+
     // Register CommandModeBlockOpenLink policy: true if any command mode is active
     this.policy.registerSignal(
       POLICY.CommbandModeActive,
