@@ -1,32 +1,47 @@
 ﻿import { Injectable, inject } from "@angular/core"
-import { HiveResolutionType, IDexieHive } from "../hive-models"
-import { HiveLoaderBase } from "./hive-loader.base"
+import { IDexieHive, HiveResolutionType } from "../hive-models"
 import { HiveScout } from "../hive-scout"
-import { HIVE_STORE } from "src/app/shared/tokens/i-hive-store.token"
+import { HiveLoaderBase } from "./hive-loader.base"
+import { OpfsHiveService } from "../storage/opfs-hive-service"
 
-/**
- * Construct a fallback Scout.
- * This should only be called if no other resolver succeeded.
- */
-@Injectable({ providedIn: 'root' })
+@Injectable({ providedIn: "root" })
 export class FallbackNameResolver extends HiveLoaderBase {
-    private hive: IDexieHive | undefined
-    public override enabled = async (hiveName: string): Promise<boolean> => {
-        this.logResolution(`FallbackNameResolver enabled for ${hiveName}`)
-        this.hive = this.store.first() // signal â†’ array of Cell
-        const result = !!this.hive
-        this.logResolution(`FallbackNameResolver enabled result for ${hiveName}: ${result}`)
-        return result
+  private readonly opfs = inject(OpfsHiveService)
+  private hive: IDexieHive | null = null
+  public override readonly type = HiveResolutionType.Fallback
+
+  private readonly isBlank = (s: string | null | undefined): boolean => !s || !s.trim()
+  private readonly norm = (s: string): string => s.trim()
+
+  public override enabled = async (hiveName: string): Promise<boolean> => {
+    if (this.isBlank(hiveName)) {
+      this.logResolution("fallback disabled: empty hive name")
+      return false
     }
-    public override resolve(hiveName: string): Promise<HiveScout | null> | HiveScout | null {                // only trigger if nothing else resolved
-        this.logResolution(`FallbackNameResolver resolving for ${hiveName}`)
-        const scout = HiveScout.fallback(hiveName)
-        scout.set(FallbackNameResolver, this.hive!)
-        this.logResolution(`FallbackNameResolver resolved for ${scout.name}`)
-        return scout
-    }
-    public override readonly type = HiveResolutionType.Fallback
-    private readonly store = inject(HIVE_STORE)
+
+    const name = this.norm(hiveName)
+    this.logResolution(`FallbackNameResolver enabled for ${name}`)
+
+    // returns IDexieHive | null
+    this.hive = await this.opfs.getFirstHive()
+
+    const result = !!this.hive
+    this.logResolution(
+      result
+        ? `FallbackNameResolver will use first OPFS hive: ${this.hive!.name}`
+        : "FallbackNameResolver disabled: no OPFS hives found"
+    )
+    return result
+  }
+
+  public override resolve = async (hiveName: string): Promise<HiveScout | null> => {
+    const name = this.norm(hiveName)
+    this.logResolution(`FallbackNameResolver resolving for ${name}`)
+
+    // no checks here because enabled() guarantees a valid hive
+    const scout = HiveScout.fallback(this.hive!.name)
+    scout.set(FallbackNameResolver, this.hive!)
+    this.logResolution(`FallbackNameResolver resolved fallback for ${scout.name}`)
+    return scout
+  }
 }
-
-
