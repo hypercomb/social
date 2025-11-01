@@ -1,7 +1,7 @@
 ﻿import { inject, Injectable } from "@angular/core"
 import { HiveResolutionType } from "../hive-models"
 import { Router } from "@angular/router"
-import { GenusBootstrapper } from "../data-resolvers/genus-data.loader"
+import { GenusBootstrapper } from "../hive-loaders/genus-data.loader"
 import { HiveScout } from "../hive-scout"
 import { HiveLoaderBase } from "./hive-loader.base"
 
