@@ -110,25 +110,17 @@ export class TouchPanningService extends PixiDataServiceBase {
       if (!container) return
 
       if (!this.anchored) {
-        // Fix anchor jump: set lastX/lastY relative to container position
-        const container = this.pixi.container;
-        if (container) {
-          this.lastX = move.clientX - container.position.x;
-          this.lastY = move.clientY - container.position.y;
-        } else {
-          this.lastX = move.clientX;
-          this.lastY = move.clientY;
-        }
-        this.crossed = false;
-        this._cancelled.set(false);
-        this.navigation.cancelled = false;
-        this.anchored = true;
-        return;
+        this.lastX = move.clientX
+        this.lastY = move.clientY
+        this.crossed = false
+        this._cancelled.set(false)
+        this.navigation.cancelled = false
+        this.anchored = true
+        return
       }
 
-      // Use the container variable already declared above
-      const dx = move.clientX - (container ? container.position.x + this.lastX : this.lastX);
-      const dy = move.clientY - (container ? container.position.y + this.lastY : this.lastY);
+      const dx = move.clientX - this.lastX
+      const dy = move.clientY - this.lastY
       if (dx === 0 && dy === 0) return
 
       if (!this.crossed) {
