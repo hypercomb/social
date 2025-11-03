@@ -45,15 +45,29 @@ export class TouchPanningService extends PixiDataServiceBase {
     return !!down && down.pointerType === "touch"
   })
 
-  public readonly canPan = computed(() =>
-    this.enabled() &&
-    this.focused() &&
-    !this.suspendUntilUp() &&
-    this.ps.dragOver() &&
-    (this.keyboard.spaceDown() || this.isTouchPan()) &&
-    !this.selections.canSelect() &&
-    !this.manager.locked()
-  )
+  public readonly canPan = computed(() => {
+    // true if mouse is over canvas or we currently have at least one touch down
+    const over = this.ps.dragOver() || (this.isTouchPan() && this.ps.activePointers().size > 0)
+
+    // touch: allow single-finger pan without spacebar
+    if (this.isTouchPan()) {
+      return this.enabled()
+        && this.focused()
+        && !this.suspendUntilUp()
+        && over
+        && this.ps.activePointers().size === 1   // single touch only → two fingers become pinch
+        && !this.manager.locked()
+    }
+
+    // mouse / pen: spacebar + no selection
+    return this.enabled()
+      && this.focused()
+      && !this.suspendUntilUp()
+      && this.ps.dragOver()
+      && this.keyboard.spaceDown()
+      && !this.selections.canSelect()
+      && !this.manager.locked()
+  })
 
   constructor() {
     super()
@@ -87,7 +101,10 @@ export class TouchPanningService extends PixiDataServiceBase {
       if (!move || !this.canPan()) return
 
       const isTouch = move.pointerType === "touch"
-      if (isTouch && this.ps.activePointers().size === 0) return
+      if (isTouch) {
+        // bail if we transitioned into a pinch
+        if (this.ps.activePointers().size !== 1) return
+      }
 
       const container = this.pixi.container
       if (!container) return
@@ -106,7 +123,6 @@ export class TouchPanningService extends PixiDataServiceBase {
       const dy = move.clientY - this.lastY
       if (dx === 0 && dy === 0) return
 
-      // threshold → cancel click actions once
       if (!this.crossed) {
         const t = this.settings.panThreshold
         if (Math.abs(dx) > t || Math.abs(dy) > t) {
@@ -162,8 +178,8 @@ export class TouchPanningService extends PixiDataServiceBase {
     canvas.style.touchAction = 'none'
     canvas.style.userSelect = 'none'
 
-    ;(container as any).style ??= {}
-    ;(container as any).style.touchAction = 'none'
+      ; (container as any).style ??= {}
+      ; (container as any).style.touchAction = 'none'
   }
 
   private clearAnchor() {

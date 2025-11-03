@@ -1,7 +1,6 @@
 ﻿import { Injectable, effect, inject } from "@angular/core"
 import { ShortcutPixiRegistrations } from "src/app/shortcuts/shortcut-registration-base"
 import { PointerState } from "src/app/state/input/pointer-state"
-import { PinchZoomService } from "./pinch-zoom-service"
 import { TouchPanningService } from "./touch-panning-service"
 
 @Injectable({ providedIn: 'root' })
