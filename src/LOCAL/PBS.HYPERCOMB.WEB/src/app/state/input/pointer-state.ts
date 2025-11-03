@@ -138,12 +138,13 @@ export class PointerState {
         // Clear dragOver for touch
         if (e.pointerType === 'touch') {
             this._dragOver.set(false)
-            console.debug('[PointerState] Touch pointerUp: dragOver forced false')
+            this._activePointers.set(new Set()) // ensure all pointers cleared
+            console.debug('[PointerState] Touch pointerUp: dragOver forced false, activePointers cleared')
         }
     }
 
     private handlePointerCancel = (e: PointerEvent) => {
-        this.releaseCapture(e)
+        this.releaseCapture(e)  
         this.updateActivePointers(s => {
             const next = new Set(s)
             next.delete(e.pointerId)
@@ -151,6 +152,12 @@ export class PointerState {
         })
         this.pointerCancelEvent.set(e)
         this.cancelSeq.update(v => v + 1)
+        // Clear dragOver for touch
+        if (e.pointerType === 'touch') {
+            this._dragOver.set(false)
+            this._activePointers.set(new Set()) // ensure all pointers cleared
+            console.debug('[PointerState] Touch pointerCancel: dragOver forced false, activePointers cleared')
+        }
     }
 
     private handlePointerEnter = () => this._dragOver.set(true)
