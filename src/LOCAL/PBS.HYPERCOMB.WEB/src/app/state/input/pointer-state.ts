@@ -94,6 +94,11 @@ export class PointerState {
         this.triggerDetect()
         this.pointerDownEvent.set(e)
         this.downSeq.update(v => v + 1)
+        // Force dragOver for touch
+        if (e.pointerType === 'touch') {
+            this._dragOver.set(true)
+            console.debug('[PointerState] Touch pointerDown: dragOver forced true')
+        }
     }
 
     private handlePointerMove = (e: PointerEvent) => {
@@ -108,6 +113,11 @@ export class PointerState {
             const out = new Point()
             this.container()!.worldTransform.applyInverse(global, out)
             this.localPosition.set(out)
+        }
+        // Force dragOver for touch
+        if (e.pointerType === 'touch') {
+            this._dragOver.set(true)
+            console.debug('[PointerState] Touch pointerMove: dragOver forced true')
         }
     }
 
@@ -125,6 +135,11 @@ export class PointerState {
 
         this.pointerUpEvent.set(e)
         this.upSeq.update(v => v + 1)
+        // Clear dragOver for touch
+        if (e.pointerType === 'touch') {
+            this._dragOver.set(false)
+            console.debug('[PointerState] Touch pointerUp: dragOver forced false')
+        }
     }
 
     private handlePointerCancel = (e: PointerEvent) => {
