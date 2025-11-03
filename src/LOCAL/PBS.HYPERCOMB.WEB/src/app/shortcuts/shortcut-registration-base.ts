@@ -10,7 +10,7 @@ export abstract class ShortcutRegistrations
 export abstract class ShortcutDataRegistrations
     extends ShortcutMixin(HypercombData) { }
 
-export abstract class ShortcutPixiRegistrations
+export abstract class   ShortcutPixiRegistrations
     extends ShortcutMixin(PixiServiceBase) { }
 
 

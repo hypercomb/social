@@ -78,6 +78,10 @@ export class ZoomService extends PixiDataServiceBase {
         const location = this.screen.getWindowCenter()
         this.applyZoom(.5, location)
     }
+
+    public get currentScale(): number {
+        return this.pixi.container?.scale.x ?? 1;
+    }
 }
 
 
