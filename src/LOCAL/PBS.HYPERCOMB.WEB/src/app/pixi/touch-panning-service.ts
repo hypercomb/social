@@ -130,6 +130,8 @@ export class TouchPanningService extends PixiDataServiceBase {
           this._cancelled.set(true)
           this.navigation.cancelled = true
           this.events.panningThresholdAttained()
+          // Dispatch a custom drag-cancel-click event for global listeners
+          this.state.setCancelled(true)
         }
       }
 

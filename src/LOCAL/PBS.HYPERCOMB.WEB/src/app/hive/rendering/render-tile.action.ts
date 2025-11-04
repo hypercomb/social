@@ -43,10 +43,11 @@ export class RenderTileAction extends ActionBase<CellContext> {
   // ─────────────────────────────────────────────────────────────
 
   public override enabled = async (payload: CellContext): Promise<boolean> => {
+   
     // Check if the cell is editable
     const cell = payload.cell
-    if(cell.kind === 'Hive') return false
-    return true
+    if(cell.kind === 'Hive') return false 
+    return !this.state.cancelled()
   }
 
   // render or update one tile, deduped by cellId, into its layer container

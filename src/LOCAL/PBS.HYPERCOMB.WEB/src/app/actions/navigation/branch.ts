@@ -11,18 +11,15 @@ export class BranchAction extends ActionBase<CellContext> {
   public override label = "Set Branch"
 
   public override enabled = async (payload: CellContext): Promise<boolean> => {
-    return payload.cell.isBranch
+    return payload.cell.isBranch &&  !this.state.cancelled()
   }
 
   public override run = async (payload: CellContext) => {
     payload.event?.stopPropagation()
     payload.event?.preventDefault()
-
-    this.state.cancelOperation()
     this.combstore.invalidate()
     this.stack.push(payload.cell!)
     this.navigation.cancelled = true
     setTimeout(() => this.menu.hide(), 10)
-
   }
 }
