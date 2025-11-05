@@ -72,21 +72,30 @@ export class TouchContextSwitchService extends ShortcutPixiRegistrations {
     })
   }
 
-  private updateContext() {
-    if(!this.initialized ) return
+private updateContext() {
+  if (!this.initialized) return;
+  const count = this.activePointers.size;
+  const latestDown = this.ps.pointerDownEvent(); // Most recent down event
+  const isTouch = latestDown?.pointerType === 'touch';
+  const touch = this.panning.getTouch();
+  const mouse = this.panning.getSpacebar();
 
-    const count = this.activePointers.size
-    const touch = this.panning.getTouch()
-    const mouse = this.panning.getMouse()
-
-    if (count === 1) {
-      touch.enable()
-      mouse.disable() // optional: prevent conflict
-    } else if (count >= 2) {
-      touch.disable()
+  if (count === 1) {
+    if (isTouch) {
+      touch.enable();
+      mouse.disable();
     } else {
-      // restore normal mouse operation when all touches end
-      mouse.enable()
+      // Mouse: do nothing (let PanningManager handle) or explicitly mouse.enable()
+      mouse.enable();
+      touch.disable();
     }
+  } else if (count >= 2) {
+    // Multi-touch: disable both for pinch
+    touch.disable();
+    mouse.disable();
+  } else {
+    mouse.enable();
+    touch.enable();
   }
+}
 }

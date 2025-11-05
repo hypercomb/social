@@ -9,6 +9,8 @@ import { ContextStack } from "src/app/core/controller/context-stack"
 
 @Injectable({ providedIn: 'root' })
 export class HypercombState {
+  // Track panning state
+  public panning = false;
   private _batchCompleteSeq = signal(0)
   public readonly batchCompleteSeq = this._batchCompleteSeq.asReadonly()
 

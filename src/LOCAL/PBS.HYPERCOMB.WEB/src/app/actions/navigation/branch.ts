@@ -11,7 +11,13 @@ export class BranchAction extends ActionBase<CellContext> {
   public override label = "Set Branch"
 
   public override enabled = async (payload: CellContext): Promise<boolean> => {
-    return payload.cell.isBranch &&  !this.state.cancelled()
+    // Skip if panning is active
+    if (this.state.panning) {
+      this.state.panning = false;
+      return false;
+    }
+    
+    return payload.cell.isBranch && !this.state.cancelled();
   }
 
   public override run = async (payload: CellContext) => {
