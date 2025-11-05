@@ -16,16 +16,15 @@ export class TouchPanningService extends PixiDataServiceBase {
   private readonly manager = inject(LayoutManager)
   private readonly navigation = inject(LinkNavigationService)
   private readonly selections = inject(SELECTIONS)
-
-  // gesture flags
+  private initialized = false
   private anchored = false
   private crossed = false
 
-  // anchor data captured on first frame
   private anchorVecX = 0
   private anchorVecY = 0
   private startPosX = 0
   private startPosY = 0
+  private capturedPointerId: number | null = null
 
   private readonly enabled = signal(true)
   private readonly _cancelled = signal(false)
@@ -50,7 +49,6 @@ export class TouchPanningService extends PixiDataServiceBase {
   public readonly canPan = computed(() => {
     const over = this.ps.dragOver() || (this.isTouchPan() && this.ps.activePointers().size > 0)
 
-    // touch: single finger, no spacebar
     if (this.isTouchPan()) {
       return this.enabled()
         && this.focused()
@@ -60,7 +58,6 @@ export class TouchPanningService extends PixiDataServiceBase {
         && !this.manager.locked()
     }
 
-    // mouse / pen: spacebar + no selection
     return this.enabled()
       && this.focused()
       && !this.suspendUntilUp()
@@ -77,6 +74,11 @@ export class TouchPanningService extends PixiDataServiceBase {
     window.addEventListener("blur", () => {
       this.anchored = false
       this.suspendUntilUp.set(true)
+      const canvas = this.pixi.app?.canvas as HTMLCanvasElement | undefined
+      if (this.capturedPointerId != null && canvas?.releasePointerCapture) {
+        try { canvas.releasePointerCapture(this.capturedPointerId) } catch { }
+        this.capturedPointerId = null
+      }
     })
 
     // unsuspend on next pointer up
@@ -92,56 +94,72 @@ export class TouchPanningService extends PixiDataServiceBase {
       if (!this.keyboard.spaceDown()) this.clearAnchor()
     })
 
-    // pointer move → pan using center-referenced delta (scale-aware)
+    // 🔹 pointer down → set anchor immediately
+    effect(() => {
+      if (this.ps.downSeq() === 0) return
+      const down = this.ps.pointerDownEvent()
+      if (!down || !this.canPan()) return
+
+      const container = this.pixi.container
+      const app = this.pixi.app
+      if (!container || !app) return
+      const parent = container.parent ?? container
+
+      const downGlobal = this.domToGlobal(down)
+      const centerGlobal = this.canvasCenterGlobal()
+
+      const pointerLocal = parent.worldTransform.applyInverse(downGlobal, new Point())
+      const centerLocal = parent.worldTransform.applyInverse(centerGlobal, new Point())
+
+      // capture anchor + start position at the exact down point
+      this.anchorVecX = pointerLocal.x - centerLocal.x
+      this.anchorVecY = pointerLocal.y - centerLocal.y
+      this.startPosX = container.position.x
+      this.startPosY = container.position.y
+      this.crossed = false
+      this._cancelled.set(false)
+      this.navigation.cancelled = false
+      this.anchored = true
+
+      // take dom pointer capture so moves don't get lost
+      try {
+        const canvas = app.canvas as HTMLCanvasElement
+        if (down.pointerId != null && canvas?.setPointerCapture) {
+          canvas.setPointerCapture(down.pointerId)
+          this.capturedPointerId = down.pointerId
+        }
+        down.preventDefault?.()
+      } catch { }
+    })
+
+    // pointer move → apply delta
     effect(() => {
       if (this.ps.moveSeq() === 0) return
       const move = this.ps.pointerMoveEvent()
       if (!move || !this.canPan()) return
       if (move.pointerType === "touch" && this.ps.activePointers().size !== 1) return
+      if (!this.anchored) return
 
       const container = this.pixi.container
       const app = this.pixi.app
       if (!container || !app) return
 
       const parent = container.parent ?? container
-
-      // current pointer and canvas center in renderer-global pixels
       const currGlobal = this.domToGlobal(move)
       const centerGlobal = this.canvasCenterGlobal()
 
-      // map both to parent-local
       const pointerLocal = parent.worldTransform.applyInverse(currGlobal, new Point())
-      const centerLocal  = parent.worldTransform.applyInverse(centerGlobal, new Point())
+      const centerLocal = parent.worldTransform.applyInverse(centerGlobal, new Point())
 
-      // first frame: capture anchor and starting position
-      if (!this.anchored) {
-        this.anchorVecX = pointerLocal.x - centerLocal.x
-        this.anchorVecY = pointerLocal.y - centerLocal.y
-        this.startPosX = container.position.x
-        this.startPosY = container.position.y
-        this.crossed = false
-        this._cancelled.set(false)
-        this.navigation.cancelled = false
-        this.anchored = true
-        return
-      }
-
-      // current pointer vector from center
       const currVecX = pointerLocal.x - centerLocal.x
       const currVecY = pointerLocal.y - centerLocal.y
 
-      // delta from anchor
       const dX = currVecX - this.anchorVecX
       const dY = currVecY - this.anchorVecY
 
-      // 🔹 adjust for current world scale so motion matches pointer speed
-      const scaleX = parent.worldTransform.a
-      const scaleY = parent.worldTransform.d
-      const adjDX = dX / scaleX
-      const adjDY = dY / scaleY
-
-      const nextX = this.startPosX + adjDX
-      const nextY = this.startPosY + adjDY
+      // compute next position directly in parent-local space (no double scale)
+      const nextX = this.startPosX + dX
+      const nextY = this.startPosY + dY
 
       // threshold check
       if (!this.crossed) {
@@ -154,10 +172,8 @@ export class TouchPanningService extends PixiDataServiceBase {
         }
       }
 
-      // apply
       container.position.set(nextX, nextY)
 
-      // persist to cell if present
       const entry = this.stack.top()
       const cell = entry?.cell
       if (cell) {
@@ -178,6 +194,14 @@ export class TouchPanningService extends PixiDataServiceBase {
 
       this.navigation.setResetTimeout()
       this.saveTransform()
+
+      // release dom pointer capture if held
+      const canvas = this.pixi.app?.canvas as HTMLCanvasElement | undefined
+      if (this.capturedPointerId != null && canvas?.releasePointerCapture) {
+        try { canvas.releasePointerCapture(this.capturedPointerId) } catch { }
+        this.capturedPointerId = null
+      }
+
       this.clearAnchor()
     })
   }
@@ -199,11 +223,10 @@ export class TouchPanningService extends PixiDataServiceBase {
     canvas.style.touchAction = "none"
     canvas.style.userSelect = "none"
 
-    ;(container as any).style ??= {}
-    ;(container as any).style.touchAction = "none"
+      ; (container as any).style ??= {}
+      ; (container as any).style.touchAction = "none"
   }
 
-  // dom (css px) → renderer global (device px)
   private domToGlobal(e: PointerEvent): Point {
     const app = this.pixi.app!
     const view = app.canvas as HTMLCanvasElement
@@ -213,7 +236,6 @@ export class TouchPanningService extends PixiDataServiceBase {
     return new Point(x, y)
   }
 
-  // canvas center in renderer global (device px)
   private canvasCenterGlobal(): Point {
     const app = this.pixi.app!
     const view = app.canvas as HTMLCanvasElement
@@ -221,9 +243,21 @@ export class TouchPanningService extends PixiDataServiceBase {
   }
 
   private clearAnchor() {
+    setTimeout(() => this.initialized = true, 50)
+    if (!this.initialized) return
+
     this.anchored = false
     this.crossed = false
     this._cancelled.set(false)
+
+    if (!this.pixi.app?.canvas) return
+
+    const canvas = this.pixi.app?.canvas as HTMLCanvasElement | undefined
+
+    if (this.capturedPointerId != null && canvas?.releasePointerCapture) {
+      try { canvas.releasePointerCapture(this.capturedPointerId) } catch { }
+      this.capturedPointerId = null
+    }
   }
 
   public enable = (): void => this.enabled.set(true)

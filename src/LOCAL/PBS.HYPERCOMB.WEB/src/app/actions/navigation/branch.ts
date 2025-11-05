@@ -15,11 +15,12 @@ export class BranchAction extends ActionBase<CellContext> {
   }
 
   public override run = async (payload: CellContext) => {
-    payload.event?.stopPropagation()
-    payload.event?.preventDefault()
-    this.combstore.invalidate()
-    this.stack.push(payload.cell!)
-    this.navigation.cancelled = true
-    setTimeout(() => this.menu.hide(), 10)
+    return
+    // payload.event?.stopPropagation()
+    // payload.event?.preventDefault()
+    // this.combstore.invalidate()
+    // this.stack.push(payload.cell!)
+    // this.navigation.cancelled = true
+    // setTimeout(() => this.menu.hide(), 10)
   }
 }
