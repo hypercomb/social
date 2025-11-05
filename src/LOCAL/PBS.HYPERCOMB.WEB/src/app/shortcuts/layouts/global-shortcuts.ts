@@ -33,17 +33,6 @@ export const globalShortcuts: IShortcut[] = [
     keys: [[{ key: "?", ctrl: true, shift: true }]],
     global: true
   },
-
-  // ─────────────────────────────────────────────
-  // OPFS EXPORT SHORTCUTS
-  // ─────────────────────────────────────────────
-  {
-    cmd: "db.export",
-    description: "Export current hive + background as .zip",
-    keys: [[{ key: "e", ctrl: true, shift: true }]],
-    global: true,
-    category: "Utility"
-  },
   {
     cmd: "db.export-all",
     description: "Export **all** hives + images as one .zip",
