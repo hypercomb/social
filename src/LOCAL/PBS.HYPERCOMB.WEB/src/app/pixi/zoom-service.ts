@@ -32,7 +32,7 @@ export class ZoomService extends PixiDataServiceBase {
         // 3) where did that local point end up globally after scaling?
         const postGlobal = container.toGlobal(preLocal)
 
-        // 4) shift container so the zoom pivots around (px, py)
+        // 4) shift container so the zoom pivots around (px, py)    
         container.position.set(
             container.x + (px - postGlobal.x),
             container.y + (py - postGlobal.y)
@@ -77,6 +77,10 @@ export class ZoomService extends PixiDataServiceBase {
     public reset() {
         const location = this.screen.getWindowCenter()
         this.applyZoom(.5, location)
+    }
+
+    public get currentScale(): number {
+        return this.pixi.container?.scale.x ?? 1;
     }
 }
 

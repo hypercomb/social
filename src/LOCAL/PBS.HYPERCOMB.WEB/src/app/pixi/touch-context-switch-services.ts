@@ -1,20 +1,27 @@
-﻿import { Injectable, effect, inject } from "@angular/core"
+﻿// src/app/pixi/touch-context-switch-services.ts (Updated: scale pinch center using pixi.app)
+import { Injectable, effect, inject } from "@angular/core"
 import { ShortcutPixiRegistrations } from "src/app/shortcuts/shortcut-registration-base"
 import { PointerState } from "src/app/state/input/pointer-state"
-import { PinchZoomService } from "./pinch-zoom-service"
-import { TouchPanningService } from "./touch-panning-service"
+import { PanningManager } from "./panning-manager"
+import { ZoomService } from "./zoom-service"
+import { Point } from "pixi.js"
+import { KeyboardService } from "../interactivity/keyboard/keyboard-service"
 
-@Injectable({ providedIn: 'root' })
+@Injectable({ providedIn: "root" })
 export class TouchContextSwitchService extends ShortcutPixiRegistrations {
-  private readonly touch = inject(TouchPanningService)
   private readonly ps = inject(PointerState)
-
+  private readonly zoom = inject(ZoomService)
+  private readonly panning = inject(PanningManager)
   private activePointers = new Set<number>()
+  private initialized = false
+  private pinchStartDist: number | null = null
+  private pinchStartScale: number | null = null
+  private readonly keyboard = inject(KeyboardService)
 
   constructor() {
     super()
 
-    // add pointer on down
+    // Add pointer on down
     effect(() => {
       const e = this.ps.pointerDownEvent()
       if (!e) return
@@ -22,59 +29,87 @@ export class TouchContextSwitchService extends ShortcutPixiRegistrations {
       this.updateContext()
     })
 
-    // remove pointer on up
+    // Remove pointer on up or cancel
     effect(() => {
-      const e = this.ps.pointerUpEvent()
+      const e = this.ps.pointerUpEvent() ?? this.ps.pointerCancelEvent()
       if (!e) return
       this.activePointers.delete(e.pointerId)
       this.updateContext()
-    })
-
-    // remove pointer on cancel
-    effect(() => {
-      const e = this.ps.pointerCancelEvent()
-      if (!e) return
-      this.activePointers.delete(e.pointerId)
-      this.updateContext()
-    })
-
-
-    effect(() => {
-      const e = this.ks.keyUp() 
-      if (!e) return
-
-      this.ks.when(e).only('Space')
-      // spacebar held down â†’ enable touch
-      e.preventDefault()
-      this.touch.enable()
-    })
-
-    effect(() => {
-      if (localStorage.getItem('professional')) {
-
-        const canvas = this.pixi.app?.canvas as HTMLCanvasElement | undefined
-        if (!canvas) return
-
-        // disable browser gestures
-        canvas.style.touchAction = 'none'
+      if (this.activePointers.size < 2) {
+        this.pinchStartDist = null
+        this.pinchStartScale = null
       }
+    })
+
+    // Pinch zoom detection (scale center to canvas-relative renderer coords)
+    effect(() => {
+      if (this.activePointers.size === 2 && this.pixi.app) {
+        const app = this.pixi.app
+        const positions = Array.from(this.activePointers)
+          .map(id => this.ps.pointerPositions().get(id))
+          .filter(Boolean) as [{ x: number, y: number }, { x: number, y: number }] | []
+        if (positions.length === 2) {
+          const [p1, p2] = positions
+          const rect = app.canvas.getBoundingClientRect()
+          const res = app.renderer.resolution
+          const centerScreenX = (p1.x + p2.x) / 2
+          const centerScreenY = (p1.y + p2.y) / 2
+          const centerX = (centerScreenX - rect.left) * res
+          const centerY = (centerScreenY - rect.top) * res
+          const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y)
+          if (this.pinchStartDist === null) {
+            this.pinchStartDist = dist
+            this.pinchStartScale = this.zoom.currentScale
+          } else {
+            const scaleFactor = dist / this.pinchStartDist
+            const newScale = Math.max(0.2, Math.min(10, (this.pinchStartScale ?? 1) * scaleFactor))
+            this.zoom.setZoom(newScale, { x: centerX, y: centerY })
+          }
+        }
+      }
+    })
+
+    // optional: disable browser pinch/zoom
+    effect(() => {
+      setTimeout(() => {
+        this.initialized = true
+      }, 50)
+
+      if (!this.initialized) return
+      const canvas = this.pixi.app?.canvas as HTMLCanvasElement | undefined
+      if (!canvas) return
+      canvas.style.touchAction = "none"
     })
   }
 
-  // private helpers
+  // In updateContext()
   private updateContext() {
+    // ---- SPACE ALWAYS OVERRIDES EVERYTHING ----
+    if (this.keyboard.spaceDown()) {
+      this.panning.getSpacebar().enable()
+      this.panning.getTouch().disable()
+      return
+    }
+
+    if (!this.initialized) return
+
     const count = this.activePointers.size
+    const latestDown = this.ps.pointerDownEvent()
+    const isTouch = latestDown?.pointerType === 'touch'
 
-    // 1 pointer â†’ pan 2+ pointers â†’ pinch 0 â†’ let things settle
+    const touchSrv = this.panning.getTouch()
+    const mouseSrv = this.panning.getSpacebar()
+
     if (count === 1) {
-      this.touch.enable()
+      if (isTouch) { touchSrv.enable(); mouseSrv.disable() }
+      else { mouseSrv.enable(); touchSrv.disable() }
     } else if (count >= 2) {
-      this.touch.disable()
-
+      touchSrv.disable()
+      mouseSrv.disable()
     } else {
-      // no pointers: allow services to keep their last state your pinch/pan services already end gracefully
+      // no pointers → both ready for the next interaction
+      mouseSrv.enable()
+      touchSrv.enable()
     }
   }
 }
-
-
