@@ -1,75 +1,226 @@
-﻿import { Injectable, signal, computed } from "@angular/core"
+﻿import { Injectable, computed, effect, inject, signal } from "@angular/core"
 import { Point } from "pixi.js"
-import { ScreenState } from "src/app/state/interactivity/screen-state"
-
-declare const document: any
+import { PixiDataServiceBase } from "src/app/database/pixi-data-service-base"
+import { LinkNavigationService } from "src/app/navigation/link-navigation-service"
+import { PointerState } from "src/app/state/input/pointer-state"
+import { EventDispatcher } from "../helper/events/event-dispatcher"
+import { LayoutManager } from "../core/controller/layout-manager"
+import { KeyboardService } from "../interactivity/keyboard/keyboard-service"
+import { SELECTIONS } from "../shared/tokens/i-selection.token"
 
 @Injectable({ providedIn: 'root' })
-export class ScreenService {
-  private readonly _isFullScreen = signal(false)
-  public readonly isFullScreen = this._isFullScreen.asReadonly()
+export class TouchPanningService extends PixiDataServiceBase {
+  private readonly keyboard = inject(KeyboardService)
+  private readonly ps = inject(PointerState)
+  private readonly events = inject(EventDispatcher)
+  private readonly manager = inject(LayoutManager)
+  private readonly navigation = inject(LinkNavigationService)
+  private readonly selections = inject(SELECTIONS)
 
-  private readonly _windowSize = signal<{ width: number; height: number }>({
-    width: window.innerWidth,
-    height: window.innerHeight,
+  // gesture flags
+  private anchored = false
+  private crossed = false
+
+  // last pointer in renderer global pixels (device px). we always compute deltas from this.
+  private lastGlobal: Point | null = null
+
+  // position at anchor (for threshold comparison)
+  private startPosX = 0
+  private startPosY = 0
+
+  // enable / disable
+  private readonly enabled = signal(true)
+
+  // reactive cancel signal (pan abort)
+  private readonly _cancelled = signal(false)
+  public readonly cancelled = this._cancelled.asReadonly()
+
+  // focus gate
+  private readonly focused = (() => {
+    const s = signal<boolean>(document.hasFocus())
+    const on = () => s.set(true)
+    const off = () => s.set(false)
+    window.addEventListener("focus", on)
+    window.addEventListener("blur", off)
+    return s.asReadonly()
+  })()
+
+  private suspendUntilUp = signal(false)
+
+  private readonly isTouchPan = computed(() => {
+    const down = this.ps.pointerDownEvent()
+    return !!down && down.pointerType === "touch"
   })
 
-  public readonly windowSize = this._windowSize.asReadonly()
+  public readonly canPan = computed(() => {
+    const over = this.ps.dragOver() || (this.isTouchPan() && this.ps.activePointers().size > 0)
 
-  public readonly windowWidth = computed(() => this._windowSize().width)
-  public readonly windowHeight = computed(() => this._windowSize().height)
+    // touch: single finger without space
+    if (this.isTouchPan()) {
+      return this.enabled()
+        && this.focused()
+        && !this.suspendUntilUp()
+        && over
+        && this.ps.activePointers().size === 1
+        && !this.manager.locked()
+    }
 
-  public readonly screenSize = signal<{ width: number; height: number }>({
-    width: screen.width,
-    height: screen.height,
+    // mouse / pen: space + no selection
+    return this.enabled()
+      && this.focused()
+      && !this.suspendUntilUp()
+      && this.ps.dragOver()
+      && this.keyboard.spaceDown()
+      && !this.selections.canSelect()
+      && !this.manager.locked()
   })
 
-  public readonly width = computed(() => this.screenSize().width)
-  public readonly height = computed(() => this.screenSize().height)
+  constructor() {
+    super()
 
-  public readonly offsetX = computed(() => (screen.width - window.outerWidth) / 2)
-  public readonly offsetY = computed(() => (screen.height - window.outerHeight) / 2)
+    // suspend on blur
+    window.addEventListener("blur", () => {
+      this.anchored = false
+      this.suspendUntilUp.set(true)
+    })
 
-  constructor(private screenState: ScreenState) {
-    // sync external state if you want to keep it around
-    this._isFullScreen.set(this.screenState.isFullScreen)
+    // unsuspend on next pointer up
+    effect(() => {
+      if (this.ps.upSeq() === 0) return
+      if (!this.focused()) return
+      if (!this.suspendUntilUp()) return
+      this.suspendUntilUp.set(false)
+    })
 
-    // keep windowSize in sync with resize events
-    window.addEventListener('resize', () => {
-      this._windowSize.set({ width: window.innerWidth, height: window.innerHeight })
+    // reset anchor when space is released
+    effect(() => {
+      if (!this.keyboard.spaceDown()) this.clearAnchor()
+    })
+
+    // pointer move → pan
+    effect(() => {
+      if (this.ps.moveSeq() === 0) return
+      const move = this.ps.pointerMoveEvent()
+      if (!move || !this.canPan()) return
+
+      // avoid pinch while in touch mode
+      if (move.pointerType === "touch" && this.ps.activePointers().size !== 1) return
+
+      const container = this.pixi.container
+      const app = this.pixi.app
+      if (!container || !app) return
+
+      const parent = container.parent ?? container
+
+      // current pointer in renderer global coords (device px)
+      const currGlobal = this.domToGlobal(move)
+
+      // first frame of drag: capture anchor
+      if (!this.anchored || this.lastGlobal === null) {
+        this.lastGlobal = currGlobal.clone()
+        this.startPosX = container.position.x
+        this.startPosY = container.position.y
+        this.crossed = false
+        this._cancelled.set(false)
+        this.navigation.cancelled = false
+        this.anchored = true
+        return
+      }
+
+      // convert prev and curr global → parent-local, then take local delta
+      const prevLocal = parent.worldTransform.applyInverse(this.lastGlobal, new Point())
+      const currLocal = parent.worldTransform.applyInverse(currGlobal, new Point())
+      const dx = currLocal.x - prevLocal.x
+      const dy = currLocal.y - prevLocal.y
+      if (dx === 0 && dy === 0) return
+
+      // threshold detection from anchor
+      if (!this.crossed) {
+        const movedX = (container.position.x + dx) - this.startPosX
+        const movedY = (container.position.y + dy) - this.startPosY
+        const t = this.settings.panThreshold
+        if (Math.abs(movedX) > t || Math.abs(movedY) > t) {
+          this.crossed = true
+          this._cancelled.set(true)
+          this.navigation.cancelled = true
+          this.events.panningThresholdAttained()
+          this.state.setCancelled(true)
+        }
+      }
+
+      // apply local delta
+      container.position.set(container.position.x + dx, container.position.y + dy)
+
+      // advance last
+      this.lastGlobal.copyFrom(currGlobal)
+
+      // persist into current cell, if any
+      const entry = this.stack.top()
+      const cell = entry?.cell
+      if (cell) {
+        cell.x = container.position.x
+        cell.y = container.position.y
+      }
+    })
+
+    // end of pan
+    effect(() => {
+      const space = this.keyboard.spaceDown()
+      const up = this.ps.upSeq()
+      const cancel = this.ps.cancelSeq()
+      if (!this.anchored) return
+
+      const shouldEnd = (!space && !this.isTouchPan()) || (up > 0 || cancel > 0)
+      if (!shouldEnd) return
+
+      this.navigation.setResetTimeout()
+      this.saveTransform()
+      this.clearAnchor()
     })
   }
 
-  public getWindowCenter(): Point {
-    const { width, height } = this._windowSize()
-    return new Point(width / 2, height / 2)
+  protected override onPixiReady(): void {
+    this.safeInit()
   }
 
-  public async goFullscreen() {
-    if (!document.fullscreenElement) {
-      this._isFullScreen.set(true)
-      this.screenState.isFullScreen = true
-
-      if (document.documentElement.requestFullscreen) {
-        await document.documentElement.requestFullscreen()
-      } else if (document.documentElement.webkitRequestFullscreen) {
-        await document.documentElement.webkitRequestFullscreen()
-      } else if (document.documentElement.msRequestFullscreen) {
-        await document.documentElement.msRequestFullscreen()
-      }
-    } else {
-      this._isFullScreen.set(false)
-      this.screenState.isFullScreen = false
-
-      if (document.exitFullscreen) {
-        await document.exitFullscreen()
-      } else if (document.webkitExitFullscreen) {
-        await document.webkitExitFullscreen()
-      } else if (document.msExitFullscreen) {
-        await document.msExitFullscreen()
-      }
+  private safeInit(): void {
+    const container = this.pixi.container
+    if (!container) {
+      this.debug.log?.('warning', 'panning: no container yet')
+      return
     }
+    container.eventMode = 'static'
+    container.hitArea ??= { contains: () => true }
+
+    const canvas = (this.pixi.app?.canvas as HTMLCanvasElement | undefined)!
+    canvas.style.touchAction = 'none'
+    canvas.style.userSelect = 'none'
+
+    ;(container as any).style ??= {}
+    ;(container as any).style.touchAction = 'none'
+  }
+
+  // dom (css px) → renderer global (device px); uses canvas rect, not screen offsets
+  private domToGlobal(e: PointerEvent): Point {
+    const app = this.pixi.app!
+    const view = app.canvas as HTMLCanvasElement
+    const rect = view.getBoundingClientRect()
+    const x = (e.clientX - rect.left) * app.renderer.resolution
+    const y = (e.clientY - rect.top) * app.renderer.resolution
+    return new Point(x, y)
+  }
+
+  private clearAnchor() {
+    this.anchored = false
+    this.crossed = false
+    this.lastGlobal = null
+    this._cancelled.set(false)
+  }
+
+  public enable = (): void => this.enabled.set(true)
+
+  public disable = (): void => {
+    this.enabled.set(false)
+    this.navigation.setResetTimeout()
   }
 }
-
-

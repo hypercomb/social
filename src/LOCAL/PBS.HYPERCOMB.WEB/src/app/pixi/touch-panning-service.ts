@@ -1,4 +1,5 @@
 ﻿import { Injectable, computed, effect, inject, signal } from "@angular/core"
+import { Point } from "pixi.js"
 import { PixiDataServiceBase } from "src/app/database/pixi-data-service-base"
 import { LinkNavigationService } from "src/app/navigation/link-navigation-service"
 import { PointerState } from "src/app/state/input/pointer-state"
@@ -7,7 +8,7 @@ import { LayoutManager } from "../core/controller/layout-manager"
 import { KeyboardService } from "../interactivity/keyboard/keyboard-service"
 import { SELECTIONS } from "../shared/tokens/i-selection.token"
 
-@Injectable({ providedIn: 'root' })
+@Injectable({ providedIn: "root" })
 export class TouchPanningService extends PixiDataServiceBase {
   private readonly keyboard = inject(KeyboardService)
   private readonly ps = inject(PointerState)
@@ -16,19 +17,20 @@ export class TouchPanningService extends PixiDataServiceBase {
   private readonly navigation = inject(LinkNavigationService)
   private readonly selections = inject(SELECTIONS)
 
-  private lastX = 0
-  private lastY = 0
+  // gesture flags
   private anchored = false
   private crossed = false
 
-  // enable / disable
-  private readonly enabled = signal(true)
+  // anchor data captured on first frame
+  private anchorVecX = 0
+  private anchorVecY = 0
+  private startPosX = 0
+  private startPosY = 0
 
-  // reactive cancel signal → other services can watch for pan-abort
+  private readonly enabled = signal(true)
   private readonly _cancelled = signal(false)
   public readonly cancelled = this._cancelled.asReadonly()
 
-  // focus gate
   private readonly focused = (() => {
     const s = signal<boolean>(document.hasFocus())
     const on = () => s.set(true)
@@ -46,16 +48,15 @@ export class TouchPanningService extends PixiDataServiceBase {
   })
 
   public readonly canPan = computed(() => {
-    // true if mouse is over canvas or we currently have at least one touch down
     const over = this.ps.dragOver() || (this.isTouchPan() && this.ps.activePointers().size > 0)
 
-    // touch: allow single-finger pan without spacebar
+    // touch: single finger, no spacebar
     if (this.isTouchPan()) {
       return this.enabled()
         && this.focused()
         && !this.suspendUntilUp()
         && over
-        && this.ps.activePointers().size === 1   // single touch only → two fingers become pinch
+        && this.ps.activePointers().size === 1
         && !this.manager.locked()
     }
 
@@ -78,10 +79,7 @@ export class TouchPanningService extends PixiDataServiceBase {
       this.suspendUntilUp.set(true)
     })
 
-    window.addEventListener("focus", () => {
-      // keep suspended until next pointer up
-    })
-
+    // unsuspend on next pointer up
     effect(() => {
       if (this.ps.upSeq() === 0) return
       if (!this.focused()) return
@@ -89,29 +87,38 @@ export class TouchPanningService extends PixiDataServiceBase {
       this.suspendUntilUp.set(false)
     })
 
-    // reset anchor when space toggles off
+    // reset anchor when spacebar released
     effect(() => {
       if (!this.keyboard.spaceDown()) this.clearAnchor()
     })
 
-    // pointer move → incremental pan
+    // pointer move → pan using center-referenced delta (scale-aware)
     effect(() => {
       if (this.ps.moveSeq() === 0) return
       const move = this.ps.pointerMoveEvent()
       if (!move || !this.canPan()) return
-
-      const isTouch = move.pointerType === "touch"
-      if (isTouch) {
-        // bail if we transitioned into a pinch
-        if (this.ps.activePointers().size !== 1) return
-      }
+      if (move.pointerType === "touch" && this.ps.activePointers().size !== 1) return
 
       const container = this.pixi.container
-      if (!container) return
+      const app = this.pixi.app
+      if (!container || !app) return
 
+      const parent = container.parent ?? container
+
+      // current pointer and canvas center in renderer-global pixels
+      const currGlobal = this.domToGlobal(move)
+      const centerGlobal = this.canvasCenterGlobal()
+
+      // map both to parent-local
+      const pointerLocal = parent.worldTransform.applyInverse(currGlobal, new Point())
+      const centerLocal  = parent.worldTransform.applyInverse(centerGlobal, new Point())
+
+      // first frame: capture anchor and starting position
       if (!this.anchored) {
-        this.lastX = move.clientX
-        this.lastY = move.clientY
+        this.anchorVecX = pointerLocal.x - centerLocal.x
+        this.anchorVecY = pointerLocal.y - centerLocal.y
+        this.startPosX = container.position.x
+        this.startPosY = container.position.y
         this.crossed = false
         this._cancelled.set(false)
         this.navigation.cancelled = false
@@ -119,31 +126,43 @@ export class TouchPanningService extends PixiDataServiceBase {
         return
       }
 
-      const dx = move.clientX - this.lastX
-      const dy = move.clientY - this.lastY
-      if (dx === 0 && dy === 0) return
+      // current pointer vector from center
+      const currVecX = pointerLocal.x - centerLocal.x
+      const currVecY = pointerLocal.y - centerLocal.y
 
+      // delta from anchor
+      const dX = currVecX - this.anchorVecX
+      const dY = currVecY - this.anchorVecY
+
+      // 🔹 adjust for current world scale so motion matches pointer speed
+      const scaleX = parent.worldTransform.a
+      const scaleY = parent.worldTransform.d
+      const adjDX = dX / scaleX
+      const adjDY = dY / scaleY
+
+      const nextX = this.startPosX + adjDX
+      const nextY = this.startPosY + adjDY
+
+      // threshold check
       if (!this.crossed) {
         const t = this.settings.panThreshold
-        if (Math.abs(dx) > t || Math.abs(dy) > t) {
+        if (Math.abs(nextX - this.startPosX) > t || Math.abs(nextY - this.startPosY) > t) {
           this.crossed = true
           this._cancelled.set(true)
           this.navigation.cancelled = true
           this.events.panningThresholdAttained()
-          // Dispatch a custom drag-cancel-click event for global listeners
-          this.state.setCancelled(true)
         }
       }
 
-      container.position.set(container.position.x + dx, container.position.y + dy)
-      this.lastX = move.clientX
-      this.lastY = move.clientY
+      // apply
+      container.position.set(nextX, nextY)
 
+      // persist to cell if present
       const entry = this.stack.top()
       const cell = entry?.cell
       if (cell) {
-        cell.x = container.position.x
-        cell.y = container.position.y
+        cell.x = nextX
+        cell.y = nextY
       }
     })
 
@@ -170,30 +189,44 @@ export class TouchPanningService extends PixiDataServiceBase {
   private safeInit(): void {
     const container = this.pixi.container
     if (!container) {
-      this.debug.log?.('warning', 'panning: no container yet')
+      this.debug.log?.("warning", "panning: no container yet")
       return
     }
-    container.eventMode = 'static'
+    container.eventMode = "static"
     container.hitArea ??= { contains: () => true }
 
-    const canvas = (this.pixi.app?.canvas as HTMLCanvasElement | undefined)!
-    canvas.style.touchAction = 'none'
-    canvas.style.userSelect = 'none'
+    const canvas = this.pixi.app?.canvas as HTMLCanvasElement
+    canvas.style.touchAction = "none"
+    canvas.style.userSelect = "none"
 
-      ; (container as any).style ??= {}
-      ; (container as any).style.touchAction = 'none'
+    ;(container as any).style ??= {}
+    ;(container as any).style.touchAction = "none"
+  }
+
+  // dom (css px) → renderer global (device px)
+  private domToGlobal(e: PointerEvent): Point {
+    const app = this.pixi.app!
+    const view = app.canvas as HTMLCanvasElement
+    const rect = view.getBoundingClientRect()
+    const x = (e.clientX - rect.left) * app.renderer.resolution
+    const y = (e.clientY - rect.top) * app.renderer.resolution
+    return new Point(x, y)
+  }
+
+  // canvas center in renderer global (device px)
+  private canvasCenterGlobal(): Point {
+    const app = this.pixi.app!
+    const view = app.canvas as HTMLCanvasElement
+    return new Point(view.width * 0.5, view.height * 0.5)
   }
 
   private clearAnchor() {
-    this.lastX = 0
-    this.lastY = 0
     this.anchored = false
     this.crossed = false
     this._cancelled.set(false)
   }
 
   public enable = (): void => this.enabled.set(true)
-
   public disable = (): void => {
     this.enabled.set(false)
     this.navigation.setResetTimeout()
