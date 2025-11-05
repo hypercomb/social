@@ -11,17 +11,18 @@ export class PanningManager {
   private readonly keyboard = inject(KeyboardService)
 
   constructor() {
-    // === PRIORITY: Spacebar ALWAYS wins when held ===
+
+    // Space always wins – enable space, disable touch
     effect(() => {
       if (this.keyboard.spaceDown()) {
         this.spacebar.enable()
         this.touch.disable()
       } else {
-        this.touch.enable()
+        // Normal state: both are allowed (the context switcher will pick one)
         this.spacebar.enable()
+        this.touch.enable()
       }
     })
-
     // === Optional: Initial device detection (fallback) ===
     // This is now secondary — spacebar overrides everything
     window.addEventListener("pointerdown", (e) => {
