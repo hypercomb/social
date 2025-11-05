@@ -1,28 +1,24 @@
+// src/app/actions/propagation/export-database.ts
 import { Injectable, inject } from "@angular/core"
 import { ActionBase } from "../action.base"
 import { ActionContext } from "../action-contexts"
-import { DatabaseExportService } from "./export-service"
+import { OpfsBackupService } from "./opfs-backup.service"
 
 @Injectable({ providedIn: "root" })
 export class ExportDatabaseAction extends ActionBase<ActionContext> {
-    public id = ExportDatabaseAction.ActionId
     public static ActionId = "db.export"
-    private readonly exporter = inject(DatabaseExportService)
-
-
-    public override label = "Export Database"
-    public override description = "Export the current hive database to a file"
+    public id = ExportDatabaseAction.ActionId
+    public override label = "Export Hive Backup"
+    public override description = "Download current hive + background as .zip"
     public override category = "Utility"
-    public override risk: "warning" = "warning"
+
+    private readonly backup = inject(OpfsBackupService)
 
     public override run = async (_payload: ActionContext): Promise<void> => {
         const hive = this.hivestore.hive()
-        if (!hive) {
-            console.warn("No active hive to export.")
-            return
-        }
+        if (!hive) return
 
-        await this.exporter.save(hive.hive)
+        const zipBlob = await this.backup.exportHiveAsZip(`${hive.hive}.json`)
+        await this.backup.saveBlobWithNativeDialog(zipBlob, `${hive.hive}_backup.zip`)
     }
-
 }

@@ -7,6 +7,7 @@ import { Hive } from "src/app/cells/cell"
 import { OpfsManager } from "src/app/common/opfs/opfs-manager"
 import { DebugService } from "src/app/core/diagnostics/debug-service"
 import { OpfsHiveService } from "src/app/hive/storage/opfs-hive-service"
+import JSZip from "jszip"
 
 export interface IOpfsHiveRecord {
   name: string
@@ -73,38 +74,38 @@ export class DatabaseImportService {
       const blobCopy = value.blob
       delete value.blob
 
-      ;(async () => {
-        try {
-          const [mainDb, imageDb] = [this.database.db()!, await this.imageDb.getDb()]
-          let image = await imageDb.table(DBTables.SmallImages)
-            .where({ cellId: value.cellId }).first()
+        ; (async () => {
+          try {
+            const [mainDb, imageDb] = [this.database.db()!, await this.imageDb.getDb()]
+            let image = await imageDb.table(DBTables.SmallImages)
+              .where({ cellId: value.cellId }).first()
 
-          if (!image) {
-            const result = await imageDb.table(DBTables.SmallImages).add({
-              hive: value.hive,
-              cellId: value.cellId,
-              blob: blobCopy
-            })
-            const smallImageId = result as number
+            if (!image) {
+              const result = await imageDb.table(DBTables.SmallImages).add({
+                hive: value.hive,
+                cellId: value.cellId,
+                blob: blobCopy
+              })
+              const smallImageId = result as number
 
-            await mainDb.transaction('rw', mainDb.table(table), async tx => {
-              const cell = await tx.table(table).get(value.cellId)
-              if (cell) {
-                cell.smallImageId = smallImageId
-                await tx.table(table).update(cell.cellId, cell)
-              } else {
-                await tx.table(table).add({
-                  cellId: value.cellId,
-                  hive: value.hive,
-                  smallImageId
-                })
-              }
-            })
+              await mainDb.transaction('rw', mainDb.table(table), async tx => {
+                const cell = await tx.table(table).get(value.cellId)
+                if (cell) {
+                  cell.smallImageId = smallImageId
+                  await tx.table(table).update(cell.cellId, cell)
+                } else {
+                  await tx.table(table).add({
+                    cellId: value.cellId,
+                    hive: value.hive,
+                    smallImageId
+                  })
+                }
+              })
+            }
+          } catch (err) {
+            this.debug.log('import', "import transactional image insert failed:", err)
           }
-        } catch (err) {
-          this.debug.log('import', "import transactional image insert failed:", err)
-        }
-      })()
+        })()
 
       return { value, key }
     }

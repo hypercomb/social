@@ -1,4 +1,5 @@
-﻿import { Injectable, inject } from '@angular/core'
+﻿// src/app/unsorted/start-up-service.ts
+import { Injectable, inject } from '@angular/core'
 
 // actions
 import { BackHiveAction } from '../actions/navigation/back'
@@ -31,15 +32,12 @@ import { CenterTileService } from '../cells/behaviors/center-tile-service'
 import { TileSelectionManager } from '../cells/selection/tile-selection-manager'
 import { SelectionMoveManager } from '../cells/selection/selection-move-manager'
 
-// database and persistence
-import { BackupService } from '../database/persistence/backup-service'
-
 // hive
 import { HiveRouteWatcher } from '../hive/name-resolvers/hive-route-watcher'
 import { HiveService } from '../hive/storage/hive-service'
 
-  // input and interactivity
-  import { KeyboardShortcutListener } from '../interactivity/keyboard/keyboard-shortcut-listener'
+// input and interactivity
+import { KeyboardShortcutListener } from '../interactivity/keyboard/keyboard-shortcut-listener'
 import { PointerBindingService } from '../state/input/pointer-binding-service'
 import { TouchContextSwitchService } from '../pixi/touch-context-switch-services'
 import { SpacebarPanningService } from '../pixi/spacebar-panning-service'
@@ -63,14 +61,14 @@ import { GhostTileService } from '../cells/creation/ghost-tile-service'
 import { RiftAction } from '../actions/navigation/path'
 import { PositionSynchronizer } from '../hive/position-synchronizer'
 
-// app
+// OPFS BACKUP & EXPORT
+import { ExportAllHivesAction } from '../actions/propagation/export-all-hives'
+import { OpfsBackupService } from '../actions/propagation/opfs-backup.service'
+
+
 @Injectable({ providedIn: 'root' })
 export class StartUpService {
-  // eagerly instantiate all injected services once on startup
   _ = [
-    // database
-    inject(BackupService),
-
     // visuals
     inject(ContainerBackgroundService),
     inject(ColorPicker),
@@ -93,7 +91,7 @@ export class StartUpService {
     inject(PinchZoomService),
     inject(TouchContextSwitchService),
     inject(TouchPanningService),
-    inject(SpacebarPanningService),    
+    inject(SpacebarPanningService),
     inject(PointerBindingService),
     inject(WheelState),
 
@@ -102,6 +100,7 @@ export class StartUpService {
     inject(TileSelectionManager),
     inject(SelectionMoveManager),
     inject(GhostTileService),
+
     // rendering
     inject(TilePointerManager),
 
@@ -117,6 +116,8 @@ export class StartUpService {
     inject(ExportDatabaseAction),
     inject(FocusModeAction),
     inject(GlobalEscapeAction),
+    inject(OpfsBackupService),
+    inject(ExportAllHivesAction),
     inject(ImportDatabasesToOpfs),
     inject(ImportOpfsHiveAction),
     inject(LockCellAction),

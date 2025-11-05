@@ -3,16 +3,15 @@ import { Injectable, inject } from "@angular/core"
 import { ActionBase } from "../action.base"
 import { DatabaseImportService } from "./import-service"
 import { ImportHiveContext } from "../action-contexts"
-import { DatabaseExportService } from "./export-service"
-import { OpfsManager } from "src/app/common/opfs/opfs-manager"
 import { OpfsHiveService } from "src/app/hive/storage/opfs-hive-service"
+import { ExportService } from "./export-service"
 
 @Injectable({ providedIn: "root" })
 export class ImportOpfsHiveAction extends ActionBase<ImportHiveContext> {
     public static ActionId = "db.import-hive"
     private readonly opfs = inject(OpfsHiveService)
     private readonly importer = inject(DatabaseImportService)
-    private readonly exporter = inject(DatabaseExportService)
+    private readonly exporter = inject(ExportService)
 
     public id = ImportOpfsHiveAction.ActionId
     public override label = "Import Hive Database"

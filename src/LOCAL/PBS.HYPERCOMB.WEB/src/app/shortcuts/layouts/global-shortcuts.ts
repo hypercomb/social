@@ -14,23 +14,41 @@ export const globalShortcuts: IShortcut[] = [
     global: true
   },
   {
-    cmd: 'global.publish',
-    description: 'Publish changes to hive',
-    category: 'Destructive',
-    risk: 'warning',
-    riskNote: 'This will make changes public',
-    keys: [[{ key: ':', primary: true, shift: true, alt: true }]]
+    cmd: "global.publish",
+    description: "Publish changes to hive",
+    category: "Destructive",
+    risk: "warning",
+    riskNote: "This will make changes public",
+    keys: [[{ key: ":", primary: true, shift: true, alt: true }]]
   },
   {
     cmd: "rebuild-hierarchy",
     description: "Rebuild hierarchy table",
-    keys: [[{ key: "~", ctrl: true, shift: true }]], // example binding
+    keys: [[{ key: "~", ctrl: true, shift: true }]],
     global: true
   },
   {
     cmd: "database.import-to-opfs",
     description: "Import databases to OPFS",
-    keys: [[{ key: "?", ctrl: true, shift: true }]], // example binding
+    keys: [[{ key: "?", ctrl: true, shift: true }]],
     global: true
+  },
+
+  // ─────────────────────────────────────────────
+  // OPFS EXPORT SHORTCUTS
+  // ─────────────────────────────────────────────
+  {
+    cmd: "db.export",
+    description: "Export current hive + background as .zip",
+    keys: [[{ key: "e", ctrl: true, shift: true }]],
+    global: true,
+    category: "Utility"
+  },
+  {
+    cmd: "db.export-all",
+    description: "Export **all** hives + images as one .zip",
+    keys: [[{ key: ">", ctrl: true, shift: true }]],
+    global: true,
+    category: "Utility"
   }
 ] as const
