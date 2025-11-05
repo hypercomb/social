@@ -1,5 +1,7 @@
-﻿import { Injectable, signal, computed, effect } from "@angular/core"
+﻿// src/app/state/input/pointer-state.ts (Fixed: subtract rect in getLocalPosition/computeLocalFromGlobal to prevent jump on scroll)
+import { Injectable, signal, computed, effect } from "@angular/core"
 import { Point, Container } from "pixi.js"
+import { PixiDataServiceBase } from "src/app/database/pixi-data-service-base" // Not injected, just for type if needed; no pixi access here
 
 @Injectable({ providedIn: "root" })
 export class PointerState {
@@ -24,9 +26,16 @@ export class PointerState {
     public readonly cancelSeq = signal(0)
     public readonly pointerPositions = signal<Map<number, { x: number; y: number }>>(new Map())
 
-    // position signals
-    public readonly position = signal(new Point(0, 0))   // global screen coords
-    public readonly localPosition = signal(new Point(0, 0)) // local to container
+    // position signals (raw CSS pixels for global screen; scaled canvas-relative computed on use)
+    public readonly position = signal(new Point(0, 0))   // raw clientX/Y (CSS pixels, viewport-relative)
+    public readonly localPosition = signal(new Point(0, 0)) // local to container (requires scaling)
+
+    // Resolution signal (set by PanningServiceBase onPixiReady)
+    public readonly resolution = signal<number>(1)
+
+    // Current mouse for scroll refresh (raw clientX/Y)
+    private readonly _currentMouse = signal(new Point(0, 0))
+    public readonly currentMouse = this._currentMouse.asReadonly()
 
     // state signals
     private readonly _dragOver = signal(false)
@@ -60,8 +69,13 @@ export class PointerState {
     private readonly _container = signal<Container | null>(null)
     public readonly container = this._container.asReadonly()
 
+    // Refs for scroll/wheel
+    private canvasRef: HTMLCanvasElement | null = null
+    private scrollUpdateHandler: (() => void) | null = null
+
     public initialize(canvas: HTMLCanvasElement) {
         if (this.initialized) return
+        this.canvasRef = canvas
         this.initialized = true
         canvas.addEventListener("pointerdown", this.handlePointerDown)
         canvas.addEventListener("pointerup", this.handlePointerUp)
@@ -73,14 +87,27 @@ export class PointerState {
         canvas.addEventListener("pointerleave", this.handlePointerLeave)
 
         window.addEventListener("blur", this.handleWindowBlur)
+
+        // Wheel prevention during drag
+        canvas.addEventListener('wheel', this.handleWheel, { passive: false })
+
+        // Scroll listener for refresh (updates position/local with current mouse and new rect)
+        this.scrollUpdateHandler = () => this.refreshOnScroll()
+        window.addEventListener('scroll', this.scrollUpdateHandler, { passive: true })
     }
 
-
-    // still keep utility for ad-hoc local transforms
+    // still keep utility for ad-hoc local transforms (now subtracts rect for canvas-relative)
     public getLocalPosition(globalPoint?: Point): Point {
         const g = globalPoint ?? this.position()
+        const c = this.container()
+        if (!c || !this.canvasRef) return new Point(0, 0)
+        const rect = this.canvasRef.getBoundingClientRect()
+        const res = this.resolution()
+        // Convert CSS viewport to canvas-relative renderer coords
+        const canvasX = (g.x - rect.left) * res
+        const canvasY = (g.y - rect.top) * res
         const out = new Point()
-        this.container()!.worldTransform.applyInverse(g, out)
+        c.worldTransform.applyInverse(new Point(canvasX, canvasY), out)
         return out
     }
 
@@ -89,8 +116,7 @@ export class PointerState {
         this.updatePointerPositions(e.pointerId, e.clientX, e.clientY)
         this.updateActivePointers(s => s.add(e.pointerId))
 
-        const global = new Point(e.clientX, e.clientY)
-        this.position.set(global)
+        this.updateRawPosition(e)
         this.triggerDetect()
         this.pointerDownEvent.set(e)
         this.downSeq.update(v => v + 1)
@@ -106,14 +132,14 @@ export class PointerState {
         this.pointerMoveEvent.set(e)
         this.moveSeq.update(v => v + 1)
 
-        const global = new Point(e.clientX, e.clientY)
-        this.position.set(global)
+        this.updateRawPosition(e)
 
-        if (this.container()) {
-            const out = new Point()
-            this.container()!.worldTransform.applyInverse(global, out)
-            this.localPosition.set(out)
-        }
+        // Update local (now correctly canvas-relative)
+        this.localPosition.set(this.getLocalPosition())
+
+        // Update current mouse
+        this._currentMouse.set(new Point(e.clientX, e.clientY))
+
         // Force dragOver for touch
         if (e.pointerType === 'touch') {
             this._dragOver.set(true)
@@ -121,10 +147,14 @@ export class PointerState {
         }
     }
 
+    // Set raw CSS position (no scaling here; scale on use)
+    private updateRawPosition(e: PointerEvent): void {
+        this.position.set(new Point(e.clientX, e.clientY))
+    }
+
     private handlePointerUp = (e: PointerEvent) => {
         this.releaseCapture(e)
-        const global = new Point(e.clientX, e.clientY)
-        this.position.set(global)
+        this.updateRawPosition(e)
 
         this.updateActivePointers(s => {
             const next = new Set(s)
@@ -173,6 +203,23 @@ export class PointerState {
         this._activePointers.set(new Set())
     }
 
+    // Wheel handler to prevent during drag
+    private handleWheel = (e: WheelEvent) => {
+        if (this.isDragging()) {
+            e.preventDefault()
+            return false
+        }
+        return undefined
+    }
+
+    // Refresh position/local on scroll using current mouse and updated rect
+    private refreshOnScroll(): void {
+        if (!this.canvasRef) return
+        // Don't mutate position (keep raw clientX/Y)
+        // Just refresh localPosition with new rect
+        this.localPosition.set(this.getLocalPosition())
+    }
+
     // in PointerState
     public onClick(handler: (e: PointerEvent) => void) {
         effect(() => {
@@ -219,18 +266,25 @@ export class PointerState {
         }
     }
 
-    public computeLocalFromGlobal(): Point | null {
-        const g = this.position()
+    public computeLocalFromGlobal(globalCSS?: Point): Point | null {
+        const gCSS = globalCSS ?? this.position()
         const c = this.container()
-        if (!g || !c) return null
+        if (!c || !this.canvasRef) return null
+        const rect = this.canvasRef.getBoundingClientRect()
+        const res = this.resolution()
+        // Convert CSS viewport to canvas-relative renderer coords
+        const canvasX = (gCSS.x - rect.left) * res
+        const canvasY = (gCSS.y - rect.top) * res
         const out = new Point()
-        c.worldTransform.applyInverse(g, out)
+        c.worldTransform.applyInverse(new Point(canvasX, canvasY), out)
         return out
     }
 
     public setContainer(container: Container) {
         this._container.set(container)
-        queueMicrotask(() => this.computeLocalFromGlobal())
+        queueMicrotask(() => {
+            this.localPosition.set(this.computeLocalFromGlobal() ?? new Point(0, 0))
+        })
     }
 
     private updateActivePointers(mutator: (s: Set<number>) => void) {
@@ -259,7 +313,16 @@ export class PointerState {
         canvas.removeEventListener("pointerenter", this.handlePointerEnter)
         canvas.removeEventListener("pointerleave", this.handlePointerLeave)
 
+        canvas.removeEventListener('wheel', this.handleWheel)
+
         window.removeEventListener("blur", this.handleWindowBlur)
+
+        if (this.scrollUpdateHandler) {
+            window.removeEventListener('scroll', this.scrollUpdateHandler)
+            this.scrollUpdateHandler = null
+        }
+
+        this.canvasRef = null
         this.initialized = false
         this._activePointers.set(new Set())
     }
