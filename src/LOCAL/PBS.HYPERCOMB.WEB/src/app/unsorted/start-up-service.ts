@@ -42,6 +42,7 @@ import { HiveService } from '../hive/storage/hive-service'
   import { KeyboardShortcutListener } from '../interactivity/keyboard/keyboard-shortcut-listener'
 import { PointerBindingService } from '../state/input/pointer-binding-service'
 import { TouchContextSwitchService } from '../pixi/touch-context-switch-services'
+import { MousePanningService } from '../pixi/mouse-panning-service'
 import { TouchPanningService } from '../pixi/touch-panning-service'
 import { PinchZoomService } from '../pixi/pinch-zoom-service'
 import { WheelState } from '../common/mouse/wheel-state'
@@ -92,6 +93,7 @@ export class StartUpService {
     inject(PinchZoomService),
     inject(TouchContextSwitchService),
     inject(TouchPanningService),
+    inject(MousePanningService),    
     inject(PointerBindingService),
     inject(WheelState),
 
