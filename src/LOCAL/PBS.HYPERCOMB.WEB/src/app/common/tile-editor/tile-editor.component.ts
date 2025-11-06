@@ -53,9 +53,9 @@ export class TileEditorComponent extends Hypercomb {
   public readonly captureManager = inject(ImageCaptureManager)
   private readonly modify = inject(MODIFY_COMB_SVC)
   public readonly persistence = inject(ImagePersistenceService)
-
+  private hasInitializedFocus = false
   private readonly ps = inject(PointerState)
-  
+
   // ─────────────────────────────────────────────
   // local state
   // ─────────────────────────────────────────────
@@ -132,13 +132,15 @@ export class TileEditorComponent extends Hypercomb {
       this.es.setContext?.(null) ?? this.es.clearContext?.()
     })
 
-    // sync local editCell whenever editor context changes
     effect(() => {
-      this.editCell = this.es.context()
-      if (this.editCell && this.name) {
+      const ctx = this.es.context()
+      this.editCell = ctx
+
+      // focus only the very first time after page load
+      if (ctx && !this.hasInitializedFocus && this.name) {
+        this.hasInitializedFocus = true
         queueMicrotask(() => {
           this.name.nativeElement.focus()
-          this.name.nativeElement.select()
         })
       }
     })
@@ -184,12 +186,12 @@ export class TileEditorComponent extends Hypercomb {
   // ─────────────────────────────────────────────
 
   public save = async (event: any): Promise<void> => {
-  const cell = this.editCell!
-  await Assets.unload(this.state.cacheId(cell))
+    const cell = this.editCell!
+    await Assets.unload(this.state.cacheId(cell))
 
     // capture and persist the working (small) snapshot
     if (!cell.image || cell.imageDirty) {
-       const snapshot = await this.captureManager.capture()
+      const snapshot = await this.captureManager.capture()
       await this.persistence.saveSmall(cell, snapshot)
     }
 
@@ -198,7 +200,7 @@ export class TileEditorComponent extends Hypercomb {
       await this.persistence.saveLargeIfChanged(cell, cell.largeImage)
     }
 
-  await Assets.unload(this.state.cacheId(cell))
+    await Assets.unload(this.state.cacheId(cell))
     await this.modify.updateCell(cell)
 
     // optional: handle navigation after save
