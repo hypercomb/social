@@ -2,10 +2,8 @@
 
 @Injectable({ providedIn: 'root' })
 export class DebugService {
-  // master toggle list – comment/uncomment to focus logs
   private readonly enabled: string[] = [
     'scaling',
-    //'render',
     'import',
     'data-resolution',
     'name-resolution',
@@ -15,7 +13,6 @@ export class DebugService {
     'opfs-explorer',
     'scheduler',
     'refreshTile',
-    //'shortcuts',
     'carousel',
     'hive',
     'cell',
@@ -24,21 +21,17 @@ export class DebugService {
     'debug',
     'layout',
     'comb',
-    'storage  ',
+    'storage',
+    'pinch',
+    'zoom',
+    'mousewheel',
   ]
-
   private readonly enabledSet = new Set(this.enabled)
 
-  // ─────────────────────────────────────────────
-  // core logger
-  // ─────────────────────────────────────────────
   private shouldLog(category: string): boolean {
     return this.enabledSet.has(category)
   }
 
-  // ─────────────────────────────────────────────
-  // unified output
-  // ─────────────────────────────────────────────
   public log(category: string, ...args: any[]): void {
     if (this.shouldLog(category)) console.log(`[${category}]`, ...args)
   }
@@ -48,16 +41,13 @@ export class DebugService {
   }
 
   public warn(category: string, ...args: any[]): void {
-    if (this.shouldLog(category)) console.warn(`[${category}] ⚠️`, ...args)
+    if (this.shouldLog(category)) console.warn(`[${category}] Warning:`, ...args)
   }
 
   public error(category: string, ...args: any[]): void {
-    if (this.shouldLog(category)) console.error(`[${category}] ❌`, ...args)
+    if (this.shouldLog(category)) console.error(`[${category}] Error:`, ...args)
   }
 
-  // ─────────────────────────────────────────────
-  // optional dynamic control
-  // ─────────────────────────────────────────────
   public enable(category: string): void {
     this.enabledSet.add(category)
   }

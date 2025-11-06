@@ -1,6 +1,5 @@
 ﻿import { Component, OnInit, inject } from "@angular/core"
 import { Hypercomb } from "src/app/core/mixins/abstraction/hypercomb.base"
-import { MousewheelZoomService } from "src/app/pixi/mousewheel-zoom-service"
 import { RenderScheduler } from "src/app/core/controller/render-scheduler"
 import { AxialService } from "src/app/unsorted/utility/axial-service"
 import { environment } from "src/environments/environment"
@@ -27,7 +26,6 @@ export class ShellComponent extends Hypercomb implements OnInit {
   private readonly pointerstate = inject(PointerState)
   private readonly axialService = inject(AxialService)
   private readonly imageService = inject(ImageService)
-  private readonly mousewheelZoom = inject(MousewheelZoomService)
   private readonly wakeupService = inject(WakeupService)
   private readonly _startUpService = inject(StartUpService)
   private readonly wheelstate = inject(WheelState)
@@ -62,7 +60,6 @@ export class ShellComponent extends Hypercomb implements OnInit {
 
     // used to be this.databaseFactory.getQueries()
     await this.pointerstate.setContainer(this.pixiService.container!)
-    await this.mousewheelZoom.initialize()
     await this.wheelstate.initialize()
     await this.wakeupService.initialize()
     await this.imageService.initialize()

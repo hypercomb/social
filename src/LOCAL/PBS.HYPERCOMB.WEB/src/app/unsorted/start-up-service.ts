@@ -63,6 +63,7 @@ import { PositionSynchronizer } from '../hive/position-synchronizer'
 // OPFS BACKUP & EXPORT
 import { ExportAllHivesAction } from '../actions/propagation/export-all-hives'
 import { OpfsBackupService } from '../actions/propagation/opfs-backup.service'
+import { MousewheelZoomService } from '../pixi/mousewheel-zoom-service'
 
 
 @Injectable({ providedIn: 'root' })
@@ -92,6 +93,7 @@ export class StartUpService {
     inject(SpacebarPanningService),
     inject(PointerBindingService),
     inject(WheelState),
+    inject(MousewheelZoomService),
 
     // cells and selection
     inject(CenterTileService),

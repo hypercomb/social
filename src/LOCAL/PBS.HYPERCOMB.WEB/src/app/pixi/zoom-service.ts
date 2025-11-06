@@ -1,66 +1,95 @@
-﻿// src/app/pixi/zoom-service.ts
-import { Injectable, inject } from "@angular/core"
-import { Point } from "pixi.js"
-import { LayoutState } from "../layout/layout-state"
-import { PixiDataServiceBase } from "../database/pixi-data-service-base"
+﻿﻿import { Injectable, inject } from '@angular/core'
+import { Point } from 'pixi.js'
+import { LayoutState } from '../layout/layout-state'
+import { PixiDataServiceBase } from '../database/pixi-data-service-base'
+import { Subject } from 'rxjs'
+import { debounceTime } from 'rxjs/operators'
+
 @Injectable({ providedIn: 'root' })
 export class ZoomService extends PixiDataServiceBase {
-    private readonly ls = inject(LayoutState)
-    private minScale: number = this.ls.minScale
-    private maxScale: number = this.ls.maxScale
-    private canZoom(): boolean {
-        return true
+  private readonly ls = inject(LayoutState)
+  private minScale: number = this.ls.minScale
+  private maxScale: number = this.ls.maxScale
+  private readonly save$ = new Subject<void>()
+
+  constructor() {
+    super()
+    this.save$.pipe(debounceTime(300)).subscribe(async () => {
+      await this.saveTransform()
+      this.debug.log('zoom', 'debounced save executed')
+    })
+  }
+
+  private canZoom(): boolean {
+    return true
+  }
+
+  private adjustZoom( 
+    newScale: number,
+    position: { x: number; y: number } = new Point(0, 0)
+  ): void {
+    const container = this.pixi.container!
+    const cell = this.stack.top()?.cell!
+    const before = {
+      scale: container.scale.x,
+      pos: { x: container.x, y: container.y },
     }
-    // zoom-service.ts
-    private adjustZoom = async (
-        newScale: number,
-        position: { x: number; y: number } = new Point(0, 0)
-    ): Promise<void> => {
-        const container = this.pixi.container!
-        const comb = this.stack.top()?.cell!
-        const { x: px, y: py } = position
-        // 1) capture the point in container-local space before scaling
-        const preLocal = container.toLocal(new Point(px, py))
-        // 2) apply the new uniform scale
-        container.scale.set(newScale)
-        // 3) where did that local point end up globally after scaling?
-        const postGlobal = container.toGlobal(preLocal)
-        // 4) shift container so the zoom pivots around (px, py)
-        container.position.set(
-            container.x + (px - postGlobal.x),
-            container.y + (py - postGlobal.y)
-        )
-        // keep your domain model in sync
-        comb.scale = newScale
-        comb.x = container.x
-        comb.y = container.y
-        await this.saveTransform()
+    const preLocal = container.toLocal(new Point(position.x, position.y))
+    container.scale.set(newScale)
+    const postGlobal = container.toGlobal(preLocal)
+    container.position.set(
+      container.x + (position.x - postGlobal.x),
+      container.y + (position.y - postGlobal.y)
+    )
+    cell.scale = newScale
+    cell.x = container.x
+    cell.y = container.y
+    const after = {
+      scale: container.scale.x,
+      pos: { x: container.x, y: container.y },
     }
-    public async applyZoom(scaleAmount: number, position: { x: number, y: number } = new Point(0, 0)) {
-        if (!this.canZoom()) return
-        const container = this.pixi.container!
-        let newScale = container.scale.x * scaleAmount
-        newScale = Math.min(Math.max(newScale, this.minScale), this.maxScale)
-        await this.adjustZoom(newScale, position)
-    }
-    public async setZoom(zoomValue: number, position: { x: number, y: number } = new Point(0, 0)) {
-        if (!this.canZoom()) return
-        const newScale = Math.min(Math.max(zoomValue, this.minScale), this.maxScale)
-        await this.adjustZoom(newScale, position)
-    }
-    public async zoomIn(position: { x: number; y: number }) {
-        const scaleAmount = 1.05 // Zoom in factor
-        await this.applyZoom(scaleAmount, position)
-    }
-    public async zoomOut(position: { x: number; y: number }) {
-        const scaleAmount = 1 / 1.05 // Zoom out factor
-        await this.applyZoom(scaleAmount, position)
-    }
-    public async reset() {
-        const location = this.screen.getWindowCenter()
-        await this.applyZoom(.5, location)
-    }
-    public get currentScale(): number {
-        return this.pixi.container?.scale.x ?? 1;
-    }
+    this.debug.log('zoom', 'adjustZoom', { before, after, pivot: position })
+    this.save$.next()
+  }
+
+  public applyZoom(scaleAmount: number, position: { x: number; y: number } = new Point(0, 0)) {
+    if (!this.canZoom()) return
+    const container = this.pixi.container!
+    const oldScale = container.scale.x
+    let newScale = oldScale * scaleAmount
+    newScale = Math.min(Math.max(newScale, this.minScale), this.maxScale)
+    this.debug.log('zoom', 'applyZoom', { oldScale, scaleAmount, newScale, position })
+    this.adjustZoom(newScale, position)
+  }
+
+  public setZoom(zoomValue: number, position: { x: number; y: number } = new Point(0, 0)) {
+    if (!this.canZoom()) return
+    const newScale = Math.min(Math.max(zoomValue, this.minScale), this.maxScale)
+    this.adjustZoom(newScale, position)
+  }
+
+  public zoomIn(position: { x: number; y: number }) {
+    const f = 1.05
+    this.debug.log('zoom', `zoomIn factor=${f} pivot=`, position)
+    this.applyZoom(f, position)
+  }
+
+  public zoomOut(position: { x: number; y: number }) {
+    const f = 1 / 1.05
+    this.debug.log('zoom', `zoomOut factor=${f} pivot=`, position)
+    this.applyZoom(f, position)
+  }
+
+  public reset() {
+    const loc = this.screen.getWindowCenter()
+    this.applyZoom(0.5, loc)
+  }
+
+  public get currentScale(): number {
+    return this.pixi.container?.scale.x ?? 1
+  }
+
+  public triggerSave(): void {
+    this.save$.next()
+  }
 }

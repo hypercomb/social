@@ -5,6 +5,7 @@ import { PanningServiceBase } from "./panning-service.base"
 @Injectable({ providedIn: "root" })
 export class SpacebarPanningService extends PanningServiceBase {
   private awaitingFirstMove = false
+  private initialized: boolean = false
 
   protected shouldStart(down: PointerEvent): boolean {
     return this.keyboard.spaceDown() && ['mouse', 'touch'].includes(down.pointerType)
@@ -21,6 +22,9 @@ export class SpacebarPanningService extends PanningServiceBase {
 
     // ---- cursor -------------------------------------------------
     effect(() => {
+      setTimeout(() => this.initialized = true, 50)
+      if(!this.initialized) return
+
       const space = this.keyboard.spaceDown()
       const canvas = this.pixi.app?.canvas
       if (!canvas) return
