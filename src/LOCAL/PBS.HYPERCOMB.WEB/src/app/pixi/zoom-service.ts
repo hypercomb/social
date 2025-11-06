@@ -1,4 +1,4 @@
-﻿﻿import { Injectable, inject } from '@angular/core'
+﻿import { Injectable, inject } from '@angular/core'
 import { Point } from 'pixi.js'
 import { LayoutState } from '../layout/layout-state'
 import { PixiDataServiceBase } from '../database/pixi-data-service-base'
@@ -10,15 +10,7 @@ export class ZoomService extends PixiDataServiceBase {
   private readonly ls = inject(LayoutState)
   private minScale: number = this.ls.minScale
   private maxScale: number = this.ls.maxScale
-  private readonly save$ = new Subject<void>()
 
-  constructor() {
-    super()
-    this.save$.pipe(debounceTime(300)).subscribe(async () => {
-      await this.saveTransform()
-      this.debug.log('zoom', 'debounced save executed')
-    })
-  }
 
   private canZoom(): boolean {
     return true
@@ -49,7 +41,7 @@ export class ZoomService extends PixiDataServiceBase {
       pos: { x: container.x, y: container.y },
     }
     this.debug.log('zoom', 'adjustZoom', { before, after, pivot: position })
-    this.save$.next()
+    this.saveTransform()
   }
 
   public applyZoom(scaleAmount: number, position: { x: number; y: number } = new Point(0, 0)) {
@@ -89,7 +81,4 @@ export class ZoomService extends PixiDataServiceBase {
     return this.pixi.container?.scale.x ?? 1
   }
 
-  public triggerSave(): void {
-    this.save$.next()
-  }
 }

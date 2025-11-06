@@ -18,7 +18,6 @@ export class ExportDatabaseAction extends ActionBase<ActionContext> {
         const hive = this.hivestore.hive()
         if (!hive) return
 
-        const zipBlob = await this.backup.exportHiveAsZip(`${hive.hive}.json`)
-        await this.backup.saveBlobWithNativeDialog(zipBlob, `${hive.hive}_backup.zip`)
+        await this.backup.exportHiveAsZip(`${hive.hive}.json`)
     }
 }

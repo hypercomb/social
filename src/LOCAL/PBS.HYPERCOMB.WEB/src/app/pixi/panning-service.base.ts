@@ -1,4 +1,3 @@
-// src/app/pixi/panning-service.base.ts
 import { Injectable, signal, inject, effect } from "@angular/core"
 import { PixiDataServiceBase } from "src/app/database/pixi-data-service-base"
 import { LinkNavigationService } from "src/app/navigation/link-navigation-service"
@@ -35,10 +34,15 @@ export abstract class PanningServiceBase extends PixiDataServiceBase {
   protected downScreenX = 0
   protected downScreenY = 0
 
+  /** determines if drag threshold suppression should apply */
+  protected usePanThreshold = true
+
   private scrollBlocker: (() => void) | null = null
 
   constructor() {
     super()
+
+    // anchor when pointer is pressed
     effect(() => {
       if (!this.anchorOnDown) return
       if (this.ps.downSeq() === 0) return
@@ -47,6 +51,7 @@ export abstract class PanningServiceBase extends PixiDataServiceBase {
       this.startAnchorAt(down.clientX, down.clientY)
     })
 
+    // handle move events
     effect(() => {
       if (!this.enabled()) return
       if (this.ps.moveSeq() === 0) return
@@ -55,23 +60,41 @@ export abstract class PanningServiceBase extends PixiDataServiceBase {
       if (!this.isMoveRelevant(move)) return
       if (this.manager.locked()) return
 
-      const threshold = this.getPanThreshold()
-      if (!this.dragThresholdReached && threshold > 0) {
-        const dx = move.clientX - this.downScreenX
-        const dy = move.clientY - this.downScreenY
-        if (Math.hypot(dx, dy) < threshold) return
-        this.dragThresholdReached = true
+      if (this.usePanThreshold) {
+        const threshold = this.getPanThreshold()
+        if (!this.dragThresholdReached && threshold > 0) {
+          const dx = move.clientX - this.downScreenX
+          const dy = move.clientY - this.downScreenY
+          if (Math.hypot(dx, dy) < threshold) return
+          this.dragThresholdReached = true
+        }
       }
       this.performPan(move)
     })
 
+    // save on pointerup or cancel
     effect(() => {
       if (this.ps.upSeq() === 0 && this.ps.cancelSeq() === 0) return
       if (!this.anchored) return
-      this.saveTransform()
-      this.unblockScroll()
-      this.clearAnchor()
+      this.commitTransform()
     })
+  }
+
+  /** commits transform and updates the cell to remain the source of truth */
+  protected commitTransform(): void {
+    const container = this.pixi.container
+    const cell = this.stack.top()?.cell
+
+    if (container && cell) {
+      cell.x = container.x
+      cell.y = container.y
+      cell.scale = container.scale.x
+      this.debug.log('panning', 'commitTransform', { x: cell.x, y: cell.y, scale: cell.scale })
+    }
+
+    this.saveTransform()
+    this.unblockScroll()
+    this.clearAnchor()
   }
 
   public enable = (): void => this.enabled.set(true)
@@ -92,7 +115,6 @@ export abstract class PanningServiceBase extends PixiDataServiceBase {
     if (!container) return
     container.eventMode = "static"
     container.hitArea ??= { contains: () => true }
-    // REMOVED: canvas.style.touchAction = "none"
   }
 
   protected override onPixiReady(): void {
@@ -131,9 +153,7 @@ export abstract class PanningServiceBase extends PixiDataServiceBase {
     const resolution = app.renderer.resolution
     const dx = (move.clientX - this.downScreenX) * resolution
     const dy = (move.clientY - this.downScreenY) * resolution
-    const nextX = this.startPosX + dx
-    const nextY = this.startPosY + dy
-    container.position.set(nextX, nextY)
+    container.position.set(this.startPosX + dx, this.startPosY + dy)
   }
 
   private unblockScroll(): void {

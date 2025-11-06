@@ -41,10 +41,9 @@ export class PinchZoomService extends PixiDataServiceBase {
           container.hitArea ??= new Rectangle(-1e6, -1e6, 2e6, 2e6) as IHitArea
           canvas.style.touchAction = 'none'
         }
+        
         if (positions.size < 2 || this.state.hasMode(HypercombMode.Transport)) {
-          if (this.isPinching()) {
-            this.zoomService.triggerSave()
-          }
+          if (this.isPinching()) this.saveTransform() // ✅ unified persistence
           this.isPinching.set(false)
           this.initialScale = 0
           this.startDistance = 0
@@ -52,6 +51,7 @@ export class PinchZoomService extends PixiDataServiceBase {
           this.deltaHistory = []
           return
         }
+
         const [p1, p2] = Array.from(positions.values()) as { x: number; y: number }[]
         if (!p1 || !p2) return
         const center = this.center(p1, p2)

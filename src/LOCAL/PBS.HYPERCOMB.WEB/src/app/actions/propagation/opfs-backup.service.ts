@@ -38,6 +38,7 @@ export class OpfsBackupService {
     }
 
     return await zip.generateAsync({ type: "blob" })
+    
   }
 
   /** --------------------------------------------------------------
