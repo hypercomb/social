@@ -12,7 +12,9 @@ export class ImageSprite extends BaseSpriteBuilder<Cell> {
     public async build(cell: Cell): Promise<Sprite> {
         try {
             const bitmap = await createImageBitmap(cell.blob!)
-
+            if (cell.name == "hot-air-rights") {
+                this.debug.log('render', `name: ${cell.name}, cacheId: ${this.state.cacheId(cell)} URL: ${cell.blob ? URL.createObjectURL(cell.blob) : 'no blob'}`)
+            }
             // Create and configure the sprite
             const sprite = new Sprite()
             this.configureSprite(sprite)
@@ -32,7 +34,7 @@ export class ImageSprite extends BaseSpriteBuilder<Cell> {
             throw error
         }
     }
-    
+
 }
 
 

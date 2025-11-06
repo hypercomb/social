@@ -11,9 +11,9 @@ import { BlobService } from 'src/app/hive/rendering/blob-service'
 import { Component, OnDestroy, ViewChild, ElementRef, inject, signal, effect, HostListener } from '@angular/core'
 import { EditImageSprite } from 'src/app/user-interface/sprite-components/edit-image-sprite'
 import { EditCell } from 'src/app/cells/cell'
-import { ImageCaptureService } from 'src/app/helper/image-capture-service'
 import { Events } from 'src/app/helper/events/events'
 import { DebugService } from 'src/app/core/diagnostics/debug-service'
+import { ImageCaptureManager } from './image-capture-manager'
 
 @Component({
   standalone: true,
@@ -31,7 +31,7 @@ export class TileImageComponent implements OnDestroy {
   private readonly mask = inject(MaskComponent)
   private readonly layers = inject(TileLayerManager)
   public readonly es = inject(EditorService)
-  private readonly captureService = inject(ImageCaptureService)
+  private readonly manager = inject(ImageCaptureManager)
   private readonly debug = inject(DebugService)
 
   // ──────────────────────────────────────────────
@@ -230,7 +230,7 @@ export class TileImageComponent implements OnDestroy {
     container.addChild(mask)
 
     this.pixiApp.stage.addChild(container)
-    await this.captureService.setContainer(container)
+    await this.manager.setContainer(container)
     this.es.rendered.set(true)
   }
 

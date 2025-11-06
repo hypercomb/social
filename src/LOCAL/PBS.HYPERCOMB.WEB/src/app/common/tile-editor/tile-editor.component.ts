@@ -19,8 +19,8 @@ import { CellFactory } from 'src/app/inversion-of-control/factory/cell-factory'
 import { MODIFY_COMB_SVC } from 'src/app/shared/tokens/i-comb-service.token'
 import { ImagePersistenceService } from './tile-image/image-persistence-service'
 import { PointerState } from 'src/app/state/input/pointer-state'
-import { ImageCaptureManager } from './tile-image/image-capture-service'
 import { HiveService } from 'src/app/hive/storage/hive-service'
+import { ImageCaptureManager } from './tile-image/image-capture-manager'
 
 
 
@@ -50,7 +50,7 @@ export class TileEditorComponent extends Hypercomb {
   private readonly factory = inject(CellFactory)
   private readonly hexagonEditor = inject(CellEditor)
   public readonly hivesvc = inject(HiveService)
-  public readonly manager = inject(ImageCaptureManager)
+  public readonly captureManager = inject(ImageCaptureManager)
   private readonly modify = inject(MODIFY_COMB_SVC)
   public readonly persistence = inject(ImagePersistenceService)
 
@@ -189,7 +189,7 @@ export class TileEditorComponent extends Hypercomb {
 
     // capture and persist the working (small) snapshot
     if (!cell.image || cell.imageDirty) {
-       const snapshot = await this.manager.capture()
+       const snapshot = await this.captureManager.capture()
       await this.persistence.saveSmall(cell, snapshot)
     }
 
