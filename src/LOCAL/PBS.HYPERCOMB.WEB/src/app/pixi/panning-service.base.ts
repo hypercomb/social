@@ -158,11 +158,16 @@ export abstract class PanningServiceBase extends PixiDataServiceBase {
     }
   }
 
-  private unblockScroll(): void {
-    if (this.scrollBlocker) {
-      this.scrollBlocker()
-      this.scrollBlocker = null
-    }
+  /** Hard reset for navigation/context switches (e.g. Back action). */
+  public cancelPanSession(): void {
+    this.unblockScroll()
+    this.anchored = false
+    this.dragThresholdReached = false
+    this.setActive(false)
+
+    this._cancelled.set(false)
+    this.state.setCancelled(false)
+    this.state.panning = false
   }
 
   public enable = (): void => this.enabled.set(true)
@@ -206,6 +211,13 @@ export abstract class PanningServiceBase extends PixiDataServiceBase {
     const dx = (move.clientX - this.downScreenX) * resolution
     const dy = (move.clientY - this.downScreenY) * resolution
     container.position.set(this.startPosX + dx, this.startPosY + dy)
+  }
+
+  private unblockScroll(): void {
+    if (this.scrollBlocker) {
+      this.scrollBlocker()
+      this.scrollBlocker = null
+    }
   }
 
   protected abstract shouldStart(down: PointerEvent): boolean

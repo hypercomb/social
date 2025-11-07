@@ -7,7 +7,7 @@ export class SpacebarPanningService extends PanningServiceBase {
   private awaitingFirstMove = false
   private initialized = false
 
-  // base effects call these, but for keyboard panning we're driving manually
+  // base wired effects won't use these for keyboard panning
   protected shouldStart(): boolean { return false }
   protected isMoveRelevant(): boolean { return true }
   protected override getPanThreshold(): number { return 0 }
@@ -25,27 +25,22 @@ export class SpacebarPanningService extends PanningServiceBase {
       canvas.style.cursor = this.keyboard.spaceDown() ? "grab" : "default"
     })
 
-    // anchor on mouse down while space is held
+    // 🔹 Anchor on mouse down while space is held
+    // NOTE: intentionally NOT using downSeq here.
     effect(() => {
       if (!this.isEnabled()) return
-
-      const downSeq = this.ps.downSeq()
-      if (downSeq === 0) return
-
-      const down = this.ps.pointerDownEvent()
-      if (!down) return
-      if (down.button !== 0) return               // primary only
-      if (down.pointerType !== "mouse") return
       if (!this.keyboard.spaceDown()) return
 
-      // standard anchor: capture container pos + down coords
-      this.startAnchorAt(down.clientX, down.clientY)
-
-      // but we will re-align on the first move to avoid any visual snap
+      if (this.anchored) return                // already in a drag for this gesture
+      const position = this.ps.position()
+      // normal anchor from current position
+      this.startAnchorAt(position.x, position.y)
+      this.debug.log('panning', this.ps.position())
+      // first move will realign the origin so there's no visible snap
       this.awaitingFirstMove = true
     })
 
-    // if space is released mid-drag, finalize
+    // 🔹 If space is released mid-drag, finalize the pan
     effect(() => {
       if (!this.isEnabled()) return
       if (this.keyboard.spaceDown()) return
@@ -59,17 +54,19 @@ export class SpacebarPanningService extends PanningServiceBase {
     })
   }
 
-  // 🔹 Critical: avoid the first-frame glitch by correcting BEFORE applying delta
+  // 🔹 Pan implementation with "no first-frame glitch"
   protected override performPan(move: PointerEvent): void {
     const container = this.pixi.container
     const app = this.pixi.app
     if (!container || !app) return
 
-    // Only pan while space is held & mouse is used
-    if (!this.keyboard.spaceDown() || move.pointerType !== "mouse") return
+    // only while space held & mouse drag
+    if (!this.keyboard.spaceDown()) return
+    if (move.pointerType !== "mouse") return
+    if (!this.anchored) return
 
     if (this.awaitingFirstMove) {
-      // Align the drag origin to the first move so dx/dy start at 0
+      // Align drag origin on the first real move so dx/dy start at 0
       this.downScreenX = move.clientX
       this.downScreenY = move.clientY
       this.awaitingFirstMove = false
@@ -83,5 +80,11 @@ export class SpacebarPanningService extends PanningServiceBase {
     const dy = (move.clientY - this.downScreenY) * resolution
 
     container.position.set(this.startPosX + dx, this.startPosY + dy)
+  }
+
+  // Ensure Back/Branch hard-resets our internal flag too
+  public override cancelPanSession(): void {
+    super.cancelPanSession()
+    this.awaitingFirstMove = false
   }
 }

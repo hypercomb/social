@@ -1,14 +1,16 @@
-// actions/back-hive.action.ts
+// src/app/actions/navigation/back.ts
 import { inject, Injectable } from "@angular/core"
 import { ActionBase } from "../action.base"
 import { PointerState } from "src/app/state/input/pointer-state"
 import { BaseContext, hasEvent } from "../action-contexts"
 import { HIVE_HYDRATION } from "src/app/shared/tokens/i-comb-service.token"
+import { PanningManager } from "src/app/pixi/panning-manager"   // ⬅️ add this
 
 @Injectable({ providedIn: "root" })
 export class BackHiveAction extends ActionBase<BaseContext> {
   private readonly pointerstate = inject(PointerState)
   private readonly hydration = inject(HIVE_HYDRATION)
+  private readonly panning = inject(PanningManager)             // ⬅️ add this
 
   public static ActionId = 'hive.back'
   public id = BackHiveAction.ActionId
@@ -27,10 +29,13 @@ export class BackHiveAction extends ActionBase<BaseContext> {
   }
 
   public override run = async (): Promise<void> => {
+    // 🔹 Ensure no stale pan/spacebar state survives across hives
+    this.panning.getSpacebar().cancelPanSession()
+    this.panning.getTouch().cancelPanSession()
+
     this.combstore.invalidate()
     this.hydration.reset()
     this.stack.pop()
     this.menu.hide()
   }
 }
-
