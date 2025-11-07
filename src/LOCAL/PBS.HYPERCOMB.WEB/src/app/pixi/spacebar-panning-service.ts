@@ -1,3 +1,4 @@
+// src/app/pixi/spacebar-panning-service.ts
 import { Injectable, effect } from "@angular/core"
 import { PanningServiceBase } from "./panning-service.base"
 
@@ -6,51 +7,81 @@ export class SpacebarPanningService extends PanningServiceBase {
   private awaitingFirstMove = false
   private initialized = false
 
-  protected shouldStart(): boolean { return false } // unused for keyboard
+  // base effects call these, but for keyboard panning we're driving manually
+  protected shouldStart(): boolean { return false }
   protected isMoveRelevant(): boolean { return true }
   protected override getPanThreshold(): number { return 0 }
 
   constructor() {
     super()
-    this.usePanThreshold = false // ✅ disable threshold for keyboard panning
+    this.usePanThreshold = false // immediate pan once anchored
 
-    // update cursor
+    // cursor feedback only
     effect(() => {
-      setTimeout(() => this.initialized = true, 50)
+      setTimeout(() => (this.initialized = true), 50)
       if (!this.initialized) return
-      const space = this.keyboard.spaceDown()
       const canvas = this.pixi.app?.canvas
-      if (canvas) canvas.style.cursor = space ? 'grab' : 'default'
+      if (!canvas) return
+      canvas.style.cursor = this.keyboard.spaceDown() ? "grab" : "default"
     })
 
-    // start / end logic
+    // anchor on mouse down while space is held
     effect(() => {
-      const space = this.keyboard.spaceDown()
-      const move = this.ps.pointerMoveEvent()
-      const pos = this.ps.position()
+      if (!this.isEnabled()) return
 
-      if (space && move && !this.anchored) {
-        this.startAnchorAt(pos.x, pos.y)
-        this.awaitingFirstMove = true
-      } else if (!space && this.anchored) {
-        this.commitTransform()  // now properly updates the cell and saves
-        this.awaitingFirstMove = false
-        const canvas = this.pixi.app?.canvas
-        if (canvas) canvas.style.cursor = 'default'
-      }
+      const downSeq = this.ps.downSeq()
+      if (downSeq === 0) return
 
-    })
-
-    // correct initial grab offset
-    effect(() => {
-      const move = this.ps.pointerMoveEvent()
-      if (!move || !this.anchored || !this.awaitingFirstMove) return
+      const down = this.ps.pointerDownEvent()
+      if (!down) return
+      if (down.button !== 0) return               // primary only
+      if (down.pointerType !== "mouse") return
       if (!this.keyboard.spaceDown()) return
+
+      // standard anchor: capture container pos + down coords
+      this.startAnchorAt(down.clientX, down.clientY)
+
+      // but we will re-align on the first move to avoid any visual snap
+      this.awaitingFirstMove = true
+    })
+
+    // if space is released mid-drag, finalize
+    effect(() => {
+      if (!this.isEnabled()) return
+      if (this.keyboard.spaceDown()) return
+      if (!this.anchored) return
+
+      this.commitTransform()
+      this.awaitingFirstMove = false
+
+      const canvas = this.pixi.app?.canvas
+      if (canvas) canvas.style.cursor = "default"
+    })
+  }
+
+  // 🔹 Critical: avoid the first-frame glitch by correcting BEFORE applying delta
+  protected override performPan(move: PointerEvent): void {
+    const container = this.pixi.container
+    const app = this.pixi.app
+    if (!container || !app) return
+
+    // Only pan while space is held & mouse is used
+    if (!this.keyboard.spaceDown() || move.pointerType !== "mouse") return
+
+    if (this.awaitingFirstMove) {
+      // Align the drag origin to the first move so dx/dy start at 0
       this.downScreenX = move.clientX
       this.downScreenY = move.clientY
       this.awaitingFirstMove = false
+
       const canvas = this.pixi.app?.canvas
-      if (canvas) canvas.style.cursor = 'grabbing'
-    })
+      if (canvas) canvas.style.cursor = "grabbing"
+    }
+
+    const resolution = app.renderer.resolution
+    const dx = (move.clientX - this.downScreenX) * resolution
+    const dy = (move.clientY - this.downScreenY) * resolution
+
+    container.position.set(this.startPosX + dx, this.startPosY + dy)
   }
 }

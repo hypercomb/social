@@ -23,6 +23,7 @@ export class PanningManager {
         this.touch.enable()
       }
     })
+    
     // === Optional: Initial device detection (fallback) ===
     // This is now secondary — spacebar overrides everything
     window.addEventListener("pointerdown", (e) => {

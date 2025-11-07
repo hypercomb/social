@@ -118,61 +118,59 @@ export class ContextMenuService extends PixiServiceBase implements IContextMenu 
     void this.safeInit()
   }
 
-private async safeInit(): Promise<void> {
-  this.menuContainer.alpha = 0
-  await this.addContainer(0, 0)
+  private async safeInit(): Promise<void> {
+    this.menuContainer.alpha = 0
+    await this.addContainer(0, 0)
 
-  // ensure the container receives mouse events
-  this.menuContainer.interactive = true
-  this.menuContainer.eventMode = 'static'
-  this.menuContainer.hitArea = new Rectangle(0, 0, 60.5, 249)
+    // Ensure the container catches all pointer events over its area
+    this.menuContainer.eventMode = 'static'
+    this.menuContainer.interactive = true
 
-  // make the background ignore pointer events so container gets them
-  const bg = this.menuContainer.children[0] as Sprite
-  if (bg) bg.eventMode = 'none'
+    // Define a hit area matching the menu’s visual bounds
+    this.menuContainer.hitArea = new Rectangle(0, 0, 60.5, 249)
 
-  // mark when mouse enters/leaves container area
-  this.menuContainer.on('pointerenter', () => this.state.setContextActive(true))
-  this.menuContainer.on('pointerleave', () => this.state.setContextActive(false))
+    // Track pointer hover state (used for disabling tile clicks)
+    this.menuContainer.on('pointerenter', () => this.state.setContextActive(true))
+    this.menuContainer.on('pointerleave', () => this.state.setContextActive(false))
 
-  const style = { fontFamily: 'hypercomb-icons', fontSize: 32, fill: 'white' }
-  this.editIcon = new Text({ text: 'N', style })
-  this.linkIcon = new Text({ text: '*', style })
-  this.branchIcon = new Text({ text: '+', style })
+    const style = { fontFamily: 'hypercomb-icons', fontSize: 32, fill: 'white' }
+    this.editIcon = new Text({ text: 'N', style })
+    this.linkIcon = new Text({ text: '*', style })
+    this.branchIcon = new Text({ text: '+', style })
 
-  this.addLinkClick(this.linkIcon)
-  this.addEditTileClick(this.editIcon)
-  this.addBranchClick(this.branchIcon)
+    this.addLinkClick(this.linkIcon)
+    this.addEditTileClick(this.editIcon)
+    this.addBranchClick(this.branchIcon)
 
-  const padding = 20
-  for (const [index, icon] of [this.linkIcon, this.editIcon, this.branchIcon].entries()) {
-    icon.anchor.set(0.5, 0.5)
-    icon.x = 32
-    icon.y = 50 + padding + index * 60
-    icon.eventMode = 'dynamic'
-    icon.on('pointerover', this.onIconHover)
-    icon.on('pointerout', this.onIconOut)
-    this.menuContainer.addChild(icon)
+    this.icons.push(this.linkIcon, this.editIcon, this.branchIcon)
+
+    const padding = 20
+    this.icons.forEach((icon, index) => {
+      icon.anchor.set(0.5, 0.5)
+      icon.x = 32
+      icon.y = 50 + padding + index * 60
+      icon.eventMode = 'dynamic'
+      icon.on('pointerover', this.onIconHover)
+      icon.on('pointerout', this.onIconOut)
+      this.menuContainer.addChild(icon)
+    })
+
+    this.menuContainer.on('pointerdown', this.onContainerClick)
   }
 
-  // stop propagation so clicks never reach tiles underneath
-  this.menuContainer.on('pointerdown', e => e.stopPropagation())
-  this.menuContainer.on('pointerup', e => e.stopPropagation())
-}
 
 
-
-public addContainer = async (x: number, y: number) => {
-  const texture = await Assets.load(LocalAssets.Background)
-  const background = new Sprite(texture)
-  background.width = 60.5
-  background.height = 249
-  background.eventMode = 'none'  // <- allow parent to get pointerenter/leave
-  this.menuContainer.addChild(background)
-  this.menuContainer.x = x
-  this.menuContainer.y = y
-  this.menuContainer.zIndex = 1000
-}
+  public addContainer = async (x: number, y: number) => {
+    const texture = await Assets.load(LocalAssets.Background)
+    const background = new Sprite(texture)
+    background.width = 60.5
+    background.height = 249
+    background.eventMode = 'none'  // <- allow parent to get pointerenter/leave
+    this.menuContainer.addChild(background)
+    this.menuContainer.x = x
+    this.menuContainer.y = y
+    this.menuContainer.zIndex = 1000
+  }
 
 
   private onIconHover = (event: FederatedPointerEvent) => {

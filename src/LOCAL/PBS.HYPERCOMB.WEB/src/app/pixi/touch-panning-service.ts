@@ -13,10 +13,27 @@ export class TouchPanningService extends PanningServiceBase {
     return move.pointerType === "touch"
   }
 
-  protected override getPanThreshold(): number { return 6 }
+  protected override getPanThreshold(): number {
+    return 6
+  }
+
 
   constructor() {
     super()
+
+    // 🔹 mark start of touch gesture immediately on pointerdown
+    effect(() => {
+      const downSeq = this.ps.downSeq()
+      if (downSeq === 0) return
+      const down = this.ps.pointerDownEvent()
+      if (!down || down.pointerType !== "touch") return
+
+      // a new gesture started — reset cancellation flags
+      this.state.setCancelled(false)
+
+      // mark that we are in a potential panning state
+      this.state.panning = true
+    })
 
     // ensure that on pointerup the transform is committed
     effect(() => {

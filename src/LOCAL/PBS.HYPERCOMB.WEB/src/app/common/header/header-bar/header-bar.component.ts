@@ -100,7 +100,8 @@ export class HeaderBarComponent extends HypercombData {
   )
 
   public openLink() {
-    this.navigation.openLink()
+    const cell = this.detector.activeCell()
+    this.navigation.openLink(cell)
   }
 
   public cancel(_: any) {
