@@ -1,4 +1,4 @@
-﻿// src/app/state/input/pointer-state.ts (Fixed: only remove individual pointer on up/cancel)
+// src/app/state/input/pointer-state.ts (Fixed: only remove individual pointer on up/cancel)
 import { Injectable, signal, computed, effect } from "@angular/core"
 import { Point, Container } from "pixi.js"
 

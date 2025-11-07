@@ -1,4 +1,4 @@
-﻿import { Injectable, effect } from "@angular/core"
+import { Injectable, effect } from "@angular/core"
 import { PanningServiceBase } from "./panning-service.base"
 
 @Injectable({ providedIn: "root" })
