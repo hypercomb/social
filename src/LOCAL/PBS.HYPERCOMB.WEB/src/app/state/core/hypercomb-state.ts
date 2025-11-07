@@ -14,6 +14,14 @@ export class HypercombState {
   private _batchCompleteSeq = signal(0)
   public readonly batchCompleteSeq = this._batchCompleteSeq.asReadonly()
 
+  // context menu active state
+  private readonly _isContextActive = signal(false)
+  public readonly isContextActive = this._isContextActive.asReadonly()
+
+  public setContextActive(active: boolean): void {
+    this._isContextActive.set(active)
+  }
+
   public setBatchComplete(): void {
     // bump value to always change, triggering dependent effects
     this._batchCompleteSeq.update(v => v + 1)

@@ -1,5 +1,6 @@
-﻿import { Injectable, inject, effect, DestroyRef, signal } from "@angular/core"
-import { Container, Assets, Sprite, FederatedPointerEvent, TextStyle, Text } from "pixi.js"
+﻿// src/app/navigation/menus/context-menu-service.ts
+import { Injectable, inject, effect, DestroyRef, signal } from "@angular/core"
+import { Container, Assets, Sprite, FederatedPointerEvent, TextStyle, Text, Rectangle } from "pixi.js"
 import { LayoutState } from "src/app/layout/layout-state"
 import { POLICY } from "src/app/core/models/enumerations"
 import { PixiServiceBase } from "src/app/pixi/pixi-service-base"
@@ -14,8 +15,6 @@ import { fromEvent } from "rxjs"
 import { CoordinateDetector } from "src/app/helper/detection/coordinate-detector"
 import { ACTION_REGISTRY, IContextMenu } from "src/app/shared/tokens/i-hypercomb.token"
 import { CellContext } from "src/app/actions/action-contexts"
-import { ActionRegistry } from "src/app/actions/action-registry"
-
 
 @Injectable({ providedIn: 'root' })
 export class ContextMenuService extends PixiServiceBase implements IContextMenu {
@@ -33,8 +32,7 @@ export class ContextMenuService extends PixiServiceBase implements IContextMenu 
     POLICY.MovingTiles
   )
 
-  private readonly menuContainer = new Container() // dedicated context menu container
-
+  private readonly menuContainer = new Container()
   private icons: Text[] = []
   private editIcon!: Text
   private linkIcon!: Text
@@ -45,61 +43,47 @@ export class ContextMenuService extends PixiServiceBase implements IContextMenu 
   constructor() {
     super()
 
+    // prevent default browser menu
     fromEvent<MouseEvent>(document, "contextmenu")
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(ev => {
-        ev.preventDefault()
-      })
+      .subscribe(ev => ev.preventDefault())
 
-    // wait until PixiManager has a container
+    // attach menu container to main pixi container
     effect(() => {
       const container = this.pixi.container
       if (!container) return
-
       container.label = ContextMenuService.name
       if (!container.children.includes(this.menuContainer)) {
         container.addChild(this.menuContainer)
       }
     })
 
-    // react to active tile detection
+    // watch active tile for context menu triggers
     effect(async () => {
       const tile = this.detector.activeTile()
-
-      // if no tile, hide menu immediately
       if (!tile || this.state.isMobile) {
         await this.hide()
         return
       }
 
-      // tile found → look up its data and show
       const cell = this.store.lookupData(tile.cellId)
       if (cell) {
         await this.show(cell)
       }
 
-      // optional: hide if pointer overlaps UI controls
       if (this.layout.isMouseOverControlBar()) {
         await this.hide()
       }
     })
 
-
-
-    // DOM events
-    document.addEventListener(Events.PanningThreshold, () => {
-      this.clickAborted = true
-    })
-    document.addEventListener('mouseup', () => {
-      this.clickAborted = false
-    })
+    // handle click aborts from panning
+    document.addEventListener(Events.PanningThreshold, () => (this.clickAborted = true))
+    document.addEventListener("mouseup", () => (this.clickAborted = false))
   }
 
-  // position of the menu
   private readonly _position = signal<{ x: number; y: number } | null>(null)
   public readonly position = this._position.asReadonly()
 
-  // show/hide is derived from detector’s activeCell
   public readonly activeCell = this.detector.activeTile()
 
   public hide = async () => {
@@ -107,129 +91,138 @@ export class ContextMenuService extends PixiServiceBase implements IContextMenu 
     this.menuContainer.visible = false
     this.menuContainer.alpha = 0
     this.isVisible.set(false)
+    this.state.setContextActive(false) // always reset when menu hidden
   }
-
 
   public show = async (cell: Cell) => {
     if (this.isBlocked()) return
     this.isVisible.set(true)
     this.menuContainer.alpha = 1
-    if (this.linkIcon) {
-      this.linkIcon.visible = !!cell.link
-    }
-    const tile = this.store.lookupTile(cell.cellId)!
+
+    if (this.linkIcon) this.linkIcon.visible = !!cell.link
+
+    const tile = this.store.lookupTile(cell.cellId)
     if (!tile) return
 
     const vspace = 125
     const xspace = 94
     const { hexagonOffsetX, hexagonOffsetY } = this.settings.hexagonDimensions
-
     if (!tile.position) return
+
     this.menuContainer.x = tile.x + hexagonOffsetX + xspace
     this.menuContainer.y = tile.y + hexagonOffsetY - vspace
     this.menuContainer.visible = true
-
   }
-
 
   protected override onPixiReady(): void {
     void this.safeInit()
   }
 
-  private async safeInit(): Promise<void> {
-    this.menuContainer.alpha = 0
-    await this.addContainer(0, 0)
-    this.menuContainer.eventMode = 'static'
+private async safeInit(): Promise<void> {
+  this.menuContainer.alpha = 0
+  await this.addContainer(0, 0)
 
-    const style = { fontFamily: 'hypercomb-icons', fontSize: 32, fill: 'white' }
+  // ensure the container receives mouse events
+  this.menuContainer.interactive = true
+  this.menuContainer.eventMode = 'static'
+  this.menuContainer.hitArea = new Rectangle(0, 0, 60.5, 249)
 
-    this.editIcon = new Text({ text: 'N', style })
-    this.linkIcon = new Text({ text: '*', style })
-    this.branchIcon = new Text({ text: '+', style })
+  // make the background ignore pointer events so container gets them
+  const bg = this.menuContainer.children[0] as Sprite
+  if (bg) bg.eventMode = 'none'
 
-    this.addLinkClick(this.linkIcon)
-    this.addEditTileClick(this.editIcon)
-    this.addBranchClick(this.branchIcon)
+  // mark when mouse enters/leaves container area
+  this.menuContainer.on('pointerenter', () => this.state.setContextActive(true))
+  this.menuContainer.on('pointerleave', () => this.state.setContextActive(false))
 
-    this.icons.push(this.linkIcon, this.editIcon, this.branchIcon)
+  const style = { fontFamily: 'hypercomb-icons', fontSize: 32, fill: 'white' }
+  this.editIcon = new Text({ text: 'N', style })
+  this.linkIcon = new Text({ text: '*', style })
+  this.branchIcon = new Text({ text: '+', style })
 
-    const padding = 20
-    this.icons.forEach((icon, index) => {
-      icon.anchor.set(0.5, 0.5)
-      icon.x = 32
-      icon.y = 50 + padding + index * 60
-      icon.eventMode = 'dynamic'
+  this.addLinkClick(this.linkIcon)
+  this.addEditTileClick(this.editIcon)
+  this.addBranchClick(this.branchIcon)
 
-      icon.on('pointerover', this.onIconHover)
-      icon.on('pointerout', this.onIconOut)
-
-      this.menuContainer.addChild(icon)
-    })
-
-    this.menuContainer.on('pointerdown', this.onContainerClick)
+  const padding = 20
+  for (const [index, icon] of [this.linkIcon, this.editIcon, this.branchIcon].entries()) {
+    icon.anchor.set(0.5, 0.5)
+    icon.x = 32
+    icon.y = 50 + padding + index * 60
+    icon.eventMode = 'dynamic'
+    icon.on('pointerover', this.onIconHover)
+    icon.on('pointerout', this.onIconOut)
+    this.menuContainer.addChild(icon)
   }
 
-  public addContainer = async (x: number, y: number) => {
-    const texture = await Assets.load(LocalAssets.Background)
-    const background = new Sprite(texture)
-    background.width = 60.5
-    background.height = 249
-    background.interactive = true
+  // stop propagation so clicks never reach tiles underneath
+  this.menuContainer.on('pointerdown', e => e.stopPropagation())
+  this.menuContainer.on('pointerup', e => e.stopPropagation())
+}
 
-    this.menuContainer.addChild(background)
-    this.menuContainer.x = x
-    this.menuContainer.y = y
-    this.menuContainer.zIndex = 1000
-  }
+
+
+public addContainer = async (x: number, y: number) => {
+  const texture = await Assets.load(LocalAssets.Background)
+  const background = new Sprite(texture)
+  background.width = 60.5
+  background.height = 249
+  background.eventMode = 'none'  // <- allow parent to get pointerenter/leave
+  this.menuContainer.addChild(background)
+  this.menuContainer.x = x
+  this.menuContainer.y = y
+  this.menuContainer.zIndex = 1000
+}
+
 
   private onIconHover = (event: FederatedPointerEvent) => {
     const icon = event.currentTarget as Text
-    icon.style = new TextStyle({ fontFamily: 'hypercomb-icons', fontSize: 46, fill: '#2e3436' })
+    icon.style = new TextStyle({ fontFamily: "hypercomb-icons", fontSize: 46, fill: "#2e3436" })
   }
 
   private onIconOut = (event: FederatedPointerEvent) => {
     const icon = event.currentTarget as Text
-    icon.style = new TextStyle({ fontFamily: 'hypercomb-icons', fontSize: 32, fill: 'white' })
+    icon.style = new TextStyle({ fontFamily: "hypercomb-icons", fontSize: 32, fill: "white" })
   }
 
   private addLinkClick(icon: Text) {
-    icon.on('pointerup', async (event: FederatedPointerEvent) => {
+    icon.on("pointerup", async (event: FederatedPointerEvent) => {
       event.stopImmediatePropagation()
       event.preventDefault()
       if (this.clickWasAborted() || event.button === 2) return
       const cell = this.stack.cell()
       if (cell) await this.navigation.openLink(cell)
+      await this.hide()
     })
   }
 
   private addEditTileClick(icon: Text) {
-    icon.on('pointerup', async (event: FederatedPointerEvent) => {
+    icon.on("pointerup", async (event: FederatedPointerEvent) => {
       event.stopImmediatePropagation()
       event.preventDefault()
       if (this.clickWasAborted() || event.button === 2) return
       const cell = this.detector.activeCell()
       if (cell) {
         const payload = { kind: "cell", cell, event } as CellContext
-        await this.actions.invoke('layout.editTile', payload)
+        await this.actions.invoke("layout.editTile", payload)
       }
+      await this.hide()
     })
   }
 
   private addBranchClick(icon: Text) {
-    icon.on('pointerup', async (event: FederatedPointerEvent) => {
+    icon.on("pointerup", async (event: FederatedPointerEvent) => {
       event.stopImmediatePropagation()
       event.preventDefault()
       if (this.clickWasAborted() || event.button === 2) return
-      //  this.actions.invoke(action.id, { cell })
+      await this.hide()
     })
   }
 
   private onContainerClick = (e: FederatedPointerEvent) => {
     const point = e.global
     const hit = this.icons.some(icon => icon.containsPoint(point))
-    if (!hit) {
-      this.debug.log('ui', 'Container clicked', e)
-    }
+    if (!hit) this.hide()
   }
 
   private clickWasAborted(): boolean {
@@ -238,5 +231,3 @@ export class ContextMenuService extends PixiServiceBase implements IContextMenu 
     return was
   }
 }
-
-

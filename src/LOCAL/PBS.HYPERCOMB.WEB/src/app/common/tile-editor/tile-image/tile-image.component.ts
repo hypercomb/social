@@ -11,9 +11,9 @@ import { BlobService } from 'src/app/hive/rendering/blob-service'
 import { Component, OnDestroy, ViewChild, ElementRef, inject, signal, effect, HostListener } from '@angular/core'
 import { EditImageSprite } from 'src/app/user-interface/sprite-components/edit-image-sprite'
 import { EditCell } from 'src/app/cells/cell'
-import { Events } from 'src/app/helper/events/events'
 import { DebugService } from 'src/app/core/diagnostics/debug-service'
 import { ImageCaptureManager } from './image-capture-manager'
+import { Events } from 'src/app/helper/events/events'
 
 @Component({
   standalone: true,
