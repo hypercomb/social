@@ -10,7 +10,7 @@ import { ZoomService } from './zoom-service'
 import { PanningManager } from './panning-manager'  // ← NEW
 
 @Injectable({ providedIn: 'root' })
-export class PinchZoomService extends PixiDataServiceBase {
+export class TouchZoomService extends PixiDataServiceBase {
   private readonly ps = inject(PointerState)
   private readonly ls = inject(LayoutState)
   private readonly navigation = inject(LinkNavigationService)

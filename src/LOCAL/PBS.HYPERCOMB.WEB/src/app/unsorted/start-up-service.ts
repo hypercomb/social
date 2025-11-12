@@ -41,7 +41,6 @@ import { KeyboardShortcutListener } from '../interactivity/keyboard/keyboard-sho
 import { PointerBindingService } from '../state/input/pointer-binding-service'
 import { SpacebarPanningService } from '../pixi/spacebar-panning-service'
 import { TouchPanningService } from '../pixi/touch-panning-service'
-import { PinchZoomService } from '../pixi/pinch-zoom-service'
 import { WheelState } from '../common/mouse/wheel-state'
 
 // rendering and visuals
@@ -64,6 +63,7 @@ import { PositionSynchronizer } from '../hive/position-synchronizer'
 import { ExportAllHivesAction } from '../actions/propagation/export-all-hives'
 import { OpfsBackupService } from '../actions/propagation/opfs-backup.service'
 import { MousewheelZoomService } from '../pixi/mousewheel-zoom-service'
+import { TouchZoomService } from '../pixi/touch-zoom-service'
 
 
 @Injectable({ providedIn: 'root' })
@@ -88,7 +88,7 @@ export class StartUpService {
     inject(KeyboardShortcutListener),
 
     // input
-    inject(PinchZoomService),
+    inject(TouchZoomService),
     inject(TouchPanningService),
     inject(SpacebarPanningService),
     inject(PointerBindingService),
