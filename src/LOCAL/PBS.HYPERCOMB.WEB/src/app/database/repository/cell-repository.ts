@@ -1,12 +1,14 @@
-﻿import { Injectable } from "@angular/core"
+﻿import { inject, Injectable } from "@angular/core"
 import { CellEntity } from "../model/i-tile-entity"
 import { ICellIdentifier } from "../model/i-tile-identifiers"
 import { RepositoryBase } from "./repository.base"
 import { ICellRepository } from "src/app/shared/tokens/i-cell-repository.token"
 import { CellOptions } from "src/app/cells/models/cell-options"
+import { DebugService } from "src/app/core/diagnostics/debug-service"
 @Injectable()
 export class CellRepository extends RepositoryBase<CellEntity> implements ICellRepository {
-
+  private debug = inject(DebugService)
+  
   async fetchByUniqueId(uniqueId: string): Promise<CellEntity | undefined> {
     if (!uniqueId) return undefined;
     return this.cell_db.where("uniqueId").equals(uniqueId).first();
@@ -14,7 +16,8 @@ export class CellRepository extends RepositoryBase<CellEntity> implements ICellR
 
    fetchRoot = async(): Promise<CellEntity | undefined> => {
     const all = await this.cell_db.toArray()
-    console.log('all cells', all)
+    // Replaced console.log with debug service
+    this.debug.log('all cells', all)
     const root = await this.cell_db
       .where("kind")
       .equals('Hive')   // if you decide to use a Root flag

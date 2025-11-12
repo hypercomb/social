@@ -2,7 +2,7 @@
 import { Point } from "pixi.js"
 import { Hypercomb } from "src/app/core/mixins/abstraction/hypercomb.base"
 import { StateDebugRegistry } from "src/app/unsorted/utility/debug-registry"
-import { Cell } from "../cell"
+import { Cell, Ghost } from "../cell"
 import { Tile } from "../models/tile"
 import { isSelected } from "../models/cell-filters"
 import { ICombStore, IStaging } from "src/app/shared/tokens/i-comb-store.token"
@@ -207,7 +207,7 @@ export class CombStore extends Hypercomb implements ICombStore, IStaging {
   // -----------------------------------------------------------
   // enqueue for runtime
   // -----------------------------------------------------------
-  public enqueueHot = (cells: Cell | Cell[]): void => {
+  public enqueueHot = (cells: Cell | Ghost| Cell[] | Ghost[]): void => {
     const items = Array.isArray(cells) ? cells : [cells]
     this.hot.update(h => [...h, ...items])
   }

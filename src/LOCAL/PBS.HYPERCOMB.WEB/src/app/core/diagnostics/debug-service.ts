@@ -19,12 +19,12 @@ export class DebugService {
     // 'editor',
     // 'actions',
     // 'debug',
-    // 'layout',
+     'layout',
     // 'comb',
     // 'storage',
     // 'pinch',
     // 'zoom',
-    'render',
+    // 'render',
     //'mousewheel',
   ]
   private readonly enabledSet = new Set(this.enabled)

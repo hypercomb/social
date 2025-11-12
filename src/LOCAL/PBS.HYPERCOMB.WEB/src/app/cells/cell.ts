@@ -142,9 +142,9 @@ export class ClipboardCell extends Cell {
   }
 }
 
-export class Ghost extends NewCell {
-  constructor(params: Partial<NewCell> = {}) {
-    super(params)
+export class Ghost extends Cell {
+  constructor(params: Partial<Cell> = {}) {
+    super({ cellId: 0, ...params })
     this.setKind("Ghost")
   }
 }

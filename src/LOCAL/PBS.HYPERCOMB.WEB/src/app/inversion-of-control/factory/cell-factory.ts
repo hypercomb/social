@@ -8,11 +8,13 @@ import { ICreateCells } from "../tokens/tile-factory.token"
 import { BlobService } from "src/app/hive/rendering/blob-service"
 import { COMB_IMG_FACTORY } from "src/app/shared/tokens/i-hive-images.token"
 import { IHiveImage } from "src/app/core/models/i-hive-image"
+import { ContextStack } from "src/app/core/controller/context-stack"
 
 @Injectable({ providedIn: "root" })
 export class CellFactory implements IEntityFactoryPort<CellEntity, Cell>, ICreateCells {
     private readonly factory = inject(COMB_IMG_FACTORY)
     private readonly blobs = inject(BlobService)
+    private readonly stack = inject(ContextStack)
 
     public map<T extends Cell | NewCell>(entity: CellEntity): T {
         return toCell(entity) as T
@@ -56,6 +58,7 @@ export class CellFactory implements IEntityFactoryPort<CellEntity, Cell>, ICreat
         const image =  <IHiveImage> await this.factory.create(blob, -1)  // use -1 as temp cellId
         return new Ghost({
             ...params,
+            hive: this.stack.hiveName(),
             dateCreated: safeDate(new Date()),
             image,
         })

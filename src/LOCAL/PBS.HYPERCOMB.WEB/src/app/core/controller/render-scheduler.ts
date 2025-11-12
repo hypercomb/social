@@ -3,9 +3,9 @@ import { Application } from "pixi.js"
 import { DebugService } from "src/app/core/diagnostics/debug-service"
 import { Cell } from "src/app/cells/cell"
 import { CellContext } from "src/app/actions/action-contexts"
-import { RenderTileAction } from "src/app/hive/rendering/render-tile.action"
 import { HIVE_HYDRATION } from "src/app/shared/tokens/i-comb-service.token"
 import { HypercombState } from "src/app/state/core/hypercomb-state"
+import { RenderTileAction } from 'src/app/hive/rendering/render-tile.action'
 
 interface RenderBatch {
   hot: Cell[]
@@ -124,7 +124,7 @@ export class RenderScheduler {
 
       for (const cell of slice) {
         const id = cell.cellId
-        if (!id || this.inFlight.has(id)) continue
+        if (this.inFlight.has(id)) continue
         this.inFlight.add(id)
         try {
           await this.renderAction.run(<CellContext>{ kind: "cell", cell })
