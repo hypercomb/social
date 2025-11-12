@@ -7,7 +7,6 @@ import { PointerState } from 'src/app/state/input/pointer-state'
 import { LayoutState } from '../layout/layout-state'
 import { PixiDataServiceBase } from '../database/pixi-data-service-base'
 import { ZoomService } from './zoom-service'
-import { PanningManager } from './panning-manager'  // ← NEW
 
 @Injectable({ providedIn: 'root' })
 export class TouchZoomService extends PixiDataServiceBase {
