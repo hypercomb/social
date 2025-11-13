@@ -55,7 +55,6 @@ import { ShortcutService } from '../shortcuts/shortcut-service'
 // state
 import { EventDispatcher } from '../helper/events/event-dispatcher'
 import { StateHub } from '../state/core/state-hub'
-import { GhostTileService } from '../cells/creation/ghost-tile-service'
 import { RiftAction } from '../actions/navigation/path'
 import { PositionSynchronizer } from '../hive/position-synchronizer'
 
@@ -99,7 +98,6 @@ export class StartUpService {
     inject(CenterTileService),
     inject(TileSelectionManager),
     inject(SelectionMoveManager),
-    inject(GhostTileService),
 
     // rendering
     inject(TilePointerManager),

@@ -34,7 +34,7 @@ export enum HypercombMode {
     HiveCreation = 0x20,
     Collaboration = 0x40,
     Focused = 0x80,
-    ChoosingEditContext = 0x200,
+    EditMode = 0x200,
     Copy = 0x400,
     Cut = 0x800,
     OpfsFileExplorer = 0x1000,
@@ -52,7 +52,7 @@ export enum HypercombMode {
     CommandModes =
     AiPrompt |
     Copy |
-    ChoosingEditContext |
+    EditMode |
     Cut |
     Move |
     Transport |
@@ -71,7 +71,7 @@ export enum HypercombMode {
     Move |
     Copy |
     Cut |
-    ChoosingEditContext |
+    EditMode |
     ViewingClipboard,
     
 }

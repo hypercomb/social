@@ -27,7 +27,7 @@ export class CustomCursorDirective extends PixiServiceBase {
     let cursorImage = ''
     switch (mode) {
       case HypercombMode.Move: cursorImage = 'assets/cursor/move-cursor.svg'; break
-      case HypercombMode.ChoosingEditContext: cursorImage = 'assets/cursor/edit-cursor.svg'; break
+      case HypercombMode.EditMode: cursorImage = 'assets/cursor/edit-cursor.svg'; break
       case HypercombMode.Copy: cursorImage = 'assets/cursor/copy-cursor.svg'; break
       case HypercombMode.Cut: cursorImage = 'assets/cursor/cut-cursor.svg'; break
       default: cursorImage = ''; break

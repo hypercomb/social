@@ -34,7 +34,7 @@ export const defaultShortcuts = [
     description: 'Start editing the active tile',
     category: 'Navigation',
     keys: [[{ key: 'tab' }]],
-    payload: { mode: HypercombMode.ChoosingEditContext }
+    payload: { mode: HypercombMode.EditMode }
   },
 
   {
@@ -113,7 +113,7 @@ export const defaultShortcuts = [
     risk: 'warning',
     riskNote: 'Be careful when editing tiles as changes are immediate',
     keys: [[{ key: 'e' }]],
-    payload: { mode: HypercombMode.ChoosingEditContext }
+    payload: { mode: HypercombMode.EditMode }
   },
 
   {

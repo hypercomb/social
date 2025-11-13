@@ -157,7 +157,7 @@ export class ControlsComponent extends Hypercomb implements OnInit {
   }
 
   public toggleEditMode = async () => {
-    this.registry.invoke(ChangeModeAction.ActionId, <ChangeModeContext>{ mode: HypercombMode.ChoosingEditContext })
+    this.registry.invoke(ChangeModeAction.ActionId, <ChangeModeContext>{ mode: HypercombMode.EditMode })
   }
 
   public toggleMoveMode = async () => {

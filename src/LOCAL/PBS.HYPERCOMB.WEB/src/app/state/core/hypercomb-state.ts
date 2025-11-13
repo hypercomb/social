@@ -159,7 +159,7 @@ export class HypercombState {
   public setToolMode(mode: HypercombMode) {
     this.removeMode(HypercombMode.Copy)
     this.removeMode(HypercombMode.Cut)
-    this.removeMode(HypercombMode.ChoosingEditContext)
+    this.removeMode(HypercombMode.EditMode)
     this.removeMode(HypercombMode.Move)
     this.removeMode(HypercombMode.Select)
     this.removeMode(HypercombMode.ShowChat)
@@ -227,7 +227,7 @@ export class HypercombState {
 const MODE_MAP = {
   isNormal: HypercombMode.Normal,
   isHiveCreation: HypercombMode.HiveCreation,
-  isChoosingEditContext: HypercombMode.ChoosingEditContext,
+  isChoosingEditContext: HypercombMode.EditMode,
   isChatWindowMode: HypercombMode.ShowChat, // extra condition handled below
   isCopyMode: HypercombMode.Copy,
   isCutMode: HypercombMode.Cut,

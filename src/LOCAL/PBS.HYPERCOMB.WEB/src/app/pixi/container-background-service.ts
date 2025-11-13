@@ -29,7 +29,7 @@ export class ContainerBackgroundService extends PixiServiceBase {
         if (mode & HypercombMode.Cut) {
             color = 0x1d3557 // Cut mode
         }
-        if (mode & HypercombMode.ChoosingEditContext) {
+        if (mode & HypercombMode.EditMode) {
             color = 0x106ebe // Edit mode
         }
         if (mode & HypercombMode.Move) {
