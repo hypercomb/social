@@ -18,15 +18,6 @@ export class HypercombState {
   private readonly _isContextActive = signal(false)
   public readonly isContextActive = this._isContextActive.asReadonly()
 
-  public setContextActive(active: boolean): void {
-    this._isContextActive.set(active)
-  }
-
-  public setBatchComplete(): void {
-    // bump value to always change, triggering dependent effects
-    this._batchCompleteSeq.update(v => v + 1)
-  }
-
   private readonly stack = inject(ContextStack)
   public awake = false
   public controlsHovered: any
@@ -190,10 +181,19 @@ export class HypercombState {
     this._lastResetMode.set(next)
     this._lastChangedMode.set(next)
   }
-
+  public setBatchComplete(): void {
+    this._batchCompleteSeq.update(v => v + 1)
+  }
   public setCancelled(cancel: boolean) {
     this._cancelled.set(cancel)
   }
+
+
+  public setContextActive(active: boolean): void {
+    this._isContextActive.set(active)
+  }
+
+
 
   public setMode(mode: HypercombMode) {
     const prev = this._mode()

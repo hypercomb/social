@@ -10,7 +10,7 @@ export class CarouselService extends Hypercomb {
   // ─────────────────────────────────────────────
   // internal signals
   // ─────────────────────────────────────────────
-  private readonly _items = signal<IDexieHive[]>([])
+  private readonly _items = signal<IDexieHive[]>([])  
   private readonly _index = signal(0)
   private readonly _tileLimit = signal(4)
   private readonly _previous = signal<IDexieHive | null>(null)

@@ -8,7 +8,7 @@ import { Tile } from "src/app/cells/models/tile"
  * manages in-memory cell staging for the active hive
  */
 export interface IStaging {
-  invalidateTile(cellId: number): void 
+  invalidateTile(cellId: number): void
   stageCells(cells: Cell[]): void
   stageAdd(cell: Cell): void
   stageRemove(cellId: number): void
@@ -22,6 +22,8 @@ export interface IStaging {
  * (single-hive version)
  */
 export interface ICombStore {
+  setVisibility(cells: Cell[] | Cell, visible: boolean): unknown
+  filteredCells: Signal<Cell[]>
 
   lookupCellByIndex(idx: number): Cell | undefined
   // flush queues for scheduler

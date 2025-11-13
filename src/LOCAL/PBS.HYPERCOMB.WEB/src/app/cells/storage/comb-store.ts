@@ -1,4 +1,4 @@
-﻿import { Injectable, signal, computed, Signal, WritableSignal } from "@angular/core"
+﻿import { Injectable, signal, computed, inject } from "@angular/core"
 import { Point } from "pixi.js"
 import { Hypercomb } from "src/app/core/mixins/abstraction/hypercomb.base"
 import { StateDebugRegistry } from "src/app/unsorted/utility/debug-registry"
@@ -6,6 +6,7 @@ import { Cell, Ghost } from "../cell"
 import { Tile } from "../models/tile"
 import { isSelected } from "../models/cell-filters"
 import { ICombStore, IStaging } from "src/app/shared/tokens/i-comb-store.token"
+import { SearchFilterService } from "src/app/common/header/header-bar/search-filter-service"
 
 /**
  * CombStore
@@ -15,6 +16,9 @@ import { ICombStore, IStaging } from "src/app/shared/tokens/i-comb-store.token"
 @Injectable() // provided in CombModule
 export class CombStore extends Hypercomb implements ICombStore, IStaging {
   // registries
+  private readonly search = inject(SearchFilterService)
+
+  private readonly visibility = new Map<number, boolean>()
   private readonly tileRegistry = new Map<number, Tile>()
   private readonly dataRegistry = new Map<number, Cell>()
 
@@ -22,10 +26,21 @@ export class CombStore extends Hypercomb implements ICombStore, IStaging {
   private readonly hot = signal<Cell[]>([])
   private readonly cold = signal<Cell[]>([])
 
+  public readonly filteredCells = computed(() => {
+    const q = this.search.delayValue().toLowerCase()
+    if (!q) return this.cells()
+
+    return this.cells().filter(c =>
+      (c.name ?? '').toLowerCase().includes(q)
+    )
+  })
+
+
   // bump every time tiles are flushed/staged/reset
   private readonly _flushSeq = signal(0)
   public readonly flushSeq = this._flushSeq.asReadonly()
 
+  public readonly recalculationSeq = signal(0)
 
   // active hive data (no per-hive map anymore)
   private readonly _cells = signal<Cell[]>([])
@@ -87,6 +102,8 @@ export class CombStore extends Hypercomb implements ICombStore, IStaging {
       tile.invalidate()
     }
 
+
+    
     // enqueue the corresponding cell to cold queue for redraw
     this.cold.update(list => {
       // prevent duplicates
@@ -96,6 +113,25 @@ export class CombStore extends Hypercomb implements ICombStore, IStaging {
 
     this.bumpFlushSeq()
   }
+
+  public isVisible(cellId: number): boolean {
+    return this.visibility.get(cellId) !== false
+  }
+
+  
+  public setVisibility = (cells: Cell[] | Cell, visible: boolean): void => {
+    const list = Array.isArray(cells) ? cells : [cells]
+
+    for (const c of list) {
+      if (!c?.cellId) continue
+
+      // pixi tile visibility
+      const tile = this.lookupTile(c.cellId)
+      if (tile) tile.visible = visible
+    }
+  }
+
+
 
   // -----------------------------------------------------------
   // registry
@@ -157,6 +193,7 @@ export class CombStore extends Hypercomb implements ICombStore, IStaging {
     this._flushSeq.update(v => v + 1)
   }
 
+
   public stageCells(cells: Cell[]): void {
     this._cells.set(cells)
     this.bumpFlushSeq()
@@ -207,7 +244,7 @@ export class CombStore extends Hypercomb implements ICombStore, IStaging {
   // -----------------------------------------------------------
   // enqueue for runtime
   // -----------------------------------------------------------
-  public enqueueHot = (cells: Cell | Ghost| Cell[] | Ghost[]): void => {
+  public enqueueHot = (cells: Cell | Ghost | Cell[] | Ghost[]): void => {
     const items = Array.isArray(cells) ? cells : [cells]
     this.hot.update(h => [...h, ...items])
   }

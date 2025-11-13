@@ -8,7 +8,6 @@ import { KeyboardState } from '../../../interactivity/keyboard/keyboard-state'
 import { HypercombState } from '../../../state/core/hypercomb-state'
 import { LayoutState } from '../../../layout/layout-state'
 import { Settings } from '../../../unsorted/settings'
-import { HiveState } from 'src/app/hive/hive-state'
 import { AbstractCtor } from 'src/app/core/mixins/mixin-helpers'
 import { PolicyService } from 'src/app/navigation/menus/policy-service'
 import { PointerState } from 'src/app/state/input/pointer-state'
@@ -36,9 +35,9 @@ export function HypercombMixin<TBase extends AbstractCtor>(Base: TBase) {
             return this._contextStack ??= this.injector.get(ContextStack)
         }
 
-        private _hs?: HiveState
-        public get hs(): HiveState {
-            return this._hs ??= this.injector.get(HiveState)
+        private _hs?: HypercombState
+        public get hs(): HypercombState {
+            return this._hs ??= this.injector.get(HypercombState)
         }
 
         private _layoutState?: LayoutState

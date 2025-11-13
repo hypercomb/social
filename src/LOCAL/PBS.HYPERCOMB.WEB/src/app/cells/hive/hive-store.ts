@@ -6,9 +6,11 @@ import { Cell, Hive } from "../cell"
 import { Tile } from "../models/tile"
 import { ContextStack } from "src/app/core/controller/context-stack"
 import { IDexieHive } from "src/app/hive/hive-models"
+import { SearchFilterService } from "src/app/common/header/header-bar/search-filter-service"
 
 @Injectable({ providedIn: "root" })
 export class HiveStore implements IControlHives, IHiveState, IHiveLookup {
+    private readonly search = inject(SearchFilterService)
     private readonly stack = inject(ContextStack)
     private readonly store = inject(COMB_STORE)
 
@@ -47,13 +49,14 @@ export class HiveStore implements IControlHives, IHiveState, IHiveLookup {
 
     public readonly locateHive = signal<string | null>(null)
 
-    private requestLocate(name: string | null) {
-        this.locateHive.set(name)
-    }
+    public readonly filteredHives = computed(() => {
+        const q = this.search.value().toLowerCase()
+        if (!q) return this.items()
 
-    public clearLocate() {
-        this.locateHive.set(null)
-    }
+        return this.items().filter(h =>
+            h.name.toLowerCase().includes(q)
+        )
+    })
 
     // state
     public readonly combCells = computed<Cell[]>(() => {
@@ -104,7 +107,7 @@ export class HiveStore implements IControlHives, IHiveState, IHiveLookup {
     }
 
     public setHive = (hive: Hive) => {
-        if(!hive) return
+        if (!hive) return
         console.debug('[HiveStore.setHive] called', { hive })
         this._hive.set(hive)
         this.stack.push(hive)

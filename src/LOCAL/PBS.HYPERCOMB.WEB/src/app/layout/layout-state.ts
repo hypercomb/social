@@ -9,12 +9,6 @@ export class LayoutState {
   public offsetFromCenterX: number = 0
   public offsetFromCenterY: number = 0
 
-  // private readonly _layoutLocked = signal(false)
-  // public readonly layoutLocked = this._layoutLocked.asReadonly()
-
-  // public lockLayout = () => this._layoutLocked.set(true)
-  // public unlockLayout = () => this._layoutLocked.set(false)
-
   private readonly _layoutInitialized = signal(false)
   public readonly layoutInitialized = this._layoutInitialized.asReadonly()
   private readonly _mouseOverControlBar = signal(false)

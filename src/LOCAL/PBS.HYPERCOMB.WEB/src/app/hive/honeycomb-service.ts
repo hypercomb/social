@@ -12,16 +12,7 @@ export class HoneycombService extends HypercombData {
     private readonly router = inject(Router)
     private readonly store = inject(HIVE_STATE)
 
-    constructor() {
-        super()
-        effect(() => {
-            const created = this.hs.lastCreated()
-            if (created) {
-                // this.notifications.success(`hive "${created.name}" created`)
-                this.hs.resetLastCreated()
-            }
-        })
-    }
+
     // --------------------------------------------------
     // validation
     // --------------------------------------------------

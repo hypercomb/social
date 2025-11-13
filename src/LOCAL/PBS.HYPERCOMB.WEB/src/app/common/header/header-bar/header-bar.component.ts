@@ -27,8 +27,7 @@ export class HeaderBarComponent extends HypercombData {
   private readonly manager = inject(CellEditor)
   private readonly navigation = inject(LinkNavigationService)
   private readonly screen = inject(ScreenService)
-  private readonly search = inject(SearchFilterService)
-  private readonly _isCaptionBlocked = this.policy.any(POLICY.EditInProgress)
+  public readonly search = inject(SearchFilterService)
   private readonly _Hypercomb = 'Hypercomb'
   public readonly detector = inject(CoordinateDetector)
   public readonly touch = inject(TouchDetectionService)
@@ -44,7 +43,6 @@ export class HeaderBarComponent extends HypercombData {
 
   public showEdit = false
   public isHovered = false
-  public searchFilter: string = ''
   public isSignedIn = false
   public userName = 'Sign In'
 
@@ -75,10 +73,6 @@ export class HeaderBarComponent extends HypercombData {
 
   constructor() {
     super()
-    effect(() => {
-      const text = this.search.value().toLowerCase()
-      this.searchFilter = text
-    })
 
     effect(() => {
       const ev = this.ks.keyUp()
@@ -90,7 +84,6 @@ export class HeaderBarComponent extends HypercombData {
         this.state.toggleToolMode(HypercombMode.ShowChat)
       }
     })
-
   }
 
   public readonly cellCount = computed(() => this.stack.size())

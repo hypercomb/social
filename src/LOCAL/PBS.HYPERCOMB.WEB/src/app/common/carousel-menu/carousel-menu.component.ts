@@ -34,10 +34,17 @@ export class CarouselMenuComponent extends HypercombData implements OnInit {
   private readonly wheelState = inject(WheelState)
   private readonly carousel = inject(CAROUSEL_SVC)
   private readonly debouncedFilter = debounced(() => this.filter.value(), 300)
-  // private readonly textureStream = inject(PassiveTextureStreamer)
 
   public current = computed(() => this.carousel.current())
-  public searchValue = ''
+
+  public readonly filtered = computed(() => {
+    const q = this.filter.value().toLowerCase()
+    if (!q) return this.hivestate.items()
+    return this.hivestate.items().filter(h =>
+      h.name.toLowerCase().includes(q)
+    )
+  })
+
   // ─────────────────────────────────────────────
   // derived signals
   // ─────────────────────────────────────────────
@@ -57,7 +64,12 @@ export class CarouselMenuComponent extends HypercombData implements OnInit {
   // ─────────────────────────────────────────────
   constructor() {
     super()
+
     let initialized = false
+
+    // ─────────────────────────────────────────────
+    // hive initialization
+    // ─────────────────────────────────────────────
     effect(() => {
       const items = this.hivestate.items()
       if (initialized || items.length === 0) return
@@ -65,21 +77,44 @@ export class CarouselMenuComponent extends HypercombData implements OnInit {
       this.carousel.setItems(items)
       this.updateMenu()
       initialized = true
-
-      // 🐝 preload textures for the first hive
-      // console.debug('[CarouselMenu] starting initial passive texture stream')
-      // void this.textureStream.streamForCarousel({
-      //   current: this.current()!,
-      //   upper: this.carousel.upper(),
-      //   lower: this.carousel.lower()
-      // })
     })
 
+    // ─────────────────────────────────────────────
+    // tile visibility based on search filter
+    // ─────────────────────────────────────────────
+    effect(() => {
+      const q = this.filter.value().toLowerCase()
+
+      const all = this.comb.store.cells()
+      const match = this.comb.store.filteredCells()
+
+      // nothing typed → show everything
+      if (!q) {
+        this.comb.store.setVisibility(all, true)
+        return
+      }
+
+      // hide everything first
+      this.comb.store.setVisibility(all, false)
+
+      // show only matching tiles
+      this.comb.store.setVisibility(match, true)
+    })
+
+    // ─────────────────────────────────────────────
+    // wheel scroll logic
+    // ─────────────────────────────────────────────
     this.initializeWheelControl()
-    this.initializeFilterWatcher()
+
+    // ─────────────────────────────────────────────
+    // scout watcher → updates carousel when hive changes
+    // ─────────────────────────────────────────────
     this.initializeScoutWatcher()
+
+    // optional debug
     if (!environment.production) this.debugWatchCurrentHive()
   }
+
 
   ngOnInit(): void {
     this.updateTileLimit()
