@@ -1,7 +1,7 @@
 import { Injectable, inject, effect, untracked } from "@angular/core"
 import { CellContext, BaseContext } from "src/app/actions/action-contexts"
 import { ViewPhotoAction } from "src/app/actions/cells/view-photo"
-import { BackHiveAction } from "src/app/actions/navigation/back"
+import { BackHiveAction } from "src/app/actions/navigation/back.action"
 import { BranchAction } from "src/app/actions/navigation/branch.action"
 import { RiftAction } from "src/app/actions/navigation/path"
 import { SelectionMoveManager } from "src/app/cells/selection/selection-move-manager"

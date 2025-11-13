@@ -12,6 +12,7 @@ export class GhostTileDirective extends HypercombLayout {
   private ghost: Ghost | undefined
   private activeIndex: number | null = null
   private committing = false
+  private lastUpSeq = 0
 
   constructor() {   
     super()
@@ -47,6 +48,9 @@ export class GhostTileDirective extends HypercombLayout {
 
       const seq = this.ps.upSeq()
       if (seq === 0) return
+      if (this.lastUpSeq === seq) return
+
+      this.lastUpSeq = seq
 
       // nothing to commit
       if (!this.ghost || this.committing) return

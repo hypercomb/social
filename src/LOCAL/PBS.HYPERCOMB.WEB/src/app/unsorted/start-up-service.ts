@@ -2,7 +2,7 @@
 import { Injectable, inject } from '@angular/core'
 
 // actions
-import { BackHiveAction } from '../actions/navigation/back'
+import { BackHiveAction } from '../actions/navigation/back.action'
 import { BranchAction } from '../actions/navigation/branch.action'
 import { CenterHiveAction } from '../actions/layout/center-hive'
 import { ChangeModeAction } from '../actions/modes/change-mode'

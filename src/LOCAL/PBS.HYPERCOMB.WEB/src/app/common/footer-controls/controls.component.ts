@@ -11,7 +11,7 @@ import { TouchDetectionService } from 'src/app/core/mobile/touch-detection-servi
 import { ScreenService } from 'src/app/unsorted/utility/screen-service'
 import { ControlsActiveDirective } from 'src/app/core/directives/controls-active-directive'
 import { CenterTileService } from 'src/app/cells/behaviors/center-tile-service'
-import { BackHiveAction } from 'src/app/actions/navigation/back'
+import { BackHiveAction } from 'src/app/actions/navigation/back.action'
 import { DeleteCellsAction } from 'src/app/actions/cells/delete-cells'
 import { CellContext, CellListContext, ChangeModeContext } from 'src/app/actions/action-contexts'
 import { LockCellAction } from 'src/app/actions/cells/lock-cell.action'

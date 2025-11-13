@@ -33,6 +33,7 @@ export class BackHiveAction extends ActionBase<BaseContext> {
     this.panning.getSpacebar().cancelPanSession()
     this.panning.getTouch().cancelPanSession()
 
+    this.state.resetMode()
     this.combstore.invalidate()
     this.hydration.reset()
     this.stack.pop()

@@ -87,11 +87,9 @@ export class BlobService {
     }
   }
 
-
   public async getInitialBlob(): Promise<Blob> {
-    return this.fetchAsset(LocalAssets.NInitialImagePath)
+    return this.fetchAsset(LocalAssets.InitialImagePath)
   }
-
 
   public async fetchImageAsBlob(url: string): Promise<Blob> {
     const response = await fetch(url)

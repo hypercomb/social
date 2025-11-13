@@ -9,6 +9,7 @@ import { ContextStack } from "src/app/core/controller/context-stack"
 
 @Injectable({ providedIn: 'root' })
 export class HypercombState {
+
   // Track panning state
   public panning = false;
   private _batchCompleteSeq = signal(0)
@@ -26,7 +27,11 @@ export class HypercombState {
   public checkMouseLock: boolean = false
   public _cancelled = signal(false)
   public readonly cancelled = this._cancelled.asReadonly()
-
+  private _emptyHoneycomb = signal<boolean>(false)
+  public emptyHoneycomb = this._emptyHoneycomb.asReadonly()
+  public get isEditMode(): boolean {
+    return (this._mode() & HypercombMode.EditMode) !== 0;
+  }
 
   public get scoutName(): string | undefined { return this.scout()?.name }
   public get isMobile(): boolean {
@@ -184,16 +189,18 @@ export class HypercombState {
   public setBatchComplete(): void {
     this._batchCompleteSeq.update(v => v + 1)
   }
+
   public setCancelled(cancel: boolean) {
     this._cancelled.set(cancel)
   }
-
 
   public setContextActive(active: boolean): void {
     this._isContextActive.set(active)
   }
 
-
+  public setHoneycombStatus(status: boolean) {
+    this._emptyHoneycomb.set(status)
+  }
 
   public setMode(mode: HypercombMode) {
     const prev = this._mode()

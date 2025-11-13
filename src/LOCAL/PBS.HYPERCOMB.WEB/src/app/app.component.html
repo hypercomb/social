@@ -37,6 +37,11 @@
 @if (loading) {
   <app-loading-overlay></app-loading-overlay>
 }
+
+@if(state.emptyHoneycomb() && !state.isEditMode) {
+  <app-empty-honeycomb></app-empty-honeycomb>
+}
+
 @if (!loading) {
   <ng-container app-custom-cursor></ng-container>
 }

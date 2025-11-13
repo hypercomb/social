@@ -2,8 +2,8 @@
 import { Injectable, inject } from "@angular/core"
 import { HypercombMode } from "../../core/models/enumerations"
 import { CellContext } from "../action-contexts"
-import { HoneycombService } from "src/app/hive/honeycomb-service"
 import { ActionBase } from "../action.base"
+import { LocatorService } from "src/app/services/locator-service"
 
 const getPath = (link: string): string | null => {
   const domain = "localhost:4200"
@@ -15,7 +15,7 @@ const getPath = (link: string): string | null => {
 
 @Injectable({ providedIn: "root" })
 export class RiftAction extends ActionBase<CellContext> {
-  private readonly honeycomb = inject(HoneycombService)
+  private readonly locator = inject(LocatorService)
 
   public id = "cell.path"
   public override label = "Path"
@@ -37,6 +37,6 @@ export class RiftAction extends ActionBase<CellContext> {
     if (!path) return
 
     history.replaceState(history.state, "", path)
-    await this.honeycomb.changeLocation(path)
+    await this.locator.changeLocation(path)
   }
 }
