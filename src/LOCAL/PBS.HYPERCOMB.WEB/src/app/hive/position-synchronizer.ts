@@ -1,7 +1,7 @@
 import { Injectable, inject, effect } from "@angular/core"
 import { ContextStack } from "../core/controller/context-stack"
 import { CombQueryService } from "../cells/storage/comb-query-service"
-import { CombStore } from "../cells/storage/comb-store"
+import { CombStore } from "../cells/storage/honeycomb-store"
 import { PixiManager } from "../pixi/pixi-manager"
 import { Cell } from "../cells/cell"
 

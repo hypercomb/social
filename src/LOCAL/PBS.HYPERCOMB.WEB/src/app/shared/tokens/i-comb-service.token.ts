@@ -33,5 +33,5 @@ export interface IHiveHydration {
 export interface ICellService extends ICombState, IHiveHydration { }
 
 export const MODIFY_COMB_SVC = new InjectionToken<IModifyComb>('MODIFY_COMB_SVC')
-export const COMB_SERVICE = new InjectionToken<ICellService>('COMB_SERVICE')
+export const HONEYCOMB_SVC = new InjectionToken<ICellService>('HONEYCOMB_SVC')
 export const HIVE_HYDRATION = new InjectionToken<IHiveHydration>('HIVE_HYDRATION')

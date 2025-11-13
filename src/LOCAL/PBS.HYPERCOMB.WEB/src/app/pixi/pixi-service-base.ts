@@ -9,10 +9,10 @@ import { KeyboardState } from "../interactivity/keyboard/keyboard-state"
 import { HypercombState } from "../state/core/hypercomb-state"
 import { ContextStack } from "../core/controller/context-stack"
 import { StorageManager } from "../helper/storage-manager"
-import { COMB_SERVICE } from "../shared/tokens/i-comb-service.token"
+import { HONEYCOMB_SVC } from "../shared/tokens/i-comb-service.token"
 
 export abstract class PixiServiceBase {
-  protected readonly cellstate = inject(COMB_SERVICE)
+  protected readonly cellstate = inject(HONEYCOMB_SVC)
   protected readonly storage = inject(StorageManager)
   protected readonly screen = inject(ScreenService)
   protected readonly debug = inject(DebugService)

@@ -14,7 +14,7 @@ import { IHiveImage } from 'src/app/core/models/i-hive-image'
 import { BlobService } from 'src/app/hive/rendering/blob-service'
 
 @Injectable({ providedIn: 'root' })
-export class CombService extends DataOrchestratorBase implements ICellService, IModifyComb, IHiveHydration {
+export class HoneycombService extends DataOrchestratorBase implements ICellService, IModifyComb, IHiveHydration {
   // ─────────────────────────────────────────────
   // dependencies
   // ─────────────────────────────────────────────
@@ -60,10 +60,10 @@ export class CombService extends DataOrchestratorBase implements ICellService, I
       this.lastHive = parent.cellId
 
       // find any children already in memory
-      const existing = this.comb.store.cells().filter(c => c.sourceId === parent.cellId)
+      const existing = this.honeycomb.store.cells().filter(c => c.sourceId === parent.cellId)
 
       if (existing.length) {
-        this.comb.store.enqueueHot(existing)
+        this.honeycomb.store.enqueueHot(existing)
         this.hydratedEnqueued.add(parent.cellId)
         return
       }
@@ -83,12 +83,12 @@ export class CombService extends DataOrchestratorBase implements ICellService, I
 
           if (decorated.length) {
             this.staging.stageMerge(decorated)
-            this.comb.store.enqueueHot(decorated as Cell[])
+            this.honeycomb.store.enqueueHot(decorated as Cell[])
           }
 
           this.hydratedEnqueued.add(parent.cellId)
         } catch (err) {
-          console.warn(`[CombService] failed to hydrate hive ${parent.cellId}:`, err)
+          console.warn(`[HoneycombService] failed to hydrate hive ${parent.cellId}:`, err)
         }
       })()
     })
@@ -105,13 +105,13 @@ export class CombService extends DataOrchestratorBase implements ICellService, I
   }
 
   public flush(): { hot: any; cold: any } {
-    return this.comb.store.flush()
+    return this.honeycomb.store.flush()
   }
 
   public invalidate(): void {
     const entry = this.stack.top()
     if (!entry?.cell) return
-    this.comb.store.invalidate()
+    this.honeycomb.store.invalidate()
     this.hydratedEnqueued.clear()
   }
 
@@ -123,7 +123,7 @@ export class CombService extends DataOrchestratorBase implements ICellService, I
   // creation
   // ─────────────────────────────────────────────
   public async create(params: Partial<NewCell>, kind: CellKind): Promise<Cell> {
-    const newCell = this.comb.factory.newCell(params)
+    const newCell = this.honeycomb.factory.newCell(params)
     const initial = await this.blobs.getInitialBlob()
     const image = <IHiveImage>{ blob: initial, scale: 1, x: 0, y: 0, getBlob: async () => initial }
     newCell.image = image
@@ -152,7 +152,7 @@ export class CombService extends DataOrchestratorBase implements ICellService, I
     this.ensureValidKind(cell)
     const result = await this.repository.update(toCellEntity(cell))
     this.staging.stageReplace(cell)
-    this.comb.store.enqueueHot([cell])
+    this.honeycomb.store.enqueueHot([cell])
     return result
   }
 
@@ -231,7 +231,7 @@ export class CombService extends DataOrchestratorBase implements ICellService, I
   // ─────────────────────────────────────────────
   public async hydrate(): Promise<Cell[]> {
     if (this.isFetching()) return []
-    if (this.isHydrated()) return this.comb.store.cells()
+    if (this.isHydrated()) return this.honeycomb.store.cells()
 
     this.markFetching()
     try {
@@ -252,8 +252,8 @@ export class CombService extends DataOrchestratorBase implements ICellService, I
   private ensureValidKind(cell: { kind?: string; name?: string }): void {
     if (!cell.kind) {
       const name = cell.name ?? '(unnamed cell)'
-      this.debug.warn('comb', `[CombService] skipping cell '${name}' because kind is empty`)
-      throw new Error(`[CombService] refusing to persist cell '${name}' with empty kind`)
+      this.debug.warn('comb', `[HoneycombService] skipping cell '${name}' because kind is empty`)
+      throw new Error(`[HoneycombService] refusing to persist cell '${name}' with empty kind`)
     }
   }
 

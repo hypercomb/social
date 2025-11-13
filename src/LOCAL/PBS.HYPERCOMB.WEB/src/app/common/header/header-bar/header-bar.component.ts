@@ -11,7 +11,7 @@ import { LinkNavigationService } from 'src/app/navigation/link-navigation-servic
 import { EditorService } from 'src/app/state/interactivity/editor-service'
 import { TouchDetectionService } from 'src/app/core/mobile/touch-detection-service'
 import { ScreenService } from 'src/app/unsorted/utility/screen-service'
-import { COMB_SERVICE } from 'src/app/shared/tokens/i-comb-service.token'
+import { HONEYCOMB_SVC } from 'src/app/shared/tokens/i-comb-service.token'
 import { COMB_STORE } from 'src/app/shared/tokens/i-comb-store.token'
 import { CellEditor } from 'src/app/unsorted/hexagons/cell-editor'
 
@@ -32,7 +32,7 @@ export class HeaderBarComponent extends HypercombData {
   public readonly detector = inject(CoordinateDetector)
   public readonly touch = inject(TouchDetectionService)
   public readonly store = inject(COMB_STORE)
-  public readonly cellstate = inject(COMB_SERVICE)
+  public readonly cellstate = inject(HONEYCOMB_SVC)
 
   public readonly name = computed(() => {
     const cell = this.stack.cell()

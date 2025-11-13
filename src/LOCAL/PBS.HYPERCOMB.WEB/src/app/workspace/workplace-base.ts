@@ -1,6 +1,6 @@
 import { Injectable, inject } from "@angular/core"
 import { SerializationService } from "../database/persistence/serialization-service"
-import { COMB_SERVICE, QUERY_CELL_SVC } from "src/app/shared/tokens/i-comb-store.token"
+import { HONEYCOMB_SVC, QUERY_CELL_SVC } from "src/app/shared/tokens/i-comb-store.token"
 
 @Injectable({ providedIn: 'root' })
 export class WorkspaceBase {
@@ -8,6 +8,6 @@ export class WorkspaceBase {
 
     // re-expose as getters
     public get serialization(): SerializationService { return this.serializer }
-    public readonly mutate = inject(COMB_SERVICE)
+    public readonly mutate = inject(HONEYCOMB_SVC)
     public readonly query = inject(QUERY_CELL_SVC)
 }

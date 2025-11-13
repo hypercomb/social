@@ -23,7 +23,7 @@ import { COMB_STORE } from 'src/app/shared/tokens/i-comb-store.token'
   imports: [CarouselItemComponent],
 })
 export class CarouselMenuComponent extends HypercombData implements OnInit {
-  private readonly comb = {
+  private readonly honeycomb = {
     store: inject(COMB_STORE)
   }
   private readonly registry = inject(ACTION_REGISTRY)
@@ -85,20 +85,20 @@ export class CarouselMenuComponent extends HypercombData implements OnInit {
     effect(() => {
       const q = this.filter.value().toLowerCase()
 
-      const all = this.comb.store.cells()
-      const match = this.comb.store.filteredCells()
+      const all = this.honeycomb.store.cells()
+      const match = this.honeycomb.store.filteredCells()
 
       // nothing typed → show everything
       if (!q) {
-        this.comb.store.setVisibility(all, true)
+        this.honeycomb.store.setVisibility(all, true)
         return
       }
 
       // hide everything first
-      this.comb.store.setVisibility(all, false)
+      this.honeycomb.store.setVisibility(all, false)
 
       // show only matching tiles
-      this.comb.store.setVisibility(match, true)
+      this.honeycomb.store.setVisibility(match, true)
     })
 
     // ─────────────────────────────────────────────

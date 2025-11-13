@@ -91,7 +91,7 @@ export abstract class HypercombLayout extends HypercombMixin(class { }) {
         factory: inject(CELL_FACTORY)
     }
 
-    protected readonly comb = {
+    protected readonly honeycomb = {
         modify: inject(MODIFY_COMB_SVC),
         store: inject(COMB_STORE),
         query: inject(QUERY_COMB_SVC)

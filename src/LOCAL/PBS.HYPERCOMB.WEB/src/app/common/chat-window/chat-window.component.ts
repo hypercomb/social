@@ -5,7 +5,7 @@ import { environment } from 'src/environments/environment'
 import { HypercombMode } from '../../core/models/enumerations'
 import { HypercombData } from 'src/app/actions/hypercomb-data'
 // import { AiService } from 'src/app/ai/ai-service'
-import { COMB_SERVICE } from 'src/app/shared/tokens/i-comb-service.token'
+import { HONEYCOMB_SVC } from 'src/app/shared/tokens/i-comb-service.token'
 
 interface ChatMessage {
   content: string

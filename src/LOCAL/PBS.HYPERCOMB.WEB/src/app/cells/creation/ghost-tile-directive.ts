@@ -86,7 +86,7 @@ export class GhostTileDirective extends HypercombLayout {
     const ghost = await this.cell.creator.createGhost({ index: coordinate.index })
     this.ghost = ghost
 
-    await this.comb.store.enqueueHot([ghost])
+    await this.honeycomb.store.enqueueHot([ghost])
   }
 
   // ────────────────────────────────
@@ -106,7 +106,7 @@ export class GhostTileDirective extends HypercombLayout {
       this.debug.log('layout', `committing ghost at ${newCell.index}`)
 
       g.setKind('Cell')
-      await this.comb.modify.addCell(newCell, newCell.image!)
+      await this.honeycomb.modify.addCell(newCell, newCell.image!)
 
       // always remove ghost after commit
       await this.destroyGhost()
@@ -124,7 +124,7 @@ export class GhostTileDirective extends HypercombLayout {
     if (!this.ghost) return
 
     this.debug.log('layout', 'destroying ghost')
-    await this.comb.modify.removeCell(this.ghost as Cell)
+    await this.honeycomb.modify.removeCell(this.ghost as Cell)
     this.ghost = undefined
   }
 }

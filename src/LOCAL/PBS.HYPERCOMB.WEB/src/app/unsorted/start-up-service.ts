@@ -3,7 +3,7 @@ import { Injectable, inject } from '@angular/core'
 
 // actions
 import { BackHiveAction } from '../actions/navigation/back'
-import { BranchAction } from '../actions/navigation/branch'
+import { BranchAction } from '../actions/navigation/branch.action'
 import { CenterHiveAction } from '../actions/layout/center-hive'
 import { ChangeModeAction } from '../actions/modes/change-mode'
 import { ClipboardCopyAction } from '../actions/clipboard/copy-comb'

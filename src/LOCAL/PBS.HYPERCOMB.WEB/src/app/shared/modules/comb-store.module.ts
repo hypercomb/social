@@ -1,5 +1,5 @@
 import { NgModule } from "@angular/core"
-import { CombStore } from "src/app/cells/storage/comb-store"
+import { CombStore } from "src/app/cells/storage/honeycomb-store"
 import { COMB_STORE, STAGING_ST } from "../tokens/i-comb-store.token"
 import { CombQueryService } from "src/app/cells/storage/comb-query-service"
 

@@ -12,7 +12,7 @@ import { HIVE_STORE } from 'src/app/shared/tokens/i-hive-store.token'
  */
 export abstract class DataOrchestratorBase extends Hypercomb {
   protected readonly staging = inject(STAGING_ST)
-  protected readonly comb = {
+  protected readonly honeycomb = {
     factory: inject(CELL_CREATOR),
     store: inject(COMB_STORE)
   }
@@ -55,7 +55,7 @@ export abstract class DataOrchestratorBase extends Hypercomb {
   // ─────────────────────────────────────────────
   protected async hydrateFlow(fetcher: () => Promise<Cell[]>): Promise<Cell[]> {
     if (this.isFetching()) return []
-    if (this.isHydrated()) return this.comb.store.cells()
+    if (this.isHydrated()) return this.honeycomb.store.cells()
 
     this.markFetching()
     try {

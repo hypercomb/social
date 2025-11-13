@@ -1,7 +1,7 @@
 // actions/show-hive.command.ts
 import { Injectable, inject } from "@angular/core"
 import { Action } from "../action-models"
-import { CombStore } from "src/app/cells/storage/comb-store"
+import { CombStore } from "src/app/cells/storage/honeycomb-store"
 import { HiveService } from "src/app/hive/storage/hive-service"
 import { ShowContext } from "../action-contexts"
 import { Hypercomb } from "src/app/core/mixins/abstraction/hypercomb.base"

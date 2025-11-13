@@ -6,7 +6,9 @@ import { PixiDataServiceBase } from "src/app/database/pixi-data-service-base"
 
 @Injectable({ providedIn: 'root' })
 export class CenterTileService extends PixiDataServiceBase {
-    private readonly store = { hive: inject(HIVE_STORE), comb: inject(COMB_STORE) }
+    private readonly honeycomb = {
+        store: inject(COMB_STORE)
+    }
 
     // Button click handler
     public arrange = async (tile?: Tile) => {
@@ -14,7 +16,7 @@ export class CenterTileService extends PixiDataServiceBase {
             await this.centerSprite([tile])
         }
         else {
-            const tiles = this.store.comb.tiles()
+            const tiles = this.honeycomb.store.tiles()
             await this.centerSprite(tiles)
         }
     }
