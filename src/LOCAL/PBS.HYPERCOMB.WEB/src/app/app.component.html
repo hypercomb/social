@@ -38,7 +38,7 @@
   <app-loading-overlay></app-loading-overlay>
 }
 
-@if(state.emptyHoneycomb() && !state.isEditMode) {
+@if(state.emptyHoneycomb() && !state.isEditMode()) {
   <app-empty-honeycomb></app-empty-honeycomb>
 }
 

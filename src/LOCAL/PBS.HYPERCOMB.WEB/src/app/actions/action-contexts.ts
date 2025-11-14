@@ -5,7 +5,9 @@ import { IDexieHive } from "../hive/hive-models"
 
 export type ContextKind =
     | "cell"
-    | "cell-list"
+    | "copy-cells"
+    | "cut-cells"
+    | "delete-cells"
     | "change-mode"
     | "keyboard"
     | "mouse"
@@ -14,25 +16,20 @@ export type ContextKind =
     | "import-hive"
 
 // base context is generic, defaults to Event
-export interface BaseContext<TEvent extends Event = Event> {
+export interface PayloadBase<TEvent extends Event = Event> {
     event?: TEvent          // optional programmatic calls can omit
     hovered?: Cell
     kind?: ContextKind
 }
 
-// optional payload wrapper
-export interface PayloadContext<TPayload = unknown, TEvent extends Event = Event>
-    extends BaseContext<TEvent> {
-    payload?: TPayload
-}
 
 // individual context variants
-export interface KeyboardContext extends BaseContext<KeyboardEvent> {
+export interface KeyboardPayload extends PayloadBase<KeyboardEvent> {
     kind: "keyboard"
     keyboard: KeyboardEvent
 }
 
-export interface MouseContext extends BaseContext<
+export interface MousePayload extends PayloadBase<
     MouseEvent | PointerEvent | FederatedPointerEvent
 > {
     kind: "mouse"
@@ -40,52 +37,66 @@ export interface MouseContext extends BaseContext<
     cell?: Cell
 }
 
-export interface CellContext extends BaseContext {
+export interface CellPayload extends PayloadBase {
     kind: "cell"
     cell: Cell
 }
 
-export interface CellListContext extends BaseContext {
-    kind: "cell-list"
-    cells: Cell[]
+export interface CopyPayload extends PayloadBase {
+    kind: "copy-cells"
+    cells: Cell[],
+    hasSelections: boolean
 }
-export interface ImportHiveContext extends BaseContext { 
+
+export interface CutPayload extends PayloadBase {
+    kind: "cut-cells"
+    cells: Cell[],
+    hasSelections: boolean
+}
+export interface DeletePayload extends PayloadBase {
+    kind: "delete-cells"
+    cells: Cell[],
+    hasSelections: boolean
+}
+
+export interface ImportHivePayload extends PayloadBase {
     kind: "import-hive"
     hive: IDexieHive
 }
 
-export interface ShowContext extends BaseContext {
+export interface ShowContext extends PayloadBase {
     kind: "show"
     hiveId: string
 }
 
-export interface RenameHiveContext extends BaseContext {
+export interface RenameHiveContext extends PayloadBase {
     kind: "rename-hive"
     hive: { name: string }
     newName: string
 }
 
-export interface ChangeModeContext extends BaseContext {
+export interface ChangeModeContext extends PayloadBase {
     kind: "change-mode"
     mode: HypercombMode
 }
 // discriminated union of all supported contexts
 export type ActionContext =
-    | BaseContext
-    | ImportHiveContext
-    | PayloadContext
+    | PayloadBase
+    | ImportHivePayload
     | ShowContext
-    | KeyboardContext
-    | MouseContext
-    | CellContext
-    | CellListContext
+    | KeyboardPayload
+    | MousePayload
+    | CellPayload
+    | DeletePayload
+    | CopyPayload
+    | CutPayload
     | RenameHiveContext
 
 // helpers to construct contexts
 export const fromKeyboard = (
     ev: KeyboardEvent,
     payload?: unknown
-): KeyboardContext & { payload?: unknown } => ({
+): KeyboardPayload & { payload?: unknown } => ({
     kind: "keyboard",
     keyboard: ev,
     event: ev,
@@ -96,7 +107,7 @@ export const fromMouse = (
     ev: MouseEvent | PointerEvent | FederatedPointerEvent,
     cell?: Cell,
     payload?: unknown
-): MouseContext & { payload?: unknown } => ({
+): MousePayload & { payload?: unknown } => ({
     kind: "mouse",
     mouse: ev,
     event: ev,
@@ -107,32 +118,32 @@ export const fromMouse = (
 export const fromRender = (
     cell: Cell,
     payload?: unknown
-): CellContext & { payload?: unknown } => ({
+): CellPayload & { payload?: unknown } => ({
     kind: "cell",
     cell,
     ...(payload !== undefined ? { payload } : {}),
 })
 
 // type guards
-export const isRender = (c: ActionContext): c is CellContext =>
+export const isRender = (c: ActionContext): c is CellPayload =>
     c.kind === "cell"
 
-export const hasCellList = (c: ActionContext): c is CellListContext => {
+export const hasCellList = (c: ActionContext): c is CopyPayload => {
     return (
-        c.kind === "cell-list" &&
-        Array.isArray((c as Partial<CellListContext>).cells) &&
-        (c as Partial<CellListContext>).cells!.length > 0
+        c.kind === "copy-cells" &&
+        Array.isArray((c as Partial<CopyPayload>).cells) &&
+        (c as Partial<CopyPayload>).cells!.length > 0
     )
 }
 
 
 // generic event type guard
 export function hasEvent<T extends Event>(
-    payload: BaseContext
-): payload is BaseContext<T> {
+    payload: PayloadBase
+): payload is PayloadBase<T> {
     return payload.event instanceof Event
 }
-export function getEvent<T extends Event>(payload: BaseContext): T | undefined {
+export function getEvent<T extends Event>(payload: PayloadBase): T | undefined {
     if (hasEvent<T>(payload)) {
         return payload.event
     }

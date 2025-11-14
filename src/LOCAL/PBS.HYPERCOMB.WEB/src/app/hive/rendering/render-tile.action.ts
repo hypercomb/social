@@ -1,6 +1,6 @@
 ﻿import { Injectable, inject } from "@angular/core"
 import { ActionBase } from "src/app/actions/action.base"
-import { CellContext } from "src/app/actions/action-contexts"
+import { CellPayload } from "src/app/actions/action-contexts"
 import { Cell } from "src/app/cells/cell"
 import { ContextMenuService } from "src/app/navigation/menus/context-menu-service"
 import { PixiManager } from "src/app/pixi/pixi-manager"
@@ -9,7 +9,7 @@ import { Container } from "pixi.js"
 import { TILE_FACTORY } from "src/app/shared/tokens/i-hypercomb.token"
 
 @Injectable({ providedIn: "root" })
-export class RenderTileAction extends ActionBase<CellContext> {
+export class RenderTileAction extends ActionBase<CellPayload> {
   public id = "tile.render"
   public override label = "Render Tile"
   public override description = "Render a tile into the current layout"
@@ -42,7 +42,7 @@ export class RenderTileAction extends ActionBase<CellContext> {
   // public api required by scheduler
   // ─────────────────────────────────────────────────────────────
 
-  public override enabled = async (payload: CellContext): Promise<boolean> => {
+  public override enabled = async (payload: CellPayload): Promise<boolean> => {
    
     // Check if the cell is editable
     const cell = payload.cell
@@ -51,7 +51,7 @@ export class RenderTileAction extends ActionBase<CellContext> {
   }
 
   // render or update one tile, deduped by cellId, into its layer container
-  public run = async (payload: CellContext): Promise<void> => {
+  public run = async (payload: CellPayload): Promise<void> => {
     const src = payload.cell
     const cell = new Cell(src) // normalize/clamp if your Cell ctor does that
     const id = cell.cellId!
@@ -151,7 +151,7 @@ export class RenderTileAction extends ActionBase<CellContext> {
   }
 
   private handleClick = (event: MouseEvent, cell: Cell): void => {
-    const cellContext = <CellContext>{ cell }
+    const cellContext = <CellPayload>{ cell }
     this.registry.invoke(OpenLinkAction.ActionId, cellContext)
   }
 }

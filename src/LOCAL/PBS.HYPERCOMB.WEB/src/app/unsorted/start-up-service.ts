@@ -6,7 +6,6 @@ import { BackHiveAction } from '../actions/navigation/back.action'
 import { BranchAction } from '../actions/navigation/branch.action'
 import { CenterHiveAction } from '../actions/layout/center-hive'
 import { ChangeModeAction } from '../actions/modes/change-mode'
-import { ClipboardCopyAction } from '../actions/clipboard/copy-comb'
 import { DeleteCellsAction } from '../actions/cells/delete-cells'
 import { EditTileAction } from '../actions/cells/edit-cell'
 import { ExploreStorageAction } from '../actions/storage/explore-storage'
@@ -63,6 +62,7 @@ import { ExportAllHivesAction } from '../actions/propagation/export-all-hives'
 import { OpfsBackupService } from '../actions/propagation/opfs-backup.service'
 import { MousewheelZoomService } from '../pixi/mousewheel-zoom-service'
 import { TouchZoomService } from '../pixi/touch-zoom-service'
+import { CopyAction } from '../actions/clipboard/copy-honeycomb'
 
 
 @Injectable({ providedIn: 'root' })
@@ -107,7 +107,7 @@ export class StartUpService {
     inject(BranchAction),
     inject(CenterHiveAction),
     inject(ChangeModeAction),
-    inject(ClipboardCopyAction),
+    inject(CopyAction),
     inject(DeleteCellsAction),
     inject(EditTileAction),
     inject(ExploreStorageAction),

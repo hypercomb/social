@@ -1,17 +1,17 @@
 ﻿// src/app/actions/navigation/branch.ts
 import { inject, Injectable } from "@angular/core"
-import { CellContext } from "src/app/actions/action-contexts"
+import { CellPayload } from "src/app/actions/action-contexts"
 import { ActionBase } from "../action.base"
 import { EditorService } from "src/app/state/interactivity/editor-service"
 
 @Injectable({ providedIn: "root" })
-export class BranchAction extends ActionBase<CellContext> {
+export class BranchAction extends ActionBase<CellPayload> {
   private readonly es = inject(EditorService)
   public static ActionId = "tile.branch"
   public id = BranchAction.ActionId
   public override label = "Set Branch"
 
-  public override enabled = async (payload: CellContext): Promise<boolean> => {
+  public override enabled = async (payload: CellPayload): Promise<boolean> => {
     // If context menu / overlay is active, don't trigger branch.
     if (this.state.isContextActive()) return false
 
@@ -24,7 +24,7 @@ export class BranchAction extends ActionBase<CellContext> {
     return !!payload.cell.isBranch
   }
 
-  public override run = async (payload: CellContext) => {
+  public override run = async (payload: CellPayload) => {
     // Defensive: re-check at execution time (race-safe)
     if (this.state.isContextActive() || this.state.cancelled() || this.state.panning) {
       this.debug.log("BranchAction run suppressed (cancelled/panning/context)")

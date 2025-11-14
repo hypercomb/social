@@ -14,7 +14,7 @@ import { takeUntilDestroyed } from "@angular/core/rxjs-interop"
 import { fromEvent } from "rxjs"
 import { CoordinateDetector } from "src/app/helper/detection/coordinate-detector"
 import { ACTION_REGISTRY, IContextMenu } from "src/app/shared/tokens/i-hypercomb.token"
-import { CellContext } from "src/app/actions/action-contexts"
+import { CellPayload } from "src/app/actions/action-contexts"
 
 @Injectable({ providedIn: 'root' })
 export class ContextMenuService extends PixiServiceBase implements IContextMenu {
@@ -201,7 +201,7 @@ export class ContextMenuService extends PixiServiceBase implements IContextMenu 
       if (this.clickWasAborted() || event.button === 2) return
       const cell = this.detector.activeCell()
       if (cell) {
-        const payload = { kind: "cell", cell, event } as CellContext
+        const payload = { kind: "cell", cell, event } as CellPayload
         await this.actions.invoke("layout.editTile", payload)
       }
       await this.hide()

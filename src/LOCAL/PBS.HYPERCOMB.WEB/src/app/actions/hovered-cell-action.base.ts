@@ -1,5 +1,5 @@
 @Injectable({ providedIn: "root" })
-export class CenterTileAction extends ActionBase<CellContext> {
+export class CenterTileAction extends ActionBase<CellPayload> {
   public id = "layout.centerTile"
 
   public enabled = async (): Promise<boolean> => {
@@ -7,7 +7,7 @@ export class CenterTileAction extends ActionBase<CellContext> {
     return !!this.hovered
   }
 
-  public run = async (payload: CellContext): Promise<void> => {
+  public run = async (payload: CellPayload): Promise<void> => {
     const cell = payload.cell ?? this.hovered
     if (!cell) return
     await this.centerSprite([cell])

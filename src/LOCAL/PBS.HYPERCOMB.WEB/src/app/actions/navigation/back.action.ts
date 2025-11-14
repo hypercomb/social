@@ -2,12 +2,12 @@
 import { inject, Injectable } from "@angular/core"
 import { ActionBase } from "../action.base"
 import { PointerState } from "src/app/state/input/pointer-state"
-import { BaseContext, hasEvent } from "../action-contexts"
+import { PayloadBase, hasEvent } from "../action-contexts"
 import { HIVE_HYDRATION } from "src/app/shared/tokens/i-comb-service.token"
 import { PanningManager } from "src/app/pixi/panning-manager"   // ⬅️ add this
 
 @Injectable({ providedIn: "root" })
-export class BackHiveAction extends ActionBase<BaseContext> {
+export class BackHiveAction extends ActionBase<PayloadBase> {
   private readonly pointerstate = inject(PointerState)
   private readonly hydration = inject(HIVE_HYDRATION)
   private readonly panning = inject(PanningManager)             // ⬅️ add this
@@ -17,7 +17,7 @@ export class BackHiveAction extends ActionBase<BaseContext> {
   public override label = "Back"
   public override description = "Go back to the parent hive or exit clipboard view"
 
-  public override enabled = async (payload: BaseContext): Promise<boolean> => {
+  public override enabled = async (payload: PayloadBase): Promise<boolean> => {
     const size = this.stack.size()
 
     if (hasEvent(payload)) {
@@ -33,7 +33,7 @@ export class BackHiveAction extends ActionBase<BaseContext> {
     this.panning.getSpacebar().cancelPanSession()
     this.panning.getTouch().cancelPanSession()
 
-    this.state.resetMode()
+    this.state.resetMode
     this.combstore.invalidate()
     this.hydration.reset()
     this.stack.pop()

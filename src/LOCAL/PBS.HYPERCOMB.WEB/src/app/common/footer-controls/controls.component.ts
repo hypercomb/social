@@ -13,12 +13,13 @@ import { ControlsActiveDirective } from 'src/app/core/directives/controls-active
 import { CenterTileService } from 'src/app/cells/behaviors/center-tile-service'
 import { BackHiveAction } from 'src/app/actions/navigation/back.action'
 import { DeleteCellsAction } from 'src/app/actions/cells/delete-cells'
-import { CellContext, CellListContext, ChangeModeContext } from 'src/app/actions/action-contexts'
+import { CellPayload, ChangeModeContext, CopyPayload, DeletePayload } from 'src/app/actions/action-contexts'
 import { LockCellAction } from 'src/app/actions/cells/lock-cell.action'
 import { LayoutManager } from 'src/app/core/controller/layout-manager'
 import { ChangeModeAction } from 'src/app/actions/modes/change-mode'
 import { SELECTIONS } from 'src/app/shared/tokens/i-selection.token'
 import { ACTION_REGISTRY } from 'src/app/shared/tokens/i-hypercomb.token'
+import { CopyAction } from 'src/app/actions/clipboard/copy-honeycomb'
 
 @Component({
   standalone: true,
@@ -29,7 +30,7 @@ import { ACTION_REGISTRY } from 'src/app/shared/tokens/i-hypercomb.token'
 })
 export class ControlsComponent extends Hypercomb implements OnInit {
   private readonly registry = inject(ACTION_REGISTRY)
-  public clipboard = { 
+  public clipboard = {
     hasItems: () => false,
     count: () => 0,
     clear: async () => { /* no-op */ },
@@ -94,27 +95,12 @@ export class ControlsComponent extends Hypercomb implements OnInit {
 
   public copy = async () => {
     const selections = this.selections.items()
-
-    // If there are multiple selections then process all immediately
-    if (selections?.length > 0) {
-      await this.registry.invoke('clipboard.copy', <CellListContext>{ kind: 'cell-list', cells: selections })
-    } else {
-      this.registry.invoke(ChangeModeAction.ActionId, <ChangeModeContext>{ mode: HypercombMode.Copy })
-    }
-
+    await this.registry.invoke(CopyAction.ActionId, <CopyPayload>{ kind: 'copy-cells', cells: selections, hasSelections: true })
   }
 
   public cut = async () => {
-    // const selections = this.ss.items()
-    // // If there are selections then process all immediately no need toggle clipboard
-    // if (selections?.length) {
+    const selections = this.selections.items()
     //   await Promise.all(selections.map(cell => clipboard.cut(cell)))
-    // }
-    // else { 
-    //   this.state.toggleToolMode(HypercombMode.Cut)
-    // }
-
-    throw new Error('Method not implemented.')
   }
 
   public async goBack(event: MouseEvent) {
@@ -139,7 +125,7 @@ export class ControlsComponent extends Hypercomb implements OnInit {
 
   public lock = async () => {
     const cell = this.stack.cell()!
-    this.registry.invoke(LockCellAction.ActionId, <CellContext>{ kind: 'cell', cell })
+    this.registry.invoke(LockCellAction.ActionId, <CellPayload>{ kind: 'cell', cell })
     console.log('lock')
   }
 
@@ -148,7 +134,7 @@ export class ControlsComponent extends Hypercomb implements OnInit {
   }
 
   public delete = async () => {
-    const payload = <CellListContext>{ kind: 'cell-list', cells: this.selections.items() }
+    const payload = <DeletePayload>{ kind: 'delete-cells', cells: this.selections.items(), hasSelections: this.selections.items().length > 0 }
     this.registry.invoke(DeleteCellsAction.ActionId, payload)
   }
 

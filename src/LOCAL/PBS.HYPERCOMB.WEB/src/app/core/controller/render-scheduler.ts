@@ -2,7 +2,7 @@
 import { Application } from "pixi.js"
 import { DebugService } from "src/app/core/diagnostics/debug-service"
 import { Cell } from "src/app/cells/cell"
-import { CellContext } from "src/app/actions/action-contexts"
+import { CellPayload } from "src/app/actions/action-contexts"
 import { HIVE_HYDRATION } from "src/app/shared/tokens/i-comb-service.token"
 import { HypercombState } from "src/app/state/core/hypercomb-state"
 import { RenderTileAction } from 'src/app/hive/rendering/render-tile.action'
@@ -127,7 +127,7 @@ export class RenderScheduler {
         if (this.inFlight.has(id)) continue
         this.inFlight.add(id)
         try {
-          await this.renderAction.run(<CellContext>{ kind: "cell", cell })
+          await this.renderAction.run(<CellPayload>{ kind: "cell", cell })
         } finally {
           this.inFlight.delete(id)
         }

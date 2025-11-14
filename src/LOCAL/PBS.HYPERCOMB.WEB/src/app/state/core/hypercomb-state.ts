@@ -29,9 +29,10 @@ export class HypercombState {
   public readonly cancelled = this._cancelled.asReadonly()
   private _emptyHoneycomb = signal<boolean>(false)
   public emptyHoneycomb = this._emptyHoneycomb.asReadonly()
-  public get isEditMode(): boolean {
+  
+  public isEditMode = computed((): boolean => {
     return (this._mode() & HypercombMode.EditMode) !== 0;
-  }
+  })
 
   public get scoutName(): string | undefined { return this.scout()?.name }
   public get isMobile(): boolean {

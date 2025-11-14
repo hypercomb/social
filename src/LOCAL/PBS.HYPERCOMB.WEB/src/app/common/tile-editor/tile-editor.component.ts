@@ -22,8 +22,6 @@ import { PointerState } from 'src/app/state/input/pointer-state'
 import { HiveService } from 'src/app/hive/storage/hive-service'
 import { ImageCaptureManager } from './tile-image/image-capture-manager'
 
-
-
 @Component({
   standalone: true,
   selector: '[app-tile-editor]',
@@ -74,9 +72,8 @@ export class TileEditorComponent extends Hypercomb {
     POLICY.MovingTiles
   )
 
-
   public readonly operation = this.es.operation
-
+  
   public readonly editorKind = computed(() => {
     switch (this.operation()) {
       case 'edit-hive': return 'Edit Hive';
@@ -86,7 +83,6 @@ export class TileEditorComponent extends Hypercomb {
       default: return 'Edit';
     }
   })
-
 
   public get deleteText(): string {
     switch (this.operation()) {
@@ -184,7 +180,6 @@ export class TileEditorComponent extends Hypercomb {
   // ─────────────────────────────────────────────
   // save pipeline
   // ─────────────────────────────────────────────
-
   public save = async (event: any): Promise<void> => {
     const cell = this.editCell!
     await Assets.unload(this.state.cacheId(cell))

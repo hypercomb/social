@@ -27,6 +27,7 @@ export class SelectionService extends PixiServiceBase implements ISelections {
   public readonly items = computed(() =>
     this.store.cells().filter(isSelected)
   )
+  
   public readonly hasItems = computed(() => this.items().length > 0)
   public readonly latest = computed(() => {
     const arr = this.items()

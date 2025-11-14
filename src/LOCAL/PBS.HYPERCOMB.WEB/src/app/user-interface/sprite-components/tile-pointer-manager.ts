@@ -1,5 +1,5 @@
 import { Injectable, inject, effect, untracked } from "@angular/core"
-import { CellContext, BaseContext } from "src/app/actions/action-contexts"
+import { CellPayload, PayloadBase } from "src/app/actions/action-contexts"
 import { ViewPhotoAction } from "src/app/actions/cells/view-photo"
 import { BackHiveAction } from "src/app/actions/navigation/back.action"
 import { BranchAction } from "src/app/actions/navigation/branch.action"
@@ -93,7 +93,7 @@ export class TilePointerManager extends PixiServiceBase {
     const hiveName = this.stack.hiveName()!
     const cell = this.store.cells().find(c => c.cellId === tile?.cellId)
 
-    const payload: CellContext | BaseContext = cell ? { kind: "cell", cell, event } : { kind: "cell", event }
+    const payload: CellPayload | PayloadBase = cell ? { kind: "cell", cell, event } : { kind: "cell", event }
 
     for (const action of actions) {
       if (await this.registry.invoke(action.id, payload)) return
