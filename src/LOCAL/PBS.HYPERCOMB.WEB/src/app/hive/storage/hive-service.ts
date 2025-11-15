@@ -4,76 +4,71 @@ import { HypercombData } from "src/app/actions/hypercomb-data"
 import { HIVE_CONTROLLER_ST } from "src/app/shared/tokens/i-hive-store.token"
 import { IDexieHive } from "../hive-models"
 import { OpfsHiveService } from "./opfs-hive-service"
+import { OpfsManager } from "src/app/common/opfs/opfs-manager"
 
 @Injectable({ providedIn: "root" })
 export class HiveService extends HypercombData {
-  private readonly opfs = inject(OpfsHiveService)
+  private readonly opfsHives = inject(OpfsHiveService)
+  private readonly opfs = inject(OpfsManager)
   private readonly controller = inject(HIVE_CONTROLLER_ST)
 
-  private lastActivatedName: string | null = null // 🔑 track last hive
+  private lastActivatedName: string | null = null
 
-  // store mutations
+  // store navigation
   public next = () => this.controller.next()
   public prev = () => this.controller.prev()
 
-  public setActive = (hiveName: string): void => {
-    // only trigger if new hive
+  public setActive = (hiveName: string) => {
     if (this.lastActivatedName !== hiveName) {
       this.controller.setActive(hiveName)
+      this.lastActivatedName = hiveName
     }
   }
 
-  public async moveHiveToHistory(hiveName: string): Promise<void> {
-    const opfsRoot = await navigator.storage.getDirectory();
-    const hiveDir = await opfsRoot.getDirectoryHandle('hive');
-    const historyDir = await opfsRoot.getDirectoryHandle('history', { create: true });
+  // ───────────────────────────────────────────────────────────────
+  // move hive.json → history/<hive.json]-[ISO timestamp>
+  // fully aligned with OpfsManager and your directory layout
+  // ───────────────────────────────────────────────────────────────
+  public async moveHiveToHistory(hiveName: string) {
+    const fileName = hiveName.endsWith(".json") ? hiveName : `${hiveName}.json`
 
-    // Find the file
-    const hiveFile = await hiveDir.getFileHandle(hiveName);
+    const root = await this.opfs.root()
+    const hivesDir = await root.getDirectoryHandle("hives", { create: true })
+    const historyDir = await root.getDirectoryHandle("history", { create: true })
 
-    // Create a timestamp
-    const now = new Date();
-    const datestamp = now.toISOString().replace(/[:.]/g, '-')
-    const historyFileName = `${hiveName}]-[${datestamp}`
+    const hiveHandle = await hivesDir.getFileHandle(fileName)
+    const hiveFile = await hiveHandle.getFile()
 
-    // Copy file contents
-    const file = await hiveFile.getFile()
-    const historyFile = await historyDir.getFileHandle(historyFileName, { create: true });
-    const writable = await historyFile.createWritable();
-    await writable.write(await file.arrayBuffer());
-    await writable.close();
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-")
+    const historyName = `${fileName}]-[${timestamp}`
 
-    // Remove the original
-    await hiveDir.removeEntry(hiveName);
+    const outHandle = await historyDir.getFileHandle(historyName, { create: true })
+    const writable = await outHandle.createWritable()
+    await writable.write(await hiveFile.arrayBuffer())
+    await writable.close()
+
+    // remove from /hives
+    await hivesDir.removeEntry(fileName)
+
+    // update registry through OpfsHiveService
+    const registry = await this.opfsHives.getRegistry()
+    await this.opfsHives.updateRegistry(registry.filter(r => r.name !== fileName))
+
+    this.controller.remove(hiveName.replace(/\.json$/, ""))
   }
 
-
-  public async rename(): Promise<IDexieHive> {
-    // const oldFilename = `${old.name}.json`
-    // const newFilename = `${newName}.json`
-
-    // const oldFileHandle = await hivesDir.getFileHandle(oldFilename)
-    // const file = await oldFileHandle.getFile()
-    // const text = await file.text()
-
-    // const newHandle = await hivesDir.getFileHandle(newFilename, { create: true })
-    // const writable = await newHandle.createWritable()
-    // await writable.write(text)
-    // await writable.close()
-
-    // await hivesDir.removeEntry(oldFilename)
-
-    // const updated: IDexieHive = { name: newName, file: { ...old.file, name: newName } }
-    // this.controller.replace(old.name, updated)
-
-    // return updated
-    throw new Error("Renaming hives is not yet implemented.")
+  // ───────────────────────────────────────────────────────────────
+  // rename not implemented
+  // ───────────────────────────────────────────────────────────────
+  public async rename() {
+    throw new Error("Renaming hives is not yet implemented")
   }
 
-  public async removeHive(hive: IDexieHive): Promise<void> {
-    const hivesDir = await this.opfs.getHivesDir()
-    const filename = `${hive.name}.json`
-    await hivesDir.removeEntry(filename)
+  // ───────────────────────────────────────────────────────────────
+  // delete hive (delegates to OpfsHiveService)
+  // ───────────────────────────────────────────────────────────────
+  public async removeHive(hive: IDexieHive) {
+    await this.opfsHives.deleteHive(hive.name)
     this.controller.remove(hive.name)
   }
 }

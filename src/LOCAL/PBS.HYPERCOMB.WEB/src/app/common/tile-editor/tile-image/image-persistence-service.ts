@@ -9,18 +9,15 @@ export class ImagePersistenceService {
   private readonly images = inject(ImageService)
   private readonly query = inject(QUERY_COMB_SVC)
 
-  // ─────────────────────────────────────────────
-  // helpers
-  // ─────────────────────────────────────────────
+  // hash helper
   private async hashBlob(blob: Blob): Promise<string> {
-    const ab = await blob.arrayBuffer()
-    const digest = await crypto.subtle.digest('SHA-256', ab)
+    const buf = await blob.arrayBuffer()
+    const digest = await crypto.subtle.digest('SHA-256', buf)
     return Array.from(new Uint8Array(digest))
       .map(b => b.toString(16).padStart(2, '0'))
       .join('')
   }
 
-  // compare full image including transform and blob hash
   private async imagesEqual(a?: IHiveImage, b?: IHiveImage): Promise<boolean> {
     if (!a || !b) return false
     if (a.x !== b.x || a.y !== b.y || a.scale !== b.scale) return false
@@ -30,82 +27,82 @@ export class ImagePersistenceService {
       this.hashBlob(a.blob),
       this.hashBlob(b.blob),
     ])
+
     return ha === hb
   }
 
-  private cloneForPersist(image: IHiveImage, cellId: number): IHiveImage {
-    const { db, getBlob, ...rest } = image as any
-    return { ...rest, cellId }
-  }
-
   // ─────────────────────────────────────────────
-  // save small (always allowed, but deduped)
+  // SAVE SMALL (writes to OPFS small/)
   // ─────────────────────────────────────────────
   public async saveSmall(cell: EditCell, blob: Blob): Promise<void> {
     if (!cell) return
 
-    // skip if same as existing small image
-    if (cell.image && await this.imagesEqual(cell.image, { ...cell.image, blob })) return
+    // dedupe check
+    if (cell.image && await this.imagesEqual(cell.image, { ...cell.image, blob }))
+      return
 
-    // update in-memory model
-    if (!cell.image) {
-      cell.image = {
-        id: undefined,
-        cellId: cell.cellId!,
-        blob,
-        x: 0,
-        y: 0,
-        scale: 1,
-        getBlob() { return Promise.resolve(this.blob) }
-      }
-    } else {
-      cell.image.blob = blob
+    // persist to OPFS
+    const hash = await this.images.save(blob)
+
+    // update EditCell state
+    cell.imageHash = hash
+    cell.image = {
+      imageHash: hash,
+      blob,
+      x: cell.image?.x ?? 0,
+      y: cell.image?.y ?? 0,
+      scale: cell.image?.scale ?? 1,
     }
-
-    const record = this.cloneForPersist(cell.image, cell.cellId!)
-    await this.images.save(record, 'small')
   }
 
   // ─────────────────────────────────────────────
-  // save large only if different from small or db
+  // SAVE LARGE (only during editing)
+  // stored as separate OPFS hash, not persisted to cell
   // ─────────────────────────────────────────────
-  public async saveLargeIfChanged(cell: EditCell, largeImage: IHiveImage): Promise<void> {
+  public async saveLargeIfChanged(cell: EditCell, large: IHiveImage): Promise<void> {
     if (!cell) return
 
-    // compare vs small
-    if (cell.image && await this.imagesEqual(cell.image, largeImage)) return
+    // dedupe against small
+    if (cell.image && await this.imagesEqual(cell.image, large))
+      return
 
-    // compare vs existing db record
-    const existing = await this.images.loadForCell(cell, 'large')
-    if (existing && await this.imagesEqual(existing, largeImage)) return
+    // dedupe against existing large
+    const existing = cell.largeImage
+    if (existing && await this.imagesEqual(existing, large))
+      return
 
-    if (!cell.largeImage) {
-      cell.largeImage = {
-        id: undefined,
-        cellId: cell.cellId!,
-        blob: largeImage.blob,
-        x: 0,
-        y: 0,
-        scale: 1,
-        getBlob() { return Promise.resolve(this.blob) }
-      }
-    } 
+    // persist to OPFS
+    const largeHash = await this.images.save(large.blob)
 
-    const record = this.cloneForPersist(cell.largeImage, cell.cellId!)
-    await this.images.save(record, 'large')
-  }
-
-  public async deleteImages(cell: EditCell): Promise<void> {
-    delete cell!.originalImage
-    delete cell!.largeImage
-    delete cell.imageDirty
+    // store only in working edit state
+    cell.largeImage = {
+      imageHash: largeHash,
+      blob: large.blob,
+      x: large.x,
+      y: large.y,
+      scale: large.scale
+    }
   }
 
   // ─────────────────────────────────────────────
-  // utility lookup (optional)
+  // delete all working images from EditCell
+  // (does not delete from OPFS)
+  // ─────────────────────────────────────────────
+  public async deleteImages(cell: EditCell): Promise<void> {
+    delete cell.originalImage
+    delete cell.largeImage
+    delete cell.image
+    delete cell.imageDirty
+    cell.imageHash = undefined
+  }
+
+  // ─────────────────────────────────────────────
+  // load large image for a persisted cell
+  // (rarely used, but kept for safety)
   // ─────────────────────────────────────────────
   public async getExistingLarge(cellId: number): Promise<IHiveImage | null> {
     const cell = await this.query.fetch(cellId)
-    return await this.images.loadForCell(cell!, 'large') ?? null
+    if (!cell?.imageHash) return null
+    return await this.images.fetch(cell.imageHash) ?? null
   }
 }

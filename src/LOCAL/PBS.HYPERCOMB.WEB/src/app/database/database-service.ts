@@ -3,13 +3,11 @@ import { inject, Injectable, signal, untracked } from "@angular/core"
 import Dexie, { Transaction } from "dexie"
 import DBTables from "src/app/core/constants/db-tables"
 import { allUpgrades } from "src/app/database/upgrades/all-upgrades"
-import { ImageDatabase } from "./images/image-database"
 import { DebugService } from "src/app/core/diagnostics/debug-service"
 
 @Injectable({ providedIn: "root" })
 export class DatabaseService {
 
-  protected readonly imageDb = inject(ImageDatabase)
   protected readonly debug = inject(DebugService)
   public readonly CURRENT_DATA_VERSION = 108
 
@@ -103,7 +101,7 @@ export class DatabaseService {
     const upgrades = allUpgrades.slice().sort((a, b) => a.version - b.version)
     for (const up of upgrades) {
       if (up.version <= this.CURRENT_DATA_VERSION) {
-        await up.apply(tx, this.imageDb)
+        await up.apply(tx)
       }
     }
   }

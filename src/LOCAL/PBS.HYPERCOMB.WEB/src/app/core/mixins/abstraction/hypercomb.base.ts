@@ -16,7 +16,6 @@ import { HIVE_HYDRATION, MODIFY_COMB_SVC } from 'src/app/shared/tokens/i-comb-se
 import { COMB_STORE, STAGING_ST } from 'src/app/shared/tokens/i-comb-store.token'
 import { EditorService } from 'src/app/state/interactivity/editor-service'
 import { CELL_CREATOR, CELL_FACTORY } from 'src/app/inversion-of-control/tokens/tile-factory.token'
-import { CombImageFactory } from 'src/app/common/tile-editor/tile-image/cell-image-factory'
 import { QUERY_COMB_SVC } from 'src/app/shared/tokens/i-comb-query.token'
 
 export function HypercombMixin<TBase extends AbstractCtor>(Base: TBase) {
@@ -81,11 +80,12 @@ export abstract class HypercombLayout extends HypercombMixin(class { }) {
     protected readonly es = inject(EditorService)
     protected readonly ps = inject(PointerState)
     protected readonly detector = inject(CoordinateDetector)
+
+    // 🟢 remove image factory completely — no longer needed
     protected readonly hive = {
-        image: {
-            factory: inject(CombImageFactory)
-        }
+        image: {}
     }
+
     protected readonly cell = {
         creator: inject(CELL_CREATOR),
         factory: inject(CELL_FACTORY)
@@ -100,3 +100,4 @@ export abstract class HypercombLayout extends HypercombMixin(class { }) {
     protected readonly hydration = inject(HIVE_HYDRATION)
     protected readonly staging = inject(STAGING_ST)
 }
+

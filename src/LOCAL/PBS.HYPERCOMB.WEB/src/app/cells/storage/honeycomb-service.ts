@@ -14,50 +14,36 @@ import { toCellEntity } from 'src/app/core/mappers/to-cell-entity'
 import { CellOptions } from '../models/cell-options'
 import { safeDate, toCell } from 'src/app/core/mappers/to-cell'
 import { CombQueryService } from './comb-query-service'
-import { IHiveImage } from 'src/app/core/models/i-hive-image'
 import { BlobService } from 'src/app/hive/rendering/blob-service'
-import { HypercombMode } from 'src/app/core/models/enumerations'
 
 @Injectable({ providedIn: 'root' })
 export class HoneycombService
   extends DataOrchestratorBase
   implements ICellService, IModifyComb, IHiveHydration {
-  // ─────────────────────────────────────────────
-  // dependencies
-  // ─────────────────────────────────────────────
+
   private readonly blobs = inject(BlobService)
   private readonly query = inject(CombQueryService)
   private readonly ps = inject(PointerState)
 
-  // ─────────────────────────────────────────────
-  // internal state
-  // ─────────────────────────────────────────────
   private readonly _lastCreated = signal<Cell | null>(null)
   private readonly _ready = signal(false)
   private readonly _selectedCells = signal<Cell[]>([])
   private hydratedEnqueued = new Set<number>()
   private lastHive = -1
 
-  // ─────────────────────────────────────────────
-  // public signals
-  // ─────────────────────────────────────────────
   public readonly lastCreated = this._lastCreated.asReadonly()
   public readonly ready = this._ready.asReadonly()
   public readonly selectedCells = this._selectedCells.asReadonly()
 
-  // ─────────────────────────────────────────────
-  // constructor
-  // ─────────────────────────────────────────────
   constructor() {
     super()
-
     this.setupHydrationEffect()
     this.setupPointerCleanup()
   }
 
-  // ========================================================================
+  // ─────────────────────────────────────────────
   // A. LIFECYCLE
-  // ========================================================================
+  // ─────────────────────────────────────────────
 
   public flush() {
     return this.honeycomb.store.flush()
@@ -78,18 +64,18 @@ export class HoneycombService
     this._ready.set(true)
   }
 
-  // ========================================================================
+  // ─────────────────────────────────────────────
   // B. CREATION
-  // ========================================================================
+  // ─────────────────────────────────────────────
 
-  public async addCell(newCell: NewCell | Ghost, image: IHiveImage): Promise<Cell> {
+  public async addCell(newCell: NewCell | Ghost): Promise<Cell> {
     this.ensureValidKind(newCell)
 
     const entity = toCellEntity(newCell)
     const cell =
       newCell.kind === 'Ghost'
         ? (newCell as unknown as Cell)
-        : <Cell>toCell(await this.repository.add(entity, image))
+        : <Cell>toCell(await this.repository.add(entity))
 
     this.staging.stageAdd(cell)
     this._lastCreated.set(cell)
@@ -98,26 +84,16 @@ export class HoneycombService
 
   public async create(params: Partial<NewCell>, kind: CellKind): Promise<Cell> {
     const nc = this.honeycomb.factory.newCell(params)
-    const blob = await this.blobs.getInitialBlob()
-
-    nc.image = <IHiveImage>{
-      blob,
-      scale: 1,
-      x: 0,
-      y: 0,
-      getBlob: async () => blob,
-    }
 
     nc.setKind(kind)
     this.ensureValidKind(nc)
 
-    // actual materialization happens in addCell()
     return <Cell>{}
   }
 
-  // ========================================================================
-  // C. HYDRATION (GLOBAL + LAZY)
-  // ========================================================================
+  // ─────────────────────────────────────────────
+  // C. HYDRATION
+  // ─────────────────────────────────────────────
 
   public async hydrate(): Promise<Cell[]> {
     if (this.isFetching()) return []
@@ -156,20 +132,16 @@ export class HoneycombService
     try {
       const rows = await this.repository.fetchBySourceId(parentId)
       this.state.setHoneycombStatus(rows.length < 1)
+
       if (!rows?.length) {
         this.hydratedEnqueued.add(parentId)
         return
       }
 
+      const cells = rows.map(r => <Cell>toCell(r))
 
-      const decorated = await Promise.all(
-        rows.map(r => this.query.decorateWithImage(<Cell>toCell(r)))
-      )
-
-      if (decorated.length) {
-        this.staging.stageMerge(decorated)
-        this.honeycomb.store.enqueueHot(decorated as Cell[])
-      }
+      this.staging.stageMerge(cells)
+      this.honeycomb.store.enqueueHot(cells)
 
       this.hydratedEnqueued.add(parentId)
     } catch (err) {
@@ -177,17 +149,9 @@ export class HoneycombService
     }
   }
 
-  // ========================================================================
-  // D. POINTER STATE
-  // ========================================================================
-
-  private setupPointerCleanup(): void {
-    this.ps.onUp(() => this.stack.doneNavigating())
-  }
-
-  // ========================================================================
+  // ─────────────────────────────────────────────
   // E. REMOVAL
-  // ========================================================================
+  // ─────────────────────────────────────────────
 
   public async removeCell(cell: Cell): Promise<void> {
     cell.options.update(o => o | CellOptions.Deleted)
@@ -223,9 +187,9 @@ export class HoneycombService
     ids.forEach(id => this.staging.stageRemove(id))
   }
 
-  // ========================================================================
+  // ─────────────────────────────────────────────
   // F. UPDATES
-  // ========================================================================
+  // ─────────────────────────────────────────────
 
   public async moveCell(_: string, cell: Cell): Promise<void> {
     await this.repository.update(toCellEntity(cell))
@@ -236,6 +200,10 @@ export class HoneycombService
   public async replaceCell(cell: Cell): Promise<void> {
     await this.repository.update(toCellEntity(cell))
     this.staging.stageReplace(cell)
+  }
+
+  private setupPointerCleanup(): void {
+    this.ps.onUp(() => this.stack.doneNavigating())
   }
 
   public async updateCell(cell: Cell): Promise<number> {
@@ -266,9 +234,9 @@ export class HoneycombService
     ids.forEach(id => this.staging.stageRemove(id))
   }
 
-  // ========================================================================
-  // G. INTERNAL HELPERS
-  // ========================================================================
+  // ─────────────────────────────────────────────
+  // G. HELPERS
+  // ─────────────────────────────────────────────
 
   private ensureValidKind(cell: { kind?: string; name?: string }): void {
     if (!cell.kind) {

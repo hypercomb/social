@@ -3,8 +3,7 @@ import { Cell, Hive } from "src/app/cells/cell"
 import { IDexieHive } from "src/app/hive/hive-models"
 
 export interface ICombQueries {
-    decorateAll(cells: Cell[]): Promise<Cell[]>
-    decorateWithImage(cell: Cell): Promise<Cell>
+
     // bulk/context
     fetchAll(): Promise<Cell[]>
 
@@ -24,7 +23,6 @@ export interface ICombQueries {
 // --------------------
 export interface IQueryHives {
     fetchHive(): Promise<Hive | undefined>
-    fetchHives(): Promise<IDexieHive[]>
 }
 
 

@@ -1,3 +1,5 @@
+// src/app/clipboard/copy-service.ts
+
 import { inject, Injectable } from "@angular/core"
 import { Cell } from "../cells/cell"
 import { CELL_CREATOR } from "../inversion-of-control/tokens/tile-factory.token"
@@ -13,8 +15,8 @@ export class CopyService {
   private readonly database = inject(DatabaseService)
 
   /**
-   * Copy one or more cells + full child hierarchy.
-   * Entire operation runs inside ONE Dexie transaction.
+   * Clone one or more cells including full recursive hierarchy.
+   * Returns newly created top-level clones.
    */
   public async copy(cells: Cell[]): Promise<Cell[]> {
     const db = this.database.db()
@@ -23,22 +25,26 @@ export class CopyService {
     const results: Cell[] = []
 
     for (const source of cells) {
-
+      // 1. Create root clone
       const rootClone = this.creator.newCell({
         ...source,
         cellId: undefined,
-        sourceId: undefined
+        sourceId: undefined,
+        uniqueId: crypto.randomUUID(),   // important: new uniqueId
+        // SIH: imageHash is preserved
       })
 
-      const cloneEntity =    toCellEntity(rootClone)
+
+      // save so we have a new cellId for children to reference
       const rootEntity = await this.repository.add(
-        cloneEntity,
-        rootClone.image!
+        toCellEntity(rootClone)
       )
 
       const root = <Cell>toCell(rootEntity)
 
+      // 2. Recursively clone children
       await this.copyChildren(source, root)
+
       results.push(root)
     }
 
@@ -46,8 +52,7 @@ export class CopyService {
   }
 
   /**
-   * Recursive copy of child hierarchy.
-   * IMPORTANT: must be called *inside* the parent's transaction.
+   * Clone all children of source under parentClone.
    */
   private async copyChildren(source: Cell, parent: Cell): Promise<void> {
     const children = await this.repository.fetchBySourceId(source.cellId!) || []
@@ -58,15 +63,18 @@ export class CopyService {
       const clone = this.creator.newCell({
         ...child,
         cellId: undefined,
-        sourceId: parent.cellId
+        sourceId: parent.cellId,
+        uniqueId: crypto.randomUUID(),
+        // keep same imageHash (SIH)
       })
 
-      const entity = await this.repository.add(
-        toCellEntity(clone),
-        clone.image!
+      const newEntity = await this.repository.add(
+        toCellEntity(clone)
       )
 
-      const newChild = <Cell>toCell(entity)
+      const newChild = <Cell>toCell(newEntity)
+
+      // recurse
       await this.copyChildren(child, newChild)
     }
   }

@@ -4,13 +4,25 @@ import { CellKind } from "src/app/cells/cell"
 import { CellOptions } from "src/app/core/models/enumerations"
 
 export interface CellEntity {
-    largeImageId: number | undefined
-    smallImageId: number
+
+    // ──────────────────────────────────────────────
+    // new unified image identity
+    // ──────────────────────────────────────────────
+    /**
+     * the canonical image identifier for this cell.
+     * both small and large images in OPFS share this hash.
+     * when blob is present (first-load / legacy), we compute a hash,
+     * write the small image to OPFS, and assign imageHash.
+     */
+    imageHash?: string | undefined
+
+    // ──────────────────────────────────────────────
+    // existing fields (unchanged)
+    // ──────────────────────────────────────────────
     kind: CellKind | undefined
     cellId: number
     isBranch: boolean | undefined
     isLocked: boolean | undefined
-    hasNoImage: boolean | undefined
     hashedHive?: number
     hive: string
     name: string
@@ -32,12 +44,13 @@ export interface CellEntity {
     uniqueId: string
     etag?: string
     updatedAt: string
-    // blobs are optional persistence fields
+
+    // legacy persistence blob (first-load only)
+    /** @deprecated used only during import; removed afterwards */
     blob?: Blob
+
     dateDeleted?: string
 }
 
-
-export interface HiveEntity extends CellEntity {
-
-}
+// HiveEntity is unchanged — it just inherits CellEntity
+export interface HiveEntity extends CellEntity {}

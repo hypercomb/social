@@ -2,25 +2,22 @@
 import { Injectable, inject } from "@angular/core"
 import { DatabaseService } from "src/app/database/database-service"
 import { exportDB } from "dexie-export-import"
+import { OpfsHiveService } from "src/app/hive/storage/opfs-hive-service"
 
 @Injectable({ providedIn: "root" })
 export class ExportService extends DatabaseService {
   private readonly database = inject(DatabaseService)
+  private readonly opfsHive = inject(OpfsHiveService)
 
-  // Export current in-memory DB as Blob
+  // export current in-memory db as blob
   public async export(): Promise<Blob> {
     return await exportDB(this.database.db()!, { prettyJson: true })
   }
 
-  // Save current hive to OPFS
+  // save current hive to opfs
   public async save(hiveName: string): Promise<void> {
     const blob = await this.export()
-    const root = await navigator.storage.getDirectory()
-    const hivesDir = await root.getDirectoryHandle("hives", { create: true })
-    const fileHandle = await hivesDir.getFileHandle(`${hiveName}.json`, { create: true })
-    const writable = await fileHandle.createWritable()
-    await writable.write(blob)
-    await writable.close()
-    this.debug.log('export', `Hive '${hiveName}' saved to OPFS`)
+    await this.opfsHive.saveHive(hiveName, blob)
+    this.debug.log("export", `hive '${hiveName}' saved to opfs`)
   }
 }

@@ -47,9 +47,7 @@ export class NewCell extends CellFlags {
   sourceId?: number
   sourcePath = ""
   index = -1
-  smallImageId: number = 0
-  largeImageId?: number
-
+  imageHash?: string | undefined
   dateCreated: string = new Date().toISOString()
   dateDeleted?: string
   updatedAt: string = new Date().toISOString()

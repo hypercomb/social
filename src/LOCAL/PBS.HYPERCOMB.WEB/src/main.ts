@@ -17,6 +17,10 @@ import { CombStoreModule } from './app/shared/modules/comb-store.module'
 import { CombServiceModule } from './app/shared/modules/comb-service.module'
 import { CombQueryModule } from './app/shared/modules/comb-query.module'
 import { HiveImageModule } from './app/shared/modules/hive-image.module'
+import { HiveFactory } from './app/hive/hive-factory'
+import { REFRESH_HIVE_PORT } from './app/hive/refresh-hive-port'
+import { HIVE_FACTORY } from './app/inversion-of-control/ports/i-hive-factory-port'
+import { HiveBootstrapService } from './app/hive/hives-bootstrapper'
 
 
 // ðŸ‘‡ hold a reference
@@ -29,6 +33,7 @@ bootstrapApplication(AppComponent, {
     importProvidersFrom(AuthConfigModule),
     importProvidersFrom(AppRoutingModule),
     ...DATABASE_PROVIDERS,
+    provideAppInitializer(() => inject(HiveBootstrapService).initOnce()),
     importProvidersFrom(HiveModule),
     importProvidersFrom(CombStoreModule),
     importProvidersFrom(CombServiceModule),

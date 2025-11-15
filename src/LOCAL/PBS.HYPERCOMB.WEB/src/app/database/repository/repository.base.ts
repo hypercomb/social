@@ -1,3 +1,4 @@
+// src/app/database/repository/repository.base.ts
 import { inject } from "@angular/core"
 import { Table } from "dexie"
 import { IdentifierService } from "../utility/identifier-service"
@@ -7,18 +8,17 @@ import { DatabaseService } from "../database-service"
 import { CellOptions } from "src/app/cells/models/cell-options"
 import { safeDate } from "src/app/core/mappers/to-cell"
 import { IRepostioryBase, QUERY_HELPER } from "src/app/shared/tokens/i-cell-repository.token"
-import { IHiveImage } from "src/app/core/models/i-hive-image"
-import { ImageDatabase } from "../images/image-database"
 import { CELL_FACTORY } from "src/app/inversion-of-control/tokens/tile-factory.token"
-import { isNew } from "src/app/cells/models/cell-filters"
+import { OpfsImageService } from "src/app/hive/storage/opfs-image.service"
 
 export abstract class RepositoryBase<TEntity extends CellEntity, TDomain = TEntity>
   implements IRepostioryBase<TEntity> {
+
   protected readonly factory = inject(CELL_FACTORY)
   protected readonly database = inject(DatabaseService)
   protected readonly idService = inject(IdentifierService)
   protected readonly query = inject(QUERY_HELPER)
-  protected readonly imageDb = inject(ImageDatabase)
+  protected readonly images = inject(OpfsImageService)
 
   protected get cell_db(): Table<TEntity, number> {
     const db = this.database.db()
@@ -26,100 +26,91 @@ export abstract class RepositoryBase<TEntity extends CellEntity, TDomain = TEnti
     return db.table(DBTables.Cells)
   }
 
-  // ghost guard
-  protected isGhost(entity: any): boolean {
+  protected isGhost(entity: any) {
     return entity?.kind === "Ghost"
   }
 
-  // default: no image relation (subclasses can override)
-  protected async findImage(entity: TEntity): Promise<IHiveImage | null> {
-    return null
-  }
-
-  // ────────────────────────────────
-  // queries
-  // ────────────────────────────────    
-  public fetch = async (cellId: number): Promise<TEntity | undefined> => {
-    const row = await this.query.findFirst<TEntity>({
+  // fetch
+  public fetch = async (cellId: number) => {
+    return await this.query.findFirst<TEntity>({
       where: { cellId },
       all: [CellOptions.Active],
-      none: [CellOptions.Deleted],
+      none: [CellOptions.Deleted]
     })
-    return row
   }
 
-  public async fetchBySourceId(cellId: number): Promise<CellEntity[]> {
-    return this.cell_db.where({ sourceId: cellId }).toArray();
+  public async fetchBySourceId(cellId: number) {
+    return this.cell_db.where({ sourceId: cellId }).toArray()
   }
 
-
-  public fetchAll = async (): Promise<TEntity[]> => {
-    const result = await this.query.get<TEntity>({
+  public fetchAll = async () => {
+    return await this.query.get<TEntity>({
       all: [CellOptions.Active],
-      none: [CellOptions.Deleted],
+      none: [CellOptions.Deleted]
     })
-    return result
   }
 
-  // ────────────────────────────────
-  // save convenience
-  // ────────────────────────────────
-  public async save(entity: TEntity, image:IHiveImage): Promise<TEntity> {
-    if (this.isGhost(entity)) {
-      // Ghosts never persisted, just return it
-      return entity
-    }
+  // save
+  public async save(entity: TEntity, imageBlob?: Blob) {
+    if (this.isGhost(entity)) return entity
 
     if (!entity.cellId) {
-      return this.add(entity,image)
+      return await this.add(entity, imageBlob)
     } else {
-      await this.update(entity)
+      await this.update(entity, imageBlob)
       return entity
     }
   }
 
-  // ────────────────────────────────
-  // persistence
-  // ────────────────────────────────
-  public async add(entity: TEntity, image: IHiveImage): Promise<TEntity> {
+  // insert
+  // src/app/database/repository/repository.base.ts
+  // only the changed parts are shown — rest of file unchanged
+
+  public async add(entity: TEntity, imageBlob?: Blob) {
     if (this.isGhost(entity)) return entity
 
     entity.dateCreated = safeDate(new Date()) || ''
 
+    // first-time image save
+    if (imageBlob instanceof Blob) {
+      const hash = await this.images.hashName(imageBlob)
+      await this.images.saveSmall(hash, imageBlob)
+
+      // ✔ modern field
+      entity.imageHash = hash
+
+      // ✔ DO NOT assign deprecated numeric field
+      // entity.smallImageId = hash   ← REMOVE THIS
+    }
+
     await this.cell_db.add(entity)
     this.idService.markAsUsed(entity.cellId)
-
-    // ensure a small image record exists
-    await this.ensureImageRecord(entity, image)
 
     return entity
   }
 
-  private ensureImageRecord = async (entity: TEntity, image: IHiveImage): Promise<void> => {
+  // update
+  public async update(entity: TEntity, imageBlob?: Blob) {
+    if (this.isGhost(entity)) return 0
 
-    // detect whether update or insert is needed
-    let isNewImage =  false
-    if (image.id != null) {
-      const existing = await this.imageDb.get(image.id)
-      isNewImage = !existing || existing.blob.size !== image.blob.size
-    } else {
-      isNewImage = true
+    entity.updatedAt = new Date().toISOString()
+
+    if (imageBlob instanceof Blob) {
+      const hash = await this.images.hashName(imageBlob)
+      await this.images.saveSmall(hash, imageBlob)
+
+      // ✔ modern field
+      entity.imageHash = hash
+
+      // ✔ do not touch deprecated numeric field
+      // entity.smallImageId = hash   ← REMOVE THIS
     }
 
-    // save the image if new or changed
-    await this.imageDb.put(image)
-
-    // we have an id now
-    entity.smallImageId = image.id!
-    await this.save(entity,image)
+    return await this.cell_db.put(entity)
   }
 
-  public async update(entity: TEntity): Promise<number> {
-    if (this.isGhost(entity)) return 0
-    entity.updatedAt = new Date().toISOString()
-    return this.cell_db.put(entity)
-  }
 
+  // delete
   public async delete(entity: TEntity, permanent = false) {
     if (this.isGhost(entity)) return
     if (!this.cell_db) return
@@ -134,37 +125,15 @@ export abstract class RepositoryBase<TEntity extends CellEntity, TDomain = TEnti
     }
   }
 
-  public async deleteAll(ids: number[], permanent = false): Promise<void> {
-    if (!this.cell_db || !ids.length) return
-
-    if (permanent) {
-      await this.cell_db.bulkDelete(ids)
-      this.idService.bulkReleaseIds(ids)
-    } else {
-      const entities = await this.cell_db.bulkGet(ids)
-      const nowUtc = new Date().toISOString()
-      const updated = entities
-        .filter((e): e is TEntity => !!e && !this.isGhost(e))
-        .map(e => ({
-          ...e,
-          options: (e.options ?? 0) | CellOptions.Deleted,
-          dateDeleted: nowUtc,
-        }))
-
-      if (updated.length) {
-        await this.cell_db.bulkPut(updated)
-      }
-    }
-  }
-
-  public async bulkAdd(entities: TEntity[], markIds = true): Promise<void> {
+  // bulk ops
+  public async bulkAdd(entities: TEntity[], markIds = true) {
     const filtered = entities.filter(e => !this.isGhost(e))
     if (!filtered.length) return
 
-    const nowUtc = safeDate(new Date())!
+    const now = safeDate(new Date())!
     filtered.forEach(e => {
-      e.dateCreated ??= nowUtc
-      e.updatedAt = nowUtc
+      e.dateCreated ??= now
+      e.updatedAt = now
     })
 
     await this.cell_db.bulkAdd(filtered)
@@ -176,12 +145,15 @@ export abstract class RepositoryBase<TEntity extends CellEntity, TDomain = TEnti
         .limit(filtered.length)
         .toArray()
 
-      const ids = persisted.map(r => r.cellId).filter((id): id is number => id != null)
+      const ids = persisted
+        .map(r => r.cellId)
+        .filter((id): id is number => id != null)
+
       this.idService.bulkMarkAsUsed(ids)
     }
   }
 
-  public async bulkPut(entities: TEntity[]): Promise<void> {
+  public async bulkPut(entities: TEntity[]) {
     const filtered = entities.filter(e => !this.isGhost(e))
     if (!filtered.length) return
 
@@ -190,17 +162,20 @@ export abstract class RepositoryBase<TEntity extends CellEntity, TDomain = TEnti
 
     await this.cell_db.bulkPut(filtered)
 
-    const ids = filtered.map(e => e.cellId).filter((id): id is number => id != null)
+    const ids = filtered
+      .map(e => e.cellId)
+      .filter((id): id is number => id != null)
+
     if (ids.length) this.idService.bulkMarkAsUsed(ids)
   }
 
-  public async bulkDelete(ids: number[]): Promise<void> {
+  public async bulkDelete(ids: number[]) {
     if (!ids.length) return
     await this.cell_db.bulkDelete(ids)
     this.idService.bulkReleaseIds(ids)
   }
 
-  public async bulkDeletePermanent(entities: TEntity[]): Promise<void> {
+  public async bulkDeletePermanent(entities: TEntity[]) {
     const ids = entities
       .filter(e => !this.isGhost(e))
       .map(e => e.cellId)

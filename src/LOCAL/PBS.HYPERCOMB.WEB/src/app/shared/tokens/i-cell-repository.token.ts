@@ -2,8 +2,6 @@
 import { ICellIdentifier } from "src/app/database/model/i-tile-identifiers"
 import { CellEntity } from "src/app/database/model/i-tile-entity"
 import { TileQueryOptions } from "src/app/database/query/query-types"
-import { IHiveImage } from "src/app/core/models/i-hive-image"
-import { Cell, NewCell } from "src/app/cells/cell"
 
 export interface IQueryHelper {
   findFirst<T = any>(opts: TileQueryOptions): Promise<T | undefined>
@@ -12,8 +10,8 @@ export interface IQueryHelper {
 }
 
 export interface IRepostioryBase<TEntity> {
-  add(cell: TEntity, image: IHiveImage): Promise<TEntity>
-  update(entity: TEntity): Promise<number>
+  add(entity: TEntity, imageBlob?: Blob): Promise<TEntity>
+  update(entity: TEntity, imageBlob?: Blob) : Promise<number>
   delete(entity: TEntity): Promise<void>
   bulkPut(cells: TEntity[]): Promise<void>
   update(entity: TEntity): Promise<number>

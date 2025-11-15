@@ -58,6 +58,7 @@ export class CarouselMenuComponent extends HypercombData implements OnInit {
 
   private wheelLocked = false
   private lastPulse = 0
+  private prepopulated = false
 
   // ─────────────────────────────────────────────
   // lifecycle
@@ -65,7 +66,11 @@ export class CarouselMenuComponent extends HypercombData implements OnInit {
   constructor() {
     super()
 
+    // 🔹 Prepopulate hive list before reactive effects run
+    this.prepopulateHives()
+
     let initialized = false
+
 
     // ─────────────────────────────────────────────
     // hive initialization
@@ -144,9 +149,6 @@ export class CarouselMenuComponent extends HypercombData implements OnInit {
     })
   }
 
-  private initializeFilterWatcher(): void {
-    effect(() => void this.debouncedFilter())
-  }
 
   private initializeScoutWatcher(): void {
     let lastHive = ''
@@ -163,6 +165,9 @@ export class CarouselMenuComponent extends HypercombData implements OnInit {
   private debugWatchCurrentHive(): void {
     effect(() => console.log('current hive:', this.current()?.name ?? '(none)'))
   }
+
+ // where do I belong?  await this.opfs.listHives()
+     
 
 
   // ─────────────────────────────────────────────
@@ -248,12 +253,74 @@ export class CarouselMenuComponent extends HypercombData implements OnInit {
     this.carousel.setTileLimit(tilesPerSide)
   }
 
-  private async findTargetHiveIndex(target: string): Promise<number> {
-    const list = this.hivestate.items()
-    for (let i = 0; i < list.length; i++) {
-      const normalized = await simplify(list[i].name)
-      if (normalized === target) return i
+  private prepopulateHives(): void {
+    if (this.prepopulated) return
+    (async () => {
+      try {
+        if (this.hivestate.items().length) {
+          this.prepopulated = true
+          return
+        }
+
+        // Prefer existing listHives() if exposed
+        const listFn = (this.coordinator as any).listHives?.bind(this.coordinator)
+        let all: IDexieHive[] = []
+
+        if (listFn) {
+          all = await listFn()
+        } else {
+          all = await this.bfsLoadHives()
+        }
+
+        if (!all?.length) return
+
+        // Attempt to set items using available API to avoid duplication
+        if ((this.hivestate as any).setItems) {
+          (this.hivestate as any).setItems(all)
+        } else if ((this.hivestate as any).replace) {
+            (this.hivestate as any).replace(all)
+        } else {
+          // fallback: mutate array reference if necessary
+          const existing = this.hivestate.items()
+          existing.splice(0, existing.length, ...all)
+        }
+
+        this.carousel.setItems(all)
+        this.updateMenu()
+        this.prepopulated = true
+      } catch (err) {
+        console.warn('[CarouselMenu] prepopulateHives failed:', err)
+      }
+    })()
+  }
+
+  // BFS fallback when listHives() is not available
+  private async bfsLoadHives(): Promise<IDexieHive[]> {
+    const roots: IDexieHive[] =
+      (await (this.coordinator as any).fetchRootHives?.()) ??
+      (await (this.coordinator as any).listRoots?.()) ??
+      []
+
+    const seen = new Map<string, IDexieHive>()
+    const queue: IDexieHive[] = [...roots]
+
+    while (queue.length) {
+      const hive = queue.shift()!
+      if (!hive?.name || seen.has(hive.name)) continue
+      seen.set(hive.name, hive)
+
+      const children: IDexieHive[] =
+        (await (this.coordinator as any).fetchChildren?.(hive.name)) ??
+        (await (this.coordinator as any).childrenOf?.(hive.name)) ??
+        []
+
+      for (const child of children) {
+        if (child?.name && !seen.has(child.name)) {
+          queue.push(child)
+        }
+      }
     }
-    return -1
+
+    return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name))
   }
 }

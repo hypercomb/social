@@ -97,6 +97,33 @@ export class BlobService {
     return response.blob()
   }
 
+  public toBlob(blobData: any): Blob | null {
+    if (!blobData) return null
+
+    // Already a real Blob
+    if (blobData instanceof Blob) {
+      return blobData
+    }
+
+    // { data: base64string, type: "image/png" }
+    if (blobData.data && blobData.type) {
+      try {
+        const binary = atob(blobData.data)
+        const bytes = new Uint8Array(binary.length)
+        for (let i = 0; i < binary.length; i++) {
+          bytes[i] = binary.charCodeAt(i)
+        }
+        return new Blob([bytes], { type: blobData.type })
+      } catch (err) {
+        console.warn("failed to decode blobData:", err)
+        return null
+      }
+    }
+
+    return null
+  }
+
+
   public trimBlob(blob: Blob): Promise<Blob> {
     return new Promise((resolve, reject) => {
       const worker = new Worker(new URL("../../workers/image-trim.worker", import.meta.url), {

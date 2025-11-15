@@ -16,23 +16,30 @@ export function toCell(entity: CellEntity): Cell | NewCell {
     sourceId: entity.sourceId,
     uniqueId: entity.uniqueId,
     index: entity.index ?? -1,
-    smallImageId: entity.smallImageId ?? 0,
-    largeImageId: entity.largeImageId,
+
+    // ✔ NEW canonical hashed image identity
+    imageHash: entity.imageHash ?? undefined,
+
     dateCreated: safeDate(entity.dateCreated),
     dateDeleted: safeDate(entity.dateDeleted),
     updatedAt: safeDate(entity.updatedAt),
+
     backgroundColor: entity.backgroundColor,
     borderColor: entity.borderColor,
     scale: entity.scale ?? 1,
     x: entity.x ?? 0,
     y: entity.y ?? 0,
+
     sourcePath: entity.sourcePath,
-    blob: entity.blob,
     etag: entity.etag,
+
+    // ✔ runtime-only fallback (never persisted)
+    // handy for first-load before hashing
+    blob: entity.blob,
   }
 
   // ─────────────────────────────
-  // case 1: new cell (not persisted)
+  // A. New Cell (not persisted)
   // ─────────────────────────────
   if (entity.cellId == null) {
     console.warn(`[toCell] entity missing cellId → returning NewCell`)
@@ -42,10 +49,13 @@ export function toCell(entity: CellEntity): Cell | NewCell {
   }
 
   // ─────────────────────────────
-  // case 2: persisted cell
+  // B. Persisted Cell
   // ─────────────────────────────
   const cell = new Cell({ ...base, cellId: entity.cellId })
   cell.setKind(entity.kind ?? "Cell")
+
+  // clear "Selected" flag on load
   cell.options.update(o => entity.options! & ~CellOptions.Selected)
+
   return cell
 }

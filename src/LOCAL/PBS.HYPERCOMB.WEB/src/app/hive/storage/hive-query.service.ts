@@ -11,35 +11,10 @@ import { OpfsHiveService } from "./opfs-hive-service"
 
 @Injectable({ providedIn: "root" })
 export class HiveQueryService implements IQueryHives {
-  private readonly opfs = inject(OpfsHiveService)
-  private readonly controller = inject(HIVE_CONTROLLER_ST)
+
   private readonly repository = inject(CELL_REPOSITORY)
   private readonly factory = inject(CELL_FACTORY)
   private readonly debug = inject(DebugService)
-
-  constructor() {
-    // auto-hydrate hive list on startup
-    effect(async () => {
-      try {
-        const registry = await this.opfs.getRegistry()
-        if (registry.length > 0) {
-          const hives = registry.map(r => ({
-            name: r.name.replace(/\.json$/, ""),
-            file: undefined
-          } as IDexieHive))
-          this.debug.log("startup", `hydrating from registry: ${hives.length} hives`)
-          this.controller.hydrate(hives)
-          return
-        }
-
-        const hives = await this.opfs.listHives()
-        this.debug.log("startup", `hydrating from hives directory: ${hives.length} hives`)
-        this.controller.hydrate(hives)
-      } catch (err) {
-        this.debug.error("startup", "HiveQueryService hydration failed", err)
-      }
-    })
-  }
 
   // ─────────────────────────────────────────────
   // fetch the current root hive from Dexie
@@ -57,20 +32,6 @@ export class HiveQueryService implements IQueryHives {
     } catch (err) {
       this.debug.error("startup", "fetchHive failed", err)
       return undefined
-    }
-  }
-
-  // ─────────────────────────────────────────────
-  // read-only queries
-  // ─────────────────────────────────────────────
-  public async fetchHives(): Promise<IDexieHive[]> {
-    try {
-      const hives = await this.opfs.listHives()
-      this.debug.log("startup", `fetched ${hives.length} hives from OPFS`)
-      return hives
-    } catch (err) {
-      this.debug.error("startup", "fetchHives failed", err)
-      return []
     }
   }
 }
