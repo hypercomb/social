@@ -1,9 +1,10 @@
 ﻿import { Injectable, signal, computed, inject } from "@angular/core"
 import { EditorMode } from "src/app/core/models/enumerations"
-import { Cell, EditCell } from "src/app/cells/cell"
+import { Cell } from "src/app/cells/cell"
 import { isNewHive } from "src/app/cells/models/cell-filters"
 import { IHiveImage } from "src/app/core/models/i-hive-image"
 import { ImageService } from "src/app/database/images/image-service"
+import { CellEditContext } from "./cell-edit-context"
 
 @Injectable({ providedIn: "root" })
 export class EditorService {
@@ -12,7 +13,7 @@ export class EditorService {
 
   // internal state
   private readonly _mode = signal<EditorMode>(EditorMode.None)
-  private readonly _context = signal<EditCell | null>(null)
+  private readonly _context = signal<CellEditContext | null>(null)
   private readonly _dragOver = signal(false)
   private readonly _initialScale = signal<number | undefined>(undefined)
   private readonly _selectedColor = signal<string | null>(null)
@@ -26,7 +27,7 @@ export class EditorService {
   public readonly isEditing = computed(() => this._context() !== null)
 
   public readonly operation = computed(() => {
-    const ctx = this._context()
+    const ctx = this.context()
     if (!ctx) return "edit-cell"
     if (ctx.kind === "Hive") {
       return ctx.cellId == null ? "new-hive" : "edit-hive"
@@ -36,6 +37,7 @@ export class EditorService {
 
   // readonly selectors
   public readonly mode = this._mode.asReadonly()
+  public readonly cell = computed(() => this._context()?.cell)
   public readonly context = this._context.asReadonly()
   public readonly dragOver = this._dragOver.asReadonly()
   public readonly initialScale = this._initialScale.asReadonly()
@@ -48,7 +50,7 @@ export class EditorService {
   public readonly isSwatchMode = computed(() => (this._mode() & EditorMode.Swatch) !== 0)
 
   public isNewHive = computed(() => {
-    const cell = this._context()
+    const cell = this.context()?.cell
     return cell ? isNewHive(cell) : false
   })
 
@@ -74,23 +76,25 @@ export class EditorService {
     }
   }
 
-  public setContext = async (cell: Cell | null) => {
-    if (!cell) {
+  public setContext = async (context: CellEditContext | null) => {
+    if (!context) {
       this._context.set(null)
       return
     }
 
+    const cell = context.cell
+    
     // preserve prototype
-    const context = Object.create(Object.getPrototypeOf(cell)) as EditCell
-    Object.assign(context, cell)
+    const editCell = Object.create(Object.getPrototypeOf(cell)) as Cell
+    Object.assign(editCell, cell)
 
     // guaranteed-valid IHiveImage clones
-    context.originalImage = this.cloneImage(cell.image)
-    context.image = this.cloneImage(cell.image)
+    context.originalSmall = this.cloneImage(context.originalSmall)
+    context.modifiedSmall = this.cloneImage(context.modifiedSmall)
 
     // large image loading via hash
     const large = await this.images.getBaseImage(cell) // automatically handles large → small fallback
-    context.largeImage = large ? this.cloneImage(large) : context.image
+    context.modifiedLarge = large ? this.cloneImage(large) : context.originalSmall
 
     this._context.set(context)
   }

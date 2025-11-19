@@ -15,7 +15,7 @@ export class RenderTextureProvider extends PixiDataServiceBase implements ITextu
     private readonly hs = inject(HypercombState)
 
     public available(cell: Cell): boolean {
-        return !!cell.image
+        return !!cell
     }
 
     public async getTexture(cell: Cell): Promise<Texture | RenderTexture | undefined> {

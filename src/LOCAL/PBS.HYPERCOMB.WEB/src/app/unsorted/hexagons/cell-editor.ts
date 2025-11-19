@@ -4,7 +4,7 @@ import { Cell } from "src/app/cells/cell"
 import { PolicyService } from "src/app/navigation/menus/policy-service"
 import { EditorService } from "src/app/state/interactivity/editor-service"
 import { PixiDataServiceBase } from "src/app/database/pixi-data-service-base"
-import { HypercombState } from "src/app/state/core/hypercomb-state"   // ✅ add this
+import { CellEditContext } from "src/app/state/interactivity/cell-edit-context"
 
 @Injectable({ providedIn: 'root' })
 export class CellEditor extends PixiDataServiceBase {
@@ -30,10 +30,10 @@ export class CellEditor extends PixiDataServiceBase {
   public isLocalDomain = (link?: string): boolean =>
     !!link && this.localDomains.some(domain => link.startsWith(domain))
 
-  public beginEditing = (cell: Cell) => {
-    if (!cell.image) throw new Error('Cannot edit a cell without an image!')
+  public beginEditing = (context: CellEditContext) => {
+    if (!context.originalSmall) throw new Error('Cannot edit a cell without an image!')
     this.state.setContextActive(false)   // ✅ reset context when entering editor
-    this.es.setContext(cell)
+    this.es.setContext(context)
   }
 
   public complete = () => {

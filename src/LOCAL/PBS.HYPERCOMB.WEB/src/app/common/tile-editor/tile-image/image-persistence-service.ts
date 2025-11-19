@@ -1,8 +1,9 @@
 import { Injectable, inject } from '@angular/core'
-import { EditCell } from 'src/app/cells/cell'
+import { Cell } from 'src/app/cells/cell'
 import { IHiveImage } from 'src/app/core/models/i-hive-image'
 import { ImageService } from 'src/app/database/images/image-service'
 import { QUERY_COMB_SVC } from 'src/app/shared/tokens/i-comb-query.token'
+import { CellEditContext } from 'src/app/state/interactivity/cell-edit-context'
 
 @Injectable({ providedIn: 'root' })
 export class ImagePersistenceService {
@@ -34,66 +35,57 @@ export class ImagePersistenceService {
   // ─────────────────────────────────────────────
   // SAVE SMALL (writes to OPFS small/)
   // ─────────────────────────────────────────────
-  public async saveSmall(cell: EditCell, blob: Blob): Promise<void> {
-    if (!cell) return
+  public async saveSmall(cell: Cell, blob: Blob): Promise<void> {
+    // if (!cell) return
 
-    // dedupe check
-    if (cell.image && await this.imagesEqual(cell.image, { ...cell.image, blob }))
-      return
+    // // dedupe check
+    // if (cell.image && await this.imagesEqual(cell.image, { ...cell.image, blob }))
+    //   return
 
-    // persist to OPFS
-    const hash = await this.images.save(blob)
+    // // persist to OPFS
+    // const hash = await this.images.save(blob)
 
-    // update EditCell state
-    cell.imageHash = hash
-    cell.image = {
-      imageHash: hash,
-      blob,
-      x: cell.image?.x ?? 0,
-      y: cell.image?.y ?? 0,
-      scale: cell.image?.scale ?? 1,
-    }
+    // // update EditCell state
+    // cell.imageHash = hash
+    // cell.image = {
+    //   imageHash: hash,
+    //   blob,
+    //   x: cell.image?.x ?? 0,
+    //   y: cell.image?.y ?? 0,
+    //   scale: cell.image?.scale ?? 1,
+    // }
+    throw new Error('Method not implemented.')
+
   }
 
   // ─────────────────────────────────────────────
   // SAVE LARGE (only during editing)
   // stored as separate OPFS hash, not persisted to cell
   // ─────────────────────────────────────────────
-  public async saveLargeIfChanged(cell: EditCell, large: IHiveImage): Promise<void> {
-    if (!cell) return
+  public async saveLargeIfChanged(large: IHiveImage): Promise<void> {
 
-    // dedupe against small
-    if (cell.image && await this.imagesEqual(cell.image, large))
-      return
+    // context cell = this.es
+    // // dedupe against small
+    // if (cell.image && await this.imagesEqual(cell.image, large))
+    //   return
 
-    // dedupe against existing large
-    const existing = cell.largeImage
-    if (existing && await this.imagesEqual(existing, large))
-      return
+    // // dedupe against existing large
+    // const existing = cell.largeImage
+    // if (existing && await this.imagesEqual(existing, large))
+    //   return
 
-    // persist to OPFS
-    const largeHash = await this.images.save(large.blob)
+    // // persist to OPFS
+    // const largeHash = await this.images.save(large.blob)
 
-    // store only in working edit state
-    cell.largeImage = {
-      imageHash: largeHash,
-      blob: large.blob,
-      x: large.x,
-      y: large.y,
-      scale: large.scale
-    }
-  }
-
-  // ─────────────────────────────────────────────
-  // delete all working images from EditCell
-  // (does not delete from OPFS)
-  // ─────────────────────────────────────────────
-  public async deleteImages(cell: EditCell): Promise<void> {
-    delete cell.originalImage
-    delete cell.largeImage
-    delete cell.image
-    delete cell.imageDirty
-    cell.imageHash = undefined
+    // // store only in working edit state
+    // cell.largeImage = {
+    //   imageHash: largeHash,
+    //   blob: large.blob,
+    //   x: large.x,
+    //   y: large.y,
+    //   scale: large.scale
+    // }
+    throw new Error('Method not implemented.')
   }
 
   // ─────────────────────────────────────────────

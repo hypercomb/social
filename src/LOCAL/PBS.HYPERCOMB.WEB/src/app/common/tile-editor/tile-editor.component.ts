@@ -12,7 +12,7 @@ import { SwatchPanelComponent } from './swatch-panel/swatch-panel.component'
 import { TileImageComponent } from './tile-image/tile-image.component'
 import { EditorService } from 'src/app/state/interactivity/editor-service'
 import { CellEditor } from 'src/app/unsorted/hexagons/cell-editor'
-import { Cell, EditCell } from 'src/app/cells/cell'
+import { Cell } from 'src/app/cells/cell'
 import { Events } from 'src/app/helper/events/events'
 import { Hypercomb } from 'src/app/core/mixins/abstraction/hypercomb.base'
 import { CellFactory } from 'src/app/inversion-of-control/factory/cell-factory'
@@ -21,6 +21,7 @@ import { ImagePersistenceService } from './tile-image/image-persistence-service'
 import { PointerState } from 'src/app/state/input/pointer-state'
 import { HiveService } from 'src/app/hive/storage/hive-service'
 import { ImageCaptureManager } from './tile-image/image-capture-manager'
+import { CellEditContext } from 'src/app/state/interactivity/cell-edit-context'
 
 @Component({
   standalone: true,
@@ -57,15 +58,21 @@ export class TileEditorComponent extends Hypercomb {
   // ─────────────────────────────────────────────
   // local state
   // ─────────────────────────────────────────────
-  public editCell: EditCell | null = null
+  public get context(): CellEditContext | null {
+    return this.es.context()
+  }
+
+  public get editCell(): Cell | null {
+    return this.context?.cell ?? null
+  }
 
   AiSearchPath = AiSearchPath
   BranchPath = BranchPath
   AlignMiddle = AlignMiddle
 
-  public readonly isComponentReady = computed(() => !!this.es.context())
-  public readonly imagePrompt = computed(() => this.es.context()?.name ?? '')
-  public readonly isBranch = computed(() => this.es.context()?.isBranch ?? false)
+  public readonly isComponentReady = computed(() => !!this.es.cell())
+  public readonly imagePrompt = computed(() => this.es.cell()?.name ?? '')
+  public readonly isBranch = computed(() => this.es.cell()?.isBranch ?? false)
   public readonly canDrop = this.policy.none(
     POLICY.EditInProgress,
     POLICY.ViewingClipboard,
@@ -73,7 +80,7 @@ export class TileEditorComponent extends Hypercomb {
   )
 
   public readonly operation = this.es.operation
-  
+
   public readonly editorKind = computed(() => {
     switch (this.operation()) {
       case 'edit-hive': return 'Edit Hive';
@@ -129,15 +136,11 @@ export class TileEditorComponent extends Hypercomb {
     })
 
     effect(() => {
-      const ctx = this.es.context()
-      this.editCell = ctx
+      const ctx = this.context
 
-      // focus only the very first time after page load
       if (ctx && !this.hasInitializedFocus && this.name) {
         this.hasInitializedFocus = true
-        queueMicrotask(() => {
-          this.name.nativeElement.focus()
-        })
+        queueMicrotask(() => this.name.nativeElement.focus())
       }
     })
 
@@ -166,33 +169,38 @@ export class TileEditorComponent extends Hypercomb {
   // field updates
   // ─────────────────────────────────────────────
   public onCaptionChange = (value: string): void => {
-    if (!this.editCell) return
-    const updated = this.factory.update(this.editCell, { name: value })
-    this.es.setContext(updated)
+    const context = this.context
+    const cell = context?.cell
+    if (!cell) return
+    const updated = this.factory.update(cell, { name: value })
+    context.setCell(updated)
   }
 
   public onLinkChange = (value: string): void => {
-    if (!this.editCell) return
-    const updated = this.factory.update(this.editCell, { link: value })
-    this.es.setContext(updated)
+    const context = this.context
+    const cell = context?.cell
+    if (!cell) return
+    const updated = this.factory.update(cell, { link: value })
+    context.setCell(updated)
   }
 
   // ─────────────────────────────────────────────
   // save pipeline
   // ─────────────────────────────────────────────
   public save = async (event: any): Promise<void> => {
-    const cell = this.editCell!
+    const context = this.context!
+    const cell = context.cell
     await Assets.unload(this.state.cacheId(cell))
 
     // capture and persist the working (small) snapshot
-    if (!cell.image || cell.imageDirty) {
+    if (context.imageDirty) {
       const snapshot = await this.captureManager.capture()
       await this.persistence.saveSmall(cell, snapshot)
     }
 
     // handle large image only if rules require
-    if (cell.largeImage && cell.imageDirty) {
-      await this.persistence.saveLargeIfChanged(cell, cell.largeImage)
+    if (context.modifiedLarge && context.imageDirty) {
+      await this.persistence.saveLargeIfChanged(context.modifiedLarge)
     }
 
     await Assets.unload(this.state.cacheId(cell))
@@ -204,7 +212,8 @@ export class TileEditorComponent extends Hypercomb {
   }
 
   public saveAsBranch = async (event: MouseEvent): Promise<void> => {
-    const cell = this.editCell!
+    const context = this.context!
+    const cell = context.cell
     cell.options.update(o => o | CellOptions.Branch)
     await this.save(event)
   }

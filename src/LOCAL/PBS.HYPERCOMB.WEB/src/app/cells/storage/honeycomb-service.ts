@@ -20,9 +20,7 @@ import { BlobService } from 'src/app/hive/rendering/blob-service'
 export class HoneycombService
   extends DataOrchestratorBase
   implements ICellService, IModifyComb, IHiveHydration {
-
-  private readonly blobs = inject(BlobService)
-  private readonly query = inject(CombQueryService)
+    
   private readonly ps = inject(PointerState)
 
   private readonly _lastCreated = signal<Cell | null>(null)

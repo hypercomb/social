@@ -42,8 +42,8 @@ export class ClipboardService {
             hive: active.hive,
             sourceId: active.cellId!,
         })
-        const { image, ...rest} = clone
-        await this.modify.addCell(<Cell>rest, <IHiveImage>image)
+        const { ...rest} = clone
+        await this.modify.addCell(<Cell>rest)
         // children auto-refresh via ClipboardStore effect
     }
 

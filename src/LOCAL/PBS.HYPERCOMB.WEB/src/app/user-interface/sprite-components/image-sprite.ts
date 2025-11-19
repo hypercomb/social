@@ -14,43 +14,41 @@ export class ImageSprite extends BaseSpriteBuilder<Cell> {
     sprite.zIndex = 1
     sprite.label = ImageSprite.name
 
-    let blob = cell.image?.blob
-    // debug: show basic info
     this.debug?.log?.(
       'sprite',
-      `image sprite build start: name=${cell.name} id=${cell.cellId} hash=${cell.imageHash} hasBlob=${!!blob}`
+      `image sprite build start: name=${cell.name} id=${cell.cellId} hash=${cell.imageHash}`
     )
 
-    // if we don't have a blob, try to hydrate from opfs via hash
-    if (!blob && cell.imageHash) {
-      try {
-        const small = await this.images.loadSmall(cell.imageHash)
-        const large = small === null ? await this.images.loadLarge(cell.imageHash) : null
-        blob = small ?? large ?? undefined
-
-        if (blob) {
-          this.debug?.log?.('sprite', `loaded blob from opfs for hash=${cell.imageHash}`)
-        } else {
-          this.debug?.warn?.('sprite', `no image found in opfs for hash=${cell.imageHash}`)
-        }
-      } catch (err) {
-        this.debug?.warn?.('sprite', 'failed to load blob for hash', cell.imageHash, err)
-      }
-    }
-
-    if (!blob) {
-      // nothing to render, we return an empty sprite but log clearly
+    // ─────────────────────────────────────────────
+    // 1. ensure hash exists
+    // ─────────────────────────────────────────────
+    if (!cell.imageHash) {
       this.debug?.warn?.(
         'sprite',
-        `no blob available for cell: name=${cell.name} id=${cell.cellId} hash=${cell.imageHash}`
+        `no imageHash on cell: name=${cell.name} id=${cell.cellId}`
       )
       return sprite
     }
 
+    // ─────────────────────────────────────────────
+    // 2. fastest load: try small first, then large
+    // ─────────────────────────────────────────────
+    let blob: Blob | null = null
+
+    blob = (await this.images.loadSmall(cell.imageHash))!
+
+
+    // ─────────────────────────────────────────────
+    // 3. decode with ImageBitmap (fastest decode)
+    // ─────────────────────────────────────────────
     try {
       const bitmap = await createImageBitmap(blob)
       sprite.texture = Texture.from(bitmap)
-      this.debug?.log?.('sprite', `texture created for cell=${cell.name} id=${cell.cellId}`)
+
+      this.debug?.log?.(
+        'sprite',
+        `texture created for cell=${cell.name} id=${cell.cellId}`
+      )
     } catch (err) {
       this.debug?.error?.('sprite', 'createImageBitmap failed', err)
     }

@@ -1,8 +1,7 @@
 ﻿// file: src/app/models/tile-flags.ts
 
 // NOTE: imports intentionally minimal; let your IDE add/fix as needed.
-import type { Sprite } from "pixi.js"
-import { Cell, EditCell, Hive, NewCell } from "src/app/cells/cell"
+import { Cell, Hive, NewCell } from "src/app/cells/cell"
 import { CellOptions } from "src/app/cells/models/cell-options" // enum of flags
 import { CellEntity } from "src/app/database/model/i-tile-entity"
 
@@ -11,23 +10,6 @@ import { CellEntity } from "src/app/database/model/i-tile-entity"
 // -----------------------------------------------------------
 const maskOf = (
     cell: Cell): number => (cell as any).options() ?? (cell as any).options() ?? 0
-
-// -----------------------------------------------------------
-// blob helpers
-// -----------------------------------------------------------
-export function blobUrlForSprite(blob: Blob, sprite: Sprite): string | null {
-    if (!blob) return null
-
-    const url = URL.createObjectURL(blob)
-
-    const originalDestroy = sprite.destroy.bind(sprite)
-    sprite.destroy = (...args: any[]) => {
-        try { URL.revokeObjectURL(url) } catch { /* ignore revoke errors */ }
-        originalDestroy(...args)
-    }
-
-    return url
-}
 
 // -----------------------------------------------------------
 // id / key helpers
@@ -52,10 +34,6 @@ export function combId(cell: Cell | CellEntity): string {
 
 export function sourceKey(cell: Cell): string {
     return `${cell.hive}-${cell.sourceId}`
-}
-
-export function noImage(cell: Cell): boolean {
-    return !cell.image
 }
 
 // -----------------------------------------------------------
@@ -104,11 +82,9 @@ export function isPathwayTile(cell: Cell): boolean {
 // grouped export for convenience
 // -----------------------------------------------------------
 export const tileFilters = {
-    blobUrlForSprite,
     cacheId,
     combId,
     sourceKey,
-    noImage,
     isHive,
     isPathway,
     isSelected,

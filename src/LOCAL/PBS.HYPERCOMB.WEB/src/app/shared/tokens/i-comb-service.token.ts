@@ -11,7 +11,7 @@ export interface IModifyComb {
     create(params: Partial<NewCell>, kind: CellKind): Promise<Cell>
     deleteAll(cell: Cell, hierarchy: Cell[]): Promise<void>
     bulkPut(dataArray: Cell[])
-    addCell(newCell: NewCell, image:IHiveImage): Promise<Cell>
+    addCell(newCell: NewCell): Promise<Cell>
     updateCell(cell: Cell): Promise<number>
     removeCell(cell: Cell): Promise<void>
 }

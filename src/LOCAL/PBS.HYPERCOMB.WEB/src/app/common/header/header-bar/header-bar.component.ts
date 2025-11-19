@@ -14,6 +14,7 @@ import { ScreenService } from 'src/app/unsorted/utility/screen-service'
 import { HONEYCOMB_SVC } from 'src/app/shared/tokens/i-comb-service.token'
 import { COMB_STORE } from 'src/app/shared/tokens/i-comb-store.token'
 import { CellEditor } from 'src/app/unsorted/hexagons/cell-editor'
+import { CellEditContext } from 'src/app/state/interactivity/cell-edit-context'
 
 @Component({
   standalone: true,
@@ -102,9 +103,9 @@ export class HeaderBarComponent extends HypercombData {
   }
 
   public edit(_: any) {
-    const entry = this.stack.top()!
-    const cell = entry?.cell!
-    this.manager.beginEditing(cell)
+    const cell= this.stack.cell()!
+    const context = new CellEditContext(cell)
+    this.manager.beginEditing(context)
   }
 
   public onFocusChanged(focused: boolean) {

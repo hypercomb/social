@@ -32,17 +32,6 @@ export class TileFactory extends PixiDataServiceBase implements ITileFactory {
         
         const { cellId } = this.stack.top()!
 
-        // clone the blob
-        // ensure blob is set
-        if (!cell.image?.blob) {
-            if (!this.blobCache) {
-                this.blobCache = await this.blob.getInitialBlob()
-            }
-            // cell.image = { ...cell.image, blob: this.blobCache }
-            throw new Error("Cell image blob is missing")
-        }
-
-
         // build the Tile runtime object
         const tile = new Tile(cell)
         tile.eventMode = "static"

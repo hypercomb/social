@@ -52,16 +52,6 @@ export class NewCell extends CellFlags {
   dateDeleted?: string
   updatedAt: string = new Date().toISOString()
 
-  private _image?: IHiveImage
-
-  public set image(value: IHiveImage | undefined) {
-    this._image = value
-  }
-
-  public get image(): IHiveImage | undefined {
-    return this._image
-  }
-
   // misc fields
   backgroundColor = ""
   borderColor = "#222"
@@ -87,7 +77,7 @@ export class NewCell extends CellFlags {
 export class Cell extends NewCell {
   override cellId: number
   hash?: any
-  
+
   constructor(params: Partial<NewCell> & { cellId: number }) {
     super(params)
     if (params.cellId == null) {
@@ -138,13 +128,4 @@ export class Path extends Cell {
     super(params)
     this.setKind("Path")
   }
-}
-
-export class EditCell extends Cell {
-  protected constructor() { 
-    super({ cellId: -1 })
-  }
-  originalImage?: IHiveImage
-  largeImage?: IHiveImage
-  imageDirty?: boolean = false
 }

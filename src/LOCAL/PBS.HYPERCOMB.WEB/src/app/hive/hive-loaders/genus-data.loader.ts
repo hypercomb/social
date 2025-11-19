@@ -56,7 +56,7 @@ export class GenusBootstrapper extends HiveLoaderBase {
       })
       newHive.options.set(CellOptions.Active)
 
-      const created = await this.modify.addCell(newHive, image) as Hive
+      const created = await this.modify.addCell(newHive) as Hive
 
       // ────────────────────────────────────────────────────────
       // 3. create first child cell under the hive
@@ -70,7 +70,7 @@ export class GenusBootstrapper extends HiveLoaderBase {
       })
       firstCell.options.set(CellOptions.Active)
 
-      await this.modify.addCell(firstCell, image)
+      await this.modify.addCell(firstCell)
     }
 
     this.logDataResolution(`GenusBootstrapper bootstrapped hive: ${scout.name}`)

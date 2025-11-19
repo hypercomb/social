@@ -62,7 +62,6 @@ export class HiveLoader extends Hypercomb {
     }
     this.debug.log('lifecycle', '[HiveLoader] calling setHive', { found })
     this.controller.setHive(found)
-    this.carousel.jumpTo(found.hive)
 
     if (!found) {
       this.debug.log('warn', '[HiveLoader] no hive available to activate')

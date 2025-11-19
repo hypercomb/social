@@ -110,7 +110,7 @@ export class GhostTileDirective extends HypercombLayout {
       this.debug.log('layout', `committing ghost at ${newCell.index}`)
 
       g.setKind('Cell')
-      await this.honeycomb.modify.addCell(newCell, newCell.image!)
+      await this.honeycomb.modify.addCell(newCell)
 
       // always remove ghost after commit
       await this.destroyGhost()

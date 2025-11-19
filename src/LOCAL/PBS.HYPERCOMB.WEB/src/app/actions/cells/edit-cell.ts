@@ -3,6 +3,7 @@ import { Injectable, inject } from "@angular/core"
 import { CellPayload } from "../action-contexts"
 import { ActionBase } from "../action.base"
 import { CellEditor } from "src/app/unsorted/hexagons/cell-editor"
+import { CellEditContext } from "src/app/state/interactivity/cell-edit-context"
 
 
 @Injectable({ providedIn: "root" })
@@ -22,8 +23,8 @@ export class EditTileAction extends ActionBase<CellPayload> {
   }
 
   public run = async (payload: CellPayload): Promise<void> => {
-    const image = await this.images.getBaseImage(payload.cell)
-    payload.cell.image = image
-    this.manager.beginEditing(payload.cell)
+    const context = new CellEditContext(payload.cell)
+    context.originalSmall = await this.images.getBaseImage(payload.cell)
+    this.manager.beginEditing(context)
   }
 }

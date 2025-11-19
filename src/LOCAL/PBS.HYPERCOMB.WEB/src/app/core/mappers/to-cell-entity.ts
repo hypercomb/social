@@ -5,7 +5,7 @@ import { safeDate } from "./to-cell"
 
 export function toCellEntity(cell: Cell | NewCell): CellEntity {
 
-  return {
+  const entity = {
     // ───────────────────────────────────────
     // identity
     // ───────────────────────────────────────
@@ -36,16 +36,7 @@ export function toCellEntity(cell: Cell | NewCell): CellEntity {
     y: cell.y ?? 0,
     backgroundColor: cell.backgroundColor ?? "",
     borderColor: cell.borderColor ?? "",
-
-    // ───────────────────────────────────────
-    // 🔥 canonical image identity
-    // never store Dexie IDs anymore
-    // ───────────────────────────────────────
-    imageHash: cell.imageHash,       // string | undefined
-
-    // ───────────────────────────────────────
-    // options & derived flags
-    // ───────────────────────────────────────
+    imageHash: cell.imageHash,
     options: cell.options(),
 
     isActive:   (cell.options() & CellOptions.Active) !== 0,
@@ -55,4 +46,6 @@ export function toCellEntity(cell: Cell | NewCell): CellEntity {
     ignoreBackground: (cell.options() & CellOptions.IgnoreBackground) !== 0,
     isLocked:   (cell.options() & CellOptions.Locked) !== 0,
   }
+
+  return entity
 }

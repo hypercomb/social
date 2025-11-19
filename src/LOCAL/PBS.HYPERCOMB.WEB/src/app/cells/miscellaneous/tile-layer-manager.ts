@@ -2,7 +2,7 @@
 import { Container, Graphics, RenderTexture, Sprite, Texture, WebGLRenderer } from 'pixi.js'
 import { HypercombMode } from 'src/app/core/models/enumerations'
 import { PixiServiceBase } from 'src/app/pixi/pixi-service-base'
-import { isSelected, noImage } from '../models/cell-filters'
+import { isSelected } from '../models/cell-filters'
 import { BackgroundGraphic } from 'src/app/user-interface/sprite-components/background-graphic-sprite'
 import { BorderColorSprite } from 'src/app/user-interface/sprite-components/border-color-sprite'
 import { BranchOverlaySprite } from 'src/app/user-interface/sprite-components/branch-overlay-sprite'
@@ -54,17 +54,15 @@ export class TileLayerManager extends PixiServiceBase {
   ): Promise<(Sprite | Graphics)[]> => {
     try {
       const focused = this.state.hasMode(HypercombMode.Focused)
-      const hasNoImgFlag = noImage(cell)
 
       // removed `.valid` to satisfy TS typings
       const imageValid =
         !!imageSprite &&
-        !!imageSprite.texture &&
-        !hasNoImgFlag
+        !!imageSprite.texture
 
       this.debug.log(
         'tiles',
-        `getLayers: cell=${cell.name} id=${cell.cellId} focused=${focused} hasNoImg=${hasNoImgFlag} imageValid=${imageValid}`
+        `getLayers: cell=${cell.name} id=${cell.cellId} focused=${focused} imageValid=${imageValid}`
       )
 
       const bg = this.getBackgroundVisual(cell)

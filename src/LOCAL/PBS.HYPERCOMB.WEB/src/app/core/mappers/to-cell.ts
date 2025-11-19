@@ -32,6 +32,8 @@ export function toCell(entity: CellEntity): Cell | NewCell {
 
     sourcePath: entity.sourcePath,
     etag: entity.etag,
+
+    // ✔ runtime-only fallback (never persisted)
   }
 
   // ─────────────────────────────
@@ -44,9 +46,7 @@ export function toCell(entity: CellEntity): Cell | NewCell {
     return cell
   }
 
-  // ─────────────────────────────
-  // B. Persisted Cell
-  // ─────────────────────────────
+
   const cell = new Cell({ ...base, cellId: entity.cellId })
   cell.setKind(entity.kind ?? "Cell")
 

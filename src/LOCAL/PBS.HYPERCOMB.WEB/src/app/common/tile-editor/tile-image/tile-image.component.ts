@@ -7,15 +7,14 @@ import { TileLayerManager } from 'src/app/cells/miscellaneous/tile-layer-manager
 import { Settings } from 'src/app/unsorted/settings'
 import { ImageSprite } from 'src/app/user-interface/sprite-components/image-sprite'
 import { MaskComponent } from 'src/app/user-interface/sprite-components/mask-component'
-import { noImage } from 'src/app/cells/models/cell-filters'
 import { DragAndDropDirective } from 'src/app/core/directives/drag-and-drop-directive'
 import { BlobService } from 'src/app/hive/rendering/blob-service'
 import { Component, OnDestroy, ViewChild, ElementRef, inject, signal, effect, HostListener } from '@angular/core'
-import { EditCell } from 'src/app/cells/cell'
 import { DebugService } from 'src/app/core/diagnostics/debug-service'
 import { ImageCaptureManager } from './image-capture-manager'
 import { Events } from 'src/app/helper/events/events'
 import { EditImageSprite } from 'src/app/user-interface/sprite-components/edit-image-sprite'
+import { Cell } from 'src/app/cells/cell'
 
 @Component({
   standalone: true,
@@ -36,7 +35,6 @@ export class TileImageComponent implements OnDestroy {
   private readonly manager = inject(ImageCaptureManager)
   private readonly debug = inject(DebugService)
 
-  public noImage = noImage
   public placeholderActive = signal(false)
 
   private pixiApp = new Application()
@@ -47,34 +45,12 @@ export class TileImageComponent implements OnDestroy {
   private dragStart = { x: 0, y: 0 }
   private sprite: Sprite | undefined = undefined
 
-  private transformPersistTimer?: number
-  private readonly transformPersistDelay = 300
-
-  // -------------------------------------------------------------
-  // ensure working small image exists (always in-memory)
-  // -------------------------------------------------------------
-  private ensureSmall = (): IHiveImage => {
-    const cell = this.es.context() as EditCell | null
-    if (!cell) throw new Error('no cell in context')
-
-    if (!cell.image) {
-      cell.image = {
-        imageHash: cell.imageHash ?? '',
-        blob: BlobService.defaultBlob,
-        x: 0,
-        y: 0,
-        scale: 1,
-      }
-    }
-
-    return cell.image
-  }
-
   // -------------------------------------------------------------
   // sync transforms back into EditCell model
   // -------------------------------------------------------------
   private syncTransformsToModel = (): void => {
-    const cell = this.es.context() as EditCell | null
+    const context = this.es.context()! 
+    const cell = this.es.cell()  
     const s = this.sprite
     if (!cell || !s) return
 
@@ -88,23 +64,26 @@ export class TileImageComponent implements OnDestroy {
       this.baseImage.scale = scale
     }
 
-    if (cell.largeImage) {
-      cell.largeImage.x = x
-      cell.largeImage.y = y
-      cell.largeImage.scale = scale
+    const image = context?.originalLarge!
+    if (image) {
+      image.x = x
+      image.y = y
+      image.scale = scale
     }
 
-    cell.imageDirty = true
+    context.imageDirty = true
   }
 
   // -------------------------------------------------------------
   // ctor
   // -------------------------------------------------------------
   constructor() {
+    const context = this.es.context()!
     // drag-and-drop image replacement
     document.addEventListener(Events.DirectImageDrop, async (event: any) => {
       const blob = event.detail.Blob as Blob
-      const cell = this.es.context() as EditCell | null
+
+      const cell = this.es.cell()
       if (!cell) return
 
       const newImage: IHiveImage = {
@@ -115,8 +94,8 @@ export class TileImageComponent implements OnDestroy {
         scale: 1,
       }
 
-      cell.largeImage = newImage
-      cell.imageDirty = true
+      context.originalLarge = newImage
+      context.imageDirty = true
       this.baseImage = newImage
 
       await this.renderLayers(cell, new Container())
@@ -129,8 +108,7 @@ export class TileImageComponent implements OnDestroy {
       const branch = this.es.branchTile()
 
       if (border || background || branch) {
-        const cell = this.es.context() as EditCell
-        if (cell) this.renderLayers(cell, new Container())
+        if (context) this.renderLayers(context.cell, new Container())
         this.es.reset()
       }
     })
@@ -139,13 +117,11 @@ export class TileImageComponent implements OnDestroy {
     effect((onCleanup) => {
       let canceled = false
       onCleanup(() => (canceled = true))
-
+      const cell = context.cell
       ;(async () => {
-        const cell = this.es.context() as EditCell | null
         if (!cell) return
 
-        this.ensureSmall()
-        this.baseImage = cell.largeImage ? { ...cell.largeImage } : undefined
+        this.baseImage = context.modifiedLarge? { ...context.modifiedLarge } : undefined
 
         if (!this.initialized) {
           const { width, height } = this.settings.hexagonDimensions
@@ -176,52 +152,52 @@ export class TileImageComponent implements OnDestroy {
   // -------------------------------------------------------------
   // rendering
   // -------------------------------------------------------------
-  public renderLayers = async (cell: EditCell, container: Container): Promise<void> => {
+  public renderLayers = async (cell: Cell, container: Container): Promise<void> => {
     this.container = container
 
     const baseImage = this.baseImage
+    throw new Error('Method not implemented.');
+    // if (!baseImage && !cell.blob) {
+    //   this.sprite = undefined
+    //   return
+    // }
 
-    if (!baseImage && !cell.image?.blob) {
-      this.sprite = undefined
-      return
-    }
+    // const { width, height } = this.settings.hexagonDimensions
 
-    const { width, height } = this.settings.hexagonDimensions
+    // container.removeChildren()
+    // container.eventMode = 'dynamic'
+    // container.cursor = 'move'
+    // container.hitArea = new Rectangle(0, 0, width, height)
+    // container.off('pointerdown', this.onPointerDown).on('pointerdown', this.onPointerDown)
 
-    container.removeChildren()
-    container.eventMode = 'dynamic'
-    container.cursor = 'move'
-    container.hitArea = new Rectangle(0, 0, width, height)
-    container.off('pointerdown', this.onPointerDown).on('pointerdown', this.onPointerDown)
+    // const sprite = baseImage
+    //   ? await this.editImageSprite.build(baseImage)
+    //   : await this.imageSprite.build(cell)
 
-    const sprite = baseImage
-      ? await this.editImageSprite.build(baseImage)
-      : await this.imageSprite.build(cell)
+    // sprite.anchor.set(0.5)
 
-    sprite.anchor.set(0.5)
+    // const layers = await this.layers.getLayers(cell, sprite)
+    // for (const layer of layers) container.addChild(layer)
 
-    const layers = await this.layers.getLayers(cell, sprite)
-    for (const layer of layers) container.addChild(layer)
+    // container.sortChildren()
 
-    container.sortChildren()
+    // this.sprite = sprite
+    // sprite.x = (baseImage?.x ?? 0) + this.settings.hexagonOffsetX
+    // sprite.y = (baseImage?.y ?? 0) + this.settings.hexagonOffsetY
+    // sprite.scale.set(baseImage?.scale ?? 1)
 
-    this.sprite = sprite
-    sprite.x = (baseImage?.x ?? 0) + this.settings.hexagonOffsetX
-    sprite.y = (baseImage?.y ?? 0) + this.settings.hexagonOffsetY
-    sprite.scale.set(baseImage?.scale ?? 1)
+    // const mask = await this.mask.build()
+    // mask.x = width / 2
+    // mask.y = height / 2
+    // ;(mask as any).eventMode = 'none'
 
-    const mask = await this.mask.build()
-    mask.x = width / 2
-    mask.y = height / 2
-    ;(mask as any).eventMode = 'none'
+    // container.mask = mask as Sprite
+    // container.addChild(mask)
 
-    container.mask = mask as Sprite
-    container.addChild(mask)
+    // this.pixiApp.stage.addChild(container)
+    // await this.manager.setContainer(container)
 
-    this.pixiApp.stage.addChild(container)
-    await this.manager.setContainer(container)
-
-    this.es.rendered.set(true)
+    // this.es.rendered.set(true)
   }
 
   // -------------------------------------------------------------
