@@ -14,13 +14,12 @@ export class ImageSprite extends BaseSpriteBuilder<Cell> {
     sprite.zIndex = 1
     sprite.label = ImageSprite.name
 
+    let blob = cell.image?.blob
     // debug: show basic info
     this.debug?.log?.(
       'sprite',
-      `image sprite build start: name=${cell.name} id=${cell.cellId} hash=${cell.imageHash} hasBlob=${!!cell.blob}`
+      `image sprite build start: name=${cell.name} id=${cell.cellId} hash=${cell.imageHash} hasBlob=${!!blob}`
     )
-
-    let blob = cell.blob
 
     // if we don't have a blob, try to hydrate from opfs via hash
     if (!blob && cell.imageHash) {
@@ -30,7 +29,6 @@ export class ImageSprite extends BaseSpriteBuilder<Cell> {
         blob = small ?? large ?? undefined
 
         if (blob) {
-          cell.blob = blob
           this.debug?.log?.('sprite', `loaded blob from opfs for hash=${cell.imageHash}`)
         } else {
           this.debug?.warn?.('sprite', `no image found in opfs for hash=${cell.imageHash}`)

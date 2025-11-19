@@ -181,7 +181,7 @@ export class TileImageComponent implements OnDestroy {
 
     const baseImage = this.baseImage
 
-    if (!baseImage && !cell.blob) {
+    if (!baseImage && !cell.image?.blob) {
       this.sprite = undefined
       return
     }

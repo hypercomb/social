@@ -34,11 +34,12 @@ export class TileFactory extends PixiDataServiceBase implements ITileFactory {
 
         // clone the blob
         // ensure blob is set
-        if (!cell.blob) {
+        if (!cell.image?.blob) {
             if (!this.blobCache) {
                 this.blobCache = await this.blob.getInitialBlob()
             }
-            cell.blob = this.blobCache
+            // cell.image = { ...cell.image, blob: this.blobCache }
+            throw new Error("Cell image blob is missing")
         }
 
 

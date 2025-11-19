@@ -68,7 +68,7 @@ export class HierarchyRestorationService extends HypercombData {
             const blobs = await Promise.all(restorableList.map(r => this.blobService.fetchImageAsBlob(r.sourcePath!)))
 
             blobs.forEach((blob, index) => {
-                restorableList[index].newItem!.blob = blob
+                restorableList[index].newItem!.image!.blob = blob
             })
 
             const dataArray = <Cell[]>restorableList.map(r => r.newItem)

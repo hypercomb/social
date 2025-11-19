@@ -52,13 +52,10 @@ export class NewCell extends CellFlags {
   dateDeleted?: string
   updatedAt: string = new Date().toISOString()
 
-  // always returns something (real blob or placeholder)
-  private _blob: Blob | undefined = undefined
   private _image?: IHiveImage
 
   public set image(value: IHiveImage | undefined) {
     this._image = value
-    this._blob = undefined // invalidate cache whenever image changes
   }
 
   public get image(): IHiveImage | undefined {
@@ -90,8 +87,7 @@ export class NewCell extends CellFlags {
 export class Cell extends NewCell {
   override cellId: number
   hash?: any
-    blob: any
-
+  
   constructor(params: Partial<NewCell> & { cellId: number }) {
     super(params)
     if (params.cellId == null) {

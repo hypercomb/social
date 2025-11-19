@@ -3,7 +3,6 @@ import { Texture, RenderTexture, Assets } from "pixi.js"
 import { PixiDataServiceBase } from "src/app/database/pixi-data-service-base"
 import { Cell } from "src/app/cells/cell"
 import { TileLayerManager } from "src/app/cells/miscellaneous/tile-layer-manager"
-import { blobUrl } from "src/app/cells/models/cell-filters"
 import { HypercombState } from 'src/app/state/core/hypercomb-state'
 import { ITextureProvider } from "./i-texture-provider"
 @Injectable({
@@ -16,7 +15,7 @@ export class RenderTextureProvider extends PixiDataServiceBase implements ITextu
     private readonly hs = inject(HypercombState)
 
     public available(cell: Cell): boolean {
-        return !!blobUrl(cell)
+        return !!cell.image
     }
 
     public async getTexture(cell: Cell): Promise<Texture | RenderTexture | undefined> {

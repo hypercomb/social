@@ -1,6 +1,5 @@
 ﻿import { Injectable } from "@angular/core"
 import { Cell, CellKind } from "src/app/cells/cell"
-import { isBlobImage } from "src/app/cells/models/cell-filters"
 import { Constants, LocalAssets } from "src/app/unsorted/constants"
 
 @Injectable({ providedIn: "root" })
@@ -41,20 +40,6 @@ export class BlobService {
 
   public static getPlaceholder(kind?: CellKind): Blob {
     return BlobService.placeholders.get(kind ?? "Cell") ?? BlobService.defaultBlob
-  }
-
-
-  // get the effective blob for a cell (lazy fetch if needed)
-  public async getBlob(cell: Cell): Promise<Blob | undefined> {
-    if (cell.kind == 'Clipboard' && !isBlobImage(cell) && cell.sourcePath) {
-      return this.fetchFromPath(cell.sourcePath)
-    }
-
-    if (cell.sourcePath && !cell.image?.blob) {
-      return this.fetchFromPath(cell.sourcePath)
-    }
-
-    return cell.image?.blob
   }
 
   // fetch from path (assets, http, relative)

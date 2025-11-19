@@ -15,10 +15,10 @@ const maskOf = (
 // -----------------------------------------------------------
 // blob helpers
 // -----------------------------------------------------------
-export function blobUrlForSprite(cell: Cell, sprite: Sprite): string | null {
-    if (!cell.blob) return null
+export function blobUrlForSprite(blob: Blob, sprite: Sprite): string | null {
+    if (!blob) return null
 
-    const url = URL.createObjectURL(cell.blob)
+    const url = URL.createObjectURL(blob)
 
     const originalDestroy = sprite.destroy.bind(sprite)
     sprite.destroy = (...args: any[]) => {
@@ -27,10 +27,6 @@ export function blobUrlForSprite(cell: Cell, sprite: Sprite): string | null {
     }
 
     return url
-}
-
-export function blobUrl(cell: Cell): string | null {
-    return cell.blob ? URL.createObjectURL(cell.blob) : null
 }
 
 // -----------------------------------------------------------
@@ -58,15 +54,8 @@ export function sourceKey(cell: Cell): string {
     return `${cell.hive}-${cell.sourceId}`
 }
 
-// -----------------------------------------------------------
-// blob state
-// -----------------------------------------------------------
-export function isBlobImage(cell: Cell): boolean {
-    return !!cell.blob
-}
-
 export function noImage(cell: Cell): boolean {
-    return !cell.image?.blob
+    return !cell.image
 }
 
 // -----------------------------------------------------------
@@ -115,12 +104,10 @@ export function isPathwayTile(cell: Cell): boolean {
 // grouped export for convenience
 // -----------------------------------------------------------
 export const tileFilters = {
-    blobUrl,
     blobUrlForSprite,
     cacheId,
     combId,
     sourceKey,
-    isBlobImage,
     noImage,
     isHive,
     isPathway,

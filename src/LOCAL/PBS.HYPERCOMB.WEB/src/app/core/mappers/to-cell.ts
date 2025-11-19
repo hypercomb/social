@@ -32,10 +32,6 @@ export function toCell(entity: CellEntity): Cell | NewCell {
 
     sourcePath: entity.sourcePath,
     etag: entity.etag,
-
-    // ✔ runtime-only fallback (never persisted)
-    // handy for first-load before hashing
-    blob: entity.blob,
   }
 
   // ─────────────────────────────
