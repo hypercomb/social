@@ -1,24 +1,32 @@
-<!-- src/app/common/footer-controls/mobile-view/mobile-view.component.html -->
 <div class="mobile-controls">
   <div class="control-bar mobile">
+    
     <!-- back -->
-    <span class="icon" id="back" (click)="goBack($event)" data-tooltip="back">
+    <span
+      class="icon"
+      id="back"
+      (click)="goBack($event)"
+      data-tooltip="back">
       B
     </span>
 
-    <!-- center button -->
-    <span class="icon" id="center" (click)="center()" data-tooltip="center">
+    <!-- center -->
+    <span
+      class="icon center-icon"
+      id="center"
+      (click)="center()"
+      data-tooltip="center">
       (
     </span>
 
     <!-- fullscreen -->
     <span
-      class="icon fullscreen"
+      class="icon"
       id="fullscreen"
       (click)="fullscreen()"
-      data-tooltip="fullscreen"
-    >
+      data-tooltip="fullscreen">
       '
     </span>
+
   </div>
 </div>
