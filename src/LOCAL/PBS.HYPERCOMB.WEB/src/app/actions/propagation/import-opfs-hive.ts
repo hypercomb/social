@@ -37,7 +37,7 @@ export class ImportOpfsHiveAction extends ActionBase<ImportHivePayload> {
         return
       }
 
-      await this.importer.importDirect(loaded.file)
+      await this.importer.importDirect(hiveName, loaded.file)
       const end = performance.now()
       this.debug.log("import", `✅ hive '${hiveName}' imported in ${(end - start).toFixed(2)} ms`)
     } catch (err) {

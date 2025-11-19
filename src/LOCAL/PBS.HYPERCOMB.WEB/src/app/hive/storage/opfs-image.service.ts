@@ -18,12 +18,18 @@ export class OpfsImageService {
 
   // sha-256
   public async hashName(blob: Blob): Promise<string> {
-    const buf = await blob.arrayBuffer()
-    const hash = await crypto.subtle.digest("SHA-256", buf)
-    const name = Array.from(new Uint8Array(hash))
-      .map(b => b.toString(16).padStart(2, "0"))
-      .join("")
-    return `${name}.${blob.type.split("/")[1] || "webp"}`
+    try {
+      const buf = await blob.arrayBuffer()
+      const hash = await crypto.subtle.digest("SHA-256", buf)
+      const name = Array.from(new Uint8Array(hash))
+        .map(b => b.toString(16).padStart(2, "0"))
+        .join("")
+      return `${name}.${blob.type.split("/")[1] || "webp"}`
+    }
+    catch (err) {
+      return 'invalid-image-name'
+    }
+
   }
 
   public async saveSmall(name: string, blob: Blob): Promise<void> {

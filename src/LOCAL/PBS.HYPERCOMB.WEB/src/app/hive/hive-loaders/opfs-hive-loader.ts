@@ -33,7 +33,7 @@ export class OpfsHiveLoader extends HiveLoaderBase implements IHiveLoader {
         this.hydration.invalidate()
         const dexie = await this.opfs.loadHive(scout.name)
         this.controller.replace(dexie?.name!, dexie!)
-        await this.importer.importDirect(dexie?.file!)
+        await this.importer.importDirect(dexie?.name!, dexie?.file!)
         
         const hive = await this.query.fetchHive()
         scout.setHive(hive!)

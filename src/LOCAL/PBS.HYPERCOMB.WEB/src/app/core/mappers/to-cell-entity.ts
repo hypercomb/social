@@ -42,7 +42,7 @@ export function toCellEntity(cell: Cell | NewCell): CellEntity {
     // never store Dexie IDs anymore
     // ───────────────────────────────────────
     imageHash: cell.imageHash,       // string | undefined
-    blob: cell.blob,                 // optional fallback (first-load only)
+    blob: 'blob' in cell ? (cell as any).blob : undefined, // optional fallback (first-load only)
 
     // ───────────────────────────────────────
     // options & derived flags

@@ -1,9 +1,11 @@
 // src/app/hive/storage/hive-normalization.service.ts
 import { Injectable, inject } from "@angular/core"
+import { BlobService } from "src/app/hive/rendering/blob-service"
 import { OpfsImageService } from "src/app/hive/storage/opfs-image.service"
 
 @Injectable({ providedIn: "root" })
 export class HiveNormalizationService {
+  private readonly blobsvc = inject(BlobService)
   private readonly images = inject(OpfsImageService)
 
   public async normalize(raw: any): Promise<{
@@ -17,8 +19,9 @@ export class HiveNormalizationService {
 
     for (const row of rows) {
       // legacy blobs – only small images exist at import time
-      if (row.blob instanceof Blob) {
-        const blob = row.blob
+      if (!!row.blob) {
+        const base64 = row.blob
+          const blob =  this.blobsvc.toBlob(base64)! // set the default menu image
         const hash = await this.images.hashName(blob)
 
         smallImages.push({ hash, blob })

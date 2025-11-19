@@ -4,6 +4,7 @@ import { DatabaseService } from "src/app/database/database-service"
 import { DebugService } from "src/app/core/diagnostics/debug-service"
 import { OpfsHiveService } from "src/app/hive/storage/opfs-hive-service"
 import { OpfsImageService } from "src/app/hive/storage/opfs-image.service"
+import { file } from "jszip"
 
 @Injectable({ providedIn: "root" })
 export class DatabaseImportService {
@@ -15,19 +16,20 @@ export class DatabaseImportService {
   // load a hive by name → ensure it's ready → import into Dexie
   public importByName = async (fileName: string): Promise<void> => {
     // auto-promote if needed
-    await this.opfs.ensureHiveReady(fileName)
-
     const hive = await this.opfs.loadHive(fileName)
     if (!hive || !hive.file) {
       this.debug.log("import", `⚠️ opfs hive not found: ${fileName}`)
       return
     }
 
-    await this.importDirect(hive.file)
+    await this.importDirect(fileName, hive.file)
   }
 
   // import a database json blob directly using dexie-export-import
-  public importDirect = async (blob: Blob): Promise<void> => {
+  public importDirect = async (fileName: string, blob: Blob): Promise<void> => {
+    
+    await this.opfs.ensureHiveReady(fileName)
+
     const db = this.database.db()
     if (!db) {
       this.debug.log("import", "❌ database not ready for import")

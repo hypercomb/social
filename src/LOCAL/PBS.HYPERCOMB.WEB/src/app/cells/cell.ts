@@ -65,17 +65,6 @@ export class NewCell extends CellFlags {
     return this._image
   }
 
-  get blob(): Blob | undefined {
-    if (this._image?.blob) {
-      this._blob = this._image.blob
-    }
-    return this._blob
-  }
-
-  set blob(value: Blob) {
-    this._blob = value
-  }
-
   // misc fields
   backgroundColor = ""
   borderColor = "#222"
@@ -101,6 +90,7 @@ export class NewCell extends CellFlags {
 export class Cell extends NewCell {
   override cellId: number
   hash?: any
+    blob: any
 
   constructor(params: Partial<NewCell> & { cellId: number }) {
     super(params)
