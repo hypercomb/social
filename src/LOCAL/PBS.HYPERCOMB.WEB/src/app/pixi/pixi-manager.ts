@@ -19,6 +19,7 @@ export class PixiManager {
   private readonly axials = inject(AxialService)
   private readonly screen = inject(ScreenService)
   private readonly settings = inject(Settings)
+
   // global app + container (created once)
   private _app: Application = g.__PIXI_APP__ ?? (g.__PIXI_APP__ = new Application())
   private _container: Container = g.__PIXI_CONTAINER__ ?? (g.__PIXI_CONTAINER__ = new Container())
@@ -55,11 +56,11 @@ export class PixiManager {
   }
 
   constructor() {
-    // reactively center on resize
+    // recenter stage when window size changes
     effect(() => {
       const size = this.screen.windowSize()
       if (this._ready()) {
-      this.setStageCenter()
+        this.setStageCenter()
       }
     })
   }
@@ -78,30 +79,42 @@ export class PixiManager {
         })
       }
 
-      // make sure our container is staged once
+      // ensure container is added once
       if (!this._container.parent) {
         this._app.stage.addChild(this._container)
       }
 
-      // initial center
+      // initial stage centering
       this.setStageCenter()
 
-      // attach canvas once
+      // attach canvas to host once
       const canvas = this._app.canvas as HTMLCanvasElement
       if (!canvas.isConnected) {
         canvas.style.touchAction = 'none'
         canvas.style.userSelect = 'none'
         host.appendChild(canvas)
+
+        // -------------------------------------------------
+        // fullscreen trigger on first user gesture
+        // this is guaranteed to fire because pixi canvas
+        // always receives the first pointer interaction
+        // -------------------------------------------------
+        canvas.addEventListener(
+          'pointerdown',
+          () => this.screen.goFullscreen(),
+          { once: true }
+        )
       }
 
       this._ready.set(this._app)
       return this._app
     })()
-      ; (<any>window).app = this._app // debug hook
+
+    ;(window as any).app = this._app // debug hook
     return this._initPromise
   }
 
-  // convenience: wait until ready
+  // wait until ready
   public whenReady = async (): Promise<Application> => {
     if (this._ready()) return this._ready()!
     return this.initialize()

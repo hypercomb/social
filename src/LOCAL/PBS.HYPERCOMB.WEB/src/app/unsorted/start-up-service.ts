@@ -63,6 +63,7 @@ import { OpfsBackupService } from '../actions/propagation/opfs-backup.service'
 import { MousewheelZoomService } from '../pixi/mousewheel-zoom-service'
 import { TouchZoomService } from '../pixi/touch-zoom-service'
 import { CopyAction } from '../actions/clipboard/copy-honeycomb'
+import { CloseExternalAction } from '../actions/navigation/close-external'
 
 
 @Injectable({ providedIn: 'root' })
@@ -103,10 +104,12 @@ export class StartUpService {
     inject(TilePointerManager),
 
     // actions
+    
     inject(BackHiveAction),
     inject(BranchAction),
     inject(CenterHiveAction),
     inject(ChangeModeAction),
+    inject(CloseExternalAction),
     inject(CopyAction),
     inject(DeleteCellsAction),
     inject(EditTileAction),

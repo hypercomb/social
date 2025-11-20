@@ -5,6 +5,7 @@ import { PointerState } from "src/app/state/input/pointer-state"
 import { PayloadBase, hasEvent } from "../action-contexts"
 import { HIVE_HYDRATION } from "src/app/shared/tokens/i-comb-service.token"
 import { PanningManager } from "src/app/pixi/panning-manager"   // ⬅️ add this
+import { CloseExternalAction } from "./close-external"
 
 @Injectable({ providedIn: "root" })
 export class BackHiveAction extends ActionBase<PayloadBase> {
@@ -37,6 +38,6 @@ export class BackHiveAction extends ActionBase<PayloadBase> {
     this.combstore.invalidate()
     this.hydration.reset()
     this.stack.pop()
-    this.menu.hide()
+    await this.registry.invoke(CloseExternalAction.ActionId)
   }
 }
