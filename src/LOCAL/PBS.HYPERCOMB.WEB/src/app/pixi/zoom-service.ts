@@ -2,8 +2,6 @@
 import { Point } from 'pixi.js'
 import { LayoutState } from '../layout/layout-state'
 import { PixiDataServiceBase } from '../database/pixi-data-service-base'
-import { Subject } from 'rxjs'
-import { debounceTime } from 'rxjs/operators'
 
 @Injectable({ providedIn: 'root' })
 export class ZoomService extends PixiDataServiceBase {
@@ -14,6 +12,15 @@ export class ZoomService extends PixiDataServiceBase {
   private targetScale: number | null = null
   private rafId: number | null = null
   private readonly ease = 0.15
+  private _wheelSpeed = 1.25
+
+  public get wheelSpeed(): number {
+    return this._wheelSpeed
+  }
+
+  public set wheelSpeed(value: number) {
+    this._wheelSpeed = Math.max(1.001, value)
+  }
 
   private canZoom(): boolean {
     return true
@@ -83,13 +90,13 @@ export class ZoomService extends PixiDataServiceBase {
   }
 
   public zoomIn(position: { x: number; y: number }) {
-    const f = 1.05
+    const f = this._wheelSpeed
     this.debug.log('zoom', `zoomIn factor=${f} pivot=`, position)
     this.applyZoom(f, position)
   }
 
   public zoomOut(position: { x: number; y: number }) {
-    const f = 1 / 1.05
+    const f = 1 / this._wheelSpeed
     this.debug.log('zoom', `zoomOut factor=${f} pivot=`, position)
     this.applyZoom(f, position)
   }

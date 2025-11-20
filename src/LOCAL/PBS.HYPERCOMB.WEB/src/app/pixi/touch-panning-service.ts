@@ -52,4 +52,12 @@ export class TouchPanningService extends PanningServiceBase {
       }
     })
   }
+
+  public resumeAfterPinch(position: { x: number; y: number }): void {
+    if (!this.isEnabled()) return
+    if (this.anchored) return
+    this.startAnchorAt(position.x, position.y)
+    this.dragThresholdReached = true
+    this.beginPan()
+  }
 }
