@@ -3,12 +3,12 @@ import { Hypercomb } from "src/app/core/mixins/abstraction/hypercomb.base"
 import { RenderScheduler } from "src/app/core/controller/render-scheduler"
 import { environment } from "src/environments/environment"
 import { PixiManager } from "src/app/pixi/pixi-manager"
-import { StartUpService } from "src/app/unsorted/start-up-service"
+import { StartUpService } from "src/app/core/start-up-service"
 import { WheelState } from "../mouse/wheel-state"
 import { PointerState } from "src/app/state/input/pointer-state"
 import { ImageService } from "src/app/database/images/image-service"
-import { WakeupService } from "src/app/unsorted/wake-up-service"
 import { AxialService } from "src/app/services/axial-service"
+import { WakeupService } from "src/app/core/wake-up-service"
 
 if (!environment.production) {
   // Dexie.delete('Database')

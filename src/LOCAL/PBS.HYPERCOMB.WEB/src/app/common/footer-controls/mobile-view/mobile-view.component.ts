@@ -13,6 +13,12 @@ import { ScreenService } from 'src/app/services/screen-service'
   styleUrls: ['./mobile-view.component.scss']
 })
 export class MobileViewComponent extends Hypercomb {
+list() {
+throw new Error('Method not implemented.')
+}
+home() {
+throw new Error('Method not implemented.')
+}
   private readonly screen = inject(ScreenService)
   private readonly centersvc = inject(CenterTileService)
   private readonly registry = inject(ACTION_REGISTRY)
