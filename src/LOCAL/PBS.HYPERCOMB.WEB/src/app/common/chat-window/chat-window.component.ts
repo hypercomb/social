@@ -5,6 +5,7 @@ import { environment } from 'src/environments/environment'
 import { HypercombMode } from '../../core/models/enumerations'
 import { HypercombData } from 'src/app/actions/hypercomb-data'
 import { HierarchyService } from 'src/app/services/hiearchy-service'
+import { AiListQuery } from 'src/app/ai/ai-list-query'
 
 interface ChatMessage {
   content: string
@@ -82,40 +83,62 @@ export class ChatWindowComponent extends HypercombData implements OnInit, OnDest
 
   // Delegates tile creation to AiService
 
+  // Inside ChatWindowComponent — replace your sendMessage() with this:
+
   public async sendMessage() {
     if (!this.newMessage.trim()) return
 
+    const userInput = this.newMessage.trim()
+    this.messages.push({ content: userInput, isUser: true })
 
-    // get the hierarchy to give to the AI.
-    const tiles  = []
-    const hierarchy = this.hierarchyService.toStringHierarchy(tiles)
+    // 1. Build current hierarchy string for context
+    const rootTiles: any[] = []
+    // const hierarchyContext = this.hierarchyService.toStringHierarchy(rootTiles)
 
-    this.debug.log('misc', 'Hierarchy:', hierarchy)
+    // this.debug.log('misc', 'Sending hierarchy context to AI:', hierarchyContext)
 
-    this.messages.push({ content: this.newMessage, isUser: true })
+    // 2. Append to messages so AI sees full context
+    this.messages.push({
+      content: 'Thinking...',
+      isUser: false
+    })
 
     try {
-      // await this.aiService.handleTileCreation(this.newMessage)
+      // Use your existing AiListQuery service (injected or via DI)
+      const aiQuery = inject(AiListQuery)  // Angular 14+ inject() works in methods too
 
-      // this.messages.push({
-      //   content: 'Tiles have been added to the hive.',
-      //   isUser: false,
-      // })
-      throw new Error('Not implemented yet.')
-    } catch (error) {
-      console.error('Error processing message:', error)
-      let errorMessage = 'Sorry, I encountered an error processing your request.'
-      if (error instanceof Error && error.message.includes('LM Studio')) {
-        errorMessage = error.message
-      } else {
-        errorMessage += ' Please try again.'
+      // Call it — it will:
+      // - Send prompt + hierarchy context to LM Studio
+      // - Get back clean list
+      // - Auto-create child cells under the currently active/hovered cell
+      const generatedItems = await aiQuery.query(userInput + ' (use current hierarchy as parent)')
+
+      // Update the "Thinking..." message
+      this.messages[this.messages.length - 1] = {
+        content: generatedItems.length
+          ? `Added ${generatedItems.length} new items as children:\n• ${generatedItems.join('\n• ')}`
+          : 'No valid items were generated.',
+        isUser: false
       }
-      this.messages.push({ content: errorMessage, isUser: false })
+
+    } catch (error: any) {
+      console.error('AI Query failed:', error)
+
+      let msg = 'Sorry, something went wrong.'
+      if (error.message?.includes('fetch') || error.message?.includes('NetworkError')) {
+        msg = 'Cannot reach LM Studio. Is the local server running on port 1234?'
+      } else if (error.message?.includes('LM Studio')) {
+        msg = error.message
+      }
+
+      this.messages[this.messages.length - 1] = {
+        content: msg,
+        isUser: false
+      }
+    } finally {
+      this.newMessage = ''
     }
-
-    // this.newMessage = ''
   }
-
   public ngOnDestroy() {
     this.chatwindowRef.nativeElement.removeEventListener('keyup', this.handleKeyup)
   }
