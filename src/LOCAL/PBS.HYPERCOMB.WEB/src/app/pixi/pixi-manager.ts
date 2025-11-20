@@ -1,6 +1,6 @@
 ﻿import { Injectable, Injector, computed, effect, inject, signal } from '@angular/core'
 import { Application, Container, Point, WebGLRenderer } from 'pixi.js'
-import { Settings } from '../unsorted/settings'
+import { Settings } from '../core/settings'
 import { AxialService } from '../services/axial-service'
 import { ScreenService } from '../services/screen-service'
 

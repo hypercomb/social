@@ -4,7 +4,7 @@
 import { Directive, effect, inject } from '@angular/core'
 import { HypercombMode } from '../models/enumerations'
 import { PixiServiceBase } from 'src/app/pixi/pixi-service-base'
-import { ModeChangeService } from 'src/app/unsorted/mode-change-service'
+import { ModeChangeService } from 'src/app/core/directives/mode-change-service'
 
 @Directive({
   standalone: true,

@@ -3,7 +3,7 @@ import { inject, Injectable } from '@angular/core'
 import { firstValueFrom } from 'rxjs'
 import { HiveService } from 'src/app/hive/storage/hive-service'
 import { HypercombState } from 'src/app/state/core/hypercomb-state'
-import { Constants } from 'src/app/unsorted/constants'
+import { Constants } from 'src/app/helper/constants'
 
 
 @Injectable({

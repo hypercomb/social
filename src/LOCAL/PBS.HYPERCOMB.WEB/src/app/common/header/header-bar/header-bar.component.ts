@@ -12,7 +12,7 @@ import { EditorService } from 'src/app/state/interactivity/editor-service'
 import { TouchDetectionService } from 'src/app/core/mobile/touch-detection-service'
 import { HONEYCOMB_SVC } from 'src/app/shared/tokens/i-comb-service.token'
 import { COMB_STORE } from 'src/app/shared/tokens/i-comb-store.token'
-import { CellEditor } from 'src/app/unsorted/hexagons/cell-editor'
+import { CellEditor } from 'src/app/common/tile-editor/cell-editor'
 import { CellEditContext } from 'src/app/state/interactivity/cell-edit-context'
 import { ScreenService } from 'src/app/services/screen-service'
 

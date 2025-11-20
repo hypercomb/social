@@ -4,7 +4,7 @@ import { Router } from "@angular/router"
 import { HypercombMode } from "../../core/models/enumerations"
 import { CellPayload } from "../action-contexts"
 import { ActionBase } from "../action.base"
-import { CellEditor } from "src/app/unsorted/hexagons/cell-editor"
+import { CellEditor } from "src/app/common/tile-editor/cell-editor"
 
 @Injectable({ providedIn: "root" })
 export class ShowHiveAction extends ActionBase<CellPayload>  {

@@ -2,7 +2,7 @@
 import { inject } from "@angular/core"
 import { HypercombData } from "src/app/actions/hypercomb-data"
 import { Cell } from "src/app/cells/cell"
-import { Constants } from "src/app/unsorted/constants"
+import { Constants } from "src/app/helper/constants"
 
 
 

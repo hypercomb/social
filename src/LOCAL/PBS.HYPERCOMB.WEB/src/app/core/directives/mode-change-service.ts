@@ -1,6 +1,6 @@
 ﻿import { Injectable } from "@angular/core"
 import { Subject } from "rxjs"
-import { HypercombMode } from "../core/models/enumerations"
+import { HypercombMode } from "../models/enumerations"
 
 @Injectable({
   providedIn: 'root'

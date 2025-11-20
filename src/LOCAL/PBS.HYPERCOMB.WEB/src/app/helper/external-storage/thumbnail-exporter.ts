@@ -2,7 +2,7 @@
 import { Injectable, inject } from "@angular/core"
 import { firstValueFrom } from "rxjs"
 import { Hypercomb } from "src/app/core/mixins/abstraction/hypercomb.base"
-import { Constants } from "src/app/unsorted/constants"
+import { Constants } from "src/app/helper/constants"
 import { ImageDownloadService } from "./temp-downloader"
 
 @Injectable({

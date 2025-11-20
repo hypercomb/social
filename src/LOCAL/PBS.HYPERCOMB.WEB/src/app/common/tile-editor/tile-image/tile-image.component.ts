@@ -4,7 +4,7 @@ import { Application, Container, Sprite, Rectangle, FederatedPointerEvent } from
 import { IHiveImage } from 'src/app/core/models/i-hive-image'
 import { EditorService } from 'src/app/state/interactivity/editor-service'
 import { TileLayerManager } from 'src/app/cells/miscellaneous/tile-layer-manager'
-import { Settings } from 'src/app/unsorted/settings'
+import { Settings } from 'src/app/core/settings'
 import { ImageSprite } from 'src/app/user-interface/sprite-components/image-sprite'
 import { MaskComponent } from 'src/app/user-interface/sprite-components/mask-component'
 import { DragAndDropDirective } from 'src/app/core/directives/drag-and-drop-directive'

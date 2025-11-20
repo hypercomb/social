@@ -1,6 +1,6 @@
 ﻿import { Injectable, Injector } from "@angular/core"
 import { Container, Sprite } from "pixi.js"
-import { HiveEvents } from "src/app/unsorted/constants"
+import { HiveEvents } from "src/app/helper/constants"
 import { AxialCoordinate } from "src/app/core/models/axial-coordinate"
 import { LayoutState } from "src/app/state/layout-state"
 import { PixiServiceBase } from "../services/pixi/pixi-service-base"

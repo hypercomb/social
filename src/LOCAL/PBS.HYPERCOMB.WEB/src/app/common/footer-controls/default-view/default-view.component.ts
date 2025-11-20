@@ -15,7 +15,7 @@ import { CopyAction } from 'src/app/actions/clipboard/copy-honeycomb'
 import { DeleteCellsAction } from 'src/app/actions/cells/delete-cells'
 import { ChangeModeAction } from 'src/app/actions/modes/change-mode'
 import { CellPayload, ChangeModeContext, CopyPayload, DeletePayload } from 'src/app/actions/action-contexts'
-import { Constants } from 'src/app/unsorted/constants'
+import { Constants } from 'src/app/helper/constants'
 import { PasteClipboardButtonComponent } from '../paste-clipboard-button/paste-clipboard-button.component'
 import { ScreenService } from 'src/app/services/screen-service'
 

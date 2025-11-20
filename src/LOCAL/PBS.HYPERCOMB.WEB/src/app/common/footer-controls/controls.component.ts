@@ -6,7 +6,7 @@ import { Hypercomb } from 'src/app/core/mixins/abstraction/hypercomb.base'
 import { environment } from 'src/environments/environment'
 import { DefaultViewComponent } from './default-view/default-view.component'
 import { MobileViewComponent } from './mobile-view/mobile-view.component'
-import { Constants } from 'src/app/unsorted/constants'
+import { Constants } from 'src/app/helper/constants'
 
 @Component({
   standalone: true,

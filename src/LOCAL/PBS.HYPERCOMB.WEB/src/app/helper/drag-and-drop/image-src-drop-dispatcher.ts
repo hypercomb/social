@@ -3,10 +3,10 @@ import { Injectable, inject } from '@angular/core'
 import { firstValueFrom } from 'rxjs'
 
 import { SerializationService } from 'src/app/database/persistence/serialization-service'
-import { Constants } from 'src/app/unsorted/constants'
+import { Constants } from 'src/app/helper/constants'
 import { IDropDispatcher } from './i-drop-dispatcher'
 import { ImageSourceParser } from './image-element-source-parser'
-import { FileDispatchBase } from 'src/app/unsorted/external/file-drop-base'
+import { FileDispatchBase } from 'src/app/helper/file-drop-base'
 
 @Injectable({ providedIn: 'root' })
 export class ImageSrcDropDispatcher extends FileDispatchBase implements IDropDispatcher {

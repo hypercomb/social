@@ -1,5 +1,5 @@
 ﻿import { Injectable, inject, signal, computed, WritableSignal } from "@angular/core"
-import { Settings } from "src/app/unsorted/settings"
+import { Settings } from "src/app/core/settings"
 
 @Injectable({ providedIn: "root" })
 export class KeyboardState {

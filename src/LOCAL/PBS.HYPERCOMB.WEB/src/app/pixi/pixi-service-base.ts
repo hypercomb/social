@@ -2,7 +2,7 @@
 import { inject, effect } from "@angular/core"
 import { Application } from "pixi.js"
 import { PIXI_MANAGER, IPixiManager } from "../shared/tokens/i-pixi-manager.token"
-import { Settings } from "../unsorted/settings"
+import { Settings } from "../core/settings"
 import { DebugService } from "../core/diagnostics/debug-service"
 import { KeyboardState } from "../interactivity/keyboard/keyboard-state"
 import { HypercombState } from "../state/core/hypercomb-state"

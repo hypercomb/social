@@ -1,8 +1,8 @@
 ﻿import { Injectable } from "@angular/core"
 import { Point } from "pixi.js"
 import { AxialCoordinate } from "src/app/core/models/axial-coordinate"
-import { Constants } from "../unsorted/constants"
-import { Settings } from "../unsorted/settings"
+import { Constants } from "../helper/constants"
+import { Settings } from "../core/settings"
 
 
 export const distance = (a: Point, b: Point): number => {

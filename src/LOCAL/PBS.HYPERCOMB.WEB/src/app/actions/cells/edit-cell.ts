@@ -2,7 +2,7 @@
 import { Injectable, inject } from "@angular/core"
 import { CellPayload } from "../action-contexts"
 import { ActionBase } from "../action.base"
-import { CellEditor } from "src/app/unsorted/hexagons/cell-editor"
+import { CellEditor } from "src/app/common/tile-editor/cell-editor"
 import { CellEditContext } from "src/app/state/interactivity/cell-edit-context"
 
 

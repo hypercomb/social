@@ -1,6 +1,6 @@
 ﻿import { Injectable } from "@angular/core"
 import { Cell, CellKind } from "src/app/cells/cell"
-import { Constants, LocalAssets } from "src/app/unsorted/constants"
+import { Constants, LocalAssets } from "src/app/helper/constants"
 
 @Injectable({ providedIn: "root" })
 export class BlobService {

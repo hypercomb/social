@@ -1,6 +1,6 @@
 ﻿import { Injectable } from "@angular/core"
-import { PathOptions } from "../core/models/path-options"
-import { Constants } from "./constants"
+import { PathOptions } from "./models/path-options"
+import { Constants } from "../helper/constants"
 
 @Injectable({ providedIn: 'root' })
 export class Settings  {

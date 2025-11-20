@@ -4,7 +4,7 @@ import { Container, Assets, Sprite, FederatedPointerEvent, TextStyle, Text, Rect
 import { LayoutState } from "src/app/layout/layout-state"
 import { POLICY } from "src/app/core/models/enumerations"
 import { PixiServiceBase } from "src/app/pixi/pixi-service-base"
-import { LocalAssets } from "src/app/unsorted/constants"
+import { LocalAssets } from "src/app/helper/constants"
 import { LinkNavigationService } from "../link-navigation-service"
 import { PolicyService } from "./policy-service"
 import { Cell } from "src/app/cells/cell"

@@ -1,7 +1,7 @@
 ﻿import { inject } from "@angular/core"
 import { Point } from "pixi.js"
-import { Constants, } from "src/app/unsorted/constants"
-import { Settings } from "src/app/unsorted/settings"
+import { Constants, } from "src/app/helper/constants"
+import { Settings } from "src/app/core/settings"
 
 export class AxialCoordinate {
     private static axialToIndex: Map<number, number> = new Map()
