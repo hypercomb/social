@@ -1,5 +1,5 @@
 ﻿import { Injectable, inject } from '@angular/core'
-import { Point } from 'pixi.js'
+import { isMobile, Point } from 'pixi.js'
 import { LayoutState } from '../layout/layout-state'
 import { PixiDataServiceBase } from '../database/pixi-data-service-base'
 
@@ -12,7 +12,7 @@ export class ZoomService extends PixiDataServiceBase {
   private targetScale: number | null = null
   private rafId: number | null = null
   private readonly ease = 0.15
-  private _wheelSpeed = 1.25
+  private _wheelSpeed = this.state.isMobile? 1.5 : 1.25
 
   public get wheelSpeed(): number {
     return this._wheelSpeed

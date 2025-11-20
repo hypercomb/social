@@ -44,7 +44,7 @@ export class ChatWindowComponent extends HypercombData implements OnInit, OnDest
         content: message,
         isUser: false
       }
-      // this.messages.push(chatMessage)
+      this.messages.push(chatMessage)
     })
   }
 
@@ -85,33 +85,33 @@ export class ChatWindowComponent extends HypercombData implements OnInit, OnDest
 
   public async sendMessage() {
     if (!this.newMessage.trim()) return
-    throw new Error('Not implemented')
+
 
     // get the hierarchy to give to the AI.
-    // const tiles = ???
-    // const hierarchy = this.hierarchyService.toStringHierarchy(tiles)
+    const tiles  = []
+    const hierarchy = this.hierarchyService.toStringHierarchy(tiles)
 
-    // this.debug.log('misc', 'Hierarchy:', hierarchy)
+    this.debug.log('misc', 'Hierarchy:', hierarchy)
 
-    // this.messages.push({ content: this.newMessage, isUser: true })
+    this.messages.push({ content: this.newMessage, isUser: true })
 
-    // try {
-    //   await this.aiService.handleTileCreation(this.newMessage)
+    try {
+      await this.aiService.handleTileCreation(this.newMessage)
 
-    //   this.messages.push({
-    //     content: 'Tiles have been added to the hive.',
-    //     isUser: false,
-    //   })
-    // } catch (error) {
-    //   console.error('Error processing message:', error)
-    //   let errorMessage = 'Sorry, I encountered an error processing your request.'
-    //   if (error instanceof Error && error.message.includes('LM Studio')) {
-    //     errorMessage = error.message
-    //   } else {
-    //     errorMessage += ' Please try again.'
-    //   }
-    //   this.messages.push({ content: errorMessage, isUser: false })
-    // }
+      this.messages.push({
+        content: 'Tiles have been added to the hive.',
+        isUser: false,
+      })
+    } catch (error) {
+      console.error('Error processing message:', error)
+      let errorMessage = 'Sorry, I encountered an error processing your request.'
+      if (error instanceof Error && error.message.includes('LM Studio')) {
+        errorMessage = error.message
+      } else {
+        errorMessage += ' Please try again.'
+      }
+      this.messages.push({ content: errorMessage, isUser: false })
+    }
 
     // this.newMessage = ''
   }
