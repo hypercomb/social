@@ -6,13 +6,15 @@ import { PayloadBase, hasEvent } from "../action-contexts"
 import { HIVE_HYDRATION } from "src/app/shared/tokens/i-comb-service.token"
 import { PanningManager } from "src/app/pixi/panning-manager"   // ⬅️ add this
 import { CloseExternalAction } from "./close-external"
+import { CarouselService } from "src/app/common/carousel-menu/carousel-service"
 
 @Injectable({ providedIn: "root" })
 export class BackHiveAction extends ActionBase<PayloadBase> {
   private readonly pointerstate = inject(PointerState)
   private readonly hydration = inject(HIVE_HYDRATION)
   private readonly panning = inject(PanningManager)             // ⬅️ add this
-
+  private readonly carouselsvc = inject(CarouselService)
+  
   public static ActionId = 'hive.back'
   public id = BackHiveAction.ActionId
   public override label = "Back"
@@ -30,14 +32,15 @@ export class BackHiveAction extends ActionBase<PayloadBase> {
   }
 
   public override run = async (): Promise<void> => {
+
+    await this.registry.invoke(CloseExternalAction.ActionId)
+
     // 🔹 Ensure no stale pan/spacebar state survives across hives
     this.panning.getSpacebar().cancelPanSession()
     this.panning.getTouch().cancelPanSession()
-
     this.state.resetMode
     this.combstore.invalidate()
     this.hydration.reset()
     this.stack.pop()
-    await this.registry.invoke(CloseExternalAction.ActionId)
   }
 }

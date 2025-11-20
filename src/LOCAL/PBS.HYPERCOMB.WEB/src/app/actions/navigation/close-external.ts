@@ -13,5 +13,6 @@ export class CloseExternalAction extends ActionBase<void> {
   public override run = async () => {
     this.menu.hide()
     this.state.removeMode(HypercombMode.YoutubeViewer)
+    this.state.setHoneycombStatus(false)
   }
 }

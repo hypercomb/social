@@ -100,6 +100,12 @@ export class PixiManager {
         // always receives the first pointer interaction
         // -------------------------------------------------
         canvas.addEventListener(
+          'touchstart',
+          () => this.screen.goFullscreen(),
+          { once: true }
+        )
+        
+        canvas.addEventListener(
           'pointerdown',
           () => this.screen.goFullscreen(),
           { once: true }
@@ -110,7 +116,7 @@ export class PixiManager {
       return this._app
     })()
 
-    ;(window as any).app = this._app // debug hook
+      ; (window as any).app = this._app // debug hook
     return this._initPromise
   }
 
