@@ -1,4 +1,4 @@
-@use '../../../common/styles/shared.scss' as shared;
+@use "../../../common/styles/shared.scss" as shared;
 
 :host {
   display: block;
@@ -24,19 +24,23 @@
     font-family: shared.$hypercomb-icons;
     font-size: 1.6rem;
     color: #bbb;
-    padding: .5rem .7rem;
+    padding: 0.5rem 0.7rem;
     cursor: pointer;
     pointer-events: auto;
     margin: 0;
+    margin-right: 1.4rem;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     line-height: 1;
-    transition: color .2s ease, text-shadow .2s ease;
+    transition:
+      color 0.2s ease,
+      text-shadow 0.2s ease;
+
 
     &:hover {
       color: whitesmoke;
-      text-shadow: 2px 2px 5px rgba(118,118,118,0.6);
+      text-shadow: 2px 2px 5px rgba(118, 118, 118, 0.6);
     }
 
     &.active {
@@ -48,6 +52,6 @@
   .center-icon {
     border: none;
     border-radius: 0;
-    padding: .5rem .7rem; /* match default */
+    padding: 0.5rem 0.7rem; /* match default */
   }
 }
