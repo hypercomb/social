@@ -62,6 +62,6 @@ export const CLIPBOARD_STATE = new InjectionToken<IClipboardState>(TOKEN_LIST.CL
 export const DETECTOR_STATE = new InjectionToken<CoordinateDetector>(TOKEN_LIST.DETECTOR_STATE)
 export const CAROUSEL_SVC = new InjectionToken<CarouselService>(TOKEN_LIST.CAROUSEL_SVC)
 export const COORDINATE_DETECTOR = new InjectionToken<ICoordinateDetector>(TOKEN_LIST.COORDINATE_DETECTOR)
-export const SETTINGS_SVC = new InjectionToken<ISettingsService>("SETTINGS_SVC")
+export const SETTINGS_DATA_SVC = new InjectionToken<ISettingsService>("SETTINGS_DATA_SVC")
 export const TILE_SERVICE = new InjectionToken<ITileService>("TILE_SERVICE")
 export const TILE_FACTORY = new InjectionToken<ITileFactory>("TILE_FACTORY")

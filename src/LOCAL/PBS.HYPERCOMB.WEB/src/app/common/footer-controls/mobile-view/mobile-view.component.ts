@@ -1,10 +1,10 @@
 // src/app/common/footer-controls/mobile-view/mobile-view.component.ts
 import { Component, inject } from '@angular/core'
 import { Hypercomb } from 'src/app/core/mixins/abstraction/hypercomb.base'
-import { ScreenService } from 'src/app/unsorted/utility/screen-service'
 import { ACTION_REGISTRY } from 'src/app/shared/tokens/i-hypercomb.token'
 import { BackHiveAction } from 'src/app/actions/navigation/back.action'
 import { CenterTileService } from 'src/app/cells/behaviors/center-tile-service'
+import { ScreenService } from 'src/app/services/screen-service'
 
 @Component({
   standalone: true,

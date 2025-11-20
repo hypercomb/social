@@ -3,8 +3,8 @@ import { Component, inject } from '@angular/core'
 import { Searcservice } from 'src/app/database/utility/search-service'
 import { CellOptions, HypercombMode } from 'src/app/core/models/enumerations'
 import { EditorService } from 'src/app/state/interactivity/editor-service'
-import { ColorPicker } from 'src/app/unsorted/utility/color-picker'
 import { Hypercomb } from 'src/app/core/mixins/abstraction/hypercomb.base'
+import { ColorPicker } from 'src/app/services/color-picker'
 
 @Component({
   standalone: true,

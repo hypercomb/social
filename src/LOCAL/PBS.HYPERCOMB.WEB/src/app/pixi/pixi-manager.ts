@@ -1,8 +1,8 @@
 ﻿import { Injectable, Injector, computed, effect, inject, signal } from '@angular/core'
 import { Application, Container, Point, WebGLRenderer } from 'pixi.js'
-import { AxialService } from '../unsorted/utility/axial-service'
-import { ScreenService } from '../unsorted/utility/screen-service'
 import { Settings } from '../unsorted/settings'
+import { AxialService } from '../services/axial-service'
+import { ScreenService } from '../services/screen-service'
 
 // global singleton to survive hmr / multiple di instances
 type GlobalPixi = {

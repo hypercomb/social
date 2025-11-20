@@ -1,5 +1,5 @@
 ﻿import { Injectable, inject } from '@angular/core'
-import { isMobile, Point } from 'pixi.js'
+import { Point } from 'pixi.js'
 import { LayoutState } from '../layout/layout-state'
 import { PixiDataServiceBase } from '../database/pixi-data-service-base'
 

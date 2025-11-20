@@ -14,7 +14,7 @@ export interface IOpfsMetadataItems {
     lastUpdated?: string
 }
 
-export class SettingsService implements ISettingsService {
+export class SettingsDataService implements ISettingsService {
     public readonly repository = inject(SettingsRepository)
 
     public getOpfsMetadata = async (): Promise<IOpfsMetadataItems | undefined> => {

@@ -1,6 +1,5 @@
 ﻿
 import { Injectable, Injector, signal } from "@angular/core"
-
 import { CoordinateDetector } from "../detection/coordinate-detector"
 import { IDropDispatcher } from "./i-drop-dispatcher"
 import { FileDispatchBase } from "src/app/unsorted/external/file-drop-base"

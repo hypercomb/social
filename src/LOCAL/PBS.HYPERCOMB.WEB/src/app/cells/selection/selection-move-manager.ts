@@ -1,13 +1,13 @@
 import { Injectable, inject, effect, computed, signal } from "@angular/core"
 import { PointerState } from "src/app/state/input/pointer-state"
 import { CoordinateDetector } from "src/app/helper/detection/coordinate-detector"
-import { AxialService } from "src/app/unsorted/utility/axial-service"
 import { AxialCoordinate } from "src/app/core/models/axial-coordinate"
 import { POLICY } from "src/app/core/models/enumerations"
 import { HypercombData } from "src/app/actions/hypercomb-data"
 import { MODIFY_COMB_SVC } from "src/app/shared/tokens/i-comb-service.token"
 import { COMB_STORE } from "src/app/shared/tokens/i-comb-store.token"
 import { SELECTIONS } from "src/app/shared/tokens/i-selection.token"
+import { AxialService } from "src/app/services/axial-service"
 
 type Move = { from: AxialCoordinate; to: AxialCoordinate }
 

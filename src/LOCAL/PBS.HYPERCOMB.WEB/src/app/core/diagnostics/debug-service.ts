@@ -1,7 +1,29 @@
 ﻿import { Injectable } from '@angular/core'
+import { environment } from 'src/environments/environment';
 
 @Injectable({ providedIn: 'root' })
 export class DebugService {
+  private static readonly state: Record<string, unknown> = {}
+
+  /** expose a state class under a short name */
+  public static expose(name: string, instance: unknown) {
+    if (environment.production) return
+
+    DebugService.state[name] = instance
+      ; (window as any).state = DebugService.state  // âœ… namespaced for autocomplete
+  }
+
+  /** remove a state */
+  public static remove(name: string) {
+    if (environment.production) return
+    delete DebugService.state[name]
+  }
+
+  /** list all registered states */
+  public static all(): Record<string, unknown> {
+    if (environment.production) return {}
+    return DebugService.state
+  }
   private readonly enabled: string[] = [
     // 'scaling',
     // 'import',
@@ -19,7 +41,7 @@ export class DebugService {
     // 'editor',
     // 'actions',
     // 'debug',
-     'layout',
+    'layout',
     // 'comb',
     // 'storage',
     // 'pinch',

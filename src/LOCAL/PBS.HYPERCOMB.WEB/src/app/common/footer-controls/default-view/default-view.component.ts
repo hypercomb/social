@@ -4,7 +4,6 @@ import { Hypercomb } from 'src/app/core/mixins/abstraction/hypercomb.base'
 import { HypercombMode } from 'src/app/core/models/enumerations'
 import { EditorService } from 'src/app/state/interactivity/editor-service'
 import { TouchDetectionService } from 'src/app/core/mobile/touch-detection-service'
-import { ScreenService } from 'src/app/unsorted/utility/screen-service'
 import { CenterTileService } from 'src/app/cells/behaviors/center-tile-service'
 import { LayoutManager } from 'src/app/core/controller/layout-manager'
 import { ZoomService } from 'src/app/pixi/zoom-service'
@@ -18,6 +17,7 @@ import { ChangeModeAction } from 'src/app/actions/modes/change-mode'
 import { CellPayload, ChangeModeContext, CopyPayload, DeletePayload } from 'src/app/actions/action-contexts'
 import { Constants } from 'src/app/unsorted/constants'
 import { PasteClipboardButtonComponent } from '../paste-clipboard-button/paste-clipboard-button.component'
+import { ScreenService } from 'src/app/services/screen-service'
 
 @Component({
   standalone: true,

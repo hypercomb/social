@@ -1,5 +1,3 @@
-import { Cell } from "src/app/cells/cell"
-import { Settings } from "src/app/unsorted/settings"
 
 export const DBTables = {
     Cells: 'data',

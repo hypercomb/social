@@ -45,7 +45,7 @@ import { WheelState } from '../common/mouse/wheel-state'
 // rendering and visuals
 import { ContainerBackgroundService } from '../pixi/container-background-service'
 import { TilePointerManager } from '../user-interface/sprite-components/tile-pointer-manager'
-import { ColorPicker } from './utility/color-picker'
+
 
 // shortcuts
 import { GlobalShortcutRegistry } from '../shortcuts/global-shortcut-registry'
@@ -64,6 +64,7 @@ import { MousewheelZoomService } from '../pixi/mousewheel-zoom-service'
 import { TouchZoomService } from '../pixi/touch-zoom-service'
 import { CopyAction } from '../actions/clipboard/copy-honeycomb'
 import { CloseExternalAction } from '../actions/navigation/close-external'
+import { ColorPicker } from '../services/color-picker'
 
 
 @Injectable({ providedIn: 'root' })

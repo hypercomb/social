@@ -1,7 +1,6 @@
 ﻿// pixi-service-base.ts
 import { inject, effect } from "@angular/core"
 import { Application } from "pixi.js"
-import { ScreenService } from "src/app/unsorted/utility/screen-service"
 import { PIXI_MANAGER, IPixiManager } from "../shared/tokens/i-pixi-manager.token"
 import { Settings } from "../unsorted/settings"
 import { DebugService } from "../core/diagnostics/debug-service"
@@ -10,6 +9,7 @@ import { HypercombState } from "../state/core/hypercomb-state"
 import { ContextStack } from "../core/controller/context-stack"
 import { StorageManager } from "../helper/storage-manager"
 import { HONEYCOMB_SVC } from "../shared/tokens/i-comb-service.token"
+import { ScreenService } from "../services/screen-service"
 
 export abstract class PixiServiceBase {
   protected readonly cellstate = inject(HONEYCOMB_SVC)

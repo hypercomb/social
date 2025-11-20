@@ -4,8 +4,7 @@ import { FormsModule } from '@angular/forms'
 import { environment } from 'src/environments/environment'
 import { HypercombMode } from '../../core/models/enumerations'
 import { HypercombData } from 'src/app/actions/hypercomb-data'
-// import { AiService } from 'src/app/ai/ai-service'
-import { HONEYCOMB_SVC } from 'src/app/shared/tokens/i-comb-service.token'
+import { HierarchyService } from 'src/app/services/hiearchy-service'
 
 interface ChatMessage {
   content: string
@@ -20,7 +19,7 @@ interface ChatMessage {
   styleUrls: ['./chat-window.component.scss']
 })
 export class ChatWindowComponent extends HypercombData implements OnInit, OnDestroy, AfterViewInit {
-
+  private readonly hierarchyService = inject(HierarchyService)
 
   @ViewChild('chatwindow', { static: true }) chatwindowRef!: ElementRef<HTMLDivElement>
 
@@ -96,12 +95,13 @@ export class ChatWindowComponent extends HypercombData implements OnInit, OnDest
     this.messages.push({ content: this.newMessage, isUser: true })
 
     try {
-      await this.aiService.handleTileCreation(this.newMessage)
+      // await this.aiService.handleTileCreation(this.newMessage)
 
-      this.messages.push({
-        content: 'Tiles have been added to the hive.',
-        isUser: false,
-      })
+      // this.messages.push({
+      //   content: 'Tiles have been added to the hive.',
+      //   isUser: false,
+      // })
+      throw new Error('Not implemented yet.')
     } catch (error) {
       console.error('Error processing message:', error)
       let errorMessage = 'Sorry, I encountered an error processing your request.'

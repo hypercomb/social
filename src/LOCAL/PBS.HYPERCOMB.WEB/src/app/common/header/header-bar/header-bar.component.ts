@@ -10,11 +10,11 @@ import { CoordinateDetector } from 'src/app/helper/detection/coordinate-detector
 import { LinkNavigationService } from 'src/app/navigation/link-navigation-service'
 import { EditorService } from 'src/app/state/interactivity/editor-service'
 import { TouchDetectionService } from 'src/app/core/mobile/touch-detection-service'
-import { ScreenService } from 'src/app/unsorted/utility/screen-service'
 import { HONEYCOMB_SVC } from 'src/app/shared/tokens/i-comb-service.token'
 import { COMB_STORE } from 'src/app/shared/tokens/i-comb-store.token'
 import { CellEditor } from 'src/app/unsorted/hexagons/cell-editor'
 import { CellEditContext } from 'src/app/state/interactivity/cell-edit-context'
+import { ScreenService } from 'src/app/services/screen-service'
 
 @Component({
   standalone: true,

@@ -3,10 +3,10 @@ import { Component, OnInit } from '@angular/core'
 import { ControlsActiveDirective } from 'src/app/core/directives/controls-active-directive'
 import { HypercombMode } from 'src/app/core/models/enumerations'
 import { Hypercomb } from 'src/app/core/mixins/abstraction/hypercomb.base'
-import { Constants } from 'src/app/unsorted/constants'
 import { environment } from 'src/environments/environment'
 import { DefaultViewComponent } from './default-view/default-view.component'
 import { MobileViewComponent } from './mobile-view/mobile-view.component'
+import { Constants } from 'src/app/unsorted/constants'
 
 @Component({
   standalone: true,

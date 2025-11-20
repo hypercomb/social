@@ -3,7 +3,8 @@ import { YouTubePlayerModule } from '@angular/youtube-player'
 import { Hypercomb } from 'src/app/core/mixins/abstraction/hypercomb.base'
 import { CoordinateDetector } from 'src/app/helper/detection/coordinate-detector'
 import { YoutubeService } from 'src/app/navigation/youtube-service'
-import { ScreenService } from 'src/app/unsorted/utility/screen-service'
+import { ScreenService } from 'src/app/services/screen-service'
+
 
 @Component({
   standalone: true,

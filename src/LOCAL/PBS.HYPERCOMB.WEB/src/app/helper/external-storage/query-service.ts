@@ -5,8 +5,8 @@ import { Injectable, signal } from "@angular/core"
 import { firstValueFrom } from "rxjs"
 import { DebugService } from "src/app/core/diagnostics/debug-service"
 import { Cell } from "src/app/cells/cell"
-import { CompressionService } from "src/app/unsorted/compression-service"
 import { Constants } from "src/app/unsorted/constants"
+import { CompressionService } from "src/app/unsorted/compression-service"
 
 interface QueryResponse {
   name?: string
