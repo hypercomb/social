@@ -96,22 +96,6 @@ export class PixiManager {
         canvas.style.userSelect = 'none'
         host.appendChild(canvas)
 
-        // // -------------------------------------------------
-        // // fullscreen trigger on first user gesture
-        // // this is guaranteed to fire because pixi canvas
-        // // always receives the first pointer interaction
-        // // -------------------------------------------------
-        // canvas.addEventListener(
-        //   'touchstart',
-        //   () => this.screen.goFullscreen(),
-        //   { once: true }
-        // )
-        
-        // canvas.addEventListener(
-        //   'pointerdown',
-        //   () => this.screen.goFullscreen(),
-        //   { once: true }
-        // )
       }
 
       this._ready.set(this._app)
