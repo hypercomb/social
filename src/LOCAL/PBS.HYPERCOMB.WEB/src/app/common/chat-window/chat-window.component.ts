@@ -21,6 +21,7 @@ interface ChatMessage {
 })
 export class ChatWindowComponent extends HypercombData implements OnInit, OnDestroy, AfterViewInit {
   private readonly hierarchyService = inject(HierarchyService)
+  private readonly aiQuery = inject(AiListQuery)  
 
   @ViewChild('chatwindow', { static: true }) chatwindowRef!: ElementRef<HTMLDivElement>
 
@@ -57,6 +58,8 @@ export class ChatWindowComponent extends HypercombData implements OnInit, OnDest
   }
 
   public ngAfterViewInit() {
+    setTimeout(() => this.state.ignoreShortcuts = true, 50)
+
     const element = this.chatwindowRef.nativeElement
 
     element.focus() // Ensure it can receive keyboard events
@@ -105,13 +108,13 @@ export class ChatWindowComponent extends HypercombData implements OnInit, OnDest
 
     try {
       // Use your existing AiListQuery service (injected or via DI)
-      const aiQuery = inject(AiListQuery)  // Angular 14+ inject() works in methods too
+      // Angular 14+ inject() works in methods too
 
       // Call it — it will:
       // - Send prompt + hierarchy context to LM Studio
       // - Get back clean list
       // - Auto-create child cells under the currently active/hovered cell
-      const generatedItems = await aiQuery.query(userInput + ' (use current hierarchy as parent)')
+      const generatedItems = await this.aiQuery.query(userInput + ' (use current hierarchy as parent)')
 
       // Update the "Thinking..." message
       this.messages[this.messages.length - 1] = {
@@ -140,6 +143,7 @@ export class ChatWindowComponent extends HypercombData implements OnInit, OnDest
     }
   }
   public ngOnDestroy() {
+    this.state.ignoreShortcuts = false
     this.chatwindowRef.nativeElement.removeEventListener('keyup', this.handleKeyup)
   }
 

@@ -22,6 +22,7 @@ import { RenameHiveAction } from '../actions/hives/rename-hive'
 import { ShowHiveAction } from '../actions/modes/show-hive'
 import { ToggleBranchAction } from '../actions/navigation/toggle-branch'
 import { ToggleCutModeAction } from '../actions/clipboard/toggle-cut-mode'
+import { ToggleChatWindowAction } from '../actions/ai/show-chat-window'
 import { ToggleEditModeAction } from '../actions/modes/cell-edit-mode'
 import { ToggleMoveModeAction } from '../actions/modes/cell-move-mode'
 import { ViewPhotoAction } from '../actions/cells/view-photo'
@@ -130,6 +131,7 @@ export class StartUpService {
     inject(RenameHiveAction),
     inject(ShowHiveAction),
     inject(ToggleBranchAction),
+    inject(ToggleChatWindowAction), 
     inject(ToggleCutModeAction),
     inject(ToggleEditModeAction),
     inject(ToggleMoveModeAction),

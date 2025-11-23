@@ -6,11 +6,12 @@ export class DebugService {
   private static readonly state: Record<string, unknown> = {}
 
   /** expose a state class under a short name */
-  public static expose(name: string, instance: unknown) {
-    if (environment.production) return
+  public static expose<T>(name: string, instance: unknown) : T | undefined {
+    if (environment.production) return undefined
 
     DebugService.state[name] = instance
       ; (window as any).state = DebugService.state  // âœ… namespaced for autocomplete
+    return undefined
   }
 
   /** remove a state */

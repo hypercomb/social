@@ -67,6 +67,10 @@ export class ShortcutService extends Hypercomb {
 
   /** check if event matches a chord (all keys/mods in that inner array) */
   private matches(ev: KeyboardEvent, keys: IShortcutKey[]): boolean {
+    if (this.state.ignoreShortcuts) {
+      return false
+    }
+
     try {
       this.debug.log('shortcuts', keys)
       const result = keys.every(k => this.ks.when(ev).key(k.key, k))

@@ -19,8 +19,8 @@ export interface IRepostioryBase<TEntity> {
 }
 
 export interface ICellRepository extends IRepostioryBase<CellEntity> {
+  fetchChildCount(cellId: number): Promise<number>
   bulkDelete(ids: number[])
-
   fetch(cellId: number): Promise<CellEntity | undefined>
   fetchBySourceId(sourceId: number): Promise<CellEntity[]>
   fetchByIds(ids: number[]): Promise<CellEntity[]>

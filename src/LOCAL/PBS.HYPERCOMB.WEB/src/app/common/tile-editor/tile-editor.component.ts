@@ -204,10 +204,9 @@ export class TileEditorComponent extends Hypercomb {
     }
 
     await Assets.unload(this.state.cacheId(cell))
+    await this.modify.updateHasChildren(cell)
     await this.modify.updateCell(cell)
-
-    // optional: handle navigation after save
-    // if (this.operation() === 'new-hive') this.utility.changeLocation(cell.hive)
+    
     this.hexagonEditor.complete()
   }
 

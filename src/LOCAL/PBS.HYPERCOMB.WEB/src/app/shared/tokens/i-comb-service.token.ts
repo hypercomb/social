@@ -7,6 +7,7 @@ export interface ICombState {
 }
 
 export interface IModifyComb {
+    updateHasChildren(cell: Cell): unknown
     updateSilent(cell: Cell)
     create(params: Partial<NewCell>, kind: CellKind): Promise<Cell>
     deleteAll(cell: Cell, hierarchy: Cell[]): Promise<void>

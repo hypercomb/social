@@ -33,6 +33,7 @@ export class HypercombState {
   public isEditMode = computed((): boolean => {
     return (this._mode() & HypercombMode.EditMode) !== 0;
   })
+  ignoreShortcuts: any
 
   public get scoutName(): string | undefined { return this.scout()?.name }
   public get isMobile(): boolean {

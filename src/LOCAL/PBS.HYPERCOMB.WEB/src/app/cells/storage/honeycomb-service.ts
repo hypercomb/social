@@ -13,14 +13,12 @@ import {
 import { toCellEntity } from 'src/app/core/mappers/to-cell-entity'
 import { CellOptions } from '../models/cell-options'
 import { safeDate, toCell } from 'src/app/core/mappers/to-cell'
-import { CombQueryService } from './comb-query-service'
-import { BlobService } from 'src/app/hive/rendering/blob-service'
 
 @Injectable({ providedIn: 'root' })
 export class HoneycombService
   extends DataOrchestratorBase
   implements ICellService, IModifyComb, IHiveHydration {
-    
+
   private readonly ps = inject(PointerState)
 
   private readonly _lastCreated = signal<Cell | null>(null)
@@ -126,26 +124,60 @@ export class HoneycombService
     })
   }
 
-  private async lazyLoadChildren(parentId: number): Promise<void> {
-    try {
-      const rows = await this.repository.fetchBySourceId(parentId)
-      this.state.setHoneycombStatus(rows.length < 1)
+ private async lazyLoadChildren(parentId: number): Promise<void> {
+  try {
+    const rows = await this.repository.fetchBySourceId(parentId)
+    const hasChildren = rows.length > 0
 
-      if (!rows?.length) {
-        this.hydratedEnqueued.add(parentId)
-        return
+    this.state.setHoneycombStatus(!hasChildren)
+
+    // ─────────────────────────────────────────────
+    // 1. update parent flags in memory
+    // ─────────────────────────────────────────────
+    const parent = this.honeycomb.store.lookupData(parentId)
+    if (parent) {
+      const newFlag = hasChildren ? 'true' : 'false'
+      if (parent.hasChildrenFlag !== newFlag) {
+        parent.hasChildrenFlag = newFlag
+        this.staging.stageReplace(parent)
       }
-
-      const cells = rows.map(r => <Cell>toCell(r))
-
-      this.staging.stageMerge(cells)
-      this.honeycomb.store.enqueueHot(cells)
-
-      this.hydratedEnqueued.add(parentId)
-    } catch (err) {
-      console.warn(`[HoneycombService] failed to hydrate hive ${parentId}:`, err)
     }
+
+    if (!hasChildren) {
+      this.hydratedEnqueued.add(parentId)
+      return
+    }
+
+    // ─────────────────────────────────────────────
+    // 2. map rows → cells
+    // ─────────────────────────────────────────────
+    const cells = rows.map(r => <Cell>toCell(r))
+
+    // ─────────────────────────────────────────────
+    // 3. initialize flags for each child
+    //    (this is the part that fixes your issue)
+    // ─────────────────────────────────────────────
+    for (const child of cells) {
+      // every child has a parent
+      child.hasChildrenFlag = 'true'
+
+      // each child might also have children -> lookup count
+      const count = await this.repository.fetchChildCount(child.cellId!)
+      child.hasChildrenFlag = count > 0 ? 'true' : 'false'
+    }
+
+    // ─────────────────────────────────────────────
+    // 4. stage children and notify store
+    // ─────────────────────────────────────────────
+    this.staging.stageMerge(cells)
+    this.honeycomb.store.enqueueHot(cells)
+    this.hydratedEnqueued.add(parentId)
+
+  } catch (err) {
+    console.warn(`[HoneycombService] failed to hydrate hive ${parentId}:`, err)
   }
+}
+
 
   // ─────────────────────────────────────────────
   // E. REMOVAL
@@ -213,6 +245,12 @@ export class HoneycombService
     this.staging.stageReplace(cell)
     this.honeycomb.store.enqueueHot([cell])
     return res
+  }
+
+  public async updateHasChildren(cell: Cell): Promise<void> {
+    const hasChildren = await this.repository.fetchChildCount(cell.cellId!)
+    cell.hasChildrenFlag = hasChildren > 0 ? 'true' : 'false'
+    this.staging.stageReplace(cell)
   }
 
   public async updateSilent(cell: Cell): Promise<number> {

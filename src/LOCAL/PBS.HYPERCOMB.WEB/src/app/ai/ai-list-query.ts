@@ -1,101 +1,113 @@
-﻿  // ai-list-query.service.ts (updated & working)
+﻿// ai-list-query.service.ts (FINAL – OpenAI Nano Test Mode)
 
-  import { Injectable, inject } from '@angular/core'
-  import { HypercombData } from '../actions/hypercomb-data'
-  import { IOpenAiQuery } from './i-open-ai-query'
-  import { CellFactory } from '../inversion-of-control/factory/cell-factory'
-  import { HONEYCOMB_SVC } from '../shared/tokens/i-comb-service.token'
-  import { CoordinateDetector } from '../helper/detection/coordinate-detector'
+import { Injectable } from '@angular/core';
+import { HypercombData } from '../actions/hypercomb-data';
+import { IOpenAiQuery } from './i-open-ai-query';
+const apiKey =
+  (window as any)?.hypercomb_openai_key ||
+  localStorage.getItem('OPENAI_API_KEY') ||
+  '';
 
-  @Injectable({ providedIn: 'root' })
-  export class AiListQuery extends HypercombData implements IOpenAiQuery {
-    private readonly td_factory = inject(CellFactory)
-    private readonly modify = inject(HONEYCOMB_SVC)
-    private readonly detector = inject(CoordinateDetector)
-    private numItems = 10
-    private readonly lmStudioUrl = 'http://localhost:4220/v1'  // LM Studio default
+@Injectable({ providedIn: 'root' })
+export class AiListQuery extends HypercombData implements IOpenAiQuery {
 
-    async query(text: string): Promise<any> {
-      const prompt = `Give me exactly ${this.numItems} short "${text}" items as a pure JSON array of strings. No explanations, no markdown, no extra text. Example: ["Apple", "Banana", "Cherry"]`
+  private readonly SYSTEM = `
+You are the Hypercomb Hierarchy Builder.
 
-      const response = await fetch(`${this.lmStudioUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'local-model', // LM Studio ignores this but requires the field
-          messages: [
-            { role: 'system', content: 'You only respond with raw JSON arrays of strings. Never add any other text.' },
-            { role: 'user', content: prompt }
-          ],
-          temperature: 0.8,
-          max_tokens: 500,
-          stream: false
-        })
-      })
+Output ONLY one JSON array using this recursive Tile format:
 
-      if (!response.ok) {
-        throw new Error(`LM Studio error: ${response.status} ${response.statusText}`)
-      }
+A Tile is:
+[
+  "name",
+  [
+    Tile,
+    Tile,
+    ...
+  ]
+]
 
-      const data = await response.json()
-      const rawContent: string = data.choices[0]?.message?.content || ''
+The output must be:
+[
+  Tile,  // 6 items
+  Tile,
+  Tile,
+  Tile,
+  Tile,
+  Tile
+]
 
-      const items = this.parseStringArrayFromAny(rawContent.trim())
+Rules:
+1. Always output exactly 6 top-level Tiles.
+2. Every Tile must be exactly: [string, array].
+3. The second element (children array) must always exist.
+4. Each top-level Tile must contain 6 child Tiles.
+5. Each child Tile must contain 3–6 grandchildren Tiles.
+6. Names must be short and unique.
+7. No objects, no prose, no markdown, no backticks.
+8. Output only JSON that matches the Tile format.
 
-      if (!items.length) {
-        console.warn('AI returned no valid items:', rawContent)
-        return rawContent
-      }
+`;
 
-      // // --- Create cells in your honeycomb ---
-      // const existingIndexes = new Set<number>(
-      //   this.cs.cells()
-      //     .map((t: any) => t.index as number)
-      //     .filter(n => Number.isInteger(n))
-      // )
+  public async query(userPrompt: string): Promise<any[]> {
+    if (!userPrompt.trim()) return [];
 
-      // let index = Math.max(...[...existingIndexes, -1]) + 1
-
-      // for (const item of items) {
-      //   while (existingIndexes.has(index)) index++
-      //   const cell = await this.td_factory.create(<any>{})
-      //   cell.name = item.trim()
-      //   cell.index = index++
-      //   cell.hive = this.stack.hiveName()!
-      //   cell.sourceId = this.stack.cell()?.cellId
-      //   await this.modify..modify.addCell(cell)
-      // }
-
-      return items // or whatever you want to return
-    }
-
-    canQuery(query: string): boolean {
-      return !!query?.trim()
-    }
-
-    // --- Robust JSON array parser (handles junk before/after) ---
-    private parseStringArrayFromAny(text: string): string[] {
-      // 1. Try direct parse
-      try {
-        const parsed = JSON.parse(text)
-        if (Array.isArray(parsed)) {
-          return parsed.filter(s => typeof s === 'string').map(s => s.trim())
-        }
-      } catch {}
-
-      // 2. Extract first [...] block
-      const match = text.match(/\[[\s\S]*\]/)
-      if (match) {
-        try {
-          const parsed = JSON.parse(match[0])
-          if (Array.isArray(parsed)) {
-            return parsed.filter(s => typeof s === 'string').map(s => s.trim())
+    const response = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'gpt-4.1',  // ← nano model
+        input: [
+          {
+            role: "system",
+            content: [
+              { type: "input_text", text: this.SYSTEM }
+            ]
+          },
+          {
+            role: "user",
+            content: [
+              { type: "input_text", text: userPrompt }
+            ]
           }
-        } catch {}
-      }
+        ]
+      })
+    });
 
-      return []
+    if (!response.ok) {
+      const err = await response.text();
+      console.error('OpenAI Error:', response.status, err);
+      return [];
     }
+
+    const data = await response.json();
+    const text = await response.text()
+    const raw = data.output_text ?? '';
+
+    return this.extractNestedArray(raw);
   }
+
+  public canQuery(q: string): boolean {
+    return !!q?.trim();
+  }
+
+  private extractNestedArray(text: string): any[] {
+    try {
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {}
+
+    const matches = text.match(/\[[\s\S]*\]/g) || [];
+    for (const m of matches.sort((a, b) => b.length - a.length)) {
+      try {
+        const parsed = JSON.parse(m);
+        if (Array.isArray(parsed)) return parsed;
+      } catch {}
+    }
+
+    console.warn('Failed to parse hierarchy:', text);
+    return [];
+  }
+}

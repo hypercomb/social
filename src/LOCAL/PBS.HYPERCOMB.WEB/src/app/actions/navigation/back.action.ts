@@ -24,7 +24,7 @@ export class BackHiveAction extends ActionBase<PayloadBase> {
     const size = this.stack.size()
 
     if (hasEvent(payload)) {
-      return size > 1
+      return size > 1 
     } else {
       const down = this.pointerstate.rightButtonDown() && size > 1
       return down

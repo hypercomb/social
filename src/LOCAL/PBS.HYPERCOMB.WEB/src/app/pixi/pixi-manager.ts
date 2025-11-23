@@ -3,6 +3,7 @@ import { Application, Container, Point, WebGLRenderer } from 'pixi.js'
 import { Settings } from '../core/settings'
 import { AxialService } from '../services/axial-service'
 import { ScreenService } from '../services/screen-service'
+import { DebugService } from '../core/diagnostics/debug-service'
 
 // global singleton to survive hmr / multiple di instances
 type GlobalPixi = {
@@ -63,6 +64,7 @@ export class PixiManager {
         this.setStageCenter()
       }
     })
+    DebugService.expose('container', this.container)
   }
 
   // initialize once
@@ -94,22 +96,22 @@ export class PixiManager {
         canvas.style.userSelect = 'none'
         host.appendChild(canvas)
 
-        // -------------------------------------------------
-        // fullscreen trigger on first user gesture
-        // this is guaranteed to fire because pixi canvas
-        // always receives the first pointer interaction
-        // -------------------------------------------------
-        canvas.addEventListener(
-          'touchstart',
-          () => this.screen.goFullscreen(),
-          { once: true }
-        )
+        // // -------------------------------------------------
+        // // fullscreen trigger on first user gesture
+        // // this is guaranteed to fire because pixi canvas
+        // // always receives the first pointer interaction
+        // // -------------------------------------------------
+        // canvas.addEventListener(
+        //   'touchstart',
+        //   () => this.screen.goFullscreen(),
+        //   { once: true }
+        // )
         
-        canvas.addEventListener(
-          'pointerdown',
-          () => this.screen.goFullscreen(),
-          { once: true }
-        )
+        // canvas.addEventListener(
+        //   'pointerdown',
+        //   () => this.screen.goFullscreen(),
+        //   { once: true }
+        // )
       }
 
       this._ready.set(this._app)

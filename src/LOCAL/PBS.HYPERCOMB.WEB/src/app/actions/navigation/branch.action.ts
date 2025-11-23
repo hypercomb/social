@@ -12,17 +12,20 @@ export class BranchAction extends ActionBase<CellPayload> {
   public override label = "Set Branch"
 
   public override enabled = async (payload: CellPayload): Promise<boolean> => {
-    // If context menu / overlay is active, don't trigger branch.
     if (this.state.isContextActive()) return false
-
-    // If last gesture was a pan (threshold crossed), cancelled() will be true
     if (this.state.cancelled()) return false
-
-    // If somehow we're still mid-pan, also bail (defensive)
     if (this.state.panning) return false
 
-    return !!payload.cell.isBranch
+    const cell = payload.cell
+    if (!cell) return false
+
+    // 🚫 block if no children
+    if (cell.hasChildrenFlag !== 'true') return false
+
+    // ✔ only allow if marked as branch
+    return cell.isBranch
   }
+
 
   public override run = async (payload: CellPayload) => {
     // Defensive: re-check at execution time (race-safe)
