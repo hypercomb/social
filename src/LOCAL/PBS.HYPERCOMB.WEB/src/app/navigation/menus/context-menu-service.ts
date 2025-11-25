@@ -135,22 +135,22 @@ export class ContextMenuService extends PixiServiceBase implements IContextMenu 
     const style = { fontFamily: "hypercomb-icons", fontSize: 32, fill: "white" }
 
     // RENAMED but kept same icons & behavior
-    this.topIcon = new Text({ text: "*", style })      // previously branchIcon
+    // this.topIcon = new Text({ text: "*", style })      // previously branchIcon
     this.editIcon = new Text({ text: "N", style })
     this.bottomIcon = new Text({ text: "*", style })   // previously linkIcon
 
-    this.addBranchClick(this.topIcon)
+    //this.addBranchClick(this.topIcon)
     this.addEditTileClick(this.editIcon)
     this.addLinkClick(this.bottomIcon)
 
     // ORDER UNCHANGED
-    this.icons.push(this.topIcon, this.editIcon, this.bottomIcon)
+    this.icons.push(this.editIcon, this.bottomIcon)
 
     const padding = 20
     this.icons.forEach((icon, index) => {
       icon.anchor.set(0.5, 0.5)
       icon.x = 32
-      icon.y = 50 + padding + index * 60
+      icon.y = 110 + padding + index * 60
       icon.eventMode = "dynamic"
       icon.on("pointerover", this.onIconHover)
       icon.on("pointerout", this.onIconOut)
@@ -231,16 +231,6 @@ export class ContextMenuService extends PixiServiceBase implements IContextMenu 
     })
   }
 
-  private addBranchClick(icon: Text): void {
-    icon.on("pointerup", async (event: FederatedPointerEvent) => {
-      event.stopImmediatePropagation()
-      event.preventDefault()
-      if (this.clickWasAborted() || event.button === 2) return
-      const cell = this.detector.activeCell()!
-      if (cell) await this.navigation.openLink(cell)
-      await this.hide()
-    })
-  }
 
   private clickWasAborted(): boolean {
     const was = this.clickAborted

@@ -31,7 +31,7 @@ export class RenderTileAction extends ActionBase<CellPayload> {
     super()
 
     this.ps.onHover(() => {
-      const cell = this.stack.cell()
+      const cell = this.detector.activeCell()!
       if (!cell) return
       this.debug.log("tiles", "tile hovered")
       this.contextMenu.show(cell)

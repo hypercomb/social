@@ -2,6 +2,7 @@ import { Cell } from "src/app/cells/cell"
 import { IHiveImage } from "src/app/core/models/i-hive-image"
 
 export class CellEditContext {
+  initialImageHash: string | undefined
   public get cellId(): number | undefined { return this.cell.cellId }
   public get kind(): string { return this.cell.kind }
 

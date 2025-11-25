@@ -70,7 +70,7 @@ export class ImageRepository {
   // ───────────────────────────────────────────────
   public async delete(hash: string): Promise<void> {
     try {
-      const dir = await this.opfs.ensureSmallDir() // NEW public helper
+      const dir = await this.opfs.smallDir()
       await dir.removeEntry(hash)
     } catch {
       // missing is fine

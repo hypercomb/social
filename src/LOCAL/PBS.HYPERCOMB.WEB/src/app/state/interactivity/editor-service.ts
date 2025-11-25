@@ -5,11 +5,13 @@ import { isNewHive } from "src/app/cells/models/cell-filters"
 import { IHiveImage } from "src/app/core/models/i-hive-image"
 import { ImageService } from "src/app/database/images/image-service"
 import { CellEditContext } from "./cell-edit-context"
+import { OpfsImageService } from "src/app/hive/storage/opfs-image.service"
 
 @Injectable({ providedIn: "root" })
 export class EditorService {
 
   private readonly images = inject(ImageService)
+  private readonly opfs = inject(OpfsImageService)
 
   // internal state
   private readonly _mode = signal<EditorMode>(EditorMode.None)
@@ -76,6 +78,7 @@ export class EditorService {
     }
   }
 
+
   public setContext = async (context: CellEditContext | null) => {
     if (!context) {
       this._context.set(null)
@@ -83,22 +86,82 @@ export class EditorService {
     }
 
     const cell = context.cell
-    
-    // preserve prototype
+
+    // record starting hash for comparison (important for save logic)
+    context.initialImageHash = cell.imageHash
+
+    // restore prototype — important for cell object integrity
     const editCell = Object.create(Object.getPrototypeOf(cell)) as Cell
     Object.assign(editCell, cell)
 
-    // guaranteed-valid IHiveImage clones
-    context.originalSmall = this.cloneImage(context.originalSmall)
-    context.modifiedSmall = this.cloneImage(context.modifiedSmall)
+    // ------------------------------------------------------------
+    // 1) Try load LARGE from OPFS
+    // ------------------------------------------------------------
+    let largeBlob: Blob | null = null
 
-    // large image loading via hash
-    const large = await this.images.getBaseImage(cell) // automatically handles large → small fallback
-    context.modifiedLarge = large ? this.cloneImage(large) : context.originalSmall
+    if (cell.imageHash) {
+      try {
+        largeBlob = await this.opfs.loadLarge(cell.imageHash)
+      } catch { /* ignore */ }
+    }
+
+    if (largeBlob) {
+      // ------------------------------------------------------------
+      // LARGE EXISTS → use its transforms
+      // ------------------------------------------------------------
+      context.originalLarge = {
+        imageHash: cell.imageHash!,
+        blob: largeBlob,
+        x: cell.x ?? 0,
+        y: cell.y ?? 0,
+        scale: cell.scale ?? 1
+      }
+
+      context.modifiedLarge = {
+        imageHash: cell.imageHash!,
+        blob: largeBlob,
+        x: cell.x ?? 0,
+        y: cell.y ?? 0,
+        scale: cell.scale ?? 1
+      }
+    }
+
+    // ------------------------------------------------------------
+    // 2) Otherwise: FALLBACK to SMALL (default transforms)
+    // ------------------------------------------------------------
+    else if (cell.imageHash) {
+      const smallBlob = await this.opfs.loadSmall(cell.imageHash!)
+
+      if (smallBlob) {
+        // small images NEVER carry transforms
+        context.originalSmall = {
+          imageHash: cell.imageHash!,
+          blob: smallBlob,
+          x: 0,
+          y: 0,
+          scale: 1
+        }
+
+        // editor still needs a "modifiedLarge"
+        context.modifiedLarge = {
+          imageHash: cell.imageHash!,
+          blob: smallBlob,
+          x: 0,
+          y: 0,
+          scale: 1
+        }
+
+        // IMPORTANT FIX:
+        // wipe transforms on the actual cell, because small images
+        // do NOT have meaningful transforms
+        cell.x = 0
+        cell.y = 0
+        cell.scale = 1
+      }
+    }
 
     this._context.set(context)
   }
-
 
   public setDragOver(over: boolean) {
     this._dragOver.set(over)

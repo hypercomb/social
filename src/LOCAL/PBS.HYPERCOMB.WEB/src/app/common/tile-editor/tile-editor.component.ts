@@ -184,29 +184,37 @@ export class TileEditorComponent extends Hypercomb {
     context.setCell(updated)
   }
 
-  // ─────────────────────────────────────────────
-  // save pipeline
-  // ─────────────────────────────────────────────
+
   public save = async (event: any): Promise<void> => {
     const context = this.context!
     const cell = context.cell
+
+    // IMPORTANT: Unload cached texture BEFORE capturing or saving
     await Assets.unload(this.state.cacheId(cell))
 
-    // capture and persist the working (small) snapshot
-    if (context.imageDirty) {
-      const snapshot = await this.captureManager.capture()
-      await this.persistence.saveSmall(cell, snapshot)
+    const imageDirty = context.imageDirty
+    const initialHash = context.initialImageHash ?? cell.imageHash
+    let newHash = cell.imageHash
+
+    if (imageDirty) {
+      const snapshot = await this.captureManager.capturePreview()
+      newHash = await this.persistence.saveSmall(cell, snapshot)
+
+      if (context.modifiedLarge?.blob) {
+        await this.persistence.saveLarge(newHash, context.modifiedLarge.blob)
+      }
+
+      if (initialHash && initialHash !== newHash) {
+        await this.persistence.moveOldLarge(initialHash)
+      }
     }
 
-    // handle large image only if rules require
-    if (context.modifiedLarge && context.imageDirty) {
-      await this.persistence.saveLargeIfChanged(context.modifiedLarge)
-    }
-
+    // IMPORTANT: Unload again AFTER saving so the next render uses updated images
     await Assets.unload(this.state.cacheId(cell))
+
     await this.modify.updateHasChildren(cell)
     await this.modify.updateCell(cell)
-    
+
     this.hexagonEditor.complete()
   }
 

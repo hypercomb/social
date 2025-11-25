@@ -1,13 +1,10 @@
+// src/app/common/tile-editor/tile-image/image-capture-manager.ts
 import { Injectable } from "@angular/core"
 import { Container, RenderTexture, RenderOptions } from "pixi.js"
 import { PixiDataServiceBase } from "src/app/database/pixi-data-service-base"
 import { BorderColorSprite } from "src/app/user-interface/sprite-components/border-color-sprite"
 
-declare const window: Window
-
-@Injectable({
-  providedIn: 'root'
-})
+@Injectable({ providedIn: 'root' })
 export class ImageCaptureManager extends PixiDataServiceBase {
 
   private _container!: Container;
@@ -16,81 +13,83 @@ export class ImageCaptureManager extends PixiDataServiceBase {
     return this._container;
   }
 
-  protected set container(value: Container) {
-    this._container = value;
-  }
-
   public setContainer(container: Container) {
-    this.container = container
+    this._container = container;
   }
 
-  public capture = async () => {
-    const tile = this.container
+  // ─────────────────────────────────────────────
+  // 1) CAPTURE PREVIEW (small image with layers)
+  // ─────────────────────────────────────────────
+  public capturePreview = async (): Promise<Blob> => {
+    const tile = this.container;
+    if (!tile) throw new Error('No tile container set for preview.');
 
-    if (!tile) {
-      throw new Error('No tile container set for image capture.')
+    const { mask } = tile;
+    tile.mask = null;
+
+    const borderIndex = tile.children.findIndex(
+      (c: any) => c.label === BorderColorSprite.name
+    );
+
+    if (borderIndex >= 0) {
+      tile.removeChildAt(borderIndex);
     }
 
-    this.debug.log('tiles', 'ImageCaptureService.capture called with tile:', tile)
+    const { width, height } = this.settings.hexagonDimensions;
 
-    const { mask } = tile
-    tile.visible
-    tile.mask = null
-
-    const { width, height } = this.settings.hexagonDimensions
-
-    // remove border by looking up border layer
-    const index = tile.children.findIndex(
-      (child: Container) => child.label === BorderColorSprite.name
-    )!
-
-    try {
-      if (index < 0) {
-        throw new Error('No border sprite found to remove.')
-      }
-      this.debug.log('tiles', `Removing border sprite at index: ${index}`)
-      tile.removeChildAt(index)
-    } catch (error) {
-      console.error('Error removing border sprite:', error)
-    }
-
-    // Create a render texture for the cropped region with specified dimensions and scale mode
     const renderTexture = RenderTexture.create({
-      width: width,
-      height: height,
+      width,
+      height,
       resolution: 1,
       scaleMode: 'nearest',
-      antialias: false
-    })
+      antialias: false,
+    });
 
-    const options = <RenderOptions>{
-      container: tile,
-      target: renderTexture
-    }
+    const renderer = this.pixi.app!.renderer;
+    renderer.render(<RenderOptions>{ container: tile, target: renderTexture });
 
-    // Render the tile onto the render texture
-    const renderer = this.pixi.app!.renderer
-    renderer.render(options)
+    const canvas = renderer.extract.canvas(renderTexture) as HTMLCanvasElement;
+    const blob = await this.canvasToBlob(canvas);
 
-    // Use renderer.extract to get a canvas and convert it to a Blob
-    const canvas = renderer.extract.canvas(renderTexture) as HTMLCanvasElement
-    const blob = await this.captureBlob(canvas)
+    tile.mask = mask;
+    return blob;
+  };
 
-    tile.mask = mask
-    tile.visible = true
+  // ─────────────────────────────────────────────
+  // 2) CAPTURE ONLY THE IMAGE (NO LAYERS)
+  // ─────────────────────────────────────────────
+  public captureImageOnly = async (): Promise<Blob> => {
+    const tile = this.container;
+    if (!tile) throw new Error("No container set for captureImageOnly");
 
-    return blob
-  }
+    // The positioned sprite is ALWAYS child[0] in TileImageComponent layers
+    const base = tile.children[0];
+    if (!base) throw new Error("No base image sprite found for capture");
 
-  private captureBlob = async (canvas: HTMLCanvasElement): Promise<Blob> => {
-    return new Promise<Blob>((resolve, reject) => {
+    const spriteBounds = base.getBounds();
+    const w = Math.ceil(spriteBounds.width);
+    const h = Math.ceil(spriteBounds.height);
+
+    const rtex = RenderTexture.create({
+      width: w,
+      height: h,
+      resolution: 1,
+      scaleMode: 'nearest',
+      antialias: false,
+    });
+
+    const renderer = this.pixi.app!.renderer;
+    renderer.render(<RenderOptions>{ container: base, target: rtex });
+
+    const canvas = renderer.extract.canvas(rtex) as HTMLCanvasElement;
+    return await this.canvasToBlob(canvas);
+  };
+
+  private canvasToBlob = async (canvas: HTMLCanvasElement): Promise<Blob> =>
+    new Promise((resolve, reject) =>
       canvas.toBlob(
-        (blob) => {
-          if (blob) resolve(blob)
-          else reject(new Error('Failed to create Blob from cropped canvas.'))
-        },
-        'image/webp'
+        blob => blob ? resolve(blob) : reject("Failed blob"),
+        "image/webp"
       )
-    })
-  }
+    );
 }
