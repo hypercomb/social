@@ -211,7 +211,7 @@ export class ContextMenuService extends PixiServiceBase implements IContextMenu 
       event.stopImmediatePropagation()
       event.preventDefault()
       if (this.clickWasAborted() || event.button === 2) return
-      const cell = this.stack.cell()
+      const cell = this.detector.activeCell()!
       if (cell) await this.navigation.openLink(cell)
       await this.hide()
     })
