@@ -2,6 +2,8 @@
 import { CellFlags } from "./models/cell-flags"
 import { IHiveImage } from "../core/models/i-hive-image"
 
+
+
 // simple deterministic hash for hive string → number
 export function hashHive(hive: string): number {
   let hash = 0
@@ -12,7 +14,7 @@ export function hashHive(hive: string): number {
 }
 
 export type CellKind =
-  | ""
+  | "NewCell"
   | "Cell"
   | "Ghost"
   | "Hive"
@@ -24,9 +26,9 @@ export class NewCell extends CellFlags {
   cellId?: number
 
   // ─────────────────────────────────────────────
-  // kind encapsulation
+  // kind encapsulation 
   // ─────────────────────────────────────────────
-  private _kind: CellKind = ""
+  private _kind: CellKind = "NewCell"
   public get kind(): CellKind {
     return this._kind
   }

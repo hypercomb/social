@@ -66,6 +66,8 @@ import { TouchZoomService } from '../pixi/touch-zoom-service'
 import { CopyAction } from '../actions/clipboard/copy-honeycomb'
 import { CloseExternalAction } from '../actions/navigation/close-external'
 import { ColorPicker } from '../services/color-picker'
+import { NewTileAction } from '../actions/cells/new-tile.action'
+import { ImagePreloader } from '../hive/rendering/image-preloader.service'
 
 
 @Injectable({ providedIn: 'root' })
@@ -78,6 +80,7 @@ export class StartUpService {
     // hive
     inject(HiveRouteWatcher),
     inject(HiveService),
+    inject(ImagePreloader),
 
     // state
     inject(StateHub),
@@ -125,6 +128,7 @@ export class StartUpService {
     inject(ImportOpfsHiveAction),
     inject(LockCellAction),
     inject(MouseLockCheckAction),
+    inject(NewTileAction),
     inject(OpenLinkAction),
     inject(RiftAction),
     inject(RebuildHierarchyAction),

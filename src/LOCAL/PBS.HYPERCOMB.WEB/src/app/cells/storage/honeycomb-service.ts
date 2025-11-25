@@ -15,9 +15,7 @@ import { CellOptions } from '../models/cell-options'
 import { safeDate, toCell } from 'src/app/core/mappers/to-cell'
 
 @Injectable({ providedIn: 'root' })
-export class HoneycombService
-  extends DataOrchestratorBase
-  implements ICellService, IModifyComb, IHiveHydration {
+export class HoneycombService extends DataOrchestratorBase implements ICellService, IModifyComb, IHiveHydration {
 
   private readonly ps = inject(PointerState)
 
@@ -31,6 +29,19 @@ export class HoneycombService
   public readonly ready = this._ready.asReadonly()
   public readonly selectedCells = this._selectedCells.asReadonly()
 
+  // ─────────────────────────────────────────────
+  // excluded kinds from persistence
+  // ─────────────────────────────────────────────
+  private static readonly NON_PERSISTABLE: CellKind[] = [
+    'Ghost',
+    'Clipboard',
+    'Path'
+  ]
+
+  private isPersistable(cell: Cell): boolean {
+    return !HoneycombService.NON_PERSISTABLE.includes(cell.kind as CellKind)
+  }
+
   constructor() {
     super()
     this.setupHydrationEffect()
@@ -40,7 +51,6 @@ export class HoneycombService
   // ─────────────────────────────────────────────
   // A. LIFECYCLE
   // ─────────────────────────────────────────────
-
   public flush() {
     return this.honeycomb.store.flush()
   }
@@ -63,34 +73,45 @@ export class HoneycombService
   // ─────────────────────────────────────────────
   // B. CREATION
   // ─────────────────────────────────────────────
-
   public async addCell(newCell: NewCell | Ghost): Promise<Cell> {
     this.ensureValidKind(newCell)
 
-    const entity = toCellEntity(newCell)
-    const cell =
-      newCell.kind === 'Ghost'
-        ? (newCell as unknown as Cell)
-        : <Cell>toCell(await this.repository.add(entity))
+    let cell: Cell
+
+    if (this.isPersistable(newCell as Cell)) {
+      newCell.setKind("Cell")
+      const entity = toCellEntity(newCell)
+      
+      cell = <Cell>toCell(await this.repository.add(entity))
+    } else {
+      // new / ghost cell: memory only
+      cell = newCell as unknown as Cell
+    }
 
     this.staging.stageAdd(cell)
-    this._lastCreated.set(cell)
+    this._lastCreated.set(cell) 
     return cell
   }
 
   public async create(params: Partial<NewCell>, kind: CellKind): Promise<Cell> {
     const nc = this.honeycomb.factory.newCell(params)
-
     nc.setKind(kind)
     this.ensureValidKind(nc)
-
     return <Cell>{}
   }
+
 
   // ─────────────────────────────────────────────
   // C. HYDRATION
   // ─────────────────────────────────────────────
 
+  public enqueueHot(cells: Cell[]): void {
+    if (!Array.isArray(cells)) {
+      cells = [cells]
+    }
+    this.honeycomb.store.enqueueHot(cells)
+  }
+  
   public async hydrate(): Promise<Cell[]> {
     if (this.isFetching()) return []
     if (this.isHydrated()) return this.honeycomb.store.cells()
@@ -111,78 +132,53 @@ export class HoneycombService
   private setupHydrationEffect(): void {
     effect(() => {
       if (!this.ready()) return
-
       const top = this.stack.top()
       if (!top?.cell) return
-
       const parent = top.cell
       if (this.hydratedEnqueued.has(parent.cellId)) return
       if (this.lastHive === parent.cellId) return
-
       this.lastHive = parent.cellId
       this.lazyLoadChildren(parent.cellId)
     })
   }
 
- private async lazyLoadChildren(parentId: number): Promise<void> {
-  try {
-    const rows = await this.repository.fetchBySourceId(parentId)
-    const hasChildren = rows.length > 0
+  private async lazyLoadChildren(parentId: number): Promise<void> {
+    try {
+      const rows = await this.repository.fetchBySourceId(parentId)
+      const hasChildren = rows.length > 0
+      this.state.setHoneycombStatus(!hasChildren)
 
-    this.state.setHoneycombStatus(!hasChildren)
-
-    // ─────────────────────────────────────────────
-    // 1. update parent flags in memory
-    // ─────────────────────────────────────────────
-    const parent = this.honeycomb.store.lookupData(parentId)
-    if (parent) {
-      const newFlag = hasChildren ? 'true' : 'false'
-      if (parent.hasChildrenFlag !== newFlag) {
-        parent.hasChildrenFlag = newFlag
-        this.staging.stageReplace(parent)
+      const parent = this.honeycomb.store.lookupData(parentId)
+      if (parent) {
+        const newFlag = hasChildren ? 'true' : 'false'
+        if (parent.hasChildrenFlag !== newFlag) {
+          parent.hasChildrenFlag = newFlag
+          this.staging.stageReplace(parent)
+        }
       }
-    }
 
-    if (!hasChildren) {
+      if (!hasChildren) {
+        this.hydratedEnqueued.add(parentId)
+        return
+      }
+
+      const cells = rows.map(r => <Cell>toCell(r))
+      for (const child of cells) {
+        const count = await this.repository.fetchChildCount(child.cellId!)
+        child.hasChildrenFlag = count > 0 ? 'true' : 'false'
+      }
+
+      this.staging.stageMerge(cells)
+      this.honeycomb.store.enqueueHot(cells)
       this.hydratedEnqueued.add(parentId)
-      return
+    } catch (err) {
+      console.warn(`[HoneycombService] failed to hydrate hive ${parentId}:`, err)
     }
-
-    // ─────────────────────────────────────────────
-    // 2. map rows → cells
-    // ─────────────────────────────────────────────
-    const cells = rows.map(r => <Cell>toCell(r))
-
-    // ─────────────────────────────────────────────
-    // 3. initialize flags for each child
-    //    (this is the part that fixes your issue)
-    // ─────────────────────────────────────────────
-    for (const child of cells) {
-      // every child has a parent
-      child.hasChildrenFlag = 'true'
-
-      // each child might also have children -> lookup count
-      const count = await this.repository.fetchChildCount(child.cellId!)
-      child.hasChildrenFlag = count > 0 ? 'true' : 'false'
-    }
-
-    // ─────────────────────────────────────────────
-    // 4. stage children and notify store
-    // ─────────────────────────────────────────────
-    this.staging.stageMerge(cells)
-    this.honeycomb.store.enqueueHot(cells)
-    this.hydratedEnqueued.add(parentId)
-
-  } catch (err) {
-    console.warn(`[HoneycombService] failed to hydrate hive ${parentId}:`, err)
   }
-}
-
 
   // ─────────────────────────────────────────────
   // E. REMOVAL
   // ─────────────────────────────────────────────
-
   public async removeCell(cell: Cell): Promise<void> {
     cell.options.update(o => o | CellOptions.Deleted)
     cell.dateDeleted = safeDate(new Date()) || ''
@@ -220,7 +216,6 @@ export class HoneycombService
   // ─────────────────────────────────────────────
   // F. UPDATES
   // ─────────────────────────────────────────────
-
   public async moveCell(_: string, cell: Cell): Promise<void> {
     await this.repository.update(toCellEntity(cell))
     this.staging.stageRemove(cell.cellId!)
@@ -237,10 +232,8 @@ export class HoneycombService
   }
 
   public async updateCell(cell: Cell): Promise<number> {
-    if (cell.kind === 'Ghost' || !cell.kind) return 0
-
+    if (!this.isPersistable(cell)) return 0
     this.ensureValidKind(cell)
-
     const res = await this.repository.update(toCellEntity(cell))
     this.staging.stageReplace(cell)
     this.honeycomb.store.enqueueHot([cell])
@@ -254,7 +247,7 @@ export class HoneycombService
   }
 
   public async updateSilent(cell: Cell): Promise<number> {
-    if (cell.kind === 'Ghost') return 0
+    if (!this.isPersistable(cell)) return 0
     this.ensureValidKind(cell)
     return this.repository.update(toCellEntity(cell))
   }
@@ -273,7 +266,6 @@ export class HoneycombService
   // ─────────────────────────────────────────────
   // G. HELPERS
   // ─────────────────────────────────────────────
-
   private ensureValidKind(cell: { kind?: string; name?: string }): void {
     if (!cell.kind) {
       const name = cell.name ?? '(unnamed cell)'

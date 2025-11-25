@@ -111,7 +111,7 @@ export class OpfsHiveService {
 
     // check if a ready hive already exists
     let readyExists = false
-    try {
+    try { 
       await this.opfs.getFile(hives, fileName)
       readyExists = true
     } catch {

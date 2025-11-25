@@ -1,5 +1,6 @@
 import { Injectable, inject, effect, untracked } from "@angular/core"
 import { CellPayload, PayloadBase } from "src/app/actions/action-contexts"
+import { NewTileAction } from "src/app/actions/cells/new-tile.action"
 import { ViewPhotoAction } from "src/app/actions/cells/view-photo"
 import { BackHiveAction } from "src/app/actions/navigation/back.action"
 import { BranchAction } from "src/app/actions/navigation/branch.action"
@@ -25,7 +26,7 @@ export class TilePointerManager extends PixiServiceBase {
   private readonly selectionMove = inject(SelectionMoveManager)
 
   // actions ordered by priority
-  private readonly leftActions = [inject(BranchAction), inject(RiftAction), inject(ViewPhotoAction)] as const
+  private readonly leftActions = [inject(BranchAction), inject(NewTileAction), inject(RiftAction), inject(ViewPhotoAction)] as const
   private readonly rightActions = [inject(BackHiveAction)] as const
 
   // gate: block clicks when moving tiles or control is pressed
