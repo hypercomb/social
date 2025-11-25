@@ -54,7 +54,7 @@ export class NewCell extends CellFlags {
   dateCreated: string = new Date().toISOString()
   dateDeleted?: string
   updatedAt: string = new Date().toISOString()
-
+  
   // misc fields
   backgroundColor = ""
   borderColor = "#222"

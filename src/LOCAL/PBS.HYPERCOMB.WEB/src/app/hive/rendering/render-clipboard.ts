@@ -2,11 +2,10 @@
 import { Injectable, inject } from "@angular/core"
 import { PixiManager } from "src/app/pixi/pixi-manager"
 import { CellFactory } from "src/app/inversion-of-control/factory/cell-factory"
-import { ContextMenuService } from "src/app/navigation/menus/context-menu-service"
 import { CellPayload } from "src/app/actions/action-contexts"
 import { Action } from "src/app/actions/action-models"
 import { Hypercomb } from "src/app/core/mixins/abstraction/hypercomb.base"
-import { TILE_FACTORY } from "src/app/shared/tokens/i-hypercomb.token"
+import { CONTEXT_MENU, TILE_FACTORY } from "src/app/shared/tokens/i-hypercomb.token"
 
 @Injectable({ providedIn: "root" })
 export class RenderClipboardCommand extends Hypercomb implements Action<CellPayload> {
@@ -14,8 +13,7 @@ export class RenderClipboardCommand extends Hypercomb implements Action<CellPayl
   public label = "Render Clipboard"
   public description = "Render a cell while in clipboard mode"
 
-  private readonly contextMenu = inject(ContextMenuService)
-  private readonly tileHack = inject(TileBlobHack)
+  private readonly contextMenu = inject(CONTEXT_MENU)
   private readonly tdFactory = inject(CellFactory)
   private readonly tileFactory = inject(TILE_FACTORY)
   private readonly pixiStartup = inject(PixiManager)

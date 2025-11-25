@@ -16,7 +16,13 @@ export class NewTileAction extends ActionBase<PayloadBase> {
   private readonly factory = inject(CellFactory)
   private readonly panning = inject(PanningManager)
 
-  // ... enabled(...) unchanged ...
+  public override enabled = async (_: PayloadBase): Promise<boolean> => {
+    const parent = this.detector.activeCell()!
+    if (!parent) return false
+
+    // only when hive has zero children
+    return parent.hasChildrenFlag !== 'true'
+  }
 
   public override run = async (payload: PayloadBase) => {
     const parent = this.detector.activeCell()!
@@ -27,6 +33,7 @@ export class NewTileAction extends ActionBase<PayloadBase> {
     // build a simple centered tile
     const newTile = this.factory.newCell({
       name: "",
+      index: 0,
       hive: parent.hive,
       sourceId: parent.cellId,
       hasChildrenFlag: "false",
@@ -35,7 +42,7 @@ export class NewTileAction extends ActionBase<PayloadBase> {
 
     parent.x = 0
     parent.y = 0
-    parent.scale = 1.6
+    parent.scale = 1.2
 
     // center and make larger
     await this.modify.updateCell(parent)
@@ -50,7 +57,8 @@ export class NewTileAction extends ActionBase<PayloadBase> {
 
     const options = <CellPayload>{ ...payload, cell: parent }
 
-    await this.registry.invoke(BranchAction.ActionId, options)
-    // visually centered (RenderScheduler will fix)
+    setTimeout(async () => {
+      await this.registry.invoke(BranchAction.ActionId, options)
+    }, 50)
   }
 }

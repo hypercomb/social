@@ -33,6 +33,7 @@ export class HoneycombService extends DataOrchestratorBase implements ICellServi
   // excluded kinds from persistence
   // ─────────────────────────────────────────────
   private static readonly NON_PERSISTABLE: CellKind[] = [
+    // 'NewCell', 
     'Ghost',
     'Clipboard',
     'Path'
