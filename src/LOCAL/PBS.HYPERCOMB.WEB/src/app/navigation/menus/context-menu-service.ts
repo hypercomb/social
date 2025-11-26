@@ -8,7 +8,7 @@ import { LocalAssets } from "src/app/helper/constants"
 import { LinkNavigationService } from "../link-navigation-service"
 import { PolicyService } from "./policy-service"
 import { Cell } from "src/app/cells/cell"
-import { CombStore } from "src/app/cells/storage/honeycomb-store"
+import { HoneycombStore } from "src/app/cells/storage/honeycomb-store"
 import { Events } from "src/app/helper/events/events"
 import { takeUntilDestroyed } from "@angular/core/rxjs-interop"
 import { fromEvent } from "rxjs"
@@ -22,7 +22,7 @@ export class ContextMenuService extends PixiServiceBase implements IContextMenu 
   private readonly detector = inject(CoordinateDetector)
   private readonly layout = inject(LayoutState)
   private readonly navigation = inject(LinkNavigationService)
-  private readonly store = inject(CombStore)
+  private readonly store = inject(HoneycombStore)
   private readonly policy = inject(PolicyService)
   private readonly destroyRef = inject(DestroyRef)
 

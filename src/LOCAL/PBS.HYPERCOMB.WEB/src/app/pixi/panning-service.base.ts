@@ -221,7 +221,9 @@ export abstract class PanningServiceBase extends PixiDataServiceBase {
   }
 
   protected abstract shouldStart(down: PointerEvent): boolean
-  protected abstract isMoveRelevant(move: PointerEvent): boolean
+  protected  isMoveRelevant(move: PointerEvent) : boolean {
+    return true
+  } 
   protected getPanThreshold(): number {
     return this.PAN_THRESHOLD
   }

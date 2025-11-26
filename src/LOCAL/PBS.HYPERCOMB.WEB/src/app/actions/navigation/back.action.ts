@@ -14,7 +14,7 @@ export class BackHiveAction extends ActionBase<PayloadBase> {
   private readonly hydration = inject(HIVE_HYDRATION)
   private readonly panning = inject(PanningManager)             // ⬅️ add this
   private readonly carouselsvc = inject(CarouselService)
-  
+
   public static ActionId = 'hive.back'
   public id = BackHiveAction.ActionId
   public override label = "Back"
@@ -24,7 +24,7 @@ export class BackHiveAction extends ActionBase<PayloadBase> {
     const size = this.stack.size()
 
     if (hasEvent(payload)) {
-      return size > 1 
+      return size > 1
     } else {
       const down = this.pointerstate.rightButtonDown() && size > 1
       return down
@@ -32,15 +32,21 @@ export class BackHiveAction extends ActionBase<PayloadBase> {
   }
 
   public override run = async (): Promise<void> => {
-
     await this.registry.invoke(CloseExternalAction.ActionId)
 
-    // 🔹 Ensure no stale pan/spacebar state survives across hives
     this.panning.getSpacebar().cancelPanSession()
     this.panning.getTouch().cancelPanSession()
-    this.state.resetMode
+    this.state.resetMode()
+
+    // wipe all rendered tiles immediately
     this.combstore.invalidate()
+
+    // wipe hydration state (so new hive loads clean)
     this.hydration.reset()
+
+    // go back
     this.stack.pop()
+    
   }
+
 }

@@ -76,7 +76,7 @@ export class StartUpService {
     // visuals
     inject(ContainerBackgroundService),
     inject(ColorPicker),
-
+    
     // hive
     inject(HiveRouteWatcher),
     inject(HiveService),
@@ -106,7 +106,7 @@ export class StartUpService {
     inject(SelectionMoveManager),
 
     // rendering
-    inject(TilePointerManager),
+    inject(TilePointerManager), 
 
     // actions
     

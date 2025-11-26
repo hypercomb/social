@@ -24,6 +24,7 @@ export class Tile extends Container {
     }
 
     this.eventMode = 'dynamic'
+    this.on('pointertap', () => console.log("TAP"))
   }
 
   public applyTexture(texture: Texture) {

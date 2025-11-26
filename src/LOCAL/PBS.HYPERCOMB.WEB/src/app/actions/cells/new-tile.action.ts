@@ -6,6 +6,7 @@ import { CellFactory } from "src/app/inversion-of-control/factory/cell-factory"
 import { PanningManager } from "src/app/pixi/panning-manager"
 import { BranchAction } from "../navigation/branch.action"
 import { ImagePreloader } from "src/app/hive/rendering/image-preloader.service"
+
 @Injectable({ providedIn: "root" })
 export class NewTileAction extends ActionBase<PayloadBase> {
   public static ActionId = "tile.new"
@@ -57,8 +58,6 @@ export class NewTileAction extends ActionBase<PayloadBase> {
 
     const options = <CellPayload>{ ...payload, cell: parent }
 
-    setTimeout(async () => {
-      await this.registry.invoke(BranchAction.ActionId, options)
-    }, 50)
+    await this.registry.invoke(BranchAction.ActionId, options)
   }
 }

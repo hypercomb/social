@@ -9,7 +9,6 @@ export class SpacebarPanningService extends PanningServiceBase {
 
   // base wired effects won't use these for keyboard panning
   protected shouldStart(): boolean { return false }
-  protected isMoveRelevant(): boolean { return true }
   protected override getPanThreshold(): number { return 0 }
 
   constructor() {

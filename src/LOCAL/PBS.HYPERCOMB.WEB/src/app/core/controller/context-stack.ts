@@ -41,9 +41,16 @@ export class ContextStack {
     let popped: StackEntry | undefined
 
     this._stack.update(list => {
+      // prevent popping the last remaining entry
+      if (list.length <= 1) {
+        popped = undefined
+        return list
+      }
+
       popped = list.at(-1)
       return list.slice(0, -1)
     })
+
     return popped
   }
 

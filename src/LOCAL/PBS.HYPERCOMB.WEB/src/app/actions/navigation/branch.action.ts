@@ -40,6 +40,6 @@ export class BranchAction extends ActionBase<CellPayload> {
     payload.event?.preventDefault()
     this.combstore.invalidate()
     this.stack.push(payload.cell!)
-    setTimeout(() => this.menu.hide(), 10)
+    setTimeout(() => this.menu.hide(), 50)
   }
 }

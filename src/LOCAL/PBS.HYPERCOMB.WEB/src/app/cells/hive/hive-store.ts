@@ -62,11 +62,17 @@ export class HiveStore implements IControlHives, IHiveState, IHiveLookup {
     public readonly combCells = computed<Cell[]>(() => {
         const cell = this.stack.cell()!
         if (!cell) return []
+
         const hive = cell.hive
         const cellId = cell.cellId
         if (!hive || cellId == null) return []
-        return this.store.cells().filter(c => c.sourceId === cellId)
+
+        // ensure we only show children from the active hive + parent
+        return this.store.cells().filter(c =>
+            c.hive === hive && c.sourceId === cellId
+        )
     })
+
 
     public readonly combTiles = computed<Tile[]>(() => {
         const cells = this.combCells()
