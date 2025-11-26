@@ -1,85 +1,109 @@
-// src/app/state/input/tile-pointer-manager.ts
+// src/app/user-interface/sprite-components/tile-pointer-manager.ts
 import { Injectable, inject } from "@angular/core"
 import { ACTION_REGISTRY } from "src/app/shared/tokens/i-hypercomb.token"
 import { POLICY } from "src/app/core/models/enumerations"
 import { PolicyService } from "src/app/navigation/menus/policy-service"
-import { SelectionMoveManager } from "src/app/cells/selection/selection-move-manager"
 import { NewTileAction } from "src/app/actions/cells/new-tile.action"
 import { ViewPhotoAction } from "src/app/actions/cells/view-photo"
 import { BranchAction } from "src/app/actions/navigation/branch.action"
 import { RiftAction } from "src/app/actions/navigation/path"
 import { PayloadBase } from "src/app/actions/action-contexts"
-import { SELECTIONS } from "src/app/shared/tokens/i-selection.token"
 import { TileSelectionManager } from "src/app/cells/selection/tile-selection-manager"
+import { SelectionMoveManager } from "src/app/cells/selection/selection-move-manager"
+import { Cell } from "src/app/cells/cell"
 
 @Injectable({ providedIn: "root" })
 export class TilePointerManager {
   private readonly policy = inject(PolicyService)
   private readonly registry = inject(ACTION_REGISTRY)
-  private readonly selections = inject(SELECTIONS)
-  private readonly manager = inject(TileSelectionManager)
+  private readonly selection = inject(TileSelectionManager)
+  private readonly moveManager = inject(SelectionMoveManager)
 
-  private readonly isBlocked = this.policy.any(
-    POLICY.MovingTiles,
-    POLICY.ControlDown,
-  )
+  // policy helper (still works whether .all returns a signal or fn)
+  private readonly moveModeSignal = this.policy.all(POLICY.MovingTiles)
+  private isMoveMode = (): boolean => this.moveModeSignal()
 
-  // actions
+  // actions (navigation, edit, etc.)
   private readonly leftActions = [
     inject(BranchAction),
     inject(NewTileAction),
     inject(RiftAction),
-    inject(ViewPhotoAction)
+    inject(ViewPhotoAction),
   ] as const
 
   // --------------------------------------------------------------------
   // attach events to the tile instance (called from RenderTileAction)
   // --------------------------------------------------------------------
-  public attach(tile: any, cell: any): void {
-    tile.on("pointertap", (event: PointerEvent) => {
-      // 1. if selection is blocked (moving, ctrl-down override, etc)
-      if (this.isBlocked()) return  
+  public attach(tile: any, cell: Cell): void {
+    // make sure tile actually receives pointer events
+    tile.eventMode = "static"
 
-      // 2. handle tile selection first
-      this.handleSelection(cell, event)
+    // avoid stacking multiple handlers if attach is called repeatedly
+    tile.removeAllListeners("pointertap")
+    tile.removeAllListeners("pointerdown")
+    tile.removeAllListeners("pointerenter")
 
-      // 3. then dispatch navigation/actions
-      this.dispatch(this.leftActions, cell, event)
+    // ------------------------------------------------------------------
+    // pointertap = primary behavior
+    // ------------------------------------------------------------------
+    tile.on("pointertap", async (event: PointerEvent) => {
+      // move mode: tiles are move handles only, no nav / actions
+      if (this.isMoveMode()) {
+        return
+      }
+
+      // ctrl/meta → selection only, no actions
+      if (event.ctrlKey || event.metaKey) {
+        // use your existing selection logic, but ONLY when ctrl/meta is down
+        this.selection.handleTap(cell, event)
+        return
+      }
+
+      // normal click: NO selection, ONLY actions (navigation / edit)
+      await this.dispatch(this.leftActions, cell, event)
     })
 
+    // ------------------------------------------------------------------
+    // pointerdown: move mode or starting ctrl/meta drag-select
+    // ------------------------------------------------------------------
     tile.on("pointerdown", (event: PointerEvent) => {
-      if (event.  pointerType !== "mouse") return;
+      if (event.button !== 0 || event.pointerType !== "mouse") return
 
-      // drag-select only when ctrl/meta held
-      if (!event.ctrlKey && !event.metaKey) return;
+      // move mode: start a move gesture using this tile as leader
+      if (this.isMoveMode()) {
+        this.moveManager.beginDrag(cell, event)
+        event.stopPropagation()
+        return
+      }
 
-      // start drag selection gesture
-      this.manager.beginGesture(cell, event);
+      // selection mode: ctrl/meta + drag = paint selection
+      if (event.ctrlKey || event.metaKey) {
+        this.selection.beginDrag(cell, event)
+        event.stopPropagation()
+      }
+      // normal clicks do NOT go through selection manager here
+    })
 
-      // critical: prevent tap from firing afterwards
-      event.stopPropagation();
-    });
-
+    // ------------------------------------------------------------------
+    // pointerenter: only used for ctrl/meta drag-select (not in move mode)
+    // ------------------------------------------------------------------
     tile.on("pointerenter", (event: PointerEvent) => {
-        this.manager.applyOpIfNeeded(cell);
+      if (this.isMoveMode()) return
+
+      // only hover-select while mouse is held + ctrl/meta
+      const buttonsDown = (event as any).buttons ?? 0
+      if (!buttonsDown) return
+      if (!event.ctrlKey && !event.metaKey) return
+
+      this.selection.hoverDrag(cell)
     })
   }
-  
-  private handleSelection(cell: any, event: PointerEvent): void {
-    // ctrl/meta → toggle multi-select
-    if (event.ctrlKey || event.metaKey) {
-      this.selections.toggle(cell)
-      return
-    }
 
-    // normal tap → select single tile
-    // clear previous unless ctrl held
-    this.selections.clear()
-    this.selections.add(cell)
-  }
-
-
-  private async dispatch(actions: readonly { id: string }[], cell: any, event: PointerEvent) {
+  private async dispatch(
+    actions: readonly { id: string }[],
+    cell: Cell,
+    event: PointerEvent
+  ) {
     const payload = <PayloadBase>{ kind: "cell", cell, event }
 
     for (const action of actions) {

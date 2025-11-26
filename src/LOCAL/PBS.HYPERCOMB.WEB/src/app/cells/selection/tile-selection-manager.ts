@@ -1,34 +1,85 @@
-﻿import { Injectable, inject, effect, untracked } from "@angular/core"
-import { isSelected } from "../models/cell-filters"
-import { SELECTIONS } from "src/app/shared/tokens/i-selection.token"
+﻿import { Injectable, inject } from "@angular/core"
 import { Cell } from "../cell"
+import { SELECTIONS } from "src/app/shared/tokens/i-selection.token"
 import { PixiServiceBase } from "src/app/pixi/pixi-service-base"
 
-@Injectable({ providedIn: 'root' })
+@Injectable({ providedIn: "root" })
 export class TileSelectionManager extends PixiServiceBase {
   private readonly selections = inject(SELECTIONS)
 
-  private lastOp: boolean | null = null        // true = add, false = remove
-  private touched = new Set<number>()          // cellIds processed this press
+  // drag-select state
+  private dragActive = false
+  private lastOp: "add" | "remove" | null = null // what are we doing this gesture?
+  private touched = new Set<number>()            // one op per tile per gesture
 
   constructor() {
     super()
+  }
 
-    this.pixi.container!.on("pointerup", (ev: PointerEvent) => {  
-      this.lastOp = null
+  // container pointerup ends any selection gesture
+  protected override onPixiReady(): void {
+    this.pixi.container!.on("pointerup", () => {
+      this.endDrag()
     })
   }
 
-  public applyOpIfNeeded(cell: any) {
-    if(this.lastOp === null) return
+  // ---------- public api used by TilePointerManager ----------
 
-    // one op per tile per press
+  // simple click selection (no ctrl-drag)
+  public handleTap = (cell: Cell, event: PointerEvent): void => {
+    // ctrl/meta → toggle multi-select
+    if (event.ctrlKey || event.metaKey) {
+      this.selections.toggle(cell)
+      return
+    }
+
+    // normal tap → single select
+    this.selections.clear()
+    this.selections.add(cell)
+  }
+
+
+  // start ctrl/meta drag selection
+  public beginDrag = (cell: Cell, event: PointerEvent): void => {
+    if (!event.ctrlKey && !event.metaKey) return
+
+    this.dragActive = true
+    this.touched.clear()
+
+    const selectedNow = this.isCellSelected(cell)
+    this.lastOp = selectedNow ? "remove" : "add"
+
+    this.applyOpIfNeeded(cell)
+  }
+
+  // pointerenter while drag is active
+  public hoverDrag = (cell: Cell): void => {
+    if (!this.dragActive || !this.lastOp) return
+    this.applyOpIfNeeded(cell)
+  }
+
+  public endDrag = (): void => {
+    this.dragActive = false
+    this.lastOp = null
+    this.touched.clear()
+  }
+
+  // ---------- helpers ----------
+
+  private isCellSelected(cell: Cell): boolean {
+    const arr = this.selections.items()
+    return arr.some(c => c.cellId === cell.cellId)
+  }
+
+  private applyOpIfNeeded(cell: Cell): void {
+    if (!this.lastOp) return
+
     const cellId = cell.cellId
     if (this.touched.has(cellId)) return
 
-    // idempotence: only change when needed
-    const selected = isSelected(cell)
-    if (this.lastOp) {
+    const selected = this.isCellSelected(cell)
+
+    if (this.lastOp === "add") {
       if (!selected) this.selections.add(cell)
     } else {
       if (selected) this.selections.remove(cell)
@@ -36,15 +87,4 @@ export class TileSelectionManager extends PixiServiceBase {
 
     this.touched.add(cellId)
   }
-
-  public beginGesture(cell: Cell, event: PointerEvent) {
-    // determine op
-    const selected = isSelected(cell);
-    this.lastOp = !selected; // same logic as before
-    this.touched.clear();
-
-    // apply to first tile
-    this.applyOpIfNeeded(cell);
-  }
-
 }
