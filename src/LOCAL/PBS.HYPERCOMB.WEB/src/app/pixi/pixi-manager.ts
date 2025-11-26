@@ -124,7 +124,7 @@ export class PixiManager {
       return this._app
     })()
 
-    ; (window as any).app = this._app // debug hook
+      ; (window as any).app = this._app // debug hook
     return this._initPromise
   }
 

@@ -9,13 +9,16 @@ import { ViewPhotoAction } from "src/app/actions/cells/view-photo"
 import { BranchAction } from "src/app/actions/navigation/branch.action"
 import { RiftAction } from "src/app/actions/navigation/path"
 import { PayloadBase } from "src/app/actions/action-contexts"
+import { SELECTIONS } from "src/app/shared/tokens/i-selection.token"
+import { TileSelectionManager } from "src/app/cells/selection/tile-selection-manager"
 
 @Injectable({ providedIn: "root" })
 export class TilePointerManager {
   private readonly policy = inject(PolicyService)
   private readonly registry = inject(ACTION_REGISTRY)
-  private readonly selectionMove = inject(SelectionMoveManager)
-  
+  private readonly selections = inject(SELECTIONS)
+  private readonly manager = inject(TileSelectionManager)
+
   private readonly isBlocked = this.policy.any(
     POLICY.MovingTiles,
     POLICY.ControlDown,
@@ -34,11 +37,47 @@ export class TilePointerManager {
   // --------------------------------------------------------------------
   public attach(tile: any, cell: any): void {
     tile.on("pointertap", (event: PointerEvent) => {
-      if (this.isBlocked()) return
-      if (this.selectionMove.isDragging()) return
+      // 1. if selection is blocked (moving, ctrl-down override, etc)
+      if (this.isBlocked()) return  
+
+      // 2. handle tile selection first
+      this.handleSelection(cell, event)
+
+      // 3. then dispatch navigation/actions
       this.dispatch(this.leftActions, cell, event)
     })
+
+    tile.on("pointerdown", (event: PointerEvent) => {
+      if (event.  pointerType !== "mouse") return;
+
+      // drag-select only when ctrl/meta held
+      if (!event.ctrlKey && !event.metaKey) return;
+
+      // start drag selection gesture
+      this.manager.beginGesture(cell, event);
+
+      // critical: prevent tap from firing afterwards
+      event.stopPropagation();
+    });
+
+    tile.on("pointerenter", (event: PointerEvent) => {
+        this.manager.applyOpIfNeeded(cell);
+    })
   }
+  
+  private handleSelection(cell: any, event: PointerEvent): void {
+    // ctrl/meta → toggle multi-select
+    if (event.ctrlKey || event.metaKey) {
+      this.selections.toggle(cell)
+      return
+    }
+
+    // normal tap → select single tile
+    // clear previous unless ctrl held
+    this.selections.clear()
+    this.selections.add(cell)
+  }
+
 
   private async dispatch(actions: readonly { id: string }[], cell: any, event: PointerEvent) {
     const payload = <PayloadBase>{ kind: "cell", cell, event }

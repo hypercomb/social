@@ -12,7 +12,7 @@ import { HONEYCOMB_SVC } from "../shared/tokens/i-comb-service.token"
 import { ScreenService } from "../services/screen-service"
 
 export abstract class PixiServiceBase {
-  protected readonly cellstate = inject(HONEYCOMB_SVC)
+  protected readonly honeycombsvc = inject(HONEYCOMB_SVC)
   protected readonly storage = inject(StorageManager)
   protected readonly screen = inject(ScreenService)
   protected readonly debug = inject(DebugService)
