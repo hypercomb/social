@@ -71,35 +71,37 @@ export class TilePointerManager {
     tile.on("pointerdown", (event: PointerEvent) => {
       if (event.button !== 0 || event.pointerType !== "mouse") return
 
-      // move mode: start a move gesture using this tile as leader
-      if (this.isMoveMode()) {
-        this.moveManager.beginDrag(cell, event)
+      const ctrl = event.ctrlKey || event.metaKey
+      const move = this.isMoveMode()
+
+      // allow ctrl selection even in move mode
+      if (ctrl) {
+        this.selection.beginDrag(cell, event)
         event.stopPropagation()
         return
       }
 
-      // selection mode: ctrl/meta + drag = paint selection
-      if (event.ctrlKey || event.metaKey) {
-        this.selection.beginDrag(cell, event)
+      if (move) {
+        this.moveManager.beginDrag(cell, event)
         event.stopPropagation()
+        return
       }
-      // normal clicks do NOT go through selection manager here
     })
+
 
     // ------------------------------------------------------------------
     // pointerenter: only used for ctrl/meta drag-select (not in move mode)
     // ------------------------------------------------------------------
-    tile.on("pointerenter", async (event: PointerEvent) => {
-      if (this.isMoveMode()) return
+    tile.on("pointerenter", (event: PointerEvent) => {
+      const ctrl = event.ctrlKey || event.metaKey
+      if (ctrl) {
+        this.selection.hoverDrag(cell)
+        return
+      }
 
-      await this.menu.show(cell)
-      // only hover-select while mouse is  held + ctrl/meta
-      const buttonsDown = (event as any).buttons ?? 0
-      if (!buttonsDown) return
-      if (!event.ctrlKey && !event.metaKey) return
-
-      this.selection.hoverDrag(cell)
+      if (!this.isMoveMode()) this.menu.show(cell)
     })
+
 
     tile.on("pointerleave", async (event: PointerEvent) => {
       await this.menu.hide()
