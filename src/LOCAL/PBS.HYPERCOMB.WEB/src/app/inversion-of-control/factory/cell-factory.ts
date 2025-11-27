@@ -1,6 +1,4 @@
-﻿// src/app/common/tile-editor/tile-image/tile-image.component.ts
-// SIH-compliant CellFactory
-
+﻿// src/app/inversion-of-control/factory/cell-factory.ts
 import { inject, Injectable } from "@angular/core"
 import { toCell, safeDate } from "src/app/core/mappers/to-cell"
 import { toCellEntity } from "src/app/core/mappers/to-cell-entity"
@@ -18,7 +16,9 @@ export class CellFactory
   private readonly stack = inject(ContextStack)
   private readonly preloader = inject(ImagePreloader)
 
+  // ───────────────────────────────────────────────
   // map / unmap
+  // ───────────────────────────────────────────────
   public map<T extends Cell | NewCell>(entity: CellEntity): T {
     return toCell(entity) as T
   }
@@ -27,7 +27,9 @@ export class CellFactory
     return toCellEntity(domain)
   }
 
-  // BASE new cell
+  // ───────────────────────────────────────────────
+  // base new cell
+  // ───────────────────────────────────────────────
   public newCell(params: Partial<NewCell>): NewCell {
     return new NewCell({
       ...params,
@@ -36,7 +38,9 @@ export class CellFactory
     })
   }
 
-  // concrete Cell creation
+  // ───────────────────────────────────────────────
+  // concrete cell creation
+  // ───────────────────────────────────────────────
   public async create(
     params: Partial<NewCell> & { cellId: number },
     kind: CellKind
@@ -61,22 +65,25 @@ export class CellFactory
     })
   }
 
-  // ---------------------------------------------------------------------
-  // FIXED GHOST CREATION
-  // ---------------------------------------------------------------------
+  // ───────────────────────────────────────────────
+  // ghost cell for hover preview
+  // ───────────────────────────────────────────────
   public async createGhost(params: Partial<NewCell> = {}): Promise<Ghost> {
-    const imageHash = this.preloader.getInitialTileHash()
-    if (!imageHash) {
-      throw new Error("initial tile hash was not preloaded")
-    }
+    const parent = this.stack.cell()
+    const hive = (params as any).hive ?? parent?.hive ?? this.stack.hiveName()
+    const index = (params as any).index ?? 0
+
+    const imageHash =
+      (params as any).imageHash ??
+      this.preloader.getInitialTileHash() ??
+      ""
 
     return new Ghost({
       ...params,
-      kind: "Ghost",
-      hive: this.stack.hiveName(),
+      hive,
+      index,
       imageHash,
       dateCreated: safeDate(new Date()),
-      isDeleted: false
     })
   }
 
@@ -102,7 +109,9 @@ export class CellFactory
     })
   }
 
+  // ───────────────────────────────────────────────
   // clones
+  // ───────────────────────────────────────────────
   public clone(
     original: Cell | NewCell,
     overrides: Partial<NewCell> = {}
