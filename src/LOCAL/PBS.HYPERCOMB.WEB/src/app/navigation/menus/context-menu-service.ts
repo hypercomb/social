@@ -78,6 +78,7 @@ export class ContextMenuService extends PixiServiceBase implements IContextMenu 
 
   public show = async (cell: Cell): Promise<void> => {
     if (this.isBlocked()) return
+    
     this.isVisible.set(true)
     this.menuContainer.alpha = 1
 
@@ -105,7 +106,7 @@ export class ContextMenuService extends PixiServiceBase implements IContextMenu 
     this.menuContainer.alpha = 0
     await this.addContainer(0, 0)
 
-    this.menuContainer.eventMode = "static"
+    this.menuContainer.eventMode = "passive"
     this.menuContainer.interactive = true
     this.menuContainer.hitArea = new Rectangle(0, 0, 60.5, 249)
 

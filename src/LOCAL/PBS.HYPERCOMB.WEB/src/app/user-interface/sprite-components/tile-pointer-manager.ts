@@ -44,7 +44,7 @@ export class TilePointerManager {
     tile.removeAllListeners("pointertap")
     tile.removeAllListeners("pointerdown")
     tile.removeAllListeners("pointerenter")
-
+    tile.removeAllListeners("pointerleave")
     // ------------------------------------------------------------------
     // pointertap = primary behavior
     // ------------------------------------------------------------------
@@ -106,11 +106,7 @@ export class TilePointerManager {
     })
   }
 
-  private async dispatch(
-    actions: readonly { id: string }[],
-    cell: Cell,
-    event: PointerEvent
-  ) {
+  private async dispatch(actions: readonly { id: string }[], cell: Cell, event: PointerEvent) {
     const payload = <PayloadBase>{ kind: "cell", cell, event }
 
     for (const action of actions) {

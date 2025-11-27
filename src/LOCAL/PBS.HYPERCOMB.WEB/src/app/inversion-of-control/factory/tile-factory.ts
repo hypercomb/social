@@ -15,7 +15,6 @@ export class TileFactory extends PixiDataServiceBase {
     private readonly mask = inject(MaskComponent)
     private readonly texture = inject(TextureService)
     private readonly store = inject(HONEYCOMB_STORE)
-    private readonly blob = inject(BlobService)
 
     public async create(cell: Cell): Promise<Tile> {
         if (cell.cellId == null) {
@@ -26,8 +25,8 @@ export class TileFactory extends PixiDataServiceBase {
         tile.eventMode = "static"
 
         // set initial position
-        const { x, y } = this.pixi.getOffset(cell.index)
-        tile.setPosition(new Point(x, y))
+        const point = this.pixi.getOffset(cell.index)
+        tile.setPosition(point)
 
         // assign texture
         const texture = await this.texture.getTexture(cell)

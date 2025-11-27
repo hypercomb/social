@@ -37,7 +37,7 @@ export class Tile extends Container {
   }
 
   public setPosition(location: Point) {
-    this.position.copyFrom(location)
+    this.position.set(location.x, location.y)
   }
 
   public requestPositionUpdate(x: number, y: number, index?: number) {

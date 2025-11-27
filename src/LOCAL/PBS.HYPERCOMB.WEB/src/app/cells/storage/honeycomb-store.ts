@@ -68,11 +68,19 @@ export class HoneycombStore extends Hypercomb implements IHoneycombStore, IStagi
     const id = cell.cellId
     if (!id) throw new Error("Cannot register tile without cellId")
 
+    const existing = this.tileRegistry.get(id)
+    if (existing && existing !== tile) {
+      // remove old tile from stage and destroy it
+      existing.parent?.removeChild(existing as unknown as Container)
+      existing.destroy({ children: true })
+    }
+
     this.tileRegistry.set(id, tile)
     this.dataRegistry.set(id, cell)
 
     this.refreshSurface()
   }
+
 
   public unregister(cellId: number): void {
     const tile = this.tileRegistry.get(cellId)
