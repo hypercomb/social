@@ -1,9 +1,12 @@
 // src/app/cells/creation/ghost-tile.directive.ts
-import { Directive, effect } from "@angular/core"
+import { Directive, effect, inject } from "@angular/core"
+import { Container } from "pixi.js"
 import { HypercombLayout } from "src/app/core/mixins/abstraction/hypercomb.base"
 import { HypercombMode } from "src/app/core/models/enumerations"
 import { AxialCoordinate } from "src/app/core/models/axial-coordinate"
 import { Cell, Ghost, NewCell } from "../cell"
+import { PixiManager } from "src/app/pixi/pixi-manager"
+import { TILE_FACTORY } from "src/app/shared/tokens/i-hypercomb.token"
 
 @Directive({
   selector: "[ghost-tile]",
@@ -14,6 +17,11 @@ export class GhostTileDirective extends HypercombLayout {
   private activeIndex: number | null = null
   private committing = false
   private lastUpSeq = 0
+
+  // new: pixi + tile factory + sprite handle
+  private readonly pixi = inject(PixiManager)
+  private readonly tileFactory = inject(TILE_FACTORY)
+  private ghostSprite?: Container
 
   constructor() {
     super()
@@ -26,17 +34,14 @@ export class GhostTileDirective extends HypercombLayout {
 
       const coord = this.detector.emptyCoordinate()
 
-      // nothing under pointer → remove ghost
       if (!coord) {
         this.destroyGhost()
         this.activeIndex = null
         return
       }
 
-      // unchanged tile index → do nothing
       if (coord.index === this.activeIndex) return
 
-      // new position → recreate ghost
       this.activeIndex = coord.index
       this.createGhostAt(coord)
     })
@@ -54,8 +59,6 @@ export class GhostTileDirective extends HypercombLayout {
       if (!this.ghost || this.committing) return
 
       const coord = this.detector.emptyCoordinate()
-
-      // pointer moved off → discard
       if (!coord || coord.index !== this.activeIndex) {
         this.destroyGhost()
         this.activeIndex = null
@@ -77,20 +80,33 @@ export class GhostTileDirective extends HypercombLayout {
   }
 
   // ───────────────────────────────────────────────
-  // create ghost tile
+  // create ghost tile (data + sprite)
   // ───────────────────────────────────────────────
   private createGhostAt = async (coordinate: any): Promise<void> => {
-    if (this.ghost) await this.destroyGhost()
+    await this.destroyGhost()
 
-    this.debug.log('layout', `creating ghost at ${coordinate.index}`)
+    this.debug.log("layout", `creating ghost at ${coordinate.index}`)
+
+    // domain ghost (uses CellFactory.createGhost)
     const ghost = await this.cell.creator.createGhost({ index: coordinate.index })
-
-    this.debug.log('layout', 'ghost created', ghost)
+    this.debug.log("layout", "ghost created", ghost)
     this.ghost = ghost
 
-    await this.honeycomb.store.enqueueHot([ghost])
-  }
+    // build a visual tile for the ghost using the normal tile factory
+    const tile = await this.tileFactory.create(ghost as unknown as Cell)
 
+    // make it look “ghosty” and non-interactive
+    tile.alpha = 0.6
+    tile.eventMode = "none" // important: do not steal pointer events
+    tile.zIndex = 9999
+
+    const container = this.pixi.container
+    if (container) {
+      container.sortableChildren = true
+      container.addChild(tile)
+      this.ghostSprite = tile
+    }
+  }
 
   // ───────────────────────────────────────────────
   // commit ghost → new permanent tile
@@ -115,6 +131,7 @@ export class GhostTileDirective extends HypercombLayout {
 
       g.setKind("Cell")
       await this.honeycomb.modify.addCell(newCell)
+
       await this.destroyGhost()
       this.activeIndex = null
 
@@ -124,11 +141,18 @@ export class GhostTileDirective extends HypercombLayout {
   }
 
   // ───────────────────────────────────────────────
-  // remove ghost tile safely
+  // remove ghost tile sprite + data
   // ───────────────────────────────────────────────
   private destroyGhost = async (): Promise<void> => {
-    if (!this.ghost) return
-    await this.honeycomb.modify.removeCell(this.ghost as Cell)
+    // remove sprite from pixi
+    if (this.ghostSprite) {
+      const parent = this.ghostSprite.parent
+      if (parent) parent.removeChild(this.ghostSprite)
+      this.ghostSprite.destroy({ children: true })
+      this.ghostSprite = undefined
+    }
+
+    // clear domain ghost reference
     this.ghost = undefined
   }
 }
