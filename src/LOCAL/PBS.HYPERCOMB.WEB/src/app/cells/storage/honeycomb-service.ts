@@ -215,7 +215,9 @@ export class HoneycombService extends DataOrchestratorBase implements ICellServi
   // POINTER CLEANUP
   // =========================================================
   private setupPointerCleanup(): void {
-    this.ps.onUp(() => this.stack.doneNavigating())
+    this.ps.onUp(() => {
+      requestAnimationFrame(() => this.stack.doneNavigating())
+    })
   }
 
   // =========================================================

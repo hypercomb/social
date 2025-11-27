@@ -47,16 +47,7 @@ export class PointerState {
         const ev = this.pointerDownEvent()
         return !!ev && ev.button === 2
     })
-    public readonly isDragging = computed(() => {
-        const down = this.pointerDownEvent()
-        const up = this.pointerUpEvent()
-        const move = this.pointerMoveEvent()
-        if (!down || down.button !== 0) return false
-        if (this.activePointers().size !== 1) return false
-        if (up && up.timeStamp > down.timeStamp) return false
-        const d = move ? Math.hypot(move.clientX - down.clientX, move.clientY - down.clientY) : 0
-        return d >= 3
-    })
+
 
     private initialized = false
     private readonly _container = signal<Container | null>(null)
@@ -77,7 +68,6 @@ export class PointerState {
         canvas.addEventListener("pointerenter", this.handlePointerEnter)
         canvas.addEventListener("pointerleave", this.handlePointerLeave)
         window.addEventListener("blur", this.handleWindowBlur)
-        canvas.addEventListener('wheel', this.handleWheel, { passive: false })
         this.scrollUpdateHandler = () => this.refreshOnScroll()
         window.addEventListener('scroll', this.scrollUpdateHandler, { passive: true })
     }
@@ -184,14 +174,6 @@ export class PointerState {
         this._activePointers.set(new Set())
     }
 
-    private handleWheel = (e: WheelEvent) => {
-        if (this.isDragging()) {
-            e.preventDefault()
-            return false
-        }
-        return undefined
-    }
-
     private refreshOnScroll(): void {
         if (!this.canvasRef) return
         this.localPosition.set(this.getLocalPosition())
@@ -285,7 +267,6 @@ export class PointerState {
         canvas.removeEventListener("pointermove", this.handlePointerMove)
         canvas.removeEventListener("pointerenter", this.handlePointerEnter)
         canvas.removeEventListener("pointerleave", this.handlePointerLeave)
-        canvas.removeEventListener('wheel', this.handleWheel)
         window.removeEventListener("blur", this.handleWindowBlur)
         if (this.scrollUpdateHandler) {
             window.removeEventListener('scroll', this.scrollUpdateHandler)

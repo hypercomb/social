@@ -5,12 +5,12 @@ import { Hypercomb } from "src/app/core/mixins/abstraction/hypercomb.base"
 import { Cell } from "../cell"
 import { Tile } from "../models/tile"
 import { isSelected } from "../models/cell-filters"
-import { ICombStore, IStaging } from "src/app/shared/tokens/i-comb-store.token"
+import { IHoneycombStore, IStaging } from "src/app/shared/tokens/i-comb-store.token"
 import { SearchFilterService } from "src/app/common/header/header-bar/search-filter-service"
 import { DebugService } from "src/app/core/diagnostics/debug-service"
 
 @Injectable()
-export class HoneycombStore extends Hypercomb implements ICombStore, IStaging {
+export class HoneycombStore extends Hypercomb implements IHoneycombStore, IStaging {
 
   private readonly search = inject(SearchFilterService)
 

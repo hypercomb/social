@@ -15,20 +15,10 @@ export class RenderTileAction extends ActionBase<CellPayload> {
   
   public override label = "Render Tile"
 
-  private readonly contextMenu = inject(ContextMenuService)
   private readonly factory = inject(TILE_FACTORY)
   private readonly pixi = inject(PixiManager)
   private readonly pointer = inject(TilePointerManager)
   private readonly layers = new Map<number, Container>()
-
-  constructor() {
-    super()
-
-    this.ps.onHover(() => {
-      const cell = this.detector.activeCell()
-      if (cell) this.contextMenu.show(cell)
-    })
-  }
 
   public override enabled = async ({ cell }: CellPayload): Promise<boolean> => {
     if (!cell) return false

@@ -2,10 +2,13 @@
 import { Cell } from "../cell"
 import { SELECTIONS } from "src/app/shared/tokens/i-selection.token"
 import { PixiServiceBase } from "src/app/pixi/pixi-service-base"
+import { HONEYCOMB_STORE } from "src/app/shared/tokens/i-comb-store.token"
 
 @Injectable({ providedIn: "root" })
 export class TileSelectionManager extends PixiServiceBase {
   private readonly selections = inject(SELECTIONS)
+  private readonly store = inject(HONEYCOMB_STORE)
+  private honeycombs = new Map<number, Cell>()
 
   // drag-select state
   private dragActive = false
@@ -42,6 +45,12 @@ export class TileSelectionManager extends PixiServiceBase {
   // start ctrl/meta drag selection
   public beginDrag = (cell: Cell, event: PointerEvent): void => {
     if (!event.ctrlKey && !event.metaKey) return
+    this.honeycombs.clear()
+    
+    const cells = this.store.cells()
+    for (const cell of cells) {
+      this.honeycombs.set(cell.index, cell)
+    }
 
     this.dragActive = true
     this.touched.clear()

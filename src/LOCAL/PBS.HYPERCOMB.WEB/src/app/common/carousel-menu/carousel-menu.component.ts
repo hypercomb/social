@@ -13,7 +13,7 @@ import { IDexieHive } from 'src/app/hive/hive-models'
 import { HiveLoader } from 'src/app/hive/name-resolvers/hive-loader'
 import { ExportDatabaseAction } from 'src/app/actions/propagation/export-database'
 import { ACTION_REGISTRY, CAROUSEL_SVC } from 'src/app/shared/tokens/i-hypercomb.token'
-import { COMB_STORE } from 'src/app/shared/tokens/i-comb-store.token'
+import { HONEYCOMB_STORE } from 'src/app/shared/tokens/i-comb-store.token'
 
 @Component({
   standalone: true,
@@ -24,7 +24,7 @@ import { COMB_STORE } from 'src/app/shared/tokens/i-comb-store.token'
 })
 export class CarouselMenuComponent extends HypercombData implements OnInit {
   private readonly honeycomb = {
-    store: inject(COMB_STORE)
+    store: inject(HONEYCOMB_STORE)
   }
   private readonly registry = inject(ACTION_REGISTRY)
   private readonly coordinator = inject(HiveLoader)

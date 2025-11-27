@@ -5,7 +5,7 @@ import { CellFactory } from "src/app/inversion-of-control/factory/cell-factory"
 import { ImageDatabase } from "src/app/database/images/image-database"
 import { HypercombMode } from "src/app/core/models/enumerations"
 import { Cell } from "src/app/cells/cell"
-import { COMB_STORE } from "src/app/shared/tokens/i-comb-store.token"
+import { HONEYCOMB_STORE } from "src/app/shared/tokens/i-comb-store.token"
 import { EditorService } from "src/app/state/interactivity/editor-service"
 import { Action } from "rxjs/internal/scheduler/Action"
 
@@ -27,7 +27,7 @@ export const copyAction: Action<Cell> = {
     const clipboard = inject(ClipboardService)
     const factory = inject(CellFactory)
     const imageDb = inject(ImageDatabase)
-    const store = inject(COMB_STORE)
+    const store = inject(HONEYCOMB_STORE)
 
     const copyMap = new Map<number, Cell>()
     // const rootCopy = await doCopy(ctx.cell, Constants.ClipboardHive, ctx.cell.sourceId ?? 0, {
@@ -53,7 +53,7 @@ const doCopy = async (
   deps: {
     factory: CellFactory
     imageDb: ImageDatabase
-    store: typeof COMB_STORE
+    store: typeof HONEYCOMB_STORE
     copyMap: Map<number, Cell>
   }
 ): Promise<Cell | undefined> => {

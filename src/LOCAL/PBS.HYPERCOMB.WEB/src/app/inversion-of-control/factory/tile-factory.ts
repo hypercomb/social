@@ -7,14 +7,14 @@ import { MaskComponent } from "../../user-interface/sprite-components/mask-compo
 import { TextureService } from "../../user-interface/texture/texture-service"
 import { Cell } from "src/app/cells/cell"
 import { BlobService } from "src/app/hive/rendering/blob-service"
-import { COMB_STORE } from "src/app/shared/tokens/i-comb-store.token"
+import { HONEYCOMB_STORE } from "src/app/shared/tokens/i-comb-store.token"
 
 @Injectable({ providedIn: 'root' })
 export class TileFactory extends PixiDataServiceBase {
 
     private readonly mask = inject(MaskComponent)
     private readonly texture = inject(TextureService)
-    private readonly store = inject(COMB_STORE)
+    private readonly store = inject(HONEYCOMB_STORE)
     private readonly blob = inject(BlobService)
 
     public async create(cell: Cell): Promise<Tile> {

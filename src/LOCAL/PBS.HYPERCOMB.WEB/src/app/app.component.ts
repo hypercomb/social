@@ -14,7 +14,7 @@ import { CoordinateDetector } from './helper/detection/coordinate-detector'
 import { EditorService } from './state/interactivity/editor-service'
 import { Events } from './helper/events/events'
 import { Hypercomb } from './core/mixins/abstraction/hypercomb.base'
-import { COMB_STORE } from './shared/tokens/i-comb-store.token'
+import { HONEYCOMB_STORE } from './shared/tokens/i-comb-store.token'
 import { SELECTIONS } from './shared/tokens/i-selection.token'
 import { OpfsFileExplorerComponent } from './common/opfs/file-explorer/opfs-file-explorer.component'
 import { SampleDataLoaderService } from './database/sample-data-loader.service'
@@ -50,7 +50,7 @@ import { EmptyHoneycombComponent } from './common/overlays/empty-honeycomb/empty
 })
 export class AppComponent extends Hypercomb implements OnInit {
 
-  private readonly store = inject(COMB_STORE)
+  private readonly store = inject(HONEYCOMB_STORE)
   public readonly detector = inject(CoordinateDetector)
   public readonly es = inject(EditorService)
   private readonly selections = inject(SELECTIONS)

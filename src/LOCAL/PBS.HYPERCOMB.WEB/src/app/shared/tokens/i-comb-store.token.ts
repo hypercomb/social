@@ -12,7 +12,7 @@ export interface IStaging {
   stageMerge(cells: Cell[]): void
 }
 
-export interface ICombStore {
+export interface IHoneycombStore {
   filteredCells: Signal<Cell[]>
 
   // scheduler
@@ -24,7 +24,7 @@ export interface ICombStore {
   unregister(cellId: number): void  
   lookupTile(cellId: number): Tile | undefined
   lookupData(cellId: number): Cell | undefined
-
+  
   // surface
   cells: Signal<Cell[]>
   tiles: Signal<Tile[]>
@@ -47,4 +47,4 @@ export interface ICombStore {
 }
 
 export const STAGING_ST = new InjectionToken<IStaging>("STAGING_ST")
-export const COMB_STORE = new InjectionToken<ICombStore>("COMB_STORE")
+export const HONEYCOMB_STORE = new InjectionToken<IHoneycombStore>("HONEYCOMB_STORE")

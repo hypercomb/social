@@ -4,14 +4,14 @@ import { filter } from "rxjs"
 import { HiveLoader } from "./hive-loader"
 import { HypercombState } from "src/app/state/core/hypercomb-state"
 import { DatabaseService } from "src/app/database/database-service"
-import { COMB_STORE } from "src/app/shared/tokens/i-comb-store.token"
+import { HONEYCOMB_STORE } from "src/app/shared/tokens/i-comb-store.token"
 import { HIVE_STORE } from "src/app/shared/tokens/i-hive-store.token"
 import { Hive } from "src/app/cells/cell"
 import { OpfsHiveService } from "../storage/opfs-hive-service"
 
 @Injectable({ providedIn: "root" })
 export class HiveRouteWatcher {
-  protected readonly combstore = inject(COMB_STORE)
+  protected readonly combstore = inject(HONEYCOMB_STORE)
   protected readonly hivestore = inject(HIVE_STORE)
   private readonly database = inject(DatabaseService)
   private readonly router = inject(Router)

@@ -1,27 +1,26 @@
 // src/app/cells/selection/selection-move-manager.ts
 import { Injectable, inject } from "@angular/core"
 import { AxialCoordinate } from "src/app/core/models/axial-coordinate"
-import { COMB_STORE } from "src/app/shared/tokens/i-comb-store.token"
+import { HONEYCOMB_STORE } from "src/app/shared/tokens/i-comb-store.token"
 import { MODIFY_COMB_SVC } from "src/app/shared/tokens/i-comb-service.token"
 import { AxialService } from "src/app/services/axial-service"
 import { CoordinateDetector } from "src/app/helper/detection/coordinate-detector"
 import { Cell } from "../cell"
 import { PixiServiceBase } from "src/app/pixi/pixi-service-base"
-import { isSelected } from "../models/cell-filters"
 import { SelectionService } from "./selection-service"
 
 @Injectable({ providedIn: "root" })
 export class SelectionMoveManager extends PixiServiceBase {
 
   private readonly axials = inject(AxialService)
-  private readonly store = inject(COMB_STORE)
+  private readonly store = inject(HONEYCOMB_STORE)
   private readonly modify = inject(MODIFY_COMB_SVC)
   private readonly detector = inject(CoordinateDetector)
   private readonly selectionsvc = inject(SelectionService)
 
   // internal drag state
   private anchorAx: AxialCoordinate | null = null
-  private selected: Cell[] = []
+
   private downPos: { x: number; y: number } | null = null
   private isDragging = false
   private readonly threshold = 6
@@ -41,22 +40,19 @@ export class SelectionMoveManager extends PixiServiceBase {
   // called by TilePointerManager on pointerdown
   // ------------------------------------------------------------------
   public beginDrag(cell: Cell, ev: PointerEvent): void {
-    const currently = this.selectionsvc.items()
-    if (!currently.some(c => c.cellId === cell.cellId)) return
+    const selections = this.selectionsvc.items()
+    if (!selections.some(c => c.cellId === cell.cellId)) return
 
-    this.selected = currently
     const ax = this.axials.items.get(cell.index)
     if (!ax) return
 
     this.anchorAx = ax
     this.downPos = { x: ev.clientX, y: ev.clientY }
 
-    // wait for threshold before we snapshot
-    this.isDragging = false
-
     // do NOT snapshot here
     this.orig.clear()
     this.occ0.clear()
+
   }
 
 
@@ -65,7 +61,7 @@ export class SelectionMoveManager extends PixiServiceBase {
   // pointermove → compute ghost positions
   // ------------------------------------------------------------------
   public onMove(ev: PointerEvent): void {
-    if (!this.anchorAx || !this.downPos || !this.selected.length) return
+    if (!this.anchorAx || !this.downPos || !this.selectionsvc.hasItems()) return
 
     // drag threshold – ignore micro jitter
     const dx = ev.clientX - this.downPos.x
@@ -82,10 +78,10 @@ export class SelectionMoveManager extends PixiServiceBase {
 
       // 1. snapshot original positions once
       this.orig.clear()
-      for (const c of this.selected) {
+      for (const c of this.selectionsvc.items()) {
         const ax = this.axials.items.get(c.index)
         if (ax) this.orig.set(c.cellId, ax)
-      }
+      } 
 
       // 2. snapshot full occupancy map once
       this.occ0.clear()
@@ -209,6 +205,5 @@ export class SelectionMoveManager extends PixiServiceBase {
     this.isDragging = false
     this.orig.clear()
     this.occ0.clear()
-    this.selected = []
   }
 }

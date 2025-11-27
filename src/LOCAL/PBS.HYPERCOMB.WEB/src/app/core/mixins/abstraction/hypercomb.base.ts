@@ -13,7 +13,7 @@ import { PolicyService } from 'src/app/navigation/menus/policy-service'
 import { PointerState } from 'src/app/state/input/pointer-state'
 import { CoordinateDetector } from 'src/app/helper/detection/coordinate-detector'
 import { HIVE_HYDRATION, MODIFY_COMB_SVC } from 'src/app/shared/tokens/i-comb-service.token'
-import { COMB_STORE, STAGING_ST } from 'src/app/shared/tokens/i-comb-store.token'
+import { HONEYCOMB_STORE, STAGING_ST } from 'src/app/shared/tokens/i-comb-store.token'
 import { EditorService } from 'src/app/state/interactivity/editor-service'
 import { CELL_CREATOR, CELL_FACTORY } from 'src/app/inversion-of-control/tokens/tile-factory.token'
 import { QUERY_COMB_SVC } from 'src/app/shared/tokens/i-comb-query.token'
@@ -93,7 +93,7 @@ export abstract class HypercombLayout extends HypercombMixin(class { }) {
 
     protected readonly honeycomb = {
         modify: inject(MODIFY_COMB_SVC),
-        store: inject(COMB_STORE),
+        store: inject(HONEYCOMB_STORE),
         query: inject(QUERY_COMB_SVC)
     }
 

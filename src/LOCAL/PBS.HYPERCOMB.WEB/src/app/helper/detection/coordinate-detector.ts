@@ -3,7 +3,7 @@ import { Point } from "pixi.js"
 import { PointerState } from "src/app/state/input/pointer-state"
 import { Tile } from "src/app/cells/models/tile"
 import { AxialCoordinate } from "src/app/core/models/axial-coordinate"
-import { COMB_STORE } from "src/app/shared/tokens/i-comb-store.token"
+import { HONEYCOMB_STORE } from "src/app/shared/tokens/i-comb-store.token"
 import { ICoordinateDetector } from "src/app/shared/tokens/i-hypercomb.token"
 import { AxialService } from "src/app/services/axial-service"
 import { CoordinateLocator } from "src/app/services/coordinate-locator"
@@ -12,7 +12,7 @@ import { CoordinateLocator } from "src/app/services/coordinate-locator"
 export class CoordinateDetector implements ICoordinateDetector {
 
   private readonly axial = inject(AxialService)
-  private readonly combstore = inject(COMB_STORE)
+  private readonly combstore = inject(HONEYCOMB_STORE)
   private readonly locator = inject(CoordinateLocator)
   private readonly pointer = inject(PointerState)
 

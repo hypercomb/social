@@ -36,7 +36,6 @@ export class ContextMenuService extends PixiServiceBase implements IContextMenu 
   private icons: Text[] = []
 
   // RENAMED for clarity
-  private topIcon!: Text       // previously "branchIcon"
   private editIcon!: Text      // unchanged
   private bottomIcon!: Text    // previously "linkIcon"
 
@@ -57,23 +56,6 @@ export class ContextMenuService extends PixiServiceBase implements IContextMenu 
       container.label = ContextMenuService.name
       if (!container.children.includes(this.menuContainer)) {
         container.addChild(this.menuContainer)
-      }
-    })
-
-    effect(async () => {
-      const tile = this.detector.activeTile()
-      if (!tile || this.state.isMobile) {
-        await this.hide()
-        return
-      }
-
-      const cell = this.store.lookupData(tile.cellId)
-      if (cell) {
-        await this.show(cell)
-      }
-
-      if (this.layout.isMouseOverControlBar()) {
-        await this.hide()
       }
     })
 

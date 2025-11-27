@@ -11,6 +11,7 @@ import { PayloadBase } from "src/app/actions/action-contexts"
 import { TileSelectionManager } from "src/app/cells/selection/tile-selection-manager"
 import { SelectionMoveManager } from "src/app/cells/selection/selection-move-manager"
 import { Cell } from "src/app/cells/cell"
+import { ContextMenuService } from "src/app/navigation/menus/context-menu-service"
 
 @Injectable({ providedIn: "root" })
 export class TilePointerManager {
@@ -18,6 +19,7 @@ export class TilePointerManager {
   private readonly registry = inject(ACTION_REGISTRY)
   private readonly selection = inject(TileSelectionManager)
   private readonly moveManager = inject(SelectionMoveManager)
+  private readonly menu = inject(ContextMenuService)
 
   // policy helper (still works whether .all returns a signal or fn)
   private readonly moveModeSignal = this.policy.all(POLICY.MovingTiles)
@@ -87,15 +89,20 @@ export class TilePointerManager {
     // ------------------------------------------------------------------
     // pointerenter: only used for ctrl/meta drag-select (not in move mode)
     // ------------------------------------------------------------------
-    tile.on("pointerenter", (event: PointerEvent) => {
+    tile.on("pointerenter", async (event: PointerEvent) => {
       if (this.isMoveMode()) return
 
-      // only hover-select while mouse is held + ctrl/meta
+      await this.menu.show(cell)
+      // only hover-select while mouse is  held + ctrl/meta
       const buttonsDown = (event as any).buttons ?? 0
       if (!buttonsDown) return
       if (!event.ctrlKey && !event.metaKey) return
 
       this.selection.hoverDrag(cell)
+    })
+
+    tile.on("pointerleave", async (event: PointerEvent) => {
+      await this.menu.hide()
     })
   }
 
