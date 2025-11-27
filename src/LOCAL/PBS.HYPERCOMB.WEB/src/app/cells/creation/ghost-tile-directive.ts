@@ -100,7 +100,6 @@ export class GhostTileDirective extends HypercombLayout {
   }
 
   // commit ghost → new permanent tile + open editor
-  // commit ghost → new permanent tile + open editor
   private commitGhostAt = async (index: number): Promise<void> => {
     if (!this.ghost) return
     this.committing = true
