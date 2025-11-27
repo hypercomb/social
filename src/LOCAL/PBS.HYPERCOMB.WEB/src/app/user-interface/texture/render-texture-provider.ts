@@ -14,13 +14,13 @@ export class RenderTextureProvider extends PixiDataServiceBase implements ITextu
     protected readonly manager = inject(TileLayerManager)
     private readonly hs = inject(HypercombState)
 
-    public available(cell: Cell): boolean {
+    public enabled(cell: Cell): boolean {
         return !!cell
     }
 
     public async getTexture(cell: Cell): Promise<Texture | RenderTexture | undefined> {
         // if(!environment.production) console.log(`loading from ${RenderTextureProvider.name} selected: ${cell.isSelected}`)
-    this.debug.log('render', `RenderTextureProvider: loading texture for tile: ${cell.name} (${this.hs.cacheId(cell)})`)
+        this.debug.log('render', `RenderTextureProvider: loading texture for tile: ${cell.name} (${this.hs.cacheId(cell)})`)
 
         try {
             const texture = await this.manager.buildNew(cell)

@@ -34,7 +34,7 @@ export class TextureService {
   public async getTexture(cell: Cell): Promise<Texture | undefined> {
     for (const provider of this.providers) {
       try {
-        if (await provider.available(cell)) {
+        if (await provider.enabled(cell)) {
           const texture = await provider.getTexture(cell)
           if (texture) return texture
         }

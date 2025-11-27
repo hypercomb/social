@@ -12,7 +12,7 @@ export class TextureCacheProvider implements ITextureProvider {
 
   private readonly hs = inject(HypercombState)
 
-  public available = (cell: Cell): boolean => {
+  public enabled = (cell: Cell): boolean => {
     const texture = Assets.cache.has(this.hs.cacheId(cell))
     return !!texture
   }
