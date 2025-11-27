@@ -27,7 +27,7 @@ export class SelectionMoveManager extends PixiServiceBase {
   private get cells(): Cell[] { return this.store.cells() }
 
   // saved state for swap resolution
-  private orig = new Map<number, AxialCoordinate>() // selected → axial
+  private orig = new Map<number, AxialCoordinate>() // moved set → axial
   private occ0 = new Map<number, number>()         // index → cellId (all cells)
   private lastIndex: number = -1                   // last hovered index
 
@@ -38,33 +38,21 @@ export class SelectionMoveManager extends PixiServiceBase {
 
   constructor() {
     super()
+
     effect(() => {
       const coord = this.detector.coordinate()
-      const index = coord?.index ?? -1   // 👈 use ?? so index 0 is preserved
+      const index = coord?.index ?? -1
 
       if (index === this.lastIndex) return
-      this.lastIndex = index             // 👈 actually record last index
+      this.lastIndex = index
 
-      console.log(`SelectionMoveManager detected hover index: ${index}`)
-
-      if (!this.anchorAx || !this.downPos || !this.selectionsvc.hasItems()) return
+      if (!this.anchorAx || !this.downPos) return
       if (!coord) return
+      if (this.orig.size === 0) return   // nothing to move (no group / tile)
 
-      // first real drag frame → snapshot layout
+      // first real drag frame
       if (!this.isDragging) {
         this.isDragging = true
-
-        // snapshot selected originals
-        this.orig.clear()
-        for (const c of this.selectionsvc.items()) {
-          const ax = this.axials.items.get(c.index)
-          if (ax) this.orig.set(c.cellId, ax)
-        }
-
-        this.occ0.clear()
-        for (const c of this.cells) {
-          this.occ0.set(c.index, c.cellId)
-        }
       }
 
       const hoverAx = coord
@@ -83,7 +71,6 @@ export class SelectionMoveManager extends PixiServiceBase {
         const tile = this.store.lookupTile(cellId)
         if (tile) tile.setPosition(ax.Location)
       }
-
     })
   }
 
@@ -92,9 +79,14 @@ export class SelectionMoveManager extends PixiServiceBase {
   // ------------------------------------------------------------------
   public beginDrag(cell: Cell, ev: PointerEvent): void {
     const selections = this.selectionsvc.items()
+    const inSelection = selections.some(c => c.cellId === cell.cellId)
 
-    // only start drag if cell is in selection
-    if (!selections.some(c => c.cellId === cell.cellId)) return
+    // if there is a selection and this tile is in it → move the whole group
+    // otherwise → move just this tile (quick single-tile swap)
+    const group: Cell[] =
+      inSelection && selections.length > 0
+        ? selections
+        : [cell]
 
     const ax = this.axials.items.get(cell.index)
     if (!ax) return
@@ -102,15 +94,16 @@ export class SelectionMoveManager extends PixiServiceBase {
     this.anchorAx = ax
     this.downPos = { x: ev.clientX, y: ev.clientY }
     this.isDragging = false
-    this.lastIndex = -1 // reset hover tracker
+    this.lastIndex = -1
 
-    // snapshot here instead of in the effect
+    // snapshot moved set
     this.orig.clear()
-    for (const c of selections) {
+    for (const c of group) {
       const selAx = this.axials.items.get(c.index)
       if (selAx) this.orig.set(c.cellId, selAx)
     }
 
+    // snapshot full occupancy for swap detection
     this.occ0.clear()
     for (const c of this.cells) {
       this.occ0.set(c.index, c.cellId)
@@ -124,7 +117,7 @@ export class SelectionMoveManager extends PixiServiceBase {
     const placements = new Map<number, AxialCoordinate>()
     if (this.orig.size === 0) return placements
 
-    // 1) move all selected cells by diff
+    // 1) move all tiles in the current move group by diff
     for (const [cellId, fromAx] of this.orig) {
       const toAx = AxialCoordinate.add(fromAx, diff)
       placements.set(cellId, toAx)
@@ -137,7 +130,7 @@ export class SelectionMoveManager extends PixiServiceBase {
 
       const occId = this.occ0.get(toAx.index)
       if (occId == null) continue
-      if (this.orig.has(occId)) continue
+      if (this.orig.has(occId)) continue // already part of the moving group
 
       placements.set(occId, fromAx)
     }
