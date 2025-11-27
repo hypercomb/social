@@ -10,17 +10,9 @@ export class TouchPanningService extends PanningServiceBase {
     return down.pointerType === "touch"
   }
 
+  // revert to simple relevance check; threshold is handled in base class
   protected override isMoveRelevant(move: PointerEvent): boolean {
-    if (move.pointerType !== "touch") return false
-
-    const down = this.ps.pointerDownEvent()
-    if (!down) return false
-
-    const dx = move.clientX - down.clientX
-    const dy = move.clientY - down.clientY
-    const dist = Math.hypot(dx, dy)
-
-    return dist > this.getPanThreshold()
+    return move.pointerType === "touch"
   }
 
   protected override getPanThreshold(): number {
@@ -30,19 +22,18 @@ export class TouchPanningService extends PanningServiceBase {
   constructor() {
     super()
 
-    // on touch down: only clear cancellation flag
+    // touch down: clear cancelled flag only, do not mark as panning yet
     effect(() => {
       const downSeq = this.ps.downSeq()
       if (downSeq === 0) return
       const down = this.ps.pointerDownEvent()
       if (!down || down.pointerType !== "touch") return
 
-      // new gesture started — clear cancelled flag only
       this.state.setCancelled(false)
-      // do not set state.panning here; beginPan() will do that after threshold
+      // beginPan() will set state.panning once drag passes threshold
     })
 
-    // the existing up / cancel effects can stay as you had them
+    // pointerup → commit transform if we were anchored
     effect(() => {
       const upSeq = this.ps.upSeq()
       if (upSeq === 0) return
@@ -50,6 +41,7 @@ export class TouchPanningService extends PanningServiceBase {
       this.commitTransform()
     })
 
+    // cancel → also commit transform if mid-gesture
     effect(() => {
       const cancelSeq = this.ps.cancelSeq()
       if (cancelSeq === 0) return

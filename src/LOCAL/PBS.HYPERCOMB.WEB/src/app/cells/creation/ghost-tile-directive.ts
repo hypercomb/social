@@ -3,10 +3,11 @@ import { Directive, effect, inject } from "@angular/core"
 import { Container } from "pixi.js"
 import { HypercombLayout } from "src/app/core/mixins/abstraction/hypercomb.base"
 import { HypercombMode } from "src/app/core/models/enumerations"
-import { AxialCoordinate } from "src/app/core/models/axial-coordinate"
 import { Cell, Ghost, NewCell } from "../cell"
 import { PixiManager } from "src/app/pixi/pixi-manager"
 import { TILE_FACTORY } from "src/app/shared/tokens/i-hypercomb.token"
+import { EditorService } from "src/app/state/interactivity/editor-service"
+import { CellEditContext } from "src/app/state/interactivity/cell-edit-context"
 
 @Directive({
   selector: "[ghost-tile]",
@@ -18,17 +19,16 @@ export class GhostTileDirective extends HypercombLayout {
   private committing = false
   private lastUpSeq = 0
 
-  // new: pixi + tile factory + sprite handle
   private readonly pixi = inject(PixiManager)
   private readonly tileFactory = inject(TILE_FACTORY)
+  private readonly editor = inject(EditorService)
+
   private ghostSprite?: Container
 
   constructor() {
     super()
 
-    // ───────────────────────────────────────────────
     // 1. live hover tracking — ghost follows empty index
-    // ───────────────────────────────────────────────
     effect(() => {
       if (!this.state.hasMode(HypercombMode.EditMode)) return
 
@@ -46,9 +46,7 @@ export class GhostTileDirective extends HypercombLayout {
       this.createGhostAt(coord)
     })
 
-    // ───────────────────────────────────────────────
     // 2. pointer up → commit ghost
-    // ───────────────────────────────────────────────
     effect(() => {
       if (!this.state.hasMode(HypercombMode.EditMode)) return
 
@@ -68,9 +66,7 @@ export class GhostTileDirective extends HypercombLayout {
       this.commitGhostAt(coord.index)
     })
 
-    // ───────────────────────────────────────────────
     // 3. leaving edit mode → wipe ghost entirely
-    // ───────────────────────────────────────────────
     effect(() => {
       if (!this.state.hasMode(HypercombMode.EditMode)) {
         this.destroyGhost()
@@ -79,25 +75,20 @@ export class GhostTileDirective extends HypercombLayout {
     })
   }
 
-  // ───────────────────────────────────────────────
   // create ghost tile (data + sprite)
-  // ───────────────────────────────────────────────
   private createGhostAt = async (coordinate: any): Promise<void> => {
     await this.destroyGhost()
 
     this.debug.log("layout", `creating ghost at ${coordinate.index}`)
 
-    // domain ghost (uses CellFactory.createGhost)
     const ghost = await this.cell.creator.createGhost({ index: coordinate.index })
     this.debug.log("layout", "ghost created", ghost)
     this.ghost = ghost
 
-    // build a visual tile for the ghost using the normal tile factory
     const tile = await this.tileFactory.create(ghost as unknown as Cell)
 
-    // make it look “ghosty” and non-interactive
     tile.alpha = 0.6
-    tile.eventMode = "none" // important: do not steal pointer events
+    tile.eventMode = "none"
     tile.zIndex = 9999
 
     const container = this.pixi.container
@@ -108,43 +99,50 @@ export class GhostTileDirective extends HypercombLayout {
     }
   }
 
-  // ───────────────────────────────────────────────
-  // commit ghost → new permanent tile
-  // ───────────────────────────────────────────────
+  // commit ghost → new permanent tile + open editor
+  // commit ghost → new permanent tile + open editor
   private commitGhostAt = async (index: number): Promise<void> => {
     if (!this.ghost) return
     this.committing = true
 
     try {
       const source = this.stack.cell()!
-      const g = this.ghost as any
+      const g = this.ghost
 
-      const { cellId, ...rest } = g
-      const newCell = <NewCell>{
-        ...rest,
-        kind: "Cell",
+      // use factory to build a real NewCell instance
+      const newCell = this.cell.creator.newCell({
         index,
-        sourceId: source.cellId!,
         hive: source.hive,
+        sourceId: source.cellId,
         hasChildrenFlag: "false",
-      }
+        imageHash: g.imageHash,
+        name: "",
+        link: "",
+      })
 
-      g.setKind("Cell")
-      await this.honeycomb.modify.addCell(newCell)
+      // mark kind properly before persisting
+      newCell.setKind("Cell")
+
+      // persist
+      const saved = await this.honeycomb.modify.addCell(newCell)
+
+      // update parent flag
+      await this.honeycomb.modify.updateHasChildren(source)
+
+      // open editor
+      const ctx = new CellEditContext(saved)
+      await this.editor.setContext(ctx)
 
       await this.destroyGhost()
       this.activeIndex = null
-
     } finally {
       this.committing = false
     }
   }
 
-  // ───────────────────────────────────────────────
+
   // remove ghost tile sprite + data
-  // ───────────────────────────────────────────────
   private destroyGhost = async (): Promise<void> => {
-    // remove sprite from pixi
     if (this.ghostSprite) {
       const parent = this.ghostSprite.parent
       if (parent) parent.removeChild(this.ghostSprite)
@@ -152,7 +150,6 @@ export class GhostTileDirective extends HypercombLayout {
       this.ghostSprite = undefined
     }
 
-    // clear domain ghost reference
     this.ghost = undefined
   }
 }

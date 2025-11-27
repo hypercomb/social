@@ -12,7 +12,7 @@ import { TilePointerManager } from "src/app/user-interface/sprite-components/til
 export class RenderTileAction extends ActionBase<CellPayload> {
   public static ActionId = "tile.render"
   public id = RenderTileAction.ActionId
-  
+
   public override label = "Render Tile"
 
   private readonly factory = inject(TILE_FACTORY)
@@ -29,21 +29,19 @@ export class RenderTileAction extends ActionBase<CellPayload> {
   public run = async ({ cell }: CellPayload): Promise<void> => {
     if (!cell?.cellId) return
 
+    // 🚫 never render the context tile (stack top)
+    const ctx = this.stack.cell()
+    if (ctx && ctx.cellId === cell.cellId) return
+
     const layerIndex = (cell as any).layerIndex ?? 0
     const layer = this.getLayer(layerIndex)
 
-    // build tile
     const tile = await this.factory.create(cell)
-
-    // 👉 attach pointer routing (left + right click)
     this.pointer.attach(tile, cell)
-
-    // mount
     layer.addChild(tile)
-
-    // register
     this.combstore.register(tile, cell)
   }
+
 
   private getLayer = (layerIndex: number): Container => {
     let layer = this.layers.get(layerIndex)
