@@ -27,22 +27,28 @@ export class TouchPanningService extends PanningServiceBase {
     return 6
   }
 
-
   constructor() {
     super()
 
-    // 🔹 mark start of touch gesture immediately on pointerdown
+    // -------------------------------------------------------------
+    // FIXED: Touch pointerdown should NOT immediately set panning=true.
+    // It should only clear cancellation, just like desktop.
+    // Panning will be set later by beginPan() when threshold is passed.
+    // -------------------------------------------------------------
     effect(() => {
       const downSeq = this.ps.downSeq()
       if (downSeq === 0) return
       const down = this.ps.pointerDownEvent()
       if (!down || down.pointerType !== "touch") return
 
-      // a new gesture started — reset cancellation flags
+      // new gesture → clear cancellation only
       this.state.setCancelled(false)
 
-      // mark that we are in a potential panning state
-      this.state.panning = true
+      // ❌ removed:
+      // this.state.panning = true
+      //
+      // Touch should behave like mouse:
+      // threshold triggers panning → beginPan() sets panning = true
     })
 
     // ensure that on pointerup the transform is committed
@@ -50,10 +56,10 @@ export class TouchPanningService extends PanningServiceBase {
       const upSeq = this.ps.upSeq()
       if (upSeq === 0) return
       if (!this.anchored) return
-      this.commitTransform() // ✅ now updates the cell and saves
+      this.commitTransform() // updates position + saves
     })
 
-    // optional: safety cleanup if the user cancels gesture
+    // safety cleanup if the user cancels gesture
     effect(() => {
       const cancelSeq = this.ps.cancelSeq()
       if (cancelSeq === 0) return
@@ -62,8 +68,6 @@ export class TouchPanningService extends PanningServiceBase {
       }
     })
   }
-
-
 
   public resumeAfterPinch(position: { x: number; y: number }): void {
     if (!this.isEnabled()) return

@@ -1,7 +1,7 @@
-// src/app/actions/navigation/new-tile.action.ts
+// src/app/actions/cells/new-tile.action.ts
 import { inject, Injectable } from "@angular/core"
 import { ActionBase } from "../action.base"
-import { CellPayload, PayloadBase } from "src/app/actions/action-contexts"
+import { PayloadBase } from "src/app/actions/action-contexts"
 import { CellFactory } from "src/app/inversion-of-control/factory/cell-factory"
 import { PanningManager } from "src/app/pixi/panning-manager"
 import { BranchAction } from "../navigation/branch.action"
@@ -17,49 +17,49 @@ export class NewTileAction extends ActionBase<PayloadBase> {
   private readonly factory = inject(CellFactory)
   private readonly panning = inject(PanningManager)
 
-  public override enabled = async (_: PayloadBase): Promise<boolean> => {
-    const active = this.detector.activeCell()!
-    if (active) return false
-    const parent = this.stack.cell()!
+
+  public override enabled = async (payload: PayloadBase): Promise<boolean> => {
+    // cannot create on top of an existing tile
+    if (this.detector.activeTile()) return false
+
+    const parent = this.stack.cell()
     if (!parent) return false
-    
-    // only when hive has zero children
-    return parent.hasChildrenFlag !== 'true'
+
+    // allow creation only on true empty coordinate
+    return !!this.detector.emptyCoordinate()
   }
 
-  public override run = async (payload: PayloadBase) => {
-    const parent = this.stack.cell()!
+
+  public override run = async (payload: PayloadBase): Promise<void> => {
+    const parent = this.stack.cell()
     if (!parent) return
 
-    const imageHash = this.preloader.getInitialTileHash() ?? ""
+    const ax = this.detector.emptyCoordinate()
+    if (!ax) return
 
-    // build a simple centered tile
+    const index = typeof ax.index === "number" ? ax.index : 0
+
     const newTile = this.factory.newCell({
       name: "",
-      index: 0,
-      hive: parent.hive,
+        index,
+        hive: parent.hive,
       sourceId: parent.cellId,
       hasChildrenFlag: "false",
-      imageHash,
+      imageHash: this.preloader.getInitialTileHash() ?? "",
     })
 
     parent.x = 0
     parent.y = 0
     parent.scale = 1.2
 
-    // center and make larger
     await this.modify.updateCell(parent)
-
-    // persist + stage
     await this.modify.addCell(newTile)
     await this.modify.updateHasChildren(parent)
 
-    // reset panning + center again
     this.panning.getSpacebar().cancelPanSession()
     this.panning.getTouch().cancelPanSession()
 
-    const options = <CellPayload>{ ...payload, cell: parent }
-
-    await this.registry.invoke(BranchAction.ActionId, options)
+    await this.registry.invoke(BranchAction.ActionId, { ...payload, cell: parent })
   }
+
 }

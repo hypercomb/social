@@ -24,6 +24,13 @@ export class PolicyRegistrations extends Hypercomb {
     )
     this.policy.registerSignal(POLICY.MovingTiles, isMoveMode, this.injector)
 
+    // edit mode selected
+    const isEditMode = computed(
+      () => (this.state.mode() & HypercombMode.EditMode) !== 0
+    )
+    this.policy.registerSignal(POLICY.EditMode, isEditMode, this.injector)
+
+
     // keyboard blocked
     const isKeyboardBlocked = computed(
       () => (this.state.mode() & HypercombMode.KeyboardBlockedCommands) !== 0

@@ -105,7 +105,8 @@ export enum POLICY {
     HiveResolution = "HiveResolution",
     IsMoveMode = "mode:IsMoveMode",
     IsBranch = "IsBranch",
-    ShowingContextMenu = "ShowingContextMenu"
+    ShowingContextMenu = "ShowingContextMenu",
+    EditMode = "mode:IsEditMode"
 }
 
 export namespace Enum {

@@ -24,8 +24,11 @@ export class CoordinateDetector implements ICoordinateDetector {
     if (!ax) return null
 
     const tile = this.combstore.lookupTileByIndex(ax.index)
+
+    // empty only if there is no tile at this axial index
     return tile ? null : ax
   })
+
 
   private readonly _suspended = signal(false)
   public suspend(on: boolean) {
@@ -69,7 +72,7 @@ export class CoordinateDetector implements ICoordinateDetector {
 
       // instantly move offscreen and back to trigger re-detection
       const offLeft = new Point(-10000, pos.y)
-      const offRight = new Point(10000, pos.y)  
+      const offRight = new Point(10000, pos.y)
 
       // go offscreen left then right and return to original instantly
       this.pointer.position.set(offLeft)

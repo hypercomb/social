@@ -1,11 +1,12 @@
 // src/app/cells/creation/ghost-tile.directive.ts
-import { Directive, effect } from '@angular/core'
-import { HypercombLayout } from 'src/app/core/mixins/abstraction/hypercomb.base'
-import { HypercombMode } from 'src/app/core/models/enumerations'
-import { Cell, Ghost, NewCell } from '../cell'
+import { Directive, effect } from "@angular/core"
+import { HypercombLayout } from "src/app/core/mixins/abstraction/hypercomb.base"
+import { HypercombMode } from "src/app/core/models/enumerations"
+import { AxialCoordinate } from "src/app/core/models/axial-coordinate"
+import { Cell, Ghost, NewCell } from "../cell"
 
 @Directive({
-  selector: '[ghost-tile]',
+  selector: "[ghost-tile]",
   standalone: true,
 })
 export class GhostTileDirective extends HypercombLayout {
@@ -14,105 +15,106 @@ export class GhostTileDirective extends HypercombLayout {
   private committing = false
   private lastUpSeq = 0
 
-  constructor() {   
+  constructor() {
     super()
 
-    // ────────────────────────────────
-    // effect: ghost position updater
-    // ────────────────────────────────
+    // ───────────────────────────────────────────────
+    // 1. live hover tracking — ghost follows empty index
+    // ───────────────────────────────────────────────
     effect(() => {
       if (!this.state.hasMode(HypercombMode.EditMode)) return
 
       const coord = this.detector.emptyCoordinate()
 
-      // no valid spot → clean ghost
+      // nothing under pointer → remove ghost
       if (!coord) {
         this.destroyGhost()
         this.activeIndex = null
         return
       }
 
-      // same index → no change
+      // unchanged tile index → do nothing
       if (coord.index === this.activeIndex) return
 
-      // new coordinate → move ghost cleanly
+      // new position → recreate ghost
       this.activeIndex = coord.index
       this.createGhostAt(coord)
     })
 
-    // ────────────────────────────────
-    // effect: pointer up → commit ghost
-    // ────────────────────────────────
+    // ───────────────────────────────────────────────
+    // 2. pointer up → commit ghost
+    // ───────────────────────────────────────────────
     effect(() => {
       if (!this.state.hasMode(HypercombMode.EditMode)) return
 
       const seq = this.ps.upSeq()
-      if (seq === 0) return
-      if (this.lastUpSeq === seq) return
-
+      if (seq === 0 || seq === this.lastUpSeq) return
       this.lastUpSeq = seq
 
-      // nothing to commit
       if (!this.ghost || this.committing) return
 
       const coord = this.detector.emptyCoordinate()
 
-      // mismatch or invalid → cleanup
+      // pointer moved off → discard
       if (!coord || coord.index !== this.activeIndex) {
         this.destroyGhost()
         this.activeIndex = null
         return
       }
 
-      this.commitGhostToCell()
+      this.commitGhostAt(coord.index)
     })
 
-    // ────────────────────────────────
-    // effect: leaving edit mode → always clean ghost
-    // ────────────────────────────────
+    // ───────────────────────────────────────────────
+    // 3. leaving edit mode → wipe ghost entirely
+    // ───────────────────────────────────────────────
     effect(() => {
-      const isEdit = this.state.hasMode(HypercombMode.EditMode)
-      if (!isEdit) {
+      if (!this.state.hasMode(HypercombMode.EditMode)) {
         this.destroyGhost()
         this.activeIndex = null
       }
     })
   }
 
-  // ────────────────────────────────
-  // create ghost
-  // ────────────────────────────────
+  // ───────────────────────────────────────────────
+  // create ghost tile
+  // ───────────────────────────────────────────────
   private createGhostAt = async (coordinate: any): Promise<void> => {
-    // old ghost must disappear before showing new one
     if (this.ghost) await this.destroyGhost()
 
     this.debug.log('layout', `creating ghost at ${coordinate.index}`)
     const ghost = await this.cell.creator.createGhost({ index: coordinate.index })
+
+    this.debug.log('layout', 'ghost created', ghost)
     this.ghost = ghost
 
     await this.honeycomb.store.enqueueHot([ghost])
   }
 
-  // ────────────────────────────────
-  // commit ghost
-  // ────────────────────────────────
-  private commitGhostToCell = async (): Promise<void> => {
-    if (!this.ghost) return
 
+  // ───────────────────────────────────────────────
+  // commit ghost → new permanent tile
+  // ───────────────────────────────────────────────
+  private commitGhostAt = async (index: number): Promise<void> => {
+    if (!this.ghost) return
     this.committing = true
 
     try {
-      const g = this.ghost as any
-      const { cellId, ...rest } = g
       const source = this.stack.cell()!
-      const newCell = <NewCell>{ ...rest, kind: 'Cell', sourceId: source.cellId! }
+      const g = this.ghost as any
 
-      this.debug.log('layout', `committing ghost at ${newCell.index}`)
+      const { cellId, ...rest } = g
+      const newCell = <NewCell>{
+        ...rest,
+        kind: "Cell",
+        index,
+        sourceId: source.cellId!,
+        hive: source.hive,
+        hasChildrenFlag: "false",
+      }
 
-      g.setKind('Cell')
+      g.setKind("Cell")
       await this.honeycomb.modify.addCell(newCell)
-
-      // always remove ghost after commit
       await this.destroyGhost()
       this.activeIndex = null
 
@@ -121,13 +123,11 @@ export class GhostTileDirective extends HypercombLayout {
     }
   }
 
-  // ────────────────────────────────
-  // destroy ghost
-  // ────────────────────────────────
+  // ───────────────────────────────────────────────
+  // remove ghost tile safely
+  // ───────────────────────────────────────────────
   private destroyGhost = async (): Promise<void> => {
     if (!this.ghost) return
-
-    this.debug.log('layout', 'destroying ghost')
     await this.honeycomb.modify.removeCell(this.ghost as Cell)
     this.ghost = undefined
   }

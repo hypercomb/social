@@ -17,11 +17,12 @@ export const HiveEvents = {
 }
 
 export enum LocalAssets {
-  Background = 'assets/svg/tile-icons-background.svg',
-  InitialImagePath = 'assets/initial-tile.png',
-  TileMask = 'assets/hexagon-cutout.png',
-  PlaceholderPath = 'assets/guide-tile.png',
-  YouTube = 'assets/youtube.png',
+    Background = 'assets/svg/tile-icons-background.svg',
+    InitialImagePath = 'assets/initial-tile.png',
+    TileMask = 'assets/hexagon-cutout.png',
+    PlaceholderPath = 'assets/guide-tile.png',
+    YouTube = 'assets/youtube.png',
+    GhostTilePath = "/assets/img/ghost.png"
 }
 
 

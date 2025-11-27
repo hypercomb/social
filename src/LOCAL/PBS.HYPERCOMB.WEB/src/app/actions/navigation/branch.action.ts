@@ -7,6 +7,7 @@ import { EditorService } from "src/app/state/interactivity/editor-service"
 @Injectable({ providedIn: "root" })
 export class BranchAction extends ActionBase<CellPayload> {
   private readonly es = inject(EditorService)
+
   public static ActionId = "tile.branch"
   public id = BranchAction.ActionId
   public override label = "Set Branch"
@@ -19,27 +20,37 @@ export class BranchAction extends ActionBase<CellPayload> {
     const cell = payload.cell
     if (!cell) return false
 
-    // 🚫 block if no children
-    if (cell.hasChildrenFlag !== 'true') return false
+    // must have children
+    if (cell.hasChildrenFlag !== "true") return false
 
-    // ✔ only allow if marked as branch
+    // only marked-as-branch children can be opened
     return cell.isBranch
   }
 
-
   public override run = async (payload: CellPayload) => {
-    // Defensive: re-check at execution time (race-safe)
-      if (this.state.isContextActive() || this.state.cancelled() || this.state.panning) {
+    // re-check
+    if (this.state.isContextActive() || this.state.cancelled() || this.state.panning) {
       this.debug.log("BranchAction run suppressed (cancelled/panning/context)")
       return
     }
 
+    const event = payload.event as any
+    const pointerType = event?.pointerType || "mouse"
+
+    // 🟢 IMPORTANT FIX:
+    // Mouse should stop propagation because of hover menu collision.
+    // Touch should NOT stop/NOT prevent default or navigation breaks.
+    if (pointerType === "mouse") {
+      event.stopPropagation?.()
+      event.preventDefault?.()
+    }
+
     this.debug.log("BranchAction run invoked")
 
-    payload.event?.stopPropagation()
-    payload.event?.preventDefault()
     this.combstore.invalidate()
     this.stack.push(payload.cell!)
+
+    // hide menu after navigation
     setTimeout(() => this.menu.hide(), 50)
   }
 }

@@ -9,16 +9,16 @@ import { IEntityFactoryPort } from "../ports/i-entity-factory-port"
 import { Cell, NewCell, Hive, Ghost, ClipboardCell, Path, CellKind } from "src/app/cells/cell"
 import { ICreateCells } from "../tokens/tile-factory.token"
 import { ContextStack } from "src/app/core/controller/context-stack"
+import { ImagePreloader } from "src/app/hive/rendering/image-preloader.service"
 
 @Injectable({ providedIn: "root" })
 export class CellFactory
   implements IEntityFactoryPort<CellEntity, Cell>, ICreateCells {
 
   private readonly stack = inject(ContextStack)
+  private readonly preloader = inject(ImagePreloader)
 
-  // ───────────────────────────────────────────────
   // map / unmap
-  // ───────────────────────────────────────────────
   public map<T extends Cell | NewCell>(entity: CellEntity): T {
     return toCell(entity) as T
   }
@@ -27,9 +27,7 @@ export class CellFactory
     return toCellEntity(domain)
   }
 
-  // ───────────────────────────────────────────────
   // BASE new cell
-  // ───────────────────────────────────────────────
   public newCell(params: Partial<NewCell>): NewCell {
     return new NewCell({
       ...params,
@@ -38,9 +36,7 @@ export class CellFactory
     })
   }
 
-  // ───────────────────────────────────────────────
   // concrete Cell creation
-  // ───────────────────────────────────────────────
   public async create(
     params: Partial<NewCell> & { cellId: number },
     kind: CellKind
@@ -65,12 +61,22 @@ export class CellFactory
     })
   }
 
+  // ---------------------------------------------------------------------
+  // FIXED GHOST CREATION
+  // ---------------------------------------------------------------------
   public async createGhost(params: Partial<NewCell> = {}): Promise<Ghost> {
-    throw new Error("needs ghostimage hash")
+    const imageHash = this.preloader.getInitialTileHash()
+    if (!imageHash) {
+      throw new Error("initial tile hash was not preloaded")
+    }
+
     return new Ghost({
       ...params,
+      kind: "Ghost",
       hive: this.stack.hiveName(),
+      imageHash,
       dateCreated: safeDate(new Date()),
+      isDeleted: false
     })
   }
 
@@ -96,9 +102,7 @@ export class CellFactory
     })
   }
 
-  // ───────────────────────────────────────────────
   // clones
-  // ───────────────────────────────────────────────
   public clone(
     original: Cell | NewCell,
     overrides: Partial<NewCell> = {}
