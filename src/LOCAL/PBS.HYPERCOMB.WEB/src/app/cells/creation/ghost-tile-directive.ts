@@ -4,10 +4,10 @@ import { Container } from "pixi.js"
 import { HypercombLayout } from "src/app/core/mixins/abstraction/hypercomb.base"
 import { HypercombMode } from "src/app/core/models/enumerations"
 import { Cell, Ghost, NewCell } from "../cell"
-import { PixiManager } from "src/app/pixi/pixi-manager"
 import { TILE_FACTORY } from "src/app/shared/tokens/i-hypercomb.token"
 import { EditorService } from "src/app/state/interactivity/editor-service"
 import { CellEditContext } from "src/app/state/interactivity/cell-edit-context"
+import { PIXI_MANAGER } from "src/app/shared/tokens/i-pixi-manager.token"
 
 @Directive({
   selector: "[ghost-tile]",
@@ -19,7 +19,7 @@ export class GhostTileDirective extends HypercombLayout {
   private committing = false
   private lastUpSeq = 0
 
-  private readonly pixi = inject(PixiManager)
+  private readonly pixi = inject(PIXI_MANAGER)
   private readonly tileFactory = inject(TILE_FACTORY)
   private readonly editor = inject(EditorService)
 

@@ -16,7 +16,6 @@ export class ContextStack {
 
   // navigation flag
   public readonly navigating = signal(false)
-
   public push(cell: Cell): void {
     this.navigating.set(true)
     const entry = new StackEntry(cell.cellId, cell.hive, cell)
@@ -24,7 +23,6 @@ export class ContextStack {
     this._stack.update(list => {
       const last = list.at(-1)
 
-      // if the new entry matches the most recent one, absorb (ignore push)
       if (last && last.cellId === entry.cellId && last.hive === entry.hive) {
         return list
       }
@@ -33,26 +31,38 @@ export class ContextStack {
       if (next.length > this.capacity) next.shift()
       return next
     })
+
+    this.navigating.set(false)
   }
 
+  public canPop(): boolean {
+    const list = this._stack()
+    return list.length > 1
+  }
 
   public pop(): StackEntry | undefined {
     this.navigating.set(true)
-    let popped: StackEntry | undefined
 
-    this._stack.update(list => {
-      // prevent popping the last remaining entry
-      if (list.length <= 1) {
-        popped = undefined
-        return list
-      }
+    try {
+      if (!this.canPop()) return undefined
 
-      popped = list.at(-1)
-      return list.slice(0, -1)
-    })
+      let popped: StackEntry | undefined
 
-    return popped
+      this._stack.update(list => {
+        popped = list.at(-1)
+        return list.slice(0, -1)
+      })
+
+      return popped
+    } finally {
+      this.navigating.set(false)
+    }
   }
+
+
+  // ─────────────────────────────────────────────
+  // maintenance
+  // ─────────────────────────────────────────────
 
   public clear(): void {
     this._stack.set([])
@@ -67,7 +77,6 @@ export class ContextStack {
       const idx = list.findIndex(e => e.cellId === cell.cellId && e.hive === cell.hive)
       if (idx === -1) return list // nothing to refresh
 
-      // replace with new StackEntry referencing the updated cell
       const updated = new StackEntry(cell.cellId, cell.hive, cell)
       const next = [...list]
       next[idx] = updated
@@ -79,9 +88,27 @@ export class ContextStack {
     this._stack.set(entries.slice(-this.capacity))
   }
 
-  // expose stack for persistence
   public snapshot(): StackEntry[] {
     return this._stack()
   }
 
+  public toString(): string {
+    const list = this._stack()
+    if (!list.length) return '[ContextStack empty]'
+
+    const lines: string[] = []
+
+    lines.push(`ContextStack(size=${list.length}, navigating=${this.navigating()})`)
+    lines.push(`top: hive=${this.hiveName() ?? 'none'} cellId=${this.cell()?.cellId ?? 'none'}`)
+    lines.push('entries:')
+
+    list.forEach((e, i) => {
+      const mark = (i === list.length - 1) ? ' <— top' : ''
+      lines.push(
+        `[${i}] hive=${e.hive} cellId=${e.cellId}${mark}`
+      )
+    })
+
+    return lines.join('\n')
+  }
 }

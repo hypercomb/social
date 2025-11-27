@@ -9,7 +9,7 @@ import { Cell } from 'src/app/cells/cell'
 export class SpritesheetProvider implements ITextureProvider {
     public get name(): string { return SpritesheetProvider.name }
 
-    public available = (cell: Cell): boolean => {
+    public enabled = (cell: Cell): boolean => {
         //   return Boolean(blob~UrlForSprite(cell),  && cell.hive)
         return false
     }

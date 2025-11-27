@@ -13,7 +13,6 @@ export class BackHiveAction extends ActionBase<PayloadBase> {
   private readonly pointerstate = inject(PointerState)
   private readonly hydration = inject(HIVE_HYDRATION)
   private readonly panning = inject(PanningManager)             // ⬅️ add this
-  private readonly carouselsvc = inject(CarouselService)
 
   public static ActionId = 'hive.back'
   public id = BackHiveAction.ActionId
@@ -37,6 +36,9 @@ export class BackHiveAction extends ActionBase<PayloadBase> {
     this.panning.getSpacebar().cancelPanSession()
     this.panning.getTouch().cancelPanSession()
     this.state.resetMode()
+
+    // safety check
+    if(!this.stack.canPop()) return
 
     // wipe all rendered tiles immediately
     this.combstore.invalidate()

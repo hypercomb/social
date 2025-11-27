@@ -16,7 +16,7 @@ export abstract class PixiServiceBase {
   protected readonly storage = inject(StorageManager)
   protected readonly screen = inject(ScreenService)
   protected readonly debug = inject(DebugService)
-  protected readonly pixi = inject(PIXI_MANAGER) as IPixiManager
+  protected readonly pixi = inject(PIXI_MANAGER) 
   protected readonly settings = inject(Settings)
   protected readonly ks = inject(KeyboardState)
   protected readonly state = inject(HypercombState)

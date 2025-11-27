@@ -6,6 +6,7 @@ import { ScreenService } from '../services/screen-service'
 import { DebugService } from '../core/diagnostics/debug-service'
 import { ACTION_REGISTRY } from '../shared/tokens/i-hypercomb.token'
 import { BackHiveAction } from '../actions/navigation/back.action'
+import { HypercombState } from '../state/core/hypercomb-state'
 
 // global singleton for HMR
 type GlobalPixi = {
@@ -22,7 +23,7 @@ export class PixiManager {
   private readonly axials = inject(AxialService)
   private readonly screen = inject(ScreenService)
   private readonly settings = inject(Settings)
-
+  private readonly state = inject(HypercombState)
   private _app: Application =
     g.__PIXI_APP__ ?? (g.__PIXI_APP__ = new Application())
 
@@ -113,6 +114,10 @@ export class PixiManager {
       this._container.eventMode = "dynamic"
 
       this._container.on("rightclick", (evt: PointerEvent) => {
+        evt.preventDefault()
+        // overlay is tied to "empty honeycomb" status, so clear it first
+        this.state.setHoneycombStatus(false)
+
         registry.invoke(BackHiveAction.ActionId, {
           kind: "cell",
           event: evt

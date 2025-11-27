@@ -1,12 +1,11 @@
 ﻿// src/app/actions/render/render-tile.action.ts
 import { Injectable, inject } from "@angular/core"
 import { ActionBase } from "src/app/actions/action.base"
-import { CellPayload, PayloadBase } from "src/app/actions/action-contexts"
-import { ContextMenuService } from "src/app/navigation/menus/context-menu-service"
-import { PixiManager } from "src/app/pixi/pixi-manager"
+import { CellPayload } from "src/app/actions/action-contexts"
 import { Container } from "pixi.js"
 import { TILE_FACTORY } from "src/app/shared/tokens/i-hypercomb.token"
 import { TilePointerManager } from "src/app/user-interface/sprite-components/tile-pointer-manager"
+import { PIXI_MANAGER } from "src/app/shared/tokens/i-pixi-manager.token"
 
 @Injectable({ providedIn: "root" })
 export class RenderTileAction extends ActionBase<CellPayload> {
@@ -16,7 +15,7 @@ export class RenderTileAction extends ActionBase<CellPayload> {
   public override label = "Render Tile"
 
   private readonly factory = inject(TILE_FACTORY)
-  private readonly pixi = inject(PixiManager)
+  private readonly pixi = inject(PIXI_MANAGER)
   private readonly pointer = inject(TilePointerManager)
   private readonly layers = new Map<number, Container>()
 
@@ -49,7 +48,7 @@ export class RenderTileAction extends ActionBase<CellPayload> {
       layer = new Container()
       layer.sortableChildren = true
       layer.zIndex = layerIndex
-      this.pixi.container.addChild(layer)
+      this.pixi.container!.addChild(layer)
       this.layers.set(layerIndex, layer)
     }
     return layer

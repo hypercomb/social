@@ -42,7 +42,7 @@ export class TilePointerManager {
 
   public attach(tile: any, cell: Cell): void {
     tile.eventMode = "dynamic"
-
+/*  */
     tile.removeAllListeners("pointertap")
     tile.removeAllListeners("pointerdown")
     tile.removeAllListeners("pointerenter")

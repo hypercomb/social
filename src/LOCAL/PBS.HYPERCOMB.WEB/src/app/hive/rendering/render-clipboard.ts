@@ -1,11 +1,11 @@
 ﻿// actions/render-clipboard.command.ts
 import { Injectable, inject } from "@angular/core"
-import { PixiManager } from "src/app/pixi/pixi-manager"
 import { CellFactory } from "src/app/inversion-of-control/factory/cell-factory"
 import { CellPayload } from "src/app/actions/action-contexts"
 import { Action } from "src/app/actions/action-models"
 import { Hypercomb } from "src/app/core/mixins/abstraction/hypercomb.base"
 import { CONTEXT_MENU, TILE_FACTORY } from "src/app/shared/tokens/i-hypercomb.token"
+import { PIXI_MANAGER } from "src/app/shared/tokens/i-pixi-manager.token"
 
 @Injectable({ providedIn: "root" })
 export class RenderClipboardCommand extends Hypercomb implements Action<CellPayload> {
@@ -16,7 +16,7 @@ export class RenderClipboardCommand extends Hypercomb implements Action<CellPayl
   private readonly contextMenu = inject(CONTEXT_MENU)
   private readonly tdFactory = inject(CellFactory)
   private readonly tileFactory = inject(TILE_FACTORY)
-  private readonly pixiStartup = inject(PixiManager)
+  private readonly pixiStartup = inject(PIXI_MANAGER)
 
 
   public override enabled = (ctx: CellPayload): boolean => {
