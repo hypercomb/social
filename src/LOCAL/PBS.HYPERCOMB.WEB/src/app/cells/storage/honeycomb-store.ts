@@ -212,10 +212,12 @@ export class HoneycombStore extends Hypercomb implements IHoneycombStore, IStagi
   }
 
   public lookupTileByIndex(idx: number): Tile | undefined {
-    return this._tiles()[idx]
+    const cell = this.lookupCellByIndex(idx)
+    if (!cell) return undefined
+    return this.tileRegistry.get(cell.cellId!)
   }
 
   public lookupCellByIndex(idx: number): Cell | undefined {
-    return this._cells()[idx]
+    return this._cells().find(c => c.index === idx)
   }
 }
