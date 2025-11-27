@@ -34,14 +34,15 @@ export class ContextMenuService extends PixiServiceBase implements IContextMenu 
 
   private readonly menuContainer = new Container()
   private icons: Text[] = []
-
-  // RENAMED for clarity
-  private editIcon!: Text      // unchanged
-  private bottomIcon!: Text    // previously "linkIcon"
-
+  private editIcon!: Text
+  private bottomIcon!: Text
   private background?: Sprite
   private clickAborted = false
   public isVisible = signal(false)
+
+  private hideTimeout: any
+  private readonly _hoveringTile = signal(false)
+  private readonly _hoveringMenu = signal(false)
 
   constructor() {
     super()
@@ -65,7 +66,6 @@ export class ContextMenuService extends PixiServiceBase implements IContextMenu 
 
   private readonly _position = signal<{ x: number; y: number } | null>(null)
   public readonly position = this._position.asReadonly()
-
   public readonly activeCell = this.detector.activeTile()
 
   public hide = async (): Promise<void> => {
@@ -74,17 +74,40 @@ export class ContextMenuService extends PixiServiceBase implements IContextMenu 
     this.menuContainer.alpha = 0
     this.isVisible.set(false)
     this.state.setContextActive(false)
+    this._hoveringTile.set(false)
+    this._hoveringMenu.set(false)
+    if (this.hideTimeout) {
+      clearTimeout(this.hideTimeout)
+      this.hideTimeout = null
+    }
+  }
+
+  public tileEnter(cell: Cell): void {
+    this._hoveringTile.set(true)
+    void this.show(cell)
+  }
+
+  public tileLeave(): void {
+    this._hoveringTile.set(false)
+    this.scheduleHide()
+  }
+
+  private scheduleHide(): void {
+    if (this.hideTimeout) clearTimeout(this.hideTimeout)
+    this.hideTimeout = setTimeout(() => {
+      this.hideTimeout = null
+      if (!this._hoveringTile() && !this._hoveringMenu()) {
+        void this.hide()
+      }
+    }, 40)
   }
 
   public show = async (cell: Cell): Promise<void> => {
     if (this.isBlocked()) return
-    
     this.isVisible.set(true)
     this.menuContainer.alpha = 1
 
-    // bottom icon toggled by cell.link logic (same as before)
     if (this.bottomIcon) this.bottomIcon.visible = !!cell.link
-
     const tile = this.store.lookupTile(cell.cellId)
     if (!tile) return
 
@@ -109,24 +132,26 @@ export class ContextMenuService extends PixiServiceBase implements IContextMenu 
     this.menuContainer.eventMode = "passive"
     this.menuContainer.interactive = true
     this.menuContainer.hitArea = new Rectangle(0, 0, 60.5, 249)
-
     this.menuContainer.on("pointerdown", this.onContainerPointerDown)
 
-    this.menuContainer.on("pointerenter", () => this.state.setContextActive(true))
-    this.menuContainer.on("pointerleave", () => this.state.setContextActive(false))
+    this.menuContainer.on("pointerenter", () => {
+      this.state.setContextActive(true)
+      this._hoveringMenu.set(true)
+      if (this.hideTimeout) clearTimeout(this.hideTimeout)
+    })
+
+    this.menuContainer.on("pointerleave", () => {
+      this.state.setContextActive(false)
+      this._hoveringMenu.set(false)
+      this.scheduleHide()
+    })
 
     const style = { fontFamily: "hypercomb-icons", fontSize: 32, fill: "white" }
-
-    // RENAMED but kept same icons & behavior
-    // this.topIcon = new Text({ text: "*", style })      // previously branchIcon
     this.editIcon = new Text({ text: "N", style })
-    this.bottomIcon = new Text({ text: "*", style })   // previously linkIcon
+    this.bottomIcon = new Text({ text: "*", style })
 
-    //this.addBranchClick(this.topIcon)
     this.addEditTileClick(this.editIcon)
     this.addLinkClick(this.bottomIcon)
-
-    // ORDER UNCHANGED
     this.icons.push(this.editIcon, this.bottomIcon)
 
     const padding = 20
@@ -145,20 +170,15 @@ export class ContextMenuService extends PixiServiceBase implements IContextMenu 
     const texture = await Assets.load(LocalAssets.Background)
     const background = new Sprite(texture)
     this.background = background
-
     background.width = 60.5
     background.height = 249
-
     background.eventMode = "dynamic"
     background.interactive = true
-
     background.on("pointerdown", (e: FederatedPointerEvent) => {
       e.stopPropagation()
       e.stopImmediatePropagation()
     })
-
     background.on("pointerup", this.onBackgroundClick)
-
     this.menuContainer.addChild(background)
     this.menuContainer.x = x
     this.menuContainer.y = y
@@ -189,7 +209,6 @@ export class ContextMenuService extends PixiServiceBase implements IContextMenu 
   }
 
   private addLinkClick(icon: Text): void {
-    // unchanged
     icon.on("pointerup", async (event: FederatedPointerEvent) => {
       event.stopImmediatePropagation()
       event.preventDefault()
@@ -213,7 +232,6 @@ export class ContextMenuService extends PixiServiceBase implements IContextMenu 
       await this.hide()
     })
   }
-
 
   private clickWasAborted(): boolean {
     const was = this.clickAborted

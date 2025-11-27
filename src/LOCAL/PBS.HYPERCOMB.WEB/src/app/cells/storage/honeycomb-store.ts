@@ -106,6 +106,23 @@ export class HoneycombStore extends Hypercomb implements IHoneycombStore, IStagi
     return this.dataRegistry.get(cellId)
   }
 
+  // new implementation: find by cell.index instead of array slot
+  public lookupCellByIndex(idx: number): Cell | undefined {
+    if (idx == null) return undefined
+    const cells = this._cells()
+    return cells.find(c => c.index === idx)
+  }
+
+  public lookupTileByIndex(idx: number): Tile | undefined {
+    if (idx == null) return undefined
+
+    const cells = this._cells()
+    const cell = cells.find(c => c.index === idx)
+    if (!cell?.cellId) return undefined
+
+    return this.tileRegistry.get(cell.cellId)
+  }
+
   // ---------------------------------------------------------
   // STAGING
   // ---------------------------------------------------------
@@ -209,15 +226,5 @@ export class HoneycombStore extends Hypercomb implements IHoneycombStore, IStagi
       const t = this.tileRegistry.get(c.cellId!)
       if (t) t.visible = visible
     }
-  }
-
-  public lookupTileByIndex(idx: number): Tile | undefined {
-    const cell = this.lookupCellByIndex(idx)
-    if (!cell) return undefined
-    return this.tileRegistry.get(cell.cellId!)
-  }
-
-  public lookupCellByIndex(idx: number): Cell | undefined {
-    return this._cells().find(c => c.index === idx)
   }
 }

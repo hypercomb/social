@@ -29,7 +29,7 @@ export class BranchAction extends ActionBase<CellPayload> {
 
   public override run = async (payload: CellPayload) => {
     // Defensive: re-check at execution time (race-safe)
-    if (this.state.isContextActive() || this.state.cancelled() || this.state.panning) {
+      if (this.state.isContextActive() || this.state.cancelled() || this.state.panning) {
       this.debug.log("BranchAction run suppressed (cancelled/panning/context)")
       return
     }

@@ -18,15 +18,17 @@ export class NewTileAction extends ActionBase<PayloadBase> {
   private readonly panning = inject(PanningManager)
 
   public override enabled = async (_: PayloadBase): Promise<boolean> => {
-    const parent = this.detector.activeCell()!
+    const active = this.detector.activeCell()!
+    if (active) return false
+    const parent = this.stack.cell()!
     if (!parent) return false
-
+    
     // only when hive has zero children
     return parent.hasChildrenFlag !== 'true'
   }
 
   public override run = async (payload: PayloadBase) => {
-    const parent = this.detector.activeCell()!
+    const parent = this.stack.cell()!
     if (!parent) return
 
     const imageHash = this.preloader.getInitialTileHash() ?? ""
