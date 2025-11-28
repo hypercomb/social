@@ -10,14 +10,12 @@ import { PixiServiceBase } from 'src/app/pixi/pixi-service-base'
 import { Assets } from 'pixi.js'
 import { Events } from 'src/app/helper/events/events'
 import { ISelections } from 'src/app/shared/tokens/i-selection.token'
-import { TILE_FACTORY } from 'src/app/shared/tokens/i-hypercomb.token'
 import { MODIFY_COMB_SVC } from 'src/app/shared/tokens/i-comb-service.token'
 
 @Injectable({ providedIn: 'root' })
 export class SelectionService extends PixiServiceBase implements ISelections {
   private readonly modify = inject(MODIFY_COMB_SVC)
   private readonly destroyRef = inject(DestroyRef)
-  private readonly factory = inject(TILE_FACTORY)
   private readonly store = inject(HONEYCOMB_STORE)
   private readonly hs = inject(HypercombState)
 

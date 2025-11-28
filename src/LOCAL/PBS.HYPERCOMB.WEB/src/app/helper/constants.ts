@@ -7,7 +7,6 @@ const DatabaseConstants = {
 }
 
 export const HiveEvents = {
-    CancelPanningEvent: 'cancel-panning',
     ClearCanvas: 'clear-canvas',
     HexagonDetected: 'hexagon-detected',
     HexagonDropped: 'hexagon-dropped',
