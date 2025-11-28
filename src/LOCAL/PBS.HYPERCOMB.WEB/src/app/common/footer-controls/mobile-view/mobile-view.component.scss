@@ -1,3 +1,4 @@
+/* src/app/common/footer-controls/mobile-view/mobile-view.component.scss */
 @use "../../../common/styles/shared.scss" as shared;
 
 :host {
@@ -7,11 +8,18 @@
   position: relative;
 }
 
-/* portrait toolbar unchanged */
+/* portrait toolbar now matches sidebar look */
 .mobile-controls {
   width: 100%;
   height: 100%;
   pointer-events: all;
+
+  /* translucent bar behind the 5 icons, similar to sidebar */
+  background: rgba(20, 20, 20, 0.8);
+  backdrop-filter: blur(4px);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 -3px 6px rgba(0, 0, 0, 0.3);
+  z-index: 5000;
 
   .control-bar.mobile {
     display: flex;
@@ -25,8 +33,14 @@
   .icon {
     font-family: shared.$hypercomb-icons;
     font-size: 1.6rem;
-    color: #bbb;
+    color: #ddd;
+
+    /* match sidebar chip style */
+    background: rgba(34, 34, 34, 0.75);
     padding: 0.5rem 0.7rem;
+    border-radius: 0.8rem;
+    box-shadow: 0 3px 6px rgba(0, 0, 0, 0.3);
+
     cursor: pointer;
     pointer-events: auto;
     margin: 0;
@@ -37,11 +51,13 @@
     line-height: 1;
     transition:
       color 0.2s ease,
-      text-shadow 0.2s ease;
+      background 0.2s ease,
+      transform 0.2s ease;
 
     &:hover {
-      color: whitesmoke;
-      text-shadow: 2px 2px 5px rgba(118, 118, 118, 0.6);
+      color: #fff;
+      background: rgba(255, 255, 255, 0.15);
+      transform: scale(1.06);
     }
 
     &.active {
@@ -51,7 +67,7 @@
 
   .center-icon {
     border: none;
-    border-radius: 0;
+    border-radius: 0.8rem;
     padding: 0.5rem 0.7rem;
   }
 }
@@ -110,7 +126,8 @@
   bottom: 6px;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  justify-content: space-around;
+  gap: .5em;
   align-items: center;
   z-index: 5000;
   pointer-events: auto;
