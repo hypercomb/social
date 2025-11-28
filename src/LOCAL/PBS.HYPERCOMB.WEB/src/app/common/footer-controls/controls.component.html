@@ -1,22 +1,21 @@
-<!-- src/app/common/footer-controls/controls.component.html -->
 <div
   controls-active
   [class.mobile]="state.isMobile"
+  [class.mobile-landscape]="isLandscapeMobile"
   class="menu-container container"
   (click)="$event.stopImmediatePropagation()"
   (mouseenter)="state.controlsHovered = true"
-  (mouseleave)="state.controlsHovered = false">
-
-  @if (state.isMobile) {
+  (mouseleave)="state.controlsHovered = false"
+>
+  @if (state.isMobile && !isLandscapeMobile) {
     <app-mobile-view></app-mobile-view>
-  } @else {
-    <app-default-view></app-default-view>
   }
 
-</div>
+  @if (state.isMobile && isLandscapeMobile) {
+    <app-mobile-view [landscape]="true"></app-mobile-view>
+  }
 
-@if (link && !state.hasMode(ViewingGoogleDoc)) {
-  <div class="link-bar">
-    &nbsp; {{ link }}
-  </div>
-}
+  @if (!state.isMobile) {
+    <app-default-view></app-default-view> 
+  }
+</div>

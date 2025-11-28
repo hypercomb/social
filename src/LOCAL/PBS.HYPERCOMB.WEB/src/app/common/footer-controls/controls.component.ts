@@ -22,6 +22,10 @@ import { Constants } from 'src/app/helper/constants'
 export class ControlsComponent extends Hypercomb implements OnInit {
   public ViewingGoogleDoc: HypercombMode = HypercombMode.ViewingGoogleDocument
 
+  public get isLandscapeMobile(): boolean {
+    return this.state.isMobile && window.innerWidth > window.innerHeight
+  }
+
   public get link(): string {
     return environment.production ? this.ls.link : this.ls.information
   }

@@ -4,8 +4,10 @@
   display: block;
   width: 100%;
   height: 100%;
+  position: relative;
 }
 
+/* portrait toolbar unchanged */
 .mobile-controls {
   width: 100%;
   height: 100%;
@@ -37,7 +39,6 @@
       color 0.2s ease,
       text-shadow 0.2s ease;
 
-
     &:hover {
       color: whitesmoke;
       text-shadow: 2px 2px 5px rgba(118, 118, 118, 0.6);
@@ -48,10 +49,95 @@
     }
   }
 
-  /* center icon with NO circle */
   .center-icon {
     border: none;
     border-radius: 0;
-    padding: 0.5rem 0.7rem; /* match default */
+    padding: 0.5rem 0.7rem;
+  }
+}
+
+/* --- LANDSCAPE MODE --- */
+
+/* square-ish floating back button bottom-left */
+.landscape-back {
+  position: fixed;
+  left: 6px;
+  bottom: 6px;
+  font-family: shared.$hypercomb-icons;
+  font-size: 2rem;
+  color: #ddd;
+  background: rgba(34, 34, 34, 0.75);
+  padding: 0.8rem;
+  border-radius: 0.8rem;
+  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.3);
+  pointer-events: auto;
+  cursor: pointer;
+  z-index: 5000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    color 0.2s ease,
+    background 0.2s ease,
+    transform 0.2s ease;
+
+  &:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.15);
+    transform: scale(1.06);
+  }
+}
+
+/* background overlay for better contrast */
+.landscape-toolbar-bg {
+  position: fixed;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 4.53em; /* enough to cover icons visually */
+  background: rgba(20, 20, 20, 0.8  ); /* translucent layer */
+  backdrop-filter: blur(4px); /* subtle blur to soften visuals */
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  z-index: 4999; /* slightly below icons */
+  pointer-events: none; /* does not block clicks */
+}
+
+/* right-side vertical toolbar inside overlay */
+.landscape-toolbar {
+  position: fixed;
+  right: 6px;
+  top: 6px;
+  bottom: 6px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 5000;
+  pointer-events: auto;
+  height: calc(100% - 12px);
+  padding: 0.3rem 0;
+}
+
+.landscape-toolbar .icon {
+  font-family: shared.$hypercomb-icons;
+  font-size: 2rem;
+  color: #ddd;
+  background: rgba(34, 34, 34, 0.75);
+  padding: 0.8rem;
+  border-radius: 0.8rem;
+  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    color 0.2s ease,
+    background 0.2s ease,
+    transform 0.2s ease;
+
+  &:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.15);
+    transform: scale(1.06);
   }
 }

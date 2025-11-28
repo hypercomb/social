@@ -1,29 +1,20 @@
 <div
   class="container header"
+  [class.mobile]="state.isMobile"
   (mouseover)="onHover(true)"
   (mouseout)="onHover(false)"
 >
   <div class="header__content">
     @if (!state.isMobile) {
       <div class="header__left">
-        <!-- <button class="header__icon-btn">
-                <span class="icon" (click)="toggleChat()">5</span>
-            </button> -->
+        <!-- desktop-only left header content -->
       </div>
     }
 
-    <!-- Mobile name -->
+    <!-- mobile name only (no view button here anymore) -->
     @if (state.isMobile) {
       <div class="mobile-name">
         <div class="name">{{ caption() }}</div>
-        <div class="mobile-actions">
-          <span
-            class="icon common-font"
-            (click)="openLink()"
-            data-tooltip="view"
-            >view</span
-          >
-        </div>
       </div>
     }
 
