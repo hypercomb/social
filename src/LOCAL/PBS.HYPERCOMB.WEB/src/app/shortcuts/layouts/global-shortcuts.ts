@@ -39,5 +39,12 @@ export const globalShortcuts: IShortcut[] = [
     keys: [[{ key: ">", ctrl: true, shift: true }]],
     global: true,
     category: "Utility"
+  },
+  {
+    cmd: "toggle.chat-window",
+    description: "Open AI Chat Window",
+    keys: [[{ key: "[", ctrl: true }]],
+    global: true,
+    category: "AI"
   }
 ] as const

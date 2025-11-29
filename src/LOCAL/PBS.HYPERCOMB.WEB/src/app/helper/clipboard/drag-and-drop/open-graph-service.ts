@@ -7,8 +7,8 @@ import { CellOptions } from "src/app/core/models/enumerations"
 import { PointerState } from "src/app/state/input/pointer-state"
 import { EditorService } from "src/app/state/interactivity/editor-service"
 import { NewTileService } from "src/app/tile/creation/new-tile-service"
-import { CombStore } from "src/app/cells/storage/comb-store"
-import { HiveEvents, Constants, LocalAssets } from "src/app/unsorted/constants"
+import { HoneycombStore } from "src/app/cells/storage/honeycomb-store"
+import { HiveEvents, Constants, LocalAssets } from "src/app/helper/constants"
 import { CellEditor } from "src/app/layout/hexagons/cell-editor"
 import { CoordinateLocator } from "src/app/unsorted/utility/coordinate-locator"
 import { CoordinateDetector } from "../../detection/coordinate-detector"
@@ -27,7 +27,7 @@ export class OpenGrapservice extends ReceiveFileBase {
     private readonly locator = inject(CoordinateLocator)
     private readonly manager = inject(CellEditor)
     private readonly ps = inject(PointerState)
-    private readonly store = inject(CombStore)
+    private readonly store = inject(HoneycombStore)
     private readonly new_tiles = inject(NewTileService)
 
     constructor() {

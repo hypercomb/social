@@ -13,7 +13,7 @@ export const defaultShortcuts = [
   {
     cmd: 'layout.centerTile',
     description: 'Center on given tile or first tile',
-    category: 'Navigation',
+    category: 'Navigation', 
     keys: [[{ key: 'h' }]]
   },
   {
@@ -34,7 +34,7 @@ export const defaultShortcuts = [
     description: 'Start editing the active tile',
     category: 'Navigation',
     keys: [[{ key: 'tab' }]],
-    payload: { mode: HypercombMode.ChoosingEditContext }
+    payload: { mode: HypercombMode.EditMode }
   },
 
   {
@@ -113,7 +113,7 @@ export const defaultShortcuts = [
     risk: 'warning',
     riskNote: 'Be careful when editing tiles as changes are immediate',
     keys: [[{ key: 'e' }]],
-    payload: { mode: HypercombMode.ChoosingEditContext }
+    payload: { mode: HypercombMode.EditMode }
   },
 
   {
@@ -161,6 +161,20 @@ export const defaultShortcuts = [
     description: 'Explore storage in OPFS',
     category: 'Navigation',
     keys: [[{ key: 'f2', primary: true, shift: true }]]
+  },
+  {
+    cmd: 'overlay.dismiss',
+    description: 'Dismiss overlay and restore the previous tiles',
+    category: 'Navigation',
+    keys: [[{ key: 'mouseLeft' }]],
+    payload: { preserveTiles: true }
+  },
+  {
+    cmd: 'navigation.restoreParentTiles',
+    description: 'Return to the parent hive without clearing tiles',
+    category: 'Navigation',
+    keys: [[{ key: 'mouseRight' }]],
+    payload: { restoreParentTiles: true }
   }
 ] as const satisfies readonly IShortcut[]
 

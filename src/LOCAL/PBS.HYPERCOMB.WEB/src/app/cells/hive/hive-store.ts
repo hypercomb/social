@@ -1,16 +1,18 @@
 // src/app/hives/hive-store.ts
 import { Injectable, computed, inject, signal } from "@angular/core"
-import { COMB_STORE } from "src/app/shared/tokens/i-comb-store.token"
+import { HONEYCOMB_STORE } from "src/app/shared/tokens/i-comb-store.token"
 import { IControlHives, IHiveLookup, IHiveState } from "src/app/shared/tokens/i-hive-store.token"
 import { Cell, Hive } from "../cell"
 import { Tile } from "../models/tile"
 import { ContextStack } from "src/app/core/controller/context-stack"
 import { IDexieHive } from "src/app/hive/hive-models"
+import { SearchFilterService } from "src/app/common/header/header-bar/search-filter-service"
 
 @Injectable({ providedIn: "root" })
 export class HiveStore implements IControlHives, IHiveState, IHiveLookup {
+    private readonly search = inject(SearchFilterService)
     private readonly stack = inject(ContextStack)
-    private readonly store = inject(COMB_STORE)
+    private readonly store = inject(HONEYCOMB_STORE)
 
     // --- derived signals ---------------------------------------------
     // currently active hive for navigation
@@ -47,23 +49,30 @@ export class HiveStore implements IControlHives, IHiveState, IHiveLookup {
 
     public readonly locateHive = signal<string | null>(null)
 
-    private requestLocate(name: string | null) {
-        this.locateHive.set(name)
-    }
+    public readonly filteredHives = computed(() => {
+        const q = this.search.value().toLowerCase()
+        if (!q) return this.items()
 
-    public clearLocate() {
-        this.locateHive.set(null)
-    }
+        return this.items().filter(h =>
+            h.name.toLowerCase().includes(q)
+        )
+    })
 
     // state
     public readonly combCells = computed<Cell[]>(() => {
         const cell = this.stack.cell()!
         if (!cell) return []
+
         const hive = cell.hive
         const cellId = cell.cellId
         if (!hive || cellId == null) return []
-        return this.store.cells().filter(c => c.sourceId === cellId)
+
+        // ensure we only show children from the active hive + parent
+        return this.store.cells().filter(c =>
+            c.hive === hive && c.sourceId === cellId
+        )
     })
+
 
     public readonly combTiles = computed<Tile[]>(() => {
         const cells = this.combCells()
@@ -104,7 +113,7 @@ export class HiveStore implements IControlHives, IHiveState, IHiveLookup {
     }
 
     public setHive = (hive: Hive) => {
-        if(!hive) return
+        if (!hive) return
         console.debug('[HiveStore.setHive] called', { hive })
         this._hive.set(hive)
         this.stack.push(hive)

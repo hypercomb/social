@@ -1,7 +1,6 @@
 ﻿import { Injectable } from "@angular/core"
 import { Cell, CellKind } from "src/app/cells/cell"
-import { isBlobImage } from "src/app/cells/models/cell-filters"
-import { Constants, LocalAssets } from "src/app/unsorted/constants"
+import { Constants, LocalAssets } from "src/app/helper/constants"
 
 @Injectable({ providedIn: "root" })
 export class BlobService {
@@ -43,20 +42,6 @@ export class BlobService {
     return BlobService.placeholders.get(kind ?? "Cell") ?? BlobService.defaultBlob
   }
 
-
-  // get the effective blob for a cell (lazy fetch if needed)
-  public async getBlob(cell: Cell): Promise<Blob | undefined> {
-    if (cell.kind == 'Clipboard' && !isBlobImage(cell) && cell.sourcePath) {
-      return this.fetchFromPath(cell.sourcePath)
-    }
-
-    if (cell.sourcePath && !cell.image?.blob) {
-      return this.fetchFromPath(cell.sourcePath)
-    }
-
-    return cell.image?.blob
-  }
-
   // fetch from path (assets, http, relative)
   private async fetchAsset(path: string): Promise<Blob> {
     const response = await fetch(path)
@@ -87,17 +72,42 @@ export class BlobService {
     }
   }
 
-
   public async getInitialBlob(): Promise<Blob> {
-    return this.fetchAsset(LocalAssets.NInitialImagePath)
+    return this.fetchAsset(LocalAssets.InitialImagePath)
   }
-
 
   public async fetchImageAsBlob(url: string): Promise<Blob> {
     const response = await fetch(url)
     if (!response.ok) throw new Error(`❌ failed to fetch image: ${url}`)
     return response.blob()
   }
+
+  public toBlob(blobData: any): Blob | null {
+    if (!blobData) return null
+
+    // Already a real Blob
+    if (blobData instanceof Blob) {
+      return blobData
+    }
+
+    // { data: base64string, type: "image/png" }
+    if (blobData.data && blobData.type) {
+      try {
+        const binary = atob(blobData.data)
+        const bytes = new Uint8Array(binary.length)
+        for (let i = 0; i < binary.length; i++) {
+          bytes[i] = binary.charCodeAt(i)
+        }
+        return new Blob([bytes], { type: blobData.type })
+      } catch (err) {
+        console.warn("failed to decode blobData:", err)
+        return null
+      }
+    }
+
+    return null
+  }
+
 
   public trimBlob(blob: Blob): Promise<Blob> {
     return new Promise((resolve, reject) => {

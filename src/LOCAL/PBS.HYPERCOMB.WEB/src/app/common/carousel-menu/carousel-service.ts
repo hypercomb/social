@@ -6,7 +6,7 @@ import { IDexieHive } from 'src/app/hive/hive-models'
 @Injectable({ providedIn: 'root' })
 export class CarouselService extends Hypercomb {
   private readonly router = inject(Router)
-  private first = true
+
   // ─────────────────────────────────────────────
   // internal signals
   // ─────────────────────────────────────────────
@@ -58,7 +58,7 @@ export class CarouselService extends Hypercomb {
       this._index.set(0)
     }
 
-    this._changeSeq.update(v => v + 1) // 🔹 trigger stream reload
+    this._changeSeq.update(v => v + 1)
   }
 
   public setTileLimit = (limit: number): void =>
@@ -67,14 +67,10 @@ export class CarouselService extends Hypercomb {
   /** navigates to a hive by full name or fragment */
   public jumpTo = (name: string): void => {
     if (!name) return
-    
-    // initialized
-    this.first = false
 
     const [base, fragment] = name.split('#')
     const url = `/${base}${fragment ? `#${fragment}` : ''}`
     this.router.navigateByUrl(url)
-
   }
 
   /** reorders list so that given hive becomes head (index 0) */
@@ -88,7 +84,7 @@ export class CarouselService extends Hypercomb {
     this._items.set(reordered)
     this._index.set(0)
 
-    this._changeSeq.update(v => v + 1) // 🔹 trigger stream reload
+    this._changeSeq.update(v => v + 1)
   }
 
   /** rotate carousel forward (next hive down) */
@@ -96,7 +92,6 @@ export class CarouselService extends Hypercomb {
     const items = this._items()
     if (items.length <= 1) return
 
-    // Move first item to end
     this._previous.set(items[0])
     this._items.set([...items.slice(1), items[0]])
     this._changeSeq.update(v => v + 1)
@@ -107,7 +102,6 @@ export class CarouselService extends Hypercomb {
     const items = this._items()
     if (items.length <= 1) return
 
-    // Move last item to front
     this._previous.set(items[0])
     this._items.set([items[items.length - 1], ...items.slice(0, -1)])
     this._changeSeq.update(v => v + 1)

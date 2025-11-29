@@ -1,17 +1,17 @@
 import Dexie from "dexie"
 import DBTables from "src/app/core/constants/db-tables"
-import { BaseContext } from "../action-contexts"
+import { PayloadBase } from "../action-contexts"
 import { ActionBase } from "../action.base"
 import { DatabaseService } from "src/app/database/database-service"
 import { inject, Injectable } from "@angular/core"
 
 @Injectable({ providedIn: 'root' })
-export class RebuildHierarchyAction extends ActionBase<BaseContext> {
+export class RebuildHierarchyAction extends ActionBase<PayloadBase> {
   public static ActionId = "rebuild-hierarchy"
   public override id = RebuildHierarchyAction.ActionId
   public readonly database = inject(DatabaseService)
   
-  public override run = async (ctx: BaseContext) => {
+  public override run = async (ctx: PayloadBase) => {
     const db = this.database.db()! 
 
     await db.transaction("rw", [DBTables.Cells, DBTables.Hierarchy], async () => {

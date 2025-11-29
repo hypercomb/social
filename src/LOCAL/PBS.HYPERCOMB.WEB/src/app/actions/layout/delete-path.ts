@@ -2,11 +2,11 @@
 import { Injectable } from "@angular/core"
 import { HypercombMode } from "src/app/core/models/enumerations"
 import { Cell } from "src/app/cells/cell"
-import { CellContext } from "src/app/actions/action-contexts"
+import { CellPayload } from "src/app/actions/action-contexts"
 import { ActionBase } from "src/app/actions/action.base"
 
 @Injectable({ providedIn: "root" })
-export class DeletePathwayAction extends ActionBase<CellContext> {
+export class DeletePathwayAction extends ActionBase<CellPayload> {
 
     public override id = "layout.deletePathway"
     public override label = "Delete Path"
@@ -15,7 +15,7 @@ export class DeletePathwayAction extends ActionBase<CellContext> {
     public override risk: "danger" = "danger"
     private readonly urls = ["hypercomb.io", "localhost:4200"]
 
-    public override enabled = async (payload: CellContext): Promise<boolean> => {
+    public override enabled = async (payload: CellPayload): Promise<boolean> => {
         const cell: Cell | undefined = payload.cell
         if (!cell) return false
 
@@ -25,7 +25,7 @@ export class DeletePathwayAction extends ActionBase<CellContext> {
         return linkBlocked && inNormalMode
     }
 
-    public override run = async (payload: CellContext): Promise<void> => {
+    public override run = async (payload: CellPayload): Promise<void> => {
         const active = payload.cell
         if (!active) return
 

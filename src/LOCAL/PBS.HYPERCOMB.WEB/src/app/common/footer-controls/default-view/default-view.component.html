@@ -1,0 +1,154 @@
+<!-- src/app/common/footer-controls/default-view/default-view.component.html -->
+<div class="left">&nbsp;</div>
+
+<div class="center control-bar">
+  <span class="icon" id="back" (click)="goBack($event)" data-tooltip="back">B</span>
+  <span class="icon home" id="home" (click)="goHome()" data-tooltip="home">d</span>
+  <span
+    class="icon lock"
+    id="lockHive"
+    (click)="lock()"
+    data-tooltip="lock"
+    [class.locked]="manager.locked()">
+    {{ manager.locked() ? 'a' : 'b' }}
+  </span>
+
+  @if (isBuildMode) {
+    <span class="icon spacer" id="spacer" style="color:#555;">&</span>
+
+    <span
+      class="icon"
+      id="edit"
+      (click)="toggleEditMode()"
+      data-tooltip="edit"
+      [class.disabled]="!hideClipboardActions"
+      [class.active]="es.isEditing()">
+      #
+    </span>
+
+    <span
+      class="icon"
+      id="cut"
+      (click)="cut()"
+      data-tooltip="cut"
+      [class.disabled]="!hideClipboardActions"
+      [class.active]="isCutMode"
+      [class.select-enabled]="hasSelections">
+      y
+    </span>
+
+    <span
+      class="icon slight-nudge"
+      id="copy"
+      (click)="copy()"
+      data-tooltip="copy"
+      [class.disabled]="!hideClipboardActions"
+      [class.active]="isCopyMode"
+      [class.select-enabled]="hasSelections">
+      x
+    </span>
+
+    <span
+      class="icon"
+      id="clipboard-button"
+      (click)="viewClipboard()"
+      data-tooltip="clipboard"
+      [class.disabled]="!clipboard.hasItems()"
+      [class.hidden]="clipboardItemCount">
+      $
+      @if (clipboard.hasItems()) {
+        <span class="badge">{{ clipboard.count() }}</span>
+      }
+    </span>
+
+    @if (state.isViewingClipboard) {
+      <span
+        class="icon"
+        id="clear-clipboard"
+        (click)="clipboard.clear()"
+        data-tooltip="clear clipboard"
+        [class.disabled]="!state.isViewingClipboard">
+        Q
+      </span>
+    }
+
+    @if (!state.isViewingClipboard) {
+      <span
+        class="icon"
+        id="remove"
+        (click)="delete()"
+        data-tooltip="remove"
+        [class.active]="isRearrangeMode"
+        [class.disabled]="!hasSelections"
+        [class.select-enabled]="hasSelections">
+        Q
+      </span>
+    }
+
+    <span class="icon spacer" id="spacer" style="color:#555">&</span>
+
+    <span
+      class="icon"
+      id="move"
+      (click)="toggleMoveMode()"
+      data-tooltip="move"
+      [class.disabled]="!hideClipboardActions"
+      [class.active]="isRearrangeMode">
+      3
+    </span>
+  }
+
+  <span
+    class="icon center-items view-icon"
+    id="center"
+    (click)="centerTiles()"
+    data-tooltip="center">
+    (
+  </span>
+
+  <span
+    class="icon view-icon zoom-adjust"
+    id="minus"
+    (click)="zoomOut()"
+    data-tooltip="zoom out">
+    I
+  </span>
+
+  <span
+    class="icon view-icon zoom-adjust"
+    id="plus"
+    (click)="zoomIn()"
+    data-tooltip="zoom in">
+    K
+  </span>
+
+  <span
+    class="icon fullscreen view-icon"
+    id="resize"
+    (click)="fullscreen()"
+    data-tooltip="fullscreen">
+    '
+  </span>
+
+  <span class="icon spacer" id="spacer" style="color:#555">&</span>
+
+  <span
+    class="icon fullscreen view-icon"
+    id="mode-toggle"
+    (click)="build()"
+    [attr.data-tooltip]="isBuildMode ? 'basic' : 'advanced'">
+    s
+  </span>
+</div>
+
+<div class="right taskbar-options">
+  <span>{{ clipboard.selected() }}</span>
+
+  @if (clipboard.hasItems()) {
+    <div app-paste-clipboard-button></div>
+  }
+
+  @if (isViewingGoogleDoc) {
+    <div app-close-google-doc-buttons></div>
+  }
+</div>

@@ -7,17 +7,15 @@ import { ContextStack } from '../../controller/context-stack'
 import { KeyboardState } from '../../../interactivity/keyboard/keyboard-state'
 import { HypercombState } from '../../../state/core/hypercomb-state'
 import { LayoutState } from '../../../layout/layout-state'
-import { Settings } from '../../../unsorted/settings'
-import { HiveState } from 'src/app/hive/hive-state'
+import { Settings } from '../../settings'
 import { AbstractCtor } from 'src/app/core/mixins/mixin-helpers'
 import { PolicyService } from 'src/app/navigation/menus/policy-service'
 import { PointerState } from 'src/app/state/input/pointer-state'
 import { CoordinateDetector } from 'src/app/helper/detection/coordinate-detector'
 import { HIVE_HYDRATION, MODIFY_COMB_SVC } from 'src/app/shared/tokens/i-comb-service.token'
-import { COMB_STORE, STAGING_ST } from 'src/app/shared/tokens/i-comb-store.token'
+import { HONEYCOMB_STORE, STAGING_ST } from 'src/app/shared/tokens/i-comb-store.token'
 import { EditorService } from 'src/app/state/interactivity/editor-service'
 import { CELL_CREATOR, CELL_FACTORY } from 'src/app/inversion-of-control/tokens/tile-factory.token'
-import { CombImageFactory } from 'src/app/common/tile-editor/tile-image/cell-image-factory'
 import { QUERY_COMB_SVC } from 'src/app/shared/tokens/i-comb-query.token'
 
 export function HypercombMixin<TBase extends AbstractCtor>(Base: TBase) {
@@ -36,9 +34,9 @@ export function HypercombMixin<TBase extends AbstractCtor>(Base: TBase) {
             return this._contextStack ??= this.injector.get(ContextStack)
         }
 
-        private _hs?: HiveState
-        public get hs(): HiveState {
-            return this._hs ??= this.injector.get(HiveState)
+        private _hs?: HypercombState
+        public get hs(): HypercombState {
+            return this._hs ??= this.injector.get(HypercombState)
         }
 
         private _layoutState?: LayoutState
@@ -82,22 +80,24 @@ export abstract class HypercombLayout extends HypercombMixin(class { }) {
     protected readonly es = inject(EditorService)
     protected readonly ps = inject(PointerState)
     protected readonly detector = inject(CoordinateDetector)
+
+    // 🟢 remove image factory completely — no longer needed
     protected readonly hive = {
-        image: {
-            factory: inject(CombImageFactory)
-        }
+        image: {}
     }
+
     protected readonly cell = {
         creator: inject(CELL_CREATOR),
         factory: inject(CELL_FACTORY)
     }
 
-    protected readonly comb = {
+    protected readonly honeycomb = {
         modify: inject(MODIFY_COMB_SVC),
-        store: inject(COMB_STORE),
+        store: inject(HONEYCOMB_STORE),
         query: inject(QUERY_COMB_SVC)
     }
 
     protected readonly hydration = inject(HIVE_HYDRATION)
     protected readonly staging = inject(STAGING_ST)
 }
+

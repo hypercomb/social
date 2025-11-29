@@ -1,7 +1,7 @@
 // actions/show-hive.command.ts
 import { Injectable, inject } from "@angular/core"
 import { Action } from "../action-models"
-import { CombStore } from "src/app/cells/storage/comb-store"
+import { HoneycombStore } from "src/app/cells/storage/honeycomb-store"
 import { HiveService } from "src/app/hive/storage/hive-service"
 import { ShowContext } from "../action-contexts"
 import { Hypercomb } from "src/app/core/mixins/abstraction/hypercomb.base"
@@ -21,7 +21,7 @@ export class ShowHiveAction extends Hypercomb implements Action<ShowContext> {
   }
   public description = "Stage and render a hive into the workspace"
 
-  private readonly combStore = inject(CombStore)
+  private readonly combStore = inject(HoneycombStore)
   private readonly hiveService = inject(HiveService)
 
   public override enabled = async (): Promise<boolean> => {

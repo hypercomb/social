@@ -3,7 +3,6 @@ import { Texture, RenderTexture, Assets } from "pixi.js"
 import { PixiDataServiceBase } from "src/app/database/pixi-data-service-base"
 import { Cell } from "src/app/cells/cell"
 import { TileLayerManager } from "src/app/cells/miscellaneous/tile-layer-manager"
-import { blobUrl } from "src/app/cells/models/cell-filters"
 import { HypercombState } from 'src/app/state/core/hypercomb-state'
 import { ITextureProvider } from "./i-texture-provider"
 @Injectable({
@@ -15,13 +14,13 @@ export class RenderTextureProvider extends PixiDataServiceBase implements ITextu
     protected readonly manager = inject(TileLayerManager)
     private readonly hs = inject(HypercombState)
 
-    public available(cell: Cell): boolean {
-        return !!blobUrl(cell)
+    public enabled(cell: Cell): boolean {
+        return !!cell
     }
 
     public async getTexture(cell: Cell): Promise<Texture | RenderTexture | undefined> {
         // if(!environment.production) console.log(`loading from ${RenderTextureProvider.name} selected: ${cell.isSelected}`)
-    this.debug.log('render', `RenderTextureProvider: loading texture for tile: ${cell.name} (${this.hs.cacheId(cell)})`)
+        this.debug.log('render', `RenderTextureProvider: loading texture for tile: ${cell.name} (${this.hs.cacheId(cell)})`)
 
         try {
             const texture = await this.manager.buildNew(cell)

@@ -3,8 +3,8 @@ import { Component, inject } from '@angular/core'
 import { Searcservice } from 'src/app/database/utility/search-service'
 import { CellOptions, HypercombMode } from 'src/app/core/models/enumerations'
 import { EditorService } from 'src/app/state/interactivity/editor-service'
-import { ColorPicker } from 'src/app/unsorted/utility/color-picker'
 import { Hypercomb } from 'src/app/core/mixins/abstraction/hypercomb.base'
+import { ColorPicker } from 'src/app/services/color-picker'
 
 @Component({
   standalone: true,
@@ -20,13 +20,13 @@ export class EditorActionsComponent extends Hypercomb {
   // actions (async arrow style per your preference)
   public googleImageSearch = async () => {
     // search by current name
-    this.searcservice.searchImage(this.es.context()!.name)
+    this.searcservice.searchImage(this.es.cell()!.name)
   }
 
   public chooseColor = async () => {
     // pick color then update visual
     const color = await this.colorPicker.pickColor()
-    const cell = this.es.context()!
+    const cell = this.es.cell()!
     cell.backgroundColor = color
     await this.es.updateBackgroundVisual(cell)
     // if you later trim blobs here, keep it reactive and off the hot path
@@ -39,7 +39,7 @@ export class EditorActionsComponent extends Hypercomb {
 
   public toggleBranch = async () => {
     // flip branch flag and update
-    const cell = this.es.context()!
+    const cell = this.es.cell()!
     cell.options.update((options) => options ^ CellOptions.Branch)
     await this.es.updateBranchVisual(cell)
   }

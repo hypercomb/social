@@ -3,14 +3,14 @@ import { inject, Injectable } from '@angular/core'
 import { Cell } from '../cells/cell'
 import { WorkspaceBase } from './workplace-base'
 import { HIVE_STORE } from '../shared/tokens/i-hive-store.token'
-import { COMB_STORE } from '../shared/tokens/i-comb-store.token'
+import { HONEYCOMB_STORE } from '../shared/tokens/i-comb-store.token'
 import { context } from '../state/interactivity/context-cell'
 
 @Injectable({ providedIn: 'root' })
 export class Workspace extends WorkspaceBase {
     private readonly store = {
         hive: inject(HIVE_STORE),
-        comb: inject(COMB_STORE)
+        comb: inject(HONEYCOMB_STORE)
     }
 
     // -----------------------------------------------------------
@@ -42,12 +42,12 @@ export class Workspace extends WorkspaceBase {
 
     public addCell = async (cell: Cell) => {
         const persisted = await this.mutate.addCell(cell)
-        this.store.comb.enqueueHot(persisted)
+        this.store.honeycomb.enqueueHot(persisted)
     }
 
     public removeCell = async (cell: Cell) => {
         await this.mutate.removeCell(cell)
-        this.store.comb.enqueueCold(cell)
+        this.store.honeycomb.enqueueCold(cell)
     }
 
     public updateCell = async (cell: Cell, targetHiveName?: string) => {
@@ -61,7 +61,7 @@ export class Workspace extends WorkspaceBase {
             : this.mutate.replaceCell(cell.hive, cell)
 
         // enqueue for render/update
-        this.store.comb.enqueueHot(cell)
+        this.store.honeycomb.enqueueHot(cell)
     }
 
     // -----------------------------------------------------------

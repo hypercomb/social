@@ -1,6 +1,6 @@
 ﻿import { Injectable, inject } from "@angular/core"
 import { BlobService } from "../../hive/rendering/blob-service"
-import { HypercombData }from "src/app/actions/hypercomb-data"
+import { HypercombData } from "src/app/actions/hypercomb-data"
 import { Cell } from "src/app/cells/cell"
 import { RestorableTileData } from "src/app/cells/flow/restorable-tile"
 import DBTables from "src/app/core/constants/db-tables"
@@ -67,10 +67,10 @@ export class HierarchyRestorationService extends HypercombData {
         try {
             const blobs = await Promise.all(restorableList.map(r => this.blobService.fetchImageAsBlob(r.sourcePath!)))
 
-            blobs.forEach((blob, index) => {
-                restorableList[index].newItem!.blob = blob
-            })
-
+            // blobs.forEach((blob, index) => {
+            //     restorableList[index].newItem!.blob = blob
+            // })
+            throw new Error("Not implemented")
             const dataArray = <Cell[]>restorableList.map(r => r.newItem)
             await this.modify.bulkPut(dataArray)
 

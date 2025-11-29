@@ -2,23 +2,29 @@
 
 @Injectable({ providedIn: 'root' })
 export class SearchFilterService {
-  private readonly _searchValue = signal<string>('')
+  private readonly _value = signal<string>('')
 
-  public readonly value = this._searchValue.asReadonly()
-  public readonly hasValue = computed(() => this._searchValue().trim().length > 0)
+  // delayed version
+  private readonly _delay = signal<string>('')
+  private delayHandle: any = null
+
+  public readonly value = this._value.asReadonly()
+  public readonly delayValue = this._delay.asReadonly()
+
+  public set(text: string) {
+    const v = text.toLowerCase()
+
+    // immediate update for tiles
+    this._value.set(v)
+
+    // delayed update for menus
+    clearTimeout(this.delayHandle)
+    this.delayHandle = setTimeout(() => {
+      this._delay.set(v)
+    }, 125)  // ← ideal delay for your UI
+  }
 
   public clear() {
-    this._searchValue.set('')
-  }
-
-  public refresh() {
-    // re-emit the same value (forces dependent computeds/effects to re-run)
-    this._searchValue.update(v => v)
-  }
-
-  public set(value: string) {
-    this._searchValue.set(value)
+    this.set('')
   }
 }
-
-

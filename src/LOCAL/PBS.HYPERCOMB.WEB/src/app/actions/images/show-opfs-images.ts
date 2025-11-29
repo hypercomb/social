@@ -31,12 +31,10 @@ export class ShowOpfsImagesAction extends ActionBase {
 
       const blob = new Blob([await file.arrayBuffer()], { type: file.type || 'image/png' });
       const record: IHiveImage = {
-        cellId: 0,     // placeholder if not stored in filename
         blob,
         x: 0,
         y: 0,
         scale: 1,
-        getBlob: async () => blob
       };
 
       images.push(record);

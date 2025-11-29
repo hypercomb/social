@@ -25,7 +25,7 @@ export class SwatchPanelComponent extends Hypercomb implements AfterViewInit, On
 
     // reapply visual when signal changes
     effect(() => {
-      const cell = this.es.context()
+      const cell = this.es.cell()
       const colorTile = this.es.borderColorTile()
       if (cell && colorTile) this.es.updateBorderVisual(cell)
     })
@@ -80,7 +80,7 @@ export class SwatchPanelComponent extends Hypercomb implements AfterViewInit, On
     const color = this.getColorFromPointer(event) || null
     if (color !== this.lastColor) {
       this.lastColor = color
-      const cell = this.es.context()
+      const cell = this.es.cell()
       if (cell) {
         cell.borderColor = color || 'transparent'
         this.es.updateBorderVisual(cell)
@@ -94,7 +94,7 @@ export class SwatchPanelComponent extends Hypercomb implements AfterViewInit, On
   }
 
   private onPointerLeave(event: PointerEvent): void {
-    const cell = this.es.context()
+    const cell = this.es.cell()
     if (!cell) return
     cell.borderColor = this.selectedColor || cell.borderColor
     this.es.updateBorderVisual(cell)

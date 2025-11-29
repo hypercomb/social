@@ -1,6 +1,6 @@
 ﻿import { Injectable, inject } from '@angular/core'
 import { HIVE_NAME_RESOLVERS, HIVE_LOADERS } from 'src/app/shared/tokens/i-hive-resolver.token'
-import { HIVE_CONTROLLER_ST, HIVE_STORE } from 'src/app/shared/tokens/i-hive-store.token'
+import { HIVE_CONTROLLER_ST } from 'src/app/shared/tokens/i-hive-store.token'
 import { IHiveLoader } from '../hive-loaders/i-data-resolver'
 import { IHiveGuide } from './i-hive-resolver'
 import { HiveScout } from '../hive-scout'
@@ -31,7 +31,7 @@ export class HiveLoader extends Hypercomb {
         const scout = await resolver.resolve(hiveName)
         if (scout) {
           this.lastResolved = scout
-          console.debug(`[HiveLoader] resolved ${hiveName} via ${resolver.constructor.name}`)
+          this.debug.log('lifecycle', `[HiveLoader] resolved ${hiveName} via ${resolver.constructor.name}`)
           return scout
         }
       }
@@ -45,7 +45,9 @@ export class HiveLoader extends Hypercomb {
   // ─────────────────────────────────────────────
   public async load(scout: HiveScout): Promise<void> {
     const result = await this.hydrate(scout)
-    if (result) console.debug(`[HiveLoader] hydrated ${scout.name}`)
+    if (result) {
+      this.debug.log('lifecycle', `[HiveLoader] hydrated ${scout.name}`)
+    }
     this.hydration.setReady()
   }
 
@@ -54,24 +56,20 @@ export class HiveLoader extends Hypercomb {
   // ─────────────────────────────────────────────
   public async activate(scout: HiveScout): Promise<void> {
     const found = scout.hive!
-    if(!found) {
-      console.warn('[HiveLoader] cannot activate, no hive on scout', { scout })
+    if (!found) {
+      this.debug.log('warn', '[HiveLoader] cannot activate, no hive on scout', { scout })
       return
     }
-
-  console.debug('[HiveLoader] calling setHive', { found })
+    this.debug.log('lifecycle', '[HiveLoader] calling setHive', { found })
     this.controller.setHive(found)
-    this.carousel.jumpTo(found.hive)
 
     if (!found) {
-      console.warn('[HiveLoader] no hive available to activate')
+      this.debug.log('warn', '[HiveLoader] no hive available to activate')
       return
     }
 
-
     this.carousel.jumpTo(found.hive)
-
-    this.debug.log("startup", `[HiveLoader] activated hive: ${found.name}`)
+    this.debug.log('lifecycle', `[HiveLoader] activated hive: ${found.name}`)
   }
 
   // ─────────────────────────────────────────────
@@ -81,11 +79,11 @@ export class HiveLoader extends Hypercomb {
     for (const loader of this.loaders) {
       if (loader.enabled(scout)) {
         const hive = await loader.load(scout)
-        console.debug(`[HiveLoader] loaded with ${loader.constructor.name}`)
+        this.debug.log('lifecycle', `[HiveLoader] loaded with ${loader.constructor.name}`)
         return hive
       }
     }
-    console.warn(`[HiveLoader] no matching loader for ${scout.type}`)
+    this.debug.log('warn', `[HiveLoader] no matching loader for ${scout.type}`)
     return null
   }
 

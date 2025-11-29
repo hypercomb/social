@@ -2,13 +2,13 @@
 import { Cell } from "src/app/cells/cell"
 import { combId, sourceKey } from "src/app/cells/models/cell-filters"
 import { HypercombMode } from "src/app/core/models/enumerations"
-import { COMB_SERVICE } from "src/app/shared/tokens/i-comb-service.token"
+import { HONEYCOMB_SVC } from "src/app/shared/tokens/i-comb-service.token"
 import { PointerState } from "src/app/state/input/pointer-state"
 import { ClipboardOperation } from "./clipboard-operation"
 
 @Injectable({ providedIn: 'root' })
 export class PasteService extends ClipboardOperation {
-    private readonly store = { query: inject(QUERY_CELL_SVC), mutate: inject(COMB_SERVICE) }
+    private readonly store = { query: inject(QUERY_CELL_SVC), mutate: inject(HONEYCOMB_SVC) }
     private readonly ps = inject(PointerState)
 
 

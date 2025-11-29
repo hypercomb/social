@@ -1,6 +1,6 @@
 ﻿import { HttpClient, HttpResponse } from '@angular/common/http'
 import { Injectable, inject, signal } from '@angular/core'
-import { Constants } from 'src/app/unsorted/constants'
+import { Constants } from 'src/app/helper/constants'
 import { HiveResolutionType } from '../hive-models'
 import { firstValueFrom, timeout, catchError, of } from 'rxjs'
 import { HiveScout } from '../hive-scout'

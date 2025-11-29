@@ -1,13 +1,13 @@
 import { NgModule } from "@angular/core"
-import { CombService } from "src/app/cells/storage/comb-service"
-import { HIVE_HYDRATION, COMB_SERVICE, MODIFY_COMB_SVC } from "../tokens/i-comb-service.token"
+import { HoneycombService } from "src/app/cells/storage/honeycomb-service"
+import { HIVE_HYDRATION, HONEYCOMB_SVC, MODIFY_COMB_SVC } from "../tokens/i-comb-service.token"
 
 @NgModule({
   providers: [
-    CombService,
-    { provide: COMB_SERVICE, useExisting: CombService },
-    { provide: HIVE_HYDRATION, useExisting: CombService },
-    { provide: MODIFY_COMB_SVC, useExisting: CombService }
+    HoneycombService,
+    { provide: HONEYCOMB_SVC, useExisting: HoneycombService },
+    { provide: HIVE_HYDRATION, useExisting: HoneycombService },
+    { provide: MODIFY_COMB_SVC, useExisting: HoneycombService }
   ]
 })
 export class CombServiceModule { }

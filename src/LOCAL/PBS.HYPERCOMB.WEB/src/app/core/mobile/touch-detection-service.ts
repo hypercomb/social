@@ -1,4 +1,5 @@
-﻿import { Injectable } from "@angular/core"
+﻿//src/app/core/mobile/touch-detection-service.ts
+import { Injectable } from "@angular/core"
 
 @Injectable({
     providedIn: 'root'
@@ -21,5 +22,4 @@ export class TouchDetectionService {
         return Math.max(screen.width, screen.height) >= sizePixels
     }
 }
-
 

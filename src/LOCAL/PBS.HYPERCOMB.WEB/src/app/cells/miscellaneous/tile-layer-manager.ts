@@ -1,8 +1,8 @@
 ﻿import { inject, Injectable } from '@angular/core'
-import { Container, Graphics, RenderOptions, RenderTexture, Sprite, Texture, WebGLRenderer, autoDetectRenderer } from 'pixi.js'
+import { Container, Graphics, RenderTexture, Sprite, Texture, WebGLRenderer } from 'pixi.js'
 import { HypercombMode } from 'src/app/core/models/enumerations'
 import { PixiServiceBase } from 'src/app/pixi/pixi-service-base'
-import { isSelected, noImage } from '../models/cell-filters'
+import { isSelected } from '../models/cell-filters'
 import { BackgroundGraphic } from 'src/app/user-interface/sprite-components/background-graphic-sprite'
 import { BorderColorSprite } from 'src/app/user-interface/sprite-components/border-color-sprite'
 import { BranchOverlaySprite } from 'src/app/user-interface/sprite-components/branch-overlay-sprite'
@@ -11,113 +11,112 @@ import { ImageSprite } from 'src/app/user-interface/sprite-components/image-spri
 import { SelectedTileSprite } from 'src/app/user-interface/sprite-components/selected-tile-sprite'
 import { Cell } from '../cell'
 
-@Injectable({
-    providedIn: 'root'
-})
+@Injectable({ providedIn: 'root' })
 export class TileLayerManager extends PixiServiceBase {
 
-    // inject dependencies directly as fields
-    private readonly background = inject(BackgroundGraphic)
-    private readonly border = inject(BorderColorSprite)
-    private readonly branch = inject(BranchOverlaySprite)
-    private readonly text = inject(HighDefinitionTextService)
-    private readonly selected = inject(SelectedTileSprite)
-    private readonly image = inject(ImageSprite)
+  private readonly background = inject(BackgroundGraphic)
+  private readonly border = inject(BorderColorSprite)
+  private readonly branch = inject(BranchOverlaySprite)
+  private readonly text = inject(HighDefinitionTextService)
+  private readonly selected = inject(SelectedTileSprite)
+  private readonly image = inject(ImageSprite)
 
-    public buildNew = async (cell: Cell): Promise<Texture | undefined> => {
+  public buildNew = async (cell: Cell): Promise<Texture | undefined> => {
+    try {
+      const imageSprite = await this.image.build(cell)
 
-        try {
-            // Resolve the imageSprite: use the provided one or fetch from the ImageSprite service
-            const sprite = await this.image.build(cell)
+      const layers = await this.getLayers(cell, imageSprite)
 
+      if (!layers.length) {
+        this.debug.log('tiles', `no layers produced for ${cell.name} (id=${cell.cellId})`)
+      }
 
-            // generate a texture from the container
-            // Fetch all layers using the resolved image sprite
-            const layers = await this.getLayers(cell, sprite)
-
-            // Collapse layers into a texture
-            const rendered = await this.onAllTexturesLoaded(layers)
-            return rendered
-        } catch (error) {
-            console.error('Failed to load and render textures:', error)
-            throw error
-        }
+      return await this.onAllTexturesLoaded(layers)
     }
-
-    public getBorderVisual = async (cell: Cell): Promise<Sprite> => {
-        return this.border.build(cell)
+    catch (err) {
+      this.debug.error('tiles', 'buildNew failed', err)
+      return undefined
     }
-    public getBranchVisual = async (cell: Cell): Promise<Sprite> => {
-        return  cell.isBranch ? this.branch.build() : <any>Promise.resolve(undefined)
+  }
+
+  public getBorderVisual = async (cell: Cell): Promise<Sprite> =>
+    this.border.build(cell)
+
+  public getBranchVisual = async (cell: Cell): Promise<Sprite | undefined> =>
+    cell.isBranch ? this.branch.build() : undefined
+
+  public getBackgroundVisual = async (cell: Cell): Promise<Graphics> =>
+    this.background.build(cell)
+
+  public getLayers = async (
+    cell: Cell,
+    imageSprite?: Sprite
+  ): Promise<(Sprite | Graphics)[]> => {
+    try {
+      const focused = this.state.hasMode(HypercombMode.Focused)
+
+      // removed `.valid` to satisfy TS typings
+      const imageValid =
+        !!imageSprite &&
+        !!imageSprite.texture
+
+      this.debug.log(
+        'tiles',
+        `getLayers: cell=${cell.name} id=${cell.cellId} focused=${focused} imageValid=${imageValid}`
+      )
+
+      const bg = this.getBackgroundVisual(cell)
+      const branch = this.getBranchVisual(cell)
+      const border = this.getBorderVisual(cell)
+      const selectedSprite = isSelected(cell) ? this.selected.build(cell) : undefined
+
+      const textSprite =
+        focused || !imageValid
+          ? this.text.add(cell.name)
+          : undefined
+
+      const layers = await Promise.all([
+        imageValid ? imageSprite : undefined,
+        bg,
+        branch,
+        textSprite,
+        border,
+        selectedSprite
+      ])
+
+      return layers.filter(l => !!l) as (Sprite | Graphics)[]
     }
-
-    public getBackgroundVisual = async (cell: Cell): Promise<Graphics> => {
-        return this.background.build(cell)
+    catch (err) {
+      this.debug.error('tiles', 'getLayers failed', err)
+      return []
     }
+  }
 
-    public getLayers = async (cell: Cell, imageSprite?: Sprite): Promise<(Sprite | Graphics)[]> => {
+  private async getRenderer(): Promise<WebGLRenderer> {
+    await this.pixi.whenReady()
+    return this.pixi.renderer
+  }
 
-        // console.log(`getting layers for: ${cell.name} -> ${tileDatasourcePath}`)
+  private onAllTexturesLoaded = async (
+    layers: (Sprite | Graphics)[]
+  ): Promise<Texture> => {
 
-        try {
-            // Load all required textures asynchronously
+    const { width, height } = this.settings.hexagonDimensions
+    const container = new Container()
 
-            const focusedMode = this.state.hasMode(HypercombMode.Focused) || (!!cell.name && !cell.blob)
-            const hasNoImage = noImage(cell)
-            imageSprite = (focusedMode || hasNoImage) ? undefined : imageSprite
+    for (const l of layers) container.addChild(l)
 
-            const backgroundGraphics = this.getBackgroundVisual(cell) // Background texture
-            const branchSprite = this.getBranchVisual(cell) // Branch state texture
-            const borderOverlaySprite = this.getBorderVisual(cell) // Border color texture
-            const selectedTileSprite = isSelected(cell) ? this.selected.build(cell) : undefined
+    const renderer = await this.getRenderer()
+    const rt = RenderTexture.create({ width, height })
 
-            const textContainer = (focusedMode || hasNoImage)
-                ? this.text.add(cell.name)
-                : undefined
+    renderer.render({
+      container,
+      target: rt,
+      clear: true
+    })
 
-            // Wait for all textures to load and filter out undefined layers
-            const layers = await Promise.all([
-                imageSprite,
-                backgroundGraphics,
-                branchSprite,
-                textContainer,
-                borderOverlaySprite,
-                selectedTileSprite
-            ])
-
-            return <any>layers.filter((layer): layer is Sprite => !!layer)
-        }
-        catch (error) {
-            this.debug.log('error', error)
-        }
-        return []
-    }
-
-    // inside TileLayerManager
-    private async getRenderer(): Promise<WebGLRenderer> {
-        await this.pixi.whenReady()
-        return this.pixi.renderer
-    }
-
-
-    private onAllTexturesLoaded = async (layers: (Sprite | Graphics)[]): Promise<Texture> => {
-        const { width, height } = this.settings.hexagonDimensions;
-
-        const container = new Container();
-        for (const l of layers) container.addChild(l);
-
-        const renderer = await this.getRenderer();
-
-        const rt = RenderTexture.create({ width, height });
-
-        // v8 single-object signature
-        renderer.render({
-            container, target: rt,
-            clear: true
-        });
-
-        container.destroy({ children: false })
-        return rt
-    }
+    container.destroy({ children: false })
+    return rt
+  }
 
 }

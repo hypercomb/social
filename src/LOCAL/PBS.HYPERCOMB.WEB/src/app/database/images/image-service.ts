@@ -1,70 +1,100 @@
+// src/app/hive/storage/image-service.ts
 import { Injectable, inject } from "@angular/core"
 import { IHiveImage } from "src/app/core/models/i-hive-image"
 import { Cell } from "src/app/cells/cell"
 import { BlobService } from "src/app/hive/rendering/blob-service"
-import { IQueryImages, IModifyImages, HIVE_IMG_REPOSITORY } from "src/app/shared/tokens/i-hive-images.token"
+import { ImageRepository } from "../repository/image-repository"
+
 
 @Injectable({ providedIn: "root" })
-export class ImageService implements IQueryImages, IModifyImages {
-  private readonly repository = inject(HIVE_IMG_REPOSITORY)
-  private readonly blobSvc = inject(BlobService)
+export class ImageService {
+
+  private readonly repo = inject(ImageRepository)
+  private readonly blobs = inject(BlobService)
 
   public initialize = async () => {
-    await this.repository.initialize()
+    // no-op for now; repository has no Dexie
   }
 
-  // fetch hydrated image for a cell
-  public async loadForCell(cell: Cell, table: "small" | "large"): Promise<IHiveImage | undefined> {
-    let image = await this.repository.fetchByCell(cell.cellId, table)
-    if (!image && cell.sourcePath) {
-      // fallback: build from sourcePath
-      const blob = await this.blobSvc.fetchImageAsBlob(cell.sourcePath)
+  // ───────────────────────────────────────────────
+  // load the image assigned to a cell (using imageHash)
+  // ───────────────────────────────────────────────
+  public async loadForCell(cell: Cell): Promise<IHiveImage | undefined> {
+    const hash = cell.imageHash
+
+    // 1. Try OPFS by hash
+    if (hash) {
+      const img = await this.repo.fetch(hash)
+      if (img) return img
+    }
+
+    // 2. Fallback to sourcePath (initial import)
+    if (cell.sourcePath) {
+      const blob = await this.blobs.fetchImageAsBlob(cell.sourcePath)
       if (blob) {
-        image = <IHiveImage>{ cellId: cell.cellId, blob, x: 0, y: 0, scale: 1 }
-        await this.repository.add(image, table) // save for next time
+        const newHash = await this.repo.save(blob)
+        cell.imageHash = newHash
+
+        return {
+          imageHash: newHash,
+          blob,
+          x: 0,
+          y: 0,
+          scale: 1
+        }
       }
     }
-    return image
+
+    return undefined
   }
 
-  public getBaseImage = async (cell: Cell): Promise<IHiveImage | undefined> => {
-    return await this.loadForCell(cell, 'large') || this.loadForCell(cell, 'small')
+  // ───────────────────────────────────────────────
+  // fallback: always returns a usable blob
+  // ───────────────────────────────────────────────
+  public async getBaseImage(cell: Cell): Promise<IHiveImage> {
+    const loaded = await this.loadForCell(cell)
+    if (loaded) return loaded
+
+    // fallback: use default blob (but still hash it!)
+    const blob = BlobService.defaultBlob
+    const hash = await this.repo.save(blob)
+
+    // assign back to cell so editor + hydration stay consistent
+    cell.imageHash = hash
+
+    return {
+      imageHash: hash,
+      blob,
+      x: 0,
+      y: 0,
+      scale: 1
+    }
   }
 
-  // fetch many by cell ids
-  public async loadForCells(cellIds: number[], table: "small" | "large"): Promise<IHiveImage[]> {
-    return this.repository.fetchByCells(cellIds, table)
+  // ───────────────────────────────────────────────
+  // load many by hashes
+  // ───────────────────────────────────────────────
+  public async loadForHashes(hashes: string[]): Promise<IHiveImage[]> {
+    return this.repo.fetchMany(hashes)
   }
 
-  // convenience: placeholder
-  public async placeholder(): Promise<Blob> {
-    return BlobService.defaultBlob
+  // ───────────────────────────────────────────────
+  // save image → returns hash
+  // ───────────────────────────────────────────────
+  public async save(blob: Blob): Promise<string> {
+    return this.repo.save(blob)
   }
 
-  // save/update image after user manipulates (drag, zoom, etc.)
-  public async save(image: IHiveImage, table: "small" | "large"): Promise<void> {
-    await this.repository.add(image, table) // put = add or update
+  // passthrough
+  public fetch(hash: string): Promise<IHiveImage | undefined> {
+    return this.repo.fetch(hash)
   }
 
-  public add(image: IHiveImage, table: "small" | "large"): Promise<number> {
-    return this.repository.add(image, table)
+  public fetchMany(hashes: string[]): Promise<IHiveImage[]> {
+    return this.repo.fetchMany(hashes)
   }
 
-  public fetchByCell(cellId: number, table: "small" | "large"): Promise<IHiveImage | undefined> {
-    return this.repository.fetchByCell(cellId, table)
+  public delete(hash: string): Promise<void> {
+    return this.repo.delete(hash)
   }
-
-  public fetchByCells(cellIds: number[], table: "small" | "large"): Promise<IHiveImage[]> {
-    return this.repository.fetchByCells(cellIds, table)
-  }
-
-  public fetchAll(table: "small" | "large"): Promise<IHiveImage[]> {
-    return this.repository.fetchAll(table)
-  }
-
-  // delete an image
-  public async delete(id: number, table: "small" | "large"): Promise<void> {
-    return this.repository.delete(id, table)
-  }
-
 }

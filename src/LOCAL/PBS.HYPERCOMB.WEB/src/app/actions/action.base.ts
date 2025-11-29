@@ -8,7 +8,7 @@ import { HypercombState } from "../state/core/hypercomb-state"
 import { PolicyService } from "../navigation/menus/policy-service"
 import { PointerState } from "../state/input/pointer-state"
 import { ACTION_REGISTRY, CONTEXT_MENU } from "../shared/tokens/i-hypercomb.token"
-import { COMB_STORE } from "../shared/tokens/i-comb-store.token"
+import { HONEYCOMB_STORE } from "../shared/tokens/i-comb-store.token"
 import { MODIFY_COMB_SVC } from "../shared/tokens/i-comb-service.token"
 import { HIVE_STORE } from "../shared/tokens/i-hive-store.token"
 import { ImageService } from "../database/images/image-service"
@@ -21,7 +21,7 @@ export abstract class ActionBase<TPayload = unknown> implements Action<TPayload>
   protected readonly registry = inject(ACTION_REGISTRY)
   protected readonly detector = inject(CoordinateDetector)
   protected readonly stack = inject(ContextStack)
-  protected readonly combstore = inject(COMB_STORE)
+  protected readonly combstore = inject(HONEYCOMB_STORE)
   protected readonly hivestore = inject(HIVE_STORE)
   protected readonly modify = inject(MODIFY_COMB_SVC)
   protected readonly policy = inject(PolicyService)

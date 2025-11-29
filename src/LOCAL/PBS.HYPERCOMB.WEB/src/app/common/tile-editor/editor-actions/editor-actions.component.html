@@ -8,7 +8,7 @@
     <div class="icon" (click)="googleImageSearch()">
         <span class="icon-google-search">)</span>
     </div>
-    <div [class.selected]="es.context()!.isBranch" class="icon" (click)="toggleBranch()">
+    <div [class.selected]="es.cell()!.isBranch" class="icon" (click)="toggleBranch()">
         <span class="icon-toggle-branch">1</span>
     </div>
 </div>

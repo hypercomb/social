@@ -1,12 +1,13 @@
 ﻿// edit-tile.action.ts
 import { Injectable, inject } from "@angular/core"
-import { CellContext } from "../action-contexts"
+import { CellPayload } from "../action-contexts"
 import { ActionBase } from "../action.base"
-import { CellEditor } from "src/app/unsorted/hexagons/cell-editor"
+import { CellEditor } from "src/app/common/tile-editor/cell-editor"
+import { CellEditContext } from "src/app/state/interactivity/cell-edit-context"
 
 
 @Injectable({ providedIn: "root" })
-export class EditTileAction extends ActionBase<CellContext> {
+export class EditTileAction extends ActionBase<CellPayload> {
 
   public id = "layout.editTile"
   public override label = "Edit Tile"
@@ -16,14 +17,14 @@ export class EditTileAction extends ActionBase<CellContext> {
 
   private readonly manager = inject(CellEditor)
 
-  public override enabled = async (payload: CellContext): Promise<boolean> => {
+  public override enabled = async (payload: CellPayload): Promise<boolean> => {
     const up = <MouseEvent>payload.event
     return !!payload.cell && !this.state.isChoosingEditContext || (up.button === 2)
   }
 
-  public run = async (payload: CellContext): Promise<void> => {
-    const image = await this.images.getBaseImage(payload.cell)
-    payload.cell.image = image
-    this.manager.beginEditing(payload.cell)
+  public run = async (payload: CellPayload): Promise<void> => {
+    const context = new CellEditContext(payload.cell)
+    context.originalSmall = await this.images.getBaseImage(payload.cell)
+    this.manager.beginEditing(context)
   }
 }

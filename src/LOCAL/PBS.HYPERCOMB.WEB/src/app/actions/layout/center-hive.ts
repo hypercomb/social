@@ -1,11 +1,11 @@
 import { Injectable, effect, inject } from "@angular/core"
 import { Action } from "../action-models"
-import { CellContext } from "../action-contexts"
+import { CellPayload } from "../action-contexts"
 import { CenterTileService } from "src/app/cells/behaviors/center-tile-service"
 import { ActionBase } from "../action.base"
 
 @Injectable({ providedIn: "root" })
-export class CenterHiveAction extends ActionBase<CellContext> implements Action<CellContext> {
+export class CenterHiveAction extends ActionBase<CellPayload> implements Action<CellPayload> {
     public readonly center = inject(CenterTileService)
 
 
@@ -15,11 +15,11 @@ export class CenterHiveAction extends ActionBase<CellContext> implements Action<
     public override category = "Layout"
     public override risk: "none" = "none"
 
-    public override enabled = async (_?: CellContext): Promise<boolean> => {
+    public override enabled = async (_?: CellPayload): Promise<boolean> => {
         return true
     }
 
-    public run = async (payload: CellContext): Promise<void> => {
+    public run = async (payload: CellPayload): Promise<void> => {
 
         const cell = payload.hovered!
         // safe due to enabled guard

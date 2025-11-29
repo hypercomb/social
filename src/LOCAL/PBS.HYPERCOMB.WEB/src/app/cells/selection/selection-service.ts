@@ -5,18 +5,18 @@ import { CellOptions } from 'src/app/core/models/enumerations'
 import { Cell } from '../cell'
 import { isSelected } from '../models/cell-filters'
 import { HypercombState } from 'src/app/state/core/hypercomb-state'
-import { COMB_STORE } from 'src/app/shared/tokens/i-comb-store.token'
+import { HONEYCOMB_STORE } from 'src/app/shared/tokens/i-comb-store.token'
 import { PixiServiceBase } from 'src/app/pixi/pixi-service-base'
 import { Assets } from 'pixi.js'
 import { Events } from 'src/app/helper/events/events'
 import { ISelections } from 'src/app/shared/tokens/i-selection.token'
-import { TILE_FACTORY } from 'src/app/shared/tokens/i-hypercomb.token'
+import { MODIFY_COMB_SVC } from 'src/app/shared/tokens/i-comb-service.token'
 
 @Injectable({ providedIn: 'root' })
 export class SelectionService extends PixiServiceBase implements ISelections {
+  private readonly modify = inject(MODIFY_COMB_SVC)
   private readonly destroyRef = inject(DestroyRef)
-  private readonly factory = inject(TILE_FACTORY)
-  private readonly store = inject(COMB_STORE)
+  private readonly store = inject(HONEYCOMB_STORE)
   private readonly hs = inject(HypercombState)
 
   // override lets clipboard mode (or other tools) bypass Ctrl requirement
@@ -27,19 +27,12 @@ export class SelectionService extends PixiServiceBase implements ISelections {
   public readonly items = computed(() =>
     this.store.cells().filter(isSelected)
   )
+
   public readonly hasItems = computed(() => this.items().length > 0)
   public readonly latest = computed(() => {
     const arr = this.items()
     return arr.length ? arr[arr.length - 1] : null
   })
-
-  // selection flags
-  private _isSelecting = signal(false)
-  public readonly isSelecting = this._isSelecting.asReadonly()
-
-  // suppress-next-up flag → avoids navigation on the immediate pointerUp after selection
-  private _suppressNextUp = signal(false)
-  public readonly suppressNextUp = this._suppressNextUp.asReadonly()
 
   // guard so we don’t double-arm the one-shot blocker
   private upBlockerArmed = false
@@ -56,45 +49,6 @@ export class SelectionService extends PixiServiceBase implements ISelections {
       .subscribe(() => this.override.set(false))
   }
 
-  /** called when selection mode begins */
-  public beginSelection() {
-    this._isSelecting.set(true)
-  }
-
-  /** called when selection finishes (ctrl released or explicit end) */
-  public finishSelection() {
-    if (!this._isSelecting()) return
-    this._isSelecting.set(false)
-    this._suppressNextUp.set(true)
-    this.armOneShotUpBlocker()
-  }
-
-  /** one-shot DOM capture blocker for the next pointerup/click */
-  private armOneShotUpBlocker() {
-    if (this.upBlockerArmed) return
-    this.upBlockerArmed = true
-
-    const cleanup = () => {
-      window.removeEventListener('pointerup', consume, true)
-      window.removeEventListener('click', consume, true)
-      window.removeEventListener('pointercancel', consume, true)
-      this._suppressNextUp.set(false)
-      this.upBlockerArmed = false
-    }
-
-    const consume = (e: Event) => {
-      e.preventDefault()
-      e.stopImmediatePropagation()
-      cleanup()
-    }
-
-    window.addEventListener('pointerup', consume, true)
-    window.addEventListener('click', consume, true)
-    window.addEventListener('pointercancel', consume, true)
-
-    // safety fallback: auto-clean if no events fire
-    setTimeout(cleanup, 200)
-  }
 
   // ----------------- selection mutators -----------------
 
@@ -138,11 +92,10 @@ export class SelectionService extends PixiServiceBase implements ISelections {
   private async invalidate(cell: Cell) {
     // remove old cache + force Pixi redraw
     let tile = this.store.lookupTile(cell.cellId)
-  const key = this.hs.cacheId(cell)
-  Assets.cache.remove(key)
+    const key = this.hs.cacheId(cell)
+    Assets.cache.remove(key)
 
     tile?.invalidate()
-    tile = await this.factory.create(cell)
-    this.pixi.container?.addChild(tile)
+    this.modify.updateCell(cell)  
   }
 }

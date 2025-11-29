@@ -1,8 +1,7 @@
 ﻿// file: src/app/models/tile-flags.ts
 
 // NOTE: imports intentionally minimal; let your IDE add/fix as needed.
-import type { Sprite } from "pixi.js"
-import { Cell, EditCell, Hive, NewCell } from "src/app/cells/cell"
+import { Cell, Hive, NewCell } from "src/app/cells/cell"
 import { CellOptions } from "src/app/cells/models/cell-options" // enum of flags
 import { CellEntity } from "src/app/database/model/i-tile-entity"
 
@@ -11,27 +10,6 @@ import { CellEntity } from "src/app/database/model/i-tile-entity"
 // -----------------------------------------------------------
 const maskOf = (
     cell: Cell): number => (cell as any).options() ?? (cell as any).options() ?? 0
-
-// -----------------------------------------------------------
-// blob helpers
-// -----------------------------------------------------------
-export function blobUrlForSprite(cell: Cell, sprite: Sprite): string | null {
-    if (!cell.blob) return null
-
-    const url = URL.createObjectURL(cell.blob)
-
-    const originalDestroy = sprite.destroy.bind(sprite)
-    sprite.destroy = (...args: any[]) => {
-        try { URL.revokeObjectURL(url) } catch { /* ignore revoke errors */ }
-        originalDestroy(...args)
-    }
-
-    return url
-}
-
-export function blobUrl(cell: Cell): string | null {
-    return cell.blob ? URL.createObjectURL(cell.blob) : null
-}
 
 // -----------------------------------------------------------
 // id / key helpers
@@ -56,17 +34,6 @@ export function combId(cell: Cell | CellEntity): string {
 
 export function sourceKey(cell: Cell): string {
     return `${cell.hive}-${cell.sourceId}`
-}
-
-// -----------------------------------------------------------
-// blob state
-// -----------------------------------------------------------
-export function isBlobImage(cell: Cell): boolean {
-    return !!cell.blob
-}
-
-export function noImage(cell: Cell): boolean {
-    return !cell.image?.blob
 }
 
 // -----------------------------------------------------------
@@ -115,13 +82,9 @@ export function isPathwayTile(cell: Cell): boolean {
 // grouped export for convenience
 // -----------------------------------------------------------
 export const tileFilters = {
-    blobUrl,
-    blobUrlForSprite,
     cacheId,
     combId,
     sourceKey,
-    isBlobImage,
-    noImage,
     isHive,
     isPathway,
     isSelected,

@@ -1,7 +1,7 @@
 ﻿import { inject, Injectable, Signal, signal } from "@angular/core"
 import { Action } from "./action-models"
 import { ActionBase } from "./action.base"
-import { BaseContext } from "./action-contexts"
+import { PayloadBase } from "./action-contexts"
 import { CoordinateDetector } from "../helper/detection/coordinate-detector"
 import { IActionRegistry } from "../shared/tokens/i-hypercomb.token"
 
@@ -12,7 +12,7 @@ export interface ActionEvent {
   error?: any
   timestamp: number
 }
-
+@Injectable({ providedIn: "root" })
 export class ActionRegistry implements IActionRegistry {
   private entries = new Map<string, ActionEntry>()
   private readonly detector = inject(CoordinateDetector)
@@ -36,7 +36,7 @@ export class ActionRegistry implements IActionRegistry {
     this.entries.set(id, { mode: "factory", factory })
   }
 
- public async invoke<TPayload extends BaseContext = BaseContext>(
+ public async invoke<TPayload extends PayloadBase = PayloadBase>(
     id: string,
     payload?: TPayload
   ): Promise<boolean> {

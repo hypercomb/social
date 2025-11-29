@@ -4,7 +4,7 @@
 import { Directive, effect, inject } from '@angular/core'
 import { HypercombMode } from '../models/enumerations'
 import { PixiServiceBase } from 'src/app/pixi/pixi-service-base'
-import { ModeChangeService } from 'src/app/unsorted/mode-change-service'
+import { ModeChangeService } from 'src/app/core/directives/mode-change-service'
 
 @Directive({
   standalone: true,
@@ -27,7 +27,7 @@ export class CustomCursorDirective extends PixiServiceBase {
     let cursorImage = ''
     switch (mode) {
       case HypercombMode.Move: cursorImage = 'assets/cursor/move-cursor.svg'; break
-      case HypercombMode.ChoosingEditContext: cursorImage = 'assets/cursor/edit-cursor.svg'; break
+      case HypercombMode.EditMode: cursorImage = 'assets/cursor/edit-cursor.svg'; break
       case HypercombMode.Copy: cursorImage = 'assets/cursor/copy-cursor.svg'; break
       case HypercombMode.Cut: cursorImage = 'assets/cursor/cut-cursor.svg'; break
       default: cursorImage = ''; break

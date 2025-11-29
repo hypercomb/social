@@ -7,6 +7,7 @@ import { DatabaseService } from "../database/database-service"
 import { CELL_FACTORY } from "../inversion-of-control/tokens/tile-factory.token"
 import { TILE_FACTORY } from "../shared/tokens/i-hypercomb.token"
 import { CELL_REPOSITORY } from "../shared/tokens/i-cell-repository.token"
+import { CoordinateDetector } from "../helper/detection/coordinate-detector"
 
 export abstract class HypercombData extends Hypercomb {
     protected readonly repository = inject(CELL_REPOSITORY)
@@ -15,6 +16,8 @@ export abstract class HypercombData extends Hypercomb {
 }
 
 export abstract class HypercombLayout extends Hypercomb {
+    protected readonly detectory = inject(CoordinateDetector)
+    
     public readonly ps = inject(PointerState)
     protected readonly cell = {
         factory: inject(CELL_FACTORY),

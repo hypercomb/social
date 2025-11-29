@@ -10,8 +10,8 @@ export class EmptyTextureProvider extends RenderTextureProvider implements IText
 
     public override get name(): string { return EmptyTextureProvider.name }
 
-    public override available = (cell: Cell): boolean => {
-        return !cell.sourcePath && !cell.blob
+    public override enabled = (cell: Cell): boolean => {
+        return !cell.sourcePath // && !cell.blob maybe we need to load from opfs? 
     }
 
     public override getTexture = async (cell: Cell): Promise<Texture | RenderTexture | undefined> => {

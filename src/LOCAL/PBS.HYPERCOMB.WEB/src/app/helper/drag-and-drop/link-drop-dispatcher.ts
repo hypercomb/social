@@ -1,5 +1,5 @@
 ﻿import { Injectable } from '@angular/core'
-import { HiveEvents } from 'src/app/unsorted/constants'
+import { HiveEvents } from 'src/app/helper/constants'
 import { Hypercomb } from '../../core/mixins/abstraction/hypercomb.base'
 import { IDropDispatcher } from './i-drop-dispatcher'
 import { HexagonLinkDroppedEvent } from '../events/event-interfaces'

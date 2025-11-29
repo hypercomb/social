@@ -12,18 +12,10 @@ export class EventDispatcher {
     appEvents.dispatch(Events.HexagonDropCompleted, {})
   }
 
-  public cancelPanning() {
-    // add CancelPanning if you want it distinct in AppEvents
-    appEvents.dispatch(Events.PanningThreshold, { dx: 0, dy: 0 })
-  }
 
   public cancelEvent(event: any) {
     appEvents.dispatch(Events.EscapeCancel, { event })
     this.state.resetMode()
-  }
-
-  public panningThresholdAttained(dx: number = 0, dy: number = 0) {
-    appEvents.dispatch(Events.PanningThreshold, { dx, dy })
   }
 
   public notifyLocked() {

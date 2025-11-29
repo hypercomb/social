@@ -2,7 +2,7 @@
 import { Graphics } from 'pixi.js'
 import { SpriteBuilder } from './sprite-builder'
 import { Cell } from 'src/app/cells/cell'
-import { StateDebugRegistry } from 'src/app/services/debug-registry'
+import { DebugService } from 'src/app/core/diagnostics/debug-service'
 
 @Injectable({
     providedIn: 'root'
@@ -10,7 +10,7 @@ import { StateDebugRegistry } from 'src/app/services/debug-registry'
 export class BackgroundGraphic extends SpriteBuilder<Cell> {
 
     public override build = async (data: Cell): Promise<Graphics> => {
-        StateDebugRegistry.expose('background-graphic', this)
+        DebugService.expose('background-graphic', this)
 
         // Set up white background using Graphics
         const { width, height } = this.settings.hexagonDimensions

@@ -1,5 +1,5 @@
 import { InjectionToken, Signal } from "@angular/core";
-import { BaseContext } from "src/app/actions/action-contexts";
+import { PayloadBase } from "src/app/actions/action-contexts";
 import { ActionBase } from "src/app/actions/action.base";
 import { Cell } from "src/app/cells/cell";
 
@@ -10,7 +10,7 @@ import { AxialCoordinate } from "src/app/core/models/axial-coordinate";
 import { CoordinateDetector } from "src/app/helper/detection/coordinate-detector";
 
 export interface IActionRegistry {
-    invoke<TPayload extends BaseContext = BaseContext>(id: string, payload?: TPayload): Promise<boolean>
+    invoke<TPayload extends PayloadBase = PayloadBase>(id: string, payload?: TPayload): Promise<boolean>
     register<TPayload = unknown>(instance: ActionBase<TPayload>): void
 }
 
@@ -62,6 +62,6 @@ export const CLIPBOARD_STATE = new InjectionToken<IClipboardState>(TOKEN_LIST.CL
 export const DETECTOR_STATE = new InjectionToken<CoordinateDetector>(TOKEN_LIST.DETECTOR_STATE)
 export const CAROUSEL_SVC = new InjectionToken<CarouselService>(TOKEN_LIST.CAROUSEL_SVC)
 export const COORDINATE_DETECTOR = new InjectionToken<ICoordinateDetector>(TOKEN_LIST.COORDINATE_DETECTOR)
-export const SETTINGS_SVC = new InjectionToken<ISettingsService>("SETTINGS_SVC")
+export const SETTINGS_DATA_SVC = new InjectionToken<ISettingsService>("SETTINGS_DATA_SVC")
 export const TILE_SERVICE = new InjectionToken<ITileService>("TILE_SERVICE")
 export const TILE_FACTORY = new InjectionToken<ITileFactory>("TILE_FACTORY")

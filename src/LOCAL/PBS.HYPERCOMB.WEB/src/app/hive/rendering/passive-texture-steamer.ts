@@ -106,7 +106,7 @@ export class PassiveTextureStreamer extends HypercombLayout {
             }
 
             const cells: Cell[] = cellTable.rows
-            await this.comb.query.decorateAll(cells)
+            await this.honeycomb.query.decorateAll(cells)
 
             for (const cell of cells) {
                 if (this.cancel) break

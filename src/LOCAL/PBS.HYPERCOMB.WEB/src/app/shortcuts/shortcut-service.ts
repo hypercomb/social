@@ -5,7 +5,7 @@ import { defaultShortcuts } from "./layouts/default-shortcuts"
 import { globalShortcuts } from "./layouts/global-shortcuts"
 import { IShortcut, IShortcutKey, IShortcutOverride } from "./shortcut-model"
 import { ShortcutRegistry } from "./shortcut-registry"
-import { BaseContext, fromKeyboard } from "../actions/action-contexts"
+import { PayloadBase, fromKeyboard } from "../actions/action-contexts"
 import { CoordinateDetector } from "../helper/detection/coordinate-detector"
 import { PayloadInfuser } from "./payload-infuser"
 
@@ -67,6 +67,10 @@ export class ShortcutService extends Hypercomb {
 
   /** check if event matches a chord (all keys/mods in that inner array) */
   private matches(ev: KeyboardEvent, keys: IShortcutKey[]): boolean {
+    if (this.state.ignoreShortcuts) {
+      return false
+    }
+
     try {
       this.debug.log('shortcuts', keys)
       const result = keys.every(k => this.ks.when(ev).key(k.key, k))
@@ -102,7 +106,7 @@ export class ShortcutService extends Hypercomb {
           }
 
           const tile = this.detector.activeTile()
-          let payload: BaseContext = fromKeyboard(ev, sc.payload)
+          let payload: PayloadBase = fromKeyboard(ev, sc.payload)
           this.infuser.infuse(payload, tile)
 
           this.registry.invoke(sc.cmd, payload)

@@ -6,10 +6,10 @@ import { Container, Point } from 'pixi.js'
 import { fromEvent, firstValueFrom } from 'rxjs'
 import { NewTileService } from 'src/app/cells/creation/new-tile-service'
 import { BlobService } from 'src/app/hive/rendering/blob-service'
-import { COMB_STORE } from 'src/app/shared/tokens/i-comb-store.token'
+import { HONEYCOMB_STORE } from 'src/app/shared/tokens/i-comb-store.token'
 import { EditorService } from 'src/app/state/interactivity/editor-service'
 import { focused } from 'src/app/state/interactivity/focus-cell'
-import { HiveEvents, Constants, LocalAssets } from 'src/app/unsorted/constants'
+import { HiveEvents, Constants, LocalAssets } from 'src/app/helper/constants'
 import { CellEditor } from 'src/app/layout/hexagons/cell-editor'
 import { CoordinateLocator } from 'src/app/unsorted/utility/coordinate-locator'
 import { CoordinateDetector } from '../detection/coordinate-detector'
@@ -29,7 +29,7 @@ export class OpenGrapservice extends ReceiveFileBase {
     private readonly locator = inject(CoordinateLocator)
     private readonly manager = inject(CellEditor)
     private readonly ps = inject(PointerState)
-    private readonly store = inject(COMB_STORE)
+    private readonly store = inject(HONEYCOMB_STORE)
     private readonly new_tiles = inject(NewTileService)
 
     constructor() {

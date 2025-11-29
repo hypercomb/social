@@ -34,7 +34,7 @@ export class FallbackDataResolver extends HiveLoaderBase implements IHiveLoader 
 
     dexieHive = (await this.opfs.loadHive(scout.name))!
     this.controller.replace(dexieHive.name, dexieHive)
-    await this.importer.importDirect(dexieHive.file!)
+    await this.importer.importDirect(dexieHive.name, dexieHive.file!)
 
     const hive = await this.query.fetchHive()
     scout.setHive(hive!)

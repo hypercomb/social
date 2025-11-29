@@ -1,4 +1,4 @@
-﻿import { NgModule } from "@angular/core"
+﻿import { APP_INITIALIZER, NgModule, provideAppInitializer } from "@angular/core"
 import { HiveFactory } from "../../hive/hive-factory"
 import { HIVE_LOADERS, HIVE_NAME_RESOLVERS } from "../tokens/i-hive-resolver.token"
 import { HIVE_FACTORY } from "../../inversion-of-control/ports/i-hive-factory-port"
@@ -20,10 +20,10 @@ import { FirstOpfsNameResolver } from "src/app/hive/name-resolvers/first-opfs-na
 import { FirstOpfsLoader } from "src/app/hive/hive-loaders/first-opfs-loader"
 import { OpfsHiveLoader } from "src/app/hive/hive-loaders/opfs-hive-loader"
 import { Hive } from "src/app/cells/cell"
+import { HiveBootstrapService } from "src/app/hive/hives-bootstrapper"
 
 @NgModule({
     providers: [
-        // factory
         { provide: HIVE_FACTORY, useExisting: HiveFactory },
         { provide: REFRESH_HIVE_PORT, useExisting: HiveFactory },
         { provide: HIVE_STORE, useExisting: HiveStore },

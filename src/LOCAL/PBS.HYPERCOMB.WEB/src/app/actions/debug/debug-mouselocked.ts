@@ -1,5 +1,5 @@
 import { inject, Inject, Injectable } from "@angular/core";
-import { CellContext } from "../action-contexts";
+import { CellPayload } from "../action-contexts";
 import { ActionBase } from "../action.base";
 import { Tile } from "src/app/cells/models/tile";
 import { CoordinateDetector } from "src/app/helper/detection/coordinate-detector";

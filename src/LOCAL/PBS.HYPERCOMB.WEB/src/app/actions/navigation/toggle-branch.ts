@@ -2,21 +2,21 @@
 import { Injectable } from "@angular/core"
 import { CellOptions, POLICY } from "../../core/models/enumerations"
 import { Cell } from "../../cells/cell"
-import { CellContext } from "../action-contexts"
+import { CellPayload } from "../action-contexts"
 import { ActionBase } from "../action.base"
 
 @Injectable({ providedIn: "root" })
-export class ToggleBranchAction extends ActionBase<CellContext> {
+export class ToggleBranchAction extends ActionBase<CellPayload> {
   public id = "layout.toggleBranch"
   public override label = "Toggle Branch"
   public override description = "Flip the branch flag on the focused cell"
 
-  public override enabled = async (payload: CellContext): Promise<boolean> => {
+  public override enabled = async (payload: CellPayload): Promise<boolean> => {
     if (this.policy.any(POLICY.NoActiveTile)) return false
     return !!payload.cell
   }
 
-  public run = async (payload: CellContext) => {
+  public run = async (payload: CellPayload) => {
     if (this.policy.any(POLICY.NoActiveTile)) return
 
     const cell: Cell | undefined = payload.cell

@@ -1,132 +1,121 @@
-﻿import { Injectable, Injector, effect, inject, signal } from '@angular/core'
-import { IHitArea, Rectangle } from 'pixi.js'
+﻿// src/app/pixi/pinch-zoom-service.ts
+import { Injectable, effect, inject, signal } from '@angular/core'
 import { HypercombMode } from 'src/app/core/models/enumerations'
-import { LinkNavigationService } from 'src/app/navigation/link-navigation-service'
-import { PointerState } from 'src/app/state/input/pointer-state'
-import { LayoutState } from '../layout/layout-state'
-import { PixiDataServiceBase } from '../database/pixi-data-service-base'
-import { ZoomService } from './zoom-service'
+import { ZoomInputBase } from './zoom-input.base'
+import { TouchPanningService } from './touch-panning-service'
 
 @Injectable({ providedIn: 'root' })
-export class PinchZoomService extends PixiDataServiceBase {
-  private readonly ps = inject(PointerState)
-  private readonly ls = inject(LayoutState)
-  private readonly navigation = inject(LinkNavigationService)
-  private readonly injector = inject(Injector)
-  private readonly zoomService = inject(ZoomService)
+export class PinchZoomService extends ZoomInputBase {
+  private readonly touchPan = inject(TouchPanningService)
 
-  private minScale = 0
-  private maxScale = 0
-
-  // pinch working state
   private readonly isPinching = signal(false)
-  private startDistance = 0
-  private startCenter = { x: 0, y: 0 }
-  private startScaleX = 1
-  private startScaleY = 1
-  private startPosX = 0
-  private startPosY = 0
 
-  public pinchTimestamp: number | null = null
+  private pivot: { x: number; y: number } | null = null
+  private baselineY = 0
+  private startScale = 1
+
+  // track which pointer id is the mouse so we can ignore it for pinch
+  private mousePointerId: number | null = null
 
   constructor() {
     super()
 
-    effect(
-      async (onCleanup) => {
-        const container = this.pixi.container // reactive read
-        const positions = this.ps.pointerPositions() // reactive read
+    effect(() => {
+      const container = this.pixi.container
+      const positions = this.ps.pointerPositions()
+      const lastMove = this.ps.pointerMoveEvent()
+      const lastDown = this.ps.pointerDownEvent()
+      if (!container) return
 
-        if (!container) return // pixi not ready yet
+      // update mouse pointer id from latest mouse event
+      const last = lastMove ?? lastDown
+      if (last && last.pointerType === 'mouse') {
+        this.mousePointerId = last.pointerId
+      }
 
-        const canvas = this.pixi.canvas()
-        if (!canvas) return // pixi not ready yet
+      const allEntries = Array.from(
+        positions.entries()
+      ) as [number, { x: number; y: number }][]
 
+      // drop mouse pointer from the set so remaining entries behave as touches
+      const touchEntries = allEntries.filter(([id]) => id !== this.mousePointerId)
+      const count = touchEntries.length
 
-        // lazy-init once per container
-        if (this.minScale === 0 && this.maxScale === 0) {
-          this.minScale = this.ls.minScale
-          this.maxScale = this.ls.maxScale
-          container.eventMode = 'static'
-          container.hitArea ??= new Rectangle(-1e6, -1e6, 2e6, 2e6) as IHitArea
-          const canvas = this.pixi.canvas()!
-          canvas.style.touchAction = 'none'
+      // no touch pointers → end any active pinch
+      if (count === 0) {
+        if (this.isPinching()) {
+          this.stopPinch()
         }
+        return
+      }
 
-        if (positions.size < 2 || this.state.hasMode(HypercombMode.Transport)) {
-          this.isPinching.set(false)
-          return
+      // block zoom in transport mode
+      if (this.state.hasMode(HypercombMode.Transport)) {
+        this.stopPinch()
+        return
+      }
+
+      // start pinch when 2 or more touch pointers exist
+      if (!this.isPinching() && count >= 2) {
+        const [, p1] = touchEntries[0]
+        const [, p2] = touchEntries[1]
+
+        this.pivot = {
+          x: (p1.x + p2.x) / 2,
+          y: (p1.y + p2.y) / 2
         }
+        this.baselineY = this.pivot.y
+        this.startScale = this.zoom.currentScale
 
-        const [p1, p2] = Array.from(positions.values()) as { x: number; y: number }[]
-        if (!p1 || !p2) return
+        this.touchPan.cancelPanSession()
+        this.touchPan.disable()
 
-        if (!this.isPinching()) {
-          // pinch start
-          this.startDistance = this.distance(p1, p2)
-          this.startCenter = this.center(p1, p2)
-          this.startScaleX = container.scale.x
-          this.startScaleY = container.scale.y
-          this.startPosX = container.x
-          this.startPosY = container.y
-          this.pinchTimestamp = Date.now()
-          this.isPinching.set(true)
-          return
-        }
+        this.isPinching.set(true)
+        this.state.setCancelled(true)
+        return
+      }
 
-        // pinch update
-        const currDistance = this.distance(p1, p2)
-        if (this.startDistance <= 0) return
+      // update pinch while 2 or more touches remain
+      if (this.isPinching() && count >= 2) {
+        const [, p1] = touchEntries[0]
+        const [, p2] = touchEntries[1]
+        if (!this.pivot) return
 
-        let factor = currDistance / this.startDistance
-        const damp = this.settings.isMac ? 0.375 : 1.5
-        factor = 1 + (factor - 1) * damp
+        const centerY = (p1.y + p2.y) / 2
+        const delta = centerY - this.baselineY
+        if (Math.abs(delta) < 4) return
 
-        const newScale = this.clamp(this.startScaleX * factor, this.minScale, this.maxScale)
+        const factor = Math.pow(2, -delta / 300)
+        const newScale = this.startScale * factor
 
-        // use the same adjustZoom logic from ZoomService
-        const { x: px, y: py } = this.startCenter
-        await this.zoomService.setZoom(newScale, { x: px, y: py })
+        this.zoomToScale(newScale, this.pivot)
+        return
+      }
 
-        this.navigation.setResetTimeout()
+      // pinch was active and now only 1 touch remains → hand off to pan
+      if (this.isPinching() && count === 1) {
+        const [pointerId, p] = touchEntries[0]
+        this.stopPinch()
 
+        this.touchPan.enable()
+        this.touchPan.beginPanFromTouch(p.x, p.y, pointerId)
+        return
+      }
 
-        const wxOld = (px - this.startPosX) / this.startScaleX
-        const wyOld = (py - this.startPosY) / this.startScaleY
-
-        container.scale.set(newScale, newScale)
-        container.x = px - wxOld * newScale
-        container.y = py - wyOld * newScale
-
-        const cell = this.stack.cell()!
-        cell.scale = newScale
-        cell.x = container.x
-        cell.y = container.y
-
-        await this.saveTransform()
-
-        this.navigation.setResetTimeout()
-
-        // cleanup if PixiManager replaces the container
-        onCleanup(() => {
-          this.isPinching.set(false)
-        })
-      },
-      {
-        injector: this.injector
-      },
-    )
+      // if not pinching and only 1 touch exists, do nothing here:
+      // touch panning service handles normal one-finger pan
+    })
   }
 
-  // helpers
-  private distance = (a: { x: number; y: number }, b: { x: number; y: number }): number =>
-    Math.hypot(a.x - b.x, a.y - b.y)
+  private stopPinch(): void {
+    if (!this.isPinching()) return
 
-  private center = (a: { x: number; y: number }, b: { x: number; y: number }) => ({
-    x: (a.x + b.x) / 2,
-    y: (a.y + b.y) / 2,
-  })
+    this.isPinching.set(false)
+    this.pivot = null
+    this.baselineY = 0
+    this.startScale = this.zoom.currentScale
 
-  private clamp = (v: number, lo: number, hi: number): number =>
-    Math.min(Math.max(v, lo), hi)
+    // allow normal touch panning after gesture ends
+    this.touchPan.enable()
+  }
 }

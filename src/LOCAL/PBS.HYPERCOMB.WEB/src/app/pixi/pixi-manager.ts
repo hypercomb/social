@@ -1,10 +1,14 @@
 ﻿import { Injectable, Injector, computed, effect, inject, signal } from '@angular/core'
 import { Application, Container, Point, WebGLRenderer } from 'pixi.js'
-import { AxialService } from '../unsorted/utility/axial-service'
-import { ScreenService } from '../unsorted/utility/screen-service'
-import { Settings } from '../unsorted/settings'
+import { Settings } from '../core/settings'
+import { AxialService } from '../services/axial-service'
+import { ScreenService } from '../services/screen-service'
+import { DebugService } from '../core/diagnostics/debug-service'
+import { ACTION_REGISTRY } from '../shared/tokens/i-hypercomb.token'
+import { BackHiveAction } from '../actions/navigation/back.action'
+import { HypercombState } from '../state/core/hypercomb-state'
 
-// global singleton to survive hmr / multiple di instances
+// global singleton for HMR
 type GlobalPixi = {
   __PIXI_APP__?: Application
   __PIXI_INIT__?: Promise<Application>
@@ -14,26 +18,27 @@ const g = globalThis as unknown as GlobalPixi
 
 @Injectable({ providedIn: 'root' })
 export class PixiManager {
-  // angular injections
+
   public readonly injector = inject(Injector)
   private readonly axials = inject(AxialService)
   private readonly screen = inject(ScreenService)
   private readonly settings = inject(Settings)
-  // global app + container (created once)
-  private _app: Application = g.__PIXI_APP__ ?? (g.__PIXI_APP__ = new Application())
-  private _container: Container = g.__PIXI_CONTAINER__ ?? (g.__PIXI_CONTAINER__ = new Container())
+  private readonly state = inject(HypercombState)
+  private _app: Application =
+    g.__PIXI_APP__ ?? (g.__PIXI_APP__ = new Application())
+
+  private _container: Container =
+    g.__PIXI_CONTAINER__ ?? (g.__PIXI_CONTAINER__ = new Container())
+
   private _initPromise?: Promise<Application>
 
-  // lifecycle state
   private readonly _ready = signal<Application | null>(null)
   public readonly ready = this._ready.asReadonly()
 
-  // expose container
   public get container(): Container {
     return this._container
   }
 
-  // derived signals
   public readonly canvas = computed<HTMLCanvasElement | null>(() => {
     const app = this._ready()
     return app ? (this._app.canvas as HTMLCanvasElement) : null
@@ -55,20 +60,24 @@ export class PixiManager {
   }
 
   constructor() {
-    // reactively center on resize
+    // keep stage centered on resize
     effect(() => {
       const size = this.screen.windowSize()
-      if (this._ready()) {
-      this.setStageCenter()
-      }
+      if (this._ready()) this.setStageCenter()
     })
+
+    DebugService.expose('container', this.container)
   }
 
-  // initialize once
+  // -------------------------------------------------------------
+  // initialize PIXI application (runs once)
+  // -------------------------------------------------------------
   public initialize = async (host: HTMLElement = document.body): Promise<Application> => {
     if (this._initPromise) return this._initPromise
 
     this._initPromise = (async () => {
+
+      // pixi init
       if (!(this._app as any).renderer) {
         await this._app.init({
           resizeTo: window,
@@ -78,12 +87,12 @@ export class PixiManager {
         })
       }
 
-      // make sure our container is staged once
+      // ensure stage → container hookup
       if (!this._container.parent) {
         this._app.stage.addChild(this._container)
       }
 
-      // initial center
+      // stage positioning
       this.setStageCenter()
 
       // attach canvas once
@@ -94,20 +103,45 @@ export class PixiManager {
         host.appendChild(canvas)
       }
 
+      // mark ready
       this._ready.set(this._app)
+
+      // -------------------------------------------------------------------
+      // GLOBAL RIGHT-CLICK HANDLER (container-level back navigation)
+      // -------------------------------------------------------------------
+      const registry = this.injector.get(ACTION_REGISTRY)
+
+      this._container.eventMode = "dynamic"
+
+      this._container.on("rightclick", (evt: PointerEvent) => {
+        evt.preventDefault()
+        // overlay is tied to "empty honeycomb" status, so clear it first
+        this.state.setHoneycombStatus(false)
+
+        registry.invoke(BackHiveAction.ActionId, {
+          kind: "cell",
+          event: evt
+        })
+      })
+
+      // -------------------------------------------------------------------
+
       return this._app
     })()
-      ; (<any>window).app = this._app // debug hook
+
+      ; (window as any).app = this._app // debug hook
     return this._initPromise
   }
 
-  // convenience: wait until ready
+  // wait until ready
   public whenReady = async (): Promise<Application> => {
     if (this._ready()) return this._ready()!
     return this.initialize()
   }
 
+  // -------------------------------------------------------------
   // helpers
+  // -------------------------------------------------------------
   public getOffset(index: number): Point {
     const coord = this.axials.items.get(index)
     if (!coord?.Location) return new Point(0, 0)

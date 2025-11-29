@@ -1,96 +1,99 @@
-﻿import { Injectable, inject, effect, untracked } from "@angular/core"
-import { CoordinateDetector } from "src/app/helper/detection/coordinate-detector"
-import { COMB_STORE } from "src/app/shared/tokens/i-comb-store.token"
-import { PointerState } from "src/app/state/input/pointer-state"
-import { isSelected } from "../models/cell-filters"
-import { KeyboardState } from "src/app/interactivity/keyboard/keyboard-state"
+﻿import { Injectable, inject } from "@angular/core"
+import { Cell } from "../cell"
 import { SELECTIONS } from "src/app/shared/tokens/i-selection.token"
+import { PixiServiceBase } from "src/app/pixi/pixi-service-base"
+import { HONEYCOMB_STORE } from "src/app/shared/tokens/i-comb-store.token"
 
-@Injectable({ providedIn: 'root' })
-export class TileSelectionManager {
-  private readonly detector = inject(CoordinateDetector)
-  private readonly ps = inject(PointerState)
-  private readonly ks = inject(KeyboardState)
+@Injectable({ providedIn: "root" })
+export class TileSelectionManager extends PixiServiceBase {
   private readonly selections = inject(SELECTIONS)
-  private readonly store = inject(COMB_STORE)
+  private readonly store = inject(HONEYCOMB_STORE)
+  private honeycombs = new Map<number, Cell>()
 
-  private lastOp: boolean | null = null        // true = add, false = remove
-  private touched = new Set<number>()          // cellIds processed this press
+  // drag-select state
+  private dragActive = false
+  private lastOp: "add" | "remove" | null = null // what are we doing this gesture?
+  private touched = new Set<number>()            // one op per tile per gesture
 
   constructor() {
-    // 1) Latch op ONCE on pointerDown
-    effect(() => {
-      const tick = this.ps.downSeq()
-      if (tick === 0) return
-      const down = this.ps.pointerDownEvent()
-      if (!down) return
-      if (this.lastOp !== null) return
+    super()
+  }
 
-      untracked(() => {
-        if (!this.ks.ctrl()) {
-          this.lastOp = null
-          this.touched.clear()
-          return
-        }
-
-        const tile = this.detector.activeTile()
-        if (!tile) {
-          this.lastOp = true
-          this.touched.clear()
-          return
-        }
-
-        const cell = this.store.lookupData(tile.cellId)
-        if (!cell) return
-
-        this.lastOp = !isSelected(cell)
-        this.touched.clear()
-        this.applyOpIfNeeded(tile.cellId, cell, this.lastOp!)
-      })
-    })
-
-    // 2) While mouse is down, on every MOVE apply op
-    effect(() => {
-      const tick = this.ps.moveSeq()
-      if (tick === 0) return
-      if (this.lastOp == null) return
-
-      const tile = this.detector.activeTile()
-      if (!tile) return
-      const cell = this.store.lookupData(tile.cellId)
-      if (!cell) return
-
-      this.applyOpIfNeeded(tile.cellId, cell, this.lastOp)
-    })
-
-    // 3) Reset on pointerUp
-    effect(() => {
-      const tick = this.ps.upSeq()
-      if (tick === 0) return
-      const up = this.ps.pointerUpEvent()
-      if (!up) return
-
-      if (this.lastOp == null) return
-      untracked(() => {
-        this.lastOp = null
-        this.touched.clear()
-      })
+  // container pointerup ends any selection gesture
+  protected override onPixiReady(): void {
+    this.pixi.container!.on("pointerup", () => {
+      this.endDrag()
     })
   }
 
+  // ---------- public api used by TilePointerManager ----------
 
-  private applyOpIfNeeded(tileId: number, cell: any, op: boolean) {
-    // one op per tile per press
-    if (this.touched.has(tileId)) return
+  // simple click selection (no ctrl-drag)
+  public handleTap = (cell: Cell, event: PointerEvent): void => {
+    // ctrl/meta → toggle multi-select
+    if (event.ctrlKey || event.metaKey) {
+      this.selections.toggle(cell)
+      return
+    }
 
-    // idempotence: only change when needed
-    const selected = isSelected(cell)
-    if (op) {
+    // normal tap → single select
+    this.selections.clear()
+    this.selections.add(cell)
+  }
+
+
+  // start ctrl/meta drag selection
+  public beginDrag = (cell: Cell, event: PointerEvent): void => {
+    if (!event.ctrlKey && !event.metaKey) return
+    this.honeycombs.clear()
+    
+    const cells = this.store.cells()
+    for (const cell of cells) {
+      this.honeycombs.set(cell.index, cell)
+    }
+
+    this.dragActive = true
+    this.touched.clear()
+
+    const selectedNow = this.isCellSelected(cell)
+    this.lastOp = selectedNow ? "remove" : "add"
+
+    this.applyOpIfNeeded(cell)
+  }
+
+  // pointerenter while drag is active
+  public hoverDrag = (cell: Cell): void => {
+    if (!this.dragActive || !this.lastOp) return
+    this.applyOpIfNeeded(cell)
+  }
+
+  public endDrag = (): void => {
+    this.dragActive = false
+    this.lastOp = null
+    this.touched.clear()
+  }
+
+  // ---------- helpers ----------
+
+  private isCellSelected(cell: Cell): boolean {
+    const arr = this.selections.items()
+    return arr.some(c => c.cellId === cell.cellId)
+  }
+
+  private applyOpIfNeeded(cell: Cell): void {
+    if (!this.lastOp) return
+
+    const cellId = cell.cellId
+    if (this.touched.has(cellId)) return
+
+    const selected = this.isCellSelected(cell)
+
+    if (this.lastOp === "add") {
       if (!selected) this.selections.add(cell)
     } else {
       if (selected) this.selections.remove(cell)
     }
 
-    this.touched.add(tileId)
+    this.touched.add(cellId)
   }
 }

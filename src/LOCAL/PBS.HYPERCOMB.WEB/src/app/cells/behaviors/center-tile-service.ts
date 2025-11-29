@@ -1,12 +1,14 @@
 ﻿import { Injectable, inject } from "@angular/core"
 import { Tile } from "../models/tile"
 import { HIVE_STORE } from "src/app/shared/tokens/i-hive-store.token"
-import { COMB_STORE } from "src/app/shared/tokens/i-comb-store.token"
+import { HONEYCOMB_STORE } from "src/app/shared/tokens/i-comb-store.token"
 import { PixiDataServiceBase } from "src/app/database/pixi-data-service-base"
 
 @Injectable({ providedIn: 'root' })
 export class CenterTileService extends PixiDataServiceBase {
-    private readonly store = { hive: inject(HIVE_STORE), comb: inject(COMB_STORE) }
+    private readonly honeycomb = {
+        store: inject(HONEYCOMB_STORE)
+    }
 
     // Button click handler
     public arrange = async (tile?: Tile) => {
@@ -14,7 +16,7 @@ export class CenterTileService extends PixiDataServiceBase {
             await this.centerSprite([tile])
         }
         else {
-            const tiles = this.store.comb.tiles()
+            const tiles = this.honeycomb.store.tiles()
             await this.centerSprite(tiles)
         }
     }

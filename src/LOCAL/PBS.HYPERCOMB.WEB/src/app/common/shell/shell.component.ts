@@ -1,15 +1,14 @@
 ﻿import { Component, OnInit, inject } from "@angular/core"
 import { Hypercomb } from "src/app/core/mixins/abstraction/hypercomb.base"
-import { MousewheelZoomService } from "src/app/pixi/mousewheel-zoom-service"
 import { RenderScheduler } from "src/app/core/controller/render-scheduler"
-import { AxialService } from "src/app/unsorted/utility/axial-service"
 import { environment } from "src/environments/environment"
-import { PixiManager } from "src/app/pixi/pixi-manager"
-import { StartUpService } from "src/app/unsorted/start-up-service"
+import { StartUpService } from "src/app/core/start-up-service"
 import { WheelState } from "../mouse/wheel-state"
 import { PointerState } from "src/app/state/input/pointer-state"
 import { ImageService } from "src/app/database/images/image-service"
-import { WakeupService } from "src/app/unsorted/wake-up-service"
+import { AxialService } from "src/app/services/axial-service"
+import { WakeupService } from "src/app/core/wake-up-service"
+import { PIXI_MANAGER } from "src/app/shared/tokens/i-pixi-manager.token"
 
 if (!environment.production) {
   // Dexie.delete('Database')
@@ -23,11 +22,10 @@ if (!environment.production) {
   styleUrls: ['./shell.component.scss']
 })
 export class ShellComponent extends Hypercomb implements OnInit {
-  private readonly pixiService = inject(PixiManager)
+  private readonly pixiService = inject(PIXI_MANAGER)
   private readonly pointerstate = inject(PointerState)
   private readonly axialService = inject(AxialService)
   private readonly imageService = inject(ImageService)
-  private readonly mousewheelZoom = inject(MousewheelZoomService)
   private readonly wakeupService = inject(WakeupService)
   private readonly _startUpService = inject(StartUpService)
   private readonly wheelstate = inject(WheelState)
@@ -58,11 +56,14 @@ export class ShellComponent extends Hypercomb implements OnInit {
     console.log(this._startUpService)
 
     const app = await this.pixiService.initialize()
-    this.scheduler.hook(app)
+    if (app) {
+      this.scheduler.hook(app)
+    } else {
+      throw new Error('PIXI Service failed to initialize Application')
+    }
 
     // used to be this.databaseFactory.getQueries()
     await this.pointerstate.setContainer(this.pixiService.container!)
-    await this.mousewheelZoom.initialize()
     await this.wheelstate.initialize()
     await this.wakeupService.initialize()
     await this.imageService.initialize()

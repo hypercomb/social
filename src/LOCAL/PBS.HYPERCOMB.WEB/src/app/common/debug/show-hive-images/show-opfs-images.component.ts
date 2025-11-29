@@ -4,6 +4,7 @@ import { IHiveImage } from 'src/app/core/models/i-hive-image';
 import { ShowOpfsImagesAction } from 'src/app/actions/images/show-opfs-images';
 import { OpfsManager } from 'src/app/common/opfs/opfs-manager';
 import { DebugService } from 'src/app/core/diagnostics/debug-service';
+import { OpfsImageService } from 'src/app/hive/storage/opfs-image.service';
 
 /**
  * ShowHiveImagesComponent
@@ -19,7 +20,7 @@ import { DebugService } from 'src/app/core/diagnostics/debug-service';
 })
 export class ShowOpfsImagesComponent {
   public URL = window.URL
-  
+  public readonly opfssvc = inject(OpfsImageService)
   // reactive state
   public readonly images = signal<IHiveImage[]>([]);
   public readonly loading = signal(false);
@@ -38,34 +39,33 @@ export class ShowOpfsImagesComponent {
   }
 
   public async loadImages(): Promise<void> {
-    this.loading.set(true);
-    this.message.set('Loading images from hive-images ...');
-    try {
-      const loaded: IHiveImage[] = [];
-      const imagesDir = await this.opfs.getDir('hive-images', { create: true });
-      const entries = await this.opfs.listEntries(imagesDir);
+    // this.loading.set(true);
+    // this.message.set('Loading images from hive-images ...');
+    // try {
+    //   const loaded: IHiveImage[] = [];
+    //   const imagesDir = await this.opfs.getDir('hive-images', { create: true });
+    //   const entries = await this.opfs.listEntries(imagesDir);
 
-      for (const entry of entries) {
-        if (entry.handle.kind !== 'file') continue;
-        const file = await this.opfs.readFile(entry.handle as FileSystemFileHandle);
-        const blob = new Blob([await file.arrayBuffer()], { type: file.type || 'image/png' });
-        loaded.push({
-          cellId: 0,
-          blob,
-          x: 0,
-          y: 0,
-          scale: 1,
-          getBlob: async () => blob,
-        });
-      }
+    //   for (const entry of entries) {
+    //     if (entry.handle.kind !== 'file') continue;
+    //     const file = await this.opfs.readFile(entry.handle as FileSystemFileHandle);
+    //     const blob = new Blob([await file.arrayBuffer()], { type: file.type || 'image/png' });
+    //     loaded.push({
+    //       imageHash: entry.name,
+    //       blob,
+    //       x: 0,
+    //       y: 0,
+    //       scale: 1,
+    //     });
+    //   }
 
-      this.images.set(loaded);
-      this.message.set(`Loaded ${loaded.length} images.`);
-    } catch (err) {
-      this.debug.log('import', 'Error loading images:', err);
-      this.message.set('Error loading images.');
-    } finally {
-      this.loading.set(false);
-    }
+    //   this.images.set(loaded);
+    //   this.message.set(`Loaded ${loaded.length} images.`);
+    // } catch (err) {
+    //   this.debug.log('import', 'Error loading images:', err);
+    //   this.message.set('Error loading images.');
+    // } finally {
+    //   this.loading.set(false);
+    // }
   }
 }

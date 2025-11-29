@@ -2,6 +2,8 @@
 import { CellFlags } from "./models/cell-flags"
 import { IHiveImage } from "../core/models/i-hive-image"
 
+
+
 // simple deterministic hash for hive string → number
 export function hashHive(hive: string): number {
   let hash = 0
@@ -12,7 +14,7 @@ export function hashHive(hive: string): number {
 }
 
 export type CellKind =
-  | ""
+  | "NewCell"
   | "Cell"
   | "Ghost"
   | "Hive"
@@ -24,9 +26,9 @@ export class NewCell extends CellFlags {
   cellId?: number
 
   // ─────────────────────────────────────────────
-  // kind encapsulation
+  // kind encapsulation 
   // ─────────────────────────────────────────────
-  private _kind: CellKind = ""
+  private _kind: CellKind = "NewCell"
   public get kind(): CellKind {
     return this._kind
   }
@@ -39,7 +41,8 @@ export class NewCell extends CellFlags {
   public get hashedHive(): number {
     return hashHive(this.hive)
   }
-
+   hasChildrenFlag: 'true' | 'false' | undefined = undefined
+  
   hive: string = ""
   name = ""
   link = ""
@@ -47,37 +50,11 @@ export class NewCell extends CellFlags {
   sourceId?: number
   sourcePath = ""
   index = -1
-  smallImageId: number = 0
-  largeImageId?: number
-
+  imageHash?: string | undefined
   dateCreated: string = new Date().toISOString()
   dateDeleted?: string
   updatedAt: string = new Date().toISOString()
-
-  // always returns something (real blob or placeholder)
-  private _blob: Blob | undefined = undefined
-  private _image?: IHiveImage
-
-  public set image(value: IHiveImage | undefined) {
-    this._image = value
-    this._blob = undefined // invalidate cache whenever image changes
-  }
-
-  public get image(): IHiveImage | undefined {
-    return this._image
-  }
-
-  get blob(): Blob | undefined {
-    if (this._image?.blob) {
-      this._blob = this._image.blob
-    }
-    return this._blob
-  }
-
-  set blob(value: Blob) {
-    this._blob = value
-  }
-
+  
   // misc fields
   backgroundColor = ""
   borderColor = "#222"
@@ -142,9 +119,9 @@ export class ClipboardCell extends Cell {
   }
 }
 
-export class Ghost extends NewCell {
-  constructor(params: Partial<NewCell> = {}) {
-    super(params)
+export class Ghost extends Cell {
+  constructor(params: Partial<Cell> = {}) {
+    super({ cellId: 0, ...params })
     this.setKind("Ghost")
   }
 }
@@ -154,13 +131,4 @@ export class Path extends Cell {
     super(params)
     this.setKind("Path")
   }
-}
-
-export class EditCell extends Cell {
-  protected constructor() { 
-    super({ cellId: -1 })
-  }
-  originalImage?: IHiveImage
-  largeImage?: IHiveImage
-  imageDirty?: boolean = false
 }

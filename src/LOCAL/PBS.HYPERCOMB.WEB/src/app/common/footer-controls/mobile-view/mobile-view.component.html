@@ -1,0 +1,39 @@
+<!-- PORTRAIT (unchanged) -->
+@if (!landscape) {
+  <div class="mobile-controls">
+    <div class="control-bar mobile">
+
+      <!-- back -->
+      <span class="icon" id="back" (click)="goBack($event)" data-tooltip="back">B</span>
+
+      <!-- home -->
+      <span class="icon home-icon" id="center" (click)="home()" data-tooltip="home">d</span>
+
+      <!-- center -->
+      <span class="icon center-icon" id="center" (click)="center()" data-tooltip="center">(</span>
+
+      <!-- list -->
+      <span class="icon list-icon" id="list" (click)="list()" data-tooltip="list">,</span>
+
+      <!-- fullscreen -->
+      <span class="icon" id="fullscreen" (click)="fullscreen()" data-tooltip="fullscreen">'</span>
+    </div>
+  </div>
+}
+
+<!-- LANDSCAPE MODE -->
+@if (landscape) {
+  <div class="landscape-back" (click)="goBack($event)" data-tooltip="back">
+    B
+  </div>
+
+  <!-- add a translucent background behind the toolbar -->
+  <div class="landscape-toolbar-bg">
+    <div class="landscape-toolbar">
+      <span class="icon" id="home" (click)="home()" data-tooltip="home">d</span>
+      <span class="icon" id="center" (click)="center()" data-tooltip="center">(</span>
+      <span class="icon" id="list" (click)="list()" data-tooltip="list">,</span>
+      <span class="icon" id="fullscreen" (click)="fullscreen()" data-tooltip="fullscreen">'</span>
+    </div>
+  </div>
+}

@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core'
 import { Transaction } from 'dexie'
-import { Constants } from 'src/app/unsorted/constants'
+import { Constants } from 'src/app/helper/constants'
 import { IDatabaseUpgrade } from './i-database-upgrade'
 import { IPropertyMapper, TilePropertyMapper } from './tile-property-mapper'
 import { Cell } from 'src/app/cells/cell'

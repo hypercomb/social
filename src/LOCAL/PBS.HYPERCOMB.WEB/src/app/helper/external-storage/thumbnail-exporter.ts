@@ -2,11 +2,11 @@
 import { Injectable, inject } from "@angular/core"
 import { firstValueFrom } from "rxjs"
 import { Hypercomb } from "src/app/core/mixins/abstraction/hypercomb.base"
-import { Constants } from "src/app/unsorted/constants"
+import { Constants } from "src/app/helper/constants"
 import { ImageDownloadService } from "./temp-downloader"
 
 @Injectable({
-  providedIn: 'root'
+  providedIn: "root"
 })
 export class ThumbnailExporter extends Hypercomb {
   public readonly download = inject(ImageDownloadService)
@@ -19,29 +19,24 @@ export class ThumbnailExporter extends Hypercomb {
     }))
 
     await this.download.downloadImagesAsZip(formattedData)
-    this.download.downloadImagesAsZip(images)
   }
 
   public send = async (item: string): Promise<string> => {
     try {
-      const { blobUrl } = <any>(await firstValueFrom(this.uploadImage(item)))
-
-      this.debug.log('http', 'Image uploaded successfully', blobUrl)
-
-      return blobUrl  // Changed from '' to return the actual response 
+      const { blobUrl } = (await firstValueFrom(this.uploadImage(item))) as any
+      this.debug.log("http", "Image uploaded successfully", blobUrl)
+      return blobUrl
     } catch (error) {
-      console.error('Error uploading image', error)
-      throw error  // Propagate the error to the caller
+      console.error("Error uploading image", error)
+      throw error
     }
   }
 
   private uploadImage(imageBase64: string) {
-    const apiUrl = `${Constants.apiEndpoint}/StoreTileImage` // Replace with your function endpoint
+    const apiUrl = `${Constants.apiEndpoint}/StoreTileImage`
     const payload = { imageBase64 }
-    const headers = new HttpHeaders({ 'Content-Type': 'application/json' })
+    const headers = new HttpHeaders({ "Content-Type": "application/json" })
 
     return this.http.post(apiUrl, payload, { headers })
   }
 }
-
-

@@ -1,3 +1,4 @@
+
 // src/app/pixi/panning-manager.ts
 import { Injectable, inject, effect } from "@angular/core"
 import { KeyboardService } from "../interactivity/keyboard/keyboard-service"
@@ -23,6 +24,7 @@ export class PanningManager {
         this.touch.enable()
       }
     })
+    
     // === Optional: Initial device detection (fallback) ===
     // This is now secondary — spacebar overrides everything
     window.addEventListener("pointerdown", (e) => {

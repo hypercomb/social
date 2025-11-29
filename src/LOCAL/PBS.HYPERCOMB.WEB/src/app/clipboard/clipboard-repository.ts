@@ -8,6 +8,7 @@ import { IClipboardRepository } from '../shared/tokens/i-clipboard-repository'
 
 @Injectable({ providedIn: 'root' })
 export class ClipboardRepository extends RepositoryBase<CellEntity> implements IClipboardRepository {
+    
     public addCell = async (cells: Clipboard[]): Promise<void> => {
         // if (!cells?.length) return;
         // for (const cell of cells) {

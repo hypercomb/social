@@ -68,11 +68,3 @@ export function attachUrlRevoker(sprite: Sprite, url: string) {
     }
 }
 
-export function blobUrlForSprite(data: Cell, sprite: Sprite): string | null {
-    if (!data.blob) return null
-    const url = getOrCreateBlobUrl(data)!
-    attachUrlRevoker(sprite, url)
-    return url
-}
-
-

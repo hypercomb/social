@@ -2,79 +2,73 @@
 import { IDexieHive } from 'src/app/hive/hive-models'
 import { HiveService } from 'src/app/hive/storage/hive-service'
 import { BlobService } from 'src/app/hive/rendering/blob-service'
-import { SETTINGS_SVC } from 'src/app/shared/tokens/i-hypercomb.token'
-import { OpfsManager } from "src/app/common/opfs/opfs-manager"
+import { OpfsHiveService } from 'src/app/hive/storage/opfs-hive-service'
+import { OpfsImageService } from 'src/app/hive/storage/opfs-image.service'
 
 @Component({
   standalone: true,
   selector: '[app-carousel-item]',
   templateUrl: './carousel-item.component.html',
   styleUrls: ['./carousel-item.component.scss'],
-  changeDetection: ChangeDetectionStrategy.OnPush,
+  changeDetection: ChangeDetectionStrategy.OnPush
 })
-export class CarouselItemComponent  {
+export class CarouselItemComponent {
 
   private readonly hives = inject(HiveService)
-  private readonly settingsService = inject(SETTINGS_SVC)
-  public backgroundColor: string = '#242a30'
-  @Input() hive!: IDexieHive
-  @Output('change-hive') changeHive: EventEmitter<string> = new EventEmitter<string>()
+  private readonly images = inject(OpfsImageService)
 
-  // reactive image URL signal (auto updates when loaded)
+  @Input() hive!: IDexieHive
+  @Output('change-hive') changeHive = new EventEmitter<string>()
+
   public imageUrl = signal<string | null>(null)
-  private readonly opfs = new OpfsManager();
+  public backgroundColor = '#242a30'
 
   constructor() {
-    // reactively reload image when hive changes
     effect(() => {
       if (this.hive?.name) {
-        this.loadFromDisk(this.hive.name)
+        this.loadPreview(this.hive.name)
       }
     })
   }
 
   // ───────────────────────────────────────────────────────────
-  // loads image from OPFS flat directory (/hive-images/{hiveName}.webp)
+  // load preview image from OPFS (small image)
   // ───────────────────────────────────────────────────────────
-  private loadFromDisk = async (hiveName: string): Promise<void> => {
-
-    const metadata = (await this.settingsService.getOpfsMetadata())!
-
+  private loadPreview = async (hiveName: string) => {
     try {
+      const hash = this.hive.imageHash
+      this.backgroundColor = this.hive.background ?? '#242a30'
 
-      const item = metadata?.hives.find(h => h.name === hiveName)
-      this.backgroundColor = item?.background || '#242a30'
-      const imagesDir = await this.opfs.getDir('hive-images');
-      const fileHandle = await this.opfs.getFile(imagesDir, `${hiveName}.webp`);
-      const file = await this.opfs.readFile(fileHandle);
-      const url = URL.createObjectURL(file);
+      if (!hash || typeof hash !== 'string') {
+        throw new Error('no imageHash in hive metadata')
+      }
+
+      const blob = await this.images.loadSmall(hash)
+      if (!blob) throw new Error('small image not found')
+
+      const url = URL.createObjectURL(blob)
       this.imageUrl.set(url)
+
     } catch (err) {
-      console.warn(`no OPFS image found for hive: ${hiveName}`, err)
-     
-      const url = URL.createObjectURL(BlobService.defaultBlob)
-      this.imageUrl.set(url)
+      console.warn(`carousel preview unavailable for ${hiveName}`, err)
+      const fallback = URL.createObjectURL(BlobService.defaultBlob)
+      this.imageUrl.set(fallback)
     }
   }
 
-  // ──────────────────────────────────────────────────────────c─
-  // lifecycle
-  // ───────────────────────────────────────────────────────────
-  public ngOnChanges(): void {
+
+  public ngOnChanges() {
     if (this.hive) {
-      this.loadFromDisk(this.hive.name)
+      this.loadPreview(this.hive.name)
     }
   }
 
-  public ngOnDestroy(): void {
+  public ngOnDestroy() {
     const url = this.imageUrl()
     if (url) URL.revokeObjectURL(url)
   }
 
-  // ───────────────────────────────────────────────────────────
-  // emits hive selection
-  // ───────────────────────────────────────────────────────────
-  public change = (hive: string): void => {
+  public change = (hive: string) => {
     this.changeHive.next(hive)
     this.hives.setActive(hive)
   }

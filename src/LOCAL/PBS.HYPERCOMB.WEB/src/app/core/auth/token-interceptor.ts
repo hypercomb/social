@@ -2,7 +2,7 @@
 import { Injectable, inject } from "@angular/core"
 import { OidcSecurityService } from "angular-auth-oidc-client"
 import { Observable, switchMap } from "rxjs"
-import { Constants } from "src/app/unsorted/constants"
+import { Constants } from "src/app/helper/constants"
 import { Hypercomb } from "../mixins/abstraction/hypercomb.base"
 
 @Injectable()

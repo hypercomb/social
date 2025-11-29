@@ -1,9 +1,9 @@
 ﻿// actions/pathway.action.ts
 import { Injectable, inject } from "@angular/core"
 import { HypercombMode } from "../../core/models/enumerations"
-import { CellContext } from "../action-contexts"
-import { HoneycombService } from "src/app/hive/honeycomb-service"
+import { CellPayload } from "../action-contexts"
 import { ActionBase } from "../action.base"
+import { LocatorService } from "src/app/services/locator-service"
 
 const getPath = (link: string): string | null => {
   const domain = "localhost:4200"
@@ -14,15 +14,15 @@ const getPath = (link: string): string | null => {
 }
 
 @Injectable({ providedIn: "root" })
-export class RiftAction extends ActionBase<CellContext> {
-  private readonly honeycomb = inject(HoneycombService)
+export class RiftAction extends ActionBase<CellPayload> {
+  private readonly locator = inject(LocatorService)
 
   public id = "cell.path"
   public override label = "Path"
   public override description = "Navigate to a linked pathway inside this hive"
   public override category = "Navigation"
 
-  public override enabled = async (ctx: CellContext): Promise<boolean> => {
+  public override enabled = async (ctx: CellPayload): Promise<boolean> => {
     const path = getPath(ctx.cell.link)
     return (
       !!path &&
@@ -32,11 +32,11 @@ export class RiftAction extends ActionBase<CellContext> {
     )
   }
 
-  public override run = async(ctx: CellContext) => {
+  public override run = async(ctx: CellPayload) => {
     const path = getPath(ctx.cell.link)
     if (!path) return
 
     history.replaceState(history.state, "", path)
-    await this.honeycomb.changeLocation(path)
+    await this.locator.changeLocation(path)
   }
 }

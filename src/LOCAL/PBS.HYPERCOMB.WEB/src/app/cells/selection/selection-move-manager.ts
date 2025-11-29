@@ -1,216 +1,179 @@
-import { Injectable, inject, effect, computed, signal } from "@angular/core"
-import { PointerState } from "src/app/state/input/pointer-state"
-import { CoordinateDetector } from "src/app/helper/detection/coordinate-detector"
-import { AxialService } from "src/app/unsorted/utility/axial-service"
+// src/app/cells/selection/selection-move-manager.ts
+import { Injectable, inject } from "@angular/core"
 import { AxialCoordinate } from "src/app/core/models/axial-coordinate"
-import { POLICY } from "src/app/core/models/enumerations"
-import { HypercombData } from "src/app/actions/hypercomb-data"
+import { HONEYCOMB_STORE } from "src/app/shared/tokens/i-comb-store.token"
 import { MODIFY_COMB_SVC } from "src/app/shared/tokens/i-comb-service.token"
-import { COMB_STORE } from "src/app/shared/tokens/i-comb-store.token"
-import { SELECTIONS } from "src/app/shared/tokens/i-selection.token"
-
-type Move = { from: AxialCoordinate; to: AxialCoordinate }
+import { AxialService } from "src/app/services/axial-service"
+import { CoordinateDetector } from "src/app/helper/detection/coordinate-detector"
+import { Cell } from "../cell"
+import { PixiServiceBase } from "src/app/pixi/pixi-service-base"
+import { SelectionService } from "./selection-service"
+import { effect } from "src/app/performance/effect-profiler"
 
 @Injectable({ providedIn: "root" })
-export class SelectionMoveManager extends HypercombData {
+export class SelectionMoveManager extends PixiServiceBase {
+
   private readonly axials = inject(AxialService)
-  private readonly ps = inject(PointerState)
-  private readonly detector = inject(CoordinateDetector)
+  private readonly store = inject(HONEYCOMB_STORE)
   private readonly modify = inject(MODIFY_COMB_SVC)
-  private readonly selections = inject(SELECTIONS)
-  private readonly store = inject(COMB_STORE)
+  private readonly detector = inject(CoordinateDetector)
+  private readonly selectionsvc = inject(SelectionService)
 
-  // latched state
-  private anchor: AxialCoordinate | null = null
-  private lastDelta = { dq: 0, dr: 0 }
+  // internal drag state
+  private anchorAx: AxialCoordinate | null = null
+  private downPos: { x: number; y: number } | null = null
+  private isDragging = false
+  private readonly threshold = 6
+  private get cells(): Cell[] { return this.store.cells() }
 
-  // drag signals
-  private readonly _isDragging = signal(false)
-  public readonly isDragging = this._isDragging.asReadonly()
+  // saved state for swap resolution
+  private orig = new Map<number, AxialCoordinate>() // moved set → axial
+  private occ0 = new Map<number, number>()         // index → cellId (all cells)
+  private lastIndex: number = -1                   // last hovered index
 
-  // snapshots
-  private orig = new Map<number, AxialCoordinate>() // cellId → original axial
-  private occ0 = new Map<number, number>()          // index → occupant cellId
-
-  // policies
-  public isControlDown = this.policy.any(POLICY.ControlDown)
-  public isMoveMode = this.policy.all(POLICY.MovingTiles)
-  public isBlocked = computed(() => this.isControlDown() || !this.isMoveMode())
+  protected override onPixiReady(): void {
+    const container = this.pixi.container!
+    container.on("pointerup", (ev: PointerEvent) => this.onUp(ev))
+  }
 
   constructor() {
     super()
 
-    // Stage A: pointerDown → latch anchor
     effect(() => {
-      const tick = this.ps.downSeq()
-      if (tick === 0 || this.isBlocked()) return
-      if (this.anchor) return // already dragging, don’t re-latch
+      const coord = this.detector.coordinate()
+      const index = coord?.index ?? -1
 
-      const ev = this.ps.pointerDownEvent()
-      if (!ev) return
-      const lead = this.detector.activeTile()
-      if (!lead) return
-      const leadCell = this.store.lookupData(lead.cellId)
-      if (!leadCell) return
+      if (index === this.lastIndex) return
+      this.lastIndex = index
 
-      const leadAx = this.axials.items.get(leadCell.index)
-      if (!leadAx) return
+      if (!this.anchorAx || !this.downPos) return
+      if (!coord) return
+      if (this.orig.size === 0) return   // nothing to move (no group / tile)
 
-      this.anchor = leadAx
-      this.lastDelta = { dq: 0, dr: 0 }
-      this._isDragging.set(false) // not yet dragging until threshold crossed
-    })
-
-    // Stage B: pointerMove → ghost tiles
-    effect(() => {
-      const tick = this.ps.moveSeq()
-      if (tick === 0 || this.isBlocked() || !this.anchor) return
-
-      const hoverAx = this.detector.coordinate()
-      if (!hoverAx) return
-
-      const diff = AxialCoordinate.subtract(hoverAx, this.anchor)
-
-      if (!this.isDragging()) {
-        // first transition into a drag
-        this._isDragging.set(true)
-
-        const leadTile = this.detector.activeTile()
-        const leadCell = leadTile ? this.store.lookupData(leadTile.cellId) : null
-        const selected = this.store.selectedCells()
-        let dragSet = selected
-
-        if (leadCell && !selected.some(c => c.cellId === leadCell.cellId)) {
-          dragSet = [leadCell]
-        }
-
-        this.orig.clear()
-        for (const c of dragSet) {
-          const ax = this.axials.items.get(c.index)
-          if (ax) this.orig.set(c.cellId, ax)
-        }
-
-        this.occ0.clear()
-        for (const c of this.store.cells()) {
-          this.occ0.set(c.index, c.cellId)
-        }
+      // first real drag frame
+      if (!this.isDragging) {
+        this.isDragging = true
       }
 
-      this.lastDelta = { dq: diff.q, dr: diff.r }
+      const hoverAx = coord
+      const diff = AxialCoordinate.subtract(hoverAx, this.anchorAx)
+      const placements = this.computePlacements(diff)
 
-      // reset positions
+      // reset all tiles to base positions
       for (const c of this.store.cells()) {
         const baseAx = this.axials.items.get(c.index)
         const tile = this.store.lookupTile(c.cellId)
         if (baseAx && tile) tile.setPosition(baseAx.Location)
       }
 
-      // apply placements
-      const placements = this.computePlacements(diff)
+      // apply live drag preview (moved + swapped)
       for (const [cellId, ax] of placements) {
         const tile = this.store.lookupTile(cellId)
         if (tile) tile.setPosition(ax.Location)
       }
     })
-
-    // Stage C: pointerUp → commit
-    effect(async () => {
-      const tick = this.ps.upSeq()
-      if (tick === 0 || !this.anchor) return
-
-      if (!this.isDragging()) {
-        this.resetMove()
-        return
-      }
-
-      const hoverAx = this.detector.coordinate()
-      if (!hoverAx) {
-        this.snapAllToPersisted()
-        this.resetMove()
-        return
-      }
-
-      const diff = AxialCoordinate.subtract(hoverAx, this.anchor)
-      const placements = this.computePlacements(diff)
-      const updated: any[] = []
-
-      for (const [cellId, ax] of placements) {
-        let cell = this.store.lookupData(cellId) as any
-        if (!cell) cell = this.store.cells().find(c => c.cellId === cellId)
-        if (!cell) continue
-
-        if (cell.index !== ax.index) {
-          cell.index = ax.index
-          updated.push(cell)
-        }
-      }
-
-      if (updated.length) {
-        await this.modify.bulkPut(updated)
-      }
-
-      this.snapAllToPersisted()
-      this.resetMove()
-    })
-
-    // cancel drag if policy flips mid-gesture
-    effect(() => {
-      if (this.isBlocked() && this.anchor) {
-        this.snapAllToPersisted()
-        this.resetMove()
-      }
-    })
   }
 
+  // ------------------------------------------------------------------
+  // called by TilePointerManager on pointerdown
+  // ------------------------------------------------------------------
+  public beginDrag(cell: Cell, ev: PointerEvent): void {
+    const selections = this.selectionsvc.items()
+    const inSelection = selections.some(c => c.cellId === cell.cellId)
+
+    // if there is a selection and this tile is in it → move the whole group
+    // otherwise → move just this tile (quick single-tile swap)
+    const group: Cell[] =
+      inSelection && selections.length > 0
+        ? selections
+        : [cell]
+
+    const ax = this.axials.items.get(cell.index)
+    if (!ax) return
+
+    this.anchorAx = ax
+    this.downPos = { x: ev.clientX, y: ev.clientY }
+    this.isDragging = false
+    this.lastIndex = -1
+
+    // snapshot moved set
+    this.orig.clear()
+    for (const c of group) {
+      const selAx = this.axials.items.get(c.index)
+      if (selAx) this.orig.set(c.cellId, selAx)
+    }
+
+    // snapshot full occupancy for swap detection
+    this.occ0.clear()
+    for (const c of this.cells) {
+      this.occ0.set(c.index, c.cellId)
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // compute tile swapping layout (rigid block + direct swaps)
+  // ------------------------------------------------------------------
   private computePlacements(diff: AxialCoordinate): Map<number, AxialCoordinate> {
-    const moves = new Map<number, Move>()
-    for (const [cellId, from] of this.orig) {
-      moves.set(cellId, { from, to: AxialCoordinate.add(from, diff) })
-    }
-
-    const toIndexToFallback = new Map<number, AxialCoordinate>()
-    for (const { from, to } of moves.values()) {
-      toIndexToFallback.set(to.index, from)
-    }
-
-    const movedIds = new Set(moves.keys())
     const placements = new Map<number, AxialCoordinate>()
-    const ordered = Array.from(moves.entries())
+    if (this.orig.size === 0) return placements
 
-    for (const [cellId, { to }] of ordered) {
-      placements.set(cellId, to)
+    // 1) move all tiles in the current move group by diff
+    for (const [cellId, fromAx] of this.orig) {
+      const toAx = AxialCoordinate.add(fromAx, diff)
+      placements.set(cellId, toAx)
     }
 
-    for (const [cellId, { to, from }] of ordered) {
-      const occId = this.occ0.get(to.index)
-      if (occId == null || movedIds.has(occId) || occId === cellId) continue
+    // 2) handle simple swaps for unselected occupants
+    for (const [cellId, fromAx] of this.orig) {
+      const toAx = placements.get(cellId)
+      if (!toAx) continue
 
-      let dest: AxialCoordinate = from
-      const visited = new Set<number>()
-      while (toIndexToFallback.has(dest.index) && !visited.has(dest.index)) {
-        visited.add(dest.index)
-        dest = toIndexToFallback.get(dest.index)!
-      }
-      placements.set(occId, dest)
+      const occId = this.occ0.get(toAx.index)
+      if (occId == null) continue
+      if (this.orig.has(occId)) continue // already part of the moving group
+
+      placements.set(occId, fromAx)
     }
 
     return placements
   }
 
-  private snapAllToPersisted() {
-    for (const c of this.store.cells()) {
-      const baseAx = this.axials.items.get(c.index)
-      const tile = this.store.lookupTile(c.cellId)
-      if (baseAx && tile) tile.setPosition(baseAx.Location)
+  // ------------------------------------------------------------------
+  // pointerup → commit drag
+  // ------------------------------------------------------------------
+  public async onUp(ev: PointerEvent): Promise<void> {
+    if (this.isDragging && this.anchorAx) {
+      const local = this.pixi.container!.toLocal({ x: ev.clientX, y: ev.clientY })
+      this.detector.detect(local)
+      const hoverAx = this.detector.coordinate()
+
+      if (hoverAx) {
+        const diff = AxialCoordinate.subtract(hoverAx, this.anchorAx)
+        const placements = this.computePlacements(diff)
+        const updated: Cell[] = []
+
+        for (const [cellId, ax] of placements) {
+          const cell = this.store.lookupData(cellId)!
+          if (cell.index !== ax.index) {
+            cell.index = ax.index
+            updated.push(cell)
+          }
+        }
+
+        if (updated.length) {
+          await this.modify.bulkPut(updated)
+        }
+      }
     }
+    this.reset()
   }
 
-  private resetMove() {
-    this._isDragging.set(false)
-    this.anchor = null
-    this.lastDelta = { dq: 0, dr: 0 }
+  private reset(): void {
+    this.anchorAx = null
+    this.downPos = null
+    this.isDragging = false
+    this.lastIndex = -1
     this.orig.clear()
     this.occ0.clear()
-    this.selections.clear()
   }
 }

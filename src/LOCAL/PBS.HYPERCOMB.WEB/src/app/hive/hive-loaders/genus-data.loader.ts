@@ -8,40 +8,59 @@ import { HiveLoaderBase } from "./i-data-resolver"
 import { OpfsHiveService } from "../storage/opfs-hive-service"
 import { IHiveImage } from "src/app/core/models/i-hive-image"
 import { BlobService } from "../rendering/blob-service"
+import { OpfsImageService } from "../storage/opfs-image.service"
 
 @Injectable({ providedIn: "root" })
 export class GenusBootstrapper extends HiveLoaderBase {
   private readonly blobs = inject(BlobService)
   private readonly modify = inject(MODIFY_COMB_SVC)
   private readonly opfs = inject(OpfsHiveService)
+  private readonly images = inject(OpfsImageService)
+
   public override enabled(scout: HiveScout): boolean {
-    return scout.type === 'Genus'
+    return scout.type === "Genus"
   }
 
   async load(scout: HiveScout) {
     this.logDataResolution(`GenusBootstrapper bootstrapping for ${scout.name}`)
+
     if (!scout.name) {
       throw new Error("Genus scout must have a name")
     }
 
-    const hasHive = await this.opfs.hasHive(scout.name)
-    if (!hasHive) {
+    const exists = await this.opfs.hasHive(scout.name)
+    if (!exists) {
 
-      // 1. seed a brand new hive cell
+      // ────────────────────────────────────────────────────────
+      // 1. create initial blob + hash + store in OPFS small/
+      // ────────────────────────────────────────────────────────
+      const blob = await this.blobs.getInitialBlob()
+      const imageHash = await this.images.hashName(blob)
+      await this.images.saveSmall(imageHash, blob)
+
+      const image: IHiveImage = {
+        imageHash,
+        blob,
+        scale: 1,
+        x: 0,
+        y: 0
+      }
+
+      // ────────────────────────────────────────────────────────
+      // 2. create the hive root cell
+      // ────────────────────────────────────────────────────────
       const newHive = new NewCell({
         name: "welcome",
         hive: scout.name,
-        kind: "Hive",
-
+        kind: "Hive"
       })
       newHive.options.set(CellOptions.Active)
 
-      // 2. persist hive to database
-      const initial = await this.blobs.getInitialBlob()
-      const image = <IHiveImage>{ cellId: 0, blob: initial, scale: 1, x: 0, y: 0, getBlob: async () => initial }
-      const created = await this.modify.addCell(newHive, image) as Hive
+      const created = await this.modify.addCell(newHive) as Hive
 
-      // 3. create the first child cell under that hive
+      // ────────────────────────────────────────────────────────
+      // 3. create first child cell under the hive
+      // ────────────────────────────────────────────────────────
       const firstCell = new NewCell({
         name: "first",
         hive: scout.name,
@@ -51,8 +70,9 @@ export class GenusBootstrapper extends HiveLoaderBase {
       })
       firstCell.options.set(CellOptions.Active)
 
-      await this.modify.addCell(firstCell, image)
+      await this.modify.addCell(firstCell)
     }
+
     this.logDataResolution(`GenusBootstrapper bootstrapped hive: ${scout.name}`)
   }
 }

@@ -1,10 +1,13 @@
 ﻿import { AfterViewInit, Component, inject } from '@angular/core'
 import { YouTubePlayerModule } from '@angular/youtube-player'
 import { Hypercomb } from 'src/app/core/mixins/abstraction/hypercomb.base'
+import { CoordinateDetector } from 'src/app/helper/detection/coordinate-detector'
 import { YoutubeService } from 'src/app/navigation/youtube-service'
-import { ScreenService } from 'src/app/unsorted/utility/screen-service'
+import { ScreenService } from 'src/app/services/screen-service'
+
 
 @Component({
+  standalone: true,
   selector: 'app-youtube-viewer',
   imports: [YouTubePlayerModule],
   templateUrl: './youtube-viewer.component.html',
@@ -13,6 +16,7 @@ import { ScreenService } from 'src/app/unsorted/utility/screen-service'
 export class YoutubeViewerComponent extends Hypercomb implements AfterViewInit {
   private readonly youtubeService = inject(YoutubeService)
   private readonly screen = inject(ScreenService)
+  private readonly detector = inject(CoordinateDetector)
 
   public currentVideoId = ''
   public width = 0
@@ -27,7 +31,7 @@ export class YoutubeViewerComponent extends Hypercomb implements AfterViewInit {
   }
 
   ngAfterViewInit() {
-    const cell = this.stack.cell()
+    const cell = this.detector.activeCell() 
     if (!cell?.link) return
 
     const parsed = this.youtubeService.parse(cell.link)

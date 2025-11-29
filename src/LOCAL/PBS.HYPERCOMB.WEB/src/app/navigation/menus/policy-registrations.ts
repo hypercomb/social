@@ -4,12 +4,13 @@ import { Injectable, inject, computed } from "@angular/core"
 import { HypercombMode, POLICY } from "src/app/core/models/enumerations"
 import { Hypercomb } from "src/app/core/mixins/abstraction/hypercomb.base"
 import { EditorService } from "src/app/state/interactivity/editor-service"
-import { ContextMenuService } from "./context-menu-service"
+import { CONTEXT_MENU } from "src/app/shared/tokens/i-hypercomb.token"
 
 @Injectable({ providedIn: 'root' })
 export class PolicyRegistrations extends Hypercomb {
   private readonly es = inject(EditorService)
-  private readonly contextmenu = inject(ContextMenuService)
+  private readonly contextmenu = inject(CONTEXT_MENU)
+  
   public initialize = () => {
     // viewing clipboard
     const isViewingClipboard = computed(
@@ -22,6 +23,13 @@ export class PolicyRegistrations extends Hypercomb {
       () => (this.state.mode() & HypercombMode.Move) !== 0
     )
     this.policy.registerSignal(POLICY.MovingTiles, isMoveMode, this.injector)
+
+    // edit mode selected
+    const isEditMode = computed(
+      () => (this.state.mode() & HypercombMode.EditMode) !== 0
+    )
+    this.policy.registerSignal(POLICY.EditMode, isEditMode, this.injector)
+
 
     // keyboard blocked
     const isKeyboardBlocked = computed(

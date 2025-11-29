@@ -1,72 +1,21 @@
-<div controls-active [class.mobile]="state.isMobile" class="menu-container container"
-  (click)="$event.stopImmediatePropagation()" (mouseenter)="state.controlsHovered = true"
-  (mouseleave)="state.controlsHovered = false">
-
-  <!-- Mobile Controls -->
-  @if (state.isMobile) {
-  <div class="mobile-controls">
-    <div class="control-bar mobile">
-      <span class="icon" id="back" (click)="goBack($event)" data-tooltip="back">B</span>
-      <span class="icon fullscreen view-icon" id="resize" (click)="fullscreen()" data-tooltip="fullscreen">'</span>
-    </div>
-  </div>
+<div
+  controls-active
+  [class.mobile]="state.isMobile"
+  [class.mobile-landscape]="isLandscapeMobile"
+  class="menu-container container"
+  (click)="$event.stopImmediatePropagation()"
+  (mouseenter)="state.controlsHovered = true"
+  (mouseleave)="state.controlsHovered = false"
+>
+  @if (state.isMobile && !isLandscapeMobile) {
+    <app-mobile-view></app-mobile-view>
   }
 
-  <!-- Desktop Controls -->
+  @if (state.isMobile && isLandscapeMobile) {
+    <app-mobile-view [landscape]="true"></app-mobile-view>
+  }
+
   @if (!state.isMobile) {
-  <div class="left">&nbsp;</div>
-  <div class="center control-bar">
-    <span class="icon" id="back" (click)="goBack($event)" data-tooltip="back">B</span>
-    <span class="icon home" id="home" (click)="goHome()" data-tooltip="home">d</span>
-    <span [class.locked]="manager.locked()" class="icon lock" id="lockHive" (click)="lock()" data-tooltip="lock">{{ manager.locked() ?
-      'a': 'b'}}</span>
-    @if (isBuildMode) {
-    <span class="icon spacer" id="spacer" style="color:#555;">&</span>
-    <span class="icon" id="edit" (click)="toggleEditMode()" data-tooltip="edit" [class.disabled]="!hideClipboardActions"
-      [class.active]="es.isEditing()">#</span>
-    <span class="icon" [class.select-enabled]="hasSelections" id="cut" (click)="cut()" data-tooltip="cut"
-      [class.disabled]="!hideClipboardActions" [class.active]="isCutMode">y</span>
-    <span class="icon slight-nudge" [class.select-enabled]="hasSelections" id="copy" (click)="copy()"
-      [class.disabled]="!hideClipboardActions" data-tooltip="copy" [class.active]="isCopyMode">x</span>
-    <span [class.disabled]="!clipboard.hasItems()" class="icon" id="clipboard-button" (click)="viewClipboard()"
-      [class.hidden]="clipboardItemCount" data-tooltip="clipboard">
-      $@if (clipboard.hasItems()) {
-      <span class="badge">{{ clipboard.count() }}</span>
-      }</span>
-    @if (state.isViewingClipboard) {
-    <span [class.disabled]="!state.isViewingClipboard" class="icon" id="clear-clipboard"
-      (click)="clipboard.clear()" data-tooltip="clear clipboard">Q</span>
-    }
-    @if (!state.isViewingClipboard) {
-    <span class="icon" [class.disabled]="!hasSelections" [class.select-enabled]="hasSelections" id="remove"
-      (click)="delete()" data-tooltip="remove" [class.active]="isRearrangeMode">Q</span>
-    }
-    <span class="icon spacer " id="spacer" style="color:#555">&</span>
-    <span class="icon" id="move" (click)="toggleMoveMode()" data-tooltip="move" [class.disabled]="!hideClipboardActions"
-      [class.active]="isRearrangeMode">3</span>
-    }
-    <span class="icon center-items view-icon" id="center" (click)="centerTiles()" data-tooltip="center">(</span>
-    <span class="icon view-icon zoom-adjust" id="minus" (click)="zoomOut()" data-tooltip="zoom out">I</span>
-    <span class="icon view-icon zoom-adjust" id="plus" (click)="zoomIn()" data-tooltip="zoom in">K</span>
-    <span class="icon fullscreen view-icon" id="resize" (click)="fullscreen()" data-tooltip="fullscreen">'</span>
-    <span class="icon spacer " id="spacer" style="color:#555">&</span>
-    <span class="icon fullscreen view-icon" id="resize" (click)="build()"
-      [attr.data-tooltip]="isBuildMode ? 'basic' : 'advanced'">s</span>
-  </div>
-  <div class="right taskbar-options">
-    <span>{{ clipboard.selected() }}</span>
-    @if (clipboard.hasItems()) {
-    <div app-paste-clipboard-button></div>
-    }
-    @if (isViewingGoogleDoc) {
-    <div app-close-google-doc-buttons></div>
-    }
-  </div>
+    <app-default-view></app-default-view> 
   }
 </div>
-
-@if (link && !state.hasMode(ViewingGoogleDoc)) {
-<div class="link-bar">
-  &nbsp; {{ link }}
-</div>
-}

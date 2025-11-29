@@ -10,10 +10,11 @@ import { CoordinateDetector } from 'src/app/helper/detection/coordinate-detector
 import { LinkNavigationService } from 'src/app/navigation/link-navigation-service'
 import { EditorService } from 'src/app/state/interactivity/editor-service'
 import { TouchDetectionService } from 'src/app/core/mobile/touch-detection-service'
-import { ScreenService } from 'src/app/unsorted/utility/screen-service'
-import { COMB_SERVICE } from 'src/app/shared/tokens/i-comb-service.token'
-import { COMB_STORE } from 'src/app/shared/tokens/i-comb-store.token'
-import { CellEditor } from 'src/app/unsorted/hexagons/cell-editor'
+import { HONEYCOMB_SVC } from 'src/app/shared/tokens/i-comb-service.token'
+import { HONEYCOMB_STORE } from 'src/app/shared/tokens/i-comb-store.token'
+import { CellEditor } from 'src/app/common/tile-editor/cell-editor'
+import { CellEditContext } from 'src/app/state/interactivity/cell-edit-context'
+import { ScreenService } from 'src/app/services/screen-service'
 
 @Component({
   standalone: true,
@@ -27,13 +28,12 @@ export class HeaderBarComponent extends HypercombData {
   private readonly manager = inject(CellEditor)
   private readonly navigation = inject(LinkNavigationService)
   private readonly screen = inject(ScreenService)
-  private readonly search = inject(SearchFilterService)
-  private readonly _isCaptionBlocked = this.policy.any(POLICY.EditInProgress)
+  public readonly search = inject(SearchFilterService)
   private readonly _Hypercomb = 'Hypercomb'
   public readonly detector = inject(CoordinateDetector)
   public readonly touch = inject(TouchDetectionService)
-  public readonly store = inject(COMB_STORE)
-  public readonly cellstate = inject(COMB_SERVICE)
+  public readonly store = inject(HONEYCOMB_STORE)
+  public readonly cellstate = inject(HONEYCOMB_SVC)
 
   public readonly name = computed(() => {
     const cell = this.stack.cell()
@@ -44,7 +44,6 @@ export class HeaderBarComponent extends HypercombData {
 
   public showEdit = false
   public isHovered = false
-  public searchFilter: string = ''
   public isSignedIn = false
   public userName = 'Sign In'
 
@@ -70,15 +69,11 @@ export class HeaderBarComponent extends HypercombData {
     const cell = tile ? this.store.lookupData(tile.cellId) : undefined
     const name = cell?.name ?? this.stack.hiveName()
 
-    return `${name}` //  index: ${coordinate.index} : ${coordinate.Location}
+    return `${name}`// index: ${coordinate.index} : ${coordinate.Location}`
   })
 
   constructor() {
     super()
-    effect(() => {
-      const text = this.search.value().toLowerCase()
-      this.searchFilter = text
-    })
 
     effect(() => {
       const ev = this.ks.keyUp()
@@ -90,7 +85,6 @@ export class HeaderBarComponent extends HypercombData {
         this.state.toggleToolMode(HypercombMode.ShowChat)
       }
     })
-
   }
 
   public readonly cellCount = computed(() => this.stack.size())
@@ -100,7 +94,8 @@ export class HeaderBarComponent extends HypercombData {
   )
 
   public openLink() {
-    this.navigation.openLink()
+    const cell = this.detector.activeCell()
+    this.navigation.openLink(cell)
   }
 
   public cancel(_: any) {
@@ -108,9 +103,9 @@ export class HeaderBarComponent extends HypercombData {
   }
 
   public edit(_: any) {
-    const entry = this.stack.top()!
-    const cell = entry?.cell!
-    this.manager.beginEditing(cell)
+    const cell= this.stack.cell()!
+    const context = new CellEditContext(cell)
+    this.manager.beginEditing(context)
   }
 
   public onFocusChanged(focused: boolean) {

@@ -9,15 +9,15 @@ import { ContextStack } from "src/app/core/controller/context-stack"
 
 @Injectable({ providedIn: 'root' })
 export class HypercombState {
+
   // Track panning state
   public panning = false;
   private _batchCompleteSeq = signal(0)
   public readonly batchCompleteSeq = this._batchCompleteSeq.asReadonly()
 
-  public setBatchComplete(): void {
-    // bump value to always change, triggering dependent effects
-    this._batchCompleteSeq.update(v => v + 1)
-  }
+  // context menu active state
+  private readonly _isContextActive = signal(false)
+  public readonly isContextActive = this._isContextActive.asReadonly()
 
   private readonly stack = inject(ContextStack)
   public awake = false
@@ -27,7 +27,13 @@ export class HypercombState {
   public checkMouseLock: boolean = false
   public _cancelled = signal(false)
   public readonly cancelled = this._cancelled.asReadonly()
-
+  private _emptyHoneycomb = signal<boolean>(false)
+  public emptyHoneycomb = this._emptyHoneycomb.asReadonly()
+  
+  public isEditMode = computed((): boolean => {
+    return (this._mode() & HypercombMode.EditMode) !== 0;
+  })
+  ignoreShortcuts: any
 
   public get scoutName(): string | undefined { return this.scout()?.name }
   public get isMobile(): boolean {
@@ -151,7 +157,7 @@ export class HypercombState {
   public setToolMode(mode: HypercombMode) {
     this.removeMode(HypercombMode.Copy)
     this.removeMode(HypercombMode.Cut)
-    this.removeMode(HypercombMode.ChoosingEditContext)
+    this.removeMode(HypercombMode.EditMode)
     this.removeMode(HypercombMode.Move)
     this.removeMode(HypercombMode.Select)
     this.removeMode(HypercombMode.ShowChat)
@@ -182,9 +188,20 @@ export class HypercombState {
     this._lastResetMode.set(next)
     this._lastChangedMode.set(next)
   }
+  public setBatchComplete(): void {
+    this._batchCompleteSeq.update(v => v + 1)
+  }
 
   public setCancelled(cancel: boolean) {
     this._cancelled.set(cancel)
+  }
+
+  public setContextActive(active: boolean): void {
+    this._isContextActive.set(active)
+  }
+
+  public setHoneycombStatus(status: boolean) {
+    this._emptyHoneycomb.set(status)
   }
 
   public setMode(mode: HypercombMode) {
@@ -219,7 +236,7 @@ export class HypercombState {
 const MODE_MAP = {
   isNormal: HypercombMode.Normal,
   isHiveCreation: HypercombMode.HiveCreation,
-  isChoosingEditContext: HypercombMode.ChoosingEditContext,
+  isChoosingEditContext: HypercombMode.EditMode,
   isChatWindowMode: HypercombMode.ShowChat, // extra condition handled below
   isCopyMode: HypercombMode.Copy,
   isCutMode: HypercombMode.Cut,
