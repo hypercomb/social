@@ -11,7 +11,7 @@ export class PinchZoomService extends ZoomInputBase {
   private readonly isPinching = signal(false)
 
   private pivot: { x: number; y: number } | null = null
-  private baselineY = 0
+  private baselineDistance = 0
   private startScale = 1
 
   // track which pointer id is the mouse so we can ignore it for pinch
@@ -60,16 +60,21 @@ export class PinchZoomService extends ZoomInputBase {
         const [, p1] = touchEntries[0]
         const [, p2] = touchEntries[1]
 
+        const dist = this.getDistance(p1, p2)
+        if (dist <= 0) return
+
         this.pivot = {
           x: (p1.x + p2.x) / 2,
           y: (p1.y + p2.y) / 2
         }
-        this.baselineY = this.pivot.y
+        this.baselineDistance = dist
         this.startScale = this.zoom.currentScale
 
+        // kill any active touch pan and disable it during pinch
         this.touchPan.cancelPanSession()
         this.touchPan.disable()
 
+        // mark gesture as pinch so clicks are cancelled
         this.isPinching.set(true)
         this.state.setCancelled(true)
         return
@@ -80,12 +85,16 @@ export class PinchZoomService extends ZoomInputBase {
         const [, p1] = touchEntries[0]
         const [, p2] = touchEntries[1]
         if (!this.pivot) return
+        if (this.baselineDistance <= 0) return
 
-        const centerY = (p1.y + p2.y) / 2
-        const delta = centerY - this.baselineY
+        const dist = this.getDistance(p1, p2)
+        const delta = dist - this.baselineDistance
+
+        // small jitter → ignore
         if (Math.abs(delta) < 4) return
 
-        const factor = Math.pow(2, -delta / 300)
+        // classic pinch: scale factor based on distance ratio
+        const factor = dist / this.baselineDistance
         const newScale = this.startScale * factor
 
         this.zoomToScale(newScale, this.pivot)
@@ -97,6 +106,7 @@ export class PinchZoomService extends ZoomInputBase {
         const [pointerId, p] = touchEntries[0]
         this.stopPinch()
 
+        // re-enable touch pan and continue from current finger position
         this.touchPan.enable()
         this.touchPan.beginPanFromTouch(p.x, p.y, pointerId)
         return
@@ -107,12 +117,18 @@ export class PinchZoomService extends ZoomInputBase {
     })
   }
 
+  private getDistance(a: { x: number; y: number }, b: { x: number; y: number }): number {
+    const dx = b.x - a.x
+    const dy = b.y - a.y
+    return Math.hypot(dx, dy)
+  }
+
   private stopPinch(): void {
     if (!this.isPinching()) return
 
     this.isPinching.set(false)
     this.pivot = null
-    this.baselineY = 0
+    this.baselineDistance = 0
     this.startScale = this.zoom.currentScale
 
     // allow normal touch panning after gesture ends
