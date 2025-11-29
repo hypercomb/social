@@ -1,7 +1,10 @@
-﻿import { Injectable, inject } from '@angular/core'
+﻿// src/app/pixi/zoom-service.ts
+import { Injectable, inject } from '@angular/core'
 import { Point } from 'pixi.js'
 import { LayoutState } from '../layout/layout-state'
 import { PixiDataServiceBase } from '../database/pixi-data-service-base'
+import { Subject } from 'rxjs'
+import { debounceTime } from 'rxjs/operators'
 
 @Injectable({ providedIn: 'root' })
 export class ZoomService extends PixiDataServiceBase {
@@ -9,24 +12,12 @@ export class ZoomService extends PixiDataServiceBase {
   private minScale: number = this.ls.minScale
   private maxScale: number = this.ls.maxScale
 
-  private targetScale: number | null = null
-  private rafId: number | null = null
-  private readonly ease = 0.15
-  private _wheelSpeed = this.state.isMobile? 1.5 : 1.25
-
-  public get wheelSpeed(): number {
-    return this._wheelSpeed
-  }
-
-  public set wheelSpeed(value: number) {
-    this._wheelSpeed = Math.max(1.001, value)
-  }
 
   private canZoom(): boolean {
     return true
   }
 
-  private adjustZoom(
+  private adjustZoom( 
     newScale: number,
     position: { x: number; y: number } = new Point(0, 0)
   ): void {
@@ -54,49 +45,30 @@ export class ZoomService extends PixiDataServiceBase {
     this.saveTransform()
   }
 
-  private animateTowardsTarget(pivot: Point): void {
-    if (this.rafId) cancelAnimationFrame(this.rafId)
-    const tick = () => {
-      if (this.targetScale == null) return
-      const container = this.pixi.container!
-      const current = container.scale.x
-      const delta = this.targetScale - current
-      if (Math.abs(delta) < 0.0005) {
-        this.adjustZoom(this.targetScale, pivot)
-        this.targetScale = null
-        this.rafId = null
-        return
-      }
-      const next = current + delta * this.ease
-      this.adjustZoom(next, pivot)
-      this.rafId = requestAnimationFrame(tick)
-    }
-    this.rafId = requestAnimationFrame(tick)
+  public applyZoom(scaleAmount: number, position: { x: number; y: number } = new Point(0, 0)) {
+    if (!this.canZoom()) return
+    const container = this.pixi.container!
+    const oldScale = container.scale.x
+    let newScale = oldScale * scaleAmount
+    newScale = Math.min(Math.max(newScale, this.minScale), this.maxScale)
+    this.debug.log('zoom', 'applyZoom', { oldScale, scaleAmount, newScale, position })
+    this.adjustZoom(newScale, position)
   }
 
-  private enqueueZoom(target: number, pivot: { x: number; y: number }): void {
-    const clamped = Math.min(Math.max(target, this.minScale), this.maxScale)
-    this.targetScale = clamped
-    this.animateTowardsTarget(new Point(pivot.x, pivot.y))
-  }
-
-  public applyZoom(scaleAmount: number, pivot: { x: number; y: number }): void {
-    const current = this.pixi.container!.scale.x
-    this.enqueueZoom(current * scaleAmount, pivot)
-  }
-
-  public setZoom(zoomValue: number, pivot: { x: number; y: number }): void {
-    this.enqueueZoom(zoomValue, pivot)
+  public setZoom(zoomValue: number, position: { x: number; y: number } = new Point(0, 0)) {
+    if (!this.canZoom()) return
+    const newScale = Math.min(Math.max(zoomValue, this.minScale), this.maxScale)
+    this.adjustZoom(newScale, position)
   }
 
   public zoomIn(position: { x: number; y: number }) {
-    const f = this._wheelSpeed
+    const f = 1.05
     this.debug.log('zoom', `zoomIn factor=${f} pivot=`, position)
     this.applyZoom(f, position)
   }
 
   public zoomOut(position: { x: number; y: number }) {
-    const f = 1 / this._wheelSpeed
+    const f = 1 / 1.05
     this.debug.log('zoom', `zoomOut factor=${f} pivot=`, position)
     this.applyZoom(f, position)
   }
@@ -109,4 +81,5 @@ export class ZoomService extends PixiDataServiceBase {
   public get currentScale(): number {
     return this.pixi.container?.scale.x ?? 1
   }
+
 }

@@ -35,34 +35,35 @@ export abstract class PanningServiceBase extends PixiDataServiceBase {
   protected downScreenX = 0
   protected downScreenY = 0
 
-  /** determines if drag threshold suppression should apply */
   protected usePanThreshold = true
-
   private scrollBlocker: (() => void) | null = null
+
+  // new: lock pan to a single pointer
+  protected activePointerId: number | null = null
 
   constructor() {
     super()
 
-    // 🔹 New primary pointerdown = new gesture → clear previous cancellation
+    // new pointerdown gesture clears cancelled flag
     effect(() => {
       const downSeq = this.ps.downSeq()
       if (downSeq === 0) return
       const down = this.ps.pointerDownEvent()
       if (!down) return
-      if (down.button !== 0) return // only left / primary
-
+      if (down.button !== 0) return
       this._cancelled.set(false)
       this.state.setCancelled(false)
-      // do NOT touch state.panning here; that is set only when we actually pan
     })
 
-    // anchor when pointer is pressed (for services that opt-in)
+    // anchor when pointer is pressed (for services that opt in)
     effect(() => {
       if (!this.anchorOnDown) return
       if (this.ps.downSeq() === 0) return
       const down = this.ps.pointerDownEvent()
       if (!down || !this.shouldStart(down)) return
-      this.startAnchorAt(down.clientX, down.clientY)
+      if (this.anchored) return // do not reanchor mid gesture
+
+      this.startAnchorAt(down.clientX, down.clientY, down.pointerId)
     })
 
     // handle move events
@@ -74,7 +75,10 @@ export abstract class PanningServiceBase extends PixiDataServiceBase {
       if (!this.isMoveRelevant(move)) return
       if (this.manager.locked()) return
 
-      // threshold → decide when it becomes a pan
+      // ignore moves from any pointer except the one we anchored with
+      if (this.activePointerId !== null && move.pointerId !== this.activePointerId) return
+
+      // threshold detection
       if (this.usePanThreshold && !this.dragThresholdReached) {
         const threshold = this.getPanThreshold()
         if (threshold > 0) {
@@ -82,6 +86,16 @@ export abstract class PanningServiceBase extends PixiDataServiceBase {
           const dy = move.clientY - this.downScreenY
           if (Math.hypot(dx, dy) < threshold) return
         }
+
+        // reanchor at the frame where drag actually starts to avoid first frame jump
+        const container = this.pixi.container
+        if (container) {
+          this.startPosX = container.position.x
+          this.startPosY = container.position.y
+          this.downScreenX = move.clientX
+          this.downScreenY = move.clientY
+        }
+
         this.dragThresholdReached = true
         this.beginPan()
       } else if (!this.usePanThreshold && !this.dragThresholdReached) {
@@ -102,69 +116,56 @@ export abstract class PanningServiceBase extends PixiDataServiceBase {
     })
   }
 
-  /** called when a pan gesture actually starts (threshold passed) */
   protected beginPan(): void {
-    if (!this.state.panning) {
-      this.state.panning = true
-    }
-    // this gesture should not trigger click-based actions
+    if (!this.state.panning) this.state.panning = true
     this._cancelled.set(true)
     this.state.setCancelled(true)
   }
 
-  /** commits transform and updates the cell to remain the source of truth */
   protected commitTransform(): void {
-    const container = this.pixi.container
+    const c = this.pixi.container
     const cell = this.stack.top()?.cell
 
-    if (container && cell) {
-      cell.x = container.x
-      cell.y = container.y
-      cell.scale = container.scale.x
-      this.debug.log("panning", "commitTransform", {
-        x: cell.x,
-        y: cell.y,
-        scale: cell.scale,
-      })
+    if (c && cell) {
+      cell.x = c.x
+      cell.y = c.y
+      cell.scale = c.scale.x
+      this.debug.log("panning", "commitTransform", { x: cell.x, y: cell.y, scale: cell.scale })
     }
 
     this.saveTransform()
     this.unblockScroll()
 
-    const dragged = this.dragThresholdReached
-
+    const drag = this.dragThresholdReached
     this.anchored = false
     this.dragThresholdReached = false
+    this.activePointerId = null
     this.setActive(false)
     this.state.panning = false
 
-    if (!dragged) {
-      // no actual pan ⇒ allow click
+    if (!drag) {
       this._cancelled.set(false)
       this.state.setCancelled(false)
     }
-    // if dragged: keep cancelled=true for this gesture.
-    // Next pointerdown will clear it via the effect above.
   }
 
   protected blockScroll(): void {
     if (this.scrollBlocker) return
     const body = document.body
-    const prevOverflow = body.style.overflow
+    const prev = body.style.overflow
     body.style.overflow = "hidden"
     this.scrollBlocker = () => {
-      body.style.overflow = prevOverflow
+      body.style.overflow = prev
       this.scrollBlocker = null
     }
   }
 
-  /** Hard reset for navigation/context switches (e.g. Back action). */
   public cancelPanSession(): void {
     this.unblockScroll()
     this.anchored = false
     this.dragThresholdReached = false
+    this.activePointerId = null
     this.setActive(false)
-
     this._cancelled.set(false)
     this.state.setCancelled(false)
     this.state.panning = false
@@ -178,39 +179,41 @@ export abstract class PanningServiceBase extends PixiDataServiceBase {
   }
 
   protected safeInit(): void {
-    const container = this.pixi.container
-    if (!container) return
-    container.eventMode = "static"
-    container.hitArea ??= { contains: () => true }
+    const c = this.pixi.container
+    if (!c) return
+    c.eventMode = "static"
+    c.hitArea ??= { contains: () => true }
   }
 
   protected override onPixiReady(): void {
     this.safeInit()
   }
 
-  protected startAnchorAt(x: number, y: number): void {
-    const container = this.pixi.container
+  // new: optional pointer id so we lock to that pointer
+  protected startAnchorAt(x: number, y: number, pointerId?: number): void {
+    const c = this.pixi.container
     const app = this.pixi.app
-    if (!container || !app) return
+    if (!c || !app) return
 
-    this.startPosX = container.position.x
-    this.startPosY = container.position.y
+    this.startPosX = c.position.x
+    this.startPosY = c.position.y
     this.downScreenX = x
     this.downScreenY = y
     this.dragThresholdReached = false
     this.anchored = true
+    this.activePointerId = pointerId ?? null
     this.setActive(true)
     this.blockScroll()
   }
 
   protected performPan(move: PointerEvent): void {
-    const container = this.pixi.container
+    const c = this.pixi.container
     const app = this.pixi.app
-    if (!container || !app) return
-    const resolution = app.renderer.resolution
-    const dx = (move.clientX - this.downScreenX) * resolution
-    const dy = (move.clientY - this.downScreenY) * resolution
-    container.position.set(this.startPosX + dx, this.startPosY + dy)
+    if (!c || !app) return
+    const r = app.renderer.resolution
+    const dx = (move.clientX - this.downScreenX) * r
+    const dy = (move.clientY - this.downScreenY) * r
+    c.position.set(this.startPosX + dx, this.startPosY + dy)
   }
 
   private unblockScroll(): void {
@@ -221,10 +224,6 @@ export abstract class PanningServiceBase extends PixiDataServiceBase {
   }
 
   protected abstract shouldStart(down: PointerEvent): boolean
-  protected  isMoveRelevant(move: PointerEvent) : boolean {
-    return true
-  } 
-  protected getPanThreshold(): number {
-    return this.PAN_THRESHOLD
-  }
+  protected abstract isMoveRelevant(move: PointerEvent): boolean
+  protected getPanThreshold(): number { return this.PAN_THRESHOLD }
 }

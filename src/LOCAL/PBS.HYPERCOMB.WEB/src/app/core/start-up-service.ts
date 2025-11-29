@@ -62,7 +62,7 @@ import { PositionSynchronizer } from '../hive/position-synchronizer'
 import { ExportAllHivesAction } from '../actions/propagation/export-all-hives'
 import { OpfsBackupService } from '../actions/propagation/opfs-backup.service'
 import { MousewheelZoomService } from '../pixi/mousewheel-zoom-service'
-import { TouchZoomService } from '../pixi/touch-zoom-service'
+import { PinchZoomService } from '../pixi/pinch-zoom-service'
 import { CopyAction } from '../actions/clipboard/copy-honeycomb'
 import { CloseExternalAction } from '../actions/navigation/close-external'
 import { ColorPicker } from '../services/color-picker'
@@ -93,7 +93,7 @@ export class StartUpService {
     inject(KeyboardShortcutListener),
 
     // input
-    inject(TouchZoomService),
+    inject(PinchZoomService),
     inject(TouchPanningService),
     inject(SpacebarPanningService),
     inject(PointerBindingService),

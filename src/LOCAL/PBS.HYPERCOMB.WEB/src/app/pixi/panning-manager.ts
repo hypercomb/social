@@ -1,3 +1,4 @@
+
 // src/app/pixi/panning-manager.ts
 import { Injectable, inject, effect } from "@angular/core"
 import { KeyboardService } from "../interactivity/keyboard/keyboard-service"
