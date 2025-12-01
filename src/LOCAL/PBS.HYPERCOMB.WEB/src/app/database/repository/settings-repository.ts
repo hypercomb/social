@@ -9,12 +9,13 @@ export class SettingsRepository extends RepositoryBase<any> {
     public readonly settingsDb = computed(() => this.database.sharedDb())
 
     public get = async <T>(key: string): Promise<T | undefined> => {
-        const db = this.settingsDb() // unwrap the computed signal
-        const table = db?.table(DBTables.Settings) as Table<{ key: string, value: any }> | undefined
+        const db = this.settingsDb();
+        const table = db?.table(DBTables.Settings);
 
-        if (!table) return undefined
-        const record = await table.get(key)
-        return record?.value as T
+        if (!table) return undefined;
+
+        const record = await table.where('key').equals(key).first();
+        return record?.value as T;
     }
 
     // ─────────────────────────────────────────────

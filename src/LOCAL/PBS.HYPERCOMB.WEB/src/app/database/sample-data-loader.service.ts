@@ -20,6 +20,7 @@ export class SampleDataLoaderService {
   ]
 
   public loadSampleDataIfNeeded = async (): Promise<void> => {
+
     const loaded = await this.settings.get<boolean>(this.flagKey)
     if (loaded) return
 
