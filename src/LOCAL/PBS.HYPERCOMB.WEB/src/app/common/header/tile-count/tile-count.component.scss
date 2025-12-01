@@ -1,0 +1,14 @@
+.tile-count {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+
+  .icon {
+    font-family: 'hypercomb-icons';
+    user-select: none;
+  }
+
+  .count {
+    font-family: "Baloo 2";
+  }
+}

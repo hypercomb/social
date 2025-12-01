@@ -3,6 +3,8 @@ import { FormsModule } from '@angular/forms'
 import { environment } from 'src/environments/environment'
 import { FocusWatcherDirective } from '../focus-watcher'
 import { IconMenuComponent } from '../icon-menu/icon-menu.component'
+import { TileCountComponent } from '../tile-count/tile-count.component'
+import { SearchBoxComponent } from '../search-box/search-box.component'
 import { SearchFilterService } from './search-filter-service'
 import { HypercombData } from 'src/app/actions/hypercomb-data'
 import { HypercombMode, POLICY } from 'src/app/core/models/enumerations'
@@ -21,7 +23,7 @@ import { ScreenService } from 'src/app/services/screen-service'
   selector: '[app-header-bar]',
   templateUrl: './header-bar.component.html',
   styleUrls: ['./header-bar.component.scss'],
-  imports: [IconMenuComponent, FocusWatcherDirective, FormsModule],
+  imports: [TileCountComponent, SearchBoxComponent, IconMenuComponent, FormsModule],
 })
 export class HeaderBarComponent extends HypercombData {
   private readonly es = inject(EditorService)
@@ -69,7 +71,7 @@ export class HeaderBarComponent extends HypercombData {
     const cell = tile ? this.store.lookupData(tile.cellId) : undefined
     const name = cell?.name ?? this.stack.hiveName()
 
-    return `${name}`// index: ${coordinate.index} : ${coordinate.Location}`
+    return `${name} ${coordinate.index  }`// index: ${coordinate.index} : ${coordinate.Location}`
   })
 
   constructor() {

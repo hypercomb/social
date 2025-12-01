@@ -1,18 +1,19 @@
-<div class="sign-in-menu">
+<div class="icon-menu">
+  <button class="item user" (click)="signIn($event)">
+    <span class="icon">{{ userName }}</span>
+  </button>
 
-  <span class="sign-in-label" (click)="signIn($event)">
-    <a [class.activeCell]="!isHovered" href="#">{{userName}}</a>
-  </span>
+  <button class="item" (click)="viewHelp($event)">
+    <span class="icon">g</span>
+  </button>
 
-
-  <span (click)="togglePreferences($event)"><a class="icon" href="#"><i class="fa-solid fa-book"></i></a></span>
-  <span (click)="viewHelp($event)"><a class="icon" href="#"><i class="fa-regular fa-circle-question"></i></a></span>
+  <button class="item" (click)="togglePreferences($event)">
+    <span class="icon">V</span>
+  </button>
 
   @if (isSignedIn) {
-    <span>
-      <div (click)="publish($event)" id="publish-button" href="#"><a class="icon" href="#"><i
-      class="fa-solid fa-upload"></i></a></div>
-    </span>
+    <button class="item" (click)="publish($event)">
+      <span class="icon">U</span>
+    </button>
   }
-
 </div>
