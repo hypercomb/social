@@ -6,7 +6,6 @@ import { Tile } from "../../cells/models/tile"
 import { MaskComponent } from "../../user-interface/sprite-components/mask-component"
 import { TextureService } from "../../user-interface/texture/texture-service"
 import { Cell } from "src/app/cells/cell"
-import { BlobService } from "src/app/hive/rendering/blob-service"
 import { HONEYCOMB_STORE } from "src/app/shared/tokens/i-comb-store.token"
 
 @Injectable({ providedIn: 'root' })

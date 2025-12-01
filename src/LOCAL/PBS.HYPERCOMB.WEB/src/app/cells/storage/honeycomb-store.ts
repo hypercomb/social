@@ -148,7 +148,7 @@ export class HoneycombStore extends Hypercomb implements IHoneycombStore, IStagi
   public stageReplace(cell: Cell): void {
     this.dataRegistry.set(cell.cellId!, cell)
     this.refreshSurface()
-    this.enqueueHot(cell)
+    this.enqueue(cell)
     this.bump()
   }
 
@@ -161,7 +161,7 @@ export class HoneycombStore extends Hypercomb implements IHoneycombStore, IStagi
   // ---------------------------------------------------------
   // HOT QUEUE
   // ---------------------------------------------------------
-  public enqueueHot(cells: Cell | Cell[]): void {
+  public enqueue(cells: Cell | Cell[]): void {
     const arr = Array.isArray(cells) ? cells : [cells]
     this.hot.update(v => [...v, ...arr])
   }

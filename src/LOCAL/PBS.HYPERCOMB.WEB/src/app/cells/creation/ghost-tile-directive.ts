@@ -89,7 +89,7 @@ export class GhostTileDirective extends HypercombLayout {
 
     tile.alpha = 0.6
     tile.eventMode = "none"
-    tile.zIndex = 9999
+    tile.zIndex = 200
 
     const container = this.pixi.container
     if (container) {
@@ -134,7 +134,7 @@ export class GhostTileDirective extends HypercombLayout {
 
       await this.destroyGhost()
       this.activeIndex = null
-    } finally {
+    } finally { 
       this.committing = false
     }
   }

@@ -42,7 +42,7 @@ export class Workspace extends WorkspaceBase {
 
     public addCell = async (cell: Cell) => {
         const persisted = await this.mutate.addCell(cell)
-        this.store.honeycomb.enqueueHot(persisted)
+        this.store.honeycomb.enqueue(persisted)
     }
 
     public removeCell = async (cell: Cell) => {
@@ -61,7 +61,7 @@ export class Workspace extends WorkspaceBase {
             : this.mutate.replaceCell(cell.hive, cell)
 
         // enqueue for render/update
-        this.store.honeycomb.enqueueHot(cell)
+        this.store.honeycomb.enqueue(cell)
     }
 
     // -----------------------------------------------------------

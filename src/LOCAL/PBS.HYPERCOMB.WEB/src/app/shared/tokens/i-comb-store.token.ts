@@ -5,6 +5,7 @@ import { Cell } from "src/app/cells/cell"
 import { Tile } from "src/app/cells/models/tile"
 
 export interface IStaging {
+  enqueue(cell: Cell)
   stageCells(cells: Cell[]): void
   stageAdd(cell: Cell): void
   stageRemove(cellId: number): void
@@ -17,7 +18,7 @@ export interface IHoneycombStore {
 
   // scheduler
   flush(): { hot: Cell[] }
-  enqueueHot(cells: Cell | Cell[]): void
+  enqueue(cells: Cell | Cell[]): void
 
   // registry
   register(tile: Tile, cell: Cell): void

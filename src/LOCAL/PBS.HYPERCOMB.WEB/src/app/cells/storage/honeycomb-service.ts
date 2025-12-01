@@ -107,7 +107,7 @@ export class HoneycombService extends DataOrchestratorBase implements ICellServi
 
       // ----- merge into store & enqueue rendering -----
       this.staging.stageMerge(children)
-      this.honeycomb.store.enqueueHot(children)
+      this.honeycomb.store.enqueue(children)
 
     } catch (err) {
       console.warn(`[HoneycombService] layer hydration failed:`, err)
@@ -182,8 +182,12 @@ export class HoneycombService extends DataOrchestratorBase implements ICellServi
 
     const res = await this.repository.update(toCellEntity(cell))
     this.staging.stageReplace(cell)
-    this.honeycomb.store.enqueueHot(cell)
+    this.honeycomb.store.enqueue(cell)
     return res
+  }
+
+  public enqueue(cell: Cell) {
+    this.honeycomb.store.enqueue(cell)
   }
 
   public async updateHasChildren(cell: Cell): Promise<void> {
