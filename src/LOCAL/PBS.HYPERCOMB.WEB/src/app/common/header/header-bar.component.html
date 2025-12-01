@@ -38,33 +38,13 @@
     }
 
     @if (!state.isMobile) {
-      <!-- <div class="right side">
-        @if (showCount()) {
-          <div class="count-display">
-            <i class="icon">E</i>
-            <span class="count">{{ cellCount() }}</span>
-          </div>
-        }
-        <div class="search">
-          <input
-            app-focus-watcher
-            type="search"
-            [value]="search.value()"
-            (input)="search.set($any($event.target).value)"
-            (focusChange)="onFocusChanged($event)"
-            placeholder="Search"
-          />
-        </div>
-        <div class="menu-container">
-          <div app-icon-menu></div>
-        </div>
-      </div> -->
 
       <div class="right-header-area">
-        <app-tile-count [count]="cellCount()" *ngIf="showCount()">
-        </app-tile-count> 
-        <app-search-box [value]="search.value()"
-        (changed)="search.set($event)"> </app-search-box>
+        @if (showCount()) {
+          <app-tile-count [count]="cellCount()"> </app-tile-count>
+        }
+        <app-search-box [value]="search.value()" (changed)="search.set($event)">
+        </app-search-box>
 
         <div app-icon-menu></div>
       </div>

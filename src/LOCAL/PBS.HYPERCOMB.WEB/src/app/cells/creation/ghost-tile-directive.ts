@@ -113,7 +113,6 @@ export class GhostTileDirective extends HypercombLayout {
         index,
         hive: source.hive,
         sourceId: source.cellId,
-        hasChildrenFlag: "false",
         imageHash: g.imageHash,
         name: "",
         link: "",

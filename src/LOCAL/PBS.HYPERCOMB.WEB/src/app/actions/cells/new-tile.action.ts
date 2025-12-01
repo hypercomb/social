@@ -44,7 +44,6 @@ export class NewTileAction extends ActionBase<PayloadBase> {
         index,
         hive: parent.hive,
       sourceId: parent.cellId,
-      hasChildrenFlag: "false",
       imageHash: this.preloader.getInitialTileHash() ?? "",
     })
 

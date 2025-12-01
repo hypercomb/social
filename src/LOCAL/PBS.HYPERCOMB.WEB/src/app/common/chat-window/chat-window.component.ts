@@ -227,7 +227,6 @@ Rules:
     index,
     hive: parent.hive,
     sourceId: parent.cellId,
-    hasChildrenFlag: 'false',
     imageHash: ghost.imageHash
   })
   newCell.setKind('Cell')

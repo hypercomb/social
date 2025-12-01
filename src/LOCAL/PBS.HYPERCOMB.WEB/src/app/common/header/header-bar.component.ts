@@ -29,7 +29,7 @@ export class HeaderBarComponent extends HypercombData {
   private readonly es = inject(EditorService)
   private readonly manager = inject(CellEditor)
   private readonly navigation = inject(LinkNavigationService)
-  private readonly screen = inject(ScreenService)
+  private readonly screen = inject(ScreenService) 
   public readonly search = inject(SearchFilterService)
   private readonly _Hypercomb = 'Hypercomb'
   public readonly detector = inject(CoordinateDetector)
@@ -71,7 +71,7 @@ export class HeaderBarComponent extends HypercombData {
     const cell = tile ? this.store.lookupData(tile.cellId) : undefined
     const name = cell?.name ?? this.stack.hiveName()
 
-    return `${name} ${coordinate.index  }`// index: ${coordinate.index} : ${coordinate.Location}`
+    return `${name} ${environment.production ? '' :  coordinate.index  }`// index: ${coordinate.index} : ${coordinate.Location}`
   })
 
   constructor() {
@@ -89,7 +89,7 @@ export class HeaderBarComponent extends HypercombData {
     })
   }
 
-  public readonly cellCount = computed(() => this.stack.size())
+  public readonly cellCount = computed(() => this.detector.activeCell()?.childCount || 0)
   public readonly showCount = computed(() => this.cellCount() > 0)
   public readonly iconsVisible = computed(() =>
     !this.screen.isFullScreen() || !this.touch.supportsEdit()

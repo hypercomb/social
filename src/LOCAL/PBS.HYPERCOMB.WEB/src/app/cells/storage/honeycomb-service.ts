@@ -77,42 +77,36 @@ export class HoneycombService extends DataOrchestratorBase implements ICellServi
   // load ONLY this layer (children of parentId)
   // ---------------------------------------------------------
   private async hydrateLayer(parentId: number): Promise<void> {
-    try {
-      const rows = await this.repository.fetchBySourceId(parentId)
-      const children = rows.map(r => <Cell>toCell(r))
+  try {
+    const rows = await this.repository.fetchBySourceId(parentId)
+    const children = rows.map(r => <Cell>toCell(r))
 
-      // ----- update parent flag -----
-      const parent = this.honeycomb.store.lookupData(parentId)
-      if (parent) {
-        const hasChildren = children.length > 0
-        const newFlag = hasChildren ? 'true' : 'false'
-
-        if (parent.hasChildrenFlag !== newFlag) {
-          parent.hasChildrenFlag = newFlag
-          this.staging.stageReplace(parent)
-        }
+    const parent = this.honeycomb.store.lookupData(parentId)
+    if (parent) {
+      // recompute every time; don't trust DB field
+      const count = children.length
+      if (parent.childCount !== count) {
+        parent.childCount = count
+        this.staging.stageReplace(parent)
       }
-
-      if (!children.length) return
-
-      // ----- compute children flags -----
-      const ids = children.map(c => c.cellId!)
-      const counts = await Promise.all(
-        ids.map(id => this.repository.fetchChildCount(id))
-      )
-
-      children.forEach((c, i) => {
-        c.hasChildrenFlag = counts[i] > 0 ? 'true' : 'false'
-      })
-
-      // ----- merge into store & enqueue rendering -----
-      this.staging.stageMerge(children)
-      this.honeycomb.store.enqueue(children)
-
-    } catch (err) {
-      console.warn(`[HoneycombService] layer hydration failed:`, err)
     }
+
+    if (!children.length) return
+
+    const ids = children.map(c => c.cellId!)
+    const counts = await Promise.all(ids.map(id => this.repository.fetchChildCount(id)))
+
+    children.forEach((c, i) => {
+      // recompute; never assume DB field exists
+      c.childCount = counts[i]
+    })
+
+    this.staging.stageMerge(children)
+    this.honeycomb.store.enqueue(children)
+  } catch (err) {
+    console.warn('[HoneycombService] layer hydration failed:', err)
   }
+}
 
   // =========================================================
   // CREATION
@@ -192,7 +186,7 @@ export class HoneycombService extends DataOrchestratorBase implements ICellServi
 
   public async updateHasChildren(cell: Cell): Promise<void> {
     const count = await this.repository.fetchChildCount(cell.cellId!)
-    cell.hasChildrenFlag = count > 0 ? 'true' : 'false'
+    cell.childCount = count
     this.staging.stageReplace(cell)
   }
 

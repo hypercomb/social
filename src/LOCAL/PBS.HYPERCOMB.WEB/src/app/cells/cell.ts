@@ -41,8 +41,9 @@ export class NewCell extends CellFlags {
   public get hashedHive(): number {
     return hashHive(this.hive)
   }
-   hasChildrenFlag: 'true' | 'false' | undefined = undefined
   
+  childCount?: number
+
   hive: string = ""
   name = ""
   link = ""
