@@ -1,7 +1,7 @@
 ﻿import { Component, computed, effect, HostListener, inject, OnInit } from '@angular/core'
 import { NgIf, NgForOf } from '@angular/common'
 import { debounced } from '../debounce-service'
-import { SearchFilterService } from '../header/header-bar/search-filter-service'
+import { SearchFilterService } from '../header/search-filter-service'
 import { CarouselItemComponent } from './carousel-item/carousel-item.component'
 import { HypercombData } from 'src/app/actions/hypercomb-data'
 import { simplify } from 'src/app/shared/services/name-simplifier'

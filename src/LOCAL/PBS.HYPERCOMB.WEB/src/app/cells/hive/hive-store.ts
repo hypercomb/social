@@ -6,7 +6,7 @@ import { Cell, Hive } from "../cell"
 import { Tile } from "../models/tile"
 import { ContextStack } from "src/app/core/controller/context-stack"
 import { IDexieHive } from "src/app/hive/hive-models"
-import { SearchFilterService } from "src/app/common/header/header-bar/search-filter-service"
+import { SearchFilterService } from "src/app/common/header/search-filter-service"
 
 @Injectable({ providedIn: "root" })
 export class HiveStore implements IControlHives, IHiveState, IHiveLookup {
