@@ -38,7 +38,7 @@ export class BackHiveAction extends ActionBase<PayloadBase> {
     this.state.resetMode()
 
     // safety check
-    if(!this.stack.canPop()) return
+    if (!this.stack.canPop()) return
 
     // wipe all rendered tiles immediately
     this.combstore.invalidate()
@@ -48,7 +48,6 @@ export class BackHiveAction extends ActionBase<PayloadBase> {
 
     // go back
     this.stack.pop()
-    
   }
 
 }

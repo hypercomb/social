@@ -31,7 +31,7 @@ export class WheelState {
 
   private handleWheel = (evt: Event) => {
     const e = evt as WheelEvent
-    e.preventDefault()
+ //   e.preventDefault()
     this.lastDeltaY = e.deltaY
     this.tick.update(n => n + 1) // 🔑 one increment = one pulse
   }

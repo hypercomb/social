@@ -20,6 +20,7 @@ import { OpfsFileExplorerComponent } from './common/opfs/file-explorer/opfs-file
 import { SampleDataLoaderService } from './database/sample-data-loader.service'
 import { GhostTileDirective } from "./cells/creation/ghost-tile-directive"
 import { EmptyHoneycombComponent } from './common/overlays/empty-honeycomb/empty-honeycomb.component'
+import { ShortcutsPageComponent } from './common/header/shortcuts-page/shortcuts-page.component'
 
 @Component({
   standalone: true,
@@ -36,6 +37,7 @@ import { EmptyHoneycombComponent } from './common/overlays/empty-honeycomb/empty
     EmptyHoneycombComponent,
     HeaderBarComponent,
     HelpPageComponent,
+    ShortcutsPageComponent,
     // JsonViewerComponent,
     // LoadingOverlayComponent,
     // PhotoViewerComponent,
