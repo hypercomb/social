@@ -21,7 +21,7 @@ export class BranchAction extends ActionBase<CellPayload> {
     if (!cell) return false
 
     // must have children
-    if (cell.hasChildrenFlag !== "true") return false
+    // if (cell.hasChildrenFlag !== "true") return false
 
     // only marked-as-branch children can be opened
     return cell.isBranch

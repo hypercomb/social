@@ -1,99 +1,104 @@
-﻿// ai-list-query.service.ts (FINAL – OpenAI Nano Test Mode)
+﻿// src/app/ai/ai-list-query.ts
 
 import { Injectable } from '@angular/core';
 import { HypercombData } from '../actions/hypercomb-data';
 import { IOpenAiQuery } from './i-open-ai-query';
-const apiKey =
-  (window as any)?.hypercomb_openai_key ||
-  localStorage.getItem('OPENAI_API_KEY') ||
-  '';
 
 @Injectable({ providedIn: 'root' })
 export class AiListQuery extends HypercombData implements IOpenAiQuery {
 
+  // system instructions for LM Studio
   private readonly SYSTEM = `
-You are the Hypercomb Hierarchy Builder.
+You are a precise list generator.
 
-Output ONLY one JSON array using this recursive Tile format:
-
-A Tile is:
-[
-  "name",
-  [
-    Tile,
-    Tile,
-    ...
-  ]
-]
-
-The output must be:
-[
-  Tile,  // 6 items
-  Tile,
-  Tile,
-  Tile,
-  Tile,
-  Tile
-]
+Your job:
+Given a single subject, produce a flat JSON array where each element is an object with:
+- "name": a short 1–3 word label directly related to the subject
+- "detail": a concise descriptive phrase (5–12 words)
 
 Rules:
-1. Always output exactly 6 top-level Tiles.
-2. Every Tile must be exactly: [string, array].
-3. The second element (children array) must always exist.
-4. Each top-level Tile must contain 6 child Tiles.
-5. Each child Tile must contain 3–6 grandchildren Tiles.
-6. Names must be short and unique.
-7. No objects, no prose, no markdown, no backticks.
-8. Output only JSON that matches the Tile format.
-
+1. The list size is determined by user instruction.
+2. If the user does NOT provide a count, output exactly 10 items.
+3. All items must be unique.
+4. Each item must strictly follow: { "name": "...", "detail": "..." }.
+5. Output ONLY the JSON array. No text, no explanations, no markdown.
+6. Output must strictly conform to the provided JSON schema.
 `;
 
-  public async query(userPrompt: string): Promise<any[]> {
-    if (!userPrompt.trim()) return [];
-
-    const response = await fetch('https://api.openai.com/v1/responses', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: 'gpt-4.1',  // ← nano model
-        input: [
-          {
-            role: "system",
-            content: [
-              { type: "input_text", text: this.SYSTEM }
-            ]
+  // JSON schema that LM Studio will enforce
+  private readonly SCHEMA = {
+    name: "FlatNamedList",
+    schema: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description: "short 1–3 word label related to the subject"
           },
-          {
-            role: "user",
-            content: [
-              { type: "input_text", text: userPrompt }
-            ]
+          detail: {
+            type: "string",
+            description: "a short descriptive phrase related to the name"
           }
-        ]
-      })
-    });
-
-    if (!response.ok) {
-      const err = await response.text();
-      console.error('OpenAI Error:', response.status, err);
-      return [];
+        },
+        required: ["name", "detail"]
+      },
+      minItems: 1,
+      maxItems: 20
     }
+  };
 
-    const data = await response.json();
-    const text = await response.text()
-    const raw = data.output_text ?? '';
-
-    return this.extractNestedArray(raw);
-  }
+  // public API ----------------------------------------------------
 
   public canQuery(q: string): boolean {
     return !!q?.trim();
   }
 
-  private extractNestedArray(text: string): any[] {
+  public async query(userPrompt: string): Promise<any[]> {
+    if (!userPrompt.trim()) return [];
+
+    const count = this.extractCount(userPrompt) ?? 10;
+    const purified = this.stripCount(userPrompt);
+
+    const payload = {
+      model: "llama-3.2-3b-instruct", // LM Studio model name
+      response_format: {
+        type: "json_schema",
+        json_schema: this.SCHEMA
+      },
+      messages: [
+        {
+          role: "system",
+          content: this.SYSTEM + `\nRequested item count: ${count}`
+        },
+        {
+          role: "user",
+          content: purified
+        }
+      ]
+    };
+
+    const response = await fetch("http://localhost:4220/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      console.error("LM Studio Error:", response.status, await response.text());
+      return [];
+    }
+
+    const data = await response.json();
+    const raw = data?.choices?.[0]?.message?.content ?? "";
+
+    return this.extractArray(raw);
+  }
+
+  // helpers --------------------------------------------------------
+
+  private extractArray(text: string): any[] {
     try {
       const parsed = JSON.parse(text);
       if (Array.isArray(parsed)) return parsed;
@@ -107,7 +112,21 @@ Rules:
       } catch {}
     }
 
-    console.warn('Failed to parse hierarchy:', text);
+    console.warn("Failed to parse LM Studio JSON:", text);
     return [];
+  }
+
+  private extractCount(input: string): number | null {
+    const match = input.match(/(?:^|\D)(\d{1,2})(?:\D|$)/);
+    if (!match) return null;
+
+    const n = parseInt(match[1], 10);
+    if (isNaN(n)) return null;
+
+    return Math.min(Math.max(n, 1), 20);
+  }
+
+  private stripCount(input: string): string {
+    return input.replace(/\d{1,2}/, "").replace(/[|:]/g, "").trim();
   }
 }
