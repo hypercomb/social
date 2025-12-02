@@ -1,11 +1,13 @@
+/* container stays same */
 .icon-menu {
   display: flex;
   align-items: center;
   gap: 1rem;
   padding: 0 1rem;
-    background: rgba(0, 0, 0, 0.25); 
+  background: rgba(0, 0, 0, 0.25);
 }
 
+/* base button */
 .item {
   display: flex;
   align-items: center;
@@ -17,13 +19,48 @@
   cursor: pointer;
 }
 
+/* shared icon font */
 .icon {
   font-family: "hypercomb-icons";
-  font-size: 1.4rem;
+  font-size: 1.55rem;
   user-select: none;
   line-height: 1;
+  color: whitesmoke;
+}
+
+/* ────────────────────────────────────────────────
+   CREATION MODE ICON — MOBILE-STYLE RED SQUARE
+   ──────────────────────────────────────────────── */
+
+.creation-icon {
+  width: 2.1rem;
+  height: 2.1rem;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: whitesmoke; /* required for visibility on dark header */
+
+  background: transparent;
+  border-radius: 6px;
+  border: 2px solid transparent; /* hidden until active */
+
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    color 0.15s ease;
+
+  .icon {
+    font-family: "hypercomb-icons";
+    font-size: 1.4rem;
+    line-height: 1;
+    color: white; /* default */
+    transition: color 0.15s ease;
+  }
+
+  &.active {
+    border-color: rgb(255, 60, 60); /* 🔴 visible only when active */
+
+    .icon {
+      color: rgb(255, 60, 60); /* 🔴 icon */
+    }
+  }
 }

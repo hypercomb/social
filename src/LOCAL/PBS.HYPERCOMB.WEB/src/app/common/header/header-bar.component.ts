@@ -26,10 +26,11 @@ import { ScreenService } from 'src/app/services/screen-service'
   imports: [TileCountComponent, SearchBoxComponent, IconMenuComponent, FormsModule],
 })
 export class HeaderBarComponent extends HypercombData {
+
   private readonly es = inject(EditorService)
   private readonly manager = inject(CellEditor)
   private readonly navigation = inject(LinkNavigationService)
-  private readonly screen = inject(ScreenService) 
+  private readonly screen = inject(ScreenService)
   public readonly search = inject(SearchFilterService)
   private readonly _Hypercomb = 'Hypercomb'
   public readonly detector = inject(CoordinateDetector)
@@ -52,11 +53,13 @@ export class HeaderBarComponent extends HypercombData {
   // derived signals
   public readonly isHelpPageActive = computed(() => this.state.hasMode(HypercombMode.ViewHelp))
   public readonly isEditingCaption = computed(() => this.state.hasMode(HypercombMode.EditingCaption))
+
   public readonly link = computed(() => environment.production ? this.ls.link : this.ls.information)
   public readonly isDoubleClickIconAllowed = computed(() =>
     !this.es.isEditing() &&
     !this.screen.isFullScreen()
   )
+
   public readonly isTabEditAllowed = computed(() =>
     !this.es.isEditing() &&
     !this.screen.isFullScreen()
@@ -71,7 +74,7 @@ export class HeaderBarComponent extends HypercombData {
     const cell = tile ? this.store.lookupData(tile.cellId) : undefined
     const name = cell?.name ?? this.stack.hiveName()
 
-    return `${name} ${environment.production ? '' :  coordinate.index  }`// index: ${coordinate.index} : ${coordinate.Location}`
+    return `${name} ${environment.production ? '' : coordinate.index}`// index: ${coordinate.index} : ${coordinate.Location}`
   })
 
   constructor() {
@@ -105,7 +108,7 @@ export class HeaderBarComponent extends HypercombData {
   }
 
   public edit(_: any) {
-    const cell= this.stack.cell()!
+    const cell = this.stack.cell()!
     const context = new CellEditContext(cell)
     this.manager.beginEditing(context)
   }
@@ -130,6 +133,8 @@ export class HeaderBarComponent extends HypercombData {
     this.showEdit = false
     this.state.removeMode(HypercombMode.EditingCaption)
   }
+
+
 }
 
 

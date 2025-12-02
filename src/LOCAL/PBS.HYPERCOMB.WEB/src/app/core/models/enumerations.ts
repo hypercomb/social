@@ -34,6 +34,7 @@ export enum HypercombMode {
     HiveCreation = 0x20,
     Collaboration = 0x40,
     Focused = 0x80,
+    CreationMode = 0x100,
     EditMode = 0x200,
     Copy = 0x400,
     Cut = 0x800,

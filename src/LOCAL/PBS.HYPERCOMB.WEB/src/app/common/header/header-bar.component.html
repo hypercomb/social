@@ -38,11 +38,11 @@
     }
 
     @if (!state.isMobile) {
-
       <div class="right-header-area">
         @if (showCount()) {
           <app-tile-count [count]="cellCount()"> </app-tile-count>
         }
+
         <app-search-box [value]="search.value()" (changed)="search.set($event)">
         </app-search-box>
 

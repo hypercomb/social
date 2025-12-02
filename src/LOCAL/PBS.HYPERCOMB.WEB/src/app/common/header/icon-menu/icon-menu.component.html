@@ -3,6 +3,14 @@
     <span class="icon">{{ userName }}</span>
   </button>
 
+  <button
+    class="item creation-icon"
+    [class.active]="isCreationMode()"
+    (click)="toggleCreationMode()"
+  >
+    <span class="icon">n</span>
+  </button>
+
   <button class="item" (click)="viewHelp($event)">
     <span class="icon">g</span>
   </button>

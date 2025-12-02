@@ -1,4 +1,4 @@
-﻿import { Component, inject } from '@angular/core'
+﻿import { Component, computed, inject } from '@angular/core'
 import { Autservice } from 'src/app/core/auth/auth-service'
 import { HypercombMode } from 'src/app/core/models/enumerations'
 import { ViewportService } from 'src/app/pixi/viewport-service'
@@ -33,6 +33,12 @@ export class IconMenuComponent extends Hypercomb {
 
   public get iconsVisible(): boolean {
     return !this.screen.isFullScreen() || !this.touch.supportsEdit()
+  }
+
+  public isCreationMode = computed(() => this.state.hasMode(HypercombMode.CreationMode))
+
+    public toggleCreationMode = async () => {
+    this.state.toggle(HypercombMode.CreationMode)
   }
 
   public get signInText(): string {

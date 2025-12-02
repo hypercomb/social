@@ -245,3 +245,15 @@ $max-width: 44rem; // Relative to root font size
     margin-top: 0.5rem;
   }
 }
+
+
+.icon {
+  font-family: "hypercomb-icons";
+  font-size: 1.4rem;
+  user-select: none;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: whitesmoke; /* required for visibility on dark header */
+}
