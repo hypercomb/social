@@ -15,6 +15,9 @@ import { ScreenService } from 'src/app/services/screen-service'
   styleUrls: ['./icon-menu.component.scss']
 })
 export class IconMenuComponent extends Hypercomb {
+createHive() {
+throw new Error('Method not implemented.')
+}
   private readonly authorization = inject(Autservice)
   private readonly screen = inject(ScreenService)
   private readonly touch = inject(TouchDetectionService)
