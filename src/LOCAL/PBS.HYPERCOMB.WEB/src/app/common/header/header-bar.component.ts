@@ -1,11 +1,9 @@
 ﻿import { Component, computed, effect, inject } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import { environment } from 'src/environments/environment'
-import { FocusWatcherDirective } from './focus-watcher'
 import { IconMenuComponent } from './icon-menu/icon-menu.component'
 import { TileCountComponent } from './tile-count/tile-count.component'
 import { SearchBoxComponent } from './search-box/search-box.component'
-import { SearchFilterService } from './search-filter-service'
 import { HypercombData } from 'src/app/actions/hypercomb-data'
 import { HypercombMode, POLICY } from 'src/app/core/models/enumerations'
 import { CoordinateDetector } from 'src/app/helper/detection/coordinate-detector'
@@ -31,7 +29,6 @@ export class HeaderBarComponent extends HypercombData {
   private readonly manager = inject(CellEditor)
   private readonly navigation = inject(LinkNavigationService)
   private readonly screen = inject(ScreenService)
-  public readonly search = inject(SearchFilterService)
   private readonly _Hypercomb = 'Hypercomb'
   public readonly detector = inject(CoordinateDetector)
   public readonly touch = inject(TouchDetectionService)
@@ -124,10 +121,6 @@ export class HeaderBarComponent extends HypercombData {
 
   public onHover = (state: boolean) => {
     this.isHovered = state
-  }
-
-  public onSearchTextChange(value: string) {
-    this.search.set(value)
   }
 
   public save = async (_: MouseEvent) => {

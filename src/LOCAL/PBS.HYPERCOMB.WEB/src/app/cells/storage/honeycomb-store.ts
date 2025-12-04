@@ -1,18 +1,18 @@
 ﻿// src/app/cells/storage/honeycomb-store.ts
-import { Injectable, signal, computed, inject } from "@angular/core"
+import { Injectable, signal, computed, inject, effect } from "@angular/core"
 import { Container, Point } from "pixi.js"
 import { Hypercomb } from "src/app/core/mixins/abstraction/hypercomb.base"
 import { Cell } from "../cell"
 import { Tile } from "../models/tile"
 import { isSelected } from "../models/cell-filters"
 import { IHoneycombStore, IStaging } from "src/app/shared/tokens/i-comb-store.token"
-import { SearchFilterService } from "src/app/common/header/search-filter-service"
+import { SearchFilter } from "src/app/common/header/search-filter"
 import { DebugService } from "src/app/core/diagnostics/debug-service"
 
 @Injectable()
 export class HoneycombStore extends Hypercomb implements IHoneycombStore, IStaging {
 
-  private readonly search = inject(SearchFilterService)
+  private readonly filter = inject(SearchFilter)
 
   // runtime registries
   private readonly tileRegistry = new Map<number, Tile>()
@@ -35,7 +35,7 @@ export class HoneycombStore extends Hypercomb implements IHoneycombStore, IStagi
   public readonly size = computed(() => this._cells().length)
 
   public readonly filteredCells = computed(() => {
-    const q = this.search.delayValue().toLowerCase()
+    const q = this.filter.delayValue().toLowerCase()
     if (!q) return this.cells()
     return this.cells().filter(c => (c.name ?? '').toLowerCase().includes(q))
   })
@@ -46,6 +46,21 @@ export class HoneycombStore extends Hypercomb implements IHoneycombStore, IStagi
   constructor() {
     super()
     DebugService.expose("surfaceCells", this.cells)
+
+    // tile visibility logic (unchanged)
+    effect(() => {
+      const q = this.filter.value().toLowerCase()
+      const all = this.cells()
+      const match = this.filteredCells()
+
+      if (!q) {
+        this.setVisibility(all, true)
+        return
+      }
+
+      this.setVisibility(all, false)
+      this.setVisibility(match, true)
+    })
   }
 
   private bump(): void {

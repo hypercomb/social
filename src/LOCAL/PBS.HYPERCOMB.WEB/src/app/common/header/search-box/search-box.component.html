@@ -1,7 +1,7 @@
 <div class="search-box">
   <input
     type="search"
-    [value]="value()"
+    [value]="filter.value()"
     (input)="onInput($event)"
     (focus)="focused($event)"
     (blur)="unfocused($event)"

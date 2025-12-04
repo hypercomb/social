@@ -6,11 +6,11 @@ import { Cell, Hive } from "../cell"
 import { Tile } from "../models/tile"
 import { ContextStack } from "src/app/core/controller/context-stack"
 import { IDexieHive } from "src/app/hive/hive-models"
-import { SearchFilterService } from "src/app/common/header/search-filter-service"
+import { SearchFilter } from "src/app/common/header/search-filter"
 
 @Injectable({ providedIn: "root" })
 export class HiveStore implements IControlHives, IHiveState, IHiveLookup {
-    private readonly search = inject(SearchFilterService)
+    private readonly filter = inject(SearchFilter)
     private readonly stack = inject(ContextStack)
     private readonly store = inject(HONEYCOMB_STORE)
 
@@ -50,7 +50,7 @@ export class HiveStore implements IControlHives, IHiveState, IHiveLookup {
     public readonly locateHive = signal<string | null>(null)
 
     public readonly filteredHives = computed(() => {
-        const q = this.search.value().toLowerCase()
+        const q = this.filter.value().toLowerCase()
         if (!q) return this.items()
 
         return this.items().filter(h =>

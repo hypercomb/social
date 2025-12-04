@@ -25,6 +25,7 @@ export interface IControlHives {
 // state: reactive selectors
 // --------------------
 export interface IHiveState {
+    filteredHives: Signal<IDexieHive[] | []>
     isHydrated(name: string): boolean
     combCells: Signal<Cell[]>
     combTiles: Signal<Tile[]>

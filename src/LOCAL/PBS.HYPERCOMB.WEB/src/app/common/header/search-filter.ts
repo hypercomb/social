@@ -1,7 +1,7 @@
 ﻿import { computed, Injectable, signal } from '@angular/core'
 
 @Injectable({ providedIn: 'root' })
-export class SearchFilterService {
+export class SearchFilter {
   private readonly _value = signal<string>('')
 
   // delayed version

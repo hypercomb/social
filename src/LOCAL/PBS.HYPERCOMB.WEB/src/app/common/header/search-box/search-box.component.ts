@@ -1,6 +1,7 @@
-import { Component, inject, input, output } from '@angular/core';
+import { Component, inject } from '@angular/core';
 import { DebugService } from 'src/app/core/diagnostics/debug-service';
 import { HypercombState } from 'src/app/state/core/hypercomb-state';
+import { SearchFilter } from '../search-filter';
 
 @Component({
   selector: 'app-search-box',
@@ -12,23 +13,27 @@ export class SearchBoxComponent {
 
   private readonly state = inject(HypercombState)
   private readonly debug = inject(DebugService)
+  public readonly filter = inject(SearchFilter)
 
-  public value = input<string>('');
-  public changed = output<string>();
-
-  public focused($event: FocusEvent) {
+  public focused(_: FocusEvent) {
     this.state.ignoreShortcuts = true
     this.debug.log("search", "Entered search box, shortcuts ignored.")
   }
 
-  public unfocused($event: FocusEvent) {
+  public unfocused(_: FocusEvent) {
     this.state.ignoreShortcuts = false
-    this.debug.log("search", " Left search box, shortcuts enabled.")
+    this.debug.log("search", "Left search box, shortcuts enabled.")
   }
 
   public onInput(ev: Event) {
     const target = ev.target as HTMLInputElement;
-    const value = target.value.trim()
-    this.changed.emit(value);
+    const value = target.value.trim();
+    this.filter.set(value);
+  }
+
+  /** optional: allow UI button or clear-on-escape */
+  public clear() {
+    this.filter.clear();
   }
 }
+  
