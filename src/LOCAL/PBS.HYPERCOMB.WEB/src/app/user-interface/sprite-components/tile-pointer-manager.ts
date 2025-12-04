@@ -11,7 +11,7 @@ import { PayloadBase } from "src/app/actions/action-contexts"
 import { TileSelectionManager } from "src/app/cells/selection/tile-selection-manager"
 import { SelectionMoveManager } from "src/app/cells/selection/selection-move-manager"
 import { Cell } from "src/app/cells/cell"
-import { ContextMenuService } from "src/app/navigation/menus/context-menu-service"
+import { ContextMenu } from "src/app/navigation/menus/context-menu-service"
 import { TouchDetectionService } from "src/app/core/mobile/touch-detection-service"
 
 @Injectable({ providedIn: "root" })
@@ -20,7 +20,7 @@ export class TilePointerManager {
   private readonly registry = inject(ACTION_REGISTRY)
   private readonly selection = inject(TileSelectionManager)
   private readonly moveManager = inject(SelectionMoveManager)
-  private readonly menu = inject(ContextMenuService)
+  private readonly menu = inject(ContextMenu)
   private readonly touch = inject(TouchDetectionService)
 
   private readonly moveModeSignal = this.policy.all(POLICY.MovingTiles)

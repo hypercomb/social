@@ -17,7 +17,7 @@ import { ACTION_REGISTRY, IContextMenu } from "src/app/shared/tokens/i-hypercomb
 import { CellPayload } from "src/app/actions/action-contexts"
 
 @Injectable({ providedIn: "root" })
-export class ContextMenuService extends PixiServiceBase implements IContextMenu {
+export class ContextMenu extends PixiServiceBase implements IContextMenu {
   private readonly actions = inject(ACTION_REGISTRY)
   private readonly detector = inject(CoordinateDetector)
   private readonly layout = inject(LayoutState)
@@ -54,7 +54,7 @@ export class ContextMenuService extends PixiServiceBase implements IContextMenu 
     effect(() => {
       const container = this.pixi.container
       if (!container) return
-      container.label = ContextMenuService.name
+      container.label = ContextMenu.name
       if (!container.children.includes(this.menuContainer)) {
         container.addChild(this.menuContainer)
       }

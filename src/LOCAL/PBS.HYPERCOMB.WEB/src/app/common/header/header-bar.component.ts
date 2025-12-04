@@ -134,8 +134,7 @@ export class HeaderBarComponent extends HypercombData {
     this.showEdit = false
     this.state.removeMode(HypercombMode.EditingCaption)
   }
-
-
+  
 }
 
 

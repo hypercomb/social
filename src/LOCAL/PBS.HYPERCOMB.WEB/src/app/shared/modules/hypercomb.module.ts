@@ -2,7 +2,7 @@ import { NgModule } from "@angular/core";
 import { ClipboardStore } from "src/app/clipboard/clipboard-store";
 import { CarouselService } from "src/app/common/carousel-menu/carousel-service";
 import { CoordinateDetector } from "src/app/helper/detection/coordinate-detector";
-import { ContextMenuService } from "src/app/navigation/menus/context-menu-service";
+import { ContextMenu } from "src/app/navigation/menus/context-menu-service";
 import { DETECTOR_STATE, CLIPBOARD_STATE, CONTEXT_MENU, CAROUSEL_SVC, ACTION_REGISTRY, SETTINGS_DATA_SVC, TILE_FACTORY } from "../tokens/i-hypercomb.token";
 import { SelectionService } from "src/app/cells/selection/selection-service";
 import { SELECTIONS } from "../tokens/i-selection.token";
@@ -26,7 +26,7 @@ import { SettingsDataService } from "src/app/cells/storage/settings-service";
         { provide: QUERY_HELPER, useExisting: QueryHelper },
         { provide: CLIPBOARD_STATE, useExisting: ClipboardStore },
         { provide: CLIPBOARD_REPOSITORY, useExisting: ClipboardRepository },
-        { provide: CONTEXT_MENU, useExisting: ContextMenuService },
+        { provide: CONTEXT_MENU, useExisting: ContextMenu },
         { provide: CAROUSEL_SVC, useExisting: CarouselService },
         { provide: SELECTIONS, useClass: SelectionService },
         { provide: SETTINGS_DATA_SVC, useClass: SettingsDataService },
