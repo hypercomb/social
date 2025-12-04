@@ -8,7 +8,7 @@
   <div class="chat-panel" [style.width.px]="panelWidth">
     <!-- Messages -->
     <div class="messages-container">
-      @for (message of messages; track message) {
+      @for (message of messages; track message) { 
         <div class="message" [class.user-message]="message.isUser" [class.ai-message]="!message.isUser">
           <div class="message-content">{{ message.content }}</div>
           <!-- Show instructions if any -->

@@ -74,7 +74,8 @@ export class HeaderBarComponent extends HypercombData {
     const cell = tile ? this.store.lookupData(tile.cellId) : undefined
     const name = cell?.name ?? this.stack.hiveName()
 
-    return `${name} ${environment.production ? '' : coordinate.index}`// index: ${coordinate.index} : ${coordinate.Location}`
+    return `${name}`
+    // return `${name}  ${environment.production ? '' : coordinate.index}`// | index: ${coordinate.index} : ${coordinate.Location}`
   })
 
   constructor() {
