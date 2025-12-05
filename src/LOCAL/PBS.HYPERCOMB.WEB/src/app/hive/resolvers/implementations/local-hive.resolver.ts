@@ -5,7 +5,7 @@ import { QUERY_HIVE_SVC } from "src/app/shared/tokens/i-comb-query.token"
 import { HiveResolverBase } from "../hive-resolver.base"
 
 @Injectable({ providedIn: 'root' })
-export class LiveDbResolver extends HiveResolverBase {
+export class LocalHiveResolver extends HiveResolverBase {
     private readonly query = inject(QUERY_HIVE_SVC)
 
     public readonly type = HiveResolutionType.LiveData
@@ -22,7 +22,7 @@ export class LiveDbResolver extends HiveResolverBase {
         this.debug.log('name-resolution', `LiveDbNameResolver resolving ${hiveName}`)
         // create a scout for the live db hive
         const cell = await this.query.fetchHive()!
-        const scout = HiveScout.liveDb(cell!.hive)
+        const scout = HiveScout.local(cell!.hive)
         this.debug.log('name-resolution', `LiveDbNameResolver resolved ${hiveName}`)
         return scout
     }

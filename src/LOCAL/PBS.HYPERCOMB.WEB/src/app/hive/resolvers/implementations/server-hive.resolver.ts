@@ -9,7 +9,7 @@ import { HiveResolverBase } from '../hive-resolver.base'
 
 
 @Injectable({ providedIn: 'root' })
-export class ServerResolver extends HiveResolverBase {
+export class ServerHiveResolver extends HiveResolverBase {
 
     public readonly type = HiveResolutionType.Server
 

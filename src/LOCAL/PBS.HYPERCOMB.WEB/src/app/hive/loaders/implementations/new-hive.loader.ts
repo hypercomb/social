@@ -7,8 +7,7 @@ import { DatabaseImportService } from "src/app/actions/propagation/import-servic
 
 @Injectable({ providedIn: "root" })
 export class NewHiveLoader extends HiveLoaderBase implements IHiveLoader {
-    private readonly hivestate = inject(HIVE_STATE)
-    private readonly importer = inject(DatabaseImportService)
+
 
     public enabled(scout: HiveScout): boolean {
         // Only enable if database is empty and scout is first hive
@@ -16,12 +15,7 @@ export class NewHiveLoader extends HiveLoaderBase implements IHiveLoader {
     }
 
     public async load(scout: HiveScout) {
-        this.logDataResolution(`EmptyDatabaseLoader loading first hive: ${scout.name}`)
-        // Load the first hive into the database
-        const first = this.hivestate.first()
 
-        // Navigate to the current hive address
-        await this.importer.importByName(first?.name!)
 
     }
 }

@@ -25,31 +25,15 @@ export class HiveScout {
 
 
   // ---------- static factories ----------
-  static newHive(hiveName: string): HiveScout {
+  static new(hiveName: string): HiveScout {
     return new HiveScout(hiveName, HiveResolutionType.NewHive, true)
   }
 
-  static liveDb(hive: string) {
+  static local(hive: string) {
     return new HiveScout(hive, HiveResolutionType.LiveData, true)
   }
   static server(hiveName: string): HiveScout {
     return new HiveScout(hiveName, HiveResolutionType.Server, true)
-  }
-
-  static opfs(hiveName: string): HiveScout | PromiseLike<HiveScout | null> | null {
-    return new HiveScout(hiveName, HiveResolutionType.Opfs, true)
-  }
-
-  static noserver(hiveName: string): HiveScout {
-    return new HiveScout(hiveName, HiveResolutionType.Server, false)
-  }
-
-  static fallback(hiveName: string): HiveScout {
-    return new HiveScout(hiveName, HiveResolutionType.Fallback, true)
-  }
-
-  static local(hiveName: string): HiveScout {
-    return new HiveScout(hiveName, HiveResolutionType.Local, false)
   }
 
   // ---------- payload helpers ----------

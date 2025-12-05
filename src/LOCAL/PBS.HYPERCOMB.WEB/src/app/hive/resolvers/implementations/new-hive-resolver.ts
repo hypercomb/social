@@ -8,10 +8,13 @@ export class NewHiveResolver extends HiveResolverBase {
   public override type = HiveResolutionType.NewHive
 
   public override enabled = async (hiveName: string): Promise<boolean> => {
-    throw new Error("Method not implemented.")
+    // always allow the user to create a new hive
+    return true
   }
 
   public override async resolve(hiveName: string): Promise<HiveScout> {
-    throw new Error("Method not implemented.")
+    const scout = HiveScout.new(hiveName)
+    this.debug.log('name-resolution', `Local hive resolved ${hiveName}`)
+    return scout
   }
 }

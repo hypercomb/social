@@ -8,10 +8,8 @@ import { IHiveLoader, HiveLoaderBase } from "../hive-loader.base"
 import { CAROUSEL_SVC } from "src/app/shared/tokens/i-hypercomb.token"
 
 @Injectable({ providedIn: "root" })
-export class LiveDataLoader extends HiveLoaderBase implements IHiveLoader {
+export class LocalHiveLoader extends HiveLoaderBase implements IHiveLoader {
     private readonly query = inject(QUERY_COMB_SVC)
-    private readonly controller = inject(HIVE_CONTROLLER_ST)
-    private readonly carousel = inject(CAROUSEL_SVC)
 
     public enabled(scout: HiveScout): boolean {
         this.logDataResolution(`LiveDbDataLoader enabled for ${scout.name}`)
