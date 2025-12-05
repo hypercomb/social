@@ -11,7 +11,7 @@ export class NewHiveLoader extends HiveLoaderBase implements IHiveLoader {
 
     public enabled(scout: HiveScout): boolean {
         // Only enable if database is empty and scout is first hive
-        return scout.type === HiveResolutionType.NewHive
+        return scout.type === HiveResolutionType.New
     }
 
     public async load(scout: HiveScout) {

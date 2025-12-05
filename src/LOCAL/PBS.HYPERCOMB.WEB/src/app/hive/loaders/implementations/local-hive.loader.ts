@@ -13,7 +13,7 @@ export class LocalHiveLoader extends HiveLoaderBase implements IHiveLoader {
 
     public enabled(scout: HiveScout): boolean {
         this.logDataResolution(`LiveDbDataLoader enabled for ${scout.name}`)
-        return scout?.type === HiveResolutionType.LiveData
+        return scout?.type === HiveResolutionType.Local
     }
 
     public async load(scout: HiveScout) {

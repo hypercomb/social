@@ -5,7 +5,7 @@ import { HiveResolverBase } from "../hive-resolver.base"
 
 @Injectable({ providedIn: "root" })
 export class NewHiveResolver extends HiveResolverBase {
-  public override type = HiveResolutionType.NewHive
+  public override type = HiveResolutionType.New
 
   public override enabled = async (hiveName: string): Promise<boolean> => {
     // always allow the user to create a new hive

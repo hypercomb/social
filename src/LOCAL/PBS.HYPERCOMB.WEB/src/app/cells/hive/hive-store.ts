@@ -50,7 +50,7 @@ export class HiveStore implements IControlHives, IHiveState, IHiveLookup {
     public readonly locateHive = signal<string | null>(null)
 
     public readonly filteredHives = computed(() => {
-        const q = this.filter.value().toLowerCase()
+        const q = this.filter.delayValue().toLowerCase()
         if (!q) return this.items()
 
         return this.items().filter(h =>

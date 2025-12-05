@@ -10,10 +10,12 @@ import { HiveQueryService } from "src/app/hive/storage/hive-query.service"
 import { QUERY_HIVE_SVC } from "../tokens/i-comb-query.token"
 import { NewHiveLoader } from "src/app/hive/loaders/implementations/new-hive.loader"
 import { ServerHiveLoader } from "src/app/hive/loaders/implementations/server-hive.loader"
-import { LocalHiveResolver } from "src/app/hive/resolvers/implementations/local-hive.resolver"
 import { NewHiveResolver } from "src/app/hive/resolvers/implementations/new-hive-resolver"
 import { LocalHiveLoader } from "src/app/hive/loaders/implementations/local-hive.loader"
 import { ServerHiveResolver } from "src/app/hive/resolvers/implementations/server-hive.resolver"
+import { LocalHiveResolver } from "src/app/hive/resolvers/implementations/local-hive.resolver"
+import { DexieHiveResolver } from "src/app/hive/resolvers/implementations/dexie-hive.resolver"
+import { DexieHiveLoader } from "src/app/hive/loaders/implementations/dexie-hive.loader"
 
 @NgModule({
     providers: [
@@ -25,11 +27,13 @@ import { ServerHiveResolver } from "src/app/hive/resolvers/implementations/serve
         // resolvers
 
         { provide: HIVE_RESOLVERS, useClass: LocalHiveResolver, multi: true },
+        { provide: HIVE_RESOLVERS, useClass: DexieHiveResolver, multi: true },
         { provide: HIVE_RESOLVERS, useClass: ServerHiveResolver, multi: true }, // server resolver
         { provide: HIVE_RESOLVERS, useClass: NewHiveResolver, multi: true },
 
         // data loader
         { provide: HIVE_LOADERS, useClass: LocalHiveLoader, multi: true },
+        { provide: HIVE_LOADERS, useClass: DexieHiveLoader, multi: true },
         { provide: HIVE_LOADERS, useClass: ServerHiveLoader, multi: true },
         { provide: HIVE_LOADERS, useClass: NewHiveLoader, multi: true },
 

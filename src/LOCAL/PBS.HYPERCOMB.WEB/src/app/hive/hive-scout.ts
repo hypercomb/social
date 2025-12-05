@@ -4,9 +4,10 @@ import { Hive } from "../cells/cell"
 
 export class HiveScout {
 
+
   public _hive: Hive | undefined
   public get hive(): Hive | undefined { return this._hive }
-  
+
   public readonly name: string
   public readonly type: HiveResolutionType
   public readonly exists: boolean
@@ -19,18 +20,21 @@ export class HiveScout {
     this.exists = exists
   }
 
-  public setHive(hive:Hive) { 
+  public setHive(hive: Hive) {
     this._hive = hive
   }
 
 
   // ---------- static factories ----------
   static new(hiveName: string): HiveScout {
-    return new HiveScout(hiveName, HiveResolutionType.NewHive, true)
+    return new HiveScout(hiveName, HiveResolutionType.New, true)
   }
 
   static local(hive: string) {
-    return new HiveScout(hive, HiveResolutionType.LiveData, true)
+    return new HiveScout(hive, HiveResolutionType.Local, true)
+  }
+  static opfs(hiveName: string): HiveScout | PromiseLike<HiveScout | null> | null {
+    return new HiveScout(hiveName, HiveResolutionType.Dexie, true)
   }
   static server(hiveName: string): HiveScout {
     return new HiveScout(hiveName, HiveResolutionType.Server, true)
