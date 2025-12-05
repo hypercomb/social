@@ -12,11 +12,11 @@ import { AbstractCtor } from 'src/app/core/mixins/mixin-helpers'
 import { PolicyService } from 'src/app/navigation/menus/policy-service'
 import { PointerState } from 'src/app/state/input/pointer-state'
 import { CoordinateDetector } from 'src/app/helper/detection/coordinate-detector'
-import { HIVE_HYDRATION, MODIFY_COMB_SVC } from 'src/app/shared/tokens/i-comb-service.token'
-import { HONEYCOMB_STORE, STAGING_ST } from 'src/app/shared/tokens/i-comb-store.token'
+import { HIVE_HYDRATION, MODIFY_COMB_SVC } from 'src/app/shared/tokens/i-honeycomb-service.token'
+import { HONEYCOMB_STORE, STAGING_ST } from 'src/app/shared/tokens/i-honeycomb-store.token'
 import { EditorService } from 'src/app/state/interactivity/editor-service'
 import { CELL_CREATOR, CELL_FACTORY } from 'src/app/inversion-of-control/tokens/tile-factory.token'
-import { QUERY_COMB_SVC } from 'src/app/shared/tokens/i-comb-query.token'
+import { QUERY_COMB_SVC } from 'src/app/shared/tokens/i-honeycomb-query.token'
 
 export function HypercombMixin<TBase extends AbstractCtor>(Base: TBase) {
     abstract class HypercombMixinClass extends Base {

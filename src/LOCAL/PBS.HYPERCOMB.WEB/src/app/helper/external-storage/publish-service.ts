@@ -41,7 +41,7 @@ export class PublishService extends HypercombData {
     //   const { _etag } = response
     //   const { hiveId, userId } = response.document
 
-    //   const hive = (await this.query.hive.fetchHive(hiveName))!
+    //   const hive = (await this.query.hive.fetchRoot(hiveName))!
     //   hive._etag = _etag
     //   await this.modify.updateCell(hive)
     //   // const newHive = await this.modify.rename(hive, `${hiveId}#${userId}`)

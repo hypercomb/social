@@ -2,7 +2,7 @@
 import { Cell } from "src/app/cells/cell"
 import { combId, sourceKey } from "src/app/cells/models/cell-filters"
 import { HypercombMode } from "src/app/core/models/enumerations"
-import { HONEYCOMB_SVC } from "src/app/shared/tokens/i-comb-service.token"
+import { HONEYCOMB_SVC } from "src/app/shared/tokens/i-honeycomb-service.token"
 import { PointerState } from "src/app/state/input/pointer-state"
 import { ClipboardOperation } from "./clipboard-operation"
 

@@ -3,7 +3,7 @@ import { Injectable, inject } from '@angular/core'
 import { Cell } from '../cells/cell'
 import { RepositoryBase } from '../database/repository/repository.base'
 import { CellEntity } from '../database/model/i-tile-entity'
-import { MODIFY_COMB_SVC } from '../shared/tokens/i-comb-service.token'
+import { MODIFY_COMB_SVC } from '../shared/tokens/i-honeycomb-service.token'
 import { IClipboardRepository } from '../shared/tokens/i-clipboard-repository'
 
 @Injectable({ providedIn: 'root' })

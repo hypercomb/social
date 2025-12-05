@@ -1,7 +1,7 @@
 ﻿import { inject } from "@angular/core"
 import { DebounceService } from "../common/debounce-service"
 import { PixiServiceBase } from "../pixi/pixi-service-base"
-import { MODIFY_COMB_SVC } from "../shared/tokens/i-comb-service.token"
+import { MODIFY_COMB_SVC } from "../shared/tokens/i-honeycomb-service.token"
 
 export abstract class PixiDataServiceBase extends PixiServiceBase {
     protected readonly modify = inject(MODIFY_COMB_SVC)

@@ -25,7 +25,7 @@ export interface ICombQueries {
 // (typically wraps the HiveStore or OpfsHiveService)
 // --------------------------------------------------------------
 export interface IQueryHives {
-  fetchHive(): Promise<Hive | undefined>
+  fetchRoot(): Promise<Hive | undefined>
 }
 
 // injection tokens

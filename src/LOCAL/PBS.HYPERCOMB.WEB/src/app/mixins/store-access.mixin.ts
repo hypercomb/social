@@ -1,6 +1,6 @@
 import { inject } from '@angular/core'
 import { MODIFY_HIVES, QUERY_HIVES } from 'src/app/shared/tokens/i-hive-store.token'
-import { QUERY_CELL_SVC, HONEYCOMB_SVC } from 'src/app/shared/tokens/i-comb-store.token'
+import { QUERY_CELL_SVC, HONEYCOMB_SVC } from 'src/app/shared/tokens/i-honeycomb-store.token'
 import { AbstractCtor } from '../core/mixins/mixin-helpers'
 
 export function StoreAccessMixin<TBase extends AbstractCtor>(Base: TBase) {

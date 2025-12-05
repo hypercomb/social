@@ -1,7 +1,7 @@
 import { inject, Injectable } from "@angular/core";
 import { Cell } from "../cells/cell";
 import { Tile } from "../cells/models/tile";
-import { HONEYCOMB_STORE } from "../shared/tokens/i-comb-store.token";
+import { HONEYCOMB_STORE } from "../shared/tokens/i-honeycomb-store.token";
 import { PayloadBase } from "../actions/action-contexts";
 
 @Injectable({ providedIn: 'root' })

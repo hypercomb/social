@@ -1,6 +1,6 @@
 import { NgModule } from "@angular/core"
 import { HoneycombService } from "src/app/cells/storage/honeycomb-service"
-import { HIVE_HYDRATION, HONEYCOMB_SVC, MODIFY_COMB_SVC } from "../tokens/i-comb-service.token"
+import { HIVE_HYDRATION, HONEYCOMB_SVC, MODIFY_COMB_SVC } from "../tokens/i-honeycomb-service.token"
 
 @NgModule({
   providers: [

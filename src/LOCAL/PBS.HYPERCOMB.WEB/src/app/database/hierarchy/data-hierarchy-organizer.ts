@@ -4,7 +4,7 @@ import { Cell } from "src/app/cells/cell"
 import { RestorableTileData } from "src/app/cells/flow/restorable-tile"
 import DBTables from "src/app/core/constants/db-tables"
 import { isHive } from "src/app/cells/models/cell-filters"
-import { MODIFY_COMB_SVC } from "src/app/shared/tokens/i-comb-service.token"
+import { MODIFY_COMB_SVC } from "src/app/shared/tokens/i-honeycomb-service.token"
 import { BlobService } from "src/app/layout/rendering/blob-service"
 
 @Injectable({

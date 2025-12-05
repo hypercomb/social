@@ -1,6 +1,6 @@
 // src/app/hives/hive-store.ts
 import { Injectable, computed, inject, signal } from "@angular/core"
-import { HONEYCOMB_STORE } from "src/app/shared/tokens/i-comb-store.token"
+import { HONEYCOMB_STORE } from "src/app/shared/tokens/i-honeycomb-store.token"
 import { IControlHives, IHiveLookup, IHiveState } from "src/app/shared/tokens/i-hive-store.token"
 import { Cell, Hive } from "../cell"
 import { Tile } from "../models/tile"

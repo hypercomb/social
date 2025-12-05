@@ -3,7 +3,7 @@ import { inject, Injectable } from "@angular/core"
 import { CellPayload } from "../action-contexts"
 import { CellOptions } from "src/app/cells/models/cell-options"
 import { ActionBase } from "../action.base"
-import { MODIFY_COMB_SVC } from "src/app/shared/tokens/i-comb-service.token"
+import { MODIFY_COMB_SVC } from "src/app/shared/tokens/i-honeycomb-service.token"
 
 
 @Injectable({ providedIn: "root" })

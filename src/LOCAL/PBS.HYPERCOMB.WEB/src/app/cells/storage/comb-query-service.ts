@@ -1,7 +1,7 @@
 import { Injectable, inject } from "@angular/core"
 import { Cell } from "src/app/cells/cell"
 import { DataOrchestratorBase } from "./data-orchestration-base"
-import { ICombQueries } from "src/app/shared/tokens/i-comb-query.token"
+import { ICombQueries } from "src/app/shared/tokens/i-honeycomb-query.token"
 import { CELL_FACTORY } from "src/app/inversion-of-control/tokens/tile-factory.token"
 
 /**

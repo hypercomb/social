@@ -1,8 +1,8 @@
 // src/app/cells/selection/selection-move-manager.ts
 import { Injectable, inject } from "@angular/core"
 import { AxialCoordinate } from "src/app/core/models/axial-coordinate"
-import { HONEYCOMB_STORE } from "src/app/shared/tokens/i-comb-store.token"
-import { MODIFY_COMB_SVC } from "src/app/shared/tokens/i-comb-service.token"
+import { HONEYCOMB_STORE } from "src/app/shared/tokens/i-honeycomb-store.token"
+import { MODIFY_COMB_SVC } from "src/app/shared/tokens/i-honeycomb-service.token"
 import { AxialService } from "src/app/services/axial-service"
 import { CoordinateDetector } from "src/app/helper/detection/coordinate-detector"
 import { Cell } from "../cell"

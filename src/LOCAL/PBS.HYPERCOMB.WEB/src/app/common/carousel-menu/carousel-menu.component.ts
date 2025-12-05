@@ -10,7 +10,7 @@ import { HiveLoader } from 'src/app/hive/loaders/hive.loader'
 import { ExportDatabaseAction } from 'src/app/actions/propagation/export-database'
 import { ACTION_REGISTRY, CAROUSEL_SVC } from 'src/app/shared/tokens/i-hypercomb.token'
 import { environment } from 'src/environments/environment'
-import { HONEYCOMB_STORE } from 'src/app/shared/tokens/i-comb-store.token'
+import { HONEYCOMB_STORE } from 'src/app/shared/tokens/i-honeycomb-store.token'
 
 @Component({
   standalone: true,

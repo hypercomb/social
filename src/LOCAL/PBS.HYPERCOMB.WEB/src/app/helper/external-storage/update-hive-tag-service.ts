@@ -3,7 +3,7 @@ import { inject, Injectable, Injector } from "@angular/core"
 import { firstValueFrom } from "rxjs"
 import { HypercombData } from "src/app/actions/hypercomb-data"
 import { HiveService } from "src/app/hive/storage/hive-service"
-import { QUERY_HIVE_SVC } from "src/app/shared/tokens/i-comb-query.token"
+import { QUERY_HIVE_SVC } from "src/app/shared/tokens/i-honeycomb-query.token"
 import { Constants } from "src/app/helper/constants"
 
 @Injectable({

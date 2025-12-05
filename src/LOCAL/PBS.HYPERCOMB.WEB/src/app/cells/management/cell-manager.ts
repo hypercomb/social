@@ -3,7 +3,7 @@ import { Assets } from 'pixi.js'
 import { cacheId } from '../models/cell-filters'
 import { HypercombData } from 'src/app/actions/hypercomb-data'
 import { Cell } from '../cell'
-import { HONEYCOMB_STORE, SELECTIONS } from 'src/app/shared/tokens/i-comb-store.token'
+import { HONEYCOMB_STORE, SELECTIONS } from 'src/app/shared/tokens/i-honeycomb-store.token'
 import { CELL_REPOSITORY } from 'src/app/shared/tokens/i-cell-repository.token'
 
 @Injectable({ providedIn: 'root' })

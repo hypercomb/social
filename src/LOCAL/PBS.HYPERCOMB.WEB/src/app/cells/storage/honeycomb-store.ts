@@ -5,7 +5,7 @@ import { Hypercomb } from "src/app/core/mixins/abstraction/hypercomb.base"
 import { Cell } from "../cell"
 import { Tile } from "../models/tile"
 import { isSelected } from "../models/cell-filters"
-import { IHoneycombStore, IStaging } from "src/app/shared/tokens/i-comb-store.token"
+import { IHoneycombStore, IStaging } from "src/app/shared/tokens/i-honeycomb-store.token"
 import { SearchFilter } from "src/app/common/header/search-filter"
 import { DebugService } from "src/app/core/diagnostics/debug-service"
 

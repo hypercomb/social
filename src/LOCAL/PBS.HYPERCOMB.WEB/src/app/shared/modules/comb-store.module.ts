@@ -1,6 +1,6 @@
 import { NgModule } from "@angular/core"
 import { HoneycombStore } from "src/app/cells/storage/honeycomb-store"
-import { HONEYCOMB_STORE, STAGING_ST } from "../tokens/i-comb-store.token"
+import { HONEYCOMB_STORE, STAGING_ST } from "../tokens/i-honeycomb-store.token"
 import { CombQueryService } from "src/app/cells/storage/comb-query-service"
 
 @NgModule({

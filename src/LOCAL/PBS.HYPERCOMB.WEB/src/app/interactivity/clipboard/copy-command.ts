@@ -5,7 +5,7 @@ import { CellFactory } from "src/app/inversion-of-control/factory/cell-factory"
 import { ImageDatabase } from "src/app/database/images/image-database"
 import { HypercombMode } from "src/app/core/models/enumerations"
 import { Cell } from "src/app/cells/cell"
-import { HONEYCOMB_STORE } from "src/app/shared/tokens/i-comb-store.token"
+import { HONEYCOMB_STORE } from "src/app/shared/tokens/i-honeycomb-store.token"
 import { EditorService } from "src/app/state/interactivity/editor-service"
 import { Action } from "rxjs/internal/scheduler/Action"
 

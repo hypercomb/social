@@ -6,7 +6,7 @@ import { IndexAllocator } from "src/app/ai/index-allocator"
 import { LmClient } from "src/app/ai/lm-client"
 import { TileCreationService } from "src/app/ai/tile-creation.service"
 import { HypercombMode } from "src/app/core/models/enumerations"
-import { HONEYCOMB_STORE } from "src/app/shared/tokens/i-comb-store.token"
+import { HONEYCOMB_STORE } from "src/app/shared/tokens/i-honeycomb-store.token"
 import { CdkDragMove } from '@angular/cdk/drag-drop'
 
 @Component({

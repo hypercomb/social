@@ -1,3 +1,4 @@
+import { Hive } from "src/app/cells/cell"
 import { IDexieHive } from "../hive-models"
 import { HiveScout } from "../hive-scout"
 import { inject } from "@angular/core"
@@ -11,7 +12,7 @@ export interface IHiveLoader {
 export abstract class HiveLoaderBase implements IHiveLoader {
   protected readonly debug = inject(DebugService)
   abstract enabled(scout: HiveScout): boolean
-  abstract load(scout: HiveScout)
+  abstract load(scout: HiveScout) : Promise<Hive | undefined>
 
   protected logDataResolution(msg: string, ...args: any[]) {
     this.debug.log('data-resolution', msg, ...args)

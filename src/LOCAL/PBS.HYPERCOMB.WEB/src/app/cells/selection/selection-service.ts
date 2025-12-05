@@ -5,12 +5,12 @@ import { CellOptions } from 'src/app/core/models/enumerations'
 import { Cell } from '../cell'
 import { isSelected } from '../models/cell-filters'
 import { HypercombState } from 'src/app/state/core/hypercomb-state'
-import { HONEYCOMB_STORE } from 'src/app/shared/tokens/i-comb-store.token'
+import { HONEYCOMB_STORE } from 'src/app/shared/tokens/i-honeycomb-store.token'
 import { PixiServiceBase } from 'src/app/pixi/pixi-service-base'
 import { Assets } from 'pixi.js'
 import { Events } from 'src/app/helper/events/events'
 import { ISelections } from 'src/app/shared/tokens/i-selection.token'
-import { MODIFY_COMB_SVC } from 'src/app/shared/tokens/i-comb-service.token'
+import { MODIFY_COMB_SVC } from 'src/app/shared/tokens/i-honeycomb-service.token'
 
 @Injectable({ providedIn: 'root' })
 export class SelectionService extends PixiServiceBase implements ISelections {

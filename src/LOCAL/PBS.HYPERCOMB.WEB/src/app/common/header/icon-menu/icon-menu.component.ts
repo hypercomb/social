@@ -5,7 +5,7 @@ import { ViewportService } from 'src/app/pixi/viewport-service'
 import { Hypercomb } from 'src/app/core/mixins/abstraction/hypercomb.base'
 import { environment } from '../../../../environments/environment'
 import { TouchDetectionService } from 'src/app/core/mobile/touch-detection-service'
-import { QUERY_COMB_SVC } from 'src/app/shared/tokens/i-comb-query.token'
+import { QUERY_COMB_SVC } from 'src/app/shared/tokens/i-honeycomb-query.token'
 import { ScreenService } from 'src/app/services/screen-service'
 
 @Component({

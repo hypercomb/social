@@ -3,7 +3,7 @@ import { inject, Injectable } from '@angular/core'
 import { Cell } from '../cells/cell'
 import { WorkspaceBase } from './workplace-base'
 import { HIVE_STORE } from '../shared/tokens/i-hive-store.token'
-import { HONEYCOMB_STORE } from '../shared/tokens/i-comb-store.token'
+import { HONEYCOMB_STORE } from '../shared/tokens/i-honeycomb-store.token'
 import { context } from '../state/interactivity/context-cell'
 
 @Injectable({ providedIn: 'root' })

@@ -3,7 +3,7 @@ import { inject, Injectable } from "@angular/core"
 import { ActionBase } from "../action.base"
 import { PointerState } from "src/app/state/input/pointer-state"
 import { PayloadBase, hasEvent } from "../action-contexts"
-import { HIVE_HYDRATION } from "src/app/shared/tokens/i-comb-service.token"
+import { HIVE_HYDRATION } from "src/app/shared/tokens/i-honeycomb-service.token"
 import { PanningManager } from "src/app/pixi/panning-manager"   // ⬅️ add this
 import { CloseExternalAction } from "./close-external"
 import { CarouselService } from "src/app/common/carousel-menu/carousel-service"

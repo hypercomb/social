@@ -2,7 +2,7 @@
 import { Cell } from "../cell"
 import { SELECTIONS } from "src/app/shared/tokens/i-selection.token"
 import { PixiServiceBase } from "src/app/pixi/pixi-service-base"
-import { HONEYCOMB_STORE } from "src/app/shared/tokens/i-comb-store.token"
+import { HONEYCOMB_STORE } from "src/app/shared/tokens/i-honeycomb-store.token"
 
 @Injectable({ providedIn: "root" })
 export class TileSelectionManager extends PixiServiceBase {

@@ -8,7 +8,7 @@ import {
   ICellService,
   IModifyComb,
   IHiveHydration,
-} from 'src/app/shared/tokens/i-comb-service.token'
+} from 'src/app/shared/tokens/i-honeycomb-service.token'
 import { toCellEntity } from 'src/app/core/mappers/to-cell-entity'
 import { safeDate, toCell } from 'src/app/core/mappers/to-cell'
 import { CellOptions } from '../models/cell-options'

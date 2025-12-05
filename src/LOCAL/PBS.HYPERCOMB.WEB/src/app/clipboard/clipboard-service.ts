@@ -2,7 +2,7 @@
 import { CellFactory } from "../inversion-of-control/factory/cell-factory"
 import { ClipboardStore } from "./clipboard-store"
 import { Cell } from "../cells/cell"
-import { MODIFY_COMB_SVC } from "../shared/tokens/i-comb-service.token"
+import { MODIFY_COMB_SVC } from "../shared/tokens/i-honeycomb-service.token"
 import { CLIPBOARD_REPOSITORY } from "../shared/tokens/i-clipboard-repository"
 import { CELL_REPOSITORY } from "../shared/tokens/i-cell-repository.token"
 import { IHiveImage } from "../core/models/i-hive-image"

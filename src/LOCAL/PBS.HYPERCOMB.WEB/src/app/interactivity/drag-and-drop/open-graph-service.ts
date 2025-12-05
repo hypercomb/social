@@ -6,7 +6,7 @@ import { CoordinateDetector } from "src/app/helper/detection/coordinate-detector
 import { OpenGraphResult } from "src/app/helper/drag-and-drop/open-graph-interfaces"
 import { ReceiveFileBase } from "src/app/helper/drag-and-drop/receive-file-base"
 import { BlobService } from "src/app/hive/rendering/blob-service"
-import { HONEYCOMB_STORE } from "src/app/shared/tokens/i-comb-store.token"
+import { HONEYCOMB_STORE } from "src/app/shared/tokens/i-honeycomb-store.token"
 import { PointerState } from "src/app/state/input/pointer-state"
 import { EditorService } from "src/app/state/interactivity/editor-service"
 import { HiveEvents, Constants, LocalAssets } from "src/app/helper/constants"

@@ -1,24 +1,38 @@
-﻿import { NgModule } from "@angular/core"
-import { Routes, RouterModule } from "@angular/router"
-import { CallbackComponent } from "../../core/auth/callback-component"
-import { EmptyComponent } from "../../common/shared/empty-component"
-import { TileEditorComponent } from "../../common/tile-editor/tile-editor.component"
-import { ShellComponent } from "src/app/common/shell/shell.component"
+﻿// src/app/app-routing.module.ts
+import { NgModule } from '@angular/core';
+import { RouterModule, Routes } from '@angular/router';
+import { EmptyComponent } from 'src/app/common/shared/empty-component';
+import { ShellComponent } from 'src/app/common/shell/shell.component';
+import { CallbackComponent } from 'src/app/core/auth/callback-component';
 
-// { matcher: customUrlMatcher,    component: ShellComponent },
+
 const routes: Routes = [
-  { path: "unauthorized", component: TileEditorComponent },
-  { path: "silent-renew.html", component: EmptyComponent },
-  { path: "callback", component: CallbackComponent },
+  // auth callbacks
+  { path: 'silent-renew.html', component: EmptyComponent },
+  { path: 'callback', component: CallbackComponent },
 
-  // 🔑 catch-all: always load ShellComponent
-  { path: "**", component: ShellComponent }
-]
+  // id-based hive loading
+  // /12345, /88219, /@vanity → handled by shell
+  {
+    path: ':id',
+    component: ShellComponent
+  },
+
+  // community fallback (no id)
+  {
+    path: '',
+    pathMatch: 'full',
+    component: ShellComponent
+  },
+
+  // final fallback
+  { path: '**', component: ShellComponent }
+];
 
 @NgModule({
-  imports: [RouterModule.forRoot(routes, { bindToComponentInputs: true }),],
+  imports: [RouterModule.forRoot(routes, { bindToComponentInputs: true })],
   exports: [RouterModule]
 })
-export class AppRoutingModule { }
+export class AppRoutingModule {
 
-
+}

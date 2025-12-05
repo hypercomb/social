@@ -4,10 +4,11 @@ import { HIVE_CONTROLLER_ST } from 'src/app/shared/tokens/i-hive-store.token'
 import { IHiveLoader } from './hive-loader.base'
 import { IHiveGuide } from '../resolvers/i-hive-resolver'
 import { HiveScout } from '../hive-scout'
-import { HIVE_HYDRATION } from 'src/app/shared/tokens/i-comb-service.token'
+import { HIVE_HYDRATION } from 'src/app/shared/tokens/i-honeycomb-service.token'
 import { IDexieHive } from '../hive-models'
 import { Hypercomb } from 'src/app/core/mixins/abstraction/hypercomb.base'
 import { CAROUSEL_SVC } from 'src/app/shared/tokens/i-hypercomb.token'
+import { Hive } from 'src/app/cells/cell'
 
 @Injectable({ providedIn: 'root' })
 export class HiveLoader extends Hypercomb {
@@ -43,48 +44,34 @@ export class HiveLoader extends Hypercomb {
   // ─────────────────────────────────────────────
   // external: load hydrated data into memory
   // ─────────────────────────────────────────────
-  public async load(scout: HiveScout): Promise<void> {
-    const result = await this.hydrate(scout)
-    if (result) {
-      this.debug.log('lifecycle', `[HiveLoader] hydrated ${scout.name}`)
+  public async load(scout: HiveScout): Promise<Hive | undefined> {
+    for (const loader of this.loaders) {
+      if (loader.enabled(scout)) {
+        const hive = await loader.load(scout)
+        this.debug.log('lifecycle', `[HiveLoader] loaded with ${loader.constructor.name}`)
+        if (hive) {
+          this.hydration.setReady()
+          return hive
+        }
+      }
     }
-    this.hydration.setReady()
+    this.debug.log('warn', `[HiveLoader] no matching loader for ${scout.type}`)
+    return undefined
   }
 
   // ─────────────────────────────────────────────
   // external: activate hive in controller
   // ─────────────────────────────────────────────
-  public async activate(scout: HiveScout): Promise<void> {
-    const found = scout.hive!
-    if (!found) {
-      this.debug.log('warn', '[HiveLoader] cannot activate, no hive on scout', { scout })
-      return
-    }
-    this.debug.log('lifecycle', '[HiveLoader] calling setHive', { found })
-    this.controller.setHive(found)
+  public async activate(hive: Hive | undefined) {
 
-    if (!found) {
+    if (!hive) {
       this.debug.log('warn', '[HiveLoader] no hive available to activate')
       return
     }
 
-    this.carousel.jumpTo(found.hive)
-    this.debug.log('lifecycle', `[HiveLoader] activated hive: ${found.name}`)
-  }
-
-  // ─────────────────────────────────────────────
-  // internal: match data loader by type
-  // ─────────────────────────────────────────────
-  private async hydrate(scout: HiveScout): Promise<IDexieHive | null> {
-    for (const loader of this.loaders) {
-      if (loader.enabled(scout)) {
-        const hive = await loader.load(scout)
-        this.debug.log('lifecycle', `[HiveLoader] loaded with ${loader.constructor.name}`)
-        return hive
-      }
-    }
-    this.debug.log('warn', `[HiveLoader] no matching loader for ${scout.type}`)
-    return null
+    this.controller.setHive(hive)
+    this.carousel.jumpTo(hive.name)
+    this.debug.log('lifecycle', `[HiveLoader] activated hive: ${hive.name}`)
   }
 
 }

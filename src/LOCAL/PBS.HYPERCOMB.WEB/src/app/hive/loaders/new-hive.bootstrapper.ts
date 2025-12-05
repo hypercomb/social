@@ -2,7 +2,7 @@
 import { Injectable, inject } from "@angular/core"
 import { Hive, NewCell } from "src/app/cells/cell"
 import { HiveScout } from "../hive-scout"
-import { MODIFY_COMB_SVC } from "src/app/shared/tokens/i-comb-service.token"
+import { MODIFY_COMB_SVC } from "src/app/shared/tokens/i-honeycomb-service.token"
 import { CellOptions } from "src/app/cells/models/cell-options"
 import { HiveLoaderBase } from "./hive-loader.base"
 import { OpfsHiveService } from "../storage/opfs-hive-service"

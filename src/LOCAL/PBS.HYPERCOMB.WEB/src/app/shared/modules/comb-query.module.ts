@@ -1,6 +1,6 @@
 import { NgModule } from "@angular/core"
 import { CombQueryService } from "src/app/cells/storage/comb-query-service"
-import { QUERY_COMB_SVC } from "../tokens/i-comb-query.token"
+import { QUERY_COMB_SVC } from "../tokens/i-honeycomb-query.token"
 
 @NgModule({
   providers: [

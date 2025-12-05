@@ -6,7 +6,7 @@ import { HypercombState } from "src/app/state/core/hypercomb-state"
 import { ActionBase } from "src/app/actions/action.base"
 
 import { CLIPBOARD_REPOSITORY } from "src/app/shared/tokens/i-clipboard-repository"
-import { HIVE_HYDRATION } from "src/app/shared/tokens/i-comb-service.token"
+import { HIVE_HYDRATION } from "src/app/shared/tokens/i-honeycomb-service.token"
 import { LOOKUP_HIVES } from "src/app/shared/tokens/i-hive-store.token"
 import { DeletePayload } from "../action-contexts"
 

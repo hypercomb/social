@@ -3,7 +3,7 @@ import { Injectable, inject } from "@angular/core"
 import { DatabaseService } from "src/app/database/database-service"
 import { RenameHiveContext } from "../action-contexts"
 import { ActionBase } from "../action.base"
-import { QUERY_COMB_SVC, QUERY_HIVE_SVC } from "src/app/shared/tokens/i-comb-query.token"
+import { QUERY_COMB_SVC, QUERY_HIVE_SVC } from "src/app/shared/tokens/i-honeycomb-query.token"
 
 @Injectable({ providedIn: "root" })
 export class RenameHiveAction extends ActionBase<RenameHiveContext> {

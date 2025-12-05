@@ -1,7 +1,7 @@
 ﻿import { Injectable, inject } from "@angular/core"
 import { Tile } from "../models/tile"
 import { HIVE_STORE } from "src/app/shared/tokens/i-hive-store.token"
-import { HONEYCOMB_STORE } from "src/app/shared/tokens/i-comb-store.token"
+import { HONEYCOMB_STORE } from "src/app/shared/tokens/i-honeycomb-store.token"
 import { PixiDataServiceBase } from "src/app/database/pixi-data-service-base"
 
 @Injectable({ providedIn: 'root' })

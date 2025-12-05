@@ -6,7 +6,7 @@ export enum HiveResolutionType {
   New = 'New',
   Name = "Name",
   Local = "Local",
-  Dexie = "Dexie"
+  Opfs = "Opfs"
 }
 
 

@@ -8,7 +8,7 @@ import { KeyboardState } from "../interactivity/keyboard/keyboard-state"
 import { HypercombState } from "../state/core/hypercomb-state"
 import { ContextStack } from "../core/controller/context-stack"
 import { StorageManager } from "../helper/storage-manager"
-import { HONEYCOMB_SVC } from "../shared/tokens/i-comb-service.token"
+import { HONEYCOMB_SVC } from "../shared/tokens/i-honeycomb-service.token"
 import { ScreenService } from "../services/screen-service"
 
 export abstract class PixiServiceBase {
