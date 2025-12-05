@@ -1,9 +1,8 @@
 ﻿import { ChangeDetectionStrategy, Component, EventEmitter, inject, Input, Output, signal, effect } from '@angular/core'
 import { IDexieHive } from 'src/app/hive/hive-models'
 import { HiveService } from 'src/app/hive/storage/hive-service'
-import { BlobService } from 'src/app/hive/rendering/blob-service'
-import { OpfsHiveService } from 'src/app/hive/storage/opfs-hive-service'
 import { OpfsImageService } from 'src/app/hive/storage/opfs-image.service'
+import { BlobService } from 'src/app/layout/rendering/blob-service'
 
 @Component({
   standalone: true,

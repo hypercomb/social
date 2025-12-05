@@ -33,7 +33,7 @@ import { TileSelectionManager } from '../cells/selection/tile-selection-manager'
 import { SelectionMoveManager } from '../cells/selection/selection-move-manager'
 
 // hive
-import { HiveRouteWatcher } from '../hive/name-resolvers/hive-route-watcher'
+import { HiveRouteWatcher } from '../hive/hive-route-watcher'
 import { HiveService } from '../hive/storage/hive-service'
 
 // input and interactivity
@@ -67,7 +67,7 @@ import { CopyAction } from '../actions/clipboard/copy-honeycomb'
 import { CloseExternalAction } from '../actions/navigation/close-external'
 import { ColorPicker } from '../services/color-picker'
 import { NewTileAction } from '../actions/cells/new-tile.action'
-import { ImagePreloader } from '../hive/rendering/image-preloader.service'
+import { ImagePreloader } from '../layout/rendering/image-preloader.service'
 
 
 @Injectable({ providedIn: 'root' })

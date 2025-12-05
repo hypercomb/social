@@ -5,7 +5,8 @@ import { PayloadBase } from "src/app/actions/action-contexts"
 import { CellFactory } from "src/app/inversion-of-control/factory/cell-factory"
 import { PanningManager } from "src/app/pixi/panning-manager"
 import { BranchAction } from "../navigation/branch.action"
-import { ImagePreloader } from "src/app/hive/rendering/image-preloader.service"
+import { ImagePreloader } from "src/app/layout/rendering/image-preloader.service"
+
 
 @Injectable({ providedIn: "root" })
 export class NewTileAction extends ActionBase<PayloadBase> {

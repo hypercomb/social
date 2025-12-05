@@ -1,14 +1,14 @@
 import { inject, Injectable } from "@angular/core"
-import { HiveResolutionType } from "../hive-models"
-import { HiveScout } from "../hive-scout"
+import { HiveResolutionType } from "../../hive-models"
+import { HiveScout } from "../../hive-scout"
 import { QUERY_HIVE_SVC } from "src/app/shared/tokens/i-comb-query.token"
-import { HiveLoaderBase } from "./hive-loader.base"
+import { HiveResolverBase } from "../hive-resolver.base"
 
 @Injectable({ providedIn: 'root' })
-export class LiveDbNameResolver extends HiveLoaderBase {
+export class LiveDbResolver extends HiveResolverBase {
     private readonly query = inject(QUERY_HIVE_SVC)
 
-    public readonly type = HiveResolutionType.LiveDb
+    public readonly type = HiveResolutionType.LiveData
 
     public override enabled = async (hiveName: string): Promise<boolean> => {
         this.debug.log('name-resolution', `LiveDbNameResolver enabled for ${hiveName}`)

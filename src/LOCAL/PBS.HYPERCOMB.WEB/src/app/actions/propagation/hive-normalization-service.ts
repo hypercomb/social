@@ -1,7 +1,7 @@
 // src/app/hive/storage/hive-normalization.service.ts
 import { Injectable, inject } from "@angular/core"
-import { BlobService } from "src/app/hive/rendering/blob-service"
 import { OpfsImageService } from "src/app/hive/storage/opfs-image.service"
+import { BlobService } from "src/app/layout/rendering/blob-service"
 
 @Injectable({ providedIn: "root" })
 export class HiveNormalizationService {

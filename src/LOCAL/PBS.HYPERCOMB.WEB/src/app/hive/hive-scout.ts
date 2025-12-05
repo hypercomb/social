@@ -23,17 +23,14 @@ export class HiveScout {
     this._hive = hive
   }
 
-  static firstOpfsHive(hiveName: string): HiveScout | PromiseLike<HiveScout | null> | null {
-    return new HiveScout(hiveName, HiveResolutionType.FirstOpfs, true)
-  }
 
   // ---------- static factories ----------
-  static genus(hiveName: string): HiveScout {
-    return new HiveScout(hiveName, HiveResolutionType.Genus, true)
+  static newHive(hiveName: string): HiveScout {
+    return new HiveScout(hiveName, HiveResolutionType.NewHive, true)
   }
 
   static liveDb(hive: string) {
-    return new HiveScout(hive, HiveResolutionType.LiveDb, true)
+    return new HiveScout(hive, HiveResolutionType.LiveData, true)
   }
   static server(hiveName: string): HiveScout {
     return new HiveScout(hiveName, HiveResolutionType.Server, true)

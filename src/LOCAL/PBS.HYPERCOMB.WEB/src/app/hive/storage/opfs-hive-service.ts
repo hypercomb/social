@@ -5,7 +5,7 @@ import { IDexieHive } from "src/app/hive/hive-models"
 import { DebugService } from "src/app/core/diagnostics/debug-service"
 import { HiveNormalizationService } from "src/app/actions/propagation/hive-normalization-service"
 import { OpfsImageService } from "./opfs-image.service"
-import { BlobService } from "../rendering/blob-service"
+import { BlobService } from "src/app/layout/rendering/blob-service"
 
 /**
  * Registry entry stored in opfs-hives.json

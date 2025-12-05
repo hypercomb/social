@@ -6,7 +6,7 @@ import { Cell } from "src/app/cells/cell"
 import { HIVE_HYDRATION } from "src/app/shared/tokens/i-comb-service.token"
 import { HypercombState } from "src/app/state/core/hypercomb-state"
 import { CellPayload } from "src/app/actions/action-contexts"
-import { RenderTileAction } from "src/app/hive/rendering/render-tile.action"
+import { RenderTileAction } from "src/app/layout/rendering/render-tile.action"
 
 /**
  * =====================================================================

@@ -1,8 +1,8 @@
 ﻿import { Injectable, inject } from '@angular/core'
-import { HIVE_NAME_RESOLVERS, HIVE_LOADERS } from 'src/app/shared/tokens/i-hive-resolver.token'
+import { HIVE_RESOLVERS, HIVE_LOADERS } from 'src/app/shared/tokens/i-hive-resolver.token'
 import { HIVE_CONTROLLER_ST } from 'src/app/shared/tokens/i-hive-store.token'
-import { IHiveLoader } from '../hive-loaders/i-data-resolver'
-import { IHiveGuide } from './i-hive-resolver'
+import { IHiveLoader } from './hive-loader.base'
+import { IHiveGuide } from '../resolvers/i-hive-resolver'
 import { HiveScout } from '../hive-scout'
 import { HIVE_HYDRATION } from 'src/app/shared/tokens/i-comb-service.token'
 import { IDexieHive } from '../hive-models'
@@ -13,7 +13,7 @@ import { CAROUSEL_SVC } from 'src/app/shared/tokens/i-hypercomb.token'
 export class HiveLoader extends Hypercomb {
 
   private readonly controller = inject(HIVE_CONTROLLER_ST)
-  private readonly resolvers = inject<IHiveGuide[]>(HIVE_NAME_RESOLVERS) ?? []
+  private readonly resolvers = inject<IHiveGuide[]>(HIVE_RESOLVERS) ?? []
   private readonly loaders = inject<IHiveLoader[]>(HIVE_LOADERS) ?? []
   private readonly hydration = inject(HIVE_HYDRATION)
   private readonly carousel = inject(CAROUSEL_SVC)

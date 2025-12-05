@@ -1,13 +1,11 @@
 import { Injectable, inject } from "@angular/core"
 import { Router, NavigationEnd } from "@angular/router"
 import { filter } from "rxjs"
-import { HiveLoader } from "./hive-loader"
 import { HypercombState } from "src/app/state/core/hypercomb-state"
 import { DatabaseService } from "src/app/database/database-service"
 import { HONEYCOMB_STORE } from "src/app/shared/tokens/i-comb-store.token"
 import { HIVE_STORE } from "src/app/shared/tokens/i-hive-store.token"
-import { Hive } from "src/app/cells/cell"
-import { OpfsHiveService } from "../storage/opfs-hive-service"
+import { HiveLoader } from "./loaders/hive.loader"
 
 @Injectable({ providedIn: "root" })
 export class HiveRouteWatcher {

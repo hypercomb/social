@@ -3,9 +3,9 @@ import { Injectable, effect, inject } from "@angular/core"
 import { Assets, Texture } from "pixi.js"
 import { LocalAssets } from "src/app/helper/constants"
 import { CarouselService } from "src/app/common/carousel-menu/carousel-service"
-import { OpfsHiveService } from "../storage/opfs-hive-service"
-import { OpfsImageService } from "../storage/opfs-image.service"
 import { BlobService } from "./blob-service"
+import { OpfsHiveService } from "src/app/hive/storage/opfs-hive-service"
+import { OpfsImageService } from "src/app/hive/storage/opfs-image.service"
 
 type LocalAssetsWithHash = typeof LocalAssets & { InitialImageHash?: string }
 

@@ -2,8 +2,8 @@
 import { Injectable, inject } from "@angular/core"
 import { IHiveImage } from "src/app/core/models/i-hive-image"
 import { Cell } from "src/app/cells/cell"
-import { BlobService } from "src/app/hive/rendering/blob-service"
 import { ImageRepository } from "../repository/image-repository"
+import { BlobService } from "src/app/layout/rendering/blob-service"
 
 
 @Injectable({ providedIn: "root" })

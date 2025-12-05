@@ -1,15 +1,15 @@
 import { Injectable, inject } from "@angular/core"
 import { HierarchyRestorationService } from "src/app/database/hierarchy/data-hierarchy-organizer"
 import { QueryService } from "src/app/helper/external-storage/query-service"
-import { HiveResolutionType, IDexieHive } from "../hive-models"
+import { HiveResolutionType, IDexieHive } from "../../hive-models"
 import { LOOKUP_HIVES } from "src/app/shared/tokens/i-hive-store.token"
-import { HiveScout } from "../hive-scout"
+import { HiveScout } from "../../hive-scout"
 import { CombQueryService } from "src/app/cells/storage/comb-query-service"
-import { IHiveLoader, HiveLoaderBase } from "./i-data-resolver"
+import { IHiveLoader, HiveLoaderBase } from "../hive-loader.base"
 import { Hive } from "src/app/cells/cell"
 
 @Injectable({ providedIn: "root" })
-export class ServerDataResolver extends HiveLoaderBase implements IHiveLoader {
+export class ServerResolver extends HiveLoaderBase implements IHiveLoader {
   private readonly restoration = inject(HierarchyRestorationService)
   private readonly queryservice = inject(QueryService)
   private readonly query = inject(CombQueryService)

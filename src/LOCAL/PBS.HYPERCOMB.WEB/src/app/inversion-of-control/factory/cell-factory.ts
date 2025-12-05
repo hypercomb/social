@@ -7,7 +7,8 @@ import { IEntityFactoryPort } from "../ports/i-entity-factory-port"
 import { Cell, NewCell, Hive, Ghost, ClipboardCell, Path, CellKind } from "src/app/cells/cell"
 import { ICreateCells } from "../tokens/tile-factory.token"
 import { ContextStack } from "src/app/core/controller/context-stack"
-import { ImagePreloader } from "src/app/hive/rendering/image-preloader.service"
+import { ImagePreloader } from "src/app/layout/rendering/image-preloader.service"
+
 
 @Injectable({ providedIn: "root" })
 export class CellFactory

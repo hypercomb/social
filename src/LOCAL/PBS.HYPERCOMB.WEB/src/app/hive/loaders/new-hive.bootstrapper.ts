@@ -4,25 +4,25 @@ import { Hive, NewCell } from "src/app/cells/cell"
 import { HiveScout } from "../hive-scout"
 import { MODIFY_COMB_SVC } from "src/app/shared/tokens/i-comb-service.token"
 import { CellOptions } from "src/app/cells/models/cell-options"
-import { HiveLoaderBase } from "./i-data-resolver"
+import { HiveLoaderBase } from "./hive-loader.base"
 import { OpfsHiveService } from "../storage/opfs-hive-service"
 import { IHiveImage } from "src/app/core/models/i-hive-image"
 import { BlobService } from "../rendering/blob-service"
 import { OpfsImageService } from "../storage/opfs-image.service"
 
 @Injectable({ providedIn: "root" })
-export class GenusBootstrapper extends HiveLoaderBase {
+export class NewHiveBootstrapper extends HiveLoaderBase {
   private readonly blobs = inject(BlobService)
   private readonly modify = inject(MODIFY_COMB_SVC)
   private readonly opfs = inject(OpfsHiveService)
   private readonly images = inject(OpfsImageService)
 
   public override enabled(scout: HiveScout): boolean {
-    return scout.type === "Genus"
+    return scout.type === "New"
   }
 
   async load(scout: HiveScout) {
-    this.logDataResolution(`GenusBootstrapper bootstrapping for ${scout.name}`)
+    this.logDataResolution(`NewHiveBootstrapper bootstrapping for ${scout.name}`)
 
     if (!scout.name) {
       throw new Error("Genus scout must have a name")
@@ -73,6 +73,6 @@ export class GenusBootstrapper extends HiveLoaderBase {
       await this.modify.addCell(firstCell)
     }
 
-    this.logDataResolution(`GenusBootstrapper bootstrapped hive: ${scout.name}`)
+    this.logDataResolution(`NewHiveBootstrapper bootstrapped hive: ${scout.name}`)
   }
 }

@@ -3,13 +3,12 @@ export enum HiveResolutionType {
   None = 'None',
   Cache = 'Cache',
   Server = 'Server',
-  Genus = 'Genus',
+  NewHive = 'NewHive',
   Name = "Name",
   Fallback = "Fallback",
   Local = "Local",
   Opfs = "Opfs",
-  LiveDb = "LiveDb",
-  FirstOpfs = "FirstOpfs"
+  LiveData = "LiveData",
 }
 
 
