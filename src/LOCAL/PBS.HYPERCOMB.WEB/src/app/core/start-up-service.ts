@@ -19,7 +19,6 @@ import { MouseLockCheckAction } from '../actions/debug/debug-mouselocked'
 import { OpenLinkAction } from '../actions/navigation/open-link'
 import { RebuildHierarchyAction } from '../actions/propagation/rebuild-hierarchies'
 import { RenameHiveAction } from '../actions/hives/rename-hive'
-import { ShowHiveAction } from '../actions/modes/show-hive'
 import { ToggleBranchAction } from '../actions/navigation/toggle-branch'
 import { ToggleCutModeAction } from '../actions/clipboard/toggle-cut-mode'
 import { ToggleChatWindowAction } from '../actions/ai/show-chat-window'
@@ -55,7 +54,6 @@ import { ShortcutService } from '../shortcuts/shortcut-service'
 // state
 import { EventDispatcher } from '../helper/events/event-dispatcher'
 import { StateHub } from '../state/core/state-hub'
-import { RiftAction } from '../actions/navigation/path'
 import { PositionSynchronizer } from '../hive/position-synchronizer'
 
 // OPFS BACKUP & EXPORT
@@ -130,10 +128,8 @@ export class StartUpService {
     inject(MouseLockCheckAction),
     inject(NewTileAction),
     inject(OpenLinkAction),
-    inject(RiftAction),
     inject(RebuildHierarchyAction),
     inject(RenameHiveAction),
-    inject(ShowHiveAction),
     inject(ToggleBranchAction),
     inject(ToggleChatWindowAction), 
     inject(ToggleCutModeAction),

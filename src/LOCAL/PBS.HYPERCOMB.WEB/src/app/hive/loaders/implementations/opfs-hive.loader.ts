@@ -37,7 +37,7 @@ export class OpfsHiveLoader extends HiveLoaderBase {
         // ──────────────────────────────────────────────
         // case 1: already active → return immediately
         // ──────────────────────────────────────────────
-        if (live?.name === name) {
+        if (live?.hive === name) {
             this.logDataResolution(`OpfsHiveLoader: hive '${name}' already active — skipping load`)
             return live
         }

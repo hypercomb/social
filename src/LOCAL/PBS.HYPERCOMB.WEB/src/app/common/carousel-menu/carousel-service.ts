@@ -2,29 +2,22 @@ import { Injectable, computed, signal, inject } from '@angular/core'
 import { Router } from '@angular/router'
 import { Hypercomb } from 'src/app/core/mixins/abstraction/hypercomb.base'
 import { IDexieHive } from 'src/app/hive/hive-models'
+import { LocatorService } from 'src/app/services/locator-service'
 
 @Injectable({ providedIn: 'root' })
 export class CarouselService extends Hypercomb {
   private readonly router = inject(Router)
+  private readonly locator = inject(LocatorService)
 
-  // ─────────────────────────────────────────────
-  // internal signals
-  // ─────────────────────────────────────────────
   private readonly _items = signal<IDexieHive[]>([])
   private readonly _index = signal(0)
   private readonly _tileLimit = signal(4)
   private readonly _previous = signal<IDexieHive | null>(null)
   private readonly _changeSeq = signal(0)
 
-  // ─────────────────────────────────────────────
-  // public readonly signals
-  // ─────────────────────────────────────────────
   public readonly previousHive = this._previous.asReadonly()
   public readonly changeSeq = this._changeSeq.asReadonly()
 
-  // ─────────────────────────────────────────────
-  // derived computed properties
-  // ─────────────────────────────────────────────
   public readonly current = computed(() => this._items()[0] ?? null)
 
   public readonly upper = computed(() => {
@@ -41,11 +34,6 @@ export class CarouselService extends Hypercomb {
     return items.slice(-limit).reverse()
   })
 
-  // ─────────────────────────────────────────────
-  // public api
-  // ─────────────────────────────────────────────
-
-  /** sets the full hive list; keeps same current if present */
   public setItems = (items: IDexieHive[]): void => {
     const current = this.current()
     this._previous.set(current)
@@ -64,7 +52,7 @@ export class CarouselService extends Hypercomb {
   public setTileLimit = (limit: number): void =>
     this._tileLimit.set(Math.max(1, limit))
 
-  /** navigates to a hive by full name or fragment */
+  // use locator so both id and sub#id stay supported
   public jumpTo = (name: string): void => {
     if (!name) return
 
@@ -73,7 +61,7 @@ export class CarouselService extends Hypercomb {
     this.router.navigateByUrl(url)
   }
 
-  /** reorders list so that given hive becomes head (index 0) */
+
   public setHive = (name: string): void => {
     if (!name) return
     const items = this._items()
@@ -87,7 +75,6 @@ export class CarouselService extends Hypercomb {
     this._changeSeq.update(v => v + 1)
   }
 
-  /** rotate carousel forward (next hive down) */
   public next = (): void => {
     const items = this._items()
     if (items.length <= 1) return
@@ -97,7 +84,6 @@ export class CarouselService extends Hypercomb {
     this._changeSeq.update(v => v + 1)
   }
 
-  /** rotate carousel backward (previous hive up) */
   public previous = (): void => {
     const items = this._items()
     if (items.length <= 1) return
@@ -107,7 +93,6 @@ export class CarouselService extends Hypercomb {
     this._changeSeq.update(v => v + 1)
   }
 
-  /** expose ordered list for stream loader */
   public items(): IDexieHive[] {
     return this._items()
   }

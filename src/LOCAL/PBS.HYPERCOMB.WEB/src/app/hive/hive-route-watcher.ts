@@ -1,3 +1,4 @@
+// src/app/hive/hive-route-watcher.ts
 import { Injectable, inject } from "@angular/core"
 import { Router, NavigationEnd } from "@angular/router"
 import { filter } from "rxjs"
@@ -21,37 +22,70 @@ export class HiveRouteWatcher {
       .pipe(filter(e => e instanceof NavigationEnd))
       .subscribe(async () => {
 
-        // initialize dexie hive database if needed
+        // ensure Dexie DB
         if (!this.database.db()) {
           await this.database.ensureHiveDb()
           await this.database.openShared()
         }
 
-        // extract the meadow name (subdomain)
-        const host = window.location.hostname    // e.g. cigars.hypercomb.io
-        const parts = host.split('.')
-        const primaryName = this.extractHiveName(parts)
+        // -------------------------
+        // ROUTE FORMAT EXPECTATIONS
+        //
+        // /crypto#1000
+        // /crypto
+        // /1000   (domain mode: crypto.<domain>/1000)
+        //
+        // Goal: ALWAYS produce crypto#1000
+        // -------------------------
 
-        // extract id from route (if present)
+        // parse route segments
         const tree = this.router.parseUrl(this.router.url)
-        const primary = tree.root.children['primary']
-        const id = primary?.segments[0]?.path ?? null
+        const primary = tree.root.children["primary"]
+        const seg = primary?.segments ?? []
 
-        // build hive identifier: meadow only → community; meadow+id → hive
-        const hiveName = id ? `${primaryName}#${id}` : primaryName
+        const part = seg[0]?.path ?? ""        // crypto  OR  1000
+        const fragment = tree.fragment ?? ""    // hash fragment if written
 
-        // load + stage + activate hive
+        let base: string | null = null
+        let id: string | null = null
+
+        // If user typed crypto#1000 → Angular puts base in segment, id in fragment
+        if (fragment) {
+          base = part
+          id = fragment
+        }
+        else {
+          // no fragment:
+          // If this is domain mode (crypto.domain/1000)
+          // part is the id, and base is the subdomain
+          const host = window.location.hostname
+          const hostParts = host.split(".")
+
+          const subdomain = hostParts.length > 1 ? hostParts[0] : null
+
+          if (subdomain && !isNaN(Number(part))) {
+            // crypto.domain/1000 → base=crypto, id=1000
+            base = subdomain
+            id = part
+          }
+          else {
+            // localhost mode or the user typed /crypto
+            // part may be base or id; preserve old behavior
+            base = part
+            id = null
+          }
+        }
+
+        // fallback protections
+        if (!base) return
+
+        const hiveName = id ? `${base}#${id}` : base
+
+        // load hive
         const scout = await this.loader.resolve(hiveName)
         this.state.setScout(scout)
         const hive = await this.loader.load(scout)
         await this.loader.activate(hive)
       })
-  }
-
-  // helper: derive meadow (subdomain) safely
-  private extractHiveName(parts: string[]): string {
-    // if local environment, allow fallback to first part
-    if (parts.length < 3) return parts[0] ?? 'local'
-    return parts[0]   // subdomain (meadow name)
   }
 }
