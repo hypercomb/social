@@ -46,16 +46,6 @@ export class LocatorService {
     )
   }
 
-  public full(name: string | null): string {
-    if (!name) return ""
-
-    // if it already contains "#", do nothing
-    if (name.includes("#")) return name
-
-    // name is only the id → watcher will prepend base
-    return name
-  }
-  
   // --------------------------------------------------
   // utility
   // --------------------------------------------------
