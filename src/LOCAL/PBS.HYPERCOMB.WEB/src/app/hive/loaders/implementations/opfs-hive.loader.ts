@@ -46,7 +46,7 @@ export class OpfsHiveLoader extends HiveLoaderBase {
         // case 2: switching hives → export old one
         // ──────────────────────────────────────────────
         if (live) {
-            await this.exporter.save(live.hive)
+          //  await this.exporter.save(live.hive)
         }
 
         // ──────────────────────────────────────────────

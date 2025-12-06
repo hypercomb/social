@@ -18,13 +18,6 @@ const routes: Routes = [
     component: ShellComponent
   },
 
-  // community fallback (no id)
-  {
-    path: '',
-    pathMatch: 'full',
-    component: ShellComponent
-  },
-
   // final fallback
   { path: '**', component: ShellComponent }
 ];
