@@ -1,10 +1,16 @@
-<div class="search-box">
+<div class="hc-search">
   <input
-    type="search"
+    type="text"
     [value]="filter.value()"
     (input)="onInput($event)"
     (focus)="focused($event)"
     (blur)="unfocused($event)"
-    placeholder="Search"
+    [placeholder]="isCreationMode() ? 'Enter new hive name' : 'Search'"
   />
+
+  <button class="action-btn" (click)="onAction()">
+    <span class="icon">
+      {{ isCreationMode() ? 'U' : 'g' }}
+    </span>
+  </button>
 </div>

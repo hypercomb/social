@@ -34,7 +34,7 @@ export class DatabaseService {
       "smallImageId",
       "largeImageId",
       // boolean flags you truly filter on (each appears ONCE)
-      "isDeleted", "isActive", "isBranch", "isHidden", "isFocusedMode", "isLocked",
+      "isDeleted", "isActive", "isBranch", "isHidden", "isLocked",
       "isHive", "isPathway", "isRecenter",
     ]
     const cellSchema = tokens.join(",")

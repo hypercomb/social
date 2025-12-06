@@ -1,19 +1,29 @@
-import { Injectable, inject } from "@angular/core"
-import { HiveResolutionType } from "../../hive-models"
-import { HiveScout } from "../../hive-scout"
-import { HiveLoaderBase, IHiveLoader } from "../hive-loader.base"
-import { Hive } from "src/app/cells/cell"
+import { inject } from "@angular/core";
+import { HiveResolutionType } from "../../hive-models";
+import { HiveScout } from "../../hive-scout";
+import { HiveLoaderBase } from "../hive-loader.base";
+import { DatabaseService } from "src/app/database/database-service";
+import { HiveTemplateService } from "src/assets/hives/hive-template.service";
 
-@Injectable({ providedIn: "root" })
-export class NewHiveLoader extends HiveLoaderBase implements IHiveLoader {
+export class NewHiveLoader extends HiveLoaderBase {
 
+  private readonly template = inject(HiveTemplateService);
+  private readonly db = inject(DatabaseService);
 
-    public enabled(scout: HiveScout): boolean {
-        // Only enable if database is empty and scout is first hive
-        return scout.type === HiveResolutionType.New
-    }
+  public enabled(scout: HiveScout): boolean {
+    return scout.type === HiveResolutionType.New;
+  }
 
-    public async load(scout: HiveScout): Promise<Hive | undefined> {
-        return undefined
-    }
+  public async load(scout: HiveScout) {
+    const json = this.template.createInstance();
+
+    const blob = new Blob([JSON.stringify(json)], {
+      type: "application/json"
+    });
+
+    await this.db.ensureHiveDb();
+    await this.db.importHive(blob);
+
+    return undefined;
+  }
 }
