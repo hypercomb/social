@@ -10,6 +10,7 @@ import { safeDate } from "src/app/core/mappers/to-cell"
 import { IRepostioryBase, QUERY_HELPER } from "src/app/shared/tokens/i-cell-repository.token"
 import { CELL_FACTORY } from "src/app/inversion-of-control/tokens/tile-factory.token"
 import { OpfsImageService } from "src/app/hive/storage/opfs-image.service"
+import { HashingService } from "src/app/hive/storage/hashing-service"
 
 export abstract class RepositoryBase<TEntity extends CellEntity, TDomain = TEntity>
   implements IRepostioryBase<TEntity> {
@@ -19,6 +20,7 @@ export abstract class RepositoryBase<TEntity extends CellEntity, TDomain = TEnti
   protected readonly idService = inject(IdentifierService)
   protected readonly query = inject(QUERY_HELPER)
   protected readonly images = inject(OpfsImageService)
+  protected readonly hashingService = inject(HashingService)
 
   protected get cell_db(): Table<TEntity, number> {
     const db = this.database.db()
@@ -63,9 +65,6 @@ export abstract class RepositoryBase<TEntity extends CellEntity, TDomain = TEnti
   }
 
   // insert
-  // src/app/database/repository/repository.base.ts
-  // only the changed parts are shown — rest of file unchanged
-
   public async add(entity: TEntity, imageBlob?: Blob) {
     if (this.isGhost(entity)) return entity
 
@@ -73,7 +72,7 @@ export abstract class RepositoryBase<TEntity extends CellEntity, TDomain = TEnti
 
     // first-time image save
     if (imageBlob instanceof Blob) {
-      const hash = await this.images.hashName(imageBlob)
+      const hash = await this.hashingService.hashName(imageBlob)
       await this.images.saveSmall(hash, imageBlob)
 
       // ✔ modern field
@@ -96,7 +95,7 @@ export abstract class RepositoryBase<TEntity extends CellEntity, TDomain = TEnti
     entity.updatedAt = new Date().toISOString()
 
     if (imageBlob instanceof Blob) {
-      const hash = await this.images.hashName(imageBlob)
+      const hash = await this.hashingService.hashName(imageBlob)
       await this.images.saveSmall(hash, imageBlob)
 
       // ✔ modern field

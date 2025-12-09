@@ -15,15 +15,6 @@ export class OpfsImageService {
   public tempDir = async () =>
     await this.opfs.ensureDirs(["hive-images", "temp"])
 
-  // create hash filename
-  public async hashName(blob: Blob): Promise<string> {
-    const buf = await blob.arrayBuffer()
-    const hash = await crypto.subtle.digest("SHA-256", buf)
-    const name = Array.from(new Uint8Array(hash))
-      .map(b => b.toString(16).padStart(2, "0"))
-      .join("")
-    return `${name}.${blob.type.split("/")[1] || "webp"}`
-  }
 
   // save small
   public async saveSmall(name: string, blob: Blob): Promise<void> {

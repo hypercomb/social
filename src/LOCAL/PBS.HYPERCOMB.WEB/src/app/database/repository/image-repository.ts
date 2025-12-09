@@ -3,6 +3,7 @@ import { Injectable, inject } from "@angular/core"
 import { IHiveImage } from "src/app/core/models/i-hive-image"
 import { DebugService } from "src/app/core/diagnostics/debug-service"
 import { OpfsImageService } from "src/app/hive/storage/opfs-image.service"
+import { HashingService } from "src/app/hive/storage/hashing-service"
 
 
 @Injectable({ providedIn: "root" })
@@ -10,6 +11,7 @@ export class ImageRepository {
 
   private readonly opfs = inject(OpfsImageService)
   private readonly debug = inject(DebugService)
+  private readonly hashingService = inject(HashingService)
   private count = 0 // diagnostics only
 
   // ───────────────────────────────────────────────
@@ -60,7 +62,7 @@ export class ImageRepository {
   // Returns: hash (string)
   // ───────────────────────────────────────────────
   public async save(blob: Blob): Promise<string> {
-    const hash = await this.opfs.hashName(blob)
+    const hash = await this.hashingService.hashName(blob)
     await this.opfs.saveSmall(hash, blob)
     return hash
   }

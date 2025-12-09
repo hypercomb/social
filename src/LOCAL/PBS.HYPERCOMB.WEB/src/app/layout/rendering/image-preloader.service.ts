@@ -6,6 +6,7 @@ import { CarouselService } from "src/app/common/carousel-menu/carousel-service"
 import { BlobService } from "./blob-service"
 import { OpfsHiveService } from "src/app/hive/storage/opfs-hive-service"
 import { OpfsImageService } from "src/app/hive/storage/opfs-image.service"
+import { HashingService } from "src/app/hive/storage/hashing-service"
 
 type LocalAssetsWithHash = typeof LocalAssets & { InitialImageHash?: string }
 
@@ -17,6 +18,7 @@ export class ImagePreloader {
   private readonly carousel = inject(CarouselService)
   private readonly opfsHives = inject(OpfsHiveService)
   private readonly images = inject(OpfsImageService)
+  private readonly hashingService = inject(HashingService)
   private readonly blobs = inject(BlobService)
 
   // recordkeeping
@@ -58,7 +60,7 @@ export class ImagePreloader {
   private preloadDefaults = async (): Promise<void> => {
     try {
       const blob = await this.blobs.getInitialBlob()
-      const hash = await this.images.hashName(blob)
+      const hash = await this.hashingService.hashName(blob)
 
       this.initialTileHash = hash
       ;(LocalAssets as LocalAssetsWithHash).InitialImageHash = hash

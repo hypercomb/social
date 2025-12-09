@@ -7,6 +7,8 @@ import { DatabaseService } from "src/app/database/database-service"
 import { HONEYCOMB_STORE } from "src/app/shared/tokens/i-honeycomb-store.token"
 import { HIVE_STORE } from "src/app/shared/tokens/i-hive-store.token"
 import { HiveLoader } from "./loaders/hive.loader"
+import { Sprite } from "pixi.js"
+//import { SpritesheetProvider } from "../user-interface/texture/spritesheet-provider"
 
 @Injectable({ providedIn: "root" })
 export class HiveRouteWatcher {
@@ -16,6 +18,7 @@ export class HiveRouteWatcher {
   private readonly router = inject(Router)
   private readonly loader = inject(HiveLoader)
   private readonly state = inject(HypercombState)
+  //private readonly spritesheetProvider = inject(SpritesheetProvider)
 
   constructor() {
     this.router.events
@@ -86,6 +89,8 @@ export class HiveRouteWatcher {
         this.state.setScout(scout)
         const hive = await this.loader.load(scout)
         await this.loader.activate(hive)
+        // this.spritesheetProvider.primeLayer(layerId, cells)
+
       })
   }
 }

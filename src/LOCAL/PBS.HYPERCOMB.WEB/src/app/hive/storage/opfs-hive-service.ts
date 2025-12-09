@@ -6,6 +6,7 @@ import { DebugService } from "src/app/core/diagnostics/debug-service"
 import { HiveNormalizationService } from "src/app/actions/propagation/hive-normalization-service"
 import { OpfsImageService } from "./opfs-image.service"
 import { BlobService } from "src/app/layout/rendering/blob-service"
+import { HashingService } from "src/app/hive/storage/hashing-service"
 
 /**
  * Registry entry stored in opfs-hives.json
@@ -28,6 +29,7 @@ export class OpfsHiveService {
   // new: use the existing normalizer + image store
   private readonly normalizer = inject(HiveNormalizationService)
   private readonly images = inject(OpfsImageService)
+  private readonly hashingService = inject(HashingService)
 
   // directory references
   private hivesDir = async (): Promise<FileSystemDirectoryHandle> =>
@@ -69,7 +71,7 @@ export class OpfsHiveService {
           const previewBlob = firstRow.blob
           const blob = this.blobsvc.toBlob(previewBlob) // set the default menu image
           if (!blob) throw new Error("invalid blob in hive import")
-          hashName = await this.images.hashName(blob)
+          hashName = await this.hashingService.hashName(blob)
 
           await this.images.saveSmall(hashName, blob)
         }

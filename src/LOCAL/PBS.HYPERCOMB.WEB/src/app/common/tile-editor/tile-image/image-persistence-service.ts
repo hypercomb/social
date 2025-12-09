@@ -2,14 +2,16 @@
 import { Injectable, inject } from '@angular/core'
 import { Cell } from 'src/app/cells/cell'
 import { OpfsImageService } from 'src/app/hive/storage/opfs-image.service'
+import { HashingService } from 'src/app/hive/storage/hashing-service'
 
 @Injectable({ providedIn: 'root' })
 export class ImagePersistenceService {
   private readonly storage = inject(OpfsImageService)
+  private readonly hashingService = inject(HashingService)
 
   // save small → sets cell.imageHash
   public saveSmall = async (cell: Cell, blob: Blob): Promise<string> => {
-    const name = await this.storage.hashName(blob)
+    const name = await this.hashingService.hashName(blob)
     await this.storage.saveSmall(name, blob)
     cell.imageHash = name
     return name

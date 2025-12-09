@@ -1,8 +1,5 @@
 ﻿import { uuidv4 } from "src/app/core/models/uuid"
 import { CellFlags } from "./models/cell-flags"
-import { IHiveImage } from "../core/models/i-hive-image"
-
-
 
 // simple deterministic hash for hive string → number
 export function hashHive(hive: string): number {
@@ -16,8 +13,7 @@ export function hashHive(hive: string): number {
 export type CellKind =
   | "NewCell"
   | "Cell"
-  | "Ghost"
-  | "Hive"
+  | "Ghost"| "Hive"
   | "Clipboard"
   | "Path"
 
