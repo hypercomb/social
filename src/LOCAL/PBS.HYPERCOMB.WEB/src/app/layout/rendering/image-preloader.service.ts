@@ -2,7 +2,6 @@
 import { Injectable, effect, inject } from "@angular/core"
 import { Assets, Texture } from "pixi.js"
 import { LocalAssets } from "src/app/helper/constants"
-import { CarouselService } from "src/app/common/carousel-menu/carousel-service"
 import { BlobService } from "./blob-service"
 import { OpfsHiveService } from "src/app/hive/storage/opfs-hive-service"
 import { OpfsImageService } from "src/app/hive/storage/opfs-image.service"
@@ -15,7 +14,6 @@ export class ImagePreloader {
   // how many hives to keep preloaded above and below the current one
   private readonly depth = 3
 
-  private readonly carousel = inject(CarouselService)
   private readonly opfsHives = inject(OpfsHiveService)
   private readonly images = inject(OpfsImageService)
   private readonly hashingService = inject(HashingService)
@@ -32,19 +30,6 @@ export class ImagePreloader {
   constructor() {
     // preload default image + static assets first
     void this.preloadDefaults()
-
-    // track carousel rotation and keep next / previous hives preloaded
-    effect(() => {
-      const upper = this.carousel.upper()
-      const lower = this.carousel.lower()
-
-      // combine both sides, skipping current hive (we only care about on-deck)
-      const targets: string[] = []
-      upper.slice(0, this.depth).forEach(h => targets.push(h.name))
-      lower.slice(0, this.depth).forEach(h => targets.push(h.name))
-
-      this.updateOnDeck(targets)
-    })
   }
 
   // expose hash of the default tile image

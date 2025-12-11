@@ -5,7 +5,6 @@ import { Cell } from "src/app/cells/cell";
 
 import { Tile } from "src/app/cells/models/tile";
 import { IOpfsMetadataItems } from "src/app/cells/storage/settings-service";
-import { CarouselService } from "src/app/common/carousel-menu/carousel-service";
 import { AxialCoordinate } from "src/app/core/models/axial-coordinate";
 import { CoordinateDetector } from "src/app/helper/detection/coordinate-detector";
 
@@ -60,7 +59,6 @@ export const ACTION_REGISTRY = new InjectionToken<IActionRegistry>(TOKEN_LIST.AC
 export const CONTEXT_MENU = new InjectionToken<IContextMenu>(TOKEN_LIST.CONTEXT_MENU)
 export const CLIPBOARD_STATE = new InjectionToken<IClipboardState>(TOKEN_LIST.CLIPBOARD_STATE)
 export const DETECTOR_STATE = new InjectionToken<CoordinateDetector>(TOKEN_LIST.DETECTOR_STATE)
-export const CAROUSEL_SVC = new InjectionToken<CarouselService>(TOKEN_LIST.CAROUSEL_SVC)
 export const COORDINATE_DETECTOR = new InjectionToken<ICoordinateDetector>(TOKEN_LIST.COORDINATE_DETECTOR)
 export const SETTINGS_DATA_SVC = new InjectionToken<ISettingsService>("SETTINGS_DATA_SVC")
 export const TILE_SERVICE = new InjectionToken<ITileService>("TILE_SERVICE")

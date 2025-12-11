@@ -6,7 +6,6 @@ import { PayloadBase, hasEvent } from "../action-contexts"
 import { HIVE_HYDRATION } from "src/app/shared/tokens/i-honeycomb-service.token"
 import { PanningManager } from "src/app/pixi/panning-manager"   // ⬅️ add this
 import { CloseExternalAction } from "./close-external"
-import { CarouselService } from "src/app/common/carousel-menu/carousel-service"
 
 @Injectable({ providedIn: "root" })
 export class BackHiveAction extends ActionBase<PayloadBase> {

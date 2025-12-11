@@ -7,7 +7,7 @@ import { DatabaseService } from "src/app/database/database-service"
 import { HONEYCOMB_STORE } from "src/app/shared/tokens/i-honeycomb-store.token"
 import { HIVE_STORE } from "src/app/shared/tokens/i-hive-store.token"
 import { HiveLoader } from "./loaders/hive.loader"
-import { Sprite } from "pixi.js"
+
 //import { SpritesheetProvider } from "../user-interface/texture/spritesheet-provider"
 
 @Injectable({ providedIn: "root" })

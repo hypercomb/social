@@ -5,9 +5,7 @@ import { IHiveLoader } from './hive-loader.base'
 import { IHiveGuide } from '../resolvers/i-hive-resolver'
 import { HiveScout } from '../hive-scout'
 import { HIVE_HYDRATION } from 'src/app/shared/tokens/i-honeycomb-service.token'
-import { IDexieHive } from '../hive-models'
 import { Hypercomb } from 'src/app/core/mixins/abstraction/hypercomb.base'
-import { CAROUSEL_SVC } from 'src/app/shared/tokens/i-hypercomb.token'
 import { Hive } from 'src/app/cells/cell'
 
 @Injectable({ providedIn: 'root' })
@@ -17,7 +15,6 @@ export class HiveLoader extends Hypercomb {
   private readonly resolvers = inject<IHiveGuide[]>(HIVE_RESOLVERS) ?? []
   private readonly loaders = inject<IHiveLoader[]>(HIVE_LOADERS) ?? []
   private readonly hydration = inject(HIVE_HYDRATION)
-  private readonly carousel = inject(CAROUSEL_SVC)
   private lastResolved: HiveScout | null = null
 
   // ─────────────────────────────────────────────
@@ -70,7 +67,6 @@ export class HiveLoader extends Hypercomb {
     }
 
     this.controller.setHive(target)
-    this.carousel.jumpTo(target.hive)
     this.debug.log('lifecycle', `[HiveLoader] activated hive: ${target.hive}`)
   }
 

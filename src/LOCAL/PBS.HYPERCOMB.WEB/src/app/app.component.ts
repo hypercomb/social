@@ -1,7 +1,5 @@
 ﻿import { Component, computed, CUSTOM_ELEMENTS_SCHEMA, HostListener, inject, OnInit } from '@angular/core'
 import { environment } from 'src/environments/environment'
-import { CarouselMenuComponent } from './common/carousel-menu/carousel-menu.component'
-import { ChatWindowComponent } from './common/chat-window/chat-window.component'
 import { ControlsComponent } from './common/footer-controls/controls.component'
 import { HeaderBarComponent } from './common/header/header-bar.component'
 import { HelpPageComponent } from './common/header/help-page/help-page.component'
@@ -29,9 +27,6 @@ import { ShortcutsPageComponent } from './common/header/shortcuts-page/shortcuts
   styleUrls: ['./app.component.scss'],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
   imports: [
-    CarouselMenuComponent,
-    ChatWindowComponent,
-    // ConfirmDeleteDialogComponent,
     ControlsComponent,
     CustomCursorDirective,
     EmptyHoneycombComponent,
