@@ -1,136 +1,112 @@
-// src/app/hives/hive-store.ts
 import { Injectable, computed, inject, signal } from "@angular/core"
 import { HONEYCOMB_STORE } from "src/app/shared/tokens/i-honeycomb-store.token"
 import { IControlHives, IHiveLookup, IHiveState } from "src/app/shared/tokens/i-hive-store.token"
-import { Cell, Hive } from "../cell"
 import { Tile } from "../models/tile"
-import { ContextStack } from "src/app/core/controller/context-stack"
-import { IDexieHive } from "src/app/hive/hive-models"
+import { ParentContext } from "src/app/core/controller/context-stack"
 import { SearchFilter } from "src/app/common/header/search-filter"
+import { Cell } from "src/app/models/cell"
+import { HivePortal } from "src/app/models/hive-portal"
+import { IHiveInfo } from "src/app/hive/i-hive-info"
+import { HashService } from "src/app/hive/storage/hashing-service"
 
 @Injectable({ providedIn: "root" })
 export class HiveStore implements IControlHives, IHiveState, IHiveLookup {
+
     private readonly filter = inject(SearchFilter)
-    private readonly stack = inject(ContextStack)
+    private readonly stack = inject(ParentContext)
     private readonly store = inject(HONEYCOMB_STORE)
 
-    // --- derived signals ---------------------------------------------
-    // currently active hive for navigation
-
-    public readonly active = computed(() => this.items()[this._activeIndex()] ?? undefined)
-
-    private readonly _activeIndex = signal<number>(0)    // active index for navigation
-    public readonly activeIndex = this._activeIndex.asReadonly()
-
-    // count of cells for the currently active hive
-    public readonly cellcount = computed(() => {
-        const activeHive = this.active()
-        if (!activeHive) return 0
-        return this.store.cells().length
-    })
-
-    public readonly menucount = computed(() => this.items().length)
-
-    public readonly _first = signal<IDexieHive | undefined>(undefined)
-    public readonly first = computed(() => this.items()[0] ?? undefined)
-
-    private readonly _hive = signal<Hive | undefined>(undefined)
-    public readonly hive = this._hive.asReadonly()
-
-    private readonly _lastCreated = signal<IDexieHive | undefined>(undefined)
-    public readonly lastCreated = this._lastCreated.asReadonly()
-
-    // --- signals ------------------------------------------------------
-    private readonly _items = signal<IDexieHive[]>([])         // core list
+    // -------------------------------------------------------
+    // core reactive state
+    // -------------------------------------------------------
+    private readonly _items = signal<IHiveInfo[]>([])
     public readonly items = this._items.asReadonly()
 
-    // --- readonly views -----------------------------------------------
+    private readonly _activeIndex = signal(0)
+    public readonly activeIndex = this._activeIndex.asReadonly()
+
+    private readonly _hive = signal<HivePortal | undefined>(undefined)
+    public readonly hive = this._hive.asReadonly()
+
+    private readonly _lastCreated = signal<IHiveInfo | undefined>(undefined)
+    public readonly lastCreated = this._lastCreated.asReadonly()
+
     public readonly hasItems = computed(() => this._items().length > 0)
+
+    // the active hive metadata (folder-level info)
+    public readonly active = computed(() =>
+        this.items()[this._activeIndex()] ?? undefined
+    )
+
+    public readonly first = computed(() => this.items()[0] ?? undefined)
+
+    public readonly cellcount = computed(() => this.store.cells().length)
 
     public readonly locateHive = signal<string | null>(null)
 
     public readonly filteredHives = computed(() => {
         const q = this.filter.delayValue().toLowerCase()
         if (!q) return this.items()
-
-        return this.items().filter(h =>
-            h.name.toLowerCase().includes(q)
-        )
+        return this.items().filter(h => h.name.toLowerCase().includes(q))
     })
 
-    // state
-    public readonly combCells = computed<Cell[]>(() => {
-        const cell = this.stack.cell()!
+    // -------------------------------------------------------
+    // hierarchy access (no hive filtering anymore!)
+    // -------------------------------------------------------
+    public readonly honeycombCells = computed<Cell[]>(() => {
+        const cell = this.stack.top()!
         if (!cell) return []
 
-        const hive = cell.hive
-        const cellId = cell.cellId
-        if (!hive || cellId == null) return []
+        const parentGene = cell.gene
+        if (parentGene == null) return []
 
-        // ensure we only show children from the active hive + parent
-        return this.store.cells().filter(c =>
-            c.hive === hive && c.sourceId === cellId
-        )
+        return this.store
+            .cells()
+            .filter(c => c.parentGene === parentGene)
     })
 
-
-    public readonly combTiles = computed<Tile[]>(() => {
-        const cells = this.combCells()
-        return cells.map(c => this.store.lookupTile(c.cellId!)).filter((t): t is Tile => !!t)
+    public readonly tiles = computed<Tile[]>(() => {
+        const cells = this.honeycombCells()
+        return cells
+            .map(c => this.store.lookupTile(c.gene))
+            .filter((t): t is Tile => !!t)
     })
 
+    // -------------------------------------------------------
     // lookup
-    public lookupDexieHive = (name: string): IDexieHive | null => {
+    // -------------------------------------------------------
+    public lookupDexieHive = (name: string): IHiveInfo | null => {
         const n = name.toLowerCase()
         return this.items().find(h => h.name.toLowerCase() === n) ?? null
     }
 
-    public isHydrated = (name: string): boolean => {
-        const dexieHive = this.lookupDexieHive(name)
-        return !!dexieHive?.file
+    // no longer needed: hydration is no longer file-based
+    public isHydrated = (_name: string): boolean => true
+
+    // -------------------------------------------------------
+    // mutations
+    // -------------------------------------------------------
+    public setHive = async (name: string) => {
+        if (!name) return
+
+        const gene = await HashService.hash(name)
+        const portal = new HivePortal(gene, name)
+
+        this._hive.set(portal)
+        this.stack.push(gene)
     }
 
-    // --- mutations ----------------------------------------------------
-
-    public markHydrated = (hive: IDexieHive) => {
-        const items = [...this._items()]
-        const idx = items.findIndex(h => h.name === hive.name)
-        if (idx >= 0) {
-            items[idx] = { ...items[idx], file: hive.file }
-            this._items.set(items)
-        }
-    }
-
-    public setActive = (hiveName: string) => {
-        if (!hiveName) return
-        const items = [...this._items()]
-        const idx = items.findIndex(h => h.name === hiveName)
-        if (idx < 0) return
-
-        if (this._activeIndex() !== idx) {
-            this._activeIndex.set(idx)
-        }
-    }
-
-    public setHive = (hive: Hive) => {
-        if (!hive) return
-        console.debug('[HiveStore.setHive] called', { hive })
-        this._hive.set(hive)
-        this.stack.push(hive)
-    }
-
-    public hydrate = async (names: string[] | IDexieHive[]) => {
-
-        const items: IDexieHive[] = Array.isArray(names)
-            ? (typeof names[0] === "string"
-                ? (names as string[]).map(n => ({ name: n, file: undefined }))
-                : (names as IDexieHive[])
+    public hydrate = async (input: string[] | IHiveInfo[]) => {
+        const items: IHiveInfo[] = Array.isArray(input)
+            ? (typeof input[0] === "string"
+                ? (input as string[]).map(n => ({ name: n }))
+                : (input as IHiveInfo[])
             )
             : []
 
         this._items.set(items)
 
-        // reset active index if out of bounds
+        // clamp active index
         if (this._activeIndex() >= items.length) {
             this._activeIndex.set(items.length - 1)
         }
@@ -139,36 +115,20 @@ export class HiveStore implements IControlHives, IHiveState, IHiveLookup {
         }
     }
 
-    public addOrUpdate = (hive: IDexieHive) => {
-        const items = [...this._items()]
-        const idx = items.findIndex(h => h.name === hive.name)
-        if (idx >= 0) {
-            items[idx] = hive
-        } else {
-            items.push(hive)
-        }
-        this._items.set(items)
-    }
 
-    public replace = (name: string, updated: IDexieHive) => {
-        const items = this._items().map(h =>
-            h.name === name ? updated : h
+    public replace = (name: string, updated: IHiveInfo) => {
+        this._items.set(
+            this._items().map(h => (h.name === name ? updated : h))
         )
-        this._items.set(items)
     }
 
     public remove = (name: string) => {
-        const items = this._items().filter(h => h.name !== name)
-        this._items.set(items)
+        this._items.set(this._items().filter(h => h.name !== name))
     }
 
-    public next = () => {
-        const total = this.items().length
-        if (total > 0) this._activeIndex.set((this._activeIndex() + 1) % total)
-    }
-
-    public prev = () => {
-        const total = this.items().length
-        if (total > 0) this._activeIndex.set((this._activeIndex() - 1 + total) % total)
+    public setActive = (hiveName: string) => {
+        if (!hiveName) return
+        const idx = this._items().findIndex(h => h.name === hiveName)
+        if (idx >= 0) this._activeIndex.set(idx)
     }
 }

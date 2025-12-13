@@ -1,10 +1,10 @@
 // src/app/user-interface/texture/spritesheet-builder.service.ts
 import { Injectable, inject } from "@angular/core"
 import { Assets, Container, RenderTexture, Sprite, Texture } from "pixi.js"
-import { Cell } from "src/app/cells/cell"
 import { TileLayerManager } from "src/app/cells/miscellaneous/tile-layer-manager"
 import { PixiServiceBase } from "src/app/pixi/pixi-service-base"
 import { CachedSpritesheet, SpritesheetRepository } from "./spritesheet.repository"
+import { Cell } from "src/app/models/cell"
 
 @Injectable({ providedIn: "root" })
 export class SpritesheetBuilderService extends PixiServiceBase {
@@ -81,7 +81,7 @@ export class SpritesheetBuilderService extends PixiServiceBase {
       sprite.x = x
       sprite.y = y
 
-      frames[cell.cellId] = { x, y, w: tileW, h: tileH }
+      frames[cell.gene] = { x, y, w: tileW, h: tileH }
 
       container.addChild(sprite)
     } 

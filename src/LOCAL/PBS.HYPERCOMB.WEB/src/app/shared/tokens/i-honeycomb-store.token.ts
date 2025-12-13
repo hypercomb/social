@@ -1,8 +1,8 @@
 ﻿// src/app/shared/tokens/i-comb-store.token.ts
 import { InjectionToken, Signal } from "@angular/core"
 import { Point } from "pixi.js"
-import { Cell } from "src/app/cells/cell"
 import { Tile } from "src/app/cells/models/tile"
+import { Cell } from "src/app/models/cell"
 
 export interface IStaging {
   enqueue(cell: Cell)
@@ -21,10 +21,10 @@ export interface IHoneycombStore {
   enqueue(cells: Cell | Cell[]): void
 
   // registry
-  register(tile: Tile, cell: Cell): void
-  unregister(cellId: number): void  
-  lookupTile(cellId: number): Tile | undefined
-  lookupData(cellId: number): Cell | undefined
+  register(cell:Cell,tile: Tile): void
+  unregister(cell:Cell): void  
+  lookupTile(gene:string): Tile | undefined
+  lookupData(gene:string): Cell | undefined
   
   // surface
   cells: Signal<Cell[]>
@@ -33,7 +33,7 @@ export interface IHoneycombStore {
   size: Signal<number>
 
   // movement
-  updatePositionAndIndex(cellId: number, pos: Point, index?: number): void
+  updatePositionAndIndex(gene: string, pos: Point, index?: number): void
 
   readonly flushSeq: Signal<number>
 

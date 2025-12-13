@@ -1,32 +1,38 @@
 ﻿import { Injectable, signal, computed } from "@angular/core"
-import { Cell } from "src/app/cells/cell"
 import { StackEntry } from "src/app/models/stack-entry"
+import { HashService } from "src/app/hive/storage/hashing-service"
 
 @Injectable({ providedIn: "root" })
-export class ContextStack {
+export class ParentContext {
+
   private readonly _stack = signal<StackEntry[]>([])
   private readonly capacity = 50
 
-  // derived signals
+  // ---------------------------------------------------
+  // computed gene: top-of-stack OR fallback to Hypercomb
+  // ---------------------------------------------------
   public readonly top = computed(() => this._stack().at(-1) ?? undefined)
-  public readonly cell = computed(() => this.top()?.cell ?? undefined)
-  public readonly hiveName = computed(() => this.cell()?.hive ?? undefined)
+
+  public readonly gene = computed(() => {
+    const top = this.top()
+     return top?.gene || null
+  })
+
   public readonly entries = computed(() => [...this._stack()].reverse())
   public readonly size = computed(() => this._stack().length)
-
-  // navigation flag
   public readonly navigating = signal(false)
-  public push(cell: Cell): void {
+
+  // ---------------------------------------------------
+  // push
+  // ---------------------------------------------------
+  public push(gene: string): void {
     this.navigating.set(true)
-    const entry = new StackEntry(cell.cellId, cell.hive, cell)
+
+    const entry = new StackEntry(gene)
 
     this._stack.update(list => {
       const last = list.at(-1)
-
-      if (last && last.cellId === entry.cellId && last.hive === entry.hive) {
-        return list
-      }
-
+      if (last && last.gene === gene) return list
       const next = [...list, entry]
       if (next.length > this.capacity) next.shift()
       return next
@@ -35,35 +41,32 @@ export class ContextStack {
     this.navigating.set(false)
   }
 
+  // ---------------------------------------------------
+  // pop
+  // ---------------------------------------------------
   public canPop(): boolean {
-    const list = this._stack()
-    return list.length > 1
+    return this._stack().length > 1
   }
 
   public pop(): StackEntry | undefined {
     this.navigating.set(true)
-
     try {
       if (!this.canPop()) return undefined
 
       let popped: StackEntry | undefined
-
       this._stack.update(list => {
         popped = list.at(-1)
         return list.slice(0, -1)
       })
-
       return popped
     } finally {
       this.navigating.set(false)
     }
   }
 
-
-  // ─────────────────────────────────────────────
+  // ---------------------------------------------------
   // maintenance
-  // ─────────────────────────────────────────────
-
+  // ---------------------------------------------------
   public clear(): void {
     this._stack.set([])
   }
@@ -72,14 +75,12 @@ export class ContextStack {
     this.navigating.set(false)
   }
 
-  public refresh(cell: Cell): void {
+  public refresh(gene: string): void {
     this._stack.update(list => {
-      const idx = list.findIndex(e => e.cellId === cell.cellId && e.hive === cell.hive)
-      if (idx === -1) return list // nothing to refresh
-
-      const updated = new StackEntry(cell.cellId, cell.hive, cell)
+      const idx = list.findIndex(e => e.gene === gene)
+      if (idx === -1) return list
       const next = [...list]
-      next[idx] = updated
+      next[idx] = new StackEntry(gene)
       return next
     })
   }
@@ -90,25 +91,5 @@ export class ContextStack {
 
   public snapshot(): StackEntry[] {
     return this._stack()
-  }
-
-  public toString(): string {
-    const list = this._stack()
-    if (!list.length) return '[ContextStack empty]'
-
-    const lines: string[] = []
-
-    lines.push(`ContextStack(size=${list.length}, navigating=${this.navigating()})`)
-    lines.push(`top: hive=${this.hiveName() ?? 'none'} cellId=${this.cell()?.cellId ?? 'none'}`)
-    lines.push('entries:')
-
-    list.forEach((e, i) => {
-      const mark = (i === list.length - 1) ? ' <— top' : ''
-      lines.push(
-        `[${i}] hive=${e.hive} cellId=${e.cellId}${mark}`
-      )
-    })
-
-    return lines.join('\n')
   }
 }

@@ -4,7 +4,7 @@ import { HttpClient } from "@angular/common/http"
 import { Injectable, signal } from "@angular/core"
 import { firstValueFrom } from "rxjs"
 import { DebugService } from "src/app/core/diagnostics/debug-service"
-import { Cell } from "src/app/cells/cell"
+import { Cell } from "src/app/models/cell-kind"
 import { Constants } from "src/app/helper/constants"
 import { CompressionService } from "src/app/helper/external-storage/compression-service"
 

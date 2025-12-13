@@ -6,7 +6,7 @@ import { IHiveGuide } from '../resolvers/i-hive-resolver'
 import { HiveScout } from '../hive-scout'
 import { HIVE_HYDRATION } from 'src/app/shared/tokens/i-honeycomb-service.token'
 import { Hypercomb } from 'src/app/core/mixins/abstraction/hypercomb.base'
-import { Hive } from 'src/app/cells/cell'
+import { HivePortal } from 'src/app/models/hive-portal'
 
 @Injectable({ providedIn: 'root' })
 export class HiveLoader extends Hypercomb {
@@ -15,6 +15,7 @@ export class HiveLoader extends Hypercomb {
   private readonly resolvers = inject<IHiveGuide[]>(HIVE_RESOLVERS) ?? []
   private readonly loaders = inject<IHiveLoader[]>(HIVE_LOADERS) ?? []
   private readonly hydration = inject(HIVE_HYDRATION)
+
   private lastResolved: HiveScout | null = null
 
   // ─────────────────────────────────────────────
@@ -41,33 +42,24 @@ export class HiveLoader extends Hypercomb {
   // ─────────────────────────────────────────────
   // external: load hydrated data into memory
   // ─────────────────────────────────────────────
-  public async load(scout: HiveScout): Promise<Hive | undefined> {
+  public async load(scout: HiveScout) {
     for (const loader of this.loaders) {
       if (loader.enabled(scout)) {
-        const hive = await loader.load(scout)
+        await loader.load(scout)
+        this.hydration.setReady()
         this.debug.log('lifecycle', `[HiveLoader] loaded with ${loader.constructor.name}`)
-        if (hive) {
-          this.hydration.setReady()
-          return hive
-        }
+        return
       }
     }
     this.debug.log('warn', `[HiveLoader] no matching loader for ${scout.type}`)
-    return undefined
+    return
   }
 
   // ─────────────────────────────────────────────
   // external: activate hive in controller
   // ─────────────────────────────────────────────
-  public async activate(target: Hive | undefined) {
-
-    if (!target) {
-      this.debug.log('warn', '[HiveLoader] no hive available to activate')
-      return
-    }
-
-    this.controller.setHive(target)
-    this.debug.log('lifecycle', `[HiveLoader] activated hive: ${target.hive}`)
+  public async activate(gene: string) {
+    this.controller.setHive(gene)
+    this.debug.log('lifecycle', `[HiveLoader] activated hive: ${this.state.hive()}`)
   }
-
 }

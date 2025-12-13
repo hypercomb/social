@@ -1,8 +1,8 @@
 import { Injectable, inject, signal } from "@angular/core"
 import { TextureService } from "src/app/user-interface/texture/texture-service"
-import { IDexieHive } from "../hive-models"
+import { IHiveInfo } from "../hive-models"
 import { OpfsHiveService } from "../storage/opfs-hive-service"
-import { Cell } from "src/app/cells/cell"
+import { Cell } from "src/app/models/cell-kind"
 import DBTables from "src/app/core/constants/db-tables"
 import { ImageService } from "src/app/database/images/image-service"
 import { TextureWorkerService } from "src/app/workers/texture-stream-worker.service"
@@ -11,9 +11,9 @@ import { Assets, Texture } from "pixi.js"
 import { effect } from "src/app/performance/effect-profiler"
 
 interface CarouselStreamSet {
-    current: IDexieHive
-    upper: IDexieHive[]
-    lower: IDexieHive[]
+    current: IHiveInfo
+    upper: IHiveInfo[]
+    lower: IHiveInfo[]
 }
 
 @Injectable({ providedIn: "root" })
@@ -131,8 +131,8 @@ export class PassiveTextureStreamer extends HypercombLayout {
         return new Promise(r => setTimeout(r, 1 + Math.random() * 2))
     }
 
-    private interleave(a: IDexieHive[], b: IDexieHive[]): IDexieHive[] {
-        const result: IDexieHive[] = []
+    private interleave(a: IHiveInfo[], b: IHiveInfo[]): IHiveInfo[] {
+        const result: IHiveInfo[] = []
         const len = Math.max(a.length, b.length)
         for (let i = 0; i < len; i++) {
             if (a[i]) result.push(a[i])

@@ -1,5 +1,5 @@
 ﻿import { Injectable, inject } from "@angular/core"
-import { Cell } from "src/app/cells/cell"
+import { Cell } from "src/app/models/cell-kind"
 import { combId, sourceKey } from "src/app/cells/models/cell-filters"
 import { HypercombMode } from "src/app/core/models/enumerations"
 import { HONEYCOMB_SVC } from "src/app/shared/tokens/i-honeycomb-service.token"

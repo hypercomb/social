@@ -1,11 +1,11 @@
 ﻿import { Injectable } from '@angular/core'
 import { Texture } from 'pixi.js'
-import { Cell } from 'src/app/cells/cell'
 import { ITextureProvider } from './i-texture-provider'
 import { EmptyTextureProvider } from './empty-texture-provider'
 import { TextureCacheProvider } from './texture-cache-provider'
 import { RenderTextureProvider } from './render-texture-provider'
 import { SpritesheetProvider } from './spritesheet-provider'
+import { Cell } from 'src/app/models/cell'
 
 @Injectable({ providedIn: 'root' })
 export class TextureService {

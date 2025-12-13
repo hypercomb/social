@@ -1,5 +1,5 @@
 ﻿import { Injectable, signal, WritableSignal } from '@angular/core'
-import { Cell } from 'src/app/cells/cell'
+import { Cell } from 'src/app/models/cell-kind'
 
 @Injectable({ providedIn: 'root' })
 export class HierarchyStore {

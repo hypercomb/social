@@ -1,5 +1,5 @@
-﻿import { Cell } from "../cells/cell"
-import { Signal } from "@angular/core"
+﻿import { Signal } from "@angular/core"
+import { Cell } from "../models/cell"
 
 export interface ActionMeta {
   id: string

@@ -1,6 +1,6 @@
 ﻿// i-cell-entity.ts
 
-import { CellKind } from "src/app/cells/cell"
+import { CellKind } from "src/app/models/cell-kind"
 import { CellOptions } from "src/app/core/models/enumerations"
 
 export interface CellEntity {

@@ -1,5 +1,5 @@
 import { Injectable, signal, inject } from '@angular/core'
-import { Cell } from '../cells/cell'
+import { Cell } from '../models/cell-kind'
 import { HypercombState } from 'src/app/state/core/hypercomb-state'
 
 export interface WorkerInfo {

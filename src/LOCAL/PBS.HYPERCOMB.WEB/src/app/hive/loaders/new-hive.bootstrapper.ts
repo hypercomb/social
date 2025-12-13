@@ -1,20 +1,21 @@
 // genus-data-resolver.ts
 import { Injectable, inject } from "@angular/core"
-import { Hive, NewCell } from "src/app/cells/cell"
-import { HiveScout } from "../hive-scout"
-import { MODIFY_COMB_SVC } from "src/app/shared/tokens/i-honeycomb-service.token"
-import { CellOptions } from "src/app/cells/models/cell-options"
-import { HiveLoaderBase } from "./hive-loader.base"
-import { OpfsHiveService } from "../storage/opfs-hive-service"
-import { IHiveImage } from "src/app/core/models/i-hive-image"
-import { BlobService } from "../rendering/blob-service"
+
 import { OpfsImageService } from "../storage/opfs-image.service"
+import { CellOptions } from "src/app/cells/models/cell-options"
+import { IHiveImage } from "src/app/core/models/i-hive-image"
+import { BlobService } from "src/app/layout/rendering/blob-service"
+import { MODIFY_COMB_SVC } from "src/app/shared/tokens/i-honeycomb-service.token"
+import { HiveScout } from "../hive-scout"
+import { HiveLoaderBase } from "./hive-loader.base"
+import { HiveService } from "src/app/cells/hive/hive-service"
+import { HivePortal } from "src/app/models/hive-portal"
 
 @Injectable({ providedIn: "root" })
 export class NewHiveBootstrapper extends HiveLoaderBase {
   private readonly blobs = inject(BlobService)
   private readonly modify = inject(MODIFY_COMB_SVC)
-  private readonly opfs = inject(OpfsHiveService)
+  private readonly opfs = inject(HiveService)
   private readonly images = inject(OpfsImageService)
 
   public override enabled(scout: HiveScout): boolean {
@@ -35,7 +36,7 @@ export class NewHiveBootstrapper extends HiveLoaderBase {
       // 1. create initial blob + hash + store in OPFS small/
       // ────────────────────────────────────────────────────────
       const blob = await this.blobs.getInitialBlob()
-      const imageHash = await this.images.hashName(blob)
+      const imageHash = await this.hashsvc.hashName(blob)
       await this.images.saveSmall(imageHash, blob)
 
       const image: IHiveImage = {
@@ -51,19 +52,17 @@ export class NewHiveBootstrapper extends HiveLoaderBase {
       // ────────────────────────────────────────────────────────
       const newHive = new NewCell({
         name: "welcome",
-        hive: scout.name,
-        kind: "Hive"
+        kind: "HivePortal"
       })
       newHive.options.set(CellOptions.Active)
 
-      const created = await this.modify.addCell(newHive) as Hive
+      const created = await this.modify.addCell(newHive) as HivePortal
 
       // ────────────────────────────────────────────────────────
       // 3. create first child cell under the hive
       // ────────────────────────────────────────────────────────
       const firstCell = new NewCell({
         name: "first",
-        hive: scout.name,
         kind: "Cell",
         index: 5,
         sourceId: created.cellId

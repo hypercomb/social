@@ -1,5 +1,5 @@
 ﻿import { Injectable, signal } from "@angular/core"
-import { Cell } from "src/app/cells/cell"
+import { Cell } from "../models/cell"
 
 @Injectable({
   providedIn: 'root'

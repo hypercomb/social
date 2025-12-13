@@ -3,11 +3,12 @@ import { Directive, effect, inject } from "@angular/core"
 import { Container } from "pixi.js"
 import { HypercombLayout } from "src/app/core/mixins/abstraction/hypercomb.base"
 import { HypercombMode } from "src/app/core/models/enumerations"
-import { Cell, Ghost, NewCell } from "../cell"
 import { TILE_FACTORY } from "src/app/shared/tokens/i-hypercomb.token"
 import { EditorService } from "src/app/state/interactivity/editor-service"
 import { CellEditContext } from "src/app/state/interactivity/cell-edit-context"
 import { PIXI_MANAGER } from "src/app/shared/tokens/i-pixi-manager.token"
+import { Cell } from "src/app/models/cell"
+import { Ghost } from "src/app/models/ghost-cell"
 
 @Directive({
   selector: "[ghost-tile]",
@@ -77,26 +78,27 @@ export class GhostTileDirective extends HypercombLayout {
 
   // create ghost tile (data + sprite)
   private createGhostAt = async (coordinate: any): Promise<void> => {
-    await this.destroyGhost()
+    // await this.destroyGhost()
 
-    this.debug.log("layout", `creating ghost at ${coordinate.index}`)
+    // this.debug.log("layout", `creating ghost at ${coordinate.index}`)
 
-    const ghost = await this.cell.creator.createGhost({ index: coordinate.index })
-    this.debug.log("layout", "ghost created", ghost)
-    this.ghost = ghost
+    // const ghost = await this.cell.creator.createGhost({ index: coordinate.index })
+    // this.debug.log("layout", "ghost created", ghost)
+    // this.ghost = ghost
 
-    const tile = await this.tileFactory.create(ghost as unknown as Cell)
+    // const tile = await this.tileFactory.create(ghost as unknown as Cell)
 
-    tile.alpha = 0.6
-    tile.eventMode = "none"
-    tile.zIndex = 200
+    // tile.alpha = 0.6
+    // tile.eventMode = "none"
+    // tile.zIndex = 200
 
-    const container = this.pixi.container
-    if (container) {
-      container.sortableChildren = true
-      container.addChild(tile)
-      this.ghostSprite = tile
-    }
+    // const container = this.pixi.container
+    // if (container) {
+    //   container.sortableChildren = true
+    //   container.addChild(tile)
+    //   this.ghostSprite = tile
+    // }
+    throw new Error("Ghost tiles are currently disabled")
   }
 
   // commit ghost → new permanent tile + open editor
@@ -111,7 +113,6 @@ export class GhostTileDirective extends HypercombLayout {
       // use factory to build a real NewCell instance
       const newCell = this.cell.creator.newCell({
         index,
-        hive: source.hive,
         sourceId: source.cellId,
         imageHash: g.imageHash,
         name: "",

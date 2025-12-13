@@ -3,7 +3,6 @@ import { Injectable, inject } from "@angular/core"
 import { Router, NavigationEnd } from "@angular/router"
 import { filter } from "rxjs"
 import { HypercombState } from "src/app/state/core/hypercomb-state"
-import { DatabaseService } from "src/app/database/database-service"
 import { HONEYCOMB_STORE } from "src/app/shared/tokens/i-honeycomb-store.token"
 import { HIVE_STORE } from "src/app/shared/tokens/i-hive-store.token"
 import { HiveLoader } from "./loaders/hive.loader"
@@ -14,7 +13,6 @@ import { HiveLoader } from "./loaders/hive.loader"
 export class HiveRouteWatcher {
   protected readonly combstore = inject(HONEYCOMB_STORE)
   protected readonly hivestore = inject(HIVE_STORE)
-  private readonly database = inject(DatabaseService)
   private readonly router = inject(Router)
   private readonly loader = inject(HiveLoader)
   private readonly state = inject(HypercombState)
@@ -25,11 +23,6 @@ export class HiveRouteWatcher {
       .pipe(filter(e => e instanceof NavigationEnd))
       .subscribe(async () => {
 
-        // ensure Dexie DB
-        if (!this.database.db()) {
-          await this.database.ensureHiveDb()
-          await this.database.openShared()
-        }
 
         // -------------------------
         // ROUTE FORMAT EXPECTATIONS
@@ -83,12 +76,13 @@ export class HiveRouteWatcher {
         if (!base) return
 
         const hiveName = id ? `${base}#${id}` : base
-
+        this.state.setHive(hiveName)
+        
         // load hive
         const scout = await this.loader.resolve(hiveName)
         this.state.setScout(scout)
-        const hive = await this.loader.load(scout)
-        await this.loader.activate(hive)
+        await this.loader.load(scout)
+        await this.loader.activate(scout.gene)
         // this.spritesheetProvider.primeLayer(layerId, cells)
 
       })

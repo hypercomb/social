@@ -1,57 +1,42 @@
-﻿import { Cell, NewCell } from "src/app/cells/cell"
-import { CellOptions } from "src/app/cells/models/cell-options"
-import { CellEntity } from "src/app/database/model/i-tile-entity"
+﻿// src/app/hive/storage/resolve-cell.ts
+import { Cell } from "src/app/models/cell"
+import { OpfsManager } from "src/app/common/opfs/opfs-manager"
+import { HashService } from "src/app/hive/storage/hashing-service"
+import { Injectable } from "@angular/core"
 
-export function safeDate(val: any): string | undefined {
-  if (!val) return undefined
-  const d = new Date(val)
-  return isNaN(d.getTime()) ? undefined : d.toISOString()
-}
+@Injectable({ providedIn: "root" })
+export class CellResolver {
 
-export function toCell(entity: CellEntity): Cell | NewCell {
-  const base = {
-    hive: entity.hive,
-    name: entity.name ?? "",
-    link: entity.link ?? "",
-    sourceId: entity.sourceId,
-    uniqueId: entity.uniqueId,
-    index: entity.index ?? -1,
+  constructor(private opfs: OpfsManager) {}
 
-    // ✔ NEW canonical hashed image identity
-    imageHash: entity.imageHash ?? undefined,
+  // resolve a cell from OPFS (canonical source of truth)
+  public async resolve(gene: string, hive: string): Promise<Cell> {
 
-    dateCreated: safeDate(entity.dateCreated),
-    dateDeleted: safeDate(entity.dateDeleted),
-    updatedAt: safeDate(entity.updatedAt),
+    const dir = await this.opfs.ensureDirs(["hives", hive, gene])
 
-    backgroundColor: entity.backgroundColor,
-    borderColor: entity.borderColor,
-    scale: entity.scale ?? 1,
-    x: entity.x ?? 0,
-    y: entity.y ?? 0,
+    const get = async (key: string): Promise<string> => {
+      const hash = await HashService.hash(key)
+      const fh = await this.opfs.getFile(dir, hash)
+      if (!fh) return ""
+      return (await fh.getFile()).text()
+    }
 
-    sourcePath: entity.sourcePath,
-    etag: entity.etag,
+    const cell = new Cell({
+      gene,
+      name:        await get("name"),
+      link:        await get("link"),
+      parentGene:  await get("parent"),
+      index:       Number(await get("index")) || 0,
+      childCount:  Number(await get("childCount")) || undefined,
+      backgroundColor: await get("backgroundColor"),
+      borderColor:     await get("borderColor"),
+      imageHash:       await get("imageHash"),
 
-    // ✔ runtime-only fallback (never persisted)
-  }
+      x: Number(await get("x")) || 0,
+      y: Number(await get("y")) || 0,
+      scale: Number(await get("scale")) || 1
+    })
 
-  // ─────────────────────────────
-  // A. New Cell (not persisted)
-  // ─────────────────────────────
-  if (entity.cellId == null) {
-    console.warn(`[toCell] entity missing cellId → returning NewCell`)
-    const cell = new NewCell(base)
-    cell.setKind(entity.kind ?? "Cell")
     return cell
   }
-
-
-  const cell = new Cell({ ...base, cellId: entity.cellId })
-  cell.setKind(entity.kind ?? "Cell")
-
-  // clear "Selected" flag on load
-  cell.options.update(o => entity.options! & ~CellOptions.Selected)
-
-  return cell
 }

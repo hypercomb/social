@@ -1,7 +1,7 @@
 ﻿// tile-preparation.service.ts
 import { Injectable, computed, effect, signal } from '@angular/core'
 import { DebugService } from 'src/app/core/diagnostics/debug-service'
-import { Cell } from './cell'
+import { Cell } from '../models/cell-kind'
 
 export interface PrepareOptions {
     linkChildren?: boolean // if true, attaches .children = Cell[]

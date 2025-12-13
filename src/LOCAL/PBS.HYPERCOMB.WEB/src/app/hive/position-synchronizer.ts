@@ -1,9 +1,9 @@
 import { Injectable, inject, effect } from "@angular/core"
-import { ContextStack } from "../core/controller/context-stack"
+import { ParentContext } from "../core/controller/context-stack"
 import { CombQueryService } from "../cells/storage/comb-query-service"
 import { HoneycombStore } from "../cells/storage/honeycomb-store"
-import { Cell } from "../cells/cell"
 import { PIXI_MANAGER } from "../shared/tokens/i-pixi-manager.token"
+import { Cell } from "../models/cell"
 
 @Injectable({ providedIn: 'root' })
 export class PositionSynchronizer {
@@ -12,7 +12,7 @@ export class PositionSynchronizer {
   // ─────────────────────────────────────────────
   private readonly query = inject(CombQueryService)
   private readonly pixi = inject(PIXI_MANAGER)
-  private readonly stack = inject(ContextStack)
+  private readonly stack = inject(ParentContext)
   private readonly store = inject(HoneycombStore)
 
   constructor() {

@@ -2,8 +2,8 @@
 import { Injectable, inject } from '@angular/core'
 import { Assets, Sprite, Texture } from 'pixi.js'
 import { BaseSpriteBuilder } from './image-sprite-base'
-import { Cell } from 'src/app/cells/cell'
 import { OpfsImageService } from 'src/app/hive/storage/opfs-image.service'
+import { Cell } from 'src/app/models/cell'
 
 @Injectable({ providedIn: 'root' })
 export class ImageSprite extends BaseSpriteBuilder<Cell> {
@@ -20,14 +20,14 @@ export class ImageSprite extends BaseSpriteBuilder<Cell> {
 
     this.debug?.log?.(
       'sprite',
-      `image sprite build start: name=${cell.name} id=${cell.cellId} hash=${cell.imageHash}`
+      `image sprite build start: name=${cell.name} id=${cell.gene} hash=${cell.imageHash}`
     )
 
     // 1. ensure hash exists
     if (!cell.imageHash) {
       this.debug?.warn?.(
         'sprite',
-        `no imageHash on cell: name=${cell.name} id=${cell.cellId}`
+        `no imageHash on cell: name=${cell.name} id=${cell.gene}`
       )
       return sprite
     }

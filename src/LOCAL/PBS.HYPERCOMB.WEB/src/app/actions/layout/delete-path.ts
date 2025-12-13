@@ -1,7 +1,7 @@
 ﻿// actions/delete-pathway.action.ts
 import { Injectable } from "@angular/core"
 import { HypercombMode } from "src/app/core/models/enumerations"
-import { Cell } from "src/app/cells/cell"
+import { Cell } from "src/app/models/cell-kind"
 import { CellPayload } from "src/app/actions/action-contexts"
 import { ActionBase } from "src/app/actions/action.base"
 

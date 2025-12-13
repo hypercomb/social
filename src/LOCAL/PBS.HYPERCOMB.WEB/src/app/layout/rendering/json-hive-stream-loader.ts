@@ -1,7 +1,7 @@
 import { Injectable, inject, signal, effect } from '@angular/core'
-import { Cell } from 'src/app/cells/cell'
+import { Cell } from 'src/app/models/cell-kind'
 import { CarouselService } from 'src/app/common/carousel-menu/carousel-service'
-import { IDexieHive } from 'src/app/hive/hive-models'
+import { IHiveInfo } from 'src/app/hive/hive-resolution-type'
 import { TextureService } from 'src/app/user-interface/texture/texture-service'
 
 @Injectable({ providedIn: 'root' })
@@ -41,7 +41,7 @@ export class JsonHiveStreamLoader {
     this._loading.set(false)
   }
 
-  private async streamHiveAndNeighbors(center: IDexieHive): Promise<void> {
+  private async streamHiveAndNeighbors(center: IHiveInfo): Promise<void> {
     this.cancel = false
     this._loading.set(true)
 
@@ -67,12 +67,12 @@ export class JsonHiveStreamLoader {
   // ─────────────────────────────────────────────
   // neighbor ordering
   // ─────────────────────────────────────────────
-  private buildNeighborOrder(center: IDexieHive): IDexieHive[] {
+  private buildNeighborOrder(center: IHiveInfo): IHiveInfo[] {
     const items = this.carousel.items?.() ?? []
     const idx = items.findIndex(i => i.name === center.name)
     if (idx === -1) return []
 
-    const order: IDexieHive[] = []
+    const order: IHiveInfo[] = []
     const max = Math.min(items.length, 5)
 
     for (let offset = 1; offset < max; offset++) {
@@ -88,7 +88,7 @@ export class JsonHiveStreamLoader {
   // ─────────────────────────────────────────────
   // core streaming logic
   // ─────────────────────────────────────────────
-  private async loadHiveFromJson(hive: IDexieHive): Promise<void> {
+  private async loadHiveFromJson(hive: IHiveInfo): Promise<void> {
     try {
       const filePath = `${this.hiveBasePath}${hive.name}.json`
       const response = await fetch(filePath)

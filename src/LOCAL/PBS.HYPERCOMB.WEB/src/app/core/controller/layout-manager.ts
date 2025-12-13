@@ -1,10 +1,10 @@
 ﻿import { Injectable, computed, inject } from "@angular/core"
 import { CellOptions } from "src/app/cells/models/cell-options"
-import { ContextStack } from "./context-stack"
+import { ParentContext } from "./context-stack"
 
 @Injectable({ providedIn: 'root' })
 export class LayoutManager {
-  private readonly stack = inject(ContextStack)
+  private readonly stack = inject(ParentContext)
 
   public readonly locked = computed(() => {
     const cell = this.stack.cell()

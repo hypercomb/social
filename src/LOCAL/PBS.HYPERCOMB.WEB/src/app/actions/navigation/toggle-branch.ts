@@ -1,9 +1,9 @@
 ﻿// actions/toggle-branch.command.ts
 import { Injectable } from "@angular/core"
 import { CellOptions, POLICY } from "../../core/models/enumerations"
-import { Cell } from "../../cells/cell"
 import { CellPayload } from "../action-contexts"
 import { ActionBase } from "../action.base"
+import { Cell } from "src/app/models/cell"
 
 @Injectable({ providedIn: "root" })
 export class ToggleBranchAction extends ActionBase<CellPayload> {
@@ -12,13 +12,10 @@ export class ToggleBranchAction extends ActionBase<CellPayload> {
   public override description = "Flip the branch flag on the focused cell"
 
   public override enabled = async (payload: CellPayload): Promise<boolean> => {
-    if (this.policy.any(POLICY.NoActiveTile)) return false
     return !!payload.cell
   }
 
   public run = async (payload: CellPayload) => {
-    if (this.policy.any(POLICY.NoActiveTile)) return
-
     const cell: Cell | undefined = payload.cell
     if (!cell) return
 

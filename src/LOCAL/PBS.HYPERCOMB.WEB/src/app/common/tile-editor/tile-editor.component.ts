@@ -6,22 +6,22 @@ import { Assets } from 'pixi.js'
 import { AiSearchPath, AlignMiddle, BranchPath } from 'src/app/helper/path'
 import { CellOptions, POLICY } from 'src/app/core/models/enumerations'
 import { EditorActionsComponent } from './editor-actions/editor-actions.component'
-import { SaveBranchButtonComponent } from './save-branch-button/save-branch-button.component'
 import { SpaceContinuationDirective } from './space-continuation.directive'
 import { SwatchPanelComponent } from './swatch-panel/swatch-panel.component'
 import { TileImageComponent } from './tile-image/tile-image.component'
 import { EditorService } from 'src/app/state/interactivity/editor-service'
 import { CellEditor } from 'src/app/common/tile-editor/cell-editor'
-import { Cell } from 'src/app/cells/cell'
 import { Events } from 'src/app/helper/events/events'
 import { Hypercomb } from 'src/app/core/mixins/abstraction/hypercomb.base'
-import { CellFactory } from 'src/app/inversion-of-control/factory/cell-factory'
 import { MODIFY_COMB_SVC } from 'src/app/shared/tokens/i-honeycomb-service.token'
 import { ImagePersistenceService } from './tile-image/image-persistence-service'
 import { PointerState } from 'src/app/state/input/pointer-state'
-import { HiveService } from 'src/app/hive/storage/hive-service'
 import { ImageCaptureManager } from './tile-image/image-capture-manager'
 import { CellEditContext } from 'src/app/state/interactivity/cell-edit-context'
+import { HiveService } from 'src/app/cells/hive/hive-service'
+import { CellFactory } from 'src/app/inversion-of-control/factory/cell-factory'
+import { Cell } from 'src/app/models/cell'
+import { ResourceManager } from 'src/app/hive/resource-manager'
 
 @Component({
   standalone: true,
@@ -33,7 +33,6 @@ import { CellEditContext } from 'src/app/state/interactivity/cell-edit-context'
     FormsModule,
     MatIconModule,
     EditorActionsComponent,
-    SaveBranchButtonComponent,
     SpaceContinuationDirective,
     SwatchPanelComponent,
     TileImageComponent
@@ -46,11 +45,12 @@ export class TileEditorComponent extends Hypercomb {
   // dependencies
   // ─────────────────────────────────────────────
   public readonly es = inject(EditorService)
-  private readonly factory = inject(CellFactory)
+    private readonly factory = inject(CellFactory)
   private readonly hexagonEditor = inject(CellEditor)
-  public readonly hivesvc = inject(HiveService)
   public readonly captureManager = inject(ImageCaptureManager)
+  public readonly hivesvc = inject(HiveService)
   private readonly modify = inject(MODIFY_COMB_SVC)
+  private readonly manager = inject(ResourceManager)
   public readonly persistence = inject(ImagePersistenceService)
   private hasInitializedFocus = false
   private readonly ps = inject(PointerState)
@@ -162,7 +162,7 @@ export class TileEditorComponent extends Hypercomb {
     this.hexagonEditor.delete(cell)
 
     const hiveName = this.state.scout.name
-    await this.hivesvc.moveHiveToHistory(hiveName);
+    await this.hivesvc.delete(hiveName);
   }
 
   // ─────────────────────────────────────────────
@@ -172,16 +172,20 @@ export class TileEditorComponent extends Hypercomb {
     const context = this.context
     const cell = context?.cell
     if (!cell) return
-    const updated = this.factory.update(cell, { name: value })
-    context.setCell(updated)
+
+    // const updated = this.factory.update(cell, { name: value })
+    this.manager.stage(JSON.stringify({name: value}))
+
+    // context.setCell(updated)
   }
 
   public onLinkChange = (value: string): void => {
     const context = this.context
     const cell = context?.cell
     if (!cell) return
-    const updated = this.factory.update(cell, { link: value })
-    context.setCell(updated)
+    // const updated = this.factory.update(cell, { link: value })
+       this.manager.stage(JSON.stringify({name: value}))
+    // context.setCell(updated)
   }
 
 

@@ -15,7 +15,7 @@ import { CoordinateLocator } from 'src/app/unsorted/utility/coordinate-locator'
 import { CoordinateDetector } from '../detection/coordinate-detector'
 import { OpenGraphResult } from './open-graph-interfaces'
 import { ReceiveFileBase } from './receive-file-base'
-import { Cell } from 'src/app/cells/cell'
+import { Cell } from 'src/app/models/cell-kind'
 
 @Injectable({
     providedIn: 'root'

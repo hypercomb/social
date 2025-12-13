@@ -1,11 +1,10 @@
 ﻿import { Injectable, inject } from "@angular/core"
 import { CellFactory } from "../inversion-of-control/factory/cell-factory"
 import { ClipboardStore } from "./clipboard-store"
-import { Cell } from "../cells/cell"
 import { MODIFY_COMB_SVC } from "../shared/tokens/i-honeycomb-service.token"
 import { CLIPBOARD_REPOSITORY } from "../shared/tokens/i-clipboard-repository"
 import { CELL_REPOSITORY } from "../shared/tokens/i-cell-repository.token"
-import { IHiveImage } from "../core/models/i-hive-image"
+import { Cell } from "../models/cell"
 
 @Injectable({ providedIn: "root" })
 export class ClipboardService {
@@ -39,7 +38,6 @@ export class ClipboardService {
         if (!active) return
 
         const clone = await this.factory.clone(cell, {
-            hive: active.hive,
             sourceId: active.cellId!,
         })
         const { ...rest} = clone

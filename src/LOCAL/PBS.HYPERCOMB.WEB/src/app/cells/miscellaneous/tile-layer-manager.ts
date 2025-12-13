@@ -9,7 +9,7 @@ import { BranchOverlaySprite } from 'src/app/user-interface/sprite-components/br
 import { HighDefinitionTextService } from 'src/app/user-interface/sprite-components/high-definition-text-service.base'
 import { ImageSprite } from 'src/app/user-interface/sprite-components/image-sprite'
 import { SelectedTileSprite } from 'src/app/user-interface/sprite-components/selected-tile-sprite'
-import { Cell } from '../cell'
+import { Cell } from 'src/app/models/cell'
 
 @Injectable({ providedIn: 'root' })
 export class TileLayerManager extends PixiServiceBase {

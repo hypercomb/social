@@ -1,5 +1,5 @@
 ﻿import { Injectable } from '@angular/core'
-import { Cell } from 'src/app/cells/cell'
+import { Cell } from 'src/app/models/cell-kind'
 import { SerializationService } from 'src/app/database/persistence/serialization-service'
 
 @Injectable({ providedIn: 'root' })

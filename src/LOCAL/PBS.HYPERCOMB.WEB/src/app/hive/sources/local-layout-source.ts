@@ -1,5 +1,5 @@
 ﻿import { Injectable } from "@angular/core"
-import { Cell } from "src/app/cells/cell"
+import { Cell } from "src/app/models/cell-kind"
 import { LayoutSourceBase } from "./layout-source-base"
 
 @Injectable({ providedIn: 'root' })

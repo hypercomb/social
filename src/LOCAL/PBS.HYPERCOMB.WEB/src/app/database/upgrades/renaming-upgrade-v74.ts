@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core'
 import { Transaction } from 'dexie'
 import { IDatabaseUpgrade } from './i-database-upgrade'
 import { IPropertyMapper, TilePropertyMapper } from './tile-property-mapper'
-import { Cell } from 'src/app/cells/cell'
+import { Cell } from 'src/app/models/cell-kind'
 import DBTables from 'src/app/core/constants/db-tables'
 
 @Injectable({ providedIn: 'root' })

@@ -5,12 +5,14 @@ import { HypercombMode, POLICY } from "src/app/core/models/enumerations"
 import { Hypercomb } from "src/app/core/mixins/abstraction/hypercomb.base"
 import { EditorService } from "src/app/state/interactivity/editor-service"
 import { CONTEXT_MENU } from "src/app/shared/tokens/i-hypercomb.token"
+import { CoordinateDetector } from "src/app/helper/detection/coordinate-detector"
 
 @Injectable({ providedIn: 'root' })
 export class PolicyRegistrations extends Hypercomb {
   private readonly es = inject(EditorService)
   private readonly contextmenu = inject(CONTEXT_MENU)
-  
+    private readonly detector = inject(CoordinateDetector)
+    
   public initialize = () => {
     // viewing clipboard
     const isViewingClipboard = computed(
@@ -55,7 +57,7 @@ export class PolicyRegistrations extends Hypercomb {
     this.policy.registerSignal(POLICY.ControlDown, controlDown, this.injector)
 
     // no active tile (fix inversion)
-    const noActiveTile = computed(() => !this.stack.cell())
+    const noActiveTile = computed(() => !this.detector.activeCell())
     this.policy.registerSignal(POLICY.NoActiveTile, noActiveTile, this.injector)
 
 

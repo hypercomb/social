@@ -4,7 +4,7 @@ import { HypercombMode, POLICY } from "../../core/models/enumerations"
 import { LinkNavigationService } from "../../navigation/link-navigation-service"
 import { CellPayload } from "../action-contexts"
 import { ActionBase } from "../action.base"
-import { Cell } from "src/app/cells/cell"
+import { Cell } from "src/app/models/cell"
 
 @Injectable({ providedIn: "root" })
 export class OpenLinkAction extends ActionBase<CellPayload> {

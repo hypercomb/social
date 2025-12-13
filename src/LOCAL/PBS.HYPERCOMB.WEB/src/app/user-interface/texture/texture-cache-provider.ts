@@ -2,9 +2,9 @@
 // (as you already have it)
 import { Injectable, inject } from "@angular/core"
 import { Assets, Texture } from "pixi.js"
-import { Cell } from "src/app/cells/cell"
 import { HypercombState } from "src/app/state/core/hypercomb-state"
 import { ITextureProvider } from "./i-texture-provider"
+import { Cell } from "src/app/models/cell"
 
 @Injectable({ providedIn: "root" })
 export class TextureCacheProvider implements ITextureProvider {

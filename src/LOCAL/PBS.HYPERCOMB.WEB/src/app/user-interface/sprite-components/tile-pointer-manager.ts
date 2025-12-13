@@ -10,9 +10,9 @@ import { ViewPhotoAction } from "src/app/actions/cells/view-photo"
 import { PayloadBase } from "src/app/actions/action-contexts"
 import { TileSelectionManager } from "src/app/cells/selection/tile-selection-manager"
 import { SelectionMoveManager } from "src/app/cells/selection/selection-move-manager"
-import { Cell } from "src/app/cells/cell"
 import { ContextMenu } from "src/app/navigation/menus/context-menu"
 import { TouchDetectionService } from "src/app/core/mobile/touch-detection-service"
+import { Cell } from "src/app/models/cell"
 
 @Injectable({ providedIn: "root" })
 export class TilePointerManager {

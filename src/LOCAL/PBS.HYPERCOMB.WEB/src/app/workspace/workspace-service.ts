@@ -1,6 +1,6 @@
 ﻿// src/app/workspace/workspace-service.ts
 import { inject, Injectable } from '@angular/core'
-import { Cell } from '../cells/cell'
+import { Cell } from '../models/cell-kind'
 import { WorkspaceBase } from './workplace-base'
 import { HIVE_STORE } from '../shared/tokens/i-hive-store.token'
 import { HONEYCOMB_STORE } from '../shared/tokens/i-honeycomb-store.token'

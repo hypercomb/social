@@ -1,8 +1,8 @@
 ﻿import { Injectable } from "@angular/core"
 import { RenderTexture, Texture } from "pixi.js"
-import { Cell } from "src/app/cells/cell"
 import { ITextureProvider } from "./i-texture-provider"
 import { RenderTextureProvider } from "./render-texture-provider"
+import { Cell } from "src/app/models/cell"
 
 @Injectable({ providedIn: 'root' })
 export class EmptyTextureProvider extends RenderTextureProvider implements ITextureProvider {

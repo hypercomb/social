@@ -5,8 +5,8 @@ import { PixiDataServiceBase } from "../../database/pixi-data-service-base"
 import { Tile } from "../../cells/models/tile"
 import { MaskComponent } from "../../user-interface/sprite-components/mask-component"
 import { TextureService } from "../../user-interface/texture/texture-service"
-import { Cell } from "src/app/cells/cell"
 import { HONEYCOMB_STORE } from "src/app/shared/tokens/i-honeycomb-store.token"
+import { Cell } from "src/app/models/cell"
 
 @Injectable({ providedIn: 'root' })
 export class TileFactory extends PixiDataServiceBase {

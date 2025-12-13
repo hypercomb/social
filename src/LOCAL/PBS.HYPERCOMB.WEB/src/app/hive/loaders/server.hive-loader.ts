@@ -1,12 +1,12 @@
 import { Injectable, inject } from "@angular/core"
 import { HierarchyRestorationService } from "src/app/database/hierarchy/data-hierarchy-organizer"
 import { QueryService } from "src/app/helper/external-storage/query-service"
-import { HiveResolutionType } from "../../hive-models"
+import { HiveResolutionType } from "../../hive-resolution-type"
 import { LOOKUP_HIVES } from "src/app/shared/tokens/i-hive-store.token"
 import { HiveScout } from "../../hive-scout"
 import { CombQueryService } from "src/app/cells/storage/comb-query-service"
 import { IHiveLoader, HiveLoaderBase } from "../hive-loader.base"
-import { Hive } from "src/app/cells/cell"
+import { Hive } from "src/app/models/cell-kind"
 
 @Injectable({ providedIn: "root" })
 export class ServerHiveLoader extends HiveLoaderBase implements IHiveLoader {

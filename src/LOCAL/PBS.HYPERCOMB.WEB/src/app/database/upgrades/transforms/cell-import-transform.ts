@@ -1,7 +1,7 @@
 // cell-import-transform.ts
 import { inject, Injectable } from '@angular/core'
 import { IPropertyMapper, TilePropertyMapper } from '../tile-property-mapper'
-import { Cell } from 'src/app/cells/cell'
+import { Cell } from 'src/app/models/cell-kind'
 import DBTables from 'src/app/core/constants/db-tables'
 import { IImportTransform } from './i-import-transform'
 import { CellOptions } from 'src/app/core/models/enumerations'

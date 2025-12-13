@@ -1,5 +1,5 @@
 ﻿import { inject, Injectable } from "@angular/core";
-import { Cell } from "../cells/cell";
+import { Cell } from "../models/cell-kind";
 import { Tile } from "../cells/models/tile";
 import { HIVE_STATE } from "../shared/tokens/i-hive-store.token";
 import { Router } from "@angular/router";
@@ -38,7 +38,7 @@ export class LocatorService {
 
 
   public findByLocation(location: { x: number, y: number }, tolerance = 0.001): Tile | undefined {
-    const tiles = this.store.combTiles() as Tile[]
+    const tiles = this.store.tiles() as Tile[]
     return tiles.find(
       (c) =>
         Math.abs(c.x - location.x) <= tolerance &&

@@ -2,7 +2,7 @@ import { Injectable, inject } from "@angular/core"
 import { CELL_CREATOR, CELL_FACTORY } from "src/app/inversion-of-control/tokens/tile-factory.token"
 import { MODIFY_COMB_SVC } from "src/app/shared/tokens/i-honeycomb-service.token"
 import { PIXI_MANAGER } from "src/app/shared/tokens/i-pixi-manager.token"
-import { Cell } from "src/app/cells/cell"
+import { Cell } from "src/app/models/cell-kind"
 import { TILE_FACTORY } from "../shared/tokens/i-hypercomb.token"
 
 @Injectable({ providedIn: "root" })

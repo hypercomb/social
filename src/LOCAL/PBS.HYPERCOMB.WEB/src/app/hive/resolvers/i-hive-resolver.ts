@@ -1,5 +1,5 @@
 ﻿// i-hive-resolver.ts
-import { HiveResolutionType } from "../hive-models"
+import { HiveResolutionType } from "../hive-resolution-type"
 import { HiveScout } from "../hive-scout"
 
 export interface IHiveGuide {

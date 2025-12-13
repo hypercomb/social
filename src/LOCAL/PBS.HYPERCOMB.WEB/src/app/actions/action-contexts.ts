@@ -1,7 +1,7 @@
 ﻿import { FederatedPointerEvent } from "pixi.js"
-import { Cell } from "../cells/cell"
 import { HypercombMode } from "../core/models/enumerations"
-import { IDexieHive } from "../hive/hive-models"
+import { IHiveInfo } from "../hive/hive-resolution-type"
+import { Cell } from "../models/cell"
 
 export type ContextKind =
     | "cell"
@@ -61,7 +61,7 @@ export interface DeletePayload extends PayloadBase {
 
 export interface ImportHivePayload extends PayloadBase {
     kind: "import-hive"
-    hive: IDexieHive
+    hive: IHiveInfo
 }
 
 export interface ShowContext extends PayloadBase {

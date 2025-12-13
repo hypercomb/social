@@ -4,9 +4,9 @@ import { EditorService } from '../state/interactivity/editor-service'
 import { HttpsLinkResolver } from './https-link-resolver'
 import { ILinkResolver } from './i-navigation-interfaces'
 import { YouTubeLinkResolver } from './youtube-link-resolver'
-import { Cell } from '../cells/cell'
 import { HONEYCOMB_STORE } from '../shared/tokens/i-honeycomb-store.token'
 import { Hypercomb } from '../core/mixins/abstraction/hypercomb.base'
+import { Cell } from '../models/cell'
 
 @Injectable({ providedIn: 'root' })
 export class LinkNavigationService extends Hypercomb {

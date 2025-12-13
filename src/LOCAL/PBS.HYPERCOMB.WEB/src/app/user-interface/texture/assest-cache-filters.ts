@@ -2,7 +2,7 @@
 // - provide stable keys for assets cache lookups
 // - wraps around cell so you don't repeat the cacheKey logic inline
 
-import { Cell } from "src/app/cells/cell"
+import { Cell } from "src/app/models/cell-kind"
 
 export const assetCacheKey = (cell: Cell): string => {
     const cid = (cell as any).cellId ?? (cell as any).id ?? 'unknown'

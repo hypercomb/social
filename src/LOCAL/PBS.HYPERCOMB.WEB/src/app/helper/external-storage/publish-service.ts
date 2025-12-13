@@ -1,8 +1,8 @@
 ﻿import { Injectable, effect } from "@angular/core"
-import { HypercombData } from "src/app/actions/hypercomb-data"
+import { Hypercomb } from "src/app/actions/hypercomb-data"
 
 @Injectable({ providedIn: 'root' })
-export class PublishService extends HypercombData {
+export class PublishService extends Hypercomb {
 
 
   constructor() {

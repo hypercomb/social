@@ -5,10 +5,11 @@ import { HONEYCOMB_STORE } from "src/app/shared/tokens/i-honeycomb-store.token"
 import { MODIFY_COMB_SVC } from "src/app/shared/tokens/i-honeycomb-service.token"
 import { AxialService } from "src/app/services/axial-service"
 import { CoordinateDetector } from "src/app/helper/detection/coordinate-detector"
-import { Cell } from "../cell"
+
 import { PixiServiceBase } from "src/app/pixi/pixi-service-base"
 import { SelectionService } from "./selection-service"
 import { effect } from "src/app/performance/effect-profiler"
+import { Cell } from "src/app/models/cell"
 
 @Injectable({ providedIn: "root" })
 export class SelectionMoveManager extends PixiServiceBase {

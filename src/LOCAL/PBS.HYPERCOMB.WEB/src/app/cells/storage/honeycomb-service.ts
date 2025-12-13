@@ -1,33 +1,26 @@
 ﻿// src/app/cells/storage/honeycomb-service.ts
 import { Injectable, inject, signal } from '@angular/core'
-import { Cell, Ghost, NewCell } from '../cell'
 import { PointerState } from 'src/app/state/input/pointer-state'
 import { effect } from 'src/app/performance/effect-profiler'
 import { DataOrchestratorBase } from './data-orchestration-base'
-import {
-  ICellService,
-  IModifyComb,
-  IHiveHydration,
-} from 'src/app/shared/tokens/i-honeycomb-service.token'
-import { toCellEntity } from 'src/app/core/mappers/to-cell-entity'
-import { safeDate, toCell } from 'src/app/core/mappers/to-cell'
-import { CellOptions } from '../models/cell-options'
+import { Cell } from 'src/app/models/cell'
+import { NewCell } from 'src/app/models/new-cell'
+import { Ghost } from 'src/app/models/ghost-cell'
+import { OpfsManager } from 'src/app/common/opfs/opfs-manager'
 
 @Injectable({ providedIn: 'root' })
-export class HoneycombService extends DataOrchestratorBase implements ICellService, IModifyComb, IHiveHydration {
+export class HoneycombService extends DataOrchestratorBase {
 
   private readonly ps = inject(PointerState)
+  private readonly opfs = inject(OpfsManager)
 
-  // v1-compatible layer-hydration tracking
-  private readonly hydratedLayers = new Set<string>()
-
-  private readonly _lastCreated = signal<Cell | null>(null)
-  public readonly lastCreated = this._lastCreated.asReadonly()
+  private readonly hydrated = new Set<string>()
 
   private readonly _ready = signal(false)
   public readonly ready = this._ready.asReadonly()
 
-  public readonly selectedCells = this.honeycomb.store.selectedCells
+  private readonly _lastCreated = signal<Cell | null>(null)
+  public readonly lastCreated = this._lastCreated.asReadonly()
 
   constructor() {
     super()
@@ -35,201 +28,92 @@ export class HoneycombService extends DataOrchestratorBase implements ICellServi
     this.setupPointerCleanup()
   }
 
-
-  // ---------------------------------------------------------
-  // HOT-only flush (unchanged)
-  // ---------------------------------------------------------
-  public flush() {
-    return this.honeycomb.store.flush()
-  }
-
-  public reset(): void {
-    this.hydratedLayers.clear()
-  }
-
-  public setReady(): void {
+  public setReady() {
     this._ready.set(true)
   }
 
-  // =========================================================
-  //   NEW / CLEAN LAYER HYDRATION (v1 correct behavior)
-  // =========================================================
-
-  private setupHydrationEffect(): void {
+  // ----------------------------------------------------------
+  // AUTO-HYDRATION when navigating the hive
+  // ----------------------------------------------------------
+  private setupHydrationEffect() {
     effect(() => {
       if (!this.ready()) return
 
       const parent = this.stack.cell()
       if (!parent) return
 
-      const layerKey = `${parent.hive}-${parent.cellId}`
+      const gene = String(parent.cellId)
+      if (this.hydrated.has(gene)) return
 
-      // already hydrated this honeycomb layer → do nothing
-      if (this.hydratedLayers.has(layerKey)) return
-
-      this.hydratedLayers.add(layerKey)
-
-      this.hydrateLayer(parent.cellId!)
+      this.hydrated.add(gene)
+      this.hydrate()
     })
   }
 
-  // ---------------------------------------------------------
-  // load ONLY this layer (children of parentId)
-  // ---------------------------------------------------------
-  private async hydrateLayer(parentId: number): Promise<void> {
-  try {
-    const rows = await this.repository.fetchBySourceId(parentId)
-    const children = rows.map(r => <Cell>toCell(r))
+  private async hydrate(): Promise<string[]> {
+    const hive = this.state.hive()!
+    const parentGene = await this.hashsvc.hash(hive)
 
-    const parent = this.honeycomb.store.lookupData(parentId)
-    if (parent) {
-      // recompute every time; don't trust DB field
-      const count = children.length
-      if (parent.childCount !== count) {
-        parent.childCount = count
-        this.staging.stageReplace(parent)
-      }
-    }
+    // hives/<parentGene>/
+    const dir = await this.opfs.ensureDirs([
+      "hives",
+      parentGene
+    ])
 
-    if (!children.length) return
+    const entries = await this.opfs.listEntries(dir)
 
-    const ids = children.map(c => c.cellId!)
-    const counts = await Promise.all(ids.map(id => this.repository.fetchChildCount(id)))
+    // genes = folders; strands = files
+    const childGenes = entries
+      .filter(e => e.handle.kind === "directory")
+      .map(e => e.name)
+      .sort((a, b) => a.localeCompare(b))
 
-    children.forEach((c, i) => {
-      // recompute; never assume DB field exists
-      c.childCount = counts[i]
-    })
-
-    this.staging.stageMerge(children)
-    this.honeycomb.store.enqueue(children)
-  } catch (err) {
-    console.warn('[HoneycombService] layer hydration failed:', err)
-  }
-}
-
-  // =========================================================
-  // CREATION
-  // =========================================================
-  private isPersistable(cell: Cell): boolean {
-    return !['Ghost', 'Clipboard', 'Path'].includes(cell.kind as string)
+    return childGenes
   }
 
+
+  // ----------------------------------------------------------
+  // ADDING NEW GENES (CELLS)
+  // ----------------------------------------------------------
   public async addCell(newCell: NewCell | Ghost): Promise<Cell> {
-    let cell: Cell
-
-    if (this.isPersistable(newCell as Cell)) {
-      newCell.setKind("Cell")
-      const row = await this.repository.add(toCellEntity(newCell))
-      cell = <Cell>toCell(row)
-    } else {
-      cell = newCell as unknown as Cell
-    }
+    const id = this.hash(newCell.name)
+    const cell = new Cell({ ...newCell, cellId: id })
+    cell.setKind("Cell")
 
     this.staging.stageAdd(cell)
     this._lastCreated.set(cell)
     return cell
   }
 
-  // deprecated but left intact
-  public async create(): Promise<Cell> {
-    throw new Error("create() is deprecated; use addCell()")
-  }
-
-  // =========================================================
-  // REMOVAL
-  // =========================================================
   public async removeCell(cell: Cell): Promise<void> {
-    const id = cell.cellId!
-
-    if (cell.kind !== 'Ghost') {
-      cell.options.update(v => v | CellOptions.Deleted)
-      cell.dateDeleted = safeDate(new Date()) || ''
-      await this.repository.update(toCellEntity(cell))
-    }
-
-    this.staging.stageRemove(id)
-    this.honeycomb.store.unregister(id)
+    this.staging.stageRemove(cell.cellId!)
+    this.honeycomb.store.unregister(cell.cellId!)
   }
 
-  public async deleteAll(root: Cell, hierarchy: Cell[]): Promise<void> {
-    const ids = hierarchy.map(c => c.cellId!).filter(Boolean)
-    if (root.cellId && !ids.includes(root.cellId)) ids.push(root.cellId)
-
-    if (!ids.length) return
-
-    await this.repository.bulkDelete(ids)
-    for (const id of ids) {
-      this.staging.stageRemove(id)
-      this.honeycomb.store.unregister(id)
-    }
-  }
-
-  // =========================================================
-  // UPDATES
-  // =========================================================
+  // no DB anymore — all updates are local to staging + store
   public async updateCell(cell: Cell): Promise<number> {
-    if (!this.isPersistable(cell)) {
-      this.staging.stageReplace(cell)
-      return 0
-    }
-
-    const res = await this.repository.update(toCellEntity(cell))
     this.staging.stageReplace(cell)
     this.honeycomb.store.enqueue(cell)
-    return res
+    return 0
   }
 
-  public enqueue(cell: Cell) {
-    this.honeycomb.store.enqueue(cell)
-  }
-
-  public async updateHasChildren(cell: Cell): Promise<void> {
-    const count = await this.repository.fetchChildCount(cell.cellId!)
-    cell.childCount = count
-    this.staging.stageReplace(cell)
-  }
-
-  public async updateSilent(cell: Cell): Promise<number> {
-    if (!this.isPersistable(cell)) return 0
-    return this.repository.update(toCellEntity(cell))
-  }
-
-  public async bulkPut(cells: Cell[]): Promise<void> {
-    if (!cells.length) return
-    await this.repository.bulkPut(cells.map(c => toCellEntity(c)))
+  public async bulkPut(cells: Cell[]) {
     this.staging.stageMerge(cells)
   }
 
-  public async bulkDelete(ids: number[]): Promise<void> {
-    await this.repository.bulkDelete(ids)
+  public async bulkDelete(ids: number[]) {
     for (const id of ids) {
       this.staging.stageRemove(id)
       this.honeycomb.store.unregister(id)
     }
   }
 
-  // =========================================================
+  // ----------------------------------------------------------
   // POINTER CLEANUP
-  // =========================================================
-  private setupPointerCleanup(): void {
+  // ----------------------------------------------------------
+  private setupPointerCleanup() {
     this.ps.onUp(() => {
       requestAnimationFrame(() => this.stack.doneNavigating())
     })
-  }
-
-  // =========================================================
-  // LEGACY API
-  // =========================================================
-  public invalidate(): void {
-    const top = this.stack.top()
-    const hive = top?.cell?.hive
-    if (!hive) return
-    this.reset()
-    this.honeycomb.store.invalidate()
-  }
-
-  public invalidateTile(cellId: number): void {
-    this.honeycomb.store.unregister(cellId)
   }
 }

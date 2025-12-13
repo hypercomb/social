@@ -1,23 +1,19 @@
 ﻿// src/app/inversion-of-control/tokens/hive-store.tokens.ts
 import { InjectionToken, Signal } from "@angular/core"
-import { Cell, Hive } from "src/app/cells/cell"
 import { Tile } from "src/app/cells/models/tile"
-import { IDexieHive } from "src/app/hive/hive-models"
 import { HiveScout } from "src/app/hive/hive-scout"
+import { IHiveInfo } from "src/app/hive/i-hive-info"
+import { HivePortal } from "src/app/models/hive-portal"
 
 
 // --------------------
 // modify: commands/mutations
 // --------------------
 export interface IControlHives {
-    setHive(root:Hive)
-    markHydrated(dexieHive: IDexieHive)
-    hydrate(hiveNames: string[] | IDexieHive[]): void
+    setHive(name: string)
+    hydrate(hiveNames: string[] | IHiveInfo[]): void
     setActive(hiveName: string): void
-    next(): void
-    prev(): void
-    addOrUpdate: (hive: IDexieHive) => void
-    replace: (oldName: string, updated: IDexieHive) => void
+    replace: (oldName: string, updated: IHiveInfo) => void
     remove: (name: string) => void
 }
 
@@ -25,19 +21,17 @@ export interface IControlHives {
 // state: reactive selectors
 // --------------------
 export interface IHiveState {
-    filteredHives: Signal<IDexieHive[] | []>
+    filteredHives: Signal<IHiveInfo[] | []>
     isHydrated(name: string): boolean
-    combCells: Signal<Cell[]>
-    combTiles: Signal<Tile[]>
+    tiles: Signal<Tile[]>
     cellcount: Signal<number>
-    menucount: Signal<number>
-    first: Signal<IDexieHive | undefined>
+    first: Signal<IHiveInfo | undefined>
     hasItems: Signal<boolean>
-    hive: Signal<Hive | undefined>
-    items: Signal<IDexieHive[] | []>
+    hive: Signal<HivePortal | undefined>
+    items: Signal<IHiveInfo[] | []>
     activeIndex: Signal<number>
-    active: Signal<IDexieHive | undefined>
-    lastCreated: Signal<IDexieHive | undefined>
+    active: Signal<IHiveInfo | undefined>
+    lastCreated: Signal<IHiveInfo | undefined>
 }
 
 
@@ -45,7 +39,7 @@ export interface IHiveState {
 // lookup
 // --------------------
 export interface IHiveLookup {
-    lookupDexieHive(name: string): IDexieHive | null
+    lookupDexieHive(name: string): IHiveInfo | null
 }
 
 export interface IResolutionCoordinator {

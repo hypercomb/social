@@ -1,6 +1,6 @@
 import { Injectable, signal, computed, effect, inject } from "@angular/core"
-import { Cell } from "../cells/cell"
 import { IClipboardState } from "../shared/tokens/i-hypercomb.token"
+import { Cell } from "../models/cell"
 
 @Injectable({ providedIn: "root" })
 export class ClipboardStore implements IClipboardState {

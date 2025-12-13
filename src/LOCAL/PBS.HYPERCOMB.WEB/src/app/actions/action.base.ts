@@ -2,8 +2,7 @@
 import { inject, Signal } from "@angular/core"
 import { Action } from "./action-models"
 import { CoordinateDetector } from "../helper/detection/coordinate-detector"
-import { ContextStack } from "../core/controller/context-stack"
-import { Cell } from "../cells/cell"
+import { ParentContext } from "../core/controller/context-stack"
 import { HypercombState } from "../state/core/hypercomb-state"
 import { PolicyService } from "../navigation/menus/policy-service"
 import { PointerState } from "../state/input/pointer-state"
@@ -14,13 +13,14 @@ import { HIVE_STORE } from "../shared/tokens/i-hive-store.token"
 import { ImageService } from "../database/images/image-service"
 import { DebugService } from "../core/diagnostics/debug-service"
 import { LinkNavigationService } from "../navigation/link-navigation-service"
+import { Cell } from "../models/cell"
 
 export abstract class ActionBase<TPayload = unknown> implements Action<TPayload> {
   protected readonly debug = inject(DebugService)
   protected readonly menu = inject(CONTEXT_MENU)
   protected readonly registry = inject(ACTION_REGISTRY)
   protected readonly detector = inject(CoordinateDetector)
-  protected readonly stack = inject(ContextStack)
+  protected readonly stack = inject(ParentContext)
   protected readonly combstore = inject(HONEYCOMB_STORE)
   protected readonly hivestore = inject(HIVE_STORE)
   protected readonly modify = inject(MODIFY_COMB_SVC)

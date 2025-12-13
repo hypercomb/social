@@ -1,5 +1,5 @@
 ﻿// hive-resolver-base.ts
-import { HiveResolutionType } from "../hive-models"
+import { HiveResolutionType } from "../hive-resolution-type"
 import { HiveScout } from "../hive-scout"
 import { inject } from "@angular/core"
 import { DebugService } from "src/app/core/diagnostics/debug-service"

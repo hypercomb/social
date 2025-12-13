@@ -1,4 +1,4 @@
-﻿import { Cell } from "../cell"
+﻿import { Cell } from "src/app/models/cell"
 
 
 export class RestorableTileData extends Cell {

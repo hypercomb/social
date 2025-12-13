@@ -1,26 +1,22 @@
 // src/app/clipboard/copy-service.ts
 
 import { inject, Injectable } from "@angular/core"
-import { Cell } from "../cells/cell"
 import { CELL_CREATOR } from "../inversion-of-control/tokens/tile-factory.token"
 import { CELL_REPOSITORY } from "../shared/tokens/i-cell-repository.token"
 import { toCellEntity } from "../core/mappers/to-cell-entity"
 import { toCell } from "../core/mappers/to-cell"
-import { DatabaseService } from "../database/database-service"
+import { Cell } from "../models/cell"
 
 @Injectable({ providedIn: "root" })
 export class CopyService {
   private readonly creator = inject(CELL_CREATOR)
   private readonly repository = inject(CELL_REPOSITORY)
-  private readonly database = inject(DatabaseService)
 
   /**
    * Clone one or more cells including full recursive hierarchy.
    * Returns newly created top-level clones.
    */
   public async copy(cells: Cell[]): Promise<Cell[]> {
-    const db = this.database.db()
-    if (!db) throw new Error("repository has no db")
 
     const results: Cell[] = []
 

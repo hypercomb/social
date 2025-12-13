@@ -15,7 +15,6 @@ import { Hypercomb } from './core/mixins/abstraction/hypercomb.base'
 import { HONEYCOMB_STORE } from './shared/tokens/i-honeycomb-store.token'
 import { SELECTIONS } from './shared/tokens/i-selection.token'
 import { OpfsFileExplorerComponent } from './common/opfs/file-explorer/opfs-file-explorer.component'
-import { SampleDataLoaderService } from './database/sample-data-loader.service'
 import { GhostTileDirective } from "./cells/creation/ghost-tile-directive"
 import { EmptyHoneycombComponent } from './common/overlays/empty-honeycomb/empty-honeycomb.component'
 import { ShortcutsPageComponent } from './common/header/shortcuts-page/shortcuts-page.component'
@@ -51,7 +50,6 @@ export class AppComponent extends Hypercomb implements OnInit {
   public readonly detector = inject(CoordinateDetector)
   public readonly es = inject(EditorService)
   private readonly selections = inject(SELECTIONS)
-  private readonly sampleDataLoader = inject(SampleDataLoaderService)
   public readonly isYoutubeViewerActive = computed(() =>
     (this.state.mode() & HypercombMode.YoutubeViewer) === HypercombMode.YoutubeViewer
   )
@@ -85,7 +83,6 @@ export class AppComponent extends Hypercomb implements OnInit {
   public get isOpfsMode(): boolean { return this.state.hasMode(HypercombMode.OpfsFileExplorer) }
 
   async ngOnInit() {
-    await this.sampleDataLoader.loadSampleDataIfNeeded();
 
     // Register CommandModeBlockOpenLink policy: true if any command mode is active
     this.policy.registerSignal(

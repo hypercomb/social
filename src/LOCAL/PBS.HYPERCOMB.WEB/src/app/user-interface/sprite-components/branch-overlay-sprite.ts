@@ -1,7 +1,7 @@
 ﻿import { Injectable } from '@angular/core'
 import { Assets, Sprite } from 'pixi.js'
 import { SpriteBuilder } from './sprite-builder'
-import { Cell } from 'src/app/cells/cell'
+import { Cell } from 'src/app/models/cell'
 
 @Injectable({
     providedIn: 'root'

@@ -1,8 +1,8 @@
 ﻿import { Container, Point, Sprite, Texture } from 'pixi.js'
-import { Cell } from '../cell'
+import { Cell } from 'src/app/models/cell'
 
 export class Tile extends Container {
-  public readonly cellId: number
+  public readonly gene:string
   public readonly uniqueId: string
   public sprite!: Sprite
 

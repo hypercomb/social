@@ -3,7 +3,7 @@
 import { inject, Injector } from '@angular/core'
 import { DebugService } from '../../diagnostics/debug-service'
 import { EventDispatcher } from '../../../helper/events/event-dispatcher'
-import { ContextStack } from '../../controller/context-stack'
+import { ParentContext } from '../../controller/context-stack'
 import { KeyboardState } from '../../../interactivity/keyboard/keyboard-state'
 import { HypercombState } from '../../../state/core/hypercomb-state'
 import { LayoutState } from '../../../layout/layout-state'
@@ -17,21 +17,26 @@ import { HONEYCOMB_STORE, STAGING_ST } from 'src/app/shared/tokens/i-honeycomb-s
 import { EditorService } from 'src/app/state/interactivity/editor-service'
 import { CELL_CREATOR, CELL_FACTORY } from 'src/app/inversion-of-control/tokens/tile-factory.token'
 import { QUERY_COMB_SVC } from 'src/app/shared/tokens/i-honeycomb-query.token'
+import { HashService } from 'src/app/hive/storage/hashing-service'
 
 export function HypercombMixin<TBase extends AbstractCtor>(Base: TBase) {
     abstract class HypercombMixinClass extends Base {
+
+        public root = async (): Promise<string> => {
+            return HashService.hash("Hypercomb")
+        }
+
         public readonly injector = inject(Injector)
         protected readonly debug = inject(DebugService)
-
 
         private _HypercombState?: HypercombState
         public get state(): HypercombState {
             return this._HypercombState ??= this.injector.get(HypercombState)
         }
 
-        private _contextStack?: ContextStack
-        public get stack(): ContextStack {
-            return this._contextStack ??= this.injector.get(ContextStack)
+        private _contextStack?: ParentContext
+        public get stack(): ParentContext {
+            return this._contextStack ??= this.injector.get(ParentContext)
         }
 
         private _hs?: HypercombState

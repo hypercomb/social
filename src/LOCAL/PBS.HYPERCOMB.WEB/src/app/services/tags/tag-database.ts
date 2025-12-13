@@ -8,7 +8,7 @@
 import Dexie from "dexie"
 import { ITagManager, ITag } from "src/app/core/models/model-interfaces"
 import { slugify } from "src/app/core/models/tag"
-import { Cell } from "src/app/cells/cell"
+import { Cell } from "src/app/models/cell-kind"
 import { Constants } from "src/app/helper/constants"
 import DBTables from "src/app/core/constants/db-tables"
 

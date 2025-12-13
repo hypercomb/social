@@ -1,14 +1,14 @@
 import { Injectable, effect } from "@angular/core"
-import { ContextStack } from "./context-stack"
+import { ParentContext } from "./context-stack"
 import { StackEntry } from "src/app/models/stack-entry"
 import { StorageManager } from "src/app/helper/storage-manager"
 
 @Injectable({ providedIn: "root" })
 export class StackPersistence {
-  private static readonly storageKey = "ContextStack"
+  private static readonly storageKey = "ParentContext"
 
   constructor(
-    private readonly stack: ContextStack,
+    private readonly stack: ParentContext,
     private readonly storage: StorageManager
   ) {
     // auto-save on every stack change

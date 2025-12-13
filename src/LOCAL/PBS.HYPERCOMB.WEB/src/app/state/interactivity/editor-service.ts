@@ -1,11 +1,10 @@
 ﻿import { Injectable, signal, computed, inject } from "@angular/core"
 import { EditorMode } from "src/app/core/models/enumerations"
-import { Cell } from "src/app/cells/cell"
-import { isNewHive } from "src/app/cells/models/cell-filters"
 import { IHiveImage } from "src/app/core/models/i-hive-image"
 import { ImageService } from "src/app/database/images/image-service"
 import { CellEditContext } from "./cell-edit-context"
 import { OpfsImageService } from "src/app/hive/storage/opfs-image.service"
+import { Cell } from "src/app/models/cell"
 
 @Injectable({ providedIn: "root" })
 export class EditorService {
@@ -50,12 +49,7 @@ export class EditorService {
   public readonly debug = this._debug.asReadonly()
 
   public readonly isSwatchMode = computed(() => (this._mode() & EditorMode.Swatch) !== 0)
-
-  public isNewHive = computed(() => {
-    const cell = this.context()?.cell
-    return cell ? isNewHive(cell) : false
-  })
-
+  
   public rendered = signal(false)
 
   public clearContext = async () => {

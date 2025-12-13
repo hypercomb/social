@@ -1,6 +1,6 @@
 ﻿// src/app/hierarchy/hierarchy-store.token.ts
 import { InjectionToken } from '@angular/core'
-import { Cell } from 'src/app/cells/cell'
+import { Cell } from 'src/app/models/cell-kind'
 export interface IHierarchyStore {
     readonly hive: () => string
     readonly rootId: () => number | null

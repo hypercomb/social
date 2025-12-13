@@ -1,12 +1,12 @@
 ﻿// clipboard-operation.ts
 import { inject } from "@angular/core"
-import { HypercombData } from "src/app/actions/hypercomb-data"
-import { Cell } from "src/app/cells/cell"
+import { Hypercomb } from "src/app/actions/hypercomb-data"
+import { Cell } from "src/app/models/cell-kind"
 import { Constants } from "src/app/helper/constants"
 
 
 
-export abstract class ClipboardOperation extends HypercombData {
+export abstract class ClipboardOperation extends Hypercomb {
 
     public setIndex = async (data: Cell) => {
         // const list = await this.hierarchy_queries.fetchHierarchy(Constants.ClipboardHive, data.cellId!)

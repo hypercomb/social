@@ -1,7 +1,7 @@
 ﻿import { HttpClient, HttpHeaders } from "@angular/common/http"
 import { inject, Injectable, Injector } from "@angular/core"
 import { firstValueFrom } from "rxjs"
-import { HypercombData } from "src/app/actions/hypercomb-data"
+import { Hypercomb } from "src/app/actions/hypercomb-data"
 import { HiveService } from "src/app/hive/storage/hive-service"
 import { QUERY_HIVE_SVC } from "src/app/shared/tokens/i-honeycomb-query.token"
 import { Constants } from "src/app/helper/constants"
@@ -9,7 +9,7 @@ import { Constants } from "src/app/helper/constants"
 @Injectable({
   providedIn: 'root'
 })
-export class UpdateHiveTagService extends HypercombData {
+export class UpdateHiveTagService extends Hypercomb {
   private readonly query = inject(QUERY_HIVE_SVC)
 
   constructor(injector: Injector,

@@ -1,9 +1,8 @@
 import { Component, inject } from '@angular/core';
-import { DebugService } from 'src/app/core/diagnostics/debug-service';
-import { HypercombState } from 'src/app/state/core/hypercomb-state';
-import { HypercombMode } from 'src/app/core/models/enumerations';
+import { CellOptions, HypercombMode } from 'src/app/core/models/enumerations';
 import { Router } from '@angular/router';
 import { SearchFilter } from '../search-filter';
+import { Hypercomb } from 'src/app/core/mixins/abstraction/hypercomb.base';
 
 @Component({
   selector: 'app-search-box',
@@ -11,12 +10,11 @@ import { SearchFilter } from '../search-filter';
   templateUrl: './search-box.component.html',
   styleUrl: './search-box.component.scss'
 })
-export class SearchBoxComponent {
+export class SearchBoxComponent extends Hypercomb {
 
-  private readonly state = inject(HypercombState)
-  private readonly debug = inject(DebugService)
   private readonly router = inject(Router)
   public readonly filter = inject(SearchFilter)
+
 
   public isCreationMode() {
     return this.state.hasMode(HypercombMode.HiveCreation);
@@ -52,6 +50,13 @@ export class SearchBoxComponent {
     this.state.removeMode(HypercombMode.HiveCreation);
     this.filter.clear();
   }
+
+  public branch = async (event: MouseEvent): Promise<void> => {
+    const cell = this.stack.cell()!
+    cell.options.update(o => o | CellOptions.Branch)
+    throw new Error('Method not implemented.')
+  }
+
 
   public focused(_: FocusEvent) { this.state.ignoreShortcuts = true; }
   public unfocused(_: FocusEvent) { this.state.ignoreShortcuts = false; }

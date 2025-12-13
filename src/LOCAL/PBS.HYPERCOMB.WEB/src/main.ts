@@ -12,7 +12,6 @@ import { PixiManager } from './app/pixi/pixi-manager'
 import { PIXI_MANAGER } from './app/shared/tokens/i-pixi-manager.token'
 import { DATABASE_PROVIDERS } from './app/shared/tokens/i-database.token'
 import { HypercombModule } from './app/shared/modules/hypercomb.module'
-import { RepositoryModule } from './app/shared/modules/repository.module'
 import { CombStoreModule } from './app/shared/modules/comb-store.module'
 import { CombServiceModule } from './app/shared/modules/comb-service.module'
 import { CombQueryModule } from './app/shared/modules/comb-query.module'
@@ -38,7 +37,6 @@ bootstrapApplication(AppComponent, {
     importProvidersFrom(HiveImageModule),
     importProvidersFrom(HypercombModule),
     provideAppInitializer(() => inject(PolicyRegistrations).initialize()),
-    importProvidersFrom(RepositoryModule),
     { provide: PIXI_MANAGER, useClass: PixiManager }
   ],
 }).then(ref => {

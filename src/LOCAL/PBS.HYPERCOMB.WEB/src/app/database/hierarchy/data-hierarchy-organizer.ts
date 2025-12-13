@@ -1,6 +1,6 @@
 ﻿import { Injectable, inject } from "@angular/core"
-import { HypercombData } from "src/app/actions/hypercomb-data"
-import { Cell } from "src/app/cells/cell"
+import { Hypercomb } from "src/app/actions/hypercomb-data"
+import { Cell } from "src/app/models/cell-kind"
 import { RestorableTileData } from "src/app/cells/flow/restorable-tile"
 import DBTables from "src/app/core/constants/db-tables"
 import { isHive } from "src/app/cells/models/cell-filters"
@@ -10,7 +10,7 @@ import { BlobService } from "src/app/layout/rendering/blob-service"
 @Injectable({
     providedIn: 'root'
 })
-export class HierarchyRestorationService extends HypercombData {
+export class HierarchyRestorationService extends Hypercomb {
     private readonly modify = inject(MODIFY_COMB_SVC)
     private readonly blobService = inject(BlobService)
 

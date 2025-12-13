@@ -1,10 +1,11 @@
 ﻿import { Injectable, inject } from "@angular/core"
 import { Texture, RenderTexture, Assets } from "pixi.js"
 import { PixiDataServiceBase } from "src/app/database/pixi-data-service-base"
-import { Cell } from "src/app/cells/cell"
 import { TileLayerManager } from "src/app/cells/miscellaneous/tile-layer-manager"
 import { HypercombState } from 'src/app/state/core/hypercomb-state'
 import { ITextureProvider } from "./i-texture-provider"
+import { Cell } from "src/app/models/cell"
+
 @Injectable({
     providedIn: 'root'
 })

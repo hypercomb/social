@@ -1,5 +1,5 @@
 ﻿import { Injectable, inject } from "@angular/core"
-import { Cell } from "../cell"
+import { Cell } from "src/app/models/cell"
 import { SELECTIONS } from "src/app/shared/tokens/i-selection.token"
 import { PixiServiceBase } from "src/app/pixi/pixi-service-base"
 import { HONEYCOMB_STORE } from "src/app/shared/tokens/i-honeycomb-store.token"

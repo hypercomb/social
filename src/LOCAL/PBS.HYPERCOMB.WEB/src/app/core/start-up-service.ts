@@ -9,16 +9,11 @@ import { ChangeModeAction } from '../actions/modes/change-mode'
 import { DeleteCellsAction } from '../actions/cells/delete-cells'
 import { EditTileAction } from '../actions/cells/edit-cell'
 import { ExploreStorageAction } from '../actions/storage/explore-storage'
-import { ExportDatabaseAction } from '../actions/propagation/export-database'
 import { FocusModeAction } from '../actions/modes/focus-mode'
 import { GlobalEscapeAction } from '../actions/global-escape'
-import { ImportDatabasesToOpfs } from '../actions/propagation/import-to-ofps'
-import { ImportOpfsHiveAction } from '../actions/propagation/import-opfs-hive'
 import { LockCellAction } from '../actions/cells/lock-cell.action'
 import { MouseLockCheckAction } from '../actions/debug/debug-mouselocked'
 import { OpenLinkAction } from '../actions/navigation/open-link'
-import { RebuildHierarchyAction } from '../actions/propagation/rebuild-hierarchies'
-import { RenameHiveAction } from '../actions/hives/rename-hive'
 import { ToggleBranchAction } from '../actions/navigation/toggle-branch'
 import { ToggleCutModeAction } from '../actions/clipboard/toggle-cut-mode'
 import { ToggleChatWindowAction } from '../actions/ai/show-chat-window'
@@ -33,7 +28,6 @@ import { SelectionMoveManager } from '../cells/selection/selection-move-manager'
 
 // hive
 import { HiveRouteWatcher } from '../hive/hive-route-watcher'
-import { HiveService } from '../hive/storage/hive-service'
 
 // input and interactivity
 import { KeyboardShortcutListener } from '../interactivity/keyboard/keyboard-shortcut-listener'
@@ -57,15 +51,13 @@ import { StateHub } from '../state/core/state-hub'
 import { PositionSynchronizer } from '../hive/position-synchronizer'
 
 // OPFS BACKUP & EXPORT
-import { ExportAllHivesAction } from '../actions/propagation/export-all-hives'
-import { OpfsBackupService } from '../actions/propagation/opfs-backup.service'
 import { MousewheelZoomService } from '../pixi/mousewheel-zoom-service'
 import { PinchZoomService } from '../pixi/pinch-zoom-service'
 import { CopyAction } from '../actions/clipboard/copy-honeycomb'
 import { CloseExternalAction } from '../actions/navigation/close-external'
 import { ColorPicker } from '../services/color-picker'
 import { NewTileAction } from '../actions/cells/new-tile.action'
-import { ImagePreloader } from '../layout/rendering/image-preloader.service'
+import { HiveService } from '../cells/hive/hive-service'
 
 
 @Injectable({ providedIn: 'root' })
@@ -78,7 +70,6 @@ export class StartUpService {
     // hive
     inject(HiveRouteWatcher),
     inject(HiveService),
-    inject(ImagePreloader),
 
     // state
     inject(StateHub),
@@ -117,19 +108,12 @@ export class StartUpService {
     inject(DeleteCellsAction),
     inject(EditTileAction),
     inject(ExploreStorageAction),
-    inject(ExportDatabaseAction),
     inject(FocusModeAction),
     inject(GlobalEscapeAction),
-    inject(OpfsBackupService),
-    inject(ExportAllHivesAction),
-    inject(ImportDatabasesToOpfs),
-    inject(ImportOpfsHiveAction),
     inject(LockCellAction),
     inject(MouseLockCheckAction),
     inject(NewTileAction),
     inject(OpenLinkAction),
-    inject(RebuildHierarchyAction),
-    inject(RenameHiveAction),
     inject(ToggleBranchAction),
     inject(ToggleChatWindowAction), 
     inject(ToggleCutModeAction),

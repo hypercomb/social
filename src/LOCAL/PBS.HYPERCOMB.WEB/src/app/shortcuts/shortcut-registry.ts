@@ -1,13 +1,12 @@
 ﻿// shortcut-registry.ts
 
 import { Injectable, inject } from "@angular/core"
-import { ActionRegistry } from "../actions/action-registry"
 import { IShortcutBinding } from "./shortcut-model"
 import { ActionContext } from "../actions/action-contexts"
 import { CoordinateDetector } from "../helper/detection/coordinate-detector"
-import { Cell } from "../cells/cell"
 import { PayloadInfuser } from "./payload-infuser"
 import { ACTION_REGISTRY } from "../shared/tokens/i-hypercomb.token"
+import { Cell } from "../models/cell"
 
 @Injectable({ providedIn: 'root' })
 export class ShortcutRegistry {

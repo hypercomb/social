@@ -1,5 +1,5 @@
 import { InjectionToken } from "@angular/core"
-import { Cell } from "src/app/cells/cell"
+import { Cell } from "src/app/models/cell"
 
 export interface IClipboardRepository {
     addCell(cells: Clipboard[]): Promise<void>

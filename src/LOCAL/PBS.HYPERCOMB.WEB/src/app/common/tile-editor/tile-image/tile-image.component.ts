@@ -12,7 +12,7 @@ import { DebugService } from 'src/app/core/diagnostics/debug-service'
 import { ImageCaptureManager } from './image-capture-manager'
 import { Events } from 'src/app/helper/events/events'
 import { EditImageSprite } from 'src/app/user-interface/sprite-components/edit-image-sprite'
-import { Cell } from 'src/app/cells/cell'
+import { Cell } from 'src/app/models/cell'
 
 @Component({
   standalone: true,

@@ -1,8 +1,8 @@
 import { Injectable, inject } from "@angular/core"
-import { Cell } from "src/app/cells/cell"
 import { DataOrchestratorBase } from "./data-orchestration-base"
 import { ICombQueries } from "src/app/shared/tokens/i-honeycomb-query.token"
 import { CELL_FACTORY } from "src/app/inversion-of-control/tokens/tile-factory.token"
+import { Cell } from "src/app/models/cell"
 
 /**
  * CombQueryService (2025)
@@ -47,21 +47,6 @@ export class CombQueryService extends DataOrchestratorBase implements ICombQueri
     return entities.map(e => this.factory.map(e) as Cell)
   }
 
-  // -----------------------------------------------------------
-  // FETCH BY UNIQUE ID
-  // -----------------------------------------------------------
-  public async fetchByUniqueId(uniqueId: string): Promise<Cell | null> {
-    const entity = await this.repository.fetchByUniqueId(uniqueId)
-    return entity ? (this.factory.map(entity) as Cell) : null
-  }
-
-  // -----------------------------------------------------------
-  // FETCH ROOT CELL
-  // -----------------------------------------------------------
-  public async fetchRoot(): Promise<Cell | undefined> {
-    const entity = await this.repository.fetchRoot()
-    return entity ? (this.factory.map(entity) as Cell) : undefined
-  }
 
   // -----------------------------------------------------------
   // EXISTS

@@ -6,7 +6,7 @@ import { Settings } from "../core/settings"
 import { DebugService } from "../core/diagnostics/debug-service"
 import { KeyboardState } from "../interactivity/keyboard/keyboard-state"
 import { HypercombState } from "../state/core/hypercomb-state"
-import { ContextStack } from "../core/controller/context-stack"
+import { ParentContext } from "../core/controller/context-stack"
 import { StorageManager } from "../helper/storage-manager"
 import { HONEYCOMB_SVC } from "../shared/tokens/i-honeycomb-service.token"
 import { ScreenService } from "../services/screen-service"
@@ -20,7 +20,7 @@ export abstract class PixiServiceBase {
   protected readonly settings = inject(Settings)
   protected readonly ks = inject(KeyboardState)
   protected readonly state = inject(HypercombState)
-  public readonly stack = inject(ContextStack)
+  public readonly stack = inject(ParentContext)
 
 
   constructor() {

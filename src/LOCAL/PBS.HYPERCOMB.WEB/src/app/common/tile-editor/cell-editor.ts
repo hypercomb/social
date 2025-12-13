@@ -1,10 +1,10 @@
 ﻿import { Injectable, inject } from "@angular/core"
 import { POLICY } from "src/app/core/models/enumerations"
-import { Cell } from "src/app/cells/cell"
 import { PolicyService } from "src/app/navigation/menus/policy-service"
 import { EditorService } from "src/app/state/interactivity/editor-service"
 import { PixiDataServiceBase } from "src/app/database/pixi-data-service-base"
 import { CellEditContext } from "src/app/state/interactivity/cell-edit-context"
+import { Cell } from "src/app/models/cell"
 
 @Injectable({ providedIn: 'root' })
 export class CellEditor extends PixiDataServiceBase {

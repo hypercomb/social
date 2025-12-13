@@ -7,7 +7,6 @@ import { PixiServiceBase } from "src/app/pixi/pixi-service-base"
 import { LocalAssets } from "src/app/helper/constants"
 import { LinkNavigationService } from "../link-navigation-service"
 import { PolicyService } from "./policy-service"
-import { Cell } from "src/app/cells/cell"
 import { HoneycombStore } from "src/app/cells/storage/honeycomb-store"
 import { Events } from "src/app/helper/events/events"
 import { takeUntilDestroyed } from "@angular/core/rxjs-interop"
@@ -15,6 +14,7 @@ import { fromEvent } from "rxjs"
 import { CoordinateDetector } from "src/app/helper/detection/coordinate-detector"
 import { ACTION_REGISTRY, IContextMenu } from "src/app/shared/tokens/i-hypercomb.token"
 import { CellPayload } from "src/app/actions/action-contexts"
+import { Cell } from "src/app/models/cell"
 
 @Injectable({ providedIn: "root" })
 export class ContextMenu extends PixiServiceBase implements IContextMenu {
@@ -108,7 +108,7 @@ export class ContextMenu extends PixiServiceBase implements IContextMenu {
     this.menuContainer.alpha = 1
 
     if (this.bottomIcon) this.bottomIcon.visible = !!cell.link
-    const tile = this.store.lookupTile(cell.cellId)
+    const tile = this.store.lookupTile(cell.gene)
     if (!tile) return
 
     const vspace = 125

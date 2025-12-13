@@ -1,13 +1,12 @@
 // src/app/common/tile-editor/tile-image/image-persistence-service.ts
 import { Injectable, inject } from '@angular/core'
-import { Cell } from 'src/app/cells/cell'
 import { OpfsImageService } from 'src/app/hive/storage/opfs-image.service'
-import { HashingService } from 'src/app/hive/storage/hashing-service'
+import { HashService } from 'src/app/hive/storage/hashing-service'
+import { Cell } from 'src/app/models/cell'
 
 @Injectable({ providedIn: 'root' })
 export class ImagePersistenceService {
   private readonly storage = inject(OpfsImageService)
-  private readonly hashingService = inject(HashingService)
 
   // save small → sets cell.imageHash
   public saveSmall = async (cell: Cell, blob: Blob): Promise<string> => {

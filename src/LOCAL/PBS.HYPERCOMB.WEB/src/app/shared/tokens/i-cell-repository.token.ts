@@ -24,10 +24,8 @@ export interface ICellRepository extends IRepostioryBase<CellEntity> {
   fetch(cellId: number): Promise<CellEntity | undefined>
   fetchBySourceId(sourceId: number): Promise<CellEntity[]>
   fetchByIds(ids: number[]): Promise<CellEntity[]>
-  fetchRoot(): Promise<CellEntity | undefined>
   fetchIdentifiers(): Promise<ICellIdentifier[]>
   exists(cellId: number): Promise<boolean>
-  fetchByUniqueId(uniqueId: string): Promise<CellEntity | undefined>
 }
 
 export const CELL_REPOSITORY = new InjectionToken<ICellRepository>('CELL_REPOSITORY')

@@ -1,22 +1,15 @@
 ﻿import { NgModule } from "@angular/core"
-import { HiveFactory } from "../../hive/hive-factory"
 import { HIVE_LOADERS, HIVE_RESOLVERS } from "../tokens/i-hive-resolver.token"
-import { HIVE_FACTORY } from "../../inversion-of-control/ports/i-hive-factory-port"
-import { REFRESH_HIVE_PORT } from "../../hive/refresh-hive-port"
 import { HiveStore } from "../../cells/hive/hive-store"
 import { HIVE_CONTROLLER_ST, HIVE_STATE, HIVE_STORE, LOOKUP_HIVES, RESOLUTION_COORDINATOR } from "../tokens/i-hive-store.token"
 import { HiveLoader } from "src/app/hive/loaders/hive.loader"
-import { HiveQueryService } from "src/app/hive/storage/hive-query.service"
-import { QUERY_HIVE_SVC } from "../tokens/i-honeycomb-query.token"
-import { NewHiveLoader } from "src/app/hive/loaders/implementations/new-hive.loader"
-import { NewHiveResolver } from "src/app/hive/resolvers/implementations/new-hive-resolver"
-import { OpfsHiveResolver } from "src/app/hive/resolvers/implementations/opfs-hive.resolver"
-import { OpfsHiveLoader } from "src/app/hive/loaders/implementations/opfs-hive.loader"
+import { NewHiveResolver } from "src/app/hive/resolvers/new-hive-resolver"
+import { OpfsHiveResolver } from "src/app/hive/resolvers/opfs-hive.resolver"
+import { NewHiveLoader } from "src/app/hive/loaders/new-hive.loader"
+import { OpfsHiveLoader } from "src/app/hive/loaders/opfs.hive-loader"
 
 @NgModule({
     providers: [
-        { provide: HIVE_FACTORY, useExisting: HiveFactory },
-        { provide: REFRESH_HIVE_PORT, useExisting: HiveFactory },
         { provide: HIVE_STORE, useExisting: HiveStore },
         { provide: HIVE_STATE, useExisting: HiveStore },
 
@@ -33,8 +26,6 @@ import { OpfsHiveLoader } from "src/app/hive/loaders/implementations/opfs-hive.l
         //{ provide: HIVE_LOADERS, useClass: ServerHiveLoader, multi: true },
         { provide: HIVE_LOADERS, useClass: NewHiveLoader, multi: true },
 
-        // service
-        { provide: QUERY_HIVE_SVC, useClass: HiveQueryService },
         // store
         { provide: HIVE_CONTROLLER_ST, useExisting: HiveStore },
         { provide: LOOKUP_HIVES, useExisting: HiveStore },

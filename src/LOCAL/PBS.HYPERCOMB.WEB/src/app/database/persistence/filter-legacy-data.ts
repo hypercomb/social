@@ -1,7 +1,7 @@
 ﻿import { Injectable } from '@angular/core'
 import { IZipData } from './i-persistence-interfaces'
 import { IRestoreFilter } from './i-restore-filter'
-import { Cell } from 'src/app/cells/cell'
+import { Cell } from 'src/app/models/cell-kind'
 
 @Injectable({
     providedIn: 'root'

@@ -1,12 +1,9 @@
 // src/app/models/cell-filters.ts
 
-// -----------------------------------------------------------
-// cache ids / keys
-// -----------------------------------------------------------
-
 import { Sprite } from "pixi.js"
 import { CellOptions as CellOptions } from 'src/app/cells/models/cell-options'
-import { Cell } from "../cells/cell"
+import { Cell } from "./cell"
+
 
 export type CacheKeyOptions = {
     size?: number
@@ -15,16 +12,6 @@ export type CacheKeyOptions = {
     version?: number | string
     styleKey?: string
 }
-export function cacheKey(cell: Cell, opts: CacheKeyOptions = {}): string {
-    const id = cacheId(cell)
-    const version = opts.version ?? (cell as any).updatedAt ?? (cell as any).version ?? 0
-    const state = opts.state ?? (cell as any).flags ?? 0
-    const size = opts.size ?? 0
-    const scale = opts.scale ?? 1
-    const style = opts.styleKey ?? ''
-    return `${id}|v=${version}|s=${size}|x=${scale}|f=${state}|sty=${style}`
-}
-
 // -----------------------------------------------------------
 // flag helpers (bit flags)
 // -----------------------------------------------------------

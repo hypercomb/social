@@ -1,10 +1,9 @@
-import { Cell } from "src/app/cells/cell"
 import { IHiveImage } from "src/app/core/models/i-hive-image"
+import { Cell } from "src/app/models/cell"
 
 export class CellEditContext {
   initialImageHash: string | undefined
-  public get cellId(): number | undefined { return this.cell.cellId }
-  public get kind(): string { return this.cell.kind }
+  public get gene(): string | undefined { return this.cell.gene }
 
   // transient editor fields
   public originalSmall?: IHiveImage 

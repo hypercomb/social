@@ -65,16 +65,10 @@
             </button>
           }
           <button (click)="cancel($event)" class="cancel">Cancel</button>
-          <app-save-branch-button
-            *ngIf="operation() === 'edit-cell' || operation() === 'edit-hive'"
-            (save-clicked)="save($event)"
-            (save-as-branch-clicked)="saveAsBranch($event)"
-          ></app-save-branch-button>
           <button
             *ngIf="operation() === 'new-hive' || operation() === 'new-cell'"
             (click)="save($event)"
-            class="save"
-          >
+            class="save">
             Save
           </button>
         </div>

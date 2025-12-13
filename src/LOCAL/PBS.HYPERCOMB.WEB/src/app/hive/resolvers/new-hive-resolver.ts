@@ -1,7 +1,7 @@
 import { Injectable } from "@angular/core"
-import { HiveResolutionType } from "../../hive-models"
-import { HiveScout } from "../../hive-scout"
-import { HiveResolverBase } from "../hive-resolver.base"
+import { HiveResolutionType } from "../hive-resolution-type"
+import { HiveScout } from "../hive-scout"
+import { HiveResolverBase } from "./hive-resolver.base"
 
 @Injectable({ providedIn: "root" })
 export class NewHiveResolver extends HiveResolverBase {

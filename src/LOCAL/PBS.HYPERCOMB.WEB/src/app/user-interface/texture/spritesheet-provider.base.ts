@@ -2,7 +2,7 @@
 import { Injectable } from '@angular/core'
 import { Texture } from 'pixi.js'
 import { ITextureProvider } from './i-texture-provider'
-import { Cell } from 'src/app/cells/cell'
+import { Cell } from 'src/app/models/cell-kind'
 
 @Injectable({
     providedIn: 'root'

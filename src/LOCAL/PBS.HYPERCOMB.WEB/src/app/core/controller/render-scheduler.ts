@@ -2,11 +2,11 @@
 import { Injectable, inject, NgZone } from "@angular/core"
 import { Application } from "pixi.js"
 import { DebugService } from "src/app/core/diagnostics/debug-service"
-import { Cell } from "src/app/cells/cell"
 import { HIVE_HYDRATION } from "src/app/shared/tokens/i-honeycomb-service.token"
 import { HypercombState } from "src/app/state/core/hypercomb-state"
 import { CellPayload } from "src/app/actions/action-contexts"
 import { RenderTileAction } from "src/app/layout/rendering/render-tile.action"
+import { Cell } from "src/app/models/cell"
 
 /**
  * =====================================================================

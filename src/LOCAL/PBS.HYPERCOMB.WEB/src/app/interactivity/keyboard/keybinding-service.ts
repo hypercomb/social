@@ -1,8 +1,8 @@
 ﻿import { Injectable, effect, untracked } from "@angular/core"
-import { HypercombData } from "src/app/database/pixi-data-service-base"
+import { Hypercomb } from "src/app/database/pixi-data-service-base"
 
 @Injectable({ providedIn: 'root' })
-export class KeyBindingService extends HypercombData {
+export class KeyBindingService extends Hypercomb {
 
     private readonly effect = effect(() => {
 

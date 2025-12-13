@@ -1,4 +1,4 @@
-﻿import { Cell } from "src/app/cells/cell"
+﻿import { Cell } from "src/app/models/cell-kind"
 import { IZipData } from "./i-persistence-interfaces"
 
 export interface IRestoreFilter {

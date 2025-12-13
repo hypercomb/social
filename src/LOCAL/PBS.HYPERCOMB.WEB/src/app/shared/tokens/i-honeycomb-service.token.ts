@@ -1,6 +1,6 @@
 // src/app/shared/tokens/i-comb-service.token.ts
 import { InjectionToken, Signal } from "@angular/core"
-import { Cell, CellKind, NewCell } from "src/app/cells/cell"
+import { Cell } from "src/app/models/cell"
 
 export interface ICombState {
   selectedCells: Signal<Cell[]>
@@ -9,10 +9,10 @@ export interface ICombState {
 export interface IModifyComb {
   updateHasChildren(cell: Cell): unknown
   updateSilent(cell: Cell): Promise<number>
-  create(params: Partial<NewCell>, kind: CellKind): Promise<Cell>
+  create(params: Partial<Cell>): Promise<Cell>
   deleteAll(cell: Cell, hierarchy: Cell[]): Promise<void>
   bulkPut(dataArray: Cell[]): Promise<void>
-  addCell(newCell: NewCell): Promise<Cell>
+  addCell(newCell: Cell): Promise<Cell>
   updateCell(cell: Cell): Promise<number>
   removeCell(cell: Cell): Promise<void>
 }

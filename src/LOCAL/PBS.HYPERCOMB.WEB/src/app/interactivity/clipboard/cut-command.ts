@@ -1,7 +1,7 @@
 ﻿// cut.action.ts
 import { inject } from "@angular/core"
 import { Action } from "rxjs/internal/scheduler/Action"
-import { Cell } from "src/app/cells/cell"
+import { Cell } from "src/app/models/cell-kind"
 import { ClipboardService } from "src/app/clipboard/clipboard-service"
 import { HypercombMode } from "src/app/core/models/enumerations"
 import { HypercombState } from "src/app/state/core/hypercomb-state"

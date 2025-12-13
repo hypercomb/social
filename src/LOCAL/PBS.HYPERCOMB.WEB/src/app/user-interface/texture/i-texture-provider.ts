@@ -1,5 +1,5 @@
 ﻿import { RenderTexture, Texture } from "pixi.js"
-import { Cell } from "src/app/cells/cell"
+import { Cell } from "src/app/models/cell"
 
 export interface ITextureProvider {
     name: string

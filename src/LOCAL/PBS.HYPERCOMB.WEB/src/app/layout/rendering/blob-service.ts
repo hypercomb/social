@@ -1,6 +1,6 @@
 ﻿import { Injectable } from "@angular/core"
-import { Cell, CellKind } from "src/app/cells/cell"
 import { Constants, LocalAssets } from "src/app/helper/constants"
+import { CellKind } from "src/app/models/cell-kind"
 
 @Injectable({ providedIn: "root" })
 export class BlobService {
@@ -25,7 +25,7 @@ export class BlobService {
     // preload known defaults (ghost, clipboard, hive, etc.)
     this.preload("Ghost", "assets/ghost-tile.png")
     this.preload("Clipboard", "assets/clipboard-tile.png")
-    this.preload("Hive", "assets/hive-tile.png")
+    this.preload("HivePortal", "assets/hive-tile.png")
     this.preload("Cell", "assets/guide-tile.png") // generic cell fallback
   }
 

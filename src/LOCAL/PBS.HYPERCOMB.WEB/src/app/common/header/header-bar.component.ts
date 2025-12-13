@@ -4,8 +4,7 @@ import { environment } from 'src/environments/environment'
 import { IconMenuComponent } from './icon-menu/icon-menu.component'
 import { TileCountComponent } from './tile-count/tile-count.component'
 import { SearchBoxComponent } from './search-box/search-box.component'
-import { HypercombData } from 'src/app/actions/hypercomb-data'
-import { HypercombMode, POLICY } from 'src/app/core/models/enumerations'
+import { HypercombMode } from 'src/app/core/models/enumerations'
 import { CoordinateDetector } from 'src/app/helper/detection/coordinate-detector'
 import { LinkNavigationService } from 'src/app/navigation/link-navigation-service'
 import { EditorService } from 'src/app/state/interactivity/editor-service'
@@ -15,6 +14,7 @@ import { HONEYCOMB_STORE } from 'src/app/shared/tokens/i-honeycomb-store.token'
 import { CellEditor } from 'src/app/common/tile-editor/cell-editor'
 import { CellEditContext } from 'src/app/state/interactivity/cell-edit-context'
 import { ScreenService } from 'src/app/services/screen-service'
+import { Hypercomb } from 'src/app/core/mixins/abstraction/hypercomb.base'
 
 @Component({
   standalone: true,
@@ -23,7 +23,7 @@ import { ScreenService } from 'src/app/services/screen-service'
   styleUrls: ['./header-bar.component.scss'],
   imports: [TileCountComponent, SearchBoxComponent, IconMenuComponent, FormsModule],
 })
-export class HeaderBarComponent extends HypercombData {
+export class HeaderBarComponent extends Hypercomb {
 
   private readonly es = inject(EditorService)
   private readonly manager = inject(CellEditor)
@@ -65,11 +65,11 @@ export class HeaderBarComponent extends HypercombData {
   public caption = computed(() => {
     const coordinate = this.detector.coordinate()
     const tile = this.detector.activeTile()
-    if (!coordinate) return this.stack.hiveName()
+    if (!coordinate) return this.state.hive()
 
     // lookup cell name if tile is present, otherwise fall back to coordinate only
     const cell = tile ? this.store.lookupData(tile.cellId) : undefined
-    const name = cell?.name ?? this.stack.hiveName()
+    const name = cell?.name ?? this.state.hive()
 
     return `${name}`
     // return `${name}  ${environment.production ? '' : coordinate.index}`// | index: ${coordinate.index} : ${coordinate.Location}`

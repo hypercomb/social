@@ -3,7 +3,7 @@ import { Transaction } from 'dexie'
 import { Constants } from 'src/app/helper/constants'
 import { IDatabaseUpgrade } from './i-database-upgrade'
 import { IPropertyMapper, TilePropertyMapper } from './tile-property-mapper'
-import { Cell } from 'src/app/cells/cell'
+import { Cell } from 'src/app/models/cell-kind'
 import DBTables from 'src/app/core/constants/db-tables'
 
 @Injectable({ providedIn: 'root' })

@@ -2,7 +2,6 @@
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop'
 import { fromEvent } from 'rxjs'
 import { CellOptions } from 'src/app/core/models/enumerations'
-import { Cell } from '../cell'
 import { isSelected } from '../models/cell-filters'
 import { HypercombState } from 'src/app/state/core/hypercomb-state'
 import { HONEYCOMB_STORE } from 'src/app/shared/tokens/i-honeycomb-store.token'
@@ -11,6 +10,7 @@ import { Assets } from 'pixi.js'
 import { Events } from 'src/app/helper/events/events'
 import { ISelections } from 'src/app/shared/tokens/i-selection.token'
 import { MODIFY_COMB_SVC } from 'src/app/shared/tokens/i-honeycomb-service.token'
+import { Cell } from 'src/app/models/cell'
 
 @Injectable({ providedIn: 'root' })
 export class SelectionService extends PixiServiceBase implements ISelections {
