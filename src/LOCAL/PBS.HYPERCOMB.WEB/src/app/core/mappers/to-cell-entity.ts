@@ -10,7 +10,7 @@ export function toCellEntity(cell: Cell | NewCell): CellEntity {
     // identity
     // ───────────────────────────────────────
     kind: cell.kind,
-    cellId: (cell as Cell).cellId,
+    gene: (cell as Cell).gene,
     hive: cell.hive,
     uniqueId: cell.uniqueId,
 

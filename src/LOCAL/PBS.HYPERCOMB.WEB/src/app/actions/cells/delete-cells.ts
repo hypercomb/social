@@ -37,10 +37,10 @@ export class DeleteCellsAction extends ActionBase<DeletePayload> {
   
   public override run = async (payload: DeletePayload): Promise<void> => {
     for (const cell of payload.cells) {
-      if (!cell.cellId) continue
-      const hierarchy = await this.repository.fetchHierarchy(cell.cellId)
+      if (!cell.gene) continue
+      const hierarchy = await this.repository.fetchHierarchy(cell.gene)
       await this.modify.deleteAll(cell, hierarchy)
-      this.hydration.invalidateTile(cell.cellId) // ensure not in memory      this.hydration.invalidateTile(cell.cellId) // ensure not in memory
+      this.hydration.invalidateTile(cell.gene) // ensure not in memory      this.hydration.invalidateTile(cell.gene) // ensure not in memory
     }
   }
 }

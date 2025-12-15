@@ -8,7 +8,7 @@ export interface IStaging {
   enqueue(cell: Cell)
   stageCells(cells: Cell[]): void
   stageAdd(cell: Cell): void
-  stageRemove(cellId: number): void
+  stageRemove(gene: string): void
   stageReplace(cell: Cell): void
   stageMerge(cells: Cell[]): void
 }

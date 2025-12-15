@@ -31,7 +31,7 @@ export class HierarchyRestorationService extends Hypercomb {
             //     const cell = new Cell(item)
             //     cell.hive = hiveName
 
-            //     const { id,cellId, ...dataWithoutIds } = <any>cell
+            //     const { id,gene, ...dataWithoutIds } = <any>cell
             //     const newCell = await this.modify.addCell(dataWithoutIds)
 
             //     restorable.newItem = newCell
@@ -54,10 +54,10 @@ export class HierarchyRestorationService extends Hypercomb {
             const current = restorable.newItem!
 
             // Find the source item using SourceId
-            const source = restorableList.find(x => restorable.sourceId === x.Id || restorable.sourceId === x.cellId)
+            const source = restorableList.find(x => restorable.sourceId === x.Id || restorable.sourceId === x.gene)
 
             // Set SourceId for the current item's newItem
-            current.sourceId = isHive(current) ? -1 : source?.newItem!.cellId
+            current.sourceId = isHive(current) ? -1 : source?.newItem!.gene
         }
     }
 

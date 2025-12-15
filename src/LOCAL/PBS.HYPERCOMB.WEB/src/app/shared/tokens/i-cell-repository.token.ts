@@ -19,13 +19,13 @@ export interface IRepostioryBase<TEntity> {
 }
 
 export interface ICellRepository extends IRepostioryBase<CellEntity> {
-  fetchChildCount(cellId: number): Promise<number>
-  bulkDelete(ids: number[])
-  fetch(cellId: number): Promise<CellEntity | undefined>
-  fetchBySourceId(sourceId: number): Promise<CellEntity[]>
-  fetchByIds(ids: number[]): Promise<CellEntity[]>
+  fetchChildCount(gene: string): Promise<number>
+  bulkDelete(ids: string[])
+  fetch(gene: string): Promise<CellEntity | undefined>
+  fetchBySourceId(gene: string): Promise<CellEntity[]>
+  fetchByIds(ids: string[]): Promise<CellEntity[]>
   fetchIdentifiers(): Promise<ICellIdentifier[]>
-  exists(cellId: number): Promise<boolean>
+  exists(gene: string): Promise<boolean>
 }
 
 export const CELL_REPOSITORY = new InjectionToken<ICellRepository>('CELL_REPOSITORY')

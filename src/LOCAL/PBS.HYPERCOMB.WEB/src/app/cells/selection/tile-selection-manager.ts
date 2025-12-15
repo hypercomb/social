@@ -13,7 +13,7 @@ export class TileSelectionManager extends PixiServiceBase {
   // drag-select state
   private dragActive = false
   private lastOp: "add" | "remove" | null = null // what are we doing this gesture?
-  private touched = new Set<number>()            // one op per tile per gesture
+  private touched = new Set<string>()            // one op per tile per gesture
 
   constructor() {
     super()
@@ -77,14 +77,14 @@ export class TileSelectionManager extends PixiServiceBase {
 
   private isCellSelected(cell: Cell): boolean {
     const arr = this.selections.items()
-    return arr.some(c => c.cellId === cell.cellId)
+    return arr.some(c => c.gene === cell.gene)
   }
 
   private applyOpIfNeeded(cell: Cell): void {
     if (!this.lastOp) return
 
-    const cellId = cell.cellId
-    if (this.touched.has(cellId)) return
+    const gene = cell.gene
+    if (this.touched.has(gene)) return
 
     const selected = this.isCellSelected(cell)
 
@@ -94,6 +94,6 @@ export class TileSelectionManager extends PixiServiceBase {
       if (selected) this.selections.remove(cell)
     }
 
-    this.touched.add(cellId)
+    this.touched.add(gene)
   }
 }

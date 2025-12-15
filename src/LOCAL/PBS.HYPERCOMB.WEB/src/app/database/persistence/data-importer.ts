@@ -18,7 +18,7 @@ export class DataImporter extends Hypercomb {
     // process adding new copies of the dat to the database
     for (const record of localData) {
       try {
-        delete (<any>record).cellId
+        delete (<any>record).gene
         record.isActive = true
 
         // switch from Key to Hive

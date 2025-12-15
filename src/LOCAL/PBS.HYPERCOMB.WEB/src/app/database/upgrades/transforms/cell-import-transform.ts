@@ -20,7 +20,7 @@ export class CellImportTransform implements IImportTransform {
   }
 
   private readonly propertyResolvers: IPropertyMapper<Cell>[] = [
-    { sourceProperty: 'TileId', targetProperty: 'cellId' },
+    { sourceProperty: 'TileId', targetProperty: 'gene' },
     { sourceProperty: 'Hive', targetProperty: 'hive' },
     { sourceProperty: 'SourceId', targetProperty: 'sourceId' },
     { sourceProperty: 'UniqueId', targetProperty: 'uniqueId' },

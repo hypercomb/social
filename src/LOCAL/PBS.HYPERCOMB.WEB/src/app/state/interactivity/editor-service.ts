@@ -30,12 +30,12 @@ export class EditorService {
   public readonly operation = computed(() => {
     const ctx = this.context()
     if (!ctx) return "edit-cell"
-    if (ctx.kind === "Hive") {
-      return ctx.cellId == null ? "new-hive" : "edit-hive"
+    
+    if (false) {
+      return false ? "new-hive" : "edit-hive"
     }
-    return ctx.cellId == null ? "new-cell" : "edit-cell"
+    return ctx.gene == null ? "new-cell" : "edit-cell"
   })
-
   // readonly selectors
   public readonly mode = this._mode.asReadonly()
   public readonly cell = computed(() => this._context()?.cell)

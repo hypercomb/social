@@ -58,12 +58,12 @@ const doCopy = async (
   }
 ): Promise<Cell | undefined> => {
     throw new Error("Not implemented")
-//   if (!data.cellId) return undefined
-//   if (deps.copyMap.has(data.cellId)) return deps.copyMap.get(data.cellId)
+//   if (!data.gene) return undefined
+//   if (deps.copyMap.has(data.gene)) return deps.copyMap.get(data.gene)
 
 //   const clone: Partial<Cell> = {
 //     ...data,
-//     cellId: undefined,
+//     gene: undefined,
 //     hive: newHive,
 //     sourceId,
 //     isInitialized: true,
@@ -72,7 +72,7 @@ const doCopy = async (
 //   }
 
 //   const newCell = await deps.factory.create(clone)
-//   deps.copyMap.set(data.cellId, newCell)
+//   deps.copyMap.set(data.gene, newCell)
 
 //   // copy image if present
 //   const image = await deps.imageDb.get(data.hiveId)
@@ -85,9 +85,9 @@ const doCopy = async (
 //   await deps.store.addCell(newCell)
 
 //   // recurse into children
-//   const children = await deps.store.fetchChildren(data.hive, data.cellId)
+//   const children = await deps.store.fetchChildren(data.hive, data.gene)
 //   for (const child of children) {
-//     await doCopy(child, newHive, newCell.cellId!, deps)
+//     await doCopy(child, newHive, newCell.gene!, deps)
 //   }
 
 //   return newCell

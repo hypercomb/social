@@ -22,7 +22,7 @@ export class CleanHiveService {
 
       // Delete hive items
       for (const item of hiveItems) {
-        await this.database.db.table('data').delete(item.cellId!)
+        await this.database.db.table('data').delete(item.gene!)
       }
 
       // Delete hive

@@ -10,7 +10,7 @@ export class PayloadInfuser {
 
     public infuse(payload: PayloadBase, context?: Tile | Cell){
         if(context instanceof Tile){
-            (<any>payload).cell = this.store.lookupData(context.cellId)
+            (<any>payload).cell = this.store.lookupData(context.gene)
         }
         else if(context instanceof Cell){
             (<any>payload).cell = context

@@ -25,8 +25,8 @@ export class CombQueryService extends DataOrchestratorBase implements ICombQueri
   // -----------------------------------------------------------
   // FETCH ONE
   // -----------------------------------------------------------
-  public async fetch(cellId: number): Promise<Cell | undefined> {
-    const entity = await this.repository.fetch(cellId)
+  public async fetch(gene: string): Promise<Cell | undefined> {
+    const entity = await this.repository.fetch(gene)
     return entity ? (this.factory.map(entity) as Cell) : undefined
   }
 
@@ -52,7 +52,7 @@ export class CombQueryService extends DataOrchestratorBase implements ICombQueri
   // EXISTS
   // -----------------------------------------------------------
   public async exists(cell: Cell): Promise<boolean> {
-    return this.repository.exists(cell.cellId!)
+    return this.repository.exists(cell.gene!)
   }
 
   // -----------------------------------------------------------
@@ -60,6 +60,6 @@ export class CombQueryService extends DataOrchestratorBase implements ICombQueri
   // -----------------------------------------------------------
   public async fetchCount(parent: Cell): Promise<number> {
     // repository fetchChildCount is the authority
-    return this.repository.fetchChildCount(parent.cellId!)
+    return this.repository.fetchChildCount(parent.gene!)
   }
 }

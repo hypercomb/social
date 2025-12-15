@@ -1,5 +1,5 @@
 ﻿export interface ICellIdentifier {
-    cellId: number
+    gene: string
     hive: string
 }
 

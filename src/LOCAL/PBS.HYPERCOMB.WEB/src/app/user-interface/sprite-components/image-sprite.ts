@@ -41,7 +41,7 @@ export class ImageSprite extends BaseSpriteBuilder<Cell> {
       sprite.texture = cached
       this.debug?.log?.(
         'sprite',
-        `texture from cache for cell=${cell.name} id=${cell.cellId}`
+        `texture from cache for cell=${cell.name} id=${cell.gene}`
       )
       return sprite
     }
@@ -52,7 +52,7 @@ export class ImageSprite extends BaseSpriteBuilder<Cell> {
       if (!blob) {
         this.debug?.warn?.(
           'sprite',
-          `no blob resolved for hash=${hash} (cell=${cell.name} id=${cell.cellId})`
+          `no blob resolved for hash=${hash} (cell=${cell.name} id=${cell.gene})`
         )
         return sprite
       }
@@ -65,7 +65,7 @@ export class ImageSprite extends BaseSpriteBuilder<Cell> {
 
       this.debug?.log?.(
         'sprite',
-        `texture created + cached for cell=${cell.name} id=${cell.cellId}`
+        `texture created + cached for cell=${cell.name} id=${cell.gene}`
       )
     } catch (err) {
       this.debug?.error?.('sprite', 'createImageBitmap or loadSmall failed', err)

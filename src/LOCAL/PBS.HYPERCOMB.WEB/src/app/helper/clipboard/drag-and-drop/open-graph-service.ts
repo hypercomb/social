@@ -84,7 +84,7 @@ export class OpenGrapservice extends ReceiveFileBase {
         const target = tiles.find(t => t.index === index)
 
 
-        const data1 = this.cs.lookupData(tile.cellId)
+        const data1 = this.cs.lookupData(tile.gene)
         const index = data1?.index ?? this.detector.currentIndex
 
         const hiveName = this.hs.activeHive()!.name
@@ -94,7 +94,7 @@ export class OpenGrapservice extends ReceiveFileBase {
         if (!tile) {
             const source = this.stack.current()!
             // we already checked for null so this should always succeed !
-            const options = <any>{ index, hiveName, sourceId: source.cellId }
+            const options = <any>{ index, hiveName, sourceId: source.gene }
             cell = await this.new_tiles.createNewTile(localPoint, options)
         }
 

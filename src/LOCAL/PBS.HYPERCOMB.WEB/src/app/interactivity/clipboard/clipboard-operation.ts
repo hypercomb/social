@@ -9,7 +9,7 @@ import { Constants } from "src/app/helper/constants"
 export abstract class ClipboardOperation extends Hypercomb {
 
     public setIndex = async (data: Cell) => {
-        // const list = await this.hierarchy_queries.fetchHierarchy(Constants.ClipboardHive, data.cellId!)
+        // const list = await this.hierarchy_queries.fetchHierarchy(Constants.ClipboardHive, data.gene!)
         // const index = await this.honeycomb.findLowestIndex(list)
         // data.index = index
     }

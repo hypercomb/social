@@ -41,7 +41,7 @@ export class LinkNavigationService extends Hypercomb {
                 if (this.state.isMobile || this.isMouseOverControlBar || this.es.isEditing()) return
 
                 const active = this.stack.cell()
-                const entry = active ? this.store.lookupData(active.cellId) : undefined
+                const entry = active ? this.store.lookupData(active.gene) : undefined
 
                 if (!!entry) {
                     void this.openLink(entry)                            // âœ… fire-and-forget

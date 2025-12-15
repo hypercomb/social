@@ -1,6 +1,5 @@
 ﻿import { Injectable, Signal, computed, inject, signal } from "@angular/core"
 import { Cell } from "src/app/models/cell"
-import { ContextStack } from "src/app/core/controller/context-stack"
 import { HiveScout } from "src/app/hive/hive-scout"
 import { HypercombMode } from "src/app/core/models/enumerations"
 
@@ -117,7 +116,7 @@ constructor() {
   // methods (alphabetized)
   // ─────────────────────────────────────────────
   public cacheId(cell: Cell) {
-  return `${this.scout()?.name}-${cell.cellId}`
+  return `${this.scout()?.name}-${cell.gene}`
 }
 
   public clearToolMode() {

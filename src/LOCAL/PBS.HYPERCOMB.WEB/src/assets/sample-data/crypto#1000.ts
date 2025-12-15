@@ -7,7 +7,7 @@ export const crypto1000 = {
     "tables": [
       {
         "name": "data",
-        "schema": "++cellId,kind,[hive+isActive+isDeleted],sourceId,uniqueId,options,name,type,dateCreated,isActive,isBranch,isDeleted,isHidden,isIgnoreBackground,isSelected,isFocusedMode,isLocked,isNoImage,isInitialTile,isHive,isTileData,isPathway,isNewHive,isRecenter,[hiveId+isDeleted],[hive+sourceId],[isSelected+isLocked],*tagIds",
+        "schema": "++gene,kind,[hive+isActive+isDeleted],sourceId,uniqueId,options,name,type,dateCreated,isActive,isBranch,isDeleted,isHidden,isIgnoreBackground,isSelected,isFocusedMode,isLocked,isNoImage,isInitialTile,isHive,isTileData,isPathway,isNewHive,isRecenter,[hiveId+isDeleted],[hive+sourceId],[isSelected+isLocked],*tagIds",
         "rowCount": 745
       },
       {
@@ -17,7 +17,7 @@ export const crypto1000 = {
       },
       {
         "name": "hierarchy",
-        "schema": "++id,cellId,hive,sourceId",
+        "schema": "++id,gene,hive,sourceId",
         "rowCount": 0
       }
     ],
@@ -27,7 +27,7 @@ export const crypto1000 = {
       "rows": [
         {
           "kind": "Hive",
-          "cellId": 116,
+          "gene": 116,
           "hive": "crypto#1000",
           "name": "cryptocurrency",
           "options": 513,
@@ -73,7 +73,7 @@ export const crypto1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 117,
+          "gene": 117,
           "hive": "crypto#1000",
           "name": "crypto-exchanges",
           "options": 515,
@@ -119,7 +119,7 @@ export const crypto1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 118,
+          "gene": 118,
           "hive": "crypto#1000",
           "name": "utility-crypto-websites",
           "options": 547,
@@ -165,7 +165,7 @@ export const crypto1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 119,
+          "gene": 119,
           "hive": "crypto#1000",
           "name": "crypto-tokens",
           "options": 515,
@@ -211,7 +211,7 @@ export const crypto1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 120,
+          "gene": 120,
           "hive": "crypto#1000",
           "name": "nashville-bitcoin-conference-presentations",
           "options": 547,
@@ -257,7 +257,7 @@ export const crypto1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 121,
+          "gene": 121,
           "hive": "crypto#1000",
           "name": "binance",
           "options": 16385,
@@ -303,7 +303,7 @@ export const crypto1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 122,
+          "gene": 122,
           "hive": "crypto#1000",
           "name": "kraken-exchange",
           "options": 16385,
@@ -349,7 +349,7 @@ export const crypto1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 123,
+          "gene": 123,
           "hive": "crypto#1000",
           "name": "coinbase",
           "options": 16417,
@@ -395,7 +395,7 @@ export const crypto1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 124,
+          "gene": 124,
           "hive": "crypto#1000",
           "name": "gemini",
           "options": 16417,
@@ -441,7 +441,7 @@ export const crypto1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 125,
+          "gene": 125,
           "hive": "crypto#1000",
           "name": "kucoin",
           "options": 16385,
@@ -486,7 +486,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 126,
+          "gene": 126,
           "hive": "crypto#1000",
           "sourceId": 117,
           "uniqueId": "9046661d-9c2b-4356-83f0-4cc6dd772b33",
@@ -528,7 +528,7 @@ export const crypto1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 127,
+          "gene": 127,
           "hive": "crypto#1000",
           "name": "uniswap",
           "options": 16385,
@@ -574,7 +574,7 @@ export const crypto1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 128,
+          "gene": 128,
           "hive": "crypto#1000",
           "name": "pancake-swap",
           "options": 16385,
@@ -620,7 +620,7 @@ export const crypto1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 129,
+          "gene": 129,
           "hive": "crypto#1000",
           "name": "sushiswap",
           "options": 16385,
@@ -666,7 +666,7 @@ export const crypto1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 130,
+          "gene": 130,
           "hive": "crypto#1000",
           "name": "pangolin",
           "options": 16417,
@@ -712,7 +712,7 @@ export const crypto1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 131,
+          "gene": 131,
           "hive": "crypto#1000",
           "name": "luaswap",
           "options": 16385,
@@ -758,7 +758,7 @@ export const crypto1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 132,
+          "gene": 132,
           "hive": "crypto#1000",
           "name": "raydium",
           "options": 16385,
@@ -803,7 +803,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 133,
+          "gene": 133,
           "hive": "crypto#1000",
           "sourceId": 118,
           "uniqueId": "f4f4f13a-325e-4c07-afdd-77e27b7a7a7a",
@@ -845,7 +845,7 @@ export const crypto1000 = {
         },
         {
           "UserCode": "",
-          "cellId": 134,
+          "gene": 134,
           "hive": "crypto#1000",
           "sourceId": 118,
           "uniqueId": "ea2a3a44-9ab2-4de5-9e4e-cc29c449c3a1",
@@ -887,7 +887,7 @@ export const crypto1000 = {
         },
         {
           "UserCode": "",
-          "cellId": 135,
+          "gene": 135,
           "hive": "crypto#1000",
           "sourceId": 118,
           "uniqueId": "368bc4dd-0cc0-4141-a453-63d12b892bb4",
@@ -928,7 +928,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 136,
+          "gene": 136,
           "hive": "crypto#1000",
           "sourceId": 118,
           "uniqueId": "b55d7bcc-4ecb-49d1-89dc-5f7683ee6856",
@@ -969,7 +969,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 137,
+          "gene": 137,
           "hive": "crypto#1000",
           "sourceId": 118,
           "uniqueId": "ce36b78e-5a87-4b4c-9393-fb3df8c03b34",
@@ -1010,7 +1010,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 138,
+          "gene": 138,
           "hive": "crypto#1000",
           "sourceId": 118,
           "uniqueId": "db4984e1-b81e-496e-844d-cbd523c7be1e",
@@ -1052,7 +1052,7 @@ export const crypto1000 = {
         },
         {
           "UserCode": "",
-          "cellId": 139,
+          "gene": 139,
           "hive": "crypto#1000",
           "sourceId": 118,
           "uniqueId": "cba11ea0-cab1-40c6-8ab4-88141de03003",
@@ -1094,7 +1094,7 @@ export const crypto1000 = {
         },
         {
           "UserCode": "",
-          "cellId": 140,
+          "gene": 140,
           "hive": "crypto#1000",
           "sourceId": 118,
           "uniqueId": "cc55ce62-012c-411e-a871-7f657bb19d2b",
@@ -1135,7 +1135,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 141,
+          "gene": 141,
           "hive": "crypto#1000",
           "sourceId": 118,
           "uniqueId": "af7f07a4-4e0b-4f30-9ec6-66dd86f27d48",
@@ -1177,7 +1177,7 @@ export const crypto1000 = {
         },
         {
           "UserCode": "",
-          "cellId": 142,
+          "gene": 142,
           "hive": "crypto#1000",
           "sourceId": 118,
           "uniqueId": "591c3d54-3227-43c6-8c09-1af2c9a03c3b",
@@ -1218,7 +1218,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 143,
+          "gene": 143,
           "hive": "crypto#1000",
           "sourceId": 118,
           "uniqueId": "126ee85a-8cf2-423d-a9b9-613b9977cc3c",
@@ -1259,7 +1259,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 144,
+          "gene": 144,
           "hive": "crypto#1000",
           "sourceId": 118,
           "uniqueId": "00a64700-e7ff-4d24-983b-12c483264d43",
@@ -1300,7 +1300,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 145,
+          "gene": 145,
           "hive": "crypto#1000",
           "sourceId": 118,
           "uniqueId": "f4f4f13a-325e-4c07-afdd-77e27b7a7a7a",
@@ -1342,7 +1342,7 @@ export const crypto1000 = {
         },
         {
           "UserCode": "",
-          "cellId": 146,
+          "gene": 146,
           "hive": "crypto#1000",
           "sourceId": 118,
           "uniqueId": "ea2a3a44-9ab2-4de5-9e4e-cc29c449c3a1",
@@ -1384,7 +1384,7 @@ export const crypto1000 = {
         },
         {
           "UserCode": "",
-          "cellId": 147,
+          "gene": 147,
           "hive": "crypto#1000",
           "sourceId": 118,
           "uniqueId": "368bc4dd-0cc0-4141-a453-63d12b892bb4",
@@ -1425,7 +1425,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 148,
+          "gene": 148,
           "hive": "crypto#1000",
           "sourceId": 118,
           "uniqueId": "b55d7bcc-4ecb-49d1-89dc-5f7683ee6856",
@@ -1466,7 +1466,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 149,
+          "gene": 149,
           "hive": "crypto#1000",
           "sourceId": 118,
           "uniqueId": "ce36b78e-5a87-4b4c-9393-fb3df8c03b34",
@@ -1507,7 +1507,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 150,
+          "gene": 150,
           "hive": "crypto#1000",
           "sourceId": 118,
           "uniqueId": "db4984e1-b81e-496e-844d-cbd523c7be1e",
@@ -1549,7 +1549,7 @@ export const crypto1000 = {
         },
         {
           "UserCode": "",
-          "cellId": 151,
+          "gene": 151,
           "hive": "crypto#1000",
           "sourceId": 118,
           "uniqueId": "cba11ea0-cab1-40c6-8ab4-88141de03003",
@@ -1591,7 +1591,7 @@ export const crypto1000 = {
         },
         {
           "UserCode": "",
-          "cellId": 152,
+          "gene": 152,
           "hive": "crypto#1000",
           "sourceId": 118,
           "uniqueId": "cc55ce62-012c-411e-a871-7f657bb19d2b",
@@ -1632,7 +1632,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 153,
+          "gene": 153,
           "hive": "crypto#1000",
           "sourceId": 118,
           "uniqueId": "af7f07a4-4e0b-4f30-9ec6-66dd86f27d48",
@@ -1674,7 +1674,7 @@ export const crypto1000 = {
         },
         {
           "UserCode": "",
-          "cellId": 154,
+          "gene": 154,
           "hive": "crypto#1000",
           "sourceId": 118,
           "uniqueId": "591c3d54-3227-43c6-8c09-1af2c9a03c3b",
@@ -1715,7 +1715,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 155,
+          "gene": 155,
           "hive": "crypto#1000",
           "sourceId": 118,
           "uniqueId": "126ee85a-8cf2-423d-a9b9-613b9977cc3c",
@@ -1756,7 +1756,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 156,
+          "gene": 156,
           "hive": "crypto#1000",
           "sourceId": 118,
           "uniqueId": "00a64700-e7ff-4d24-983b-12c483264d43",
@@ -1797,7 +1797,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 157,
+          "gene": 157,
           "hive": "crypto#1000",
           "sourceId": 119,
           "uniqueId": "e28dc6a4-4449-4db7-ac9c-cf3b854936d8",
@@ -1838,7 +1838,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 158,
+          "gene": 158,
           "hive": "crypto#1000",
           "sourceId": 119,
           "uniqueId": "a797bc60-3d65-4808-81fb-153413a5be1f",
@@ -1880,7 +1880,7 @@ export const crypto1000 = {
         },
         {
           "UserCode": "",
-          "cellId": 159,
+          "gene": 159,
           "hive": "crypto#1000",
           "sourceId": 119,
           "uniqueId": "6ad7cec4-2425-4d7f-9e2d-7d28e4d3e733",
@@ -1922,7 +1922,7 @@ export const crypto1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 160,
+          "gene": 160,
           "hive": "crypto#1000",
           "name": "tether-coin",
           "options": 16417,
@@ -1968,7 +1968,7 @@ export const crypto1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 161,
+          "gene": 161,
           "hive": "crypto#1000",
           "name": "solana",
           "options": 16417,
@@ -2013,7 +2013,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 162,
+          "gene": 162,
           "hive": "crypto#1000",
           "sourceId": 119,
           "uniqueId": "e8de9d57-8e65-4572-b6f5-7e5209423437",
@@ -2055,7 +2055,7 @@ export const crypto1000 = {
         },
         {
           "UserCode": "",
-          "cellId": 163,
+          "gene": 163,
           "hive": "crypto#1000",
           "sourceId": 119,
           "uniqueId": "8664f071-4bd2-474f-9677-72c73a142f91",
@@ -2096,7 +2096,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 164,
+          "gene": 164,
           "hive": "crypto#1000",
           "sourceId": 119,
           "uniqueId": "0b8882fe-0c7e-47cb-bf25-ed68f5d24c8d",
@@ -2138,7 +2138,7 @@ export const crypto1000 = {
         },
         {
           "UserCode": "",
-          "cellId": 165,
+          "gene": 165,
           "hive": "crypto#1000",
           "sourceId": 119,
           "uniqueId": "8714e86f-4a7d-44c0-a085-5aa983547cc7",
@@ -2179,7 +2179,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 166,
+          "gene": 166,
           "hive": "crypto#1000",
           "sourceId": 119,
           "uniqueId": "a86f6b6c-595d-4e7a-99ca-9a1e4e0e1f62",
@@ -2221,7 +2221,7 @@ export const crypto1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 167,
+          "gene": 167,
           "hive": "crypto#1000",
           "name": "troncoin",
           "options": 16417,
@@ -2266,7 +2266,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 168,
+          "gene": 168,
           "hive": "crypto#1000",
           "sourceId": 119,
           "uniqueId": "bc30242f-a16f-43f8-b439-aa2bd2cc5c28",
@@ -2308,7 +2308,7 @@ export const crypto1000 = {
         },
         {
           "UserCode": "",
-          "cellId": 169,
+          "gene": 169,
           "hive": "crypto#1000",
           "sourceId": 119,
           "uniqueId": "78965e72-6fcf-4b22-aabf-eb1aa5a6da86",
@@ -2349,7 +2349,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 170,
+          "gene": 170,
           "hive": "crypto#1000",
           "sourceId": 119,
           "uniqueId": "775c2bf3-fd70-4f1c-96b4-12859c44c31a",
@@ -2390,7 +2390,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 171,
+          "gene": 171,
           "hive": "crypto#1000",
           "sourceId": 119,
           "uniqueId": "4420d95d-003f-4f43-8b74-728b73e3bb62",
@@ -2431,7 +2431,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 172,
+          "gene": 172,
           "hive": "crypto#1000",
           "sourceId": 119,
           "uniqueId": "e824d658-9ce1-4e2c-8d15-0d54bf9db22d",
@@ -2472,7 +2472,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 173,
+          "gene": 173,
           "hive": "crypto#1000",
           "sourceId": 120,
           "uniqueId": "bd7f1522-0fd7-44dd-93a0-8612d42463e6",
@@ -2513,7 +2513,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 174,
+          "gene": 174,
           "hive": "crypto#1000",
           "sourceId": 120,
           "uniqueId": "ea089c6f-fa9e-4395-9ee5-85dd888f0796",
@@ -2554,7 +2554,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 175,
+          "gene": 175,
           "hive": "crypto#1000",
           "sourceId": 120,
           "uniqueId": "7511e4dd-1ec9-4e84-81ac-5c0c89e56475",
@@ -2595,7 +2595,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 176,
+          "gene": 176,
           "hive": "crypto#1000",
           "sourceId": 120,
           "uniqueId": "3bb8d62d-b8ae-45d7-adbd-ed2ae3281fc9",
@@ -2636,7 +2636,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 177,
+          "gene": 177,
           "hive": "crypto#1000",
           "sourceId": 120,
           "uniqueId": "795e4b90-7525-4f9d-9ea8-182ec60a89bb",
@@ -2677,7 +2677,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 178,
+          "gene": 178,
           "hive": "crypto#1000",
           "sourceId": 120,
           "uniqueId": "d710802b-b6f7-43d1-88c9-22faf9967181",
@@ -2718,7 +2718,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 179,
+          "gene": 179,
           "hive": "crypto#1000",
           "sourceId": 120,
           "uniqueId": "5cf06e8a-8cfa-4523-981f-c4ea4fee3da7",
@@ -2759,7 +2759,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 180,
+          "gene": 180,
           "hive": "crypto#1000",
           "sourceId": 120,
           "uniqueId": "92832811-d89a-4a09-82be-f09c5347e703",
@@ -2800,7 +2800,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 181,
+          "gene": 181,
           "hive": "crypto#1000",
           "sourceId": 120,
           "uniqueId": "2f3fee22-a575-46a1-b1a8-cbba6f83d59a",
@@ -2841,7 +2841,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 182,
+          "gene": 182,
           "hive": "crypto#1000",
           "sourceId": 120,
           "uniqueId": "2a0edb50-2435-4b9c-9011-a1e86873310f",
@@ -2882,7 +2882,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 183,
+          "gene": 183,
           "hive": "crypto#1000",
           "sourceId": 120,
           "uniqueId": "9c8cdd41-b754-4f3f-bb10-9f8f611e7530",
@@ -2923,7 +2923,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 184,
+          "gene": 184,
           "hive": "crypto#1000",
           "sourceId": 120,
           "uniqueId": "f30a35b1-ffeb-4958-947f-8dede56a89dc",
@@ -2964,7 +2964,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 185,
+          "gene": 185,
           "hive": "crypto#1000",
           "sourceId": 120,
           "uniqueId": "5016a900-a3fd-48bd-bcea-0580c3c56b09",
@@ -3005,7 +3005,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 186,
+          "gene": 186,
           "hive": "crypto#1000",
           "sourceId": 120,
           "uniqueId": "0c797dbb-db16-4738-89f7-c06a9547d456",
@@ -3046,7 +3046,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 187,
+          "gene": 187,
           "hive": "crypto#1000",
           "sourceId": 120,
           "uniqueId": "95eeb198-7465-4808-bbe5-7dd13ad5e7c5",
@@ -3087,7 +3087,7 @@ export const crypto1000 = {
           }
         },
         {
-          "cellId": 188,
+          "gene": 188,
           "hive": "crypto#1000",
           "sourceId": 120,
           "uniqueId": "3e8ac6f6-a6f8-4079-a2f3-e793a5491698",
@@ -3129,7 +3129,7 @@ export const crypto1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 190,
+          "gene": 190,
           "hive": "crypto#1000",
           "name": "more",
           "options": 16899,

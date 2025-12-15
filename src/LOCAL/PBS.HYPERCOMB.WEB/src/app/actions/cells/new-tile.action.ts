@@ -39,7 +39,7 @@ export class NewTileAction extends ActionBase<PayloadBase> {
     //   name: "",
     //     index,
     //     hive: parent.hive,
-    //   sourceId: parent.cellId,
+    //   sourceId: parent.gene,
     //   imageHash: this.preloader.getInitialTileHash() ?? "",
     // })
 

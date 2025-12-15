@@ -1,7 +1,7 @@
 ﻿import { FederatedPointerEvent } from "pixi.js"
 import { HypercombMode } from "../core/models/enumerations"
-import { IHiveInfo } from "../hive/hive-resolution-type"
 import { Cell } from "../models/cell"
+import { IHiveInfo } from "../hive/i-hive-info"
 
 export type ContextKind =
     | "cell"

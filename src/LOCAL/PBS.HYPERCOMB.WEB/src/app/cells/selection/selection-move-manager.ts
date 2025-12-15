@@ -29,7 +29,7 @@ export class SelectionMoveManager extends PixiServiceBase {
 
   // saved state for swap resolution
   private orig = new Map<number, AxialCoordinate>() // moved set → axial
-  private occ0 = new Map<number, number>()         // index → cellId (all cells)
+  private occ0 = new Map<number, number>()         // index → gene (all cells)
   private lastIndex: number = -1                   // last hovered index
 
   protected override onPixiReady(): void {
@@ -63,13 +63,13 @@ export class SelectionMoveManager extends PixiServiceBase {
       // reset all tiles to base positions
       for (const c of this.store.cells()) {
         const baseAx = this.axials.items.get(c.index)
-        const tile = this.store.lookupTile(c.cellId)
+        const tile = this.store.lookupTile(c.gene)
         if (baseAx && tile) tile.setPosition(baseAx.Location)
       }
 
       // apply live drag preview (moved + swapped)
-      for (const [cellId, ax] of placements) {
-        const tile = this.store.lookupTile(cellId)
+      for (const [gene, ax] of placements) {
+        const tile = this.store.lookupTile(gene)
         if (tile) tile.setPosition(ax.Location)
       }
     })
@@ -80,7 +80,7 @@ export class SelectionMoveManager extends PixiServiceBase {
   // ------------------------------------------------------------------
   public beginDrag(cell: Cell, ev: PointerEvent): void {
     const selections = this.selectionsvc.items()
-    const inSelection = selections.some(c => c.cellId === cell.cellId)
+    const inSelection = selections.some(c => c.gene === cell.gene)
 
     // if there is a selection and this tile is in it → move the whole group
     // otherwise → move just this tile (quick single-tile swap)
@@ -101,13 +101,13 @@ export class SelectionMoveManager extends PixiServiceBase {
     this.orig.clear()
     for (const c of group) {
       const selAx = this.axials.items.get(c.index)
-      if (selAx) this.orig.set(c.cellId, selAx)
+      if (selAx) this.orig.set(c.gene, selAx)
     }
 
     // snapshot full occupancy for swap detection
     this.occ0.clear()
     for (const c of this.cells) {
-      this.occ0.set(c.index, c.cellId)
+      this.occ0.set(c.index, c.gene)
     }
   }
 
@@ -119,14 +119,14 @@ export class SelectionMoveManager extends PixiServiceBase {
     if (this.orig.size === 0) return placements
 
     // 1) move all tiles in the current move group by diff
-    for (const [cellId, fromAx] of this.orig) {
+    for (const [gene, fromAx] of this.orig) {
       const toAx = AxialCoordinate.add(fromAx, diff)
-      placements.set(cellId, toAx)
+      placements.set(gene, toAx)
     }
 
     // 2) handle simple swaps for unselected occupants
-    for (const [cellId, fromAx] of this.orig) {
-      const toAx = placements.get(cellId)
+    for (const [gene, fromAx] of this.orig) {
+      const toAx = placements.get(gene)
       if (!toAx) continue
 
       const occId = this.occ0.get(toAx.index)
@@ -153,8 +153,8 @@ export class SelectionMoveManager extends PixiServiceBase {
         const placements = this.computePlacements(diff)
         const updated: Cell[] = []
 
-        for (const [cellId, ax] of placements) {
-          const cell = this.store.lookupData(cellId)!
+        for (const [gene, ax] of placements) {
+          const cell = this.store.lookupData(gene)!
           if (cell.index !== ax.index) {
             cell.index = ax.index
             updated.push(cell)

@@ -16,7 +16,7 @@ export class CellFactory implements ICreateCells {
   private readonly stack = inject(ParentContext)
 
   // ───────────────────────────────────────────────
-  // create: now uses `gene` instead of `cellId`
+  // create: now uses `gene` instead of `gene`
   // ───────────────────────────────────────────────
   public async create(name: string,
     params: Partial<Cell>,

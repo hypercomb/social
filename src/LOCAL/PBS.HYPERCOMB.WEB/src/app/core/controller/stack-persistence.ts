@@ -14,7 +14,7 @@ export class StackPersistence {
     // auto-save on every stack change
     effect(() => {
       const ids = this.stack.snapshot().map(e => ({
-        cellId: e.cellId,
+        gene: e.gene,
         hive: e.hive,
       }))
       this.storage.set(StackPersistence.storageKey, ids)
@@ -22,13 +22,13 @@ export class StackPersistence {
   }
 
   public load(): void {
-    const cached = this.storage.get<{ cellId: number; hive: string }[]>(
+    const cached = this.storage.get<{ gene: string; hive: string }[]>(
       StackPersistence.storageKey
     )
     if (!cached) return
 
     try {
-      const entries = cached.map(v => new StackEntry(v.cellId, v.hive))
+      const entries = cached.map(v => new StackEntry(v.gene, v.hive))
       this.stack.restore(entries)
     } catch {
       this.stack.clear()

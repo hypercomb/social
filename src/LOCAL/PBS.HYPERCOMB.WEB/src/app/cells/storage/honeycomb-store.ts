@@ -82,7 +82,7 @@ export class HoneycombStore extends Hypercomb implements IHoneycombStore, IStagi
   // ---------------------------------------------------------
   public register(cell: Cell, tile: Tile): void {
 
-    if (!gene) throw new Error("Cannot register tile without cellId")
+    if (!gene) throw new Error("Cannot register tile without gene")
 
     const existing = this.tileRegistry.get(gene)
     if (existing && existing !== tile) {
@@ -98,15 +98,15 @@ export class HoneycombStore extends Hypercomb implements IHoneycombStore, IStagi
   }
 
 
-  public unregister(cellId: number): void {
-    const tile = this.tileRegistry.get(cellId)
+  public unregister(gene: string): void {
+    const tile = this.tileRegistry.get(gene)
     if (tile) {
       tile.parent?.removeChild(tile as unknown as Container)
       tile.destroy({ children: true })
-      this.tileRegistry.delete(cellId)
+      this.tileRegistry.delete(gene)
     }
 
-    this.dataRegistry.delete(cellId)
+    this.dataRegistry.delete(gene)
     this.refreshSurface()
     this.bump()
   }
@@ -115,11 +115,11 @@ export class HoneycombStore extends Hypercomb implements IHoneycombStore, IStagi
   // LOOKUP
   // ---------------------------------------------------------
   public lookupTile(gene: string): Tile | undefined {
-    return this.tileRegistry.get(cellId)
+    return this.tileRegistry.get(gene)
   }
 
-  public lookupData(cellId: number): Cell | undefined {
-    return this.dataRegistry.get(cellId)
+  public lookupData(gene: string): Cell | undefined {
+    return this.dataRegistry.get(gene)
   }
 
   // new implementation: find by cell.index instead of array slot
@@ -134,9 +134,9 @@ export class HoneycombStore extends Hypercomb implements IHoneycombStore, IStagi
 
     const cells = this._cells()
     const cell = cells.find(c => c.index === idx)
-    if (!cell?.cellId) return undefined
+    if (!cell?.gene) return undefined
 
-    return this.tileRegistry.get(cell.cellId)
+    return this.tileRegistry.get(cell.gene)
   }
 
   // ---------------------------------------------------------
@@ -144,32 +144,32 @@ export class HoneycombStore extends Hypercomb implements IHoneycombStore, IStagi
   // ---------------------------------------------------------
   public stageCells(cells: Cell[]): void {
     this.dataRegistry.clear()
-    for (const c of cells) this.dataRegistry.set(c.cellId!, c)
+    for (const c of cells) this.dataRegistry.set(c.gene!, c)
     this.refreshSurface()
     this.bump()
   }
 
   public stageAdd(cell: Cell): void {
-    this.dataRegistry.set(cell.cellId!, cell)
+    this.dataRegistry.set(cell.gene!, cell)
     this.refreshSurface()
     this.bump()
   }
 
-  public stageRemove(cellId: number): void {
-    this.dataRegistry.delete(cellId)
+  public stageRemove(gene: string): void {
+    this.dataRegistry.delete(gene)
     this.refreshSurface()
     this.bump()
   }
 
   public stageReplace(cell: Cell): void {
-    this.dataRegistry.set(cell.cellId!, cell)
+    this.dataRegistry.set(cell.gene!, cell)
     this.refreshSurface()
     this.enqueue(cell)
     this.bump()
   }
 
   public stageMerge(cells: Cell[]): void {
-    for (const c of cells) this.dataRegistry.set(c.cellId!, c)
+    for (const c of cells) this.dataRegistry.set(c.gene!, c)
     this.refreshSurface()
     this.bump()
   }
@@ -239,7 +239,7 @@ export class HoneycombStore extends Hypercomb implements IHoneycombStore, IStagi
 
   public setVisibility(cells: Cell[], visible: boolean): void {
     for (const c of cells) {
-      const t = this.tileRegistry.get(c.cellId!)
+      const t = this.tileRegistry.get(c.gene!)
       if (t) t.visible = visible
     }
   }

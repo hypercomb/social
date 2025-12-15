@@ -68,7 +68,7 @@ export class HeaderBarComponent extends Hypercomb {
     if (!coordinate) return this.state.hive()
 
     // lookup cell name if tile is present, otherwise fall back to coordinate only
-    const cell = tile ? this.store.lookupData(tile.cellId) : undefined
+    const cell = tile ? this.store.lookupData(tile.gene) : undefined
     const name = cell?.name ?? this.state.hive()
 
     return `${name}`

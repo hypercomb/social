@@ -14,10 +14,10 @@ import DBTables from "src/app/core/constants/db-tables"
 
 export class TagDatabase implements ITagManager {
   constructor(private db: Dexie) { }
-  removeTagFromTile(cellId: number, name: string) {
+  removeTagFromTile(gene: string, name: string) {
     throw new Error("Method not implemented.")
   }
-  setTagsOnTile(cellId: number, names: string[]) {
+  setTagsOnTile(gene: string, names: string[]) {
     throw new Error("Method not implemented.")
   }
   findTilesByAny(names: string[]): Promise<Cell[]> {
@@ -26,7 +26,7 @@ export class TagDatabase implements ITagManager {
   findTilesByAll(names: string[]): Promise<Cell[]> {
     throw new Error("Method not implemented.")
   }
-  getTileTagNames(cellId: number): Promise<string[]> {
+  getTileTagNames(gene: string): Promise<string[]> {
     throw new Error("Method not implemented.")
   }
   countByTag(name: string): Promise<number> {
@@ -106,7 +106,7 @@ export class TagDatabase implements ITagManager {
   // ---------------------------------------------------------------------------
 
   /** add one or more tags to a tile (creates tags if missing) */
-  public addTagsToTile = async cellId: number, names: string[]) => {
+  public addTagsToTile = async gene: string, names: string[]) => {
     const ids = Array.from(new Set(await Promise.all(names.map((n) => this.create(n)))))
     await this.db.table(Constants.TileDataTable).updatecellId (t: any) => {
       const next = new Set([...(t?.TagIds ?? []), ...ids])
@@ -115,7 +115,7 @@ export class TagDatabase implements ITagManager {
   }
 
   /** remove a tag (by name) from a tile */
-  public removeTagFromTile = async cellId: number, name: string) => {
+  public removeTagFromTile = async gene: string, name: string) => {
     const tag = await this.getBySlug(name)
     if (!tag?.id) return
     await this.db.table(Constants.TileDataTable).updatecellId (t: any) => ({
@@ -124,7 +124,7 @@ export class TagDatabase implements ITagManager {
   }
 
   /** overwrite all tags on a tile */
-  public setTagsOnTile = async cellId: number, names: string[]) => {
+  public setTagsOnTile = async gene: string, names: string[]) => {
     const ids = Array.from(new Set(await Promise.all(names.map((n) => this.create(n)))))
     await this.db.table(Constants.TileDataTable).updatecellId { TagIds: ids })
   }
@@ -185,7 +185,7 @@ export class TagDatabase implements ITagManager {
   }
 
   /** get tag names assigned to a tile */
-  public getTileTagNames = async cellId: number): Promise<string[]> => {
+  public getTileTagNames = async gene: string): Promise<string[]> => {
     const t = (await this.db.table(Constants.TileDataTable).getcellId) as Cell | undefined
     if (!t?.tagIds?.length) return []
     const rows = (await this.db.table(Constants.TagsDataTable).bulkGet(t.tagIds)) as (ITag | undefined)[]

@@ -28,7 +28,7 @@ export class TileLayerManager extends PixiServiceBase {
       const layers = await this.getLayers(cell, imageSprite)
 
       if (!layers.length) {
-        this.debug.log('tiles', `no layers produced for ${cell.name} (id=${cell.cellId})`)
+        this.debug.log('tiles', `no layers produced for ${cell.name} (id=${cell.gene})`)
       }
 
       return await this.onAllTexturesLoaded(layers)
@@ -62,7 +62,7 @@ export class TileLayerManager extends PixiServiceBase {
 
       this.debug.log(
         'tiles',
-        `getLayers: cell=${cell.name} id=${cell.cellId} focused=${focused} imageValid=${imageValid}`
+        `getLayers: cell=${cell.name} id=${cell.gene} focused=${focused} imageValid=${imageValid}`
       )
 
       const bg = this.getBackgroundVisual(cell)

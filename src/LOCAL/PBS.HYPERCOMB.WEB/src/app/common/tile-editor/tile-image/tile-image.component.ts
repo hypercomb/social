@@ -163,7 +163,7 @@ export class TileImageComponent implements OnDestroy {
     const hasHash = !!cell.imageHash
 
     if (!base && !hasHash) {
-      this.debug.warn('tile-image', 'no image found', cell.cellId)
+      this.debug.warn('tile-image', 'no image found', cell.gene)
       this.sprite = undefined
       this.es.rendered.set(false)
       return

@@ -7,7 +7,7 @@ export class Tile extends Container {
   public sprite!: Sprite
 
   public onPositionUpdate?: (args: {
-    cellId: number
+    gene: string
     x: number
     y: number
     index?: number
@@ -15,7 +15,7 @@ export class Tile extends Container {
 
   constructor(cell: Cell, sprite?: Sprite) {
     super()
-    this.cellId = cell.cellId
+    this.gene = cell.gene
     this.uniqueId = cell.uniqueId
 
     if (sprite) {
@@ -42,7 +42,7 @@ export class Tile extends Container {
 
   public requestPositionUpdate(x: number, y: number, index?: number) {
     this.onPositionUpdate?.({
-      cellId: this.cellId,
+      gene: this.gene,
       x,
       y,
       index

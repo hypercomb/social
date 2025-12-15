@@ -7,7 +7,7 @@ export const news1000 = {
     "tables": [
       {
         "name": "data",
-        "schema": "++cellId,kind,[hive+isActive+isDeleted],sourceId,uniqueId,options,name,type,dateCreated,isActive,isBranch,isDeleted,isHidden,isIgnoreBackground,isSelected,isFocusedMode,isLocked,isNoImage,isInitialTile,isHive,isTileData,isPathway,isNewHive,isRecenter,[hiveId+isDeleted],[hive+sourceId],[isSelected+isLocked],*tagIds",
+        "schema": "++gene,kind,[hive+isActive+isDeleted],sourceId,uniqueId,options,name,type,dateCreated,isActive,isBranch,isDeleted,isHidden,isIgnoreBackground,isSelected,isFocusedMode,isLocked,isNoImage,isInitialTile,isHive,isTileData,isPathway,isNewHive,isRecenter,[hiveId+isDeleted],[hive+sourceId],[isSelected+isLocked],*tagIds",
         "rowCount": 745
       },
       {
@@ -17,7 +17,7 @@ export const news1000 = {
       },
       {
         "name": "hierarchy",
-        "schema": "++id,cellId,hive,sourceId",
+        "schema": "++id,gene,hive,sourceId",
         "rowCount": 0
       }
     ],
@@ -27,7 +27,7 @@ export const news1000 = {
       "rows": [
         {
           "kind": "Hive",
-          "cellId": 4,
+          "gene": 4,
           "hive": "news#1000",
           "name": "the-blazesss",
           "options": 513,
@@ -73,7 +73,7 @@ export const news1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 5,
+          "gene": 5,
           "hive": "news#1000",
           "name": "townhall",
           "options": 16417,
@@ -118,7 +118,7 @@ export const news1000 = {
           }
         },
         {
-          "cellId": 6,
+          "gene": 6,
           "hive": "news#1000",
           "sourceId": 4,
           "uniqueId": "2b2d7713-964d-4aff-a780-d9da8c90e954",
@@ -159,7 +159,7 @@ export const news1000 = {
           }
         },
         {
-          "cellId": 8,
+          "gene": 8,
           "hive": "news#1000",
           "sourceId": 4,
           "uniqueId": "c262131f-e184-4efc-8894-b7d33c8f1413",
@@ -200,7 +200,7 @@ export const news1000 = {
           }
         },
         {
-          "cellId": 9,
+          "gene": 9,
           "hive": "news#1000",
           "sourceId": 4,
           "uniqueId": "32419e11-2585-41a7-b732-d44d5af931e8",
@@ -241,7 +241,7 @@ export const news1000 = {
           }
         },
         {
-          "cellId": 10,
+          "gene": 10,
           "hive": "news#1000",
           "sourceId": 4,
           "uniqueId": "c51a7ce7-e1b8-4e5a-b897-61c10b2280b1",
@@ -282,7 +282,7 @@ export const news1000 = {
           }
         },
         {
-          "cellId": 11,
+          "gene": 11,
           "hive": "news#1000",
           "sourceId": 4,
           "uniqueId": "5da3952e-372e-4501-966a-296c27d735bd",
@@ -323,7 +323,7 @@ export const news1000 = {
           }
         },
         {
-          "cellId": 12,
+          "gene": 12,
           "hive": "news#1000",
           "sourceId": 4,
           "uniqueId": "4ccf16a1-eaf6-46bc-8d01-608770a109c5",
@@ -364,7 +364,7 @@ export const news1000 = {
           }
         },
         {
-          "cellId": 13,
+          "gene": 13,
           "hive": "news#1000",
           "sourceId": 4,
           "uniqueId": "921ec2b6-5a12-4bd6-8b24-3561c67bf758",
@@ -405,7 +405,7 @@ export const news1000 = {
           }
         },
         {
-          "cellId": 14,
+          "gene": 14,
           "hive": "news#1000",
           "sourceId": 4,
           "uniqueId": "37c6356c-c4b7-417e-aa8f-3c6090884cd0",
@@ -446,7 +446,7 @@ export const news1000 = {
           }
         },
         {
-          "cellId": 15,
+          "gene": 15,
           "hive": "news#1000",
           "sourceId": 4,
           "uniqueId": "2aa9484e-2b04-47c3-a30f-85a351d92d5f",
@@ -487,7 +487,7 @@ export const news1000 = {
           }
         },
         {
-          "cellId": 16,
+          "gene": 16,
           "hive": "news#1000",
           "sourceId": 4,
           "uniqueId": "d5ccea62-ba57-406f-a9a9-c0846e60d84f",
@@ -528,7 +528,7 @@ export const news1000 = {
           }
         },
         {
-          "cellId": 17,
+          "gene": 17,
           "hive": "news#1000",
           "sourceId": 4,
           "uniqueId": "2efa0a4e-d264-470a-a983-7780226f3844",
@@ -569,7 +569,7 @@ export const news1000 = {
           }
         },
         {
-          "cellId": 18,
+          "gene": 18,
           "hive": "news#1000",
           "sourceId": 4,
           "uniqueId": "ab2be110-2d9f-480b-81fe-6193eb6f5410",
@@ -611,7 +611,7 @@ export const news1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 19,
+          "gene": 19,
           "hive": "news#1000",
           "name": "counterpunch",
           "options": 16897,
@@ -657,7 +657,7 @@ export const news1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 20,
+          "gene": 20,
           "hive": "news#1000",
           "name": "the-blaze",
           "options": 16929,
@@ -702,7 +702,7 @@ export const news1000 = {
           }
         },
         {
-          "cellId": 21,
+          "gene": 21,
           "hive": "news#1000",
           "sourceId": 4,
           "uniqueId": "7a80b6ce-b858-42ae-bf61-3077b950ba59",
@@ -744,7 +744,7 @@ export const news1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 22,
+          "gene": 22,
           "hive": "news#1000",
           "name": "media-lens",
           "options": 16929,
@@ -790,7 +790,7 @@ export const news1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 23,
+          "gene": 23,
           "hive": "news#1000",
           "name": "news-max",
           "options": 16417,
@@ -835,7 +835,7 @@ export const news1000 = {
           }
         },
         {
-          "cellId": 24,
+          "gene": 24,
           "hive": "news#1000",
           "sourceId": 4,
           "uniqueId": "012e8f90-db43-4a7e-ad9d-4ef80b75f06e",
@@ -876,7 +876,7 @@ export const news1000 = {
           }
         },
         {
-          "cellId": 26,
+          "gene": 26,
           "hive": "news#1000",
           "sourceId": 4,
           "uniqueId": "f97aaca9-bf57-427b-adfc-1d2f17654bf1",
@@ -917,7 +917,7 @@ export const news1000 = {
           }
         },
         {
-          "cellId": 27,
+          "gene": 27,
           "hive": "news#1000",
           "sourceId": 4,
           "uniqueId": "05bea79a-7f3e-4ce4-b68c-3858d245c0c9",
@@ -959,7 +959,7 @@ export const news1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 28,
+          "gene": 28,
           "hive": "news#1000",
           "name": "american-thinker",
           "options": 16385,
@@ -1004,7 +1004,7 @@ export const news1000 = {
           }
         },
         {
-          "cellId": 29,
+          "gene": 29,
           "hive": "news#1000",
           "sourceId": 4,
           "uniqueId": "15b3fede-31fe-4caf-b561-44ea121fc79f",
@@ -1045,7 +1045,7 @@ export const news1000 = {
           }
         },
         {
-          "cellId": 30,
+          "gene": 30,
           "hive": "news#1000",
           "sourceId": 4,
           "uniqueId": "be7b944e-07ca-447e-9331-d096d372d0f1",
@@ -1086,7 +1086,7 @@ export const news1000 = {
           }
         },
         {
-          "cellId": 31,
+          "gene": 31,
           "hive": "news#1000",
           "sourceId": 4,
           "uniqueId": "f942f5a9-a78f-4d2b-8484-e40b6d29ed59",
@@ -1127,7 +1127,7 @@ export const news1000 = {
           }
         },
         {
-          "cellId": 32,
+          "gene": 32,
           "hive": "news#1000",
           "sourceId": 4,
           "uniqueId": "c848ee38-1a5c-45ae-9eb8-10ca30b0bd97",
@@ -1168,7 +1168,7 @@ export const news1000 = {
           }
         },
         {
-          "cellId": 33,
+          "gene": 33,
           "hive": "news#1000",
           "sourceId": 4,
           "uniqueId": "1ab8db45-ac40-4e3b-9950-9d2f4a5ccde0",
@@ -1209,7 +1209,7 @@ export const news1000 = {
           }
         },
         {
-          "cellId": 34,
+          "gene": 34,
           "hive": "news#1000",
           "sourceId": 4,
           "uniqueId": "2385ef7f-17ee-4a23-88da-abcd98160e6e",
@@ -1250,7 +1250,7 @@ export const news1000 = {
           }
         },
         {
-          "cellId": 35,
+          "gene": 35,
           "hive": "news#1000",
           "sourceId": 4,
           "uniqueId": "3f0f130b-48ae-4da0-a0d4-c9c3b726d6df",
@@ -1292,7 +1292,7 @@ export const news1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 36,
+          "gene": 36,
           "hive": "news#1000",
           "name": "in-these-times",
           "options": 16417,
@@ -1337,7 +1337,7 @@ export const news1000 = {
           }
         },
         {
-          "cellId": 37,
+          "gene": 37,
           "hive": "news#1000",
           "sourceId": 4,
           "uniqueId": "0edf02bb-a19a-4df8-ae57-05f944ec7421",
@@ -1378,7 +1378,7 @@ export const news1000 = {
           }
         },
         {
-          "cellId": 38,
+          "gene": 38,
           "hive": "news#1000",
           "sourceId": 4,
           "uniqueId": "948e8932-243a-4b8a-a38d-7298de7b9486",
@@ -1419,7 +1419,7 @@ export const news1000 = {
           }
         },
         {
-          "cellId": 39,
+          "gene": 39,
           "hive": "news#1000",
           "sourceId": 4,
           "uniqueId": "84f9eb0e-adb7-4d2f-89f3-64944d2bf207",
@@ -1460,7 +1460,7 @@ export const news1000 = {
           }
         },
         {
-          "cellId": 40,
+          "gene": 40,
           "hive": "news#1000",
           "sourceId": 4,
           "uniqueId": "6f3a642c-b9de-4bc7-bd92-ea70c98b3025",
@@ -1502,7 +1502,7 @@ export const news1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 41,
+          "gene": 41,
           "hive": "news#1000",
           "name": "hot-air-rights",
           "options": 16897,
@@ -1548,7 +1548,7 @@ export const news1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 42,
+          "gene": 42,
           "hive": "news#1000",
           "name": "the-canary",
           "options": 16417,
@@ -1593,7 +1593,7 @@ export const news1000 = {
           }
         },
         {
-          "cellId": 43,
+          "gene": 43,
           "hive": "news#1000",
           "sourceId": 4,
           "uniqueId": "9bb7e292-f26d-400a-be6f-457357e8daa5",
@@ -1635,7 +1635,7 @@ export const news1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 44,
+          "gene": 44,
           "hive": "news#1000",
           "name": "new-internationalist",
           "options": 16417,
@@ -1680,7 +1680,7 @@ export const news1000 = {
           }
         },
         {
-          "cellId": 45,
+          "gene": 45,
           "hive": "news#1000",
           "sourceId": 4,
           "uniqueId": "cd0ce5f3-a8b1-49a1-8309-b5a89bae9c41",
@@ -1721,7 +1721,7 @@ export const news1000 = {
           }
         },
         {
-          "cellId": 46,
+          "gene": 46,
           "hive": "news#1000",
           "sourceId": 4,
           "uniqueId": "7d71acd6-0927-4707-8db0-d54324e09e4e",
@@ -1762,7 +1762,7 @@ export const news1000 = {
           }
         },
         {
-          "cellId": 47,
+          "gene": 47,
           "hive": "news#1000",
           "sourceId": 4,
           "uniqueId": "9ae263eb-1b41-43c8-b406-c845b9b52eb2",
@@ -1803,7 +1803,7 @@ export const news1000 = {
           }
         },
         {
-          "cellId": 48,
+          "gene": 48,
           "hive": "news#1000",
           "sourceId": 4,
           "uniqueId": "c7a0d7b0-52b4-4d6d-abcd-5467d807e9fb",
@@ -1845,7 +1845,7 @@ export const news1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 49,
+          "gene": 49,
           "hive": "news#1000",
           "name": "the-gateway-pundit",
           "options": 16417,
@@ -1890,7 +1890,7 @@ export const news1000 = {
           }
         },
         {
-          "cellId": 50,
+          "gene": 50,
           "hive": "news#1000",
           "sourceId": 4,
           "uniqueId": "c97fac16-2d16-4426-8796-9501558f9829",
@@ -1931,7 +1931,7 @@ export const news1000 = {
           }
         },
         {
-          "cellId": 52,
+          "gene": 52,
           "hive": "news#1000",
           "sourceId": 4,
           "uniqueId": "f4e1f914-3387-4d80-a345-309bf5a1b4e3",

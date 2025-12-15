@@ -27,7 +27,7 @@ export class ClipboardService {
 
     public add = async (root: Cell): Promise<Cell> => {
         // const cell = await this.repository.add(root)!
-        // console.assert(cell.cellId, "added clipboard must have cellId")
+        // console.assert(cell.gene, "added clipboard must have gene")
         // return cell
         throw new Error("Not implemented")
     }
@@ -38,7 +38,7 @@ export class ClipboardService {
         if (!active) return
 
         const clone = await this.factory.clone(cell, {
-            sourceId: active.cellId!,
+            sourceId: active.gene!,
         })
         const { ...rest} = clone
         await this.modify.addCell(<Cell>rest)

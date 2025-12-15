@@ -29,7 +29,7 @@ export class SpritesheetProvider implements ITextureProvider {
   // prime with current layer context when the layer becomes known/active
   public primeLayer = (cells: Cell[]): void => {
     for (const cell of cells) {
-     // this.ctxByCellId.set(String(cell.cellId), { layerId, cells })
+     // this.ctxByCellId.set(String(cell.gene), { layerId, cells })
       throw Error("not implemented")
     }
   }

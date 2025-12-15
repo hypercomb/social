@@ -7,7 +7,7 @@ export const businessPlan1000 = {
     "tables": [
       {
         "name": "data",
-        "schema": "++cellId,kind,[hive+isActive+isDeleted],sourceId,uniqueId,options,name,type,dateCreated,isActive,isBranch,isDeleted,isHidden,isIgnoreBackground,isSelected,isFocusedMode,isLocked,isNoImage,isInitialTile,isHive,isTileData,isPathway,isNewHive,isRecenter,[hiveId+isDeleted],[hive+sourceId],[isSelected+isLocked],*tagIds",
+        "schema": "++gene,kind,[hive+isActive+isDeleted],sourceId,uniqueId,options,name,type,dateCreated,isActive,isBranch,isDeleted,isHidden,isIgnoreBackground,isSelected,isFocusedMode,isLocked,isNoImage,isInitialTile,isHive,isTileData,isPathway,isNewHive,isRecenter,[hiveId+isDeleted],[hive+sourceId],[isSelected+isLocked],*tagIds",
         "rowCount": 745
       },
       {
@@ -17,7 +17,7 @@ export const businessPlan1000 = {
       },
       {
         "name": "hierarchy",
-        "schema": "++id,cellId,hive,sourceId",
+        "schema": "++id,gene,hive,sourceId",
         "rowCount": 0
       }
     ],
@@ -27,7 +27,7 @@ export const businessPlan1000 = {
       "rows": [
         {
           "kind": "Hive",
-          "cellId": 66,
+          "gene": 66,
           "hive": "business-plan#1000",
           "name": "business-hive",
           "options": 513,
@@ -77,7 +77,7 @@ export const businessPlan1000 = {
           "UserCode": "",
           "ImageX": 0,
           "ImageY": 0,
-          "cellId": 67,
+          "gene": 67,
           "hive": "business-plan#1000",
           "sourceId": 66,
           "uniqueId": "cbc06f69-4291-42df-b8bc-0cf87f7f9fd8",
@@ -119,7 +119,7 @@ export const businessPlan1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 68,
+          "gene": 68,
           "hive": "business-plan#1000",
           "name": "business-plan",
           "options": 515,
@@ -165,7 +165,7 @@ export const businessPlan1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 70,
+          "gene": 70,
           "hive": "business-plan#1000",
           "name": "simple",
           "options": 16385,
@@ -215,7 +215,7 @@ export const businessPlan1000 = {
           "UserCode": "",
           "ImageX": 0,
           "ImageY": 0,
-          "cellId": 71,
+          "gene": 71,
           "hive": "business-plan#1000",
           "sourceId": 66,
           "uniqueId": "d342d9c9-771f-47f5-913e-fe6fc0894d92",
@@ -261,7 +261,7 @@ export const businessPlan1000 = {
           "UserCode": "",
           "ImageX": 0,
           "ImageY": 0,
-          "cellId": 72,
+          "gene": 72,
           "hive": "business-plan#1000",
           "sourceId": 66,
           "uniqueId": "44eb6cba-6a2a-4cc3-a3c1-90cb85a9d44e",
@@ -303,7 +303,7 @@ export const businessPlan1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 73,
+          "gene": 73,
           "hive": "business-plan#1000",
           "name": "localized",
           "options": 515,
@@ -353,7 +353,7 @@ export const businessPlan1000 = {
           "UserCode": "",
           "ImageX": 0,
           "ImageY": 0,
-          "cellId": 74,
+          "gene": 74,
           "hive": "business-plan#1000",
           "sourceId": 68,
           "uniqueId": "8cd51a83-2918-4ad5-9465-4a07a31aa5aa",
@@ -399,7 +399,7 @@ export const businessPlan1000 = {
           "UserCode": "",
           "ImageX": 0,
           "ImageY": 0,
-          "cellId": 75,
+          "gene": 75,
           "hive": "business-plan#1000",
           "sourceId": 68,
           "uniqueId": "3a9ffa4d-dba8-45b1-bc51-4334f59561be",
@@ -441,7 +441,7 @@ export const businessPlan1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 76,
+          "gene": 76,
           "hive": "business-plan#1000",
           "name": "executive-summary",
           "options": 16385,
@@ -487,7 +487,7 @@ export const businessPlan1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 77,
+          "gene": 77,
           "hive": "business-plan#1000",
           "name": "mission-statement",
           "options": 16385,
@@ -533,7 +533,7 @@ export const businessPlan1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 78,
+          "gene": 78,
           "hive": "business-plan#1000",
           "name": "user-stories",
           "options": 515,
@@ -579,7 +579,7 @@ export const businessPlan1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 79,
+          "gene": 79,
           "hive": "business-plan#1000",
           "name": "marketing-strategy",
           "options": 16385,
@@ -625,7 +625,7 @@ export const businessPlan1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 80,
+          "gene": 80,
           "hive": "business-plan#1000",
           "name": "organizational-structure",
           "options": 16385,
@@ -671,7 +671,7 @@ export const businessPlan1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 81,
+          "gene": 81,
           "hive": "business-plan#1000",
           "name": "sales-plan",
           "options": 16385,
@@ -721,7 +721,7 @@ export const businessPlan1000 = {
           "UserCode": "",
           "ImageX": 0,
           "ImageY": 0,
-          "cellId": 82,
+          "gene": 82,
           "hive": "business-plan#1000",
           "sourceId": 68,
           "uniqueId": "d9a69b67-0d71-4a10-918f-6da22a59af4c",
@@ -767,7 +767,7 @@ export const businessPlan1000 = {
           "UserCode": "",
           "ImageX": 0,
           "ImageY": 0,
-          "cellId": 83,
+          "gene": 83,
           "hive": "business-plan#1000",
           "sourceId": 68,
           "uniqueId": "6dc5fec0-a276-4bd3-8c3a-cec6b908c870",
@@ -813,7 +813,7 @@ export const businessPlan1000 = {
           "UserCode": "",
           "ImageX": 0,
           "ImageY": 0,
-          "cellId": 84,
+          "gene": 84,
           "hive": "business-plan#1000",
           "sourceId": 68,
           "uniqueId": "2d4566c0-6602-4f48-a485-c369186047da",
@@ -859,7 +859,7 @@ export const businessPlan1000 = {
           "UserCode": "",
           "ImageX": 0,
           "ImageY": 0,
-          "cellId": 85,
+          "gene": 85,
           "hive": "business-plan#1000",
           "sourceId": 68,
           "uniqueId": "96544986-9960-4c3a-a889-d421e5f0baf0",
@@ -905,7 +905,7 @@ export const businessPlan1000 = {
           "UserCode": "",
           "ImageX": 0,
           "ImageY": 0,
-          "cellId": 86,
+          "gene": 86,
           "hive": "business-plan#1000",
           "sourceId": 78,
           "uniqueId": "48c34e1e-8c0b-482c-b64b-0eda5baaabab",
@@ -946,7 +946,7 @@ export const businessPlan1000 = {
           }
         },
         {
-          "cellId": 305,
+          "gene": 305,
           "hive": "business-plan#1000",
           "sourceId": 73,
           "uniqueId": "3e9fdceb-12af-4052-815c-466e28b5cc45",
@@ -983,7 +983,7 @@ export const businessPlan1000 = {
           }
         },
         {
-          "cellId": 306,
+          "gene": 306,
           "hive": "business-plan#1000",
           "sourceId": 73,
           "uniqueId": "dfd92d4c-23dc-45af-9177-c54bd390c7d7",
@@ -1020,7 +1020,7 @@ export const businessPlan1000 = {
           }
         },
         {
-          "cellId": 307,
+          "gene": 307,
           "hive": "business-plan#1000",
           "sourceId": 73,
           "uniqueId": "336165fe-b771-4c17-bb17-b1b4fde6b028",
@@ -1057,7 +1057,7 @@ export const businessPlan1000 = {
           }
         },
         {
-          "cellId": 308,
+          "gene": 308,
           "hive": "business-plan#1000",
           "sourceId": 73,
           "uniqueId": "50c73b42-62ef-4ea8-87d0-74f9b5ce5cb3",
@@ -1094,7 +1094,7 @@ export const businessPlan1000 = {
           }
         },
         {
-          "cellId": 310,
+          "gene": 310,
           "hive": "business-plan#1000",
           "sourceId": 73,
           "uniqueId": "bd3f8cee-a1ce-464e-9251-0c2f61ef60d3",
@@ -1131,7 +1131,7 @@ export const businessPlan1000 = {
           }
         },
         {
-          "cellId": 311,
+          "gene": 311,
           "hive": "business-plan#1000",
           "sourceId": 73,
           "uniqueId": "41e882c0-7706-4ae7-8a5c-7ac70e55668e",
@@ -1168,7 +1168,7 @@ export const businessPlan1000 = {
           }
         },
         {
-          "cellId": 312,
+          "gene": 312,
           "hive": "business-plan#1000",
           "sourceId": 73,
           "uniqueId": "a17eee81-4049-47c6-98a6-5e43a054c507",
@@ -1205,7 +1205,7 @@ export const businessPlan1000 = {
           }
         },
         {
-          "cellId": 313,
+          "gene": 313,
           "hive": "business-plan#1000",
           "sourceId": 73,
           "uniqueId": "dcb05617-936e-489a-b5f2-da328199d59a",
@@ -1242,7 +1242,7 @@ export const businessPlan1000 = {
           }
         },
         {
-          "cellId": 314,
+          "gene": 314,
           "hive": "business-plan#1000",
           "sourceId": 73,
           "uniqueId": "b43ff9f0-47f7-45ea-b759-e0b8de4ed191",
@@ -1280,7 +1280,7 @@ export const businessPlan1000 = {
         },
         {
           "kind": "Cell",
-          "cellId": 315,
+          "gene": 315,
           "hive": "business-plan#1000",
           "name": "montecristo",
           "options": 515,
@@ -1325,7 +1325,7 @@ export const businessPlan1000 = {
           }
         },
         {
-          "cellId": 319,
+          "gene": 319,
           "hive": "business-plan#1000",
           "sourceId": 315,
           "uniqueId": "10b69de2-077f-4dee-8048-0742c9850bad",
@@ -1362,7 +1362,7 @@ export const businessPlan1000 = {
           }
         },
         {
-          "cellId": 320,
+          "gene": 320,
           "hive": "business-plan#1000",
           "sourceId": 315,
           "uniqueId": "d54d59c2-9c86-427b-87ab-a26f28277cdb",
@@ -1399,7 +1399,7 @@ export const businessPlan1000 = {
           }
         },
         {
-          "cellId": 321,
+          "gene": 321,
           "hive": "business-plan#1000",
           "sourceId": 315,
           "uniqueId": "cd2c125d-bca7-4b6a-8241-f0753f60ee15",
@@ -1436,7 +1436,7 @@ export const businessPlan1000 = {
           }
         },
         {
-          "cellId": 322,
+          "gene": 322,
           "hive": "business-plan#1000",
           "sourceId": 315,
           "uniqueId": "9e30a9bd-8e0c-4500-9c4f-21f37cd8a9dc",
@@ -1478,7 +1478,7 @@ export const businessPlan1000 = {
           "UserCode": "",
           "ImageX": 0,
           "ImageY": 0,
-          "cellId": 329,
+          "gene": 329,
           "hive": "business-plan#1000",
           "sourceId": 66,
           "uniqueId": "7b7b5b9b-4fe5-461c-a5b6-8ae93edd3321",

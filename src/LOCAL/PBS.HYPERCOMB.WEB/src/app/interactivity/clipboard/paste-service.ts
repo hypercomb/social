@@ -40,7 +40,7 @@ export class PasteService extends ClipboardOperation {
         // if (!data?.length) return
         // const mapped = this.getMappedItems(data)
 
-        // const first = data.find(x => x.cellId === cell.cellId)
+        // const first = data.find(x => x.gene === cell.gene)
         // if (!first) return
 
         // // pick index
@@ -52,7 +52,7 @@ export class PasteService extends ClipboardOperation {
 
         // // seed root of paste tree
         // first.index = index
-        // first.sourceId = context.cellId!
+        // first.sourceId = context.gene!
 
         // // rebuild hierarchy
         // const resultData: Cell[] = []

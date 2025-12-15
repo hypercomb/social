@@ -1,7 +1,6 @@
 ﻿import { Injectable } from '@angular/core'
 import { Texture } from 'pixi.js'
 import { ITextureProvider } from './i-texture-provider'
-import { EmptyTextureProvider } from './empty-texture-provider'
 import { TextureCacheProvider } from './texture-cache-provider'
 import { RenderTextureProvider } from './render-texture-provider'
 import { SpritesheetProvider } from './spritesheet-provider'
@@ -12,14 +11,12 @@ export class TextureService {
   private readonly providers: readonly ITextureProvider[]
 
   constructor(
-    emptyTextureProvider: EmptyTextureProvider,
     spritesheetProvider: SpritesheetProvider,
     textureCacheProvider: TextureCacheProvider,
     renderTextureProvider: RenderTextureProvider
   ) {
     // priority order: empty → cache → render → spritesheet (or adjust as needed)
     this.providers = [
-      emptyTextureProvider,
       spritesheetProvider,
       textureCacheProvider,
       renderTextureProvider,

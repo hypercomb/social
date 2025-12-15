@@ -50,7 +50,7 @@ export class TilePreparationService {
         for (const t of items) {
             if (!t) continue
             // Ensure basic keys (non-throwing)
-            if (typeof t.cellId !== 'number') t.cellId = t.cellId ?? -1 as any
+            if (typeof t.gene !== 'number') t.gene = t.gene ?? -1 as any
             if (typeof t.sourceId !== 'number') t.sourceId = t.sourceId ?? -1 as any
             if (typeof (t as any).uniqueId !== 'string') (t as any).uniqueId = crypto.randomUUID()
             // drop obviously broken entries (no UniqueId after patch is still impossible, but guard anyway)
@@ -64,13 +64,13 @@ export class TilePreparationService {
     /** Parents before children by following SourceId */
     private topologicalSort = (items: Cell[]): Cell[] => {
         const byId = new Map<number, Cell>()
-        for (const t of items) if (typeof t.cellId === 'number') byId.set(t.cellId!, t)
+        for (const t of items) if (typeof t.gene === 'number') byId.set(t.gene!, t)
 
         const visited = new Set<number>()
         const sorted: Cell[] = []
 
         const visit = (t: Cell) => {
-            const id = t.cellId!
+            const id = t.gene!
             if (visited.has(id)) return
             visited.add(id)
             if (typeof t.sourceId === 'number' && t.sourceId >= 0) {
@@ -81,7 +81,7 @@ export class TilePreparationService {
         }
 
         for (const t of items) {
-            if (typeof t.cellId === 'number') visit(t)
+            if (typeof t.gene === 'number') visit(t)
         }
 
         return sorted
@@ -93,7 +93,7 @@ export class TilePreparationService {
         for (const t of items as any) t.children = undefined
 
         const byId = new Map<number, Cell>()
-        for (const t of items) if (typeof t.cellId === 'number') byId.set(t.cellId!, t)
+        for (const t of items) if (typeof t.gene === 'number') byId.set(t.gene!, t)
 
         for (const t of items) {
             const sid = t.sourceId

@@ -65,7 +65,7 @@ export class NewHiveBootstrapper extends HiveLoaderBase {
         name: "first",
         kind: "Cell",
         index: 5,
-        sourceId: created.cellId
+        sourceId: created.gene
       })
       firstCell.options.set(CellOptions.Active)
 
