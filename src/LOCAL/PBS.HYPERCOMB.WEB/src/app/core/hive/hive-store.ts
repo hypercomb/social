@@ -1,13 +1,13 @@
 import { Injectable, computed, inject, signal } from "@angular/core"
 import { HONEYCOMB_STORE } from "src/app/shared/tokens/i-honeycomb-store.token"
 import { IControlHives, IHiveLookup, IHiveState } from "src/app/shared/tokens/i-hive-store.token"
-import { Tile } from "../models/tile"
+import { Tile } from "../../cells/models/tile"
 import { ParentContext } from "src/app/core/controller/context-stack"
 import { SearchFilter } from "src/app/common/header/search-filter"
 import { Cell } from "src/app/models/cell"
 import { HivePortal } from "src/app/models/hive-portal"
 import { IHiveInfo } from "src/app/hive/i-hive-info"
-import { HashService } from "src/app/hive/storage/hashing-service"
+import { HashService } from "src/app/hive/storage/hash.service"
 
 @Injectable({ providedIn: "root" })
 export class HiveStore implements IControlHives, IHiveState, IHiveLookup {
@@ -57,7 +57,7 @@ export class HiveStore implements IControlHives, IHiveState, IHiveLookup {
         const cell = this.stack.top()!
         if (!cell) return []
 
-        const parentGene = cell.gene
+        const parentGene = cell.seed
         if (parentGene == null) return []
 
         return this.store
@@ -68,7 +68,7 @@ export class HiveStore implements IControlHives, IHiveState, IHiveLookup {
     public readonly tiles = computed<Tile[]>(() => {
         const cells = this.honeycombCells()
         return cells
-            .map(c => this.store.lookupTile(c.gene))
+            .map(c => this.store.lookupTile(c.seed))
             .filter((t): t is Tile => !!t)
     })
 
@@ -89,11 +89,11 @@ export class HiveStore implements IControlHives, IHiveState, IHiveLookup {
     public setHive = async (name: string) => {
         if (!name) return
 
-        const gene = await HashService.hash(name)
-        const portal = new HivePortal(gene, name)
+        const seed = await HashService.hash(name)
+        const portal = new HivePortal(seed, name)
 
         this._hive.set(portal)
-        this.stack.push(gene)
+        this.stack.push(seed)
     }
 
     public hydrate = async (input: string[] | IHiveInfo[]) => {
@@ -132,3 +132,4 @@ export class HiveStore implements IControlHives, IHiveState, IHiveLookup {
         if (idx >= 0) this._activeIndex.set(idx)
     }
 }
+    

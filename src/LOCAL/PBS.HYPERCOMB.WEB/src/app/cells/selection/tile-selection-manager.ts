@@ -77,14 +77,14 @@ export class TileSelectionManager extends PixiServiceBase {
 
   private isCellSelected(cell: Cell): boolean {
     const arr = this.selections.items()
-    return arr.some(c => c.gene === cell.gene)
+    return arr.some(c => c.seed === cell.seed)
   }
 
   private applyOpIfNeeded(cell: Cell): void {
     if (!this.lastOp) return
 
-    const gene = cell.gene
-    if (this.touched.has(gene)) return
+    const seed = cell.seed
+    if (this.touched.has(seed)) return
 
     const selected = this.isCellSelected(cell)
 
@@ -94,6 +94,6 @@ export class TileSelectionManager extends PixiServiceBase {
       if (selected) this.selections.remove(cell)
     }
 
-    this.touched.add(gene)
+    this.touched.add(seed)
   }
 }

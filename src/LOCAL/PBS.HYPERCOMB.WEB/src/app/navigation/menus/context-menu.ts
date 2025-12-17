@@ -108,7 +108,7 @@ export class ContextMenu extends PixiServiceBase implements IContextMenu {
     this.menuContainer.alpha = 1
 
     if (this.bottomIcon) this.bottomIcon.visible = !!cell.link
-    const tile = this.store.lookupTile(cell.gene)
+    const tile = this.store.lookupTile(cell.seed)
     if (!tile) return
 
     const vspace = 125

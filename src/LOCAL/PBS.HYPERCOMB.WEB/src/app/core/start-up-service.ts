@@ -57,7 +57,7 @@ import { CopyAction } from '../actions/clipboard/copy-honeycomb'
 import { CloseExternalAction } from '../actions/navigation/close-external'
 import { ColorPicker } from '../services/color-picker'
 import { NewTileAction } from '../actions/cells/new-tile.action'
-import { HiveService } from '../cells/hive/hive-service'
+import { HiveService } from './hive/hive-service'
 
 
 @Injectable({ providedIn: 'root' })

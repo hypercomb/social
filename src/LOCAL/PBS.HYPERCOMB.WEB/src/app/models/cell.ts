@@ -1,13 +1,13 @@
 // src/app/models/cell.ts
 import { CellFlags } from "./cell-flags"
-import { HashService } from "src/app/hive/storage/hashing-service"
+import { HashService } from "src/app/hive/storage/hash.service"
 
 export class Cell extends CellFlags {
 
   // identity (always present)
-  gene: string = ""
+  seed: string = ""
 
-  // parent gene (optional)
+  // parent seed (optional)
   parentGene: string | null = null
 
   // readable properties
@@ -41,6 +41,6 @@ export class Cell extends CellFlags {
   public async set(name: string, parent: string): Promise<void> {
     this.name = name ?? ""
     this.parentGene = parent ? await HashService.hash(parent) : null
-    this.gene = await HashService.hash(this.name)
+    this.seed = await HashService.hash(this.name)
   }
 }

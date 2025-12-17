@@ -1,7 +1,7 @@
 ﻿// copy.action.ts
 import { inject } from "@angular/core"
 import { ClipboardService } from "src/app/clipboard/clipboard-service"
-import { CellFactory } from "src/app/inversion-of-control/factory/cell-factory"
+import { CellFactory } from "src/app/inversion-of-control/factory/cell.builder"
 import { ImageDatabase } from "src/app/database/images/image-database"
 import { HypercombMode } from "src/app/core/models/enumerations"
 import { Cell } from "src/app/models/cell-kind"
@@ -58,12 +58,12 @@ const doCopy = async (
   }
 ): Promise<Cell | undefined> => {
     throw new Error("Not implemented")
-//   if (!data.gene) return undefined
-//   if (deps.copyMap.has(data.gene)) return deps.copyMap.get(data.gene)
+//   if (!data.seed) return undefined
+//   if (deps.copyMap.has(data.seed)) return deps.copyMap.get(data.seed)
 
 //   const clone: Partial<Cell> = {
 //     ...data,
-//     gene: undefined,
+//     seed: undefined,
 //     hive: newHive,
 //     sourceId,
 //     isInitialized: true,
@@ -72,7 +72,7 @@ const doCopy = async (
 //   }
 
 //   const newCell = await deps.factory.create(clone)
-//   deps.copyMap.set(data.gene, newCell)
+//   deps.copyMap.set(data.seed, newCell)
 
 //   // copy image if present
 //   const image = await deps.imageDb.get(data.hiveId)
@@ -85,9 +85,9 @@ const doCopy = async (
 //   await deps.store.addCell(newCell)
 
 //   // recurse into children
-//   const children = await deps.store.fetchChildren(data.hive, data.gene)
+//   const children = await deps.store.fetchChildren(data.hive, data.seed)
 //   for (const child of children) {
-//     await doCopy(child, newHive, newCell.gene!, deps)
+//     await doCopy(child, newHive, newCell.seed!, deps)
 //   }
 
 //   return newCell

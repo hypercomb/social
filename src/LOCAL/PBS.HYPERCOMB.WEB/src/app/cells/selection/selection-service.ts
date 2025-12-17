@@ -80,8 +80,8 @@ export class SelectionService extends PixiServiceBase implements ISelections {
     }
   }
 
-  public isSelected(gene: string): boolean {
-    return this.items().some(cell => cell.gene === gene)
+  public isSelected(seed: string): boolean {
+    return this.items().some(cell => cell.seed === seed)
   }
 
   // clipboard (or any feature) toggles this
@@ -91,7 +91,7 @@ export class SelectionService extends PixiServiceBase implements ISelections {
 
   private async invalidate(cell: Cell) {
     // remove old cache + force Pixi redraw
-    let tile = this.store.lookupTile(cell.gene)
+    let tile = this.store.lookupTile(cell.seed)
     const key = this.hs.cacheId(cell)
     Assets.cache.remove(key)
 

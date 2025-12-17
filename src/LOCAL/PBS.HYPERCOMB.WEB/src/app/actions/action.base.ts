@@ -66,7 +66,7 @@ export abstract class ActionBase<TPayload = unknown> implements Action<TPayload>
     // the "hovered" tile from detector, converted to a real Cell
     const tile = this.detector.activeTile() ?? undefined
     if (tile) {
-      this.focused = this.combstore.lookupData(tile.gene!) ?? undefined
+      this.focused = this.combstore.lookupData(tile.seed!) ?? undefined
     }
   }
 }

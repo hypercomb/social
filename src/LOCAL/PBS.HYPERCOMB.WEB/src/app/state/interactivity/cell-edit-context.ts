@@ -3,7 +3,7 @@ import { Cell } from "src/app/models/cell"
 
 export class CellEditContext {
   initialImageHash: string | undefined
-  public get gene(): string | undefined { return this.cell.gene }
+  public get seed(): string | undefined { return this.cell.seed }
 
   // transient editor fields
   public originalSmall?: IHiveImage 

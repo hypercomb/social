@@ -10,7 +10,7 @@ export interface ICombQueries {
   fetchAll(): Promise<Cell[]>
 
   // lookups
-  fetch(gene: string): Promise<Cell | undefined>
+  fetch(seed: string): Promise<Cell | undefined>
   fetchByIds(ids: number[]): Promise<Cell[]>
 
   // meta

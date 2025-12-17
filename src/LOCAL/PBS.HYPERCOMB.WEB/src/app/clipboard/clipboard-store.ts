@@ -31,7 +31,7 @@ export class ClipboardStore implements IClipboardState {
                 return
             }
 
-            // const children = await this.query.fetchHierarchy(active.hive, active.gene!)
+            // const children = await this.query.fetchHierarchy(active.hive, active.seed!)
             // this.activeItems.set(children)
             throw new Error("Not implemented")
         })

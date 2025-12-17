@@ -13,7 +13,7 @@ export class NamingUpgradeNewSchema implements IDatabaseUpgrade {
 
     // define all field mappings from old schema → new schema
     protected readonly propertyResolvers: IPropertyMapper<Cell>[] = [
-        { sourceProperty: 'TileId', targetProperty: 'gene' },
+        { sourceProperty: 'TileId', targetProperty: 'seed' },
         { sourceProperty: 'Hive', targetProperty: 'hive' },
         { sourceProperty: 'Name', targetProperty: 'name' },
         { sourceProperty: 'SourceId', targetProperty: 'sourceId' },

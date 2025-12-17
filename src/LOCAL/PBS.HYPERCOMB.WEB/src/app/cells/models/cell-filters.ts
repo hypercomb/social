@@ -14,7 +14,7 @@ const maskOf = (
 // id / key helpers
 // -----------------------------------------------------------
 export function cacheId(cell: Cell): string {
-    return `texture-${cell.gene}`
+    return `texture-${cell.seed}`
 }
 
 export function isSelected(cell: Cell): boolean {

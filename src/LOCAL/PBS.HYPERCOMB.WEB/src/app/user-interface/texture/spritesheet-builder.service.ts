@@ -81,7 +81,7 @@ export class SpritesheetBuilderService extends PixiServiceBase {
       sprite.x = x
       sprite.y = y
 
-      frames[cell.gene] = { x, y, w: tileW, h: tileH }
+      frames[cell.seed] = { x, y, w: tileW, h: tileH }
 
       container.addChild(sprite)
     } 

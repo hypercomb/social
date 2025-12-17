@@ -11,7 +11,7 @@ export class IdentifierService {
 
   public initialize = async (identifiers: ICellIdentifier[]) => {
     try {
-      this.existingIds = new Set(identifiers.map(item => item.gene))
+      this.existingIds = new Set(identifiers.map(item => item.seed))
       this.buildIdQueue()
     } catch (error) {
       console.error('Error loading existing Ids:', error)

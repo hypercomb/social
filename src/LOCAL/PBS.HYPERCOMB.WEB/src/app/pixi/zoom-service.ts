@@ -22,7 +22,7 @@ export class ZoomService extends PixiDataServiceBase {
     position: { x: number; y: number } = new Point(0, 0)
   ): void {
     const container = this.pixi.container!
-    const cell = this.stack.top()?.cell!
+    const cell = this.stack.top()?.seed!
     const before = {
       scale: container.scale.x,
       pos: { x: container.x, y: container.y },

@@ -1,14 +1,12 @@
-﻿// tile-factory.token.ts
+﻿// src/app/inversion-of-control/tokens/tile-factory.token.ts
 
-import { CellEntity } from 'src/app/database/model/i-tile-entity'
-import { createEntityFactoryToken } from './entity-factory.token'
 import { InjectionToken } from '@angular/core'
 import { Cell } from 'src/app/models/cell'
 
-export interface ICreateCells {
-    create(name: string, params: Partial<Cell>): Promise<Cell>
+// intent-level creation (introduces new identity)
+export interface IBuildCells {
+    build(name: string): Promise<Cell>
 }
 
-export const CELL_FACTORY = createEntityFactoryToken<CellEntity, Cell>('CELL_FACTORY')
-export const CELL_CREATOR = new InjectionToken<ICreateCells>('CELL_CREATOR')
 
+export const CELL_BUILDER = new InjectionToken<IBuildCells>('CELL_BUILDER')

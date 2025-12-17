@@ -1,6 +1,6 @@
 ﻿import { Injectable, signal, computed } from "@angular/core"
 import { StackEntry } from "src/app/models/stack-entry"
-import { HashService } from "src/app/hive/storage/hashing-service"
+import { HashService } from "src/app/hive/storage/hash.service"
 
 @Injectable({ providedIn: "root" })
 export class ParentContext {
@@ -9,13 +9,13 @@ export class ParentContext {
   private readonly capacity = 50
 
   // ---------------------------------------------------
-  // computed gene: top-of-stack OR fallback to Hypercomb
+  // computed seed: top-of-stack OR fallback to Hypercomb
   // ---------------------------------------------------
   public readonly top = computed(() => this._stack().at(-1) ?? undefined)
 
-  public readonly gene = computed(() => {
+  public readonly seed = computed(() => {
     const top = this.top()
-     return top?.gene || null
+     return top?.seed || null
   })
 
   public readonly entries = computed(() => [...this._stack()].reverse())
@@ -25,14 +25,14 @@ export class ParentContext {
   // ---------------------------------------------------
   // push
   // ---------------------------------------------------
-  public push(gene: string): void {
+  public push(seed: string): void {
     this.navigating.set(true)
 
-    const entry = new StackEntry(gene)
+    const entry = new StackEntry(seed)
 
     this._stack.update(list => {
       const last = list.at(-1)
-      if (last && last.gene === gene) return list
+      if (last && last.seed === seed) return list
       const next = [...list, entry]
       if (next.length > this.capacity) next.shift()
       return next
@@ -75,12 +75,12 @@ export class ParentContext {
     this.navigating.set(false)
   }
 
-  public refresh(gene: string): void {
+  public refresh(seed: string): void {
     this._stack.update(list => {
-      const idx = list.findIndex(e => e.gene === gene)
+      const idx = list.findIndex(e => e.seed === seed)
       if (idx === -1) return list
       const next = [...list]
-      next[idx] = new StackEntry(gene)
+      next[idx] = new StackEntry(seed)
       return next
     })
   }

@@ -1,7 +1,7 @@
 ﻿// src/app/hive/storage/resolve-cell.ts
 import { Cell } from "src/app/models/cell"
 import { OpfsManager } from "src/app/common/opfs/opfs-manager"
-import { HashService } from "src/app/hive/storage/hashing-service"
+import { HashService } from "src/app/hive/storage/hash.service"
 import { Injectable } from "@angular/core"
 
 @Injectable({ providedIn: "root" })
@@ -10,9 +10,9 @@ export class CellResolver {
   constructor(private opfs: OpfsManager) {}
 
   // resolve a cell from OPFS (canonical source of truth)
-  public async resolve(gene: string, hive: string): Promise<Cell> {
+  public async resolve(seed: string, hive: string): Promise<Cell> {
 
-    const dir = await this.opfs.ensureDirs(["hives", hive, gene])
+    const dir = await this.opfs.ensureDirs(["hives", hive, seed])
 
     const get = async (key: string): Promise<string> => {
       const hash = await HashService.hash(key)
@@ -22,7 +22,7 @@ export class CellResolver {
     }
 
     const cell = new Cell({
-      gene,
+      seed,
       name:        await get("name"),
       link:        await get("link"),
       parentGene:  await get("parent"),

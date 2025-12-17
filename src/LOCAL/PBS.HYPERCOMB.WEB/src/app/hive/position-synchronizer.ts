@@ -27,11 +27,11 @@ export class PositionSynchronizer {
 
       this.hideContainer()
 
-      const cell = this.store.lookupData(entry.gene)
+      const cell = this.store.lookupData(entry.seed)
       if (cell) {
         this.applyTransform(cell)
       } else {
-        this.loadAndSync(entry.gene)
+        this.loadAndSync(entry.seed)
       }
     })
   }
@@ -47,8 +47,8 @@ export class PositionSynchronizer {
     setTimeout(() => (this.pixi.container!.visible = true), 0)
   }
 
-  private async loadAndSync(gene: string): Promise<void> {
-    const loaded = await this.query.fetch(gene)
+  private async loadAndSync(seed: string): Promise<void> {
+    const loaded = await this.query.fetch(seed)
     if (!loaded) return
 
     const entry = this.stack.top()

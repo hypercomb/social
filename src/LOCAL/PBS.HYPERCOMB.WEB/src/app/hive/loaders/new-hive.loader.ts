@@ -1,11 +1,11 @@
 import { inject } from "@angular/core"
 
-import { HiveService } from "src/app/cells/hive/hive-service"
+import { HiveService } from "src/app/core/hive/hive-service"
 import { HivePortal } from "src/app/models/hive-portal"
 import { HiveResolutionType } from "../hive-resolution-type"
 import { HiveScout } from "../hive-scout"
 import { HiveLoaderBase } from "./hive-loader.base"
-import { HashService } from "../storage/hashing-service"
+import { HashService } from "../storage/hash.service"
 
 export class NewHiveLoader extends HiveLoaderBase {
 

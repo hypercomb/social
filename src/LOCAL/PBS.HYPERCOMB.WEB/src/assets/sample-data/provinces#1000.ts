@@ -7,7 +7,7 @@ export const provinces1000 = {
     "tables": [
       {
         "name": "data",
-        "schema": "++gene,kind,[hive+isActive+isDeleted],sourceId,uniqueId,options,name,type,dateCreated,isActive,isBranch,isDeleted,isHidden,isLocked,isHive,isNewHive,isRecenter,[hiveId+isDeleted],[hive+sourceId],[isSelected+isLocked],*tagIds",
+        "schema": "++seed,kind,[hive+isActive+isDeleted],sourceId,uniqueId,options,name,type,dateCreated,isActive,isBranch,isDeleted,isHidden,isLocked,isHive,isNewHive,isRecenter,[hiveId+isDeleted],[hive+sourceId],[isSelected+isLocked],*tagIds",
         "rowCount": 745
       },
       {
@@ -22,7 +22,7 @@ export const provinces1000 = {
       "rows": [
         {
           "kind": "Hive",
-          "gene": 500,
+          "seed": 500,
           "hive": "provinces#1000",
           "name": "provinces",
           "options": 513,

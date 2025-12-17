@@ -19,13 +19,13 @@ export interface ITagManager {
   changeSlug(tagId: number, newSlug: string)
   delete(tagId: number)
 
-  addTagsToTile(gene: string, names: string[])
-  removeTagFromTile(gene: string, name: string)
-  setTagsOnTile(gene: string, names: string[])
+  addTagsToTile(seed: string, names: string[])
+  removeTagFromTile(seed: string, name: string)
+  setTagsOnTile(seed: string, names: string[])
 
   findTilesByAny(names: string[]): Promise<Cell[]>
   findTilesByAll(names: string[]): Promise<Cell[]>
-  getTileTagNames(gene: string): Promise<string[]>
+  getTileTagNames(seed: string): Promise<string[]>
 
   countByTag(name: string): Promise<number>
 }

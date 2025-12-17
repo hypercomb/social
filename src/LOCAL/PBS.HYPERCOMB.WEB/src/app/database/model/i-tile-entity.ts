@@ -20,7 +20,7 @@ export interface CellEntity {
     // existing fields (unchanged)
     // ──────────────────────────────────────────────
     kind: CellKind | undefined
-    gene: string
+    seed: string
     isBranch: boolean | undefined
     isLocked: boolean | undefined
     hashedHive?: number

@@ -2,12 +2,12 @@
 import { Cell } from 'src/app/models/cell'
 
 export class Tile extends Container {
-  public readonly gene:string
+  public readonly seed:string
   public readonly uniqueId: string
   public sprite!: Sprite
 
   public onPositionUpdate?: (args: {
-    gene: string
+    seed: string
     x: number
     y: number
     index?: number
@@ -15,7 +15,7 @@ export class Tile extends Container {
 
   constructor(cell: Cell, sprite?: Sprite) {
     super()
-    this.gene = cell.gene
+    this.seed = cell.seed
     this.uniqueId = cell.uniqueId
 
     if (sprite) {
@@ -42,7 +42,7 @@ export class Tile extends Container {
 
   public requestPositionUpdate(x: number, y: number, index?: number) {
     this.onPositionUpdate?.({
-      gene: this.gene,
+      seed: this.seed,
       x,
       y,
       index

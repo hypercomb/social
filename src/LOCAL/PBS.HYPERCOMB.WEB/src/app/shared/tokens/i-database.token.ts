@@ -1,5 +1,5 @@
 import { InjectionToken, Provider } from "@angular/core"
-import { HiveStore } from "src/app/cells/hive/hive-store"
+import { HiveStore } from "src/app/core/hive/hive-store"
 
 /**
  * Dexie is no longer used for hive storage.

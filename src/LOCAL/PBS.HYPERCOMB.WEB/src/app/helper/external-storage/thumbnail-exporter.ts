@@ -15,7 +15,7 @@ export class ThumbnailExporter extends Hypercomb {
   public downloadImages = async (images: any[]) => {
     const formattedData = images.map(item => ({
       blob: item.blob,
-      fileName: `image${item.gene}.webp`
+      fileName: `image${item.seed}.webp`
     }))
 
     await this.download.downloadImagesAsZip(formattedData)

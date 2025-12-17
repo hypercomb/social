@@ -124,7 +124,7 @@ export class RenderScheduler {
 
     while (this.batchQueue.length > 0) {
       const cell = this.batchQueue.shift()!
-      const id = cell.gene
+      const id = cell.seed
       if (id == null) continue
 
       // avoid duplicate render of same tile in this frame cycle

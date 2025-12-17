@@ -1,11 +1,11 @@
 
 export class StackEntry {
   private _gene: string = ""
-  public get gene(): string { return this._gene }
+  public get seed(): string { return this._gene }
   public ready = false
 
-  constructor(gene?: string) {
-    this._gene = gene ?? ""
+  constructor(seed?: string) {
+    this._gene = seed ?? ""
     this.ready = true
   }
 }

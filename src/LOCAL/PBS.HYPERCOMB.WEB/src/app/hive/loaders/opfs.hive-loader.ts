@@ -2,7 +2,7 @@ import { inject, Injectable } from "@angular/core"
 import { HIVE_HYDRATION } from "src/app/shared/tokens/i-honeycomb-service.token"
 import { HIVE_CONTROLLER_ST, HIVE_STATE } from "src/app/shared/tokens/i-hive-store.token"
 import { HivePortal } from "src/app/models/hive-portal"
-import { HiveService } from "src/app/cells/hive/hive-service"
+import { HiveService } from "src/app/core/hive/hive-service"
 import { HiveResolutionType } from "../hive-resolution-type"
 import { HiveLoaderBase } from "./hive-loader.base"
 import { HiveScout } from "../hive-scout"
@@ -46,7 +46,7 @@ export class OpfsHiveLoader extends HiveLoaderBase {
     //   - derive visible set from strand operations
     //   - create Gene objects for all visible genes
     //   - register them in the hive store (no cells yet)
-    //   - push the root gene into the context stack
+    //   - push the root seed into the context stack
     await this.hivesvc.load(hash)
 
     // return a simple portal object (hive header)

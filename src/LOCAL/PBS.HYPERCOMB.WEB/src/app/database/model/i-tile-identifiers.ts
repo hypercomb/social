@@ -1,5 +1,5 @@
 ﻿export interface ICellIdentifier {
-    gene: string
+    seed: string
     hive: string
 }
 

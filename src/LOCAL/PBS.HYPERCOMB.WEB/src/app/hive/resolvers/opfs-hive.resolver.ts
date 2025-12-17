@@ -3,7 +3,7 @@ import { HiveResolutionType } from "../hive-resolution-type"
 import { HiveScout } from "../hive-scout"
 
 import { HiveResolverBase } from "./hive-resolver.base"
-import { HiveService } from "src/app/cells/hive/hive-service"
+import { HiveService } from "src/app/core/hive/hive-service"
 
 @Injectable({ providedIn: "root" })
 export class OpfsHiveResolver extends HiveResolverBase {

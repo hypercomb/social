@@ -28,8 +28,8 @@ export class RenderTileAction extends ActionBase<CellPayload> {
   public run = async ({ cell }: CellPayload): Promise<void> => {
 
     // 🚫 never render the context tile (stack top)
-    const parent = this.stack.gene()
-    if (parent && parent === cell.gene) return
+    const parent = this.stack.seed()
+    if (parent && parent === cell.seed) return
 
     const layerIndex = (cell as any).layerIndex ?? 0
     const layer = this.getLayer(layerIndex)

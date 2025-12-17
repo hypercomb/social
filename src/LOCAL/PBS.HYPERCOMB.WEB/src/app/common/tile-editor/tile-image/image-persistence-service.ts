@@ -1,7 +1,7 @@
 // src/app/common/tile-editor/tile-image/image-persistence-service.ts
 import { Injectable, inject } from '@angular/core'
 import { OpfsImageService } from 'src/app/hive/storage/opfs-image.service'
-import { HashService } from 'src/app/hive/storage/hashing-service'
+import { HashService } from 'src/app/hive/storage/hash.service'
 import { Cell } from 'src/app/models/cell'
 
 @Injectable({ providedIn: 'root' })

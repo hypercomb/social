@@ -5,7 +5,7 @@
 import { Cell } from "src/app/models/cell-kind"
 
 export const assetCacheKey = (cell: Cell): string => {
-    const cid = (cell as any).gene ?? (cell as any).id ?? 'unknown'
+    const cid = (cell as any).seed ?? (cell as any).id ?? 'unknown'
     const version = cell.hash ?? cell.updatedAt ?? ''
     const state = cell.options() ?? 0
     return `${cid}|v=${version}|f=${state}`

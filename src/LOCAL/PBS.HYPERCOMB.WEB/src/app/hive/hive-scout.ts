@@ -1,11 +1,11 @@
 ﻿import { simplify } from "src/app/shared/services/name-simplifier"
 import { HiveResolutionType } from "./hive-resolution-type"
-import { HashService } from "./storage/hashing-service"
+import { HashService } from "./storage/hash.service"
 
 export class HiveScout {
 
   public readonly name: string 
-  public gene: string = ''
+  public seed: string = ''
   public readonly type: HiveResolutionType
   private constructor(hiveName: string, type: HiveResolutionType) {
     this.name = simplify(hiveName)   // always simplified, fragment preserved
@@ -13,7 +13,7 @@ export class HiveScout {
     this.type = type
 
     queueMicrotask(async () => {
-      this.gene = await HashService.hash(this.name)
+      this.seed = await HashService.hash(this.name)
     })
   }
 

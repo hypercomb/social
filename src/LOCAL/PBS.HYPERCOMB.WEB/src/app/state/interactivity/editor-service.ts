@@ -34,7 +34,7 @@ export class EditorService {
     if (false) {
       return false ? "new-hive" : "edit-hive"
     }
-    return ctx.gene == null ? "new-cell" : "edit-cell"
+    return ctx.seed == null ? "new-cell" : "edit-cell"
   })
   // readonly selectors
   public readonly mode = this._mode.asReadonly()

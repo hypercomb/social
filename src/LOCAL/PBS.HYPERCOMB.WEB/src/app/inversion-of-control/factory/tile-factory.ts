@@ -16,7 +16,7 @@ export class TileFactory extends PixiDataServiceBase {
     private readonly store = inject(HONEYCOMB_STORE)
 
     public async create(cell: Cell): Promise<Tile> {
-        if (cell.gene == null) {
+        if (cell.seed == null) {
             throw new Error(`TileFactory.create requires a persisted Cell with a valid TileId`)
         }
 
@@ -38,7 +38,7 @@ export class TileFactory extends PixiDataServiceBase {
 
         // wire persistence updates
         tile.onPositionUpdate = ({ x, y, index }) => {
-            this.store.updatePositionAndIndex(cell.gene, new Point(x, y), index)
+            this.store.updatePositionAndIndex(cell.seed, new Point(x, y), index)
         }
 
         return tile

@@ -89,12 +89,12 @@ export class OpenGrapservice extends ReceiveFileBase {
 
             cell = await this.new_tiles.createNewTile(global, {
                 hive: hiveName,
-                sourceId: source.gene,
+                sourceId: source.seed,
             })
 
             tile = this.detector.getByGlobal(global) // should be registered by TileFactory
         } else {
-            cell = this.store.lookupData(tile.gene)!
+            cell = this.store.lookupData(tile.seed)!
         }
 
         if (!cell) throw new Error("tile cell is undefined")

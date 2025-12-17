@@ -18,7 +18,7 @@ export class HiveTemplateService {
           {
             name: "cells",
             schema:
-              "++gene,kind,uniqueId,dateCreated,sourceId," +
+              "++seed,kind,uniqueId,dateCreated,sourceId," +
               "smallImageId,largeImageId," +
               "isDeleted,isActive,isBranch,isHidden," +
               "isFocusedMode,isLocked,isHive,isPathway,isRecenter",
@@ -37,7 +37,7 @@ export class HiveTemplateService {
             inbound: true,
             rows: [
               {
-                gene: 1,
+                seed: 1,
                 kind: "Hive",
 
                 // required fields

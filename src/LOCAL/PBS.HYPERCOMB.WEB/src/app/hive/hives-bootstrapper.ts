@@ -1,7 +1,7 @@
 import { Injectable, inject } from "@angular/core"
 import { HIVE_CONTROLLER_ST } from "../shared/tokens/i-hive-store.token"
 import { Hypercomb } from "../core/mixins/abstraction/hypercomb.base"
-import { HiveService } from "../cells/hive/hive-service"
+import { HiveService } from "../core/hive/hive-service"
 
 @Injectable({ providedIn: 'root' })
 export class HiveBootstrapService extends Hypercomb {

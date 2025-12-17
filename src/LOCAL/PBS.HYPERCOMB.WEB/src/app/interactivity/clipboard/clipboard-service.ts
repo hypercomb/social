@@ -44,12 +44,12 @@
 //   // ---------------------------------------------------------
 //   public async initialize() {
 //     this.clipboardTile = await this.db.getClipboardTile()
-//     this.key = this.clipboardTile?.gene ?? 0
+//     this.key = this.clipboardTile?.seed ?? 0
 
 //     if (!this.key) {
 //       const stored = await this.newTiles.createClipboardTile()
 //       this.clipboardTile = await this.db.getClipboardTile()
-//       this.key = stored.gene!
+//       this.key = stored.seed!
 //     }
 
 //     const hierarchy = await this.query.tile_db.fetchHierarchy(Constants.ClipboardHive, this.key)
@@ -86,7 +86,7 @@
 
 //     const siblings = await this.query.hive_db.fetchByHiv~e(context.hive)
 //     const used = new Set<number>(
-//       siblings.filter(s => s.sourceId === context.gene && s.index != null).map(s => s.index!)
+//       siblings.filter(s => s.sourceId === context.seed && s.index != null).map(s => s.index!)
 //     )
 
 //     // paste selections one-by-one with index coordination
@@ -118,7 +118,7 @@
 //   }
 
 //   public async setIndex(data: Cell) {
-//     const list = await this.query.tile_db.fetchHierarchy(Constants.ClipboardHive, data.gene!)
+//     const list = await this.query.tile_db.fetchHierarchy(Constants.ClipboardHive, data.seed!)
 //     data.index = await this.honeycomb.findLowestIndex(list)
 //   }
 

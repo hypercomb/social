@@ -3,9 +3,9 @@ import { Cell } from "./cell"
 
 export class HivePortal extends Cell {
 
-  constructor(gene: string, name: string) {
+  constructor(seed: string, name: string) {
     super({
-      gene,
+      seed,
       parentGene: null,
       name
     })

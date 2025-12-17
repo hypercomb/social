@@ -1,5 +1,5 @@
 ﻿import { Injectable, inject } from "@angular/core"
-import { CellFactory } from "../inversion-of-control/factory/cell-factory"
+import { CellFactory } from "../inversion-of-control/factory/cell.builder"
 import { ClipboardStore } from "./clipboard-store"
 import { MODIFY_COMB_SVC } from "../shared/tokens/i-honeycomb-service.token"
 import { CLIPBOARD_REPOSITORY } from "../shared/tokens/i-clipboard-repository"
@@ -27,7 +27,7 @@ export class ClipboardService {
 
     public add = async (root: Cell): Promise<Cell> => {
         // const cell = await this.repository.add(root)!
-        // console.assert(cell.gene, "added clipboard must have gene")
+        // console.assert(cell.seed, "added clipboard must have seed")
         // return cell
         throw new Error("Not implemented")
     }
@@ -38,7 +38,7 @@ export class ClipboardService {
         if (!active) return
 
         const clone = await this.factory.clone(cell, {
-            sourceId: active.gene!,
+            sourceId: active.seed!,
         })
         const { ...rest} = clone
         await this.modify.addCell(<Cell>rest)

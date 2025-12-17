@@ -32,7 +32,7 @@ export class TileCreationService {
       name: item.name,
       index,
       hive: parent.hive,
-      sourceId: parent.gene,
+      sourceId: parent.seed,
       imageHash: ghost.imageHash
     })
 

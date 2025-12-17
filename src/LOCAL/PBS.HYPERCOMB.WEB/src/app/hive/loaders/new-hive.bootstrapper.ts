@@ -8,7 +8,7 @@ import { BlobService } from "src/app/layout/rendering/blob-service"
 import { MODIFY_COMB_SVC } from "src/app/shared/tokens/i-honeycomb-service.token"
 import { HiveScout } from "../hive-scout"
 import { HiveLoaderBase } from "./hive-loader.base"
-import { HiveService } from "src/app/cells/hive/hive-service"
+import { HiveService } from "src/app/core/hive/hive-service"
 import { HivePortal } from "src/app/models/hive-portal"
 
 @Injectable({ providedIn: "root" })
@@ -65,7 +65,7 @@ export class NewHiveBootstrapper extends HiveLoaderBase {
         name: "first",
         kind: "Cell",
         index: 5,
-        sourceId: created.gene
+        sourceId: created.seed
       })
       firstCell.options.set(CellOptions.Active)
 

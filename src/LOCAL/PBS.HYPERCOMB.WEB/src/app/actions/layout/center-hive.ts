@@ -24,7 +24,7 @@ export class CenterHiveAction extends ActionBase<CellPayload> implements Action<
         const cell = payload.hovered!
         // safe due to enabled guard
         if (cell) {
-            const tile = this.combstore.lookupTile(cell.gene)
+            const tile = this.combstore.lookupTile(cell.seed)
             if (!tile) return
             this.center.arrange(tile)
         }

@@ -1,7 +1,7 @@
 // src/app/hive/storage/resource-manager.ts
 import { Injectable, inject } from "@angular/core"
 import { OpfsManager } from "src/app/common/opfs/opfs-manager"
-import { HashService } from "./storage/hashing-service"
+import { HashService } from "./storage/hash.service"
 
 export interface StagedResource {
   hash: string

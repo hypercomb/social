@@ -2,6 +2,7 @@
 import { Cell } from "src/app/models/cell"
 import { HiveScout } from "src/app/hive/hive-scout"
 import { HypercombMode } from "src/app/core/models/enumerations"
+import { ParentContext } from "src/app/core/controller/context-stack"
 
 @Injectable({ providedIn: "root" })
 export class HypercombState {
@@ -54,6 +55,9 @@ export class HypercombState {
   private _lastSetMode = signal<HypercombMode | undefined>(undefined)
   public readonly lastSetMode = this._lastSetMode.asReadonly()
 
+  private _lineage = signal<string>("Hypercomb")
+  public readonly lineage = this._lineage.asReadonly()
+
   private _log = signal("")
   public readonly logOutput = this._log.asReadonly()
 
@@ -72,7 +76,7 @@ export class HypercombState {
   // private fields (alphabetized)
   // ─────────────────────────────────────────────
   private readonly _modeSignals: Record<ModeName, () => boolean>
-  private readonly stack = inject(ContextStack)
+  private readonly stack = inject(ParentContext)
 
 
   public get scoutName() {
@@ -116,7 +120,7 @@ constructor() {
   // methods (alphabetized)
   // ─────────────────────────────────────────────
   public cacheId(cell: Cell) {
-  return `${this.scout()?.name}-${cell.gene}`
+  return `${this.scout()?.name}-${cell.seed}`
 }
 
   public clearToolMode() {

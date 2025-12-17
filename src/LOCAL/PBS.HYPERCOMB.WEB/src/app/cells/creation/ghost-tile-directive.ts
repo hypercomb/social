@@ -113,7 +113,7 @@ export class GhostTileDirective extends HypercombLayout {
       // use factory to build a real NewCell instance
       const newCell = this.cell.creator.newCell({
         index,
-        sourceId: source.gene,
+        sourceId: source.seed,
         imageHash: g.imageHash,
         name: "",
         link: "",

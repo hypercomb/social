@@ -1,6 +1,6 @@
 ﻿// actions/render-clipboard.command.ts
 import { Injectable, inject } from "@angular/core"
-import { CellFactory } from "src/app/inversion-of-control/factory/cell-factory"
+import { CellFactory } from "src/app/inversion-of-control/factory/cell.builder"
 import { CellPayload } from "src/app/actions/action-contexts"
 import { Action } from "src/app/actions/action-models"
 import { Hypercomb } from "src/app/core/mixins/abstraction/hypercomb.base"

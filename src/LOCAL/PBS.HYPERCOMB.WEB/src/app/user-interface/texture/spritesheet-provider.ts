@@ -1,7 +1,7 @@
 ﻿// src/app/user-interface/texture/spritesheet-texture-provider.ts
 import { Injectable, inject } from "@angular/core"
 import { Rectangle, Texture } from "pixi.js"
-import { HashService } from "src/app/hive/storage/hashing-service"
+import { HashService } from "src/app/hive/storage/hash.service"
 import { ITextureProvider } from "./i-texture-provider"
 import { SpritesheetBuilderService } from "./spritesheet-builder.service"
 import { CachedSpritesheet, SpritesheetRepository } from "./spritesheet.repository"
@@ -29,21 +29,21 @@ export class SpritesheetProvider implements ITextureProvider {
   // prime with current layer context when the layer becomes known/active
   public primeLayer = (cells: Cell[]): void => {
     for (const cell of cells) {
-     // this.ctxByCellId.set(String(cell.gene), { layerId, cells })
+     // this.ctxByCellId.set(String(cell.seed), { layerId, cells })
       throw Error("not implemented")
     }
   }
 
   // clear when passivating/evicting a layer
   public clearLayer = (cells: Cell[]): void => {
-    for (const cell of cells) this.ctxByCellId.delete(String(cell.gene))
+    for (const cell of cells) this.ctxByCellId.delete(String(cell.seed))
   }
 
   public enabled = (cell: Cell): boolean =>
-    !!cell && this.ctxByCellId.has(String(cell.gene))
+    !!cell && this.ctxByCellId.has(String(cell.seed))
 
   public getTexture = async (cell: Cell): Promise<Texture | undefined> => {
-    const ctx = this.ctxByCellId.get(String(cell.gene))
+    const ctx = this.ctxByCellId.get(String(cell.seed))
     if (!ctx) return undefined
 
     const layerHash = await this.getLayerHash(ctx.layerId, ctx.cells)
@@ -55,7 +55,7 @@ export class SpritesheetProvider implements ITextureProvider {
     const sheet = this.findSheetContainingCell(sheets, cell)
     if (!sheet) return undefined
 
-    const frame = sheet.frames?.[cell.gene]
+    const frame = sheet.frames?.[cell.seed]
     if (!frame) return undefined
 
     const base = await this.getBaseTexture(sheet)
@@ -70,18 +70,18 @@ export class SpritesheetProvider implements ITextureProvider {
     // deterministic signature with no phantom properties
     // adjust the signature fields if you later formalize a cell hash
     const ordered = [...cells].sort((a, b) =>
-      String(a.gene).localeCompare(String(b.gene))
+      String(a.seed).localeCompare(String(b.seed))
     )
 
     const signature = ordered
-      .map(c => `${c.gene}:${c.imageHash ?? ""}:${c.name ?? ""}`)
+      .map(c => `${c.seed}:${c.imageHash ?? ""}:${c.name ?? ""}`)
       .join("|")
 
     return HashService.sha256Hex(`${layerId}::${signature}`)
   }
 
   private findSheetContainingCell = (sheets: CachedSpritesheet[], cell: Cell): CachedSpritesheet | undefined =>
-    sheets.find(s => !!s.frames?.[cell.gene])
+    sheets.find(s => !!s.frames?.[cell.seed])
 
   private getBaseTexture = async (sheet: CachedSpritesheet): Promise<Texture> => {
     const cached = this.baseBySheetHash.get(sheet.sheetHash)

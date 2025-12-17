@@ -20,14 +20,14 @@ export class ImageSprite extends BaseSpriteBuilder<Cell> {
 
     this.debug?.log?.(
       'sprite',
-      `image sprite build start: name=${cell.name} id=${cell.gene} hash=${cell.imageHash}`
+      `image sprite build start: name=${cell.name} id=${cell.seed} hash=${cell.imageHash}`
     )
 
     // 1. ensure hash exists
     if (!cell.imageHash) {
       this.debug?.warn?.(
         'sprite',
-        `no imageHash on cell: name=${cell.name} id=${cell.gene}`
+        `no imageHash on cell: name=${cell.name} id=${cell.seed}`
       )
       return sprite
     }
@@ -41,7 +41,7 @@ export class ImageSprite extends BaseSpriteBuilder<Cell> {
       sprite.texture = cached
       this.debug?.log?.(
         'sprite',
-        `texture from cache for cell=${cell.name} id=${cell.gene}`
+        `texture from cache for cell=${cell.name} id=${cell.seed}`
       )
       return sprite
     }
@@ -52,7 +52,7 @@ export class ImageSprite extends BaseSpriteBuilder<Cell> {
       if (!blob) {
         this.debug?.warn?.(
           'sprite',
-          `no blob resolved for hash=${hash} (cell=${cell.name} id=${cell.gene})`
+          `no blob resolved for hash=${hash} (cell=${cell.name} id=${cell.seed})`
         )
         return sprite
       }
@@ -65,7 +65,7 @@ export class ImageSprite extends BaseSpriteBuilder<Cell> {
 
       this.debug?.log?.(
         'sprite',
-        `texture created + cached for cell=${cell.name} id=${cell.gene}`
+        `texture created + cached for cell=${cell.name} id=${cell.seed}`
       )
     } catch (err) {
       this.debug?.error?.('sprite', 'createImageBitmap or loadSmall failed', err)

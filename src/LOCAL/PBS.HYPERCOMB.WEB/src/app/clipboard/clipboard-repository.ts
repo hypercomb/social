@@ -29,11 +29,11 @@ export class ClipboardRepository implements IClipboardRepository {
 //         if (!rootEntity) return [];
 
 //         const root = await this.factory.map(rootEntity);
-//         if (!root?.gene || !root.hive) return [];
+//         if (!root?.seed || !root.hive) return [];
 
 //         const all: Cell[] = [];
 //         const seen = new Set<number>();
-//         const queue: Array<{ hive: string; parentId: number }> = [{ hive: root.hive, parentId: root.gene }];
+//         const queue: Array<{ hive: string; parentId: number }> = [{ hive: root.hive, parentId: root.seed }];
 
 //         // bfs over sourceId links
 //         while (queue.length) {
@@ -43,12 +43,12 @@ export class ClipboardRepository implements IClipboardRepository {
 
 //             const mapped = await Promise.all(children.map(c => this.factory.map(c)))
 //             for (const child of mapped) {
-//                 if (!child?.gene) continue;
-//                 if (seen.has(child.gene)) continue;
-//                 seen.add(child.gene);
+//                 if (!child?.seed) continue;
+//                 if (seen.has(child.seed)) continue;
+//                 seen.add(child.seed);
 //                 all.push(<Cell>child);
 
-//                 if (child.hive) queue.push({ hive: child.hive, parentId: child.gene });
+//                 if (child.hive) queue.push({ hive: child.hive, parentId: child.seed });
 //             }
 //         }
 // ``
@@ -66,8 +66,8 @@ export class ClipboardRepository implements IClipboardRepository {
         // if (!hierarchy?.length) return;
 
         // const toDelete = hierarchy
-        //     .filter(x => x.gene !== rootId)
-        //     .map(x => x.gene!)
+        //     .filter(x => x.seed !== rootId)
+        //     .map(x => x.seed!)
         //     .filter(Boolean);
 
         // if (!toDelete.length) return;

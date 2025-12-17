@@ -18,7 +18,7 @@ export class NewTileAction extends ActionBase<PayloadBase> {
     // cannot create on top of an existing tile
     if (this.detector.activeTile()) return false
 
-    const parent = this.stack.cell()
+    const parent = this.stack.dna.cell()
     if (!parent) return false
 
     // allow creation only on true empty coordinate
@@ -39,7 +39,7 @@ export class NewTileAction extends ActionBase<PayloadBase> {
     //   name: "",
     //     index,
     //     hive: parent.hive,
-    //   sourceId: parent.gene,
+    //   sourceId: parent.seed,
     //   imageHash: this.preloader.getInitialTileHash() ?? "",
     // })
 

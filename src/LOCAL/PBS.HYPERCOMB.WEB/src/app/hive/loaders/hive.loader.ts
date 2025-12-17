@@ -58,8 +58,8 @@ export class HiveLoader extends Hypercomb {
   // ─────────────────────────────────────────────
   // external: activate hive in controller
   // ─────────────────────────────────────────────
-  public async activate(gene: string) {
-    this.controller.setHive(gene)
+  public async activate(seed: string) {
+    this.controller.setHive(seed)
     this.debug.log('lifecycle', `[HiveLoader] activated hive: ${this.state.hive()}`)
   }
 }

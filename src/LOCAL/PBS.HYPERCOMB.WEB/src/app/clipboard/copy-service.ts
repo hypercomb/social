@@ -22,14 +22,14 @@ export class CopyService {
   //     // 1. Create root clone
   //     const rootClone = this.creator.newCell({
   //       ...source,
-  //       gene: undefined,
+  //       seed: undefined,
   //       sourceId: undefined,
   //       uniqueId: crypto.randomUUID(),   // important: new uniqueId
   //       // SIH: imageHash is preserved
   //     })
 
 
-  //     // save so we have a new gene for children to reference
+  //     // save so we have a new seed for children to reference
   //     const rootEntity = await this.repository.add(
   //       toCellEntity(rootClone)
   //     )
@@ -50,15 +50,15 @@ export class CopyService {
    * Clone all children of source under parentClone.
    */
   // private async copyChildren(source: Cell, parent: Cell): Promise<void> {
-  //   // const children = await this.repository.fetchBySourceId(source.gene!) || []
+  //   // const children = await this.repository.fetchBySourceId(source.seed!) || []
 
   //   // for (const childEntity of children) {
   //   //   const child = <Cell>toCell(childEntity)
 
   //   //   const clone = this.creator.newCell({
   //   //     ...child,
-  //   //     gene: undefined,
-  //   //     sourceId: parent.gene,
+  //   //     seed: undefined,
+  //   //     sourceId: parent.seed,
   //   //     uniqueId: crypto.randomUUID(),
   //   //     // keep same imageHash (SIH)
   //   //   })

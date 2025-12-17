@@ -1,6 +1,6 @@
 ﻿import { NgModule } from "@angular/core"
 import { HIVE_LOADERS, HIVE_RESOLVERS } from "../tokens/i-hive-resolver.token"
-import { HiveStore } from "../../cells/hive/hive-store"
+import { HiveStore } from "../../core/hive/hive-store"
 import { HIVE_CONTROLLER_ST, HIVE_STATE, HIVE_STORE, LOOKUP_HIVES, RESOLUTION_COORDINATOR } from "../tokens/i-hive-store.token"
 import { HiveLoader } from "src/app/hive/loaders/hive.loader"
 import { NewHiveResolver } from "src/app/hive/resolvers/new-hive-resolver"

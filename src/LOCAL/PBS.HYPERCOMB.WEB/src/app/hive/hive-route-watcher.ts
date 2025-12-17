@@ -82,7 +82,7 @@ export class HiveRouteWatcher {
         const scout = await this.loader.resolve(hiveName)
         this.state.setScout(scout)
         await this.loader.load(scout)
-        await this.loader.activate(scout.gene)
+        await this.loader.activate(scout.seed)
         // this.spritesheetProvider.primeLayer(layerId, cells)
 
       })

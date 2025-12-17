@@ -28,7 +28,7 @@ export interface IHiveHydration {
   // LEGACY COMPATIBILITY
   // ---------------------------------------------------------
   invalidate(): void
-  invalidateTile(gene: string): void
+  invalidateTile(seed: string): void
 }
 
 export interface ICellService extends ICombState, IHiveHydration { }

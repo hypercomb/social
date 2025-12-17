@@ -8,7 +8,7 @@ export interface IStaging {
   enqueue(cell: Cell)
   stageCells(cells: Cell[]): void
   stageAdd(cell: Cell): void
-  stageRemove(gene: string): void
+  stageRemove(seed: string): void
   stageReplace(cell: Cell): void
   stageMerge(cells: Cell[]): void
 }
@@ -23,8 +23,8 @@ export interface IHoneycombStore {
   // registry
   register(cell:Cell,tile: Tile): void
   unregister(cell:Cell): void  
-  lookupTile(gene:string): Tile | undefined
-  lookupData(gene:string): Cell | undefined
+  lookupTile(seed:string): Tile | undefined
+  lookupData(seed:string): Cell | undefined
   
   // surface
   cells: Signal<Cell[]>
@@ -33,7 +33,7 @@ export interface IHoneycombStore {
   size: Signal<number>
 
   // movement
-  updatePositionAndIndex(gene: string, pos: Point, index?: number): void
+  updatePositionAndIndex(seed: string, pos: Point, index?: number): void
 
   readonly flushSeq: Signal<number>
 

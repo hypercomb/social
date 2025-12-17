@@ -17,7 +17,7 @@ import { HONEYCOMB_STORE, STAGING_ST } from 'src/app/shared/tokens/i-honeycomb-s
 import { EditorService } from 'src/app/state/interactivity/editor-service'
 import { CELL_CREATOR, CELL_FACTORY } from 'src/app/inversion-of-control/tokens/tile-factory.token'
 import { QUERY_COMB_SVC } from 'src/app/shared/tokens/i-honeycomb-query.token'
-import { HashService } from 'src/app/hive/storage/hashing-service'
+import { HashService } from 'src/app/hive/storage/hash.service'
 
 export function HypercombMixin<TBase extends AbstractCtor>(Base: TBase) {
     abstract class HypercombMixinClass extends Base {

@@ -7,7 +7,7 @@ import { Cell } from 'src/app/models/cell'
 import { NewCell } from 'src/app/models/new-cell'
 import { Ghost } from 'src/app/models/ghost-cell'
 import { OpfsManager } from 'src/app/common/opfs/opfs-manager'
-import { HashService } from 'src/app/hive/storage/hashing-service'
+import { HashService } from 'src/app/hive/storage/hash.service'
 
 @Injectable({ providedIn: 'root' })
 export class HoneycombService extends DataOrchestratorBase {
@@ -43,10 +43,10 @@ export class HoneycombService extends DataOrchestratorBase {
       const parent = this.stack.cell()
       if (!parent) return
 
-      const gene = String(parent.gene)
-      if (this.hydrated.has(gene)) return
+      const seed = String(parent.seed)
+      if (this.hydrated.has(seed)) return
 
-      this.hydrated.add(gene)
+      this.hydrated.add(seed)
       this.hydrate()
     })
   }
@@ -78,7 +78,7 @@ export class HoneycombService extends DataOrchestratorBase {
   // ----------------------------------------------------------
   public async addCell(newCell: NewCell | Ghost): Promise<Cell> {
     const id = HashService.hash(newCell.name)
-    const cell = new Cell({ ...newCell, gene: id })
+    const cell = new Cell({ ...newCell, seed: id })
 
     this.staging.stageAdd(cell)
     this._lastCreated.set(cell)
@@ -86,7 +86,7 @@ export class HoneycombService extends DataOrchestratorBase {
   }
 
   public async removeCell(cell: Cell): Promise<void> {
-    this.staging.stageRemove(cell.gene!)
+    this.staging.stageRemove(cell.seed!)
     this.honeycomb.store.unregister(cell)
   }
 

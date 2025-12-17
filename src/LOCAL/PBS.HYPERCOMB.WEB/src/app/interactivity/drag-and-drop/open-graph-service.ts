@@ -91,7 +91,7 @@ export class OpenGrapservice extends ReceiveFileBase {
         // if (!tile) {
         //     const source = this.stack.current()!
         //     // we already checked for null so this should always succeed !
-        //     const options = <any>{ index, hiveName, sourceId: source.gene }
+        //     const options = <any>{ index, hiveName, sourceId: source.seed }
         //     cell = await this.new_tiles.createNewTile(localPoint, options)
         // }
 
