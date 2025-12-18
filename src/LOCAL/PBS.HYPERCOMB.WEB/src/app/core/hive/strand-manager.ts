@@ -4,45 +4,66 @@ import { IStrand, IStrandManager, StrandOp, Seed } from './i-dna.token'
 import { OpfsManager } from 'src/app/common/opfs/opfs-manager'
 import { Hypercomb } from '../mixins/abstraction/hypercomb.base'
 import { HashService } from 'src/app/hive/storage/hash.service'
+import { Nucleotide } from './nucleotide'
 
 /*
 filename layout (positional, fixed offsets):
 [0..7]    ordinal (8 chars, zero-padded)
 [8]       '-'
-[9..72]   seed (64-char hex hash)
+[9..72]   seed (64-char hex)
 [73]      '-'
-[74..]    op (variable: add | remove   | update)
+[74..]    op (strand operation)
 
-example:
-00000001-<64hexhash>-add
+payload format (file contents):
+- newline-delimited JSON
+- each line = StrandParam
+- empty file = no nucleotides
 */
 
 export class StrandManager extends Hypercomb implements IStrandManager {
   private readonly opfs = inject(OpfsManager)
 
   private static readonly ORDINAL_LEN = 8
-  private static readonly DASH_LEN = 1
-  private static readonly SEED_LEN = HashService.HASH_LENGTH // 64
+  private static readonly DASH = '-'
+  private static readonly SEED_LEN = HashService.HASH_LENGTH
 
-  private static readonly SEED_START = StrandManager.ORDINAL_LEN + StrandManager.DASH_LEN
-  private static readonly SEED_END   = StrandManager.SEED_START + StrandManager.SEED_LEN
-  private static readonly OP_START   = StrandManager.SEED_END + StrandManager.DASH_LEN
+  private static readonly SEED_START = 9
+  private static readonly SEED_END = 9 + StrandManager.SEED_LEN
+  private static readonly OP_START = StrandManager.SEED_END + 1
 
-  // creates an immutable strand file at: <lineage>/<ordinal>-<seed>-<op>
-  public add = async (lineage: string, strand: IStrand): Promise<void> => {
+  private static readonly OPS = new Set<StrandOp>([
+    'add-cell',
+    'remove-cell',
+    'add-action',
+    'remove-action',
+    'add-pheromone',
+    'remove-pheromone'
+  ])
+
+  // append immutable strand file
+  public add = async (
+    lineage: string,
+    strand: IStrand,
+    ...actions: string[]
+  ): Promise<void> => {
     const name = this.formatName(strand)
     const dir = await this.opfs.ensureDirs(this.split(lineage))
 
-    // strands are immutable, never overwrite
     if (await this.exists(dir, name)) {
       throw new Error(`strand already exists: ${lineage}/${name}`)
     }
 
-    // empty file = instruction only
-    await this.opfs.writeFile(dir, name, '')
+    // params → newline-delimited json
+    // empty params = empty file (no nucleotides)
+    const payload =
+      actions.length === 0
+        ? ''
+        : actions.map(p => JSON.stringify(p)).join('\n')
+
+    await this.opfs.writeFile(dir, name, payload)
   }
 
-  // reads and parses strand files at: <lineage>
+  // list + parse strand headers
   public list = async (lineage: string): Promise<IStrand[]> => {
     const dir = await this.opfs.ensureDirs(this.split(lineage))
     const entries = await this.opfs.listEntries(dir)
@@ -55,12 +76,12 @@ export class StrandManager extends Hypercomb implements IStrandManager {
   }
 
   // -------------------------
-  // filename parsing (fixed offsets)
+  // filename parsing
   // -------------------------
   private parseName = (name: string): IStrand | null => {
-    // minimal length check: ordinal + '-' + seed + '-' + op(1)
     if (name.length <= StrandManager.OP_START) return null
-    if (name[8] !== '-' || name[StrandManager.SEED_END] !== '-') return null
+    if (name[8] !== StrandManager.DASH) return null
+    if (name[StrandManager.SEED_END] !== StrandManager.DASH) return null
 
     const ordinal = Number(name.slice(0, StrandManager.ORDINAL_LEN))
     if (!Number.isFinite(ordinal)) return null
@@ -69,31 +90,30 @@ export class StrandManager extends Hypercomb implements IStrandManager {
       StrandManager.SEED_START,
       StrandManager.SEED_END
     )
-    if (seed.length !== StrandManager.SEED_LEN) return null
+    if (!/^[0-9a-f]{64}$/.test(seed)) return null
 
     const op = name.slice(StrandManager.OP_START) as StrandOp
-    if (op !== 'add' && op !== 'remove' && op !== 'update') return null
+    if (!StrandManager.OPS.has(op)) return null
 
     return { ordinal, seed, op }
   }
 
-  private formatName = (strand: IStrand): string => {
-    return `${this.formatOrdinal(strand.ordinal)}-${strand.seed}-${strand.op}`
-  }
+  private formatName = (strand: IStrand): string =>
+    `${this.formatOrdinal(strand.ordinal)}-${strand.seed}-${strand.op}`
 
-  private formatOrdinal = (value: number): string => {
-    return value.toString().padStart(StrandManager.ORDINAL_LEN, '0')
-  }
+  private formatOrdinal = (value: number): string =>
+    value.toString().padStart(StrandManager.ORDINAL_LEN, '0')
 
   // -------------------------
   // helpers
   // -------------------------
-  private split = (lineage: Seed): string[] => {
-    // lineage is a path string like "hypercomb/<seed>/<seed>/..."
-    return lineage.split('/').filter(Boolean)
-  }
+  private split = (lineage: Seed): string[] =>
+    lineage.split('/').filter(Boolean)
 
-  private exists = async (dir: FileSystemDirectoryHandle, name: string): Promise<boolean> => {
+  private exists = async (
+    dir: FileSystemDirectoryHandle,
+    name: string
+  ): Promise<boolean> => {
     try {
       await dir.getFileHandle(name)
       return true

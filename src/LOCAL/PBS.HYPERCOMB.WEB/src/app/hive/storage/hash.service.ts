@@ -39,7 +39,7 @@ export class HashService {
   // identity hashing (names, intent)
   // ---------------------------------------------
 
-  public static hash(input: string): Promise<Hash> {
+  public static seed(input: string): Promise<Hash> {
     return this.sha256Hex(input)
   }
 
@@ -47,9 +47,7 @@ export class HashService {
   // content signatures (truth)
   // ---------------------------------------------
 
-  public static async signature(
-    payload: unknown | ArrayBuffer
-  ): Promise<Signature> {
+  public static async signature(payload: unknown | ArrayBuffer): Promise<Signature> {
     const bytes =
       payload instanceof ArrayBuffer
         ? payload

@@ -85,10 +85,13 @@ export class DefaultViewComponent extends Hypercomb {
     )
   }
 
-  public cut = async (): Promise<void> => {
-    const selections = this.selections.items()
-    // await Promise.all(selections.map(cell => clipboard.cut(cell)))
-  }
+public cut = async (): Promise<void> => {
+  await this.registry.invoke(
+    ChangeModeAction.ActionId,
+    <ChangeModeContext>{ mode: HypercombMode.Cut }
+  )
+}
+
 
   public goBack = async (event: MouseEvent): Promise<void> => {
     await this.registry.invoke(BackHiveAction.ActionId, { event })

@@ -21,7 +21,7 @@ import { CellEditContext } from 'src/app/state/interactivity/cell-edit-context'
 import { HiveService } from 'src/app/core/hive/hive-service'
 import { CellFactory } from 'src/app/inversion-of-control/factory/cell.builder'
 import { Cell } from 'src/app/models/cell'
-import { ResourceManager } from 'src/app/hive/resource-manager'
+import { ResourceManager } from 'src/app/core/hive/resource-manager'
 
 @Component({
   standalone: true,

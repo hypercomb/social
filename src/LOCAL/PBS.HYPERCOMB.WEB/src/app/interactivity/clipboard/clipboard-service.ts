@@ -134,7 +134,7 @@
 //     this.state.removeMode(HypercombMode.Select)
 
 //     await this.prepareClipboardView()
-//     this.state.setMode(HypercombMode.ViewingClipboard)
+//     this.state.openClipboard()
 //     this.container.alpha = 0
 
 //     this.refreshPort.refresh()

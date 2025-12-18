@@ -8,7 +8,7 @@ import { IHoneycombStore, IStaging } from "src/app/shared/tokens/i-honeycomb-sto
 import { SearchFilter } from "src/app/common/header/search-filter"
 import { DebugService } from "src/app/core/diagnostics/debug-service"
 import { Cell } from "src/app/models/cell"
-import { gen } from "fast-check"
+
 
 @Injectable()
 export class HoneycombStore extends Hypercomb implements IHoneycombStore, IStaging {
@@ -28,6 +28,8 @@ export class HoneycombStore extends Hypercomb implements IHoneycombStore, IStagi
 
   public readonly cells = this._cells.asReadonly()
   public readonly tiles = this._tiles.asReadonly()
+
+  public readonly hasCells = computed(() => this._cells().length > 0)
 
   public readonly selectedCells = computed(() =>
     this._cells().filter(isSelected)
@@ -232,10 +234,6 @@ export class HoneycombStore extends Hypercomb implements IHoneycombStore, IStagi
     this.bump()
   }
 
-
-  public hasCells(): boolean {
-    return this._cells().length > 0
-  }
 
   public setVisibility(cells: Cell[], visible: boolean): void {
     for (const c of cells) {

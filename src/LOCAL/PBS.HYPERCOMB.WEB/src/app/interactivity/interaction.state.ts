@@ -1,23 +1,45 @@
-// -----------------------------
-// app scope
-// -----------------------------
+// src/app/interactivity/interaction.state.ts
+
+// ─────────────────────────────────────────────
+// application / routing layer (ephemeral)
+// ─────────────────────────────────────────────
+
 export type AppMode =
   | { kind: 'world' }
-  | { kind: 'editor'; editorId: string }
+  | { kind: 'editor'; editorId?: string }
+  | { kind: 'viewer' }
 
-// -----------------------------
-// input & focus
-// -----------------------------
+
+// ─────────────────────────────────────────────
+// viewer surface (presentation execution only)
+// source of truth lives elsewhere
+// ─────────────────────────────────────────────
+
+export type ViewerType =
+  | 'youtube'
+  | 'document'
+  | 'opfs'
+  | 'photo'
+
+// ─────────────────────────────────────────────
+// input primitives
+// ─────────────────────────────────────────────
+
 export type PointerDevice = 'mouse' | 'touch' | 'pen'
+
+// ─────────────────────────────────────────────
+// keyboard focus (ephemeral)
+// ─────────────────────────────────────────────
 
 export type KeyboardFocus =
   | { kind: 'shortcuts' }
   | { kind: 'text'; targetId: string }
   | { kind: 'none' }
 
-// -----------------------------
-// world interactions
-// -----------------------------
+// ─────────────────────────────────────────────
+// world-level interaction (ephemeral)
+// ─────────────────────────────────────────────
+
 export type WorldGesture =
   | { kind: 'idle' }
   | { kind: 'pan'; device: PointerDevice }
@@ -25,15 +47,10 @@ export type WorldGesture =
   | { kind: 'drag-tile'; tileId: string; device: PointerDevice }
   | { kind: 'select'; device: PointerDevice }
 
-// -----------------------------
-// editor interactions
-// -----------------------------
-export type EditorTool =
-  | { kind: 'select' }
-  | { kind: 'text' }
-  | { kind: 'move' }
-  | { kind: 'resize' }
-  | { kind: 'paint' }
+// ─────────────────────────────────────────────
+// editor interaction (ephemeral)
+// reacts to shared intent, never owns it
+// ─────────────────────────────────────────────
 
 export type EditorGesture =
   | { kind: 'idle' }
@@ -47,49 +64,60 @@ export type EditorGesture =
       device: PointerDevice
     }
 
-// -----------------------------
-// orthogonal conditions
-// -----------------------------
+// ─────────────────────────────────────────────
+// environment / execution conditions
+// toggles, not intent
+// ─────────────────────────────────────────────
+
 export interface Conditions {
   snap: boolean
   grid: boolean
   debug: boolean
 }
 
-// -----------------------------
-// full app state
-// -----------------------------
-export interface AppState {
+// ─────────────────────────────────────────────
+// root interaction state
+// execution-only, never semantic truth
+// ─────────────────────────────────────────────
+
+export interface InteractionState {
+  // routing / surface
   appMode: AppMode
+
+  // viewer execution (visibility & surface only)
+  viewer: {
+    visible: boolean
+    surface: ViewerType | null
+  }
+
+  // keyboard capture
   keyboardFocus: KeyboardFocus
+
+  // environment flags
   conditions: Conditions
 
+  // world execution
   world: {
     gesture: WorldGesture
-    camera: { x: number; y: number; zoom: number }
+    camera: {
+      x: number
+      y: number
+      zoom: number
+    }
   }
 
+  // editor execution
   editor: {
-    tool: EditorTool
     gesture: EditorGesture
-    camera: { x: number; y: number; zoom: number }
+    camera: {
+      x: number
+      y: number
+      zoom: number
+    }
+  }
+
+  // physical selection presence only
+  selection: {
+    active: boolean
   }
 }
-
-// -----------------------------
-// derived helpers (pure)
-// -----------------------------
-export const inEditor = (s: AppState): boolean =>
-  s.appMode.kind === 'editor'
-
-export const typing = (s: AppState): boolean =>
-  s.keyboardFocus.kind === 'text'
-
-export const allowWorldInput = (s: AppState): boolean =>
-  !inEditor(s)
-
-export const allowEditorInput = (s: AppState): boolean =>
-  inEditor(s)
-
-export const allowShortcuts = (s: AppState): boolean =>
-  s.keyboardFocus.kind === 'shortcuts'
