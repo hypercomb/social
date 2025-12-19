@@ -1,15 +1,20 @@
 // src/app/core/hive/strand.manager.ts
 
-import { inject } from '@angular/core'
+import { inject, Injectable, signal } from '@angular/core'
 import { IStrand, IStrandManager, StrandOp } from './i-dna.token'
 import { Hypercomb } from '../hypercomb.base'
 import { OpfsManager } from './opfs.manager'
 
+@Injectable({ providedIn: 'root' })
 export class StrandManager extends Hypercomb implements IStrandManager {
   private readonly opfs = inject(OpfsManager)
 
   private static readonly SEP = '-'
   private static readonly ORDINAL_LEN = 8
+
+  private readonly _version = signal(0)
+  public readonly version = this._version.asReadonly()
+
 
   private static readonly OPS = new Set<StrandOp>([
     'add.cell',
@@ -32,6 +37,7 @@ export class StrandManager extends Hypercomb implements IStrandManager {
         : capabilities.map(c => JSON.stringify(c)).join('\n')
 
     await this.opfs.writeFile(dir, name, payload)
+    this._version.update((v: number) => v + 1) // 🔑 notify
   }
 
   public list = async (lineage: string): Promise<IStrand[]> => {

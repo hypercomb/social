@@ -1,7 +1,7 @@
 // src/app/core/intent/intent.scanner.ts
 
 import { Injectable, inject } from '@angular/core'
-import { DebugService } from '../diagnostics/debug.service'
+import { DebugService } from '../../common/debug/debug.service'
 import { CapabilityDoc } from '../capability/capability-doc.model'
 import { Capability } from '../capability/capability.interface'
 import { RESOURCE_RESOLVERS } from '../hive/i-resource-resolver.token'

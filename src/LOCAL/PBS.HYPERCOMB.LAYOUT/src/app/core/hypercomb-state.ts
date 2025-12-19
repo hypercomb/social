@@ -4,7 +4,8 @@ import { Injectable, signal } from '@angular/core'
 
 @Injectable({ providedIn: 'root' })
 export class HypercombState {
-  private _lineage = signal<string>('Hypercomb')
+  private static readonly DEFAULT_LINEAGE = 'hypercomb'
+  private _lineage = signal<string>(HypercombState.DEFAULT_LINEAGE)
   public readonly lineage = this._lineage.asReadonly()
 
   private _hive = signal<string | null>(null)

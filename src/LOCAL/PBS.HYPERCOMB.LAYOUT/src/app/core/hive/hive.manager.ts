@@ -1,10 +1,11 @@
 // src/app/core/hive/hive.manager.ts
 
-import { inject } from '@angular/core'
+import { inject, Injectable } from '@angular/core'
 import { Hypercomb } from '../hypercomb.base'
 import { IHiveManager, Seed } from './i-dna.token'
 import { LayerManager } from './layer.manager'
 
+@Injectable({ providedIn: 'root' })
 export class HiveManager extends Hypercomb implements IHiveManager {
   private readonly layermgr = inject(LayerManager)
   private readonly rootLineage = 'hypercomb'
