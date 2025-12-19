@@ -102,6 +102,7 @@ export class HypercombState {
   public readonly isEditMode = computed(() =>
     (this.mode() & HypercombMode.EditMode) !== 0
   )
+  public ignoreShortcuts: boolean = false
 
   // ─────────────────────────────────────────────
   // intent getters (tools only)

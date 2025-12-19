@@ -1,0 +1,17 @@
+<div class="hc-search">
+  <input
+    type="text"
+    [value]="text()"
+    (input)="onInput($event)"
+    (keydown)="onKeydown($event)"
+    placeholder="Type intention…"
+  />
+
+  <button
+    class="action-btn"
+    (click)="commit()"
+    aria-label="commit intention"
+  >
+    <span class="icon">g</span>
+  </button>
+</div>

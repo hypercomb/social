@@ -1,5 +1,3 @@
-// src/app/interactivity/interaction.state.ts
-
 // ─────────────────────────────────────────────
 // application / routing layer (ephemeral)
 // ─────────────────────────────────────────────
@@ -8,7 +6,6 @@ export type AppMode =
   | { kind: 'world' }
   | { kind: 'editor'; editorId?: string }
   | { kind: 'viewer' }
-
 
 // ─────────────────────────────────────────────
 // viewer surface (presentation execution only)
@@ -44,7 +41,7 @@ export type WorldGesture =
   | { kind: 'idle' }
   | { kind: 'pan'; device: PointerDevice }
   | { kind: 'zoom'; method: 'wheel' | 'pinch' | 'keys' | 'program' }
-  | { kind: 'drag-tile'; tileId: string; device: PointerDevice }  
+  | { kind: 'drag-tile'; tileId: string; device: PointerDevice }
   | { kind: 'select'; device: PointerDevice }
 
 // ─────────────────────────────────────────────

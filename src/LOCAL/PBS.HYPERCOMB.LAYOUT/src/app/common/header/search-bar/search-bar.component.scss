@@ -1,9 +1,8 @@
-/* src/app/common/header/search-box/search-box.component.scss */
 .hc-search {
   display: flex;
   align-items: center;
   width: 100%;
-  max-width: 420px; // extended width
+  max-width: 420px;
   height: 2.2rem;
   background: #3a3f44;
   border-radius: 6px;
@@ -45,9 +44,4 @@
       background: #4dd8ff;
     }
   }
-}
-
-/* creation mode highlight */
-.hc-search.creation {
-  border: 2px solid rgb(255, 60, 60);
 }

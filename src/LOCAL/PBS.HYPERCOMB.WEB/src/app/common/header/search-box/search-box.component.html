@@ -1,14 +1,23 @@
-<div class="hc-search">
+<!-- src/app/common/header/search-box/search-box.component.html -->
+<div
+  class="hc-search"
+  [class.creation]="isCreationMode()"
+>
   <input
     type="text"
     [value]="filter.value()"
     (input)="onInput($event)"
+    (keydown)="onKeydown($event)"
     (focus)="focused($event)"
     (blur)="unfocused($event)"
-    [placeholder]="isCreationMode() ? 'Enter new hive name' : 'Search'"
+    [placeholder]="isCreationMode() ? 'Enter new hive name' : 'Type intention…'"
   />
 
-  <button class="action-btn" (click)="onAction()">
+  <button
+    class="action-btn"
+    (click)="onAction()"
+    aria-label="commit intention"
+  >
     <span class="icon">
       {{ isCreationMode() ? 'U' : 'g' }}
     </span>

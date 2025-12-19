@@ -1,10 +1,9 @@
 import { Routes } from '@angular/router';
-import { Home } from './home/home';
-import { HistoryComponent } from './history-component/history';
+import { SearchBarComponent } from './common/header/search-bar/search-bar.component';
 
 export const routes: Routes = [
     {
         path: '**',
-        component: HistoryComponent
+        component: SearchBarComponent
     }
 ];

@@ -23,9 +23,18 @@ export class HistoryComponent implements OnInit, OnDestroy {
 
   // lifecycle
   ngOnInit(): void {
-    // seed a pool of ids to consume when adding new states
     this.idPool.set(this.generateIds(64))
-    // listen for browser back/forward
+
+    // bootstrap browser history once
+    if (!window.history.state) {
+      const root: HistoryState = {
+        hiveId: '__root__',
+        title: 'root'
+      }
+      window.history.replaceState(root, root.title)
+      this.history.replaceState(root)
+    }
+
     window.addEventListener('popstate', this.history.handlePop)
   }
 
