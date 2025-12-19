@@ -14,12 +14,12 @@ export class HiveManager extends Hypercomb implements IHiveManager {
 
   // add hive = add strand at root
   public add = async (seed: Seed): Promise<void> => {
-    await this.layermgr.add(this.hypercomb, seed, 'add-cell')
+    await this.layermgr.add(this.hypercomb, seed)
   }
 
   // remove hive = remove strand at root
   public remove = async (seed: Seed): Promise<void> => {
-    await this.layermgr.add(this.hypercomb, seed, 'remove-cell')
+    await this.layermgr.add(this.hypercomb, seed)
   }
 
   public exists = async (seed: Seed): Promise<boolean> => {

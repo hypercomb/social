@@ -6,14 +6,14 @@ import { Signature } from 'src/app/hive/storage/hash.service'
 export type Seed = string
 
 // strand operations (intent only)
-// expected filename: 00000001-64hexhash-add-cell
+// expected filename: 00000001-64hexhash-add.cell
 export type StrandOp =
-  | 'add-cell'
-  | 'remove-cell'
-  | 'add-action'
-  | 'remove-action'
-  | 'add-pheromone'
-  | 'remove-pheromone'
+  | 'add.capability'
+  | 'remove.capability'
+  | 'add.capability'
+  | 'remove.capability'
+  | 'add.pheremone'
+  | 'remove.pheremone'
 
 
 // strand = immutable instruction header (payload is params stream)
@@ -30,7 +30,7 @@ export interface IStrandManager {
   add(
     lineage: string,
     strand: IStrand,
-    ...actions: string[]
+    ...capability: string[]
   ): Promise<void>
 
   list(lineage: string): Promise<IStrand[]>

@@ -18,10 +18,8 @@ import { ImagePersistenceService } from './tile-image/image-persistence-service'
 import { PointerState } from 'src/app/state/input/pointer-state'
 import { ImageCaptureManager } from './tile-image/image-capture-manager'
 import { CellEditContext } from 'src/app/state/interactivity/cell-edit-context'
-import { HiveService } from 'src/app/core/hive/hive-service'
-import { CellFactory } from 'src/app/inversion-of-control/factory/cell.builder'
 import { Cell } from 'src/app/models/cell'
-import { ResourceManager } from 'src/app/core/hive/resource-manager'
+import { CapabilityManager } from 'src/app/core/hive/capability-manager'
 
 @Component({
   standalone: true,
@@ -45,12 +43,10 @@ export class TileEditorComponent extends Hypercomb {
   // dependencies
   // ─────────────────────────────────────────────
   public readonly es = inject(EditorService)
-    private readonly factory = inject(CellFactory)
   private readonly hexagonEditor = inject(CellEditor)
   public readonly captureManager = inject(ImageCaptureManager)
-  public readonly hivesvc = inject(HiveService)
   private readonly modify = inject(MODIFY_COMB_SVC)
-  private readonly manager = inject(ResourceManager)
+  private readonly manager = inject(CapabilityManager)
   public readonly persistence = inject(ImagePersistenceService)
   private hasInitializedFocus = false
   private readonly ps = inject(PointerState)

@@ -12,7 +12,7 @@ export interface StagedResource {
 }
 
 @Injectable({ providedIn: 'root' })
-export class ResourceManager {
+export class CapabilityManager {
 
   private readonly opfs = inject(OpfsManager)
 

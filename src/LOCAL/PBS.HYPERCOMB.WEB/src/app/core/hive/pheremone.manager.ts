@@ -7,7 +7,7 @@ import { Hypercomb } from '../mixins/abstraction/hypercomb.base'
 /*
 pheromone manager
 - consumes the full strand history for a lineage
-- reduces only add-pheromone / remove-pheromone ops
+- reduces only add.pheremone / remove.pheremone ops
 - pheromones are signals/markers, not structure
 - existence is symbolic; resolution is optional
 */
@@ -24,13 +24,13 @@ export class PheromoneManager extends Hypercomb implements IPheromoneManager {
   // appends a pheromone-related strand at the given lineage
   public add = async (lineage: string, seed: Seed): Promise<void> => {
     const ordinal = (await this.strandmgr.list(lineage)).length
-    const strand: IStrand = { ordinal, seed, op: 'add-pheromone' }
+    const strand: IStrand = { ordinal, seed, op: 'add.pheremone' }
     await this.strandmgr.add(lineage, strand)
   }
 
   public remove = async (lineage: string, seed: Seed): Promise<void> => {
     const ordinal = (await this.strandmgr.list(lineage)).length
-    const strand: IStrand = { ordinal, seed, op: 'remove-pheromone' }
+    const strand: IStrand = { ordinal, seed, op: 'remove.pheremone' }
     await this.strandmgr.add(lineage, strand)
   }
 
@@ -50,11 +50,11 @@ export class PheromoneManager extends Hypercomb implements IPheromoneManager {
   }
 
   private apply = (map: Map<Seed, boolean>, strand: IStrand): void => {
-    if (strand.op === 'add-pheromone') {
+    if (strand.op === 'add.pheremone') {
       map.set(strand.seed, true)
     }
 
-    if (strand.op === 'remove-pheromone') {
+    if (strand.op === 'remove.pheremone') {
       map.set(strand.seed, false)
     }
   }

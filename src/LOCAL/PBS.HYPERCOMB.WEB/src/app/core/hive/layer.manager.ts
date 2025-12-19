@@ -20,24 +20,24 @@ export class LayerManager extends Hypercomb implements ILayerManager {
     return this.reduce(strands)
   }
 
-  public add = async (lineage: string, seed: Seed, actions: string[] = []): Promise<void> => {
+  public add = async (lineage: string, seed: Seed, capabilities: string[] = []): Promise<void> => {
     const ordinal = (await this.strandmgr.list(lineage)).length
-    const strand: IStrand = { ordinal, seed, op: 'add-cell' }
-    await this.strandmgr.add(lineage, strand, ...actions)
+    const strand: IStrand = { ordinal, seed, op: 'add.cell' }
+    await this.strandmgr.add(lineage, strand, ...capabilities)
   }
 
-  public remove = async (lineage: string, seed: Seed, actions: string[] = []): Promise<void> => {
+  public remove = async (lineage: string, seed: Seed, capabilities: string[] = []): Promise<void> => {
     const ordinal = (await this.strandmgr.list(lineage)).length
-    const strand: IStrand = { ordinal, seed, op: 'remove-cell' }
-    await this.strandmgr.add(lineage, strand, ...actions)
+    const strand: IStrand = { ordinal, seed, op: 'remove.cell' }
+    await this.strandmgr.add(lineage, strand, ...capabilities)
   }
 
   private reduce = (strands: IStrand[]): Seed[] => {
     const map = new Map<Seed, boolean>()
 
     for (const strand of strands) {
-      if (strand.op === 'add-cell') map.set(strand.seed, true)
-      if (strand.op === 'remove-cell') map.set(strand.seed, false)
+      if (strand.op === 'add.cell') map.set(strand.seed, true)
+      if (strand.op === 'remove.cell') map.set(strand.seed, false)
     }
 
     return [...map.entries()].filter(([, visible]) => visible).map(([seed]) => seed)

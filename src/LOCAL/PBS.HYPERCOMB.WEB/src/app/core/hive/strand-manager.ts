@@ -4,7 +4,7 @@ import { IStrand, IStrandManager, StrandOp, Seed } from './i-dna.token'
 import { OpfsManager } from 'src/app/common/opfs/opfs-manager'
 import { Hypercomb } from '../mixins/abstraction/hypercomb.base'
 import { HashService } from 'src/app/hive/storage/hash.service'
-import { Nucleotide } from './nucleotide'
+
 
 /*
 filename layout (positional, fixed offsets):
@@ -32,19 +32,19 @@ export class StrandManager extends Hypercomb implements IStrandManager {
   private static readonly OP_START = StrandManager.SEED_END + 1
 
   private static readonly OPS = new Set<StrandOp>([
-    'add-cell',
-    'remove-cell',
-    'add-action',
-    'remove-action',
-    'add-pheromone',
-    'remove-pheromone'
-  ])
+    'add.cell',
+    'remove.cell',
+    'add.capability',
+    'remove.capability',
+    'add.pheremone',
+    'remove.pheremone'
+  ] as StrandOp[])
 
   // append immutable strand file
   public add = async (
     lineage: string,
     strand: IStrand,
-    ...actions: string[]
+    ...capabilities: string[]
   ): Promise<void> => {
     const name = this.formatName(strand)
     const dir = await this.opfs.ensureDirs(this.split(lineage))
@@ -56,9 +56,9 @@ export class StrandManager extends Hypercomb implements IStrandManager {
     // params → newline-delimited json
     // empty params = empty file (no nucleotides)
     const payload =
-      actions.length === 0
+      capabilities.length === 0
         ? ''
-        : actions.map(p => JSON.stringify(p)).join('\n')
+        : capabilities.map(p => JSON.stringify(p)).join('\n')
 
     await this.opfs.writeFile(dir, name, payload)
   }

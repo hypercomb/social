@@ -18,7 +18,8 @@ import { TileFactory } from "src/app/inversion-of-control/factory/tile-factory";
         { provide: CLIPBOARD_REPOSITORY, useExisting: ClipboardRepository },
         { provide: CONTEXT_MENU, useExisting: ContextMenu },
         { provide: SELECTIONS, useClass: SelectionService },
-        { provide: TILE_FACTORY, useClass: TileFactory }
+        { provide: TILE_FACTORY, useClass: TileFactory },
+          { provide: Capability, useClass: FindSubtreeCapability, multi: true }
     ]
 })
 export class HypercombModule { }
