@@ -1,17 +1,25 @@
 <div class="hc-search">
-  <input
-    type="text"
-    [value]="text()"
-    (input)="onInput($event)"
-    (keydown)="onKeydown($event)"
-    placeholder="Type intention…"
-  />
+  <div class="input-wrapper">
+    <!-- ghost text -->
+    @if (completion(); as c) {
+      <div class="ghost">
+        <span class="typed">{{ text() }}</span
+        ><span class="ghost-suffix">{{ c }}</span>
+      </div>
+    }
 
-  <button
-    class="action-btn"
-    (click)="commit()"
-    aria-label="commit intention"
-  >
-    <span class="icon">g</span>
-  </button>
+    <!-- real input -->
+    <input
+      type="text"
+      [value]="text()"
+      (input)="onInput($event)"
+      (keydown)="onKeydown($event)"
+      placeholder="Type intention…"
+      spellcheck="false"
+      autocorrect="off"
+      autocomplete="off"
+      autocapitalize="off"
+    />
+  </div>
+
 </div>

@@ -5,6 +5,8 @@
   "scripts": {
     "start": "ng serve",
     "build": "ng build"
+  },
+  "dependencies": {
+    "pixi.js": "^8.14.3"
   }
 }
-  
