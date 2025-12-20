@@ -1,21 +1,17 @@
 // src/app/core/intent/models/intent-field.model.ts
 
-import { IntentPlane, Intent } from './intent.model'
-
+export type IntentPlane = 'action' | 'object' | 'focus'
 export type SafetyClass = 'safe' | 'restricted' | 'unsafe'
 
 export interface IntentParticle {
-  intent: Intent
+  index: number
+  value: string
   plane: IntentPlane
-  weight: number
-  safetyClass: SafetyClass
-  source: 'mouse' | 'keyboard' | 'gesture' | 'programmatic'
-  ageMs: number
-  lastUpdated: number
 }
 
 export interface IntentFieldSnapshot {
+  raw: string
+  normalized: string
   particles: IntentParticle[]
-  pendingBridge: boolean
-  timestamp: number
+  createdAt: number
 }

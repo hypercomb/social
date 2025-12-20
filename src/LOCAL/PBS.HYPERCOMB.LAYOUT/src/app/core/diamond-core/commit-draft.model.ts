@@ -5,6 +5,9 @@ import { SelectionContext } from '../selection/selection-context.model'
 
 export interface CommitDraft {
   lineage: string
-  intent: IntentFieldContext
+
+  // optional in v1; the processor currently derives intent from particles
+  intent?: IntentFieldContext
+
   selection?: SelectionContext
 }

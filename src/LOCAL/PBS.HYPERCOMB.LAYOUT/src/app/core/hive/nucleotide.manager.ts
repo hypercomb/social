@@ -33,13 +33,21 @@ export class NucleotideManager {
   }
 
   private readCapabilities = async (lineage: string, strand: IStrand): Promise<string[]> => {
+    // unchanged logic, hardened parsing below
     const dir = await this.opfs.ensureDirs(lineage.split('/').filter(Boolean))
     const handle = await dir.getFileHandle(this.filename(strand))
     const file = await handle.getFile()
     const text = await file.text()
-    return text ? text.split('\n').map(line => JSON.parse(line)) : []
+
+    return text
+      ? text
+          .split('\n')
+          .map(l => l.trim())
+          .filter(Boolean)
+          .map(line => JSON.parse(line))
+      : []
   }
 
   private filename = (strand: IStrand): string =>
-    `${strand.ordinal.toString().padStart(8, '0')}|${strand.seed}|${strand.op}`
+    `${strand.ordinal.toString().padStart(8, '0')}-${strand.seed}-${strand.op}`
 }

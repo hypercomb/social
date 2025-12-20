@@ -17,6 +17,8 @@ import { OPERATIONS } from '../operations/operation.registry'
 import { LiveExecutionSink } from '../execution/live-execution.sink'
 import { PreflightRunner } from '../preflight/preflight.runner'
 import { CommitDraft } from './commit-draft.model'
+import { Segment } from './segment.model'
+import { StrandManager } from '../hive/strand.manager'
 
 @Injectable({ providedIn: 'root' })
 export class DiamondCoreProcessor {
@@ -25,6 +27,10 @@ export class DiamondCoreProcessor {
   // internal state
   // ─────────────────────────────────────────────
 
+  // virtual, unsaved work
+  private draftSegment?: Segment
+
+  // intent field
   private particles: IntentParticle[] = []
   private active?: ActiveContext
 
@@ -43,7 +49,8 @@ export class DiamondCoreProcessor {
   constructor(
     private readonly safetyPolicy: SafetyPolicy,
     private readonly preflight: PreflightRunner,
-    private readonly executionSink: LiveExecutionSink
+    private readonly executionSink: LiveExecutionSink,
+    private readonly strandManager: StrandManager
   ) {}
 
   // ─────────────────────────────────────────────
@@ -82,7 +89,7 @@ export class DiamondCoreProcessor {
   }
 
   // ─────────────────────────────────────────────
-  // commit (draft → resolved → execute)
+  // commit (draft → segment)
   // ─────────────────────────────────────────────
 
   public commit(draft: CommitDraft): void {
@@ -137,28 +144,55 @@ export class DiamondCoreProcessor {
       return
     }
 
-    // ── execution ──────────────────────────────
+    // ── stage into virtual segment ─────────────
 
     this.resolveActive(commit)
-    this.execute(commit, operationKey)
-    this.collapse()
+    this.stageSegment(commit, operationKey)
   }
 
   // ─────────────────────────────────────────────
-  // execution
+  // segment staging
   // ─────────────────────────────────────────────
 
-  private execute(commit: DiamondCommit, operationKey: string): void {
+  private stageSegment(commit: DiamondCommit, operationKey: string): void {
     const operation = OPERATIONS.find(op => op.key === operationKey)
     if (!operation) return
     if (!operation.canRun(commit)) return
 
-    const result = operation.run(commit)
-    this.applyOperationResult(result, commit)
+    const result = operation.run(commit) as OperationResult | void
+    if (!result || !result.strand) return
 
-    // side-effect sink (live or sandbox)
-    this.executionSink.execute(commit)
+    this.draftSegment = {
+      lineage: commit.lineage,
+      strands: [result.strand],
+      createdAt: performance.now()
+    }
   }
+
+  // ─────────────────────────────────────────────
+  // persistence boundary
+  // ─────────────────────────────────────────────
+
+  // explicit save / heartbeat commit
+  public async flushSegment(): Promise<void> {
+    if (!this.draftSegment) return
+
+    for (const strand of this.draftSegment.strands) {
+      await this.strandManager.add(this.draftSegment.lineage, strand)
+    }
+
+    this.draftSegment = undefined
+    this.collapse()
+  }
+
+  // explicit discard (undo-without-history)
+  public dumpDraft(): void {
+    this.draftSegment = undefined
+  }
+
+  // ─────────────────────────────────────────────
+  // execution helpers (unchanged, but now indirect)
+  // ─────────────────────────────────────────────
 
   private applyOperationResult(
     result: OperationResult | void,

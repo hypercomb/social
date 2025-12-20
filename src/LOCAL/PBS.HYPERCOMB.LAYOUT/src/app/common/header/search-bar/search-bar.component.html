@@ -1,25 +1,8 @@
-<div class="hc-search">
-  <div class="input-wrapper">
-    <!-- ghost text -->
-    @if (completion(); as c) {
-      <div class="ghost">
-        <span class="typed">{{ text() }}</span
-        ><span class="ghost-suffix">{{ c }}</span>
-      </div>
-    }
-
-    <!-- real input -->
-    <input
-      type="text"
-      [value]="text()"
-      (input)="onInput($event)"
-      (keydown)="onKeydown($event)"
-      placeholder="Type intention…"
-      spellcheck="false"
-      autocorrect="off"
-      autocomplete="off"
-      autocapitalize="off"
-    />
-  </div>
-
-</div>
+<input
+  #input
+  type="text"
+  autocomplete="off"
+  spellcheck="false"
+  aria-label="intention input"
+  (keydown)="onKeyDown($event)"
+/>

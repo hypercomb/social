@@ -8,5 +8,5 @@ export interface Capability<TOutput = unknown> {
 
   describe(): CapabilityDoc
 
-  execute(intent: Intent): Promise<TOutput>
+  apply(intent: Intent): Promise<TOutput>
 }

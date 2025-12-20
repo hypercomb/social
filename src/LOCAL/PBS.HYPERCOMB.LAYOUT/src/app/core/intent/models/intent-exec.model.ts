@@ -1,20 +1,14 @@
-import { Intent } from './intent.model'
-import { StrandOp } from '../../hive/i-dna.token'
+// src/app/core/intent/models/intent-exec.model.ts
 
-export interface SemanticResolution {
-  executable: boolean
-  op?: StrandOp
-  object?: string
-  confidence: number
-}
+import { Intent } from './intent.model'
+import { IStrand } from '../../hive/i-dna.token'
 
 export interface DiamondDecision {
   winner: Intent | null
   reason: string
 }
 
+// retained only as a data carrier if needed later
 export interface ResolvedIntent {
-  op: StrandOp
-  seed: string
-  lineage: string
+  strand: IStrand
 }

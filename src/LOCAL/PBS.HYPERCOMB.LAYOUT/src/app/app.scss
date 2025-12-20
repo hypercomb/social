@@ -2,7 +2,7 @@
 
 .viewport {
   display: grid;
-  grid-template-rows: $header-height 1fr $footer-height;
+  grid-template-rows: $header-height 1fr 0;
   grid-template-columns: 100%;
   min-height: 100vh; // ensures full height scaling
   min-height: 100dvh; // modern viewport unit for mobile browsers

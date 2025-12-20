@@ -1,9 +1,4 @@
-export type IntentIdentifier =
-  | 'add.cell'
-  | 'remove.cell'
-  | 'object.tile'
-  | 'object.image'
-  | 'unknown'
+// src/app/core/intent/models/intent.model.ts
 
 export type IntentPlane =
   | 'action'
@@ -12,9 +7,8 @@ export type IntentPlane =
   | 'control'
   | 'safety'
 
-
 export interface Intent {
+  // opaque, capability-defined
   key: string
-  noun?: string
   confidence: number
 }
