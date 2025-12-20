@@ -7,14 +7,19 @@ import { OpfsManager } from './opfs.manager'
 
 @Injectable({ providedIn: 'root' })
 export class StrandManager extends Hypercomb implements IStrandManager {
+
+  // ─────────────────────────────────────────────
+  // dependencies
+  // ─────────────────────────────────────────────
+
   private readonly opfs = inject(OpfsManager)
+
+  // ─────────────────────────────────────────────
+  // constants
+  // ─────────────────────────────────────────────
 
   private static readonly SEP = '-'
   private static readonly ORDINAL_LEN = 8
-
-  private readonly _version = signal(0)
-  public readonly version = this._version.asReadonly()
-
 
   private static readonly OPS = new Set<StrandOp>([
     'add.cell',
@@ -23,7 +28,28 @@ export class StrandManager extends Hypercomb implements IStrandManager {
     'remove.capability'
   ])
 
-  public add = async (lineage: string, strand: IStrand, ...capabilities: string[]): Promise<void> => {
+  // ─────────────────────────────────────────────
+  // reactive state
+  // ─────────────────────────────────────────────
+
+  // monotonic write signal for observers (debuggers, views, caches)
+  private readonly _writeSeq = signal(0)
+  public readonly writeSeq = this._writeSeq.asReadonly()
+
+  private notifyWrite = (): void => {
+    this._writeSeq.update(v => v + 1)
+  }
+
+  // ─────────────────────────────────────────────
+  // public api
+  // ─────────────────────────────────────────────
+
+  public add = async (
+    lineage: string,
+    strand: IStrand,
+    ...capabilities: string[]
+  ): Promise<void> => {
+
     const name = this.formatName(strand)
     const dir = await this.opfs.ensureDirs(this.split(lineage))
 
@@ -37,7 +63,9 @@ export class StrandManager extends Hypercomb implements IStrandManager {
         : capabilities.map(c => JSON.stringify(c)).join('\n')
 
     await this.opfs.writeFile(dir, name, payload)
-    this._version.update((v: number) => v + 1) // 🔑 notify
+
+    // notify observers that strands changed
+    this.notifyWrite()
   }
 
   public list = async (lineage: string): Promise<IStrand[]> => {
@@ -50,6 +78,10 @@ export class StrandManager extends Hypercomb implements IStrandManager {
       .filter((s): s is IStrand => s !== null)
       .sort((a, b) => a.ordinal - b.ordinal)
   }
+
+  // ─────────────────────────────────────────────
+  // helpers
+  // ─────────────────────────────────────────────
 
   private parseName = (name: string): IStrand | null => {
     const parts = name.split(StrandManager.SEP)
@@ -78,7 +110,10 @@ export class StrandManager extends Hypercomb implements IStrandManager {
   private split = (lineage: string): string[] =>
     lineage.split('/').filter(Boolean)
 
-  private exists = async (dir: FileSystemDirectoryHandle, name: string): Promise<boolean> => {
+  private exists = async (
+    dir: FileSystemDirectoryHandle,
+    name: string
+  ): Promise<boolean> => {
     try {
       await dir.getFileHandle(name)
       return true

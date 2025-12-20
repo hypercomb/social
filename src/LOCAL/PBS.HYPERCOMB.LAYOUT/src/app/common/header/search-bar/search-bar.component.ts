@@ -29,9 +29,17 @@ export class SearchBarComponent {
     const value = this.text().trim()
     if (!value) return
 
-    // next step: translate text → strands written at current lineage
-    void this.intent.commit(this.state.lineage(), value)
+    const lineage = this.state.lineage()
+    const selection = this.state.selection() ?? undefined
+
+    void this.intent.process(lineage, value, {
+      lineage,
+      capabilities: [],
+      selection
+    })
 
     this.text.set('')
   }
+
+
 }

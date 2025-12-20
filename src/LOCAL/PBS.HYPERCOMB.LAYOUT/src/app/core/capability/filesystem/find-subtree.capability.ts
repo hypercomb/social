@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core'
-import { Intent } from '../../intent/intent.model'
+import { Intent } from '../../intent/models/intent.model'
 import { CapabilityDoc } from '../capability-doc.model'
 import { Capability } from '../capability.interface'
 
@@ -8,8 +8,8 @@ import { Capability } from '../capability.interface'
 export class FindSubtreeCapability implements Capability {
   public readonly capabilityId = 'filesystem.find.subtree'
 
-  public supports(intentId: string): boolean {
-    return intentId === 'find.subtree'
+  public supports(intent: string): boolean {
+    return intent === 'find.subtree'
   }
 
   public describe(): CapabilityDoc {

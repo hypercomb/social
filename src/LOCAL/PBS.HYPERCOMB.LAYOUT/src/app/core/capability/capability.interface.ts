@@ -1,10 +1,10 @@
-import { Intent } from '../intent/intent.model'
+import { Intent } from '../intent/models/intent.model'
 import { CapabilityDoc } from './capability-doc.model'
 
 export interface Capability<TOutput = unknown> {
   readonly capabilityId: string
 
-  supports(intentId: string): boolean
+  supports(intent: string): boolean
 
   describe(): CapabilityDoc
 

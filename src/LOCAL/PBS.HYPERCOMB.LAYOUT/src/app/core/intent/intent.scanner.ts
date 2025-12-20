@@ -7,6 +7,8 @@ import { Capability } from '../capability/capability.interface'
 import { RESOURCE_RESOLVERS } from '../hive/i-resource-resolver.token'
 import { LayerManager } from '../hive/layer.manager'
 import { NucleotideManager } from '../hive/nucleotide.manager'
+import { CoreIntentPlane } from './models/intent-field-plane.model'
+import { SelectionContext } from '../selection/selection-context.model'
 
 export interface ScannedCapability {
   seed: string
@@ -16,8 +18,12 @@ export interface ScannedCapability {
 
 export interface IntentScanResult {
   lineage: string
+  dominantPlane?: CoreIntentPlane
   capabilities: ScannedCapability[]
+  selection?: SelectionContext
 }
+
+
 
 @Injectable({ providedIn: 'root' })
 export class IntentScanner {

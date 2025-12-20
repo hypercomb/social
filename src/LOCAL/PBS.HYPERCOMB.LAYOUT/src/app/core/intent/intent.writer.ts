@@ -1,73 +1,83 @@
+// src/app/core/intent/intent.writer.ts
+
 import { Injectable, inject } from '@angular/core'
 import { StrandManager } from '../hive/strand.manager'
 import { HashService } from '../hash.service'
-import { IStrand, StrandOp } from '../hive/i-dna.token'
+import { IntentScanResult } from './intent.scanner'
+import { SemanticResolver } from './semantic.resolver'
+import { Intent } from './models/intent.model'
+import { ParsedPhrase } from './models/parsed-phrase.model'
 
 @Injectable({ providedIn: 'root' })
 export class IntentWriter {
 
+  private readonly resolver = inject(SemanticResolver)
   private readonly strands = inject(StrandManager)
-  private readonly hash = inject(HashService)
 
-  /**
-   * commit user intent into history
-   */
-  public commit = async (lineage: string, text: string): Promise<void> => {
-     debugger
-    const parsed = this.parse(text)
-    if (!parsed) return
+  public process = async (
+    lineage: string,
+    text: string,
+    scan: IntentScanResult
+  ): Promise<void> => {
 
-    // identity collapse happens here (async boundary)
-    const seed = await HashService.seed(parsed.noun)
+    const phrase = this.parse(text)
+    if (!phrase) return
 
+    const intent = this.inferIntent(phrase)
+
+    const resolution = this.resolver.resolve(intent, scan)
+    if (!resolution || !resolution.executable) return
+
+    const seed = await HashService.seed(resolution.object ?? '')
     const ordinal = (await this.strands.list(lineage)).length
 
-    const strand: IStrand = {
-      ordinal,
-      seed,
-      op: parsed.op
-    }
-
-    await this.strands.add(lineage, strand, ...parsed.capabilities)
+    await this.strands.add(
+      lineage,
+      {
+        ordinal,
+        seed,
+        op: resolution.op!
+      }
+    )
   }
 
-  // --------------------------------------------------
-  // parsing (pure, synchronous)
-  // --------------------------------------------------
+  // ------------------------------------
+  // semantic inference (explained above)
+  // ------------------------------------
 
-  private parse = (
-    text: string
-  ): { noun: string; op: StrandOp; capabilities: string[] } | null => {
+  private inferIntent = (phrase: ParsedPhrase): Intent => {
 
-    const parts = text.trim().split(/\s+/)
-    if (parts.length < 2) return null
+    if (
+      phrase.verb === 'add' ||
+      phrase.verb === 'create' ||
+      phrase.verb === 'make'
+    ) {
+      return { key: 'add.cell', noun: phrase.noun, confidence: 1 }
+    }
 
-    const verb = parts[0].toLowerCase()
-    const noun = parts.slice(1).join(' ')
+    if (phrase.verb === 'remove' || phrase.verb === 'delete') {
+      return { key: 'remove.cell', noun: phrase.noun, confidence: 1 }
+    }
 
-    switch (verb) {
-      case 'add':
-        return { noun, op: 'add.cell', capabilities: [] }
+    if (phrase.noun === 'tile') {
+      return { key: 'object.tile', confidence: 0.6 }
+    }
 
-      case 'remove':
-        return { noun, op: 'remove.cell', capabilities: [] }
+    return { key: 'unknown', confidence: 0 }
+  }
 
-      case 'enable':
-        return {
-          noun,
-          op: 'add.capability',
-          capabilities: parts.slice(2)
-        }
+  // ------------------------------------
+  // parsing (syntax only)
+  // ------------------------------------
 
-      case 'disable':
-        return {
-          noun,
-          op: 'remove.capability',
-          capabilities: parts.slice(2)
-        }
+  private parse = (text: string): ParsedPhrase | null => {
+    const parts = text.trim().toLowerCase().split(/\s+/)
+    if (!parts.length) return null
 
-      default:
-        return null
+    return {
+      verb: parts[0],
+      noun: parts.slice(1).join(' '),
+      modifiers: parts.slice(2)
     }
   }
 }

@@ -1,0 +1,9 @@
+/* src/app/common/overlays/intent-field-overlay.scss */
+
+.intent-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.9;
+  z-index: 1000;
+}

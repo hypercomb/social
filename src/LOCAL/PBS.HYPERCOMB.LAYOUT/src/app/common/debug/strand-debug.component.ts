@@ -2,7 +2,6 @@ import { Component, inject, signal, effect } from '@angular/core'
 import { IStrand } from '../../core/hive/i-dna.token'
 import { StrandManager } from '../../core/hive/strand.manager'
 import { HypercombState } from '../../core/hypercomb-state'
-import { NgClass } from '@angular/common'
 
 
 
