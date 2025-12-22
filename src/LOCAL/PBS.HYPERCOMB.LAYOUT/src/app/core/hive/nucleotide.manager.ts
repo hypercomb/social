@@ -3,7 +3,7 @@
 import { inject, Injectable } from '@angular/core'
 import { IStrand, Seed } from './i-dna.token'
 import { OpfsManager } from './opfs.manager'
-import { StrandManager } from './strand.manager'
+import { StrandManager } from './strand.writer'
 
 @Injectable({ providedIn: 'root' })
 export class NucleotideManager {

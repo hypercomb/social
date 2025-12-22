@@ -3,7 +3,7 @@
 import { Inject, inject, Injectable } from '@angular/core'
 import { ILayerManager, IStrand, Seed } from './i-dna.token'
 import { Hypercomb } from '../hypercomb.base'
-import { StrandManager } from './strand.manager'
+import { StrandManager } from './strand.writer'
 
 @Injectable({ providedIn: 'root' })
 export class LayerManager extends Hypercomb implements ILayerManager {

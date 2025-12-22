@@ -1,14 +1,12 @@
-// src/app/core/diamond-core/diamond-core.model.ts
+// src/app/core/diamond-core/diamond-decision.model.ts
 
 import { IntentFieldContext } from '../intent/models/intent-field-content.model'
 import { SelectionContext } from '../selection/selection-context.model'
 import { SafetyClass } from '../intent/models/intent-field.model'
 
-export interface DiamondCommit {
+export interface DiamondDecision {
   lineage: string
   intent: IntentFieldContext
   selection?: SelectionContext
-
-  // resolved during processing, not required at creation
-  safety?: SafetyClass
+  safety: SafetyClass
 }
