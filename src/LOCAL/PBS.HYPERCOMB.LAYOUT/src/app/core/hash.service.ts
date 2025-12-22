@@ -36,14 +36,6 @@ export class HashService {
   }
 
   // ---------------------------------------------
-  // identity hashing (names, intent)
-  // ---------------------------------------------
-
-  public static seed(input: string): Promise<Hash> {
-    return this.sha256Hex(input)
-  }
-
-  // ---------------------------------------------
   // content signatures (truth)
   // ---------------------------------------------
 
@@ -52,7 +44,7 @@ export class HashService {
       payload instanceof ArrayBuffer
         ? payload
         : new TextEncoder().encode(
-            this.canonicalStringify(payload)
+            this.simplify(payload)
           ).buffer
 
     return this.sha256Hex(bytes)
@@ -62,20 +54,20 @@ export class HashService {
   // canonical json (deterministic)
   // ---------------------------------------------
 
-  private static canonicalStringify(value: unknown): string {
+  private static simplify(value: unknown): string {
     if (value === null || typeof value !== 'object') {
       return JSON.stringify(value)
     }
 
     if (Array.isArray(value)) {
-      return `[${value.map(v => this.canonicalStringify(v)).join(',')}]`
+      return `[${value.map(v => this.simplify(v)).join(',')}]`
     }
 
     const obj = value as Record<string, unknown>
     const keys = Object.keys(obj).sort()
 
     return `{${keys
-      .map(k => `"${k}":${this.canonicalStringify(obj[k])}`)
+      .map(k => `"${k}":${this.simplify(obj[k])}`)
       .join(',')}}`
   }
 }

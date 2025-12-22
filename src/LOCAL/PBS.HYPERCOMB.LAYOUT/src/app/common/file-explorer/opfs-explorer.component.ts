@@ -3,7 +3,8 @@ import { CommonModule } from '@angular/common'
 import { MatTableModule } from '@angular/material/table'
 import { MatIconModule } from '@angular/material/icon'
 import { MatButtonModule } from '@angular/material/button'
-import { DebugService } from '../debug/debug.service'
+import { DebugService } from '../../core/debug-service'
+
 
 interface FileEntry {
   name: string
@@ -20,13 +21,13 @@ interface FileEntry {
   styleUrls: ['./opfs-explorer.component.scss']
 })
 export class OpfsExplorerComponent implements OnInit {
+  private readonly debug = inject(DebugService)
   public readonly entries = signal<FileEntry[]>([])
   public readonly currentPath = signal<string>('/')
   public readonly previewUrl = signal<string | null>(null)
 
   private currentDirHandle?: FileSystemDirectoryHandle
   private readonly dirStack: FileSystemDirectoryHandle[] = []
-  private readonly debug = inject(DebugService)
 
   public async ngOnInit(): Promise<void> {
     await this.loadDirectory()

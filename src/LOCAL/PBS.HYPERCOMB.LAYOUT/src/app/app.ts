@@ -2,13 +2,13 @@ import { Component, signal } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { Header } from "./header/header";
 import { Footer } from "./footer/footer";
-import { StrandDebugComponent } from "./common/debug/strand-debug.component";
+import { OpfsExplorerComponent } from "./common/file-explorer/opfs-explorer.component";
 
 @Component({
   selector: 'app-root',
   imports: [RouterOutlet,
     Header,
-    Footer, StrandDebugComponent],
+    Footer, OpfsExplorerComponent],
   templateUrl: './app.html',
   styleUrl: './app.scss'
 })
