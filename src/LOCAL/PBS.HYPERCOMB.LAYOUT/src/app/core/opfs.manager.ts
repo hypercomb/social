@@ -1,98 +1,55 @@
-// src/app/common/opfs/opfs-manager.ts
-import { Injectable } from "@angular/core";
+// src/app/core/opfs.manager.ts
+import { Injectable } from "@angular/core"
+
+export interface OpenExistingResult {
+  readonly dir: FileSystemDirectoryHandle
+  readonly existing: string[]
+  readonly missing: string[]
+}
 
 @Injectable({ providedIn: "root" })
 export class OpfsManager {
 
-  public async root(): Promise<FileSystemDirectoryHandle> {
-    return await navigator.storage.getDirectory();
+  public root = async (): Promise<FileSystemDirectoryHandle> => {
+    return await navigator.storage.getDirectory()
   }
 
-  // recursive ensure
-  public async ensureDirs(path: string[]): Promise<FileSystemDirectoryHandle> {
-    let dir = await this.root();
+  // create only when explicitly asked to (creation is meaning)
+  public ensureDirs = async (path: string[]): Promise<FileSystemDirectoryHandle> => {
+    let dir = await this.root()
     for (const segment of path) {
-      dir = await dir.getDirectoryHandle(segment, { create: true });
+      dir = await dir.getDirectoryHandle(segment, { create: true })
     }
-    return dir;
+    return dir
   }
 
-  // basic listing
-  public async listEntries(
-    dir: FileSystemDirectoryHandle
-  ): Promise<{ name: string; handle: FileSystemHandle }[]> {
-    const out: { name: string; handle: FileSystemHandle }[] = [];
-    for await (const [name, handle] of dir.entries()) out.push({ name, handle });
-    return out;
-  }
+  // open what exists; do not create meaning by arriving
+  public openExistingDirs = async (path: string[]): Promise<OpenExistingResult> => {
+    let dir = await this.root()
+    const existing: string[] = []
+    const missing: string[] = []
 
-  // read/write
-  public async getFile(
-    dir: FileSystemDirectoryHandle,
-    name: string,
-    opts: { create?: boolean } = {}
-  ): Promise<FileSystemFileHandle> {
-    return await dir.getFileHandle(name, opts);
-  }
-
-  public async readFile(handle: FileSystemFileHandle): Promise<File> {
-    return await handle.getFile();
-  }
-
-  public async writeFile(
-    dir: FileSystemDirectoryHandle,
-    name: string,
-    data: Blob | string
-  ): Promise<void> {
-    const fh = await dir.getFileHandle(name, { create: true });
-    const w = await fh.createWritable();
-    await w.write(data);
-    await w.close();
-  }
-
-  // delete
-  public async deleteEntry(
-    dir: FileSystemDirectoryHandle,
-    name: string,
-    recursive = false
-  ): Promise<void> {
-    await dir.removeEntry(name, { recursive });
-  }
-
-  // atomic move if exists
-  public async moveFileIfExists(
-    fromDir: FileSystemDirectoryHandle,
-    toDir: FileSystemDirectoryHandle,
-    name: string
-  ): Promise<boolean> {
-    try {
-      const file = await fromDir.getFileHandle(name);
-      const blob = await (await file.getFile()).arrayBuffer();
-      await this.writeFile(toDir, name, new Blob([blob]));
-      await fromDir.removeEntry(name);
-      return true;
-    } catch {
-      return false;
+    for (const segment of path) {
+      try {
+        dir = await dir.getDirectoryHandle(segment, { create: false })
+        existing.push(segment)
+      } catch {
+        missing.push(segment)
+      }
+      if (missing.length) break
     }
+
+    return { dir, existing, missing }
   }
 
-  // registry
-  public async readRegistry(): Promise<any[]> {
-    try {
-      const root = await this.root();
-      const fh = await root.getFileHandle("opfs-hives.json");
-      const file = await fh.getFile();
-      return JSON.parse(await file.text());
-    } catch {
-      return [];
-    }
+  public writeFile = async (dir: FileSystemDirectoryHandle, name: string, data: Blob | string): Promise<void> => {
+    const fh = await dir.getFileHandle(name, { create: true })
+    const w = await fh.createWritable()
+    await w.write(data)
+    await w.close()
   }
 
-  public async writeRegistry(records: any[]): Promise<void> {
-    const root = await this.root();
-    const fh = await root.getFileHandle("opfs-hives.json", { create: true });
-    const w = await fh.createWritable();
-    await w.write(JSON.stringify(records, null, 2));
-    await w.close();
+  public deleteEntry = async (dir: FileSystemDirectoryHandle, name: string, recursive = false): Promise<void> => {
+    await dir.removeEntry(name, { recursive })
   }
 }

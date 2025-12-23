@@ -2,98 +2,85 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
   min-height: 80vh;
-  padding: 1rem;
+  padding: 2rem;
+  color: #111;
 
-  .toolbar {
+  .title {
     display: flex;
     align-items: center;
-    gap: 1rem;
+    gap: 0.5rem;
     margin-bottom: 1rem;
+    font-weight: 500;
+
+    .title-icon {
+      color: #fbc02d;
+    }
+  }
+
+  .toolbar {
     width: 1000px;
-    max-width: 100vw;
+    max-width: 100%;
+    margin-bottom: 0.75rem;
 
     .path {
-      flex: 1;
       font-family: monospace;
-      color: #bbb;
+      font-size: 0.85rem;
+      color: #666;
+      white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      white-space: nowrap;
     }
   }
 
   .table-container {
-    display: flex;
-    justify-content: center;
-    align-items: flex-start;
     width: 1000px;
-    max-width: 100vw;
+    max-width: 100%;
     background: #fff;
-    border-radius: 6px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-    padding: 0;
-    max-height: 60vh;
-    overflow: auto;
+    border-radius: 8px;
+    overflow: hidden;
   }
 
-  table {
+  .opfs-table {
     width: 100%;
-    border-collapse: collapse;
+  }
 
-    .icon-cell {
-      width: 40px;
-      max-width: 40px;
-      text-align: left;
-      padding-right: 0;
-      color: #ccc;
+  th.mat-header-cell {
+    font-weight: 600;
+    color: #444;
+  }
 
-      mat-icon {
-        font-size: 22px;
-        vertical-align: middle;
-        transition: color 0.2s;
-      }
+  td.mat-cell,
+  th.mat-header-cell {
+    padding: 0.75rem 1rem;
+  }
 
-      &:hover mat-icon {
-        color: #fff;
-      }
+  .icon-cell {
+    width: 48px;
+    color: #757575;
+
+    mat-icon {
+      font-size: 22px;
     }
+  }
 
-    .name-cell {
-      text-align: left;
-      max-width: 200px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
+  .name-cell {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 
-    .thumb-cell {
-      width: 70px;
-      text-align: center;
+  .preview-cell {
+    width: 56px;
+    text-align: right;
+  }
 
-      .thumb {
-        width: 48px;
-        height: 48px;
-        object-fit: cover;
-        border-radius: 4px;
-        cursor: pointer;
-        transition: transform 0.15s ease, box-shadow 0.15s ease;
+  .data-row {
+    cursor: pointer;
+    transition: background 120ms ease;
 
-        &:hover {
-          transform: scale(1.15);
-          box-shadow: 0 0 4px rgba(0, 0, 0, 0.4);
-        }
-      }
-    }
-
-    .delete-cell {
-      width: 50px;
-      text-align: right;
-    }
-
-    .clickable:hover {
-      background: rgba(255, 255, 255, 0.08);
+    &:hover {
+      background: rgba(0, 0, 0, 0.04);
     }
   }
 }
@@ -105,7 +92,7 @@
   display: flex;
   justify-content: center;
   align-items: center;
-  z-index: 9999;
+  z-index: 10000;
   cursor: zoom-out;
 }
 
@@ -113,6 +100,10 @@
   max-width: 85vw;
   max-height: 85vh;
   border-radius: 8px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
   object-fit: contain;
+}
+
+.delete-cell {
+  width: 48px;
+  text-align: right;
 }

@@ -8,7 +8,7 @@ import { OpfsExplorerComponent } from "./common/file-explorer/opfs-explorer.comp
   selector: 'app-root',
   imports: [RouterOutlet,
     Header,
-    Footer, OpfsExplorerComponent],
+    Footer],
   templateUrl: './app.html',
   styleUrl: './app.scss'
 })
