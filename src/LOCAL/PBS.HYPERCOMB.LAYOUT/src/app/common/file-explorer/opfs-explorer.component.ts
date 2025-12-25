@@ -1,7 +1,7 @@
 // src/app/common/file-explorer/opfs-explorer.component.ts
 
 import { CommonModule } from '@angular/common'
-import { Component, inject, signal } from '@angular/core'
+import { Component, inject, OnDestroy, signal } from '@angular/core'
 import { MatButtonModule } from '@angular/material/button'
 import { MatIconModule } from '@angular/material/icon'
 import { MatTableModule } from '@angular/material/table'
@@ -21,8 +21,8 @@ interface FileEntry {
   templateUrl: './opfs-explorer.component.html',
   styleUrls: ['./opfs-explorer.component.scss']
 })
-export class OpfsExplorerComponent extends hypercomb {
-
+export class OpfsExplorerComponent extends hypercomb implements OnDestroy 
+{
   public readonly entries = signal<FileEntry[]>([])
   public readonly directory = signal<string>('/')
 
@@ -115,7 +115,7 @@ export class OpfsExplorerComponent extends hypercomb {
     await this.project()
   }
 
-  public ngDestroy(): void {
+  public ngOnDestroy(): void {
     window.removeEventListener('synchronize', this.forward)
     window.removeEventListener('popstate', this.back)
   }

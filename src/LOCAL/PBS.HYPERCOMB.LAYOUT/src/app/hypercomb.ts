@@ -1,11 +1,11 @@
 // src/app/hypercomb.ts
 
-import { inject, Injectable, signal } from '@angular/core'
+import { inject, Injectable, OnDestroy, signal } from '@angular/core'
 import { web } from './hypercomb.web'
 import { ACTION_MANAGER } from './core/action-manager'
 
-@Injectable({ providedIn: 'root' })
 export class hypercomb extends web {
+
   private readonly manager = inject(ACTION_MANAGER)
   public readonly active = (): string => this.segments()[this.index] ?? ''
   public readonly path = (): string => window.location.pathname
@@ -14,12 +14,10 @@ export class hypercomb extends web {
   public index: number = 0
 
   public override act = async (text: string): Promise<void> => {
-    const clean = text.replace(/[\/\\?:]/g, ' ').replace(/\s+/g, ' ').trim()
-    if (!clean) return
-
-    const next = this.path() === '/' ? `/${clean}` : `${this.path()}/${clean}`
+    const clean = text.replace(/[\\?:\s]+/g, ' ').trim()
+    const next = `${this.path().replace(/\/$/, '')}/${clean}`
+    
     const actions = await this.manager.find(clean)
-
     this.index = actions.length ? this.index + 1 : this.index
     for (const action of actions) await action.run()
 
@@ -31,5 +29,6 @@ export class hypercomb extends web {
 
     window.dispatchEvent(new Event('synchronize'))
   }
+
 }
 

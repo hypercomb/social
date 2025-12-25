@@ -10,7 +10,6 @@
     <span class="path">{{ directory() }}</span>
   </div>
 
-
   <div class="table-container">
     <table mat-table [dataSource]="entries()" class="mat-elevation-z2 opfs-table">
 
@@ -43,14 +42,7 @@
       </ng-container>
 
       <tr mat-header-row *matHeaderRowDef="['icon', 'name', 'delete']"></tr>
-
-      <tr
-  mat-row
-  *matRowDef="let row; columns: ['icon', 'name', 'delete']"
-  class="data-row"
-  (click)="explore(row.name)"
-></tr>
-
+      <tr mat-row *matRowDef="let row; columns: ['icon', 'name', 'delete']" class="data-row" (click)="explore(row.name)"></tr>
 
     </table>
   </div>

@@ -3,7 +3,7 @@
 import { Injectable, OnDestroy } from '@angular/core'
 import { hypercomb } from '../hypercomb'
 
-@Injectable({ providedIn: 'root' })
+@Injectable()
 export class synchronizer extends hypercomb implements OnDestroy {
 
   private readonly onSynchronize = (): void => {
