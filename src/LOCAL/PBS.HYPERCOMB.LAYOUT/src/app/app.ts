@@ -10,6 +10,7 @@ import { synchronizer } from './core/synchronizer'
 @Component({
   selector: 'app-root',
   imports: [RouterOutlet, Header, Footer],
+  providers: [synchronizer],
   templateUrl: './app.html',
   styleUrl: './app.scss'
 })
@@ -18,10 +19,15 @@ export class App extends hypercomb {
   protected readonly title = signal('PBS.HYPERCOMB.LAYOUT')
   public showHeader = true
   public showFooter = false
-
-  // force eager construction
+  
+  // --------------------------------------------------------
+  // startup dependencies
+  // --------------------------------------------------------
   private readonly sync = inject(synchronizer)
-
+  // --------------------------------------------------------
+  // startup dependencies
+  // --------------------------------------------------------
+  
   constructor() {
     super()
 

@@ -1,7 +1,7 @@
 // src/app/common/file-explorer/opfs-explorer.component.ts
 
 import { CommonModule } from '@angular/common'
-import { Component, OnDestroy, inject, signal } from '@angular/core'
+import { Component, inject, signal } from '@angular/core'
 import { MatButtonModule } from '@angular/material/button'
 import { MatIconModule } from '@angular/material/icon'
 import { MatTableModule } from '@angular/material/table'
@@ -21,7 +21,7 @@ interface FileEntry {
   templateUrl: './opfs-explorer.component.html',
   styleUrls: ['./opfs-explorer.component.scss']
 })
-export class OpfsExplorerComponent extends hypercomb implements OnDestroy {
+export class OpfsExplorerComponent extends hypercomb {
 
   public readonly entries = signal<FileEntry[]>([])
   public readonly directory = signal<string>('/')
@@ -32,8 +32,8 @@ export class OpfsExplorerComponent extends hypercomb implements OnDestroy {
   private currentDir?: FileSystemDirectoryHandle
 
   // stable handler refs so removeeventlistener works
-  private readonly onSynchronize = (): void => { void this.project() }
-  private readonly onPopState = (): void => { void this.project() }
+  private readonly forward = (): void => { void this.project() }
+  protected readonly back = (): void => { void this.project() }
 
   constructor() {
     super()
@@ -42,8 +42,12 @@ export class OpfsExplorerComponent extends hypercomb implements OnDestroy {
     void this.project()
 
     // listen for the single sync wave
-    window.addEventListener('synchronize', this.onSynchronize)
-    window.addEventListener('popstate', this.onPopState)
+    window.addEventListener('synchronize', this.forward)
+    window.addEventListener('popstate', this.back)
+  }
+
+  public explore = async (name: string): Promise<void> => {
+    await this.act(name)
   }
 
   private readonly project = async (): Promise<void> => {
@@ -111,8 +115,8 @@ export class OpfsExplorerComponent extends hypercomb implements OnDestroy {
     await this.project()
   }
 
-  public ngOnDestroy(): void {
-    window.removeEventListener('synchronize', this.onSynchronize)
-    window.removeEventListener('popstate', this.onPopState)
+  public ngDestroy(): void {
+    window.removeEventListener('synchronize', this.forward)
+    window.removeEventListener('popstate', this.back)
   }
 }

@@ -44,7 +44,13 @@
 
       <tr mat-header-row *matHeaderRowDef="['icon', 'name', 'delete']"></tr>
 
-      <tr mat-row *matRowDef="let row; columns: ['icon', 'name', 'delete']" class="data-row"></tr>
+      <tr
+  mat-row
+  *matRowDef="let row; columns: ['icon', 'name', 'delete']"
+  class="data-row"
+  (click)="explore(row.name)"
+></tr>
+
 
     </table>
   </div>

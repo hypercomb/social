@@ -1,11 +1,8 @@
 // src/app/core/synchronizer.ts
 
-import { Injectable, OnDestroy } from '@angular/core'
 import { hypercomb } from '../hypercomb'
 
-@Injectable({ providedIn: 'root' })
-export class synchronizer extends hypercomb implements OnDestroy {
-
+export class synchronizer extends hypercomb  {
   private readonly onSynchronize = (): void => {
     const lineage = window.location.pathname.split('/').filter(Boolean)
     this.ensureDirectories(lineage).catch(console.error)
@@ -27,9 +24,5 @@ export class synchronizer extends hypercomb implements OnDestroy {
     for (const seg of lineage) {
       dir = await dir.getDirectoryHandle(seg, { create: true })
     }
-  }
-
-  public ngOnDestroy(): void {
-    window.removeEventListener('synchronize', this.onSynchronize)
   }
 }

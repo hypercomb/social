@@ -10,7 +10,7 @@ import { hypercomb } from '../../hypercomb'
 })
 export class HistoryComponent extends hypercomb {
   public readonly length = (): number => window.history.length
-  public readonly index = (): number => ((window.history.state as any)?.i ?? 0)
+  public readonly current = (): number => ((window.history.state as any)?.i ?? 0)
   public back(): void { window.history.back() }
   public forward(): void { window.history.forward() }
 }
