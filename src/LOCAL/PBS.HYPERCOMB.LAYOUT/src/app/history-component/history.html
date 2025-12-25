@@ -1,28 +1,16 @@
-<div class="history-container">
-  <h2>browser history management</h2>
+<!-- src/app/history-component/history.html -->
+
+<div id="history">
+  <h2>browser history</h2>
 
   <div class="controls">
-    <button (click)="addState()">add new state</button>
-    <button (click)="replaceState()">replace current state</button>
-    <button (click)="removeLast()">remove last (go back)</button>
+    <button (click)="back()">back</button>
+    <button (click)="forward()">forward</button>
   </div>
 
-  <p><strong>count:</strong> {{ count() }}</p>
-
-  @if (historyStack().length > 0) {
-    <div>
-      <h3>current history stack:</h3>
-      <ul>
-        @for (s of historyStack(); track s.hiveId) {
-          <li>
-            <strong>hiveId:</strong> {{ s.hiveId }}<br>
-            title: {{ s.title }}<br>
-            data: {{ s.data || '—' }}
-          </li>
-        }
-      </ul>
-    </div>
-  } @else {
-    <p>no history states yet. click "add new state" to start.</p>
-  }
+  <p><strong>length:</strong> {{ length() }}</p>
+  <p><strong>index:</strong> {{ index() }}</p>
+  <p><strong>path:</strong> {{ path() }}</p>
+  <p><strong>depth:</strong> {{ depth() }}</p>
+  <p><strong>active:</strong> {{ active() }}</p>
 </div>

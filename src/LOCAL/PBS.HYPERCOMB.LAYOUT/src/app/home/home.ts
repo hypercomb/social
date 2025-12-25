@@ -1,9 +1,9 @@
 import { Component } from '@angular/core';
-import { OpfsExplorerComponent } from "../common/file-explorer/opfs-explorer.component";
+import { HistoryComponent } from "../history-component/history";
 
 @Component({
   selector: 'app-home',
-  imports: [ OpfsExplorerComponent],
+  imports: [ HistoryComponent],
   templateUrl: './home.html',
   styleUrl: './home.scss'
 })

@@ -1,5 +1,6 @@
 // src/app/core/opfs.manager.ts
-import { Injectable } from "@angular/core"
+
+import { Injectable } from '@angular/core'
 
 export interface OpenExistingResult {
   readonly dir: FileSystemDirectoryHandle
@@ -7,15 +8,16 @@ export interface OpenExistingResult {
   readonly missing: string[]
 }
 
-@Injectable({ providedIn: "root" })
+@Injectable({ providedIn: 'root' })
 export class OpfsManager {
 
   public root = async (): Promise<FileSystemDirectoryHandle> => {
-    return await navigator.storage.getDirectory()
+    return navigator.storage.getDirectory()
   }
 
-  // create only when explicitly asked to (creation is meaning)
-  public ensureDirs = async (path: string[]): Promise<FileSystemDirectoryHandle> => {
+  public ensureDirs = async (
+    path: readonly string[]
+  ): Promise<FileSystemDirectoryHandle> => {
     let dir = await this.root()
     for (const segment of path) {
       dir = await dir.getDirectoryHandle(segment, { create: true })
@@ -23,33 +25,23 @@ export class OpfsManager {
     return dir
   }
 
-  // open what exists; do not create meaning by arriving
-  public openExistingDirs = async (path: string[]): Promise<OpenExistingResult> => {
+  public openExistingDirs = async (
+    path: readonly string[]
+  ): Promise<OpenExistingResult> => {
     let dir = await this.root()
     const existing: string[] = []
     const missing: string[] = []
 
-    for (const segment of path) {
+    for (const segment of path  ) {
       try {
         dir = await dir.getDirectoryHandle(segment, { create: false })
         existing.push(segment)
       } catch {
         missing.push(segment)
+        break
       }
-      if (missing.length) break
     }
 
     return { dir, existing, missing }
-  }
-
-  public writeFile = async (dir: FileSystemDirectoryHandle, name: string, data: Blob | string): Promise<void> => {
-    const fh = await dir.getFileHandle(name, { create: true })
-    const w = await fh.createWritable()
-    await w.write(data)
-    await w.close()
-  }
-
-  public deleteEntry = async (dir: FileSystemDirectoryHandle, name: string, recursive = false): Promise<void> => {
-    await dir.removeEntry(name, { recursive })
   }
 }

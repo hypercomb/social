@@ -9,6 +9,7 @@ import { MatTableModule } from '@angular/material/table'
 import { Subscription } from 'rxjs'
 import { DebugService } from '../../core/debug-service'
 import { hypercomb } from '../../hypercomb'
+import { OpfsManager } from '../../core/opfs.manager'
 
 interface FileEntry {
   name: string
@@ -32,6 +33,7 @@ export class OpfsExplorerComponent implements OnInit, OnDestroy {
   private readonly route = inject(ActivatedRoute)
   private readonly debug = inject(DebugService)
   private readonly processor = inject(hypercomb)
+  private readonly opfs = inject(OpfsManager)
 
   // ─────────────────────────────────────────────
   // reactive state
@@ -50,7 +52,8 @@ export class OpfsExplorerComponent implements OnInit, OnDestroy {
   // ─────────────────────────────────────────────
 
   public ngOnInit(): void {
-    this.sub = this.route.url.subscribe(segments => {
+
+    this.sub = this.route.url.subscribe( segments => {
       // derive directly from the actual browser URL
       const path = '/' + segments.map(s => s.path).filter(Boolean).join('/')
       const lineage = path.split('/').filter(Boolean)
@@ -60,7 +63,7 @@ export class OpfsExplorerComponent implements OnInit, OnDestroy {
       this.lineage.set(lineage)
 
       // sync filesystem view
-      this.syncFromLineage(lineage).catch(err =>
+       this.syncFromLineage(lineage).catch(err =>
         this.debug.error('opfs-explorer', 'sync failed', err)
       )
     })
