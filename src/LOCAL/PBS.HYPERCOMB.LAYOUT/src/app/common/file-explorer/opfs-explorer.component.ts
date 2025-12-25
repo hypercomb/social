@@ -1,11 +1,12 @@
 // src/app/common/file-explorer/opfs-explorer.component.ts
 
-import { Component, signal, OnDestroy } from '@angular/core'
 import { CommonModule } from '@angular/common'
-import { MatIconModule } from '@angular/material/icon'
+import { Component, OnDestroy, inject, signal } from '@angular/core'
 import { MatButtonModule } from '@angular/material/button'
+import { MatIconModule } from '@angular/material/icon'
 import { MatTableModule } from '@angular/material/table'
 import { hypercomb } from '../../hypercomb'
+import { OpfsManager } from '../../core/opfs.manager'
 
 interface FileEntry {
   name: string
@@ -25,36 +26,35 @@ export class OpfsExplorerComponent extends hypercomb implements OnDestroy {
   public readonly entries = signal<FileEntry[]>([])
   public readonly directory = signal<string>('/')
 
+  private readonly opfs = inject(OpfsManager)
+  private readonly rootPromise = this.opfs.root()
+
   private currentDir?: FileSystemDirectoryHandle
 
-  private readonly onSynchronize = (): void => {
-    this.project().catch(console.error)
-  }
+  // stable handler refs so removeeventlistener works
+  private readonly onSynchronize = (): void => { void this.project() }
+  private readonly onPopState = (): void => { void this.project() }
 
   constructor() {
     super()
-    
+
     // initial projection
-    this.project().catch(console.error)
+    void this.project()
 
     // listen for the single sync wave
     window.addEventListener('synchronize', this.onSynchronize)
+    window.addEventListener('popstate', this.onPopState)
   }
 
   private readonly project = async (): Promise<void> => {
+    // requested lineage from url
     const lineage = window.location.pathname.split('/').filter(Boolean)
     this.directory.set('/' + lineage.join('/'))
 
-    const opfsRoot = await navigator.storage.getDirectory()
+    const opfsRoot = await this.rootPromise
 
-    const originKey =
-      (window.location.host || 'origin')
-        .replace(/[^a-z0-9._-]/gi, '_')
-
-    const originDir =
-      await opfsRoot.getDirectoryHandle(originKey, { create: true })
-
-    const dir = await this.openDeepestExisting(originDir, lineage)
+    // open deepest existing dir so explorer never throws on missing segments
+    const dir = await this.openDeepestExisting(opfsRoot, lineage)
     this.currentDir = dir
 
     const list: FileEntry[] = []
@@ -75,13 +75,19 @@ export class OpfsExplorerComponent extends hypercomb implements OnDestroy {
     lineage: readonly string[]
   ): Promise<FileSystemDirectoryHandle> => {
     let dir = root
+
     for (const seg of lineage) {
+      // walk until the first missing segment, then stop at the deepest existing folder
       try {
         dir = await dir.getDirectoryHandle(seg, { create: false })
-      } catch {
-        break
+      } catch (err) {
+        // stop only on notfound; rethrow unexpected errors
+        const name = (err as DOMException | undefined)?.name
+        if (name === 'NotFoundError') break
+        throw err
       }
     }
+
     return dir
   }
 
@@ -97,7 +103,8 @@ export class OpfsExplorerComponent extends hypercomb implements OnDestroy {
         recursive: entry.kind === 'directory'
       })
     } catch (err) {
-      if ((err as DOMException)?.name !== 'NotFoundError') throw err
+      // ignore if it was already deleted elsewhere
+      if ((err as DOMException | undefined)?.name !== 'NotFoundError') throw err
     }
 
     // re-project after mutation
@@ -106,5 +113,6 @@ export class OpfsExplorerComponent extends hypercomb implements OnDestroy {
 
   public ngOnDestroy(): void {
     window.removeEventListener('synchronize', this.onSynchronize)
+    window.removeEventListener('popstate', this.onPopState)
   }
 }

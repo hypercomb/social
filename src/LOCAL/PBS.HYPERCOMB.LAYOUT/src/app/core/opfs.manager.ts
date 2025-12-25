@@ -1,56 +1,42 @@
-// src/app/core/opfs.manager.ts
-
 import { Injectable } from '@angular/core'
-
-export interface OpenExistingResult {
-  readonly dir: FileSystemDirectoryHandle
-  readonly existing: string[]
-  readonly missing: string[]
-}
+import { Action, ActionManager } from './action-manager'
 
 @Injectable({ providedIn: 'root' })
-export class OpfsManager  {
+export class OpfsManager implements ActionManager {
 
   public root = async (): Promise<FileSystemDirectoryHandle> => {
     return navigator.storage.getDirectory()
   }
 
-  // deterministic folder name (so localhost:4200 becomes localhost_4200)
-  public originKey = (): string => {
-    const host = window.location.host || 'origin'
-    return host.replace(/[^a-z0-9._-]/gi, '_')
-  }
-
-  // origin folder inside opfs root (your explorer can safely use this)
-  public originDir = async (): Promise<FileSystemDirectoryHandle> => {
-    const root = await this.root()
-    return root.getDirectoryHandle(this.originKey(), { create: true })
-  }
-
-  // ... unchanged: ensureDirs/openExistingDirs still behave exactly as before
   public ensureDirs = async (path: readonly string[]): Promise<FileSystemDirectoryHandle> => {
     let dir = await this.root()
-    for (const segment of path) {
-      dir = await dir.getDirectoryHandle(segment, { create: true })
-    }
+    for (const segment of path) dir = await dir.getDirectoryHandle(segment, { create: true })
     return dir
   }
 
-  public openExistingDirs = async (path: readonly string[]): Promise<OpenExistingResult> => {
+  public find = async (_name: string): Promise<readonly Action[]> => {
+    const lineage = window.location.pathname.split('/').filter(Boolean)
+    let dir = await this.root()
+    for (const seg of lineage) {
+      try { dir = await dir.getDirectoryHandle(seg, { create: false }) }
+      catch { return [] }
+    }
+    const actions: Action[] = []
+    for await (const [name, handle] of dir.entries()) {
+      if (handle.kind !== 'file') continue
+      actions.push({ name, run: async () => {} })
+    }
+    return actions
+  }
+
+  public openExistingDirs = async (path: readonly string[]) => {
     let dir = await this.root()
     const existing: string[] = []
     const missing: string[] = []
-
     for (const segment of path) {
-      try {
-        dir = await dir.getDirectoryHandle(segment, { create: false })
-        existing.push(segment)
-      } catch {
-        missing.push(segment)
-        break
-      }
+      try { dir = await dir.getDirectoryHandle(segment, { create: false }); existing.push(segment) }
+      catch { missing.push(segment); break }
     }
-
     return { dir, existing, missing }
   }
 }

@@ -2,11 +2,16 @@ import { ApplicationConfig, provideBrowserGlobalErrorListeners, provideZoneChang
 import { provideRouter } from '@angular/router';
 
 import { routes } from './app.routes';
+import { OpfsManager } from './core/opfs.manager';
+import { ACTION_MANAGER } from './core/action-manager';
 
 export const appConfig: ApplicationConfig = {
   providers: [
+
     provideBrowserGlobalErrorListeners(),
     provideZoneChangeDetection({ eventCoalescing: true }),
-    provideRouter(routes)
+    provideRouter(routes),
+    // action discovery seam
+    { provide: ACTION_MANAGER, useClass: OpfsManager }
   ]
 };

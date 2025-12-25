@@ -19,8 +19,8 @@ export class App extends hypercomb {
   public showHeader = true
   public showFooter = false
 
-  // 🔑 force eager construction
-  private readonly _sync = inject(synchronizer)
+  // force eager construction
+  private readonly sync = inject(synchronizer)
 
   constructor() {
     super()
@@ -31,15 +31,23 @@ export class App extends hypercomb {
       }
     })
 
+    // replay url once, in order
+    this.bootstrapFromUrl().catch(console.error)
+  }
+
+  private readonly bootstrapFromUrl = async (): Promise<void> => {
     const original = window.location.pathname
     const segs = original.split('/').filter(Boolean)
     const state = window.history.state as any
 
-    if (segs.length && state?.__hc !== 1) {
-      window.history.replaceState({ __hc: 1, i: 0 }, '', '/')
-      for (const seg of segs) {
-        this.act(seg).catch(console.error)
-      }
+    if (!segs.length) return
+    if (state?.__hc === 1) return
+
+    window.history.replaceState({ __hc: 1, i: 0 }, '', '/')
+
+    // critical: await, so / -> /jaime -> /jaime/weise (no races)
+    for (const seg of segs) {
+      await this.act(seg)
     }
   }
 }
