@@ -16,7 +16,7 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit {
   public commit = async (): Promise<void> => {
     const v = this.input.nativeElement.value.trim()
     if (!v) return
-    await this.write(v)
+    await this.act(v)
     this.input.nativeElement.value = ''
   }
 }

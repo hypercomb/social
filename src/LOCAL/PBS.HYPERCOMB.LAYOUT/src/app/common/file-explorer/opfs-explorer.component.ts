@@ -1,15 +1,11 @@
 // src/app/common/file-explorer/opfs-explorer.component.ts
 
-import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core'
+import { Component, signal, OnDestroy } from '@angular/core'
 import { CommonModule } from '@angular/common'
-import { ActivatedRoute } from '@angular/router'
-import { MatButtonModule } from '@angular/material/button'
 import { MatIconModule } from '@angular/material/icon'
+import { MatButtonModule } from '@angular/material/button'
 import { MatTableModule } from '@angular/material/table'
-import { Subscription } from 'rxjs'
-import { DebugService } from '../../core/debug-service'
 import { hypercomb } from '../../hypercomb'
-import { OpfsManager } from '../../core/opfs.manager'
 
 interface FileEntry {
   name: string
@@ -24,78 +20,44 @@ interface FileEntry {
   templateUrl: './opfs-explorer.component.html',
   styleUrls: ['./opfs-explorer.component.scss']
 })
-export class OpfsExplorerComponent implements OnInit, OnDestroy {
-
-  // ─────────────────────────────────────────────
-  // dependencies
-  // ─────────────────────────────────────────────
-
-  private readonly route = inject(ActivatedRoute)
-  private readonly debug = inject(DebugService)
-  private readonly processor = inject(hypercomb)
-  private readonly opfs = inject(OpfsManager)
-
-  // ─────────────────────────────────────────────
-  // reactive state
-  // ─────────────────────────────────────────────
+export class OpfsExplorerComponent extends hypercomb implements OnDestroy {
 
   public readonly entries = signal<FileEntry[]>([])
-  public readonly previewUrl = signal<string | null>(null)
-  public readonly lineage = signal<string[]>([])
-  public readonly path = signal<string>('')
+  public readonly directory = signal<string>('/')
 
   private currentDir?: FileSystemDirectoryHandle
-  private sub?: Subscription
 
-  // ─────────────────────────────────────────────
-  // lifecycle
-  // ─────────────────────────────────────────────
-
-  public ngOnInit(): void {
-
-    this.sub = this.route.url.subscribe( segments => {
-      // derive directly from the actual browser URL
-      const path = '/' + segments.map(s => s.path).filter(Boolean).join('/')
-      const lineage = path.split('/').filter(Boolean)
-
-      // update signals
-      this.path.set(path)
-      this.lineage.set(lineage)
-
-      // sync filesystem view
-       this.syncFromLineage(lineage).catch(err =>
-        this.debug.error('opfs-explorer', 'sync failed', err)
-      )
-    })
+  private readonly onSynchronize = (): void => {
+    this.project().catch(console.error)
   }
 
-  public ngOnDestroy(): void {
-    this.sub?.unsubscribe()
-    this.closePreview()
+  constructor() {
+    super()
+    
+    // initial projection
+    this.project().catch(console.error)
+
+    // listen for the single sync wave
+    window.addEventListener('synchronize', this.onSynchronize)
   }
 
-  // ─────────────────────────────────────────────
-  // filesystem sync
-  // ─────────────────────────────────────────────
+  private readonly project = async (): Promise<void> => {
+    const lineage = window.location.pathname.split('/').filter(Boolean)
+    this.directory.set('/' + lineage.join('/'))
 
-  private async syncFromLineage(lineage: string[]): Promise<void> {
-    let dir = await navigator.storage.getDirectory()
+    const opfsRoot = await navigator.storage.getDirectory()
 
-    for (const seg of lineage) {
-      try {
-        dir = await dir.getDirectoryHandle(seg, { create: false })
-      } catch {
-        break
-      }
-    }
+    const originKey =
+      (window.location.host || 'origin')
+        .replace(/[^a-z0-9._-]/gi, '_')
 
+    const originDir =
+      await opfsRoot.getDirectoryHandle(originKey, { create: true })
+
+    const dir = await this.openDeepestExisting(originDir, lineage)
     this.currentDir = dir
-    await this.loadDirectory(dir)
-  }
 
-  private async loadDirectory(dir: FileSystemDirectoryHandle): Promise<void> {
     const list: FileEntry[] = []
-
     for await (const [name, handle] of dir.entries()) {
       list.push({
         name,
@@ -108,16 +70,25 @@ export class OpfsExplorerComponent implements OnInit, OnDestroy {
     this.entries.set(list)
   }
 
-  // ─────────────────────────────────────────────
-  // actions
-  // ─────────────────────────────────────────────
-
-  public async open(entry: FileEntry): Promise<void> {
-    if (entry.kind !== 'directory') return
-    await this.processor.write(entry.name)
+  private readonly openDeepestExisting = async (
+    root: FileSystemDirectoryHandle,
+    lineage: readonly string[]
+  ): Promise<FileSystemDirectoryHandle> => {
+    let dir = root
+    for (const seg of lineage) {
+      try {
+        dir = await dir.getDirectoryHandle(seg, { create: false })
+      } catch {
+        break
+      }
+    }
+    return dir
   }
 
-  public async delete(entry: FileEntry, ev: MouseEvent): Promise<void> {
+  public readonly delete = async (
+    entry: FileEntry,
+    ev: MouseEvent
+  ): Promise<void> => {
     ev.stopPropagation()
     if (!this.currentDir) return
 
@@ -125,31 +96,15 @@ export class OpfsExplorerComponent implements OnInit, OnDestroy {
       await this.currentDir.removeEntry(entry.name, {
         recursive: entry.kind === 'directory'
       })
-      await this.loadDirectory(this.currentDir)
     } catch (err) {
-      this.debug.error('opfs-explorer', 'delete failed', err)
+      if ((err as DOMException)?.name !== 'NotFoundError') throw err
     }
+
+    // re-project after mutation
+    await this.project()
   }
 
-  public async openPreview(entry: FileEntry): Promise<void> {
-    if (entry.kind !== 'file') return
-
-    try {
-      const existing = this.previewUrl()
-      if (existing) URL.revokeObjectURL(existing)
-
-      const fh = entry.handle as FileSystemFileHandle
-      const file = await fh.getFile()
-      this.previewUrl.set(URL.createObjectURL(file))
-    } catch (err) {
-      this.debug.error('opfs-explorer', 'preview failed', err)
-    }
-  }
-
-  public closePreview(): void {
-    const url = this.previewUrl()
-    if (url) URL.revokeObjectURL(url)
-    this.previewUrl.set(null)
+  public ngOnDestroy(): void {
+    window.removeEventListener('synchronize', this.onSynchronize)
   }
 }
-  

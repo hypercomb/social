@@ -7,8 +7,9 @@
   </h3>
 
   <div class="toolbar">
-    <span class="path">{{ path() }}</span>
+    <span class="path">{{ directory() }}</span>
   </div>
+
 
   <div class="table-container">
     <table mat-table [dataSource]="entries()" class="mat-elevation-z2 opfs-table">
@@ -35,12 +36,7 @@
       <ng-container matColumnDef="delete">
         <th mat-header-cell *matHeaderCellDef></th>
         <td mat-cell *matCellDef="let e" class="delete-cell">
-          <button
-            mat-icon-button
-            color="warn"
-            (click)="delete(e, $event)"
-            aria-label="delete"
-          >
+          <button mat-icon-button color="warn" (click)="delete(e, $event)" aria-label="delete">
             <mat-icon>delete</mat-icon>
           </button>
         </td>
@@ -48,12 +44,7 @@
 
       <tr mat-header-row *matHeaderRowDef="['icon', 'name', 'delete']"></tr>
 
-      <tr
-        mat-row
-        *matRowDef="let row; columns: ['icon', 'name', 'delete']"
-        class="data-row"
-        (click)="row.kind === 'directory' ? open(row) : openPreview(row)"
-      ></tr>
+      <tr mat-row *matRowDef="let row; columns: ['icon', 'name', 'delete']" class="data-row"></tr>
 
     </table>
   </div>

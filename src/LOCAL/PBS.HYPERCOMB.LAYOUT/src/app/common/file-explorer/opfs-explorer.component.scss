@@ -70,37 +70,14 @@
     text-overflow: ellipsis;
   }
 
-  .preview-cell {
-    width: 56px;
-    text-align: right;
-  }
-
   .data-row {
-    cursor: pointer;
+    cursor: default;
     transition: background 120ms ease;
 
     &:hover {
       background: rgba(0, 0, 0, 0.04);
     }
   }
-}
-
-.preview-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.75);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 10000;
-  cursor: zoom-out;
-}
-
-.preview-image {
-  max-width: 85vw;
-  max-height: 85vh;
-  border-radius: 8px;
-  object-fit: contain;
 }
 
 .delete-cell {

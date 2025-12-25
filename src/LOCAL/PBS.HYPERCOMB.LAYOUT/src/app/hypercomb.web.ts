@@ -2,6 +2,6 @@
 import { Injectable } from "@angular/core"
 @Injectable()
 export abstract class web {
-  public abstract write(text: string): Promise<void>
+  public abstract act(text: string): Promise<void>
 }
   
