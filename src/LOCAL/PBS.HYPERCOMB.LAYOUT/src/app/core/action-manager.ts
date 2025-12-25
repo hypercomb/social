@@ -11,5 +11,4 @@ export interface ActionManager {
   find(name:string): Promise<readonly Action[]>
 }
 
-export const ACTION_MANAGER =
-  new InjectionToken<ActionManager>('ACTION_MANAGER')
+export const ACTION_MANAGER = new InjectionToken<ActionManager>('ACTION_MANAGER')

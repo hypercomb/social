@@ -9,9 +9,7 @@ export abstract class web implements OnDestroy {
     window.addEventListener('popstate', this.onPopState)
   }
 
-  protected onPopState = (): void => {
-    // subclasses may override
-}
+  protected onPopState = (): void => {/* subclasses may override */ }
 
   public ngOnDestroy(): void {
     window.removeEventListener('popstate', this.onPopState)

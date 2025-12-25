@@ -7,6 +7,7 @@ import { ACTION_MANAGER } from './core/action-manager'
 @Injectable({ providedIn: 'root' })
 export class hypercomb extends web {
   private readonly manager = inject(ACTION_MANAGER)
+  public readonly active = (): string => this.segments()[this.index] ?? ''
   public readonly path = (): string => window.location.pathname
   public readonly segments = (): readonly string[] => this.path().split('/').filter(Boolean)
   public readonly depth = (): number => this.segments().length
@@ -16,9 +17,7 @@ export class hypercomb extends web {
     const clean = text.replace(/[\/\\?:]/g, ' ').replace(/\s+/g, ' ').trim()
     if (!clean) return
 
-    const next =
-      this.path() === '/' ? `/${clean}` : `${this.path()}/${clean}`
-
+    const next = this.path() === '/' ? `/${clean}` : `${this.path()}/${clean}`
     const actions = await this.manager.find(clean)
 
     this.index = actions.length ? this.index + 1 : this.index
@@ -32,7 +31,5 @@ export class hypercomb extends web {
 
     window.dispatchEvent(new Event('synchronize'))
   }
-
-
 }
 
