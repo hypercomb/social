@@ -1,7 +1,8 @@
 // src/app/history-component/history.ts
 
 import { Component } from '@angular/core'
-import { hypercomb } from '../../hypercomb'
+import { hypercomb } from '@hypercomb/core'
+
 
 @Component({
   selector: 'hc-history',

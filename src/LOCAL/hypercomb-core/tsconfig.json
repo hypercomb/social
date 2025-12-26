@@ -1,14 +1,14 @@
 {
   "compilerOptions": {
-    "target": "ES2022",
-    "module": "ES2022",
-    "moduleResolution": "Bundler",
-
-    "rootDir": "src",
-    "outDir": "dist",
+    "target": "es2022",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
 
     "declaration": true,
-    "declarationMap": false,
+    "declarationMap": true,
+
+    "outDir": "dist",
+    "rootDir": "src",
 
     "strict": true,
     "skipLibCheck": true

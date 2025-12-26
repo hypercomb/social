@@ -1,6 +1,6 @@
 // src/app/core/action-manager.ts
 
-import { InjectionToken } from '@angular/core'
+import { InjectionToken } from "@angular/core"
 
 export interface Action {
   readonly name: string

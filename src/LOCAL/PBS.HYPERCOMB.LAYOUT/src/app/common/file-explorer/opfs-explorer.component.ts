@@ -5,8 +5,8 @@ import { Component, inject, OnDestroy, signal } from '@angular/core'
 import { MatButtonModule } from '@angular/material/button'
 import { MatIconModule } from '@angular/material/icon'
 import { MatTableModule } from '@angular/material/table'
-import { hypercomb } from '../../hypercomb'
 import { OpfsManager } from '../../core/opfs.manager'
+import { hypercomb } from '@hypercomb/core'
 
 interface FileEntry {
   name: string

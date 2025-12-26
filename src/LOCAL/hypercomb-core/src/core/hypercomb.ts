@@ -1,8 +1,9 @@
 // src/app/hypercomb.ts
 
 import { inject, Injectable, OnDestroy, signal } from '@angular/core'
-import { web } from './hypercomb.web'
-import { ACTION_MANAGER } from './core/action-manager'
+import { web } from './hypercomb.web.js'
+import { ACTION_MANAGER } from './action-manager.js'
+
 
 export class hypercomb extends web {
 
@@ -29,6 +30,5 @@ export class hypercomb extends web {
 
     window.dispatchEvent(new Event('synchronize'))
   }
-
 }
 

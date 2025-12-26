@@ -1,6 +1,6 @@
-import { Effect } from './effect'
-import { GrammarHint } from './grammar-hint'
-import { Source } from './source'
+import { Effect } from './effect.js'
+import { GrammarHint } from './grammar-hint.js'
+import { Source } from './source.js'
 
 export interface Intent {
   // stable identity
@@ -19,8 +19,3 @@ export interface Intent {
 }
 
 
-export * from './effect'
-export * from './grammar-hint'
-export * from './source'
-export * from './intent'
-export * from './fixtures/sample-code'

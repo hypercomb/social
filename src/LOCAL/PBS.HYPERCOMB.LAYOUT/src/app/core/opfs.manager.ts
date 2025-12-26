@@ -1,5 +1,6 @@
 import { Injectable } from '@angular/core'
-import { Action, ActionManager } from './action-manager'
+import { Action, ActionManager } from '@hypercomb/core'
+
 
 @Injectable({ providedIn: 'root' })
 export class OpfsManager implements ActionManager {

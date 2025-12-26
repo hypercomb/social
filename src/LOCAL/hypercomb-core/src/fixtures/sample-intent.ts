@@ -1,4 +1,4 @@
-import { Intent } from '../intent'
+import { Intent } from "../intent.js";
 
 export const SAMPLE_INTENT: Intent = {
   signature: 'intent.navigate.create',
@@ -23,7 +23,6 @@ export const SAMPLE_INTENT: Intent = {
       meaning: 'Open today’s notes, creating them if needed'
     }
   ],
-
   sources: [
     {
       label: 'Hypercomb Core',

@@ -4,8 +4,8 @@ import { Component, inject, signal } from '@angular/core'
 import { RouterOutlet } from '@angular/router'
 import { Header } from "./header/header"
 import { Footer } from "./footer/footer"
-import { hypercomb } from './hypercomb'
 import { synchronizer } from './core/synchronizer'
+import { hypercomb } from '@hypercomb/core'
 
 @Component({
   selector: 'app-root',

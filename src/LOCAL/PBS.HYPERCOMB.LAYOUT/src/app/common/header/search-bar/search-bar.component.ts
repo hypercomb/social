@@ -1,5 +1,6 @@
 import { AfterViewInit, Component, ElementRef, ViewChild } from '@angular/core'
-import { hypercomb } from '../../../hypercomb'
+import { hypercomb } from '@hypercomb/core'
+
 
 @Component({
   selector: 'hc-search-bar',

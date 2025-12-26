@@ -1,7 +1,8 @@
+import { hypercomb } from '@hypercomb/core';
 // src/app/core/synchronizer.ts
 
 import { Injectable, OnDestroy } from '@angular/core'
-import { hypercomb } from '../hypercomb'
+
 
 @Injectable()
 export class synchronizer extends hypercomb implements OnDestroy {
