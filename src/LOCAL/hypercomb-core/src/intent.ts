@@ -1,21 +1,34 @@
-import { Effect } from './effect.js'
-import { GrammarHint } from './grammar-hint.js'
-import { Source } from './source.js'
+// @hypercomb/core/src/intents/intent.ts
+
+import { Effect } from "./effect.js"
 
 export interface Intent {
-  // stable identity
-  readonly signature: string
+  // identity
+  signature: string
 
-  // human-facing
-  readonly title: string
-  readonly summary?: string
+  // presentation
+  title: string
+  summary?: string
+  description?: string
 
-  // informational only
-  readonly effects?: readonly Effect[]
-  readonly grammar?: readonly GrammarHint[]
+  // classification
+  scope?: 'global' | 'contextual'
+  implicit?: boolean
 
-  // where code may be obtained
-  readonly sources: readonly Source[]
+  // execution (optional)
+  effects?: Effect[]
+
+  // language surface
+  grammar?: {
+    example: string
+    meaning?: string
+  }[]
+
+  // discovery / documentation
+  links?: {
+    label: string
+    url: string
+    trust?: 'official' | 'community'
+    purpose?: string
+  }[]
 }
-
-
