@@ -1,8 +1,10 @@
+<!-- src/app/common/header/search-bar/search-bar.component.html -->
 <input
   #input
   type="text"
   autocomplete="off"
   spellcheck="false"
   aria-label="intention input"
-  (keydown.enter)="commit()"
+  (keydown)="onKeyDown($event)"
+  placeholder="Type # and press Enter to open the Portal"
 />

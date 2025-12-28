@@ -1,3 +1,4 @@
+/* src/app/common/header/search-bar/search-bar.component.scss */
 :host {
   display: block;
   width: 100%;
@@ -13,6 +14,16 @@ input {
   outline: none;
 
   color: inherit;
-  font-size: 14px;
+  font-size: 1.2rem;
   caret-color: currentColor;
+
+  &::placeholder {
+    color: currentColor;
+    opacity: 0.55;
+  }
+}
+
+input.armed {
+  background: rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid currentColor;
 }
