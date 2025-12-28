@@ -1,0 +1,14 @@
+<!-- src/app/code-viewer/code-viewer.component.html -->
+<div class="code-viewer">
+  <div class="toolbar">
+    <div class="label">Code</div>
+
+    <button class="copy" type="button" (click)="copy()">
+      {{ copied() ? 'COPIED' : 'COPY' }}
+    </button>
+  </div>
+
+  <div class="scroller" role="region" aria-label="code payload">
+    <pre class="pre"><code class="code">{{ normalized() }}</code></pre>
+  </div>
+</div>

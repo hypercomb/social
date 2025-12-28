@@ -1,0 +1,66 @@
+<!-- src/app/intent-inspector/tabs/intent-confirm.component.html -->
+<div class="page-grid">
+  <div class="viewer">
+    <h2 class="viewer-title">Are you sure?</h2>
+    <p class="viewer-subtitle">running code can have real risks.</p>
+
+    <h3 class="section-title">COMMON RISKS</h3>
+    <ul class="grammar">
+      <li>network calls, hidden telemetry, data exfiltration</li>
+      <li>token leakage, clipboard reads, storage scraping</li>
+      <li>infinite loops, cpu abuse, performance sabotage</li>
+      <li>obfuscation, staged payload downloads</li>
+    </ul>
+
+    <p class="helper-note">
+      use the bottom button to proceed. it requires two acknowledgements before confirm appears.
+    </p>
+  </div>
+
+  <div class="viewer">
+    <h3 class="section-title">AI & scanning links</h3>
+    <ul class="links">
+      <li><a href="https://chat.openai.com" target="_blank" rel="noopener noreferrer">ChatGPT check</a></li>
+      <li><a href="https://claude.ai" target="_blank" rel="noopener noreferrer">Claude check</a></li>
+      <li><a href="https://snyk.io" target="_blank" rel="noopener noreferrer">Snyk scan</a></li>
+      <li><a href="https://semgrep.dev" target="_blank" rel="noopener noreferrer">Semgrep rules</a></li>
+      <li><a href="https://osv.dev" target="_blank" rel="noopener noreferrer">OSV dependency audit</a></li>
+    </ul>
+
+    <h3 class="section-title">API vetting</h3>
+
+    <label class="field">
+      <div class="field-label">endpoint</div>
+      <input
+        class="field-input"
+        type="text"
+        [value]="vetEndpoint()"
+        (input)="setVetEndpoint(($any($event.target)).value)"
+        placeholder="https://vet.example.com/api"
+        autocomplete="off"
+        spellcheck="false"
+      />
+    </label>
+
+    <label class="field">
+      <div class="field-label">api key</div>
+      <input
+        class="field-input"
+        type="password"
+        [value]="vetApiKey()"
+        (input)="setVetApiKey(($any($event.target)).value)"
+        placeholder="optional"
+        autocomplete="off"
+        spellcheck="false"
+      />
+    </label>
+
+    <button class="vet-button" type="button" (click)="runVetCheck()" [disabled]="isVetting()">
+      {{ isVetting() ? 'CHECKING…' : 'RUN VET CHECK' }}
+    </button>
+
+    @if (vetResult(); as r) {
+      <pre class="result-block">{{ r }}</pre>
+    }
+  </div>
+</div>

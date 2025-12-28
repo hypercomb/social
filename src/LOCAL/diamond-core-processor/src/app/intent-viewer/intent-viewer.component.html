@@ -1,0 +1,68 @@
+<div class="intent-viewer">
+  <h2>{{ intent().title }}</h2>
+
+  @if (intent().summary) {
+    <p class="summary">
+      {{ intent().summary }}
+    </p>
+  }
+
+  @if (intent().description) {
+    <section>
+      <h3>Description</h3>
+      <p>{{ intent().description }}</p>
+    </section>
+  }
+
+  <section>
+    <h3>Signature</h3>
+    <code>{{ intent().signature }}</code>
+  </section>
+
+  @if (intent().effects?.length) {
+    <section>
+      <h3>Effects</h3>
+      <ul>
+        @for (effect of intent().effects; track effect) {
+          <li>{{ effect }}</li>
+        }
+      </ul>
+    </section>
+  }
+
+  @if (intent().grammar?.length) {
+    <section>
+      <h3>Grammar</h3>
+      <ul>
+        @for (g of intent().grammar; track g.example) {
+          <li>
+            <code>{{ g.example }}</code>
+            @if (g.meaning) {
+              <span> — {{ g.meaning }}</span>
+            }
+          </li>
+        }
+      </ul>
+    </section>
+  }
+
+  @if (intent().links?.length) {
+    <section>
+      <h3>Links</h3>
+      <ul>
+        @for (l of intent().links; track l.url) {
+          <li>
+            <strong>{{ l.label }}</strong>
+            @if (l.trust) {
+              <span> ({{ l.trust }})</span>
+            }
+            <br />
+            <a [href]="l.url" target="_blank" rel="noopener">
+              {{ l.url }}
+            </a>
+          </li>
+        }
+      </ul>
+    </section>
+  }
+</div>

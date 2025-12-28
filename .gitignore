@@ -6,7 +6,8 @@
 /e2e/test-output/
 /.angular/
 .angular/
-
+.vscode/
+dist/
 # Node modules and dependency files
 /node_modules/
 /yarn.lock

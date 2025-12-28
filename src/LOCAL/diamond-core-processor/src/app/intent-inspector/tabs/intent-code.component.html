@@ -1,0 +1,18 @@
+<!-- src/app/intent-inspector/tabs/intent-code.component.html -->
+<div class="page-grid">
+  <div class="viewer">
+    <h3 class="section-title">This code will run when you confirm</h3>
+    <app-code-viewer [code]="code()"></app-code-viewer>
+  </div>
+
+  <div class="viewer">
+    <h3 class="section-title">Quick safety checks</h3>
+    <ul class="grammar">
+      <li>only run code from someone you trust (or that’s verified)</li>
+      <li>be wary if it looks hidden or scrambled</li>
+      <li>malicious code can change your clipboard, browser storage, cookies, or login keys</li>
+      <li>beware of code that can send data out or make live connections</li>
+      <li>if it feels off it probably is -- cancel and ask someone to review it before you proceed</li>
+    </ul>
+  </div>
+</div>

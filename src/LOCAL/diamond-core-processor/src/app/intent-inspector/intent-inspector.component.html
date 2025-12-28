@@ -1,0 +1,32 @@
+<!-- src/app/intent-inspector/intent-inspector.component.html -->
+<div class="outer-container">
+  <div class="main-container">
+    <mat-tab-group class="content-tabs" animationDuration="0ms" [(selectedIndex)]="selectedIndex">
+      <mat-tab label="INTENT"></mat-tab>
+      <mat-tab label="CODE"></mat-tab>
+      <mat-tab label="VERIFY"></mat-tab>
+    </mat-tab-group>
+
+    <div class="page-content">
+      @switch (activeTab()) {
+        @case (0) {
+          <hc-intent-content [intent]="intent()"></hc-intent-content>
+        }
+        @case (1) {
+          <hc-intent-code [intent]="intent()" [code]="code()"></hc-intent-code>
+        }
+        @case (2) {
+          <hc-intent-confirm [intent]="intent()" [code]="code()"></hc-intent-confirm>
+        }
+      }
+    </div>
+
+    <div class="bottom-buttons">
+      <button class="button primary" type="button" (click)="next()">
+        {{ primaryLabel() }}
+      </button>
+
+      <button class="button secondary" type="button" (click)="cancel()">CANCEL</button>
+    </div>
+  </div>
+</div>
