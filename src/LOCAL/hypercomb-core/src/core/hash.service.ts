@@ -1,4 +1,4 @@
-// src/app/hive/storage/hashing-service.ts
+// src/core/hash.service.ts
 
 import { Injectable } from "@angular/core"
 

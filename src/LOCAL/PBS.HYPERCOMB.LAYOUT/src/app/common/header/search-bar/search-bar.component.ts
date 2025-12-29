@@ -14,22 +14,21 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
   @ViewChild('input', { static: true })
   private readonly input!: ElementRef<HTMLInputElement>
 
-  // todo: replace with manifest/registry lookup
-  public hasActions = false
+  // todo: replace with action registry / manifest lookup
+  private hasActions = false
 
   private initState: InitState = 'locked'
 
   private static readonly INIT_LINE = '# Press Enter to open the Portal'
 
-  private readonly onActionsAvailable = (_e: Event): void => {
-    // when at least one action exists, unlock normal behavior
+  private readonly onActionsAvailable = (): void => {
+    // once at least one action exists, normal behavior starts
     this.hasActions = true
     this.initState = 'unlocked'
     this.clear()
   }
 
   public ngAfterViewInit(): void {
-    // if actions exist, skip the init gate
     if (this.hasActions) this.initState = 'unlocked'
 
     window.addEventListener('actions:available', this.onActionsAvailable)
@@ -44,23 +43,18 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
 
   public onKeyDown = (e: KeyboardEvent): void => {
 
-    // normal mode: let typing happen, but use '#' to start intellisense
+    // unlocked → normal behavior (future: hash triggers intellisense)
     if (this.initState === 'unlocked') {
-      if (this.isHashKey(e)) {
-        // allow the '#' to appear in the input
-        queueMicrotask(() => window.dispatchEvent(new CustomEvent('intellisense:start')))
-        return
-      }
-
       if (e.key === 'Enter') {
         e.preventDefault()
         this.commit().catch(console.error)
       }
 
+      // todo: if (this.isHashKey(e)) { start intellisense }
       return
     }
 
-    // init mode: lock input
+    // locked/armed gate: prevent all typing
     e.preventDefault()
 
     // locked → only '#'
@@ -78,7 +72,8 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
     // armed → only enter / backspace / delete
     if (this.initState === 'armed') {
       if (e.key === 'Enter') {
-        this.openPortal()
+        window.dispatchEvent(new CustomEvent('portal:open'))
+        this.resetInit()
         return
       }
 
@@ -87,7 +82,7 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
         return
       }
 
-      // keep the caret locked at the end
+      // keep caret pinned at the end
       this.placeCaretAtEnd()
     }
   }
@@ -100,43 +95,31 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
     this.input.nativeElement.value = ''
   }
 
-  private openPortal(): void {
-    // do not unlock here. we stay gated until actions:available fires.
-    window.dispatchEvent(new CustomEvent('portal:open'))
-
-    // return to the locked start state so the gate remains active
-    this.resetInit()
-  }
-
-  private resetInit(): void {
+  private resetInit = (): void => {
     this.initState = 'locked'
     this.clear()
   }
 
-  private clear(): void {
+  private clear = (): void => {
     this.input.nativeElement.value = ''
     this.input.nativeElement.classList.remove('armed')
     this.updatePlaceholder()
   }
 
-  private updatePlaceholder(): void {
-    // placeholder only shows when value is empty (locked state)
+  private updatePlaceholder = (): void => {
+    // placeholder is only visible when value is empty
     this.input.nativeElement.placeholder = 'Type # and press Enter to open the Portal'
   }
 
-  private placeCaretAtEnd(): void {
+  private placeCaretAtEnd = (): void => {
     const el = this.input.nativeElement
     const n = el.value.length
     queueMicrotask(() => el.setSelectionRange(n, n))
   }
 
-  private isHashKey(e: KeyboardEvent): boolean {
-    // direct cases
+  private isHashKey = (e: KeyboardEvent): boolean => {
     if (e.key === '#' || e.key === '＃') return true
-
-    // common physical key combo where keydown can report '3' + shift
     if (e.shiftKey && (e.key === '3' || e.code === 'Digit3')) return true
-
     return false
   }
 }

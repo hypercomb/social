@@ -1,0 +1,145 @@
+<!-- src/app/intent-inspector/intent-inspector-pro.component.html -->
+<div class="outer-container">
+  <div class="main-container">
+    <header class="topbar">
+      <div class="title-stack">
+        <div class="intent-title">{{ intent().title }}</div>
+
+        <div class="intent-subtitle">
+          <span class="mono">{{ intent().signature }}</span>
+
+          @if (intent().summary) {
+            <span class="dot">•</span>
+            <span>{{ intent().summary }}</span>
+          }
+        </div>
+      </div>
+
+      <div class="topbar-actions">
+        <button class="ghost" type="button" (click)="copySignature()">
+          {{ signatureCopied() ? 'COPIED' : 'COPY SIGNATURE' }}
+        </button>
+      </div>
+    </header>
+
+    <div class="page-grid">
+      <!-- left: code + intent tabs -->
+      <section class="left">
+        <app-code-viewer [code]="code()"></app-code-viewer>
+
+        <div class="panel">
+          <div class="intent-tabs">
+            <div class="intent-tabbar">
+              <!-- left: static label (not a button) -->
+              <div class="intent-tabbar-left" aria-hidden="true">
+                <div class="intent-label">INTENT</div>
+              </div>
+
+              <!-- right: tabs driven from intent payload -->
+              <div class="intent-tabbar-right" role="tablist" aria-label="intent sections">
+                @for (s of intentSections(); track s.id) {
+                  <button
+                    class="intent-tab"
+                    type="button"
+                    role="tab"
+                    [class.active]="intentTab() === s.id"
+                    [class.empty]="s.isEmpty"
+                    [attr.aria-selected]="intentTab() === s.id"
+                    (click)="setIntentTab(s.id)">
+                    {{ s.label }}
+                  </button>
+                }
+              </div>
+            </div>
+
+            <div class="intent-tabcontent" role="tabpanel">
+              @switch (intentTab()) {
+                @case ('description') {
+                  @if (intent().description) {
+                    <p class="desc">{{ intent().description }}</p>
+                  } @else {
+                    <p class="empty">no description.</p>
+                  }
+                }
+
+                @case ('grammar') {
+                  @if (intent().grammar?.length) {
+                    <ul class="list">
+                      @for (g of intent().grammar; track g.example) {
+                        <li class="li">
+                          <span class="mono">{{ g.example }}</span>
+                          @if (g.meaning) { <span class="dim"> — {{ g.meaning }}</span> }
+                        </li>
+                      }
+                    </ul>
+                  } @else {
+                    <p class="empty">no grammar.</p>
+                  }
+                }
+
+                @case ('links') {
+                  @if (intent().links?.length) {
+                    <ul class="list">
+                      @for (l of intent().links; track l.url) {
+                        <li class="li">
+                          <div class="link-row">
+                            <span class="link-label">{{ l.label }}</span>
+                            @if (l.trust) { <span class="pill">{{ l.trust }}</span> }
+                          </div>
+
+                          <a class="link" [href]="l.url" target="_blank" rel="noopener noreferrer">{{ l.url }}</a>
+                        </li>
+                      }
+                    </ul>
+                  } @else {
+                    <p class="empty">no links.</p>
+                  }
+                }
+              }
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- right: safety + scanning links -->
+      <aside class="right">
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">Quick safety checks</div>
+            <div class="panel-subtitle">if it feels off, cancel</div>
+          </div>
+
+          <ul class="list">
+            <li class="li">only run code from someone you trust (or that’s verified)</li>
+            <li class="li">be wary if it looks hidden, scrambled, or staged</li>
+            <li class="li">malicious code can read storage, cookies, tokens, clipboard</li>
+            <li class="li">beware of live connections, telemetry, or exfiltration</li>
+          </ul>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">AI & scanning links</div>
+            <div class="panel-subtitle">optional external review</div>
+          </div>
+
+          <ul class="links">
+            <li class="li"><a class="link" href="https://chat.openai.com" target="_blank" rel="noopener noreferrer">ChatGPT check</a></li>
+            <li class="li"><a class="link" href="https://claude.ai" target="_blank" rel="noopener noreferrer">Claude check</a></li>
+            <li class="li"><a class="link" href="https://snyk.io" target="_blank" rel="noopener noreferrer">Snyk scan</a></li>
+            <li class="li"><a class="link" href="https://semgrep.dev" target="_blank" rel="noopener noreferrer">Semgrep rules</a></li>
+            <li class="li"><a class="link" href="https://osv.dev" target="_blank" rel="noopener noreferrer">OSV dependency audit</a></li>
+          </ul>
+        </div>
+      </aside>
+    </div>
+
+    <footer class="bottom-buttons">
+      <button class="button primary" type="button" (click)="primary()">
+        {{ primaryLabel() }}
+      </button>
+
+      <button class="button secondary" type="button" (click)="cancel()">CANCEL</button>
+    </footer>
+  </div>
+</div>

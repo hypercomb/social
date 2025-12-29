@@ -1,0 +1,13 @@
+<!-- src/app/common/portal/portal-overlay.component.html -->
+@if (open()) {
+  <div class="backdrop" (click)="close()"></div>
+
+  <div class="panel" role="dialog" aria-label="portal">
+    <iframe
+      class="frame"
+      [src]="src()!"
+      sandbox="allow-scripts allow-forms allow-same-origin"
+      referrerpolicy="no-referrer"
+    ></iframe>
+  </div>
+}
