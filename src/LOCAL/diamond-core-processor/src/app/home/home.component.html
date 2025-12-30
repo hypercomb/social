@@ -1,0 +1,28 @@
+<div class="home">
+  <h1>Diamond Core Processor</h1>
+  <p class="subtitle">Trusted domains</p>
+
+  <div class="domain-input">
+    <input
+      type="text"
+      placeholder="https://example.com"
+      [value]="input()"
+      (input)="input.set($any($event.target).value)"
+      (keydown.enter)="add()"
+    />
+    <button (click)="add()">Add</button>
+  </div>
+
+  @if (domains().length) {
+    <ul class="domain-list">
+      @for (d of domains(); track d) {
+        <li>
+          <span>{{ d }}</span>
+          <button class="remove" (click)="remove(d)">✕</button>
+        </li>
+      }
+    </ul>
+  } @else {
+    <p class="empty">No domains added yet.</p>
+  }
+</div>

@@ -7,4 +7,5 @@ export * from './fixtures/portal-open-intent.js';
 export * from './core/hypercomb.web.js';
 export * from './core/hypercomb.js';
 export * from './core/action-manager.js';
+export * from './core/signature.service.js';
 //# sourceMappingURL=index.d.ts.map
