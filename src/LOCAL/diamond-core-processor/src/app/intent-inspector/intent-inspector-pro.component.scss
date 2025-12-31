@@ -133,30 +133,12 @@
   min-height: 0;
 }
 
-.panel-head {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  margin-bottom: 0.85rem;
-}
-
-.panel > :not(.panel-head) {
-  flex: 1 1 auto;
-  min-height: 0;
-}
-
 .panel-title {
   font-size: 13px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: #777;
-}
-
-.panel-subtitle {
-  font-size: 14px;
-  font-weight: 500;
-  color: #555;
 }
 
 .intent-tabs {
@@ -239,41 +221,10 @@
   padding: 0.9rem 0.25rem 0.25rem 0.25rem;
 }
 
-.intent-meta {
-  margin: 0;
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  column-gap: 1.25rem;
-  row-gap: 0.55rem;
-  font-size: 15px;
-  line-height: 1.55;
-}
-
-.intent-meta dt {
-  color: #888;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-size: 12px;
-}
-
-.intent-meta dd {
-  margin: 0;
-  color: #444;
-  font-weight: 500;
-}
-
 .desc {
   margin: 0;
   color: #555;
   font-size: 16px;
-  line-height: 1.55;
-}
-
-.empty {
-  margin: 0;
-  color: #666;
-  font-size: 14px;
   line-height: 1.55;
 }
 
@@ -283,50 +234,6 @@
   color: #555;
   font-size: 15px;
   line-height: 1.55;
-}
-
-.li {
-  margin: 0.25rem 0;
-}
-
-.link-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.link-label {
-  font-weight: 600;
-  color: #333;
-}
-
-.pill {
-  font-size: 11px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  padding: 0.15rem 0.45rem;
-  border-radius: 999px;
-  background: #f0f0f0;
-  color: #555;
-}
-
-.links {
-  margin: 0;
-  padding-left: 1.1rem;
-  font-size: 15px;
-  line-height: 1.55;
-  color: #555;
-}
-
-.link {
-  color: #0066cc;
-  text-decoration: none;
-  word-break: break-word;
-}
-
-.link:hover {
-  text-decoration: underline;
 }
 
 .mono {
@@ -393,4 +300,77 @@
   border-color: rgba(0, 0, 0, 0.18);
   box-shadow: 0 12px 18px rgba(0, 0, 0, 0.08);
   transform: translateY(-1px);
+}
+
+.editor {
+  border: none;
+  outline: none;
+  background: transparent;
+  width: 100%;
+}
+
+.intent-title.editor {
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.desc.editor {
+  min-height: 140px;
+  resize: vertical;
+}
+
+/* right sidebar tabs */
+.right-tabs {
+  padding: 0.75rem;
+}
+
+.right-tabbar {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  flex: 0 0 auto;
+}
+
+.right-tab {
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: rgba(255, 255, 255, 0.92);
+  padding: 0.45rem 0.6rem;
+  border-radius: 12px;
+  cursor: pointer;
+
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #777;
+}
+
+.right-tab.active {
+  color: #222;
+  background: rgba(0, 0, 0, 0.06);
+  border-color: rgba(0, 0, 0, 0.18);
+}
+
+.right-tabcontent {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding-top: 0.75rem;
+}
+
+.json-pre {
+  margin: 0.75rem 0 0;
+  padding: 0.75rem;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.10);
+  background: rgba(0, 0, 0, 0.03);
+
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+
+  white-space: pre-wrap;
+  word-break: break-word;
 }

@@ -8,3 +8,4 @@ export * from './core/hypercomb.web.js';
 export * from './core/hypercomb.js';
 export * from './core/action-manager.js';
 export * from './core/signature.service.js';
+export * from './dcp-message.js';

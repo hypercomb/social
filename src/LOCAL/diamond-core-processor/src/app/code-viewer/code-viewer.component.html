@@ -9,6 +9,15 @@
   </div>
 
   <div class="scroller" role="region" aria-label="code payload">
-    <pre class="pre"><code class="code">{{ normalized() }}</code></pre>
+    @if (editable()) {
+      <textarea
+        class="code-editor"
+        [value]="normalized()"
+        (input)="onEdit($any($event.target).value)"
+        spellcheck="false">
+      </textarea>
+    } @else {
+      <pre class="pre"><code class="code">{{ normalized() }}</code></pre>
+    }
   </div>
 </div>

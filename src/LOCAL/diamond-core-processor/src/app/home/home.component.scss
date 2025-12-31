@@ -1,3 +1,5 @@
+/* src/app/home/home.component.scss */
+
 .home {
   display: flex;
   flex-direction: column;
@@ -18,7 +20,7 @@
 }
 
 input {
-  width: 260px;
+  width: 32rem;
   padding: 0.5rem 0.6rem;
   font-size: 14px;
 }
@@ -28,11 +30,25 @@ button {
   cursor: pointer;
 }
 
+.primary {
+  height: 44px;
+  padding: 0 1rem;
+  border-radius: 12px;
+  border: 1px solid rgba(0,0,0,0.14);
+  background: rgba(255,255,255,0.92);
+  font-weight: 800;
+}
+
+.primary:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 .domain-list {
   list-style: none;
   padding: 0;
   margin: 0.5rem 0 0;
-  width: 360px;
+  width: 32rem;
 }
 
 .domain-list li {
@@ -57,4 +73,12 @@ button {
 .empty {
   opacity: 0.6;
   font-size: 14px;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.error {
+  color: #b00020;
 }

@@ -1,3 +1,4 @@
+<!-- src/app/home/home.component.html -->
 <div class="home">
   <h1>Diamond Core Processor</h1>
   <p class="subtitle">Trusted domains</p>
@@ -8,8 +9,7 @@
       placeholder="https://example.com"
       [value]="input()"
       (input)="input.set($any($event.target).value)"
-      (keydown.enter)="add()"
-    />
+      (keydown.enter)="add()" />
     <button (click)="add()">Add</button>
   </div>
 
@@ -25,18 +25,20 @@
   } @else {
     <p class="empty">No domains added yet.</p>
   }
+
+  <hr />
+
+  <button class="primary" type="button" [disabled]="busy()" (click)="createModule()">
+    {{ busy() ? 'Creating…' : 'Create new module' }}
+  </button>
+
+  <a href="#" (click)="testPost($event)">test postMessage payload → self</a>
+
+  @if (lastSignature()) {
+    <p class="subtitle mono">last signature: {{ lastSignature() }}</p>
+  }
+
+  @if (error()) {
+    <p class="error">{{ error() }}</p>
+  }
 </div>
-
-<hr />
-
-<a href="#" (click)="testPost($event)">
-  test postMessage payload → self
-</a>
-
-@if (payloadSignature()) {
-  <p class="subtitle">last signature: {{ payloadSignature() }}</p>
-}
-
-@if (error()) {
-  <p class="error">{{ error() }}</p>
-}

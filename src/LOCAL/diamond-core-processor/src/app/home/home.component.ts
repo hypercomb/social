@@ -1,9 +1,11 @@
 // src/app/home/home.component.ts
-import { Component, signal } from '@angular/core'
+import { Component, inject, signal } from '@angular/core'
 import { Router } from '@angular/router'
-import { SignatureService } from '@hypercomb/core'
+import { DraftPayloadCacheService } from '../core/draft-payload-cache.service'
+import { PayloadCanonical } from '../core/payload-canonical'
 
-const STORAGE_KEY = 'dcp.domains'
+const DOMAINS_KEY = 'dcp.domains'
+const LAST_KEY = 'dcp.lastSignature'
 
 @Component({
   selector: 'app-home',
@@ -13,27 +15,24 @@ const STORAGE_KEY = 'dcp.domains'
 })
 export class HomeComponent {
 
-  protected readonly domains = signal<string[]>(this.load())
+  // -----------------------------
+  // event handlers and state
+  // -----------------------------
+  protected readonly domains = signal<string[]>(this.loadDomains())
   protected readonly input = signal('')
 
-  // payload signing
-  protected readonly payloadName = signal('helloworld')
-  protected readonly payloadSignature = signal<string | null>(null)
-  protected readonly error = signal<string | null>(null)
   protected readonly busy = signal(false)
-
-  public constructor(private readonly router: Router) {
-    // one-time dev test: hash helloworld on load
-    // fetch('/payloads/helloworld')
-    //   .then(r => r.arrayBuffer())
-    //   .then(async buffer => {
-    //     const sig = await SignatureService.hash(buffer)
-    //     console.log('HELLO WORLD HASH:', sig)
-    //   })
-  }
+  protected readonly error = signal<string | null>(null)
+  protected readonly lastSignature = signal<string | null>(this.loadLast())
 
   // -----------------------------
-  // domain management
+  // private fields
+  // -----------------------------
+  private readonly router = inject(Router)
+  private readonly cache = inject(DraftPayloadCacheService)
+
+  // -----------------------------
+  // domains
   // -----------------------------
   protected add = (): void => {
     const raw = this.input().trim()
@@ -41,16 +40,19 @@ export class HomeComponent {
 
     try {
       const url = new URL(raw)
-      const origin = url.origin
 
-      if (this.domains().includes(origin)) {
+      const scope = url.pathname && url.pathname !== '/'
+        ? `${url.origin}${url.pathname.replace(/\/+$/, '')}`
+        : url.origin
+
+      if (this.domains().includes(scope)) {
         this.input.set('')
         return
       }
 
-      const next = [...this.domains(), origin]
+      const next = [...this.domains(), scope]
       this.domains.set(next)
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+      localStorage.setItem(DOMAINS_KEY, JSON.stringify(next))
       this.input.set('')
     } catch {
       // ignore invalid urls
@@ -60,126 +62,61 @@ export class HomeComponent {
   protected remove = (domain: string): void => {
     const next = this.domains().filter(d => d !== domain)
     this.domains.set(next)
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+    localStorage.setItem(DOMAINS_KEY, JSON.stringify(next))
   }
 
   // -----------------------------
-  // helper: resolve payload url
+  // module creation
   // -----------------------------
-  private resolvePayloadUrl(name: string): string {
-    const trimmed = name.trim()
-    if (!trimmed) return ''
-
-    // if it looks like a full url, use as-is
-    if (/^https?:\/\//i.test(trimmed)) {
-      return trimmed
-    }
-
-    // otherwise use local payload route
-    return `/payloads/${trimmed}`
-  }
-
-  // -----------------------------
-  // payload signature (upgraded, non-breaking)
-  // -----------------------------
-  protected signPayload = async (): Promise<void> => {
-    const name = this.payloadName().trim()
-    if (!name) return
-
-    const url = this.resolvePayloadUrl(name)
-    if (!url) return
-
+  protected createModule = async (): Promise<void> => {
     this.busy.set(true)
     this.error.set(null)
-    this.payloadSignature.set(null)
 
     try {
-      const res = await fetch(url)
-      if (!res.ok) throw new Error('payload not found')
+      const draft = PayloadCanonical.createEmpty()
 
-      let sig: string
-
-      // try json first, fall back to raw bytes
-      try {
-        const payload = await res.clone().json()
-        sig = await SignatureService.sign(payload)
-      } catch {
-        const buffer = await res.arrayBuffer()
-        sig = await SignatureService.sign(buffer)
+      draft.source.entry = 'index.ts'
+      draft.source.files = {
+        'index.ts': btoa(`// empty module\n`)
       }
 
-      console.log('canonical payload hash:', sig)
-      this.payloadSignature.set(sig)
+      const { signature, json } = await PayloadCanonical.signPayload(draft)
+
+      this.cache.set(signature, json)
+      this.lastSignature.set(signature)
+      localStorage.setItem(LAST_KEY, signature)
+
+      await this.router.navigateByUrl(`/inspect/${signature}`)
     } catch (e: any) {
-      this.error.set(e.message ?? 'failed to sign payload')
+      this.error.set(e.message ?? 'failed to create module')
     } finally {
       this.busy.set(false)
     }
   }
 
-  protected openViewer = (): void => {
-    const sig = this.payloadSignature()
-    if (!sig) return
-    this.router.navigateByUrl(`/${sig}`)
+  // -----------------------------
+  // optional dev postmessage test
+  // -----------------------------
+  protected testPost = (ev: Event): void => {
+    ev.preventDefault()
   }
 
   // -----------------------------
   // storage
   // -----------------------------
-  private load(): string[] {
+  private loadDomains(): string[] {
     try {
-      return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]')
+      return JSON.parse(localStorage.getItem(DOMAINS_KEY) ?? '[]')
     } catch {
       return []
     }
   }
 
-    // -----------------------------
-  // test postMessage (end-to-end)
-  // -----------------------------
-  protected testPost = async (ev: Event): Promise<void> => {
-    console.log('window href:', window.location.href)
-    debugger
-    ev.preventDefault()
-    this.busy.set(true)
-    this.error.set(null)
-    this.payloadSignature.set(null)
-
+  private loadLast(): string | null {
     try {
-      const name = this.payloadName().trim()
-      if (!name) throw new Error('no payload name')
-
-      // HARD-CODED TEST FETCH
-      const res = await fetch(
-        'https://storagehypercomb.blob.core.windows.net/hypercomb-data/44bebabbbcc7b042606d8c1409977f1bafb5eecc0afcdbd13b0a6024a0b3232c'
-      )
-      if (!res.ok) throw new Error('payload not found')
-
-      // raw bytes for the payload
-      const bytes = await res.arrayBuffer()
-
-      // optional: compute signature locally for visibility / routing
-      const sig = await SignatureService.sign(bytes)
-      this.payloadSignature.set(sig)
-
-      // post raw bytes; arraybuffer is structured clonable
-      const message = {
-        scope: 'dcp',          // <-- dcp marker
-        type: 'resource.bytes',
-        name,
-        signature: sig,
-        bytes
-      }
-
-      // third arg transfers ownership of the buffer (no copy, more efficient)
-      window.parent.postMessage(message, 'http://localhost:4200', [bytes])
-
-      console.log('postMessage sent, signature:', sig)
-    } catch (e: any) {
-      this.error.set(e.message ?? 'postMessage test failed')
-    } finally {
-      this.busy.set(false)
+      return localStorage.getItem(LAST_KEY)
+    } catch {
+      return null
     }
   }
-
 }

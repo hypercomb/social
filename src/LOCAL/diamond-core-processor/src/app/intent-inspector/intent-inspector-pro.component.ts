@@ -1,18 +1,17 @@
 // src/app/intent-inspector/intent-inspector-pro.component.ts
 import { CommonModule } from '@angular/common'
-import {
-  Component,
-  DestroyRef,
-  computed,
-  effect,
-  inject,
-  signal
-} from '@angular/core'
+import { Component, DestroyRef, computed, effect, inject, signal } from '@angular/core'
+import { toSignal } from '@angular/core/rxjs-interop'
 import { ActivatedRoute } from '@angular/router'
 import { Intent, SignatureService } from '@hypercomb/core'
+import { map } from 'rxjs'
 import { CodeViewerComponent } from '../code-viewer/code-viewer.component'
+import { DraftPayloadCacheService } from '../core/draft-payload-cache.service'
+import { DraftPayloadV1, PayloadCanonical } from '../core/payload-canonical'
+import { Location } from '@angular/common'
 
 type IntentTab = 'description' | 'grammar' | 'links'
+type RightTab = 'safety' | 'json'
 
 type IntentSection = {
   id: IntentTab
@@ -29,31 +28,57 @@ type IntentSection = {
 })
 export class IntentInspectorProComponent {
 
-  // -----------------------------
-  // core loaded state
-  // -----------------------------
-  protected readonly intent = signal<Intent | null>(null)
-  protected readonly code = signal<string>('')
+  // ----------------------------------
+  // canonical draft (single source)
+  // ----------------------------------
+  protected readonly draft = signal<DraftPayloadV1 | null>(null)
+
+  // ----------------------------------
+  // derived display state
+  // ----------------------------------
+  protected readonly intent = computed<Intent | null>(() => this.draft()?.intent ?? null)
+
+  protected readonly code = computed<string>(() => {
+    const src = this.draft()?.source
+    if (!src?.files || !src.entry) return ''
+    return atob(src.files[src.entry] ?? '')
+  })
 
   protected readonly loading = signal(true)
   protected readonly error = signal<string | null>(null)
 
-  // -----------------------------
-  // UI state
-  // -----------------------------
+  // ----------------------------------
+  // signature + url behavior
+  // ----------------------------------
+  protected readonly signature = signal<string>('')
+  protected readonly signing = signal(false)
+
+  private readonly destroyRef = inject(DestroyRef)
+  private readonly location = inject(Location)
+  private readonly route = inject(ActivatedRoute)
+  private readonly cache = inject(DraftPayloadCacheService)
+
+  private resignTimer: number | null = null
+  private resignSeq = 0
+
+  // ----------------------------------
+  // ui state
+  // ----------------------------------
   protected readonly intentTab = signal<IntentTab>('description')
-  protected readonly confirmStage = signal<0 | 1>(0)
-  protected readonly confirmCountdown = signal(0)
+  protected readonly rightTab = signal<RightTab>('safety')
   protected readonly signatureCopied = signal(false)
 
-  private readonly route = inject(ActivatedRoute)
-  private readonly destroyRef = inject(DestroyRef)
+  // ----------------------------------
+  // route param (reactive)
+  // ----------------------------------
+  private readonly hash = toSignal(
+    this.route.paramMap.pipe(map(p => p.get('hash'))),
+    { initialValue: null }
+  )
 
-  private confirmIntervalId: number | null = null
-
-  // -----------------------------
+  // ----------------------------------
   // derived sections
-  // -----------------------------
+  // ----------------------------------
   protected readonly intentSections = computed<IntentSection[]>(() => {
     const i = this.intent()
     if (!i) return []
@@ -65,138 +90,272 @@ export class IntentInspectorProComponent {
     ]
   })
 
-  protected readonly primaryLabel = computed(() => {
-    if (this.confirmStage() === 0) return 'ARM CONFIRM'
-    const s = this.confirmCountdown()
-    return s > 0 ? `CONFIRM (${s}s)` : 'CONFIRM'
+  protected readonly grammarText = computed(() => {
+    const g = this.intent()?.grammar ?? []
+    return g
+      .map(x => (x.meaning ? `${x.example} — ${x.meaning}` : x.example))
+      .join('\n')
   })
 
-  // -----------------------------
+  protected readonly linksText = computed(() => {
+    const links = this.intent()?.links ?? []
+    return links
+      .map(l => {
+        const trust = l.trust ? ` | ${l.trust}` : ''
+        const label = (l.label ?? '').trim()
+        const url = (l.url ?? '').trim()
+        if (!label && url) return `${url}${trust}`
+        if (label && url) return `${label} | ${url}${trust}`
+        return ''
+      })
+      .filter(Boolean)
+      .join('\n')
+  })
+
+  protected readonly jsonView = computed(() => {
+    const d = this.draft()
+    if (!d) return ''
+
+    const payload = structuredClone(d)
+    payload.intent.signature = this.signature()
+
+    const exportView = {
+      signature: this.signature(),
+      payload,
+      bytes_base64: '...'
+    }
+
+    return JSON.stringify(exportView, null, 2)
+  })
+
+  // ----------------------------------
   // lifecycle
-  // -----------------------------
+  // ----------------------------------
   public constructor() {
     effect(() => {
-      const sig = this.route.snapshot.paramMap.get('hash')
+      const sig = this.hash()
       if (!sig) {
         this.fail('missing payload signature')
         return
       }
 
-      this.loadPayload(sig)
+      this.loadFromCacheOrRemote(sig)
     })
 
-    this.destroyRef.onDestroy(() => this.clearConfirmTimer())
+    this.destroyRef.onDestroy(() => this.clearResignTimer())
   }
 
- 
-  // -----------------------------
-  // payload loading (BYTE-EXACT)
-  // -----------------------------
-private async loadPayload(signature: string): Promise<void> {
-  try {
-    const url = `https://storagehypercomb.blob.core.windows.net/hypercomb-data/${signature}`
+  // ----------------------------------
+  // cache-first loading (so drafts work without a blob)
+  // ----------------------------------
+  private loadFromCacheOrRemote = async (signature: string): Promise<void> => {
+    try {
+      const cached = this.cache.get(signature)
+      if (cached) {
+        const parsed = JSON.parse(cached) as DraftPayloadV1
+        parsed.intent.signature = signature
 
-    const res = await fetch(url, { cache: 'no-store' })
-    if (!res.ok) {
-      throw new Error(`payload not found (${res.status})`)
+        this.draft.set(parsed)
+        this.signature.set(signature)
+        this.loading.set(false)
+        return
+      }
+
+      const url = `https://storagehypercomb.blob.core.windows.net/hypercomb-data/${signature}`
+      const res = await fetch(url, { cache: 'no-store' })
+      if (!res.ok) throw new Error(`payload not found (${res.status})`)
+
+      const bytes = await res.arrayBuffer()
+      const actual = await SignatureService.sign(bytes)
+      if (actual !== signature) throw new Error('payload signature mismatch')
+
+      const canonicalJson = new TextDecoder().decode(bytes).trim()
+      const parsed = JSON.parse(canonicalJson) as DraftPayloadV1
+      parsed.intent.signature = signature
+
+      this.draft.set(parsed)
+      this.signature.set(signature)
+
+      this.cache.set(signature, canonicalJson)
+      this.loading.set(false)
+
+    } catch (e: any) {
+      this.fail(e.message ?? 'failed to load payload')
+    }
+  }
+
+  // ----------------------------------
+  // authoring actions
+  // ----------------------------------
+  protected updateIntent = (key: keyof Intent, value: any): void => {
+    const d = this.draft()
+    if (!d) return
+
+    const next = structuredClone(d)
+    ;(next.intent as any)[key] = value
+
+    this.draft.set(next)
+    this.scheduleResign()
+  }
+
+  protected updateGrammarText = (text: string): void => {
+    const d = this.draft()
+    if (!d) return
+
+    const lines = text
+      .replaceAll('\r\n', '\n')
+      .split('\n')
+      .map(x => x.trim())
+      .filter(Boolean)
+
+    const grammar = lines.map(line => {
+      const split = line.split('—')
+      if (split.length >= 2) {
+        const example = split[0].trim()
+        const meaning = split.slice(1).join('—').trim()
+        return meaning ? { example, meaning } : { example }
+      }
+
+      const splitDash = line.split(' - ')
+      if (splitDash.length >= 2) {
+        const example = splitDash[0].trim()
+        const meaning = splitDash.slice(1).join(' - ').trim()
+        return meaning ? { example, meaning } : { example }
+      }
+
+      return { example: line }
+    })
+
+    const next = structuredClone(d)
+    next.intent.grammar = grammar as any
+
+    this.draft.set(next)
+    this.scheduleResign()
+  }
+
+  protected updateLinksText = (text: string): void => {
+    const d = this.draft()
+    if (!d) return
+
+    const lines = text
+      .replaceAll('\r\n', '\n')
+      .split('\n')
+      .map(x => x.trim())
+      .filter(Boolean)
+
+    const links = lines.map(line => {
+      const parts = line.split('|').map(x => x.trim()).filter(Boolean)
+
+      if (parts.length >= 2) {
+        const label = parts[0]
+        const url = parts[1]
+        const trustRaw = (parts[2] ?? '').toLowerCase()
+        const trust = trustRaw === 'official' || trustRaw === 'community' ? (trustRaw as any) : undefined
+        return trust ? { label, url, trust } : { label, url }
+      }
+
+      const tokens = line.split(/\s+/).filter(Boolean)
+      const maybeUrl = tokens[tokens.length - 1] ?? ''
+      const label = tokens.length > 1 ? tokens.slice(0, -1).join(' ') : maybeUrl
+      const url = maybeUrl
+      return { label, url }
+    })
+
+    const next = structuredClone(d)
+    next.intent.links = links as any
+
+    this.draft.set(next)
+    this.scheduleResign()
+  }
+
+  protected updateCode = (source: string): void => {
+    const d = this.draft()
+    if (!d) return
+
+    const next = structuredClone(d)
+
+    if (!next.source.entry) {
+      next.source.entry = 'index.ts'
     }
 
-    const bytes = await res.arrayBuffer()
+    next.source.files[next.source.entry] = btoa(source)
 
+    this.draft.set(next)
+    this.scheduleResign()
+  }
 
-    const view = new Uint8Array(bytes)
-    const headAscii = new TextDecoder().decode(view.slice(0, 64))
-    console.log('received head ascii:', JSON.stringify(headAscii))
-    console.log('content-type:', res.headers.get('content-type'))
+  // ----------------------------------
+  // live signing (debounced) + url replace + cache move
+  // ----------------------------------
+  private scheduleResign = (): void => {
+    this.signing.set(true)
+    this.clearResignTimer()
 
-    const actual = await SignatureService.sign(bytes)
-    console.log('expected signature:', signature)
-    console.log('actual signature:', actual)
+    const seq = ++this.resignSeq
+    this.resignTimer = window.setTimeout(async () => {
+      if (seq !== this.resignSeq) return
+      await this.resignNow()
+    }, 250)
+  }
 
-    if (actual !== signature) {
-      throw new Error('payload signature mismatch')
+  protected forceResignNow = async (): Promise<void> => {
+    this.signing.set(true)
+    this.clearResignTimer()
+    await this.resignNow()
+  }
+
+  private resignNow = async (): Promise<void> => {
+    const d = this.draft()
+    if (!d) return
+
+    const fromSig = this.signature()
+
+    const { signature, canonicalJson } = await PayloadCanonical.compute(d)
+
+    const next = structuredClone(d)
+    next.intent.signature = signature
+    this.draft.set(next)
+
+    this.cache.move(fromSig, signature, canonicalJson)
+
+    this.signature.set(signature)
+    this.location.replaceState(this.currentInspectorPath(signature))
+
+    this.signing.set(false)
+  }
+
+  private currentInspectorPath(signature: string): string {
+    const isInspect = (this.route.snapshot.routeConfig?.path ?? '').startsWith('inspect')
+    return isInspect ? `/inspect/${signature}` : `/${signature}`
+  }
+
+  private clearResignTimer = (): void => {
+    if (this.resignTimer !== null) {
+      window.clearTimeout(this.resignTimer)
+      this.resignTimer = null
     }
-
-    const text = new TextDecoder().decode(bytes)
-
-    const payload = JSON.parse(text.trim())
-
-    this.intent.set(payload.intent)
-    this.code.set(this.decodeSource(payload.source))
-    this.intentTab.set('description')
-    this.loading.set(false)
-
-  } catch (e: any) {
-    this.fail(e.message ?? 'failed to load payload')
-  }
-}
-
-
-  // -----------------------------
-  // source decode
-  // -----------------------------
-  private decodeSource(source: any): string {
-    if (!source?.files || !source.entry) return ''
-    const encoded = source.files[source.entry]
-    if (!encoded) return ''
-    return atob(encoded)
   }
 
-  // -----------------------------
-  // UI actions (unchanged)
-  // -----------------------------
+  // ----------------------------------
+  // ui helpers
+  // ----------------------------------
   protected setIntentTab = (value: IntentTab): void => {
     this.intentTab.set(value)
   }
 
-  protected primary = (): void => {
-    if (this.confirmStage() === 0) {
-      this.armConfirm()
-      return
-    }
-
-    this.confirm()
-    this.disarmConfirm()
-  }
-
-  protected armConfirm = (): void => {
-    this.confirmStage.set(1)
-    this.confirmCountdown.set(8)
-    this.clearConfirmTimer()
-
-    this.confirmIntervalId = window.setInterval(() => {
-      const next = this.confirmCountdown() - 1
-      this.confirmCountdown.set(next)
-      if (next <= 0) this.disarmConfirm()
-    }, 1000)
-  }
-
-  protected disarmConfirm = (): void => {
-    this.confirmStage.set(0)
-    this.confirmCountdown.set(0)
-    this.clearConfirmTimer()
-  }
-
-  private clearConfirmTimer = (): void => {
-    if (this.confirmIntervalId !== null) {
-      window.clearInterval(this.confirmIntervalId)
-      this.confirmIntervalId = null
-    }
+  protected setRightTab = (value: RightTab): void => {
+    this.rightTab.set(value)
   }
 
   protected copySignature = async (): Promise<void> => {
-    const text = this.intent()?.signature ?? ''
-    await navigator.clipboard.writeText(text)
+    const sig = this.signature()
+    await navigator.clipboard.writeText(sig)
     this.signatureCopied.set(true)
     setTimeout(() => this.signatureCopied.set(false), 900)
   }
 
-  protected confirm = (): void => {
-    // handled by hypercomb host
-  }
-
   protected cancel = (): void => {
-    // handled by hypercomb host
+    history.back()
   }
 
   private fail(msg: string): void {

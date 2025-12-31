@@ -4,27 +4,23 @@
     <header class="topbar">
       <div class="title-stack">
         @if (intent(); as i) {
-          <div class="intent-title">{{ i.title }}</div>
+          <input
+            class="intent-title editor"
+            [value]="i.title"
+            (input)="updateIntent('title', $any($event.target).value)" />
 
           <div class="intent-subtitle">
-            <span class="mono">{{ i.signature }}</span>
-
-            @if (i.summary) {
-              <span class="dot">•</span>
-              <span>{{ i.summary }}</span>
-            }
+            <span class="mono">{{ signature() }}</span>
+            @if (signing()) { <span class="dot">•</span> <span class="dim">signing…</span> }
           </div>
         } @else {
           <div class="intent-title">Loading…</div>
-          <div class="intent-subtitle">
-            <span class="mono dim">payload</span>
-            @if (error()) { <span class="dot">•</span> <span>{{ error() }}</span> }
-          </div>
+          @if (error()) { <div class="intent-subtitle"><span class="mono dim">{{ error() }}</span></div> }
         }
       </div>
 
       <div class="topbar-actions">
-        <button class="ghost" type="button" [disabled]="!intent()" (click)="copySignature()">
+        <button class="ghost" type="button" [disabled]="!signature()" (click)="copySignature()">
           {{ signatureCopied() ? 'COPIED' : 'COPY SIGNATURE' }}
         </button>
       </div>
@@ -32,28 +28,26 @@
 
     @if (intent(); as i) {
       <div class="page-grid">
-        <!-- left: code + intent tabs -->
         <section class="left">
-          <app-code-viewer [code]="code()"></app-code-viewer>
+          <hc-code-viewer
+            [code]="code()"
+            [editable]="true"
+            (codeChange)="updateCode($event)">
+          </hc-code-viewer>
 
           <div class="panel">
             <div class="intent-tabs">
               <div class="intent-tabbar">
-                <!-- left: static label (not a button) -->
-                <div class="intent-tabbar-left" aria-hidden="true">
+                <div class="intent-tabbar-left">
                   <div class="intent-label">INTENT</div>
                 </div>
 
-                <!-- right: tabs driven from intent payload -->
-                <div class="intent-tabbar-right" role="tablist" aria-label="intent sections">
+                <div class="intent-tabbar-right">
                   @for (s of intentSections(); track s.id) {
                     <button
                       class="intent-tab"
                       type="button"
-                      role="tab"
                       [class.active]="intentTab() === s.id"
-                      [class.empty]="s.isEmpty"
-                      [attr.aria-selected]="intentTab() === s.id"
                       (click)="setIntentTab(s.id)">
                       {{ s.label }}
                     </button>
@@ -61,48 +55,32 @@
                 </div>
               </div>
 
-              <div class="intent-tabcontent" role="tabpanel">
+              <div class="intent-tabcontent">
                 @switch (intentTab()) {
                   @case ('description') {
-                    @if (i.description) {
-                      <p class="desc">{{ i.description }}</p>
-                    } @else {
-                      <p class="empty">no description.</p>
-                    }
+                    <textarea
+                      class="desc editor"
+                      [value]="i.description"
+                      (input)="updateIntent('description', $any($event.target).value)">
+                    </textarea>
                   }
 
                   @case ('grammar') {
-                    @if (i.grammar?.length) {
-                      <ul class="list">
-                        @for (g of (i.grammar ?? []); track g.example) {
-                          <li class="li">
-                            <span class="mono">{{ g.example }}</span>
-                            @if (g.meaning) { <span class="dim"> — {{ g.meaning }}</span> }
-                          </li>
-                        }
-                      </ul>
-                    } @else {
-                      <p class="empty">no grammar.</p>
-                    }
+                    <textarea
+                      class="desc editor"
+                      [value]="grammarText()"
+                      (input)="updateGrammarText($any($event.target).value)"
+                      placeholder="one per line&#10;example — meaning (optional)">
+                    </textarea>
                   }
 
                   @case ('links') {
-                    @if (i.links?.length) {
-                      <ul class="list">
-                        @for (l of (i.links ?? []); track l.url) {
-                          <li class="li">
-                            <div class="link-row">
-                              <span class="link-label">{{ l.label }}</span>
-                              @if (l.trust) { <span class="pill">{{ l.trust }}</span> }
-                            </div>
-
-                            <a class="link" [href]="l.url" target="_blank" rel="noopener noreferrer">{{ l.url }}</a>
-                          </li>
-                        }
-                      </ul>
-                    } @else {
-                      <p class="empty">no links.</p>
-                    }
+                    <textarea
+                      class="desc editor"
+                      [value]="linksText()"
+                      (input)="updateLinksText($any($event.target).value)"
+                      placeholder="one per line&#10;label | url | trust(optional)">
+                    </textarea>
                   }
                 }
               </div>
@@ -110,85 +88,57 @@
           </div>
         </section>
 
-        <!-- right: safety + scanning links -->
         <aside class="right">
-          <div class="panel">
-            <div class="panel-head">
-              <div class="panel-title">Quick safety checks</div>
-              <div class="panel-subtitle">if it feels off, cancel</div>
+          <div class="panel right-tabs">
+            <div class="right-tabbar" role="tablist" aria-label="right sidebar tabs">
+              <button
+                class="right-tab"
+                type="button"
+                role="tab"
+                [class.active]="rightTab() === 'safety'"
+                [attr.aria-selected]="rightTab() === 'safety'"
+                (click)="setRightTab('safety')">
+                SAFETY
+              </button>
+
+              <button
+                class="right-tab"
+                type="button"
+                role="tab"
+                [class.active]="rightTab() === 'json'"
+                [attr.aria-selected]="rightTab() === 'json'"
+                (click)="setRightTab('json')">
+                JSON
+              </button>
             </div>
 
-            <ul class="list">
-              <li class="li">only run code from someone you trust (or that’s verified)</li>
-              <li class="li">be wary if it looks hidden, scrambled, or staged</li>
-              <li class="li">malicious code can read storage, cookies, tokens, clipboard</li>
-              <li class="li">beware of live connections, telemetry, or exfiltration</li>
-            </ul>
-          </div>
+            <div class="right-tabcontent" role="tabpanel">
+              @switch (rightTab()) {
+                @case ('safety') {
+                  <div class="panel-title">Safety</div>
+                  <ul class="list">
+                    <li>signature updates as you edit</li>
+                    <li>refresh restores the cached draft for this signature</li>
+                    <li>verify before confirming</li>
+                  </ul>
+                }
 
-          <div class="panel">
-            <div class="panel-head">
-              <div class="panel-title">AI & scanning links</div>
-              <div class="panel-subtitle">optional external review</div>
+                @case ('json') {
+                  <div class="panel-title">Export</div>
+                  <pre class="json-pre">{{ jsonView() }}</pre>
+                }
+              }
             </div>
-
-            <ul class="links">
-              <li class="li"><a class="link" href="https://chat.openai.com" target="_blank" rel="noopener noreferrer">ChatGPT check</a></li>
-              <li class="li"><a class="link" href="https://claude.ai" target="_blank" rel="noopener noreferrer">Claude check</a></li>
-              <li class="li"><a class="link" href="https://snyk.io" target="_blank" rel="noopener noreferrer">Snyk scan</a></li>
-              <li class="li"><a class="link" href="https://semgrep.dev" target="_blank" rel="noopener noreferrer">Semgrep rules</a></li>
-              <li class="li"><a class="link" href="https://osv.dev" target="_blank" rel="noopener noreferrer">OSV dependency audit</a></li>
-            </ul>
           </div>
         </aside>
       </div>
 
       <footer class="bottom-buttons">
-        <button class="button primary" type="button" (click)="primary()">
-          {{ primaryLabel() }}
+        <button class="button primary" type="button" [disabled]="signing()" (click)="forceResignNow()">
+          {{ signing() ? 'SIGNING…' : 'RE-SIGN NOW' }}
         </button>
 
-        <button class="button secondary" type="button" (click)="cancel()">CANCEL</button>
-      </footer>
-    } @else {
-      <div class="page-grid">
-        <section class="left">
-          <app-code-viewer [code]="code()"></app-code-viewer>
-
-          <div class="panel">
-            <div class="panel-head">
-              <div class="panel-title">Payload</div>
-              <div class="panel-subtitle">@if (error()) { failed to load } @else { loading }</div>
-            </div>
-
-            @if (error()) {
-              <p class="empty">{{ error() }}</p>
-            } @else {
-              <p class="empty">loading payload…</p>
-            }
-          </div>
-        </section>
-
-        <aside class="right">
-          <div class="panel">
-            <div class="panel-head">
-              <div class="panel-title">Quick safety checks</div>
-              <div class="panel-subtitle">if it feels off, cancel</div>
-            </div>
-
-            <ul class="list">
-              <li class="li">only run code from someone you trust (or that’s verified)</li>
-              <li class="li">be wary if it looks hidden, scrambled, or staged</li>
-              <li class="li">malicious code can read storage, cookies, tokens, clipboard</li>
-              <li class="li">beware of live connections, telemetry, or exfiltration</li>
-            </ul>
-          </div>
-        </aside>
-      </div>
-
-      <footer class="bottom-buttons">
-        <button class="button primary" type="button" disabled>ARM CONFIRM</button>
-        <button class="button secondary" type="button" (click)="cancel()">CANCEL</button>
+        <button class="button secondary" type="button" (click)="cancel()">DONE</button>
       </footer>
     }
   </div>

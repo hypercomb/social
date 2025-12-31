@@ -6,6 +6,7 @@ import { Header } from "./header/header"
 import { Footer } from "./footer/footer"
 import { synchronizer } from './core/synchronizer'
 import { hypercomb } from '@hypercomb/core'
+import { ScriptPreloaderService } from './core/script-preloader.service' // <-- add this import
 
 @Component({
   selector: 'app-root',
@@ -24,8 +25,7 @@ export class App extends hypercomb {
   // startup dependencies
   // --------------------------------------------------------
   private readonly sync = inject(synchronizer)
-  // --------------------------------------------------------
-  // startup dependencies
+  private readonly preloader = inject(ScriptPreloaderService) // <-- preload scripts on app start
   // --------------------------------------------------------
   
   constructor() {
@@ -36,6 +36,10 @@ export class App extends hypercomb {
         e.stopImmediatePropagation()
       }
     })
+
+    // preload scripts first
+    // no need to await — just fire it and let it warm up while bootstrapping
+    void this.preloader
 
     // replay url once, in order
     this.bootstrapFromUrl().catch(console.error)

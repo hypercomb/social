@@ -1,9 +1,9 @@
 // src/app/code-viewer/code-viewer.component.ts
 import { CommonModule } from '@angular/common'
-import { Component, computed, input, signal } from '@angular/core'
+import { Component, computed, input, output, signal } from '@angular/core'
 
 @Component({
-  selector: 'app-code-viewer',
+  selector: 'hc-code-viewer',
   standalone: true,
   imports: [CommonModule],
   templateUrl: './code-viewer.component.html',
@@ -12,9 +12,16 @@ import { Component, computed, input, signal } from '@angular/core'
 export class CodeViewerComponent {
 
   public readonly code = input.required<string>()
+  public readonly editable = input<boolean>(false)
+
+  public readonly codeChange = output<string>()
 
   protected readonly copied = signal(false)
   protected readonly normalized = computed(() => (this.code() ?? '').replaceAll('\r\n', '\n'))
+
+  protected onEdit = (value: string): void => {
+    this.codeChange.emit(value)
+  }
 
   protected copy = async (): Promise<void> => {
     const text = this.normalized()
@@ -24,7 +31,6 @@ export class CodeViewerComponent {
       this.copied.set(true)
       window.setTimeout(() => this.copied.set(false), 900)
     } catch {
-      // clipboard may be blocked; fall back to selection based copy
       const el = document.createElement('textarea')
       el.value = text
       el.setAttribute('readonly', 'true')

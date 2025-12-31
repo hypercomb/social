@@ -1,6 +1,6 @@
 // src/app/messaging/resource-message-handler.ts
 import { Injectable } from '@angular/core'
-import { SignatureService } from '@hypercomb/core'
+import { DcpResourceMessage, SignatureService } from '@hypercomb/core'
 
 @Injectable({ providedIn: 'root' })
 export class ResourceMessageHandler {
@@ -29,7 +29,11 @@ export class ResourceMessageHandler {
     // origin check
     if (!this.allowedOrigins.has(event.origin)) return
 
-    const data = event.data
+    const data = event.data as DcpResourceMessage
+    if (data.scope === 'dcp' && data.type === 'resource.bytes') {
+      // handle bytes, verify signature, etc.
+    }
+
     if (!data || typeof data !== 'object') return
 
     // only accept explicit dcp messages
