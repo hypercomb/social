@@ -21,8 +21,7 @@ interface FileEntry {
   templateUrl: './opfs-explorer.component.html',
   styleUrls: ['./opfs-explorer.component.scss']
 })
-export class OpfsExplorerComponent extends hypercomb implements OnDestroy 
-{
+export class OpfsExplorerComponent extends hypercomb implements OnDestroy {
   public readonly entries = signal<FileEntry[]>([])
   public readonly directory = signal<string>('/')
 
@@ -32,8 +31,13 @@ export class OpfsExplorerComponent extends hypercomb implements OnDestroy
   private currentDir?: FileSystemDirectoryHandle
 
   // stable handler refs so removeeventlistener works
-  private readonly forward = (): void => { void this.project() }
-  protected readonly back = (): void => { void this.project() }
+  private readonly forward = (): void => {
+    void this.project()
+  }
+
+  protected readonly back = (): void => {
+    void this.project()
+  }
 
   constructor() {
     super()
@@ -113,6 +117,50 @@ export class OpfsExplorerComponent extends hypercomb implements OnDestroy
 
     // re-project after mutation
     await this.project()
+  }
+
+  // copy file json contents to clipboard without affecting row click
+  public readonly copyDetails = async (
+    entry: FileEntry,
+    ev: MouseEvent
+  ): Promise<void> => {
+    ev.stopPropagation()
+
+    // only files have readable contents
+    if (entry.kind !== 'file') {
+      console.warn('copyDetails: entry is not a file, skipping', entry.name)
+      return
+    }
+
+    try {
+      const fileHandle = entry.handle as FileSystemFileHandle
+      const file = await fileHandle.getFile()
+      const text = await file.text()
+
+      // try to pretty-print json if valid; fallback to raw text
+      let contentToCopy = text
+      try {
+        const parsed = JSON.parse(text)
+        contentToCopy = JSON.stringify(parsed, null, 2)
+      } catch {
+        // not valid json, leave as-is
+      }
+
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(contentToCopy)
+      } else {
+        const ta = document.createElement('textarea')
+        ta.value = contentToCopy
+        ta.style.position = 'fixed'
+        ta.style.opacity = '0'
+        document.body.appendChild(ta)
+        ta.select()
+        document.execCommand('copy')
+        document.body.removeChild(ta)
+      }
+    } catch (err) {
+      console.error('failed to copy file json to clipboard', err)
+    }
   }
 
   public ngOnDestroy(): void {

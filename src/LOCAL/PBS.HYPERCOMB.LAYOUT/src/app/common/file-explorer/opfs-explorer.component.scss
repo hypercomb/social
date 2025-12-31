@@ -1,3 +1,5 @@
+/* src/app/common/file-explorer/opfs-explorer.component.scss */
+
 .opfs-explorer {
   display: flex;
   flex-direction: column;
@@ -80,7 +82,20 @@
   }
 }
 
+.copy-cell {
+  width: 80px;
+  text-align: right;
+
+  .copy-link {
+    font-size: 0.8rem;
+    text-transform: none;
+    padding: 0;
+    min-width: 0;
+  }
+}
+
 .delete-cell {
   width: 48px;
   text-align: right;
 }
+

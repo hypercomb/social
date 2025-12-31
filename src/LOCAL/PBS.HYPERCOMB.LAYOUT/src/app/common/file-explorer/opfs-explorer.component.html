@@ -31,18 +31,45 @@
         </td>
       </ng-container>
 
+      <!-- copy link -->
+      <ng-container matColumnDef="copy">
+        <th mat-header-cell *matHeaderCellDef></th>
+        <td mat-cell *matCellDef="let e" class="copy-cell">
+          <button
+            mat-button
+            type="button"
+            class="copy-link"
+            (click)="copyDetails(e, $event)"
+            aria-label="copy details to clipboard"
+          >
+            copy
+          </button>
+        </td>
+      </ng-container>
+
       <!-- delete -->
       <ng-container matColumnDef="delete">
         <th mat-header-cell *matHeaderCellDef></th>
         <td mat-cell *matCellDef="let e" class="delete-cell">
-          <button mat-icon-button color="warn" (click)="delete(e, $event)" aria-label="delete">
+          <button
+            mat-icon-button
+            type="button"
+            color="warn"
+            (click)="delete(e, $event)"
+            aria-label="delete"
+          >
             <mat-icon>delete</mat-icon>
           </button>
         </td>
       </ng-container>
 
-      <tr mat-header-row *matHeaderRowDef="['icon', 'name', 'delete']"></tr>
-      <tr mat-row *matRowDef="let row; columns: ['icon', 'name', 'delete']" class="data-row" (click)="explore(row.name)"></tr>
+      <tr mat-header-row *matHeaderRowDef="['icon', 'name', 'copy', 'delete']"></tr>
+      <tr
+        mat-row
+        *matRowDef="let row; columns: ['icon', 'name', 'copy', 'delete']"
+        class="data-row"
+        (click)="explore(row.name)"
+      ></tr>
 
     </table>
   </div>
