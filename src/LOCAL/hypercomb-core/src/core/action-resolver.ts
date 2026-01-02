@@ -5,8 +5,7 @@ import { Action } from '@hypercomb/core/src/action.base.js'
 
 
 export interface ActionResolver {
-  find(input: string): Promise<Action | null>
+  find(input: string): Promise<Action[]>
 }
 
-export const ACTION_RESOLVER =
-  new InjectionToken<ActionResolver>('ACTION_RESOLVER')
+export const ACTION_RESOLVER =new InjectionToken<ActionResolver>('ACTION_RESOLVER')

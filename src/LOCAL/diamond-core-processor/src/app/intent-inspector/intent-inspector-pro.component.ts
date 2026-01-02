@@ -142,17 +142,28 @@ export class IntentInspectorProComponent {
     try {
       const compiled = await compilePayload(payload)
 
-      // optional: still log it
-      console.log('[compiled js]', compiled)
+      // send compiled code for storage
+      window.parent.postMessage(
+        {
+          scope: 'dcp',
+          type: 'compiled.code',
+          code: compiled
+        },
+        'http://localhost:4200'
+      )
 
-      // keep navigation AFTER you inspect
-      history.back()
+      // tell the portal overlay to close
+      window.parent.postMessage(
+        {
+          type: 'dcp:confirm'
+        },
+        'http://localhost:4200'
+      )
+
     } catch (e: any) {
       this.error.set(e?.message ?? 'compile failed')
     }
   }
-
-
 
   protected done = (): void => {
     history.back()

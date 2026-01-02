@@ -13,25 +13,25 @@ export class hypercomb extends web {
   public readonly depth = (): number => this.segments().length
   public index: number = 0
 
-public override act = async (text: string): Promise<void> => {
-  const clean = text.replace(/[\\?:\s]+/g, ' ').trim()
-  const next = `${this.path().replace(/\/$/, '')}/${clean}`
+  public override act = async (text: string): Promise<void> => {
+    const clean = text.replace(/[\\?:\s]+/g, ' ').trim()
+    const next = `${this.path().replace(/\/$/, '')}/${clean}`
 
-  const action = await this.resolver.find(clean)
+    const actions = await this.resolver.find(clean)
 
-  if (action) {
-    this.index++
-    await action.execute()
+    if (actions.length) {
+      this.index++
+      for (const action of actions) await action.execute()
+    }
+
+    window.history.pushState(
+      { index: this.index },
+      '',
+      next
+    )
+
+    window.dispatchEvent(new Event('synchronize'))
   }
-
-  window.history.pushState(
-    { index: this.index },
-    '',
-    next
-  )
-
-  window.dispatchEvent(new Event('synchronize'))
-}
 
 }
 
