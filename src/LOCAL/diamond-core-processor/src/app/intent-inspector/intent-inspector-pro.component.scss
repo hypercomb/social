@@ -66,32 +66,6 @@
   text-overflow: ellipsis;
 }
 
-.dot {
-  opacity: 0.7;
-}
-
-.topbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex: 0 0 auto;
-}
-
-.ghost {
-  height: 36px;
-  padding: 0 0.85rem;
-  border-radius: 12px;
-  border: 1px solid rgba(0, 0, 0, 0.14);
-  background: rgba(255, 255, 255, 0.92);
-  font-size: 12px;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.ghost:active {
-  transform: translateY(1px);
-}
-
 .page-grid {
   flex: 1 1 auto;
   min-height: 0;
@@ -141,95 +115,8 @@
   color: #777;
 }
 
-.intent-tabs {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-}
-
-/* parent flexbox */
-.intent-tabbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-
-  padding: 0.25rem 0.25rem 0.75rem 0.25rem;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-  flex: 0 0 auto;
-}
-
-/* left: fixed label */
-.intent-tabbar-left {
-  flex: 0 0 auto;
-}
-
-.intent-label {
-  padding: 0.35rem 0.25rem;
-  border-radius: .2rem;
-
-  font-size: 13px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: #777;
-
-  user-select: none;
-}
-
-/* right: expands to fill remaining width */
-.intent-tabbar-right {
-  flex: 1 1 auto;
-  min-width: 0;
-
-  display: flex;
-  align-items: center;
-
-  /* distribute the 3 buttons inside the remaining space */
-  justify-content: space-around;
-}
-
-.intent-tab {
-  border: 1px solid transparent;
-  background: transparent;
-  padding: 0.35rem 0.75rem;
-  border-radius: .2rem;
-  cursor: pointer;
-
-  font-size: 13px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: #777;
-}
-
-.intent-tab:hover {
-  background: rgba(0, 0, 0, 0.04);
-}
-
-.intent-tab.active {
-  color: #222;
-  background: rgba(0, 0, 0, 0.06);
-  border-color: rgba(0, 0, 0, 0.10);
-}
-
-.intent-tabcontent {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: auto;
-  padding: 0.9rem 0.25rem 0.25rem 0.25rem;
-}
-
-.desc {
-  margin: 0;
-  color: #555;
-  font-size: 16px;
-  line-height: 1.55;
-}
-
 .list {
-  margin: 0;
+  margin: 0.75rem 0 0;
   padding-left: 1.1rem;
   color: #555;
   font-size: 15px;
@@ -300,77 +187,4 @@
   border-color: rgba(0, 0, 0, 0.18);
   box-shadow: 0 12px 18px rgba(0, 0, 0, 0.08);
   transform: translateY(-1px);
-}
-
-.editor {
-  border: none;
-  outline: none;
-  background: transparent;
-  width: 100%;
-}
-
-.intent-title.editor {
-  font-size: 24px;
-  font-weight: 600;
-}
-
-.desc.editor {
-  min-height: 140px;
-  resize: vertical;
-}
-
-/* right sidebar tabs */
-.right-tabs {
-  padding: 0.75rem;
-}
-
-.right-tabbar {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.5rem;
-  padding-bottom: 0.75rem;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-  flex: 0 0 auto;
-}
-
-.right-tab {
-  border: 1px solid rgba(0, 0, 0, 0.12);
-  background: rgba(255, 255, 255, 0.92);
-  padding: 0.45rem 0.6rem;
-  border-radius: 12px;
-  cursor: pointer;
-
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: #777;
-}
-
-.right-tab.active {
-  color: #222;
-  background: rgba(0, 0, 0, 0.06);
-  border-color: rgba(0, 0, 0, 0.18);
-}
-
-.right-tabcontent {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: auto;
-  padding-top: 0.75rem;
-}
-
-.json-pre {
-  margin: 0.75rem 0 0;
-  padding: 0.75rem;
-  border-radius: 12px;
-  border: 1px solid rgba(0, 0, 0, 0.10);
-  background: rgba(0, 0, 0, 0.03);
-
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
-  line-height: 1.5;
-
-  white-space: pre-wrap;
-  word-break: break-word;
 }

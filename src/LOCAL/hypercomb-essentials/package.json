@@ -1,0 +1,13 @@
+{
+  "name": "@hypercomb/essentials",
+  "type": "module",
+  "scripts": {
+    "build": "tsc && tsx ./scripts/build-module.ts"
+  },
+  "dependencies": {
+    "@hypercomb/core": "file:../hypercomb-core"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0"
+  }
+}

@@ -1,3 +1,4 @@
+// src/effect.ts
 export type Effect =
   | 'filesystem'
   | 'render'

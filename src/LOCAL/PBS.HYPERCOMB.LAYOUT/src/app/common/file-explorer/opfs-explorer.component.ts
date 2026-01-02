@@ -139,25 +139,10 @@ export class OpfsExplorerComponent extends hypercomb implements OnDestroy {
 
       // try to pretty-print json if valid; fallback to raw text
       let contentToCopy = text
-      try {
-        const parsed = JSON.parse(text)
-        contentToCopy = JSON.stringify(parsed, null, 2)
-      } catch {
-        // not valid json, leave as-is
-      }
 
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(contentToCopy)
-      } else {
-        const ta = document.createElement('textarea')
-        ta.value = contentToCopy
-        ta.style.position = 'fixed'
-        ta.style.opacity = '0'
-        document.body.appendChild(ta)
-        ta.select()
-        document.execCommand('copy')
-        document.body.removeChild(ta)
-      }
+      const parsed = JSON.parse(text)
+      contentToCopy = JSON.stringify(parsed, null, 2)
+
     } catch (err) {
       console.error('failed to copy file json to clipboard', err)
     }

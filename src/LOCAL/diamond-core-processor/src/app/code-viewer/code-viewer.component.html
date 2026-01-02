@@ -1,23 +1,14 @@
 <!-- src/app/code-viewer/code-viewer.component.html -->
 <div class="code-viewer">
   <div class="toolbar">
-    <div class="label">Code</div>
+    <div class="label">code</div>
 
     <button class="copy" type="button" (click)="copy()">
-      {{ copied() ? 'COPIED' : 'COPY' }}
+      {{ copied() ? 'copied' : 'copy' }}
     </button>
   </div>
 
   <div class="scroller" role="region" aria-label="code payload">
-    @if (editable()) {
-      <textarea
-        class="code-editor"
-        [value]="normalized()"
-        (input)="onEdit($any($event.target).value)"
-        spellcheck="false">
-      </textarea>
-    } @else {
-      <pre class="pre"><code class="code">{{ normalized() }}</code></pre>
-    }
+    <pre class="pre"><code class="code">{{ normalized() }}</code></pre>
   </div>
 </div>

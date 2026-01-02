@@ -1,6 +1,6 @@
 // src/app/code-viewer/code-viewer.component.ts
 import { CommonModule } from '@angular/common'
-import { Component, computed, input, output, signal } from '@angular/core'
+import { Component, computed, input, signal } from '@angular/core'
 
 @Component({
   selector: 'hc-code-viewer',
@@ -12,16 +12,9 @@ import { Component, computed, input, output, signal } from '@angular/core'
 export class CodeViewerComponent {
 
   public readonly code = input.required<string>()
-  public readonly editable = input<boolean>(false)
-
-  public readonly codeChange = output<string>()
 
   protected readonly copied = signal(false)
   protected readonly normalized = computed(() => (this.code() ?? '').replaceAll('\r\n', '\n'))
-
-  protected onEdit = (value: string): void => {
-    this.codeChange.emit(value)
-  }
 
   protected copy = async (): Promise<void> => {
     const text = this.normalized()

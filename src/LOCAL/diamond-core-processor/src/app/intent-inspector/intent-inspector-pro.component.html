@@ -3,142 +3,48 @@
   <div class="main-container">
     <header class="topbar">
       <div class="title-stack">
-        @if (intent(); as i) {
-          <input
-            class="intent-title editor"
-            [value]="i.title"
-            (input)="updateIntent('title', $any($event.target).value)" />
-
-          <div class="intent-subtitle">
-            <span class="mono">{{ signature() }}</span>
-            @if (signing()) { <span class="dot">•</span> <span class="dim">signing…</span> }
+        @if (action(); as a) {
+          <div class="intent-title">
+            {{ name() }}
           </div>
         } @else {
-          <div class="intent-title">Loading…</div>
-          @if (error()) { <div class="intent-subtitle"><span class="mono dim">{{ error() }}</span></div> }
+          <div class="intent-title">loading…</div>
+          @if (error()) {
+            <div class="intent-subtitle">
+              <span class="mono dim">{{ error() }}</span>
+            </div>
+          }
         }
-      </div>
-
-      <div class="topbar-actions">
-        <button class="ghost" type="button" [disabled]="!signature()" (click)="copySignature()">
-          {{ signatureCopied() ? 'COPIED' : 'COPY SIGNATURE' }}
-        </button>
       </div>
     </header>
 
-    @if (intent(); as i) {
+    @if (action(); as a) {
       <div class="page-grid">
         <section class="left">
-          <hc-code-viewer
-            [code]="code()"
-            [editable]="true"
-            (codeChange)="updateCode($event)">
-          </hc-code-viewer>
-
-          <div class="panel">
-            <div class="intent-tabs">
-              <div class="intent-tabbar">
-                <div class="intent-tabbar-left">
-                  <div class="intent-label">INTENT</div>
-                </div>
-
-                <div class="intent-tabbar-right">
-                  @for (s of intentSections(); track s.id) {
-                    <button
-                      class="intent-tab"
-                      type="button"
-                      [class.active]="intentTab() === s.id"
-                      (click)="setIntentTab(s.id)">
-                      {{ s.label }}
-                    </button>
-                  }
-                </div>
-              </div>
-
-              <div class="intent-tabcontent">
-                @switch (intentTab()) {
-                  @case ('description') {
-                    <textarea
-                      class="desc editor"
-                      [value]="i.description"
-                      (input)="updateIntent('description', $any($event.target).value)">
-                    </textarea>
-                  }
-
-                  @case ('grammar') {
-                    <textarea
-                      class="desc editor"
-                      [value]="grammarText()"
-                      (input)="updateGrammarText($any($event.target).value)"
-                      placeholder="one per line&#10;example — meaning (optional)">
-                    </textarea>
-                  }
-
-                  @case ('links') {
-                    <textarea
-                      class="desc editor"
-                      [value]="linksText()"
-                      (input)="updateLinksText($any($event.target).value)"
-                      placeholder="one per line&#10;label | url | trust(optional)">
-                    </textarea>
-                  }
-                }
-              </div>
-            </div>
-          </div>
+          <!-- static source view only -->
+          <hc-code-viewer [code]="classSource()"></hc-code-viewer>
         </section>
 
         <aside class="right">
           <div class="panel right-tabs">
-            <div class="right-tabbar" role="tablist" aria-label="right sidebar tabs">
-              <button
-                class="right-tab"
-                type="button"
-                role="tab"
-                [class.active]="rightTab() === 'safety'"
-                [attr.aria-selected]="rightTab() === 'safety'"
-                (click)="setRightTab('safety')">
-                SAFETY
-              </button>
-
-              <button
-                class="right-tab"
-                type="button"
-                role="tab"
-                [class.active]="rightTab() === 'json'"
-                [attr.aria-selected]="rightTab() === 'json'"
-                (click)="setRightTab('json')">
-                JSON
-              </button>
-            </div>
-
-            <div class="right-tabcontent" role="tabpanel">
-              @switch (rightTab()) {
-                @case ('safety') {
-                  <div class="panel-title">Safety</div>
-                  <ul class="list">
-                    <li>signature updates as you edit</li>
-                    <li>refresh restores the cached draft for this signature</li>
-                    <li>verify before confirming</li>
-                  </ul>
-                }
-
-                @case ('json') {
-                  <div class="panel-title">Export</div>
-                  <pre class="json-pre">{{ jsonView() }}</pre>
-                }
-              }
-            </div>
+            <div class="panel-title">safety</div>
+            <ul class="list">
+              <li>review this code like it is untrusted input</li>
+              <li>focus on network calls, data exfiltration, and token/resource access</li>
+              <li>verify before confirming</li>
+            </ul>
           </div>
         </aside>
       </div>
 
       <footer class="bottom-buttons">
-        <button class="button primary" type="button" [disabled]="signing()" (click)="forceResignNow()">
-          {{ signing() ? 'SIGNING…' : 'RE-SIGN NOW' }}
+        <button class="button primary" type="button" [disabled]="!canConfirm()" (click)="confirm()">
+          allow script
         </button>
 
-        <button class="button secondary" type="button" (click)="cancel()">DONE</button>
+        <button class="button secondary" type="button" (click)="done()">
+          done
+        </button>
       </footer>
     }
   </div>

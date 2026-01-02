@@ -13,6 +13,7 @@
     <button (click)="add()">Add</button>
   </div>
 
+  <!-- Using @if syntax for conditionals -->
   @if (domains().length) {
     <ul class="domain-list">
       @for (d of domains(); track d) {
@@ -28,17 +29,40 @@
 
   <hr />
 
-  <button class="primary" type="button" [disabled]="busy()" (click)="createModule()">
-    {{ busy() ? 'Creating…' : 'Create new module' }}
-  </button>
+  <p class="subtitle">Module signature</p>
 
-  <a href="#" (click)="testPost($event)">test postMessage payload → self</a>
+  <div class="domain-input">
+    <input
+      type="text"
+      placeholder="64 hex signature"
+      [value]="moduleSignature()"
+      (input)="moduleSignature.set($any($event.target).value)"
+      (keydown.enter)="loadModule()" />
+    <button class="primary" type="button" [disabled]="moduleBusy()" (click)="loadModule()">
+      {{ moduleBusy() ? 'Loading…' : 'Load module' }}
+    </button>
+  </div>
 
-  @if (lastSignature()) {
-    <p class="subtitle mono">last signature: {{ lastSignature() }}</p>
+  @if (moduleError()) {
+    <p class="error">{{ moduleError() }}</p>
   }
 
-  @if (error()) {
-    <p class="error">{{ error() }}</p>
+  @if (resolvedModule(); as m) {
+    <p class="subtitle mono">module: {{ m.module.name }}</p>
+
+    @if (actions().length) {
+      <ul class="domain-list">
+        @for (a of actions(); track a.signature) {
+          <li>
+            <span class="mono">{{ a.signature }}</span>
+            <button class="primary" type="button" (click)="openAction(a.signature)">
+              Open
+            </button>
+          </li>
+        }
+      </ul>
+    } @else {
+      <p class="empty">No actions in this module.</p>
+    }
   }
 </div>
