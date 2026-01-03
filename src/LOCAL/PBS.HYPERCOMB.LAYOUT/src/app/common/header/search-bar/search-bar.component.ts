@@ -1,7 +1,8 @@
 // src/app/common/header/search-bar/search-bar.component.ts
 
-import { AfterViewInit, Component, ElementRef, OnDestroy, ViewChild } from '@angular/core'
+import { AfterViewInit, Component, ElementRef, OnDestroy, ViewChild, inject } from '@angular/core'
 import { hypercomb } from '@hypercomb/core'
+import { OpfsStore } from '../../../core/opfs.store'
 import { InitState } from '../../../core/model'
 
 @Component({
@@ -10,32 +11,33 @@ import { InitState } from '../../../core/model'
   templateUrl: './search-bar.component.html',
   styleUrls: ['./search-bar.component.scss']
 })
-export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDestroy {
+export class SearchBarComponent
+  extends hypercomb
+  implements AfterViewInit, OnDestroy {
 
   @ViewChild('input', { static: true })
   private readonly input!: ElementRef<HTMLInputElement>
 
-  private hasActions = false
+  private readonly opfs = inject(OpfsStore)
+
   private initState: InitState = 'locked'
 
   private static readonly INIT_LINE = '# Press Enter to open the Portal'
 
-  private readonly onActionsAvailable = (): void => {
-    this.hasActions = true
-    this.initState = 'unlocked'
-    this.clear()
-  }
+  // -------------------------------------------------
+  // lifecycle
+  // -------------------------------------------------
 
   public ngAfterViewInit(): void {
-    if (this.hasActions) this.initState = 'unlocked'
-    window.addEventListener('actions:available', this.onActionsAvailable)
+    if (this.opfs.actionsReady()) {
+      this.initState = 'unlocked'
+    }
+
     this.input.nativeElement.focus()
     this.updatePlaceholder()
   }
 
-  public ngOnDestroy(): void {
-    window.removeEventListener('actions:available', this.onActionsAvailable)
-  }
+  public ngOnDestroy(): void {}
 
   // -------------------------------------------------
   // input handling
@@ -43,16 +45,28 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
 
   public onKeyDown = (e: KeyboardEvent): void => {
 
-    // unlocked → normal behavior
-    if (this.initState === 'unlocked') {
+    // -------------------------------------------------
+    // actions exist → always allow typing
+    // -------------------------------------------------
+
+    if (this.opfs.actionsReady()) {
+      if (this.initState !== 'unlocked') {
+        this.initState = 'unlocked'
+        this.clear()
+      }
+
       if (e.key === 'Enter') {
         e.preventDefault()
         void this.commit()
       }
+
       return
     }
 
-    // locked / armed gate
+    // -------------------------------------------------
+    // no actions → portal gate
+    // -------------------------------------------------
+
     e.preventDefault()
 
     if (this.initState === 'locked') {
@@ -83,7 +97,7 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
   }
 
   // -------------------------------------------------
-  // commit (enter boundary)
+  // commit
   // -------------------------------------------------
 
   private commit = async (): Promise<void> => {
@@ -91,7 +105,6 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
     if (!v) return
 
     await this.act(v)
-
     this.input.nativeElement.value = ''
   }
 
@@ -111,7 +124,10 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
   }
 
   private updatePlaceholder = (): void => {
-    this.input.nativeElement.placeholder = 'Type # and press Enter to open the Portal'
+    this.input.nativeElement.placeholder =
+      this.opfs.actionsReady()
+        ? 'Type a command…'
+        : 'Type # and press Enter to open the Portal'
   }
 
   private placeCaretAtEnd = (): void => {
