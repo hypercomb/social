@@ -1,18 +1,16 @@
 // src/app/core/script-preloader.service.ts
 
 import { Injectable, inject } from '@angular/core'
-import { OpfsManager } from './opfs.manager'
+import { OpfsStore } from './opfs.store'
 
 @Injectable({ providedIn: 'root' })
 export class ScriptPreloaderService {
 
   // in-memory cache of payload bytes keyed by signature (file name)
   private readonly cache = new Map<string, ArrayBuffer>()
+  private readonly opfs = inject(OpfsStore)
 
-  private readonly opfs = inject(OpfsManager)
-  private readonly rootPromise = this.opfs.root()
-
-  public constructor() {
+  public initialize = async () => {
     // fire and forget: warm all scripts on startup
     void this.preloadAll()
   }
@@ -30,7 +28,7 @@ export class ScriptPreloaderService {
   // load all files from /resources into memory
   private readonly preloadAll = async (): Promise<void> => {
     try {
-      const root = await this.rootPromise
+      const root = this.opfs.root()!
 
       let resourcesDir: FileSystemDirectoryHandle
       try {

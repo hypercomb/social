@@ -4,30 +4,30 @@ import { Component, inject, signal } from '@angular/core'
 import { RouterOutlet } from '@angular/router'
 import { Header } from "./header/header"
 import { Footer } from "./footer/footer"
-import { synchronizer } from './core/synchronizer'
 import { hypercomb } from '@hypercomb/core'
 import { ScriptPreloaderService } from './core/script-preloader.service' // <-- add this import
+import { OpfsStore } from './core/opfs.store'
+import { MovementService } from './core/movment.service'
 
 @Component({
   selector: 'app-root',
   imports: [RouterOutlet, Header, Footer],
-  providers: [synchronizer],
   templateUrl: './app.html',
   styleUrl: './app.scss'
 })
 export class App extends hypercomb {
-
+  private readonly opfs = inject(OpfsStore)
   protected readonly title = signal('PBS.HYPERCOMB.LAYOUT')
   public showHeader = true
   public showFooter = false
-  
+
   // --------------------------------------------------------
   // startup dependencies
   // --------------------------------------------------------
-  private readonly sync = inject(synchronizer)
+  private readonly movement = inject(MovementService)
   private readonly preloader = inject(ScriptPreloaderService) // <-- preload scripts on app start
   // --------------------------------------------------------
-  
+
   constructor() {
     super()
 
@@ -39,25 +39,12 @@ export class App extends hypercomb {
 
     // preload scripts first
     // no need to await — just fire it and let it warm up while bootstrapping
-    void this.preloader
+    queueMicrotask(async () => {
+      await this.opfs.initialize()
+      await this.preloader.initialize()
+      //synchronize initial directory after OPFS is ready
+      window.dispatchEvent(new Event('synchronize'))
+    })
 
-    // replay url once, in order
-    this.bootstrapFromUrl().catch(console.error)
-  }
-
-  private readonly bootstrapFromUrl = async (): Promise<void> => {
-    const original = window.location.pathname
-    const segs = original.split('/').filter(Boolean)
-    const state = window.history.state as any
-
-    if (!segs.length) return
-    if (state?.__hc === 1) return
-
-    window.history.replaceState({ __hc: 1, i: 0 }, '', '/')
-
-    // critical: await, so / -> /jaime -> /jaime/weise (no races)
-    for (const seg of segs) {
-      await this.act(seg)
-    }
   }
 }

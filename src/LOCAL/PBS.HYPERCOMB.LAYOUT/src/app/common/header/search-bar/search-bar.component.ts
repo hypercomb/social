@@ -1,4 +1,5 @@
 // src/app/common/header/search-bar/search-bar.component.ts
+
 import { AfterViewInit, Component, ElementRef, OnDestroy, ViewChild } from '@angular/core'
 import { hypercomb } from '@hypercomb/core'
 import { InitState } from '../../../core/model'
@@ -14,15 +15,12 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
   @ViewChild('input', { static: true })
   private readonly input!: ElementRef<HTMLInputElement>
 
-  // todo: replace with action registry / manifest lookup
   private hasActions = false
-
   private initState: InitState = 'locked'
 
   private static readonly INIT_LINE = '# Press Enter to open the Portal'
 
   private readonly onActionsAvailable = (): void => {
-    // once at least one action exists, normal behavior starts
     this.hasActions = true
     this.initState = 'unlocked'
     this.clear()
@@ -30,9 +28,7 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
 
   public ngAfterViewInit(): void {
     if (this.hasActions) this.initState = 'unlocked'
-
     window.addEventListener('actions:available', this.onActionsAvailable)
-
     this.input.nativeElement.focus()
     this.updatePlaceholder()
   }
@@ -41,23 +37,24 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
     window.removeEventListener('actions:available', this.onActionsAvailable)
   }
 
+  // -------------------------------------------------
+  // input handling
+  // -------------------------------------------------
+
   public onKeyDown = (e: KeyboardEvent): void => {
 
-    // unlocked → normal behavior (future: hash triggers intellisense)
+    // unlocked → normal behavior
     if (this.initState === 'unlocked') {
       if (e.key === 'Enter') {
         e.preventDefault()
-        this.commit().catch(console.error)
+        void this.commit()
       }
-
-      // todo: if (this.isHashKey(e)) { start intellisense }
       return
     }
 
-    // locked/armed gate: prevent all typing
+    // locked / armed gate
     e.preventDefault()
 
-    // locked → only '#'
     if (this.initState === 'locked') {
       if (this.isHashKey(e)) {
         this.initState = 'armed'
@@ -69,7 +66,6 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
       return
     }
 
-    // armed → only enter / backspace / delete
     if (this.initState === 'armed') {
       if (e.key === 'Enter') {
         window.dispatchEvent(new CustomEvent('portal:open'))
@@ -82,18 +78,26 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
         return
       }
 
-      // keep caret pinned at the end
       this.placeCaretAtEnd()
     }
   }
+
+  // -------------------------------------------------
+  // commit (enter boundary)
+  // -------------------------------------------------
 
   private commit = async (): Promise<void> => {
     const v = this.input.nativeElement.value.trim()
     if (!v) return
 
     await this.act(v)
+
     this.input.nativeElement.value = ''
   }
+
+  // -------------------------------------------------
+  // ui helpers
+  // -------------------------------------------------
 
   private resetInit = (): void => {
     this.initState = 'locked'
@@ -107,7 +111,6 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
   }
 
   private updatePlaceholder = (): void => {
-    // placeholder is only visible when value is empty
     this.input.nativeElement.placeholder = 'Type # and press Enter to open the Portal'
   }
 

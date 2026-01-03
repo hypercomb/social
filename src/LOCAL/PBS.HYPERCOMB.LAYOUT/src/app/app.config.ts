@@ -1,8 +1,9 @@
+import { ACTION_RESOLVER } from '@hypercomb/core';
 import { ApplicationConfig, provideBrowserGlobalErrorListeners, provideZoneChangeDetection } from '@angular/core';
 import { provideRouter } from '@angular/router';
 import { routes } from './app.routes';
-import { OpfsManager } from './core/opfs.manager';
-import { ACTION_MANAGER } from '@hypercomb/core';
+import { OpfsStore } from './core/opfs.store';
+
 
 
 export const appConfig: ApplicationConfig = {
@@ -11,7 +12,8 @@ export const appConfig: ApplicationConfig = {
     provideBrowserGlobalErrorListeners(),
     provideZoneChangeDetection({ eventCoalescing: true }),
     provideRouter(routes),
-    // action discovery seam
-    { provide: ACTION_MANAGER, useClass: OpfsManager }
+    
+    { provide: ACTION_RESOLVER, useClass: OpfsStore }
+
   ]
 };

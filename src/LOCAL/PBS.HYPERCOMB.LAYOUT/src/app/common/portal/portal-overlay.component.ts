@@ -1,4 +1,3 @@
-    // src/app/common/portal/portal-overlay.component.ts
 import { Component, OnDestroy, OnInit, signal } from '@angular/core'
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser'
 
@@ -10,40 +9,55 @@ import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser'
 })
 export class PortalOverlayComponent implements OnInit, OnDestroy {
 
-  // todo: replace with your real dcp url
+  // dcp entry point
   private static readonly DCP_URL = 'http://localhost:2400'
 
   public readonly open = signal(false)
   public readonly src = signal<SafeResourceUrl | null>(null)
 
+  // -------------------------------------------------
+  // open portal
+  // -------------------------------------------------
   private readonly onPortalOpen = (): void => {
     this.open.set(true)
-    this.src.set(this.sanitizer.bypassSecurityTrustResourceUrl(PortalOverlayComponent.DCP_URL))
+    this.src.set(
+      this.sanitizer.bypassSecurityTrustResourceUrl(
+        PortalOverlayComponent.DCP_URL
+      )
+    )
   }
 
+  // -------------------------------------------------
+  // iframe → parent messages
+  // -------------------------------------------------
   private readonly onMessage = (e: MessageEvent): void => {
-    // accept only messages from the iframe window and expected origin
-    // note: requires iframe sandbox includes allow-same-origin so origin is not "null"
-    const expected = new URL(PortalOverlayComponent.DCP_URL).origin
-    if (e.origin !== expected) return
+    const expectedOrigin = new URL(
+      PortalOverlayComponent.DCP_URL
+    ).origin
+
+    // enforce origin boundary
+    if (e.origin !== expectedOrigin) return
 
     const data = e.data as { type?: string } | null
     if (!data?.type) return
 
-    if (data.type === 'dcp:confirm') {
-      // todo: persist payload / update manifest here
-      this.close()
+    switch (data.type) {
+      case 'dcp:confirm':
+        this.close()
+        window.dispatchEvent(
+          new CustomEvent('actions:available')
+        )
+        break
 
-      // tells search-bar (and anyone else) that actions now exist
-      window.dispatchEvent(new CustomEvent('actions:available'))
-      return
-    }
-
-    if (data.type === 'dcp:cancel') {
-      this.close()
+      case 'dcp:cancel':
+        this.close()
+        break
     }
   }
 
+  // -------------------------------------------------
+  // escape key closes portal
+  // -------------------------------------------------
   private readonly onKeyDown = (e: KeyboardEvent): void => {
     if (!this.open()) return
     if (e.key !== 'Escape') return
@@ -51,8 +65,13 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     this.close()
   }
 
-  constructor(private readonly sanitizer: DomSanitizer) {}
+  constructor(
+    private readonly sanitizer: DomSanitizer
+  ) {}
 
+  // -------------------------------------------------
+  // lifecycle
+  // -------------------------------------------------
   public ngOnInit(): void {
     window.addEventListener('portal:open', this.onPortalOpen)
     window.addEventListener('message', this.onMessage)
@@ -65,6 +84,9 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     window.removeEventListener('keydown', this.onKeyDown)
   }
 
+  // -------------------------------------------------
+  // close portal
+  // -------------------------------------------------
   public close = (): void => {
     this.open.set(false)
     this.src.set(null)
