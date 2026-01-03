@@ -1,10 +1,40 @@
 <!-- src/app/common/header/search-bar/search-bar.component.html -->
-<input
-  #input
-  type="text"
-  autocomplete="off"
-  spellcheck="false"
-  aria-label="intention input"
-  (keydown)="onKeyDown($event)"
-  placeholder="Type # and press Enter to open the Portal"
-/>
+
+<div class="hc-search-bar">
+  <div class="field">
+    <input
+      class="ghost-input"
+      type="text"
+      tabindex="-1"
+      readonly
+      aria-hidden="true"
+      [value]="ghostValue()"
+    />
+
+    <input
+      #input
+      class="input"
+      type="text"
+      autocomplete="off"
+      autocapitalize="off"
+      spellcheck="false"
+      (keydown)="onKeyDown($event)"
+      (input)="onInput()"
+    />
+  </div>
+
+  @if (showCompletions()) {
+    <ul class="completions" role="listbox">
+      @for (s of suggestions(); track s; let i = $index) {
+        <li
+          class="item"
+          role="option"
+          [class.active]="i === getActiveIndex()"
+          (mousedown)="onSuggestionMouseDown($event, s, i)"
+        >
+          <span class="typed">{{ typedPart(s) }}</span><span class="rest">{{ restPart(s) }}</span>
+        </li>
+      }
+    </ul>
+  }
+</div>
