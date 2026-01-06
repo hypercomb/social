@@ -24,11 +24,12 @@ interface FileEntry {
 export class OpfsExplorerComponent {
 
   public readonly entries = signal<FileEntry[]>([])
+
   private readonly movement = inject(MovementService)
   private readonly opfs = inject(OpfsStore)
 
   constructor() {
-    // reactive chain: rerun whenever movement changes or OPFS directory updates
+    // re-project whenever navigation or directory changes
     effect(() => {
       this.movement.moved()
       void this.project()
@@ -57,12 +58,25 @@ export class OpfsExplorerComponent {
 
   public copyDetails = (e: FileEntry, ev: MouseEvent): void => {
     ev.stopPropagation()
-    navigator.clipboard.writeText(e.name)
+    void navigator.clipboard.writeText(e.name)
   }
 
-  public delete = (_e: FileEntry, ev: MouseEvent): void => {
+  public delete = async (e: FileEntry, ev: MouseEvent): Promise<void> => {
     ev.stopPropagation()
-    // intentionally empty for now
+
+    const current = this.opfs.current()
+    if (!current) return
+
+    try {
+      await current.removeEntry(e.name, {
+        recursive: e.kind === 'directory'
+      })
+
+      // refresh view after deletion
+      void this.project()
+    } catch (err) {
+      console.error('failed to delete entry', e.name, err)
+    }
   }
 
   // -------------------------------------------------
@@ -74,8 +88,8 @@ export class OpfsExplorerComponent {
     if (!current) return
 
     const list: FileEntry[] = []
-    const entries = current.entries()
-    for await (const [name, handle] of entries) {
+
+    for await (const [name, handle] of current.entries()) {
       list.push({
         name,
         kind: handle.kind as 'file' | 'directory',

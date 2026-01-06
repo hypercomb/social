@@ -69,7 +69,7 @@ export class MovementService {
     }
 
     this.committing = (async () => {
-      const dir = await this.opfs.syncToUrl(create)
+      const dir = await this.opfs.sync(create)
       this.opfs.current.set(dir)
       this.moved.update(v => v + 1)
     })()

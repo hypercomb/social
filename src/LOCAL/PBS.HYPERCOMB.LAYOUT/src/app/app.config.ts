@@ -12,8 +12,10 @@ export const appConfig: ApplicationConfig = {
     provideBrowserGlobalErrorListeners(),
     provideZoneChangeDetection({ eventCoalescing: true }),
     provideRouter(routes),
-    
-    { provide: ACTION_RESOLVER, useClass: OpfsStore }
-
+    OpfsStore, // optional if already providedIn: 'root'
+    {
+      provide: ACTION_RESOLVER,
+      useExisting: OpfsStore
+    }
   ]
 };

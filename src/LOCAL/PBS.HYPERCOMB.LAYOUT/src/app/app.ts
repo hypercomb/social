@@ -6,8 +6,8 @@ import { Header } from "./header/header"
 import { Footer } from "./footer/footer"
 import { hypercomb } from '@hypercomb/core'
 import { ScriptPreloaderService } from './core/script-preloader.service' // <-- add this import
-import { OpfsStore } from './core/opfs.store'
 import { MovementService } from './core/movment.service'
+import { OpfsStore } from './core/opfs.store'
 
 @Component({
   selector: 'app-root',
@@ -41,10 +41,8 @@ export class App extends hypercomb {
     // no need to await — just fire it and let it warm up while bootstrapping
     queueMicrotask(async () => {
       await this.opfs.initialize()
-      await this.preloader.initialize()
       //synchronize initial directory after OPFS is ready
       window.dispatchEvent(new Event('synchronize'))
     })
-
   }
 }

@@ -1,12 +1,15 @@
+// src/app/messaging/resource-message-handler.ts
 import { Injectable, inject } from '@angular/core'
 import { OpfsStore } from '../core/opfs.store'
+import { ScriptPreloaderService } from '../core/script-preloader.service'
 
 @Injectable({ providedIn: 'root' })
 export class ResourceMessageHandler {
 
   private readonly opfs = inject(OpfsStore)
+  private readonly preloader = inject(ScriptPreloaderService)
 
-  // whitelist for allowed postMessage origins
+  // whitelist for allowed postmessage origins
   private readonly allowedOrigins = new Set<string>([
     window.origin,
     'http://localhost:2400',
@@ -25,32 +28,33 @@ export class ResourceMessageHandler {
   // -------------------------------------------------
   // main dcp-scoped message handler
   // -------------------------------------------------
+
   public handle = async (event: MessageEvent): Promise<void> => {
     if (!this.allowedOrigins.has(event.origin)) return
 
     const data = event.data
     if (!data || typeof data !== 'object') return
     if ((data as any).scope !== 'dcp') return
-
     if ((data as any).type !== 'compiled.code') return
 
     await this.handleCompiled(data as { code?: string })
   }
+
   // -------------------------------------------------
-  // compiled JS → OPFS (authoritative store)
+  // compiled js → opfs (authoritative store)
   // -------------------------------------------------
-  private handleCompiled = async (msg: {
-    code?: string
-  }): Promise<void> => {
+
+  private handleCompiled = async (msg: { code?: string }): Promise<void> => {
     if (!msg.code || typeof msg.code !== 'string') return
 
-    // convert compiled JS string → bytes
     const bytes = new TextEncoder().encode(msg.code).buffer
-
-    // OPFS owns signing, dedupe, persistence
     const signature = await this.opfs.store(bytes)
+
+    // single incremental update
+    this.preloader.add(signature, bytes)
 
     console.log('[dcp] compiled action stored', signature)
   }
+
 
 }

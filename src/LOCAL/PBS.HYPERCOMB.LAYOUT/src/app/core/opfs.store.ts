@@ -1,38 +1,40 @@
 // src/app/core/opfs.store.ts
 
-import { Injectable, signal } from '@angular/core'
+import { inject, Injectable, signal } from '@angular/core'
 import { SignatureService } from '@hypercomb/core'
+import { ScriptPreloaderService } from './script-preloader.service'
 
 @Injectable({ providedIn: 'root' })
 export class OpfsStore {
 
   public static readonly RESOURCES_DIR = 'resources'
 
-  // -------------------------------------------------
+  private readonly preloader = inject(ScriptPreloaderService)
+
+  // ----------------------------------
   // reactive state
-  // -------------------------------------------------
+  // ----------------------------------
 
   public readonly ready = signal(false)
-
-  // true once at least one action is discoverable
   public readonly actionsReady = signal(false)
 
   public readonly root = signal<FileSystemDirectoryHandle | null>(null)
   public readonly current = signal<FileSystemDirectoryHandle | null>(null)
 
-  private resourcesHandle?: FileSystemDirectoryHandle
+  private resources!: FileSystemDirectoryHandle
 
-  // -------------------------------------------------
+  // ----------------------------------
   // navigation hooks
-  // -------------------------------------------------
+  // ----------------------------------
 
-  private readonly onSynchronize = async (): Promise<void> => {
-    const dir = await this.syncToUrl(true)
+  private readonly onSynchronize = async (e: Event): Promise<void> => {
+    const grammar = (e as CustomEvent<string>).detail
+    const dir = await this.sync(true, grammar)
     this.current.set(dir)
   }
 
   private readonly onPopstate = async (): Promise<void> => {
-    const dir = await this.syncToUrl(false)
+    const dir = await this.sync(false)
     this.current.set(dir)
   }
 
@@ -40,9 +42,9 @@ export class OpfsStore {
     window.addEventListener('synchronize', this.onSynchronize)
   }
 
-  // -------------------------------------------------
+  // ----------------------------------
   // init
-  // -------------------------------------------------
+  // ----------------------------------
 
   public initialize = async (): Promise<void> => {
     if (this.ready()) return
@@ -51,52 +53,56 @@ export class OpfsStore {
     this.root.set(root)
 
     // resources dir
-    this.resourcesHandle =
-      await root.getDirectoryHandle(OpfsStore.RESOURCES_DIR, { create: true })
+    this.resources = await root.getDirectoryHandle(
+      OpfsStore.RESOURCES_DIR,
+      { create: true }
+    )
 
-    // discover actions once, at init
-    const hasAnyActions = await this.discoverActions()
-    this.actionsReady.set(hasAnyActions)
+    // single authoritative discovery
+    await this.preloader.initialize(this.resources)
 
+    this.actionsReady.set(this.preloader.actionNames().length > 0)
     this.ready.set(true)
 
     window.addEventListener('popstate', this.onPopstate)
 
-    const dir = await this.syncToUrl(false)
+    const dir = await this.sync(false)
     this.current.set(dir)
   }
 
-  // -------------------------------------------------
-  // discovery
-  // -------------------------------------------------
+  // ----------------------------------
+  // execution lookup
+  // ----------------------------------
 
-  private discoverActions = async (): Promise<boolean> => {
-    // intentionally conservative:
-    // existence of at least one executable action is enough
+  public find = async (): Promise<ArrayBuffer[]> => {
+    const out: ArrayBuffer[] = []
 
-    const resources = this.resourcesHandle
-    if (!resources) return false
+    for await (const [signature, handle] of this.current()!.entries()) {
+      if (handle.kind !== 'file') continue
 
-    try {
-      for await (const _ of (resources as any).values()) {
-        return true
-      }
-    } catch {
-      // ignore enumeration errors
+      const bytes = this.preloader.get(signature)
+      if (bytes) out.push(bytes)
     }
 
-    return false
+    return out
   }
 
-  // -------------------------------------------------
+  // ----------------------------------
   // directory sync
-  // -------------------------------------------------
+  // ----------------------------------
 
-  public syncToUrl = async (create: boolean): Promise<FileSystemDirectoryHandle> => {
+  public sync = async (
+    create: boolean,
+    grammar?: string
+  ): Promise<FileSystemDirectoryHandle> => {
+
     const root = this.root()
     if (!root) throw new Error('root not initialized')
 
-    const segments = this.getLineageFromUrl()
+    const segments = grammar?.trim()
+      ? grammar.trim().split(/\s+/)
+      : this.getLineageFromUrl()
+
     let dir = root
 
     for (const seg of segments) {
@@ -106,23 +112,14 @@ export class OpfsStore {
     return dir
   }
 
-  public add = async (name: string): Promise<FileSystemDirectoryHandle> => {
-    const base = this.current() ?? this.root()
-    if (!base) throw new Error('no active directory')
-    return await base.getDirectoryHandle(name, { create: true })
-  }
-
-  // -------------------------------------------------
+  // ----------------------------------
   // resources
-  // -------------------------------------------------
+  // ----------------------------------
 
   public store = async (bytes: ArrayBuffer): Promise<string> => {
-    if (!(bytes instanceof ArrayBuffer)) throw new Error('invalid bytes')
-    const dir = this.resourcesHandle
-    if (!dir) throw new Error('resources not initialized')
-
     const signature = await SignatureService.sign(bytes)
-    const handle = await dir.getFileHandle(signature, { create: true })
+
+    const handle = await this.resources.getFileHandle(signature, { create: true })
     const writable = await handle.createWritable()
 
     try {
@@ -131,21 +128,19 @@ export class OpfsStore {
       await writable.close()
     }
 
-    // first successful store implies actions exist
-    if (!this.actionsReady()) {
-      this.actionsReady.set(true)
-    }
-
+    this.actionsReady.set(true)
     return signature
   }
 
-  public attach = async (signature: string): Promise<void> => {
-    const resources = this.resourcesHandle
-    if (!resources) throw new Error('resources not initialized')
+  // ----------------------------------
+  // markers
+  // ----------------------------------
 
-    await resources.getFileHandle(signature, { create: false })
+  public attach = async (actionName: string): Promise<void> => {
+    const signature = this.preloader.actionIndex.get(actionName)
+    if (!signature) return
 
-    const current = this.current() ?? (await this.syncToUrl(false))
+    const current = this.current() ?? (await this.sync(false))
     const marker = await current.getFileHandle(signature, { create: true })
     const writable = await marker.createWritable()
 
@@ -157,19 +152,22 @@ export class OpfsStore {
   }
 
   public detach = async (signature: string): Promise<void> => {
-    const current = this.current() ?? (await this.syncToUrl(false))
+    const current = this.current() ?? (await this.sync(false))
     try {
       await current.removeEntry(signature)
     } catch (err) {
-      if ((err as DOMException | undefined)?.name !== 'NotFoundError') throw err
+      if ((err as DOMException)?.name !== 'NotFoundError') throw err
     }
   }
 
-  // -------------------------------------------------
+  // ----------------------------------
   // utils
-  // -------------------------------------------------
+  // ----------------------------------
 
   private getLineageFromUrl = (): string[] => {
-    return window.location.pathname.split('/').filter(Boolean)
+    return window.location.pathname
+      .split('/')
+      .filter(Boolean)
+      .map(decodeURIComponent)
   }
 }

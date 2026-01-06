@@ -1,5 +1,4 @@
 // src/app/common/header/search-bar/search-bar.component.ts
-
 import { AfterViewInit, Component, ElementRef, OnDestroy, ViewChild, computed, inject, signal } from '@angular/core'
 import { hypercomb } from '@hypercomb/core'
 import { OpfsStore } from '../../../core/opfs.store'
@@ -7,16 +6,18 @@ import { InitState } from '../../../core/model'
 import { ResourceCompletionService } from './resource-completion.service'
 
 type CompletionStyle = 'space' | 'dot'
+type CompletionMode = 'action' | 'marker'
 
 type CompletionContext =
   | { active: false }
   | {
-      active: true
-      head: string          // everything up to and including "#"+spaces
-      raw: string           // raw token text after "#"
-      normalized: string    // normalized for matching
-      style: CompletionStyle
-    }
+    active: true
+    mode: CompletionMode
+    head: string
+    raw: string
+    normalized: string
+    style: CompletionStyle
+  }
 
 @Component({
   selector: 'hc-search-bar',
@@ -24,9 +25,7 @@ type CompletionContext =
   templateUrl: './search-bar.component.html',
   styleUrls: ['./search-bar.component.scss']
 })
-export class SearchBarComponent
-  extends hypercomb
-  implements AfterViewInit, OnDestroy {
+export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDestroy {
 
   @ViewChild('input', { static: true })
   private readonly input!: ElementRef<HTMLInputElement>
@@ -41,34 +40,44 @@ export class SearchBarComponent
   private readonly activeIndex = signal(0)
   private readonly suppressed = signal(false)
 
+  private readonly markerVerbs = new Set<string>(['add', 'tag', 'mark', 'attach'])
+
   // -------------------------------------------------
-  // completion context (ANY #, last one wins)
+  // completion context
+  // - if there is a #, we complete the marker segment (after the last #)
+  // - otherwise, we complete the command itself
   // -------------------------------------------------
 
   private readonly context = computed<CompletionContext>(() => {
     const v = this.value()
+    const lastHash = v.lastIndexOf('#')
 
-    const hashIndex = v.lastIndexOf('#')
-    if (hashIndex === -1) return { active: false }
+    // marker mode (last # wins)
+    if (lastHash !== -1) {
+      const after = v.slice(lastHash + 1)
+      const leadingWs = after.match(/^\s*/)?.[0] ?? ''
+      const raw = after.slice(leadingWs.length)
 
-    const afterHash = v.slice(hashIndex + 1)
+      return {
+        active: true,
+        mode: 'marker',
+        head: v.slice(0, lastHash + 1) + leadingWs,
+        raw,
+        normalized: this.normalize(raw),
+        style: raw.includes('.') ? 'dot' : 'space'
+      }
+    }
 
-    const leadingWs = afterHash.match(/^\s*/)?.[0] ?? ''
-    const raw = afterHash.slice(leadingWs.length)
-
-    const head = v.slice(0, hashIndex + 1) + leadingWs
-
-    const style: CompletionStyle =
-      raw.includes('.') ? 'dot' : 'space'
-
-    const normalized = this.normalize(raw)
+    // action mode (only when the user has started typing)
+    if (!v.trim()) return { active: false }
 
     return {
       active: true,
-      head,
-      raw,
-      normalized,
-      style
+      mode: 'action',
+      head: '',
+      raw: v,
+      normalized: this.normalize(v),
+      style: v.includes('.') ? 'dot' : 'space'
     }
   })
 
@@ -82,11 +91,10 @@ export class SearchBarComponent
     const ctx = this.context()
     if (!ctx.active) return []
 
-    const prefix = ctx.normalized
     const all = this.resources.names()
+    if (!ctx.normalized) return all
 
-    if (!prefix) return all
-    return all.filter(n => n.startsWith(prefix))
+    return all.filter(n => n.startsWith(ctx.normalized))
   })
 
   public readonly showCompletions = computed<boolean>(() => {
@@ -94,7 +102,7 @@ export class SearchBarComponent
   })
 
   // -------------------------------------------------
-  // ghost text (mirrored input behind real input)
+  // ghost mirror
   // -------------------------------------------------
 
   public readonly ghostValue = computed<string>(() => {
@@ -110,21 +118,19 @@ export class SearchBarComponent
     if (!best.startsWith(ctx.normalized)) return ''
     if (best.length === ctx.normalized.length) return ''
 
-    const renderedBest = this.render(best, ctx.style)
-    const renderedPrefix = this.render(ctx.normalized, ctx.style)
+    const rendered = this.render(best, ctx.style)
+    const prefix = this.render(ctx.normalized, ctx.style)
 
-    let suffix = renderedBest.slice(renderedPrefix.length)
+    let suffix = rendered.slice(prefix.length)
     if (!suffix) return ''
 
     const current = this.value()
     const last = current.slice(-1)
 
-    if ((last === '.' || /\s/.test(last)) &&
-        (suffix.startsWith('.') || suffix.startsWith(' '))) {
+    if ((last === '.' || /\s/.test(last)) && (suffix.startsWith('.') || suffix.startsWith(' '))) {
       suffix = suffix.slice(1)
     }
 
-    if (!suffix) return ''
     return current + suffix
   })
 
@@ -137,17 +143,15 @@ export class SearchBarComponent
       this.initState = 'unlocked'
     }
 
-    void this.resources.initialize()
-
     this.input.nativeElement.focus()
     this.syncSignalsFromDom()
     this.updatePlaceholder()
   }
 
-  public ngOnDestroy(): void {}
+  public ngOnDestroy(): void { }
 
   // -------------------------------------------------
-  // template helpers
+  // template-required helpers
   // -------------------------------------------------
 
   public getActiveIndex = (): number => {
@@ -190,51 +194,49 @@ export class SearchBarComponent
 
   public onKeyDown = (e: KeyboardEvent): void => {
 
-    // actions exist → normal typing + intellisense
-    if (this.opfs.actionsReady()) {
-      if (this.initState !== 'unlocked') {
-        this.initState = 'unlocked'
-        this.clear()
-      }
+    // portal gate
+    if (!this.opfs.actionsReady()) {
+      e.preventDefault()
 
-      if (this.handleCompletionKeys(e)) return
-
-      if (e.key === 'Enter') {
-        e.preventDefault()
-        void this.commit()
-      }
-      return
-    }
-
-    // no actions → portal gate
-    e.preventDefault()
-
-    if (this.initState === 'locked') {
-      if (this.isHashKey(e)) {
+      if (this.initState === 'locked' && this.isHashKey(e)) {
         this.initState = 'armed'
         this.input.nativeElement.value = SearchBarComponent.INIT_LINE
         this.input.nativeElement.classList.add('armed')
-        this.updatePlaceholder()
         this.placeCaretAtEnd()
         this.syncSignalsFromDom()
+        return
       }
+
+      if (this.initState === 'armed') {
+        if (e.key === 'Enter') {
+          window.dispatchEvent(new CustomEvent('portal:open'))
+          this.resetInit()
+          return
+        }
+
+        if (e.key === 'Backspace' || e.key === 'Delete') {
+          this.resetInit()
+          return
+        }
+
+        this.placeCaretAtEnd()
+        return
+      }
+
       return
     }
 
-    if (this.initState === 'armed') {
-      if (e.key === 'Enter') {
-        window.dispatchEvent(new CustomEvent('portal:open'))
-        this.resetInit()
-        return
-      }
+    // actions ready
+    if (this.initState !== 'unlocked') {
+      this.initState = 'unlocked'
+      this.clear()
+    }
 
-      if (e.key === 'Backspace' || e.key === 'Delete') {
-        this.resetInit()
-        return
-      }
+    if (this.handleCompletionKeys(e)) return
 
-      this.placeCaretAtEnd()
-      this.syncSignalsFromDom()
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      void this.commit()
     }
   }
 
@@ -243,17 +245,40 @@ export class SearchBarComponent
   // -------------------------------------------------
 
   private readonly commit = async (): Promise<void> => {
-    const v = this.input.nativeElement.value.trim()
-    if (!v) return
+    const raw = this.input.nativeElement.value.trim()
+    if (!raw) return
 
-    await this.act(v)
+    const firstHash = raw.indexOf('#')
 
-    this.input.nativeElement.value = ''
-    this.syncSignalsFromDom()
+    // no marker → just act
+    if (firstHash === -1) {
+      await this.act(raw)
+      this.clear()
+      return
+    }
+
+    // single marker: cmd#marker
+    const cmd = raw.slice(0, firstHash).trim()
+    const markerRaw = raw.slice(firstHash + 1).trim()
+
+    if (cmd) {
+      await this.act(cmd)
+    }
+
+    const marker = this.normalize(markerRaw)
+    
+    if (marker) {
+      try {
+        await this.opfs.attach(marker)
+      } catch { }
+    }
+
+    this.clear()
   }
 
+
   // -------------------------------------------------
-  // completion keys
+  // completion logic
   // -------------------------------------------------
 
   private readonly handleCompletionKeys = (e: KeyboardEvent): boolean => {
@@ -284,20 +309,6 @@ export class SearchBarComponent
       return true
     }
 
-    if (e.key === 'Enter') {
-      const ctx = this.context()
-      if (!ctx.active) return false
-
-      const s = list[this.activeIndex()] ?? list[0]
-      if (!s) return false
-
-      if (s !== ctx.normalized) {
-        e.preventDefault()
-        this.acceptCompletion(s)
-        return true
-      }
-    }
-
     return false
   }
 
@@ -306,28 +317,24 @@ export class SearchBarComponent
     if (!ctx.active) return
 
     const list = this.suggestions()
-    const s = forced ?? list[this.activeIndex()] ?? list[0]
-    if (!s) return
+    const best = forced ?? list[this.activeIndex()] ?? list[0]
+    if (!best) return
 
-    const el = this.input.nativeElement
-    const rendered = this.render(s, ctx.style)
+    const rendered = this.render(best, ctx.style)
 
-    el.value = ctx.head + rendered + ' '
+    this.input.nativeElement.value =
+      ctx.mode === 'marker'
+        ? ctx.head + rendered + ' '
+        : rendered + ' '
+
     this.suppressed.set(true)
-
     this.placeCaretAtEnd()
     this.syncSignalsFromDom()
   }
 
   private readonly clampActiveIndex = (): void => {
-    const list = this.suggestions()
-    if (!list.length) {
-      this.activeIndex.set(0)
-      return
-    }
-
-    const max = list.length - 1
-    this.activeIndex.update(v => (v > max ? 0 : v))
+    const max = this.suggestions().length - 1
+    this.activeIndex.update(v => Math.max(0, Math.min(v, max)))
   }
 
   // -------------------------------------------------
@@ -355,14 +362,11 @@ export class SearchBarComponent
 
   private readonly placeCaretAtEnd = (): void => {
     const el = this.input.nativeElement
-    const n = el.value.length
-    queueMicrotask(() => el.setSelectionRange(n, n))
+    queueMicrotask(() => el.setSelectionRange(el.value.length, el.value.length))
   }
 
   private readonly isHashKey = (e: KeyboardEvent): boolean => {
-    if (e.key === '#' || e.key === '＃') return true
-    if (e.shiftKey && (e.key === '3' || e.code === 'Digit3')) return true
-    return false
+    return e.key === '#' || e.key === '＃' || (e.shiftKey && (e.key === '3' || e.code === 'Digit3'))
   }
 
   private readonly syncSignalsFromDom = (): void => {
@@ -373,13 +377,9 @@ export class SearchBarComponent
   // utils
   // -------------------------------------------------
 
-  private readonly normalize = (s: string): string => {
-    return s.replace(/\./g, ' ').replace(/\s+/g, ' ').trim().toLowerCase()
-  }
+  private readonly normalize = (s: string): string =>
+    s.replace(/\./g, ' ').replace(/\s+/g, ' ').trim().toLowerCase()
 
-  private readonly render = (s: string, style: CompletionStyle): string => {
-    return style === 'dot'
-      ? s.replace(/\s+/g, '.')
-      : s
-  }
+  private readonly render = (s: string, style: CompletionStyle): string =>
+    style === 'dot' ? s.replace(/\s+/g, '.') : s
 }
