@@ -1,13 +1,8 @@
-// src/action.base.ts
-import { GrammarHint } from './grammar-hint.js'
-import { ProviderLink } from './provider-link.js'
-import { Effect } from './effect.js'
+import { Effect } from "./effect.js"
+import { GrammarHint } from "./grammar-hint.js"
+import { ProviderLink } from "./provider-link.js"
 
 export abstract class Action {
-
-  // --------------------------------
-  // identity (derived, not editable)
-  // --------------------------------
 
   public readonly name: string
 
@@ -19,7 +14,14 @@ export abstract class Action {
   }
 
   // --------------------------------
-  // meaning (signed)
+  // author intent (overrideable)
+  // --------------------------------
+
+  // default: always enabled
+  public enabled = (): boolean | Promise<boolean> => true
+
+  // --------------------------------   
+  // meaning
   // --------------------------------
 
   public description?: string
@@ -28,13 +30,21 @@ export abstract class Action {
   public effects?: readonly Effect[]
 
   // --------------------------------
+  // framework gate
+  // --------------------------------
+
+  public canExecute = async (): Promise<boolean> => {
+    return await this.enabled()
+  }
+
+  // --------------------------------
   // execution
   // --------------------------------
 
-  // must be arrow fn for toString()
   protected abstract run: () => Promise<void>
 
   public async execute(): Promise<void> {
+    if (!(await this.canExecute())) return
     await this.run()
   }
 }
