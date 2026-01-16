@@ -3,7 +3,7 @@
   "version": 1,
   "newProjectRoot": "projects",
   "projects": {
-    "PBS.HYPERCOMB.LAYOUT": {
+    "hypercomb-web": {
       "projectType": "application",
       "schematics": {
         "@schematics/angular:component": {
@@ -60,10 +60,10 @@
           "builder": "@angular/build:dev-server",
           "configurations": {
             "production": {
-              "buildTarget": "PBS.HYPERCOMB.LAYOUT:build:production"
+              "buildTarget": "hypercomb-web:build:production"
             },
             "development": {
-              "buildTarget": "PBS.HYPERCOMB.LAYOUT:build:development"
+              "buildTarget": "hypercomb-web:build:development"
             }
           },
           "defaultConfiguration": "development"

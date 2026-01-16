@@ -6,12 +6,12 @@ export abstract class Action {
 
   public readonly name: string
 
-  public constructor() {
+  public constructor() {  
     this.name = this.constructor.name
       .replace(/Action$/, '')
       .replace(/([a-z])([A-Z])/g, '$1 $2')
       .trim()
-  }
+    }
 
   // --------------------------------
   // author intent (overrideable)

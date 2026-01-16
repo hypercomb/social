@@ -1,12 +1,11 @@
-// src/app/common/file-explorer/opfs-explorer.component.ts
-
 import { CommonModule } from '@angular/common'
-import { Component, effect, inject, signal } from '@angular/core'
+import { AfterViewInit, Component, effect, inject, signal } from '@angular/core'
 import { MatButtonModule } from '@angular/material/button'
 import { MatIconModule } from '@angular/material/icon'
 import { MatTableModule } from '@angular/material/table'
-import { OpfsStore } from '../../core/opfs.store'
+import { Lineage } from '../../core/lineage'
 import { MovementService } from '../../core/movment.service'
+
 
 interface FileEntry {
   name: string
@@ -26,15 +25,15 @@ export class OpfsExplorerComponent {
   public readonly entries = signal<FileEntry[]>([])
 
   private readonly movement = inject(MovementService)
-  private readonly opfs = inject(OpfsStore)
+  private readonly lineage = inject(Lineage)
 
   constructor() {
-    // re-project whenever navigation or directory changes
     effect(() => {
       this.movement.moved()
       void this.project()
     })
   }
+
 
   // --------------------------------------------
   // navigation
@@ -43,7 +42,7 @@ export class OpfsExplorerComponent {
   public explore = async (name: string): Promise<void> => {
     const entry = this.entries().find(e => e.name === name)
     if (!entry || entry.kind !== 'directory') return
-    this.movement.move(name)
+    await this.movement.move(name)
   }
 
   public back = (): void => {
@@ -64,7 +63,7 @@ export class OpfsExplorerComponent {
   public delete = async (e: FileEntry, ev: MouseEvent): Promise<void> => {
     ev.stopPropagation()
 
-    const current = this.opfs.current()
+    const current = await this.lineage.currentDir()
     if (!current) return
 
     try {
@@ -72,19 +71,18 @@ export class OpfsExplorerComponent {
         recursive: e.kind === 'directory'
       })
 
-      // refresh view after deletion
-      void this.project()
+      await this.project()
     } catch (err) {
       console.error('failed to delete entry', e.name, err)
     }
   }
 
-  // -------------------------------------------------
+  // --------------------------------------------
   // projection
-  // -------------------------------------------------
+  // --------------------------------------------
 
   private readonly project = async (): Promise<void> => {
-    const current = this.opfs.current()
+    const current = await this.lineage.currentDir()
     if (!current) return
 
     const list: FileEntry[] = []

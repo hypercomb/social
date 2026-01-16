@@ -1,12 +1,12 @@
 // src/app/messaging/resource-message-handler.ts
 import { Injectable, inject } from '@angular/core'
-import { OpfsStore } from '../core/opfs.store'
 import { ScriptPreloaderService } from '../core/script-preloader.service'
+import { Store } from '../core/store'
 
 @Injectable({ providedIn: 'root' })
 export class ResourceMessageHandler {
 
-  private readonly opfs = inject(OpfsStore)
+  private readonly store = inject(Store)
   private readonly preloader = inject(ScriptPreloaderService)
 
   // whitelist for allowed postmessage origins
@@ -48,7 +48,7 @@ export class ResourceMessageHandler {
     if (!msg.code || typeof msg.code !== 'string') return
 
     const bytes = new TextEncoder().encode(msg.code).buffer
-    const signature = await this.opfs.store(bytes)
+    const signature = await this.store.put(bytes)
 
     // single incremental update
     this.preloader.add(signature, bytes)

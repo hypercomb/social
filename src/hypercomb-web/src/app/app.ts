@@ -1,32 +1,24 @@
-// src/app/app.ts
-
 import { Component, inject, signal } from '@angular/core'
 import { RouterOutlet } from '@angular/router'
-import { Header } from "./header/header"
-import { Footer } from "./footer/footer"
+import { Header } from './header/header'
+import { Footer } from './footer/footer'
 import { hypercomb } from '@hypercomb/core'
-import { ScriptPreloaderService } from './core/script-preloader.service' // <-- add this import
-import { MovementService } from './core/movment.service'
-import { OpfsStore } from './core/opfs.store'
+import { CoreAdapter } from './core/core-adapter'
 
 @Component({
   selector: 'app-root',
+  standalone: true,
   imports: [RouterOutlet, Header, Footer],
   templateUrl: './app.html',
   styleUrl: './app.scss'
 })
 export class App extends hypercomb {
-  private readonly opfs = inject(OpfsStore)
-  protected readonly title = signal('PBS.HYPERCOMB.LAYOUT')
+
+  protected readonly title = signal('hypercomb-web')
   public showHeader = true
   public showFooter = false
 
-  // --------------------------------------------------------
-  // startup dependencies
-  // --------------------------------------------------------
-  private readonly movement = inject(MovementService)
-  private readonly preloader = inject(ScriptPreloaderService) // <-- preload scripts on app start
-  // --------------------------------------------------------
+  private readonly core = inject(CoreAdapter)
 
   constructor() {
     super()
@@ -37,12 +29,6 @@ export class App extends hypercomb {
       }
     })
 
-    // preload scripts first
-    // no need to await — just fire it and let it warm up while bootstrapping
-    queueMicrotask(async () => {
-      await this.opfs.initialize()
-      //synchronize initial directory after OPFS is ready
-      window.dispatchEvent(new Event('synchronize'))
-    })
+    void this.core.initialize()
   }
 }

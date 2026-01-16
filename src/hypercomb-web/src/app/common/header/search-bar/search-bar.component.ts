@@ -1,23 +1,12 @@
 // src/app/common/header/search-bar/search-bar.component.ts
-import { AfterViewInit, Component, ElementRef, OnDestroy, ViewChild, computed, inject, signal } from '@angular/core'
-import { hypercomb } from '@hypercomb/core'
-import { OpfsStore } from '../../../core/opfs.store'
-import { InitState } from '../../../core/model'
-import { ResourceCompletionService } from './resource-completion.service'
 
-type CompletionStyle = 'space' | 'dot'
-type CompletionMode = 'action' | 'marker'
-
-type CompletionContext =
-  | { active: false }
-  | {
-    active: true
-    mode: CompletionMode
-    head: string
-    raw: string
-    normalized: string
-    style: CompletionStyle
-  }
+import { Component, AfterViewInit, OnDestroy, ViewChild, ElementRef, inject, signal, computed } from "@angular/core"
+import { ActIntent, hypercomb } from "@hypercomb/core"
+import { CompletionContext, CompletionUtility } from "../../../core/completion-utility"
+import { InitState } from "../../../core/model"
+import { ScriptPreloaderService } from "../../../core/script-preloader.service"
+import { ResourceCompletionService } from "./resource-completion.service"
+import { Lineage } from "../../../core/lineage"
 
 @Component({
   selector: 'hc-search-bar',
@@ -26,33 +15,52 @@ type CompletionContext =
   styleUrls: ['./search-bar.component.scss']
 })
 export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDestroy {
-
+  private readonly completions = inject(CompletionUtility)
   @ViewChild('input', { static: true })
   private readonly input!: ElementRef<HTMLInputElement>
 
-  private readonly opfs = inject(OpfsStore)
+  private readonly lineage = inject(Lineage)
+  private readonly preloader = inject(ScriptPreloaderService)
   private readonly resources = inject(ResourceCompletionService)
 
-  private initState: InitState = 'locked'
-  private static readonly INIT_LINE = '# Press Enter to open the Portal'
+  private initState: InitState = 'unlocked'
 
   private readonly value = signal('')
   private readonly activeIndex = signal(0)
   private readonly suppressed = signal(false)
 
-  private readonly markerVerbs = new Set<string>(['add', 'tag', 'mark', 'attach'])
+  // open dcp only once per page load, and only while locked
+  private dcpOpened = false
+
+  // -------------------------------------------------
+  // readiness / locking
+  // -------------------------------------------------
+
+  // app becomes usable as soon as any payload exists in /__resources__
+  // (even if action extraction fails, typing must not be blocked)
+  private readonly hasAnyResources = computed<boolean>(() => this.preloader.resourceCount() > 0)
+
+  // locked only while there are zero payloads in /__resources__
+  private readonly locked = computed<boolean>(() => !this.hasAnyResources())
+
+  // -------------------------------------------------
+  // placeholder
+  // -------------------------------------------------
+
+  public readonly placeholder = computed<string>(() => {
+    return this.locked()
+      ? 'press # to open dcp...'
+      : 'search actions...'
+  })
 
   // -------------------------------------------------
   // completion context
-  // - if there is a #, we complete the marker segment (after the last #)
-  // - otherwise, we complete the command itself
   // -------------------------------------------------
 
   private readonly context = computed<CompletionContext>(() => {
     const v = this.value()
     const lastHash = v.lastIndexOf('#')
 
-    // marker mode (last # wins)
     if (lastHash !== -1) {
       const after = v.slice(lastHash + 1)
       const leadingWs = after.match(/^\s*/)?.[0] ?? ''
@@ -63,12 +71,11 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
         mode: 'marker',
         head: v.slice(0, lastHash + 1) + leadingWs,
         raw,
-        normalized: this.normalize(raw),
+        normalized: this.completions.normalize(raw),
         style: raw.includes('.') ? 'dot' : 'space'
       }
     }
 
-    // action mode (only when the user has started typing)
     if (!v.trim()) return { active: false }
 
     return {
@@ -76,7 +83,7 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
       mode: 'action',
       head: '',
       raw: v,
-      normalized: this.normalize(v),
+      normalized: this.completions.normalize(v),
       style: v.includes('.') ? 'dot' : 'space'
     }
   })
@@ -94,7 +101,7 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
     const all = this.resources.names()
     if (!ctx.normalized) return all
 
-    return all.filter(n => n.startsWith(ctx.normalized))
+    return all.filter((n: any) => n.startsWith(ctx.normalized))
   })
 
   public readonly showCompletions = computed<boolean>(() => {
@@ -102,7 +109,7 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
   })
 
   // -------------------------------------------------
-  // ghost mirror
+  // ghost mirror (second input layer)
   // -------------------------------------------------
 
   public readonly ghostValue = computed<string>(() => {
@@ -116,10 +123,9 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
     if (!best) return ''
 
     if (!best.startsWith(ctx.normalized)) return ''
-    if (best.length === ctx.normalized.length) return ''
 
-    const rendered = this.render(best, ctx.style)
-    const prefix = this.render(ctx.normalized, ctx.style)
+    const rendered = this.completions.render(best, ctx.style)
+    const prefix = this.completions.render(ctx.normalized, ctx.style)
 
     let suffix = rendered.slice(prefix.length)
     if (!suffix) return ''
@@ -127,6 +133,7 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
     const current = this.value()
     const last = current.slice(-1)
 
+    // avoid double separators when user already typed '.' or space
     if ((last === '.' || /\s/.test(last)) && (suffix.startsWith('.') || suffix.startsWith(' '))) {
       suffix = suffix.slice(1)
     }
@@ -139,31 +146,24 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
   // -------------------------------------------------
 
   public ngAfterViewInit(): void {
-    if (this.opfs.actionsReady()) {
-      this.initState = 'unlocked'
-    }
-
     this.input.nativeElement.focus()
     this.syncSignalsFromDom()
-    this.updatePlaceholder()
   }
 
   public ngOnDestroy(): void { }
 
   // -------------------------------------------------
-  // template-required helpers
+  // template helpers (required)
   // -------------------------------------------------
 
-  public getActiveIndex = (): number => {
-    return this.activeIndex()
-  }
+  public getActiveIndex = (): number => this.activeIndex()
 
   public typedPart = (s: string): string => {
     const ctx = this.context()
     if (!ctx.active) return ''
 
-    const rendered = this.render(s, ctx.style)
-    const prefix = this.render(ctx.normalized, ctx.style)
+    const rendered = this.completions.render(s, ctx.style)
+    const prefix = this.completions.render(ctx.normalized, ctx.style)
     return rendered.slice(0, Math.min(prefix.length, rendered.length))
   }
 
@@ -171,8 +171,8 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
     const ctx = this.context()
     if (!ctx.active) return s
 
-    const rendered = this.render(s, ctx.style)
-    const prefix = this.render(ctx.normalized, ctx.style)
+    const rendered = this.completions.render(s, ctx.style)
+    const prefix = this.completions.render(ctx.normalized, ctx.style)
     return rendered.slice(Math.min(prefix.length, rendered.length))
   }
 
@@ -193,43 +193,29 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
   }
 
   public onKeyDown = (e: KeyboardEvent): void => {
+    const el = this.input.nativeElement
+    const v = el.value
 
-    // portal gate
-    if (!this.opfs.actionsReady()) {
-      e.preventDefault()
-
-      if (this.initState === 'locked' && this.isHashKey(e)) {
-        this.initState = 'armed'
-        this.input.nativeElement.value = SearchBarComponent.INIT_LINE
-        this.input.nativeElement.classList.add('armed')
-        this.placeCaretAtEnd()
-        this.syncSignalsFromDom()
-        return
+    // open dcp only once, only while locked (no resources yet)
+    if (this.locked() && !this.dcpOpened) {
+      if (e.key === '#') {
+        this.dcpOpened = true
+        window.dispatchEvent(new CustomEvent('portal:open', { detail: { target: 'dcp' } }))
+        // allow '#' to type
       }
 
-      if (this.initState === 'armed') {
-        if (e.key === 'Enter') {
-          window.dispatchEvent(new CustomEvent('portal:open'))
-          this.resetInit()
-          return
-        }
-
-        if (e.key === 'Backspace' || e.key === 'Delete') {
-          this.resetInit()
-          return
-        }
-
-        this.placeCaretAtEnd()
+      if (e.key === 'Enter' && v.trim() === '#') {
+        e.preventDefault()
+        this.dcpOpened = true
+        window.dispatchEvent(new CustomEvent('portal:open', { detail: { target: 'dcp' } }))
+        this.clear()
         return
       }
-
-      return
     }
 
-    // actions ready
-    if (this.initState !== 'unlocked') {
-      this.initState = 'unlocked'
-      this.clear()
+    // while locked: only allow '#', edit/nav keys, and shortcuts
+    if (this.locked()) {
+      if (this.blockWhileLocked(e)) return
     }
 
     if (this.handleCompletionKeys(e)) return
@@ -240,6 +226,7 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
     }
   }
 
+
   // -------------------------------------------------
   // commit
   // -------------------------------------------------
@@ -248,29 +235,77 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
     const raw = this.input.nativeElement.value.trim()
     if (!raw) return
 
-    const firstHash = raw.indexOf('#')
-
-    // no marker → just act
-    if (firstHash === -1) {
-      await this.act(raw)
+    if (this.locked()) {
       this.clear()
       return
     }
 
-    // single marker: cmd#marker
-    const cmd = raw.slice(0, firstHash).trim()
-    const markerRaw = raw.slice(firstHash + 1).trim()
+    const hashIndex = raw.indexOf('#')
 
-    if (cmd) {
-      await this.act(cmd)
+    const seedPart =
+      hashIndex === -1 ? raw : raw.slice(0, hashIndex).trim()
+
+    const markerPart =
+      hashIndex === -1 ? null : raw.slice(hashIndex + 1).trim()
+
+    // nothing meaningful
+    if (!seedPart && !markerPart) {
+      this.clear()
+      return
     }
 
-    const marker = this.normalize(markerRaw)
-    
-    if (marker) {
-      try {
-        await this.opfs.attach(marker)
-      } catch { }
+    let targetSegments = this.segments()
+
+    // -------------------------------------------------
+    // no hash → try execution first, else create seed
+    // -------------------------------------------------
+
+    if (hashIndex === -1) {
+      const executed = await this.act(seedPart)
+
+      // execution is dominant
+      if (executed) {
+        this.clear()
+        return
+      }
+
+      // no action → treat as seed
+      targetSegments = [...targetSegments, seedPart]
+      await this.lineage.resolve(targetSegments, true)
+
+      this.clear()
+      return
+    }
+
+    // -------------------------------------------------
+    // hash present
+    // -------------------------------------------------
+
+    // ONLY hash (#foo) → explicit execution
+    if (!seedPart && markerPart) {
+      await this.act(markerPart)
+      this.clear()
+      return
+    }
+
+    // seed#marker → structure only
+    if (seedPart) {
+      targetSegments = [...targetSegments, seedPart]
+      await this.lineage.resolve(targetSegments, true)
+    }
+
+    // attach marker (signature-based, inert)
+    if (seedPart && markerPart) {
+      const descriptor = this.preloader.resolveByName(markerPart)
+      if (!descriptor) {
+        this.clear()
+        return
+      }
+
+      await this.lineage.addMarker(
+        targetSegments,
+        descriptor.signature
+      )
     }
 
     this.clear()
@@ -320,7 +355,7 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
     const best = forced ?? list[this.activeIndex()] ?? list[0]
     if (!best) return
 
-    const rendered = this.render(best, ctx.style)
+    const rendered = this.completions.render(best, ctx.style)
 
     this.input.nativeElement.value =
       ctx.mode === 'marker'
@@ -341,23 +376,9 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
   // ui helpers
   // -------------------------------------------------
 
-  private readonly resetInit = (): void => {
-    this.initState = 'locked'
-    this.clear()
-  }
-
   private readonly clear = (): void => {
     this.input.nativeElement.value = ''
-    this.input.nativeElement.classList.remove('armed')
-    this.updatePlaceholder()
     this.syncSignalsFromDom()
-  }
-
-  private readonly updatePlaceholder = (): void => {
-    this.input.nativeElement.placeholder =
-      this.opfs.actionsReady()
-        ? 'Type a command…'
-        : 'Type # and press Enter to open the Portal'
   }
 
   private readonly placeCaretAtEnd = (): void => {
@@ -365,21 +386,40 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
     queueMicrotask(() => el.setSelectionRange(el.value.length, el.value.length))
   }
 
-  private readonly isHashKey = (e: KeyboardEvent): boolean => {
-    return e.key === '#' || e.key === '＃' || (e.shiftKey && (e.key === '3' || e.code === 'Digit3'))
-  }
-
   private readonly syncSignalsFromDom = (): void => {
     this.value.set(this.input.nativeElement.value)
   }
 
   // -------------------------------------------------
-  // utils
+  // blocking logic (while locked)
   // -------------------------------------------------
 
-  private readonly normalize = (s: string): string =>
-    s.replace(/\./g, ' ').replace(/\s+/g, ' ').trim().toLowerCase()
+  private readonly blockWhileLocked = (e: KeyboardEvent): boolean => {
+    const key = e.key
 
-  private readonly render = (s: string, style: CompletionStyle): string =>
-    style === 'dot' ? s.replace(/\s+/g, '.') : s
+    if (key === 'Backspace' || key === 'Delete') return false
+    if (key === '#') return false
+    if (key === 'Enter') return false
+
+    if (
+      key === 'ArrowLeft' ||
+      key === 'ArrowRight' ||
+      key === 'ArrowUp' ||
+      key === 'ArrowDown' ||
+      key === 'Home' ||
+      key === 'End' ||
+      key === 'Tab' ||
+      key === 'Escape' ||
+      key === 'Shift' ||
+      key === 'Control' ||
+      key === 'Alt' ||
+      key === 'Meta'
+    ) return false
+
+    if (e.ctrlKey || e.metaKey) return false
+
+    e.preventDefault()
+    return true
+  }
+
 }

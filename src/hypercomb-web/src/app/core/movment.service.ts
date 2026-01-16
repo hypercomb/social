@@ -1,78 +1,67 @@
-// src/app/core/movement.service.ts
-
 import { Injectable, inject, signal } from '@angular/core'
-import { OpfsStore } from './opfs.store'
+import { Navigation } from './navigation'
 
 @Injectable({ providedIn: 'root' })
 export class MovementService {
 
-  // increments only after opfs.current is aligned to the url
+  // increments only after navigation intent is committed
   public readonly moved = signal(0)
 
-  private readonly opfs = inject(OpfsStore)
+  private readonly navigation = inject(Navigation)
 
-  // prevents overlapping sync waves from racing each other
+  // prevents overlapping navigation commits
   private committing: Promise<void> | null = null
 
-  constructor() {
-    // back/forward (and user nav) activates a different history entry
-    // the browser fires popstate, so we commit from here
+  public constructor() {
+    // browser back/forward
     window.addEventListener('popstate', () => {
-      void this.commit(false)
+      void this.commit()
     })
   }
 
-  // -------------------------------------------------
+  // ----------------------------------
   // relative movement
-  // -------------------------------------------------
+  // ----------------------------------
 
   public move = async (segment: string): Promise<void> => {
-    const seg = segment.trim()
-    if (!seg) return
+    const clean = segment.replace(/\s+/g, ' ').trim()
+    if (!clean) return
 
-    const current = window.location.pathname.split('/').filter(Boolean)
-    current.push(seg)
+    const segments = this.navigation.segments()
+    segments.push(clean)
 
-    window.history.pushState(null, '', '/' + current.join('/'))
+    this.navigation.go(segments)
+    await this.commit()
+  } 
 
-    // pushstate does not trigger popstate, so we must commit explicitly
-    await this.commit(false)
-  }
-
-  // -------------------------------------------------
+  // ----------------------------------
   // history
-  // -------------------------------------------------
+  // ----------------------------------
 
   public back = (): void => {
     window.history.back()
-    // popstate will commit + bump
+    // popstate will trigger commit
   }
 
   public forward = (): void => {
     window.history.forward()
-    // popstate will commit + bump
+    // popstate will trigger commit
   }
 
-  // -------------------------------------------------
-  // internal (commit protocol)
-  // -------------------------------------------------
+  // ----------------------------------
+  // internal
+  // ----------------------------------
 
-  private readonly commit = async (create: boolean): Promise<void> => {
-    // do nothing until opfs is initialized
-    if (!this.opfs.ready()) return
-
-    // serialize commits to avoid races from fast clicks / rapid back-forward
+  private readonly commit = async (): Promise<void> => {
     if (this.committing) {
       await this.committing
-      // after waiting, align again to the latest url
-      // (in case url changed during the wait)
     }
 
-    this.committing = (async () => {
-      const dir = await this.opfs.sync(create)
-      this.opfs.current.set(dir)
+    this.committing = Promise.resolve().then(() => {
+      // navigation intent is already committed to the url
+      // this service only signals movement
       this.moved.update(v => v + 1)
-    })()
+    })
 
     try {
       await this.committing

@@ -1,7 +1,6 @@
 export * from './effect.js'
 export * from './grammar-hint.js'
 export * from './source.js'
-export * from './fixtures/portal-open.js'
 export * from './core/hypercomb.web.js'
 export * from './core/hypercomb.js'
 export * from './core/signature.service.js'

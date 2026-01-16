@@ -1,4 +1,4 @@
-# Copilot instructions (PBS.HYPERCOMB.LAYOUT)
+# Copilot instructions (hypercomb-web)
 
 ## Big picture
 - Angular CLI v20 app using **standalone bootstrap**: see [src/main.ts](src/main.ts) + [src/app/app.config.ts](src/app/app.config.ts).

@@ -41,3 +41,6 @@ testem.log
 .DS_Store
 Thumbs.db
 /dist
+
+# generated esm runtime surface (copied from @hypercomb/core/dist)
+public/core

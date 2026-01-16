@@ -3,16 +3,6 @@
 import { bootstrapApplication } from '@angular/platform-browser'
 import { appConfig } from './app/app.config'
 import { App } from './app/app'
-import { bootstrapHistory } from './bootstrap-history'
 
-
-// --------------------------------
-// cold start: inert history setup
-// --------------------------------
-bootstrapHistory()
-
-// --------------------------------
-// live system starts here
-// --------------------------------
 bootstrapApplication(App, appConfig)
   .catch(err => console.error(err))
