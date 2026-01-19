@@ -3,6 +3,8 @@ import { Injectable, inject } from '@angular/core'
 import { Lineage } from './lineage'
 import { Navigation } from './navigation'
 import { Store } from './store'
+import { provideRuntimeLibs } from './runtime-libs'
+import { ProcessorHost } from './processor-host'
 
 @Injectable({ providedIn: 'root' })
 export class CoreAdapter {
@@ -10,6 +12,7 @@ export class CoreAdapter {
   private readonly navigation = inject(Navigation)
   private readonly lineage = inject(Lineage)
   private readonly store = inject(Store)
+  private readonly processorHost = inject(ProcessorHost)
 
   private initialized = false
 
@@ -17,24 +20,19 @@ export class CoreAdapter {
     if (this.initialized) return
     this.initialized = true
 
-    // storage first so resources preload is ready
-    await this.store.initialize()
+    provideRuntimeLibs()
 
-    // root handle for lineage
+    await this.store.initialize()
     await this.lineage.initialize()
 
-    // start listening for browser navigation
     this.navigation.listen()
 
-    // build state from url without creating anything
-    await this.lineage.tryResolve(this.navigation.segments())
+    const segments = this.navigation.segments()
 
-    // whenever navigation changes, update derived lineage state (read-only)
-    window.addEventListener('navigate', this.onNavigate)
-  }
+    // align history FIRST
+    this.navigation.bootstrap(segments)
 
-  private readonly onNavigate = async (e: Event): Promise<void> => {
-    const { segments } = (e as CustomEvent<{ segments: string[] }>).detail
-    await this.lineage.tryResolve(segments)
+    // start reacting to navigation AFTER history is aligned
+    this.processorHost.start()
   }
 }

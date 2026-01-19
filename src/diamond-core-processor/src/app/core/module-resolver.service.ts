@@ -2,13 +2,15 @@
 import { Injectable } from '@angular/core'
 import { SignatureService, type ActionPayloadV1 } from '@hypercomb/core'
 
+export type ModuleActionV1 = {
+  signature: string
+  payload: ActionPayloadV1
+}
+
 export type ModuleFileV1 = {
-  version: 1
-  module: { name: string }
-  actions: Array<{
-    signature: string
-    payload: ActionPayloadV1
-  }>
+  version?: number
+  module?: { name?: string }
+  actions: ModuleActionV1[]
 }
 
 export type ResolvedModule = {
@@ -44,9 +46,14 @@ export class ModuleResolverService {
         const json = new TextDecoder().decode(bytes).trim()
         const parsed = JSON.parse(json) as ModuleFileV1
 
-        if (parsed?.version !== 1) throw new Error('unsupported module version')
-        if (!parsed?.module?.name) throw new Error('invalid module file (missing module.name)')
+        if (!parsed || typeof parsed !== 'object') throw new Error('invalid module file (not an object)')
         if (!Array.isArray(parsed.actions)) throw new Error('invalid module file (missing actions array)')
+
+        // light validation for list rendering
+        for (const a of parsed.actions) {
+          if (!a?.signature || typeof a.signature !== 'string') throw new Error('invalid module file (action missing signature)')
+          if (!a?.payload || typeof a.payload !== 'object') throw new Error('invalid module file (action missing payload)')
+        }
 
         return { url, domain: base, module: parsed }
       } catch (e) {

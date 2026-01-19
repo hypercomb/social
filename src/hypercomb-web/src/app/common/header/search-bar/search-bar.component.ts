@@ -7,6 +7,8 @@ import { InitState } from "../../../core/model"
 import { ScriptPreloaderService } from "../../../core/script-preloader.service"
 import { ResourceCompletionService } from "./resource-completion.service"
 import { Lineage } from "../../../core/lineage"
+import { MovementService } from "../../../core/movment.service"
+import { Navigation } from "../../../core/navigation"
 
 @Component({
   selector: 'hc-search-bar',
@@ -20,6 +22,8 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
   private readonly input!: ElementRef<HTMLInputElement>
 
   private readonly lineage = inject(Lineage)
+  private readonly movement = inject(MovementService)
+  private readonly navigation = inject(Navigation)
   private readonly preloader = inject(ScriptPreloaderService)
   private readonly resources = inject(ResourceCompletionService)
 
@@ -192,9 +196,27 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
     this.clampActiveIndex()
   }
 
+  // src/app/common/header/search-bar/search-bar.component.ts
+
+  // -------------------------------------------------
+  // input handling
+  // -------------------------------------------------
+
   public onKeyDown = (e: KeyboardEvent): void => {
     const el = this.input.nativeElement
     const v = el.value
+
+    // -------------------------------------------------
+    // open dcp whenever "#" is the only character
+    // (always, not only while locked)
+    // -------------------------------------------------
+    if (e.key === 'Enter' && v.trim() === '#') {
+      e.preventDefault()
+      this.dcpOpened = true
+      window.dispatchEvent(new CustomEvent('portal:open', { detail: { target: 'dcp' } }))
+      this.clear()
+      return
+    }
 
     // open dcp only once, only while locked (no resources yet)
     if (this.locked() && !this.dcpOpened) {
@@ -202,14 +224,6 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
         this.dcpOpened = true
         window.dispatchEvent(new CustomEvent('portal:open', { detail: { target: 'dcp' } }))
         // allow '#' to type
-      }
-
-      if (e.key === 'Enter' && v.trim() === '#') {
-        e.preventDefault()
-        this.dcpOpened = true
-        window.dispatchEvent(new CustomEvent('portal:open', { detail: { target: 'dcp' } }))
-        this.clear()
-        return
       }
     }
 
@@ -226,15 +240,14 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
     }
   }
 
-
   // -------------------------------------------------
   // commit
   // -------------------------------------------------
-
   private readonly commit = async (): Promise<void> => {
     const raw = this.input.nativeElement.value.trim()
     if (!raw) return
 
+    // meta-only: '#' opens dcp and exits earlier in keydown
     if (this.locked()) {
       this.clear()
       return
@@ -242,75 +255,63 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
 
     const hashIndex = raw.indexOf('#')
 
-    const seedPart =
+    const rawSeed =
       hashIndex === -1 ? raw : raw.slice(0, hashIndex).trim()
 
-    const markerPart =
+    const rawMarker =
       hashIndex === -1 ? null : raw.slice(hashIndex + 1).trim()
 
-    // nothing meaningful
-    if (!seedPart && !markerPart) {
-      this.clear()
-      return
+    const seedName = rawSeed
+      ? this.completions.normalize(rawSeed)
+      : null
+
+    const markerName = rawMarker
+      ? this.completions.normalize(rawMarker)
+      : null
+
+    const baseSegments = this.navigation.segments()
+
+    // -------------------------------------------------
+    // ensure grammar always exists when referenced
+    // -------------------------------------------------
+
+    if (seedName) {
+      await this.lineage.resolve([...baseSegments, seedName], true)
     }
 
-    let targetSegments = this.segments()
-
     // -------------------------------------------------
-    // no hash → try execution first, else create seed
+    // always signal intent (execution semantics deferred)
     // -------------------------------------------------
 
-    if (hashIndex === -1) {
-      const executed = await this.act(seedPart)
+    if (seedName) {
+      void this.act(seedName)
+    }
 
-      // execution is dominant
-      if (executed) {
-        this.clear()
-        return
+    // -------------------------------------------------
+    // marker attachment (no execution implied here)
+    // -------------------------------------------------
+
+    if (markerName) {
+      const descriptor = this.preloader.resolveByName(markerName)
+      if (descriptor) {
+        const target = seedName
+          ? [...baseSegments, seedName]
+          : baseSegments
+
+        await this.lineage.addMarker(target, descriptor.signature)
       }
-
-      // no action → treat as seed
-      targetSegments = [...targetSegments, seedPart]
-      await this.lineage.resolve(targetSegments, true)
-
-      this.clear()
-      return
     }
 
     // -------------------------------------------------
-    // hash present
+    // navigation (seed implies entering scope)
     // -------------------------------------------------
 
-    // ONLY hash (#foo) → explicit execution
-    if (!seedPart && markerPart) {
-      await this.act(markerPart)
-      this.clear()
-      return
-    }
-
-    // seed#marker → structure only
-    if (seedPart) {
-      targetSegments = [...targetSegments, seedPart]
-      await this.lineage.resolve(targetSegments, true)
-    }
-
-    // attach marker (signature-based, inert)
-    if (seedPart && markerPart) {
-      const descriptor = this.preloader.resolveByName(markerPart)
-      if (!descriptor) {
-        this.clear()
-        return
-      }
-
-      await this.lineage.addMarker(
-        targetSegments,
-        descriptor.signature
-      )
+    if (seedName) {
+      await this.movement.move(seedName)
     }
 
     this.clear()
   }
-
 
   // -------------------------------------------------
   // completion logic

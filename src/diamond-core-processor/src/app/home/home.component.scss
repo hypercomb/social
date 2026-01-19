@@ -1,5 +1,4 @@
 /* src/app/home/home.component.scss */
-
 .home {
   display: flex;
   flex-direction: column;
@@ -79,6 +78,77 @@ button {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
+.dim {
+  color: #666;
+}
+
 .error {
   color: #b00020;
+}
+
+.module-meta {
+  width: 32rem;
+  border: 1px solid rgba(0,0,0,0.10);
+  border-radius: 14px;
+  padding: 0.75rem 0.9rem;
+  background: rgba(255,255,255,0.85);
+}
+
+.module-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.25rem 0;
+}
+
+.label {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 12px;
+  font-weight: 800;
+  color: #777;
+}
+
+.action-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.25rem 0 0;
+  width: 32rem;
+}
+
+.action-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.65rem 0.5rem;
+  border-bottom: 1px solid rgba(0,0,0,0.08);
+}
+
+.action-left {
+  text-align: left;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.action-title {
+  font-size: 15px;
+  font-weight: 800;
+  color: #222;
+  line-height: 1.25;
+}
+
+.action-sub {
+  margin-top: 0.15rem;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.action-desc {
+  margin-top: 0.35rem;
+  font-size: 13px;
+  opacity: 0.8;
+  line-height: 1.35;
 }

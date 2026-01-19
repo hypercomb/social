@@ -1,4 +1,4 @@
-import { Action } from '@hypercomb/core'
+import { Action } from "@hypercomb/core"
 
 export class HelloWorldAction extends Action {
 

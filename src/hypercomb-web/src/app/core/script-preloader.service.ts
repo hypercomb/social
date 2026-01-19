@@ -136,7 +136,7 @@ export class ScriptPreloaderService {
   }
 
   // -------------------------------------------------
-  // extraction (canonical kebab-case)
+  // extraction (canonical kebab-case)  
   // -------------------------------------------------
 
   private extractActionName = (buf: ArrayBuffer): string | null => {

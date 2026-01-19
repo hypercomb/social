@@ -99,3 +99,11 @@
   text-align: right;
 }
 
+.run-cell {
+  width: 48px;
+  text-align: right;
+
+  button[mat-icon-button] {
+    transform: translateY(-1px);
+  }
+}

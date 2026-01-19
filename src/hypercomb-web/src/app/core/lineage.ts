@@ -5,7 +5,6 @@ import { CompletionUtility } from './completion-utility'
 @Injectable({ providedIn: 'root' })
 export class Lineage {
   private readonly completions = inject(CompletionUtility)
-
   private root!: FileSystemDirectoryHandle
 
   public readonly ready = signal(false)
@@ -16,16 +15,19 @@ export class Lineage {
   // remaining segments that do not exist yet (read-only state)
   public readonly missing = signal<readonly string[]>([])
 
+  // new: revision bump for UI reactivity (e.g., explorer, processors)
+  private readonly fsRevision = signal(0)
+  public readonly changed = (): number => this.fsRevision()
+  public readonly invalidate = (): void => this.fsRevision.update(v => v + 1)
+
   public initialize = async (): Promise<void> => {
     this.root = await navigator.storage.getDirectory()
     this.ready.set(true)
   }
 
-  
   // -------------------------------------------------
   // marker mutation (explicit intent)
   // -------------------------------------------------
-
   public addMarker = async (
     segments: readonly string[],
     signature: string
@@ -33,30 +35,36 @@ export class Lineage {
     const dir = await this.resolve(segments, true)
     try {
       await dir.getFileHandle(signature, { create: true })
+      this.invalidate() // notify listeners of file creation
     } catch {
       // ignore duplicates
     }
   }
 
+  // -------------------------------------------------
+  // directory resolution and observation
+  // -------------------------------------------------
+
   // url is the truth, always
-  public segments = (): string[] => {
-    return window.location.pathname.split('/').filter(Boolean).map(s => this.completions.normalize(s))
-  }
+  public segments = (): string[] =>
+    window.location.pathname
+      .split('/')
+      .filter(Boolean)
+      .map(s => this.completions.normalize(s))
 
   // resolves a directory handle from segments (optionally creates missing dirs)
-  // use create=true only from explicit user intent (enter/tab/commit)
   public resolve = async (
     segments: readonly string[],
     create: boolean = false
   ): Promise<FileSystemDirectoryHandle> => {
     let dir = this.root
-
     for (const seg of segments) {
       const clean = this.clean(seg)
       if (!clean) continue
       dir = await dir.getDirectoryHandle(clean, { create })
     }
 
+    if (create) this.invalidate() // any created directory bumps revision
     return dir
   }
 
@@ -72,7 +80,6 @@ export class Lineage {
 
     for (let i = 0; i < cleaned.length; i++) {
       const seg = cleaned[i]
-
       try {
         dir = await dir.getDirectoryHandle(seg, { create: false })
       } catch {
@@ -99,7 +106,6 @@ export class Lineage {
     out.push(dir)
 
     const segs = this.segments().map(this.clean).filter(Boolean)
-
     for (const seg of segs) {
       dir = await dir.getDirectoryHandle(seg, { create: false })
       out.push(dir)
@@ -122,14 +128,15 @@ export class Lineage {
   public markersByDepth = async (): Promise<string[][]> => {
     const dirs = await this.ancestors()
     const out: string[][] = []
-
     for (const dir of dirs) {
       out.push(await this.markers(dir))
     }
-
     return out
   }
 
+  // -------------------------------------------------
+  // utilities
+  // -------------------------------------------------
   private readonly clean = (s: string): string => {
     const noSlashes = (s ?? '').replace(/[\/\\]+/g, ' ')
     return this.completions.normalize(noSlashes)

@@ -13,7 +13,6 @@
     <button (click)="add()">Add</button>
   </div>
 
-  <!-- Using @if syntax for conditionals -->
   @if (domains().length) {
     <ul class="domain-list">
       @for (d of domains(); track d) {
@@ -47,14 +46,32 @@
     <p class="error">{{ moduleError() }}</p>
   }
 
-  @if (resolvedModule(); as m) {
-    <p class="subtitle mono">module: {{ m.module.name }}</p>
+  @if (resolvedModule(); as rm) {
+    <div class="module-meta">
+      <div class="module-line">
+        <span class="label">module</span>
+        <span class="mono">{{ moduleName() }}</span>
+      </div>
+      <div class="module-line">
+        <span class="label">source</span>
+        <span class="mono">{{ rm.domain }}</span>
+      </div>
+    </div>
 
     @if (actions().length) {
-      <ul class="domain-list">
+      <ul class="action-list">
         @for (a of actions(); track a.signature) {
-          <li>
-            <span class="mono">{{ a.signature }}</span>
+          <li class="action-row">
+            <div class="action-left">
+              <div class="action-title">{{ actionTitle(a) }}</div>
+              <div class="action-sub">
+                <span class="mono dim">{{ a.signature }}</span>
+              </div>
+              @if (actionDescription(a)) {
+                <div class="action-desc">{{ actionDescription(a) }}</div>
+              }
+            </div>
+
             <button class="primary" type="button" (click)="openAction(a.signature)">
               Open
             </button>

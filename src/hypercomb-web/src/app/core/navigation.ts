@@ -9,7 +9,35 @@ type NavigateDetail = {
 @Injectable({ providedIn: 'root' })
 export class Navigation {
 
-  private readonly completions = inject(CompletionUtility)
+private readonly completions = inject(CompletionUtility)
+  private bootstrapped = false
+  private listening = false
+
+  // reconstructs browser history on cold entry so back button steps by segment
+  public bootstrap = (segments: readonly string[]): void => {
+    if (this.bootstrapped) return
+    this.bootstrapped = true
+
+    const clean = segments.map(this.cleanSegment).filter(Boolean)
+
+    // preserve any existing state object
+    const state = window.history.state ?? null
+
+    // replace current entry with root
+    window.history.replaceState(state, '', '/')
+
+    // push one entry per grammar
+    const acc: string[] = []
+    for (const s of clean) {
+      acc.push(s)
+      const path = '/' + acc.join('/')
+      window.history.pushState(state, '', path)
+    }
+
+    // notify listeners of final state
+    this.dispatch([...clean])
+  }
+
 
   // reads current url and returns normalized segments only
   public segments = (): string[] => {
@@ -18,6 +46,9 @@ export class Navigation {
   }
 
   public listen = (): void => {
+    if (this.listening) return
+    this.listening = true
+
     // back/forward only
     window.addEventListener('popstate', this.onPopState)
   }

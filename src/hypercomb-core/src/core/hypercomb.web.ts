@@ -6,5 +6,5 @@ export type ActIntent =
   | { kind: 'error'; name: string }
 
 export abstract class web {
-  public abstract act(text: string): Promise<ActIntent>
+  public abstract act(text: string): Promise<void>
 }
