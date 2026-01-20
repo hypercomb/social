@@ -1,13 +1,14 @@
 // src/app/common/file-explorer/opfs-explorer.component.ts
-
 import { CommonModule } from '@angular/common'
 import { Component, effect, inject, signal } from '@angular/core'
 import { MatButtonModule } from '@angular/material/button'
 import { MatIconModule } from '@angular/material/icon'
 import { MatTableModule } from '@angular/material/table'
 import { ActIntent, hypercomb } from '@hypercomb/core'
+import { CompletionUtility } from '../../core/completion-utility'
 import { Lineage } from '../../core/lineage'
 import { MovementService } from '../../core/movment.service'
+import { Navigation } from '../../core/navigation'
 import { ScriptPreloaderService } from '../../core/script-preloader.service'
 
 interface FileEntry {
@@ -26,15 +27,39 @@ interface FileEntry {
 export class OpfsExplorerComponent extends hypercomb {
 
   public readonly entries = signal<FileEntry[]>([])
+
+  private readonly completions = inject(CompletionUtility)
   private readonly lineage = inject(Lineage)
   private readonly movement = inject(MovementService)
+  private readonly navigation = inject(Navigation)
   private readonly preloader = inject(ScriptPreloaderService)
+
+  // current selection set derived from url hash
+  public readonly selected = signal<string[]>([])
 
   // used to ignore stale async projections if multiple refresh triggers fire quickly
   private projectNonce = 0
 
+  private readonly onSelection = (ev: Event): void => {
+    // selection is url-driven, so treat the url as truth
+    void ev
+    this.selected.set(this.navigation.getSelections())
+  }
+
+  private readonly onHashChange = (): void => {
+    // manual url edits or external hash updates
+    this.selected.set(this.navigation.getSelections())
+  }
+
   constructor() {
     super()
+
+    // initial selection from current url
+    this.selected.set(this.navigation.getSelections())
+
+    // selection updates
+    window.addEventListener('selection', this.onSelection)
+    window.addEventListener('hashchange', this.onHashChange)
 
     effect(() => {
       // refresh and update entries when lineage changes
@@ -42,6 +67,21 @@ export class OpfsExplorerComponent extends hypercomb {
       this.lineage.changed()
       void this.project()
     })
+  }
+
+  public ngOnDestroy = (): void => {
+    window.removeEventListener('selection', this.onSelection)
+    window.removeEventListener('hashchange', this.onHashChange)
+  }
+
+  // --------------------------------------------
+  // row state
+  // --------------------------------------------
+
+  public isSelected = (e: FileEntry): boolean => {
+    if (e.kind !== 'directory') return false
+    const name = this.completions.normalize(e.name)
+    return this.selected().includes(name)
   }
 
   // --------------------------------------------

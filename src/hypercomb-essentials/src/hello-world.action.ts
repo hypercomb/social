@@ -1,4 +1,5 @@
 import { Action } from "@hypercomb/core"
+import { helloWorld } from "./hw-service"
 
 export class HelloWorldAction extends Action {
 
@@ -21,6 +22,6 @@ export class HelloWorldAction extends Action {
   ]
 
   protected override run = async (): Promise<void> => {
-    console.log('[hypercomb essentials] hello world')
+    helloWorld()
   }
 }

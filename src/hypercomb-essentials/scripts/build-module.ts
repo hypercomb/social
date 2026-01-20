@@ -2,6 +2,7 @@
 import { HostedActions } from '../src/index.js'
 import { existsSync, readFileSync, rmSync, mkdirSync, writeFileSync, readdirSync, statSync } from 'fs'
 import { resolve, join } from 'path'
+import { build } from 'esbuild'
 import { PayloadCanonical, SignatureService, type ActionPayloadV1, type Action } from '@hypercomb/core'
 
 // -----------------------------------------
@@ -24,7 +25,7 @@ const toKebab = (value: string): string =>
 const toBase64 = (text: string): string =>
   Buffer.from(text, 'utf8').toString('base64')
 
-// normalize Uint8Array → real ArrayBuffer (never SharedArrayBuffer)
+// normalize Uint8Array → real ArrayBuffer
 const toArrayBuffer = (bytes: Uint8Array): ArrayBuffer => {
   const out = new ArrayBuffer(bytes.byteLength)
   new Uint8Array(out).set(bytes)
@@ -33,92 +34,68 @@ const toArrayBuffer = (bytes: Uint8Array): ArrayBuffer => {
 
 const walkFiles = (dir: string): string[] => {
   if (!existsSync(dir)) return []
-
   const out: string[] = []
 
   for (const name of readdirSync(dir)) {
     const full = join(dir, name)
     const st = statSync(full)
-
-    if (st.isDirectory()) {
-      out.push(...walkFiles(full))
-      continue
-    }
-
-    out.push(full)
+    if (st.isDirectory()) out.push(...walkFiles(full))
+    else out.push(full)
   }
 
   return out
 }
 
 const buildActionSourceIndex = (): Map<string, string> => {
-  // key = fileBase like "show-cell"
-  // value = full absolute path to the actual file in src/** (nested ok)
   const index = new Map<string, string>()
-
   const srcRoot = resolve('./src')
   const all = walkFiles(srcRoot)
 
   for (const file of all) {
     if (!file.endsWith('.action.ts') && !file.endsWith('.action.js')) continue
-
     const base = file.replace(/^.*[\\\/]/, '').replace(/\.action\.(ts|js)$/, '')
-    // only map first match (keeps behavior stable if duplicates exist)
     if (!index.has(base)) index.set(base, file)
   }
 
   return index
 }
 
-const resolveActionText = (fileBase: string, index: Map<string, string>): { entry: string; text: string } => {
-  // preferred resolution:
-  // - for metadata we want ts text if present (authoring)
-  // - fallback to js if present
-  //
-  // note:
-  // index keys are fileBase, values are absolute file paths
-  const tsPath = index.get(fileBase)?.endsWith('.action.ts') ? index.get(fileBase)! : null
-  const jsPath = index.get(fileBase)?.endsWith('.action.js') ? index.get(fileBase)! : null
-
-  // if the first hit was js but ts exists elsewhere, search explicitly
-  if (!tsPath) {
-    const srcRoot = resolve('./src')
-    const explicitTs = walkFiles(srcRoot).find(f => f.endsWith(`${fileBase}.action.ts`))
-    if (explicitTs) {
-      const text = readFileSync(explicitTs, 'utf8')
-      return { entry: `${fileBase}.action.ts`, text }
-    }
+const resolveActionEntry = (fileBase: string, index: Map<string, string>): string => {
+  const candidate = index.get(fileBase)
+  if (!candidate) {
+    throw new Error(`action source not found for "${fileBase}"`)
   }
-
-  if (USE_TS_SOURCE && tsPath) {
-    const text = readFileSync(tsPath, 'utf8')
-    return { entry: `${fileBase}.action.ts`, text }
-  }
-
-  // fallback js search (src/**)
-  if (jsPath) {
-    const text = readFileSync(jsPath, 'utf8')
-    return { entry: `${fileBase}.action.js`, text }
-  }
-
-  // last fallback: dist/src/** (if you ever want to sign compiled outputs)
-  const distCandidate = resolve(`./dist/src/${fileBase}.action.js`)
-  if (existsSync(distCandidate)) {
-    const text = readFileSync(distCandidate, 'utf8')
-    return { entry: `${fileBase}.action.js`, text }
-  }
-
-  // error message mirrors what you're seeing, but now it includes nested intent
-  const tried = [
-    resolve(`./src/${fileBase}.action.ts`),
-    resolve(`./src/${fileBase}.action.js`),
-    resolve(`./dist/src/${fileBase}.action.js`),
-    resolve(`./src/**/${fileBase}.action.ts`),
-    resolve(`./src/**/${fileBase}.action.js`)
-  ]
-
-  throw new Error(`action source not found for "${fileBase}". tried: ${tried.join(', ')}`)
+  return candidate
 }
+
+// -----------------------------------------
+// bundler
+// -----------------------------------------
+const bundleAction = async (entryFile: string): Promise<string> => {
+  const result = await build({
+    entryPoints: [resolve(entryFile)],
+    bundle: true,
+    format: 'esm',
+    platform: 'browser',
+    write: false,
+    target: 'es2022',
+
+    tsconfig: resolve('./tsconfig.json'),
+    absWorkingDir: process.cwd(),
+
+    external: ['@hypercomb/core'],
+    metafile: true
+  })
+
+  // DEBUG: prove what's included
+  console.log(
+    '[bundle inputs]',
+    Object.keys(result.metafile!.inputs)
+  )
+
+  return result.outputFiles[0].text
+}
+
 
 // -----------------------------------------
 // main
@@ -138,10 +115,13 @@ const main = async (): Promise<void> => {
 
   for (const ActionCtor of HostedActions as HostedEntry[]) {
     const instance = new ActionCtor()
-
     const fileBase = toKebab(instance.constructor.name)
+    const entryPath = resolveActionEntry(fileBase, index)
 
-    const { entry, text: sourceText } = resolveActionText(fileBase, index)
+    // -----------------------------------------
+    // bundle full dependency closure
+    // -----------------------------------------
+    const bundledSource = await bundleAction(entryPath)
 
     const draft = PayloadCanonical.createEmpty()
 
@@ -155,17 +135,19 @@ const main = async (): Promise<void> => {
     ;(draft.action as any).effects = (instance as any).effects ?? []
 
     // -----------------------------------------
-    // source (unsigned)
+    // source (unsigned, bundled)
     // -----------------------------------------
-    draft.source.entry = entry
-    draft.source.files = { [entry]: toBase64(sourceText) }
+    draft.source.entry = 'bundle.js'
+    draft.source.files = {
+      'bundle.js': toBase64(bundledSource)
+    }
 
     const { signature } = await PayloadCanonical.compute(draft)
     builtActions.push({ signature, payload: draft })
   }
 
   // -----------------------------------------
-  // assemble module (single dist artifact)
+  // assemble module
   // -----------------------------------------
   const moduleFile = {
     version: 1,

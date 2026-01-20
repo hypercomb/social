@@ -145,9 +145,9 @@ export class ScriptPreloaderService {
     if (!src.includes('class') || !src.includes('Action')) return null
 
     const m = src.match(
-      /class\s+([A-Za-z0-9_]+)\s+extends\s+(?:[\w.]*\.)?([A-Za-z0-9_]*Action)\b/
+    /(?:export\s+)?(?:var\s+)?([A-Za-z0-9_]+)\s*(?:=\s*)?(?:class\s+)?extends\s+(?:[\w.]*\.)?Action\b/
     )
-
+    
     if (!m) return null
 
     // FooBarAction → foo-bar

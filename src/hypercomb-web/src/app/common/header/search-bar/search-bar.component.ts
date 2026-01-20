@@ -234,20 +234,30 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
 
     if (this.handleCompletionKeys(e)) return
 
+    // -------------------------------------------------
+    // enter behavior:
+    // - enter: selection toggle / create (no navigation)
+    // - shift+enter: navigate to seed (no selection changes)
+    // -------------------------------------------------
     if (e.key === 'Enter') {
       e.preventDefault()
+
+      if (e.shiftKey) {
+        void this.commitNavigate()
+        return
+      }
+
       void this.commit()
     }
   }
 
   // -------------------------------------------------
-  // commit
+  // commit (selection toggle / create only)
   // -------------------------------------------------
   private readonly commit = async (): Promise<void> => {
     const raw = this.input.nativeElement.value.trim()
     if (!raw) return
 
-    // meta-only: '#' opens dcp and exits earlier in keydown
     if (this.locked()) {
       this.clear()
       return
@@ -271,26 +281,21 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
 
     const baseSegments = this.navigation.segments()
 
-    // -------------------------------------------------
-    // ensure grammar always exists when referenced
-    // -------------------------------------------------
-
+    // selection semantics
     if (seedName) {
-      await this.lineage.resolve([...baseSegments, seedName], true)
+      const target = [...baseSegments, seedName]
+      const exists = await this.lineage.tryResolve(target)
+
+      // create only if missing
+      if (!exists) {
+        await this.lineage.resolve(target, true)
+      }
+
+      // toggle selection in url hash
+      this.navigation.toggleSelection(seedName)
     }
 
-    // -------------------------------------------------
-    // always signal intent (execution semantics deferred)
-    // -------------------------------------------------
-
-    if (seedName) {
-      void this.act(seedName)
-    }
-
-    // -------------------------------------------------
-    // marker attachment (no execution implied here)
-    // -------------------------------------------------
-
+    // marker attachment (seed#marker)
     if (markerName) {
       const descriptor = this.preloader.resolveByName(markerName)
       if (descriptor) {
@@ -302,14 +307,47 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
       }
     }
 
-    // -------------------------------------------------
-    // navigation (seed implies entering scope)
-    // -------------------------------------------------
+    this.clear()
+  }
 
-    if (seedName) {
-      await this.movement.move(seedName)
+  // -------------------------------------------------
+  // commit (navigate only)
+  // -------------------------------------------------
+  private readonly commitNavigate = async (): Promise<void> => {
+    const raw = this.input.nativeElement.value.trim()
+    if (!raw) return
+
+    if (this.locked()) {
+      this.clear()
+      return
     }
 
+    const hashIndex = raw.indexOf('#')
+
+    const rawSeed =
+      hashIndex === -1 ? raw : raw.slice(0, hashIndex).trim()
+
+    const seedName = rawSeed
+      ? this.completions.normalize(rawSeed)
+      : null
+
+    if (!seedName) {
+      this.clear()
+      return
+    }
+
+    const baseSegments = this.navigation.segments()
+    const target = [...baseSegments, seedName]
+
+    // navigate should only happen if seed exists
+    const exists = await this.lineage.tryResolve(target)
+    if (!exists) {
+      // do not create and do not navigate on shift+enter
+      this.clear()
+      return
+    }
+
+    await this.movement.move(seedName)
     this.clear()
   }
 

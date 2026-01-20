@@ -29,10 +29,10 @@ export class CoreAdapter {
 
     const segments = this.navigation.segments()
 
-    // align history FIRST
+    // align history first (root + one entry per segment with history.state.segments)
     this.navigation.bootstrap(segments)
 
-    // start reacting to navigation AFTER history is aligned
+    // start reacting to navigation after history is aligned
     this.processorHost.start()
   }
 }

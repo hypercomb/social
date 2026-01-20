@@ -79,6 +79,14 @@
     &:hover {
       background: rgba(0, 0, 0, 0.04);
     }
+
+    &.selected-row {
+      background: rgba(0, 0, 0, 0.10);
+    }
+
+    &.selected-row:hover {
+      background: rgba(0, 0, 0, 0.12);
+    }
   }
 }
 

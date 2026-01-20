@@ -83,6 +83,7 @@
         mat-row
         *matRowDef="let row; columns: ['icon', 'name', 'run', 'copy', 'delete']"
         class="data-row"
+        [class.selected-row]="isSelected(row)"
         (click)="explore(row.name)"
       ></tr>
 
