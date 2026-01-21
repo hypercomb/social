@@ -7,7 +7,7 @@ import { InitState } from "../../../core/model"
 import { ScriptPreloaderService } from "../../../core/script-preloader.service"
 import { ResourceCompletionService } from "./resource-completion.service"
 import { Lineage } from "../../../core/lineage"
-import { MovementService } from "../../../core/movment.service"
+import { MovementService } from "../../../core/movement.service"
 import { Navigation } from "../../../core/navigation"
 
 @Component({

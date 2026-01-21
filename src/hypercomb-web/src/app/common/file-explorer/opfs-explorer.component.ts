@@ -7,7 +7,7 @@ import { MatTableModule } from '@angular/material/table'
 import { hypercomb } from '@hypercomb/core'
 import { CompletionUtility } from '../../core/completion-utility'
 import { Lineage } from '../../core/lineage'
-import { MovementService } from '../../core/movment.service'
+import { MovementService } from '../../core/movement.service'
 import { Navigation } from '../../core/navigation'
 import { ScriptPreloaderService } from '../../core/script-preloader.service'
 
