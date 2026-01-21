@@ -41,10 +41,10 @@ export abstract class Action {
   // execution
   // --------------------------------
 
-  protected abstract run: () => Promise<void>
+  protected abstract run: (grammar:string) => Promise<void>
 
-  public async execute(): Promise<void> {
+  public async execute(grammar: string): Promise<void> {
     if (!(await this.canExecute())) return
-    await this.run()
+    await this.run(grammar)
   }
 }

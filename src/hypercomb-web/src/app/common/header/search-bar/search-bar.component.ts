@@ -1,7 +1,7 @@
 // src/app/common/header/search-bar/search-bar.component.ts
 
 import { Component, AfterViewInit, OnDestroy, ViewChild, ElementRef, inject, signal, computed } from "@angular/core"
-import { ActIntent, hypercomb } from "@hypercomb/core"
+import { hypercomb } from "@hypercomb/core"
 import { CompletionContext, CompletionUtility } from "../../../core/completion-utility"
 import { InitState } from "../../../core/model"
 import { ScriptPreloaderService } from "../../../core/script-preloader.service"

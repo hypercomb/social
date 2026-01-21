@@ -4,7 +4,7 @@ import { Component, effect, inject, signal } from '@angular/core'
 import { MatButtonModule } from '@angular/material/button'
 import { MatIconModule } from '@angular/material/icon'
 import { MatTableModule } from '@angular/material/table'
-import { ActIntent, hypercomb } from '@hypercomb/core'
+import { hypercomb } from '@hypercomb/core'
 import { CompletionUtility } from '../../core/completion-utility'
 import { Lineage } from '../../core/lineage'
 import { MovementService } from '../../core/movment.service'
@@ -114,8 +114,8 @@ export class OpfsExplorerComponent extends hypercomb {
     try {
       // if your runtime exposes an "execute by signature" pathway, route it here.
       // otherwise, this no-ops safely.
-      const intent: ActIntent | void = await this.act(descriptor.name)
-      void intent
+       await this.act(descriptor.name)
+
     } catch (err) {
       console.error('failed to run entry', e.name, err)
     }

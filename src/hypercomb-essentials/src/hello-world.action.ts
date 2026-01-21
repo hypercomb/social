@@ -21,7 +21,7 @@ export class HelloWorldAction extends Action {
     } as const
   ]
 
-  protected override run = async (): Promise<void> => {
+  protected override run = async (grammar:string): Promise<void> => {
     helloWorld()
   }
 }

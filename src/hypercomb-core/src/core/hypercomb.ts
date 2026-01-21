@@ -1,7 +1,7 @@
 // src/app/hypercomb.ts
 
 import { inject } from '@angular/core'
-import { ActIntent, web } from './hypercomb.web.js'
+import { web } from './hypercomb.web.js'
 import { ACTION_RESOLVER } from './action-resolver.js'
 
 export class hypercomb extends web {
@@ -24,7 +24,7 @@ export class hypercomb extends web {
     const actions = await this.resolver.find(resolvedGrammar)
 
     for (const action of actions) {
-      await action.execute()
+      await action.execute(grammar)
     }
   }
 }

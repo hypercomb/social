@@ -29,7 +29,7 @@ export class ShowCellAction extends Action {
 
   public effects = ['render'] as const
 
-  protected override run = async (): Promise<void> => {
+  protected override run = async (grammar:string): Promise<void> => {
     const pixi = (window as any).__hypercomb_libs__?.pixi as PixiLib | undefined
     const hostState = (window as any).__hypercomb_pixi__ as { app: any } | undefined
 
