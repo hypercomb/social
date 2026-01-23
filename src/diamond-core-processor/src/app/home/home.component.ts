@@ -2,7 +2,7 @@
 import { Component, computed, inject, signal } from '@angular/core'
 import { Router } from '@angular/router'
 import { DraftPayloadCacheService } from '../core/draft-payload-cache.service'
-import { ModuleResolverService, type ModuleActionV1, type ResolvedModule } from '../core/module-resolver.service'
+import { ModuleResolverService, type ModuleDroneV1, type ResolvedModule } from '../core/module-resolver.service'
 
 const DOMAINS_KEY = 'dcp.domains'
 const LAST_MODULE_KEY = 'dcp.lastModuleSignature'
@@ -31,8 +31,8 @@ export class HomeComponent {
     return name || 'unnamed module'
   })
 
-  public readonly actions = computed((): ModuleActionV1[] => {
-    return this.resolvedModule()?.module.actions ?? []
+  public readonly drones = computed((): ModuleDroneV1[] => {
+    return this.resolvedModule()?.module.drones ?? []
   })
 
   // -----------------------------
@@ -76,19 +76,19 @@ export class HomeComponent {
   // -----------------------------
   // display helpers (names from payload, fallback to source bytes)
   // -----------------------------
-  protected actionTitle = (a: ModuleActionV1): string => {
-    const fromMeta = (a?.payload?.action?.name ?? '').trim()
+  protected actionTitle = (a: ModuleDroneV1): string => {
+    const fromMeta = (a?.payload?.drone?.name ?? '').trim()
     if (fromMeta) return fromMeta
 
     const fromSource = this.inferTitleFromSource(a)
     return fromSource || 'untitled action'
   }
 
-  protected actionDescription = (a: ModuleActionV1): string => {
-    return (a?.payload?.action?.description ?? '').trim()
+  protected actionDescription = (a: ModuleDroneV1): string => {
+    return (a?.payload?.drone?.description ?? '').trim()
   }
 
-  private inferTitleFromSource(a: ModuleActionV1): string {
+  private inferTitleFromSource(a: ModuleDroneV1): string {
     const entry = (a?.payload?.source?.entry ?? '').trim()
     if (!entry) return ''
 
@@ -122,7 +122,7 @@ export class HomeComponent {
       this.resolvedModule.set(resolved)
 
       // cache each action payload under its signature so the inspector can open instantly
-      for (const item of resolved.module.actions) {
+      for (const item of resolved.module.drones) {
         const { signature, payload } = item
         this.cache.set(signature, JSON.stringify(payload))
       }

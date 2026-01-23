@@ -1,23 +1,13 @@
-// src/hypercomb-actions/pixi/show-cell.action.ts
+// src/hypercomb-drones/pixi/show-cell.drone.ts
 
-import { Action } from '@hypercomb/core'
+import { Drone, get, has } from '@hypercomb/core'
+import type { Container, Mesh, MeshGeometry, Text, Texture } from 'pixi.js'
+import { PixiHostDrone } from './pixi-host.drone'
 
-type PixiLib = {
-  Application: new () => any
-  Container: new () => any
-  Mesh: new (options: { geometry: any; texture?: any }) => any
-  MeshGeometry: new (options: {
-    attributes: {
-      aPosition: { buffer: Float32Array; size: number }
-      aUV: { buffer: Float32Array; size: number }
-    }
-    indices: Uint16Array
-  }) => any
-  Text: new (options: any) => any
-  Texture: { WHITE: any }
-}
+export class ShowCellDrone extends Drone {
 
-export class ShowCellAction extends Action {
+  public host: PixiHostDrone | undefined
+  public pixi: any
 
   public description =
     'Renders a single hex cell using mesh geometry (no masks) with centered text.'
@@ -29,29 +19,44 @@ export class ShowCellAction extends Action {
 
   public effects = ['render'] as const
 
-  protected override run = async (grammar:string): Promise<void> => {
-    const pixi = (window as any).__hypercomb_libs__?.pixi as PixiLib | undefined
-    const hostState = (window as any).__hypercomb_pixi__ as { app: any } | undefined
+  // -------------------------------------------------
+  // cached objects (live on the registered instance)
+  // -------------------------------------------------
+  private layer: Container | null = null
+  private texture: Texture | null = null
 
-    if (!pixi || !hostState?.app) {
+  // note: geometry is keyed by radius so it can be reused safely
+  private geometryByRadius = new Map<number, MeshGeometry>()
+
+  protected override sense = (grammar: string): boolean | Promise<boolean> => {
+    // somehow check to see if the lineage is correct
+    return true
+  }
+
+  protected override heartbeat = async (grammar: string): Promise<void> => {
+
+    const host = this.host = get<PixiHostDrone>(PixiHostDrone.name)
+    const pixi = this.pixi = this.host!.pixi
+
+    if (!this.host?.app) {
       console.log('[pixi] missing host; run "add pixi" first')
       return
     }
 
-    const app = hostState.app
+    const app = host!.app!
 
     // -------------------------------------------------
-    // shared render layer
+    // shared render layer (cached on this instance)
     // -------------------------------------------------
-    const layerKey = '__hypercomb_cells__'
-    let layer = (window as any)[layerKey]
-    if (!layer) {
-      layer = new pixi.Container()
-      ;(window as any)[layerKey] = layer
-      app.stage.addChild(layer)
+    // note:
+    // - this.layer survives across heartbeats because the drone instance is registered
+    // - we attach it to the host stage once
+    if (!this.layer) {
+      this.layer = new pixi.Container()
+      app.stage.addChild(this.layer)
     }
 
-    layer.removeChildren()
+    this.layer.removeChildren()
 
     // -------------------------------------------------
     // sizing
@@ -61,14 +66,18 @@ export class ShowCellAction extends Action {
     const r = Math.max(64, Math.floor(Math.min(w, h) * 0.18))
 
     // -------------------------------------------------
-    // texture (cheap + cached)
+    // texture (cached on this instance)
     // -------------------------------------------------
-    const texture = this.getSharedTexture(pixi)
+    const texture = this.getSharedTexture()
 
     // -------------------------------------------------
-    // mesh (geometry clips image)
+    // geometry (cached by radius on this instance)
     // -------------------------------------------------
-    const geometry = this.getSharedHexGeometry(r, w, h, pixi)
+    const geometry = this.getSharedHexGeometry(r, w, h)
+
+    // -------------------------------------------------
+    // mesh
+    // -------------------------------------------------
     const mesh = new pixi.Mesh({ geometry, texture })
 
     // -------------------------------------------------
@@ -87,23 +96,19 @@ export class ShowCellAction extends Action {
     label.anchor.set(0.5)
     label.position.set(w * 0.5, h * 0.5)
 
-    layer.addChild(mesh)
-    layer.addChild(label)
+    this.layer.addChild(mesh)
+    this.layer.addChild(label)
 
     console.log('[pixi] show cell rendered (v8 mesh, no masks)')
   }
 
-  // -------------------------------------------------
-  // geometry (cached, reusable, GPU-fast)
-  // -------------------------------------------------
   private getSharedHexGeometry = (
     r: number,
     w: number,
-    h: number,
-    pixi: PixiLib
-  ): any => {
-    const key = `__hypercomb_hex_geom__:${r}`
-    const cached = (window as any)[key]
+    h: number
+  ): MeshGeometry => {
+
+    const cached = this.geometryByRadius.get(r)
     if (cached) return cached
 
     const cx = w * 0.5
@@ -132,34 +137,26 @@ export class ShowCellAction extends Action {
       indices.push(0, i, i === 6 ? 1 : i + 1)
     }
 
+    const pixi = this.pixi
+
     const geom = new pixi.MeshGeometry({
-      attributes: {
-        aPosition: {
-          buffer: new Float32Array(positions),
-          size: 2
-        },
-        aUV: {
-          buffer: new Float32Array(uvs),
-          size: 2
-        }
-      },
-      indices: new Uint16Array(indices)
+      positions: new Float32Array(positions),
+      uvs: new Float32Array(uvs),
+      indices: new Uint32Array(indices)
     })
 
-    ;(window as any)[key] = geom
+    this.geometryByRadius.set(r, geom)
     return geom
   }
 
   // -------------------------------------------------
   // texture (white base, zero network)
   // -------------------------------------------------
-  private getSharedTexture = (pixi: PixiLib): any => {
-    const key = '__hypercomb_cell_texture__'
-    const cached = (window as any)[key]
-    if (cached) return cached
-
-    const t = pixi.Texture.WHITE
-    ;(window as any)[key] = t
-    return t
+  private getSharedTexture = (): Texture => {
+    if (this.texture) return this.texture
+    const pixi = this.pixi
+    this.texture = pixi.Texture.WHITE
+    return this.texture!
   }
+
 }

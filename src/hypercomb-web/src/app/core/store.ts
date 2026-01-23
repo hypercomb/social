@@ -1,56 +1,140 @@
 // src/app/core/store.ts
+
 import { inject, Injectable } from '@angular/core'
-import { Action, SignatureService } from '@hypercomb/core'
+import { Drone, type DroneResolver, get, SignatureService } from '@hypercomb/core'
 import { CompletionUtility } from './completion-utility'
-import { Lineage } from './lineage'
 import { ScriptPreloaderService } from './script-preloader.service'
 
-type ActionCtor = new () => Action
+type DroneCtor = new () => Drone
 
 @Injectable({ providedIn: 'root' })
-export class Store {
+export class Store implements DroneResolver {
 
+  // -------------------------------------------------
+  // constants
+  // -------------------------------------------------
+
+  private static readonly HYPERCOMB_DIRECTORY = 'hypercomb'
   private static readonly RESOURCES_DIRECTORY = '__resources__'
+  private static readonly TEST_DOMAIN_DIRECTORY = 'hypercomb-test-domain'
+
+  // -------------------------------------------------
+  // dependencies
+  // -------------------------------------------------
 
   private readonly completion = inject(CompletionUtility)
-  private readonly lineage = inject(Lineage)
+  private readonly preloader = inject(ScriptPreloaderService)
 
-  private root!: FileSystemDirectoryHandle
+  // -------------------------------------------------
+  // file system handles
+  // -------------------------------------------------
+
+  private opfsRoot!: FileSystemDirectoryHandle
+  private hypercombRoot!: FileSystemDirectoryHandle
+  private testDomainRoot!: FileSystemDirectoryHandle
   private resources!: FileSystemDirectoryHandle
 
-  public constructor(
-    private readonly preloader: ScriptPreloaderService
-  ) { }
+  // -------------------------------------------------
+  // lifecycle
+  // -------------------------------------------------
 
   public initialize = async (): Promise<void> => {
-    this.root = await navigator.storage.getDirectory()
-    this.resources = await this.root.getDirectoryHandle(Store.RESOURCES_DIRECTORY, { create: true })
+    // opfs root is neutral. do not store anything directly here unless explicitly scoped.
+    this.opfsRoot = await navigator.storage.getDirectory()
+
+    // fixed platform root for all platform-owned data
+    this.hypercombRoot =
+      await this.opfsRoot.getDirectoryHandle(Store.HYPERCOMB_DIRECTORY, { create: true })
+
+    // deterministic test domain root folder at opfs root (sibling of hypercomb)
+    this.testDomainRoot =
+      await this.opfsRoot.getDirectoryHandle(Store.TEST_DOMAIN_DIRECTORY, { create: true })
+
+    // resources stored by signature under hypercomb/__resources__
+    this.resources =
+      await this.hypercombRoot.getDirectoryHandle(Store.RESOURCES_DIRECTORY, { create: true })
+
     await this.preloader.initialize(this.resources)
   }
 
-  public find = async (name: string): Promise<Action[]> => {
-    console.log('[store] finding actions for', name)
+  // -------------------------------------------------
+  // platform roots
+  // -------------------------------------------------
 
-    const actions: Action[] = []
+  // opfs root directory
+  public opfsDirectory = (): FileSystemDirectoryHandle => {
+    return this.opfsRoot
+  }
 
+  // platform root directory (opfs/hypercomb)
+  // never exposed in the browser address
+  public hypercombDirectory = (): FileSystemDirectoryHandle => {
+    return this.hypercombRoot
+  }
+
+  // deterministic test domain root directory (opfs/hypercomb-test-domain)
+  public testDomainDirectory = (): FileSystemDirectoryHandle => {
+    return this.testDomainRoot
+  }
+
+  // resources root directory (opfs/hypercomb/__resources__)
+  public resourcesDirectory = (): FileSystemDirectoryHandle => {
+    return this.resources
+  }
+
+  // resolves any domain directory under opfs root
+  // create is false by default so listing is passive
+  public domainDirectory = async (name: string, create: boolean = false): Promise<FileSystemDirectoryHandle> => {
+    return await this.opfsRoot.getDirectoryHandle(name, { create })
+  }
+
+  // -------------------------------------------------
+  // drone resolution
+  // -------------------------------------------------
+
+  public find = async (name: string): Promise<Drone[]> => {
     const clean = this.completion.normalize(name)
+
+    // 1) ioc first (source of truth)
+    const existing = get<Drone>(clean)
+    if (existing) return [existing]
+
+    // 2) resolve module via preloader
     const descriptor = this.preloader.resolveByName(clean)
-    if (!descriptor) return actions
+    if (!descriptor) return []
 
     const bytes = this.preloader.get(descriptor.signature)
-    if (!bytes) return actions
+    if (!bytes) return []
 
+    // 3) import module
     const mod = await this.loadModule(bytes)
 
-    const extracted = this.extractActions(mod)
-    if (!extracted.length) {
-      console.warn('[store] no action export found for', name)
-      return actions
+    // 4) get constructable drone exports (no side-effects)
+    const ctors = this.extractDroneCtors(mod)
+    if (!ctors.length) return []
+
+    // 5) instantiate missing drones (auto-registers via base class)
+    for (const Ctor of ctors) {
+      const key = this.completion.normalize(Drone.key(Ctor.name))
+      if (!get<Drone>(key)) {
+        new Ctor()
+      }
     }
 
-    actions.push(...extracted)
-    return actions
+    // 6) return instances from ioc (single source of truth)
+    const out: Drone[] = []
+    for (const Ctor of ctors) {
+      const key = this.completion.normalize(Drone.key(Ctor.name))
+      const inst = get<Drone>(key)
+      if (inst) out.push(inst)
+    }
+
+    return out
   }
+
+  // -------------------------------------------------
+  // resource io
+  // -------------------------------------------------
 
   public put = async (bytes: ArrayBuffer): Promise<string> => {
     const signature = await SignatureService.sign(bytes)
@@ -75,13 +159,16 @@ export class Store {
     return this.preloader.has(signature)
   }
 
+  // -------------------------------------------------
+  // module loader (bytes -> esm)
+  // -------------------------------------------------
+
   private loadModule = async (bytes: ArrayBuffer): Promise<unknown> => {
     const blob = new Blob([bytes], { type: 'application/javascript' })
     const url = URL.createObjectURL(blob)
 
     try {
-      const result = await import(/* @vite-ignore */ url)
-      return result
+      return await import(/* @vite-ignore */ url)
     } catch (error) {
       console.error('[store] failed to load module', error)
       throw error
@@ -90,42 +177,32 @@ export class Store {
     }
   }
 
- // src/app/core/store.ts
-private extractActions = (module: unknown): Action[] => {
-  const out: Action[] =   []
+  // -------------------------------------------------
+  // ctor extractor (safe, no side-effects)
+  // -------------------------------------------------
 
-  if (!module || typeof module !== 'object') return out
+  private extractDroneCtors = (module: unknown): DroneCtor[] => {
+    const out: DroneCtor[] = []
 
-  for (const [key, value] of Object.entries(module as Record<string, unknown>)) {
-    if (typeof value !== 'function') continue
+    if (!module || typeof module !== 'object') return out
 
-    const proto = (value as any).prototype
-    if (!proto) continue
+    for (const value of Object.values(module as Record<string, unknown>)) {
+      if (typeof value !== 'function') continue
 
-    // must be constructable
-    let instance: any
-    try {
-      instance = new (value as any)()
-    } catch {
-      continue
+      const proto = (value as any).prototype
+      if (!proto) continue
+
+      // must look like a Drone subclass by shape
+      if (typeof proto.encounter !== 'function') continue
+      if (typeof proto.sensed !== 'function') continue
+
+      out.push(value as unknown as DroneCtor)
     }
 
-    // must look like an action instance
-    // (this avoids realm/duplicate-module instanceof problems)
-    if (!instance || typeof instance !== 'object') continue
-    if (typeof instance.execute !== 'function') continue
+    if (!out.length) {
+      console.warn('[store] no drone exports found. exports:', Object.keys(module as any))
+    }
 
-    // optional: require id
-    // if (typeof instance.id !== 'string' || !instance.id.trim()) continue
-
-    out.push(instance as Action)
+    return out
   }
-
-  if (!out.length) {
-    console.warn('[store] no action-like exports found. exports:', Object.keys(module as any))
-  }
-
-  return out
-}
-
 }

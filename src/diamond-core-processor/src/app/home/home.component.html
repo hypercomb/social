@@ -58,9 +58,9 @@
       </div>
     </div>
 
-    @if (actions().length) {
+    @if (drones().length) {
       <ul class="action-list">
-        @for (a of actions(); track a.signature) {
+        @for (a of drones(); track a.signature) {
           <li class="action-row">
             <div class="action-left">
               <div class="action-title">{{ actionTitle(a) }}</div>

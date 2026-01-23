@@ -12,5 +12,6 @@ export const get = <T = unknown>(key: string): T | undefined =>
 export const has = (key: string): boolean =>
   registry.has(key)
 
-export const list = (): readonly string[] =>
+export const list = (): readonly string[] =>  
   [...registry.keys()]
+  

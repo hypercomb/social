@@ -5,7 +5,8 @@
     "build": "tsc && tsx ./scripts/build-module.ts"
   },
   "dependencies": {
-    "@hypercomb/core": "file:../hypercomb-core"
+    "@hypercomb/core": "file:../hypercomb-core",
+    "pixi.js": "^8.15.0"
   },
   "devDependencies": {
     "tsx": "^4.21.0"

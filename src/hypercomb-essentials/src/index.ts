@@ -1,10 +1,11 @@
 // src/index.ts
-import { HelloWorldAction } from './hello-world.action'
-import { ShowCellAction } from './pixi/show-cell.action'
-import { PixiHostAction } from './pixi/pixi-host.action'
+import { HelloWorldDrone } from './hello-world.drone'
+import { PixiHostDrone } from './pixi/pixi-host.drone'
+import { ShowCellDrone } from './pixi/show-cell.drone'
 
-export const HostedActions = [
-  HelloWorldAction,
-  PixiHostAction,
-  ShowCellAction,
+
+export const HostedDrones = [
+  HelloWorldDrone,
+  PixiHostDrone,
+  ShowCellDrone,
 ]

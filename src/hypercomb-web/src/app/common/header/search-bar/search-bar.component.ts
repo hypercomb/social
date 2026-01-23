@@ -288,7 +288,7 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
 
       // create only if missing
       if (!exists) {
-        await this.lineage.resolve(target, true)
+        await this.lineage.ensure(target)
       }
 
       // toggle selection in url hash

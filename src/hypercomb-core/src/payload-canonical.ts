@@ -5,9 +5,9 @@ import { GrammarHint } from './grammar-hint.js'
 import { ProviderLink } from './provider-link.js'
 import { Effect } from './effect.js';
 
-export type ActionPayloadV1 = {
+export type DronePayloadV1 = {
   version: 1
-  action: {
+  drone: {
     name: string
     description?: string
     grammar?: GrammarHint[]
@@ -22,9 +22,9 @@ export type ActionPayloadV1 = {
 
 export class PayloadCanonical {
 
-  public static createEmpty = (): ActionPayloadV1 => ({
+  public static createEmpty = (): DronePayloadV1 => ({
     version: 1,
-    action: {
+    drone: {
       name: '',
       description: '',
       grammar: [],
@@ -37,7 +37,7 @@ export class PayloadCanonical {
   })
 
   public static compute = async (
-    payload: ActionPayloadV1
+    payload: DronePayloadV1
   ): Promise<{ signature: string; canonicalJson: string }> => {
 
     const canonical = structuredClone(payload)
@@ -54,7 +54,7 @@ export class PayloadCanonical {
   }
 
   public static signPayload = async (
-    payload: ActionPayloadV1
+    payload: DronePayloadV1
   ): Promise<{ signature: string; json: string }> => {
 
     const { signature, canonicalJson } = await this.compute(payload)

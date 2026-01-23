@@ -1,11 +1,11 @@
-import { Action } from "@hypercomb/core"
-import { helloWorld } from "./hw-service"
+import { Drone } from "@hypercomb/core"
+// import { helloWorld } from "./hw-service"
 
-export class HelloWorldAction extends Action {
+export class HelloWorldDrone extends Drone {
 
   public description =
     'Minimal hello world action from Hypercomb essentials.'
-
+  
   public grammar = [
     { example: 'hello world' }
   ]
@@ -21,7 +21,7 @@ export class HelloWorldAction extends Action {
     } as const
   ]
 
-  protected override run = async (grammar:string): Promise<void> => {
-    helloWorld()
+  protected override heartbeat = async (grammar:string): Promise<void> => {
+    // helloWorld()
   }
 }

@@ -1,28 +1,38 @@
-// src/hypercomb-actions/pixi/add-pixi.action.ts
+// src/hypercomb-drones/pixi/add-pixi.drone.ts
 
-import { Action } from '@hypercomb/core'
+import { Drone, has } from '@hypercomb/core'
+import * as pixi from 'pixi.js'
+import type { Application, Container } from 'pixi.js'
 
-export class PixiHostAction extends Action {
+export class PixiHostDrone extends Drone {
 
   // -------------------------------------------------
-  // constants (pure, safe)
+  // capability surface
   // -------------------------------------------------
 
-  public readonly hexagonSide = 200
+  public app: Application | null = null
+  public host: HTMLDivElement | null = null
+  public container!: Container
+  public pixi = pixi
 
-  public get height(): number {
+  // -------------------------------------------------
+  // constants
+  // -------------------------------------------------
+
+  private readonly hexagonSide = 200
+
+  private get height(): number {
     return this.hexagonSide * 2
   }
-
-  public get width(): number {
+  private get width(): number {
     return this.hexagonSide * Math.sqrt(3)
   }
 
-  public get hexagonOffsetX(): number {
+  private get hexagonOffsetX(): number {
     return this.width / 2
   }
 
-  public get hexagonOffsetY(): number {
+  private get hexagonOffsetY(): number {
     return this.height / 2
   }
 
@@ -31,51 +41,45 @@ export class PixiHostAction extends Action {
   // -------------------------------------------------
 
   public description =
-    'Adds a PIXI canvas to the page (single global instance) so future actions can draw to it.'
+    'Provides a single PIXI application for rendering drones.'
 
   public grammar = [
     { example: 'add pixi' },
     { example: 'pixi' }
   ]
 
-  public effects = ['memory', 'render'] as const
+  public effects = ['render'] as const
 
-  public links = [
-    {
-      label: 'PixiJS docs',
-      url: 'https://pixijs.com/',
-      trust: 'official',
-      purpose: 'PIXI renderer docs and examples'
-    } as const
-  ]
 
   // -------------------------------------------------
-  // runtime
+  // sense (idempotent)
   // -------------------------------------------------
 
-  protected override run = async (): Promise<void> => {
+  protected override sense = (_grammar: string): boolean | Promise<boolean> => {
+    // already registered → nothing to do
+    if (has(this.name)) return false
+
+    // not registered yet → run heartbeat
+    return true
+  }
+
+  // -------------------------------------------------
+  // heartbeat (idempotent)
+  // -------------------------------------------------
+
+  protected override heartbeat = async (_grammar: string): Promise<void> => {
     // -------------------------------------------------
-    // hard runtime guard (Node / build safety)
+    // already registered?
     // -------------------------------------------------
-    if (typeof window === 'undefined' || typeof document === 'undefined') {
+    if (has(this.name)) {
       return
     }
 
     // -------------------------------------------------
-    // already mounted?
+    // already mounted? (dom guard, avoids double hosts)
     // -------------------------------------------------
     const existing = document.querySelector('[data-hypercomb-pixi="root"]')
     if (existing) {
-      console.log('[pixi] already mounted')
-      return
-    }
-
-    // -------------------------------------------------
-    // pixi availability
-    // -------------------------------------------------
-    const pixi = (window as any).__hypercomb_libs__?.pixi
-    if (!pixi) {
-      console.warn('[pixi] pixi library not available')
       return
     }
 
@@ -97,7 +101,7 @@ export class PixiHostAction extends Action {
     // -------------------------------------------------
     // pixi app
     // -------------------------------------------------
-    const app = new pixi.Application()
+    const app = this.app = new pixi.Application()
 
     await app.init({
       resizeTo: window,
@@ -126,15 +130,5 @@ export class PixiHostAction extends Action {
     g.fill(0xffffff)
 
     app.stage.addChild(g)
-
-    // -------------------------------------------------
-    // temporary global (migration seam for IoC later)
-    // -------------------------------------------------
-    ;(window as any).__hypercomb_pixi__ = {
-      app,
-      host
-    }
-
-    console.log('[pixi] mounted')
   }
 }

@@ -2,29 +2,21 @@
 
 import { inject } from '@angular/core'
 import { web } from './hypercomb.web.js'
-import { ACTION_RESOLVER } from './action-resolver.js'
+import { DRONE_RESOLVER } from './drone-resolver.js'
 
 export class hypercomb extends web {
-  private readonly resolver = inject(ACTION_RESOLVER)
-
+  private readonly resolver = inject(DRONE_RESOLVER)
+  
   /**
    * activate a grammar at the current scope.
    * empty or '/' means root grammar.
    * always executes, always returns.
    */
-  public override act = async (grammar: string = '') => {
-    const clean = grammar
-      .replace(/[\\?:\s]+/g, '-')
-      .replace(/^\/+|\/+$/g, '')
-      .trim()
+  public override act = async (signature: string = '') => {
+    const honeycomb = await this.resolver.find(signature)
 
-    // empty => root grammar
-    const resolvedGrammar = clean || '/'
-
-    const actions = await this.resolver.find(resolvedGrammar)
-
-    for (const action of actions) {
-      await action.execute(grammar)
+    for (const drone of honeycomb.drones) {
+      await drone.encounter(honeycomb.name)
     }
   }
 }
