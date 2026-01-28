@@ -286,13 +286,14 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
       const target = [...baseSegments, seedName]
       const exists = await this.lineage.tryResolve(target)
 
-      // create only if missing
-      if (!exists) {
-        await this.lineage.ensure(target)
-      }
+      // // create only if missing
+      // if (!exists) {
+      //   await this.lineage.ensure(target)
+      // }
+      throw new Error('disabled for now')
 
       // toggle selection in url hash
-      this.navigation.toggleSelection(seedName)
+     // this.navigation.toggleSelection(seedName)
     }
 
     // marker attachment (seed#marker)

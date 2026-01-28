@@ -5,6 +5,7 @@ import { Lineage } from './lineage'
 import { Navigation } from './navigation'
 import { Store } from './store'
 import { provideRuntimeLibs } from './runtime-libs'
+import { LayerRestorationService } from './layer-restoration.service'
 
 @Injectable({ providedIn: 'root' })
 export class CoreAdapter {
@@ -15,6 +16,7 @@ export class CoreAdapter {
 
   private readonly navigation = inject(Navigation)
   private readonly lineage = inject(Lineage)
+  private readonly layout = inject(LayerRestorationService)
   private readonly store = inject(Store)
 
   // -------------------------------------------------
@@ -35,6 +37,9 @@ export class CoreAdapter {
 
     // storage first (lineage + preloader depend on handles)
     await this.store.initialize()
+
+    // restore the layout where necessary
+    await this.layout.load(this.store.opfsRoot, 3)
 
     // lineage is anchored to the platform root (hypercomb folder)
     // note: test-domain root also gets created by store.initialize()

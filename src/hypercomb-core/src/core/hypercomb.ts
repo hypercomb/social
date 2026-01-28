@@ -12,11 +12,11 @@ export class hypercomb extends web {
    * empty or '/' means root grammar.
    * always executes, always returns.
    */
-  public override act = async (signature: string = '') => {
-    const honeycomb = await this.resolver.find(signature)
+  public override act = async (grammar: string = '') => {
+    const drones = await this.resolver.find(grammar) || []
 
-    for (const drone of honeycomb.drones) {
-      await drone.encounter(honeycomb.name)
+    for (const drone of drones) {
+      await drone.encounter(grammar)
     }
   }
 }

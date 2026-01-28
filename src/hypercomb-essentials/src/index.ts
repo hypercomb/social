@@ -5,6 +5,7 @@ import { ShowCellDrone } from './pixi/show-cell.drone'
 
 
 export const HostedDrones = [
+
   HelloWorldDrone,
   PixiHostDrone,
   ShowCellDrone,

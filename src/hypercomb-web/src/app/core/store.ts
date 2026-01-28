@@ -1,7 +1,7 @@
 // src/app/core/store.ts
 
 import { inject, Injectable } from '@angular/core'
-import { Drone, type DroneResolver, get, SignatureService } from '@hypercomb/core'
+import { Drone, type DroneResolver, get, hypercomb, SignatureService } from '@hypercomb/core'
 import { CompletionUtility } from './completion-utility'
 import { ScriptPreloaderService } from './script-preloader.service'
 
@@ -16,7 +16,6 @@ export class Store implements DroneResolver {
 
   private static readonly HYPERCOMB_DIRECTORY = 'hypercomb'
   private static readonly RESOURCES_DIRECTORY = '__resources__'
-  private static readonly TEST_DOMAIN_DIRECTORY = 'hypercomb-test-domain'
 
   // -------------------------------------------------
   // dependencies
@@ -29,7 +28,7 @@ export class Store implements DroneResolver {
   // file system handles
   // -------------------------------------------------
 
-  private opfsRoot!: FileSystemDirectoryHandle
+  public opfsRoot!: FileSystemDirectoryHandle
   private hypercombRoot!: FileSystemDirectoryHandle
   private testDomainRoot!: FileSystemDirectoryHandle
   private resources!: FileSystemDirectoryHandle
@@ -43,16 +42,10 @@ export class Store implements DroneResolver {
     this.opfsRoot = await navigator.storage.getDirectory()
 
     // fixed platform root for all platform-owned data
-    this.hypercombRoot =
-      await this.opfsRoot.getDirectoryHandle(Store.HYPERCOMB_DIRECTORY, { create: true })
-
-    // deterministic test domain root folder at opfs root (sibling of hypercomb)
-    this.testDomainRoot =
-      await this.opfsRoot.getDirectoryHandle(Store.TEST_DOMAIN_DIRECTORY, { create: true })
+    this.hypercombRoot = await this.opfsRoot.getDirectoryHandle(Store.HYPERCOMB_DIRECTORY, { create: true })
 
     // resources stored by signature under hypercomb/__resources__
-    this.resources =
-      await this.hypercombRoot.getDirectoryHandle(Store.RESOURCES_DIRECTORY, { create: true })
+    this.resources = await this.hypercombRoot.getDirectoryHandle(Store.RESOURCES_DIRECTORY, { create: true })
 
     await this.preloader.initialize(this.resources)
   }
@@ -72,10 +65,6 @@ export class Store implements DroneResolver {
     return this.hypercombRoot
   }
 
-  // deterministic test domain root directory (opfs/hypercomb-test-domain)
-  public testDomainDirectory = (): FileSystemDirectoryHandle => {
-    return this.testDomainRoot
-  }
 
   // resources root directory (opfs/hypercomb/__resources__)
   public resourcesDirectory = (): FileSystemDirectoryHandle => {
@@ -84,8 +73,27 @@ export class Store implements DroneResolver {
 
   // resolves any domain directory under opfs root
   // create is false by default so listing is passive
+  // src/app/core/store.ts
+
   public domainDirectory = async (name: string, create: boolean = false): Promise<FileSystemDirectoryHandle> => {
-    return await this.opfsRoot.getDirectoryHandle(name, { create })
+    const raw = (name ?? '').trim()
+
+    // do not allow internal/system folders to ever become "domains"
+    // and do not allow empty or dot paths
+    if (!raw || raw === '.' || raw === '..' || raw.startsWith('__')) {
+      throw new Error(`[store] invalid domain name: "${raw}"`)
+    }
+
+    // only allow creation for host-like names (same rule as your domain ui intent)
+    // read-only access can still attempt anything (create=false) without polluting root
+    if (create) {
+      const ok = /^[a-z0-9.-]+$/i.test(raw) && raw.includes('.')
+      if (!ok) {
+        throw new Error(`[store] refused to create non-host domain: "${raw}"`)
+      }
+    }
+
+    return await this.opfsRoot.getDirectoryHandle(raw, { create })
   }
 
   // -------------------------------------------------
