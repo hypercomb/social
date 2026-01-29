@@ -9,6 +9,9 @@ import { MatTableModule } from '@angular/material/table'
 import { DomainName } from '../../core/domain-name'
 import { Lineage } from '../../core/lineage'
 import { Store } from '../../core/store'
+import { hypercomb } from '@hypercomb/core'
+import { FileEntry } from '../../core/model'
+import { ScriptPreloaderService } from '../../core/script-preloader.service'
 
 interface ExplorerEntry {
   name: string
@@ -28,13 +31,15 @@ interface ExplorerEntry {
   templateUrl: './opfs-explorer.component.html',
   styleUrls: ['./opfs-explorer.component.scss']
 })
-export class OpfsExplorerComponent {
+
+export class OpfsExplorerComponent extends hypercomb{
 
   // -------------------------------------------------
   // dependencies
   // -------------------------------------------------
 
   private readonly lineage = inject(Lineage)
+  private readonly preloader = inject(ScriptPreloaderService)
   private readonly store = inject(Store)
 
   // -------------------------------------------------
@@ -54,6 +59,8 @@ export class OpfsExplorerComponent {
   // -------------------------------------------------
 
   public constructor() {
+    super()
+    
     effect(() => {
       this.directory()
       void this.refresh()
@@ -100,8 +107,7 @@ export class OpfsExplorerComponent {
       const writable = await handle.createWritable()
 
       try {
-        const location = `https://storagehypercomb.blob.core.windows.net/content`
-        await writable.write(location)
+        await writable.write(raw)
       } finally {
         await writable.close()
       }
@@ -112,10 +118,10 @@ export class OpfsExplorerComponent {
     }
 
     // normal folder inside the currently explored directory
-    const dir = await this.lineage.explorerDir()
-    if (!dir) return
+    // const dir = await this.lineage.explorerDir()
+    // if (!dir) return
 
-    await dir.getDirectoryHandle(raw, { create: true })
+    // await dir.getDirectoryHandle(raw, { create: true })
     this.newName = ''
     void this.refresh()
   }
@@ -144,9 +150,25 @@ export class OpfsExplorerComponent {
   // actions
   // -------------------------------------------------
 
-  public run = (_e: any, ev: MouseEvent): void => {
+  public run = async (e: FileEntry, ev: MouseEvent): Promise<void> => {
     ev.stopPropagation()
+    if (e.kind !== 'file') return
+
+    // marker files are signatures; try to resolve as a known payload and execute it
+    // note: this is a test harness. if a signature doesn't map to an action, do nothing.
+    const descriptor = this.preloader.get(e.name) ?? null
+    if (!descriptor) return
+
+    try {
+      // if your runtime exposes an "execute by signature" pathway, route it here.
+      // otherwise, this no-ops safely.
+       await this.act(descriptor.name)
+
+    } catch (err) {
+      console.error('failed to run entry', e.name, err)
+    }
   }
+
 
   public copyDetails = async (e: ExplorerEntry, ev: MouseEvent): Promise<void> => {
     ev.stopPropagation()

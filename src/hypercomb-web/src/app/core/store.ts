@@ -4,6 +4,7 @@ import { inject, Injectable } from '@angular/core'
 import { Drone, type DroneResolver, get, hypercomb, SignatureService } from '@hypercomb/core'
 import { CompletionUtility } from './completion-utility'
 import { ScriptPreloaderService } from './script-preloader.service'
+import { DirectoryWalkerService } from './directory-walker.service'
 
 type DroneCtor = new () => Drone
 
@@ -23,6 +24,7 @@ export class Store implements DroneResolver {
 
   private readonly completion = inject(CompletionUtility)
   private readonly preloader = inject(ScriptPreloaderService)
+  private readonly walker = inject(DirectoryWalkerService)
 
   // -------------------------------------------------
   // file system handles
@@ -47,7 +49,7 @@ export class Store implements DroneResolver {
     // resources stored by signature under hypercomb/__resources__
     this.resources = await this.hypercombRoot.getDirectoryHandle(Store.RESOURCES_DIRECTORY, { create: true })
 
-    await this.preloader.initialize(this.resources)
+   // await this.preloader.initialize(this.resources)
   }
 
   // -------------------------------------------------

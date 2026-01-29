@@ -16,7 +16,7 @@ export class CoreAdapter {
 
   private readonly navigation = inject(Navigation)
   private readonly lineage = inject(Lineage)
-  private readonly layout = inject(LayerRestorationService)
+  private readonly restoration = inject(LayerRestorationService)
   private readonly store = inject(Store)
 
   // -------------------------------------------------
@@ -39,8 +39,10 @@ export class CoreAdapter {
     await this.store.initialize()
 
     // restore the layout where necessary
-    await this.layout.load(this.store.opfsRoot, 3)
-
+    const depth = 3
+    await this.restoration.load(this.store.opfsRoot, depth)
+    await this.restoration.restore(this.store.opfsRoot, depth)
+    
     // lineage is anchored to the platform root (hypercomb folder)
     // note: test-domain root also gets created by store.initialize()
     await this.lineage.initialize()

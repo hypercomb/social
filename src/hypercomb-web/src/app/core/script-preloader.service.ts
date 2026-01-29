@@ -152,6 +152,7 @@ export class ScriptPreloaderService {
 
     let count = 0
 
+    // load all resources
     for await (const [signature, handle] of resources.entries()) {
       if (handle.kind !== 'file') continue
 
