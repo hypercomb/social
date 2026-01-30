@@ -1,7 +1,10 @@
 // src/app/core/script-preloader.service.ts
 
-import { Injectable, signal } from '@angular/core'
-import { type DronePayloadV1 } from '@hypercomb/core'
+import { inject, Injectable, signal } from '@angular/core'
+import { Drone, DroneResolver, type DronePayloadV1 } from '@hypercomb/core'
+import { Lineage } from './lineage'
+import { DirectoryWalkerService } from './directory-walker.service'
+import { Store } from './store'
 
 export interface ActionDescriptor {
   signature: string
@@ -18,7 +21,10 @@ export interface DroneDescriptor {
 }
 
 @Injectable({ providedIn: 'root' })
-export class ScriptPreloaderService {
+export class ScriptPreloaderService implements DroneResolver {
+  private readonly lineage = inject(Lineage)
+  private readonly walker = inject(DirectoryWalkerService)
+  private readonly store = inject(Store)
 
   // -------------------------------------------------
   // authoritative stores
@@ -30,14 +36,13 @@ export class ScriptPreloaderService {
   // kebab-case example -> descriptor
   private readonly byName = new Map<string, ActionDescriptor>()
 
+  private readonly drones = new Map<string, Drone[]>()
+
   // signature -> descriptor
   private readonly bySignature = new Map<string, ActionDescriptor>()
 
   // droneSig -> drone meaning
   private readonly droneBySignature = new Map<string, DroneDescriptor>()
-
-  // space example -> droneSig list (new discovery)
-  private readonly dronesByExample = new Map<string, string[]>()
 
   // -------------------------------------------------
   // projected state (UI only)
@@ -75,40 +80,10 @@ export class ScriptPreloaderService {
 
   // takes user text and returns matching drone signatures in priority order
   // this is the method the DCP should call
-  public find = (text: string): readonly string[] => {
-    const normalized = this.normalizeExample(text)
-    if (!normalized) return []
-
-    // exact example match first
-    const exact = this.dronesByExample.get(normalized)
-    if (exact?.length) return exact
-
-    // fallback: match by kebab-name (legacy autocomplete list)
-    // "add pixi" => "add-pixi"
-    const kebab = normalized.replace(/\s+/g, '-')
-    const desc = this.byName.get(kebab)
-    return desc ? [desc.signature] : []
+  public find = async (input: string): Promise<Drone[]> => {
+    return []
   }
 
-  // convenience: return full drone descriptors instead of signatures
-  public findDrones = (text: string): readonly DroneDescriptor[] => {
-    const sigs = this.find(text)
-    const out: DroneDescriptor[] = []
-
-    for (const sig of sigs) {
-      const d = this.droneBySignature.get(sig)
-      if (d) out.push(d)
-    }
-
-    return out
-  }
-
-  // convenience: when you already have an example string ("add pixi")
-  public resolveDroneSigsByExample = (example: string): readonly string[] =>
-    this.dronesByExample.get(this.normalizeExample(example)) ?? []
-
-  public resolveDrone = (signature: string): DroneDescriptor | undefined =>
-    this.droneBySignature.get(signature)
 
   // -------------------------------------------------
   // incremental mutation
@@ -127,8 +102,6 @@ export class ScriptPreloaderService {
     if (!drone) return
 
     this.droneBySignature.set(signature, drone)
-    this.indexDroneExamples(signature, drone.grammar)
-
     this.refreshProjection()
   }
 
@@ -136,37 +109,37 @@ export class ScriptPreloaderService {
   // bulk initialization
   // -------------------------------------------------
 
-  public initialize = async (
-    resources: FileSystemDirectoryHandle
-  ): Promise<void> => {
-
-    this.payloadBySignature.clear()
-    this.byName.clear()
-    this.bySignature.clear()
-    this.droneBySignature.clear()
-    this.dronesByExample.clear()
+  public preload = async (): Promise<void> => {
 
     this.actions.set([])
     this.actionNames.set([])
     this.resourceCount.set(0)
 
-    let count = 0
+    let count = this.resourceCount()
+    const depth = 3
+    const root = this.store.opfsRoot
+    const walked = (await this.walker.walk(root, depth)).map(w => w.handle).slice(1)
+    let drones: Drone[] = []
 
-    // load all resources
-    for await (const [signature, handle] of resources.entries()) {
-      if (handle.kind !== 'file') continue
+    for await (const handle of walked) {
+      const name = handle.name
 
-      const file = await (handle as FileSystemFileHandle).getFile()
-      const buffer = await file.arrayBuffer()
 
-      this.payloadBySignature.set(signature, buffer)
-      count++
+      if (name.includes("__layers__")) continue
+      if (name.includes("__resources__")) continue
 
-      const drone = this.extractDroneDescriptor(signature, buffer)
-      if (!drone) continue
+      // get the markers from current directory
+      for await (const [name, entry] of handle.entries()) {
+        if (entry.kind !== 'file') continue
+        if (entry.name.includes('__location__')) continue
 
-      this.droneBySignature.set(signature, drone)
-      this.indexDroneExamples(signature, drone.grammar)
+        console.log(entry)
+        const resource = await this.store.getDrone(entry.name)
+        console.log(resource)
+        drones.push(resource!)
+        count++
+      }
+      this.drones.set(name, drones)
     }
 
     this.resourceCount.set(count)
@@ -227,32 +200,6 @@ export class ScriptPreloaderService {
         err
       )
       return null
-    }
-  }
-
-
-  // -------------------------------------------------
-  // grammar indexing
-  // -------------------------------------------------
-
-  private indexDroneExamples = (
-    droneSig: string,
-    grammar: readonly { example: string }[]
-  ): void => {
-
-    for (const item of grammar ?? []) {
-      const example = this.normalizeExample(item?.example ?? '')
-      if (!example) continue
-
-      const list = this.dronesByExample.get(example) ?? []
-      if (!list.includes(droneSig)) list.push(droneSig)
-      this.dronesByExample.set(example, list)
-
-      const name = example.replace(/\s+/g, '-')
-      const desc: ActionDescriptor = { signature: droneSig, name }
-
-      this.byName.set(name, desc)
-      this.bySignature.set(droneSig, desc)
     }
   }
 

@@ -125,7 +125,7 @@ export class PixiHostDrone extends Drone {
     // -------------------------------------------------
     // visual proof
     // -------------------------------------------------
-    const g = new pixi.Graphics()
+    const g = new pixi.Graphics() 
     g.circle(0, 0, 18)
     g.fill(0xffffff)
 

@@ -1,15 +1,11 @@
 // src/app/core/store.ts
 
-import { inject, Injectable } from '@angular/core'
-import { Drone, type DroneResolver, get, hypercomb, SignatureService } from '@hypercomb/core'
-import { CompletionUtility } from './completion-utility'
-import { ScriptPreloaderService } from './script-preloader.service'
-import { DirectoryWalkerService } from './directory-walker.service'
-
+import { Injectable } from '@angular/core'
+import { Drone, SignatureService } from '@hypercomb/core'
 type DroneCtor = new () => Drone
 
 @Injectable({ providedIn: 'root' })
-export class Store implements DroneResolver {
+export class Store {
 
   // -------------------------------------------------
   // constants
@@ -18,13 +14,6 @@ export class Store implements DroneResolver {
   private static readonly HYPERCOMB_DIRECTORY = 'hypercomb'
   private static readonly RESOURCES_DIRECTORY = '__resources__'
 
-  // -------------------------------------------------
-  // dependencies
-  // -------------------------------------------------
-
-  private readonly completion = inject(CompletionUtility)
-  private readonly preloader = inject(ScriptPreloaderService)
-  private readonly walker = inject(DirectoryWalkerService)
 
   // -------------------------------------------------
   // file system handles
@@ -32,8 +21,7 @@ export class Store implements DroneResolver {
 
   public opfsRoot!: FileSystemDirectoryHandle
   private hypercombRoot!: FileSystemDirectoryHandle
-  private testDomainRoot!: FileSystemDirectoryHandle
-  private resources!: FileSystemDirectoryHandle
+  public resources!: FileSystemDirectoryHandle
 
   // -------------------------------------------------
   // lifecycle
@@ -48,13 +36,55 @@ export class Store implements DroneResolver {
 
     // resources stored by signature under hypercomb/__resources__
     this.resources = await this.hypercombRoot.getDirectoryHandle(Store.RESOURCES_DIRECTORY, { create: true })
-
-   // await this.preloader.initialize(this.resources)
   }
 
   // -------------------------------------------------
   // platform roots
   // -------------------------------------------------
+
+  public getDrone = async (signature: string): Promise<Drone | null> => {
+    const sig = (signature ?? '').trim().toLowerCase()
+    if (!/^[a-f0-9]{64}$/i.test(sig)) return null
+
+    // each directory under opfsRoot is a domain (including "hypercomb")
+    for await (const [domainName, entry] of this.opfsRoot.entries()) {
+      if (entry.kind !== 'directory') continue
+
+      // skip internal/system folders only
+      if (domainName.startsWith('__')) continue
+
+      try {
+        // <domain>/__resources__/<signature>
+        const domainDir = entry as FileSystemDirectoryHandle
+        const resourcesDir = await domainDir.getDirectoryHandle(
+          Store.RESOURCES_DIRECTORY,
+          { create: false }
+        )
+
+        const fileHandle = await resourcesDir.getFileHandle(sig, { create: false })
+        if (!fileHandle) continue
+
+
+        const file = await fileHandle.getFile()
+        const buffer = await file.arrayBuffer()
+
+        const mod = await this.loadModule(buffer)
+
+        const ctors = this.extractDroneCtors(mod)
+
+        // 5) instantiate missing drones (auto-registers via base class)
+        for (const Ctor of ctors) {
+          const drone = new Ctor()
+          return drone
+        }
+
+      } catch {
+        // not in this domain, keep scanning
+      }
+    }
+
+    return null
+  }
 
   // opfs root directory
   public opfsDirectory = (): FileSystemDirectoryHandle => {
@@ -99,50 +129,6 @@ export class Store implements DroneResolver {
   }
 
   // -------------------------------------------------
-  // drone resolution
-  // -------------------------------------------------
-
-  public find = async (name: string): Promise<Drone[]> => {
-    const clean = this.completion.normalize(name)
-
-    // 1) ioc first (source of truth)
-    const existing = get<Drone>(clean)
-    if (existing) return [existing]
-
-    // 2) resolve module via preloader
-    const descriptor = this.preloader.resolveByName(clean)
-    if (!descriptor) return []
-
-    const bytes = this.preloader.get(descriptor.signature)
-    if (!bytes) return []
-
-    // 3) import module
-    const mod = await this.loadModule(bytes)
-
-    // 4) get constructable drone exports (no side-effects)
-    const ctors = this.extractDroneCtors(mod)
-    if (!ctors.length) return []
-
-    // 5) instantiate missing drones (auto-registers via base class)
-    for (const Ctor of ctors) {
-      const key = this.completion.normalize(Drone.key(Ctor.name))
-      if (!get<Drone>(key)) {
-        new Ctor()
-      }
-    }
-
-    // 6) return instances from ioc (single source of truth)
-    const out: Drone[] = []
-    for (const Ctor of ctors) {
-      const key = this.completion.normalize(Drone.key(Ctor.name))
-      const inst = get<Drone>(key)
-      if (inst) out.push(inst)
-    }
-
-    return out
-  }
-
-  // -------------------------------------------------
   // resource io
   // -------------------------------------------------
 
@@ -161,23 +147,42 @@ export class Store implements DroneResolver {
     return signature
   }
 
-  public get = (signature: string): ArrayBuffer | null => {
-    return this.preloader.get(signature) ?? null
-  }
-
-  public has = (signature: string): boolean => {
-    return this.preloader.has(signature)
-  }
-
   // -------------------------------------------------
   // module loader (bytes -> esm)
   // -------------------------------------------------
 
   private loadModule = async (bytes: ArrayBuffer): Promise<unknown> => {
-    const blob = new Blob([bytes], { type: 'application/javascript' })
+    const text = new TextDecoder().decode(bytes).trim()
+
+    // payload is guaranteed json at this point
+    const payload = JSON.parse(text)
+
+    const entry = payload.source?.entry
+    const files = payload.source?.files
+
+    if (!entry || !files || !files[entry]) {
+      throw new Error('[store] invalid drone payload: missing bundle entry')
+    }
+
+    // base64 → binary
+    const base64 = files[entry] as string
+    const binary = atob(base64)
+    const len = binary.length
+    const buf = new Uint8Array(len)
+
+    for (let i = 0; i < len; i++) {
+      buf[i] = binary.charCodeAt(i)
+    }
+
+    // binary → js source
+    const bundleText = new TextDecoder().decode(buf)
+
+    // js source → esm module
+    const blob = new Blob([bundleText], { type: 'application/javascript' })
     const url = URL.createObjectURL(blob)
 
     try {
+      // keep dynamic import from being rewritten by bundlers
       return await import(/* @vite-ignore */ url)
     } catch (error) {
       console.error('[store] failed to load module', error)
@@ -201,10 +206,6 @@ export class Store implements DroneResolver {
 
       const proto = (value as any).prototype
       if (!proto) continue
-
-      // must look like a Drone subclass by shape
-      if (typeof proto.encounter !== 'function') continue
-      if (typeof proto.sensed !== 'function') continue
 
       out.push(value as unknown as DroneCtor)
     }

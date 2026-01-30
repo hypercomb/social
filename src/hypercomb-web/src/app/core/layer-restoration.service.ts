@@ -15,7 +15,7 @@ export class LayerRestorationService {
 
   private static readonly DEFAULT_ORIGIN = 'https://storagehypercomb.blob.core.windows.net/content/ee6f2ec14e1ad55b2705d7490a79e5903f0ba4e29c7ddf9a28ef9efcd0fd10fa'
   private static readonly LOCATION_FILE = '__location__'
-  private static readonly LAYERS_DIRECTORY = 'layers'
+  private static readonly LAYERS_DIRECTORY = '__layers__'
   private static readonly RESOURCES_DIRECTORY = '__resources__'
   private static readonly INSTALL_PREFIX = 'install-'
 
@@ -183,7 +183,7 @@ export class LayerRestorationService {
       if (!this.isSignature(name)) continue
 
       // marker file name is the drone signature
-      await this.ensureDronePreloaded(resourcesDir, `${server}/resources`, name)
+      await this.ensureDronePreloaded(resourcesDir, `${server}/__resources__`, name)
     }
   }
 

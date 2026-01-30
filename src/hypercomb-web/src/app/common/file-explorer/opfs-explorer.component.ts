@@ -31,8 +31,7 @@ interface ExplorerEntry {
   templateUrl: './opfs-explorer.component.html',
   styleUrls: ['./opfs-explorer.component.scss']
 })
-
-export class OpfsExplorerComponent extends hypercomb{
+export class OpfsExplorerComponent extends hypercomb {
 
   // -------------------------------------------------
   // dependencies
@@ -49,6 +48,9 @@ export class OpfsExplorerComponent extends hypercomb{
   public readonly entries = signal<readonly ExplorerEntry[]>([])
   public newName = ''
 
+  // toggle for raw / normal view
+  public readonly showAll = signal(false)
+
   public readonly directory = computed(() => {
     this.lineage.changed()
     return this.lineage.explorerLabel()
@@ -60,9 +62,10 @@ export class OpfsExplorerComponent extends hypercomb{
 
   public constructor() {
     super()
-    
+
     effect(() => {
       this.directory()
+      this.showAll()
       void this.refresh()
     })
   }
@@ -80,8 +83,6 @@ export class OpfsExplorerComponent extends hypercomb{
     const row = this.entries().find(e => e.name === name)
     if (!row || row.kind !== 'directory') return
 
-    // explorer is a pure directory browser
-    // never interpret a folder click as a "domain selection"
     this.lineage.explorerEnter(name)
   }
 
@@ -93,8 +94,6 @@ export class OpfsExplorerComponent extends hypercomb{
     const raw = this.newName.trim()
     if (!raw) return
 
-    // creating at "/" is still your explicit "create new domain" intent
-    // because you type it, and DomainName.parse is enforced here
     if (this.directory() === '/') {
       const parsed = DomainName.parse(raw)
       const domain = parsed.folder
@@ -117,11 +116,6 @@ export class OpfsExplorerComponent extends hypercomb{
       return
     }
 
-    // normal folder inside the currently explored directory
-    // const dir = await this.lineage.explorerDir()
-    // if (!dir) return
-
-    // await dir.getDirectoryHandle(raw, { create: true })
     this.newName = ''
     void this.refresh()
   }
@@ -151,35 +145,17 @@ export class OpfsExplorerComponent extends hypercomb{
   // -------------------------------------------------
 
   public run = async (e: FileEntry, ev: MouseEvent): Promise<void> => {
-    ev.stopPropagation()
-    if (e.kind !== 'file') return
-
-    // marker files are signatures; try to resolve as a known payload and execute it
-    // note: this is a test harness. if a signature doesn't map to an action, do nothing.
-    const descriptor = this.preloader.get(e.name) ?? null
-    if (!descriptor) return
-
-    try {
-      // if your runtime exposes an "execute by signature" pathway, route it here.
-      // otherwise, this no-ops safely.
-       await this.act(descriptor.name)
-
-    } catch (err) {
-      console.error('failed to run entry', e.name, err)
-    }
+    // intentionally left as no-op / test harness
   }
-
 
   public copyDetails = async (e: ExplorerEntry, ev: MouseEvent): Promise<void> => {
     ev.stopPropagation()
 
-    // directories: name only
     if (e.kind === 'directory') {
       await navigator.clipboard.writeText(e.name)
       return
     }
 
-    // files: attempt to read contents
     try {
       const dir = await this.lineage.explorerDir()
       if (!dir) {
@@ -196,7 +172,6 @@ export class OpfsExplorerComponent extends hypercomb{
       }
 
       const text = await file.text()
-      ;(window as any).cliptext = text
       await navigator.clipboard.writeText(text)
     } catch {
       await navigator.clipboard.writeText(e.name)
@@ -211,6 +186,19 @@ export class OpfsExplorerComponent extends hypercomb{
 
     await dir.removeEntry(e.name, { recursive: e.kind === 'directory' })
     void this.refresh()
+  }
+
+  // -------------------------------------------------
+  // helpers
+  // -------------------------------------------------
+
+  private readonly isHiddenEntry = (name: string): boolean => {
+    if (this.showAll()) return false
+    if (name === '__location__') return true
+    if (name === '__resources__') return true
+    if (name === '__layers__') return true
+    if (name.startsWith('install-')) return true
+    return false
   }
 
   // -------------------------------------------------
@@ -231,6 +219,7 @@ export class OpfsExplorerComponent extends hypercomb{
     }
 
     for await (const [name, handle] of dir.entries()) {
+      if (this.isHiddenEntry(name)) continue
       out.push({ name, kind: handle.kind })
     }
 

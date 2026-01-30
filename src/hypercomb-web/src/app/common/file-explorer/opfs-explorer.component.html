@@ -1,8 +1,20 @@
 <div class="opfs-explorer">
   <!-- header -->
   <h3 class="title">
-    <mat-icon class="title-icon">folder</mat-icon>
-    OPFS Explorer
+    <div class="title-left">
+      <mat-icon class="title-icon">folder</mat-icon>
+      OPFS Explorer
+    </div>
+
+    <button
+      mat-icon-button
+      class="gear"
+      [color]="showAll() ? 'primary' : undefined"
+      title="toggle raw view"
+      (click)="showAll.set(!showAll())"
+    >
+      <mat-icon>settings</mat-icon>
+    </button>
   </h3>
 
   <!-- current path -->
