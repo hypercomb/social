@@ -1,7 +1,7 @@
 // src/runtime/hypercomb-core.runtime.ts
 // angular-free runtime ABI for actions
 
-export * from './core/dist/action.base.js'
+export * from './core/dist/drone.base.js'
 export * from './core/dist/effect.js'
 export * from './core/dist/grammar-hint.js'
 export * from './core/dist/provider-link.js'

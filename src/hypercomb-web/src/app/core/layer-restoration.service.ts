@@ -207,7 +207,7 @@ export class LayerRestorationService {
       await this.writeCachedDronePayload(resourcesDir, signature, result.bytes)
     }
 
-    this.preloader.add(signature, result.bytes)
+   // this.preloader.add(signature, result.bytes)
   }
 
   private getDronePayloadBytes = async (

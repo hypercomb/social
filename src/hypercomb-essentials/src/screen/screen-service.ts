@@ -1,6 +1,6 @@
 import { Injectable, signal, computed } from "@angular/core"
 import { Point } from "pixi.js"
-import { ScreenState } from "./screen-state"
+import { ScreenState } from "./screen-state.js"
 declare const document: any
 
 export class ScreenService {

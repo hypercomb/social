@@ -1,23 +1,24 @@
 // src/hypercomb-drones/pixi/show-cell.drone.ts
 
-import { Drone, get, has } from '@hypercomb/core'
-import type { Container, Mesh, MeshGeometry, Text, Texture } from 'pixi.js'
-import { PixiHostDrone } from './pixi-host.drone'
+import { Drone, get } from '@hypercomb/core'
+import type { Container,  MeshGeometry, Text, Texture } from 'pixi.js'
+import { PixiHostDrone } from './pixi-host.drone.js'
+
 
 export class ShowCellDrone extends Drone {
 
   public host: PixiHostDrone | undefined
   public pixi: any
 
-  public description =
+  public override description =
     'Renders a single hex cell using mesh geometry (no masks) with centered text.'
 
-  public grammar = [
+  public override grammar = [
     { example: 'show cell' },
     { example: 'cell' }
   ]
 
-  public effects = ['render'] as const
+  public override effects = ['render'] as const
 
   // -------------------------------------------------
   // cached objects (live on the registered instance)

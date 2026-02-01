@@ -1,4 +1,10 @@
 // scripts/build-module.ts
+//
+// baseline behavior preserved
+// - src is NEVER deleted
+// - dist is wiped
+// - runtime JS comes from tsc (not this script)
+// - this script ONLY builds canonical drone artifacts
 
 import {
   existsSync,
@@ -19,7 +25,6 @@ import { HostedDrones } from '../src'
 // -----------------------------------------
 
 const MODULE_NAME = '@hypercomb/essentials'
-
 type HostedEntry = new () => Drone
 
 // -----------------------------------------
@@ -57,7 +62,9 @@ const dirRelFromEntry = (srcRoot: string, entryPath: string): string =>
 const baseNameFromRel = (rel: string): string =>
   rel === '' ? MODULE_NAME : rel.split('/').filter(Boolean).pop() ?? MODULE_NAME
 
-const signJson = async (value: any): Promise<{ signature: string; json: string }> => {
+const signJson = async (
+  value: any
+): Promise<{ signature: string; json: string }> => {
   const json = JSON.stringify(value)
   const bytes = new TextEncoder().encode(json)
   const signature = await SignatureService.sign(toArrayBuffer(bytes))
@@ -96,14 +103,17 @@ const buildDroneSourceIndex = (): Map<string, string> => {
   return index
 }
 
-const resolveDroneEntry = (fileBase: string, index: Map<string, string>): string => {
+const resolveDroneEntry = (
+  fileBase: string,
+  index: Map<string, string>
+): string => {
   const candidate = index.get(fileBase)
   if (!candidate) throw new Error(`drone source not found for "${fileBase}"`)
   return candidate
 }
 
 // -----------------------------------------
-// bundler
+// bundler (unchanged)
 // -----------------------------------------
 
 const bundleDrone = async (entryFile: string): Promise<string> => {
@@ -116,7 +126,7 @@ const bundleDrone = async (entryFile: string): Promise<string> => {
     target: 'es2022',
     tsconfig: resolve('./tsconfig.json'),
     absWorkingDir: process.cwd(),
-    external: ['@hypercomb/core'],
+    external: ['@hypercomb/core']
   })
 
   return result.outputFiles[0].text
@@ -172,7 +182,7 @@ const buildLayersBottomUp = async (
     version: 1,
     name: baseNameFromRel(node.rel),
     drones: sortUnique(dirToDrones.get(node.rel) ?? []),
-    children: sortUnique(childLayer),
+    children: sortUnique(childLayer)
   }
 
   const signed = await signJson(layer)
@@ -187,11 +197,12 @@ const buildLayersBottomUp = async (
 
 const main = async (): Promise<void> => {
   const distDir = resolve('./dist')
+
   rmSync(distDir, { recursive: true, force: true })
   mkdirSync(distDir, { recursive: true })
 
-  const layersDir = resolve(distDir, '__layers__')
-  const resourcesDir = resolve(distDir, '__resources__')
+  const layersDir = join(distDir, '__layers__')
+  const resourcesDir = join(distDir, '__resources__')
 
   mkdirSync(layersDir, { recursive: true })
   mkdirSync(resourcesDir, { recursive: true })
@@ -202,7 +213,6 @@ const main = async (): Promise<void> => {
 
   const sourceIndex = buildDroneSourceIndex()
   const srcRoot = resolve('./src')
-
   const built: { droneSig: string; dirRel: string }[] = []
 
   for (const DroneCtor of HostedDrones as HostedEntry[]) {
@@ -211,7 +221,6 @@ const main = async (): Promise<void> => {
     const entryPath = resolveDroneEntry(fileBase, sourceIndex)
 
     const bundledSource = await bundleDrone(entryPath)
-
     const draft = PayloadCanonical.createEmpty()
 
     draft.drone.name = instance.name
@@ -251,13 +260,8 @@ const main = async (): Promise<void> => {
 
   const rootLayerSig = await buildLayersBottomUp(tree, dirToDrones, layersDir)
 
-  // -----------------------------------------
-  // nest under root signature
-  // -----------------------------------------
-
-  const rootDir = resolve(distDir, rootLayerSig)
+  const rootDir = join(distDir, rootLayerSig)
   mkdirSync(rootDir)
-
   mkdirSync(join(rootDir, '__layers__'))
   mkdirSync(join(rootDir, '__resources__'))
 
@@ -275,6 +279,7 @@ const main = async (): Promise<void> => {
     )
   }
 
+  // ✅ de-duplicate: remove staging folders after copy
   rmSync(layersDir, { recursive: true, force: true })
   rmSync(resourcesDir, { recursive: true, force: true })
 

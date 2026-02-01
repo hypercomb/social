@@ -51,8 +51,8 @@ export class ResourceMessageHandler {
     const signature = await this.store.put(bytes)
 
     // single incremental update
-    this.preloader.add(signature, bytes)
-
+    // this.preloader.add(signature, bytes)
+    throw new Error('Not implemented')
     console.log('[dcp] compiled action stored', signature)
   }
 

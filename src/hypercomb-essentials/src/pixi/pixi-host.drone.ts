@@ -1,6 +1,6 @@
 // src/hypercomb-drones/pixi/add-pixi.drone.ts
 
-import { Drone, has } from '@hypercomb/core'
+import { Drone } from '@hypercomb/core'
 import * as pixi from 'pixi.js'
 import type { Application, Container } from 'pixi.js'
 
@@ -24,6 +24,7 @@ export class PixiHostDrone extends Drone {
   private get height(): number {
     return this.hexagonSide * 2
   }
+
   private get width(): number {
     return this.hexagonSide * Math.sqrt(3)
   }
@@ -40,7 +41,7 @@ export class PixiHostDrone extends Drone {
   // metadata
   // -------------------------------------------------
 
-  public description =
+  public override description =
     'Provides a single PIXI application for rendering drones.'
 
   public grammar = [
@@ -50,16 +51,11 @@ export class PixiHostDrone extends Drone {
 
   public effects = ['render'] as const
 
-
   // -------------------------------------------------
   // sense (idempotent)
   // -------------------------------------------------
 
   protected override sense = (_grammar: string): boolean | Promise<boolean> => {
-    // already registered → nothing to do
-    if (has(this.name)) return false
-
-    // not registered yet → run heartbeat
     return true
   }
 
@@ -68,25 +64,19 @@ export class PixiHostDrone extends Drone {
   // -------------------------------------------------
 
   protected override heartbeat = async (_grammar: string): Promise<void> => {
-    // -------------------------------------------------
-    // already registered?
-    // -------------------------------------------------
-    if (has(this.name)) {
-      return
-    }
 
     // -------------------------------------------------
-    // already mounted? (dom guard, avoids double hosts)
+    // dom guard
     // -------------------------------------------------
+
     const existing = document.querySelector('[data-hypercomb-pixi="root"]')
-    if (existing) {
-      return
-    }
+    if (existing) return
 
     // -------------------------------------------------
     // host element
     // -------------------------------------------------
-    const host = document.createElement('div')
+
+    const host = this.host = document.createElement('div')
     host.dataset['hypercombPixi'] = 'root'
     host.style.position = 'fixed'
     host.style.left = '0'
@@ -95,12 +85,14 @@ export class PixiHostDrone extends Drone {
     host.style.height = '100vh'
     host.style.zIndex = '9999'
     host.style.pointerEvents = 'none'
+    host.style.backgroundColor = '#0f4054'
 
     document.body.appendChild(host)
 
     // -------------------------------------------------
     // pixi app
     // -------------------------------------------------
+
     const app = this.app = new pixi.Application()
 
     await app.init({
@@ -112,23 +104,35 @@ export class PixiHostDrone extends Drone {
     host.appendChild(app.canvas)
 
     // -------------------------------------------------
-    // center stage (pure math)
+    // center stage so (0,0) === screen center
     // -------------------------------------------------
-    const centerX =
-      window.innerWidth / 2 - this.hexagonOffsetX
 
-    const centerY =
-      window.innerHeight / 2 - this.hexagonOffsetY
+    const centerStage = (): void => {
+      app.stage.position.set(
+        app.renderer.width / 2,
+        app.renderer.height / 2
+      )
+    }
 
-    app.stage.position.set(centerX, centerY)
+    centerStage()
+    window.addEventListener('resize', centerStage)
 
     // -------------------------------------------------
-    // visual proof
+    // optional root container (future-proofing)
     // -------------------------------------------------
-    const g = new pixi.Graphics() 
+
+    this.container = new pixi.Container()
+    app.stage.addChild(this.container)
+
+    // -------------------------------------------------
+    // visual proof (origin marker)
+    // -------------------------------------------------
+
+    const g = new pixi.Graphics()
     g.circle(0, 0, 18)
     g.fill(0xffffff)
 
-    app.stage.addChild(g)
+    // drawn at (0,0) → exact screen center
+    this.container.addChild(g)
   }
 }

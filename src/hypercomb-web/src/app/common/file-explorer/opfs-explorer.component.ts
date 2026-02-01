@@ -10,11 +10,12 @@ import { DomainName } from '../../core/domain-name'
 import { Lineage } from '../../core/lineage'
 import { Store } from '../../core/store'
 import { hypercomb } from '@hypercomb/core'
-import { FileEntry } from '../../core/model'
 import { ScriptPreloaderService } from '../../core/script-preloader.service'
+import { PixiHostDrone } from '@hypercomb/essentials'
 
 interface ExplorerEntry {
   name: string
+  label: string
   kind: 'file' | 'directory'
 }
 
@@ -29,9 +30,21 @@ interface ExplorerEntry {
     MatButtonModule
   ],
   templateUrl: './opfs-explorer.component.html',
-  styleUrls: ['./opfs-explorer.component.scss']
+  styleUrls: ['./opfs-explorer.component.scss'],
+  providers: [
+    {
+      provide: PixiHostDrone,
+      useFactory: () => new PixiHostDrone()
+    }
+  ]
 })
 export class OpfsExplorerComponent extends hypercomb {
+
+  // -------------------------------------------------
+  // constants
+  // -------------------------------------------------
+
+  private static readonly SHOW_ALL_KEY = 'opfs-explorer.show-all'
 
   // -------------------------------------------------
   // dependencies
@@ -40,6 +53,7 @@ export class OpfsExplorerComponent extends hypercomb {
   private readonly lineage = inject(Lineage)
   private readonly preloader = inject(ScriptPreloaderService)
   private readonly store = inject(Store)
+  private readonly host = inject(PixiHostDrone)
 
   // -------------------------------------------------
   // state
@@ -48,8 +62,9 @@ export class OpfsExplorerComponent extends hypercomb {
   public readonly entries = signal<readonly ExplorerEntry[]>([])
   public newName = ''
 
-  // toggle for raw / normal view
-  public readonly showAll = signal(false)
+  public readonly showAll = signal(
+    localStorage.getItem(OpfsExplorerComponent.SHOW_ALL_KEY) === 'true'
+  )
 
   public readonly directory = computed(() => {
     this.lineage.changed()
@@ -63,6 +78,15 @@ export class OpfsExplorerComponent extends hypercomb {
   public constructor() {
     super()
 
+    // persist showAll
+    effect(() => {
+      localStorage.setItem(
+        OpfsExplorerComponent.SHOW_ALL_KEY,
+        String(this.showAll())
+      )
+    })
+
+    // refresh on navigation or view toggle
     effect(() => {
       this.directory()
       this.showAll()
@@ -84,6 +108,64 @@ export class OpfsExplorerComponent extends hypercomb {
     if (!row || row.kind !== 'directory') return
 
     this.lineage.explorerEnter(name)
+  }
+
+  // -------------------------------------------------
+  // actions
+  // -------------------------------------------------
+
+  public run = async (e: ExplorerEntry, ev: MouseEvent): Promise<void> => {
+    // ev.stopPropagation()
+    // if (e.kind !== 'file') return
+
+    // const drone = this.preloader.get(e.name)
+    // drone?.encounter(e.name)
+
+    this.host.encounter('testing')
+  }
+
+  // -------------------------------------------------
+  // refresh
+  // -------------------------------------------------
+
+  private readonly refresh = async (): Promise<void> => {
+    const dir = await this.lineage.explorerDir()
+    if (!dir) {
+      this.entries.set([])
+      return
+    }
+
+    const out: ExplorerEntry[] = []
+
+    if (this.directory() !== '/') {
+      out.push({ name: '..', label: '..', kind: 'directory' })
+    }
+
+    for await (const [name, handle] of dir.entries()) {
+      if (this.isHiddenEntry(name)) continue
+
+      let label = name
+
+      if (handle.kind === 'file') {
+        const resolved = this.preloader.getActionName(name)
+        if (resolved) label = resolved
+      }
+
+      out.push({
+        name,
+        label,
+        kind: handle.kind
+      })
+    }
+
+    out.sort((a, b) => {
+      if (a.name === '..') return -1
+      if (b.name === '..') return 1
+      if (a.kind !== b.kind) return a.kind === 'directory' ? -1 : 1
+      return a.label.localeCompare(b.label)
+    })
+
+    this.entries.set(out)
   }
 
   // -------------------------------------------------
@@ -141,12 +223,8 @@ export class OpfsExplorerComponent extends hypercomb {
   }
 
   // -------------------------------------------------
-  // actions
+  // clipboard
   // -------------------------------------------------
-
-  public run = async (e: FileEntry, ev: MouseEvent): Promise<void> => {
-    // intentionally left as no-op / test harness
-  }
 
   public copyDetails = async (e: ExplorerEntry, ev: MouseEvent): Promise<void> => {
     ev.stopPropagation()
@@ -178,6 +256,10 @@ export class OpfsExplorerComponent extends hypercomb {
     }
   }
 
+  // -------------------------------------------------
+  // delete
+  // -------------------------------------------------
+
   public delete = async (e: ExplorerEntry, ev: MouseEvent): Promise<void> => {
     ev.stopPropagation()
 
@@ -199,37 +281,5 @@ export class OpfsExplorerComponent extends hypercomb {
     if (name === '__layers__') return true
     if (name.startsWith('install-')) return true
     return false
-  }
-
-  // -------------------------------------------------
-  // refresh
-  // -------------------------------------------------
-
-  private readonly refresh = async (): Promise<void> => {
-    const dir = await this.lineage.explorerDir()
-    if (!dir) {
-      this.entries.set([])
-      return
-    }
-
-    const out: ExplorerEntry[] = []
-
-    if (this.directory() !== '/') {
-      out.push({ name: '..', kind: 'directory' })
-    }
-
-    for await (const [name, handle] of dir.entries()) {
-      if (this.isHiddenEntry(name)) continue
-      out.push({ name, kind: handle.kind })
-    }
-
-    out.sort((a, b) => {
-      if (a.name === '..') return -1
-      if (b.name === '..') return 1
-      if (a.kind !== b.kind) return a.kind === 'directory' ? -1 : 1
-      return a.name.localeCompare(b.name)
-    })
-
-    this.entries.set(out)
   }
 }
