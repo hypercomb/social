@@ -1,109 +1,64 @@
-// src/hypercomb-drones/pixi/hex-sdf.shader.ts
+import { Shader, Texture } from 'pixi.js'
 
-import { Shader } from 'pixi.js'
+type Vec2 = [number, number]
 
-type Vec4 = [number, number, number, number]
-
-export class HexSdfShader {
+export class HexSdfTextureShader {
   public shader: Shader
 
   private readonly uniforms: {
-    uInRadius: { value: number; type: 'f32' }
-    uFillColor: { value: Vec4; type: 'vec4<f32>' }
+    u_quadSize: { value: Vec2; type: 'vec2<f32>' }
+    u_radiusPx: { value: number; type: 'f32' }
+    u_texSize: { value: Vec2; type: 'vec2<f32>' }
+    u_pan: { value: Vec2; type: 'vec2<f32>' }
+    u_zoom: { value: number; type: 'f32' }
   }
 
-  private circumRadiusPx: number
-  private borderWidthPx: number
-
-  public constructor(circumRadiusPx: number, fillColorHex: number, borderWidthPx = 0) {
-    this.circumRadiusPx = circumRadiusPx
-    this.borderWidthPx = borderWidthPx
-
+  public constructor(texture: Texture, quadW: number, quadH: number, radiusPx: number) {
     this.uniforms = {
-      uInRadius: { value: HexSdfShader.computeInRadius(circumRadiusPx, borderWidthPx), type: 'f32' },
-      uFillColor: { value: HexSdfShader.hexToVec4(fillColorHex), type: 'vec4<f32>' },
+      u_quadSize: { value: [quadW, quadH], type: 'vec2<f32>' },
+      u_radiusPx: { value: radiusPx, type: 'f32' },
+      u_texSize: { value: [Math.max(1, texture.width), Math.max(1, texture.height)], type: 'vec2<f32>' },
+      u_pan: { value: [0, 0], type: 'vec2<f32>' },
+      u_zoom: { value: 1, type: 'f32' },
     }
 
     this.shader = Shader.from({
       gl: {
-        vertex: HexSdfShader.vertexSource,
-        fragment: HexSdfShader.fragmentSource,
+        vertex: HexSdfTextureShader.vertexSource,
+        fragment: HexSdfTextureShader.fragmentSource,
       },
-      resources: { honeycomb: this.uniforms },
+      resources: {
+        hex: this.uniforms,
+        u_tex0: texture.source,
+      },
     })
   }
 
-  public setFillColor = (fillColorHex: number): void => {
-    const v = HexSdfShader.hexToVec4(fillColorHex)
-    this.uniforms.uFillColor.value[0] = v[0]
-    this.uniforms.uFillColor.value[1] = v[1]
-    this.uniforms.uFillColor.value[2] = v[2]
-    this.uniforms.uFillColor.value[3] = v[3]
+  public setQuadSize = (w: number, h: number): void => {
+    this.uniforms.u_quadSize.value[0] = w
+    this.uniforms.u_quadSize.value[1] = h
   }
 
-  public setBorderWidth = (borderWidthPx: number): void => {
-    this.borderWidthPx = borderWidthPx
-    this.uniforms.uInRadius.value = HexSdfShader.computeInRadius(this.circumRadiusPx, this.borderWidthPx)
+  public setRadiusPx = (r: number): void => {
+    this.uniforms.u_radiusPx.value = r
   }
 
-  public setCircumRadius = (circumRadiusPx: number): void => {
-    this.circumRadiusPx = circumRadiusPx
-    this.uniforms.uInRadius.value = HexSdfShader.computeInRadius(this.circumRadiusPx, this.borderWidthPx)
+  public setTexture = (texture: Texture): void => {
+    ;(this.shader.resources as any).u_tex0 = texture.source
+    this.uniforms.u_texSize.value[0] = Math.max(1, texture.width)
+    this.uniforms.u_texSize.value[1] = Math.max(1, texture.height)
   }
 
-  private static computeInRadius = (circumRadiusPx: number, borderWidthPx: number): number => {
-    // sdhex is inradius-based
-    const raw = circumRadiusPx * 0.8660254037844386
-
-    // inset half the border so the line can sit between cells without covering the interior
-    // the extra 0.25 helps prevent aa bleed at high resolution
-    const inset = borderWidthPx * 0.5 + 0.25
-
-    return Math.max(0, raw - inset)
+  // pan is in uv units (0..1). example: 0.05 moves right 5% of the image
+  public setPan = (x: number, y: number): void => {
+    this.uniforms.u_pan.value[0] = x
+    this.uniforms.u_pan.value[1] = y
   }
 
-  private static fragmentSource = `
-    precision highp float;
-
-    varying vec2 vLocal;
-    uniform float uInRadius;
-    uniform vec4 uFillColor;
-
-    vec2 rot30(vec2 p) {
-      float c = 0.8660254037844386;
-      float s = 0.5;
-      return vec2(c * p.x - s * p.y, s * p.x + c * p.y);
-    }
-
-    float sdHexFlat(vec2 p, float r) {
-      p = abs(p);
-      return max(dot(p, vec2(0.8660254, 0.5)), p.y) - r;
-    }
-
-    void main() {
-      vec2 p = rot30(vLocal);
-      float d = sdHexFlat(p, uInRadius);
-
-      // hard reject outside so one cell cannot tint another cell's interior
-      if (d > 0.0) discard;
-
-      // inside-only aa: the feather happens inward, never outward
-      float aa = 1.0;
-      float mask = smoothstep(0.0, aa, -d);
-
-      vec4 col = uFillColor;
-      col.a *= mask;
-      gl_FragColor = col;
-    }
-  `;
-  
-
-  private static hexToVec4 = (color: number, a = 1): Vec4 => {
-    const r = ((color >> 16) & 0xff) / 255;
-    const g = ((color >> 8) & 0xff) / 255;
-    const b = (color & 0xff) / 255;
-    return [r, g, b, a];
-  };
+  // zoom > 1 zooms in, zoom < 1 zooms out
+  public setZoom = (z: number): void => {
+    this.uniforms.u_zoom.value = Math.max(0.001, z)
+  }
 
   private static vertexSource = `
     attribute vec2 aPosition;
@@ -113,15 +68,89 @@ export class HexSdfShader {
     uniform mat3 uWorldTransformMatrix;
     uniform mat3 uTransformMatrix;
 
-    varying vec2 vLocal;
+    varying vec2 vUV;
 
     void main() {
       mat3 mvp = uProjectionMatrix * uWorldTransformMatrix * uTransformMatrix;
       gl_Position = vec4((mvp * vec3(aPosition, 1.0)).xy, 0.0, 1.0);
-
-      // we store local pixel coords in the uv buffer
-      vLocal = aUV;
+      vUV = aUV;
     }
-  `;
+  `
 
+  private static fragmentSource = `
+    precision highp float;
+
+    varying vec2 vUV;
+
+    uniform vec2 u_quadSize;
+    uniform float u_radiusPx;
+    uniform vec2 u_texSize;
+    uniform vec2 u_pan;
+    uniform float u_zoom;
+    uniform sampler2D u_tex0;
+
+    float sdHex(vec2 p, float r) {
+      p = abs(p);
+      return max(p.x * 0.8660254 + p.y * 0.5, p.y) - r;
+    }
+
+    vec2 rot30(vec2 p) {
+      return vec2(
+        0.8660254 * p.x - 0.5 * p.y,
+        0.5 * p.x + 0.8660254 * p.y
+      );
+    }
+
+    void main() {
+
+      // ---------------------------------
+      // reconstruct local pixel coords from uv
+      // uv is 0..1 across the quad
+      // local is centered at 0,0 in pixel space
+      // ---------------------------------
+      vec2 local = (vUV - 0.5) * u_quadSize;
+
+      // ---------------------------------
+      // hex sdf clip in pixel space
+      // ---------------------------------
+      vec2 p_hex = rot30(local);
+      float d = sdHex(p_hex, u_radiusPx);
+      if (d > 0.0) discard;
+
+      // ---------------------------------
+      // texture mapping (cover) + editor pan/zoom
+      // ---------------------------------
+      vec2 uv = vUV;
+      vec2 c = uv - 0.5;
+
+      float texAspect = u_texSize.x / u_texSize.y;
+      float hexAspect = 0.8660254; // (sqrt(3)/2), width/height of a regular hex bbox
+
+      // cover: crop the longer axis so the image fills the hex
+      if (texAspect > hexAspect) {
+        float s = hexAspect / texAspect;
+        c.x *= s;
+      } else {
+        float s = texAspect / hexAspect;
+        c.y *= s;
+      }
+
+      // zoom and pan in the same centered space
+      c = c / u_zoom + u_pan;
+
+      uv = c + 0.5;
+
+      // ---------------------------------
+      // prevent edge bleeding
+      // discard if outside an inset uv rect
+      // ---------------------------------
+      vec2 inset = 0.5 / u_texSize;
+
+      if (uv.x < inset.x || uv.x > 1.0 - inset.x || uv.y < inset.y || uv.y > 1.0 - inset.y) {
+        discard;
+      }
+
+      gl_FragColor = texture2D(u_tex0, uv);
+    }
+  `
 }

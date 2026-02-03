@@ -2,7 +2,6 @@
 
 import { Drone } from '@hypercomb/core'
 import * as pixi from 'pixi.js'
-import type { Application, Container } from 'pixi.js'
 
 export class PixiHostDrone extends Drone {
 
@@ -10,9 +9,9 @@ export class PixiHostDrone extends Drone {
   // capability surface
   // -------------------------------------------------
 
-  public app: Application | null = null
+  public app: pixi.Application | null = null
   public host: HTMLDivElement | null = null
-  public container!: Container
+  public container!: pixi.Container
   public pixi = pixi
 
   // -------------------------------------------------
@@ -100,7 +99,7 @@ export class PixiHostDrone extends Drone {
       backgroundAlpha: 0,
 
       // 👇 THIS IS THE KEY
-      resolution: 4 ,
+      resolution: window.devicePixelRatio || 1,
       autoDensity: true
     })
 
