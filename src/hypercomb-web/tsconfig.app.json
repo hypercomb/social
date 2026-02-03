@@ -1,15 +1,26 @@
-/* To learn more about Typescript configuration file: https://www.typescriptlang.org/docs/handbook/tsconfig-json.html. */
-/* To learn more about Angular compiler options: https://angular.dev/reference/configs/angular-compiler-options. */
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "outDir": "./out-tsc/app",
-    "types": []
+    "types": [],
+
+    // -------------------------------------------------
+    // DEV SOURCE MAPPING (CRITICAL)
+    // -------------------------------------------------
+    // makes @hypercomb/essentials resolve to source
+    // instead of node_modules
+    // -------------------------------------------------
+    "baseUrl": ".",
+    "paths": {
+      "@hypercomb/essentials": [
+        "../hypercomb-essentials/src/index.ts"
+      ]
+    }
   },
+  "files": [
+    "src/main.ts"
+  ],
   "include": [
-    "src/**/*.ts"
-, "public/hypercomb-core.runtime.ts"  ],
-  "exclude": [
-    "src/**/*.spec.ts"
+    "src/**/*.d.ts"
   ]
 }

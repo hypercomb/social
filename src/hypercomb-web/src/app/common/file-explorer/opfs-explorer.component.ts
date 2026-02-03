@@ -11,7 +11,7 @@ import { Lineage } from '../../core/lineage'
 import { Store } from '../../core/store'
 import { hypercomb } from '@hypercomb/core'
 import { ScriptPreloaderService } from '../../core/script-preloader.service'
-import { PixiHostDrone } from '@hypercomb/essentials'
+import { PixiHostDrone, ShowHoneycombDrone } from '@hypercomb/essentials'
 
 interface ExplorerEntry {
   name: string
@@ -34,7 +34,11 @@ interface ExplorerEntry {
   providers: [
     {
       provide: PixiHostDrone,
-      useFactory: () => new PixiHostDrone()
+      useFactory: () => new PixiHostDrone(),
+    },
+    {
+      provide: ShowHoneycombDrone,
+      useFactory: () => new ShowHoneycombDrone()
     }
   ]
 })
@@ -54,6 +58,7 @@ export class OpfsExplorerComponent extends hypercomb {
   private readonly preloader = inject(ScriptPreloaderService)
   private readonly store = inject(Store)
   private readonly host = inject(PixiHostDrone)
+  private readonly show = inject(ShowHoneycombDrone)
 
   // -------------------------------------------------
   // state
@@ -121,7 +126,6 @@ export class OpfsExplorerComponent extends hypercomb {
     // const drone = this.preloader.get(e.name)
     // drone?.encounter(e.name)
 
-    this.host.encounter('testing')
   }
 
   // -------------------------------------------------

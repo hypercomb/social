@@ -6,7 +6,7 @@ import { Lineage } from '../core/lineage';
 
 @Component({
   selector: 'app-home',
-  imports: [OpfsExplorerComponent, PortalOverlayComponent],
+  imports: [ PortalOverlayComponent],
   templateUrl: './home.html',
   styleUrl: './home.scss'
 })

@@ -1,71 +1,110 @@
 /* src/app/common/header/search-bar/search-bar.component.scss */
 
-.hc-search-bar {
-  position: relative;
-}
-
-.field {
-  position: relative;
-  display: grid;
-}
-
-.field > input {
-  grid-area: 1 / 1;
+:host {
+  display: block;
   width: 100%;
+}
+
+/* outer anchor */
+.command-bar {
+  position: relative;
+  width: 100%;
+}
+
+/* visual shell */
+.command-shell {
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+/* focus lives on the shell, not the input */
+.command-shell:focus-within {
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+/* input row */
+.command-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 2.6rem;
+}
+
+/* ghost text */
+.ghost {
+  position: absolute;
+  inset: 0;
+
+  padding: 0.6rem 0.75rem;
   background: transparent;
 
-  /* keep both layers perfectly aligned */
+  border: none;
+  outline: none;
+
   font: inherit;
   letter-spacing: inherit;
-  padding: 0.5rem 0.75rem;
-  line-height: 1.25rem;
-}
+  color: rgba(245, 245, 245, 0.45);
 
-.ghost-input {
-  z-index: 1;
   pointer-events: none;
   user-select: none;
-
-  /* make suffix readable, typed part is covered by the real input */
-  opacity: 0.6;
-  text-shadow: 0 0 2px rgba(0, 0, 0, 0.35);
-  caret-color: transparent;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
-.input {
-  position: relative;
-  z-index: 2;
+/* real input */
+.command-input {
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+
+  background: transparent;
+  border: none;
+  outline: none;
+
+  font: inherit;
+  letter-spacing: inherit;
+  color: whitesmoke;
+
+  caret-color: whitesmoke;
 }
 
-.completions {
+/* placeholder */
+.command-input::placeholder {
+  color: rgba(245, 245, 245, 0.4);
+}
+
+/* results dropdown */
+.command-results {
   position: absolute;
   left: 0;
   right: 0;
-  top: 100%;
-  margin-top: 0.35rem;
-  z-index: 3;
+  top: calc(100% + 0.4rem);
+  z-index: 10;
+
+  margin: 0;
+  padding: 0.45rem;
 
   list-style: none;
-  padding: 0.35rem;
   border-radius: 0.75rem;
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  background: rgba(0, 0, 0, 0.75);
-  backdrop-filter: blur(10px);
 
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(12px);
+
+  border: 1px solid rgba(255, 255, 255, 0.12);
   max-height: 16rem;
   overflow: auto;
 }
 
-.item {
+/* result item */
+.command-results li {
   display: flex;
-  gap: 0;
-  padding: 0.4rem 0.55rem;
+  padding: 0.45rem 0.6rem;
   border-radius: 0.55rem;
-  cursor: default;
   user-select: none;
 }
 
-.item.active {
+.command-results li.active {
   background: rgba(255, 255, 255, 0.08);
 }
 
@@ -75,25 +114,4 @@
 
 .rest {
   opacity: 0.55;
-}
-/* src/app/common/header/search-bar/search-bar.component.scss */
-
-/* base text color */
-.field > input {
-  color: whitesmoke;            /* main text */
-}
-
-/* caret should stay visible on dark bg */
-.input {
-  caret-color: whitesmoke;
-}
-
-/* ghost layer: slightly dimmer but still legible */
-.ghost-input {
-  color: rgba(245, 245, 245, 0.55);  /* whitesmoke-ish */
-}
-
-/* placeholder text */
-.input::placeholder {
-  color: rgba(245, 245, 245, 0.45);
 }

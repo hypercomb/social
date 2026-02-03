@@ -44,12 +44,12 @@ export class PixiHostDrone extends Drone {
   public override description =
     'Provides a single PIXI application for rendering drones.'
 
-  public grammar = [
+  public override grammar = [
     { example: 'add pixi' },
     { example: 'pixi' }
   ]
 
-  public effects = ['render'] as const
+  public override effects = ['render'] as const
 
   // -------------------------------------------------
   // sense (idempotent)
@@ -85,7 +85,6 @@ export class PixiHostDrone extends Drone {
     host.style.height = '100vh'
     host.style.zIndex = '9999'
     host.style.pointerEvents = 'none'
-    host.style.backgroundColor = '#0f4054'
 
     document.body.appendChild(host)
 
@@ -98,8 +97,13 @@ export class PixiHostDrone extends Drone {
     await app.init({
       resizeTo: window,
       antialias: true,
-      backgroundAlpha: 0
+      backgroundAlpha: 0,
+
+      // 👇 THIS IS THE KEY
+      resolution: 4 ,
+      autoDensity: true
     })
+
 
     host.appendChild(app.canvas)
 
@@ -124,15 +128,5 @@ export class PixiHostDrone extends Drone {
     this.container = new pixi.Container()
     app.stage.addChild(this.container)
 
-    // -------------------------------------------------
-    // visual proof (origin marker)
-    // -------------------------------------------------
-
-    const g = new pixi.Graphics()
-    g.circle(0, 0, 18)
-    g.fill(0xffffff)
-
-    // drawn at (0,0) → exact screen center
-    this.container.addChild(g)
   }
 }

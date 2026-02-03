@@ -1,39 +1,43 @@
 <!-- src/app/common/header/search-bar/search-bar.component.html -->
 
-<div class="hc-search-bar">
-  <div class="field">
-    <input
-      class="ghost-input"
-      type="text"
-      tabindex="-1"
-      readonly
-      aria-hidden="true"
-      [value]="ghostValue()"
-    />
+<div class="command-bar">
+  <div class="command-shell">
+    <div class="command-row">
 
-    <input
-      #input
-      class="input"
-      type="text"
-      autocomplete="off"
-      autocapitalize="off"
-      spellcheck="false"
-      [placeholder]="placeholder()"
-      (keydown)="onKeyDown($event)"
-      (input)="onInput()"
-    />
+      <input
+        class="ghost"
+        type="text"
+        tabindex="-1"
+        readonly
+        aria-hidden="true"
+        [value]="ghostValue()"
+      />
+
+      <input
+        #input
+        class="command-input"
+        type="text"
+        autocomplete="off"
+        autocapitalize="off"
+        spellcheck="false"
+        [placeholder]="placeholder()"
+        (keydown)="onKeyDown($event)"
+        (input)="onInput()"
+      />
+
+    </div>
   </div>
 
   @if (showCompletions()) {
-    <ul class="completions" role="listbox">
+    <ul class="command-results" role="listbox">
       @for (s of suggestions(); track s; let i = $index) {
         <li
-          class="item"
           role="option"
           [class.active]="i === getActiveIndex()"
           (mousedown)="onSuggestionMouseDown($event, s, i)"
         >
-          <span class="typed">{{ typedPart(s) }}</span><span class="rest">{{ restPart(s) }}</span>
+          <span class="typed">{{ typedPart(s) }}</span
+          ><span class="rest">{{ restPart(s) }}</span>
         </li>
       }
     </ul>

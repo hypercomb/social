@@ -13,29 +13,18 @@
     color: $text-light;
     display: flex;
     align-items: center;
-    padding-inline: 1rem;
     font-size: clamp(0.9rem, 2vw, 1rem);
     
   }
 
   main {
-    background: #050f17;
+    //background: #050f17;
     color: $text-dark;
     padding: 1rem;
     overflow-y: auto; // allow scroll only in main content
   }
-
-  footer {
-    background: $bg-footer;
-    color: $text-light;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: clamp(0.8rem, 1.5vw, 0.9rem);
-  }
 }
 
-app-header,
-app-footer {
+app-header{
   width: 100%;
 }

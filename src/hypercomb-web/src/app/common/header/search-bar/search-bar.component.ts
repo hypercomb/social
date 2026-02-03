@@ -203,6 +203,7 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
   // -------------------------------------------------
 
   public onKeyDown = (e: KeyboardEvent): void => {
+
     const el = this.input.nativeElement
     const v = el.value
 

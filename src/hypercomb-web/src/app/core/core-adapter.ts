@@ -7,6 +7,7 @@ import { Store } from './store'
 import { provideRuntimeLibs } from './runtime-libs'
 import { LayerRestorationService } from './layer-restoration.service'
 import { ScriptPreloaderService } from './script-preloader.service'
+import { PixiHostDrone, ShowHoneycombDrone } from '@hypercomb/essentials'
 
 @Injectable({ providedIn: 'root' })
 export class CoreAdapter {
@@ -20,7 +21,7 @@ export class CoreAdapter {
   private readonly preloader = inject(ScriptPreloaderService) 
   private readonly restoration = inject(LayerRestorationService)
   private readonly store = inject(Store)
-
+  
   // -------------------------------------------------
   // state
   // -------------------------------------------------
@@ -50,6 +51,11 @@ export class CoreAdapter {
     // lineage is anchored to the platform root (hypercomb folder)
     // note: test-domain root also gets created by store.initialize()
     await this.lineage.initialize()
+
+    const host = new PixiHostDrone()
+    await host.encounter('testing')
+    const show = new ShowHoneycombDrone()
+    await show.encounter('testing')
 
     // bootstrap navigation using url segments only
     // never inject "hypercomb" into the url
