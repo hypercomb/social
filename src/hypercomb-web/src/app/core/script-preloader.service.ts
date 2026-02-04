@@ -1,33 +1,36 @@
 // src/app/core/script-preloader.service.ts
+//
+// production-ready
+// - ioc is the single source of truth for drone instances
+// - byName is a production projection for ux / grammar / display
+// - this service owns discovery + projection only
+// - no duplicated instance storage
 
 import { inject, Injectable, signal } from '@angular/core'
-import { Drone, type DroneResolver } from '@hypercomb/core'
+import { Drone, type DroneResolver, get as iocGet, has as iocHas, list } from '@hypercomb/core'
 import { Lineage } from './lineage'
 import { DirectoryWalkerService } from './directory-walker.service'
 import { Store } from './store'
 
 export interface ActionDescriptor {
   signature: string
-  name: string // kebab-case
+  name: string // kebab-case, ux-facing
 }
 
 @Injectable({ providedIn: 'root' })
 export class ScriptPreloaderService implements DroneResolver {
 
-  private readonly lineage = inject(Lineage)
+  private readonly lineage = inject(Lineage)  
   private readonly walker = inject(DirectoryWalkerService)
   private readonly store = inject(Store)
 
   // -------------------------------------------------
-  // authoritative stores
+  // authoritative projection (no instances here)
   // -------------------------------------------------
-
-  private readonly byName = new Map<string, ActionDescriptor>()
   private readonly bySignature = new Map<string, ActionDescriptor>()
-  private readonly droneBySignature = new Map<string, Drone>()
 
   // -------------------------------------------------
-  // projected state (UI)
+  // projected state (ui)
   // -------------------------------------------------
 
   public readonly actions = signal<readonly ActionDescriptor[]>([])
@@ -35,41 +38,37 @@ export class ScriptPreloaderService implements DroneResolver {
   public readonly resourceCount = signal(0)
 
   // -------------------------------------------------
-  // lookup api
+  // ioc delegation (execution truth)
   // -------------------------------------------------
 
   public get = (signature: string): Drone | undefined =>
-    this.droneBySignature.get(signature)
+    iocGet<Drone>(signature)
 
   public has = (signature: string): boolean =>
-    this.droneBySignature.has(signature)
-
-  public resolveByName = (name: string): ActionDescriptor | undefined =>
-    this.byName.get(name)
+    iocHas(signature)
 
   public resolveBySignature = (signature: string): ActionDescriptor | undefined =>
     this.bySignature.get(signature)
 
-  // **new – UI helper**
   public getActionName = (signature: string): string | null =>
     this.bySignature.get(signature)?.name ?? null
 
   // -------------------------------------------------
-  // discovery (placeholder – unchanged)
+  // drone resolution (grammar → signatures)
   // -------------------------------------------------
 
-  public find = async (_input: string): Promise<Drone[]> => {
+  public find = async (_name: string): Promise<Drone[]> => {
+    // grammar resolution happens in the processor
+    // this resolver only exposes available actions
     return []
   }
 
   // -------------------------------------------------
-  // incremental mutation
+  // incremental projection mutation
   // -------------------------------------------------
 
   public add = (signature: string, drone: Drone): void => {
-    if (this.droneBySignature.has(signature)) return
-
-    this.droneBySignature.set(signature, drone)
+    if (this.bySignature.has(signature)) return
 
     const name = drone.name
       .toLowerCase()
@@ -78,21 +77,18 @@ export class ScriptPreloaderService implements DroneResolver {
     const descriptor: ActionDescriptor = { signature, name }
 
     this.bySignature.set(signature, descriptor)
-    this.byName.set(name, descriptor)
 
     this.resourceCount.update(v => v + 1)
     this.refreshProjection()
   }
 
   // -------------------------------------------------
-  // bulk initialization
+  // bulk initialization (discovery only)
   // -------------------------------------------------
 
   public preload = async (): Promise<void> => {
 
-    this.byName.clear()
     this.bySignature.clear()
-    this.droneBySignature.clear()
 
     this.actions.set([])
     this.actionNames.set([])
@@ -100,27 +96,30 @@ export class ScriptPreloaderService implements DroneResolver {
 
     const depth = 3
     const root = this.store.opfsRoot
-    const walked = (await this.walker.walk(root, depth)).map(w => w.handle).slice(1)
+    const walked = (await this.walker.walk(root, depth))
+      .map(w => w.handle)
+      .slice(1)
 
     for await (const handle of walked) {
-      for await (const [name, entry] of handle.entries()) {
+      for await (const [fileName, entry] of handle.entries()) {
         if (entry.kind !== 'file') continue
-        if (!/^[a-f0-9]{64}$/i.test(name)) continue
+        if (!/^[a-f0-9]{64}$/i.test(fileName)) continue
 
-        const drone = await this.store.getDrone(name)
-        if (drone) {
-          this.add(name, drone)
-        }
+        const drone = await this.store.getDrone(fileName)
+        if (!drone) continue
+        
+        // expectation: drone constructor already registered into ioc
+        this.add(fileName, drone)
       }
     }
   }
 
   // -------------------------------------------------
-  // projection rebuild (UI-only)
+  // projection rebuild (ui-only)
   // -------------------------------------------------
 
   private refreshProjection = (): void => {
-    const list = [...this.byName.values()]
+    const list = [...this.bySignature.values()]
       .sort((a, b) => a.name.localeCompare(b.name))
 
     this.actions.set(list)

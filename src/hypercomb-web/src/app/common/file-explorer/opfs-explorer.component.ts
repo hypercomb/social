@@ -30,17 +30,7 @@ interface ExplorerEntry {
     MatButtonModule
   ],
   templateUrl: './opfs-explorer.component.html',
-  styleUrls: ['./opfs-explorer.component.scss'],
-  providers: [
-    {
-      provide: PixiHostDrone,
-      useFactory: () => new PixiHostDrone(),
-    },
-    {
-      provide: ShowHoneycombDrone,
-      useFactory: () => new ShowHoneycombDrone()
-    }
-  ]
+  styleUrls: ['./opfs-explorer.component.scss']
 })
 export class OpfsExplorerComponent extends hypercomb {
 

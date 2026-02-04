@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@hypercomb/core": "file:../hypercomb-core",
+    "@hypercomb/essentials": "file:../hypercomb-essentials",
     "pixi.js": "^8.14.3"
   }
 }

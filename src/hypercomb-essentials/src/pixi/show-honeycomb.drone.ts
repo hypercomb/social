@@ -1,14 +1,14 @@
 // src/pixi/show-honeycomb.drone.ts
-import { Drone, get } from '@hypercomb/core'
+import { Drone, get, list } from '@hypercomb/core'
 import type { Container, MeshGeometry, Texture } from 'pixi.js'
 import { PixiHostDrone } from './pixi-host.drone.js'
 import { HexLabelAtlas } from './hex-label.atlas.js';
 import { HexSdfTextureShader } from './hex-sdf.shader.js';
 
-
 type Axial = { q: number; r: number }
 
 export class ShowHoneycombDrone extends Drone {
+  private hostkey = 'ddd2317a1089b8b067a2d1f1e48c0ddcc3f8a9fe49333e1a8a868c9f69e39a31'
   public host: PixiHostDrone | undefined
   public pixi: any
 
@@ -26,10 +26,11 @@ export class ShowHoneycombDrone extends Drone {
   protected override sense = (): boolean => true
 
   protected override heartbeat = async (): Promise<void> => {
-    const host = (this.host = get<PixiHostDrone>(Drone.key(PixiHostDrone.name)))
+    
+    const host = (this.host = get<PixiHostDrone>(this.hostkey))
     if (!host?.app) return
     const start = performance.now()
-    
+
     const pixi = (this.pixi = host.pixi)
     const app = host.app
 
@@ -89,7 +90,7 @@ export class ShowHoneycombDrone extends Drone {
     }
 
     this.geom = geom
-    
+
     const end = performance.now()
     console.log(`ShowHoneycombDrone: updated mesh with ${cells.length} cells in ${(end - start).toFixed(1)} ms`)
   }

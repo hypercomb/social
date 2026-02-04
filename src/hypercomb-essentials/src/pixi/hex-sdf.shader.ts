@@ -71,45 +71,45 @@ export class HexSdfTextureShader {
     }
   `
 
-  private static fragmentSource = `
-    precision highp float;
+    private static fragmentSource = `
+      precision highp float;
 
-    varying vec2 vUV;
-    varying vec4 vLabelUV;
+      varying vec2 vUV;
+      varying vec4 vLabelUV;
 
-    uniform vec2 u_quadSize;
-    uniform float u_radiusPx;
-    uniform vec2 u_texSize;
+      uniform vec2 u_quadSize;
+      uniform float u_radiusPx;
+      uniform vec2 u_texSize;
 
-    uniform sampler2D u_tex0;
-    uniform sampler2D u_label;
+      uniform sampler2D u_tex0;
+      uniform sampler2D u_label;
 
-    float sdHex(vec2 p, float r) {
-      p = abs(p);
-      return max(p.x * 0.8660254 + p.y * 0.5, p.y) - r;
-    }
+      float sdHex(vec2 p, float r) {
+        p = abs(p);
+        return max(p.x * 0.8660254 + p.y * 0.5, p.y) - r;
+      }
 
-    vec2 rot30(vec2 p) {
-      return vec2(
-        0.8660254 * p.x - 0.5 * p.y,
-        0.5 * p.x + 0.8660254 * p.y
-      );
-    }
+      vec2 rot30(vec2 p) {
+        return vec2(
+          0.8660254 * p.x - 0.5 * p.y,
+          0.5 * p.x + 0.8660254 * p.y
+        );
+      }
 
-    void main() {
-      // local pixel coords for sdf
-      vec2 local = (vUV - 0.5) * u_quadSize;
-      float d = sdHex(rot30(local), u_radiusPx);
-      if (d > 0.0) discard;
+      void main() {
+        // local pixel coords for sdf
+        vec2 local = (vUV - 0.5) * u_quadSize;
+        float d = sdHex(rot30(local), u_radiusPx);
+        if (d > 0.0) discard;
 
-      // base texture (simple sample for now)
-      vec4 base = texture2D(u_tex0, vUV);
+        // base texture (simple sample for now)
+        vec4 base = texture2D(u_tex0, vUV);
 
-      // per-cell label atlas rect (vec4) + per-vertex quad uv (vUV)
-      vec2 luv = mix(vLabelUV.xy, vLabelUV.zw, vUV);
-      vec4 label = texture2D(u_label, luv);
+        // per-cell label atlas rect (vec4) + per-vertex quad uv (vUV)
+        vec2 luv = mix(vLabelUV.xy, vLabelUV.zw, vUV);
+        vec4 label = texture2D(u_label, luv);
 
-      gl_FragColor = mix(base, label, label.a);
-    }
-  `
+        gl_FragColor = mix(base, label, label.a);
+      }
+    `
 }

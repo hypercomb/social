@@ -7,7 +7,8 @@ import { Store } from './store'
 import { provideRuntimeLibs } from './runtime-libs'
 import { LayerRestorationService } from './layer-restoration.service'
 import { ScriptPreloaderService } from './script-preloader.service'
-import { PixiHostDrone, ShowHoneycombDrone } from '@hypercomb/essentials'
+import { PixiHostDrone, ShowHoneycombDrone, HelloWorldDrone } from '@hypercomb/essentials'
+import { get, list } from '@hypercomb/core'
 
 @Injectable({ providedIn: 'root' })
 export class CoreAdapter {
@@ -18,10 +19,10 @@ export class CoreAdapter {
 
   private readonly navigation = inject(Navigation)
   private readonly lineage = inject(Lineage)
-  private readonly preloader = inject(ScriptPreloaderService) 
+  private readonly preloader = inject(ScriptPreloaderService)
   private readonly restoration = inject(LayerRestorationService)
   private readonly store = inject(Store)
-  
+
   // -------------------------------------------------
   // state
   // -------------------------------------------------
@@ -40,22 +41,45 @@ export class CoreAdapter {
 
     // storage first (lineage + preloader depend on handles)
     await this.store.initialize()
-    
+
     // restore the layout where necessary
     const depth = 3
     await this.restoration.load(this.store.opfsRoot, depth)
     await this.restoration.restore(this.store.opfsRoot, depth)
-    
+
     await this.preloader.preload()
 
     // lineage is anchored to the platform root (hypercomb folder)
     // note: test-domain root also gets created by store.initialize()
     await this.lineage.initialize()
 
-    const host = new PixiHostDrone()
+
+    const l = list();
+    const hostkey = 'ddd2317a1089b8b067a2d1f1e48c0ddcc3f8a9fe49333e1a8a868c9f69e39a31'
+    const host = get<PixiHostDrone>(hostkey)!
+    JSON.stringify(host)
+
     await host.encounter('testing')
-    const show = new ShowHoneycombDrone()
+    
+    const showkey = 'bcbaf6cbc1f21798e0d728a66acb04f1b4ce5b044e0c7ac854a0fce14a824834'
+    const show = get<ShowHoneycombDrone>(showkey)!
     await show.encounter('testing')
+
+    const l2 = list();
+    const hostkey2 = 'ddd2317a1089b8b067a2d1f1e48c0ddcc3f8a9fe49333e1a8a868c9f69e39a31'
+    const host2 = new PixiHostDrone(hostkey2)!
+    JSON.stringify(host2)
+    
+    await host2.encounter('testing')
+
+    const showkey2 = 'bcbaf6cbc1f21798e0d728a66acb04f1b4ce5b044e0c7ac854a0fce14a824834'
+    const show2 = new ShowHoneycombDrone(showkey2)!
+    await show2.encounter('testing')
+
+
+
+    // const hello = get<HelloWorldDrone>('e9e4750b480a8271b92a1a95cd83d613076ecd19ece0bf5d918e3a48f68609c4')!
+    // await hello.encounter('hello')
 
     // bootstrap navigation using url segments only
     // never inject "hypercomb" into the url

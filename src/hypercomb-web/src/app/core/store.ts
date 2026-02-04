@@ -1,8 +1,8 @@
 // src/app/core/store.ts
 
 import { Injectable } from '@angular/core'
-import { Drone, SignatureService } from '@hypercomb/core'
-type DroneCtor = new () => Drone
+import { Drone, register, SignatureService } from '@hypercomb/core'
+type DroneCtor = new (signature: string) => Drone
 
 @Injectable({ providedIn: 'root' })
 export class Store {
@@ -43,8 +43,6 @@ export class Store {
   // -------------------------------------------------
 
   public getDrone = async (signature: string): Promise<Drone | null> => {
-    const sig = (signature ?? '').trim().toLowerCase()
-    if (!/^[a-f0-9]{64}$/i.test(sig)) return null
 
     // each directory under opfsRoot is a domain (including "hypercomb")
     for await (const [domainName, entry] of this.opfsRoot.entries()) {
@@ -61,7 +59,7 @@ export class Store {
           { create: false }
         )
 
-        const fileHandle = await resourcesDir.getFileHandle(sig, { create: false })
+        const fileHandle = await resourcesDir.getFileHandle(signature, { create: false })
         if (!fileHandle) continue
 
 
@@ -74,7 +72,8 @@ export class Store {
 
         // 5) instantiate missing drones (auto-registers via base class)
         for (const Ctor of ctors) {
-          const drone = new Ctor()
+          const drone = new Ctor(signature)
+          register(signature, drone)  
           return drone
         }
 

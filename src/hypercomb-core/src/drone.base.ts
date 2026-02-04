@@ -7,16 +7,16 @@ export abstract class Drone {
 
   public readonly name: string
 
-  public static key = (name:string): string => {
+  public static simplify = (name:string): string => {
     return name
       .replace(/Drone$/, '')
       .replace(/([a-z])([A-Z])/g, '$1 $2')
       .trim()
   }
 
-  public constructor() {
-    this.name = Drone.key(this.constructor.name)
-    register(this.name, this)
+  public constructor(signature: string) {
+    this.name = Drone.simplify(this.constructor.name)
+    register(signature, this)
   }
 
   // --------------------------------

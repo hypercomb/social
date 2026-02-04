@@ -1,7 +1,6 @@
 // src/app/common/header/search-bar/search-bar.component.ts
 
 import { Component, AfterViewInit, OnDestroy, ViewChild, ElementRef, inject, signal, computed } from "@angular/core"
-import { hypercomb } from "@hypercomb/core"
 import { CompletionContext, CompletionUtility } from "../../../core/completion-utility"
 import { InitState } from "../../../core/model"
 import { ScriptPreloaderService } from "../../../core/script-preloader.service"
@@ -9,6 +8,7 @@ import { ResourceCompletionService } from "./resource-completion.service"
 import { Lineage } from "../../../core/lineage"
 import { MovementService } from "../../../core/movement.service"
 import { Navigation } from "../../../core/navigation"
+import { hypercomb } from "@hypercomb/core"
 
 @Component({
   selector: 'hc-search-bar',
@@ -298,16 +298,16 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
     }
 
     // marker attachment (seed#marker)
-    if (markerName) {
-      const descriptor = this.preloader.resolveByName(markerName)
-      if (descriptor) {
-        const target = seedName
-          ? [...baseSegments, seedName]
-          : baseSegments
+    // if (markerName) {
+    //   const descriptor = this.preloader.resolveByName(markerName)
+    //   if (descriptor) {
+    //     const target = seedName
+    //       ? [...baseSegments, seedName]
+    //       : baseSegments
 
-        await this.lineage.addMarker(target, descriptor.signature)
-      }
-    }
+    //     await this.lineage.addMarker(target, descriptor.signature)
+    //   }
+    // }
 
     this.clear()
   }

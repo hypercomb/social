@@ -1,5 +1,7 @@
-import { Drone } from "@hypercomb/core"
+import { Drone, get, list} from "@hypercomb/core"
 import { helloWorld } from "./hw-service.js"
+
+const pixihost = 'ddd2317a1089b8b067a2d1f1e48c0ddcc3f8a9fe49333e1a8a868c9f69e39a31'
 
 export class HelloWorldDrone extends Drone {
 
@@ -22,6 +24,9 @@ export class HelloWorldDrone extends Drone {
   ]
 
   protected override heartbeat = async (grammar:string): Promise<void> => {
+   const host =  get(pixihost) 
+   const list2 = list()
+   console.log(`Hello, world! from ${host}`)
     helloWorld()
   }
 }

@@ -10,7 +10,6 @@ export * from './hello-world.drone.js'
 export * from './core/communication/mesh-adapter.drone.js'
 
 export const HostedDrones = [
-
   HelloWorldDrone,  
   MeshAdapterDrone,
   PixiHostDrone,

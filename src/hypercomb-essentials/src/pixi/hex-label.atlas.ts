@@ -63,11 +63,11 @@ export class HexLabelAtlas {
 
     // pixi v8 render signature: one object argument
     // clear=false so we keep previously rendered labels in the atlas
-    this.renderer.render({
-      container: text,
-      target: this.atlas,
-      clear: false,
-    })
+    // this.renderer.render({
+    //   container: text,
+    //   target: this.atlas,
+    //   clear: false,
+    // })
 
     const u0 = (col * this.cellPx) / this.atlas.width
     const v0 = (row * this.cellPx) / this.atlas.height

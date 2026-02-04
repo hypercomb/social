@@ -7,14 +7,13 @@
   min-height: 100vh; // ensures full height scaling
   min-height: 100dvh; // modern viewport unit for mobile browsers
   width: 100%;
-  
+
   header {
     background: $bg-header;
     color: $text-light;
     display: flex;
     align-items: center;
     font-size: clamp(0.9rem, 2vw, 1rem);
-    
   }
 
   main {
@@ -27,4 +26,5 @@
 
 app-header{
   width: 100%;
+        z-index: 100;
 }

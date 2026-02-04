@@ -2,9 +2,6 @@
 	"folders": [
 		{
 			"path": "hypercomb-web"
-		},
-		{
-			"path": "hypercomb-essentials/src"
 		}
 	],
 	"settings": {

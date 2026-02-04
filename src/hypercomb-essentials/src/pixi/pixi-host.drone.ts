@@ -82,7 +82,7 @@ export class PixiHostDrone extends Drone {
     host.style.top = '0'
     host.style.width = '100vw'
     host.style.height = '100vh'
-    host.style.zIndex = '9999'
+    host.style.zIndex = '1'
     host.style.pointerEvents = 'none'
 
     document.body.appendChild(host)
@@ -116,6 +116,7 @@ export class PixiHostDrone extends Drone {
         app.renderer.height / 2
       )
     }
+    app.stage.scale.set(2,2)
 
     centerStage()
     window.addEventListener('resize', centerStage)

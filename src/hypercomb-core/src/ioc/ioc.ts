@@ -1,17 +1,31 @@
 // runtime/ioc.ts
 
-const registry = new Map<string, unknown>()
+const instances = new Map<string, unknown>()
+const names = new Map<string, string>()
 
-export const register = (key: string, value: unknown): void => {
-  registry.set(key, value)
+export const register = (
+  signature: string,
+  value: unknown,
+  name?: string
+): void => {
+  instances.set(signature, value)
+  if (name) names.set(name, signature)
 }
 
-export const get = <T = unknown>(key: string): T | undefined =>
-  registry.get(key) as T | undefined
+export const get = <T = unknown>(
+  key: string
+): T | undefined => {
+  const signature = instances.has(key)
+    ? key
+    : names.get(key)
+
+  return signature
+    ? (instances.get(signature) as T | undefined)
+    : undefined
+}
 
 export const has = (key: string): boolean =>
-  registry.has(key)
+  instances.has(key) || names.has(key)
 
-export const list = (): readonly string[] =>  
-  [...registry.keys()]
-  
+export const list = (): readonly string[] =>
+  [...instances.keys()]
