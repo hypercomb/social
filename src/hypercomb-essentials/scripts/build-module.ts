@@ -119,12 +119,13 @@ const discoverDrones = (): DroneSource[] => {
 const compileDroneSource = async (entry: string): Promise<string> => {
   const result = await build({
     entryPoints: [resolve(entry)],
-    bundle: false,
+    bundle: true,
     format: 'esm',
     platform: 'browser',
     write: false,
     target: TARGET,
-    tsconfig: resolve('./tsconfig.json')
+    tsconfig: resolve('./tsconfig.json'),
+    external: ['@hypercomb/core','pixi.js', '@essentials/hello'],
   })
 
   if (!result.outputFiles || result.outputFiles.length === 0) {
@@ -257,7 +258,7 @@ const main = async (): Promise<void> => {
 
   const packageDir = join(DIST_ROOT, rootLayerSig)
   const layersDir = join(packageDir, '__layers__')
-  const resourcesDir = join(packageDir, '__resources__')
+  const resourcesDir = join(DIST_ROOT, '__resources__')
 
   mkdirSync(packageDir, { recursive: true })
   mkdirSync(layersDir, { recursive: true })

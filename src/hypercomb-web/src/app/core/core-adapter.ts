@@ -8,6 +8,7 @@ import { Store } from './store'
 import { LayerRestorationService } from './layer-restoration.service'
 import { ScriptPreloader } from './script-preloader'
 import { DependencyLoader } from './dependency-loader'
+import { get, list } from '@hypercomb/core'
 
 @Injectable({ providedIn: 'root' })
 export class CoreAdapter {
@@ -46,20 +47,20 @@ export class CoreAdapter {
     await this.restoration.load(this.store.opfsRoot, depth)
     await this.restoration.restore(this.store.opfsRoot, depth)
 
-   // await this.preloader.preload()
+    await this.preloader.preload()
 
     // lineage is anchored to the platform root (hypercomb folder)
     // note: test-domain root also gets created by store.initialize()
-    await this.lineage.initialize() 
+    await this.lineage.initialize()
 
-    // const l = list();
-    // const hostkey = '5eb6110661afcad1a4b84a77bf5bb6cb214b6b4e9d36fa278fcead2174f39459'
-    // const host = <any>get(hostkey)!
-    // await host.encounter('testing')
+    const l = list();
+    const hostkey = '57b5a96271fb7382a06fc37141a1f58689d48395072ec370d27ca432d4e0c24c'
+    const host = <any>get(hostkey)!
+    await host.encounter('testing')
 
-    // const showkey = '8d11953684ffa573fe5b95816d6e1581eabafd24c51f2d84758570f009e5f291'
-    // const show = <any>get(showkey)!
-    // await show.encounter('testing')
+    const showkey = '1b1241658f4664d4f3a5878f41d3480103bcb0f4baf007f5b0c8eab91a668cac'
+    const show = <any>get(showkey)!
+    await show. encounter('testing')
 
     // const l2 = list();
     // const hostkey2 = 'ddd2317a1089b8b067a2d1f1e48c0ddcc3f8a9fe49333e1a8a868c9f69e39a31'

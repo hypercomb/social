@@ -13,7 +13,7 @@ export class Store {
   // -------------------------------------------------
 
   private static readonly HYPERCOMB_DIRECTORY = 'hypercomb'
-  private static readonly RESOURCES_DIRECTORY = '__resources__'
+  public static readonly RESOURCES_DIRECTORY = '__resources__'
 
 
   // -------------------------------------------------
@@ -36,7 +36,7 @@ export class Store {
     this.hypercombRoot = await this.opfsRoot.getDirectoryHandle(Store.HYPERCOMB_DIRECTORY, { create: true })
 
     // resources stored by signature under hypercomb/__resources__
-    this.resources = await this.hypercombRoot.getDirectoryHandle(Store.RESOURCES_DIRECTORY, { create: true })
+    this.resources = await this.opfsRoot.getDirectoryHandle(Store.RESOURCES_DIRECTORY, { create: true })
   }
 
   // -------------------------------------------------
@@ -53,16 +53,9 @@ export class Store {
       if (domainName.startsWith('__')) continue
 
       try {
-        // <domain>/__resources__/<signature>
-        const domainDir = entry as FileSystemDirectoryHandle
-        const resourcesDir = await domainDir.getDirectoryHandle(
-          Store.RESOURCES_DIRECTORY,
-          { create: false }
-        )
-
+        const resourcesDir = await this.resourcesDirectory()
         const fileHandle = await resourcesDir.getFileHandle(signature, { create: false })
         if (!fileHandle) continue
-
 
         const file = await fileHandle.getFile()
         const buffer = await file.arrayBuffer()

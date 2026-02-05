@@ -54,25 +54,6 @@ export class ScriptPreloader implements DroneResolver {
   }
 
   // -------------------------------------------------
-  // incremental projection mutation
-  // -------------------------------------------------
-
-  public add = (signature: string, drone: Drone): void => {
-    if (this.bySignature.has(signature)) return
-
-    const name = drone.name
-      .toLowerCase()
-      .replace(/\s+/g, '-')
-
-    const descriptor: ActionDescriptor = { signature, name }
-
-    this.bySignature.set(signature, descriptor)
-
-    this.resourceCount.update(v => v + 1)
-    this.refreshProjection()
-  }
-
-  // -------------------------------------------------
   // bulk initialization (discovery only)
   // -------------------------------------------------
 
@@ -84,34 +65,38 @@ export class ScriptPreloader implements DroneResolver {
     this.actionNames.set([])
     this.resourceCount.set(0)
 
-    const depth = 3
     const root = this.store.opfsRoot
-    const walked = (await this.walker.walk(root, depth))
-      .map(w => w.handle)
-      .slice(1)
-    const used: string[] = []
-    for await (const handle of walked) {
-      for await (const [fileName, entry] of handle.entries()) {
-        if (entry.kind !== 'file') continue
-        if (!/^[a-f0-9]{64}$/i.test(fileName)) continue
-        if (used.includes(fileName)) continue
-        used.push(fileName)
 
-        try {
-          const url = `https://storagehypercomb.blob.core.windows.net/content/${fileName}`
-          const drone = await import(/* @vite-ignore */ url)
-          // expectation: drone constructor already registered into ioc
-          this.add(fileName, drone)
+    let resourcesDir: FileSystemDirectoryHandle
+    try {
+      resourcesDir = await root.getDirectoryHandle('__resources__')
+    } catch {
+      // no resources is a valid empty state
+      return
+    }
 
-        } catch (e) {
-          console.warn(`failed to load drone: ${fileName}`, e)
+    for await (const [fileName, entry] of resourcesDir.entries()) {
 
-          continue
-        }
-        // const drone = await this.store.getDrone(fileName)
-        // if (!drone) continue
+      if (entry.kind !== 'file') continue
+      if (!/^[a-f0-9]{64}$/i.test(fileName)) continue
 
+      const drone = await this.store.getDrone(fileName)
+      if (!drone) continue
+
+      // expectation: drone constructor already registered into ioc
+      const name = drone.name
+        .toLowerCase()
+        .replace(/\s+/g, '-')
+
+      const descriptor: ActionDescriptor = {
+        signature: fileName,
+        name
       }
+
+      this.bySignature.set(fileName, descriptor)
+
+      this.resourceCount.update(v => v + 1)
+      this.refreshProjection()
     }
   }
 

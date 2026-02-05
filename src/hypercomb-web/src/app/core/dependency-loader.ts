@@ -69,7 +69,8 @@ export class DependencyLoader {
 
   private loadDependency = async (signature: string): Promise<void> => {
 
-    const url = "https://storagehypercomb.blob.core.windows.net/content/0342a3d97eec74a8506aaaafe5cf3dcd92f01ed862c131aac0d4525e8ea247fa/__resources__/7b8cff4b30fc01bcc01c8b37861273dffecd96d626354b4b3bfcb57b13372d85.js"
+    const url = "https://storagehypercomb.blob.core.windows.net/content/__dependencies__/" + signature 
+    
     // this.resolveDependencyUrl(signature)
     const data = await fetch(url)
     const json = await data.text()

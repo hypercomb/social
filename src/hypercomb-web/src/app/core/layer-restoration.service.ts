@@ -4,11 +4,13 @@ import { Injectable, inject } from '@angular/core'
 import { DirectoryWalkerService } from './directory-walker.service'
 import { ScriptPreloader } from './script-preloader'
 import { has } from '@hypercomb/core'
+import { Store } from './store'
 
 type LayerRecord = { name: string; children: string[]; drones: string[] }
 
 @Injectable({ providedIn: 'root' })
 export class LayerRestorationService {
+  private readonly store = inject(Store)
 
   // -------------------------------------------------
   // constants
@@ -160,20 +162,16 @@ export class LayerRestorationService {
     const server = await this.readLocationPrefix(rootDirectory)
     if (!server) return
 
-    const resourcesDir = await rootDirectory.getDirectoryHandle(LayerRestorationService.RESOURCES_DIRECTORY, { create: true })
-
     const walked = await this.walker.walk(rootDirectory, depth)
 
     for (const dir of walked) {
       if (this.isPathSkippable(dir.path)) continue
 
-      await this.restoreMarkersInDirectory(resourcesDir, server, dir.handle)
+      await this.restoreMarkersInDirectory(dir.handle)
     }
   }
 
   private restoreMarkersInDirectory = async (
-    resourcesDir: FileSystemDirectoryHandle,
-    server: string,
     dir: FileSystemDirectoryHandle
   ): Promise<void> => {
 
@@ -184,7 +182,7 @@ export class LayerRestorationService {
       if (!this.isSignature(name)) continue
 
       // marker file name is the drone signature
-      await this.ensureDronePreloaded(resourcesDir, `${server}/__resources__`, name)
+      await this.ensureDronePreloaded(name)
     }
   }
 
@@ -193,41 +191,39 @@ export class LayerRestorationService {
   // -------------------------------------------------
 
   private ensureDronePreloaded = async (
-    resourcesDir: FileSystemDirectoryHandle,
-    resourcesLocation: string,
     signature: string
   ): Promise<void> => {
 
     if (has(signature)) return
 
-    const result = await this.getDronePayloadBytes(resourcesDir, resourcesLocation, signature)
+
+    const result = await this.getDronePayloadBytes(signature)
     if (!result.bytes) return
 
     // ensure the cache is populated when it came from the network
     if (!result.exists) {
-      await this.writeCachedDronePayload(resourcesDir, signature, result.bytes)
+      await this.writeCachedDronePayload(signature, result.bytes)
     }
 
-   // this.preloader.add(signature, result.bytes)
+    // this.preloader.add(signature, result.bytes)
   }
 
   private getDronePayloadBytes = async (
-    resourcesDir: FileSystemDirectoryHandle,
-    resourcesLocation: string,
     signature: string
   ): Promise<{ exists: boolean; bytes: ArrayBuffer | null }> => {
 
-    const cached = await this.readCachedDronePayload(resourcesDir, signature)
+    const cached = await this.readCachedDronePayload(signature)
     if (cached) return { exists: true, bytes: cached }
 
-    const fetched = await this.fetchDronePayload(resourcesLocation, signature)
+    const fetched = await this.fetchDronePayload(signature)
     return { exists: false, bytes: fetched }
   }
 
   private readCachedDronePayload = async (
-    resourcesDir: FileSystemDirectoryHandle,
     signature: string
   ): Promise<ArrayBuffer | null> => {
+
+    const resourcesDir = this.store.resources
 
     try {
       const fileHandle = await resourcesDir.getFileHandle(signature, { create: false })
@@ -239,12 +235,11 @@ export class LayerRestorationService {
   }
 
   private writeCachedDronePayload = async (
-    resourcesDir: FileSystemDirectoryHandle,
     signature: string,
     bytes: ArrayBuffer
   ): Promise<void> => {
 
-    const handle = await resourcesDir.getFileHandle(signature, { create: true })
+    const handle = await this.store.resourcesDirectory().getFileHandle(signature, { create: true })
     const writable = await handle.createWritable()
 
     try {
@@ -255,11 +250,10 @@ export class LayerRestorationService {
   }
 
   private fetchDronePayload = async (
-    resourcesLocation: string,
     signature: string
   ): Promise<ArrayBuffer | null> => {
 
-    const url = `${resourcesLocation}/${signature}`
+    const url = `https://storagehypercomb.blob.core.windows.net/content/${Store.RESOURCES_DIRECTORY}/${signature}`
     console.log('[layer-restoration] fetching drone payload', url)
 
     const res = await fetch(url)

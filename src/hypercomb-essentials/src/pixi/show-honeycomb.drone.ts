@@ -1,15 +1,13 @@
 // src/pixi/show-honeycomb.drone.ts
 import { Drone, get } from '@hypercomb/core'
-import type { Container, MeshGeometry, Texture } from 'pixi.js'
+import { Container, Mesh, MeshGeometry, Texture } from 'pixi.js'
 import { PixiHostDrone } from './pixi-host.drone.js'
 import { HexLabelAtlas } from './hex-label.atlas.js'
 import { HexSdfTextureShader } from './hex-sdf.shader.js'
 
-
 type Axial = { q: number; r: number }
 
-const HOST_SIGNATURE =
-  'ddd2317a1089b8b067a2d1f1e48c0ddcc3f8a9fe49333e1a8a868c9f69e39a31'
+const HOST_SIGNATURE = '57b5a96271fb7382a06fc37141a1f58689d48395072ec370d27ca432d4e0c24c'
 
 export class ShowHoneycombDrone extends Drone {
 
@@ -34,10 +32,10 @@ export class ShowHoneycombDrone extends Drone {
     // host resolution
     // -------------------------------------------------
 
-    const host = this.host ??= get<PixiHostDrone>(HOST_SIGNATURE)
+    const host = this.host ??= get(HOST_SIGNATURE)
     if (!host?.app || !host.container) return
 
-    const pixi = this.pixi ??= host.pixi
+    const pixi = this.pixi ??= (<any>host).pixi
     const root = host.container
 
     // -------------------------------------------------
@@ -45,7 +43,7 @@ export class ShowHoneycombDrone extends Drone {
     // -------------------------------------------------
 
     if (!this.layer) {
-      this.layer = new pixi.Container()
+      this.layer = new Container()
       root.addChild(this.layer!)
 
       this.atlas = new HexLabelAtlas(
@@ -124,7 +122,7 @@ export class ShowHoneycombDrone extends Drone {
     // -------------------------------------------------
 
     if (!this.mesh) {
-      this.mesh = new pixi.Mesh({
+      this.mesh = new Mesh({
         geometry: geom,
         shader: this.shader.shader,
       })
