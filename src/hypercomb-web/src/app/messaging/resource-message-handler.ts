@@ -1,13 +1,13 @@
 // src/app/messaging/resource-message-handler.ts
 import { Injectable, inject } from '@angular/core'
-import { ScriptPreloaderService } from '../core/script-preloader.service'
+import { ScriptPreloader } from '../core/script-preloader'
 import { Store } from '../core/store'
 
 @Injectable({ providedIn: 'root' })
 export class ResourceMessageHandler {
 
   private readonly store = inject(Store)
-  private readonly preloader = inject(ScriptPreloaderService)
+  private readonly preloader = inject(ScriptPreloader)
 
   // whitelist for allowed postmessage origins
   private readonly allowedOrigins = new Set<string>([

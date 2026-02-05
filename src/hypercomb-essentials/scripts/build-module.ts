@@ -1,44 +1,40 @@
 // scripts/build-module.ts
-//
-// baseline behavior preserved
-// - src is NEVER deleted
-// - dist is wiped
-// - runtime JS comes from tsc (not this script)
-// - this script ONLY builds canonical drone artifacts
+// production build: emits dist/<rootLayerSig>/__layers__ + __resources__
+// layers are the install surface (folder structure)
+// no imports, no drone execution, no dependency bundling
 
+import { spawnSync } from 'child_process'
+import { fileURLToPath } from 'url'
 import {
   existsSync,
   mkdirSync,
   readdirSync,
-  readFileSync,
   rmSync,
   statSync,
   writeFileSync
 } from 'fs'
-import { resolve, join, relative, dirname } from 'path'
+import { resolve, join, dirname, relative } from 'path'
 import { build } from 'esbuild'
-import { PayloadCanonical, SignatureService, type Drone } from '@hypercomb/core'
-import { HostedDrones } from '../src'
+import { PayloadCanonical, SignatureService } from '@hypercomb/core'
 
-// -----------------------------------------
+// -------------------------------------------------
+// esm globals
+// -------------------------------------------------
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = dirname(__filename)
+
+// -------------------------------------------------
 // config
-// -----------------------------------------
+// -------------------------------------------------
 
-const MODULE_NAME = '@hypercomb/essentials'
-type HostedEntry = new () => Drone
+const SRC_ROOT = resolve('./src')
+const DIST_ROOT = resolve('./dist')
+const TARGET = 'es2022'
 
-// -----------------------------------------
+// -------------------------------------------------
 // helpers
-// -----------------------------------------
-
-const toKebab = (value: string): string =>
-  value
-    .replace(/Drone$/, '')
-    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
-    .toLowerCase()
-
-const toBase64 = (text: string): string =>
-  Buffer.from(text, 'utf8').toString('base64')
+// -------------------------------------------------
 
 const toArrayBuffer = (bytes: Uint8Array): ArrayBuffer => {
   const out = new ArrayBuffer(bytes.byteLength)
@@ -46,24 +42,44 @@ const toArrayBuffer = (bytes: Uint8Array): ArrayBuffer => {
   return out
 }
 
+const toBase64 = (text: string): string =>
+  Buffer.from(text, 'utf8').toString('base64')
+
+const relPosix = (from: string, to: string): string => {
+  const rel = relative(from, to).replace(/\\/g, '/')
+  return rel === '.' ? '' : rel
+}
+
 const sortUnique = (items: readonly string[]): string[] => {
   const set = new Set(items)
   return [...set].sort((a, b) => a.localeCompare(b))
 }
 
-const relPosix = (root: string, full: string): string => {
-  const rel = relative(root, full).replace(/\\/g, '/')
-  return rel === '.' ? '' : rel
+const walkFiles = (dir: string): string[] => {
+  if (!existsSync(dir)) return []
+  const out: string[] = []
+  for (const name of readdirSync(dir)) {
+    const full = join(dir, name)
+    const st = statSync(full)
+    if (st.isDirectory()) out.push(...walkFiles(full))
+    else out.push(full)
+  }
+  return out
 }
 
-const dirRelFromEntry = (srcRoot: string, entryPath: string): string =>
-  relPosix(srcRoot, dirname(entryPath))
+const baseNameFromRel = (rel: string): string => {
+  if (!rel) return 'hypercomb-essentials'
+  const parts = rel.split('/').filter(Boolean)
+  return parts[parts.length - 1] ?? 'hypercomb-essentials'
+}
 
-const baseNameFromRel = (rel: string): string =>
-  rel === '' ? MODULE_NAME : rel.split('/').filter(Boolean).pop() ?? MODULE_NAME
+const droneIdFromEntry = (entry: string): string => {
+  const file = entry.replace(/\\/g, '/').split('/').pop() ?? ''
+  return file.replace(/\.drone\.(ts|js)$/, '')
+}
 
 const signJson = async (
-  value: any
+  value: unknown
 ): Promise<{ signature: string; json: string }> => {
   const json = JSON.stringify(value)
   const bytes = new TextEncoder().encode(json)
@@ -71,70 +87,56 @@ const signJson = async (
   return { signature, json }
 }
 
-// -----------------------------------------
-// source indexing (drones only)
-// -----------------------------------------
+// -------------------------------------------------
+// discovery (no imports, no execution)
+// -------------------------------------------------
 
-const walkFiles = (dir: string): string[] => {
-  if (!existsSync(dir)) return []
-  const out: string[] = []
-
-  for (const name of readdirSync(dir)) {
-    const full = join(dir, name)
-    const st = statSync(full)
-    if (st.isDirectory()) out.push(...walkFiles(full))
-    else out.push(full)
-  }
-
-  return out
+type DroneSource = {
+  entry: string
+  dirRel: string
 }
 
-const buildDroneSourceIndex = (): Map<string, string> => {
-  const index = new Map<string, string>()
-  const srcRoot = resolve('./src')
-  const all = walkFiles(srcRoot)
+const discoverDrones = (): DroneSource[] => {
+  const files = walkFiles(SRC_ROOT)
+  const drones: DroneSource[] = []
 
-  for (const file of all) {
+  for (const file of files) {
     if (!file.endsWith('.drone.ts') && !file.endsWith('.drone.js')) continue
-    const base = file.replace(/^.*[\\/]/, '').replace(/\.drone\.(ts|js)$/, '')
-    if (!index.has(base)) index.set(base, file)
+
+    drones.push({
+      entry: file,
+      dirRel: relPosix(SRC_ROOT, dirname(file))
+    })
   }
 
-  return index
+  return drones
 }
 
-const resolveDroneEntry = (
-  fileBase: string,
-  index: Map<string, string>
-): string => {
-  const candidate = index.get(fileBase)
-  if (!candidate) throw new Error(`drone source not found for "${fileBase}"`)
-  return candidate
-}
+// -------------------------------------------------
+// compile (no bundling; allow runtime-only imports to remain)
+// -------------------------------------------------
 
-// -----------------------------------------
-// bundler (unchanged)
-// -----------------------------------------
-
-const bundleDrone = async (entryFile: string): Promise<string> => {
+const compileDroneSource = async (entry: string): Promise<string> => {
   const result = await build({
-    entryPoints: [resolve(entryFile)],
-    bundle: true,
+    entryPoints: [resolve(entry)],
+    bundle: false,
     format: 'esm',
     platform: 'browser',
     write: false,
-    target: 'es2022',
-    tsconfig: resolve('./tsconfig.json'),
-    absWorkingDir: process.cwd(),
-    external: ['@hypercomb/core']
+    target: TARGET,
+    tsconfig: resolve('./tsconfig.json')
   })
+
+  if (!result.outputFiles || result.outputFiles.length === 0) {
+    throw new Error(`no output emitted for: ${entry}`)
+  }
 
   return result.outputFiles[0].text
 }
 
-// -----------------------------------------
-// honeycomb layers
-// -----------------------------------------
+// -------------------------------------------------
+// layers (directory tree from src)
+// -------------------------------------------------
 
 type DirNode = {
   rel: string
@@ -169,73 +171,62 @@ const readDirTreeFiltered = (
 const buildLayersBottomUp = async (
   node: DirNode,
   dirToDrones: Map<string, string[]>,
-  layersDir: string
+  writeLayer: (sig: string, json: string) => void
 ): Promise<string> => {
-  const childLayer: string[] = []
+  const childLayerSigs: string[] = []
 
   for (const child of node.children) {
-    const sig = await buildLayersBottomUp(child, dirToDrones, layersDir)
-    childLayer.push(sig)
+    const sig = await buildLayersBottomUp(child, dirToDrones, writeLayer)
+    childLayerSigs.push(sig)
   }
 
   const layer = {
     version: 1,
     name: baseNameFromRel(node.rel),
+    rel: node.rel,
     drones: sortUnique(dirToDrones.get(node.rel) ?? []),
-    children: sortUnique(childLayer)
+    children: sortUnique(childLayerSigs)
   }
 
   const signed = await signJson(layer)
-  writeFileSync(join(layersDir, signed.signature), signed.json, 'utf8')
+  writeLayer(signed.signature, signed.json)
 
   return signed.signature
 }
 
-// -----------------------------------------
+// -------------------------------------------------
 // main
-// -----------------------------------------
+// -------------------------------------------------
 
 const main = async (): Promise<void> => {
-  const distDir = resolve('./dist')
+  rmSync(DIST_ROOT, { recursive: true, force: true })
+  mkdirSync(DIST_ROOT, { recursive: true })
 
-  rmSync(distDir, { recursive: true, force: true })
-  mkdirSync(distDir, { recursive: true })
-
-  const layersDir = join(distDir, '__layers__')
-  const resourcesDir = join(distDir, '__resources__')
-
-  mkdirSync(layersDir, { recursive: true })
-  mkdirSync(resourcesDir, { recursive: true })
-
-  if (!Array.isArray(HostedDrones) || HostedDrones.length === 0) {
-    throw new Error('no drones exported from src/index.ts')
+  const drones = discoverDrones()
+  if (drones.length === 0) {
+    throw new Error('no drone sources found')
   }
 
-  const sourceIndex = buildDroneSourceIndex()
-  const srcRoot = resolve('./src')
   const built: { droneSig: string; dirRel: string }[] = []
 
-  for (const DroneCtor of HostedDrones as HostedEntry[]) {
-    const instance = new DroneCtor()
-    const fileBase = toKebab(instance.constructor.name)
-    const entryPath = resolveDroneEntry(fileBase, sourceIndex)
+  const resourceMap = new Map<string, string>()
+  const layerMap = new Map<string, string>()
 
-    const bundledSource = await bundleDrone(entryPath)
+  for (const drone of drones) {
+    const source = await compileDroneSource(drone.entry)
+    const inferredId = droneIdFromEntry(drone.entry)
+
     const draft = PayloadCanonical.createEmpty()
-
-    draft.drone.name = instance.name
-    draft.drone.description = instance.description ?? ''
-    draft.drone.grammar = instance.grammar ?? []
-    draft.drone.links = instance.links ?? []
-    ;(draft.drone as any).effects = (instance as any).effects ?? []
-
     draft.source.entry = 'bundle.js'
-    draft.source.files = { 'bundle.js': toBase64(bundledSource) }
+    draft.source.files = { 'bundle.js': toBase64(source) }
+
+    // inferred name only (resource metadata)
+    draft.drone.name = inferredId
 
     const { signature: droneSig } = await PayloadCanonical.compute(draft)
-    writeFileSync(join(resourcesDir, droneSig), JSON.stringify(draft), 'utf8')
+    resourceMap.set(droneSig, JSON.stringify(draft))
 
-    built.push({ droneSig, dirRel: dirRelFromEntry(srcRoot, entryPath) })
+    built.push({ droneSig, dirRel: drone.dirRel })
   }
 
   const dirToDrones = new Map<string, string[]>()
@@ -255,37 +246,50 @@ const main = async (): Promise<void> => {
     }
   }
 
-  const tree = readDirTreeFiltered(srcRoot, '', included)
+  const tree = readDirTreeFiltered(SRC_ROOT, '', included)
   if (!tree) throw new Error('no layer tree could be constructed')
 
-  const rootLayerSig = await buildLayersBottomUp(tree, dirToDrones, layersDir)
-
-  const rootDir = join(distDir, rootLayerSig)
-  mkdirSync(rootDir)
-  mkdirSync(join(rootDir, '__layers__'))
-  mkdirSync(join(rootDir, '__resources__'))
-
-  for (const f of readdirSync(layersDir)) {
-    writeFileSync(
-      join(rootDir, '__layers__', f),
-      readFileSync(join(layersDir, f))
-    )
+  const writeLayer = (sig: string, json: string): void => {
+    layerMap.set(sig, json)
   }
 
-  for (const f of readdirSync(resourcesDir)) {
-    writeFileSync(
-      join(rootDir, '__resources__', f),
-      readFileSync(join(resourcesDir, f))
-    )
+  const rootLayerSig = await buildLayersBottomUp(tree, dirToDrones, writeLayer)
+
+  const packageDir = join(DIST_ROOT, rootLayerSig)
+  const layersDir = join(packageDir, '__layers__')
+  const resourcesDir = join(packageDir, '__resources__')
+
+  mkdirSync(packageDir, { recursive: true })
+  mkdirSync(layersDir, { recursive: true })
+  mkdirSync(resourcesDir, { recursive: true })
+
+  for (const [sig, json] of layerMap.entries()) {
+    writeFileSync(join(layersDir, sig), json, 'utf8')
   }
 
-  // ✅ de-duplicate: remove staging folders after copy
-  rmSync(layersDir, { recursive: true, force: true })
-  rmSync(resourcesDir, { recursive: true, force: true })
+  for (const [sig, json] of resourceMap.entries()) {
+    writeFileSync(join(resourcesDir, sig), json, 'utf8')
+  }
 
-  console.log('module built')
-  console.log(`root signature: ${rootLayerSig}`)
-  console.log(`drones packaged: ${built.length}`)
+  writeFileSync(join(packageDir, 'root.txt'), `${rootLayerSig}\n`, 'utf8')
+
+  const ps1 = resolve(__dirname, 'deploy-azure.ps1')
+  if (existsSync(ps1)) {
+    const result = spawnSync(
+      'powershell',
+      [
+        '-NoProfile',
+        '-ExecutionPolicy', 'Bypass',
+        '-File', ps1,
+        '-Signature', rootLayerSig
+      ],
+      { stdio: 'inherit' }
+    )
+
+    if (result.status !== 0) {
+      throw new Error('deployment failed')
+    }
+  }
 }
 
 main().catch(err => {

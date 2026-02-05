@@ -1,90 +1,40 @@
-// src/hypercomb-drones/pixi/add-pixi.drone.ts
-
-import { Drone } from '@hypercomb/core'
+// src/pixi/pixi-host.drone.ts
+import { Drone, has, register } from '@hypercomb/core'
 import * as pixi from 'pixi.js'
+
+const HOST_SIGNATURE =
+  'ddd2317a1089b8b067a2d1f1e48c0ddcc3f8a9fe49333e1a8a868c9f69e39a31'
 
 export class PixiHostDrone extends Drone {
 
-  // -------------------------------------------------
-  // capability surface
-  // -------------------------------------------------
-
   public app: pixi.Application | null = null
   public host: HTMLDivElement | null = null
+
+  // stable render root for all drones
   public container!: pixi.Container
+
+  // expose pixi namespace intentionally
   public pixi = pixi
 
-  // -------------------------------------------------
-  // constants
-  // -------------------------------------------------
-
-  private readonly hexagonSide = 200
-
-  private get height(): number {
-    return this.hexagonSide * 2
-  }
-
-  private get width(): number {
-    return this.hexagonSide * Math.sqrt(3)
-  }
-
-  private get hexagonOffsetX(): number {
-    return this.width / 2
-  }
-
-  private get hexagonOffsetY(): number {
-    return this.height / 2
-  }
-
-  // -------------------------------------------------
-  // metadata
-  // -------------------------------------------------
-
-  public override description =
-    'Provides a single PIXI application for rendering drones.'
-
-  public override grammar = [
-    { example: 'add pixi' },
-    { example: 'pixi' }
-  ]
-
-  public override effects = ['render'] as const
-
-  // -------------------------------------------------
-  // sense (idempotent)
-  // -------------------------------------------------
-
-  protected override sense = (_grammar: string): boolean | Promise<boolean> => {
+  protected override sense = (): boolean => {
+    if (!has(HOST_SIGNATURE)) {
+      register(HOST_SIGNATURE, this, 'pixi-host')
+    }
     return true
   }
 
-  // -------------------------------------------------
-  // heartbeat (idempotent)
-  // -------------------------------------------------
-
-  protected override heartbeat = async (_grammar: string): Promise<void> => {
+  protected override heartbeat = async (): Promise<void> => {
+    if (this.app) return
 
     // -------------------------------------------------
-    // dom guard
-    // -------------------------------------------------
-
-    const existing = document.querySelector('[data-hypercomb-pixi="root"]')
-    if (existing) return
-
-    // -------------------------------------------------
-    // host element
+    // dom root (single, inert)
     // -------------------------------------------------
 
     const host = this.host = document.createElement('div')
     host.dataset['hypercombPixi'] = 'root'
     host.style.position = 'fixed'
-    host.style.left = '0'
-    host.style.top = '0'
-    host.style.width = '100vw'
-    host.style.height = '100vh'
-    host.style.zIndex = '1'
+    host.style.inset = '0'
     host.style.pointerEvents = 'none'
-
     document.body.appendChild(host)
 
     // -------------------------------------------------
@@ -95,38 +45,39 @@ export class PixiHostDrone extends Drone {
 
     await app.init({
       resizeTo: window,
-      antialias: true,
       backgroundAlpha: 0,
-
-      // 👇 THIS IS THE KEY
       resolution: window.devicePixelRatio || 1,
-      autoDensity: true
+      autoDensity: true,
     })
-
 
     host.appendChild(app.canvas)
 
     // -------------------------------------------------
-    // center stage so (0,0) === screen center
+    // center stage (no scaling!)
     // -------------------------------------------------
 
-    const centerStage = (): void => {
+    const center = (): void => {
       app.stage.position.set(
-        app.renderer.width / 2,
-        app.renderer.height / 2
+        app.renderer.width * 0.5,
+        app.renderer.height * 0.5
       )
     }
-    app.stage.scale.set(2,2)
 
-    centerStage()
-    window.addEventListener('resize', centerStage)
+    center()
+    window.addEventListener('resize', center)
 
     // -------------------------------------------------
-    // optional root container (future-proofing)
+    // root render container
     // -------------------------------------------------
 
     this.container = new pixi.Container()
     app.stage.addChild(this.container)
 
+        const g = new pixi.Graphics()
+    g.circle(0, 0, 18)
+    g.fill('red')
+
+    // drawn at (0,0) → exact screen center
+    this.container.addChild(g)
   }
 }

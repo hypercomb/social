@@ -1,14 +1,13 @@
 // src/app/core/core-adapter.ts
+import './ioc.web'
 
 import { Injectable, inject } from '@angular/core'
 import { Lineage } from './lineage'
 import { Navigation } from './navigation'
 import { Store } from './store'
-import { provideRuntimeLibs } from './runtime-libs'
 import { LayerRestorationService } from './layer-restoration.service'
-import { ScriptPreloaderService } from './script-preloader.service'
-import { PixiHostDrone, ShowHoneycombDrone, HelloWorldDrone } from '@hypercomb/essentials'
-import { get, list } from '@hypercomb/core'
+import { ScriptPreloader } from './script-preloader'
+import { DependencyLoader } from './dependency-loader'
 
 @Injectable({ providedIn: 'root' })
 export class CoreAdapter {
@@ -19,7 +18,8 @@ export class CoreAdapter {
 
   private readonly navigation = inject(Navigation)
   private readonly lineage = inject(Lineage)
-  private readonly preloader = inject(ScriptPreloaderService)
+  private readonly dependency = inject(DependencyLoader)
+  private readonly preloader = inject(ScriptPreloader)
   private readonly restoration = inject(LayerRestorationService)
   private readonly store = inject(Store)
 
@@ -37,44 +37,40 @@ export class CoreAdapter {
     if (this.initialized) return
     this.initialized = true
 
-    provideRuntimeLibs()
-
     // storage first (lineage + preloader depend on handles)
     await this.store.initialize()
 
     // restore the layout where necessary
     const depth = 3
+    await this.dependency.load()
     await this.restoration.load(this.store.opfsRoot, depth)
     await this.restoration.restore(this.store.opfsRoot, depth)
 
-    await this.preloader.preload()
+   // await this.preloader.preload()
 
     // lineage is anchored to the platform root (hypercomb folder)
     // note: test-domain root also gets created by store.initialize()
-    await this.lineage.initialize()
+    await this.lineage.initialize() 
 
+    // const l = list();
+    // const hostkey = '5eb6110661afcad1a4b84a77bf5bb6cb214b6b4e9d36fa278fcead2174f39459'
+    // const host = <any>get(hostkey)!
+    // await host.encounter('testing')
 
-    const l = list();
-    const hostkey = 'ddd2317a1089b8b067a2d1f1e48c0ddcc3f8a9fe49333e1a8a868c9f69e39a31'
-    const host = get<PixiHostDrone>(hostkey)!
-    JSON.stringify(host)
+    // const showkey = '8d11953684ffa573fe5b95816d6e1581eabafd24c51f2d84758570f009e5f291'
+    // const show = <any>get(showkey)!
+    // await show.encounter('testing')
 
-    await host.encounter('testing')
-    
-    const showkey = 'bcbaf6cbc1f21798e0d728a66acb04f1b4ce5b044e0c7ac854a0fce14a824834'
-    const show = get<ShowHoneycombDrone>(showkey)!
-    await show.encounter('testing')
+    // const l2 = list();
+    // const hostkey2 = 'ddd2317a1089b8b067a2d1f1e48c0ddcc3f8a9fe49333e1a8a868c9f69e39a31'
+    // const host2 = new PixiHostDrone(hostkey2)!
+    // JSON.stringify(host2)
 
-    const l2 = list();
-    const hostkey2 = 'ddd2317a1089b8b067a2d1f1e48c0ddcc3f8a9fe49333e1a8a868c9f69e39a31'
-    const host2 = new PixiHostDrone(hostkey2)!
-    JSON.stringify(host2)
-    
-    await host2.encounter('testing')
+    // await host2.encounter('testing')
 
-    const showkey2 = 'bcbaf6cbc1f21798e0d728a66acb04f1b4ce5b044e0c7ac854a0fce14a824834'
-    const show2 = new ShowHoneycombDrone(showkey2)!
-    await show2.encounter('testing')
+    // const showkey2 = 'bcbaf6cbc1f21798e0d728a66acb04f1b4ce5b044e0c7ac854a0fce14a824834'
+    // const show2 = new ShowHoneycombDrone(showkey2)!
+    // await show2.encounter('testing')
 
 
 

@@ -7,20 +7,16 @@
     // -------------------------------------------------
     // DEV SOURCE MAPPING (CRITICAL)
     // -------------------------------------------------
-    // makes @hypercomb/essentials resolve to source
+    // makes @hypercomb/hello resolve to source
     // instead of node_modules
     // -------------------------------------------------
     "baseUrl": ".",
     "paths": {
-      "@hypercomb/essentials": [
-        "../hypercomb-essentials/src/index.ts"
+      "@essentials/hello": [
+        "../hypercomb-essentials/src/hello-world/hello-world.entry.ts"
       ]
     }
   },
-  "files": [
-    "src/main.ts"
-  ],
-  "include": [
-    "src/**/*.d.ts"
-  ]
+  "files": ["src/main.ts"],
+  "include": ["src/**/*.d.ts"]
 }

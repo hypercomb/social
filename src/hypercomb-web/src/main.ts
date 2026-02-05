@@ -1,12 +1,24 @@
 // src/main.ts
+/// <reference path="./global.d.ts" />
 
-import { bootstrapApplication } from '@angular/platform-browser'
-import { appConfig } from './app/app.config'
-import { App } from './app/app'
+import { resolveImportMap } from './setup/resolve-import-map'
 
-// claim the initial session entry *without changing the URL*
 const url = window.location.pathname + window.location.search + window.location.hash
 window.history.replaceState(window.history.state ?? {}, '', url)
 
-bootstrapApplication(App, appConfig)
-  .catch(err => console.error(err))
+resolveImportMap().then(importMap => {
+  const script = document.createElement('script')
+  script.type = 'importmap'
+  script.textContent = JSON.stringify({ imports: importMap }, null, 2 )
+  document.head.appendChild(script)
+
+  // no reference to @essentials/* here
+ 
+  import('@angular/platform-browser').then(({ bootstrapApplication }) => {
+    import('./app/app.config').then(({ appConfig }) => {
+      import('./app/app').then(({ App }) => {
+        bootstrapApplication(App, appConfig).catch(console.error)
+      })
+    })
+  })
+})

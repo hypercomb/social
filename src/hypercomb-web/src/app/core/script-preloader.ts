@@ -7,7 +7,7 @@
 // - no duplicated instance storage
 
 import { inject, Injectable, signal } from '@angular/core'
-import { Drone, type DroneResolver, get as iocGet, has as iocHas, list } from '@hypercomb/core'
+import { Drone, type DroneResolver, get, has, list } from '@hypercomb/core'
 import { Lineage } from './lineage'
 import { DirectoryWalkerService } from './directory-walker.service'
 import { Store } from './store'
@@ -18,9 +18,9 @@ export interface ActionDescriptor {
 }
 
 @Injectable({ providedIn: 'root' })
-export class ScriptPreloaderService implements DroneResolver {
+export class ScriptPreloader implements DroneResolver {
 
-  private readonly lineage = inject(Lineage)  
+  private readonly lineage = inject(Lineage)
   private readonly walker = inject(DirectoryWalkerService)
   private readonly store = inject(Store)
 
@@ -36,16 +36,6 @@ export class ScriptPreloaderService implements DroneResolver {
   public readonly actions = signal<readonly ActionDescriptor[]>([])
   public readonly actionNames = signal<readonly string[]>([])
   public readonly resourceCount = signal(0)
-
-  // -------------------------------------------------
-  // ioc delegation (execution truth)
-  // -------------------------------------------------
-
-  public get = (signature: string): Drone | undefined =>
-    iocGet<Drone>(signature)
-
-  public has = (signature: string): boolean =>
-    iocHas(signature)
 
   public resolveBySignature = (signature: string): ActionDescriptor | undefined =>
     this.bySignature.get(signature)
@@ -99,17 +89,28 @@ export class ScriptPreloaderService implements DroneResolver {
     const walked = (await this.walker.walk(root, depth))
       .map(w => w.handle)
       .slice(1)
-
+    const used: string[] = []
     for await (const handle of walked) {
       for await (const [fileName, entry] of handle.entries()) {
         if (entry.kind !== 'file') continue
         if (!/^[a-f0-9]{64}$/i.test(fileName)) continue
+        if (used.includes(fileName)) continue
+        used.push(fileName)
 
-        const drone = await this.store.getDrone(fileName)
-        if (!drone) continue
-        
-        // expectation: drone constructor already registered into ioc
-        this.add(fileName, drone)
+        try {
+          const url = `https://storagehypercomb.blob.core.windows.net/content/${fileName}`
+          const drone = await import(/* @vite-ignore */ url)
+          // expectation: drone constructor already registered into ioc
+          this.add(fileName, drone)
+
+        } catch (e) {
+          console.warn(`failed to load drone: ${fileName}`, e)
+
+          continue
+        }
+        // const drone = await this.store.getDrone(fileName)
+        // if (!drone) continue
+
       }
     }
   }

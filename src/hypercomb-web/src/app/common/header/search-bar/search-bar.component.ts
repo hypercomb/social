@@ -3,7 +3,7 @@
 import { Component, AfterViewInit, OnDestroy, ViewChild, ElementRef, inject, signal, computed } from "@angular/core"
 import { CompletionContext, CompletionUtility } from "../../../core/completion-utility"
 import { InitState } from "../../../core/model"
-import { ScriptPreloaderService } from "../../../core/script-preloader.service"
+import { ScriptPreloader } from "../../../core/script-preloader"
 import { ResourceCompletionService } from "./resource-completion.service"
 import { Lineage } from "../../../core/lineage"
 import { MovementService } from "../../../core/movement.service"
@@ -24,7 +24,7 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
   private readonly lineage = inject(Lineage)
   private readonly movement = inject(MovementService)
   private readonly navigation = inject(Navigation)
-  private readonly preloader = inject(ScriptPreloaderService)
+  private readonly preloader = inject(ScriptPreloader)
   private readonly resources = inject(ResourceCompletionService)
 
   private initState: InitState = 'unlocked'

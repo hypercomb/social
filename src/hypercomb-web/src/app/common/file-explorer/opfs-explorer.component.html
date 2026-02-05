@@ -38,18 +38,24 @@
     <button mat-stroked-button type="button" (click)="createFile()">
       add file
     </button>
+    <button mat-stroked-button type="button" (click)="addDependency()">
+      add dependency
+    </button>
   </div>
 
   <!-- table -->
   <div class="table-container">
-    <table mat-table [dataSource]="entries()" class="mat-elevation-z2 opfs-table">
-
+    <table
+      mat-table
+      [dataSource]="entries()"
+      class="mat-elevation-z2 opfs-table"
+    >
       <!-- icon -->
       <ng-container matColumnDef="icon">
         <th mat-header-cell *matHeaderCellDef></th>
         <td mat-cell *matCellDef="let e">
           <mat-icon>
-            {{ e.kind === 'directory' ? 'folder' : 'insert_drive_file' }}
+            {{ e.kind === "directory" ? "folder" : "insert_drive_file" }}
           </mat-icon>
         </td>
       </ng-container>
@@ -76,9 +82,7 @@
       <ng-container matColumnDef="copy">
         <th mat-header-cell *matHeaderCellDef></th>
         <td mat-cell *matCellDef="let e">
-          <button mat-button (click)="copyDetails(e, $event)">
-            copy
-          </button>
+          <button mat-button (click)="copyDetails(e, $event)">copy</button>
         </td>
       </ng-container>
 
@@ -92,13 +96,15 @@
         </td>
       </ng-container>
 
-      <tr mat-header-row *matHeaderRowDef="['icon','name','run','copy','delete']"></tr>
+      <tr
+        mat-header-row
+        *matHeaderRowDef="['icon', 'name', 'run', 'copy', 'delete']"
+      ></tr>
       <tr
         mat-row
-        *matRowDef="let row; columns: ['icon','name','run','copy','delete']"
-        (click)="explore(row.name)">
-      </tr>
-
+        *matRowDef="let row; columns: ['icon', 'name', 'run', 'copy', 'delete']"
+        (click)="explore(row.name)"
+      ></tr>
     </table>
   </div>
 </div>

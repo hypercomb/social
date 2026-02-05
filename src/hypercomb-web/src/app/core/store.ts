@@ -2,6 +2,7 @@
 
 import { Injectable } from '@angular/core'
 import { Drone, register, SignatureService } from '@hypercomb/core'
+
 type DroneCtor = new (signature: string) => Drone
 
 @Injectable({ providedIn: 'root' })

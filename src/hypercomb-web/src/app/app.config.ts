@@ -2,7 +2,7 @@ import { DRONE_RESOLVER } from '@hypercomb/core';
 import { ApplicationConfig, provideBrowserGlobalErrorListeners, provideZoneChangeDetection } from '@angular/core';
 import { provideRouter } from '@angular/router';
 import { routes } from './app.routes';
-import { ScriptPreloaderService } from './core/script-preloader.service';
+import { ScriptPreloader } from './core/script-preloader';
 
 
 export const appConfig: ApplicationConfig = {
@@ -12,7 +12,7 @@ export const appConfig: ApplicationConfig = {
     provideRouter(routes),
     {
       provide: DRONE_RESOLVER,
-      useExisting: ScriptPreloaderService
+      useExisting: ScriptPreloader
     }
   ]
 };

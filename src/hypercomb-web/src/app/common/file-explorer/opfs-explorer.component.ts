@@ -10,8 +10,7 @@ import { DomainName } from '../../core/domain-name'
 import { Lineage } from '../../core/lineage'
 import { Store } from '../../core/store'
 import { hypercomb } from '@hypercomb/core'
-import { ScriptPreloaderService } from '../../core/script-preloader.service'
-import { PixiHostDrone, ShowHoneycombDrone } from '@hypercomb/essentials'
+import { ScriptPreloader } from '../../core/script-preloader'
 
 interface ExplorerEntry {
   name: string
@@ -45,10 +44,8 @@ export class OpfsExplorerComponent extends hypercomb {
   // -------------------------------------------------
 
   private readonly lineage = inject(Lineage)
-  private readonly preloader = inject(ScriptPreloaderService)
+  private readonly preloader = inject(ScriptPreloader)
   private readonly store = inject(Store)
-  private readonly host = inject(PixiHostDrone)
-  private readonly show = inject(ShowHoneycombDrone)
 
   // -------------------------------------------------
   // state
@@ -215,6 +212,40 @@ export class OpfsExplorerComponent extends hypercomb {
     this.newName = ''
     void this.refresh()
   }
+
+  public addDependency = async (): Promise<void> => {
+  const sig = this.newName.trim()
+  if (!sig) return
+
+  // fetch from server
+  const url = `https://storagehypercomb.blob.core.windows.net/content/__dependencies__/`
+  const res = await fetch(`${url}${sig}`)
+
+  if (!res.ok) {
+    console.error('failed to fetch dependency', sig)
+    return
+  }
+
+  const bytes = await res.arrayBuffer()
+
+  // ensure __dependencies__ exists at OPFS root
+  const root = this.store.opfsDirectory()
+  const depsDir = await root.getDirectoryHandle('__dependencies__', { create: true })
+
+  // write dependency by signature
+  const fileHandle = await depsDir.getFileHandle(sig, { create: true })
+  const writable = await fileHandle.createWritable()
+
+  try {
+    await writable.write(bytes)
+  } finally {
+    await writable.close()
+  }
+
+  this.newName = ''
+  void this.refresh()
+}
+
 
   // -------------------------------------------------
   // clipboard

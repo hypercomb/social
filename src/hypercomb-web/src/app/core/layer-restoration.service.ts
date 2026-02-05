@@ -2,7 +2,8 @@
 
 import { Injectable, inject } from '@angular/core'
 import { DirectoryWalkerService } from './directory-walker.service'
-import { ScriptPreloaderService } from './script-preloader.service'
+import { ScriptPreloader } from './script-preloader'
+import { has } from '@hypercomb/core'
 
 type LayerRecord = { name: string; children: string[]; drones: string[] }
 
@@ -24,7 +25,7 @@ export class LayerRestorationService {
   // -------------------------------------------------
 
   private readonly walker = inject(DirectoryWalkerService)
-  private readonly preloader = inject(ScriptPreloaderService)
+  private readonly preloader = inject(ScriptPreloader)
 
   // -------------------------------------------------
   // private fields
@@ -197,7 +198,7 @@ export class LayerRestorationService {
     signature: string
   ): Promise<void> => {
 
-    if (this.preloader.has(signature)) return
+    if (has(signature)) return
 
     const result = await this.getDronePayloadBytes(resourcesDir, resourcesLocation, signature)
     if (!result.bytes) return

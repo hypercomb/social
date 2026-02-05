@@ -1,14 +1,17 @@
 {
-  "name": "@hypercomb/essentials",
+  "name": "hypercomb-essentials",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "build-module": "tsc && tsx ./scripts/build-module.ts"
+    "module": "tsc -p tsconfig.json && tsx ./scripts/build-module.ts --tsconfig tsconfig.scripts.json",
+    "dependencies": "tsx ./scripts/build-dependencies.ts --tsconfig tsconfig.scripts.json"
   },
   "dependencies": {
-    "@hypercomb/core": "file:../hypercomb-core",
-    "pixi.js": "^8.15.0"
+    "@hypercomb/core": "file:../hypercomb-core"
+  },
+  "peerDependencies": {
+    "pixi.js": "^8.14.3"
   }
 }
