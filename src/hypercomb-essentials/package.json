@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "module": "tsc -p tsconfig.json && tsx ./scripts/build-module.ts --tsconfig tsconfig.scripts.json",
-    "dependencies": "tsx ./scripts/build-dependencies.ts --tsconfig tsconfig.scripts.json"
+    "dependencies": "tsx ./scripts/build-dependencies.ts --tsconfig tsconfig.scripts.json",
+    "all": "npm run build && npm run module && npm run dependencies"
   },
   "dependencies": {
     "@hypercomb/core": "file:../hypercomb-core"

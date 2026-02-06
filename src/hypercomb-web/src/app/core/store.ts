@@ -1,9 +1,9 @@
 // src/app/core/store.ts
 
 import { Injectable } from '@angular/core'
-import { Drone, register, SignatureService } from '@hypercomb/core'
+import { Drone, SignatureService } from '@hypercomb/core'
 
-type DroneCtor = new (signature: string) => Drone
+type DroneCtor = new () => Drone
 
 @Injectable({ providedIn: 'root' })
 export class Store {
@@ -43,41 +43,24 @@ export class Store {
   // platform roots
   // -------------------------------------------------
 
-  public getDrone = async (signature: string): Promise<Drone | null> => {
+  public getDrone = async (name: string, buffer: ArrayBuffer): Promise<Drone | null> => {
+    const { register } = window.ioc
 
-    // each directory under opfsRoot is a domain (including "hypercomb")
-    for await (const [domainName, entry] of this.opfsRoot.entries()) {
-      if (entry.kind !== 'directory') continue
+    try {
+      const mod = await this.loadModule(buffer)
+      const ctors = this.extractDroneCtors(mod)
 
-      // skip internal/system folders only
-      if (domainName.startsWith('__')) continue
-
-      try {
-        const resourcesDir = await this.resourcesDirectory()
-        const fileHandle = await resourcesDir.getFileHandle(signature, { create: false })
-        if (!fileHandle) continue
-
-        const file = await fileHandle.getFile()
-        const buffer = await file.arrayBuffer()
-
-        const mod = await this.loadModule(buffer)
-
-        const ctors = this.extractDroneCtors(mod)
-
-        // 5) instantiate missing drones (auto-registers via base class)
-        for (const Ctor of ctors) {
-          const drone = new Ctor(signature)
-          register(signature, drone)  
-          return drone
-        }
-
-      } catch {
-        // not in this domain, keep scanning
+      for (const Ctor of ctors) {
+        const instance = new Ctor()
+        register(instance.name, instance)
       }
+    } catch {
+      // ignore and keep scanning
     }
-
     return null
   }
+
+
 
   // opfs root directory
   public opfsDirectory = (): FileSystemDirectoryHandle => {
@@ -139,39 +122,17 @@ export class Store {
 
     return signature
   }
-
   // -------------------------------------------------
   // module loader (bytes -> esm)
   // -------------------------------------------------
 
   private loadModule = async (bytes: ArrayBuffer): Promise<unknown> => {
-    const text = new TextDecoder().decode(bytes).trim()
+    // bytes already represent the final JS bundle
+    const blob = new Blob(
+      [bytes],
+      { type: 'application/javascript' }
+    )
 
-    // payload is guaranteed json at this point
-    const payload = JSON.parse(text)
-
-    const entry = payload.source?.entry
-    const files = payload.source?.files
-
-    if (!entry || !files || !files[entry]) {
-      throw new Error('[store] invalid drone payload: missing bundle entry')
-    }
-
-    // base64 → binary
-    const base64 = files[entry] as string
-    const binary = atob(base64)
-    const len = binary.length
-    const buf = new Uint8Array(len)
-
-    for (let i = 0; i < len; i++) {
-      buf[i] = binary.charCodeAt(i)
-    }
-
-    // binary → js source
-    const bundleText = new TextDecoder().decode(buf)
-
-    // js source → esm module
-    const blob = new Blob([bundleText], { type: 'application/javascript' })
     const url = URL.createObjectURL(blob)
 
     try {
@@ -184,6 +145,7 @@ export class Store {
       URL.revokeObjectURL(url)
     }
   }
+
 
   // -------------------------------------------------
   // ctor extractor (safe, no side-effects)

@@ -1,13 +1,12 @@
 // src/pixi/show-honeycomb.drone.ts
-import { Drone, get } from '@hypercomb/core'
-import { Container, Mesh, MeshGeometry, Texture } from 'pixi.js'
+import { Drone } from '@hypercomb/core'
+import { Assets, Container, Mesh, MeshGeometry, Texture } from 'pixi.js'
 import { PixiHostDrone } from './pixi-host.drone.js'
 import { HexLabelAtlas } from './hex-label.atlas.js'
 import { HexSdfTextureShader } from './hex-sdf.shader.js'
 
-type Axial = { q: number; r: number }
 
-const HOST_SIGNATURE = '57b5a96271fb7382a06fc37141a1f58689d48395072ec370d27ca432d4e0c24c'
+type Axial = { q: number; r: number }
 
 export class ShowHoneycombDrone extends Drone {
 
@@ -27,15 +26,13 @@ export class ShowHoneycombDrone extends Drone {
   protected override sense = (): boolean => true
 
   protected override heartbeat = async (): Promise<void> => {
-
+    const { get } = (<any>window).ioc
     // -------------------------------------------------
     // host resolution
     // -------------------------------------------------
 
-    const host = this.host ??= get(HOST_SIGNATURE)
+    const host = this.host = get("PixiHostDrone")
     if (!host?.app || !host.container) return
-
-    const pixi = this.pixi ??= (<any>host).pixi
     const root = host.container
 
     // -------------------------------------------------
@@ -142,7 +139,7 @@ export class ShowHoneycombDrone extends Drone {
 
   private ensureTexture = async (url: string): Promise<Texture | null> => {
     if (this.tex) return this.tex
-    this.tex = await this.pixi.Assets.load(url)
+    this.tex = await Assets.load(url)
     return this.tex
   }
 
@@ -195,7 +192,7 @@ export class ShowHoneycombDrone extends Drone {
     const pos = new Float32Array(cells.length * 8)
     const uv = new Float32Array(cells.length * 8)
     const luv = new Float32Array(cells.length * 16)
-    const idx = new Uint16Array(cells.length * 6)
+    const idx = new Uint32Array(cells.length * 6)
 
     let pv = 0, uvp = 0, lp = 0, ii = 0, base = 0
 
@@ -206,7 +203,7 @@ export class ShowHoneycombDrone extends Drone {
       const y0 = y - hh, y1 = y + hh
 
       pos.set([x0, y0, x1, y0, x1, y1, x0, y1], pv); pv += 8
-      uv.set([0,0, 1,0, 1,1, 0,1], uvp); uvp += 8
+      uv.set([0, 0, 1, 0, 1, 1, 0, 1], uvp); uvp += 8
 
       const ruv = this.atlas!.getLabelUV(`${c.q},${c.r}`)
       for (let i = 0; i < 4; i++) {
@@ -214,16 +211,15 @@ export class ShowHoneycombDrone extends Drone {
         lp += 4
       }
 
-      idx.set([base, base+1, base+2, base, base+2, base+3], ii)
+      idx.set([base, base + 1, base + 2, base, base + 2, base + 3], ii)
       ii += 6
       base += 4
     }
-
-    const g = new this.pixi.MeshGeometry()
-    g.addAttribute('aPosition', pos, 2)
-    g.addAttribute('aUV', uv, 2)
-    g.addAttribute('aLabelUV', luv, 4)
-    g.addIndex(idx)
+    const g = new MeshGeometry({
+      positions: pos,   // Float32Array
+      uvs: uv,          // Float32Array
+      indices: idx,     // Uint32Array
+    })
 
     return g
   }

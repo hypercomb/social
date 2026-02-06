@@ -78,11 +78,7 @@ export class DependencyLoader {
     const objectUrl = URL.createObjectURL(blob)
 
     // eslint-disable-next-line @typescript-eslint/no-unused-expressions
-    await import(/* @vite-ignore */ objectUrl)
-  }
-
-  private resolveDependencyUrl = (signature: string): string => {
-    return `https://storagehypercomb.blob.core.windows.net/content/__dependencies__/${signature}.js`
+   const result =  await import(/* @vite-ignore */ objectUrl)
   }
 
   private isSignature = (name: string): boolean =>

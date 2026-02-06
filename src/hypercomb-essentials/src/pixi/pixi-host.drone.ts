@@ -61,11 +61,5 @@ export class PixiHostDrone extends Drone {
     this.container = new Container()
     app.stage.addChild(this.container)
 
-    const g = new Graphics()
-    g.circle(0, 0, 4)
-    g.fill('aliceblue')
-
-    // drawn at (0,0) → exact screen center
-    this.container.addChild(g)
   }
 }

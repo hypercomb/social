@@ -6,77 +6,68 @@ import { ScriptPreloader } from './script-preloader'
 import { has } from '@hypercomb/core'
 import { Store } from './store'
 
-type LayerRecord = { name: string; children: string[]; drones: string[] }
+type LayerRecord = {
+  name: string
+  children: string[]
+  drones: string[]
+}
 
 @Injectable({ providedIn: 'root' })
 export class LayerRestorationService {
+
   private readonly store = inject(Store)
+  private readonly walker = inject(DirectoryWalkerService)
+  private readonly preloader = inject(ScriptPreloader)
 
-  // -------------------------------------------------
-  // constants
-  // -------------------------------------------------
+  private readonly decoder = new TextDecoder()
+  private readonly encoder = new TextEncoder()
 
-  private static readonly DEFAULT_ORIGIN = 'https://storagehypercomb.blob.core.windows.net/content/ee6f2ec14e1ad55b2705d7490a79e5903f0ba4e29c7ddf9a28ef9efcd0fd10fa'
+  private static readonly DEFAULT_ORIGIN =
+    'https://storagehypercomb.blob.core.windows.net/content'
+
   private static readonly LOCATION_FILE = '__location__'
   private static readonly LAYERS_DIRECTORY = '__layers__'
   private static readonly RESOURCES_DIRECTORY = '__resources__'
   private static readonly INSTALL_PREFIX = 'install-'
 
   // -------------------------------------------------
-  // dependencies
+  // phase 1: layer structure restore
   // -------------------------------------------------
 
-  private readonly walker = inject(DirectoryWalkerService)
-  private readonly preloader = inject(ScriptPreloader)
+  public load = async (
+    domainsRoot: FileSystemDirectoryHandle,
+    depth: number
+  ): Promise<void> => {
 
-  // -------------------------------------------------
-  // private fields
-  // -------------------------------------------------
-
-  private readonly decoder = new TextDecoder()
-  private readonly encoder = new TextEncoder()
-
-  // -------------------------------------------------
-  // public api
-  // -------------------------------------------------
-
-  // phase 1: structural restore only (layers -> seed folders + marker files)
-  // - resolves layer json (opfs first, http fallback, caches in domain/layers)
-  // - creates child seed folders
-  // - creates install-* files for next pass
-  // - creates marker files for drones (file name = drone signature)
-  public load = async (domainsRoot: FileSystemDirectoryHandle, depth: number): Promise<void> => {
     for await (const [name, entry] of domainsRoot.entries()) {
       if (entry.kind !== 'directory') continue
       if (this.isDomainSkippable(name)) continue
 
-      await this.loadDomain(entry as FileSystemDirectoryHandle, depth)
+      const dir = entry as FileSystemDirectoryHandle
+      await this.loadDomain(dir, depth)
     }
   }
 
-  // phase 2: marker restore (walk dirs -> marker signatures -> local cache -> remote -> cache -> preload)
-  // - uses the walker so the behavior matches the actual installed structure
-  // - looks for marker files (file name is a 64-hex signature) and resolves payloads into __resources__
-  // - preloads only what markers declare (no bulk preload unless markers are present)
-  public restore = async (domainsRoot: FileSystemDirectoryHandle, depth: number): Promise<void> => {
-    for await (const [name, entry] of domainsRoot.entries()) {
-      if (entry.kind !== 'directory') continue
-      if (this.isDomainSkippable(name)) continue
+  private loadDomain = async (
+    domainDirectory: FileSystemDirectoryHandle,
+    depth: number
+  ): Promise<void> => {
 
-      await this.restoreDomain(entry as FileSystemDirectoryHandle, depth)
-    }
-  }
-
-  // -------------------------------------------------
-  // domain load (phase 1)
-  // -------------------------------------------------
-
-  private loadDomain = async (rootDirectory: FileSystemDirectoryHandle, depth: number): Promise<void> => {
-    const server = await this.readLocationPrefix(rootDirectory)
+    const server = await this.readLocationPrefix(domainDirectory)
     if (!server) return
 
-    const layersDir = await rootDirectory.getDirectoryHandle(LayerRestorationService.LAYERS_DIRECTORY, { create: true })
-    await this.loadRecursive(layersDir, `${server}/${LayerRestorationService.LAYERS_DIRECTORY}`, rootDirectory, depth)
+    const layersDir =
+      await domainDirectory.getDirectoryHandle(
+        LayerRestorationService.LAYERS_DIRECTORY,
+        { create: true }
+      )
+
+    await this.loadRecursive(
+      layersDir,
+      `${server}/${LayerRestorationService.LAYERS_DIRECTORY}`,
+      domainDirectory,
+      depth
+    )
   }
 
   private loadRecursive = async (
@@ -88,28 +79,35 @@ export class LayerRestorationService {
 
     if (depth < 0) return
 
-    // install files are applied to each directory
     for await (const [name, entry] of currentDir.entries()) {
       if (entry.kind !== 'file') continue
       if (!name.startsWith(LayerRestorationService.INSTALL_PREFIX)) continue
 
-      const seedSig = name.slice(LayerRestorationService.INSTALL_PREFIX.length).trim()
-      if (!seedSig) continue
+      const seedSig =
+        name.slice(LayerRestorationService.INSTALL_PREFIX.length).trim()
 
-      await this.consumeInstall(layersDir, layersLocation, currentDir, seedSig)
+      if (!this.isSignature(seedSig)) continue
+
+      await this.consumeInstall(
+        layersDir,
+        layersLocation,
+        currentDir,
+        seedSig
+      )
     }
 
     if (depth === 0) return
 
-    // descend only into user seed folders (never internal folders)
     for await (const [name, entry] of currentDir.entries()) {
       if (entry.kind !== 'directory') continue
       if (this.isInternalDirectoryName(name)) continue
 
+      const dir = entry as FileSystemDirectoryHandle
+
       await this.loadRecursive(
         layersDir,
         layersLocation,
-        entry as FileSystemDirectoryHandle,
+        dir,
         depth - 1
       )
     }
@@ -122,51 +120,61 @@ export class LayerRestorationService {
     seedSignature: string
   ): Promise<void> => {
 
-    const layer = await this.lookupLayer(layersDir, layersLocation, seedSignature)
-    console.log('[layer-restoration] restoring layer', seedSignature, layer!)
+    const layer =
+      await this.lookupLayer(layersDir, layersLocation, seedSignature)
+    if (!layer) return
 
-    if (layer === null) return
-
-    // create children + plant install files
     for (const child of layer.children) {
-      const childLayer = await this.lookupLayer(layersDir, layersLocation, child)
-      if (childLayer === null) continue
+      const childLayer =
+        await this.lookupLayer(layersDir, layersLocation, child)
+      if (!childLayer) continue
 
-      console.log('[layer-restoration]  - child layer', child, childLayer)
+      const seedDir =
+        await parentDir.getDirectoryHandle(childLayer.name, { create: true })
 
-      const childName = childLayer.name
-      const seedDir = await parentDir.getDirectoryHandle(childName, { create: true })
-
-      await seedDir.getFileHandle(`${LayerRestorationService.INSTALL_PREFIX}${child}`, { create: true })
+      await seedDir.getFileHandle(
+        `${LayerRestorationService.INSTALL_PREFIX}${child}`,
+        { create: true }
+      )
     }
 
-    // plant marker files (marker file name == drone signature)
-    for (const drone of layer.drones) {
-      const sig = String(drone ?? '').trim()
-      if (!this.isSignature(sig)) continue
-
-      await parentDir.getFileHandle(sig, { create: true })
+    for (const droneSig of layer.drones) {
+      if (!this.isSignature(droneSig)) continue
+      await parentDir.getFileHandle(droneSig, { create: true })
     }
 
-    // finally remove the install file for this layer
-    parentDir.removeEntry(`${LayerRestorationService.INSTALL_PREFIX}${seedSignature}`).catch(() => {
-      // ignore
-    })
+    parentDir.removeEntry(
+      `${LayerRestorationService.INSTALL_PREFIX}${seedSignature}`
+    ).catch(() => {})
   }
 
   // -------------------------------------------------
-  // domain restore (phase 2)
+  // phase 2: marker restore (resources)
   // -------------------------------------------------
 
-  private restoreDomain = async (rootDirectory: FileSystemDirectoryHandle, depth: number): Promise<void> => {
-    const server = await this.readLocationPrefix(rootDirectory)
-    if (!server) return
+  public restore = async (
+    domainsRoot: FileSystemDirectoryHandle,
+    depth: number
+  ): Promise<void> => {
+
+    for await (const [name, entry] of domainsRoot.entries()) {
+      if (entry.kind !== 'directory') continue
+      if (this.isDomainSkippable(name)) continue
+
+      const dir = entry as FileSystemDirectoryHandle
+      await this.restoreDomain(dir, depth)
+    }
+  }
+
+  private restoreDomain = async (
+    rootDirectory: FileSystemDirectoryHandle,
+    depth: number
+  ): Promise<void> => {
 
     const walked = await this.walker.walk(rootDirectory, depth)
 
     for (const dir of walked) {
       if (this.isPathSkippable(dir.path)) continue
-
       await this.restoreMarkersInDirectory(dir.handle)
     }
   }
@@ -181,14 +189,9 @@ export class LayerRestorationService {
       if (name.startsWith(LayerRestorationService.INSTALL_PREFIX)) continue
       if (!this.isSignature(name)) continue
 
-      // marker file name is the drone signature
       await this.ensureDronePreloaded(name)
     }
   }
-
-  // -------------------------------------------------
-  // marker -> local -> server resolution (resources)
-  // -------------------------------------------------
 
   private ensureDronePreloaded = async (
     signature: string
@@ -196,16 +199,12 @@ export class LayerRestorationService {
 
     if (has(signature)) return
 
-
     const result = await this.getDronePayloadBytes(signature)
     if (!result.bytes) return
 
-    // ensure the cache is populated when it came from the network
     if (!result.exists) {
       await this.writeCachedDronePayload(signature, result.bytes)
     }
-
-    // this.preloader.add(signature, result.bytes)
   }
 
   private getDronePayloadBytes = async (
@@ -222,12 +221,10 @@ export class LayerRestorationService {
   private readCachedDronePayload = async (
     signature: string
   ): Promise<ArrayBuffer | null> => {
-
-    const resourcesDir = this.store.resources
-
     try {
-      const fileHandle = await resourcesDir.getFileHandle(signature, { create: false })
-      const file = await fileHandle.getFile()
+      const handle =
+        await this.store.resourcesDirectory().getFileHandle(signature)
+      const file = await handle.getFile()
       return await file.arrayBuffer()
     } catch {
       return null
@@ -239,9 +236,9 @@ export class LayerRestorationService {
     bytes: ArrayBuffer
   ): Promise<void> => {
 
-    const handle = await this.store.resourcesDirectory().getFileHandle(signature, { create: true })
+    const handle =
+      await this.store.resourcesDirectory().getFileHandle(signature, { create: true })
     const writable = await handle.createWritable()
-
     try {
       await writable.write(bytes)
     } finally {
@@ -253,26 +250,17 @@ export class LayerRestorationService {
     signature: string
   ): Promise<ArrayBuffer | null> => {
 
-    const url = `https://storagehypercomb.blob.core.windows.net/content/${Store.RESOURCES_DIRECTORY}/${signature}`
-    console.log('[layer-restoration] fetching drone payload', url)
+    const url =
+      `${LayerRestorationService.DEFAULT_ORIGIN}/__resources__/${signature}`
 
     const res = await fetch(url)
     if (!res.ok) return null
 
-    const buf = await res.arrayBuffer()
-
-    // quick sanity check: payload must be json
-    const head = this.decoder.decode(new Uint8Array(buf.slice(0, 1)))
-    if (head !== '{') {
-      console.error('[layer-restoration] non-json drone payload encountered:', signature)
-      return null
-    }
-
-    return buf
+    return await res.arrayBuffer()
   }
 
   // -------------------------------------------------
-  // lookup layer: coordinator only
+  // layer lookup
   // -------------------------------------------------
 
   private lookupLayer = async (
@@ -282,19 +270,14 @@ export class LayerRestorationService {
   ): Promise<LayerRecord | null> => {
 
     const result = await this.getLayerJsonText(layersDir, location, signature)
-    if (result.content === '') return null
+    if (!result.content) return null
 
     if (!result.exists) {
       await this.writeCachedLayerJson(layersDir, signature, result.content)
     }
 
-    const parsedResult = this.parseLayerJson(signature, result.content)
-    return { ...parsedResult }
+    return this.parseLayerJson(signature, result.content)
   }
-
-  // -------------------------------------------------
-  // step 1: get json text (opfs first, http fallback)
-  // -------------------------------------------------
 
   private getLayerJsonText = async (
     layersDir: FileSystemDirectoryHandle,
@@ -313,10 +296,9 @@ export class LayerRestorationService {
     layersDir: FileSystemDirectoryHandle,
     signature: string
   ): Promise<string | null> => {
-
     try {
-      const fileHandle = await layersDir.getFileHandle(signature, { create: false })
-      const file = await fileHandle.getFile()
+      const handle = await layersDir.getFileHandle(signature)
+      const file = await handle.getFile()
       return this.decoder.decode(await file.arrayBuffer())
     } catch {
       return null
@@ -331,7 +313,6 @@ export class LayerRestorationService {
 
     const handle = await layersDir.getFileHandle(signature, { create: true })
     const writable = await handle.createWritable()
-
     try {
       await writable.write(this.encoder.encode(jsonText))
     } finally {
@@ -344,75 +325,64 @@ export class LayerRestorationService {
     signature: string
   ): Promise<string | null> => {
 
-    const url = `${location}/${signature}`
-    console.log('[layer-restoration] fetching layer json', url)
-
-    const res = await fetch(url)
+    const res = await fetch(`${location}/${signature}`)
     if (!res.ok) return null
-
     return await res.text()
   }
 
-  // -------------------------------------------------
-  // step 2: parse + validate
-  // -------------------------------------------------
+  private parseLayerJson = (
+    signature: string,
+    jsonText: string
+  ): LayerRecord => {
 
-  private parseLayerJson = (signature: string, jsonText: string): LayerRecord => {
     let parsed: any
-
     try {
       parsed = JSON.parse(jsonText)
     } catch {
-      throw new Error(`[layer-restoration] invalid layer json ${signature}`)
+      throw new Error(`invalid layer json ${signature}`)
     }
 
-    const name = typeof parsed.name === 'string' ? parsed.name.trim() : ''
-    if (!name) {
-      throw new Error(`[layer-restoration] layer ${signature} missing name`)
-    }
+    const name = String(parsed.name || '').trim()
+    if (!name) throw new Error(`layer ${signature} missing name`)
 
-    if (!Array.isArray(parsed.children)) {
-      throw new Error(`[layer-restoration] layer ${signature} missing children`)
-    }
+    const children =
+      (Array.isArray(parsed.children) ? parsed.children : [])
+        .map((c: unknown) => String(c).trim())
+        .filter((c: string) => this.isSignature(c))
 
-    const children = parsed.children
-      .map((c: unknown) => String(c).trim())
-      .filter((c: string) => this.isSignature(c))
-
-    const drones = (Array.isArray(parsed.drones) ? parsed.drones : [])
-      .map((d: unknown) => String(d).trim())
-      .filter((d: string) => this.isSignature(d))
+    const drones =
+      (Array.isArray(parsed.drones) ? parsed.drones : [])
+        .map((d: unknown) => String(d).trim())
+        .filter((d: string) => this.isSignature(d))
 
     return { name, children, drones }
   }
 
-  // -------------------------------------------------
-  // location + helpers
-  // -------------------------------------------------
-
-  private readLocationPrefix = async (rootDirectory: FileSystemDirectoryHandle): Promise<string | null> => {
-    let raw = ''
+  private readLocationPrefix = async (
+    rootDirectory: FileSystemDirectoryHandle
+  ): Promise<string | null> => {
 
     try {
-      const handle = await rootDirectory.getFileHandle(LayerRestorationService.LOCATION_FILE, { create: false })
+      const handle =
+        await rootDirectory.getFileHandle(
+          LayerRestorationService.LOCATION_FILE
+        )
       const file = await handle.getFile()
-      raw = (await file.text()).trim()
+      const text = (await file.text()).trim()
+      if (!text) return null
+
+      if (/^https?:\/\//i.test(text)) {
+        return text.replace(/\/+$/, '')
+      }
+
+      if (!this.isSignature(text)) {
+        throw new Error('__location__ must be url or 64-hex signature')
+      }
+
+      return `${LayerRestorationService.DEFAULT_ORIGIN}/${text}`
     } catch {
       return null
     }
-
-    if (!raw) return null
-
-    if (/^https?:\/\//i.test(raw)) {
-      return raw.replace(/\/+$/, '')
-    }
-
-    const root = raw.trim()
-    if (!this.isSignature(root)) {
-      throw new Error('[layer-restoration] __location__ must be a url or 64-hex root signature')
-    }
-
-    return `${LayerRestorationService.DEFAULT_ORIGIN}/${root}`
   }
 
   private isSignature = (value: string): boolean =>

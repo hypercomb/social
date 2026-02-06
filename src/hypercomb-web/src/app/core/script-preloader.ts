@@ -58,46 +58,37 @@ export class ScriptPreloader implements DroneResolver {
   // -------------------------------------------------
 
   public preload = async (): Promise<void> => {
-
     this.bySignature.clear()
-
     this.actions.set([])
     this.actionNames.set([])
     this.resourceCount.set(0)
 
-    const root = this.store.opfsRoot
-
     let resourcesDir: FileSystemDirectoryHandle
     try {
-      resourcesDir = await root.getDirectoryHandle('__resources__')
+      resourcesDir = await this.store.opfsRoot.getDirectoryHandle('__resources__')
     } catch {
-      // no resources is a valid empty state
       return
     }
 
-    for await (const [fileName, entry] of resourcesDir.entries()) {
-
+    for await (const [sig, entry] of resourcesDir.entries()) {
       if (entry.kind !== 'file') continue
-      if (!/^[a-f0-9]{64}$/i.test(fileName)) continue
+      if (!/^[a-f0-9]{64}$/i.test(sig)) continue
 
-      const drone = await this.store.getDrone(fileName)
+      const file = await (entry as FileSystemFileHandle).getFile()
+      const buffer = await file.arrayBuffer()
+      const drone = await this.store.getDrone(sig, buffer)
       if (!drone) continue
 
-      // expectation: drone constructor already registered into ioc
-      const name = drone.name
-        .toLowerCase()
-        .replace(/\s+/g, '-')
-
-      const descriptor: ActionDescriptor = {
-        signature: fileName,
-        name
-      }
-
-      this.bySignature.set(fileName, descriptor)
+      this.bySignature.set(sig, {
+        signature: sig,
+        name: drone.name.toLowerCase().replace(/\s+/g, '-')
+      })
 
       this.resourceCount.update(v => v + 1)
-      this.refreshProjection()
     }
+
+    this.refreshProjection()
+
   }
 
   // -------------------------------------------------

@@ -35,7 +35,7 @@ export class OpfsExplorerComponent extends hypercomb {
 
   // -------------------------------------------------
   // constants
-  // -------------------------------------------------
+  // -------------------------------------------------  
 
   private static readonly SHOW_ALL_KEY = 'opfs-explorer.show-all'
 
@@ -138,9 +138,18 @@ export class OpfsExplorerComponent extends hypercomb {
       let label = name
 
       if (handle.kind === 'file') {
-        const resolved = this.preloader.getActionName(name)
-        if (resolved) label = resolved
+        // resource payload label takes priority
+        const resourceLabel = await this.resolveResourceLabel(name)
+        if (resourceLabel) {
+          label = `${name.slice(0, 16)} - ${resourceLabel} `
+        } else {
+          // fallback to preloader resolution
+          const resolved = this.preloader.getActionName(name)
+          if (resolved) label = resolved 
+        }
       }
+
+
 
       out.push({
         name,
@@ -213,38 +222,99 @@ export class OpfsExplorerComponent extends hypercomb {
     void this.refresh()
   }
 
+
+  public createEntry = async (): Promise<void> => {
+    const raw = this.newName.trim()
+    if (!raw) return
+
+    // root-level: domain + install in one shot
+    if (this.directory() === '/') {
+      const parsed = DomainName.parse(raw)
+      const domain = parsed.folder
+      if (!domain) return
+
+      // extract last path segment (expected b64 / signature)
+      const parts = raw.split('/').filter(Boolean)
+      const installId = parts[parts.length - 1]
+      if (!installId) return
+
+      const root = this.store.opfsDirectory()
+
+      // create domain folder
+      const domainDir = await root.getDirectoryHandle(domain, { create: true })
+
+      // persist original raw value (location / provenance)
+      const locationHandle = await domainDir.getFileHandle('__location__', { create: true })
+      const locationWritable = await locationHandle.createWritable()
+      try {
+        await locationWritable.write(raw)
+      } finally {
+        await locationWritable.close()
+      }
+
+      // create install file inside domain
+      const installHandle = await domainDir.getFileHandle(`install-${installId}`, { create: true })
+      const installWritable = await installHandle.createWritable()
+      try {
+        await installWritable.write('')
+      } finally {
+        await installWritable.close()
+      }
+
+      this.newName = ''
+      void this.refresh()
+      return
+    }
+
+    // non-root: create install in current directory
+    const dir = await this.lineage.explorerDir()
+    if (!dir) return
+
+    const handle = await dir.getFileHandle(`install-${raw}`, { create: true })
+    const writable = await handle.createWritable()
+    try {
+      await writable.write('')
+    } finally {
+      await writable.close()
+    }
+
+    this.newName = ''
+    void this.refresh()
+  }
+
+
   public addDependency = async (): Promise<void> => {
-  const sig = this.newName.trim()
-  if (!sig) return
+    const sig = this.newName.trim()
+    if (!sig) return
 
-  // fetch from server
-  const url = `https://storagehypercomb.blob.core.windows.net/content/__dependencies__/`
-  const res = await fetch(`${url}${sig}`)
+    // fetch from server
+    const url = `https://storagehypercomb.blob.core.windows.net/content/__dependencies__/`
+    const res = await fetch(`${url}${sig}`)
 
-  if (!res.ok) {
-    console.error('failed to fetch dependency', sig)
-    return
+    if (!res.ok) {
+      console.error('failed to fetch dependency', sig)
+      return
+    }
+
+    const bytes = await res.arrayBuffer()
+
+    // ensure __dependencies__ exists at OPFS root
+    const root = this.store.opfsDirectory()
+    const depsDir = await root.getDirectoryHandle('__dependencies__', { create: true })
+
+    // write dependency by signature
+    const fileHandle = await depsDir.getFileHandle(sig, { create: true })
+    const writable = await fileHandle.createWritable()
+
+    try {
+      await writable.write(bytes)
+    } finally {
+      await writable.close()
+    }
+
+    this.newName = ''
+    void this.refresh()
   }
-
-  const bytes = await res.arrayBuffer()
-
-  // ensure __dependencies__ exists at OPFS root
-  const root = this.store.opfsDirectory()
-  const depsDir = await root.getDirectoryHandle('__dependencies__', { create: true })
-
-  // write dependency by signature
-  const fileHandle = await depsDir.getFileHandle(sig, { create: true })
-  const writable = await fileHandle.createWritable()
-
-  try {
-    await writable.write(bytes)
-  } finally {
-    await writable.close()
-  }
-
-  this.newName = ''
-  void this.refresh()
-}
 
 
   // -------------------------------------------------
@@ -253,32 +323,7 @@ export class OpfsExplorerComponent extends hypercomb {
 
   public copyDetails = async (e: ExplorerEntry, ev: MouseEvent): Promise<void> => {
     ev.stopPropagation()
-
-    if (e.kind === 'directory') {
-      await navigator.clipboard.writeText(e.name)
-      return
-    }
-
-    try {
-      const dir = await this.lineage.explorerDir()
-      if (!dir) {
-        await navigator.clipboard.writeText(e.name)
-        return
-      }
-
-      const handle = await dir.getFileHandle(e.name, { create: false })
-      const file = await handle.getFile()
-
-      if (file.size === 0) {
-        await navigator.clipboard.writeText(e.name)
-        return
-      }
-
-      const text = await file.text()
-      await navigator.clipboard.writeText(text)
-    } catch {
-      await navigator.clipboard.writeText(e.name)
-    }
+navigator.clipboard.writeText(e.name )
   }
 
   // -------------------------------------------------
@@ -291,7 +336,7 @@ export class OpfsExplorerComponent extends hypercomb {
     const dir = await this.lineage.explorerDir()
     if (!dir) return
 
-    await dir.removeEntry(e.name, { recursive: e.kind === 'directory' })
+    await dir.removeEntry(e.name, { recursive: true })
     void this.refresh()
   }
 
@@ -307,4 +352,34 @@ export class OpfsExplorerComponent extends hypercomb {
     if (name.startsWith('install-')) return true
     return false
   }
+
+private readonly resolveResourceLabel = async (
+  name: string
+): Promise<string | null> => {
+  try {
+    const root = this.store.opfsDirectory()
+    const resourcesDir = await root.getDirectoryHandle('__resources__', { create: false })
+    const handle = await resourcesDir.getFileHandle(name, { create: false })
+    const file = await handle.getFile()
+    if (file.size === 0) return null
+
+    // read only the first ~256 bytes
+    const slice = await file.slice(0, 256).text()
+    const firstLine = slice.split('\n')[0]?.trim()
+    if (!firstLine?.startsWith('// @hypercomb ')) return null
+
+    const jsonText = firstLine.slice('// @hypercomb '.length)
+    const meta = JSON.parse(jsonText)
+
+    if (typeof meta.label === 'string' && meta.label.trim()) {
+      return `${meta.label} – ${new Date(file.lastModified).toLocaleTimeString()}`
+    }
+  } catch {
+    // ignore
+  }
+
+  return null
+}
+
+
 }
