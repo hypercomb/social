@@ -8,12 +8,7 @@ export type HostedDependency = {
 
 export const HostedDependencies: HostedDependency[] = [
   {
-    name: 'pixi',
-    entry: 'node_modules/pixi.js/lib/index.js',
-    alias: '@essentials/pixi'
-  },
-  {
-    name: 'hypercomb-essentials',
+    name: 'hypercomb-essentials', 
     entry: 'src/hello-world/hello-world.entry.ts',
     alias: '@essentials/hello'
   }

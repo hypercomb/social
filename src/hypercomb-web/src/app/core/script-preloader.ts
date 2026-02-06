@@ -70,12 +70,15 @@ export class ScriptPreloader implements DroneResolver {
       return
     }
 
+    // load all resources and extract drone metadata (name) for projection
     for await (const [sig, entry] of resourcesDir.entries()) {
       if (entry.kind !== 'file') continue
       if (!/^[a-f0-9]{64}$/i.test(sig)) continue
 
       const file = await (entry as FileSystemFileHandle).getFile()
       const buffer = await file.arrayBuffer()
+
+      // load drone module and extract metadata (name)
       const drone = await this.store.getDrone(sig, buffer)
       if (!drone) continue
 

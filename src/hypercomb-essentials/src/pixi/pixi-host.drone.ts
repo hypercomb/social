@@ -1,6 +1,6 @@
 // src/pixi/pixi-host.drone.ts
 import { Drone } from '@hypercomb/core'
-import { Application, Container, Graphics } from 'pixi.js'
+import { Application, Container } from 'pixi.js'
 
 export class PixiHostDrone extends Drone {
 

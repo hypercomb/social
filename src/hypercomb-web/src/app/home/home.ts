@@ -14,7 +14,7 @@ export class Home {
   private handler = inject(ResourceMessageHandler)
   private readonly lineage = inject(Lineage) 
   public ready = computed(() =>  this.lineage.ready())
-  
+ 
   ngOnDestroy(): void {
     this.handler.destroy()
   }

@@ -13,6 +13,6 @@
     "@hypercomb/core": "file:../hypercomb-core"
   },
   "peerDependencies": {
-    "pixi.js": "^8.14.3"
+    "pixi.js": "^8.16.0"
   }
 }

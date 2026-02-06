@@ -1,5 +1,5 @@
-import { effect } from '@angular/core';
 // src/payload-canonical.ts
+
 import { SignatureService } from './core/signature.service.js'
 import { GrammarHint } from './grammar-hint.js'
 import { ProviderLink } from './provider-link.js'

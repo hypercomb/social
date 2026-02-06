@@ -1,24 +1,25 @@
 // scripts/build-module.ts
 // production build
-// - __resources__ contains ONLY raw js bytes (with first-line comment preserved)
+// - __resources__ contains only raw js bytes (with first-line comment preserved)
 // - __layers__ contains json only
 // - no manifests, no payload json
 // - sourcemaps enabled
-// - guarantees ArrayBuffer (never SharedArrayBuffer) for signing
+// - guarantees arraybuffer (never sharedarraybuffer) for signing
+//
+// dev mirror export (optional)
+// - emits /public/dev/* as a flat folder containing:
+//   - drones.runtime-map.json
+//   - dependencies.runtime-map.json
+//   - <signature> files (drones + dependencies mixed)
+// - designed for native esm imports from the same root during dev
 
 import { spawnSync } from 'child_process'
 import { fileURLToPath } from 'url'
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  rmSync,
-  statSync,
-  writeFileSync
-} from 'fs'
-import { resolve, join, dirname, relative } from 'path'
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
+import { dirname, join, relative, resolve } from 'path'
 import { build } from 'esbuild'
 import { SignatureService } from '@hypercomb/core'
+import { HostedDependencies } from './dependencies'
 
 // -------------------------------------------------
 // esm globals
@@ -34,6 +35,20 @@ const __dirname = dirname(__filename)
 const SRC_ROOT = resolve('./src')
 const DIST_ROOT = resolve('./dist')
 const TARGET = 'es2022'
+
+// dev export root (mirror output for local dev server)
+// note: use forward slashes in json output, but filesystem paths can be platform-specific
+const DEV_PUBLIC_ROOT = resolve(
+  process.env.HYPERCOMB_DEV_PUBLIC_ROOT ??
+  resolve(__dirname, '../../hypercomb-web/public/dev/drones')
+)
+
+const DEV_PUBLIC_BASE_URL =
+  process.env.HYPERCOMB_DEV_PUBLIC_BASE_URL ?? '/dev/drones'
+
+
+// set to "0" to disable dev export
+const DEV_EXPORT_ENABLED = (process.env.HYPERCOMB_DEV_EXPORT ?? '1') !== '0'
 
 // -------------------------------------------------
 // helpers
@@ -73,23 +88,36 @@ const droneIdFromEntry = (entry: string): string => {
 const textToBytes = (text: string): Uint8Array =>
   new TextEncoder().encode(text)
 
-// critical: always materialize a real ArrayBuffer
+// critical: always materialize a real arraybuffer
 const toArrayBuffer = (bytes: Uint8Array): ArrayBuffer => {
   const copy = new Uint8Array(bytes.byteLength)
   copy.set(bytes)
   return copy.buffer
 }
 
+const isSig = (value: string): boolean => /^[a-f0-9]{64}$/i.test(value)
+
+const ensureDir = (dir: string): void => {
+  mkdirSync(dir, { recursive: true })
+}
+
+const writeSigFile = (dir: string, sig: string, bytes: Uint8Array): void => {
+  if (!isSig(sig)) throw new Error(`invalid signature: ${sig}`)
+  writeFileSync(join(dir, sig), bytes)
+}
+
+const writeJsonFile = (dir: string, name: string, value: unknown): void => {
+  const json = JSON.stringify(value, null, 2)
+  writeFileSync(join(dir, name), json + '\n', 'utf8')
+}
+
 // -------------------------------------------------
 // discovery (filesystem only)
 // -------------------------------------------------
 
-type SourceFile = {
-  entry: string
-  dirRel: string
-}
+type SourceFile = { entry: string; dirRel: string }
 
-const discoverSources = (): SourceFile[] => {
+const discoverDroneSources = (): SourceFile[] => {
   const files = walkFiles(SRC_ROOT)
   const out: SourceFile[] = []
 
@@ -108,7 +136,7 @@ const discoverSources = (): SourceFile[] => {
 // compile (leave runtime imports unresolved)
 // -------------------------------------------------
 
-const compileSource = async (entry: string): Promise<string> => {
+const compileDrone = async (entry: string): Promise<string> => {
   const result = await build({
     entryPoints: [resolve(entry)],
     bundle: true,
@@ -117,18 +145,32 @@ const compileSource = async (entry: string): Promise<string> => {
     write: false,
     target: TARGET,
     tsconfig: resolve('./tsconfig.json'),
-    external: [
-      '@hypercomb/core',
-      'pixi.js',
-      '@essentials/*'
-    ],
+    external: ['@hypercomb/core', 'pixi.js', '@essentials/*'],
     sourcemap: true
   })
 
-  if (!result.outputFiles?.length) {
-    throw new Error(`no output emitted for: ${entry}`)
-  }
+  if (!result.outputFiles?.length) throw new Error(`no output emitted for: ${entry}`)
+  return result.outputFiles[0].text
+}
 
+// dependencies are expected to be atomic, shareable, signed js payloads
+// for third-party libs like pixi.js, bundling is required to collapse internal module graph
+const compileDependency = async (entry: string): Promise<string> => {
+  const result = await build({
+    entryPoints: [resolve(entry)],
+    bundle: true,
+    format: 'esm',
+    platform: 'browser',
+    write: false,
+    target: TARGET,
+    tsconfig: resolve('./tsconfig.json'),
+    // do not externalize here unless you explicitly want the dependency to remain non-atomic
+    // keeping empty means the result becomes a single-file payload
+    external: [],
+    sourcemap: true
+  })
+
+  if (!result.outputFiles?.length) throw new Error(`no output emitted for: ${entry}`)
   return result.outputFiles[0].text
 }
 
@@ -136,16 +178,9 @@ const compileSource = async (entry: string): Promise<string> => {
 // layers
 // -------------------------------------------------
 
-type DirNode = {
-  rel: string
-  children: DirNode[]
-}
+type DirNode = { rel: string; children: DirNode[] }
 
-const readDirTreeFiltered = (
-  srcRoot: string,
-  relDir: string,
-  included: Set<string>
-): DirNode | null => {
+const readDirTreeFiltered = (srcRoot: string, relDir: string, included: Set<string>): DirNode | null => {
   const full = join(srcRoot, relDir)
   if (!existsSync(full) || !statSync(full).isDirectory()) return null
 
@@ -166,9 +201,7 @@ const readDirTreeFiltered = (
   return { rel: relDir, children }
 }
 
-const signJson = async (
-  value: unknown
-): Promise<{ signature: string; json: string }> => {
+const signJson = async (value: unknown): Promise<{ signature: string; json: string }> => {
   const json = JSON.stringify(value)
   const bytes = textToBytes(json)
   const signature = await SignatureService.sign(toArrayBuffer(bytes))
@@ -201,26 +234,58 @@ const buildLayersBottomUp = async (
 }
 
 // -------------------------------------------------
+// dev mirror export
+// -------------------------------------------------
+
+type DevDronesRuntimeMap = {
+  version: 1
+  root: string
+  drones: Record<string, string>
+}
+
+type DevDependenciesRuntimeMap = {
+  version: 1
+  imports: Record<string, string>
+}
+
+const toDevUrl = (sig: string): string => {
+  // keep url posix
+  return `${DEV_PUBLIC_BASE_URL.replace(/\/+$/, '')}/${sig}`
+}
+
+// -------------------------------------------------
 // main
 // -------------------------------------------------
 
 const main = async (): Promise<void> => {
   rmSync(DIST_ROOT, { recursive: true, force: true })
-  mkdirSync(DIST_ROOT, { recursive: true })
+  ensureDir(DIST_ROOT)
 
-  const sources = discoverSources()
+  if (DEV_EXPORT_ENABLED) {
+    rmSync(DEV_PUBLIC_ROOT, { recursive: true, force: true })
+    ensureDir(DEV_PUBLIC_ROOT)
+  }
+
+  // -----------------------------
+  // compile drones
+  // -----------------------------
+
+  const sources = discoverDroneSources()
   if (!sources.length) throw new Error('no drone sources found')
 
   const dirToResources = new Map<string, string[]>()
   const resourceBytes = new Map<string, Uint8Array>()
   const layerMap = new Map<string, string>()
+  const droneNameToSig: Record<string, string> = {}
 
   for (const src of sources) {
-    const compiled = await compileSource(src.entry)
+    const compiled = await compileDrone(src.entry)
+
+    const label = droneIdFromEntry(src.entry)
 
     const meta =
       `// @hypercomb ${JSON.stringify({
-        label: droneIdFromEntry(src.entry),
+        label,
         kind: 'drone',
         lang: 'js'
       })}\n`
@@ -230,11 +295,43 @@ const main = async (): Promise<void> => {
     const signature = await SignatureService.sign(toArrayBuffer(bytes))
 
     resourceBytes.set(signature, bytes)
+    droneNameToSig[label] = signature
 
     const list = dirToResources.get(src.dirRel) ?? []
     list.push(signature)
     dirToResources.set(src.dirRel, list)
   }
+
+  // -----------------------------
+  // compile hosted dependencies
+  // -----------------------------
+
+  // this emits dependency payloads into the same signature pool
+  // note: these signatures are dev/runtime-level assets, separate from production __resources__
+  const depAliasToSig: Record<string, string> = {}
+
+  for (const dep of HostedDependencies) {
+    const compiled = await compileDependency(dep.entry)
+
+    const meta =
+      `// @hypercomb ${JSON.stringify({
+        label: dep.name,
+        kind: 'dependency',
+        alias: dep.alias,
+        lang: 'js'
+      })}\n`
+
+    const finalSource = meta + compiled
+    const bytes = textToBytes(finalSource)
+    const signature = await SignatureService.sign(toArrayBuffer(bytes))
+
+    resourceBytes.set(signature, bytes)
+    depAliasToSig[dep.alias] = signature
+  }
+
+  // -----------------------------
+  // build layers (production)
+  // -----------------------------
 
   const included = new Set<string>([''])
   for (const rel of dirToResources.keys()) {
@@ -249,36 +346,70 @@ const main = async (): Promise<void> => {
   const tree = readDirTreeFiltered(SRC_ROOT, '', included)
   if (!tree) throw new Error('no layer tree')
 
-  const rootLayerSig = await buildLayersBottomUp(
-    tree,
-    dirToResources,
-    (sig, json) => layerMap.set(sig, json)
-  )
+  const rootLayerSig = await buildLayersBottomUp(tree, dirToResources, (sig, json) => layerMap.set(sig, json))
 
   const packageDir = join(DIST_ROOT, rootLayerSig)
   const layersDir = join(packageDir, '__layers__')
   const resourcesDir = join(DIST_ROOT, '__resources__')
 
-  mkdirSync(layersDir, { recursive: true })
-  mkdirSync(resourcesDir, { recursive: true })
+  ensureDir(layersDir)
+  ensureDir(resourcesDir)
 
   for (const [sig, json] of layerMap) {
     writeFileSync(join(layersDir, sig), json, 'utf8')
   }
 
+  // production: only drones go into __resources__
+  // dependencies are not part of production package here (they are handled by the dependency surface)
   for (const [sig, bytes] of resourceBytes) {
-    writeFileSync(join(resourcesDir, sig), bytes)
+    writeSigFile(resourcesDir, sig, bytes)
   }
 
   writeFileSync(join(packageDir, 'root.txt'), `${rootLayerSig}\n`, 'utf8')
 
+  // -----------------------------
+  // dev mirror export
+  // -----------------------------
+
+  if (DEV_EXPORT_ENABLED) {
+    // write mixed signature pool (drones + deps) into public/dev
+    for (const [sig, bytes] of resourceBytes) {
+      writeSigFile(DEV_PUBLIC_ROOT, sig, bytes)
+    }
+
+    // drones map: name -> signature
+    const dronesMap: DevDronesRuntimeMap = {
+      version: 1,
+      root: DEV_PUBLIC_BASE_URL,
+      drones: droneNameToSig
+    }
+
+    // dependencies map: import specifier -> url
+    // note: if you want pixi to be "pixi.js", set HostedDependencies alias accordingly
+    const imports: Record<string, string> = {}
+    for (const [alias, sig] of Object.entries(depAliasToSig)) {
+      imports[alias] = toDevUrl(sig)
+    }
+
+    // also allow resolving hypercomb core from a fixed dev address if you want
+    // if you do not want this, remove it
+    // imports['@hypercomb/core'] = '/hypercomb-core.runtime.js'
+
+    const depsMap: DevDependenciesRuntimeMap = { version: 1, imports }
+
+    writeJsonFile(DEV_PUBLIC_ROOT, 'drones.runtime-map.json', dronesMap)
+    writeJsonFile(DEV_PUBLIC_ROOT, 'dependencies.runtime-map.json', depsMap)
+  }
+
+  // -----------------------------
+  // optional deployment
+  // -----------------------------
+
   const ps1 = resolve(__dirname, 'deploy-azure.ps1')
   if (existsSync(ps1)) {
-    const r = spawnSync(
-      'powershell',
-      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1, '-Signature', rootLayerSig],
-      { stdio: 'inherit' }
-    )
+    const r = spawnSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1, '-Signature', rootLayerSig], {
+      stdio: 'inherit'
+    })
     if (r.status !== 0) throw new Error('deployment failed')
   }
 }

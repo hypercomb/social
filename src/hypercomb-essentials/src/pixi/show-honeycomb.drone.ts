@@ -31,7 +31,7 @@ export class ShowHoneycombDrone extends Drone {
     // host resolution
     // -------------------------------------------------
 
-    const host = this.host = get("PixiHostDrone")
+    const host = this.host = get("Pixi Host")
     if (!host?.app || !host.container) return
     const root = host.container
 

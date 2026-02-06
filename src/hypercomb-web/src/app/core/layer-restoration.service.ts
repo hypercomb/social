@@ -2,28 +2,25 @@
 
 import { Injectable, inject } from '@angular/core'
 import { DirectoryWalkerService } from './directory-walker.service'
-import { ScriptPreloader } from './script-preloader'
-import { has } from '@hypercomb/core'
-import { Store } from './store'
-
-type LayerRecord = {
-  name: string
-  children: string[]
-  drones: string[]
-}
+import { LayerFilesystemApplier } from './layer-filesystem-applier.service'
+import { LayerGraphResolver, LayerRecord } from './layer-graph-resolver.service'
+import { DronePayloadResolver } from './drone-payload-resolver.service'
 
 @Injectable({ providedIn: 'root' })
 export class LayerRestorationService {
 
-  private readonly store = inject(Store)
+  // -------------------------------------------------
+  // dependencies
+  // -------------------------------------------------
+
   private readonly walker = inject(DirectoryWalkerService)
-  private readonly preloader = inject(ScriptPreloader)
+  private readonly graph = inject(LayerGraphResolver)
+  private readonly fs = inject(LayerFilesystemApplier)
+  private readonly drones = inject(DronePayloadResolver)
 
-  private readonly decoder = new TextDecoder()
-  private readonly encoder = new TextEncoder()
-
-  private static readonly DEFAULT_ORIGIN =
-    'https://storagehypercomb.blob.core.windows.net/content'
+  // -------------------------------------------------
+  // constants
+  // -------------------------------------------------
 
   private static readonly LOCATION_FILE = '__location__'
   private static readonly LAYERS_DIRECTORY = '__layers__'
@@ -31,41 +28,39 @@ export class LayerRestorationService {
   private static readonly INSTALL_PREFIX = 'install-'
 
   // -------------------------------------------------
-  // phase 1: layer structure restore
+  // phase 1: structural restore
   // -------------------------------------------------
 
   public load = async (
     domainsRoot: FileSystemDirectoryHandle,
-    depth: number
-  ): Promise<void> => {
+    depth: number): Promise<void> => {
 
     for await (const [name, entry] of domainsRoot.entries()) {
       if (entry.kind !== 'directory') continue
       if (this.isDomainSkippable(name)) continue
 
-      const dir = entry as FileSystemDirectoryHandle
-      await this.loadDomain(dir, depth)
+      await this.loadDomain(entry as FileSystemDirectoryHandle, depth)
     }
   }
 
   private loadDomain = async (
-    domainDirectory: FileSystemDirectoryHandle,
+    domainDir: FileSystemDirectoryHandle,
     depth: number
   ): Promise<void> => {
 
-    const server = await this.readLocationPrefix(domainDirectory)
-    if (!server) return
+    const location = await this.readLocationPrefix(domainDir)
+    if (!location) return
 
     const layersDir =
-      await domainDirectory.getDirectoryHandle(
+      await domainDir.getDirectoryHandle(
         LayerRestorationService.LAYERS_DIRECTORY,
         { create: true }
       )
 
     await this.loadRecursive(
       layersDir,
-      `${server}/${LayerRestorationService.LAYERS_DIRECTORY}`,
-      domainDirectory,
+      `${location}/${LayerRestorationService.LAYERS_DIRECTORY}`,
+      domainDir,
       depth
     )
   }
@@ -79,6 +74,7 @@ export class LayerRestorationService {
 
     if (depth < 0) return
 
+    // apply install markers in this directory
     for await (const [name, entry] of currentDir.entries()) {
       if (entry.kind !== 'file') continue
       if (!name.startsWith(LayerRestorationService.INSTALL_PREFIX)) continue
@@ -98,16 +94,15 @@ export class LayerRestorationService {
 
     if (depth === 0) return
 
+    // descend only into user seed folders
     for await (const [name, entry] of currentDir.entries()) {
       if (entry.kind !== 'directory') continue
       if (this.isInternalDirectoryName(name)) continue
 
-      const dir = entry as FileSystemDirectoryHandle
-
       await this.loadRecursive(
         layersDir,
         layersLocation,
-        dir,
+        entry as FileSystemDirectoryHandle,
         depth - 1
       )
     }
@@ -121,31 +116,17 @@ export class LayerRestorationService {
   ): Promise<void> => {
 
     const layer =
-      await this.lookupLayer(layersDir, layersLocation, seedSignature)
+      await this.graph.resolve(layersDir, layersLocation, seedSignature)
     if (!layer) return
 
-    for (const child of layer.children) {
-      const childLayer =
-        await this.lookupLayer(layersDir, layersLocation, child)
-      if (!childLayer) continue
+    await this.fs.applyLayer(
+      parentDir,
+      layer,
+      async (sig: string): Promise<LayerRecord | null> =>
+        this.graph.resolve(layersDir, layersLocation, sig)
+    )
 
-      const seedDir =
-        await parentDir.getDirectoryHandle(childLayer.name, { create: true })
-
-      await seedDir.getFileHandle(
-        `${LayerRestorationService.INSTALL_PREFIX}${child}`,
-        { create: true }
-      )
-    }
-
-    for (const droneSig of layer.drones) {
-      if (!this.isSignature(droneSig)) continue
-      await parentDir.getFileHandle(droneSig, { create: true })
-    }
-
-    parentDir.removeEntry(
-      `${LayerRestorationService.INSTALL_PREFIX}${seedSignature}`
-    ).catch(() => {})
+    await this.fs.finalizeInstall(parentDir, seedSignature)
   }
 
   // -------------------------------------------------
@@ -161,8 +142,7 @@ export class LayerRestorationService {
       if (entry.kind !== 'directory') continue
       if (this.isDomainSkippable(name)) continue
 
-      const dir = entry as FileSystemDirectoryHandle
-      await this.restoreDomain(dir, depth)
+      await this.restoreDomain(entry as FileSystemDirectoryHandle, depth)
     }
   }
 
@@ -189,174 +169,13 @@ export class LayerRestorationService {
       if (name.startsWith(LayerRestorationService.INSTALL_PREFIX)) continue
       if (!this.isSignature(name)) continue
 
-      await this.ensureDronePreloaded(name)
+      await this.drones.ensure(name)
     }
-  }
-
-  private ensureDronePreloaded = async (
-    signature: string
-  ): Promise<void> => {
-
-    if (has(signature)) return
-
-    const result = await this.getDronePayloadBytes(signature)
-    if (!result.bytes) return
-
-    if (!result.exists) {
-      await this.writeCachedDronePayload(signature, result.bytes)
-    }
-  }
-
-  private getDronePayloadBytes = async (
-    signature: string
-  ): Promise<{ exists: boolean; bytes: ArrayBuffer | null }> => {
-
-    const cached = await this.readCachedDronePayload(signature)
-    if (cached) return { exists: true, bytes: cached }
-
-    const fetched = await this.fetchDronePayload(signature)
-    return { exists: false, bytes: fetched }
-  }
-
-  private readCachedDronePayload = async (
-    signature: string
-  ): Promise<ArrayBuffer | null> => {
-    try {
-      const handle =
-        await this.store.resourcesDirectory().getFileHandle(signature)
-      const file = await handle.getFile()
-      return await file.arrayBuffer()
-    } catch {
-      return null
-    }
-  }
-
-  private writeCachedDronePayload = async (
-    signature: string,
-    bytes: ArrayBuffer
-  ): Promise<void> => {
-
-    const handle =
-      await this.store.resourcesDirectory().getFileHandle(signature, { create: true })
-    const writable = await handle.createWritable()
-    try {
-      await writable.write(bytes)
-    } finally {
-      await writable.close()
-    }
-  }
-
-  private fetchDronePayload = async (
-    signature: string
-  ): Promise<ArrayBuffer | null> => {
-
-    const url =
-      `${LayerRestorationService.DEFAULT_ORIGIN}/__resources__/${signature}`
-
-    const res = await fetch(url)
-    if (!res.ok) return null
-
-    return await res.arrayBuffer()
   }
 
   // -------------------------------------------------
-  // layer lookup
+  // helpers
   // -------------------------------------------------
-
-  private lookupLayer = async (
-    layersDir: FileSystemDirectoryHandle,
-    location: string,
-    signature: string
-  ): Promise<LayerRecord | null> => {
-
-    const result = await this.getLayerJsonText(layersDir, location, signature)
-    if (!result.content) return null
-
-    if (!result.exists) {
-      await this.writeCachedLayerJson(layersDir, signature, result.content)
-    }
-
-    return this.parseLayerJson(signature, result.content)
-  }
-
-  private getLayerJsonText = async (
-    layersDir: FileSystemDirectoryHandle,
-    location: string,
-    signature: string
-  ): Promise<{ exists: boolean; content: string }> => {
-
-    const cached = await this.readCachedLayerJson(layersDir, signature)
-    if (cached) return { exists: true, content: cached }
-
-    const fetched = await this.fetchLayerJson(location, signature)
-    return { exists: false, content: fetched || '' }
-  }
-
-  private readCachedLayerJson = async (
-    layersDir: FileSystemDirectoryHandle,
-    signature: string
-  ): Promise<string | null> => {
-    try {
-      const handle = await layersDir.getFileHandle(signature)
-      const file = await handle.getFile()
-      return this.decoder.decode(await file.arrayBuffer())
-    } catch {
-      return null
-    }
-  }
-
-  private writeCachedLayerJson = async (
-    layersDir: FileSystemDirectoryHandle,
-    signature: string,
-    jsonText: string
-  ): Promise<void> => {
-
-    const handle = await layersDir.getFileHandle(signature, { create: true })
-    const writable = await handle.createWritable()
-    try {
-      await writable.write(this.encoder.encode(jsonText))
-    } finally {
-      await writable.close()
-    }
-  }
-
-  private fetchLayerJson = async (
-    location: string,
-    signature: string
-  ): Promise<string | null> => {
-
-    const res = await fetch(`${location}/${signature}`)
-    if (!res.ok) return null
-    return await res.text()
-  }
-
-  private parseLayerJson = (
-    signature: string,
-    jsonText: string
-  ): LayerRecord => {
-
-    let parsed: any
-    try {
-      parsed = JSON.parse(jsonText)
-    } catch {
-      throw new Error(`invalid layer json ${signature}`)
-    }
-
-    const name = String(parsed.name || '').trim()
-    if (!name) throw new Error(`layer ${signature} missing name`)
-
-    const children =
-      (Array.isArray(parsed.children) ? parsed.children : [])
-        .map((c: unknown) => String(c).trim())
-        .filter((c: string) => this.isSignature(c))
-
-    const drones =
-      (Array.isArray(parsed.drones) ? parsed.drones : [])
-        .map((d: unknown) => String(d).trim())
-        .filter((d: string) => this.isSignature(d))
-
-    return { name, children, drones }
-  }
 
   private readLocationPrefix = async (
     rootDirectory: FileSystemDirectoryHandle
@@ -379,7 +198,7 @@ export class LayerRestorationService {
         throw new Error('__location__ must be url or 64-hex signature')
       }
 
-      return `${LayerRestorationService.DEFAULT_ORIGIN}/${text}`
+      return `https://storagehypercomb.blob.core.windows.net/content/${text}`
     } catch {
       return null
     }

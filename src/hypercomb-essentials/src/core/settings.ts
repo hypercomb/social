@@ -1,5 +1,3 @@
-import { Injectable } from "@angular/core"
-
 export class Settings {
 
     public static hexagonSide = 200

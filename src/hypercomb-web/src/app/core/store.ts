@@ -4,6 +4,21 @@ import { Injectable } from '@angular/core'
 import { Drone, SignatureService } from '@hypercomb/core'
 
 type DroneCtor = new () => Drone
+// src/app/core/store.ts
+
+// -------------------------------------------------
+// platform roots
+// -------------------------------------------------
+
+type ModuleRoot = {
+  baseUrl: string
+  useHostedModules: boolean
+}
+
+const defaultRoot: ModuleRoot = {
+  baseUrl: '/dev/essentials/drones',
+  useHostedModules: false
+}
 
 @Injectable({ providedIn: 'root' })
 export class Store {
@@ -17,7 +32,7 @@ export class Store {
 
 
   // -------------------------------------------------
-  // file system handles
+  // file system handless
   // -------------------------------------------------
 
   public opfsRoot!: FileSystemDirectoryHandle
@@ -43,24 +58,94 @@ export class Store {
   // platform roots
   // -------------------------------------------------
 
-  public getDrone = async (name: string, buffer: ArrayBuffer): Promise<Drone | null> => {
-    const { register } = window.ioc
+public getDrone = async (signature: string, buffer: ArrayBuffer): Promise<Drone | null> => {
+  const { register } = window.ioc
+  console.log('[store] loading drone module:', signature)
 
-    try {
-      const mod = await this.loadModule(buffer)
-      const ctors = this.extractDroneCtors(mod)
+  try {
+    const root = (window as any).moduleRoot as ModuleRoot | undefined
+    const cfg = root ?? defaultRoot
+
+    // -------------------------------------------------
+    // hosted dev import path (preferred when flagged)
+    // -------------------------------------------------
+
+    if (cfg.useHostedModules) {
+      const url = `${cfg.baseUrl.replace(/\/+$/, '')}/${signature}`
+
+      let module: unknown
+      try {
+        // keep dynamic import from being rewritten by bundlers
+        module = await import(/* @vite-ignore */ url)
+      } catch (error) {
+        console.error('[store] failed to load hosted module', { signature, url, error })
+        throw error
+      }
+
+      const ctors: DroneCtor[] = []
+
+      for (const value of Object.values(module as Record<string, unknown>)) {
+        if (typeof value !== 'function') continue
+        const proto = (value as any).prototype
+        if (!proto) continue
+        ctors.push(value as unknown as DroneCtor)
+      }
+
+      if (!ctors.length) {
+        console.warn('[store] no drone exports found. exports:', Object.keys(module as any))
+      }
 
       for (const Ctor of ctors) {
         const instance = new Ctor()
         register(instance.name, instance)
+        return instance
       }
-    } catch {
-      // ignore and keep scanning
+
+      return null
     }
-    return null
+
+    // -------------------------------------------------
+    // buffer import path (fallback for opfs/offline)
+    // -------------------------------------------------
+
+    let module: unknown = null
+    const blob = new Blob([buffer], { type: 'application/javascript' })
+    const url = URL.createObjectURL(blob)
+
+    try {
+      // keep dynamic import from being rewritten by bundlers
+      module = await import(/* @vite-ignore */ url)
+    } catch (error) {
+      console.error('[store] failed to load module', error)
+      throw error
+    } finally {
+      URL.revokeObjectURL(url)
+    }
+
+    const ctors: DroneCtor[] = []
+
+    for (const value of Object.values(module as Record<string, unknown>)) {
+      if (typeof value !== 'function') continue
+      const proto = (value as any).prototype
+      if (!proto) continue
+      ctors.push(value as unknown as DroneCtor)
+    }
+
+    if (!ctors.length) {
+      console.warn('[store] no drone exports found. exports:', Object.keys(module as any))
+    }
+
+    for (const Ctor of ctors) {
+      const instance = new Ctor()
+      register(instance.name, instance)
+      return instance
+    }
+  } catch {
+    // ignore and keep scanning
   }
 
-
+  return null
+}
 
   // opfs root directory
   public opfsDirectory = (): FileSystemDirectoryHandle => {
@@ -122,53 +207,6 @@ export class Store {
 
     return signature
   }
-  // -------------------------------------------------
-  // module loader (bytes -> esm)
-  // -------------------------------------------------
-
-  private loadModule = async (bytes: ArrayBuffer): Promise<unknown> => {
-    // bytes already represent the final JS bundle
-    const blob = new Blob(
-      [bytes],
-      { type: 'application/javascript' }
-    )
-
-    const url = URL.createObjectURL(blob)
-
-    try {
-      // keep dynamic import from being rewritten by bundlers
-      return await import(/* @vite-ignore */ url)
-    } catch (error) {
-      console.error('[store] failed to load module', error)
-      throw error
-    } finally {
-      URL.revokeObjectURL(url)
-    }
-  }
 
 
-  // -------------------------------------------------
-  // ctor extractor (safe, no side-effects)
-  // -------------------------------------------------
-
-  private extractDroneCtors = (module: unknown): DroneCtor[] => {
-    const out: DroneCtor[] = []
-
-    if (!module || typeof module !== 'object') return out
-
-    for (const value of Object.values(module as Record<string, unknown>)) {
-      if (typeof value !== 'function') continue
-
-      const proto = (value as any).prototype
-      if (!proto) continue
-
-      out.push(value as unknown as DroneCtor)
-    }
-
-    if (!out.length) {
-      console.warn('[store] no drone exports found. exports:', Object.keys(module as any))
-    }
-
-    return out
-  }
 }

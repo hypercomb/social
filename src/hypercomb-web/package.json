@@ -4,10 +4,11 @@
   "private": true,
   "scripts": {
     "start": "ng serve",
-    "build": "ng build"
+    "build": "ng build",
+    "runtime": "npm run runtime:pixi",
+    "runtime:pixi": "npx tsx ./scripts/build-pixi-vendor.ts"
   },
   "dependencies": {
-    "@hypercomb/core": "file:../hypercomb-core",
-    "pixi.js": "^8.14.3"
+    "@hypercomb/core": "file:../hypercomb-core"
   }
 }

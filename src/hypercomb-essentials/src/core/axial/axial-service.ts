@@ -1,4 +1,4 @@
-import { Injectable } from "@angular/core"
+
 import { Point } from "pixi.js"
 import { AxialCoordinate } from "./axial-coordinate.js"
 import { Settings } from "../settings.js"
@@ -9,7 +9,6 @@ export const distance = (a: Point, b: Point): number => {
     return Math.sqrt(dx * dx + dy * dy)
 }
 
-@Injectable({ providedIn: 'root' })
 export class AxialService {
 
     public count: number = 0

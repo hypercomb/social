@@ -14,9 +14,8 @@ export abstract class Drone {
       .trim()
   }
 
-  public constructor(signature: string) {
+  public constructor() {
     this.name = Drone.simplify(this.constructor.name)
-    register(signature, this)
   }
 
   // --------------------------------

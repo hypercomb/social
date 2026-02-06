@@ -1,24 +1,74 @@
-// src/app/core/resolve-import-map.ts
+// hypercomb-web/src/setup/resolve-import-map.ts
 
-import { loadOpfsDependencies } from './dependency-loader'
+import { environment } from '../environments/environment'
 
-export const resolveImportMap = async (): Promise<Record<string, string>> => {
-  const deps = await loadOpfsDependencies()
-  const imports: Record<string, string> = {}
+// alias → fetchable module url
+export type ResolvedImports = Record<string, string>
 
-  // hardcoded test binding
-  const bindings: Record<string, string> = {
-    '@essentials/pixi': 'dd0ae992a13acd6913bb742a2f3f576c6ff6885d33b5579d87fc5937d933eb84',
-    '@essentials/hello': '8479fff6262d2f3c9e719748a224433df3ccd35fdc56231ef356aa68e32ffa48'
-  }
+// prod dependencies are served via SW from OPFS
+const OPFS_DEPENDENCY_BASE_PATH = '/opfs/__dependencies__'
 
-  for (const [alias, sig] of Object.entries(bindings)) {
-    const url = deps[sig]
-    if (!url) {
-      throw new Error(`missing dependency in OPFS: ${alias} (${sig})`)
+// dev dependencies are served directly from public
+const DEV_DEPENDENCIES_IMPORTS =
+  '/dev/essentials/dependencies.runtime-map.json'
+
+export const resolveImportMap = async (): Promise<ResolvedImports> => {
+  const imports: ResolvedImports = {}
+
+  // -----------------------------------------
+  // dependencies
+  // -----------------------------------------
+
+  if (environment.production) {
+    // prod: discover dependencies from OPFS
+    const root = await navigator.storage.getDirectory()
+
+    let depsDir: FileSystemDirectoryHandle
+    try {
+      depsDir = await root.getDirectoryHandle('__dependencies__')
+    } catch {
+      // no dependencies installed yet
+      return imports
     }
-    imports[alias] = url
+
+    for await (const [signature, handle] of depsDir.entries()) {
+      if (handle.kind !== 'file') continue
+
+      const file = await (handle as FileSystemFileHandle).getFile()
+
+      // read first line only (header convention)
+      const text = await file.text()
+      const firstLine = text.split('\n', 1)[0]?.trim()
+      if (!firstLine) continue
+
+      // expected header: "// @alias/name"
+      const alias = firstLine.split(/\s+/)[1]
+      if (!alias) continue
+
+      // collision guard
+      if (imports[alias]) {
+        throw new Error(`dependency alias collision: ${alias}`)
+      }
+
+      imports[alias] = `${OPFS_DEPENDENCY_BASE_PATH}/${signature}`
+    }
+  } else {
+    // dev: import generated public imports module
+    const devModule = await import(DEV_DEPENDENCIES_IMPORTS)
+
+    if (!devModule?.imports || typeof devModule.imports !== 'object') {
+      throw new Error('invalid dev dependencies.imports.js')
+    }
+
+    Object.assign(imports, devModule.imports)
   }
+
+  // -----------------------------------------
+  // platform vendors (same in dev + prod)
+  // -----------------------------------------
+
+  imports['@hypercomb/core'] = '/hypercomb-core.runtime.js'
+  imports['pixi.js'] = '/vendor/pixi.runtime.js'
 
   return imports
 }

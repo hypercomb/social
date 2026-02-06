@@ -1,5 +1,6 @@
 // scripts/build-dependencies.ts
 // freezes third-party ESM dependencies into signed, deterministic payloads
+// and emits a dev import-map derived from alias headers
 
 import { spawnSync } from 'child_process'
 import { fileURLToPath } from 'url'
@@ -20,8 +21,21 @@ const __dirname = dirname(__filename)
 // config
 // -----------------------------------------
 
-const OUT_DIR = resolve('./dist/__dependencies__')
 const TARGET = 'es2022'
+
+// canonical build output
+const DIST_DEPS_DIR = resolve('./dist/__dependencies__')
+
+// dev public output (web project)
+const DEV_PUBLIC_DEPS_DIR = resolve(
+  __dirname,
+  '../../hypercomb-web/public/dev/essentials/'
+)
+
+const DEV_IMPORT_MAP_FILE = resolve(
+  __dirname,
+  '../../hypercomb-web/public/dev/essentials/dependencies.runtime-map.json'
+)
 
 // -----------------------------------------
 // helpers
@@ -37,6 +51,15 @@ const assertClosedBundle = (code: string): void => {
   if (/\bimport\s*\(/.test(code)) {
     throw new Error('dynamic import detected; dependency bundles must be closed')
   }
+}
+
+// prepend alias prologue BEFORE signing
+const withPrologue = (alias: string, bytes: Uint8Array): Uint8Array => {
+  const header = new TextEncoder().encode(`// ${alias}\n`)
+  const out = new Uint8Array(header.byteLength + bytes.byteLength)
+  out.set(header, 0)
+  out.set(bytes, header.byteLength)
+  return out
 }
 
 // -----------------------------------------
@@ -73,29 +96,51 @@ const bundleDependency = async (dep: HostedDependency): Promise<Uint8Array> => {
 // -----------------------------------------
 
 const main = async (): Promise<void> => {
-  if (existsSync(OUT_DIR)) {
-    rmSync(OUT_DIR, { recursive: true, force: true })
+  // clean outputs
+  for (const dir of [DIST_DEPS_DIR, DEV_PUBLIC_DEPS_DIR]) {
+    if (existsSync(dir)) {
+      rmSync(dir, { recursive: true, force: true })
+    }
+    mkdirSync(dir, { recursive: true })
   }
 
-  mkdirSync(OUT_DIR, { recursive: true })
+  const importMap: Record<string, string> = {}
 
   for (const dep of HostedDependencies) {
     console.log(`bundling dependency: ${dep.name}`)
 
-    const bytes = await bundleDependency(dep)
+    const bundled = await bundleDependency(dep)
+
+    // alias becomes part of the signed payload
+    const bytes = withPrologue(dep.alias, bundled)
+
     const signature = await SignatureService.sign(toArrayBuffer(bytes))
 
-    writeFileSync(join(OUT_DIR, signature), bytes)
+    // write canonical dist output
+    writeFileSync(join(DIST_DEPS_DIR, signature), bytes)
+
+    // write dev public output
+    writeFileSync(join(DEV_PUBLIC_DEPS_DIR, signature), bytes)
+
+    // record alias → signature mapping
+    importMap[dep.alias] = `/dev/essentials/${signature}`
 
     console.log(`  alias: ${dep.alias}`)
     console.log(`  sig:   ${signature}`)
     console.log(`  bytes: ${bytes.byteLength}`)
   }
 
-  console.log('dependencies built')
+  // emit dev import map (alias → signature)
+  writeFileSync(
+    DEV_IMPORT_MAP_FILE,
+    JSON.stringify({ imports: importMap }, null, 2)
+  )
+
+  console.log('dependency import map written:')
+  console.log(`  ${DEV_IMPORT_MAP_FILE}`)
 
   // -----------------------------------------
-  // deploy (shared dependencies)
+  // deploy (shared dependencies, prod path)
   // -----------------------------------------
 
   const ps1 = resolve(__dirname, 'deploy-dependencies.ps1')
@@ -110,7 +155,7 @@ const main = async (): Promise<void> => {
       '-NoProfile',
       '-ExecutionPolicy', 'Bypass',
       '-File', ps1
-    ],  
+    ],
     { stdio: 'inherit' }
   )
 
