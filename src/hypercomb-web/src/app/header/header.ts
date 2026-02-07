@@ -1,5 +1,6 @@
 import { Component } from '@angular/core';
 import { SearchBarComponent } from "../common/header/search-bar/search-bar.component";
+import { OpfsExplorerComponent } from "../common/file-explorer/opfs-explorer.component";
 
 @Component({
   selector: 'app-header',

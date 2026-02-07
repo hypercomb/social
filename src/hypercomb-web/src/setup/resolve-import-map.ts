@@ -54,7 +54,7 @@ export const resolveImportMap = async (): Promise<ResolvedImports> => {
     }
   } else {
     // dev: import generated public imports module
-    const devModule = await import(DEV_DEPENDENCIES_IMPORTS)
+    const devModule = await import(/* @vite-ignore */ DEV_DEPENDENCIES_IMPORTS)
 
     if (!devModule?.imports || typeof devModule.imports !== 'object') {
       throw new Error('invalid dev dependencies.imports.js')

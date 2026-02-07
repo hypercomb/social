@@ -1,14 +1,13 @@
 import { Component, inject, signal } from '@angular/core'
 import { RouterOutlet } from '@angular/router'
 import { Header } from './header/header'
-import { Footer } from './footer/footer'
 import { hypercomb } from '@hypercomb/core'
 import { CoreAdapter } from './core/core-adapter'
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, Header, Footer],
+  imports: [RouterOutlet, Header],
   templateUrl: './app.html',
   styleUrl: './app.scss'
 })
