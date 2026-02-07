@@ -1,15 +1,15 @@
 // scripts/build-module.ts
 // production build
-// - __resources__ contains only raw js bytes (with first-line comment preserved)
-// - __layers__ contains json only
+// - dist/<rootLayerSig>/__layers__ contains json only
+// - dist/__resources__ contains only drone js bytes (with first-line comment preserved)
 // - no manifests, no payload json
 // - sourcemaps enabled
 // - guarantees arraybuffer (never sharedarraybuffer) for signing
 //
 // dev mirror export (optional)
-// - emits /public/dev/* as a flat folder containing:
+// - emits <DEV_PUBLIC_ROOT> as a flat folder containing:
 //   - drones.runtime-map.json
-//   - dependencies.runtime-map.json
+//   - dependencies.runtime-map.json (import-map shape: { "imports": { ... } })
 //   - <signature> files (drones + dependencies mixed)
 // - designed for native esm imports from the same root during dev
 
@@ -45,7 +45,6 @@ const DEV_PUBLIC_ROOT = resolve(
 
 const DEV_PUBLIC_BASE_URL =
   process.env.HYPERCOMB_DEV_PUBLIC_BASE_URL ?? '/dev/drones'
-
 
 // set to "0" to disable dev export
 const DEV_EXPORT_ENABLED = (process.env.HYPERCOMB_DEV_EXPORT ?? '1') !== '0'
@@ -111,6 +110,11 @@ const writeJsonFile = (dir: string, name: string, value: unknown): void => {
   writeFileSync(join(dir, name), json + '\n', 'utf8')
 }
 
+const toDevUrl = (sig: string): string => {
+  // keep url posix
+  return `${DEV_PUBLIC_BASE_URL.replace(/\/+$/, '')}/${sig}`
+}
+
 // -------------------------------------------------
 // discovery (filesystem only)
 // -------------------------------------------------
@@ -133,9 +137,10 @@ const discoverDroneSources = (): SourceFile[] => {
 }
 
 // -------------------------------------------------
-// compile (leave runtime imports unresolved)
+// compile
 // -------------------------------------------------
 
+// drone payloads are expected to be small and may reference platform/global libs
 const compileDrone = async (entry: string): Promise<string> => {
   const result = await build({
     entryPoints: [resolve(entry)],
@@ -164,8 +169,6 @@ const compileDependency = async (entry: string): Promise<string> => {
     write: false,
     target: TARGET,
     tsconfig: resolve('./tsconfig.json'),
-    // do not externalize here unless you explicitly want the dependency to remain non-atomic
-    // keeping empty means the result becomes a single-file payload
     external: [],
     sourcemap: true
   })
@@ -234,7 +237,7 @@ const buildLayersBottomUp = async (
 }
 
 // -------------------------------------------------
-// dev mirror export
+// dev mirror shapes
 // -------------------------------------------------
 
 type DevDronesRuntimeMap = {
@@ -243,14 +246,8 @@ type DevDronesRuntimeMap = {
   drones: Record<string, string>
 }
 
-type DevDependenciesRuntimeMap = {
-  version: 1
+type DevImportMap = {
   imports: Record<string, string>
-}
-
-const toDevUrl = (sig: string): string => {
-  // keep url posix
-  return `${DEV_PUBLIC_BASE_URL.replace(/\/+$/, '')}/${sig}`
 }
 
 // -------------------------------------------------
@@ -267,15 +264,14 @@ const main = async (): Promise<void> => {
   }
 
   // -----------------------------
-  // compile drones
+  // compile drones (production + dev)
   // -----------------------------
 
   const sources = discoverDroneSources()
   if (!sources.length) throw new Error('no drone sources found')
 
   const dirToResources = new Map<string, string[]>()
-  const resourceBytes = new Map<string, Uint8Array>()
-  const layerMap = new Map<string, string>()
+  const droneBytes = new Map<string, Uint8Array>()
   const droneNameToSig: Record<string, string> = {}
 
   for (const src of sources) {
@@ -294,7 +290,7 @@ const main = async (): Promise<void> => {
     const bytes = textToBytes(finalSource)
     const signature = await SignatureService.sign(toArrayBuffer(bytes))
 
-    resourceBytes.set(signature, bytes)
+    droneBytes.set(signature, bytes)
     droneNameToSig[label] = signature
 
     const list = dirToResources.get(src.dirRel) ?? []
@@ -303,11 +299,10 @@ const main = async (): Promise<void> => {
   }
 
   // -----------------------------
-  // compile hosted dependencies
+  // compile hosted dependencies (dev mirror only)
   // -----------------------------
 
-  // this emits dependency payloads into the same signature pool
-  // note: these signatures are dev/runtime-level assets, separate from production __resources__
+  const depBytes = new Map<string, Uint8Array>()
   const depAliasToSig: Record<string, string> = {}
 
   for (const dep of HostedDependencies) {
@@ -325,7 +320,7 @@ const main = async (): Promise<void> => {
     const bytes = textToBytes(finalSource)
     const signature = await SignatureService.sign(toArrayBuffer(bytes))
 
-    resourceBytes.set(signature, bytes)
+    depBytes.set(signature, bytes)
     depAliasToSig[dep.alias] = signature
   }
 
@@ -346,6 +341,7 @@ const main = async (): Promise<void> => {
   const tree = readDirTreeFiltered(SRC_ROOT, '', included)
   if (!tree) throw new Error('no layer tree')
 
+  const layerMap = new Map<string, string>()
   const rootLayerSig = await buildLayersBottomUp(tree, dirToResources, (sig, json) => layerMap.set(sig, json))
 
   const packageDir = join(DIST_ROOT, rootLayerSig)
@@ -359,43 +355,40 @@ const main = async (): Promise<void> => {
     writeFileSync(join(layersDir, sig), json, 'utf8')
   }
 
-  // production: only drones go into __resources__
-  // dependencies are not part of production package here (they are handled by the dependency surface)
-  for (const [sig, bytes] of resourceBytes) {
+  // production: __resources__ contains ONLY drone payloads
+  for (const [sig, bytes] of droneBytes) {
     writeSigFile(resourcesDir, sig, bytes)
   }
 
   writeFileSync(join(packageDir, 'root.txt'), `${rootLayerSig}\n`, 'utf8')
 
   // -----------------------------
-  // dev mirror export
+  // dev mirror export (mixed pool)
   // -----------------------------
 
   if (DEV_EXPORT_ENABLED) {
     // write mixed signature pool (drones + deps) into public/dev
-    for (const [sig, bytes] of resourceBytes) {
+    for (const [sig, bytes] of droneBytes) {
+      writeSigFile(DEV_PUBLIC_ROOT, sig, bytes)
+    }
+    for (const [sig, bytes] of depBytes) {
       writeSigFile(DEV_PUBLIC_ROOT, sig, bytes)
     }
 
-    // drones map: name -> signature
+    // drones map: label -> signature
     const dronesMap: DevDronesRuntimeMap = {
       version: 1,
       root: DEV_PUBLIC_BASE_URL,
       drones: droneNameToSig
     }
 
-    // dependencies map: import specifier -> url
-    // note: if you want pixi to be "pixi.js", set HostedDependencies alias accordingly
+    // dependencies map: alias -> fetchable url (import-map shape)
     const imports: Record<string, string> = {}
     for (const [alias, sig] of Object.entries(depAliasToSig)) {
       imports[alias] = toDevUrl(sig)
     }
 
-    // also allow resolving hypercomb core from a fixed dev address if you want
-    // if you do not want this, remove it
-    // imports['@hypercomb/core'] = '/hypercomb-core.runtime.js'
-
-    const depsMap: DevDependenciesRuntimeMap = { version: 1, imports }
+    const depsMap: DevImportMap = { imports }
 
     writeJsonFile(DEV_PUBLIC_ROOT, 'drones.runtime-map.json', dronesMap)
     writeJsonFile(DEV_PUBLIC_ROOT, 'dependencies.runtime-map.json', depsMap)
@@ -407,9 +400,12 @@ const main = async (): Promise<void> => {
 
   const ps1 = resolve(__dirname, 'deploy-azure.ps1')
   if (existsSync(ps1)) {
-    const r = spawnSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1, '-Signature', rootLayerSig], {
-      stdio: 'inherit'
-    })
+    const r = spawnSync(
+      'powershell',
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1, '-Signature', rootLayerSig],
+      { stdio: 'inherit' }
+    )
+
     if (r.status !== 0) throw new Error('deployment failed')
   }
 }

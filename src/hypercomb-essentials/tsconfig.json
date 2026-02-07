@@ -7,7 +7,7 @@
     "declaration": true,
     "declarationMap": true,
 
-    "outDir": "dist",
+    "outDir": "../hypercomb-web/public/dev/essentials",
     "rootDir": "src",
 
     "strict": true,

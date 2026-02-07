@@ -1,4 +1,4 @@
-﻿// src/app/pixi/pinch-zoom-service.ts
+﻿d// src/app/pixi/pinch-zoom-service.ts
 import { Injectable, effect, inject, signal } from '@angular/core'
 import { HypercombMode } from 'src/app/core/models/enumerations'
 import { ZoomInputBase } from './zoom-input.base'

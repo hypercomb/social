@@ -18,7 +18,7 @@ export class PixiHostDrone extends Drone {
     // dom root (single, inert)
     // -------------------------------------------------
 
-    const host = this.host = document.createElement('div')
+    const host = this.host = document.getElementById('pixi-host') as HTMLDivElement
     host.dataset['hypercombPixi'] = 'root'
     host.style.position = 'fixed'
     host.style.inset = '0'
@@ -50,6 +50,7 @@ export class PixiHostDrone extends Drone {
         app.renderer.height * 0.5
       )
     }
+    
 
     center()
     window.addEventListener('resize', center)
