@@ -50,8 +50,7 @@ export class DependencyLoader {
       if (this.loaded.has(fileName)) continue
 
       try {
-        const dep = await this.loadDependency(fileName)
-
+        await this.loadDependency(fileName)
         this.loaded.add(fileName)
         this.dependencyCount.update(v => v + 1)
         this.loadedSignatures.update(v => [...v, fileName])
