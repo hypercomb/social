@@ -7,7 +7,7 @@ export abstract class Drone {
 
   public readonly name: string
 
-  public static simplify = (name:string): string => {
+  public static simplify = (name: string): string => {
     return name
       .replace(/Drone$/, '')
       .replace(/([a-z])([A-Z])/g, '$1 $2')
@@ -25,9 +25,9 @@ export abstract class Drone {
   // does this drone perceive relevance right now?
   protected sense = (grammar: string): boolean | Promise<boolean> => true
 
-  
+
   // developer-defined behavior
-  protected abstract heartbeat: (grammar: string) => Promise<void>
+  protected heartbeat: (grammar: string) => Promise<void> = async () => { }
 
   // --------------------------------
   // meaning

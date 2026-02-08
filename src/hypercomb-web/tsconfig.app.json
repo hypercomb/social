@@ -10,12 +10,7 @@
     // makes @hypercomb/hello resolve to source
     // instead of node_modules
     // -------------------------------------------------
-    "baseUrl": ".",
-    "paths": {
-      "@essentials/hello": [
-        "../hypercomb-essentials/src/hello-world/hello-world.entry.ts"
-      ]
-    }
+    "baseUrl": "."
   },
   "files": ["src/main.ts"],
   "include": ["src/**/*.d.ts"]

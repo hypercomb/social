@@ -1,4 +1,6 @@
-export class Settings {
+import { Drone } from "@hypercomb/core"
+
+export class Settings extends Drone {
 
     public static hexagonSide = 200
 
@@ -22,6 +24,7 @@ export class Settings {
     public readonly rings = 50
 
     public fillColor = "#242a30"
+
 }
 
 

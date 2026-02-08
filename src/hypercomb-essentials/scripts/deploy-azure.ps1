@@ -1,7 +1,6 @@
 # scripts/deploy-azure.ps1
 # deploys:
-#   dist/<signature>/**   -> content/<signature>/**
-#   dist/__resources__/** -> content/__resources__/**
+#   dist/<signature>/** -> content/<signature>/**
 
 param (
   [Parameter(Mandatory = $true)]
@@ -12,11 +11,8 @@ $ScriptDir   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Resolve-Path (Join-Path $ScriptDir "..")
 $DistPath    = Join-Path $ProjectRoot "dist"
 
-$PackageSource   = Join-Path $DistPath $Signature
-$ResourcesSource = Join-Path $DistPath "__resources__"
-
+$PackageSource = Join-Path $DistPath $Signature
 $PackageDest   = "content/$Signature"
-$ResourcesDest = "content/__resources__"
 
 $AccountName = "storagehypercomb"
 
@@ -39,13 +35,13 @@ if (-not (Test-Path (Join-Path $PackageSource "__layers__"))) {
   exit 1
 }
 
-if (-not (Test-Path $ResourcesSource)) {
-  Write-Error "__resources__ missing in dist root: $ResourcesSource"
+if (-not (Test-Path (Join-Path $PackageSource "__resources__"))) {
+  Write-Error "__resources__ missing in package: $PackageSource"
   exit 1
 }
 
 # -------------------------------------------------
-# deploy package (layers + metadata)
+# deploy package (layers + resources + metadata)
 # -------------------------------------------------
 
 Write-Host ""
@@ -70,36 +66,11 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # -------------------------------------------------
-# deploy shared resources (flat, global)
-# -------------------------------------------------
-
-Write-Host ""
-Write-Host "deploying shared resources"
-Write-Host "--------------------------------"
-Write-Host " source : $ResourcesSource"
-Write-Host " dest   : $ResourcesDest"
-Write-Host ""
-
-az storage blob upload-batch `
-  --account-name $AccountName `
-  --destination $ResourcesDest `
-  --source $ResourcesSource `
-  --auth-mode login `
-  --overwrite `
-  --no-progress
-
-if ($LASTEXITCODE -ne 0) {
-  Write-Error "resources deployment failed"
-  exit 1
-}
-
-# -------------------------------------------------
 # done
 # -------------------------------------------------
 
 Write-Host ""
 Write-Host "deployment complete"
 Write-Host "--------------------------------"
-Write-Host " package   : https://$AccountName.blob.core.windows.net/$PackageDest/"
-Write-Host " resources : https://$AccountName.blob.core.windows.net/$ResourcesDest/"
+Write-Host " package : https://$AccountName.blob.core.windows.net/$PackageDest/"
 Write-Host ""
