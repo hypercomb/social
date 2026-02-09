@@ -1,74 +1,55 @@
+// hypercomb-web/src/setup/resolve-import-map.ts
+
 import { environment } from '../environments/environment'
 
-// alias → fetchable module url
 export type ResolvedImports = Record<string, string>
 
-// prod dependencies are served via SW from OPFS
 const OPFS_DEPENDENCY_BASE_PATH = '/opfs/__dependencies__'
-
-// dev namespace manifest (explicit)
-const DEV_NAMESPACE_MANIFEST = '/dev/namespace.manifest.js'
+const DEV_NAME_MANIFEST = '/dev/name.manifest.js'
 
 export const resolveImportMap = async (): Promise<ResolvedImports> => {
   const imports: ResolvedImports = {}
 
-  // -----------------------------------------
-  // prod: signed dependencies via OPFS
-  // -----------------------------------------
-
   if (environment.production) {
     const root = await navigator.storage.getDirectory()
 
-    let depsDir: FileSystemDirectoryHandle
+    let depsDir: FileSystemDirectoryHandle | null = null
     try {
       depsDir = await root.getDirectoryHandle('__dependencies__')
     } catch {
-      return imports
+      depsDir = null
     }
 
-    for await (const [signature, handle] of depsDir.entries()) {
-      if (handle.kind !== 'file') continue
+    if (depsDir) {
+      for await (const [signature, handle] of depsDir.entries()) {
+        if (handle.kind !== 'file') continue
 
-      const file = await (handle as FileSystemFileHandle).getFile()
-      const text = await file.text()
+        const file = await (handle as FileSystemFileHandle).getFile()
 
-      // first line convention: "// @namespace/path"
-      const firstLine = text.split('\n', 1)[0]?.trim()
-      if (!firstLine) continue
+        const text = await file.text()
+        const firstLine = text.split('\n', 1)[0]?.trim()
+        if (!firstLine) continue
 
-      const alias = firstLine.split(/\s+/)[1]
-      if (!alias) continue
+        const alias = firstLine.split(/\s+/)[1]
+        if (!alias) continue
 
-      if (imports[alias]) {
-        throw new Error(`dependency alias collision: ${alias}`)
+        if (imports[alias]) {
+          throw new Error(`dependency alias collision: ${alias}`)
+        }
+
+        imports[alias] = `${OPFS_DEPENDENCY_BASE_PATH}/${signature}`
       }
-
-      imports[alias] = `${OPFS_DEPENDENCY_BASE_PATH}/${signature}`
     }
+  } else {
+    const mod = await import(/* @vite-ignore */ DEV_NAME_MANIFEST)
+
+    const devImports = mod?.imports
+    if (!devImports || typeof devImports !== 'object') {
+      throw new Error('invalid dev name.manifest.js')
+    }
+
+    Object.assign(imports, devImports as ResolvedImports)
   }
-
-  // -----------------------------------------
-  // dev: explicit namespace → entry mapping
-  // -----------------------------------------
-
-  else {
-    const manifest = await import(/* @vite-ignore */ DEV_NAMESPACE_MANIFEST)
-
-    if (
-      !manifest ||
-      typeof manifest.namespaceEntries !== 'object'
-    ) {
-      throw new Error('invalid dev namespace.manifest.js')
-    }
-
-    for (const [ns, entry] of Object.entries(manifest.namespaceEntries)) {
-      imports[ns] = `/dev/${entry}`
-    }
-  }
-
-  // -----------------------------------------
-  // platform vendors (same in dev + prod)
-  // -----------------------------------------
 
   imports['@hypercomb/core'] = '/hypercomb-core.runtime.js'
   imports['pixi.js'] = '/vendor/pixi.runtime.js'

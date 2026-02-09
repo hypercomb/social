@@ -32,7 +32,7 @@ export class DependencyLoader {
     this.dependencyCount.set(0)
     this.loadedSignatures.set([])
     this.failedSignatures.set([])
-
+    
     const root = this.store.opfsRoot
 
     let depDir: FileSystemDirectoryHandle

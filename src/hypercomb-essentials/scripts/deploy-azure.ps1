@@ -16,8 +16,6 @@ $PackageDest   = "content/$Signature"
 
 $AccountName = "storagehypercomb"
 
-# validation
-
 if (-not (Test-Path $DistPath)) {
   Write-Error "dist folder does not exist: $DistPath"
   exit 1
@@ -42,8 +40,6 @@ if (-not (Test-Path (Join-Path $PackageSource "__dependencies__"))) {
   Write-Error "__dependencies__ missing in package: $PackageSource"
   exit 1
 }
-
-# deploy package
 
 Write-Host ""
 Write-Host "deploying hypercomb package"

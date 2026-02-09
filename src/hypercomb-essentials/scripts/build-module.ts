@@ -3,8 +3,11 @@
 //
 // dev
 // - compile each source file into hypercomb-web/public/dev/** preserving structure
-// - generate one entry per namespace into hypercomb-web/public/dev/
-// - generate namespace.manifest.js into hypercomb-web/public/dev/
+// - generate one runtime entry per domain:
+//   - hypercomb-web/public/dev/<domain>/index.runtime.js
+// - generate one flat name manifest at dev root:
+//   - hypercomb-web/public/dev/name.manifest.js
+//   - maps every namespace (@domain[/seg1[/seg2]]) -> /dev/<domain>/index.runtime.js
 //
 // prod
 // - signed dependency bundles (namespace-based)
@@ -112,17 +115,23 @@ const namespaceRelDirFromRelDir = (relDir: string): string => {
 const specifierFromNamespaceRelDir = (namespaceRelDir: string): string =>
   `@${namespaceRelDir}`
 
+const domainFromRelPath = (relPath: string): string => {
+  const parts = splitPath(relPath)
+  return parts[0] ?? ''
+}
+
+const relWithinDomainFromRelPath = (domain: string, relPath: string): string => {
+  const prefix = `${domain}/`
+  if (relPath.startsWith(prefix)) return relPath.slice(prefix.length)
+  return relPath
+}
+
 const uniq = (xs: string[]): string[] => Array.from(new Set(xs))
 
 const uniqSorted = (xs: string[]): string[] =>
   uniq(xs).sort((a, b) => a.localeCompare(b))
 
-const addToBucket = (
-  map: Map<string, { drones: string[]; deps: string[] }>,
-  relDir: string,
-  sig: string,
-  kind: 'dep' | 'drone'
-): void => {
+const addToBucket = (map: Map<string, { drones: string[]; deps: string[] }>, relDir: string, sig: string, kind: 'dep' | 'drone'): void => {
   const bucket = map.get(relDir) ?? { drones: [], deps: [] }
   if (kind === 'dep') bucket.deps.push(sig)
   else bucket.drones.push(sig)
@@ -149,7 +158,7 @@ const discoverSources = (): SourceFile[] =>
       // skip src/types/**
       if (relPath === 'types' || relPath.startsWith('types/')) return false
 
-      // skip entry sources (we generate entries from namespaces)
+      // skip entry sources (dev runtime is per-domain index.runtime.js)
       if (isEntry(relPath)) return false
 
       // skip root src files
@@ -208,67 +217,78 @@ const buildDevFile = (src: SourceFile, devTsOptions: ts.CompilerOptions): void =
 }
 
 // -------------------------------------------------
-// dev namespace entries + manifest (explicit)
+// dev: per-domain runtime entry + one flat name manifest
 // -------------------------------------------------
 
-type DevNamespaceManifest = Record<string, string>
-
-const sanitizeFilePart = (s: string): string =>
-  s.replace(/[^a-z0-9._-]+/gi, '_')
-
-const entryNameFromNamespace = (ns: string): string => {
-  const parts = ns.replace(/^@/, '').split('/')
-  const safe = parts.map(sanitizeFilePart).join('__')
-  return `${safe}.entry.js`
+type NameManifest = {
+  domains: Record<string, string>
+  imports: Record<string, string>
 }
 
-const generateDevNamespaceEntriesAndManifest = (sources: SourceFile[]): void => {
-  // group dependency sources by namespace
-  const nsToFiles = new Map<string, SourceFile[]>()
+const generateDevDomainRuntimeAndNameManifest = (sources: SourceFile[]): void => {
+  const deps = sources.filter(s => s.kind === 'dependency')
 
-  for (const src of sources.filter(s => s.kind === 'dependency')) {
-    const nsRelDir = namespaceRelDirFromRelDir(src.relDir)
-    const ns = specifierFromNamespaceRelDir(nsRelDir)
-    const list = nsToFiles.get(ns) ?? []
-    list.push(src)
-    nsToFiles.set(ns, list)
+  const domainToDeps = new Map<string, SourceFile[]>()
+  for (const s of deps) {
+    const domain = domainFromRelPath(s.relPath)
+    if (!domain) continue
+    const list = domainToDeps.get(domain) ?? []
+    list.push(s)
+    domainToDeps.set(domain, list)
   }
 
-  // deterministic manifest keys
-  const namespaces = Array.from(nsToFiles.keys()).sort((a, b) => a.localeCompare(b))
-  const manifest: DevNamespaceManifest = {}
+  const domains = Array.from(domainToDeps.keys()).sort((a, b) => a.localeCompare(b))
+  const domainsMap: Record<string, string> = {}
+  const importsMap: Record<string, string> = {}
 
-  // write one entry per namespace, and record it in the manifest
-  for (const ns of namespaces) {
-    const entryName = entryNameFromNamespace(ns)
-    const entryOut = join(DEV_ROOT, entryName)
+  for (const domain of domains) {
+    const domainDevRoot = join(DEV_ROOT, domain)
+    ensureDir(domainDevRoot)
 
-    const members = (nsToFiles.get(ns) ?? [])
-      .slice()
-      .sort((a, b) => a.relPath.localeCompare(b.relPath))
+    const entryOut = join(domainDevRoot, 'index.runtime.js')
+    const members = (domainToDeps.get(domain) ?? []).slice().sort((a, b) => a.relPath.localeCompare(b.relPath))
 
-    const exports = members
-      .map(m => `export * from './${stripExt(m.relPath)}.js';`)
-      .sort((a, b) => a.localeCompare(b))
+    const exportLines = uniqSorted(
+      members.map(m => {
+        const relWithinDomain = relWithinDomainFromRelPath(domain, m.relPath)
+        return `export * from './${stripExt(relWithinDomain)}.js';`
+      })
+    )
 
-    ensureDir(dirname(entryOut))
-    writeFileSync(entryOut, exports.join('\n') + '\n', 'utf8')
+    writeFileSync(entryOut, exportLines.join('\n') + '\n', 'utf8')
 
-    manifest[ns] = entryName
+    const entryUrl = `/dev/${domain}/index.runtime.js`
+    domainsMap[domain] = entryUrl
+
+    const domainNamespaces = uniqSorted(
+      members.map(m => {
+        const nsRelDir = namespaceRelDirFromRelDir(m.relDir)
+        return specifierFromNamespaceRelDir(nsRelDir)
+      })
+    )
+
+    for (const ns of domainNamespaces) {
+      importsMap[ns] = entryUrl
+    }
+
+    const rootNs = `@${domain}`
+    if (!importsMap[rootNs]) importsMap[rootNs] = entryUrl
   }
 
-  // write the manifest into dev root (must exist to avoid folder discovery)
-  const manifestFile = join(DEV_ROOT, 'namespace.manifest.js')
+  const manifest: NameManifest = { domains: domainsMap, imports: importsMap }
+
+  const manifestFile = join(DEV_ROOT, 'name.manifest.js')
   const manifestSource =
-    `// AUTO-GENERATED by hypercomb-essentials/scripts/build-module.ts\n` +
-    `// explicit dev namespace -> entry mapping\n\n` +
-    `export const namespaceEntries = ${JSON.stringify(manifest, null, 2)}\n`
+    `// auto-generated by hypercomb-essentials/scripts/build-module.ts\n` +
+    `// flat dev name manifest (domains + namespace imports)\n\n` +
+    `export const nameManifest = ${JSON.stringify(manifest, null, 2)}\n` +
+    `export const domains = nameManifest.domains\n` +
+    `export const imports = nameManifest.imports\n`
 
   writeFileSync(manifestFile, manifestSource, 'utf8')
 
-  // hard guard: fail fast if the manifest wasn't created where expected
   if (!existsSync(manifestFile)) {
-    throw new Error(`dev manifest was not written: ${manifestFile}`)
+    throw new Error(`dev name manifest was not written: ${manifestFile}`)
   }
 }
 
@@ -284,9 +304,7 @@ const readDirTree = (root: string, rel: string): DirNode => {
 
   const names = readdirSync(full).slice().sort((a, b) => a.localeCompare(b))
   for (const name of names) {
-    // skip src/types only
     if (!rel && name === 'types') continue
-
     const child = join(full, name)
     if (statSync(child).isDirectory()) {
       children.push(readDirTree(root, rel ? `${rel}/${name}` : name))
@@ -306,11 +324,7 @@ const signJson = async (value: unknown) => {
 // build helpers (prod)
 // -------------------------------------------------
 
-const buildNamespaceDependency = async (
-  namespaceRelDir: string,
-  memberFiles: SourceFile[],
-  allNamespaceSpecifiers: string[]
-): Promise<{ sig: string; bytes: Uint8Array }> => {
+const buildNamespaceDependency = async (namespaceRelDir: string, memberFiles: SourceFile[], allNamespaceSpecifiers: string[]): Promise<{ sig: string; bytes: Uint8Array }> => {
   const namespaceRootFs = join(SRC_ROOT, namespaceRelDir)
   const namespaceSpecifier = specifierFromNamespaceRelDir(namespaceRelDir)
 
@@ -390,23 +404,16 @@ const main = async (): Promise<void> => {
   const sources = discoverSources()
   if (!sources.length) throw new Error('no sources found')
 
-  // -------------------------------------------------
   // dev
-  // -------------------------------------------------
-
   const devTsOptions = getDevTsOptions()
   for (const src of sources) buildDevFile(src, devTsOptions)
-  generateDevNamespaceEntriesAndManifest(sources)
+  generateDevDomainRuntimeAndNameManifest(sources)
 
-  // -------------------------------------------------
   // prod (signed, identical package structure)
-  // -------------------------------------------------
-
   const resourcesByDir = new Map<string, { drones: string[]; deps: string[] }>()
   const dependencyBytes = new Map<string, Uint8Array>()
   const resourceBytes = new Map<string, Uint8Array>()
 
-  // namespace grouping (dependencies)
   const deps = sources.filter(s => s.kind === 'dependency')
   const namespaceToFiles = new Map<string, SourceFile[]>()
 
@@ -420,12 +427,8 @@ const main = async (): Promise<void> => {
   const allNamespaceRelDirs = Array.from(namespaceToFiles.keys()).sort((a, b) => a.localeCompare(b))
   const allNamespaceSpecifiers = allNamespaceRelDirs.map(specifierFromNamespaceRelDir)
 
-  // build one dependency module per namespace
   for (const nsRelDir of allNamespaceRelDirs) {
-    const files = (namespaceToFiles.get(nsRelDir) ?? [])
-      .slice()
-      .sort((a, b) => a.entry.localeCompare(b.entry))
-
+    const files = (namespaceToFiles.get(nsRelDir) ?? []).slice().sort((a, b) => a.entry.localeCompare(b.entry))
     const { sig, bytes } = await buildNamespaceDependency(nsRelDir, files, allNamespaceSpecifiers)
 
     dependencyBytes.set(sig, bytes)
@@ -434,7 +437,6 @@ const main = async (): Promise<void> => {
     addToBucket(resourcesByDir, nsRelDir, sig, 'dep')
   }
 
-  // drones (resources)
   const droneExternals = [...PLATFORM_EXTERNALS, ...allNamespaceSpecifiers]
   for (const src of sources.filter(s => s.kind === 'drone')) {
     const bytes = await buildDrone(src.entry, droneExternals)
@@ -444,7 +446,6 @@ const main = async (): Promise<void> => {
     addToBucket(resourcesByDir, src.relDir, sig, 'drone')
   }
 
-  // layers
   const tree = readDirTree(SRC_ROOT, '')
   const layers = new Map<string, string>()
 
@@ -483,17 +484,9 @@ const main = async (): Promise<void> => {
   for (const [sig, bytes] of dependencyBytes) writeSigFile(dependenciesDir, sig, bytes)
   for (const [sig, bytes] of resourceBytes) writeSigFile(resourcesDir, sig, bytes)
 
-  // -------------------------------------------------
-  // deploy (unchanged)
-  // -------------------------------------------------
-
   const ps1 = resolve(__dirname, 'deploy-azure.ps1')
   if (existsSync(ps1)) {
-    const r = spawnSync(
-      'powershell',
-      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1, '-Signature', rootLayerSig],
-      { stdio: 'inherit' },
-    )
+    const r = spawnSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1, '-Signature', rootLayerSig], { stdio: 'inherit' })
     if (r.status !== 0) throw new Error('deployment failed')
   }
 }

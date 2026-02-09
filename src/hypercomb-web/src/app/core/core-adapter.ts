@@ -52,15 +52,15 @@ export class CoreAdapter {
     // note: test-domain root also gets created by store.initialize()
     await this.lineage.initialize()
 
-    const { get , list } = window.ioc
-    const l = list();
-    const hostkey = 'Pixi Host'
-    const host = <any>get(hostkey)!
-    await host.encounter('testing')
+    // const { get , list } = window.ioc
+    // const l = list();
+    // const hostkey = 'Pixi Host'
+    // const host = <any>get(hostkey)!
+    // await host.encounter('testing')
 
-    const showkey = 'Show Honeycomb'
-    const show = <any>get(showkey)!
-    await show. encounter('testing')
+    // const showkey = 'Show Honeycomb'
+    // const show = <any>get(showkey)!
+    // await show. encounter('testing')
 
     // const l2 = list();
     // const hostkey2 = 'ddd2317a1089b8b067a2d1f1e48c0ddcc3f8a9fe49333e1a8a868c9f69e39a31'

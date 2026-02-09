@@ -1,4 +1,3 @@
-//import { helloWorld } from "@essentials/hello"
 import { helloWorld } from "@diamondcoreprocessor.com/hello-world"
 import { Drone } from "@hypercomb/core"
 
