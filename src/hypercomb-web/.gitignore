@@ -44,3 +44,4 @@ Thumbs.db
 
 # generated esm runtime surface (copied from @hypercomb/core/dist)
 public/core
+public/dev

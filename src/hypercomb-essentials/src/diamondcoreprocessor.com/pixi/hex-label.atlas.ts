@@ -1,4 +1,5 @@
-// src/hypercomb-drones/pixi/hex-label-atlas.ts
+// @essentials/default/hex-label.atlas
+// @hypercomb/pixi
 import { RenderTexture, Text, TextStyle, Texture } from 'pixi.js'
 
 export interface LabelUV {

@@ -1,3 +1,5 @@
+// @essentials/core
+
 import { Drone } from "@hypercomb/core"
 
 export class Settings extends Drone {

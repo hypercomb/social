@@ -3,8 +3,7 @@
 import { Drone } from '@hypercomb/core'
 import { Assets, Container, Geometry, Mesh, Texture } from 'pixi.js'
 import { PixiHostDrone } from './pixi-host.drone.js'
-import { HexLabelAtlas } from './hex-label.atlas.js'
-import { HexSdfTextureShader } from './hex-sdf.shader.js'
+import { HexSdfTextureShader, HexLabelAtlas } from '@diamondcoreprocessor.com/pixi';
 
 type Axial = { q: number; r: number }
 

@@ -1,5 +1,7 @@
+// @essentials/core
+
 import { Point } from "pixi.js"
-import { Settings } from "../settings.js"
+import { Settings } from '@diamondcoreprocessor.com/core'
 
 export class AxialCoordinate {
     private static axialToIndex: Map<number, number> = new Map()

@@ -1,5 +1,5 @@
 //import { helloWorld } from "@essentials/hello"
-import { helloWorld } from "@essentials/hello"
+import { helloWorld } from "@diamondcoreprocessor.com/hello-world"
 import { Drone } from "@hypercomb/core"
 
 export class HelloWorldDrone extends Drone {
@@ -23,6 +23,7 @@ export class HelloWorldDrone extends Drone {
   ]
 
   protected override heartbeat = async (grammar: string): Promise<void> => {
+     helloWorld()
      helloWorld()
   }
 }

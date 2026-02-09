@@ -1,3 +1,5 @@
+// @essentials/default/screen-service
+
 import { get } from "@hypercomb/core"
 import { ScreenState } from "./screen-state.js"
 

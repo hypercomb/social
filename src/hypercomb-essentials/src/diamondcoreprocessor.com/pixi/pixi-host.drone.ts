@@ -1,4 +1,5 @@
-// src/pixi/pixi-host.drone.ts
+// @hypercomb/pixi
+
 import { Drone } from '@hypercomb/core'
 import { Application, Container } from 'pixi.js'
 

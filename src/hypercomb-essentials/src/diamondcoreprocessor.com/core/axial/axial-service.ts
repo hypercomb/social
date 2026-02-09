@@ -1,3 +1,4 @@
+// @essentials/core
 
 import { Point } from "pixi.js"
 import { AxialCoordinate } from "./axial-coordinate.js"

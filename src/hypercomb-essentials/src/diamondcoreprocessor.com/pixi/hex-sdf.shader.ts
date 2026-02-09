@@ -1,4 +1,6 @@
-// src/hypercomb-drones/pixi/hex-sdf.shader.ts
+// @essentials/default/hex-sdf.shader
+// @hypercomb/pixi
+
 import { Shader, Texture } from 'pixi.js'
 
 type Vec2 = [number, number]

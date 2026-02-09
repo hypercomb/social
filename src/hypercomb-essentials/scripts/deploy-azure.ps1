@@ -1,4 +1,4 @@
-# scripts/deploy-azure.ps1
+# hypercomb-essentials/scripts/deploy-azure.ps1
 # deploys:
 #   dist/<signature>/** -> content/<signature>/**
 
@@ -16,9 +16,7 @@ $PackageDest   = "content/$Signature"
 
 $AccountName = "storagehypercomb"
 
-# -------------------------------------------------
 # validation
-# -------------------------------------------------
 
 if (-not (Test-Path $DistPath)) {
   Write-Error "dist folder does not exist: $DistPath"
@@ -40,9 +38,12 @@ if (-not (Test-Path (Join-Path $PackageSource "__resources__"))) {
   exit 1
 }
 
-# -------------------------------------------------
-# deploy package (layers + resources + metadata)
-# -------------------------------------------------
+if (-not (Test-Path (Join-Path $PackageSource "__dependencies__"))) {
+  Write-Error "__dependencies__ missing in package: $PackageSource"
+  exit 1
+}
+
+# deploy package
 
 Write-Host ""
 Write-Host "deploying hypercomb package"
@@ -64,10 +65,6 @@ if ($LASTEXITCODE -ne 0) {
   Write-Error "package deployment failed"
   exit 1
 }
-
-# -------------------------------------------------
-# done
-# -------------------------------------------------
 
 Write-Host ""
 Write-Host "deployment complete"
