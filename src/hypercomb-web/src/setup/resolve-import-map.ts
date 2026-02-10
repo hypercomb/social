@@ -9,7 +9,9 @@ const DEV_NAME_MANIFEST = '/dev/name.manifest.js'
 
 export const resolveImportMap = async (): Promise<ResolvedImports> => {
   const imports: ResolvedImports = {}
-
+  imports['@hypercomb/core'] = '/hypercomb-core.runtime.js'
+  imports['pixi.js'] = '/vendor/pixi.runtime.js'
+  
   if (environment.production) {
     const root = await navigator.storage.getDirectory()
 
@@ -48,11 +50,19 @@ export const resolveImportMap = async (): Promise<ResolvedImports> => {
       throw new Error('invalid dev name.manifest.js')
     }
 
+    for (const [alias, url] of Object.entries(devImports)) {
+      if (typeof alias !== 'string' || typeof url !== 'string') {
+        throw new Error('invalid dev name.manifest.js entry')
+      }
+      const runtime = `${location.origin}${url.trim()}`
+      console.log(`dev import map entry: ${alias} -> ${runtime}`)
+      imports[alias] = runtime
+    }
+
     Object.assign(imports, devImports as ResolvedImports)
   }
 
-  imports['@hypercomb/core'] = '/hypercomb-core.runtime.js'
-  imports['pixi.js'] = '/vendor/pixi.runtime.js'
+
 
   return imports
 }

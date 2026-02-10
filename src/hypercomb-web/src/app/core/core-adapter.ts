@@ -1,6 +1,4 @@
 // src/app/core/core-adapter.ts
-import './ioc.web'
-
 import { Injectable, inject } from '@angular/core'
 import { Lineage } from './lineage'
 import { Navigation } from './navigation'
@@ -42,9 +40,9 @@ export class CoreAdapter {
 
     // restore the layout where necessary
     const depth = 3
-    await this.dependency.load()
-    await this.restoration.load(this.store.opfsRoot, depth)
-    await this.restoration.restore(this.store.opfsRoot, depth)
+        await this.dependency.load()
+    // await this.restoration.load(this.store.opfsRoot, depth)
+    // await this.restoration.restore(this.store.opfsRoot, depth)
 
     await this.preloader.preload()
 
@@ -52,9 +50,9 @@ export class CoreAdapter {
     // note: test-domain root also gets created by store.initialize()
     await this.lineage.initialize()
 
-    // const { get , list } = window.ioc
-    // const l = list();
-    // const hostkey = 'Pixi Host'
+    const { get , list } = window.ioc
+    const l = list();
+    const hostkey = 'Pixi Host'
     // const host = <any>get(hostkey)!
     // await host.encounter('testing')
 

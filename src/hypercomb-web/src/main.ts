@@ -1,5 +1,6 @@
 // src/main.ts
 /// <reference path="./global.d.ts" />
+import './app/core/ioc.web'
 
 import { resolveImportMap } from './setup/resolve-import-map'
 

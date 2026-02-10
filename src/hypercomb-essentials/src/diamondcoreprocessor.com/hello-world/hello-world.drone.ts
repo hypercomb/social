@@ -24,5 +24,7 @@ export class HelloWorldDrone extends Drone {
   protected override heartbeat = async (grammar: string): Promise<void> => {
      helloWorld()
      helloWorld()
+     helloWorld()
+
   }
 }

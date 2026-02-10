@@ -10,5 +10,8 @@
   },
   "dependencies": {
     "@hypercomb/core": "file:../hypercomb-core"
+  },
+  "devDependencies": {
+    "pixi.js": "^8.16.0"
   }
 }

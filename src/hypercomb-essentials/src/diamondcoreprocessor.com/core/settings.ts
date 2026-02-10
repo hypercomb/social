@@ -1,8 +1,4 @@
-// @essentials/core
-
-import { Drone } from "@hypercomb/core"
-
-export class Settings extends Drone {
+export class Settings  {
 
     public static hexagonSide = 200
 
