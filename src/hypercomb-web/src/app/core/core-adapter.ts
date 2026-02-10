@@ -41,8 +41,8 @@ export class CoreAdapter {
     // restore the layout where necessary
     const depth = 3
         await this.dependency.load()
-    // await this.restoration.load(this.store.opfsRoot, depth)
-    // await this.restoration.restore(this.store.opfsRoot, depth)
+    await this.restoration.load(this.store.opfsRoot, depth)
+    await this.restoration.restore(this.store.opfsRoot, depth)
 
     await this.preloader.preload()
 
@@ -53,12 +53,12 @@ export class CoreAdapter {
     const { get , list } = window.ioc
     const l = list();
     const hostkey = 'Pixi Host'
-    // const host = <any>get(hostkey)!
-    // await host.encounter('testing')
+    const host = <any>get(hostkey)!
+    await host.encounter('testing')
 
-    // const showkey = 'Show Honeycomb'
-    // const show = <any>get(showkey)!
-    // await show. encounter('testing')
+    const showkey = 'Show Honeycomb'
+    const show = <any>get(showkey)!
+    await show. encounter('testing')
 
     // const l2 = list();
     // const hostkey2 = 'ddd2317a1089b8b067a2d1f1e48c0ddcc3f8a9fe49333e1a8a868c9f69e39a31'

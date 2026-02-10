@@ -9,7 +9,6 @@ export const appConfig: ApplicationConfig = {
   providers: [
     provideBrowserGlobalErrorListeners(),
     provideZoneChangeDetection({ eventCoalescing: true }),
-    
     provideAppInitializer(async () => {
       const preloader = inject(ScriptPreloader)
       return () => {

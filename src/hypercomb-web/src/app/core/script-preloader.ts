@@ -110,7 +110,10 @@ export class ScriptPreloader implements DroneResolver {
             const url = `/dev/${domain}/${Store.RESOURCES_DIRECTORY}/${sig}`
             const r = await fetch(url)
             if (!r.ok) continue
+            const text = await r.text()
+            console
             buffer = await r.arrayBuffer()
+            
           } catch (err) {
             console.log(`[store] failed to fetch resource ${sig} for domain ${domain}:`, err)
           }

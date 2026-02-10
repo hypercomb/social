@@ -1,9 +1,9 @@
 export class Settings  {
 
-    public static hexagonSide = 200
+    public hexagonSide = 200
 
-    public get height(): number { return Settings.hexagonSide * 2 }
-    public get width(): number { return Settings.hexagonSide * Math.sqrt(3) }
+    public get height(): number { return this.hexagonSide * 2 }
+    public get width(): number { return this.hexagonSide * Math.sqrt(3) }
     public get hexagonOffsetX(): number { return this.width / 2 }
     public get hexagonOffsetY(): number { return this.height / 2 }
 

@@ -136,7 +136,10 @@ export class Store {
       try {
         module = await import(/* @vite-ignore */ url)
         console.log('[store] module loaded:', module)
+      } catch (err) {
+        console.error(`[store] failed to import drone module from blob URL:`, err)
       } finally {
+        URL.revokeObjectURL(url)
       }
 
       // collect drone ctors only
@@ -167,6 +170,7 @@ export class Store {
           return instance
         } catch {
           // ignore bad exports and keep scanning
+          console.log(`[store] failed to instantiate drone from ctor. trying next if available.`)
         }
       }
     } catch {

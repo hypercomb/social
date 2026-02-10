@@ -1,7 +1,6 @@
 // @essentials/core
 
 import { Point } from "pixi.js"
-import { Settings } from '@diamondcoreprocessor.com/core'
 
 export class AxialCoordinate {
     private static axialToIndex: Map<number, number> = new Map()
@@ -41,6 +40,8 @@ export class AxialCoordinate {
     }
 
     private static getLocation = (q: number, r: number, s: number): Point => {
+        const { Settings } = (<any>window).ioc.get("@diamondcoreprocessor.com/core")
+
         let xCoord = Settings.hexagonSide * (Math.sqrt(3) * q + Math.sqrt(3) / 2 * r)
         let yCoord = Settings.hexagonSide * (3.0 / 2.0 * r)
         return new Point(xCoord, yCoord)
