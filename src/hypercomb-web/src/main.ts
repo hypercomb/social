@@ -1,47 +1,44 @@
-// src/main.ts
+// hypercomb-web/src/main.ts
 /// <reference path="./global.d.ts" />
-import './app/core/ioc.web'
 
+import './app/core/ioc.web'
 import { resolveImportMap } from './setup/resolve-import-map'
 
-const url =
-  window.location.pathname +
-  window.location.search +
-  window.location.hash
+const ensureSwControl = async (): Promise<void> => {
+  if (!('serviceWorker' in navigator)) return
 
-window.history.replaceState(
-  window.history.state ?? {},
-  '',
-  url
-)
+  await navigator.serviceWorker.register('/hypercomb.worker.js', { scope: '/' })
+  await navigator.serviceWorker.ready
 
-resolveImportMap()
-  .then(async importMap => {
+  if (navigator.serviceWorker.controller) return
 
-    const script = document.createElement('script')
-    script.type = 'importmap'
-    script.textContent = JSON.stringify({ imports: importMap }, null, 2)
-    document.head.appendChild(script)
+  const key = '__hypercomb_sw_reload__'
+  if (sessionStorage.getItem(key) === '1') return
 
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/hypercomb.worker.js', { scope: '/' })
-    }
+  sessionStorage.setItem(key, '1')
+  location.reload()
+}
 
+const attachImportMap = async (): Promise<void> => {
+  const imports = await resolveImportMap()
 
-    // 🔑 critical: allow the browser to commit the import map
-    await Promise.resolve()
+  const script = document.createElement('script')
+  script.type = 'importmap'
+  script.textContent = JSON.stringify({ imports }, null, 2)
+  document.head.appendChild(script)
 
-    // no reference to @essentials/* here
-    const { bootstrapApplication } = await import('@angular/platform-browser')
-    const { appConfig } = await import('./app/app.config')
-    const { App } = await import('./app/app')
+  await Promise.resolve()
+}
 
-    bootstrapApplication(App, appConfig)
-      .then(() => {
-        console.log('[main] 🎉 Angular bootstrap complete')
-      })
-      .catch(console.error)
-  })
-  .catch(err => {
-    console.error('[main] ❌ Failed to resolve import map:', err)
-  })
+const bootstrap = async (): Promise<void> => {
+  await attachImportMap()
+  await ensureSwControl()
+
+  const { bootstrapApplication } = await import('@angular/platform-browser')
+  const { appConfig } = await import('./app/app.config')
+  const { App } = await import('./app/app')
+
+  await bootstrapApplication(App, appConfig)
+}
+
+bootstrap().catch(err => console.error('[main] bootstrap failed:', err))

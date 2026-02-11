@@ -1,4 +1,4 @@
-// src/app/core/layer-filesystem-applier.service.ts
+// hypercomb-web/src/app/core/layer-filesystem-applier.service.ts
 
 import { Injectable } from '@angular/core'
 import { LayerRecord } from './layer-graph-resolver.service'
@@ -6,39 +6,62 @@ import { LayerRecord } from './layer-graph-resolver.service'
 @Injectable({ providedIn: 'root' })
 export class LayerFilesystemApplier {
 
-  private static readonly INSTALL_PREFIX = 'install-'
+  private static readonly INSTALL_SUFFIX = '-install'
+  private static readonly INSTALLED_SUFFIX = '-installed'
 
   public applyLayer = async (
-    parentDir: FileSystemDirectoryHandle,
+    targetDir: FileSystemDirectoryHandle,
+    installDir: FileSystemDirectoryHandle,
     layer: LayerRecord,
     childResolver: (sig: string) => Promise<LayerRecord | null>
-  ): Promise<void> => {
+  ): Promise<string[]> => {
 
+    const droneSigs: string[] = []
+
+    // child layers
+    // - create the child folder in the target tree
+    // - mirror the folder in the install tree
+    // - drop <childSig>-install inside the mirrored install folder
     for (const childSig of layer.children) {
       const childLayer = await childResolver(childSig)
       if (!childLayer) continue
 
-      const seedDir =
-        await parentDir.getDirectoryHandle(childLayer.name, { create: true })
+      await targetDir.getDirectoryHandle(childLayer.name, { create: true })
 
-      await seedDir.getFileHandle(
-        `${LayerFilesystemApplier.INSTALL_PREFIX}${childSig}`,
+      const childInstallDir =
+        await installDir.getDirectoryHandle(childLayer.name, { create: true })
+
+      await childInstallDir.getFileHandle(
+        `${childSig}${LayerFilesystemApplier.INSTALL_SUFFIX}`,
         { create: true }
       )
     }
 
+    // drones/resources
+    // - optional reference marker in the target dir (keeps existing behavior)
+    // - installer hydrates bytes into opfs/__resources__/sig
     for (const droneSig of layer.drones) {
-      await parentDir.getFileHandle(droneSig, { create: true })
+      await targetDir.getFileHandle(droneSig, { create: true })
+      droneSigs.push(droneSig)
     }
+
+    return droneSigs
   }
 
   public finalizeInstall = async (
-    parentDir: FileSystemDirectoryHandle,
-    seedSignature: string
+    installDir: FileSystemDirectoryHandle,
+    signature: string
   ): Promise<void> => {
 
-    parentDir.removeEntry(
-      `${LayerFilesystemApplier.INSTALL_PREFIX}${seedSignature}`
-    ).catch(() => {})
+    // installed marker is the truth
+    await installDir.getFileHandle(
+      `${signature}${LayerFilesystemApplier.INSTALLED_SUFFIX}`,
+      { create: true }
+    )
+
+    // clean up pending marker (best effort)
+    await installDir.removeEntry(
+      `${signature}${LayerFilesystemApplier.INSTALL_SUFFIX}`
+    ).catch(() => { })
   }
 }

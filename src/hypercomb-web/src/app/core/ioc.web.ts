@@ -1,4 +1,4 @@
-// src/app/core/ioc.web.ts
+// hypercomb-web/src/app/core/ioc.web.ts
 
 const instances = new Map<string, unknown>()
 const names = new Map<string, string>()
@@ -28,5 +28,5 @@ if (!window.ioc) {
     },
   }
 
-  console.log('[hypercomb] IOC installed')
+  console.log('[hypercomb] ioc installed')
 }

@@ -1,4 +1,4 @@
-// src/app/core/drone-payload-resolver.service.ts
+// hypercomb-web/src/app/core/drone-payload-resolver.service.ts
 
 import { Injectable, inject } from '@angular/core'
 import { has } from '@hypercomb/core'
@@ -9,16 +9,21 @@ export class DronePayloadResolver {
 
   private readonly store = inject(Store)
 
-  private static readonly DEFAULT_ORIGIN =
-    'https://storagehypercomb.blob.core.windows.net/content'
-
-  public ensure = async (signature: string): Promise<void> => {
+  public ensure = async (location: string, signature: string): Promise<void> => {
     if (has(signature)) return
 
     const cached = await this.readCached(signature)
     if (cached) return
 
-    const fetched = await this.fetch(signature)
+    // prefer the old worker path (dev cache-first, prod opfs fallback)
+    const workerBytes = await this.fetchFromWorker(signature)
+    if (workerBytes) {
+      await this.writeCached(signature, workerBytes)
+      return
+    }
+
+    // fallback: direct domain fetch (prod install base)
+    const fetched = await this.fetchFromLocation(location, signature)
     if (!fetched) return
 
     await this.writeCached(signature, fetched)
@@ -54,12 +59,25 @@ export class DronePayloadResolver {
     }
   }
 
-  private fetch = async (
+  private fetchFromWorker = async (signature: string): Promise<ArrayBuffer | null> => {
+    try {
+      const res = await fetch(`/opfs/__resources__/${signature}`)
+      if (!res.ok) return null
+      return await res.arrayBuffer()
+    } catch {
+      return null
+    }
+  }
+
+  private fetchFromLocation = async (
+    location: string,
     signature: string
   ): Promise<ArrayBuffer | null> => {
 
-    const url =
-      `${DronePayloadResolver.DEFAULT_ORIGIN}/__resources__/${signature}`
+    const base = (location ?? '').trim().replace(/\/+$/, '')
+    if (!base) return null
+
+    const url = `${base}/${signature}`
 
     const res = await fetch(url)
     if (!res.ok) return null

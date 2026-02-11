@@ -1,9 +1,6 @@
-// @hypercomb/core/src/ioc/ioc.ts
-export const register = <T>(
-  signature: string,
-  value: T,
-  name?: string
-): void => {
+// hypercomb-web/src/app/core/ioc.ts
+
+export const register = <T>(signature: string, value: T, name?: string): void => {
   window.ioc.register(signature, value, name)
 }
 

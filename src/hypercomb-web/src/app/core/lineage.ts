@@ -57,7 +57,7 @@ export class Lineage {
   }
 
   public explorerDir = async (): Promise<FileSystemDirectoryHandle | null> => {
-    return await this.tryResolveFrom(this.store.opfsDirectory(), this.explorerPath)
+    return await this.tryResolveFrom(this.store.opfsRoot, this.explorerPath)
   }
 
   // -------------------------------------------------
@@ -88,13 +88,13 @@ export class Lineage {
   // -------------------------------------------------
 
   public setDomain = async (name: string): Promise<void> => {
-    const raw = (name ?? '').trim()
-    if (!raw) return
+    // const raw = (name ?? '').trim()
+    // if (!raw) return
 
-    // do not create domains here
-    this.domainRoot = await this.store.domainDirectory(raw, false)
-    this.activeDomain.set(raw)
-    this.invalidate()
+    // // do not create domains here
+    // this.domainRoot = await this.store.domainDirectory(raw, false)
+    // this.activeDomain.set(raw)
+    // this.invalidate()
   }
 
   // -------------------------------------------------

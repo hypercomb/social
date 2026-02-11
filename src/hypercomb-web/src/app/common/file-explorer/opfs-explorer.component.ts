@@ -6,11 +6,12 @@ import { FormsModule } from '@angular/forms'
 import { MatButtonModule } from '@angular/material/button'
 import { MatIconModule } from '@angular/material/icon'
 import { MatTableModule } from '@angular/material/table'
-import { DomainName } from '../../core/domain-name'
 import { Lineage } from '../../core/lineage'
 import { Store } from '../../core/store'
 import { hypercomb } from '@hypercomb/core'
 import { ScriptPreloader } from '../../core/script-preloader'
+import { RuntimeMediator } from '../../core/runtime-mediator.service'
+import { LocationParser } from '../../core/initializers/location-parser'
 
 interface ExplorerEntry {
   name: string
@@ -46,7 +47,7 @@ export class OpfsExplorerComponent extends hypercomb {
   private readonly lineage = inject(Lineage)
   private readonly preloader = inject(ScriptPreloader)
   private readonly store = inject(Store)
-
+  private readonly runtime = inject(RuntimeMediator)
   // -------------------------------------------------
   // state
   // -------------------------------------------------
@@ -145,7 +146,7 @@ export class OpfsExplorerComponent extends hypercomb {
         } else {
           // fallback to preloader resolution
           const resolved = this.preloader.getActionName(name)
-          if (resolved) label = resolved 
+          if (resolved) label = resolved
         }
       }
 
@@ -172,25 +173,22 @@ export class OpfsExplorerComponent extends hypercomb {
   // create
   // -------------------------------------------------
 
+  // hypercomb-web/src/app/common/file-explorer/opfs-explorer.component.ts
+  // only the changed section
+
   public createFolder = async (): Promise<void> => {
     const raw = this.newName.trim()
     if (!raw) return
 
     if (this.directory() === '/') {
-      const parsed = DomainName.parse(raw)
-      const domain = parsed.folder
-      if (!domain) return
-
-      const root = this.store.opfsDirectory()
-      const domainDir = await root.getDirectoryHandle(domain, { create: true })
-
-      const handle = await domainDir.getFileHandle('__location__', { create: true })
-      const writable = await handle.createWritable()
-
       try {
-        await writable.write(raw)
-      } finally {
-        await writable.close()
+        // await this.installer.install(raw)
+
+        // run the exact same pipeline as boot
+        await this.runtime.sync()
+      } catch (e) {
+        console.error(e)
+        return
       }
 
       this.newName = ''
@@ -229,8 +227,8 @@ export class OpfsExplorerComponent extends hypercomb {
 
     // root-level: domain + install in one shot
     if (this.directory() === '/') {
-      const parsed = DomainName.parse(raw)
-      const domain = parsed.folder
+      const parsed = LocationParser.parse(raw)
+      const domain = parsed.domain
       if (!domain) return
 
       // extract last path segment (expected b64 / signature)
@@ -238,7 +236,7 @@ export class OpfsExplorerComponent extends hypercomb {
       const installId = parts[parts.length - 1]
       if (!installId) return
 
-      const root = this.store.opfsDirectory()
+      const root = this.store.opfsRoot
 
       // create domain folder
       const domainDir = await root.getDirectoryHandle(domain, { create: true })
@@ -299,7 +297,7 @@ export class OpfsExplorerComponent extends hypercomb {
     const bytes = await res.arrayBuffer()
 
     // ensure __dependencies__ exists at OPFS root
-    const root = this.store.opfsDirectory()
+    const root = this.store.opfsRoot
     const depsDir = await root.getDirectoryHandle('__dependencies__', { create: true })
 
     // write dependency by signature
@@ -323,7 +321,7 @@ export class OpfsExplorerComponent extends hypercomb {
 
   public copyDetails = async (e: ExplorerEntry, ev: MouseEvent): Promise<void> => {
     ev.stopPropagation()
-navigator.clipboard.writeText(e.name )
+    navigator.clipboard.writeText(e.name)
   }
 
   // -------------------------------------------------
@@ -353,33 +351,33 @@ navigator.clipboard.writeText(e.name )
     return false
   }
 
-private readonly resolveResourceLabel = async (
-  name: string
-): Promise<string | null> => {
-  try {
-    const root = this.store.opfsDirectory()
-    const resourcesDir = await root.getDirectoryHandle('__resources__', { create: false })
-    const handle = await resourcesDir.getFileHandle(name, { create: false })
-    const file = await handle.getFile()
-    if (file.size === 0) return null
+  private readonly resolveResourceLabel = async (
+    name: string
+  ): Promise<string | null> => {
+    try {
+      const root = this.store.opfsRoot
+      const resourcesDir = await root.getDirectoryHandle('__resources__', { create: false })
+      const handle = await resourcesDir.getFileHandle(name, { create: false })
+      const file = await handle.getFile()
+      if (file.size === 0) return null
 
-    // read only the first ~256 bytes
-    const slice = await file.slice(0, 256).text()
-    const firstLine = slice.split('\n')[0]?.trim()
-    if (!firstLine?.startsWith('// @hypercomb ')) return null
+      // read only the first ~256 bytes
+      const slice = await file.slice(0, 256).text()
+      const firstLine = slice.split('\n')[0]?.trim()
+      if (!firstLine?.startsWith('// @hypercomb ')) return null
 
-    const jsonText = firstLine.slice('// @hypercomb '.length)
-    const meta = JSON.parse(jsonText)
+      const jsonText = firstLine.slice('// @hypercomb '.length)
+      const meta = JSON.parse(jsonText)
 
-    if (typeof meta.label === 'string' && meta.label.trim()) {
-      return `${meta.label} – ${new Date(file.lastModified).toLocaleTimeString()}`
+      if (typeof meta.label === 'string' && meta.label.trim()) {
+        return `${meta.label} – ${new Date(file.lastModified).toLocaleTimeString()}`
+      }
+    } catch {
+      // ignore
     }
-  } catch {
-    // ignore
-  }
 
-  return null
-}
+    return null
+  }
 
 
 }

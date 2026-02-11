@@ -6,13 +6,10 @@ import { Drone, SignatureService } from '@hypercomb/core'
 type DroneCtor = new () => Drone
 
 export type DevManifest = {
-  // import map source: "@domain/seg" -> "/dev/<domain>/index.seg.runtime.js"
   imports: Record<string, string>
-  // resource discovery: "<domain>" -> ["<sig>", ...]
-  // optional (but required if you want dev drones to preload deterministically)
   resources?: Record<string, string[]>
-  // legacy support: "<domain>" -> runtime url that exports { resources: string[] }
-  domains?: Record<string, unknown>
+  domains?: Record<string, unknown> | unknown,
+  root: string 
 }
 
 @Injectable({ providedIn: 'root' })
@@ -20,30 +17,56 @@ export class Store {
 
   private static readonly HYPERCOMB_DIRECTORY = 'hypercomb'
   public static readonly RESOURCES_DIRECTORY = '__resources__'
+  public static readonly DEPENDENCIES_DIRECTORY = '__dependencies__'
+  public static readonly LAYERS_DIRECTORY = '__layers__'
+
+  private static readonly CACHE_NAME = 'hypercomb-modules-v1'
 
   public opfsRoot!: FileSystemDirectoryHandle
   private hypercombRoot!: FileSystemDirectoryHandle
-  public resources!: FileSystemDirectoryHandle
 
-  // dev manifest cache (used by discovery services)
+  public resources!: FileSystemDirectoryHandle
+  public dependencies!: FileSystemDirectoryHandle
+
+  public layers!: FileSystemDirectoryHandle
+
   private devManifestLoaded = false
   private devManifest: DevManifest | null = null
 
   // -------------------------------------------------
-  // initialization
+  // init
   // -------------------------------------------------
 
   public initialize = async (): Promise<void> => {
-    // opfs root is neutral. do not store anything directly here unless explicitly scoped.
     this.opfsRoot = await navigator.storage.getDirectory()
 
-    // fixed platform root for all platform-owned data
     this.hypercombRoot =
       await this.opfsRoot.getDirectoryHandle(Store.HYPERCOMB_DIRECTORY, { create: true })
 
-    // compatibility cache: resources stored by signature under opfs/__resources__
     this.resources =
       await this.opfsRoot.getDirectoryHandle(Store.RESOURCES_DIRECTORY, { create: true })
+
+    this.dependencies =
+      await this.opfsRoot.getDirectoryHandle(Store.DEPENDENCIES_DIRECTORY, { create: true })
+
+    this.layers =
+      await this.opfsRoot.getDirectoryHandle(Store.LAYERS_DIRECTORY, { create: true })
+  }
+
+  // -------------------------------------------------
+  // directories
+  // -------------------------------------------------
+
+  public hypercombDirectory = (): FileSystemDirectoryHandle => this.hypercombRoot
+  public resourcesDirectory = (): FileSystemDirectoryHandle => this.resources
+  public dependenciesDirectory = (): FileSystemDirectoryHandle => this.dependencies
+  public layersDirectory = (): FileSystemDirectoryHandle => this.layers
+
+  public domainLayersDirectory = async (
+    domain: string,
+    create: boolean = false
+  ): Promise<FileSystemDirectoryHandle> => {
+    return await this.layers.getDirectoryHandle(domain, { create })
   }
 
   // -------------------------------------------------
@@ -54,25 +77,11 @@ export class Store {
     if (this.devManifestLoaded) return this.devManifest
 
     this.devManifestLoaded = true
+
     try {
       const url = '/dev/name.manifest.js'
       const mod = await import(/* @vite-ignore */ url)
-
-      // supports either:
-      // - export const nameManifest = { imports, resources, domains }
-      // - export const imports = { ... } (and optional resources/domains)
-      const raw = (mod as any)?.nameManifest ?? mod
-
-      const imports = this.readRecordOfStrings((raw as any)?.imports ?? (mod as any)?.imports)
-      if (!imports) {
-        this.devManifest = null
-        return this.devManifest
-      }
-
-      const resources = this.readRecordOfStringArrays((raw as any)?.resources ?? (mod as any)?.resources) ?? undefined
-      const domains = this.readRecordUnknown((raw as any)?.domains ?? (mod as any)?.domains) ?? undefined
-
-      this.devManifest = { imports, resources, domains }
+      this.devManifest = mod
     } catch {
       this.devManifest = null
     }
@@ -80,138 +89,89 @@ export class Store {
     return this.devManifest
   }
 
-  private readRecordOfStrings = (v: unknown): Record<string, string> | null => {
-    if (!v || typeof v !== 'object') return null
-    const out: Record<string, string> = {}
-    for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
-      if (typeof k !== 'string' || !k.trim()) continue
-      if (typeof val !== 'string' || !val.trim()) continue
-      out[k] = val
-    }
-    return Object.keys(out).length ? out : null
-  }
 
-  private readRecordOfStringArrays = (v: unknown): Record<string, string[]> | null => {
-    if (!v || typeof v !== 'object') return null
-    const out: Record<string, string[]> = {}
-    for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
-      if (typeof k !== 'string' || !k.trim()) continue
-      if (!Array.isArray(val)) continue
-
-      const list = (val as unknown[])
-        .filter(x => typeof x === 'string' && x.trim().length)
-        .map(x => (x as string).trim())
-
-      if (!list.length) continue
-      out[k] = list
-    }
-    return Object.keys(out).length ? out : null
-  }
-
-  private readRecordUnknown = (v: unknown): Record<string, unknown> | null => {
-    if (!v || typeof v !== 'object') return null
-    const out: Record<string, unknown> = {}
-    for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
-      if (typeof k !== 'string' || !k.trim()) continue
-      out[k] = val
-    }
-    return Object.keys(out).length ? out : null
-  }
 
   // -------------------------------------------------
-  // drone loading (bytes -> module)
+  // drone loader
   // -------------------------------------------------
 
-  public getDrone = async (signature: string, buffer: ArrayBuffer): Promise<Drone | null> => {
+  public getDrone = async (
+    signature: string,
+    buffer: ArrayBuffer
+  ): Promise<Drone | null> => {
+
     const { register } = window.ioc
-    console.log('[store] loading drone module:', signature)
 
     try {
-      // bytes import path (works for opfs and dev fetch)
-      const blob = new Blob([buffer], { type: 'application/javascript' })
-      const url = URL.createObjectURL(blob)
+      await this.seedResourceCache(signature, buffer)
 
-      let module: unknown = null
-
+      let mod: Record<string, unknown> | null = null
       try {
-        module = await import(/* @vite-ignore */ url)
-        console.log('[store] module loaded:', module)
+        const url = `/opfs/__resources__/${signature}`
+        mod = (await import(/* @vite-ignore */ url)) as any
       } catch (err) {
-        console.error(`[store] failed to import drone module from blob URL:`, err)
-      } finally {
-        URL.revokeObjectURL(url)
+        console.error(`[store] failed to import module for signature ${signature}:`, err)
+        return null
       }
 
-      // collect drone ctors only
+      if (!mod || typeof mod !== 'object') return null
+
       const ctors: DroneCtor[] = []
 
-      for (const value of Object.values(module as Record<string, unknown>)) {
+      for (const value of Object.values(mod)) {
         if (typeof value !== 'function') continue
         const proto = (value as any).prototype
         if (!proto) continue
         ctors.push(value as unknown as DroneCtor)
       }
 
-      if (!ctors.length) {
-        console.warn('[store] no drone exports found. exports:', Object.keys(module as any))
-        return null
-      }
+      if (!ctors.length) return null
 
-      // first ctor that actually instantiates a drone wins
       for (const Ctor of ctors) {
         try {
           const instance = new Ctor()
 
-          // guard: must look like a drone instance
           if (!(instance instanceof Drone)) continue
           if (typeof instance.name !== 'string' || !instance.name.trim()) continue
 
-          register(instance.name, instance)
+          register(signature, instance, instance.name)
           return instance
         } catch {
-          // ignore bad exports and keep scanning
-          console.log(`[store] failed to instantiate drone from ctor. trying next if available.`)
+          // ignore and try next export
         }
       }
     } catch {
-      // ignore and keep scanning
+      // ignore
     }
 
     return null
   }
 
-  // -------------------------------------------------
-  // directory helpers
-  // -------------------------------------------------
+  private seedResourceCache = async (
+    signature: string,
+    buffer: ArrayBuffer
+  ): Promise<void> => {
 
-  public opfsDirectory = (): FileSystemDirectoryHandle => this.opfsRoot
-  public hypercombDirectory = (): FileSystemDirectoryHandle => this.hypercombRoot
-  public resourcesDirectory = (): FileSystemDirectoryHandle => this.resources
+    const opfsUrl =
+      new URL(`/opfs/__resources__/${signature}`, location.origin).toString()
 
-  public domainDirectory = async (name: string, create: boolean = false): Promise<FileSystemDirectoryHandle> => {
-    const raw = (name ?? '').trim()
-
-    if (!raw || raw === '.' || raw === '..' || raw.startsWith('__')) {
-      throw new Error(`[store] invalid domain name: "${raw}"`)
+    try {
+      const cache = await caches.open(Store.CACHE_NAME)
+      await cache.put(opfsUrl, new Response(buffer, { headers: this.jsNoStoreHeaders() }))
+    } catch {
+      // ignore
     }
-
-    if (create) {
-      const ok = /^[a-z0-9.-]+$/i.test(raw) && raw.includes('.')
-      if (!ok) {
-        throw new Error(`[store] refused to create non-host domain: "${raw}"`)
-      }
-    }
-
-    return await this.opfsRoot.getDirectoryHandle(raw, { create })
   }
 
-  public domainResourcesDirectory = async (domain: string, create: boolean = false): Promise<FileSystemDirectoryHandle> => {
-    const dir = await this.domainDirectory(domain, create)
-    return await dir.getDirectoryHandle(Store.RESOURCES_DIRECTORY, { create })
+  private jsNoStoreHeaders = (): Headers => {
+    const h = new Headers()
+    h.set('content-type', 'application/javascript')
+    h.set('cache-control', 'no-store')
+    return h
   }
 
   // -------------------------------------------------
-  // persistence (compat cache)
+  // resource put
   // -------------------------------------------------
 
   public put = async (bytes: ArrayBuffer): Promise<string> => {

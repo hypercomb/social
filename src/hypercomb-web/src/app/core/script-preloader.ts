@@ -4,7 +4,6 @@ import { inject, Injectable, signal } from '@angular/core'
 import { environment } from '../../environments/environment'
 import { Drone, type DroneResolver } from '@hypercomb/core'
 import { Lineage } from './lineage'
-import { DirectoryWalkerService } from './directory-walker.service'
 import { Store, type DevManifest } from './store'
 
 export interface ActionDescriptor {
@@ -16,13 +15,10 @@ export interface ActionDescriptor {
 export class ScriptPreloader implements DroneResolver {
 
   private readonly lineage = inject(Lineage)
-  private readonly walker = inject(DirectoryWalkerService)
   private readonly store = inject(Store)
 
-  // authoritative projection (no instances here)
   private readonly bySignature = new Map<string, ActionDescriptor>()
 
-  // projected state (ui)
   public readonly actions = signal<readonly ActionDescriptor[]>([])
   public readonly actionNames = signal<readonly string[]>([])
   public readonly resourceCount = signal(0)
@@ -36,10 +32,6 @@ export class ScriptPreloader implements DroneResolver {
   public find = async (_name: string): Promise<Drone[]> => {
     return []
   }
-
-  // -------------------------------------------------
-  // bulk initialization (discovery only)
-  // -------------------------------------------------
 
   public preload = async (): Promise<void> => {
     this.bySignature.clear()
@@ -56,12 +48,7 @@ export class ScriptPreloader implements DroneResolver {
     this.refreshProjection()
   }
 
-  // -------------------------------------------------
-  // production: scan available opfs resource locations
-  // -------------------------------------------------
-
   private preloadFromOpfs = async (): Promise<void> => {
-    // a) scan domain folders: opfs/<domain>/__resources__/<sig>
     for await (const [name, entry] of this.store.opfsRoot.entries()) {
       if (entry.kind !== 'directory') continue
       if (!this.isDomainName(name)) continue
@@ -78,7 +65,6 @@ export class ScriptPreloader implements DroneResolver {
       await this.loadAllFromDirectory(resourcesDir)
     }
 
-    // b) compatibility: opfs/__resources__/<sig>
     try {
       const globalResources = await this.store.opfsRoot.getDirectoryHandle(Store.RESOURCES_DIRECTORY)
       await this.loadAllFromDirectory(globalResources)
@@ -87,80 +73,27 @@ export class ScriptPreloader implements DroneResolver {
     }
   }
 
-  // -------------------------------------------------
-  // development: use manifest.resources -> /dev/<domain>/__resources__/<sig>
-  // -------------------------------------------------
-
   private preloadFromDev = async (): Promise<void> => {
     const manifest = await this.store.getDevManifest()
     if (!manifest) return
 
-    // preferred contract (new):
-    // name.manifest.js exports { imports, resources }
     const resourcesByDomain = this.readResourcesByDomain(manifest)
+    if (!resourcesByDomain) return
 
-    if (resourcesByDomain) {
-      for (const [domain, sigs] of Object.entries(resourcesByDomain).sort((a, b) => a[0].localeCompare(b[0]))) {
-        for (const sig of sigs) {
-          if (!this.isSignature(sig)) continue
-          if (this.bySignature.has(sig)) continue
-
-          let buffer: ArrayBuffer | null = null
-          try {
-            const url = `/dev/${domain}/${Store.RESOURCES_DIRECTORY}/${sig}`
-            const r = await fetch(url)
-            if (!r.ok) continue
-            const text = await r.text()
-            console
-            buffer = await r.arrayBuffer()
-            
-          } catch (err) {
-            console.log(`[store] failed to fetch resource ${sig} for domain ${domain}:`, err)
-          }
-
-          if (!buffer) continue
-
-          const drone = await this.store.getDrone(sig, buffer)
-          if (!drone) continue
-
-          const { register } = window.ioc
-          register(sig, drone)
-        }
-      }
-
-      return
-    }
-
-    // legacy fallback (old): manifest.domains -> runtime url -> runtime.resources[]
-    const domains = manifest.domains as Record<string, unknown> | undefined
-    if (!domains || typeof domains !== 'object') return
-
-    for (const [domain, domainInfo] of Object.entries(domains)) {
-      const runtimeUrl = this.getRuntimeUrl(domainInfo)
-      if (!runtimeUrl) continue
-
-      let runtime: any
-      try {
-        runtime = await import(/* @vite-ignore */ runtimeUrl)
-      } catch {
-        continue
-      }
-
-      const sigs = runtime?.resources
-      if (!Array.isArray(sigs)) continue
-
+    for (const [domain, sigs] of Object.entries(resourcesByDomain).sort((a, b) => a[0].localeCompare(b[0]))) {
       for (const sig of sigs) {
         if (!this.isSignature(sig)) continue
         if (this.bySignature.has(sig)) continue
 
         let buffer: ArrayBuffer | null = null
         try {
+          // IMPORTANT: fetch as non-js so vite will not import-analyze it
           const url = `/dev/${domain}/${Store.RESOURCES_DIRECTORY}/${sig}`
-          const r = await fetch(url)
+          const r = await fetch(url, { cache: 'no-store' })
           if (!r.ok) continue
           buffer = await r.arrayBuffer()
-        } catch (err) {
-          console.log(`[store] failed to fetch resource ${sig} for domain ${domain}:`, err)
+        } catch {
+          // ignore
         }
 
         if (!buffer) continue
@@ -168,8 +101,8 @@ export class ScriptPreloader implements DroneResolver {
         const drone = await this.store.getDrone(sig, buffer)
         if (!drone) continue
 
-        const { register } = window.ioc
-        register(sig, drone)
+        this.bySignature.set(sig, { signature: sig, name: drone.name })
+        this.resourceCount.update(v => v + 1)
       }
     }
   }
@@ -195,10 +128,6 @@ export class ScriptPreloader implements DroneResolver {
     return Object.keys(out).length ? out : null
   }
 
-  // -------------------------------------------------
-  // helpers
-  // -------------------------------------------------
-
   private loadAllFromDirectory = async (resourcesDir: FileSystemDirectoryHandle): Promise<void> => {
     for await (const [sig, entry] of resourcesDir.entries()) {
       if (entry.kind !== 'file') continue
@@ -212,29 +141,18 @@ export class ScriptPreloader implements DroneResolver {
         const drone = await this.store.getDrone(sig, buffer)
         if (!drone) continue
 
-        const { register } = window.ioc
-        register(sig, drone)
+        this.bySignature.set(sig, { signature: sig, name: drone.name })
+        this.resourceCount.update(v => v + 1)
       } catch {
-        // ignore and continue
+        // ignore
       }
     }
   }
 
   private refreshProjection = (): void => {
-    const list = [...this.bySignature.values()]
-      .sort((a, b) => a.name.localeCompare(b.name))
-
+    const list = [...this.bySignature.values()].sort((a, b) => a.name.localeCompare(b.name))
     this.actions.set(list)
     this.actionNames.set(list.map(a => a.name.replace(/-/g, ' ')))
-  }
-
-  private getRuntimeUrl = (domainInfo: unknown): string | null => {
-    if (typeof domainInfo === 'string') return domainInfo
-    if (!domainInfo || typeof domainInfo !== 'object') return null
-
-    const v = domainInfo as any
-    const url = v.runtimeUrl ?? v.runtime ?? v.url
-    return typeof url === 'string' ? url : null
   }
 
   private isSignature = (name: string): boolean =>
@@ -244,9 +162,8 @@ export class ScriptPreloader implements DroneResolver {
     const raw = (name ?? '').trim()
     if (!raw || raw.startsWith('__')) return false
     if (raw === Store.RESOURCES_DIRECTORY) return false
+    if (raw === Store.DEPENDENCIES_DIRECTORY) return false
     if (raw === 'hypercomb') return false
-
-    // "host-like" folders only
     return /^[a-z0-9.-]+$/i.test(raw) && raw.includes('.')
   }
 }

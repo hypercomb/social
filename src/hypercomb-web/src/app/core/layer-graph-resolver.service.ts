@@ -1,4 +1,4 @@
-// src/app/core/layer-graph-resolver.service.ts
+// hypercomb-web/src/app/core/layer-graph-resolver.service.ts
 
 import { Injectable, inject } from '@angular/core'
 import { Store } from './store'
@@ -12,18 +12,32 @@ export type LayerRecord = {
 @Injectable({ providedIn: 'root' })
 export class LayerGraphResolver {
 
+  // -------------------------------------------------
+  // dependencies
+  // -------------------------------------------------
+
   private readonly store = inject(Store)
+
+  // -------------------------------------------------
+  // fields
+  // -------------------------------------------------
 
   private readonly decoder = new TextDecoder()
   private readonly encoder = new TextEncoder()
 
-  private static readonly LAYERS_DIRECTORY = '__layers__'
+  // -------------------------------------------------
+  // api
+  // -------------------------------------------------
 
   public resolve = async (
-    layersDir: FileSystemDirectoryHandle,
+    domain: string,
     location: string,
     signature: string
   ): Promise<LayerRecord | null> => {
+
+    if (!this.isSignature(signature)) return null
+
+    const layersDir = await this.store.domainLayersDirectory(domain, true)
 
     const result = await this.getLayerJsonText(layersDir, location, signature)
     if (!result.content) return null
@@ -83,7 +97,7 @@ export class LayerGraphResolver {
     signature: string
   ): Promise<string | null> => {
 
-    const res = await fetch(`${location}/${signature}`)
+    const res = await fetch(`${location.replace(/\/+$/, '')}/${signature}`)
     if (!res.ok) return null
     return await res.text()
   }

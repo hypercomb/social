@@ -1,53 +1,134 @@
-// hypercomb.worker.js
-// production service worker
-// - serves OPFS-backed ESM dependencies
-// - content-addressed by signature
-// - no framework coupling
-self.addEventListener("fetch", (event) => {
-  const url = new URL(event.request.url);
+// hypercomb-web/public/hypercomb.worker.js
+// service worker
+// - serves esm modules from /opfs/** without letting vite transform them
+// - cache-first (dev seeds cache with bytes)
+// - opfs fallback (prod reads bytes from opfs)
 
-  if (!url.pathname.startsWith("/opfs/__dependencies__/")) return;
+const CACHE_NAME = 'hypercomb-modules-v1'
 
-   // <- this will break every time the URL matches
-  event.respondWith(handleDependencyRequest(url));
-});
+const DEP_PREFIX = '/opfs/__dependencies__/'
+const RES_PREFIX = '/opfs/__resources__/'
 
-self.addEventListener("install", (event) => {
-  self.skipWaiting();
-});
+self.addEventListener('install', (event) => {
+  event.waitUntil(self.skipWaiting())
+})
 
-self.addEventListener("activate", (event) => {
-  event.waitUntil(self.clients.claim());
-});
+self.addEventListener('activate', (event) => {
+  event.waitUntil(self.clients.claim())
+})
 
-self.addEventListener("fetch", (event) => {
-  const url = new URL(event.request.url);
+self.addEventListener('fetch', (event) => {
+  const url = new URL(event.request.url)
+  console.log('[SW] fetch', url.pathname)
+  
+  if (url.origin !== self.location.origin) return
 
-  if (!url.pathname.startsWith("/opfs/__dependencies__/")) return;
+  const method = (event.request.method || 'GET').toUpperCase()
+  if (method !== 'GET' && method !== 'HEAD') return
 
-  event.respondWith(handleDependencyRequest(url));
-});
+  if (url.pathname.startsWith(DEP_PREFIX)) {
+    event.respondWith(handleModuleRequest(event.request, '__dependencies__'))
+    return
+  }
 
-async function handleDependencyRequest(url) {
+  if (url.pathname.startsWith(RES_PREFIX)) {
+    event.respondWith(handleModuleRequest(event.request, '__resources__'))
+    return
+  }
+})
+
+async function handleModuleRequest(request, dirName) {
+  const url = new URL(request.url)
+  const sig = readSignature(url.pathname)
+  if (!sig) return new Response('invalid signature', { status: 400 })
+
+  const cached = await tryCacheMatch(request)
+  if (cached) return toHeadIfNeeded(request, cached)
+
+  const opfs = await tryReadFromOpfs(dirName, sig)
+  if (opfs) return toHeadIfNeeded(request, opfs)
+
+  return new Response('module not found', { status: 404 })
+}
+
+function readSignature(pathname) {
+  const last = pathname.split('/').pop() ?? ''
+  const token = last.endsWith('.js') ? last.slice(0, -3) : last
+  return /^[a-f0-9]{64}$/i.test(token) ? token : null
+}
+
+async function tryCacheMatch(request) {
   try {
-    const sig = url.pathname.split("/").pop().replace(".js", "");
-    if (!sig || !/^[a-f0-9]{64}$/i.test(sig)) {
-      return new Response("invalid signature", { status: 400 });
+    const cache = await caches.open(CACHE_NAME)
+    return await cache.match(request, { ignoreSearch: false })
+  } catch {
+    return null
+  }
+}
+
+function toHeadIfNeeded(request, response) {
+  const method = (request.method || 'GET').toUpperCase()
+  if (method !== 'HEAD') return response
+  const headers = new Headers(response.headers)
+  return new Response(null, { status: response.status, headers })
+}
+
+async function tryReadFromOpfs(dirName, sig) {
+  try {
+    const root = await self.navigator.storage.getDirectory()
+
+    // root-scoped: opfs/__resources__/sig or opfs/__dependencies__/sig
+    const direct = await readFromDir(root, dirName, sig)
+    if (direct) return direct
+
+    // domain-scoped: opfs/<domain>/__resources__/sig or opfs/<domain>/__dependencies__/sig
+    for await (const [name, entry] of root.entries()) {
+      if (!entry || entry.kind !== 'directory') continue
+      if (!isDomainName(name)) continue
+      const nested = await readFromNested(entry, dirName, sig)
+      if (nested) return nested
     }
 
-    const root = await navigator.storage.getDirectory();
-    const depDir = await root.getDirectoryHandle("__dependencies__");
-    const fileHandle = await depDir.getFileHandle(sig);
-    const file = await fileHandle.getFile();
-    const buffer = await file.arrayBuffer();
-
-    return new Response(buffer, {
-      headers: {
-        "Content-Type": "application/javascript",
-        "Cache-Control": "public, max-age=31536000, immutable",
-      },
-    });
-  } catch (err) {
-    return new Response("dependency not found", { status: 404 });
+    return null
+  } catch {
+    return null
   }
+}
+
+async function readFromDir(rootDir, dirName, sig) {
+  try {
+    const dir = await rootDir.getDirectoryHandle(dirName)
+    const fileHandle = await dir.getFileHandle(sig)
+    const file = await fileHandle.getFile()
+    return asJsResponse(file, false)
+  } catch {
+    return null
+  }
+}
+
+async function readFromNested(domainDir, dirName, sig) {
+  try {
+    const dir = await domainDir.getDirectoryHandle(dirName)
+    const fileHandle = await dir.getFileHandle(sig)
+    const file = await fileHandle.getFile()
+    return asJsResponse(file, true)
+  } catch {
+    return null
+  }
+}
+
+function asJsResponse(file, immutable) {
+  const headers = new Headers()
+  headers.set('content-type', 'application/javascript')
+  headers.set('cache-control', immutable ? 'public, max-age=31536000, immutable' : 'no-store')
+  return new Response(file, { status: 200, headers })
+}
+
+function isDomainName(name) {
+  const raw = (name ?? '').trim()
+  if (!raw || raw.startsWith('__')) return false
+  if (raw === '__resources__') return false
+  if (raw === '__dependencies__') return false
+  if (raw === 'hypercomb') return false
+  return /^[a-z0-9.-]+$/i.test(raw) && raw.includes('.')
 }
