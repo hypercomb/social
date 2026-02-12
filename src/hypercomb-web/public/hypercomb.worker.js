@@ -7,7 +7,7 @@
 const CACHE_NAME = 'hypercomb-modules-v1'
 
 const DEP_PREFIX = '/opfs/__dependencies__/'
-const RES_PREFIX = '/opfs/__resources__/'
+const RES_PREFIX = '/opfs/__drones__/'
 
 self.addEventListener('install', (event) => {
   event.waitUntil(self.skipWaiting())
@@ -32,7 +32,7 @@ self.addEventListener('fetch', (event) => {
   }
 
   if (url.pathname.startsWith(RES_PREFIX)) {
-    event.respondWith(handleModuleRequest(event.request, '__resources__'))
+    event.respondWith(handleModuleRequest(event.request, '__drones__'))
     return
   }
 })
@@ -77,11 +77,11 @@ async function tryReadFromOpfs(dirName, sig) {
   try {
     const root = await self.navigator.storage.getDirectory()
 
-    // root-scoped: opfs/__resources__/sig or opfs/__dependencies__/sig
+    // root-scoped: opfs/__drones__/sig or opfs/__dependencies__/sig
     const direct = await readFromDir(root, dirName, sig)
     if (direct) return direct
 
-    // domain-scoped: opfs/<domain>/__resources__/sig or opfs/<domain>/__dependencies__/sig
+    // domain-scoped: opfs/<domain>/__drones__/sig or opfs/<domain>/__dependencies__/sig
     for await (const [name, entry] of root.entries()) {
       if (!entry || entry.kind !== 'directory') continue
       if (!isDomainName(name)) continue
@@ -127,7 +127,7 @@ function asJsResponse(file, immutable) {
 function isDomainName(name) {
   const raw = (name ?? '').trim()
   if (!raw || raw.startsWith('__')) return false
-  if (raw === '__resources__') return false
+  if (raw === '__drones__') return false
   if (raw === '__dependencies__') return false
   if (raw === 'hypercomb') return false
   return /^[a-z0-9.-]+$/i.test(raw) && raw.includes('.')

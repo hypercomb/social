@@ -8,7 +8,7 @@ import { LayerInstallContext, LayerInstallFile, LayerInstallSource } from './lay
 import { environment } from '../../environments/environment'
 
 @Injectable({ providedIn: 'root' })
-export class LayerInstallCollectionService {
+export class LayerInstallCollection {
 
   private readonly opfs = inject(OpfsInstallFileSource)
   private readonly dev = inject(DevLayerSource)

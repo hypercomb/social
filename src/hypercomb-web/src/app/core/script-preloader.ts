@@ -57,7 +57,7 @@ export class ScriptPreloader implements DroneResolver {
 
       let resourcesDir: FileSystemDirectoryHandle
       try {
-        resourcesDir = await domainDir.getDirectoryHandle(Store.RESOURCES_DIRECTORY)
+        resourcesDir = await domainDir.getDirectoryHandle(Store.DRONES_DIRECTORY)
       } catch {
         continue
       }
@@ -66,7 +66,7 @@ export class ScriptPreloader implements DroneResolver {
     }
 
     try {
-      const globalResources = await this.store.opfsRoot.getDirectoryHandle(Store.RESOURCES_DIRECTORY)
+      const globalResources = await this.store.opfsRoot.getDirectoryHandle(Store.DRONES_DIRECTORY)
       await this.loadAllFromDirectory(globalResources)
     } catch {
       // ignore
@@ -88,7 +88,7 @@ export class ScriptPreloader implements DroneResolver {
         let buffer: ArrayBuffer | null = null
         try {
           // IMPORTANT: fetch as non-js so vite will not import-analyze it
-          const url = `/dev/${domain}/${Store.RESOURCES_DIRECTORY}/${sig}`
+          const url = `/dev/${domain}/${Store.DRONES_DIRECTORY}/${sig}`
           const r = await fetch(url, { cache: 'no-store' })
           if (!r.ok) continue
           buffer = await r.arrayBuffer()
@@ -161,7 +161,7 @@ export class ScriptPreloader implements DroneResolver {
   private isDomainName = (name: string): boolean => {
     const raw = (name ?? '').trim()
     if (!raw || raw.startsWith('__')) return false
-    if (raw === Store.RESOURCES_DIRECTORY) return false
+    if (raw === Store.DRONES_DIRECTORY) return false
     if (raw === Store.DEPENDENCIES_DIRECTORY) return false
     if (raw === 'hypercomb') return false
     return /^[a-z0-9.-]+$/i.test(raw) && raw.includes('.')

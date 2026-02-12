@@ -2,15 +2,14 @@
 
 import { Injectable, inject } from '@angular/core'
 import { DronePayloadResolver } from './drone-payload-resolver.service'
-import { LayerInstallCollectionService } from './layer-install-collection.service'
-import { RuntimeMode } from './runtime-mode'
+import { LayerInstallCollection } from './layer-install-collection'
 import { Store } from './store'
 
 @Injectable({ providedIn: 'root' })
 export class LayerRestorationService {
 
   private readonly drones = inject(DronePayloadResolver)
-  private readonly installs = inject(LayerInstallCollectionService)
+  private readonly installs = inject(LayerInstallCollection)
   private readonly store = inject(Store)
 
   private static readonly LOCATION_FILE = '__location__'

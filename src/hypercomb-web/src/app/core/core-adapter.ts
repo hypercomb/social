@@ -38,7 +38,7 @@ export class CoreAdapter {
     // opfs roots
     await this.store.initialize()
 
-     // layers -> hydrate drones -> deps (single canonical pipeline)
+    //  // layers -> hydrate drones -> deps (single canonical pipeline)
     await this.runtime.sync()
     
     // optional: dev diagnostics

@@ -39,7 +39,7 @@ export class LayerFilesystemApplier {
 
     // drones/resources
     // - optional reference marker in the target dir (keeps existing behavior)
-    // - installer hydrates bytes into opfs/__resources__/sig
+    // - installer hydrates bytes into opfs/__drones__/sig
     for (const droneSig of layer.drones) {
       await targetDir.getFileHandle(droneSig, { create: true })
       droneSigs.push(droneSig)

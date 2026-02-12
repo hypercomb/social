@@ -19,13 +19,22 @@ export class DevInitializer implements IDomainInitializer {
 
     // create the domain directory inside layers
     const domainLayers = await this.store.domainLayersDirectory(parsed.domain, true)
-    
-    const path = `/dev/${parsed.domain}${parsed.path}`
+
+    const handle = await domainLayers.getFileHandle(`${parsed.signature}-install`, { create: true })
+    const existing = await handle.getFile()
+    if (existing.size > 0) return
+
+    const path = `/dev/${parsed.domain}${parsed.path}.json`
     const res = await fetch(path)
 
     if (!res.ok) throw new Error(`[dev-initializer] failed to fetch layer: ${res.status} ${res.statusText}`)
-    const handle = await domainLayers.getFileHandle(`${parsed.signature}-install`, { create: true })
+        
     const writable = await handle.createWritable()
-    try { await writable.write(await res.arrayBuffer()) } finally { await writable.close() }
+
+    try {
+      await writable.write(await res.arrayBuffer())
+    } finally {
+      await writable.close()
+    }
   }
 }

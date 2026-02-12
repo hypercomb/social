@@ -6,6 +6,7 @@ import { Drone, SignatureService } from '@hypercomb/core'
 type DroneCtor = new () => Drone
 
 export type DevManifest = {
+  dependencies: Record<string, string>
   imports: Record<string, string>
   resources?: Record<string, string[]>
   domains?: Record<string, unknown> | unknown,
@@ -16,7 +17,7 @@ export type DevManifest = {
 export class Store {
 
   private static readonly HYPERCOMB_DIRECTORY = 'hypercomb'
-  public static readonly RESOURCES_DIRECTORY = '__resources__'
+  public static readonly DRONES_DIRECTORY = '__drones__'
   public static readonly DEPENDENCIES_DIRECTORY = '__dependencies__'
   public static readonly LAYERS_DIRECTORY = '__layers__'
 
@@ -25,7 +26,7 @@ export class Store {
   public opfsRoot!: FileSystemDirectoryHandle
   private hypercombRoot!: FileSystemDirectoryHandle
 
-  public resources!: FileSystemDirectoryHandle
+  public drones!: FileSystemDirectoryHandle
   public dependencies!: FileSystemDirectoryHandle
 
   public layers!: FileSystemDirectoryHandle
@@ -43,8 +44,8 @@ export class Store {
     this.hypercombRoot =
       await this.opfsRoot.getDirectoryHandle(Store.HYPERCOMB_DIRECTORY, { create: true })
 
-    this.resources =
-      await this.opfsRoot.getDirectoryHandle(Store.RESOURCES_DIRECTORY, { create: true })
+    this.drones =
+      await this.opfsRoot.getDirectoryHandle(Store.DRONES_DIRECTORY, { create: true })
 
     this.dependencies =
       await this.opfsRoot.getDirectoryHandle(Store.DEPENDENCIES_DIRECTORY, { create: true })
@@ -58,7 +59,7 @@ export class Store {
   // -------------------------------------------------
 
   public hypercombDirectory = (): FileSystemDirectoryHandle => this.hypercombRoot
-  public resourcesDirectory = (): FileSystemDirectoryHandle => this.resources
+  public dronesDirectory = (): FileSystemDirectoryHandle => this.drones
   public dependenciesDirectory = (): FileSystemDirectoryHandle => this.dependencies
   public layersDirectory = (): FileSystemDirectoryHandle => this.layers
 
@@ -107,7 +108,7 @@ export class Store {
 
       let mod: Record<string, unknown> | null = null
       try {
-        const url = `/opfs/__resources__/${signature}`
+        const url = `/opfs/__drones__/${signature}`
         mod = (await import(/* @vite-ignore */ url)) as any
       } catch (err) {
         console.error(`[store] failed to import module for signature ${signature}:`, err)
@@ -153,7 +154,7 @@ export class Store {
   ): Promise<void> => {
 
     const opfsUrl =
-      new URL(`/opfs/__resources__/${signature}`, location.origin).toString()
+      new URL(`/opfs/__drones__/${signature}`, location.origin).toString()
 
     try {
       const cache = await caches.open(Store.CACHE_NAME)
@@ -177,7 +178,7 @@ export class Store {
   public put = async (bytes: ArrayBuffer): Promise<string> => {
     const signature = await SignatureService.sign(bytes)
 
-    const handle = await this.resources.getFileHandle(signature, { create: true })
+    const handle = await this.drones.getFileHandle(signature, { create: true })
     const writable = await handle.createWritable()
 
     try {

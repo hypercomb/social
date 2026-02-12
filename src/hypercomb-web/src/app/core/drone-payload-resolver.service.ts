@@ -61,7 +61,7 @@ export class DronePayloadResolver {
 
   private fetchFromWorker = async (signature: string): Promise<ArrayBuffer | null> => {
     try {
-      const res = await fetch(`/opfs/__resources__/${signature}`)
+      const res = await fetch(`/opfs/__drones__/${signature}`)
       if (!res.ok) return null
       return await res.arrayBuffer()
     } catch {

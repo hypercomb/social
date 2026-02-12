@@ -31,8 +31,8 @@ if (-not (Test-Path (Join-Path $PackageSource "__layers__"))) {
   exit 1
 }
 
-if (-not (Test-Path (Join-Path $PackageSource "__resources__"))) {
-  Write-Error "__resources__ missing in package: $PackageSource"
+if (-not (Test-Path (Join-Path $PackageSource "__drones__"))) {
+  Write-Error "__drones__ missing in package: $PackageSource"
   exit 1
 }
 

@@ -315,14 +315,38 @@ export class OpfsExplorerComponent extends hypercomb {
   }
 
 
+  // src/app/common/file-explorer/opfs-explorer.component.ts
+  // only the changed sections
+
   // -------------------------------------------------
   // clipboard
   // -------------------------------------------------
 
   public copyDetails = async (e: ExplorerEntry, ev: MouseEvent): Promise<void> => {
     ev.stopPropagation()
-    navigator.clipboard.writeText(e.name)
+
+    // only files have bytes to copy
+    if (e.kind !== 'file') return
+
+    const dir = await this.lineage.explorerDir()
+    if (!dir) return
+
+    try {
+      const handle = await dir.getFileHandle(e.name, { create: false })
+      const file = await handle.getFile()
+
+      // read as text and copy to clipboard
+      const text = await file.text()
+      console.log(text)
+
+      // optional: quick confirmation for debugging
+      console.log('[opfs explorer] copied to clipboard', e.name, text.length)
+    } catch (err) {
+      console.error('[opfs explorer] copy failed', e.name, err)
+    }
   }
+
+
 
   // -------------------------------------------------
   // delete
@@ -345,7 +369,7 @@ export class OpfsExplorerComponent extends hypercomb {
   private readonly isHiddenEntry = (name: string): boolean => {
     if (this.showAll()) return false
     if (name === '__location__') return true
-    if (name === '__resources__') return true
+    if (name === '__drones__') return true
     if (name === '__layers__') return true
     if (name.startsWith('install-')) return true
     return false
@@ -356,7 +380,7 @@ export class OpfsExplorerComponent extends hypercomb {
   ): Promise<string | null> => {
     try {
       const root = this.store.opfsRoot
-      const resourcesDir = await root.getDirectoryHandle('__resources__', { create: false })
+      const resourcesDir = await root.getDirectoryHandle('__drones__', { create: false })
       const handle = await resourcesDir.getFileHandle(name, { create: false })
       const file = await handle.getFile()
       if (file.size === 0) return null

@@ -85,6 +85,14 @@ const writeSigFile = (dir: string, sig: string, bytes: Uint8Array): void => {
   writeFileSync(join(dir, sig), bytes)
 }
 
+// layer json is always written as <sig>.json to prevent vite from treating it as js
+const layerFileName = (sig: string): string => `${sig}.json`
+
+const writeLayerJsonFile = (dir: string, sig: string, json: string): void => {
+  if (!isSig(sig)) throw new Error(`invalid signature: ${sig}`)
+  writeFileSync(join(dir, layerFileName(sig)), json, 'utf8')
+}
+
 const splitPath = (p: string): string[] =>
   p.split('/').filter(Boolean)
 
@@ -199,9 +207,9 @@ const buildLayersFromTree = async (
   out: Map<string, string>,
   rootDependencies: string[]
 ): Promise<string> => {
-  const children: string[] = []
+  const layers: string[] = []
   for (const c of node.children) {
-    children.push(await buildLayersFromTree(c, resourcesByDir, out, rootDependencies))
+    layers.push(await buildLayersFromTree(c, resourcesByDir, out, rootDependencies))
   }
 
   const entry = resourcesByDir.get(node.rel) ?? { drones: [], deps: [] }
@@ -212,7 +220,7 @@ const buildLayersFromTree = async (
     rel: node.rel,
     drones: uniqSorted(entry.drones),
     dependencies: node.rel ? [] : rootDependencies,
-    children,
+    layers,
   }
 
   const { sig, json } = await signJson(layer)
@@ -304,7 +312,6 @@ const buildDrone = async (entry: string, externals: string[]): Promise<Uint8Arra
 // -------------------------------------------------
 // dev emitters
 // -------------------------------------------------
-
 
 const writeDevNameManifest = (imports: Record<string, string>, domains: string[], resources: Record<string, string[]>, root: string): void => {
   const manifestFile = join(DEV_ROOT, 'name.manifest.js')
@@ -425,14 +432,14 @@ const main = async (): Promise<void> => {
 
   const rootDir = join(DIST_ROOT, rootLayerSig)
   const layersDir = join(rootDir, '__layers__')
-  const resourcesDir = join(rootDir, '__resources__')
+  const resourcesDir = join(rootDir, '__drones__')
   const dependenciesDir = join(rootDir, '__dependencies__')
 
   ensureDir(layersDir)
   ensureDir(resourcesDir)
   ensureDir(dependenciesDir)
 
-  for (const [sig, json] of layers) writeFileSync(join(layersDir, sig), json, 'utf8')
+  for (const [sig, json] of layers) writeLayerJsonFile(layersDir, sig, json)
   for (const [sig, bytes] of dependencyBytes) writeSigFile(dependenciesDir, sig, bytes)
   for (const [sig, bytes] of resourceBytes) writeSigFile(resourcesDir, sig, bytes)
 
@@ -448,7 +455,7 @@ const main = async (): Promise<void> => {
   for (const domain of devDomains) {
     const domainDir = join(DEV_ROOT, domain)
     const devDepsDir = join(domainDir, '__dependencies__')
-    const devResDir = join(domainDir, '__resources__')
+    const devResDir = join(domainDir, '__drones__')
     const devLayersDir = join(domainDir, '__layers__')
 
     ensureDir(domainDir)
@@ -471,9 +478,9 @@ const main = async (): Promise<void> => {
     const domainTree = readDirTree(SRC_ROOT, domain)
     const devLayers = new Map<string, string>()
     await buildLayersFromTree(domainTree, resourcesByDir, devLayers, rootDependencies)
-    for (const [sig, json] of devLayers) writeFileSync(join(devLayersDir, sig), json, 'utf8')
+    for (const [sig, json] of devLayers) writeLayerJsonFile(devLayersDir, sig, json)
 
-    writeFileSync(join(devLayersDir, rootLayerSig), layers.get(rootLayerSig)!, 'utf8')
+    writeLayerJsonFile(devLayersDir, rootLayerSig, layers.get(rootLayerSig)!)
 
     const nsToSig = devDomainNsToDepSig.get(domain) ?? new Map<string, string>()
     for (const [nsRelDir, depSig] of nsToSig) {
@@ -489,7 +496,7 @@ const main = async (): Promise<void> => {
   }
 
   writeDevNameManifest(devImports, devDomains, devResourcesByDomain, rootLayerSig)
-  
+
   const ps1 = resolve(__dirname, 'deploy-azure.ps1')
   if (existsSync(ps1)) {
     const r = spawnSync(

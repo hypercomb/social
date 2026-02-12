@@ -40,11 +40,11 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
   // readiness / locking
   // -------------------------------------------------
 
-  // app becomes usable as soon as any payload exists in /__resources__
+  // app becomes usable as soon as any payload exists in /__drones__
   // (even if action extraction fails, typing must not be blocked)
   private readonly hasAnyResources = computed<boolean>(() => this.preloader.resourceCount() > 0)
 
-  // locked only while there are zero payloads in /__resources__
+  // locked only while there are zero payloads in /__drones__
   private readonly locked = computed<boolean>(() => !this.hasAnyResources())
 
   // -------------------------------------------------
