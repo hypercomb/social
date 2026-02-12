@@ -230,11 +230,11 @@ const writeFolderKeys = (domain: string, domainRoot: string, dir: string): void 
 // public module keys for ${domain}/${folderRel}
 // do not edit manually
 
-export const ${moduleConstName} = '${folderModuleKey}'
+ export const ${moduleConstName} = '@${folderModuleKey}'
 `
 
   for (const sym of symbols) {
-    out += `export const ${sym} = '${bySymbol.get(sym)}'\n`
+    out += `export const ${sym} = '@${bySymbol.get(sym)}'\n`
   }
 
   out += `export const ${keysConstName} = { ${symbols.join(', ')} } as const\n`

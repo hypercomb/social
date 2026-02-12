@@ -1,6 +1,5 @@
 import { Effect } from "./effect.js"
 import { GrammarHint } from "./grammar-hint.js"
-import { register } from "./ioc/ioc.js"
 import { ProviderLink } from "./provider-link.js"
 
 export abstract class Drone {
@@ -16,6 +15,7 @@ export abstract class Drone {
 
   public constructor() {
     this.name = Drone.simplify(this.constructor.name)
+
   }
 
   // --------------------------------

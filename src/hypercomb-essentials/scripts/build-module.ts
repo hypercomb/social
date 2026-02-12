@@ -1,14 +1,29 @@
 // hypercomb-essentials/scripts/build-module.ts
+// builds folder namespaces into signature-addressed esm files
+// outputs a root layer (directory name = root layer signature) containing:
+// - __dependencies__/<sig>  (real source code, no *-keys.* ever bundled)
+// - __drones__/<sig>        (real drone code)
+// - __layers__/<sig>.install.json (root + per-domain layer install manifests)
+// plus a stable dev/dist manifest file (package-name.manifest.js) that points at /dev/<rootSig>/
+//
+// rules:
+// - namespaces: @<domain>/<up to 2 subfolders>
+// - folders define modules; files never define modules
+// - only explicit symbol exports (no export *)
+// - exclude any file ending with "-keys.ts/js" from dependencies entirely
+// - exclude any "*.drone.ts/js" from dependencies entirely
+// - if any non-keys code imports a "-keys" module, build hard-fails
+// - no sourcemaps (dependencies/drones remain code-only files)
 
-import { spawnSync } from 'child_process'
+import { createHash } from 'crypto'
+import { build, type Plugin } from 'esbuild'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
+import { dirname, extname, join, resolve } from 'path'
+import ts from 'typescript'
 import { fileURLToPath } from 'url'
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
-import { dirname, extname, join, relative, resolve } from 'path'
-import { build } from 'esbuild'
-import { SignatureService } from '@hypercomb/core'
 
 // -------------------------------------------------
-// esm globals
+// anchors
 // -------------------------------------------------
 
 const __filename = fileURLToPath(import.meta.url)
@@ -25,12 +40,24 @@ const DIST_ROOT = resolve(PROJECT_ROOT, 'dist')
 // dev root (hypercomb-web)
 const DEV_ROOT = resolve(PROJECT_ROOT, '../hypercomb-web/public/dev')
 
-const TARGET = 'es2022'
-const NAMESPACE_SEGMENTS_MAX = 3
-const PLATFORM_EXTERNALS = ['@hypercomb/core', 'pixi.js']
+// namespace depth: @domain/<seg>/<seg>
+const NAMESPACE_DEPTH = 2
 
-// hard rule: never generate @<domain> root aggregator
-const EMIT_DOMAIN_ROOT_NAMESPACE = false
+const TARGET = 'es2022'
+
+// output dirs inside root layer folder
+const DEP_DIRNAME = '__dependencies__'
+const DRONE_DIRNAME = '__drones__'
+const LAYER_DIRNAME = '__layers__'
+
+// installer suffix expectation
+const LAYER_INSTALL_SUFFIX = '.install.json'
+
+// platform/vendor externals (do not bundle)
+const EXTERNALS = ['@hypercomb/core', 'pixi.js']
+
+// build flags
+const MINIFY = !process.argv.includes('--no-minify')
 
 // -------------------------------------------------
 // helpers
@@ -40,14 +67,24 @@ const ensureDir = (dir: string): void => {
   mkdirSync(dir, { recursive: true })
 }
 
-const relPosix = (from: string, to: string): string =>
-  relative(from, to).replace(/\\/g, '/') || ''
+const toPosix = (p: string): string => p.replace(/\\/g, '/')
+
+const relFrom = (root: string, full: string): string =>
+  toPosix(full.replace(root, '').replace(/^[\\/]/, ''))
+
+const isTsOrJs = (f: string): boolean =>
+  (f.endsWith('.ts') || f.endsWith('.js')) && !f.endsWith('.d.ts')
+
+const isDrone = (f: string): boolean =>
+  f.endsWith('.drone.ts') || f.endsWith('.drone.js')
+
+const isKeysFile = (f: string): boolean =>
+  f.endsWith('-keys.ts') || f.endsWith('-keys.js')
 
 const walkFiles = (dir: string): string[] => {
   if (!existsSync(dir)) return []
   const out: string[] = []
-  const names = readdirSync(dir).slice().sort((a, b) => a.localeCompare(b))
-  for (const name of names) {
+  for (const name of readdirSync(dir).sort()) {
     const full = join(dir, name)
     const st = statSync(full)
     if (st.isDirectory()) out.push(...walkFiles(full))
@@ -56,281 +93,339 @@ const walkFiles = (dir: string): string[] => {
   return out
 }
 
-const isSource = (f: string): boolean =>
-  (f.endsWith('.ts') || f.endsWith('.js')) && !f.endsWith('.d.ts')
+const sha256Hex = (bytes: Uint8Array): string =>
+  createHash('sha256').update(bytes).digest('hex')
 
-const isDrone = (f: string): boolean =>
-  f.endsWith('.drone.ts') || f.endsWith('.drone.js')
+const sha256HexText = (text: string): string =>
+  sha256Hex(Buffer.from(text, 'utf8'))
 
-const isEntry = (f: string): boolean =>
-  f.endsWith('.entry.ts') || f.endsWith('.entry.js')
+const isSignature = (s: string): boolean =>
+  /^[0-9a-f]{64}$/i.test(s)
 
-const stripExt = (p: string): string =>
-  p.slice(0, -extname(p).length)
-
-const textToBytes = (text: string): Uint8Array =>
-  new TextEncoder().encode(text)
-
-const toArrayBuffer = (bytes: Uint8Array): ArrayBuffer => {
-  const copy = new Uint8Array(bytes.byteLength)
-  copy.set(bytes)
-  return copy.buffer
-}
-
-const isSig = (v: string): boolean =>
-  /^[a-f0-9]{64}$/i.test(v)
-
-const jsFileName = (sig: string): string => `${sig}.js`
-
-const writeSigJsFile = (dir: string, sig: string, bytes: Uint8Array): void => {
-  if (!isSig(sig)) throw new Error(`invalid signature: ${sig}`)
-  writeFileSync(join(dir, jsFileName(sig)), bytes)
-}
-
-// layer json is always written as <sig>.json to prevent vite from treating it as js
-const layerFileName = (sig: string): string => `${sig}.json`
-
-const writeLayerJsonFile = (dir: string, sig: string, json: string): void => {
-  if (!isSig(sig)) throw new Error(`invalid signature: ${sig}`)
-  writeFileSync(join(dir, layerFileName(sig)), json, 'utf8')
-}
-
-const splitPath = (p: string): string[] =>
-  p.split('/').filter(Boolean)
-
-const uniq = (xs: string[]): string[] => Array.from(new Set(xs))
-
-const uniqSorted = (xs: string[]): string[] =>
-  uniq(xs).sort((a, b) => a.localeCompare(b))
-
-const namespaceRelDirFromRelDir = (relDir: string): string => {
-  const parts = splitPath(relDir)
-  return parts.slice(0, Math.min(NAMESPACE_SEGMENTS_MAX, parts.length)).join('/')
-}
-
-const specifierFromNamespaceRelDir = (namespaceRelDir: string): string =>
-  `@${namespaceRelDir}`
-
-const domainFromRelPath = (relPath: string): string => {
-  const parts = splitPath(relPath)
-  return parts[0] ?? ''
-}
-
-const domainFromNamespaceRelDir = (namespaceRelDir: string): string => {
-  const parts = splitPath(namespaceRelDir)
-  return parts[0] ?? ''
-}
-
-const prefixesForNamespaceRelDir = (nsRelDir: string): string[] => {
-  const parts = splitPath(nsRelDir)
-  const out: string[] = []
-
-  const start = EMIT_DOMAIN_ROOT_NAMESPACE ? 1 : 2
-
-  for (let i = start; i <= Math.min(parts.length, NAMESPACE_SEGMENTS_MAX); i++) {
-    out.push(parts.slice(0, i).join('/'))
+const getPackageName = (): string => {
+  const pkgPath = join(PROJECT_ROOT, 'package.json')
+  if (!existsSync(pkgPath)) return 'manifest'
+  try {
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { name?: string }
+    return (pkg.name ?? 'manifest').replace(/^@/, '').replace(/[\/\\]/g, '-')
+  } catch {
+    return 'manifest'
   }
+}
+
+const MANIFEST_BASENAME = `${getPackageName()}.manifest.js`
+
+const DEV_MANIFEST_FILE = join(DEV_ROOT, MANIFEST_BASENAME)
+const DIST_MANIFEST_FILE = join(DIST_ROOT, MANIFEST_BASENAME)
+
+const tryGetPreviousRootSig = (manifestPath: string): string | null => {
+  if (!existsSync(manifestPath)) return null
+  const txt = readFileSync(manifestPath, 'utf8')
+  const m = txt.match(/\/dev\/([0-9a-f]{64})\//i)
+  return m ? m[1] : null
+}
+
+const safeRmDir = (dir: string): void => {
+  if (!existsSync(dir)) return
+  rmSync(dir, { recursive: true, force: true })
+}
+
+// -------------------------------------------------
+// export parsing (explicit symbol exports only)
+// -------------------------------------------------
+
+type ExportInfo = { value: string[]; type: string[] }
+
+const parseExports = (file: string): ExportInfo => {
+  const source = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true)
+  const out: ExportInfo = { value: [], type: [] }
+
+  source.forEachChild(node => {
+    if (ts.canHaveModifiers(node) && node.modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword)) {
+      if (ts.isClassDeclaration(node) || ts.isFunctionDeclaration(node) || ts.isEnumDeclaration(node)) {
+        if (node.name) out.value.push(node.name.text)
+      }
+
+      if (ts.isVariableStatement(node)) {
+        node.declarationList.declarations.forEach(d => {
+          if (ts.isIdentifier(d.name)) out.value.push(d.name.text)
+        })
+      }
+
+      if (ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node)) {
+        out.type.push(node.name.text)
+      }
+    }
+
+    if (ts.isExportDeclaration(node) && node.exportClause && ts.isNamedExports(node.exportClause)) {
+      node.exportClause.elements.forEach(e => {
+        const name = (e.name || e.propertyName)?.text
+        if (name) out.value.push(name)
+      })
+    }
+  })
+
+  out.value = Array.from(new Set(out.value)).sort()
+  out.type = Array.from(new Set(out.type)).sort()
 
   return out
-}
-
-const addToBucket = (
-  map: Map<string, { drones: string[]; deps: string[] }>,
-  relDir: string,
-  fileName: string,
-  kind: 'dep' | 'drone'
-): void => {
-  const bucket = map.get(relDir) ?? { drones: [], deps: [] }
-  if (kind === 'dep') bucket.deps.push(fileName)
-  else bucket.drones.push(fileName)
-  map.set(relDir, bucket)
 }
 
 // -------------------------------------------------
 // discovery
 // -------------------------------------------------
 
-type SourceFile = {
-  entry: string
-  relPath: string
-  relDir: string
-  kind: 'dependency' | 'drone'
+type NamespaceBucket = { domain: string; ns: string; nsRootDir: string; files: string[] }
+
+const discoverDomains = (): string[] => {
+  if (!existsSync(SRC_ROOT)) return []
+  return readdirSync(SRC_ROOT).filter(name => {
+    if (name === 'types') return false
+    const full = join(SRC_ROOT, name)
+    return existsSync(full) && statSync(full).isDirectory()
+  }).sort()
 }
 
-const discoverSources = (): SourceFile[] =>
-  walkFiles(SRC_ROOT)
-    .filter(isSource)
-    .filter(f => {
-      const relPath = relPosix(SRC_ROOT, f)
-      if (relPath === 'types' || relPath.startsWith('types/')) return false
-      if (isEntry(relPath)) return false
-      const relDir = relPosix(SRC_ROOT, dirname(f))
-      if (!relDir) return false
-      return true
-    })
-    .map(file => ({
-      entry: file,
-      relPath: relPosix(SRC_ROOT, file),
-      relDir: relPosix(SRC_ROOT, dirname(file)),
-      kind: isDrone(file) ? 'drone' : 'dependency',
-    }))
+const getNamespaceForFile = (domain: string, file: string): { ns: string; nsRootDir: string } => {
+  const domainRoot = join(SRC_ROOT, domain)
+  const rel = relFrom(domainRoot, file)
+  const parts = rel.split('/')
+  parts.pop() // filename
 
-// -------------------------------------------------
-// layers
-// -------------------------------------------------
+  if (parts.length === 0) return { ns: `@${domain}`, nsRootDir: domainRoot }
 
-type DirNode = { rel: string; children: DirNode[] }
+  const slice = parts.slice(0, NAMESPACE_DEPTH)
+  const nsPath = slice.join('/')
+  return { ns: `@${domain}/${nsPath}`, nsRootDir: join(domainRoot, ...slice) }
+}
 
-const readDirTree = (root: string, rel: string): DirNode => {
-  const children: DirNode[] = []
-  const full = join(root, rel)
+const discoverNamespaces = (domains: string[]): Map<string, NamespaceBucket> => {
+  const buckets = new Map<string, NamespaceBucket>()
 
-  const names = readdirSync(full).slice().sort((a, b) => a.localeCompare(b))
-  for (const name of names) {
-    if (!rel && name === 'types') continue
-    const child = join(full, name)
-    if (statSync(child).isDirectory()) {
-      children.push(readDirTree(root, rel ? `${rel}/${name}` : name))
+  for (const domain of domains) {
+    const domainRoot = join(SRC_ROOT, domain)
+    const files = walkFiles(domainRoot).filter(isTsOrJs)
+
+    for (const file of files) {
+      const { ns, nsRootDir } = getNamespaceForFile(domain, file)
+      const b = buckets.get(ns) ?? { domain, ns, nsRootDir, files: [] }
+      b.files.push(file)
+      buckets.set(ns, b)
     }
   }
 
-  return { rel, children }
-}
-
-const signJson = async (value: unknown) => {
-  const json = JSON.stringify(value)
-  const sig = await SignatureService.sign(toArrayBuffer(textToBytes(json)))
-  return { sig, json }
-}
-
-const buildLayersFromTree = async (
-  node: DirNode,
-  resourcesByDir: Map<string, { drones: string[]; deps: string[] }>,
-  out: Map<string, string>,
-  rootDependencies: string[]
-): Promise<string> => {
-  const layers: string[] = []
-  for (const c of node.children) {
-    layers.push(await buildLayersFromTree(c, resourcesByDir, out, rootDependencies))
+  for (const b of buckets.values()) {
+    b.files = Array.from(new Set(b.files)).sort()
   }
 
-  const entry = resourcesByDir.get(node.rel) ?? { drones: [], deps: [] }
+  return buckets
+}
 
-  const layer = {
-    version: 1,
-    name: node.rel.split('/').pop() || 'root',
-    rel: node.rel,
-    drones: uniqSorted(entry.drones),
-    dependencies: node.rel ? [] : rootDependencies,
-    layers,
+const discoverDrones = (domains: string[]): { domain: string; file: string }[] => {
+  const out: { domain: string; file: string }[] = []
+  for (const domain of domains) {
+    const domainRoot = join(SRC_ROOT, domain)
+    const files = walkFiles(domainRoot).filter(f => isTsOrJs(f) && isDrone(f))
+    for (const file of files) out.push({ domain, file })
+  }
+  return out.sort((a, b) => (a.domain + a.file).localeCompare(b.domain + b.file))
+}
+
+// -------------------------------------------------
+// esbuild plugins
+// -------------------------------------------------
+
+const makeDomainExternalPlugin = (domains: string[]): Plugin => {
+  const roots = new Set(domains.map(d => `@${d}`))
+  return {
+    name: 'externalize-domain-imports',
+    setup: (b) => {
+      b.onResolve({ filter: /^@/ }, (args) => {
+        for (const root of roots) {
+          if (args.path === root || args.path.startsWith(`${root}/`)) {
+            return { path: args.path, external: true }
+          }
+        }
+        return null
+      })
+    }
+  }
+}
+
+const makeBlockKeysImportsPlugin = (): Plugin => {
+  const isKeysPath = (p: string): boolean => {
+    const pp = p.replace(/\\/g, '/')
+    if (pp.endsWith('-keys')) return true
+    if (pp.endsWith('-keys.ts') || pp.endsWith('-keys.js')) return true
+    return /\/[^\/]+-keys(\.ts|\.js)?$/i.test(pp)
   }
 
-  const { sig, json } = await signJson(layer)
-  out.set(sig, json)
-  return sig
+  return {
+    name: 'block-keys-imports',
+    setup: (b) => {
+      b.onResolve({ filter: /.*/ }, (args) => {
+        // only block for normal code resolutions (relative/absolute/package)
+        if (!args.path) return null
+        if (!isKeysPath(args.path)) return null
+
+        // allow the build system itself to read keys files when scanning src;
+        // this block is specifically for bundling: no keys in output.
+        return {
+          errors: [
+            {
+              text: `[build-module] keys modules are not allowed in bundles: "${args.path}" imported by "${args.importer}"`
+            }
+          ]
+        }
+      })
+    }
+  }
 }
 
 // -------------------------------------------------
-// build helpers (prod)
+// barrel generation (dependencies entry)
 // -------------------------------------------------
 
-const buildNamespaceDependency = async (
-  namespaceRelDir: string,
-  directMemberFiles: SourceFile[],
-  allNamespaceSpecifiers: string[]
-): Promise<{ sig: string; bytes: Uint8Array; namespaceSpecifier: string }> => {
-  const namespaceSpecifier = specifierFromNamespaceRelDir(namespaceRelDir)
+const makeBarrelContents = (bucket: NamespaceBucket): string => {
+  const nsRootDir = bucket.nsRootDir
 
-  const namespaceRootFs = join(SRC_ROOT, namespaceRelDir)
-  const resolveDir = existsSync(namespaceRootFs) ? namespaceRootFs : SRC_ROOT
+  type ModuleExport = { modRel: string; exp: ExportInfo }
+  const modules: ModuleExport[] = []
 
-  const exportLocalLines = directMemberFiles
-    .map(f => {
-      const relFromNs = relPosix(namespaceRootFs, f.entry)
-      const relNoExt = stripExt(relFromNs)
-      const spec = relNoExt.startsWith('.') ? relNoExt : `./${relNoExt}`
-      return `export * from '${spec}';`
-    })
-    .sort((a, b) => a.localeCompare(b))
+  for (const file of bucket.files) {
+    if (!isTsOrJs(file)) continue
+    if (isDrone(file)) continue
+    if (isKeysFile(file)) continue
 
-  const entrySource =
-    exportLocalLines.length > 0
-      ? exportLocalLines.join('\n') + '\n'
-      : `export {};\n`
+    const base = file.replace(extname(file), '').split(/[\\/]/).pop() ?? ''
+    if (base === 'index') continue
 
-  const externals = [
-    ...PLATFORM_EXTERNALS,
-    ...allNamespaceSpecifiers.filter(s => s !== namespaceSpecifier),
-  ]
+    const exp = parseExports(file)
+    if (!exp.value.length && !exp.type.length) continue
 
-  const r = await build({
-    stdin: {
-      contents: entrySource,
-      resolveDir,
-      sourcefile: `virtual:${namespaceSpecifier}`,
-      loader: 'ts',
-    },
+    const rel = relFrom(nsRootDir, file).replace(extname(file), '')
+    const modRel = './' + rel
+
+    modules.push({ modRel, exp })
+  }
+
+  modules.sort((a, b) => a.modRel.localeCompare(b.modRel))
+
+  let out = `// auto-generated by scripts/build-module.ts\n// namespace barrel for ${bucket.ns}\n// do not edit manually\n\n`
+  for (const m of modules) {
+    if (m.exp.value.length) out += `export { ${m.exp.value.join(', ')} } from '${m.modRel}'\n`
+    if (m.exp.type.length) out += `export type { ${m.exp.type.join(', ')} } from '${m.modRel}'\n`
+  }
+  if (modules.length === 0) out += `export {}\n`
+
+  return out
+}
+
+// -------------------------------------------------
+// builders
+// -------------------------------------------------
+
+const pickJsOutput = (out: { path: string; contents: Uint8Array }[]): Uint8Array => {
+  // stdin builds often return "<stdout>" so do not rely on ".js"
+  const js = out.find(f => !toPosix(f.path).endsWith('.map')) ?? null
+  if (!js) throw new Error('[build-module] missing js output (no non-map output file)')
+  return js.contents
+}
+
+const buildDependency = async (bucket: NamespaceBucket, plugins: Plugin[]): Promise<Uint8Array> => {
+  const result = await build({
+    absWorkingDir: PROJECT_ROOT,
     bundle: true,
+    write: false,
     format: 'esm',
     platform: 'browser',
-    write: false,
     target: TARGET,
-    tsconfig: resolve(PROJECT_ROOT, 'tsconfig.json'),
-    external: externals,
+    minify: MINIFY,
     sourcemap: false,
-    minify: false,
+    sourcesContent: false,
+    external: EXTERNALS,
+    plugins,
+    stdin: { contents: makeBarrelContents(bucket), loader: 'ts', resolveDir: bucket.nsRootDir }
   })
 
-  const compiled = r.outputFiles?.[0]?.text
-  if (!compiled) throw new Error(`no output: ${namespaceSpecifier}`)
-
-  const withHeader = `// ${namespaceSpecifier}\n${compiled}`
-  const bytes = textToBytes(withHeader)
-  const sig = await SignatureService.sign(toArrayBuffer(bytes))
-
-  return { sig, bytes, namespaceSpecifier }
+  return pickJsOutput(result.outputFiles)
 }
 
-const buildDrone = async (entry: string, externals: string[]): Promise<Uint8Array> => {
-  const r = await build({
-    entryPoints: [entry],
+const buildDrone = async (file: string, plugins: Plugin[]): Promise<Uint8Array> => {
+  const result = await build({
+    absWorkingDir: PROJECT_ROOT,
     bundle: true,
-    splitting: false,
+    write: false,
     format: 'esm',
     platform: 'browser',
-    write: false,
     target: TARGET,
-    tsconfig: resolve(PROJECT_ROOT, 'tsconfig.json'),
-    external: externals,
+    minify: MINIFY,
     sourcemap: false,
-    minify: false,
+    sourcesContent: false,
+    external: EXTERNALS,
+    plugins,
+    entryPoints: [file]
   })
 
-  const compiled = r.outputFiles?.[0]?.text
-  if (!compiled) throw new Error(`no output: ${entry}`)
-  return textToBytes(compiled)
+  return pickJsOutput(result.outputFiles)
 }
 
 // -------------------------------------------------
-// dev emitters
+// output writers
 // -------------------------------------------------
 
-const writeDevNameManifest = (
-  imports: Record<string, string>,
-  domains: string[],
-  resources: Record<string, string[]>,
-  root: string
-): void => {
-  const manifestFile = join(DEV_ROOT, 'name.manifest.js')
-  writeFileSync(
-    manifestFile,
-    `// auto-generated by hypercomb-essentials/scripts/build-module.ts\n` +
-      `export const imports = ${JSON.stringify(imports, null, 2)}\n` +
-      `export const domains = ${JSON.stringify(domains, null, 2)}\n` +
-      `export const resources = ${JSON.stringify(resources, null, 2)}\n` +
-      `export const root = ${JSON.stringify(root)}\n`,
-    'utf8'
-  )
+type BuiltDep = { ns: string; domain: string; sig: string; bytes: Uint8Array }
+type BuiltDrone = { domain: string; sig: string; bytes: Uint8Array; sourceFile: string }
+
+const writeRootSigFile = (rootBase: string, rootSig: string, dirName: string, fileName: string, bytes: Uint8Array): void => {
+  const dir = join(rootBase, rootSig, dirName)
+  ensureDir(dir)
+  writeFileSync(join(dir, fileName), bytes)
+}
+
+const writeRootTextFile = (rootBase: string, rootSig: string, dirName: string, fileName: string, text: string): void => {
+  const dir = join(rootBase, rootSig, dirName)
+  ensureDir(dir)
+  writeFileSync(join(dir, fileName), text, 'utf8')
+}
+
+const writeManifest = (rootSig: string, imports: Record<string, string>): void => {
+  const manifest = { root: `/dev/${rootSig}/`, imports }
+
+  const text =
+`// auto-generated by scripts/build-module.ts
+// do not edit manually
+
+export const manifest = ${JSON.stringify(manifest, null, 2)}
+export const imports = manifest.imports
+export default manifest
+`
+
+  ensureDir(dirname(DEV_MANIFEST_FILE))
+  ensureDir(dirname(DIST_MANIFEST_FILE))
+
+  writeFileSync(DEV_MANIFEST_FILE, text, 'utf8')
+  writeFileSync(DIST_MANIFEST_FILE, text, 'utf8')
+}
+
+// -------------------------------------------------
+// layer install json
+// -------------------------------------------------
+
+type LayerInstall = { domain: string; dependencies: string[]; drones: string[]; children: string[]; resources: string[] }
+
+const stableJson = (obj: unknown): string => JSON.stringify(obj, null, 2)
+
+const makeDomainLayer = (domain: string, depSigs: string[], droneSigs: string[]): { sig: string; text: string } => {
+  const layer: LayerInstall = { domain, dependencies: depSigs.slice().sort(), drones: droneSigs.slice().sort(), children: [], resources: [] }
+  const text = stableJson(layer)
+  return { sig: sha256HexText(text), text }
+}
+
+const makeRootLayer = (name: string, childSigs: string[]): { sig: string; text: string } => {
+  const layer: LayerInstall = { domain: name, dependencies: [], drones: [], children: childSigs.slice().sort(), resources: [] }
+  const text = stableJson(layer)
+  return { sig: sha256HexText(text), text }
 }
 
 // -------------------------------------------------
@@ -338,186 +433,89 @@ const writeDevNameManifest = (
 // -------------------------------------------------
 
 const main = async (): Promise<void> => {
-  rmSync(DIST_ROOT, { recursive: true, force: true })
-  rmSync(DEV_ROOT, { recursive: true, force: true })
   ensureDir(DIST_ROOT)
   ensureDir(DEV_ROOT)
 
-  const sources = discoverSources()
-  if (!sources.length) throw new Error('no sources found')
+  // remove the previous root sig folder referenced by this package's manifest (only)
+  const prevDev = tryGetPreviousRootSig(DEV_MANIFEST_FILE)
+  const prevDist = tryGetPreviousRootSig(DIST_MANIFEST_FILE)
+  if (prevDev && isSignature(prevDev)) safeRmDir(join(DEV_ROOT, prevDev))
+  if (prevDist && isSignature(prevDist)) safeRmDir(join(DIST_ROOT, prevDist))
 
-  const resourcesByDir = new Map<string, { drones: string[]; deps: string[] }>()
-  const dependencyBytes = new Map<string, Uint8Array>()
-  const resourceBytes = new Map<string, Uint8Array>()
-  const layers = new Map<string, string>()
+  const domains = discoverDomains()
+  if (!domains.length) return
 
-  const devImports: Record<string, string> = {}
-  const devDomainDeps = new Map<string, Set<string>>()
-  const devDomainRes = new Map<string, Set<string>>()
-  const devDomainNsToDepSig = new Map<string, Map<string, string>>()
+  const plugins: Plugin[] = [makeBlockKeysImportsPlugin(), makeDomainExternalPlugin(domains)]
 
-  // -----------------------------
-  // dependencies
-  // -----------------------------
+  // build dependencies (namespace barrels)
+  const buckets = Array.from(discoverNamespaces(domains).values()).sort((a, b) => a.ns.localeCompare(b.ns))
+  const deps: BuiltDep[] = []
 
-  const deps = sources.filter(s => s.kind === 'dependency')
-  const namespaceToDirectMembers = new Map<string, SourceFile[]>()
-  const nsDerived = new Set<string>()
-
-  for (const src of deps) {
-    const nsRelDir = namespaceRelDirFromRelDir(src.relDir)
-    nsDerived.add(nsRelDir)
-    const list = namespaceToDirectMembers.get(nsRelDir) ?? []
-    list.push(src)
-    namespaceToDirectMembers.set(nsRelDir, list)
+  for (const b of buckets) {
+    const bytes = await buildDependency(b, plugins)
+    const sig = sha256Hex(bytes)
+    deps.push({ ns: b.ns, domain: b.domain, sig, bytes })
+    console.log(`[build-module] dep ${b.ns} -> ${sig}`)
   }
 
-  const nsAllSet = new Set<string>()
-  for (const nsRelDir of nsDerived) {
-    for (const p of prefixesForNamespaceRelDir(nsRelDir)) nsAllSet.add(p)
+  // build drones (each .drone.ts)
+  const droneFiles = discoverDrones(domains)
+  const drones: BuiltDrone[] = []
+
+  for (const d of droneFiles) {
+    const bytes = await buildDrone(d.file, plugins)
+    const sig = sha256Hex(bytes)
+    drones.push({ domain: d.domain, sig, bytes, sourceFile: d.file })
+    console.log(`[build-module] drone ${relFrom(SRC_ROOT, d.file)} -> ${sig}`)
   }
 
-  const allNamespaceRelDirs = Array.from(nsAllSet)
-    .filter(ns => EMIT_DOMAIN_ROOT_NAMESPACE || splitPath(ns).length >= 2)
-    .sort((a, b) => a.localeCompare(b))
-
-  const allNamespaceSpecifiers = allNamespaceRelDirs.map(specifierFromNamespaceRelDir)
-
-  for (const nsRelDir of allNamespaceRelDirs) {
-    const directMembers =
-      namespaceToDirectMembers.get(nsRelDir)?.slice().sort((a, b) =>
-        a.entry.localeCompare(b.entry)
-      ) ?? []
-
-    const built = await buildNamespaceDependency(nsRelDir, directMembers, allNamespaceSpecifiers)
-    dependencyBytes.set(built.sig, built.bytes)
-
-    addToBucket(resourcesByDir, nsRelDir, jsFileName(built.sig), 'dep')
-    for (const f of directMembers) addToBucket(resourcesByDir, f.relDir, jsFileName(built.sig), 'dep')
-
-    const domain = domainFromNamespaceRelDir(nsRelDir)
-    if (!domain) continue
-
-    const depSet = devDomainDeps.get(domain) ?? new Set<string>()
-    depSet.add(built.sig)
-    devDomainDeps.set(domain, depSet)
-
-    const m = devDomainNsToDepSig.get(domain) ?? new Map<string, string>()
-    m.set(nsRelDir, built.sig)
-    devDomainNsToDepSig.set(domain, m)
+  // build per-domain layers
+  const domainLayers: { domain: string; sig: string; text: string }[] = []
+  for (const domain of domains) {
+    const depSigs = deps.filter(x => x.domain === domain).map(x => x.sig)
+    const droneSigs = drones.filter(x => x.domain === domain).map(x => x.sig)
+    const layer = makeDomainLayer(domain, depSigs, droneSigs)
+    domainLayers.push({ domain, sig: layer.sig, text: layer.text })
   }
 
-  const rootDependencies = uniqSorted(Array.from(dependencyBytes.keys()).map(jsFileName))
+  // root layer signature = output folder name
+  const rootName = getPackageName()
+  const rootLayer = makeRootLayer(rootName, domainLayers.map(x => x.sig))
+  const rootSig = rootLayer.sig
 
-  // -----------------------------
-  // drones
-  // -----------------------------
-
-  const droneExternals = [...PLATFORM_EXTERNALS, ...allNamespaceSpecifiers]
-  for (const src of sources.filter(s => s.kind === 'drone')) {
-    const bytes = await buildDrone(src.entry, droneExternals)
-    const sig = await SignatureService.sign(toArrayBuffer(bytes))
-
-    resourceBytes.set(sig, bytes)
-    addToBucket(resourcesByDir, src.relDir, jsFileName(sig), 'drone')
-
-    const domain = domainFromRelPath(src.relPath)
-    if (!domain) continue
-    const set = devDomainRes.get(domain) ?? new Set<string>()
-    set.add(sig)
-    devDomainRes.set(domain, set)
+  // write dependencies + drones + layers into dev/dist under /<rootSig>/
+  for (const d of deps) {
+    writeRootSigFile(DEV_ROOT, rootSig, DEP_DIRNAME, d.sig, d.bytes)
+    writeRootSigFile(DIST_ROOT, rootSig, DEP_DIRNAME, d.sig, d.bytes)
   }
 
-  // -----------------------------
-  // layers (prod)
-  // -----------------------------
-
-  const tree = readDirTree(SRC_ROOT, '')
-  const rootLayerSig = await buildLayersFromTree(tree, resourcesByDir, layers, rootDependencies)
-
-  // -----------------------------
-  // write prod package
-  // -----------------------------
-
-  const rootDir = join(DIST_ROOT, rootLayerSig)
-  const layersDir = join(rootDir, '__layers__')
-  const resourcesDir = join(rootDir, '__drones__')
-  const dependenciesDir = join(rootDir, '__dependencies__')
-
-  ensureDir(layersDir)
-  ensureDir(resourcesDir)
-  ensureDir(dependenciesDir)
-
-  for (const [sig, json] of layers) writeLayerJsonFile(layersDir, sig, json)
-  for (const [sig, bytes] of dependencyBytes) writeSigJsFile(dependenciesDir, sig, bytes)
-  for (const [sig, bytes] of resourceBytes) writeSigJsFile(resourcesDir, sig, bytes)
-
-  // -----------------------------
-  // write dev package
-  // -----------------------------
-
-  const devDomains = uniqSorted([
-    ...Array.from(devDomainDeps.keys()),
-    ...Array.from(devDomainRes.keys()),
-  ])
-
-  for (const domain of devDomains) {
-    const domainDir = join(DEV_ROOT, domain)
-    const devDepsDir = join(domainDir, '__dependencies__')
-    const devResDir = join(domainDir, '__drones__')
-    const devLayersDir = join(domainDir, '__layers__')
-
-    ensureDir(domainDir)
-    ensureDir(devDepsDir)
-    ensureDir(devResDir)
-    ensureDir(devLayersDir)
-
-    for (const sig of Array.from(devDomainDeps.get(domain) ?? [])) {
-      const bytes = dependencyBytes.get(sig)
-      if (!bytes) throw new Error(`missing dependency bytes (${sig})`)
-      writeSigJsFile(devDepsDir, sig, bytes)
-    }
-
-    for (const sig of Array.from(devDomainRes.get(domain) ?? [])) {
-      const bytes = resourceBytes.get(sig)
-      if (!bytes) throw new Error(`missing resource bytes (${sig})`)
-      writeSigJsFile(devResDir, sig, bytes)
-    }
-
-    const domainTree = readDirTree(SRC_ROOT, domain)
-    const devLayers = new Map<string, string>()
-    await buildLayersFromTree(domainTree, resourcesByDir, devLayers, rootDependencies)
-    for (const [sig, json] of devLayers) writeLayerJsonFile(devLayersDir, sig, json)
-
-    writeLayerJsonFile(devLayersDir, rootLayerSig, layers.get(rootLayerSig)!)
-
-    const nsToSig = devDomainNsToDepSig.get(domain) ?? new Map<string, string>()
-    for (const [nsRelDir, depSig] of nsToSig) {
-      if (!EMIT_DOMAIN_ROOT_NAMESPACE && splitPath(nsRelDir).length === 1) continue
-      devImports[specifierFromNamespaceRelDir(nsRelDir)] =
-        `/dev/${domain}/__dependencies__/${jsFileName(depSig)}`
-    }
+  for (const dr of drones) {
+    writeRootSigFile(DEV_ROOT, rootSig, DRONE_DIRNAME, dr.sig, dr.bytes)
+    writeRootSigFile(DIST_ROOT, rootSig, DRONE_DIRNAME, dr.sig, dr.bytes)
   }
 
-  const devResourcesByDomain: Record<string, string[]> = {}
-  for (const domain of devDomains) {
-    devResourcesByDomain[domain] = Array.from(devDomainRes.get(domain) ?? []).map(jsFileName).sort()
+  // write root + domain layer install manifests
+  writeRootTextFile(DEV_ROOT, rootSig, LAYER_DIRNAME, `${rootSig}${LAYER_INSTALL_SUFFIX}`, rootLayer.text)
+  writeRootTextFile(DIST_ROOT, rootSig, LAYER_DIRNAME, `${rootSig}${LAYER_INSTALL_SUFFIX}`, rootLayer.text)
+
+  for (const l of domainLayers) {
+    writeRootTextFile(DEV_ROOT, rootSig, LAYER_DIRNAME, `${l.sig}${LAYER_INSTALL_SUFFIX}`, l.text)
+    writeRootTextFile(DIST_ROOT, rootSig, LAYER_DIRNAME, `${l.sig}${LAYER_INSTALL_SUFFIX}`, l.text)
   }
 
-  writeDevNameManifest(devImports, devDomains, devResourcesByDomain, rootLayerSig)
-
-  const ps1 = resolve(__dirname, 'deploy-azure.ps1')
-  if (existsSync(ps1)) {
-    const r = spawnSync(
-      'powershell',
-      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1, '-Signature', rootLayerSig],
-      { stdio: 'inherit' }
-    )
-    if (r.status !== 0) throw new Error('deployment failed')
+  // manifest (stable file name) points at /dev/<rootSig>/
+  const imports: Record<string, string> = {}
+  for (const d of deps) {
+    imports[d.ns] = `/dev/${rootSig}/${DEP_DIRNAME}/${d.sig}`
   }
+
+  writeManifest(rootSig, imports)
+
+  console.log(`[build-module] root layer -> ${rootSig}${LAYER_INSTALL_SUFFIX}`)
+  console.log(`[build-module] wrote ${DEV_MANIFEST_FILE}`)
 }
-
+  
 main().catch(err => {
-  console.error(err)
-  process.exit(1)
+  console.error(err instanceof Error ? err.message : err)
+  process.exitCode = 1
 })
