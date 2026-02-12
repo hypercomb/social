@@ -101,8 +101,6 @@ export class Store {
     buffer: ArrayBuffer
   ): Promise<Drone | null> => {
 
-    const { register } = window.ioc
-
     try {
       await this.seedResourceCache(signature, buffer)
 
@@ -132,10 +130,9 @@ export class Store {
         try {
           const instance = new Ctor()
 
-          if (!(instance instanceof Drone)) continue
-          if (typeof instance.name !== 'string' || !instance.name.trim()) continue
+          if (!instance) continue
 
-          register(signature, instance, instance.name)
+
           return instance
         } catch {
           // ignore and try next export
@@ -154,7 +151,7 @@ export class Store {
   ): Promise<void> => {
 
     const opfsUrl =
-      new URL(`/opfs/__drones__/${signature}`, location.origin).toString()
+      new URL(`/opfs/__drones__/${signature}.js`, location.origin).toString()
 
     try {
       const cache = await caches.open(Store.CACHE_NAME)

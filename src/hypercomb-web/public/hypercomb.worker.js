@@ -78,14 +78,14 @@ async function tryReadFromOpfs(dirName, sig) {
     const root = await self.navigator.storage.getDirectory()
 
     // root-scoped: opfs/__drones__/sig or opfs/__dependencies__/sig
-    const direct = await readFromDir(root, dirName, sig)
+    const direct = await readFromDir(root, dirName, `${sig}.js`)
     if (direct) return direct
 
     // domain-scoped: opfs/<domain>/__drones__/sig or opfs/<domain>/__dependencies__/sig
     for await (const [name, entry] of root.entries()) {
       if (!entry || entry.kind !== 'directory') continue
       if (!isDomainName(name)) continue
-      const nested = await readFromNested(entry, dirName, sig)
+      const nested = await readFromNested(entry, dirName, `${sig}.js`)
       if (nested) return nested
     }
 
@@ -111,6 +111,7 @@ async function readFromNested(domainDir, dirName, sig) {
     const dir = await domainDir.getDirectoryHandle(dirName)
     const fileHandle = await dir.getFileHandle(sig)
     const file = await fileHandle.getFile()
+    const text = await file.text()
     return asJsResponse(file, true)
   } catch {
     return null

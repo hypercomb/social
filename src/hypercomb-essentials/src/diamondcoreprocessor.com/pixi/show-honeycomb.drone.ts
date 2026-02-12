@@ -48,7 +48,7 @@ export class ShowHoneycombDrone extends Drone {
     const circumRadiusPx = 32
     const gapPx = 6.5
     const padPx = 10
-    const maxCells = 1000
+    const maxCells = 7
     const textureUrl = '/spw.png'
 
     const key = `${circumRadiusPx}|${gapPx}|${padPx}|${maxCells}|${textureUrl}`

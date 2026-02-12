@@ -39,16 +39,6 @@ export class ScriptPreloader implements DroneResolver {
     this.actionNames.set([])
     this.resourceCount.set(0)
 
-    if (environment.production) {
-      await this.preloadFromOpfs()
-    } else {
-      await this.preloadFromDev()
-    }
-
-    this.refreshProjection()
-  }
-
-  private preloadFromOpfs = async (): Promise<void> => {
     for await (const [name, entry] of this.store.opfsRoot.entries()) {
       if (entry.kind !== 'directory') continue
       if (!this.isDomainName(name)) continue
@@ -71,80 +61,32 @@ export class ScriptPreloader implements DroneResolver {
     } catch {
       // ignore
     }
-  }
 
-  private preloadFromDev = async (): Promise<void> => {
-    const manifest = await this.store.getDevManifest()
-    if (!manifest) return
-
-    const resourcesByDomain = this.readResourcesByDomain(manifest)
-    if (!resourcesByDomain) return
-
-    for (const [domain, sigs] of Object.entries(resourcesByDomain).sort((a, b) => a[0].localeCompare(b[0]))) {
-      for (const sig of sigs) {
-        if (!this.isSignature(sig)) continue
-        if (this.bySignature.has(sig)) continue
-
-        let buffer: ArrayBuffer | null = null
-        try {
-          // IMPORTANT: fetch as non-js so vite will not import-analyze it
-          const url = `/dev/${domain}/${Store.DRONES_DIRECTORY}/${sig}`
-          const r = await fetch(url, { cache: 'no-store' })
-          if (!r.ok) continue
-          buffer = await r.arrayBuffer()
-        } catch {
-          // ignore
-        }
-
-        if (!buffer) continue
-
-        const drone = await this.store.getDrone(sig, buffer)
-        if (!drone) continue
-
-        this.bySignature.set(sig, { signature: sig, name: drone.name })
-        this.resourceCount.update(v => v + 1)
-      }
-    }
-  }
-
-  private readResourcesByDomain = (manifest: DevManifest): Record<string, string[]> | null => {
-    const v = manifest?.resources
-    if (!v || typeof v !== 'object') return null
-
-    const out: Record<string, string[]> = {}
-    for (const [domain, raw] of Object.entries(v)) {
-      if (typeof domain !== 'string' || !domain.trim()) continue
-      if (!Array.isArray(raw)) continue
-
-      const list = raw
-        .filter(x => typeof x === 'string' && x.trim().length)
-        .map(x => (x as string).trim())
-        .filter(x => this.isSignature(x))
-
-      if (!list.length) continue
-      out[domain] = list
-    }
-
-    return Object.keys(out).length ? out : null
+    this.refreshProjection()
   }
 
   private loadAllFromDirectory = async (resourcesDir: FileSystemDirectoryHandle): Promise<void> => {
     for await (const [sig, entry] of resourcesDir.entries()) {
+      const signature  = sig.replace('.js', '') 
+      
       if (entry.kind !== 'file') continue
-      if (!this.isSignature(sig)) continue
-      if (this.bySignature.has(sig)) continue
+      if (!this.isSignature(signature)) continue
+      if (this.bySignature.has(signature)) continue
 
       try {
         const file = await (entry as FileSystemFileHandle).getFile()
         const buffer = await file.arrayBuffer()
 
-        const drone = await this.store.getDrone(sig, buffer)
+        const drone = await this.store.getDrone(signature, buffer)
         if (!drone) continue
+        const { register } = window.ioc
+        register(drone.name, drone)
 
-        this.bySignature.set(sig, { signature: sig, name: drone.name })
+        this.bySignature.set(signature, { signature, name: drone.name })
         this.resourceCount.update(v => v + 1)
       } catch {
         // ignore
+        console.log(`[script-preloader] failed to load resource ${signature} from OPFS`)
       }
     }
   }

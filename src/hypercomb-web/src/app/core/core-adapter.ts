@@ -40,7 +40,7 @@ export class CoreAdapter {
 
     //  // layers -> hydrate drones -> deps (single canonical pipeline)
     await this.runtime.sync()
-    
+
     // optional: dev diagnostics
     if (!environment.production && new URLSearchParams(location.search).has('test')) {
       const { list } = window.ioc
@@ -50,14 +50,24 @@ export class CoreAdapter {
     // initialize navigation + lineage after content is available
     await this.lineage.initialize()
 
-
-    
     const segments = this.navigation.segments().filter(Boolean)
     this.navigation.bootstrap(segments)
 
     // note:
     // - preloader is intentionally not invoked here yet
     // - keep it behind explicit user action or a separate boot phase
-    void this.preloader
+    void await this.preloader.preload()
+    // console.log('[core-adapter] initialized')
+
+    const { get, list } = window.ioc
+    const l = list();
+    console.log('[core-adapter] ioc keys:', l)
+    const hostkey = 'Pixi Host'
+    const host = <any>get(hostkey)!
+    await host.encounter('testing')
+
+    const showkey = 'Show Honeycomb'
+    const show = <any>get(showkey)!
+    await show. encounter('testing')
   }
 }

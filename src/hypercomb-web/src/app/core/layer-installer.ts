@@ -147,7 +147,7 @@ export class LayerInstaller {
           // not present
         }
 
-        const url = `${devDronesBase}${drone}.js`
+        const url = `${devDronesBase}${drone}`
         const res = await fetch(url, { cache: 'no-store' })
 
         const ct = res.headers.get('content-type') ?? ''
