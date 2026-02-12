@@ -21,10 +21,10 @@ export class RuntimeMediator {
   public sync = async (): Promise<void> => {
     const run = async (): Promise<void> => {
       const manifest = <DevManifest>await import(/* @vite-ignore */ this.DEV_MANIFEST_URL)
+      await this.dependency.load()
       await this.initializer.initialize(manifest)
       await this.installer.install(manifest)
       // await this.restoration.restore()
-      await this.dependency.load()
     }
 
     this.running = (this.running ?? Promise.resolve()).then(run, run)

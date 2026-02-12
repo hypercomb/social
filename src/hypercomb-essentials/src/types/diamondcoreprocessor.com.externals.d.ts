@@ -11,6 +11,12 @@ declare module '@diamondcoreprocessor.com/core' {
   export { Settings } from '../diamondcoreprocessor.com/core/settings'
 }
 
+declare module '@diamondcoreprocessor.com/core/zoom' {
+  export { ZoomArbiter } from '../diamondcoreprocessor.com/core/zoom/zoom-arbiter'
+  export { ZoomState } from '../diamondcoreprocessor.com/core/zoom/zoom-state'
+  export type { ZoomSnapshot } from '../diamondcoreprocessor.com/core/zoom/zoom-state'
+}
+
 declare module '@diamondcoreprocessor.com/hello-world' {
   export { helloWorld } from '../diamondcoreprocessor.com/hello-world/hw-service'
 }
@@ -25,5 +31,10 @@ declare module '@diamondcoreprocessor.com/screen' {
   export { ScreenService } from '../diamondcoreprocessor.com/screen/screen-service'
   export type { ScreenSnapshot } from '../diamondcoreprocessor.com/screen/screen-service'
   export { ScreenState } from '../diamondcoreprocessor.com/screen/screen-state'
+}
+
+declare module '@diamondcoreprocessor.com/settings' {
+  export { ZoomSettings } from '../diamondcoreprocessor.com/settings/zoom-settings'
+  export type { ZoomSettingsType } from '../diamondcoreprocessor.com/settings/zoom-settings'
 }
 

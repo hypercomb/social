@@ -17,19 +17,20 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(self.clients.claim())
 })
 
-self.addEventListener('fetch', (event) => {
+self.addEventListener('fetch', async (event) => {
   const url = new URL(event.request.url)
   console.log('[SW] fetch', url.pathname)
-  
+
   if (url.origin !== self.location.origin) return
 
   const method = (event.request.method || 'GET').toUpperCase()
   if (method !== 'GET' && method !== 'HEAD') return
 
-  if (url.pathname.startsWith(DEP_PREFIX)) {
-    event.respondWith(handleModuleRequest(event.request, '__dependencies__'))
-    return
-  }
+  // if(url.pathname.includes('/dev/')) {
+  //   console.log('[SW] ignoring /dev/ request')
+  //  //  event.respondWith(handleModuleRequest(event.request, '__dependencies__'))
+  //   return
+  // }
 
   if (url.pathname.startsWith(RES_PREFIX)) {
     event.respondWith(handleModuleRequest(event.request, '__drones__'))

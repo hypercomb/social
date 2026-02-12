@@ -69,5 +69,14 @@ export class CoreAdapter {
     const showkey = 'Show Honeycomb'
     const show = <any>get(showkey)!
     await show. encounter('testing')
+
+    const pinchkey = 'Pinch Zoom'
+    const pinch = <any>get(pinchkey)!
+    await pinch.encounter('testing')
+
+    const settingKey = 'Settings'
+    const setting = <any>get(settingKey)
+    await setting.encounter('testing')
+    console.log('got setting:', setting)
   }
 }
