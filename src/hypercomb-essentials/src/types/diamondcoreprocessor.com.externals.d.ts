@@ -2,13 +2,13 @@
 // ambient externals for diamondcoreprocessor.com
 // do not edit manually
 
-declare module '@diamondcoreprocessor.com/core/axial' {
-  export { AxialCoordinate } from '../diamondcoreprocessor.com/core/axial/axial-coordinate'
-  export { distance, AxialService } from '../diamondcoreprocessor.com/core/axial/axial-service'
-}
-
 declare module '@diamondcoreprocessor.com/core' {
   export { Settings } from '../diamondcoreprocessor.com/core/settings'
+}
+
+declare module '@diamondcoreprocessor.com/core/axial' {
+  export { AxialCoordinate } from '../diamondcoreprocessor.com/core/axial/axial-coordinate'
+  export { AxialService, distance } from '../diamondcoreprocessor.com/core/axial/axial-service'
 }
 
 declare module '@diamondcoreprocessor.com/core/zoom' {

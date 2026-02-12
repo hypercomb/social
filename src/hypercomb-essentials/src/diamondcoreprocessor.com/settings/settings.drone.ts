@@ -1,5 +1,6 @@
 // src/<domain>/settings/settings.drone.ts
 import { Drone } from '@hypercomb/core'
+import { SettingsKeys, SettingsModule } from './settings-keys.js'
 
 export class SettingsDrone extends Drone {
   private initialized = false
@@ -16,10 +17,10 @@ export class SettingsDrone extends Drone {
     const { register, get } = (<any>window).ioc
 
     // // get settings module (preloaded or importable)
-    const mod = get('@diamondcoreprocessor.com/settings')
+    const mod = get(SettingsModule)
     console.log('got settings module:', mod)
 
-    register('@diamondcoreprocessor.com/settings/zoom-settings', mod.ZoomSettings())
+    register(SettingsKeys.ZoomSettings, mod.ZoomSettings())
     // // publish instances
     // ioc.register('diamondcoreprocessor.com/core/settings/zoom-settings', new mod.ZoomSettings())
 
