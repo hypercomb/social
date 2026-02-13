@@ -1,12 +1,13 @@
 import { inject, provideAppInitializer } from '@angular/core';
 import { ApplicationConfig, provideBrowserGlobalErrorListeners, provideZoneChangeDetection } from '@angular/core';
-import { ScriptPreloader } from './core/script-preloader';
+import { ScriptPreloader } from './app/core/script-preloader';
 import { DRONE_RESOLVER_KEY, register } from '@hypercomb/core';
 import { provideRouter } from '@angular/router';
-import { routes } from './app.routes';
+import { routes } from './app/app.routes';
 
 export const appConfig: ApplicationConfig = {
   providers: [
+    ScriptPreloader,
     provideBrowserGlobalErrorListeners(),
     provideZoneChangeDetection({ eventCoalescing: true }),
     provideAppInitializer(async () => {

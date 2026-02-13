@@ -23,7 +23,7 @@ export class RuntimeMediator {
       const manifest = <DevManifest>await import(/* @vite-ignore */ this.DEV_MANIFEST_URL)
       await this.dependency.load()
       await this.initializer.initialize(manifest)
-      await this.installer.install(manifest)
+      // await this.installer.install(manifest)
       // await this.restoration.restore()
     }
 

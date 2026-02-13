@@ -3,6 +3,7 @@
 
 import './app/core/ioc.web'
 import { resolveImportMap } from './setup/resolve-import-map'
+import { appConfig } from './app.config'
 
 const ensureDevDroneHost = async (): Promise<void> => {
   // dev is "present" if the dev manifest exists
@@ -56,7 +57,7 @@ const bootstrap = async (): Promise<void> => {
 
   const { bootstrapApplication } = await import('@angular/platform-browser')
   const { App } = await import('./app/app')
-  await bootstrapApplication(App)
+  await bootstrapApplication(App, appConfig)
 }
 
 bootstrap().catch(err => console.error(err))

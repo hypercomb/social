@@ -11,7 +11,6 @@ export interface ActionDescriptor {
   name: string // kebab-case, ux-facing
 }
 
-@Injectable({ providedIn: 'root' })
 export class ScriptPreloader implements DroneResolver {
 
   private readonly lineage = inject(Lineage)
