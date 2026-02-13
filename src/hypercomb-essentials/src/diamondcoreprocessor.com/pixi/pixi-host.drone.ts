@@ -23,6 +23,7 @@ export class PixiHostDrone extends Drone {
     host.dataset['hypercombPixi'] = 'root'
     host.style.position = 'fixed'
     host.style.inset = '0'
+    host.style.zIndex = '489989'
     host.style.pointerEvents = 'none'
     document.body.appendChild(host)
 

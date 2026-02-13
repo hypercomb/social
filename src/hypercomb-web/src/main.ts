@@ -4,6 +4,25 @@
 import './app/core/ioc.web'
 import { resolveImportMap } from './setup/resolve-import-map'
 
+const ensureDevDroneHost = async (): Promise<void> => {
+  // dev is "present" if the dev manifest exists
+  try {
+    const r = await fetch(`/dev/name.manifest.js?_=${Date.now()}`, { cache: 'no-store' })
+    if (!r.ok) return
+  } catch {
+    return
+  }
+
+  // create iframe only in dev
+  if (document.getElementById('hc-drone-host')) return
+
+  const iframe = document.createElement('iframe')
+  iframe.id = 'hc-drone-host'
+  iframe.src = `/drone-host.html?boot=${Date.now()}`
+  iframe.style.display = 'none'
+  document.body.appendChild(iframe)
+}
+
 const ensureSwControl = async (): Promise<void> => {
   if (!('serviceWorker' in navigator)) return
 
@@ -33,12 +52,11 @@ const attachImportMap = async (): Promise<void> => {
 const bootstrap = async (): Promise<void> => {
   await attachImportMap()
   await ensureSwControl()
+  await ensureDevDroneHost()
 
   const { bootstrapApplication } = await import('@angular/platform-browser')
-  const { appConfig } = await import('./app/app.config')
   const { App } = await import('./app/app')
-
-  await bootstrapApplication(App, appConfig)
+  await bootstrapApplication(App)
 }
 
-bootstrap().catch(err => console.error('[main] bootstrap failed:', err))
+bootstrap().catch(err => console.error(err))

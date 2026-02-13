@@ -21,7 +21,6 @@ export class App extends hypercomb {
 
   constructor() {
     super()
-
     window.addEventListener('error', e => {
       if ((e as ErrorEvent).message?.includes('ResizeObserver loop')) {
         e.stopImmediatePropagation()

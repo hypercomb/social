@@ -5,7 +5,7 @@ import { Lineage } from '../core/lineage';
 
 @Component({
   selector: 'app-home',
-  imports: [OpfsExplorerComponent],
+  imports: [],
   templateUrl: './home.html',
   styleUrl: './home.scss'
 })
