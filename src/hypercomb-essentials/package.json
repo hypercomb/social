@@ -4,10 +4,10 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
+    "build-dev": "tsc -p tsconfig.json",
     "prepare": "tsx ./scripts/prepare.ts",  
     "build": "tsc -p tsconfig.json && tsx ./scripts/build-module.ts",
     "build-legacy": "tsc -p tsconfig.json && tsx ./scripts/build-module-legacy.ts",
-
     "build:watch": "tsx watch --include \"./src/**/*\" --include \"./scripts/**/*\" ./scripts/build-module.ts",
     "build-legacy:watch": "tsx watch --include \"./src/**/*\" --include \"./scripts/**/*\" ./scripts/build-module-legacy.ts"
   },

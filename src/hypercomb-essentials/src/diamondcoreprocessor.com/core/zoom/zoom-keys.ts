@@ -1,0 +1,8 @@
+// auto-generated
+// do not edit manually
+
+export const ZoomModule = '@diamondcoreprocessor.com/core/zoom'
+export const ZoomArbiter = '@diamondcoreprocessor.com/core/zoom/zoom-arbiter'
+export const ZoomSnapshot = '@diamondcoreprocessor.com/core/zoom/zoom-state'
+export const ZoomState = '@diamondcoreprocessor.com/core/zoom/zoom-state'
+export const ZoomKeys = { ZoomArbiter, ZoomSnapshot, ZoomState } as const

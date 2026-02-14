@@ -1,7 +1,7 @@
 // hypercomb-essentials/scripts/build-module-legacy.ts
 // production legacy build (dev-debug friendly)
 // - dev hierarchy mirrors source folders directly:
-//   /dev/<domain>/<folder>/<file>.js (+ .map)
+//   /dev/<domain>/<folder>/<file>.js (inline sourcemaps; no .map files)
 // - __dependencies__, __drones__, __layers__ are signature-only (dev + prod)
 // - runtimes (alias entrypoints) are signature-only modules in __dependencies__
 // - runtimes export only direct files in their folder via absolute /dev/... imports
@@ -225,7 +225,7 @@ const buildLayersFromTree = async (
 const buildDevHierarchyFile = async (
   entry: string,
   outBaseName: string
-): Promise<{ js: Uint8Array; map: Uint8Array }> => {
+): Promise<Uint8Array> => {
   const r = await build({
     entryPoints: [entry],
     bundle: false,
@@ -234,16 +234,20 @@ const buildDevHierarchyFile = async (
     write: false,
     target: TARGET,
     tsconfig: resolve(PROJECT_ROOT, 'tsconfig.json'),
+
+    // keep a stable output label for diagnostics, but do not rely on it for lookup
     outfile: outBaseName,
-    sourcemap: 'external',
+
+    // inline maps for dev hierarchy (no .map files)
+    sourcemap: 'inline',
     minify: false,
   })
 
-  const js = r.outputFiles?.find(f => f.path.endsWith(outBaseName))?.text
-  const map = r.outputFiles?.find(f => f.path.endsWith(`${outBaseName}.map`))?.text
+  // do not search by path; inline sourcemaps change output paths
+  const file = r.outputFiles?.find(f => f.path.endsWith('.js')) ?? r.outputFiles?.[0]
+  if (!file) throw new Error(`no output: ${entry}`)
 
-  if (!js || !map) throw new Error(`no output: ${entry}`)
-  return { js: textToBytes(js), map: textToBytes(map) }
+  return file.contents
 }
 
 const buildRuntime = async (
@@ -356,6 +360,7 @@ const main = async (): Promise<void> => {
   // -----------------------------
   // dev hierarchy (real files)
   // - includes dependencies and drones
+  // - inline sourcemaps (no .map files)
   // -----------------------------
 
   for (const src of sources) {
@@ -366,10 +371,8 @@ const main = async (): Promise<void> => {
     const outBase =
       `${src.relPath.replace(/\\/g, '/').split('/').pop()!.replace(/\.(ts|js)$/, '')}.js`
 
-    const built = await buildDevHierarchyFile(src.entry, outBase)
-
-    writeFileSync(absOutJs, built.js)
-    writeFileSync(`${absOutJs}.map`, built.map)
+    const bytes = await buildDevHierarchyFile(src.entry, outBase)
+    writeFileSync(absOutJs, bytes)
 
     domainSet.add(domainFromRelPath(src.relPath))
   }

@@ -13,7 +13,7 @@ export class SettingsDrone extends Drone {
   }
 
   public heartbeat = async (): Promise<void> => {
-    const { register, get } = (<any>window).ioc
+    const { register, get } = window.ioc
 
     // // get settings module (preloaded or importable)
     // const mod = get(SettingsModule)

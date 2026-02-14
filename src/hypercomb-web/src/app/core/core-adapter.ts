@@ -63,17 +63,14 @@ export class CoreAdapter {
     const l = list();
     console.log('[core-adapter] ioc keys:', l)
     
-    const hostkey = 'Pixi Host'
+    const hostkey = 'PixiHost'
     const host = <any>get(hostkey)!
     await host.encounter('testing')
 
-    const showkey = 'Show Honeycomb'
+    const showkey = 'ShowHoneycomb'
     const show = <any>get(showkey)!
     await show. encounter('testing')
 
-    // const pinchkey = 'Pinch Zoom'
-    // const pinch = <any>get(pinchkey)!
-    // await pinch.encounter('testing')
 
     // const settingKey = 'Settings'
     // const setting = <any>get(settingKey)

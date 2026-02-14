@@ -1,17 +1,33 @@
 {
   "compilerOptions": {
-    "target": "es2022",
-    "module": "nodenext",
-    "moduleResolution": "nodenext",
+    "target": "ES2022",
 
-    "declaration": true,
-    "declarationMap": true,
+    // 🔥 ESM clean mode
+    "module": "ESNext",
+    "moduleResolution": "bundler",
 
-    "outDir": "../hypercomb-web/public/dev/essentials",
+    // Required for ESM + .js specifiers in TS
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "allowImportingTsExtensions": false,
+
+    // Output
+    "outDir": "dist",
     "rootDir": "src",
 
+    // Declarations
+    "declaration": true,
+    "declarationMap": true,
+    "emitDeclarationOnly": false,
+
+    // Clean behavior
     "strict": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+
+    // Helps Angular + Vite + ESM environments
+    "resolveJsonModule": true,
+    "esModuleInterop": false
   },
   "include": ["src"]
 }

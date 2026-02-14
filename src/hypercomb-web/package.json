@@ -9,7 +9,7 @@
     "runtime:pixi": "npx tsx ./scripts/build-pixi-vendor.ts"
   },
   "dependencies": {
-    "@hypercomb/core": "file:../hypercomb-core"
+    "@hypercomb/core": "file:../hypercomb-core"  
   },
   "devDependencies": {
     "pixi.js": "^8.16.0"

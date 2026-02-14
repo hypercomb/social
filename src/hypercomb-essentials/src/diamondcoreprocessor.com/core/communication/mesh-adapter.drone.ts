@@ -1,6 +1,6 @@
 // src/mesh-adapter.drone.ts
 
-import { Drone, Effect } from '@hypercomb/core'
+import { Drone, type Effect } from '@hypercomb/core'
 
 type NostrRelay = string
 

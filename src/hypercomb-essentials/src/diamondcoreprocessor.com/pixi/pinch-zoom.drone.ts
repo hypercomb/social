@@ -6,33 +6,35 @@ type Point = { x: number; y: number }
 
 export class PinchZoomDrone extends Drone {
 
+  public override description = 'two-finger pinch zoom (host-only, encapsulated)'
+
   private initialized = false
-  public override description = 'two-finger pinch zoom (ignores mouse pointer)'
-
-  private readonly jitterPx = 4
-  private readonly source = 'pinch'
-
-  private isPinching = false
-  private baselineDistance = 0
-  private startScale = 1
-  private pinchId1: number | null = null
-  private pinchId2: number | null = null
-
-  private mousePointerId: number | null = null
   private rafId: number | null = null
 
-  protected sense = (grammar: string): boolean | Promise<boolean> => {
-    const intialized = this.initialized
+  private pointers = new Map<number, Point>()
+  private isPinching = false
+
+  private baselineDistance = 0
+  private startScale = 1
+
+  protected override sense = (): boolean => {
+    if (this.initialized) return false
     this.initialized = true
-    return !intialized
+    return true
   }
 
-  protected override heartbeat = async (grammar: string): Promise<void> => {
-    await this.run()
+  protected override heartbeat = async (): Promise<void> => {
+    this.start()
   }
 
-  public run = async (): Promise<void> => {
+  public start = (): void => {
     if (this.rafId !== null) return
+
+    window.addEventListener('pointerdown', this.onPointerDown, { passive: false })
+    window.addEventListener('pointermove', this.onPointerMove, { passive: false })
+    window.addEventListener('pointerup', this.onPointerUp, { passive: false })
+    window.addEventListener('pointercancel', this.onPointerUp, { passive: false })
+
     this.tick()
   }
 
@@ -41,126 +43,87 @@ export class PinchZoomDrone extends Drone {
       cancelAnimationFrame(this.rafId)
       this.rafId = null
     }
-    this.stopPinch()
+
+    window.removeEventListener('pointerdown', this.onPointerDown)
+    window.removeEventListener('pointermove', this.onPointerMove)
+    window.removeEventListener('pointerup', this.onPointerUp)
+    window.removeEventListener('pointercancel', this.onPointerUp)
+
+    this.resetPinch()
   }
 
   private tick = (): void => {
     this.rafId = requestAnimationFrame(this.tick)
 
-    const host = <any>get('Pixi Host')!
-    const container = host.container
-    if (!container) {
-      if (this.isPinching) this.stopPinch()
+    if (this.pointers.size < 2) {
+      if (this.isPinching) this.resetPinch()
       return
     }
 
-    // const positions = this.ps.pointerPositions()
-    // const last = this.ps.pointerMoveEvent() ?? this.ps.pointerDownEvent()
+    const host = get<any>('PixiHost')
+    if (!host?.container) return
 
-    // if (last && last.pointerType === 'mouse') {
-    //   this.mousePointerId = last.pointerId
-    // }
+    const [p1, p2] = Array.from(this.pointers.values()).slice(0, 2)
 
-    // const allEntries = Array.from(positions.entries()) as [number, Point][]
-    // const touchEntries = allEntries.filter(([id]) => id !== this.mousePointerId)
-    // const count = touchEntries.length
+    const dist = this.distance(p1, p2)
+    if (dist <= 0) return
 
-    // if (count === 0) {
-    //   if (this.isPinching) this.stopPinch()
-    //   return
-    // }
+    if (!this.isPinching) {
+      this.isPinching = true
+      this.baselineDistance = dist
+      this.startScale = host.container.scale.x
+      return
+    }
 
-    // // block zoom in transport mode
-    // if (this.state.hasMode(this.transportMode)) {
-    //   if (this.isPinching) this.stopPinch()
-    //   return
-    // }
+    const factor = dist / this.baselineDistance
+    const newScale = this.startScale * factor
 
-    // // start pinch when we see 2 touches
-    // if (!this.isPinching && count >= 2) {
-    //   const [id1, p1] = touchEntries[0]
-    //   const [id2, p2] = touchEntries[1]
+    const pivot = {
+      x: (p1.x + p2.x) / 2,
+      y: (p1.y + p2.y) / 2
+    }
 
-    //   const dist = this.getDistance(p1, p2)
-    //   if (dist <= 0) return
-
-    //   // pinch should win over other zoom inputs
-    //   if (!this.zoomArbiter.acquire(this.source, true)) return
-
-    //   this.pinchId1 = id1
-    //   this.pinchId2 = id2
-    //   this.baselineDistance = dist
-    //   this.startScale = this.zoom.currentScale
-
-    //   this.touchPan.cancelPanSession()
-    //   this.touchPan.disable()
-
-    //   this.isPinching = true
-    //   this.state.setCancelled(true)
-    //   return
-    // }
-
-    // // update pinch while 2+ touches remain
-    // if (this.isPinching && count >= 2) {
-    //   if (this.pinchId1 === null || this.pinchId2 === null) {
-    //     this.stopPinch()
-    //     return
-    //   }
-
-    //   const p1 = positions.get(this.pinchId1)
-    //   const p2 = positions.get(this.pinchId2)
-
-    //   // if either finger changed, stop and let next frame re-start cleanly
-    //   if (!p1 || !p2) {
-    //     this.stopPinch()
-    //     return
-    //   }
-
-    //   if (this.baselineDistance <= 0) return
-
-    //   const dist = this.getDistance(p1, p2)
-    //   const delta = dist - this.baselineDistance
-    //   if (Math.abs(delta) < this.jitterPx) return
-
-    //   const factor = dist / this.baselineDistance
-    //   const newScale = this.startScale * factor
-
-    //   // pivot follows the midpoint each frame
-    //   const pivot = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 }
-    //   this.zoom.zoomToScale(newScale, pivot)
-    //   return
-    // }
-
-    // // handoff to pan when pinch drops to one touch
-    // if (this.isPinching && count === 1) {
-    //   const [pointerId, p] = touchEntries[0]
-    //   this.stopPinch()
-
-    //   this.touchPan.enable()
-    //   this.touchPan.beginPanFromTouch(p.x, p.y, pointerId)
-    //   return
-    // }
+    this.applyZoom(host.container, newScale, pivot)
   }
 
-  private getDistance = (a: Point, b: Point): number => {
-    const dx = b.x - a.x
-    const dy = b.y - a.y
-    return Math.hypot(dx, dy)
+  private onPointerDown = (e: PointerEvent): void => {
+    if (e.pointerType !== 'touch') return
+    this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
   }
 
-  private stopPinch = (): void => {
-    // if (!this.isPinching) return
+  private onPointerMove = (e: PointerEvent): void => {
+    if (!this.pointers.has(e.pointerId)) return
+    this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
+  }
 
-    // this.isPinching = false
-    // this.pinchId1 = null
-    // this.pinchId2 = null
-    // this.baselineDistance = 0
-    // this.startScale = this.zoom.currentScale
+  private onPointerUp = (e: PointerEvent): void => {
+    this.pointers.delete(e.pointerId)
+    if (this.pointers.size < 2) this.resetPinch()
+  }
 
-    // this.zoomArbiter.release(this.source)
-    // this.touchPan.enable()
+  private resetPinch = (): void => {
+    this.isPinching = false
+    this.baselineDistance = 0
+  }
 
-    // // keep cancelled scoped to the gesture
-    // this.state.setCancelled(false)
+  private distance = (a: Point, b: Point): number => {
+    return Math.hypot(b.x - a.x, b.y - a.y)
+  }
+
+  private applyZoom = (container: any, scale: number, pivot: Point): void => {
+    const worldBefore = {
+      x: (pivot.x - container.position.x) / container.scale.x,
+      y: (pivot.y - container.position.y) / container.scale.y
+    }
+
+    container.scale.set(scale)
+
+    const worldAfter = {
+      x: worldBefore.x * scale,
+      y: worldBefore.y * scale
+    }
+
+    container.position.x = pivot.x - worldAfter.x
+    container.position.y = pivot.y - worldAfter.y
   }
 }

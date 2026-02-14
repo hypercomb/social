@@ -1,17 +1,15 @@
 // hypercomb-essentials/scripts/prepare.ts
-// generates ambient externals per domain by parsing real exports
-// generates per-folder *-keys.ts files (module + symbol keys)
-// - domains = first-level folders under src (except "types")
-// - namespaces = @<domain>/<up to 2 subfolders>
-// - folders only (never files) define module names
-// - explicit symbol exports only
-// - ignore .drone.*
-// - ignore generated *-keys.* when building externals
+// production-grade prepare script
+// - generates per-folder *-keys.ts
+// - generates per-folder index.ts
+// - generates per-domain root index.ts
+// - generates root index.ts
+// - drones exported as types only
 // - deterministic
-// - overwrites existing generated files
-
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'fs'
-import { dirname, extname, join, resolve } from 'path'
+// - overwrites generated files
+debugger
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
+import { basename, dirname, extname, join, resolve } from 'path'
 import ts from 'typescript'
 import { fileURLToPath } from 'url'
 
@@ -22,85 +20,42 @@ import { fileURLToPath } from 'url'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
-// -------------------------------------------------
-// config
-// -------------------------------------------------
-
 const SRC_ROOT = resolve(__dirname, '../src')
-const TYPES_ROOT = resolve(SRC_ROOT, 'types')
+const TYPES_ROOT = join(SRC_ROOT, 'types')
 
 // -------------------------------------------------
 // helpers
 // -------------------------------------------------
 
-const isSource = (f: string): boolean =>
-  (f.endsWith('.ts') || f.endsWith('.js')) &&
-  !f.endsWith('.d.ts') &&
-  !f.endsWith('.drone.ts') &&
-  !f.endsWith('.drone.js')
+const isSource = (f: string) => (f.endsWith('.ts') || f.endsWith('.js')) && !f.endsWith('.d.ts')
+const isDrone = (f: string) => f.endsWith('.drone.ts') || f.endsWith('.drone.js')
+const isGenerated = (f: string) => f.endsWith('-keys.ts') || basename(f) === 'index.ts'
 
-const isGeneratedKeysFile = (f: string): boolean =>
-  f.endsWith('-keys.ts') || f.endsWith('-keys.js')
-
-const isExternalSource = (f: string): boolean =>
-  isSource(f) && !isGeneratedKeysFile(f)
-
-const isKeyInput = (full: string): boolean => {
-  if (!isSource(full)) return false
-
-  const base = full.replace(extname(full), '').split(/[\\/]/).pop() ?? ''
-  if (base === 'index') return false
-  if (base.endsWith('-keys')) return false
-
-  return true
-}
-
-const relFrom = (root: string, full: string): string =>
+const relFrom = (root: string, full: string) =>
   full.replace(root, '').replace(/^[\\/]/, '').replace(/\\/g, '/')
 
-const relNoExtFrom = (root: string, full: string): string =>
-  relFrom(root, full).replace(extname(full), '')
-
-const toPascal = (name: string): string =>
+const toPascal = (name: string) =>
   name
     .replace(/[^a-zA-Z0-9]+/g, ' ')
     .split(' ')
     .filter(Boolean)
-    .map(p => p.slice(0, 1).toUpperCase() + p.slice(1))
+    .map(p => p[0].toUpperCase() + p.slice(1))
     .join('')
 
 // -------------------------------------------------
 // walking
 // -------------------------------------------------
 
-const walkFiles = (dir: string): string[] => {
-  if (!existsSync(dir)) return []
-  const out: string[] = []
-
-  for (const name of readdirSync(dir).sort()) {
-    const full = join(dir, name)
-    const st = statSync(full)
-
-    if (st.isDirectory()) out.push(...walkFiles(full))
-    else out.push(full)
-  }
-
-  return out
-}
-
 const walkDirs = (dir: string): string[] => {
   if (!existsSync(dir)) return []
   const out: string[] = []
-
   for (const name of readdirSync(dir).sort()) {
     const full = join(dir, name)
-    const st = statSync(full)
-    if (!st.isDirectory()) continue
-
-    out.push(full)
-    out.push(...walkDirs(full))
+    if (statSync(full).isDirectory()) {
+      out.push(full)
+      out.push(...walkDirs(full))
+    }
   }
-
   return out
 }
 
@@ -108,28 +63,19 @@ const walkDirs = (dir: string): string[] => {
 // export parsing
 // -------------------------------------------------
 
-type ExportInfo = {
-  value: string[]
-  type: string[]
-}
+type ExportInfo = { value: string[]; type: string[] }
 
 const parseExports = (file: string): ExportInfo => {
-  const source = ts.createSourceFile(
-    file,
-    readFileSync(file, 'utf8'),
-    ts.ScriptTarget.Latest,
-    true
-  )
-
+  const source = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true)
   const out: ExportInfo = { value: [], type: [] }
 
   source.forEachChild(node => {
-    if (
-      ts.canHaveModifiers(node) &&
-      node.modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword)
-    ) {
+    if (ts.canHaveModifiers(node) && node.modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword)) {
       if (ts.isClassDeclaration(node) || ts.isFunctionDeclaration(node) || ts.isEnumDeclaration(node)) {
-        if (node.name) out.value.push(node.name.text)
+        if (node.name) {
+          if (isDrone(file)) out.type.push(node.name.text)
+          else out.value.push(node.name.text)
+        }
       }
 
       if (ts.isVariableStatement(node)) {
@@ -146,167 +92,217 @@ const parseExports = (file: string): ExportInfo => {
     if (ts.isExportDeclaration(node) && node.exportClause && ts.isNamedExports(node.exportClause)) {
       node.exportClause.elements.forEach(e => {
         const name = (e.name || e.propertyName)?.text
-        if (name) out.value.push(name)
+        if (!name) return
+        if (isDrone(file)) out.type.push(name)
+        else out.value.push(name)
       })
     }
   })
 
-  out.value = Array.from(new Set(out.value)).sort()
-  out.type = Array.from(new Set(out.type)).sort()
-
-  return out
+  return {
+    value: Array.from(new Set(out.value)).sort(),
+    type: Array.from(new Set(out.type)).sort()
+  }
 }
 
 // -------------------------------------------------
-// namespace helpers
+// folder keys
 // -------------------------------------------------
 
-const getNamespace = (domain: string, file: string): string | null => {
-  const rel = relFrom(join(SRC_ROOT, domain), file)
-  const parts = rel.split('/')
-
-  parts.pop()
-
-  if (parts.length === 0) return `@${domain}`
-
-  return `@${[domain, ...parts.slice(0, 2)].join('/')}`
-}
-
-const getModulePath = (domain: string, file: string): string =>
-  '../' + relNoExtFrom(SRC_ROOT, file)
-
-// -------------------------------------------------
-// per-folder keys generation
-// -------------------------------------------------
-
-const writeFolderKeys = (domain: string, domainRoot: string, dir: string): void => {
-  const dirName = dir.split(/[\\/]/).pop() ?? ''
+const writeFolderKeys = (domain: string, domainRoot: string, dir: string) => {
+  const dirName = dir.split(/[\\/]/).pop()
   if (!dirName) return
 
-  const folderRel = relFrom(domainRoot, dir) // e.g. "settings" or "core/zoom"
-  const folderModuleKey = `${domain}/${folderRel}`
+  const folderRel = relFrom(domainRoot, dir)
+  const moduleKey = folderRel ? `${domain}/${folderRel}` : `${domain}`
 
-  const keysConstName = `${toPascal(dirName)}Keys`
-  const moduleConstName = `${toPascal(dirName)}Module`
+  const keysConst = `${toPascal(dirName)}Keys`
+  const moduleConst = `${toPascal(dirName)}Module`
   const outFile = join(dir, `${dirName}-keys.ts`)
 
   const bySymbol = new Map<string, string>()
 
   for (const name of readdirSync(dir).sort()) {
     const full = join(dir, name)
-    const st = statSync(full)
-    if (!st.isFile()) continue
-    if (!isKeyInput(full)) continue
+    if (!statSync(full).isFile()) continue
+    if (!isSource(full)) continue
+    if (isGenerated(full)) continue
 
     const exp = parseExports(full)
-    if (!exp.value.length && !exp.type.length) continue
+    const stem = name.replace(extname(name), '')
+    const keyBase = `${moduleKey}/${stem}`
 
-    const fileStem = name.replace(extname(name), '')
-    const symbolKey = `${folderModuleKey}/${fileStem}`
-
-    // value + type exports both become key constants
-    for (const sym of [...exp.value, ...exp.type]) {
-      if (!sym) continue
-      if (sym === keysConstName) continue
-      if (sym === moduleConstName) continue
-
-      if (bySymbol.has(sym)) {
-        const existing = bySymbol.get(sym)
-        if (existing !== symbolKey) {
-          console.warn(`[prepare] duplicate export name "${sym}" in ${dir} (${existing} vs ${symbolKey})`)
-        }
-        continue
-      }
-
-      bySymbol.set(sym, symbolKey)
-    }
+    for (const sym of [...exp.value, ...exp.type]) bySymbol.set(sym, keyBase)
   }
 
   if (!bySymbol.size) return
 
   const symbols = Array.from(bySymbol.keys()).sort()
 
-  let out = `// auto-generated by scripts/prepare.ts
-// public module keys for ${domain}/${folderRel}
+  let out = `// auto-generated
 // do not edit manually
 
- export const ${moduleConstName} = '@${folderModuleKey}'
+export const ${moduleConst} = '@${moduleKey}'
 `
 
-  for (const sym of symbols) {
-    out += `export const ${sym} = '@${bySymbol.get(sym)}'\n`
-  }
+  for (const s of symbols) out += `export const ${s} = '@${bySymbol.get(s)}'\n`
 
-  out += `export const ${keysConstName} = { ${symbols.join(', ')} } as const\n`
+  out += `export const ${keysConst} = { ${symbols.join(', ')} } as const\n`
 
   writeFileSync(outFile, out, 'utf8')
-  console.log(`[prepare] wrote ${outFile}`)
 }
 
-const generateKeysForDomain = (domain: string): void => {
-  const domainRoot = join(SRC_ROOT, domain)
-  for (const dir of walkDirs(domainRoot)) writeFolderKeys(domain, domainRoot, dir)
+// -------------------------------------------------
+// index planning (so folder exports don't stop after the first)
+// -------------------------------------------------
+
+type DirMeta = { children: string[]; exportFiles: string[] }
+
+const buildDirMeta = (root: string): Map<string, DirMeta> => {
+  const dirs = [root, ...walkDirs(root)]
+  const map = new Map<string, DirMeta>()
+
+  for (const dir of dirs) {
+    const children: string[] = []
+    const exportFiles: string[] = []
+
+    for (const name of readdirSync(dir).sort()) {
+      const full = join(dir, name)
+      const st = statSync(full)
+
+      if (st.isDirectory()) {
+        children.push(full)
+        continue
+      }
+
+      if (!st.isFile()) continue
+      if (!isSource(full)) continue
+      if (isGenerated(full)) continue
+
+      const base = name.replace(extname(name), '')
+      if (base === 'index') continue
+
+      exportFiles.push(full)
+    }
+
+    map.set(dir, { children, exportFiles })
+  }
+
+  return map
+}
+
+const computeHasDeepSources = (meta: Map<string, DirMeta>) => {
+  const cache = new Map<string, boolean>()
+
+  const hasDeep = (dir: string): boolean => {
+    const hit = cache.get(dir)
+    if (hit !== undefined) return hit
+
+    const m = meta.get(dir)
+    if (!m) {
+      cache.set(dir, false)
+      return false
+    }
+
+    if (m.exportFiles.length) {
+      cache.set(dir, true)
+      return true
+    }
+
+    for (const child of m.children) {
+      if (hasDeep(child)) {
+        cache.set(dir, true)
+        return true
+      }
+    }
+
+    cache.set(dir, false)
+    return false
+  }
+
+  return hasDeep
+}
+
+// -------------------------------------------------
+// folder index (exports subfolders + files; subfolders ensure you don't "stop after the first")
+// -------------------------------------------------
+
+const writeFolderIndex = (dir: string, meta: Map<string, DirMeta>, hasDeep: (dir: string) => boolean) => {
+  if (!hasDeep(dir)) return
+
+  const m = meta.get(dir)
+  if (!m) return
+
+  const lines: string[] = []
+
+  for (const child of m.children.sort()) {
+    if (!hasDeep(child)) continue
+    lines.push(`export * from './${basename(child)}'`)
+  }
+
+  for (const full of m.exportFiles.sort()) {
+    const name = basename(full)
+    const base = name.replace(extname(name), '')
+    const rel = `./${base}`
+    if (isDrone(full)) lines.push(`export * from '${rel}'`)
+    else lines.push(`export * from '${rel}'`)
+  }
+
+  if (!lines.length) return
+
+  const content = `// auto-generated
+// do not edit manually
+
+${lines.join('\n')}
+`
+
+  writeFileSync(join(dir, 'index.ts'), content, 'utf8')
 }
 
 // -------------------------------------------------
 // main
 // -------------------------------------------------
 
+rmSync(TYPES_ROOT, { recursive: true, force: true })
 mkdirSync(TYPES_ROOT, { recursive: true })
 
-const domains = readdirSync(SRC_ROOT).filter(name => {
-  if (name === 'types') return false
-  const full = join(SRC_ROOT, name)
-  return statSync(full).isDirectory()
-}).sort()
+const domains = readdirSync(SRC_ROOT)
+  .filter(n => n !== 'types' && statSync(join(SRC_ROOT, n)).isDirectory())
+  .sort()
 
-// 1) generate per-folder keys
-for (const domain of domains) {
-  generateKeysForDomain(domain)
-}
+const rootExports: string[] = []
 
-// 2) generate ambient externals per domain (exclude generated *-keys.* so externals stay clean)
 for (const domain of domains) {
   const domainRoot = join(SRC_ROOT, domain)
 
-  const namespaces = new Map<string, Map<string, ExportInfo>>()
+  const meta = buildDirMeta(domainRoot)
+  const hasDeep = computeHasDeepSources(meta)
 
-  for (const file of walkFiles(domainRoot)) {
-    if (!isExternalSource(file)) continue
+  const allDirs = [domainRoot, ...walkDirs(domainRoot)]
 
-    const exports = parseExports(file)
-    if (!exports.value.length && !exports.type.length) continue
-
-    const ns = getNamespace(domain, file)
-    if (!ns) continue
-
-    const mod = getModulePath(domain, file)
-    const bucket = namespaces.get(ns) ?? new Map()
-    bucket.set(mod, exports)
-    namespaces.set(ns, bucket)
+  for (const dir of allDirs) {
+    writeFolderKeys(domain, domainRoot, dir)
   }
 
-  if (!namespaces.size) continue
+  for (const dir of allDirs) {
+    writeFolderIndex(dir, meta, hasDeep)
+  }
 
-  const outFile = join(TYPES_ROOT, `${domain}.externals.d.ts`)
+  for (const dir of allDirs) {
+    if (hasDeep(dir)) {
+      const rel = relFrom(SRC_ROOT, dir)
+      rootExports.push(`export * from './${rel}'`)
+    }
+  }
+}
 
-  let out = `// auto-generated by scripts/prepare.ts
-// ambient externals for ${domain}
+const rootIndex = `// auto-generated
+// package root entrypoint
 // do not edit manually
 
+${rootExports.sort().join('\n')}
 `
 
-  for (const [ns, modules] of Array.from(namespaces.entries()).sort((a, b) => a[0].localeCompare(b[0]))) {
-    out += `declare module '${ns}' {\n`
+writeFileSync(join(SRC_ROOT, 'index.ts'), rootIndex, 'utf8')
 
-    for (const [mod, exp] of Array.from(modules.entries()).sort((a, b) => a[0].localeCompare(b[0]))) {
-      if (exp.value.length) out += `  export { ${exp.value.join(', ')} } from '${mod}'\n`
-      if (exp.type.length) out += `  export type { ${exp.type.join(', ')} } from '${mod}'\n`
-    }
-
-    out += `}\n\n`
-  }
-
-  writeFileSync(outFile, out, 'utf8')
-  console.log(`[prepare] wrote ${outFile}`)
-}
+console.log('[prepare] complete')

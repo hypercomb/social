@@ -1,13 +1,15 @@
 // src/pixi/show-honeycomb.drone.ts
 
-import { Drone } from '@hypercomb/core'
-import { Assets, Container, Geometry, Mesh, Texture } from 'pixi.js'
-import { PixiHostDrone } from './pixi-host.drone.js'
-import { HexSdfTextureShader, HexLabelAtlas } from '@diamondcoreprocessor.com/pixi';
+  import { Drone } from '@hypercomb/core'
+  import { Assets, Container, Geometry, Mesh, Texture } from 'pixi.js'
+  import { PixiHostDrone } from './pixi-host.drone.js'
+  import { HexLabelAtlas } from './hex-label.atlas.js';
+  import { HexSdfTextureShader } from './hex-sdf.shader.js';
 
-type Axial = { q: number; r: number }
 
-export class ShowHoneycombDrone extends Drone {
+  type Axial = { q: number; r: number }
+
+  export class ShowHoneycombDrone extends Drone {
 
   private host?: PixiHostDrone
   private layer: Container | null = null
@@ -28,7 +30,7 @@ export class ShowHoneycombDrone extends Drone {
     const { get } = (window as any).ioc
 
     // host resolution
-    const host = this.host = get('Pixi Host')
+    const host = this.host = get('PixiHost')
     if (!host?.app || !host.container) return
 
     // layer (created once)
@@ -48,7 +50,7 @@ export class ShowHoneycombDrone extends Drone {
     const circumRadiusPx = 32
     const gapPx = 6.5
     const padPx = 10
-    const maxCells = 600
+    const maxCells = 100
     const textureUrl = '/spw.png'
 
     const key = `${circumRadiusPx}|${gapPx}|${padPx}|${maxCells}|${textureUrl}`

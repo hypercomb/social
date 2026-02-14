@@ -1,13 +1,16 @@
 {
 	"folders": [
 		{
-			"path": "../../.."
-		},
-		{
 			"path": "../../../../hypercomb-essentials"
 		},
 		{
 			"path": "../../../../hypercomb-core"
+		},
+		{
+			"path": "../../../../hypercomb-dev"
+		},
+		{
+			"path": "../../.."
 		}
 	],
 	"settings": {

@@ -36,7 +36,7 @@ export class PixiHostDrone extends Drone {
     await app.init({
       resizeTo: window,
       backgroundAlpha: 0,
-      resolution: window.devicePixelRatio || 1,
+      resolution: 8,
       autoDensity: true,
     })
 

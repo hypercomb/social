@@ -1,4 +1,3 @@
-import type { helloWorld } from "@diamondcoreprocessor.com/hello-world"
 import { Drone } from "@hypercomb/core"
 
 export class HelloWorldDrone extends Drone {
@@ -22,7 +21,7 @@ export class HelloWorldDrone extends Drone {
   ]
 
   protected override heartbeat = async (grammar: string): Promise<void> => {
-    const hw =   (<helloWorld>window).ioc.get("@diamondcoreprocessor.com/hello-world")
+    const hw = window.ioc.get("@diamondcoreprocessor.com/hello-world")
     console.log('[hypercomb essentials] hello world')
   }
 }

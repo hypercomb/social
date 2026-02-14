@@ -1,7 +1,8 @@
 
 import { Point } from "pixi.js"
 import { AxialCoordinate } from "./axial-coordinate.js"
-import type { Settings } from "@diamondcoreprocessor.com/core"
+import type { Settings } from "../settings.js"
+
 
 export const distance = (a: Point, b: Point): number => {
     const dx = a.x - b.x
