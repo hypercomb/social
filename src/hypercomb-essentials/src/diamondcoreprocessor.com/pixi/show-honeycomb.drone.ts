@@ -1,20 +1,18 @@
-// src/pixi/show-honeycomb.drone.ts
+// hypercomb-essentials/src/diamondcoreprocessor.com/pixi/show-honeycomb.drone.ts
 
-  import { Drone } from '@hypercomb/core'
-  import { Assets, Container, Geometry, Mesh, Texture } from 'pixi.js'
-  import { PixiHostDrone } from './pixi-host.drone.js'
-  import { HexLabelAtlas } from './hex-label.atlas.js';
-  import { HexSdfTextureShader } from './hex-sdf.shader.js';
+import { Drone } from '@hypercomb/core'
+import { Assets, Container, Geometry, Mesh, Texture } from 'pixi.js'
+import { PixiHostDrone } from './pixi-host.drone.js'
+import { HexLabelAtlas } from './hex-label.atlas.js'
+import { HexSdfTextureShader } from './hex-sdf.shader.js'
 
+// note: now we carry pixel position directly
+type Cell = { q: number; r: number; x: number; y: number }
 
-  type Axial = { q: number; r: number }
-
-  export class ShowHoneycombDrone extends Drone {
-
+export class ShowHoneycombDrone extends Drone {
   private host?: PixiHostDrone
   private layer: Container | null = null
 
-  // note: pixi typings vary by build; keep these runtime-safe and avoid generic constraints
   private mesh: any | null = null
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -27,30 +25,32 @@
   protected override sense = (): boolean => true
 
   protected override heartbeat = async (): Promise<void> => {
-    const { get } = (window as any).ioc
+    const { get, register, list } = window.ioc
 
     // host resolution
     const host = this.host = get('PixiHost')
     if (!host?.app || !host.container) return
+
+    // axial must be ready
+    const axial = get('AxialService') as any
+    if (!axial?.items?.size) return
 
     // layer (created once)
     if (!this.layer) {
       this.layer = new Container()
       host.container.addChild(this.layer)
 
-      this.atlas = new HexLabelAtlas(
-        host.app.renderer,
-        128,
-        8,
-        8
-      )
+      this.atlas = new HexLabelAtlas(host.app.renderer, 128, 8, 8)
     }
 
-    // parameters 
+    // parameters
     const circumRadiusPx = 32
-    const gapPx = 6.5
+    const gapPx = 6
     const padPx = 10
-    const maxCells = 100
+
+    // draw first n indices (fast lookup)
+    const maxCells = 7
+
     const textureUrl = '/spw.png'
 
     const key = `${circumRadiusPx}|${gapPx}|${padPx}|${maxCells}|${textureUrl}`
@@ -58,7 +58,8 @@
     this.lastKey = key
 
     // data
-    const cells = this.buildSpiral(maxCells)
+    const cells = this.buildCellsFromAxial(axial, maxCells)
+    if (!cells.length) return
 
     const hexHalfW = (Math.sqrt(3) * circumRadiusPx) / 2
     const hexHalfH = circumRadiusPx
@@ -72,17 +73,9 @@
     if (!baseTex || !this.atlas) return
 
     // warm atlas
-    for (const c of cells) {
-      this.atlas.getLabelUV(`${c.q},${c.r}`)
-    }
+    for (const c of cells) this.atlas.getLabelUV(`${c.q},${c.r}`)
 
-    const geom = this.buildFillQuadGeometry(
-      cells,
-      circumRadiusPx,
-      gapPx,
-      quadHalfW,
-      quadHalfH
-    )
+    const geom = this.buildFillQuadGeometry(cells, quadHalfW, quadHalfH)
 
     // shader
     if (!this.shader) {
@@ -102,8 +95,6 @@
 
     // mesh
     if (!this.mesh) {
-      // some pixi builds type mesh shader as textureshader and require a texture field
-      // we provide texture and keep shader assignment runtime-correct
       this.mesh = new Mesh({
         geometry: geom as any,
         shader: (this.shader as any).shader,
@@ -117,7 +108,6 @@
       this.mesh.geometry = geom
       this.mesh.shader = (this.shader as any).shader
 
-      // keep texture in sync for mesh types that require it
       if ('texture' in this.mesh) this.mesh.texture = baseTex
     }
 
@@ -134,52 +124,33 @@
     return this.tex
   }
 
-  private buildSpiral = (max: number): Axial[] => {
-    const out: Axial[] = [{ q: 0, r: 0 }]
-    if (max <= 1) return out
+  private buildCellsFromAxial = (axial: any, max: number): Cell[] => {
+    const out: Cell[] = []
 
-    const dirs: Axial[] = [
-      { q: 1, r: 0 },
-      { q: 0, r: 1 },
-      { q: -1, r: 1 },
-      { q: -1, r: 0 },
-      { q: 0, r: -1 },
-      { q: 1, r: -1 },
-    ]
+    // important: recenter so index 0 lands at (0,0) in mesh space
+    const c0 = axial.items.get(0)
+    const cx = c0?.Location?.x ?? 0
+    const cy = c0?.Location?.y ?? 0
 
-    for (let ring = 1; out.length < max; ring++) {
-      let q = dirs[4].q * ring
-      let r = dirs[4].r * ring
+    for (let i = 0; i < max; i++) {
+      const a = axial.items.get(i)
+      if (!a) break
 
-      for (let side = 0; side < 6; side++) {
-        const d = dirs[side]
-        for (let step = 0; step < ring; step++) {
-          if (out.length >= max) break
-          out.push({ q, r })
-          q += d.q
-          r += d.r
-        }
-      }
+      const loc = a.Location
+      if (!loc) continue
+
+      out.push({
+        q: a.q,
+        r: a.r,
+        x: (loc.x ?? 0) - cx,
+        y: (loc.y ?? 0) - cy,
+      })
     }
 
     return out
   }
 
-  private axialToPixel = (q: number, r: number, s: number) => ({
-    x: Math.sqrt(3) * s * (q + r / 2),
-    y: s * 1.5 * r,
-  })
-
-  private buildFillQuadGeometry(
-    cells: Axial[],
-    r: number,
-    gap: number,
-    hw: number,
-    hh: number
-  ): Geometry {
-
-    const spacing = r + gap
-
+  private buildFillQuadGeometry = (cells: Cell[], hw: number, hh: number): Geometry => {
     const pos = new Float32Array(cells.length * 8)
     const uv = new Float32Array(cells.length * 8)
     const labelUV = new Float32Array(cells.length * 16)
@@ -188,10 +159,9 @@
     let pv = 0, uvp = 0, luvp = 0, ii = 0, base = 0
 
     for (const c of cells) {
-      const { x, y } = this.axialToPixel(c.q, c.r, spacing)
-
-      const x0 = x - hw, x1 = x + hw
-      const y0 = y - hh, y1 = y + hh
+      // note: positions come directly from axial service lookup
+      const x0 = c.x - hw, x1 = c.x + hw
+      const y0 = c.y - hh, y1 = c.y + hh
 
       pos.set([x0, y0, x1, y0, x1, y1, x0, y1], pv)
       pv += 8
@@ -210,10 +180,7 @@
       base += 4
     }
 
-    // pixi v8 geometry descriptor typing differs by build; construct explicitly
-    // attribute names must match the shader: aPosition, aUV, aLabelUV
     const g = new Geometry()
-
     ;(g as any).addAttribute('aPosition', pos, 2)
     ;(g as any).addAttribute('aUV', uv, 2)
     ;(g as any).addAttribute('aLabelUV', labelUV, 4)
@@ -222,3 +189,5 @@
     return g
   }
 }
+
+window.ioc.register('ShowHoneycomb', new ShowHoneycombDrone())

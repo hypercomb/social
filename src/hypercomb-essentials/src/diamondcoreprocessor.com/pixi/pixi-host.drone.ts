@@ -1,19 +1,28 @@
+// hypercomb-essentials/src/diamondcoreprocessor.com/pixi/pixi-host.drone.ts
 // @hypercomb/pixi
 
 import { Drone } from '@hypercomb/core'
 import { Application, Container } from 'pixi.js'
 
 export class PixiHostDrone extends Drone {
-
   public app: Application | null = null
   public host: HTMLDivElement | null = null
 
-
-  // stable render root for all drones
+  // stable render root for all drones (this is what ZoomDrone scales/translates)
   public container!: Container
 
   protected override heartbeat = async (): Promise<void> => {
     if (this.app) return
+
+    const { get, register, list } = window.ioc
+
+    // axial must be initialized before any drone tries to use index->axial lookups
+    // if settings aren't ready yet, just wait for the next heartbeat
+    const settings = get('Settings') as any
+    if (!settings) return
+
+    const axial = get('AxialService') as any
+    if (axial?.initialize) axial.initialize(settings)
 
     // -------------------------------------------------
     // dom root (single, inert)
@@ -36,26 +45,11 @@ export class PixiHostDrone extends Drone {
     await app.init({
       resizeTo: window,
       backgroundAlpha: 0,
-      resolution: 8,
-      autoDensity: true,
+      resolution: devicePixelRatio || 1,
+      autoDensity: true
     })
 
     host.appendChild(app.canvas)
-
-    // -------------------------------------------------
-    // center stage (no scaling!)
-    // -------------------------------------------------
-
-    const center = (): void => {
-      app.stage.position.set(
-        app.renderer.width * 0.5,
-        app.renderer.height * 0.5
-      )
-    }
-    
-
-    center()
-    window.addEventListener('resize', center)
 
     // -------------------------------------------------
     // root render container
@@ -64,5 +58,18 @@ export class PixiHostDrone extends Drone {
     this.container = new Container()
     app.stage.addChild(this.container)
 
+    // -------------------------------------------------
+    // center stage (no scaling!) + keep coordinates in renderer.screen units
+    // -------------------------------------------------
+
+    const center = (): void => {
+      const s = app.renderer.screen
+      app.stage.position.set(s.width * 0.5, s.height * 0.5)
+    }
+
+    center()
+    window.addEventListener('resize', center)
   }
 }
+
+window.ioc.register('PixiHost', new PixiHostDrone())

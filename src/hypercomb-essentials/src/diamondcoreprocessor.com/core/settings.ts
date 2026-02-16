@@ -22,8 +22,8 @@ export class Settings  {
     public readonly rings = 50
 
     public fillColor = "#242a30"
-
 }
 
+window.ioc.register('Settings', new Settings())
 
 

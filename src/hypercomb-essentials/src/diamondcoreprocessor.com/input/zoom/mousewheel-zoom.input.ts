@@ -1,8 +1,8 @@
-// src/<domain>/pixi/inputs/mousewheel-zoom.input.ts
+// hypercomb-essentials/src/diamondcoreprocessor.com/input/zoom/mousewheel-zoom.input.ts
+
 type Point = { x: number; y: number }
 
 export class MousewheelZoomInput {
-
   private enabled = false
   private canvas: HTMLCanvasElement | null = null
 
@@ -26,7 +26,8 @@ export class MousewheelZoomInput {
     this.zoom = zoom
     this.canvas = canvas
 
-    // listen on the actual canvas so pivot math matches layout
+    // canvas has pointer-events:none so this must be global
+    // gating uses the canvas rect so behavior matches "over the container"
     window.addEventListener('wheel', this.onWheel, { passive: false })
     this.enabled = true
   }
@@ -45,7 +46,6 @@ export class MousewheelZoomInput {
   private onWheel = (event: WheelEvent): void => {
     if (!this.zoom || !this.canvas) return
 
-    // only zoom when cursor is over the canvas rect
     const rect = this.canvas.getBoundingClientRect()
     if (
       event.clientX < rect.left || event.clientX > rect.right ||
@@ -64,4 +64,6 @@ export class MousewheelZoomInput {
     event.stopPropagation()
   }
 }
-window.ioc.register('MousewheelZoomInput',new MousewheelZoomInput())
+
+const { get, register, list } = window.ioc
+window.ioc.register('MousewheelZoomInput', new MousewheelZoomInput())

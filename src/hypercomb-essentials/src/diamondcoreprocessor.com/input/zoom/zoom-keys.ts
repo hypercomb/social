@@ -1,0 +1,7 @@
+// auto-generated
+// do not edit manually
+
+export const ZoomModule = '@diamondcoreprocessor.com/input/zoom'
+export const MousewheelZoomInput = '@diamondcoreprocessor.com/input/zoom/mousewheel-zoom.input'
+export const ZoomDrone = '@diamondcoreprocessor.com/input/zoom/zoom.drone'
+export const ZoomKeys = { MousewheelZoomInput, ZoomDrone } as const

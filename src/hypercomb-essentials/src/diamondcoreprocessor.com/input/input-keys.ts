@@ -2,5 +2,6 @@
 // do not edit manually
 
 export const InputModule = '@diamondcoreprocessor.com/input'
-export const MousewheelZoomDrone = '@diamondcoreprocessor.com/input/mousewheel-zoom.drone'
-export const InputKeys = { MousewheelZoomDrone } as const
+export const MousePanInput = '@diamondcoreprocessor.com/input/mouse-pan.input'
+export const PanningDrone = '@diamondcoreprocessor.com/input/panning.drone'
+export const InputKeys = { MousePanInput, PanningDrone } as const
