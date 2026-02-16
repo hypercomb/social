@@ -65,5 +65,4 @@ export class MousewheelZoomInput {
   }
 }
 
-const { get, register, list } = window.ioc
 window.ioc.register('MousewheelZoomInput', new MousewheelZoomInput())

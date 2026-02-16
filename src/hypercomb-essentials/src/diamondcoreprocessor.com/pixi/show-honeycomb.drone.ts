@@ -1,4 +1,5 @@
 // hypercomb-essentials/src/diamondcoreprocessor.com/pixi/show-honeycomb.drone.ts
+// src/pixi/show-honeycomb.drone.ts
 
 import { Drone } from '@hypercomb/core'
 import { Assets, Container, Geometry, Mesh, Texture } from 'pixi.js'
@@ -6,13 +7,13 @@ import { PixiHostDrone } from './pixi-host.drone.js'
 import { HexLabelAtlas } from './hex-label.atlas.js'
 import { HexSdfTextureShader } from './hex-sdf.shader.js'
 
-// note: now we carry pixel position directly
-type Cell = { q: number; r: number; x: number; y: number }
+type Axial = { q: number; r: number }
 
 export class ShowHoneycombDrone extends Drone {
   private host?: PixiHostDrone
   private layer: Container | null = null
 
+  // note: pixi typings vary by build; keep these runtime-safe and avoid generic constraints
   private mesh: any | null = null
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -25,22 +26,27 @@ export class ShowHoneycombDrone extends Drone {
   protected override sense = (): boolean => true
 
   protected override heartbeat = async (): Promise<void> => {
-    const { get, register, list } = window.ioc
+    const { get} = window.ioc
 
     // host resolution
     const host = this.host = get('PixiHost')
     if (!host?.app || !host.container) return
 
-    // axial must be ready
+    // axial lookup (index -> axial coordinate)
     const axial = get('AxialService') as any
-    if (!axial?.items?.size) return
+    if (!axial?.items) return
 
     // layer (created once)
     if (!this.layer) {
       this.layer = new Container()
       host.container.addChild(this.layer)
 
-      this.atlas = new HexLabelAtlas(host.app.renderer, 128, 8, 8)
+      this.atlas = new HexLabelAtlas(
+        host.app.renderer,
+        128,
+        8,
+        8
+      )
     }
 
     // parameters
@@ -48,8 +54,8 @@ export class ShowHoneycombDrone extends Drone {
     const gapPx = 6
     const padPx = 10
 
-    // draw first n indices (fast lookup)
-    const maxCells = 7
+    // this is now "how many indices to draw", pulled from axial.items
+    const maxCells = 37
 
     const textureUrl = '/spw.png'
 
@@ -57,9 +63,9 @@ export class ShowHoneycombDrone extends Drone {
     if (this.lastKey === key) return
     this.lastKey = key
 
-    // data
+    // data (index ordered) - no spiral math here, just axial lookup
     const cells = this.buildCellsFromAxial(axial, maxCells)
-    if (!cells.length) return
+    if (cells.length === 0) return
 
     const hexHalfW = (Math.sqrt(3) * circumRadiusPx) / 2
     const hexHalfH = circumRadiusPx
@@ -73,9 +79,17 @@ export class ShowHoneycombDrone extends Drone {
     if (!baseTex || !this.atlas) return
 
     // warm atlas
-    for (const c of cells) this.atlas.getLabelUV(`${c.q},${c.r}`)
+    for (const c of cells) {
+      this.atlas.getLabelUV(`${c.q},${c.r}`)
+    }
 
-    const geom = this.buildFillQuadGeometry(cells, quadHalfW, quadHalfH)
+    const geom = this.buildFillQuadGeometry(
+      cells,
+      circumRadiusPx,
+      gapPx,
+      quadHalfW,
+      quadHalfH
+    )
 
     // shader
     if (!this.shader) {
@@ -98,7 +112,7 @@ export class ShowHoneycombDrone extends Drone {
       this.mesh = new Mesh({
         geometry: geom as any,
         shader: (this.shader as any).shader,
-        texture: baseTex as any,
+        texture: baseTex as any
       } as any)
 
       this.layer.addChild(this.mesh as any)
@@ -108,7 +122,19 @@ export class ShowHoneycombDrone extends Drone {
       this.mesh.geometry = geom
       this.mesh.shader = (this.shader as any).shader
 
+      // keep texture in sync for mesh types that require it
       if ('texture' in this.mesh) this.mesh.texture = baseTex
+    }
+
+    // center the mesh content around local origin so stage centering always works
+    // important when maxCells is not a perfectly symmetric ring count
+    if (this.mesh?.getLocalBounds) {
+      this.mesh.position.set(0, 0)
+      const b = this.mesh.getLocalBounds()
+      this.mesh.position.set(
+        -(b.x + b.width * 0.5),
+        -(b.y + b.height * 0.5)
+      )
     }
 
     this.geom = geom
@@ -124,33 +150,33 @@ export class ShowHoneycombDrone extends Drone {
     return this.tex
   }
 
-  private buildCellsFromAxial = (axial: any, max: number): Cell[] => {
-    const out: Cell[] = []
+  private buildCellsFromAxial = (axial: any, max: number): Axial[] => {
+    const out: Axial[] = []
 
-    // important: recenter so index 0 lands at (0,0) in mesh space
-    const c0 = axial.items.get(0)
-    const cx = c0?.Location?.x ?? 0
-    const cy = c0?.Location?.y ?? 0
-
+    // index order is the whole point: fast lookup + deterministic plotting
     for (let i = 0; i < max; i++) {
       const a = axial.items.get(i)
       if (!a) break
-
-      const loc = a.Location
-      if (!loc) continue
-
-      out.push({
-        q: a.q,
-        r: a.r,
-        x: (loc.x ?? 0) - cx,
-        y: (loc.y ?? 0) - cy,
-      })
+      out.push({ q: a.q, r: a.r })
     }
 
     return out
   }
 
-  private buildFillQuadGeometry = (cells: Cell[], hw: number, hh: number): Geometry => {
+  private axialToPixel = (q: number, r: number, s: number) => ({
+    x: Math.sqrt(3) * s * (q + r / 2),
+    y: s * 1.5 * r
+  })
+
+  private buildFillQuadGeometry(
+    cells: Axial[],
+    r: number,
+    gap: number,
+    hw: number,
+    hh: number
+  ): Geometry {
+    const spacing = r + gap
+
     const pos = new Float32Array(cells.length * 8)
     const uv = new Float32Array(cells.length * 8)
     const labelUV = new Float32Array(cells.length * 16)
@@ -159,9 +185,11 @@ export class ShowHoneycombDrone extends Drone {
     let pv = 0, uvp = 0, luvp = 0, ii = 0, base = 0
 
     for (const c of cells) {
-      // note: positions come directly from axial service lookup
-      const x0 = c.x - hw, x1 = c.x + hw
-      const y0 = c.y - hh, y1 = c.y + hh
+      // positions now come from axial indices (q,r) pulled from AxialService
+      const { x, y } = this.axialToPixel(c.q, c.r, spacing)
+
+      const x0 = x - hw, x1 = x + hw
+      const y0 = y - hh, y1 = y + hh
 
       pos.set([x0, y0, x1, y0, x1, y1, x0, y1], pv)
       pv += 8

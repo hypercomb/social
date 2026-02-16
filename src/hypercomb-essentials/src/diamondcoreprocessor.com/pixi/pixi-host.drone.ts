@@ -14,7 +14,7 @@ export class PixiHostDrone extends Drone {
   protected override heartbeat = async (): Promise<void> => {
     if (this.app) return
 
-    const { get, register, list } = window.ioc
+    const { get } = window.ioc
 
     // axial must be initialized before any drone tries to use index->axial lookups
     // if settings aren't ready yet, just wait for the next heartbeat
@@ -32,7 +32,7 @@ export class PixiHostDrone extends Drone {
     host.dataset['hypercombPixi'] = 'root'
     host.style.position = 'fixed'
     host.style.inset = '0'
-    host.style.zIndex = '489989'
+    host.style.zIndex = '59989'
     host.style.pointerEvents = 'none'
     document.body.appendChild(host)
 

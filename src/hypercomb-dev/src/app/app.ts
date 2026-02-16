@@ -1,10 +1,9 @@
 import { Component, signal } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
-import { PinchZoomDrone, PixiHostDrone, ShowHoneycombDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi'
-import { MousewheelZoomInput } from '@hypercomb/essentials/diamondcoreprocessor.com/input'
-import { MousePanInput } from '@hypercomb/essentials/diamondcoreprocessor.com/input/mouse-pan.input'
+import { PixiHostDrone, ShowHoneycombDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi'
+import { MousePanInput, MousewheelZoomInput } from '@hypercomb/essentials/diamondcoreprocessor.com/input'
 import { ZoomDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/zoom/zoom.drone'
-import { PanningDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/panning.drone';
+import { PanningDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/pan/panning.drone';
 import { Settings } from '@hypercomb/essentials/diamondcoreprocessor.com/core/settings';
 import { AxialService } from '@hypercomb/essentials/diamondcoreprocessor.com/core/axial/axial-service';
 
@@ -18,11 +17,9 @@ export class App {
   protected readonly title = signal('hypercomb-dev');
   constructor() {
     const { register, get, list } = window.ioc
-    const types = [AxialService, PanningDrone, PinchZoomDrone, PixiHostDrone, ShowHoneycombDrone, MousePanInput, MousewheelZoomInput, Settings, ZoomDrone]
+    const _ = [AxialService, PanningDrone,   PixiHostDrone, ShowHoneycombDrone, MousePanInput, MousewheelZoomInput, Settings, ZoomDrone]
 
     queueMicrotask(async () => {
-      register('PixiHost', new PixiHostDrone())
-      register('ShowHoneycomb', new ShowHoneycombDrone())
       const l = list();
       console.log('[core-adapter] ioc keys:', l)
 
