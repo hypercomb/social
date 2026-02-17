@@ -87,6 +87,32 @@
           }
         }
       }
+    },
+    "hypercomb-shared": {
+      "projectType": "library",
+      "root": "projects/hypercomb-shared",
+      "sourceRoot": "projects/hypercomb-shared/src",
+      "prefix": "lib",
+      "architect": {
+        "build": {
+          "builder": "@angular/build:ng-packagr",
+          "configurations": {
+            "production": {
+              "tsConfig": "projects/hypercomb-shared/tsconfig.lib.prod.json"
+            },
+            "development": {
+              "tsConfig": "projects/hypercomb-shared/tsconfig.lib.json"
+            }
+          },
+          "defaultConfiguration": "production"
+        },
+        "test": {
+          "builder": "@angular/build:karma",
+          "options": {
+            "tsConfig": "projects/hypercomb-shared/tsconfig.spec.json"
+          }
+        }
+      }
     }
   },
   "cli": {

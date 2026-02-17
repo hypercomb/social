@@ -3,6 +3,5 @@
 
 export * from './hex-label.atlas'
 export * from './hex-sdf.shader'
-export * from '../input/zoom/pinch-zoom.input'
 export * from './pixi-host.drone'
 export * from './show-honeycomb.drone'

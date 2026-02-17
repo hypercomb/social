@@ -9,9 +9,14 @@
     "runtime:pixi": "npx tsx ./scripts/build-pixi-vendor.ts"
   },
   "dependencies": {
-    "@hypercomb/core": "file:../hypercomb-core"  
+    "@hypercomb/core": "file:../hypercomb-core",
+    "tslib": "^2.3.0"
   },
   "devDependencies": {
-    "pixi.js": "^8.16.0"
+    "@angular/build": "^20.1.6",
+    "@angular/compiler-cli": "^20.1.0",
+    "ng-packagr": "^20.1.0",
+    "pixi.js": "^8.16.0",
+    "typescript": "~5.8.2"
   }
 }

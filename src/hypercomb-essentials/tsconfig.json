@@ -7,7 +7,6 @@
     "moduleResolution": "bundler",
 
     // Required for ESM + .js specifiers in TS
-    "verbatimModuleSyntax": true,
     "isolatedModules": true,
     "allowImportingTsExtensions": false,
 
@@ -29,5 +28,5 @@
     "resolveJsonModule": true,
     "esModuleInterop": false
   },
-  "include": ["src"]
+  "include": ["src", "../hypercomb-shared/ui/search-bar/resource-message-handler.ts", "../hypercomb-shared/ui/search-bar/resource-completion.service.ts", "../hypercomb-shared/ui/search-bar/completion-utility.ts", "../hypercomb-shared/core/model.ts", "../hypercomb-shared/core/lineage.ts", "../hypercomb-shared/core/movement.service.ts", "../hypercomb-shared/core/navigation.ts"]
 }

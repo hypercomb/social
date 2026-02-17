@@ -1,6 +1,6 @@
 // src/app/app.routes.ts
 
-import { Routes, UrlMatchResult, UrlSegment } from '@angular/router'
+import type { UrlSegment, UrlMatchResult, Routes } from '@angular/router'
 import { Home } from './home/home'
 
 export const lineageMatcher = (segments: UrlSegment[]): UrlMatchResult => ({

@@ -2,7 +2,7 @@ import { Component, inject, signal } from '@angular/core'
 import { RouterOutlet } from '@angular/router'
 import { Header } from './header/header'
 import { hypercomb } from '@hypercomb/core'
-import { CoreAdapter } from './core/core-adapter'
+import { CoreAdapter } from './core-adapter'
 
 @Component({
   selector: 'app-root',

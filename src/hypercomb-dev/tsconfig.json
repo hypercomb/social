@@ -1,5 +1,7 @@
 // hypercomb-dev/tsconfig.json
 {
+  "extends": "../../tsconfig.base.json",
+
   "compileOnSave": false,
 
   "compilerOptions": {
@@ -15,18 +17,7 @@
     "importHelpers": true,
 
     "target": "ES2022",
-    "module": "preserve",
-
-    "baseUrl": ".",
-
-    "paths": {
-      "@hypercomb/core": ["../hypercomb-core/src/index.ts"],
-
-      "@hypercomb/essentials": ["../hypercomb-essentials/src/index.ts"],
-      "@hypercomb/essentials/*": ["../hypercomb-essentials/src/*"],
-
-      "hypercomb-essentials/*": ["../hypercomb-essentials/src/*"]
-    }
+    "module": "preserve"
   },
 
   "angularCompilerOptions": {
@@ -38,6 +29,8 @@
   },
 
   "files": [],
-
-  "references": [{ "path": "./tsconfig.app.json" }, { "path": "./tsconfig.spec.json" }]
+  "references": [
+    { "path": "./tsconfig.app.json" },
+    { "path": "./tsconfig.spec.json" }
+  ]
 }

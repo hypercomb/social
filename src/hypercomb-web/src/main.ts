@@ -1,7 +1,8 @@
 // hypercomb-web/src/main.ts
-/// <reference path="./global.d.ts" />
+/// <reference path="../../hypercomb-shared/global.d.ts" />
 
-import './app/core/ioc.web'
+import '@hypercomb/shared/core/ioc.web'
+
 import { resolveImportMap } from './setup/resolve-import-map'
 import { appConfig } from './app.config'
 

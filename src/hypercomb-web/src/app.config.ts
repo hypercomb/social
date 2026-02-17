@@ -1,9 +1,9 @@
-import { inject, provideAppInitializer } from '@angular/core';
-import { ApplicationConfig, provideBrowserGlobalErrorListeners, provideZoneChangeDetection } from '@angular/core';
-import { ScriptPreloader } from './app/core/script-preloader';
+import { inject, provideAppInitializer, provideBrowserGlobalErrorListeners, provideZoneChangeDetection, type ApplicationConfig } from '@angular/core';
+
 import { DRONE_RESOLVER_KEY, register } from '@hypercomb/core';
 import { provideRouter } from '@angular/router';
 import { routes } from './app/app.routes';
+import { ScriptPreloader } from '@hypercomb/shared/core';
 
 export const appConfig: ApplicationConfig = {
   providers: [

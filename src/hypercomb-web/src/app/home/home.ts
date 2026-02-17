@@ -1,7 +1,6 @@
 import { Component, computed, inject } from '@angular/core';
-import { OpfsExplorerComponent } from "../common/file-explorer/opfs-explorer.component";
-import { ResourceMessageHandler } from '../messaging/resource-message-handler';
-import { Lineage } from '../core/lineage';
+import { ResourceMessageHandler } from '../../../../hypercomb-shared/ui/search-bar/resource-message-handler';
+import { Lineage } from '@hypercomb/shared/core';
 
 @Component({
   selector: 'app-home',

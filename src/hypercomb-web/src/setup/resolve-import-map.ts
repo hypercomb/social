@@ -1,6 +1,6 @@
 // hypercomb-web/src/setup/resolve-import-map.ts
 
-import { environment } from '../environments/environment'
+import { environment } from '@hypercomb/shared'
 
 export type ResolvedImports = Record<string, string>
 

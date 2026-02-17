@@ -1,0 +1,36 @@
+{
+  "compilerOptions": {
+    // language + platform
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    
+    // 🔥 restore working ESM contract
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "verbatimModuleSyntax": false,
+    "isolatedModules": true,
+
+    // helpers (required by Angular)
+    "importHelpers": true,
+
+    // resolution
+    "baseUrl": ".",
+    "paths": {
+      "@hypercomb/core": ["src/hypercomb-core/src/index.ts"],
+      "@hypercomb/core/*": ["src/hypercomb-core/src/*"],
+
+      "@hypercomb/essentials": ["src/hypercomb-essentials/src/index.ts"],
+      "@hypercomb/essentials/*": ["src/hypercomb-essentials/src/*"],
+
+      "@hypercomb/shared": ["src/hypercomb-shared/index.ts"],
+      "@hypercomb/shared/*": ["src/hypercomb-shared/*"]
+    },
+
+    // sanity
+    "strict": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "forceConsistentCasingInFileNames": true,
+    
+  }
+}
