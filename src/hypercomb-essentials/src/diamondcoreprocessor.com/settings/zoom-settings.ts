@@ -15,3 +15,5 @@ export const ZoomSettings = (): ZoomSettingsType => ({
   pinchJitterPx: 4,
   pinchForceTakeover: true
 })
+
+window.ioc.register('ZoomSettings', ZoomSettings())

@@ -40,7 +40,7 @@ export class CoreAdapter {
     await store.initialize()
 
     //  // layers -> hydrate drones -> deps (single canonical pipeline)
-    const parsed = LocationParser.parse("https://storagehypercomb.blob.core.windows.net/content/1321d428408d47085d2669d053446dbd899ca30ac387330f5fb5fac21e743885")
+    const parsed = LocationParser.parse("https://storagehypercomb.blob.core.windows.net/content/da83f9918946df8b4c9440aa9aee8fedb9a4156e5bc7919d5069ea57afe2c2cf")
     await this.runtime.sync(parsed)
 
     // optional: dev diagnostics
@@ -55,23 +55,18 @@ export class CoreAdapter {
     const segments = this.navigation.segments().filter(Boolean)
     this.navigation.bootstrap(segments)
 
-    // note:
-    // - preloader is intentionally not invoked here yet
-    // - keep it behind explicit user action or a separate boot phase
-    void await this.preloader.preload()
-    // console.log('[core-adapter] initialized')
-
+  
     const { get, list } = window.ioc
     const l = list();
     console.log('[core-adapter] ioc keys:', l)
 
-    // const hostkey = 'PixiHost'
-    // const host = <any>get(hostkey)!
-    // await host.encounter('testing')
+    const hostkey = 'PixiHost'
+    const host = <any>get(hostkey)!
+    await host.encounter('testing')
 
-    // const showkey = 'ShowHoneycomb'
-    // const show = <any>get(showkey)!
-    // await show. encounter('testing')
+    const showkey = 'ShowHoneycomb'
+    const show = <any>get(showkey)!
+    await show. encounter('testing')
 
 
     // const settingKey = 'Settings'

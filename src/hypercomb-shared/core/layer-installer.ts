@@ -4,269 +4,196 @@ import { Injectable } from '@angular/core'
 import { type LocationParseResult } from './initializers/location-parser'
 import { Store } from './store'
 
-type LayerInstallFile = {
-  signature: string
-  name?: string
-  layers?: string[]
-  drones?: string[]
-  dependencies?: string[]
-}
+type InstallManifest = { version: number; layers: string[]; drones: string[]; dependencies: string[] }
 
-type LayerServiceApi = {
-  get: (parsed: LocationParseResult) => Promise<LayerInstallFile | null>
-}
+const { get, register, list } = window.ioc
 
 @Injectable({ providedIn: 'root' })
 export class LayerInstaller {
 
-  private static readonly INSTALL_SUFFIX = '-install'
+  private readonly manifestName = 'install.manifest.json'
 
   public install = async (parsed: LocationParseResult): Promise<void> => {
-    const baseUrl = (parsed?.baseUrl ?? '').trim().replace(/\/+$/, '')
-    const path = (parsed?.path ?? '').trim().replace(/^\/+/, '').replace(/\/+$/, '')
-    const rootSig = (parsed?.signature ?? '').trim()
+    const baseUrl = parsed?.baseUrl ?? ''
+    const rootSig = parsed?.signature ?? ''
+    if (!baseUrl || !rootSig) return
 
-    if (!baseUrl) {
-      console.log('[layer-installer] install skipped: empty base url')
-      return
-    }
+    // endpoint: [baseUrl]/[path]/[signature]
+    const endpoint =  `${baseUrl}/${rootSig}`
 
-    if (!rootSig) {
-      console.log('[layer-installer] install skipped: empty signature')
-      return
-    }
+    // domain folder key used for: opfsroot/__layers__/<domain>/
+    const domainKey = parsed?.domain || this.tryHost(endpoint)
+    if (!domainKey) return
 
-    // remote root used for fetching drones / deps
-    const baseRoot =
-      path
-        ? `${baseUrl}/${path}`.replace(/\/+$/, '')
-        : baseUrl
-
-    const { get } = window.ioc
-    const store = get('Store') as Store
-    const layers = get('LayerService') as LayerServiceApi
-
-    // layers directory is flat by design
-    const layersDir = store.layersDirectory()
-
-    // ensure the root layer exists locally and is queued for install
-    await layers.get({ ...parsed, signature: rootSig })
-    await this.ensureInstallMarker(layersDir, rootSig)
-
-    await this.installLoop(baseRoot, parsed, layersDir, new Set<string>())
-
-    console.log('[layer-installer] install complete')
-  }
-
-  private installLoop = async (
-    baseRoot: string,
-    parsed: LocationParseResult,
-    layersDir: FileSystemDirectoryHandle,
-    visited: Set<string>
-  ): Promise<void> => {
-
-    const root = (baseRoot ?? '').trim().replace(/\/+$/, '')
-
-    for (;;) {
-      const installNames: string[] = []
-
-      for await (const [name, handle] of layersDir.entries()) {
-        if (handle.kind !== 'file') continue
-        if (!name.endsWith(LayerInstaller.INSTALL_SUFFIX)) continue
-        installNames.push(name)
-      }
-
-      installNames.sort((a, b) => a.localeCompare(b))
-      if (!installNames.length) return
-
-      let progressed = false
-
-      for (const name of installNames) {
-        const sig = this.installNameToSig(name)
-        if (!sig) continue
-
-        if (visited.has(sig)) {
-          await this.safeRemove(layersDir, name)
-          continue
-        }
-
-        const handle = await this.tryGetFileHandle(layersDir, name)
-        if (!handle) continue
-
-        const { ok, layerText, layer } = await this.readInstallLayer(handle, sig)
-        if (!ok || !layerText || !layer) {
-          await this.safeRemove(layersDir, name)
-          continue
-        }
-
-        visited.add(sig)
-        progressed = true
-
-        // commit stable layer file for lookup/debugging
-        await this.ensureStableLayer(layersDir, sig, layerText)
-
-        console.log(`[layer-installer] installing layer ${sig} (${layerText.length} chars)`)
-
-        // install dependencies
-        await this.installDependencies(root, layer)
-
-        // install drones
-        await this.installDrones(root, layer)
-
-        const { get } = window.ioc
-        const layers = get('LayerService') as LayerServiceApi
-
-        // discover children, ensure local, then queue child installs
-        for (const childSigRaw of layer.layers ?? []) {
-          const childSig = (childSigRaw ?? '').trim()
-          if (!childSig) continue
-
-          await layers.get({ ...parsed, signature: childSig })
-          await this.ensureInstallMarker(layersDir, childSig)
-        }
-
-        // consume install marker
-        await this.safeRemove(layersDir, name)
-      }
-
-      if (!progressed) return
-    }
-  }
-
-  // -------------------------------------------------
-  // install steps
-  // -------------------------------------------------
-
-  private installDependencies = async (baseRoot: string, layer: LayerInstallFile): Promise<void> => {
-    const { get } = window.ioc
     const store = get('Store') as Store
 
-    const targetDirectory = store.dependenciesDirectory()
-    const root = (baseRoot ?? '').trim().replace(/\/+$/, '')
+    // layers are stored per domain: opfsroot/__layers__/<domain>/
+    const domainLayersDir = await store.domainLayersDirectory(domainKey, true)
 
-    for (const dependency of layer.dependencies ?? []) {
-      const dep = (dependency ?? '').trim()
-      if (!dep) continue
+    // 1) d/l the manifest (resume if present)
+    const manifest = await this.getOrFetchManifest(domainLayersDir, endpoint)
+    if (!manifest) return
 
-      const exists = await this.tryGetFileHandle(targetDirectory, dep)
-      if (exists) {
-        console.log(`[layer-installer] dependency already present: ${dep}`)
-        continue
-      }
+    // 2) install all files
+    await this.installLayers(domainLayersDir, endpoint, manifest.layers || [])
+    await this.installDependencies(store, endpoint, manifest.dependencies || [])
+    await this.installDrones(store, endpoint, manifest.drones || [])
 
-      const url = `${root}/__dependencies__/${dep}`
-      const bytes = await this.fetchBytes(url)
-      if (!bytes) continue
-
-      await this.writeBytesFile(targetDirectory, dep, bytes)
-      console.log(`[layer-installer] stored dependency ${dep} (${bytes.byteLength} bytes)`)
-    }
-  }
-
-  private installDrones = async (baseRoot: string, layer: LayerInstallFile): Promise<void> => {
-    const { get } = window.ioc
-    const store = get('Store') as Store
-
-    const targetDirectory = store.dronesDirectory()
-    const root = (baseRoot ?? '').trim().replace(/\/+$/, '')
-
-    for (const drone of layer.drones ?? []) {
-      const dr = (drone ?? '').trim()
-      if (!dr) continue
-
-      const exists = await this.tryGetFileHandle(targetDirectory, dr)
-      if (exists) {
-        console.log(`[layer-installer] drone already present: ${dr}`)
-        continue
-      }
-
-      const url = `${root}/__drones__/${dr}`
-      const bytes = await this.fetchBytes(url)
-      if (!bytes) continue
-
-      await this.writeBytesFile(targetDirectory, dr, bytes)
-      console.log(`[layer-installer] stored drone ${dr} (${bytes.byteLength} bytes)`)
+    // 3) remove manifest when complete
+    const complete = await this.isComplete(domainLayersDir, store, manifest)
+    if (complete) {
+      await this.safeRemove(domainLayersDir, this.manifestName)
+      console.log('[layer-installer] install complete (manifest removed)')
     }
   }
 
   // -------------------------------------------------
-  // layer files
+  // manifest
   // -------------------------------------------------
 
-  private ensureStableLayer = async (
-    layersDir: FileSystemDirectoryHandle,
-    signature: string,
-    layerText: string
-  ): Promise<void> => {
-    const sig = (signature ?? '').trim()
-    if (!sig) return
+  private getOrFetchManifest = async (
+    domainLayersDir: FileSystemDirectoryHandle,
+    endpoint: string
+  ): Promise<InstallManifest | null> => {
 
-    const existing = await this.tryGetFileHandle(layersDir, sig)
-    if (existing) {
-      const file = await existing.getFile().catch(() => null)
-      if (file && file.size > 0) return
+    // local first (resume)
+    const localText = await this.tryReadText(domainLayersDir, this.manifestName)
+    if (localText) {
+      const local = this.tryParseManifest(localText)
+      if (local) return local
+      await this.safeRemove(domainLayersDir, this.manifestName)
     }
 
-    await this.writeTextFile(layersDir, sig, layerText)
+    // remote
+    const url = `${endpoint}/${this.manifestName}`
+    const bytes = await this.fetchBytes(url)
+    if (!bytes) return null
+
+    const text = new TextDecoder().decode(bytes)
+    const parsed = this.tryParseManifest(text)
+    if (!parsed) return null
+
+    await this.writeBytesFile(domainLayersDir, this.manifestName, bytes)
+    return parsed
   }
 
-  private ensureInstallMarker = async (
-    layersDir: FileSystemDirectoryHandle,
-    signature: string
-  ): Promise<void> => {
-    const sig = (signature ?? '').trim()
-    if (!sig) return
-
-    const installName = `${sig}${LayerInstaller.INSTALL_SUFFIX}`
-
-    const existing = await this.tryGetFileHandle(layersDir, installName)
-    if (existing) {
-      const file = await existing.getFile().catch(() => null)
-      if (file && file.size > 0) return
-    }
-
-    // copy from stable file (signature) into install marker
-    const stable = await this.tryGetFileHandle(layersDir, sig)
-    const stableFile = stable ? await stable.getFile().catch(() => null) : null
-    if (!stableFile || stableFile.size <= 0) return
-
-    const bytes = new Uint8Array(await stableFile.arrayBuffer())
-    await this.writeBytesFile(layersDir, installName, bytes)
-  }
-
-  private readInstallLayer = async (
-    handle: FileSystemFileHandle,
-    sig: string
-  ): Promise<{ ok: boolean; layerText: string | null; layer: LayerInstallFile | null }> => {
-
-    const file = await handle.getFile().catch(() => null)
-    if (!file) return { ok: false, layerText: null, layer: null }
-
-    const text = ((await file.text().catch(() => '')) ?? '').trim()
-    if (!text) return { ok: false, layerText: null, layer: null }
-
+  private tryParseManifest = (text: string): InstallManifest | null => {
     try {
-      const json = JSON.parse(text) as LayerInstallFile
-
-      if ((json.signature ?? '').trim() && (json.signature ?? '').trim() !== sig) {
-        console.log(`[layer-installer] signature mismatch marker=${sig} payload=${json.signature}`)
-        json.signature = sig
-      }
-
-      return { ok: true, layerText: text, layer: json }
+      return JSON.parse(text) as InstallManifest
     } catch {
-      console.log(`[layer-installer] invalid json in ${sig}${LayerInstaller.INSTALL_SUFFIX}`)
-      return { ok: false, layerText: text, layer: null }
+      return null
     }
   }
 
-  private installNameToSig = (name: string): string | null => {
-    if (!name.endsWith(LayerInstaller.INSTALL_SUFFIX)) return null
-    return name.slice(0, -LayerInstaller.INSTALL_SUFFIX.length) || null
+  // -------------------------------------------------
+  // install
+  // -------------------------------------------------
+
+  private installLayers = async (
+    domainLayersDir: FileSystemDirectoryHandle,
+    endpoint: string,
+    layers: string[]
+  ): Promise<void> => {
+    for (const sig of layers) {
+      if (!sig) continue
+
+      const existing = (await this.tryGetFileHandle(domainLayersDir, `${sig}.json`))
+      if (existing) continue
+
+      const url = `${endpoint}/__layers__/${sig}.json`
+      const bytes = await this.fetchBytes(url)
+      if (!bytes) continue
+
+      // store as: opfsroot/__layers__/<domain>/<sig>
+      await this.writeBytesFile(domainLayersDir, sig, bytes)
+    }
+  }
+
+  private installDependencies = async (
+    store: Store,
+    endpoint: string,
+    deps: string[]
+  ): Promise<void> => {
+    const depDir = store.dependenciesDirectory()
+
+    for (const sig of deps) {
+      if (!sig) continue
+
+      const name = `${sig}.js`
+      const existing =
+        (await this.tryGetFileHandle(depDir, name)) ??
+        (await this.tryGetFileHandle(depDir, sig))
+
+      if (existing) continue
+
+      const url = `${endpoint}/__dependencies__/${name}`
+      const bytes = await this.fetchBytes(url)
+      if (!bytes) continue
+
+      // store as: opfsroot/__dependencies__/<sig>.js
+      await this.writeBytesFile(depDir, name, bytes)
+    }
+  }
+
+  private installDrones = async (
+    store: Store,
+    endpoint: string,
+    drones: string[]
+  ): Promise<void> => {
+    const dronesDir = store.dronesDirectory()
+
+    for (const sig of drones) {
+      if (!sig) continue
+
+      const name = `${sig}.js`
+      const existing =
+        (await this.tryGetFileHandle(dronesDir, name)) ??
+        (await this.tryGetFileHandle(dronesDir, sig))
+
+      if (existing) continue
+
+      const url = `${endpoint}/__drones__/${name}`
+      const bytes = await this.fetchBytes(url)
+      if (!bytes) continue
+
+      // store as: opfsroot/__drones__/<sig>.js
+      await this.writeBytesFile(dronesDir, name, bytes)
+    }
+  }
+
+  private isComplete = async (
+    domainLayersDir: FileSystemDirectoryHandle,
+    store: Store,
+    manifest: InstallManifest
+  ): Promise<boolean> => {
+    for (const sig of manifest.layers || []) {
+      if (!sig) continue
+      const a = await this.tryGetFileHandle(domainLayersDir, sig)
+      const b = await this.tryGetFileHandle(domainLayersDir, `${sig}.json`)
+      if (!a && !b) return false
+    }
+
+    const depDir = store.dependenciesDirectory()
+    for (const sig of manifest.dependencies || []) {
+      if (!sig) continue
+      const a = await this.tryGetFileHandle(depDir, `${sig}.js`)
+      const b = await this.tryGetFileHandle(depDir, sig)
+      if (!a && !b) return false
+    }
+
+    const dronesDir = store.dronesDirectory()
+    for (const sig of manifest.drones || []) {
+      if (!sig) continue
+      const a = await this.tryGetFileHandle(dronesDir, `${sig}.js`)
+      const b = await this.tryGetFileHandle(dronesDir, sig)
+      if (!a && !b) return false
+    }
+
+    return true
   }
 
   // -------------------------------------------------
-  // opfs utilities
+  // io
   // -------------------------------------------------
 
   private tryGetFileHandle = async (
@@ -291,6 +218,17 @@ export class LayerInstaller {
     }
   }
 
+  private tryReadText = async (
+    dir: FileSystemDirectoryHandle,
+    name: string
+  ): Promise<string | null> => {
+    const handle = await this.tryGetFileHandle(dir, name)
+    if (!handle) return null
+    const file = await handle.getFile().catch(() => null)
+    if (!file) return null
+    return await file.text().catch(() => null)
+  }
+
   private writeBytesFile = async (
     dir: FileSystemDirectoryHandle,
     name: string,
@@ -302,45 +240,22 @@ export class LayerInstaller {
     await writable.close()
   }
 
-  private writeTextFile = async (
-    dir: FileSystemDirectoryHandle,
-    name: string,
-    text: string
-  ): Promise<void> => {
-    const outHandle = await dir.getFileHandle(name, { create: true })
-    const writable = await outHandle.createWritable()
-    await writable.write(text)
-    await writable.close()
-  }
-
-  // -------------------------------------------------
-  // fetch utilities
-  // -------------------------------------------------
-
   private fetchBytes = async (url: string): Promise<Uint8Array<ArrayBuffer> | null> => {
     try {
       const res = await fetch(url, { cache: 'no-store' })
-
-      const ct = (res.headers.get('content-type') ?? '').toLowerCase()
-      console.log(`[layer-installer] fetch ${url} -> ${res.status} ${ct}`)
-
-      if (!res.ok) {
-        const body = await res.text().catch(() => '')
-        console.log(`[layer-installer] fetch failed body (first 200): ${body.slice(0, 200)}`)
-        return null
-      }
-
-      if (ct.includes('text/html')) {
-        const body = await res.text().catch(() => '')
-        console.log(`[layer-installer] unexpected html (first 200): ${body.slice(0, 200)}`)
-        return null
-      }
-
-      const buf: ArrayBuffer = await res.arrayBuffer()
+      if (!res.ok) return null
+      const buf = await res.arrayBuffer()
       return new Uint8Array(buf)
-    } catch (err) {
-      console.log('[layer-installer] fetch error', err)
+    } catch {
       return null
+    }
+  }
+
+  private tryHost = (url: string): string => {
+    try {
+      return new URL(url).host
+    } catch {
+      return ''
     }
   }
 }

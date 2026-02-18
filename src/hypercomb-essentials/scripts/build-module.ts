@@ -2,7 +2,7 @@
 // hypercomb-essentials/scripts/build-module.ts
 // MINIMAL UPGRADE:
 // - exclude *.keys.ts / *.keys.js at discovery time
-// - add install-manifest.json at dist/<rootSignature>/install-manifest.json with only signatures (no root field)
+// - add install.manifest.json at dist/<rootSignature>/install.manifest.json with only signatures (no root field)
 // - nothing else changed (deploy, layers, signing untouched)
 
 import { spawnSync } from 'child_process'
@@ -35,7 +35,7 @@ const PLATFORM_EXTERNALS = ['@hypercomb/core', 'pixi.js']
 const EMIT_DOMAIN_ROOT_NAMESPACE = false
 
 // new: minimal manifest name
-const INSTALL_MANIFEST_FILE = 'install-manifest.json'
+const INSTALL_MANIFEST_FILE = 'install.manifest.json'
 
 // -------------------------------------------------
 // helpers
