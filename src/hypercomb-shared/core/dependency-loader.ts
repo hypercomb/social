@@ -47,7 +47,8 @@ export class DependencyLoader {
         this.loaded.add(sig)
         this.dependencyCount.update(v => v + 1)
         this.loadedSignatures.update(v => [...v, sig])
-      } catch {
+      } catch(error) {
+        console.error(`Failed to load dependency: ${sig}`, error)
         this.failedSignatures.update(v => [...v, sig])
       }
     }
@@ -61,5 +62,5 @@ export class DependencyLoader {
   }
 
   private isSignature = (name: string): boolean =>
-    /^[a-f0-9]{64}$/i.test(name)
+    /^[a-f0-9]{64}$/i.test(name.replace('.js', ''))
 }
