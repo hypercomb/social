@@ -30,12 +30,6 @@ export class Store {
   public dependencies!: FileSystemDirectoryHandle
   public layers!: FileSystemDirectoryHandle
 
-  private devManifestLoaded = false
-  private devManifest: DevManifest | null = null
-
-  private devDroneDomainIndexBuilt = false
-  private devDroneDomainBySig: Map<string, string> | null = null
-
   // -------------------------------------------------
   // init
   // -------------------------------------------------
@@ -70,63 +64,6 @@ export class Store {
     create: boolean = false
   ): Promise<FileSystemDirectoryHandle> => {
     return await this.layers.getDirectoryHandle(domain, { create })
-  }
-
-  // -------------------------------------------------
-  // dev manifest
-  // -------------------------------------------------
-
-  public getDevManifest = async (): Promise<DevManifest | null> => {
-    if (this.devManifestLoaded) return this.devManifest
-    this.devManifestLoaded = true
-
-    try {
-      const url = '/dev/name.manifest.js'
-      const mod = await import(/* @vite-ignore */ url)
-      this.devManifest = mod as any
-      return this.devManifest
-    } catch {
-      this.devManifest = null
-      return null
-    }
-  }
-
-  private buildDevDroneDomainIndex = async (): Promise<void> => {
-    if (this.devDroneDomainIndexBuilt) return
-    this.devDroneDomainIndexBuilt = true
-
-    const manifest = await this.getDevManifest()
-    const resources = manifest?.resources
-
-    if (!resources || typeof resources !== 'object') {
-      this.devDroneDomainBySig = null
-      return
-    }
-
-    const index = new Map<string, string>()
-
-    for (const [domain, list] of Object.entries(resources)) {
-      if (!Array.isArray(list)) continue
-
-      for (const item of list) {
-        if (typeof item !== 'string') continue
-
-        const raw = item.trim()
-        if (!raw) continue
-
-        const sig = raw.endsWith('.js') ? raw.slice(0, -3) : raw
-        if (!/^[a-f0-9]{64}$/i.test(sig)) continue
-
-        index.set(sig, domain)
-      }
-    }
-
-    this.devDroneDomainBySig = index.size ? index : null
-  }
-
-  private getDevDomainForDrone = async (signature: string): Promise<string | null> => {
-    await this.buildDevDroneDomainIndex()
-    return this.devDroneDomainBySig?.get(signature) ?? null
   }
 
   // -------------------------------------------------
@@ -173,23 +110,12 @@ export class Store {
     }
 
     try {
-      const manifest = await this.getDevManifest()
-      const devVersion = manifest?.root ? encodeURIComponent(manifest.root) : `${Date.now()}`
-
-      const devDomain = await this.getDevDomainForDrone(signature)
-
-      const devUrl =
-        devDomain
-          ? `/dev/${devDomain}/${Store.DRONES_DIRECTORY}/${signature}.js?v=${devVersion}`
-          : null
 
       const opfsUrl = `/opfs/${Store.DRONES_DIRECTORY}/${signature}.js`
 
       // dev is authority if manifest knows the domain for this sig
       let mod: Record<string, unknown> | null = null
-      if (devUrl) {
-        mod = await tryImport(devUrl)
-      }
+
 
       // fallback to opfs (seed bytes first so sw can serve exact module bytes)
       if (!mod) {

@@ -1,0 +1,5 @@
+# compiled javascript
+*.js
+*.js.map
+*.d.ts.map
+*.d.ts

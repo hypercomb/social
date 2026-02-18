@@ -10,7 +10,6 @@ import { DomainInitializer } from '@hypercomb/shared/core'
 @Injectable({ providedIn: 'root' })
 export class RuntimeMediator {
 
-  private readonly DEV_MANIFEST_URL = '/dev/name.manifest.js'
   private readonly initializer = inject(DomainInitializer)
   private readonly installer = inject(LayerInstaller)
   // private readonly restoration = inject(LayerRestorationService)
@@ -20,10 +19,9 @@ export class RuntimeMediator {
 
   public sync = async (): Promise<void> => {
     const run = async (): Promise<void> => {
-      const manifest = <DevManifest>await import(/* @vite-ignore */ this.DEV_MANIFEST_URL)
       await this.dependency.load()
-      await this.initializer.initialize(manifest)
-      await this.installer.install(manifest)
+      await this.initializer.initialize()
+      // await this.installer.install()
       // await this.restoration.restore()
     }
 

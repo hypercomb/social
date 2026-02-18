@@ -1,7 +1,6 @@
 import { inject, Injectable } from "@angular/core"
-import { DevInitializer } from "./dev-initializer.service"
 import { ServerInitializer } from "./server-initializer.service"
-import { DevManifest } from "../store"
+
 
 export interface IDomainInitializer {
     enabled: (input: string) => Promise<boolean>
@@ -10,14 +9,13 @@ export interface IDomainInitializer {
 @Injectable({ providedIn: 'root' })
 export class DomainInitializer {
 
-    public initializers: IDomainInitializer[] = [inject(DevInitializer), inject(ServerInitializer)]
-    public initialize = async (manifest: DevManifest): Promise<void> => {
-        const domain =  manifest.domains
-        const input = `${domain}/__layers__/${manifest.root}`
+    public initializers: IDomainInitializer[] = [inject(ServerInitializer)]
+    public initialize = async (): Promise<void> => {
+        const domain ='https://storagehypercomb.blob.core.windows.net/content/e7ecd3544a11072255ad3a10adcff6d2ec4333aa884be8b52f5c780a2d570306'
 
         for (const instance of this.initializers) {
-            if (await instance.enabled(input)) {
-                await instance.initialize(input)
+            if (await instance.enabled(domain)) {
+                await instance.initialize(domain)
                 return
             }
         }

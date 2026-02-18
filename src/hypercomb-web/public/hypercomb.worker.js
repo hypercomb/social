@@ -31,15 +31,6 @@ self.addEventListener('fetch', (event) => {
   if (method !== 'GET' && method !== 'HEAD') return
 
   // ----------------------------------------
-  // dev: serve bytes exactly as-is
-  // ----------------------------------------
-
-  if (url.pathname.startsWith(DEV_PREFIX)) {
-    event.respondWith(handleDevRequest(event.request))
-    return
-  }
-
-  // ----------------------------------------
   // prod: opfs resolution by signature
   // ----------------------------------------
 

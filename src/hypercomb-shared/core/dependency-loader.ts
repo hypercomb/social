@@ -20,37 +20,7 @@ export class DependencyLoader {
     this.loadedSignatures.set([])
     this.failedSignatures.set([])
 
-    if (environment.production) {
-      await this.preloadFromOpfs()
-      return
-    }
-
-    await this.preloadFromDevManifest()
-  }
-
-  private preloadFromDevManifest = async (): Promise<void> => {
-    const manifest = await this.store.getDevManifest()
-    if (!manifest) return
-
-    const aliases = Object.keys(manifest.imports).sort((a, b) => a.localeCompare(b))
-
-    for (const alias of aliases) {
-      if (!alias || this.loaded.has(alias)) continue
-
-      try {
-        const mod = await import(/* @vite-ignore */ alias)
-        window.ioc.register(alias, mod)
-
-        this.loaded.add(alias)
-        this.dependencyCount.update(v => v + 1)
-        this.loadedSignatures.update(v => [...v, alias])
-      } catch {
-        this.failedSignatures.update(v => [...v, alias])
-      }
-    }
-  }
-
-  private preloadFromOpfs = async (): Promise<void> => {
+    // load all from opfs dependencies directory
     let depDir: FileSystemDirectoryHandle
     try {
       depDir = this.store.dependenciesDirectory()
@@ -72,7 +42,7 @@ export class DependencyLoader {
         if (!alias) continue
 
         const mod = await import(/* @vite-ignore */ alias)
-        window.ioc.register(alias, mod)
+        // window.ioc.register(alias, mod)
 
         this.loaded.add(sig)
         this.dependencyCount.update(v => v + 1)

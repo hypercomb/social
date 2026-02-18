@@ -1,32 +1,35 @@
 {
   "compilerOptions": {
+    // language + platform
     "target": "ES2022",
 
-    // 🔥 ESM clean mode
+    // 🔥 ESM clean mode (keep)
     "module": "ESNext",
     "moduleResolution": "bundler",
 
-    // Required for ESM + .js specifiers in TS
+    // required for ESM builds
     "isolatedModules": true,
     "allowImportingTsExtensions": false,
 
-    // Output
+    // library output
     "outDir": "dist",
     "rootDir": "src",
 
-    // Declarations
+    // declarations (library contract)
     "declaration": true,
     "declarationMap": true,
     "emitDeclarationOnly": false,
 
-    // Clean behavior
+    // correctness
     "strict": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
 
-    // Helps Angular + Vite + ESM environments
+    // misc
     "resolveJsonModule": true,
     "esModuleInterop": false
   },
-  "include": ["src", "../hypercomb-shared/ui/search-bar/resource-message-handler.ts", "../hypercomb-shared/ui/search-bar/resource-completion.service.ts", "../hypercomb-shared/ui/search-bar/completion-utility.ts", "../hypercomb-shared/core/model.ts", "../hypercomb-shared/core/lineage.ts", "../hypercomb-shared/core/movement.service.ts", "../hypercomb-shared/core/navigation.ts"]
+
+  // 🚫 IMPORTANT: do NOT compile shared here
+  "include": ["src"]
 }
