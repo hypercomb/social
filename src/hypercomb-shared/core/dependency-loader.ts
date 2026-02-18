@@ -1,13 +1,11 @@
 // hypercomb-web/src/app/core/dependency-loader.ts
 
-import { inject, Injectable, signal } from '@angular/core'
-import { environment } from '../environments/environment'
+import { Injectable, signal } from '@angular/core'
 import { Store } from './store'
 
 @Injectable({ providedIn: 'root' })
 export class DependencyLoader {
 
-  private readonly store = inject(Store)
   private readonly loaded = new Set<string>()
 
   public readonly dependencyCount = signal(0)
@@ -23,7 +21,8 @@ export class DependencyLoader {
     // load all from opfs dependencies directory
     let depDir: FileSystemDirectoryHandle
     try {
-      depDir = this.store.dependenciesDirectory()
+      const store = <Store>window.ioc.get('Store') 
+      depDir = store.dependenciesDirectory()
     } catch {
       return
     }
@@ -64,3 +63,5 @@ export class DependencyLoader {
   private isSignature = (name: string): boolean =>
     /^[a-f0-9]{64}$/i.test(name.replace('.js', ''))
 }
+
+window.ioc.register('DependencyLoader', new DependencyLoader())

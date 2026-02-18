@@ -1,4 +1,9 @@
 // hypercomb-essentials/scripts/build-module.ts
+// hypercomb-essentials/scripts/build-module.ts
+// MINIMAL UPGRADE:
+// - exclude *.keys.ts / *.keys.js at discovery time
+// - add install-manifest.json at dist/<rootSignature>/install-manifest.json with only signatures (no root field)
+// - nothing else changed (deploy, layers, signing untouched)
 
 import { spawnSync } from 'child_process'
 import { fileURLToPath } from 'url'
@@ -29,6 +34,9 @@ const PLATFORM_EXTERNALS = ['@hypercomb/core', 'pixi.js']
 // hard rule: never generate @<domain> root aggregator
 const EMIT_DOMAIN_ROOT_NAMESPACE = false
 
+// new: minimal manifest name
+const INSTALL_MANIFEST_FILE = 'install-manifest.json'
+
 // -------------------------------------------------
 // helpers
 // -------------------------------------------------
@@ -55,6 +63,10 @@ const walkFiles = (dir: string): string[] => {
 
 const isSource = (f: string): boolean =>
   (f.endsWith('.ts') || f.endsWith('.js')) && !f.endsWith('.d.ts')
+
+// exclude key-only files from artifact pipeline
+const isKeysFile = (f: string): boolean =>
+  f.endsWith('.keys.ts') || f.endsWith('.keys.js') || f.endsWith('-keys.ts') || f.endsWith('-keys.js')
 
 const isDrone = (f: string): boolean =>
   f.endsWith('.drone.ts') || f.endsWith('.drone.js')
@@ -143,6 +155,7 @@ type SourceFile = {
 const discoverSources = (): SourceFile[] =>
   walkFiles(SRC_ROOT)
     .filter(isSource)
+    .filter(f => !isKeysFile(f))
     .filter(f => {
       const relPath = relPosix(SRC_ROOT, f)
       if (relPath === 'types' || relPath.startsWith('types/')) return false
@@ -327,6 +340,7 @@ const main = async (): Promise<void> => {
   }
 
   const rootDependencies = uniqSorted(Array.from(dependencyBytes.keys()).map(jsFileName))
+  const dependencySigs = Array.from(dependencyBytes.keys()).sort((a, b) => a.localeCompare(b))
 
   // drones
   const droneExternals = [...PLATFORM_EXTERNALS, ...allSpecifiers]
@@ -354,6 +368,15 @@ const main = async (): Promise<void> => {
   for (const [sig, json] of layers) writeLayerJsonFile(layersDir, sig, json)
   for (const [sig, bytes] of dependencyBytes) writeSigJsFile(depDir, sig, bytes)
   for (const [sig, bytes] of resourceBytes) writeSigJsFile(resDir, sig, bytes)
+
+  // minimal install manifest (signatures only, no root)
+  const installManifest = {
+    version: 1,
+    layers: Array.from(layers.keys()).sort((a, b) => a.localeCompare(b)),
+    drones: Array.from(resourceBytes.keys()).sort((a, b) => a.localeCompare(b)),
+    dependencies: dependencySigs,
+  }
+  writeFileSync(join(rootDir, INSTALL_MANIFEST_FILE), JSON.stringify(installManifest) + '\n', 'utf8')
 
   // deploy
   const ps1 = resolve(__dirname, 'deploy-azure.ps1')

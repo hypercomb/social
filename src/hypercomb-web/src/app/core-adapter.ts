@@ -2,12 +2,15 @@
 
 import { Injectable, inject } from "@angular/core"
 import { environment } from "@hypercomb/shared"
-import { Navigation, Lineage, ScriptPreloader, Store } from "@hypercomb/shared/core"
+import { Navigation, Lineage, ScriptPreloader, Store, LayerInstaller, DependencyLoader } from "@hypercomb/shared/core"
 import { RuntimeMediator } from "./runtime-mediator.service"
+import { LocationParser } from "@hypercomb/shared/core/initializers/location-parser"
+import { LayerService } from "./layer-service"
+const _ = [DependencyLoader, LayerInstaller, LayerService, Store]
+
 
 @Injectable({ providedIn: 'root' })
 export class CoreAdapter {
-
   // -------------------------------------------------
   // dependencies
   // -------------------------------------------------
@@ -16,7 +19,6 @@ export class CoreAdapter {
   private readonly lineage = inject(Lineage)
   private readonly preloader = inject(ScriptPreloader)
   private readonly runtime = inject(RuntimeMediator)
-  private readonly store = inject(Store)
 
   // -------------------------------------------------
   // state
@@ -32,11 +34,14 @@ export class CoreAdapter {
     if (this.initialized) return
     this.initialized = true
 
+    const store = window.ioc.get('Store') as Store
+    
     // opfs roots
-    await this.store.initialize()
+    await store.initialize()
 
     //  // layers -> hydrate drones -> deps (single canonical pipeline)
-    await this.runtime.sync()
+    const parsed = LocationParser.parse("https://storagehypercomb.blob.core.windows.net/content/1321d428408d47085d2669d053446dbd899ca30ac387330f5fb5fac21e743885")
+    await this.runtime.sync(parsed)
 
     // optional: dev diagnostics
     if (!environment.production && new URLSearchParams(location.search).has('test')) {
@@ -59,7 +64,7 @@ export class CoreAdapter {
     const { get, list } = window.ioc
     const l = list();
     console.log('[core-adapter] ioc keys:', l)
-    
+
     // const hostkey = 'PixiHost'
     // const host = <any>get(hostkey)!
     // await host.encounter('testing')

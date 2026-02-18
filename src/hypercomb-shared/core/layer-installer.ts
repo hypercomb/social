@@ -1,7 +1,8 @@
-// hypercomb-web/src/app/core/layer-installer.ts
+// hypercomb-shared/core/layer-installer.ts
 
-import { Injectable, inject } from '@angular/core'
-import { type DevManifest, Store } from './store'
+import { Injectable } from '@angular/core'
+import { type LocationParseResult } from './initializers/location-parser'
+import { Store } from './store'
 
 type LayerInstallFile = {
   signature: string
@@ -11,52 +12,71 @@ type LayerInstallFile = {
   dependencies?: string[]
 }
 
+type LayerServiceApi = {
+  get: (parsed: LocationParseResult) => Promise<LayerInstallFile | null>
+}
+
 @Injectable({ providedIn: 'root' })
 export class LayerInstaller {
 
-  private readonly store = inject(Store)
-
   private static readonly INSTALL_SUFFIX = '-install'
 
-  public install = async (manifest: DevManifest): Promise<void> => {
-    const domains = Array.from(manifest.domains as any) as string[]
+  public install = async (parsed: LocationParseResult): Promise<void> => {
+    const baseUrl = (parsed?.baseUrl ?? '').trim().replace(/\/+$/, '')
+    const path = (parsed?.path ?? '').trim().replace(/^\/+/, '').replace(/\/+$/, '')
+    const rootSig = (parsed?.signature ?? '').trim()
 
-    for (const domain of domains) {
-      const domainLayersDir = await this.store.domainLayersDirectory(domain, true)
-
-      // seed root install json once (no empty marker files)
-      await this.ensureInstallJson(domain, domainLayersDir, manifest.root)
-
-      await this.installDomain(domain, domainLayersDir)
+    if (!baseUrl) {
+      console.log('[layer-installer] install skipped: empty base url')
+      return
     }
 
-    console.log('[layer-installer] install complete for manifest')
-  }
+    if (!rootSig) {
+      console.log('[layer-installer] install skipped: empty signature')
+      return
+    }
 
-  private installDomain = async (domain: string, domainLayersDir: FileSystemDirectoryHandle): Promise<void> => {
-    const visited = new Set<string>()
-    await this.installLoop(domain, domainLayersDir, visited)
+    // remote root used for fetching drones / deps
+    const baseRoot =
+      path
+        ? `${baseUrl}/${path}`.replace(/\/+$/, '')
+        : baseUrl
+
+    const { get } = window.ioc
+    const store = get('Store') as Store
+    const layers = get('LayerService') as LayerServiceApi
+
+    // layers directory is flat by design
+    const layersDir = store.layersDirectory()
+
+    // ensure the root layer exists locally and is queued for install
+    await layers.get({ ...parsed, signature: rootSig })
+    await this.ensureInstallMarker(layersDir, rootSig)
+
+    await this.installLoop(baseRoot, parsed, layersDir, new Set<string>())
+
+    console.log('[layer-installer] install complete')
   }
 
   private installLoop = async (
-    domain: string,
-    layersDomainDir: FileSystemDirectoryHandle,
+    baseRoot: string,
+    parsed: LocationParseResult,
+    layersDir: FileSystemDirectoryHandle,
     visited: Set<string>
   ): Promise<void> => {
 
-    // scan until no more install files exist
-    // deterministic: opfs entries iteration order is not guaranteed, so we sort each pass
+    const root = (baseRoot ?? '').trim().replace(/\/+$/, '')
+
     for (;;) {
       const installNames: string[] = []
 
-      for await (const [name, handle] of layersDomainDir.entries()) {
+      for await (const [name, handle] of layersDir.entries()) {
         if (handle.kind !== 'file') continue
         if (!name.endsWith(LayerInstaller.INSTALL_SUFFIX)) continue
         installNames.push(name)
       }
 
       installNames.sort((a, b) => a.localeCompare(b))
-
       if (!installNames.length) return
 
       let progressed = false
@@ -65,45 +85,48 @@ export class LayerInstaller {
         const sig = this.installNameToSig(name)
         if (!sig) continue
 
-        // if something re-seeded an already-consumed install file during this run, delete it
         if (visited.has(sig)) {
-          await this.safeRemove(layersDomainDir, name)
+          await this.safeRemove(layersDir, name)
           continue
         }
 
-        // try to open the file by name (it may have been removed by a prior step)
-        const handle = await this.tryGetFileHandle(layersDomainDir, name)
+        const handle = await this.tryGetFileHandle(layersDir, name)
         if (!handle) continue
 
-        const { ok, layerText, layer } = await this.readInstallLayer(domain, layersDomainDir, sig, handle)
+        const { ok, layerText, layer } = await this.readInstallLayer(handle, sig)
         if (!ok || !layerText || !layer) {
-          // bad/empty/invalid install json -> consume marker to avoid infinite loop
-          // if you prefer to keep it for debugging, remove this line
-          await this.safeRemove(layersDomainDir, name)
+          await this.safeRemove(layersDir, name)
           continue
         }
 
         visited.add(sig)
         progressed = true
 
+        // commit stable layer file for lookup/debugging
+        await this.ensureStableLayer(layersDir, sig, layerText)
+
         console.log(`[layer-installer] installing layer ${sig} (${layerText.length} chars)`)
 
-        // install dependencies (dev fetch -> opfs)
-        await this.installDependencies(domain, layer)
+        // install dependencies
+        await this.installDependencies(root, layer)
 
-        // install drones (dev fetch -> opfs)
-        await this.installDrones(domain, layer)
+        // install drones
+        await this.installDrones(root, layer)
 
-        // seed children (write childSig-install json)
-        for (const childSig of layer.layers ?? []) {
-          await this.ensureInstallJson(domain, layersDomainDir, childSig)
+        const { get } = window.ioc
+        const layers = get('LayerService') as LayerServiceApi
+
+        // discover children, ensure local, then queue child installs
+        for (const childSigRaw of layer.layers ?? []) {
+          const childSig = (childSigRaw ?? '').trim()
+          if (!childSig) continue
+
+          await layers.get({ ...parsed, signature: childSig })
+          await this.ensureInstallMarker(layersDir, childSig)
         }
 
-        // consume install marker into a stable file named by sig (optional but matches your convention)
-        await this.writeTextFile(layersDomainDir, sig, layerText)
-
-        // delete the install file
-        await this.safeRemove(layersDomainDir, name)
+        // consume install marker
+        await this.safeRemove(layersDir, name)
       }
 
       if (!progressed) return
@@ -114,100 +137,122 @@ export class LayerInstaller {
   // install steps
   // -------------------------------------------------
 
-  private installDependencies = async (domain: string, layer: LayerInstallFile): Promise<void> => {
-    const targetDirectory = this.store.dependenciesDirectory()
-    const devBase = `/dev/${domain}/__dependencies__/`
+  private installDependencies = async (baseRoot: string, layer: LayerInstallFile): Promise<void> => {
+    const { get } = window.ioc
+    const store = get('Store') as Store
+
+    const targetDirectory = store.dependenciesDirectory()
+    const root = (baseRoot ?? '').trim().replace(/\/+$/, '')
 
     for (const dependency of layer.dependencies ?? []) {
-      const exists = await this.tryGetFileHandle(targetDirectory, dependency)
+      const dep = (dependency ?? '').trim()
+      if (!dep) continue
+
+      const exists = await this.tryGetFileHandle(targetDirectory, dep)
       if (exists) {
-        console.log(`[layer-installer] dependency already present: ${dependency}`)
+        console.log(`[layer-installer] dependency already present: ${dep}`)
         continue
       }
 
-      const url = `${devBase}${dependency}`
+      const url = `${root}/__dependencies__/${dep}`
       const bytes = await this.fetchBytes(url)
       if (!bytes) continue
 
-      await this.writeBytesFile(targetDirectory, dependency, bytes)
-      console.log(`[layer-installer] stored dependency ${dependency} (${bytes.byteLength} bytes)`)
+      await this.writeBytesFile(targetDirectory, dep, bytes)
+      console.log(`[layer-installer] stored dependency ${dep} (${bytes.byteLength} bytes)`)
     }
   }
 
-  private installDrones = async (domain: string, layer: LayerInstallFile): Promise<void> => {
-    const targetDirectory = this.store.dronesDirectory()
-    const devBase = `/dev/${domain}/__drones__/`
+  private installDrones = async (baseRoot: string, layer: LayerInstallFile): Promise<void> => {
+    const { get } = window.ioc
+    const store = get('Store') as Store
+
+    const targetDirectory = store.dronesDirectory()
+    const root = (baseRoot ?? '').trim().replace(/\/+$/, '')
 
     for (const drone of layer.drones ?? []) {
-      const exists = await this.tryGetFileHandle(targetDirectory, drone)
+      const dr = (drone ?? '').trim()
+      if (!dr) continue
+
+      const exists = await this.tryGetFileHandle(targetDirectory, dr)
       if (exists) {
-        console.log(`[layer-installer] drone already present: ${drone}`)
+        console.log(`[layer-installer] drone already present: ${dr}`)
         continue
       }
 
-      const url = `${devBase}${drone}`
+      const url = `${root}/__drones__/${dr}`
       const bytes = await this.fetchBytes(url)
       if (!bytes) continue
 
-      await this.writeBytesFile(targetDirectory, drone, bytes)
-      console.log(`[layer-installer] stored drone ${drone} (${bytes.byteLength} bytes)`)
+      await this.writeBytesFile(targetDirectory, dr, bytes)
+      console.log(`[layer-installer] stored drone ${dr} (${bytes.byteLength} bytes)`)
     }
   }
 
   // -------------------------------------------------
-  // install json handling
+  // layer files
   // -------------------------------------------------
 
-  private ensureInstallJson = async (
-    domain: string,
-    layersDomainDir: FileSystemDirectoryHandle,
-    sig: string
+  private ensureStableLayer = async (
+    layersDir: FileSystemDirectoryHandle,
+    signature: string,
+    layerText: string
   ): Promise<void> => {
+    const sig = (signature ?? '').trim()
+    if (!sig) return
 
-    const installName = `${sig}${LayerInstaller.INSTALL_SUFFIX}`
-
-    const existing = await this.tryGetFileHandle(layersDomainDir, installName)
+    const existing = await this.tryGetFileHandle(layersDir, sig)
     if (existing) {
       const file = await existing.getFile().catch(() => null)
       if (file && file.size > 0) return
     }
 
-    const url = `/dev/${domain}/__layers__/${sig}.json`
-    const bytes = await this.fetchBytes(url)
-    if (!bytes) return
+    await this.writeTextFile(layersDir, sig, layerText)
+  }
 
-    await this.writeBytesFile(layersDomainDir, installName, bytes)
-    console.log(`[layer-installer] seeded install ${installName} (${bytes.byteLength} bytes)`)
+  private ensureInstallMarker = async (
+    layersDir: FileSystemDirectoryHandle,
+    signature: string
+  ): Promise<void> => {
+    const sig = (signature ?? '').trim()
+    if (!sig) return
+
+    const installName = `${sig}${LayerInstaller.INSTALL_SUFFIX}`
+
+    const existing = await this.tryGetFileHandle(layersDir, installName)
+    if (existing) {
+      const file = await existing.getFile().catch(() => null)
+      if (file && file.size > 0) return
+    }
+
+    // copy from stable file (signature) into install marker
+    const stable = await this.tryGetFileHandle(layersDir, sig)
+    const stableFile = stable ? await stable.getFile().catch(() => null) : null
+    if (!stableFile || stableFile.size <= 0) return
+
+    const bytes = new Uint8Array(await stableFile.arrayBuffer())
+    await this.writeBytesFile(layersDir, installName, bytes)
   }
 
   private readInstallLayer = async (
-    domain: string,
-    layersDomainDir: FileSystemDirectoryHandle,
-    sig: string,
-    handle: FileSystemFileHandle
+    handle: FileSystemFileHandle,
+    sig: string
   ): Promise<{ ok: boolean; layerText: string | null; layer: LayerInstallFile | null }> => {
 
     const file = await handle.getFile().catch(() => null)
     if (!file) return { ok: false, layerText: null, layer: null }
 
-    let text = await file.text().catch(() => '')
-    text = (text ?? '').trim()
-
-    // if we ever ended up with an empty marker, repair it by refetching the real json
-    if (!text) {
-      await this.ensureInstallJson(domain, layersDomainDir, sig)
-      const repaired = await this.tryGetFileHandle(layersDomainDir, `${sig}${LayerInstaller.INSTALL_SUFFIX}`)
-      if (!repaired) return { ok: false, layerText: null, layer: null }
-
-      const repairedFile = await repaired.getFile().catch(() => null)
-      if (!repairedFile) return { ok: false, layerText: null, layer: null }
-
-      text = (await repairedFile.text().catch(() => '')).trim()
-      if (!text) return { ok: false, layerText: null, layer: null }
-    }
+    const text = ((await file.text().catch(() => '')) ?? '').trim()
+    if (!text) return { ok: false, layerText: null, layer: null }
 
     try {
       const json = JSON.parse(text) as LayerInstallFile
+
+      if ((json.signature ?? '').trim() && (json.signature ?? '').trim() !== sig) {
+        console.log(`[layer-installer] signature mismatch marker=${sig} payload=${json.signature}`)
+        json.signature = sig
+      }
+
       return { ok: true, layerText: text, layer: json }
     } catch {
       console.log(`[layer-installer] invalid json in ${sig}${LayerInstaller.INSTALL_SUFFIX}`)
@@ -217,8 +262,7 @@ export class LayerInstaller {
 
   private installNameToSig = (name: string): string | null => {
     if (!name.endsWith(LayerInstaller.INSTALL_SUFFIX)) return null
-    const raw = name.slice(0, -LayerInstaller.INSTALL_SUFFIX.length)
-    return raw.replace(/^install-/, '') || null
+    return name.slice(0, -LayerInstaller.INSTALL_SUFFIX.length) || null
   }
 
   // -------------------------------------------------
@@ -236,7 +280,10 @@ export class LayerInstaller {
     }
   }
 
-  private safeRemove = async (dir: FileSystemDirectoryHandle, name: string): Promise<void> => {
+  private safeRemove = async (
+    dir: FileSystemDirectoryHandle,
+    name: string
+  ): Promise<void> => {
     try {
       await dir.removeEntry(name)
     } catch {
@@ -251,8 +298,6 @@ export class LayerInstaller {
   ): Promise<void> => {
     const outHandle = await dir.getFileHandle(name, { create: true })
     const writable = await outHandle.createWritable()
-
-    // note: use Uint8Array<ArrayBuffer> so it matches FileSystemWriteChunkType (ArrayBufferView<ArrayBuffer>)
     await writable.write(bytes)
     await writable.close()
   }
@@ -294,8 +339,10 @@ export class LayerInstaller {
       const buf: ArrayBuffer = await res.arrayBuffer()
       return new Uint8Array(buf)
     } catch (err) {
-      console.log(`[layer-installer] fetch error ${url}`, err)
+      console.log('[layer-installer] fetch error', err)
       return null
     }
   }
 }
+
+window.ioc.register('LayerInstaller', new LayerInstaller())

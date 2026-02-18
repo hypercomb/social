@@ -9,6 +9,7 @@ import { MousePanInput } from '@hypercomb/essentials/diamondcoreprocessor.com/in
 import { MousewheelZoomInput } from '@hypercomb/essentials/diamondcoreprocessor.com/input/zoom/mousewheel-zoom.input';
 import { Settings } from '@hypercomb/essentials/diamondcoreprocessor.com/core/settings';
 import { ZoomDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/zoom/zoom.drone';
+import { LayerService } from 'src/hypercomb-web/src/app/layer-service';
 
 @Component({
   selector: 'app-root',
@@ -19,8 +20,17 @@ import { ZoomDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/
 export class App {
   protected readonly title = signal('hypercomb-dev');
   constructor() {
-    const { register, get, list } = window.ioc
-    const _ = [AxialService, PanningDrone, PixiHostDrone, ShowHoneycombDrone, MousePanInput, MousewheelZoomInput, Settings, ZoomDrone]
+    const { get, list } = window.ioc
+    const _ = [
+      AxialService,
+      LayerService,
+      PanningDrone,
+      PixiHostDrone,
+      ShowHoneycombDrone,
+      MousePanInput,
+      MousewheelZoomInput,
+      Settings,
+      ZoomDrone]
 
     queueMicrotask(async () => {
       const l = list();

@@ -173,3 +173,4 @@ export class Store {
     return signature
   }
 }
+window.ioc.register('Store', new Store())

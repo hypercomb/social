@@ -185,7 +185,7 @@ export class OpfsExplorerComponent extends hypercomb {
         // await this.installer.install(raw)
 
         // run the exact same pipeline as boot
-        await this.runtime.sync()
+        await this.runtime.sync(LocationParser.parse(raw))
       } catch (e) {
         console.error(e)
         return
