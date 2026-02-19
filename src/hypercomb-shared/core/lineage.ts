@@ -12,13 +12,15 @@ export class Lineage {
   // dependencies
   // -------------------------------------------------
 
-  private get store(): Store { return <Store>window.ioc.get("Store") }
+  private get store(): Store {
+    const { get } = window.ioc
+    return get('Store') as Store
+  }
 
   // -------------------------------------------------
   // domain context (used by navigation/search, not the explorer)
   // -------------------------------------------------
 
-  private domainRoot!: FileSystemDirectoryHandle
   private readonly activeDomain = signal('hypercomb')
   public readonly domain = (): string => this.activeDomain()
 
@@ -78,7 +80,7 @@ export class Lineage {
 
   public initialize = async (): Promise<void> => {
     // domain selection is independent from explorer browsing
-    await this.setDomain('hypercomb')
+    await this.setDomain('hypercomb', true)
     this.showDomainRoot()
     this.ready.set(true)
   }
@@ -87,14 +89,13 @@ export class Lineage {
   // domain selection (explicit only)
   // -------------------------------------------------
 
-  public setDomain = async (name: string): Promise<void> => {
-    // const raw = (name ?? '').trim()
-    // if (!raw) return
-
-    // // do not create domains here
-    // this.domainRoot = await this.store.domainDirectory(raw, false)
-    // this.activeDomain.set(raw)
-    // this.invalidate()
+  public setDomain = async (name: string, createIfMissing = false): Promise<void> => {
+    const raw = (name ?? '').trim()
+    if (!raw) return
+    
+    await this.store.opfsRoot.getDirectoryHandle(raw, { create: createIfMissing })
+    this.activeDomain.set(raw)
+    this.invalidate()
   }
 
   // -------------------------------------------------
@@ -103,9 +104,39 @@ export class Lineage {
 
   public tryResolve = async (
     segments: readonly string[],
-    start: FileSystemDirectoryHandle = this.domainRoot
+    start: FileSystemDirectoryHandle = this.store.current
   ): Promise<FileSystemDirectoryHandle | null> => {
     return await this.tryResolveFrom(start, segments)
+  }
+
+  // -------------------------------------------------
+  // domain creation (used by search bar enter = create seed)
+  // -------------------------------------------------
+
+  public ensure = async (
+    segments: readonly string[],
+    start: FileSystemDirectoryHandle = this.store.hypercombRoot
+  ): Promise<FileSystemDirectoryHandle | null> => {
+
+    let dir = start
+
+    for (let i = 0; i < segments.length; i++) {
+      const seg = (segments[i] ?? '').trim()
+      if (!seg) continue
+
+      try {
+        dir = await dir.getDirectoryHandle(seg, { create: true })
+      } catch {
+        this.materialized.set(false)
+        this.missing.set(segments.slice(i))
+        return null
+      }
+    }
+
+    this.materialized.set(true)
+    this.missing.set([])
+    this.invalidate()
+    return dir
   }
 
   private readonly tryResolveFrom = async (
@@ -141,7 +172,7 @@ export class Lineage {
     const sig = (signature ?? '').trim()
     if (!sig) return
 
-    const dir = await this.tryResolve(segments, this.domainRoot)
+    const dir = await this.tryResolve(segments, this.store.hypercombRoot)
     if (!dir) return
 
     try {

@@ -2,9 +2,9 @@
 
 import { Injectable, inject } from "@angular/core"
 import { Navigation, Lineage, ScriptPreloader, Store, LayerInstaller, DependencyLoader, OpfsTreeLogger } from "@hypercomb/shared/core"
-import { RuntimeMediator } from "./runtime-mediator.service"
 import { LocationParser } from "@hypercomb/shared/core/initializers/location-parser"
 import { LayerService } from "./layer-service"
+import { RuntimeMediator } from "@hypercomb/shared/ui/runtime-mediator"
 
 const _ = [DependencyLoader, LayerInstaller, LayerService, Store]
 

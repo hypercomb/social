@@ -1,6 +1,6 @@
 // src/app/common/header/search-bar/resource-completion.service.ts
 import { Injectable, computed, inject } from '@angular/core'
-import { ScriptPreloader } from '../../core/script-preloader'
+import { ScriptPreloader } from './script-preloader'
 
 @Injectable({ providedIn: 'root' })
 export class ResourceCompletionService {

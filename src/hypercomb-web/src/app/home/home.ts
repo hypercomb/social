@@ -1,6 +1,6 @@
 import { Component, computed, inject } from '@angular/core';
-import { ResourceMessageHandler } from '../../../../hypercomb-shared/ui/search-bar/resource-message-handler';
 import { Lineage } from '@hypercomb/shared/core';
+import { ResourceMessageHandler } from '@hypercomb/shared/core/resource-message-handler';
 import { OpfsExplorerComponent } from '@hypercomb/shared/ui';
 
 @Component({

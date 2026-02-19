@@ -1,6 +1,6 @@
 import { bootstrapApplication } from '@angular/platform-browser';
 import { appConfig } from './app/app.config';
-import './app/core/ioc.web'
+import '@hypercomb/shared/core/ioc.web'
 import { App } from './app/app';
 import { Store } from '@hypercomb/shared';
 

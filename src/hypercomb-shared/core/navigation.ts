@@ -1,7 +1,7 @@
 // src/app/core/navigation.ts
 import { Injectable, inject } from '@angular/core'
-import { CompletionUtility } from './completion-utility'
 import { hypercomb } from '@hypercomb/core'
+import { CompletionUtility } from '../core/completion-utility'
 
 type SelectionDetail = {
   selected: string[]

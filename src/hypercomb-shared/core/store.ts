@@ -24,8 +24,7 @@ export class Store {
   private static readonly CACHE_NAME = 'hypercomb-modules-v1'
 
   public opfsRoot!: FileSystemDirectoryHandle
-  private hypercombRoot!: FileSystemDirectoryHandle
-
+  public hypercombRoot!: FileSystemDirectoryHandle
   public drones!: FileSystemDirectoryHandle
   public dependencies!: FileSystemDirectoryHandle
   public layers!: FileSystemDirectoryHandle
@@ -49,15 +48,6 @@ export class Store {
     this.layers =
       await this.opfsRoot.getDirectoryHandle(Store.LAYERS_DIRECTORY, { create: true })
   }
-
-  // -------------------------------------------------
-  // directories
-  // -------------------------------------------------
-
-  public hypercombDirectory = (): FileSystemDirectoryHandle => this.hypercombRoot
-  public dronesDirectory = (): FileSystemDirectoryHandle => this.drones
-  public dependenciesDirectory = (): FileSystemDirectoryHandle => this.dependencies
-  public layersDirectory = (): FileSystemDirectoryHandle => this.layers
 
   public domainLayersDirectory = async (
     domain: string,

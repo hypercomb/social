@@ -11,11 +11,10 @@ import { Settings } from '@hypercomb/essentials/diamondcoreprocessor.com/core/se
 import { ZoomDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/zoom/zoom.drone';
 import { LayerService } from 'src/hypercomb-web/src/app/layer-service';
 import { OpfsExplorerComponent } from "@hypercomb/shared/ui";
-import { PortalOverlayComponent } from '@hypercomb/shared/ui/portal/portal-overlay.component';
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, SearchBarComponent, OpfsExplorerComponent, PortalOverlayComponent],
+  imports: [RouterOutlet, SearchBarComponent, OpfsExplorerComponent],
   templateUrl: './app.html',
   styleUrl: './app.scss'
 })

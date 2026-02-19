@@ -1,17 +1,14 @@
 // hypercomb-shared/ui/file-explorer/opfs-explorer.component.ts
 
 import { CommonModule } from '@angular/common'
-import { Component, computed, effect, signal } from '@angular/core'
+import { Component, computed, effect, inject, signal } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import { Lineage } from '../../core/lineage'
 import { Store } from '../../core/store'
 import { hypercomb } from '@hypercomb/core'
 import { ScriptPreloader } from '../../core/script-preloader'
 import { LocationParser } from '../../core/initializers/location-parser'
-
-type RuntimeMediator = {
-  sync: (parsed: ReturnType<typeof LocationParser.parse>) => Promise<void>
-}
+import { RuntimeMediator } from '../runtime-mediator'
 
 interface ExplorerEntry {
   name: string
@@ -42,10 +39,10 @@ export class OpfsExplorerComponent extends hypercomb {
   // dependencies
   // -------------------------------------------------
 
-  private get lineage(): Lineage { return <Lineage>window.ioc.get('Lineage') }
-  private get preloader(): ScriptPreloader { return <ScriptPreloader>window.ioc.get('ScriptPreloader') }
-  private get store(): Store { return <Store>window.ioc.get('Store') }
-  private get runtime(): RuntimeMediator { return <RuntimeMediator>window.ioc.get('RuntimeMediator') }
+  private readonly lineage = inject(Lineage) 
+  private readonly preloader = inject(ScriptPreloader)
+  private readonly store = inject(Store)
+  private readonly runtime = inject(RuntimeMediator)  
 
   // -------------------------------------------------
   // state
