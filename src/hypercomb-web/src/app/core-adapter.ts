@@ -6,8 +6,9 @@ import { Navigation, Lineage, ScriptPreloader, Store, LayerInstaller, Dependency
 import { RuntimeMediator } from "./runtime-mediator.service"
 import { LocationParser } from "@hypercomb/shared/core/initializers/location-parser"
 import { LayerService } from "./layer-service"
-const _ = [DependencyLoader, LayerInstaller, LayerService, Store]
+import { OpfsTreeLogger } from "./tree-logger"
 
+const _ = [DependencyLoader, LayerInstaller, LayerService, OpfsTreeLogger, Store]
 
 @Injectable({ providedIn: 'root' })
 export class CoreAdapter {
@@ -31,11 +32,15 @@ export class CoreAdapter {
   // -------------------------------------------------
 
   public initialize = async (): Promise<void> => {
+
     if (this.initialized) return
     this.initialized = true
 
+    const logger = <OpfsTreeLogger>window.ioc.get("OpfsTreeLogger")
+    await logger.log()
+
     const store = window.ioc.get('Store') as Store
-    
+
     // opfs roots
     await store.initialize()
 
@@ -55,19 +60,26 @@ export class CoreAdapter {
     const segments = this.navigation.segments().filter(Boolean)
     this.navigation.bootstrap(segments)
 
-  
-    const { get, list } = window.ioc
+
+    const { list } = window.ioc
     const l = list();
     console.log('[core-adapter] ioc keys:', l)
 
-    const hostkey = 'PixiHost'
-    const host = <any>get(hostkey)!
-    await host.encounter('testing')
+    // const hostkey = 'PixiHost'
+    // const host = <any>get(hostkey)!
+    // await host.encounter('testing')
 
-    const showkey = 'ShowHoneycomb'
-    const show = <any>get(showkey)!
-    await show. encounter('testing')
+    // const showkey = 'ShowHoneycomb'
+    // const show = <any>get(showkey)!
+    // await show. encounter('testing')
 
+    // const zoomkey = 'ZoomDrone'
+    // const zoom = <any>get(zoomkey)!
+    // await zoom.encounter('testing')
+
+    //     const panningkey = 'PanningDrone'
+    // const panning = <any>get(panningkey)!
+    // await panning.encounter('testing')
 
     // const settingKey = 'Settings'
     // const setting = <any>get(settingKey)
