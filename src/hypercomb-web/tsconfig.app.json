@@ -7,6 +7,6 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"]
   },
   "files": ["src/main.ts"],
-  "include": ["src/**/*.ts", "../hypercomb-shared/**/*.ts"],
+  "include": ["src/**/*.ts", "../hypercomb-shared/**/*.ts", "../hypercomb-shared/core/tree-logger.ts"],
   "exclude": ["src/**/*.spec.ts"]
 }

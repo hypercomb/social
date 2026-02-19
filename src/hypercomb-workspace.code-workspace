@@ -1,21 +1,21 @@
 {
-	"folders": [
-		{
-			"name": "hypercomb-web",
-			"path": "hypercomb-web"
-		},
-		{
-			"name": "hypercomb-dev",
-			"path": "hypercomb-dev"
-		},
-		{
-			"name": "hypercomb-shared",
-			"path": "hypercomb-shared"
-		},
-		{
-			"name": "hypercomb-essentials",
-			"path": "hypercomb-essentials"
-		}
-	],
-	"settings": {}
+  "folders": [
+    {
+      "name": "hypercomb-web",
+      "path": "hypercomb-web",
+    },
+    {
+      "name": "hypercomb-dev",
+      "path": "hypercomb-dev",
+    },
+    {
+      "name": "hypercomb-shared",
+      "path": "hypercomb-shared",
+    },
+    {
+      "name": "hypercomb-essentials",
+      "path": "hypercomb-essentials",
+    },
+  ],
+  "settings": {},
 }

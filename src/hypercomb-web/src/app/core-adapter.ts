@@ -1,14 +1,12 @@
 // hypercomb-web/src/app/core/core-adapter.ts
 
 import { Injectable, inject } from "@angular/core"
-import { environment } from "@hypercomb/shared"
-import { Navigation, Lineage, ScriptPreloader, Store, LayerInstaller, DependencyLoader } from "@hypercomb/shared/core"
+import { Navigation, Lineage, ScriptPreloader, Store, LayerInstaller, DependencyLoader, OpfsTreeLogger } from "@hypercomb/shared/core"
 import { RuntimeMediator } from "./runtime-mediator.service"
 import { LocationParser } from "@hypercomb/shared/core/initializers/location-parser"
 import { LayerService } from "./layer-service"
-import { OpfsTreeLogger } from "./tree-logger"
 
-const _ = [DependencyLoader, LayerInstaller, LayerService, OpfsTreeLogger, Store]
+const _ = [DependencyLoader, LayerInstaller, LayerService, Store]
 
 @Injectable({ providedIn: 'root' })
 export class CoreAdapter {
@@ -47,12 +45,6 @@ export class CoreAdapter {
     //  // layers -> hydrate drones -> deps (single canonical pipeline)
     const parsed = LocationParser.parse("https://storagehypercomb.blob.core.windows.net/content/da83f9918946df8b4c9440aa9aee8fedb9a4156e5bc7919d5069ea57afe2c2cf")
     await this.runtime.sync(parsed)
-
-    // optional: dev diagnostics
-    if (!environment.production && new URLSearchParams(location.search).has('test')) {
-      const { list } = window.ioc
-      console.log('[test] ioc keys:', list())
-    }
 
     // initialize navigation + lineage after content is available
     await this.lineage.initialize()
