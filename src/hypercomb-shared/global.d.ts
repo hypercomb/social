@@ -12,4 +12,3 @@ interface Window {
     list(): readonly string[]
   }
 }
-

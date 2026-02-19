@@ -61,3 +61,5 @@ export class DomainLayerSource implements LayerInstallSource {
     return { signature, name: name || undefined, drones, children }
   }
 }
+
+window.ioc.register('DomainLayerSource', new DomainLayerSource())

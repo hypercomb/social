@@ -1,17 +1,17 @@
-// src/app/common/file-explorer/opfs-explorer.component.ts
+// hypercomb-shared/ui/file-explorer/opfs-explorer.component.ts
 
 import { CommonModule } from '@angular/common'
-import { Component, computed, effect, inject, signal } from '@angular/core'
+import { Component, computed, effect, signal } from '@angular/core'
 import { FormsModule } from '@angular/forms'
-import { MatButtonModule } from '@angular/material/button'
-import { MatIconModule } from '@angular/material/icon'
-import { MatTableModule } from '@angular/material/table'
 import { Lineage } from '../../core/lineage'
 import { Store } from '../../core/store'
 import { hypercomb } from '@hypercomb/core'
 import { ScriptPreloader } from '../../core/script-preloader'
-import { RuntimeMediator } from '../../../hypercomb-web/src/app/runtime-mediator.service'
 import { LocationParser } from '../../core/initializers/location-parser'
+
+type RuntimeMediator = {
+  sync: (parsed: ReturnType<typeof LocationParser.parse>) => Promise<void>
+}
 
 interface ExplorerEntry {
   name: string
@@ -24,10 +24,7 @@ interface ExplorerEntry {
   standalone: true,
   imports: [
     CommonModule,
-    FormsModule,
-    MatTableModule,
-    MatIconModule,
-    MatButtonModule
+    FormsModule
   ],
   templateUrl: './opfs-explorer.component.html',
   styleUrls: ['./opfs-explorer.component.scss']
@@ -36,18 +33,20 @@ export class OpfsExplorerComponent extends hypercomb {
 
   // -------------------------------------------------
   // constants
-  // -------------------------------------------------  
+  // -------------------------------------------------
 
   private static readonly SHOW_ALL_KEY = 'opfs-explorer.show-all'
+  private static readonly COPY_MAX_BYTES = 250_000
 
   // -------------------------------------------------
   // dependencies
   // -------------------------------------------------
 
-  private readonly lineage = inject(Lineage)
-  private readonly preloader = inject(ScriptPreloader)
-  private readonly store = inject(Store)
-  private readonly runtime = inject(RuntimeMediator)
+  private get lineage(): Lineage { return <Lineage>window.ioc.get('Lineage') }
+  private get preloader(): ScriptPreloader { return <ScriptPreloader>window.ioc.get('ScriptPreloader') }
+  private get store(): Store { return <Store>window.ioc.get('Store') }
+  private get runtime(): RuntimeMediator { return <RuntimeMediator>window.ioc.get('RuntimeMediator') }
+
   // -------------------------------------------------
   // state
   // -------------------------------------------------
@@ -88,6 +87,17 @@ export class OpfsExplorerComponent extends hypercomb {
   }
 
   // -------------------------------------------------
+  // template helpers
+  // -------------------------------------------------
+
+  public trackByName = (_: number, e: ExplorerEntry): string => e.name
+
+  public icon = (e: ExplorerEntry): string => {
+    if (e.kind === 'directory') return e.name === '..' ? '↩' : '📁'
+    return '📄'
+  }
+
+  // -------------------------------------------------
   // navigation
   // -------------------------------------------------
 
@@ -108,12 +118,52 @@ export class OpfsExplorerComponent extends hypercomb {
   // -------------------------------------------------
 
   public run = async (e: ExplorerEntry, ev: MouseEvent): Promise<void> => {
-    // ev.stopPropagation()
-    // if (e.kind !== 'file') return
+    ev.stopPropagation()
 
+    // wire this back in when ready
+    // if (e.kind !== 'file') return
     // const drone = this.preloader.get(e.name)
     // drone?.encounter(e.name)
+  }
 
+  public copyDetails = async (e: ExplorerEntry, ev: MouseEvent): Promise<void> => {
+    ev.stopPropagation()
+    if (e.kind !== 'file') return
+
+    const dir = await this.lineage.explorerDir()
+    if (!dir) return
+
+    try {
+      const handle = await dir.getFileHandle(e.name, { create: false })
+      const file = await handle.getFile()
+
+      if (file.size > OpfsExplorerComponent.COPY_MAX_BYTES) {
+        const msg = [
+          `file too large to copy (${file.size.toLocaleString()} bytes)`,
+          `name: ${e.name}`,
+          `label: ${e.label}`,
+          `last modified: ${new Date(file.lastModified).toISOString()}`
+        ].join('\n')
+
+        await this.writeClipboard(msg)
+        return
+      }
+
+      const text = await file.text()
+      await this.writeClipboard(text)
+    } catch (err) {
+      console.error('[opfs explorer] copy failed', e.name, err)
+    }
+  }
+
+  public delete = async (e: ExplorerEntry, ev: MouseEvent): Promise<void> => {
+    ev.stopPropagation()
+
+    const dir = await this.lineage.explorerDir()
+    if (!dir) return
+
+    await dir.removeEntry(e.name, { recursive: true })
+    void this.refresh()
   }
 
   // -------------------------------------------------
@@ -142,7 +192,7 @@ export class OpfsExplorerComponent extends hypercomb {
         // resource payload label takes priority
         const resourceLabel = await this.resolveResourceLabel(name)
         if (resourceLabel) {
-          label = `${name.slice(0, 16)} - ${resourceLabel} `
+          label = `${name.slice(0, 16)} - ${resourceLabel}`
         } else {
           // fallback to preloader resolution
           const resolved = this.preloader.getActionName(name)
@@ -150,13 +200,7 @@ export class OpfsExplorerComponent extends hypercomb {
         }
       }
 
-
-
-      out.push({
-        name,
-        label,
-        kind: handle.kind
-      })
+      out.push({ name, label, kind: handle.kind })
     }
 
     out.sort((a, b) => {
@@ -173,17 +217,12 @@ export class OpfsExplorerComponent extends hypercomb {
   // create
   // -------------------------------------------------
 
-  // hypercomb-web/src/app/common/file-explorer/opfs-explorer.component.ts
-  // only the changed section
-
   public createFolder = async (): Promise<void> => {
     const raw = this.newName.trim()
     if (!raw) return
 
     if (this.directory() === '/') {
       try {
-        // await this.installer.install(raw)
-
         // run the exact same pipeline as boot
         await this.runtime.sync(LocationParser.parse(raw))
       } catch (e) {
@@ -196,6 +235,7 @@ export class OpfsExplorerComponent extends hypercomb {
       return
     }
 
+    // note: implement non-root folder create when you decide the naming rules
     this.newName = ''
     void this.refresh()
   }
@@ -220,72 +260,10 @@ export class OpfsExplorerComponent extends hypercomb {
     void this.refresh()
   }
 
-
-  public createEntry = async (): Promise<void> => {
-    const raw = this.newName.trim()
-    if (!raw) return
-
-    // root-level: domain + install in one shot
-    if (this.directory() === '/') {
-      const parsed = LocationParser.parse(raw)
-      const domain = parsed.domain
-      if (!domain) return
-
-      // extract last path segment (expected b64 / signature)
-      const parts = raw.split('/').filter(Boolean)
-      const installId = parts[parts.length - 1]
-      if (!installId) return
-
-      const root = this.store.opfsRoot
-
-      // create domain folder
-      const domainDir = await root.getDirectoryHandle(domain, { create: true })
-
-      // persist original raw value (location / provenance)
-      const locationHandle = await domainDir.getFileHandle('__location__', { create: true })
-      const locationWritable = await locationHandle.createWritable()
-      try {
-        await locationWritable.write(raw)
-      } finally {
-        await locationWritable.close()
-      }
-
-      // create install file inside domain
-      const installHandle = await domainDir.getFileHandle(`install-${installId}`, { create: true })
-      const installWritable = await installHandle.createWritable()
-      try {
-        await installWritable.write('')
-      } finally {
-        await installWritable.close()
-      }
-
-      this.newName = ''
-      void this.refresh()
-      return
-    }
-
-    // non-root: create install in current directory
-    const dir = await this.lineage.explorerDir()
-    if (!dir) return
-
-    const handle = await dir.getFileHandle(`install-${raw}`, { create: true })
-    const writable = await handle.createWritable()
-    try {
-      await writable.write('')
-    } finally {
-      await writable.close()
-    }
-
-    this.newName = ''
-    void this.refresh()
-  }
-
-
   public addDependency = async (): Promise<void> => {
     const sig = this.newName.trim()
     if (!sig) return
 
-    // fetch from server
     const url = `https://storagehypercomb.blob.core.windows.net/content/__dependencies__/`
     const res = await fetch(`${url}${sig}`)
 
@@ -296,11 +274,9 @@ export class OpfsExplorerComponent extends hypercomb {
 
     const bytes = await res.arrayBuffer()
 
-    // ensure __dependencies__ exists at OPFS root
     const root = this.store.opfsRoot
     const depsDir = await root.getDirectoryHandle('__dependencies__', { create: true })
 
-    // write dependency by signature
     const fileHandle = await depsDir.getFileHandle(sig, { create: true })
     const writable = await fileHandle.createWritable()
 
@@ -314,57 +290,31 @@ export class OpfsExplorerComponent extends hypercomb {
     void this.refresh()
   }
 
-
-  // src/app/common/file-explorer/opfs-explorer.component.ts
-  // only the changed sections
-
-  // -------------------------------------------------
-  // clipboard
-  // -------------------------------------------------
-
-  public copyDetails = async (e: ExplorerEntry, ev: MouseEvent): Promise<void> => {
-    ev.stopPropagation()
-
-    // only files have bytes to copy
-    if (e.kind !== 'file') return
-
-    const dir = await this.lineage.explorerDir()
-    if (!dir) return
-
-    try {
-      const handle = await dir.getFileHandle(e.name, { create: false })
-      const file = await handle.getFile()
-
-      // read as text and copy to clipboard
-      const text = await file.text()
-      console.log(text)
-
-      // optional: quick confirmation for debugging
-      console.log('[opfs explorer] copied to clipboard', e.name, text.length)
-    } catch (err) {
-      console.error('[opfs explorer] copy failed', e.name, err)
-    }
-  }
-
-
-
-  // -------------------------------------------------
-  // delete
-  // -------------------------------------------------
-
-  public delete = async (e: ExplorerEntry, ev: MouseEvent): Promise<void> => {
-    ev.stopPropagation()
-
-    const dir = await this.lineage.explorerDir()
-    if (!dir) return
-
-    await dir.removeEntry(e.name, { recursive: true })
-    void this.refresh()
-  }
-
   // -------------------------------------------------
   // helpers
   // -------------------------------------------------
+
+  private readonly writeClipboard = async (text: string): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(text)
+      return
+    } catch {
+      // fallback (works in more contexts)
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.left = '-9999px'
+      ta.style.top = '0'
+      document.body.appendChild(ta)
+      ta.focus()
+      ta.select()
+      try {
+        document.execCommand('copy')
+      } finally {
+        document.body.removeChild(ta)
+      }
+    }
+  }
 
   private readonly isHiddenEntry = (name: string): boolean => {
     if (this.showAll()) return false
@@ -375,9 +325,7 @@ export class OpfsExplorerComponent extends hypercomb {
     return false
   }
 
-  private readonly resolveResourceLabel = async (
-    name: string
-  ): Promise<string | null> => {
+  private readonly resolveResourceLabel = async (name: string): Promise<string | null> => {
     try {
       const root = this.store.opfsRoot
       const resourcesDir = await root.getDirectoryHandle('__drones__', { create: false })
@@ -385,7 +333,6 @@ export class OpfsExplorerComponent extends hypercomb {
       const file = await handle.getFile()
       if (file.size === 0) return null
 
-      // read only the first ~256 bytes
       const slice = await file.slice(0, 256).text()
       const firstLine = slice.split('\n')[0]?.trim()
       if (!firstLine?.startsWith('// @hypercomb ')) return null
@@ -402,6 +349,4 @@ export class OpfsExplorerComponent extends hypercomb {
 
     return null
   }
-
-
 }

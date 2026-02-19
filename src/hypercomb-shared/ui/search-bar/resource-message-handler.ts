@@ -6,8 +6,8 @@ import { ScriptPreloader } from '@hypercomb/shared/core'
 @Injectable({ providedIn: 'root' })
 export class ResourceMessageHandler {
 
-  private readonly store = inject(Store)
-  private readonly preloader = inject(ScriptPreloader)
+  private get store(): Store { return <Store>window.ioc.get("Store") }
+  private get preloader(): ScriptPreloader { return <ScriptPreloader>window.ioc.get("ScriptPreloader") }
 
   // whitelist for allowed postmessage origins
   private readonly allowedOrigins = new Set<string>([

@@ -10,7 +10,7 @@ type SelectionDetail = {
 @Injectable({ providedIn: 'root' })
 export class Navigation extends hypercomb {
 
-  private readonly completions = inject(CompletionUtility)
+  private get completions(): CompletionUtility { return <CompletionUtility>window.ioc.get("CompletionUtility") }
   private listening = false
 
   // ----------------------------------
@@ -157,3 +157,5 @@ export class Navigation extends hypercomb {
     return this.completions.normalize(noSlashes)
   }
 }
+
+window.ioc.register('Navigation', new Navigation())

@@ -2,7 +2,7 @@
 // explorer is absolute from opfs root
 // domain is separate and must not be driven by explorer clicks
 
-import { inject, Injectable, signal } from '@angular/core'
+import { Injectable, signal } from '@angular/core'
 import { Store } from './store'
 
 @Injectable({ providedIn: 'root' })
@@ -12,7 +12,7 @@ export class Lineage {
   // dependencies
   // -------------------------------------------------
 
-  private readonly store = inject(Store)
+  private get store(): Store { return <Store>window.ioc.get("Store") }
 
   // -------------------------------------------------
   // domain context (used by navigation/search, not the explorer)
@@ -152,3 +152,5 @@ export class Lineage {
     }
   }
 }
+
+window.ioc.register('Lineage', new Lineage())

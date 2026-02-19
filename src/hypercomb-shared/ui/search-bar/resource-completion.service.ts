@@ -5,7 +5,7 @@ import { ScriptPreloader } from '../../core/script-preloader'
 @Injectable({ providedIn: 'root' })
 export class ResourceCompletionService {
 
-  private readonly preloader = inject(ScriptPreloader)
+  private get preloader(): ScriptPreloader { return <ScriptPreloader>window.ioc.get("ScriptPreloader") }
 
   // always live (no snapshot)
   public readonly names = computed(() => this.preloader.actionNames())

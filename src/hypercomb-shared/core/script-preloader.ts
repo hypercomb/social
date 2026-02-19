@@ -12,8 +12,8 @@ export interface ActionDescriptor {
 @Injectable({ providedIn: 'root' })
 export class ScriptPreloader implements DroneResolver {
 
-  private readonly lineage = inject(Lineage)
-  private readonly store = inject(Store)
+  private get lineage(): Lineage { return <Lineage>window.ioc.get("Lineage") }
+  private get store(): Store { return <Store>window.ioc.get("Store") }
 
   private readonly bySignature = new Map<string, ActionDescriptor>()
 
@@ -107,3 +107,5 @@ export class ScriptPreloader implements DroneResolver {
     return /^[a-z0-9.-]+$/i.test(raw) && raw.includes('.')
   }
 }
+
+window.ioc.register('ScriptPreloader', new ScriptPreloader())

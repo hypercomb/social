@@ -1,21 +1,24 @@
+<!-- hypercomb-shared/ui/file-explorer/opfs-explorer.component.html -->
+
 <div class="opfs-explorer">
   <!-- header -->
-  <h3 class="title">
+  <div class="title">
     <div class="title-left">
-      <mat-icon class="title-icon">folder</mat-icon>
-      OPFS Explorer
+      <span class="title-icon" aria-hidden="true">📁</span>
+      <span>OPFS Explorer</span>
     </div>
 
     <button
-      mat-icon-button
-      class="gear"
-      [color]="showAll() ? 'primary' : undefined"
+      type="button"
+      class="icon-button gear"
+      [class.is-on]="showAll()"
       title="toggle raw view"
       (click)="showAll.set(!showAll())"
+      aria-label="toggle raw view"
     >
-      <mat-icon>settings</mat-icon>
+      <span aria-hidden="true">⚙</span>
     </button>
-  </h3>
+  </div>
 
   <!-- current path -->
   <div class="toolbar">
@@ -31,80 +34,67 @@
       class="name-input"
     />
 
-    <button mat-stroked-button type="button" (click)="createFolder()">
+    <button type="button" class="btn" (click)="createFolder()">
       add folder
     </button>
 
-    <button mat-stroked-button type="button" (click)="createFile()">
+    <button type="button" class="btn" (click)="createFile()">
       add file
     </button>
-    <button mat-stroked-button type="button" (click)="addDependency()">
+
+    <button type="button" class="btn" (click)="addDependency()">
       add dependency
     </button>
   </div>
 
   <!-- table -->
-  <div class="table-container">
-    <table
-      mat-table
-      [dataSource]="entries()"
-      class="mat-elevation-z2 opfs-table"
-    >
-      <!-- icon -->
-      <ng-container matColumnDef="icon">
-        <th mat-header-cell *matHeaderCellDef></th>
-        <td mat-cell *matCellDef="let e">
-          <mat-icon>
-            {{ e.kind === "directory" ? "folder" : "insert_drive_file" }}
-          </mat-icon>
-        </td>
-      </ng-container>
+  <div class="table-container" role="region" aria-label="opfs entries">
+    <table class="opfs-table" aria-label="opfs entries table">
+      <thead>
+        <tr>
+          <th class="col-icon" aria-hidden="true"></th>
+          <th class="col-name">name</th>
+          <th class="col-actions">actions</th>
+        </tr>
+      </thead>
 
-      <!-- name -->
-      <ng-container matColumnDef="name">
-        <th mat-header-cell *matHeaderCellDef>Name</th>
-        <td mat-cell *matCellDef="let e">
-          {{ e.label }}
-        </td>
-      </ng-container>
+      <tbody>
+        <tr
+          *ngFor="let e of entries(); trackBy: trackByName"
+          class="row"
+          [class.is-dir]="e.kind === 'directory'"
+          (click)="explore(e.name)"
+          tabindex="0"
+          (keydown.enter)="explore(e.name)"
+        >
+          <td class="cell-icon" aria-hidden="true">
+            <span class="icon">{{ icon(e) }}</span>
+          </td>
 
-      <!-- run -->
-      <ng-container matColumnDef="run">
-        <th mat-header-cell *matHeaderCellDef></th>
-        <td mat-cell *matCellDef="let e">
-          <button mat-icon-button (click)="run(e, $event)">
-            <mat-icon>play_arrow</mat-icon>
-          </button>
-        </td>
-      </ng-container>
+          <td class="cell-name">
+            <span class="label">{{ e.label }}</span>
+            <span class="sub" *ngIf="showAll()">{{ e.name }}</span>
+          </td>
 
-      <!-- copy -->
-      <ng-container matColumnDef="copy">
-        <th mat-header-cell *matHeaderCellDef></th>
-        <td mat-cell *matCellDef="let e">
-          <button mat-button (click)="copyDetails(e, $event)">copy</button>
-        </td>
-      </ng-container>
+          <td class="cell-actions">
+            <button type="button" class="icon-button" title="run" aria-label="run" (click)="run(e, $event)">
+              <span aria-hidden="true">▶</span>
+            </button>
 
-      <!-- delete -->
-      <ng-container matColumnDef="delete">
-        <th mat-header-cell *matHeaderCellDef></th>
-        <td mat-cell *matCellDef="let e">
-          <button mat-icon-button color="warn" (click)="delete(e, $event)">
-            <mat-icon>delete</mat-icon>
-          </button>
-        </td>
-      </ng-container>
+            <button type="button" class="btn-small" title="copy" aria-label="copy" (click)="copyDetails(e, $event)">
+              copy
+            </button>
 
-      <tr
-        mat-header-row
-        *matHeaderRowDef="['icon', 'name', 'run', 'copy', 'delete']"
-      ></tr>
-      <tr
-        mat-row
-        *matRowDef="let row; columns: ['icon', 'name', 'run', 'copy', 'delete']"
-        (click)="explore(row.name)"
-      ></tr>
+            <button type="button" class="icon-button danger" title="delete" aria-label="delete" (click)="delete(e, $event)">
+              <span aria-hidden="true">🗑</span>
+            </button>
+          </td>
+        </tr>
+
+        <tr *ngIf="entries().length === 0">
+          <td class="empty" colspan="3">no entries</td>
+        </tr>
+      </tbody>
     </table>
   </div>
 </div>

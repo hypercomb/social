@@ -1,6 +1,6 @@
 import { Component, signal } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
-import { SearchBarComponent } from '@hypercomb/shared';
+import { SearchBarComponent, Store } from '@hypercomb/shared';
 import { AxialService } from '@hypercomb/essentials/diamondcoreprocessor.com/core/axial/axial-service';
 import { PanningDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/pan/panning.drone';
 import { PixiHostDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/pixi-host.drone';
@@ -10,10 +10,12 @@ import { MousewheelZoomInput } from '@hypercomb/essentials/diamondcoreprocessor.
 import { Settings } from '@hypercomb/essentials/diamondcoreprocessor.com/core/settings';
 import { ZoomDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/zoom/zoom.drone';
 import { LayerService } from 'src/hypercomb-web/src/app/layer-service';
+import { OpfsExplorerComponent } from "@hypercomb/shared/ui";
+import { PortalOverlayComponent } from '@hypercomb/shared/ui/portal/portal-overlay.component';
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, SearchBarComponent],
+  imports: [RouterOutlet, SearchBarComponent, OpfsExplorerComponent, PortalOverlayComponent],
   templateUrl: './app.html',
   styleUrl: './app.scss'
 })
@@ -35,7 +37,7 @@ export class App {
     queueMicrotask(async () => {
       const l = list();
       console.log('[core-adapter] ioc keys:', l)
-
+      
       const hostkey = 'PixiHost'
       const host = <any>get(hostkey)!
       await host.encounter('testing')

@@ -10,9 +10,9 @@ import { environment } from '../environments/environment'
 @Injectable({ providedIn: 'root' })
 export class LayerInstallCollection {
 
-  private readonly opfs = inject(OpfsInstallFileSource)
-  private readonly dev = inject(DevLayerSource)
-  private readonly domain = inject(DomainLayerSource)
+  private get opfs(): OpfsInstallFileSource { return <OpfsInstallFileSource>window.ioc.get("OpfsInstallFileSource") }
+  private get dev(): DevLayerSource { return <DevLayerSource>window.ioc.get("DevLayerSource") }
+  private get domain(): DomainLayerSource { return <DomainLayerSource>window.ioc.get("DomainLayerSource") }
 
   private readonly ordered = (ctx: LayerInstallContext): readonly LayerInstallSource[] => {
     // debug mode: prefer live sources first so cache can’t “win”

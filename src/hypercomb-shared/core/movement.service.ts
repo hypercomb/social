@@ -7,7 +7,7 @@ export class MovementService {
   // increments only after navigation intent is committed
   public readonly moved = signal(0)
 
-  private readonly navigation = inject(Navigation)
+  private get navigation(): Navigation { return <Navigation>window.ioc.get("Navigation") }
 
   // prevents overlapping navigation commits
   private committing: Promise<void> | null = null

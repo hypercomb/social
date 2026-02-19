@@ -1,6 +1,6 @@
 // src/app/common/history-component/history.ts
 import { Component, inject } from '@angular/core'
-import { Navigation } from '@hypercomb/shared/core'
+import { Navigation } from '../../core/navigation'
 
 @Component({
   selector: 'hc-history',
@@ -8,7 +8,7 @@ import { Navigation } from '@hypercomb/shared/core'
   templateUrl: './history.html'
 })
 export class HistoryComponent {
-  private readonly navigation = inject(Navigation)
+  private get navigation(): Navigation { return <Navigation>window.ioc.get("Navigation") }
 
   public readonly length = (): number => window.history.length
   public readonly current = (): number => ((window.history.state as any)?.i ?? 0)

@@ -59,3 +59,5 @@ export class DevLayerSource implements LayerInstallSource {
     return { signature, name: name || undefined, drones, children }
   }
 }
+
+window.ioc.register('DevLayerSource', new DevLayerSource())

@@ -63,3 +63,5 @@ export class OpfsInstallFileSource implements LayerInstallSource {
     }
   }
 }
+
+window.ioc.register('OpfsInstallFileSource', new OpfsInstallFileSource())

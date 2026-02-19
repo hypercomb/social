@@ -14,7 +14,6 @@ export class Home {
   private readonly lineage = inject(Lineage) 
   public ready = computed(() =>  this.lineage.ready())
  
-  
   ngOnDestroy(): void {
     this.handler.destroy()
   }
