@@ -7,7 +7,7 @@ import { Store } from '@hypercomb/shared'
 import { appConfig } from './app/app.config'
 import { App } from './app/app'
 
-const { get, register, list } = window.ioc
+const { get } = window.ioc
 
 // keep this as a value-use so the module can't be elided
 void Store
@@ -15,14 +15,7 @@ void Store
 const main = async (): Promise<void> => {
 
   // store is registered by side-effect in store.ts, but guard just in case
-  let store: Store | null = null
-  try { store = get('Store') as Store } catch { /* ignore */ }
-
-  if (!store) {
-    store = new Store()
-    register('Store', store)
-  }
-
+  const store = window.ioc.get('Store') as Store 
   await store.initialize()
 
   // start listening before bootstrap emits popstate

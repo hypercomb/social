@@ -1,7 +1,12 @@
+// hypercomb-shared/core/navigation.ts
 // src/app/core/navigation.ts
-import { Injectable, inject } from '@angular/core'
+
+import { Injectable } from '@angular/core'
 import { hypercomb } from '@hypercomb/core'
 import { CompletionUtility } from '../core/completion-utility'
+
+const { get, register, list } = window.ioc
+void list
 
 type SelectionDetail = {
   selected: string[]
@@ -10,38 +15,29 @@ type SelectionDetail = {
 @Injectable({ providedIn: 'root' })
 export class Navigation extends hypercomb {
 
-  private get completions(): CompletionUtility { return <CompletionUtility>window.ioc.get("CompletionUtility") }
+  private get completions(): CompletionUtility { return get('CompletionUtility') as CompletionUtility }
   private listening = false
-
-  // ----------------------------------
-  // bootstrap (semantic replay only)
-  // ----------------------------------
-
-  // replay encounters for the current url; no history mutation
-  public bootstrap = (segments: readonly string[]): void => {
-    for (const segment of segments) {
-      this.act(segment)
-    }
-  }
 
   // ----------------------------------
   // reads
   // ----------------------------------
 
-  // canonical source of truth is the url
+  // normalized segments (good for actions/seeds)
   public segments = (): string[] => {
     const raw = window.location.pathname.split('/').filter(Boolean)
     return raw.map(this.cleanSegment).filter(Boolean)
+  }
+
+  // raw decoded segments (good for explorer folder names)
+  public segmentsRaw = (): string[] => {
+    const raw = window.location.pathname.split('/').filter(Boolean)
+    return raw.map(this.safeDecode).map(s => (s ?? '').trim()).filter(Boolean)
   }
 
   // ----------------------------------
   // selection (hash) helpers
   // ----------------------------------
 
-  // supported:
-  // - #abc
-  // - #(abc,def)
-  // - #abc,def
   public readonly getSelections = (): string[] => {
     const raw = window.location.hash ?? ''
     const h = raw.startsWith('#') ? raw.slice(1) : raw
@@ -100,22 +96,46 @@ export class Navigation extends hypercomb {
   }
 
   // ----------------------------------
-  // mutations
+  // mutations (normalized)
   // ----------------------------------
 
   public go = (segments: readonly string[]): void => {
     const clean = segments.map(this.cleanSegment).filter(Boolean)
     const path = '/' + clean.join('/')
+    const hash = window.location.hash ?? ''
 
-    window.history.pushState({}, '', path)
+    window.history.pushState({}, '', path + hash)
     this.dispatch()
   }
 
   public replace = (segments: readonly string[]): void => {
     const clean = segments.map(this.cleanSegment).filter(Boolean)
     const path = '/' + clean.join('/')
+    const hash = window.location.hash ?? ''
 
-    window.history.replaceState({}, '', path)
+    window.history.replaceState({}, '', path + hash)
+    this.dispatch()
+  }
+
+  // ----------------------------------
+  // mutations (raw, url-encoded)
+  // ----------------------------------
+
+  public goRaw = (segments: readonly string[]): void => {
+    const clean = segments.map(s => (s ?? '').trim()).filter(Boolean)
+    const path = '/' + clean.map(encodeURIComponent).join('/')
+    const hash = window.location.hash ?? ''
+
+    window.history.pushState({}, '', path + hash)
+    this.dispatch()
+  }
+
+  public replaceRaw = (segments: readonly string[]): void => {
+    const clean = segments.map(s => (s ?? '').trim()).filter(Boolean)
+    const path = '/' + clean.map(encodeURIComponent).join('/')
+    const hash = window.location.hash ?? ''
+
+    window.history.replaceState({}, '', path + hash)
     this.dispatch()
   }
 
@@ -158,4 +178,4 @@ export class Navigation extends hypercomb {
   }
 }
 
-window.ioc.register('Navigation', new Navigation())
+register('Navigation', new Navigation())

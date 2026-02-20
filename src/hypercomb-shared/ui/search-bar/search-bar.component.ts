@@ -1,4 +1,5 @@
-// src/app/common/header/search-bar/search-bar.component.ts
+// hypercomb-shared/ui/search-bar/search-bar.component.ts
+// fix: remove manual instantiation; let angular construct the component (ioc registration happens from ctor)
 
 import { AfterViewInit, Component, computed, ElementRef, inject, signal, ViewChild, type OnDestroy } from '@angular/core'
 import { hypercomb } from '@hypercomb/core'
@@ -42,11 +43,7 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
   // readiness / locking
   // -------------------------------------------------
 
-  // app becomes usable as soon as any payload exists in /__drones__
-  // important: typing must not be blocked while locked (we only block "commit" behaviors)
   private readonly hasAnyResources = computed<boolean>(() => this.preloader.resourceCount() > 0)
-
-  // locked only while there are zero payloads in /__drones__
   private readonly locked = computed<boolean>(() => !this.hasAnyResources())
 
   // -------------------------------------------------
@@ -61,6 +58,11 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
 
   public constructor() {
     super()
+
+    // allow other systems to access the live instance without breaking angular construction
+    // note: do not new() this outside angular
+    try { window.ioc.register('SearchBarComponent', this) } catch { /* ignore */ }
+
     console.log('[search-bar] initialized with url segments:', this.navigation.segments())
   }
 
@@ -144,7 +146,6 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
     const current = this.value()
     const last = current.slice(-1)
 
-    // avoid double separators when user already typed '.' or space
     if ((last === '.' || /\s/.test(last)) && (suffix.startsWith('.') || suffix.startsWith(' '))) {
       suffix = suffix.slice(1)
     }
@@ -207,14 +208,7 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
     const el = this.input.nativeElement
     const v = el.value
 
-    // -------------------------------------------------
-    // dcp open rules
-    // - open only once per page load
-    // - open when:
-    //   - user presses '#', OR
-    //   - user presses enter with input exactly '#'
-    // -------------------------------------------------
-
+    // explicit '#' + enter always opens dcp
     if (e.key === 'Enter' && v.trim() === '#') {
       e.preventDefault()
       this.tryOpenDcp()
@@ -222,24 +216,14 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
       return
     }
 
-    if (e.key === '#' && !this.dcpOpened) {
-      // allow '#' to type, just open the portal once
+    // single-press hotkey: only when locked, only on first '#', and only when starting from empty input
+    if (e.key === '#' && !this.dcpOpened && this.locked() && !v.trim()) {
+      e.preventDefault()
       this.tryOpenDcp()
-      // do not preventDefault
+      return
     }
 
-    // -------------------------------------------------
-    // important: never block normal typing
-    // locked only disables commit behaviors (enter actions)
-    // -------------------------------------------------
-
     if (this.handleCompletionKeys(e)) return
-
-    // -------------------------------------------------
-    // enter behavior:
-    // - enter: create seed in current directory (no navigation)
-    // - shift+enter: navigate to seed (no selection changes)
-    // -------------------------------------------------
 
     if (e.key === 'Enter') {
       e.preventDefault()
@@ -255,24 +239,20 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
   }
 
   // -------------------------------------------------
-  // create seed in place (no hash, no modifiers)
+  // create seed in place
   // -------------------------------------------------
 
   private readonly commitCreateSeedInPlace = async (): Promise<void> => {
-    const raw = this.input.nativeElement.value.trim()
-    if (!raw) return
+    const rawInput = this.input.nativeElement.value.trim()
+    if (!rawInput) return
 
-    // locked: allow typing, but do not create anything yet
-    // if (this.locked()) {
-    //   this.clear()
-    //   return
-    // }
-
-    // "in place" means: plain text without hash
-    if (raw.includes('#')) {
+    if (rawInput.includes('#')) {
       await this.commitLegacy()
       return
     }
+
+    const navigateAfterCreate = rawInput.startsWith('/')
+    const raw = navigateAfterCreate ? rawInput.replace(/^\/+/, '').trim() : rawInput
 
     const seedName = this.completions.normalize(raw)
     if (!seedName) {
@@ -281,12 +261,13 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
     }
 
     await this.ensureSeedInCurrentDirectory(seedName)
+
+    if (navigateAfterCreate) {
+      await this.movement.move(seedName)
+    }
+
     this.clear()
   }
-
-  // -------------------------------------------------
-  // legacy commit path (seed#marker, etc)
-  // -------------------------------------------------
 
   private readonly commitLegacy = async (): Promise<void> => {
     const raw = this.input.nativeElement.value.trim()
@@ -299,28 +280,12 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
 
     const parsed = this.parseInput(raw)
 
-    // seed creation step (restored)
     if (parsed.seedName) {
       await this.ensureSeedInCurrentDirectory(parsed.seedName)
     }
 
-    // marker attachment (leave intact for later wiring)
-    // if (parsed.markerName) {
-    //   const descriptor = this.preloader.resolveByName(parsed.markerName)
-    //   if (descriptor) {
-    //     const target = parsed.seedName
-    //       ? [...this.navigation.segments(), parsed.seedName]
-    //       : this.navigation.segments()
-    //     await this.lineage.addMarker(target, descriptor.signature)
-    //   }
-    // }
-
     this.clear()
   }
-
-  // -------------------------------------------------
-  // commit (navigate only)
-  // -------------------------------------------------
 
   private readonly commitNavigate = async (): Promise<void> => {
     const raw = this.input.nativeElement.value.trim()
@@ -340,7 +305,6 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
     const baseSegments = this.navigation.segments()
     const target = [...baseSegments, parsed.seedName]
 
-    // navigate should only happen if seed exists
     const exists = await this.lineage.tryResolve(target)
     if (!exists) {
       this.clear()
@@ -421,7 +385,7 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
     const rawSeed = hashIndex === -1 ? raw : raw.slice(0, hashIndex).trim()
     const rawMarker = hashIndex === -1 ? null : raw.slice(hashIndex + 1).trim()
 
-    const seedName = rawSeed ? this.completions.normalize(rawSeed) : null
+    const seedName = rawSeed ? this.completions.normalize(rawSeed.replace(/^\/+/, '').trim()) : null
     const markerName = rawMarker ? this.completions.normalize(rawMarker) : null
 
     return { seedName, markerName }
@@ -431,7 +395,6 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
     const baseSegments = this.navigation.segments()
     const target = [...baseSegments, seedName]
 
-    // create only if missing
     const exists = await this.lineage.tryResolve(target)
     if (!exists) {
       await this.lineage.ensure(target)

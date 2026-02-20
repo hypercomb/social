@@ -1,9 +1,13 @@
-// src/app/core/lineage.ts
-// explorer is absolute from opfs root
-// domain is separate and must not be driven by explorer clicks
+// hypercomb-shared/core/lineage.ts
+// explorer is relative to the domain root (store.hypercombRoot)
+// navigation + explorer are followers and drivers of each other
 
-import { inject, Injectable, signal } from '@angular/core'
-import { Store } from './store'
+import { Injectable, signal } from '@angular/core'
+import type { Navigation } from './navigation'
+import type { Store } from './store'
+
+const { get, register, list } = window.ioc
+void list
 
 @Injectable({ providedIn: 'root' })
 export class Lineage {
@@ -12,21 +16,21 @@ export class Lineage {
   // dependencies
   // -------------------------------------------------
 
-  private get store(): Store { return <Store>window.ioc.get("Store")}
+  private get store(): Store { return get('Store') as Store }
+  private get navigation(): Navigation { return get('Navigation') as Navigation }
 
   // -------------------------------------------------
-  // domain context (used by navigation/search, not the explorer)
+  // domain context (reserved for later)
   // -------------------------------------------------
 
-  private readonly activeDomain = signal('hypercomb')
+  private readonly activeDomain = signal('hypercomb.io')
   public readonly domain = (): string => this.activeDomain()
 
   // -------------------------------------------------
-  // explorer path (absolute from opfs root)
+  // explorer path (domain-relative)
   // -------------------------------------------------
 
   private explorerPath: string[] = []
-
   public explorerSegments = (): readonly string[] => this.explorerPath
 
   public explorerEnter = (name: string): void => {
@@ -36,19 +40,28 @@ export class Lineage {
     // do not normalize explorer names
     this.explorerPath.push(seg)
     this.invalidate()
+
+    // explorer drives navigation
+    try { this.navigation.goRaw(this.explorerPath) } catch { /* ignore */ }
   }
 
   public explorerUp = (): void => {
     if (this.explorerPath.length === 0) return
     this.explorerPath.pop()
     this.invalidate()
+
+    // explorer drives navigation
+    try { this.navigation.goRaw(this.explorerPath) } catch { /* ignore */ }
   }
 
   // keeps old name so you don't have to refactor callers
-  // this now means "show opfs root"
+  // this now means "show domain root"
   public showDomainRoot = (): void => {
     this.explorerPath = []
     this.invalidate()
+
+    // explorer drives navigation
+    try { this.navigation.goRaw([]) } catch { /* ignore */ }
   }
 
   public explorerLabel = (): string => {
@@ -56,7 +69,12 @@ export class Lineage {
   }
 
   public explorerDir = async (): Promise<FileSystemDirectoryHandle | null> => {
-    return await this.tryResolveFrom(this.store.opfsRoot, this.explorerPath)
+    try {
+      // domain root (hypercomb.io)
+      return await this.tryResolveFrom(this.store.hypercombRoot, this.explorerPath)
+    } catch {
+      return null
+    }
   }
 
   // -------------------------------------------------
@@ -75,24 +93,38 @@ export class Lineage {
   // lifecycle
   // -------------------------------------------------
 
+  public constructor() {
+    // follow url changes (programmatic + back/forward)
+    window.addEventListener('navigate', this.followLocation)
+    window.addEventListener('popstate', this.followLocation)
+
+    // best-effort initial sync (safe if nav/store aren't ready yet)
+    this.followLocation()
+
+    this.ready.set(true)
+  }
+
   public initialize = async (): Promise<void> => {
-    // domain selection is independent from explorer browsing
-    await this.setDomain('hypercomb', true)
-    this.showDomainRoot()
+    // keep api stable; domain is fixed for now
+    this.activeDomain.set('hypercomb.io')
+    this.followLocation()
     this.ready.set(true)
   }
 
   // -------------------------------------------------
-  // domain selection (explicit only)
+  // domain selection (explicit only, reserved)
   // -------------------------------------------------
 
   public setDomain = async (name: string, createIfMissing = false): Promise<void> => {
     const raw = (name ?? '').trim()
     if (!raw) return
 
+    // only ensures existence; store wiring can evolve later
     await this.store.opfsRoot.getDirectoryHandle(raw, { create: createIfMissing })
     this.activeDomain.set(raw)
-    this.invalidate()
+
+    // keep explorer aligned to url after domain change
+    this.followLocation()
   }
 
   // -------------------------------------------------
@@ -177,6 +209,20 @@ export class Lineage {
       this.invalidate()
     } catch {
       // ignore duplicates
+    }
+  }
+
+  // -------------------------------------------------
+  // internal
+  // -------------------------------------------------
+
+  private readonly followLocation = (): void => {
+    try {
+      // follower: mirror the url using normalized segments (matches on-disk naming rules)
+      this.explorerPath = this.navigation.segments()
+      this.invalidate()
+    } catch {
+      // ignore until nav is ready
     }
   }
 }

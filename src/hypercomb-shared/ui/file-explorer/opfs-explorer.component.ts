@@ -1,14 +1,18 @@
 // hypercomb-shared/ui/file-explorer/opfs-explorer.component.ts
 
 import { CommonModule } from '@angular/common'
-import { Component, computed, effect, inject, signal } from '@angular/core'
+import { Component, computed, effect, signal } from '@angular/core'
 import { FormsModule } from '@angular/forms'
-import { Lineage } from '../../core/lineage'
-import { Store } from '../../core/store'
+import type { Lineage } from '../../core/lineage'
+import type { Store } from '../../core/store'
 import { hypercomb } from '@hypercomb/core'
-import { ScriptPreloader } from '../../core/script-preloader'
+import type { ScriptPreloader } from '../../core/script-preloader'
 import { LocationParser } from '../../core/initializers/location-parser'
 import { RuntimeMediator } from '../runtime-mediator'
+
+const { get, register, list } = window.ioc
+void list
+void register
 
 interface ExplorerEntry {
   name: string
@@ -19,10 +23,7 @@ interface ExplorerEntry {
 @Component({
   selector: 'hc-opfs-explorer',
   standalone: true,
-  imports: [
-    CommonModule,
-    FormsModule
-  ],
+  imports: [CommonModule, FormsModule],
   templateUrl: './opfs-explorer.component.html',
   styleUrls: ['./opfs-explorer.component.scss']
 })
@@ -34,15 +35,18 @@ export class OpfsExplorerComponent extends hypercomb {
 
   private static readonly SHOW_ALL_KEY = 'opfs-explorer.show-all'
   private static readonly COPY_MAX_BYTES = 250_000
+  private static readonly INSTALL_SUFFIX = '-install'
 
   // -------------------------------------------------
   // dependencies
   // -------------------------------------------------
 
-  private readonly lineage = inject(Lineage) 
-  private readonly preloader = inject(ScriptPreloader)
-  private readonly store = inject(Store)
-  private readonly runtime = inject(RuntimeMediator)  
+  private get lineage(): Lineage { return get('Lineage') as Lineage }
+  private get preloader(): ScriptPreloader { return get('ScriptPreloader') as ScriptPreloader }
+  private get store(): Store { return get('Store') as Store }
+
+  // note: runtime mediator stays as angular service
+  private readonly runtime = new RuntimeMediator()
 
   // -------------------------------------------------
   // state
@@ -186,12 +190,10 @@ export class OpfsExplorerComponent extends hypercomb {
       let label = name
 
       if (handle.kind === 'file') {
-        // resource payload label takes priority
         const resourceLabel = await this.resolveResourceLabel(name)
         if (resourceLabel) {
           label = `${name.slice(0, 16)} - ${resourceLabel}`
         } else {
-          // fallback to preloader resolution
           const resolved = this.preloader.getActionName(name)
           if (resolved) label = resolved
         }
@@ -218,9 +220,9 @@ export class OpfsExplorerComponent extends hypercomb {
     const raw = this.newName.trim()
     if (!raw) return
 
+    // domain root create -> sync pipeline
     if (this.directory() === '/') {
       try {
-        // run the exact same pipeline as boot
         await this.runtime.sync(LocationParser.parse(raw))
       } catch (e) {
         console.error(e)
@@ -238,13 +240,14 @@ export class OpfsExplorerComponent extends hypercomb {
   }
 
   public createFile = async (): Promise<void> => {
-    const name = this.newName.trim()
-    if (!name) return
+    const raw = this.newName.trim()
+    if (!raw) return
 
     const dir = await this.lineage.explorerDir()
     if (!dir) return
 
-    const handle = await dir.getFileHandle(`install-${name}`, { create: true })
+    const installName = raw.endsWith(OpfsExplorerComponent.INSTALL_SUFFIX) ? raw : `${raw}${OpfsExplorerComponent.INSTALL_SUFFIX}`
+    const handle = await dir.getFileHandle(installName, { create: true })
     const writable = await handle.createWritable()
 
     try {
@@ -296,7 +299,6 @@ export class OpfsExplorerComponent extends hypercomb {
       await navigator.clipboard.writeText(text)
       return
     } catch {
-      // fallback (works in more contexts)
       const ta = document.createElement('textarea')
       ta.value = text
       ta.style.position = 'fixed'
@@ -319,6 +321,7 @@ export class OpfsExplorerComponent extends hypercomb {
     if (name === '__drones__') return true
     if (name === '__layers__') return true
     if (name.startsWith('install-')) return true
+    if (name.endsWith(OpfsExplorerComponent.INSTALL_SUFFIX)) return true
     return false
   }
 

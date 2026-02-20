@@ -1,22 +1,31 @@
-import { Injectable, inject, signal } from '@angular/core'
-import { Navigation } from './navigation'
+// hypercomb-shared/core/movement.service.ts
+
+import { Injectable, signal } from '@angular/core'
+import type { Navigation } from './navigation'
+
+const { get, register, list } = window.ioc
+void list
 
 @Injectable({ providedIn: 'root' })
 export class MovementService {
 
-  // increments only after navigation intent is committed
+  // increments after navigation intent is committed
   public readonly moved = signal(0)
 
-  private get navigation(): Navigation { return <Navigation>window.ioc.get("Navigation") }
+  private get navigation(): Navigation { return get('Navigation') as Navigation }
 
-  // prevents overlapping navigation commits
+  // prevents overlapping commits
   private committing: Promise<void> | null = null
 
+  // lets callers await the next commit (used by move)
+  private waiters: Array<() => void> = []
+
   public constructor() {
-    // browser back/forward
-    window.addEventListener('popstate', () => {
-      void this.commit()
-    })
+    // follow browser back/forward
+    window.addEventListener('popstate', () => { void this.commit() })
+
+    // follow programmatic navigation (navigation.go/goRaw/etc dispatches this)
+    window.addEventListener('navigate', () => { void this.commit() })
   }
 
   // ----------------------------------
@@ -27,40 +36,50 @@ export class MovementService {
     const clean = segment.replace(/\s+/g, ' ').trim()
     if (!clean) return
 
-    const segments = this.navigation.segments()
+    const segments = this.navigation.segmentsRaw()
     segments.push(clean)
 
-    this.navigation.go(segments)
-    await this.commit()
-  } 
+    const done = this.waitForNextCommit()
+    this.navigation.goRaw(segments)
+    await done
+  }
 
   // ----------------------------------
   // history
   // ----------------------------------
 
-  public back = (): void => {
+  public back = async (): Promise<void> => {
+    const done = this.waitForNextCommit()
     window.history.back()
-    // popstate will trigger commit
+    await done
   }
 
-  public forward = (): void => {
+  public forward = async (): Promise<void> => {
+    const done = this.waitForNextCommit()
     window.history.forward()
-    // popstate will trigger commit
+    await done
   }
 
   // ----------------------------------
   // internal
   // ----------------------------------
 
+  private readonly waitForNextCommit = (): Promise<void> => {
+    return new Promise(resolve => { this.waiters.push(resolve) })
+  }
+
   private readonly commit = async (): Promise<void> => {
     if (this.committing) {
       await this.committing
+      return
     }
 
     this.committing = Promise.resolve().then(() => {
-      // navigation intent is already committed to the url
-      // this service only signals movement
       this.moved.update(v => v + 1)
+
+      const pending = this.waiters
+      this.waiters = []
+      for (const r of pending) r()
     })
 
     try {
@@ -70,3 +89,5 @@ export class MovementService {
     }
   }
 }
+
+register('MovementService', new MovementService())

@@ -1,6 +1,7 @@
 // hypercomb-shared/core/bootstrap-history.ts
 // hypercomb-web/src/bootstrap/bootstrap-history.ts
 
+import { CompletionUtility } from './completion-utility'
 import { DirectoryWalker } from './directory-walker'
 import { Store } from './store'
 
@@ -22,10 +23,13 @@ export class BootstrapHistory {
 
     const store = get('Store') as Store
     const preloader = get('ScriptPreloader') as any
+    const completions = this.tryGetCompletions(get)
 
     const inputPath = window.location.pathname || '/'
     const inputSuffix = (window.location.search || '') + (window.location.hash || '')
-    const urlSegments = this.parsePath(inputPath)
+
+    // use the same decode + normalize rules as navigation.cleanSegment
+    const urlSegments = this.parsePath(inputPath, completions)
 
     // root for now is just the hypercomb root
     // note: when you introduce per-domain roots, swap this for getDirectoryHandle(this.defaultDomain)
@@ -141,8 +145,26 @@ export class BootstrapHistory {
     this.dispatchPopState()
   }
 
-  private parsePath = (path: string): string[] => {
-    return (path ?? '').split('/').map(s => s.trim()).filter(Boolean)
+  private parsePath = (path: string, completions: CompletionUtility | null): string[] => {
+    const parts = (path ?? '').split('/').filter(Boolean)
+    return parts
+      .map(p => this.cleanSegment(p, completions))
+      .filter(Boolean)
+  }
+
+  private cleanSegment = (s: string, completions: CompletionUtility | null): string => {
+    const decoded = this.safeDecode((s ?? '').trim())
+    const noSlashes = decoded.replace(/[\/\\]+/g, ' ')
+    if (completions?.normalize) return completions.normalize(noSlashes)
+    return noSlashes.replace(/\s+/g, ' ').trim()
+  }
+
+  private safeDecode = (s: string): string => {
+    try { return decodeURIComponent(s) } catch { return s }
+  }
+
+  private tryGetCompletions = (get: any): CompletionUtility | null => {
+    try { return get('CompletionUtility') as CompletionUtility } catch { return null }
   }
 
   private tryGetLineage = (): any | null => {
