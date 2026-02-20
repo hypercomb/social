@@ -1,5 +1,5 @@
 // hypercomb-essentials/src/diamondcoreprocessor.com/pixi/show-honeycomb.drone.ts
-// src/pixi/show-honeycomb.drone.ts
+// fix: redraw is event-driven (lineage:changed + navigate) and clears stale mesh on empty folders
 
 import { Drone } from '@hypercomb/core'
 import { Assets, Container, Geometry, Mesh, Texture } from 'pixi.js'
@@ -8,12 +8,12 @@ import { HexLabelAtlas } from './hex-label.atlas.js'
 import { HexSdfTextureShader } from './hex-sdf.shader.js'
 
 type Axial = { q: number; r: number }
+type SeedCell = { q: number; r: number; label: string }
 
 export class ShowHoneycombDrone extends Drone {
   private host?: PixiHostDrone
   private layer: Container | null = null
 
-  // note: pixi typings vary by build; keep these runtime-safe and avoid generic constraints
   private mesh: any | null = null
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -23,49 +23,83 @@ export class ShowHoneycombDrone extends Drone {
 
   private lastKey = ''
 
+  // event-driven redraw
+  private dirty = true
+  private listening = false
+
   protected override sense = (): boolean => true
 
   protected override heartbeat = async (): Promise<void> => {
-    const { get} = window.ioc
+    const { get, register, list } = window.ioc
+    void register
+    void list
 
-    // host resolution
+    this.ensureListeners()
+
     const host = this.host = get('PixiHost')
-    if (!host?.app || !host.container) return
+    if (!host?.app || !host.container) {
+      this.clearMesh()
+      return
+    }
 
-    // axial lookup (index -> axial coordinate)
     const axial = get('AxialService') as any
-    if (!axial?.items) return
+    if (!axial?.items) {
+      this.clearMesh()
+      return
+    }
 
-    // layer (created once)
+    const lineage = get('Lineage') as any
+    if (!lineage?.explorerDir || !lineage?.explorerLabel || !lineage?.changed) {
+      this.clearMesh()
+      return
+    }
+
     if (!this.layer) {
       this.layer = new Container()
       host.container.addChild(this.layer)
 
-      this.atlas = new HexLabelAtlas(
-        host.app.renderer,
-        128,
-        8,
-        8
-      )
+      this.atlas = new HexLabelAtlas(host.app.renderer, 128, 8, 8)
     }
 
-    // parameters
     const circumRadiusPx = 32
     const gapPx = 6
     const padPx = 10
-
-    // this is now "how many indices to draw", pulled from axial.items
-    const maxCells = 37
-
     const textureUrl = '/spw.png'
 
-    const key = `${circumRadiusPx}|${gapPx}|${padPx}|${maxCells}|${textureUrl}`
-    if (this.lastKey === key) return
-    this.lastKey = key
+    const locationKey = String(lineage.explorerLabel?.() ?? '/')
+    const fsRev = Number(lineage.changed?.() ?? 0)
 
-    // data (index ordered) - no spiral math here, just axial lookup
-    const cells = this.buildCellsFromAxial(axial, maxCells)
-    if (cells.length === 0) return
+    // gate rebuilds, but allow event-driven forcing
+    const key = `${locationKey}|${fsRev}|${circumRadiusPx}|${gapPx}|${padPx}|${textureUrl}`
+    if (!this.dirty && this.lastKey === key) return
+    this.lastKey = key
+    this.dirty = false
+
+    const dir = await lineage.explorerDir()
+    if (!dir) {
+      this.clearMesh()
+      return
+    }
+
+    const seedNames = await this.listSeedFolders(dir)
+    if (seedNames.length === 0) {
+      // critical: remove stale geometry when folder is empty
+      this.clearMesh()
+      return
+    }
+
+    const axialMax = typeof axial.items.size === 'number' ? axial.items.size : seedNames.length
+    const maxCells = Math.min(seedNames.length, axialMax)
+    if (maxCells <= 0) {
+      this.clearMesh()
+      return
+    }
+
+    const cells = this.buildCellsFromAxial(axial, seedNames, maxCells)
+    if (cells.length === 0) {
+      this.clearMesh()
+      return
+    }
 
     const hexHalfW = (Math.sqrt(3) * circumRadiusPx) / 2
     const hexHalfH = circumRadiusPx
@@ -76,22 +110,15 @@ export class ShowHoneycombDrone extends Drone {
     const quadH = quadHalfH * 2
 
     const baseTex = await this.ensureTexture(textureUrl)
-    if (!baseTex || !this.atlas) return
-
-    // warm atlas
-    for (const c of cells) {
-      this.atlas.getLabelUV(`${c.q},${c.r}`)
+    if (!baseTex || !this.atlas) {
+      this.clearMesh()
+      return
     }
 
-    const geom = this.buildFillQuadGeometry(
-      cells,
-      circumRadiusPx,
-      gapPx,
-      quadHalfW,
-      quadHalfH
-    )
+    for (const c of cells) this.atlas.getLabelUV(c.label)
 
-    // shader
+    const geom = this.buildFillQuadGeometry(cells, circumRadiusPx, gapPx, quadHalfW, quadHalfH)
+
     if (!this.shader) {
       this.shader = new HexSdfTextureShader(
         baseTex,
@@ -107,7 +134,6 @@ export class ShowHoneycombDrone extends Drone {
       this.shader.setRadiusPx(circumRadiusPx)
     }
 
-    // mesh
     if (!this.mesh) {
       this.mesh = new Mesh({
         geometry: geom as any,
@@ -121,23 +147,53 @@ export class ShowHoneycombDrone extends Drone {
 
       this.mesh.geometry = geom
       this.mesh.shader = (this.shader as any).shader
-
-      // keep texture in sync for mesh types that require it
       if ('texture' in this.mesh) this.mesh.texture = baseTex
     }
 
-    // center the mesh content around local origin so stage centering always works
-    // important when maxCells is not a perfectly symmetric ring count
     if (this.mesh?.getLocalBounds) {
       this.mesh.position.set(0, 0)
       const b = this.mesh.getLocalBounds()
-      this.mesh.position.set(
-        -(b.x + b.width * 0.5),
-        -(b.y + b.height * 0.5)
-      )
+      this.mesh.position.set(-(b.x + b.width * 0.5), -(b.y + b.height * 0.5))
     }
 
     this.geom = geom
+  }
+
+  // -------------------------------------------------
+  // listeners
+  // -------------------------------------------------
+
+  private ensureListeners = (): void => {
+    if (this.listening) return
+    this.listening = true
+
+    const mark = (): void => { this.dirty = true }
+
+    // explorer clicks (lineage.explorerEnter/up) trigger this immediately now
+    window.addEventListener('lineage:changed', mark)
+
+    // url/nav changes (search bar, movement, back/forward) still count too
+    window.addEventListener('navigate', mark)
+    window.addEventListener('popstate', mark)
+  }
+
+  // -------------------------------------------------
+  // cleanup
+  // -------------------------------------------------
+
+  private clearMesh = (): void => {
+    if (this.mesh && this.layer) {
+      try { this.layer.removeChild(this.mesh as any) } catch { /* ignore */ }
+      try { this.mesh.destroy?.(true) } catch { /* ignore */ }
+    }
+
+    if (this.geom) {
+      try { this.geom.destroy(true) } catch { /* ignore */ }
+    }
+
+    this.mesh = null
+    this.geom = null
+    this.dirty = true
   }
 
   // -------------------------------------------------
@@ -150,14 +206,34 @@ export class ShowHoneycombDrone extends Drone {
     return this.tex
   }
 
-  private buildCellsFromAxial = (axial: any, max: number): Axial[] => {
-    const out: Axial[] = []
+  private listSeedFolders = async (dir: FileSystemDirectoryHandle): Promise<string[]> => {
+    const out: string[] = []
 
-    // index order is the whole point: fast lookup + deterministic plotting
+    for await (const [name, handle] of dir.entries()) {
+      if (handle.kind !== 'directory') continue
+      if (!name) continue
+
+      if (name === '__dependencies__') continue
+      if (name === '__drones__') continue
+      if (name === '__layers__') continue
+      if (name === '__location__') continue
+      if (name.startsWith('__') && name.endsWith('__')) continue
+
+      out.push(name)
+    }
+
+    out.sort((a, b) => a.localeCompare(b))
+    return out
+  }
+
+  private buildCellsFromAxial = (axial: any, names: string[], max: number): SeedCell[] => {
+    const out: SeedCell[] = []
+
     for (let i = 0; i < max; i++) {
-      const a = axial.items.get(i)
-      if (!a) break
-      out.push({ q: a.q, r: a.r })
+      const a = axial.items.get(i) as Axial | undefined
+      const label = names[i]
+      if (!a || !label) break
+      out.push({ q: a.q, r: a.r, label })
     }
 
     return out
@@ -169,7 +245,7 @@ export class ShowHoneycombDrone extends Drone {
   })
 
   private buildFillQuadGeometry(
-    cells: Axial[],
+    cells: SeedCell[],
     r: number,
     gap: number,
     hw: number,
@@ -185,7 +261,6 @@ export class ShowHoneycombDrone extends Drone {
     let pv = 0, uvp = 0, luvp = 0, ii = 0, base = 0
 
     for (const c of cells) {
-      // positions now come from axial indices (q,r) pulled from AxialService
       const { x, y } = this.axialToPixel(c.q, c.r, spacing)
 
       const x0 = x - hw, x1 = x + hw
@@ -197,7 +272,7 @@ export class ShowHoneycombDrone extends Drone {
       uv.set([0, 0, 1, 0, 1, 1, 0, 1], uvp)
       uvp += 8
 
-      const ruv = this.atlas!.getLabelUV(`${c.q},${c.r}`)
+      const ruv = this.atlas!.getLabelUV(c.label)
       for (let i = 0; i < 4; i++) {
         labelUV.set([ruv.u0, ruv.v0, ruv.u1, ruv.v1], luvp)
         luvp += 4

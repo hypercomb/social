@@ -1,6 +1,6 @@
 // hypercomb-shared/core/lineage.ts
-// explorer is relative to the domain root (store.hypercombRoot)
-// navigation + explorer are followers and drivers of each other
+// fix: always emit a concrete "explorer changed" hook, and avoid no-op invalidations
+// result: explorer clicks fire a redraw signal even if url/nav wiring is flaky
 
 import { Injectable, signal } from '@angular/core'
 import type { Navigation } from './navigation'
@@ -38,30 +38,43 @@ export class Lineage {
     if (!seg || seg === '.' || seg === '..') return
 
     // do not normalize explorer names
-    this.explorerPath.push(seg)
-    this.invalidate()
+    this.explorerPath = [...this.explorerPath, seg]
+    this.invalidate('explorer')
 
-    // explorer drives navigation
-    try { this.navigation.goRaw(this.explorerPath) } catch { /* ignore */ }
+    // explorer drives navigation (best effort)
+    try {
+      this.navigation.goRaw(this.explorerPath)
+    } catch {
+      // fallback: still notify followers even if navigation isn't ready
+      this.dispatchNavigateFallback()
+    }
   }
 
   public explorerUp = (): void => {
     if (this.explorerPath.length === 0) return
-    this.explorerPath.pop()
-    this.invalidate()
+    this.explorerPath = this.explorerPath.slice(0, -1)
+    this.invalidate('explorer')
 
-    // explorer drives navigation
-    try { this.navigation.goRaw(this.explorerPath) } catch { /* ignore */ }
+    // explorer drives navigation (best effort)
+    try {
+      this.navigation.goRaw(this.explorerPath)
+    } catch {
+      this.dispatchNavigateFallback()
+    }
   }
 
   // keeps old name so you don't have to refactor callers
   // this now means "show domain root"
   public showDomainRoot = (): void => {
     this.explorerPath = []
-    this.invalidate()
+    this.invalidate('explorer')
 
-    // explorer drives navigation
-    try { this.navigation.goRaw([]) } catch { /* ignore */ }
+    // explorer drives navigation (best effort)
+    try {
+      this.navigation.goRaw([])
+    } catch {
+      this.dispatchNavigateFallback()
+    }
   }
 
   public explorerLabel = (): string => {
@@ -87,7 +100,6 @@ export class Lineage {
 
   private readonly fsRevision = signal(0)
   public readonly changed = (): number => this.fsRevision()
-  public readonly invalidate = (): void => this.fsRevision.update(v => v + 1)
 
   // -------------------------------------------------
   // lifecycle
@@ -105,7 +117,6 @@ export class Lineage {
   }
 
   public initialize = async (): Promise<void> => {
-    // keep api stable; domain is fixed for now
     this.activeDomain.set('hypercomb.io')
     this.followLocation()
     this.ready.set(true)
@@ -119,11 +130,8 @@ export class Lineage {
     const raw = (name ?? '').trim()
     if (!raw) return
 
-    // only ensures existence; store wiring can evolve later
     await this.store.opfsRoot.getDirectoryHandle(raw, { create: createIfMissing })
     this.activeDomain.set(raw)
-
-    // keep explorer aligned to url after domain change
     this.followLocation()
   }
 
@@ -137,10 +145,6 @@ export class Lineage {
   ): Promise<FileSystemDirectoryHandle | null> => {
     return await this.tryResolveFrom(start, segments)
   }
-
-  // -------------------------------------------------
-  // domain creation (used by search bar enter = create seed)
-  // -------------------------------------------------
 
   public ensure = async (
     segments: readonly string[],
@@ -164,7 +168,7 @@ export class Lineage {
 
     this.materialized.set(true)
     this.missing.set([])
-    this.invalidate()
+    this.invalidate('fs')
     return dir
   }
 
@@ -193,10 +197,6 @@ export class Lineage {
     return dir
   }
 
-  // -------------------------------------------------
-  // markers: add to an existing directory only (no creation)
-  // -------------------------------------------------
-
   public addMarker = async (segments: readonly string[], signature: string): Promise<void> => {
     const sig = (signature ?? '').trim()
     if (!sig) return
@@ -206,7 +206,7 @@ export class Lineage {
 
     try {
       await dir.getFileHandle(sig, { create: true })
-      this.invalidate()
+      this.invalidate('fs')
     } catch {
       // ignore duplicates
     }
@@ -216,13 +216,51 @@ export class Lineage {
   // internal
   // -------------------------------------------------
 
+  private readonly invalidate = (reason: 'explorer' | 'url' | 'fs'): void => {
+    this.fsRevision.update(v => v + 1)
+
+    // single, explicit hook for pixi + any other followers
+    try {
+      window.dispatchEvent(new CustomEvent('lineage:changed', {
+        detail: {
+          reason,
+          rev: this.fsRevision(),
+          path: this.explorerLabel(),
+          segments: [...this.explorerPath]
+        }
+      }))
+    } catch {
+      // ignore
+    }
+  }
+
   private readonly followLocation = (): void => {
     try {
-      // follower: mirror the url using normalized segments (matches on-disk naming rules)
-      this.explorerPath = this.navigation.segments()
-      this.invalidate()
+      const next = this.navigation.segments()
+
+      // do not spam invalidations if nothing changed
+      if (this.sameSegments(this.explorerPath, next)) return
+
+      this.explorerPath = next
+      this.invalidate('url')
     } catch {
       // ignore until nav is ready
+    }
+  }
+
+  private readonly sameSegments = (a: readonly string[], b: readonly string[]): boolean => {
+    if (a.length !== b.length) return false
+    for (let i = 0; i < a.length; i++) {
+      if ((a[i] ?? '') !== (b[i] ?? '')) return false
+    }
+    return true
+  }
+
+  private readonly dispatchNavigateFallback = (): void => {
+    try {
+      window.dispatchEvent(new Event('navigate'))
+    } catch {
+      // ignore
     }
   }
 }

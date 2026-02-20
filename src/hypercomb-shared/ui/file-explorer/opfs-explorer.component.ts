@@ -36,6 +36,7 @@ export class OpfsExplorerComponent extends hypercomb {
   private static readonly SHOW_ALL_KEY = 'opfs-explorer.show-all'
   private static readonly COPY_MAX_BYTES = 250_000
   private static readonly INSTALL_SUFFIX = '-install'
+  public domain: string = 'hypercomb.io'
 
   // -------------------------------------------------
   // dependencies
