@@ -114,7 +114,7 @@ export class LayerInstaller {
     endpoint: string,
     deps: string[]
   ): Promise<void> => {
-    const depDir = store.dependenciesDirectory()
+    const depDir = store.dependencies
 
     for (const sig of deps) {
       if (!sig) continue
@@ -140,7 +140,7 @@ export class LayerInstaller {
     endpoint: string,
     drones: string[]
   ): Promise<void> => {
-    const dronesDir = store.dronesDirectory()
+    const dronesDir = store.drones
 
     for (const sig of drones) {
       if (!sig) continue
@@ -173,7 +173,7 @@ export class LayerInstaller {
       if (!a && !b) return false
     }
 
-    const depDir = store.dependenciesDirectory()
+    const depDir = store.dependencies
     for (const sig of manifest.dependencies || []) {
       if (!sig) continue
       const a = await this.tryGetFileHandle(depDir, `${sig}.js`)
@@ -181,7 +181,7 @@ export class LayerInstaller {
       if (!a && !b) return false
     }
 
-    const dronesDir = store.dronesDirectory()
+    const dronesDir = store.drones
     for (const sig of manifest.drones || []) {
       if (!sig) continue
       const a = await this.tryGetFileHandle(dronesDir, `${sig}.js`)

@@ -2,7 +2,6 @@
 
 import { inject, Injectable, signal } from '@angular/core'
 import { Drone, type DroneResolver } from '@hypercomb/core'
-import { Lineage } from './lineage'
 import { Store, type DevManifest } from './store'
 
 export interface ActionDescriptor {
@@ -12,9 +11,8 @@ export interface ActionDescriptor {
 @Injectable({ providedIn: 'root' })
 export class ScriptPreloader implements DroneResolver {
 
-  private get lineage(): Lineage { return <Lineage>window.ioc.get("Lineage") }
-  private get store(): Store { return <Store>window.ioc.get("Store") }
-
+  private get store(): Store { return <Store>window.ioc.get("Store")}
+  
   private readonly bySignature = new Map<string, ActionDescriptor>()
 
   public readonly actions = signal<readonly ActionDescriptor[]>([])

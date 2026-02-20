@@ -2,7 +2,7 @@
 // explorer is absolute from opfs root
 // domain is separate and must not be driven by explorer clicks
 
-import { Injectable, signal } from '@angular/core'
+import { inject, Injectable, signal } from '@angular/core'
 import { Store } from './store'
 
 @Injectable({ providedIn: 'root' })
@@ -12,10 +12,7 @@ export class Lineage {
   // dependencies
   // -------------------------------------------------
 
-  private get store(): Store {
-    const { get } = window.ioc
-    return get('Store') as Store
-  }
+  private get store(): Store { return <Store>window.ioc.get("Store")}
 
   // -------------------------------------------------
   // domain context (used by navigation/search, not the explorer)
@@ -92,7 +89,7 @@ export class Lineage {
   public setDomain = async (name: string, createIfMissing = false): Promise<void> => {
     const raw = (name ?? '').trim()
     if (!raw) return
-    
+
     await this.store.opfsRoot.getDirectoryHandle(raw, { create: createIfMissing })
     this.activeDomain.set(raw)
     this.invalidate()

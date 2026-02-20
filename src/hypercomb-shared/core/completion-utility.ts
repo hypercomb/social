@@ -29,3 +29,5 @@ public readonly normalize = (s: string): string =>
     style === 'dot' ? s.replace(/\s+/g, '.') : s
 
 }
+
+window.ioc.register('CompletionUtility', new CompletionUtility())

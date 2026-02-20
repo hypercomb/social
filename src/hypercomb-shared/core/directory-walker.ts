@@ -8,8 +8,7 @@ export interface WalkedDirectory {
   depth: number
 }
 
-@Injectable({ providedIn: 'root' })
-export class DirectoryWalkerService {
+export class DirectoryWalker {
 
   // -------------------------------------------------
   // public api
@@ -19,7 +18,7 @@ export class DirectoryWalkerService {
   // yields directory handles only (no semantics, no mutation)
   public walk = async (
     root: FileSystemDirectoryHandle,
-    maxDepth: number
+    maxDepth: number = Number.MAX_VALUE
   ): Promise<readonly WalkedDirectory[]> => {
 
     const out: WalkedDirectory[] = []
@@ -60,3 +59,5 @@ export class DirectoryWalkerService {
     return out
   }
 }
+
+window.ioc.register('DirectoryWalker', new DirectoryWalker())

@@ -1,11 +1,12 @@
 // hypercomb-web/src/app/core/dependency-loader.ts
 
-import { Injectable, signal } from '@angular/core'
+import { inject, Injectable, signal } from '@angular/core'
 import { Store } from './store'
 
 @Injectable({ providedIn: 'root' })
 export class DependencyLoader {
 
+  private get store(): Store { return <Store>window.ioc.get("Store") }
   private readonly loaded = new Set<string>()
 
   public readonly dependencyCount = signal(0)
@@ -21,8 +22,7 @@ export class DependencyLoader {
     // load all from opfs dependencies directory
     let depDir: FileSystemDirectoryHandle
     try {
-      const store = <Store>window.ioc.get('Store') 
-      depDir = store.dependenciesDirectory()
+      depDir = this.store.dependencies
     } catch {
       return
     }
@@ -46,7 +46,7 @@ export class DependencyLoader {
         this.loaded.add(sig)
         this.dependencyCount.update(v => v + 1)
         this.loadedSignatures.update(v => [...v, sig])
-      } catch(error) {
+      } catch (error) {
         console.error(`Failed to load dependency: ${sig}`, error)
         this.failedSignatures.update(v => [...v, sig])
       }

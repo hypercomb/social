@@ -1,6 +1,7 @@
+// hypercomb-shared/core/store.ts
 // hypercomb-web/src/app/core/store.ts
 
-import { Injectable } from '@angular/core'
+import { Injectable, signal } from '@angular/core'
 import { Drone, SignatureService } from '@hypercomb/core'
 
 type DroneCtor = new () => Drone
@@ -16,7 +17,7 @@ export type DevManifest = {
 @Injectable({ providedIn: 'root' })
 export class Store {
 
-  private static readonly HYPERCOMB_DIRECTORY = 'hypercomb'
+  private static readonly HYPERCOMB_DIRECTORY = 'hypercomb.io'
   public static readonly DRONES_DIRECTORY = '__drones__'
   public static readonly DEPENDENCIES_DIRECTORY = '__dependencies__'
   public static readonly LAYERS_DIRECTORY = '__layers__'
@@ -28,6 +29,50 @@ export class Store {
   public drones!: FileSystemDirectoryHandle
   public dependencies!: FileSystemDirectoryHandle
   public layers!: FileSystemDirectoryHandle
+
+  // -------------------------------------------------
+  // current folder (within hypercomb root)
+  // -------------------------------------------------
+
+  public current!: FileSystemDirectoryHandle
+  public readonly currentSegments = signal<readonly string[]>([])
+
+  public readonly setCurrentHandle = (
+    dir: FileSystemDirectoryHandle,
+    segments: readonly string[]
+  ): void => {
+    this.current = dir
+    this.currentSegments.set([...segments])
+  }
+
+  public readonly resetCurrent = (): void => {
+    this.setCurrentHandle(this.hypercombRoot, [])
+  }
+
+  // caller can use this when "moving to a seed"
+  public readonly setCurrent = async (
+    segments: readonly string[],
+    create: boolean = false
+  ): Promise<FileSystemDirectoryHandle | null> => {
+
+    let dir = this.hypercombRoot
+    const clean: string[] = []
+
+    for (let i = 0; i < segments.length; i++) {
+      const seg = (segments[i] ?? '').trim()
+      if (!seg || seg === '.' || seg === '..') continue
+
+      try {
+        dir = await dir.getDirectoryHandle(seg, { create })
+        clean.push(seg)
+      } catch {
+        return null
+      }
+    }
+
+    this.setCurrentHandle(dir, clean)
+    return dir
+  }
 
   // -------------------------------------------------
   // init
@@ -47,6 +92,9 @@ export class Store {
 
     this.layers =
       await this.opfsRoot.getDirectoryHandle(Store.LAYERS_DIRECTORY, { create: true })
+
+    // default current is the hypercomb root
+    this.resetCurrent()
   }
 
   public domainLayersDirectory = async (
@@ -106,7 +154,6 @@ export class Store {
       // dev is authority if manifest knows the domain for this sig
       let mod: Record<string, unknown> | null = null
 
-
       // fallback to opfs (seed bytes first so sw can serve exact module bytes)
       if (!mod) {
         await this.seedResourceCache(signature, buffer)
@@ -119,7 +166,6 @@ export class Store {
       return null
     }
   }
-
 
   private seedResourceCache = async (
     signature: string,
@@ -163,4 +209,5 @@ export class Store {
     return signature
   }
 }
+
 window.ioc.register('Store', new Store())

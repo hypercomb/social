@@ -1,21 +1,20 @@
 {
   "folders": [
     {
-      "name": "hypercomb-web",
-      "path": "hypercomb-web",
-    },
-    {
       "name": "hypercomb-dev",
-      "path": "hypercomb-dev",
+      "path": "hypercomb-dev"
     },
     {
       "name": "hypercomb-shared",
-      "path": "hypercomb-shared",
+      "path": "hypercomb-shared"
     },
     {
       "name": "hypercomb-essentials",
-      "path": "hypercomb-essentials",
+      "path": "hypercomb-essentials"
     },
+    {
+      "path": "hypercomb-web"
+    }
   ],
   "settings": {},
 }

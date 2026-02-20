@@ -1,3 +1,23 @@
-import { Routes } from '@angular/router';
+// hypercomb-dev/src/app/app.routes.ts
 
-export const routes: Routes = [];
+import type { Routes, UrlMatchResult, UrlSegment } from '@angular/router'
+import { RouteSinkComponent } from './router/route-sink.component'
+
+export const lineageMatcher = (segments: UrlSegment[]): UrlMatchResult => ({
+  consumed: segments
+})
+
+export const routes: Routes = [
+  {
+    // accepts any url segments so angular router never blocks deep links
+    matcher: lineageMatcher,
+    component: RouteSinkComponent
+  }
+]
+
+export class AppRoutes {
+  public readonly routes = routes
+  public readonly matcher = lineageMatcher
+}
+
+window.ioc.register('AppRoutes', new AppRoutes())
