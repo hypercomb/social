@@ -35,9 +35,9 @@
     "zone.js": "~0.15.0"
   },
   "devDependencies": {
-    "@angular/build": "^20.2.0",
-    "@angular/cli": "^20.2.0",
-    "@angular/compiler-cli": "^20.2.0",
+    "@angular/build": "^20.3.17",
+    "@angular/cli": "^20.3.17",
+    "@angular/compiler-cli": "^20.3.16",
     "@types/jasmine": "~5.1.0",
     "hypercomb-essentials": "file:../hypercomb-essentials",
     "jasmine-core": "~5.9.0",

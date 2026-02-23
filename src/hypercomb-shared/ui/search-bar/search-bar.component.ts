@@ -30,8 +30,6 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
   private readonly preloader = inject(ScriptPreloader)
   private readonly resources = inject(ResourceCompletionService)
 
-  private initState: InitState = 'unlocked'
-
   private readonly value = signal('')
   private readonly activeIndex = signal(0)
   private readonly suppressed = signal(false)
@@ -58,10 +56,6 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
 
   public constructor() {
     super()
-
-    // allow other systems to access the live instance without breaking angular construction
-    // note: do not new() this outside angular
-    try { window.ioc.register('SearchBarComponent', this) } catch { /* ignore */ }
 
     console.log('[search-bar] initialized with url segments:', this.navigation.segments())
   }

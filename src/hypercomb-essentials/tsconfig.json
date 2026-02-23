@@ -31,5 +31,8 @@
   },
 
   // 🚫 IMPORTANT: do NOT compile shared here
-  "include": ["src", "../hypercomb-shared/core/tree-logger.ts"]
+  // "include": ["src", "../hypercomb-shared/core/tree-logger.ts"]
+  "include": ["src/**/*.ts"],
+  "exclude": ["scripts/**/*", "dist/**/*", "node_modules/**/*"]
+
 }

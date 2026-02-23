@@ -13,5 +13,6 @@ export class hypercomb extends web {
     for (const drone of drones) {
       await drone.encounter(grammar)
     }
+    window.dispatchEvent(new CustomEvent('synchronize', { detail: { source: 'processor' } }))
   }
 }

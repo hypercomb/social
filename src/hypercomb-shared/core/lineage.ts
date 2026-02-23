@@ -5,8 +5,9 @@
 import { Injectable, signal } from '@angular/core'
 import type { Navigation } from './navigation'
 import type { Store } from './store'
+import { VisualUpdateService } from './visual-update.service'
 
-const { get, register, list } = window.ioc
+const { get, list } = window.ioc
 void list
 
 @Injectable({ providedIn: 'root' })
@@ -18,6 +19,7 @@ export class Lineage {
 
   private get store(): Store { return get('Store') as Store }
   private get navigation(): Navigation { return get('Navigation') as Navigation }
+  private get visualUpdates(): VisualUpdateService { return get('VisualUpdateService') as VisualUpdateService }
 
   // -------------------------------------------------
   // domain context (reserved for later)
@@ -39,6 +41,7 @@ export class Lineage {
 
     // do not normalize explorer names
     this.explorerPath = [...this.explorerPath, seg]
+    this.visualUpdates.markLocationChange('lineage:explorer-enter')
     this.invalidate('explorer')
 
     // explorer drives navigation (best effort)
@@ -53,6 +56,7 @@ export class Lineage {
   public explorerUp = (): void => {
     if (this.explorerPath.length === 0) return
     this.explorerPath = this.explorerPath.slice(0, -1)
+    this.visualUpdates.markLocationChange('lineage:explorer-up')
     this.invalidate('explorer')
 
     // explorer drives navigation (best effort)
@@ -67,6 +71,7 @@ export class Lineage {
   // this now means "show domain root"
   public showDomainRoot = (): void => {
     this.explorerPath = []
+    this.visualUpdates.markLocationChange('lineage:domain-root')
     this.invalidate('explorer')
 
     // explorer drives navigation (best effort)
@@ -218,6 +223,7 @@ export class Lineage {
 
   private readonly invalidate = (reason: 'explorer' | 'url' | 'fs'): void => {
     this.fsRevision.update(v => v + 1)
+    this.visualUpdates.notifyChange(`lineage:${reason}`)
 
     // single, explicit hook for pixi + any other followers
     try {
@@ -241,6 +247,7 @@ export class Lineage {
       // do not spam invalidations if nothing changed
       if (this.sameSegments(this.explorerPath, next)) return
 
+      this.visualUpdates.markLocationChange('lineage:url')
       this.explorerPath = next
       this.invalidate('url')
     } catch {

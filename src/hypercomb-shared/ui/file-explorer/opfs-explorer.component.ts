@@ -1,7 +1,7 @@
 // hypercomb-shared/ui/file-explorer/opfs-explorer.component.ts
 
 import { CommonModule } from '@angular/common'
-import { Component, computed, effect, signal } from '@angular/core'
+import { Component, computed, effect, signal, type OnDestroy } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import type { Lineage } from '../../core/lineage'
 import type { Store } from '../../core/store'
@@ -9,6 +9,7 @@ import { hypercomb } from '@hypercomb/core'
 import type { ScriptPreloader } from '../../core/script-preloader'
 import { LocationParser } from '../../core/initializers/location-parser'
 import { RuntimeMediator } from '../runtime-mediator'
+import type { VisualUpdateService } from '../../core/visual-update.service'
 
 const { get, register, list } = window.ioc
 void list
@@ -45,6 +46,7 @@ export class OpfsExplorerComponent extends hypercomb {
   private get lineage(): Lineage { return get('Lineage') as Lineage }
   private get preloader(): ScriptPreloader { return get('ScriptPreloader') as ScriptPreloader }
   private get store(): Store { return get('Store') as Store }
+  private get visualUpdates(): VisualUpdateService { return get('VisualUpdateService') as VisualUpdateService }
 
   // note: runtime mediator stays as angular service
   private readonly runtime = new RuntimeMediator()
@@ -61,9 +63,13 @@ export class OpfsExplorerComponent extends hypercomb {
   )
 
   public readonly directory = computed(() => {
-    this.lineage.changed()
+    this.visualUpdates.changed()
     return this.lineage.explorerLabel()
   })
+
+  private readonly onSynchronize = (): void => {
+    void this.refresh()
+  }
 
   // -------------------------------------------------
   // lifecycle
@@ -71,6 +77,8 @@ export class OpfsExplorerComponent extends hypercomb {
 
   public constructor() {
     super()
+
+    window.addEventListener('synchronize', this.onSynchronize)
 
     // persist showAll
     effect(() => {
@@ -86,6 +94,10 @@ export class OpfsExplorerComponent extends hypercomb {
       this.showAll()
       void this.refresh()
     })
+  }
+
+  public ngOnDestroy(): void {
+    window.removeEventListener('synchronize', this.onSynchronize)
   }
 
   // -------------------------------------------------
@@ -165,7 +177,7 @@ export class OpfsExplorerComponent extends hypercomb {
     if (!dir) return
 
     await dir.removeEntry(e.name, { recursive: true })
-    void this.refresh()
+    this.visualUpdates.notifyChange('opfs:delete')
   }
 
   // -------------------------------------------------
@@ -231,13 +243,13 @@ export class OpfsExplorerComponent extends hypercomb {
       }
 
       this.newName = ''
-      void this.refresh()
+      this.visualUpdates.notifyChange('opfs:create-folder')
       return
     }
 
     // note: implement non-root folder create when you decide the naming rules
     this.newName = ''
-    void this.refresh()
+    this.visualUpdates.notifyChange('opfs:create-folder')
   }
 
   public createFile = async (): Promise<void> => {
@@ -258,7 +270,7 @@ export class OpfsExplorerComponent extends hypercomb {
     }
 
     this.newName = ''
-    void this.refresh()
+    this.visualUpdates.notifyChange('opfs:create-file')
   }
 
   public addDependency = async (): Promise<void> => {
@@ -288,7 +300,7 @@ export class OpfsExplorerComponent extends hypercomb {
     }
 
     this.newName = ''
-    void this.refresh()
+    this.visualUpdates.notifyChange('opfs:add-dependency')
   }
 
   // -------------------------------------------------

@@ -8,15 +8,13 @@
       "root": "",
       "sourceRoot": "src",
       "prefix": "app",
-      "architect": {
+
+      "targets": {
         "build": {
           "builder": "@angular/build:application",
           "options": {
-            "allowedCommonJsDependencies": [
-              "@xmldom/xmldom",
-              "parse-svg-path"
-            ],
-
+            "outputPath": "dist/hypercomb-dev",
+            "index": "src/index.html",
             "browser": "src/main.ts",
             "polyfills": ["zone.js"],
             "tsConfig": "tsconfig.app.json",
@@ -29,11 +27,16 @@
               }
             ],
 
-            "styles": ["src/styles.scss"]
-          },
+            "styles": ["src/styles.scss"],
 
+            "allowedCommonJsDependencies": [
+              "@xmldom/xmldom",
+              "parse-svg-path"
+            ]
+          },
           "configurations": {
             "production": {
+              "outputHashing": "all",
               "budgets": [
                 {
                   "type": "initial",
@@ -45,31 +48,32 @@
                   "maximumWarning": "4kB",
                   "maximumError": "8kB"
                 }
-              ],
-              "outputHashing": "all"
+              ]
             },
-
             "development": {
               "optimization": false,
               "extractLicenses": false,
               "sourceMap": true
             }
           },
-
-          "defaultConfiguration": "production"
+          "defaultConfiguration": "development"
         },
 
         "serve": {
           "builder": "@angular/build:dev-server",
-          "defaultConfiguration": "development",
+          "options": {
+            "port": 4200,
+            "open": false
+          },
           "configurations": {
-            "production": {
-              "buildTarget": "hypercomb-dev:build:production"
-            },
             "development": {
               "buildTarget": "hypercomb-dev:build:development"
+            },
+            "production": {
+              "buildTarget": "hypercomb-dev:build:production"
             }
-          }
+          },
+          "defaultConfiguration": "development"
         }
       }
     }

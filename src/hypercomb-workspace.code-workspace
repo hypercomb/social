@@ -13,7 +13,7 @@
       "path": "hypercomb-essentials"
     },
     {
-      "path": "hypercomb-web"
+      "path": "hypercomb-core"
     }
   ],
   "settings": {},

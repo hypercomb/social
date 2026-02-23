@@ -1,10 +1,4 @@
-/// <reference path="./global.d.ts" />
-
 // src/global.d.ts
-
-// -------------------------------------------------
-// global window extensions
-// -------------------------------------------------
 
 interface Window {
   ioc: {
@@ -14,4 +8,3 @@ interface Window {
     list(): readonly string[]
   }
 }
-

@@ -1,5 +1,5 @@
 // hypercomb-essentials/src/diamondcoreprocessor.com/pixi/show-honeycomb.drone.ts
-// fix: redraw is event-driven (lineage:changed + navigate) and clears stale mesh on empty folders
+// fix: redraw is event-driven (synchronize) and clears stale mesh on empty folders
 
 import { Drone } from '@hypercomb/core'
 import { Assets, Container, Geometry, Mesh, Texture } from 'pixi.js'
@@ -23,18 +23,22 @@ export class ShowHoneycombDrone extends Drone {
 
   private lastKey = ''
 
-  // event-driven redraw
-  private dirty = true
   private listening = false
 
   protected override sense = (): boolean => true
 
   protected override heartbeat = async (): Promise<void> => {
+    this.ensureListeners()
+
+    // keep heartbeat as setup/bootstrap only
+    // synchronize event is responsible for running redraw work
+    await this.renderFromSynchronize()
+  }
+
+  private readonly renderFromSynchronize = async (): Promise<void> => {
     const { get, register, list } = window.ioc
     void register
     void list
-
-    this.ensureListeners()
 
     const host = this.host = get('PixiHost')
     if (!host?.app || !host.container) {
@@ -69,11 +73,9 @@ export class ShowHoneycombDrone extends Drone {
     const locationKey = String(lineage.explorerLabel?.() ?? '/')
     const fsRev = Number(lineage.changed?.() ?? 0)
 
-    // gate rebuilds, but allow event-driven forcing
+    // track key for diagnostics only
     const key = `${locationKey}|${fsRev}|${circumRadiusPx}|${gapPx}|${padPx}|${textureUrl}`
-    if (!this.dirty && this.lastKey === key) return
     this.lastKey = key
-    this.dirty = false
 
     const dir = await lineage.explorerDir()
     if (!dir) {
@@ -167,14 +169,10 @@ export class ShowHoneycombDrone extends Drone {
     if (this.listening) return
     this.listening = true
 
-    const mark = (): void => { this.dirty = true }
+    const mark = (): void => { void this.renderFromSynchronize() }
 
-    // explorer clicks (lineage.explorerEnter/up) trigger this immediately now
-    window.addEventListener('lineage:changed', mark)
-
-    // url/nav changes (search bar, movement, back/forward) still count too
-    window.addEventListener('navigate', mark)
-    window.addEventListener('popstate', mark)
+    // single source-of-truth visual refresh event
+    window.addEventListener('synchronize', mark)
   }
 
   // -------------------------------------------------
@@ -193,7 +191,6 @@ export class ShowHoneycombDrone extends Drone {
 
     this.mesh = null
     this.geom = null
-    this.dirty = true
   }
 
   // -------------------------------------------------
