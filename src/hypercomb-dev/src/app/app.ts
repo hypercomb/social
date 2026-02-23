@@ -10,13 +10,11 @@ import { MousewheelZoomInput } from '@hypercomb/essentials/diamondcoreprocessor.
 import { Settings } from '@hypercomb/essentials/diamondcoreprocessor.com/core/settings';
 import { ZoomDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/zoom/zoom.drone';
 import { LayerService } from 'src/hypercomb-web/src/app/layer-service';
-import { OpfsExplorerComponent } from "@hypercomb/shared/ui";
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, SearchBarComponent, OpfsExplorerComponent],
-  templateUrl: './app.html',
-  styleUrl: './app.scss'
+  imports: [RouterOutlet, SearchBarComponent],
+  templateUrl: './app.html'
 })
 export class App {
   protected readonly title = signal('hypercomb-dev');
@@ -53,6 +51,5 @@ export class App {
       const pan = <any>get(pankey)!
       await pan.encounter('testing')
     })
-
   }
 }
