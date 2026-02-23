@@ -1,7 +1,7 @@
 // hypercomb-shared/ui/file-explorer/opfs-explorer.component.ts
 
 import { CommonModule } from '@angular/common'
-import { Component, computed, effect, signal, type OnDestroy } from '@angular/core'
+import { Component, signal, type OnDestroy } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import type { Lineage } from '../../core/lineage'
 import type { Store } from '../../core/store'
@@ -9,7 +9,6 @@ import { hypercomb } from '@hypercomb/core'
 import type { ScriptPreloader } from '../../core/script-preloader'
 import { LocationParser } from '../../core/initializers/location-parser'
 import { RuntimeMediator } from '../runtime-mediator'
-import type { VisualUpdateService } from '../../core/visual-update.service'
 
 const { get, register, list } = window.ioc
 void list
@@ -46,7 +45,6 @@ export class OpfsExplorerComponent extends hypercomb {
   private get lineage(): Lineage { return get('Lineage') as Lineage }
   private get preloader(): ScriptPreloader { return get('ScriptPreloader') as ScriptPreloader }
   private get store(): Store { return get('Store') as Store }
-  private get visualUpdates(): VisualUpdateService { return get('VisualUpdateService') as VisualUpdateService }
 
   // note: runtime mediator stays as angular service
   private readonly runtime = new RuntimeMediator()
@@ -62,13 +60,37 @@ export class OpfsExplorerComponent extends hypercomb {
     localStorage.getItem(OpfsExplorerComponent.SHOW_ALL_KEY) === 'true'
   )
 
-  public readonly directory = computed(() => {
-    this.visualUpdates.changed()
-    return this.lineage.explorerLabel()
-  })
+  public readonly directory = (): string => this.lineage.explorerLabel()
+
+  private readonly dispatchSynchronize = (source: string): void => {
+    window.dispatchEvent(new CustomEvent('synchronize', { detail: { source } }))
+  }
+
+  private refreshing = false
+  private refreshQueued = false
+
+  private readonly requestRefresh = (): void => {
+    if (this.refreshing) {
+      this.refreshQueued = true
+      return
+    }
+
+    this.refreshing = true
+
+    void (async () => {
+      try {
+        do {
+          this.refreshQueued = false
+          await this.refresh()
+        } while (this.refreshQueued)
+      } finally {
+        this.refreshing = false
+      }
+    })()
+  }
 
   private readonly onSynchronize = (): void => {
-    void this.refresh()
+    this.requestRefresh()
   }
 
   // -------------------------------------------------
@@ -80,20 +102,8 @@ export class OpfsExplorerComponent extends hypercomb {
 
     window.addEventListener('synchronize', this.onSynchronize)
 
-    // persist showAll
-    effect(() => {
-      localStorage.setItem(
-        OpfsExplorerComponent.SHOW_ALL_KEY,
-        String(this.showAll())
-      )
-    })
-
-    // refresh on navigation or view toggle
-    effect(() => {
-      this.directory()
-      this.showAll()
-      void this.refresh()
-    })
+    // initial load
+    this.requestRefresh()
   }
 
   public ngOnDestroy(): void {
@@ -111,6 +121,13 @@ export class OpfsExplorerComponent extends hypercomb {
     return '📄'
   }
 
+  public toggleShowAll = (): void => {
+    const next = !this.showAll()
+    this.showAll.set(next)
+    localStorage.setItem(OpfsExplorerComponent.SHOW_ALL_KEY, String(next))
+    this.requestRefresh()
+  }
+
   // -------------------------------------------------
   // navigation
   // -------------------------------------------------
@@ -118,6 +135,7 @@ export class OpfsExplorerComponent extends hypercomb {
   public explore = (name: string): void => {
     if (name === '..') {
       this.lineage.explorerUp()
+      void this.runProcessorForLocation()
       return
     }
 
@@ -125,6 +143,12 @@ export class OpfsExplorerComponent extends hypercomb {
     if (!row || row.kind !== 'directory') return
 
     this.lineage.explorerEnter(name)
+    void this.runProcessorForLocation()
+  }
+
+  private readonly runProcessorForLocation = async (): Promise<void> => {
+    const grammar = this.directory()
+    await this.act(grammar)
   }
 
   // -------------------------------------------------
@@ -177,7 +201,7 @@ export class OpfsExplorerComponent extends hypercomb {
     if (!dir) return
 
     await dir.removeEntry(e.name, { recursive: true })
-    this.visualUpdates.notifyChange('opfs:delete')
+    this.dispatchSynchronize('opfs:delete')
   }
 
   // -------------------------------------------------
@@ -185,7 +209,15 @@ export class OpfsExplorerComponent extends hypercomb {
   // -------------------------------------------------
 
   private readonly refresh = async (): Promise<void> => {
+    const pathAtStart = this.lineage.explorerLabel()
+    const isStale = (): boolean => this.lineage.explorerLabel() !== pathAtStart
+
     const dir = await this.lineage.explorerDir()
+    if (isStale()) {
+      this.refreshQueued = true
+      return
+    }
+
     if (!dir) {
       this.entries.set([])
       return
@@ -213,6 +245,11 @@ export class OpfsExplorerComponent extends hypercomb {
       }
 
       out.push({ name, label, kind: handle.kind })
+    }
+
+    if (isStale()) {
+      this.refreshQueued = true
+      return
     }
 
     out.sort((a, b) => {
@@ -243,13 +280,13 @@ export class OpfsExplorerComponent extends hypercomb {
       }
 
       this.newName = ''
-      this.visualUpdates.notifyChange('opfs:create-folder')
+      this.dispatchSynchronize('opfs:create-folder')
       return
     }
 
     // note: implement non-root folder create when you decide the naming rules
     this.newName = ''
-    this.visualUpdates.notifyChange('opfs:create-folder')
+    this.dispatchSynchronize('opfs:create-folder')
   }
 
   public createFile = async (): Promise<void> => {
@@ -270,7 +307,7 @@ export class OpfsExplorerComponent extends hypercomb {
     }
 
     this.newName = ''
-    this.visualUpdates.notifyChange('opfs:create-file')
+    this.dispatchSynchronize('opfs:create-file')
   }
 
   public addDependency = async (): Promise<void> => {
@@ -300,7 +337,7 @@ export class OpfsExplorerComponent extends hypercomb {
     }
 
     this.newName = ''
-    this.visualUpdates.notifyChange('opfs:add-dependency')
+    this.dispatchSynchronize('opfs:add-dependency')
   }
 
   // -------------------------------------------------

@@ -1,11 +1,9 @@
 // hypercomb-shared/core/lineage.ts
-// fix: always emit a concrete "explorer changed" hook, and avoid no-op invalidations
-// result: explorer clicks fire a redraw signal even if url/nav wiring is flaky
+// fix: synchronize is the single visual update mechanism
 
 import { Injectable, signal } from '@angular/core'
 import type { Navigation } from './navigation'
 import type { Store } from './store'
-import { VisualUpdateService } from './visual-update.service'
 
 const { get, list } = window.ioc
 void list
@@ -19,7 +17,6 @@ export class Lineage {
 
   private get store(): Store { return get('Store') as Store }
   private get navigation(): Navigation { return get('Navigation') as Navigation }
-  private get visualUpdates(): VisualUpdateService { return get('VisualUpdateService') as VisualUpdateService }
 
   // -------------------------------------------------
   // domain context (reserved for later)
@@ -41,7 +38,6 @@ export class Lineage {
 
     // do not normalize explorer names
     this.explorerPath = [...this.explorerPath, seg]
-    this.visualUpdates.markLocationChange('lineage:explorer-enter')
     this.invalidate('explorer')
 
     // explorer drives navigation (best effort)
@@ -56,7 +52,6 @@ export class Lineage {
   public explorerUp = (): void => {
     if (this.explorerPath.length === 0) return
     this.explorerPath = this.explorerPath.slice(0, -1)
-    this.visualUpdates.markLocationChange('lineage:explorer-up')
     this.invalidate('explorer')
 
     // explorer drives navigation (best effort)
@@ -71,7 +66,6 @@ export class Lineage {
   // this now means "show domain root"
   public showDomainRoot = (): void => {
     this.explorerPath = []
-    this.visualUpdates.markLocationChange('lineage:domain-root')
     this.invalidate('explorer')
 
     // explorer drives navigation (best effort)
@@ -223,31 +217,25 @@ export class Lineage {
 
   private readonly invalidate = (reason: 'explorer' | 'url' | 'fs'): void => {
     this.fsRevision.update(v => v + 1)
-    this.visualUpdates.notifyChange(`lineage:${reason}`)
 
-    // single, explicit hook for pixi + any other followers
-    try {
-      window.dispatchEvent(new CustomEvent('lineage:changed', {
-        detail: {
-          reason,
-          rev: this.fsRevision(),
-          path: this.explorerLabel(),
-          segments: [...this.explorerPath]
-        }
-      }))
-    } catch {
-      // ignore
-    }
+    window.dispatchEvent(new CustomEvent('synchronize', {
+      detail: {
+        source: `lineage:${reason}`,
+        rev: this.fsRevision(),
+        path: this.explorerLabel(),
+        segments: [...this.explorerPath]
+      }
+    }))
   }
 
   private readonly followLocation = (): void => {
     try {
-      const next = this.navigation.segments()
+      // explorer path must stay lossless; use raw decoded URL segments
+      const next = this.navigation.segmentsRaw()
 
       // do not spam invalidations if nothing changed
       if (this.sameSegments(this.explorerPath, next)) return
 
-      this.visualUpdates.markLocationChange('lineage:url')
       this.explorerPath = next
       this.invalidate('url')
     } catch {

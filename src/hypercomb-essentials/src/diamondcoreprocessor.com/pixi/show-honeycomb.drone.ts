@@ -20,19 +20,45 @@ export class ShowHoneycombDrone extends Drone {
 
   private tex: Texture | null = null
   private atlas: HexLabelAtlas | null = null
+  private atlasRenderer: unknown = null
 
   private lastKey = ''
 
   private listening = false
+  private bootstrapped = false
+  private rendering = false
+  private renderQueued = false
 
   protected override sense = (): boolean => true
 
   protected override heartbeat = async (): Promise<void> => {
     this.ensureListeners()
 
-    // keep heartbeat as setup/bootstrap only
-    // synchronize event is responsible for running redraw work
-    await this.renderFromSynchronize()
+    if (this.bootstrapped) return
+    this.bootstrapped = true
+
+    // initial draw once; subsequent redraws come from synchronize
+    this.requestRender()
+  }
+
+  private readonly requestRender = (): void => {
+    if (this.rendering) {
+      this.renderQueued = true
+      return
+    }
+
+    this.rendering = true
+
+    void (async () => {
+      try {
+        do {
+          this.renderQueued = false
+          await this.renderFromSynchronize()
+        } while (this.renderQueued)
+      } finally {
+        this.rendering = false
+      }
+    })()
   }
 
   private readonly renderFromSynchronize = async (): Promise<void> => {
@@ -63,6 +89,12 @@ export class ShowHoneycombDrone extends Drone {
       host.container.addChild(this.layer)
 
       this.atlas = new HexLabelAtlas(host.app.renderer, 128, 8, 8)
+      this.atlasRenderer = host.app.renderer
+      this.shader = null
+    } else if (!this.atlas || this.atlasRenderer !== host.app.renderer) {
+      this.atlas = new HexLabelAtlas(host.app.renderer, 128, 8, 8)
+      this.atlasRenderer = host.app.renderer
+      this.shader = null
     }
 
     const circumRadiusPx = 32
@@ -73,17 +105,31 @@ export class ShowHoneycombDrone extends Drone {
     const locationKey = String(lineage.explorerLabel?.() ?? '/')
     const fsRev = Number(lineage.changed?.() ?? 0)
 
+    const isStale = (): boolean => {
+      const currentKey = String(lineage.explorerLabel?.() ?? '/')
+      const currentRev = Number(lineage.changed?.() ?? 0)
+      return currentKey !== locationKey || currentRev !== fsRev
+    }
+
     // track key for diagnostics only
     const key = `${locationKey}|${fsRev}|${circumRadiusPx}|${gapPx}|${padPx}|${textureUrl}`
     this.lastKey = key
 
     const dir = await lineage.explorerDir()
+    if (isStale()) {
+      this.renderQueued = true
+      return
+    }
     if (!dir) {
       this.clearMesh()
       return
     }
 
     const seedNames = await this.listSeedFolders(dir)
+    if (isStale()) {
+      this.renderQueued = true
+      return
+    }
     if (seedNames.length === 0) {
       // critical: remove stale geometry when folder is empty
       this.clearMesh()
@@ -112,8 +158,19 @@ export class ShowHoneycombDrone extends Drone {
     const quadH = quadHalfH * 2
 
     const baseTex = await this.ensureTexture(textureUrl)
+    if (isStale()) {
+      this.renderQueued = true
+      return
+    }
     if (!baseTex || !this.atlas) {
       this.clearMesh()
+      return
+    }
+
+    const labelTex = this.atlas.getAtlasTexture()
+    if (!this.hasBindableSource(baseTex) || !this.hasBindableSource(labelTex)) {
+      this.rebuildRenderResources(host.app.renderer)
+      this.renderQueued = true
       return
     }
 
@@ -124,16 +181,22 @@ export class ShowHoneycombDrone extends Drone {
     if (!this.shader) {
       this.shader = new HexSdfTextureShader(
         baseTex,
-        this.atlas.getAtlasTexture(),
+        labelTex,
         quadW,
         quadH,
         circumRadiusPx
       )
     } else {
-      this.shader.setBaseTexture(baseTex)
-      this.shader.setLabelAtlas(this.atlas.getAtlasTexture())
-      this.shader.setQuadSize(quadW, quadH)
-      this.shader.setRadiusPx(circumRadiusPx)
+      try {
+        this.shader.setBaseTexture(baseTex)
+        this.shader.setLabelAtlas(labelTex)
+        this.shader.setQuadSize(quadW, quadH)
+        this.shader.setRadiusPx(circumRadiusPx)
+      } catch {
+        this.rebuildRenderResources(host.app.renderer)
+        this.renderQueued = true
+        return
+      }
     }
 
     if (!this.mesh) {
@@ -169,7 +232,9 @@ export class ShowHoneycombDrone extends Drone {
     if (this.listening) return
     this.listening = true
 
-    const mark = (): void => { void this.renderFromSynchronize() }
+    const mark = (): void => {
+      this.requestRender()
+    }
 
     // single source-of-truth visual refresh event
     window.addEventListener('synchronize', mark)
@@ -191,6 +256,19 @@ export class ShowHoneycombDrone extends Drone {
 
     this.mesh = null
     this.geom = null
+  }
+
+  private readonly rebuildRenderResources = (renderer: unknown): void => {
+    this.clearMesh()
+    this.shader = null
+    this.tex = null
+    this.atlas = new HexLabelAtlas(renderer, 128, 8, 8)
+    this.atlasRenderer = renderer
+  }
+
+  private readonly hasBindableSource = (t: any): boolean => {
+    const source = t?.source ?? t?.baseTexture?.source ?? t?.texture?.source
+    return !!source && typeof source.on === 'function'
   }
 
   // -------------------------------------------------
@@ -281,10 +359,10 @@ export class ShowHoneycombDrone extends Drone {
     }
 
     const g = new Geometry()
-    ;(g as any).addAttribute('aPosition', pos, 2)
-    ;(g as any).addAttribute('aUV', uv, 2)
-    ;(g as any).addAttribute('aLabelUV', labelUV, 4)
-    ;(g as any).addIndex(idx)
+      ; (g as any).addAttribute('aPosition', pos, 2)
+      ; (g as any).addAttribute('aUV', uv, 2)
+      ; (g as any).addAttribute('aLabelUV', labelUV, 4)
+      ; (g as any).addIndex(idx)
 
     return g
   }
