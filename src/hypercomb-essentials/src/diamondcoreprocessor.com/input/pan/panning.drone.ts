@@ -37,7 +37,7 @@ export class PanningDrone extends Drone {
     if (!this.host?.app) return
 
     const mousePan = get<any>('MousePanInput')
-    mousePan?.attach(this)
+    mousePan?.attach(this, this.host.app.canvas)
   }
 
   private detach = (): void => {
