@@ -29,6 +29,7 @@
     "@angular/platform-browser": "^20.2.0",
     "@angular/router": "^20.2.0",
     "hypercomb-core": "file:../hypercomb-core",
+    "nostr-tools": "^2.23.1",
     "pixi.js": "^8.16.0",
     "rxjs": "~7.8.0",
     "tslib": "^2.8.1",

@@ -32,7 +32,7 @@ export class HexLabelAtlas {
     this.atlas = RenderTexture.create({
       width: this.cols * this.cellPx,
       height: this.rows * this.cellPx,
-      resolution: 1,
+      resolution: 2,
     })
 
     // clear once so sampling starts transparent
@@ -41,8 +41,9 @@ export class HexLabelAtlas {
 
     this.style = new TextStyle({
       fontFamily: 'monospace',
-      fontSize: 32,
+      fontSize: 16,
       fill: 0xffffff,
+      stroke: 0x000000,
       align: 'center',
     })
   }

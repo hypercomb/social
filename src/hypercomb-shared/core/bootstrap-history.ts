@@ -17,13 +17,10 @@ export class BootstrapHistory {
   private readonly defaultDomain = 'hypercomb.io'
 
   public run = async (): Promise<void> => {
-    const { get, register, list } = window.ioc
-    void register
-    void list
 
-    const store = get('Store') as Store
-    const preloader = get('ScriptPreloader') as any
-    const completions = this.tryGetCompletions(get)
+    const store = window.ioc.get('Store') as Store
+    const preloader = window.ioc.get('ScriptPreloader') as any
+    const completions = this.tryGetCompletions(window.ioc.get)
 
     const inputPath = window.location.pathname || '/'
     const inputSuffix = (window.location.search || '') + (window.location.hash || '')
@@ -47,7 +44,7 @@ export class BootstrapHistory {
         : urlSegments
 
     // walker strategy: build a path->handle lookup so we never mutate url until we know the answer
-    const walker = get('DirectoryWalker') as DirectoryWalker
+    const walker = window.ioc.get('DirectoryWalker') as DirectoryWalker
     const directories = await walker.walk(domainRoot)
 
     // map key is "a/b/c" (no leading slash), rooted at domainRoot
@@ -219,7 +216,5 @@ export class BootstrapHistory {
   }
 }
 
-const { get, register, list } = window.ioc
-void get
-void list
+
 window.ioc.register('BootstrapHistory', new BootstrapHistory())

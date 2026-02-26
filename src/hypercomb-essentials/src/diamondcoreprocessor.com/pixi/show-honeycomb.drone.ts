@@ -1,7 +1,10 @@
 // hypercomb-essentials/src/diamondcoreprocessor.com/pixi/show-honeycomb.drone.ts
-// fix: redraw is event-driven (synchronize) and clears stale mesh on empty folders
+// upgrade: heartbeat derives signed sig(domain-lineage-seed), pulls non-expired mesh items, unions with local seeds, and renders as tiles
+// - expiry rules are owned by NostrMeshDrone
+// - union keeps filesystem seeds as your own local truth, mesh adds shared seeds
+// - redraw stays event-driven via synchronize, but heartbeat also triggers synchronize
 
-import { Drone } from '@hypercomb/core'
+import { Drone, SignatureService } from '@hypercomb/core'
 import { Assets, Container, Geometry, Mesh, Texture } from 'pixi.js'
 import { PixiHostDrone } from './pixi-host.drone.js'
 import { HexLabelAtlas } from './hex-label.atlas.js'
@@ -9,6 +12,9 @@ import { HexSdfTextureShader } from './hex-sdf.shader.js'
 
 type Axial = { q: number; r: number }
 type SeedCell = { q: number; r: number; label: string }
+
+type MeshEvt = { relay: string; sig: string; event: any; payload: any }
+type MeshApi = { ensureStartedForSig: (sig: string) => void; getNonExpired: (sig: string) => MeshEvt[] }
 
 export class ShowHoneycombDrone extends Drone {
   private host?: PixiHostDrone
@@ -25,20 +31,114 @@ export class ShowHoneycombDrone extends Drone {
   private lastKey = ''
 
   private listening = false
-  private bootstrapped = false
   private rendering = false
   private renderQueued = false
 
-  protected override sense = (): boolean => true
+  private renderedCellsKey = ''
+  private renderedCount = 0
+
+  // note: mesh seed state (derived on heartbeat)
+  private meshSig = ''
+  private meshSeedsRev = 0
+  private meshSeeds: string[] = []
 
   protected override heartbeat = async (): Promise<void> => {
     this.ensureListeners()
 
-    if (this.bootstrapped) return
-    this.bootstrapped = true
+    // note: always compute mesh seeds on every heartbeat
+    await this.refreshMeshSeeds()
 
-    // initial draw once; subsequent redraws come from synchronize
+    // note: force redraw contract
+    window.dispatchEvent(new CustomEvent('synchronize', { detail: { source: 'show-honeycomb:heartbeat' } }))
+
+    // note: live heartbeat path; no bootstrap short-circuit
     this.requestRender()
+  }
+
+  private refreshMeshSeeds = async (): Promise<void> => {
+
+    const lineage = window.ioc.get('Lineage') as any
+    const mesh = window.ioc.get('NostrMeshDrone') as any as MeshApi
+    if (!lineage || !mesh) return
+
+    // note: domain-lineage-seed discriminator
+    const domain = String(lineage?.domain?.() ?? lineage?.domainLabel?.() ?? 'hypercomb.io')
+    const explorerSegmentsRaw = lineage?.explorerSegments?.()
+    const explorerSegments = Array.isArray(explorerSegmentsRaw)
+      ? explorerSegmentsRaw
+        .map((x: unknown) => String(x ?? '').trim())
+        .filter((x: string) => x.length > 0)
+      : []
+    const lineageKey = explorerSegments.length > 0
+      ? `/${explorerSegments.join('/')}`
+      : String(lineage?.explorerLabel?.() ?? window.location.pathname ?? '/')
+    const seed = 'seed:list:v1'
+
+    const key = `${domain}-${lineageKey}-${seed}`
+    const bytes = new TextEncoder().encode(key)
+    const sig = await SignatureService.sign(bytes.buffer)
+
+    if (!sig) return
+
+    if (sig !== this.meshSig) {
+      this.meshSig = sig
+      this.meshSeeds = []
+      this.meshSeedsRev++
+    }
+
+    // note: ensure relays are queried for this sig (no external subscribe required)
+    mesh.ensureStartedForSig(sig)
+
+    // note: get non-expired items (mesh owns ttl)
+    const items = mesh.getNonExpired(sig)
+    if (!items || items.length === 0) {
+      if (this.meshSeeds.length !== 0) {
+        this.meshSeeds = []
+        this.meshSeedsRev++
+      }
+      return
+    }
+
+    // note: union seeds across all non-expired payloads
+    // - supports payload shapes:
+    //   1) { seeds: string[] }
+    //   2) string[] (direct)
+    // - any other shape is ignored
+    const set = new Set<string>()
+    for (const it of items) {
+      const p = it?.payload
+      if (Array.isArray(p)) {
+        for (const x of p) {
+          const s = String(x ?? '').trim()
+          if (s) set.add(s)
+        }
+        continue
+      }
+
+      const seedsArr = p?.seeds
+      if (Array.isArray(seedsArr)) {
+        for (const x of seedsArr) {
+          const s = String(x ?? '').trim()
+          if (s) set.add(s)
+        }
+      }
+    }
+
+    const next = Array.from(set)
+    next.sort((a, b) => a.localeCompare(b))
+
+    const sameLen = next.length === this.meshSeeds.length
+    let same = sameLen
+    if (same) {
+      for (let i = 0; i < next.length; i++) {
+        if (next[i] !== this.meshSeeds[i]) { same = false; break }
+      }
+    }
+
+    if (!same) {
+      this.meshSeeds = next
+      this.meshSeedsRev++
+    }
   }
 
   private readonly requestRender = (): void => {
@@ -62,28 +162,25 @@ export class ShowHoneycombDrone extends Drone {
   }
 
   private readonly renderFromSynchronize = async (): Promise<void> => {
-    const { get, register, list } = window.ioc
-    void register
-    void list
-
-    const host = this.host = get('PixiHost')
+    const host = this.host = window.ioc.get('PixiHost') as any
     if (!host?.app || !host.container) {
       this.clearMesh()
       return
     }
 
-    const axial = get('AxialService') as any
+    const axial = window.ioc.get('AxialService') as any
     if (!axial?.items) {
       this.clearMesh()
       return
     }
 
-    const lineage = get('Lineage') as any
+    const lineage = window.ioc.get('Lineage') as any
     if (!lineage?.explorerDir || !lineage?.explorerLabel || !lineage?.changed) {
       this.clearMesh()
       return
     }
 
+    // note: init layer + atlas (and reset shader if renderer changes)
     if (!this.layer) {
       this.layer = new Container()
       host.container.addChild(this.layer)
@@ -104,15 +201,17 @@ export class ShowHoneycombDrone extends Drone {
 
     const locationKey = String(lineage.explorerLabel?.() ?? '/')
     const fsRev = Number(lineage.changed?.() ?? 0)
+    const meshRev = this.meshSeedsRev
 
     const isStale = (): boolean => {
       const currentKey = String(lineage.explorerLabel?.() ?? '/')
       const currentRev = Number(lineage.changed?.() ?? 0)
-      return currentKey !== locationKey || currentRev !== fsRev
+      const currentMeshRev = this.meshSeedsRev
+      return currentKey !== locationKey || currentRev !== fsRev || currentMeshRev !== meshRev
     }
 
-    // track key for diagnostics only
-    const key = `${locationKey}|${fsRev}|${circumRadiusPx}|${gapPx}|${padPx}|${textureUrl}`
+    // note: key includes meshRev so mesh changes invalidate render baseline
+    const key = `${locationKey}|${fsRev}|${meshRev}|${circumRadiusPx}|${gapPx}|${padPx}|${textureUrl}`
     this.lastKey = key
 
     const dir = await lineage.explorerDir()
@@ -125,13 +224,22 @@ export class ShowHoneycombDrone extends Drone {
       return
     }
 
-    const seedNames = await this.listSeedFolders(dir)
+    // note: your own seeds (filesystem)
+    const localSeeds = await this.listSeedFolders(dir)
     if (isStale()) {
       this.renderQueued = true
       return
     }
+
+    // note: union with mesh seeds (shared)
+    const union = new Set<string>()
+    for (const s of localSeeds) union.add(s)
+    for (const s of this.meshSeeds) union.add(s)
+
+    const seedNames = Array.from(union)
+    seedNames.sort((a, b) => a.localeCompare(b))
+
     if (seedNames.length === 0) {
-      // critical: remove stale geometry when folder is empty
       this.clearMesh()
       return
     }
@@ -146,6 +254,13 @@ export class ShowHoneycombDrone extends Drone {
     const cells = this.buildCellsFromAxial(axial, seedNames, maxCells)
     if (cells.length === 0) {
       this.clearMesh()
+      return
+    }
+
+    const nextCellsKey = this.buildCellsKey(cells)
+
+    // note: if nothing changed, avoid rebuilding geometry/shader
+    if (nextCellsKey === this.renderedCellsKey && cells.length === this.renderedCount) {
       return
     }
 
@@ -168,24 +283,14 @@ export class ShowHoneycombDrone extends Drone {
     }
 
     const labelTex = this.atlas.getAtlasTexture()
-    if (!this.hasBindableSource(baseTex) || !this.hasBindableSource(labelTex)) {
-      this.rebuildRenderResources(host.app.renderer)
-      this.renderQueued = true
-      return
-    }
 
+    // note: warm atlas uvs
     for (const c of cells) this.atlas.getLabelUV(c.label)
 
     const geom = this.buildFillQuadGeometry(cells, circumRadiusPx, gapPx, quadHalfW, quadHalfH)
 
     if (!this.shader) {
-      this.shader = new HexSdfTextureShader(
-        baseTex,
-        labelTex,
-        quadW,
-        quadH,
-        circumRadiusPx
-      )
+      this.shader = new HexSdfTextureShader(baseTex, labelTex, quadW, quadH, circumRadiusPx)
     } else {
       try {
         this.shader.setBaseTexture(baseTex)
@@ -199,22 +304,18 @@ export class ShowHoneycombDrone extends Drone {
       }
     }
 
+    // note: apply geometry
     if (!this.mesh) {
-      this.mesh = new Mesh({
-        geometry: geom as any,
-        shader: (this.shader as any).shader,
-        texture: baseTex as any
-      } as any)
-
+      this.mesh = new Mesh({ geometry: geom as any, shader: (this.shader as any).shader, texture: baseTex as any } as any)
       this.layer.addChild(this.mesh as any)
     } else {
       if (this.geom) this.geom.destroy(true)
-
       this.mesh.geometry = geom
       this.mesh.shader = (this.shader as any).shader
       if ('texture' in this.mesh) this.mesh.texture = baseTex
     }
 
+    // note: keep centered
     if (this.mesh?.getLocalBounds) {
       this.mesh.position.set(0, 0)
       const b = this.mesh.getLocalBounds()
@@ -222,11 +323,9 @@ export class ShowHoneycombDrone extends Drone {
     }
 
     this.geom = geom
+    this.renderedCellsKey = nextCellsKey
+    this.renderedCount = cells.length
   }
-
-  // -------------------------------------------------
-  // listeners
-  // -------------------------------------------------
 
   private ensureListeners = (): void => {
     if (this.listening) return
@@ -236,13 +335,8 @@ export class ShowHoneycombDrone extends Drone {
       this.requestRender()
     }
 
-    // single source-of-truth visual refresh event
     window.addEventListener('synchronize', mark)
   }
-
-  // -------------------------------------------------
-  // cleanup
-  // -------------------------------------------------
 
   private clearMesh = (): void => {
     if (this.mesh && this.layer) {
@@ -256,6 +350,8 @@ export class ShowHoneycombDrone extends Drone {
 
     this.mesh = null
     this.geom = null
+    this.renderedCellsKey = ''
+    this.renderedCount = 0
   }
 
   private readonly rebuildRenderResources = (renderer: unknown): void => {
@@ -265,15 +361,6 @@ export class ShowHoneycombDrone extends Drone {
     this.atlas = new HexLabelAtlas(renderer, 128, 8, 8)
     this.atlasRenderer = renderer
   }
-
-  private readonly hasBindableSource = (t: any): boolean => {
-    const source = t?.source ?? t?.baseTexture?.source ?? t?.texture?.source
-    return !!source && typeof source.on === 'function'
-  }
-
-  // -------------------------------------------------
-  // helpers
-  // -------------------------------------------------
 
   private ensureTexture = async (url: string): Promise<Texture | null> => {
     if (this.tex) return this.tex
@@ -314,18 +401,18 @@ export class ShowHoneycombDrone extends Drone {
     return out
   }
 
+  private buildCellsKey = (cells: SeedCell[]): string => {
+    let s = ''
+    for (const c of cells) s += `${c.q},${c.r}:${c.label}|`
+    return s
+  }
+
   private axialToPixel = (q: number, r: number, s: number) => ({
     x: Math.sqrt(3) * s * (q + r / 2),
     y: s * 1.5 * r
   })
 
-  private buildFillQuadGeometry(
-    cells: SeedCell[],
-    r: number,
-    gap: number,
-    hw: number,
-    hh: number
-  ): Geometry {
+  private buildFillQuadGeometry(cells: SeedCell[], r: number, gap: number, hw: number, hh: number): Geometry {
     const spacing = r + gap
 
     const pos = new Float32Array(cells.length * 8)
