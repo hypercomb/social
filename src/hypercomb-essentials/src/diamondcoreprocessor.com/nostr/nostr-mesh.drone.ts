@@ -38,6 +38,7 @@ type MeshStats = {
 type MeshLog = { atMs: number; type: string; relay?: string; sig?: string; subId?: string; kind?: number; note?: string; data?: any }
 
 type RelayBackoff = { attempts: number; nextAtMs: number; timer?: number }
+type SigReadyWaiter = { resolve: () => void; timer?: number }
 
 type CachedItem = { relay: string; sig: string; event: NostrEvent; payload: any; receivedAtMs: number; createdAtMs: number }
 type MeshExpiryRule = {
@@ -86,6 +87,7 @@ export class NostrMeshDrone extends Drone {
 
   // note: ttl-backed cache per sig
   private itemsBySig = new Map<string, CachedItem[]>()
+  private readyWaitersBySig = new Map<string, SigReadyWaiter[]>()
 
   // note: dedupe across relays (drops repeated ids)
   private recentIds: string[] = []
@@ -222,6 +224,37 @@ export class NostrMeshDrone extends Drone {
       .sort((a, b) => (b.createdAtMs || b.receivedAtMs) - (a.createdAtMs || a.receivedAtMs))
 
     return sorted.map(i => ({ relay: i.relay, sig: i.sig, event: i.event, payload: i.payload }))
+  }
+
+  // note: await initial cache readiness for a signature
+  // resolves when first matching event arrives, relay sends EOSE, or timeout elapses
+  public awaitReadyForSig = async (sig: string, timeoutMs = 900): Promise<void> => {
+    this.ensureStartedNow()
+
+    const s = String(sig ?? '').trim()
+    if (!s) return
+
+    this.ensureStartedForSig(s)
+    this.pruneSigExpired(s)
+
+    const existing = this.itemsBySig.get(s)
+    if (existing && existing.length > 0) return
+
+    await new Promise<void>((resolve) => {
+      const list = this.readyWaitersBySig.get(s) ?? []
+      const waiter: SigReadyWaiter = { resolve }
+
+      const t = Number(timeoutMs ?? 0)
+      if (Number.isFinite(t) && t > 0) {
+        waiter.timer = window.setTimeout(() => {
+          this.removeReadyWaiter(s, waiter)
+          resolve()
+        }, Math.floor(t))
+      }
+
+      list.push(waiter)
+      this.readyWaitersBySig.set(s, list)
+    })
   }
 
   public stop = (): void => {
@@ -547,6 +580,16 @@ export class NostrMeshDrone extends Drone {
       return
     }
 
+    if (type === 'EOSE') {
+      const subId = String(msg[1] ?? '')
+      const bucket = this.bucketsBySubId.get(subId)
+      if (bucket) this.resolveReadyWaiters(bucket.sig)
+
+      this.stats.msgOtherIn++
+      if (this.debug) this.note('in:eose', relay, bucket?.sig, subId)
+      return
+    }
+
     if (type !== 'EVENT') {
       this.stats.msgOtherIn++
       if (this.debug) this.note('in:other', relay, undefined, undefined, undefined, msg)
@@ -585,6 +628,7 @@ export class NostrMeshDrone extends Drone {
 
     // note: cache first so heartbeat queries see it immediately
     this.cacheItem(relay, bucket.sig, evt, payload)
+    this.resolveReadyWaiters(bucket.sig)
 
     const out: MeshEvt = { relay, sig: bucket.sig, event: evt, payload }
 
@@ -927,6 +971,31 @@ export class NostrMeshDrone extends Drone {
     }
 
     return this.ttlMs
+  }
+
+  private resolveReadyWaiters = (sig: string): void => {
+    const list = this.readyWaitersBySig.get(sig)
+    if (!list || list.length === 0) return
+
+    this.readyWaitersBySig.delete(sig)
+
+    for (const waiter of list) {
+      if (waiter.timer) {
+        try { clearTimeout(waiter.timer) } catch { /* ignore */ }
+      }
+      try { waiter.resolve() } catch { /* ignore */ }
+    }
+  }
+
+  private removeReadyWaiter = (sig: string, waiter: SigReadyWaiter): void => {
+    const list = this.readyWaitersBySig.get(sig)
+    if (!list || list.length === 0) return
+
+    const idx = list.indexOf(waiter)
+    if (idx < 0) return
+
+    list.splice(idx, 1)
+    if (list.length === 0) this.readyWaitersBySig.delete(sig)
   }
 }
 

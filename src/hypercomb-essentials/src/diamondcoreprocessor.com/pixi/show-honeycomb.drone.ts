@@ -17,6 +17,7 @@ type MeshEvt = { relay: string; sig: string; event: any; payload: any }
 type MeshSub = { close: () => void }
 type MeshApi = {
   ensureStartedForSig: (sig: string) => void
+  awaitReadyForSig?: (sig: string, timeoutMs?: number) => Promise<void>
   getNonExpired: (sig: string) => MeshEvt[]
   publish?: (kind: number, sig: string, payload: any, extraTags?: string[][]) => Promise<boolean>
   subscribe?: (sig: string, cb: (e: MeshEvt) => void) => MeshSub
@@ -48,20 +49,38 @@ export class ShowHoneycombDrone extends Drone {
   private meshSeedsRev = 0
   private meshSeeds: string[] = []
   private meshSub: MeshSub | null = null
-  private lastPublishedSig = ''
-  private lastPublishedSeedDigest = ''
+  private readonly publisherId: string = (() => {
+    const key = 'hc:show-honeycomb:publisher-id'
+    try {
+      const existing = String(localStorage.getItem(key) ?? '').trim()
+      if (existing) return existing
 
-  protected override heartbeat = async (): Promise<void> => {
+      const next = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+        ? crypto.randomUUID()
+        : `pub-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+
+      localStorage.setItem(key, next)
+      return next
+    } catch {
+      return `pub-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+    }
+  })()
+  private snapshotPostedBySig = new Set<string>()
+  private lastLocalSeedsBySig = new Map<string, string[]>()
+  private lastPublishedGrammarSig = ''
+  private lastPublishedGrammarSeed = ''
+
+  protected override heartbeat = async (grammar: string = ''): Promise<void> => {
     this.ensureListeners()
 
     // note: always compute mesh seeds on every heartbeat
-    await this.refreshMeshSeeds()
+    await this.refreshMeshSeeds(grammar)
 
     // note: live heartbeat path; no bootstrap short-circuit
     this.requestRender()
   }
 
-  private refreshMeshSeeds = async (): Promise<void> => {
+  private refreshMeshSeeds = async (grammar: string = ''): Promise<void> => {
 
     const lineage = window.ioc.get('Lineage') as any
     const mesh = this.tryGetMesh()
@@ -71,8 +90,8 @@ export class ShowHoneycombDrone extends Drone {
     const sig = signatureLocation.sig
 
     if (sig !== this.meshSig) {
-      const nakPayload = JSON.stringify({ seeds: ['external.alpha'], publishedAtMs: Date.now() })
-      const nakCmd = `nak event wss://nos.lol --kind 29010 --tag "x=${sig}" --content '${nakPayload}'`
+      const nakPayload = 'external.alpha,external.beta'
+      const nakCmd = `nak event wss://nos.lol --kind 29010 --tag "x=${sig}" --content "${nakPayload}"`
       ; (window as any).__showHoneycombNakCommand = nakCmd
       console.log('[show-honeycomb] signature location', signatureLocation.key)
       console.log('[show-honeycomb] nak command (copy from window.__showHoneycombNakCommand):', nakCmd)
@@ -80,7 +99,9 @@ export class ShowHoneycombDrone extends Drone {
 
     if (!sig) return
 
-    if (sig !== this.meshSig) {
+    const sigChanged = sig !== this.meshSig
+
+    if (sigChanged) {
       if (this.meshSub) {
         try { this.meshSub.close() } catch { /* ignore */ }
         this.meshSub = null
@@ -103,8 +124,13 @@ export class ShowHoneycombDrone extends Drone {
     // note: ensure relays are queried for this sig
     mesh.ensureStartedForSig(sig)
 
+    // note: on signature changes, wait briefly for relay fill so first render can include remote items
+    if (sigChanged && typeof mesh.awaitReadyForSig === 'function') {
+      await mesh.awaitReadyForSig(sig, 1000)
+    }
+
     // note: publish local filesystem seeds for this sig when changed
-    await this.publishLocalSeeds(lineage, mesh, sig)
+    await this.publishLocalSeeds(lineage, mesh, sig, grammar)
 
     // note: get non-expired items (mesh owns ttl)
     const items = mesh.getNonExpired(sig)
@@ -124,17 +150,34 @@ export class ShowHoneycombDrone extends Drone {
     const set = new Set<string>()
     for (const it of items) {
       const p = it?.payload
+
+      const tagPublisherId = this.readPublisherIdFromEvent(it?.event)
+      const payloadPublisherId = String(p?.publisherId ?? p?.publisher ?? p?.clientId ?? '').trim()
+      if ((payloadPublisherId && payloadPublisherId === this.publisherId) || (tagPublisherId && tagPublisherId === this.publisherId)) {
+        continue
+      }
+
+      const fromContent = this.extractSeedsFromEventContent(it?.event?.content)
+      if (fromContent.length > 0) {
+        for (const seed of fromContent) set.add(seed)
+        continue
+      }
+
       if (Array.isArray(p)) {
         for (const x of p) {
           const s = String(x ?? '').trim()
-          if (s) set.add(s)
+          this.addCsvSeeds(set, s)
         }
         continue
       }
 
       if (typeof p === 'string') {
-        const s = p.trim()
-        if (s) set.add(s)
+        const parsed = this.extractSeedsFromEventContent(p)
+        if (parsed.length > 0) {
+          for (const seed of parsed) set.add(seed)
+        } else if (!this.looksStructuredContent(p)) {
+          this.addCsvSeeds(set, p)
+        }
         continue
       }
 
@@ -142,9 +185,12 @@ export class ShowHoneycombDrone extends Drone {
       if (Array.isArray(seedsArr)) {
         for (const x of seedsArr) {
           const s = String(x ?? '').trim()
-          if (s) set.add(s)
+          this.addCsvSeeds(set, s)
         }
       }
+
+      const singleSeed = String(p?.seed ?? '').trim()
+      this.addCsvSeeds(set, singleSeed)
     }
 
     const next = Array.from(set)
@@ -176,11 +222,8 @@ export class ShowHoneycombDrone extends Drone {
       ? seeds.map(s => String(s ?? '').trim()).filter(s => s.length > 0)
       : []
 
-    const ok = await mesh.publish(29010, signatureLocation.sig, {
-      seeds: normalized,
-      publishedAtMs: Date.now(),
-      source: 'show-honeycomb:explicit'
-    })
+    const payload = normalized.join(',')
+    const ok = await mesh.publish(29010, signatureLocation.sig, payload, [['publisher', this.publisherId]])
 
     await this.refreshMeshSeeds()
     this.requestRender()
@@ -218,7 +261,7 @@ export class ShowHoneycombDrone extends Drone {
   }
 
 
-  private publishLocalSeeds = async (lineage: any, mesh: MeshApi, sig: string): Promise<void> => {
+  private publishLocalSeeds = async (lineage: any, mesh: MeshApi, sig: string, grammar: string = ''): Promise<void> => {
     if (typeof mesh.publish !== 'function') return
     if (!lineage?.explorerDir) return
 
@@ -226,19 +269,136 @@ export class ShowHoneycombDrone extends Drone {
     if (!dir) return
 
     const localSeeds = await this.listSeedFolders(dir)
-    const digest = localSeeds.join('|')
+    const previousSeeds = this.lastLocalSeedsBySig.get(sig) ?? []
 
-    if (sig === this.lastPublishedSig && digest === this.lastPublishedSeedDigest) return
-
-    const payload = {
-      seeds: localSeeds,
-      publishedAtMs: Date.now()
+    // 1) one snapshot post per signature: full array of items
+    if (!this.snapshotPostedBySig.has(sig)) {
+      await mesh.publish(29010, sig, {
+        seeds: localSeeds,
+        publisherId: this.publisherId,
+        mode: 'snapshot',
+        publishedAtMs: Date.now()
+      }, [['publisher', this.publisherId], ['mode', 'snapshot']])
+      this.snapshotPostedBySig.add(sig)
     }
 
-    await mesh.publish(29010, sig, payload)
+    // 2) thereafter post only newly added single items
+    const prevSet = new Set(previousSeeds)
+    for (const seed of localSeeds) {
+      if (prevSet.has(seed)) continue
+      await mesh.publish(29010, sig, seed, [['publisher', this.publisherId], ['mode', 'delta']])
+    }
 
-    this.lastPublishedSig = sig
-    this.lastPublishedSeedDigest = digest
+    this.lastLocalSeedsBySig.set(sig, localSeeds)
+
+    const grammarSeed = this.toGrammarSeed(grammar)
+    const grammarIsNew = grammarSeed && (sig !== this.lastPublishedGrammarSig || grammarSeed !== this.lastPublishedGrammarSeed)
+    if (grammarIsNew) {
+      await mesh.publish(29010, sig, grammarSeed, [['publisher', this.publisherId], ['source', 'show-honeycomb:grammar-heartbeat']])
+
+      this.lastPublishedGrammarSig = sig
+      this.lastPublishedGrammarSeed = grammarSeed
+    }
+  }
+
+  private addCsvSeeds = (set: Set<string>, raw: string): void => {
+    const text = String(raw ?? '').trim()
+    if (!text) return
+
+    const parts = text.split(',')
+    for (const part of parts) {
+      const seed = String(part ?? '').trim()
+      if (seed) set.add(seed)
+    }
+  }
+
+  private readPublisherIdFromEvent = (evt: any): string => {
+    const tags = evt?.tags
+    if (!Array.isArray(tags)) return ''
+
+    for (const t of tags) {
+      if (!Array.isArray(t) || t.length < 2) continue
+      const k = String(t[0] ?? '').trim().toLowerCase()
+      if (k !== 'publisher' && k !== 'p') continue
+
+      const v = String(t[1] ?? '').trim()
+      if (v) return v
+    }
+
+    return ''
+  }
+
+  private extractSeedsFromEventContent = (content: any): string[] => {
+    const raw = String(content ?? '').trim()
+    if (!raw) return []
+
+    // direct CSV content (preferred): "a,b,c"
+    if (!raw.startsWith('{') && !raw.startsWith('[') && !raw.startsWith('"')) {
+      return this.splitCsv(raw)
+    }
+
+    // JSON / structured content
+    try {
+      const parsed = JSON.parse(raw)
+
+      if (typeof parsed === 'string') return this.splitCsv(parsed)
+
+      if (Array.isArray(parsed)) {
+        const out: string[] = []
+        for (const x of parsed) out.push(...this.splitCsv(String(x ?? '')))
+        return out
+      }
+
+      if (parsed && typeof parsed === 'object') {
+        const out: string[] = []
+        const seeds = (parsed as any).seeds
+        if (Array.isArray(seeds)) {
+          for (const x of seeds) out.push(...this.splitCsv(String(x ?? '')))
+        }
+
+        const seed = String((parsed as any).seed ?? '').trim()
+        if (seed) out.push(...this.splitCsv(seed))
+        return out
+      }
+    } catch {
+      // tolerant fallback for non-strict object-like payloads:
+      // {seeds:[hello2,world2],pubs:123}
+      const seedsMatch = raw.match(/seeds\s*:\s*\[([^\]]*)\]/i)
+      if (seedsMatch && seedsMatch[1]) {
+        return this.splitCsv(String(seedsMatch[1] ?? ''))
+      }
+
+      // do not split structured text blindly into junk tiles
+      if (this.looksStructuredContent(raw)) return []
+
+      // non-structured plain text fallback
+      return this.splitCsv(raw)
+    }
+
+    return []
+  }
+
+  private looksStructuredContent = (raw: string): boolean => {
+    const s = String(raw ?? '').trim()
+    if (!s) return false
+    return s.startsWith('{') || s.startsWith('[') || s.startsWith('"')
+  }
+
+  private splitCsv = (raw: string): string[] => {
+    const out: string[] = []
+    const parts = String(raw ?? '').split(',')
+    for (const part of parts) {
+      const seed = String(part ?? '').trim()
+      if (seed) out.push(seed)
+    }
+    return out
+  }
+
+  private toGrammarSeed = (grammar: string): string => {
+    const raw = String(grammar ?? '').trim()
+    if (!raw) return ''
+    if (raw.startsWith('show-honeycomb:')) return ''
+    return raw
   }
 
   private readonly requestRender = (): void => {
