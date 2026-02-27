@@ -110,9 +110,10 @@ export class HexSdfTextureShader {
       vec4 base = texture2D(u_tex0, vUV);
 
       vec2 luv = mix(vLabelUV.xy, vLabelUV.zw, vUV);
-      vec4 label = texture2D(u_label, luv);
+      float labelAlpha = texture2D(u_label, luv).a;
+      vec4 label = vec4(1.0, 1.0, 1.0, labelAlpha);
 
-      gl_FragColor = mix(base, label, label.a);
+      gl_FragColor = mix(base, label, labelAlpha);
     }
   `
 }
