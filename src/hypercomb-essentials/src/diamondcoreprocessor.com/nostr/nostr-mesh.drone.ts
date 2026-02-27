@@ -7,6 +7,8 @@
 
 import { Drone } from '@hypercomb/core'
 
+const HARD_RELAY = 'wss://nos.lol'
+
 type NostrEvent = { id?: string; pubkey?: string; created_at: number; kind: number; tags: string[][]; content: string; sig?: string }
 type MeshEvt = { relay: string; sig: string; event: NostrEvent; payload: any }
 type MeshCb = (e: MeshEvt) => void
@@ -51,8 +53,13 @@ export class NostrMeshDrone extends Drone {
   // config
   // -----------------------------
 
-  // note: production default is empty, configure at runtime or via localstorage
-  private relays: string[] = []
+  // note: default public relay (can be overridden by localstorage/configureRelays)
+  private relays: string[] = [HARD_RELAY]
+
+  private forceHardRelay = (): void => {
+    this.relays = [HARD_RELAY]
+    try { localStorage.setItem('hc:nostrmesh:relays', JSON.stringify([HARD_RELAY])) } catch {}
+  }
 
   // note: set to null to accept any kind matching x
   private kinds: number[] | null = [29010]
@@ -108,24 +115,16 @@ export class NostrMeshDrone extends Drone {
   // public api
   // -----------------------------
 
-  public configureRelays = (urls: string[], persist = true): void => {
-    this.ensureStartedNow()
-
-    if (!Array.isArray(urls) || urls.length === 0) return
-
-    const next = urls
-      .filter(u => typeof u === 'string')
-      .map(u => u.trim())
-      .filter(u => u.startsWith('ws://') || u.startsWith('wss://'))
-
-    const uniq = Array.from(new Set(next))
-    if (uniq.length === 0) return
-
-    this.relays = uniq
-    if (persist) this.saveRelays(uniq)
-
-    this.note('relays:set', undefined, undefined, undefined, undefined, uniq)
+  public configureRelays = (_urls: string[], persist = true): void => {
+    this.relays = [HARD_RELAY]
+    if (persist) {
+      try { localStorage.setItem('hc:nostrmesh:relays', JSON.stringify([HARD_RELAY])) } catch {}
+    }
     this.reconnectAll()
+  }
+
+  private loadRelayConfig = (): void => {
+    this.forceHardRelay()
   }
 
   public configureKinds = (kinds: number[] | null, persist = true): void => {
@@ -397,8 +396,8 @@ export class NostrMeshDrone extends Drone {
   // -----------------------------
 
   private connectAll = (): void => {
-    if (this.stopped) return
-    for (const url of this.relays) this.ensureSocket(url)
+    this.forceHardRelay()
+    this.ensureSocket(HARD_RELAY)
   }
 
   private reconnectAll = (): void => {
@@ -425,71 +424,72 @@ export class NostrMeshDrone extends Drone {
     }
   }
 
-  private ensureSocket = (url: string): void => {
+  private ensureSocket = (relay: string): void => {
+    if (relay !== HARD_RELAY) return
     if (this.stopped) return
-    if (this.sockets.has(url)) return
-    if (!this.canAttemptRelay(url)) return
+    if (this.sockets.has(relay)) return
+    if (!this.canAttemptRelay(relay)) return
 
     const now = Date.now()
-    const st = this.backoff.get(url)
+    const st = this.backoff.get(relay)
     if (st && st.nextAtMs > now) {
-      this.scheduleEnsure(url, st.nextAtMs - now)
+      this.scheduleEnsure(relay, st.nextAtMs - now)
       return
     }
 
     let ws: WebSocket
-    try { ws = new WebSocket(url) } catch { return }
+    try { ws = new WebSocket(relay) } catch { return }
 
-    this.sockets.set(url, ws)
-    this.note('socket:create', url)
+    this.sockets.set(relay, ws)
+    this.note('socket:create', relay)
 
     ws.onopen = () => {
       this.stats.socketsOpened++
-      this.note('socket:open', url)
+      this.note('socket:open', relay)
 
-      const b = this.backoff.get(url)
+      const b = this.backoff.get(relay)
       if (b) { b.attempts = 0; b.nextAtMs = 0 }
 
       // note: resubscribe everything on connect
-      for (const bucket of this.bucketsBySig.values()) this.sendReq(url, bucket)
+      for (const bucket of this.bucketsBySig.values()) this.sendReq(relay, bucket)
     }
 
     ws.onmessage = (msg) => {
-      this.onMessage(url, msg?.data)
+      this.onMessage(relay, msg?.data)
     }
 
     ws.onclose = () => {
       this.stats.socketsClosed++
-      this.note('socket:closed', url)
+      this.note('socket:closed', relay)
 
-      this.sockets.delete(url)
-      this.bumpBackoff(url)
-      this.ensureSocket(url)
+      this.sockets.delete(relay)
+      this.bumpBackoff(relay)
+      this.ensureSocket(relay)
     }
 
     ws.onerror = () => {
       this.stats.socketsErrors++
-      this.note('socket:error', url)
+      this.note('socket:error', relay)
 
       try { ws.close() } catch { /* ignore */ }
     }
   }
 
-  private scheduleEnsure = (url: string, delayMs: number): void => {
+  private scheduleEnsure = (relay: string, delayMs: number): void => {
     if (this.stopped) return
-    const st = this.backoff.get(url)
+    const st = this.backoff.get(relay)
     if (!st) return
     if (st.timer) return
 
     st.timer = window.setTimeout(() => {
       st.timer = undefined
-      this.ensureSocket(url)
+      this.ensureSocket(relay)
     }, Math.max(0, delayMs))
   }
 
-  private bumpBackoff = (url: string): void => {
+  private bumpBackoff = (relay: string): void => {
     const now = Date.now()
-    const st = this.backoff.get(url) ?? { attempts: 0, nextAtMs: 0 }
+    const st = this.backoff.get(relay) ?? { attempts: 0, nextAtMs: 0 }
 
     st.attempts = Math.min(10, st.attempts + 1)
 
@@ -497,21 +497,21 @@ export class NostrMeshDrone extends Drone {
     const jitter = Math.floor(Math.random() * 250)
     st.nextAtMs = now + base + jitter
 
-    this.backoff.set(url, st)
-    this.note('socket:backoff', url, undefined, undefined, undefined, { attempts: st.attempts, waitMs: base + jitter })
+    this.backoff.set(relay, st)
+    this.note('socket:backoff', relay, undefined, undefined, undefined, { attempts: st.attempts, waitMs: base + jitter })
   }
 
-  private canAttemptRelay = (url: string): boolean => {
-    if (!this.isLoopbackRelay(url)) return true
+  private canAttemptRelay = (relay: string): boolean => {
+    if (!this.isLoopbackRelay(relay)) return true
     if (this.allowLoopbackRelay()) return true
 
-    this.note('socket:skip-loopback-relay', url)
+    this.note('socket:skip-loopback-relay', relay)
     return false
   }
 
-  private isLoopbackRelay = (url: string): boolean => {
+  private isLoopbackRelay = (relay: string): boolean => {
     try {
-      const u = new URL(url)
+      const u = new URL(relay)
       const h = String(u.hostname ?? '').trim().toLowerCase()
       return h === 'localhost' || h === '127.0.0.1' || h === '::1'
     } catch {
@@ -930,4 +930,6 @@ export class NostrMeshDrone extends Drone {
   }
 }
 
-window.ioc.register('NostrMeshDrone', new NostrMeshDrone())
+const meshDrone = new NostrMeshDrone()
+window.ioc.register('NostrMeshDrone', meshDrone)
+window.ioc.register('MeshDrone', meshDrone)

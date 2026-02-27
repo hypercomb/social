@@ -109,12 +109,10 @@ export class App {
       const segs = Array.isArray(segsRaw)
         ? segsRaw.map((x: unknown) => String(x ?? '').trim()).filter((x: string) => x.length > 0)
         : []
-      const lineageKey = segs.length > 0
-        ? `/${segs.join('/')}`
-        : String(lineage?.explorerLabel?.() ?? window.location.pathname ?? '/')
-
-      const showSeedDiscriminator = 'seed:list:v1'
-      const showKey = `${showDomain}-${lineageKey}-${showSeedDiscriminator}`
+      const lineagePath = segs.join('/')
+      const showKey = lineagePath
+        ? `${showDomain}/${lineagePath}/seed`
+        : `${showDomain}/seed`
       const showBytes = new TextEncoder().encode(showKey)
       const showSig = await SignatureService.sign(showBytes.buffer)
 
@@ -124,10 +122,9 @@ export class App {
       await mesh.publish(29010, showSig, { seeds: sampleSeedsA, publishedAtMs: Date.now() })
       await mesh.publish(29010, showSig, { seeds: sampleSeedsB, publishedAtMs: Date.now() + 1 })
 
-      console.log('[show-sim] published seeds for show sig', { showSig, lineageKey, showDomain })
+      console.log('[show-sim] published seeds for show sig', { showSig, showKey, showDomain })
 
       await show.encounter('simulate-show-cells-pickup')
-      window.dispatchEvent(new CustomEvent('synchronize', { detail: { source: 'app:show-sim' } }))
 
 
       // 6) final assertion (microtask flush)

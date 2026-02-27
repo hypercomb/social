@@ -34,6 +34,7 @@ export class PixiHostDrone extends Drone {
     host.style.inset = '0'
     host.style.zIndex = '59989'
     host.style.pointerEvents = 'none'
+    
     document.body.appendChild(host)
 
     // -------------------------------------------------
@@ -49,6 +50,7 @@ export class PixiHostDrone extends Drone {
       autoDensity: true
     })
 
+    app.stage.scale.set(1.8, 1.8)
     host.appendChild(app.canvas)
 
     // -------------------------------------------------

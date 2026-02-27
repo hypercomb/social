@@ -1,5 +1,5 @@
 // hypercomb-essentials/src/diamondcoreprocessor.com/pixi/show-honeycomb.drone.ts
-// upgrade: heartbeat derives signed sig(domain-lineage-seed), pulls non-expired mesh items, unions with local seeds, and renders as tiles
+// upgrade: heartbeat derives signed sig(domain/segment(s)/seed), pulls non-expired mesh items, unions with local seeds, and renders as tiles
 // - expiry rules are owned by NostrMeshDrone
 // - union keeps filesystem seeds as your own local truth, mesh adds shared seeds
 // - redraw stays event-driven via synchronize, but heartbeat also triggers synchronize
@@ -14,7 +14,13 @@ type Axial = { q: number; r: number }
 type SeedCell = { q: number; r: number; label: string }
 
 type MeshEvt = { relay: string; sig: string; event: any; payload: any }
-type MeshApi = { ensureStartedForSig: (sig: string) => void; getNonExpired: (sig: string) => MeshEvt[] }
+type MeshSub = { close: () => void }
+type MeshApi = {
+  ensureStartedForSig: (sig: string) => void
+  getNonExpired: (sig: string) => MeshEvt[]
+  publish?: (kind: number, sig: string, payload: any, extraTags?: string[][]) => Promise<boolean>
+  subscribe?: (sig: string, cb: (e: MeshEvt) => void) => MeshSub
+}
 
 export class ShowHoneycombDrone extends Drone {
   private host?: PixiHostDrone
@@ -41,15 +47,15 @@ export class ShowHoneycombDrone extends Drone {
   private meshSig = ''
   private meshSeedsRev = 0
   private meshSeeds: string[] = []
+  private meshSub: MeshSub | null = null
+  private lastPublishedSig = ''
+  private lastPublishedSeedDigest = ''
 
   protected override heartbeat = async (): Promise<void> => {
     this.ensureListeners()
 
     // note: always compute mesh seeds on every heartbeat
     await this.refreshMeshSeeds()
-
-    // note: force redraw contract
-    window.dispatchEvent(new CustomEvent('synchronize', { detail: { source: 'show-honeycomb:heartbeat' } }))
 
     // note: live heartbeat path; no bootstrap short-circuit
     this.requestRender()
@@ -58,36 +64,47 @@ export class ShowHoneycombDrone extends Drone {
   private refreshMeshSeeds = async (): Promise<void> => {
 
     const lineage = window.ioc.get('Lineage') as any
-    const mesh = window.ioc.get('NostrMeshDrone') as any as MeshApi
+    const mesh = this.tryGetMesh()
     if (!lineage || !mesh) return
 
-    // note: domain-lineage-seed discriminator
-    const domain = String(lineage?.domain?.() ?? lineage?.domainLabel?.() ?? 'hypercomb.io')
-    const explorerSegmentsRaw = lineage?.explorerSegments?.()
-    const explorerSegments = Array.isArray(explorerSegmentsRaw)
-      ? explorerSegmentsRaw
-        .map((x: unknown) => String(x ?? '').trim())
-        .filter((x: string) => x.length > 0)
-      : []
-    const lineageKey = explorerSegments.length > 0
-      ? `/${explorerSegments.join('/')}`
-      : String(lineage?.explorerLabel?.() ?? window.location.pathname ?? '/')
-    const seed = 'seed:list:v1'
+    const signatureLocation = await this.computeSignatureLocation(lineage)
+    const sig = signatureLocation.sig
 
-    const key = `${domain}-${lineageKey}-${seed}`
-    const bytes = new TextEncoder().encode(key)
-    const sig = await SignatureService.sign(bytes.buffer)
+    if (sig !== this.meshSig) {
+      const nakPayload = JSON.stringify({ seeds: ['external.alpha'], publishedAtMs: Date.now() })
+      const nakCmd = `nak event wss://nos.lol --kind 29010 --tag "x=${sig}" --content '${nakPayload}'`
+      ; (window as any).__showHoneycombNakCommand = nakCmd
+      console.log('[show-honeycomb] signature location', signatureLocation.key)
+      console.log('[show-honeycomb] nak command (copy from window.__showHoneycombNakCommand):', nakCmd)
+    }
 
     if (!sig) return
 
     if (sig !== this.meshSig) {
+      if (this.meshSub) {
+        try { this.meshSub.close() } catch { /* ignore */ }
+        this.meshSub = null
+      }
+
       this.meshSig = sig
       this.meshSeeds = []
       this.meshSeedsRev++
+
+      if (typeof mesh.subscribe === 'function') {
+        this.meshSub = mesh.subscribe(sig, () => {
+          void (async () => {
+            await this.refreshMeshSeeds()
+            this.requestRender()
+          })()
+        })
+      }
     }
 
-    // note: ensure relays are queried for this sig (no external subscribe required)
+    // note: ensure relays are queried for this sig
     mesh.ensureStartedForSig(sig)
+
+    // note: publish local filesystem seeds for this sig when changed
+    await this.publishLocalSeeds(lineage, mesh, sig)
 
     // note: get non-expired items (mesh owns ttl)
     const items = mesh.getNonExpired(sig)
@@ -112,6 +129,12 @@ export class ShowHoneycombDrone extends Drone {
           const s = String(x ?? '').trim()
           if (s) set.add(s)
         }
+        continue
+      }
+
+      if (typeof p === 'string') {
+        const s = p.trim()
+        if (s) set.add(s)
         continue
       }
 
@@ -141,6 +164,83 @@ export class ShowHoneycombDrone extends Drone {
     }
   }
 
+  public publishExplicitSeedList = async (seeds: string[]): Promise<boolean> => {
+    const lineage = window.ioc.get('Lineage') as any
+    const mesh = this.tryGetMesh()
+    if (!lineage || !mesh || typeof mesh.publish !== 'function') return false
+
+    const signatureLocation = await this.computeSignatureLocation(lineage)
+    if (!signatureLocation.sig) return false
+
+    const normalized = Array.isArray(seeds)
+      ? seeds.map(s => String(s ?? '').trim()).filter(s => s.length > 0)
+      : []
+
+    const ok = await mesh.publish(29010, signatureLocation.sig, {
+      seeds: normalized,
+      publishedAtMs: Date.now(),
+      source: 'show-honeycomb:explicit'
+    })
+
+    await this.refreshMeshSeeds()
+    this.requestRender()
+
+    return !!ok
+  }
+
+  private computeSignatureLocation = async (lineage: any): Promise<{ key: string; sig: string }> => {
+    const domain = String(lineage?.domain?.() ?? lineage?.domainLabel?.() ?? 'hypercomb.io')
+    const explorerSegmentsRaw = lineage?.explorerSegments?.()
+    const explorerSegments = Array.isArray(explorerSegmentsRaw)
+      ? explorerSegmentsRaw
+        .map((x: unknown) => String(x ?? '').trim())
+        .filter((x: string) => x.length > 0)
+      : []
+
+    const lineagePath = explorerSegments.join('/')
+    const key = lineagePath ? `${domain}/${lineagePath}/seed` : `${domain}/seed`
+    const bytes = new TextEncoder().encode(key)
+    const sig = await SignatureService.sign(bytes.buffer)
+
+    return { key, sig }
+  }
+
+  private tryGetMesh = (): MeshApi | null => {
+    try {
+      return window.ioc.get('MeshDrone') as any as MeshApi
+    } catch {
+      try {
+        return window.ioc.get('NostrMeshDrone') as any as MeshApi
+      } catch {
+        return null
+      }
+    }
+  }
+
+
+  private publishLocalSeeds = async (lineage: any, mesh: MeshApi, sig: string): Promise<void> => {
+    if (typeof mesh.publish !== 'function') return
+    if (!lineage?.explorerDir) return
+
+    const dir = await lineage.explorerDir()
+    if (!dir) return
+
+    const localSeeds = await this.listSeedFolders(dir)
+    const digest = localSeeds.join('|')
+
+    if (sig === this.lastPublishedSig && digest === this.lastPublishedSeedDigest) return
+
+    const payload = {
+      seeds: localSeeds,
+      publishedAtMs: Date.now()
+    }
+
+    await mesh.publish(29010, sig, payload)
+
+    this.lastPublishedSig = sig
+    this.lastPublishedSeedDigest = digest
+  }
+
   private readonly requestRender = (): void => {
     if (this.rendering) {
       this.renderQueued = true
@@ -167,6 +267,9 @@ export class ShowHoneycombDrone extends Drone {
       this.clearMesh()
       return
     }
+
+    // note: query mesh before building cells so first render includes latest shared seeds
+    await this.refreshMeshSeeds()
 
     const axial = window.ioc.get('AxialService') as any
     if (!axial?.items) {
@@ -336,6 +439,14 @@ export class ShowHoneycombDrone extends Drone {
     }
 
     window.addEventListener('synchronize', mark)
+
+    ; (window as any).showCellsPoc = {
+      publishSeeds: async (seeds: string[]) => this.publishExplicitSeedList(seeds),
+      signature: async () => {
+        const lineage = window.ioc.get('Lineage') as any
+        return await this.computeSignatureLocation(lineage)
+      }
+    }
   }
 
   private clearMesh = (): void => {
