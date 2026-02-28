@@ -31,6 +31,9 @@ export class OpfsExplorerComponent extends hypercomb {
   // -------------------------------------------------
 
   private static readonly SHOW_ALL_KEY = 'opfs-explorer.show-all'
+  private static readonly SHOW_ALL_USER_SET_KEY = 'opfs-explorer.show-all.user-set'
+  private static readonly LEGACY_SHOW_ALL_KEY = 'opfs-explorer.show-raw'
+  private static readonly SHOW_ALL_BOOTSTRAP_V2_KEY = 'opfs-explorer.show-all.bootstrap-v2'
   private static readonly COPY_MAX_BYTES = 250_000
   private static readonly INSTALL_SUFFIX = '-install'
   public domain: string = 'hypercomb.io'
@@ -53,9 +56,7 @@ export class OpfsExplorerComponent extends hypercomb {
   public readonly entries = signal<readonly ExplorerEntry[]>([])
   public newName = ''
 
-  public readonly showAll = signal(
-    localStorage.getItem(OpfsExplorerComponent.SHOW_ALL_KEY) === 'true'
-  )
+  public readonly showAll = signal(this.readInitialShowAll())
 
   public readonly directory = (): string => this.lineage.explorerLabel()
 
@@ -121,6 +122,7 @@ export class OpfsExplorerComponent extends hypercomb {
   public toggleShowAll = (): void => {
     const next = !this.showAll()
     this.showAll.set(next)
+    localStorage.setItem(OpfsExplorerComponent.SHOW_ALL_USER_SET_KEY, '1')
     localStorage.setItem(OpfsExplorerComponent.SHOW_ALL_KEY, String(next))
     this.requestRefresh()
   }
@@ -367,9 +369,35 @@ export class OpfsExplorerComponent extends hypercomb {
     if (name === '__location__') return true
     if (name === '__drones__') return true
     if (name === '__layers__') return true
+    if (name === '__dependencies__') return true
     if (name.startsWith('install-')) return true
     if (name.endsWith(OpfsExplorerComponent.INSTALL_SUFFIX)) return true
     return false
+  }
+
+  private readInitialShowAll(): boolean {
+    const userSet = localStorage.getItem(OpfsExplorerComponent.SHOW_ALL_USER_SET_KEY)
+    if (userSet !== '1') {
+      localStorage.setItem(OpfsExplorerComponent.SHOW_ALL_KEY, 'true')
+      return true
+    }
+
+    const bootstrapped = localStorage.getItem(OpfsExplorerComponent.SHOW_ALL_BOOTSTRAP_V2_KEY)
+    if (bootstrapped !== '1') {
+      localStorage.setItem(OpfsExplorerComponent.SHOW_ALL_BOOTSTRAP_V2_KEY, '1')
+      localStorage.setItem(OpfsExplorerComponent.SHOW_ALL_KEY, 'true')
+      return true
+    }
+
+    const current = localStorage.getItem(OpfsExplorerComponent.SHOW_ALL_KEY)
+    if (current === 'true') return true
+    if (current === 'false') return false
+
+    const legacy = localStorage.getItem(OpfsExplorerComponent.LEGACY_SHOW_ALL_KEY)
+    if (legacy === 'true') return true
+    if (legacy === 'false') return false
+
+    return true
   }
 
   private readonly resolveResourceLabel = async (name: string): Promise<string | null> => {

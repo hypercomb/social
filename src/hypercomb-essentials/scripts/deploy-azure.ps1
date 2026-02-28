@@ -13,6 +13,8 @@ $DistPath    = Join-Path $ProjectRoot "dist"
 
 $PackageSource = Join-Path $DistPath $Signature
 $PackageDest   = "content/$Signature"
+$LatestTxtPath = Join-Path $DistPath "latest.txt"
+$LatestJsonPath = Join-Path $DistPath "latest.json"
 
 $AccountName = "storagehypercomb"
 
@@ -62,8 +64,41 @@ if ($LASTEXITCODE -ne 0) {
   exit 1
 }
 
+Set-Content -Path $LatestTxtPath -Value $Signature -NoNewline -Encoding utf8
+$LatestJsonContent = '{{"signature":"{0}"}}' -f $Signature
+Set-Content -Path $LatestJsonPath -Value $LatestJsonContent -NoNewline -Encoding utf8
+
+az storage blob upload `
+  --account-name $AccountName `
+  --container-name content `
+  --name latest.txt `
+  --file $LatestTxtPath `
+  --auth-mode login `
+  --overwrite `
+  --no-progress
+
+if ($LASTEXITCODE -ne 0) {
+  Write-Error "latest.txt deployment failed"
+  exit 1
+}
+
+az storage blob upload `
+  --account-name $AccountName `
+  --container-name content `
+  --name latest.json `
+  --file $LatestJsonPath `
+  --auth-mode login `
+  --overwrite `
+  --no-progress
+
+if ($LASTEXITCODE -ne 0) {
+  Write-Error "latest.json deployment failed"
+  exit 1
+}
+
 Write-Host ""
 Write-Host "deployment complete"
 Write-Host "--------------------------------"
 Write-Host " package : https://$AccountName.blob.core.windows.net/$PackageDest/"
+Write-Host " latest  : https://$AccountName.blob.core.windows.net/content/latest.txt"
 Write-Host ""

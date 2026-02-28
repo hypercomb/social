@@ -28,6 +28,21 @@ self.addEventListener('fetch', (event) => {
   const method = (event.request.method || 'GET').toUpperCase()
   if (method !== 'GET' && method !== 'HEAD') return
 
+  if (url.pathname === '/house.png' || url.pathname === '/spw.png') {
+    event.respondWith(fetchUncachedAsset(event.request))
+    return
+  }
+
+  if (url.pathname === '/local.png') {
+    event.respondWith(fetchWithFallback(event.request, '/house.png'))
+    return
+  }
+
+  if (url.pathname === '/external.png') {
+    event.respondWith(fetchWithFallback(event.request, '/spw.png'))
+    return
+  }
+
   // ----------------------------------------
   // prod: opfs resolution by signature
   // ----------------------------------------
@@ -170,6 +185,44 @@ function readSignature(pathname) {
       : last
 
   return /^[a-f0-9]{64}$/i.test(token) ? token : null
+}
+
+async function fetchAlias(request, aliasPath) {
+  const aliasUrl = new URL(aliasPath, self.location.origin).toString()
+  const aliasRequest = new Request(aliasUrl, {
+    method: (request.method || 'GET').toUpperCase() === 'HEAD' ? 'HEAD' : 'GET',
+    headers: request.headers,
+    mode: 'same-origin',
+    credentials: 'same-origin',
+    cache: 'no-store',
+    redirect: 'follow'
+  })
+
+  const response = await fetch(aliasRequest)
+  return toHeadIfNeeded(request, response)
+}
+
+async function fetchWithFallback(request, fallbackPath) {
+  const primary = await fetchUncachedAsset(request)
+  if (primary && primary.ok) return primary
+  return await fetchAlias(request, fallbackPath)
+}
+
+async function fetchUncachedAsset(request) {
+  const method = (request.method || 'GET').toUpperCase()
+  const url = new URL(request.url)
+
+  const networkRequest = new Request(url.toString(), {
+    method: method === 'HEAD' ? 'HEAD' : 'GET',
+    headers: request.headers,
+    mode: 'same-origin',
+    credentials: 'same-origin',
+    cache: 'reload',
+    redirect: 'follow'
+  })
+
+  const response = await fetch(networkRequest)
+  return toHeadIfNeeded(request, response)
 }
 
 /* ----------------------------------------
