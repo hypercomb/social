@@ -33,19 +33,16 @@ jobs:
         run: npm ci
 
       - name: Login to Azure for essentials publish
-        if: ${{ secrets.AZURE_CREDENTIALS_LIVE != '' }}
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS_LIVE }}
 
       - name: Publish essentials package + latest pointers
-        if: ${{ secrets.AZURE_CREDENTIALS_LIVE != '' }}
         shell: pwsh
         working-directory: src/hypercomb-essentials
         run: npm run build
 
       - name: Verify latest essentials pointer
-        if: ${{ secrets.AZURE_CREDENTIALS_LIVE != '' }}
         run: |
           set -euo pipefail
           SIG=$(curl -fsSL https://storagehypercomb.blob.core.windows.net/content/latest.txt | tr -d '\357\273\277' | tr -d '\r\n')
@@ -55,10 +52,6 @@ jobs:
             exit 1
           fi
           curl -fsSI "https://storagehypercomb.blob.core.windows.net/content/$SIG/install.manifest.json" >/dev/null
-
-      - name: Warn if essentials deploy skipped
-        if: ${{ secrets.AZURE_CREDENTIALS_LIVE == '' }}
-        run: echo "AZURE_CREDENTIALS_LIVE not set; essentials resources were not deployed."
 
       - name: Install web dependencies
         working-directory: src/hypercomb-web
