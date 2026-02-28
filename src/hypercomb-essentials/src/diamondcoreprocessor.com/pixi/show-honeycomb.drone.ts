@@ -11,7 +11,7 @@ import { HexLabelAtlas } from './hex-label.atlas.js'
 import { HexSdfTextureShader } from './hex-sdf.shader.js'
 
 type Axial = { q: number; r: number }
-type SeedCell = { q: number; r: number; label: string }
+type SeedCell = { q: number; r: number; label: string; external: boolean }
 
 type MeshEvt = { relay: string; sig: string; event: any; payload: any }
 type MeshSub = { close: () => void }
@@ -31,7 +31,7 @@ export class ShowHoneycombDrone extends Drone {
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
 
-  private tex: Texture | null = null
+  private readonly texByUrl = new Map<string, Texture>()
   private atlas: HexLabelAtlas | null = null
   private atlasRenderer: unknown = null
 
@@ -90,8 +90,9 @@ export class ShowHoneycombDrone extends Drone {
     const sig = signatureLocation.sig
 
     if (sig !== this.meshSig) {
-      const nakPayload = 'external.alpha,external.beta'
-      const nakCmd = `nak event wss://nos.lol --kind 29010 --tag "x=${sig}" --content "${nakPayload}"`
+      const NOSTR = 'wss://relay.snort.social'
+      const nakPayload = '{"seeds":["external.alpha","Street Fighter"]}'
+      const nakCmd = `nak event ${NOSTR} --kind 29010 --tag "x=${sig}" --content '${nakPayload}'`
       ; (window as any).__showHoneycombNakCommand = nakCmd
       console.log('[show-honeycomb] signature location', signatureLocation.key)
       console.log('[show-honeycomb] nak command (copy from window.__showHoneycombNakCommand):', nakCmd)
@@ -388,7 +389,13 @@ export class ShowHoneycombDrone extends Drone {
     const out: string[] = []
     const parts = String(raw ?? '').split(',')
     for (const part of parts) {
-      const seed = String(part ?? '').trim()
+      let seed = String(part ?? '').trim()
+      if (seed.startsWith('"') && seed.endsWith('"') && seed.length >= 2) {
+        seed = seed.slice(1, -1).trim()
+      }
+      if (seed.startsWith("'") && seed.endsWith("'") && seed.length >= 2) {
+        seed = seed.slice(1, -1).trim()
+      }
       if (seed) out.push(seed)
     }
     return out
@@ -460,7 +467,8 @@ export class ShowHoneycombDrone extends Drone {
     const circumRadiusPx = 32
     const gapPx = 6
     const padPx = 10
-    const textureUrl = '/spw.png'
+    const localTextureUrl = '/local.png'
+    const externalTextureUrl = '/external.png'
 
     const locationKey = String(lineage.explorerLabel?.() ?? '/')
     const fsRev = Number(lineage.changed?.() ?? 0)
@@ -474,7 +482,7 @@ export class ShowHoneycombDrone extends Drone {
     }
 
     // note: key includes meshRev so mesh changes invalidate render baseline
-    const key = `${locationKey}|${fsRev}|${meshRev}|${circumRadiusPx}|${gapPx}|${padPx}|${textureUrl}`
+    const key = `${locationKey}|${fsRev}|${meshRev}|${circumRadiusPx}|${gapPx}|${padPx}|${localTextureUrl}|${externalTextureUrl}`
     this.lastKey = key
 
     const dir = await lineage.explorerDir()
@@ -514,7 +522,8 @@ export class ShowHoneycombDrone extends Drone {
       return
     }
 
-    const cells = this.buildCellsFromAxial(axial, seedNames, maxCells)
+    const localSeedSet = new Set(localSeeds)
+    const cells = this.buildCellsFromAxial(axial, seedNames, maxCells, localSeedSet)
     if (cells.length === 0) {
       this.clearMesh()
       return
@@ -535,12 +544,13 @@ export class ShowHoneycombDrone extends Drone {
     const quadW = quadHalfW * 2
     const quadH = quadHalfH * 2
 
-    const baseTex = await this.ensureTexture(textureUrl)
+    const baseTex = await this.ensureTexture(localTextureUrl)
+    const externalTex = await this.ensureTexture(externalTextureUrl)
     if (isStale()) {
       this.renderQueued = true
       return
     }
-    if (!baseTex || !this.atlas) {
+    if (!baseTex || !externalTex || !this.atlas) {
       this.clearMesh()
       return
     }
@@ -553,10 +563,11 @@ export class ShowHoneycombDrone extends Drone {
     const geom = this.buildFillQuadGeometry(cells, circumRadiusPx, gapPx, quadHalfW, quadHalfH)
 
     if (!this.shader) {
-      this.shader = new HexSdfTextureShader(baseTex, labelTex, quadW, quadH, circumRadiusPx)
+      this.shader = new HexSdfTextureShader(baseTex, externalTex, labelTex, quadW, quadH, circumRadiusPx)
     } else {
       try {
         this.shader.setBaseTexture(baseTex)
+        this.shader.setExternalTexture(externalTex)
         this.shader.setLabelAtlas(labelTex)
         this.shader.setQuadSize(quadW, quadH)
         this.shader.setRadiusPx(circumRadiusPx)
@@ -628,15 +639,18 @@ export class ShowHoneycombDrone extends Drone {
   private readonly rebuildRenderResources = (renderer: unknown): void => {
     this.clearMesh()
     this.shader = null
-    this.tex = null
+    this.texByUrl.clear()
     this.atlas = new HexLabelAtlas(renderer, 128, 8, 8)
     this.atlasRenderer = renderer
   }
 
   private ensureTexture = async (url: string): Promise<Texture | null> => {
-    if (this.tex) return this.tex
-    this.tex = await Assets.load(url)
-    return this.tex
+    const existing = this.texByUrl.get(url)
+    if (existing) return existing
+
+    const loaded = await Assets.load(url)
+    this.texByUrl.set(url, loaded)
+    return loaded
   }
 
   private listSeedFolders = async (dir: FileSystemDirectoryHandle): Promise<string[]> => {
@@ -659,14 +673,14 @@ export class ShowHoneycombDrone extends Drone {
     return out
   }
 
-  private buildCellsFromAxial = (axial: any, names: string[], max: number): SeedCell[] => {
+  private buildCellsFromAxial = (axial: any, names: string[], max: number, localSeedSet: Set<string>): SeedCell[] => {
     const out: SeedCell[] = []
 
     for (let i = 0; i < max; i++) {
       const a = axial.items.get(i) as Axial | undefined
       const label = names[i]
       if (!a || !label) break
-      out.push({ q: a.q, r: a.r, label })
+      out.push({ q: a.q, r: a.r, label, external: !localSeedSet.has(label) })
     }
 
     return out
@@ -674,7 +688,7 @@ export class ShowHoneycombDrone extends Drone {
 
   private buildCellsKey = (cells: SeedCell[]): string => {
     let s = ''
-    for (const c of cells) s += `${c.q},${c.r}:${c.label}|`
+    for (const c of cells) s += `${c.q},${c.r}:${c.label}:${c.external ? 1 : 0}|`
     return s
   }
 
@@ -689,9 +703,10 @@ export class ShowHoneycombDrone extends Drone {
     const pos = new Float32Array(cells.length * 8)
     const uv = new Float32Array(cells.length * 8)
     const labelUV = new Float32Array(cells.length * 16)
+    const texKind = new Float32Array(cells.length * 4)
     const idx = new Uint32Array(cells.length * 6)
 
-    let pv = 0, uvp = 0, luvp = 0, ii = 0, base = 0
+    let pv = 0, uvp = 0, luvp = 0, tkp = 0, ii = 0, base = 0
 
     for (const c of cells) {
       const { x, y } = this.axialToPixel(c.q, c.r, spacing)
@@ -711,6 +726,10 @@ export class ShowHoneycombDrone extends Drone {
         luvp += 4
       }
 
+      const kind = c.external ? 1 : 0
+      texKind.set([kind, kind, kind, kind], tkp)
+      tkp += 4
+
       idx.set([base, base + 1, base + 2, base, base + 2, base + 3], ii)
       ii += 6
       base += 4
@@ -720,6 +739,7 @@ export class ShowHoneycombDrone extends Drone {
       ; (g as any).addAttribute('aPosition', pos, 2)
       ; (g as any).addAttribute('aUV', uv, 2)
       ; (g as any).addAttribute('aLabelUV', labelUV, 4)
+      ; (g as any).addAttribute('aTexKind', texKind, 1)
       ; (g as any).addIndex(idx)
 
     return g

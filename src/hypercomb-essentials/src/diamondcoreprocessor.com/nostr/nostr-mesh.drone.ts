@@ -7,7 +7,8 @@
 
 import { Drone } from '@hypercomb/core'
 
-const HARD_RELAY = 'wss://nos.lol'
+// const HARD_RELAY = 'wss://nos.lol'
+const HARD_RELAY = 'wss://relay.snort.social'
 
 type NostrEvent = { id?: string; pubkey?: string; created_at: number; kind: number; tags: string[][]; content: string; sig?: string }
 type MeshEvt = { relay: string; sig: string; event: NostrEvent; payload: any }

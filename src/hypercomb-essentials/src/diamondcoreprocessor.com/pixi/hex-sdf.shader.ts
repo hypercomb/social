@@ -15,7 +15,7 @@ export class HexSdfTextureShader {
     u_texSize: { value: Vec2; type: 'vec2<f32>' }
   }
 
-  public constructor(baseTexture: Texture, labelAtlas: Texture, quadW: number, quadH: number, radiusPx: number) {
+  public constructor(baseTexture: Texture, externalTexture: Texture, labelAtlas: Texture, quadW: number, quadH: number, radiusPx: number) {
     this.uniforms = {
       u_quadSize: { value: [quadW, quadH], type: 'vec2<f32>' },
       u_radiusPx: { value: radiusPx, type: 'f32' },
@@ -28,6 +28,7 @@ export class HexSdfTextureShader {
       resources: {
         uniforms: this.uniforms,
         u_tex0: this.toSource(baseTexture),
+        u_tex1: this.toSource(externalTexture),
         u_label: this.toSource(labelAtlas),
       },
     })
@@ -52,6 +53,10 @@ export class HexSdfTextureShader {
     ;(this.shader.resources as any).u_label = this.toSource(t)
   }
 
+  public setExternalTexture = (t: Texture): void => {
+    ;(this.shader.resources as any).u_tex1 = this.toSource(t)
+  }
+
   private toSource = (t: Texture): any => {
     return (t as any).source ?? (t as any).baseTexture?.source ?? (t as any).texture?.source
   }
@@ -61,9 +66,11 @@ export class HexSdfTextureShader {
     in vec2 aPosition;
     in vec2 aUV;
     in vec4 aLabelUV;
+    in float aTexKind;
 
     out vec2 vUV;
     out vec4 vLabelUV;
+    out float vTexKind;
 
     uniform mat3 uProjectionMatrix;
     uniform mat3 uWorldTransformMatrix;
@@ -74,6 +81,7 @@ export class HexSdfTextureShader {
       gl_Position = vec4((mvp * vec3(aPosition, 1.0)).xy, 0.0, 1.0);
       vUV = aUV;
       vLabelUV = aLabelUV;
+      vTexKind = aTexKind;
     }
   `
 
@@ -82,12 +90,14 @@ export class HexSdfTextureShader {
 
     in vec2 vUV;
     in vec4 vLabelUV;
+    in float vTexKind;
 
     uniform vec2 u_quadSize;
     uniform float u_radiusPx;
     uniform vec2 u_texSize;
 
     uniform sampler2D u_tex0;
+    uniform sampler2D u_tex1;
     uniform sampler2D u_label;
 
     float sdHex(vec2 p, float r) {
@@ -107,7 +117,9 @@ export class HexSdfTextureShader {
       float d = sdHex(rot30(local), u_radiusPx);
       if (d > 0.0) discard;
 
-      vec4 base = texture2D(u_tex0, vUV);
+      vec4 baseLocal = texture2D(u_tex0, vUV);
+      vec4 baseExternal = texture2D(u_tex1, vUV);
+      vec4 base = mix(baseLocal, baseExternal, step(0.5, vTexKind));
 
       vec2 luv = mix(vLabelUV.xy, vLabelUV.zw, vUV);
       float labelAlpha = texture2D(u_label, luv).a;
@@ -119,8 +131,8 @@ export class HexSdfTextureShader {
 }
 
 export class HexSdfTextureShaderFactory {
-  public create = (baseTexture: Texture, labelAtlas: Texture, quadW: number, quadH: number, radiusPx: number): HexSdfTextureShader => {
-    return new HexSdfTextureShader(baseTexture, labelAtlas, quadW, quadH, radiusPx)
+  public create = (baseTexture: Texture, externalTexture: Texture, labelAtlas: Texture, quadW: number, quadH: number, radiusPx: number): HexSdfTextureShader => {
+    return new HexSdfTextureShader(baseTexture, externalTexture, labelAtlas, quadW, quadH, radiusPx)
   }
 }
 
