@@ -4,6 +4,7 @@
 export * from './core'
 export * from './hello-world'
 export * from './input'
+export * from './nostr'
 export * from './pixi'
 export * from './screen'
 export * from './settings'
