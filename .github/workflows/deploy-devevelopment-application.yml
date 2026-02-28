@@ -19,32 +19,82 @@ jobs:
           submodules: true
           lfs: false
 
-      - name: Debug File System
-        run: |
-          ls -l src/LOCAL/PBS.HYPERCOMB.WEB/package-lock.json || echo "package-lock.json not found"
-          npm config get cache
-
       - name: Use Node 22.12.0
         uses: actions/setup-node@v4
         with:
           node-version: '22.12.0'
           cache: 'npm'
-          cache-dependency-path: '**/package-lock.json' # Use glob for flexibility
+          cache-dependency-path: |
+            src/hypercomb-essentials/package-lock.json
+            src/hypercomb-web/package-lock.json
 
-      - name: Install dependencies
-        working-directory: src/LOCAL/PBS.HYPERCOMB.WEB
+      - name: Install essentials dependencies
+        working-directory: src/hypercomb-essentials
         run: npm ci
 
-      - name: Build (Angular CLI by path)
-        working-directory: src/LOCAL/PBS.HYPERCOMB.WEB
+      - name: Build and deploy essentials resources
+        if: ${{ secrets.AZURE_CREDENTIALS_DEVELOPMENT != '' }}
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS_DEVELOPMENT }}
+
+      - name: Publish essentials package + latest pointers
+        if: ${{ secrets.AZURE_CREDENTIALS_DEVELOPMENT != '' }}
+        shell: pwsh
+        working-directory: src/hypercomb-essentials
+        run: npm run build
+
+      - name: Verify latest essentials pointer
+        if: ${{ secrets.AZURE_CREDENTIALS_DEVELOPMENT != '' }}
         run: |
-          if [ ! -f node_modules/@angular/cli/bin/ng ]; then
-            npm i -D @angular/cli@20.3.3
+          set -euo pipefail
+          SIG=$(curl -fsSL https://storagehypercomb.blob.core.windows.net/content/latest.txt | tr -d '\357\273\277' | tr -d '\r\n')
+          echo "latest signature: $SIG"
+          if ! echo "$SIG" | grep -Eq '^[a-f0-9]{64}$'; then
+            echo "Invalid latest signature: $SIG"
+            exit 1
           fi
-          node node_modules/@angular/cli/bin/ng build --configuration production
+          curl -fsSI "https://storagehypercomb.blob.core.windows.net/content/$SIG/install.manifest.json" >/dev/null
+
+      - name: Warn if essentials deploy skipped
+        if: ${{ secrets.AZURE_CREDENTIALS_DEVELOPMENT == '' }}
+        run: echo "AZURE_CREDENTIALS_DEVELOPMENT not set; essentials resources were not deployed."
+
+      - name: Install web dependencies
+        working-directory: src/hypercomb-web
+        run: npm ci
+
+      - name: Build web runtime assets
+        working-directory: src/hypercomb-web
+        run: npm run runtime
+
+      - name: Build web app
+        working-directory: src/hypercomb-web
+        run: npm run build
 
       - name: Verify build output
-        run: ls -al src/LOCAL/PBS.HYPERCOMB.WEB/dist || true
+        run: ls -al src/hypercomb-web/dist/hypercomb-web/browser || true
+
+      - name: Verify required web artifacts
+        run: |
+          set -euo pipefail
+          ROOT="src/hypercomb-web/dist/hypercomb-web/browser"
+          REQUIRED=(
+            "index.html"
+            "hypercomb.worker.js"
+            "hypercomb-core.runtime.js"
+            "local.png"
+            "external.png"
+            "house.png"
+            "spw.png"
+            "vendor/pixi.runtime.js"
+          )
+          for f in "${REQUIRED[@]}"; do
+            if [ ! -f "$ROOT/$f" ]; then
+              echo "Missing required artifact: $ROOT/$f"
+              exit 1
+            fi
+          done
 
       - name: Upload to Azure Static Web Apps
         uses: Azure/static-web-apps-deploy@v1
@@ -52,7 +102,7 @@ jobs:
           azure_static_web_apps_api_token: ${{ secrets.STATIC_WEBSITE_DEVELOPMENT_DEPLOYMENT_TOKEN }}
           action: upload
           skip_app_build: true
-          app_location: src/LOCAL/PBS.HYPERCOMB.WEB/dist/PBS-Hypercomb-Web
+          app_location: src/hypercomb-web/dist/hypercomb-web/browser
           api_location: ""
 
   close_pull_request_job:
@@ -65,4 +115,4 @@ jobs:
         with:
           azure_static_web_apps_api_token: ${{ secrets.STATIC_WEBSITE_DEVELOPMENT_DEPLOYMENT_TOKEN }}
           action: close
-          app_location: src/LOCAL/PBS.HYPERCOMB.WEB/dist/PBS-Hypercomb-Web
+          app_location: src/hypercomb-web/dist/hypercomb-web/browser
