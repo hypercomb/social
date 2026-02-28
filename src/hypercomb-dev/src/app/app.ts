@@ -12,12 +12,10 @@ import { ZoomDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/
 import { LayerService } from 'src/hypercomb-web/src/app/layer-service';
 import { NostrMeshDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/nostr/nostr-mesh.drone'
 import { NostrSigner } from '@hypercomb/essentials/diamondcoreprocessor.com/nostr/nostr-signer'
-import { SignatureService } from '@hypercomb/core'
-import { OpfsExplorerComponent } from "@hypercomb/shared/ui";
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, SearchBarComponent, OpfsExplorerComponent],
+  imports: [RouterOutlet, SearchBarComponent],
   templateUrl: './app.html'
 })
 export class App {

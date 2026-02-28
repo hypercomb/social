@@ -96,6 +96,18 @@ export class Navigation extends hypercomb {
   }
 
   // ----------------------------------
+  // bootstrap
+  // ----------------------------------
+
+  public bootstrap = (segments: readonly string[] = []): void => {
+    this.listen()
+
+    const clean = segments.map(this.cleanSegment).filter(Boolean)
+    this.replace(clean)
+    this.dispatchSelection(this.getSelections())
+  }
+
+  // ----------------------------------
   // mutations (normalized)
   // ----------------------------------
 

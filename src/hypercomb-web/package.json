@@ -5,7 +5,8 @@
   "scripts": {
     "start": "ng serve",
     "build": "ng build",
-    "runtime": "npm run runtime:pixi",
+    "runtime": "npm run runtime:core ; npm run runtime:pixi",
+    "runtime:core": "node ./scripts/build-core-vendor.cjs",
     "runtime:pixi": "npx tsx ./scripts/build-pixi-vendor.ts"
   },
   "dependencies": {

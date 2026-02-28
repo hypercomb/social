@@ -8,6 +8,7 @@ const OPFS_DEPENDENCY_BASE_PATH = '/opfs/__dependencies__'
 
 export const resolveImportMap = async (): Promise<ResolvedImports> => {
   const imports: ResolvedImports = {}
+  const aliasSource = new Map<string, string>()
   imports['@hypercomb/core'] = '/hypercomb-core.runtime.js'
   imports['pixi.js'] = '/vendor/pixi.runtime.js'
 
@@ -35,10 +36,13 @@ export const resolveImportMap = async (): Promise<ResolvedImports> => {
     if (!alias) continue
 
     if (imports[alias]) {
-      throw new Error(`dependency alias collision: ${alias}`)
+      const existing = aliasSource.get(alias) ?? 'unknown'
+      console.warn(`[resolveImportMap] alias collision for ${alias}; keeping ${existing}, skipping ${signature}`)
+      continue
     }
 
     imports[alias] = `${OPFS_DEPENDENCY_BASE_PATH}/${signature}`
+    aliasSource.set(alias, signature)
   }
 
   return imports

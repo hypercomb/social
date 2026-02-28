@@ -41,7 +41,7 @@ export class DependencyLoader {
         if (!alias) continue
 
         const mod = await import(/* @vite-ignore */ alias)
-        // window.ioc.register(alias, mod)
+        void mod
 
         this.loaded.add(sig)
         this.dependencyCount.update(v => v + 1)
