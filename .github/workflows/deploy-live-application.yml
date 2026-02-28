@@ -32,21 +32,53 @@ jobs:
         working-directory: src/hypercomb-essentials
         run: npm ci
 
+      - name: Validate Azure credentials (live)
+        id: azure_creds
+        shell: bash
+        env:
+          AZURE_CREDENTIALS_JSON: ${{ secrets.AZURE_CREDENTIALS_LIVE }}
+        run: |
+          set -euo pipefail
+          if [ -z "${AZURE_CREDENTIALS_JSON:-}" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "reason=missing secret AZURE_CREDENTIALS_LIVE" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          node -e "
+            const raw = process.env.AZURE_CREDENTIALS_JSON || '';
+            try {
+              const o = JSON.parse(raw);
+              const required = ['clientId','clientSecret','tenantId','subscriptionId'];
+              const missing = required.filter((k) => !String(o[k] || '').trim());
+              if (missing.length) {
+                console.log('ready=false');
+                console.log('reason=missing fields: ' + missing.join(','));
+              } else {
+                console.log('ready=true');
+                console.log('reason=ok');
+              }
+            } catch {
+              console.log('ready=false');
+              console.log('reason=invalid JSON in AZURE_CREDENTIALS_LIVE');
+            }
+          " | while IFS= read -r line; do echo "$line" >> "$GITHUB_OUTPUT"; done
+
       - name: Login to Azure for essentials publish
         id: az_login
-        continue-on-error: true
+        if: steps.azure_creds.outputs.ready == 'true'
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS_LIVE }}
 
       - name: Publish essentials package + latest pointers
-        if: steps.az_login.outcome == 'success'
+        if: steps.azure_creds.outputs.ready == 'true' && steps.az_login.outcome == 'success'
         shell: pwsh
         working-directory: src/hypercomb-essentials
         run: npm run build
 
       - name: Verify latest essentials pointer
-        if: steps.az_login.outcome == 'success'
+        if: steps.azure_creds.outputs.ready == 'true' && steps.az_login.outcome == 'success'
         run: |
           set -euo pipefail
           SIG=$(curl -fsSL https://storagehypercomb.blob.core.windows.net/content/latest.txt | tr -d '\357\273\277' | tr -d '\r\n')
@@ -58,8 +90,8 @@ jobs:
           curl -fsSI "https://storagehypercomb.blob.core.windows.net/content/$SIG/install.manifest.json" >/dev/null
 
       - name: Warn if essentials publish skipped
-        if: steps.az_login.outcome != 'success'
-        run: echo "Azure login unavailable; skipped essentials publish. Web deploy continues with existing latest resources."
+        if: steps.azure_creds.outputs.ready != 'true' || steps.az_login.outcome != 'success'
+        run: echo "Skipped essentials publish (${ { steps.azure_creds.outputs.reason } }); web deploy continues with existing latest resources."
 
       - name: Install web dependencies
         working-directory: src/hypercomb-web
