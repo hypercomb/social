@@ -3,6 +3,7 @@
 
 import '@hypercomb/shared/core/ioc.web'
 
+import { ensureInstall } from './setup/ensure-install'
 import { resolveImportMap } from './setup/resolve-import-map'
 import { appConfig } from './app.config'
 
@@ -33,8 +34,9 @@ const attachImportMap = async (): Promise<void> => {
 }
 
 const bootstrap = async (): Promise<void> => {
-  await attachImportMap()
   await ensureSwControl()
+  await ensureInstall()
+  await attachImportMap()
 
   const { bootstrapApplication } = await import('@angular/platform-browser')
   const { App } = await import('./app/app')
