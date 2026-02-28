@@ -91,7 +91,9 @@ jobs:
 
       - name: Warn if essentials publish skipped
         if: steps.azure_creds.outputs.ready != 'true' || steps.az_login.outcome != 'success'
-        run: echo "Skipped essentials publish (${ { steps.azure_creds.outputs.reason } }); web deploy continues with existing latest resources."
+        env:
+          SKIP_REASON: ${{ steps.azure_creds.outputs.reason }}
+        run: echo "Skipped essentials publish ($SKIP_REASON); web deploy continues with existing latest resources."
 
       - name: Install web dependencies
         working-directory: src/hypercomb-web
