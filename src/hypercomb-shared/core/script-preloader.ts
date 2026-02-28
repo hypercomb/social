@@ -1,6 +1,6 @@
 // hypercomb-web/src/app/core/script-preloader.ts
 
-import { inject, Injectable, signal } from '@angular/core'
+import { signal } from '@angular/core'
 import { Drone, type DroneResolver } from '@hypercomb/core'
 import { Store, type DevManifest } from './store'
 
@@ -8,7 +8,6 @@ export interface ActionDescriptor {
   signature: string
   name: string // kebab-case, ux-facing
 }
-@Injectable({ providedIn: 'root' })
 export class ScriptPreloader implements DroneResolver {
 
   private get store(): Store { return <Store>window.ioc.get("Store")}

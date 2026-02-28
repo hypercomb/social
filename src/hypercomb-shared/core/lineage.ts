@@ -1,14 +1,13 @@
 // hypercomb-shared/core/lineage.ts
 // fix: synchronize is the single visual update mechanism
 
-import { Injectable, signal } from '@angular/core'
+import { signal } from '@angular/core'
 import type { Navigation } from './navigation'
 import type { Store } from './store'
 
 const { get, list } = window.ioc
 void list
 
-@Injectable({ providedIn: 'root' })
 export class Lineage {
 
   // -------------------------------------------------

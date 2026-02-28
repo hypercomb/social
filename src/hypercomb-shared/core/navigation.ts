@@ -1,7 +1,6 @@
 // hypercomb-shared/core/navigation.ts
 // src/app/core/navigation.ts
 
-import { Injectable } from '@angular/core'
 import { hypercomb } from '@hypercomb/core'
 import { CompletionUtility } from '../core/completion-utility'
 
@@ -12,7 +11,6 @@ type SelectionDetail = {
   selected: string[]
 }
 
-@Injectable({ providedIn: 'root' })
 export class Navigation extends hypercomb {
 
   private get completions(): CompletionUtility { return get('CompletionUtility') as CompletionUtility }

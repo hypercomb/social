@@ -1,5 +1,3 @@
-import { Injectable } from "@angular/core"
-
 export type CompletionStyle = 'space' | 'dot'
 export  type CompletionMode = 'action' | 'marker'
 
@@ -14,7 +12,6 @@ export type CompletionContext =
     style: CompletionStyle
   }
 
-@Injectable({ providedIn: 'root' })
 export class CompletionUtility { 
 
 

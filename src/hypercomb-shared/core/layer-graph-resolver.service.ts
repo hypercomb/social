@@ -1,6 +1,5 @@
 // hypercomb-web/src/app/core/layer-graph-resolver.service.ts
 
-import { Injectable, inject } from '@angular/core'
 import { Store } from './store'
 
 export type LayerRecord = {
@@ -9,7 +8,6 @@ export type LayerRecord = {
   drones: string[]
 }
 
-@Injectable({ providedIn: 'root' })
 export class LayerGraphResolver {
 
   // -------------------------------------------------

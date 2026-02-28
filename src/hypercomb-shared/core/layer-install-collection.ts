@@ -1,13 +1,11 @@
 // hypercomb-web/src/app/core/layer-install-collection.service.ts
 
-import { Injectable, inject } from '@angular/core'
 import { DevLayerSource } from './layer-install-sources/dev-layer.source'
 import { DomainLayerSource } from './layer-install-sources/domain-layer.source'
 import { OpfsInstallFileSource } from './layer-install-sources/opfs-install-file.source'
 import { LayerInstallContext, LayerInstallFile, LayerInstallSource } from './layer-install.types'
 import { environment } from '../environments/environment'
 
-@Injectable({ providedIn: 'root' })
 export class LayerInstallCollection {
 
   private get opfs(): OpfsInstallFileSource { return <OpfsInstallFileSource>window.ioc.get("OpfsInstallFileSource") }

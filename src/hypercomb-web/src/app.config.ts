@@ -4,10 +4,11 @@ import { DRONE_RESOLVER_KEY, register } from '@hypercomb/core';
 import { provideRouter } from '@angular/router';
 import { routes } from './app/app.routes';
 import { ScriptPreloader } from '@hypercomb/shared/core';
+import { sharedProviders } from '@hypercomb/shared/core/shared-providers';
 
 export const appConfig: ApplicationConfig = {
   providers: [
-    ScriptPreloader,
+    ...sharedProviders,
     provideBrowserGlobalErrorListeners(),
     provideZoneChangeDetection({ eventCoalescing: true }),
     provideAppInitializer(async () => {
@@ -16,7 +17,7 @@ export const appConfig: ApplicationConfig = {
         register(DRONE_RESOLVER_KEY, preloader)
       }
     }),
-        provideRouter(routes),
+    provideRouter(routes),
   ]
 };
 

@@ -1,7 +1,7 @@
 // hypercomb-shared/core/store.ts
 // hypercomb-web/src/app/core/store.ts
 
-import { Injectable, signal } from '@angular/core'
+import { signal } from '@angular/core'
 import { Drone, SignatureService } from '@hypercomb/core'
 
 type DroneCtor = new () => Drone
@@ -14,7 +14,6 @@ export type DevManifest = {
   root: string
 }
 
-@Injectable({ providedIn: 'root' })
 export class Store {
 
   private static readonly HYPERCOMB_DIRECTORY = 'hypercomb.io'

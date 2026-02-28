@@ -1,6 +1,5 @@
 // hypercomb-shared/core/layer-installer.ts
 
-import { Injectable } from '@angular/core'
 import { type LocationParseResult } from './initializers/location-parser'
 import { Store } from './store'
 
@@ -8,7 +7,6 @@ type InstallManifest = { version: number; layers: string[]; drones: string[]; de
 
 const { get, register, list } = window.ioc
 
-@Injectable({ providedIn: 'root' })
 export class LayerInstaller {
 
   private readonly manifestName = 'install.manifest.json'

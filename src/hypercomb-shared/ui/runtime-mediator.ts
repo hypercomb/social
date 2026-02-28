@@ -1,10 +1,8 @@
 // hypercomb-web/src/app/runtime-mediator.service.ts
 
-import { Injectable } from '@angular/core'
 import { DependencyLoader, LayerInstaller } from '@hypercomb/shared/core'
 import { type LocationParseResult } from '@hypercomb/shared/core/initializers/location-parser'
 
-@Injectable({ providedIn: 'root' })
 export class RuntimeMediator {
 
   private running: Promise<void> | null = null

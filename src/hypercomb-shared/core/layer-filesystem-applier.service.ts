@@ -1,9 +1,7 @@
 // hypercomb-web/src/app/core/layer-filesystem-applier.service.ts
 
-import { Injectable } from '@angular/core'
 import { LayerRecord } from './layer-graph-resolver.service'
 
-@Injectable({ providedIn: 'root' })
 export class LayerFilesystemApplier {
 
   private static readonly INSTALL_SUFFIX = '-install'

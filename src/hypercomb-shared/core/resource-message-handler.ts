@@ -1,5 +1,5 @@
 // src/app/messaging/resource-message-handler.ts
-import { Injectable, inject } from '@angular/core'
+import { Injectable } from '@angular/core'
 import { ScriptPreloader, Store } from '@hypercomb/shared/core'
 
 @Injectable({ providedIn: 'root' })

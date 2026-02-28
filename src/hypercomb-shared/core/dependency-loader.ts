@@ -1,9 +1,8 @@
 // hypercomb-web/src/app/core/dependency-loader.ts
 
-import { inject, Injectable, signal } from '@angular/core'
+import { signal } from '@angular/core'
 import { Store } from './store'
 
-@Injectable({ providedIn: 'root' })
 export class DependencyLoader {
 
   private get store(): Store { return <Store>window.ioc.get("Store") }

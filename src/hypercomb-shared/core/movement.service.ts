@@ -1,12 +1,11 @@
 // hypercomb-shared/core/movement.service.ts
 
-import { Injectable, signal } from '@angular/core'
+import { signal } from '@angular/core'
 import type { Navigation } from './navigation'
 
 const { get, register, list } = window.ioc
 void list
 
-@Injectable({ providedIn: 'root' })
 export class MovementService {
 
   // increments after navigation intent is committed
