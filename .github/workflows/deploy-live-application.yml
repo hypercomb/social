@@ -25,9 +25,14 @@ jobs:
           node-version: '22.12.0'
           cache: 'npm'
           cache-dependency-path: |
+            src/package-lock.json
             src/hypercomb-core/package-lock.json
             src/hypercomb-essentials/package-lock.json
             src/hypercomb-web/package-lock.json
+
+      - name: Install shared (src-level) dependencies
+        working-directory: src
+        run: npm ci --ignore-scripts
 
       - name: Install essentials dependencies
         working-directory: src/hypercomb-essentials
