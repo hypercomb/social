@@ -9,7 +9,10 @@ export class RuntimeMediator {
 
   private running: Promise<void> | null = null
 
-  public sync = async (parsed: LocationParseResult): Promise<void> => {
+  public sync = async (
+    parsed: LocationParseResult,
+    afterInstall?: () => Promise<void>
+  ): Promise<void> => {
     const run = async (): Promise<void> => {
       const { get } = window.ioc
 
@@ -19,7 +22,10 @@ export class RuntimeMediator {
       // 1) download + install all files via install.manifest.json (resumable)
       await installer.install(parsed)
 
-      // 2) load dependencies into memory
+      // 2) allow caller to refresh import map before dependency loading
+      if (afterInstall) await afterInstall()
+
+      // 3) load dependencies into memory
       await dependency.load()
 
     }

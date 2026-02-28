@@ -5,6 +5,7 @@ import { Navigation, Lineage, ScriptPreloader, Store, LayerInstaller, Dependency
 import { LocationParser } from "@hypercomb/shared/core/initializers/location-parser"
 import { LayerService } from "./layer-service"
 import { RuntimeMediator } from "@hypercomb/shared/ui/runtime-mediator"
+import { resolveImportMap } from '../setup/resolve-import-map'
 
 const _ = [DependencyLoader, LayerInstaller, LayerService, Store]
 
@@ -55,7 +56,18 @@ export class CoreAdapter {
     const shouldInstall = await this.shouldInstallSignature(store, signature)
     if (shouldInstall) {
       await this.resetRuntimeInstallState(store)
-      await this.runtime.sync(parsed)
+      await this.runtime.sync(parsed, async () => {
+        // Refresh the import map after files are written to OPFS.
+        // The initial map (set before Angular boot) was empty because
+        // the install hadn't run yet.  A second <script type="importmap">
+        // is allowed and merges into the existing map.
+        const imports = await resolveImportMap()
+        const script = document.createElement('script')
+        script.type = 'importmap'
+        script.textContent = JSON.stringify({ imports })
+        document.head.appendChild(script)
+        console.log('[core-adapter] import map refreshed with', Object.keys(imports).length, 'entries')
+      })
       this.setInstalledSignature(signature)
       console.log('[core-adapter] installed signature:', signature)
     } else {
