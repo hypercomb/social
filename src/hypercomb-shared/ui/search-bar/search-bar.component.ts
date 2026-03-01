@@ -3,7 +3,6 @@
 
 import { AfterViewInit, Component, computed, ElementRef, inject, signal, ViewChild, type OnDestroy } from '@angular/core'
 import { hypercomb } from '@hypercomb/core'
-import type { InitState } from '../../core'
 import { Lineage } from '../../core/lineage'
 import { MovementService } from '../../core/movement.service'
 import { Navigation } from '../../core/navigation'
@@ -19,11 +18,10 @@ import { ResourceCompletionService } from '@hypercomb/shared/core/resource-compl
 })
 export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDestroy {
 
-  private readonly completions = inject(CompletionUtility)
-
-  @ViewChild('input', { static: true })
+    @ViewChild('input', { static: true })
   private readonly input!: ElementRef<HTMLInputElement>
 
+  private readonly completions = inject(CompletionUtility)
   private readonly lineage = inject(Lineage)
   private readonly movement = inject(MovementService)
   private readonly navigation = inject(Navigation)

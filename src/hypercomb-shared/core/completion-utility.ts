@@ -1,5 +1,5 @@
 export type CompletionStyle = 'space' | 'dot'
-export  type CompletionMode = 'action' | 'marker'
+export type CompletionMode = 'action' | 'marker'
 
 export type CompletionContext =
   | { active: false }
@@ -12,14 +12,13 @@ export type CompletionContext =
     style: CompletionStyle
   }
 
-export class CompletionUtility { 
+export class CompletionUtility {
 
-
-public readonly normalize = (s: string): string =>
-  s.replace(/\./g, ' ')
-   .replace(/\s+/g, '-')
-   .trim()
-   .toLowerCase()
+  public readonly normalize = (s: string): string =>
+    s.replace(/\./g, ' ')
+      .replace(/\s+/g, '-')
+      .trim()
+      .toLowerCase()
 
 
   public readonly render = (s: string, style: CompletionStyle): string =>
