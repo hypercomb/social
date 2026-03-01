@@ -1,10 +1,8 @@
 // hypercomb-web/src/app/core/layer-install-sources/dev-layer.source.ts
 
-import { Injectable } from '@angular/core'
 import { environment } from '../../environments/environment'
 import { LayerInstallContext, LayerInstallFile, LayerInstallSource } from '../layer-install.types'
 
-@Injectable({ providedIn: 'root' })
 export class DevLayerSource implements LayerInstallSource {
 
   public readonly id = 'dev-layer'

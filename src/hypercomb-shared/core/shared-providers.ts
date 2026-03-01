@@ -12,6 +12,8 @@ import { CompletionUtility } from './completion-utility'
 import { Lineage } from './lineage'
 import { MovementService } from './movement.service'
 import { Navigation } from './navigation'
+import { ResourceCompletionService } from './resource-completion.service'
+import { ResourceMessageHandler } from './resource-message-handler'
 import { ScriptPreloader } from './script-preloader'
 
 export const sharedProviders: Provider[] = [
@@ -19,5 +21,7 @@ export const sharedProviders: Provider[] = [
   { provide: Lineage, useFactory: () => window.ioc.get('Lineage') as Lineage },
   { provide: MovementService, useFactory: () => window.ioc.get('MovementService') as MovementService },
   { provide: Navigation, useFactory: () => window.ioc.get('Navigation') as Navigation },
+  { provide: ResourceCompletionService, useFactory: () => window.ioc.get('ResourceCompletionService') as ResourceCompletionService },
+  { provide: ResourceMessageHandler, useFactory: () => window.ioc.get('ResourceMessageHandler') as ResourceMessageHandler },
   { provide: ScriptPreloader, useFactory: () => window.ioc.get('ScriptPreloader') as ScriptPreloader },
 ]

@@ -1,9 +1,7 @@
 // hypercomb-web/src/app/core/layer-install-sources/domain-layer.source.ts
 
-import { Injectable } from '@angular/core'
 import { LayerInstallContext, LayerInstallFile, LayerInstallSource } from '../layer-install.types'
 
-@Injectable({ providedIn: 'root' })
 export class DomainLayerSource implements LayerInstallSource {
 
   public readonly id = 'domain-layer'

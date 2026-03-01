@@ -11,11 +11,9 @@ export const appConfig: ApplicationConfig = {
     ...sharedProviders,
     provideBrowserGlobalErrorListeners(),
     provideZoneChangeDetection({ eventCoalescing: true }),
-    provideAppInitializer(async () => {
+    provideAppInitializer(() => {
       const preloader = inject(ScriptPreloader)
-      return () => {
-        register(DRONE_RESOLVER_KEY, preloader)
-      }
+      register(DRONE_RESOLVER_KEY, preloader)
     }),
     provideRouter(routes),
   ]

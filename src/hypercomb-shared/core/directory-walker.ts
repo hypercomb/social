@@ -1,7 +1,5 @@
 // src/app/core/directory-walker.service.ts
 
-import { Injectable } from '@angular/core'
-
 export interface WalkedDirectory {
   handle: FileSystemDirectoryHandle
   path: readonly string[]

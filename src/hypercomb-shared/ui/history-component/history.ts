@@ -1,5 +1,5 @@
 // src/app/common/history-component/history.ts
-import { Component, inject } from '@angular/core'
+import { Component } from '@angular/core'
 import { Navigation } from '../../core/navigation'
 
 @Component({

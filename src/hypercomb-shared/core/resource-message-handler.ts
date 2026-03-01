@@ -1,8 +1,6 @@
 // src/app/messaging/resource-message-handler.ts
-import { Injectable } from '@angular/core'
 import { ScriptPreloader, Store } from '@hypercomb/shared/core'
 
-@Injectable({ providedIn: 'root' })
 export class ResourceMessageHandler {
 
   private get store(): Store { return <Store>window.ioc.get("Store") }
@@ -57,3 +55,5 @@ export class ResourceMessageHandler {
 
 
 }
+
+window.ioc.register('ResourceMessageHandler', new ResourceMessageHandler())

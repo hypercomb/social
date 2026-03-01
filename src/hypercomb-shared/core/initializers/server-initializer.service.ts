@@ -1,9 +1,7 @@
 // hypercomb-shared/core/initializers/server-initializer.service.ts
 
-import { Injectable } from '@angular/core'
 import { LocationParser, type LocationParseResult } from './location-parser'
 
-@Injectable({ providedIn: 'root' })
 export class ServerInitializer {
 
   public enabled = async (_: string): Promise<boolean> => true
