@@ -29,6 +29,7 @@ export class PixiHostDrone extends Drone {
     // -------------------------------------------------
 
     const host = this.host = document.getElementById('pixi-host') as HTMLDivElement
+    if (!host) return
     host.dataset['hypercombPixi'] = 'root'
     host.style.position = 'fixed'
     host.style.inset = '0'

@@ -1,7 +1,6 @@
 // hypercomb-shared/core/bootstrap-history.ts
 // hypercomb-web/src/bootstrap/bootstrap-history.ts
 
-import { inject } from '@angular/core'
 import { CompletionUtility } from './completion-utility'
 import { DirectoryWalker } from './directory-walker'
 import { Store } from './store'
@@ -21,7 +20,7 @@ export class BootstrapHistory {
 
     const store = window.ioc.get('Store') as Store
     const preloader = window.ioc.get('ScriptPreloader') as any
-    const utility = inject(CompletionUtility)
+    const utility = window.ioc.get('CompletionUtility') as CompletionUtility
 
     const inputPath = window.location.pathname || '/'
     const inputSuffix = (window.location.search || '') + (window.location.hash || '')

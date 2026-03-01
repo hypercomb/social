@@ -5,7 +5,8 @@ import { OpfsExplorerComponent } from '@hypercomb/shared/ui';
 
 @Component({
   selector: 'app-home',
-  imports: [],
+  standalone: true,
+  imports: [OpfsExplorerComponent],
   templateUrl: './home.html',
   styleUrl: './home.scss'
 })

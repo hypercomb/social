@@ -32,8 +32,8 @@ export class CoreAdapter {
     if (this.initialized) return
     this.initialized = true
 
-    const logger = <OpfsTreeLogger>window.ioc.get("OpfsTreeLogger")
-    await logger.log()
+    // const logger = <OpfsTreeLogger>window.ioc.get("OpfsTreeLogger")
+    // await logger.log()
 
     const store = window.ioc.get('Store') as Store
 

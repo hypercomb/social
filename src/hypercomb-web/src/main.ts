@@ -3,9 +3,11 @@
 
 import '@hypercomb/shared/core/ioc.web'
 
+import { bootstrapApplication } from '@angular/platform-browser'
 import { ensureInstall } from './setup/ensure-install'
 import { resolveImportMap } from './setup/resolve-import-map'
 import { appConfig } from './app.config'
+import { App } from './app/app'
 
 const ensureSwControl = async (): Promise<void> => {
   if (!('serviceWorker' in navigator)) return
@@ -38,8 +40,6 @@ const bootstrap = async (): Promise<void> => {
   await ensureInstall()
   await attachImportMap()
 
-  const { bootstrapApplication } = await import('@angular/platform-browser')
-  const { App } = await import('./app/app')
   await bootstrapApplication(App, appConfig)
 }
 

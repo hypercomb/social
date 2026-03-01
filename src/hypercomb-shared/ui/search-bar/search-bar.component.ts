@@ -1,8 +1,6 @@
 // hypercomb-shared/ui/search-bar/search-bar.component.ts
-// fix: remove manual instantiation; let angular construct the component (ioc registration happens from ctor)
 
-import { AfterViewInit, Component, computed, ElementRef, inject, signal, ViewChild, type OnDestroy } from '@angular/core'
-import { hypercomb } from '@hypercomb/core'
+import { AfterViewInit, Component, computed, ElementRef, inject, signal, viewChild, type OnDestroy } from '@angular/core'
 import { Lineage } from '../../core/lineage'
 import { MovementService } from '../../core/movement.service'
 import { Navigation } from '../../core/navigation'
@@ -16,10 +14,9 @@ import { ResourceCompletionService } from '@hypercomb/shared/core/resource-compl
   templateUrl: './search-bar.component.html',
   styleUrls: ['./search-bar.component.scss']
 })
-export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDestroy {
+export class SearchBarComponent implements AfterViewInit, OnDestroy {
 
-    @ViewChild('input', { static: true })
-  private readonly input!: ElementRef<HTMLInputElement>
+  private readonly input = viewChild.required<ElementRef<HTMLInputElement>>('input')
 
   private readonly completions = inject(CompletionUtility)
   private readonly lineage = inject(Lineage)
@@ -53,8 +50,6 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
   })
 
   public constructor() {
-    super()
-
     console.log('[search-bar] initialized with url segments:', this.navigation.segments())
   }
 
@@ -150,7 +145,7 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
   // -------------------------------------------------
 
   public ngAfterViewInit(): void {
-    this.input.nativeElement.focus()
+    this.input().nativeElement.focus()
     this.syncSignalsFromDom()
   }
 
@@ -197,7 +192,7 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
   }
 
   public onKeyDown = (e: KeyboardEvent): void => {
-    const el = this.input.nativeElement
+    const el = this.input().nativeElement
     const v = el.value
 
     // explicit '#' + enter always opens dcp
@@ -235,7 +230,7 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
   // -------------------------------------------------
 
   private readonly commitCreateSeedInPlace = async (): Promise<void> => {
-    const rawInput = this.input.nativeElement.value.trim()
+    const rawInput = this.input().nativeElement.value.trim()
     if (!rawInput) return
 
     if (rawInput.includes('#')) {
@@ -262,7 +257,7 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
   }
 
   private readonly commitLegacy = async (): Promise<void> => {
-    const raw = this.input.nativeElement.value.trim()
+    const raw = this.input().nativeElement.value.trim()
     if (!raw) return
 
     if (this.locked()) {
@@ -280,7 +275,7 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
   }
 
   private readonly commitNavigate = async (): Promise<void> => {
-    const raw = this.input.nativeElement.value.trim()
+    const raw = this.input().nativeElement.value.trim()
     if (!raw) return
 
     if (this.locked()) {
@@ -352,7 +347,7 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
 
     const rendered = this.completions.render(best, ctx.style)
 
-    this.input.nativeElement.value =
+    this.input().nativeElement.value =
       ctx.mode === 'marker'
         ? ctx.head + rendered + ' '
         : rendered + ' '
@@ -408,16 +403,16 @@ export class SearchBarComponent extends hypercomb implements AfterViewInit, OnDe
   // -------------------------------------------------
 
   private readonly clear = (): void => {
-    this.input.nativeElement.value = ''
+    this.input().nativeElement.value = ''
     this.syncSignalsFromDom()
   }
 
   private readonly placeCaretAtEnd = (): void => {
-    const el = this.input.nativeElement
+    const el = this.input().nativeElement
     queueMicrotask(() => el.setSelectionRange(el.value.length, el.value.length))
   }
 
   private readonly syncSignalsFromDom = (): void => {
-    this.value.set(this.input.nativeElement.value)
+    this.value.set(this.input().nativeElement.value)
   }
 }

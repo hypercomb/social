@@ -9,7 +9,6 @@ import { MousePanInput } from '@hypercomb/essentials/diamondcoreprocessor.com/in
 import { MousewheelZoomInput } from '@hypercomb/essentials/diamondcoreprocessor.com/input/zoom/mousewheel-zoom.input';
 import { Settings } from '@hypercomb/essentials/diamondcoreprocessor.com/core/settings';
 import { ZoomDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/zoom/zoom.drone';
-import { LayerService } from 'src/hypercomb-web/src/app/layer-service';
 import { NostrMeshDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/nostr/nostr-mesh.drone'
 import { NostrSigner } from '@hypercomb/essentials/diamondcoreprocessor.com/nostr/nostr-signer'
 
@@ -24,7 +23,6 @@ export class App {
     const { get, list } = window.ioc
     const _ = [
       AxialService,
-      LayerService,
       PanningDrone,
       PixiHostDrone,
       ShowHoneycombDrone,

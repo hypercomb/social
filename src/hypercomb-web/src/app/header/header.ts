@@ -3,6 +3,7 @@ import { SearchBarComponent } from '@hypercomb/shared/ui/search-bar/search-bar.c
 
 @Component({
   selector: 'app-header',
+  standalone: true,
   imports: [SearchBarComponent],
   templateUrl: './header.html',
   styleUrl: './header.scss'
