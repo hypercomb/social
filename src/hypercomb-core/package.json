@@ -1,14 +1,43 @@
 {
   "name": "@hypercomb/core",
   "version": "0.1.0",
-  "private": true,
+  "description": "Core primitives for the Hypercomb framework — IoC, effects, drones, and signature services",
   "type": "module",
-  "main": "./dist/index.js",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsup",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "hypercomb",
+    "ioc",
+    "drones",
+    "effects",
+    "framework"
+  ],
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hypercomb/social.git",
+    "directory": "src/hypercomb-core"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "devDependencies": {
+    "tsup": "^8.5.1",
     "typescript": "^5.9.3"
   }
 }

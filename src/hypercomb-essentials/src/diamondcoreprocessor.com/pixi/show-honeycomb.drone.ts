@@ -244,7 +244,7 @@ export class ShowHoneycombDrone extends Drone {
     const lineagePath = explorerSegments.join('/')
     const key = lineagePath ? `${domain}/${lineagePath}/seed` : `${domain}/seed`
     const bytes = new TextEncoder().encode(key)
-    const sig = await SignatureService.sign(bytes.buffer)
+    const sig = await SignatureService.sign(bytes.buffer as ArrayBuffer)
 
     return { key, sig }
   }

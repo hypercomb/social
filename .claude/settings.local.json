@@ -1,7 +1,15 @@
 {
   "permissions": {
     "allow": [
-      "Bash(xargs grep:*)"
+      "Bash(xargs grep:*)",
+      "Bash(npm install --save-dev tsup)",
+      "Bash(npx tsup)",
+      "Bash(npm install --install-links=false)",
+      "Bash(npm view @hypercomb/core)",
+      "Bash(npm view @hypercomb/essentials)",
+      "Bash(npm pack --dry-run)",
+      "Bash(start https://www.npmjs.com/signup)",
+      "Bash(npm login --scope=@hypercomb)"
     ]
   }
 }

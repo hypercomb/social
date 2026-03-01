@@ -1,24 +1,56 @@
 {
-  "name": "hypercomb-essentials",
+  "name": "@hypercomb/essentials",
+  "version": "0.1.0",
+  "description": "Essential drones and services for the Hypercomb framework — pixi rendering, input handling, nostr, and screen management",
   "type": "module",
-  "main": "./dist/index.js",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build-dev": "tsc -p tsconfig.json",
     "prepare": "tsx ./scripts/prepare.ts",
-    "build": "tsc -p tsconfig.json && tsx ./scripts/build-module.ts",
+    "build": "tsup",
     "build-legacy": "tsc -p tsconfig.json && tsx ./scripts/build-module-legacy.ts",
     "build:watch": "tsx watch --include \"./src/**/*\" --include \"./scripts/**/*\" ./scripts/build-module.ts",
-    "build-legacy:watch": "tsx watch --include \"./src/**/*\" --include \"./scripts/**/*\" ./scripts/build-module-legacy.ts"
+    "build-legacy:watch": "tsx watch --include \"./src/**/*\" --include \"./scripts/**/*\" ./scripts/build-module-legacy.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "hypercomb",
+    "pixi",
+    "drones",
+    "nostr",
+    "hexagonal",
+    "rendering"
+  ],
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hypercomb/social.git",
+    "directory": "src/hypercomb-essentials"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "dependencies": {
-    "@hypercomb/core": "file:../hypercomb-core",
+    "@hypercomb/core": "^0.1.0",
     "nostr-tools": "^2.23.1"
   },
   "peerDependencies": {
     "pixi.js": "^8.16.0"
   },
   "devDependencies": {
+    "tsup": "^8.5.1",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2"
   }
