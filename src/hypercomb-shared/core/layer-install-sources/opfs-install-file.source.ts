@@ -62,4 +62,4 @@ export class OpfsInstallFileSource implements LayerInstallSource {
   }
 }
 
-register('OpfsInstallFileSource', new OpfsInstallFileSource())
+register('@hypercomb.social/OpfsInstallFileSource', new OpfsInstallFileSource(), 'OpfsInstallFileSource')

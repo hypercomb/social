@@ -26,4 +26,4 @@ export class CompletionUtility {
 
 }
 
-register('CompletionUtility', new CompletionUtility())
+register('@hypercomb.social/CompletionUtility', new CompletionUtility(), 'CompletionUtility')

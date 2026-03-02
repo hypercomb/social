@@ -139,4 +139,4 @@ export class PinchZoomInput {
   }
 }
 
-window.ioc.register('PinchZoomInput', new PinchZoomInput())
+window.ioc.register('@diamondcoreprocessor.com/PinchZoomInput', new PinchZoomInput(), 'PinchZoomInput')

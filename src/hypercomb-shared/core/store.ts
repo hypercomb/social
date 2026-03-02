@@ -209,4 +209,4 @@ export class Store {
   }
 }
 
-register('Store', new Store())
+register('@hypercomb.social/Store', new Store(), 'Store')

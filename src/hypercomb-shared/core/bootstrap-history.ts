@@ -217,4 +217,4 @@ export class BootstrapHistory {
 }
 
 
-register('BootstrapHistory', new BootstrapHistory())
+register('@hypercomb.social/BootstrapHistory', new BootstrapHistory(), 'BootstrapHistory')

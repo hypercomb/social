@@ -119,4 +119,4 @@ export class AxialService {
   }
 }
 
-window.ioc.register('AxialService', new AxialService())
+window.ioc.register('@diamondcoreprocessor.com/AxialService', new AxialService(), 'AxialService')

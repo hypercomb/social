@@ -104,4 +104,4 @@ export class ScriptPreloader implements DroneResolver {
   }
 }
 
-register('ScriptPreloader', new ScriptPreloader())
+register('@hypercomb.social/ScriptPreloader', new ScriptPreloader(), 'ScriptPreloader')

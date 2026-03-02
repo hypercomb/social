@@ -258,4 +258,4 @@ export class Lineage {
   }
 }
 
-register('Lineage', new Lineage())
+register('@hypercomb.social/Lineage', new Lineage(), 'Lineage')

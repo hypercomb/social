@@ -11,4 +11,4 @@ export class ResourceCompletionService {
 
 }
 
-register('ResourceCompletionService', new ResourceCompletionService())
+register('@hypercomb.social/ResourceCompletionService', new ResourceCompletionService(), 'ResourceCompletionService')

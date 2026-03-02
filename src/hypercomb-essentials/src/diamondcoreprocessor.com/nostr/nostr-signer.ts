@@ -68,4 +68,4 @@ export class NostrSigner {
   }
 }
 
-window.ioc.register('NostrSigner', new NostrSigner())
+window.ioc.register('@diamondcoreprocessor.com/NostrSigner', new NostrSigner(), 'NostrSigner')

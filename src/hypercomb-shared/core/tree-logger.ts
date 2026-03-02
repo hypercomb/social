@@ -36,4 +36,4 @@ export class OpfsTreeLogger {
     }
 }
 
-register('OpfsTreeLogger', new OpfsTreeLogger())
+register('@hypercomb.social/OpfsTreeLogger', new OpfsTreeLogger(), 'OpfsTreeLogger')

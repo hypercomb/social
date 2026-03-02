@@ -118,4 +118,4 @@ export class MousePanInput {
     }
   }
 }
-window.ioc.register('MousePanInput',new MousePanInput())
+window.ioc.register('@diamondcoreprocessor.com/MousePanInput', new MousePanInput(), 'MousePanInput')

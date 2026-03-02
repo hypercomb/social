@@ -88,4 +88,4 @@ export class MovementService {
   }
 }
 
-register('MovementService', new MovementService())
+register('@hypercomb.social/MovementService', new MovementService(), 'MovementService')

@@ -63,4 +63,4 @@ export class DependencyLoader {
     /^[a-f0-9]{64}$/i.test(name.replace('.js', ''))
 }
 
-register('DependencyLoader', new DependencyLoader())
+register('@hypercomb.social/DependencyLoader', new DependencyLoader(), 'DependencyLoader')

@@ -187,4 +187,4 @@ export class Navigation extends hypercomb {
   }
 }
 
-register('Navigation', new Navigation())
+register('@hypercomb.social/Navigation', new Navigation(), 'Navigation')

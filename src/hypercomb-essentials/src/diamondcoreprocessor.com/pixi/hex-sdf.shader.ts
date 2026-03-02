@@ -136,4 +136,4 @@ export class HexSdfTextureShaderFactory {
   }
 }
 
-window.ioc.register('HexSdfTextureShaderFactory', new HexSdfTextureShaderFactory())
+window.ioc.register('@diamondcoreprocessor.com/HexSdfTextureShaderFactory', new HexSdfTextureShaderFactory(), 'HexSdfTextureShaderFactory')

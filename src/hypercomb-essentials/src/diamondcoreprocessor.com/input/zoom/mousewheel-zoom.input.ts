@@ -65,4 +65,4 @@ export class MousewheelZoomInput {
   }
 }
 
-window.ioc.register('MousewheelZoomInput', new MousewheelZoomInput())
+window.ioc.register('@diamondcoreprocessor.com/MousewheelZoomInput', new MousewheelZoomInput(), 'MousewheelZoomInput')

@@ -9,4 +9,4 @@ import { Component } from '@angular/core'
 export class RouteSinkComponent { }
 
 class RouteSinkComponentRef { public readonly type = RouteSinkComponent }
-register('RouteSinkComponent', new RouteSinkComponentRef())
+register('@hypercomb.social/RouteSinkComponent', new RouteSinkComponentRef(), 'RouteSinkComponent')
