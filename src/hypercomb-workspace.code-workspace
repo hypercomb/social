@@ -1,6 +1,10 @@
 {
   "folders": [
     {
+      "name": "documentation",
+      "path": "documentation"
+    },
+    {
       "name": "hypercomb-dev",
       "path": "hypercomb-dev"
     },
@@ -13,9 +17,11 @@
       "path": "hypercomb-essentials"
     },
     {
+      "name": "hypercomb-core",
       "path": "hypercomb-core"
     },
     {
+      "name": "hypercomb-web",
       "path": "hypercomb-web"
     }
   ],
