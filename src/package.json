@@ -6,6 +6,16 @@
     "node": ">=20.19.0",
     "npm": ">=8.0.0"
   },
+  "scripts": {
+    "audit-imports": "tsx scripts/audit-imports.ts",
+    "build:core": "npm --prefix hypercomb-core run build",
+    "build:essentials": "npm --prefix hypercomb-essentials run build",
+    "build:packages": "npm run build:core && npm run build:essentials",
+    "bump": "tsx scripts/bump-version.ts",
+    "publish:all": "tsx scripts/publish.ts",
+    "publish:core": "tsx scripts/publish.ts --core-only",
+    "publish:essentials": "tsx scripts/publish.ts --essentials-only"
+  },
   "dependencies": {
     "@angular/animations": "21.2.0",
     "@angular/cdk": "21.2.0",
@@ -54,6 +64,7 @@
     "prettier": "^3.6.2",
     "rimraf": "^6.0.1",
     "ts-morph": "^26.0.0",
+    "tsx": "^4.21.0",
     "typescript": "~5.9.3"
   }
 }
