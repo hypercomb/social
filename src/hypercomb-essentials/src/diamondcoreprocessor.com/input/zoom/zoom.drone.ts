@@ -7,6 +7,7 @@ import type { HostReadyPayload } from '../../pixi/pixi-host.drone.js'
 type Pt = { x: number; y: number }
 
 export class ZoomDrone extends Drone {
+  readonly namespace = 'diamondcoreprocessor.com'
   public override description = 'authoritative zoom controller'
 
   private initialized = false
@@ -172,4 +173,5 @@ export class ZoomDrone extends Drone {
     Math.max(this.minScale, Math.min(this.maxScale, v))
 }
 
-window.ioc.register('ZoomDrone', new ZoomDrone())
+const _zoom = new ZoomDrone()
+window.ioc.register(_zoom.iocKey, _zoom, 'ZoomDrone')

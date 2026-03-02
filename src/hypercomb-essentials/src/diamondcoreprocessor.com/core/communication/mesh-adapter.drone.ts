@@ -9,6 +9,7 @@ interface MeshAdapterConfig {
 }
 
 export class MeshAdapterDrone extends Drone {
+  readonly namespace = 'diamondcoreprocessor.com'
 
   public override description =
     'Posts a Hypercomb signature to the Nostr mesh'

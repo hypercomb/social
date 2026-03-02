@@ -24,6 +24,7 @@ type MeshApi = {
 }
 
 export class ShowHoneycombDrone extends Drone {
+  readonly namespace = 'diamondcoreprocessor.com'
   // pixi resources (populated via render:host-ready effect)
   private pixiApp: Application | null = null
   private pixiContainer: Container | null = null
@@ -761,4 +762,5 @@ export class ShowHoneycombDrone extends Drone {
   }
 }
 
-window.ioc.register('ShowHoneycomb', new ShowHoneycombDrone())
+const _showHoneycomb = new ShowHoneycombDrone()
+window.ioc.register(_showHoneycomb.iocKey, _showHoneycomb, 'ShowHoneycomb')

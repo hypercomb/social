@@ -5,6 +5,7 @@ import type { HostReadyPayload } from '../../pixi/pixi-host.drone.js'
 type Point = { x: number; y: number }
 
 export class PanningDrone extends Drone {
+  readonly namespace = 'diamondcoreprocessor.com'
 
   public override description = 'authoritative panning controller'
   private initialized = false
@@ -78,4 +79,5 @@ export class PanningDrone extends Drone {
   }
 }
 
-window.ioc.register('PanningDrone',new PanningDrone())
+const _panning = new PanningDrone()
+window.ioc.register(_panning.iocKey, _panning, 'PanningDrone')

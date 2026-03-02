@@ -1,6 +1,7 @@
 import { Drone } from "@hypercomb/core"
 
 export class HelloWorldDrone extends Drone {
+  readonly namespace = 'diamondcoreprocessor.com'
 
   public override description =
     'Minimal hello world action from Hypercomb essentials.'

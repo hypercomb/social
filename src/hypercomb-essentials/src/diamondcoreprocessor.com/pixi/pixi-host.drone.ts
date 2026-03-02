@@ -12,6 +12,7 @@ export type HostReadyPayload = {
 }
 
 export class PixiHostDrone extends Drone {
+  readonly namespace = 'diamondcoreprocessor.com'
   public app: Application | null = null
   public host: HTMLDivElement | null = null
 
@@ -94,4 +95,5 @@ export class PixiHostDrone extends Drone {
   }
 }
 
-window.ioc.register('PixiHost', new PixiHostDrone())
+const _pixiHost = new PixiHostDrone()
+window.ioc.register(_pixiHost.iocKey, _pixiHost, 'PixiHost')
