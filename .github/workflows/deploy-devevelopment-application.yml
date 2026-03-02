@@ -25,14 +25,9 @@ jobs:
           node-version: '22.12.0'
           cache: 'npm'
           cache-dependency-path: |
-            src/package-lock.json
             src/hypercomb-core/package-lock.json
             src/hypercomb-essentials/package-lock.json
             src/hypercomb-web/package-lock.json
-
-      - name: Install shared (src-level) dependencies
-        working-directory: src
-        run: npm ci --ignore-scripts
 
       - name: Install essentials dependencies
         working-directory: src/hypercomb-essentials
@@ -112,6 +107,10 @@ jobs:
       - name: Install web dependencies
         working-directory: src/hypercomb-web
         run: npm ci
+
+      - name: Link shared node_modules to web (prevents dual Angular runtime)
+        working-directory: src
+        run: ln -sf hypercomb-web/node_modules node_modules
 
       - name: Build web runtime assets
         working-directory: src/hypercomb-web
