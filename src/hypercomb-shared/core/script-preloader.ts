@@ -77,7 +77,7 @@ export class ScriptPreloader implements DroneResolver {
         register(drone.name, drone)
 
         this.bySignature.set(signature, { signature, name: drone.name })
-        this.resourceCount.update(v => v + 1)
+        this.resourceCount.update((v: number) => v + 1)
       } catch {
         // ignore
         console.log(`[script-preloader] failed to load resource ${signature} from OPFS`)

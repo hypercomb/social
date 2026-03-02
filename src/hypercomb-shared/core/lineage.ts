@@ -214,7 +214,7 @@ export class Lineage {
   // -------------------------------------------------
 
   private readonly invalidate = (reason: 'explorer' | 'url' | 'fs'): void => {
-    this.fsRevision.update(v => v + 1)
+    this.fsRevision.update((v: number) => v + 1)
 
     window.dispatchEvent(new CustomEvent('synchronize', {
       detail: {

@@ -3,9 +3,9 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "F5 Run Web (production)",
+      "label": "F5 Debug Start Web (production)",
       "type": "shell",
-      "command": "npx ng serve --configuration production --port 4200 --host localhost",
+      "command": "npx ng serve --configuration production --source-map --port 4200 --host localhost",
       "isBackground": true,
       "problemMatcher": {
         "owner": "typescript",

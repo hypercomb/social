@@ -73,7 +73,7 @@ export class MovementService {
     }
 
     this.committing = Promise.resolve().then(() => {
-      this.moved.update(v => v + 1)
+      this.moved.update((v: number) => v + 1)
 
       const pending = this.waiters
       this.waiters = []

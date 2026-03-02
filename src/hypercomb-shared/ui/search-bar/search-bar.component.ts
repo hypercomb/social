@@ -320,13 +320,13 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
 
     if (e.key === 'ArrowDown') {
       e.preventDefault()
-      this.activeIndex.update(v => Math.min(v + 1, list.length - 1))
+      this.activeIndex.update((v: number) => Math.min(v + 1, list.length - 1))
       return true
     }
 
     if (e.key === 'ArrowUp') {
       e.preventDefault()
-      this.activeIndex.update(v => Math.max(v - 1, 0))
+      this.activeIndex.update((v: number) => Math.max(v - 1, 0))
       return true
     }
 
@@ -361,7 +361,7 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
 
   private readonly clampActiveIndex = (): void => {
     const max = this.suggestions().length - 1
-    this.activeIndex.update(v => Math.max(0, Math.min(v, max)))
+    this.activeIndex.update((v: number) => Math.max(0, Math.min(v, max)))
   }
 
   // -------------------------------------------------

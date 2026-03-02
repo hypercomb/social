@@ -43,11 +43,11 @@ export class DependencyLoader {
         void mod
 
         this.loaded.add(sig)
-        this.dependencyCount.update(v => v + 1)
-        this.loadedSignatures.update(v => [...v, sig])
+        this.dependencyCount.update((v: number) => v + 1)
+        this.loadedSignatures.update((v: readonly string[]) => [...v, sig])
       } catch (error) {
         console.error(`Failed to load dependency: ${sig}`, error)
-        this.failedSignatures.update(v => [...v, sig])
+        this.failedSignatures.update((v: readonly string[]) => [...v, sig])
       }
     }
   }
