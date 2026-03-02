@@ -2,6 +2,11 @@
   "name": "pbs-hypercomb-shared",
   "version": "0.0.1",
   "private": true,
+  "workspaces": [
+    "hypercomb-shared",
+    "hypercomb-core",
+    "hypercomb-essentials"
+  ],
   "engines": {
     "node": ">=20.19.0",
     "npm": ">=8.0.0"

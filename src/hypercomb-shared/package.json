@@ -1,0 +1,33 @@
+{
+  "name": "@hypercomb/shared",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared library for Hypercomb apps — store, IoC, layer installer, UI components, environment config",
+  "type": "module",
+  "main": "./index.ts",
+  "types": "./index.ts",
+  "exports": {
+    ".": "./index.ts",
+    "./core": "./core/index.ts",
+    "./core/*": "./core/*",
+    "./ui": "./ui/index.ts",
+    "./ui/*": "./ui/*",
+    "./environments/*": "./environments/*",
+    "./*": "./*"
+  },
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hypercomb/social.git",
+    "directory": "src/hypercomb-shared"
+  },
+  "peerDependencies": {
+    "@angular/cdk": ">=21.0.0",
+    "@angular/common": ">=21.0.0",
+    "@angular/core": ">=21.0.0",
+    "@angular/forms": ">=21.0.0",
+    "@angular/material": ">=21.0.0",
+    "@angular/router": ">=21.0.0",
+    "rxjs": "^7.0.0"
+  }
+}
