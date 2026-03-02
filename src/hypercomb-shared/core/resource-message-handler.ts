@@ -3,8 +3,8 @@ import { ScriptPreloader, Store } from '@hypercomb/shared/core'
 
 export class ResourceMessageHandler {
 
-  private get store(): Store { return <Store>window.ioc.get("Store") }
-  private get preloader(): ScriptPreloader { return <ScriptPreloader>window.ioc.get("ScriptPreloader") }
+  private get store(): Store { return <Store>get("Store") }
+  private get preloader(): ScriptPreloader { return <ScriptPreloader>get("ScriptPreloader") }
 
   // whitelist for allowed postmessage origins
   private readonly allowedOrigins = new Set<string>([
@@ -56,4 +56,4 @@ export class ResourceMessageHandler {
 
 }
 
-window.ioc.register('ResourceMessageHandler', new ResourceMessageHandler())
+register('ResourceMessageHandler', new ResourceMessageHandler())

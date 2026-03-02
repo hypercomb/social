@@ -209,4 +209,4 @@ export class Store {
   }
 }
 
-window.ioc.register('Store', new Store())
+register('Store', new Store())

@@ -18,9 +18,9 @@ export class BootstrapHistory {
 
   public run = async (): Promise<void> => {
 
-    const store = window.ioc.get('Store') as Store
-    const preloader = window.ioc.get('ScriptPreloader') as any
-    const utility = window.ioc.get('CompletionUtility') as CompletionUtility
+    const store = get('Store') as Store
+    const preloader = get('ScriptPreloader') as any
+    const utility = get('CompletionUtility') as CompletionUtility
 
     const inputPath = window.location.pathname || '/'
     const inputSuffix = (window.location.search || '') + (window.location.hash || '')
@@ -44,7 +44,7 @@ export class BootstrapHistory {
         : urlSegments
 
     // walker strategy: build a path->handle lookup so we never mutate url until we know the answer
-    const walker = window.ioc.get('DirectoryWalker') as DirectoryWalker
+    const walker = get('DirectoryWalker') as DirectoryWalker
     const directories = await walker.walk(domainRoot)
 
     // map key is "a/b/c" (no leading slash), rooted at domainRoot
@@ -165,7 +165,7 @@ export class BootstrapHistory {
   }
 
   private tryGetLineage = (): any | null => {
-    try { return window.ioc.get('Lineage') as any } catch { return null }
+    try { return get('Lineage') as any } catch { return null }
   }
 
   private tryGetLineageSegments = (lineage: any | null): string[] => {
@@ -217,4 +217,4 @@ export class BootstrapHistory {
 }
 
 
-window.ioc.register('BootstrapHistory', new BootstrapHistory())
+register('BootstrapHistory', new BootstrapHistory())

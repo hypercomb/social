@@ -1,18 +1,18 @@
-import { inject, provideAppInitializer, provideBrowserGlobalErrorListeners, provideZoneChangeDetection, type ApplicationConfig } from '@angular/core';
+import { provideBrowserGlobalErrorListeners, provideAppInitializer, provideZoneChangeDetection, type ApplicationConfig } from '@angular/core';
 
-import { DRONE_RESOLVER_KEY, register } from '@hypercomb/core';
+import { DRONE_RESOLVER_KEY } from '@hypercomb/core';
 import { provideRouter } from '@angular/router';
 import { routes } from './app/app.routes';
-import { ScriptPreloader } from '@hypercomb/shared/core';
-import { sharedProviders } from '@hypercomb/shared/core/shared-providers';
+
+// side-effect imports: ensure shared services self-register before Angular boots
+import '@hypercomb/shared/core'
 
 export const appConfig: ApplicationConfig = {
   providers: [
-    ...sharedProviders,
     provideBrowserGlobalErrorListeners(),
     provideZoneChangeDetection({ eventCoalescing: true }),
     provideAppInitializer(() => {
-      const preloader = inject(ScriptPreloader)
+      const preloader = get('ScriptPreloader')
       register(DRONE_RESOLVER_KEY, preloader)
     }),
     provideRouter(routes),

@@ -28,6 +28,14 @@ export class ShowHoneycombDrone extends Drone {
   private layer: Container | null = null
 
   private mesh: any | null = null
+
+  protected override deps = {
+    lineage: 'Lineage',
+    mesh: 'MeshDrone',
+    meshAlt: 'NostrMeshDrone',
+    pixiHost: 'PixiHost',
+    axial: 'AxialService',
+  }
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
 
@@ -82,7 +90,7 @@ export class ShowHoneycombDrone extends Drone {
 
   private refreshMeshSeeds = async (grammar: string = ''): Promise<void> => {
 
-    const lineage = window.ioc.get('Lineage') as any
+    const lineage = this.resolve<any>('lineage')
     const mesh = this.tryGetMesh()
     if (!lineage || !mesh) return
 
@@ -212,7 +220,7 @@ export class ShowHoneycombDrone extends Drone {
   }
 
   public publishExplicitSeedList = async (seeds: string[]): Promise<boolean> => {
-    const lineage = window.ioc.get('Lineage') as any
+    const lineage = this.resolve<any>('lineage')
     const mesh = this.tryGetMesh()
     if (!lineage || !mesh || typeof mesh.publish !== 'function') return false
 
@@ -250,15 +258,7 @@ export class ShowHoneycombDrone extends Drone {
   }
 
   private tryGetMesh = (): MeshApi | null => {
-    try {
-      return window.ioc.get('MeshDrone') as any as MeshApi
-    } catch {
-      try {
-        return window.ioc.get('NostrMeshDrone') as any as MeshApi
-      } catch {
-        return null
-      }
-    }
+    return (this.resolve<MeshApi>('mesh') ?? this.resolve<MeshApi>('meshAlt')) ?? null
   }
 
 
@@ -429,7 +429,7 @@ export class ShowHoneycombDrone extends Drone {
   }
 
   private readonly renderFromSynchronize = async (): Promise<void> => {
-    const host = this.host = window.ioc.get('PixiHost') as any
+    const host = this.host = this.resolve<any>('pixiHost')
     if (!host?.app || !host.container) {
       this.clearMesh()
       return
@@ -438,13 +438,13 @@ export class ShowHoneycombDrone extends Drone {
     // note: query mesh before building cells so first render includes latest shared seeds
     await this.refreshMeshSeeds()
 
-    const axial = window.ioc.get('AxialService') as any
+    const axial = this.resolve<any>('axial')
     if (!axial?.items) {
       this.clearMesh()
       return
     }
 
-    const lineage = window.ioc.get('Lineage') as any
+    const lineage = this.resolve<any>('lineage')
     if (!lineage?.explorerDir || !lineage?.explorerLabel || !lineage?.changed) {
       this.clearMesh()
       return
@@ -614,7 +614,7 @@ export class ShowHoneycombDrone extends Drone {
     ; (window as any).showCellsPoc = {
       publishSeeds: async (seeds: string[]) => this.publishExplicitSeedList(seeds),
       signature: async () => {
-        const lineage = window.ioc.get('Lineage') as any
+        const lineage = this.resolve<any>('lineage')
         return await this.computeSignatureLocation(lineage)
       }
     }

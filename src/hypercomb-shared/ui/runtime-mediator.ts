@@ -9,8 +9,6 @@ export class RuntimeMediator {
 
   public sync = async (parsed: LocationParseResult): Promise<void> => {
     const run = async (): Promise<void> => {
-      const { get } = window.ioc
-
       const installer = get('LayerInstaller') as LayerInstaller
       const dependency = get('DependencyLoader') as DependencyLoader
 
@@ -27,5 +25,4 @@ export class RuntimeMediator {
   }
 }
 
-const { register } = window.ioc
 register('RuntimeMediator', new RuntimeMediator())

@@ -12,4 +12,4 @@ export class ServerInitializer {
   }
 }
 
-window.ioc.register('ServerInitializer', new ServerInitializer())
+register('ServerInitializer', new ServerInitializer())

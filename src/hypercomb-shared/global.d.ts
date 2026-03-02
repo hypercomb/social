@@ -1,10 +1,25 @@
 // src/global.d.ts
 
+// -------------------------------------------------
+// window.ioc container
+// -------------------------------------------------
+
 interface Window {
   ioc: {
     register<T>(signature: string, value: T, name?: string): void
     get<T = unknown>(key: string): T | undefined
     has(key: string): boolean
     list(): readonly string[]
+    onRegister(cb: (key: string, value: unknown) => void): () => void
+    graph(): Record<string, string[]>
   }
 }
+
+// -------------------------------------------------
+// global convenience functions
+// -------------------------------------------------
+
+declare function get<T = unknown>(key: string): T | undefined
+declare function register<T>(signature: string, value: T, name?: string): void
+declare function has(key: string): boolean
+declare function list(): readonly string[]

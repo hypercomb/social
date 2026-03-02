@@ -14,7 +14,7 @@ const INSTALLED_KEY = 'core-adapter.installed-signature'
 const _deps = [Store, LayerInstaller]
 
 export const ensureInstall = async (): Promise<void> => {
-  const store = window.ioc.get('Store') as Store | undefined
+  const store = get('Store') as Store | undefined
   if (!store) {
     console.warn('[ensure-install] Store not registered')
     return
@@ -38,7 +38,7 @@ export const ensureInstall = async (): Promise<void> => {
   const installUrl = `${CONTENT_BASE_URL}/${signature}`
   const parsed = LocationParser.parse(installUrl)
 
-  const installer = window.ioc.get('LayerInstaller') as LayerInstaller | undefined
+  const installer = get('LayerInstaller') as LayerInstaller | undefined
   if (!installer) {
     console.warn('[ensure-install] LayerInstaller not registered')
     return

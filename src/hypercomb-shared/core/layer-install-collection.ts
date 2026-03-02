@@ -8,9 +8,9 @@ import { environment } from '../environments/environment'
 
 export class LayerInstallCollection {
 
-  private get opfs(): OpfsInstallFileSource { return <OpfsInstallFileSource>window.ioc.get("OpfsInstallFileSource") }
-  private get dev(): DevLayerSource { return <DevLayerSource>window.ioc.get("DevLayerSource") }
-  private get domain(): DomainLayerSource { return <DomainLayerSource>window.ioc.get("DomainLayerSource") }
+  private get opfs(): OpfsInstallFileSource { return <OpfsInstallFileSource>get("OpfsInstallFileSource") }
+  private get dev(): DevLayerSource { return <DevLayerSource>get("DevLayerSource") }
+  private get domain(): DomainLayerSource { return <DomainLayerSource>get("DomainLayerSource") }
 
   private readonly ordered = (ctx: LayerInstallContext): readonly LayerInstallSource[] => {
     // debug mode: prefer live sources first so cache can’t “win”

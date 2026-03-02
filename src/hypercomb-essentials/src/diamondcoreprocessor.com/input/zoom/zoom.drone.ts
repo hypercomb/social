@@ -18,6 +18,8 @@ export class ZoomDrone extends Drone {
 
   private activeSource: string | null = null
 
+  protected override deps = { pixiHost: 'PixiHost', mouseWheel: 'MousewheelZoomInput' }
+
   protected override sense = (): boolean => {
     const prev = this.initialized
     this.initialized = true
@@ -39,21 +41,17 @@ export class ZoomDrone extends Drone {
   private attach = (): void => {
     if (this.host) return
 
-    const { get } = window.ioc
-
-    this.host = get('PixiHost')
+    this.host = this.resolve('pixiHost')
     if (!this.host?.app || !this.host?.container) return
 
     this.canvas = this.host.app.canvas
 
-    const mouseWheel = get<any>('MousewheelZoomInput')
+    const mouseWheel = this.resolve<any>('mouseWheel')
     mouseWheel?.attach(this, this.canvas)
   }
 
   private detach = (): void => {
-    const { get } = window.ioc
-
-    const mouseWheel = get<any>('MousewheelZoomInput')
+    const mouseWheel = this.resolve<any>('mouseWheel')
     mouseWheel?.detach()
 
     this.host = null
@@ -174,5 +172,4 @@ export class ZoomDrone extends Drone {
     Math.max(this.minScale, Math.min(this.maxScale, v))
 }
 
-const { get, register, list } = window.ioc
 window.ioc.register('ZoomDrone', new ZoomDrone())

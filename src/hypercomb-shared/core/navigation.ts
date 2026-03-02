@@ -4,8 +4,7 @@
 import { hypercomb } from '@hypercomb/core'
 import { CompletionUtility } from '../core/completion-utility'
 
-const { get, register, list } = window.ioc
-void list
+// global get/register/list available via ioc.web.ts
 
 type SelectionDetail = {
   selected: string[]

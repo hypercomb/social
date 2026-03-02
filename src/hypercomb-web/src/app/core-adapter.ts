@@ -1,7 +1,7 @@
 // hypercomb-web/src/app/core/core-adapter.ts
 
-import { Injectable, inject } from "@angular/core"
-import { Navigation, Lineage, ScriptPreloader, Store, LayerInstaller, DependencyLoader, OpfsTreeLogger } from "@hypercomb/shared/core"
+import { Injectable } from "@angular/core"
+import { type Navigation, type Lineage, type ScriptPreloader, Store, LayerInstaller, DependencyLoader, OpfsTreeLogger } from "@hypercomb/shared/core"
 import { LayerService } from "./layer-service"
 
 const _ = [DependencyLoader, LayerInstaller, LayerService, Store]
@@ -10,12 +10,12 @@ const _ = [DependencyLoader, LayerInstaller, LayerService, Store]
 export class CoreAdapter {
 
   // -------------------------------------------------
-  // dependencies
+  // dependencies (lazy IoC resolution)
   // -------------------------------------------------
 
-  private readonly navigation = inject(Navigation)
-  private readonly lineage = inject(Lineage)
-  private readonly preloader = inject(ScriptPreloader)
+  private get navigation(): Navigation { return get('Navigation') as Navigation }
+  private get lineage(): Lineage { return get('Lineage') as Lineage }
+  private get preloader(): ScriptPreloader { return get('ScriptPreloader') as ScriptPreloader }
 
   // -------------------------------------------------
   // state
@@ -35,7 +35,7 @@ export class CoreAdapter {
     // const logger = <OpfsTreeLogger>window.ioc.get("OpfsTreeLogger")
     // await logger.log()
 
-    const store = window.ioc.get('Store') as Store
+    const store = get('Store') as Store
 
     // Store is already initialized in ensure-install (pre-boot)
     // but re-init is safe (idempotent)
@@ -43,7 +43,7 @@ export class CoreAdapter {
 
     // Install was already performed in ensure-install (before import map).
     // Just load dependencies into memory — the import map is now populated.
-    const dependency = window.ioc.get('DependencyLoader') as DependencyLoader | undefined
+    const dependency = get('DependencyLoader') as DependencyLoader | undefined
     await dependency?.load?.()
     console.log('[core-adapter] dependencies loaded')
 
@@ -56,16 +56,15 @@ export class CoreAdapter {
     this.navigation.bootstrap(segments)
 
 
-    const { list } = window.ioc
     const l = list();
     console.log('[core-adapter] ioc keys:', l)
 
     const hostkey = 'PixiHost'
-    const host = window.ioc.get(hostkey) as { encounter?: (arg: string) => Promise<void> | void } | undefined
+    const host = get(hostkey) as { encounter?: (arg: string) => Promise<void> | void } | undefined
     await host?.encounter?.('testing')
 
     const showkey = 'ShowHoneycomb'
-    const show = window.ioc.get(showkey) as { encounter?: (arg: string) => Promise<void> | void } | undefined
+    const show = get(showkey) as { encounter?: (arg: string) => Promise<void> | void } | undefined
     await show?.encounter?.('testing')
 
     // const zoomkey = 'ZoomDrone'

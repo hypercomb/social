@@ -58,4 +58,4 @@ export class DevLayerSource implements LayerInstallSource {
   }
 }
 
-window.ioc.register('DevLayerSource', new DevLayerSource())
+register('DevLayerSource', new DevLayerSource())

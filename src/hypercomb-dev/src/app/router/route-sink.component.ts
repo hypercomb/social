@@ -9,4 +9,4 @@ import { Component } from '@angular/core'
 export class RouteSinkComponent { }
 
 class RouteSinkComponentRef { public readonly type = RouteSinkComponent }
-window.ioc.register('RouteSinkComponent', new RouteSinkComponentRef())
+register('RouteSinkComponent', new RouteSinkComponentRef())

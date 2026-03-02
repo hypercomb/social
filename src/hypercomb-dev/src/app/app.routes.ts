@@ -20,4 +20,4 @@ export class AppRoutes {
   public readonly matcher = lineageMatcher
 }
 
-window.ioc.register('AppRoutes', new AppRoutes())
+register('AppRoutes', new AppRoutes())

@@ -14,7 +14,7 @@ export class LayerGraphResolver {
   // dependencies
   // -------------------------------------------------
 
-  private get store(): Store { return <Store>window.ioc.get("Store") }
+  private get store(): Store { return <Store>get("Store") }
 
   // -------------------------------------------------
   // fields

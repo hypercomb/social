@@ -8,7 +8,7 @@ import { Navigation } from '../../core/navigation'
   templateUrl: './history.html'
 })
 export class HistoryComponent {
-  private get navigation(): Navigation { return <Navigation>window.ioc.get("Navigation") }
+  private get navigation(): Navigation { return <Navigation>get("Navigation") }
 
   public readonly length = (): number => window.history.length
   public readonly current = (): number => ((window.history.state as any)?.i ?? 0)

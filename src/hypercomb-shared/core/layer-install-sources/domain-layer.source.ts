@@ -60,4 +60,4 @@ export class DomainLayerSource implements LayerInstallSource {
   }
 }
 
-window.ioc.register('DomainLayerSource', new DomainLayerSource())
+register('DomainLayerSource', new DomainLayerSource())

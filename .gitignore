@@ -145,3 +145,4 @@ src/hypercomb-web/public/dev/essentials/diamondcoreprocessor.com/screen/screen-s
 src/hypercomb-web/public/dev/essentials/diamondcoreprocessor.com/screen/settings.d.ts
 src/hypercomb-web/public/dev/essentials/diamondcoreprocessor.com/screen/settings.d.ts.map
 src/hypercomb-web/public/dev/essentials/diamondcoreprocessor.com/screen/settings.js
+.claude/settings.local.json

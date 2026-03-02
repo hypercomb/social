@@ -51,6 +51,8 @@ type MeshExpiryRule = {
 
 export class NostrMeshDrone extends Drone {
 
+  protected override deps = { signer: 'NostrSigner' }
+
   // -----------------------------
   // config
   // -----------------------------
@@ -810,7 +812,7 @@ export class NostrMeshDrone extends Drone {
       } catch { /* ignore */ }
     }
 
-    const signer = window.ioc.get('NostrSigner') as any
+    const signer = this.resolve<any>('signer')
     if (signer?.signEvent) {
       try {
         const signed = await signer.signEvent(evt)

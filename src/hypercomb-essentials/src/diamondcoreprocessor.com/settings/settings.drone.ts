@@ -13,17 +13,6 @@ export class SettingsDrone extends Drone {
   }
 
   public heartbeat = async (): Promise<void> => {
-    const { register, get } = window.ioc
-
-    // // get settings module (preloaded or importable)
-    // const mod = get(SettingsModule)
-    // console.log('got settings module:', mod)
-
-    // register(SettingsKeys.ZoomSettings, mod.ZoomSettings())
-    // // publish instances
-    // ioc.register('diamondcoreprocessor.com/core/settings/zoom-settings', new mod.ZoomSettings())
-
-    // repeat if needed
-    // ioc.register('otherSettings', new mod.OtherSettings())
+    // placeholder — settings registration will use global register() when enabled
   }
 }

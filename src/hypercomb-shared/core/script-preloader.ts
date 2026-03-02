@@ -10,7 +10,7 @@ export interface ActionDescriptor {
 }
 export class ScriptPreloader implements DroneResolver {
 
-  private get store(): Store { return <Store>window.ioc.get("Store")}
+  private get store(): Store { return <Store>get("Store")}
   
   private readonly bySignature = new Map<string, ActionDescriptor>()
 
@@ -74,7 +74,6 @@ export class ScriptPreloader implements DroneResolver {
 
         const drone = await this.store.getDrone(signature, buffer)
         if (!drone) continue
-        const { register } = window.ioc
         register(drone.name, drone)
 
         this.bySignature.set(signature, { signature, name: drone.name })
@@ -105,4 +104,4 @@ export class ScriptPreloader implements DroneResolver {
   }
 }
 
-window.ioc.register('ScriptPreloader', new ScriptPreloader())
+register('ScriptPreloader', new ScriptPreloader())

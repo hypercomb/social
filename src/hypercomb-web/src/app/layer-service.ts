@@ -18,7 +18,6 @@ export class LayerService {
 
     if (!dom || !rootSig || !requestedSig) return null
 
-    const { get } = window.ioc
     const store = get('Store') as Store
 
     const dir = await store.domainLayersDirectory(dom, true)
@@ -107,5 +106,4 @@ export class LayerService {
   }
 }
 
-const { register } = window.ioc
 register('LayerService', new LayerService())

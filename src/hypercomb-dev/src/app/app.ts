@@ -20,7 +20,6 @@ import { NostrSigner } from '@hypercomb/essentials/diamondcoreprocessor.com/nost
 export class App {
   protected readonly title = signal('hypercomb-dev');
   constructor() {
-    const { get, list } = window.ioc
     const _ = [
       AxialService,
       PanningDrone,

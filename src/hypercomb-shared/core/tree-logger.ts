@@ -36,4 +36,4 @@ export class OpfsTreeLogger {
     }
 }
 
-window.ioc.register('OpfsTreeLogger', new OpfsTreeLogger())
+register('OpfsTreeLogger', new OpfsTreeLogger())

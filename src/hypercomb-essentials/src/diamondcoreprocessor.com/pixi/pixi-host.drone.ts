@@ -11,17 +11,17 @@ export class PixiHostDrone extends Drone {
   // stable render root for all drones (this is what ZoomDrone scales/translates)
   public container!: Container
 
+  protected override deps = { settings: 'Settings', axial: 'AxialService' }
+
   protected override heartbeat = async (): Promise<void> => {
     if (this.app) return
 
-    const { get } = window.ioc
-
     // axial must be initialized before any drone tries to use index->axial lookups
     // if settings aren't ready yet, just wait for the next heartbeat
-    const settings = get('Settings') as any
+    const settings = this.resolve<any>('settings')
     if (!settings) return
 
-    const axial = get('AxialService') as any
+    const axial = this.resolve<any>('axial')
     if (axial?.initialize) axial.initialize(settings)
 
     // -------------------------------------------------

@@ -5,7 +5,7 @@ import { Store } from './store'
 
 export class DependencyLoader {
 
-  private get store(): Store { return <Store>window.ioc.get("Store") }
+  private get store(): Store { return <Store>get("Store") }
   private readonly loaded = new Set<string>()
 
   public readonly dependencyCount = signal(0)
@@ -63,4 +63,4 @@ export class DependencyLoader {
     /^[a-f0-9]{64}$/i.test(name.replace('.js', ''))
 }
 
-window.ioc.register('DependencyLoader', new DependencyLoader())
+register('DependencyLoader', new DependencyLoader())

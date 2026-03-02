@@ -26,4 +26,4 @@ export class CompletionUtility {
 
 }
 
-window.ioc.register('CompletionUtility', new CompletionUtility())
+register('CompletionUtility', new CompletionUtility())

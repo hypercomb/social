@@ -1,20 +1,18 @@
-import { Component, computed, inject } from '@angular/core';
-import { Lineage } from '@hypercomb/shared/core';
-import { ResourceMessageHandler } from '@hypercomb/shared/core/resource-message-handler';
-import { OpfsExplorerComponent } from '@hypercomb/shared/ui';
+import { Component, computed } from '@angular/core';
+import type { Lineage } from '@hypercomb/shared/core';
+import type { ResourceMessageHandler } from '@hypercomb/shared/core/resource-message-handler';
 
 @Component({
   selector: 'app-home',
   standalone: true,
-  imports: [OpfsExplorerComponent],
   templateUrl: './home.html',
   styleUrl: './home.scss'
 })
 export class Home {
-  private handler = inject(ResourceMessageHandler)
-  private readonly lineage = inject(Lineage) 
-  public ready = computed(() =>  this.lineage.ready())
- 
+  private get handler(): ResourceMessageHandler { return get('ResourceMessageHandler') as ResourceMessageHandler }
+  private get lineage(): Lineage { return get('Lineage') as Lineage }
+  public ready = computed(() => this.lineage.ready())
+
   ngOnDestroy(): void {
     this.handler.destroy()
   }

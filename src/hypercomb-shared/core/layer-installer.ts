@@ -5,7 +5,7 @@ import { Store } from './store'
 
 type InstallManifest = { version: number; layers: string[]; drones: string[]; dependencies: string[] }
 
-const { get, register, list } = window.ioc
+// global get/register/list available via ioc.web.ts
 
 export class LayerInstaller {
 
@@ -258,4 +258,4 @@ export class LayerInstaller {
   }
 }
 
-window.ioc.register('LayerInstaller', new LayerInstaller())
+register('LayerInstaller', new LayerInstaller())

@@ -26,5 +26,6 @@ export class App {
     })
 
     void this.core.initialize()
+    console.log('[app] initialized')
   }
 }

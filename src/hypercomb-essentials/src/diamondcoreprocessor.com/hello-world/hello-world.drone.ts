@@ -20,8 +20,10 @@ export class HelloWorldDrone extends Drone {
     } as const
   ]
 
+  protected override deps = { hw: '@diamondcoreprocessor.com/hello-world' }
+
   protected override heartbeat = async (grammar: string): Promise<void> => {
-    const hw = window.ioc.get("@diamondcoreprocessor.com/hello-world")
+    const hw = this.resolve('hw')
     console.log('[hypercomb essentials] hello world')
   }
 }

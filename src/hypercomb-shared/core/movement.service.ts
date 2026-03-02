@@ -3,8 +3,7 @@
 import { signal } from '@angular/core'
 import type { Navigation } from './navigation'
 
-const { get, register, list } = window.ioc
-void list
+// global get/register/list available via ioc.web.ts
 
 export class MovementService {
 

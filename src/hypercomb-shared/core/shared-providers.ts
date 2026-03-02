@@ -7,21 +7,23 @@
 // Without this, @Injectable({ providedIn: 'root' }) causes Angular to create a
 // SECOND instance, leaving Angular-side and dynamic-module-side state diverged.
 
-import type { Provider } from '@angular/core'
-import { CompletionUtility } from './completion-utility'
-import { Lineage } from './lineage'
-import { MovementService } from './movement.service'
-import { Navigation } from './navigation'
-import { ResourceCompletionService } from './resource-completion.service'
-import { ResourceMessageHandler } from './resource-message-handler'
-import { ScriptPreloader } from './script-preloader'
+import {
+  bridgeProviders,
+  COMPLETION_UTILITY,
+  LINEAGE,
+  MOVEMENT,
+  NAVIGATION,
+  RESOURCE_COMPLETION,
+  RESOURCE_MSG_HANDLER,
+  SCRIPT_PRELOADER,
+} from './tokens'
 
-export const sharedProviders: Provider[] = [
-  { provide: CompletionUtility, useFactory: () => window.ioc.get('CompletionUtility') as CompletionUtility },
-  { provide: Lineage, useFactory: () => window.ioc.get('Lineage') as Lineage },
-  { provide: MovementService, useFactory: () => window.ioc.get('MovementService') as MovementService },
-  { provide: Navigation, useFactory: () => window.ioc.get('Navigation') as Navigation },
-  { provide: ResourceCompletionService, useFactory: () => window.ioc.get('ResourceCompletionService') as ResourceCompletionService },
-  { provide: ResourceMessageHandler, useFactory: () => window.ioc.get('ResourceMessageHandler') as ResourceMessageHandler },
-  { provide: ScriptPreloader, useFactory: () => window.ioc.get('ScriptPreloader') as ScriptPreloader },
-]
+export const sharedProviders = bridgeProviders([
+  COMPLETION_UTILITY,
+  LINEAGE,
+  MOVEMENT,
+  NAVIGATION,
+  RESOURCE_COMPLETION,
+  RESOURCE_MSG_HANDLER,
+  SCRIPT_PRELOADER,
+])

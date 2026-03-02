@@ -58,4 +58,4 @@ export class DirectoryWalker {
   }
 }
 
-window.ioc.register('DirectoryWalker', new DirectoryWalker())
+register('DirectoryWalker', new DirectoryWalker())

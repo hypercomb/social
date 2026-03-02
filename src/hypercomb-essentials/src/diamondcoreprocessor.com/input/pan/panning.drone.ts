@@ -1,6 +1,5 @@
 // src/<domain>/pixi/panning.drone.ts
 import { Drone } from '@hypercomb/core'
-const { get } = window.ioc
 
 type Point = { x: number; y: number }
 
@@ -11,6 +10,8 @@ export class PanningDrone extends Drone {
 
   private host: any = null
   private activeSource: string | null = null
+
+  protected override deps = { pixiHost: 'PixiHost', mousePan: 'MousePanInput' }
 
   protected override sense = (): boolean => {
     const prev = this.initialized
@@ -33,15 +34,15 @@ export class PanningDrone extends Drone {
   private attach = (): void => {
     if (this.host) return
 
-    this.host = get('PixiHost')
+    this.host = this.resolve('pixiHost')
     if (!this.host?.app) return
 
-    const mousePan = get<any>('MousePanInput')
+    const mousePan = this.resolve<any>('mousePan')
     mousePan?.attach(this, this.host.app.canvas)
   }
 
   private detach = (): void => {
-    const mousePan = get<any>('MousePanInput')
+    const mousePan = this.resolve<any>('mousePan')
     mousePan?.detach()
 
     this.host = null

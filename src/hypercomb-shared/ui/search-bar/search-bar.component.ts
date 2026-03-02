@@ -1,12 +1,12 @@
 // hypercomb-shared/ui/search-bar/search-bar.component.ts
 
-import { AfterViewInit, Component, computed, ElementRef, inject, signal, viewChild, type OnDestroy } from '@angular/core'
-import { Lineage } from '../../core/lineage'
-import { MovementService } from '../../core/movement.service'
-import { Navigation } from '../../core/navigation'
-import { ScriptPreloader } from '../../core/script-preloader'
-import { CompletionUtility, type CompletionContext } from '@hypercomb/shared/core/completion-utility'
-import { ResourceCompletionService } from '@hypercomb/shared/core/resource-completion.service'
+import { AfterViewInit, Component, computed, ElementRef, signal, viewChild, type OnDestroy } from '@angular/core'
+import type { Lineage } from '../../core/lineage'
+import type { MovementService } from '../../core/movement.service'
+import type { Navigation } from '../../core/navigation'
+import type { ScriptPreloader } from '../../core/script-preloader'
+import type { CompletionUtility, CompletionContext } from '@hypercomb/shared/core/completion-utility'
+import type { ResourceCompletionService } from '@hypercomb/shared/core/resource-completion.service'
 
 @Component({
   selector: 'hc-search-bar',
@@ -18,12 +18,14 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
 
   private readonly input = viewChild.required<ElementRef<HTMLInputElement>>('input')
 
-  private readonly completions = inject(CompletionUtility)
-  private readonly lineage = inject(Lineage)
-  private readonly movement = inject(MovementService)
-  private readonly navigation = inject(Navigation)
-  private readonly preloader = inject(ScriptPreloader)
-  private readonly resources = inject(ResourceCompletionService)
+  // Resolve via IoC container (not Angular DI) — these are shared services
+  // registered at module load time, available globally via get()
+  private get completions(): CompletionUtility { return get('CompletionUtility') as CompletionUtility }
+  private get lineage(): Lineage { return get('Lineage') as Lineage }
+  private get movement(): MovementService { return get('MovementService') as MovementService }
+  private get navigation(): Navigation { return get('Navigation') as Navigation }
+  private get preloader(): ScriptPreloader { return get('ScriptPreloader') as ScriptPreloader }
+  private get resources(): ResourceCompletionService { return get('ResourceCompletionService') as ResourceCompletionService }
 
   private readonly value = signal('')
   private readonly activeIndex = signal(0)

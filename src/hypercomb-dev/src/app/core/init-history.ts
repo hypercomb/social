@@ -26,4 +26,4 @@ export class InitHistory {
   }
 }
 
-window.ioc.register('InitHistory', new InitHistory())
+register('InitHistory', new InitHistory())

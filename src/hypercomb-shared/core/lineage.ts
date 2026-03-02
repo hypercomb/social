@@ -5,8 +5,7 @@ import { signal } from '@angular/core'
 import type { Navigation } from './navigation'
 import type { Store } from './store'
 
-const { get, list } = window.ioc
-void list
+// global get/register/list available via ioc.web.ts
 
 export class Lineage {
 
@@ -259,4 +258,4 @@ export class Lineage {
   }
 }
 
-window.ioc.register('Lineage', new Lineage())
+register('Lineage', new Lineage())
