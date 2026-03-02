@@ -28,8 +28,10 @@
     "@angular/cli": "21.2.0",
     "@angular/build": "21.2.0",
     "@angular/compiler-cli": "21.2.0",
+    "esbuild": "^0.27.0",
     "ng-packagr": "21.2.0",
     "pixi.js": "^8.16.0",
+    "tsx": "^4.21.0",
     "typescript": "~5.9.3"
   }
 }
