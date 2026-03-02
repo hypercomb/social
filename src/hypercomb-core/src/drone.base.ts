@@ -1,7 +1,7 @@
 import { Effect } from "./effect.js"
+import { EffectBus, type EffectHandler } from "./effect-bus.js"
 import { GrammarHint } from "./grammar-hint.js"
 import { ProviderLink } from "./provider-link.js"
-import { get } from "./ioc/ioc.js"
 
 // -------------------------------------------------
 // lifecycle state machine
@@ -50,10 +50,40 @@ export abstract class Drone {
   /** Optional cleanup hook — override in subclasses */
   protected dispose?(): void
 
-  /** Mark this drone as disposed, calling dispose() if defined */
+  /** Mark this drone as disposed, clean up effect subscriptions, call dispose() if defined */
   public markDisposed(): void {
     this._state = DroneState.Disposed
+    for (const unsub of this._effectSubs) unsub()
+    this._effectSubs.length = 0
     this.dispose?.()
+  }
+
+  // --------------------------------
+  // effect bus (drone-to-drone communication)
+  // --------------------------------
+
+  /** Effect subscriptions — auto-cleaned on dispose */
+  private _effectSubs: (() => void)[] = []
+
+  /** Effects this drone listens for (metadata for graph visibility) */
+  protected listens?: string[]
+
+  /** Effects this drone emits (metadata for graph visibility) */
+  protected emits?: string[]
+
+  /** Emit an effect for other drones to consume */
+  protected emitEffect<T = unknown>(effect: string, payload: T): void {
+    EffectBus.emit(effect, payload)
+  }
+
+  /** Subscribe to an effect (auto-cleaned on dispose) */
+  protected onEffect<T = unknown>(effect: string, handler: EffectHandler<T>): void {
+    this._effectSubs.push(EffectBus.on(effect, handler))
+  }
+
+  /** Subscribe to an effect once (auto-cleaned on dispose) */
+  protected onceEffect<T = unknown>(effect: string, handler: EffectHandler<T>): void {
+    this._effectSubs.push(EffectBus.once(effect, handler))
   }
 
   // --------------------------------
@@ -63,10 +93,10 @@ export abstract class Drone {
   /** Declared dependencies — maps local names to IoC keys */
   protected deps?: Record<string, string>
 
-  /** Resolve a declared dependency by its local name */
+  /** Resolve a declared dependency by its local name (uses window.ioc where services register) */
   protected resolve<T>(localName: string): T | undefined {
     const key = this.deps?.[localName] ?? localName
-    return get<T>(key)
+    return (globalThis as any).ioc?.get(key) as T | undefined
   }
 
   // --------------------------------

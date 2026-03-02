@@ -5,8 +5,8 @@
 // - redraw stays event-driven via synchronize, but heartbeat also triggers synchronize
 
 import { Drone, SignatureService } from '@hypercomb/core'
-import { Assets, Container, Geometry, Mesh, Texture } from 'pixi.js'
-import { PixiHostDrone } from './pixi-host.drone.js'
+import { Application, Assets, Container, Geometry, Mesh, Texture } from 'pixi.js'
+import type { HostReadyPayload } from './pixi-host.drone.js'
 import { HexLabelAtlas } from './hex-label.atlas.js'
 import { HexSdfTextureShader } from './hex-sdf.shader.js'
 
@@ -24,18 +24,21 @@ type MeshApi = {
 }
 
 export class ShowHoneycombDrone extends Drone {
-  private host?: PixiHostDrone
-  private layer: Container | null = null
+  // pixi resources (populated via render:host-ready effect)
+  private pixiApp: Application | null = null
+  private pixiContainer: Container | null = null
+  private pixiRenderer: Application['renderer'] | null = null
 
-  private mesh: any | null = null
+  private layer: Container | null = null
+  private hexMesh: any | null = null
 
   protected override deps = {
     lineage: 'Lineage',
-    mesh: 'MeshDrone',
-    meshAlt: 'NostrMeshDrone',
-    pixiHost: 'PixiHost',
     axial: 'AxialService',
   }
+
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated']
+  protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
 
@@ -80,6 +83,14 @@ export class ShowHoneycombDrone extends Drone {
 
   protected override heartbeat = async (grammar: string = ''): Promise<void> => {
     this.ensureListeners()
+
+    // listen for pixi host readiness via effect bus
+    this.onEffect<HostReadyPayload>('render:host-ready', (payload) => {
+      this.pixiApp = payload.app
+      this.pixiContainer = payload.container
+      this.pixiRenderer = payload.renderer
+      this.requestRender()
+    })
 
     // note: always compute mesh seeds on every heartbeat
     await this.refreshMeshSeeds(grammar)
@@ -130,8 +141,9 @@ export class ShowHoneycombDrone extends Drone {
       }
     }
 
-    // note: ensure relays are queried for this sig
+    // note: ensure relays are queried for this sig (direct call + effect for observability)
     mesh.ensureStartedForSig(sig)
+    this.emitEffect('mesh:ensure-started', { signature: sig })
 
     // note: on signature changes, wait briefly for relay fill so first render can include remote items
     if (sigChanged && typeof mesh.awaitReadyForSig === 'function') {
@@ -257,8 +269,11 @@ export class ShowHoneycombDrone extends Drone {
     return { key, sig }
   }
 
+  // mesh discovery — resolves whichever mesh drone is registered
+  // note: data queries (getNonExpired, subscribe) still use the direct API
+  // coordination (ensureStartedForSig, publish) also emits effects for observability
   private tryGetMesh = (): MeshApi | null => {
-    return (this.resolve<MeshApi>('mesh') ?? this.resolve<MeshApi>('meshAlt')) ?? null
+    return (get<MeshApi>('MeshDrone') ?? get<MeshApi>('NostrMeshDrone')) ?? null
   }
 
 
@@ -429,8 +444,7 @@ export class ShowHoneycombDrone extends Drone {
   }
 
   private readonly renderFromSynchronize = async (): Promise<void> => {
-    const host = this.host = this.resolve<any>('pixiHost')
-    if (!host?.app || !host.container) {
+    if (!this.pixiApp || !this.pixiContainer || !this.pixiRenderer) {
       this.clearMesh()
       return
     }
@@ -453,14 +467,14 @@ export class ShowHoneycombDrone extends Drone {
     // note: init layer + atlas (and reset shader if renderer changes)
     if (!this.layer) {
       this.layer = new Container()
-      host.container.addChild(this.layer)
+      this.pixiContainer.addChild(this.layer)
 
-      this.atlas = new HexLabelAtlas(host.app.renderer, 128, 8, 8)
-      this.atlasRenderer = host.app.renderer
+      this.atlas = new HexLabelAtlas(this.pixiRenderer, 128, 8, 8)
+      this.atlasRenderer = this.pixiRenderer
       this.shader = null
-    } else if (!this.atlas || this.atlasRenderer !== host.app.renderer) {
-      this.atlas = new HexLabelAtlas(host.app.renderer, 128, 8, 8)
-      this.atlasRenderer = host.app.renderer
+    } else if (!this.atlas || this.atlasRenderer !== this.pixiRenderer) {
+      this.atlas = new HexLabelAtlas(this.pixiRenderer, 128, 8, 8)
+      this.atlasRenderer = this.pixiRenderer
       this.shader = null
     }
 
@@ -491,6 +505,7 @@ export class ShowHoneycombDrone extends Drone {
       return
     }
     if (!dir) {
+      console.warn('[show-honeycomb] BAIL: explorerDir returned null')
       this.clearMesh()
       return
     }
@@ -572,28 +587,28 @@ export class ShowHoneycombDrone extends Drone {
         this.shader.setQuadSize(quadW, quadH)
         this.shader.setRadiusPx(circumRadiusPx)
       } catch {
-        this.rebuildRenderResources(host.app.renderer)
+        this.rebuildRenderResources(this.pixiRenderer)
         this.renderQueued = true
         return
       }
     }
 
     // note: apply geometry
-    if (!this.mesh) {
-      this.mesh = new Mesh({ geometry: geom as any, shader: (this.shader as any).shader, texture: baseTex as any } as any)
-      this.layer.addChild(this.mesh as any)
+    if (!this.hexMesh) {
+      this.hexMesh = new Mesh({ geometry: geom as any, shader: (this.shader as any).shader, texture: baseTex as any } as any)
+      this.layer.addChild(this.hexMesh as any)
     } else {
       if (this.geom) this.geom.destroy(true)
-      this.mesh.geometry = geom
-      this.mesh.shader = (this.shader as any).shader
-      if ('texture' in this.mesh) this.mesh.texture = baseTex
+      this.hexMesh.geometry = geom
+      this.hexMesh.shader = (this.shader as any).shader
+      if ('texture' in this.hexMesh) this.hexMesh.texture = baseTex
     }
 
     // note: keep centered
-    if (this.mesh?.getLocalBounds) {
-      this.mesh.position.set(0, 0)
-      const b = this.mesh.getLocalBounds()
-      this.mesh.position.set(-(b.x + b.width * 0.5), -(b.y + b.height * 0.5))
+    if (this.hexMesh?.getLocalBounds) {
+      this.hexMesh.position.set(0, 0)
+      const b = this.hexMesh.getLocalBounds()
+      this.hexMesh.position.set(-(b.x + b.width * 0.5), -(b.y + b.height * 0.5))
     }
 
     this.geom = geom
@@ -621,16 +636,16 @@ export class ShowHoneycombDrone extends Drone {
   }
 
   private clearMesh = (): void => {
-    if (this.mesh && this.layer) {
-      try { this.layer.removeChild(this.mesh as any) } catch { /* ignore */ }
-      try { this.mesh.destroy?.(true) } catch { /* ignore */ }
+    if (this.hexMesh && this.layer) {
+      try { this.layer.removeChild(this.hexMesh as any) } catch { /* ignore */ }
+      try { this.hexMesh.destroy?.(true) } catch { /* ignore */ }
     }
 
     if (this.geom) {
       try { this.geom.destroy(true) } catch { /* ignore */ }
     }
 
-    this.mesh = null
+    this.hexMesh = null
     this.geom = null
     this.renderedCellsKey = ''
     this.renderedCount = 0

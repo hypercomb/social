@@ -6,7 +6,8 @@ import type { ResourceMessageHandler } from '@hypercomb/shared/core/resource-mes
   selector: 'app-home',
   standalone: true,
   templateUrl: './home.html',
-  styleUrl: './home.scss'
+  styleUrl: './home.scss',
+  imports: []
 })
 export class Home {
   private get handler(): ResourceMessageHandler { return get('ResourceMessageHandler') as ResourceMessageHandler }

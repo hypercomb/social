@@ -1,7 +1,8 @@
 // hypercomb-essentials/src/diamondcoreprocessor.com/input/zoom/zoom.drone.ts
 
 import { Drone } from '@hypercomb/core'
-import { Point } from 'pixi.js'
+import { Application, Container, Point } from 'pixi.js'
+import type { HostReadyPayload } from '../../pixi/pixi-host.drone.js'
 
 type Pt = { x: number; y: number }
 
@@ -10,15 +11,18 @@ export class ZoomDrone extends Drone {
 
   private initialized = false
 
-  private host: any = null
+  private app: Application | null = null
+  private renderContainer: Container | null = null
   private canvas: HTMLCanvasElement | null = null
+  private renderer: Application['renderer'] | null = null
 
   private readonly minScale = 0.05
   private readonly maxScale = 12
 
   private activeSource: string | null = null
 
-  protected override deps = { pixiHost: 'PixiHost', mouseWheel: 'MousewheelZoomInput' }
+  protected override deps = { mouseWheel: 'MousewheelZoomInput' }
+  protected override listens = ['render:host-ready']
 
   protected override sense = (): boolean => {
     const prev = this.initialized
@@ -27,7 +31,15 @@ export class ZoomDrone extends Drone {
   }
 
   protected override heartbeat = async (): Promise<void> => {
-    this.attach()
+    this.onEffect<HostReadyPayload>('render:host-ready', (payload) => {
+      this.app = payload.app
+      this.renderContainer = payload.container
+      this.canvas = payload.canvas
+      this.renderer = payload.renderer
+
+      const mouseWheel = this.resolve<any>('mouseWheel')
+      mouseWheel?.attach(this, this.canvas)
+    })
   }
 
   public stop = async (): Promise<void> => {
@@ -38,24 +50,14 @@ export class ZoomDrone extends Drone {
   // lifecycle
   // -------------------------------------------------
 
-  private attach = (): void => {
-    if (this.host) return
-
-    this.host = this.resolve('pixiHost')
-    if (!this.host?.app || !this.host?.container) return
-
-    this.canvas = this.host.app.canvas
-
-    const mouseWheel = this.resolve<any>('mouseWheel')
-    mouseWheel?.attach(this, this.canvas)
-  }
-
   private detach = (): void => {
     const mouseWheel = this.resolve<any>('mouseWheel')
     mouseWheel?.detach()
 
-    this.host = null
+    this.app = null
+    this.renderContainer = null
     this.canvas = null
+    this.renderer = null
     this.activeSource = null
   }
 
@@ -79,10 +81,9 @@ export class ZoomDrone extends Drone {
 
   public zoomByFactor = (factor: number, pivotClient: Pt, source: string): void => {
     if (!this.begin(source)) return
-    if (!this.host || !this.canvas) return
+    if (!this.renderContainer || !this.canvas) return
 
-    // zoom the world root (the thing your honeycomb is under)
-    const target = this.host.container
+    const target = this.renderContainer
 
     const current = target.scale.x || 1
     const next = this.clamp(current * factor)
@@ -105,8 +106,7 @@ export class ZoomDrone extends Drone {
   //
 
   private adjustZoom = (target: any, newScale: number, pivotClient: Pt): void => {
-    const app = this.host?.app
-    if (!app || !this.canvas) return
+    if (!this.renderer || !this.canvas) return
 
     const pivotGlobal = this.clientToPixiGlobal(pivotClient)
 
@@ -147,7 +147,7 @@ export class ZoomDrone extends Drone {
   //
 
   private clientToPixiGlobal = (p: Pt): Pt => {
-    const renderer = this.host!.app.renderer
+    const renderer = this.renderer!
     const canvas = this.canvas!
 
     // best: pixi v8 event mapping (handles autoDensity + resolution correctly)

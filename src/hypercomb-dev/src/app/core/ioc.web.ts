@@ -55,13 +55,21 @@
         }
       },
 
-      graph(): Record<string, string[]> {
-        const result: Record<string, string[]> = {}
+      graph(): Record<string, { deps: string[]; listens: string[]; emits: string[] }> {
+        const result: Record<string, { deps: string[]; listens: string[]; emits: string[] }> = {}
         for (const [key, value] of instances) {
-          if (value && typeof value === 'object' && 'deps' in value) {
-            const deps = (value as any).deps
-            if (deps && typeof deps === 'object') {
-              result[key] = Object.values(deps) as string[]
+          if (!value || typeof value !== 'object') continue
+
+          const v = value as any
+          const hasDeps = v.deps && typeof v.deps === 'object'
+          const hasListens = Array.isArray(v.listens)
+          const hasEmits = Array.isArray(v.emits)
+
+          if (hasDeps || hasListens || hasEmits) {
+            result[key] = {
+              deps: hasDeps ? Object.values(v.deps) as string[] : [],
+              listens: hasListens ? v.listens : [],
+              emits: hasEmits ? v.emits : [],
             }
           }
         }

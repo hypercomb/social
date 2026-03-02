@@ -205,6 +205,130 @@ class hypercomb extends web {
 
 ---
 
+## The Seed Hierarchy: The Runtime IS the Data Structure
+
+The central runtime concept in Hypercomb is the **seed hierarchy** -- a tree of
+cells stored as nested directories in OPFS, where each directory is a seed and
+the tree structure itself is the program's execution space.
+
+### Seeds as Cells
+
+A seed is a named directory inside the current lineage path. The URL
+`/domain/path/to/seed` maps directly to an OPFS directory path
+`hypercomb.io/domain/path/to/seed`. Seeds are the atoms of the hierarchy --
+each one is a cell in the hexagonal grid that can contain:
+
+- **Child seeds** (subdirectories) -- forming the tree's branches
+- **Markers** (files named by signature) -- associating drones with locations
+- **Mesh state** (shared seeds from the Nostr relay mesh) -- external
+  contributions from other nodes
+
+The `Lineage` service tracks the current position in this tree. `Navigation`
+moves through it. The URL bar is a direct reflection of your position in the
+seed hierarchy. The `ShowHoneycombDrone` renders the current seed's children as
+hexagonal cells, unioning local filesystem seeds with seeds discovered through
+the mesh.
+
+### The Runtime Loop
+
+When the application starts, it begins at the root of the seed tree. At each
+position in the tree, the runtime checks whether any scripts should run at this
+location and then moves on. The loop works as follows:
+
+1. **Intent arrives** -- any user input, gesture, navigation event, or tracked
+   signal becomes a grammar string. A keystroke is intent. A pan gesture is
+   intent. A URL change is intent. There is no distinction between "user action"
+   and "system event" -- all are grammar.
+2. **`hypercomb.act(grammar)`** broadcasts the grammar to all registered drones.
+3. Each drone's **`encounter(grammar)`** fires: check lifecycle state, evaluate
+   `sense(grammar)`, execute `heartbeat(grammar)` if relevant.
+4. The heartbeat examines the current seed (via Lineage) -- does this location
+   have scripts to run? Are there child seeds to traverse? What mesh state
+   exists here?
+5. **`synchronize`** event fires, coalescing all visual updates into a single
+   render pass.
+
+The seed doesn't "run" in the traditional sense. It is a location in the tree
+that drones inspect and act upon. The drone checks what exists at the current
+seed, performs its work, and the tree is both the data and the execution context.
+
+### Tree Traversal and Parallel Execution
+
+When the seed hierarchy branches -- when a seed has many children -- the runtime
+can dispatch work across branches concurrently. Each path from root to leaf is
+an independent line of execution:
+
+```
+         root
+        / | \
+      a   b   c          <- 3 branches, can process in parallel
+     / \     / \
+    d   e   f   g         <- leaf drones execute independently
+```
+
+At each node, the drone evaluates whether it should act. If the tree has many
+active paths (many leaves with associated drones), those paths can execute their
+heartbeats concurrently because:
+
+- Each drone's `encounter()` is self-contained -- drones don't call each other
+  directly.
+- The IoC container is read-safe for concurrent access.
+- The `synchronize` event at the end coalesces all visual updates into one pass.
+
+This is concurrent `Promise` execution within the JavaScript event loop, with
+the tree structure providing natural task boundaries. Each branch of the tree is
+a self-contained unit of work. When there are many paths out to each leaf, all
+active branches can execute their heartbeats in parallel.
+
+### Seeds Are Content-Addressable Locations
+
+The seed hierarchy isn't just a folder structure. Each location in the tree has
+a **signature** computed from its lineage path:
+
+```
+sig = SHA-256("hypercomb.io/domain/path/to/seed")
+```
+
+This signature is used to:
+- **Subscribe to mesh updates** for that location (via Nostr relays)
+- **Publish local seeds** to the mesh so other nodes can discover them
+- **Deduplicate** -- two users at the same path are at the same signed location
+
+The signature makes every position in the tree globally addressable. Two
+instances of Hypercomb navigating to the same path independently arrive at the
+same signature and can share state through the mesh without coordination.
+
+### The Lifecycle IS the Heartbeat
+
+The drone lifecycle is not a separate initialization sequence. It is the
+encounter itself. The lifecycle state machine exists to track *where a drone is*
+in its history of encounters, not to enforce a startup ceremony:
+
+```
+Intent (any input / gesture / tracked event)
+  -> grammar string
+    -> hypercomb.act(grammar)
+      -> DroneResolver.find(grammar) -> [matching drones]
+        -> drone.encounter(grammar)
+          -> check state (Disposed? skip entirely)
+          -> sense(grammar) (relevant? no? skip)
+          -> heartbeat(grammar) (execute the work)
+          -> state: Created/Registered -> Active (on first successful heartbeat)
+```
+
+A drone that has never been activated simply hasn't encountered a grammar it
+senses as relevant yet. The first time it does, it transitions to Active. There
+is no separate "init" phase, no temporal ordering of setup calls to get wrong.
+The intent IS the lifecycle trigger.
+
+This answers the temporal coupling concern directly: there is nothing to call in
+the wrong order. There is only `encounter`, and `encounter` handles everything
+-- state gating, relevance filtering, execution, and state transition -- in a
+single atomic operation. Each intent reaching some leaf drone in the hierarchy
+sends the heartbeat in the lifecycle. That is the lifecycle.
+
+---
+
 ## Paradigm Significance
 
 ### Content-Addressable Everything
@@ -258,6 +382,26 @@ This means:
   trusted domain and verified by its hash.
 - **Multi-tenant isolation** is structural. Each domain gets its own OPFS
   subdirectory for drones, dependencies, and layers.
+
+### The Tree as Runtime
+
+Most applications separate "code" from "data" -- the program is a fixed binary
+that acts on mutable state. In Hypercomb, the seed hierarchy is both. The tree
+of seeds is the data structure the user navigates, and it is simultaneously the
+execution context that determines which drones fire and what they see.
+
+This means:
+- **Adding a seed IS adding behavior.** If a drone senses a particular seed
+  name, creating that seed directory activates that drone at that location.
+- **Navigation IS execution.** Moving to a new seed changes the execution
+  context. Different drones may sense relevance at different positions in the
+  tree.
+- **The tree scales naturally.** Each branch is independent. A tree with a
+  thousand leaves can process all active branches concurrently without
+  coordination, because the drones at each leaf are self-contained.
+- **The tree is the API.** External consumers (mesh peers, other Hypercomb
+  instances) don't call methods -- they navigate to signed locations and publish
+  seeds. The tree structure IS the shared interface.
 
 ### Separation of Framework and Domain
 

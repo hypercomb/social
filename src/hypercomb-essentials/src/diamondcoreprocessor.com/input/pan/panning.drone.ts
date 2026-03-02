@@ -1,5 +1,6 @@
 // src/<domain>/pixi/panning.drone.ts
 import { Drone } from '@hypercomb/core'
+import type { HostReadyPayload } from '../../pixi/pixi-host.drone.js'
 
 type Point = { x: number; y: number }
 
@@ -8,10 +9,12 @@ export class PanningDrone extends Drone {
   public override description = 'authoritative panning controller'
   private initialized = false
 
-  private host: any = null
+  private stage: any = null
+  private canvas: HTMLCanvasElement | null = null
   private activeSource: string | null = null
 
-  protected override deps = { pixiHost: 'PixiHost', mousePan: 'MousePanInput' }
+  protected override deps = { mousePan: 'MousePanInput' }
+  protected override listens = ['render:host-ready']
 
   protected override sense = (): boolean => {
     const prev = this.initialized
@@ -20,7 +23,13 @@ export class PanningDrone extends Drone {
   }
 
   protected override heartbeat = async (): Promise<void> => {
-    this.attach()
+    this.onEffect<HostReadyPayload>('render:host-ready', (payload) => {
+      this.stage = payload.app.stage
+      this.canvas = payload.canvas
+
+      const mousePan = this.resolve<any>('mousePan')
+      mousePan?.attach(this, this.canvas)
+    })
   }
 
   public stop = async (): Promise<void> => {
@@ -31,21 +40,12 @@ export class PanningDrone extends Drone {
   // lifecycle
   // -------------------------------------------------
 
-  private attach = (): void => {
-    if (this.host) return
-
-    this.host = this.resolve('pixiHost')
-    if (!this.host?.app) return
-
-    const mousePan = this.resolve<any>('mousePan')
-    mousePan?.attach(this, this.host.app.canvas)
-  }
-
   private detach = (): void => {
     const mousePan = this.resolve<any>('mousePan')
     mousePan?.detach()
 
-    this.host = null
+    this.stage = null
+    this.canvas = null
     this.activeSource = null
   }
 
@@ -71,11 +71,10 @@ export class PanningDrone extends Drone {
 
   public panBy = (delta: Point, source: string): void => {
     if (!this.begin(source)) return
-    if (!this.host) return
+    if (!this.stage) return
 
-    const stage = this.host.app.stage
-    stage.position.x += delta.x
-    stage.position.y += delta.y
+    this.stage.position.x += delta.x
+    this.stage.position.y += delta.y
   }
 }
 

@@ -3,7 +3,7 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "F5 Start (hypercomb-web, production)",
+      "label": "F5 Run Web (production)",
       "type": "shell",
       "command": "npx ng serve --configuration production --port 4200 --host localhost",
       "isBackground": true,

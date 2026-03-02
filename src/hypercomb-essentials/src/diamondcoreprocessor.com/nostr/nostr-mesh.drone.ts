@@ -52,6 +52,8 @@ type MeshExpiryRule = {
 export class NostrMeshDrone extends Drone {
 
   protected override deps = { signer: 'NostrSigner' }
+  protected override listens = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish']
+  protected override emits = ['mesh:ready', 'mesh:items-updated']
 
   // -----------------------------
   // config
@@ -114,6 +116,20 @@ export class NostrMeshDrone extends Drone {
 
     // note: expiry is mesh responsibility
     this.pruneAllExpired()
+
+    // effect bus listeners — allow other drones to coordinate via effects
+    this.onEffect<{ signature: string }>('mesh:ensure-started', async ({ signature }) => {
+      this.ensureStartedForSig(signature)
+      this.emitEffect('mesh:ready', { signature })
+    })
+
+    this.onEffect<{ signature: string, onItems: (e: any) => void }>('mesh:subscribe', ({ signature, onItems }) => {
+      this.subscribe(signature, onItems)
+    })
+
+    this.onEffect<{ kind: number, sig: string, payload: any, extraTags?: string[][] }>('mesh:publish', async ({ kind, sig, payload, extraTags }) => {
+      await this.publish(kind, sig, payload, extraTags)
+    })
   }
 
   // -----------------------------

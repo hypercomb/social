@@ -4,6 +4,13 @@
 import { Drone } from '@hypercomb/core'
 import { Application, Container } from 'pixi.js'
 
+export type HostReadyPayload = {
+  app: Application
+  container: Container
+  canvas: HTMLCanvasElement
+  renderer: Application['renderer']
+}
+
 export class PixiHostDrone extends Drone {
   public app: Application | null = null
   public host: HTMLDivElement | null = null
@@ -12,6 +19,7 @@ export class PixiHostDrone extends Drone {
   public container!: Container
 
   protected override deps = { settings: 'Settings', axial: 'AxialService' }
+  protected override emits = ['render:host-ready']
 
   protected override heartbeat = async (): Promise<void> => {
     if (this.app) return
@@ -72,6 +80,17 @@ export class PixiHostDrone extends Drone {
 
     center()
     window.addEventListener('resize', center)
+
+    // -------------------------------------------------
+    // broadcast pixi resources to other drones via effect bus
+    // -------------------------------------------------
+
+    this.emitEffect<HostReadyPayload>('render:host-ready', {
+      app: this.app,
+      container: this.container,
+      canvas: this.app.canvas as HTMLCanvasElement,
+      renderer: this.app.renderer,
+    })
   }
 }
 
