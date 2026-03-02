@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web-prod",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [".claude/serve-prod.js"],
+      "port": 4203
+    }
+  ]
+}
