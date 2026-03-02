@@ -15,10 +15,22 @@ import { NostrSigner } from '@hypercomb/essentials/diamondcoreprocessor.com/nost
 @Component({
   selector: 'app-root',
   imports: [RouterOutlet, SearchBarComponent],
+  styleUrls: ['./app.scss'],
   templateUrl: './app.html'
 })
 export class App {
   protected readonly title = signal('hypercomb-dev');
+
+  public readonly meshPublic = signal(true);
+
+  public toggleMesh = (): void => {
+    const mesh = get('NostrMeshDrone') as any;
+
+    const next = !this.meshPublic();
+    this.meshPublic.set(next);
+    mesh?.setNetworkEnabled?.(next, true);
+  }
+
   constructor() {
     const _ = [
       AxialService,
@@ -56,6 +68,13 @@ export class App {
 
       // 1) hard-start mesh lifecycle
       await mesh.encounter('smoke-test')
+
+      try {
+        const enabled = !!mesh?.isNetworkEnabled?.()
+        this.meshPublic.set(enabled)
+      } catch {
+        // ignore
+      }
 
     })
   }

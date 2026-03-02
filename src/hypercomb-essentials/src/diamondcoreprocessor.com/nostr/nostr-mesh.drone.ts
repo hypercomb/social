@@ -85,6 +85,8 @@ export class NostrMeshDrone extends Drone {
   private started = false
   private stopped = false
 
+  private networkEnabled = this.loadNetworkEnabled()
+
   private sockets = new Map<string, WebSocket>()
   private backoff = new Map<string, RelayBackoff>()
 
@@ -325,6 +327,30 @@ export class NostrMeshDrone extends Drone {
     }
   }
 
+
+  public isNetworkEnabled = (): boolean => this.networkEnabled
+
+  public setNetworkEnabled = (enabled: boolean, persist = true): void => {
+  const next = !!enabled
+  if (next === this.networkEnabled) return
+
+  this.networkEnabled = next
+  if (persist) {
+    try { localStorage.setItem('hc:nostrmesh:network', next ? '1' : '0') } catch {}
+  }
+
+  this.note('network:set', undefined, undefined, undefined, undefined, this.networkEnabled)
+
+  if (!this.networkEnabled) {
+    this.pauseNetwork()
+    return
+  }
+
+  // coming back online
+  this.ensureStartedNow()
+  this.reconnectAll()
+}
+
   // note: signature-only subscription
   // - sig is used as the x tag value
   // - multiple consumers share one network subscription per sig
@@ -449,9 +475,10 @@ export class NostrMeshDrone extends Drone {
   // -----------------------------
 
   private connectAll = (): void => {
-    this.forceHardRelay()
-    this.ensureSocket(HARD_RELAY)
-  }
+  if (!this.networkEnabled) return
+  this.forceHardRelay()
+  this.ensureSocket(HARD_RELAY)
+}
 
   private reconnectAll = (): void => {
     if (this.stopped) return
@@ -478,6 +505,7 @@ export class NostrMeshDrone extends Drone {
   }
 
   private ensureSocket = (relay: string): void => {
+    if (!this.networkEnabled) return
     if (relay !== HARD_RELAY) return
     if (this.stopped) return
     if (this.sockets.has(relay)) return
@@ -516,6 +544,8 @@ export class NostrMeshDrone extends Drone {
       this.note('socket:closed', relay)
 
       this.sockets.delete(relay)
+      if (!this.networkEnabled || this.stopped) return
+
       this.bumpBackoff(relay)
       this.ensureSocket(relay)
     }
@@ -709,6 +739,7 @@ export class NostrMeshDrone extends Drone {
   // -----------------------------
 
   private sendReqToAll = (b: Bucket): void => {
+    if (!this.networkEnabled) return
     for (const url of this.sockets.keys()) this.sendReq(url, b)
   }
 
@@ -745,6 +776,7 @@ export class NostrMeshDrone extends Drone {
     this.stats.eventSent++
 
     for (const ws of this.sockets.values()) {
+      if (!this.networkEnabled) return
       if (ws.readyState !== WebSocket.OPEN) continue
       try { ws.send(frame) } catch { /* ignore */ }
     }
@@ -843,6 +875,31 @@ export class NostrMeshDrone extends Drone {
   // -----------------------------
   // helpers
   // -----------------------------
+
+
+  private loadNetworkEnabled(): boolean {
+  try {
+    const v = localStorage.getItem('hc:nostrmesh:network')
+    if (v === '0') return false
+    if (v === '1') return true
+  } catch {}
+  return true
+}
+
+
+  private pauseNetwork = (): void => {
+  for (const [url, st] of this.backoff.entries()) {
+    if (st.timer) clearTimeout(st.timer)
+    this.backoff.delete(url)
+  }
+
+  for (const [url, ws] of this.sockets.entries()) {
+    try { ws.onopen = null; ws.onmessage = null; ws.onerror = null; ws.onclose = null } catch {}
+    try { ws.close() } catch {}
+    this.sockets.delete(url)
+    this.note('socket:pause', url)
+  }
+}
 
   private loadDebugFlag = (): boolean => {
     try { return localStorage.getItem('hc:nostrmesh:debug') === '1' } catch { return false }
