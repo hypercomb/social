@@ -3,6 +3,25 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "F5 Start (hypercomb-web, production)",
+      "type": "shell",
+      "command": "npx ng serve --configuration production --port 4200 --host localhost",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "typescript",
+        "pattern": "$tsc",
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": {
+            "regexp": "(.*?)"
+          },
+          "endsPattern": {
+            "regexp": "bundle generation complete|Application bundle generation complete|Compiled successfully|Local:"
+          }
+        }
+      }
+    },
+    {
       "type": "npm",
       "script": "start",
       "isBackground": true,
