@@ -929,3 +929,5 @@ src/.claude/worktrees/nostalgic-johnson/src/hypercomb-web/src/setup/ensure-insta
 src/.claude/worktrees/nostalgic-johnson/src/hypercomb-web/src/setup/resolve-import-map.ts
 src/.claude/worktrees/nostalgic-johnson/src/hypercomb-web/src/types/opfs-entries.d.ts
 src/.claude/settings.local.json
+src/hypercomb-web/.vscode/tasks.json
+src/hypercomb-web/.vscode/tasks.json
