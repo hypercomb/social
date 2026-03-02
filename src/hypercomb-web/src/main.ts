@@ -1,6 +1,5 @@
 // hypercomb-web/src/main.ts
 /// <reference path="../../hypercomb-shared/global.d.ts" />
-
 import '@hypercomb/shared/core/ioc.web'
 
 import { bootstrapApplication } from '@angular/platform-browser'
