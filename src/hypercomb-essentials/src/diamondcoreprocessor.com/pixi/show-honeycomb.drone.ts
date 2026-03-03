@@ -39,7 +39,7 @@ export class ShowHoneycombDrone extends Drone {
   }
 
   protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated']
-  protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish']
+  protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
 
@@ -610,6 +610,7 @@ export class ShowHoneycombDrone extends Drone {
       this.hexMesh.position.set(0, 0)
       const b = this.hexMesh.getLocalBounds()
       this.hexMesh.position.set(-(b.x + b.width * 0.5), -(b.y + b.height * 0.5))
+      this.emitEffect('render:mesh-offset', { x: this.hexMesh.position.x, y: this.hexMesh.position.y })
     }
 
     this.geom = geom

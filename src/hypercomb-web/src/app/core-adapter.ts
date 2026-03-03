@@ -86,6 +86,9 @@ export class CoreAdapter {
     const panning = get(panningkey) as { encounter?: (arg: string) => Promise<void> | void } | undefined
     await panning?.encounter?.('testing')
 
+    const overlaykey = '@diamondcoreprocessor.com/TileOverlayDrone'
+    const overlay = get(overlaykey) as { encounter?: (arg: string) => Promise<void> | void } | undefined
+    await overlay?.encounter?.('testing')
 
       const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any
 

@@ -11,11 +11,13 @@ import { Settings } from '@hypercomb/essentials/diamondcoreprocessor.com/core/se
 import { ZoomDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/zoom/zoom.drone';
 import { NostrMeshDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/nostr/nostr-mesh.drone'
 import { NostrSigner } from '@hypercomb/essentials/diamondcoreprocessor.com/nostr/nostr-signer'
+import { HexDetector } from '@hypercomb/essentials/diamondcoreprocessor.com/input/hex-detector'
+import { TileOverlayDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/tile-overlay.drone'
 
 @Component({
   selector: 'app-root',
   imports: [RouterOutlet, SearchBarComponent],
-  styleUrls: ['./app.scss'],
+  styleUrls: ['./app.scss'] as any,
   templateUrl: './app.html'
 })
 export class App {
@@ -41,6 +43,8 @@ export class App {
       MousewheelZoomInput,
       NostrMeshDrone,
       NostrSigner,
+      HexDetector,
+      TileOverlayDrone,
       Settings,
       ZoomDrone]
 
@@ -63,6 +67,10 @@ export class App {
       const pankey = '@diamondcoreprocessor.com/PanningDrone'
       const pan = <any>get(pankey)!
       await pan.encounter('testing')
+
+      const overlaykey = '@diamondcoreprocessor.com/TileOverlayDrone'
+      const overlay = <any>get(overlaykey)!
+      await overlay.encounter('testing')
 
       const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any
 
