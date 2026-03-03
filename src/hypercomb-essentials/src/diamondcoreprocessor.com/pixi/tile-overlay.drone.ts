@@ -2,12 +2,16 @@
 // Contextual action overlay: shows clickable icons at hex vertices on occupied tiles.
 
 import { Drone } from '@hypercomb/core'
-import { Application, Container, Text, TextStyle, Point } from 'pixi.js'
+import { Application, Container, Graphics, Text, TextStyle, Point } from 'pixi.js'
 import type { HostReadyPayload } from './pixi-host.drone.js'
 import type { Axial } from '../input/hex-detector.js'
 import type { HistoryService } from '../core/history.service.js'
 
 type CellCountPayload = { count: number; labels: string[] }
+
+// icon offset from hex center (flat-top hex, bottom-right vertex area)
+const ICON_OFFSET_X = 16
+const ICON_OFFSET_Y = 28
 
 export class TileOverlayDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -19,7 +23,7 @@ export class TileOverlayDrone extends Drone {
   private renderer: Application['renderer'] | null = null
 
   private overlay: Container | null = null
-  private removeIcon: Text | null = null
+  private removeIcon: Container | null = null
   private meshOffset = { x: 0, y: 0 }
   private currentAxial: Axial | null = null
   private currentIndex: number | undefined = undefined
@@ -71,9 +75,8 @@ export class TileOverlayDrone extends Drone {
     this.onEffect<CellCountPayload>('render:cell-count', (payload) => {
       this.cellCount = payload.count
       this.cellLabels = payload.labels
-      console.log('[TileOverlay] render:cell-count →', payload.count, 'labels:', payload.labels.length)
+      console.log('[TileOverlay] render:cell-count →', payload.count)
       this.rebuildOccupiedMap()
-      console.log('[TileOverlay] occupiedByAxial size:', this.occupiedByAxial.size)
       // re-evaluate visibility for current hover
       if (this.overlay && this.currentAxial) {
         this.currentIndex = this.lookupIndex(this.currentAxial.q, this.currentAxial.r)
@@ -99,8 +102,6 @@ export class TileOverlayDrone extends Drone {
   // overlay setup
   // -------------------------------------------------
 
-  private iconFontLoaded = false
-
   private initOverlay(): void {
     if (!this.renderContainer || this.overlay) return
 
@@ -108,41 +109,45 @@ export class TileOverlayDrone extends Drone {
     this.overlay.visible = false
     this.overlay.zIndex = 9999
 
-    this.createRemoveIcon()
+    // create icon immediately with a Graphics fallback, upgrade to font async
+    this.removeIcon = new Container()
+    this.removeIcon.position.set(ICON_OFFSET_X, ICON_OFFSET_Y)
 
+    // fallback: simple red X drawn with Graphics (always works)
+    const fallback = new Graphics()
+    fallback.circle(0, 0, 8)
+    fallback.fill({ color: 0xff4444, alpha: 0.85 })
+    const s = 4
+    fallback.setStrokeStyle({ width: 2, color: 0xffffff, alpha: 1 })
+    fallback.moveTo(-s, -s).lineTo(s, s).stroke()
+    fallback.moveTo(s, -s).lineTo(-s, s).stroke()
+    this.removeIcon.addChild(fallback)
+
+    this.overlay.addChild(this.removeIcon)
     this.renderContainer.addChild(this.overlay)
     this.renderContainer.sortableChildren = true
-  }
 
-  private createRemoveIcon(): void {
-    if (!this.overlay) return
+    console.log('[TileOverlay] overlay created with fallback icon')
 
-    const icon = new Text({
-      text: this.iconFontLoaded ? 'h' : '\u{1F5D1}',
-      style: new TextStyle({
-        fontFamily: this.iconFontLoaded ? 'hypercomb-icons' : 'sans-serif',
-        fontSize: 16,
-        fill: 0xffffff,
-      }),
-    })
-    icon.anchor.set(0.5)
-    icon.alpha = 0.5
-    icon.position.set(0, this.circumRadiusPx - 8)
+    // async: try to upgrade to the icon font glyph
+    this.loadIconFont().then((loaded) => {
+      if (!loaded || !this.removeIcon) return
+      console.log('[TileOverlay] upgrading to hypercomb-icons font')
 
-    this.removeIcon = icon
-    this.overlay.addChild(icon)
-    console.log('[TileOverlay] icon created, fontLoaded:', this.iconFontLoaded)
+      // remove the Graphics fallback
+      this.removeIcon.removeChildren()
 
-    // async: upgrade to icon font once loaded
-    if (!this.iconFontLoaded) {
-      this.loadIconFont().then((loaded) => {
-        console.log('[TileOverlay] font load result:', loaded)
-        if (!loaded || !this.removeIcon) return
-        this.iconFontLoaded = true
-        this.removeIcon.text = 'h'
-        this.removeIcon.style.fontFamily = 'hypercomb-icons'
+      const icon = new Text({
+        text: 'h',
+        style: new TextStyle({
+          fontFamily: 'hypercomb-icons',
+          fontSize: 16,
+          fill: 0xff4444,
+        }),
       })
-    }
+      icon.anchor.set(0.5)
+      this.removeIcon.addChild(icon)
+    })
   }
 
   private async loadIconFont(): Promise<boolean> {
@@ -152,7 +157,8 @@ export class TileOverlayDrone extends Drone {
       document.fonts.add(loaded)
       await document.fonts.ready
       return true
-    } catch {
+    } catch (e) {
+      console.warn('[TileOverlay] font load failed:', e)
       return false
     }
   }
@@ -200,7 +206,7 @@ export class TileOverlayDrone extends Drone {
     this.currentIndex = this.lookupIndex(axial.q, axial.r)
 
     if (this._hoverLog < 5) {
-      console.log('[TileOverlay] hover q:', axial.q, 'r:', axial.r, '→ index:', this.currentIndex, 'cellCount:', this.cellCount, 'hasIcon:', !!this.removeIcon)
+      console.log('[TileOverlay] hover q:', axial.q, 'r:', axial.r, '→ index:', this.currentIndex, 'cellCount:', this.cellCount, 'occupied:', this.occupiedByAxial.size)
       this._hoverLog++
     }
 
@@ -227,9 +233,9 @@ export class TileOverlayDrone extends Drone {
     const overlayX = this.overlay.position.x
     const overlayY = this.overlay.position.y
 
-    // remove icon is at (0, circumRadiusPx - 8) relative to overlay center
-    const iconWorldX = overlayX
-    const iconWorldY = overlayY + this.circumRadiusPx - 8
+    // remove icon offset from overlay center
+    const iconWorldX = overlayX + ICON_OFFSET_X
+    const iconWorldY = overlayY + ICON_OFFSET_Y
 
     const dx = local.x - iconWorldX
     const dy = local.y - iconWorldY
