@@ -5,7 +5,7 @@
     {
       "label": "F5 Debug Start Web (production)",
       "type": "shell",
-      "command": "npx ng serve --port 4200 --host localhost",
+      "command": "npx ng serve --port 4200 --host localhost --configuration production",
       "isBackground": true,
       "problemMatcher": {
         "owner": "typescript",
