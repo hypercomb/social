@@ -6,7 +6,7 @@ import type { MovementService } from '../../core/movement.service'
 import type { Navigation } from '../../core/navigation'
 import type { ScriptPreloader } from '../../core/script-preloader'
 import type { CompletionUtility, CompletionContext } from '@hypercomb/shared/core/completion-utility'
-import type { ResourceCompletionService } from '@hypercomb/shared/core/resource-completion.service'
+import { fromRuntime } from '../../core/from-runtime'
 
 @Component({
   selector: 'hc-search-bar',
@@ -25,11 +25,20 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
   private get movement(): MovementService { return get('@hypercomb.social/MovementService') as MovementService }
   private get navigation(): Navigation { return get('@hypercomb.social/Navigation') as Navigation }
   private get preloader(): ScriptPreloader { return get('@hypercomb.social/ScriptPreloader') as ScriptPreloader }
-  private get resources(): ResourceCompletionService { return get('@hypercomb.social/ResourceCompletionService') as ResourceCompletionService }
 
   private readonly value = signal('')
   private readonly activeIndex = signal(0)
   private readonly suppressed = signal(false)
+
+  // Bridge EventTarget-based services to Angular Signals for reactivity
+  private readonly resourceCount$ = fromRuntime(
+    get('@hypercomb.social/ScriptPreloader') as EventTarget,
+    () => this.preloader.resourceCount
+  )
+  private readonly actionNames$ = fromRuntime(
+    get('@hypercomb.social/ScriptPreloader') as EventTarget,
+    () => this.preloader.actionNames
+  )
 
   // open dcp only once per page load
   private dcpOpened = false
@@ -38,7 +47,7 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
   // readiness / locking
   // -------------------------------------------------
 
-  private readonly hasAnyResources = computed<boolean>(() => this.preloader.resourceCount() > 0)
+  private readonly hasAnyResources = computed<boolean>(() => this.resourceCount$() > 0)
   private readonly locked = computed<boolean>(() => !this.hasAnyResources())
 
   // -------------------------------------------------
@@ -100,7 +109,7 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     const ctx = this.context()
     if (!ctx.active) return []
 
-    const all = this.resources.names()
+    const all = this.actionNames$()
     if (!ctx.normalized) return all
 
     return all.filter((n: any) => n.startsWith(ctx.normalized))

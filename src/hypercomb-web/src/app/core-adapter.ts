@@ -90,25 +90,20 @@ export class CoreAdapter {
     const overlay = get(overlaykey) as { encounter?: (arg: string) => Promise<void> | void } | undefined
     await overlay?.encounter?.('testing')
 
-      const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any
+    const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any
 
-      if (mesh) {
-        await mesh.encounter('smoke-test')
+    if (mesh) {
+      await mesh.encounter('smoke-test')
 
-        try {
-          const enabled = !!mesh.isNetworkEnabled?.()
-          this.meshPublic.set(enabled)
-        } catch {
-          // ignore
-        }
-      } else {
-        console.warn('[core-adapter] NostrMeshDrone not found — OPFS bundles may need rebuilding')
+      try {
+        const enabled = !!mesh.isNetworkEnabled?.()
+        this.meshPublic.set(enabled)
+      } catch {
+        // ignore
       }
-
-      const overlay2key = '@diamondcoreprocessor.com/TileOverlayDrone'
-      const overlay2 = get(overlay2key) as { encounter?: (arg: string) => Promise<void> | void } | undefined
-      await overlay2?.encounter?.('testing')
-
+    } else {
+      console.warn('[core-adapter] NostrMeshDrone not found — OPFS bundles may need rebuilding')
+    }
 
     // const settingKey = 'Settings'
     // const setting = <any>get(settingKey)

@@ -171,9 +171,9 @@ export class BootstrapHistory {
   private tryGetLineageSegments = (lineage: any | null): string[] => {
     if (!lineage) return []
 
-    // lineage.ready is a signal, so read via ready()
+    // lineage.ready is now a boolean getter; fallback handles legacy signal form
     try {
-      const ready = (typeof lineage.ready === 'function') ? lineage.ready() : false
+      const ready = (typeof lineage.ready === 'function') ? lineage.ready() : !!lineage.ready
       if (!ready) return []
     } catch {
       return []

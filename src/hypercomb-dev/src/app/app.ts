@@ -46,7 +46,6 @@ export class App {
       TileOverlayDrone,
       NostrSigner,
       HexDetector,
-      TileOverlayDrone,
       Settings,
       ZoomDrone,
       HistoryService]

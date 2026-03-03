@@ -232,7 +232,7 @@ const buildNamespaceDependency = async (
   namespaceRelDir: string,
   directMemberFiles: SourceFile[],
   allNamespaceSpecifiers: string[]
-): Promise<{ sig: string; bytes: Uint8Array }> => {
+): Promise<{ sig: string; bytes: Uint8Array } | null> => {
   const namespaceSpecifier = specifierFromNamespaceRelDir(namespaceRelDir)
   const namespaceRootFs = join(SRC_ROOT, namespaceRelDir)
   const resolveDir = existsSync(namespaceRootFs) ? namespaceRootFs : SRC_ROOT
@@ -270,7 +270,10 @@ const buildNamespaceDependency = async (
   })
 
   const compiled = r.outputFiles?.[0]?.text
-  if (!compiled) throw new Error(`no output: ${namespaceSpecifier}`)
+  if (!compiled || compiled.trim().length === 0) {
+    console.log(`[build-module] skipping empty namespace: ${namespaceSpecifier}`)
+    return null
+  }
 
   const bytes = textToBytes(`// ${namespaceSpecifier}\n${compiled}`)
   const sig = await SignatureService.sign(toArrayBuffer(bytes))
@@ -334,6 +337,7 @@ const main = async (): Promise<void> => {
   for (const ns of allNs) {
     const members = namespaceToMembers.get(ns) ?? []
     const built = await buildNamespaceDependency(ns, members, allSpecifiers)
+    if (!built) continue
     dependencyBytes.set(built.sig, built.bytes)
     addToBucket(resourcesByDir, ns, jsFileName(built.sig), 'dep')
     for (const f of members) addToBucket(resourcesByDir, f.relDir, jsFileName(built.sig), 'dep')

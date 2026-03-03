@@ -1,7 +1,6 @@
 // hypercomb-shared/core/store.ts
 // hypercomb-web/src/app/core/store.ts
 
-import { signal } from '@angular/core'
 import { Drone, SignatureService } from '@hypercomb/core'
 
 type DroneCtor = new () => Drone
@@ -14,7 +13,7 @@ export type DevManifest = {
   root: string
 }
 
-export class Store {
+export class Store extends EventTarget {
 
   private static readonly HYPERCOMB_DIRECTORY = 'hypercomb.io'
   public static readonly DRONES_DIRECTORY = '__drones__'
@@ -34,14 +33,18 @@ export class Store {
   // -------------------------------------------------
 
   public current!: FileSystemDirectoryHandle
-  public readonly currentSegments = signal<readonly string[]>([])
+
+  #currentSegments: readonly string[] = []
+
+  public get currentSegments(): readonly string[] { return this.#currentSegments }
 
   public readonly setCurrentHandle = (
     dir: FileSystemDirectoryHandle,
     segments: readonly string[]
   ): void => {
     this.current = dir
-    this.currentSegments.set([...segments])
+    this.#currentSegments = [...segments]
+    this.dispatchEvent(new CustomEvent('change'))
   }
 
   public readonly resetCurrent = (): void => {

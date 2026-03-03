@@ -1,22 +1,26 @@
 // hypercomb-web/src/app/core/dependency-loader.ts
 
-import { signal } from '@angular/core'
 import { Store } from './store'
 
-export class DependencyLoader {
+export class DependencyLoader extends EventTarget {
 
   private get store(): Store { return <Store>get("@hypercomb.social/Store") }
   private readonly loaded = new Set<string>()
 
-  public readonly dependencyCount = signal(0)
-  public readonly loadedSignatures = signal<readonly string[]>([])
-  public readonly failedSignatures = signal<readonly string[]>([])
+  #dependencyCount = 0
+  #loadedSignatures: readonly string[] = []
+  #failedSignatures: readonly string[] = []
+
+  public get dependencyCount(): number { return this.#dependencyCount }
+  public get loadedSignatures(): readonly string[] { return this.#loadedSignatures }
+  public get failedSignatures(): readonly string[] { return this.#failedSignatures }
 
   public load = async (): Promise<void> => {
     this.loaded.clear()
-    this.dependencyCount.set(0)
-    this.loadedSignatures.set([])
-    this.failedSignatures.set([])
+    this.#dependencyCount = 0
+    this.#loadedSignatures = []
+    this.#failedSignatures = []
+    this.dispatchEvent(new CustomEvent('change'))
 
     // load all from opfs dependencies directory
     let depDir: FileSystemDirectoryHandle
@@ -43,11 +47,13 @@ export class DependencyLoader {
         void mod
 
         this.loaded.add(sig)
-        this.dependencyCount.update((v: number) => v + 1)
-        this.loadedSignatures.update((v: readonly string[]) => [...v, sig])
+        this.#dependencyCount = this.#dependencyCount + 1
+        this.#loadedSignatures = [...this.#loadedSignatures, sig]
+        this.dispatchEvent(new CustomEvent('change'))
       } catch (error) {
         console.error(`Failed to load dependency: ${sig}`, error)
-        this.failedSignatures.update((v: readonly string[]) => [...v, sig])
+        this.#failedSignatures = [...this.#failedSignatures, sig]
+        this.dispatchEvent(new CustomEvent('change'))
       }
     }
   }

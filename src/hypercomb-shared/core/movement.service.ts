@@ -1,14 +1,15 @@
 // hypercomb-shared/core/movement.service.ts
 
-import { signal } from '@angular/core'
 import type { Navigation } from './navigation'
 
 // global get/register/list available via ioc.web.ts
 
-export class MovementService {
+export class MovementService extends EventTarget {
 
   // increments after navigation intent is committed
-  public readonly moved = signal(0)
+  #moved = 0
+
+  public get moved(): number { return this.#moved }
 
   private get navigation(): Navigation { return get('@hypercomb.social/Navigation') as Navigation }
 
@@ -19,6 +20,7 @@ export class MovementService {
   private waiters: Array<() => void> = []
 
   public constructor() {
+    super()
     // follow browser back/forward
     window.addEventListener('popstate', () => { void this.commit() })
 
@@ -73,7 +75,8 @@ export class MovementService {
     }
 
     this.committing = Promise.resolve().then(() => {
-      this.moved.update((v: number) => v + 1)
+      this.#moved = this.#moved + 1
+      this.dispatchEvent(new CustomEvent('change'))
 
       const pending = this.waiters
       this.waiters = []

@@ -1,13 +1,12 @@
 // hypercomb-shared/core/lineage.ts
 // fix: synchronize is the single visual update mechanism
 
-import { signal } from '@angular/core'
 import type { Navigation } from './navigation'
 import type { Store } from './store'
 
 // global get/register/list available via ioc.web.ts
 
-export class Lineage {
+export class Lineage extends EventTarget {
 
   // -------------------------------------------------
   // dependencies
@@ -20,8 +19,9 @@ export class Lineage {
   // domain context (reserved for later)
   // -------------------------------------------------
 
-  private readonly activeDomain = signal('hypercomb.io')
-  public readonly domain = (): string => this.activeDomain()
+  #activeDomain = 'hypercomb.io'
+
+  public domain = (): string => this.#activeDomain
 
   // -------------------------------------------------
   // explorer path (domain-relative)
@@ -91,18 +91,23 @@ export class Lineage {
   // status
   // -------------------------------------------------
 
-  public readonly ready = signal(false)
-  public readonly materialized = signal(true)
-  public readonly missing = signal<readonly string[]>([])
+  #ready = false
+  #materialized = true
+  #missing: readonly string[] = []
+  #fsRevision = 0
 
-  private readonly fsRevision = signal(0)
-  public readonly changed = (): number => this.fsRevision()
+  public get ready(): boolean { return this.#ready }
+  public get materialized(): boolean { return this.#materialized }
+  public get missing(): readonly string[] { return this.#missing }
+
+  public changed = (): number => this.#fsRevision
 
   // -------------------------------------------------
   // lifecycle
   // -------------------------------------------------
 
   public constructor() {
+    super()
     // follow url changes (programmatic + back/forward)
     window.addEventListener('navigate', this.followLocation)
     window.addEventListener('popstate', this.followLocation)
@@ -110,13 +115,15 @@ export class Lineage {
     // best-effort initial sync (safe if nav/store aren't ready yet)
     this.followLocation()
 
-    this.ready.set(true)
+    this.#ready = true
+    this.dispatchEvent(new CustomEvent('change'))
   }
 
   public initialize = async (): Promise<void> => {
-    this.activeDomain.set('hypercomb.io')
+    this.#activeDomain = 'hypercomb.io'
     this.followLocation()
-    this.ready.set(true)
+    this.#ready = true
+    this.dispatchEvent(new CustomEvent('change'))
   }
 
   // -------------------------------------------------
@@ -128,7 +135,7 @@ export class Lineage {
     if (!raw) return
 
     await this.store.opfsRoot.getDirectoryHandle(raw, { create: createIfMissing })
-    this.activeDomain.set(raw)
+    this.#activeDomain = raw
     this.followLocation()
   }
 
@@ -157,14 +164,16 @@ export class Lineage {
       try {
         dir = await dir.getDirectoryHandle(seg, { create: true })
       } catch {
-        this.materialized.set(false)
-        this.missing.set(segments.slice(i))
+        this.#materialized = false
+        this.#missing = segments.slice(i)
+        this.dispatchEvent(new CustomEvent('change'))
         return null
       }
     }
 
-    this.materialized.set(true)
-    this.missing.set([])
+    this.#materialized = true
+    this.#missing = []
+    this.dispatchEvent(new CustomEvent('change'))
     this.invalidate('fs')
     return dir
   }
@@ -183,14 +192,16 @@ export class Lineage {
       try {
         dir = await dir.getDirectoryHandle(seg, { create: false })
       } catch {
-        this.materialized.set(false)
-        this.missing.set(segments.slice(i))
+        this.#materialized = false
+        this.#missing = segments.slice(i)
+        this.dispatchEvent(new CustomEvent('change'))
         return null
       }
     }
 
-    this.materialized.set(true)
-    this.missing.set([])
+    this.#materialized = true
+    this.#missing = []
+    this.dispatchEvent(new CustomEvent('change'))
     return dir
   }
 
@@ -214,12 +225,13 @@ export class Lineage {
   // -------------------------------------------------
 
   private readonly invalidate = (reason: 'explorer' | 'url' | 'fs'): void => {
-    this.fsRevision.update((v: number) => v + 1)
+    this.#fsRevision = this.#fsRevision + 1
+    this.dispatchEvent(new CustomEvent('change'))
 
     window.dispatchEvent(new CustomEvent('synchronize', {
       detail: {
         source: `lineage:${reason}`,
-        rev: this.fsRevision(),
+        rev: this.#fsRevision,
         path: this.explorerLabel(),
         segments: [...this.explorerPath]
       }

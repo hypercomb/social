@@ -1,22 +1,25 @@
 // hypercomb-web/src/app/core/script-preloader.ts
 
-import { signal } from '@angular/core'
 import { Drone, type DroneResolver } from '@hypercomb/core'
-import { Store, type DevManifest } from './store'
+import { Store } from './store'
 
 export interface ActionDescriptor {
   signature: string
   name: string // kebab-case, ux-facing
 }
-export class ScriptPreloader implements DroneResolver {
+export class ScriptPreloader extends EventTarget implements DroneResolver {
 
   private get store(): Store { return <Store>get("@hypercomb.social/Store")}
-  
-  private readonly bySignature = new Map<string, ActionDescriptor>()
 
-  public readonly actions = signal<readonly ActionDescriptor[]>([])
-  public readonly actionNames = signal<readonly string[]>([])
-  public readonly resourceCount = signal(0)
+  #actions: readonly ActionDescriptor[] = []
+  #actionNames: readonly string[] = []
+  #resourceCount = 0
+
+  public get actions(): readonly ActionDescriptor[] { return this.#actions }
+  public get actionNames(): readonly string[] { return this.#actionNames }
+  public get resourceCount(): number { return this.#resourceCount }
+
+  private readonly bySignature = new Map<string, ActionDescriptor>()
 
   public resolveBySignature = (signature: string): ActionDescriptor | undefined =>
     this.bySignature.get(signature)
@@ -30,9 +33,10 @@ export class ScriptPreloader implements DroneResolver {
 
   public preload = async (): Promise<void> => {
     this.bySignature.clear()
-    this.actions.set([])
-    this.actionNames.set([])
-    this.resourceCount.set(0)
+    this.#actions = []
+    this.#actionNames = []
+    this.#resourceCount = 0
+    this.dispatchEvent(new CustomEvent('change'))
 
     for await (const [name, entry] of this.store.opfsRoot.entries()) {
       if (entry.kind !== 'directory') continue
@@ -62,8 +66,8 @@ export class ScriptPreloader implements DroneResolver {
 
   private loadAllFromDirectory = async (resourcesDir: FileSystemDirectoryHandle): Promise<void> => {
     for await (const [sig, entry] of resourcesDir.entries()) {
-      const signature  = sig.replace('.js', '') 
-      
+      const signature  = sig.replace('.js', '')
+
       if (entry.kind !== 'file') continue
       if (!this.isSignature(signature)) continue
       if (this.bySignature.has(signature)) continue
@@ -77,7 +81,8 @@ export class ScriptPreloader implements DroneResolver {
         if (!has(drone.iocKey)) register(drone.iocKey, drone)
 
         this.bySignature.set(signature, { signature, name: drone.name })
-        this.resourceCount.update((v: number) => v + 1)
+        this.#resourceCount = this.#resourceCount + 1
+        this.dispatchEvent(new CustomEvent('change'))
       } catch {
         // ignore
         console.log(`[script-preloader] failed to load resource ${signature} from OPFS`)
@@ -87,8 +92,9 @@ export class ScriptPreloader implements DroneResolver {
 
   private refreshProjection = (): void => {
     const list = [...this.bySignature.values()].sort((a, b) => a.name.localeCompare(b.name))
-    this.actions.set(list)
-    this.actionNames.set(list.map(a => a.name.replace(/-/g, ' ')))
+    this.#actions = list
+    this.#actionNames = list.map(a => a.name.replace(/-/g, ' '))
+    this.dispatchEvent(new CustomEvent('change'))
   }
 
   private isSignature = (name: string): boolean =>
