@@ -23,15 +23,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22.12.0'
-          cache: 'npm'
-          cache-dependency-path: |
-            src/package-lock.json
-            src/hypercomb-essentials/package-lock.json
-            src/hypercomb-web/package-lock.json
 
       - name: Install workspace root dependencies
         working-directory: src
-        run: npm install
+        run: |
+          rm -rf node_modules package-lock.json
+          npm install
 
       - name: Install essentials dependencies
         working-directory: src/hypercomb-essentials
