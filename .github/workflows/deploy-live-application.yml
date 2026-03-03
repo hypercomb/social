@@ -29,6 +29,9 @@ jobs:
             src/hypercomb-essentials/package-lock.json
             src/hypercomb-web/package-lock.json
 
+      - name: Clear npm cache
+        run: npm cache clean --force
+
       - name: Install essentials dependencies
         working-directory: src/hypercomb-essentials
         run: npm ci
