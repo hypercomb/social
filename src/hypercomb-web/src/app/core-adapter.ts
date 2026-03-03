@@ -105,6 +105,11 @@ export class CoreAdapter {
         console.warn('[core-adapter] NostrMeshDrone not found — OPFS bundles may need rebuilding')
       }
 
+      const overlay2key = '@diamondcoreprocessor.com/TileOverlayDrone'
+      const overlay2 = get(overlay2key) as { encounter?: (arg: string) => Promise<void> | void } | undefined
+      await overlay2?.encounter?.('testing')
+
+
     // const settingKey = 'Settings'
     // const setting = <any>get(settingKey)
     // await setting.encounter('testing')

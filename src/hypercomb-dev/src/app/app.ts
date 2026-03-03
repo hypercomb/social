@@ -42,6 +42,7 @@ export class App {
       MousePanInput,
       MousewheelZoomInput,
       NostrMeshDrone,
+      TileOverlayDrone,
       NostrSigner,
       HexDetector,
       TileOverlayDrone,

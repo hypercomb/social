@@ -74,7 +74,7 @@ export class ScriptPreloader implements DroneResolver {
 
         const drone = await this.store.getDrone(signature, buffer)
         if (!drone) continue
-        register(drone.iocKey, drone)
+        if (!has(drone.iocKey)) register(drone.iocKey, drone)
 
         this.bySignature.set(signature, { signature, name: drone.name })
         this.resourceCount.update((v: number) => v + 1)

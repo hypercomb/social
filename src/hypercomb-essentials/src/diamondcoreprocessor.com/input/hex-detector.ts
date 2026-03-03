@@ -6,7 +6,9 @@ export type Axial = { q: number; r: number }
 const SQRT3_OVER_3 = Math.sqrt(3) / 3
 
 export class HexDetector {
-  constructor(private readonly spacing: number) {}
+  constructor(private readonly spacing: number) {
+
+  }
 
   /**
    * O(1) pixel-to-axial conversion using cube rounding.
@@ -46,6 +48,7 @@ export class HexDetector {
   }
 }
 
+console.log('[HexDetector] registering @diamondcoreprocessor.com/HexDetector in ioc')
 window.ioc.register(
   '@diamondcoreprocessor.com/HexDetector',
   new HexDetector(38)

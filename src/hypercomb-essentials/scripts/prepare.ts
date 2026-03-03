@@ -244,7 +244,7 @@ const writeFolderIndex = (dir: string, meta: Map<string, DirMeta>, hasDeep: (dir
     const name = basename(full)
     const base = name.replace(extname(name), '')
     const rel = `./${base}`
-    if (isDrone(full)) lines.push(`export * from '${rel}'`)
+    if (isDrone(full)) lines.push(`export type * from '${rel}'`)
     else lines.push(`export * from '${rel}'`)
   }
 

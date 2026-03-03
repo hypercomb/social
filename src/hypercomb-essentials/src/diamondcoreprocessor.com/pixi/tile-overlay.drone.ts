@@ -26,18 +26,27 @@ export class TileOverlayDrone extends Drone {
   private initialized = false
   private listening = false
 
-  protected override deps = { detector: 'HexDetector' }
+  protected override deps = { detector: '@diamondcoreprocessor.com/HexDetector' }
   protected override listens = ['render:host-ready', 'render:mesh-offset']
   protected override emits = ['tile:hover']
 
   protected override sense = (): boolean => {
     const prev = this.initialized
     this.initialized = true
+    console.log('[TileOverlay] sense() called — initialized was:', prev, '→ returning:', !prev)
     return !prev
   }
 
   protected override heartbeat = async (): Promise<void> => {
+    console.log('[TileOverlay] heartbeat — subscribing to effects')
+
     this.onEffect<HostReadyPayload>('render:host-ready', (payload) => {
+      console.log('[TileOverlay] render:host-ready received', {
+        app: !!payload.app,
+        container: !!payload.container,
+        canvas: !!payload.canvas,
+        renderer: !!payload.renderer,
+      })
       this.app = payload.app
       this.renderContainer = payload.container
       this.canvas = payload.canvas
@@ -47,6 +56,7 @@ export class TileOverlayDrone extends Drone {
     })
 
     this.onEffect<{ x: number; y: number }>('render:mesh-offset', (offset) => {
+      console.log('[TileOverlay] render:mesh-offset received', offset)
       this.meshOffset = offset
       if (this.currentAxial) {
         this.positionOverlay(this.currentAxial.q, this.currentAxial.r)
@@ -72,6 +82,8 @@ export class TileOverlayDrone extends Drone {
   private initOverlay(): void {
     if (!this.renderContainer || this.overlay) return
 
+    console.log('[TileOverlay] initOverlay — creating hex outline container')
+
     this.overlay = new Container()
     this.overlay.visible = false
 
@@ -80,6 +92,7 @@ export class TileOverlayDrone extends Drone {
     this.overlay.addChild(g)
 
     this.renderContainer.addChild(this.overlay)
+    console.log('[TileOverlay] overlay added to renderContainer, children:', this.renderContainer.children.length)
   }
 
   private drawHexOutline(g: Graphics): void {
@@ -106,14 +119,34 @@ export class TileOverlayDrone extends Drone {
   private attachPointerListener(): void {
     if (this.listening) return
     this.listening = true
+    console.log('[TileOverlay] attachPointerListener — listening for pointermove')
     document.addEventListener('pointermove', this.onPointerMove)
   }
 
+  private _moveLogCount = 0
+
   private onPointerMove = (e: PointerEvent): void => {
-    if (!this.renderContainer || !this.overlay || !this.renderer || !this.canvas) return
+    if (!this.renderContainer || !this.overlay || !this.renderer || !this.canvas) {
+      if (this._moveLogCount < 3) {
+        console.warn('[TileOverlay] onPointerMove — missing refs', {
+          renderContainer: !!this.renderContainer,
+          overlay: !!this.overlay,
+          renderer: !!this.renderer,
+          canvas: !!this.canvas,
+        })
+        this._moveLogCount++
+      }
+      return
+    }
 
     const detector = this.resolve<{ pixelToAxial(px: number, py: number): Axial }>('detector')
-    if (!detector) return
+    if (!detector) {
+      if (this._moveLogCount < 3) {
+        console.warn('[TileOverlay] onPointerMove — detector not resolved. ioc keys:', (globalThis as any).ioc?.list?.() ?? 'no list')
+        this._moveLogCount++
+      }
+      return
+    }
 
     // 1. CSS client → pixi global
     const pixiGlobal = this.clientToPixiGlobal(e.clientX, e.clientY)
@@ -132,6 +165,11 @@ export class TileOverlayDrone extends Drone {
     if (this.currentAxial && this.currentAxial.q === axial.q && this.currentAxial.r === axial.r) return
 
     this.currentAxial = axial
+
+    if (this._moveLogCount < 5) {
+      console.log('[TileOverlay] hover →', axial, '| overlay visible:', this.overlay.visible, '| pos:', this.overlay.position.x.toFixed(1), this.overlay.position.y.toFixed(1))
+      this._moveLogCount++
+    }
 
     // 6. position the overlay
     this.positionOverlay(axial.q, axial.r)

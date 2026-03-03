@@ -150,16 +150,28 @@ export class Store {
 
       const opfsUrl = `/opfs/${Store.DRONES_DIRECTORY}/${signature}.js`
 
-      // dev is authority if manifest knows the domain for this sig
+      // Snapshot IoC keys before import so we can detect self-registration
+      const keysBefore = new Set(window.ioc.list())
+
       let mod: Record<string, unknown> | null = null
 
-      // fallback to opfs (seed bytes first so sw can serve exact module bytes)
+      // seed bytes first so sw can serve exact module bytes, then import
       if (!mod) {
         await this.seedResourceCache(signature, buffer)
         mod = await tryImport(opfsUrl)
       }
 
       if (!mod || typeof mod !== 'object') return null
+
+      // If the module's side-effect already registered a drone, reuse it
+      // instead of creating a duplicate via buildInstance()
+      for (const key of window.ioc.list()) {
+        if (keysBefore.has(key)) continue
+        const value = window.ioc.get(key)
+        if (value instanceof Drone) return value
+      }
+
+      // Fallback for modules without self-registration side-effects
       return buildInstance(mod)
     } catch {
       return null
