@@ -1,40 +1,37 @@
 // hypercomb-essentials/src/diamondcoreprocessor.com/core/history-recorder.drone.ts
-// Central history recorder: listens on the EffectBus for `history:op` effects
-// and records each operation into the append-only OPFS history bag for the
-// current lineage location.
+// Central history recorder: listens on `synchronize` window events for mutations
+// that carry a `historyOp` field, and records each operation into the append-only
+// OPFS history bag for the current lineage location.
 //
-// Any drone or UI component can emit `history:op` with a HistoryEffectPayload
-// instead of calling HistoryService directly. This decouples producers from the
-// persistence mechanism.
+// Sits at the processor level alongside ShowHoneycombDrone — history recording is
+// a first-class reaction to the canonical mutation event, not a parallel channel.
 
-import { EffectBus } from '@hypercomb/core'
-import type { HistoryService, HistoryEffectPayload } from './history.service.js'
+import type { HistoryService, HistoryOpType } from './history.service.js'
 
 export class HistoryRecorder {
 
-  private readonly processed = new Set<string>()
-
   constructor() {
-    EffectBus.on<HistoryEffectPayload>('history:op', (payload) => {
-      if (!payload?.id || !payload?.op || !payload?.seed) return
+    window.addEventListener('synchronize', (e: Event) => {
+      const detail = (e as CustomEvent).detail
+      if (!detail?.historyOp) return
 
-      // deduplicate: EffectBus replays last value on subscribe
-      if (this.processed.has(payload.id)) return
-      this.processed.add(payload.id)
+      // prevent infinite loop: historyService.record() dispatches synchronize
+      // with source 'history:record' — we must not re-record that
+      if (detail.source === 'history:record') return
 
-      void this.recordOp(payload)
+      void this.recordOp(detail.historyOp)
     })
   }
 
-  private readonly recordOp = async (payload: HistoryEffectPayload): Promise<void> => {
+  private readonly recordOp = async (historyOp: { op: HistoryOpType, seed: string }): Promise<void> => {
     const lineage = get<any>('@hypercomb.social/Lineage')
     const historyService = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
     if (!lineage || !historyService) return
 
     const sig = await historyService.sign(lineage)
     await historyService.record(sig, {
-      op: payload.op,
-      seed: payload.seed,
+      op: historyOp.op,
+      seed: historyOp.seed,
       at: Date.now(),
     })
   }

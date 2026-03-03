@@ -152,7 +152,8 @@ export class Lineage extends EventTarget {
 
   public ensure = async (
     segments: readonly string[],
-    start: FileSystemDirectoryHandle = this.store.hypercombRoot
+    start: FileSystemDirectoryHandle = this.store.hypercombRoot,
+    historyOp?: { op: string, seed: string }
   ): Promise<FileSystemDirectoryHandle | null> => {
 
     let dir = start
@@ -174,7 +175,7 @@ export class Lineage extends EventTarget {
     this.#materialized = true
     this.#missing = []
     this.dispatchEvent(new CustomEvent('change'))
-    this.invalidate('fs')
+    this.invalidate('fs', historyOp)
     return dir
   }
 
@@ -224,7 +225,10 @@ export class Lineage extends EventTarget {
   // internal
   // -------------------------------------------------
 
-  private readonly invalidate = (reason: 'explorer' | 'url' | 'fs'): void => {
+  private readonly invalidate = (
+    reason: 'explorer' | 'url' | 'fs',
+    historyOp?: { op: string, seed: string }
+  ): void => {
     this.#fsRevision = this.#fsRevision + 1
     this.dispatchEvent(new CustomEvent('change'))
 
@@ -233,7 +237,8 @@ export class Lineage extends EventTarget {
         source: `lineage:${reason}`,
         rev: this.#fsRevision,
         path: this.explorerLabel(),
-        segments: [...this.explorerPath]
+        segments: [...this.explorerPath],
+        ...(historyOp ? { historyOp } : {})
       }
     }))
   }

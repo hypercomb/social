@@ -1,7 +1,6 @@
 // hypercomb-shared/ui/search-bar/search-bar.component.ts
 
 import { AfterViewInit, Component, computed, ElementRef, signal, viewChild, type OnDestroy } from '@angular/core'
-import { EffectBus } from '@hypercomb/core'
 import type { Lineage } from '../../core/lineage'
 import type { MovementService } from '../../core/movement.service'
 import type { Navigation } from '../../core/navigation'
@@ -394,16 +393,9 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     const baseSegments = this.navigation.segments()
     const target = [...baseSegments, seedName]
 
-    const exists = await this.lineage.tryResolve(target)
-    if (!exists) {
-      await this.lineage.ensure(target)
-    }
-
-    EffectBus.emit('history:op', {
-      op: 'add',
-      seed: seedName,
-      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    })
+    // ensure() is idempotent — creates if needed, dispatches synchronize with historyOp.
+    // HistoryRecorder (a synchronize listener) persists the add to OPFS history.
+    await this.lineage.ensure(target, undefined, { op: 'add', seed: seedName })
   }
 
   // -------------------------------------------------

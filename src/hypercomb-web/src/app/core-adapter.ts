@@ -43,8 +43,8 @@ export class CoreAdapter {
     if (this.initialized) return
     this.initialized = true
 
-    // const logger = <OpfsTreeLogger>window.ioc.get("@hypercomb.social/OpfsTreeLogger")
-    // await logger.log()
+    const logger = get('@hypercomb.social/OpfsTreeLogger') as OpfsTreeLogger
+    await logger.log()
 
     const store = get('@hypercomb.social/Store') as Store
 

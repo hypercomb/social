@@ -12,17 +12,6 @@ export type HistoryOp = {
   at: number
 }
 
-/**
- * Payload emitted on the EffectBus `history:op` channel.
- * Any drone (or UI component) can emit this to record a history operation
- * at the current lineage location.
- */
-export type HistoryEffectPayload = {
-  op: HistoryOpType
-  seed: string
-  id: string   // unique nonce — used by the recorder to deduplicate replayed last-values
-}
-
 export class HistoryService {
 
   private historyRoot: FileSystemDirectoryHandle | null = null
