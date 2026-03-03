@@ -1,14 +1,17 @@
 // hypercomb-essentials/src/diamondcoreprocessor.com/pixi/tile-overlay.drone.ts
-// Hover overlay above the active hex tile.
+// Contextual action overlay: shows clickable icons at hex vertices on occupied tiles.
 
 import { Drone } from '@hypercomb/core'
-import { Application, Container, Graphics, Point } from 'pixi.js'
+import { Application, Container, Text, TextStyle, Point } from 'pixi.js'
 import type { HostReadyPayload } from './pixi-host.drone.js'
 import type { Axial } from '../input/hex-detector.js'
+import type { HistoryService } from '../core/history.service.js'
+
+type CellCountPayload = { count: number; labels: string[] }
 
 export class TileOverlayDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
-  override description = 'hover overlay above the active hex tile'
+  override description = 'contextual action overlay on occupied hex tiles'
 
   private app: Application | null = null
   private renderContainer: Container | null = null
@@ -16,50 +19,62 @@ export class TileOverlayDrone extends Drone {
   private renderer: Application['renderer'] | null = null
 
   private overlay: Container | null = null
+  private removeIcon: Text | null = null
   private meshOffset = { x: 0, y: 0 }
   private currentAxial: Axial | null = null
+  private currentIndex: number | undefined = undefined
 
   private readonly circumRadiusPx = 32
   private readonly gapPx = 6
   private readonly spacing = 38 // circumRadiusPx + gapPx
 
+  private cellCount = 0
+  private cellLabels: string[] = []
+
   private initialized = false
   private listening = false
 
-  protected override deps = { detector: '@diamondcoreprocessor.com/HexDetector' }
-  protected override listens = ['render:host-ready', 'render:mesh-offset']
-  protected override emits = ['tile:hover']
+  // occupied positions — precomputed from render:cell-count + axial service
+  private occupiedByAxial = new Map<string, { index: number; label: string }>()
+
+  protected override deps = {
+    detector: '@diamondcoreprocessor.com/HexDetector',
+    axial: '@diamondcoreprocessor.com/AxialService',
+  }
+  protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count']
+  protected override emits = ['tile:hover', 'tile:action']
 
   protected override sense = (): boolean => {
     const prev = this.initialized
     this.initialized = true
-    console.log('[TileOverlay] sense() called — initialized was:', prev, '→ returning:', !prev)
     return !prev
   }
 
   protected override heartbeat = async (): Promise<void> => {
-    console.log('[TileOverlay] heartbeat — subscribing to effects')
-
     this.onEffect<HostReadyPayload>('render:host-ready', (payload) => {
-      console.log('[TileOverlay] render:host-ready received', {
-        app: !!payload.app,
-        container: !!payload.container,
-        canvas: !!payload.canvas,
-        renderer: !!payload.renderer,
-      })
       this.app = payload.app
       this.renderContainer = payload.container
       this.canvas = payload.canvas
       this.renderer = payload.renderer
       this.initOverlay()
-      this.attachPointerListener()
+      this.attachListeners()
     })
 
     this.onEffect<{ x: number; y: number }>('render:mesh-offset', (offset) => {
-      console.log('[TileOverlay] render:mesh-offset received', offset)
       this.meshOffset = offset
       if (this.currentAxial) {
         this.positionOverlay(this.currentAxial.q, this.currentAxial.r)
+      }
+    })
+
+    this.onEffect<CellCountPayload>('render:cell-count', (payload) => {
+      this.cellCount = payload.count
+      this.cellLabels = payload.labels
+      this.rebuildOccupiedMap()
+      // re-evaluate visibility for current hover
+      if (this.overlay && this.currentAxial) {
+        this.currentIndex = this.lookupIndex(this.currentAxial.q, this.currentAxial.r)
+        this.updateVisibility()
       }
     })
   }
@@ -67,11 +82,13 @@ export class TileOverlayDrone extends Drone {
   protected override dispose(): void {
     if (this.listening) {
       document.removeEventListener('pointermove', this.onPointerMove)
+      document.removeEventListener('click', this.onClick)
       this.listening = false
     }
     if (this.overlay) {
       this.overlay.destroy({ children: true })
       this.overlay = null
+      this.removeIcon = null
     }
   }
 
@@ -82,71 +99,65 @@ export class TileOverlayDrone extends Drone {
   private initOverlay(): void {
     if (!this.renderContainer || this.overlay) return
 
-    console.log('[TileOverlay] initOverlay — creating hex outline container')
-
     this.overlay = new Container()
     this.overlay.visible = false
+    this.overlay.zIndex = 9999
 
-    const g = new Graphics()
-    this.drawHexOutline(g)
-    this.overlay.addChild(g)
+    this.loadIconFont().then(() => {
+      if (!this.overlay || !this.renderContainer) return
+
+      const icon = new Text({
+        text: 'h',
+        style: new TextStyle({
+          fontFamily: 'hypercomb-icons',
+          fontSize: 16,
+          fill: 0xffffff,
+        }),
+      })
+      icon.anchor.set(0.5)
+      icon.alpha = 0.5
+      // position in the bottom nook of the hex
+      icon.position.set(0, this.circumRadiusPx - 8)
+
+      this.removeIcon = icon
+      this.overlay.addChild(icon)
+    })
 
     this.renderContainer.addChild(this.overlay)
-    console.log('[TileOverlay] overlay added to renderContainer, children:', this.renderContainer.children.length)
+    this.renderContainer.sortableChildren = true
   }
 
-  private drawHexOutline(g: Graphics): void {
-    const r = this.circumRadiusPx
-
-    // flat-top hex vertices (matches the rot30 + sdHex in the SDF shader)
-    g.setStrokeStyle({ width: 2, color: 0x00ccff, alpha: 0.7 })
-    g.beginPath()
-    for (let i = 0; i < 6; i++) {
-      const angle = (Math.PI / 3) * i // 0°, 60°, 120°, 180°, 240°, 300°
-      const x = r * Math.cos(angle)
-      const y = r * Math.sin(angle)
-      if (i === 0) g.moveTo(x, y)
-      else g.lineTo(x, y)
+  private async loadIconFont(): Promise<void> {
+    try {
+      const font = new FontFace('hypercomb-icons', 'url(/fonts/hypercomb-icons.ttf)')
+      const loaded = await font.load()
+      document.fonts.add(loaded)
+    } catch {
+      // font may already be loaded via CSS @font-face
     }
-    g.closePath()
-    g.stroke()
+    await document.fonts.ready
+  }
+
+  // -------------------------------------------------
+  // listener setup
+  // -------------------------------------------------
+
+  private attachListeners(): void {
+    if (this.listening) return
+    this.listening = true
+    document.addEventListener('pointermove', this.onPointerMove)
+    document.addEventListener('click', this.onClick)
   }
 
   // -------------------------------------------------
   // pointer tracking
   // -------------------------------------------------
 
-  private attachPointerListener(): void {
-    if (this.listening) return
-    this.listening = true
-    console.log('[TileOverlay] attachPointerListener — listening for pointermove')
-    document.addEventListener('pointermove', this.onPointerMove)
-  }
-
-  private _moveLogCount = 0
-
   private onPointerMove = (e: PointerEvent): void => {
-    if (!this.renderContainer || !this.overlay || !this.renderer || !this.canvas) {
-      if (this._moveLogCount < 3) {
-        console.warn('[TileOverlay] onPointerMove — missing refs', {
-          renderContainer: !!this.renderContainer,
-          overlay: !!this.overlay,
-          renderer: !!this.renderer,
-          canvas: !!this.canvas,
-        })
-        this._moveLogCount++
-      }
-      return
-    }
+    if (!this.renderContainer || !this.overlay || !this.renderer || !this.canvas) return
 
     const detector = this.resolve<{ pixelToAxial(px: number, py: number): Axial }>('detector')
-    if (!detector) {
-      if (this._moveLogCount < 3) {
-        console.warn('[TileOverlay] onPointerMove — detector not resolved. ioc keys:', (globalThis as any).ioc?.list?.() ?? 'no list')
-        this._moveLogCount++
-      }
-      return
-    }
+    if (!detector) return
 
     // 1. CSS client → pixi global
     const pixiGlobal = this.clientToPixiGlobal(e.clientX, e.clientY)
@@ -166,16 +177,75 @@ export class TileOverlayDrone extends Drone {
 
     this.currentAxial = axial
 
-    if (this._moveLogCount < 5) {
-      console.log('[TileOverlay] hover →', axial, '| overlay visible:', this.overlay.visible, '| pos:', this.overlay.position.x.toFixed(1), this.overlay.position.y.toFixed(1))
-      this._moveLogCount++
-    }
+    // 6. determine index for this axial coordinate (O(1) precomputed lookup)
+    this.currentIndex = this.lookupIndex(axial.q, axial.r)
 
-    // 6. position the overlay
+    // 7. position the overlay (visibility decided by updateVisibility)
     this.positionOverlay(axial.q, axial.r)
 
-    // 7. broadcast for other drones
+    // 8. broadcast for other drones
     this.emitEffect('tile:hover', { q: axial.q, r: axial.r })
+  }
+
+  // -------------------------------------------------
+  // click detection
+  // -------------------------------------------------
+
+  private onClick = (e: MouseEvent): void => {
+    if (!this.overlay?.visible || !this.renderContainer || !this.renderer || !this.canvas) return
+    if (this.currentIndex === undefined || this.currentIndex >= this.cellCount) return
+
+    // convert click to overlay-local coords
+    const pixiGlobal = this.clientToPixiGlobal(e.clientX, e.clientY)
+    const local = this.renderContainer.toLocal(new Point(pixiGlobal.x, pixiGlobal.y))
+
+    // overlay position in renderContainer space
+    const overlayX = this.overlay.position.x
+    const overlayY = this.overlay.position.y
+
+    // remove icon is at (0, circumRadiusPx - 8) relative to overlay center
+    const iconWorldX = overlayX
+    const iconWorldY = overlayY + this.circumRadiusPx - 8
+
+    const dx = local.x - iconWorldX
+    const dy = local.y - iconWorldY
+    const dist = Math.sqrt(dx * dx + dy * dy)
+
+    if (dist <= 12) {
+      const entry = this.occupiedByAxial.get(TileOverlayDrone.axialKey(this.currentAxial!.q, this.currentAxial!.r))
+      const label = entry?.label
+      if (!label) return
+
+      this.emitEffect('tile:action', {
+        action: 'remove',
+        q: this.currentAxial!.q,
+        r: this.currentAxial!.r,
+        index: this.currentIndex,
+        label,
+      })
+
+      this.handleRemove(label)
+    }
+  }
+
+  private handleRemove = async (label: string): Promise<void> => {
+    const lineage = (window as any).ioc?.get?.('@hypercomb.social/Lineage')
+    const historyService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as HistoryService | undefined
+    if (!lineage || !historyService) return
+
+    const sig = await historyService.sign(lineage)
+    await historyService.record(sig, { op: 'remove', seed: label, at: Date.now() })
+    // record() dispatches synchronize, which triggers ShowHoneycombDrone re-render
+  }
+
+  // -------------------------------------------------
+  // visibility
+  // -------------------------------------------------
+
+  private updateVisibility(): void {
+    if (!this.overlay) return
+    const occupied = this.currentIndex !== undefined && this.currentIndex < this.cellCount
+    this.overlay.visible = occupied
   }
 
   // -------------------------------------------------
@@ -190,7 +260,8 @@ export class TileOverlayDrone extends Drone {
       px.x + this.meshOffset.x,
       px.y + this.meshOffset.y
     )
-    this.overlay.visible = true
+
+    this.updateVisibility()
   }
 
   private axialToPixel(q: number, r: number) {
@@ -198,6 +269,31 @@ export class TileOverlayDrone extends Drone {
       x: Math.sqrt(3) * this.spacing * (q + r / 2),
       y: this.spacing * 1.5 * r
     }
+  }
+
+  // -------------------------------------------------
+  // occupied position lookup (precomputed from render:cell-count)
+  // -------------------------------------------------
+
+  private static axialKey(q: number, r: number): string {
+    return `${q},${r}`
+  }
+
+  private rebuildOccupiedMap(): void {
+    this.occupiedByAxial.clear()
+    const axial = this.resolve<any>('axial')
+    if (!axial?.items) return
+
+    for (let i = 0; i < this.cellCount; i++) {
+      const coord = axial.items.get(i) as Axial | undefined
+      const label = this.cellLabels[i]
+      if (!coord || !label) break
+      this.occupiedByAxial.set(TileOverlayDrone.axialKey(coord.q, coord.r), { index: i, label })
+    }
+  }
+
+  private lookupIndex(q: number, r: number): number | undefined {
+    return this.occupiedByAxial.get(TileOverlayDrone.axialKey(q, r))?.index
   }
 
   // -------------------------------------------------
@@ -222,4 +318,4 @@ export class TileOverlayDrone extends Drone {
 }
 
 const _tileOverlay = new TileOverlayDrone()
-window.ioc.register(_tileOverlay.iocKey, _tileOverlay)
+window.ioc.register('@diamondcoreprocessor.com/TileOverlayDrone', _tileOverlay)

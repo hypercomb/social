@@ -9,6 +9,7 @@ import { Application, Assets, Container, Geometry, Mesh, Texture } from 'pixi.js
 import type { HostReadyPayload } from './pixi-host.drone.js'
 import { HexLabelAtlas } from './hex-label.atlas.js'
 import { HexSdfTextureShader } from './hex-sdf.shader.js'
+import type { HistoryService, HistoryOp } from '../core/history.service.js'
 
 type Axial = { q: number; r: number }
 type SeedCell = { q: number; r: number; label: string; external: boolean }
@@ -39,7 +40,7 @@ export class ShowHoneycombDrone extends Drone {
   }
 
   protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated']
-  protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset']
+  protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
 
@@ -523,6 +524,18 @@ export class ShowHoneycombDrone extends Drone {
     for (const s of localSeeds) union.add(s)
     for (const s of this.meshSeeds) union.add(s)
 
+    // note: apply history — filter out seeds whose last operation is "remove"
+    const historyService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as HistoryService | undefined
+    if (historyService) {
+      const sig = await this.computeSignatureLocation(lineage)
+      const ops = await historyService.replay(sig.sig)
+      const seedState = new Map<string, string>() // seed → last op
+      for (const op of ops) seedState.set(op.seed, op.op)
+      for (const [seed, lastOp] of seedState) {
+        if (lastOp === 'remove') union.delete(seed)
+      }
+    }
+
     const seedNames = Array.from(union)
     seedNames.sort((a, b) => a.localeCompare(b))
 
@@ -616,6 +629,12 @@ export class ShowHoneycombDrone extends Drone {
     this.geom = geom
     this.renderedCellsKey = nextCellsKey
     this.renderedCount = cells.length
+
+    // note: broadcast cell count + labels so tile-overlay knows which indices are occupied
+    this.emitEffect('render:cell-count', {
+      count: cells.length,
+      labels: cells.map(c => c.label),
+    })
   }
 
   private ensureListeners = (): void => {
@@ -651,6 +670,7 @@ export class ShowHoneycombDrone extends Drone {
     this.geom = null
     this.renderedCellsKey = ''
     this.renderedCount = 0
+    this.emitEffect('render:cell-count', { count: 0, labels: [] })
   }
 
   private readonly rebuildRenderResources = (renderer: unknown): void => {
