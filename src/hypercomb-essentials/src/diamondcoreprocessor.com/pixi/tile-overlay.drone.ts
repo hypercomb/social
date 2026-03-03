@@ -5,7 +5,7 @@ import { Drone } from '@hypercomb/core'
 import { Application, Container, Graphics, Text, TextStyle, Point } from 'pixi.js'
 import type { HostReadyPayload } from './pixi-host.drone.js'
 import type { Axial } from '../input/hex-detector.js'
-import type { HistoryService } from '../core/history.service.js'
+import type { HistoryEffectPayload } from '../core/history.service.js'
 
 type CellCountPayload = { count: number; labels: string[] }
 
@@ -47,7 +47,7 @@ export class TileOverlayDrone extends Drone {
     axial: '@diamondcoreprocessor.com/AxialService',
   }
   protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count']
-  protected override emits = ['tile:hover', 'tile:action']
+  protected override emits = ['tile:hover', 'tile:action', 'history:op']
 
   protected override sense = (): boolean => {
     const prev = this.initialized
@@ -258,14 +258,13 @@ export class TileOverlayDrone extends Drone {
     }
   }
 
-  private handleRemove = async (label: string): Promise<void> => {
-    const lineage = (window as any).ioc?.get?.('@hypercomb.social/Lineage')
-    const historyService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as HistoryService | undefined
-    if (!lineage || !historyService) return
-
-    const sig = await historyService.sign(lineage)
-    await historyService.record(sig, { op: 'remove', seed: label, at: Date.now() })
-    // record() dispatches synchronize, which triggers ShowHoneycombDrone re-render
+  private handleRemove = (label: string): void => {
+    const payload: HistoryEffectPayload = {
+      op: 'remove',
+      seed: label,
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    }
+    this.emitEffect('history:op', payload)
   }
 
   // -------------------------------------------------

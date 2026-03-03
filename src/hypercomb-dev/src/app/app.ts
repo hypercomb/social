@@ -14,6 +14,7 @@ import { NostrSigner } from '@hypercomb/essentials/diamondcoreprocessor.com/nost
 import { HexDetector } from '@hypercomb/essentials/diamondcoreprocessor.com/input/hex-detector'
 import { TileOverlayDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/tile-overlay.drone'
 import { HistoryService } from '@hypercomb/essentials/diamondcoreprocessor.com/core/history.service'
+import { HistoryRecorder } from '@hypercomb/essentials/diamondcoreprocessor.com/core/history-recorder.drone'
 
 @Component({
   selector: 'app-root',
@@ -48,7 +49,8 @@ export class App {
       HexDetector,
       Settings,
       ZoomDrone,
-      HistoryService]
+      HistoryService,
+      HistoryRecorder]
 
     queueMicrotask(async () => {
       const l = list();

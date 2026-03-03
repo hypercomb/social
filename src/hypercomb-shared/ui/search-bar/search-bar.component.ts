@@ -1,6 +1,7 @@
 // hypercomb-shared/ui/search-bar/search-bar.component.ts
 
 import { AfterViewInit, Component, computed, ElementRef, signal, viewChild, type OnDestroy } from '@angular/core'
+import { EffectBus } from '@hypercomb/core'
 import type { Lineage } from '../../core/lineage'
 import type { MovementService } from '../../core/movement.service'
 import type { Navigation } from '../../core/navigation'
@@ -397,6 +398,12 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     if (!exists) {
       await this.lineage.ensure(target)
     }
+
+    EffectBus.emit('history:op', {
+      op: 'add',
+      seed: seedName,
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    })
   }
 
   // -------------------------------------------------
