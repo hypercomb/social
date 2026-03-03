@@ -24,6 +24,11 @@
               {
                 "glob": "**/*",
                 "input": "public"
+              },
+              {
+                "glob": "hypercomb-icons.ttf",
+                "input": "../hypercomb-legacy/src/assets/fonts/hypercomb",
+                "output": "fonts"
               }
             ],
 
