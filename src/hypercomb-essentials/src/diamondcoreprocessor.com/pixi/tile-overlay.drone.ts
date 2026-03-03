@@ -33,6 +33,7 @@ export class TileOverlayDrone extends Drone {
 
   private initialized = false
   private listening = false
+  private _hoverLog = 0
 
   // occupied positions — precomputed from render:cell-count + axial service
   private occupiedByAxial = new Map<string, { index: number; label: string }>()
@@ -70,7 +71,9 @@ export class TileOverlayDrone extends Drone {
     this.onEffect<CellCountPayload>('render:cell-count', (payload) => {
       this.cellCount = payload.count
       this.cellLabels = payload.labels
+      console.log('[TileOverlay] render:cell-count →', payload.count, 'labels:', payload.labels.length)
       this.rebuildOccupiedMap()
+      console.log('[TileOverlay] occupiedByAxial size:', this.occupiedByAxial.size)
       // re-evaluate visibility for current hover
       if (this.overlay && this.currentAxial) {
         this.currentIndex = this.lookupIndex(this.currentAxial.q, this.currentAxial.r)
@@ -96,6 +99,8 @@ export class TileOverlayDrone extends Drone {
   // overlay setup
   // -------------------------------------------------
 
+  private iconFontLoaded = false
+
   private initOverlay(): void {
     if (!this.renderContainer || this.overlay) return
 
@@ -103,39 +108,53 @@ export class TileOverlayDrone extends Drone {
     this.overlay.visible = false
     this.overlay.zIndex = 9999
 
-    this.loadIconFont().then(() => {
-      if (!this.overlay || !this.renderContainer) return
-
-      const icon = new Text({
-        text: 'h',
-        style: new TextStyle({
-          fontFamily: 'hypercomb-icons',
-          fontSize: 16,
-          fill: 0xffffff,
-        }),
-      })
-      icon.anchor.set(0.5)
-      icon.alpha = 0.5
-      // position in the bottom nook of the hex
-      icon.position.set(0, this.circumRadiusPx - 8)
-
-      this.removeIcon = icon
-      this.overlay.addChild(icon)
-    })
+    this.createRemoveIcon()
 
     this.renderContainer.addChild(this.overlay)
     this.renderContainer.sortableChildren = true
   }
 
-  private async loadIconFont(): Promise<void> {
+  private createRemoveIcon(): void {
+    if (!this.overlay) return
+
+    const icon = new Text({
+      text: this.iconFontLoaded ? 'h' : '\u{1F5D1}',
+      style: new TextStyle({
+        fontFamily: this.iconFontLoaded ? 'hypercomb-icons' : 'sans-serif',
+        fontSize: 16,
+        fill: 0xffffff,
+      }),
+    })
+    icon.anchor.set(0.5)
+    icon.alpha = 0.5
+    icon.position.set(0, this.circumRadiusPx - 8)
+
+    this.removeIcon = icon
+    this.overlay.addChild(icon)
+    console.log('[TileOverlay] icon created, fontLoaded:', this.iconFontLoaded)
+
+    // async: upgrade to icon font once loaded
+    if (!this.iconFontLoaded) {
+      this.loadIconFont().then((loaded) => {
+        console.log('[TileOverlay] font load result:', loaded)
+        if (!loaded || !this.removeIcon) return
+        this.iconFontLoaded = true
+        this.removeIcon.text = 'h'
+        this.removeIcon.style.fontFamily = 'hypercomb-icons'
+      })
+    }
+  }
+
+  private async loadIconFont(): Promise<boolean> {
     try {
       const font = new FontFace('hypercomb-icons', 'url(/fonts/hypercomb-icons.ttf)')
       const loaded = await font.load()
       document.fonts.add(loaded)
+      await document.fonts.ready
+      return true
     } catch {
-      // font may already be loaded via CSS @font-face
+      return false
     }
-    await document.fonts.ready
   }
 
   // -------------------------------------------------
@@ -179,6 +198,11 @@ export class TileOverlayDrone extends Drone {
 
     // 6. determine index for this axial coordinate (O(1) precomputed lookup)
     this.currentIndex = this.lookupIndex(axial.q, axial.r)
+
+    if (this._hoverLog < 5) {
+      console.log('[TileOverlay] hover q:', axial.q, 'r:', axial.r, '→ index:', this.currentIndex, 'cellCount:', this.cellCount, 'hasIcon:', !!this.removeIcon)
+      this._hoverLog++
+    }
 
     // 7. position the overlay (visibility decided by updateVisibility)
     this.positionOverlay(axial.q, axial.r)
