@@ -107,7 +107,9 @@ jobs:
 
       - name: Link shared node_modules to web (prevents dual Angular runtime)
         working-directory: src
-        run: ln -sf hypercomb-web/node_modules node_modules
+        run: |
+          rm -rf node_modules
+          ln -s hypercomb-web/node_modules node_modules
 
       - name: Build web runtime assets
         working-directory: src/hypercomb-web
