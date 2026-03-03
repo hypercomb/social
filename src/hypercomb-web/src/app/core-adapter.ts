@@ -1,6 +1,6 @@
 // hypercomb-web/src/app/core/core-adapter.ts
 
-import { Injectable } from "@angular/core"
+import { Injectable, signal } from "@angular/core"
 import { type Navigation, type Lineage, type ScriptPreloader, Store, LayerInstaller, DependencyLoader, OpfsTreeLogger } from "@hypercomb/shared/core"
 import { LayerService } from "./layer-service"
 
@@ -12,7 +12,7 @@ export class CoreAdapter {
   // -------------------------------------------------
   // dependencies (lazy IoC resolution)
   // -------------------------------------------------
-
+  public readonly meshPublic = signal(true);
   private get navigation(): Navigation { return get('Navigation') as Navigation }
   private get lineage(): Lineage { return get('Lineage') as Lineage }
   private get preloader(): ScriptPreloader { return get('ScriptPreloader') as ScriptPreloader }
@@ -74,6 +74,19 @@ export class CoreAdapter {
     const panningkey = 'PanningDrone'
     const panning = get(panningkey) as { encounter?: (arg: string) => Promise<void> | void } | undefined
     await panning?.encounter?.('testing')
+
+
+      const mesh = get('NostrMeshDrone') as any
+
+      // 1) hard-start mesh lifecycle
+      await mesh.encounter('smoke-test')
+
+      try {
+        const enabled = !!mesh?.isNetworkEnabled?.()
+        this.meshPublic.set(enabled)
+      } catch {
+        // ignore
+      }
 
     // const settingKey = 'Settings'
     // const setting = <any>get(settingKey)

@@ -13,8 +13,8 @@ export class Lineage {
   // dependencies
   // -------------------------------------------------
 
-  private get store(): Store { return get('Store') as Store }
-  private get navigation(): Navigation { return get('Navigation') as Navigation }
+  private get store(): Store { return get('@hypercomb.social/Store') as Store }
+  private get navigation(): Navigation { return get('@hypercomb.social/Navigation') as Navigation }
 
   // -------------------------------------------------
   // domain context (reserved for later)

@@ -111,8 +111,6 @@ export class NostrMeshDrone extends Drone {
   private logs: MeshLog[] = []
   private readonly logCap = 200
 
-  protected override sense = (): boolean => true
-
   protected override heartbeat = async (): Promise<void> => {
     // note: still respects drone lifecycle, but we also self-start when subscribe/publish is used
     this.ensureStartedNow()
