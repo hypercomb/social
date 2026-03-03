@@ -56,4 +56,4 @@ export class ResourceMessageHandler {
 
 }
 
-register('@hypercomb.social/ResourceMessageHandler', new ResourceMessageHandler(), 'ResourceMessageHandler')
+register('@hypercomb.social/ResourceMessageHandler', new ResourceMessageHandler())

@@ -58,4 +58,4 @@ export class DevLayerSource implements LayerInstallSource {
   }
 }
 
-register('@hypercomb.social/DevLayerSource', new DevLayerSource(), 'DevLayerSource')
+register('@hypercomb.social/DevLayerSource', new DevLayerSource())

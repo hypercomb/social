@@ -14,7 +14,7 @@ export class PanningDrone extends Drone {
   private canvas: HTMLCanvasElement | null = null
   private activeSource: string | null = null
 
-  protected override deps = { mousePan: 'MousePanInput' }
+  protected override deps = { mousePan: '@diamondcoreprocessor.com/MousePanInput' }
   protected override listens = ['render:host-ready']
 
   protected override sense = (): boolean => {
@@ -80,4 +80,4 @@ export class PanningDrone extends Drone {
 }
 
 const _panning = new PanningDrone()
-window.ioc.register(_panning.iocKey, _panning, 'PanningDrone')
+window.ioc.register('@diamondcoreprocessor.com/PanningDrone', _panning)

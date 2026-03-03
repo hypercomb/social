@@ -1,35 +1,15 @@
 // hypercomb-shared/core/ioc.web.ts
 
 const instances = new Map<string, unknown>()
-const names = new Map<string, string>()
-const privates = new Set<string>()
 const listeners: Array<(key: string, value: unknown) => void> = []
 
 if (!window.ioc) {
   window.ioc = {
 
-    /**
-     * Register a service in the IoC container.
-     *
-     * @param signature  Fully-qualified key (`@domain/Name`) or plain string.
-     * @param value      The instance to register.
-     * @param opts       Backward-compatible: pass a string for a short-name alias,
-     *                   or an object `{ name?, visibility? }`.
-     *                   - visibility 'public' (default): alias is registered so
-     *                     `get('@domain/Name')` resolves via short name.
-     *                   - visibility 'private': only resolvable by full key.
-     */
-    register(
-      signature: any,
-      value: any,
-      opts?: string | { name?: string; visibility?: 'public' | 'private' }
-    ) {
+    register(signature: any, value: any) {
       const key: string = signature && typeof signature === 'object' && 'key' in signature
         ? signature.key
         : signature
-
-      const name = typeof opts === 'string' ? opts : opts?.name
-      const visibility = typeof opts === 'string' ? 'public' : (opts?.visibility ?? 'public')
 
       if (instances.has(key)) {
         console.warn(`[ioc] duplicate key: ${key}`)
@@ -38,78 +18,23 @@ if (!window.ioc) {
 
       instances.set(key, value)
 
-      if (visibility === 'private') {
-        privates.add(key)
-      }
-
-      // register short-name alias for public services
-      if (visibility !== 'private' && name) {
-        if (names.has(name)) {
-          console.warn(`[ioc] alias collision: "${name}" → ${key} (already → ${names.get(name)})`)
-        } else {
-          names.set(name, key)
-        }
-      }
-
-      // notify listeners
       for (const cb of listeners) {
         try { cb(key, value) } catch { /* swallow */ }
       }
     },
 
-    /**
-     * Resolve a service by key.
-     *
-     * Resolution order:
-     * 1. Exact match on full key
-     * 2. Exact match on short-name alias
-     * 3. Suffix scan — if key is unqualified, find `@…/key` (warn on ambiguity)
-     */
     get<T = unknown>(key: any): T | undefined {
       const k: string = key && typeof key === 'object' && 'key' in key
         ? key.key
         : key
-
-      // 1. exact match (full key)
-      if (instances.has(k)) return instances.get(k) as T
-
-      // 2. alias lookup
-      const aliased = names.get(k)
-      if (aliased) return instances.get(aliased) as T
-
-      // 3. suffix fallback for unqualified names
-      if (!k.startsWith('@')) {
-        const suffix = '/' + k
-        const matches: string[] = []
-        for (const full of instances.keys()) {
-          if (full.endsWith(suffix) && !privates.has(full)) matches.push(full)
-        }
-        if (matches.length === 1) return instances.get(matches[0]) as T
-        if (matches.length > 1) {
-          console.warn(`[ioc] ambiguous key "${k}": ${matches.join(', ')}`)
-        }
-      }
-
-      return undefined
+      return instances.get(k) as T | undefined
     },
 
     has(key: any): boolean {
       const k: string = key && typeof key === 'object' && 'key' in key
         ? key.key
         : key
-
-      if (instances.has(k)) return true
-      if (names.has(k)) return true
-
-      // suffix fallback
-      if (!k.startsWith('@')) {
-        const suffix = '/' + k
-        for (const full of instances.keys()) {
-          if (full.endsWith(suffix) && !privates.has(full)) return true
-        }
-      }
-
-      return false
+      return instances.has(k)
     },
 
     list(): readonly string[] {
@@ -146,7 +71,6 @@ if (!window.ioc) {
     },
   }
 
-  // Global convenience — use get('@hypercomb.social/Store') anywhere without window.ioc prefix
   ;(window as any).get = window.ioc.get
   ;(window as any).register = window.ioc.register
   ;(window as any).has = window.ioc.has

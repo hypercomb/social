@@ -90,4 +90,4 @@ export class HexLabelAtlasFactory {
   }
 }
 
-window.ioc.register('@diamondcoreprocessor.com/HexLabelAtlasFactory', new HexLabelAtlasFactory(), 'HexLabelAtlasFactory')
+window.ioc.register('@diamondcoreprocessor.com/HexLabelAtlasFactory', new HexLabelAtlasFactory())

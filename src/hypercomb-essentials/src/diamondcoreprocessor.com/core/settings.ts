@@ -24,6 +24,6 @@ export class Settings  {
     public fillColor = "#242a30"
 }
 
-window.ioc.register('@diamondcoreprocessor.com/Settings', new Settings(), 'Settings')
+window.ioc.register('@diamondcoreprocessor.com/Settings', new Settings())
 
 

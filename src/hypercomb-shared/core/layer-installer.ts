@@ -258,4 +258,4 @@ export class LayerInstaller {
   }
 }
 
-register('@hypercomb.social/LayerInstaller', new LayerInstaller(), 'LayerInstaller')
+register('@hypercomb.social/LayerInstaller', new LayerInstaller())

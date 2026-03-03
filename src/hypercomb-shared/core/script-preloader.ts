@@ -74,7 +74,7 @@ export class ScriptPreloader implements DroneResolver {
 
         const drone = await this.store.getDrone(signature, buffer)
         if (!drone) continue
-        register(drone.name, drone)
+        register(drone.iocKey, drone)
 
         this.bySignature.set(signature, { signature, name: drone.name })
         this.resourceCount.update((v: number) => v + 1)
@@ -104,4 +104,4 @@ export class ScriptPreloader implements DroneResolver {
   }
 }
 
-register('@hypercomb.social/ScriptPreloader', new ScriptPreloader(), 'ScriptPreloader')
+register('@hypercomb.social/ScriptPreloader', new ScriptPreloader())

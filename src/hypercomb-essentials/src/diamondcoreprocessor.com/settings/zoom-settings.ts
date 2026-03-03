@@ -16,4 +16,4 @@ export const ZoomSettings = (): ZoomSettingsType => ({
   pinchForceTakeover: true
 })
 
-window.ioc.register('@diamondcoreprocessor.com/ZoomSettings', ZoomSettings(), 'ZoomSettings')
+window.ioc.register('@diamondcoreprocessor.com/ZoomSettings', ZoomSettings())

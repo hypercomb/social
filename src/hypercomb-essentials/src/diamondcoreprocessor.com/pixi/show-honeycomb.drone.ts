@@ -34,8 +34,8 @@ export class ShowHoneycombDrone extends Drone {
   private hexMesh: any | null = null
 
   protected override deps = {
-    lineage: 'Lineage',
-    axial: 'AxialService',
+    lineage: '@hypercomb.social/Lineage',
+    axial: '@diamondcoreprocessor.com/AxialService',
   }
 
   protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated']
@@ -274,7 +274,7 @@ export class ShowHoneycombDrone extends Drone {
   // note: data queries (getNonExpired, subscribe) still use the direct API
   // coordination (ensureStartedForSig, publish) also emits effects for observability
   private tryGetMesh = (): MeshApi | null => {
-    return (get<MeshApi>('@diamondcoreprocessor.com/MeshDrone') ?? get<MeshApi>('@diamondcoreprocessor.com/NostrMeshDrone')) ?? null
+    return get<MeshApi>('@diamondcoreprocessor.com/NostrMeshDrone') ?? null
   }
 
 
@@ -763,4 +763,4 @@ export class ShowHoneycombDrone extends Drone {
 }
 
 const _showHoneycomb = new ShowHoneycombDrone()
-window.ioc.register(_showHoneycomb.iocKey, _showHoneycomb, 'ShowHoneycomb')
+window.ioc.register('@diamondcoreprocessor.com/ShowHoneycombDrone', _showHoneycomb)

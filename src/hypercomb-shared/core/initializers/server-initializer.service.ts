@@ -12,4 +12,4 @@ export class ServerInitializer {
   }
 }
 
-register('@hypercomb.social/ServerInitializer', new ServerInitializer(), 'ServerInitializer')
+register('@hypercomb.social/ServerInitializer', new ServerInitializer())

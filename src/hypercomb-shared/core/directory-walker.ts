@@ -58,4 +58,4 @@ export class DirectoryWalker {
   }
 }
 
-register('@hypercomb.social/DirectoryWalker', new DirectoryWalker(), 'DirectoryWalker')
+register('@hypercomb.social/DirectoryWalker', new DirectoryWalker())

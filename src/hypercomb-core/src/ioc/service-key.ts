@@ -1,14 +1,6 @@
 // hypercomb-core/src/ioc/service-key.ts
 
 // -------------------------------------------------
-// visibility
-// -------------------------------------------------
-
-/** public = globally addressable by short name or full key.
- *  private = only resolvable by full qualified key. */
-export type Visibility = 'public' | 'private'
-
-// -------------------------------------------------
 // key construction
 // -------------------------------------------------
 

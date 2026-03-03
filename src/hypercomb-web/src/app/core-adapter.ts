@@ -24,6 +24,17 @@ export class CoreAdapter {
   private initialized = false
 
   // -------------------------------------------------
+  // mesh toggle
+  // -------------------------------------------------
+
+  public toggleMesh = (): void => {
+    const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any
+    const next = !this.meshPublic()
+    this.meshPublic.set(next)
+    mesh?.setNetworkEnabled?.(next, true)
+  }
+
+  // -------------------------------------------------
   // public api
   // -------------------------------------------------
 
@@ -78,14 +89,17 @@ export class CoreAdapter {
 
       const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any
 
-      // 1) hard-start mesh lifecycle
-      await mesh.encounter('smoke-test')
+      if (mesh) {
+        await mesh.encounter('smoke-test')
 
-      try {
-        const enabled = !!mesh?.isNetworkEnabled?.()
-        this.meshPublic.set(enabled)
-      } catch {
-        // ignore
+        try {
+          const enabled = !!mesh.isNetworkEnabled?.()
+          this.meshPublic.set(enabled)
+        } catch {
+          // ignore
+        }
+      } else {
+        console.warn('[core-adapter] NostrMeshDrone not found — OPFS bundles may need rebuilding')
       }
 
     // const settingKey = 'Settings'

@@ -22,7 +22,7 @@ export class ZoomDrone extends Drone {
 
   private activeSource: string | null = null
 
-  protected override deps = { mouseWheel: 'MousewheelZoomInput' }
+  protected override deps = { mouseWheel: '@diamondcoreprocessor.com/MousewheelZoomInput' }
   protected override listens = ['render:host-ready']
 
   protected override sense = (): boolean => {
@@ -174,4 +174,4 @@ export class ZoomDrone extends Drone {
 }
 
 const _zoom = new ZoomDrone()
-window.ioc.register(_zoom.iocKey, _zoom, 'ZoomDrone')
+window.ioc.register('@diamondcoreprocessor.com/ZoomDrone', _zoom)

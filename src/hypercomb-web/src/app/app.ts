@@ -16,7 +16,9 @@ export class App {
   public showHeader = true
   public showFooter = false
 
-  private readonly core = inject(CoreAdapter)
+  protected readonly core = inject(CoreAdapter)
+  protected readonly meshPublic = this.core.meshPublic
+  protected readonly toggleMesh = () => this.core.toggleMesh()
 
   constructor() {
     window.addEventListener('error', e => {

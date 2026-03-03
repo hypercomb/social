@@ -60,4 +60,4 @@ export class DomainLayerSource implements LayerInstallSource {
   }
 }
 
-register('@hypercomb.social/DomainLayerSource', new DomainLayerSource(), 'DomainLayerSource')
+register('@hypercomb.social/DomainLayerSource', new DomainLayerSource())

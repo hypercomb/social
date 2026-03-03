@@ -52,7 +52,7 @@ type MeshExpiryRule = {
 export class NostrMeshDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
 
-  protected override deps = { signer: 'NostrSigner' }
+  protected override deps = { signer: '@diamondcoreprocessor.com/NostrSigner' }
   protected override listens = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish']
   protected override emits = ['mesh:ready', 'mesh:items-updated']
 
@@ -1075,5 +1075,4 @@ export class NostrMeshDrone extends Drone {
 }
 
 const meshDrone = new NostrMeshDrone()
-window.ioc.register(meshDrone.iocKey, meshDrone, 'NostrMeshDrone')
-window.ioc.register('@diamondcoreprocessor.com/MeshDrone', meshDrone, 'MeshDrone')
+window.ioc.register('@diamondcoreprocessor.com/NostrMeshDrone', meshDrone)

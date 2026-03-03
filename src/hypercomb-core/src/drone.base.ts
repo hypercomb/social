@@ -2,7 +2,7 @@ import { Effect } from "./effect.js"
 import { EffectBus, type EffectHandler } from "./effect-bus.js"
 import { GrammarHint } from "./grammar-hint.js"
 import { ProviderLink } from "./provider-link.js"
-import { serviceKey, type Visibility } from "./ioc/service-key.js"
+import { serviceKey } from "./ioc/service-key.js"
 
 // -------------------------------------------------
 // lifecycle state machine
@@ -23,9 +23,6 @@ export abstract class Drone {
 
   /** Domain-rooted namespace, e.g. 'diamondcoreprocessor.com' */
   abstract readonly namespace: string
-
-  /** Visibility: 'public' services get a short-name alias, 'private' require full key. */
-  readonly visibility: Visibility = 'public'
 
   public readonly name: string
 

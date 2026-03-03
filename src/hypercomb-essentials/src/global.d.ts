@@ -6,7 +6,7 @@
 
 interface Window {
   ioc: {
-    register<T>(signature: string, value: T, name?: string): void
+    register<T>(signature: string, value: T): void
     get<T = unknown>(key: string): T | undefined
     has(key: string): boolean
     list(): readonly string[]
@@ -20,6 +20,6 @@ interface Window {
 // -------------------------------------------------
 
 declare function get<T = unknown>(key: string): T | undefined
-declare function register<T>(signature: string, value: T, name?: string): void
+declare function register<T>(signature: string, value: T): void
 declare function has(key: string): boolean
 declare function list(): readonly string[]

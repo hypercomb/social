@@ -106,4 +106,4 @@ export class LayerService {
   }
 }
 
-register('@hypercomb.social/LayerService', new LayerService(), 'LayerService')
+register('@hypercomb.social/LayerService', new LayerService())

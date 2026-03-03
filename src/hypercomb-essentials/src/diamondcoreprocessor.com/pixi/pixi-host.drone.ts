@@ -19,7 +19,7 @@ export class PixiHostDrone extends Drone {
   // stable render root for all drones (this is what ZoomDrone scales/translates)
   public container!: Container
 
-  protected override deps = { settings: 'Settings', axial: 'AxialService' }
+  protected override deps = { settings: '@diamondcoreprocessor.com/Settings', axial: '@diamondcoreprocessor.com/AxialService' }
   protected override emits = ['render:host-ready']
 
   protected override heartbeat = async (): Promise<void> => {
@@ -96,4 +96,4 @@ export class PixiHostDrone extends Drone {
 }
 
 const _pixiHost = new PixiHostDrone()
-window.ioc.register(_pixiHost.iocKey, _pixiHost, 'PixiHost')
+window.ioc.register('@diamondcoreprocessor.com/PixiHostDrone', _pixiHost)

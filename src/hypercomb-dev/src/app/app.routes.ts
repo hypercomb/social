@@ -20,4 +20,4 @@ export class AppRoutes {
   public readonly matcher = lineageMatcher
 }
 
-register('@hypercomb.social/AppRoutes', new AppRoutes(), 'AppRoutes')
+register('@hypercomb.social/AppRoutes', new AppRoutes())

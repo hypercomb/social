@@ -25,4 +25,4 @@ export class RuntimeMediator {
   }
 }
 
-register('@hypercomb.social/RuntimeMediator', new RuntimeMediator(), 'RuntimeMediator')
+register('@hypercomb.social/RuntimeMediator', new RuntimeMediator())

@@ -26,4 +26,4 @@ export class InitHistory {
   }
 }
 
-register('@hypercomb.social/InitHistory', new InitHistory(), 'InitHistory')
+register('@hypercomb.social/InitHistory', new InitHistory())
