@@ -47,7 +47,7 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
 
   public readonly placeholder = computed<string>(() => {
     return this.locked()
-      ? 'press # to open dcp...'
+      ? 'press enter'
       : 'search actions...'
   })
 

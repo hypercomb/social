@@ -21,7 +21,7 @@ export class Store {
   public static readonly DEPENDENCIES_DIRECTORY = '__dependencies__'
   public static readonly LAYERS_DIRECTORY = '__layers__'
 
-  private static readonly CACHE_NAME = 'hypercomb-modules-v1'
+  private static readonly CACHE_NAME = 'hypercomb-modules-v2'
 
   public opfsRoot!: FileSystemDirectoryHandle
   public hypercombRoot!: FileSystemDirectoryHandle
