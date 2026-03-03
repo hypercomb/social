@@ -68,12 +68,12 @@ export class CoreAdapter {
     await show?.encounter?.('testing')
 
     const zoomkey = 'ZoomDrone'
-    const zoom = <any>get(zoomkey)!
-    await zoom.encounter('testing')
+    const zoom = get(zoomkey) as { encounter?: (arg: string) => Promise<void> | void } | undefined
+    await zoom?.encounter?.('testing')
 
     const panningkey = 'PanningDrone'
-    const panning = <any>get(panningkey)!
-    await panning.encounter('testing')
+    const panning = get(panningkey) as { encounter?: (arg: string) => Promise<void> | void } | undefined
+    await panning?.encounter?.('testing')
 
     // const settingKey = 'Settings'
     // const setting = <any>get(settingKey)

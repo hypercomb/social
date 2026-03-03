@@ -16,11 +16,11 @@ const ensureSwControl = async (): Promise<void> => {
 
   if (navigator.serviceWorker.controller) return
 
-  const key = '__hypercomb_sw_reload__'
-  if (sessionStorage.getItem(key) === '1') return
-
-  sessionStorage.setItem(key, '1')
-  location.reload()
+  // Wait for clients.claim() to propagate (fires controllerchange)
+  await new Promise<void>(resolve => {
+    navigator.serviceWorker.addEventListener('controllerchange', () => resolve(), { once: true })
+    setTimeout(resolve, 3000)
+  })
 }
 
 const attachImportMap = async (): Promise<void> => {

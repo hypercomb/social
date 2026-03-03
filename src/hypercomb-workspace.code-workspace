@@ -23,9 +23,6 @@
     {
       "name": "hypercomb-web",
       "path": "hypercomb-web"
-    },
-    {
-      "path": "hypercomb-legacy"
     }
   ],
   "settings": {},

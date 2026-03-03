@@ -2,6 +2,7 @@
 import { Drone } from '@hypercomb/core'
 
 export class SettingsDrone extends Drone {
+  readonly namespace = 'diamondcoreprocessor.com'
   private initialized = false
 
   protected sense = async (grammar: string):  Promise<boolean> => { 
