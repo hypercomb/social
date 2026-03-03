@@ -23,7 +23,7 @@ export class LayerInstaller {
     const domainKey = parsed?.domain || this.tryHost(endpoint)
     if (!domainKey) return
 
-    const store = get('Store') as Store
+    const store = get('@hypercomb.social/Store') as Store
 
     // layers are stored per domain: opfsroot/__layers__/<domain>/
     const domainLayersDir = await store.domainLayersDirectory(domainKey, true)

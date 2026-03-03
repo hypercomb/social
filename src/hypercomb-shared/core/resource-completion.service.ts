@@ -4,7 +4,7 @@ import { ScriptPreloader } from './script-preloader'
 
 export class ResourceCompletionService {
 
-  private get preloader(): ScriptPreloader { return <ScriptPreloader>get("ScriptPreloader") }
+  private get preloader(): ScriptPreloader { return <ScriptPreloader>get("@hypercomb.social/ScriptPreloader") }
 
   // always live (no snapshot)
   public readonly names = computed(() => this.preloader.actionNames())

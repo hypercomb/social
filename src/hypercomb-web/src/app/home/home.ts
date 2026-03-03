@@ -10,8 +10,8 @@ import type { ResourceMessageHandler } from '@hypercomb/shared/core/resource-mes
   imports: []
 })
 export class Home {
-  private get handler(): ResourceMessageHandler { return get('ResourceMessageHandler') as ResourceMessageHandler }
-  private get lineage(): Lineage { return get('Lineage') as Lineage }
+  private get handler(): ResourceMessageHandler { return get('@hypercomb.social/ResourceMessageHandler') as ResourceMessageHandler }
+  private get lineage(): Lineage { return get('@hypercomb.social/Lineage') as Lineage }
   public ready = computed(() => this.lineage.ready())
 
   ngOnDestroy(): void {

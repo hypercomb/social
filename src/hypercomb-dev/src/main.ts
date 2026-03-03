@@ -13,19 +13,19 @@ void Store
 const main = async (): Promise<void> => {
 
   // store is registered by side-effect in store.ts, but guard just in case
-  const store = get('Store') as Store
+  const store = get('@hypercomb.social/Store') as Store
   await store.initialize()
 
   // start listening before bootstrap emits popstate
   try {
-    const nav = get('Navigation') as any
+    const nav = get('@hypercomb.social/Navigation') as any
     nav?.listen?.()
   } catch {
     // ignore
   }
 
   // always rebuild the stack on refresh
-  const history = get('BootstrapHistory') as BootstrapHistory
+  const history = get('@hypercomb.social/BootstrapHistory') as BootstrapHistory
   await history.run()
 
   await bootstrapApplication(App, appConfig)

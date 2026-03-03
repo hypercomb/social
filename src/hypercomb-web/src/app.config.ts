@@ -12,7 +12,7 @@ export const appConfig: ApplicationConfig = {
     provideBrowserGlobalErrorListeners(),
     provideZoneChangeDetection({ eventCoalescing: true }),
     provideAppInitializer(() => {
-      const preloader = get('ScriptPreloader')
+      const preloader = get('@hypercomb.social/ScriptPreloader')
       register(DRONE_RESOLVER_KEY, preloader)
     }),
     provideRouter(routes),

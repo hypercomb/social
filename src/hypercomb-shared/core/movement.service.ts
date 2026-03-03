@@ -10,7 +10,7 @@ export class MovementService {
   // increments after navigation intent is committed
   public readonly moved = signal(0)
 
-  private get navigation(): Navigation { return get('Navigation') as Navigation }
+  private get navigation(): Navigation { return get('@hypercomb.social/Navigation') as Navigation }
 
   // prevents overlapping commits
   private committing: Promise<void> | null = null

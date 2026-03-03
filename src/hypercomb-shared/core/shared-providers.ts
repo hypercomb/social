@@ -2,7 +2,7 @@
 //
 // Bridge providers that connect Angular DI to the canonical window.ioc instances.
 // Angular components use inject(Lineage) etc. — these factories ensure they get
-// the SAME object that dynamic OPFS modules see via window.ioc.get('Lineage').
+// the SAME object that dynamic OPFS modules see via window.ioc.get('@hypercomb.social/Lineage').
 //
 // Without this, @Injectable({ providedIn: 'root' }) causes Angular to create a
 // SECOND instance, leaving Angular-side and dynamic-module-side state diverged.

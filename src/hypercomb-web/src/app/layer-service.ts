@@ -18,7 +18,7 @@ export class LayerService {
 
     if (!dom || !rootSig || !requestedSig) return null
 
-    const store = get('Store') as Store
+    const store = get('@hypercomb.social/Store') as Store
 
     const dir = await store.domainLayersDirectory(dom, true)
 

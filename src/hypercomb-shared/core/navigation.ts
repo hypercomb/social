@@ -12,7 +12,7 @@ type SelectionDetail = {
 
 export class Navigation extends hypercomb {
 
-  private get completions(): CompletionUtility { return get('CompletionUtility') as CompletionUtility }
+  private get completions(): CompletionUtility { return get('@hypercomb.social/CompletionUtility') as CompletionUtility }
   private listening = false
 
   // ----------------------------------

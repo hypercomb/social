@@ -13,9 +13,9 @@ export class CoreAdapter {
   // dependencies (lazy IoC resolution)
   // -------------------------------------------------
   public readonly meshPublic = signal(true);
-  private get navigation(): Navigation { return get('Navigation') as Navigation }
-  private get lineage(): Lineage { return get('Lineage') as Lineage }
-  private get preloader(): ScriptPreloader { return get('ScriptPreloader') as ScriptPreloader }
+  private get navigation(): Navigation { return get('@hypercomb.social/Navigation') as Navigation }
+  private get lineage(): Lineage { return get('@hypercomb.social/Lineage') as Lineage }
+  private get preloader(): ScriptPreloader { return get('@hypercomb.social/ScriptPreloader') as ScriptPreloader }
 
   // -------------------------------------------------
   // state
@@ -32,10 +32,10 @@ export class CoreAdapter {
     if (this.initialized) return
     this.initialized = true
 
-    // const logger = <OpfsTreeLogger>window.ioc.get("OpfsTreeLogger")
+    // const logger = <OpfsTreeLogger>window.ioc.get("@hypercomb.social/OpfsTreeLogger")
     // await logger.log()
 
-    const store = get('Store') as Store
+    const store = get('@hypercomb.social/Store') as Store
 
     // Store is already initialized in ensure-install (pre-boot)
     // but re-init is safe (idempotent)
@@ -43,7 +43,7 @@ export class CoreAdapter {
 
     // Install was already performed in ensure-install (before import map).
     // Just load dependencies into memory — the import map is now populated.
-    const dependency = get('DependencyLoader') as DependencyLoader | undefined
+    const dependency = get('@hypercomb.social/DependencyLoader') as DependencyLoader | undefined
     await dependency?.load?.()
     console.log('[core-adapter] dependencies loaded')
 
@@ -59,24 +59,24 @@ export class CoreAdapter {
     const l = list();
     console.log('[core-adapter] ioc keys:', l)
 
-    const hostkey = 'PixiHost'
+    const hostkey = '@diamondcoreprocessor.com/PixiHostDrone'
     const host = get(hostkey) as { encounter?: (arg: string) => Promise<void> | void } | undefined
     await host?.encounter?.('testing')
 
-    const showkey = 'ShowHoneycomb'
+    const showkey = '@diamondcoreprocessor.com/ShowHoneycombDrone'
     const show = get(showkey) as { encounter?: (arg: string) => Promise<void> | void } | undefined
     await show?.encounter?.('testing')
 
-    const zoomkey = 'ZoomDrone'
+    const zoomkey = '@diamondcoreprocessor.com/ZoomDrone'
     const zoom = get(zoomkey) as { encounter?: (arg: string) => Promise<void> | void } | undefined
     await zoom?.encounter?.('testing')
 
-    const panningkey = 'PanningDrone'
+    const panningkey = '@diamondcoreprocessor.com/PanningDrone'
     const panning = get(panningkey) as { encounter?: (arg: string) => Promise<void> | void } | undefined
     await panning?.encounter?.('testing')
 
 
-      const mesh = get('NostrMeshDrone') as any
+      const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any
 
       // 1) hard-start mesh lifecycle
       await mesh.encounter('smoke-test')

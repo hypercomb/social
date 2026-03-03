@@ -3,8 +3,8 @@ import { ScriptPreloader, Store } from '@hypercomb/shared/core'
 
 export class ResourceMessageHandler {
 
-  private get store(): Store { return <Store>get("Store") }
-  private get preloader(): ScriptPreloader { return <ScriptPreloader>get("ScriptPreloader") }
+  private get store(): Store { return <Store>get("@hypercomb.social/Store") }
+  private get preloader(): ScriptPreloader { return <ScriptPreloader>get("@hypercomb.social/ScriptPreloader") }
 
   // whitelist for allowed postmessage origins
   private readonly allowedOrigins = new Set<string>([

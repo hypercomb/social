@@ -9,8 +9,8 @@ export class RuntimeMediator {
 
   public sync = async (parsed: LocationParseResult): Promise<void> => {
     const run = async (): Promise<void> => {
-      const installer = get('LayerInstaller') as LayerInstaller
-      const dependency = get('DependencyLoader') as DependencyLoader
+      const installer = get('@hypercomb.social/LayerInstaller') as LayerInstaller
+      const dependency = get('@hypercomb.social/DependencyLoader') as DependencyLoader
 
       // 1) download + install all files via install.manifest.json (resumable)
       await installer.install(parsed)

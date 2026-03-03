@@ -32,13 +32,13 @@ function token<T>(key: string, ngType: any): SharedToken<T> {
 // shared service tokens
 // -------------------------------------------------
 
-export const COMPLETION_UTILITY = token<CompletionUtility>('CompletionUtility', CompletionUtility)
-export const LINEAGE = token<Lineage>('Lineage', Lineage)
-export const MOVEMENT = token<MovementService>('MovementService', MovementService)
-export const NAVIGATION = token<Navigation>('Navigation', Navigation)
-export const RESOURCE_COMPLETION = token<ResourceCompletionService>('ResourceCompletionService', ResourceCompletionService)
-export const RESOURCE_MSG_HANDLER = token<ResourceMessageHandler>('ResourceMessageHandler', ResourceMessageHandler)
-export const SCRIPT_PRELOADER = token<ScriptPreloader>('ScriptPreloader', ScriptPreloader)
+export const COMPLETION_UTILITY = token<CompletionUtility>('@hypercomb.social/CompletionUtility', CompletionUtility)
+export const LINEAGE = token<Lineage>('@hypercomb.social/Lineage', Lineage)
+export const MOVEMENT = token<MovementService>('@hypercomb.social/MovementService', MovementService)
+export const NAVIGATION = token<Navigation>('@hypercomb.social/Navigation', Navigation)
+export const RESOURCE_COMPLETION = token<ResourceCompletionService>('@hypercomb.social/ResourceCompletionService', ResourceCompletionService)
+export const RESOURCE_MSG_HANDLER = token<ResourceMessageHandler>('@hypercomb.social/ResourceMessageHandler', ResourceMessageHandler)
+export const SCRIPT_PRELOADER = token<ScriptPreloader>('@hypercomb.social/ScriptPreloader', ScriptPreloader)
 
 // -------------------------------------------------
 // Angular bridge helper

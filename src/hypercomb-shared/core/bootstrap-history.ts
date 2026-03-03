@@ -18,9 +18,9 @@ export class BootstrapHistory {
 
   public run = async (): Promise<void> => {
 
-    const store = get('Store') as Store
-    const preloader = get('ScriptPreloader') as any
-    const utility = get('CompletionUtility') as CompletionUtility
+    const store = get('@hypercomb.social/Store') as Store
+    const preloader = get('@hypercomb.social/ScriptPreloader') as any
+    const utility = get('@hypercomb.social/CompletionUtility') as CompletionUtility
 
     const inputPath = window.location.pathname || '/'
     const inputSuffix = (window.location.search || '') + (window.location.hash || '')
@@ -44,7 +44,7 @@ export class BootstrapHistory {
         : urlSegments
 
     // walker strategy: build a path->handle lookup so we never mutate url until we know the answer
-    const walker = get('DirectoryWalker') as DirectoryWalker
+    const walker = get('@hypercomb.social/DirectoryWalker') as DirectoryWalker
     const directories = await walker.walk(domainRoot)
 
     // map key is "a/b/c" (no leading slash), rooted at domainRoot
@@ -161,11 +161,11 @@ export class BootstrapHistory {
   }
 
   private tryGetCompletions = (get: any): CompletionUtility | null => {
-    try { return get('CompletionUtility') as CompletionUtility } catch { return null }
+    try { return get('@hypercomb.social/CompletionUtility') as CompletionUtility } catch { return null }
   }
 
   private tryGetLineage = (): any | null => {
-    try { return get('Lineage') as any } catch { return null }
+    try { return get('@hypercomb.social/Lineage') as any } catch { return null }
   }
 
   private tryGetLineageSegments = (lineage: any | null): string[] => {

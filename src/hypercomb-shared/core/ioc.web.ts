@@ -16,7 +16,7 @@ if (!window.ioc) {
      * @param opts       Backward-compatible: pass a string for a short-name alias,
      *                   or an object `{ name?, visibility? }`.
      *                   - visibility 'public' (default): alias is registered so
-     *                     `get('Name')` resolves via short name.
+     *                     `get('@domain/Name')` resolves via short name.
      *                   - visibility 'private': only resolvable by full key.
      */
     register(
@@ -146,7 +146,7 @@ if (!window.ioc) {
     },
   }
 
-  // Global convenience — use get('Store') anywhere without window.ioc prefix
+  // Global convenience — use get('@hypercomb.social/Store') anywhere without window.ioc prefix
   ;(window as any).get = window.ioc.get
   ;(window as any).register = window.ioc.register
   ;(window as any).has = window.ioc.has

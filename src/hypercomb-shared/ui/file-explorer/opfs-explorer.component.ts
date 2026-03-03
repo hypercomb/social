@@ -42,9 +42,9 @@ export class OpfsExplorerComponent extends hypercomb {
   // dependencies
   // -------------------------------------------------
 
-  private get lineage(): Lineage { return get('Lineage') as Lineage }
-  private get preloader(): ScriptPreloader { return get('ScriptPreloader') as ScriptPreloader }
-  private get store(): Store { return get('Store') as Store }
+  private get lineage(): Lineage { return get('@hypercomb.social/Lineage') as Lineage }
+  private get preloader(): ScriptPreloader { return get('@hypercomb.social/ScriptPreloader') as ScriptPreloader }
+  private get store(): Store { return get('@hypercomb.social/Store') as Store }
 
   // note: runtime mediator stays as angular service
   private readonly runtime = new RuntimeMediator()

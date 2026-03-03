@@ -24,7 +24,7 @@ export class App {
   public readonly meshPublic = signal(true);
 
   public toggleMesh = (): void => {
-    const mesh = get('NostrMeshDrone') as any;
+    const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any;
 
     const next = !this.meshPublic();
     this.meshPublic.set(next);
@@ -48,23 +48,23 @@ export class App {
       const l = list();
       console.log('[core-adapter] ioc keys:', l)
 
-      const hostkey = 'PixiHost'
+      const hostkey = '@diamondcoreprocessor.com/PixiHostDrone'
       const host = <any>get(hostkey)!
       await host.encounter('testing')
 
-      const showkey = 'ShowHoneycomb'
+      const showkey = '@diamondcoreprocessor.com/ShowHoneycombDrone'
       const show = <any>get(showkey)!
       await show.encounter('testing')
 
-      const zoomkey = 'ZoomDrone'
+      const zoomkey = '@diamondcoreprocessor.com/ZoomDrone'
       const zoom = <any>get(zoomkey)!
       await zoom.encounter('testing')
 
-      const pankey = 'PanningDrone'
+      const pankey = '@diamondcoreprocessor.com/PanningDrone'
       const pan = <any>get(pankey)!
       await pan.encounter('testing')
 
-      const mesh = get('NostrMeshDrone') as any
+      const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any
 
       // 1) hard-start mesh lifecycle
       await mesh.encounter('smoke-test')

@@ -8,7 +8,7 @@ import { Navigation } from '../../core/navigation'
   templateUrl: './history.html'
 })
 export class HistoryComponent {
-  private get navigation(): Navigation { return <Navigation>get("Navigation") }
+  private get navigation(): Navigation { return <Navigation>get("@hypercomb.social/Navigation") }
 
   public readonly length = (): number => window.history.length
   public readonly current = (): number => ((window.history.state as any)?.i ?? 0)

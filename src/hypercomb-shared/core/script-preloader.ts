@@ -10,7 +10,7 @@ export interface ActionDescriptor {
 }
 export class ScriptPreloader implements DroneResolver {
 
-  private get store(): Store { return <Store>get("Store")}
+  private get store(): Store { return <Store>get("@hypercomb.social/Store")}
   
   private readonly bySignature = new Map<string, ActionDescriptor>()
 

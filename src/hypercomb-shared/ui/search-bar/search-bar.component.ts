@@ -20,12 +20,12 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
 
   // Resolve via IoC container (not Angular DI) — these are shared services
   // registered at module load time, available globally via get()
-  private get completions(): CompletionUtility { return get('CompletionUtility') as CompletionUtility }
-  private get lineage(): Lineage { return get('Lineage') as Lineage }
-  private get movement(): MovementService { return get('MovementService') as MovementService }
-  private get navigation(): Navigation { return get('Navigation') as Navigation }
-  private get preloader(): ScriptPreloader { return get('ScriptPreloader') as ScriptPreloader }
-  private get resources(): ResourceCompletionService { return get('ResourceCompletionService') as ResourceCompletionService }
+  private get completions(): CompletionUtility { return get('@hypercomb.social/CompletionUtility') as CompletionUtility }
+  private get lineage(): Lineage { return get('@hypercomb.social/Lineage') as Lineage }
+  private get movement(): MovementService { return get('@hypercomb.social/MovementService') as MovementService }
+  private get navigation(): Navigation { return get('@hypercomb.social/Navigation') as Navigation }
+  private get preloader(): ScriptPreloader { return get('@hypercomb.social/ScriptPreloader') as ScriptPreloader }
+  private get resources(): ResourceCompletionService { return get('@hypercomb.social/ResourceCompletionService') as ResourceCompletionService }
 
   private readonly value = signal('')
   private readonly activeIndex = signal(0)

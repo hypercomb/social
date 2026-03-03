@@ -42,7 +42,7 @@ export class AxialCoordinate {
     }
 
     private static getLocation = (q: number, r: number, s: number): Point => {
-        const settings = get("Settings") as Settings
+        const settings = get("@diamondcoreprocessor.com/Settings") as Settings
 
         let xCoord = settings.hexagonSide * (Math.sqrt(3) * q + Math.sqrt(3) / 2 * r)
         let yCoord = settings.hexagonSide * (3.0 / 2.0 * r)

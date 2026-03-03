@@ -5,7 +5,7 @@ import { Store } from './store'
 
 export class DependencyLoader {
 
-  private get store(): Store { return <Store>get("Store") }
+  private get store(): Store { return <Store>get("@hypercomb.social/Store") }
   private readonly loaded = new Set<string>()
 
   public readonly dependencyCount = signal(0)

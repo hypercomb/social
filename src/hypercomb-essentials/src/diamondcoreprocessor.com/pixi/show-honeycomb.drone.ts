@@ -274,7 +274,7 @@ export class ShowHoneycombDrone extends Drone {
   // note: data queries (getNonExpired, subscribe) still use the direct API
   // coordination (ensureStartedForSig, publish) also emits effects for observability
   private tryGetMesh = (): MeshApi | null => {
-    return (get<MeshApi>('MeshDrone') ?? get<MeshApi>('NostrMeshDrone')) ?? null
+    return (get<MeshApi>('@diamondcoreprocessor.com/MeshDrone') ?? get<MeshApi>('@diamondcoreprocessor.com/NostrMeshDrone')) ?? null
   }
 
 
