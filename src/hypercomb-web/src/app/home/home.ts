@@ -2,14 +2,12 @@ import { Component } from '@angular/core';
 import type { Lineage } from '@hypercomb/shared/core';
 import type { ResourceMessageHandler } from '@hypercomb/shared/core/resource-message-handler';
 import { fromRuntime } from '@hypercomb/shared/core/from-runtime';
-import { OpfsExplorerComponent } from "@hypercomb/shared/ui";
 
 @Component({
   selector: 'app-home',
   standalone: true,
   templateUrl: './home.html',
   styleUrl: './home.scss',
-  imports: [OpfsExplorerComponent]
 })
 export class Home {
   private get handler(): ResourceMessageHandler { return get('@hypercomb.social/ResourceMessageHandler') as ResourceMessageHandler }
