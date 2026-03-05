@@ -80,7 +80,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
         if (!bee) continue
         if (!has(bee.iocKey)) register(bee.iocKey, bee)
 
-        this.bySignature.set(signature, { signature, name: bee.name })
+        this.bySignature.set(signature, { signature, name: bee.name ?? signature })
         this.#resourceCount = this.#resourceCount + 1
         this.dispatchEvent(new CustomEvent('change'))
       } catch {
@@ -93,7 +93,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   private refreshProjection = (): void => {
     const list = [...this.bySignature.values()].sort((a, b) => a.name.localeCompare(b.name))
     this.#actions = list
-    this.#actionNames = list.map(a => a.name.replace(/-/g, ' '))
+    this.#actionNames = list.map(a => (a.name ?? '').replace(/-/g, ' '))
     this.dispatchEvent(new CustomEvent('change'))
   }
 
