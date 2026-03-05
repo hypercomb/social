@@ -7,6 +7,10 @@ import { ensureInstall } from './setup/ensure-install'
 import { resolveImportMap } from './setup/resolve-import-map'
 import { appConfig } from './app.config'
 import { App } from './app/app'
+import { DependencyLoader } from '@hypercomb/shared/core'
+
+// Ensure side-effect registration
+const _deps = [DependencyLoader]
 
 const ensureSwControl = async (): Promise<void> => {
   if (!('serviceWorker' in navigator)) return
@@ -38,6 +42,10 @@ const bootstrap = async (): Promise<void> => {
   await ensureSwControl()
   await ensureInstall()
   await attachImportMap()
+
+  // Load dependency namespaces so services self-register before Angular renders
+  const loader = get('@hypercomb.social/DependencyLoader') as DependencyLoader | undefined
+  await loader?.load?.()
 
   await bootstrapApplication(App, appConfig)
 }

@@ -49,12 +49,8 @@ export class CoreAdapter {
     const store = get('@hypercomb.social/Store') as Store
     await store.initialize()
 
-    // Install was already performed in ensure-install (before import map).
-    // Just load dependencies into memory — the import map is now populated.
-    const dependency = get('@hypercomb.social/DependencyLoader') as DependencyLoader | undefined
-    await dependency?.load?.()
-    console.log('[core-adapter] dependencies loaded')
-
+    // Dependencies already loaded in main.ts before Angular bootstrap.
+    // Just load bees from OPFS.
     await this.preloader.preload()
 
     // initialize navigation + lineage after content is available
