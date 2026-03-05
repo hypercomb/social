@@ -46,27 +46,27 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
 
   private readonly mode$ = fromRuntime(
     get('@diamondcoreprocessor.com/TileEditorService') as EventTarget,
-    () => this.editorService.mode,
+    () => this.editorService?.mode ?? 'idle',
   )
 
   private readonly seed$ = fromRuntime(
     get('@diamondcoreprocessor.com/TileEditorService') as EventTarget,
-    () => this.editorService.seed,
+    () => this.editorService?.seed ?? '',
   )
 
   private readonly link$ = fromRuntime(
     get('@diamondcoreprocessor.com/TileEditorService') as EventTarget,
-    () => this.editorService.link,
+    () => this.editorService?.link ?? '',
   )
 
   private readonly borderColor$ = fromRuntime(
     get('@diamondcoreprocessor.com/TileEditorService') as EventTarget,
-    () => this.editorService.borderColor,
+    () => this.editorService?.borderColor ?? '',
   )
 
   private readonly hasImage$ = fromRuntime(
     get('@diamondcoreprocessor.com/ImageEditorService') as EventTarget,
-    () => this.imageEditor.hasImage,
+    () => this.imageEditor?.hasImage ?? false,
   )
 
   public readonly open = computed(() => this.mode$() === 'editing')

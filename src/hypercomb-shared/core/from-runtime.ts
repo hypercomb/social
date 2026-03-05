@@ -15,11 +15,14 @@ import { signal, type Signal, type WritableSignal } from '@angular/core'
  * @param event    The event name to listen for (default: 'change')
  */
 export function fromRuntime<T>(
-  target: EventTarget,
+  target: EventTarget | undefined | null,
   getter: () => T,
   event = 'change'
 ): Signal<T> {
-  const s: WritableSignal<T> = signal(getter())
-  target.addEventListener(event, () => s.set(getter()))
+  const initial = target ? getter() : undefined as T
+  const s: WritableSignal<T> = signal(initial)
+  if (target) {
+    target.addEventListener(event, () => s.set(getter()))
+  }
   return s.asReadonly()
 }
