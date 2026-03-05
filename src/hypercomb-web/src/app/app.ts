@@ -2,11 +2,12 @@ import { Component, inject, signal } from '@angular/core'
 import { RouterOutlet } from '@angular/router'
 import { Header } from './header/header'
 import { CoreAdapter } from './core-adapter'
+import { TileEditorComponent } from '@hypercomb/shared/ui/tile-editor/tile-editor.component'
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, Header],
+  imports: [RouterOutlet, Header, TileEditorComponent],
   templateUrl: './app.html',
   styleUrl: './app.scss'
 })
