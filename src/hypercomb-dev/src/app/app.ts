@@ -15,10 +15,14 @@ import { HexDetector } from '@hypercomb/essentials/diamondcoreprocessor.com/inpu
 import { TileOverlayDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/tile-overlay.drone'
 import { HistoryService } from '@hypercomb/essentials/diamondcoreprocessor.com/core/history.service'
 import { HistoryRecorder } from '@hypercomb/essentials/diamondcoreprocessor.com/core/history-recorder.drone'
+import { TileEditorService } from '@hypercomb/essentials/diamondcoreprocessor.com/editor/tile-editor.service'
+import { TileEditorDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/editor/tile-editor.drone'
+import { ImageEditorService } from '@hypercomb/essentials/diamondcoreprocessor.com/editor/image-editor.service'
+import { TileEditorComponent } from '@hypercomb/shared/ui/tile-editor/tile-editor.component'
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, SearchBarComponent],
+  imports: [RouterOutlet, SearchBarComponent, TileEditorComponent],
   styleUrls: ['./app.scss'] as any,
   templateUrl: './app.html'
 })
@@ -50,7 +54,10 @@ export class App {
       Settings,
       ZoomDrone,
       HistoryService,
-      HistoryRecorder]
+      HistoryRecorder,
+      TileEditorService,
+      TileEditorDrone,
+      ImageEditorService]
 
     queueMicrotask(async () => {
       const l = list();

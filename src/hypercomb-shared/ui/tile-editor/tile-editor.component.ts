@@ -1,22 +1,34 @@
 // hypercomb-shared/ui/tile-editor/tile-editor.component.ts
-// Generic property editor for seed state bags.
+// Tile editor with image manager, link, and border color fields.
 
-import { Component, computed, signal, type OnInit, type OnDestroy } from '@angular/core'
+import {
+  Component,
+  computed,
+  effect,
+  ElementRef,
+  ViewChild,
+  type AfterViewInit,
+  type OnInit,
+  type OnDestroy,
+} from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import { fromRuntime } from '../../core/from-runtime'
-import { isSignature } from '@hypercomb/essentials/diamondcoreprocessor.com/editor/tile-properties'
 
 import type { TileEditorService } from
   '@hypercomb/essentials/diamondcoreprocessor.com/editor/tile-editor.service'
+import type { ImageEditorService } from
+  '@hypercomb/essentials/diamondcoreprocessor.com/editor/image-editor.service'
 
 @Component({
   selector: 'hc-tile-editor',
   standalone: true,
   imports: [FormsModule],
   templateUrl: './tile-editor.component.html',
-  styleUrls: ['./tile-editor.component.scss']
+  styleUrls: ['./tile-editor.component.scss'],
 })
-export class TileEditorComponent implements OnInit, OnDestroy {
+export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
+
+  @ViewChild('imageCanvas', { static: false }) imageCanvas!: ElementRef<HTMLDivElement>
 
   private get editorService(): TileEditorService {
     return get('@diamondcoreprocessor.com/TileEditorService') as TileEditorService
@@ -26,75 +38,137 @@ export class TileEditorComponent implements OnInit, OnDestroy {
     return get('@diamondcoreprocessor.com/TileEditorDrone')
   }
 
+  private get imageEditor(): ImageEditorService {
+    return get('@diamondcoreprocessor.com/ImageEditorService') as ImageEditorService
+  }
+
+  // ── reactive state ─────────────────────────────────────────────
+
   private readonly mode$ = fromRuntime(
     get('@diamondcoreprocessor.com/TileEditorService') as EventTarget,
-    () => this.editorService.mode
-  )
-
-  private readonly props$ = fromRuntime(
-    get('@diamondcoreprocessor.com/TileEditorService') as EventTarget,
-    () => this.editorService.properties
+    () => this.editorService.mode,
   )
 
   private readonly seed$ = fromRuntime(
     get('@diamondcoreprocessor.com/TileEditorService') as EventTarget,
-    () => this.editorService.seed
+    () => this.editorService.seed,
+  )
+
+  private readonly link$ = fromRuntime(
+    get('@diamondcoreprocessor.com/TileEditorService') as EventTarget,
+    () => this.editorService.link,
+  )
+
+  private readonly borderColor$ = fromRuntime(
+    get('@diamondcoreprocessor.com/TileEditorService') as EventTarget,
+    () => this.editorService.borderColor,
+  )
+
+  private readonly hasImage$ = fromRuntime(
+    get('@diamondcoreprocessor.com/ImageEditorService') as EventTarget,
+    () => this.imageEditor.hasImage,
   )
 
   public readonly open = computed(() => this.mode$() === 'editing')
   public readonly seed = computed(() => this.seed$())
+  public readonly hasImage = computed(() => this.hasImage$())
 
-  public readonly entries = computed(() => {
-    const p = this.props$()
-    return Object.entries(p)
-  })
+  // bound form values (updated on open, pushed on change)
+  public linkValue = ''
+  public borderColorValue = ''
 
-  // new property row
-  public newKey = ''
-  public newValue = ''
+  // track previous open state for init/teardown
+  #wasOpen = false
 
-  readonly isSignature = isSignature
+  constructor() {
+    // watch for editor open/close to initialize/destroy image canvas
+    effect(() => {
+      const isOpen = this.open()
+      if (isOpen && !this.#wasOpen) {
+        // editor just opened — sync form values
+        this.linkValue = this.link$()
+        this.borderColorValue = this.borderColor$()
 
-  readonly inputType = (value: unknown): string => {
-    if (typeof value === 'boolean') return 'checkbox'
-    if (typeof value === 'number') return 'number'
-    return 'text'
+        // defer canvas init to next microtask (ViewChild not ready yet in same tick)
+        queueMicrotask(() => this.#initCanvas())
+      }
+      if (!isOpen && this.#wasOpen) {
+        // editor closed
+        this.linkValue = ''
+        this.borderColorValue = ''
+      }
+      this.#wasOpen = isOpen
+    })
   }
 
-  readonly displayValue = (value: unknown): string => {
-    if (typeof value === 'string') return value
-    if (typeof value === 'number' || typeof value === 'boolean') return String(value)
-    return JSON.stringify(value)
+  // ── canvas initialization ──────────────────────────────────────
+
+  async #initCanvas(): Promise<void> {
+    const el = this.imageCanvas?.nativeElement
+    if (!el) return
+
+    const settings = get('@diamondcoreprocessor.com/Settings') as any
+    const width = settings?.width ?? 346
+    const height = settings?.height ?? 400
+
+    await this.imageEditor.initialize(el, width, height)
+
+    // set initial border color
+    this.imageEditor.setBorderColor(this.borderColorValue)
+
+    // if there's a large blob, load it
+    const service = this.editorService
+    if (service.largeBlob) {
+      const transform = (service.properties as any).large
+      await this.imageEditor.loadImage(
+        service.largeBlob,
+        transform ? { x: transform.x ?? 0, y: transform.y ?? 0, scale: transform.scale ?? 1 } : undefined,
+      )
+    }
   }
 
-  readonly onPropertyChange = (key: string, raw: string, currentValue: unknown): void => {
-    let value: unknown = raw
-    if (typeof currentValue === 'number') value = Number(raw)
-    else if (typeof currentValue === 'boolean') value = raw === 'true' || raw === 'on'
-    this.editorService.updateProperty(key, value)
+  // ── image upload ───────────────────────────────────────────────
+
+  readonly onImageDrop = (event: DragEvent): void => {
+    event.preventDefault()
+    event.stopPropagation()
+    const file = event.dataTransfer?.files?.[0]
+    if (file && file.type.startsWith('image/')) {
+      void this.#loadImageFile(file)
+    }
   }
 
-  readonly onCheckboxChange = (key: string, checked: boolean): void => {
-    this.editorService.updateProperty(key, checked)
+  readonly onDragOver = (event: DragEvent): void => {
+    event.preventDefault()
   }
 
-  readonly onRemoveProperty = (key: string): void => {
-    this.editorService.removeProperty(key)
+  readonly onFileSelect = (event: Event): void => {
+    const input = event.target as HTMLInputElement
+    const file = input.files?.[0]
+    if (file) {
+      void this.#loadImageFile(file)
+      input.value = '' // reset so same file can be re-selected
+    }
   }
 
-  readonly onAddProperty = (): void => {
-    const k = this.newKey.trim()
-    if (!k) return
-
-    let value: unknown = this.newValue
-    if (this.newValue === 'true') value = true
-    else if (this.newValue === 'false') value = false
-    else if (this.newValue !== '' && !isNaN(Number(this.newValue))) value = Number(this.newValue)
-
-    this.editorService.updateProperty(k, value)
-    this.newKey = ''
-    this.newValue = ''
+  async #loadImageFile(file: File): Promise<void> {
+    const blob = new Blob([await file.arrayBuffer()], { type: file.type })
+    this.editorService.setLargeBlob(blob)
+    await this.imageEditor.loadImage(blob)
   }
+
+  // ── property changes ───────────────────────────────────────────
+
+  readonly onLinkChange = (value: string): void => {
+    this.editorService.setLink(value)
+  }
+
+  readonly onBorderColorChange = (value: string): void => {
+    this.editorService.setBorderColor(value)
+    this.imageEditor.setBorderColor(value)
+  }
+
+  // ── save / cancel ──────────────────────────────────────────────
 
   readonly save = (): void => {
     this.editorDrone?.saveAndComplete?.()
@@ -104,7 +178,9 @@ export class TileEditorComponent implements OnInit, OnDestroy {
     this.editorDrone?.cancelEditing?.()
   }
 
-  private readonly onKeyDown = (e: KeyboardEvent): void => {
+  // ── keyboard ───────────────────────────────────────────────────
+
+  #onKeyDown = (e: KeyboardEvent): void => {
     if (!this.open()) return
     if (e.key === 'Escape') {
       e.preventDefault()
@@ -112,11 +188,18 @@ export class TileEditorComponent implements OnInit, OnDestroy {
     }
   }
 
+  // ── lifecycle ──────────────────────────────────────────────────
+
   ngOnInit(): void {
-    window.addEventListener('keydown', this.onKeyDown)
+    window.addEventListener('keydown', this.#onKeyDown)
+  }
+
+  ngAfterViewInit(): void {
+    // canvas init handled reactively via effect
   }
 
   ngOnDestroy(): void {
-    window.removeEventListener('keydown', this.onKeyDown)
+    window.removeEventListener('keydown', this.#onKeyDown)
+    this.imageEditor?.destroy()
   }
 }

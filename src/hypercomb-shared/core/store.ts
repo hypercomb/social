@@ -19,6 +19,7 @@ export class Store extends EventTarget {
   public static readonly BEES_DIRECTORY = '__bees__'
   public static readonly DEPENDENCIES_DIRECTORY = '__dependencies__'
   public static readonly LAYERS_DIRECTORY = '__layers__'
+  public static readonly RESOURCES_DIRECTORY = '__resources__'
 
   private static readonly CACHE_NAME = 'hypercomb-modules-v2'
 
@@ -27,6 +28,7 @@ export class Store extends EventTarget {
   public bees!: FileSystemDirectoryHandle
   public dependencies!: FileSystemDirectoryHandle
   public layers!: FileSystemDirectoryHandle
+  public resources!: FileSystemDirectoryHandle
 
   // -------------------------------------------------
   // current folder (within hypercomb root)
@@ -94,6 +96,9 @@ export class Store extends EventTarget {
 
     this.layers =
       await this.opfsRoot.getDirectoryHandle(Store.LAYERS_DIRECTORY, { create: true })
+
+    this.resources =
+      await this.opfsRoot.getDirectoryHandle(Store.RESOURCES_DIRECTORY, { create: true })
 
     // default current is the hypercomb root
     this.resetCurrent()
@@ -205,7 +210,33 @@ export class Store extends EventTarget {
   }
 
   // -------------------------------------------------
-  // resource put
+  // content-addressed resource storage (__resources__)
+  // -------------------------------------------------
+
+  public putResource = async (blob: Blob): Promise<string> => {
+    const bytes = await blob.arrayBuffer()
+    const signature = await SignatureService.sign(bytes)
+    const handle = await this.resources.getFileHandle(signature, { create: true })
+    const writable = await handle.createWritable()
+    try {
+      await writable.write(blob)
+    } finally {
+      await writable.close()
+    }
+    return signature
+  }
+
+  public getResource = async (signature: string): Promise<Blob | null> => {
+    try {
+      const handle = await this.resources.getFileHandle(signature)
+      return await handle.getFile()
+    } catch {
+      return null
+    }
+  }
+
+  // -------------------------------------------------
+  // drone put
   // -------------------------------------------------
 
   public put = async (bytes: ArrayBuffer): Promise<string> => {

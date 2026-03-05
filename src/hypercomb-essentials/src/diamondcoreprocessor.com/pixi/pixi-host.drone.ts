@@ -20,7 +20,16 @@ export class PixiHostWorker extends Worker {
   public container!: Container
 
   protected override deps = { settings: '@diamondcoreprocessor.com/Settings', axial: '@diamondcoreprocessor.com/AxialService' }
+  protected override listens = ['editor:mode']
   protected override emits = ['render:host-ready']
+
+  constructor() {
+    super()
+    this.onEffect<{ active: boolean }>('editor:mode', ({ active }) => {
+      if (!this.host) return
+      this.host.style.visibility = active ? 'hidden' : 'visible'
+    })
+  }
 
   protected override heartbeat = async (): Promise<void> => {
     if (this.app) return

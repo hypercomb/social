@@ -3,59 +3,70 @@
 
   <div class="editor-panel" role="dialog" aria-label="tile editor">
     <header class="editor-header">
+      <span class="hci header-icon">#</span>
       <h3>{{ seed() }}</h3>
-      <button class="editor-close" type="button" (click)="cancel()">&times;</button>
+      <button class="editor-close" type="button" (click)="cancel()">
+        <span class="hci">Q</span>
+      </button>
     </header>
 
     <div class="editor-body">
-      <div class="property-list">
-        @for (entry of entries(); track entry[0]) {
-          <div class="property-row">
-            <span class="property-key">{{ entry[0] }}</span>
+      <!-- image editor area -->
+      <div class="image-section">
+        <div
+          class="image-canvas"
+          #imageCanvas
+          (dragover)="onDragOver($event)"
+          (drop)="onImageDrop($event)"
+        >
+          @if (!hasImage()) {
+            <div class="image-placeholder">
+              <span class="hci placeholder-icon">U</span>
+              <span>Drop image here</span>
+            </div>
+          }
+          <div class="hex-frame"></div>
+        </div>
 
-            @if (inputType(entry[1]) === 'checkbox') {
-              <input
-                type="checkbox"
-                [checked]="entry[1]"
-                (change)="onCheckboxChange(entry[0], $any($event.target).checked)"
-              />
-            } @else {
-              <input
-                class="property-input"
-                [type]="inputType(entry[1])"
-                [value]="displayValue(entry[1])"
-                (change)="onPropertyChange(entry[0], $any($event.target).value, entry[1])"
-                [class.signature]="isSignature(entry[1])"
-              />
-            }
-
-            <button class="remove-btn" type="button" (click)="onRemoveProperty(entry[0])">
-              &minus;
-            </button>
-          </div>
-        }
-
-        @if (entries().length === 0) {
-          <p class="empty-hint">No properties yet</p>
-        }
+        <div class="image-controls">
+          <button type="button" class="upload-btn" (click)="fileInput.click()">
+            <span class="hci">U</span> Upload
+          </button>
+          <input #fileInput type="file" accept="image/*" hidden (change)="onFileSelect($event)" />
+        </div>
       </div>
 
-      <div class="add-row">
-        <input
-          class="add-key"
-          type="text"
-          placeholder="key"
-          [(ngModel)]="newKey"
-          (keydown.enter)="onAddProperty()"
-        />
-        <input
-          class="add-value"
-          type="text"
-          placeholder="value"
-          [(ngModel)]="newValue"
-          (keydown.enter)="onAddProperty()"
-        />
-        <button class="add-btn" type="button" (click)="onAddProperty()">+</button>
+      <!-- property fields -->
+      <div class="fields">
+        <label class="field-row">
+          <span class="field-label"><span class="hci">*</span> Link</span>
+          <input
+            class="field-input"
+            type="text"
+            placeholder="https://..."
+            [ngModel]="linkValue"
+            (ngModelChange)="linkValue = $event; onLinkChange($event)"
+          />
+        </label>
+
+        <label class="field-row">
+          <span class="field-label"><span class="hci">s</span> Border</span>
+          <div class="color-field">
+            <input
+              class="field-input color-text"
+              type="text"
+              placeholder="#000000"
+              [ngModel]="borderColorValue"
+              (ngModelChange)="borderColorValue = $event; onBorderColorChange($event)"
+            />
+            <input
+              class="color-picker"
+              type="color"
+              [ngModel]="borderColorValue || '#000000'"
+              (ngModelChange)="borderColorValue = $event; onBorderColorChange($event)"
+            />
+          </div>
+        </label>
       </div>
     </div>
 
