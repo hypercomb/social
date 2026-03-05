@@ -3,7 +3,7 @@
 // Manages OPFS I/O for 0000 properties file and resource storage.
 // NOT a Drone subclass — follows the HistoryRecorder pattern.
 
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, get } from '@hypercomb/core'
 import { PROPERTIES_FILE } from './tile-properties.js'
 import type { TileEditorService } from './tile-editor.service.js'
 import type { ImageEditorService } from './image-editor.service.js'
