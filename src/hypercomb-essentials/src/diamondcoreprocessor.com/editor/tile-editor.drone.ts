@@ -3,7 +3,7 @@
 // Manages OPFS I/O for 0000 properties file and resource storage.
 // NOT a Drone subclass — follows the HistoryRecorder pattern.
 
-import { EffectBus, get } from '@hypercomb/core'
+import { EffectBus } from '@hypercomb/core'
 import { PROPERTIES_FILE } from './tile-properties.js'
 import type { TileEditorService } from './tile-editor.service.js'
 import type { ImageEditorService } from './image-editor.service.js'
@@ -44,8 +44,8 @@ export class TileEditorDrone {
   // ── open editor ────────────────────────────────────────────────
 
   async #openEditing(seed: string): Promise<void> {
-    const store = get<Store>('@hypercomb.social/Store')
-    const service = get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
+    const store = window.ioc.get<Store>('@hypercomb.social/Store')
+    const service = window.ioc.get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
     if (!store || !service) return
 
     // 1. resolve seed directory
@@ -83,10 +83,10 @@ export class TileEditorDrone {
   // ── save (called by Angular component) ─────────────────────────
 
   readonly saveAndComplete = async (): Promise<void> => {
-    const store = get<Store>('@hypercomb.social/Store')
-    const service = get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
-    const imageEditor = get<ImageEditorService>('@diamondcoreprocessor.com/ImageEditorService')
-    const settings = get<Settings>('@diamondcoreprocessor.com/Settings')
+    const store = window.ioc.get<Store>('@hypercomb.social/Store')
+    const service = window.ioc.get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
+    const imageEditor = window.ioc.get<ImageEditorService>('@diamondcoreprocessor.com/ImageEditorService')
+    const settings = window.ioc.get<Settings>('@diamondcoreprocessor.com/Settings')
 
     if (!store || !service || !imageEditor || !settings) return
     if (service.mode !== 'editing') return
@@ -138,8 +138,8 @@ export class TileEditorDrone {
   // ── cancel ─────────────────────────────────────────────────────
 
   readonly cancelEditing = (): void => {
-    const imageEditor = get<ImageEditorService>('@diamondcoreprocessor.com/ImageEditorService')
-    const service = get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
+    const imageEditor = window.ioc.get<ImageEditorService>('@diamondcoreprocessor.com/ImageEditorService')
+    const service = window.ioc.get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
     imageEditor?.destroy()
     service?.close()
   }
