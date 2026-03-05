@@ -5,7 +5,12 @@
 import { Store, LayerInstaller } from '@hypercomb/shared/core'
 import { LocationParser } from '@hypercomb/shared/core/initializers/location-parser'
 
-const CONTENT_BASE_URL = 'https://storagehypercomb.blob.core.windows.net/content'
+const AZURE_CONTENT_URL = 'https://storagehypercomb.blob.core.windows.net/content'
+const isLocalDev = typeof window !== 'undefined'
+  && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+const CONTENT_BASE_URL = isLocalDev
+  ? `${window.location.origin}/content`
+  : AZURE_CONTENT_URL
 const FALLBACK_SIGNATURE = '6a09457f907419eb03493cda1d8e43d24a76e8f72acbcdbebd894b4bed5d0c08'
 const SIGNATURE_REGEX = /^[a-f0-9]{64}$/i
 const INSTALLED_KEY = 'core-adapter.installed-signature'

@@ -382,15 +382,22 @@ const main = async (): Promise<void> => {
   }
   writeFileSync(join(rootDir, INSTALL_MANIFEST_FILE), JSON.stringify(installManifest) + '\n', 'utf8')
 
-  // deploy
-  const ps1 = resolve(__dirname, 'deploy-azure.ps1')
-  if (existsSync(ps1)) {
-    const r = spawnSync(
-      'powershell',
-      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1, '-Signature', rootLayerSig],
-      { stdio: 'inherit' }
-    )
-    if (r.status !== 0) throw new Error('deployment failed')
+  // deploy (skip with --local flag)
+  const skipDeploy = process.argv.includes('--local')
+  if (skipDeploy) {
+    console.log(`[build-module] --local: skipping Azure deploy`)
+    console.log(`[build-module] root signature: ${rootLayerSig}`)
+    console.log(`[build-module] output: ${rootDir}`)
+  } else {
+    const ps1 = resolve(__dirname, 'deploy-azure.ps1')
+    if (existsSync(ps1)) {
+      const r = spawnSync(
+        'powershell',
+        ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1, '-Signature', rootLayerSig],
+        { stdio: 'inherit' }
+      )
+      if (r.status !== 0) throw new Error('deployment failed')
+    }
   }
 }
 
