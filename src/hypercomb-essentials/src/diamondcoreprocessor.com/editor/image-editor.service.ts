@@ -48,6 +48,11 @@ export class ImageEditorService extends EventTarget {
     })
 
     this.#app.stage.eventMode = 'static'
+    // force canvas to fill its container (Angular view encapsulation
+    // prevents the SCSS canvas rule from reaching this dynamic element)
+    this.#app.canvas.style.display = 'block'
+    this.#app.canvas.style.width = '100%'
+    this.#app.canvas.style.height = '100%'
     this.#app.canvas.style.cursor = 'auto'
     hostElement.appendChild(this.#app.canvas)
 
@@ -205,64 +210,65 @@ export class ImageEditorService extends EventTarget {
     const w = this.#hexWidth
     const h = this.#hexHeight
 
-    // Map source SVG path bounds to canvas via uniform scale-to-height.
-    // Source bounds: x[27.090419..103.57464] y[122.41302..213.95472]
+    // 346×400 hex frame path — uniform scale at 95%, centered.
+    // Source bounds: x[27.090419..118.63625] y[122.41302..228.24639]
     const srcMinX = 27.090419, srcMinY = 122.41302
-    const srcW = 76.484221, srcH = 91.5417
-    const s = h / srcH
+    const srcW = 91.545831, srcH = 105.83337
+    const s = (h / srcH) * 0.95
     const ox = (w - srcW * s) / 2
+    const oy = (h - srcH * s) / 2
     const tx = (x: number) => (x - srcMinX) * s + ox
-    const ty = (y: number) => (y - srcMinY) * s
+    const ty = (y: number) => (y - srcMinY) * s + oy
 
     // Top segment: E5 + E0 (vertex notch at top)
     g.poly([
-      tx(64.927386), ty(122.41302),
-      tx(64.928936), ty(122.54893),
-      tx(27.090419), ty(144.79047),
-      tx(32.63375),  ty(147.95978),
-      tx(65.044691), ty(128.82193),
-      tx(97.997719), ty(147.65902),
-      tx(103.52451), ty(144.45509),
-      tx(65.158896), ty(122.54531),
-      tx(65.160447), ty(122.41302),
-      tx(65.045725), ty(122.48072),
-      tx(64.927386), ty(122.41302),
+      tx(72.37841),  ty(122.41302),
+      tx(72.38031),  ty(122.57015),
+      tx(27.090464), ty(148.28408),
+      tx(33.725412), ty(151.94819),
+      tx(72.51886),  ty(129.8225),
+      tx(111.96115), ty(151.60047),
+      tx(118.5763),  ty(147.89634),
+      tx(72.655554), ty(122.56596),
+      tx(72.657454), ty(122.41302),
+      tx(72.52014),  ty(122.49132),
+      tx(72.37841),  ty(122.41302),
     ])
     g.fill({ color: c })
 
     // Right segment: E1
     g.poly([
-      tx(103.57464),  ty(146.06222),
-      tx(98.108823),  ty(149.37055),
-      tx(98.108823),  ty(187.00908),
-      tx(103.57464),  ty(190.2218),
-      tx(103.57464),  ty(146.06222),
+      tx(118.63625), ty(149.75438),
+      tx(112.09408), ty(153.57921),
+      tx(112.09408), ty(197.09393),
+      tx(118.63625), ty(200.80823),
+      tx(118.63625), ty(149.75438),
     ])
     g.fill({ color: c })
 
     // Left segment: E4
     g.poly([
-      tx(27.090419),  ty(146.14594),
-      tx(27.090419),  ty(190.30552),
-      tx(32.632716),  ty(186.94448),
-      tx(32.556235),  ty(149.35815),
-      tx(27.090419),  ty(146.14594),
+      tx(27.090419), ty(149.85118),
+      tx(27.090419), ty(200.905),
+      tx(33.72413),  ty(197.01923),
+      tx(33.63259),  ty(153.56485),
+      tx(27.090419), ty(149.85118),
     ])
     g.fill({ color: c })
 
     // Bottom segment: E2 + E3 (vertex notch at bottom)
     g.poly([
-      tx(98.137245),  ty(188.37385),
-      tx(65.641037),  ty(207.53392),
-      tx(32.6353),    ty(188.63792),
-      tx(27.176202),  ty(191.90955),
-      tx(65.506162),  ty(213.82243),
-      tx(65.504612),  ty(213.95472),
-      tx(65.619333),  ty(213.88702),
-      tx(65.737672),  ty(213.95472),
-      tx(65.736639),  ty(213.81829),
-      tx(103.57464),  ty(191.57727),
-      tx(98.137245),  ty(188.37385),
+      tx(112.1281),  ty(198.67179),
+      tx(73.232596), ty(220.82317),
+      tx(33.727223), ty(198.97709),
+      tx(27.193095), ty(202.75949),
+      tx(73.071161), ty(228.09345),
+      tx(73.069261), ty(228.24639),
+      tx(73.206574), ty(228.16809),
+      tx(73.348217), ty(228.24639),
+      tx(73.347017), ty(228.08866),
+      tx(118.63624), ty(202.37534),
+      tx(112.1281),  ty(198.67179),
     ])
     g.fill({ color: c })
   }

@@ -107,10 +107,9 @@
 
 .image-canvas {
   position: relative;
-  width: 100%;
+  height: min(40vh, 400px);
   aspect-ratio: 346 / 400;
-  max-height: 40vh;
-  max-width: 346px;
+  max-width: 100%;
   background: #0d0d10;
   border: 1px solid #2a2a2e;
   border-radius: 6px;
