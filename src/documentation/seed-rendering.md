@@ -6,14 +6,14 @@ How seeds become tiles on the honeycomb grid, and how marker files, the zero-sig
 
 ## Seeds
 
-A **seed** is a folder in the OPFS content tree. Its name is its label. Seeds are discovered by iterating the entries of the current explorer directory and collecting all subdirectories that are not reserved (`__drones__`, `__layers__`, `__dependencies__`, `__history__`, or any `__*__` folder).
+A **seed** is a folder in the OPFS content tree. Its name is its label. Seeds are discovered by iterating the entries of the current explorer directory and collecting all subdirectories that are not reserved (`__bees__`, `__layers__`, `__dependencies__`, `__history__`, or any `__*__` folder).
 
 ```
 opfs://hypercomb.io/
   ├── Alice/          ← seed
   ├── Bob/            ← seed
   ├── Photos/         ← seed
-  ├── __drones__/     ← reserved (not a seed)
+  ├── __bees__/     ← reserved (not a seed)
   └── __layers__/     ← reserved (not a seed)
 ```
 
@@ -46,7 +46,7 @@ for (const droneSig of layer.drones) {
 The filename is the SHA-256 hash of the compiled drone module's bytes. The actual executable code lives at:
 
 ```
-opfs://__drones__/{same-signature}.js
+opfs://__bees__/{same-signature}.js
 ```
 
 When the system encounters a seed, it can scan for marker files and resolve them to runnable drone scripts. The marker file itself is empty — its entire purpose is the name.
@@ -90,8 +90,8 @@ This provides a single place to **collapse many properties** that would otherwis
 ```
 opfs://hypercomb.io/Alice/
   ├── 0000000000000000000000000000000000000000000000000000000000000000   ← properties (JSON)
-  ├── a3f8...c9d1     ← marker file → __drones__/a3f8...c9d1.js
-  └── 7b02...e4f6     ← marker file → __drones__/7b02...e4f6.js
+  ├── a3f8...c9d1     ← marker file → __bees__/a3f8...c9d1.js
+  └── 7b02...e4f6     ← marker file → __bees__/7b02...e4f6.js
 ```
 
 ---
@@ -204,7 +204,7 @@ For `ShowHoneycombDrone`, heartbeat:
 2. Refreshes mesh seeds from nostr relays
 3. Queues a render pass
 
-Marker files in seed folders reference drone scripts that can be loaded and encountered in the same lifecycle. The marker's signature resolves to `__drones__/{sig}.js`, which self-registers in IoC and responds to future encounters.
+Marker files in seed folders reference drone scripts that can be loaded and encountered in the same lifecycle. The marker's signature resolves to `__bees__/{sig}.js`, which self-registers in IoC and responds to future encounters.
 
 ---
 
@@ -216,6 +216,6 @@ Marker files in seed folders reference drone scripts that can be loaded and enco
 | **Marker file** | Empty file, name is a drone signature | Inside seed folder |
 | **Zero-sig file** | JSON properties, name is 64 zeros | Inside seed folder (first file created) |
 | **Resource** | JSON data addressed by signature | `__resources__/{sig}` |
-| **Drone module** | Compiled JS addressed by signature | `__drones__/{sig}.js` |
+| **Drone module** | Compiled JS addressed by signature | `__bees__/{sig}.js` |
 
 The zero-signature properties file is the seed's identity card. Marker files point to its behaviors. Resource resolution composes referenced signatures into a rich runtime object. Together they enable a fully modular, signature-verified, content-addressed system where every piece can be independently shared, verified, and composed.

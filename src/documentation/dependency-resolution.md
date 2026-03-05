@@ -81,7 +81,7 @@ at runtime.
    dist/<rootSignature>/
      install.manifest.json
      __layers__/<sig>.json
-     __drones__/<sig>.js
+     __bees__/<sig>.js
      __dependencies__/<sig>.js
    ```
 
@@ -94,7 +94,7 @@ at runtime.
   - `pixi.js` -> `/vendor/pixi.runtime.js` (vendored)
   - `@diamondcoreprocessor.com/core` -> `/opfs/__dependencies__/<sig>.js`
     (served by service worker from OPFS)
-  - Drones loaded via dynamic `import()` of `/opfs/__drones__/<sig>.js`
+  - Drones loaded via dynamic `import()` of `/opfs/__bees__/<sig>.js`
 
 **Constraints:**
 - May only import from `@hypercomb/core` or sibling namespaces within
@@ -176,7 +176,7 @@ dynamically load essentials at runtime.
 | `@hypercomb/shared/*` | tsconfig paths + include | Source files compiled inline |
 | `@angular/*` | npm `node_modules` | `hypercomb-web/node_modules/@angular/*` |
 | Shared services | `window.ioc.get()` or Angular DI bridge | Singleton from IoC container |
-| Drones | Dynamic `import('/opfs/__drones__/<sig>.js')` | Service worker serves from OPFS |
+| Drones | Dynamic `import('/opfs/__bees__/<sig>.js')` | Service worker serves from OPFS |
 | Dependencies | Import map specifier | Service worker serves from OPFS |
 
 **npm dependencies:**
@@ -223,7 +223,7 @@ dependency file in OPFS (e.g. `// @diamondcoreprocessor.com/core`).
 The service worker (`hypercomb.worker.js`) intercepts fetch requests matching
 `/opfs/**` and serves them from OPFS:
 
-- `/opfs/__drones__/<sig>.js` -> OPFS `__drones__/<sig>.js`
+- `/opfs/__bees__/<sig>.js` -> OPFS `__bees__/<sig>.js`
 - `/opfs/__dependencies__/<sig>.js` -> OPFS `__dependencies__/<sig>.js`
 - `/opfs/__layers__/<sig>.json` -> OPFS `__layers__/<sig>.json`
 

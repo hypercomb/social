@@ -47,9 +47,6 @@ export class CoreAdapter {
     await logger.log()
 
     const store = get('@hypercomb.social/Store') as Store
-
-    // Store is already initialized in ensure-install (pre-boot)
-    // but re-init is safe (idempotent)
     await store.initialize()
 
     // Install was already performed in ensure-install (before import map).

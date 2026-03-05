@@ -169,7 +169,7 @@ opfs root
   hypercomb.io/          <-- domain root (hypercomb root)
     seed-a/              <-- a seed directory (becomes a hex cell)
     seed-b/
-    __drones__/          <-- installed drone bytecode (by signature)
+    __bees__/          <-- installed drone bytecode (by signature)
     __dependencies__/    <-- resolved dependency modules
     __layers__/          <-- layer installation state
 ```

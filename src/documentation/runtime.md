@@ -133,7 +133,7 @@ each segment maps to a `FileSystemDirectoryHandle`. `tryResolve()` reads without
 ```
 opfs root
   └── hypercomb.io/
-        ├── __drones__/
+        ├── __bees__/
         ├── __dependencies__/
         └── __layers__/
 ```

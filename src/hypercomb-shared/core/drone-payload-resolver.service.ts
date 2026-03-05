@@ -61,7 +61,7 @@
 
 //   private fetchFromWorker = async (signature: string): Promise<ArrayBuffer | null> => {
 //     try {
-//       const res = await fetch(`/opfs/__drones__/${signature}`)
+//       const res = await fetch(`/opfs/__bees__/${signature}`)
 //       if (!res.ok) return null
 //       return await res.arrayBuffer()
 //     } catch {
