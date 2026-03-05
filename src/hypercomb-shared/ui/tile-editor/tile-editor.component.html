@@ -1,0 +1,67 @@
+@if (open()) {
+  <div class="editor-backdrop" (click)="cancel()"></div>
+
+  <div class="editor-panel" role="dialog" aria-label="tile editor">
+    <header class="editor-header">
+      <h3>{{ seed() }}</h3>
+      <button class="editor-close" type="button" (click)="cancel()">&times;</button>
+    </header>
+
+    <div class="editor-body">
+      <div class="property-list">
+        @for (entry of entries(); track entry[0]) {
+          <div class="property-row">
+            <span class="property-key">{{ entry[0] }}</span>
+
+            @if (inputType(entry[1]) === 'checkbox') {
+              <input
+                type="checkbox"
+                [checked]="entry[1]"
+                (change)="onCheckboxChange(entry[0], $any($event.target).checked)"
+              />
+            } @else {
+              <input
+                class="property-input"
+                [type]="inputType(entry[1])"
+                [value]="displayValue(entry[1])"
+                (change)="onPropertyChange(entry[0], $any($event.target).value, entry[1])"
+                [class.signature]="isSignature(entry[1])"
+              />
+            }
+
+            <button class="remove-btn" type="button" (click)="onRemoveProperty(entry[0])">
+              &minus;
+            </button>
+          </div>
+        }
+
+        @if (entries().length === 0) {
+          <p class="empty-hint">No properties yet</p>
+        }
+      </div>
+
+      <div class="add-row">
+        <input
+          class="add-key"
+          type="text"
+          placeholder="key"
+          [(ngModel)]="newKey"
+          (keydown.enter)="onAddProperty()"
+        />
+        <input
+          class="add-value"
+          type="text"
+          placeholder="value"
+          [(ngModel)]="newValue"
+          (keydown.enter)="onAddProperty()"
+        />
+        <button class="add-btn" type="button" (click)="onAddProperty()">+</button>
+      </div>
+    </div>
+
+    <footer class="editor-footer">
+      <button type="button" (click)="cancel()">Cancel</button>
+      <button type="button" class="primary" (click)="save()">Save</button>
+    </footer>
+  </div>
+}
