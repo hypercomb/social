@@ -68,7 +68,6 @@ export class TileOverlayDrone extends Drone {
   #cellCount = 0
   #cellLabels: string[] = []
 
-  #initialized = false
   #listening = false
   #hoverLog = 0
 
@@ -80,12 +79,6 @@ export class TileOverlayDrone extends Drone {
   }
   protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count']
   protected override emits = ['tile:hover', 'tile:action']
-
-  protected override sense = (): boolean => {
-    const prev = this.#initialized
-    this.#initialized = true
-    return !prev
-  }
 
   protected override heartbeat = async (): Promise<void> => {
     this.onEffect<HostReadyPayload>('render:host-ready', (payload) => {

@@ -1,7 +1,7 @@
 // hypercomb-essentials/src/diamondcoreprocessor.com/pixi/pixi-host.drone.ts
 // @hypercomb/pixi
 
-import { Drone } from '@hypercomb/core'
+import { Worker } from '@hypercomb/core'
 import { Application, Container } from 'pixi.js'
 
 export type HostReadyPayload = {
@@ -11,7 +11,7 @@ export type HostReadyPayload = {
   renderer: Application['renderer']
 }
 
-export class PixiHostDrone extends Drone {
+export class PixiHostWorker extends Worker {
   readonly namespace = 'diamondcoreprocessor.com'
   public app: Application | null = null
   public host: HTMLDivElement | null = null
@@ -95,5 +95,5 @@ export class PixiHostDrone extends Drone {
   }
 }
 
-const _pixiHost = new PixiHostDrone()
-window.ioc.register('@diamondcoreprocessor.com/PixiHostDrone', _pixiHost)
+const _pixiHost = new PixiHostWorker()
+window.ioc.register('@diamondcoreprocessor.com/PixiHostWorker', _pixiHost)

@@ -4,7 +4,7 @@ import { Injectable } from '@angular/core'
 import { type LocationParseResult } from '@hypercomb/shared/core/initializers/location-parser'
 import { Store } from '@hypercomb/shared/core'
 
-export type LayerFile = { signature: string; name?: string; layers?: string[]; drones?: string[]; dependencies?: string[] }
+export type LayerFile = { signature: string; name?: string; layers?: string[]; bees?: string[]; dependencies?: string[] }
 
 @Injectable({ providedIn: 'root' })
 export class LayerService {

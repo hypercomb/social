@@ -1,6 +1,6 @@
-import { Drone } from "@hypercomb/core"
+import { Worker } from "@hypercomb/core"
 
-export class HelloWorldDrone extends Drone {
+export class HelloWorldWorker extends Worker {
   readonly namespace = 'diamondcoreprocessor.com'
 
   public override description =

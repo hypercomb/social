@@ -2,7 +2,7 @@
 import { CommonModule } from '@angular/common'
 import { Component, computed, inject, signal } from '@angular/core'
 import { ActivatedRoute } from '@angular/router'
-import { SignatureService, type DronePayloadV1, type Effect } from '@hypercomb/core'
+import { SignatureService, type BeePayloadV1, type Effect } from '@hypercomb/core'
 import { CodeViewerComponent } from '../code-viewer/code-viewer.component'
 import { DraftPayloadCacheService } from '../core/draft-payload-cache.service'
 import { compilePayload } from '../core/compile-payload'
@@ -20,17 +20,17 @@ export class IntentInspectorProComponent {
   // canonical payload (single source)
   // ----------------------------------
 
-  protected readonly draft = signal<DronePayloadV1 | null>(null)
+  protected readonly draft = signal<BeePayloadV1 | null>(null)
   protected readonly canonicalJson = signal<string>('')
 
   // ----------------------------------
   // derived display state
   // ----------------------------------
 
-  protected readonly action = computed(() => this.draft()?.drone ?? null)
+  protected readonly action = computed(() => this.draft()?.bee ?? null)
 
   protected readonly name = computed((): string =>
-    this.action()?.name ?? 'Untitled Drone'
+    this.action()?.name ?? 'Untitled Bee'
   )
 
   protected readonly effects = computed((): Effect[] => {
@@ -91,7 +91,7 @@ export class IntentInspectorProComponent {
 
       const cached = this.cache.get(signature)
       if (cached) {
-        const parsed = JSON.parse(cached) as DronePayloadV1
+        const parsed = JSON.parse(cached) as BeePayloadV1
         this.applyLoadedPayload(signature, parsed, cached)
         this.loading.set(false)
         return
@@ -106,7 +106,7 @@ export class IntentInspectorProComponent {
       if (actual !== signature) throw new Error('payload signature mismatch')
 
       const canonicalJson = new TextDecoder().decode(bytes).trim()
-      const parsed = JSON.parse(canonicalJson) as DronePayloadV1
+      const parsed = JSON.parse(canonicalJson) as BeePayloadV1
 
       this.cache.set(signature, canonicalJson)
       this.applyLoadedPayload(signature, parsed, canonicalJson)
@@ -119,7 +119,7 @@ export class IntentInspectorProComponent {
 
   private applyLoadedPayload = (
     signature: string,
-    payload: DronePayloadV1,
+    payload: BeePayloadV1,
     canonicalJson: string
   ): void => {
     this.signature.set(signature)
@@ -174,7 +174,7 @@ export class IntentInspectorProComponent {
     this.loading.set(false)
   }
 
-  private getEffects = (action: DronePayloadV1['drone']): Effect[] => {
+  private getEffects = (action: BeePayloadV1['bee']): Effect[] => {
     const a: any = action as any
     const effects = (a?.effects ?? a?.effect ?? []) as Effect[]
     return Array.isArray(effects) ? effects : []

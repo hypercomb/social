@@ -1,7 +1,7 @@
-import { Drone } from "../drone.base.js"
+import { Bee } from "../bee.base.js"
 
 export interface Honeycomb {
     name: string
-    drones: Drone[]
+    bees: Bee[]
     layers: string[]
 }

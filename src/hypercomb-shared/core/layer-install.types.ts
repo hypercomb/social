@@ -4,7 +4,7 @@ export type LayerInstallFile = {
   signature: string
   name?: string
   children?: string[]
-  drones?: string[]
+  bees?: string[]
 }
 
 export type LayerInstallContext = {

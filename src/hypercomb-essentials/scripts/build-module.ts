@@ -68,8 +68,8 @@ const isSource = (f: string): boolean =>
 const isKeysFile = (f: string): boolean =>
   f.endsWith('.keys.ts') || f.endsWith('.keys.js') || f.endsWith('-keys.ts') || f.endsWith('-keys.js')
 
-const isDrone = (f: string): boolean =>
-  f.endsWith('.drone.ts') || f.endsWith('.drone.js')
+const isBee = (f: string): boolean =>
+  f.endsWith('.drone.ts') || f.endsWith('.drone.js') || f.endsWith('.worker.ts') || f.endsWith('.worker.js')
 
 const isEntry = (f: string): boolean =>
   f.endsWith('.entry.ts') || f.endsWith('.entry.js')
@@ -130,14 +130,14 @@ const prefixesForNamespaceRelDir = (nsRelDir: string): string[] => {
 }
 
 const addToBucket = (
-  map: Map<string, { drones: string[]; deps: string[] }>,
+  map: Map<string, { bees: string[]; deps: string[] }>,
   relDir: string,
   fileName: string,
-  kind: 'dep' | 'drone'
+  kind: 'dep' | 'bee'
 ): void => {
-  const bucket = map.get(relDir) ?? { drones: [], deps: [] }
+  const bucket = map.get(relDir) ?? { bees: [], deps: [] }
   if (kind === 'dep') bucket.deps.push(fileName)
-  else bucket.drones.push(fileName)
+  else bucket.bees.push(fileName)
   map.set(relDir, bucket)
 }
 
@@ -149,7 +149,7 @@ type SourceFile = {
   entry: string
   relPath: string
   relDir: string
-  kind: 'dependency' | 'drone'
+  kind: 'dependency' | 'bee'
 }
 
 const discoverSources = (): SourceFile[] =>
@@ -168,7 +168,7 @@ const discoverSources = (): SourceFile[] =>
       entry: file,
       relPath: relPosix(SRC_ROOT, file),
       relDir: relPosix(SRC_ROOT, dirname(file)),
-      kind: isDrone(file) ? 'drone' : 'dependency',
+      kind: isBee(file) ? 'bee' : 'dependency',
     }))
 
 // -------------------------------------------------
@@ -199,7 +199,7 @@ const signJson = async (value: unknown) => {
 
 const buildLayersFromTree = async (
   node: DirNode,
-  resourcesByDir: Map<string, { drones: string[]; deps: string[] }>,
+  resourcesByDir: Map<string, { bees: string[]; deps: string[] }>,
   out: Map<string, string>,
   rootDependencies: string[]
 ): Promise<string> => {
@@ -208,13 +208,13 @@ const buildLayersFromTree = async (
     layers.push(await buildLayersFromTree(c, resourcesByDir, out, rootDependencies))
   }
 
-  const entry = resourcesByDir.get(node.rel) ?? { drones: [], deps: [] }
+  const entry = resourcesByDir.get(node.rel) ?? { bees: [], deps: [] }
 
   const layer = {
     version: 1,
     name: node.rel.split('/').pop() || 'root',
     rel: node.rel,
-    drones: uniqSorted(entry.drones),
+    bees: uniqSorted(entry.bees),
     dependencies: node.rel ? [] : rootDependencies,
     layers,
   }
@@ -280,7 +280,7 @@ const buildNamespaceDependency = async (
   return { sig, bytes }
 }
 
-const buildDrone = async (entry: string, externals: string[]): Promise<Uint8Array> => {
+const buildBee = async (entry: string, externals: string[]): Promise<Uint8Array> => {
   const r = await build({
     entryPoints: [entry],
     bundle: true,
@@ -308,7 +308,7 @@ const main = async (): Promise<void> => {
   const sources = discoverSources()
   if (!sources.length) throw new Error('no sources found')
 
-  const resourcesByDir = new Map<string, { drones: string[]; deps: string[] }>()
+  const resourcesByDir = new Map<string, { bees: string[]; deps: string[] }>()
   const dependencyBytes = new Map<string, Uint8Array>()
   const resourceBytes = new Map<string, Uint8Array>()
   const layers = new Map<string, string>()
@@ -346,13 +346,13 @@ const main = async (): Promise<void> => {
   const rootDependencies = uniqSorted(Array.from(dependencyBytes.keys()).map(jsFileName))
   const dependencySigs = Array.from(dependencyBytes.keys()).sort((a, b) => a.localeCompare(b))
 
-  // drones
-  const droneExternals = [...PLATFORM_EXTERNALS, ...allSpecifiers]
-  for (const src of sources.filter(s => s.kind === 'drone')) {
-    const bytes = await buildDrone(src.entry, droneExternals)
+  // bees
+  const beeExternals = [...PLATFORM_EXTERNALS, ...allSpecifiers]
+  for (const src of sources.filter(s => s.kind === 'bee')) {
+    const bytes = await buildBee(src.entry, beeExternals)
     const sig = await SignatureService.sign(toArrayBuffer(bytes))
     resourceBytes.set(sig, bytes)
-    addToBucket(resourcesByDir, src.relDir, jsFileName(sig), 'drone')
+    addToBucket(resourcesByDir, src.relDir, jsFileName(sig), 'bee')
   }
 
   // layers
@@ -361,9 +361,9 @@ const main = async (): Promise<void> => {
 
   // write package
   const rootDir = join(DIST_ROOT, rootLayerSig)
-  const layersDir = join(rootDir, '__layers__')
-  const resDir = join(rootDir, '__drones__')
-  const depDir = join(rootDir, '__dependencies__')
+  const layersDir  = join(rootDir, '__layers__')
+  const resDir     = join(rootDir, '__bees__')
+  const depDir     = join(rootDir, '__dependencies__')
 
   ensureDir(layersDir)
   ensureDir(resDir)
@@ -377,7 +377,7 @@ const main = async (): Promise<void> => {
   const installManifest = {
     version: 1,
     layers: Array.from(layers.keys()).sort((a, b) => a.localeCompare(b)),
-    drones: Array.from(resourceBytes.keys()).sort((a, b) => a.localeCompare(b)),
+    bees: Array.from(resourceBytes.keys()).sort((a, b) => a.localeCompare(b)),
     dependencies: dependencySigs,
   }
   writeFileSync(join(rootDir, INSTALL_MANIFEST_FILE), JSON.stringify(installManifest) + '\n', 'utf8')

@@ -3,7 +3,7 @@
 // that carry a `historyOp` field, and records each operation into the append-only
 // OPFS history bag for the current lineage location.
 //
-// Sits at the processor level alongside ShowHoneycombDrone — history recording is
+// Sits at the processor level alongside ShowHoneycombWorker — history recording is
 // a first-class reaction to the canonical mutation event, not a parallel channel.
 
 import type { HistoryService, HistoryOpType } from './history.service.js'

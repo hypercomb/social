@@ -1,21 +1,16 @@
 import { Bee, BeeState } from './bee.base.js'
 
 // -------------------------------------------------
-// drone — bootstrap-once bee, heartbeats once then goes dormant
+// worker — reactive bee, heartbeats every pulse
 // -------------------------------------------------
 
-export abstract class Drone extends Bee {
+export abstract class Worker extends Bee {
 
-  #bootstrapped = false
-  public get bootstrapped(): boolean { return this.#bootstrapped }
-
-  /** Drones pulse once — heartbeat runs on first successful pulse, then goes dormant */
+  /** Workers pulse every time — heartbeat runs on each act() cycle */
   public async pulse(grammar: string): Promise<void> {
     if (this._state === BeeState.Disposed) return
-    if (this.#bootstrapped) return
     if (!(await this.sensed(grammar))) return
     await this.heartbeat(grammar)
-    this.#bootstrapped = true
     if (this._state === BeeState.Created || this._state === BeeState.Registered) {
       this._state = BeeState.Active
     }

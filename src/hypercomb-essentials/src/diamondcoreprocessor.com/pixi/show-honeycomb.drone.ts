@@ -4,7 +4,7 @@
 // - union keeps filesystem seeds as your own local truth, mesh adds shared seeds
 // - redraw stays event-driven via synchronize, but heartbeat also triggers synchronize
 
-import { Drone, SignatureService } from '@hypercomb/core'
+import { Worker, SignatureService } from '@hypercomb/core'
 import { Application, Assets, Container, Geometry, Mesh, Texture } from 'pixi.js'
 import type { HostReadyPayload } from './pixi-host.drone.js'
 import { HexLabelAtlas } from './hex-label.atlas.js'
@@ -24,7 +24,7 @@ type MeshApi = {
   subscribe?: (sig: string, cb: (e: MeshEvt) => void) => MeshSub
 }
 
-export class ShowHoneycombDrone extends Drone {
+export class ShowHoneycombWorker extends Worker {
   readonly namespace = 'diamondcoreprocessor.com'
   // pixi resources (populated via render:host-ready effect)
   private pixiApp: Application | null = null
@@ -275,7 +275,7 @@ export class ShowHoneycombDrone extends Drone {
   // note: data queries (getNonExpired, subscribe) still use the direct API
   // coordination (ensureStartedForSig, publish) also emits effects for observability
   private tryGetMesh = (): MeshApi | null => {
-    return get<MeshApi>('@diamondcoreprocessor.com/NostrMeshDrone') ?? null
+    return get<MeshApi>('@diamondcoreprocessor.com/NostrMeshWorker') ?? null
   }
 
 
@@ -698,7 +698,7 @@ export class ShowHoneycombDrone extends Drone {
       if (!name) continue
 
       if (name === '__dependencies__') continue
-      if (name === '__drones__') continue
+      if (name === '__bees__') continue
       if (name === '__layers__') continue
       if (name === '__location__') continue
       if (name.startsWith('__') && name.endsWith('__')) continue
@@ -783,5 +783,5 @@ export class ShowHoneycombDrone extends Drone {
   }
 }
 
-const _showHoneycomb = new ShowHoneycombDrone()
-window.ioc.register('@diamondcoreprocessor.com/ShowHoneycombDrone', _showHoneycomb)
+const _showHoneycomb = new ShowHoneycombWorker()
+window.ioc.register('@diamondcoreprocessor.com/ShowHoneycombWorker', _showHoneycomb)

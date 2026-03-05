@@ -1,6 +1,6 @@
 import { provideBrowserGlobalErrorListeners, provideAppInitializer, provideZoneChangeDetection, type ApplicationConfig } from '@angular/core';
 
-import { DRONE_RESOLVER_KEY } from '@hypercomb/core';
+import { BEE_RESOLVER_KEY } from '@hypercomb/core';
 import { provideRouter } from '@angular/router';
 import { routes } from './app/app.routes';
 
@@ -13,7 +13,7 @@ export const appConfig: ApplicationConfig = {
     provideZoneChangeDetection({ eventCoalescing: true }),
     provideAppInitializer(() => {
       const preloader = get('@hypercomb.social/ScriptPreloader')
-      register(DRONE_RESOLVER_KEY, preloader)
+      register(BEE_RESOLVER_KEY, preloader)
     }),
     provideRouter(routes),
   ]

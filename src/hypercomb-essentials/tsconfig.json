@@ -27,7 +27,8 @@
 
     // misc
     "resolveJsonModule": true,
-    "esModuleInterop": false
+    "esModuleInterop": false,
+
   },
 
   // 🚫 IMPORTANT: do NOT compile shared here

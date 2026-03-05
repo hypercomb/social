@@ -3,13 +3,13 @@ import { RouterOutlet } from '@angular/router';
 import { SearchBarComponent } from '@hypercomb/shared';
 import { AxialService } from '@hypercomb/essentials/diamondcoreprocessor.com/core/axial/axial-service';
 import { PanningDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/pan/panning.drone';
-import { PixiHostDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/pixi-host.drone';
-import { ShowHoneycombDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/show-honeycomb.drone';
+import { PixiHostWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/pixi-host.drone';
+import { ShowHoneycombWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/show-honeycomb.drone';
 import { MousePanInput } from '@hypercomb/essentials/diamondcoreprocessor.com/input/pan/mouse-pan.input';
 import { MousewheelZoomInput } from '@hypercomb/essentials/diamondcoreprocessor.com/input/zoom/mousewheel-zoom.input';
 import { Settings } from '@hypercomb/essentials/diamondcoreprocessor.com/core/settings';
 import { ZoomDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/zoom/zoom.drone';
-import { NostrMeshDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/nostr/nostr-mesh.drone'
+import { NostrMeshWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/nostr/nostr-mesh.drone'
 import { NostrSigner } from '@hypercomb/essentials/diamondcoreprocessor.com/nostr/nostr-signer'
 import { HexDetector } from '@hypercomb/essentials/diamondcoreprocessor.com/input/hex-detector'
 import { TileOverlayDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/tile-overlay.drone'
@@ -28,7 +28,7 @@ export class App {
   public readonly meshPublic = signal(true);
 
   public toggleMesh = (): void => {
-    const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any;
+    const mesh = get('@diamondcoreprocessor.com/NostrMeshWorker') as any;
 
     const next = !this.meshPublic();
     this.meshPublic.set(next);
@@ -39,11 +39,11 @@ export class App {
     const _ = [
       AxialService,
       PanningDrone,
-      PixiHostDrone,
-      ShowHoneycombDrone,
+      PixiHostWorker,
+      ShowHoneycombWorker,
       MousePanInput,
       MousewheelZoomInput,
-      NostrMeshDrone,
+      NostrMeshWorker,
       TileOverlayDrone,
       NostrSigner,
       HexDetector,
@@ -56,30 +56,30 @@ export class App {
       const l = list();
       console.log('[core-adapter] ioc keys:', l)
 
-      const hostkey = '@diamondcoreprocessor.com/PixiHostDrone'
+      const hostkey = '@diamondcoreprocessor.com/PixiHostWorker'
       const host = <any>get(hostkey)!
-      await host.encounter('testing')
+      await host.pulse('testing')
 
-      const showkey = '@diamondcoreprocessor.com/ShowHoneycombDrone'
+      const showkey = '@diamondcoreprocessor.com/ShowHoneycombWorker'
       const show = <any>get(showkey)!
-      await show.encounter('testing')
+      await show.pulse('testing')
 
       const zoomkey = '@diamondcoreprocessor.com/ZoomDrone'
       const zoom = <any>get(zoomkey)!
-      await zoom.encounter('testing')
+      await zoom.pulse('testing')
 
       const pankey = '@diamondcoreprocessor.com/PanningDrone'
       const pan = <any>get(pankey)!
-      await pan.encounter('testing')
+      await pan.pulse('testing')
 
       const overlaykey = '@diamondcoreprocessor.com/TileOverlayDrone'
       const overlay = <any>get(overlaykey)!
-      await overlay.encounter('testing')
+      await overlay.pulse('testing')
 
-      const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any
+      const mesh = get('@diamondcoreprocessor.com/NostrMeshWorker') as any
 
       // 1) hard-start mesh lifecycle
-      await mesh.encounter('smoke-test')
+      await mesh.pulse('smoke-test')
 
       try {
         const enabled = !!mesh?.isNetworkEnabled?.()

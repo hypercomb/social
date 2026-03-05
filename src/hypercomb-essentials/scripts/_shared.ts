@@ -25,7 +25,7 @@ export const rmDir = (dir: string): void => {
   rmSync(dir, { recursive: true, force: true })
 }
 
-export const isDrone = (file: string): boolean => file.endsWith('.drone.ts') || file.endsWith('.drone.js')
+export const isBee = (file: string): boolean => file.endsWith('.drone.ts') || file.endsWith('.drone.js') || file.endsWith('.worker.ts') || file.endsWith('.worker.js')
 
 export const stripExt = (p: string): string => p.slice(0, -extname(p).length)
 

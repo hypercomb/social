@@ -42,9 +42,9 @@ export class DevLayerSource implements LayerInstallSource {
 
     if (!/^[a-f0-9]{64}$/i.test(signature)) return null
 
-    const drones =
-      Array.isArray(parsed.drones)
-        ? parsed.drones.map((x: unknown) => String(x ?? '').trim().toLowerCase()).filter((x: string) => /^[a-f0-9]{64}$/i.test(x))
+    const bees =
+      Array.isArray(parsed.bees)
+        ? parsed.bees.map((x: unknown) => String(x ?? '').trim().toLowerCase()).filter((x: string) => /^[a-f0-9]{64}$/i.test(x))
         : []
 
     const children =
@@ -54,7 +54,7 @@ export class DevLayerSource implements LayerInstallSource {
 
     const name = String(parsed.name ?? '').trim()
 
-    return { signature, name: name || undefined, drones, children }
+    return { signature, name: name || undefined, bees, children }
   }
 }
 

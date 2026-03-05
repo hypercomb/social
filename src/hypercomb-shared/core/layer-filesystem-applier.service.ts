@@ -35,10 +35,10 @@ export class LayerFilesystemApplier {
       )
     }
 
-    // drones/resources
+    // bees/resources
     // - optional reference marker in the target dir (keeps existing behavior)
-    // - installer hydrates bytes into opfs/__drones__/sig
-    for (const droneSig of layer.drones) {
+    // - installer hydrates bytes into opfs/__bees__/sig
+    for (const droneSig of layer.bees) {
       await targetDir.getFileHandle(droneSig, { create: true })
       droneSigs.push(droneSig)
     }

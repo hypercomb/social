@@ -3,7 +3,7 @@
 import { type LocationParseResult } from './initializers/location-parser'
 import { Store } from './store'
 
-type InstallManifest = { version: number; layers: string[]; drones: string[]; dependencies: string[] }
+type InstallManifest = { version: number; layers: string[]; bees: string[]; dependencies: string[] }
 
 // global get/register/list available via ioc.web.ts
 
@@ -35,7 +35,7 @@ export class LayerInstaller {
     // 2) install all files
     await this.installLayers(domainLayersDir, endpoint, manifest.layers || [])
     await this.installDependencies(store, endpoint, manifest.dependencies || [])
-    await this.installDrones(store, endpoint, manifest.drones || [])
+    await this.installBees(store, endpoint, manifest.bees || [])
 
     // 3) remove manifest when complete
     const complete = await this.isComplete(domainLayersDir, store, manifest)
@@ -133,29 +133,29 @@ export class LayerInstaller {
     }
   }
 
-  private installDrones = async (
+  private installBees = async (
     store: Store,
     endpoint: string,
-    drones: string[]
+    bees: string[]
   ): Promise<void> => {
-    const dronesDir = store.drones
+    const beesDir = store.bees
 
-    for (const sig of drones) {
+    for (const sig of bees) {
       if (!sig) continue
 
       const name = `${sig}.js`
       const existing =
-        (await this.tryGetFileHandle(dronesDir, name)) ??
-        (await this.tryGetFileHandle(dronesDir, sig))
+        (await this.tryGetFileHandle(beesDir, name)) ??
+        (await this.tryGetFileHandle(beesDir, sig))
 
       if (existing) continue
 
-      const url = `${endpoint}/__drones__/${name}`
+      const url = `${endpoint}/__bees__/${name}`
       const bytes = await this.fetchBytes(url)
       if (!bytes) continue
 
-      // store as: opfsroot/__drones__/<sig>.js
-      await this.writeBytesFile(dronesDir, name, bytes)
+      // store as: opfsroot/__bees__/<sig>.js
+      await this.writeBytesFile(beesDir, name, bytes)
     }
   }
 
@@ -179,11 +179,11 @@ export class LayerInstaller {
       if (!a && !b) return false
     }
 
-    const dronesDir = store.drones
-    for (const sig of manifest.drones || []) {
+    const beesDir = store.bees
+    for (const sig of manifest.bees || []) {
       if (!sig) continue
-      const a = await this.tryGetFileHandle(dronesDir, `${sig}.js`)
-      const b = await this.tryGetFileHandle(dronesDir, sig)
+      const a = await this.tryGetFileHandle(beesDir, `${sig}.js`)
+      const b = await this.tryGetFileHandle(beesDir, sig)
       if (!a && !b) return false
     }
 

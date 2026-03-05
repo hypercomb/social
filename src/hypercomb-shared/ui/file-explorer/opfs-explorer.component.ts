@@ -159,8 +159,8 @@ export class OpfsExplorerComponent extends hypercomb {
 
     // wire this back in when ready
     // if (e.kind !== 'file') return
-    // const drone = this.preloader.get(e.name)
-    // drone?.encounter(e.name)
+    // const bee = this.preloader.get(e.name)
+    // bee?.pulse(e.name)
   }
 
   public copyDetails = async (e: ExplorerEntry, ev: MouseEvent): Promise<void> => {
@@ -367,7 +367,7 @@ export class OpfsExplorerComponent extends hypercomb {
   private readonly isHiddenEntry = (name: string): boolean => {
     if (this.showAll()) return false
     if (name === '__location__') return true
-    if (name === '__drones__') return true
+    if (name === '__bees__') return true
     if (name === '__layers__') return true
     if (name === '__dependencies__') return true
     if (name.startsWith('install-')) return true
@@ -403,7 +403,7 @@ export class OpfsExplorerComponent extends hypercomb {
   private readonly resolveResourceLabel = async (name: string): Promise<string | null> => {
     try {
       const root = this.store.opfsRoot
-      const resourcesDir = await root.getDirectoryHandle('__drones__', { create: false })
+      const resourcesDir = await root.getDirectoryHandle('__bees__', { create: false })
       const handle = await resourcesDir.getFileHandle(name, { create: false })
       const file = await handle.getFile()
       if (file.size === 0) return null

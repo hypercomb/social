@@ -190,16 +190,16 @@ export class BootstrapHistory {
   }
 
   private encounter = async (preloader: any, seg: string): Promise<void> => {
-    let drones: any[] = []
+    let bees: any[] = []
     try {
-      drones = await preloader.find(seg)
+      bees = await preloader.find(seg)
     } catch {
       return
     }
 
-    for (const d of drones) {
+    for (const b of bees) {
       try {
-        const res = d?.encounter?.(seg)
+        const res = b?.pulse?.(seg)
         if (res && typeof res.then === 'function') await res
       } catch {
         // ignore

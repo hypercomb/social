@@ -28,7 +28,7 @@ export class CoreAdapter {
   // -------------------------------------------------
 
   public toggleMesh = (): void => {
-    const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any
+    const mesh = get('@diamondcoreprocessor.com/NostrMeshWorker') as any
     const next = !this.meshPublic()
     this.meshPublic.set(next)
     mesh?.setNetworkEnabled?.(next, true)
@@ -70,30 +70,30 @@ export class CoreAdapter {
     const l = list();
     console.log('[core-adapter] ioc keys:', l)
 
-    const hostkey = '@diamondcoreprocessor.com/PixiHostDrone'
-    const host = get(hostkey) as { encounter?: (arg: string) => Promise<void> | void } | undefined
-    await host?.encounter?.('testing')
+    const hostkey = '@diamondcoreprocessor.com/PixiHostWorker'
+    const host = get(hostkey) as { pulse?: (arg: string) => Promise<void> | void } | undefined
+    await host?.pulse?.('testing')
 
-    const showkey = '@diamondcoreprocessor.com/ShowHoneycombDrone'
-    const show = get(showkey) as { encounter?: (arg: string) => Promise<void> | void } | undefined
-    await show?.encounter?.('testing')
+    const showkey = '@diamondcoreprocessor.com/ShowHoneycombWorker'
+    const show = get(showkey) as { pulse?: (arg: string) => Promise<void> | void } | undefined
+    await show?.pulse?.('testing')
 
     const zoomkey = '@diamondcoreprocessor.com/ZoomDrone'
-    const zoom = get(zoomkey) as { encounter?: (arg: string) => Promise<void> | void } | undefined
-    await zoom?.encounter?.('testing')
+    const zoom = get(zoomkey) as { pulse?: (arg: string) => Promise<void> | void } | undefined
+    await zoom?.pulse?.('testing')
 
     const panningkey = '@diamondcoreprocessor.com/PanningDrone'
-    const panning = get(panningkey) as { encounter?: (arg: string) => Promise<void> | void } | undefined
-    await panning?.encounter?.('testing')
+    const panning = get(panningkey) as { pulse?: (arg: string) => Promise<void> | void } | undefined
+    await panning?.pulse?.('testing')
 
     const overlaykey = '@diamondcoreprocessor.com/TileOverlayDrone'
-    const overlay = get(overlaykey) as { encounter?: (arg: string) => Promise<void> | void } | undefined
-    await overlay?.encounter?.('testing')
+    const overlay = get(overlaykey) as { pulse?: (arg: string) => Promise<void> | void } | undefined
+    await overlay?.pulse?.('testing')
 
-    const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any
+    const mesh = get('@diamondcoreprocessor.com/NostrMeshWorker') as any
 
     if (mesh) {
-      await mesh.encounter('smoke-test')
+      await mesh.pulse('smoke-test')
 
       try {
         const enabled = !!mesh.isNetworkEnabled?.()
@@ -102,12 +102,12 @@ export class CoreAdapter {
         // ignore
       }
     } else {
-      console.warn('[core-adapter] NostrMeshDrone not found — OPFS bundles may need rebuilding')
+      console.warn('[core-adapter] NostrMeshWorker not found — OPFS bundles may need rebuilding')
     }
 
     // const settingKey = 'Settings'
     // const setting = <any>get(settingKey)
-    // await setting.encounter('testing')
+    // await setting.pulse('testing')
     // console.log('got setting:', setting)
   }
 }

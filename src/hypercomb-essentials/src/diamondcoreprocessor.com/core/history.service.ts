@@ -31,7 +31,7 @@ export class HistoryService {
 
   /**
    * Sign a lineage path to get the history bag signature.
-   * Matches the same signing scheme as ShowHoneycombDrone.
+   * Matches the same signing scheme as ShowHoneycombWorker.
    */
   public readonly sign = async (lineage: any): Promise<string> => {
     const domain = String(lineage?.domain?.() ?? 'hypercomb.io')

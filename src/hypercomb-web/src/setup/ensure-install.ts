@@ -32,7 +32,7 @@ export const ensureInstall = async (): Promise<void> => {
 
   console.log('[ensure-install] installing:', signature)
   await clearDirectory(store.layers)
-  await clearDirectory(store.drones)
+  await clearDirectory(store.bees)
   await clearDirectory(store.dependencies)
 
   const installUrl = `${CONTENT_BASE_URL}/${signature}`
@@ -56,9 +56,9 @@ const needsInstall = async (store: Store, signature: string): Promise<boolean> =
   if (installed !== signature) return true
 
   const hasLayers = await hasAny(store.layers)
-  const hasDrones = await hasAny(store.drones)
+  const hasBees = await hasAny(store.bees)
   const hasDeps = await hasAny(store.dependencies)
-  return !(hasLayers && hasDrones && hasDeps)
+  return !(hasLayers && hasBees && hasDeps)
 }
 
 const hasAny = async (dir: FileSystemDirectoryHandle): Promise<boolean> => {

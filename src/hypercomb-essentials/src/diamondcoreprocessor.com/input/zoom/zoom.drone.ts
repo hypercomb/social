@@ -10,8 +10,6 @@ export class ZoomDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   public override description = 'authoritative zoom controller'
 
-  private initialized = false
-
   private app: Application | null = null
   private renderContainer: Container | null = null
   private canvas: HTMLCanvasElement | null = null
@@ -24,12 +22,6 @@ export class ZoomDrone extends Drone {
 
   protected override deps = { mouseWheel: '@diamondcoreprocessor.com/MousewheelZoomInput' }
   protected override listens = ['render:host-ready']
-
-  protected override sense = (): boolean => {
-    const prev = this.initialized
-    this.initialized = true
-    return !prev
-  }
 
   protected override heartbeat = async (): Promise<void> => {
     this.onEffect<HostReadyPayload>('render:host-ready', (payload) => {

@@ -1,16 +1,16 @@
 // src/app/core/module-resolver.service.ts
 import { Injectable } from '@angular/core'
-import { SignatureService, type DronePayloadV1 } from '@hypercomb/core'
+import { SignatureService, type BeePayloadV1 } from '@hypercomb/core'
 
-export type ModuleDroneV1 = {
+export type ModuleBeeV1 = {
   signature: string
-  payload: DronePayloadV1
+  payload: BeePayloadV1
 }
 
 export type ModuleFileV1 = {
   version?: number
   module?: { name?: string }
-  drones: ModuleDroneV1[]
+  bees: ModuleBeeV1[]
 }
 
 export type ResolvedModule = {
@@ -47,12 +47,12 @@ export class ModuleResolverService {
         const parsed = JSON.parse(json) as ModuleFileV1
 
         if (!parsed || typeof parsed !== 'object') throw new Error('invalid module file (not an object)')
-        if (!Array.isArray(parsed.drones)) throw new Error('invalid module file (missing drones array)')
+        if (!Array.isArray(parsed.bees)) throw new Error('invalid module file (missing bees array)')
 
         // light validation for list rendering
-        for (const a of parsed.drones) {
-          if (!a?.signature || typeof a.signature !== 'string') throw new Error('invalid module file (drone missing signature)')
-          if (!a?.payload || typeof a.payload !== 'object') throw new Error('invalid module file (drone missing payload)')
+        for (const a of parsed.bees) {
+          if (!a?.signature || typeof a.signature !== 'string') throw new Error('invalid module file (bee missing signature)')
+          if (!a?.payload || typeof a.payload !== 'object') throw new Error('invalid module file (bee missing payload)')
         }
 
         return { url, domain: base, module: parsed }

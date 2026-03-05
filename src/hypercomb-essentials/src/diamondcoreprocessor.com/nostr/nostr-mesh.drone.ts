@@ -5,7 +5,7 @@
 // - cache supports both network events and local fanout
 // - one network req per sig (shared across consumers)
 
-import { Drone } from '@hypercomb/core'
+import { Worker } from '@hypercomb/core'
 
 // const HARD_RELAY = 'wss://nos.lol'
 const HARD_RELAY = 'wss://relay.snort.social'
@@ -49,7 +49,7 @@ type MeshExpiryRule = {
   kind?: number
 }
 
-export class NostrMeshDrone extends Drone {
+export class NostrMeshWorker extends Worker {
   readonly namespace = 'diamondcoreprocessor.com'
 
   protected override deps = { signer: '@diamondcoreprocessor.com/NostrSigner' }
@@ -1074,5 +1074,5 @@ export class NostrMeshDrone extends Drone {
   }
 }
 
-const meshDrone = new NostrMeshDrone()
-window.ioc.register('@diamondcoreprocessor.com/NostrMeshDrone', meshDrone)
+const meshWorker = new NostrMeshWorker()
+window.ioc.register('@diamondcoreprocessor.com/NostrMeshWorker', meshWorker)

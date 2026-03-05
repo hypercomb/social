@@ -1,13 +1,13 @@
 // hypercomb-web/src/app/core/script-preloader.ts
 
-import { Drone, type DroneResolver } from '@hypercomb/core'
+import { Bee, type BeeResolver } from '@hypercomb/core'
 import { Store } from './store'
 
 export interface ActionDescriptor {
   signature: string
   name: string // kebab-case, ux-facing
 }
-export class ScriptPreloader extends EventTarget implements DroneResolver {
+export class ScriptPreloader extends EventTarget implements BeeResolver {
 
   private get store(): Store { return <Store>get("@hypercomb.social/Store")}
 
@@ -27,7 +27,7 @@ export class ScriptPreloader extends EventTarget implements DroneResolver {
   public getActionName = (signature: string): string | null =>
     this.bySignature.get(signature)?.name ?? null
 
-  public find = async (_name: string): Promise<Drone[]> => {
+  public find = async (_name: string): Promise<Bee[]> => {
     return []
   }
 
@@ -46,7 +46,7 @@ export class ScriptPreloader extends EventTarget implements DroneResolver {
 
       let resourcesDir: FileSystemDirectoryHandle
       try {
-        resourcesDir = await domainDir.getDirectoryHandle(Store.DRONES_DIRECTORY)
+        resourcesDir = await domainDir.getDirectoryHandle(Store.BEES_DIRECTORY)
       } catch {
         continue
       }
@@ -55,7 +55,7 @@ export class ScriptPreloader extends EventTarget implements DroneResolver {
     }
 
     try {
-      const globalResources = await this.store.opfsRoot.getDirectoryHandle(Store.DRONES_DIRECTORY)
+      const globalResources = await this.store.opfsRoot.getDirectoryHandle(Store.BEES_DIRECTORY)
       await this.loadAllFromDirectory(globalResources)
     } catch {
       // ignore
@@ -76,11 +76,11 @@ export class ScriptPreloader extends EventTarget implements DroneResolver {
         const file = await (entry as FileSystemFileHandle).getFile()
         const buffer = await file.arrayBuffer()
 
-        const drone = await this.store.getDrone(signature, buffer)
-        if (!drone) continue
-        if (!has(drone.iocKey)) register(drone.iocKey, drone)
+        const bee = await this.store.getBee(signature, buffer)
+        if (!bee) continue
+        if (!has(bee.iocKey)) register(bee.iocKey, bee)
 
-        this.bySignature.set(signature, { signature, name: drone.name })
+        this.bySignature.set(signature, { signature, name: bee.name })
         this.#resourceCount = this.#resourceCount + 1
         this.dispatchEvent(new CustomEvent('change'))
       } catch {
@@ -103,7 +103,7 @@ export class ScriptPreloader extends EventTarget implements DroneResolver {
   private isDomainName = (name: string): boolean => {
     const raw = (name ?? '').trim()
     if (!raw || raw.startsWith('__')) return false
-    if (raw === Store.DRONES_DIRECTORY) return false
+    if (raw === Store.BEES_DIRECTORY) return false
     if (raw === Store.DEPENDENCIES_DIRECTORY) return false
     if (raw === 'hypercomb') return false
     return /^[a-z0-9.-]+$/i.test(raw) && raw.includes('.')

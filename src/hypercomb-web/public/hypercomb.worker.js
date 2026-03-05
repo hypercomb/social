@@ -8,7 +8,7 @@
 
 const CACHE_NAME = 'hypercomb-modules-v2'
 const DEP_PREFIX = '/opfs/__dependencies__/'
-const RES_PREFIX = '/opfs/__drones__/'
+const RES_PREFIX = '/opfs/__bees__/'
 const LAYER_PREFIX = '/opfs/__layers__/'
 
 self.addEventListener('install', (event) => {
@@ -48,7 +48,7 @@ self.addEventListener('fetch', (event) => {
   // ----------------------------------------
 
   if (url.pathname.startsWith(RES_PREFIX)) {
-    event.respondWith(handleModuleRequest(event.request, '__drones__'))
+    event.respondWith(handleModuleRequest(event.request, '__bees__'))
     return
   }
 
@@ -233,11 +233,11 @@ async function tryReadFromOpfs(dirName, fileName) {
   try {
     const root = await self.navigator.storage.getDirectory()
 
-    // root-scoped: opfs/__drones__/sig.js
+    // root-scoped: opfs/__bees__/sig.js
     const direct = await readFromDir(root, dirName, fileName)
     if (direct) return direct
 
-    // domain-scoped: opfs/<domain>/__drones__/sig.js
+    // domain-scoped: opfs/<domain>/__bees__/sig.js
     for await (const [name, entry] of root.entries()) {
       if (!isDomainName(name)) continue
       const nested = await readFromNested(entry, dirName, fileName)
@@ -289,7 +289,7 @@ function asJsResponse(file, immutable) {
 function isDomainName(name) {
   const raw = (name ?? '').trim()
   if (!raw || raw.startsWith('__')) return false
-  if (raw === '__drones__') return false
+  if (raw === '__bees__') return false
   if (raw === '__dependencies__') return false
   if (raw === 'hypercomb') return false
   return /^[a-z0-9.-]+$/i.test(raw) && raw.includes('.')

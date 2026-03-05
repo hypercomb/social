@@ -1,5 +1,5 @@
 // src/app/core/compile-payload.ts
-import type { DronePayloadV1 } from '@hypercomb/core'
+import type { BeePayloadV1 } from '@hypercomb/core'
 
 type CompileLoader = 'ts' | 'js'
 
@@ -31,7 +31,7 @@ const inferLoader = (entry: string): CompileLoader => {
   return 'ts'
 }
 
-export const compilePayload = (payload: DronePayloadV1): Promise<string> => {
+export const compilePayload = (payload: BeePayloadV1): Promise<string> => {
   const sourceMeta = payload.source
   if (!sourceMeta?.entry) return Promise.reject(new Error('payload has no source entry'))
 

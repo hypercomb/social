@@ -5,7 +5,7 @@ import { Store } from './store'
 export type LayerRecord = {
   name: string
   children: string[]
-  drones: string[]
+  bees: string[]
 }
 
 export class LayerGraphResolver {
@@ -120,12 +120,12 @@ export class LayerGraphResolver {
         .map((c: unknown) => String(c).trim())
         .filter((c: string) => this.isSignature(c))
 
-    const drones =
-      (Array.isArray(parsed.drones) ? parsed.drones : [])
+    const bees =
+      (Array.isArray(parsed.bees) ? parsed.bees : [])
         .map((d: unknown) => String(d).trim())
         .filter((d: string) => this.isSignature(d))
 
-    return { name, children, drones }
+    return { name, children, bees }
   }
 
   private isSignature = (value: string): boolean =>

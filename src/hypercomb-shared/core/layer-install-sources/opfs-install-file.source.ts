@@ -26,9 +26,9 @@ export class OpfsInstallFileSource implements LayerInstallSource {
       const signature = String(parsed.signature ?? '').trim().toLowerCase()
       if (signature !== ctx.signature) return null
 
-      const drones =
-        Array.isArray(parsed.drones)
-          ? parsed.drones.map((x: unknown) => String(x ?? '').trim().toLowerCase()).filter((x: string) => x.length)
+      const bees =
+        Array.isArray(parsed.bees)
+          ? parsed.bees.map((x: unknown) => String(x ?? '').trim().toLowerCase()).filter((x: string) => x.length)
           : []
 
       const children =
@@ -39,12 +39,12 @@ export class OpfsInstallFileSource implements LayerInstallSource {
       const layerName = String(parsed.name ?? '').trim()
 
       // only treat this as a resolved manifest if it actually carries useful data
-      if (!drones.length && !children.length && !layerName) return null
+      if (!bees.length && !children.length && !layerName) return null
 
       return {
         signature,
         name: layerName || undefined,
-        drones,
+        bees,
         children
       }
     } catch {

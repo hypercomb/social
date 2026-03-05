@@ -1,9 +1,9 @@
 // hypercomb-shared/core/store.ts
 // hypercomb-web/src/app/core/store.ts
 
-import { Drone, SignatureService } from '@hypercomb/core'
+import { Bee, SignatureService } from '@hypercomb/core'
 
-type DroneCtor = new () => Drone
+type BeeCtor = new () => Bee
 
 export type DevManifest = {
   dependencies: Record<string, string>
@@ -16,7 +16,7 @@ export type DevManifest = {
 export class Store extends EventTarget {
 
   private static readonly HYPERCOMB_DIRECTORY = 'hypercomb.io'
-  public static readonly DRONES_DIRECTORY = '__drones__'
+  public static readonly BEES_DIRECTORY = '__bees__'
   public static readonly DEPENDENCIES_DIRECTORY = '__dependencies__'
   public static readonly LAYERS_DIRECTORY = '__layers__'
 
@@ -24,7 +24,7 @@ export class Store extends EventTarget {
 
   public opfsRoot!: FileSystemDirectoryHandle
   public hypercombRoot!: FileSystemDirectoryHandle
-  public drones!: FileSystemDirectoryHandle
+  public bees!: FileSystemDirectoryHandle
   public dependencies!: FileSystemDirectoryHandle
   public layers!: FileSystemDirectoryHandle
 
@@ -86,8 +86,8 @@ export class Store extends EventTarget {
     this.hypercombRoot =
       await this.opfsRoot.getDirectoryHandle(Store.HYPERCOMB_DIRECTORY, { create: true })
 
-    this.drones =
-      await this.opfsRoot.getDirectoryHandle(Store.DRONES_DIRECTORY, { create: true })
+    this.bees =
+      await this.opfsRoot.getDirectoryHandle(Store.BEES_DIRECTORY, { create: true })
 
     this.dependencies =
       await this.opfsRoot.getDirectoryHandle(Store.DEPENDENCIES_DIRECTORY, { create: true })
@@ -107,13 +107,13 @@ export class Store extends EventTarget {
   }
 
   // -------------------------------------------------
-  // drone loader
+  // bee loader
   // -------------------------------------------------
 
-  public getDrone = async (
+  public getBee = async (
     signature: string,
     buffer: ArrayBuffer
-  ): Promise<Drone | null> => {
+  ): Promise<Bee | null> => {
 
     const tryImport = async (url: string): Promise<Record<string, unknown> | null> => {
       try {
@@ -125,14 +125,14 @@ export class Store extends EventTarget {
       }
     }
 
-    const buildInstance = (mod: Record<string, unknown>): Drone | null => {
-      const ctors: DroneCtor[] = []
+    const buildInstance = (mod: Record<string, unknown>): Bee | null => {
+      const ctors: BeeCtor[] = []
 
       for (const value of Object.values(mod)) {
         if (typeof value !== 'function') continue
         const proto = (value as any).prototype
         if (!proto) continue
-        ctors.push(value as unknown as DroneCtor)
+        ctors.push(value as unknown as BeeCtor)
       }
 
       if (!ctors.length) return null
@@ -151,7 +151,7 @@ export class Store extends EventTarget {
 
     try {
 
-      const opfsUrl = `/opfs/${Store.DRONES_DIRECTORY}/${signature}.js`
+      const opfsUrl = `/opfs/${Store.BEES_DIRECTORY}/${signature}.js`
 
       // Snapshot IoC keys before import so we can detect self-registration
       const keysBefore = new Set(window.ioc.list())
@@ -166,12 +166,12 @@ export class Store extends EventTarget {
 
       if (!mod || typeof mod !== 'object') return null
 
-      // If the module's side-effect already registered a drone, reuse it
+      // If the module's side-effect already registered a bee, reuse it
       // instead of creating a duplicate via buildInstance()
       for (const key of window.ioc.list()) {
         if (keysBefore.has(key)) continue
         const value = window.ioc.get(key)
-        if (value instanceof Drone) return value
+        if (value instanceof Bee) return value
       }
 
       // Fallback for modules without self-registration side-effects
@@ -187,7 +187,7 @@ export class Store extends EventTarget {
   ): Promise<void> => {
 
     const opfsUrl =
-      new URL(`/opfs/${Store.DRONES_DIRECTORY}/${signature}.js`, location.origin).toString()
+      new URL(`/opfs/${Store.BEES_DIRECTORY}/${signature}.js`, location.origin).toString()
 
     try {
       const cache = await caches.open(Store.CACHE_NAME)
@@ -211,7 +211,7 @@ export class Store extends EventTarget {
   public put = async (bytes: ArrayBuffer): Promise<string> => {
     const signature = await SignatureService.sign(bytes)
 
-    const handle = await this.drones.getFileHandle(signature, { create: true })
+    const handle = await this.bees.getFileHandle(signature, { create: true })
     const writable = await handle.createWritable()
 
     try {

@@ -48,7 +48,7 @@ export class ZoomState {
     return ioc.get(key)
   }
 
-  private get pixi(): PixiHostLike { return this.getService('@diamondcoreprocessor.com/PixiHostDrone') }
+  private get pixi(): PixiHostLike { return this.getService('@diamondcoreprocessor.com/PixiHostWorker') }
 
   // ---------------------------------------------
   // api

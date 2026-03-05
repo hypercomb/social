@@ -1,15 +1,15 @@
 import { get } from '../ioc/ioc.js'
-import { DRONE_RESOLVER_KEY, DroneResolver } from './drone-resolver.js'
+import { BEE_RESOLVER_KEY, BeeResolver } from './bee-resolver.js'
 import { web } from './hypercomb.web.js'
 
 export class hypercomb extends web {
   public override act = async (grammar: string = ''): Promise<void> => {
     try {
-      const resolver = get<DroneResolver>(DRONE_RESOLVER_KEY)
-      const drones = resolver ? await resolver.find(grammar) : []
+      const resolver = get<BeeResolver>(BEE_RESOLVER_KEY)
+      const bees = resolver ? await resolver.find(grammar) : []
 
-      for (const drone of drones) {
-        await drone.encounter(grammar)
+      for (const bee of bees) {
+        await bee.pulse(grammar)
       }
     } finally {
       window.dispatchEvent(new CustomEvent('synchronize', { detail: { source: 'processor' } }))
