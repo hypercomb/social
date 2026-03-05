@@ -53,7 +53,7 @@ hypercomb-core → hypercomb-essentials → hypercomb-web / hypercomb-dev
 | Changed | Rebuild |
 |---------|---------|
 | **hypercomb-core** | `npm run build:core` then `npm run build:essentials` then (if web) `npm run runtime:core` in hypercomb-web |
-| **hypercomb-essentials** | `npm run build:essentials` (dev picks up via file: link) |
+| **hypercomb-essentials** | `npm run build:essentials` (builds + copies modules to web `public/content/` for local dev) |
 | **hypercomb-shared** | Nothing — raw source, Angular dev server hot-reloads |
 | **hypercomb-web** | Nothing extra — `ng serve` or `ng build` |
 | **hypercomb-dev** | Nothing extra — `ng serve` or `ng build` |
@@ -63,7 +63,8 @@ hypercomb-core → hypercomb-essentials → hypercomb-web / hypercomb-dev
 ```bash
 npm run build:packages          # Build core + essentials in order
 npm run build:core              # Build core only
-npm run build:essentials        # Build essentials only
+npm run build:essentials        # Build essentials (tsup + esbuild modules + copy to web)
+npm run deploy:essentials       # Build essentials + deploy to Azure (production)
 ```
 
 From `hypercomb-web/`:
@@ -72,6 +73,16 @@ npm start                       # ng serve
 npm run runtime                 # Copy core dist + bundle pixi.js to public/
 npm run runtime:core            # Copy core dist to public/core/
 ```
+
+### Module delivery pipeline
+
+Essentials are built as **signature-addressed modules** and auto-installed into OPFS at runtime:
+
+1. **Build** (`npm run build:essentials`): esbuild bundles drones into `dist/{rootSig}/` with `__layers__/`, `__bees__/`, `__dependencies__/`, and `install.manifest.json`. Then `copy-to-web.ts` copies output to `hypercomb-web/public/content/{rootSig}/` and writes `latest.txt`.
+2. **Deploy** (`npm run deploy:essentials`): Same build, but uploads to Azure blob storage (`storagehypercomb`) instead of copying locally. Uploads `latest.txt` and `latest.json` for discovery.
+3. **Runtime auto-install**: On app load, `ensureInstall()` fetches `latest.txt` → gets root signature → `LayerInstaller` downloads `install.manifest.json` and all listed layers/bees/deps → writes to OPFS. Skips if already installed (checked via `localStorage` + OPFS directory presence).
+4. **Import map**: `resolveImportMap()` reads `__dependencies__/` from OPFS, extracts aliases from first-line comments (`// @scope/name`), and injects a dynamic `<script type="importmap">`.
+5. **Module loading**: `DependencyLoader` imports dependencies via the import map. `ScriptPreloader` loads bees from OPFS, instantiates them, and registers in IoC.
 
 ## Documentation File Placement
 
@@ -136,11 +147,10 @@ Self-contained modules. Lifecycle: Created → Registered → Active → Dispose
 ### OPFS (Origin-Private File System)
 ```
 /opfs/
-  __drones__/{signature}.js       # Compiled drone modules
-  __dependencies__/               # IoC-registered service bundles
-  __resources__/                  # Static assets (images, text, styles, JSON, byte arrays)
-  __history__/{signature}/        # Append-only operation log per lineage
-  __layers__/{domain}/            # Domain-scoped layer manifests
+  __bees__/{signature}.js         # Compiled drone/bee modules
+  __dependencies__/{signature}.js # Namespace service bundles (first line: // @scope/alias)
+  __resources__/{signature}       # Content-addressed static assets
+  __layers__/{domain}/            # Domain-scoped layer manifests + install.manifest.json
   hypercomb.io/                   # User content tree
 ```
 
