@@ -2,7 +2,7 @@ import { Component, inject, signal } from '@angular/core'
 import { RouterOutlet } from '@angular/router'
 import { Header } from './header/header'
 import { CoreAdapter } from './core-adapter'
-import { TileEditorComponent } from '@hypercomb/shared/ui/tile-editor/tile-editor.component'
+import { TileEditorComponent } from "@hypercomb/shared/ui/tile-editor/tile-editor.component";
 
 @Component({
   selector: 'app-root',
