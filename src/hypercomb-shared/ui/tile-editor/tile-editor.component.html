@@ -67,6 +67,25 @@
             />
           </div>
         </label>
+
+        <label class="field-row">
+          <span class="field-label"><span class="hci">s</span> Background</span>
+          <div class="color-field">
+            <input
+              class="field-input color-text"
+              type="text"
+              placeholder="#1e1e1e"
+              [ngModel]="backgroundColorValue"
+              (ngModelChange)="backgroundColorValue = $event; onBackgroundColorChange($event)"
+            />
+            <input
+              class="color-picker"
+              type="color"
+              [ngModel]="backgroundColorValue || '#1e1e1e'"
+              (ngModelChange)="backgroundColorValue = $event; onBackgroundColorChange($event)"
+            />
+          </div>
+        </label>
       </div>
     </div>
 

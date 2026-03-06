@@ -64,6 +64,11 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
     () => this.editorService?.borderColor ?? '',
   )
 
+  private readonly backgroundColor$ = fromRuntime(
+    get('@diamondcoreprocessor.com/TileEditorService') as EventTarget,
+    () => this.editorService?.backgroundColor ?? '',
+  )
+
   private readonly hasImage$ = fromRuntime(
     get('@diamondcoreprocessor.com/ImageEditorService') as EventTarget,
     () => this.imageEditor?.hasImage ?? false,
@@ -76,6 +81,7 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
   // bound form values (updated on open, pushed on change)
   public linkValue = ''
   public borderColorValue = ''
+  public backgroundColorValue = ''
 
   // track previous open state for init/teardown
   #wasOpen = false
@@ -88,6 +94,7 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
         // editor just opened — sync form values
         this.linkValue = this.link$()
         this.borderColorValue = this.borderColor$()
+        this.backgroundColorValue = this.backgroundColor$()
 
         // defer canvas init to next microtask (ViewChild not ready yet in same tick)
         queueMicrotask(() => this.#initCanvas())
@@ -96,6 +103,7 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
         // editor closed
         this.linkValue = ''
         this.borderColorValue = ''
+        this.backgroundColorValue = ''
       }
       this.#wasOpen = isOpen
     })
@@ -113,8 +121,9 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
 
     await this.imageEditor.initialize(el, width, height)
 
-    // set initial border color
+    // set initial colors
     this.imageEditor.setBorderColor(this.borderColorValue)
+    this.imageEditor.setBackgroundColor(this.backgroundColorValue)
 
     // if there's a large blob, load it
     const service = this.editorService
@@ -166,6 +175,11 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly onBorderColorChange = (value: string): void => {
     this.editorService.setBorderColor(value)
     this.imageEditor.setBorderColor(value)
+  }
+
+  readonly onBackgroundColorChange = (value: string): void => {
+    this.editorService.setBackgroundColor(value)
+    this.imageEditor.setBackgroundColor(value)
   }
 
   // ── save / cancel ──────────────────────────────────────────────
