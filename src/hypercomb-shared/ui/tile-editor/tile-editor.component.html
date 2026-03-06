@@ -49,28 +49,11 @@
           />
         </label>
 
-        <label class="field-row">
-          <span class="field-label"><span class="hci">s</span> Border</span>
-          <div class="color-field">
-            <input
-              class="field-input color-text"
-              type="text"
-              placeholder="#000000"
-              [ngModel]="borderColorValue"
-              (ngModelChange)="borderColorValue = $event; onBorderColorChange($event)"
-            />
-            <input
-              class="color-picker"
-              type="color"
-              [ngModel]="borderColorValue || '#000000'"
-              (ngModelChange)="borderColorValue = $event; onBorderColorChange($event)"
-            />
-          </div>
-        </label>
-
-        <label class="field-row">
-          <span class="field-label"><span class="hci">s</span> Background</span>
-          <div class="color-field">
+        <div class="color-row">
+          <label class="color-control">
+            <span class="color-btn">
+              <span class="hci">s</span> Bg
+            </span>
             <input
               class="field-input color-text"
               type="text"
@@ -84,8 +67,27 @@
               [ngModel]="backgroundColorValue || '#1e1e1e'"
               (ngModelChange)="backgroundColorValue = $event; onBackgroundColorChange($event)"
             />
-          </div>
-        </label>
+          </label>
+
+          <label class="color-control">
+            <span class="color-btn">
+              <span class="hci">s</span> Border
+            </span>
+            <input
+              class="field-input color-text"
+              type="text"
+              placeholder="#000000"
+              [ngModel]="borderColorValue"
+              (ngModelChange)="borderColorValue = $event; onBorderColorChange($event)"
+            />
+            <input
+              class="color-picker"
+              type="color"
+              [ngModel]="borderColorValue || '#000000'"
+              (ngModelChange)="borderColorValue = $event; onBorderColorChange($event)"
+            />
+          </label>
+        </div>
       </div>
     </div>
 

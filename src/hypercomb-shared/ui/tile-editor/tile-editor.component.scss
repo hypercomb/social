@@ -208,7 +208,7 @@
 }
 
 .field-label {
-  min-width: 5.5em;
+  white-space: nowrap;
   font-size: 0.8em;
   color: #888;
   display: flex;
@@ -237,15 +237,43 @@
   }
 }
 
-.color-field {
+.color-row {
+  display: flex;
+  gap: 0.75em;
+}
+
+.color-control {
   flex: 1;
   display: flex;
-  gap: 0.4em;
   align-items: center;
+  gap: 0.5em;
+  min-width: 0;
+}
+
+.color-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.25em;
+  padding: 0.3em 0.5em;
+  border: 1px solid #333;
+  border-radius: 5px;
+  background: #252528;
+  color: #ccc;
+  font-size: 0.8em;
+  white-space: nowrap;
+  cursor: default;
+  box-sizing: content-box;
+  min-width: 2em;
+
+  .hci {
+    font-size: 1.1em;
+    color: #c8975a;
+  }
 }
 
 .color-text {
   flex: 1;
+  min-width: 0;
 }
 
 .color-picker {

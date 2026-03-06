@@ -82,7 +82,6 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
   public linkValue = ''
   public borderColorValue = ''
   public backgroundColorValue = ''
-
   // track previous open state for init/teardown
   #wasOpen = false
 
