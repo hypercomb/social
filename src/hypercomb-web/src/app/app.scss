@@ -13,23 +13,37 @@ app-header {
 }
 
 .mesh-toggle {
-  flex-shrink: 0;
+  position: fixed;
+  top: 8px;
+  right: 8px;
+  z-index: 9999;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   min-width: 6.5rem;
   padding: 0 1.25em;
-  border-radius: 0 3px 3px 0;
+  height: 2rem;
+  border-radius: 3px;
   border: 1px solid rgba(255, 45, 138, 0.2);
 
+  background: rgba(8, 18, 28, 0.65);
+  color: rgba(255, 45, 138, 0.7);
   background: rgba(8, 18, 28, 0.65);
   color: rgba(255, 45, 138, 0.7);
 
   font: 600 0.85em/1 ui-monospace, sfmono-regular, menlo, consolas, monospace;
   letter-spacing: 0.02em;
+  font: 600 0.85em/1 ui-monospace, sfmono-regular, menlo, consolas, monospace;
+  letter-spacing: 0.02em;
 
   box-shadow: 0 0 4px rgba(255, 45, 138, 0.08);
+  box-shadow: 0 0 4px rgba(255, 45, 138, 0.08);
   cursor: pointer;
+  transition:
+    border-color 200ms ease,
+    box-shadow 200ms ease,
+    color 200ms ease,
+    background 200ms ease;
   transition:
     border-color 200ms ease,
     box-shadow 200ms ease,
@@ -42,13 +56,21 @@ app-header {
     box-shadow:
       0 0 6px rgba(255, 45, 138, 0.15),
       0 0 14px rgba(255, 45, 138, 0.06);
+    border-color: rgba(255, 45, 138, 0.4);
+    color: rgba(255, 45, 138, 0.9);
+    box-shadow:
+      0 0 6px rgba(255, 45, 138, 0.15),
+      0 0 14px rgba(255, 45, 138, 0.06);
   }
 
   &:active {
     background: rgba(255, 45, 138, 0.08);
+    background: rgba(255, 45, 138, 0.08);
   }
 
   &:focus-visible {
+    outline: 1px solid rgba(255, 45, 138, 0.5);
+    outline-offset: 2px;
     outline: 1px solid rgba(255, 45, 138, 0.5);
     outline-offset: 2px;
   }
