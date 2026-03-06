@@ -60,8 +60,8 @@ export class OpfsExplorerComponent extends hypercomb {
 
   public readonly directory = (): string => this.lineage.explorerLabel()
 
-  private readonly dispatchSynchronize = (source: string): void => {
-    window.dispatchEvent(new CustomEvent('synchronize', { detail: { source } }))
+  private readonly runProcessor = async (): Promise<void> => {
+    await this.act()
   }
 
   private refreshing = false
@@ -200,7 +200,7 @@ export class OpfsExplorerComponent extends hypercomb {
     if (!dir) return
 
     await dir.removeEntry(e.name, { recursive: true })
-    this.dispatchSynchronize('opfs:delete')
+    void this.runProcessor()
   }
 
   // -------------------------------------------------
@@ -279,13 +279,13 @@ export class OpfsExplorerComponent extends hypercomb {
       }
 
       this.newName = ''
-      this.dispatchSynchronize('opfs:create-folder')
+      void this.runProcessor()
       return
     }
 
     // note: implement non-root folder create when you decide the naming rules
     this.newName = ''
-    this.dispatchSynchronize('opfs:create-folder')
+    void this.runProcessor()
   }
 
   public createFile = async (): Promise<void> => {
@@ -306,7 +306,7 @@ export class OpfsExplorerComponent extends hypercomb {
     }
 
     this.newName = ''
-    this.dispatchSynchronize('opfs:create-file')
+    void this.runProcessor()
   }
 
   public addDependency = async (): Promise<void> => {
@@ -336,7 +336,7 @@ export class OpfsExplorerComponent extends hypercomb {
     }
 
     this.newName = ''
-    this.dispatchSynchronize('opfs:add-dependency')
+    void this.runProcessor()
   }
 
   // -------------------------------------------------

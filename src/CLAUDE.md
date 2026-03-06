@@ -137,6 +137,9 @@ protected onEffect('effect:name', handler)      // Subscribe (auto-cleanup on di
 ```
 Late subscribers receive the last emitted value immediately. No timing races.
 
+### `synchronize` Event (critical)
+The `synchronize` window event **must only be dispatched from the processor** (`hypercomb.act()`). It fires in the `finally` block after all bees have pulsed, coalescing visual updates into a single pass. Because the processor is the sole dispatcher, `synchronize` does not need a `detail` payload — no source tagging, revision data, or history ops. Any code that currently dispatches `synchronize` directly must be refactored to let the processor handle it.
+
 ### Drones
 Self-contained modules. Lifecycle: Created → Registered → Active → Disposed.
 - `sense(grammar)` — should this drone activate?
