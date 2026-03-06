@@ -14,7 +14,7 @@ import { PROPERTIES_FILE, isSignature } from '../editor/tile-properties.js'
 import type { HistoryService, HistoryOp } from '../core/history.service.js'
 
 type Axial = { q: number; r: number }
-type SeedCell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number }
+type SeedCell = { q: number; r: number; label: string; external: boolean; imageSig?: string }
 
 type MeshEvt = { relay: string; sig: string; event: any; payload: any }
 type MeshSub = { close: () => void }
@@ -46,15 +46,19 @@ export class ShowHoneycombWorker extends Drone {
     axial: '@diamondcoreprocessor.com/AxialService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'seed:added', 'seed:removed', 'selection:changed']
-  protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'navigation:guard-start', 'navigation:guard-end']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved']
+  protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
 
   private readonly texByUrl = new Map<string, Texture>()
   private atlas: HexLabelAtlas | null = null
   private imageAtlas: HexImageAtlas | null = null
+  private imageAtlas: HexImageAtlas | null = null
   private atlasRenderer: unknown = null
+
+  // cache: seed label → small image signature (avoids re-reading 0000 on every render)
+  private readonly seedImageCache = new Map<string, string | null>()
 
   // cache: seed label → small image signature (avoids re-reading 0000 on every render)
   private readonly seedImageCache = new Map<string, string | null>()
@@ -120,6 +124,14 @@ export class ShowHoneycombWorker extends Drone {
 
   protected override heartbeat = async (grammar: string = ''): Promise<void> => {
     this.ensureListeners()
+
+    // listen for pixi host readiness via effect bus
+    this.onEffect<HostReadyPayload>('render:host-ready', (payload) => {
+      this.pixiApp = payload.app
+      this.pixiContainer = payload.container
+      this.pixiRenderer = payload.renderer
+      this.requestRender()
+    })
 
     // note: always compute mesh seeds on every heartbeat
     await this.refreshMeshSeeds(grammar)
@@ -494,16 +506,19 @@ export class ShowHoneycombWorker extends Drone {
     }
 
     // note: init layer + atlases (and reset shader if renderer changes)
+    // note: init layer + atlases (and reset shader if renderer changes)
     if (!this.layer) {
       this.layer = new Container()
       this.pixiContainer.addChild(this.layer)
 
       this.atlas = new HexLabelAtlas(this.pixiRenderer, 128, 8, 8)
       this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8)
+      this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8)
       this.atlasRenderer = this.pixiRenderer
       this.shader = null
     } else if (!this.atlas || this.atlasRenderer !== this.pixiRenderer) {
       this.atlas = new HexLabelAtlas(this.pixiRenderer, 128, 8, 8)
+      this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8)
       this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8)
       this.atlasRenderer = this.pixiRenderer
       this.shader = null
@@ -603,83 +618,12 @@ export class ShowHoneycombWorker extends Drone {
       return
     }
 
-    // note: load cell images (cached via seedImageCache + imageAtlas — fast for existing seeds)
+    // note: load cell images from 0000 properties → __resources__/
     await this.loadCellImages(cells, dir)
     if (isStale()) {
       this.renderQueued = true
       return
     }
-
-    // update rendered cells map
-    this.renderedCells.clear()
-    for (const c of cells) this.renderedCells.set(c.label, c)
-
-    // apply geometry (skips rebuild if cells key unchanged)
-    await this.applyGeometry(cells)
-  }
-
-  // ── progressive streaming (inspired by legacy JsonHiveStreamLoader) ──
-
-  private static readonly STREAM_BATCH_SIZE = 8
-
-  private readonly streamSeeds = async (
-    dir: FileSystemDirectoryHandle,
-    seedNames: string[],
-    localSeedSet: Set<string>,
-    axial: any,
-  ): Promise<void> => {
-    this.streamActive = true
-    this.cancelStreamFlag = false
-
-    const cells: SeedCell[] = []
-
-    for (let i = 0; i < seedNames.length; i++) {
-      if (this.cancelStreamFlag) break
-
-      const label = seedNames[i]
-      const a = axial.items.get(i) as Axial | undefined
-      if (!a || !label) continue
-
-      const external = !localSeedSet.has(label)
-      const cell: SeedCell = { q: a.q, r: a.r, label, external }
-
-      // load image for this cell (cached if already in seedImageCache + atlas)
-      await this.loadCellImages([cell], dir)
-      if (this.cancelStreamFlag) break
-
-      cells.push(cell)
-      this.renderedCells.set(label, cell)
-
-      // rebuild geometry every batch or on last seed
-      const isLastSeed = i === seedNames.length - 1
-      if (cells.length % ShowHoneycombWorker.STREAM_BATCH_SIZE === 0 || isLastSeed) {
-        await this.applyGeometry(cells)
-      }
-
-      // micro-delay to avoid blocking main thread (legacy pattern)
-      await this.microDelay()
-    }
-
-    this.streamActive = false
-
-    // lift navigation guard
-    this.emitEffect('navigation:guard-end', {})
-
-    // pick up any changes that occurred during streaming
-    this.requestRender()
-  }
-
-  // ── geometry application (extracted for reuse by streaming + incremental paths) ──
-
-  private readonly applyGeometry = async (cells: SeedCell[]): Promise<void> => {
-    if (cells.length === 0) {
-      this.clearMesh()
-      return
-    }
-
-    const circumRadiusPx = 32
-    const gapPx = 6
-    const padPx = 10
 
     const nextCellsKey = this.buildCellsKey(cells)
 
@@ -695,14 +639,19 @@ export class ShowHoneycombWorker extends Drone {
     const quadW = quadHalfW * 2
     const quadH = quadHalfH * 2
 
-    const baseTex = await this.ensureTexture('/local.png')
-    const externalTex = await this.ensureTexture('/external.png')
+    const baseTex = await this.ensureTexture(localTextureUrl)
+    const externalTex = await this.ensureTexture(externalTextureUrl)
+    if (isStale()) {
+      this.renderQueued = true
+      return
+    }
     if (!baseTex || !externalTex || !this.atlas || !this.imageAtlas) {
       this.clearMesh()
       return
     }
 
     const labelTex = this.atlas.getAtlasTexture()
+    const cellImageTex = this.imageAtlas.getAtlasTexture()
     const cellImageTex = this.imageAtlas.getAtlasTexture()
 
     // warm atlas uvs
@@ -712,11 +661,13 @@ export class ShowHoneycombWorker extends Drone {
 
     if (!this.shader) {
       this.shader = new HexSdfTextureShader(baseTex, externalTex, labelTex, cellImageTex, quadW, quadH, circumRadiusPx)
+      this.shader = new HexSdfTextureShader(baseTex, externalTex, labelTex, cellImageTex, quadW, quadH, circumRadiusPx)
     } else {
       try {
         this.shader.setBaseTexture(baseTex)
         this.shader.setExternalTexture(externalTex)
         this.shader.setLabelAtlas(labelTex)
+        this.shader.setCellImageAtlas(cellImageTex)
         this.shader.setCellImageAtlas(cellImageTex)
         this.shader.setQuadSize(quadW, quadH)
         this.shader.setRadiusPx(circumRadiusPx)
@@ -765,28 +716,8 @@ export class ShowHoneycombWorker extends Drone {
     if (this.listening) return
     this.listening = true
 
-    this.onEffect<HostReadyPayload>('render:host-ready', (payload) => {
-      this.adoptHostPayload(payload)
-    })
-
-    const host = get('@diamondcoreprocessor.com/PixiHostWorker') as PixiHostApi | undefined
-    if (host?.app && host?.container) {
-      this.adoptHostPayload({
-        app: host.app,
-        container: host.container,
-        canvas: host.app.canvas as HTMLCanvasElement,
-        renderer: host.app.renderer,
-      })
-    }
-
     // respond to processor-emitted synchronize
-    window.addEventListener('synchronize', this.onSynchronize)
-
-    const lineage = this.resolve<EventTarget>('lineage')
-    if (lineage && !this.lineageChangeListening) {
-      lineage.addEventListener('change', this.onLineageChange)
-      this.lineageChangeListening = true
-    }
+    window.addEventListener('synchronize', () => this.requestRender())
 
     // tile:saved effect — invalidate image cache so re-render picks up new image
     this.onEffect<{ seed: string }>('tile:saved', (payload) => {
@@ -794,19 +725,6 @@ export class ShowHoneycombWorker extends Drone {
         this.seedImageCache.delete(payload.seed)
       }
       this.seedImageCache.clear()
-      this.requestRender()
-    })
-
-    // seed lifecycle effects — re-render when seeds are added or removed
-    this.onEffect<{ seed: string }>('seed:added', () => this.requestRender())
-    this.onEffect<{ seed: string }>('seed:removed', () => this.requestRender())
-
-    // selection changes — re-render to update selection highlight
-    this.onEffect<{ selected: string[] }>('selection:changed', () => this.requestRender())
-
-    // ambient presence heat — re-render to update border temperature
-    this.onEffect<Record<string, number>>('render:presence-heat', (heat) => {
-      this.#heatByLabel = new Map(Object.entries(heat))
       this.requestRender()
     })
 
@@ -852,6 +770,8 @@ export class ShowHoneycombWorker extends Drone {
     this.shader = null
     this.texByUrl.clear()
     this.atlas = new HexLabelAtlas(renderer, 128, 8, 8)
+    this.imageAtlas = new HexImageAtlas(renderer, 256, 8, 8)
+    this.seedImageCache.clear()
     this.imageAtlas = new HexImageAtlas(renderer, 256, 8, 8)
     this.seedImageCache.clear()
     this.atlasRenderer = renderer
@@ -951,11 +871,63 @@ export class ShowHoneycombWorker extends Drone {
     }
   }
 
+  /**
+   * Load cell properties (0000 file) for each local seed and resolve
+   * the small.image signature from __resources__/ into the image atlas.
+   * Standard: any property value matching a 64-char hex signature
+   * refers to a blob in __resources__/{signature}.
+   */
+  private loadCellImages = async (cells: SeedCell[], dir: FileSystemDirectoryHandle): Promise<void> => {
+    const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as
+      { getResource: (sig: string) => Promise<Blob | null> } | undefined
+    if (!store || !this.imageAtlas) return
+
+    for (const cell of cells) {
+      // external seeds don't have local OPFS data
+      if (cell.external) continue
+
+      // check cache first
+      if (this.seedImageCache.has(cell.label)) {
+        cell.imageSig = this.seedImageCache.get(cell.label) ?? undefined
+        continue
+      }
+
+      // read 0000 properties file from the seed directory
+      try {
+        const seedDir = await dir.getDirectoryHandle(cell.label)
+        const fileHandle = await seedDir.getFileHandle(PROPERTIES_FILE)
+        const file = await fileHandle.getFile()
+        const text = await file.text()
+        const props = JSON.parse(text)
+
+        // standard: small.image is a signature → resolve from __resources__/
+        const smallSig = props?.small?.image
+        if (smallSig && isSignature(smallSig)) {
+          cell.imageSig = smallSig
+          this.seedImageCache.set(cell.label, smallSig)
+
+          // load blob into image atlas if not already there
+          if (!this.imageAtlas.hasImage(smallSig)) {
+            const blob = await store.getResource(smallSig)
+            if (blob) {
+              await this.imageAtlas.loadImage(smallSig, blob)
+            }
+          }
+        } else {
+          this.seedImageCache.set(cell.label, null)
+        }
+      } catch {
+        // no seed dir or no properties file — no image
+        this.seedImageCache.set(cell.label, null)
+      }
+    }
+  }
+
   private buildCellsKey = (cells: SeedCell[]): string => {
     const selectionService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SelectionService') as
       { isSelected: (label: string) => boolean } | undefined
     let s = ''
-    for (const c of cells) s += `${c.q},${c.r}:${c.label}:${c.external ? 1 : 0}:${c.imageSig ?? ''}:${selectionService?.isSelected(c.label) ? 1 : 0}:${(c.heat ?? 0).toFixed(2)}|`
+    for (const c of cells) s += `${c.q},${c.r}:${c.label}:${c.external ? 1 : 0}:${c.imageSig ?? ''}|`
     return s
   }
 
@@ -976,11 +948,9 @@ export class ShowHoneycombWorker extends Drone {
     const texKind = new Float32Array(cells.length * 4)
     const imageUV = new Float32Array(cells.length * 16)
     const hasImage = new Float32Array(cells.length * 4)
-    const selected = new Float32Array(cells.length * 4)
-    const heatArr = new Float32Array(cells.length * 4)
     const idx = new Uint32Array(cells.length * 6)
 
-    let pv = 0, uvp = 0, luvp = 0, tkp = 0, iuvp = 0, hip = 0, sp = 0, hp = 0, ii = 0, base = 0
+    let pv = 0, uvp = 0, luvp = 0, tkp = 0, iuvp = 0, hip = 0, ii = 0, base = 0
 
     for (const c of cells) {
       const { x, y } = this.axialToPixel(c.q, c.r, spacing)
@@ -1014,16 +984,6 @@ export class ShowHoneycombWorker extends Drone {
       hasImage.set([hi, hi, hi, hi], hip)
       hip += 4
 
-      // selection state
-      const sel = selectionService?.isSelected(c.label) ? 1 : 0
-      selected.set([sel, sel, sel, sel], sp)
-      sp += 4
-
-      // ambient presence heat
-      const h = c.heat ?? 0
-      heatArr.set([h, h, h, h], hp)
-      hp += 4
-
       idx.set([base, base + 1, base + 2, base, base + 2, base + 3], ii)
       ii += 6
       base += 4
@@ -1036,8 +996,6 @@ export class ShowHoneycombWorker extends Drone {
       ; (g as any).addAttribute('aTexKind', texKind, 1)
       ; (g as any).addAttribute('aImageUV', imageUV, 4)
       ; (g as any).addAttribute('aHasImage', hasImage, 1)
-      ; (g as any).addAttribute('aSelected', selected, 1)
-      ; (g as any).addAttribute('aHeat', heatArr, 1)
       ; (g as any).addIndex(idx)
 
     return g
