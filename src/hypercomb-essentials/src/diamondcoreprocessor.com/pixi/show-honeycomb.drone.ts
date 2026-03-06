@@ -4,7 +4,7 @@
 // - union keeps filesystem seeds as your own local truth, mesh adds shared seeds
 // - redraw stays event-driven via synchronize, but heartbeat also triggers synchronize
 
-import { Worker, SignatureService } from '@hypercomb/core'
+import { Drone, SignatureService } from '@hypercomb/core'
 import { Application, Assets, Container, Geometry, Mesh, Texture } from 'pixi.js'
 import type { HostReadyPayload } from './pixi-host.drone.js'
 import { HexLabelAtlas } from './hex-label.atlas.js'
@@ -26,7 +26,7 @@ type MeshApi = {
   subscribe?: (sig: string, cb: (e: MeshEvt) => void) => MeshSub
 }
 
-export class ShowHoneycombWorker extends Worker {
+export class ShowHoneycombWorker extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   // pixi resources (populated via render:host-ready effect)
   private pixiApp: Application | null = null
@@ -91,14 +91,6 @@ export class ShowHoneycombWorker extends Worker {
 
   protected override heartbeat = async (grammar: string = ''): Promise<void> => {
     this.ensureListeners()
-
-    // listen for pixi host readiness via effect bus
-    this.onEffect<HostReadyPayload>('render:host-ready', (payload) => {
-      this.pixiApp = payload.app
-      this.pixiContainer = payload.container
-      this.pixiRenderer = payload.renderer
-      this.requestRender()
-    })
 
     // note: always compute mesh seeds on every heartbeat
     await this.refreshMeshSeeds(grammar)
@@ -657,6 +649,13 @@ export class ShowHoneycombWorker extends Worker {
   private ensureListeners = (): void => {
     if (this.listening) return
     this.listening = true
+
+    this.onEffect<HostReadyPayload>('render:host-ready', (payload) => {
+      this.pixiApp = payload.app
+      this.pixiContainer = payload.container
+      this.pixiRenderer = payload.renderer
+      this.requestRender()
+    })
 
     // respond to processor-emitted synchronize
     window.addEventListener('synchronize', () => this.requestRender())

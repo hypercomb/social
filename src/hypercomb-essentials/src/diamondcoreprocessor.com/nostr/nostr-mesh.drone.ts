@@ -111,11 +111,9 @@ export class NostrMeshWorker extends Worker {
   private logs: MeshLog[] = []
   private readonly logCap = 200
 
-  protected override heartbeat = async (): Promise<void> => {
-    // note: still respects drone lifecycle, but we also self-start when subscribe/publish is used
+  protected override act = async (): Promise<void> => {
     this.ensureStartedNow()
 
-    // note: expiry is mesh responsibility
     this.pruneAllExpired()
 
     // effect bus listeners — allow other drones to coordinate via effects

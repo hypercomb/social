@@ -20,6 +20,8 @@ import { HistoryRecorder } from '@hypercomb/essentials/diamondcoreprocessor.com/
 import { TileEditorService } from '@hypercomb/essentials/diamondcoreprocessor.com/editor/tile-editor.service'
 import { TileEditorDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/editor/tile-editor.drone'
 import { ImageEditorService } from '@hypercomb/essentials/diamondcoreprocessor.com/editor/image-editor.service'
+import { SelectionService } from '@hypercomb/essentials/diamondcoreprocessor.com/core/selection/selection.service'
+import { TileSelectionDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/selection/tile-selection.drone'
 import { TileEditorComponent } from '@hypercomb/shared/ui/tile-editor/tile-editor.component'
 import { ControlsBarComponent } from '@hypercomb/shared/ui/controls-bar/controls-bar.component'
 
@@ -60,7 +62,9 @@ export class App {
       HistoryRecorder,
       TileEditorService,
       TileEditorDrone,
-      ImageEditorService]
+      ImageEditorService,
+      SelectionService,
+      TileSelectionDrone]
 
     queueMicrotask(async () => {
       await initializeRuntime({

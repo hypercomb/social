@@ -31,11 +31,16 @@ export class PixiHostWorker extends Worker {
     })
   }
 
-  protected override heartbeat = async (): Promise<void> => {
-    if (this.app) return
+  protected override ready = async (): Promise<boolean> => {
+    if (this.app) return false
 
-    // axial must be initialized before any drone tries to use index->axial lookups
-    // if settings aren't ready yet, just wait for the next heartbeat
+    const settings = this.resolve<any>('settings')
+    const host = document.getElementById('pixi-host') as HTMLDivElement | null
+
+    return !!settings && !!host
+  }
+
+  protected override act = async (): Promise<void> => {
     const settings = this.resolve<any>('settings')
     if (!settings) return
 

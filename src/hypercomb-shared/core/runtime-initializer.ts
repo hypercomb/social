@@ -20,6 +20,7 @@ const STARTUP_PULSE_KEYS = [
   '@diamondcoreprocessor.com/ZoomDrone',
   '@diamondcoreprocessor.com/PanningDrone',
   '@diamondcoreprocessor.com/TileOverlayDrone',
+  '@diamondcoreprocessor.com/TileSelectionDrone',
 ] as const
 
 export const initializeRuntime = async (

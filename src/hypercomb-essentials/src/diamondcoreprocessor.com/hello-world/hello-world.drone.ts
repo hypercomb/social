@@ -23,8 +23,8 @@ export class HelloWorldWorker extends Worker {
 
   protected override deps = { hw: '@diamondcoreprocessor.com/hello-world' }
 
-  protected override heartbeat = async (grammar: string): Promise<void> => {
-    const hw = this.resolve('hw')
+  protected override act = async (_grammar: string): Promise<void> => {
+    this.resolve('hw')
     console.log('[hypercomb essentials] hello world')
   }
 }
