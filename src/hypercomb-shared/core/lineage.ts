@@ -1,5 +1,5 @@
 // hypercomb-shared/core/lineage.ts
-// fix: synchronize is the single visual update mechanism
+// synchronize is dispatched only by the processor — lineage fires 'change' on itself
 
 import type { Navigation } from './navigation'
 import type { Store } from './store'
@@ -36,7 +36,7 @@ export class Lineage extends EventTarget {
 
     // do not normalize explorer names
     this.explorerPath = [...this.explorerPath, seg]
-    this.invalidate('explorer')
+    this.invalidate()
 
     // explorer drives navigation (best effort)
     try {
@@ -50,7 +50,7 @@ export class Lineage extends EventTarget {
   public explorerUp = (): void => {
     if (this.explorerPath.length === 0) return
     this.explorerPath = this.explorerPath.slice(0, -1)
-    this.invalidate('explorer')
+    this.invalidate()
 
     // explorer drives navigation (best effort)
     try {
@@ -64,7 +64,7 @@ export class Lineage extends EventTarget {
   // this now means "show domain root"
   public showDomainRoot = (): void => {
     this.explorerPath = []
-    this.invalidate('explorer')
+    this.invalidate()
 
     // explorer drives navigation (best effort)
     try {
@@ -153,7 +153,6 @@ export class Lineage extends EventTarget {
   public ensure = async (
     segments: readonly string[],
     start: FileSystemDirectoryHandle = this.store.hypercombRoot,
-    historyOp?: { op: string, seed: string }
   ): Promise<FileSystemDirectoryHandle | null> => {
 
     let dir = start
@@ -175,7 +174,7 @@ export class Lineage extends EventTarget {
     this.#materialized = true
     this.#missing = []
     this.dispatchEvent(new CustomEvent('change'))
-    this.invalidate('fs', historyOp)
+    this.invalidate()
     return dir
   }
 
@@ -215,7 +214,7 @@ export class Lineage extends EventTarget {
 
     try {
       await dir.getFileHandle(sig, { create: true })
-      this.invalidate('fs')
+      this.invalidate()
     } catch {
       // ignore duplicates
     }
@@ -225,22 +224,9 @@ export class Lineage extends EventTarget {
   // internal
   // -------------------------------------------------
 
-  private readonly invalidate = (
-    reason: 'explorer' | 'url' | 'fs',
-    historyOp?: { op: string, seed: string }
-  ): void => {
+  private readonly invalidate = (): void => {
     this.#fsRevision = this.#fsRevision + 1
     this.dispatchEvent(new CustomEvent('change'))
-
-    window.dispatchEvent(new CustomEvent('synchronize', {
-      detail: {
-        source: `lineage:${reason}`,
-        rev: this.#fsRevision,
-        path: this.explorerLabel(),
-        segments: [...this.explorerPath],
-        ...(historyOp ? { historyOp } : {})
-      }
-    }))
   }
 
   private readonly followLocation = (): void => {
@@ -252,7 +238,7 @@ export class Lineage extends EventTarget {
       if (this.sameSegments(this.explorerPath, next)) return
 
       this.explorerPath = next
-      this.invalidate('url')
+      this.invalidate()
     } catch {
       // ignore until nav is ready
     }

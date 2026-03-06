@@ -393,9 +393,8 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     const baseSegments = this.navigation.segments()
     const target = [...baseSegments, seedName]
 
-    // ensure() is idempotent — creates if needed, dispatches synchronize with historyOp.
-    // HistoryRecorder (a synchronize listener) persists the add to OPFS history.
-    await this.lineage.ensure(target, undefined, { op: 'add', seed: seedName })
+    // ensure() is idempotent — creates if needed. Processor dispatches synchronize.
+    await this.lineage.ensure(target)
   }
 
   // -------------------------------------------------

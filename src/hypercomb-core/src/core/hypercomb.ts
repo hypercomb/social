@@ -12,7 +12,7 @@ export class hypercomb extends web {
         await bee.pulse(grammar)
       }
     } finally {
-      window.dispatchEvent(new CustomEvent('synchronize', { detail: { source: 'processor' } }))
+      window.dispatchEvent(new Event('synchronize'))
     }
   }
 }

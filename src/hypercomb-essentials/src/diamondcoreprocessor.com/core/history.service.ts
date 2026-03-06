@@ -51,7 +51,6 @@ export class HistoryService {
   /**
    * Record an operation into the history bag for the given signature.
    * Appends a sequential file (00000001, 00000002, ...) with JSON content.
-   * Dispatches `synchronize` to trigger re-render.
    */
   public readonly record = async (signature: string, operation: HistoryOp): Promise<void> => {
     const bag = await this.getBag(signature)
@@ -63,10 +62,6 @@ export class HistoryService {
     const writable = await fileHandle.createWritable()
     await writable.write(JSON.stringify(operation))
     await writable.close()
-
-    window.dispatchEvent(new CustomEvent('synchronize', {
-      detail: { source: 'history:record', op: operation.op, seed: operation.seed }
-    }))
   }
 
   /**

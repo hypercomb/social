@@ -1,12 +1,12 @@
 // hypercomb-essentials/src/diamondcoreprocessor.com/pixi/tile-overlay.drone.ts
 // Contextual action overlay: dark underlay + icon buttons on occupied hex tiles on hover.
 
-import { Drone } from '@hypercomb/core'
+import { Drone, hypercomb } from '@hypercomb/core'
 import { Application, Container, Graphics, Point } from 'pixi.js'
 import { HexIconButton } from './hex-icon-button.js'
 import type { HostReadyPayload } from './pixi-host.drone.js'
 import type { Axial } from '../input/hex-detector.js'
-import type { HistoryOpType } from '../core/history.service.js'
+
 
 type CellCountPayload = { count: number; labels: string[] }
 
@@ -277,13 +277,8 @@ export class TileOverlayDrone extends Drone {
     }
   }
 
-  #handleRemove = (label: string): void => {
-    window.dispatchEvent(new CustomEvent('synchronize', {
-      detail: {
-        source: 'tile:remove',
-        historyOp: { op: 'remove' as HistoryOpType, seed: label },
-      },
-    }))
+  #handleRemove = (_label: string): void => {
+    void new hypercomb().act()
   }
 
   // ── visibility ─────────────────────────────────────────────────
