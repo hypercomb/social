@@ -173,11 +173,16 @@ export class Store extends EventTarget {
 
       // If the module's side-effect already registered a bee, reuse it
       // instead of creating a duplicate via buildInstance()
+      let selfRegistered = false
       for (const key of window.ioc.list()) {
         if (keysBefore.has(key)) continue
+        selfRegistered = true
         const value = window.ioc.get(key)
         if (value instanceof Bee) return value
       }
+
+      // Module self-registered as non-Bee — skip buildInstance to avoid duplicates
+      if (selfRegistered) return null
 
       // Fallback for modules without self-registration side-effects
       return buildInstance(mod)
