@@ -13,7 +13,10 @@ export class PanningDrone extends Drone {
   private canvas: HTMLCanvasElement | null = null
   private activeSource: string | null = null
 
-  protected override deps = { mousePan: '@diamondcoreprocessor.com/MousePanInput' }
+  protected override deps = {
+    spacebarPan: '@diamondcoreprocessor.com/SpacebarPanInput',
+    touchPan: '@diamondcoreprocessor.com/TouchPanInput',
+  }
   protected override listens = ['render:host-ready']
 
   protected override heartbeat = async (): Promise<void> => {
@@ -21,8 +24,11 @@ export class PanningDrone extends Drone {
       this.stage = payload.app.stage
       this.canvas = payload.canvas
 
-      const mousePan = this.resolve<any>('mousePan')
-      mousePan?.attach(this, this.canvas)
+      const spacebarPan = this.resolve<any>('spacebarPan')
+      spacebarPan?.attach(this, this.canvas)
+
+      const touchPan = this.resolve<any>('touchPan')
+      touchPan?.attach(this, this.canvas)
     })
   }
 
@@ -35,8 +41,11 @@ export class PanningDrone extends Drone {
   // -------------------------------------------------
 
   private detach = (): void => {
-    const mousePan = this.resolve<any>('mousePan')
-    mousePan?.detach()
+    const spacebarPan = this.resolve<any>('spacebarPan')
+    spacebarPan?.detach()
+
+    const touchPan = this.resolve<any>('touchPan')
+    touchPan?.detach()
 
     this.stage = null
     this.canvas = null

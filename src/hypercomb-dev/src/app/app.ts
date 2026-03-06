@@ -5,7 +5,8 @@ import { AxialService } from '@hypercomb/essentials/diamondcoreprocessor.com/cor
 import { PanningDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/pan/panning.drone';
 import { PixiHostWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/pixi-host.drone';
 import { ShowHoneycombWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/show-honeycomb.drone';
-import { MousePanInput } from '@hypercomb/essentials/diamondcoreprocessor.com/input/pan/mouse-pan.input';
+import { SpacebarPanInput } from '@hypercomb/essentials/diamondcoreprocessor.com/input/pan/spacebar-pan.input';
+import { TouchPanInput } from '@hypercomb/essentials/diamondcoreprocessor.com/input/pan/touch-pan.input';
 import { MousewheelZoomInput } from '@hypercomb/essentials/diamondcoreprocessor.com/input/zoom/mousewheel-zoom.input';
 import { Settings } from '@hypercomb/essentials/diamondcoreprocessor.com/core/settings';
 import { ZoomDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/zoom/zoom.drone';
@@ -45,7 +46,8 @@ export class App {
       PanningDrone,
       PixiHostWorker,
       ShowHoneycombWorker,
-      MousePanInput,
+      SpacebarPanInput,
+      TouchPanInput,
       MousewheelZoomInput,
       NostrMeshWorker,
       TileOverlayDrone,
