@@ -25,6 +25,7 @@ export class TileSelectionDrone extends Drone {
 
   // drag-select gesture state
   #dragActive = false
+  #activePointerId: number | null = null
   #lastOp: 'add' | 'remove' | null = null
   #touched = new Set<string>()
   #justDragged = false
@@ -78,6 +79,9 @@ export class TileSelectionDrone extends Drone {
       document.removeEventListener('pointerdown', this.#onPointerDown)
       document.removeEventListener('pointermove', this.#onPointerMove)
       document.removeEventListener('pointerup', this.#onPointerUp)
+      document.removeEventListener('pointercancel', this.#onPointerCancel)
+      document.removeEventListener('keyup', this.#onKeyUp)
+      window.removeEventListener('blur', this.#onBlur)
       this.#listening = false
     }
   }
@@ -90,12 +94,16 @@ export class TileSelectionDrone extends Drone {
     document.addEventListener('pointerdown', this.#onPointerDown)
     document.addEventListener('pointermove', this.#onPointerMove)
     document.addEventListener('pointerup', this.#onPointerUp)
+    document.addEventListener('pointercancel', this.#onPointerCancel)
+    document.addEventListener('keyup', this.#onKeyUp)
+    window.addEventListener('blur', this.#onBlur)
   }
 
   // ── pointer handlers ────────────────────────────────────────
 
   #onPointerDown = (e: PointerEvent): void => {
     if (!e.ctrlKey && !e.metaKey) return
+    if (this.#dragActive) return
     if (!this.#renderContainer || !this.#renderer || !this.#canvas) return
 
     const label = this.#labelAtClient(e.clientX, e.clientY)
@@ -104,6 +112,7 @@ export class TileSelectionDrone extends Drone {
     const selection = this.#selection()
     if (!selection) return
 
+    this.#activePointerId = e.pointerId
     this.#dragActive = true
     this.#touched.clear()
     this.#lastOp = selection.isSelected(label) ? 'remove' : 'add'
@@ -112,22 +121,43 @@ export class TileSelectionDrone extends Drone {
 
   #onPointerMove = (e: PointerEvent): void => {
     if (!this.#dragActive || !this.#lastOp) return
+    if (e.pointerId !== this.#activePointerId) return
 
     const label = this.#labelAtClient(e.clientX, e.clientY)
     if (label) this.#applyOp(label)
   }
 
-  #onPointerUp = (): void => {
+  #onPointerUp = (e: PointerEvent): void => {
+    if (e.pointerId !== this.#activePointerId) return
+    this.#endDrag()
+  }
+
+  #onPointerCancel = (e: PointerEvent): void => {
+    if (e.pointerId !== this.#activePointerId) return
+    this.#endDrag()
+  }
+
+  #onKeyUp = (e: KeyboardEvent): void => {
+    if (!this.#dragActive) return
+    if (e.key === 'Control' || e.key === 'Meta') this.#endDrag()
+  }
+
+  #onBlur = (): void => {
+    if (this.#dragActive) this.#endDrag()
+  }
+
+  // ── drag helpers ────────────────────────────────────────────
+
+  #endDrag(): void {
     if (this.#dragActive) {
       this.#justDragged = true
       requestAnimationFrame(() => { this.#justDragged = false })
     }
     this.#dragActive = false
+    this.#activePointerId = null
     this.#lastOp = null
     this.#touched.clear()
   }
-
-  // ── drag helpers ────────────────────────────────────────────
 
   #applyOp(label: string): void {
     if (this.#touched.has(label)) return
