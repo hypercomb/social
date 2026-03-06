@@ -253,16 +253,24 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     const navigateAfterCreate = rawInput.startsWith('/')
     const raw = navigateAfterCreate ? rawInput.replace(/^\/+/, '').trim() : rawInput
 
-    const seedName = this.completions.normalize(raw)
-    if (!seedName) {
+    // support nested seed creation: "hello/world" → create hello, then hello/world
+    const parts = raw.split('/').map(s => this.completions.normalize(s.trim())).filter(Boolean)
+    if (parts.length === 0) {
       this.clear()
       return
     }
 
-    await this.ensureSeedInCurrentDirectory(seedName)
+    const baseSegments = this.navigation.segments()
+    const target = [...baseSegments, ...parts]
+
+    // ensure() is idempotent — creates the full directory hierarchy as needed
+    await this.lineage.ensure(target)
+
+    // emit seed:added for the top-level seed (the one visible in the current layer)
+    EffectBus.emit('seed:added', { seed: parts[0] })
 
     if (navigateAfterCreate) {
-      await this.movement.move(seedName)
+      await this.movement.move(parts[0])
     }
 
     this.clear()

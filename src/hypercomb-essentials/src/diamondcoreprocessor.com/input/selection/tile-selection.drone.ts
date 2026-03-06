@@ -30,6 +30,10 @@ export class TileSelectionDrone extends Drone {
   #touched = new Set<string>()
   #justDragged = false
 
+  // navigation click guard — blocks clicks during layer transitions
+  #navigationBlocked = false
+  #navigationGuardTimer: ReturnType<typeof setTimeout> | null = null
+
   #listening = false
 
   protected override deps = {
@@ -38,7 +42,7 @@ export class TileSelectionDrone extends Drone {
     selection: '@diamondcoreprocessor.com/SelectionService',
   }
 
-  protected override listens = ['render:host-ready', 'render:cell-count', 'render:mesh-offset', 'tile:click']
+  protected override listens = ['render:host-ready', 'render:cell-count', 'render:mesh-offset', 'tile:click', 'navigation:guard-start', 'navigation:guard-end']
   protected override emits: string[] = []
 
   protected override heartbeat = async (): Promise<void> => {
@@ -62,6 +66,7 @@ export class TileSelectionDrone extends Drone {
     // click selection via tile:click effect from TileOverlayDrone
     this.onEffect<TileClickPayload>('tile:click', (payload) => {
       if (this.#justDragged) return
+      if (this.#navigationBlocked) return
       const selection = this.#selection()
       if (!selection) return
 
@@ -71,6 +76,17 @@ export class TileSelectionDrone extends Drone {
         selection.clear()
         selection.add(payload.label)
       }
+    })
+
+    // navigation guard — block clicks during layer transitions
+    this.onEffect('navigation:guard-start', () => {
+      this.#navigationBlocked = true
+      if (this.#navigationGuardTimer) clearTimeout(this.#navigationGuardTimer)
+      this.#navigationGuardTimer = setTimeout(() => { this.#navigationBlocked = false }, 200)
+    })
+    this.onEffect('navigation:guard-end', () => {
+      this.#navigationBlocked = false
+      if (this.#navigationGuardTimer) { clearTimeout(this.#navigationGuardTimer); this.#navigationGuardTimer = null }
     })
   }
 
@@ -102,6 +118,7 @@ export class TileSelectionDrone extends Drone {
   // ── pointer handlers ────────────────────────────────────────
 
   #onPointerDown = (e: PointerEvent): void => {
+    if (this.#navigationBlocked) return
     if (!e.ctrlKey && !e.metaKey) return
     if (this.#dragActive) return
     if (!this.#renderContainer || !this.#renderer || !this.#canvas) return

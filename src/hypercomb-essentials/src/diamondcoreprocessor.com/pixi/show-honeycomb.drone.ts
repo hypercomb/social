@@ -42,7 +42,7 @@ export class ShowHoneycombWorker extends Drone {
   }
 
   protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'seed:added', 'seed:removed', 'selection:changed']
-  protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count']
+  protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'navigation:guard-start', 'navigation:guard-end']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
 
@@ -62,6 +62,12 @@ export class ShowHoneycombWorker extends Drone {
 
   private renderedCellsKey = ''
   private renderedCount = 0
+
+  // incremental rendering state — tracks what's currently painted (geometry cache)
+  private readonly renderedCells = new Map<string, SeedCell>()
+  private streamActive = false
+  private cancelStreamFlag = false
+  private renderedLocationKey = ''
 
   // note: mesh seed state (derived on heartbeat)
   private meshSig = ''
@@ -480,12 +486,6 @@ export class ShowHoneycombWorker extends Drone {
       this.shader = null
     }
 
-    const circumRadiusPx = 32
-    const gapPx = 6
-    const padPx = 10
-    const localTextureUrl = '/local.png'
-    const externalTextureUrl = '/external.png'
-
     const locationKey = String(lineage.explorerLabel?.() ?? '/')
     const fsRev = Number(lineage.changed?.() ?? 0)
     const meshRev = this.meshSeedsRev
@@ -496,10 +496,6 @@ export class ShowHoneycombWorker extends Drone {
       const currentMeshRev = this.meshSeedsRev
       return currentKey !== locationKey || currentRev !== fsRev || currentMeshRev !== meshRev
     }
-
-    // note: key includes meshRev so mesh changes invalidate render baseline
-    const key = `${locationKey}|${fsRev}|${meshRev}|${circumRadiusPx}|${gapPx}|${padPx}|${localTextureUrl}|${externalTextureUrl}`
-    this.lastKey = key
 
     const dir = await lineage.explorerDir()
     if (isStale()) {
@@ -512,7 +508,7 @@ export class ShowHoneycombWorker extends Drone {
       return
     }
 
-    // note: your own seeds (filesystem)
+    // note: seed collection — always fresh, never cached
     const localSeeds = await this.listSeedFolders(dir)
     if (isStale()) {
       this.renderQueued = true
@@ -539,6 +535,33 @@ export class ShowHoneycombWorker extends Drone {
     const seedNames = Array.from(union)
     seedNames.sort((a, b) => a.localeCompare(b))
 
+    const localSeedSet = new Set(localSeeds)
+    const layerChanged = locationKey !== this.renderedLocationKey
+
+    // note: if streaming is active for the same layer, let the stream finish
+    if (this.streamActive && !layerChanged) return
+
+    // note: layer changed — cancel active stream, start progressive streaming
+    if (layerChanged) {
+      this.cancelStreamFlag = true
+      this.renderedLocationKey = locationKey
+      this.renderedCells.clear()
+
+      // emit navigation guard so click handlers block during transition
+      this.emitEffect('navigation:guard-start', { locationKey })
+
+      if (seedNames.length === 0) {
+        this.clearMesh()
+        this.emitEffect('navigation:guard-end', {})
+        return
+      }
+
+      // stream seeds progressively (async, non-blocking)
+      void this.streamSeeds(dir, seedNames, localSeedSet, axial)
+      return
+    }
+
+    // note: same layer — incremental path (seed collection was fresh, images are cached)
     if (seedNames.length === 0) {
       this.clearMesh()
       return
@@ -551,41 +574,106 @@ export class ShowHoneycombWorker extends Drone {
       return
     }
 
-    const localSeedSet = new Set(localSeeds)
     const cells = this.buildCellsFromAxial(axial, seedNames, maxCells, localSeedSet)
     if (cells.length === 0) {
       this.clearMesh()
       return
     }
 
-    // note: load cell images from 0000 properties → __resources__/
+    // note: load cell images (cached via seedImageCache + imageAtlas — fast for existing seeds)
     await this.loadCellImages(cells, dir)
     if (isStale()) {
       this.renderQueued = true
       return
     }
 
+    // update rendered cells map
+    this.renderedCells.clear()
+    for (const c of cells) this.renderedCells.set(c.label, c)
+
+    // apply geometry (skips rebuild if cells key unchanged)
+    await this.applyGeometry(cells)
+  }
+
+  // ── progressive streaming (inspired by legacy JsonHiveStreamLoader) ──
+
+  private static readonly STREAM_BATCH_SIZE = 8
+
+  private readonly streamSeeds = async (
+    dir: FileSystemDirectoryHandle,
+    seedNames: string[],
+    localSeedSet: Set<string>,
+    axial: any,
+  ): Promise<void> => {
+    this.streamActive = true
+    this.cancelStreamFlag = false
+
+    const cells: SeedCell[] = []
+
+    for (let i = 0; i < seedNames.length; i++) {
+      if (this.cancelStreamFlag) break
+
+      const label = seedNames[i]
+      const a = axial.items.get(i) as Axial | undefined
+      if (!a || !label) continue
+
+      const external = !localSeedSet.has(label)
+      const cell: SeedCell = { q: a.q, r: a.r, label, external }
+
+      // load image for this cell (cached if already in seedImageCache + atlas)
+      await this.loadCellImages([cell], dir)
+      if (this.cancelStreamFlag) break
+
+      cells.push(cell)
+      this.renderedCells.set(label, cell)
+
+      // rebuild geometry every batch or on last seed
+      const isLastSeed = i === seedNames.length - 1
+      if (cells.length % ShowHoneycombWorker.STREAM_BATCH_SIZE === 0 || isLastSeed) {
+        await this.applyGeometry(cells)
+      }
+
+      // micro-delay to avoid blocking main thread (legacy pattern)
+      await this.microDelay()
+    }
+
+    this.streamActive = false
+
+    // lift navigation guard
+    this.emitEffect('navigation:guard-end', {})
+
+    // pick up any changes that occurred during streaming
+    this.requestRender()
+  }
+
+  // ── geometry application (extracted for reuse by streaming + incremental paths) ──
+
+  private readonly applyGeometry = async (cells: SeedCell[]): Promise<void> => {
+    if (cells.length === 0) {
+      this.clearMesh()
+      return
+    }
+
+    const circumRadiusPx = 32
+    const gapPx = 6
+    const padPx = 10
+
     const nextCellsKey = this.buildCellsKey(cells)
 
-    // note: if nothing changed, avoid rebuilding geometry/shader
+    // skip rebuild if nothing changed
     if (nextCellsKey === this.renderedCellsKey && cells.length === this.renderedCount) {
       return
     }
 
     const hexHalfW = (Math.sqrt(3) * circumRadiusPx) / 2
     const hexHalfH = circumRadiusPx
-
     const quadHalfW = hexHalfW + padPx
     const quadHalfH = hexHalfH + padPx
     const quadW = quadHalfW * 2
     const quadH = quadHalfH * 2
 
-    const baseTex = await this.ensureTexture(localTextureUrl)
-    const externalTex = await this.ensureTexture(externalTextureUrl)
-    if (isStale()) {
-      this.renderQueued = true
-      return
-    }
+    const baseTex = await this.ensureTexture('/local.png')
+    const externalTex = await this.ensureTexture('/external.png')
     if (!baseTex || !externalTex || !this.atlas || !this.imageAtlas) {
       this.clearMesh()
       return
@@ -594,7 +682,7 @@ export class ShowHoneycombWorker extends Drone {
     const labelTex = this.atlas.getAtlasTexture()
     const cellImageTex = this.imageAtlas.getAtlasTexture()
 
-    // note: warm atlas uvs
+    // warm atlas uvs
     for (const c of cells) this.atlas.getLabelUV(c.label)
 
     const geom = this.buildFillQuadGeometry(cells, circumRadiusPx, gapPx, quadHalfW, quadHalfH)
@@ -616,10 +704,10 @@ export class ShowHoneycombWorker extends Drone {
       }
     }
 
-    // note: apply geometry
+    // apply geometry to mesh
     if (!this.hexMesh) {
       this.hexMesh = new Mesh({ geometry: geom as any, shader: (this.shader as any).shader, texture: baseTex as any } as any)
-      this.layer.addChild(this.hexMesh as any)
+      this.layer!.addChild(this.hexMesh as any)
     } else {
       if (this.geom) this.geom.destroy(true)
       this.hexMesh.geometry = geom
@@ -627,7 +715,7 @@ export class ShowHoneycombWorker extends Drone {
       if ('texture' in this.hexMesh) this.hexMesh.texture = baseTex
     }
 
-    // note: keep centered
+    // keep centered
     if (this.hexMesh?.getLocalBounds) {
       this.hexMesh.position.set(0, 0)
       const b = this.hexMesh.getLocalBounds()
@@ -639,12 +727,16 @@ export class ShowHoneycombWorker extends Drone {
     this.renderedCellsKey = nextCellsKey
     this.renderedCount = cells.length
 
-    // note: broadcast cell count + labels so tile-overlay knows which indices are occupied
+    // broadcast cell count + labels so tile-overlay knows which indices are occupied
     this.emitEffect('render:cell-count', {
       count: cells.length,
       labels: cells.map(c => c.label),
     })
   }
+
+  // 1–3ms micro-pause to avoid main-thread blocking (legacy JsonHiveStreamLoader pattern)
+  private readonly microDelay = (): Promise<void> =>
+    new Promise(r => setTimeout(r, 1 + Math.random() * 2))
 
   private ensureListeners = (): void => {
     if (this.listening) return
@@ -699,6 +791,7 @@ export class ShowHoneycombWorker extends Drone {
     this.geom = null
     this.renderedCellsKey = ''
     this.renderedCount = 0
+    this.renderedCells.clear()
     this.emitEffect('render:cell-count', { count: 0, labels: [] })
   }
 

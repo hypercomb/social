@@ -84,12 +84,16 @@ export class TileOverlayDrone extends Drone {
 
   #occupiedByAxial = new Map<string, { index: number; label: string }>()
 
+  // navigation click guard — blocks clicks during layer transitions
+  #navigationBlocked = false
+  #navigationGuardTimer: ReturnType<typeof setTimeout> | null = null
+
   protected override deps = {
     detector: '@diamondcoreprocessor.com/HexDetector',
     axial: '@diamondcoreprocessor.com/AxialService',
     lineage: '@hypercomb.social/Lineage',
   }
-  protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count']
+  protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count', 'navigation:guard-start', 'navigation:guard-end']
   protected override emits = ['tile:hover', 'tile:action', 'tile:click']
 
   protected override heartbeat = async (): Promise<void> => {
@@ -117,6 +121,18 @@ export class TileOverlayDrone extends Drone {
         this.#currentIndex = this.#lookupIndex(this.#currentAxial.q, this.#currentAxial.r)
         this.#updateVisibility()
       }
+    })
+
+    // navigation guard — block clicks during layer transitions
+    this.onEffect('navigation:guard-start', () => {
+      this.#navigationBlocked = true
+      // safety-net timeout in case guard-end never fires
+      if (this.#navigationGuardTimer) clearTimeout(this.#navigationGuardTimer)
+      this.#navigationGuardTimer = setTimeout(() => { this.#navigationBlocked = false }, 200)
+    })
+    this.onEffect('navigation:guard-end', () => {
+      this.#navigationBlocked = false
+      if (this.#navigationGuardTimer) { clearTimeout(this.#navigationGuardTimer); this.#navigationGuardTimer = null }
     })
   }
 
@@ -271,6 +287,7 @@ export class TileOverlayDrone extends Drone {
   // ── click detection ────────────────────────────────────────────
 
   #onClick = (e: MouseEvent): void => {
+    if (this.#navigationBlocked) return
     if (!this.#renderContainer || !this.#renderer || !this.#canvas) return
     if (this.#currentIndex === undefined || this.#currentIndex >= this.#cellCount) return
 
