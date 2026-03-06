@@ -1,18 +1,11 @@
-<!-- app.component.html -->
-<div class="app viewport">
-  @if(showHeader){
-  <header>
-    <app-header></app-header>
-  </header>
-  }
-
-  <main>
-    <router-outlet></router-outlet>
-  </main>
-
+@if(showHeader){
+<div class="header-bar">
+  <app-header></app-header>
+  <button class="mesh-toggle" type="button" (click)="toggleMesh()">
+    {{ meshPublic() ? 'public' : 'private' }}
+  </button>
 </div>
-<button class="mesh-toggle" type="button" (click)="toggleMesh()">
-  {{ meshPublic() ? 'public' : 'private' }}
-</button>
+}
+<router-outlet></router-outlet>
 <hc-controls-bar></hc-controls-bar>
 <hc-tile-editor></hc-tile-editor>

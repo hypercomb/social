@@ -1,66 +1,55 @@
-@use "variables" as *;
-
-.viewport {
-  display: grid;
-  grid-template-rows: $header-height 1fr 0;
-  grid-template-columns: 100%;
-  min-height: 100vh; // ensures full height scaling
-  min-height: 100dvh; // modern viewport unit for mobile browsers
-  width: 100%;
-
-  header {
-    background: $bg-header;
-    color: $text-light;
-    display: flex;
-    align-items: center;
-    font-size: clamp(0.9rem, 2vw, 1rem);
-  }
-
-  main {
-    //background: #050f17;
-    color: $text-dark;
-    padding: 1rem;
-    overflow-y: auto; // allow scroll only in main content
-  }
+.header-bar {
+  display: flex;
+  align-items: stretch;
+  padding: 0.4rem 0.5rem;
+  background-color: #050f17;
+  position: relative;
+  z-index: 10;
 }
 
-app-header{
-  width: 100%;
-        z-index: 100;
+app-header {
+  flex: 1;
+  min-width: 0;
 }
 
 .mesh-toggle {
-  position: fixed;
-  top: 14px;
-  right: 14px;
-  z-index: 9999;
-  width: 6.4em;
-  padding: 6px 20px;
-  border-radius: 5px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 6.5rem;
+  padding: 0 1.25em;
+  border-radius: 0 3px 3px 0;
+  border: 1px solid rgba(255, 45, 138, 0.2);
 
-  background: rgba(20, 24, 32, 0.72);
-  color: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(10px);
+  background: rgba(8, 18, 28, 0.65);
+  color: rgba(255, 45, 138, 0.7);
 
-  font: 600 13px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
-  letter-spacing: 0.2px;
+  font: 600 0.85em/1 ui-monospace, sfmono-regular, menlo, consolas, monospace;
+  letter-spacing: 0.02em;
 
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 0 4px rgba(255, 45, 138, 0.08);
   cursor: pointer;
+  transition:
+    border-color 200ms ease,
+    box-shadow 200ms ease,
+    color 200ms ease,
+    background 200ms ease;
 
   &:hover {
-    background: rgba(20, 24, 32, 0.86);
-    border-color: rgba(255, 255, 255, 0.22);
+    border-color: rgba(255, 45, 138, 0.4);
+    color: rgba(255, 45, 138, 0.9);
+    box-shadow:
+      0 0 6px rgba(255, 45, 138, 0.15),
+      0 0 14px rgba(255, 45, 138, 0.06);
   }
 
   &:active {
-    transform: translateY(1px);
+    background: rgba(255, 45, 138, 0.08);
   }
 
   &:focus-visible {
-    outline: 2px solid rgba(255, 208, 0, 0.9);
-    outline-offset: 3px;
+    outline: 1px solid rgba(255, 45, 138, 0.5);
+    outline-offset: 2px;
   }
 }
-

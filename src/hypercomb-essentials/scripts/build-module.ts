@@ -265,7 +265,7 @@ const buildNamespaceDependency = async (
     platform: 'browser',
     write: false,
     target: TARGET,
-    sourcemap: false,
+    sourcemap: 'inline',
     tsconfig: resolve(PROJECT_ROOT, 'tsconfig.json'),
     external: externals,
   })
@@ -289,7 +289,7 @@ const buildBee = async (entry: string, externals: string[]): Promise<Uint8Array>
     platform: 'browser',
     write: false,
     target: TARGET,
-    sourcemap: false,
+    sourcemap: 'inline',
     tsconfig: resolve(PROJECT_ROOT, 'tsconfig.json'),
     external: externals,
   })

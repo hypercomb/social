@@ -1,6 +1,7 @@
 import { Component, signal } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { SearchBarComponent } from '@hypercomb/shared';
+import { initializeRuntime } from '@hypercomb/shared/core';
 import { AxialService } from '@hypercomb/essentials/diamondcoreprocessor.com/core/axial/axial-service';
 import { PanningDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/pan/panning.drone';
 import { PixiHostWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/pixi-host.drone';
@@ -62,40 +63,9 @@ export class App {
       ImageEditorService]
 
     queueMicrotask(async () => {
-      const l = list();
-      console.log('[core-adapter] ioc keys:', l)
-
-      const hostkey = '@diamondcoreprocessor.com/PixiHostWorker'
-      const host = <any>get(hostkey)!
-      await host.pulse('testing')
-
-      const showkey = '@diamondcoreprocessor.com/ShowHoneycombWorker'
-      const show = <any>get(showkey)!
-      await show.pulse('testing')
-
-      const zoomkey = '@diamondcoreprocessor.com/ZoomDrone'
-      const zoom = <any>get(zoomkey)!
-      await zoom.pulse('testing')
-
-      const pankey = '@diamondcoreprocessor.com/PanningDrone'
-      const pan = <any>get(pankey)!
-      await pan.pulse('testing')
-
-      const overlaykey = '@diamondcoreprocessor.com/TileOverlayDrone'
-      const overlay = <any>get(overlaykey)!
-      await overlay.pulse('testing')
-
-      const mesh = get('@diamondcoreprocessor.com/NostrMeshWorker') as any
-
-      // 1) hard-start mesh lifecycle
-      await mesh.pulse('smoke-test')
-
-      try {
-        const enabled = !!mesh?.isNetworkEnabled?.()
-        this.meshPublic.set(enabled)
-      } catch {
-        // ignore
-      }
+      await initializeRuntime({
+        onMeshStateChange: enabled => this.meshPublic.set(enabled),
+      })
     })
   }
 }
