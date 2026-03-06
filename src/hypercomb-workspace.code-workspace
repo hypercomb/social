@@ -25,5 +25,26 @@
       "path": "hypercomb-web"
     }
   ],
+  "launch": {
+    "configurations": [
+      {
+        "name": "F5 Debug Dev",
+        "type": "chrome",
+        "request": "launch",
+        "preLaunchTask": "hypercomb-dev: F5 Start Dev",
+        "url": "http://localhost:4200/",
+        "webRoot": "${workspaceFolder:hypercomb-dev}"
+      },
+      {
+        "name": "F6 Debug Web",
+        "type": "chrome",
+        "request": "launch",
+        "preLaunchTask": "hypercomb-web: F5 Debug Start Web (production)",
+        "url": "http://localhost:4200/",
+        "webRoot": "${workspaceFolder:hypercomb-web}"
+      }
+    ],
+    "compounds": []
+  },
   "settings": {},
 }
