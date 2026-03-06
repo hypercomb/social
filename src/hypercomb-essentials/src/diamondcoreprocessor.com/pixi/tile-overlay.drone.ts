@@ -36,11 +36,11 @@ const RECT_COLOR = 0x001e30
 const RECT_ALPHA = 0.85
 
 // Icon positions within the overlay (measured from hex center = overlay origin)
-const ICON_SIZE = 7
-const EDIT_X = 11
-const EDIT_Y = 8
-const GARBAGE_X = 19.5
-const GARBAGE_Y = 8
+const ICON_SIZE = 8.75
+const EDIT_X = 10
+const EDIT_Y = 5
+const GARBAGE_X = 20.625
+const GARBAGE_Y = 5
 
 export class TileOverlayDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
