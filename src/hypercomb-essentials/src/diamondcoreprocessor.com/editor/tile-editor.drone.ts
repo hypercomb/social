@@ -125,14 +125,15 @@ export class TileEditorDrone {
       await writable.close()
     }
 
-    // 5. cleanup
+    // 5. capture seed name before closing
+    const savedSeed = service.seed
+
+    // 6. cleanup
     imageEditor.destroy()
     service.close()
 
-    // 6. trigger re-render
-    window.dispatchEvent(new CustomEvent('synchronize', {
-      detail: { source: 'tile:save' },
-    }))
+    // 7. notify via effect bus (processor owns synchronize; drones use effects)
+    EffectBus.emit('tile:saved', { seed: savedSeed })
   }
 
   // ── cancel ─────────────────────────────────────────────────────

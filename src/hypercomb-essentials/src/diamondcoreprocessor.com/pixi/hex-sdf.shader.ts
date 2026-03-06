@@ -15,14 +15,14 @@ export class HexSdfTextureShader {
     u_texSize: { value: Vec2; type: 'vec2<f32>' }
   }
 
-  public constructor(baseTexture: Texture, externalTexture: Texture, labelAtlas: Texture, quadW: number, quadH: number, radiusPx: number) {
+  public constructor(baseTexture: Texture, externalTexture: Texture, labelAtlas: Texture, cellImageAtlas: Texture, quadW: number, quadH: number, radiusPx: number) {
     this.uniforms = {
       u_quadSize: { value: [quadW, quadH], type: 'vec2<f32>' },
       u_radiusPx: { value: radiusPx, type: 'f32' },
       u_texSize: { value: [Math.max(1, baseTexture.width), Math.max(1, baseTexture.height)], type: 'vec2<f32>' },
     }
 
-    // v8 shaded mesh requires uniforms nested under a group and shader inputs using in/out :contentReference[oaicite:3]{index=3}
+    // v8 shaded mesh requires uniforms nested under a group and shader inputs using in/out
     this.shader = Shader.from({
       gl: { vertex: HexSdfTextureShader.vertexSource, fragment: HexSdfTextureShader.fragmentSource },
       resources: {
@@ -30,6 +30,7 @@ export class HexSdfTextureShader {
         u_tex0: this.toSource(baseTexture),
         u_tex1: this.toSource(externalTexture),
         u_label: this.toSource(labelAtlas),
+        u_cellImages: this.toSource(cellImageAtlas),
       },
     })
   }
@@ -57,20 +58,28 @@ export class HexSdfTextureShader {
     ;(this.shader.resources as any).u_tex1 = this.toSource(t)
   }
 
+  public setCellImageAtlas = (t: Texture): void => {
+    ;(this.shader.resources as any).u_cellImages = this.toSource(t)
+  }
+
   private toSource = (t: Texture): any => {
     return (t as any).source ?? (t as any).baseTexture?.source ?? (t as any).texture?.source
   }
 
-  // note: use in/out so pixi v8 can compile consistently :contentReference[oaicite:4]{index=4}
+  // note: use in/out so pixi v8 can compile consistently
   private static vertexSource = `
     in vec2 aPosition;
     in vec2 aUV;
     in vec4 aLabelUV;
     in float aTexKind;
+    in vec4 aImageUV;
+    in float aHasImage;
 
     out vec2 vUV;
     out vec4 vLabelUV;
     out float vTexKind;
+    out vec4 vImageUV;
+    out float vHasImage;
 
     uniform mat3 uProjectionMatrix;
     uniform mat3 uWorldTransformMatrix;
@@ -82,6 +91,8 @@ export class HexSdfTextureShader {
       vUV = aUV;
       vLabelUV = aLabelUV;
       vTexKind = aTexKind;
+      vImageUV = aImageUV;
+      vHasImage = aHasImage;
     }
   `
 
@@ -91,6 +102,8 @@ export class HexSdfTextureShader {
     in vec2 vUV;
     in vec4 vLabelUV;
     in float vTexKind;
+    in vec4 vImageUV;
+    in float vHasImage;
 
     uniform vec2 u_quadSize;
     uniform float u_radiusPx;
@@ -99,6 +112,7 @@ export class HexSdfTextureShader {
     uniform sampler2D u_tex0;
     uniform sampler2D u_tex1;
     uniform sampler2D u_label;
+    uniform sampler2D u_cellImages;
 
     float sdHex(vec2 p, float r) {
       p = abs(p);
@@ -114,12 +128,21 @@ export class HexSdfTextureShader {
 
     void main() {
       vec2 local = (vUV - 0.5) * u_quadSize;
-      float d = sdHex(rot30(local), u_radiusPx);
+      vec2 rotated = rot30(local);
+      float d = sdHex(rotated, u_radiusPx);
       if (d > 0.0) discard;
 
       vec4 baseLocal = texture2D(u_tex0, vUV);
       vec4 baseExternal = texture2D(u_tex1, vUV);
       vec4 base = mix(baseLocal, baseExternal, step(0.5, vTexKind));
+
+      // cell image fills interior; border from base texture stays on top
+      vec2 imgUV = mix(vImageUV.xy, vImageUV.zw, vUV);
+      vec4 cellImg = texture2D(u_cellImages, imgUV);
+      float borderWidth = u_radiusPx * 0.18;
+      float innerD = sdHex(rotated, u_radiusPx - borderWidth);
+      float innerMask = smoothstep(0.0, -1.5, innerD);
+      base = mix(base, cellImg, step(0.5, vHasImage) * innerMask);
 
       vec2 luv = mix(vLabelUV.xy, vLabelUV.zw, vUV);
       float labelAlpha = texture2D(u_label, luv).a;
@@ -131,8 +154,8 @@ export class HexSdfTextureShader {
 }
 
 export class HexSdfTextureShaderFactory {
-  public create = (baseTexture: Texture, externalTexture: Texture, labelAtlas: Texture, quadW: number, quadH: number, radiusPx: number): HexSdfTextureShader => {
-    return new HexSdfTextureShader(baseTexture, externalTexture, labelAtlas, quadW, quadH, radiusPx)
+  public create = (baseTexture: Texture, externalTexture: Texture, labelAtlas: Texture, cellImageAtlas: Texture, quadW: number, quadH: number, radiusPx: number): HexSdfTextureShader => {
+    return new HexSdfTextureShader(baseTexture, externalTexture, labelAtlas, cellImageAtlas, quadW, quadH, radiusPx)
   }
 }
 

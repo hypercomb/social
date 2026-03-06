@@ -8,11 +8,13 @@ import { Worker, SignatureService } from '@hypercomb/core'
 import { Application, Assets, Container, Geometry, Mesh, Texture } from 'pixi.js'
 import type { HostReadyPayload } from './pixi-host.drone.js'
 import { HexLabelAtlas } from './hex-label.atlas.js'
+import { HexImageAtlas } from './hex-image.atlas.js'
 import { HexSdfTextureShader } from './hex-sdf.shader.js'
+import { PROPERTIES_FILE, isSignature } from '../editor/tile-properties.js'
 import type { HistoryService, HistoryOp } from '../core/history.service.js'
 
 type Axial = { q: number; r: number }
-type SeedCell = { q: number; r: number; label: string; external: boolean }
+type SeedCell = { q: number; r: number; label: string; external: boolean; imageSig?: string }
 
 type MeshEvt = { relay: string; sig: string; event: any; payload: any }
 type MeshSub = { close: () => void }
@@ -39,14 +41,18 @@ export class ShowHoneycombWorker extends Worker {
     axial: '@diamondcoreprocessor.com/AxialService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
 
   private readonly texByUrl = new Map<string, Texture>()
   private atlas: HexLabelAtlas | null = null
+  private imageAtlas: HexImageAtlas | null = null
   private atlasRenderer: unknown = null
+
+  // cache: seed label → small image signature (avoids re-reading 0000 on every render)
+  private readonly seedImageCache = new Map<string, string | null>()
 
   private lastKey = ''
 
@@ -466,16 +472,18 @@ export class ShowHoneycombWorker extends Worker {
       return
     }
 
-    // note: init layer + atlas (and reset shader if renderer changes)
+    // note: init layer + atlases (and reset shader if renderer changes)
     if (!this.layer) {
       this.layer = new Container()
       this.pixiContainer.addChild(this.layer)
 
       this.atlas = new HexLabelAtlas(this.pixiRenderer, 128, 8, 8)
+      this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8)
       this.atlasRenderer = this.pixiRenderer
       this.shader = null
     } else if (!this.atlas || this.atlasRenderer !== this.pixiRenderer) {
       this.atlas = new HexLabelAtlas(this.pixiRenderer, 128, 8, 8)
+      this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8)
       this.atlasRenderer = this.pixiRenderer
       this.shader = null
     }
@@ -558,6 +566,13 @@ export class ShowHoneycombWorker extends Worker {
       return
     }
 
+    // note: load cell images from 0000 properties → __resources__/
+    await this.loadCellImages(cells, dir)
+    if (isStale()) {
+      this.renderQueued = true
+      return
+    }
+
     const nextCellsKey = this.buildCellsKey(cells)
 
     // note: if nothing changed, avoid rebuilding geometry/shader
@@ -579,12 +594,13 @@ export class ShowHoneycombWorker extends Worker {
       this.renderQueued = true
       return
     }
-    if (!baseTex || !externalTex || !this.atlas) {
+    if (!baseTex || !externalTex || !this.atlas || !this.imageAtlas) {
       this.clearMesh()
       return
     }
 
     const labelTex = this.atlas.getAtlasTexture()
+    const cellImageTex = this.imageAtlas.getAtlasTexture()
 
     // note: warm atlas uvs
     for (const c of cells) this.atlas.getLabelUV(c.label)
@@ -592,12 +608,13 @@ export class ShowHoneycombWorker extends Worker {
     const geom = this.buildFillQuadGeometry(cells, circumRadiusPx, gapPx, quadHalfW, quadHalfH)
 
     if (!this.shader) {
-      this.shader = new HexSdfTextureShader(baseTex, externalTex, labelTex, quadW, quadH, circumRadiusPx)
+      this.shader = new HexSdfTextureShader(baseTex, externalTex, labelTex, cellImageTex, quadW, quadH, circumRadiusPx)
     } else {
       try {
         this.shader.setBaseTexture(baseTex)
         this.shader.setExternalTexture(externalTex)
         this.shader.setLabelAtlas(labelTex)
+        this.shader.setCellImageAtlas(cellImageTex)
         this.shader.setQuadSize(quadW, quadH)
         this.shader.setRadiusPx(circumRadiusPx)
       } catch {
@@ -641,11 +658,17 @@ export class ShowHoneycombWorker extends Worker {
     if (this.listening) return
     this.listening = true
 
-    const mark = (): void => {
-      this.requestRender()
-    }
+    // respond to processor-emitted synchronize
+    window.addEventListener('synchronize', () => this.requestRender())
 
-    window.addEventListener('synchronize', mark)
+    // tile:saved effect — invalidate image cache so re-render picks up new image
+    this.onEffect<{ seed: string }>('tile:saved', (payload) => {
+      if (payload?.seed) {
+        this.seedImageCache.delete(payload.seed)
+      }
+      this.seedImageCache.clear()
+      this.requestRender()
+    })
 
     ; (window as any).showCellsPoc = {
       publishSeeds: async (seeds: string[]) => this.publishExplicitSeedList(seeds),
@@ -678,6 +701,8 @@ export class ShowHoneycombWorker extends Worker {
     this.shader = null
     this.texByUrl.clear()
     this.atlas = new HexLabelAtlas(renderer, 128, 8, 8)
+    this.imageAtlas = new HexImageAtlas(renderer, 256, 8, 8)
+    this.seedImageCache.clear()
     this.atlasRenderer = renderer
   }
 
@@ -723,9 +748,61 @@ export class ShowHoneycombWorker extends Worker {
     return out
   }
 
+  /**
+   * Load cell properties (0000 file) for each local seed and resolve
+   * the small.image signature from __resources__/ into the image atlas.
+   * Standard: any property value matching a 64-char hex signature
+   * refers to a blob in __resources__/{signature}.
+   */
+  private loadCellImages = async (cells: SeedCell[], dir: FileSystemDirectoryHandle): Promise<void> => {
+    const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as
+      { getResource: (sig: string) => Promise<Blob | null> } | undefined
+    if (!store || !this.imageAtlas) return
+
+    for (const cell of cells) {
+      // external seeds don't have local OPFS data
+      if (cell.external) continue
+
+      // check cache first
+      if (this.seedImageCache.has(cell.label)) {
+        cell.imageSig = this.seedImageCache.get(cell.label) ?? undefined
+        continue
+      }
+
+      // read 0000 properties file from the seed directory
+      try {
+        const seedDir = await dir.getDirectoryHandle(cell.label)
+        const fileHandle = await seedDir.getFileHandle(PROPERTIES_FILE)
+        const file = await fileHandle.getFile()
+        const text = await file.text()
+        const props = JSON.parse(text)
+
+        // standard: small.image is a signature → resolve from __resources__/
+        const smallSig = props?.small?.image
+        if (smallSig && isSignature(smallSig)) {
+          cell.imageSig = smallSig
+          this.seedImageCache.set(cell.label, smallSig)
+
+          // load blob into image atlas if not already there
+          if (!this.imageAtlas.hasImage(smallSig)) {
+            const blob = await store.getResource(smallSig)
+            if (blob) {
+              await this.imageAtlas.loadImage(smallSig, blob)
+            }
+          }
+        } else {
+          this.seedImageCache.set(cell.label, null)
+        }
+      } catch {
+        // no seed dir or no properties file — no image
+        this.seedImageCache.set(cell.label, null)
+      }
+    }
+  }
+
   private buildCellsKey = (cells: SeedCell[]): string => {
     let s = ''
-    for (const c of cells) s += `${c.q},${c.r}:${c.label}:${c.external ? 1 : 0}|`
+    for (const c of cells) s += `${c.q},${c.r}:${c.label}:${c.external ? 1 : 0}:${c.imageSig ?? ''}|`
     return s
   }
 
@@ -741,9 +818,11 @@ export class ShowHoneycombWorker extends Worker {
     const uv = new Float32Array(cells.length * 8)
     const labelUV = new Float32Array(cells.length * 16)
     const texKind = new Float32Array(cells.length * 4)
+    const imageUV = new Float32Array(cells.length * 16)
+    const hasImage = new Float32Array(cells.length * 4)
     const idx = new Uint32Array(cells.length * 6)
 
-    let pv = 0, uvp = 0, luvp = 0, tkp = 0, ii = 0, base = 0
+    let pv = 0, uvp = 0, luvp = 0, tkp = 0, iuvp = 0, hip = 0, ii = 0, base = 0
 
     for (const c of cells) {
       const { x, y } = this.axialToPixel(c.q, c.r, spacing)
@@ -767,6 +846,16 @@ export class ShowHoneycombWorker extends Worker {
       texKind.set([kind, kind, kind, kind], tkp)
       tkp += 4
 
+      // cell image atlas UVs
+      const imgUV = c.imageSig ? this.imageAtlas?.getImageUV(c.imageSig) ?? null : null
+      const hi = imgUV ? 1 : 0
+      for (let i = 0; i < 4; i++) {
+        imageUV.set(imgUV ? [imgUV.u0, imgUV.v0, imgUV.u1, imgUV.v1] : [0, 0, 0, 0], iuvp)
+        iuvp += 4
+      }
+      hasImage.set([hi, hi, hi, hi], hip)
+      hip += 4
+
       idx.set([base, base + 1, base + 2, base, base + 2, base + 3], ii)
       ii += 6
       base += 4
@@ -777,6 +866,8 @@ export class ShowHoneycombWorker extends Worker {
       ; (g as any).addAttribute('aUV', uv, 2)
       ; (g as any).addAttribute('aLabelUV', labelUV, 4)
       ; (g as any).addAttribute('aTexKind', texKind, 1)
+      ; (g as any).addAttribute('aImageUV', imageUV, 4)
+      ; (g as any).addAttribute('aHasImage', hasImage, 1)
       ; (g as any).addIndex(idx)
 
     return g
