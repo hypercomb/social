@@ -19,6 +19,7 @@ export class ImageEditorService extends EventTarget {
   #hexWidth = 0
   #hexHeight = 0
   #borderColor = 0xc8975a
+  #backgroundColor = 0x1e1e1e
 
   // ── public state ───────────────────────────────────────────────
 
@@ -145,12 +146,12 @@ export class ImageEditorService extends EventTarget {
   }
 
   // ── capture ────────────────────────────────────────────────────
-  // Renders the container at hex dimensions to a WebP blob.
-  // No layer overlays — just the positioned/scaled image.
+  // Renders background + positioned image only.
+  // The grid shader adds its own border + label on top.
 
   readonly captureSmall = async (
     width: number,
-    height: number
+    height: number,
   ): Promise<Blob> => {
     if (!this.#app || !this.#container) {
       throw new Error('ImageEditorService not initialized')
@@ -165,11 +166,24 @@ export class ImageEditorService extends EventTarget {
       antialias: false,
     })
 
+    // hide hex frame — the grid shader renders its own border
+    if (this.#hexFrame) this.#hexFrame.visible = false
+
+    // add temporary background fill behind the image
+    const bg = new Graphics()
+    bg.rect(0, 0, width, height).fill({ color: this.#backgroundColor })
+    this.#container.addChildAt(bg, 0)
+
     renderer.render({
       container: this.#container,
       target: renderTexture,
       clear: true,
     } as any)
+
+    // restore
+    this.#container.removeChild(bg)
+    bg.destroy()
+    if (this.#hexFrame) this.#hexFrame.visible = true
 
     const canvas = renderer.extract.canvas(renderTexture) as HTMLCanvasElement
     renderTexture.destroy(true)
@@ -199,6 +213,7 @@ export class ImageEditorService extends EventTarget {
     const parsed = color
       ? (parseInt(color.replace('#', ''), 16) || 0x1e1e1e)
       : 0x1e1e1e
+    this.#backgroundColor = parsed
     this.#app.renderer.background.color = parsed
   }
 
@@ -218,11 +233,12 @@ export class ImageEditorService extends EventTarget {
     const w = this.#hexWidth
     const h = this.#hexHeight
 
-    // 346×400 hex frame path — uniform scale at 95%, centered.
+    // 346×400 hex frame path — uniform scale to fill canvas.
     // Source bounds: x[27.090419..118.63625] y[122.41302..228.24639]
+    // Source aspect (√3 : 2) matches the hex canvas, so uniform scale fits exactly.
     const srcMinX = 27.090419, srcMinY = 122.41302
     const srcW = 91.545831, srcH = 105.83337
-    const s = (h / srcH) * 0.95
+    const s = h / srcH
     const ox = (w - srcW * s) / 2
     const oy = (h - srcH * s) / 2
     const tx = (x: number) => (x - srcMinX) * s + ox

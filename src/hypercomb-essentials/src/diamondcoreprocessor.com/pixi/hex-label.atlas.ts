@@ -41,10 +41,12 @@ export class HexLabelAtlas {
 
     this.style = new TextStyle({
       fontFamily: 'monospace',
-      fontSize: 10,
+      fontSize: 7.5,
       fill: 0xffffff,
-      align: 'center',
+      align: 'center'
     })
+  
+
   }
 
   public getAtlasTexture = (): Texture => {
@@ -63,6 +65,8 @@ export class HexLabelAtlas {
     const row = Math.floor(slot / this.cols)
 
     const text = new Text({ text: label, style: this.style })
+    text.resolution = 4
+
     text.anchor.set(0.5)
     text.position.set(
       col * this.cellPx + this.cellPx * 0.5,

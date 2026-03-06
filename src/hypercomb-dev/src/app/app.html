@@ -1,9 +1,10 @@
-<hc-search-bar></hc-search-bar>
+<div class="header-bar">
+  <hc-search-bar></hc-search-bar>
+  <button class="mesh-toggle" type="button" (click)="toggleMesh()">{{ meshPublic() ? 'public' : 'private' }}</button>
+</div>
 <router-outlet />
 <div id="pixi-host" style="z-index: 0; position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></div>
-<button class="mesh-toggle" type="button" (click)="toggleMesh()">
-  {{ meshPublic() ? 'public' : 'private' }}
-</button>
+<hc-controls-bar></hc-controls-bar>
 <hc-tile-editor></hc-tile-editor>
 <!-- <hc-opfs-explorer></hc-opfs-explorer> -->
 <!-- <hc-portal-overlay></hc-portal-overlay> -->

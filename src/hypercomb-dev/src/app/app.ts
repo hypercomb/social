@@ -20,10 +20,11 @@ import { TileEditorService } from '@hypercomb/essentials/diamondcoreprocessor.co
 import { TileEditorDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/editor/tile-editor.drone'
 import { ImageEditorService } from '@hypercomb/essentials/diamondcoreprocessor.com/editor/image-editor.service'
 import { TileEditorComponent } from '@hypercomb/shared/ui/tile-editor/tile-editor.component'
+import { ControlsBarComponent } from '@hypercomb/shared/ui/controls-bar/controls-bar.component'
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, SearchBarComponent, TileEditorComponent],
+  imports: [RouterOutlet, SearchBarComponent, TileEditorComponent, ControlsBarComponent],
   styleUrls: ['./app.scss'] as any,
   templateUrl: './app.html'
 })
@@ -34,7 +35,6 @@ export class App {
 
   public toggleMesh = (): void => {
     const mesh = get('@diamondcoreprocessor.com/NostrMeshWorker') as any;
-
     const next = !this.meshPublic();
     this.meshPublic.set(next);
     mesh?.setNetworkEnabled?.(next, true);
@@ -96,7 +96,6 @@ export class App {
       } catch {
         // ignore
       }
-
     })
   }
 }

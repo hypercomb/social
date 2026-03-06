@@ -136,7 +136,7 @@ export class HexSdfTextureShader {
       vec4 baseExternal = texture2D(u_tex1, vUV);
       vec4 base = mix(baseLocal, baseExternal, step(0.5, vTexKind));
 
-      // cell image fills interior; border from base texture stays on top
+      // cell image fills interior; base texture border stays on top
       vec2 imgUV = mix(vImageUV.xy, vImageUV.zw, vUV);
       vec4 cellImg = texture2D(u_cellImages, imgUV);
       float borderWidth = u_radiusPx * 0.18;

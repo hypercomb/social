@@ -1,0 +1,93 @@
+<div
+  class="controls-pill"
+  [class.faded]="!visible()"
+  (mouseenter)="onBarEnter()"
+  (mouseleave)="onBarLeave()"
+>
+  @switch (mode()) {
+    @case ('browsing') {
+      <!-- nav section (leftmost) -->
+      @if (canGoBack() || hasPath()) {
+        <div class="controls-section nav">
+          @if (canGoBack()) {
+            <button class="ctl-btn" (click)="goBack()" aria-label="back">
+              <span class="hci">B</span>
+            </button>
+          }
+          @if (hasPath()) {
+            <span class="path-crumb">{{ path() }}</span>
+          }
+        </div>
+        <div class="controls-divider"></div>
+      }
+
+      <!-- view section -->
+      <div class="controls-section view">
+        <button class="ctl-btn" [class.active]="locked()" (click)="toggleLock()" aria-label="lock">
+          <span class="hci">{{ locked() ? 'a' : 'b' }}</span>
+        </button>
+        <button class="ctl-btn" (click)="centerView()" aria-label="center">
+          <span class="hci">(</span>
+        </button>
+        <button class="ctl-btn" (click)="zoomOut()" aria-label="zoom out">
+          <span class="hci">I</span>
+        </button>
+        <button class="ctl-btn" (click)="zoomIn()" aria-label="zoom in">
+          <span class="hci">K</span>
+        </button>
+        <button class="ctl-btn" (click)="toggleFullscreen()" aria-label="fullscreen">
+          <span class="hci">'</span>
+        </button>
+      </div>
+
+      <!-- utility section (slides in) -->
+      @if (utility()) {
+        <div class="controls-divider"></div>
+        <div class="controls-section utility">
+          <button class="ctl-btn" (click)="cut()" aria-label="cut">
+            <span class="hci">y</span>
+          </button>
+          <button class="ctl-btn" (click)="copy()" aria-label="copy">
+            <span class="hci">x</span>
+          </button>
+          <button class="ctl-btn" (click)="remove()" aria-label="delete">
+            <span class="hci">Q</span>
+          </button>
+          <button class="ctl-btn" (click)="move()" aria-label="move">
+            <span class="hci">3</span>
+          </button>
+          <button class="ctl-btn clipboard-btn" (click)="openClipboard()" aria-label="clipboard">
+            <span class="hci">$</span>
+            @if (clipboardCount() > 0) {
+              <span class="badge">{{ clipboardCount() }}</span>
+            }
+          </button>
+        </div>
+      }
+
+      <!-- utility toggle (rightmost) -->
+      <div class="controls-divider"></div>
+      <button class="ctl-btn toggle" [class.active]="utility()" (click)="toggleUtility()" aria-label="utility mode">
+        <span class="hci">s</span>
+      </button>
+    }
+
+    @case ('clipboard') {
+      <div class="controls-section clipboard-mode">
+        <span class="mode-label">clipboard</span>
+        @if (clipboardCount() > 0) {
+          <span class="clipboard-count">{{ clipboardCount() }}</span>
+        } @else {
+          <span class="clipboard-empty">empty</span>
+        }
+      </div>
+      <div class="controls-divider"></div>
+      <button class="ctl-btn" (click)="clearClipboard()" aria-label="clear clipboard">
+        <span class="hci">Q</span>
+      </button>
+      <button class="ctl-btn" (click)="closeClipboard()" aria-label="close clipboard">
+        <span class="close-x">&times;</span>
+      </button>
+    }
+  }
+</div>

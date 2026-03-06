@@ -65,10 +65,13 @@ export class HexImageAtlas {
     const texture = Texture.from(bitmap)
     const sprite = new Sprite(texture)
 
-    // scale image to fill the atlas cell
+    // scale image to fit within the atlas cell (contain, no cropping).
+    // The hex quad has the same aspect ratio (√3 : 2) so the horizontal
+    // padding aligns exactly with the hex clip region — no visible gap.
     const scaleX = this.#cellPx / bitmap.width
     const scaleY = this.#cellPx / bitmap.height
-    sprite.scale.set(Math.max(scaleX, scaleY))
+    const scale = Math.min(scaleX, scaleY)
+    sprite.scale.set(scale)
 
     // center the image in the cell
     sprite.anchor.set(0.5)
@@ -81,10 +84,16 @@ export class HexImageAtlas {
     this.#renderer.render({ container: sprite, target: this.#atlas, clear: false })
     sprite.destroy()
 
-    const u0 = (col * this.#cellPx) / this.#atlas.width
-    const v0 = (row * this.#cellPx) / this.#atlas.height
-    const u1 = ((col + 1) * this.#cellPx) / this.#atlas.width
-    const v1 = ((row + 1) * this.#cellPx) / this.#atlas.height
+    // UV bounds reference only the image content within the cell (skip padding)
+    const imgW = bitmap.width * scale
+    const imgH = bitmap.height * scale
+    const padX = (this.#cellPx - imgW) / 1.25
+    const padY = (this.#cellPx - imgH) / 1.25
+
+    const u0 = (col * this.#cellPx + padX) / this.#atlas.width
+    const v0 = (row * this.#cellPx + padY) / this.#atlas.height
+    const u1 = (col * this.#cellPx + padX + imgW) / this.#atlas.width
+    const v1 = (row * this.#cellPx + padY + imgH) / this.#atlas.height
 
     const uv: ImageUV = { u0, v0, u1, v1 }
     this.#map.set(sig, uv)
