@@ -3,7 +3,8 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "start": "ng serve",
+    "prestart": "npm run prebuild:web --prefix ..",
+    "start": "ng serve --port 4200 --host localhost",
     "build": "ng build",
     "runtime": "npm run runtime:core ; npm run runtime:pixi",
     "runtime:core": "node ./scripts/build-core-vendor.cjs",

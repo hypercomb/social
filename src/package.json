@@ -21,7 +21,10 @@
     "publish:core": "tsx scripts/publish.ts --core-only",
     "publish:essentials": "tsx scripts/publish.ts --essentials-only",
     "build:module": "npm --prefix hypercomb-essentials run build:module",
-    "deploy:essentials": "npm --prefix hypercomb-essentials run build:module:deploy"
+    "deploy:essentials": "npm --prefix hypercomb-essentials run build:module:deploy",
+    "runtime:essentials": "npm run build:module && npm --prefix hypercomb-essentials run copy-to-web",
+    "prebuild:web": "tsx scripts/prebuild.ts --target web",
+    "prebuild:dev": "tsx scripts/prebuild.ts --target dev"
   },
   "dependencies": {
     "@angular/animations": "21.2.0",

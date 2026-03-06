@@ -53,7 +53,6 @@ if (-not $SkipEssentialsDeploy) {
 
   Invoke-Step 'Verify latest pointers are readable' {
     $latestTxt = Invoke-WebRequest -UseBasicParsing -Uri "https://$StorageAccount.blob.core.windows.net/content/latest.txt"
-    $latestJson = Invoke-WebRequest -UseBasicParsing -Uri "https://$StorageAccount.blob.core.windows.net/content/latest.json"
 
     $sig = ($latestTxt.Content -replace "`uFEFF", '').Trim()
     if ($sig -notmatch '^[a-f0-9]{64}$') {
@@ -61,7 +60,6 @@ if (-not $SkipEssentialsDeploy) {
     }
 
     Write-Host "latest signature: $sig"
-    Write-Host "latest.json: $($latestJson.Content)"
   }
 }
 

@@ -78,32 +78,8 @@ const clearDirectory = async (dir: FileSystemDirectoryHandle): Promise<void> => 
 }
 
 const resolveLatestSignature = async (): Promise<string | null> => {
-  const candidates = [
-    `${CONTENT_BASE_URL}/latest.txt`,
-    `${CONTENT_BASE_URL}/latest`,
-    `${CONTENT_BASE_URL}/latest.json`,
-    `${CONTENT_BASE_URL}/__latest__.txt`,
-    `${CONTENT_BASE_URL}/__latest__.json`,
-  ]
-
-  for (const url of candidates) {
-    const text = await fetchText(url)
-    if (!text) continue
-
-    const direct = extractSignature(text)
-    if (direct) return direct
-
-    try {
-      const json = JSON.parse(text) as Record<string, string>
-      const parsed =
-        extractSignature(json['signature']) ||
-        extractSignature(json['latest']) ||
-        extractSignature(json['root'])
-      if (parsed) return parsed
-    } catch { /* not json */ }
-  }
-
-  return null
+  const text = await fetchText(`${CONTENT_BASE_URL}/latest.txt`)
+  return text ? extractSignature(text) : null
 }
 
 const fetchText = async (url: string): Promise<string | null> => {
