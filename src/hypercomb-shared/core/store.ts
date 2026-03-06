@@ -30,6 +30,8 @@ export class Store extends EventTarget {
   public layers!: FileSystemDirectoryHandle
   public resources!: FileSystemDirectoryHandle
 
+  #initialized = false
+
   // -------------------------------------------------
   // current folder (within hypercomb root)
   // -------------------------------------------------
@@ -83,6 +85,9 @@ export class Store extends EventTarget {
   // -------------------------------------------------
 
   public initialize = async (): Promise<void> => {
+    if (this.#initialized) return
+    this.#initialized = true
+
     this.opfsRoot = await navigator.storage.getDirectory()
 
     this.hypercombRoot =

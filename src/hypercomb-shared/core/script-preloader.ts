@@ -20,6 +20,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   public get resourceCount(): number { return this.#resourceCount }
 
   private readonly bySignature = new Map<string, ActionDescriptor>()
+  readonly #beeBySignature = new Map<string, Bee>()
 
   public resolveBySignature = (signature: string): ActionDescriptor | undefined =>
     this.bySignature.get(signature)
@@ -27,8 +28,44 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   public getActionName = (signature: string): string | null =>
     this.bySignature.get(signature)?.name ?? null
 
+  /**
+   * Read marker files from store.current (the active seed directory).
+   * Each marker is an empty file named with a 64-hex bee signature.
+   * Loads the corresponding bee from __bees__/{sig}.js and returns it.
+   */
   public find = async (_name: string): Promise<Bee[]> => {
-    return []
+    const store = this.store
+    const dir = store.current
+    const bees: Bee[] = []
+
+    for await (const [markerSig, entry] of dir.entries()) {
+      if (entry.kind !== 'file') continue
+      if (!this.isSignature(markerSig)) continue
+
+      // Already loaded — return cached instance
+      const cached = this.#beeBySignature.get(markerSig)
+      if (cached) {
+        bees.push(cached)
+        continue
+      }
+
+      // Load bee JS from __bees__/{sig}.js
+      try {
+        const beeHandle = await store.bees.getFileHandle(`${markerSig}.js`)
+        const beeFile = await beeHandle.getFile()
+        const buffer = await beeFile.arrayBuffer()
+        const bee = await store.getBee(markerSig, buffer)
+        if (!bee) continue
+        if (!has(bee.iocKey)) register(bee.iocKey, bee)
+        this.bySignature.set(markerSig, { signature: markerSig, name: bee.name ?? markerSig })
+        this.#beeBySignature.set(markerSig, bee)
+        bees.push(bee)
+      } catch {
+        // bee not in OPFS yet — skip silently
+      }
+    }
+
+    return bees
   }
 
   public preload = async (): Promise<void> => {
@@ -81,6 +118,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
         if (!has(bee.iocKey)) register(bee.iocKey, bee)
 
         this.bySignature.set(signature, { signature, name: bee.name ?? signature })
+        this.#beeBySignature.set(signature, bee)
         this.#resourceCount = this.#resourceCount + 1
         this.dispatchEvent(new CustomEvent('change'))
       } catch {
