@@ -41,7 +41,7 @@ export class ShowHoneycombWorker extends Worker {
     axial: '@diamondcoreprocessor.com/AxialService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'seed:added', 'seed:removed']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'seed:added', 'seed:removed', 'selection:changed']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -674,6 +674,9 @@ export class ShowHoneycombWorker extends Worker {
     this.onEffect<{ seed: string }>('seed:added', () => this.requestRender())
     this.onEffect<{ seed: string }>('seed:removed', () => this.requestRender())
 
+    // selection changes — re-render to update selection highlight
+    this.onEffect<{ selected: string[] }>('selection:changed', () => this.requestRender())
+
     ; (window as any).showCellsPoc = {
       publishSeeds: async (seeds: string[]) => this.publishExplicitSeedList(seeds),
       signature: async () => {
@@ -805,8 +808,10 @@ export class ShowHoneycombWorker extends Worker {
   }
 
   private buildCellsKey = (cells: SeedCell[]): string => {
+    const selectionService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SelectionService') as
+      { isSelected: (label: string) => boolean } | undefined
     let s = ''
-    for (const c of cells) s += `${c.q},${c.r}:${c.label}:${c.external ? 1 : 0}:${c.imageSig ?? ''}|`
+    for (const c of cells) s += `${c.q},${c.r}:${c.label}:${c.external ? 1 : 0}:${c.imageSig ?? ''}:${selectionService?.isSelected(c.label) ? 1 : 0}|`
     return s
   }
 
@@ -818,15 +823,19 @@ export class ShowHoneycombWorker extends Worker {
   private buildFillQuadGeometry(cells: SeedCell[], r: number, gap: number, hw: number, hh: number): Geometry {
     const spacing = r + gap
 
+    const selectionService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SelectionService') as
+      { isSelected: (label: string) => boolean } | undefined
+
     const pos = new Float32Array(cells.length * 8)
     const uv = new Float32Array(cells.length * 8)
     const labelUV = new Float32Array(cells.length * 16)
     const texKind = new Float32Array(cells.length * 4)
     const imageUV = new Float32Array(cells.length * 16)
     const hasImage = new Float32Array(cells.length * 4)
+    const selected = new Float32Array(cells.length * 4)
     const idx = new Uint32Array(cells.length * 6)
 
-    let pv = 0, uvp = 0, luvp = 0, tkp = 0, iuvp = 0, hip = 0, ii = 0, base = 0
+    let pv = 0, uvp = 0, luvp = 0, tkp = 0, iuvp = 0, hip = 0, sp = 0, ii = 0, base = 0
 
     for (const c of cells) {
       const { x, y } = this.axialToPixel(c.q, c.r, spacing)
@@ -860,6 +869,11 @@ export class ShowHoneycombWorker extends Worker {
       hasImage.set([hi, hi, hi, hi], hip)
       hip += 4
 
+      // selection state
+      const sel = selectionService?.isSelected(c.label) ? 1 : 0
+      selected.set([sel, sel, sel, sel], sp)
+      sp += 4
+
       idx.set([base, base + 1, base + 2, base, base + 2, base + 3], ii)
       ii += 6
       base += 4
@@ -872,6 +886,7 @@ export class ShowHoneycombWorker extends Worker {
       ; (g as any).addAttribute('aTexKind', texKind, 1)
       ; (g as any).addAttribute('aImageUV', imageUV, 4)
       ; (g as any).addAttribute('aHasImage', hasImage, 1)
+      ; (g as any).addAttribute('aSelected', selected, 1)
       ; (g as any).addIndex(idx)
 
     return g

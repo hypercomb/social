@@ -74,12 +74,14 @@ export class HexSdfTextureShader {
     in float aTexKind;
     in vec4 aImageUV;
     in float aHasImage;
+    in float aSelected;
 
     out vec2 vUV;
     out vec4 vLabelUV;
     out float vTexKind;
     out vec4 vImageUV;
     out float vHasImage;
+    out float vSelected;
 
     uniform mat3 uProjectionMatrix;
     uniform mat3 uWorldTransformMatrix;
@@ -93,6 +95,7 @@ export class HexSdfTextureShader {
       vTexKind = aTexKind;
       vImageUV = aImageUV;
       vHasImage = aHasImage;
+      vSelected = aSelected;
     }
   `
 
@@ -104,6 +107,7 @@ export class HexSdfTextureShader {
     in float vTexKind;
     in vec4 vImageUV;
     in float vHasImage;
+    in float vSelected;
 
     uniform vec2 u_quadSize;
     uniform float u_radiusPx;
@@ -148,7 +152,16 @@ export class HexSdfTextureShader {
       float labelAlpha = texture2D(u_label, luv).a;
       vec4 label = vec4(1.0, 1.0, 1.0, labelAlpha);
 
-      gl_FragColor = mix(base, label, labelAlpha);
+      vec4 color = mix(base, label, labelAlpha);
+
+      // selection ring — cyan-blue glow at the hex edge
+      if (vSelected > 0.5) {
+        float selRing = smoothstep(0.0, -2.0, d) - smoothstep(-4.0, -6.0, d);
+        vec3 selColor = vec3(0.3, 0.7, 1.0);
+        color = mix(color, vec4(selColor, 1.0), selRing * 0.8);
+      }
+
+      gl_FragColor = color;
     }
   `
 }

@@ -90,7 +90,7 @@ export class TileOverlayDrone extends Drone {
     lineage: '@hypercomb.social/Lineage',
   }
   protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count']
-  protected override emits = ['tile:hover', 'tile:action']
+  protected override emits = ['tile:hover', 'tile:action', 'tile:click']
 
   protected override heartbeat = async (): Promise<void> => {
     this.onEffect<HostReadyPayload>('render:host-ready', (payload) => {
@@ -271,29 +271,43 @@ export class TileOverlayDrone extends Drone {
   // ── click detection ────────────────────────────────────────────
 
   #onClick = (e: MouseEvent): void => {
-    if (!this.#overlay?.visible || !this.#renderContainer || !this.#renderer || !this.#canvas) return
+    if (!this.#renderContainer || !this.#renderer || !this.#canvas) return
     if (this.#currentIndex === undefined || this.#currentIndex >= this.#cellCount) return
+
+    const entry = this.#occupiedByAxial.get(
+      TileOverlayDrone.axialKey(this.#currentAxial!.q, this.#currentAxial!.r),
+    )
+    if (!entry?.label) return
 
     const pixiGlobal = this.#clientToPixiGlobal(e.clientX, e.clientY)
     const local = this.#renderContainer.toLocal(new Point(pixiGlobal.x, pixiGlobal.y))
 
-    const ox = this.#overlay.position.x
-    const oy = this.#overlay.position.y
+    // check action buttons first (only when overlay is visible)
+    if (this.#overlay?.visible) {
+      const ox = this.#overlay.position.x
+      const oy = this.#overlay.position.y
 
-    for (const action of this.#actions) {
-      const btn = action.button
-      const bx = local.x - ox - btn.position.x
-      const by = local.y - oy - btn.position.y
+      for (const action of this.#actions) {
+        const btn = action.button
+        const bx = local.x - ox - btn.position.x
+        const by = local.y - oy - btn.position.y
 
-      if (btn.containsPoint(bx, by)) {
-        const entry = this.#occupiedByAxial.get(
-          TileOverlayDrone.axialKey(this.#currentAxial!.q, this.#currentAxial!.r),
-        )
-        if (!entry?.label) return
-        action.handler(entry.label, this.#currentAxial!.q, this.#currentAxial!.r, this.#currentIndex!)
-        return
+        if (btn.containsPoint(bx, by)) {
+          action.handler(entry.label, this.#currentAxial!.q, this.#currentAxial!.r, this.#currentIndex!)
+          return
+        }
       }
     }
+
+    // no action button hit — emit tile:click for selection handling
+    this.emitEffect('tile:click', {
+      q: this.#currentAxial!.q,
+      r: this.#currentAxial!.r,
+      label: entry.label,
+      index: this.#currentIndex!,
+      ctrlKey: e.ctrlKey,
+      metaKey: e.metaKey,
+    })
   }
 
   #handleRemove = async (label: string): Promise<void> => {

@@ -1,0 +1,203 @@
+// hypercomb-essentials/src/diamondcoreprocessor.com/input/selection/tile-selection.drone.ts
+// Pointer-to-selection coordination: click-select, ctrl+click toggle, ctrl+drag paint-select/deselect.
+
+import { Drone } from '@hypercomb/core'
+import { Application, Container, Point } from 'pixi.js'
+import type { HostReadyPayload } from '../../pixi/pixi-host.drone.js'
+import type { Axial } from '../hex-detector.js'
+import type { SelectionService } from '../../core/selection/selection.service.js'
+
+type CellCountPayload = { count: number; labels: string[] }
+type TileClickPayload = { q: number; r: number; label: string; index: number; ctrlKey: boolean; metaKey: boolean }
+
+export class TileSelectionDrone extends Drone {
+  readonly namespace = 'diamondcoreprocessor.com'
+  override description = 'click and drag tile selection'
+
+  #renderContainer: Container | null = null
+  #canvas: HTMLCanvasElement | null = null
+  #renderer: Application['renderer'] | null = null
+
+  #meshOffset = { x: 0, y: 0 }
+  #cellCount = 0
+  #cellLabels: string[] = []
+  #occupiedByAxial = new Map<string, { index: number; label: string }>()
+
+  // drag-select gesture state
+  #dragActive = false
+  #lastOp: 'add' | 'remove' | null = null
+  #touched = new Set<string>()
+  #justDragged = false
+
+  #listening = false
+
+  protected override deps = {
+    detector: '@diamondcoreprocessor.com/HexDetector',
+    axial: '@diamondcoreprocessor.com/AxialService',
+    selection: '@diamondcoreprocessor.com/SelectionService',
+  }
+
+  protected override listens = ['render:host-ready', 'render:cell-count', 'render:mesh-offset', 'tile:click']
+  protected override emits: string[] = []
+
+  protected override heartbeat = async (): Promise<void> => {
+    this.onEffect<HostReadyPayload>('render:host-ready', (payload) => {
+      this.#renderContainer = payload.container
+      this.#canvas = payload.canvas
+      this.#renderer = payload.renderer
+      this.#attachListeners()
+    })
+
+    this.onEffect<{ x: number; y: number }>('render:mesh-offset', (offset) => {
+      this.#meshOffset = offset
+    })
+
+    this.onEffect<CellCountPayload>('render:cell-count', (payload) => {
+      this.#cellCount = payload.count
+      this.#cellLabels = payload.labels
+      this.#rebuildOccupiedMap()
+    })
+
+    // click selection via tile:click effect from TileOverlayDrone
+    this.onEffect<TileClickPayload>('tile:click', (payload) => {
+      if (this.#justDragged) return
+      const selection = this.#selection()
+      if (!selection) return
+
+      if (payload.ctrlKey || payload.metaKey) {
+        selection.toggle(payload.label)
+      } else {
+        selection.clear()
+        selection.add(payload.label)
+      }
+    })
+  }
+
+  protected override dispose(): void {
+    if (this.#listening) {
+      document.removeEventListener('pointerdown', this.#onPointerDown)
+      document.removeEventListener('pointermove', this.#onPointerMove)
+      document.removeEventListener('pointerup', this.#onPointerUp)
+      this.#listening = false
+    }
+  }
+
+  // ── listener setup ──────────────────────────────────────────
+
+  #attachListeners(): void {
+    if (this.#listening) return
+    this.#listening = true
+    document.addEventListener('pointerdown', this.#onPointerDown)
+    document.addEventListener('pointermove', this.#onPointerMove)
+    document.addEventListener('pointerup', this.#onPointerUp)
+  }
+
+  // ── pointer handlers ────────────────────────────────────────
+
+  #onPointerDown = (e: PointerEvent): void => {
+    if (!e.ctrlKey && !e.metaKey) return
+    if (!this.#renderContainer || !this.#renderer || !this.#canvas) return
+
+    const label = this.#labelAtClient(e.clientX, e.clientY)
+    if (!label) return
+
+    const selection = this.#selection()
+    if (!selection) return
+
+    this.#dragActive = true
+    this.#touched.clear()
+    this.#lastOp = selection.isSelected(label) ? 'remove' : 'add'
+    this.#applyOp(label)
+  }
+
+  #onPointerMove = (e: PointerEvent): void => {
+    if (!this.#dragActive || !this.#lastOp) return
+
+    const label = this.#labelAtClient(e.clientX, e.clientY)
+    if (label) this.#applyOp(label)
+  }
+
+  #onPointerUp = (): void => {
+    if (this.#dragActive) {
+      this.#justDragged = true
+      requestAnimationFrame(() => { this.#justDragged = false })
+    }
+    this.#dragActive = false
+    this.#lastOp = null
+    this.#touched.clear()
+  }
+
+  // ── drag helpers ────────────────────────────────────────────
+
+  #applyOp(label: string): void {
+    if (this.#touched.has(label)) return
+    this.#touched.add(label)
+
+    const selection = this.#selection()
+    if (!selection || !this.#lastOp) return
+
+    if (this.#lastOp === 'add') {
+      if (!selection.isSelected(label)) selection.add(label)
+    } else {
+      if (selection.isSelected(label)) selection.remove(label)
+    }
+  }
+
+  #selection(): SelectionService | undefined {
+    return this.resolve<SelectionService>('selection')
+  }
+
+  // ── coordinate mapping (same pattern as TileOverlayDrone) ──
+
+  #labelAtClient(cx: number, cy: number): string | undefined {
+    if (!this.#renderContainer || !this.#renderer || !this.#canvas) return undefined
+
+    const detector = this.resolve<{ pixelToAxial(px: number, py: number): Axial }>('detector')
+    if (!detector) return undefined
+
+    const pixiGlobal = this.#clientToPixiGlobal(cx, cy)
+    const local = this.#renderContainer.toLocal(new Point(pixiGlobal.x, pixiGlobal.y))
+    const meshLocalX = local.x - this.#meshOffset.x
+    const meshLocalY = local.y - this.#meshOffset.y
+    const axial = detector.pixelToAxial(meshLocalX, meshLocalY)
+
+    const entry = this.#occupiedByAxial.get(axialKey(axial.q, axial.r))
+    if (!entry || entry.index >= this.#cellCount) return undefined
+    return entry.label
+  }
+
+  #clientToPixiGlobal(cx: number, cy: number) {
+    const events = (this.#renderer as any)?.events
+    if (events?.mapPositionToPoint) {
+      const out = new Point()
+      events.mapPositionToPoint(out, cx, cy)
+      return { x: out.x, y: out.y }
+    }
+    const rect = this.#canvas!.getBoundingClientRect()
+    const screen = this.#renderer!.screen
+    return {
+      x: (cx - rect.left) * (screen.width / rect.width),
+      y: (cy - rect.top) * (screen.height / rect.height),
+    }
+  }
+
+  #rebuildOccupiedMap(): void {
+    this.#occupiedByAxial.clear()
+    const axial = this.resolve<any>('axial')
+    if (!axial?.items) return
+
+    for (let i = 0; i < this.#cellCount; i++) {
+      const coord = axial.items.get(i) as Axial | undefined
+      const label = this.#cellLabels[i]
+      if (!coord || !label) break
+      this.#occupiedByAxial.set(axialKey(coord.q, coord.r), { index: i, label })
+    }
+  }
+}
+
+function axialKey(q: number, r: number): string {
+  return `${q},${r}`
+}
+
+const _tileSelection = new TileSelectionDrone()
+window.ioc.register('@diamondcoreprocessor.com/TileSelectionDrone', _tileSelection)
