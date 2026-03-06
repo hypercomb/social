@@ -194,6 +194,14 @@ export class ImageEditorService extends EventTarget {
   // Pixi pivot+scale maps source bbox to canvas dimensions.
   // Top: E5+E0 (vertex notch), Right: E1, Left: E4, Bottom: E2+E3 (vertex notch)
 
+  readonly setBackgroundColor = (color: string): void => {
+    if (!this.#app) return
+    const parsed = color
+      ? (parseInt(color.replace('#', ''), 16) || 0x1e1e1e)
+      : 0x1e1e1e
+    this.#app.renderer.background.color = parsed
+  }
+
   readonly setBorderColor = (color: string): void => {
     this.#borderColor = color
       ? (parseInt(color.replace('#', ''), 16) || 0xc8975a)

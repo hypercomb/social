@@ -30,6 +30,10 @@ export class TileEditorService extends EventTarget {
     return String((this.#properties as any).border?.color ?? '')
   }
 
+  get backgroundColor(): string {
+    return String((this.#properties as any).background?.color ?? '')
+  }
+
   // ── state mutations ────────────────────────────────────────────
 
   readonly open = (
@@ -74,6 +78,23 @@ export class TileEditorService extends EventTarget {
         delete (this.#properties as any).border.color
         if (Object.keys((this.#properties as any).border).length === 0) {
           delete (this.#properties as any).border
+        }
+      }
+    }
+    this.#emit()
+  }
+
+  readonly setBackgroundColor = (value: string): void => {
+    if (value) {
+      if (!(this.#properties as any).background) {
+        (this.#properties as any).background = {}
+      }
+      (this.#properties as any).background.color = value
+    } else {
+      if ((this.#properties as any).background) {
+        delete (this.#properties as any).background.color
+        if (Object.keys((this.#properties as any).background).length === 0) {
+          delete (this.#properties as any).background
         }
       }
     }
