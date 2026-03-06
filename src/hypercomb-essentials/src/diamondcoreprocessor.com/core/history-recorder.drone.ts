@@ -1,39 +1,30 @@
 // hypercomb-essentials/src/diamondcoreprocessor.com/core/history-recorder.drone.ts
-// Central history recorder: listens on `synchronize` window events for mutations
-// that carry a `historyOp` field, and records each operation into the append-only
-// OPFS history bag for the current lineage location.
-//
-// Sits at the processor level alongside ShowHoneycombWorker — history recording is
-// a first-class reaction to the canonical mutation event, not a parallel channel.
+// Central history recorder: listens for seed lifecycle effects (seed:added,
+// seed:removed) via the EffectBus and records each operation into the
+// append-only OPFS history bag for the current lineage location.
 
+import { EffectBus } from '@hypercomb/core'
 import type { HistoryService, HistoryOpType } from './history.service.js'
 
 export class HistoryRecorder {
 
   constructor() {
-    window.addEventListener('synchronize', (e: Event) => {
-      const detail = (e as CustomEvent).detail
-      if (!detail?.historyOp) return
+    EffectBus.on<{ seed: string }>('seed:added', (payload) => {
+      if (payload?.seed) void this.recordOp('add', payload.seed)
+    })
 
-      // prevent infinite loop: historyService.record() dispatches synchronize
-      // with source 'history:record' — we must not re-record that
-      if (detail.source === 'history:record') return
-
-      void this.recordOp(detail.historyOp)
+    EffectBus.on<{ seed: string }>('seed:removed', (payload) => {
+      if (payload?.seed) void this.recordOp('remove', payload.seed)
     })
   }
 
-  private readonly recordOp = async (historyOp: { op: HistoryOpType, seed: string }): Promise<void> => {
+  private readonly recordOp = async (op: HistoryOpType, seed: string): Promise<void> => {
     const lineage = get<any>('@hypercomb.social/Lineage')
     const historyService = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
     if (!lineage || !historyService) return
 
     const sig = await historyService.sign(lineage)
-    await historyService.record(sig, {
-      op: historyOp.op,
-      seed: historyOp.seed,
-      at: Date.now(),
-    })
+    await historyService.record(sig, { op, seed, at: Date.now() })
   }
 }
 

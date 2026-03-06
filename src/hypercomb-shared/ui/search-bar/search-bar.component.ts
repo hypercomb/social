@@ -7,6 +7,7 @@ import type { Navigation } from '../../core/navigation'
 import type { ScriptPreloader } from '../../core/script-preloader'
 import type { CompletionUtility, CompletionContext } from '@hypercomb/shared/core/completion-utility'
 import { fromRuntime } from '../../core/from-runtime'
+import { EffectBus } from '@hypercomb/core'
 
 @Component({
   selector: 'hc-search-bar',
@@ -393,8 +394,11 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     const baseSegments = this.navigation.segments()
     const target = [...baseSegments, seedName]
 
-    // ensure() is idempotent — creates if needed. Processor dispatches synchronize.
+    // ensure() is idempotent — creates the seed directory if needed.
     await this.lineage.ensure(target)
+
+    // reactive: notify the system a seed was added
+    EffectBus.emit('seed:added', { seed: seedName })
   }
 
   // -------------------------------------------------

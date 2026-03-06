@@ -41,7 +41,7 @@ export class ShowHoneycombWorker extends Worker {
     axial: '@diamondcoreprocessor.com/AxialService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'seed:added', 'seed:removed']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -669,6 +669,10 @@ export class ShowHoneycombWorker extends Worker {
       this.seedImageCache.clear()
       this.requestRender()
     })
+
+    // seed lifecycle effects — re-render when seeds are added or removed
+    this.onEffect<{ seed: string }>('seed:added', () => this.requestRender())
+    this.onEffect<{ seed: string }>('seed:removed', () => this.requestRender())
 
     ; (window as any).showCellsPoc = {
       publishSeeds: async (seeds: string[]) => this.publishExplicitSeedList(seeds),

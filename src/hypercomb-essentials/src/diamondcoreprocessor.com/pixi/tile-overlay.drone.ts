@@ -1,8 +1,8 @@
 // hypercomb-essentials/src/diamondcoreprocessor.com/pixi/tile-overlay.drone.ts
 // Contextual action overlay: dark underlay + icon buttons on occupied hex tiles on hover.
 
-import { Drone, hypercomb } from '@hypercomb/core'
-import { Application, Container, Graphics, Point } from 'pixi.js'
+import { Drone, EffectBus, hypercomb } from '@hypercomb/core'
+import { Application, Container, Graphics, Point, Text, TextStyle } from 'pixi.js'
 import { HexIconButton } from './hex-icon-button.js'
 import type { HostReadyPayload } from './pixi-host.drone.js'
 import type { Axial } from '../input/hex-detector.js'
@@ -37,10 +37,20 @@ const RECT_ALPHA = 0.85
 
 // Icon positions within the overlay (measured from hex center = overlay origin)
 const ICON_SIZE = 8.75
-const EDIT_X = 10
+const EDIT_X = -2
 const EDIT_Y = 5
-const GARBAGE_X = 20.625
+const GARBAGE_X = 8.625
 const GARBAGE_Y = 5
+
+// Seed label styling
+const LABEL_X = RECT_X + 2
+const LABEL_Y = RECT_Y + 1.5
+const LABEL_STYLE = new TextStyle({
+  fontFamily: 'monospace',
+  fontSize: 7,
+  fill: 0xffffff,
+  align: 'left',
+})
 
 export class TileOverlayDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -53,6 +63,7 @@ export class TileOverlayDrone extends Drone {
 
   #overlay: Container | null = null
   #hexBg: Graphics | null = null
+  #seedLabel: Text | null = null
   #editButton: HexIconButton | null = null
   #deleteButton: HexIconButton | null = null
   #actions: OverlayAction[] = []
@@ -76,6 +87,7 @@ export class TileOverlayDrone extends Drone {
   protected override deps = {
     detector: '@diamondcoreprocessor.com/HexDetector',
     axial: '@diamondcoreprocessor.com/AxialService',
+    lineage: '@hypercomb.social/Lineage',
   }
   protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count']
   protected override emits = ['tile:hover', 'tile:action']
@@ -118,6 +130,7 @@ export class TileOverlayDrone extends Drone {
       this.#overlay.destroy({ children: true })
       this.#overlay = null
       this.#hexBg = null
+      this.#seedLabel = null
       this.#editButton = null
       this.#deleteButton = null
       this.#actions = []
@@ -139,7 +152,12 @@ export class TileOverlayDrone extends Drone {
     this.#hexBg.fill({ color: RECT_COLOR, alpha: RECT_ALPHA })
     this.#overlay.addChild(this.#hexBg)
 
-    // 2. Edit icon button
+    // 2. Seed name label (top-left of overlay)
+    this.#seedLabel = new Text({ text: '', style: LABEL_STYLE })
+    this.#seedLabel.position.set(LABEL_X, LABEL_Y)
+    this.#overlay.addChild(this.#seedLabel)
+
+    // 3. Edit icon button
     this.#editButton = new HexIconButton({
       svgMarkup: EDIT_ICON_SVG,
       width: ICON_SIZE,
@@ -150,7 +168,7 @@ export class TileOverlayDrone extends Drone {
     this.#editButton.position.set(EDIT_X, EDIT_Y)
     this.#overlay.addChild(this.#editButton)
 
-    // 3. Delete icon button
+    // 4. Delete icon button
     this.#deleteButton = new HexIconButton({
       svgMarkup: GARBAGE_ICON_SVG,
       width: ICON_SIZE,
@@ -161,7 +179,7 @@ export class TileOverlayDrone extends Drone {
     this.#deleteButton.position.set(GARBAGE_X, GARBAGE_Y)
     this.#overlay.addChild(this.#deleteButton)
 
-    // 4. Register action handlers
+    // 5. Register action handlers
     this.#actions = [
       {
         name: 'edit',
@@ -175,7 +193,7 @@ export class TileOverlayDrone extends Drone {
         button: this.#deleteButton,
         handler: (label, q, r, index) => {
           this.emitEffect('tile:action', { action: 'remove', q, r, index, label })
-          this.#handleRemove(label)
+          void this.#handleRemove(label)
         },
       },
     ]
@@ -225,6 +243,7 @@ export class TileOverlayDrone extends Drone {
       }
 
       this.#positionOverlay(axial.q, axial.r)
+      this.#updateSeedLabel(axial.q, axial.r)
       this.emitEffect('tile:hover', { q: axial.q, r: axial.r })
     }
 
@@ -277,8 +296,29 @@ export class TileOverlayDrone extends Drone {
     }
   }
 
-  #handleRemove = (_label: string): void => {
+  #handleRemove = async (label: string): Promise<void> => {
+    const lineage = this.resolve<{ explorerDir(): Promise<FileSystemDirectoryHandle | null> }>('lineage')
+    if (lineage) {
+      const dir = await lineage.explorerDir()
+      if (dir) {
+        try {
+          await dir.removeEntry(label, { recursive: true })
+        } catch (e) {
+          console.warn('[TileOverlay] failed to remove seed folder:', label, e)
+        }
+      }
+    }
+
+    EffectBus.emit('seed:removed', { seed: label })
     void new hypercomb().act()
+  }
+
+  // ── seed label ───────────────────────────────────────────────
+
+  #updateSeedLabel(q: number, r: number): void {
+    if (!this.#seedLabel) return
+    const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(q, r))
+    this.#seedLabel.text = entry?.label ?? ''
   }
 
   // ── visibility ─────────────────────────────────────────────────
