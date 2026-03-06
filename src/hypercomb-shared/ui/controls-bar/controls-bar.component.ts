@@ -153,7 +153,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     EffectBus.emit('controls:action', { action: 'remove' })
   }
 
-  readonly move = (): void => {
+  readonly moveItem = (): void => {
     EffectBus.emit('controls:action', { action: 'move' })
   }
 
