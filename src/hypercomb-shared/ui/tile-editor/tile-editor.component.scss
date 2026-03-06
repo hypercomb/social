@@ -214,7 +214,8 @@
   display: flex;
   align-items: center;
   gap: 0.3em;
-
+  width: 3.3em;
+  
   .hci {
     font-size: 1.1em;
     color: #c8975a;
@@ -229,8 +230,8 @@
   color: #e0e0e0;
   padding: 0.35em 0.5em;
   font-size: 0.8em;
-  transition: border-color 0.15s;
-
+    transition: border-color 0.15s;
+  width: 3.3em;
   &:focus {
     outline: none;
     border-color: #c8975a;
@@ -255,9 +256,6 @@
   align-items: center;
   gap: 0.25em;
   padding: 0.3em 0.5em;
-  border: 1px solid #333;
-  border-radius: 5px;
-  background: #252528;
   color: #ccc;
   font-size: 0.8em;
   white-space: nowrap;

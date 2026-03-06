@@ -108,16 +108,6 @@ export abstract class Bee {
   }
 
   // --------------------------------
-  // developer hooks (overrideable)
-  // --------------------------------
-
-  /** Does this bee sense relevance in the current grammar? (biofidelic gate) */
-  protected sense: (grammar: string) => boolean | Promise<boolean> = () => true
-
-  /** Developer-defined behavior — all bees have heartbeats */
-  protected heartbeat: (grammar: string) => Promise<void> = async () => { }
-
-  // --------------------------------
   // meaning
   // --------------------------------
 
@@ -130,11 +120,6 @@ export abstract class Bee {
   // bee mechanics (framework-owned)
   // --------------------------------
 
-  /** Should this bee respond to this pulse? */
-  public sensed = async (grammar: string): Promise<boolean> => {
-    return await this.sense(grammar)
-  }
-
-  /** Unified framework entry point — Worker and Drone implement differently */
+  /** Unified framework entry point — Drone and Worker implement differently */
   public abstract pulse(grammar: string): Promise<void>
 }
