@@ -32,7 +32,7 @@
           <button type="button" class="upload-btn" (click)="fileInput.click()">
             <span class="hci">U</span> Upload
           </button>
-          <input #fileInput type="file" accept="image/*" hidden (change)="onFileSelect($event)" />
+          <input #fileInput type="file" name="tile-image" accept="image/*" hidden (change)="onFileSelect($event)" />
         </div>
       </div>
 
@@ -43,6 +43,7 @@
           <input
             class="field-input"
             type="text"
+            name="tile-link"
             placeholder="https://..."
             [ngModel]="linkValue"
             (ngModelChange)="linkValue = $event; onLinkChange($event)"
@@ -57,6 +58,7 @@
             <input
               class="field-input color-text"
               type="text"
+              name="tile-background-color-text"
               placeholder="#1e1e1e"
               [ngModel]="backgroundColorValue"
               (ngModelChange)="backgroundColorValue = $event; onBackgroundColorChange($event)"
@@ -64,6 +66,7 @@
             <input
               class="color-picker"
               type="color"
+              name="tile-background-color"
               [ngModel]="backgroundColorValue || '#1e1e1e'"
               (ngModelChange)="backgroundColorValue = $event; onBackgroundColorChange($event)"
             />
@@ -76,6 +79,7 @@
             <input
               class="field-input color-text"
               type="text"
+              name="tile-border-color-text"
               placeholder="#000000"
               [ngModel]="borderColorValue"
               (ngModelChange)="borderColorValue = $event; onBorderColorChange($event)"
@@ -83,6 +87,7 @@
             <input
               class="color-picker"
               type="color"
+              name="tile-border-color"
               [ngModel]="borderColorValue || '#000000'"
               (ngModelChange)="borderColorValue = $event; onBorderColorChange($event)"
             />
