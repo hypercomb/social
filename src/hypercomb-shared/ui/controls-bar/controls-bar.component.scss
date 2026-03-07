@@ -180,3 +180,31 @@
   line-height: 1;
   color: rgba(200, 200, 200, 0.8);
 }
+
+// ── secret mode ─────────────────────────────────────────
+
+.secret-input {
+  flex: 1;
+  min-width: 12rem;
+  height: 1.6rem;
+  padding: 0 0.5em;
+  border: none;
+  border-radius: 3px;
+
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(245, 245, 245, 0.9);
+
+  font: inherit;
+  font-size: 0.78rem;
+  letter-spacing: 0.03em;
+
+  &::placeholder {
+    color: rgba(245, 245, 245, 0.3);
+  }
+
+  &:focus {
+    outline: none;
+    background: rgba(255, 255, 255, 0.1);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.15);
+  }
+}
