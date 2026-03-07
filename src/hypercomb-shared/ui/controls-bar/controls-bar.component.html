@@ -24,7 +24,7 @@
       <!-- view section -->
       <div class="controls-section view">
         <button class="ctl-btn" [class.active]="locked()" (click)="toggleLock()" aria-label="lock">
-          <span class="hci">{{ locked() ? 'n' : 'e' }}</span>
+          <span class="hci">{{ locked() ? '_' : '`' }}</span>
         </button>
         <button class="ctl-btn" (click)="centerView()" aria-label="center">
           <span class="hci">N</span>
