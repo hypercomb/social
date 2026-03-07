@@ -95,6 +95,9 @@ export class BootstrapHistory {
     try {
       window.history.replaceState({ i: 0, steps: [] as BootstrapStep[] }, '', '/')
 
+      // Always encounter root markers (global bees that load at every location)
+      await this.encounter(preloader, '')
+
       let path = ''
       let index = 0
       const steps: BootstrapStep[] = []

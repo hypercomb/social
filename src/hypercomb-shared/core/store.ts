@@ -177,13 +177,16 @@ export class Store extends EventTarget {
       if (!mod || typeof mod !== 'object') return null
 
       // If the module's side-effect already registered a bee, reuse it
-      // instead of creating a duplicate via buildInstance()
+      // instead of creating a duplicate via buildInstance().
+      // Use duck-typing instead of instanceof: bee bundles import Bee from the
+      // import-mapped runtime URL, while this file uses the Vite-resolved path —
+      // two different class objects, so instanceof always fails across the boundary.
       let selfRegistered = false
       for (const key of window.ioc.list()) {
         if (keysBefore.has(key)) continue
         selfRegistered = true
         const value = window.ioc.get(key)
-        if (value instanceof Bee) return value
+        if (value != null && typeof (value as any).pulse === 'function') return value as Bee
       }
 
       // Module self-registered as non-Bee — skip buildInstance to avoid duplicates

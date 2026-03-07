@@ -46,6 +46,8 @@ export const ensureInstall = async (): Promise<void> => {
     if (cached) {
       const m = tryParseManifest(cached)
       if (m?.beeDeps) (globalThis as any).__hypercombBeeDeps = m.beeDeps
+      // Ensure markers exist in hypercomb root (idempotent — safe to always run)
+      if (m?.bees) await applyBeeMarkers(store, m.bees)
     }
     return
   }
@@ -83,6 +85,8 @@ export const ensureInstall = async (): Promise<void> => {
   if (newManifest) {
     localStorage.setItem(MANIFEST_KEY, JSON.stringify(newManifest))
     if (newManifest.beeDeps) (globalThis as any).__hypercombBeeDeps = newManifest.beeDeps
+    // Place bee markers in hypercomb.io/ root so ScriptPreloader.find() discovers them
+    await applyBeeMarkers(store, newManifest.bees)
   }
   console.log('[ensure-install] done:', signature)
 }
@@ -163,4 +167,20 @@ const removeStale = async (
     try { await dir.removeEntry(`${sig}${ext}`) } catch { /* already gone */ }
     try { await dir.removeEntry(sig) } catch { /* already gone */ }
   }
+}
+
+// Place empty marker files in hypercomb.io/ root — one per bee sig.
+// ScriptPreloader.find() always scans hypercombRoot, so all markers here
+// load globally (same behaviour as hypercomb-dev where bees are instantiated
+// directly at startup).
+const applyBeeMarkers = async (store: Store, bees: string[]): Promise<void> => {
+  let placed = 0
+  for (const sig of bees) {
+    if (!sig) continue
+    try {
+      await store.hypercombRoot.getFileHandle(sig, { create: true })
+      placed++
+    } catch { /* ignore — already exists or unwritable */ }
+  }
+  if (placed) console.log(`[ensure-install] placed ${placed} bee markers in hypercomb root`)
 }

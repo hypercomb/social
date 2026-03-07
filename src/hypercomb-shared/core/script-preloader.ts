@@ -79,10 +79,17 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
 
     EffectBus.emit('loader:bees-progress', { loading: pending.length, total: this.#beeCache.size + pending.length })
 
-    // Load all new markers in parallel
-    const results = await Promise.allSettled(
-      pending.map(sig => this.#loadBeeBySignature(sig))
-    )
+    // Load markers sequentially so each getBee() call sees an accurate
+    // keysBefore snapshot (parallel imports share the same snapshot and
+    // can return the wrong self-registered instance for each signature).
+    const results: Array<PromiseSettledResult<Bee | null>> = []
+    for (const sig of pending) {
+      try {
+        results.push({ status: 'fulfilled', value: await this.#loadBeeBySignature(sig) })
+      } catch (e) {
+        results.push({ status: 'rejected', reason: e })
+      }
+    }
 
     let changed = false
     let loaded = 0
@@ -187,9 +194,10 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       if (this.#loadedDeps.has(depSig)) continue
 
       // Reverse lookup: find alias for this dep signature
+      // aliasMap values may have .js suffix (stored as filenames); strip when comparing
       let alias: string | undefined
       for (const [a, s] of aliasMap) {
-        if (s === depSig) { alias = a; break }
+        if (s.replace(/\.js$/i, '') === depSig) { alias = a; break }
       }
       if (!alias) continue
 
