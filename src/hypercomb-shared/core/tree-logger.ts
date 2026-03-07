@@ -1,4 +1,7 @@
-// hypercomb-web/src/app/core/opfs-tree-logger.ts
+// hypercomb-shared/core/tree-logger.ts
+
+const SIG_RE = /^[a-f0-9]{64}$/i
+const SYSTEM_DIRS = new Set(['__bees__', '__dependencies__', '__layers__', '__resources__', '__history__'])
 
 export class OpfsTreeLogger {
 
@@ -6,20 +9,21 @@ export class OpfsTreeLogger {
         console.clear()
         try {
             const root = await navigator.storage.getDirectory()
-            console.log('[opfs] /')
-            await this.walk(root, '')
+            console.log('📂 /')
+            await this.#walk(root, '  ')
         } catch (err) {
-            console.log('[opfs] unable to read opfs root (navigator.storage.getDirectory)', err)
+            console.log('[opfs] unable to read opfs root', err)
         }
     }
 
-    private walk = async (dir: FileSystemDirectoryHandle, indent: string, insideHistory = false): Promise<void> => {
+    #walk = async (dir: FileSystemDirectoryHandle, indent: string): Promise<void> => {
         const entries: Array<{ name: string; kind: FileSystemHandleKind; handle: FileSystemHandle }> = []
 
         for await (const [name, handle] of dir.entries()) {
             entries.push({ name, kind: handle.kind, handle })
         }
 
+        // Directories first, then files; alphabetical within each group
         entries.sort((a, b) => {
             if (a.kind !== b.kind) return a.kind === 'directory' ? -1 : 1
             return a.name.localeCompare(b.name)
@@ -27,28 +31,36 @@ export class OpfsTreeLogger {
 
         for (const e of entries) {
             if (e.kind === 'directory') {
-                const isHistory = e.name === '__history__'
-                console.log(`${indent}📁 ${e.name}/`)
-                await this.walk(e.handle as FileSystemDirectoryHandle, indent + '  ', insideHistory || isHistory)
-            } else {
-                if (insideHistory) {
-                    const content = await this.readFileContent(e.handle as FileSystemFileHandle)
-                    console.log(`${indent}📄 ${e.name} → ${content}`)
-                } else {
-                    console.log(`${indent}📄 ${e.name}`)
+                const isSystem = SYSTEM_DIRS.has(e.name)
+                const icon = isSystem ? '📦' : '📁'
+                const childDir = e.handle as FileSystemDirectoryHandle
+                const summary = isSystem ? await this.#summarizeSystemDir(childDir) : ''
+                console.log(`${indent}${icon} ${e.name}/${summary}`)
+
+                // System dirs: show summary only (skip deep walk)
+                if (!isSystem) {
+                    await this.#walk(childDir, indent + '  ')
                 }
+            } else {
+                const label = this.#describeFile(e.name)
+                console.log(`${indent}📄 ${e.name}${label}`)
             }
         }
     }
 
-    private readFileContent = async (fileHandle: FileSystemFileHandle): Promise<string> => {
+    #describeFile = (name: string): string => {
+        const bare = name.replace(/\.js$/i, '')
+        if (SIG_RE.test(bare)) return '  🐝 marker'
+        if (name === '0000') return '  (seed)'
+        return ''
+    }
+
+    #summarizeSystemDir = async (dir: FileSystemDirectoryHandle): Promise<string> => {
+        let count = 0
         try {
-            const file = await fileHandle.getFile()
-            const text = await file.text()
-            return text.trim() || '(empty)'
-        } catch {
-            return '(unreadable)'
-        }
+            for await (const _ of dir.entries()) { count++; if (count > 999) break }
+        } catch { /* unreadable */ }
+        return count > 0 ? `  (${count} entries)` : '  (empty)'
     }
 }
 
