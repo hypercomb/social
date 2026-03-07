@@ -75,6 +75,7 @@ export class HexSdfTextureShader {
     in vec4 aImageUV;
     in float aHasImage;
     in float aSelected;
+    in float aHeat;
 
     out vec2 vUV;
     out vec4 vLabelUV;
@@ -82,6 +83,7 @@ export class HexSdfTextureShader {
     out vec4 vImageUV;
     out float vHasImage;
     out float vSelected;
+    out float vHeat;
 
     uniform mat3 uProjectionMatrix;
     uniform mat3 uWorldTransformMatrix;
@@ -96,6 +98,7 @@ export class HexSdfTextureShader {
       vImageUV = aImageUV;
       vHasImage = aHasImage;
       vSelected = aSelected;
+      vHeat = aHeat;
     }
   `
 
@@ -108,6 +111,7 @@ export class HexSdfTextureShader {
     in vec4 vImageUV;
     in float vHasImage;
     in float vSelected;
+    in float vHeat;
 
     uniform vec2 u_quadSize;
     uniform float u_radiusPx;
@@ -160,6 +164,14 @@ export class HexSdfTextureShader {
         vec3 selColor = vec3(0.3, 0.7, 1.0);
         color = mix(color, vec4(selColor, 1.0), selRing * 0.8);
       }
+
+      // ambient presence — cool blue border shifts to warm amber with activity
+      float heatRing = smoothstep(0.0, -1.5, d) - smoothstep(-4.0, -6.0, d);
+      vec3 coldColor = vec3(0.3, 0.5, 0.85);
+      vec3 warmColor = vec3(1.0, 0.62, 0.12);
+      vec3 heatTint = mix(coldColor, warmColor, vHeat);
+      float heatAlpha = mix(0.07, 0.68, vHeat);
+      color.rgb = mix(color.rgb, heatTint, heatRing * heatAlpha);
 
       gl_FragColor = color;
     }

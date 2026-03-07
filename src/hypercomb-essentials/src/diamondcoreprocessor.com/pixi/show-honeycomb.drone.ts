@@ -14,7 +14,7 @@ import { PROPERTIES_FILE, isSignature } from '../editor/tile-properties.js'
 import type { HistoryService, HistoryOp } from '../core/history.service.js'
 
 type Axial = { q: number; r: number }
-type SeedCell = { q: number; r: number; label: string; external: boolean; imageSig?: string }
+type SeedCell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number }
 
 type MeshEvt = { relay: string; sig: string; event: any; payload: any }
 type MeshSub = { close: () => void }
@@ -65,6 +65,7 @@ export class ShowHoneycombWorker extends Drone {
 
   // incremental rendering state — tracks what's currently painted (geometry cache)
   private readonly renderedCells = new Map<string, SeedCell>()
+  #heatByLabel = new Map<string, number>()
   private streamActive = false
   private cancelStreamFlag = false
   private renderedLocationKey = ''
@@ -768,6 +769,12 @@ export class ShowHoneycombWorker extends Drone {
     // selection changes — re-render to update selection highlight
     this.onEffect<{ selected: string[] }>('selection:changed', () => this.requestRender())
 
+    // ambient presence heat — re-render to update border temperature
+    this.onEffect<Record<string, number>>('render:presence-heat', (heat) => {
+      this.#heatByLabel = new Map(Object.entries(heat))
+      this.requestRender()
+    })
+
     ; (window as any).showCellsPoc = {
       publishSeeds: async (seeds: string[]) => this.publishExplicitSeedList(seeds),
       signature: async () => {
@@ -841,7 +848,7 @@ export class ShowHoneycombWorker extends Drone {
       const a = axial.items.get(i) as Axial | undefined
       const label = names[i]
       if (!a || !label) break
-      out.push({ q: a.q, r: a.r, label, external: !localSeedSet.has(label) })
+      out.push({ q: a.q, r: a.r, label, external: !localSeedSet.has(label), heat: this.#heatByLabel.get(label) ?? 0 })
     }
 
     return out
@@ -903,7 +910,7 @@ export class ShowHoneycombWorker extends Drone {
     const selectionService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SelectionService') as
       { isSelected: (label: string) => boolean } | undefined
     let s = ''
-    for (const c of cells) s += `${c.q},${c.r}:${c.label}:${c.external ? 1 : 0}:${c.imageSig ?? ''}:${selectionService?.isSelected(c.label) ? 1 : 0}|`
+    for (const c of cells) s += `${c.q},${c.r}:${c.label}:${c.external ? 1 : 0}:${c.imageSig ?? ''}:${selectionService?.isSelected(c.label) ? 1 : 0}:${(c.heat ?? 0).toFixed(2)}|`
     return s
   }
 
@@ -925,9 +932,10 @@ export class ShowHoneycombWorker extends Drone {
     const imageUV = new Float32Array(cells.length * 16)
     const hasImage = new Float32Array(cells.length * 4)
     const selected = new Float32Array(cells.length * 4)
+    const heatArr = new Float32Array(cells.length * 4)
     const idx = new Uint32Array(cells.length * 6)
 
-    let pv = 0, uvp = 0, luvp = 0, tkp = 0, iuvp = 0, hip = 0, sp = 0, ii = 0, base = 0
+    let pv = 0, uvp = 0, luvp = 0, tkp = 0, iuvp = 0, hip = 0, sp = 0, hp = 0, ii = 0, base = 0
 
     for (const c of cells) {
       const { x, y } = this.axialToPixel(c.q, c.r, spacing)
@@ -966,6 +974,11 @@ export class ShowHoneycombWorker extends Drone {
       selected.set([sel, sel, sel, sel], sp)
       sp += 4
 
+      // ambient presence heat
+      const h = c.heat ?? 0
+      heatArr.set([h, h, h, h], hp)
+      hp += 4
+
       idx.set([base, base + 1, base + 2, base, base + 2, base + 3], ii)
       ii += 6
       base += 4
@@ -979,6 +992,7 @@ export class ShowHoneycombWorker extends Drone {
       ; (g as any).addAttribute('aImageUV', imageUV, 4)
       ; (g as any).addAttribute('aHasImage', hasImage, 1)
       ; (g as any).addAttribute('aSelected', selected, 1)
+      ; (g as any).addAttribute('aHeat', heatArr, 1)
       ; (g as any).addIndex(idx)
 
     return g
