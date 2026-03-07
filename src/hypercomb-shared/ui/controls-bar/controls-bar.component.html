@@ -62,6 +62,9 @@
               <span class="badge">{{ clipboardCount() }}</span>
             }
           </button>
+          <button class="ctl-btn" (click)="openSecret()" aria-label="secret">
+            <span class="hci">a</span>
+          </button>
         </div>
       }
 
@@ -86,6 +89,22 @@
         <span class="hci">Q</span>
       </button>
       <button class="ctl-btn" (click)="closeClipboard()" aria-label="close clipboard">
+        <span class="close-x">&times;</span>
+      </button>
+    }
+
+    @case ('secret') {
+      <input
+        class="secret-input"
+        type="text"
+        placeholder="enter secret..."
+        [value]="secretValue()"
+        (input)="onSecretInput($event)"
+        (keydown.enter)="submitSecret()"
+        (keydown.escape)="closeSecret()"
+        #secretInput
+      />
+      <button class="ctl-btn" (click)="closeSecret()" aria-label="close secret">
         <span class="close-x">&times;</span>
       </button>
     }
