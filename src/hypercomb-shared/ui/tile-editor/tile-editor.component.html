@@ -3,7 +3,7 @@
 
   <div class="editor-panel" role="dialog" aria-label="tile editor">
     <header class="editor-header">
-      <span class="hci header-icon">#</span>
+      <span class="hci header-icon">k</span>
       <h3>{{ seed() }}</h3>
       <button class="editor-close" type="button" (click)="cancel()">
         <span class="hci">Q</span>
@@ -21,7 +21,7 @@
         >
           @if (!hasImage()) {
             <div class="image-placeholder">
-              <span class="hci placeholder-icon">U</span>
+              <span class="hci placeholder-icon">B</span>
               <span>Drop image here</span>
             </div>
           }
@@ -30,7 +30,7 @@
 
         <div class="image-controls">
           <button type="button" class="upload-btn" (click)="fileInput.click()">
-            <span class="hci">U</span> Upload
+            <span class="hci">B</span> Upload
           </button>
           <input #fileInput type="file" name="tile-image" accept="image/*" hidden (change)="onFileSelect($event)" />
         </div>
@@ -39,7 +39,7 @@
       <!-- property fields -->
       <div class="fields">
         <label class="field-row">
-          <span class="field-label"><span class="hci">*</span> Link</span>
+          <span class="field-label"><span class="hci">p</span> Link</span>
           <input
             class="field-input"
             type="text"
@@ -53,7 +53,7 @@
         <div class="color-row">
           <label class="color-control">
             <span class="color-btn">
-              <span class="hci">s</span> Bg
+              <span class="hci">l</span> Bg
             </span>
             <input
               class="field-input color-text"
@@ -74,7 +74,7 @@
 
           <label class="color-control">
             <span class="color-btn">
-              <span class="hci">s</span> Border
+              <span class="hci">l</span> Border
             </span>
             <input
               class="field-input color-text"
