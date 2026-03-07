@@ -28,8 +28,8 @@ export const resolveImportMap = async (): Promise<ResolvedImports> => {
 
     const file = await (handle as FileSystemFileHandle).getFile()
 
-    const text = await file.text()
-    const firstLine = text.split('\n', 1)[0]?.trim()
+    const prefix = await file.slice(0, 512).arrayBuffer()
+    const firstLine = new TextDecoder().decode(prefix).split('\n', 1)[0]?.trim()
     if (!firstLine) continue
 
     const alias = firstLine.split(/\s+/)[1]
@@ -44,6 +44,9 @@ export const resolveImportMap = async (): Promise<ResolvedImports> => {
     imports[alias] = `${OPFS_DEPENDENCY_BASE_PATH}/${signature}`
     aliasSource.set(alias, signature)
   }
+
+  // Cache alias map so DependencyLoader can skip redundant OPFS scan
+  ;(globalThis as any).__hypercombAliasMap = aliasSource
 
   return imports
 }

@@ -16,7 +16,11 @@ export class BootstrapHistory {
   // note: reserved for later; current bootstrap starts at store.hypercombRoot
   private readonly defaultDomain = 'hypercomb.io'
 
+  #hasRun = false
+
   public run = async (): Promise<void> => {
+    if (this.#hasRun) return
+    this.#hasRun = true
 
     const store = get('@hypercomb.social/Store') as Store
     const preloader = get('@hypercomb.social/ScriptPreloader') as any

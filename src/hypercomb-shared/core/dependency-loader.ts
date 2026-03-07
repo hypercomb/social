@@ -1,5 +1,6 @@
 // hypercomb-web/src/app/core/dependency-loader.ts
 
+import { EffectBus, SignatureService } from '@hypercomb/core'
 import { Store } from './store'
 
 export class DependencyLoader extends EventTarget {
@@ -22,13 +23,79 @@ export class DependencyLoader extends EventTarget {
     this.#failedSignatures = []
     this.dispatchEvent(new CustomEvent('change'))
 
-    // load all from opfs dependencies directory
+    // Use cached alias map from resolveImportMap() if available (skips OPFS re-scan)
+    let pending = await this.#collectPending()
+    if (!pending.length) return
+
+    // When beeDeps is present, only eagerly load deps NOT claimed by any bee.
+    // Bee-specific deps are lazy-loaded by ScriptPreloader.#ensureDeps().
+    const beeDeps = (globalThis as any).__hypercombBeeDeps as Record<string, string[]> | undefined
+    if (beeDeps) {
+      const claimed = new Set(Object.values(beeDeps).flat())
+      pending = pending.filter(p => {
+        const pureSig = p.sig.replace(/\.js$/i, '')
+        return !claimed.has(pureSig) && !claimed.has(p.sig)
+      })
+      if (!pending.length) return
+    }
+
+    EffectBus.emit('loader:deps-start', { total: pending.length })
+
+    // Verify signatures then import concurrently
+    const results = await Promise.allSettled(
+      pending.map(({ sig, alias }) =>
+        this.#verifyAndImport(sig, alias)
+      )
+    )
+
+    const loadedSigs: string[] = []
+    const failedSigs: string[] = []
+
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i]
+      const { sig } = pending[i]
+
+      if (r.status === 'fulfilled') {
+        this.loaded.add(sig)
+        loadedSigs.push(sig)
+      } else {
+        console.error(`Failed to load dependency: ${sig}`, r.reason)
+        failedSigs.push(sig)
+      }
+    }
+
+    this.#dependencyCount = loadedSigs.length
+    this.#loadedSignatures = loadedSigs
+    this.#failedSignatures = failedSigs
+    this.dispatchEvent(new CustomEvent('change'))
+
+    EffectBus.emit('loader:deps-done', {
+      loaded: loadedSigs.length,
+      failed: failedSigs.length,
+      total: pending.length,
+    })
+  }
+
+  #collectPending = async (): Promise<{ sig: string; alias: string }[]> => {
+    // Fast path: use cached alias map from resolveImportMap() (web mode)
+    const cachedMap = (globalThis as any).__hypercombAliasMap as Map<string, string> | undefined
+    if (cachedMap && cachedMap.size > 0) {
+      const pending: { sig: string; alias: string }[] = []
+      for (const [alias, sig] of cachedMap) {
+        if (!this.loaded.has(sig)) pending.push({ sig, alias })
+      }
+      return pending
+    }
+
+    // Fallback: scan OPFS dependencies directory (dev mode or no cached map)
     let depDir: FileSystemDirectoryHandle
     try {
       depDir = this.store.dependencies
     } catch {
-      return
+      return []
     }
+
+    const pending: { sig: string; alias: string }[] = []
 
     for await (const [sig, entry] of depDir.entries()) {
       if (entry.kind !== 'file') continue
@@ -41,19 +108,52 @@ export class DependencyLoader extends EventTarget {
         const first = new TextDecoder().decode(prefix).split('\n', 1)[0]?.trim() ?? ''
 
         const alias = this.readAliasFromFirstLine(first)
-        if (!alias) continue
+        if (alias) pending.push({ sig, alias })
+      } catch {
+        // skip unreadable entries
+      }
+    }
 
+    return pending
+  }
+
+  #verifyAndImport = async (sig: string, alias: string): Promise<string> => {
+    // Normalize: sig from alias map may include .js extension
+    const pureSig = sig.replace(/\.js$/i, '')
+
+    // Verify signature integrity before executing
+    try {
+      const depDir = this.store.dependencies
+      let fh: FileSystemFileHandle
+      try {
+        fh = await depDir.getFileHandle(`${pureSig}.js`)
+      } catch {
+        fh = await depDir.getFileHandle(pureSig)
+      }
+      const file = await fh.getFile()
+      const buffer = await file.arrayBuffer()
+      const computed = await SignatureService.sign(buffer)
+      if (computed !== pureSig) {
+        throw new Error(`signature mismatch: expected ${pureSig}, got ${computed}`)
+      }
+    } catch (err) {
+      console.error(`[dependency-loader] verification failed for ${pureSig}:`, err)
+      throw err
+    }
+
+    await this.#importWithRetry(alias)
+    return sig
+  }
+
+  #importWithRetry = async (alias: string, maxAttempts = 3): Promise<void> => {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
         const mod = await import(/* @vite-ignore */ alias)
         void mod
-
-        this.loaded.add(sig)
-        this.#dependencyCount = this.#dependencyCount + 1
-        this.#loadedSignatures = [...this.#loadedSignatures, sig]
-        this.dispatchEvent(new CustomEvent('change'))
-      } catch (error) {
-        console.error(`Failed to load dependency: ${sig}`, error)
-        this.#failedSignatures = [...this.#failedSignatures, sig]
-        this.dispatchEvent(new CustomEvent('change'))
+        return
+      } catch (err) {
+        if (attempt === maxAttempts) throw err
+        await new Promise(r => setTimeout(r, 200 * (2 ** (attempt - 1))))
       }
     }
   }

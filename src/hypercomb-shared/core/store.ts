@@ -206,7 +206,10 @@ export class Store extends EventTarget {
 
     try {
       const cache = await caches.open(Store.CACHE_NAME)
-      await cache.put(opfsUrl, new Response(buffer, { headers: this.jsNoStoreHeaders() }))
+      const existing = await cache.match(opfsUrl)
+      if (!existing) {
+        await cache.put(opfsUrl, new Response(buffer, { headers: this.jsNoStoreHeaders() }))
+      }
     } catch {
       // ignore
     }

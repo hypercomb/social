@@ -11,6 +11,7 @@ interface Window {
     has(key: string): boolean
     list(): readonly string[]
     onRegister(cb: (key: string, value: unknown) => void): () => void
+    whenReady<T = unknown>(key: string, callback: (value: T) => void): void
     graph(): Record<string, { deps: string[]; listens: string[]; emits: string[] }>
   }
 }

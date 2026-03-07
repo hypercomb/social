@@ -348,13 +348,41 @@ const main = async (): Promise<void> => {
   const rootDependencies = uniqSorted(Array.from(dependencyBytes.keys()).map(jsFileName))
   const dependencySigs = Array.from(dependencyBytes.keys()).sort((a, b) => a.localeCompare(b))
 
-  // bees
+  // class-to-dep reverse index: scan each namespace bundle for exported class names
+  const classToDepSig = new Map<string, string>()
+  for (const [sig, bytes] of dependencyBytes) {
+    const text = new TextDecoder().decode(bytes)
+    for (const m of text.matchAll(/(?:var\s+(\w+)\s*=\s*class|class\s+(\w+))/g)) {
+      const name = m[1] || m[2]
+      if (name) classToDepSig.set(name, sig)
+    }
+  }
+  console.log(`[build-module] class-to-dep index: ${classToDepSig.size} classes across ${dependencyBytes.size} namespaces`)
+
+  // bees — extract deps from compiled output and map to dep sigs
+  const beeDepsMap = new Map<string, string[]>()
   const beeExternals = [...PLATFORM_EXTERNALS, ...allSpecifiers]
   for (const src of sources.filter(s => s.kind === 'bee')) {
     const bytes = await buildBee(src.entry, beeExternals)
     const sig = await SignatureService.sign(toArrayBuffer(bytes))
     resourceBytes.set(sig, bytes)
     addToBucket(resourcesByDir, src.relDir, jsFileName(sig), 'bee')
+
+    // Extract deps = { ... } from compiled output, map IoC keys to dep sigs
+    const text = new TextDecoder().decode(bytes)
+    const depSigs = new Set<string>()
+    const depsMatch = text.match(/deps\s*=\s*\{([^}]+)\}/)
+    if (depsMatch) {
+      for (const m of depsMatch[1].matchAll(/@[^"'/]+\/(\w+)/g)) {
+        const cls = m[1]
+        if (cls && classToDepSig.has(cls)) depSigs.add(classToDepSig.get(cls)!)
+      }
+    }
+    if (depSigs.size) {
+      beeDepsMap.set(sig, [...depSigs].sort())
+      const relName = src.relPath.split('/').pop() ?? src.relPath
+      console.log(`[build-module] ${relName} → ${depSigs.size} dep(s)`)
+    }
   }
 
   // layers
@@ -375,12 +403,13 @@ const main = async (): Promise<void> => {
   for (const [sig, bytes] of dependencyBytes) writeSigJsFile(depDir, sig, bytes)
   for (const [sig, bytes] of resourceBytes) writeSigJsFile(resDir, sig, bytes)
 
-  // minimal install manifest (signatures only, no root)
+  // install manifest with bee-to-dep mapping
   const installManifest = {
-    version: 1,
+    version: 2,
     layers: Array.from(layers.keys()).sort((a, b) => a.localeCompare(b)),
     bees: Array.from(resourceBytes.keys()).sort((a, b) => a.localeCompare(b)),
     dependencies: dependencySigs,
+    beeDeps: Object.fromEntries(beeDepsMap),
   }
   writeFileSync(join(rootDir, INSTALL_MANIFEST_FILE), JSON.stringify(installManifest) + '\n', 'utf8')
 

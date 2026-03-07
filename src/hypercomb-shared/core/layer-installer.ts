@@ -1,5 +1,6 @@
 // hypercomb-shared/core/layer-installer.ts
 
+import { SignatureService } from '@hypercomb/core'
 import { type LocationParseResult } from './initializers/location-parser'
 import { Store } from './store'
 
@@ -102,6 +103,13 @@ export class LayerInstaller {
       const bytes = await this.fetchBytes(url)
       if (!bytes) continue
 
+      // Verify downloaded content matches expected signature
+      const computed = await SignatureService.sign(bytes.buffer as ArrayBuffer)
+      if (computed !== sig) {
+        console.error(`[layer-installer] layer signature mismatch: expected ${sig}, got ${computed}`)
+        continue
+      }
+
       // store as: opfsroot/__layers__/<domain>/<sig>
       await this.writeBytesFile(domainLayersDir, sig, bytes)
     }
@@ -128,6 +136,13 @@ export class LayerInstaller {
       const bytes = await this.fetchBytes(url)
       if (!bytes) continue
 
+      // Verify downloaded content matches expected signature
+      const computed = await SignatureService.sign(bytes.buffer as ArrayBuffer)
+      if (computed !== sig) {
+        console.error(`[layer-installer] dep signature mismatch: expected ${sig}, got ${computed}`)
+        continue
+      }
+
       // store as: opfsroot/__dependencies__/<sig>.js
       await this.writeBytesFile(depDir, name, bytes)
     }
@@ -153,6 +168,13 @@ export class LayerInstaller {
       const url = `${endpoint}/__bees__/${name}`
       const bytes = await this.fetchBytes(url)
       if (!bytes) continue
+
+      // Verify downloaded content matches expected signature
+      const computed = await SignatureService.sign(bytes.buffer as ArrayBuffer)
+      if (computed !== sig) {
+        console.error(`[layer-installer] bee signature mismatch: expected ${sig}, got ${computed}`)
+        continue
+      }
 
       // store as: opfsroot/__bees__/<sig>.js
       await this.writeBytesFile(beesDir, name, bytes)
