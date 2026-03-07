@@ -42,17 +42,39 @@ export class OpfsTreeLogger {
                     await this.#walk(childDir, indent + '  ')
                 }
             } else {
-                const label = this.#describeFile(e.name)
+                const label = await this.#describeFile(e.name, e.handle as FileSystemFileHandle)
                 console.log(`${indent}📄 ${e.name}${label}`)
             }
         }
     }
 
-    #describeFile = (name: string): string => {
+    #describeFile = async (name: string, handle: FileSystemFileHandle): Promise<string> => {
         const bare = name.replace(/\.js$/i, '')
         if (SIG_RE.test(bare)) return '  🐝 marker'
-        if (name === '0000') return '  (seed)'
+        if (name === '0000') {
+            try {
+                const file = await handle.getFile()
+                const text = await file.text()
+                const props = JSON.parse(text) as Record<string, unknown>
+                return `  (seed)  ${this.#formatSeedProps(props)}`
+            } catch {
+                return '  (seed)'
+            }
+        }
         return ''
+    }
+
+    #formatSeedProps = (props: Record<string, unknown>): string => {
+        const parts: string[] = []
+        if (props['name']) parts.push(`name="${props['name']}"`)
+        if (props['link']) parts.push(`link="${props['link']}"`)
+        const border = props['border'] as Record<string, unknown> | undefined
+        if (border?.['color']) parts.push(`border=${border['color']}`)
+        const bg = props['background'] as Record<string, unknown> | undefined
+        if (bg?.['color']) parts.push(`bg=${bg['color']}`)
+        const small = props['small'] as Record<string, unknown> | undefined
+        if (small?.['image']) parts.push(`img=${String(small['image']).slice(0, 8)}…`)
+        return parts.length ? parts.join('  ') : JSON.stringify(props)
     }
 
     #summarizeSystemDir = async (dir: FileSystemDirectoryHandle): Promise<string> => {
