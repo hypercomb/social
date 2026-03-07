@@ -22,6 +22,7 @@ import { TileEditorDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/
 import { ImageEditorService } from '@hypercomb/essentials/diamondcoreprocessor.com/editor/image-editor.service'
 import { SelectionService } from '@hypercomb/essentials/diamondcoreprocessor.com/core/selection/selection.service'
 import { TileSelectionDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/selection/tile-selection.drone'
+import { KeyMapService } from '@hypercomb/essentials/diamondcoreprocessor.com/input/keymap/keymap.service'
 import { TileEditorComponent } from '@hypercomb/shared/ui/tile-editor/tile-editor.component'
 import { ControlsBarComponent } from '@hypercomb/shared/ui/controls-bar/controls-bar.component'
 
@@ -64,7 +65,8 @@ export class App {
       TileEditorDrone,
       ImageEditorService,
       SelectionService,
-      TileSelectionDrone]
+      TileSelectionDrone,
+      KeyMapService]
 
     queueMicrotask(async () => {
       await initializeRuntime({
