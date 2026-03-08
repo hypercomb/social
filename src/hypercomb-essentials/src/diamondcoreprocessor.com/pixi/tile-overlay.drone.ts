@@ -94,7 +94,7 @@ export class TileOverlayDrone extends Drone {
     lineage: '@hypercomb.social/Lineage',
   }
   protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count', 'navigation:guard-start', 'navigation:guard-end']
-  protected override emits = ['tile:hover', 'tile:action', 'tile:click']
+  protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back']
 
   protected override heartbeat = async (): Promise<void> => {
     this.onEffect<HostReadyPayload>('render:host-ready', (payload) => {
@@ -140,6 +140,7 @@ export class TileOverlayDrone extends Drone {
     if (this.#listening) {
       document.removeEventListener('pointermove', this.#onPointerMove)
       document.removeEventListener('click', this.#onClick)
+      document.removeEventListener('contextmenu', this.#onContextMenu)
       this.#listening = false
     }
     if (this.#overlay) {
@@ -229,6 +230,7 @@ export class TileOverlayDrone extends Drone {
     this.#listening = true
     document.addEventListener('pointermove', this.#onPointerMove)
     document.addEventListener('click', this.#onClick)
+    document.addEventListener('contextmenu', this.#onContextMenu)
   }
 
   // ── pointer tracking ───────────────────────────────────────────
@@ -316,15 +318,54 @@ export class TileOverlayDrone extends Drone {
       }
     }
 
-    // no action button hit — emit tile:click for selection handling
-    this.emitEffect('tile:click', {
-      q: this.#currentAxial!.q,
-      r: this.#currentAxial!.r,
-      label: entry.label,
-      index: this.#currentIndex!,
-      ctrlKey: e.ctrlKey,
-      metaKey: e.metaKey,
-    })
+    // modifier click → selection (existing behavior)
+    if (e.ctrlKey || e.metaKey) {
+      this.emitEffect('tile:click', {
+        q: this.#currentAxial!.q,
+        r: this.#currentAxial!.r,
+        label: entry.label,
+        index: this.#currentIndex!,
+        ctrlKey: e.ctrlKey,
+        metaKey: e.metaKey,
+      })
+      return
+    }
+
+    // plain left-click on tile → navigate back to parent layer
+    this.#navigateBack()
+  }
+
+  // right-click on occupied tile → navigate into that tile's child layer
+  #onContextMenu = (e: MouseEvent): void => {
+    if (this.#navigationBlocked) return
+    if (!this.#renderContainer || !this.#renderer || !this.#canvas) return
+    if (this.#currentIndex === undefined || this.#currentIndex >= this.#cellCount) return
+
+    const entry = this.#occupiedByAxial.get(
+      TileOverlayDrone.axialKey(this.#currentAxial!.q, this.#currentAxial!.r),
+    )
+    if (!entry?.label) return
+
+    e.preventDefault()
+    this.#navigateInto(entry.label)
+  }
+
+  // ── tile navigation ───────────────────────────────────────────
+
+  #navigateInto(label: string): void {
+    const lineage = this.resolve<{ explorerEnter(name: string): void }>('lineage')
+    if (!lineage) return
+    this.emitEffect('tile:navigate-in', { label })
+    lineage.explorerEnter(label)
+    void new hypercomb().act()
+  }
+
+  #navigateBack(): void {
+    const lineage = this.resolve<{ explorerUp(): void }>('lineage')
+    if (!lineage) return
+    this.emitEffect('tile:navigate-back', {})
+    lineage.explorerUp()
+    void new hypercomb().act()
   }
 
   #handleRemove = async (label: string): Promise<void> => {
