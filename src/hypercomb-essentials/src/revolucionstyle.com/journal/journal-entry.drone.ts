@@ -33,13 +33,6 @@ export class JournalEntryDrone {
   constructor() {
     EffectBus.on<JournalActionPayload>('journal:action', this.#onAction)
     EffectBus.on<FlavorProfile>('wheel:selection-changed', this.#onFlavorChanged)
-    EffectBus.on<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
-      if (cmd !== 'journal.toggle') return
-      const service = window.ioc.get<JournalService>('@revolucionstyle.com/JournalService')
-      if (!service) return
-      if (service.mode === 'editing') this.#cancel()
-      else void this.#openNew()
-    })
   }
 
   // ── effect handlers ────────────────────────────────────────────
@@ -101,7 +94,7 @@ export class JournalEntryDrone {
     const service = window.ioc.get<JournalService>('@revolucionstyle.com/JournalService')
     if (!service) return
 
-    const overlay = this.#el('div', {
+    this.#overlay = this.#el('div', {
       position: 'fixed', inset: '0', zIndex: '70000',
       backgroundColor: 'rgba(0, 0, 0, 0.82)',
       display: 'flex', justifyContent: 'center', alignItems: 'center',
@@ -124,12 +117,11 @@ export class JournalEntryDrone {
     container.appendChild(this.#buildMetaSection(service))
     container.appendChild(this.#buildActions())
 
-    overlay.appendChild(container)
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) this.#cancel()
+    this.#overlay.appendChild(container)
+    this.#overlay.addEventListener('click', (e) => {
+      if (e.target === this.#overlay) this.#cancel()
     })
-    document.body.appendChild(overlay)
-    this.#overlay = overlay
+    document.body.appendChild(this.#overlay)
   }
 
   #destroyOverlay(): void {
@@ -237,7 +229,6 @@ export class JournalEntryDrone {
     })
 
     const badge = this.#el('span', { fontSize: '12px', color: TEXT_DIM })
-    badge.dataset['flavorBadge'] = 'true'
     badge.textContent = service.entry.flavors.selected.length > 0
       ? `${service.entry.flavors.selected.length} selected`
       : 'none selected'
@@ -247,12 +238,11 @@ export class JournalEntryDrone {
     section.appendChild(row)
 
     // chips container
-    const chipsContainer = this.#el('div', {
+    this.#flavorChipsContainer = this.#el('div', {
       display: 'flex', flexWrap: 'wrap', gap: '6px',
-    })
-    this.#flavorChipsContainer = chipsContainer
+    }) as HTMLDivElement
     this.#renderFlavorChips(service.entry.flavors)
-    section.appendChild(chipsContainer)
+    section.appendChild(this.#flavorChipsContainer)
 
     return section
   }
@@ -417,7 +407,7 @@ export class JournalEntryDrone {
 
   // ── DOM helpers ────────────────────────────────────────────────
 
-  #el<K extends keyof HTMLElementTagNameMap>(tag: K, styles: Record<string, string>): HTMLElementTagNameMap[K] {
+  #el(tag: string, styles: Record<string, string>): HTMLElement {
     const el = document.createElement(tag)
     Object.assign(el.style, styles)
     return el
