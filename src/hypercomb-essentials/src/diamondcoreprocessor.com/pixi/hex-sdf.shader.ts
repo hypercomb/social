@@ -145,6 +145,8 @@ export class HexSdfTextureShader {
       vec4 base = mix(baseLocal, baseExternal, step(0.5, vTexKind));
 
       // cell image fills interior; base texture border stays on top
+      // Remap vUV from quad space to hex bounding-box space so the
+      // captured image (which IS the hex bounding box) maps 1:1.
       float hexW = 1.732050808 * u_radiusPx;
       float hexH = 2.0 * u_radiusPx;
       vec2 hexScale = vec2(hexW / u_quadSize.x, hexH / u_quadSize.y);
