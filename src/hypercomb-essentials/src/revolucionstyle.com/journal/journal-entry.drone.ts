@@ -97,13 +97,13 @@ export class JournalEntryDrone {
     this.#overlay = this.#el('div', {
       position: 'fixed', inset: '0', zIndex: '70000',
       backgroundColor: 'rgba(0, 0, 0, 0.82)',
-      display: 'flex', justifyContent: 'center', alignItems: 'center',
+      overflowY: 'auto',
       fontFamily: "'Segoe UI', system-ui, sans-serif",
       color: TEXT,
     })
 
     const container = this.#el('div', {
-      width: '480px', maxHeight: '90vh', overflowY: 'auto',
+      width: '480px', margin: '40px auto',
       backgroundColor: BG_DARK, borderRadius: '12px', padding: '24px',
       border: `1px solid ${BORDER}`,
     })
