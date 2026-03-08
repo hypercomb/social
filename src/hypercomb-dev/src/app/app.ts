@@ -1,6 +1,7 @@
-import { Component, signal } from '@angular/core';
+import { AfterViewInit, Component, signal } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { SearchBarComponent } from '@hypercomb/shared';
+import type { Bee } from '@hypercomb/core';
 import { initializeRuntime } from '@hypercomb/shared/core';
 import { AxialService } from '@hypercomb/essentials/diamondcoreprocessor.com/core/axial/axial-service';
 import { PanningDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/pan/panning.drone';
@@ -34,6 +35,7 @@ import { ControlsBarComponent } from '@hypercomb/shared/ui/controls-bar/controls
 })
 export class App {
   protected readonly title = signal('hypercomb-dev');
+  private runtimeReady: Promise<void> = Promise.resolve();
 
   public readonly meshPublic = signal(true);
 
@@ -68,10 +70,34 @@ export class App {
       TileSelectionDrone,
       KeyMapService]
 
-    queueMicrotask(async () => {
-      await initializeRuntime({
+    queueMicrotask(() => {
+      this.runtimeReady = initializeRuntime({
         onMeshStateChange: enabled => this.meshPublic.set(enabled),
       })
     })
+  }
+
+  public ngAfterViewInit(): void {
+    void this.runtimeReady.then(() => {
+      requestAnimationFrame(() => {
+        void this.startRegisteredBees()
+      })
+    })
+  }
+
+  private readonly startRegisteredBees = async (): Promise<void> => {
+    const values = list()
+      .map(key => get(key))
+      .filter((value): value is Bee => !!value && typeof (value as Bee).pulse === 'function')
+
+    for (const bee of values) {
+      try {
+        await bee.pulse('')
+      } catch (error) {
+        console.warn('[app] failed to start bee', bee.constructor?.name, error)
+      }
+    }
+
+    window.dispatchEvent(new Event('synchronize'))
   }
 }

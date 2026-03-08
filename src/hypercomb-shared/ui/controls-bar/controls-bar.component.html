@@ -11,7 +11,7 @@
         <div class="controls-section nav">
           @if (canGoBack()) {
             <button class="ctl-btn" (click)="goBack()" aria-label="back">
-              <span class="hci">W</span>
+              <span class="hci">B</span>
             </button>
           }
           @if (hasPath()) {
@@ -24,19 +24,19 @@
       <!-- view section -->
       <div class="controls-section view">
         <button class="ctl-btn" [class.active]="locked()" (click)="toggleLock()" aria-label="lock">
-          <span class="hci">{{ locked() ? '_' : '`' }}</span>
+          <span class="hci">{{ locked() ? 'a' : 'b' }}</span>
         </button>
         <button class="ctl-btn" (click)="centerView()" aria-label="center">
-          <span class="hci">N</span>
+          <span class="hci">(</span>
         </button>
         <button class="ctl-btn" (click)="zoomOut()" aria-label="zoom out">
-          <span class="hci">c</span>
+          <span class="hci">I</span>
         </button>
         <button class="ctl-btn" (click)="zoomIn()" aria-label="zoom in">
-          <span class="hci">d</span>
+          <span class="hci">K</span>
         </button>
         <button class="ctl-btn" (click)="toggleFullscreen()" aria-label="fullscreen">
-          <span class="hci">U</span>
+          <span class="hci">'</span>
         </button>
       </div>
 
@@ -45,19 +45,19 @@
         <div class="controls-divider"></div>
         <div class="controls-section utility">
           <button class="ctl-btn" (click)="cut()" aria-label="cut">
-            <span class="hci">T</span>
+            <span class="hci">y</span>
           </button>
           <button class="ctl-btn" (click)="copy()" aria-label="copy">
-            <span class="hci">r</span>
+            <span class="hci">x</span>
           </button>
           <button class="ctl-btn" (click)="remove()" aria-label="delete">
             <span class="hci">Q</span>
           </button>
           <button class="ctl-btn" (click)="moveItem()" aria-label="move">
-            <span class="hci">S</span>
+            <span class="hci">3</span>
           </button>
           <button class="ctl-btn clipboard-btn" (click)="openClipboard()" aria-label="clipboard">
-            <span class="hci">J</span>
+            <span class="hci">$</span>
             @if (clipboardCount() > 0) {
               <span class="badge">{{ clipboardCount() }}</span>
             }
@@ -71,7 +71,7 @@
       <!-- utility toggle (rightmost) -->
       <div class="controls-divider"></div>
       <button class="ctl-btn toggle" [class.active]="utility()" (click)="toggleUtility()" aria-label="utility mode">
-        <span class="hci">L</span>
+        <span class="hci">s</span>
       </button>
     }
 
@@ -94,16 +94,19 @@
     }
 
     @case ('secret') {
-      <input
-        class="secret-input"
-        type="text"
-        placeholder="enter secret..."
-        [value]="secretValue()"
-        (input)="onSecretInput($event)"
-        (keydown.enter)="submitSecret()"
-        (keydown.escape)="closeSecret()"
-        #secretInput
-      />
+      <div class="secret-shell">
+        <span class="secret-label">secret</span>
+        <input
+          class="secret-input"
+          type="text"
+          placeholder="SECURE BY LOCATION"
+          [value]="secretValue()"
+          (input)="onSecretInput($event)"
+          (keydown.enter)="submitSecret()"
+          (keydown.escape)="closeSecret()"
+          #secretInput
+        />
+      </div>
       <button class="ctl-btn" (click)="closeSecret()" aria-label="close secret">
         <span class="close-x">&times;</span>
       </button>

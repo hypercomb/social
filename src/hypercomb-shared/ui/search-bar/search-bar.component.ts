@@ -268,6 +268,7 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
 
     // emit seed:added for the top-level seed (the one visible in the current layer)
     EffectBus.emit('seed:added', { seed: parts[0] })
+    this.requestSynchronize()
 
     if (navigateAfterCreate) {
       await this.movement.move(parts[0])
@@ -407,6 +408,7 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
 
     // reactive: notify the system a seed was added
     EffectBus.emit('seed:added', { seed: seedName })
+    this.requestSynchronize()
   }
 
   // -------------------------------------------------
@@ -435,5 +437,9 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
 
   private readonly syncSignalsFromDom = (): void => {
     this.value.set(this.input().nativeElement.value)
+  }
+
+  private readonly requestSynchronize = (): void => {
+    window.dispatchEvent(new Event('synchronize'))
   }
 }

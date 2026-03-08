@@ -26,6 +26,11 @@ type MeshApi = {
   subscribe?: (sig: string, cb: (e: MeshEvt) => void) => MeshSub
 }
 
+type PixiHostApi = {
+  app?: Application | null
+  container?: Container | null
+}
+
 export class ShowHoneycombWorker extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   // pixi resources (populated via render:host-ready effect)
@@ -63,6 +68,8 @@ export class ShowHoneycombWorker extends Drone {
   private renderedCellsKey = ''
   private renderedCount = 0
 
+  private lineageChangeListening = false
+
   // incremental rendering state — tracks what's currently painted (geometry cache)
   private readonly renderedCells = new Map<string, SeedCell>()
   #heatByLabel = new Map<string, number>()
@@ -95,6 +102,21 @@ export class ShowHoneycombWorker extends Drone {
   private lastLocalSeedsBySig = new Map<string, string[]>()
   private lastPublishedGrammarSig = ''
   private lastPublishedGrammarSeed = ''
+
+  private readonly onSynchronize = (): void => {
+    this.requestRender()
+  }
+
+  private readonly onLineageChange = (): void => {
+    this.requestRender()
+  }
+
+  private readonly adoptHostPayload = (payload: HostReadyPayload): void => {
+    this.pixiApp = payload.app
+    this.pixiContainer = payload.container
+    this.pixiRenderer = payload.renderer
+    this.requestRender()
+  }
 
   protected override heartbeat = async (grammar: string = ''): Promise<void> => {
     this.ensureListeners()
@@ -521,6 +543,8 @@ export class ShowHoneycombWorker extends Drone {
     for (const s of localSeeds) union.add(s)
     for (const s of this.meshSeeds) union.add(s)
 
+    const localSeedSet = new Set(localSeeds)
+
     // note: apply history — filter out seeds whose last operation is "remove"
     const historyService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as HistoryService | undefined
     if (historyService) {
@@ -529,14 +553,12 @@ export class ShowHoneycombWorker extends Drone {
       const seedState = new Map<string, string>() // seed → last op
       for (const op of ops) seedState.set(op.seed, op.op)
       for (const [seed, lastOp] of seedState) {
-        if (lastOp === 'remove') union.delete(seed)
+        if (lastOp === 'remove' && !localSeedSet.has(seed)) union.delete(seed)
       }
     }
 
     const seedNames = Array.from(union)
     seedNames.sort((a, b) => a.localeCompare(b))
-
-    const localSeedSet = new Set(localSeeds)
     const layerChanged = locationKey !== this.renderedLocationKey
 
     // note: if streaming is active for the same layer, let the stream finish
@@ -744,14 +766,27 @@ export class ShowHoneycombWorker extends Drone {
     this.listening = true
 
     this.onEffect<HostReadyPayload>('render:host-ready', (payload) => {
-      this.pixiApp = payload.app
-      this.pixiContainer = payload.container
-      this.pixiRenderer = payload.renderer
-      this.requestRender()
+      this.adoptHostPayload(payload)
     })
 
+    const host = get('@diamondcoreprocessor.com/PixiHostWorker') as PixiHostApi | undefined
+    if (host?.app && host?.container) {
+      this.adoptHostPayload({
+        app: host.app,
+        container: host.container,
+        canvas: host.app.canvas as HTMLCanvasElement,
+        renderer: host.app.renderer,
+      })
+    }
+
     // respond to processor-emitted synchronize
-    window.addEventListener('synchronize', () => this.requestRender())
+    window.addEventListener('synchronize', this.onSynchronize)
+
+    const lineage = this.resolve<EventTarget>('lineage')
+    if (lineage && !this.lineageChangeListening) {
+      lineage.addEventListener('change', this.onLineageChange)
+      this.lineageChangeListening = true
+    }
 
     // tile:saved effect — invalidate image cache so re-render picks up new image
     this.onEffect<{ seed: string }>('tile:saved', (payload) => {
@@ -781,6 +816,16 @@ export class ShowHoneycombWorker extends Drone {
         const lineage = this.resolve<any>('lineage')
         return await this.computeSignatureLocation(lineage)
       }
+    }
+  }
+
+  protected override dispose = (): void => {
+    window.removeEventListener('synchronize', this.onSynchronize)
+
+    if (this.lineageChangeListening) {
+      const lineage = this.resolve<EventTarget>('lineage')
+      lineage?.removeEventListener('change', this.onLineageChange)
+      this.lineageChangeListening = false
     }
   }
 
