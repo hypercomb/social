@@ -1,4 +1,4 @@
-import { AfterViewInit, Component, signal } from '@angular/core';
+import { Component, signal } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { SearchBarComponent } from '@hypercomb/shared';
 import type { Bee } from '@hypercomb/core';
@@ -35,7 +35,6 @@ import { ControlsBarComponent } from '@hypercomb/shared/ui/controls-bar/controls
 })
 export class App {
   protected readonly title = signal('hypercomb-dev');
-  private runtimeReady: Promise<void> = Promise.resolve();
 
   public readonly meshPublic = signal(true);
 
@@ -70,15 +69,10 @@ export class App {
       TileSelectionDrone,
       KeyMapService]
 
-    queueMicrotask(() => {
-      this.runtimeReady = initializeRuntime({
+    queueMicrotask(async () => {
+      await initializeRuntime({
         onMeshStateChange: enabled => this.meshPublic.set(enabled),
       })
-    })
-  }
-
-  public ngAfterViewInit(): void {
-    void this.runtimeReady.then(() => {
       requestAnimationFrame(() => {
         void this.startRegisteredBees()
       })
