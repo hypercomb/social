@@ -1,7 +1,7 @@
 <!-- src/app/common/header/search-bar/search-bar.component.html -->
 
 <div class="command-bar">
-  <div class="command-shell">
+  <div class="command-shell" (mousedown)="onShellMouseDown($event)">
     <div class="command-row">
 
       <span

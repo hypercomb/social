@@ -187,6 +187,12 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     return rendered.slice(Math.min(prefix.length, rendered.length))
   }
 
+  public onShellMouseDown = (e: MouseEvent): void => {
+    if (e.target === this.input().nativeElement) return
+    e.preventDefault()
+    this.input().nativeElement.focus()
+  }
+
   public onSuggestionMouseDown = (e: MouseEvent, s: string, i: number): void => {
     e.preventDefault()
     this.activeIndex.set(i)

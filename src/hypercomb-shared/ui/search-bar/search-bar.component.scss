@@ -34,6 +34,8 @@
   transition:
     border-color var(--transition-speed) ease,
     box-shadow var(--transition-speed) ease;
+  user-select: none;
+  cursor: default;
 }
 
 .command-shell:focus-within {
@@ -97,6 +99,8 @@
   letter-spacing: 0.02em;
   color: whitesmoke;
   caret-color: var(--glow-color);
+  user-select: text;
+  cursor: text;
 }
 
 .command-input::placeholder {
