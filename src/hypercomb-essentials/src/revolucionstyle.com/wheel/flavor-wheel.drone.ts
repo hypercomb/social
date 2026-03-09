@@ -17,21 +17,23 @@ const OUTER_THICKNESS = 50
 const GAP_RAD = (2 * Math.PI) / 180
 const CANVAS_SIZE = 420
 const CENTER = CANVAS_SIZE / 2
+const CORNER_R = 3
 
 // ── styling ──────────────────────────────────────────────────────
 
-const UNSELECTED_ALPHA = 0.4
-const PARTIAL_ALPHA = 0.7
-const SELECTED_ALPHA = 1.0
-const STROKE_COLOR = 0xFFFFFF
-const STROKE_ALPHA = 0.5
-const STROKE_WIDTH = 2
+const UNSELECTED_ALPHA = 0.32
+const PARTIAL_ALPHA = 0.6
+const SELECTED_ALPHA = 0.92
+const STROKE_COLOR = 0xe0d5c8
+const STROKE_ALPHA = 0.35
+const STROKE_WIDTH = 1.5
 
 const LABEL_STYLE = new TextStyle({
   fontFamily: "'Segoe UI', system-ui, sans-serif",
   fontSize: 9,
   fill: 0xFFFFFF,
   align: 'center',
+  letterSpacing: 0.3,
 })
 
 const CAT_LABEL_STYLE = new TextStyle({
@@ -40,14 +42,16 @@ const CAT_LABEL_STYLE = new TextStyle({
   fontWeight: 'bold',
   fill: 0xFFFFFF,
   align: 'center',
+  letterSpacing: 0.5,
 })
 
 const CENTER_STYLE = new TextStyle({
   fontFamily: "'Segoe UI', system-ui, sans-serif",
-  fontSize: 16,
-  fontWeight: 'bold',
-  fill: 0xe0d5c8,
+  fontSize: 14,
+  fontWeight: '600',
+  fill: 0x9a8e82,
   align: 'center',
+  letterSpacing: 1,
 })
 
 // ── hit zone lookup ──────────────────────────────────────────────
@@ -115,13 +119,15 @@ export class FlavorWheelDrone extends Drone {
   // ── initialization ─────────────────────────────────────────────
 
   async #init(): Promise<void> {
-    // backdrop
+    // backdrop with blur
     this.#backdrop = document.createElement('div')
     Object.assign(this.#backdrop.style, {
       position: 'fixed',
       inset: '0',
       zIndex: '75000',
-      backgroundColor: 'rgba(0, 0, 0, 0.8)',
+      backgroundColor: 'rgba(8, 6, 4, 0.72)',
+      backdropFilter: 'blur(20px)',
+      WebkitBackdropFilter: 'blur(20px)',
       display: 'none',
       justifyContent: 'center',
       alignItems: 'center',
@@ -131,30 +137,60 @@ export class FlavorWheelDrone extends Drone {
       if (e.target === this.#backdrop) this.#hide()
     })
 
-    // wrapper to prevent canvas click from closing
-    const wrapper = document.createElement('div')
-    Object.assign(wrapper.style, {
+    // card container
+    const card = document.createElement('div')
+    Object.assign(card.style, {
       position: 'relative',
       cursor: 'default',
+      backgroundColor: 'rgba(26, 22, 18, 0.88)',
+      borderRadius: '20px',
+      border: '1px solid rgba(200, 151, 90, 0.12)',
+      boxShadow: '0 32px 80px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.03) inset',
+      padding: '28px 28px 20px',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
     })
-    wrapper.addEventListener('click', (e) => e.stopPropagation())
+    card.addEventListener('click', (e) => e.stopPropagation())
+
+    // title
+    const title = document.createElement('div')
+    Object.assign(title.style, {
+      fontSize: '10px',
+      fontWeight: '600',
+      letterSpacing: '0.2em',
+      textTransform: 'uppercase',
+      color: 'rgba(200, 151, 90, 0.55)',
+      marginBottom: '16px',
+      fontFamily: "'Segoe UI', system-ui, sans-serif",
+    })
+    title.textContent = 'Flavor Profile'
 
     // close button
     const closeBtn = document.createElement('button')
     closeBtn.textContent = 'Done'
     Object.assign(closeBtn.style, {
-      position: 'absolute',
-      bottom: '-48px',
-      left: '50%',
-      transform: 'translateX(-50%)',
-      padding: '8px 24px',
-      border: '1px solid #c8975a',
-      borderRadius: '6px',
-      backgroundColor: '#2a231c',
-      color: '#e0d5c8',
-      fontSize: '14px',
+      marginTop: '18px',
+      padding: '10px 36px',
+      border: '1px solid rgba(200, 151, 90, 0.25)',
+      borderRadius: '24px',
+      backgroundColor: 'rgba(200, 151, 90, 0.08)',
+      color: '#c8975a',
+      fontSize: '13px',
+      fontWeight: '500',
       cursor: 'pointer',
       fontFamily: "'Segoe UI', system-ui, sans-serif",
+      letterSpacing: '0.06em',
+      transition: 'all 0.2s ease',
+      outline: 'none',
+    })
+    closeBtn.addEventListener('mouseenter', () => {
+      closeBtn.style.backgroundColor = 'rgba(200, 151, 90, 0.15)'
+      closeBtn.style.borderColor = 'rgba(200, 151, 90, 0.4)'
+    })
+    closeBtn.addEventListener('mouseleave', () => {
+      closeBtn.style.backgroundColor = 'rgba(200, 151, 90, 0.08)'
+      closeBtn.style.borderColor = 'rgba(200, 151, 90, 0.25)'
     })
     closeBtn.addEventListener('click', () => this.#hide())
 
@@ -194,9 +230,10 @@ export class FlavorWheelDrone extends Drone {
     this.#app.stage.hitArea = { contains: () => true }
     this.#app.stage.on('pointerdown', this.#onPointerDown)
 
-    wrapper.appendChild(this.#canvas)
-    wrapper.appendChild(closeBtn)
-    this.#backdrop.appendChild(wrapper)
+    card.appendChild(title)
+    card.appendChild(this.#canvas)
+    card.appendChild(closeBtn)
+    this.#backdrop.appendChild(card)
     document.body.appendChild(this.#backdrop)
 
     this.#initialized = true
@@ -214,6 +251,9 @@ export class FlavorWheelDrone extends Drone {
     this.#selectionGraphics.clear()
     this.#labelsContainer.removeChildren()
 
+    // ── background decoration ──
+    this.#drawDecoration(this.#wheelGraphics)
+
     const catCount = FLAVOR_CATEGORIES.length
     const catAngle = (2 * Math.PI) / catCount
 
@@ -228,7 +268,7 @@ export class FlavorWheelDrone extends Drone {
       const catPartial = service.isCategoryPartiallySelected(flavorIds)
       const catAlpha = catSelected ? SELECTED_ALPHA : catPartial ? PARTIAL_ALPHA : UNSELECTED_ALPHA
 
-      this.#drawArc(
+      this.#drawRoundedArc(
         this.#wheelGraphics,
         INNER_RADIUS, INNER_RADIUS + INNER_THICKNESS,
         startAngle + GAP_RAD / 2, endAngle - GAP_RAD / 2,
@@ -236,7 +276,7 @@ export class FlavorWheelDrone extends Drone {
       )
 
       if (catSelected || catPartial) {
-        this.#drawArcStroke(
+        this.#drawRoundedArcStroke(
           this.#selectionGraphics,
           INNER_RADIUS, INNER_RADIUS + INNER_THICKNESS,
           startAngle + GAP_RAD / 2, endAngle - GAP_RAD / 2,
@@ -265,7 +305,7 @@ export class FlavorWheelDrone extends Drone {
         const selected = service.isSelected(flavor.id)
         const alpha = selected ? SELECTED_ALPHA : UNSELECTED_ALPHA
 
-        this.#drawArc(
+        this.#drawRoundedArc(
           this.#wheelGraphics,
           OUTER_RADIUS, OUTER_RADIUS + OUTER_THICKNESS,
           fStart + GAP_RAD / 2, fEnd - GAP_RAD / 2,
@@ -273,7 +313,7 @@ export class FlavorWheelDrone extends Drone {
         )
 
         if (selected) {
-          this.#drawArcStroke(
+          this.#drawRoundedArcStroke(
             this.#selectionGraphics,
             OUTER_RADIUS, OUTER_RADIUS + OUTER_THICKNESS,
             fStart + GAP_RAD / 2, fEnd - GAP_RAD / 2,
@@ -300,9 +340,168 @@ export class FlavorWheelDrone extends Drone {
       : 'Tap to\nselect'
   }
 
-  // ── arc geometry helpers ───────────────────────────────────────
+  // ── background decoration ──────────────────────────────────────
 
-  #drawArc(
+  #drawDecoration(g: Graphics): void {
+    // subtle center circle
+    g.circle(CENTER, CENTER, INNER_RADIUS - 6)
+    g.fill({ color: 0x1a1612, alpha: 0.7 })
+
+    // thin accent ring around center
+    g.circle(CENTER, CENTER, INNER_RADIUS - 6)
+    g.stroke({ color: 0xc8975a, alpha: 0.08, width: 1 })
+
+    // subtle ring between inner and outer rings
+    g.circle(CENTER, CENTER, OUTER_RADIUS)
+    g.stroke({ color: 0xFFFFFF, alpha: 0.03, width: 1 })
+
+    // outer decorative ring
+    g.circle(CENTER, CENTER, OUTER_RADIUS + OUTER_THICKNESS + 4)
+    g.stroke({ color: 0xc8975a, alpha: 0.06, width: 0.5 })
+  }
+
+  // ── rounded arc drawing ────────────────────────────────────────
+
+  #drawRoundedArc(
+    g: Graphics,
+    innerR: number, outerR: number,
+    startAngle: number, endAngle: number,
+    color: number, alpha: number,
+  ): void {
+    const thickness = outerR - innerR
+    const arcLen = (endAngle - startAngle) * innerR
+    const cr = Math.min(CORNER_R, thickness * 0.25, arcLen * 0.25)
+
+    if (cr < 0.5) {
+      this.#drawSimpleArc(g, innerR, outerR, startAngle, endAngle, color, alpha)
+      return
+    }
+
+    const aOuter = cr / outerR
+    const aInner = cr / innerR
+    const dr = cr
+
+    // Start on the start-radial, just below outer edge
+    g.moveTo(
+      CENTER + Math.cos(startAngle) * (outerR - dr),
+      CENTER + Math.sin(startAngle) * (outerR - dr),
+    )
+
+    // Corner 1: start-outer
+    g.quadraticCurveTo(
+      CENTER + Math.cos(startAngle) * outerR,
+      CENTER + Math.sin(startAngle) * outerR,
+      CENTER + Math.cos(startAngle + aOuter) * outerR,
+      CENTER + Math.sin(startAngle + aOuter) * outerR,
+    )
+
+    // Outer arc (forward)
+    g.arc(CENTER, CENTER, outerR, startAngle + aOuter, endAngle - aOuter)
+
+    // Corner 2: end-outer
+    g.quadraticCurveTo(
+      CENTER + Math.cos(endAngle) * outerR,
+      CENTER + Math.sin(endAngle) * outerR,
+      CENTER + Math.cos(endAngle) * (outerR - dr),
+      CENTER + Math.sin(endAngle) * (outerR - dr),
+    )
+
+    // Radial line to inner arc
+    g.lineTo(
+      CENTER + Math.cos(endAngle) * (innerR + dr),
+      CENTER + Math.sin(endAngle) * (innerR + dr),
+    )
+
+    // Corner 3: end-inner
+    g.quadraticCurveTo(
+      CENTER + Math.cos(endAngle) * innerR,
+      CENTER + Math.sin(endAngle) * innerR,
+      CENTER + Math.cos(endAngle - aInner) * innerR,
+      CENTER + Math.sin(endAngle - aInner) * innerR,
+    )
+
+    // Inner arc (backward)
+    g.arc(CENTER, CENTER, innerR, endAngle - aInner, startAngle + aInner, true)
+
+    // Corner 4: start-inner
+    g.quadraticCurveTo(
+      CENTER + Math.cos(startAngle) * innerR,
+      CENTER + Math.sin(startAngle) * innerR,
+      CENTER + Math.cos(startAngle) * (innerR + dr),
+      CENTER + Math.sin(startAngle) * (innerR + dr),
+    )
+
+    g.closePath()
+    g.fill({ color, alpha })
+  }
+
+  #drawRoundedArcStroke(
+    g: Graphics,
+    innerR: number, outerR: number,
+    startAngle: number, endAngle: number,
+  ): void {
+    const thickness = outerR - innerR
+    const arcLen = (endAngle - startAngle) * innerR
+    const cr = Math.min(CORNER_R, thickness * 0.25, arcLen * 0.25)
+
+    if (cr < 0.5) {
+      this.#drawSimpleArcStroke(g, innerR, outerR, startAngle, endAngle)
+      return
+    }
+
+    const aOuter = cr / outerR
+    const aInner = cr / innerR
+    const dr = cr
+
+    g.moveTo(
+      CENTER + Math.cos(startAngle) * (outerR - dr),
+      CENTER + Math.sin(startAngle) * (outerR - dr),
+    )
+
+    g.quadraticCurveTo(
+      CENTER + Math.cos(startAngle) * outerR,
+      CENTER + Math.sin(startAngle) * outerR,
+      CENTER + Math.cos(startAngle + aOuter) * outerR,
+      CENTER + Math.sin(startAngle + aOuter) * outerR,
+    )
+
+    g.arc(CENTER, CENTER, outerR, startAngle + aOuter, endAngle - aOuter)
+
+    g.quadraticCurveTo(
+      CENTER + Math.cos(endAngle) * outerR,
+      CENTER + Math.sin(endAngle) * outerR,
+      CENTER + Math.cos(endAngle) * (outerR - dr),
+      CENTER + Math.sin(endAngle) * (outerR - dr),
+    )
+
+    g.lineTo(
+      CENTER + Math.cos(endAngle) * (innerR + dr),
+      CENTER + Math.sin(endAngle) * (innerR + dr),
+    )
+
+    g.quadraticCurveTo(
+      CENTER + Math.cos(endAngle) * innerR,
+      CENTER + Math.sin(endAngle) * innerR,
+      CENTER + Math.cos(endAngle - aInner) * innerR,
+      CENTER + Math.sin(endAngle - aInner) * innerR,
+    )
+
+    g.arc(CENTER, CENTER, innerR, endAngle - aInner, startAngle + aInner, true)
+
+    g.quadraticCurveTo(
+      CENTER + Math.cos(startAngle) * innerR,
+      CENTER + Math.sin(startAngle) * innerR,
+      CENTER + Math.cos(startAngle) * (innerR + dr),
+      CENTER + Math.sin(startAngle) * (innerR + dr),
+    )
+
+    g.closePath()
+    g.stroke({ color: STROKE_COLOR, alpha: STROKE_ALPHA, width: STROKE_WIDTH })
+  }
+
+  // ── simple arc fallback (for tiny segments) ────────────────────
+
+  #drawSimpleArc(
     g: Graphics,
     innerR: number, outerR: number,
     startAngle: number, endAngle: number,
@@ -311,14 +510,12 @@ export class FlavorWheelDrone extends Drone {
     const steps = 32
     const points: number[] = []
 
-    // outer arc forward
     for (let i = 0; i <= steps; i++) {
       const angle = startAngle + (endAngle - startAngle) * (i / steps)
       points.push(CENTER + Math.cos(angle) * outerR)
       points.push(CENTER + Math.sin(angle) * outerR)
     }
 
-    // inner arc backward
     for (let i = steps; i >= 0; i--) {
       const angle = startAngle + (endAngle - startAngle) * (i / steps)
       points.push(CENTER + Math.cos(angle) * innerR)
@@ -329,7 +526,7 @@ export class FlavorWheelDrone extends Drone {
     g.fill({ color, alpha })
   }
 
-  #drawArcStroke(
+  #drawSimpleArcStroke(
     g: Graphics,
     innerR: number, outerR: number,
     startAngle: number, endAngle: number,
