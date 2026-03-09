@@ -28,6 +28,9 @@ const SRC_ROOT = resolve(PROJECT_ROOT, 'src')
 const DIST_ROOT = resolve(PROJECT_ROOT, 'dist')
 
 const TARGET = 'es2022'
+
+// domains to exclude from the build output
+const EXCLUDED_DOMAINS: string[] = ['revolucionstyle.com']
 const NAMESPACE_SEGMENTS_MAX = 3
 const PLATFORM_EXTERNALS = ['@hypercomb/core', 'pixi.js']
 
@@ -159,6 +162,8 @@ const discoverSources = (): SourceFile[] =>
     .filter(f => {
       const relPath = relPosix(SRC_ROOT, f)
       if (relPath === 'types' || relPath.startsWith('types/')) return false
+      const domain = relPath.split('/')[0]
+      if (EXCLUDED_DOMAINS.includes(domain)) return false
       if (isEntry(relPath)) return false
       const relDir = relPosix(SRC_ROOT, dirname(f))
       if (!relDir) return false
@@ -183,6 +188,7 @@ const readDirTree = (root: string, rel: string): DirNode => {
   const names = readdirSync(full).slice().sort((a, b) => a.localeCompare(b))
   for (const name of names) {
     if (!rel && name === 'types') continue
+    if (!rel && EXCLUDED_DOMAINS.includes(name)) continue
     const child = join(full, name)
     if (statSync(child).isDirectory()) {
       children.push(readDirTree(root, rel ? `${rel}/${name}` : name))

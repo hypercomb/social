@@ -6,25 +6,29 @@ Ideas for making the experience more incredible. Each iteration picks one. Archi
 
 ## Chosen This Iteration
 
-### Stigmergic Trails
+### Seed Portals
 
-**What**: Extend ambient presence from point-in-time heat into directional flow. When users navigate from seed A to seed B, the mesh publishes a lightweight `navigation-edge` event (just two signatures + timestamp). Over time, these edges accumulate into visible trails on the honeycomb — fading lines between cells showing where collective attention flows.
+**What**: A seed whose content is another seed's 64-char signature becomes a portal — a wormhole in hex space. Navigating into a portal teleports you to the target seed anywhere in the honeycomb. The topology transforms from a flat hex plane into a connected graph with long-range links.
 
-**Why this is universal**: Stigmergy is how ants coordinate without language, hierarchy, or profiles. No recommendation algorithm, no curation, no user accounts needed. Every person on the planet navigating the honeycomb contributes to and benefits from the trails. Language-independent, culture-independent, zero onboarding.
+**Why this is universal**: Portals require no language, no labels, no taxonomy. Anyone on any device can create one by writing a signature as content. Communities self-organize link networks without coordination. The signature IS the address — no DNS, no URLs, no breakable links. Physical-world QR codes (backlog idea) become portal creation tools. Portals compose: chains of portals form paths across the mesh.
 
 **Architecture fit**:
-- Builds directly on existing ambient presence + Nostr mesh infrastructure
-- One new Nostr event kind (navigation edge: `{from: sig, to: sig}`)
-- One new effect: `render:trail-edges` emitting edge list with decay weights
-- ShowHoneycombWorker already has per-vertex attributes — add `aTrailIntensity` for edge glow between connected cells
-- Trails decay via the same TTL mechanism presence uses — no timers, no cleanup
-- A new `StigmergyDrone` subscribes to mesh navigation events, accumulates edges, emits the render effect
+- Zero new protocols: a portal is just content that matches the 64-hex-char signature pattern
+- Renderer detects signature-content seeds and applies a distinct visual (spiral/vortex hex shader variant)
+- Navigation checks content on `encounter()` — if it's a valid signature, offer or auto-jump to target
+- History already tracks every navigation, so portal jumps appear naturally in the history log
+- ShowHoneycombDrone gets one new tile visual state (portal glow), similar to existing heat/selection states
+- One small drone (`PortalDrone`) that intercepts navigation into portal seeds and redirects
 
-**Minimal surface area**: One drone, one event kind, one vertex attribute, one effect. Everything else reuses existing infrastructure.
+**Minimal surface area**: One content pattern (64 hex chars), one visual state, one navigation intercept. No new storage, no new events, no new services. Everything reuses existing infrastructure.
 
 ---
 
 ## Backlog
+
+### Stigmergic Trails
+
+Extend ambient presence from point-in-time heat into directional flow. Mesh publishes lightweight `navigation-edge` events (two signatures + timestamp). Edges accumulate into visible trails — fading lines between cells showing where collective attention flows. Stigmergy: coordination without language, hierarchy, or profiles. One drone, one event kind, one vertex attribute, one effect. Builds on existing ambient presence + Nostr mesh.
 
 ### Temporal Replay
 
@@ -50,6 +54,14 @@ Seeds with high ambient presence exert gentle "gravitational pull" on viewport n
 
 Copy a seed's signature to clipboard. Paste it anywhere — another browser, a text file, a chat message. The recipient pastes it into any hypercomb instance and navigates directly there. The signature IS the link. No URLs, no servers, no link shorteners. Works offline (if the content is in local OPFS). Works across mesh instances. Works forever. Just a clipboard integration drone — read/write `navigator.clipboard`, resolve signatures via store.
 
+### Pulse Resonance
+
+Every navigation event triggers a subtle ripple animation outward from the visited cell. When multiple users are present, their pulses create wave interference patterns — constructive and destructive — visible as shimmer across the surface. Like stones dropped in a pond. Zero data model: local animation triggered by existing presence events. One shader uniform (`uPulseTime` per active source), one modification to ShowHoneycombDrone's fragment shader. Beautiful, biophilic, zero storage overhead.
+
+### Ephemeral Ink
+
+Long-press any seed to leave a mark. The mark is a single Nostr event: seed signature + timestamp. Nothing else — no text, no identity, no content. Marks accumulate as ink density (darker = more marks). Decays over time like presence heat. The simplest possible human gesture in spatial medium. Cave paintings before language. One event kind, one vertex attribute, one drone. Complementary to presence (presence = "someone is here now"; ink = "someone lingered here recently").
+
 ---
 
-*Last updated: 2026-03-07*
+*Last updated: 2026-03-08*
