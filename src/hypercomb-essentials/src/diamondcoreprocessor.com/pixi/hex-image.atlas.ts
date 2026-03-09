@@ -68,7 +68,8 @@ export class HexImageAtlas {
     // scale image to fill the atlas cell
     const scaleX = this.#cellPx / bitmap.width
     const scaleY = this.#cellPx / bitmap.height
-    sprite.scale.set(Math.max(scaleX, scaleY))
+    const scale = Math.max(scaleX, scaleY)
+    sprite.scale.set(scale)
 
     // center the image in the cell
     sprite.anchor.set(0.5)

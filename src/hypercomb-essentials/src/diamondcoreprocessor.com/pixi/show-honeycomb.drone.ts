@@ -14,7 +14,31 @@ import { TILE_PROPERTIES_FILE, isSignature } from '../editor/tile-properties.js'
 import type { HistoryService, HistoryOp } from '../core/history.service.js'
 
 type Axial = { q: number; r: number }
-type SeedCell = { q: number; r: number; label: string; external: boolean; imageSig?: string }
+type SeedCell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number }
+
+/** Deterministic label → RGB via DJB2 hash → HSL → RGB. Returns [r, g, b] in 0–1 range. */
+function labelToRgb(label: string): [number, number, number] {
+  let hash = 5381
+  for (let i = 0; i < label.length; i++) hash = ((hash << 5) + hash + label.charCodeAt(i)) | 0
+  hash = hash >>> 0
+
+  const hue = (hash % 360) / 360
+  const sat = 0.5
+  const lit = 0.6
+
+  const c = (1 - Math.abs(2 * lit - 1)) * sat
+  const x = c * (1 - Math.abs(((hue * 6) % 2) - 1))
+  const m = lit - c / 2
+  let r = 0, g = 0, b = 0
+  const sector = (hue * 6) | 0
+  if (sector === 0)      { r = c; g = x; b = 0 }
+  else if (sector === 1) { r = x; g = c; b = 0 }
+  else if (sector === 2) { r = 0; g = c; b = x }
+  else if (sector === 3) { r = 0; g = x; b = c }
+  else if (sector === 4) { r = x; g = 0; b = c }
+  else                   { r = c; g = 0; b = x }
+  return [r + m, g + m, b + m]
+}
 
 type MeshEvt = { relay: string; sig: string; event: any; payload: any }
 type MeshSub = { close: () => void }
@@ -32,6 +56,8 @@ type PixiHostApi = {
 }
 
 export class ShowHoneycombWorker extends Drone {
+  private static readonly STREAM_BATCH_SIZE = 8
+
   readonly namespace = 'diamondcoreprocessor.com'
   // pixi resources (populated via render:host-ready effect)
   private pixiApp: Application | null = null
@@ -54,11 +80,7 @@ export class ShowHoneycombWorker extends Drone {
   private readonly texByUrl = new Map<string, Texture>()
   private atlas: HexLabelAtlas | null = null
   private imageAtlas: HexImageAtlas | null = null
-  private imageAtlas: HexImageAtlas | null = null
   private atlasRenderer: unknown = null
-
-  // cache: seed label → small image signature (avoids re-reading 0000 on every render)
-  private readonly seedImageCache = new Map<string, string | null>()
 
   // cache: seed label → small image signature (avoids re-reading 0000 on every render)
   private readonly seedImageCache = new Map<string, string | null>()
@@ -625,9 +647,67 @@ export class ShowHoneycombWorker extends Drone {
       return
     }
 
-    const nextCellsKey = this.buildCellsKey(cells)
+    this.renderedCells.clear()
+    for (const cell of cells) this.renderedCells.set(cell.label, cell)
 
-    // skip rebuild if nothing changed
+    await this.applyGeometry(cells)
+  }
+
+  private readonly streamSeeds = async (
+    dir: FileSystemDirectoryHandle,
+    seedNames: string[],
+    localSeedSet: Set<string>,
+    axial: any,
+  ): Promise<void> => {
+    this.streamActive = true
+    this.cancelStreamFlag = false
+
+    const cells: SeedCell[] = []
+
+    for (let index = 0; index < seedNames.length; index++) {
+      if (this.cancelStreamFlag) break
+
+      const label = seedNames[index]
+      const axialCell = axial.items.get(index) as Axial | undefined
+      if (!axialCell || !label) continue
+
+      const cell: SeedCell = {
+        q: axialCell.q,
+        r: axialCell.r,
+        label,
+        external: !localSeedSet.has(label),
+      }
+
+      await this.loadCellImages([cell], dir)
+      if (this.cancelStreamFlag) break
+
+      cells.push(cell)
+      this.renderedCells.set(label, cell)
+
+      const isLastSeed = index === seedNames.length - 1
+      if (cells.length % ShowHoneycombWorker.STREAM_BATCH_SIZE === 0 || isLastSeed) {
+        await this.applyGeometry(cells)
+      }
+
+      await this.microDelay()
+    }
+
+    this.streamActive = false
+    this.emitEffect('navigation:guard-end', {})
+    this.requestRender()
+  }
+
+  private readonly applyGeometry = async (cells: SeedCell[]): Promise<void> => {
+    if (cells.length === 0) {
+      this.clearMesh()
+      return
+    }
+
+    const circumRadiusPx = 32
+    const gapPx = 6
+    const padPx = 10
+
+    const nextCellsKey = this.buildCellsKey(cells)
     if (nextCellsKey === this.renderedCellsKey && cells.length === this.renderedCount) {
       return
     }
@@ -639,12 +719,8 @@ export class ShowHoneycombWorker extends Drone {
     const quadW = quadHalfW * 2
     const quadH = quadHalfH * 2
 
-    const baseTex = await this.ensureTexture(localTextureUrl)
-    const externalTex = await this.ensureTexture(externalTextureUrl)
-    if (isStale()) {
-      this.renderQueued = true
-      return
-    }
+    const baseTex = await this.ensureTexture('/local.png')
+    const externalTex = await this.ensureTexture('/external.png')
     if (!baseTex || !externalTex || !this.atlas || !this.imageAtlas) {
       this.clearMesh()
       return
@@ -652,22 +728,18 @@ export class ShowHoneycombWorker extends Drone {
 
     const labelTex = this.atlas.getAtlasTexture()
     const cellImageTex = this.imageAtlas.getAtlasTexture()
-    const cellImageTex = this.imageAtlas.getAtlasTexture()
 
-    // warm atlas uvs
-    for (const c of cells) this.atlas.getLabelUV(c.label)
+    for (const cell of cells) this.atlas.getLabelUV(cell.label)
 
     const geom = this.buildFillQuadGeometry(cells, circumRadiusPx, gapPx, quadHalfW, quadHalfH)
 
     if (!this.shader) {
-      this.shader = new HexSdfTextureShader(baseTex, externalTex, labelTex, cellImageTex, quadW, quadH, circumRadiusPx)
       this.shader = new HexSdfTextureShader(baseTex, externalTex, labelTex, cellImageTex, quadW, quadH, circumRadiusPx)
     } else {
       try {
         this.shader.setBaseTexture(baseTex)
         this.shader.setExternalTexture(externalTex)
         this.shader.setLabelAtlas(labelTex)
-        this.shader.setCellImageAtlas(cellImageTex)
         this.shader.setCellImageAtlas(cellImageTex)
         this.shader.setQuadSize(quadW, quadH)
         this.shader.setRadiusPx(circumRadiusPx)
@@ -678,7 +750,6 @@ export class ShowHoneycombWorker extends Drone {
       }
     }
 
-    // apply geometry to mesh
     if (!this.hexMesh) {
       this.hexMesh = new Mesh({ geometry: geom as any, shader: (this.shader as any).shader, texture: baseTex as any } as any)
       this.layer!.addChild(this.hexMesh as any)
@@ -689,22 +760,19 @@ export class ShowHoneycombWorker extends Drone {
       if ('texture' in this.hexMesh) this.hexMesh.texture = baseTex
     }
 
-    // keep centered
     if (this.hexMesh?.getLocalBounds) {
       this.hexMesh.position.set(0, 0)
-      const b = this.hexMesh.getLocalBounds()
-      this.hexMesh.position.set(-(b.x + b.width * 0.5), -(b.y + b.height * 0.5))
+      const bounds = this.hexMesh.getLocalBounds()
+      this.hexMesh.position.set(-(bounds.x + bounds.width * 0.5), -(bounds.y + bounds.height * 0.5))
       this.emitEffect('render:mesh-offset', { x: this.hexMesh.position.x, y: this.hexMesh.position.y })
     }
 
     this.geom = geom
     this.renderedCellsKey = nextCellsKey
     this.renderedCount = cells.length
-
-    // broadcast cell count + labels so tile-overlay knows which indices are occupied
     this.emitEffect('render:cell-count', {
       count: cells.length,
-      labels: cells.map(c => c.label),
+      labels: cells.map(cell => cell.label),
     })
   }
 
@@ -871,58 +939,6 @@ export class ShowHoneycombWorker extends Drone {
     }
   }
 
-  /**
-   * Load cell properties (0000 file) for each local seed and resolve
-   * the small.image signature from __resources__/ into the image atlas.
-   * Standard: any property value matching a 64-char hex signature
-   * refers to a blob in __resources__/{signature}.
-   */
-  private loadCellImages = async (cells: SeedCell[], dir: FileSystemDirectoryHandle): Promise<void> => {
-    const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as
-      { getResource: (sig: string) => Promise<Blob | null> } | undefined
-    if (!store || !this.imageAtlas) return
-
-    for (const cell of cells) {
-      // external seeds don't have local OPFS data
-      if (cell.external) continue
-
-      // check cache first
-      if (this.seedImageCache.has(cell.label)) {
-        cell.imageSig = this.seedImageCache.get(cell.label) ?? undefined
-        continue
-      }
-
-      // read 0000 properties file from the seed directory
-      try {
-        const seedDir = await dir.getDirectoryHandle(cell.label)
-        const fileHandle = await seedDir.getFileHandle(PROPERTIES_FILE)
-        const file = await fileHandle.getFile()
-        const text = await file.text()
-        const props = JSON.parse(text)
-
-        // standard: small.image is a signature → resolve from __resources__/
-        const smallSig = props?.small?.image
-        if (smallSig && isSignature(smallSig)) {
-          cell.imageSig = smallSig
-          this.seedImageCache.set(cell.label, smallSig)
-
-          // load blob into image atlas if not already there
-          if (!this.imageAtlas.hasImage(smallSig)) {
-            const blob = await store.getResource(smallSig)
-            if (blob) {
-              await this.imageAtlas.loadImage(smallSig, blob)
-            }
-          }
-        } else {
-          this.seedImageCache.set(cell.label, null)
-        }
-      } catch {
-        // no seed dir or no properties file — no image
-        this.seedImageCache.set(cell.label, null)
-      }
-    }
-  }
-
   private buildCellsKey = (cells: SeedCell[]): string => {
     const selectionService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SelectionService') as
       { isSelected: (label: string) => boolean } | undefined
@@ -948,9 +964,11 @@ export class ShowHoneycombWorker extends Drone {
     const texKind = new Float32Array(cells.length * 4)
     const imageUV = new Float32Array(cells.length * 16)
     const hasImage = new Float32Array(cells.length * 4)
+    const heat = new Float32Array(cells.length * 4)
+    const identityColor = new Float32Array(cells.length * 12)
     const idx = new Uint32Array(cells.length * 6)
 
-    let pv = 0, uvp = 0, luvp = 0, tkp = 0, iuvp = 0, hip = 0, ii = 0, base = 0
+    let pv = 0, uvp = 0, luvp = 0, tkp = 0, iuvp = 0, hip = 0, hp = 0, icp = 0, ii = 0, base = 0
 
     for (const c of cells) {
       const { x, y } = this.axialToPixel(c.q, c.r, spacing)
@@ -984,6 +1002,14 @@ export class ShowHoneycombWorker extends Drone {
       hasImage.set([hi, hi, hi, hi], hip)
       hip += 4
 
+      const h = c.heat ?? 0
+      heat.set([h, h, h, h], hp)
+      hp += 4
+
+      const [cr, cg, cb] = labelToRgb(c.label)
+      identityColor.set([cr, cg, cb, cr, cg, cb, cr, cg, cb, cr, cg, cb], icp)
+      icp += 12
+
       idx.set([base, base + 1, base + 2, base, base + 2, base + 3], ii)
       ii += 6
       base += 4
@@ -996,6 +1022,8 @@ export class ShowHoneycombWorker extends Drone {
       ; (g as any).addAttribute('aTexKind', texKind, 1)
       ; (g as any).addAttribute('aImageUV', imageUV, 4)
       ; (g as any).addAttribute('aHasImage', hasImage, 1)
+      ; (g as any).addAttribute('aHeat', heat, 1)
+      ; (g as any).addAttribute('aIdentityColor', identityColor, 3)
       ; (g as any).addIndex(idx)
 
     return g

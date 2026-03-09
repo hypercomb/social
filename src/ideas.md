@@ -6,7 +6,29 @@ Ideas for making the experience more incredible. Each iteration picks one. Archi
 
 ## Chosen This Iteration
 
-### Seed Portals
+### Chromatic Identity
+
+**What**: Every cell derives its ambient color from its own signature. The first 6 hex chars of the SHA-256 hash become the hue. Cells without custom content glow with their mathematical identity. The honeycomb becomes a stained glass window of deterministic color — navigate through it and you learn to recognize places by color before reading any content.
+
+**Why this is universal**: Color needs no language, no labels, no explanation. The same signature always produces the same color on every device, every instance, every platform. A cell's color is not assigned by anyone — it's a mathematical inevitability of its identity. Visitors develop spatial intuition: "the blue region," "that amber corner." Color becomes wayfinding without any wayfinding system.
+
+**Architecture fit**:
+- Zero new primitives: the signature already exists for every cell, and the shader already supports per-cell tint (heat visualization proves this)
+- One pure function: `sigToHSL(sig: string) → { h, s, l }` — deterministic, side-effect-free, testable in isolation
+- The hex SDF shader already has a `vHeat` vertex attribute and color mixing — add a `vIdentityHue` attribute alongside it
+- ShowHoneycombDrone passes the computed hue when building tile geometry, just like it passes heat values today
+- Intensity can modulate with zoom: zoomed out = saturated identity colors for wayfinding; zoomed in = subtle wash behind content
+- Plays beautifully with existing ambient presence heat — heat overlays on top of identity color, so you see both "what this place is" and "who's here now"
+
+**Minimal surface area**: One function, one vertex attribute, one shader uniform blend. No new drones, no new events, no new services, no new storage. The color was always there — latent in the signature — waiting to be revealed.
+
+---
+
+## Previously Chosen
+
+### Seed Portals (Iteration 1)
+
+**Status**: UI prep work exists (`PortalOverlayComponent` in shared/ui). No essentials drone yet.
 
 **What**: A seed whose content is another seed's 64-char signature becomes a portal — a wormhole in hex space. Navigating into a portal teleports you to the target seed anywhere in the honeycomb. The topology transforms from a flat hex plane into a connected graph with long-range links.
 
@@ -30,9 +52,17 @@ Ideas for making the experience more incredible. Each iteration picks one. Archi
 
 Extend ambient presence from point-in-time heat into directional flow. Mesh publishes lightweight `navigation-edge` events (two signatures + timestamp). Edges accumulate into visible trails — fading lines between cells showing where collective attention flows. Stigmergy: coordination without language, hierarchy, or profiles. One drone, one event kind, one vertex attribute, one effect. Builds on existing ambient presence + Nostr mesh.
 
+### Seed Fossils
+
+Content at a seed changes, but nothing truly disappears. Previous content leaves geological strata — visible layers beneath the current surface. Zoom in or toggle a mode to see time compressed into depth: newest on top, oldest at the bottom, like reading rock layers. The append-only history log already holds every version. No new storage. One visual mode, one history query, one layered render. Everyone understands geological time. Makes immutability tangible and beautiful — distinct from Temporal Replay (scrubbing a timeline) because fossils are always passively visible as depth.
+
 ### Temporal Replay
 
 View the honeycomb at any point in its history. The append-only history log already captures every mutation. Add a time parameter to the render pipeline — filter history entries by timestamp, replay state up to that moment. A simple slider in the UI scrubs through time. Everyone can see how any location evolved. No new storage, no new protocols — just a lens on data that already exists.
+
+### Murmuration
+
+When multiple users are present in the same region simultaneously, their movements create a flocking visualization — like starlings in murmuration. Each presence becomes a particle that flows with the group. No identity, no chat, no interaction — just the beautiful emergent pattern of collective attention moving through space. Uses existing presence data + a particle system in the shader. One drone, one particle buffer, presence events as input. Deeply biophilic — the honeycomb becomes a living organism responding to collective behavior.
 
 ### Signature QR Bridges
 
@@ -64,4 +94,4 @@ Long-press any seed to leave a mark. The mark is a single Nostr event: seed sign
 
 ---
 
-*Last updated: 2026-03-08*
+*Last updated: 2026-03-09*

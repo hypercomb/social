@@ -331,23 +331,17 @@ export class TileOverlayDrone extends Drone {
       return
     }
 
-    // plain left-click on tile → navigate back to parent layer
-    this.#navigateBack()
+    // plain left-click on tile → navigate into that tile's child layer
+    this.#navigateInto(entry.label)
   }
 
-  // right-click on occupied tile → navigate into that tile's child layer
+  // right-click → navigate back to parent layer
   #onContextMenu = (e: MouseEvent): void => {
     if (this.#navigationBlocked) return
     if (!this.#renderContainer || !this.#renderer || !this.#canvas) return
-    if (this.#currentIndex === undefined || this.#currentIndex >= this.#cellCount) return
-
-    const entry = this.#occupiedByAxial.get(
-      TileOverlayDrone.axialKey(this.#currentAxial!.q, this.#currentAxial!.r),
-    )
-    if (!entry?.label) return
 
     e.preventDefault()
-    this.#navigateInto(entry.label)
+    this.#navigateBack()
   }
 
   // ── tile navigation ───────────────────────────────────────────
