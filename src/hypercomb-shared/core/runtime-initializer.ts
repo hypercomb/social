@@ -18,8 +18,8 @@ export const initializeRuntime = async (
   } = options
 
   if (logOpfs) {
-    const logger = get('@hypercomb.social/OpfsTreeLogger') as OpfsTreeLogger | undefined
-    await logger?.log?.()
+    // const logger = get('@hypercomb.social/OpfsTreeLogger') as OpfsTreeLogger | undefined
+    // await logger?.log?.()
   }
 
   const store = get('@hypercomb.social/Store') as Store | undefined

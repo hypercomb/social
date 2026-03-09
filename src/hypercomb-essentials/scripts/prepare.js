@@ -228,18 +228,15 @@ for (const domain of domains) {
     const domainRoot = join(SRC_ROOT, domain);
     const meta = buildDirMeta(domainRoot);
     const hasDeep = computeHasDeepSources(meta);
+    if (hasDeep(domainRoot)) {
+        rootExports.push(`export * from './${domain}'`);
+    }
     const allDirs = [domainRoot, ...walkDirs(domainRoot)];
     for (const dir of allDirs) {
         writeFolderKeys(domain, domainRoot, dir);
     }
     for (const dir of allDirs) {
         writeFolderIndex(dir, meta, hasDeep);
-    }
-    for (const dir of allDirs) {
-        if (hasDeep(dir)) {
-            const rel = relFrom(SRC_ROOT, dir);
-            rootExports.push(`export * from './${rel}'`);
-        }
     }
 }
 const rootIndex = `// auto-generated

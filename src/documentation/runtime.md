@@ -75,11 +75,22 @@ registered effects in the current codebase:
 | effect | emitter | purpose |
 |--------|---------|---------|
 | `render:host-ready` | PixiHostDrone | pixi app, container, canvas, renderer are available |
+| `render:mesh-offset` | ShowHoneycombDrone | hex mesh position updated (for overlay alignment) |
+| `render:cell-count` | ShowHoneycombDrone | current cell count and label list changed |
+| `render:presence-heat` | AmbientPresenceDrone | per-cell presence heat map for visualization |
 | `mesh:ensure-started` | any | trigger nostr mesh initialization for a signature |
 | `mesh:subscribe` | any | subscribe to mesh events for a signature |
 | `mesh:publish` | any | publish an event to nostr relays |
 | `mesh:ready` | NostrMeshDrone | mesh connection established |
 | `mesh:items-updated` | NostrMeshDrone | cached mesh items changed |
+| `navigation:guard-start` | ShowHoneycombDrone | layer navigation in progress — ignore input |
+| `navigation:guard-end` | ShowHoneycombDrone | layer navigation complete — resume input |
+| `tile:click` | TileOverlayDrone | user clicked a tile (q, r, label, modifiers) |
+| `tile:hover` | TileOverlayDrone | cursor entered a tile (q, r) |
+| `tile:action` | TileOverlayDrone | tile action triggered (edit, remove) |
+| `tile:navigate-in` | TileOverlayDrone | right-click navigate into child layer |
+| `tile:navigate-back` | TileOverlayDrone | left-click navigate to parent layer |
+| `wheel:close` | any | close the flavor wheel overlay |
 
 ---
 
@@ -228,6 +239,13 @@ PixiHostDrone
   ├──> deps: Settings, AxialService
   └──> emits: 'render:host-ready'
          ├──> ShowHoneycombDrone (subscribes)
+         │     ├──> emits: 'render:mesh-offset', 'render:cell-count'
+         │     └──> emits: 'navigation:guard-start', 'navigation:guard-end'
+         ├──> TileOverlayDrone (subscribes)
+         │     ├──> listens: 'navigation:guard-start/end', 'render:mesh-offset'
+         │     └──> emits: 'tile:click', 'tile:hover', 'tile:action', 'tile:navigate-*'
+         ├──> TileSelectionDrone (subscribes)
+         │     └──> listens: 'tile:click', 'navigation:guard-start/end'
          ├──> ZoomDrone (subscribes)
          └──> PanningDrone (subscribes)
 
@@ -235,6 +253,12 @@ NostrMeshDrone
   ├──> deps: NostrSigner
   ├──> listens: 'mesh:ensure-started', 'mesh:subscribe', 'mesh:publish'
   └──> emits: 'mesh:ready', 'mesh:items-updated'
+
+AmbientPresenceDrone
+  └──> emits: 'render:presence-heat'
+
+KeyMapService
+  └──> listens: 'navigation:guard-start', 'navigation:guard-end'
 
 Store ──> Lineage ──> Navigation
   (OPFS)   (paths)    (url)
@@ -247,4 +271,4 @@ every arrow is either an ioc resolution or an effect subscription. there are no 
 
 ---
 
-*sixteen primitives. zero direct coupling. the runtime is a colony of small, focused behaviors coordinating through scent and registry. that is all it takes.*
+*twenty primitives. zero direct coupling. the runtime is a colony of small, focused behaviors coordinating through scent and registry. that is all it takes.*

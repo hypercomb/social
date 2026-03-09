@@ -129,10 +129,25 @@ lightweight duck-type of `ServiceToken` used in `@hypercomb/shared`. interface w
 zero-dependency framework layer. exports: `Drone`, `DroneState`, `EffectBus`, `Effect`, `GrammarHint`, `Source`, `ProviderLink`, `SignatureService`, `PayloadCanonical`, `DronePayloadV1`, ioc (`register`, `get`, `has`, `list`, `ServiceToken`).
 
 ### @hypercomb/essentials
-concrete drones and services. depends on `@hypercomb/core`. pixi.js is a peer dependency. contains: `AxialCoordinate`, `AxialService`, `NostrMeshDrone`, pixi host and rendering drones, input drones (pan, zoom).
+concrete drones and services, organized by domain namespace. depends on `@hypercomb/core`. pixi.js is a peer dependency. domain namespaces include `diamondcoreprocessor.com` (core rendering, input, mesh) and `revolucionstyle.com` (cigar journal, flavor wheel, discovery). each domain is an independent module ecosystem within the same build pipeline.
 
 ### @hypercomb/shared
 angular integration bridge. path-aliased, not published to npm. provides `bridgeProviders()`, shared tokens, and angular-side services that delegate to the ioc container.
+
+### keymap service
+layered keyboard shortcut engine. drones push and pop `KeyMapLayer` instances to register context-specific bindings. supports multi-step chord sequences (`KeyChord`) and priority-sorted layer stacks. suspends during navigation guards. types (`KeyChord`, `KeyBinding`, `KeyMapLayer`) are defined in `@hypercomb/core`; the service implementation lives in `@hypercomb/essentials`.
+
+### ambient presence
+passive presence tracking via the nostr mesh. `AmbientPresenceDrone` aggregates mesh activity into a per-cell heat map and emits `render:presence-heat`. the hex sdf shader uses heat values to tint tiles, making collective attention visible without profiles or accounts.
+
+### navigation guard
+a pair of effects (`navigation:guard-start`, `navigation:guard-end`) emitted by `ShowHoneycombDrone` during layer transitions. while a guard is active, tile overlay and selection drones ignore clicks, and `KeyMapService` suspends bindings. prevents input during the incremental mesh rebuild.
+
+### secret store
+shared secret state in `@hypercomb/shared`. persists a single value in `localStorage` (`hc:secret`). on first access, captures any subdomain-derived secret from the url for mesh room joining. exposed in the controls bar ui via a lock icon.
+
+### domain namespace
+the organizational unit within `@hypercomb/essentials`. each domain (e.g. `diamondcoreprocessor.com`, `revolucionstyle.com`) groups related drones, services, and resources into namespaces. domains are independent — they share the build pipeline and core primitives but never import from each other at the source level. at runtime, each domain's namespaces are resolved via the import map.
 
 ### nostr mesh
 decentralized relay layer implemented by `NostrMeshDrone` in `@hypercomb/essentials`. uses `nostr-tools` and websocket connections to public relays. provides subscribe/publish over nostr events keyed by content signature (`x` tag). ttl-backed cache with per-sig expiry rules. this is the network-level equivalent of the metaphor **relay**.

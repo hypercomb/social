@@ -278,6 +278,10 @@ for (const domain of domains) {
   const meta = buildDirMeta(domainRoot)
   const hasDeep = computeHasDeepSources(meta)
 
+  if (hasDeep(domainRoot)) {
+    rootExports.push(`export * from './${domain}'`)
+  }
+
   const allDirs = [domainRoot, ...walkDirs(domainRoot)]
 
   for (const dir of allDirs) {
@@ -286,13 +290,6 @@ for (const domain of domains) {
 
   for (const dir of allDirs) {
     writeFolderIndex(dir, meta, hasDeep)
-  }
-
-  for (const dir of allDirs) {
-    if (hasDeep(dir)) {
-      const rel = relFrom(SRC_ROOT, dir)
-      rootExports.push(`export * from './${rel}'`)
-    }
   }
 }
 

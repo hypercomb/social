@@ -4,7 +4,7 @@
 // NOT a Drone subclass — follows the HistoryRecorder pattern.
 
 import { EffectBus } from '@hypercomb/core'
-import { PROPERTIES_FILE } from './tile-properties.js'
+import { TILE_PROPERTIES_FILE } from './tile-properties.js'
 import type { TileEditorService } from './tile-editor.service.js'
 import type { ImageEditorService } from './image-editor.service.js'
 
@@ -61,7 +61,7 @@ export class TileEditorDrone {
     // 2. read 0000 properties file
     let properties: Record<string, unknown> = {}
     try {
-      const fileHandle = await seedDir.getFileHandle(PROPERTIES_FILE)
+      const fileHandle = await seedDir.getFileHandle(TILE_PROPERTIES_FILE)
       const file = await fileHandle.getFile()
       const text = await file.text()
       properties = JSON.parse(text)
@@ -117,7 +117,7 @@ export class TileEditorDrone {
 
     // 4. write 0000 to seed directory
     const seedDir = await store.current.getDirectoryHandle(service.seed, { create: true })
-    const fileHandle = await seedDir.getFileHandle(PROPERTIES_FILE, { create: true })
+    const fileHandle = await seedDir.getFileHandle(TILE_PROPERTIES_FILE, { create: true })
     const writable = await fileHandle.createWritable()
     try {
       await writable.write(JSON.stringify(props, null, 2))

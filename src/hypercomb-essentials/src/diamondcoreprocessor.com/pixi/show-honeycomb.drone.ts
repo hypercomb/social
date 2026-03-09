@@ -10,7 +10,7 @@ import type { HostReadyPayload } from './pixi-host.drone.js'
 import { HexLabelAtlas } from './hex-label.atlas.js'
 import { HexImageAtlas } from './hex-image.atlas.js'
 import { HexSdfTextureShader } from './hex-sdf.shader.js'
-import { PROPERTIES_FILE, isSignature } from '../editor/tile-properties.js'
+import { TILE_PROPERTIES_FILE, isSignature } from '../editor/tile-properties.js'
 import type { HistoryService, HistoryOp } from '../core/history.service.js'
 
 type Axial = { q: number; r: number }
@@ -843,7 +843,7 @@ export class ShowHoneycombWorker extends Drone {
       // read 0000 properties file from the seed directory
       try {
         const seedDir = await dir.getDirectoryHandle(cell.label)
-        const fileHandle = await seedDir.getFileHandle(PROPERTIES_FILE)
+        const fileHandle = await seedDir.getFileHandle(TILE_PROPERTIES_FILE)
         const file = await fileHandle.getFile()
         const text = await file.text()
         const props = JSON.parse(text)

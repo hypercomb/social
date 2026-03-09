@@ -3,7 +3,7 @@
 
 import { EffectBus, SignatureService } from '@hypercomb/core'
 import type { Cigar, CigarRatings, FlavorProfile, JournalEntry, Pairing } from './journal-entry.js'
-import { emptyEntry, PROPERTIES_FILE } from './journal-entry.js'
+import { emptyEntry, JOURNAL_PROPERTIES_FILE } from './journal-entry.js'
 
 type Store = {
   current: FileSystemDirectoryHandle
@@ -118,7 +118,7 @@ export class JournalService extends EventTarget {
     const sig = await SignatureService.sign(bytes.buffer as ArrayBuffer)
 
     const entryDir = await journalDir.getDirectoryHandle(sig, { create: true })
-    const fileHandle = await entryDir.getFileHandle(PROPERTIES_FILE, { create: true })
+    const fileHandle = await entryDir.getFileHandle(JOURNAL_PROPERTIES_FILE, { create: true })
     const writable = await fileHandle.createWritable()
     try {
       await writable.write(json)
@@ -142,7 +142,7 @@ export class JournalService extends EventTarget {
       const domainDir = await store.current.getDirectoryHandle('revolucionstyle.com')
       const journalDir = await domainDir.getDirectoryHandle('journal')
       const entryDir = await journalDir.getDirectoryHandle(sig)
-      const fileHandle = await entryDir.getFileHandle(PROPERTIES_FILE)
+      const fileHandle = await entryDir.getFileHandle(JOURNAL_PROPERTIES_FILE)
       const file = await fileHandle.getFile()
       const text = await file.text()
       return JSON.parse(text) as JournalEntry
@@ -166,7 +166,7 @@ export class JournalService extends EventTarget {
       for await (const [name, handle] of journalDir.entries()) {
         if (handle.kind !== 'directory') continue
         try {
-          const fileHandle = await (handle as FileSystemDirectoryHandle).getFileHandle(PROPERTIES_FILE)
+          const fileHandle = await (handle as FileSystemDirectoryHandle).getFileHandle(JOURNAL_PROPERTIES_FILE)
           const file = await fileHandle.getFile()
           const text = await file.text()
           entries.push({ sig: name, entry: JSON.parse(text) })

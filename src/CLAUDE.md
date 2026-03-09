@@ -95,17 +95,24 @@ Essentials are built as **signature-addressed modules** and auto-installed into 
 
 ```
 src/
-├── hypercomb-core/             # IoC, EffectBus, Drone base, SignatureService
-├── hypercomb-essentials/       # Drones + services under diamondcoreprocessor.com/
-│   └── src/diamondcoreprocessor.com/
-│       ├── core/               # AxialService, HistoryService, Settings, Zoom
-│       ├── input/              # Pan, Zoom (mouse + pinch)
-│       ├── nostr/              # NostrMeshDrone, NostrSigner
-│       ├── pixi/               # PixiHostDrone, ShowHoneycombDrone, TileOverlay, Shaders
-│       └── settings/           # SettingsDrone, ZoomSettings
+├── hypercomb-core/             # IoC, EffectBus, Drone base, SignatureService, KeyMap types
+├── hypercomb-essentials/       # Drones + services, organized by domain namespace
+│   └── src/
+│       ├── diamondcoreprocessor.com/   # Core rendering, navigation, input, mesh
+│       │   ├── core/                   # AxialService, HistoryService, Settings, Zoom
+│       │   ├── input/                  # Pan, Zoom, KeyMapService, TileSelection
+│       │   ├── nostr/                  # NostrMeshDrone, NostrSigner, AmbientPresence
+│       │   ├── pixi/                   # PixiHostDrone, ShowHoneycombDrone, TileOverlay, Shaders
+│       │   ├── editor/                 # TileEditorDrone, TileProperties
+│       │   └── settings/               # SettingsDrone, ZoomSettings
+│       └── revolucionstyle.com/        # Cigar journal domain module
+│           ├── journal/                # CigarJournalDrone, JournalEntryDrone, JournalService
+│           ├── wheel/                  # FlavorWheelDrone, FlavorWheelService, flavor taxonomy
+│           ├── cigar/                  # Cigar identity, CigarCatalogService
+│           └── discovery/              # DiscoveryService (Jaccard similarity recommendations)
 ├── hypercomb-shared/           # Store, Lineage, Navigation, LayerInstaller, UI components
-│   ├── core/                   # Services: Store, Lineage, Navigation, MovementService, ioc.web
-│   └── ui/                     # Angular components: SearchBar, FileExplorer, History, Portal
+│   ├── core/                   # Services: Store, Lineage, Navigation, SecretStore, ioc.web
+│   └── ui/                     # Angular components: SearchBar, ControlsBar, FileExplorer, History
 ├── hypercomb-web/              # Production Angular app (runtime drone loading)
 ├── hypercomb-dev/              # Development Angular app (direct drone imports)
 ├── documentation/              # Feature docs, implementation guides, how-things-work

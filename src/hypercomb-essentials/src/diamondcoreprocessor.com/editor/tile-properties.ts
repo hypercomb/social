@@ -1,6 +1,6 @@
 // hypercomb-essentials/src/diamondcoreprocessor.com/editor/tile-properties.ts
 
-export const PROPERTIES_FILE = '0000'
+export const TILE_PROPERTIES_FILE = '0000'
 
 export const isSignature = (value: unknown): boolean =>
   typeof value === 'string' && /^[0-9a-f]{64}$/.test(value)
@@ -13,7 +13,7 @@ export const readSeedProperties = async (
   seedDir: FileSystemDirectoryHandle
 ): Promise<Record<string, unknown>> => {
   try {
-    const fileHandle = await seedDir.getFileHandle(PROPERTIES_FILE)
+    const fileHandle = await seedDir.getFileHandle(TILE_PROPERTIES_FILE)
     const file = await fileHandle.getFile()
     const text = await file.text()
     return JSON.parse(text)

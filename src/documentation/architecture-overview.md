@@ -187,18 +187,27 @@ the hive is layered. each ring depends only on the rings inside it.
 ```
 @hypercomb/core          zero dependencies. the framework.
                          Drone, EffectBus, IoC, SignatureService,
-                         PayloadCanonical, DroneResolver.
+                         PayloadCanonical, DroneResolver, KeyMap types.
 
 @hypercomb/essentials    pixi peer dep. the essential drones.
-                         AxialCoordinate, AxialService, Settings,
-                         PixiHostDrone, ShowHoneycombDrone,
-                         NostrMeshDrone, NostrSigner,
-                         ZoomDrone, PanningDrone.
+                         organized by domain namespace:
+
+  diamondcoreprocessor.com/
+    core/                AxialCoordinate, AxialService, Settings, Zoom
+    input/               PanningDrone, ZoomDrone, KeyMapService, TileSelection
+    nostr/               NostrMeshDrone, NostrSigner, AmbientPresenceDrone
+    pixi/                PixiHostDrone, ShowHoneycombDrone, TileOverlayDrone
+
+  revolucionstyle.com/
+    journal/             CigarJournalDrone, JournalEntryDrone, JournalService
+    wheel/               FlavorWheelDrone, FlavorWheelService
+    cigar/               Cigar identity, CigarCatalogService
+    discovery/           DiscoveryService (Jaccard similarity)
 
 @hypercomb/shared        angular bridge. path aliases.
                          Store (opfs), Lineage (navigation),
-                         Navigation, DomainInstaller, LayerInstaller,
-                         BridgeProviders for angular DI.
+                         Navigation, SecretStore,
+                         LayerInstaller, BridgeProviders for angular DI.
 
 hypercomb-web            the app. angular shell.
                          home page, setup, service worker.
@@ -206,6 +215,8 @@ hypercomb-web            the app. angular shell.
 
 `@hypercomb/core` has zero dependencies and can run anywhere.
 `@hypercomb/essentials` adds pixi as a peer dependency for rendering.
+domain namespaces within essentials are independent — each is a self-contained
+module ecosystem that builds, signs, and deploys as part of the same pipeline.
 `@hypercomb/shared` bridges to angular's dependency injection.
 `hypercomb-web` is the final application shell.
 

@@ -46,19 +46,20 @@ the hive is layered. each ring depends only on the rings inside it.
 ```
 @hypercomb/core          zero dependencies. the framework.
                          Drone, DroneState, EffectBus, IoC, ServiceToken,
-                         SignatureService, PayloadCanonical, DroneResolver.
+                         SignatureService, PayloadCanonical, DroneResolver,
+                         KeyChord, KeyBinding, KeyMapLayer.
                          build: tsup (ESM + CJS + .d.ts)
 
-@hypercomb/essentials    pixi peer dep. the essential drones.
-                         AxialCoordinate, AxialService, Settings,
-                         PixiHostDrone, ShowHoneycombDrone,
-                         NostrMeshDrone, NostrSigner,
-                         ZoomDrone, PanningDrone.
+@hypercomb/essentials    pixi peer dep. domain-namespaced modules.
+                         diamondcoreprocessor.com/:
+                           core, input, nostr, pixi, editor, settings
+                         revolucionstyle.com/:
+                           journal, wheel, cigar, discovery
                          build: esbuild via custom build-module.ts pipeline
 
 @hypercomb/shared        angular bridge. path aliases. not published to npm.
                          Store (opfs), Lineage (navigation),
-                         Navigation, DomainInstaller, LayerInstaller,
+                         Navigation, SecretStore, LayerInstaller,
                          BridgeProviders for angular DI.
                          compiled inline as part of angular app builds.
 
@@ -111,8 +112,10 @@ model. they must not be weakened or worked around:
   (e.g., `pixi-host.drone.ts`).
 - key export files use the `.keys.ts` suffix. these are auto-generated
   and excluded from essentials artifacts.
-- essentials are organized by namespace directory:
-  `hypercomb-essentials/src/diamondcoreprocessor.com/<namespace>/`.
+- essentials are organized by domain namespace:
+  `hypercomb-essentials/src/<domain>/<namespace>/`.
+  each domain (e.g. `diamondcoreprocessor.com`, `revolucionstyle.com`) is an
+  independent module ecosystem within the same build pipeline.
 
 ### naming
 
