@@ -30,28 +30,31 @@ const STROKE_WIDTH = 1.5
 
 const LABEL_STYLE = new TextStyle({
   fontFamily: "'Segoe UI', system-ui, sans-serif",
-  fontSize: 9,
+  fontSize: 11,
   fill: 0xFFFFFF,
   align: 'center',
   letterSpacing: 0.3,
+  padding: 4,
 })
 
 const CAT_LABEL_STYLE = new TextStyle({
   fontFamily: "'Segoe UI', system-ui, sans-serif",
-  fontSize: 10,
+  fontSize: 12,
   fontWeight: 'bold',
   fill: 0xFFFFFF,
   align: 'center',
   letterSpacing: 0.5,
+  padding: 4,
 })
 
 const CENTER_STYLE = new TextStyle({
   fontFamily: "'Segoe UI', system-ui, sans-serif",
-  fontSize: 14,
+  fontSize: 16,
   fontWeight: '600',
   fill: 0x9a8e82,
   align: 'center',
   letterSpacing: 1,
+  padding: 4,
 })
 
 // ── hit zone lookup ──────────────────────────────────────────────
@@ -202,7 +205,7 @@ export class FlavorWheelDrone extends Drone {
       backgroundAlpha: 0,
       antialias: true,
       autoDensity: true,
-      resolution: window.devicePixelRatio,
+      resolution: Math.max(2, window.devicePixelRatio),
     })
 
     this.#canvas = this.#app.canvas as HTMLCanvasElement
