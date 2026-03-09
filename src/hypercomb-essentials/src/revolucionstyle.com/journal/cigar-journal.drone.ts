@@ -11,7 +11,7 @@ export class CigarJournalWorker extends Worker {
     { example: 'new smoke' },
   ]
 
-  public override effects = ['journal:action'] as const
+  public override effects = ['memory'] as const
 
   protected override deps = { journal: '@revolucionstyle.com/journal' }
 

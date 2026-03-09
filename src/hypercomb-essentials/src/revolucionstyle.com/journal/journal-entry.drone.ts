@@ -94,16 +94,16 @@ export class JournalEntryDrone {
     const service = window.ioc.get<JournalService>('@revolucionstyle.com/JournalService')
     if (!service) return
 
-    this.#overlay = this.#el('div', {
+    const overlay = this.#el('div', {
       position: 'fixed', inset: '0', zIndex: '70000',
       backgroundColor: 'rgba(0, 0, 0, 0.82)',
-      overflowY: 'auto',
+      display: 'flex', justifyContent: 'center', alignItems: 'center',
       fontFamily: "'Segoe UI', system-ui, sans-serif",
       color: TEXT,
     })
 
     const container = this.#el('div', {
-      width: '480px', margin: '40px auto',
+      width: '480px', maxHeight: '90vh', overflowY: 'auto',
       backgroundColor: BG_DARK, borderRadius: '12px', padding: '24px',
       border: `1px solid ${BORDER}`,
     })
@@ -117,11 +117,12 @@ export class JournalEntryDrone {
     container.appendChild(this.#buildMetaSection(service))
     container.appendChild(this.#buildActions())
 
-    this.#overlay.appendChild(container)
-    this.#overlay.addEventListener('click', (e) => {
-      if (e.target === this.#overlay) this.#cancel()
+    overlay.appendChild(container)
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) this.#cancel()
     })
-    document.body.appendChild(this.#overlay)
+    document.body.appendChild(overlay)
+    this.#overlay = overlay
   }
 
   #destroyOverlay(): void {
@@ -229,6 +230,7 @@ export class JournalEntryDrone {
     })
 
     const badge = this.#el('span', { fontSize: '12px', color: TEXT_DIM })
+    badge.dataset.flavorBadge = 'true'
     badge.textContent = service.entry.flavors.selected.length > 0
       ? `${service.entry.flavors.selected.length} selected`
       : 'none selected'
@@ -238,11 +240,12 @@ export class JournalEntryDrone {
     section.appendChild(row)
 
     // chips container
-    this.#flavorChipsContainer = this.#el('div', {
+    const chipsContainer = this.#el('div', {
       display: 'flex', flexWrap: 'wrap', gap: '6px',
-    }) as HTMLDivElement
+    })
+    this.#flavorChipsContainer = chipsContainer
     this.#renderFlavorChips(service.entry.flavors)
-    section.appendChild(this.#flavorChipsContainer)
+    section.appendChild(chipsContainer)
 
     return section
   }
@@ -407,7 +410,7 @@ export class JournalEntryDrone {
 
   // ── DOM helpers ────────────────────────────────────────────────
 
-  #el(tag: string, styles: Record<string, string>): HTMLElement {
+  #el<K extends keyof HTMLElementTagNameMap>(tag: K, styles: Record<string, string>): HTMLElementTagNameMap[K] {
     const el = document.createElement(tag)
     Object.assign(el.style, styles)
     return el

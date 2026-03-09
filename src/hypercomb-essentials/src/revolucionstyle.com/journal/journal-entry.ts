@@ -1,7 +1,7 @@
 // revolucionstyle.com/journal/journal-entry.ts
 // Type definitions for cigar journal entries.
 
-export const PROPERTIES_FILE = '0000'
+export const JOURNAL_PROPERTIES_FILE = '0000'
 
 // ── Cigar identity ─────────────────────────────────────────────
 
