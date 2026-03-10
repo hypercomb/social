@@ -33,6 +33,13 @@ export class JournalEntryDrone {
   constructor() {
     EffectBus.on<JournalActionPayload>('journal:action', this.#onAction)
     EffectBus.on<FlavorProfile>('wheel:selection-changed', this.#onFlavorChanged)
+    EffectBus.on<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
+      if (cmd !== 'journal.toggle') return
+      const service = window.ioc.get<JournalService>('@revolucionstyle.com/JournalService')
+      if (!service) return
+      if (service.mode === 'editing') this.#cancel()
+      else void this.#openNew()
+    })
   }
 
   // ── effect handlers ────────────────────────────────────────────
@@ -230,7 +237,7 @@ export class JournalEntryDrone {
     })
 
     const badge = this.#el('span', { fontSize: '12px', color: TEXT_DIM })
-    badge.dataset.flavorBadge = 'true'
+    badge.dataset['flavorBadge'] = 'true'
     badge.textContent = service.entry.flavors.selected.length > 0
       ? `${service.entry.flavors.selected.length} selected`
       : 'none selected'

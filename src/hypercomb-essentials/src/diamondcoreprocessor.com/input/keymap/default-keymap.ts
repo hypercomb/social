@@ -147,6 +147,14 @@ export const defaultKeyMap: KeyMapLayer = {
       risk: 'warning',
     },
 
+    // Journal
+    {
+      cmd: 'journal.toggle',
+      sequence: [[{ key: 'j' }]],
+      description: 'Toggle Cigar Journal',
+      category: 'Journal',
+    },
+
     // Advanced
     {
       cmd: 'advanced.aiImage',
