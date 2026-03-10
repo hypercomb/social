@@ -1,10 +1,10 @@
 // hypercomb-essentials/src/diamondcoreprocessor.com/editor/tile-editor.drone.ts
 // Orchestrator: wires tile:action effect → editor open/save/cancel.
-// Properties stored as content-addressed resources in __resources__/.
+// Manages OPFS I/O for 0000 properties file and resource storage.
 // NOT a Drone subclass — follows the HistoryRecorder pattern.
 
-import { EffectBus, hypercomb, computeLineageSig } from '@hypercomb/core'
-import { PROPERTIES_FILE } from './tile-properties.js'
+import { EffectBus } from '@hypercomb/core'
+import { TILE_PROPERTIES_FILE } from './tile-properties.js'
 import type { TileEditorService } from './tile-editor.service.js'
 import type { ImageEditorService } from './image-editor.service.js'
 
@@ -17,10 +17,8 @@ type TileActionPayload = {
 }
 
 type Store = {
+  current: FileSystemDirectoryHandle
   resources: FileSystemDirectoryHandle
-  liveCache: ReadonlyMap<string, any>
-  getLayer(lineageSig: string): any | null
-  getListResource(listSig: string): Promise<string[]>
   putResource: (blob: Blob) => Promise<string>
   getResource: (signature: string) => Promise<Blob | null>
 }
@@ -50,31 +48,25 @@ export class TileEditorDrone {
     const service = window.ioc.get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
     if (!store || !service) return
 
-    // 1. resolve child layer from live cache
-    const lineage = window.ioc.get<any>('@hypercomb.social/Lineage')
-    const segments: string[] = lineage?.explorerSegments?.() ?? []
-    const childLineageSig = await computeLineageSig([...segments, seed])
-    const childLayer = store.getLayer(childLineageSig)
-
-    if (!childLayer) {
+    // 1. resolve seed directory
+    let seedDir: FileSystemDirectoryHandle
+    try {
+      seedDir = await store.current.getDirectoryHandle(seed)
+    } catch {
+      // seed directory doesn't exist yet — open with empty properties
       service.open(seed, {}, null)
       return
     }
 
-    // 2. read properties from resources (first valid JSON object)
+    // 2. read 0000 properties file
     let properties: Record<string, unknown> = {}
-    const resourceSigs = await store.getListResource(childLayer.resources)
-    for (const sig of resourceSigs) {
-      const blob = await store.getResource(sig)
-      if (!blob) continue
-      try {
-        const text = await blob.text()
-        const parsed = JSON.parse(text)
-        if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-          properties = parsed
-          break
-        }
-      } catch { continue }
+    try {
+      const fileHandle = await seedDir.getFileHandle(TILE_PROPERTIES_FILE)
+      const file = await fileHandle.getFile()
+      const text = await file.text()
+      properties = JSON.parse(text)
+    } catch {
+      // no properties file yet — use empty
     }
 
     // 3. load large image blob from __resources__ (if present)
@@ -123,24 +115,25 @@ export class TileEditorDrone {
     // 3. preserve link + border.color from service
     // (already in props via service.properties — setLink/setBorderColor mutate in-place)
 
-    // 4. store properties as content-addressed resource
-    const propsBlob = new Blob([JSON.stringify(props, null, 2)], { type: 'application/json' })
-    const propsSig = await store.putResource(propsBlob)
-
-    // 5. update child layer's resources list via HistoryService
-    const historyService = window.ioc.get<any>('@diamondcoreprocessor.com/HistoryService')
-    if (historyService) {
-      const lineage = window.ioc.get<any>('@hypercomb.social/Lineage')
-      const segments: string[] = lineage?.explorerSegments?.() ?? []
-      await historyService.addResource([...segments, service.seed], propsSig)
+    // 4. write 0000 to seed directory
+    const seedDir = await store.current.getDirectoryHandle(service.seed, { create: true })
+    const fileHandle = await seedDir.getFileHandle(TILE_PROPERTIES_FILE, { create: true })
+    const writable = await fileHandle.createWritable()
+    try {
+      await writable.write(JSON.stringify(props, null, 2))
+    } finally {
+      await writable.close()
     }
+
+    // 5. capture seed name before closing
+    const savedSeed = service.seed
 
     // 6. cleanup
     imageEditor.destroy()
     service.close()
 
-    // 7. trigger processor → synchronize
-    await new hypercomb().act()
+    // 7. notify via effect bus (processor owns synchronize; drones use effects)
+    EffectBus.emit<{ seed: string }>('tile:saved', { seed: savedSeed })
   }
 
   // ── cancel ─────────────────────────────────────────────────────

@@ -27,8 +27,17 @@ export class DependencyLoader extends EventTarget {
     let pending = await this.#collectPending()
     if (!pending.length) return
 
-    // Layer primitive: all bees load at once, so load all deps eagerly.
-    // (beeDeps lazy loading removed — no longer needed without marker-based loading)
+    // When beeDeps is present, only eagerly load deps NOT claimed by any bee.
+    // Bee-specific deps are lazy-loaded by ScriptPreloader.#ensureDeps().
+    const beeDeps = (globalThis as any).__hypercombBeeDeps as Record<string, string[]> | undefined
+    if (beeDeps) {
+      const claimed = new Set(Object.values(beeDeps).flat())
+      pending = pending.filter(p => {
+        const pureSig = p.sig.replace(/\.js$/i, '')
+        return !claimed.has(pureSig) && !claimed.has(p.sig)
+      })
+      if (!pending.length) return
+    }
 
     EffectBus.emit('loader:deps-start', { total: pending.length })
 

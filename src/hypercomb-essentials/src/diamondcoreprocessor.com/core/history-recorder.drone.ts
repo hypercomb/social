@@ -1,57 +1,32 @@
 // hypercomb-essentials/src/diamondcoreprocessor.com/core/history-recorder.drone.ts
-// Listens on EffectBus for layer mutation effects and delegates to HistoryService.
-// Callers emit 'layer:add-child' or 'layer:remove-child' effects;
-// the recorder resolves the current lineage and records the mutation.
+// Central history recorder: listens for seed lifecycle effects (seed:added,
+// seed:removed) via the EffectBus and records each operation into the
+// append-only OPFS history bag for the current lineage location.
 
 import { EffectBus } from '@hypercomb/core'
-import type { HistoryService } from './history.service.js'
-
-type AddChildPayload = { name: string }
-type RemoveChildPayload = { name: string }
+import type { HistoryService, HistoryOpType } from './history.service.js'
 
 export class HistoryRecorder {
 
   constructor() {
-    EffectBus.on<AddChildPayload>('layer:add-child', this.#onAddChild)
-    EffectBus.on<RemoveChildPayload>('layer:remove-child', this.#onRemoveChild)
+    EffectBus.on<{ seed: string }>('seed:added', (payload) => {
+      if (payload?.seed) void this.recordOp('add', payload.seed)
+    })
+
+    EffectBus.on<{ seed: string }>('seed:removed', (payload) => {
+      if (payload?.seed) void this.recordOp('remove', payload.seed)
+    })
   }
 
-  #onAddChild = (payload: AddChildPayload): void => {
-    void this.#recordAdd(payload.name)
-  }
-
-  #onRemoveChild = (payload: RemoveChildPayload): void => {
-    void this.#recordRemove(payload.name)
-  }
-
-  #recordAdd = async (childName: string): Promise<void> => {
-    const lineage = (window as any).ioc.get('@hypercomb.social/Lineage')
-    const historyService = (window as any).ioc.get('@diamondcoreprocessor.com/HistoryService') as HistoryService | undefined
+  private readonly recordOp = async (op: HistoryOpType, seed: string): Promise<void> => {
+    const lineage = get<any>('@hypercomb.social/Lineage')
+    const historyService = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
     if (!lineage || !historyService) return
 
-    const segments = this.#getSegments(lineage)
-    await historyService.addChild(segments, childName)
-  }
-
-  #recordRemove = async (childName: string): Promise<void> => {
-    const lineage = (window as any).ioc.get('@hypercomb.social/Lineage')
-    const historyService = (window as any).ioc.get('@diamondcoreprocessor.com/HistoryService') as HistoryService | undefined
-    if (!lineage || !historyService) return
-
-    const segments = this.#getSegments(lineage)
-    await historyService.removeChild(segments, childName)
-  }
-
-  #getSegments = (lineage: any): string[] => {
-    try {
-      const segs = lineage.explorerSegments?.()
-      if (Array.isArray(segs)) return segs.map((s: unknown) => String(s ?? '').trim()).filter(Boolean)
-    } catch {
-      // ignore
-    }
-    return []
+    const sig = await historyService.sign(lineage)
+    await historyService.record(sig, { op, seed, at: Date.now() })
   }
 }
 
 const _historyRecorder = new HistoryRecorder()
-;(window as any).ioc.register('@diamondcoreprocessor.com/HistoryRecorder', _historyRecorder)
+window.ioc.register('@diamondcoreprocessor.com/HistoryRecorder', _historyRecorder)

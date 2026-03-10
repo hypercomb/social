@@ -4,6 +4,7 @@
 
 import { SignatureStore } from '@hypercomb/core'
 import { Store, LayerInstaller } from '@hypercomb/shared/core'
+import { LocationParser } from '@hypercomb/shared/core/initializers/location-parser'
 
 const AZURE_CONTENT_URL = 'https://storagehypercomb.blob.core.windows.net/content'
 const isLocalDev = typeof window !== 'undefined'
@@ -45,9 +46,6 @@ export const ensureInstall = async (): Promise<void> => {
   const shouldInstall = await needsInstall(store, signature)
 
   if (!shouldInstall) {
-    // load snapshot into live cache
-    const loaded = await store.loadSnapshot()
-    if (!loaded) await store.rebuildFromHistory()
     console.log('[ensure-install] already installed:', signature)
     restoreSignatureStore(sigStore)
     // Restore beeDeps from cached manifest for lazy loading
@@ -55,25 +53,11 @@ export const ensureInstall = async (): Promise<void> => {
     if (cached) {
       const m = tryParseManifest(cached)
       if (m?.beeDeps) (globalThis as any).__hypercombBeeDeps = m.beeDeps
-      // No more bee markers — layer primitive uses live cache
+      // Ensure markers exist in hypercomb root (idempotent — safe to always run)
+      if (m?.bees) await applyBeeMarkers(store, m.bees)
     }
     return
   }
-
-  console.log('[ensure-install] installing:', signature)
-
-  // clear OPFS directories
-  await clearDirectory(store.bees)
-  await clearDirectory(store.dependencies)
-  await clearDirectory(store.resources)
-  await clearDirectory(store.history)
-
-  // one-time migration: clean up old directories
-  await removeOldDirectory(store, 'hypercomb.io')
-  await removeOldDirectory(store, '__layers__')
-
-  const endpoint = `${CONTENT_BASE_URL}/${signature}`
-
 
   const installer = get('@hypercomb.social/LayerInstaller') as LayerInstaller | undefined
   if (!installer) {
@@ -81,19 +65,39 @@ export const ensureInstall = async (): Promise<void> => {
     return
   }
 
-  await installer.install(endpoint)
+  // Fetch new manifest to diff against old
+  const newManifest = await fetchManifest(signature)
+
+  // Incremental diff: only clear entries not in new manifest
+  const oldManifestJson = localStorage.getItem(MANIFEST_KEY)
+  const oldManifest = oldManifestJson ? tryParseManifest(oldManifestJson) : null
+
+  if (oldManifest && newManifest) {
+    console.log('[ensure-install] incremental update:', signature)
+    await removeStale(store.layers, oldManifest.layers, newManifest.layers, '.json')
+    await removeStale(store.bees, oldManifest.bees, newManifest.bees, '.js')
+    await removeStale(store.dependencies, oldManifest.dependencies, newManifest.dependencies, '.js')
+  } else {
+    console.log('[ensure-install] full install:', signature)
+    await clearDirectory(store.layers)
+    await clearDirectory(store.bees)
+    await clearDirectory(store.dependencies)
+  }
+
+  const installUrl = `${CONTENT_BASE_URL}/${signature}`
+  const parsed = LocationParser.parse(installUrl)
+
+  await installer.install(parsed)
 
   // populate the signature store from the install manifest (browser cache hit)
   await populateSignatureStore(sigStore, signature)
-
-  // Fetch manifest for beeDeps mapping and bee markers
-  const newManifest = await fetchManifest(signature)
 
   localStorage.setItem(INSTALLED_KEY, signature)
   if (newManifest) {
     localStorage.setItem(MANIFEST_KEY, JSON.stringify(newManifest))
     if (newManifest.beeDeps) (globalThis as any).__hypercombBeeDeps = newManifest.beeDeps
-    // No more bee markers — layer primitive uses live cache
+    // Place bee markers in hypercomb.io/ root so ScriptPreloader.find() discovers them
+    await applyBeeMarkers(store, newManifest.bees)
   }
   console.log('[ensure-install] done:', signature)
 }
@@ -104,9 +108,10 @@ const needsInstall = async (store: Store, signature: string): Promise<boolean> =
   const installed = (localStorage.getItem(INSTALLED_KEY) ?? '').trim().toLowerCase()
   if (installed !== signature) return true
 
+  const hasLayers = await hasAny(store.layers)
   const hasBees = await hasAny(store.bees)
   const hasDeps = await hasAny(store.dependencies)
-  return !(hasBees && hasDeps)
+  return !(hasLayers && hasBees && hasDeps)
 }
 
 const hasAny = async (dir: FileSystemDirectoryHandle): Promise<boolean> => {
@@ -117,15 +122,6 @@ const hasAny = async (dir: FileSystemDirectoryHandle): Promise<boolean> => {
 const clearDirectory = async (dir: FileSystemDirectoryHandle): Promise<void> => {
   for await (const [name] of dir.entries()) {
     try { await dir.removeEntry(name, { recursive: true }) } catch { /* skip */ }
-  }
-}
-
-const removeOldDirectory = async (store: Store, name: string): Promise<void> => {
-  try {
-    await store.opfsRoot.removeEntry(name, { recursive: true })
-    console.log(`[ensure-install] removed old directory: ${name}`)
-  } catch {
-    // doesn't exist, ignore
   }
 }
 
@@ -184,6 +180,21 @@ const removeStale = async (
   }
 }
 
+// Place empty marker files in hypercomb.io/ root — one per bee sig.
+// ScriptPreloader.find() always scans hypercombRoot, so all markers here
+// load globally (same behaviour as hypercomb-dev where bees are instantiated
+// directly at startup).
+const applyBeeMarkers = async (store: Store, bees: string[]): Promise<void> => {
+  let placed = 0
+  for (const sig of bees) {
+    if (!sig) continue
+    try {
+      await store.hypercombRoot.getFileHandle(sig, { create: true })
+      placed++
+    } catch { /* ignore — already exists or unwritable */ }
+  }
+  if (placed) console.log(`[ensure-install] placed ${placed} bee markers in hypercomb root`)
+}
 
 // ----- signature store helpers -----
 

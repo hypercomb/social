@@ -1,7 +1,6 @@
 // hypercomb-shared/core/lineage.ts
 // synchronize is dispatched only by the processor — lineage fires 'change' on itself
 
-import { type LayerV2, computeLineageSig } from '@hypercomb/core'
 import type { Navigation } from './navigation'
 import type { Store } from './store'
 
@@ -13,8 +12,8 @@ export class Lineage extends EventTarget {
   // dependencies
   // -------------------------------------------------
 
-  #store(): Store { return get('@hypercomb.social/Store') as Store }
-  #navigation(): Navigation { return get('@hypercomb.social/Navigation') as Navigation }
+  private get store(): Store { return get('@hypercomb.social/Store') as Store }
+  private get navigation(): Navigation { return get('@hypercomb.social/Navigation') as Navigation }
 
   // -------------------------------------------------
   // domain context (reserved for later)
@@ -28,75 +27,64 @@ export class Lineage extends EventTarget {
   // explorer path (domain-relative)
   // -------------------------------------------------
 
-  #explorerPath: string[] = []
-  public explorerSegments = (): readonly string[] => this.#explorerPath
+  private explorerPath: string[] = []
+  public explorerSegments = (): readonly string[] => this.explorerPath
 
   public explorerEnter = (name: string): void => {
     const seg = (name ?? '').trim()
     if (!seg || seg === '.' || seg === '..') return
 
-    this.#explorerPath = [...this.#explorerPath, seg]
-    this.#invalidate()
+    // do not normalize explorer names
+    this.explorerPath = [...this.explorerPath, seg]
+    this.invalidate()
 
+    // explorer drives navigation (best effort)
     try {
-      this.#navigation().goRaw(this.#explorerPath)
+      this.navigation.goRaw(this.explorerPath)
     } catch {
-      this.#dispatchNavigateFallback()
+      // fallback: still notify followers even if navigation isn't ready
+      this.dispatchNavigateFallback()
     }
   }
 
   public explorerUp = (): void => {
-    if (this.#explorerPath.length === 0) return
-    this.#explorerPath = this.#explorerPath.slice(0, -1)
-    this.#invalidate()
+    if (this.explorerPath.length === 0) return
+    this.explorerPath = this.explorerPath.slice(0, -1)
+    this.invalidate()
 
+    // explorer drives navigation (best effort)
     try {
-      this.#navigation().goRaw(this.#explorerPath)
+      this.navigation.goRaw(this.explorerPath)
     } catch {
-      this.#dispatchNavigateFallback()
+      this.dispatchNavigateFallback()
     }
   }
 
+  // keeps old name so you don't have to refactor callers
+  // this now means "show domain root"
   public showDomainRoot = (): void => {
-    this.#explorerPath = []
-    this.#invalidate()
+    this.explorerPath = []
+    this.invalidate()
 
+    // explorer drives navigation (best effort)
     try {
-      this.#navigation().goRaw([])
+      this.navigation.goRaw([])
     } catch {
-      this.#dispatchNavigateFallback()
+      this.dispatchNavigateFallback()
     }
   }
 
   public explorerLabel = (): string => {
-    return '/' + this.#explorerPath.join('/')
+    return '/' + this.explorerPath.join('/')
   }
 
-  // -------------------------------------------------
-  // layer-based resolution (replaces folder-based)
-  // -------------------------------------------------
-
-  /**
-   * Get the current layer from the live cache.
-   */
-  public currentLayer = (): LayerV2 | null => {
-    const store = this.#store()
-    // synchronous: lineage sig is deterministic from segments,
-    // but computing it is async. Use the cached lookup.
-    for (const [, layer] of store.liveCache) {
-      // match by comparing lineage sig — we precompute on invalidation
-      if (this.#currentLineageSig && layer.lineage === this.#currentLineageSig) {
-        return layer
-      }
+  public explorerDir = async (): Promise<FileSystemDirectoryHandle | null> => {
+    try {
+      // domain root (hypercomb.io)
+      return await this.tryResolveFrom(this.store.hypercombRoot, this.explorerPath)
+    } catch {
+      return null
     }
-    return null
-  }
-
-  /**
-   * Compute the lineage signature for the current explorer segments.
-   */
-  public lineageSignature = async (): Promise<string> => {
-    return computeLineageSig(this.#explorerPath)
   }
 
   // -------------------------------------------------
@@ -107,11 +95,8 @@ export class Lineage extends EventTarget {
   #materialized = true
   #missing: readonly string[] = []
   #fsRevision = 0
-  #currentLineageSig: string | null = null
 
   public get ready(): boolean { return this.#ready }
-
-  /** Whether a layer exists in the live cache for the current lineage. */
   public get materialized(): boolean { return this.#materialized }
   public get missing(): readonly string[] { return this.#missing }
 
@@ -123,10 +108,12 @@ export class Lineage extends EventTarget {
 
   public constructor() {
     super()
-    window.addEventListener('navigate', this.#followLocation)
-    window.addEventListener('popstate', this.#followLocation)
+    // follow url changes (programmatic + back/forward)
+    window.addEventListener('navigate', this.followLocation)
+    window.addEventListener('popstate', this.followLocation)
 
-    this.#followLocation()
+    // best-effort initial sync (safe if nav/store aren't ready yet)
+    this.followLocation()
 
     this.#ready = true
     this.dispatchEvent(new CustomEvent('change'))
@@ -134,45 +121,130 @@ export class Lineage extends EventTarget {
 
   public initialize = async (): Promise<void> => {
     this.#activeDomain = 'hypercomb.io'
-    this.#followLocation()
-    await this.#updateLineageSig()
+    this.followLocation()
     this.#ready = true
     this.dispatchEvent(new CustomEvent('change'))
+  }
+
+  // -------------------------------------------------
+  // domain selection (explicit only, reserved)
+  // -------------------------------------------------
+
+  public setDomain = async (name: string, createIfMissing = false): Promise<void> => {
+    const raw = (name ?? '').trim()
+    if (!raw) return
+
+    await this.store.opfsRoot.getDirectoryHandle(raw, { create: createIfMissing })
+    this.#activeDomain = raw
+    this.followLocation()
+  }
+
+  // -------------------------------------------------
+  // domain resolution (used by navigation/search)
+  // -------------------------------------------------
+
+  public tryResolve = async (
+    segments: readonly string[],
+    start: FileSystemDirectoryHandle = this.store.current
+  ): Promise<FileSystemDirectoryHandle | null> => {
+    return await this.tryResolveFrom(start, segments)
+  }
+
+  public ensure = async (
+    segments: readonly string[],
+    start: FileSystemDirectoryHandle = this.store.hypercombRoot,
+  ): Promise<FileSystemDirectoryHandle | null> => {
+
+    let dir = start
+
+    for (let i = 0; i < segments.length; i++) {
+      const seg = (segments[i] ?? '').trim()
+      if (!seg) continue
+
+      try {
+        dir = await dir.getDirectoryHandle(seg, { create: true })
+      } catch {
+        this.#materialized = false
+        this.#missing = segments.slice(i)
+        this.dispatchEvent(new CustomEvent('change'))
+        return null
+      }
+    }
+
+    this.#materialized = true
+    this.#missing = []
+    this.dispatchEvent(new CustomEvent('change'))
+    this.invalidate()
+    return dir
+  }
+
+  private readonly tryResolveFrom = async (
+    start: FileSystemDirectoryHandle,
+    segments: readonly string[]
+  ): Promise<FileSystemDirectoryHandle | null> => {
+
+    let dir = start
+
+    for (let i = 0; i < segments.length; i++) {
+      const seg = (segments[i] ?? '').trim()
+      if (!seg) continue
+
+      try {
+        dir = await dir.getDirectoryHandle(seg, { create: false })
+      } catch {
+        this.#materialized = false
+        this.#missing = segments.slice(i)
+        this.dispatchEvent(new CustomEvent('change'))
+        return null
+      }
+    }
+
+    this.#materialized = true
+    this.#missing = []
+    this.dispatchEvent(new CustomEvent('change'))
+    return dir
+  }
+
+  public addMarker = async (segments: readonly string[], signature: string): Promise<void> => {
+    const sig = (signature ?? '').trim()
+    if (!sig) return
+
+    const dir = await this.tryResolve(segments, this.store.hypercombRoot)
+    if (!dir) return
+
+    try {
+      await dir.getFileHandle(sig, { create: true })
+      this.invalidate()
+    } catch {
+      // ignore duplicates
+    }
   }
 
   // -------------------------------------------------
   // internal
   // -------------------------------------------------
 
-  readonly #invalidate = (): void => {
+  private readonly invalidate = (): void => {
     this.#fsRevision = this.#fsRevision + 1
-    this.#updateLineageSig().catch(() => {})
     this.dispatchEvent(new CustomEvent('change'))
   }
 
-  readonly #updateLineageSig = async (): Promise<void> => {
-    this.#currentLineageSig = await computeLineageSig(this.#explorerPath)
-
-    const store = this.#store()
-    const layer = store.getLayer(this.#currentLineageSig)
-    this.#materialized = layer !== null
-    this.#missing = layer ? [] : this.#explorerPath
-  }
-
-  readonly #followLocation = (): void => {
+  private readonly followLocation = (): void => {
     try {
-      const next = this.#navigation().segmentsRaw()
+      // explorer path must stay lossless; use raw decoded URL segments
+      const next = this.navigation.segmentsRaw()
 
-      if (this.#sameSegments(this.#explorerPath, next)) return
+      // do not spam invalidations if nothing changed
+      if (this.sameSegments(this.explorerPath, next)) return
 
-      this.#explorerPath = next
-      this.#invalidate()
+      this.explorerPath = next
+      this.invalidate()
     } catch {
       // ignore until nav is ready
     }
   }
 
-  readonly #sameSegments = (a: readonly string[], b: readonly string[]): boolean => {
+  private readonly sameSegments = (a: readonly string[], b: readonly string[]): boolean => {
     if (a.length !== b.length) return false
     for (let i = 0; i < a.length; i++) {
       if ((a[i] ?? '') !== (b[i] ?? '')) return false
@@ -180,7 +252,7 @@ export class Lineage extends EventTarget {
     return true
   }
 
-  readonly #dispatchNavigateFallback = (): void => {
+  private readonly dispatchNavigateFallback = (): void => {
     try {
       window.dispatchEvent(new Event('navigate'))
     } catch {

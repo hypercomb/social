@@ -12,28 +12,6 @@ import { dirname, extname, join, relative, resolve } from 'path'
 import { build } from 'esbuild'
 import { SignatureService } from '@hypercomb/core'
 
-// ── layer v2 types + helpers (inlined from @hypercomb/core/layer) ──
-
-type LayerV2 = {
-  v: 2
-  lineage: string
-  bees: string
-  deps: string
-  resources: string
-  children: string
-}
-
-const computeLineageSig = async (segments: string[]): Promise<string> =>
-  SignatureService.sign(toArrayBuffer(textToBytes(JSON.stringify(segments))))
-
-const computeListSig = async (sigs: string[]): Promise<string> => {
-  const content = [...sigs].sort().join('\n')
-  return SignatureService.sign(toArrayBuffer(textToBytes(content)))
-}
-
-const listResourceContent = (sigs: string[]): string =>
-  [...sigs].sort().join('\n')
-
 // -------------------------------------------------
 // esm globals
 // -------------------------------------------------
@@ -121,6 +99,12 @@ const writeSigJsFile = (dir: string, sig: string, bytes: Uint8Array): void => {
   writeFileSync(join(dir, jsFileName(sig)), bytes)
 }
 
+const layerFileName = (sig: string): string => `${sig}.json`
+
+const writeLayerJsonFile = (dir: string, sig: string, json: string): void => {
+  if (!isSig(sig)) throw new Error(`invalid signature: ${sig}`)
+  writeFileSync(join(dir, layerFileName(sig)), json, 'utf8')
+}
 
 const splitPath = (p: string): string[] =>
   p.split('/').filter(Boolean)
@@ -213,70 +197,37 @@ const readDirTree = (root: string, rel: string): DirNode => {
   return { rel, children }
 }
 
-/**
- * Build v2 layers from the directory tree.
- *
- * Each directory node becomes a layer with 5 typed fields (lineage, bees,
- * deps, resources, children). Each field is a content-addressed signature
- * pointing to a sorted list stored in __resources__/.
- *
- * Children are referenced by lineage sig (not layer sig) — no Merkle cascade.
- * Returns the lineage sig for this node (used by parent's children list).
- */
-const buildLayersV2FromTree = async (
+const signJson = async (value: unknown) => {
+  const json = JSON.stringify(value)
+  const sig = await SignatureService.sign(toArrayBuffer(textToBytes(json)))
+  return { sig, json }
+}
+
+const buildLayersFromTree = async (
   node: DirNode,
   resourcesByDir: Map<string, { bees: string[]; deps: string[] }>,
-  listResources: Map<string, string>,
-  lineageResources: Map<string, string>,
-  history: Map<string, LayerV2>,
-  rootDepSigs: string[]
+  out: Map<string, string>,
+  rootDependencies: string[]
 ): Promise<string> => {
-  const segments = node.rel ? splitPath(node.rel) : []
-  const lineageSig = await computeLineageSig(segments)
-  lineageResources.set(lineageSig, JSON.stringify(segments))
-
-  // process children first (bottom-up), collecting their lineage sigs
-  const childLineageSigs: string[] = []
-  for (const child of node.children) {
-    childLineageSigs.push(
-      await buildLayersV2FromTree(child, resourcesByDir, listResources, lineageResources, history, rootDepSigs)
-    )
+  const layers: string[] = []
+  for (const c of node.children) {
+    layers.push(await buildLayersFromTree(c, resourcesByDir, out, rootDependencies))
   }
 
-  // bees at this node (strip .js from bucket entries)
   const entry = resourcesByDir.get(node.rel) ?? { bees: [], deps: [] }
-  const beeSigs = uniqSorted(entry.bees.map(b => b.replace(/\.js$/i, '')))
 
-  // deps: only root layer carries dependencies
-  const depSigs = node.rel === '' ? rootDepSigs : []
-
-  // resources: none at build time (static assets TBD)
-  const resourceSigs: string[] = []
-
-  // compute and store list resources
-  const beesListSig = await computeListSig(beeSigs)
-  listResources.set(beesListSig, listResourceContent(beeSigs))
-
-  const depsListSig = await computeListSig(depSigs)
-  listResources.set(depsListSig, listResourceContent(depSigs))
-
-  const resourcesListSig = await computeListSig(resourceSigs)
-  listResources.set(resourcesListSig, listResourceContent(resourceSigs))
-
-  const childrenListSig = await computeListSig(childLineageSigs)
-  listResources.set(childrenListSig, listResourceContent(childLineageSigs))
-
-  const layer: LayerV2 = {
-    v: 2,
-    lineage: lineageSig,
-    bees: beesListSig,
-    deps: depsListSig,
-    resources: resourcesListSig,
-    children: childrenListSig,
+  const layer = {
+    version: 1,
+    name: node.rel.split('/').pop() || 'root',
+    rel: node.rel,
+    bees: uniqSorted(entry.bees),
+    dependencies: node.rel ? [] : rootDependencies,
+    layers,
   }
 
-  history.set(lineageSig, layer)
-  return lineageSig
+  const { sig, json } = await signJson(layer)
+  out.set(sig, json)
+  return sig
 }
 
 // -------------------------------------------------
@@ -368,6 +319,7 @@ const main = async (): Promise<void> => {
   const resourcesByDir = new Map<string, { bees: string[]; deps: string[] }>()
   const dependencyBytes = new Map<string, Uint8Array>()
   const resourceBytes = new Map<string, Uint8Array>()
+  const layers = new Map<string, string>()
 
   // dependencies
   const deps = sources.filter(s => s.kind === 'dependency')
@@ -399,6 +351,7 @@ const main = async (): Promise<void> => {
     for (const f of members) addToBucket(resourcesByDir, f.relDir, jsFileName(built.sig), 'dep')
   }
 
+  const rootDependencies = uniqSorted(Array.from(dependencyBytes.keys()).map(jsFileName))
   const dependencySigs = Array.from(dependencyBytes.keys()).sort((a, b) => a.localeCompare(b))
 
   // class-to-dep reverse index: scan each namespace bundle for exported class names
@@ -438,70 +391,46 @@ const main = async (): Promise<void> => {
     }
   }
 
-  // v2 layers (history snapshots + list resources)
-  const listResources = new Map<string, string>()
-  const lineageResources = new Map<string, string>()
-  const history = new Map<string, LayerV2>()
-  const rootDepSigs = Array.from(dependencyBytes.keys()).sort((a, b) => a.localeCompare(b))
-
+  // layers
   const tree = readDirTree(SRC_ROOT, '')
-  await buildLayersV2FromTree(tree, resourcesByDir, listResources, lineageResources, history, rootDepSigs)
-
-  // build v2 manifest
-  const allResourceSigs = uniqSorted([...listResources.keys(), ...lineageResources.keys()])
-  const historyEntries: Record<string, LayerV2> = {}
-  for (const [lineageSig, layer] of history) historyEntries[lineageSig] = layer
-
-  const installManifest = {
-    version: 2,
-    bees: Array.from(resourceBytes.keys()).sort((a, b) => a.localeCompare(b)),
-    dependencies: dependencySigs,
-    resources: allResourceSigs,
-    history: historyEntries,
-    beeDeps: Object.fromEntries(beeDepsMap),
-  }
-
-  // root sig = hash of manifest (changes when ANY content changes)
-  const manifestJson = JSON.stringify(installManifest)
-  const rootSig = await SignatureService.sign(toArrayBuffer(textToBytes(manifestJson)))
+  const rootLayerSig = await buildLayersFromTree(tree, resourcesByDir, layers, rootDependencies)
 
   // write package
-  const rootDir = join(DIST_ROOT, rootSig)
-  const beesDir = join(rootDir, '__bees__')
-  const depDir  = join(rootDir, '__dependencies__')
-  const resDir  = join(rootDir, '__resources__')
+  const rootDir = join(DIST_ROOT, rootLayerSig)
+  const layersDir  = join(rootDir, '__layers__')
+  const resDir     = join(rootDir, '__bees__')
+  const depDir     = join(rootDir, '__dependencies__')
 
-  ensureDir(beesDir)
-  ensureDir(depDir)
+  ensureDir(layersDir)
   ensureDir(resDir)
+  ensureDir(depDir)
 
+  for (const [sig, json] of layers) writeLayerJsonFile(layersDir, sig, json)
   for (const [sig, bytes] of dependencyBytes) writeSigJsFile(depDir, sig, bytes)
-  for (const [sig, bytes] of resourceBytes) writeSigJsFile(beesDir, sig, bytes)
+  for (const [sig, bytes] of resourceBytes) writeSigJsFile(resDir, sig, bytes)
 
-  // write list resources and lineage resources (plain text, no .js extension)
-  for (const [sig, content] of listResources) {
-    if (!isSig(sig)) throw new Error(`invalid list resource sig: ${sig}`)
-    writeFileSync(join(resDir, sig), content, 'utf8')
+  // install manifest with bee-to-dep mapping
+  const installManifest = {
+    version: 2,
+    layers: Array.from(layers.keys()).sort((a, b) => a.localeCompare(b)),
+    bees: Array.from(resourceBytes.keys()).sort((a, b) => a.localeCompare(b)),
+    dependencies: dependencySigs,
+    beeDeps: Object.fromEntries(beeDepsMap),
   }
-  for (const [sig, content] of lineageResources) {
-    if (!isSig(sig)) throw new Error(`invalid lineage resource sig: ${sig}`)
-    writeFileSync(join(resDir, sig), content, 'utf8')
-  }
-
-  writeFileSync(join(rootDir, INSTALL_MANIFEST_FILE), manifestJson + '\n', 'utf8')
+  writeFileSync(join(rootDir, INSTALL_MANIFEST_FILE), JSON.stringify(installManifest) + '\n', 'utf8')
 
   // deploy (skip with --local flag)
   const skipDeploy = process.argv.includes('--local')
   if (skipDeploy) {
     console.log(`[build-module] --local: skipping Azure deploy`)
-    console.log(`[build-module] root signature: ${rootSig}`)
+    console.log(`[build-module] root signature: ${rootLayerSig}`)
     console.log(`[build-module] output: ${rootDir}`)
   } else {
     const ps1 = resolve(__dirname, 'deploy-azure.ps1')
     if (existsSync(ps1)) {
       const r = spawnSync(
         'powershell',
-        ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1, '-Signature', rootSig],
+        ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1, '-Signature', rootLayerSig],
         { stdio: 'inherit' }
       )
       if (r.status !== 0) throw new Error('deployment failed')
