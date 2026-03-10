@@ -1,7 +1,6 @@
 // hypercomb-shared/core/store.ts
-// hypercomb-web/src/app/core/store.ts
 
-import { Bee, SignatureService } from '@hypercomb/core'
+import { Bee, SignatureService, type LayerV2, computeLineageSig } from '@hypercomb/core'
 
 type BeeCtor = new () => Bee
 
@@ -15,69 +14,178 @@ export type DevManifest = {
 
 export class Store extends EventTarget {
 
-  private static readonly HYPERCOMB_DIRECTORY = 'hypercomb.io'
   public static readonly BEES_DIRECTORY = '__bees__'
   public static readonly DEPENDENCIES_DIRECTORY = '__dependencies__'
-  public static readonly LAYERS_DIRECTORY = '__layers__'
   public static readonly RESOURCES_DIRECTORY = '__resources__'
+  public static readonly HISTORY_DIRECTORY = '__history__'
 
-  private static readonly CACHE_NAME = 'hypercomb-modules-v2'
+  static readonly #SNAPSHOT_FILE = '__snapshot__.json'
+  static readonly #CACHE_NAME = 'hypercomb-modules-v2'
 
   public opfsRoot!: FileSystemDirectoryHandle
-  public hypercombRoot!: FileSystemDirectoryHandle
   public bees!: FileSystemDirectoryHandle
   public dependencies!: FileSystemDirectoryHandle
-  public layers!: FileSystemDirectoryHandle
   public resources!: FileSystemDirectoryHandle
+  public history!: FileSystemDirectoryHandle
 
   #initialized = false
 
   // -------------------------------------------------
-  // current folder (within hypercomb root)
+  // live cache (lineageSig → latest layer snapshot)
   // -------------------------------------------------
 
-  public current!: FileSystemDirectoryHandle
+  #liveCache = new Map<string, LayerV2>()
 
-  #currentSegments: readonly string[] = []
+  public get liveCache(): ReadonlyMap<string, LayerV2> { return this.#liveCache }
 
-  public get currentSegments(): readonly string[] { return this.#currentSegments }
+  public getLayer = (lineageSig: string): LayerV2 | null => {
+    return this.#liveCache.get(lineageSig) ?? null
+  }
 
-  public readonly setCurrentHandle = (
-    dir: FileSystemDirectoryHandle,
-    segments: readonly string[]
-  ): void => {
-    this.current = dir
-    this.#currentSegments = [...segments]
+  public resolveLayerForLineage = async (segments: string[]): Promise<LayerV2 | null> => {
+    const sig = await computeLineageSig(segments)
+    return this.getLayer(sig)
+  }
+
+  // -------------------------------------------------
+  // list resources (__resources__/)
+  // -------------------------------------------------
+
+  public getListResource = async (listSig: string): Promise<string[]> => {
+    try {
+      const handle = await this.resources.getFileHandle(listSig)
+      const file = await handle.getFile()
+      const text = await file.text()
+      if (text === '') return []
+      return text.split('\n')
+    } catch {
+      return []
+    }
+  }
+
+  // -------------------------------------------------
+  // history bag operations
+  // -------------------------------------------------
+
+  public appendHistory = async (lineageSig: string, layer: LayerV2): Promise<void> => {
+    const bagDir = await this.history.getDirectoryHandle(lineageSig, { create: true })
+
+    // find next sequence number
+    let maxSeq = 0
+    for await (const name of (bagDir as any).keys()) {
+      const n = parseInt(name, 10)
+      if (!isNaN(n) && n > maxSeq) maxSeq = n
+    }
+
+    const nextSeq = String(maxSeq + 1).padStart(8, '0')
+    const handle = await bagDir.getFileHandle(nextSeq, { create: true })
+    const writable = await handle.createWritable()
+    try {
+      await writable.write(JSON.stringify(layer))
+    } finally {
+      await writable.close()
+    }
+
+    // update live cache
+    this.#liveCache.set(lineageSig, layer)
     this.dispatchEvent(new CustomEvent('change'))
+
+    // persist snapshot (fire-and-forget)
+    this.saveSnapshot().catch(() => {})
   }
 
-  public readonly resetCurrent = (): void => {
-    this.setCurrentHandle(this.hypercombRoot, [])
+  public replayHistory = async (lineageSig: string): Promise<LayerV2[]> => {
+    const entries: LayerV2[] = []
+    try {
+      const bagDir = await this.history.getDirectoryHandle(lineageSig)
+      const names: string[] = []
+      for await (const name of (bagDir as any).keys()) names.push(name)
+      names.sort()
+
+      for (const name of names) {
+        const handle = await bagDir.getFileHandle(name)
+        const file = await handle.getFile()
+        const text = await file.text()
+        entries.push(JSON.parse(text) as LayerV2)
+      }
+    } catch {
+      // bag doesn't exist yet
+    }
+    return entries
   }
 
-  // caller can use this when "moving to a seed"
-  public readonly setCurrent = async (
-    segments: readonly string[],
-    create: boolean = false
-  ): Promise<FileSystemDirectoryHandle | null> => {
+  // -------------------------------------------------
+  // snapshot (fast restore)
+  // -------------------------------------------------
 
-    let dir = this.hypercombRoot
-    const clean: string[] = []
+  public loadSnapshot = async (): Promise<boolean> => {
+    try {
+      const handle = await this.history.getFileHandle(Store.#SNAPSHOT_FILE)
+      const file = await handle.getFile()
+      const text = await file.text()
+      const data = JSON.parse(text) as Record<string, LayerV2>
 
-    for (let i = 0; i < segments.length; i++) {
-      const seg = (segments[i] ?? '').trim()
-      if (!seg || seg === '.' || seg === '..') continue
+      this.#liveCache.clear()
+      for (const [lineageSig, layer] of Object.entries(data)) {
+        this.#liveCache.set(lineageSig, layer)
+      }
 
-      try {
-        dir = await dir.getDirectoryHandle(seg, { create })
-        clean.push(seg)
-      } catch {
-        return null
+      this.dispatchEvent(new CustomEvent('change'))
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  public saveSnapshot = async (): Promise<void> => {
+    const data: Record<string, LayerV2> = {}
+    for (const [lineageSig, layer] of this.#liveCache) {
+      data[lineageSig] = layer
+    }
+
+    const handle = await this.history.getFileHandle(Store.#SNAPSHOT_FILE, { create: true })
+    const writable = await handle.createWritable()
+    try {
+      await writable.write(JSON.stringify(data))
+    } finally {
+      await writable.close()
+    }
+  }
+
+  public rebuildFromHistory = async (): Promise<void> => {
+    this.#liveCache.clear()
+
+    // walk all history bag directories
+    for await (const [name, entry] of (this.history as any).entries()) {
+      if (entry.kind !== 'directory') continue
+      if (name === Store.#SNAPSHOT_FILE) continue
+
+      const bagDir = entry as FileSystemDirectoryHandle
+      const fileNames: string[] = []
+      for await (const fname of (bagDir as any).keys()) fileNames.push(fname)
+      fileNames.sort()
+
+      // latest entry = current state
+      if (fileNames.length > 0) {
+        const latestName = fileNames[fileNames.length - 1]!
+        const handle = await bagDir.getFileHandle(latestName)
+        const file = await handle.getFile()
+        const text = await file.text()
+        this.#liveCache.set(name, JSON.parse(text) as LayerV2)
       }
     }
 
-    this.setCurrentHandle(dir, clean)
-    return dir
+    this.dispatchEvent(new CustomEvent('change'))
+  }
+
+  /**
+   * Seed the live cache directly (used during install).
+   */
+  public seedLiveCache = (entries: Record<string, LayerV2>): void => {
+    for (const [lineageSig, layer] of Object.entries(entries)) {
+      this.#liveCache.set(lineageSig, layer)
+    }
+    this.dispatchEvent(new CustomEvent('change'))
   }
 
   // -------------------------------------------------
@@ -90,30 +198,17 @@ export class Store extends EventTarget {
 
     this.opfsRoot = await navigator.storage.getDirectory()
 
-    this.hypercombRoot =
-      await this.opfsRoot.getDirectoryHandle(Store.HYPERCOMB_DIRECTORY, { create: true })
-
     this.bees =
       await this.opfsRoot.getDirectoryHandle(Store.BEES_DIRECTORY, { create: true })
 
     this.dependencies =
       await this.opfsRoot.getDirectoryHandle(Store.DEPENDENCIES_DIRECTORY, { create: true })
 
-    this.layers =
-      await this.opfsRoot.getDirectoryHandle(Store.LAYERS_DIRECTORY, { create: true })
-
     this.resources =
       await this.opfsRoot.getDirectoryHandle(Store.RESOURCES_DIRECTORY, { create: true })
 
-    // default current is the hypercomb root
-    this.resetCurrent()
-  }
-
-  public domainLayersDirectory = async (
-    domain: string,
-    create: boolean = false
-  ): Promise<FileSystemDirectoryHandle> => {
-    return await this.layers.getDirectoryHandle(domain, { create })
+    this.history =
+      await this.opfsRoot.getDirectoryHandle(Store.HISTORY_DIRECTORY, { create: true })
   }
 
   // -------------------------------------------------
@@ -199,7 +294,7 @@ export class Store extends EventTarget {
     }
   }
 
-  private seedResourceCache = async (
+  #seedResourceCache = async (
     signature: string,
     buffer: ArrayBuffer
   ): Promise<void> => {
@@ -208,17 +303,20 @@ export class Store extends EventTarget {
       new URL(`/opfs/${Store.BEES_DIRECTORY}/${signature}.js`, location.origin).toString()
 
     try {
-      const cache = await caches.open(Store.CACHE_NAME)
+      const cache = await caches.open(Store.#CACHE_NAME)
       const existing = await cache.match(opfsUrl)
       if (!existing) {
-        await cache.put(opfsUrl, new Response(buffer, { headers: this.jsNoStoreHeaders() }))
+        await cache.put(opfsUrl, new Response(buffer, { headers: this.#jsNoStoreHeaders() }))
       }
     } catch {
       // ignore
     }
   }
 
-  private jsNoStoreHeaders = (): Headers => {
+  // keep old name for getBee compatibility
+  private seedResourceCache = this.#seedResourceCache
+
+  #jsNoStoreHeaders = (): Headers => {
     const h = new Headers()
     h.set('content-type', 'application/javascript')
     h.set('cache-control', 'no-store')

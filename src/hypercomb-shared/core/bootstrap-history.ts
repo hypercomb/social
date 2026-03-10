@@ -1,8 +1,7 @@
 // hypercomb-shared/core/bootstrap-history.ts
-// hypercomb-web/src/bootstrap/bootstrap-history.ts
 
+import { computeLineageSig } from '@hypercomb/core'
 import { CompletionUtility } from './completion-utility'
-import { DirectoryWalker } from './directory-walker'
 import { Store } from './store'
 
 type BootstrapStep = {
@@ -13,72 +12,42 @@ type BootstrapStep = {
 
 export class BootstrapHistory {
 
-  // note: reserved for later; current bootstrap starts at store.hypercombRoot
-  private readonly defaultDomain = 'hypercomb.io'
-
-  #hasRun = false
-
+  /**
+   * Walk from root to the deepest valid lineage for the current URL,
+   * rebuilding the browser history stack at each depth.
+   *
+   * The processor handles bee loading after popstate fires — bootstrap
+   * only validates the URL against the live cache and sets up history.
+   */
   public run = async (): Promise<void> => {
-    if (this.#hasRun) return
-    this.#hasRun = true
 
     const store = get('@hypercomb.social/Store') as Store
-    const preloader = get('@hypercomb.social/ScriptPreloader') as any
     const utility = get('@hypercomb.social/CompletionUtility') as CompletionUtility
 
     const inputPath = window.location.pathname || '/'
     const inputSuffix = (window.location.search || '') + (window.location.hash || '')
 
     // use the same decode + normalize rules as navigation.cleanSegment
-    const urlSegments = this.parsePath(inputPath, utility)
-
-    // root for now is just the hypercomb root
-    // note: when you introduce per-domain roots, swap this for getDirectoryHandle(this.defaultDomain)
-    const domainRoot = store.hypercombRoot
-
-    // current starts at domain root
-    store.setCurrentHandle(domainRoot, [])
+    const urlSegments = this.#parsePath(inputPath, utility)
 
     // prefer lineage segments if they exist and lineage is ready
-    const lineage = this.tryGetLineage()
-    const lineageSegments = this.tryGetLineageSegments(lineage)
-    const rawSegments =
-      lineageSegments.length
-        ? lineageSegments
-        : urlSegments
+    const lineage = this.#tryGetLineage()
+    const lineageSegments = this.#tryGetLineageSegments(lineage)
+    const rawSegments = lineageSegments.length ? lineageSegments : urlSegments
 
-    // walker strategy: build a path->handle lookup so we never mutate url until we know the answer
-    const walker = get('@hypercomb.social/DirectoryWalker') as DirectoryWalker
-    const directories = await walker.walk(domainRoot)
-
-    // map key is "a/b/c" (no leading slash), rooted at domainRoot
-    const byPath = new Map<string, FileSystemDirectoryHandle>()
-    byPath.set('', domainRoot)
-
-    for (const d of directories as any[]) {
-      const parts = (d?.path ?? []) as string[]
-      const handle = (d?.handle ?? null) as FileSystemDirectoryHandle | null
-      if (!handle) continue
-      byPath.set(parts.join('/'), handle)
-    }
-
-    // resolve deepest existing lineage for the current segments
+    // resolve deepest existing lineage in the live cache
     const existingSegments: string[] = []
-    const existingDirs: FileSystemDirectoryHandle[] = []
-
-    let cursor = ''
 
     for (let i = 0; i < rawSegments.length; i++) {
       const seg = (rawSegments[i] ?? '').trim()
       if (!seg) continue
 
-      cursor = cursor ? `${cursor}/${seg}` : seg
-
-      const dir = byPath.get(cursor)
-      if (!dir) break
+      const candidate = [...existingSegments, seg]
+      const lineageSig = await computeLineageSig(candidate)
+      const layer = store.getLayer(lineageSig)
+      if (!layer) break
 
       existingSegments.push(seg)
-      existingDirs.push(dir)
     }
 
     const fullExists = existingSegments.length === rawSegments.length
@@ -95,28 +64,18 @@ export class BootstrapHistory {
     try {
       window.history.replaceState({ i: 0, steps: [] as BootstrapStep[] }, '', '/')
 
-      // Always encounter root markers (global bees that load at every location)
-      await this.encounter(preloader, '')
-
       let path = ''
       let index = 0
       const steps: BootstrapStep[] = []
 
       for (let i = 0; i < existingSegments.length; i++) {
         const seg = existingSegments[i]
-        const dir = existingDirs[i]
 
         path += `/${seg}`
         index++
 
         window.history.pushState({ i: index }, '', path)
         steps.push({ index, segment: seg, path })
-
-        // advance current folder for runtime
-        store.setCurrentHandle(dir, existingSegments.slice(0, i + 1))
-
-        // replay: encounter this segment
-        await this.encounter(preloader, seg)
       }
 
       // stash steps for debugging, but keep the current url correct
@@ -146,39 +105,34 @@ export class BootstrapHistory {
       }
     }
 
-    this.dispatchPopState()
+    this.#dispatchPopState()
   }
 
-  private parsePath = (path: string, completions: CompletionUtility | null): string[] => {
+  #parsePath = (path: string, completions: CompletionUtility | null): string[] => {
     const parts = (path ?? '').split('/').filter(Boolean)
     return parts
-      .map(p => this.cleanSegment(p, completions))
+      .map(p => this.#cleanSegment(p, completions))
       .filter(Boolean)
   }
 
-  private cleanSegment = (s: string, completions: CompletionUtility | null): string => {
-    const decoded = this.safeDecode((s ?? '').trim())
+  #cleanSegment = (s: string, completions: CompletionUtility | null): string => {
+    const decoded = this.#safeDecode((s ?? '').trim())
     const noSlashes = decoded.replace(/[\/\\]+/g, ' ')
     if (completions?.normalize) return completions.normalize(noSlashes)
     return noSlashes.replace(/\s+/g, ' ').trim()
   }
 
-  private safeDecode = (s: string): string => {
+  #safeDecode = (s: string): string => {
     try { return decodeURIComponent(s) } catch { return s }
   }
 
-  private tryGetCompletions = (get: any): CompletionUtility | null => {
-    try { return get('@hypercomb.social/CompletionUtility') as CompletionUtility } catch { return null }
-  }
-
-  private tryGetLineage = (): any | null => {
+  #tryGetLineage = (): any | null => {
     try { return get('@hypercomb.social/Lineage') as any } catch { return null }
   }
 
-  private tryGetLineageSegments = (lineage: any | null): string[] => {
+  #tryGetLineageSegments = (lineage: any | null): string[] => {
     if (!lineage) return []
 
-    // lineage.ready is now a boolean getter; fallback handles legacy signal form
     try {
       const ready = (typeof lineage.ready === 'function') ? lineage.ready() : !!lineage.ready
       if (!ready) return []
@@ -196,25 +150,7 @@ export class BootstrapHistory {
     return []
   }
 
-  private encounter = async (preloader: any, seg: string): Promise<void> => {
-    let bees: any[] = []
-    try {
-      bees = await preloader.find(seg)
-    } catch {
-      return
-    }
-
-    for (const b of bees) {
-      try {
-        const res = b?.pulse?.(seg)
-        if (res && typeof res.then === 'function') await res
-      } catch {
-        // ignore
-      }
-    }
-  }
-
-  private dispatchPopState = (): void => {
+  #dispatchPopState = (): void => {
     try {
       window.dispatchEvent(new PopStateEvent('popstate', { state: window.history.state }))
     } catch {
@@ -222,6 +158,5 @@ export class BootstrapHistory {
     }
   }
 }
-
 
 register('@hypercomb.social/BootstrapHistory', new BootstrapHistory())

@@ -5,10 +5,8 @@ import { Component, signal, type OnDestroy } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import type { Lineage } from '../../core/lineage'
 import type { Store } from '../../core/store'
-import { hypercomb } from '@hypercomb/core'
+import { computeLineageSig } from '@hypercomb/core'
 import type { ScriptPreloader } from '../../core/script-preloader'
-import { LocationParser } from '../../core/initializers/location-parser'
-import { RuntimeMediator } from '../runtime-mediator'
 
 
 interface ExplorerEntry {
@@ -24,7 +22,7 @@ interface ExplorerEntry {
   templateUrl: './opfs-explorer.component.html',
   styleUrls: ['./opfs-explorer.component.scss']
 })
-export class OpfsExplorerComponent extends hypercomb {
+export class OpfsExplorerComponent implements OnDestroy {
 
   // -------------------------------------------------
   // constants
@@ -34,20 +32,15 @@ export class OpfsExplorerComponent extends hypercomb {
   private static readonly SHOW_ALL_USER_SET_KEY = 'opfs-explorer.show-all.user-set'
   private static readonly LEGACY_SHOW_ALL_KEY = 'opfs-explorer.show-raw'
   private static readonly SHOW_ALL_BOOTSTRAP_V2_KEY = 'opfs-explorer.show-all.bootstrap-v2'
-  private static readonly COPY_MAX_BYTES = 250_000
-  private static readonly INSTALL_SUFFIX = '-install'
   public domain: string = 'hypercomb.io'
 
   // -------------------------------------------------
   // dependencies
   // -------------------------------------------------
 
-  private get lineage(): Lineage { return get('@hypercomb.social/Lineage') as Lineage }
-  private get preloader(): ScriptPreloader { return get('@hypercomb.social/ScriptPreloader') as ScriptPreloader }
-  private get store(): Store { return get('@hypercomb.social/Store') as Store }
-
-  // note: runtime mediator stays as angular service
-  private readonly runtime = new RuntimeMediator()
+  #lineage(): Lineage { return get('@hypercomb.social/Lineage') as Lineage }
+  #preloader(): ScriptPreloader { return get('@hypercomb.social/ScriptPreloader') as ScriptPreloader }
+  #store(): Store { return get('@hypercomb.social/Store') as Store }
 
   // -------------------------------------------------
   // state
@@ -58,37 +51,33 @@ export class OpfsExplorerComponent extends hypercomb {
 
   public readonly showAll = signal(this.readInitialShowAll())
 
-  public readonly directory = (): string => this.lineage.explorerLabel()
+  public readonly directory = (): string => this.#lineage().explorerLabel()
 
-  private readonly runProcessor = async (): Promise<void> => {
-    await this.act()
-  }
+  #refreshing = false
+  #refreshQueued = false
 
-  private refreshing = false
-  private refreshQueued = false
-
-  private readonly requestRefresh = (): void => {
-    if (this.refreshing) {
-      this.refreshQueued = true
+  readonly #requestRefresh = (): void => {
+    if (this.#refreshing) {
+      this.#refreshQueued = true
       return
     }
 
-    this.refreshing = true
+    this.#refreshing = true
 
     void (async () => {
       try {
         do {
-          this.refreshQueued = false
-          await this.refresh()
-        } while (this.refreshQueued)
+          this.#refreshQueued = false
+          await this.#refresh()
+        } while (this.#refreshQueued)
       } finally {
-        this.refreshing = false
+        this.#refreshing = false
       }
     })()
   }
 
-  private readonly onSynchronize = (): void => {
-    this.requestRefresh()
+  readonly #onSynchronize = (): void => {
+    this.#requestRefresh()
   }
 
   // -------------------------------------------------
@@ -96,16 +85,14 @@ export class OpfsExplorerComponent extends hypercomb {
   // -------------------------------------------------
 
   public constructor() {
-    super()
-
-    window.addEventListener('synchronize', this.onSynchronize)
+    window.addEventListener('synchronize', this.#onSynchronize)
 
     // initial load
-    this.requestRefresh()
+    this.#requestRefresh()
   }
 
   public ngOnDestroy(): void {
-    window.removeEventListener('synchronize', this.onSynchronize)
+    window.removeEventListener('synchronize', this.#onSynchronize)
   }
 
   // -------------------------------------------------
@@ -124,7 +111,7 @@ export class OpfsExplorerComponent extends hypercomb {
     this.showAll.set(next)
     localStorage.setItem(OpfsExplorerComponent.SHOW_ALL_USER_SET_KEY, '1')
     localStorage.setItem(OpfsExplorerComponent.SHOW_ALL_KEY, String(next))
-    this.requestRefresh()
+    this.#requestRefresh()
   }
 
   // -------------------------------------------------
@@ -133,21 +120,16 @@ export class OpfsExplorerComponent extends hypercomb {
 
   public explore = (name: string): void => {
     if (name === '..') {
-      this.lineage.explorerUp()
-      void this.runProcessorForLocation()
+      this.#lineage().explorerUp()
+      this.#requestRefresh()
       return
     }
 
     const row = this.entries().find(e => e.name === name)
     if (!row || row.kind !== 'directory') return
 
-    this.lineage.explorerEnter(name)
-    void this.runProcessorForLocation()
-  }
-
-  private readonly runProcessorForLocation = async (): Promise<void> => {
-    const grammar = this.directory()
-    await this.act(grammar)
+    this.#lineage().explorerEnter(name)
+    this.#requestRefresh()
   }
 
   // -------------------------------------------------
@@ -156,38 +138,20 @@ export class OpfsExplorerComponent extends hypercomb {
 
   public run = async (e: ExplorerEntry, ev: MouseEvent): Promise<void> => {
     ev.stopPropagation()
-
-    // wire this back in when ready
-    // if (e.kind !== 'file') return
-    // const bee = this.preloader.get(e.name)
-    // bee?.pulse(e.name)
   }
 
   public copyDetails = async (e: ExplorerEntry, ev: MouseEvent): Promise<void> => {
     ev.stopPropagation()
     if (e.kind !== 'file') return
 
-    const dir = await this.lineage.explorerDir()
-    if (!dir) return
-
+    // resource files — try reading from __resources__/
+    const store = this.#store()
     try {
-      const handle = await dir.getFileHandle(e.name, { create: false })
-      const file = await handle.getFile()
+      const blob = await store.getResource(e.name)
+      if (!blob) return
 
-      if (file.size > OpfsExplorerComponent.COPY_MAX_BYTES) {
-        const msg = [
-          `file too large to copy (${file.size.toLocaleString()} bytes)`,
-          `name: ${e.name}`,
-          `label: ${e.label}`,
-          `last modified: ${new Date(file.lastModified).toISOString()}`
-        ].join('\n')
-
-        await this.writeClipboard(msg)
-        return
-      }
-
-      const text = await file.text()
-      await this.writeClipboard(text)
+      const text = await blob.text()
+      await this.#writeClipboard(text)
     } catch (err) {
       console.error('[opfs explorer] copy failed', e.name, err)
     }
@@ -195,32 +159,36 @@ export class OpfsExplorerComponent extends hypercomb {
 
   public delete = async (e: ExplorerEntry, ev: MouseEvent): Promise<void> => {
     ev.stopPropagation()
+    if (e.kind !== 'directory') return
 
-    const dir = await this.lineage.explorerDir()
-    if (!dir) return
+    // remove child from current layer via HistoryService
+    const historyService = get('@diamondcoreprocessor.com/HistoryService') as any
+    if (!historyService) return
 
-    await dir.removeEntry(e.name, { recursive: true })
-    void this.runProcessor()
+    const segments = [...this.#lineage().explorerSegments()]
+    await historyService.removeChild(segments, e.name)
+    this.#requestRefresh()
   }
 
   // -------------------------------------------------
-  // refresh
+  // refresh — reads live cache instead of OPFS folder tree
   // -------------------------------------------------
 
-  private readonly refresh = async (): Promise<void> => {
-    const pathAtStart = this.lineage.explorerLabel()
-    const isStale = (): boolean => this.lineage.explorerLabel() !== pathAtStart
+  readonly #refresh = async (): Promise<void> => {
+    const lineage = this.#lineage()
+    const store = this.#store()
+    const pathAtStart = lineage.explorerLabel()
+    const isStale = (): boolean => lineage.explorerLabel() !== pathAtStart
 
-    const dir = await this.lineage.explorerDir()
+    const segments = [...lineage.explorerSegments()]
+    const lineageSig = await computeLineageSig(segments)
+
     if (isStale()) {
-      this.refreshQueued = true
+      this.#refreshQueued = true
       return
     }
 
-    if (!dir) {
-      this.entries.set([])
-      return
-    }
+    const layer = store.getLayer(lineageSig)
 
     const out: ExplorerEntry[] = []
 
@@ -228,26 +196,41 @@ export class OpfsExplorerComponent extends hypercomb {
       out.push({ name: '..', label: '..', kind: 'directory' })
     }
 
-    for await (const [name, handle] of dir.entries()) {
-      if (this.isHiddenEntry(name)) continue
-
-      let label = name
-
-      if (handle.kind === 'file') {
-        const resourceLabel = await this.resolveResourceLabel(name)
-        if (resourceLabel) {
-          label = `${name.slice(0, 16)} - ${resourceLabel}`
-        } else {
-          const resolved = this.preloader.getActionName(name)
-          if (resolved) label = resolved
-        }
+    if (layer) {
+      // children → shown as directories
+      const childSigs = await store.getListResource(layer.children)
+      for (const childSig of childSigs) {
+        try {
+          const blob = await store.getResource(childSig)
+          if (!blob) continue
+          const text = await blob.text()
+          const childSegments = JSON.parse(text) as string[]
+          const name = childSegments[childSegments.length - 1]
+          if (name) {
+            out.push({ name, label: name, kind: 'directory' })
+          }
+        } catch { /* skip */ }
       }
 
-      out.push({ name, label, kind: handle.kind })
+      // resources → shown as files (when showAll is on)
+      if (this.showAll()) {
+        const resourceSigs = await store.getListResource(layer.resources)
+        for (const sig of resourceSigs) {
+          out.push({ name: sig, label: sig.slice(0, 16) + '...', kind: 'file' })
+        }
+
+        const beeSigs = await store.getListResource(layer.bees)
+        for (const sig of beeSigs) {
+          const preloader = this.#preloader()
+          const actionName = preloader.getActionName(sig)
+          const label = actionName ? `${sig.slice(0, 16)} - ${actionName}` : sig.slice(0, 16) + '...'
+          out.push({ name: sig, label, kind: 'file' })
+        }
+      }
     }
 
     if (isStale()) {
-      this.refreshQueued = true
+      this.#refreshQueued = true
       return
     }
 
@@ -269,44 +252,19 @@ export class OpfsExplorerComponent extends hypercomb {
     const raw = this.newName.trim()
     if (!raw) return
 
-    // domain root create -> sync pipeline
-    if (this.directory() === '/') {
-      try {
-        await this.runtime.sync(LocationParser.parse(raw))
-      } catch (e) {
-        console.error(e)
-        return
-      }
+    const historyService = get('@diamondcoreprocessor.com/HistoryService') as any
+    if (!historyService) return
 
-      this.newName = ''
-      void this.runProcessor()
-      return
-    }
+    const segments = [...this.#lineage().explorerSegments()]
+    await historyService.addChild(segments, raw)
 
-    // note: implement non-root folder create when you decide the naming rules
     this.newName = ''
-    void this.runProcessor()
+    this.#requestRefresh()
   }
 
   public createFile = async (): Promise<void> => {
-    const raw = this.newName.trim()
-    if (!raw) return
-
-    const dir = await this.lineage.explorerDir()
-    if (!dir) return
-
-    const installName = raw.endsWith(OpfsExplorerComponent.INSTALL_SUFFIX) ? raw : `${raw}${OpfsExplorerComponent.INSTALL_SUFFIX}`
-    const handle = await dir.getFileHandle(installName, { create: true })
-    const writable = await handle.createWritable()
-
-    try {
-      await writable.write('')
-    } finally {
-      await writable.close()
-    }
-
+    // marker files are no longer used in the layer-based architecture
     this.newName = ''
-    void this.runProcessor()
   }
 
   public addDependency = async (): Promise<void> => {
@@ -323,7 +281,7 @@ export class OpfsExplorerComponent extends hypercomb {
 
     const bytes = await res.arrayBuffer()
 
-    const root = this.store.opfsRoot
+    const root = this.#store().opfsRoot
     const depsDir = await root.getDirectoryHandle('__dependencies__', { create: true })
 
     const fileHandle = await depsDir.getFileHandle(sig, { create: true })
@@ -336,14 +294,14 @@ export class OpfsExplorerComponent extends hypercomb {
     }
 
     this.newName = ''
-    void this.runProcessor()
+    this.#requestRefresh()
   }
 
   // -------------------------------------------------
   // helpers
   // -------------------------------------------------
 
-  private readonly writeClipboard = async (text: string): Promise<void> => {
+  readonly #writeClipboard = async (text: string): Promise<void> => {
     try {
       await navigator.clipboard.writeText(text)
       return
@@ -362,17 +320,6 @@ export class OpfsExplorerComponent extends hypercomb {
         document.body.removeChild(ta)
       }
     }
-  }
-
-  private readonly isHiddenEntry = (name: string): boolean => {
-    if (this.showAll()) return false
-    if (name === '__location__') return true
-    if (name === '__bees__') return true
-    if (name === '__layers__') return true
-    if (name === '__dependencies__') return true
-    if (name.startsWith('install-')) return true
-    if (name.endsWith(OpfsExplorerComponent.INSTALL_SUFFIX)) return true
-    return false
   }
 
   private readInitialShowAll(): boolean {
@@ -398,30 +345,5 @@ export class OpfsExplorerComponent extends hypercomb {
     if (legacy === 'false') return false
 
     return true
-  }
-
-  private readonly resolveResourceLabel = async (name: string): Promise<string | null> => {
-    try {
-      const root = this.store.opfsRoot
-      const resourcesDir = await root.getDirectoryHandle('__bees__', { create: false })
-      const handle = await resourcesDir.getFileHandle(name, { create: false })
-      const file = await handle.getFile()
-      if (file.size === 0) return null
-
-      const slice = await file.slice(0, 256).text()
-      const firstLine = slice.split('\n')[0]?.trim()
-      if (!firstLine?.startsWith('// @hypercomb ')) return null
-
-      const jsonText = firstLine.slice('// @hypercomb '.length)
-      const meta = JSON.parse(jsonText)
-
-      if (typeof meta.label === 'string' && meta.label.trim()) {
-        return `${meta.label} – ${new Date(file.lastModified).toLocaleTimeString()}`
-      }
-    } catch {
-      // ignore
-    }
-
-    return null
   }
 }

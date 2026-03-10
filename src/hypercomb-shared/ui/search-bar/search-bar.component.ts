@@ -1,11 +1,13 @@
 // hypercomb-shared/ui/search-bar/search-bar.component.ts
 
 import { AfterViewInit, Component, computed, ElementRef, signal, viewChild, type OnDestroy } from '@angular/core'
+import { computeLineageSig } from '@hypercomb/core'
 import type { Lineage } from '../../core/lineage'
 import type { MovementService } from '../../core/movement.service'
 import type { Navigation } from '../../core/navigation'
 import type { ScriptPreloader } from '../../core/script-preloader'
 import type { CompletionUtility, CompletionContext } from '@hypercomb/shared/core/completion-utility'
+import type { Store } from '../../core/store'
 import { fromRuntime } from '../../core/from-runtime'
 import { EffectBus } from '@hypercomb/core'
 
@@ -267,14 +269,20 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     }
 
     const baseSegments = this.navigation.segments()
-    const target = [...baseSegments, ...parts]
 
-    // ensure() is idempotent — creates the full directory hierarchy as needed
-    await this.lineage.ensure(target)
+    // Create each nested part via HistoryService.addChild
+    const historyService = get('@diamondcoreprocessor.com/HistoryService') as any
+    if (!historyService) return
 
-    // emit seed:added for the top-level seed (the one visible in the current layer)
-    EffectBus.emit('seed:added', { seed: parts[0] })
-    this.requestSynchronize()
+    let parentSegments = [...baseSegments]
+    for (const part of parts) {
+      const store = get('@hypercomb.social/Store') as Store
+      const childSig = await computeLineageSig([...parentSegments, part])
+      if (!store.getLayer(childSig)) {
+        await historyService.addChild(parentSegments, part)
+      }
+      parentSegments = [...parentSegments, part]
+    }
 
     if (navigateAfterCreate) {
       await this.movement.move(parts[0])
@@ -319,8 +327,10 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     const baseSegments = this.navigation.segments()
     const target = [...baseSegments, parsed.seedName]
 
-    const exists = await this.lineage.tryResolve(target)
-    if (!exists) {
+    const store = get('@hypercomb.social/Store') as Store
+    const lineageSig = await computeLineageSig(target)
+    const layer = store.getLayer(lineageSig)
+    if (!layer) {
       this.clear()
       return
     }
@@ -407,14 +417,17 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
 
   private readonly ensureSeedInCurrentDirectory = async (seedName: string): Promise<void> => {
     const baseSegments = this.navigation.segments()
-    const target = [...baseSegments, seedName]
 
-    // ensure() is idempotent — creates the seed directory if needed.
-    await this.lineage.ensure(target)
+    // Check if child already exists in live cache
+    const store = get('@hypercomb.social/Store') as Store
+    const childSig = await computeLineageSig([...baseSegments, seedName])
+    if (store.getLayer(childSig)) return // already exists
 
-    // reactive: notify the system a seed was added
-    EffectBus.emit('seed:added', { seed: seedName })
-    this.requestSynchronize()
+    // Add child via HistoryService — creates layer + appends history
+    const historyService = get('@diamondcoreprocessor.com/HistoryService') as any
+    if (historyService) {
+      await historyService.addChild([...baseSegments], seedName)
+    }
   }
 
   // -------------------------------------------------

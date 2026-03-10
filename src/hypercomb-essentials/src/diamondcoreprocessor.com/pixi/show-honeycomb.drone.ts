@@ -11,7 +11,7 @@ import { HexLabelAtlas } from './hex-label.atlas.js'
 import { HexImageAtlas } from './hex-image.atlas.js'
 import { HexSdfTextureShader } from './hex-sdf.shader.js'
 import { TILE_PROPERTIES_FILE, isSignature } from '../editor/tile-properties.js'
-import type { HistoryService, HistoryOp } from '../core/history.service.js'
+import { computeLineageSig } from '@hypercomb/core'
 
 type Axial = { q: number; r: number }
 type SeedCell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number }
@@ -341,12 +341,8 @@ export class ShowHoneycombWorker extends Drone {
 
   private publishLocalSeeds = async (lineage: any, mesh: MeshApi, sig: string, grammar: string = ''): Promise<void> => {
     if (typeof mesh.publish !== 'function') return
-    if (!lineage?.explorerDir) return
 
-    const dir = await lineage.explorerDir()
-    if (!dir) return
-
-    const localSeeds = await this.listSeedFolders(dir)
+    const localSeeds = await this.getChildNames()
     const previousSeeds = this.lastLocalSeedsBySig.get(sig) ?? []
 
     // 1) one snapshot post per signature: full array of items
@@ -521,7 +517,7 @@ export class ShowHoneycombWorker extends Drone {
     }
 
     const lineage = this.resolve<any>('lineage')
-    if (!lineage?.explorerDir || !lineage?.explorerLabel || !lineage?.changed) {
+    if (!lineage?.explorerLabel || !lineage?.changed) {
       this.clearMesh()
       return
     }
@@ -553,19 +549,8 @@ export class ShowHoneycombWorker extends Drone {
       return currentKey !== locationKey || currentRev !== fsRev || currentMeshRev !== meshRev
     }
 
-    const dir = await lineage.explorerDir()
-    if (isStale()) {
-      this.renderQueued = true
-      return
-    }
-    if (!dir) {
-      console.warn('[show-honeycomb] BAIL: explorerDir returned null')
-      this.clearMesh()
-      return
-    }
-
-    // note: seed collection — always fresh, never cached
-    const localSeeds = await this.listSeedFolders(dir)
+    // note: your own seeds (live cache children)
+    const localSeeds = await this.getChildNames()
     if (isStale()) {
       this.renderQueued = true
       return
@@ -577,19 +562,6 @@ export class ShowHoneycombWorker extends Drone {
     for (const s of this.meshSeeds) union.add(s)
 
     const localSeedSet = new Set(localSeeds)
-
-    // note: apply history — filter out seeds whose last operation is "remove"
-    const historyService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as HistoryService | undefined
-    if (historyService) {
-      const sig = await this.computeSignatureLocation(lineage)
-      const ops = await historyService.replay(sig.sig)
-      const seedState = new Map<string, string>() // seed → last op
-      for (const op of ops) seedState.set(op.seed, op.op)
-      for (const [seed, lastOp] of seedState) {
-        if (lastOp === 'remove' && !localSeedSet.has(seed)) union.delete(seed)
-      }
-    }
-
     const seedNames = Array.from(union)
     seedNames.sort((a, b) => a.localeCompare(b))
     const layerChanged = locationKey !== this.renderedLocationKey
@@ -613,7 +585,7 @@ export class ShowHoneycombWorker extends Drone {
       }
 
       // stream seeds progressively (async, non-blocking)
-      void this.streamSeeds(dir, seedNames, localSeedSet, axial)
+      void this.streamSeeds(null, seedNames, localSeedSet, axial)
       return
     }
 
@@ -637,7 +609,7 @@ export class ShowHoneycombWorker extends Drone {
     }
 
     // note: load cell images from 0000 properties → __resources__/
-    await this.loadCellImages(cells, dir)
+    await this.loadCellImages(cells, null)
     if (isStale()) {
       this.renderQueued = true
       return
@@ -650,7 +622,7 @@ export class ShowHoneycombWorker extends Drone {
   }
 
   private readonly streamSeeds = async (
-    dir: FileSystemDirectoryHandle,
+    dir: FileSystemDirectoryHandle | null,
     seedNames: string[],
     localSeedSet: Set<string>,
     axial: any,
@@ -851,24 +823,35 @@ export class ShowHoneycombWorker extends Drone {
     return loaded
   }
 
-  private listSeedFolders = async (dir: FileSystemDirectoryHandle): Promise<string[]> => {
-    const out: string[] = []
+  /**
+   * Read child names from the live cache for the current lineage.
+   * Each child's lineage resource (stored in __resources__/) contains
+   * the JSON segments array; the last segment is the child's name.
+   */
+  private getChildNames = async (): Promise<string[]> => {
+    const lineage = this.resolve<any>('lineage')
+    const store = (window as any).ioc?.get?.('@hypercomb.social/Store')
+    if (!lineage || !store) return []
 
-    for await (const [name, handle] of dir.entries()) {
-      if (handle.kind !== 'directory') continue
-      if (!name) continue
+    const layer = lineage.currentLayer?.()
+    if (!layer) return []
 
-      if (name === '__dependencies__') continue
-      if (name === '__bees__') continue
-      if (name === '__layers__') continue
-      if (name === '__location__') continue
-      if (name.startsWith('__') && name.endsWith('__')) continue
+    const childSigs: string[] = await store.getListResource(layer.children)
+    const names: string[] = []
 
-      out.push(name)
+    for (const childSig of childSigs) {
+      try {
+        const blob = await store.getResource(childSig)
+        if (!blob) continue
+        const text = await blob.text()
+        const segments = JSON.parse(text) as string[]
+        const name = segments[segments.length - 1]
+        if (name) names.push(name)
+      } catch { /* skip */ }
     }
 
-    out.sort((a, b) => a.localeCompare(b))
-    return out
+    names.sort((a, b) => a.localeCompare(b))
+    return names
   }
 
   private buildCellsFromAxial = (axial: any, names: string[], max: number, localSeedSet: Set<string>): SeedCell[] => {
@@ -890,10 +873,10 @@ export class ShowHoneycombWorker extends Drone {
    * Standard: any property value matching a 64-char hex signature
    * refers to a blob in __resources__/{signature}.
    */
-  private loadCellImages = async (cells: SeedCell[], dir: FileSystemDirectoryHandle): Promise<void> => {
+  private loadCellImages = async (cells: SeedCell[], dir: FileSystemDirectoryHandle | null): Promise<void> => {
     const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as
       { getResource: (sig: string) => Promise<Blob | null> } | undefined
-    if (!store || !this.imageAtlas) return
+    if (!store || !this.imageAtlas || !dir) return
 
     for (const cell of cells) {
       // external seeds don't have local OPFS data

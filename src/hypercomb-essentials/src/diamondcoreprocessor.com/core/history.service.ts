@@ -1,122 +1,129 @@
 // hypercomb-essentials/src/diamondcoreprocessor.com/core/history.service.ts
-// History bag service: every operation is an append-only entry in __history__/<signature>/
-// There is no delete. A "remove" is an operation. Replaying skips removed seeds.
+// Layer-based history service: mutations create layer snapshots in __history__/<lineageSig>/.
+// Each entry is a complete LayerV2 snapshot. The live cache is the derived current state.
 
-import { SignatureService, SignatureStore } from '@hypercomb/core'
+import { computeLineageSig, computeListSig, listResourceContent } from '@hypercomb/core'
 
-export type HistoryOpType = 'add' | 'remove' | 'rename' | 'add-drone' | 'remove-drone'
+type LayerV2 = {
+  v: 2
+  lineage: string
+  bees: string
+  deps: string
+  resources: string
+  children: string
+}
 
-export type HistoryOp = {
-  op: HistoryOpType
-  seed: string
-  at: number
+type Store = {
+  history: FileSystemDirectoryHandle
+  resources: FileSystemDirectoryHandle
+  liveCache: ReadonlyMap<string, LayerV2>
+  getLayer(lineageSig: string): LayerV2 | null
+  getListResource(listSig: string): Promise<string[]>
+  appendHistory(lineageSig: string, layer: LayerV2): Promise<void>
+  replayHistory(lineageSig: string): Promise<LayerV2[]>
+  saveSnapshot(): Promise<void>
 }
 
 export class HistoryService {
 
-  private historyRoot: FileSystemDirectoryHandle | null = null
-
-  private readonly getHistoryRoot = async (): Promise<FileSystemDirectoryHandle> => {
-    if (this.historyRoot) return this.historyRoot
-
-    const opfsRoot = await navigator.storage.getDirectory()
-    this.historyRoot = await opfsRoot.getDirectoryHandle('__history__', { create: true })
-    return this.historyRoot
-  }
-
-  private readonly getBag = async (signature: string): Promise<FileSystemDirectoryHandle> => {
-    const root = await this.getHistoryRoot()
-    return await root.getDirectoryHandle(signature, { create: true })
+  #store(): Store {
+    return (window as any).ioc.get('@hypercomb.social/Store') as Store
   }
 
   /**
-   * Sign a lineage path to get the history bag signature.
-   * Matches the same signing scheme as ShowHoneycombWorker.
+   * Add a child at the given parent lineage.
+   * Creates a new child layer and updates the parent's children list.
    */
-  public readonly sign = async (lineage: any): Promise<string> => {
-    const domain = String(lineage?.domain?.() ?? 'hypercomb.io')
-    const explorerSegmentsRaw = lineage?.explorerSegments?.()
-    const explorerSegments = Array.isArray(explorerSegmentsRaw)
-      ? explorerSegmentsRaw
-        .map((x: unknown) => String(x ?? '').trim())
-        .filter((x: string) => x.length > 0)
-      : []
+  readonly addChild = async (parentSegments: string[], childName: string): Promise<void> => {
+    const store = this.#store()
 
-    const lineagePath = explorerSegments.join('/')
-    const key = lineagePath ? `${domain}/${lineagePath}/seed` : `${domain}/seed`
+    // 1. create child lineage
+    const childSegments = [...parentSegments, childName]
+    const childLineageSig = await computeLineageSig(childSegments)
 
-    // use SignatureStore.signText() for memoization — same lineage = same sig
-    const sigStore = get<SignatureStore>('@hypercomb/SignatureStore')
-    return sigStore
-      ? await sigStore.signText(key)
-      : await SignatureService.sign(new TextEncoder().encode(key).buffer as ArrayBuffer)
-  }
+    // store lineage array as a resource
+    await this.#storeResource(store, childLineageSig, JSON.stringify(childSegments))
 
-  /**
-   * Record an operation into the history bag for the given signature.
-   * Appends a sequential file (00000001, 00000002, ...) with JSON content.
-   */
-  public readonly record = async (signature: string, operation: HistoryOp): Promise<void> => {
-    const bag = await this.getBag(signature)
+    // 2. create initial child layer (empty lists)
+    const emptyListSig = await computeListSig([])
+    await this.#storeResource(store, emptyListSig, listResourceContent([]))
 
-    const nextIndex = await this.nextIndex(bag)
-    const fileName = String(nextIndex).padStart(8, '0')
-
-    const fileHandle = await bag.getFileHandle(fileName, { create: true })
-    const writable = await fileHandle.createWritable()
-    await writable.write(JSON.stringify(operation))
-    await writable.close()
-  }
-
-  /**
-   * Replay all operations in a bag, in order.
-   * If upTo is provided, stop at that index (inclusive).
-   */
-  public readonly replay = async (signature: string, upTo?: number): Promise<HistoryOp[]> => {
-    const root = await this.getHistoryRoot()
-
-    let bag: FileSystemDirectoryHandle
-    try {
-      bag = await root.getDirectoryHandle(signature, { create: false })
-    } catch {
-      return []
+    const childLayer: LayerV2 = {
+      v: 2,
+      lineage: childLineageSig,
+      bees: emptyListSig,
+      deps: emptyListSig,
+      resources: emptyListSig,
+      children: emptyListSig,
     }
 
-    const entries: { name: string; handle: FileSystemFileHandle }[] = []
-    for await (const [name, handle] of bag.entries()) {
-      if (handle.kind !== 'file') continue
-      entries.push({ name, handle: handle as FileSystemFileHandle })
-    }
+    // 3. append to child's history bag + update live cache
+    await store.appendHistory(childLineageSig, childLayer)
 
-    entries.sort((a, b) => a.name.localeCompare(b.name))
-
-    const ops: HistoryOp[] = []
-    for (const entry of entries) {
-      const index = parseInt(entry.name, 10)
-      if (isNaN(index)) continue
-      if (upTo !== undefined && index > upTo) break
-
-      try {
-        const file = await entry.handle.getFile()
-        const text = await file.text()
-        const op = JSON.parse(text) as HistoryOp
-        ops.push(op)
-      } catch {
-        // skip corrupted entries
-      }
-    }
-
-    return ops
+    // 4. update parent's children list
+    await this.#addToList(store, parentSegments, 'children', childLineageSig)
   }
 
   /**
-   * List all signature bags in __history__/.
+   * Remove a child from the given parent lineage.
    */
-  public readonly list = async (): Promise<{ signature: string; count: number }[]> => {
-    const root = await this.getHistoryRoot()
+  readonly removeChild = async (parentSegments: string[], childName: string): Promise<void> => {
+    const store = this.#store()
+    const childSegments = [...parentSegments, childName]
+    const childLineageSig = await computeLineageSig(childSegments)
+
+    await this.#removeFromList(store, parentSegments, 'children', childLineageSig)
+  }
+
+  /**
+   * Add a bee signature to the layer at the given lineage.
+   */
+  readonly addBee = async (segments: string[], beeSig: string): Promise<void> => {
+    const store = this.#store()
+    await this.#addToList(store, segments, 'bees', beeSig)
+  }
+
+  /**
+   * Remove a bee signature from the layer at the given lineage.
+   */
+  readonly removeBee = async (segments: string[], beeSig: string): Promise<void> => {
+    const store = this.#store()
+    await this.#removeFromList(store, segments, 'bees', beeSig)
+  }
+
+  /**
+   * Add a resource signature to the layer at the given lineage.
+   */
+  readonly addResource = async (segments: string[], resourceSig: string): Promise<void> => {
+    const store = this.#store()
+    await this.#addToList(store, segments, 'resources', resourceSig)
+  }
+
+  /**
+   * Replay history for a lineage, returning all layer snapshots in order.
+   */
+  readonly replay = async (lineageSig: string): Promise<LayerV2[]> => {
+    const store = this.#store()
+    return store.replayHistory(lineageSig)
+  }
+
+  /**
+   * Get the latest layer for a lineage from live cache.
+   */
+  readonly head = async (lineageSig: string): Promise<LayerV2 | null> => {
+    const store = this.#store()
+    return store.getLayer(lineageSig)
+  }
+
+  /**
+   * List all lineage bags in __history__/.
+   */
+  readonly list = async (): Promise<{ signature: string; count: number }[]> => {
+    const store = this.#store()
+    const root = store.history
     const result: { signature: string; count: number }[] = []
 
-    for await (const [name, handle] of root.entries()) {
+    for await (const [name, handle] of (root as any).entries()) {
       if (handle.kind !== 'directory') continue
 
       let count = 0
@@ -130,50 +137,58 @@ export class HistoryService {
     return result
   }
 
-  /**
-   * Return the latest operation index and contents for a given bag.
-   */
-  public readonly head = async (signature: string): Promise<{ index: number; op: HistoryOp } | null> => {
-    const root = await this.getHistoryRoot()
+  // ── internal helpers ──
 
-    let bag: FileSystemDirectoryHandle
-    try {
-      bag = await root.getDirectoryHandle(signature, { create: false })
-    } catch {
-      return null
-    }
+  #addToList = async (
+    store: Store,
+    segments: string[],
+    field: 'bees' | 'deps' | 'resources' | 'children',
+    sig: string
+  ): Promise<void> => {
+    const lineageSig = await computeLineageSig(segments)
+    const layer = store.getLayer(lineageSig)
+    if (!layer) return
 
-    let maxName = ''
-    let maxHandle: FileSystemFileHandle | null = null
+    const currentList = await store.getListResource(layer[field])
+    if (currentList.includes(sig)) return // already present
 
-    for await (const [name, handle] of bag.entries()) {
-      if (handle.kind !== 'file') continue
-      if (name > maxName) {
-        maxName = name
-        maxHandle = handle as FileSystemFileHandle
-      }
-    }
+    const newList = [...currentList, sig]
+    const newListSig = await computeListSig(newList)
+    await this.#storeResource(store, newListSig, listResourceContent(newList))
 
-    if (!maxHandle) return null
-
-    try {
-      const file = await maxHandle.getFile()
-      const text = await file.text()
-      const op = JSON.parse(text) as HistoryOp
-      return { index: parseInt(maxName, 10), op }
-    } catch {
-      return null
-    }
+    const updatedLayer: LayerV2 = { ...layer, [field]: newListSig }
+    await store.appendHistory(lineageSig, updatedLayer)
   }
 
-  private readonly nextIndex = async (bag: FileSystemDirectoryHandle): Promise<number> => {
-    let max = 0
-    for await (const [name, handle] of bag.entries()) {
-      if (handle.kind !== 'file') continue
-      const n = parseInt(name, 10)
-      if (!isNaN(n) && n > max) max = n
+  #removeFromList = async (
+    store: Store,
+    segments: string[],
+    field: 'bees' | 'deps' | 'resources' | 'children',
+    sig: string
+  ): Promise<void> => {
+    const lineageSig = await computeLineageSig(segments)
+    const layer = store.getLayer(lineageSig)
+    if (!layer) return
+
+    const currentList = await store.getListResource(layer[field])
+    const newList = currentList.filter(s => s !== sig)
+    if (newList.length === currentList.length) return // not present
+
+    const newListSig = await computeListSig(newList)
+    await this.#storeResource(store, newListSig, listResourceContent(newList))
+
+    const updatedLayer: LayerV2 = { ...layer, [field]: newListSig }
+    await store.appendHistory(lineageSig, updatedLayer)
+  }
+
+  #storeResource = async (store: Store, sig: string, content: string): Promise<void> => {
+    const handle = await store.resources.getFileHandle(sig, { create: true })
+    const writable = await handle.createWritable()
+    try {
+      await writable.write(content)
+    } finally {
+      await writable.close()
     }
-    return max + 1
   }
 }
 

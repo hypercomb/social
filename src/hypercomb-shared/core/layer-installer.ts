@@ -1,281 +1,150 @@
 // hypercomb-shared/core/layer-installer.ts
 
-import { SignatureService } from '@hypercomb/core'
-import { type LocationParseResult } from './initializers/location-parser'
+import { type LayerV2 } from '@hypercomb/core'
 import { Store } from './store'
 
-type InstallManifest = { version: number; layers: string[]; bees: string[]; dependencies: string[] }
+type InstallManifestV2 = {
+  version: 2
+  bees: string[]
+  dependencies: string[]
+  resources: string[]
+  history: Record<string, LayerV2>
+}
 
 // global get/register/list available via ioc.web.ts
 
 export class LayerInstaller {
 
-  private readonly manifestName = 'install.manifest.json'
+  readonly #manifestName = 'install.manifest.json'
 
-  public install = async (parsed: LocationParseResult): Promise<void> => {
-    const baseUrl = parsed?.baseUrl ?? ''
-    const rootSig = parsed?.signature ?? ''
-    if (!baseUrl || !rootSig) return
-
-    // endpoint: [baseUrl]/[path]/[signature]
-    const endpoint =  `${baseUrl}/${rootSig}`
-
-    // domain folder key used for: opfsroot/__layers__/<domain>/
-    const domainKey = parsed?.domain || this.tryHost(endpoint)
-    if (!domainKey) return
+  /**
+   * Install from a content endpoint.
+   * endpoint = baseUrl/rootSig  (e.g. https://host/content/abc123...)
+   */
+  public install = async (endpoint: string): Promise<void> => {
+    if (!endpoint) return
 
     const store = get('@hypercomb.social/Store') as Store
 
-    // layers are stored per domain: opfsroot/__layers__/<domain>/
-    const domainLayersDir = await store.domainLayersDirectory(domainKey, true)
-
-    // 1) d/l the manifest (resume if present)
-    const manifest = await this.getOrFetchManifest(domainLayersDir, endpoint)
+    // 1) fetch manifest
+    const manifest = await this.#fetchManifest(endpoint)
     if (!manifest) return
 
-    // 2) install all files
-    await this.installLayers(domainLayersDir, endpoint, manifest.layers || [])
-    await this.installDependencies(store, endpoint, manifest.dependencies || [])
-    await this.installBees(store, endpoint, manifest.bees || [])
+    // 2) install all files to OPFS
+    await this.#installBees(store, endpoint, manifest.bees)
+    await this.#installDependencies(store, endpoint, manifest.dependencies)
+    await this.#installResources(store, endpoint, manifest.resources)
 
-    // 3) remove manifest when complete
-    const complete = await this.isComplete(domainLayersDir, store, manifest)
-    if (complete) {
-      await this.safeRemove(domainLayersDir, this.manifestName)
-      console.log('[layer-installer] install complete (manifest removed)')
-    }
+    // 3) seed history bags from manifest
+    await this.#seedHistory(store, manifest.history)
+
+    // 4) populate live cache
+    store.seedLiveCache(manifest.history)
+
+    // 5) save snapshot for fast restore
+    await store.saveSnapshot()
+
+    console.log('[layer-installer] install complete')
   }
 
   // -------------------------------------------------
   // manifest
   // -------------------------------------------------
 
-  private getOrFetchManifest = async (
-    domainLayersDir: FileSystemDirectoryHandle,
-    endpoint: string
-  ): Promise<InstallManifest | null> => {
-
-    // local first (resume)
-    const localText = await this.tryReadText(domainLayersDir, this.manifestName)
-    if (localText) {
-      const local = this.tryParseManifest(localText)
-      if (local) return local
-      await this.safeRemove(domainLayersDir, this.manifestName)
-    }
-
-    // remote
-    const url = `${endpoint}/${this.manifestName}`
-    const bytes = await this.fetchBytes(url)
+  #fetchManifest = async (endpoint: string): Promise<InstallManifestV2 | null> => {
+    const url = `${endpoint}/${this.#manifestName}`
+    const bytes = await this.#fetchBytes(url)
     if (!bytes) return null
 
-    const text = new TextDecoder().decode(bytes)
-    const parsed = this.tryParseManifest(text)
-    if (!parsed) return null
-
-    await this.writeBytesFile(domainLayersDir, this.manifestName, bytes)
-    return parsed
-  }
-
-  private tryParseManifest = (text: string): InstallManifest | null => {
     try {
-      return JSON.parse(text) as InstallManifest
+      const text = new TextDecoder().decode(bytes)
+      const parsed = JSON.parse(text) as InstallManifestV2
+      if (parsed.version !== 2) {
+        console.warn('[layer-installer] unsupported manifest version:', parsed.version)
+        return null
+      }
+      return parsed
     } catch {
       return null
     }
   }
 
   // -------------------------------------------------
-  // install
+  // install files
   // -------------------------------------------------
 
-  private installLayers = async (
-    domainLayersDir: FileSystemDirectoryHandle,
-    endpoint: string,
-    layers: string[]
-  ): Promise<void> => {
-    for (const sig of layers) {
-      if (!sig) continue
-
-      const existing = (await this.tryGetFileHandle(domainLayersDir, `${sig}.json`))
-      if (existing) continue
-
-      const url = `${endpoint}/__layers__/${sig}.json`
-      const bytes = await this.fetchBytes(url)
-      if (!bytes) continue
-
-      // Verify downloaded content matches expected signature
-      const computed = await SignatureService.sign(bytes.buffer as ArrayBuffer)
-      if (computed !== sig) {
-        console.error(`[layer-installer] layer signature mismatch: expected ${sig}, got ${computed}`)
-        continue
-      }
-
-      // store as: opfsroot/__layers__/<domain>/<sig>
-      await this.writeBytesFile(domainLayersDir, sig, bytes)
-    }
-  }
-
-  private installDependencies = async (
-    store: Store,
-    endpoint: string,
-    deps: string[]
-  ): Promise<void> => {
-    const depDir = store.dependencies
-
-    for (const sig of deps) {
-      if (!sig) continue
-
-      const name = `${sig}.js`
-      const existing =
-        (await this.tryGetFileHandle(depDir, name)) ??
-        (await this.tryGetFileHandle(depDir, sig))
-
-      if (existing) continue
-
-      const url = `${endpoint}/__dependencies__/${name}`
-      const bytes = await this.fetchBytes(url)
-      if (!bytes) continue
-
-      // Verify downloaded content matches expected signature
-      const computed = await SignatureService.sign(bytes.buffer as ArrayBuffer)
-      if (computed !== sig) {
-        console.error(`[layer-installer] dep signature mismatch: expected ${sig}, got ${computed}`)
-        continue
-      }
-
-      // store as: opfsroot/__dependencies__/<sig>.js
-      await this.writeBytesFile(depDir, name, bytes)
-    }
-  }
-
-  private installBees = async (
-    store: Store,
-    endpoint: string,
-    bees: string[]
-  ): Promise<void> => {
-    const beesDir = store.bees
-
+  #installBees = async (store: Store, endpoint: string, bees: string[]): Promise<void> => {
+    const dir = store.bees
     for (const sig of bees) {
       if (!sig) continue
-
       const name = `${sig}.js`
-      const existing =
-        (await this.tryGetFileHandle(beesDir, name)) ??
-        (await this.tryGetFileHandle(beesDir, sig))
+      if (await this.#fileExists(dir, name)) continue
 
-      if (existing) continue
-
-      const url = `${endpoint}/__bees__/${name}`
-      const bytes = await this.fetchBytes(url)
-      if (!bytes) continue
-
-      // Verify downloaded content matches expected signature
-      const computed = await SignatureService.sign(bytes.buffer as ArrayBuffer)
-      if (computed !== sig) {
-        console.error(`[layer-installer] bee signature mismatch: expected ${sig}, got ${computed}`)
-        continue
-      }
-
-      // store as: opfsroot/__bees__/<sig>.js
-      await this.writeBytesFile(beesDir, name, bytes)
+      const bytes = await this.#fetchBytes(`${endpoint}/__bees__/${name}`)
+      if (bytes) await this.#writeFile(dir, name, bytes)
     }
   }
 
-  private isComplete = async (
-    domainLayersDir: FileSystemDirectoryHandle,
-    store: Store,
-    manifest: InstallManifest
-  ): Promise<boolean> => {
-    for (const sig of manifest.layers || []) {
+  #installDependencies = async (store: Store, endpoint: string, deps: string[]): Promise<void> => {
+    const dir = store.dependencies
+    for (const sig of deps) {
       if (!sig) continue
-      const a = await this.tryGetFileHandle(domainLayersDir, sig)
-      const b = await this.tryGetFileHandle(domainLayersDir, `${sig}.json`)
-      if (!a && !b) return false
-    }
+      const name = `${sig}.js`
+      if (await this.#fileExists(dir, name)) continue
 
-    const depDir = store.dependencies
-    for (const sig of manifest.dependencies || []) {
+      const bytes = await this.#fetchBytes(`${endpoint}/__dependencies__/${name}`)
+      if (bytes) await this.#writeFile(dir, name, bytes)
+    }
+  }
+
+  #installResources = async (store: Store, endpoint: string, resources: string[]): Promise<void> => {
+    const dir = store.resources
+    for (const sig of resources) {
       if (!sig) continue
-      const a = await this.tryGetFileHandle(depDir, `${sig}.js`)
-      const b = await this.tryGetFileHandle(depDir, sig)
-      if (!a && !b) return false
-    }
+      if (await this.#fileExists(dir, sig)) continue
 
-    const beesDir = store.bees
-    for (const sig of manifest.bees || []) {
-      if (!sig) continue
-      const a = await this.tryGetFileHandle(beesDir, `${sig}.js`)
-      const b = await this.tryGetFileHandle(beesDir, sig)
-      if (!a && !b) return false
+      const bytes = await this.#fetchBytes(`${endpoint}/__resources__/${sig}`)
+      if (bytes) await this.#writeFile(dir, sig, bytes)
     }
-
-    return true
   }
 
   // -------------------------------------------------
-  // io
+  // history seeding
   // -------------------------------------------------
 
-  private tryGetFileHandle = async (
-    dir: FileSystemDirectoryHandle,
-    name: string
-  ): Promise<FileSystemFileHandle | null> => {
-    try {
-      return await dir.getFileHandle(name)
-    } catch {
-      return null
+  #seedHistory = async (store: Store, history: Record<string, LayerV2>): Promise<void> => {
+    for (const [lineageSig, layer] of Object.entries(history)) {
+      await store.appendHistory(lineageSig, layer)
     }
   }
 
-  private safeRemove = async (
-    dir: FileSystemDirectoryHandle,
-    name: string
-  ): Promise<void> => {
+  // -------------------------------------------------
+  // io helpers
+  // -------------------------------------------------
+
+  #fileExists = async (dir: FileSystemDirectoryHandle, name: string): Promise<boolean> => {
     try {
-      await dir.removeEntry(name)
+      await dir.getFileHandle(name)
+      return true
     } catch {
-      // ignore
+      return false
     }
   }
 
-  private tryReadText = async (
-    dir: FileSystemDirectoryHandle,
-    name: string
-  ): Promise<string | null> => {
-    const handle = await this.tryGetFileHandle(dir, name)
-    if (!handle) return null
-    const file = await handle.getFile().catch(() => null)
-    if (!file) return null
-    return await file.text().catch(() => null)
-  }
-
-  private writeBytesFile = async (
-    dir: FileSystemDirectoryHandle,
-    name: string,
-    bytes: Uint8Array<ArrayBuffer>
-  ): Promise<void> => {
-    const outHandle = await dir.getFileHandle(name, { create: true })
-    const writable = await outHandle.createWritable()
-    await writable.write(bytes)
+  #writeFile = async (dir: FileSystemDirectoryHandle, name: string, bytes: Uint8Array): Promise<void> => {
+    const handle = await dir.getFileHandle(name, { create: true })
+    const writable = await handle.createWritable()
+    await writable.write(bytes as unknown as ArrayBuffer)
     await writable.close()
   }
 
-  private fetchBytes = async (url: string): Promise<Uint8Array<ArrayBuffer> | null> => {
+  #fetchBytes = async (url: string): Promise<Uint8Array | null> => {
     try {
       const res = await fetch(url, { cache: 'no-store' })
       if (!res.ok) return null
-      const buf = await res.arrayBuffer()
-      return new Uint8Array(buf)
+      return new Uint8Array(await res.arrayBuffer())
     } catch {
       return null
-    }
-  }
-
-  private tryHost = (url: string): string => {
-    try {
-      return new URL(url).host
-    } catch {
-      return ''
     }
   }
 }
