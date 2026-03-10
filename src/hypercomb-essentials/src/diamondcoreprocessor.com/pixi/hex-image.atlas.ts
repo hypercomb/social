@@ -65,10 +65,10 @@ export class HexImageAtlas {
     const texture = Texture.from(bitmap)
     const sprite = new Sprite(texture)
 
-    // scale image to fill the atlas cell
+    // contain-fill: scale image to fit entirely within the atlas cell (no overflow)
     const scaleX = this.#cellPx / bitmap.width
     const scaleY = this.#cellPx / bitmap.height
-    const scale = Math.max(scaleX, scaleY)
+    const scale = Math.min(scaleX, scaleY)
     sprite.scale.set(scale)
 
     // center the image in the cell
@@ -82,7 +82,8 @@ export class HexImageAtlas {
     this.#renderer.render({ container: sprite, target: this.#atlas, clear: false })
     sprite.destroy()
 
-    // UV bounds reference only the image content within the cell (skip padding)
+    // UV bounds reference the image content within the cell (skip padding).
+    // Contain-fill guarantees padding ≥ 0, so UVs stay within the cell.
     const imgW = bitmap.width * scale
     const imgH = bitmap.height * scale
     const padX = (this.#cellPx - imgW) / 2

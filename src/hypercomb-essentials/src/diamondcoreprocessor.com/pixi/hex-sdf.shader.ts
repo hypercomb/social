@@ -140,39 +140,45 @@ export class HexSdfTextureShader {
       float d = sdHex(rotated, u_radiusPx);
       if (d > 0.0) discard;
 
-      vec4 baseLocal = texture2D(u_tex0, vUV);
-      vec4 baseExternal = texture2D(u_tex1, vUV);
-      vec4 base = mix(baseLocal, baseExternal, step(0.5, vTexKind));
+      vec4 base;
 
-      // cell image fills interior; base texture border stays on top
-      // Remap vUV from quad space to hex bounding-box space so the
-      // captured image (which IS the hex bounding box) maps 1:1.
-      float hexW = 1.732050808 * u_radiusPx;
-      float hexH = 2.0 * u_radiusPx;
-      vec2 hexScale = vec2(hexW / u_quadSize.x, hexH / u_quadSize.y);
-      vec2 hexUV = (vUV - 0.5) / hexScale + 0.5;
-      vec2 imgUV = mix(vImageUV.xy, vImageUV.zw, hexUV);
-      vec4 cellImg = texture2D(u_cellImages, imgUV);
-      float borderWidth = u_radiusPx * 0.18;
-      float innerD = sdHex(rotated, u_radiusPx - borderWidth);
-      float innerMask = smoothstep(0.0, -1.5, innerD);
-      base = mix(base, cellImg, step(0.5, vHasImage) * innerMask);
+      if (vHasImage > 0.5) {
+        // snapshot cell: fill full hex with the snapshot image (border is baked in)
+        // sdHex r = apothem. Pointy-top bounding box: width = 2r, height = 2r / (√3/2)
+        float hexW = 2.0 * u_radiusPx;
+        float hexH = 2.0 * u_radiusPx / 0.8660254;
+        vec2 hexScale = vec2(hexW / u_quadSize.x, hexH / u_quadSize.y);
+        vec2 hexUV = clamp((vUV - 0.5) / hexScale + 0.5, 0.0, 1.0);
+        vec2 imgUV = mix(vImageUV.xy, vImageUV.zw, hexUV);
+        base = texture2D(u_cellImages, imgUV);
+      } else {
+        // no snapshot: training wheels (hex prism texture)
+        vec4 baseLocal = texture2D(u_tex0, vUV);
+        vec4 baseExternal = texture2D(u_tex1, vUV);
+        base = mix(baseLocal, baseExternal, step(0.5, vTexKind));
 
-      // subtle identity wash on cell interior
-      base.rgb = mix(base.rgb, vIdentityColor, innerMask * 0.07);
+        // subtle identity wash on cell interior
+        float borderWidth = u_radiusPx * 0.18;
+        float innerD = sdHex(rotated, u_radiusPx - borderWidth);
+        float innerMask = smoothstep(0.0, -1.5, innerD);
+        base.rgb = mix(base.rgb, vIdentityColor, innerMask * 0.07);
+      }
 
-      vec2 luv = mix(vLabelUV.xy, vLabelUV.zw, vUV);
-      float labelAlpha = texture2D(u_label, luv).a;
-      vec4 label = vec4(1.0, 1.0, 1.0, labelAlpha);
+      vec4 color = base;
 
-      vec4 color = mix(base, label, labelAlpha);
+      if (vHasImage < 0.5) {
+        // label only for cells without snapshot (text must not overlap border path)
+        vec2 luv = mix(vLabelUV.xy, vLabelUV.zw, vUV);
+        float labelAlpha = texture2D(u_label, luv).a;
+        color = mix(color, vec4(1.0, 1.0, 1.0, labelAlpha), labelAlpha);
 
-      // ambient presence — identity color at rest, shifts to warm amber with heat
-      float heatRing = smoothstep(0.0, -1.5, d) - smoothstep(-4.0, -6.0, d);
-      vec3 warmColor = vec3(1.0, 0.62, 0.12);
-      vec3 heatTint = mix(vIdentityColor, warmColor, vHeat);
-      float heatAlpha = mix(0.07, 0.68, vHeat);
-      color.rgb = mix(color.rgb, heatTint, heatRing * heatAlpha);
+        // ambient presence — identity color at rest, shifts to warm amber with heat
+        float heatRing = smoothstep(0.0, -1.5, d) - smoothstep(-4.0, -6.0, d);
+        vec3 warmColor = vec3(1.0, 0.62, 0.12);
+        vec3 heatTint = mix(vIdentityColor, warmColor, vHeat);
+        float heatAlpha = mix(0.07, 0.68, vHeat);
+        color.rgb = mix(color.rgb, heatTint, heatRing * heatAlpha);
+      }
 
       gl_FragColor = color;
     }

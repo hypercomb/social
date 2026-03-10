@@ -2,14 +2,14 @@
 // Manages a Pixi Application for image editing: drag, zoom, hex-masked capture.
 // Ported from legacy TileImageComponent + ImageCaptureManager.
 
-import { Application, Container, Graphics, Sprite, Texture, RenderTexture, Rectangle } from 'pixi.js'
+import { Application, Container, Sprite, Texture, RenderTexture, Rectangle } from 'pixi.js'
 
 export class ImageEditorService extends EventTarget {
 
   #app: Application | null = null
   #container: Container | null = null
   #sprite: Sprite | null = null
-  #hexFrame: Graphics | null = null
+  #hexFrame: Sprite | null = null
   #hostElement: HTMLElement | null = null
   #initialized = false
 
@@ -18,8 +18,9 @@ export class ImageEditorService extends EventTarget {
 
   #hexWidth = 0
   #hexHeight = 0
-  #borderColor = 0xc8975a
+  #borderColor = '#c8975a'
   #backgroundColor = 0x1e1e1e
+  #svgSource: string | null = null
 
   // ── public state ───────────────────────────────────────────────
 
@@ -68,12 +69,8 @@ export class ImageEditorService extends EventTarget {
     // listen for wheel on the canvas element
     this.#app.canvas.addEventListener('wheel', this.#onWheel, { passive: false })
 
-    // hex frame border — 4 segments drawn directly in canvas coords.
-    // Source SVG bounds mapped to canvas via uniform scale-to-height + center-x.
-    this.#hexFrame = new Graphics()
-    this.#hexFrame.eventMode = 'none'
-    this.#container.addChild(this.#hexFrame)
-    this.#drawHexFrame()
+    // hex frame border — loaded from SVG, color-swappable
+    await this.#loadHexFrame()
 
     this.#initialized = true
     this.#emit()
@@ -146,12 +143,12 @@ export class ImageEditorService extends EventTarget {
   }
 
   // ── capture ────────────────────────────────────────────────────
-  // Renders background + positioned image only.
-  // The grid shader adds its own border + label on top.
+  // Renders the container at hex dimensions to a WebP blob.
+  // Includes the hex frame border — the snapshot IS the cell visual.
 
   readonly captureSmall = async (
     width: number,
-    height: number,
+    height: number
   ): Promise<Blob> => {
     if (!this.#app || !this.#container) {
       throw new Error('ImageEditorService not initialized')
@@ -166,24 +163,11 @@ export class ImageEditorService extends EventTarget {
       antialias: false,
     })
 
-    // hide hex frame — the grid shader renders its own border
-    if (this.#hexFrame) this.#hexFrame.visible = false
-
-    // add temporary background fill behind the image
-    const bg = new Graphics()
-    bg.rect(0, 0, width, height).fill({ color: this.#backgroundColor })
-    this.#container.addChildAt(bg, 0)
-
     renderer.render({
       container: this.#container,
       target: renderTexture,
       clear: true,
     } as any)
-
-    // restore
-    this.#container.removeChild(bg)
-    bg.destroy()
-    if (this.#hexFrame) this.#hexFrame.visible = true
 
     const canvas = renderer.extract.canvas(renderTexture) as HTMLCanvasElement
     renderTexture.destroy(true)
@@ -204,9 +188,8 @@ export class ImageEditorService extends EventTarget {
   }
 
   // ── hex frame border ───────────────────────────────────────────
-  // 4 filled segments drawn in source SVG coordinates.
-  // Pixi pivot+scale maps source bbox to canvas dimensions.
-  // Top: E5+E0 (vertex notch), Right: E1, Left: E4, Bottom: E2+E3 (vertex notch)
+  // Loaded from /local.svg at exact canvas dimensions.
+  // Dynamic color via SVG fill attribute replacement.
 
   readonly setBackgroundColor = (color: string): void => {
     if (!this.#app) return
@@ -218,83 +201,48 @@ export class ImageEditorService extends EventTarget {
   }
 
   readonly setBorderColor = (color: string): void => {
-    this.#borderColor = color
-      ? (parseInt(color.replace('#', ''), 16) || 0xc8975a)
-      : 0xc8975a
-    this.#drawHexFrame()
+    this.#borderColor = color && /^#?[0-9a-fA-F]{6}$/.test(color.replace('#', ''))
+      ? (color.startsWith('#') ? color : `#${color}`)
+      : '#c8975a'
+    void this.#loadHexFrame()
   }
 
-  #drawHexFrame(): void {
-    const g = this.#hexFrame
-    if (!g) return
-    g.clear()
+  async #loadHexFrame(): Promise<void> {
+    if (!this.#container) return
 
-    const c = this.#borderColor
-    const w = this.#hexWidth
-    const h = this.#hexHeight
+    // fetch SVG source once
+    if (!this.#svgSource) {
+      try {
+        const resp = await fetch('/local.svg')
+        this.#svgSource = await resp.text()
+      } catch { return }
+    }
 
-    // 346×400 hex frame path — uniform scale to fill canvas.
-    // Source bounds: x[27.090419..118.63625] y[122.41302..228.24639]
-    // Source aspect (√3 : 2) matches the hex canvas, so uniform scale fits exactly.
-    const srcMinX = 27.090419, srcMinY = 122.41302
-    const srcW = 91.545831, srcH = 105.83337
-    const s = h / srcH
-    const ox = (w - srcW * s) / 2
-    const oy = (h - srcH * s) / 2
-    const tx = (x: number) => (x - srcMinX) * s + ox
-    const ty = (y: number) => (y - srcMinY) * s + oy
+    // replace all fill colors in the SVG with the current border color
+    const colored = this.#svgSource.replace(/fill:#[0-9a-fA-F]{6}/g, `fill:${this.#borderColor}`)
 
-    // Top segment: E5 + E0 (vertex notch at top)
-    g.poly([
-      tx(72.37841),  ty(122.41302),
-      tx(72.38031),  ty(122.57015),
-      tx(27.090464), ty(148.28408),
-      tx(33.725412), ty(151.94819),
-      tx(72.51886),  ty(129.8225),
-      tx(111.96115), ty(151.60047),
-      tx(118.5763),  ty(147.89634),
-      tx(72.655554), ty(122.56596),
-      tx(72.657454), ty(122.41302),
-      tx(72.52014),  ty(122.49132),
-      tx(72.37841),  ty(122.41302),
-    ])
-    g.fill({ color: c })
+    // blob → Image element (handles SVG filters/namespaces) → Pixi Texture
+    const blob = new Blob([colored], { type: 'image/svg+xml' })
+    const url = URL.createObjectURL(blob)
+    const img = new Image()
+    img.src = url
+    try { await img.decode() } catch { URL.revokeObjectURL(url); return }
+    URL.revokeObjectURL(url)
+    const texture = Texture.from(img)
 
-    // Right segment: E1
-    g.poly([
-      tx(118.63625), ty(149.75438),
-      tx(112.09408), ty(153.57921),
-      tx(112.09408), ty(197.09393),
-      tx(118.63625), ty(200.80823),
-      tx(118.63625), ty(149.75438),
-    ])
-    g.fill({ color: c })
+    // remove old frame sprite
+    if (this.#hexFrame) {
+      this.#container.removeChild(this.#hexFrame)
+      this.#hexFrame.destroy()
+      this.#hexFrame = null
+    }
 
-    // Left segment: E4
-    g.poly([
-      tx(27.090419), ty(149.85118),
-      tx(27.090419), ty(200.905),
-      tx(33.72413),  ty(197.01923),
-      tx(33.63259),  ty(153.56485),
-      tx(27.090419), ty(149.85118),
-    ])
-    g.fill({ color: c })
-
-    // Bottom segment: E2 + E3 (vertex notch at bottom)
-    g.poly([
-      tx(112.1281),  ty(198.67179),
-      tx(73.232596), ty(220.82317),
-      tx(33.727223), ty(198.97709),
-      tx(27.193095), ty(202.75949),
-      tx(73.071161), ty(228.09345),
-      tx(73.069261), ty(228.24639),
-      tx(73.206574), ty(228.16809),
-      tx(73.348217), ty(228.24639),
-      tx(73.347017), ty(228.08866),
-      tx(118.63624), ty(202.37534),
-      tx(112.1281),  ty(198.67179),
-    ])
-    g.fill({ color: c })
+    this.#hexFrame = new Sprite(texture)
+    this.#hexFrame.eventMode = 'none'
+    // stretch SVG (346×400 integer) to exact canvas dims (346.41×400)
+    this.#hexFrame.width = this.#hexWidth
+    this.#hexFrame.height = this.#hexHeight
+    this.#container.addChild(this.#hexFrame)
   }
 
   // ── drag handling ──────────────────────────────────────────────

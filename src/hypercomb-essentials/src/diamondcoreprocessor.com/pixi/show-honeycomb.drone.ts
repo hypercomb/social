@@ -527,19 +527,16 @@ export class ShowHoneycombWorker extends Drone {
     }
 
     // note: init layer + atlases (and reset shader if renderer changes)
-    // note: init layer + atlases (and reset shader if renderer changes)
     if (!this.layer) {
       this.layer = new Container()
       this.pixiContainer.addChild(this.layer)
 
       this.atlas = new HexLabelAtlas(this.pixiRenderer, 128, 8, 8)
       this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8)
-      this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8)
       this.atlasRenderer = this.pixiRenderer
       this.shader = null
     } else if (!this.atlas || this.atlasRenderer !== this.pixiRenderer) {
       this.atlas = new HexLabelAtlas(this.pixiRenderer, 128, 8, 8)
-      this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8)
       this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8)
       this.atlasRenderer = this.pixiRenderer
       this.shader = null
@@ -786,12 +783,15 @@ export class ShowHoneycombWorker extends Drone {
     // respond to processor-emitted synchronize
     window.addEventListener('synchronize', () => this.requestRender())
 
-    // tile:saved effect — invalidate image cache so re-render picks up new image
+    // tile:saved effect — invalidate image cache for the specific seed so re-render picks up new image
     this.onEffect<{ seed: string }>('tile:saved', (payload) => {
       if (payload?.seed) {
+        const oldSig = this.seedImageCache.get(payload.seed)
         this.seedImageCache.delete(payload.seed)
+        if (oldSig && this.imageAtlas) {
+          this.imageAtlas.invalidate(oldSig)
+        }
       }
-      this.seedImageCache.clear()
       this.requestRender()
     })
 
@@ -837,8 +837,6 @@ export class ShowHoneycombWorker extends Drone {
     this.shader = null
     this.texByUrl.clear()
     this.atlas = new HexLabelAtlas(renderer, 128, 8, 8)
-    this.imageAtlas = new HexImageAtlas(renderer, 256, 8, 8)
-    this.seedImageCache.clear()
     this.imageAtlas = new HexImageAtlas(renderer, 256, 8, 8)
     this.seedImageCache.clear()
     this.atlasRenderer = renderer

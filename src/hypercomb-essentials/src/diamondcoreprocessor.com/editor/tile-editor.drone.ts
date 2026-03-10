@@ -133,7 +133,7 @@ export class TileEditorDrone {
     service.close()
 
     // 7. notify via effect bus (processor owns synchronize; drones use effects)
-    EffectBus.emit('tile:saved', { seed: savedSeed })
+    EffectBus.emit<{ seed: string }>('tile:saved', { seed: savedSeed })
   }
 
   // ── cancel ─────────────────────────────────────────────────────
