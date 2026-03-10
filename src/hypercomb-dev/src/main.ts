@@ -3,6 +3,7 @@
 import '@hypercomb/shared/core/ioc.web'
 import { bootstrapApplication } from '@angular/platform-browser'
 import { BootstrapHistory } from '@hypercomb/shared/core/bootstrap-history'
+import { SignatureStore } from '@hypercomb/core'
 import { Store } from '@hypercomb/shared'
 import { appConfig } from './app/app.config'
 import { App } from './app/app'
@@ -11,6 +12,9 @@ import { App } from './app/app'
 void Store
 
 const main = async (): Promise<void> => {
+
+  // central signature allowlist — signText() memoizes repeated computeSignatureLocation calls
+  register('@hypercomb/SignatureStore', new SignatureStore())
 
   // store is registered by side-effect in store.ts, but guard just in case
   const store = get('@hypercomb.social/Store') as Store

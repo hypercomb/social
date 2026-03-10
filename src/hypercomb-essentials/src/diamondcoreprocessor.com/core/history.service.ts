@@ -2,7 +2,7 @@
 // History bag service: every operation is an append-only entry in __history__/<signature>/
 // There is no delete. A "remove" is an operation. Replaying skips removed seeds.
 
-import { SignatureService } from '@hypercomb/core'
+import { SignatureService, SignatureStore } from '@hypercomb/core'
 
 export type HistoryOpType = 'add' | 'remove' | 'rename' | 'add-drone' | 'remove-drone'
 
@@ -44,8 +44,12 @@ export class HistoryService {
 
     const lineagePath = explorerSegments.join('/')
     const key = lineagePath ? `${domain}/${lineagePath}/seed` : `${domain}/seed`
-    const bytes = new TextEncoder().encode(key)
-    return await SignatureService.sign(bytes.buffer as ArrayBuffer)
+
+    // use SignatureStore.signText() for memoization — same lineage = same sig
+    const sigStore = get<SignatureStore>('@hypercomb/SignatureStore')
+    return sigStore
+      ? await sigStore.signText(key)
+      : await SignatureService.sign(new TextEncoder().encode(key).buffer as ArrayBuffer)
   }
 
   /**

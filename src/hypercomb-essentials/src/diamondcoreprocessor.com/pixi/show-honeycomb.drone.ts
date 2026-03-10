@@ -4,7 +4,7 @@
 // - union keeps filesystem seeds as your own local truth, mesh adds shared seeds
 // - redraw stays event-driven via synchronize, but heartbeat also triggers synchronize
 
-import { Drone, SignatureService } from '@hypercomb/core'
+import { Drone, SignatureService, SignatureStore } from '@hypercomb/core'
 import { Application, Assets, Container, Geometry, Mesh, Texture } from 'pixi.js'
 import type { HostReadyPayload } from './pixi-host.drone.js'
 import { HexLabelAtlas } from './hex-label.atlas.js'
@@ -208,10 +208,6 @@ export class ShowHoneycombWorker extends Drone {
     mesh.ensureStartedForSig(sig)
     this.emitEffect('mesh:ensure-started', { signature: sig })
 
-    // note: on signature changes, wait briefly for relay fill so first render can include remote items
-    if (sigChanged && typeof mesh.awaitReadyForSig === 'function') {
-      await mesh.awaitReadyForSig(sig, 1000)
-    }
 
     // note: publish local filesystem seeds for this sig when changed
     await this.publishLocalSeeds(lineage, mesh, sig, grammar)
@@ -326,8 +322,11 @@ export class ShowHoneycombWorker extends Drone {
 
     const lineagePath = explorerSegments.join('/')
     const key = lineagePath ? `${domain}/${lineagePath}/seed` : `${domain}/seed`
-    const bytes = new TextEncoder().encode(key)
-    const sig = await SignatureService.sign(bytes.buffer as ArrayBuffer)
+    // use SignatureStore.signText() for memoization — same lineage path = same sig
+    const sigStore = get<SignatureStore>('@hypercomb/SignatureStore')
+    const sig = sigStore
+      ? await sigStore.signText(key)
+      : await SignatureService.sign(new TextEncoder().encode(key).buffer as ArrayBuffer)
 
     return { key, sig }
   }

@@ -2,6 +2,7 @@
 // Runs BEFORE the import map is set, so that OPFS dependencies are written
 // before the browser freezes the import-map entries.
 
+import { SignatureStore } from '@hypercomb/core'
 import { Store, LayerInstaller } from '@hypercomb/shared/core'
 import { LocationParser } from '@hypercomb/shared/core/initializers/location-parser'
 
@@ -15,6 +16,7 @@ const FALLBACK_SIGNATURE = '6a09457f907419eb03493cda1d8e43d24a76e8f72acbcdbebd89
 const SIGNATURE_REGEX = /^[a-f0-9]{64}$/i
 const INSTALLED_KEY = 'core-adapter.installed-signature'
 const MANIFEST_KEY = 'core-adapter.installed-manifest'
+const SIG_STORE_KEY = 'hypercomb.signature-store'
 
 // ensure side-effect registrations
 const _deps = [Store, LayerInstaller]
@@ -28,6 +30,10 @@ type InstallManifest = {
 }
 
 export const ensureInstall = async (): Promise<void> => {
+  // register the central signature allowlist — scripts in the store skip re-verification
+  const sigStore = new SignatureStore()
+  register('@hypercomb/SignatureStore', sigStore)
+
   const store = get('@hypercomb.social/Store') as Store | undefined
   if (!store) {
     console.warn('[ensure-install] Store not registered')
@@ -41,6 +47,7 @@ export const ensureInstall = async (): Promise<void> => {
 
   if (!shouldInstall) {
     console.log('[ensure-install] already installed:', signature)
+    restoreSignatureStore(sigStore)
     // Restore beeDeps from cached manifest for lazy loading
     const cached = localStorage.getItem(MANIFEST_KEY)
     if (cached) {
@@ -81,6 +88,10 @@ export const ensureInstall = async (): Promise<void> => {
   const parsed = LocationParser.parse(installUrl)
 
   await installer.install(parsed)
+
+  // populate the signature store from the install manifest (browser cache hit)
+  await populateSignatureStore(sigStore, signature)
+
   localStorage.setItem(INSTALLED_KEY, signature)
   if (newManifest) {
     localStorage.setItem(MANIFEST_KEY, JSON.stringify(newManifest))
@@ -183,4 +194,40 @@ const applyBeeMarkers = async (store: Store, bees: string[]): Promise<void> => {
     } catch { /* ignore — already exists or unwritable */ }
   }
   if (placed) console.log(`[ensure-install] placed ${placed} bee markers in hypercomb root`)
+}
+
+// ----- signature store helpers -----
+
+const populateSignatureStore = async (sigStore: SignatureStore, rootSig: string): Promise<void> => {
+  try {
+    const url = `${CONTENT_BASE_URL}/${rootSig}/install.manifest.json`
+    const res = await fetch(url)  // browser cache hit — LayerInstaller just fetched this
+    if (!res.ok) return
+    const manifest = await res.json()
+
+    const allSigs = [
+      ...(manifest.layers || []),
+      ...(manifest.bees || []),
+      ...(manifest.dependencies || []),
+    ].filter(Boolean)
+
+    sigStore.trustAll(allSigs)
+    sigStore.trust(rootSig)
+
+    localStorage.setItem(SIG_STORE_KEY, JSON.stringify(sigStore.toJSON()))
+    console.log(`[ensure-install] signature store populated: ${sigStore.size} trusted sigs`)
+  } catch {
+    // non-fatal — verification falls back to SHA-256 hashing
+  }
+}
+
+const restoreSignatureStore = (sigStore: SignatureStore): void => {
+  try {
+    const raw = localStorage.getItem(SIG_STORE_KEY)
+    if (!raw) return
+    sigStore.restore(JSON.parse(raw))
+    console.log(`[ensure-install] signature store restored: ${sigStore.size} trusted sigs`)
+  } catch {
+    // non-fatal
+  }
 }
