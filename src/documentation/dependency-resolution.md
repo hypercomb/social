@@ -64,7 +64,10 @@ at runtime.
 
 **Build pipeline:**
 1. **Discover** -- Walk `src/`, classify files as drones (`*.drone.ts`) or
-   dependencies.
+   dependencies. Domains listed in `EXCLUDED_DOMAINS` (e.g. `revolucionstyle.com`)
+   are skipped entirely -- their drones and namespaces are omitted from the build
+   output. This allows domain-specific modules to exist in the source tree without
+   shipping in the production artifact.
 2. **Namespace** -- Group files into namespaces by directory path (up to 3
    segments). Example: `core/communication/mesh-adapter.ts` becomes namespace
    `@diamondcoreprocessor.com/core/communication`.

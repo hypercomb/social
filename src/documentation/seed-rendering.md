@@ -104,8 +104,8 @@ When the zero-signature properties file is **materialized** (parsed and loaded i
 
 1. The runtime reads the zero-signature JSON from the seed folder
 2. For each value in the JSON, it checks whether the value is a 64-character hex string (a signature)
-3. If it is, the runtime looks up `__resources__/{signature}` and reads the JSON stored there
-4. That resource JSON replaces the signature value in the materialized object
+3. If it is, the runtime looks up `__resources__/{signature}` and reads the data stored there
+4. JSON resources replace the signature value in the materialized object; binary resources (images) are handed to the rendering pipeline directly (e.g. `HexImageAtlas` for tile textures)
 
 ### Example
 
@@ -149,6 +149,7 @@ This pattern enables **extreme modularization with signature verification**:
 - **Integrity**: The signature is the SHA-256 hash of the resource content. If the content is tampered with, the hash won't match.
 - **Composability**: A seed's properties are a composed object at runtime — flat references in storage, rich objects in memory.
 - **Shareability**: Resources are content-addressed. The community can share resources via the merkle tree pattern, and signatures ensure integrity across the network.
+- **Binary resources**: Resources are not limited to JSON. Image blobs stored at `__resources__/{sig}` are loaded by `HexImageAtlas` and rendered as tile textures inside the hex grid.
 
 ---
 
@@ -176,7 +177,8 @@ Each surviving seed name is mapped to an axial hex coordinate via `AxialService`
 Each seed becomes a quad tile rendered with Pixi.js:
 
 - `HexLabelAtlas` renders seed labels into a texture atlas
-- `HexSdfTextureShader` draws hexagonal shapes with SDF (signed distance field) rendering
+- `HexImageAtlas` renders seed images into a separate texture atlas — when a seed's properties file contains an image resource signature, the image blob is loaded from `__resources__/{sig}` and composited into an atlas slot
+- `HexSdfTextureShader` draws hexagonal shapes with SDF (signed distance field) rendering, sampling from both atlases — the shader clips images to the hex boundary
 - Local seeds and external (mesh) seeds get different textures
 - The mesh is centered in the viewport
 
@@ -185,8 +187,10 @@ Each seed becomes a quad tile rendered with Pixi.js:
 `TileOverlayDrone` adds interactive overlays:
 
 - Hover detection via `HexDetector` (pixel → axial coordinate)
-- Remove icons on each tile
-- Click actions dispatch `synchronize` events with history operations
+- Right-click navigates into a child layer (`tile:navigate-in`)
+- Left-click navigates back to the parent layer (`tile:navigate-back`)
+- Action buttons on tiles (edit, remove)
+- `TileSelectionDrone` subscribes to `tile:click` for drag-select over multiple tiles
 
 ---
 
@@ -215,7 +219,7 @@ Marker files in seed folders reference drone scripts that can be loaded and enco
 | **Seed** | A folder = one tile on the grid | `opfs://domain/path/` |
 | **Marker file** | Empty file, name is a drone signature | Inside seed folder |
 | **Zero-sig file** | JSON properties, name is 64 zeros | Inside seed folder (first file created) |
-| **Resource** | JSON data addressed by signature | `__resources__/{sig}` |
+| **Resource** | Data (JSON or binary) addressed by signature | `__resources__/{sig}` |
 | **Drone module** | Compiled JS addressed by signature | `__bees__/{sig}.js` |
 
 The zero-signature properties file is the seed's identity card. Marker files point to its behaviors. Resource resolution composes referenced signatures into a rich runtime object. Together they enable a fully modular, signature-verified, content-addressed system where every piece can be independently shared, verified, and composed.
