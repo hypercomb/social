@@ -87,19 +87,31 @@ export const ensureInstall = async (): Promise<void> => {
   const installUrl = `${CONTENT_BASE_URL}/${signature}`
   const parsed = LocationParser.parse(installUrl)
 
-  await installer.install(parsed)
+  const complete = await installer.install(parsed)
 
   // populate the signature store from the install manifest (browser cache hit)
   await populateSignatureStore(sigStore, signature)
 
-  localStorage.setItem(INSTALLED_KEY, signature)
-  if (newManifest) {
-    localStorage.setItem(MANIFEST_KEY, JSON.stringify(newManifest))
-    if (newManifest.beeDeps) (globalThis as any).__hypercombBeeDeps = newManifest.beeDeps
-    // Place bee markers in hypercomb.io/ root so ScriptPreloader.find() discovers them
-    await applyBeeMarkers(store, newManifest.bees)
+  // Only mark as installed if the install actually completed.
+  // If incomplete, next load will retry without clearing — the installer
+  // skips files that are already present, so it resumes where it left off.
+  if (complete) {
+    localStorage.setItem(INSTALLED_KEY, signature)
+    if (newManifest) {
+      localStorage.setItem(MANIFEST_KEY, JSON.stringify(newManifest))
+      if (newManifest.beeDeps) (globalThis as any).__hypercombBeeDeps = newManifest.beeDeps
+      // Place bee markers in hypercomb.io/ root so ScriptPreloader.find() discovers them
+      await applyBeeMarkers(store, newManifest.bees)
+    }
+    console.log('[ensure-install] done:', signature)
+  } else {
+    // Still stash beeDeps and markers so partially-installed bees can load this session
+    if (newManifest) {
+      if (newManifest.beeDeps) (globalThis as any).__hypercombBeeDeps = newManifest.beeDeps
+      if (newManifest.bees) await applyBeeMarkers(store, newManifest.bees)
+    }
+    console.warn('[ensure-install] install incomplete — will resume on next load')
   }
-  console.log('[ensure-install] done:', signature)
 }
 
 // ----- helpers -----

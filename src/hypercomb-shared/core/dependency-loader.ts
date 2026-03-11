@@ -6,7 +6,8 @@ import { Store } from './store'
 export class DependencyLoader extends EventTarget {
 
   private get store(): Store { return <Store>get("@hypercomb.social/Store") }
-  private readonly loaded = new Set<string>()
+  readonly #loaded = new Set<string>()
+  #loading: Promise<void> | null = null
 
   #dependencyCount = 0
   #loadedSignatures: readonly string[] = []
@@ -17,63 +18,75 @@ export class DependencyLoader extends EventTarget {
   public get failedSignatures(): readonly string[] { return this.#failedSignatures }
 
   public load = async (): Promise<void> => {
-    this.loaded.clear()
-    this.#dependencyCount = 0
-    this.#loadedSignatures = []
-    this.#failedSignatures = []
-    this.dispatchEvent(new CustomEvent('change'))
-
-    // Use cached alias map from resolveImportMap() if available (skips OPFS re-scan)
-    let pending = await this.#collectPending()
-    if (!pending.length) return
-
-    // When beeDeps is present, only eagerly load deps NOT claimed by any bee.
-    // Bee-specific deps are lazy-loaded by ScriptPreloader.#ensureDeps().
-    const beeDeps = (globalThis as any).__hypercombBeeDeps as Record<string, string[]> | undefined
-    if (beeDeps) {
-      const claimed = new Set(Object.values(beeDeps).flat())
-      pending = pending.filter(p => {
-        const pureSig = p.sig.replace(/\.js$/i, '')
-        return !claimed.has(pureSig) && !claimed.has(p.sig)
-      })
-      if (!pending.length) return
+    // In-flight dedup: if load() is already running, wait for it
+    if (this.#loading) {
+      console.log('[dependency-loader] load() already in progress, waiting')
+      return this.#loading
     }
 
-    EffectBus.emit('loader:deps-start', { total: pending.length })
-
-    // Verify signatures then import concurrently
-    const results = await Promise.allSettled(
-      pending.map(({ sig, alias }) =>
-        this.#verifyAndImport(sig, alias)
-      )
-    )
-
-    const loadedSigs: string[] = []
-    const failedSigs: string[] = []
-
-    for (let i = 0; i < results.length; i++) {
-      const r = results[i]
-      const { sig } = pending[i]
-
-      if (r.status === 'fulfilled') {
-        this.loaded.add(sig)
-        loadedSigs.push(sig)
-      } else {
-        console.error(`Failed to load dependency: ${sig}`, r.reason)
-        failedSigs.push(sig)
+    const run = async (): Promise<void> => {
+      // Use cached alias map from resolveImportMap() if available (skips OPFS re-scan)
+      let pending = await this.#collectPending()
+      if (!pending.length) {
+        console.log('[dependency-loader] no pending dependencies')
+        return
       }
+
+      // When beeDeps is present, only eagerly load deps NOT claimed by any bee.
+      // Bee-specific deps are lazy-loaded by ScriptPreloader.#ensureDeps().
+      const beeDeps = (globalThis as any).__hypercombBeeDeps as Record<string, string[]> | undefined
+      if (beeDeps) {
+        const claimed = new Set(Object.values(beeDeps).flat())
+        const before = pending.length
+        pending = pending.filter(p => {
+          const pureSig = p.sig.replace(/\.js$/i, '')
+          return !claimed.has(pureSig) && !claimed.has(p.sig)
+        })
+        if (before !== pending.length) {
+          console.log(`[dependency-loader] ${before - pending.length} deps claimed by bees, ${pending.length} orphans to eagerly load`)
+        }
+        if (!pending.length) return
+      }
+
+      EffectBus.emit('loader:deps-start', { total: pending.length })
+
+      // Verify signatures then import concurrently
+      const results = await Promise.allSettled(
+        pending.map(({ sig, alias }) =>
+          this.#verifyAndImport(sig, alias)
+        )
+      )
+
+      const loadedSigs: string[] = []
+      const failedSigs: string[] = []
+
+      for (let i = 0; i < results.length; i++) {
+        const r = results[i]
+        const { sig } = pending[i]
+
+        if (r.status === 'fulfilled') {
+          this.#loaded.add(sig)
+          loadedSigs.push(sig)
+        } else {
+          console.error(`[dependency-loader] failed to load dependency ${sig}:`, r.reason)
+          failedSigs.push(sig)
+        }
+      }
+
+      this.#dependencyCount = this.#dependencyCount + loadedSigs.length
+      this.#loadedSignatures = [...this.#loadedSignatures, ...loadedSigs]
+      this.#failedSignatures = [...this.#failedSignatures, ...failedSigs]
+      this.dispatchEvent(new CustomEvent('change'))
+
+      EffectBus.emit('loader:deps-done', {
+        loaded: loadedSigs.length,
+        failed: failedSigs.length,
+        total: pending.length,
+      })
     }
 
-    this.#dependencyCount = loadedSigs.length
-    this.#loadedSignatures = loadedSigs
-    this.#failedSignatures = failedSigs
-    this.dispatchEvent(new CustomEvent('change'))
-
-    EffectBus.emit('loader:deps-done', {
-      loaded: loadedSigs.length,
-      failed: failedSigs.length,
-      total: pending.length,
-    })
+    this.#loading = run()
+    try { await this.#loading } finally { this.#loading = null }
   }
 
   #collectPending = async (): Promise<{ sig: string; alias: string }[]> => {
@@ -82,7 +95,11 @@ export class DependencyLoader extends EventTarget {
     if (cachedMap && cachedMap.size > 0) {
       const pending: { sig: string; alias: string }[] = []
       for (const [alias, sig] of cachedMap) {
-        if (!this.loaded.has(sig)) pending.push({ sig, alias })
+        if (this.#loaded.has(sig)) {
+          console.log(`[dependency-loader] ${alias} (${sig}) already loaded, skipping`)
+          continue
+        }
+        pending.push({ sig, alias })
       }
       return pending
     }
@@ -99,15 +116,18 @@ export class DependencyLoader extends EventTarget {
 
     for await (const [sig, entry] of depDir.entries()) {
       if (entry.kind !== 'file') continue
-      if (!this.isSignature(sig)) continue
-      if (this.loaded.has(sig)) continue
+      if (!this.#isSignature(sig)) continue
+      if (this.#loaded.has(sig)) {
+        console.log(`[dependency-loader] ${sig} already loaded, skipping`)
+        continue
+      }
 
       try {
         const file = await (entry as FileSystemFileHandle).getFile()
         const prefix = await file.slice(0, 512).arrayBuffer()
         const first = new TextDecoder().decode(prefix).split('\n', 1)[0]?.trim() ?? ''
 
-        const alias = this.readAliasFromFirstLine(first)
+        const alias = this.#readAliasFromFirstLine(first)
         if (alias) pending.push({ sig, alias })
       } catch {
         // skip unreadable entries
@@ -141,31 +161,21 @@ export class DependencyLoader extends EventTarget {
       throw err
     }
 
-    await this.#importWithRetry(alias)
+    console.log(`[dependency-loader] importing ${alias} (${pureSig})`)
+    const mod = await import(/* @vite-ignore */ alias)
+    void mod
+    console.log(`[dependency-loader] imported ${alias}`)
     return sig
   }
 
-  #importWithRetry = async (alias: string, maxAttempts = 3): Promise<void> => {
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        const mod = await import(/* @vite-ignore */ alias)
-        void mod
-        return
-      } catch (err) {
-        if (attempt === maxAttempts) throw err
-        await new Promise(r => setTimeout(r, 200 * (2 ** (attempt - 1))))
-      }
-    }
-  }
-
-  private readAliasFromFirstLine = (text: string): string | null => {
+  #readAliasFromFirstLine = (text: string): string | null => {
     if (!text.startsWith('//')) return null
     const parts = text.split(/\s+/)
     const token = (parts[1] ?? '').trim()
     return token.startsWith('@') ? token : null
   }
 
-  private isSignature = (name: string): boolean =>
+  #isSignature = (name: string): boolean =>
     /^[a-f0-9]{64}$/i.test(name.replace('.js', ''))
 }
 

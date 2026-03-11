@@ -18,40 +18,53 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   #actions: readonly ActionDescriptor[] = []
   #actionNames: readonly string[] = []
   #resourceCount = 0
+  #finding: Promise<Bee[]> | null = null
 
   public get actions(): readonly ActionDescriptor[] { return this.#actions }
   public get actionNames(): readonly string[] { return this.#actionNames }
   public get resourceCount(): number { return this.#resourceCount }
 
-  private readonly bySignature = new Map<string, ActionDescriptor>()
+  readonly #bySignature = new Map<string, ActionDescriptor>()
   readonly #beeCache = new Map<string, Bee>()
   readonly #loadedDeps = new Set<string>()
+  // In-flight dedup: prevents two callers from loading the same bee concurrently
+  readonly #inFlight = new Map<string, Promise<Bee | null>>()
 
   public resolveBySignature = (signature: string): ActionDescriptor | undefined =>
-    this.bySignature.get(signature)
+    this.#bySignature.get(signature)
 
   public getActionName = (signature: string): string | null =>
-    this.bySignature.get(signature)?.name ?? null
+    this.#bySignature.get(signature)?.name ?? null
 
   // -------------------------------------------------
   // find — marker-driven, called by the processor
   // -------------------------------------------------
 
   public find = async (_grammar: string): Promise<Bee[]> => {
-
-    // Scan root for global markers (skips already-loaded signatures)
-    await this.#scanDirectoryForMarkers(this.store.hypercombRoot)
-
-    // Scan current directory for location-specific markers
-    const current = this.store.current
-    if (current && current !== this.store.hypercombRoot) {
-      await this.#scanDirectoryForMarkers(current)
+    // In-flight dedup: if find() is already running, wait for it
+    if (this.#finding) {
+      console.log('[script-preloader] find() already in progress, waiting')
+      return this.#finding
     }
 
-    // Fire-and-forget depth radar — pre-warm child seeds
-    if (current) this.#warmChildSeeds(current)
+    const run = async (): Promise<Bee[]> => {
+      // Scan root for global markers (skips already-loaded signatures)
+      await this.#scanDirectoryForMarkers(this.store.hypercombRoot)
 
-    return [...this.#beeCache.values()]
+      // Scan current directory for location-specific markers
+      const current = this.store.current
+      if (current && current !== this.store.hypercombRoot) {
+        await this.#scanDirectoryForMarkers(current)
+      }
+
+      // Fire-and-forget depth radar — pre-warm child seeds
+      if (current) this.#warmChildSeeds(current)
+
+      return [...this.#beeCache.values()]
+    }
+
+    this.#finding = run()
+    try { return await this.#finding } finally { this.#finding = null }
   }
 
   // -------------------------------------------------
@@ -103,31 +116,43 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     }
   }
 
-  #loadBeeBySignature = async (signature: string, maxAttempts = 3): Promise<Bee | null> => {
-    if (this.#beeCache.has(signature)) return this.#beeCache.get(signature)!
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        return await this.#tryLoadBee(signature)
-      } catch {
-        if (attempt === maxAttempts) {
-          console.log(`[script-preloader] failed to load bee ${signature} after ${maxAttempts} attempts`)
-          return null
-        }
-        await new Promise(r => setTimeout(r, 200 * (2 ** (attempt - 1))))
-      }
+  #loadBeeBySignature = async (signature: string): Promise<Bee | null> => {
+    // Already loaded — skip
+    if (this.#beeCache.has(signature)) {
+      console.log(`[script-preloader] bee ${signature} already loaded, skipping`)
+      return this.#beeCache.get(signature)!
     }
 
-    return null
+    // In-flight dedup — if another caller is loading this bee, wait for it
+    const existing = this.#inFlight.get(signature)
+    if (existing) {
+      console.log(`[script-preloader] bee ${signature} already loading, waiting`)
+      return existing
+    }
+
+    const promise = this.#tryLoadBee(signature)
+    this.#inFlight.set(signature, promise)
+    try {
+      return await promise
+    } finally {
+      this.#inFlight.delete(signature)
+    }
   }
 
   #tryLoadBee = async (signature: string): Promise<Bee | null> => {
+    console.log(`[script-preloader] loading bee ${signature}`)
+
     // Try __bees__/{sig}.js then __bees__/{sig}
     let handle: FileSystemFileHandle | null = null
     try {
       handle = await this.store.bees.getFileHandle(`${signature}.js`)
     } catch {
-      handle = await this.store.bees.getFileHandle(signature)
+      try {
+        handle = await this.store.bees.getFileHandle(signature)
+      } catch {
+        console.warn(`[script-preloader] bee ${signature} not found in OPFS`)
+        return null
+      }
     }
 
     const file = await handle.getFile()
@@ -144,15 +169,19 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     await this.#ensureDeps(signature)
 
     const bee = await this.store.getBee(signature, buffer)
-    if (!bee) return null
+    if (!bee) {
+      console.warn(`[script-preloader] bee ${signature} returned null from getBee()`)
+      return null
+    }
 
     if (!has(bee.iocKey)) register(bee.iocKey, bee)
 
-    this.bySignature.set(signature, { signature, name: bee.name ?? signature })
+    this.#bySignature.set(signature, { signature, name: bee.name ?? signature })
     this.#beeCache.set(signature, bee)
     this.#resourceCount++
     this.dispatchEvent(new CustomEvent('change'))
 
+    console.log(`[script-preloader] bee ${signature} loaded as ${bee.iocKey}`)
     return bee
   }
 
@@ -191,7 +220,10 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     if (!aliasMap) return
 
     for (const depSig of needed) {
-      if (this.#loadedDeps.has(depSig)) continue
+      if (this.#loadedDeps.has(depSig)) {
+        console.log(`[script-preloader] dep ${depSig} already loaded for bee ${beeSig}, skipping`)
+        continue
+      }
 
       // Reverse lookup: find alias for this dep signature
       // aliasMap values may have .js suffix (stored as filenames); strip when comparing
@@ -199,7 +231,10 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       for (const [a, s] of aliasMap) {
         if (s.replace(/\.js$/i, '') === depSig) { alias = a; break }
       }
-      if (!alias) continue
+      if (!alias) {
+        console.warn(`[script-preloader] no alias found for dep ${depSig} (bee ${beeSig})`)
+        continue
+      }
 
       try {
         // Verify dep signature before importing
@@ -212,10 +247,12 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
           continue
         }
 
+        console.log(`[script-preloader] loading dep ${depSig} (${alias}) for bee ${beeSig}`)
         await import(/* @vite-ignore */ alias)
         this.#loadedDeps.add(depSig)
-      } catch {
-        // Best effort — bee may still work without this dep
+        console.log(`[script-preloader] dep ${depSig} loaded`)
+      } catch (err) {
+        console.warn(`[script-preloader] failed to load dep ${depSig} for bee ${beeSig}:`, err)
       }
     }
   }
@@ -225,7 +262,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   // -------------------------------------------------
 
   public preload = async (): Promise<void> => {
-    this.bySignature.clear()
+    this.#bySignature.clear()
     this.#beeCache.clear()
     this.#actions = []
     this.#actionNames = []
@@ -238,7 +275,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   // -------------------------------------------------
 
   #refreshProjection = (): void => {
-    const list = [...this.bySignature.values()].sort((a, b) => a.name.localeCompare(b.name))
+    const list = [...this.#bySignature.values()].sort((a, b) => a.name.localeCompare(b.name))
     this.#actions = list
     this.#actionNames = list.map(a => (a.name ?? '').replace(/-/g, ' '))
     this.dispatchEvent(new CustomEvent('change'))

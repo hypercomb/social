@@ -12,17 +12,17 @@ export class LayerInstaller {
 
   private readonly manifestName = 'install.manifest.json'
 
-  public install = async (parsed: LocationParseResult): Promise<void> => {
+  public install = async (parsed: LocationParseResult): Promise<boolean> => {
     const baseUrl = parsed?.baseUrl ?? ''
     const rootSig = parsed?.signature ?? ''
-    if (!baseUrl || !rootSig) return
+    if (!baseUrl || !rootSig) return false
 
     // endpoint: [baseUrl]/[path]/[signature]
     const endpoint =  `${baseUrl}/${rootSig}`
 
     // domain folder key used for: opfsroot/__layers__/<domain>/
     const domainKey = parsed?.domain || this.tryHost(endpoint)
-    if (!domainKey) return
+    if (!domainKey) return false
 
     const store = get('@hypercomb.social/Store') as Store
 
@@ -31,7 +31,7 @@ export class LayerInstaller {
 
     // 1) d/l the manifest (resume if present)
     const manifest = await this.getOrFetchManifest(domainLayersDir, endpoint)
-    if (!manifest) return
+    if (!manifest) return false
 
     // 2) install all files
     await this.installLayers(domainLayersDir, endpoint, manifest.layers || [])
@@ -43,7 +43,10 @@ export class LayerInstaller {
     if (complete) {
       await this.safeRemove(domainLayersDir, this.manifestName)
       console.log('[layer-installer] install complete (manifest removed)')
+    } else {
+      console.warn('[layer-installer] install incomplete — missing files will be retried on next load')
     }
+    return complete
   }
 
   // -------------------------------------------------
@@ -96,8 +99,14 @@ export class LayerInstaller {
     for (const sig of layers) {
       if (!sig) continue
 
-      const existing = (await this.tryGetFileHandle(domainLayersDir, `${sig}.json`))
-      if (existing) continue
+      // Layers are stored as `sig` (no extension) — check both forms for compatibility
+      const existing =
+        (await this.tryGetFileHandle(domainLayersDir, sig)) ??
+        (await this.tryGetFileHandle(domainLayersDir, `${sig}.json`))
+      if (existing) {
+        console.log(`[layer-installer] layer ${sig} already installed, skipping`)
+        continue
+      }
 
       const url = `${endpoint}/__layers__/${sig}.json`
       const bytes = await this.fetchBytes(url)

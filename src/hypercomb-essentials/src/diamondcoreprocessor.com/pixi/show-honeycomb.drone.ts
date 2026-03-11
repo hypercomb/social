@@ -715,8 +715,8 @@ export class ShowHoneycombWorker extends Drone {
     const quadW = quadHalfW * 2
     const quadH = quadHalfH * 2
 
-    const baseTex = await this.ensureTexture('/local.png')
-    const externalTex = await this.ensureTexture('/external.png')
+    const baseTex = await this.ensureTexture('/local.svg')
+    const externalTex = await this.ensureTexture('/external.svg')
     if (!baseTex || !externalTex || !this.atlas || !this.imageAtlas) {
       this.clearMesh()
       return
