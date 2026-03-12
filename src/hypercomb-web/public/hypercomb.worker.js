@@ -232,19 +232,7 @@ async function fetchUncachedAsset(request) {
 async function tryReadFromOpfs(dirName, fileName) {
   try {
     const root = await self.navigator.storage.getDirectory()
-
-    // root-scoped: opfs/__bees__/sig.js
-    const direct = await readFromDir(root, dirName, fileName)
-    if (direct) return direct
-
-    // domain-scoped: opfs/<domain>/__bees__/sig.js
-    for await (const [name, entry] of root.entries()) {
-      if (!isDomainName(name)) continue
-      const nested = await readFromNested(entry, dirName, fileName)
-      if (nested) return nested
-    }
-
-    return null
+    return await readFromDir(root, dirName, fileName)
   } catch {
     return null
   }
@@ -255,42 +243,15 @@ async function readFromDir(rootDir, dirName, fileName) {
     const dir = await rootDir.getDirectoryHandle(dirName)
     const fileHandle = await dir.getFileHandle(fileName)
     const file = await fileHandle.getFile()
-    return asJsResponse(file, false)
+    return asJsResponse(file)
   } catch {
     return null
   }
 }
 
-async function readFromNested(domainDir, dirName, fileName) {
-  try {
-    const dir = await domainDir.getDirectoryHandle(dirName)
-    const fileHandle = await dir.getFileHandle(fileName)
-    const file = await fileHandle.getFile()
-    return asJsResponse(file, true)
-  } catch {
-    return null
-  }
-}
-
-function asJsResponse(file, immutable) {
+function asJsResponse(file) {
   const headers = new Headers()
   headers.set('content-type', guessContentType(file.name))
-  headers.set(
-    'cache-control',
-    immutable ? 'public, max-age=31536000, immutable' : 'no-store'
-  )
+  headers.set('cache-control', 'no-store')
   return new Response(file, { status: 200, headers })
-}
-
-/* ----------------------------------------
- * domain filtering
- * ------------------------------------- */
-
-function isDomainName(name) {
-  const raw = (name ?? '').trim()
-  if (!raw || raw.startsWith('__')) return false
-  if (raw === '__bees__') return false
-  if (raw === '__dependencies__') return false
-  if (raw === 'hypercomb') return false
-  return /^[a-z0-9.-]+$/i.test(raw) && raw.includes('.')
 }

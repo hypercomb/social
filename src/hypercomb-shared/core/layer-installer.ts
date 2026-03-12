@@ -10,7 +10,7 @@ type InstallManifest = { version: number; layers: string[]; bees: string[]; depe
 
 export class LayerInstaller {
 
-  private readonly manifestName = 'install.manifest.json'
+  readonly #manifestName = 'install.manifest.json'
 
   public install = async (parsed: LocationParseResult): Promise<boolean> => {
     const baseUrl = parsed?.baseUrl ?? ''
@@ -21,7 +21,7 @@ export class LayerInstaller {
     const endpoint =  `${baseUrl}/${rootSig}`
 
     // domain folder key used for: opfsroot/__layers__/<domain>/
-    const domainKey = parsed?.domain || this.tryHost(endpoint)
+    const domainKey = parsed?.domain || this.#tryHost(endpoint)
     if (!domainKey) return false
 
     const store = get('@hypercomb.social/Store') as Store
@@ -30,18 +30,18 @@ export class LayerInstaller {
     const domainLayersDir = await store.domainLayersDirectory(domainKey, true)
 
     // 1) d/l the manifest (resume if present)
-    const manifest = await this.getOrFetchManifest(domainLayersDir, endpoint)
+    const manifest = await this.#getOrFetchManifest(domainLayersDir, endpoint)
     if (!manifest) return false
 
     // 2) install all files
-    await this.installLayers(domainLayersDir, endpoint, manifest.layers || [])
-    await this.installDependencies(store, endpoint, manifest.dependencies || [])
-    await this.installBees(store, endpoint, manifest.bees || [])
+    await this.#installLayers(domainLayersDir, endpoint, manifest.layers || [])
+    await this.#installDependencies(store, endpoint, manifest.dependencies || [])
+    await this.#installBees(store, endpoint, manifest.bees || [])
 
     // 3) remove manifest when complete
-    const complete = await this.isComplete(domainLayersDir, store, manifest)
+    const complete = await this.#isComplete(domainLayersDir, store, manifest)
     if (complete) {
-      await this.safeRemove(domainLayersDir, this.manifestName)
+      await this.#safeRemove(domainLayersDir, this.#manifestName)
       console.log('[layer-installer] install complete (manifest removed)')
     } else {
       console.warn('[layer-installer] install incomplete — missing files will be retried on next load')
@@ -53,33 +53,33 @@ export class LayerInstaller {
   // manifest
   // -------------------------------------------------
 
-  private getOrFetchManifest = async (
+  #getOrFetchManifest = async (
     domainLayersDir: FileSystemDirectoryHandle,
     endpoint: string
   ): Promise<InstallManifest | null> => {
 
     // local first (resume)
-    const localText = await this.tryReadText(domainLayersDir, this.manifestName)
+    const localText = await this.#tryReadText(domainLayersDir, this.#manifestName)
     if (localText) {
-      const local = this.tryParseManifest(localText)
+      const local = this.#tryParseManifest(localText)
       if (local) return local
-      await this.safeRemove(domainLayersDir, this.manifestName)
+      await this.#safeRemove(domainLayersDir, this.#manifestName)
     }
 
     // remote
-    const url = `${endpoint}/${this.manifestName}`
-    const bytes = await this.fetchBytes(url)
+    const url = `${endpoint}/${this.#manifestName}`
+    const bytes = await this.#fetchBytes(url)
     if (!bytes) return null
 
     const text = new TextDecoder().decode(bytes)
-    const parsed = this.tryParseManifest(text)
+    const parsed = this.#tryParseManifest(text)
     if (!parsed) return null
 
-    await this.writeBytesFile(domainLayersDir, this.manifestName, bytes)
+    await this.#writeBytesFile(domainLayersDir, this.#manifestName, bytes)
     return parsed
   }
 
-  private tryParseManifest = (text: string): InstallManifest | null => {
+  #tryParseManifest = (text: string): InstallManifest | null => {
     try {
       return JSON.parse(text) as InstallManifest
     } catch {
@@ -91,7 +91,7 @@ export class LayerInstaller {
   // install
   // -------------------------------------------------
 
-  private installLayers = async (
+  #installLayers = async (
     domainLayersDir: FileSystemDirectoryHandle,
     endpoint: string,
     layers: string[]
@@ -101,16 +101,20 @@ export class LayerInstaller {
 
       // Layers are stored as `sig` (no extension) — check both forms for compatibility
       const existing =
-        (await this.tryGetFileHandle(domainLayersDir, sig)) ??
-        (await this.tryGetFileHandle(domainLayersDir, `${sig}.json`))
+        (await this.#tryGetFileHandle(domainLayersDir, sig)) ??
+        (await this.#tryGetFileHandle(domainLayersDir, `${sig}.json`))
       if (existing) {
         console.log(`[layer-installer] layer ${sig} already installed, skipping`)
         continue
       }
 
+      console.log(`[layer-installer] downloading layer ${sig}`)
       const url = `${endpoint}/__layers__/${sig}.json`
-      const bytes = await this.fetchBytes(url)
-      if (!bytes) continue
+      const bytes = await this.#fetchBytes(url)
+      if (!bytes) {
+        console.warn(`[layer-installer] failed to download layer ${sig}`)
+        continue
+      }
 
       // Verify downloaded content matches expected signature
       const computed = await SignatureService.sign(bytes.buffer as ArrayBuffer)
@@ -120,11 +124,12 @@ export class LayerInstaller {
       }
 
       // store as: opfsroot/__layers__/<domain>/<sig>
-      await this.writeBytesFile(domainLayersDir, sig, bytes)
+      await this.#writeBytesFile(domainLayersDir, sig, bytes)
+      console.log(`[layer-installer] layer ${sig} installed`)
     }
   }
 
-  private installDependencies = async (
+  #installDependencies = async (
     store: Store,
     endpoint: string,
     deps: string[]
@@ -136,14 +141,21 @@ export class LayerInstaller {
 
       const name = `${sig}.js`
       const existing =
-        (await this.tryGetFileHandle(depDir, name)) ??
-        (await this.tryGetFileHandle(depDir, sig))
+        (await this.#tryGetFileHandle(depDir, name)) ??
+        (await this.#tryGetFileHandle(depDir, sig))
 
-      if (existing) continue
+      if (existing) {
+        console.log(`[layer-installer] dependency ${sig} already installed, skipping`)
+        continue
+      }
 
+      console.log(`[layer-installer] downloading dependency ${sig}`)
       const url = `${endpoint}/__dependencies__/${name}`
-      const bytes = await this.fetchBytes(url)
-      if (!bytes) continue
+      const bytes = await this.#fetchBytes(url)
+      if (!bytes) {
+        console.warn(`[layer-installer] failed to download dependency ${sig}`)
+        continue
+      }
 
       // Verify downloaded content matches expected signature
       const computed = await SignatureService.sign(bytes.buffer as ArrayBuffer)
@@ -153,11 +165,12 @@ export class LayerInstaller {
       }
 
       // store as: opfsroot/__dependencies__/<sig>.js
-      await this.writeBytesFile(depDir, name, bytes)
+      await this.#writeBytesFile(depDir, name, bytes)
+      console.log(`[layer-installer] dependency ${sig} installed`)
     }
   }
 
-  private installBees = async (
+  #installBees = async (
     store: Store,
     endpoint: string,
     bees: string[]
@@ -169,14 +182,21 @@ export class LayerInstaller {
 
       const name = `${sig}.js`
       const existing =
-        (await this.tryGetFileHandle(beesDir, name)) ??
-        (await this.tryGetFileHandle(beesDir, sig))
+        (await this.#tryGetFileHandle(beesDir, name)) ??
+        (await this.#tryGetFileHandle(beesDir, sig))
 
-      if (existing) continue
+      if (existing) {
+        console.log(`[layer-installer] bee ${sig} already installed, skipping`)
+        continue
+      }
 
+      console.log(`[layer-installer] downloading bee ${sig}`)
       const url = `${endpoint}/__bees__/${name}`
-      const bytes = await this.fetchBytes(url)
-      if (!bytes) continue
+      const bytes = await this.#fetchBytes(url)
+      if (!bytes) {
+        console.warn(`[layer-installer] failed to download bee ${sig}`)
+        continue
+      }
 
       // Verify downloaded content matches expected signature
       const computed = await SignatureService.sign(bytes.buffer as ArrayBuffer)
@@ -186,35 +206,36 @@ export class LayerInstaller {
       }
 
       // store as: opfsroot/__bees__/<sig>.js
-      await this.writeBytesFile(beesDir, name, bytes)
+      await this.#writeBytesFile(beesDir, name, bytes)
+      console.log(`[layer-installer] bee ${sig} installed`)
     }
   }
 
-  private isComplete = async (
+  #isComplete = async (
     domainLayersDir: FileSystemDirectoryHandle,
     store: Store,
     manifest: InstallManifest
   ): Promise<boolean> => {
     for (const sig of manifest.layers || []) {
       if (!sig) continue
-      const a = await this.tryGetFileHandle(domainLayersDir, sig)
-      const b = await this.tryGetFileHandle(domainLayersDir, `${sig}.json`)
+      const a = await this.#tryGetFileHandle(domainLayersDir, sig)
+      const b = await this.#tryGetFileHandle(domainLayersDir, `${sig}.json`)
       if (!a && !b) return false
     }
 
     const depDir = store.dependencies
     for (const sig of manifest.dependencies || []) {
       if (!sig) continue
-      const a = await this.tryGetFileHandle(depDir, `${sig}.js`)
-      const b = await this.tryGetFileHandle(depDir, sig)
+      const a = await this.#tryGetFileHandle(depDir, `${sig}.js`)
+      const b = await this.#tryGetFileHandle(depDir, sig)
       if (!a && !b) return false
     }
 
     const beesDir = store.bees
     for (const sig of manifest.bees || []) {
       if (!sig) continue
-      const a = await this.tryGetFileHandle(beesDir, `${sig}.js`)
-      const b = await this.tryGetFileHandle(beesDir, sig)
+      const a = await this.#tryGetFileHandle(beesDir, `${sig}.js`)
+      const b = await this.#tryGetFileHandle(beesDir, sig)
       if (!a && !b) return false
     }
 
@@ -225,7 +246,7 @@ export class LayerInstaller {
   // io
   // -------------------------------------------------
 
-  private tryGetFileHandle = async (
+  #tryGetFileHandle = async (
     dir: FileSystemDirectoryHandle,
     name: string
   ): Promise<FileSystemFileHandle | null> => {
@@ -236,7 +257,7 @@ export class LayerInstaller {
     }
   }
 
-  private safeRemove = async (
+  #safeRemove = async (
     dir: FileSystemDirectoryHandle,
     name: string
   ): Promise<void> => {
@@ -247,18 +268,18 @@ export class LayerInstaller {
     }
   }
 
-  private tryReadText = async (
+  #tryReadText = async (
     dir: FileSystemDirectoryHandle,
     name: string
   ): Promise<string | null> => {
-    const handle = await this.tryGetFileHandle(dir, name)
+    const handle = await this.#tryGetFileHandle(dir, name)
     if (!handle) return null
     const file = await handle.getFile().catch(() => null)
     if (!file) return null
     return await file.text().catch(() => null)
   }
 
-  private writeBytesFile = async (
+  #writeBytesFile = async (
     dir: FileSystemDirectoryHandle,
     name: string,
     bytes: Uint8Array<ArrayBuffer>
@@ -269,7 +290,7 @@ export class LayerInstaller {
     await writable.close()
   }
 
-  private fetchBytes = async (url: string): Promise<Uint8Array<ArrayBuffer> | null> => {
+  #fetchBytes = async (url: string): Promise<Uint8Array<ArrayBuffer> | null> => {
     try {
       const res = await fetch(url, { cache: 'no-store' })
       if (!res.ok) return null
@@ -280,7 +301,7 @@ export class LayerInstaller {
     }
   }
 
-  private tryHost = (url: string): string => {
+  #tryHost = (url: string): string => {
     try {
       return new URL(url).host
     } catch {
