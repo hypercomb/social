@@ -1,14 +1,11 @@
 import { Component, signal } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { SearchBarComponent } from '@hypercomb/shared';
-import type { Bee } from '@hypercomb/core';
-import { initializeRuntime } from '@hypercomb/shared/core';
 import { AxialService } from '@hypercomb/essentials/diamondcoreprocessor.com/core/axial/axial-service';
 import { PanningDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/pan/panning.drone';
 import { PixiHostWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/pixi-host.drone';
 import { ShowHoneycombWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/show-honeycomb.drone';
-import { SpacebarPanInput } from '@hypercomb/essentials/diamondcoreprocessor.com/input/pan/spacebar-pan.input';
-import { TouchPanInput } from '@hypercomb/essentials/diamondcoreprocessor.com/input/pan/touch-pan.input';
+import { MousePanInput } from '@hypercomb/essentials/diamondcoreprocessor.com/input/pan/mouse-pan.input';
 import { MousewheelZoomInput } from '@hypercomb/essentials/diamondcoreprocessor.com/input/zoom/mousewheel-zoom.input';
 import { Settings } from '@hypercomb/essentials/diamondcoreprocessor.com/core/settings';
 import { ZoomDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/zoom/zoom.drone';
@@ -16,22 +13,17 @@ import { NostrMeshWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/
 import { NostrSigner } from '@hypercomb/essentials/diamondcoreprocessor.com/nostr/nostr-signer'
 import { HexDetector } from '@hypercomb/essentials/diamondcoreprocessor.com/input/hex-detector'
 import { TileOverlayDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/tile-overlay.drone'
+import { TileSelectionDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/tile-selection.drone'
 import { HistoryService } from '@hypercomb/essentials/diamondcoreprocessor.com/core/history.service'
 import { HistoryRecorder } from '@hypercomb/essentials/diamondcoreprocessor.com/core/history-recorder.drone'
 import { TileEditorService } from '@hypercomb/essentials/diamondcoreprocessor.com/editor/tile-editor.service'
 import { TileEditorDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/editor/tile-editor.drone'
 import { ImageEditorService } from '@hypercomb/essentials/diamondcoreprocessor.com/editor/image-editor.service'
-import { SelectionService } from '@hypercomb/essentials/diamondcoreprocessor.com/core/selection/selection.service'
-import { TileSelectionDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/selection/tile-selection.drone'
-import { KeyMapService } from '@hypercomb/essentials/diamondcoreprocessor.com/input/keymap/keymap.service'
-import { JournalService } from '@hypercomb/essentials/revolucionstyle.com/journal/journal.service'
-import { JournalEntryDrone } from '@hypercomb/essentials/revolucionstyle.com/journal/journal-entry.drone'
 import { TileEditorComponent } from '@hypercomb/shared/ui/tile-editor/tile-editor.component'
-import { ControlsBarComponent } from '@hypercomb/shared/ui/controls-bar/controls-bar.component'
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, SearchBarComponent, TileEditorComponent, ControlsBarComponent],
+  imports: [RouterOutlet, SearchBarComponent, TileEditorComponent],
   styleUrls: ['./app.scss'] as any,
   templateUrl: './app.html'
 })
@@ -42,6 +34,7 @@ export class App {
 
   public toggleMesh = (): void => {
     const mesh = get('@diamondcoreprocessor.com/NostrMeshWorker') as any;
+
     const next = !this.meshPublic();
     this.meshPublic.set(next);
     mesh?.setNetworkEnabled?.(next, true);
@@ -53,11 +46,11 @@ export class App {
       PanningDrone,
       PixiHostWorker,
       ShowHoneycombWorker,
-      SpacebarPanInput,
-      TouchPanInput,
+      MousePanInput,
       MousewheelZoomInput,
       NostrMeshWorker,
       TileOverlayDrone,
+      TileSelectionDrone,
       NostrSigner,
       HexDetector,
       Settings,
@@ -66,36 +59,48 @@ export class App {
       HistoryRecorder,
       TileEditorService,
       TileEditorDrone,
-      ImageEditorService,
-      SelectionService,
-      TileSelectionDrone,
-      KeyMapService,
-      JournalService,
-      JournalEntryDrone]
+      ImageEditorService]
 
     queueMicrotask(async () => {
-      await initializeRuntime({
-        onMeshStateChange: enabled => this.meshPublic.set(enabled),
-      })
-      requestAnimationFrame(() => {
-        void this.startRegisteredBees()
-      })
-    })
-  }
+      const l = list();
+      console.log('[core-adapter] ioc keys:', l)
 
-  private readonly startRegisteredBees = async (): Promise<void> => {
-    const values = list()
-      .map(key => get(key))
-      .filter((value): value is Bee => !!value && typeof (value as Bee).pulse === 'function')
+      const hostkey = '@diamondcoreprocessor.com/PixiHostWorker'
+      const host = <any>get(hostkey)!
+      await host.pulse('testing')
 
-    for (const bee of values) {
+      const showkey = '@diamondcoreprocessor.com/ShowHoneycombWorker'
+      const show = <any>get(showkey)!
+      await show.pulse('testing')
+
+      const zoomkey = '@diamondcoreprocessor.com/ZoomDrone'
+      const zoom = <any>get(zoomkey)!
+      await zoom.pulse('testing')
+
+      const pankey = '@diamondcoreprocessor.com/PanningDrone'
+      const pan = <any>get(pankey)!
+      await pan.pulse('testing')
+
+      const overlaykey = '@diamondcoreprocessor.com/TileOverlayDrone'
+      const overlay = <any>get(overlaykey)!
+      await overlay.pulse('testing')
+
+      const selectionkey = '@diamondcoreprocessor.com/TileSelectionDrone'
+      const selection = <any>get(selectionkey)!
+      await selection.pulse('testing')
+
+      const mesh = get('@diamondcoreprocessor.com/NostrMeshWorker') as any
+
+      // 1) hard-start mesh lifecycle
+      await mesh.pulse('smoke-test')
+
       try {
-        await bee.pulse('')
-      } catch (error) {
-        console.warn('[app] failed to start bee', bee.constructor?.name, error)
+        const enabled = !!mesh?.isNetworkEnabled?.()
+        this.meshPublic.set(enabled)
+      } catch {
+        // ignore
       }
-    }
 
-    window.dispatchEvent(new Event('synchronize'))
+    })
   }
 }
