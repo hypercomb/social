@@ -72,7 +72,7 @@ export class ShowHoneycombWorker extends Drone {
     axial: '@diamondcoreprocessor.com/AxialService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -128,6 +128,7 @@ export class ShowHoneycombWorker extends Drone {
   private lastLocalSeedsBySig = new Map<string, string[]>()
   private lastPublishedGrammarSig = ''
   private lastPublishedGrammarSeed = ''
+  private filterKeyword = ''
 
   private readonly onSynchronize = (): void => {
     this.requestRender()
@@ -590,8 +591,15 @@ export class ShowHoneycombWorker extends Drone {
       }
     }
 
-    const seedNames = Array.from(union)
+    let seedNames = Array.from(union)
     seedNames.sort((a, b) => a.localeCompare(b))
+
+    // apply search filter if active
+    if (this.filterKeyword) {
+      const kw = this.filterKeyword
+      seedNames = seedNames.filter(s => s.toLowerCase().includes(kw))
+    }
+
     const layerChanged = locationKey !== this.renderedLocationKey
 
     // note: if streaming is active for the same layer, let the stream finish
@@ -792,6 +800,12 @@ export class ShowHoneycombWorker extends Drone {
           this.imageAtlas.invalidate(oldSig)
         }
       }
+      this.requestRender()
+    })
+
+    // search:filter effect — live-filter visible tiles by keyword
+    this.onEffect<{ keyword: string }>('search:filter', ({ keyword }) => {
+      this.filterKeyword = String(keyword ?? '').trim().toLowerCase()
       this.requestRender()
     })
 

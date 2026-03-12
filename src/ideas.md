@@ -6,25 +6,39 @@ Ideas for making the experience more incredible. Each iteration picks one. Archi
 
 ## Chosen This Iteration
 
-### Chromatic Identity
+### Sediment Layers
 
-**What**: Every cell derives its ambient color from its own signature. The first 6 hex chars of the SHA-256 hash become the hue. Cells without custom content glow with their mathematical identity. The honeycomb becomes a stained glass window of deterministic color — navigate through it and you learn to recognize places by color before reading any content.
+**What**: Every edit to a cell deposits a thin ring of color at its hexagonal border — like tree rings, geological strata, or growth bands in a seashell. The color of each ring is derived from the content's signature at that edit (same `sigToHSL` as Chromatic Identity). A cell edited once has a clean, single-color border. A cell edited fifty times develops a rich, layered band of color — a geological record of its creative evolution, always visible, never hidden behind a menu. You glance at a cell and *read its age* in the complexity of its rim.
 
-**Why this is universal**: Color needs no language, no labels, no explanation. The same signature always produces the same color on every device, every instance, every platform. A cell's color is not assigned by anyone — it's a mathematical inevitability of its identity. Visitors develop spatial intuition: "the blue region," "that amber corner." Color becomes wayfinding without any wayfinding system.
+**Why this is universal**: Every culture on Earth understands growth rings. Cut a tree, read its life. Split a rock, read the ages. Break a shell, count the bands. Sediment layers require no labels, no numbers, no language — the visual complexity IS the information. A child sees it: thick, colorful borders mean rich history. Thin borders mean new. Ancient cells look *wise*. The metaphor crosses every human boundary because it's not a metaphor — it's the same physics of accumulation that shaped every natural structure.
 
 **Architecture fit**:
-- Zero new primitives: the signature already exists for every cell, and the shader already supports per-cell tint (heat visualization proves this)
-- One pure function: `sigToHSL(sig: string) → { h, s, l }` — deterministic, side-effect-free, testable in isolation
-- The hex SDF shader already has a `vHeat` vertex attribute and color mixing — add a `vIdentityHue` attribute alongside it
-- ShowHoneycombDrone passes the computed hue when building tile geometry, just like it passes heat values today
-- Intensity can modulate with zoom: zoomed out = saturated identity colors for wayfinding; zoomed in = subtle wash behind content
-- Plays beautifully with existing ambient presence heat — heat overlays on top of identity color, so you see both "what this place is" and "who's here now"
+- History entry count per cell: `Store.editCount(lineageSig)` or count entries in the history bag / OPFS folder. Even without LayerV2, OPFS file count per seed folder serves as a proxy.
+- Ring colors: each historical edit's content signature → `sigToHSL()` (reuses Chromatic Identity's function). If full history sigs aren't available yet, degrade gracefully: use edit count to modulate ring thickness with the current sig's color.
+- One vertex attribute: `vEditCount` — integer [0, N] per cell, clamped to a max ring count (~20) for visual clarity
+- Shader: concentric hex SDFs at decreasing radii. Each ring is `borderWidth / maxRings` thick. Color per ring from a small uniform array or a 1D texture lookup.
+- ShowHoneycombDrone computes edit count when building tile geometry — same pipeline as heat, tidal, identity values
+- Composes with Chromatic Identity: identity = current color; sediment = historical colors. Together they show both *what a cell is* and *what it has been*.
+- Composes with Tidal Memory: tidal = breathing rhythm of recent activity; sediment = permanent geological record. Time at two scales.
+- Composes with editor snapshots: the thumbnail shows current content; the border rings show depth of iteration.
 
-**Minimal surface area**: One function, one vertex attribute, one shader uniform blend. No new drones, no new events, no new services, no new storage. The color was always there — latent in the signature — waiting to be revealed.
+**Minimal surface area**: One count query, one shared color function, one vertex attribute, one shader loop. No new drones, no new events, no new services. The history was always accumulating — this makes accumulation visible as beauty.
 
 ---
 
 ## Previously Chosen
+
+### Tidal Memory (Iteration 3)
+
+**Status**: Not yet implemented.
+
+**What**: The honeycomb breathes. Cells edited recently expand slightly and glow warm — high tide. Cells untouched for days contract and cool — low tide. The grid rises and falls with the rhythm of creation. One timestamp query per visible cell, one exponential decay function, one vertex attribute (`vTidal`), one shader blend. The rhythm was always encoded in the history — waiting to become visible.
+
+### Chromatic Identity (Iteration 2)
+
+**Status**: Not yet implemented.
+
+**What**: Every cell derives its ambient color from its own signature. The first 6 hex chars of the SHA-256 hash become the hue. Cells without custom content glow with their mathematical identity. The honeycomb becomes a stained glass window of deterministic color. One pure function `sigToHSL(sig)`, one vertex attribute `vIdentityHue`, one shader blend. The color was always latent in the signature.
 
 ### Seed Portals (Iteration 1)
 
@@ -92,6 +106,26 @@ Every navigation event triggers a subtle ripple animation outward from the visit
 
 Long-press any seed to leave a mark. The mark is a single Nostr event: seed signature + timestamp. Nothing else — no text, no identity, no content. Marks accumulate as ink density (darker = more marks). Decays over time like presence heat. The simplest possible human gesture in spatial medium. Cave paintings before language. One event kind, one vertex attribute, one drone. Complementary to presence (presence = "someone is here now"; ink = "someone lingered here recently").
 
+### Spore Propagation
+
+A cell's snapshot would be a self-contained, signed description: lineage + bees + deps + resources + children — all as signature references. Publish any snapshot as a single Nostr event. Anyone receiving the spore can plant it in their own mesh. Missing referenced content is fetched from the mesh on demand. Cells spread organically between instances — not through "sharing" (a platform concept) but through biological propagation. Seeds on the wind. Each spore carries DNA (the snapshot) and grows in whatever soil it lands on. Requires a snapshot/history primitive (LayerV2 was explored and reverted). One event kind, one publish action, one plant action.
+
+### Constellation View
+
+At maximum zoom-out, the hex grid transforms into a star map. Each star represents a top-level lineage (root children). Size = descendant count. Brightness = recent activity. Color = signature-derived (Chromatic Identity). Click a star to zoom into the hexagonal grid beneath. Smooth transition — hexagons crystallize from starlight as you approach. Gives the mesh cosmic scale: zoom out for the universe, zoom in for the cell. One zoom threshold, one render mode, one aggregate query per root child. The seed folder hierarchy provides natural clustering.
+
+### Depth Rings
+
+As you navigate deeper (more path segments), each depth level adds a concentric ring inside the current cell's hex frame. Depth 0 = plain. Depth 3 = three nested hex rings getting smaller toward center. Instant depth perception — you FEEL how deep you are without breadcrumb UI. The depth is `lineage.segments.length`, computable from navigation state. One vertex attribute (`vDepth`), one shader modification (nested hex SDFs at decreasing radii). Zero new drones or storage.
+
+### Living Thumbnails
+
+Editor snapshots already render on grid cells. Extend this: when a cell's content changes anywhere on the mesh (via Nostr event), its thumbnail pulses once — a single heartbeat flash. You're looking at a region and you SEE edits happening in real time as thumbnail flickers across the grid. No notification badge, no inbox — the content itself shows it's alive. Architecture: one Nostr subscription filtered by visible-cell signatures, one animation trigger (`uPulseTime` uniform per cell) on ShowHoneycombDrone, zero new storage. Composes with Tidal Memory (breathing = recent activity rhythm) and Ambient Presence (heat = who's here). Living Thumbnails adds the missing real-time heartbeat — the moment of creation made visible.
+
+### Negative Space Navigation
+
+Instead of navigating INTO cells, navigate into the spaces BETWEEN them. The gaps between hexagons become pathways — click the negative space to slide along the interstice. At each junction, three cells meet — you see all three simultaneously from the crack between them. The honeycomb becomes navigable as both cells (content) and gaps (relationships). Universal: paths between things are as meaningful as things themselves — rivers between lands, streets between buildings, synapses between neurons. Architecture: the hex grid already computes gap geometry. One click-target layer for inter-cell regions, one camera transition mode, one viewport composition showing adjacent cell previews. Zero new storage, zero new events.
+
 ---
 
-*Last updated: 2026-03-09*
+*Last updated: 2026-03-11*

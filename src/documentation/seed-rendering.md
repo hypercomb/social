@@ -6,15 +6,17 @@ How seeds become tiles on the honeycomb grid, and how marker files, the zero-sig
 
 ## Seeds
 
-A **seed** is a folder in the OPFS content tree. Its name is its label. Seeds are discovered by iterating the entries of the current explorer directory and collecting all subdirectories that are not reserved (`__bees__`, `__layers__`, `__dependencies__`, `__history__`, or any `__*__` folder).
+A **seed** is a folder in the OPFS content tree. Its name is its label. Seeds are discovered by iterating the entries of the current explorer directory and collecting all subdirectories that are not reserved (any `__*__` folder: `__bees__`, `__dependencies__`, `__layers__`, `__resources__`, `__location__`, etc.).
 
 ```
 opfs://hypercomb.io/
-  ├── Alice/          ← seed
-  ├── Bob/            ← seed
-  ├── Photos/         ← seed
-  ├── __bees__/     ← reserved (not a seed)
-  └── __layers__/     ← reserved (not a seed)
+  ├── Alice/            ← seed
+  ├── Bob/              ← seed
+  ├── Photos/           ← seed
+  ├── __bees__/         ← reserved (not a seed)
+  ├── __dependencies__/ ← reserved (not a seed)
+  ├── __layers__/       ← reserved (not a seed)
+  └── __resources__/    ← reserved (not a seed)
 ```
 
 Each discovered seed folder name becomes one hexagonal tile on the honeycomb grid.
@@ -33,7 +35,11 @@ opfs://hypercomb.io/Alice/
 
 ### How markers are created
 
-When a layer is applied to a location, `LayerFilesystemApplier` creates a marker file for each drone signature declared in the layer:
+Markers are placed in two ways:
+
+**At install time** — `ensureInstall()` calls `applyBeeMarkers()`, which writes an empty marker file in the hypercomb root (`hypercomb.io/`) for every bee signature in the install manifest. These root-level markers ensure that `ScriptPreloader.find()` discovers all installed bees globally — the same behavior as hypercomb-dev where bees are instantiated directly at startup.
+
+**At layer application** — `LayerFilesystemApplier` creates a marker file for each drone signature declared in a layer, placing them inside the target seed folder:
 
 ```typescript
 for (const droneSig of layer.drones) {
@@ -157,7 +163,7 @@ This pattern enables **extreme modularization with signature verification**:
 
 ### 1. Discovery
 
-`ShowHoneycombDrone` listens for `synchronize` events and runs the render pipeline:
+`ShowHoneycombWorker` listens for `synchronize` events and runs the render pipeline:
 
 1. Get the current explorer directory from `Lineage`
 2. List all seed folders (non-reserved subdirectories)
@@ -196,19 +202,19 @@ Each seed becomes a quad tile rendered with Pixi.js:
 
 ## Heartbeat → Script Execution
 
-When a drone's `encounter()` is called:
+When a bee's `pulse()` is called:
 
-1. **Sense check** — `sensed(grammar)` returns whether the drone should activate
+1. **Sense check** — `sense(grammar)` returns whether this drone should activate
 2. **Heartbeat** — `heartbeat(grammar)` runs the drone's main logic
-3. **State transition** — drone moves from Created/Registered → Active
+3. **State transition** — bee moves from Created/Registered → Active
 
-For `ShowHoneycombDrone`, heartbeat:
+For `ShowHoneycombWorker`, heartbeat:
 
 1. Subscribes to `render:host-ready` (Pixi resources)
 2. Refreshes mesh seeds from nostr relays
 3. Queues a render pass
 
-Marker files in seed folders reference drone scripts that can be loaded and encountered in the same lifecycle. The marker's signature resolves to `__bees__/{sig}.js`, which self-registers in IoC and responds to future encounters.
+Marker files in seed folders reference bee scripts that can be loaded and pulsed in the same lifecycle. The marker's signature resolves to `__bees__/{sig}.js`, which self-registers in IoC and responds to future pulses.
 
 ---
 

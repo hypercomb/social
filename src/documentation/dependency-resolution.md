@@ -56,14 +56,14 @@ primitives: `Drone`, `ServiceToken`, `SignatureService`, IoC (`register`/`get`/
 
 ## 2. Essentials (`@hypercomb/essentials`)
 
-**What it is:** A collection of domain-specific drones and their dependencies,
+**What it is:** A collection of domain-specific bees (drones + workers) and their dependencies,
 compiled into content-addressed artifacts and delivered to the browser via OPFS
 at runtime.
 
 **Build tool:** Custom `build-module.ts` pipeline using esbuild.
 
 **Build pipeline:**
-1. **Discover** -- Walk `src/`, classify files as drones (`*.drone.ts`) or
+1. **Discover** -- Walk `src/`, classify files as bees (`*.drone.ts`, `*.worker.ts`) or
    dependencies. Domains listed in `EXCLUDED_DOMAINS` (e.g. `revolucionstyle.com`)
    are skipped entirely -- their drones and namespaces are omitted from the build
    output. This allows domain-specific modules to exist in the source tree without
@@ -97,7 +97,7 @@ at runtime.
   - `pixi.js` -> `/vendor/pixi.runtime.js` (vendored)
   - `@diamondcoreprocessor.com/core` -> `/opfs/__dependencies__/<sig>.js`
     (served by service worker from OPFS)
-  - Drones loaded via dynamic `import()` of `/opfs/__bees__/<sig>.js`
+  - Bees loaded via dynamic `import()` of `/opfs/__bees__/<sig>.js`
 
 **Constraints:**
 - May only import from `@hypercomb/core` or sibling namespaces within
@@ -165,10 +165,23 @@ dynamically load essentials at runtime.
 ```
 1. import '@hypercomb/shared/core/ioc.web'    install window.ioc
 2. await ensureSwControl()                     register service worker
-3. await ensureInstall()                       fetch + write layers to OPFS
+3. await ensureInstall()                       fetch + write layers to OPFS (resumable)
 4. await attachImportMap()                     build + insert <script type="importmap">
 5. await bootstrapApplication(App, appConfig)  start Angular
 ```
+
+**Resumable installs:** `ensureInstall()` only marks the signature as installed
+in `localStorage` after all artifacts have been written to OPFS. If the install
+is interrupted (tab closed, network failure), the next load detects the
+incomplete state and resumes — the `LayerInstaller` skips files already present
+in OPFS, so only missing artifacts are fetched. Incremental manifest diffing
+removes stale entries from the previous version without clearing everything.
+
+**Global bee markers:** After a successful install, `ensureInstall()` places
+empty marker files in the `hypercomb.io/` root for every bee signature in the
+manifest. `ScriptPreloader.find()` always scans the hypercomb root, so all
+installed bees are discovered globally without requiring per-seed marker
+placement.
 
 **Resolution rules:**
 
@@ -179,7 +192,7 @@ dynamically load essentials at runtime.
 | `@hypercomb/shared/*` | tsconfig paths + include | Source files compiled inline |
 | `@angular/*` | npm `node_modules` | `hypercomb-web/node_modules/@angular/*` |
 | Shared services | `window.ioc.get()` or Angular DI bridge | Singleton from IoC container |
-| Drones | Dynamic `import('/opfs/__bees__/<sig>.js')` | Service worker serves from OPFS |
+| Bees | Dynamic `import('/opfs/__bees__/<sig>.js')` | Service worker serves from OPFS |
 | Dependencies | Import map specifier | Service worker serves from OPFS |
 
 **npm dependencies:**
@@ -193,6 +206,8 @@ dynamically load essentials at runtime.
 - Must ensure service worker is ready before inserting the import map.
 - Must ensure the import map is in the DOM before any dynamic `import()` of
   OPFS modules.
+- All shared file imports resolve through the workspace root `node_modules` for
+  third-party packages.
 - All shared file imports resolve through the workspace root `node_modules` for
   third-party packages. Angular package versions must match between the workspace
   root and the app's own `node_modules` to avoid duplicate runtimes.

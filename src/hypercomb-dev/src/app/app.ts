@@ -1,11 +1,11 @@
-import { Component, signal } from '@angular/core';
+import { AfterViewInit, Component, signal } from '@angular/core';
+import type { Bee } from '@hypercomb/core';
 import { RouterOutlet } from '@angular/router';
 import { SearchBarComponent } from '@hypercomb/shared';
 import { AxialService } from '@hypercomb/essentials/diamondcoreprocessor.com/core/axial/axial-service';
 import { PanningDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/pan/panning.drone';
 import { PixiHostWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/pixi-host.drone';
 import { ShowHoneycombWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/show-honeycomb.drone';
-import { MousePanInput } from '@hypercomb/essentials/diamondcoreprocessor.com/input/pan/mouse-pan.input';
 import { MousewheelZoomInput } from '@hypercomb/essentials/diamondcoreprocessor.com/input/zoom/mousewheel-zoom.input';
 import { Settings } from '@hypercomb/essentials/diamondcoreprocessor.com/core/settings';
 import { ZoomDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/zoom/zoom.drone';
@@ -20,14 +20,37 @@ import { TileEditorService } from '@hypercomb/essentials/diamondcoreprocessor.co
 import { TileEditorDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/editor/tile-editor.drone'
 import { ImageEditorService } from '@hypercomb/essentials/diamondcoreprocessor.com/editor/image-editor.service'
 import { TileEditorComponent } from '@hypercomb/shared/ui/tile-editor/tile-editor.component'
+import { ControlsBarComponent } from '@hypercomb/shared/ui';
+
+const _deps = [
+  AxialService,
+  PanningDrone,
+  PixiHostWorker,
+  ShowHoneycombWorker,
+  MousewheelZoomInput,
+  NostrMeshWorker,
+  TileOverlayDrone,
+  TileSelectionDrone,
+  NostrSigner,
+  HexDetector,
+  Settings,
+  ZoomDrone,
+  HistoryService,
+  HistoryRecorder,
+  TileEditorService,
+  TileEditorDrone,
+  ImageEditorService,
+]
+
+void _deps
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, SearchBarComponent, TileEditorComponent],
+  imports: [ControlsBarComponent, RouterOutlet, SearchBarComponent, TileEditorComponent],
   styleUrls: ['./app.scss'] as any,
   templateUrl: './app.html'
 })
-export class App {
+export class App implements AfterViewInit {
   protected readonly title = signal('hypercomb-dev');
 
   public readonly meshPublic = signal(true);
@@ -40,67 +63,34 @@ export class App {
     mesh?.setNetworkEnabled?.(next, true);
   }
 
-  constructor() {
-    const _ = [
-      AxialService,
-      PanningDrone,
-      PixiHostWorker,
-      ShowHoneycombWorker,
-      MousePanInput,
-      MousewheelZoomInput,
-      NostrMeshWorker,
-      TileOverlayDrone,
-      TileSelectionDrone,
-      NostrSigner,
-      HexDetector,
-      Settings,
-      ZoomDrone,
-      HistoryService,
-      HistoryRecorder,
-      TileEditorService,
-      TileEditorDrone,
-      ImageEditorService]
-
-    queueMicrotask(async () => {
-      const l = list();
-      console.log('[core-adapter] ioc keys:', l)
-
-      const hostkey = '@diamondcoreprocessor.com/PixiHostWorker'
-      const host = <any>get(hostkey)!
-      await host.pulse('testing')
-
-      const showkey = '@diamondcoreprocessor.com/ShowHoneycombWorker'
-      const show = <any>get(showkey)!
-      await show.pulse('testing')
-
-      const zoomkey = '@diamondcoreprocessor.com/ZoomDrone'
-      const zoom = <any>get(zoomkey)!
-      await zoom.pulse('testing')
-
-      const pankey = '@diamondcoreprocessor.com/PanningDrone'
-      const pan = <any>get(pankey)!
-      await pan.pulse('testing')
-
-      const overlaykey = '@diamondcoreprocessor.com/TileOverlayDrone'
-      const overlay = <any>get(overlaykey)!
-      await overlay.pulse('testing')
-
-      const selectionkey = '@diamondcoreprocessor.com/TileSelectionDrone'
-      const selection = <any>get(selectionkey)!
-      await selection.pulse('testing')
-
-      const mesh = get('@diamondcoreprocessor.com/NostrMeshWorker') as any
-
-      // 1) hard-start mesh lifecycle
-      await mesh.pulse('smoke-test')
-
-      try {
-        const enabled = !!mesh?.isNetworkEnabled?.()
-        this.meshPublic.set(enabled)
-      } catch {
-        // ignore
-      }
-
+  public ngAfterViewInit(): void {
+    requestAnimationFrame(() => {
+      void this.startRegisteredBees()
     })
+  }
+
+  private readonly startRegisteredBees = async (): Promise<void> => {
+    console.log('[core-adapter] ioc keys:', list())
+
+    const values = list()
+      .map(key => get(key))
+      .filter((value): value is Bee => !!value && typeof (value as Bee).pulse === 'function')
+
+    for (const bee of values) {
+      try {
+        await bee.pulse('')
+      } catch (error) {
+        console.warn('[app] failed to start bee', bee.constructor?.name, error)
+      }
+    }
+
+    const mesh = get('@diamondcoreprocessor.com/NostrMeshWorker') as any
+    try {
+      this.meshPublic.set(!!mesh?.isNetworkEnabled?.())
+    } catch {
+      // ignore
+    }
+
+    window.dispatchEvent(new Event('synchronize'))
   }
 }

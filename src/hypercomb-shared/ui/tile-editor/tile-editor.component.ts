@@ -6,6 +6,8 @@ import {
   computed,
   effect,
   ElementRef,
+  inject,
+  Injector,
   ViewChild,
   type AfterViewInit,
   type OnInit,
@@ -27,6 +29,8 @@ import type { ImageEditorService } from
   styleUrls: ['./tile-editor.component.scss'],
 })
 export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
+
+  private readonly injector = inject(Injector)
 
   @ViewChild('imageCanvas', { static: false }) imageCanvas!: ElementRef<HTMLDivElement>
 
@@ -85,28 +89,22 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
   // track previous open state for init/teardown
   #wasOpen = false
 
-  constructor() {
-    // watch for editor open/close to initialize/destroy image canvas
-    effect(() => {
-      const isOpen = this.open()
-      if (isOpen && !this.#wasOpen) {
-        // editor just opened — sync form values
-        this.linkValue = this.link$()
-        this.borderColorValue = this.borderColor$()
-        this.backgroundColorValue = this.backgroundColor$()
+  private readonly openEffect = effect(() => {
+    const isOpen = this.open()
+    if (isOpen && !this.#wasOpen) {
+      this.linkValue = this.link$()
+      this.borderColorValue = this.borderColor$()
+      this.backgroundColorValue = this.backgroundColor$()
 
-        // defer canvas init to next microtask (ViewChild not ready yet in same tick)
-        queueMicrotask(() => this.#initCanvas())
-      }
-      if (!isOpen && this.#wasOpen) {
-        // editor closed
-        this.linkValue = ''
-        this.borderColorValue = ''
-        this.backgroundColorValue = ''
-      }
-      this.#wasOpen = isOpen
-    })
-  }
+      queueMicrotask(() => this.#initCanvas())
+    }
+    if (!isOpen && this.#wasOpen) {
+      this.linkValue = ''
+      this.borderColorValue = ''
+      this.backgroundColorValue = ''
+    }
+    this.#wasOpen = isOpen
+  }, { injector: this.injector })
 
   // ── canvas initialization ──────────────────────────────────────
 

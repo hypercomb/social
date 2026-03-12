@@ -27,12 +27,12 @@ the two are the same system seen from different distances.
 
 | metaphor (what it feels like) | implementation (what the code does) |
 |-------------------------------|-------------------------------------|
-| bee | `Drone` (drone.base.ts in @hypercomb/core) |
+| bee | `Bee` (bee.base.ts in @hypercomb/core) — specialized as `Drone` or `Worker` |
 | hive | `Honeycomb` -- a named collection of drones and layers |
 | pheromone | effect -- a named signal on the `EffectBus` |
 | honeycomb cell | `AxialCoordinate` (q, r, s cube coords) rendered via pixi |
 | relay (stateless forwarder) | `EffectBus` (local) + `NostrMeshDrone` (network) |
-| swarm intelligence | `DroneResolver` finds relevant drones; each decides via `sensed()` |
+| swarm intelligence | `BeeResolver` finds relevant bees; each decides via `sense()` |
 | meadow log | opfs directory tree (origin private file system) |
 | dna (path capsule) | `PayloadCanonical` -- signed drone payload with sha-256 content address |
 
@@ -47,7 +47,7 @@ the two are the same system seen from different distances.
 - **signature**: sha-256 content address computed by `SignatureService`.
   like git or ipfs -- the content is the identity.
 - **opfs tree**: local filesystem rooted at `hypercomb.io/` in the browser's
-  origin private file system. seeds, drones, dependencies, and layers live here.
+  origin private file system. seeds, bees, dependencies, resources, and layers live here.
 - **(optional) mesh events**: nostr events tagged with a content-addressed
   signature. ttl-backed cache, auto-expiring, deduplicated across relays.
 
@@ -55,8 +55,12 @@ the two are the same system seen from different distances.
 
 ## drone lifecycle
 
-every bee in the hive is a drone. drones are autonomous units with a simple
-state machine:
+every bee in the hive is a `Bee`. bees come in two flavors:
+
+- **drone** — reactive bee. pulses every cycle. uses `sense()` + `heartbeat()`.
+- **worker** — bootstrap-once bee. acts once when `ready()` returns true, then goes dormant.
+
+both share the same lifecycle state machine:
 
 ```
 Created --> Registered --> Active --> Disposed
@@ -64,17 +68,12 @@ Created --> Registered --> Active --> Disposed
 
 - **created**: constructed, not yet known to the container.
 - **registered**: placed in the ioc container (`window.ioc.register`).
-- **active**: has successfully responded to at least one heartbeat.
+- **active**: has successfully responded to at least one pulse.
 - **disposed**: cleaned up, effect subscriptions removed, done.
 
-a drone does two things:
-
-1. `sensed(grammar)` -- does this drone perceive relevance right now?
-   returns true/false. if false, the drone sleeps through this pulse.
-2. `heartbeat(grammar)` -- execute. this is where behavior lives.
-
-the framework calls `encounter(grammar)` on each resolved drone.
-encounter checks sensed, then calls heartbeat, then transitions state.
+the framework calls `bee.pulse(grammar)` on each resolved bee.
+for drones, pulse checks `sense()`, then calls `heartbeat()`, then transitions state.
+for workers, pulse checks `ready()`, then calls `act()` once.
 
 ---
 
@@ -131,7 +130,7 @@ the spatial foundation is a hexagonal grid using axial coordinates.
   lists for all six neighbors, and provides closest-cell lookup.
 - **PixiHostDrone**: creates the pixi application and root render container.
   broadcasts `render:host-ready` so other drones can draw.
-- **ShowHoneycombDrone**: unions local opfs seeds with mesh seeds, maps them
+- **ShowHoneycombWorker**: unions local opfs seeds with mesh seeds, maps them
   onto axial positions, and renders labeled hex tiles via sdf shaders.
 
 the grid is what the byte protocol navigates. each cell is a seed.
@@ -169,9 +168,10 @@ opfs root
   hypercomb.io/          <-- domain root (hypercomb root)
     seed-a/              <-- a seed directory (becomes a hex cell)
     seed-b/
-    __bees__/          <-- installed drone bytecode (by signature)
-    __dependencies__/    <-- resolved dependency modules
-    __layers__/          <-- layer installation state
+  __bees__/              <-- installed bee bytecode (by signature)
+  __dependencies__/      <-- resolved dependency modules
+  __layers__/            <-- layer installation state
+  __resources__/         <-- content-addressed blobs (images, JSON)
 ```
 
 `Store` manages the opfs handles. `Lineage` tracks the current explorer
@@ -194,9 +194,10 @@ the hive is layered. each ring depends only on the rings inside it.
 
   diamondcoreprocessor.com/
     core/                AxialCoordinate, AxialService, Settings, Zoom
-    input/               PanningDrone, ZoomDrone, KeyMapService, TileSelection
+    input/               PanningDrone, ZoomDrone, KeyMapService
     nostr/               NostrMeshDrone, NostrSigner, AmbientPresenceDrone
-    pixi/                PixiHostDrone, ShowHoneycombDrone, TileOverlayDrone
+    pixi/                PixiHostDrone, ShowHoneycombDrone, TileOverlayDrone, TileSelectionDrone
+    editor/              TileEditorDrone, TileProperties
 
   revolucionstyle.com/
     journal/             CigarJournalDrone, JournalEntryDrone, JournalService

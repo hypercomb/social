@@ -1,5 +1,5 @@
 export type CompletionStyle = 'space' | 'dot'
-export type CompletionMode = 'action' | 'marker'
+export type CompletionMode = 'action' | 'marker' | 'filter'
 
 export type CompletionContext =
   | { active: false }

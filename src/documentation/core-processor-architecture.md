@@ -9,7 +9,7 @@ establishes.
 
 `@hypercomb/core` is the zero-dependency foundation of the Hypercomb framework.
 It defines a small set of primitives that together enable a content-addressable,
-grammar-driven, reactive runtime where behaviors (drones) are loaded, resolved,
+grammar-driven, reactive runtime where behaviors (bees) are loaded, resolved,
 and executed dynamically -- without compile-time coupling to the application that
 hosts them.
 
@@ -20,34 +20,35 @@ primitives. Core itself imports nothing and depends on nothing.
 
 ## Primitives
 
-### Drone
+### Bee
 
-The fundamental unit of behavior. A drone is a class that:
+The fundamental unit of behavior. `Bee` is the abstract base class for all
+autonomous behavior units. It comes in two specializations:
 
-1. **Senses** whether it should respond to a given grammar string.
-2. **Executes** a heartbeat when it does.
-3. **Declares** its dependencies, effects, and intent metadata.
-4. **Tracks** its lifecycle through a state machine.
+- **Drone** — reactive bee. Overrides `sense()` + `heartbeat()`. Pulses every
+  processor cycle.
+- **Worker** — bootstrap-once bee. Overrides `ready()` + `act()`. Acts once when
+  ready, then goes dormant.
 
 ```
-DroneState:  Created -> Registered -> Active -> Disposed
+BeeState:  Created -> Registered -> Active -> Disposed
 ```
 
-A drone's `encounter(grammar)` method is the single framework entry point. The
-framework never calls `heartbeat()` directly -- it calls `encounter()`, which
-checks lifecycle state, evaluates `sense()`, and only then delegates to
-`heartbeat()`.
+A bee's `pulse(grammar)` method is the single framework entry point. The
+framework calls `pulse()`, which checks lifecycle state, evaluates the gate
+(`sense()` for drones, `ready()` for workers), and only then delegates to
+the action (`heartbeat()` for drones, `act()` for workers).
 
 ```typescript
-abstract class Drone {
-  // developer overrides
-  protected sense(grammar: string): boolean | Promise<boolean>
-  protected heartbeat(grammar: string): Promise<void>
+abstract class Bee {
+  // framework entry point
+  public abstract pulse(grammar: string): Promise<void>
+
+  // shared infrastructure
   protected deps?: Record<string, string>
   protected resolve<T>(localName: string): T | undefined
-
-  // framework entry point
-  public async encounter(grammar: string): Promise<void>
+  protected emitEffect<T>(effect: string, payload: T): void
+  protected onEffect<T>(effect: string, handler: EffectHandler<T>): void
 
   // metadata
   public description?: string
@@ -55,12 +56,22 @@ abstract class Drone {
   public effects?: readonly Effect[]
   public links?: ProviderLink[]
 }
+
+class Drone extends Bee {
+  protected sense(grammar: string): boolean | Promise<boolean>
+  protected heartbeat(grammar: string): Promise<void>
+}
+
+class Worker extends Bee {
+  protected ready(grammar: string): boolean | Promise<boolean>
+  protected act(grammar: string): Promise<void>
+}
 ```
 
-**Why this matters:** Drones are self-describing. A drone declares what grammar
+**Why this matters:** Bees are self-describing. A bee declares what grammar
 it responds to, what effects it produces, what dependencies it needs, and what
 its purpose is. This metadata makes it possible for the runtime to discover,
-filter, and orchestrate drones without knowing their implementations at compile
+filter, and orchestrate bees without knowing their implementations at compile
 time.
 
 ### SignatureService
@@ -75,7 +86,7 @@ class SignatureService {
 }
 ```
 
-Every artifact in the system -- drones, dependencies, layers, payloads -- is
+Every artifact in the system -- bees, dependencies, layers, payloads -- is
 identified by its content hash. Two artifacts with the same bytes produce the
 same signature. Different bytes always produce different signatures. This
 eliminates version numbers, timestamps, and naming conventions as coordination
@@ -112,40 +123,69 @@ extends it with `onRegister` callbacks, `graph()` introspection, and global
 convenience functions (`window.get`, `window.register`).
 
 **Why this matters:** The IoC container is the seam between compile-time code
-(Angular apps, shared services) and runtime-loaded code (OPFS drones). Both
+(Angular apps, shared services) and runtime-loaded code (OPFS bees). Both
 sides register and resolve through the same container, enabling communication
 without import coupling.
 
-### DroneResolver
+### SignatureStore
 
-An interface that finds drones for a given grammar string. The framework calls
-`resolver.find(grammar)` and gets back an array of `Drone` instances.
+A trusted-signature allowlist that eliminates redundant SHA-256 hashing at
+runtime. Populated from `install.manifest.json` during installation and
+persisted to `localStorage` across sessions.
 
 ```typescript
-interface DroneResolver {
-  find(input: string): Promise<Drone[]>
+class SignatureStore extends EventTarget {
+  trust(sig: string): void
+  trustAll(sigs: Iterable<string>): void
+  isTrusted(sig: string): boolean
+  async verify(bytes: ArrayBuffer, expectedSig: string): Promise<boolean>
+  async signText(text: string): Promise<string>
+  toJSON(): { sigs: string[]; storeSig: string | null }
+  restore(data: { sigs?: string[]; storeSig?: string | null }): void
+}
+```
+
+`verify()` returns `true` immediately for trusted signatures (no hashing),
+or hashes and compares for unknown ones (auto-trusting on match). `signText()`
+memoizes repeated text-to-signature calls — useful when the same lineage path
+is hashed multiple times per render cycle.
+
+**Why this matters:** Content verification is the system's integrity guarantee,
+but SHA-256 hashing every file on every load is redundant when the install
+pipeline already verified everything. The signature store turns verification
+from O(n * hash) into O(n * lookup) for known artifacts, while preserving full
+verification for anything new or untrusted.
+
+### BeeResolver
+
+An interface that finds bees for a given grammar string. The framework calls
+`resolver.find(grammar)` and gets back an array of `Bee` instances.
+
+```typescript
+interface BeeResolver {
+  find(input: string): Promise<Bee[]>
 }
 ```
 
 The resolver implementation lives outside core (in `ScriptPreloader` within
 shared). Core only defines the contract and the IoC key
-(`hypercomb:drone-resolver`).
+(`hypercomb:bee-resolver`).
 
 ### Effect
 
-A union type that categorizes what a drone does to the world:
+A union type that categorizes what a bee does to the world:
 
 ```typescript
 type Effect = 'filesystem' | 'render' | 'history' | 'network' | 'memory' | 'external'
 ```
 
-Effects are metadata, not enforcement. A drone declares its effects so that
-orchestrators, UIs, and auditors can reason about what a drone does without
+Effects are metadata, not enforcement. A bee declares its effects so that
+orchestrators, UIs, and auditors can reason about what a bee does without
 inspecting its code.
 
 ### PayloadCanonical
 
-The canonical format for a drone's source code and metadata, used for signing
+The canonical format for a bee's source code and metadata, used for signing
 and transmission:
 
 ```typescript
@@ -157,7 +197,7 @@ type DronePayloadV1 = {
 ```
 
 `PayloadCanonical.compute(payload)` serializes the payload to canonical JSON
-and signs it. This produces a single signature that identifies the exact drone
+and signs it. This produces a single signature that identifies the exact bee
 implementation -- its code, its metadata, everything.
 
 ### DcpResourceMessage
@@ -175,7 +215,7 @@ interface DcpResourceMessage {
 }
 ```
 
-This enables the DCP to compile drone source code in an isolated context and
+This enables the DCP to compile bee source code in an isolated context and
 hand the resulting bytes back to the parent for signing and storage.
 
 ---
@@ -185,20 +225,23 @@ hand the resulting bytes back to the parent for signing and storage.
 The top-level orchestrator. Extends `web` (an abstract class with a single
 `act(grammar)` method). Its implementation:
 
-1. Resolves the `DroneResolver` from IoC.
-2. Calls `resolver.find(grammar)` to discover relevant drones.
-3. Calls `drone.encounter(grammar)` on each.
-4. Dispatches a `synchronize` event when complete.
+1. Resolves the `BeeResolver` from IoC.
+2. Calls `resolver.find(grammar)` to discover relevant bees.
+3. Calls `bee.pulse(grammar)` on each.
+4. Dispatches a `synchronize` event when complete (in a `finally` block).
 
 ```typescript
 class hypercomb extends web {
-  public act = async (grammar: string): Promise<void> => {
-    const resolver = get<DroneResolver>(DRONE_RESOLVER_KEY)
-    const drones = resolver ? await resolver.find(grammar) : []
-    for (const drone of drones) {
-      await drone.encounter(grammar)
+  public override act = async (grammar: string = ''): Promise<void> => {
+    try {
+      const resolver = get<BeeResolver>(BEE_RESOLVER_KEY)
+      const bees = resolver ? await resolver.find(grammar) : []
+      for (const bee of bees) {
+        await bee.pulse(grammar)
+      }
+    } finally {
+      window.dispatchEvent(new Event('synchronize'))
     }
-    window.dispatchEvent(new CustomEvent('synchronize', { detail: { source: 'processor' } }))
   }
 }
 ```
@@ -219,13 +262,13 @@ A seed is a named directory inside the current lineage path. The URL
 each one is a cell in the hexagonal grid that can contain:
 
 - **Child seeds** (subdirectories) -- forming the tree's branches
-- **Markers** (files named by signature) -- associating drones with locations
+- **Markers** (files named by signature) -- associating bees with locations
 - **Mesh state** (shared seeds from the Nostr relay mesh) -- external
   contributions from other nodes
 
 The `Lineage` service tracks the current position in this tree. `Navigation`
 moves through it. The URL bar is a direct reflection of your position in the
-seed hierarchy. The `ShowHoneycombDrone` renders the current seed's children as
+seed hierarchy. The `ShowHoneycombWorker` renders the current seed's children as
 hexagonal cells, unioning local filesystem seeds with seeds discovered through
 the mesh.
 
@@ -239,17 +282,17 @@ location and then moves on. The loop works as follows:
    signal becomes a grammar string. A keystroke is intent. A pan gesture is
    intent. A URL change is intent. There is no distinction between "user action"
    and "system event" -- all are grammar.
-2. **`hypercomb.act(grammar)`** broadcasts the grammar to all registered drones.
-3. Each drone's **`encounter(grammar)`** fires: check lifecycle state, evaluate
-   `sense(grammar)`, execute `heartbeat(grammar)` if relevant.
-4. The heartbeat examines the current seed (via Lineage) -- does this location
+2. **`hypercomb.act(grammar)`** broadcasts the grammar to all registered bees.
+3. Each bee's **`pulse(grammar)`** fires: check lifecycle state, evaluate
+   the gate (`sense`/`ready`), execute the action (`heartbeat`/`act`) if relevant.
+4. The action examines the current seed (via Lineage) -- does this location
    have scripts to run? Are there child seeds to traverse? What mesh state
    exists here?
 5. **`synchronize`** event fires, coalescing all visual updates into a single
    render pass.
 
 The seed doesn't "run" in the traditional sense. It is a location in the tree
-that drones inspect and act upon. The drone checks what exists at the current
+that bees inspect and act upon. The bee checks what exists at the current
 seed, performs its work, and the tree is both the data and the execution context.
 
 ### Tree Traversal and Parallel Execution
@@ -263,14 +306,14 @@ an independent line of execution:
         / | \
       a   b   c          <- 3 branches, can process in parallel
      / \     / \
-    d   e   f   g         <- leaf drones execute independently
+    d   e   f   g         <- leaf bees execute independently
 ```
 
-At each node, the drone evaluates whether it should act. If the tree has many
-active paths (many leaves with associated drones), those paths can execute their
-heartbeats concurrently because:
+At each node, the bee evaluates whether it should act. If the tree has many
+active paths (many leaves with associated bees), those paths can execute their
+actions concurrently because:
 
-- Each drone's `encounter()` is self-contained -- drones don't call each other
+- Each bee's `pulse()` is self-contained -- bees don't call each other
   directly.
 - The IoC container is read-safe for concurrent access.
 - The `synchronize` event at the end coalesces all visual updates into one pass.
@@ -278,7 +321,7 @@ heartbeats concurrently because:
 This is concurrent `Promise` execution within the JavaScript event loop, with
 the tree structure providing natural task boundaries. Each branch of the tree is
 a self-contained unit of work. When there are many paths out to each leaf, all
-active branches can execute their heartbeats in parallel.
+active branches can execute their pulses in parallel.
 
 ### Seeds Are Content-Addressable Locations
 
@@ -300,32 +343,32 @@ same signature and can share state through the mesh without coordination.
 
 ### The Lifecycle IS the Heartbeat
 
-The drone lifecycle is not a separate initialization sequence. It is the
-encounter itself. The lifecycle state machine exists to track *where a drone is*
-in its history of encounters, not to enforce a startup ceremony:
+The bee lifecycle is not a separate initialization sequence. It is the
+pulse itself. The lifecycle state machine exists to track *where a bee is*
+in its history of pulses, not to enforce a startup ceremony:
 
 ```
 Intent (any input / gesture / tracked event)
   -> grammar string
     -> hypercomb.act(grammar)
-      -> DroneResolver.find(grammar) -> [matching drones]
-        -> drone.encounter(grammar)
+      -> BeeResolver.find(grammar) -> [matching bees]
+        -> bee.pulse(grammar)
           -> check state (Disposed? skip entirely)
-          -> sense(grammar) (relevant? no? skip)
-          -> heartbeat(grammar) (execute the work)
-          -> state: Created/Registered -> Active (on first successful heartbeat)
+          -> sense(grammar) / ready(grammar) (relevant? no? skip)
+          -> heartbeat(grammar) / act(grammar) (execute the work)
+          -> state: Created/Registered -> Active (on first successful pulse)
 ```
 
-A drone that has never been activated simply hasn't encountered a grammar it
+A bee that has never been activated simply hasn't pulsed with a grammar it
 senses as relevant yet. The first time it does, it transitions to Active. There
 is no separate "init" phase, no temporal ordering of setup calls to get wrong.
 The intent IS the lifecycle trigger.
 
 This answers the temporal coupling concern directly: there is nothing to call in
-the wrong order. There is only `encounter`, and `encounter` handles everything
+the wrong order. There is only `pulse`, and `pulse` handles everything
 -- state gating, relevance filtering, execution, and state transition -- in a
-single atomic operation. Each intent reaching some leaf drone in the hierarchy
-sends the heartbeat in the lifecycle. That is the lifecycle.
+single atomic operation. Each intent reaching some leaf bee in the hierarchy
+sends the pulse in the lifecycle. That is the lifecycle.
 
 ---
 
@@ -344,44 +387,44 @@ artifact.
 
 ### Grammar-Driven Dispatch
 
-Instead of method calls or event names, drones respond to grammar -- natural
+Instead of method calls or event names, bees respond to grammar -- natural
 language strings that describe intent. `hypercomb.act('hello world')` doesn't
-call a specific function; it broadcasts a grammar string and every drone that
+call a specific function; it broadcasts a grammar string and every bee that
 senses relevance responds.
 
 This inverts the coupling direction. The caller doesn't need to know which
-drones exist. Drones don't need to know who calls them. The grammar is the only
+bees exist. Bees don't need to know who calls them. The grammar is the only
 shared vocabulary.
 
 ### Self-Describing Behaviors
 
-Each drone carries its own metadata: what grammar it responds to, what effects
+Each bee carries its own metadata: what grammar it responds to, what effects
 it produces, what dependencies it needs, who authored it, and what it does. This
 metadata travels with the compiled artifact because it is part of the signed
 payload.
 
 This enables:
-- **Discovery** -- a UI can list all available drones and their purposes without
+- **Discovery** -- a UI can list all available bees and their purposes without
   loading their code.
-- **Auditing** -- the effect declarations make it possible to filter drones by
+- **Auditing** -- the effect declarations make it possible to filter bees by
   what they do to the system (filesystem, network, render, etc.).
 - **Dependency visualization** -- `window.ioc.graph()` reads `deps` from all
-  registered drones to produce a dependency map.
+  registered bees to produce a dependency map.
 
 ### Runtime Module Loading via OPFS
 
-Drones and their dependencies are not bundled with the application. They are
+Bees and their dependencies are not bundled with the application. They are
 stored in the browser's Origin Private File System, served by a service worker,
 and resolved through a dynamically-generated import map.
 
 This means:
-- **The application binary doesn't change when behaviors change.** New drones
+- **The application binary doesn't change when behaviors change.** New bees
   can be installed by updating OPFS, without rebuilding or redeploying the
   Angular app.
-- **Behaviors are portable.** A signed drone artifact can be fetched from any
+- **Behaviors are portable.** A signed bee artifact can be fetched from any
   trusted domain and verified by its hash.
 - **Multi-tenant isolation** is structural. Each domain gets its own OPFS
-  subdirectory for drones, dependencies, and layers.
+  subdirectory for bees, dependencies, and layers.
 
 ### The Tree as Runtime
 
@@ -391,14 +434,14 @@ of seeds is the data structure the user navigates, and it is simultaneously the
 execution context that determines which drones fire and what they see.
 
 This means:
-- **Adding a seed IS adding behavior.** If a drone senses a particular seed
-  name, creating that seed directory activates that drone at that location.
+- **Adding a seed IS adding behavior.** If a bee senses a particular seed
+  name, creating that seed directory activates that bee at that location.
 - **Navigation IS execution.** Moving to a new seed changes the execution
-  context. Different drones may sense relevance at different positions in the
+  context. Different bees may sense relevance at different positions in the
   tree.
 - **The tree scales naturally.** Each branch is independent. A tree with a
   thousand leaves can process all active branches concurrently without
-  coordination, because the drones at each leaf are self-contained.
+  coordination, because the bees at each leaf are self-contained.
 - **The tree is the API.** External consumers (mesh peers, other Hypercomb
   instances) don't call methods -- they navigate to signed locations and publish
   seeds. The tree structure IS the shared interface.
@@ -408,7 +451,7 @@ This means:
 Core defines the framework contract. Essentials implements domain behaviors.
 Shared bridges them to Angular. Web apps compose everything.
 
-At no point does core know about Angular, OPFS, or any specific drone
+At no point does core know about Angular, OPFS, or any specific bee
 implementation. At no point do essentials know about Angular or the DOM. This
 separation means you can replace the rendering layer (Angular -> another
 framework), the storage layer (OPFS -> IndexedDB), or the delivery mechanism
@@ -431,8 +474,8 @@ recomputing.
 ## Diamond Core Processor
 
 The Diamond Core Processor (DCP) is a separate Angular application that serves
-as the drone development and compilation tool. It uses `esbuild-wasm` to compile
-TypeScript drone source code in the browser, producing the `DronePayloadV1`
+as the bee development and compilation tool. It uses `esbuild-wasm` to compile
+TypeScript bee source code in the browser, producing the `DronePayloadV1`
 artifacts that get signed and stored.
 
 **Key components:**
@@ -445,7 +488,7 @@ artifacts that get signed and stored.
   domains, verifying content hash on arrival
 
 The DCP communicates with the parent Hypercomb application via `postMessage`
-using the `DcpResourceMessage` protocol. When a drone is compiled and signed,
+using the `DcpResourceMessage` protocol. When a bee is compiled and signed,
 the result bytes are transferred (not copied) back to the parent for storage in
 OPFS.
 

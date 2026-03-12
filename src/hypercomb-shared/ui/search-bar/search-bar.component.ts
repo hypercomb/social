@@ -1,6 +1,6 @@
 // hypercomb-shared/ui/search-bar/search-bar.component.ts
 
-import { AfterViewInit, Component, computed, ElementRef, signal, viewChild, type OnDestroy } from '@angular/core'
+import { AfterViewInit, Component, computed, ElementRef, signal, ViewChild, type OnDestroy } from '@angular/core'
 import type { Lineage } from '../../core/lineage'
 import type { MovementService } from '../../core/movement.service'
 import type { Navigation } from '../../core/navigation'
@@ -17,7 +17,15 @@ import { EffectBus } from '@hypercomb/core'
 })
 export class SearchBarComponent implements AfterViewInit, OnDestroy {
 
-  private readonly input = viewChild.required<ElementRef<HTMLInputElement>>('input')
+  @ViewChild('input', { read: ElementRef })
+  private inputRef?: ElementRef<HTMLInputElement>
+
+  private get input(): ElementRef<HTMLInputElement> {
+    if (!this.inputRef) {
+      throw new Error('SearchBarComponent input is not available before view init')
+    }
+    return this.inputRef
+  }
 
   // Resolve via IoC container (not Angular DI) — these are shared services
   // registered at module load time, available globally via get()
@@ -56,9 +64,10 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
   // -------------------------------------------------
 
   public readonly placeholder = computed<string>(() => {
-    return this.locked()
-      ? 'press enter'
-      : 'search actions...'
+    if (this.locked()) return 'press enter'
+    const ctx = this.context()
+    if (ctx.active && ctx.mode === 'filter') return 'filter tiles...'
+    return 'search actions...'
   })
 
   public constructor() {
@@ -71,6 +80,21 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
 
   private readonly context = computed<CompletionContext>(() => {
     const v = this.value()
+
+    // >? prefix enters filter mode
+    if (v.startsWith('>?')) {
+      const raw = v.slice(2)
+      const keyword = this.completions.normalize(raw)
+      return {
+        active: true,
+        mode: 'filter',
+        head: '>?',
+        raw,
+        normalized: keyword,
+        style: 'space'
+      }
+    }
+
     const lastHash = v.lastIndexOf('#')
 
     if (lastHash !== -1) {
@@ -109,6 +133,7 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
 
     const ctx = this.context()
     if (!ctx.active) return []
+    if (ctx.mode === 'filter') return []
 
     const all = this.actionNames$()
     if (!ctx.normalized) return all
@@ -157,7 +182,7 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
   // -------------------------------------------------
 
   public ngAfterViewInit(): void {
-    this.input().nativeElement.focus()
+    this.input.nativeElement.focus()
     this.syncSignalsFromDom()
   }
 
@@ -188,9 +213,9 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
   }
 
   public onShellMouseDown = (e: MouseEvent): void => {
-    if (e.target === this.input().nativeElement) return
+    if (e.target === this.input.nativeElement) return
     e.preventDefault()
-    this.input().nativeElement.focus()
+    this.input.nativeElement.focus()
   }
 
   public onSuggestionMouseDown = (e: MouseEvent, s: string, i: number): void => {
@@ -207,10 +232,23 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     this.suppressed.set(false)
     this.syncSignalsFromDom()
     this.clampActiveIndex()
+
+    const ctx = this.context()
+    if (ctx.active && ctx.mode === 'filter') {
+      EffectBus.emit('search:filter', { keyword: ctx.normalized })
+    } else if (this.lastFilterKeyword) {
+      EffectBus.emit('search:filter', { keyword: '' })
+      this.lastFilterKeyword = ''
+    }
+    if (ctx.active && ctx.mode === 'filter') {
+      this.lastFilterKeyword = ctx.normalized
+    }
   }
 
+  private lastFilterKeyword = ''
+
   public onKeyDown = (e: KeyboardEvent): void => {
-    const el = this.input().nativeElement
+    const el = this.input.nativeElement
     const v = el.value
 
     // explicit '#' + enter always opens dcp
@@ -248,7 +286,7 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
   // -------------------------------------------------
 
   private readonly commitCreateSeedInPlace = async (): Promise<void> => {
-    const rawInput = this.input().nativeElement.value.trim()
+    const rawInput = this.input.nativeElement.value.trim()
     if (!rawInput) return
 
     if (rawInput.includes('#')) {
@@ -284,7 +322,7 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
   }
 
   private readonly commitLegacy = async (): Promise<void> => {
-    const raw = this.input().nativeElement.value.trim()
+    const raw = this.input.nativeElement.value.trim()
     if (!raw) return
 
     if (this.locked()) {
@@ -302,7 +340,7 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
   }
 
   private readonly commitNavigate = async (): Promise<void> => {
-    const raw = this.input().nativeElement.value.trim()
+    const raw = this.input.nativeElement.value.trim()
     if (!raw) return
 
     if (this.locked()) {
@@ -374,7 +412,7 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
 
     const rendered = this.completions.render(best, ctx.style)
 
-    this.input().nativeElement.value =
+    this.input.nativeElement.value =
       ctx.mode === 'marker'
         ? ctx.head + rendered + ' '
         : rendered + ' '
@@ -432,17 +470,21 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
   // -------------------------------------------------
 
   private readonly clear = (): void => {
-    this.input().nativeElement.value = ''
+    this.input.nativeElement.value = ''
     this.syncSignalsFromDom()
+    if (this.lastFilterKeyword) {
+      EffectBus.emit('search:filter', { keyword: '' })
+      this.lastFilterKeyword = ''
+    }
   }
 
   private readonly placeCaretAtEnd = (): void => {
-    const el = this.input().nativeElement
+    const el = this.input.nativeElement
     queueMicrotask(() => el.setSelectionRange(el.value.length, el.value.length))
   }
 
   private readonly syncSignalsFromDom = (): void => {
-    this.value.set(this.input().nativeElement.value)
+    this.value.set(this.input.nativeElement.value)
   }
 
   private readonly requestSynchronize = (): void => {

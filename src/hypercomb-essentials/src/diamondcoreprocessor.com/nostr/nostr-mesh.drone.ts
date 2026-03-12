@@ -5,7 +5,7 @@
 // - cache supports both network events and local fanout
 // - one network req per sig (shared across consumers)
 
-import { Worker } from '@hypercomb/core'
+import { Drone } from '@hypercomb/core'
 
 // const HARD_RELAY = 'wss://nos.lol'
 const HARD_RELAY = 'wss://relay.snort.social'
@@ -49,7 +49,7 @@ type MeshExpiryRule = {
   kind?: number
 }
 
-export class NostrMeshWorker extends Worker {
+export class NostrMeshWorker extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
 
   protected override deps = { signer: '@diamondcoreprocessor.com/NostrSigner' }
@@ -111,24 +111,33 @@ export class NostrMeshWorker extends Worker {
   private logs: MeshLog[] = []
   private readonly logCap = 200
 
-  protected override act = async (): Promise<void> => {
-    this.ensureStartedNow()
+  #initialized = false
+
+  protected override sense = () => true
+
+  protected override heartbeat = async (): Promise<void> => {
+    if (!this.#initialized) {
+      this.#initialized = true
+
+      this.ensureStartedNow()
+
+      // effect bus listeners — allow other drones to coordinate via effects
+      this.onEffect<{ signature: string }>('mesh:ensure-started', async ({ signature }) => {
+        this.ensureStartedForSig(signature)
+        this.emitEffect('mesh:ready', { signature })
+      })
+
+      this.onEffect<{ signature: string, onItems: (e: any) => void }>('mesh:subscribe', ({ signature, onItems }) => {
+        this.subscribe(signature, onItems)
+      })
+
+      this.onEffect<{ kind: number, sig: string, payload: any, extraTags?: string[][] }>('mesh:publish', async ({ kind, sig, payload, extraTags }) => {
+        await this.publish(kind, sig, payload, extraTags)
+      })
+    }
 
     this.pruneAllExpired()
-
-    // effect bus listeners — allow other drones to coordinate via effects
-    this.onEffect<{ signature: string }>('mesh:ensure-started', async ({ signature }) => {
-      this.ensureStartedForSig(signature)
-      this.emitEffect('mesh:ready', { signature })
-    })
-
-    this.onEffect<{ signature: string, onItems: (e: any) => void }>('mesh:subscribe', ({ signature, onItems }) => {
-      this.subscribe(signature, onItems)
-    })
-
-    this.onEffect<{ kind: number, sig: string, payload: any, extraTags?: string[][] }>('mesh:publish', async ({ kind, sig, payload, extraTags }) => {
-      await this.publish(kind, sig, payload, extraTags)
-    })
+    this.ensureSocketHealth()
   }
 
   // -----------------------------
@@ -475,6 +484,24 @@ export class NostrMeshWorker extends Worker {
   this.forceHardRelay()
   this.ensureSocket(HARD_RELAY)
 }
+
+  private ensureSocketHealth = (): void => {
+    if (!this.networkEnabled || this.stopped) return
+    if (this.sockets.size > 0) return
+
+    // reset backoff for relays stuck at max attempts for over 30s
+    const now = Date.now()
+    for (const [url, st] of this.backoff.entries()) {
+      if (st.attempts >= 10 && st.nextAtMs > 0 && (now - st.nextAtMs) > 30_000) {
+        st.attempts = 0
+        st.nextAtMs = 0
+        if (st.timer) { clearTimeout(st.timer); st.timer = undefined }
+        this.note('socket:backoff-reset', url)
+      }
+    }
+
+    this.connectAll()
+  }
 
   private reconnectAll = (): void => {
     if (this.stopped) return
@@ -827,7 +854,7 @@ export class NostrMeshWorker extends Worker {
 
     const now = Date.now()
     const keep = list.filter(i => {
-      const t = i.createdAtMs || i.receivedAtMs || 0
+      const t = i.receivedAtMs || i.createdAtMs || 0
       const ttlMs = this.resolveTtlMs(sig, i.event)
       return t > 0 && (now - t) <= ttlMs
     })

@@ -230,7 +230,7 @@ export class JournalEntryDrone {
     })
 
     const badge = this.#el('span', { fontSize: '12px', color: TEXT_DIM })
-    badge.dataset.flavorBadge = 'true'
+      badge.dataset['flavorBadge'] = 'true'
     badge.textContent = service.entry.flavors.selected.length > 0
       ? `${service.entry.flavors.selected.length} selected`
       : 'none selected'

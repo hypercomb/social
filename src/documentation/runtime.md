@@ -31,34 +31,37 @@ this is the spatial foundation. every higher-level navigation primitive ultimate
 
 ## the drone
 
-the drone is the unit of behavior. every runtime action is performed by a drone.
+the bee is the unit of behavior. every runtime action is performed by a bee. bees come in two flavors:
+
+- **drone** — reactive bee. pulses every cycle. overrides `sense()` + `heartbeat()`.
+- **worker** — bootstrap-once bee. overrides `ready()` + `act()`. acts once, then goes dormant.
 
 **lifecycle**: `Created → Registered → Active → Disposed`
 
-- a drone enters `Created` when instantiated
+- a bee enters `Created` when instantiated
 - it enters `Registered` when placed in the ioc container (`markRegistered()`)
-- it enters `Active` on first successful `encounter()` — the framework calls `sensed()` for relevance, then `heartbeat()` for execution
+- it enters `Active` on first successful `pulse()` — drones check `sense()` then run `heartbeat()`; workers check `ready()` then run `act()`
 - it enters `Disposed` when `markDisposed()` is called, which severs all effect subscriptions and invokes the optional `dispose()` hook
 
-**dependency declaration**: drones declare what they need via a `deps` map:
+**dependency declaration**: bees declare what they need via a `deps` map:
 ```ts
 protected deps = { settings: 'Settings', axial: 'AxialService' }
 ```
 resolved at runtime through `this.resolve<T>('settings')`.
 
-**effect participation**: drones declare what they listen for and what they emit:
+**effect participation**: bees declare what they listen for and what they emit:
 ```ts
 listens = ['render:host-ready']
 emits = ['mesh:ready', 'mesh:items-updated']
 ```
 
-a drone that has been disposed cannot be reactivated. the lifecycle is one-directional.
+a bee that has been disposed cannot be reactivated. the lifecycle is one-directional.
 
 ---
 
 ## the effect bus
 
-all drone-to-drone communication passes through the effect bus. no drone imports another drone.
+all bee-to-bee communication passes through the effect bus. no bee imports another bee.
 
 **emit** — broadcast a named effect with a typed payload. the bus stores the most recent value.
 
@@ -68,28 +71,30 @@ all drone-to-drone communication passes through the effect bus. no drone imports
 
 **auto-cleanup** — when a drone is disposed, all its subscriptions are severed automatically.
 
-the bus has no routing logic, no priorities, no filtering. it is a medium. drones decide for themselves whether to respond.
+the bus has no routing logic, no priorities, no filtering. it is a medium. bees decide for themselves whether to respond.
 
 registered effects in the current codebase:
 
 | effect | emitter | purpose |
 |--------|---------|---------|
 | `render:host-ready` | PixiHostDrone | pixi app, container, canvas, renderer are available |
-| `render:mesh-offset` | ShowHoneycombDrone | hex mesh position updated (for overlay alignment) |
-| `render:cell-count` | ShowHoneycombDrone | current cell count and label list changed |
+| `render:mesh-offset` | ShowHoneycombWorker | hex mesh position updated (for overlay alignment) |
+| `render:cell-count` | ShowHoneycombWorker | current cell count and label list changed |
 | `render:presence-heat` | AmbientPresenceDrone | per-cell presence heat map for visualization |
 | `mesh:ensure-started` | any | trigger nostr mesh initialization for a signature |
 | `mesh:subscribe` | any | subscribe to mesh events for a signature |
 | `mesh:publish` | any | publish an event to nostr relays |
 | `mesh:ready` | NostrMeshDrone | mesh connection established |
 | `mesh:items-updated` | NostrMeshDrone | cached mesh items changed |
-| `navigation:guard-start` | ShowHoneycombDrone | layer navigation in progress — ignore input |
-| `navigation:guard-end` | ShowHoneycombDrone | layer navigation complete — resume input |
+| `navigation:guard-start` | ShowHoneycombWorker | layer navigation in progress — ignore input |
+| `navigation:guard-end` | ShowHoneycombWorker | layer navigation complete — resume input |
 | `tile:click` | TileOverlayDrone | user clicked a tile (q, r, label, modifiers) |
 | `tile:hover` | TileOverlayDrone | cursor entered a tile (q, r) |
 | `tile:action` | TileOverlayDrone | tile action triggered (edit, remove) |
 | `tile:navigate-in` | TileOverlayDrone | right-click navigate into child layer |
 | `tile:navigate-back` | TileOverlayDrone | left-click navigate to parent layer |
+| `tile:saved` | TileEditorDrone | seed saved after tile editing |
+| `selection:changed` | TileSelectionDrone | tile selection set changed (leader, selected labels, relative axials) |
 | `wheel:close` | any | close the flavor wheel overlay |
 
 ---
@@ -120,13 +125,13 @@ window.ioc.register('AxialService', new AxialService())
 
 **PixiHostDrone** — creates the pixi `Application`, attaches it to the dom, initializes `AxialService` with `Settings`, and broadcasts `'render:host-ready'` carrying the app, container, canvas, and renderer.
 
-**ShowHoneycombDrone** — subscribes to `'render:host-ready'`. receives the pixi infrastructure and renders the hex grid.
+**ShowHoneycombWorker** — subscribes to `'render:host-ready'`. receives the pixi infrastructure and renders the hex grid.
 
 **ZoomDrone** — manages zoom state. uses `ZoomArbiter` for exclusive control (only one input source zooms at a time). `ZoomState` tracks per-scope snapshots, min/max scale (0.05–12), and pivot-preserving zoom math. subscribes to `'render:host-ready'`.
 
 **PanningDrone** — manages panning. uses a similar exclusive-control pattern via `begin(source)` / `end(source)`. delegates to `MousePanInput` for mouse-based panning. subscribes to `'render:host-ready'`.
 
-the rendering pipeline is entirely effect-driven. no drone in the pipeline imports another. they coordinate through the bus.
+the rendering pipeline is entirely effect-driven. no bee in the pipeline imports another. they coordinate through the bus.
 
 ---
 
@@ -143,16 +148,17 @@ each segment maps to a `FileSystemDirectoryHandle`. `tryResolve()` reads without
 **Store** — manages the OPFS root. initializes the directory structure:
 ```
 opfs root
-  └── hypercomb.io/
-        ├── __bees__/
-        ├── __dependencies__/
-        └── __layers__/
+  ├── hypercomb.io/          ← domain root (seed tree)
+  ├── __bees__/              ← compiled bee modules
+  ├── __dependencies__/      ← namespace service bundles
+  ├── __layers__/            ← layer installation state
+  └── __resources__/         ← content-addressed blobs (images, JSON)
 ```
 provides `setCurrent(segments)` to navigate the filesystem and `resetCurrent()` to return to root.
 
 **Navigation** — reads and writes the browser url. `segments()` returns normalized path segments from the url. `getSelections()` parses hash-based selections (`#name` or `#(a,b,c)`). `toggleSelection()` adds or removes from the selection set.
 
-lineage dispatches `'synchronize'` events with revision data when paths change. it listens to `'navigate'` and `'popstate'` events from the browser.
+lineage dispatches `'change'` events on itself when paths change. it listens to `'navigate'` and `'popstate'` events from the browser. the `synchronize` event is dispatched only by the processor (`hypercomb.act()`).
 
 ---
 
@@ -238,14 +244,15 @@ Settings
 PixiHostDrone
   ├──> deps: Settings, AxialService
   └──> emits: 'render:host-ready'
-         ├──> ShowHoneycombDrone (subscribes)
+         ├──> ShowHoneycombWorker (subscribes)
          │     ├──> emits: 'render:mesh-offset', 'render:cell-count'
          │     └──> emits: 'navigation:guard-start', 'navigation:guard-end'
          ├──> TileOverlayDrone (subscribes)
          │     ├──> listens: 'navigation:guard-start/end', 'render:mesh-offset'
          │     └──> emits: 'tile:click', 'tile:hover', 'tile:action', 'tile:navigate-*'
          ├──> TileSelectionDrone (subscribes)
-         │     └──> listens: 'tile:click', 'navigation:guard-start/end'
+         │     ├──> listens: 'render:mesh-offset', 'render:cell-count'
+         │     └──> emits: 'selection:changed'
          ├──> ZoomDrone (subscribes)
          └──> PanningDrone (subscribes)
 
@@ -267,8 +274,8 @@ SignatureService ──> PayloadCanonical
   (SHA-256)           (drone signing)
 ```
 
-every arrow is either an ioc resolution or an effect subscription. there are no direct imports between drones.
+every arrow is either an ioc resolution or an effect subscription. there are no direct imports between bees.
 
 ---
 
-*twenty primitives. zero direct coupling. the runtime is a colony of small, focused behaviors coordinating through scent and registry. that is all it takes.*
+*twenty primitives. zero direct coupling. the runtime is a colony of small, focused bees coordinating through scent and registry. that is all it takes.*

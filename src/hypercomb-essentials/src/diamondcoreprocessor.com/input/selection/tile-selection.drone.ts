@@ -10,7 +10,7 @@ import type { SelectionService } from '../../core/selection/selection.service.js
 type CellCountPayload = { count: number; labels: string[] }
 type TileClickPayload = { q: number; r: number; label: string; index: number; ctrlKey: boolean; metaKey: boolean }
 
-export class TileSelectionDrone extends Drone {
+class TileSelectionDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override description = 'click and drag tile selection'
 
