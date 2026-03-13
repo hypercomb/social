@@ -6,8 +6,6 @@ import {
   computed,
   effect,
   ElementRef,
-  inject,
-  Injector,
   ViewChild,
   type AfterViewInit,
   type OnInit,
@@ -88,7 +86,6 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
   #wasOpen = false
 
   constructor() {
-    const injector = inject(Injector)
     effect(() => {
       const isOpen = this.open()
       if (isOpen && !this.#wasOpen) {
@@ -104,7 +101,7 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
         this.backgroundColorValue = ''
       }
       this.#wasOpen = isOpen
-    }, { injector })
+    })
   }
 
   // ── canvas initialization ──────────────────────────────────────
