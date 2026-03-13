@@ -221,14 +221,13 @@
   color: rgba(248, 248, 244, 0.96);
 
   font: inherit;
-  font-size: 0.82rem;
-  font-weight: 500;
-  letter-spacing: 0.06em;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
 
   &::placeholder {
     color: rgba(245, 245, 245, 0.34);
-    text-transform: uppercase;
-    letter-spacing: 0.16em;
   }
 
   &:focus {

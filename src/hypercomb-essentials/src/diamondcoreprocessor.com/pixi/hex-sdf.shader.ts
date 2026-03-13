@@ -76,6 +76,7 @@ export class HexSdfTextureShader {
     in float aHasImage;
     in float aHeat;
     in vec3 aIdentityColor;
+    in float aHasBranch;
 
     out vec2 vUV;
     out vec4 vLabelUV;
@@ -84,6 +85,7 @@ export class HexSdfTextureShader {
     out float vHasImage;
     out float vHeat;
     out vec3 vIdentityColor;
+    out float vHasBranch;
 
     uniform mat3 uProjectionMatrix;
     uniform mat3 uWorldTransformMatrix;
@@ -99,6 +101,7 @@ export class HexSdfTextureShader {
       vHasImage = aHasImage;
       vHeat = aHeat;
       vIdentityColor = aIdentityColor;
+      vHasBranch = aHasBranch;
     }
   `
 
@@ -112,6 +115,7 @@ export class HexSdfTextureShader {
     in float vHasImage;
     in float vHeat;
     in vec3 vIdentityColor;
+    in float vHasBranch;
 
     uniform vec2 u_quadSize;
     uniform float u_radiusPx;
@@ -178,6 +182,18 @@ export class HexSdfTextureShader {
         vec3 heatTint = mix(vIdentityColor, warmColor, vHeat);
         float heatAlpha = mix(0.07, 0.68, vHeat);
         color.rgb = mix(color.rgb, heatTint, heatRing * heatAlpha);
+      }
+
+      // branch indicator: inner hex ring + subtle portal glow
+      if (vHasBranch > 0.5) {
+        float innerD = sdHex(rotated, u_radiusPx * 0.68);
+        float ring = 1.0 - smoothstep(0.0, 1.2, abs(innerD));
+        vec3 ringColor = vec3(0.45, 0.72, 1.0);
+        color.rgb = mix(color.rgb, ringColor, ring * 0.7);
+
+        float dist = length(local) / u_radiusPx;
+        float glow = exp(-dist * dist * 3.0);
+        color.rgb += ringColor * glow * 0.12;
       }
 
       gl_FragColor = color;

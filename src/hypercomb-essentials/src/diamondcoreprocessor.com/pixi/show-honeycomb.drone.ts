@@ -14,7 +14,7 @@ import { TILE_PROPERTIES_FILE, isSignature } from '../editor/tile-properties.js'
 import type { HistoryService, HistoryOp } from '../core/history.service.js'
 
 type Axial = { q: number; r: number }
-type SeedCell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number }
+type SeedCell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean }
 
 /** Deterministic label → RGB via DJB2 hash → HSL → RGB. Returns [r, g, b] in 0–1 range. */
 function labelToRgb(label: string): [number, number, number] {
@@ -579,6 +579,12 @@ export class ShowHoneycombWorker extends Drone {
 
     const localSeedSet = new Set(localSeeds)
 
+    // detect which local seeds have children (branches)
+    const branchSet = new Set<string>()
+    await Promise.all(localSeeds.map(async (name) => {
+      if (await this.checkHasBranch(dir, name)) branchSet.add(name)
+    }))
+
     // note: apply history — filter out seeds whose last operation is "remove"
     const historyService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as HistoryService | undefined
     if (historyService) {
@@ -621,7 +627,7 @@ export class ShowHoneycombWorker extends Drone {
       }
 
       // stream seeds progressively (async, non-blocking)
-      void this.streamSeeds(dir, seedNames, localSeedSet, axial)
+      void this.streamSeeds(dir, seedNames, localSeedSet, axial, branchSet)
       return
     }
 
@@ -638,7 +644,7 @@ export class ShowHoneycombWorker extends Drone {
       return
     }
 
-    const cells = this.buildCellsFromAxial(axial, seedNames, maxCells, localSeedSet)
+    const cells = this.buildCellsFromAxial(axial, seedNames, maxCells, localSeedSet, branchSet)
     if (cells.length === 0) {
       this.clearMesh()
       return
@@ -662,6 +668,7 @@ export class ShowHoneycombWorker extends Drone {
     seedNames: string[],
     localSeedSet: Set<string>,
     axial: any,
+    branchSet?: Set<string>,
   ): Promise<void> => {
     this.streamActive = true
     this.cancelStreamFlag = false
@@ -680,6 +687,7 @@ export class ShowHoneycombWorker extends Drone {
         r: axialCell.r,
         label,
         external: !localSeedSet.has(label),
+        hasBranch: branchSet?.has(label) ?? false,
       }
 
       await this.loadCellImages([cell], dir)
@@ -788,8 +796,9 @@ export class ShowHoneycombWorker extends Drone {
     if (this.listening) return
     this.listening = true
 
-    // respond to processor-emitted synchronize
+    // respond to processor-emitted synchronize and URL navigation
     window.addEventListener('synchronize', () => this.requestRender())
+    window.addEventListener('navigate', () => this.requestRender())
 
     // tile:saved effect — invalidate image cache for the specific seed so re-render picks up new image
     this.onEffect<{ seed: string }>('tile:saved', (payload) => {
@@ -885,14 +894,24 @@ export class ShowHoneycombWorker extends Drone {
     return out
   }
 
-  private buildCellsFromAxial = (axial: any, names: string[], max: number, localSeedSet: Set<string>): SeedCell[] => {
+  private checkHasBranch = async (parentDir: FileSystemDirectoryHandle, seedName: string): Promise<boolean> => {
+    try {
+      const seedDir = await parentDir.getDirectoryHandle(seedName, { create: false })
+      for await (const [name, handle] of seedDir.entries()) {
+        if (handle.kind === 'directory' && !name.startsWith('__')) return true
+      }
+    } catch { /* seed doesn't exist or can't be read */ }
+    return false
+  }
+
+  private buildCellsFromAxial = (axial: any, names: string[], max: number, localSeedSet: Set<string>, branchSet?: Set<string>): SeedCell[] => {
     const out: SeedCell[] = []
 
     for (let i = 0; i < max; i++) {
       const a = axial.items.get(i) as Axial | undefined
       const label = names[i]
       if (!a || !label) break
-      out.push({ q: a.q, r: a.r, label, external: !localSeedSet.has(label), heat: this.#heatByLabel.get(label) ?? 0 })
+      out.push({ q: a.q, r: a.r, label, external: !localSeedSet.has(label), heat: this.#heatByLabel.get(label) ?? 0, hasBranch: branchSet?.has(label) ?? false })
     }
 
     return out
@@ -954,7 +973,7 @@ export class ShowHoneycombWorker extends Drone {
     const selectionService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SelectionService') as
       { isSelected: (label: string) => boolean } | undefined
     let s = ''
-    for (const c of cells) s += `${c.q},${c.r}:${c.label}:${c.external ? 1 : 0}:${c.imageSig ?? ''}|`
+    for (const c of cells) s += `${c.q},${c.r}:${c.label}:${c.external ? 1 : 0}:${c.imageSig ?? ''}:${c.hasBranch ? 1 : 0}|`
     return s
   }
 
@@ -977,9 +996,10 @@ export class ShowHoneycombWorker extends Drone {
     const hasImage = new Float32Array(cells.length * 4)
     const heat = new Float32Array(cells.length * 4)
     const identityColor = new Float32Array(cells.length * 12)
+    const branch = new Float32Array(cells.length * 4)
     const idx = new Uint32Array(cells.length * 6)
 
-    let pv = 0, uvp = 0, luvp = 0, tkp = 0, iuvp = 0, hip = 0, hp = 0, icp = 0, ii = 0, base = 0
+    let pv = 0, uvp = 0, luvp = 0, tkp = 0, iuvp = 0, hip = 0, hp = 0, icp = 0, bp = 0, ii = 0, base = 0
 
     for (const c of cells) {
       const { x, y } = this.axialToPixel(c.q, c.r, spacing)
@@ -1021,6 +1041,10 @@ export class ShowHoneycombWorker extends Drone {
       identityColor.set([cr, cg, cb, cr, cg, cb, cr, cg, cb, cr, cg, cb], icp)
       icp += 12
 
+      const b = c.hasBranch ? 1 : 0
+      branch.set([b, b, b, b], bp)
+      bp += 4
+
       idx.set([base, base + 1, base + 2, base, base + 2, base + 3], ii)
       ii += 6
       base += 4
@@ -1035,6 +1059,7 @@ export class ShowHoneycombWorker extends Drone {
       ; (g as any).addAttribute('aHasImage', hasImage, 1)
       ; (g as any).addAttribute('aHeat', heat, 1)
       ; (g as any).addAttribute('aIdentityColor', identityColor, 3)
+      ; (g as any).addAttribute('aHasBranch', branch, 1)
       ; (g as any).addIndex(idx)
 
     return g

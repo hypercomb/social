@@ -30,8 +30,6 @@ import type { ImageEditorService } from
 })
 export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
 
-  private readonly injector = inject(Injector)
-
   @ViewChild('imageCanvas', { static: false }) imageCanvas!: ElementRef<HTMLDivElement>
 
   private get editorService(): TileEditorService {
@@ -89,22 +87,25 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
   // track previous open state for init/teardown
   #wasOpen = false
 
-  private readonly openEffect = effect(() => {
-    const isOpen = this.open()
-    if (isOpen && !this.#wasOpen) {
-      this.linkValue = this.link$()
-      this.borderColorValue = this.borderColor$()
-      this.backgroundColorValue = this.backgroundColor$()
+  constructor() {
+    const injector = inject(Injector)
+    effect(() => {
+      const isOpen = this.open()
+      if (isOpen && !this.#wasOpen) {
+        this.linkValue = this.link$()
+        this.borderColorValue = this.borderColor$()
+        this.backgroundColorValue = this.backgroundColor$()
 
-      queueMicrotask(() => this.#initCanvas())
-    }
-    if (!isOpen && this.#wasOpen) {
-      this.linkValue = ''
-      this.borderColorValue = ''
-      this.backgroundColorValue = ''
-    }
-    this.#wasOpen = isOpen
-  }, { injector: this.injector })
+        queueMicrotask(() => this.#initCanvas())
+      }
+      if (!isOpen && this.#wasOpen) {
+        this.linkValue = ''
+        this.borderColorValue = ''
+        this.backgroundColorValue = ''
+      }
+      this.#wasOpen = isOpen
+    }, { injector })
+  }
 
   // ── canvas initialization ──────────────────────────────────────
 
