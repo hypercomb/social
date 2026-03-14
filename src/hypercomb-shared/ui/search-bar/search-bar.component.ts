@@ -17,13 +17,9 @@ import { EffectBus } from '@hypercomb/core'
 })
 export class SearchBarComponent implements AfterViewInit, OnDestroy {
 
-  @ViewChild('input', { read: ElementRef })
-  private inputRef?: ElementRef<HTMLInputElement>
+  @ViewChild('input', { read: ElementRef }) private inputRef!: ElementRef<HTMLInputElement>
 
   private get input(): ElementRef<HTMLInputElement> {
-    if (!this.inputRef) {
-      throw new Error('SearchBarComponent input is not available before view init')
-    }
     return this.inputRef
   }
 
