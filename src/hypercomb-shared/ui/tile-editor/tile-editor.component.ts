@@ -4,10 +4,7 @@
 import {
   Component,
   computed,
-  effect,
   ElementRef,
-  inject,
-  Injector,
   ViewChild,
   type AfterViewInit,
   type OnInit,
@@ -87,24 +84,23 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
   // track previous open state for init/teardown
   #wasOpen = false
 
-  constructor() {
-    const injector = inject(Injector)
-    effect(() => {
-      const isOpen = this.open()
-      if (isOpen && !this.#wasOpen) {
-        this.linkValue = this.link$()
-        this.borderColorValue = this.borderColor$()
-        this.backgroundColorValue = this.backgroundColor$()
+  // ── open/close side effects (EventTarget listener, no inject) ──
 
-        queueMicrotask(() => this.#initCanvas())
-      }
-      if (!isOpen && this.#wasOpen) {
-        this.linkValue = ''
-        this.borderColorValue = ''
-        this.backgroundColorValue = ''
-      }
-      this.#wasOpen = isOpen
-    }, { injector })
+  #onEditorChange = (): void => {
+    const isOpen = this.editorService?.mode === 'editing'
+    if (isOpen && !this.#wasOpen) {
+      this.linkValue = this.editorService?.link ?? ''
+      this.borderColorValue = this.editorService?.borderColor ?? ''
+      this.backgroundColorValue = this.editorService?.backgroundColor ?? ''
+
+      queueMicrotask(() => this.#initCanvas())
+    }
+    if (!isOpen && this.#wasOpen) {
+      this.linkValue = ''
+      this.borderColorValue = ''
+      this.backgroundColorValue = ''
+    }
+    this.#wasOpen = isOpen
   }
 
   // ── canvas initialization ──────────────────────────────────────
@@ -204,14 +200,18 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
 
   ngOnInit(): void {
     window.addEventListener('keydown', this.#onKeyDown)
+    const target = get('@diamondcoreprocessor.com/TileEditorService') as EventTarget | undefined
+    target?.addEventListener('change', this.#onEditorChange)
   }
 
   ngAfterViewInit(): void {
-    // canvas init handled reactively via effect
+    // canvas init handled reactively via change listener
   }
 
   ngOnDestroy(): void {
     window.removeEventListener('keydown', this.#onKeyDown)
+    const target = get('@diamondcoreprocessor.com/TileEditorService') as EventTarget | undefined
+    target?.removeEventListener('change', this.#onEditorChange)
     this.imageEditor?.destroy()
   }
 }

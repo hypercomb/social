@@ -14,7 +14,7 @@
   "scripts": {
     "audit-imports": "tsx scripts/audit-imports.ts",
     "build:core": "npm --prefix hypercomb-core run build",
-    "build:essentials": "npm --prefix hypercomb-essentials run build && npm run build:module",
+    "build:essentials": "npm --prefix hypercomb-essentials run build && npm run build:module && npm --prefix hypercomb-web run runtime:core",
     "build:packages": "npm run build:core && npm run build:essentials",
     "bump": "tsx scripts/bump-version.ts",
     "publish:all": "tsx scripts/publish.ts",
