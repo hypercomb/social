@@ -19,24 +19,56 @@ jobs:
           submodules: true
           lfs: false
 
-      - name: Use Node 22.12.0
+      - name: Use Node 20.19.0
         uses: actions/setup-node@v4
         with:
           node-version: 20.19.0
           cache: 'npm'
           cache-dependency-path: 'src/package-lock.json'
 
+      - name: Install workspace root dependencies
+        working-directory: src
+        run: |
+          rm -rf node_modules package-lock.json
+          npm install
 
-      # 3️⃣ Build & Deploy using Azure Static Web Apps Action
-      - name: Build & Deploy
+      - name: Install essentials dependencies
+        working-directory: src/hypercomb-essentials
+        run: npm ci
+
+      - name: Build hypercomb-core
+        working-directory: src/hypercomb-core
+        run: npm run build
+
+      - name: Install web dependencies
+        working-directory: src/hypercomb-web
+        run: npm ci
+
+      - name: Link shared node_modules to web (prevents dual Angular runtime)
+        working-directory: src
+        run: |
+          rm -rf node_modules
+          ln -s hypercomb-web/node_modules node_modules
+
+      - name: Build web runtime assets
+        working-directory: src/hypercomb-web
+        run: npm run runtime
+
+      - name: Build web app
+        working-directory: src/hypercomb-web
+        run: npm run build
+
+      - name: Verify build output
+        run: ls -al src/hypercomb-web/dist/hypercomb-web/browser || true
+
+      - name: Upload to Azure Static Web Apps
         uses: Azure/static-web-apps-deploy@v1
         with:
           azure_static_web_apps_api_token: ${{ secrets.STATIC_WEBSITE_DEVELOPMENT_DEPLOYMENT_TOKEN }}
           action: upload
-          app_location: src                              # Workspace root
-          api_location: ""                               # no API
-          output_location: LOCAL/PBS.HYPERCOMB.WEB/dist/PBS-Hypercomb-Web  # matches angular.json outputPath from workspace root
-          app_build_command: npm ci && npm run build --workspace=pbs-hypercomb-web     # Build specific workspace
+          skip_app_build: true
+          app_location: src/hypercomb-web/dist/hypercomb-web/browser
+          api_location: ""
 
   close_pull_request_job:
     if: github.event_name == 'pull_request' && github.event.action == 'closed'
