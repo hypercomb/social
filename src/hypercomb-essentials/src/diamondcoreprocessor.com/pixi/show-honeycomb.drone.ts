@@ -785,6 +785,7 @@ export class ShowHoneycombWorker extends Drone {
     this.emitEffect('render:cell-count', {
       count: cells.length,
       labels: cells.map(cell => cell.label),
+      branchLabels: cells.filter(cell => cell.hasBranch).map(cell => cell.label),
     })
   }
 

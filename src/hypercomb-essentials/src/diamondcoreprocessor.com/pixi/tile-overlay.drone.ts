@@ -8,7 +8,7 @@ import type { HostReadyPayload } from './pixi-host.drone.js'
 import type { Axial } from '../input/hex-detector.js'
 
 
-type CellCountPayload = { count: number; labels: string[] }
+type CellCountPayload = { count: number; labels: string[]; branchLabels?: string[] }
 
 type OverlayAction = {
   name: string
@@ -37,9 +37,9 @@ const RECT_ALPHA = 0.85
 
 // Icon positions within the overlay (measured from hex center = overlay origin)
 const ICON_SIZE = 8.75
-const EDIT_X = -2
+const EDIT_X = 8.625
 const EDIT_Y = 5
-const GARBAGE_X = 8.625
+const GARBAGE_X = -2
 const GARBAGE_Y = 5
 
 // Seed label styling
@@ -83,6 +83,7 @@ export class TileOverlayDrone extends Drone {
   #hoverLog = 0
 
   #occupiedByAxial = new Map<string, { index: number; label: string }>()
+  #branchLabels = new Set<string>()
 
   // navigation click guard — blocks clicks during layer transitions
   #navigationBlocked = false
@@ -116,6 +117,7 @@ export class TileOverlayDrone extends Drone {
     this.onEffect<CellCountPayload>('render:cell-count', (payload) => {
       this.#cellCount = payload.count
       this.#cellLabels = payload.labels
+      this.#branchLabels = new Set(payload.branchLabels ?? [])
       this.#rebuildOccupiedMap()
       if (this.#overlay && this.#currentAxial) {
         this.#currentIndex = this.#lookupIndex(this.#currentAxial.q, this.#currentAxial.r)
@@ -331,23 +333,17 @@ export class TileOverlayDrone extends Drone {
       return
     }
 
-    // plain left-click on tile → navigate back to parent layer
-    this.#navigateBack()
+    // plain left-click on branch tile → navigate into child layer
+    if (this.#branchLabels.has(entry.label)) {
+      this.#navigateInto(entry.label)
+    }
   }
 
-  // right-click on occupied tile → navigate into that tile's child layer
+  // right-click → navigate back to parent layer
   #onContextMenu = (e: MouseEvent): void => {
     if (this.#navigationBlocked) return
-    if (!this.#renderContainer || !this.#renderer || !this.#canvas) return
-    if (this.#currentIndex === undefined || this.#currentIndex >= this.#cellCount) return
-
-    const entry = this.#occupiedByAxial.get(
-      TileOverlayDrone.axialKey(this.#currentAxial!.q, this.#currentAxial!.r),
-    )
-    if (!entry?.label) return
-
     e.preventDefault()
-    this.#navigateInto(entry.label)
+    this.#navigateBack()
   }
 
   // ── tile navigation ───────────────────────────────────────────
