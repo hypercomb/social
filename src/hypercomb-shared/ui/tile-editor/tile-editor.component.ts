@@ -4,7 +4,6 @@
 import {
   Component,
   computed,
-  effect,
   ElementRef,
   ViewChild,
   type AfterViewInit,
@@ -85,23 +84,21 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
   // track previous open state for init/teardown
   #wasOpen = false
 
-  constructor() {
-    effect(() => {
-      const isOpen = this.open()
-      if (isOpen && !this.#wasOpen) {
-        this.linkValue = this.link$()
-        this.borderColorValue = this.borderColor$()
-        this.backgroundColorValue = this.backgroundColor$()
+  #onModeChange = (): void => {
+    const isOpen = this.open()
+    if (isOpen && !this.#wasOpen) {
+      this.linkValue = this.link$()
+      this.borderColorValue = this.borderColor$()
+      this.backgroundColorValue = this.backgroundColor$()
 
-        queueMicrotask(() => this.#initCanvas())
-      }
-      if (!isOpen && this.#wasOpen) {
-        this.linkValue = ''
-        this.borderColorValue = ''
-        this.backgroundColorValue = ''
-      }
-      this.#wasOpen = isOpen
-    })
+      queueMicrotask(() => this.#initCanvas())
+    }
+    if (!isOpen && this.#wasOpen) {
+      this.linkValue = ''
+      this.borderColorValue = ''
+      this.backgroundColorValue = ''
+    }
+    this.#wasOpen = isOpen
   }
 
   // ── canvas initialization ──────────────────────────────────────
@@ -201,6 +198,12 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
 
   ngOnInit(): void {
     window.addEventListener('keydown', this.#onKeyDown)
+
+    const target = get('@diamondcoreprocessor.com/TileEditorService') as EventTarget | undefined
+    if (target) {
+      target.addEventListener('change', this.#onModeChange)
+      this.#onModeChange() // initial check
+    }
   }
 
   ngAfterViewInit(): void {
@@ -209,6 +212,10 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
 
   ngOnDestroy(): void {
     window.removeEventListener('keydown', this.#onKeyDown)
+    const target = get('@diamondcoreprocessor.com/TileEditorService') as EventTarget | undefined
+    if (target) {
+      target.removeEventListener('change', this.#onModeChange)
+    }
     this.imageEditor?.destroy()
   }
 }
