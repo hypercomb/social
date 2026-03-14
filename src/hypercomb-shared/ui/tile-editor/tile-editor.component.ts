@@ -4,7 +4,10 @@
 import {
   Component,
   computed,
+  effect,
   ElementRef,
+  inject,
+  Injector,
   ViewChild,
   type AfterViewInit,
   type OnInit,
@@ -84,21 +87,24 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
   // track previous open state for init/teardown
   #wasOpen = false
 
-  #onModeChange = (): void => {
-    const isOpen = this.open()
-    if (isOpen && !this.#wasOpen) {
-      this.linkValue = this.link$()
-      this.borderColorValue = this.borderColor$()
-      this.backgroundColorValue = this.backgroundColor$()
+  constructor() {
+    const injector = inject(Injector)
+    effect(() => {
+      const isOpen = this.open()
+      if (isOpen && !this.#wasOpen) {
+        this.linkValue = this.link$()
+        this.borderColorValue = this.borderColor$()
+        this.backgroundColorValue = this.backgroundColor$()
 
-      queueMicrotask(() => this.#initCanvas())
-    }
-    if (!isOpen && this.#wasOpen) {
-      this.linkValue = ''
-      this.borderColorValue = ''
-      this.backgroundColorValue = ''
-    }
-    this.#wasOpen = isOpen
+        queueMicrotask(() => this.#initCanvas())
+      }
+      if (!isOpen && this.#wasOpen) {
+        this.linkValue = ''
+        this.borderColorValue = ''
+        this.backgroundColorValue = ''
+      }
+      this.#wasOpen = isOpen
+    }, { injector })
   }
 
   // ── canvas initialization ──────────────────────────────────────
@@ -198,12 +204,6 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
 
   ngOnInit(): void {
     window.addEventListener('keydown', this.#onKeyDown)
-
-    const target = get('@diamondcoreprocessor.com/TileEditorService') as EventTarget | undefined
-    if (target) {
-      target.addEventListener('change', this.#onModeChange)
-      this.#onModeChange() // initial check
-    }
   }
 
   ngAfterViewInit(): void {
@@ -212,10 +212,6 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
 
   ngOnDestroy(): void {
     window.removeEventListener('keydown', this.#onKeyDown)
-    const target = get('@diamondcoreprocessor.com/TileEditorService') as EventTarget | undefined
-    if (target) {
-      target.removeEventListener('change', this.#onModeChange)
-    }
     this.imageEditor?.destroy()
   }
 }
