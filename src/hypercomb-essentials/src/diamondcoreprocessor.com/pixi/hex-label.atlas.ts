@@ -32,7 +32,7 @@ export class HexLabelAtlas {
     this.atlas = RenderTexture.create({
       width: this.cols * this.cellPx,
       height: this.rows * this.cellPx,
-      resolution: 4,
+      resolution: 8,
     })
 
     // clear once so sampling starts transparent
