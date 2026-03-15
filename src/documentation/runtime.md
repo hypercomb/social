@@ -127,9 +127,9 @@ window.ioc.register('AxialService', new AxialService())
 
 **ShowHoneycombWorker** — subscribes to `'render:host-ready'`. receives the pixi infrastructure and renders the hex grid.
 
-**ZoomDrone** — manages zoom state. uses `ZoomArbiter` for exclusive control (only one input source zooms at a time). `ZoomState` tracks per-scope snapshots, min/max scale (0.05–12), and pivot-preserving zoom math. subscribes to `'render:host-ready'`.
+**ZoomDrone** — manages zoom state. uses `ZoomArbiter` for exclusive control (only one input source zooms at a time). tracks min/max scale (0.05–12) and pivot-preserving zoom math. persists viewport zoom/pan snapshots to the current seed's OPFS properties file, restoring them on navigation. subscribes to `'render:host-ready'`.
 
-**PanningDrone** — manages panning. uses a similar exclusive-control pattern via `begin(source)` / `end(source)`. delegates to `MousePanInput` for mouse-based panning. subscribes to `'render:host-ready'`.
+**PanningDrone** — manages panning. uses a similar exclusive-control pattern via `begin(source)` / `end(source)`. delegates to `MousePanInput` for mouse-based panning. persists pan offset to OPFS alongside zoom state. subscribes to `'render:host-ready'`.
 
 the rendering pipeline is entirely effect-driven. no bee in the pipeline imports another. they coordinate through the bus.
 
@@ -209,11 +209,11 @@ zoom and pan use an exclusive-control pattern to prevent conflicts:
 
 **ZoomArbiter** — `acquire(source)` grants exclusive zoom control to one source (mouse wheel, pinch, programmatic). `release(source)` frees it. only the current holder can zoom.
 
-**PanningDrone** — `begin(source)` / `end(source)` for exclusive pan control.
+**ZoomDrone** — owns the zoom lifecycle. reads persisted viewport state from the current seed's OPFS properties on navigation, applies saved scale/pivot, and debounce-persists changes back. `zoomToScale(scale, pivot)` preserves the screen point under the cursor during zoom.
 
-**ZoomState** — maintains per-scope snapshots. when scope changes (e.g., entering a sub-hive), the current zoom is saved and the new scope's zoom is restored. `zoomToScale(scale, pivot)` preserves the screen point under the cursor during zoom.
+**PanningDrone** — `begin(source)` / `end(source)` for exclusive pan control. persists pan offset alongside zoom state.
 
-this pattern ensures that mouse wheel zoom, pinch zoom, and programmatic zoom never fight each other. the arbiter is a semaphore, not a queue.
+this pattern ensures that mouse wheel zoom, pinch zoom, and programmatic zoom never fight each other. the arbiter is a semaphore, not a queue. viewport state survives page reloads and navigation.
 
 ---
 
@@ -223,12 +223,13 @@ nothing crosses into persistence unless meaning was attached.
 
 lineage writes to OPFS only through explicit operations: `ensure()` creates directories, `addMarker()` writes signature files. the store does not auto-save. the navigation layer reads the url but does not write history entries automatically.
 
-effects are ephemeral — they exist in the bus until the session ends. drone state is ephemeral — it exists until disposal. zoom snapshots are ephemeral — they exist in memory until the page unloads.
+effects are ephemeral — they exist in the bus until the session ends. drone state is ephemeral — it exists until disposal.
 
 the only durable state is:
 1. OPFS directory structure (explicit writes via lineage/store)
 2. nostr events published to relays (explicit publish via mesh)
 3. url path and hash (explicit writes via navigation)
+4. viewport state — zoom/pan snapshots persisted to the current seed's OPFS properties file by ZoomDrone and PanningDrone
 
 everything else is runtime turbulence. if the intent never resolves, nothing persists.
 

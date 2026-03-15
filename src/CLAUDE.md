@@ -99,11 +99,13 @@ src/
 ├── hypercomb-essentials/       # Drones + services, organized by domain namespace
 │   └── src/
 │       ├── diamondcoreprocessor.com/   # Core rendering, navigation, input, mesh
-│       │   ├── core/                   # AxialService, HistoryService, Settings, Zoom
-│       │   ├── input/                  # Pan, Zoom, KeyMapService, TileSelection
-│       │   ├── nostr/                  # NostrMeshDrone, NostrSigner, AmbientPresence
-│       │   ├── pixi/                   # PixiHostDrone, ShowHoneycombDrone, TileOverlay, Shaders
-│       │   ├── editor/                 # TileEditorDrone, TileProperties
+│       │   ├── core/                   # AxialService, HistoryService, Settings, SelectionService, MeshAdapter
+│       │   ├── editor/                 # TileEditorDrone, TileEditorService, ImageEditorService
+│       │   ├── hello-world/            # HelloWorldDrone (dev/test module)
+│       │   ├── input/                  # PanningDrone, ZoomDrone, KeyMapService, TileSelectionDrone
+│       │   ├── nostr/                  # NostrMeshDrone, NostrSigner, AmbientPresenceDrone
+│       │   ├── pixi/                   # PixiHostDrone, ShowHoneycombDrone, TileOverlayDrone, Shaders
+│       │   ├── screen/                 # ScreenService, ScreenState
 │       │   └── settings/               # SettingsDrone, ZoomSettings
 │       └── revolucionstyle.com/        # Cigar journal domain module
 │           ├── journal/                # CigarJournalDrone, JournalEntryDrone, JournalService

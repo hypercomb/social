@@ -193,11 +193,12 @@ the hive is layered. each ring depends only on the rings inside it.
                          organized by domain namespace:
 
   diamondcoreprocessor.com/
-    core/                AxialCoordinate, AxialService, Settings, Zoom
-    input/               PanningDrone, ZoomDrone, KeyMapService
+    core/                AxialService, HistoryService, Settings, SelectionService, MeshAdapter
+    editor/              TileEditorDrone, TileEditorService, ImageEditorService
+    input/               PanningDrone, ZoomDrone, KeyMapService, TileSelectionDrone
     nostr/               NostrMeshDrone, NostrSigner, AmbientPresenceDrone
-    pixi/                PixiHostDrone, ShowHoneycombDrone, TileOverlayDrone, TileSelectionDrone
-    editor/              TileEditorDrone, TileProperties
+    pixi/                PixiHostDrone, ShowHoneycombDrone, TileOverlayDrone, Shaders
+    screen/              ScreenService, ScreenState
 
   revolucionstyle.com/
     journal/             CigarJournalDrone, JournalEntryDrone, JournalService

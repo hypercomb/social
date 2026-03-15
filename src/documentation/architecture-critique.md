@@ -157,7 +157,7 @@ The `Location: Point` field stores screen coordinates as a PixiJS `Point`, and `
 
 **What Fowler would commend:**
 - Axial coordinates are their own type, not just `{x, y}` objects. This is **Value Object** thinking — two coordinates with the same q,r values are semantically equal.
-- The zoom system (`ZoomArbiter`, `ZoomState`) separates the *decision* of what zoom level to use from the *rendering* of that zoom level. This is **Separated Presentation**.
+- The zoom system (`ZoomArbiter`, `ZoomDrone`) separates the *decision* of what zoom level to use from the *rendering* of that zoom level. This is **Separated Presentation**. `ZoomDrone` now persists viewport snapshots to OPFS, extending the separation into durable state.
 - Ring enumeration and adjacency caching show a well-understood domain.
 
 **What remains:**

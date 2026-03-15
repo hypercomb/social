@@ -16,7 +16,7 @@ created --> registered --> active --> disposed
 
 **registered** — the larva. the drone has been added to the colony's registry (the ioc container). other drones can now find it by name. it is being fed — receiving the services it declared as dependencies. but it has not yet acted.
 
-**active** — the adult. the drone has encountered its first grammar, passed its relevance check (`sensed()`), and executed its first heartbeat. it is now a working member of the colony. it emits effects, responds to stimuli, and participates in the hive's life.
+**active** — the adult. the drone has encountered its first grammar, passed its relevance check (`sense()`), and executed its first heartbeat. it is now a working member of the colony. it emits effects, responds to stimuli, and participates in the hive's life.
 
 **disposed** — death, but clean death. the drone's effect subscriptions are automatically severed. its resources are released. it cannot be reactivated. the colony reclaims what it gave. no ghost signals, no phantom listeners, no lingering state.
 
@@ -41,7 +41,7 @@ no drone tries to do everything. each one declares what it needs, what it listen
 
 when a bee encounters a stimulus — a scent, a vibration, a returning scout's dance — it decides whether to respond. not every bee responds to every signal. a nurse bee ignores the waggle dance. a forager ignores the brood pheromone.
 
-drones work identically. every drone has a `sensed()` method that receives a grammar string and returns true or false: *is this relevant to me?* only if the answer is yes does the drone execute its `heartbeat()`.
+drones work identically. every drone has a `sense()` method that receives a grammar string and returns true or false: *is this relevant to me?* only if the answer is yes does the drone execute its `heartbeat()`.
 
 this is declarative sensing. the colony broadcasts. each bee decides for itself.
 

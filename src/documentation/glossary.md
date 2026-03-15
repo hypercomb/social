@@ -150,7 +150,7 @@ layered keyboard shortcut engine. bees push and pop `KeyMapLayer` instances to r
 passive presence tracking via the nostr mesh. `AmbientPresenceDrone` aggregates mesh activity into a per-cell heat map and emits `render:presence-heat`. the hex sdf shader uses heat values to tint tiles, making collective attention visible without profiles or accounts.
 
 ### tile selection drone
-programmatic hex overlay for multi-select. `TileSelectionDrone` in `@hypercomb/essentials` (`pixi/tile-selection.drone.ts`). ctrl+click toggles a tile; ctrl+drag range-selects. first selected tile becomes the **leader** (amber overlay), others are green. emits `selection:changed` with leader info and relative axial coordinates for computational irreducibility math. listens to `render:host-ready`, `render:mesh-offset`, `render:cell-count`.
+programmatic hex overlay for multi-select. `TileSelectionDrone` in `@hypercomb/essentials` (`input/selection/tile-selection.drone.ts`). ctrl+click toggles a tile; ctrl+drag range-selects. first selected tile becomes the **leader** (amber overlay), others are green. emits `selection:changed` with leader info and relative axial coordinates for computational irreducibility math. listens to `render:host-ready`, `render:mesh-offset`, `render:cell-count`.
 
 ### tile editor drone
 seed editing drone. `TileEditorDrone` in `@hypercomb/essentials` (`editor/tile-editor.drone.ts`). provides seed creation and property editing. emits `tile:saved` when a seed is persisted.
