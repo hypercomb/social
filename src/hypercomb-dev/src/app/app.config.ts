@@ -4,6 +4,9 @@ import { provideRouter } from '@angular/router';
 import { routes } from './app.routes';
 import { sharedProviders } from '@hypercomb/shared/core/shared-providers';
 
+// side-effect imports: ensure shared services self-register before Angular boots
+import '@hypercomb/shared/core'
+
 export const appConfig: ApplicationConfig = {
   providers: [
     ...sharedProviders,

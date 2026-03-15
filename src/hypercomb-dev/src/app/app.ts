@@ -2,6 +2,7 @@ import { AfterViewInit, Component, signal } from '@angular/core';
 import type { Bee } from '@hypercomb/core';
 import { RouterOutlet } from '@angular/router';
 import { SearchBarComponent } from '@hypercomb/shared';
+import { initializeRuntime } from '@hypercomb/shared/core';
 import { AxialService } from '@hypercomb/essentials/diamondcoreprocessor.com/core/axial/axial-service';
 import { PanningDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/pan/panning.drone';
 import { PixiHostWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/pixi-host.drone';
@@ -55,6 +56,14 @@ export class App implements AfterViewInit {
 
   public readonly meshPublic = signal(true);
 
+  #runtimeReady: Promise<void>
+
+  constructor() {
+    this.#runtimeReady = initializeRuntime({
+      onMeshStateChange: enabled => this.meshPublic.set(enabled),
+    })
+  }
+
   public toggleMesh = (): void => {
     const mesh = get('@diamondcoreprocessor.com/NostrMeshWorker') as any;
 
@@ -64,8 +73,10 @@ export class App implements AfterViewInit {
   }
 
   public ngAfterViewInit(): void {
-    requestAnimationFrame(() => {
-      void this.startRegisteredBees()
+    void this.#runtimeReady.then(() => {
+      requestAnimationFrame(() => {
+        void this.startRegisteredBees()
+      })
     })
   }
 
@@ -82,13 +93,6 @@ export class App implements AfterViewInit {
       } catch (error) {
         console.warn('[app] failed to start bee', bee.constructor?.name, error)
       }
-    }
-
-    const mesh = get('@diamondcoreprocessor.com/NostrMeshWorker') as any
-    try {
-      this.meshPublic.set(!!mesh?.isNetworkEnabled?.())
-    } catch {
-      // ignore
     }
 
     window.dispatchEvent(new Event('synchronize'))
