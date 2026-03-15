@@ -186,7 +186,7 @@ export class HexSdfTextureShader {
 
       // branch indicator: inner hex ring + subtle portal glow
       if (vHasBranch > 0.5) {
-        float innerD = sdHex(rotated, u_radiusPx * 0.68);
+        float innerD = sdHex(rotated, u_radiusPx * 0.78);
         float ring = 1.0 - smoothstep(0.0, 1.2, abs(innerD));
         vec3 ringColor = vec3(0.45, 0.72, 1.0);
         color.rgb = mix(color.rgb, ringColor, ring * 0.7);

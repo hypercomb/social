@@ -1,6 +1,7 @@
 // src/<domain>/pixi/panning.drone.ts
 import { Drone } from '@hypercomb/core'
 import type { HostReadyPayload } from '../../pixi/pixi-host.drone.js'
+import type { ViewportPersistence } from '../zoom/zoom.drone.js'
 
 type Point = { x: number; y: number }
 
@@ -11,7 +12,9 @@ export class PanningDrone extends Drone {
 
   private stage: any = null
   private canvas: HTMLCanvasElement | null = null
+  private renderer: any = null
   private activeSource: string | null = null
+  private vp: ViewportPersistence | null = null
 
   protected override deps = {
     spacebarPan: '@diamondcoreprocessor.com/SpacebarPanInput',
@@ -23,12 +26,27 @@ export class PanningDrone extends Drone {
     this.onEffect<HostReadyPayload>('render:host-ready', (payload) => {
       this.stage = payload.app.stage
       this.canvas = payload.canvas
+      this.renderer = payload.renderer
 
       const spacebarPan = this.resolve<any>('spacebarPan')
       spacebarPan?.attach(this, this.canvas)
 
       const touchPan = this.resolve<any>('touchPan')
       touchPan?.attach(this, this.canvas)
+
+      // restore saved pan offset from 0000 viewport state
+      this.vp = window.ioc.get<ViewportPersistence>('@diamondcoreprocessor.com/ViewportPersistence') ?? null
+      if (this.vp && this.stage && this.renderer) {
+        void this.vp.read().then((snap) => {
+          if (snap.pan && this.stage && this.renderer) {
+            const s = this.renderer.screen
+            this.stage.position.set(
+              s.width * 0.5 + snap.pan.dx,
+              s.height * 0.5 + snap.pan.dy,
+            )
+          }
+        })
+      }
     })
   }
 
@@ -49,7 +67,9 @@ export class PanningDrone extends Drone {
 
     this.stage = null
     this.canvas = null
+    this.renderer = null
     this.activeSource = null
+    this.vp = null
   }
 
   // -------------------------------------------------
@@ -78,6 +98,15 @@ export class PanningDrone extends Drone {
 
     this.stage.position.x += delta.x
     this.stage.position.y += delta.y
+
+    // persist pan offset relative to center
+    if (this.renderer && this.vp) {
+      const s = this.renderer.screen
+      this.vp.setPan(
+        this.stage.position.x - s.width * 0.5,
+        this.stage.position.y - s.height * 0.5,
+      )
+    }
   }
 }
 

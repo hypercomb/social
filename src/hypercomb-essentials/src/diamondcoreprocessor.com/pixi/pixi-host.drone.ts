@@ -90,7 +90,11 @@ export class PixiHostWorker extends Worker {
 
     const center = (): void => {
       const s = app.renderer.screen
-      app.stage.position.set(s.width * 0.5, s.height * 0.5)
+      const cx = s.width * 0.5
+      const cy = s.height * 0.5
+      const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
+      const pan = vp?.lastPan
+      app.stage.position.set(cx + (pan?.dx ?? 0), cy + (pan?.dy ?? 0))
     }
 
     center()
