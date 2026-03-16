@@ -111,9 +111,17 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
 
   // ── canvas initialization ──────────────────────────────────────
 
+  #initCanvasRetries = 0
+
   async #initCanvas(): Promise<void> {
     const el = this.imageCanvas?.nativeElement
-    if (!el) return
+    if (!el) {
+      if (this.#initCanvasRetries++ < 5) {
+        setTimeout(() => this.#initCanvas(), 50)
+      }
+      return
+    }
+    this.#initCanvasRetries = 0
 
     const settings = get('@diamondcoreprocessor.com/Settings') as any
     const size = settings?.editorSize ?? 400

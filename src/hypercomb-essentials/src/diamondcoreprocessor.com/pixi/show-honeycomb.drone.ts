@@ -46,6 +46,7 @@ type MeshApi = {
   ensureStartedForSig: (sig: string) => void
   awaitReadyForSig?: (sig: string, timeoutMs?: number) => Promise<void>
   getNonExpired: (sig: string) => MeshEvt[]
+  getSwarmSize?: (sig: string) => number
   publish?: (kind: number, sig: string, payload: any, extraTags?: string[][]) => Promise<boolean>
   subscribe?: (sig: string, cb: (e: MeshEvt) => void) => MeshSub
 }
@@ -131,6 +132,14 @@ export class ShowHoneycombWorker extends Drone {
   private lastLocalSeedsBySig = new Map<string, string[]>()
   private lastPublishedGrammarSig = ''
   private lastPublishedGrammarSeed = ''
+
+  // lease renewal: periodic refresh to keep tiles alive for late joiners
+  #lastRefreshAtMs = new Map<string, number>()
+  // sync-request: one-shot per sig arrival
+  #syncRequestedBySig = new Set<string>()
+  // rate-limit triggered republishes from sync-requests
+  #lastTriggeredRepublishAtMs = new Map<string, number>()
+
   private filterKeyword = ''
 
   private readonly onSynchronize = (): void => {
@@ -210,7 +219,10 @@ export class ShowHoneycombWorker extends Drone {
       this.meshSeedsRev++
 
       if (typeof mesh.subscribe === 'function') {
-        this.meshSub = mesh.subscribe(sig, () => {
+        this.meshSub = mesh.subscribe(sig, (evt) => {
+          // detect sync-request from another publisher — trigger immediate republish
+          this.#handleIncomingSyncRequest(evt, mesh, sig)
+
           void (async () => {
             await this.refreshMeshSeeds()
             this.requestRender()
@@ -229,6 +241,23 @@ export class ShowHoneycombWorker extends Drone {
 
     // note: get non-expired items (mesh owns ttl)
     const items = mesh.getNonExpired(sig)
+
+    // sync-request: if we arrived and see no items from other publishers, ask the swarm to republish
+    if (!this.#syncRequestedBySig.has(sig) && this.snapshotPostedBySig.has(sig)) {
+      const hasOtherPublishers = items.some(it => {
+        const pubId = this.readPublisherIdFromEvent(it?.event)
+        return pubId && pubId !== this.publisherId
+      })
+      if (!hasOtherPublishers && typeof mesh.publish === 'function') {
+        this.#syncRequestedBySig.add(sig)
+        void mesh.publish(29010, sig, {
+          type: 'sync-request',
+          publisherId: this.publisherId,
+          requestedAtMs: Date.now()
+        }, [['publisher', this.publisherId], ['mode', 'sync-request']])
+      }
+    }
+
     if (!items || items.length === 0) {
       if (this.meshSeeds.length !== 0) {
         this.meshSeeds = []
@@ -373,6 +402,7 @@ export class ShowHoneycombWorker extends Drone {
         publishedAtMs: Date.now()
       }, [['publisher', this.publisherId], ['mode', 'snapshot']])
       this.snapshotPostedBySig.add(sig)
+      this.#lastRefreshAtMs.set(sig, Date.now())
     }
 
     // 2) thereafter post only newly added single items
@@ -384,6 +414,20 @@ export class ShowHoneycombWorker extends Drone {
 
     this.lastLocalSeedsBySig.set(sig, localSeeds)
 
+    // 3) periodic refresh (lease renewal) — re-publish full seed list so late joiners see tiles
+    const now = Date.now()
+    const lastRefresh = this.#lastRefreshAtMs.get(sig) ?? 0
+    const refreshInterval = this.#computeRefreshInterval(mesh, sig)
+    if (lastRefresh > 0 && (now - lastRefresh) >= refreshInterval) {
+      await mesh.publish(29010, sig, {
+        seeds: localSeeds,
+        publisherId: this.publisherId,
+        mode: 'refresh',
+        publishedAtMs: now
+      }, [['publisher', this.publisherId], ['mode', 'refresh']])
+      this.#lastRefreshAtMs.set(sig, now)
+    }
+
     const grammarSeed = this.toGrammarSeed(grammar)
     const grammarIsNew = grammarSeed && (sig !== this.lastPublishedGrammarSig || grammarSeed !== this.lastPublishedGrammarSeed)
     if (grammarIsNew) {
@@ -392,6 +436,57 @@ export class ShowHoneycombWorker extends Drone {
       this.lastPublishedGrammarSig = sig
       this.lastPublishedGrammarSeed = grammarSeed
     }
+  }
+
+  // swarm-adaptive refresh interval: smaller swarms refresh more frequently
+  #computeRefreshInterval = (mesh: MeshApi, sig: string): number => {
+    const swarmSize = typeof mesh.getSwarmSize === 'function' ? mesh.getSwarmSize(sig) : 0
+    const jitter = Math.floor(Math.random() * 5000)
+    if (swarmSize > 20) return 90_000 + jitter
+    if (swarmSize > 5) return 60_000 + jitter
+    return 45_000 + jitter
+  }
+
+  // handle incoming sync-request from another publisher — republish snapshot (rate-limited)
+  #handleIncomingSyncRequest = (evt: MeshEvt, mesh: MeshApi, sig: string): void => {
+    if (typeof mesh.publish !== 'function') return
+
+    const tags = evt?.event?.tags
+    if (!Array.isArray(tags)) return
+
+    // check for mode=sync-request tag
+    let isSyncRequest = false
+    let requestPublisherId = ''
+    for (const t of tags) {
+      if (!Array.isArray(t) || t.length < 2) continue
+      if (String(t[0]) === 'mode' && String(t[1]) === 'sync-request') isSyncRequest = true
+      if (String(t[0]) === 'publisher') requestPublisherId = String(t[1] ?? '').trim()
+    }
+
+    if (!isSyncRequest) return
+    if (requestPublisherId === this.publisherId) return // ignore own sync-request
+
+    // rate-limit: at most one triggered republish per 10s + jitter per sig
+    const now = Date.now()
+    const lastTriggered = this.#lastTriggeredRepublishAtMs.get(sig) ?? 0
+    const cooldown = 10_000 + Math.floor(Math.random() * 3000)
+    if ((now - lastTriggered) < cooldown) return
+
+    this.#lastTriggeredRepublishAtMs.set(sig, now)
+
+    // republish current local seeds as snapshot
+    const localSeeds = this.lastLocalSeedsBySig.get(sig) ?? []
+    if (localSeeds.length === 0) return
+
+    void mesh.publish(29010, sig, {
+      seeds: localSeeds,
+      publisherId: this.publisherId,
+      mode: 'snapshot',
+      publishedAtMs: now
+    }, [['publisher', this.publisherId], ['mode', 'snapshot']])
+
+    // reset refresh timer since we just published
+    this.#lastRefreshAtMs.set(sig, now)
   }
 
   private addCsvSeeds = (set: Set<string>, raw: string): void => {

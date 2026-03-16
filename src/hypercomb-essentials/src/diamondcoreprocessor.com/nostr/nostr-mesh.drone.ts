@@ -216,6 +216,29 @@ export class NostrMeshWorker extends Drone {
     return this.expiryRules.map(r => ({ ...r }))
   }
 
+  // note: count distinct publisher IDs in non-expired cache for a signature
+  public getSwarmSize = (sig: string): number => {
+    const s = String(sig ?? '').trim()
+    if (!s) return 0
+
+    this.pruneSigExpired(s)
+    const items = this.itemsBySig.get(s)
+    if (!items || items.length === 0) return 0
+
+    const publishers = new Set<string>()
+    for (const item of items) {
+      const tags = item.event?.tags
+      if (!Array.isArray(tags)) continue
+      for (const t of tags) {
+        if (Array.isArray(t) && t.length >= 2 && String(t[0]) === 'publisher') {
+          const v = String(t[1] ?? '').trim()
+          if (v) publishers.add(v)
+        }
+      }
+    }
+    return publishers.size
+  }
+
   // note: creates a bucket (zero consumers) so relays are queried and cache fills
   public ensureStartedForSig = (sig: string): void => {
     this.ensureStartedNow()
@@ -398,7 +421,7 @@ export class NostrMeshWorker extends Drone {
     const s = String(sig ?? '').trim()
     if (!s) return false
 
-    const tags: string[][] = [['x', s]]
+    const tags: string[][] = [['x', s], ['expiration', String(Math.floor(Date.now() / 1000) + 120)]]
 
     if (Array.isArray(extraTags)) {
       for (const t of extraTags) {
@@ -770,7 +793,7 @@ export class NostrMeshWorker extends Drone {
     const ws = this.sockets.get(url)
     if (!ws || ws.readyState !== WebSocket.OPEN) return
 
-    const filter: any = { '#x': [b.sig] }
+    const filter: any = { '#x': [b.sig], since: Math.floor(Date.now() / 1000) - 180 }
     if (Array.isArray(this.kinds) && this.kinds.length > 0) filter.kinds = this.kinds
 
     this.stats.reqSent++
