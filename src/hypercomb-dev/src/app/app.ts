@@ -81,6 +81,7 @@ export class App implements AfterViewInit {
     const next = !this.meshPublic();
     this.meshPublic.set(next);
     mesh?.setNetworkEnabled?.(next, true);
+    EffectBus.emit('mesh:public-changed', { public: next })
   }
 
   public ngAfterViewInit(): void {
@@ -112,5 +113,8 @@ export class App implements AfterViewInit {
     if (this.orientation() === 'flat') {
       EffectBus.emit('render:set-orientation', { flat: true })
     }
+
+    // broadcast initial mesh state so drones can react
+    EffectBus.emit('mesh:public-changed', { public: this.meshPublic() })
   }
 }

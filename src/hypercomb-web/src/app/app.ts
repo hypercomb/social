@@ -1,5 +1,5 @@
 import { AfterViewInit, Component, inject, signal } from '@angular/core'
-import type { Bee } from '@hypercomb/core'
+import { type Bee, EffectBus } from '@hypercomb/core'
 import { RouterOutlet } from '@angular/router'
 import { Header } from './header/header'
 import { CoreAdapter } from './core-adapter'
@@ -56,5 +56,8 @@ export class App implements AfterViewInit {
     }
 
     window.dispatchEvent(new Event('synchronize'))
+
+    // broadcast initial mesh state so drones can react
+    EffectBus.emit('mesh:public-changed', { public: this.meshPublic() })
   }
 }

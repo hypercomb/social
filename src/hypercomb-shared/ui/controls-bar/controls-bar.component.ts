@@ -4,6 +4,7 @@
 import {
   Component,
   computed,
+  input,
   signal,
   type OnInit,
   type OnDestroy,
@@ -21,6 +22,10 @@ import type { SecretStore } from '../../core/secret-store'
   styleUrls: ['./controls-bar.component.scss'],
 })
 export class ControlsBarComponent implements OnInit, OnDestroy {
+
+  // ── inputs ────────────────────────────────────────────────
+
+  readonly meshPublic = input(false)
 
   // ── IoC resolution ──────────────────────────────────────
 
@@ -50,7 +55,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #idle = signal(false)
   #hovered = signal(false)
   #locked = signal(false)
-  #utility = signal(false)
+  #utility = signal(localStorage.getItem('hc:utility-expanded') !== 'false')
   #mode = signal<'browsing' | 'clipboard' | 'secret'>('browsing')
   #clipboardItems = signal<string[]>([])
   #secretValue = signal('')
@@ -140,6 +145,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
 
   readonly toggleUtility = (): void => {
     this.#utility.update(v => !v)
+    localStorage.setItem('hc:utility-expanded', String(this.#utility()))
     if (!this.#utility()) {
       this.#mode.set('browsing')
     }

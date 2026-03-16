@@ -44,24 +44,26 @@
       @if (utility()) {
         <div class="controls-divider"></div>
         <div class="controls-section utility">
-          <button class="ctl-btn" (click)="cut()" aria-label="cut">
-            <span class="hci">%</span>
-          </button>
-          <button class="ctl-btn" (click)="copy()" aria-label="copy">
-            <span class="hci">F</span>
-          </button>
-          <button class="ctl-btn" (click)="remove()" aria-label="delete">
-            <span class="hci">Q</span>
-          </button>
-          <button class="ctl-btn" (click)="moveItem()" aria-label="move">
-            <span class="hci">Z</span>
-          </button>
-          <button class="ctl-btn clipboard-btn" (click)="openClipboard()" aria-label="clipboard">
-            <span class="hci">y</span>
-            @if (clipboardCount() > 0) {
-              <span class="badge">{{ clipboardCount() }}</span>
-            }
-          </button>
+          @if (!meshPublic()) {
+            <button class="ctl-btn" (click)="cut()" aria-label="cut">
+              <span class="hci">%</span>
+            </button>
+            <button class="ctl-btn" (click)="copy()" aria-label="copy">
+              <span class="hci">F</span>
+            </button>
+            <button class="ctl-btn" (click)="remove()" aria-label="delete">
+              <span class="hci">Q</span>
+            </button>
+            <button class="ctl-btn" (click)="moveItem()" aria-label="move">
+              <span class="hci">Z</span>
+            </button>
+            <button class="ctl-btn clipboard-btn" (click)="openClipboard()" aria-label="clipboard">
+              <span class="hci">y</span>
+              @if (clipboardCount() > 0) {
+                <span class="badge">{{ clipboardCount() }}</span>
+              }
+            </button>
+          }
           <button class="ctl-btn" (click)="openSecret()" aria-label="secret">
             <span class="hci">e</span>
           </button>
@@ -76,21 +78,23 @@
     }
 
     @case ('clipboard') {
-      <div class="controls-section clipboard-mode">
-        <span class="mode-label">clipboard</span>
-        @if (clipboardCount() > 0) {
-          <span class="clipboard-count">{{ clipboardCount() }}</span>
-        } @else {
-          <span class="clipboard-empty">empty</span>
-        }
-      </div>
-      <div class="controls-divider"></div>
-      <button class="ctl-btn" (click)="clearClipboard()" aria-label="clear clipboard">
-        <span class="hci">Q</span>
-      </button>
-      <button class="ctl-btn" (click)="closeClipboard()" aria-label="close clipboard">
-        <span class="close-x">&times;</span>
-      </button>
+      @if (!meshPublic()) {
+        <div class="controls-section clipboard-mode">
+          <span class="mode-label">clipboard</span>
+          @if (clipboardCount() > 0) {
+            <span class="clipboard-count">{{ clipboardCount() }}</span>
+          } @else {
+            <span class="clipboard-empty">empty</span>
+          }
+        </div>
+        <div class="controls-divider"></div>
+        <button class="ctl-btn" (click)="clearClipboard()" aria-label="clear clipboard">
+          <span class="hci">Q</span>
+        </button>
+        <button class="ctl-btn" (click)="closeClipboard()" aria-label="close clipboard">
+          <span class="close-x">&times;</span>
+        </button>
+      }
     }
 
     @case ('secret') {

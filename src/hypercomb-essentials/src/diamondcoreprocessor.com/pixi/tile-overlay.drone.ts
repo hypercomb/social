@@ -91,13 +91,14 @@ export class TileOverlayDrone extends Drone {
   // navigation click guard — blocks clicks during layer transitions
   #navigationBlocked = false
   #navigationGuardTimer: ReturnType<typeof setTimeout> | null = null
+  #meshPublic = false
 
   protected override deps = {
     detector: '@diamondcoreprocessor.com/HexDetector',
     axial: '@diamondcoreprocessor.com/AxialService',
     lineage: '@hypercomb.social/Lineage',
   }
-  protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count', 'render:set-orientation', 'navigation:guard-start', 'navigation:guard-end']
+  protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count', 'render:set-orientation', 'navigation:guard-start', 'navigation:guard-end', 'mesh:public-changed']
   protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back']
 
   protected override heartbeat = async (): Promise<void> => {
@@ -143,6 +144,12 @@ export class TileOverlayDrone extends Drone {
     this.onEffect('navigation:guard-end', () => {
       this.#navigationBlocked = false
       if (this.#navigationGuardTimer) { clearTimeout(this.#navigationGuardTimer); this.#navigationGuardTimer = null }
+    })
+
+    // mesh public state — hide overlay when public
+    this.onEffect<{ public: boolean }>('mesh:public-changed', (payload) => {
+      this.#meshPublic = payload.public
+      this.#updateVisibility()
     })
   }
 
@@ -402,7 +409,7 @@ export class TileOverlayDrone extends Drone {
   #updateVisibility(): void {
     if (!this.#overlay) return
     const occupied = this.#currentIndex !== undefined && this.#currentIndex < this.#cellCount
-    this.#overlay.visible = occupied
+    this.#overlay.visible = occupied && !this.#meshPublic
   }
 
   // ── positioning ────────────────────────────────────────────────

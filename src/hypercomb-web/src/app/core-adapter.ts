@@ -1,6 +1,7 @@
 // hypercomb-web/src/app/core/core-adapter.ts
 
 import { Injectable, signal } from "@angular/core"
+import { EffectBus } from "@hypercomb/core"
 import { Store, LayerInstaller, DependencyLoader, initializeRuntime } from "@hypercomb/shared/core"
 import { LayerService } from "./layer-service"
 
@@ -29,6 +30,7 @@ export class CoreAdapter {
     const next = !this.meshPublic()
     this.meshPublic.set(next)
     mesh?.setNetworkEnabled?.(next, true)
+    EffectBus.emit('mesh:public-changed', { public: next })
   }
 
   // -------------------------------------------------
