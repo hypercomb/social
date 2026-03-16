@@ -12,10 +12,16 @@ export class HexDetector {
 
   /**
    * O(1) pixel-to-axial conversion using cube rounding.
-   * Inverse of: x = √3 * spacing * (q + r/2), y = spacing * 1.5 * r
+   * Pointy-top inverse of: x = √3 * s * (q + r/2), y = s * 1.5 * r
+   * Flat-top inverse of:   x = 1.5 * s * q,        y = √3 * s * (r + q/2)
    */
-  public pixelToAxial(px: number, py: number): Axial {
+  public pixelToAxial(px: number, py: number, flat = false): Axial {
     const s = this.spacing
+    if (flat) {
+      const qf = (2 / 3 * px) / s
+      const rf = (py * SQRT3_OVER_3 - px / 3) / s
+      return HexDetector.cubeRound(qf, rf)
+    }
     const qf = (px * SQRT3_OVER_3 - py / 3) / s
     const rf = (2 / 3 * py) / s
     return HexDetector.cubeRound(qf, rf)

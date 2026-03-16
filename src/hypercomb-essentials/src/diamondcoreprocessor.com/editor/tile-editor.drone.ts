@@ -24,8 +24,9 @@ type Store = {
 }
 
 type Settings = {
-  width: number
-  height: number
+  editorSize: number
+  hexWidth: (orientation: 'pointy' | 'flat') => number
+  hexHeight: (orientation: 'pointy' | 'flat') => number
 }
 
 export class TileEditorDrone {
@@ -92,22 +93,66 @@ export class TileEditorDrone {
     if (service.mode !== 'editing') return
 
     const props: Record<string, unknown> = { ...service.properties }
+    const currentOrientation = imageEditor.orientation ?? 'pointy'
 
-    // 1. capture small image (if image loaded)
+    // 1. capture small image for CURRENT orientation (if image loaded)
     if (imageEditor.hasImage) {
-      const smallBlob = await imageEditor.captureSmall(settings.width, settings.height)
-      const smallSig = await store.putResource(smallBlob)
-      ;(props as any).small = { image: smallSig }
+      // save current orientation's transform before switching
+      const currentTransform = imageEditor.getTransform()
+      service.updateTransform(currentTransform.x, currentTransform.y, currentTransform.scale, currentOrientation)
 
-      // 2. store large image blob
+      // capture current orientation snapshot
+      const curW = settings.hexWidth(currentOrientation)
+      const curH = settings.hexHeight(currentOrientation)
+      const currentBlob = await imageEditor.captureSmall(curW, curH)
+      const currentSig = await store.putResource(currentBlob)
+
+      // determine the other orientation
+      const otherOrientation = currentOrientation === 'pointy' ? 'flat' as const : 'pointy' as const
+      const otherW = settings.hexWidth(otherOrientation)
+      const otherH = settings.hexHeight(otherOrientation)
+
+      // switch to the other orientation, capture, then switch back
+      const otherTransform = otherOrientation === 'flat'
+        ? (props as any).flat?.large
+        : (props as any).large
+      await imageEditor.setOrientation(otherOrientation,
+        otherTransform ? { x: otherTransform.x ?? 0, y: otherTransform.y ?? 0, scale: otherTransform.scale ?? 1 } : undefined)
+      const otherBlob = await imageEditor.captureSmall(otherW, otherH)
+      const otherSig = await store.putResource(otherBlob)
+
+      // switch back to the current orientation
+      await imageEditor.setOrientation(currentOrientation,
+        { x: currentTransform.x, y: currentTransform.y, scale: currentTransform.scale })
+
+      // store pointy-top snapshot + transform
+      if (currentOrientation === 'pointy') {
+        ;(props as any).small = { image: currentSig }
+        if (!(props as any).flat) (props as any).flat = {}
+        ;(props as any).flat.small = { image: otherSig }
+      } else {
+        ;(props as any).small = { image: otherSig }
+        if (!(props as any).flat) (props as any).flat = {}
+        ;(props as any).flat.small = { image: currentSig }
+      }
+
+      // 2. store large image blob + transforms
       if (service.largeBlob) {
         const largeSig = await store.putResource(service.largeBlob)
-        const transform = imageEditor.getTransform()
+        const pointyTransform = currentOrientation === 'pointy' ? currentTransform : imageEditor.getTransform()
         ;(props as any).large = {
           image: largeSig,
-          x: transform.x,
-          y: transform.y,
-          scale: transform.scale,
+          x: (props as any).large?.x ?? pointyTransform.x,
+          y: (props as any).large?.y ?? pointyTransform.y,
+          scale: (props as any).large?.scale ?? pointyTransform.scale,
+        }
+        // large.image is shared; flat only stores positioning
+        if (!(props as any).flat) (props as any).flat = {}
+        const flatLarge = (props as any).flat.large ?? {}
+        ;(props as any).flat.large = {
+          x: flatLarge.x ?? 0,
+          y: flatLarge.y ?? 0,
+          scale: flatLarge.scale ?? 1,
         }
       }
     }

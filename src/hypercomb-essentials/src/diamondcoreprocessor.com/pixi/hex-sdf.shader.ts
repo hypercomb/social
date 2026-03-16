@@ -13,6 +13,7 @@ export class HexSdfTextureShader {
     u_quadSize: { value: Vec2; type: 'vec2<f32>' }
     u_radiusPx: { value: number; type: 'f32' }
     u_texSize: { value: Vec2; type: 'vec2<f32>' }
+    u_flat: { value: number; type: 'f32' }
   }
 
   constructor(baseTexture: Texture, externalTexture: Texture, labelAtlas: Texture, cellImageAtlas: Texture, quadW: number, quadH: number, radiusPx: number) {
@@ -20,6 +21,7 @@ export class HexSdfTextureShader {
       u_quadSize: { value: [quadW, quadH], type: 'vec2<f32>' },
       u_radiusPx: { value: radiusPx, type: 'f32' },
       u_texSize: { value: [Math.max(1, baseTexture.width), Math.max(1, baseTexture.height)], type: 'vec2<f32>' },
+      u_flat: { value: 0, type: 'f32' },
     }
 
     // v8 shaded mesh requires uniforms nested under a group and shader inputs using in/out
@@ -42,6 +44,10 @@ export class HexSdfTextureShader {
 
   public setRadiusPx = (r: number): void => {
     this.uniforms.u_radiusPx.value = r
+  }
+
+  public setFlat = (flat: boolean): void => {
+    this.uniforms.u_flat.value = flat ? 1.0 : 0.0
   }
 
   public setBaseTexture = (t: Texture): void => {
@@ -120,6 +126,7 @@ export class HexSdfTextureShader {
     uniform vec2 u_quadSize;
     uniform float u_radiusPx;
     uniform vec2 u_texSize;
+    uniform float u_flat;
 
     uniform sampler2D u_tex0;
     uniform sampler2D u_tex1;
@@ -140,7 +147,8 @@ export class HexSdfTextureShader {
 
     void main() {
       vec2 local = (vUV - 0.5) * u_quadSize;
-      vec2 rotated = rot30(local);
+      // pointy-top: rotate 30° so sdHex clips correctly; flat-top: no rotation needed
+      vec2 rotated = u_flat > 0.5 ? local : rot30(local);
       float d = sdHex(rotated, u_radiusPx);
       if (d > 0.0) discard;
 
@@ -148,9 +156,11 @@ export class HexSdfTextureShader {
 
       if (vHasImage > 0.5) {
         // snapshot cell: fill full hex with the snapshot image (border is baked in)
-        // sdHex r = apothem. Pointy-top bounding box: width = 2r, height = 2r / (√3/2)
-        float hexW = 2.0 * u_radiusPx;
-        float hexH = 2.0 * u_radiusPx / 0.8660254;
+        // sdHex r = apothem. Bounding box depends on orientation.
+        // Pointy-top: width = 2r, height = 2r / (√3/2)
+        // Flat-top:   width = 2r / (√3/2), height = 2r
+        float hexW = u_flat > 0.5 ? 2.0 * u_radiusPx / 0.8660254 : 2.0 * u_radiusPx;
+        float hexH = u_flat > 0.5 ? 2.0 * u_radiusPx : 2.0 * u_radiusPx / 0.8660254;
         vec2 hexScale = vec2(hexW / u_quadSize.x, hexH / u_quadSize.y);
         vec2 hexUV = clamp((vUV - 0.5) / hexScale + 0.5, 0.0, 1.0);
         vec2 imgUV = mix(vImageUV.xy, vImageUV.zw, hexUV);
@@ -186,14 +196,14 @@ export class HexSdfTextureShader {
 
       // branch indicator: inner hex ring + subtle portal glow
       if (vHasBranch > 0.5) {
-        float innerD = sdHex(rotated, u_radiusPx * 0.78);
-        float ring = 1.0 - smoothstep(0.0, 1.2, abs(innerD));
+        float innerD = sdHex(rotated, u_radiusPx * 0.72);
+        float ring = 1.0 - smoothstep(0.0, 2.0, abs(innerD));
         vec3 ringColor = vec3(0.45, 0.72, 1.0);
-        color.rgb = mix(color.rgb, ringColor, ring * 0.7);
+        color.rgb = mix(color.rgb, ringColor, ring * 0.8);
 
         float dist = length(local) / u_radiusPx;
-        float glow = exp(-dist * dist * 3.0);
-        color.rgb += ringColor * glow * 0.12;
+        float glow = exp(-dist * dist * 2.2);
+        color.rgb += ringColor * glow * 0.18;
       }
 
       gl_FragColor = color;

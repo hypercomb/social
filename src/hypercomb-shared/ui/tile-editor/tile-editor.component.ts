@@ -81,6 +81,8 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
   public linkValue = ''
   public borderColorValue = ''
   public backgroundColorValue = ''
+  public isFlat = false
+  public isLinked = true
   // track previous open state for init/teardown
   #wasOpen = false
 
@@ -90,10 +92,14 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
     const isOpen = this.editorService?.mode === 'editing'
     if (isOpen && !this.#wasOpen) {
       this.linkValue = this.editorService?.link ?? ''
-      this.borderColorValue = this.editorService?.borderColor ?? ''
-      this.backgroundColorValue = this.editorService?.backgroundColor ?? ''
+      this.borderColorValue = this.editorService?.borderColor || '#c8975a'
+      this.backgroundColorValue = this.editorService?.backgroundColor || '#1e1e1e'
 
-      queueMicrotask(() => this.#initCanvas())
+      // ensure defaults are persisted in properties
+      if (!this.editorService?.borderColor) this.editorService.setBorderColor(this.borderColorValue)
+      if (!this.editorService?.backgroundColor) this.editorService.setBackgroundColor(this.backgroundColorValue)
+
+      setTimeout(() => this.#initCanvas(), 0)
     }
     if (!isOpen && this.#wasOpen) {
       this.linkValue = ''
@@ -110,10 +116,9 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
     if (!el) return
 
     const settings = get('@diamondcoreprocessor.com/Settings') as any
-    const width = settings?.width ?? 346
-    const height = settings?.height ?? 400
+    const size = settings?.editorSize ?? 400
 
-    await this.imageEditor.initialize(el, width, height)
+    await this.imageEditor.initialize(el, size)
 
     // set initial colors
     this.imageEditor.setBorderColor(this.borderColorValue)
@@ -174,6 +179,48 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly onBackgroundColorChange = (value: string): void => {
     this.editorService.setBackgroundColor(value)
     this.imageEditor.setBackgroundColor(value)
+  }
+
+  // ── link toggle ────────────────────────────────────────────────
+
+  readonly toggleLink = (): void => {
+    this.isLinked = !this.isLinked
+    this.imageEditor.linked = this.isLinked
+    // when re-linking, sync current transform to both orientations immediately
+    if (this.isLinked) {
+      const t = this.imageEditor.getTransform()
+      this.editorService.updateTransform(t.x, t.y, t.scale, 'pointy')
+      this.editorService.updateTransform(t.x, t.y, t.scale, 'flat')
+    }
+  }
+
+  // ── orientation toggle ─────────────────────────────────────────
+
+  readonly toggleOrientation = (): void => {
+    // save current transform before switching
+    const currentOrientation = this.imageEditor.orientation ?? 'pointy'
+    const currentTransform = this.imageEditor.getTransform()
+    this.editorService.updateTransform(
+      currentTransform.x, currentTransform.y, currentTransform.scale, currentOrientation
+    )
+
+    // switch to the other orientation (canvas stays same size)
+    const nextOrientation = currentOrientation === 'pointy' ? 'flat' as const : 'pointy' as const
+
+    // when linked, keep same position; when unlinked, load saved transform
+    let transform: { x: number; y: number; scale: number } | undefined
+    if (!this.isLinked) {
+      const props = this.editorService.properties as any
+      const savedTransform = nextOrientation === 'flat'
+        ? props?.flat?.large
+        : props?.large
+      transform = savedTransform
+        ? { x: savedTransform.x ?? 0, y: savedTransform.y ?? 0, scale: savedTransform.scale ?? 1 }
+        : undefined
+    }
+
+    this.isFlat = nextOrientation === 'flat'
+    void this.imageEditor.setOrientation(nextOrientation, transform)
   }
 
   // ── save / cancel ──────────────────────────────────────────────

@@ -106,14 +106,27 @@ export class TileEditorService extends EventTarget {
     this.#emit()
   }
 
-  readonly updateTransform = (x: number, y: number, scale: number): void => {
-    if (!(this.#properties as any).large) {
-      (this.#properties as any).large = {}
+  readonly updateTransform = (x: number, y: number, scale: number, orientation: 'pointy' | 'flat' = 'pointy'): void => {
+    if (orientation === 'flat') {
+      if (!(this.#properties as any).flat) {
+        (this.#properties as any).flat = {}
+      }
+      if (!(this.#properties as any).flat.large) {
+        (this.#properties as any).flat.large = {}
+      }
+      const flatLarge = (this.#properties as any).flat.large
+      flatLarge.x = x
+      flatLarge.y = y
+      flatLarge.scale = scale
+    } else {
+      if (!(this.#properties as any).large) {
+        (this.#properties as any).large = {}
+      }
+      const large = (this.#properties as any).large
+      large.x = x
+      large.y = y
+      large.scale = scale
     }
-    const large = (this.#properties as any).large
-    large.x = x
-    large.y = y
-    large.scale = scale
     // no emit — transform updates are high frequency (drag/zoom)
   }
 

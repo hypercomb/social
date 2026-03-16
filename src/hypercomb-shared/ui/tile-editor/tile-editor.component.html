@@ -15,6 +15,7 @@
       <div class="image-section">
         <div
           class="image-canvas"
+          [class.flat-top]="isFlat"
           #imageCanvas
           (dragover)="onDragOver($event)"
           (drop)="onImageDrop($event)"
@@ -29,8 +30,14 @@
         </div>
 
         <div class="image-controls">
+          <button type="button" class="link-btn" [class.linked]="isLinked" (click)="toggleLink()" [attr.title]="isLinked ? 'Unlink transforms' : 'Link transforms'">
+            <span class="link-icon" [class.broken]="!isLinked"></span>
+          </button>
           <button type="button" class="upload-btn" (click)="fileInput.click()">
             <span class="hci">U</span> Upload
+          </button>
+          <button type="button" class="orientation-btn" (click)="toggleOrientation()" [attr.title]="isFlat ? 'Switch to pointy-top' : 'Switch to flat-top'">
+            <span class="hci">r</span> {{ isFlat ? 'Flat' : 'Pointy' }}
           </button>
           <input #fileInput type="file" name="tile-image" accept="image/*" hidden (change)="onFileSelect($event)" />
         </div>

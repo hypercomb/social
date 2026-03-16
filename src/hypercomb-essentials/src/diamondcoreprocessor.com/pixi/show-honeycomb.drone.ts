@@ -72,7 +72,7 @@ export class ShowHoneycombWorker extends Drone {
     axial: '@diamondcoreprocessor.com/AxialService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -102,6 +102,9 @@ export class ShowHoneycombWorker extends Drone {
   private streamActive = false
   private cancelStreamFlag = false
   private renderedLocationKey = ''
+
+  // hex orientation: 'pointy' (default) or 'flat'
+  #flat = false
 
   // note: mesh seed state (derived on heartbeat)
   private meshSig = ''
@@ -154,6 +157,17 @@ export class ShowHoneycombWorker extends Drone {
       this.pixiContainer = payload.container
       this.pixiRenderer = payload.renderer
       this.requestRender()
+    })
+
+    // listen for orientation change
+    this.onEffect<{ flat: boolean }>('render:set-orientation', (payload) => {
+      if (this.#flat !== payload.flat) {
+        this.#flat = payload.flat
+        // invalidate image cache since we need different snapshots
+        this.seedImageCache.clear()
+        this.renderedCellsKey = ''
+        this.requestRender()
+      }
     })
 
     // note: always compute mesh seeds on every heartbeat
@@ -724,14 +738,15 @@ export class ShowHoneycombWorker extends Drone {
       return
     }
 
-    const hexHalfW = (Math.sqrt(3) * circumRadiusPx) / 2
-    const hexHalfH = circumRadiusPx
+    // flat-top swaps width/height bounding box
+    const hexHalfW = this.#flat ? circumRadiusPx : (Math.sqrt(3) * circumRadiusPx) / 2
+    const hexHalfH = this.#flat ? (Math.sqrt(3) * circumRadiusPx) / 2 : circumRadiusPx
     const quadHalfW = hexHalfW + padPx
     const quadHalfH = hexHalfH + padPx
     const quadW = quadHalfW * 2
     const quadH = quadHalfH * 2
 
-    const baseTex = await this.ensureTexture('/local.svg')
+    const baseTex = await this.ensureTexture(this.#flat ? '/local-flat.svg' : '/local.svg')
     const externalTex = await this.ensureTexture('/external.svg')
     if (!baseTex || !externalTex || !this.atlas || !this.imageAtlas) {
       this.clearMesh()
@@ -761,6 +776,7 @@ export class ShowHoneycombWorker extends Drone {
         return
       }
     }
+    this.shader.setFlat(this.#flat)
 
     if (!this.hexMesh) {
       this.hexMesh = new Mesh({ geometry: geom as any, shader: (this.shader as any).shader, texture: baseTex as any } as any)
@@ -947,8 +963,8 @@ export class ShowHoneycombWorker extends Drone {
         const text = await file.text()
         const props = JSON.parse(text)
 
-        // standard: small.image is a signature → resolve from __resources__/
-        const smallSig = props?.small?.image
+        // load flat-top snapshot if in flat mode, fallback to pointy-top
+        const smallSig = (this.#flat && props?.flat?.small?.image) || props?.small?.image
         if (smallSig && isSignature(smallSig)) {
           cell.imageSig = smallSig
           this.seedImageCache.set(cell.label, smallSig)
@@ -978,10 +994,9 @@ export class ShowHoneycombWorker extends Drone {
     return s
   }
 
-  private axialToPixel = (q: number, r: number, s: number) => ({
-    x: Math.sqrt(3) * s * (q + r / 2),
-    y: s * 1.5 * r
-  })
+  private axialToPixel = (q: number, r: number, s: number, flat = false) => flat
+    ? { x: 1.5 * s * q, y: Math.sqrt(3) * s * (r + q / 2) }
+    : { x: Math.sqrt(3) * s * (q + r / 2), y: s * 1.5 * r }
 
   private buildFillQuadGeometry(cells: SeedCell[], r: number, gap: number, hw: number, hh: number): Geometry {
     const spacing = r + gap
@@ -1003,7 +1018,7 @@ export class ShowHoneycombWorker extends Drone {
     let pv = 0, uvp = 0, luvp = 0, tkp = 0, iuvp = 0, hip = 0, hp = 0, icp = 0, bp = 0, ii = 0, base = 0
 
     for (const c of cells) {
-      const { x, y } = this.axialToPixel(c.q, c.r, spacing)
+      const { x, y } = this.axialToPixel(c.q, c.r, spacing, this.#flat)
 
       const x0 = x - hw, x1 = x + hw
       const y0 = y - hh, y1 = y + hh

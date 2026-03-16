@@ -1,8 +1,11 @@
 // hypercomb-essentials/src/diamondcoreprocessor.com/editor/image-editor.service.ts
 // Manages a Pixi Application for image editing: drag, zoom, hex-masked capture.
-// Ported from legacy TileImageComponent + ImageCaptureManager.
+// Canvas is always square (editorSize × editorSize). Both hex orientations
+// fit within the same coordinate space — the hex frame is centered.
 
 import { Application, Container, Sprite, Texture, RenderTexture, Rectangle } from 'pixi.js'
+
+export type HexOrientation = 'pointy' | 'flat'
 
 export class ImageEditorService extends EventTarget {
 
@@ -16,60 +19,60 @@ export class ImageEditorService extends EventTarget {
   #isDragging = false
   #dragStart = { x: 0, y: 0 }
 
-  #hexWidth = 0
-  #hexHeight = 0
+  #size = 0  // always square: editorSize × editorSize
   #borderColor = '#c8975a'
   #backgroundColor = 0x1e1e1e
-  #svgSource: string | null = null
+  #svgSourcePointy: string | null = null
+  #svgSourceFlat: string | null = null
+  #orientation: HexOrientation = 'pointy'
+  #linked = true
 
   // ── public state ───────────────────────────────────────────────
 
   get hasImage(): boolean { return this.#sprite !== null }
+  get orientation(): HexOrientation { return this.#orientation }
+  get linked(): boolean { return this.#linked }
+  set linked(value: boolean) { this.#linked = value }
 
   // ── lifecycle ──────────────────────────────────────────────────
 
   readonly initialize = async (
     hostElement: HTMLElement,
-    width: number,
-    height: number
+    size: number,
+    orientation: HexOrientation = 'pointy'
   ): Promise<void> => {
     if (this.#initialized) return
 
     this.#hostElement = hostElement
-    this.#hexWidth = width
-    this.#hexHeight = height
+    this.#orientation = orientation
+    this.#size = size
 
     this.#app = new Application()
 
     await this.#app.init({
-      width,
-      height,
+      width: size,
+      height: size,
       backgroundColor: 0x1e1e1e,
       antialias: true,
       autoDensity: true,
     })
 
     this.#app.stage.eventMode = 'static'
-    // force canvas to fill its container (Angular view encapsulation
-    // prevents the SCSS canvas rule from reaching this dynamic element)
     this.#app.canvas.style.display = 'block'
     this.#app.canvas.style.width = '100%'
     this.#app.canvas.style.height = '100%'
     this.#app.canvas.style.cursor = 'auto'
     hostElement.appendChild(this.#app.canvas)
 
-    // create main container with hit area for pointer events
     this.#container = new Container()
     this.#container.eventMode = 'dynamic'
     this.#container.cursor = 'move'
-    this.#container.hitArea = new Rectangle(0, 0, width, height)
+    this.#container.hitArea = new Rectangle(0, 0, size, size)
     this.#container.on('pointerdown', this.#onPointerDown)
     this.#app.stage.addChild(this.#container)
 
-    // listen for wheel on the canvas element
     this.#app.canvas.addEventListener('wheel', this.#onWheel, { passive: false })
 
-    // hex frame border — loaded from SVG, color-swappable
     await this.#loadHexFrame()
 
     this.#initialized = true
@@ -79,7 +82,6 @@ export class ImageEditorService extends EventTarget {
   readonly destroy = (): void => {
     if (!this.#initialized) return
 
-    // grab canvas ref before destroy nullifies it
     const canvas = this.#app?.canvas ?? null
 
     canvas?.removeEventListener('wheel', this.#onWheel)
@@ -88,7 +90,6 @@ export class ImageEditorService extends EventTarget {
     this.#app?.stop()
     this.#app?.destroy()
 
-    // remove canvas from DOM
     if (this.#hostElement && canvas) {
       try { this.#hostElement.removeChild(canvas) } catch { /* already gone */ }
     }
@@ -100,6 +101,33 @@ export class ImageEditorService extends EventTarget {
     this.#hostElement = null
     this.#initialized = false
     this.#isDragging = false
+    this.#orientation = 'pointy'
+    this.#linked = true
+    this.#emit()
+  }
+
+  // ── orientation switching ────────────────────────────────────────
+  // Canvas stays the same size. Only the hex frame changes.
+
+  readonly setOrientation = async (
+    orientation: HexOrientation,
+    transform?: { x: number; y: number; scale: number }
+  ): Promise<void> => {
+    if (!this.#app || !this.#container || !this.#initialized) return
+    if (orientation === this.#orientation) return
+
+    this.#orientation = orientation
+
+    // reposition sprite if a saved transform was provided
+    if (this.#sprite && transform) {
+      const half = this.#size / 2
+      this.#sprite.x = transform.x + half
+      this.#sprite.y = transform.y + half
+      this.#sprite.scale.set(transform.scale)
+    }
+
+    // reload hex frame for new orientation (centered in same square)
+    await this.#loadHexFrame()
     this.#emit()
   }
 
@@ -111,7 +139,6 @@ export class ImageEditorService extends EventTarget {
   ): Promise<void> => {
     if (!this.#container || !this.#app) return
 
-    // remove existing sprite
     if (this.#sprite) {
       this.#container.removeChild(this.#sprite)
       this.#sprite.destroy()
@@ -120,21 +147,20 @@ export class ImageEditorService extends EventTarget {
 
     const bitmap = await createImageBitmap(blob)
     const texture = Texture.from(bitmap)
+    const half = this.#size / 2
 
     this.#sprite = new Sprite(texture)
     this.#sprite.anchor.set(0.5)
 
-    // apply saved transform or center the image
     if (transform) {
-      this.#sprite.x = transform.x + this.#hexWidth / 2
-      this.#sprite.y = transform.y + this.#hexHeight / 2
+      this.#sprite.x = transform.x + half
+      this.#sprite.y = transform.y + half
       this.#sprite.scale.set(transform.scale)
     } else {
-      // fit image into hex dimensions
-      this.#sprite.x = this.#hexWidth / 2
-      this.#sprite.y = this.#hexHeight / 2
-      const scaleX = this.#hexWidth / bitmap.width
-      const scaleY = this.#hexHeight / bitmap.height
+      this.#sprite.x = half
+      this.#sprite.y = half
+      const scaleX = this.#size / bitmap.width
+      const scaleY = this.#size / bitmap.height
       this.#sprite.scale.set(Math.max(scaleX, scaleY))
     }
 
@@ -143,12 +169,13 @@ export class ImageEditorService extends EventTarget {
   }
 
   // ── capture ────────────────────────────────────────────────────
-  // Renders the container at hex dimensions to a WebP blob.
-  // Includes the hex frame border — the snapshot IS the cell visual.
+  // Renders the hex region (not the full square) to a WebP blob.
+  // The hex is centered in the square canvas, so we offset the
+  // container to crop to the hex bounding box.
 
   readonly captureSmall = async (
-    width: number,
-    height: number
+    hexWidth: number,
+    hexHeight: number
   ): Promise<Blob> => {
     if (!this.#app || !this.#container) {
       throw new Error('ImageEditorService not initialized')
@@ -156,18 +183,29 @@ export class ImageEditorService extends EventTarget {
 
     const renderer = this.#app.renderer
     const renderTexture = RenderTexture.create({
-      width,
-      height,
+      width: hexWidth,
+      height: hexHeight,
       resolution: 1,
       scaleMode: 'nearest',
       antialias: false,
     })
 
+    // offset container so hex center (size/2, size/2) maps to output center
+    const offsetX = hexWidth / 2 - this.#size / 2
+    const offsetY = hexHeight / 2 - this.#size / 2
+    this.#container.x = offsetX
+    this.#container.y = offsetY
+
     renderer.render({
       container: this.#container,
       target: renderTexture,
       clear: true,
+      clearColor: this.#backgroundColor,
     } as any)
+
+    // restore
+    this.#container.x = 0
+    this.#container.y = 0
 
     const canvas = renderer.extract.canvas(renderTexture) as HTMLCanvasElement
     renderTexture.destroy(true)
@@ -179,17 +217,17 @@ export class ImageEditorService extends EventTarget {
 
   readonly getTransform = (): { x: number; y: number; scale: number } => {
     if (!this.#sprite) return { x: 0, y: 0, scale: 1 }
-
+    const half = this.#size / 2
     return {
-      x: this.#sprite.x - this.#hexWidth / 2,
-      y: this.#sprite.y - this.#hexHeight / 2,
+      x: this.#sprite.x - half,
+      y: this.#sprite.y - half,
       scale: this.#sprite.scale.x,
     }
   }
 
   // ── hex frame border ───────────────────────────────────────────
-  // Loaded from /local.svg at exact canvas dimensions.
-  // Dynamic color via SVG fill attribute replacement.
+  // Loaded from /local.svg (pointy, 346×400) or /local-flat.svg (flat, 400×346).
+  // Centered within the square canvas.
 
   readonly setBackgroundColor = (color: string): void => {
     if (!this.#app) return
@@ -210,18 +248,27 @@ export class ImageEditorService extends EventTarget {
   async #loadHexFrame(): Promise<void> {
     if (!this.#container) return
 
-    // fetch SVG source once
-    if (!this.#svgSource) {
+    const isFlat = this.#orientation === 'flat'
+    const svgPath = isFlat ? '/local-flat.svg' : '/local.svg'
+
+    // fetch SVG source once per orientation
+    if (isFlat && !this.#svgSourceFlat) {
       try {
-        const resp = await fetch('/local.svg')
-        this.#svgSource = await resp.text()
+        const resp = await fetch(svgPath)
+        this.#svgSourceFlat = await resp.text()
+      } catch { return }
+    } else if (!isFlat && !this.#svgSourcePointy) {
+      try {
+        const resp = await fetch(svgPath)
+        this.#svgSourcePointy = await resp.text()
       } catch { return }
     }
 
-    // replace all fill colors in the SVG with the current border color
-    const colored = this.#svgSource.replace(/fill:#[0-9a-fA-F]{6}/g, `fill:${this.#borderColor}`)
+    const svgSource = isFlat ? this.#svgSourceFlat! : this.#svgSourcePointy!
 
-    // blob → Image element (handles SVG filters/namespaces) → Pixi Texture
+    // replace all fill colors in the SVG with the current border color
+    const colored = svgSource.replace(/fill:#[0-9a-fA-F]{6}/g, `fill:${this.#borderColor}`)
+
     const blob = new Blob([colored], { type: 'image/svg+xml' })
     const url = URL.createObjectURL(blob)
     const img = new Image()
@@ -237,11 +284,17 @@ export class ImageEditorService extends EventTarget {
       this.#hexFrame = null
     }
 
+    // natural SVG dimensions
+    const hexW = isFlat ? 400 : 346
+    const hexH = isFlat ? 346 : 400
+
     this.#hexFrame = new Sprite(texture)
     this.#hexFrame.eventMode = 'none'
-    // stretch SVG (346×400 integer) to exact canvas dims (346.41×400)
-    this.#hexFrame.width = this.#hexWidth
-    this.#hexFrame.height = this.#hexHeight
+    this.#hexFrame.width = hexW
+    this.#hexFrame.height = hexH
+    // center within the square canvas
+    this.#hexFrame.x = (this.#size - hexW) / 2
+    this.#hexFrame.y = (this.#size - hexH) / 2
     this.#container.addChild(this.#hexFrame)
   }
 
@@ -298,11 +351,14 @@ export class ImageEditorService extends EventTarget {
   // ── internal helpers ───────────────────────────────────────────
 
   #syncTransform(): void {
-    // push transform to TileEditorService (if available)
     const service = (window as any).ioc?.get?.('@diamondcoreprocessor.com/TileEditorService')
     if (service?.updateTransform) {
       const t = this.getTransform()
-      service.updateTransform(t.x, t.y, t.scale)
+      service.updateTransform(t.x, t.y, t.scale, this.#orientation)
+      if (this.#linked) {
+        const other: HexOrientation = this.#orientation === 'pointy' ? 'flat' : 'pointy'
+        service.updateTransform(t.x, t.y, t.scale, other)
+      }
     }
   }
 

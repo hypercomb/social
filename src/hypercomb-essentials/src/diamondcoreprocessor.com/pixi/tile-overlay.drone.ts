@@ -409,11 +409,10 @@ export class TileOverlayDrone extends Drone {
     this.#updateVisibility()
   }
 
-  #axialToPixel(q: number, r: number) {
-    return {
-      x: Math.sqrt(3) * this.#spacing * (q + r / 2),
-      y: this.#spacing * 1.5 * r,
-    }
+  #axialToPixel(q: number, r: number, flat = false) {
+    return flat
+      ? { x: 1.5 * this.#spacing * q, y: Math.sqrt(3) * this.#spacing * (r + q / 2) }
+      : { x: Math.sqrt(3) * this.#spacing * (q + r / 2), y: this.#spacing * 1.5 * r }
   }
 
   // ── occupied position lookup ───────────────────────────────────

@@ -108,7 +108,7 @@
 .image-canvas {
   position: relative;
   height: min(40vh, 400px);
-  aspect-ratio: 346 / 400;
+  aspect-ratio: 1;
   max-width: 100%;
   background: #0d0d10;
   border: 1px solid #2a2a2e;
@@ -154,14 +154,21 @@
   pointer-events: none;
   z-index: 1;
 
-  // Pointy-top hexagon mask — exact geometry from Settings:
-  // width = side * sqrt(3) ≈ 346, height = side * 2 = 400
-  // Vertices: (173,0) (346,100) (346,300) (173,400) (0,300) (0,100)
+  // Both hex masks are in a 400×400 viewBox, centered.
+  // Pointy-top: 346×400 hex centered (offset x=27)
+  // Vertices shifted: (200,0) (373,100) (373,300) (200,400) (27,300) (27,100)
   background: rgba(0, 0, 0, 0.55);
-  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 346 400'%3E%3Crect width='346' height='400' fill='white'/%3E%3Cpolygon points='173,0 346,100 346,300 173,400 0,300 0,100' fill='black'/%3E%3C/svg%3E");
-  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 346 400'%3E%3Crect width='346' height='400' fill='white'/%3E%3Cpolygon points='173,0 346,100 346,300 173,400 0,300 0,100' fill='black'/%3E%3C/svg%3E");
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 400'%3E%3Crect width='400' height='400' fill='white'/%3E%3Cpolygon points='200,0 373,100 373,300 200,400 27,300 27,100' fill='black'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 400'%3E%3Crect width='400' height='400' fill='white'/%3E%3Cpolygon points='200,0 373,100 373,300 200,400 27,300 27,100' fill='black'/%3E%3C/svg%3E");
   -webkit-mask-size: 100% 100%;
   mask-size: 100% 100%;
+
+  // Flat-top: 400×346 hex centered (offset y=27)
+  // Vertices shifted: (400,200) (300,373) (100,373) (0,200) (100,27) (300,27)
+  .flat-top & {
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 400'%3E%3Crect width='400' height='400' fill='white'/%3E%3Cpolygon points='400,200 300,373 100,373 0,200 100,27 300,27' fill='black'/%3E%3C/svg%3E");
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 400'%3E%3Crect width='400' height='400' fill='white'/%3E%3Cpolygon points='400,200 300,373 100,373 0,200 100,27 300,27' fill='black'/%3E%3C/svg%3E");
+  }
 }
 
 .image-controls {
@@ -169,7 +176,8 @@
   gap: 0.5em;
 }
 
-.upload-btn {
+.upload-btn,
+.orientation-btn {
   display: flex;
   align-items: center;
   gap: 0.35em;
@@ -178,7 +186,7 @@
   border-radius: 5px;
   color: #ccc;
   cursor: pointer;
-  font-size: 0.8em;
+  font-size: 0.64em;
   padding: 0.35em 0.8em;
   transition: background 0.15s, border-color 0.15s;
 
@@ -190,6 +198,69 @@
   &:hover {
     background: #333336;
     border-color: #555;
+  }
+}
+
+.link-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: #666;
+  cursor: pointer;
+  padding: 0.2em;
+  transition: color 0.15s;
+
+  &:hover {
+    color: #999;
+  }
+
+  &.linked {
+    color: #c8975a;
+
+    &:hover {
+      color: #d4a76a;
+    }
+  }
+}
+
+.link-icon {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  position: relative;
+
+  // two chain links via pseudo-elements
+  &::before,
+  &::after {
+    content: '';
+    position: absolute;
+    width: 8px;
+    height: 6px;
+    border: 2px solid currentColor;
+    border-radius: 3px;
+  }
+
+  &::before {
+    top: 0;
+    left: 0;
+    transform: rotate(-45deg);
+  }
+
+  &::after {
+    bottom: 0;
+    right: 0;
+    transform: rotate(-45deg);
+  }
+
+  // slash through when broken
+  &.broken::before {
+    border-color: #666;
+  }
+
+  &.broken::after {
+    border-color: #666;
   }
 }
 

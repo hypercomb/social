@@ -309,13 +309,14 @@ export class TileSelectionDrone extends Drone {
     }
   }
 
-  #drawHex(cx: number, cy: number, r: number, isLeader: boolean): void {
+  #drawHex(cx: number, cy: number, r: number, isLeader: boolean, flat = false): void {
     if (!this.#layer) return
 
-    // pointy-top hexagon vertices (30deg offset)
+    // pointy-top: 30° offset; flat-top: 0° offset
+    const angleOffset = flat ? 0 : Math.PI / 6
     const verts: number[] = []
     for (let i = 0; i < 6; i++) {
-      const angle = (Math.PI / 3) * i + Math.PI / 6
+      const angle = (Math.PI / 3) * i + angleOffset
       verts.push(cx + r * Math.cos(angle))
       verts.push(cy + r * Math.sin(angle))
     }
@@ -334,11 +335,10 @@ export class TileSelectionDrone extends Drone {
 
   // ── coordinate helpers ────────────────────────────────────────
 
-  #axialToPixel(q: number, r: number) {
-    return {
-      x: Math.sqrt(3) * this.#spacing * (q + r / 2),
-      y: this.#spacing * 1.5 * r,
-    }
+  #axialToPixel(q: number, r: number, flat = false) {
+    return flat
+      ? { x: 1.5 * this.#spacing * q, y: Math.sqrt(3) * this.#spacing * (r + q / 2) }
+      : { x: Math.sqrt(3) * this.#spacing * (q + r / 2), y: this.#spacing * 1.5 * r }
   }
 
   #clientToAxial(cx: number, cy: number): Axial | null {
