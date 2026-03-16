@@ -36,13 +36,16 @@ class TileSelectionDrone extends Drone {
 
   #listening = false
 
+  // hex orientation
+  #flat = false
+
   protected override deps = {
     detector: '@diamondcoreprocessor.com/HexDetector',
     axial: '@diamondcoreprocessor.com/AxialService',
     selection: '@diamondcoreprocessor.com/SelectionService',
   }
 
-  protected override listens = ['render:host-ready', 'render:cell-count', 'render:mesh-offset', 'tile:click', 'navigation:guard-start', 'navigation:guard-end']
+  protected override listens = ['render:host-ready', 'render:cell-count', 'render:mesh-offset', 'render:set-orientation', 'tile:click', 'navigation:guard-start', 'navigation:guard-end']
   protected override emits: string[] = []
 
   protected override heartbeat = async (): Promise<void> => {
@@ -76,6 +79,11 @@ class TileSelectionDrone extends Drone {
         selection.clear()
         selection.add(payload.label)
       }
+    })
+
+    // orientation
+    this.onEffect<{ flat: boolean }>('render:set-orientation', (payload) => {
+      this.#flat = payload.flat
     })
 
     // navigation guard — block clicks during layer transitions
@@ -199,14 +207,14 @@ class TileSelectionDrone extends Drone {
   #labelAtClient(cx: number, cy: number): string | undefined {
     if (!this.#renderContainer || !this.#renderer || !this.#canvas) return undefined
 
-    const detector = this.resolve<{ pixelToAxial(px: number, py: number): Axial }>('detector')
+    const detector = this.resolve<{ pixelToAxial(px: number, py: number, flat?: boolean): Axial }>('detector')
     if (!detector) return undefined
 
     const pixiGlobal = this.#clientToPixiGlobal(cx, cy)
     const local = this.#renderContainer.toLocal(new Point(pixiGlobal.x, pixiGlobal.y))
     const meshLocalX = local.x - this.#meshOffset.x
     const meshLocalY = local.y - this.#meshOffset.y
-    const axial = detector.pixelToAxial(meshLocalX, meshLocalY)
+    const axial = detector.pixelToAxial(meshLocalX, meshLocalY, this.#flat)
 
     const entry = this.#occupiedByAxial.get(axialKey(axial.q, axial.r))
     if (!entry || entry.index >= this.#cellCount) return undefined

@@ -85,6 +85,9 @@ export class TileOverlayDrone extends Drone {
   #occupiedByAxial = new Map<string, { index: number; label: string }>()
   #branchLabels = new Set<string>()
 
+  // hex orientation
+  #flat = false
+
   // navigation click guard — blocks clicks during layer transitions
   #navigationBlocked = false
   #navigationGuardTimer: ReturnType<typeof setTimeout> | null = null
@@ -94,7 +97,7 @@ export class TileOverlayDrone extends Drone {
     axial: '@diamondcoreprocessor.com/AxialService',
     lineage: '@hypercomb.social/Lineage',
   }
-  protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count', 'navigation:guard-start', 'navigation:guard-end']
+  protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count', 'render:set-orientation', 'navigation:guard-start', 'navigation:guard-end']
   protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back']
 
   protected override heartbeat = async (): Promise<void> => {
@@ -123,6 +126,11 @@ export class TileOverlayDrone extends Drone {
         this.#currentIndex = this.#lookupIndex(this.#currentAxial.q, this.#currentAxial.r)
         this.#updateVisibility()
       }
+    })
+
+    // orientation
+    this.onEffect<{ flat: boolean }>('render:set-orientation', (payload) => {
+      this.#flat = payload.flat
     })
 
     // navigation guard — block clicks during layer transitions
@@ -240,14 +248,14 @@ export class TileOverlayDrone extends Drone {
   #onPointerMove = (e: PointerEvent): void => {
     if (!this.#renderContainer || !this.#overlay || !this.#renderer || !this.#canvas) return
 
-    const detector = this.resolve<{ pixelToAxial(px: number, py: number): Axial }>('detector')
+    const detector = this.resolve<{ pixelToAxial(px: number, py: number, flat?: boolean): Axial }>('detector')
     if (!detector) return
 
     const pixiGlobal = this.#clientToPixiGlobal(e.clientX, e.clientY)
     const local = this.#renderContainer.toLocal(new Point(pixiGlobal.x, pixiGlobal.y))
     const meshLocalX = local.x - this.#meshOffset.x
     const meshLocalY = local.y - this.#meshOffset.y
-    const axial = detector.pixelToAxial(meshLocalX, meshLocalY)
+    const axial = detector.pixelToAxial(meshLocalX, meshLocalY, this.#flat)
 
     const hexChanged = !this.#currentAxial
       || this.#currentAxial.q !== axial.q
@@ -401,7 +409,7 @@ export class TileOverlayDrone extends Drone {
 
   #positionOverlay(q: number, r: number): void {
     if (!this.#overlay) return
-    const px = this.#axialToPixel(q, r)
+    const px = this.#axialToPixel(q, r, this.#flat)
     this.#overlay.position.set(
       px.x + this.#meshOffset.x,
       px.y + this.#meshOffset.y,

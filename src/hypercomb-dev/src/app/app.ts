@@ -1,5 +1,6 @@
 import { AfterViewInit, Component, signal } from '@angular/core';
-import type { Bee } from '@hypercomb/core';
+import { type Bee, EffectBus } from '@hypercomb/core';
+import type { HexOrientation } from '@hypercomb/essentials/diamondcoreprocessor.com/core/settings';
 import { RouterOutlet } from '@angular/router';
 import { SearchBarComponent } from '@hypercomb/shared';
 import { initializeRuntime } from '@hypercomb/shared/core';
@@ -55,6 +56,9 @@ export class App implements AfterViewInit {
   protected readonly title = signal('hypercomb-dev');
 
   public readonly meshPublic = signal(true);
+  public readonly orientation = signal<HexOrientation>(
+    (localStorage.getItem('hc:hex-orientation') as HexOrientation) || 'pointy'
+  );
 
   #runtimeReady: Promise<void>
 
@@ -62,6 +66,13 @@ export class App implements AfterViewInit {
     this.#runtimeReady = initializeRuntime({
       onMeshStateChange: enabled => this.meshPublic.set(enabled),
     })
+  }
+
+  public toggleOrientation = (): void => {
+    const next: HexOrientation = this.orientation() === 'pointy' ? 'flat' : 'pointy'
+    this.orientation.set(next)
+    localStorage.setItem('hc:hex-orientation', next)
+    EffectBus.emit('render:set-orientation', { flat: next === 'flat' })
   }
 
   public toggleMesh = (): void => {
@@ -96,5 +107,10 @@ export class App implements AfterViewInit {
     }
 
     window.dispatchEvent(new Event('synchronize'))
+
+    // restore persisted orientation
+    if (this.orientation() === 'flat') {
+      EffectBus.emit('render:set-orientation', { flat: true })
+    }
   }
 }

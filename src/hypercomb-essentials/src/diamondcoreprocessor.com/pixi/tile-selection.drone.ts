@@ -58,11 +58,14 @@ export class TileSelectionDrone extends Drone {
 
   #listening = false
 
+  // hex orientation
+  #flat = false
+
   protected override deps = {
     detector: '@diamondcoreprocessor.com/HexDetector',
     axial: '@diamondcoreprocessor.com/AxialService',
   }
-  protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count']
+  protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count', 'render:set-orientation']
   protected override emits = ['selection:changed']
 
   protected override heartbeat = async (): Promise<void> => {
@@ -85,6 +88,11 @@ export class TileSelectionDrone extends Drone {
       this.#cellLabels = payload.labels
       this.#rebuildOccupiedMap()
       this.#pruneStaleSelections()
+      this.#redraw()
+    })
+
+    this.onEffect<{ flat: boolean }>('render:set-orientation', (payload) => {
+      this.#flat = payload.flat
       this.#redraw()
     })
   }
@@ -300,12 +308,12 @@ export class TileSelectionDrone extends Drone {
       const [qs, rs] = key.split(',')
       const q = Number(qs)
       const rr = Number(rs)
-      const px = this.#axialToPixel(q, rr)
+      const px = this.#axialToPixel(q, rr, this.#flat)
       const cx = px.x + ox
       const cy = px.y + oy
 
       const isLeader = key === this.#leaderKey
-      this.#drawHex(cx, cy, r, isLeader)
+      this.#drawHex(cx, cy, r, isLeader, this.#flat)
     }
   }
 
@@ -343,14 +351,14 @@ export class TileSelectionDrone extends Drone {
 
   #clientToAxial(cx: number, cy: number): Axial | null {
     if (!this.#renderContainer || !this.#renderer || !this.#canvas) return null
-    const detector = this.resolve<{ pixelToAxial(px: number, py: number): Axial }>('detector')
+    const detector = this.resolve<{ pixelToAxial(px: number, py: number, flat?: boolean): Axial }>('detector')
     if (!detector) return null
 
     const pixiGlobal = this.#clientToPixiGlobal(cx, cy)
     const local = this.#renderContainer.toLocal(new Point(pixiGlobal.x, pixiGlobal.y))
     const meshLocalX = local.x - this.#meshOffset.x
     const meshLocalY = local.y - this.#meshOffset.y
-    return detector.pixelToAxial(meshLocalX, meshLocalY)
+    return detector.pixelToAxial(meshLocalX, meshLocalY, this.#flat)
   }
 
   #clientToPixiGlobal(cx: number, cy: number) {

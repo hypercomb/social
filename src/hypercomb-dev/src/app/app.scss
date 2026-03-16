@@ -12,15 +12,15 @@ hc-search-bar {
   min-width: 0;
 }
 
-.mesh-toggle {
+.header-toggle {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 6.5rem;
+  min-width: 5.5rem;
   padding: 0 1.25em;
-  border-radius: 0 3px 3px 0;
   border: 1px solid rgba(255, 45, 138, 0.2);
+  border-right: none;
 
   background: rgba(8, 18, 28, 0.65);
   color: rgba(255, 45, 138, 0.7);
@@ -51,5 +51,10 @@ hc-search-bar {
   &:focus-visible {
     outline: 1px solid rgba(255, 45, 138, 0.5);
     outline-offset: 2px;
+  }
+
+  &:last-of-type {
+    border-right: 1px solid rgba(255, 45, 138, 0.2);
+    border-radius: 0 3px 3px 0;
   }
 }
