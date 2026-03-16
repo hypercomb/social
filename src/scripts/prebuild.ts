@@ -74,9 +74,14 @@ function saveState(state: BuildState): void {
   writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), 'utf8')
 }
 
-function run(cmd: string, cwd: string): void {
+function run(cmd: string, cwd: string, allowFailure = false): void {
   console.log(`${TAG} > ${cmd}`)
-  execSync(cmd, { cwd, stdio: 'inherit' })
+  try {
+    execSync(cmd, { cwd, stdio: 'inherit' })
+  } catch (e) {
+    if (!allowFailure) throw e
+    console.warn(`${TAG} ⚠ command exited with error (non-fatal)`)
+  }
 }
 
 function needsBuild(state: BuildState, key: string, srcDir: string, outputMarker?: string): boolean {
@@ -126,8 +131,11 @@ function main() {
     if (coreDirty || needsBuild(state, 'essentials', essentialsSrc, essentialsMarker)) {
       console.log(`${TAG} building essentials (prepare + tsup)...`)
       run('npm run prepare', essentialsDir)
-      run('npm run build', essentialsDir)
-      recordBuild(state, 'essentials', essentialsSrc)
+      run('npm run build', essentialsDir, true) // DTS may fail on pixi.js types; ESM/CJS still succeed
+      // Only record if the output actually exists
+      if (existsSync(join(essentialsDir, 'dist', 'index.js'))) {
+        recordBuild(state, 'essentials', essentialsSrc)
+      }
     } else {
       console.log(`${TAG} essentials — up to date`)
     }
