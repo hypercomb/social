@@ -17,7 +17,7 @@ Ideas for making the experience more incredible. Each iteration picks one. Archi
 - Ring colors: each historical edit's content signature → `sigToHSL()` (reuses Chromatic Identity's function). If full history sigs aren't available yet, degrade gracefully: use edit count to modulate ring thickness with the current sig's color.
 - One vertex attribute: `vEditCount` — integer [0, N] per cell, clamped to a max ring count (~20) for visual clarity
 - Shader: concentric hex SDFs at decreasing radii. Each ring is `borderWidth / maxRings` thick. Color per ring from a small uniform array or a 1D texture lookup.
-- ShowHoneycombDrone computes edit count when building tile geometry — same pipeline as heat, tidal, identity values
+- ShowHoneycombWorker computes edit count when building tile geometry — same pipeline as heat, tidal, identity values
 - Composes with Chromatic Identity: identity = current color; sediment = historical colors. Together they show both *what a cell is* and *what it has been*.
 - Composes with Tidal Memory: tidal = breathing rhythm of recent activity; sediment = permanent geological record. Time at two scales.
 - Composes with editor snapshots: the thumbnail shows current content; the border rings show depth of iteration.
@@ -53,7 +53,7 @@ Ideas for making the experience more incredible. Each iteration picks one. Archi
 - Renderer detects signature-content seeds and applies a distinct visual (spiral/vortex hex shader variant)
 - Navigation checks content on `encounter()` — if it's a valid signature, offer or auto-jump to target
 - History already tracks every navigation, so portal jumps appear naturally in the history log
-- ShowHoneycombDrone gets one new tile visual state (portal glow), similar to existing heat/selection states
+- ShowHoneycombWorker gets one new tile visual state (portal glow), similar to existing heat/selection states
 - One small drone (`PortalDrone`) that intercepts navigation into portal seeds and redirects
 
 **Minimal surface area**: One content pattern (64 hex chars), one visual state, one navigation intercept. No new storage, no new events, no new services. Everything reuses existing infrastructure.
@@ -100,7 +100,7 @@ Copy a seed's signature to clipboard. Paste it anywhere — another browser, a t
 
 ### Pulse Resonance
 
-Every navigation event triggers a subtle ripple animation outward from the visited cell. When multiple users are present, their pulses create wave interference patterns — constructive and destructive — visible as shimmer across the surface. Like stones dropped in a pond. Zero data model: local animation triggered by existing presence events. One shader uniform (`uPulseTime` per active source), one modification to ShowHoneycombDrone's fragment shader. Beautiful, biophilic, zero storage overhead.
+Every navigation event triggers a subtle ripple animation outward from the visited cell. When multiple users are present, their pulses create wave interference patterns — constructive and destructive — visible as shimmer across the surface. Like stones dropped in a pond. Zero data model: local animation triggered by existing presence events. One shader uniform (`uPulseTime` per active source), one modification to ShowHoneycombWorker's fragment shader. Beautiful, biophilic, zero storage overhead.
 
 ### Ephemeral Ink
 
@@ -120,7 +120,7 @@ As you navigate deeper (more path segments), each depth level adds a concentric 
 
 ### Living Thumbnails
 
-Editor snapshots already render on grid cells. Extend this: when a cell's content changes anywhere on the mesh (via Nostr event), its thumbnail pulses once — a single heartbeat flash. You're looking at a region and you SEE edits happening in real time as thumbnail flickers across the grid. No notification badge, no inbox — the content itself shows it's alive. Architecture: one Nostr subscription filtered by visible-cell signatures, one animation trigger (`uPulseTime` uniform per cell) on ShowHoneycombDrone, zero new storage. Composes with Tidal Memory (breathing = recent activity rhythm) and Ambient Presence (heat = who's here). Living Thumbnails adds the missing real-time heartbeat — the moment of creation made visible.
+Editor snapshots already render on grid cells. Extend this: when a cell's content changes anywhere on the mesh (via Nostr event), its thumbnail pulses once — a single heartbeat flash. You're looking at a region and you SEE edits happening in real time as thumbnail flickers across the grid. No notification badge, no inbox — the content itself shows it's alive. Architecture: one Nostr subscription filtered by visible-cell signatures, one animation trigger (`uPulseTime` uniform per cell) on ShowHoneycombWorker, zero new storage. Composes with Tidal Memory (breathing = recent activity rhythm) and Ambient Presence (heat = who's here). Living Thumbnails adds the missing real-time heartbeat — the moment of creation made visible.
 
 ### Negative Space Navigation
 

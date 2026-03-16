@@ -34,7 +34,7 @@ these are the ten changes that would most reinforce hypercomb's existing archite
 
 **why**: these five primitives are the load-bearing walls of the entire system. they have zero test coverage. they are all testable today without any code changes — no pixi, no dom, no browser required.
 
-**how**: `vitest` in `@hypercomb/core`. test files co-located: `effect-bus.test.ts`, `ioc.test.ts`, `signature.service.test.ts`, `drone.base.test.ts`, `payload-canonical.test.ts`. a `TestDrone` subclass with public `sensed()` and `heartbeat()` overrides for lifecycle testing.
+**how**: `vitest` in `@hypercomb/core`. test files co-located: `effect-bus.test.ts`, `ioc.test.ts`, `signature.service.test.ts`, `drone.base.test.ts`, `payload-canonical.test.ts`. a `TestDrone` subclass with public `sense()` and `heartbeat()` overrides for lifecycle testing.
 
 **stability gain**: confidence that the foundation is correct. regression protection as the system grows. the tests also serve as documentation — they show exactly how each primitive behaves.
 
@@ -136,7 +136,7 @@ with companion payload type exports. drones import these constants instead of us
 2. AxialService registers, calls initialize(settings)
 3. PixiHostDrone registers, creates pixi app
 4. PixiHostDrone emits 'render:host-ready'
-5. ShowHoneycombDrone, ZoomDrone, PanningDrone subscribe and activate
+5. ShowHoneycombWorker, ZoomDrone, PanningDrone subscribe and activate
 6. NostrMeshDrone registers, awaits 'mesh:ensure-started'
 7. Store initializes OPFS root
 8. Lineage bootstraps from url

@@ -144,15 +144,15 @@ the mode bits control drone lifecycle behavior. they map directly to the drone s
 
 | mm | name | meaning | drone behavior |
 |----|------|---------|----------------|
-| 00 | end | trail terminates here. | the drone calls `markDisposed()`. state becomes `DroneState.Disposed`. effect subscriptions are cleaned up. |
-| 01 | continue | trail continues. keep flying. | the drone's `heartbeat()` runs on the next pulse. state remains `DroneState.Active`. |
+| 00 | end | trail terminates here. | the drone calls `markDisposed()`. state becomes `BeeState.Disposed`. effect subscriptions are cleaned up. |
+| 01 | continue | trail continues. keep flying. | the drone's `heartbeat()` runs on the next pulse. state remains `BeeState.Active`. |
 | 10 | branch | trail forks. spawn a new path. | the drone emits the remaining trail as a new effect. a new drone (or the same drone on a new pass) picks up the fork. |
 | 11 | reserved | undefined. | treat as `continue` (01). log a warning. do not crash. |
 
 ### mode and drone lifecycle
 
 ```
-                  encounter()
+                  pulse()
   Created ──> Registered ──> Active ──> Disposed
                                |            ^
                                |  mm=00     |

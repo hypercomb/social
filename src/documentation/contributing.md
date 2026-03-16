@@ -45,7 +45,7 @@ the hive is layered. each ring depends only on the rings inside it.
 
 ```
 @hypercomb/core          zero dependencies. the framework.
-                         Drone, DroneState, EffectBus, IoC, ServiceToken,
+                         Bee, Drone, Worker, BeeState, EffectBus, IoC, ServiceToken,
                          SignatureService, PayloadCanonical, DroneResolver,
                          KeyChord, KeyBinding, KeyMapLayer.
                          build: tsup (ESM + CJS + .d.ts)
@@ -192,7 +192,7 @@ categories correspond to the `Effect` type union: `filesystem`, `render`,
 
 ### drone conventions
 
-- every drone must handle the `Disposed` state correctly. `encounter()`
+- every bee must handle the `Disposed` state correctly. `pulse()`
   already gates on it, but custom cleanup logic belongs in an overridden
   `dispose()` method.
 - drones self-register at module load via
@@ -212,7 +212,7 @@ if (!settings) return
 
 ## drone lifecycle
 
-every drone follows this state machine:
+every bee follows this state machine:
 
 ```
 Created --> Registered --> Active --> Disposed
@@ -221,16 +221,17 @@ Created --> Registered --> Active --> Disposed
 - **created**: constructed, not yet known to the ioc container.
 - **registered**: placed in the container via `window.ioc.register()`.
   `markRegistered()` transitions the state.
-- **active**: has successfully responded to at least one `encounter()`.
-  the first successful heartbeat transitions the state.
+- **active**: has successfully responded to at least one `pulse()`.
+  the first successful heartbeat (drone) or act (worker) transitions the state.
 - **disposed**: cleaned up, effect subscriptions removed.
   `markDisposed()` transitions the state, calls all unsubscribe
   functions, then calls `dispose()` if overridden.
 
-the framework calls `encounter(grammar)` on each resolved drone.
-encounter checks lifecycle state, evaluates `sensed()`, calls
-`heartbeat()` if relevant, then transitions state. there is no separate
-init phase. the intent is the lifecycle trigger.
+the framework calls `pulse(grammar)` on each resolved bee.
+pulse checks lifecycle state, evaluates the gate (`sense()` for drones,
+`ready()` for workers), calls the action (`heartbeat()` for drones,
+`act()` for workers) if relevant, then transitions state. there is no
+separate init phase. the intent is the lifecycle trigger.
 
 ---
 
@@ -278,8 +279,9 @@ before opening a pull request, verify all of these:
 ### drone lifecycle
 
 - [ ] new drones extend `Drone` and override `heartbeat` as an arrow async
-      method.
+      method. workers extend `Worker` and override `act`.
 - [ ] `sense()` is overridden if the drone should not respond to every grammar.
+      `ready()` is overridden for workers.
 - [ ] dependencies are declared in `deps` and resolved via `this.resolve()`.
 - [ ] `emits` and `listens` metadata arrays are declared for graph visibility.
 - [ ] `dispose()` is overridden if the drone allocates resources beyond effect
@@ -376,7 +378,7 @@ and their declared effects.
 - **import map not loading**: the service worker must be active before
   `attachImportMap()` runs. check `navigator.serviceWorker.controller` in
   the console.
-- **drone not firing**: check that `sensed()` returns true for the current
+- **drone not firing**: check that `sense()` returns true for the current
   grammar. check that the drone is registered in ioc (`window.ioc.has('Name')`).
 - **effect not received**: check that the emitter has already called
   `emitEffect()` or that the subscriber is listening on the correct effect
@@ -427,7 +429,7 @@ examples:
 feat: add EffectBus for drone-to-drone communication via effects
 fix: clean up effect subscriptions on drone disposal
 refactor: extract axial coordinate caching to AxialService
-chore: upgrade Angular 20 -> 21.2.0, align all package versions
+chore: update Angular dependencies to version 21.2.4 and related packages
 docs: add byte protocol specification
 ```
 

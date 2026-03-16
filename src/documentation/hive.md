@@ -54,7 +54,7 @@ when a drone is disposed, all its subscriptions are cleaned up automatically.
 | `external`   | something happened outside the hive boundary   |
 
 a real example: `PixiHostDrone` emits `'render:host-ready'` carrying the PixiJS
-application, its root container, and the canvas. `ShowHoneycombDrone` subscribes
+application, its root container, and the canvas. `ShowHoneycombWorker` subscribes
 to that effect, receives the rendering infrastructure, and begins drawing the
 honeycomb grid. neither drone imports nor references the other. the effect bus is
 the only bridge.

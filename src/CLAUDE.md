@@ -104,7 +104,7 @@ src/
 │       │   ├── hello-world/            # HelloWorldDrone (dev/test module)
 │       │   ├── input/                  # PanningDrone, ZoomDrone, KeyMapService, TileSelectionDrone
 │       │   ├── nostr/                  # NostrMeshDrone, NostrSigner, AmbientPresenceDrone
-│       │   ├── pixi/                   # PixiHostDrone, ShowHoneycombDrone, TileOverlayDrone, Shaders
+│       │   ├── pixi/                   # PixiHostDrone, ShowHoneycombWorker, TileOverlayDrone, Shaders
 │       │   ├── screen/                 # ScreenService, ScreenState
 │       │   └── settings/               # SettingsDrone, ZoomSettings
 │       └── revolucionstyle.com/        # Cigar journal domain module

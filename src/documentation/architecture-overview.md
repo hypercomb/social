@@ -197,7 +197,7 @@ the hive is layered. each ring depends only on the rings inside it.
     editor/              TileEditorDrone, TileEditorService, ImageEditorService
     input/               PanningDrone, ZoomDrone, KeyMapService, TileSelectionDrone
     nostr/               NostrMeshDrone, NostrSigner, AmbientPresenceDrone
-    pixi/                PixiHostDrone, ShowHoneycombDrone, TileOverlayDrone, Shaders
+    pixi/                PixiHostDrone, ShowHoneycombWorker, TileOverlayDrone, Shaders
     screen/              ScreenService, ScreenState
 
   revolucionstyle.com/

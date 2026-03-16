@@ -32,25 +32,25 @@ Drones resolve dependencies through `this.resolve()` rather than making ad-hoc `
 
 The "Drone" is Hypercomb's core abstraction. Each drone is simultaneously a lifecycle-managed component, an event participant, a renderer (optionally), and a domain actor. Fowler would recognize the **"God Object"** risk, but Hypercomb mitigates it through specialization — `PanningDrone` only handles panning, `NostrMeshDrone` only handles mesh communication. The *pattern* is broad, but the *instances* are focused.
 
-The lifecycle is now governed by a formal `DroneState` enum in `drone.base.ts`:
+The lifecycle is now governed by a formal `BeeState` enum in `bee.base.ts`:
 
 ```
 Created → Registered → Active → Disposed
 ```
 
 - `markRegistered()` — Framework calls this when the drone is added to IoC.
-- `encounter(grammar)` — Single entry point. Checks for Disposed state, calls `sensed()` for relevance filtering, then `heartbeat()` for execution. Transitions to Active on first successful heartbeat.
+- `pulse(grammar)` — Single entry point. Checks for Disposed state, calls `sense()` for relevance filtering, then `heartbeat()` for execution. Transitions to Active on first successful heartbeat. Workers use `ready()` / `act()` instead.
 - `markDisposed()` — Triggers auto-unsubscription of all effect subscriptions, then calls the optional `dispose()` override for custom cleanup.
 
 **What Fowler would commend:**
 - The drone-as-composable-unit model resembles the **Plugin** pattern from *Patterns of Enterprise Application Architecture*. Each drone extends the system without modifying the core.
 - The separation between `@hypercomb/core` (drone infrastructure) and `@hypercomb/essentials` (concrete drones) is a clean example of the **Separated Interface** pattern.
-- The state machine makes temporal coupling visible. Disposed drones are gated out of `encounter()` entirely — no zombie behavior.
-- **Declarative sensing** via `sensed()` lets drones declare relevance to a grammar string rather than blindly reacting to everything.
+- The state machine makes temporal coupling visible. Disposed drones are gated out of `pulse()` entirely — no zombie behavior.
+- **Declarative sensing** via `sense()` lets drones declare relevance to a grammar string rather than blindly reacting to everything.
 
 **What remains:**
 - No compile-time enforcement that `resolve()` is only called during appropriate states (e.g., after `Registered`). This is still a runtime responsibility.
-- `sensed()` and `heartbeat()` are `protected`, which means testing requires subclassing — not ideal for test ergonomics.
+- `sense()` and `heartbeat()` are `protected`, which means testing requires subclassing — not ideal for test ergonomics.
 - No state change events — no observers notified on transitions. Though the EffectBus could serve this role if wired in.
 
 ---
@@ -68,7 +68,7 @@ The `EffectBus` implementation (48 lines in `effect-bus.ts`) provides:
 
 Drones integrate via protected methods: `emitEffect()`, `onEffect()`, `onceEffect()`. Subscriptions are tracked in `_effectSubs[]` and auto-unsubscribed when `markDisposed()` is called. Drones can also declare `listens?: string[]` and `emits?: string[]` metadata for discovery.
 
-Real-world usage: `PixiHostDrone` emits `'render:host-ready'` with its app, container, canvas, and renderer. `ShowHoneycombDrone` subscribes to this effect to receive the Pixi infrastructure — no import dependency between the two drones.
+Real-world usage: `PixiHostDrone` emits `'render:host-ready'` with its app, container, canvas, and renderer. `ShowHoneycombWorker` subscribes to this effect to receive the Pixi infrastructure — no import dependency between the two drones.
 
 Fowler's writing on **Event-Driven Architecture** distinguishes three levels:
 1. **Event Notification** — "something happened, react if you want"
@@ -177,18 +177,18 @@ This is the area where Fowler would be most direct. There are no `*.test.ts` or 
 
 | Component | Without IoC | Without PixiJS | Assessment |
 |---|---|---|---|
-| `DroneState` enum | Yes | Yes | Pure enum, trivially testable |
+| `BeeState` enum | Yes | Yes | Pure enum, trivially testable |
 | `EffectBus` | Yes | Yes | Self-contained, most testable component |
 | `SignatureService` | Yes | Yes | Only uses Web Crypto API |
 | `IoC register/get` | Yes | Yes | Pure functions |
-| `Drone.encounter()` | Partial | Yes | Needs mocked `sensed()` / `heartbeat()` |
+| `Drone.pulse()` | Partial | Yes | Needs mocked `sense()` / `heartbeat()` |
 | `AxialCoordinate` | No | No | Module-level PixiJS import blocks loading |
-| `ShowHoneycombDrone` | No | No | Depends on Pixi and window.ioc |
+| `ShowHoneycombWorker` | No | No | Depends on Pixi and window.ioc |
 
 **What would be needed:**
 1. A test runner configured for core and essentials (Vitest would be natural for ESM packages).
 2. Unit tests for `drone.base.ts`, `ioc.ts`, `effect-bus.ts`, `signature.service.ts` — all testable today without changes.
-3. A **Test Fixture** pattern: `class TestDrone extends Drone` with public overrides for `sensed()` and `heartbeat()`.
+3. A **Test Fixture** pattern: `class TestDrone extends Drone` with public overrides for `sense()` and `heartbeat()`.
 4. A test double for `window.ioc` to avoid global pollution between tests.
 5. Decoupling `AxialCoordinate` from PixiJS before it can be unit tested.
 
@@ -203,7 +203,7 @@ Hypercomb's architecture is **ambitious and maturing**. The EffectBus and drone 
 | Critique Area | Status | Key Evidence |
 |---|---|---|
 | IoC / Dependency Injection | **Addressed** | `ServiceToken<T>`, typed resolution, Bridge Providers |
-| Drone Lifecycle | **Addressed** | `DroneState` enum, enforced state machine, auto-cleanup |
+| Drone Lifecycle | **Addressed** | `BeeState` enum, enforced state machine, auto-cleanup |
 | Effect System | **Addressed** | `EffectBus` with last-value replay, drone integration, auto-unsubscribe |
 | Module Boundaries | **Incremental** | Dependency resolution documented, packages properly structured |
 

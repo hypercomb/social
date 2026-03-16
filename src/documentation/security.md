@@ -37,7 +37,7 @@ this policy covers the following components of the hypercomb system:
 
 - **ioc container** -- `ServiceToken<T>`-based registration and resolution.
   holds ephemeral in-memory references only. no serialization, no persistence.
-- **drone base class** -- `Drone` with `DroneState` lifecycle
+- **bee base class** -- `Bee` (specialized as `Drone` or `Worker`) with `BeeState` lifecycle
   (`created -> registered -> active -> disposed`). auto-cleanup of effect
   subscriptions on dispose.
 - **effectbus** -- typed pub/sub for drone-to-drone communication. in-memory
@@ -169,7 +169,7 @@ disposed`. security properties:
   from receiving or processing further effects.
 - **no resurrection.** a disposed drone cannot transition back to an active
   state. the state machine is forward-only.
-- **heartbeat gating.** `encounter()` checks `DroneState` before executing
+- **heartbeat gating.** `pulse()` checks `BeeState` before executing
   `heartbeat()`. a disposed drone is skipped silently.
 - **effect metadata.** drones declare `listens` and `emits` arrays for graph
   visibility. these are informational and not enforced at runtime (enforcement

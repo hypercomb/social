@@ -29,7 +29,7 @@ real bees specialize. nurse bees tend brood. foragers collect nectar. guard bees
 hypercomb drones specialize the same way:
 
 - **PixiHostDrone** — the architect. sets up the rendering infrastructure and announces it to the colony.
-- **ShowHoneycombDrone** — the builder. receives the architect's signal and draws the hex grid.
+- **ShowHoneycombWorker** — the builder. receives the architect's signal and draws the hex grid.
 - **NostrMeshDrone** — the scout. connects to external relays and brings back messages from other colonies.
 - **PanningDrone** — the navigator. translates human gestures into movement across the grid.
 
