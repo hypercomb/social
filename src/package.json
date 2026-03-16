@@ -5,7 +5,8 @@
   "workspaces": [
     "hypercomb-shared",
     "hypercomb-core",
-    "hypercomb-essentials"
+    "hypercomb-essentials",
+    "hypercomb-dev"
   ],
   "engines": {
     "node": ">=20.19.0",
