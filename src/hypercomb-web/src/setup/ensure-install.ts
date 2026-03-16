@@ -12,7 +12,6 @@ const isLocalDev = typeof window !== 'undefined'
 const CONTENT_BASE_URL = isLocalDev
   ? `${window.location.origin}/content`
   : AZURE_CONTENT_URL
-const FALLBACK_SIGNATURE = '6a09457f907419eb03493cda1d8e43d24a76e8f72acbcdbebd894b4bed5d0c08'
 const SIGNATURE_REGEX = /^[a-f0-9]{64}$/i
 const INSTALLED_KEY = 'core-adapter.installed-signature'
 const MANIFEST_KEY = 'core-adapter.installed-manifest'
@@ -42,7 +41,13 @@ export const ensureInstall = async (): Promise<void> => {
 
   await store.initialize()
 
-  const signature = (await resolveLatestSignature()) || FALLBACK_SIGNATURE
+  const signature = resolveSignatureFromUrl()
+    ?? await resolveLatestSignature()
+  if (!signature) {
+    console.warn('[ensure-install] no content signature — add ?content=<sig> or ensure latest.txt is served')
+    return
+  }
+  console.log(`[ensure-install] active signature: ${signature} (source: ${resolveSignatureFromUrl() ? 'url' : 'latest.txt'})`)
   const shouldInstall = await needsInstall(store, signature)
 
   if (!shouldInstall) {
@@ -65,8 +70,11 @@ export const ensureInstall = async (): Promise<void> => {
     return
   }
 
+  // Resolve content base: local if available, Azure as fallback
+  const contentBase = await resolveContentBase(signature)
+
   // Fetch new manifest to diff against old
-  const newManifest = await fetchManifest(signature)
+  const newManifest = await fetchManifest(contentBase, signature)
 
   // Incremental diff: only clear entries not in new manifest
   const oldManifestJson = localStorage.getItem(MANIFEST_KEY)
@@ -84,13 +92,13 @@ export const ensureInstall = async (): Promise<void> => {
     await clearDirectory(store.dependencies)
   }
 
-  const installUrl = `${CONTENT_BASE_URL}/${signature}`
+  const installUrl = `${contentBase}/${signature}`
   const parsed = LocationParser.parse(installUrl)
 
   const complete = await installer.install(parsed)
 
   // populate the signature store from the install manifest (browser cache hit)
-  await populateSignatureStore(sigStore, signature)
+  await populateSignatureStore(sigStore, contentBase, signature)
 
   // Only mark as installed if the install actually completed.
   // If incomplete, next load will retry without clearing — the installer
@@ -137,9 +145,21 @@ const clearDirectory = async (dir: FileSystemDirectoryHandle): Promise<void> => 
   }
 }
 
+const resolveSignatureFromUrl = (): string | null => {
+  const params = new URLSearchParams(window.location.search)
+  return extractSignature(params.get('content'))
+}
+
 const resolveLatestSignature = async (): Promise<string | null> => {
-  const text = await fetchText(`${CONTENT_BASE_URL}/latest.txt`)
-  return text ? extractSignature(text) : null
+  // Try local first (fast in dev), fall back to Azure (always authoritative)
+  const local = await fetchText(`${CONTENT_BASE_URL}/latest.txt`)
+  if (local) return extractSignature(local)
+  if (isLocalDev) {
+    console.log('[ensure-install] local latest.txt not found, falling back to server')
+    const remote = await fetchText(`${AZURE_CONTENT_URL}/latest.txt`)
+    return remote ? extractSignature(remote) : null
+  }
+  return null
 }
 
 const fetchText = async (url: string): Promise<string | null> => {
@@ -157,8 +177,17 @@ const extractSignature = (raw: string | null | undefined): string | null => {
   return SIGNATURE_REGEX.test(clean) ? clean.toLowerCase() : null
 }
 
-const fetchManifest = async (signature: string): Promise<InstallManifest | null> => {
-  const json = await fetchText(`${CONTENT_BASE_URL}/${signature}/install.manifest.json`)
+const resolveContentBase = async (signature: string): Promise<string> => {
+  if (!isLocalDev) return AZURE_CONTENT_URL
+  // Check if local content exists for this signature
+  const localManifest = await fetchText(`${CONTENT_BASE_URL}/${signature}/install.manifest.json`)
+  if (localManifest) return CONTENT_BASE_URL
+  console.log('[ensure-install] content not found locally, using server')
+  return AZURE_CONTENT_URL
+}
+
+const fetchManifest = async (contentBase: string, signature: string): Promise<InstallManifest | null> => {
+  const json = await fetchText(`${contentBase}/${signature}/install.manifest.json`)
   return json ? tryParseManifest(json) : null
 }
 
@@ -210,9 +239,9 @@ const applyBeeMarkers = async (store: Store, bees: string[]): Promise<void> => {
 
 // ----- signature store helpers -----
 
-const populateSignatureStore = async (sigStore: SignatureStore, rootSig: string): Promise<void> => {
+const populateSignatureStore = async (sigStore: SignatureStore, contentBase: string, rootSig: string): Promise<void> => {
   try {
-    const url = `${CONTENT_BASE_URL}/${rootSig}/install.manifest.json`
+    const url = `${contentBase}/${rootSig}/install.manifest.json`
     const res = await fetch(url)  // browser cache hit — LayerInstaller just fetched this
     if (!res.ok) return
     const manifest = await res.json()
