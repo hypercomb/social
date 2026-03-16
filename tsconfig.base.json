@@ -23,7 +23,13 @@
       "@hypercomb/essentials/*": ["src/hypercomb-essentials/src/*"],
 
       "@hypercomb/shared": ["src/hypercomb-shared/index.ts"],
-      "@hypercomb/shared/*": ["src/hypercomb-shared/*"]
+      "@hypercomb/shared/*": ["src/hypercomb-shared/*"],
+
+      "@hypercomb/sdk": ["src/hypercomb-sdk/src/index.ts"],
+      "@hypercomb/sdk/*": ["src/hypercomb-sdk/src/*"],
+
+      "@hypercomb/cli": ["src/hypercomb-cli/src/index.ts"],
+      "@hypercomb/cli/*": ["src/hypercomb-cli/src/*"]
     },
 
     // sanity

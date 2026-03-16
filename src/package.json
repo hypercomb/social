@@ -6,6 +6,8 @@
     "hypercomb-shared",
     "hypercomb-core",
     "hypercomb-essentials",
+    "hypercomb-sdk",
+    "hypercomb-cli",
     "hypercomb-dev"
   ],
   "engines": {
@@ -25,7 +27,9 @@
     "deploy:essentials": "npm --prefix hypercomb-essentials run build:module:deploy",
     "runtime:essentials": "npm run build:module && npm --prefix hypercomb-essentials run copy-to-web",
     "prebuild:web": "tsx scripts/prebuild.ts --target web",
-    "prebuild:dev": "tsx scripts/prebuild.ts --target dev"
+    "prebuild:dev": "tsx scripts/prebuild.ts --target dev",
+    "build:sdk": "npm --prefix hypercomb-sdk run build",
+    "build:cli": "npm --prefix hypercomb-cli run build"
   },
   "dependencies": {
     "@angular/animations": "21.2.4",
