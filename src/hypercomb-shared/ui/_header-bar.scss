@@ -101,45 +101,6 @@ $secret-bg: rgba(10, 12, 16, 0.85);
   }
 }
 
-// ── eye toggle (visibility) ─────────────────────────────
-
-.eye-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  padding: 0 0.85rem;
-  border: 1px solid rgba(245, 245, 245, 0.12);
-  border-left: none;
-  border-right: none;
-  background: $secret-bg;
-  color: rgba(245, 245, 245, 0.25);
-  cursor: pointer;
-  transition: color 200ms ease, background 200ms ease, border-color 200ms ease;
-
-  .hci {
-    font-size: 1.05rem;
-  }
-
-  &:hover {
-    color: rgba(245, 245, 245, 0.5);
-    background: rgba(245, 245, 245, 0.04);
-  }
-
-  &:active {
-    background: rgba(245, 245, 245, 0.06);
-  }
-
-  &:focus-visible {
-    outline: 1px solid rgba(245, 245, 245, 0.3);
-    outline-offset: -1px;
-  }
-
-  &.visible {
-    color: rgba(245, 245, 245, 0.9);
-  }
-}
-
 // ── pink toggle buttons (public / private) ───────────────
 
 @mixin pink-toggle {

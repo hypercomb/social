@@ -70,10 +70,10 @@ export class App implements AfterViewInit {
 
   // ── secret state (public-mode mesh scoping) ─────────────
   #secretValue = signal('')
-  #secretVisible = signal(false)
+  #secretExpanded = signal(true)
 
   protected readonly secretValue = this.#secretValue.asReadonly()
-  protected readonly secretVisible = this.#secretVisible.asReadonly()
+  protected readonly secretExpanded = this.#secretExpanded.asReadonly()
   protected readonly hasSecret = computed(() => this.#secretValue().trim().length > 0)
 
   protected readonly shieldColor = computed(() => {
@@ -121,7 +121,7 @@ export class App implements AfterViewInit {
   }
 
   protected readonly onShieldClick = (): void => {
-    this.#secretVisible.update(v => !v)
+    this.#secretExpanded.set(true)
   }
 
   protected readonly onSecretInput = (event: Event): void => {
@@ -132,6 +132,7 @@ export class App implements AfterViewInit {
     const value = this.#secretValue().trim()
     if (!value) return
     EffectBus.emit('mesh:secret', { secret: value })
+    this.#secretExpanded.set(false)
   }
 
   public ngAfterViewInit(): void {

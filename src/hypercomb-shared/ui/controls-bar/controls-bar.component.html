@@ -65,10 +65,10 @@
         </div>
       }
 
-      <!-- room section (public mode) -->
+      <!-- space section (public mode) -->
       @if (meshPublic()) {
         <div class="controls-divider"></div>
-        <button class="ctl-btn" [class.active]="roomOpen()" (click)="toggleRoom()" aria-label="room">
+        <button class="ctl-btn" [class.active]="roomOpen()" (click)="toggleRoom()" aria-label="space">
           <span class="hci">B</span>
         </button>
         @if (roomOpen()) {
@@ -76,7 +76,7 @@
             <input
               class="room-input"
               type="text"
-              placeholder="room"
+              placeholder="space"
               [value]="roomValue()"
               (input)="onRoomInput($event)"
               (keydown.enter)="submitRoom()"
