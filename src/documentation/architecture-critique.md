@@ -101,6 +101,8 @@ The package structure demonstrates thoughtful modular thinking. Fowler's **Modul
 |---|---|---|
 | `@hypercomb/core` | npm (published) | Zero runtime dependencies |
 | `@hypercomb/essentials` | npm (published) | `@hypercomb/core`, `nostr-tools`; peer: `pixi.js` |
+| `@hypercomb/sdk` | npm (published) | `@hypercomb/core` (peer) |
+| `@hypercomb/cli` | npm (published) | `@hypercomb/sdk` |
 | `@hypercomb/shared` | Source inclusion via tsconfig | Not published, no `package.json` |
 
 The `dependency-resolution.md` documents three resolution mechanisms: IoC container (runtime), Angular DI (framework), and Dynamic Import Maps (OPFS modules).

@@ -132,6 +132,11 @@ the spatial foundation is a hexagonal grid using axial coordinates.
   broadcasts `render:host-ready` so other drones can draw.
 - **ShowHoneycombWorker**: unions local opfs seeds with mesh seeds, maps them
   onto axial positions, and renders labeled hex tiles via sdf shaders.
+- **HexSdfTextureShader**: programmatic signed-distance-field rendering for
+  hex tiles — replaced svg borders with gpu-computed borders and overlays.
+- **orientation**: the grid supports both pointy-top (default) and flat-top
+  hex orientations, toggled via a header bar control. orientation changes
+  propagate through settings to all input and rendering drones.
 
 the grid is what the byte protocol navigates. each cell is a seed.
 entering a cell means navigating into that seed's opfs directory.
@@ -195,10 +200,11 @@ the hive is layered. each ring depends only on the rings inside it.
   diamondcoreprocessor.com/
     core/                AxialService, HistoryService, Settings, SelectionService, MeshAdapter
     editor/              TileEditorDrone, TileEditorService, ImageEditorService
-    input/               PanningDrone, ZoomDrone, KeyMapService, TileSelectionDrone
+    input/               PanningDrone, ZoomDrone, KeyMapService, TileSelectionDrone, InputGate
     nostr/               NostrMeshDrone, NostrSigner, AmbientPresenceDrone
-    pixi/                PixiHostDrone, ShowHoneycombWorker, TileOverlayDrone, Shaders
+    pixi/                PixiHostDrone, ShowHoneycombWorker, TileOverlayDrone, TileSelectionDrone, Shaders
     screen/              ScreenService, ScreenState
+    settings/            SettingsDrone, ZoomSettings
 
   revolucionstyle.com/
     journal/             CigarJournalDrone, JournalEntryDrone, JournalService
@@ -206,9 +212,16 @@ the hive is layered. each ring depends only on the rings inside it.
     cigar/               Cigar identity, CigarCatalogService
     discovery/           DiscoveryService (Jaccard similarity)
 
+@hypercomb/sdk           facade unifying core primitives and build API.
+                         environment-agnostic IoC proxy, IoC key constants,
+                         re-exports core types, programmatic build pipeline.
+
+@hypercomb/cli           command-line interface for the framework.
+                         `hypercomb build [--local]`, `hypercomb inspect`.
+
 @hypercomb/shared        angular bridge. path aliases.
                          Store (opfs), Lineage (navigation),
-                         Navigation, SecretStore,
+                         Navigation, SecretStore, RoomStore,
                          LayerInstaller, BridgeProviders for angular DI.
 
 hypercomb-web            the app. angular shell.
@@ -219,6 +232,10 @@ hypercomb-web            the app. angular shell.
 `@hypercomb/essentials` adds pixi as a peer dependency for rendering.
 domain namespaces within essentials are independent — each is a self-contained
 module ecosystem that builds, signs, and deploys as part of the same pipeline.
+`@hypercomb/sdk` is a thin facade that re-exports core primitives and provides
+an environment-agnostic IoC proxy (auto-detects `window.ioc` in browser,
+falls back to core module in Node). `@hypercomb/cli` wraps the sdk for
+command-line use (`build`, `inspect`).
 `@hypercomb/shared` bridges to angular's dependency injection.
 `hypercomb-web` is the final application shell.
 

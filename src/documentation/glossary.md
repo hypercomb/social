@@ -140,6 +140,12 @@ zero-dependency framework layer. exports: `Bee`, `BeeState`, `Drone`, `Worker`, 
 ### @hypercomb/essentials
 concrete bees (drones + workers) and services, organized by domain namespace. depends on `@hypercomb/core`. pixi.js is a peer dependency. domain namespaces include `diamondcoreprocessor.com` (core rendering, input, mesh) and `revolucionstyle.com` (cigar journal, flavor wheel, discovery). each domain is an independent module ecosystem within the same build pipeline.
 
+### @hypercomb/sdk
+facade package unifying core primitives and the build api. re-exports `Bee`, `Drone`, `Worker`, `EffectBus`, `SignatureService`, and ioc types from `@hypercomb/core`. provides an environment-agnostic `ioc` proxy that auto-detects `window.ioc` in browser or falls back to the core module in node. exports ioc key constants for both framework-level and shared-level services. `buildModules(options)` spawns the essentials build pipeline programmatically. built as dual-format (esm + cjs) via tsup.
+
+### @hypercomb/cli
+command-line interface for the framework. wraps `@hypercomb/sdk` for terminal use. commands: `hypercomb build [--local]` (build essentials modules), `hypercomb inspect [--keys|--registry]` (list ioc key constants or live registry). built as esm with shebang via tsup.
+
 ### @hypercomb/shared
 angular integration bridge. path-aliased, not published to npm. provides `bridgeProviders()`, shared tokens, and angular-side services that delegate to the ioc container.
 
@@ -155,11 +161,23 @@ programmatic hex overlay for multi-select. `TileSelectionDrone` in `@hypercomb/e
 ### tile editor drone
 seed editing drone. `TileEditorDrone` in `@hypercomb/essentials` (`editor/tile-editor.drone.ts`). provides seed creation and property editing. emits `tile:saved` when a seed is persisted.
 
+### hex sdf shader
+signed-distance-field shader for rendering hex tiles in pixi.js. `HexSdfTextureShader` in `@hypercomb/essentials` (`pixi/hex-sdf.shader.ts`). replaces the original svg-based borders with gpu-computed hex outlines and overlays. supports both pointy-top and flat-top orientations. samples from the label atlas and image atlas to render text and images clipped to the hex boundary. branch indicators and selection highlights are drawn as sdf rings.
+
 ### navigation guard
 a pair of effects (`navigation:guard-start`, `navigation:guard-end`) emitted by `ShowHoneycombWorker` during layer transitions. while a guard is active, tile overlay and selection bees ignore clicks, and `KeyMapService` suspends bindings. prevents input during the incremental mesh rebuild.
 
 ### secret store
 shared secret state in `@hypercomb/shared`. persists a single value in `localStorage` (`hc:secret`). on first access, captures any subdomain-derived secret from the url for mesh room joining. exposed in the controls bar ui via a lock icon.
+
+### room store
+shared room state in `@hypercomb/shared`. manages the current room identity and secret for mesh participation. provides room controls (join, leave, secret management) in the controls bar ui.
+
+### input gate
+shared input exclusivity service in `@hypercomb/essentials` (`input/input-gate.service.ts`). ensures only one input consumer (e.g., panning, selection, editor) has control at a time. also suppresses the browser context menu when an input source is active. drones call `acquire(source)` / `release(source)` to coordinate.
+
+### hex orientation
+the grid supports two hex orientations: **pointy-top** (default) and **flat-top**. toggled via a header bar control. the orientation propagates through `Settings` to all input drones (hex detection, panning, selection) and rendering drones (sdf shader, tile overlay). the coordinate math adapts automatically — flat-top swaps the projection axes.
 
 ### domain namespace
 the organizational unit within `@hypercomb/essentials`. each domain (e.g. `diamondcoreprocessor.com`, `revolucionstyle.com`) groups related bees, services, and resources into namespaces. domains are independent — they share the build pipeline and core primitives but never import from each other at the source level. at runtime, each domain's namespaces are resolved via the import map.

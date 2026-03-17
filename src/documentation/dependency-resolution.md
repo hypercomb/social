@@ -14,6 +14,12 @@ constraints on what it may reference.
   @hypercomb/essentials    runtime plugin modules (npm package, OPFS delivery)
         |                  imports core as PLATFORM_EXTERNAL
         |
+  @hypercomb/sdk           facade re-exporting core + build API (npm package)
+        |                  imports core as peer dependency
+        |
+  @hypercomb/cli           command-line tool wrapping sdk (npm package)
+        |                  imports sdk
+        |
   @hypercomb/shared        shared services + Angular bridge (source reference)
         |                  imports core via tsconfig paths
         |

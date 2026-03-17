@@ -258,9 +258,12 @@ opfs is the only persistent storage mechanism. security properties:
   code running in the same origin can read them. sensitive data should not
   be stored in opfs without application-level encryption.
 - **layer loading.** drone packages are loaded from opfs via dynamic import
-  maps. a tampered opfs could inject malicious drones. the integrity of
-  opfs-stored packages should be verified against known content hashes
-  before execution (not yet enforced -- candidate for future hardening).
+  maps. integrity is enforced at three layers: install time
+  (`LayerInstaller` verifies downloaded bytes against expected signature),
+  bee load time (`ScriptPreloader` re-verifies opfs bytes before import),
+  and dependency load time (`DependencyLoader` verifies before import).
+  signature mismatch = reject, no fallback. `SignatureStore` caches
+  trusted signatures to avoid redundant sha-256 hashing on subsequent loads.
 
 ---
 
@@ -338,8 +341,8 @@ the following security improvements are planned or under consideration:
   transmission using xchacha20-poly1305 with session-derived keys.
 - **effectbus authorization.** optional per-effect access control to limit
   which drones can emit or subscribe to specific effect names.
-- **opfs integrity verification.** verify content hashes of opfs-stored
-  packages before dynamic import.
+- ~~**opfs integrity verification.**~~ **implemented.** three-layer signature
+  verification (install, bee load, dep load) with `SignatureStore` caching.
 - **drone effect enforcement.** runtime enforcement of declared `listens`
   and `emits` metadata, preventing undeclared effect usage.
 - **key rotation for nostr identities.** automated or prompted key rotation

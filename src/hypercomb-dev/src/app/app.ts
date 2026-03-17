@@ -121,7 +121,7 @@ export class App implements AfterViewInit {
   }
 
   protected readonly onShieldClick = (): void => {
-    this.#secretExpanded.set(true)
+    this.#secretExpanded.update(v => !v)
   }
 
   protected readonly onSecretInput = (event: Event): void => {

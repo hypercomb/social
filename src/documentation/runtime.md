@@ -12,7 +12,7 @@ navigation happens on a hexagonal grid. the grid is defined by three primitives:
 
 **AxialService** — the grid builder. `createMatrix()` generates hexagons outward from center (0, 0, 0) in concentric rings, up to `Settings.rings` deep (default: 50). pre-computes an adjacency map: every coordinate knows its 6 neighbors.
 
-**Settings** — spatial configuration. `hexagonSide = 200` drives all geometry. height = side * 2. width = side * sqrt(3). `rings = 50` determines grid extent. `panThreshold = 25` sets input sensitivity.
+**Settings** — spatial configuration. `hexagonSide = 200` drives all geometry. height = side * 2. width = side * sqrt(3). `rings = 50` determines grid extent. `panThreshold = 25` sets input sensitivity. `orientation` toggles between pointy-top (default) and flat-top hex layout — the projection math adapts automatically.
 
 the six neighbors of any cell:
 
@@ -130,6 +130,8 @@ window.ioc.register('AxialService', new AxialService())
 **ZoomDrone** — manages zoom state. uses `ZoomArbiter` for exclusive control (only one input source zooms at a time). tracks min/max scale (0.05–12) and pivot-preserving zoom math. persists viewport zoom/pan snapshots to the current seed's OPFS properties file, restoring them on navigation. subscribes to `'render:host-ready'`.
 
 **PanningDrone** — manages panning. uses a similar exclusive-control pattern via `begin(source)` / `end(source)`. delegates to `MousePanInput` for mouse-based panning. persists pan offset to OPFS alongside zoom state. subscribes to `'render:host-ready'`.
+
+**InputGate** — shared input exclusivity. only one input consumer (mouse pan, touch pan, pinch zoom, tile selection, editor) can be active at a time. `acquire(source)` claims the gate, `release(source)` frees it. while any source holds the gate, the browser context menu is suppressed. this prevents conflicting gestures (e.g., panning and selecting simultaneously).
 
 the rendering pipeline is entirely effect-driven. no bee in the pipeline imports another. they coordinate through the bus.
 

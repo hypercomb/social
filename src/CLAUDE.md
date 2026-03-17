@@ -8,12 +8,14 @@ Minimalism. Small surface area. No unnecessary abstractions. Signatures (SHA-256
 
 ## Project Roles
 
-There are three project tiers with distinct roles:
+There are five project tiers with distinct roles:
 
 | Project | Role | Build | Consumed by |
 |---------|------|-------|-------------|
-| **hypercomb-core** | Core primitives (IoC, EffectBus, Drone base, Signatures) | `tsup` → `dist/` | essentials, shared, web, dev |
+| **hypercomb-core** | Core primitives (IoC, EffectBus, Drone base, Signatures) | `tsup` → `dist/` | essentials, sdk, shared, web, dev |
 | **hypercomb-essentials** | Module project — drones, supporting services (IoC), and resources (static assets) | `tsup` → `dist/` | dev (import), web (runtime OPFS) |
+| **hypercomb-sdk** | Facade — re-exports core types, env-agnostic IoC proxy, build API | `tsup` → `dist/` | cli, external consumers |
+| **hypercomb-cli** | CLI tool — `hypercomb build`, `hypercomb inspect` | `tsup` → `dist/` | Developers (terminal) |
 | **hypercomb-shared** | Shared source — Store, Navigation, Lineage, UI components | No build (raw `.ts`) | web, dev (direct tsconfig include) |
 | **hypercomb-web** | Production Angular app — loads drones at **runtime** from OPFS | `ng build` | End users |
 | **hypercomb-dev** | Development Angular app — imports drones at **dev-time** directly | `ng build` | Developers |
@@ -102,7 +104,7 @@ src/
 │       │   ├── core/                   # AxialService, HistoryService, Settings, SelectionService, MeshAdapter
 │       │   ├── editor/                 # TileEditorDrone, TileEditorService, ImageEditorService
 │       │   ├── hello-world/            # HelloWorldDrone (dev/test module)
-│       │   ├── input/                  # PanningDrone, ZoomDrone, KeyMapService, TileSelectionDrone
+│       │   ├── input/                  # PanningDrone, ZoomDrone, KeyMapService, TileSelectionDrone, InputGate
 │       │   ├── nostr/                  # NostrMeshDrone, NostrSigner, AmbientPresenceDrone
 │       │   ├── pixi/                   # PixiHostDrone, ShowHoneycombWorker, TileOverlayDrone, Shaders
 │       │   ├── screen/                 # ScreenService, ScreenState
@@ -112,8 +114,10 @@ src/
 │           ├── wheel/                  # FlavorWheelDrone, FlavorWheelService, flavor taxonomy
 │           ├── cigar/                  # Cigar identity, CigarCatalogService
 │           └── discovery/              # DiscoveryService (Jaccard similarity recommendations)
+├── hypercomb-sdk/              # Facade: re-exports core types, env-agnostic IoC proxy, build API
+├── hypercomb-cli/              # CLI tool: `hypercomb build`, `hypercomb inspect`
 ├── hypercomb-shared/           # Store, Lineage, Navigation, LayerInstaller, UI components
-│   ├── core/                   # Services: Store, Lineage, Navigation, SecretStore, ioc.web
+│   ├── core/                   # Services: Store, Lineage, Navigation, SecretStore, RoomStore, ioc.web
 │   └── ui/                     # Angular components: SearchBar, ControlsBar, FileExplorer, History
 ├── hypercomb-web/              # Production Angular app (runtime drone loading)
 ├── hypercomb-dev/              # Development Angular app (direct drone imports)
@@ -126,6 +130,8 @@ src/
 - `@hypercomb/core` → `src/hypercomb-core/src/index.ts`
 - `@hypercomb/essentials` → `src/hypercomb-essentials/src/index.ts`
 - `@hypercomb/shared` → `src/hypercomb-shared/index.ts`
+- `@hypercomb/sdk` → `src/hypercomb-sdk/src/index.ts`
+- `@hypercomb/cli` → `src/hypercomb-cli/src/index.ts`
 
 ## Core Primitives
 
