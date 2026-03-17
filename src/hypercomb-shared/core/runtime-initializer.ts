@@ -16,7 +16,7 @@ export const initializeRuntime = async (
     logOpfs = false,
     onMeshStateChange,
   } = options
-
+  
   if (logOpfs) {
     const logger = get('@hypercomb.social/OpfsTreeLogger') as OpfsTreeLogger | undefined
     await logger?.log?.()

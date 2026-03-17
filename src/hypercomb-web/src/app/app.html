@@ -1,9 +1,7 @@
 @if(showHeader){
 <div class="header-bar">
   <app-header></app-header>
-  <button class="mesh-toggle" type="button" (click)="toggleMesh()">
-    {{ meshPublic() ? 'public' : 'private' }}
-  </button>
+  <hc-mesh-header [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()"></hc-mesh-header>
 </div>
 }
 <router-outlet></router-outlet>

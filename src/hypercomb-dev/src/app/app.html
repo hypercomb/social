@@ -1,30 +1,6 @@
 <div class="header-bar">
   <hc-search-bar></hc-search-bar>
-
-  @if (meshPublic()) {
-    <div class="mesh-public">
-      <button class="shield-toggle" [class.has-secret]="hasSecret()" [style.--shield-color]="shieldColor()" type="button" (click)="onShieldClick()">
-        <span class="hci">e</span>
-      </button>
-      @if (secretExpanded()) {
-        <input
-          class="header-secret-input" [class.has-secret]="hasSecret()"
-          type="text"
-          placeholder="secure your location"
-          [value]="secretValue()"
-          (input)="onSecretInput($event)"
-          (keydown.enter)="submitSecret()"
-        />
-      }
-      <button class="public-toggle" type="button" (click)="toggleMesh()">
-        public
-      </button>
-    </div>
-  } @else {
-    <button class="private-toggle" type="button" (click)="toggleMesh()">
-      private
-    </button>
-  }
+  <hc-mesh-header [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()"></hc-mesh-header>
 </div>
 <router-outlet />
 <div id="pixi-host" style="z-index: 0; position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></div>

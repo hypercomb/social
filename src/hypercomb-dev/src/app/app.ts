@@ -1,11 +1,10 @@
-import { AfterViewInit, Component, computed, OnDestroy, signal } from '@angular/core';
+import { AfterViewInit, Component, signal } from '@angular/core';
 import { type Bee, EffectBus } from '@hypercomb/core';
 import type { HexOrientation } from '@hypercomb/essentials/diamondcoreprocessor.com/core/settings';
 import { RouterOutlet } from '@angular/router';
 import { SearchBarComponent } from '@hypercomb/shared';
+import { MeshHeaderComponent } from '@hypercomb/shared/ui';
 import { initializeRuntime } from '@hypercomb/shared/core';
-import type { Navigation } from '@hypercomb/shared/core/navigation';
-import type { SecretStrengthProvider } from '@hypercomb/shared/core/secret-strength';
 import { AxialService } from '@hypercomb/essentials/diamondcoreprocessor.com/core/axial/axial-service';
 import { PanningDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/pan/panning.drone';
 import { PixiHostWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/pixi-host.drone';
@@ -24,8 +23,6 @@ import { HistoryRecorder } from '@hypercomb/essentials/diamondcoreprocessor.com/
 import { TileEditorService } from '@hypercomb/essentials/diamondcoreprocessor.com/editor/tile-editor.service'
 import { TileEditorDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/editor/tile-editor.drone'
 import { ImageEditorService } from '@hypercomb/essentials/diamondcoreprocessor.com/editor/image-editor.service'
-import { KeyMapService } from '@hypercomb/essentials/diamondcoreprocessor.com/input/keymap/keymap.service'
-import { SelectionService } from '@hypercomb/essentials/diamondcoreprocessor.com/core/selection/selection.service'
 import { TileEditorComponent } from '@hypercomb/shared/ui/tile-editor/tile-editor.component'
 import { ControlsBarComponent } from '@hypercomb/shared/ui';
 
@@ -48,70 +45,37 @@ const _deps = [
   TileEditorService,
   TileEditorDrone,
   ImageEditorService,
-  KeyMapService,
-  SelectionService,
 ]
 
 void _deps
 
 @Component({
   selector: 'app-root',
-  imports: [ControlsBarComponent, RouterOutlet, SearchBarComponent, TileEditorComponent],
+  imports: [ControlsBarComponent, MeshHeaderComponent, RouterOutlet, SearchBarComponent, TileEditorComponent],
   styleUrls: ['./app.scss'] as any,
   templateUrl: './app.html'
 })
-export class App implements AfterViewInit, OnDestroy {
+export class App implements AfterViewInit {
   protected readonly title = signal('hypercomb-dev');
 
   public readonly meshPublic = signal(true);
   public readonly orientation = signal<HexOrientation>(
-    (localStorage.getItem('hc:hex-orientation') as HexOrientation) || 'point-top'
+    (localStorage.getItem('hc:hex-orientation') as HexOrientation) || 'pointy'
   );
 
-  // ── secret state (public-mode mesh scoping) ─────────────
-  #secretValue = signal('')
-  #secretExpanded = signal(true)
-
-  protected readonly secretValue = this.#secretValue.asReadonly()
-  protected readonly secretExpanded = this.#secretExpanded.asReadonly()
-  protected readonly hasSecret = computed(() => this.#secretValue().trim().length > 0)
-
-  protected readonly shieldColor = computed(() => {
-    const secret = this.#secretValue().trim()
-    if (!secret) return 'rgba(245, 245, 245, 0.35)'
-    const provider = get('@hypercomb.social/SecretStrengthProvider') as SecretStrengthProvider | undefined
-    const score = provider?.evaluate(secret) ?? 0.5
-    // interpolate hue: 0 (red) → 130 (green)
-    const hue = Math.round(score * 130)
-    return `hsl(${hue}, 70%, 50%)`
-  })
-
-  private get nav(): Navigation {
-    return get('@hypercomb.social/Navigation') as Navigation
-  }
-
   #runtimeReady: Promise<void>
-  #pivotOn = localStorage.getItem('hc:hex-pivot') === 'true'
 
   constructor() {
     this.#runtimeReady = initializeRuntime({
       onMeshStateChange: enabled => this.meshPublic.set(enabled),
     })
-    document.addEventListener('keydown', this.#onKeyDown)
   }
 
-  ngOnDestroy(): void {
-    document.removeEventListener('keydown', this.#onKeyDown)
-  }
-
-  #onKeyDown = (e: KeyboardEvent): void => {
-    // Ctrl+Shift+8 toggles pivot mode
-    if (e.ctrlKey && e.shiftKey && e.code === 'Digit8') {
-      e.preventDefault()
-      this.#pivotOn = !this.#pivotOn
-      localStorage.setItem('hc:hex-pivot', String(this.#pivotOn))
-      EffectBus.emit('render:set-pivot', { pivot: this.#pivotOn })
-    }
+  public toggleOrientation = (): void => {
+    const next: HexOrientation = this.orientation() === 'pointy' ? 'flat' : 'pointy'
+    this.orientation.set(next)
+    localStorage.setItem('hc:hex-orientation', next)
+    EffectBus.emit('render:set-orientation', { flat: next === 'flat' })
   }
 
   public toggleMesh = (): void => {
@@ -122,26 +86,6 @@ export class App implements AfterViewInit, OnDestroy {
     this.meshPublic.set(next);
     mesh?.setNetworkEnabled?.(next, true);
     EffectBus.emit('mesh:public-changed', { public: next })
-    if (!wasPublic) {
-      // coming back to public — re-emit secret if present
-      const secret = this.#secretValue().trim()
-      if (secret) EffectBus.emit('mesh:secret', { secret })
-    }
-  }
-
-  protected readonly onShieldClick = (): void => {
-    this.#secretExpanded.update(v => !v)
-  }
-
-  protected readonly onSecretInput = (event: Event): void => {
-    this.#secretValue.set((event.target as HTMLInputElement).value)
-  }
-
-  protected readonly submitSecret = (): void => {
-    const value = this.#secretValue().trim()
-    if (!value) return
-    EffectBus.emit('mesh:secret', { secret: value })
-    this.#secretExpanded.set(false)
   }
 
   public ngAfterViewInit(): void {
@@ -170,13 +114,8 @@ export class App implements AfterViewInit, OnDestroy {
     window.dispatchEvent(new Event('synchronize'))
 
     // restore persisted orientation
-    if (this.orientation() === 'flat-top') {
+    if (this.orientation() === 'flat') {
       EffectBus.emit('render:set-orientation', { flat: true })
-    }
-
-    // restore persisted pivot
-    if (this.#pivotOn) {
-      EffectBus.emit('render:set-pivot', { pivot: true })
     }
 
     // broadcast initial mesh state so drones can react
