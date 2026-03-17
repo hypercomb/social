@@ -150,5 +150,3 @@ export class SpacebarPanInput {
     )
   }
 }
-
-window.ioc.register('@diamondcoreprocessor.com/SpacebarPanInput', new SpacebarPanInput())

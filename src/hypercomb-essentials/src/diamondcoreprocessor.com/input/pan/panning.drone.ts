@@ -93,3 +93,13 @@ export class PanningDrone extends Drone {
 
 const _panning = new PanningDrone()
 window.ioc.register('@diamondcoreprocessor.com/PanningDrone', _panning)
+
+// Co-locate pan input registration here — plain classes (no base class) get
+// tree-shaken when imported from a separate module at file scope, because
+// esbuild considers `new PlainClass()` pure/droppable. Importing and
+// registering them from PanningDrone's module (which extends Drone and is
+// therefore preserved) ensures the side-effects survive the Angular build.
+import { SpacebarPanInput } from './spacebar-pan.input.js'
+import { TouchPanInput } from './touch-pan.input.js'
+window.ioc.register('@diamondcoreprocessor.com/SpacebarPanInput', new SpacebarPanInput())
+window.ioc.register('@diamondcoreprocessor.com/TouchPanInput', new TouchPanInput())

@@ -134,5 +134,3 @@ export class TouchPanInput {
     return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
   }
 }
-
-window.ioc.register('@diamondcoreprocessor.com/TouchPanInput', new TouchPanInput())
