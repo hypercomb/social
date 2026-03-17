@@ -22,7 +22,7 @@ const LEADER_FILL_ALPHA = 0.2
 const LEADER_STROKE = 0xffaa00
 const LEADER_STROKE_ALPHA = 0.8
 
-const STROKE_WIDTH = 0.5
+const STROKE_WIDTH = 1.0
 
 export type LeaderInfo = { q: number; r: number; label: string } | null
 export type RelativeAxial = { q: number; r: number; dq: number; dr: number; label: string }
@@ -334,7 +334,7 @@ export class TileSelectionDrone extends Drone {
   #drawHex(cx: number, cy: number, r: number, isLeader: boolean, flat = false): void {
     if (!this.#layer) return
 
-    // pointy-top: 30° offset; flat-top: 0° offset
+    // point-top: 30° offset; flat-top: 0° offset
     const angleOffset = flat ? 0 : Math.PI / 6
     const verts: number[] = []
     for (let i = 0; i < 6; i++) {

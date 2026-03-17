@@ -1,10 +1,10 @@
-export type HexOrientation = 'pointy' | 'flat'
+export type HexOrientation = 'point-top' | 'flat-top'
 
 export class Settings  {
 
     public hexagonSide = 200
 
-    // pointy-top dimensions (default)
+    // point-top dimensions (default)
     public get height(): number { return this.hexagonSide * 2 }
     public get width(): number { return this.hexagonSide * Math.sqrt(3) }
     public get hexagonOffsetX(): number { return this.width / 2 }
@@ -12,10 +12,10 @@ export class Settings  {
 
     // orientation-aware dimensions
     public hexWidth(orientation: HexOrientation): number {
-        return orientation === 'flat' ? this.hexagonSide * 2 : this.hexagonSide * Math.sqrt(3)
+        return orientation === 'flat-top' ? this.hexagonSide * 2 : this.hexagonSide * Math.sqrt(3)
     }
     public hexHeight(orientation: HexOrientation): number {
-        return orientation === 'flat' ? this.hexagonSide * Math.sqrt(3) : this.hexagonSide * 2
+        return orientation === 'flat-top' ? this.hexagonSide * Math.sqrt(3) : this.hexagonSide * 2
     }
 
     // editor canvas is always a square that fits both orientations

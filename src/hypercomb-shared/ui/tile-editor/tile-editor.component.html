@@ -23,21 +23,21 @@
           @if (!hasImage()) {
             <div class="image-placeholder">
               <span class="hci placeholder-icon">U</span>
-              <span>Drop image here</span>
+              <span>drop image here</span>
             </div>
           }
           <div class="hex-frame"></div>
         </div>
 
         <div class="image-controls">
-          <button type="button" class="link-btn" [class.linked]="isLinked" (click)="toggleLink()" [attr.title]="isLinked ? 'Unlink transforms' : 'Link transforms'">
+          <button type="button" class="link-btn" [class.linked]="isLinked" (click)="toggleLink()" [attr.title]="isLinked ? 'unlink transforms' : 'link transforms'">
             <span class="link-icon" [class.broken]="!isLinked"></span>
           </button>
           <button type="button" class="upload-btn" (click)="fileInput.click()">
-            <span class="hci">U</span> Upload
+            <span class="hci">U</span> upload
           </button>
-          <button type="button" class="orientation-btn" (click)="toggleOrientation()" [attr.title]="isFlat ? 'Switch to pointy-top' : 'Switch to flat-top'">
-            <span class="hci">r</span> {{ isFlat ? 'Flat' : 'Pointy' }}
+          <button type="button" class="orientation-btn" (click)="toggleOrientation()" [attr.title]="isFlat ? 'switch to point-top' : 'switch to flat-top'">
+            <span class="hci">r</span> {{ isFlat ? 'flat-top' : 'point-top' }}
           </button>
           <input #fileInput type="file" name="tile-image" accept="image/*" hidden (change)="onFileSelect($event)" />
         </div>
@@ -46,9 +46,9 @@
       <!-- property fields -->
       <div class="fields">
         <label class="field-row">
-          <span class="field-label"><span class="hci">*</span> Link</span>
+          <span class="field-label"><span class="hci">*</span> link</span>
           <input
-            class="field-input"
+            class="field-input link-input"
             type="text"
             name="tile-link"
             placeholder="https://..."
@@ -60,13 +60,13 @@
         <div class="color-row">
           <label class="color-control">
             <span class="color-btn">
-              <span class="hci">s</span> Bg
+              <span class="hci">s</span> bg
             </span>
             <input
               class="field-input color-text"
               type="text"
               name="tile-background-color-text"
-              placeholder="#1e1e1e"
+              placeholder="#1E1E1E"
               [ngModel]="backgroundColorValue"
               (ngModelChange)="backgroundColorValue = $event; onBackgroundColorChange($event)"
             />
@@ -74,14 +74,14 @@
               class="color-picker"
               type="color"
               name="tile-background-color"
-              [ngModel]="backgroundColorValue || '#1e1e1e'"
+              [ngModel]="backgroundColorValue || '#1E1E1E'"
               (ngModelChange)="backgroundColorValue = $event; onBackgroundColorChange($event)"
             />
           </label>
 
           <label class="color-control">
             <span class="color-btn">
-              <span class="hci">s</span> Border
+              <span class="hci">s</span> border
             </span>
             <input
               class="field-input color-text"
@@ -104,8 +104,8 @@
     </div>
 
     <footer class="editor-footer">
-      <button type="button" (click)="cancel()">Cancel</button>
-      <button type="button" class="primary" (click)="save()">Save</button>
+      <button type="button" (click)="cancel()">cancel</button>
+      <button type="button" class="primary" (click)="save()">save</button>
     </footer>
   </div>
 }

@@ -5,7 +5,7 @@
 // - redraw stays event-driven via synchronize, but heartbeat also triggers synchronize
 
 import { Drone, SignatureService, SignatureStore } from '@hypercomb/core'
-import { Application, Assets, Container, Geometry, Mesh, Texture } from 'pixi.js'
+import { Application, Container, Geometry, Mesh, Texture } from 'pixi.js'
 import type { HostReadyPayload } from './pixi-host.drone.js'
 import { HexLabelAtlas } from './hex-label.atlas.js'
 import { HexImageAtlas } from './hex-image.atlas.js'
@@ -14,7 +14,7 @@ import { TILE_PROPERTIES_FILE, isSignature } from '../editor/tile-properties.js'
 import type { HistoryService, HistoryOp } from '../core/history.service.js'
 
 type Axial = { q: number; r: number }
-type SeedCell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean }
+type SeedCell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; borderColor?: [number, number, number] }
 
 /** Deterministic label → RGB via DJB2 hash → HSL → RGB. Returns [r, g, b] in 0–1 range. */
 function labelToRgb(label: string): [number, number, number] {
@@ -78,13 +78,14 @@ export class ShowHoneycombWorker extends Drone {
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
 
-  private readonly texByUrl = new Map<string, Texture>()
   private atlas: HexLabelAtlas | null = null
   private imageAtlas: HexImageAtlas | null = null
   private atlasRenderer: unknown = null
 
   // cache: seed label → small image signature (avoids re-reading 0000 on every render)
   private readonly seedImageCache = new Map<string, string | null>()
+  // cache: seed label → border color RGB floats
+  private readonly seedBorderColorCache = new Map<string, [number, number, number]>()
 
   private lastKey = ''
 
@@ -104,7 +105,7 @@ export class ShowHoneycombWorker extends Drone {
   private cancelStreamFlag = false
   private renderedLocationKey = ''
 
-  // hex orientation: 'pointy' (default) or 'flat'
+  // hex orientation: 'point-top' (default) or 'flat-top'
   #flat = false
 
   // note: mesh seed state (derived on heartbeat)
@@ -841,9 +842,7 @@ export class ShowHoneycombWorker extends Drone {
     const quadW = quadHalfW * 2
     const quadH = quadHalfH * 2
 
-    const baseTex = await this.ensureTexture(this.#flat ? '/local-flat.svg' : '/local.svg')
-    const externalTex = await this.ensureTexture('/external.svg')
-    if (!baseTex || !externalTex || !this.atlas || !this.imageAtlas) {
+    if (!this.atlas || !this.imageAtlas) {
       this.clearMesh()
       return
     }
@@ -856,11 +855,9 @@ export class ShowHoneycombWorker extends Drone {
     const geom = this.buildFillQuadGeometry(cells, circumRadiusPx, gapPx, quadHalfW, quadHalfH)
 
     if (!this.shader) {
-      this.shader = new HexSdfTextureShader(baseTex, externalTex, labelTex, cellImageTex, quadW, quadH, circumRadiusPx)
+      this.shader = new HexSdfTextureShader(labelTex, cellImageTex, quadW, quadH, circumRadiusPx)
     } else {
       try {
-        this.shader.setBaseTexture(baseTex)
-        this.shader.setExternalTexture(externalTex)
         this.shader.setLabelAtlas(labelTex)
         this.shader.setCellImageAtlas(cellImageTex)
         this.shader.setQuadSize(quadW, quadH)
@@ -874,13 +871,12 @@ export class ShowHoneycombWorker extends Drone {
     this.shader.setFlat(this.#flat)
 
     if (!this.hexMesh) {
-      this.hexMesh = new Mesh({ geometry: geom as any, shader: (this.shader as any).shader, texture: baseTex as any } as any)
+      this.hexMesh = new Mesh({ geometry: geom as any, shader: (this.shader as any).shader, texture: Texture.WHITE as any } as any)
       this.layer!.addChild(this.hexMesh as any)
     } else {
       if (this.geom) this.geom.destroy(true)
       this.hexMesh.geometry = geom
       this.hexMesh.shader = (this.shader as any).shader
-      if ('texture' in this.hexMesh) this.hexMesh.texture = baseTex
     }
 
     if (this.hexMesh?.getLocalBounds) {
@@ -917,6 +913,7 @@ export class ShowHoneycombWorker extends Drone {
       if (payload?.seed) {
         const oldSig = this.seedImageCache.get(payload.seed)
         this.seedImageCache.delete(payload.seed)
+        this.seedBorderColorCache.delete(payload.seed)
         if (oldSig && this.imageAtlas) {
           this.imageAtlas.invalidate(oldSig)
         }
@@ -970,20 +967,10 @@ export class ShowHoneycombWorker extends Drone {
   private readonly rebuildRenderResources = (renderer: unknown): void => {
     this.clearMesh()
     this.shader = null
-    this.texByUrl.clear()
     this.atlas = new HexLabelAtlas(renderer, 128, 8, 8)
     this.imageAtlas = new HexImageAtlas(renderer, 256, 8, 8)
     this.seedImageCache.clear()
     this.atlasRenderer = renderer
-  }
-
-  private ensureTexture = async (url: string): Promise<Texture | null> => {
-    const existing = this.texByUrl.get(url)
-    if (existing) return existing
-
-    const loaded = await Assets.load(url)
-    this.texByUrl.set(url, loaded)
-    return loaded
   }
 
   private listSeedFolders = async (dir: FileSystemDirectoryHandle): Promise<string[]> => {
@@ -1047,6 +1034,7 @@ export class ShowHoneycombWorker extends Drone {
       // check cache first
       if (this.seedImageCache.has(cell.label)) {
         cell.imageSig = this.seedImageCache.get(cell.label) ?? undefined
+        cell.borderColor = this.seedBorderColorCache.get(cell.label)
         continue
       }
 
@@ -1058,7 +1046,18 @@ export class ShowHoneycombWorker extends Drone {
         const text = await file.text()
         const props = JSON.parse(text)
 
-        // load flat-top snapshot if in flat mode, fallback to pointy-top
+        // extract border color from properties
+        const bc = props?.border?.color
+        if (bc && typeof bc === 'string' && /^#?[0-9a-fA-F]{6}$/.test(bc.replace('#', ''))) {
+          const hex = bc.startsWith('#') ? bc : `#${bc}`
+          const r = parseInt(hex.slice(1, 3), 16) / 255
+          const g = parseInt(hex.slice(3, 5), 16) / 255
+          const b = parseInt(hex.slice(5, 7), 16) / 255
+          cell.borderColor = [r, g, b]
+          this.seedBorderColorCache.set(cell.label, [r, g, b])
+        }
+
+        // load flat-top snapshot if in flat mode, fallback to point-top
         const smallSig = (this.#flat && props?.flat?.small?.image) || props?.small?.image
         if (smallSig && isSignature(smallSig)) {
           cell.imageSig = smallSig
@@ -1102,15 +1101,15 @@ export class ShowHoneycombWorker extends Drone {
     const pos = new Float32Array(cells.length * 8)
     const uv = new Float32Array(cells.length * 8)
     const labelUV = new Float32Array(cells.length * 16)
-    const texKind = new Float32Array(cells.length * 4)
     const imageUV = new Float32Array(cells.length * 16)
     const hasImage = new Float32Array(cells.length * 4)
     const heat = new Float32Array(cells.length * 4)
     const identityColor = new Float32Array(cells.length * 12)
     const branch = new Float32Array(cells.length * 4)
+    const borderColor = new Float32Array(cells.length * 12)
     const idx = new Uint32Array(cells.length * 6)
 
-    let pv = 0, uvp = 0, luvp = 0, tkp = 0, iuvp = 0, hip = 0, hp = 0, icp = 0, bp = 0, ii = 0, base = 0
+    let pv = 0, uvp = 0, luvp = 0, iuvp = 0, hip = 0, hp = 0, icp = 0, bp = 0, bcp = 0, ii = 0, base = 0
 
     for (const c of cells) {
       const { x, y } = this.axialToPixel(c.q, c.r, spacing, this.#flat)
@@ -1129,10 +1128,6 @@ export class ShowHoneycombWorker extends Drone {
         labelUV.set([ruv.u0, ruv.v0, ruv.u1, ruv.v1], luvp)
         luvp += 4
       }
-
-      const kind = c.external ? 1 : 0
-      texKind.set([kind, kind, kind, kind], tkp)
-      tkp += 4
 
       // cell image atlas UVs
       const imgUV = c.imageSig ? this.imageAtlas?.getImageUV(c.imageSig) ?? null : null
@@ -1156,6 +1151,10 @@ export class ShowHoneycombWorker extends Drone {
       branch.set([b, b, b, b], bp)
       bp += 4
 
+      const [bcr, bcg, bcb] = c.borderColor ?? [0.784, 0.592, 0.353]
+      borderColor.set([bcr, bcg, bcb, bcr, bcg, bcb, bcr, bcg, bcb, bcr, bcg, bcb], bcp)
+      bcp += 12
+
       idx.set([base, base + 1, base + 2, base, base + 2, base + 3], ii)
       ii += 6
       base += 4
@@ -1165,12 +1164,12 @@ export class ShowHoneycombWorker extends Drone {
       ; (g as any).addAttribute('aPosition', pos, 2)
       ; (g as any).addAttribute('aUV', uv, 2)
       ; (g as any).addAttribute('aLabelUV', labelUV, 4)
-      ; (g as any).addAttribute('aTexKind', texKind, 1)
       ; (g as any).addAttribute('aImageUV', imageUV, 4)
       ; (g as any).addAttribute('aHasImage', hasImage, 1)
       ; (g as any).addAttribute('aHeat', heat, 1)
       ; (g as any).addAttribute('aIdentityColor', identityColor, 3)
       ; (g as any).addAttribute('aHasBranch', branch, 1)
+      ; (g as any).addAttribute('aBorderColor', borderColor, 3)
       ; (g as any).addIndex(idx)
 
     return g

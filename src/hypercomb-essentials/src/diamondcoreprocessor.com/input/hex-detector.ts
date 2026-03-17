@@ -12,8 +12,8 @@ export class HexDetector {
 
   /**
    * O(1) pixel-to-axial conversion using cube rounding.
-   * Pointy-top inverse of: x = √3 * s * (q + r/2), y = s * 1.5 * r
-   * Flat-top inverse of:   x = 1.5 * s * q,        y = √3 * s * (r + q/2)
+   * point-top inverse of: x = √3 * s * (q + r/2), y = s * 1.5 * r
+   * flat-top inverse of:   x = 1.5 * s * q,        y = √3 * s * (r + q/2)
    */
   public pixelToAxial(px: number, py: number, flat = false): Axial {
     const s = this.spacing

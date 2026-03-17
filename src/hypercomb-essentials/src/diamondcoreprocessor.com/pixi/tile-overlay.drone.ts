@@ -26,15 +26,11 @@ const EDIT_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="99.7 93.
 const GARBAGE_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="112.2 93.2 10.4 10.5" width="96" height="96"><path fill="white" fill-rule="evenodd" d="m 114.23557,93.367129 c -0.51819,0 -0.96431,0.18841 -1.3382,0.564993 -0.36732,0.369975 -0.55093,0.815843 -0.55093,1.337773 v 6.342445 c 0,0.52192 0.18361,0.97127 0.55093,1.34786 0.37389,0.36997 0.82001,0.5549 1.3382,0.5549 h 6.29699 c 0.51819,0 0.96088,-0.18493 1.3282,-0.5549 0.37387,-0.37659 0.56094,-0.82594 0.56094,-1.34786 v -4.756922 -1.585523 c 0,-0.52193 -0.18707,-0.967798 -0.56094,-1.337773 -0.36732,-0.376583 -0.81001,-0.564993 -1.3282,-0.564993 z m 2.2286,1.368005 h 1.8398 c 0.12936,0.0048 0.23735,0.05074 0.32359,0.1376 0.0862,0.08685 0.13151,0.195289 0.13627,0.325582 v 0.926365 h 0.92008 0.91973 c 0.12936,0.0048 0.23735,0.05075 0.32358,0.1376 0.0863,0.08685 0.13185,0.195636 0.13663,0.32593 v 0.463183 h -0.46021 v 4.632516 c -0.004,0.13029 -0.0499,0.23909 -0.13628,0.32594 -0.0863,0.0868 -0.19423,0.1328 -0.32359,0.13761 h -5.51941 c -0.12935,-0.004 -0.23701,-0.0507 -0.32324,-0.13761 -0.0862,-0.0868 -0.13185,-0.19565 -0.13662,-0.32594 v -4.632516 h -0.45986 v -0.463183 c 0.004,-0.130294 0.0504,-0.239069 0.13661,-0.32593 0.0862,-0.08689 0.19389,-0.132793 0.32325,-0.1376 h 1.83981 v -0.926365 c 0.004,-0.130293 0.0504,-0.238719 0.13661,-0.325582 0.0862,-0.08688 0.19389,-0.132796 0.32325,-0.1376 z m 0.45986,0.926365 v 0.463182 h 0.92008 v -0.463182 h -0.45986 z m -1.83946,1.389895 v 4.169336 h 2.29968 2.29966 v -4.169336 z m 0.91974,0.926366 h 0.45986 0.45986 v 2.3166 h -0.91972 z m 1.8398,0 h 0.45986 0.45986 v 2.3166 h -0.91972 z"/></svg>`
 
 // ── overlay geometry constants ─────────────────────────────────────
-// Dark rect fills the hex's rectangular body (between upper/lower shoulder vertices).
-// Derived from icon-tray.svg proportions, scaled from SVG mm → Pixi px (scale ≈ 0.6417).
-const RECT_X = -30
-const RECT_Y = -18
-const RECT_W = 60
-const RECT_H = 36
-const RECT_R = 2
-const RECT_COLOR = 0x001e30
-const RECT_ALPHA = 0.85
+const HEX_FILL_COLOR = 0x001e30
+const HEX_FILL_ALPHA = 0.65
+const HEX_STROKE_COLOR = 0x4488aa
+const HEX_STROKE_ALPHA = 0.5
+const HEX_STROKE_WIDTH = 1.0
 
 // Icon positions within the overlay (measured from hex center = overlay origin)
 const ICON_SIZE = 8.75
@@ -44,8 +40,8 @@ const GARBAGE_X = -2
 const GARBAGE_Y = 5
 
 // Seed label styling
-const LABEL_X = RECT_X + 2
-const LABEL_Y = RECT_Y + 1.5
+const LABEL_X = -24
+const LABEL_Y = -14
 const LABEL_STYLE = new TextStyle({
   fontFamily: 'monospace',
   fontSize: 7,
@@ -82,12 +78,10 @@ export class TileOverlayDrone extends Drone {
 
   #listening = false
   #hoverLog = 0
+  #flat = false
 
   #occupiedByAxial = new Map<string, { index: number; label: string }>()
   #branchLabels = new Set<string>()
-
-  // hex orientation
-  #flat = false
 
   // navigation click guard — blocks clicks during layer transitions
   #navigationBlocked = false
@@ -133,6 +127,8 @@ export class TileOverlayDrone extends Drone {
     // orientation
     this.onEffect<{ flat: boolean }>('render:set-orientation', (payload) => {
       this.#flat = payload.flat
+      this.#drawHexBg()
+      if (this.#currentAxial) this.#positionOverlay(this.#currentAxial.q, this.#currentAxial.r)
     })
 
     // navigation guard — block clicks during layer transitions
@@ -181,10 +177,9 @@ export class TileOverlayDrone extends Drone {
     this.#overlay.visible = false
     this.#overlay.zIndex = 9999
 
-    // 1. Dark rounded-rect underlay (fills the hex body area)
+    // 1. Hex-shaped underlay (matches selection style, no drop-shadow)
     this.#hexBg = new Graphics()
-    this.#hexBg.roundRect(RECT_X, RECT_Y, RECT_W, RECT_H, RECT_R)
-    this.#hexBg.fill({ color: RECT_COLOR, alpha: RECT_ALPHA })
+    this.#drawHexBg()
     this.#overlay.addChild(this.#hexBg)
 
     // 2. Seed name label (top-left of overlay)
@@ -239,6 +234,23 @@ export class TileOverlayDrone extends Drone {
     // load icon textures asynchronously
     void this.#editButton.load()
     void this.#deleteButton.load()
+  }
+
+  #drawHexBg(): void {
+    if (!this.#hexBg) return
+    this.#hexBg.clear()
+    const r = this.#circumRadiusPx
+    const angleOffset = this.#flat ? 0 : Math.PI / 6
+    const verts: number[] = []
+    for (let i = 0; i < 6; i++) {
+      const angle = (Math.PI / 3) * i + angleOffset
+      verts.push(r * Math.cos(angle))
+      verts.push(r * Math.sin(angle))
+    }
+    this.#hexBg.poly(verts, true)
+    this.#hexBg.fill({ color: HEX_FILL_COLOR, alpha: HEX_FILL_ALPHA })
+    this.#hexBg.poly(verts, true)
+    this.#hexBg.stroke({ color: HEX_STROKE_COLOR, alpha: HEX_STROKE_ALPHA, width: HEX_STROKE_WIDTH })
   }
 
   // ── listener setup ─────────────────────────────────────────────
@@ -437,8 +449,8 @@ export class TileOverlayDrone extends Drone {
     this.#updateVisibility()
   }
 
-  #axialToPixel(q: number, r: number, flat = false) {
-    return flat
+  #axialToPixel(q: number, r: number) {
+    return this.#flat
       ? { x: 1.5 * this.#spacing * q, y: Math.sqrt(3) * this.#spacing * (r + q / 2) }
       : { x: Math.sqrt(3) * this.#spacing * (q + r / 2), y: this.#spacing * 1.5 * r }
   }

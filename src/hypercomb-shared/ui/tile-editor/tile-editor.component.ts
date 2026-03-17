@@ -197,8 +197,8 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
     // when re-linking, sync current transform to both orientations immediately
     if (this.isLinked) {
       const t = this.imageEditor.getTransform()
-      this.editorService.updateTransform(t.x, t.y, t.scale, 'pointy')
-      this.editorService.updateTransform(t.x, t.y, t.scale, 'flat')
+      this.editorService.updateTransform(t.x, t.y, t.scale, 'point-top')
+      this.editorService.updateTransform(t.x, t.y, t.scale, 'flat-top')
     }
   }
 
@@ -206,20 +206,20 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
 
   readonly toggleOrientation = (): void => {
     // save current transform before switching
-    const currentOrientation = this.imageEditor.orientation ?? 'pointy'
+    const currentOrientation = this.imageEditor.orientation ?? 'point-top'
     const currentTransform = this.imageEditor.getTransform()
     this.editorService.updateTransform(
       currentTransform.x, currentTransform.y, currentTransform.scale, currentOrientation
     )
 
     // switch to the other orientation (canvas stays same size)
-    const nextOrientation = currentOrientation === 'pointy' ? 'flat' as const : 'pointy' as const
+    const nextOrientation = currentOrientation === 'point-top' ? 'flat-top' as const : 'point-top' as const
 
     // when linked, keep same position; when unlinked, load saved transform
     let transform: { x: number; y: number; scale: number } | undefined
     if (!this.isLinked) {
       const props = this.editorService.properties as any
-      const savedTransform = nextOrientation === 'flat'
+      const savedTransform = nextOrientation === 'flat-top'
         ? props?.flat?.large
         : props?.large
       transform = savedTransform
@@ -227,7 +227,7 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
         : undefined
     }
 
-    this.isFlat = nextOrientation === 'flat'
+    this.isFlat = nextOrientation === 'flat-top'
     void this.imageEditor.setOrientation(nextOrientation, transform)
   }
 

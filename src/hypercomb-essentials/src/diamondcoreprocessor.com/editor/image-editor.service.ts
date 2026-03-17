@@ -3,16 +3,16 @@
 // Canvas is always square (editorSize × editorSize). Both hex orientations
 // fit within the same coordinate space — the hex frame is centered.
 
-import { Application, Container, Sprite, Texture, RenderTexture, Rectangle } from 'pixi.js'
+import { Application, Container, Graphics, Sprite, Texture, RenderTexture, Rectangle } from 'pixi.js'
 
-export type HexOrientation = 'pointy' | 'flat'
+export type HexOrientation = 'point-top' | 'flat-top'
 
 export class ImageEditorService extends EventTarget {
 
   #app: Application | null = null
   #container: Container | null = null
   #sprite: Sprite | null = null
-  #hexFrame: Sprite | null = null
+  #hexFrame: Graphics | null = null
   #hostElement: HTMLElement | null = null
   #initialized = false
 
@@ -22,9 +22,7 @@ export class ImageEditorService extends EventTarget {
   #size = 0  // always square: editorSize × editorSize
   #borderColor = '#c8975a'
   #backgroundColor = 0x1e1e1e
-  #svgSourcePointy: string | null = null
-  #svgSourceFlat: string | null = null
-  #orientation: HexOrientation = 'pointy'
+  #orientation: HexOrientation = 'point-top'
   #linked = true
 
   // ── public state ───────────────────────────────────────────────
@@ -39,7 +37,7 @@ export class ImageEditorService extends EventTarget {
   readonly initialize = async (
     hostElement: HTMLElement,
     size: number,
-    orientation: HexOrientation = 'pointy'
+    orientation: HexOrientation = 'point-top'
   ): Promise<void> => {
     if (this.#initialized) return
 
@@ -73,7 +71,7 @@ export class ImageEditorService extends EventTarget {
 
     this.#app.canvas.addEventListener('wheel', this.#onWheel, { passive: false })
 
-    await this.#loadHexFrame()
+    this.#drawHexFrame()
 
     this.#initialized = true
     this.#emit()
@@ -101,7 +99,7 @@ export class ImageEditorService extends EventTarget {
     this.#hostElement = null
     this.#initialized = false
     this.#isDragging = false
-    this.#orientation = 'pointy'
+    this.#orientation = 'point-top'
     this.#linked = true
     this.#emit()
   }
@@ -126,8 +124,8 @@ export class ImageEditorService extends EventTarget {
       this.#sprite.scale.set(transform.scale)
     }
 
-    // reload hex frame for new orientation (centered in same square)
-    await this.#loadHexFrame()
+    // redraw hex frame for new orientation (centered in same square)
+    this.#drawHexFrame()
     this.#emit()
   }
 
@@ -226,8 +224,8 @@ export class ImageEditorService extends EventTarget {
   }
 
   // ── hex frame border ───────────────────────────────────────────
-  // Loaded from /local.svg (pointy, 346×400) or /local-flat.svg (flat, 400×346).
-  // Centered within the square canvas.
+  // Programmatic hex polygon outline centered within the square canvas.
+  // Matches the branch indicator / border ring style (full hexagon stroke).
 
   readonly setBackgroundColor = (color: string): void => {
     if (!this.#app) return
@@ -242,59 +240,65 @@ export class ImageEditorService extends EventTarget {
     this.#borderColor = color && /^#?[0-9a-fA-F]{6}$/.test(color.replace('#', ''))
       ? (color.startsWith('#') ? color : `#${color}`)
       : '#c8975a'
-    void this.#loadHexFrame()
+    this.#drawHexFrame()
   }
 
-  async #loadHexFrame(): Promise<void> {
+  #drawHexFrame(): void {
     if (!this.#container) return
 
-    const isFlat = this.#orientation === 'flat'
-    const svgPath = isFlat ? '/local-flat.svg' : '/local.svg'
-
-    // fetch SVG source once per orientation
-    if (isFlat && !this.#svgSourceFlat) {
-      try {
-        const resp = await fetch(svgPath)
-        this.#svgSourceFlat = await resp.text()
-      } catch { return }
-    } else if (!isFlat && !this.#svgSourcePointy) {
-      try {
-        const resp = await fetch(svgPath)
-        this.#svgSourcePointy = await resp.text()
-      } catch { return }
-    }
-
-    const svgSource = isFlat ? this.#svgSourceFlat! : this.#svgSourcePointy!
-
-    // replace all fill colors in the SVG with the current border color
-    const colored = svgSource.replace(/fill:#[0-9a-fA-F]{6}/g, `fill:${this.#borderColor}`)
-
-    const blob = new Blob([colored], { type: 'image/svg+xml' })
-    const url = URL.createObjectURL(blob)
-    const img = new Image()
-    img.src = url
-    try { await img.decode() } catch { URL.revokeObjectURL(url); return }
-    URL.revokeObjectURL(url)
-    const texture = Texture.from(img)
-
-    // remove old frame sprite
+    // remove old frame graphic
     if (this.#hexFrame) {
       this.#container.removeChild(this.#hexFrame)
       this.#hexFrame.destroy()
       this.#hexFrame = null
     }
 
-    // natural SVG dimensions
+    const isFlat = this.#orientation === 'flat-top'
+
+    // hex dimensions matching settings: point-top 346×400, flat-top 400×346
     const hexW = isFlat ? 400 : 346
     const hexH = isFlat ? 346 : 400
 
-    this.#hexFrame = new Sprite(texture)
+    // center of the hex within the square canvas
+    const cx = this.#size / 2
+    const cy = this.#size / 2
+
+    const strokeWidth = 14.44
+
+    // inset vertices by half stroke width so outer edge stays flush with hex boundary
+    const inset = strokeWidth / 2
+    const hw = (hexW / 2) - inset
+    const hh = (hexH / 2) - inset
+
+    // build 6 vertices
+    const verts: number[] = []
+    if (isFlat) {
+      // flat-top hex vertices (wide horizontally)
+      verts.push(cx + hw, cy)           // right
+      verts.push(cx + hw / 2, cy + hh)  // bottom-right
+      verts.push(cx - hw / 2, cy + hh)  // bottom-left
+      verts.push(cx - hw, cy)           // left
+      verts.push(cx - hw / 2, cy - hh)  // top-left
+      verts.push(cx + hw / 2, cy - hh)  // top-right
+    } else {
+      // point-top hex vertices (tall vertically)
+      verts.push(cx, cy - hh)           // top
+      verts.push(cx + hw, cy - hh / 2)  // top-right
+      verts.push(cx + hw, cy + hh / 2)  // bottom-right
+      verts.push(cx, cy + hh)           // bottom
+      verts.push(cx - hw, cy + hh / 2)  // bottom-left
+      verts.push(cx - hw, cy - hh / 2)  // top-left
+    }
+
+    const color = parseInt(this.#borderColor.replace('#', ''), 16) || 0xc8975a
+
+    this.#hexFrame = new Graphics()
     this.#hexFrame.eventMode = 'none'
-    this.#hexFrame.width = hexW
-    this.#hexFrame.height = hexH
-    // center within the square canvas
-    this.#hexFrame.x = (this.#size - hexW) / 2
-    this.#hexFrame.y = (this.#size - hexH) / 2
+
+    // stroke outline matching branch indicator style
+    this.#hexFrame.poly(verts, true)
+    this.#hexFrame.stroke({ color, alpha: 0.7, width: strokeWidth })
+
     this.#container.addChild(this.#hexFrame)
   }
 
@@ -356,7 +360,7 @@ export class ImageEditorService extends EventTarget {
       const t = this.getTransform()
       service.updateTransform(t.x, t.y, t.scale, this.#orientation)
       if (this.#linked) {
-        const other: HexOrientation = this.#orientation === 'pointy' ? 'flat' : 'pointy'
+        const other: HexOrientation = this.#orientation === 'point-top' ? 'flat-top' : 'point-top'
         service.updateTransform(t.x, t.y, t.scale, other)
       }
     }

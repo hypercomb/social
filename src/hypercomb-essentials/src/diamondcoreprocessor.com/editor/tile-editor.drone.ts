@@ -25,8 +25,8 @@ type Store = {
 
 type Settings = {
   editorSize: number
-  hexWidth: (orientation: 'pointy' | 'flat') => number
-  hexHeight: (orientation: 'pointy' | 'flat') => number
+  hexWidth: (orientation: 'point-top' | 'flat-top') => number
+  hexHeight: (orientation: 'point-top' | 'flat-top') => number
 }
 
 export class TileEditorDrone {
@@ -93,7 +93,7 @@ export class TileEditorDrone {
     if (service.mode !== 'editing') return
 
     const props: Record<string, unknown> = { ...service.properties }
-    const currentOrientation = imageEditor.orientation ?? 'pointy'
+    const currentOrientation = imageEditor.orientation ?? 'point-top'
 
     // 1. capture small image for CURRENT orientation (if image loaded)
     if (imageEditor.hasImage) {
@@ -108,12 +108,12 @@ export class TileEditorDrone {
       const currentSig = await store.putResource(currentBlob)
 
       // determine the other orientation
-      const otherOrientation = currentOrientation === 'pointy' ? 'flat' as const : 'pointy' as const
+      const otherOrientation = currentOrientation === 'point-top' ? 'flat-top' as const : 'point-top' as const
       const otherW = settings.hexWidth(otherOrientation)
       const otherH = settings.hexHeight(otherOrientation)
 
       // switch to the other orientation, capture, then switch back
-      const otherTransform = otherOrientation === 'flat'
+      const otherTransform = otherOrientation === 'flat-top'
         ? (props as any).flat?.large
         : (props as any).large
       await imageEditor.setOrientation(otherOrientation,
@@ -125,8 +125,8 @@ export class TileEditorDrone {
       await imageEditor.setOrientation(currentOrientation,
         { x: currentTransform.x, y: currentTransform.y, scale: currentTransform.scale })
 
-      // store pointy-top snapshot + transform
-      if (currentOrientation === 'pointy') {
+      // store point-top snapshot + transform
+      if (currentOrientation === 'point-top') {
         ;(props as any).small = { image: currentSig }
         if (!(props as any).flat) (props as any).flat = {}
         ;(props as any).flat.small = { image: otherSig }
@@ -139,7 +139,7 @@ export class TileEditorDrone {
       // 2. store large image blob + transforms
       if (service.largeBlob) {
         const largeSig = await store.putResource(service.largeBlob)
-        const pointyTransform = currentOrientation === 'pointy' ? currentTransform : imageEditor.getTransform()
+        const pointyTransform = currentOrientation === 'point-top' ? currentTransform : imageEditor.getTransform()
         ;(props as any).large = {
           image: largeSig,
           x: (props as any).large?.x ?? pointyTransform.x,

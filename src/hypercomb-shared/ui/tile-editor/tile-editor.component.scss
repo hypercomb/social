@@ -180,14 +180,14 @@
 .orientation-btn {
   display: flex;
   align-items: center;
-  gap: 0.35em;
+  gap: 0.4em;
   background: #252528;
   border: 1px solid #3a3a3e;
   border-radius: 5px;
   color: #ccc;
   cursor: pointer;
   font-size: 0.64em;
-  padding: 0.35em 0.8em;
+  padding: 0.45em 1em;
   transition: background 0.15s, border-color 0.15s;
 
   .hci {
@@ -264,45 +264,54 @@
   }
 }
 
-// ── property fields ─────────────────────────────────────
+// ── property fields (8-column grid) ─────────────────────
+// Columns: [label] [input] [input] [input] [label] [input] [input] [picker]
+// The label columns are auto-sized to content; input columns take remaining space.
 
 .fields {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: auto 1fr 1fr auto auto 1fr 1fr auto;
   gap: 0.5em;
 }
 
 .field-row {
-  display: flex;
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
   align-items: center;
-  gap: 0.5em;
 }
 
 .field-label {
+  grid-column: 1;
   white-space: nowrap;
   font-size: 0.8em;
   color: #888;
   display: flex;
   align-items: center;
   gap: 0.3em;
-  width: 3.3em;
-  
+  padding-right: 0.4em;
+  justify-self: start;
+
   .hci {
     font-size: 1.1em;
     color: #c8975a;
   }
 }
 
+.link-input {
+  grid-column: 2 / -1;
+}
+
 .field-input {
-  flex: 1;
   background: #1e1e22;
   border: 1px solid #333;
   border-radius: 5px;
   color: #e0e0e0;
   padding: 0.35em 0.5em;
   font-size: 0.8em;
-    transition: border-color 0.15s;
-  width: 3.3em;
+  transition: border-color 0.15s;
+  min-width: 0;
+
   &:focus {
     outline: none;
     border-color: #c8975a;
@@ -310,29 +319,29 @@
 }
 
 .color-row {
-  display: flex;
-  gap: 0.75em;
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  gap: 0.5em;
 }
 
 .color-control {
-  flex: 1;
-  display: flex;
+  grid-column: span 4;
+  display: grid;
+  grid-template-columns: subgrid;
   align-items: center;
-  gap: 0.5em;
-  min-width: 0;
 }
 
 .color-btn {
   display: flex;
   align-items: center;
   gap: 0.25em;
-  padding: 0.3em 0.5em;
+  padding: 0.2em 0.4em 0.2em 0;
   color: #ccc;
   font-size: 0.8em;
   white-space: nowrap;
   cursor: default;
-  box-sizing: content-box;
-  min-width: 2em;
+  justify-self: start;
 
   .hci {
     font-size: 1.1em;
@@ -341,7 +350,7 @@
 }
 
 .color-text {
-  flex: 1;
+  grid-column: span 2;
   min-width: 0;
 }
 

@@ -106,8 +106,8 @@ export class TileEditorService extends EventTarget {
     this.#emit()
   }
 
-  readonly updateTransform = (x: number, y: number, scale: number, orientation: 'pointy' | 'flat' = 'pointy'): void => {
-    if (orientation === 'flat') {
+  readonly updateTransform = (x: number, y: number, scale: number, orientation: 'point-top' | 'flat-top' = 'point-top'): void => {
+    if (orientation === 'flat-top') {
       if (!(this.#properties as any).flat) {
         (this.#properties as any).flat = {}
       }
