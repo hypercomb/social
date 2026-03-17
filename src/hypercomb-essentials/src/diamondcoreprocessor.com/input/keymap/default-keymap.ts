@@ -51,6 +51,30 @@ export const defaultKeyMap: KeyMapLayer = {
   bindings: [
     // Navigation
     {
+      cmd: 'navigation.moveUp',
+      sequence: [[{ key: 'arrowup' }]],
+      description: 'Move to tile above',
+      category: 'Navigation',
+    },
+    {
+      cmd: 'navigation.moveDown',
+      sequence: [[{ key: 'arrowdown' }]],
+      description: 'Move to tile below',
+      category: 'Navigation',
+    },
+    {
+      cmd: 'navigation.moveLeft',
+      sequence: [[{ key: 'arrowleft' }]],
+      description: 'Move to tile left',
+      category: 'Navigation',
+    },
+    {
+      cmd: 'navigation.moveRight',
+      sequence: [[{ key: 'arrowright' }]],
+      description: 'Move to tile right',
+      category: 'Navigation',
+    },
+    {
       cmd: 'layout.centerTile',
       sequence: [[{ key: 'h' }]],
       description: 'Center on active tile',

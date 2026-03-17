@@ -66,8 +66,9 @@ export class TileSelectionDrone extends Drone {
   protected override deps = {
     detector: '@diamondcoreprocessor.com/HexDetector',
     axial: '@diamondcoreprocessor.com/AxialService',
+    selection: '@diamondcoreprocessor.com/SelectionService',
   }
-  protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count', 'render:set-orientation']
+  protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count', 'render:set-orientation', 'keymap:invoke']
   protected override emits = ['selection:changed']
 
   protected override heartbeat = async (): Promise<void> => {
@@ -97,6 +98,10 @@ export class TileSelectionDrone extends Drone {
     this.onEffect<{ flat: boolean }>('render:set-orientation', (payload) => {
       this.#flat = payload.flat
       this.#redraw()
+    })
+
+    this.onEffect<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
+      if (cmd in ARROW_OFFSETS) this.#handleArrowNav(cmd)
     })
   }
 
@@ -163,6 +168,55 @@ export class TileSelectionDrone extends Drone {
     this.#leaderKey = null
     this.#redraw()
     this.#emitChanged()
+  }
+
+  // ── keyboard navigation ──────────────────────────────────────
+
+  #handleArrowNav(cmd: string): void {
+    const offset = ARROW_OFFSETS[cmd]
+    if (!offset) return
+
+    // no leader — default to center tile
+    if (!this.#leaderKey) {
+      const centerKey = axialKey(0, 0)
+      if (!this.#occupiedByAxial.has(centerKey)) return
+      this.#leaderKey = centerKey
+      this.#selected.clear()
+      this.#selected.add(centerKey)
+      this.#syncSelectionService(centerKey)
+      this.#redraw()
+      this.#emitChanged()
+      return
+    }
+
+    const [qs, rs] = this.#leaderKey.split(',')
+    const tq = Number(qs) + offset.dq
+    const tr = Number(rs) + offset.dr
+    const targetKey = axialKey(tq, tr)
+
+    if (!this.#occupiedByAxial.has(targetKey)) return
+
+    if (this.#selected.has(targetKey)) {
+      // target already in selection — promote to leader, keep selection
+      this.#leaderKey = targetKey
+    } else {
+      // target outside selection — collapse to single
+      this.#leaderKey = targetKey
+      this.#selected.clear()
+      this.#selected.add(targetKey)
+      this.#syncSelectionService(targetKey)
+    }
+    this.#redraw()
+    this.#emitChanged()
+  }
+
+  #syncSelectionService(axialKeyStr: string): void {
+    const entry = this.#occupiedByAxial.get(axialKeyStr)
+    if (!entry) return
+    const selection = this.resolve<{ clear(): void; add(label: string): void }>('selection')
+    if (!selection) return
+    selection.clear()
+    selection.add(entry.label)
   }
 
   // ── layer setup ───────────────────────────────────────────────
@@ -413,6 +467,14 @@ export class TileSelectionDrone extends Drone {
   #isInsideRect(x: number, y: number, rect: DOMRect): boolean {
     return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
   }
+}
+
+// ── arrow-key direction offsets ─────────────────────────────────
+const ARROW_OFFSETS: Record<string, { dq: number; dr: number }> = {
+  'navigation.moveLeft':  { dq: -1, dr:  0 },
+  'navigation.moveRight': { dq:  1, dr:  0 },
+  'navigation.moveUp':    { dq:  0, dr: -1 },
+  'navigation.moveDown':  { dq:  0, dr:  1 },
 }
 
 function axialKey(q: number, r: number): string {
