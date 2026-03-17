@@ -1,0 +1,160 @@
+// hypercomb-shared/ui/_header-bar.scss
+// Shared header-bar styles consumed by both web and dev apps.
+
+$secret-border: rgba(200, 151, 90, 0.2);
+$secret-bg: rgba(10, 12, 16, 0.85);
+
+// ── layout ───────────────────────────────────────────────
+
+.header-bar {
+  display: flex;
+  align-items: stretch;
+  padding: 0.4rem 0.5rem;
+  background-color: #050f17;
+  position: relative;
+  z-index: 10;
+}
+
+// ── hci icon font ────────────────────────────────────────
+
+.hci {
+  font-family: 'hypercomb-icons';
+  font-style: normal;
+  font-weight: normal;
+  line-height: 1;
+  user-select: none;
+}
+
+// ── public mode (shield + secret + toggle) ───────────────
+
+.mesh-public {
+  display: flex;
+  align-items: stretch;
+  flex-shrink: 0;
+}
+
+.shield-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 0 0.85rem;
+  border: 1px solid rgba(245, 245, 245, 0.12);
+  border-right: none;
+  background: $secret-bg;
+  color: rgba(245, 245, 245, 0.35);
+  cursor: pointer;
+  transition: color 200ms ease, background 200ms ease, border-color 200ms ease;
+
+  .hci {
+    font-size: 1.05rem;
+  }
+
+  &:hover {
+    color: rgba(245, 245, 245, 0.6);
+    background: rgba(245, 245, 245, 0.04);
+  }
+
+  &:active {
+    background: rgba(245, 245, 245, 0.06);
+  }
+
+  &:focus-visible {
+    outline: 1px solid rgba(245, 245, 245, 0.3);
+    outline-offset: -1px;
+  }
+
+  &.has-secret {
+    border-color: $secret-border;
+    color: rgba(200, 151, 90, 0.7);
+
+    &:hover {
+      color: rgba(200, 151, 90, 0.9);
+      background: rgba(200, 151, 90, 0.06);
+    }
+
+    &:active {
+      background: rgba(200, 151, 90, 0.1);
+    }
+
+    &:focus-visible {
+      outline-color: rgba(200, 151, 90, 0.5);
+    }
+  }
+}
+
+.header-secret-input {
+  width: 14rem;
+  padding: 0.55rem 1.1rem;
+  border: 1px solid rgba(245, 245, 245, 0.12);
+  border-left: none;
+  background: $secret-bg;
+  color: rgba(248, 248, 244, 0.9);
+  font: 600 0.72rem/1 ui-monospace, sfmono-regular, menlo, consolas, monospace;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  transition: border-color 200ms ease;
+
+  &::placeholder {
+    color: rgba(245, 245, 245, 0.24);
+    letter-spacing: 0.1em;
+    font-weight: 400;
+  }
+
+  &:focus {
+    outline: none;
+  }
+
+  &.has-secret {
+    border-color: $secret-border;
+  }
+}
+
+// ── pink toggle buttons (public / private) ───────────────
+
+@mixin pink-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  min-width: 6rem;
+  padding: 0 1.25em;
+  border: 1px solid rgba(255, 45, 138, 0.2);
+  border-radius: 0 3px 3px 0;
+  background: rgba(8, 18, 28, 0.65);
+  color: rgba(255, 45, 138, 0.7);
+  font: 600 0.85em/1 ui-monospace, sfmono-regular, menlo, consolas, monospace;
+  letter-spacing: 0.02em;
+  box-shadow: 0 0 4px rgba(255, 45, 138, 0.08);
+  cursor: pointer;
+  transition:
+    border-color 200ms ease,
+    box-shadow 200ms ease,
+    color 200ms ease,
+    background 200ms ease;
+
+  &:hover {
+    border-color: rgba(255, 45, 138, 0.4);
+    color: rgba(255, 45, 138, 0.9);
+    box-shadow:
+      0 0 6px rgba(255, 45, 138, 0.15),
+      0 0 14px rgba(255, 45, 138, 0.06);
+  }
+
+  &:active {
+    background: rgba(255, 45, 138, 0.08);
+  }
+
+  &:focus-visible {
+    outline: 1px solid rgba(255, 45, 138, 0.5);
+    outline-offset: 2px;
+  }
+}
+
+.public-toggle {
+  @include pink-toggle;
+}
+
+.private-toggle {
+  @include pink-toggle;
+}

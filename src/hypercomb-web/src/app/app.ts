@@ -1,10 +1,12 @@
-import { AfterViewInit, Component, inject, signal } from '@angular/core'
+import { AfterViewInit, Component, computed, inject, signal } from '@angular/core'
 import { type Bee, EffectBus } from '@hypercomb/core'
 import { RouterOutlet } from '@angular/router'
 import { Header } from './header/header'
 import { CoreAdapter } from './core-adapter'
 import { TileEditorComponent } from "@hypercomb/shared/ui/tile-editor/tile-editor.component"
 import { ControlsBarComponent } from "@hypercomb/shared/ui/controls-bar/controls-bar.component"
+import type { SecretStore } from '@hypercomb/shared/core/secret-store'
+import type { Navigation } from '@hypercomb/shared/core/navigation'
 
 @Component({
   selector: 'app-root',
@@ -21,7 +23,50 @@ export class App implements AfterViewInit {
 
   protected readonly core = inject(CoreAdapter)
   protected readonly meshPublic = this.core.meshPublic
-  protected readonly toggleMesh = () => this.core.toggleMesh()
+
+  // ── secret state (public-mode mesh scoping) ─────────────
+  #secretValue = signal('')
+  #secretVisible = signal(false)
+
+  protected readonly secretValue = this.#secretValue.asReadonly()
+  protected readonly secretVisible = this.#secretVisible.asReadonly()
+  protected readonly hasSecret = computed(() => this.#secretValue().trim().length > 0)
+
+  private get secretStore(): SecretStore | undefined {
+    return get('@hypercomb.social/SecretStore') as SecretStore | undefined
+  }
+
+  private get navigation(): Navigation {
+    return get('@hypercomb.social/Navigation') as Navigation
+  }
+
+  protected readonly toggleMesh = (): void => {
+    const wasPublic = this.meshPublic()
+    this.core.toggleMesh()
+    if (!wasPublic) {
+      // coming back to public — restore secret from store
+      const stored = this.secretStore?.value ?? ''
+      this.#secretValue.set(stored)
+      if (stored) EffectBus.emit('mesh:secret', { secret: stored })
+    }
+  }
+
+  protected readonly onShieldClick = (): void => {
+    this.#secretVisible.update(v => !v)
+  }
+
+  protected readonly onSecretInput = (event: Event): void => {
+    this.#secretValue.set((event.target as HTMLInputElement).value)
+  }
+
+  protected readonly submitSecret = (): void => {
+    const value = this.#secretValue().trim()
+    if (!value) return
+    this.secretStore?.set(value)
+    EffectBus.emit('mesh:secret', { secret: value })
+    const segments = value.split('/').map(s => s.trim()).filter(Boolean)
+    this.navigation.go(segments)
+  }
 
   constructor() {
     window.addEventListener('error', e => {
@@ -36,6 +81,10 @@ export class App implements AfterViewInit {
 
   public ngAfterViewInit(): void {
     void this.runtimeReady.then(() => {
+      // pre-fill secret from store (subdomain may have populated it)
+      const stored = this.secretStore?.value ?? ''
+      if (stored) this.#secretValue.set(stored)
+
       requestAnimationFrame(() => {
         void this.startRegisteredBees()
       })
