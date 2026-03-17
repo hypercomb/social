@@ -50,7 +50,6 @@ export class TileSelectionDrone extends Drone {
   // ── selection state ───────────────────────────────────────────
   #selected = new Set<string>() // axial keys "q,r"
   #leaderKey: string | null = null // axial key of the leader tile
-
   // ── drag state ────────────────────────────────────────────────
   #dragActive = false
   #dragOp: 'add' | 'remove' | null = null
@@ -101,7 +100,7 @@ export class TileSelectionDrone extends Drone {
     })
 
     this.onEffect<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
-      if (cmd in ARROW_OFFSETS) this.#handleArrowNav(cmd)
+      if (cmd in ARROW_OFFSETS) { this.#handleArrowNav(cmd); return }
     })
   }
 
@@ -176,38 +175,59 @@ export class TileSelectionDrone extends Drone {
     const offset = ARROW_OFFSETS[cmd]
     if (!offset) return
 
-    // no leader — default to center tile
+    // no leader — default to center tile (or first occupied)
     if (!this.#leaderKey) {
       const centerKey = axialKey(0, 0)
-      if (!this.#occupiedByAxial.has(centerKey)) return
-      this.#leaderKey = centerKey
-      this.#selected.clear()
-      this.#selected.add(centerKey)
-      this.#syncSelectionService(centerKey)
+      if (this.#occupiedByAxial.has(centerKey)) {
+        this.#leaderKey = centerKey
+        this.#selected.clear()
+        this.#selected.add(centerKey)
+        this.#syncSelectionService(centerKey)
+      } else {
+        // pick first occupied tile if center is empty
+        const first = this.#occupiedByAxial.keys().next().value
+        if (!first) return
+        this.#leaderKey = first
+        this.#selected.clear()
+        this.#selected.add(first)
+        this.#syncSelectionService(first)
+      }
       this.#redraw()
       this.#emitChanged()
       return
     }
 
     const [qs, rs] = this.#leaderKey.split(',')
-    const tq = Number(qs) + offset.dq
-    const tr = Number(rs) + offset.dr
-    const targetKey = axialKey(tq, tr)
+    let tq = Number(qs) + offset.dq
+    let tr = Number(rs) + offset.dr
 
-    if (!this.#occupiedByAxial.has(targetKey)) return
-
-    if (this.#selected.has(targetKey)) {
-      // target already in selection — promote to leader, keep selection
-      this.#leaderKey = targetKey
-    } else {
-      // target outside selection — collapse to single
-      this.#leaderKey = targetKey
-      this.#selected.clear()
-      this.#selected.add(targetKey)
-      this.#syncSelectionService(targetKey)
+    // scan in direction, skipping empty spaces, until we find an occupied tile or go out of bounds
+    while (TileSelectionDrone.#inBounds(tq, tr)) {
+      const targetKey = axialKey(tq, tr)
+      if (this.#occupiedByAxial.has(targetKey)) {
+        if (this.#selected.has(targetKey)) {
+          // target already in selection — promote to leader, keep selection
+          this.#leaderKey = targetKey
+        } else {
+          // target outside selection — collapse to single
+          this.#leaderKey = targetKey
+          this.#selected.clear()
+          this.#selected.add(targetKey)
+          this.#syncSelectionService(targetKey)
+        }
+        this.#redraw()
+        this.#emitChanged()
+        return
+      }
+      tq += offset.dq
+      tr += offset.dr
     }
-    this.#redraw()
-    this.#emitChanged()
+    // no occupied tile found in this direction — do nothing
+  }
+
+  static #inBounds(q: number, r: number): boolean {
+    const s = -q - r
+    return Math.max(Math.abs(q), Math.abs(r), Math.abs(s)) <= 50
   }
 
   #syncSelectionService(axialKeyStr: string): void {
@@ -383,6 +403,7 @@ export class TileSelectionDrone extends Drone {
       const isLeader = key === this.#leaderKey
       this.#drawHex(cx, cy, r, isLeader, this.#flat)
     }
+
   }
 
   #drawHex(cx: number, cy: number, r: number, isLeader: boolean, flat = false): void {

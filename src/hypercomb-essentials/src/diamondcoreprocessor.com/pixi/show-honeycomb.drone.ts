@@ -10,7 +10,7 @@ import type { HostReadyPayload } from './pixi-host.drone.js'
 import { HexLabelAtlas } from './hex-label.atlas.js'
 import { HexImageAtlas } from './hex-image.atlas.js'
 import { HexSdfTextureShader } from './hex-sdf.shader.js'
-import { TILE_PROPERTIES_FILE, isSignature } from '../editor/tile-properties.js'
+import { TILE_PROPERTIES_FILE, isSignature, readSeedProperties, writeSeedProperties } from '../editor/tile-properties.js'
 import type { HistoryService, HistoryOp } from '../core/history.service.js'
 import type { ViewportSnapshot } from '../input/zoom/zoom.drone.js'
 
@@ -74,7 +74,7 @@ export class ShowHoneycombWorker extends Drone {
     axial: '@diamondcoreprocessor.com/AxialService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'mesh:room', 'mesh:secret']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'seed:place-at', 'seed:reorder']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -207,13 +207,19 @@ export class ShowHoneycombWorker extends Drone {
     this.onEffect<{ pivot: boolean }>('render:set-pivot', (payload) => {
       if (this.#pivot !== payload.pivot) {
         this.#pivot = payload.pivot
-        // invalidate image cache — pivot uses different snapshot signatures
         this.seedImageCache.clear()
-        // re-render labels rotated
         this.atlas?.setPivot(payload.pivot)
         this.renderedCellsKey = ''
         this.requestRender()
       }
+    })
+
+    this.onEffect<{ seed: string; index: number }>('seed:place-at', (payload) => {
+      void this.#handlePlaceAt(payload.seed, payload.index)
+    })
+
+    this.onEffect<{ labels: string[] }>('seed:reorder', (payload) => {
+      void this.#handleReorder(payload.labels)
     })
 
     // note: always compute mesh seeds on every heartbeat
@@ -747,19 +753,23 @@ export class ShowHoneycombWorker extends Drone {
       }
     }
 
-    // filter out blocked external tiles and hidden local tiles
+    // filter out blocked external tiles and hidden local tiles before ordering
     const blockedSet = new Set<string>(JSON.parse(localStorage.getItem(`hc:blocked-tiles:${locationKey}`) ?? '[]'))
-    for (const b of blockedSet) { if (!localSeedSet.has(b)) union.delete(b) }
-    const hiddenSet = new Set<string>(JSON.parse(localStorage.getItem(`hc:hidden-tiles:${locationKey}`) ?? '[]'))
-    for (const h of hiddenSet) { if (localSeedSet.has(h)) union.delete(h) }
+    for (const blocked of blockedSet) {
+      if (!localSeedSet.has(blocked)) union.delete(blocked)
+    }
 
-    let seedNames = Array.from(union)
-    seedNames.sort((a, b) => a.localeCompare(b))
+    const hiddenSet = new Set<string>(JSON.parse(localStorage.getItem(`hc:hidden-tiles:${locationKey}`) ?? '[]'))
+    for (const hidden of hiddenSet) {
+      if (localSeedSet.has(hidden)) union.delete(hidden)
+    }
+
+    let seedNames = await this.#orderByIndex(dir, Array.from(union), localSeedSet)
 
     // apply search filter if active
     if (this.filterKeyword) {
       const kw = this.filterKeyword
-      seedNames = seedNames.filter(s => s.toLowerCase().includes(kw))
+      seedNames = seedNames.filter((s: string) => s.toLowerCase().includes(kw))
     }
 
     const layerChanged = locationKey !== this.renderedLocationKey
@@ -1079,6 +1089,121 @@ export class ShowHoneycombWorker extends Drone {
 
     out.sort((a, b) => a.localeCompare(b))
     return out
+  }
+
+  /**
+   * Order seeds by their persisted index in the 0000 properties file.
+   * Seeds without an index get the next available index and are written back.
+   * External (mesh) seeds are always re-indexed locally.
+   */
+  async #orderByIndex(dir: FileSystemDirectoryHandle, names: string[], localSeedSet: Set<string>): Promise<string[]> {
+    const alphabetical = [...names].sort((a, b) => a.localeCompare(b))
+    const indexed: { name: string; index: number }[] = []
+    const unindexed: string[] = []
+
+    for (const name of names) {
+      if (!localSeedSet.has(name)) {
+        // external seeds always re-indexed
+        unindexed.push(name)
+        continue
+      }
+      try {
+        const seedDir = await dir.getDirectoryHandle(name, { create: false })
+        const props = await readSeedProperties(seedDir)
+        if (typeof props['index'] === 'number') {
+          indexed.push({ name, index: props['index'] as number })
+        } else {
+          unindexed.push(name)
+        }
+      } catch {
+        unindexed.push(name)
+      }
+    }
+
+    // sort indexed seeds by their stored index
+    indexed.sort((a, b) => a.index - b.index)
+
+    // assign next available indices to unindexed seeds
+    let nextIndex = indexed.length > 0 ? Math.max(...indexed.map(s => s.index)) + 1 : 0
+    // if no indexed seeds exist, start from 0 and use alphabetical order
+    if (indexed.length === 0) {
+      unindexed.sort((a, b) => a.localeCompare(b))
+    }
+
+    for (const name of unindexed) {
+      const assignedIndex = nextIndex++
+      indexed.push({ name, index: assignedIndex })
+
+      // persist index + offset for local seeds
+      if (localSeedSet.has(name)) {
+        const alphaIdx = alphabetical.indexOf(name)
+        const offset = assignedIndex - alphaIdx
+        try {
+          const seedDir = await dir.getDirectoryHandle(name, { create: false })
+          await writeSeedProperties(seedDir, { index: assignedIndex, offset })
+        } catch { /* seed dir missing — skip */ }
+      }
+    }
+
+    // re-sort all by index after appending
+    indexed.sort((a, b) => a.index - b.index)
+    return indexed.map(s => s.name)
+  }
+
+  async #handlePlaceAt(seed: string, targetIndex: number): Promise<void> {
+    const lineage = this.resolve<any>('lineage')
+    if (!lineage) return
+    const dir = await lineage.explorerDir() as FileSystemDirectoryHandle | null
+    if (!dir) return
+
+    // read all local seeds and their current indices
+    const localSeeds = await this.listSeedFolders(dir)
+    const entries: { name: string; index: number }[] = []
+
+    for (const name of localSeeds) {
+      try {
+        const seedDir = await dir.getDirectoryHandle(name, { create: false })
+        const props = await readSeedProperties(seedDir)
+        entries.push({ name, index: typeof props['index'] === 'number' ? props['index'] as number : entries.length })
+      } catch {
+        entries.push({ name, index: entries.length })
+      }
+    }
+
+    entries.sort((a, b) => a.index - b.index)
+
+    // remove seed if already present, then insert at target
+    const names = entries.map(e => e.name).filter(n => n !== seed)
+    const clamped = Math.max(0, Math.min(targetIndex, names.length))
+    names.splice(clamped, 0, seed)
+
+    // write updated indices
+    await this.#writeIndices(dir, names)
+    this.requestRender()
+  }
+
+  async #handleReorder(labels: string[]): Promise<void> {
+    const lineage = this.resolve<any>('lineage')
+    if (!lineage) return
+    const dir = await lineage.explorerDir() as FileSystemDirectoryHandle | null
+    if (!dir) return
+
+    await this.#writeIndices(dir, labels)
+    this.requestRender()
+  }
+
+  async #writeIndices(dir: FileSystemDirectoryHandle, orderedNames: string[]): Promise<void> {
+    const alphabetical = [...orderedNames].sort((a, b) => a.localeCompare(b))
+
+    for (let i = 0; i < orderedNames.length; i++) {
+      const name = orderedNames[i]
+      const alphaIdx = alphabetical.indexOf(name)
+      const offset = i - alphaIdx
+      try {
+        const seedDir = await dir.getDirectoryHandle(name, { create: false })
+        await writeSeedProperties(seedDir, { index: i, offset })
+      } catch { /* skip missing seed dirs */ }
+    }
   }
 
   private checkHasBranch = async (parentDir: FileSystemDirectoryHandle, seedName: string): Promise<boolean> => {
