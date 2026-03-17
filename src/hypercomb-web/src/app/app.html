@@ -1,29 +1,7 @@
 @if(showHeader){
 <div class="header-bar">
   <app-header></app-header>
-
-  @if (meshPublic()) {
-    <div class="mesh-public">
-      <button class="shield-toggle" [class.has-secret]="hasSecret()" type="button" (click)="onShieldClick()">
-        <span class="hci">e</span>
-      </button>
-      <input
-        class="header-secret-input" [class.has-secret]="hasSecret()"
-        [type]="secretVisible() ? 'text' : 'password'"
-        placeholder="secure your location"
-        [value]="secretValue()"
-        (input)="onSecretInput($event)"
-        (keydown.enter)="submitSecret()"
-      />
-      <button class="public-toggle" type="button" (click)="toggleMesh()">
-        public
-      </button>
-    </div>
-  } @else {
-    <button class="private-toggle" type="button" (click)="toggleMesh()">
-      private
-    </button>
-  }
+  <hc-mesh-header [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()"></hc-mesh-header>
 </div>
 }
 <router-outlet></router-outlet>
