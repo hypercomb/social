@@ -707,6 +707,12 @@ export class ShowHoneycombWorker extends Drone {
       }
     }
 
+    // filter out blocked external tiles and hidden local tiles
+    const blockedSet = new Set<string>(JSON.parse(localStorage.getItem(`hc:blocked-tiles:${locationKey}`) ?? '[]'))
+    for (const b of blockedSet) { if (!localSeedSet.has(b)) union.delete(b) }
+    const hiddenSet = new Set<string>(JSON.parse(localStorage.getItem(`hc:hidden-tiles:${locationKey}`) ?? '[]'))
+    for (const h of hiddenSet) { if (localSeedSet.has(h)) union.delete(h) }
+
     let seedNames = Array.from(union)
     seedNames.sort((a, b) => a.localeCompare(b))
 
@@ -893,6 +899,7 @@ export class ShowHoneycombWorker extends Drone {
       count: cells.length,
       labels: cells.map(cell => cell.label),
       branchLabels: cells.filter(cell => cell.hasBranch).map(cell => cell.label),
+      externalLabels: cells.filter(cell => cell.external).map(cell => cell.label),
     })
   }
 
