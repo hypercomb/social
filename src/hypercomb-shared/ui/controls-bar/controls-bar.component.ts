@@ -13,7 +13,6 @@ import { fromRuntime } from '../../core/from-runtime'
 import type { Navigation } from '../../core/navigation'
 import type { MovementService } from '../../core/movement.service'
 import { EffectBus } from '@hypercomb/core'
-import type { SecretStore } from '../../core/secret-store'
 
 @Component({
   selector: 'hc-controls-bar',
@@ -41,10 +40,6 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   private get pixiHost(): any {
     return get('@diamondcoreprocessor.com/PixiHostWorker')
   }
-  private get secretStore(): SecretStore | undefined {
-    return get('@hypercomb.social/SecretStore') as SecretStore | undefined
-  }
-
   // ── reactive state ──────────────────────────────────────
 
   #moved$ = fromRuntime(
@@ -56,10 +51,8 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #hovered = signal(false)
   #locked = signal(false)
   #utility = signal(localStorage.getItem('hc:utility-expanded') !== 'false')
-  #mode = signal<'browsing' | 'clipboard' | 'secret'>('browsing')
+  #mode = signal<'browsing' | 'clipboard'>('browsing')
   #clipboardItems = signal<string[]>([])
-  #secretValue = signal('')
-
   #idleTimer: ReturnType<typeof setTimeout> | null = null
   readonly #IDLE_DELAY = 3000
 
@@ -82,8 +75,6 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   readonly mode = this.#mode.asReadonly()
   readonly clipboardItems = this.#clipboardItems.asReadonly()
   readonly clipboardCount = computed(() => this.#clipboardItems().length)
-  readonly secretValue = this.#secretValue.asReadonly()
-
   readonly visible = computed(() => !this.#idle() || this.#hovered())
 
   // ── lifecycle ───────────────────────────────────────────
@@ -180,40 +171,6 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   readonly clearClipboard = (): void => {
     this.#clipboardItems.set([])
     this.#mode.set('browsing')
-  }
-
-  // ── secret mode ─────────────────────────────────────
-
-  readonly openSecret = (): void => {
-    // pre-fill from shared store (may have been set by subdomain redirect)
-    const stored = this.secretStore?.value ?? ''
-    this.#secretValue.set(stored)
-    this.#mode.set('secret')
-    queueMicrotask(() => {
-      const el = document.querySelector<HTMLInputElement>('.secret-input')
-      el?.focus()
-    })
-  }
-
-  readonly closeSecret = (): void => {
-    this.#secretValue.set('')
-    this.#mode.set('browsing')
-  }
-
-  readonly onSecretInput = (event: Event): void => {
-    this.#secretValue.set((event.target as HTMLInputElement).value)
-  }
-
-  readonly submitSecret = (): void => {
-    const value = this.#secretValue().trim()
-    if (!value) return
-
-    // persist to shared store
-    this.secretStore?.set(value)
-
-    const segments = value.split('/').map(s => s.trim()).filter(Boolean)
-    this.navigation.go(segments)
-    this.closeSecret()
   }
 
   // ── hover / idle ──────────────────────────────────────

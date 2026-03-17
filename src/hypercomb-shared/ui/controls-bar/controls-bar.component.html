@@ -44,28 +44,23 @@
       @if (utility()) {
         <div class="controls-divider"></div>
         <div class="controls-section utility">
-          @if (!meshPublic()) {
-            <button class="ctl-btn" (click)="cut()" aria-label="cut">
-              <span class="hci">%</span>
-            </button>
-            <button class="ctl-btn" (click)="copy()" aria-label="copy">
-              <span class="hci">F</span>
-            </button>
-            <button class="ctl-btn" (click)="remove()" aria-label="delete">
-              <span class="hci">Q</span>
-            </button>
-            <button class="ctl-btn" (click)="moveItem()" aria-label="move">
-              <span class="hci">Z</span>
-            </button>
-            <button class="ctl-btn clipboard-btn" (click)="openClipboard()" aria-label="clipboard">
-              <span class="hci">y</span>
-              @if (clipboardCount() > 0) {
-                <span class="badge">{{ clipboardCount() }}</span>
-              }
-            </button>
-          }
-          <button class="ctl-btn" (click)="openSecret()" aria-label="secret">
-            <span class="hci">e</span>
+          <button class="ctl-btn" (click)="cut()" aria-label="cut">
+            <span class="hci">%</span>
+          </button>
+          <button class="ctl-btn" (click)="copy()" aria-label="copy">
+            <span class="hci">F</span>
+          </button>
+          <button class="ctl-btn" (click)="remove()" aria-label="delete">
+            <span class="hci">Q</span>
+          </button>
+          <button class="ctl-btn" (click)="moveItem()" aria-label="move">
+            <span class="hci">Z</span>
+          </button>
+          <button class="ctl-btn clipboard-btn" (click)="openClipboard()" aria-label="clipboard">
+            <span class="hci">y</span>
+            @if (clipboardCount() > 0) {
+              <span class="badge">{{ clipboardCount() }}</span>
+            }
           </button>
         </div>
       }
@@ -97,23 +92,6 @@
       }
     }
 
-    @case ('secret') {
-      <div class="secret-shell">
-        <span class="secret-label">secret</span>
-        <input
-          class="secret-input"
-          type="text"
-          placeholder="secure your location"
-          [value]="secretValue()"
-          (input)="onSecretInput($event)"
-          (keydown.enter)="submitSecret()"
-          (keydown.escape)="closeSecret()"
-          #secretInput
-        />
-      </div>
-      <button class="ctl-btn" (click)="closeSecret()" aria-label="close secret">
-        <span class="close-x">&times;</span>
-      </button>
-    }
+
   }
 </div>
