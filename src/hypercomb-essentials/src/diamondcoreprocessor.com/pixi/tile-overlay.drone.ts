@@ -8,7 +8,6 @@ import type { HostReadyPayload } from './pixi-host.drone.js'
 import type { Axial } from '../input/hex-detector.js'
 import type { InputGate } from '../input/input-gate.service.js'
 
-
 type CellCountPayload = { count: number; labels: string[]; branchLabels?: string[]; externalLabels?: string[] }
 
 type OverlayAction = {
@@ -16,6 +15,19 @@ type OverlayAction = {
   button: HexIconButton
   handler: (label: string, q: number, r: number, index: number) => void
 }
+
+type OverlayActionDescriptor = {
+  name: string
+  svgMarkup: string
+  x: number
+  y: number
+  iconSize?: number
+  hoverTint?: number
+  handler: (label: string, q: number, r: number, index: number) => void
+}
+
+type OverlayProfile = OverlayActionDescriptor[]
+type OverlayProfileKey = 'private' | 'public-own' | 'public-external' | null
 
 // ── SVG icon markup ────────────────────────────────────────────────
 // Path data from icon-tray.svg — each icon is a compound path (rounded-rect shell + icon cutout, evenodd fill).
@@ -25,11 +37,14 @@ const EDIT_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="99.7 93.
 
 const GARBAGE_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="112.2 93.2 10.4 10.5" width="96" height="96"><path fill="white" fill-rule="evenodd" d="m 114.23557,93.367129 c -0.51819,0 -0.96431,0.18841 -1.3382,0.564993 -0.36732,0.369975 -0.55093,0.815843 -0.55093,1.337773 v 6.342445 c 0,0.52192 0.18361,0.97127 0.55093,1.34786 0.37389,0.36997 0.82001,0.5549 1.3382,0.5549 h 6.29699 c 0.51819,0 0.96088,-0.18493 1.3282,-0.5549 0.37387,-0.37659 0.56094,-0.82594 0.56094,-1.34786 v -4.756922 -1.585523 c 0,-0.52193 -0.18707,-0.967798 -0.56094,-1.337773 -0.36732,-0.376583 -0.81001,-0.564993 -1.3282,-0.564993 z m 2.2286,1.368005 h 1.8398 c 0.12936,0.0048 0.23735,0.05074 0.32359,0.1376 0.0862,0.08685 0.13151,0.195289 0.13627,0.325582 v 0.926365 h 0.92008 0.91973 c 0.12936,0.0048 0.23735,0.05075 0.32358,0.1376 0.0863,0.08685 0.13185,0.195636 0.13663,0.32593 v 0.463183 h -0.46021 v 4.632516 c -0.004,0.13029 -0.0499,0.23909 -0.13628,0.32594 -0.0863,0.0868 -0.19423,0.1328 -0.32359,0.13761 h -5.51941 c -0.12935,-0.004 -0.23701,-0.0507 -0.32324,-0.13761 -0.0862,-0.0868 -0.13185,-0.19565 -0.13662,-0.32594 v -4.632516 h -0.45986 v -0.463183 c 0.004,-0.130294 0.0504,-0.239069 0.13661,-0.32593 0.0862,-0.08689 0.19389,-0.132793 0.32325,-0.1376 h 1.83981 v -0.926365 c 0.004,-0.130293 0.0504,-0.238719 0.13661,-0.325582 0.0862,-0.08688 0.19389,-0.132796 0.32325,-0.1376 z m 0.45986,0.926365 v 0.463182 h 0.92008 v -0.463182 h -0.45986 z m -1.83946,1.389895 v 4.169336 h 2.29968 2.29966 v -4.169336 z m 0.91974,0.926366 h 0.45986 0.45986 v 2.3166 h -0.91972 z m 1.8398,0 h 0.45986 0.45986 v 2.3166 h -0.91972 z"/></svg>`
 
-const ADOPT_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="96" height="96"><path fill="white" d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/></svg>`
+// Hide own tile from mesh (eye with slash)
+const HIDE_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96"><path fill="white" d="M48 28c-18 0-33 12-40 20 3.5 4 8.2 8.5 14 12l5.5-5.5C23 51 20 48 20 48s12-14 28-14c3 0 5.8.6 8.4 1.6l6-6C57.8 27 53 28 48 28zm0 40c18 0 33-12 40-20-3.5-4-8.2-8.5-14-12l-5.5 5.5C73 45 76 48 76 48S64 62 48 62c-3 0-5.8-.6-8.4-1.6l-6 6C38.2 69 43 68 48 68z"/><circle fill="white" cx="48" cy="48" r="10"/><rect fill="white" x="46" y="16" width="4" height="64" rx="2" transform="rotate(-45 48 48)"/></svg>`
 
-const HIDE_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="96" height="96"><path fill="white" d="M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46A11.8 11.8 0 0 0 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z"/></svg>`
+// Block tile by name (circle with slash)
+const BLOCK_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96"><path fill="white" fill-rule="evenodd" d="M48 12c-19.9 0-36 16.1-36 36s16.1 36 36 36 36-16.1 36-36-16.1-36-36-36zm0 8c6.5 0 12.5 2.2 17.3 6L25 66.3C21.2 61.5 20 55.5 20 48c0-15.5 12.5-28 28-28zm0 56c-6.5 0-12.5-2.2-17.3-6L71 29.7C74.8 34.5 76 40.5 76 48c0 15.5-12.5 28-28 28z"/></svg>`
 
-const BLOCK_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="96" height="96"><path fill="white" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zM4 12c0-4.42 3.58-8 8-8 1.85 0 3.55.63 4.9 1.69L5.69 16.9A7.902 7.902 0 0 1 4 12zm8 8c-1.85 0-3.55-.63-4.9-1.69L18.31 7.1A7.902 7.902 0 0 1 20 12c0 4.42-3.58 8-8 8z"/></svg>`
+// Add external tile to own collection (plus icon)
+const ADD_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96"><path fill="white" d="M50 18h-4v28H18v4h28v28h4V50h28v-4H50z"/></svg>`
 
 // ── overlay geometry constants ─────────────────────────────────────
 const HEX_FILL_COLOR = 0x001e30
@@ -44,6 +59,12 @@ const EDIT_X = 8.625
 const EDIT_Y = 5
 const GARBAGE_X = -2
 const GARBAGE_Y = 5
+const HIDE_X = 8.625
+const HIDE_Y = 5
+const BLOCK_X = -2
+const BLOCK_Y = 5
+const ADD_X = 8.625
+const ADD_Y = 5
 
 // Seed label styling
 const LABEL_X = -24
@@ -71,19 +92,13 @@ export class TileOverlayDrone extends Drone {
   #deleteButton: HexIconButton | null = null
   #actions: OverlayAction[] = []
 
-  #adoptButton: HexIconButton | null = null
-  #blockButton: HexIconButton | null = null
-  #hideButton: HexIconButton | null = null
-  #externalActions: OverlayAction[] = []
-  #localPublicActions: OverlayAction[] = []
-
   #meshOffset = { x: 0, y: 0 }
   #currentAxial: Axial | null = null
   #currentIndex: number | undefined = undefined
 
   readonly #circumRadiusPx = 32
   readonly #gapPx = 6
-  readonly #spacing = 38 // circumRadiusPx + gapPx
+  readonly #spacing = 38
 
   #cellCount = 0
   #cellLabels: string[] = []
@@ -95,8 +110,9 @@ export class TileOverlayDrone extends Drone {
   #occupiedByAxial = new Map<string, { index: number; label: string }>()
   #branchLabels = new Set<string>()
   #externalLabels = new Set<string>()
+  #currentTileExternal = false
+  #activeProfileKey: OverlayProfileKey = null
 
-  // navigation click guard — blocks clicks during layer transitions
   #navigationBlocked = false
   #navigationGuardTimer: ReturnType<typeof setTimeout> | null = null
   #meshPublic = false
@@ -108,6 +124,7 @@ export class TileOverlayDrone extends Drone {
     axial: '@diamondcoreprocessor.com/AxialService',
     lineage: '@hypercomb.social/Lineage',
   }
+
   protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count', 'render:set-orientation', 'navigation:guard-start', 'navigation:guard-end', 'mesh:public-changed', 'editor:mode']
   protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'tile:hidden', 'tile:blocked']
 
@@ -140,32 +157,33 @@ export class TileOverlayDrone extends Drone {
       }
     })
 
-    // orientation
     this.onEffect<{ flat: boolean }>('render:set-orientation', (payload) => {
       this.#flat = payload.flat
       this.#drawHexBg()
       if (this.#currentAxial) this.#positionOverlay(this.#currentAxial.q, this.#currentAxial.r)
     })
 
-    // navigation guard — block clicks during layer transitions
     this.onEffect('navigation:guard-start', () => {
       this.#navigationBlocked = true
-      // safety-net timeout in case guard-end never fires
       if (this.#navigationGuardTimer) clearTimeout(this.#navigationGuardTimer)
       this.#navigationGuardTimer = setTimeout(() => { this.#navigationBlocked = false }, 200)
     })
+
     this.onEffect('navigation:guard-end', () => {
       this.#navigationBlocked = false
-      if (this.#navigationGuardTimer) { clearTimeout(this.#navigationGuardTimer); this.#navigationGuardTimer = null }
+      if (this.#navigationGuardTimer) {
+        clearTimeout(this.#navigationGuardTimer)
+        this.#navigationGuardTimer = null
+      }
     })
 
-    // mesh public state — hide overlay when public
     this.onEffect<{ public: boolean }>('mesh:public-changed', (payload) => {
       this.#meshPublic = payload.public
+      const { key, profile } = this.#resolveProfile()
+      this.#applyProfile(profile, key)
       this.#updateVisibility()
     })
 
-    // editor mode — hide overlay during editing + cooldown after close
     this.onEffect<{ active: boolean }>('editor:mode', (payload) => {
       this.#editing = payload.active
       if (payload.active) {
@@ -194,15 +212,8 @@ export class TileOverlayDrone extends Drone {
       this.#editButton = null
       this.#deleteButton = null
       this.#actions = []
-      this.#adoptButton = null
-      this.#blockButton = null
-      this.#hideButton = null
-      this.#externalActions = []
-      this.#localPublicActions = []
     }
   }
-
-  // ── overlay setup ──────────────────────────────────────────────
 
   #initOverlay(): void {
     if (!this.#renderContainer || this.#overlay) return
@@ -211,134 +222,19 @@ export class TileOverlayDrone extends Drone {
     this.#overlay.visible = false
     this.#overlay.zIndex = 9999
 
-    // 1. Hex-shaped underlay (matches selection style, no drop-shadow)
     this.#hexBg = new Graphics()
     this.#drawHexBg()
     this.#overlay.addChild(this.#hexBg)
 
-    // 2. Seed name label (top-left of overlay)
-    this.#seedLabel = new Text({ text: '', style: LABEL_STYLE, resolution: 4 })
+    this.#seedLabel = new Text({ text: '', style: LABEL_STYLE, resolution: window.devicePixelRatio * 4 })
     this.#seedLabel.position.set(LABEL_X, LABEL_Y)
     this.#overlay.addChild(this.#seedLabel)
-
-    // 3. Edit icon button
-    this.#editButton = new HexIconButton({
-      svgMarkup: EDIT_ICON_SVG,
-      width: ICON_SIZE,
-      height: ICON_SIZE,
-      alias: 'hc-icon-edit',
-      hoverTint: 0xc8d8ff,
-    })
-    this.#editButton.position.set(EDIT_X, EDIT_Y)
-    this.#overlay.addChild(this.#editButton)
-
-    // 4. Delete icon button
-    this.#deleteButton = new HexIconButton({
-      svgMarkup: GARBAGE_ICON_SVG,
-      width: ICON_SIZE,
-      height: ICON_SIZE,
-      alias: 'hc-icon-delete',
-      hoverTint: 0xffc8c8,
-    })
-    this.#deleteButton.position.set(GARBAGE_X, GARBAGE_Y)
-    this.#overlay.addChild(this.#deleteButton)
-
-    // 5. Register action handlers
-    this.#actions = [
-      {
-        name: 'edit',
-        button: this.#editButton,
-        handler: (label, q, r, index) => {
-          this.emitEffect('tile:action', { action: 'edit', q, r, index, label })
-        },
-      },
-      {
-        name: 'remove',
-        button: this.#deleteButton,
-        handler: (label, q, r, index) => {
-          this.emitEffect('tile:action', { action: 'remove', q, r, index, label })
-          void this.#handleRemove(label)
-        },
-      },
-    ]
-
-    // 6. Adopt icon button (public mode, external tiles — import as own)
-    this.#adoptButton = new HexIconButton({
-      svgMarkup: ADOPT_ICON_SVG,
-      width: ICON_SIZE,
-      height: ICON_SIZE,
-      alias: 'hc-icon-adopt',
-      hoverTint: 0xc8ffc8,
-    })
-    this.#adoptButton.position.set(EDIT_X, EDIT_Y)
-    this.#adoptButton.visible = false
-    this.#overlay.addChild(this.#adoptButton)
-
-    // 7. Block icon button (public mode, external tiles — permanently filter out)
-    this.#blockButton = new HexIconButton({
-      svgMarkup: BLOCK_ICON_SVG,
-      width: ICON_SIZE,
-      height: ICON_SIZE,
-      alias: 'hc-icon-block',
-      hoverTint: 0xffc8c8,
-    })
-    this.#blockButton.position.set(GARBAGE_X, GARBAGE_Y)
-    this.#blockButton.visible = false
-    this.#overlay.addChild(this.#blockButton)
-
-    // 8. Hide icon button (public mode, local tiles — hide from collection)
-    this.#hideButton = new HexIconButton({
-      svgMarkup: HIDE_ICON_SVG,
-      width: ICON_SIZE,
-      height: ICON_SIZE,
-      alias: 'hc-icon-hide',
-      hoverTint: 0xffc8c8,
-    })
-    this.#hideButton.position.set(EDIT_X, EDIT_Y)
-    this.#hideButton.visible = false
-    this.#overlay.addChild(this.#hideButton)
-
-    // 9. Register public-mode action handlers — external tiles: adopt + block
-    this.#externalActions = [
-      {
-        name: 'adopt',
-        button: this.#adoptButton,
-        handler: (label, q, r, index) => {
-          this.emitEffect('tile:action', { action: 'adopt', q, r, index, label })
-          void this.#handleAdopt(label)
-        },
-      },
-      {
-        name: 'block',
-        button: this.#blockButton,
-        handler: (label, q, r, index) => {
-          this.emitEffect('tile:action', { action: 'block', q, r, index, label })
-          this.#handleBlock(label)
-        },
-      },
-    ]
-
-    // 10. Register public-mode action handlers — local tiles: hide
-    this.#localPublicActions = [
-      {
-        name: 'hide',
-        button: this.#hideButton,
-        handler: (label, q, r, index) => {
-          this.emitEffect('tile:action', { action: 'hide', q, r, index, label })
-          this.#handleHide(label)
-        },
-      },
-    ]
 
     this.#renderContainer.addChild(this.#overlay)
     this.#renderContainer.sortableChildren = true
 
-    // load icon textures asynchronously
-    void this.#editButton.load()
-    void this.#deleteButton.load()
-    void this.#adoptButton.load()
-    void this.#blockButton.load()
-    void this.#hideButton.load()
+    const { key, profile } = this.#resolveProfile()
+    this.#applyProfile(profile, key)
   }
 
   #drawHexBg(): void {
@@ -358,7 +254,109 @@ export class TileOverlayDrone extends Drone {
     this.#hexBg.stroke({ color: HEX_STROKE_COLOR, alpha: HEX_STROKE_ALPHA, width: HEX_STROKE_WIDTH })
   }
 
-  // ── listener setup ─────────────────────────────────────────────
+  #privateProfile(): OverlayProfile {
+    return [
+      {
+        name: 'edit',
+        svgMarkup: EDIT_ICON_SVG,
+        x: EDIT_X,
+        y: EDIT_Y,
+        hoverTint: 0xc8d8ff,
+        handler: (label, q, r, index) => {
+          this.emitEffect('tile:action', { action: 'edit', q, r, index, label })
+        },
+      },
+      {
+        name: 'remove',
+        svgMarkup: GARBAGE_ICON_SVG,
+        x: GARBAGE_X,
+        y: GARBAGE_Y,
+        hoverTint: 0xffc8c8,
+        handler: (label, q, r, index) => {
+          this.emitEffect('tile:action', { action: 'remove', q, r, index, label })
+          void this.#handleRemove(label)
+        },
+      },
+    ]
+  }
+
+  #publicOwnProfile(): OverlayProfile {
+    return [
+      {
+        name: 'hide',
+        svgMarkup: HIDE_ICON_SVG,
+        x: HIDE_X,
+        y: HIDE_Y,
+        hoverTint: 0xffd8a8,
+        handler: (label, q, r, index) => {
+          this.emitEffect('tile:action', { action: 'hide', q, r, index, label })
+          this.#handleHide(label)
+        },
+      },
+    ]
+  }
+
+  #publicExternalProfile(): OverlayProfile {
+    return [
+      {
+        name: 'adopt',
+        svgMarkup: ADD_ICON_SVG,
+        x: ADD_X,
+        y: ADD_Y,
+        hoverTint: 0xa8ffd8,
+        handler: (label, q, r, index) => {
+          this.emitEffect('tile:action', { action: 'adopt', q, r, index, label })
+          void this.#handleAdopt(label)
+        },
+      },
+      {
+        name: 'block',
+        svgMarkup: BLOCK_ICON_SVG,
+        x: BLOCK_X,
+        y: BLOCK_Y,
+        hoverTint: 0xffc8c8,
+        handler: (label, q, r, index) => {
+          this.emitEffect('tile:action', { action: 'block', q, r, index, label })
+          this.#handleBlock(label)
+        },
+      },
+    ]
+  }
+
+  #resolveProfile(): { key: OverlayProfileKey; profile: OverlayProfile } {
+    if (!this.#meshPublic) return { key: 'private', profile: this.#privateProfile() }
+    return this.#currentTileExternal
+      ? { key: 'public-external', profile: this.#publicExternalProfile() }
+      : { key: 'public-own', profile: this.#publicOwnProfile() }
+  }
+
+  #applyProfile(profile: OverlayProfile, key?: OverlayProfileKey): void {
+    if (!this.#overlay) return
+
+    for (const action of this.#actions) {
+      this.#overlay.removeChild(action.button)
+      action.button.destroy({ children: true })
+    }
+    this.#actions = []
+    this.#editButton = null
+    this.#deleteButton = null
+    this.#activeProfileKey = key ?? null
+
+    for (const desc of profile) {
+      const btn = new HexIconButton({
+        svgMarkup: desc.svgMarkup,
+        width: desc.iconSize ?? ICON_SIZE,
+        height: desc.iconSize ?? ICON_SIZE,
+        alias: `hc-icon-${desc.name}`,
+        hoverTint: desc.hoverTint,
+      })
+      btn.position.set(desc.x, desc.y)
+      this.#overlay.addChild(btn)
+      void btn.load()
+
+      this.#actions.push({ name: desc.name, button: btn, handler: desc.handler })
+    }
+  }
 
   #attachListeners(): void {
     if (this.#listening) return
@@ -368,13 +366,13 @@ export class TileOverlayDrone extends Drone {
     document.addEventListener('contextmenu', this.#onContextMenu)
   }
 
-  // ── pointer tracking ───────────────────────────────────────────
-
   #onPointerMove = (e: PointerEvent): void => {
     if (!this.#renderContainer || !this.#overlay || !this.#renderer || !this.#canvas) return
 
-    // hide overlay while selecting (ctrl/meta held)
-    if (e.ctrlKey || e.metaKey) { this.#overlay.visible = false; return }
+    if (e.ctrlKey || e.metaKey) {
+      this.#overlay.visible = false
+      return
+    }
 
     const detector = this.resolve<{ pixelToAxial(px: number, py: number, flat?: boolean): Axial }>('detector')
     if (!detector) return
@@ -393,6 +391,14 @@ export class TileOverlayDrone extends Drone {
       this.#currentAxial = axial
       this.#currentIndex = this.#lookupIndex(axial.q, axial.r)
 
+      const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(axial.q, axial.r))
+      this.#currentTileExternal = !!(entry?.label && this.#externalLabels.has(entry.label))
+
+      if (this.#meshPublic) {
+        const { key, profile } = this.#resolveProfile()
+        if (key !== this.#activeProfileKey) this.#applyProfile(profile, key)
+      }
+
       if (this.#hoverLog < 5) {
         console.log('[TileOverlay] hover q:', axial.q, 'r:', axial.r, '-> index:', this.#currentIndex)
         this.#hoverLog++
@@ -403,7 +409,6 @@ export class TileOverlayDrone extends Drone {
       this.emitEffect('tile:hover', { q: axial.q, r: axial.r })
     }
 
-    // always update per-icon hover state (even within same hex)
     this.#updateIconHover(local)
   }
 
@@ -424,8 +429,6 @@ export class TileOverlayDrone extends Drone {
     }
   }
 
-  // ── click detection ────────────────────────────────────────────
-
   #onClick = (e: MouseEvent): void => {
     if (this.#navigationBlocked) return
     if (this.#editing || this.#editCooldown) return
@@ -440,7 +443,6 @@ export class TileOverlayDrone extends Drone {
     const pixiGlobal = this.#clientToPixiGlobal(e.clientX, e.clientY)
     const local = this.#renderContainer.toLocal(new Point(pixiGlobal.x, pixiGlobal.y))
 
-    // check action buttons first (only when overlay is visible)
     if (this.#overlay?.visible) {
       const ox = this.#overlay.position.x
       const oy = this.#overlay.position.y
@@ -457,7 +459,6 @@ export class TileOverlayDrone extends Drone {
       }
     }
 
-    // modifier click → selection (existing behavior)
     if (e.ctrlKey || e.metaKey) {
       this.emitEffect('tile:click', {
         q: this.#currentAxial!.q,
@@ -470,29 +471,30 @@ export class TileOverlayDrone extends Drone {
       return
     }
 
-    // plain left-click on branch tile → navigate into child layer
     if (this.#branchLabels.has(entry.label)) {
       this.#navigateInto(entry.label)
     }
   }
 
-  // right-click → navigate back to parent layer
   #onContextMenu = (e: MouseEvent): void => {
     if (this.#navigationBlocked) return
 
-    // suppress context menu while selecting (ctrl/meta held or tiles already selected)
-    if (e.ctrlKey || e.metaKey) { e.preventDefault(); return }
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault()
+      return
+    }
     const selection = window.ioc.get<{ count: number }>('@diamondcoreprocessor.com/SelectionService')
-    if (selection && selection.count > 0) { e.preventDefault(); return }
+    if (selection && selection.count > 0) {
+      e.preventDefault()
+      return
+    }
 
     const gate = window.ioc.get<InputGate>('@diamondcoreprocessor.com/InputGate')
-    if (gate?.active) return  // another interaction owns input — gate already prevented default
+    if (gate?.active) return
 
     e.preventDefault()
     this.#navigateBack()
   }
-
-  // ── tile navigation ───────────────────────────────────────────
 
   #navigateInto(label: string): void {
     const lineage = this.resolve<{ explorerEnter(name: string): void }>('lineage')
@@ -564,51 +566,21 @@ export class TileOverlayDrone extends Drone {
     void new hypercomb().act()
   }
 
-  // ── seed label ───────────────────────────────────────────────
-
   #updateSeedLabel(q: number, r: number): void {
     if (!this.#seedLabel) return
     const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(q, r))
     this.#seedLabel.text = entry?.label ?? ''
   }
 
-  // ── external tile helpers ──────────────────────────────────────
-
-  #isCurrentExternal(): boolean {
-    if (!this.#currentAxial) return false
-    const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(this.#currentAxial.q, this.#currentAxial.r))
-    return entry ? this.#externalLabels.has(entry.label) : false
-  }
-
   #getActiveActions(): OverlayAction[] {
-    if (!this.#meshPublic) return this.#actions
-    return this.#isCurrentExternal() ? this.#externalActions : this.#localPublicActions
+    return this.#actions
   }
-
-  #syncButtonVisibility(): void {
-    const isPublicExternal = this.#meshPublic && this.#isCurrentExternal()
-    const isPublicLocal = this.#meshPublic && !this.#isCurrentExternal()
-    // private mode: edit + delete
-    if (this.#editButton) this.#editButton.visible = !this.#meshPublic
-    if (this.#deleteButton) this.#deleteButton.visible = !this.#meshPublic
-    // public external: adopt + block
-    if (this.#adoptButton) this.#adoptButton.visible = isPublicExternal
-    if (this.#blockButton) this.#blockButton.visible = isPublicExternal
-    // public local: hide
-    if (this.#hideButton) this.#hideButton.visible = isPublicLocal
-  }
-
-  // ── visibility ─────────────────────────────────────────────────
 
   #updateVisibility(): void {
     if (!this.#overlay) return
     const occupied = this.#currentIndex !== undefined && this.#currentIndex < this.#cellCount
-    // show on any occupied tile in both modes — buttons swap based on context
     this.#overlay.visible = occupied && !this.#editing && !this.#editCooldown
-    this.#syncButtonVisibility()
   }
-
-  // ── positioning ────────────────────────────────────────────────
 
   #positionOverlay(q: number, r: number): void {
     if (!this.#overlay) return
@@ -625,8 +597,6 @@ export class TileOverlayDrone extends Drone {
       ? { x: 1.5 * this.#spacing * q, y: Math.sqrt(3) * this.#spacing * (r + q / 2) }
       : { x: Math.sqrt(3) * this.#spacing * (q + r / 2), y: this.#spacing * 1.5 * r }
   }
-
-  // ── occupied position lookup ───────────────────────────────────
 
   static axialKey(q: number, r: number): string {
     return `${q},${r}`
@@ -648,8 +618,6 @@ export class TileOverlayDrone extends Drone {
   #lookupIndex(q: number, r: number): number | undefined {
     return this.#occupiedByAxial.get(TileOverlayDrone.axialKey(q, r))?.index
   }
-
-  // ── coordinate mapping ─────────────────────────────────────────
 
   #clientToPixiGlobal(cx: number, cy: number) {
     const events = (this.#renderer as any)?.events
