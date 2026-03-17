@@ -6,6 +6,7 @@ import { Application, Container, Graphics, Point, Text, TextStyle } from 'pixi.j
 import { HexIconButton } from './hex-icon-button.js'
 import type { HostReadyPayload } from './pixi-host.drone.js'
 import type { Axial } from '../input/hex-detector.js'
+import type { InputGate } from '../input/input-gate.service.js'
 
 
 type CellCountPayload = { count: number; labels: string[]; branchLabels?: string[] }
@@ -255,6 +256,9 @@ export class TileOverlayDrone extends Drone {
   #onPointerMove = (e: PointerEvent): void => {
     if (!this.#renderContainer || !this.#overlay || !this.#renderer || !this.#canvas) return
 
+    // hide overlay while selecting (ctrl/meta held)
+    if (e.ctrlKey || e.metaKey) { this.#overlay.visible = false; return }
+
     const detector = this.resolve<{ pixelToAxial(px: number, py: number, flat?: boolean): Axial }>('detector')
     if (!detector) return
 
@@ -357,6 +361,15 @@ export class TileOverlayDrone extends Drone {
   // right-click → navigate back to parent layer
   #onContextMenu = (e: MouseEvent): void => {
     if (this.#navigationBlocked) return
+
+    // suppress context menu while selecting (ctrl/meta held or tiles already selected)
+    if (e.ctrlKey || e.metaKey) { e.preventDefault(); return }
+    const selection = window.ioc.get<{ count: number }>('@diamondcoreprocessor.com/SelectionService')
+    if (selection && selection.count > 0) { e.preventDefault(); return }
+
+    const gate = window.ioc.get<InputGate>('@diamondcoreprocessor.com/InputGate')
+    if (gate?.active) return  // another interaction owns input — gate already prevented default
+
     e.preventDefault()
     this.#navigateBack()
   }

@@ -10,6 +10,7 @@ import { PixiHostWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/p
 import { ShowHoneycombWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/show-honeycomb.drone';
 import { MousewheelZoomInput } from '@hypercomb/essentials/diamondcoreprocessor.com/input/zoom/mousewheel-zoom.input';
 import { Settings } from '@hypercomb/essentials/diamondcoreprocessor.com/core/settings';
+import { InputGate } from '@hypercomb/essentials/diamondcoreprocessor.com/input/input-gate.service';
 import { ZoomDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/zoom/zoom.drone';
 import { NostrMeshWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/nostr/nostr-mesh.drone'
 import { NostrSigner } from '@hypercomb/essentials/diamondcoreprocessor.com/nostr/nostr-signer'
@@ -36,6 +37,7 @@ const _deps = [
   NostrSigner,
   HexDetector,
   Settings,
+  InputGate,
   ZoomDrone,
   HistoryService,
   HistoryRecorder,

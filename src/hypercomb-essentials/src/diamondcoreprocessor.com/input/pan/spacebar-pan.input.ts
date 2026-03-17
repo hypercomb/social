@@ -1,5 +1,7 @@
 // hypercomb-essentials/src/diamondcoreprocessor.com/input/pan/spacebar-pan.input.ts
 
+import type { InputGate } from '../input-gate.service.js'
+
 type Point = { x: number; y: number }
 
 /**
@@ -18,16 +20,14 @@ export class SpacebarPanInput {
   private readonly source = 'spacebar-pan'
 
   private pan: {
-    panBy: (delta: Point, source: string) => void
-    begin: (source: string) => boolean
-    end: (source: string) => void
+    panBy: (delta: Point) => void
   } | null = null
+
+  private gate: InputGate | null = null
 
   public attach = (
     pan: {
-      panBy: (delta: Point, source: string) => void
-      begin: (source: string) => boolean
-      end: (source: string) => void
+      panBy: (delta: Point) => void
     },
     canvas: HTMLCanvasElement
   ): void => {
@@ -35,6 +35,7 @@ export class SpacebarPanInput {
 
     this.pan = pan
     this.canvas = canvas
+    this.gate = window.ioc.get<InputGate>('@diamondcoreprocessor.com/InputGate') ?? null
 
     document.addEventListener('keydown', this.onKeyDown)
     document.addEventListener('keyup', this.onKeyUp)
@@ -56,6 +57,7 @@ export class SpacebarPanInput {
 
     this.pan = null
     this.canvas = null
+    this.gate = null
     this.enabled = false
   }
 
@@ -97,10 +99,7 @@ export class SpacebarPanInput {
 
     if (!this.last) {
       // first move after spacebar pressed — anchor
-      if (!this.pan.begin(this.source)) {
-        // another source owns the pan
-        return
-      }
+      if (!this.gate?.claim(this.source)) return
       this.last = { x: e.clientX, y: e.clientY }
       this.setCursor('grabbing')
       return
@@ -110,7 +109,7 @@ export class SpacebarPanInput {
     const delta = { x: next.x - this.last.x, y: next.y - this.last.y }
     this.last = next
 
-    this.pan.panBy(delta, this.source)
+    this.pan.panBy(delta)
   }
 
   // -------------------------------------------------
@@ -119,7 +118,7 @@ export class SpacebarPanInput {
 
   private endPan = (): void => {
     if (this.spaceHeld && this.last) {
-      this.pan?.end(this.source)
+      this.gate?.release(this.source)
     }
     this.spaceHeld = false
     this.last = null

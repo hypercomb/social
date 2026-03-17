@@ -1,5 +1,7 @@
 // hypercomb-essentials/src/diamondcoreprocessor.com/input/zoom/mousewheel-zoom.input.ts
 
+import type { InputGate } from '../input-gate.service.js'
+
 type Point = { x: number; y: number }
 
 export class MousewheelZoomInput {
@@ -7,17 +9,16 @@ export class MousewheelZoomInput {
   private canvas: HTMLCanvasElement | null = null
 
   private readonly step = 1.05
-  private readonly source = 'mousewheel'
 
   private zoom: {
-    zoomByFactor: (factor: number, pivot: Point, source: string) => void
-    end: (source: string) => void
+    zoomByFactor: (factor: number, pivot: Point) => void
   } | null = null
+
+  private gate: InputGate | null = null
 
   public attach = (
     zoom: {
-      zoomByFactor: (factor: number, pivot: Point, source: string) => void
-      end: (source: string) => void
+      zoomByFactor: (factor: number, pivot: Point) => void
     },
     canvas: HTMLCanvasElement
   ): void => {
@@ -25,6 +26,7 @@ export class MousewheelZoomInput {
 
     this.zoom = zoom
     this.canvas = canvas
+    this.gate = window.ioc.get<InputGate>('@diamondcoreprocessor.com/InputGate') ?? null
 
     // canvas has pointer-events:none so this must be global
     // gating uses the canvas rect so behavior matches "over the container"
@@ -36,15 +38,18 @@ export class MousewheelZoomInput {
     if (!this.enabled) return
 
     window.removeEventListener('wheel', this.onWheel)
-    this.zoom?.end(this.source)
 
     this.zoom = null
     this.canvas = null
+    this.gate = null
     this.enabled = false
   }
 
   private onWheel = (event: WheelEvent): void => {
     if (!this.zoom || !this.canvas) return
+
+    // bail if another interaction owns the gate
+    if (this.gate?.active) return
 
     const rect = this.canvas.getBoundingClientRect()
     if (
@@ -57,7 +62,6 @@ export class MousewheelZoomInput {
     this.zoom.zoomByFactor(
       factor,
       { x: event.clientX, y: event.clientY },
-      this.source
     )
 
     event.preventDefault()

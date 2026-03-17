@@ -1,5 +1,7 @@
 // hypercomb-essentials/src/diamondcoreprocessor.com/input/zoom/pinch-zoom.input.ts
 
+import type { InputGate } from '../input-gate.service.js'
+
 type Point = { x: number; y: number }
 
 export class PinchZoomInput {
@@ -9,9 +11,10 @@ export class PinchZoomInput {
   private readonly source = 'pinch'
 
   private zoom: {
-    zoomByFactor: (factor: number, pivot: Point, source: string) => void
-    end: (source: string) => void
+    zoomByFactor: (factor: number, pivot: Point) => void
   } | null = null
+
+  private gate: InputGate | null = null
 
   private pointers = new Map<number, Point>()
   private pinching = false
@@ -19,8 +22,7 @@ export class PinchZoomInput {
 
   public attach = (
     zoom: {
-      zoomByFactor: (factor: number, pivot: Point, source: string) => void
-      end: (source: string) => void
+      zoomByFactor: (factor: number, pivot: Point) => void
     },
     canvas: HTMLCanvasElement
   ): void => {
@@ -28,6 +30,7 @@ export class PinchZoomInput {
 
     this.zoom = zoom
     this.canvas = canvas
+    this.gate = window.ioc.get<InputGate>('@diamondcoreprocessor.com/InputGate') ?? null
 
     // canvas has pointer-events:none so this must be global
     // gating uses the canvas rect so behavior matches "over the container"
@@ -51,6 +54,7 @@ export class PinchZoomInput {
 
     this.zoom = null
     this.canvas = null
+    this.gate = null
     this.enabled = false
   }
 
@@ -82,6 +86,7 @@ export class PinchZoomInput {
     if (dist <= 0) return
 
     if (!this.pinching) {
+      if (!this.gate?.claim(this.source)) return
       this.pinching = true
       this.lastDistance = dist
 
@@ -99,7 +104,7 @@ export class PinchZoomInput {
 
     const pivot = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 }
 
-    this.zoom.zoomByFactor(factor, pivot, this.source)
+    this.zoom.zoomByFactor(factor, pivot)
 
     this.lastDistance = dist
 
@@ -122,7 +127,7 @@ export class PinchZoomInput {
 
   private endPinch = (): void => {
     if (this.pinching) {
-      this.zoom?.end(this.source)
+      this.gate?.release(this.source)
     }
 
     this.pointers.clear()

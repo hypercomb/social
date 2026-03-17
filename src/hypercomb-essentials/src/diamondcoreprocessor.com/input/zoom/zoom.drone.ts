@@ -6,6 +6,32 @@ import type { HostReadyPayload } from '../../pixi/pixi-host.drone.js'
 
 type Pt = { x: number; y: number }
 
+// ── InputGate — shared input exclusivity ─────────────
+// Inlined here so Angular's esbuild cannot tree-shake the IoC registration.
+// One source at a time. Context menu auto-suppressed while claimed.
+
+export class InputGate {
+  private owner: string | null = null
+
+  get active(): boolean { return this.owner !== null }
+
+  claim = (source: string): boolean => {
+    if (this.owner && this.owner !== source) return false
+    this.owner = source
+    return true
+  }
+
+  release = (source: string): void => {
+    if (this.owner === source) this.owner = null
+  }
+
+  constructor() {
+    document.addEventListener('contextmenu', (e) => {
+      if (this.owner || e.ctrlKey || e.metaKey) e.preventDefault()
+    }, true)
+  }
+}
+
 // -------------------------------------------------
 // ViewportPersistence — thin write coordinator
 // -------------------------------------------------
@@ -182,7 +208,6 @@ export class ZoomDrone extends Drone {
   private readonly minScale = 0.05
   private readonly maxScale = 12
 
-  private activeSource: string | null = null
   private vp: ViewportPersistence | null = null
 
   protected override deps = { mouseWheel: '@diamondcoreprocessor.com/MousewheelZoomInput' }
@@ -227,29 +252,13 @@ export class ZoomDrone extends Drone {
     this.renderContainer = null
     this.canvas = null
     this.renderer = null
-    this.activeSource = null
-  }
-
-  // -------------------------------------------------
-  // exclusivity
-  // -------------------------------------------------
-
-  public begin = (source: string): boolean => {
-    if (this.activeSource && this.activeSource !== source) return false
-    this.activeSource = source
-    return true
-  }
-
-  public end = (source: string): void => {
-    if (this.activeSource === source) this.activeSource = null
   }
 
   // -------------------------------------------------
   // zoom api (used by inputs)
   // -------------------------------------------------
 
-  public zoomByFactor = (factor: number, pivotClient: Pt, source: string): void => {
-    if (!this.begin(source)) return
+  public zoomByFactor = (factor: number, pivotClient: Pt): void => {
     if (!this.renderContainer || !this.canvas) return
 
     const target = this.renderContainer
@@ -351,6 +360,9 @@ export class ZoomDrone extends Drone {
 // -------------------------------------------------
 // IoC registration (side-effects — must survive tree-shaking)
 // -------------------------------------------------
+
+const _inputGate = new InputGate()
+window.ioc.register('@diamondcoreprocessor.com/InputGate', _inputGate)
 
 const _viewportPersistence = new ViewportPersistence()
 window.ioc.register('@diamondcoreprocessor.com/ViewportPersistence', _viewportPersistence)

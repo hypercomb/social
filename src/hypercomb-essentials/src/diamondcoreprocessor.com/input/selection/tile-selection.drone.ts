@@ -6,6 +6,7 @@ import { Application, Container, Point } from 'pixi.js'
 import type { HostReadyPayload } from '../../pixi/pixi-host.drone.js'
 import type { Axial } from '../hex-detector.js'
 import type { SelectionService } from '../../core/selection/selection.service.js'
+import type { InputGate } from '../input-gate.service.js'
 
 type CellCountPayload = { count: number; labels: string[] }
 type TileClickPayload = { q: number; r: number; label: string; index: number; ctrlKey: boolean; metaKey: boolean }
@@ -34,6 +35,7 @@ class TileSelectionDrone extends Drone {
   #navigationBlocked = false
   #navigationGuardTimer: ReturnType<typeof setTimeout> | null = null
 
+  #gate: InputGate | null = null
   #listening = false
 
   // hex orientation
@@ -53,6 +55,7 @@ class TileSelectionDrone extends Drone {
       this.#renderContainer = payload.container
       this.#canvas = payload.canvas
       this.#renderer = payload.renderer
+      this.#gate = window.ioc.get<InputGate>('@diamondcoreprocessor.com/InputGate') ?? null
       this.#attachListeners()
     })
 
@@ -138,6 +141,8 @@ class TileSelectionDrone extends Drone {
     const selection = this.#selection()
     if (!selection) return
 
+    if (!this.#gate?.claim('tile-selection')) return
+
     this.#activePointerId = e.pointerId
     this.#dragActive = true
     this.#touched.clear()
@@ -176,6 +181,7 @@ class TileSelectionDrone extends Drone {
 
   #endDrag(): void {
     if (this.#dragActive) {
+      this.#gate?.release('tile-selection')
       this.#justDragged = true
       requestAnimationFrame(() => { this.#justDragged = false })
     }

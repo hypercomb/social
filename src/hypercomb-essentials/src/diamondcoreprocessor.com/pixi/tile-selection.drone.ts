@@ -7,6 +7,7 @@ import { Drone } from '@hypercomb/core'
 import { Application, Container, Graphics, Point } from 'pixi.js'
 import type { HostReadyPayload } from './pixi-host.drone.js'
 import type { Axial } from '../input/hex-detector.js'
+import type { InputGate } from '../input/input-gate.service.js'
 
 type CellCountPayload = { count: number; labels: string[] }
 
@@ -56,6 +57,7 @@ export class TileSelectionDrone extends Drone {
   #touched = new Set<string>()
   #lastDragAxial: Axial | null = null
 
+  #gate: InputGate | null = null
   #listening = false
 
   // hex orientation
@@ -74,6 +76,7 @@ export class TileSelectionDrone extends Drone {
       this.#renderContainer = payload.container
       this.#canvas = payload.canvas
       this.#renderer = payload.renderer
+      this.#gate = window.ioc.get<InputGate>('@diamondcoreprocessor.com/InputGate') ?? null
       this.#initLayer()
       this.#attachListeners()
     })
@@ -199,6 +202,8 @@ export class TileSelectionDrone extends Drone {
     const key = axialKey(axial.q, axial.r)
     const isOccupied = this.#occupiedByAxial.has(key)
 
+    if (!this.#gate?.claim('tile-selection')) return
+
     this.#dragActive = true
     this.#touched.clear()
     this.#lastDragAxial = axial
@@ -243,6 +248,7 @@ export class TileSelectionDrone extends Drone {
 
   #onMouseUp = (_e: MouseEvent): void => {
     if (!this.#dragActive) return
+    this.#gate?.release('tile-selection')
     this.#dragActive = false
     this.#dragOp = null
     this.#touched.clear()

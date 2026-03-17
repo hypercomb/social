@@ -1,5 +1,7 @@
 // hypercomb-essentials/src/diamondcoreprocessor.com/input/pan/touch-pan.input.ts
 
+import type { InputGate } from '../input-gate.service.js'
+
 type Point = { x: number; y: number }
 
 /**
@@ -14,10 +16,10 @@ export class TouchPanInput {
   private readonly source = 'touch-pan'
 
   private pan: {
-    panBy: (delta: Point, source: string) => void
-    begin: (source: string) => boolean
-    end: (source: string) => void
+    panBy: (delta: Point) => void
   } | null = null
+
+  private gate: InputGate | null = null
 
   private activePointerId: number | null = null
   private last: Point | null = null
@@ -25,9 +27,7 @@ export class TouchPanInput {
 
   public attach = (
     pan: {
-      panBy: (delta: Point, source: string) => void
-      begin: (source: string) => boolean
-      end: (source: string) => void
+      panBy: (delta: Point) => void
     },
     canvas: HTMLCanvasElement
   ): void => {
@@ -35,6 +35,7 @@ export class TouchPanInput {
 
     this.pan = pan
     this.canvas = canvas
+    this.gate = window.ioc.get<InputGate>('@diamondcoreprocessor.com/InputGate') ?? null
 
     window.addEventListener('pointerdown', this.onPointerDown, { passive: false })
     window.addEventListener('pointermove', this.onPointerMove, { passive: false })
@@ -56,6 +57,7 @@ export class TouchPanInput {
 
     this.pan = null
     this.canvas = null
+    this.gate = null
     this.enabled = false
   }
 
@@ -78,7 +80,7 @@ export class TouchPanInput {
       return
     }
 
-    if (!this.pan?.begin(this.source)) return
+    if (!this.gate?.claim(this.source)) return
 
     this.activePointerId = e.pointerId
     this.last = { x: e.clientX, y: e.clientY }
@@ -96,7 +98,7 @@ export class TouchPanInput {
     const delta = { x: next.x - this.last.x, y: next.y - this.last.y }
     this.last = next
 
-    this.pan.panBy(delta, this.source)
+    this.pan.panBy(delta)
 
     e.preventDefault()
     e.stopPropagation()
@@ -118,7 +120,7 @@ export class TouchPanInput {
 
   private endPan = (): void => {
     if (this.activePointerId != null) {
-      this.pan?.end(this.source)
+      this.gate?.release(this.source)
     }
     this.activePointerId = null
     this.last = null

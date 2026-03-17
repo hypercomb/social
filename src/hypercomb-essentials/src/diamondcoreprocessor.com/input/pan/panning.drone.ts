@@ -13,7 +13,6 @@ export class PanningDrone extends Drone {
   private stage: any = null
   private canvas: HTMLCanvasElement | null = null
   private renderer: any = null
-  private activeSource: string | null = null
   private vp: ViewportPersistence | null = null
 
   protected override deps = {
@@ -68,32 +67,14 @@ export class PanningDrone extends Drone {
     this.stage = null
     this.canvas = null
     this.renderer = null
-    this.activeSource = null
     this.vp = null
-  }
-
-  // -------------------------------------------------
-  // exclusivity
-  // -------------------------------------------------
-
-  public begin = (source: string): boolean => {
-    if (this.activeSource && this.activeSource !== source) return false
-    this.activeSource = source
-    return true
-  }
-
-  public end = (source: string): void => {
-    if (this.activeSource === source) {
-      this.activeSource = null
-    }
   }
 
   // -------------------------------------------------
   // pan api (used by inputs)
   // -------------------------------------------------
 
-  public panBy = (delta: Point, source: string): void => {
-    if (!this.begin(source)) return
+  public panBy = (delta: Point): void => {
     if (!this.stage) return
 
     this.stage.position.x += delta.x
