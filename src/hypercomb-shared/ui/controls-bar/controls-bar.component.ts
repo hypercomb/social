@@ -13,6 +13,7 @@ import { fromRuntime } from '../../core/from-runtime'
 import type { Navigation } from '../../core/navigation'
 import type { MovementService } from '../../core/movement.service'
 import { EffectBus } from '@hypercomb/core'
+import type { RoomStore } from '../../core/room-store'
 
 @Component({
   selector: 'hc-controls-bar',
@@ -40,6 +41,10 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   private get pixiHost(): any {
     return get('@diamondcoreprocessor.com/PixiHostWorker')
   }
+  private get roomStore(): RoomStore | undefined {
+    return get('@hypercomb.social/RoomStore') as RoomStore | undefined
+  }
+
   // ── reactive state ──────────────────────────────────────
 
   #moved$ = fromRuntime(
@@ -53,6 +58,8 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #utility = signal(localStorage.getItem('hc:utility-expanded') !== 'false')
   #mode = signal<'browsing' | 'clipboard'>('browsing')
   #clipboardItems = signal<string[]>([])
+  #roomValue = signal('')
+  #roomOpen = signal(false)
   #idleTimer: ReturnType<typeof setTimeout> | null = null
   readonly #IDLE_DELAY = 3000
 
@@ -76,10 +83,16 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   readonly clipboardItems = this.#clipboardItems.asReadonly()
   readonly clipboardCount = computed(() => this.#clipboardItems().length)
   readonly visible = computed(() => !this.#idle() || this.#hovered())
+  readonly roomValue = this.#roomValue.asReadonly()
+  readonly roomOpen = this.#roomOpen.asReadonly()
 
   // ── lifecycle ───────────────────────────────────────────
 
   ngOnInit(): void {
+    // pre-fill room from store
+    const stored = this.roomStore?.value ?? ''
+    if (stored) this.#roomValue.set(stored)
+
     window.addEventListener('pointermove', this.#onActivity)
     window.addEventListener('pointerdown', this.#onActivity)
     window.addEventListener('keydown', this.#onActivity)
@@ -171,6 +184,31 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   readonly clearClipboard = (): void => {
     this.#clipboardItems.set([])
     this.#mode.set('browsing')
+  }
+
+  // ── room ────────────────────────────────────────────
+
+  readonly toggleRoom = (): void => {
+    this.#roomOpen.update(v => !v)
+    if (this.#roomOpen()) {
+      const stored = this.roomStore?.value ?? ''
+      if (stored) this.#roomValue.set(stored)
+      queueMicrotask(() => {
+        document.querySelector<HTMLInputElement>('.room-input')?.focus()
+      })
+    }
+  }
+
+  readonly onRoomInput = (event: Event): void => {
+    this.#roomValue.set((event.target as HTMLInputElement).value)
+  }
+
+  readonly submitRoom = (): void => {
+    const value = this.#roomValue().trim()
+    if (!value) return
+    this.roomStore?.set(value)
+    EffectBus.emit('mesh:room', { room: value })
+    this.#roomOpen.set(false)
   }
 
   // ── hover / idle ──────────────────────────────────────

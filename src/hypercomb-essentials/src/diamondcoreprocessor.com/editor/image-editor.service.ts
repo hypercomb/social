@@ -4,8 +4,7 @@
 // fit within the same coordinate space — the hex frame is centered.
 
 import { Application, Container, Graphics, Sprite, Texture, RenderTexture, Rectangle } from 'pixi.js'
-
-export type HexOrientation = 'point-top' | 'flat-top'
+import type { HexOrientation } from '../core/settings'
 
 export class ImageEditorService extends EventTarget {
 

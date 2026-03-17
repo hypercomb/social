@@ -87,13 +87,15 @@ export class TileOverlayDrone extends Drone {
   #navigationBlocked = false
   #navigationGuardTimer: ReturnType<typeof setTimeout> | null = null
   #meshPublic = false
+  #editing = false
+  #editCooldown = false
 
   protected override deps = {
     detector: '@diamondcoreprocessor.com/HexDetector',
     axial: '@diamondcoreprocessor.com/AxialService',
     lineage: '@hypercomb.social/Lineage',
   }
-  protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count', 'render:set-orientation', 'navigation:guard-start', 'navigation:guard-end', 'mesh:public-changed']
+  protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count', 'render:set-orientation', 'navigation:guard-start', 'navigation:guard-end', 'mesh:public-changed', 'editor:mode']
   protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back']
 
   protected override heartbeat = async (): Promise<void> => {
@@ -147,6 +149,19 @@ export class TileOverlayDrone extends Drone {
     this.onEffect<{ public: boolean }>('mesh:public-changed', (payload) => {
       this.#meshPublic = payload.public
       this.#updateVisibility()
+    })
+
+    // editor mode — hide overlay during editing + cooldown after close
+    this.onEffect<{ active: boolean }>('editor:mode', (payload) => {
+      this.#editing = payload.active
+      if (payload.active) {
+        this.#editCooldown = false
+        this.#updateVisibility()
+      } else {
+        this.#editCooldown = true
+        this.#updateVisibility()
+        setTimeout(() => { this.#editCooldown = false; this.#updateVisibility() }, 300)
+      }
     })
   }
 
@@ -323,6 +338,7 @@ export class TileOverlayDrone extends Drone {
 
   #onClick = (e: MouseEvent): void => {
     if (this.#navigationBlocked) return
+    if (this.#editing || this.#editCooldown) return
     if (!this.#renderContainer || !this.#renderer || !this.#canvas) return
     if (this.#currentIndex === undefined || this.#currentIndex >= this.#cellCount) return
 
@@ -434,14 +450,14 @@ export class TileOverlayDrone extends Drone {
   #updateVisibility(): void {
     if (!this.#overlay) return
     const occupied = this.#currentIndex !== undefined && this.#currentIndex < this.#cellCount
-    this.#overlay.visible = occupied && !this.#meshPublic
+    this.#overlay.visible = occupied && !this.#meshPublic && !this.#editing && !this.#editCooldown
   }
 
   // ── positioning ────────────────────────────────────────────────
 
   #positionOverlay(q: number, r: number): void {
     if (!this.#overlay) return
-    const px = this.#axialToPixel(q, r, this.#flat)
+    const px = this.#axialToPixel(q, r)
     this.#overlay.position.set(
       px.x + this.#meshOffset.x,
       px.y + this.#meshOffset.y,

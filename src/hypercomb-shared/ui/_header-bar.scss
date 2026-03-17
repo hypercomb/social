@@ -42,7 +42,7 @@ $secret-bg: rgba(10, 12, 16, 0.85);
   border: 1px solid rgba(245, 245, 245, 0.12);
   border-right: none;
   background: $secret-bg;
-  color: rgba(245, 245, 245, 0.35);
+  color: var(--shield-color, rgba(245, 245, 245, 0.35));
   cursor: pointer;
   transition: color 200ms ease, background 200ms ease, border-color 200ms ease;
 
@@ -51,7 +51,7 @@ $secret-bg: rgba(10, 12, 16, 0.85);
   }
 
   &:hover {
-    color: rgba(245, 245, 245, 0.6);
+    filter: brightness(1.3);
     background: rgba(245, 245, 245, 0.04);
   }
 
@@ -66,19 +66,9 @@ $secret-bg: rgba(10, 12, 16, 0.85);
 
   &.has-secret {
     border-color: $secret-border;
-    color: rgba(200, 151, 90, 0.7);
-
-    &:hover {
-      color: rgba(200, 151, 90, 0.9);
-      background: rgba(200, 151, 90, 0.06);
-    }
-
-    &:active {
-      background: rgba(200, 151, 90, 0.1);
-    }
 
     &:focus-visible {
-      outline-color: rgba(200, 151, 90, 0.5);
+      outline-color: var(--shield-color, rgba(200, 151, 90, 0.5));
     }
   }
 }
@@ -94,6 +84,7 @@ $secret-bg: rgba(10, 12, 16, 0.85);
   letter-spacing: 0.16em;
   text-transform: uppercase;
   transition: border-color 200ms ease;
+  -webkit-text-security: disc;
 
   &::placeholder {
     color: rgba(245, 245, 245, 0.24);
@@ -107,6 +98,45 @@ $secret-bg: rgba(10, 12, 16, 0.85);
 
   &.has-secret {
     border-color: $secret-border;
+  }
+}
+
+// ── eye toggle (visibility) ─────────────────────────────
+
+.eye-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 0 0.85rem;
+  border: 1px solid rgba(245, 245, 245, 0.12);
+  border-left: none;
+  border-right: none;
+  background: $secret-bg;
+  color: rgba(245, 245, 245, 0.25);
+  cursor: pointer;
+  transition: color 200ms ease, background 200ms ease, border-color 200ms ease;
+
+  .hci {
+    font-size: 1.05rem;
+  }
+
+  &:hover {
+    color: rgba(245, 245, 245, 0.5);
+    background: rgba(245, 245, 245, 0.04);
+  }
+
+  &:active {
+    background: rgba(245, 245, 245, 0.06);
+  }
+
+  &:focus-visible {
+    outline: 1px solid rgba(245, 245, 245, 0.3);
+    outline-offset: -1px;
+  }
+
+  &.visible {
+    color: rgba(245, 245, 245, 0.9);
   }
 }
 

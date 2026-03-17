@@ -4,7 +4,7 @@
 
   @if (meshPublic()) {
     <div class="mesh-public">
-      <button class="shield-toggle" [class.has-secret]="hasSecret()" type="button" (click)="onShieldClick()">
+      <button class="shield-toggle" [class.has-secret]="hasSecret()" [style.--shield-color]="shieldColor()" type="button" (click)="onShieldClick()">
         <span class="hci">e</span>
       </button>
       <input
@@ -15,6 +15,9 @@
         (input)="onSecretInput($event)"
         (keydown.enter)="submitSecret()"
       />
+      <button class="eye-toggle" [class.visible]="secretVisible()" type="button" (click)="onShieldClick()">
+        <span class="hci">c</span>
+      </button>
       <button class="public-toggle" type="button" (click)="toggleMesh()">
         public
       </button>

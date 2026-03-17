@@ -4,8 +4,8 @@ import type { HexOrientation } from '@hypercomb/essentials/diamondcoreprocessor.
 import { RouterOutlet } from '@angular/router';
 import { SearchBarComponent } from '@hypercomb/shared';
 import { initializeRuntime } from '@hypercomb/shared/core';
-import type { SecretStore } from '@hypercomb/shared/core/secret-store';
 import type { Navigation } from '@hypercomb/shared/core/navigation';
+import type { SecretStrengthProvider } from '@hypercomb/shared/core/secret-strength';
 import { AxialService } from '@hypercomb/essentials/diamondcoreprocessor.com/core/axial/axial-service';
 import { PanningDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/pan/panning.drone';
 import { PixiHostWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/pixi-host.drone';
@@ -61,7 +61,7 @@ export class App implements AfterViewInit {
 
   public readonly meshPublic = signal(true);
   public readonly orientation = signal<HexOrientation>(
-    (localStorage.getItem('hc:hex-orientation') as HexOrientation) || 'pointy'
+    (localStorage.getItem('hc:hex-orientation') as HexOrientation) || 'point-top'
   );
 
   // ── secret state (public-mode mesh scoping) ─────────────
@@ -72,9 +72,15 @@ export class App implements AfterViewInit {
   protected readonly secretVisible = this.#secretVisible.asReadonly()
   protected readonly hasSecret = computed(() => this.#secretValue().trim().length > 0)
 
-  private get secretStore(): SecretStore | undefined {
-    return get('@hypercomb.social/SecretStore') as SecretStore | undefined
-  }
+  protected readonly shieldColor = computed(() => {
+    const secret = this.#secretValue().trim()
+    if (!secret) return 'rgba(245, 245, 245, 0.35)'
+    const provider = get('@hypercomb.social/SecretStrengthProvider') as SecretStrengthProvider | undefined
+    const score = provider?.evaluate(secret) ?? 0.5
+    // interpolate hue: 0 (red) → 130 (green)
+    const hue = Math.round(score * 130)
+    return `hsl(${hue}, 70%, 50%)`
+  })
 
   private get nav(): Navigation {
     return get('@hypercomb.social/Navigation') as Navigation
@@ -89,10 +95,10 @@ export class App implements AfterViewInit {
   }
 
   public toggleOrientation = (): void => {
-    const next: HexOrientation = this.orientation() === 'pointy' ? 'flat' : 'pointy'
+    const next: HexOrientation = this.orientation() === 'point-top' ? 'flat-top' : 'point-top'
     this.orientation.set(next)
     localStorage.setItem('hc:hex-orientation', next)
-    EffectBus.emit('render:set-orientation', { flat: next === 'flat' })
+    EffectBus.emit('render:set-orientation', { flat: next === 'flat-top' })
   }
 
   public toggleMesh = (): void => {
@@ -104,10 +110,9 @@ export class App implements AfterViewInit {
     mesh?.setNetworkEnabled?.(next, true);
     EffectBus.emit('mesh:public-changed', { public: next })
     if (!wasPublic) {
-      // coming back to public — restore secret from store
-      const stored = this.secretStore?.value ?? ''
-      this.#secretValue.set(stored)
-      if (stored) EffectBus.emit('mesh:secret', { secret: stored })
+      // coming back to public — re-emit secret if present
+      const secret = this.#secretValue().trim()
+      if (secret) EffectBus.emit('mesh:secret', { secret })
     }
   }
 
@@ -122,18 +127,11 @@ export class App implements AfterViewInit {
   protected readonly submitSecret = (): void => {
     const value = this.#secretValue().trim()
     if (!value) return
-    this.secretStore?.set(value)
     EffectBus.emit('mesh:secret', { secret: value })
-    const segments = value.split('/').map(s => s.trim()).filter(Boolean)
-    this.nav.go(segments)
   }
 
   public ngAfterViewInit(): void {
     void this.#runtimeReady.then(() => {
-      // pre-fill secret from store (subdomain may have populated it)
-      const stored = this.secretStore?.value ?? ''
-      if (stored) this.#secretValue.set(stored)
-
       requestAnimationFrame(() => {
         void this.startRegisteredBees()
       })
@@ -158,7 +156,7 @@ export class App implements AfterViewInit {
     window.dispatchEvent(new Event('synchronize'))
 
     // restore persisted orientation
-    if (this.orientation() === 'flat') {
+    if (this.orientation() === 'flat-top') {
       EffectBus.emit('render:set-orientation', { flat: true })
     }
 

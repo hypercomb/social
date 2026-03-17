@@ -1,17 +1,11 @@
-.header-bar {
-  display: flex;
-  align-items: stretch;
-  padding: 0.4rem 0.5rem;
-  background-color: #050f17;
-  position: relative;
-  z-index: 10;
-}
+@use '../../../hypercomb-shared/ui/header-bar';
 
 hc-search-bar {
   flex: 1;
   min-width: 0;
 }
 
+// dev-only: orientation toggle (currently commented out in template)
 .header-toggle {
   flex-shrink: 0;
   display: inline-flex;

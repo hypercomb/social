@@ -65,6 +65,29 @@
         </div>
       }
 
+      <!-- room section (public mode) -->
+      @if (meshPublic()) {
+        <div class="controls-divider"></div>
+        <button class="ctl-btn" [class.active]="roomOpen()" (click)="toggleRoom()" aria-label="room">
+          <span class="hci">B</span>
+        </button>
+        @if (roomOpen()) {
+          <div class="room-shell">
+            <input
+              class="room-input"
+              type="text"
+              placeholder="room"
+              [value]="roomValue()"
+              (input)="onRoomInput($event)"
+              (keydown.enter)="submitRoom()"
+              (keydown.escape)="toggleRoom()"
+            />
+          </div>
+        } @else if (roomValue()) {
+          <span class="room-display">{{ roomValue() }}</span>
+        }
+      }
+
       <!-- utility toggle (rightmost) -->
       <div class="controls-divider"></div>
       <button class="ctl-btn toggle" [class.active]="utility()" (click)="toggleUtility()" aria-label="utility mode">
