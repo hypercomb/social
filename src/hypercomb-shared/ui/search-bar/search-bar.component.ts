@@ -11,7 +11,7 @@ import { EffectBus } from '@hypercomb/core'
 
 @Component({
   selector: 'hc-search-bar',
-  standalone: true,
+  standalone: true, 
   templateUrl: './search-bar.component.html',
   styleUrls: ['./search-bar.component.scss']
 })

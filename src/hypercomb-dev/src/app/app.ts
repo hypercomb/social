@@ -67,7 +67,6 @@ export class App implements AfterViewInit, OnDestroy {
   public readonly orientation = signal<HexOrientation>(
     (localStorage.getItem('hc:hex-orientation') as HexOrientation) || 'point-top'
   );
-  protected readonly orientationLabel = this.orientation;
 
   // ── secret state (public-mode mesh scoping) ─────────────
   #secretValue = signal('')
@@ -113,13 +112,6 @@ export class App implements AfterViewInit, OnDestroy {
       localStorage.setItem('hc:hex-pivot', String(this.#pivotOn))
       EffectBus.emit('render:set-pivot', { pivot: this.#pivotOn })
     }
-  }
-
-  public toggleOrientation = (): void => {
-    const next: HexOrientation = this.orientation() === 'point-top' ? 'flat-top' : 'point-top'
-    this.orientation.set(next)
-    localStorage.setItem('hc:hex-orientation', next)
-    EffectBus.emit('render:set-orientation', { flat: next === 'flat-top' })
   }
 
   public toggleMesh = (): void => {
