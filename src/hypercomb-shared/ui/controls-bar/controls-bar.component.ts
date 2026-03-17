@@ -14,7 +14,6 @@ import type { Navigation } from '../../core/navigation'
 import type { MovementService } from '../../core/movement.service'
 import { EffectBus } from '@hypercomb/core'
 import type { RoomStore } from '../../core/room-store'
-
 @Component({
   selector: 'hc-controls-bar',
   standalone: true,
@@ -210,7 +209,6 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     EffectBus.emit('mesh:room', { room: value })
     this.#roomOpen.set(false)
   }
-
   // ── hover / idle ──────────────────────────────────────
 
   readonly onBarEnter = (): void => { this.#hovered.set(true) }
