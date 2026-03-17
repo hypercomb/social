@@ -205,8 +205,16 @@ export class TileSelectionDrone extends Drone {
 
     if (isOccupied) {
       const isSelected = this.#selected.has(key)
-      this.#dragOp = isSelected ? 'remove' : 'add'
-      this.#applyOp(key)
+      if (isSelected && this.#selected.size > 1) {
+        // promote to leader instead of removing
+        this.#leaderKey = key
+        this.#dragOp = null
+        this.#redraw()
+        this.#emitChanged()
+      } else {
+        this.#dragOp = isSelected ? 'remove' : 'add'
+        this.#applyOp(key)
+      }
     } else {
       this.#dragOp = 'add'
     }
