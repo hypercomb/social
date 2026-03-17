@@ -107,6 +107,7 @@ export class ShowHoneycombWorker extends Drone {
 
   // hex orientation: 'point-top' (default) or 'flat-top'
   #flat = false
+  #pivot = false
 
   // mesh scoping — space + secret feed into the signature key
   #space = ''
@@ -197,6 +198,19 @@ export class ShowHoneycombWorker extends Drone {
       if (this.#secret !== secret) {
         this.#secret = secret
         this.renderedLocationKey = ''
+        this.requestRender()
+      }
+    })
+
+    // listen for pivot mode toggle (loads pre-rotated snapshots + rotated labels)
+    this.onEffect<{ pivot: boolean }>('render:set-pivot', (payload) => {
+      if (this.#pivot !== payload.pivot) {
+        this.#pivot = payload.pivot
+        // invalidate image cache — pivot uses different snapshot signatures
+        this.seedImageCache.clear()
+        // re-render labels rotated
+        this.atlas?.setPivot(payload.pivot)
+        this.renderedCellsKey = ''
         this.requestRender()
       }
     })
@@ -666,11 +680,13 @@ export class ShowHoneycombWorker extends Drone {
       this.pixiContainer.addChild(this.layer)
 
       this.atlas = new HexLabelAtlas(this.pixiRenderer, 128, 8, 8)
+      this.atlas.setPivot(this.#pivot)
       this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8)
       this.atlasRenderer = this.pixiRenderer
       this.shader = null
     } else if (!this.atlas || this.atlasRenderer !== this.pixiRenderer) {
       this.atlas = new HexLabelAtlas(this.pixiRenderer, 128, 8, 8)
+      this.atlas.setPivot(this.#pivot)
       this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8)
       this.atlasRenderer = this.pixiRenderer
       this.shader = null
@@ -898,6 +914,7 @@ export class ShowHoneycombWorker extends Drone {
       }
     }
     this.shader.setFlat(this.#flat)
+    this.shader.setPivot(this.#pivot)
 
     if (!this.hexMesh) {
       this.hexMesh = new Mesh({ geometry: geom as any, shader: (this.shader as any).shader, texture: Texture.WHITE as any } as any)
@@ -1087,8 +1104,9 @@ export class ShowHoneycombWorker extends Drone {
           this.seedBorderColorCache.set(cell.label, [r, g, b])
         }
 
-        // load flat-top snapshot if in flat mode, fallback to point-top
-        const smallSig = (this.#flat && props?.flat?.small?.image) || props?.small?.image
+        // pivot swaps orientation: pointy uses flat snapshot, flat uses pointy snapshot
+        const effectiveFlat = this.#pivot ? !this.#flat : this.#flat
+        const smallSig = (effectiveFlat && props?.flat?.small?.image) || props?.small?.image
         if (smallSig && isSignature(smallSig)) {
           cell.imageSig = smallSig
           this.seedImageCache.set(cell.label, smallSig)

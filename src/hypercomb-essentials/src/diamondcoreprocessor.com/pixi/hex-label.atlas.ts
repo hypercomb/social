@@ -15,6 +15,7 @@ export class HexLabelAtlas {
   private readonly atlas: RenderTexture
   private readonly map = new Map<string, LabelUV>()
   private nextIndex = 0
+  #pivot = false
 
   private readonly cols: number
   private readonly rows: number
@@ -36,7 +37,6 @@ export class HexLabelAtlas {
     })
 
     // clear once so sampling starts transparent
-    // renderer.render signature is object-based in v8 :contentReference[oaicite:2]{index=2}
     this.renderer.render({ container: new Container(), target: this.atlas, clear: true })
 
     this.style = new TextStyle({
@@ -45,8 +45,15 @@ export class HexLabelAtlas {
       fill: 0xffffff,
       align: 'center'
     })
-  
+  }
 
+  public setPivot = (pivot: boolean): void => {
+    if (this.#pivot === pivot) return
+    this.#pivot = pivot
+    // clear cache so all labels re-render with new rotation
+    this.map.clear()
+    this.nextIndex = 0
+    this.renderer.render({ container: new Container(), target: this.atlas, clear: true })
   }
 
   public getAtlasTexture = (): Texture => {
@@ -72,6 +79,11 @@ export class HexLabelAtlas {
       col * this.cellPx + this.cellPx * 0.5,
       row * this.cellPx + this.cellPx * 0.5
     )
+
+    // rotate text 90° CW when pivot is active (pre-baked rotation)
+    if (this.#pivot) {
+      text.rotation = Math.PI / 2
+    }
 
     // render into the atlas (keep previous labels)
     this.renderer.render({ container: text, target: this.atlas, clear: false })

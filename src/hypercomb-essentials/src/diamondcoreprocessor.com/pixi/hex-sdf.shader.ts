@@ -9,41 +9,52 @@ type Vec2 = [number, number]
 export class HexSdfTextureShader {
   public shader: Shader
 
-  private readonly uniforms: {
-    u_quadSize: { value: Vec2; type: 'vec2<f32>' }
-    u_radiusPx: { value: number; type: 'f32' }
-    u_flat: { value: number; type: 'f32' }
-  }
+  // Pixi v8 separates uniform structures ({ value, type }) from the flat values
+  // it uploads to the GPU. We must update the flat values via the uniform group's
+  // .uniforms property, then call .update() to mark dirty for re-upload.
+  #ug: any // UniformGroup — holds .uniforms (flat GPU values)
 
   constructor(labelAtlas: Texture, cellImageAtlas: Texture, quadW: number, quadH: number, radiusPx: number) {
-    this.uniforms = {
+    const uniformDefs = {
       u_quadSize: { value: [quadW, quadH], type: 'vec2<f32>' },
       u_radiusPx: { value: radiusPx, type: 'f32' },
       u_flat: { value: 0, type: 'f32' },
+      u_pivot: { value: 0, type: 'f32' },
     }
 
     // v8 shaded mesh requires uniforms nested under a group and shader inputs using in/out
     this.shader = Shader.from({
       gl: { vertex: HexSdfTextureShader.vertexSource, fragment: HexSdfTextureShader.fragmentSource },
       resources: {
-        uniforms: this.uniforms,
+        uniforms: uniformDefs,
         u_label: this.toSource(labelAtlas),
         u_cellImages: this.toSource(cellImageAtlas),
       },
     })
+
+    // cache the uniform group so setters can update GPU-side flat values
+    this.#ug = (this.shader.resources as any).uniforms
   }
 
   public setQuadSize = (w: number, h: number): void => {
-    this.uniforms.u_quadSize.value[0] = w
-    this.uniforms.u_quadSize.value[1] = h
+    const v = this.#ug.uniforms.u_quadSize
+    v[0] = w; v[1] = h
+    this.#ug.update()
   }
 
   public setRadiusPx = (r: number): void => {
-    this.uniforms.u_radiusPx.value = r
+    this.#ug.uniforms.u_radiusPx = r
+    this.#ug.update()
   }
 
   public setFlat = (flat: boolean): void => {
-    this.uniforms.u_flat.value = flat ? 1.0 : 0.0
+    this.#ug.uniforms.u_flat = flat ? 1.0 : 0.0
+    this.#ug.update()
+  }
+
+  public setPivot = (pivot: boolean): void => {
+    this.#ug.uniforms.u_pivot = pivot ? 1.0 : 0.0
+    this.#ug.update()
   }
 
   public setLabelAtlas = (t: Texture): void => {
@@ -112,6 +123,7 @@ export class HexSdfTextureShader {
     uniform vec2 u_quadSize;
     uniform float u_radiusPx;
     uniform float u_flat;
+    uniform float u_pivot;
 
     uniform sampler2D u_label;
     uniform sampler2D u_cellImages;
@@ -143,6 +155,10 @@ export class HexSdfTextureShader {
         float hexH = u_flat > 0.5 ? 2.0 * u_radiusPx : 2.0 * u_radiusPx / 0.8660254;
         vec2 hexScale = vec2(hexW / u_quadSize.x, hexH / u_quadSize.y);
         vec2 hexUV = clamp((vUV - 0.5) / hexScale + 0.5, 0.0, 1.0);
+        // pivot mode: rotate snapshot 90° CW inside the hex
+        if (u_pivot > 0.5) {
+          hexUV = vec2(hexUV.y, 1.0 - hexUV.x);
+        }
         vec2 imgUV = mix(vImageUV.xy, vImageUV.zw, hexUV);
         base = texture2D(u_cellImages, imgUV);
 
