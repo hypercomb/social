@@ -73,7 +73,7 @@ export class ShowHoneycombWorker extends Drone {
     axial: '@diamondcoreprocessor.com/AxialService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'mesh:room', 'mesh:secret']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -107,6 +107,10 @@ export class ShowHoneycombWorker extends Drone {
 
   // hex orientation: 'point-top' (default) or 'flat-top'
   #flat = false
+
+  // mesh scoping — space + secret feed into the signature key
+  #space = ''
+  #secret = ''
 
   // note: mesh seed state (derived on heartbeat)
   private meshSig = ''
@@ -176,6 +180,23 @@ export class ShowHoneycombWorker extends Drone {
         // invalidate image cache since we need different snapshots
         this.seedImageCache.clear()
         this.renderedCellsKey = ''
+        this.requestRender()
+      }
+    })
+
+    // listen for space (room) and secret changes — recompute signature
+    this.onEffect<{ room: string }>('mesh:room', ({ room }) => {
+      if (this.#space !== room) {
+        this.#space = room
+        this.renderedLocationKey = ''
+        this.requestRender()
+      }
+    })
+
+    this.onEffect<{ secret: string }>('mesh:secret', ({ secret }) => {
+      if (this.#secret !== secret) {
+        this.#secret = secret
+        this.renderedLocationKey = ''
         this.requestRender()
       }
     })
@@ -366,7 +387,9 @@ export class ShowHoneycombWorker extends Drone {
       : []
 
     const lineagePath = explorerSegments.join('/')
-    const key = lineagePath ? `${domain}/${lineagePath}/seed` : `${domain}/seed`
+    // key = space/domain/path/secret/seed (empty segments omitted)
+    const parts = [this.#space, domain, lineagePath, this.#secret, 'seed'].filter(Boolean)
+    const key = parts.join('/')
     // use SignatureStore.signText() for memoization — same lineage path = same sig
     const sigStore = get<SignatureStore>('@hypercomb/SignatureStore')
     const sig = sigStore
