@@ -12,6 +12,7 @@ import { HexImageAtlas } from './hex-image.atlas.js'
 import { HexSdfTextureShader } from './hex-sdf.shader.js'
 import { TILE_PROPERTIES_FILE, isSignature } from '../editor/tile-properties.js'
 import type { HistoryService, HistoryOp } from '../core/history.service.js'
+import type { ViewportSnapshot } from '../input/zoom/zoom.drone.js'
 
 type Axial = { q: number; r: number }
 type SeedCell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; borderColor?: [number, number, number] }
@@ -772,6 +773,9 @@ export class ShowHoneycombWorker extends Drone {
       this.renderedLocationKey = locationKey
       this.renderedCells.clear()
 
+      // apply saved viewport (or defaults) so the container is correct before tiles render
+      await this.#applyViewportForLayer(dir)
+
       // emit navigation guard so click handlers block during transition
       this.emitEffect('navigation:guard-start', { locationKey })
 
@@ -862,6 +866,43 @@ export class ShowHoneycombWorker extends Drone {
     this.streamActive = false
     this.emitEffect('navigation:guard-end', {})
     this.requestRender()
+  }
+
+  readonly #applyViewportForLayer = async (dir: FileSystemDirectoryHandle): Promise<void> => {
+    const container = this.pixiContainer
+    const app = this.pixiApp
+    const renderer = this.pixiRenderer
+    if (!container || !app || !renderer) return
+
+    // read 0000 directly from the target dir — VP.#dir may still
+    // point at the previous layer (navigate fires before store.change)
+    let snap: ViewportSnapshot = {}
+    try {
+      const fh = await dir.getFileHandle('0000')
+      const file = await fh.getFile()
+      const props = JSON.parse(await file.text())
+      snap = (props as any).viewport ?? {}
+    } catch {
+      // no 0000 yet — defaults
+    }
+
+    const s = renderer.screen
+
+    // zoom: set scale + position on the render container
+    if (snap.zoom) {
+      container.scale.set(snap.zoom.scale)
+      container.position.set(snap.zoom.cx, snap.zoom.cy)
+    } else {
+      container.scale.set(1)
+      container.position.set(0, 0)
+    }
+
+    // pan: set stage position
+    if (snap.pan) {
+      app.stage.position.set(s.width * 0.5 + snap.pan.dx, s.height * 0.5 + snap.pan.dy)
+    } else {
+      app.stage.position.set(s.width * 0.5, s.height * 0.5)
+    }
   }
 
   private readonly applyGeometry = async (cells: SeedCell[]): Promise<void> => {

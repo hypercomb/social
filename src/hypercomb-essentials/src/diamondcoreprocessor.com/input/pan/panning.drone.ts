@@ -1,7 +1,7 @@
 // src/<domain>/pixi/panning.drone.ts
 import { Drone } from '@hypercomb/core'
 import type { HostReadyPayload } from '../../pixi/pixi-host.drone.js'
-import type { ViewportPersistence } from '../zoom/zoom.drone.js'
+import type { ViewportPersistence, ViewportSnapshot } from '../zoom/zoom.drone.js'
 
 type Point = { x: number; y: number }
 
@@ -33,20 +33,28 @@ export class PanningDrone extends Drone {
       const touchPan = this.resolve<any>('touchPan')
       touchPan?.attach(this, this.canvas)
 
-      // restore saved pan offset from 0000 viewport state
+      // resolve ViewportPersistence and subscribe to navigation restores
       this.vp = window.ioc.get<ViewportPersistence>('@diamondcoreprocessor.com/ViewportPersistence') ?? null
-      if (this.vp && this.stage && this.renderer) {
-        void this.vp.read().then((snap) => {
-          if (snap.pan && this.stage && this.renderer) {
-            const s = this.renderer.screen
-            this.stage.position.set(
-              s.width * 0.5 + snap.pan.dx,
-              s.height * 0.5 + snap.pan.dy,
-            )
-          }
-        })
+      if (this.vp) {
+        void this.vp.read().then(snap => this.#applyPanSnapshot(snap))
+        this.vp.addEventListener('restore', ((e: CustomEvent<ViewportSnapshot>) => {
+          this.#applyPanSnapshot(e.detail)
+        }) as EventListener)
       }
     })
+  }
+
+  #applyPanSnapshot = (snap: ViewportSnapshot): void => {
+    if (!this.stage || !this.renderer) return
+    const s = this.renderer.screen
+    if (snap.pan) {
+      this.stage.position.set(
+        s.width * 0.5 + snap.pan.dx,
+        s.height * 0.5 + snap.pan.dy,
+      )
+    } else {
+      this.stage.position.set(s.width * 0.5, s.height * 0.5)
+    }
   }
 
   public stop = async (): Promise<void> => {

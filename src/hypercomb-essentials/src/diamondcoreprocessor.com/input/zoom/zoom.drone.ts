@@ -57,7 +57,9 @@ export type ZoomSnapshot = { scale: number; cx: number; cy: number }
 export type PanSnapshot = { dx: number; dy: number }
 export type ViewportSnapshot = { zoom?: ZoomSnapshot; pan?: PanSnapshot }
 
-export class ViewportPersistence {
+export class ViewportPersistence extends EventTarget {
+
+  constructor() { super() }
 
   #dir: FileSystemDirectoryHandle | null = null
   #debounceTimer: ReturnType<typeof setTimeout> | null = null
@@ -89,13 +91,24 @@ export class ViewportPersistence {
     if (this.#debounceTimer) {
       clearTimeout(this.#debounceTimer)
       this.#debounceTimer = null
-      if (this.#dir) void this.#persist()
+    }
+    const flushDir = this.#dir
+    const flushPending = this.#pending
+    if (flushDir && (flushPending.zoom || flushPending.pan)) {
+      void this.#persistTo(flushDir, flushPending)
     }
 
     this.#dir = dir
     this.#pending = {}
     this.#lastRead = {}
     this.#reading = null
+
+    // read the new directory's viewport and notify subscribers
+    if (dir) {
+      void this.read().then(snap => {
+        this.dispatchEvent(new CustomEvent('restore', { detail: snap }))
+      })
+    }
   }
 
   // -- drone-facing api --
@@ -152,28 +165,18 @@ export class ViewportPersistence {
     }, 1000)
   }
 
-  #persist = async (): Promise<void> => {
-    const dir = this.#dir
-    if (!dir) return
-    if (this.#writing) {
-      // re-schedule if a write is already in progress
-      this.#schedulePersist()
-      return
-    }
-
-    this.#writing = true
+  #persistTo = async (
+    dir: FileSystemDirectoryHandle,
+    pending: ViewportSnapshot,
+  ): Promise<void> => {
     try {
-      // read existing 0000
       const props = await readProperties(dir)
-
-      // merge viewport key
       const viewport: ViewportSnapshot = {
         ...((props as any).viewport as ViewportSnapshot | undefined),
-        ...this.#pending,
+        ...pending,
       }
       ;(props as any).viewport = viewport
 
-      // write back
       const fileHandle = await dir.getFileHandle(PROPERTIES_FILE, { create: true })
       const writable = await fileHandle.createWritable()
       try {
@@ -182,10 +185,28 @@ export class ViewportPersistence {
         await writable.close()
       }
 
-      // sync last-read with what we just wrote
-      this.#lastRead = viewport
+      // sync last-read only if dir is still current
+      if (this.#dir === dir) this.#lastRead = viewport
     } catch {
       // OPFS write failed — silently drop, will retry on next gesture
+    }
+  }
+
+  #persist = async (): Promise<void> => {
+    const dir = this.#dir
+    if (!dir) return
+    if (this.#writing) {
+      this.#schedulePersist()
+      return
+    }
+
+    // snapshot pending before any await — setDir() may clear it mid-flight
+    const pending = { ...this.#pending }
+    if (!pending.zoom && !pending.pan) return
+
+    this.#writing = true
+    try {
+      await this.#persistTo(dir, pending)
     } finally {
       this.#writing = false
     }
@@ -223,17 +244,26 @@ export class ZoomDrone extends Drone {
       const mouseWheel = this.resolve<any>('mouseWheel')
       mouseWheel?.attach(this, this.canvas)
 
-      // restore saved zoom from 0000 viewport state
+      // resolve ViewportPersistence and subscribe to navigation restores
       this.vp = window.ioc.get<ViewportPersistence>('@diamondcoreprocessor.com/ViewportPersistence') ?? null
-      if (this.vp && this.renderContainer) {
-        void this.vp.read().then((snap) => {
-          if (snap.zoom && this.renderContainer) {
-            this.renderContainer.scale.set(snap.zoom.scale)
-            this.renderContainer.position.set(snap.zoom.cx, snap.zoom.cy)
-          }
-        })
+      if (this.vp) {
+        void this.vp.read().then(snap => this.#applyZoomSnapshot(snap))
+        this.vp.addEventListener('restore', ((e: CustomEvent<ViewportSnapshot>) => {
+          this.#applyZoomSnapshot(e.detail)
+        }) as EventListener)
       }
     })
+  }
+
+  #applyZoomSnapshot = (snap: ViewportSnapshot): void => {
+    if (!this.renderContainer) return
+    if (snap.zoom) {
+      this.renderContainer.scale.set(snap.zoom.scale)
+      this.renderContainer.position.set(snap.zoom.cx, snap.zoom.cy)
+    } else {
+      this.renderContainer.scale.set(1)
+      this.renderContainer.position.set(0, 0)
+    }
   }
 
   public stop = async (): Promise<void> => {
