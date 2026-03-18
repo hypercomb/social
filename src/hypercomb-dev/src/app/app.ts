@@ -81,6 +81,7 @@ export class App {
     (localStorage.getItem('hc:hex-orientation') as HexOrientation) || 'point-top'
   );
 
+  #pivotOn = localStorage.getItem('hc:hex-pivot') === 'true'
   #runtimeReady: Promise<void>
 
   constructor() {
