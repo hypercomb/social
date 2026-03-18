@@ -67,5 +67,6 @@ export class MeshHeaderComponent {
     this.#store?.set(value)
     EffectBus.emit('mesh:secret', { secret: value })
     this.#secretExpanded.set(false)
+    this.#secretRevealed.set(false)
   }
 }
