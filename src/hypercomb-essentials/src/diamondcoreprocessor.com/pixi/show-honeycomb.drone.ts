@@ -73,9 +73,10 @@ export class ShowHoneycombWorker extends Drone {
   protected override deps = {
     lineage: '@hypercomb.social/Lineage',
     axial: '@diamondcoreprocessor.com/AxialService',
+    layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'seed:place-at', 'seed:reorder', 'render:set-gap', 'render:set-text-only', 'tile:hover']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'seed:place-at', 'seed:reorder', 'render:set-gap', 'move:preview']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -156,6 +157,13 @@ export class ShowHoneycombWorker extends Drone {
   #lastTriggeredRepublishAtMs = new Map<string, number>()
 
   private filterKeyword = ''
+  private moveNames: string[] | null = null
+  private suppressCellCount = false
+
+  // cached render context for fast move:preview path (avoids full OPFS re-read)
+  private cachedSeedNames: string[] | null = null
+  private cachedLocalSeedSet: Set<string> | null = null
+  private cachedBranchSet: Set<string> | null = null
 
   private readonly onSynchronize = (): void => {
     this.requestRender()
@@ -701,6 +709,40 @@ export class ShowHoneycombWorker extends Drone {
     })()
   }
 
+  /** Fast path for move:preview — skips OPFS/mesh/image loading, only rebuilds geometry with reordered labels */
+  private readonly renderMovePreview = (): void => {
+    const axial = this.resolve<any>('axial')
+    if (!axial?.items || !this.cachedSeedNames || !this.cachedLocalSeedSet) {
+      this.requestRender()
+      return
+    }
+
+    const seedNames = this.cachedSeedNames
+    const localSeedSet = this.cachedLocalSeedSet
+    const branchSet = this.cachedBranchSet ?? new Set<string>()
+
+    const axialMax = typeof axial.items.size === 'number' ? axial.items.size : seedNames.length
+    const effectiveLen = this.moveNames ? this.moveNames.length : seedNames.length
+    const maxCells = Math.min(effectiveLen, axialMax)
+    if (maxCells <= 0) return
+
+    const cells = this.buildCellsFromAxial(axial, seedNames, maxCells, localSeedSet, branchSet)
+    if (cells.length === 0) return
+
+    // reuse cached image sigs (no OPFS read needed)
+    for (const cell of cells) {
+      if (this.seedImageCache.has(cell.label)) {
+        cell.imageSig = this.seedImageCache.get(cell.label) ?? undefined
+      }
+    }
+
+    this.renderedCells.clear()
+    for (const cell of cells) this.renderedCells.set(cell.label, cell)
+
+    this.suppressCellCount = true
+    void this.applyGeometry(cells).finally(() => { this.suppressCellCount = false })
+  }
+
   private readonly renderFromSynchronize = async (): Promise<void> => {
     this.shader?.setHoveredIndex(-1)
     if (!this.pixiApp || !this.pixiContainer || !this.pixiRenderer) {
@@ -852,6 +894,13 @@ export class ShowHoneycombWorker extends Drone {
       seedNames = await this.#orderByIndex(dir, Array.from(union), localSeedSet)
     }
 
+    // apply layout ordering if a __layout__ file exists
+    const layout = this.resolve<any>('layout')
+    if (layout) {
+      const order = await layout.read(dir)
+      if (order) seedNames = layout.merge(order, seedNames)
+    }
+
     // apply search filter if active
     if (this.filterKeyword) {
       const kw = this.filterKeyword
@@ -919,6 +968,11 @@ export class ShowHoneycombWorker extends Drone {
       this.renderQueued = true
       return
     }
+
+    // cache render context for fast move:preview path
+    this.cachedSeedNames = seedNames
+    this.cachedLocalSeedSet = localSeedSet
+    this.cachedBranchSet = branchSet
 
     this.renderedCells.clear()
     for (const cell of cells) this.renderedCells.set(cell.label, cell)
@@ -1072,7 +1126,7 @@ export class ShowHoneycombWorker extends Drone {
       this.hexMesh.shader = (this.shader as any).shader
     }
 
-    if (final && this.hexMesh?.getLocalBounds) {
+    if (this.hexMesh?.getLocalBounds && !this.suppressCellCount) {
       this.hexMesh.position.set(0, 0)
       const bounds = this.hexMesh.getLocalBounds()
       this.hexMesh.position.set(-(bounds.x + bounds.width * 0.5), -(bounds.y + bounds.height * 0.5))
@@ -1082,13 +1136,14 @@ export class ShowHoneycombWorker extends Drone {
     this.geom = geom
     this.renderedCellsKey = nextCellsKey
     this.renderedCount = cells.length
-    this.emitEffect('render:cell-count', {
-      count: cells.length,
-      labels: cells.map(cell => cell.label),
-      branchLabels: cells.filter(cell => cell.hasBranch).map(cell => cell.label),
-      externalLabels: cells.filter(cell => cell.external).map(cell => cell.label),
-      noImageLabels: cells.filter(cell => !cell.imageSig).map(cell => cell.label),
-    })
+    if (!this.suppressCellCount) {
+      this.emitEffect('render:cell-count', {
+        count: cells.length,
+        labels: cells.map(cell => cell.label),
+        branchLabels: cells.filter(cell => cell.hasBranch).map(cell => cell.label),
+        externalLabels: cells.filter(cell => cell.external).map(cell => cell.label),
+      })
+    }
   }
 
   // 1–3ms micro-pause to avoid main-thread blocking (legacy JsonHiveStreamLoader pattern)
@@ -1122,20 +1177,17 @@ export class ShowHoneycombWorker extends Drone {
       this.requestRender()
     })
 
-    // seed lifecycle re-renders are driven by the processor:
-    // HistoryRecorder records the op → calls hypercomb().act() → dispatches synchronize
-
-    // clipboard:view effect — filter visible seeds to clipboard contents
-    this.onEffect<{ active: boolean; labels?: string[]; sourceSegments?: string[] }>('clipboard:view', (payload) => {
-      if (payload?.active && payload.labels) {
-        this.#clipboardView = {
-          labels: new Set(payload.labels),
-          sourceSegments: payload.sourceSegments ?? [],
-        }
+    // move:preview — reordered names during drag (fast path avoids full OPFS re-read)
+    this.onEffect<{ names: string[]; movedLabels: Set<string> } | null>('move:preview', (payload) => {
+      this.moveNames = payload?.names ?? null
+      this.renderedCellsKey = '' // force geometry rebuild
+      if (payload && this.cachedSeedNames) {
+        // fast path: reuse cached render context, only rebuild geometry with swapped labels
+        this.renderMovePreview()
       } else {
-        this.#clipboardView = null
+        // clearing move preview or no cache — full render
+        this.requestRender()
       }
-      this.requestRender()
     })
 
     ; (window as any).showCellsPoc = {
@@ -1172,6 +1224,9 @@ export class ShowHoneycombWorker extends Drone {
     this.renderedCellsKey = ''
     this.renderedCount = 0
     this.renderedCells.clear()
+    this.cachedSeedNames = null
+    this.cachedLocalSeedSet = null
+    this.cachedBranchSet = null
     this.emitEffect('render:cell-count', { count: 0, labels: [] })
   }
 
@@ -1210,13 +1265,12 @@ export class ShowHoneycombWorker extends Drone {
    * External (mesh) seeds are always re-indexed locally.
    */
   async #orderByIndex(dir: FileSystemDirectoryHandle, names: string[], localSeedSet: Set<string>): Promise<string[]> {
-    const alphabetical = [...names].sort((a, b) => a.localeCompare(b))
-    const indexed: { name: string; index: number }[] = []
+    const indexed: { name: string; position: number }[] = []
     const unindexed: string[] = []
+    let maxIndex = -1
 
     for (const name of names) {
       if (!localSeedSet.has(name)) {
-        // external seeds always re-indexed
         unindexed.push(name)
         continue
       }
@@ -1224,7 +1278,10 @@ export class ShowHoneycombWorker extends Drone {
         const seedDir = await dir.getDirectoryHandle(name, { create: false })
         const props = await readSeedProperties(seedDir)
         if (typeof props['index'] === 'number') {
-          indexed.push({ name, index: props['index'] as number })
+          const idx = props['index'] as number
+          const off = typeof props['offset'] === 'number' ? props['offset'] as number : 0
+          indexed.push({ name, position: idx + off })
+          if (idx > maxIndex) maxIndex = idx
         } else {
           unindexed.push(name)
         }
@@ -1233,33 +1290,30 @@ export class ShowHoneycombWorker extends Drone {
       }
     }
 
-    // sort indexed seeds by their stored index
-    indexed.sort((a, b) => a.index - b.index)
+    // sort by effective position (index + offset)
+    indexed.sort((a, b) => a.position - b.position)
 
-    // assign next available indices to unindexed seeds
-    let nextIndex = indexed.length > 0 ? Math.max(...indexed.map(s => s.index)) + 1 : 0
-    // if no indexed seeds exist, start from 0 and use alphabetical order
+    // assign next available permanent index to unindexed seeds
+    let nextIndex = maxIndex + 1
     if (indexed.length === 0) {
       unindexed.sort((a, b) => a.localeCompare(b))
     }
 
     for (const name of unindexed) {
       const assignedIndex = nextIndex++
-      indexed.push({ name, index: assignedIndex })
+      // new tiles: index = permanent, offset = 0 → position = index
+      indexed.push({ name, position: assignedIndex })
 
-      // persist index + offset for local seeds
       if (localSeedSet.has(name)) {
-        const alphaIdx = alphabetical.indexOf(name)
-        const offset = assignedIndex - alphaIdx
         try {
           const seedDir = await dir.getDirectoryHandle(name, { create: false })
-          await writeSeedProperties(seedDir, { index: assignedIndex, offset })
+          await writeSeedProperties(seedDir, { index: assignedIndex, offset: 0 })
         } catch { /* seed dir missing — skip */ }
       }
     }
 
-    // re-sort all by index after appending
-    indexed.sort((a, b) => a.index - b.index)
+    // re-sort after appending new seeds
+    indexed.sort((a, b) => a.position - b.position)
     return indexed.map(s => s.name)
   }
 
@@ -1306,15 +1360,30 @@ export class ShowHoneycombWorker extends Drone {
   }
 
   async #writeIndices(dir: FileSystemDirectoryHandle, orderedNames: string[]): Promise<void> {
-    const alphabetical = [...orderedNames].sort((a, b) => a.localeCompare(b))
+    // read all existing permanent indices to find maxIndex for new tiles
+    let maxIndex = -1
+    const existingIndices = new Map<string, number>()
+    for (const name of orderedNames) {
+      try {
+        const seedDir = await dir.getDirectoryHandle(name, { create: false })
+        const props = await readSeedProperties(seedDir)
+        if (typeof props['index'] === 'number') {
+          existingIndices.set(name, props['index'] as number)
+          if ((props['index'] as number) > maxIndex) maxIndex = props['index'] as number
+        }
+      } catch { /* skip */ }
+    }
 
     for (let i = 0; i < orderedNames.length; i++) {
       const name = orderedNames[i]
-      const alphaIdx = alphabetical.indexOf(name)
-      const offset = i - alphaIdx
+      let permanentIndex = existingIndices.get(name)
+      if (permanentIndex === undefined) {
+        permanentIndex = ++maxIndex
+      }
+      const offset = i - permanentIndex
       try {
         const seedDir = await dir.getDirectoryHandle(name, { create: false })
-        await writeSeedProperties(seedDir, { index: i, offset })
+        await writeSeedProperties(seedDir, { index: permanentIndex, offset })
       } catch { /* skip missing seed dirs */ }
     }
   }
@@ -1331,11 +1400,15 @@ export class ShowHoneycombWorker extends Drone {
 
   private buildCellsFromAxial = (axial: any, names: string[], max: number, localSeedSet: Set<string>, branchSet?: Set<string>): SeedCell[] => {
     const out: SeedCell[] = []
+    // during move drag, use reordered names so labels map to correct indices
+    const effectiveNames = this.moveNames ?? names
 
     for (let i = 0; i < max; i++) {
       const a = axial.items.get(i) as Axial | undefined
-      const label = names[i]
-      if (!a || !label) break
+      const label = effectiveNames[i] ?? names[i]
+      if (!a) break
+      if (!label) continue
+
       out.push({ q: a.q, r: a.r, label, external: !localSeedSet.has(label), heat: this.#heatByLabel.get(label) ?? 0, hasBranch: branchSet?.has(label) ?? false })
     }
 
