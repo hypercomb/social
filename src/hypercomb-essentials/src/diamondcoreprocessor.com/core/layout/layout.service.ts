@@ -48,7 +48,6 @@ export class LayoutService {
         seen.add(label)
       }
     }
-
     // append new seeds not in layout (alphabetically)
     const newSeeds = fsSeeds.filter(s => !seen.has(s))
     newSeeds.sort((a, b) => a.localeCompare(b))

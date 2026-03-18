@@ -12,7 +12,7 @@ import {
 import { fromRuntime } from '../../core/from-runtime'
 import type { Navigation } from '../../core/navigation'
 import type { MovementService } from '../../core/movement.service'
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, get } from '@hypercomb/core'
 import type { RoomStore } from '../../core/room-store'
 
 @Component({
@@ -60,7 +60,6 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #locked = signal(false)
   #utility = signal(localStorage.getItem('hc:utility-expanded') !== 'false')
   #moveMode = signal(false)
-  #moveMode = signal(false)
   #mode = signal<'browsing' | 'clipboard'>('browsing')
   #clipboardItems = signal<string[]>([])
   #roomValue = signal('')
@@ -69,7 +68,6 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #textOnly = signal(false)
 
   #idleTimer: ReturnType<typeof setTimeout> | null = null
-  #moveModeUnsub: (() => void) | null = null
   #moveModeUnsub: (() => void) | null = null
   readonly #IDLE_DELAY = 3000
 
@@ -126,7 +124,6 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
         this.closeClipboard()
       }
     })
-
     this.#moveModeUnsub = EffectBus.on<{ active: boolean }>('move:mode', ({ active }) => {
       this.#moveMode.set(active)
     })
