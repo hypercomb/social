@@ -10,6 +10,7 @@ import type { HostReadyPayload } from './pixi-host.drone.js'
 import { HexLabelAtlas } from './hex-label.atlas.js'
 import { HexImageAtlas } from './hex-image.atlas.js'
 import { HexSdfTextureShader } from './hex-sdf.shader.js'
+import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from './hex-geometry.js'
 import { TILE_PROPERTIES_FILE, isSignature, readSeedProperties, writeSeedProperties } from '../editor/tile-properties.js'
 import type { HistoryService, HistoryOp } from '../core/history.service.js'
 import type { ViewportSnapshot } from '../input/zoom/zoom.drone.js'
@@ -74,8 +75,8 @@ export class ShowHoneycombWorker extends Drone {
     axial: '@diamondcoreprocessor.com/AxialService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'seed:place-at', 'seed:reorder']
-  protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'seed:place-at', 'seed:reorder', 'render:set-gap']
+  protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
 
@@ -105,6 +106,9 @@ export class ShowHoneycombWorker extends Drone {
   private streamActive = false
   private cancelStreamFlag = false
   private renderedLocationKey = ''
+
+  // hex geometry (circumradius, gap, pad, spacing) — configurable via render:set-gap effect
+  #hexGeo: HexGeometry = DEFAULT_HEX_GEOMETRY
 
   // hex orientation: 'point-top' (default) or 'flat-top'
   #flat = false
@@ -221,6 +225,18 @@ export class ShowHoneycombWorker extends Drone {
     this.onEffect<{ labels: string[] }>('seed:reorder', (payload) => {
       void this.#handleReorder(payload.labels)
     })
+
+    this.onEffect<{ gapPx: number }>('render:set-gap', (payload) => {
+      if (this.#hexGeo.gapPx !== payload.gapPx) {
+        this.#hexGeo = createHexGeometry(this.#hexGeo.circumRadiusPx, payload.gapPx, this.#hexGeo.padPx)
+        this.emitEffect('render:geometry-changed', this.#hexGeo)
+        this.renderedCellsKey = ''
+        this.requestRender()
+      }
+    })
+
+    // emit initial geometry so consumers start in sync
+    this.emitEffect('render:geometry-changed', this.#hexGeo)
 
     // note: always compute mesh seeds on every heartbeat
     await this.refreshMeshSeeds(grammar)
@@ -921,9 +937,7 @@ export class ShowHoneycombWorker extends Drone {
       return
     }
 
-    const circumRadiusPx = 32
-    const gapPx = 6
-    const padPx = 10
+    const { circumRadiusPx, gapPx, padPx } = this.#hexGeo
 
     const nextCellsKey = this.buildCellsKey(cells)
     if (nextCellsKey === this.renderedCellsKey && cells.length === this.renderedCount) {

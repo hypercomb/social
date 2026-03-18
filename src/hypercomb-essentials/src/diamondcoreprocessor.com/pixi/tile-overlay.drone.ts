@@ -5,8 +5,9 @@ import { Drone, EffectBus, hypercomb } from '@hypercomb/core'
 import { Application, Container, Graphics, Point, Text, TextStyle } from 'pixi.js'
 import { HexIconButton } from './hex-icon-button.js'
 import type { HostReadyPayload } from './pixi-host.drone.js'
-import type { Axial } from '../input/hex-detector.js'
+import type { Axial, HexDetector } from '../input/hex-detector.js'
 import type { InputGate } from '../input/input-gate.service.js'
+import { type HexGeometry, DEFAULT_HEX_GEOMETRY } from './hex-geometry.js'
 
 type CellCountPayload = { count: number; labels: string[]; branchLabels?: string[]; externalLabels?: string[] }
 
@@ -96,9 +97,7 @@ export class TileOverlayDrone extends Drone {
   #currentAxial: Axial | null = null
   #currentIndex: number | undefined = undefined
 
-  readonly #circumRadiusPx = 32
-  readonly #gapPx = 6
-  readonly #spacing = 38
+  #geo: HexGeometry = DEFAULT_HEX_GEOMETRY
 
   #cellCount = 0
   #cellLabels: string[] = []
@@ -125,7 +124,7 @@ export class TileOverlayDrone extends Drone {
     lineage: '@hypercomb.social/Lineage',
   }
 
-  protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count', 'render:set-orientation', 'navigation:guard-start', 'navigation:guard-end', 'mesh:public-changed', 'editor:mode']
+  protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count', 'render:set-orientation', 'render:geometry-changed', 'navigation:guard-start', 'navigation:guard-end', 'mesh:public-changed', 'editor:mode']
   protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'tile:hidden', 'tile:blocked']
 
   protected override heartbeat = async (): Promise<void> => {
@@ -159,6 +158,14 @@ export class TileOverlayDrone extends Drone {
 
     this.onEffect<{ flat: boolean }>('render:set-orientation', (payload) => {
       this.#flat = payload.flat
+      this.#drawHexBg()
+      if (this.#currentAxial) this.#positionOverlay(this.#currentAxial.q, this.#currentAxial.r)
+    })
+
+    this.onEffect<HexGeometry>('render:geometry-changed', (geo) => {
+      this.#geo = geo
+      const detector = this.resolve<HexDetector>('detector')
+      if (detector) detector.spacing = geo.spacing
       this.#drawHexBg()
       if (this.#currentAxial) this.#positionOverlay(this.#currentAxial.q, this.#currentAxial.r)
     })
@@ -240,7 +247,7 @@ export class TileOverlayDrone extends Drone {
   #drawHexBg(): void {
     if (!this.#hexBg) return
     this.#hexBg.clear()
-    const r = this.#circumRadiusPx
+    const r = this.#geo.circumRadiusPx
     const angleOffset = this.#flat ? 0 : Math.PI / 6
     const verts: number[] = []
     for (let i = 0; i < 6; i++) {
@@ -594,8 +601,8 @@ export class TileOverlayDrone extends Drone {
 
   #axialToPixel(q: number, r: number) {
     return this.#flat
-      ? { x: 1.5 * this.#spacing * q, y: Math.sqrt(3) * this.#spacing * (r + q / 2) }
-      : { x: Math.sqrt(3) * this.#spacing * (q + r / 2), y: this.#spacing * 1.5 * r }
+      ? { x: 1.5 * this.#geo.spacing * q, y: Math.sqrt(3) * this.#geo.spacing * (r + q / 2) }
+      : { x: Math.sqrt(3) * this.#geo.spacing * (q + r / 2), y: this.#geo.spacing * 1.5 * r }
   }
 
   static axialKey(q: number, r: number): string {

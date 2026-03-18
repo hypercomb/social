@@ -1,13 +1,25 @@
 // hypercomb-essentials/src/diamondcoreprocessor.com/input/hex-detector.ts
 // O(1) pixel-to-axial coordinate detection via cube rounding.
 
+import { DEFAULT_HEX_GEOMETRY } from '../pixi/hex-geometry.js'
+
 export type Axial = { q: number; r: number }
 
 const SQRT3_OVER_3 = Math.sqrt(3) / 3
 
 export class HexDetector {
-  constructor(private readonly spacing: number) {
+  #spacing: number
 
+  constructor(spacing: number) {
+    this.#spacing = spacing
+  }
+
+  get spacing(): number {
+    return this.#spacing
+  }
+
+  set spacing(value: number) {
+    this.#spacing = value
   }
 
   /**
@@ -16,7 +28,7 @@ export class HexDetector {
    * flat-top inverse of:   x = 1.5 * s * q,        y = √3 * s * (r + q/2)
    */
   public pixelToAxial(px: number, py: number, flat = false): Axial {
-    const s = this.spacing
+    const s = this.#spacing
     if (flat) {
       const qf = (2 / 3 * px) / s
       const rf = (py * SQRT3_OVER_3 - px / 3) / s
@@ -57,5 +69,5 @@ export class HexDetector {
 console.log('[HexDetector] registering @diamondcoreprocessor.com/HexDetector in ioc')
 window.ioc.register(
   '@diamondcoreprocessor.com/HexDetector',
-  new HexDetector(38)
+  new HexDetector(DEFAULT_HEX_GEOMETRY.spacing)
 )

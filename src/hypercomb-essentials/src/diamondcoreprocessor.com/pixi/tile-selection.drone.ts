@@ -8,6 +8,7 @@ import { Application, Container, Graphics, Point } from 'pixi.js'
 import type { HostReadyPayload } from './pixi-host.drone.js'
 import type { Axial } from '../input/hex-detector.js'
 import type { InputGate } from '../input/input-gate.service.js'
+import { type HexGeometry, DEFAULT_HEX_GEOMETRY } from './hex-geometry.js'
 
 type CellCountPayload = { count: number; labels: string[] }
 
@@ -40,8 +41,7 @@ export class TileSelectionDrone extends Drone {
 
   #meshOffset = { x: 0, y: 0 }
 
-  readonly #circumRadiusPx = 32
-  readonly #spacing = 38 // circumRadiusPx + gapPx
+  #geo: HexGeometry = DEFAULT_HEX_GEOMETRY
 
   #cellCount = 0
   #cellLabels: string[] = []
@@ -67,7 +67,7 @@ export class TileSelectionDrone extends Drone {
     axial: '@diamondcoreprocessor.com/AxialService',
     selection: '@diamondcoreprocessor.com/SelectionService',
   }
-  protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count', 'render:set-orientation', 'keymap:invoke']
+  protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count', 'render:set-orientation', 'render:geometry-changed', 'keymap:invoke']
   protected override emits = ['selection:changed']
 
   protected override heartbeat = async (): Promise<void> => {
@@ -96,6 +96,11 @@ export class TileSelectionDrone extends Drone {
 
     this.onEffect<{ flat: boolean }>('render:set-orientation', (payload) => {
       this.#flat = payload.flat
+      this.#redraw()
+    })
+
+    this.onEffect<HexGeometry>('render:geometry-changed', (geo) => {
+      this.#geo = geo
       this.#redraw()
     })
 
@@ -386,7 +391,7 @@ export class TileSelectionDrone extends Drone {
 
     if (this.#selected.size === 0) return
 
-    const r = this.#circumRadiusPx
+    const r = this.#geo.circumRadiusPx
     const ox = this.#meshOffset.x
     const oy = this.#meshOffset.y
 
@@ -434,8 +439,8 @@ export class TileSelectionDrone extends Drone {
 
   #axialToPixel(q: number, r: number, flat = false) {
     return flat
-      ? { x: 1.5 * this.#spacing * q, y: Math.sqrt(3) * this.#spacing * (r + q / 2) }
-      : { x: Math.sqrt(3) * this.#spacing * (q + r / 2), y: this.#spacing * 1.5 * r }
+      ? { x: 1.5 * this.#geo.spacing * q, y: Math.sqrt(3) * this.#geo.spacing * (r + q / 2) }
+      : { x: Math.sqrt(3) * this.#geo.spacing * (q + r / 2), y: this.#geo.spacing * 1.5 * r }
   }
 
   #clientToAxial(cx: number, cy: number): Axial | null {
