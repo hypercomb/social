@@ -54,7 +54,6 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #idle = signal(false)
   #hovered = signal(false)
   #locked = signal(false)
-  #utility = signal(localStorage.getItem('hc:utility-expanded') !== 'false')
   #mode = signal<'browsing' | 'clipboard'>('browsing')
   #clipboardItems = signal<string[]>([])
   #roomValue = signal('')
@@ -77,7 +76,6 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   })
 
   readonly locked = this.#locked.asReadonly()
-  readonly utility = this.#utility.asReadonly()
   readonly mode = this.#mode.asReadonly()
   readonly clipboardItems = this.#clipboardItems.asReadonly()
   readonly clipboardCount = computed(() => this.#clipboardItems().length)
@@ -141,16 +139,6 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
       void document.exitFullscreen()
     } else {
       void document.documentElement.requestFullscreen()
-    }
-  }
-
-  // ── utility mode ──────────────────────────────────────
-
-  readonly toggleUtility = (): void => {
-    this.#utility.update(v => !v)
-    localStorage.setItem('hc:utility-expanded', String(this.#utility()))
-    if (!this.#utility()) {
-      this.#mode.set('browsing')
     }
   }
 
