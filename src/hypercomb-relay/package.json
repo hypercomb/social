@@ -1,0 +1,22 @@
+{
+  "name": "@hypercomb/relay",
+  "version": "0.1.0",
+  "description": "Minimal Nostr relay for Hypercomb swarm meetings",
+  "type": "module",
+  "main": "relay.js",
+  "bin": {
+    "hypercomb-relay": "relay.js"
+  },
+  "scripts": {
+    "start": "node relay.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.0.0",
+    "nostr-tools": "^2.23.1",
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "license": "AGPL-3.0-only"
+}
