@@ -16,7 +16,7 @@ export class LayoutService {
       const text = await file.text()
       const parsed = JSON.parse(text)
       if (!Array.isArray(parsed)) return null
-      return parsed.map((x: unknown) => typeof x === 'string' ? x : '')
+      return parsed.filter((x: unknown) => typeof x === 'string' && x.length > 0)
     } catch {
       return null
     }
@@ -41,20 +41,13 @@ export class LayoutService {
     const result: string[] = []
     const seen = new Set<string>()
 
-    // keep layout positions — gaps stay as empty strings, deleted seeds become gaps
+    // keep layout order for seeds that still exist
     for (const label of layoutOrder) {
-      if (label === '') {
-        result.push('')
-      } else if (fsSet.has(label) && !seen.has(label)) {
+      if (fsSet.has(label) && !seen.has(label)) {
         result.push(label)
         seen.add(label)
-      } else {
-        result.push('')
       }
     }
-
-    // trim trailing gaps
-    while (result.length > 0 && result[result.length - 1] === '') result.pop()
 
     // append new seeds not in layout (alphabetically)
     const newSeeds = fsSeeds.filter(s => !seen.has(s))
