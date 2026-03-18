@@ -115,6 +115,7 @@ export class App implements AfterViewInit, OnDestroy {
 
     const wasPublic = this.meshPublic();
     const next = !wasPublic;
+    
     this.meshPublic.set(next);
     mesh?.setNetworkEnabled?.(next, true);
     EffectBus.emit('mesh:public-changed', { public: next })
