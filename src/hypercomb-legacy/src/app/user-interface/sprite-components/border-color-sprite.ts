@@ -17,13 +17,13 @@ export class BorderColorSprite extends SpriteBuilder<Cell> {
     const svg = `
       <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height + padding}">
           <polygon points="
-              ${width / 2},${padding / 2} 
-              0,${(height * 0.25) + (padding / 2)} 
-              0,${(height * 0.75) + (padding / 2)} 
-              ${width / 2},${height + (padding / 2)} 
-              ${width},${(height * 0.75) + (padding / 2)} 
-              ${width},${(height * 0.25) + (padding / 2)} 
-              ${width / 2},${padding / 2} 
+              ${width / 2},${padding / 2}
+              0,${(height * 0.25) + (padding / 2)}
+              0,${(height * 0.75) + (padding / 2)}
+              ${width / 2},${height + (padding / 2)}
+              ${width},${(height * 0.75) + (padding / 2)}
+              ${width},${(height * 0.25) + (padding / 2)}
+              ${width / 2},${padding / 2}
           " fill="none" stroke="${border}" stroke-width="18" />
       </svg>`
 

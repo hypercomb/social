@@ -145,7 +145,11 @@ export class HexSdfTextureShader {
       // point-top: rotate 30° so sdHex clips correctly; flat-top: no rotation needed
       vec2 rotated = u_flat > 0.5 ? local : rot30(local);
       float d = sdHex(rotated, u_radiusPx);
-      if (d > 0.0) discard;
+
+      // smooth the hex edge — wider band for clean AA
+      float aa = max(u_radiusPx * 0.04, 1.5);
+      float hexAlpha = 1.0 - smoothstep(-aa, aa, d);
+      if (hexAlpha < 0.005) discard;
 
       vec4 base;
 
@@ -162,22 +166,20 @@ export class HexSdfTextureShader {
         vec2 imgUV = mix(vImageUV.xy, vImageUV.zw, hexUV);
         base = texture2D(u_cellImages, imgUV);
 
-        // border ring on image cells — flush with hex edge, subtle
-        float imgBorderD = sdHex(rotated, u_radiusPx);
-        float imgRing = 1.0 - smoothstep(0.0, 1.2, abs(imgBorderD));
+        // border ring on image cells — flush with hex edge, DPI-aware width
+        float imgRing = 1.0 - smoothstep(0.0, aa * 2.0, abs(d));
         base.rgb = mix(base.rgb, vBorderColor, imgRing * 0.4);
       } else {
         // no snapshot: dark fill + border ring (branch-indicator style)
         vec3 bgColor = vec3(0.04, 0.10, 0.16);
         base = vec4(bgColor, 1.0);
 
-        // border ring — flush with hex edge (same path as selection graphic), less effects
-        float borderD = sdHex(rotated, u_radiusPx);
-        float ring = 1.0 - smoothstep(0.0, 1.2, abs(borderD));
+        // border ring — flush with hex edge, DPI-aware width
+        float ring = 1.0 - smoothstep(0.0, aa * 2.0, abs(d));
         base.rgb = mix(base.rgb, vBorderColor, ring * 0.5);
 
         // subtle identity wash on cell interior
-        float innerMask = smoothstep(0.0, -2.0, borderD);
+        float innerMask = smoothstep(0.0, -2.0, d);
         base.rgb = mix(base.rgb, vIdentityColor, innerMask * 0.05);
       }
 
@@ -199,16 +201,18 @@ export class HexSdfTextureShader {
 
       // branch indicator: hex ring at edge + subtle portal glow
       if (vHasBranch > 0.5) {
-        float innerD = sdHex(rotated, u_radiusPx);
-        float ring = 1.0 - smoothstep(0.0, 2.0, abs(innerD));
+        float branchRing = 1.0 - smoothstep(0.0, aa * 3.0, abs(d));
         vec3 ringColor = vec3(0.45, 0.72, 1.0);
-        color.rgb = mix(color.rgb, ringColor, ring * 0.8);
+        color.rgb = mix(color.rgb, ringColor, branchRing * 0.8);
 
         float dist = length(local) / u_radiusPx;
         float glow = exp(-dist * dist * 2.2);
         color.rgb += ringColor * glow * 0.18;
       }
 
+      // premultiplied alpha output for correct blending at hex edges
+      color.a *= hexAlpha;
+      color.rgb *= color.a;
       gl_FragColor = color;
     }
   `

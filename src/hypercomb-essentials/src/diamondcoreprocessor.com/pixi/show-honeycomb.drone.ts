@@ -983,6 +983,7 @@ export class ShowHoneycombWorker extends Drone {
 
     if (!this.hexMesh) {
       this.hexMesh = new Mesh({ geometry: geom as any, shader: (this.shader as any).shader, texture: Texture.WHITE as any } as any)
+      ;(this.hexMesh as any).blendMode = 'pre-multiply'
       this.layer!.addChild(this.hexMesh as any)
     } else {
       if (this.geom) this.geom.destroy(true)

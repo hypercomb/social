@@ -21,7 +21,7 @@ export class HexImageAtlas {
   readonly #cellPx: number
   readonly #renderer: any
 
-  constructor(renderer: any, cellPx = 128, cols = 8, rows = 8) {
+  constructor(renderer: any, cellPx = 256, cols = 8, rows = 8) {
     this.#renderer = renderer
     this.#cellPx = Math.max(1, cellPx)
     this.#cols = Math.max(1, cols)
