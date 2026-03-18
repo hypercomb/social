@@ -22,7 +22,7 @@
   display: flex;
   align-items: center;
   gap: 0.15rem;
-  padding: 0.3rem 0.5rem;
+  padding: 0.24rem 0.4rem;
 
   background: rgba(14, 18, 24, 0.78);
   backdrop-filter: blur(12px);
@@ -62,7 +62,7 @@
 
 .controls-divider {
   width: 1px;
-  height: 1.2rem;
+  height: 0.96rem;
   background: rgba(255, 255, 255, 0.12);
   margin: 0 0.3rem;
 }
@@ -73,8 +73,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0.35rem 0.45rem;
-  min-width: 1.8rem;
+  padding: 0.28rem 0.36rem;
+  min-width: 1.44rem;
 
   background: none;
   border: none;
@@ -84,7 +84,7 @@
   transition: color 200ms ease, background 200ms ease;
 
   .hci {
-    font-size: 1.05rem;
+    font-size: 0.84rem;
   }
 
   &:hover {
@@ -186,8 +186,8 @@
 .room-shell {
   display: flex;
   align-items: center;
-  height: 2rem;
-  padding: 0 0.4rem;
+  height: 1.6rem;
+  padding: 0 0.32rem;
   border: 1px solid rgba(200, 151, 90, 0.22);
   border-radius: 3px;
   background:

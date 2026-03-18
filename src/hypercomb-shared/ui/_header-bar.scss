@@ -9,7 +9,7 @@ $secret-bg: rgba(10, 12, 16, 0.85);
 .header-bar {
   display: flex;
   align-items: stretch;
-  padding: 0.25rem 0.5rem;
+  padding: 0.2rem 0.4rem;
   background-color: #050f17;
   position: relative;
   z-index: 10;
@@ -38,7 +38,7 @@ $secret-bg: rgba(10, 12, 16, 0.85);
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  padding: 0 0.85rem;
+  padding: 0 0.68rem;
   border: 1px solid rgba(245, 245, 245, 0.12);
   border-right: none;
   background: $secret-bg;
@@ -47,7 +47,7 @@ $secret-bg: rgba(10, 12, 16, 0.85);
   transition: color 200ms ease, background 200ms ease, border-color 200ms ease;
 
   .hci {
-    font-size: 1.05rem;
+    font-size: 0.84rem;
   }
 
   &:hover {
@@ -75,7 +75,7 @@ $secret-bg: rgba(10, 12, 16, 0.85);
 
 .header-secret-input {
   width: 14rem;
-  padding: 0.55rem 1.1rem;
+  padding: 0.44rem 0.88rem;
   border: 1px solid rgba(245, 245, 245, 0.12);
   border-left: none;
   border-right: none;
@@ -111,7 +111,7 @@ $secret-bg: rgba(10, 12, 16, 0.85);
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  padding: 0 0.85rem;
+  padding: 0 0.68rem;
   border: 1px solid rgba(245, 245, 245, 0.12);
   border-left: none;
   background: $secret-bg;
@@ -120,7 +120,7 @@ $secret-bg: rgba(10, 12, 16, 0.85);
   transition: color 200ms ease, background 200ms ease;
 
   .hci {
-    font-size: 1.05rem;
+    font-size: 0.84rem;
   }
 
   &:hover {

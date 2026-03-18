@@ -1,5 +1,5 @@
 @use "../styles/shared" as shared;
-$header-height: 2.75rem;
+$header-height: 2.2rem;
 
 .container {
   position: absolute;
@@ -162,8 +162,8 @@ $header-height: 2.75rem;
         padding: 0.5rem 0.75rem;
         width: 100%;
         font-size: 0.9em;
-        height: 2rem;
-        margin-top: 0.12em;
+        height: 1.6rem;
+        margin-top: 0.1em;
       }
     }
 
@@ -266,7 +266,7 @@ $header-height: 2.75rem;
     background: none;
     border: none;
     color: white;
-    padding: 1.2em;
+    padding: 0.96em;
     cursor: pointer;
     display: flex;
     align-items: center;
