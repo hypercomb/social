@@ -60,6 +60,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #roomOpen = signal(false)
   #moveMode = signal(false)
   #hasSelection = signal(false)
+  #textOnly = signal(false)
 
   #idleTimer: ReturnType<typeof setTimeout> | null = null
   readonly #IDLE_DELAY = 3000
@@ -84,6 +85,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   readonly clipboardCount = computed(() => this.#clipboardItems().length)
   readonly moveMode = this.#moveMode.asReadonly()
   readonly hasSelection = this.#hasSelection.asReadonly()
+  readonly textOnly = this.#textOnly.asReadonly()
 
   readonly visible = computed(() => !this.#idle() || this.#hovered())
   readonly roomValue = this.#roomValue.asReadonly()
@@ -189,6 +191,11 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   readonly moveItem = (): void => {
     this.#moveMode.update(v => !v)
     EffectBus.emit('controls:move-mode', { active: this.#moveMode() })
+  }
+
+  readonly toggleTextOnly = (): void => {
+    this.#textOnly.update(v => !v)
+    EffectBus.emit('render:set-text-only', { textOnly: this.#textOnly() })
   }
 
   readonly openClipboard = (): void => {

@@ -38,55 +38,10 @@
         <button class="ctl-btn" (click)="toggleFullscreen()" aria-label="fullscreen">
           <span class="hci">'</span>
         </button>
-      </div>
-
-      <!-- utility section (slides in) -->
-      @if (utility()) {
-        <div class="controls-divider"></div>
-        <div class="controls-section utility">
-          <button class="ctl-btn" (click)="cut()" aria-label="cut">
-            <span class="hci">F</span>
-          </button>
-          <button class="ctl-btn" (click)="copy()" aria-label="copy">
-            <span class="hci">%</span>
-          </button>
-          <button class="ctl-btn" (click)="remove()" aria-label="delete">
-            <span class="hci">Q</span>
-          </button>
-          <button class="ctl-btn" [class.active]="moveMode()" (click)="moveItem()" aria-label="move">
-            <span class="hci">Z</span>
-          </button>
-          <button class="ctl-btn clipboard-btn" (click)="openClipboard()" aria-label="clipboard">
-            <span class="hci">y</span>
-            @if (clipboardCount() > 0) {
-              <span class="badge">{{ clipboardCount() }}</span>
-            }
-          </button>
-        </div>
-      }
-
-      <!-- space section (public mode) -->
-      @if (meshPublic()) {
-        <div class="controls-divider"></div>
-        <button class="ctl-btn" [class.active]="roomOpen()" (click)="toggleRoom()" aria-label="space">
-          <span class="hci">B</span>
+        <button class="ctl-btn" [class.active]="textOnly()" (click)="toggleTextOnly()" aria-label="text only">
+          <span class="hci">m</span>
         </button>
-        @if (roomOpen()) {
-          <div class="room-shell">
-            <input
-              class="room-input"
-              type="text"
-              placeholder="space"
-              [value]="roomValue()"
-              (input)="onRoomInput($event)"
-              (keydown.enter)="submitRoom()"
-              (keydown.escape)="toggleRoom()"
-            />
-          </div>
-        } @else if (roomValue()) {
-          <span class="room-display">{{ roomValue() }}</span>
-        }
-      }
+      </div>
 
       <!-- utility toggle (rightmost) -->
       <div class="controls-divider"></div>

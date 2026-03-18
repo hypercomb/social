@@ -75,7 +75,7 @@ export class ShowHoneycombWorker extends Drone {
     axial: '@diamondcoreprocessor.com/AxialService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'seed:place-at', 'seed:reorder', 'render:set-gap']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'seed:place-at', 'seed:reorder', 'render:set-gap', 'render:set-text-only']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -113,6 +113,7 @@ export class ShowHoneycombWorker extends Drone {
   // hex orientation: 'point-top' (default) or 'flat-top'
   #flat = false
   #pivot = false
+  #textOnly = false
 
   // mesh scoping — space + secret feed into the signature key
   #space = ''
@@ -216,6 +217,14 @@ export class ShowHoneycombWorker extends Drone {
         this.#pivot = payload.pivot
         this.seedImageCache.clear()
         this.atlas?.setPivot(payload.pivot)
+        this.renderedCellsKey = ''
+        this.requestRender()
+      }
+    })
+
+    this.onEffect<{ textOnly: boolean }>('render:set-text-only', (payload) => {
+      if (this.#textOnly !== payload.textOnly) {
+        this.#textOnly = payload.textOnly
         this.renderedCellsKey = ''
         this.requestRender()
       }
@@ -708,12 +717,16 @@ export class ShowHoneycombWorker extends Drone {
       this.atlas = new HexLabelAtlas(this.pixiRenderer, 128, 8, 8)
       this.atlas.setPivot(this.#pivot)
       this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8)
+      this.seedImageCache.clear()
+      this.seedBorderColorCache.clear()
       this.atlasRenderer = this.pixiRenderer
       this.shader = null
     } else if (!this.atlas || this.atlasRenderer !== this.pixiRenderer) {
       this.atlas = new HexLabelAtlas(this.pixiRenderer, 128, 8, 8)
       this.atlas.setPivot(this.#pivot)
       this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8)
+      this.seedImageCache.clear()
+      this.seedBorderColorCache.clear()
       this.atlasRenderer = this.pixiRenderer
       this.shader = null
     }
@@ -1417,8 +1430,8 @@ export class ShowHoneycombWorker extends Drone {
         luvp += 4
       }
 
-      // cell image atlas UVs
-      const imgUV = c.imageSig ? this.imageAtlas?.getImageUV(c.imageSig) ?? null : null
+      // cell image atlas UVs (suppressed in text-only mode)
+      const imgUV = !this.#textOnly && c.imageSig ? this.imageAtlas?.getImageUV(c.imageSig) ?? null : null
       const hi = imgUV ? 1 : 0
       for (let i = 0; i < 4; i++) {
         imageUV.set(imgUV ? [imgUV.u0, imgUV.v0, imgUV.u1, imgUV.v1] : [0, 0, 0, 0], iuvp)
