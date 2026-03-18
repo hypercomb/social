@@ -15,6 +15,7 @@ import type { MovementService } from '../../core/movement.service'
 import { EffectBus } from '@hypercomb/core'
 import type { RoomStore } from '../../core/room-store'
 
+
 @Component({
   selector: 'hc-controls-bar',
   standalone: true,
@@ -58,7 +59,9 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #idle = signal(false)
   #hovered = signal(false)
   #locked = signal(false)
+  #publicUtilityOpen = signal(false)
   #utility = signal(localStorage.getItem('hc:utility-expanded') !== 'false')
+  readonly publicUtilityOpen = this.#publicUtilityOpen.asReadonly()
   #moveMode = signal(false)
   #mode = signal<'browsing' | 'clipboard'>('browsing')
   #clipboardItems = signal<string[]>([])
@@ -116,6 +119,9 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     this.#selectionUnsub = EffectBus.on<{ selected?: string[] }>('selection:changed', (payload) => {
       this.#hasSelection.set((payload?.selected?.length ?? 0) > 0)
     })
+    this.#selectionUnsub = EffectBus.on<{ selected?: string[] }>('selection:changed', (payload) => {
+      this.#hasSelection.set((payload?.selected?.length ?? 0) > 0)
+    })
 
     this.#clipboardUnsub = EffectBus.on<{ items?: { label: string }[] }>('clipboard:changed', (payload) => {
       const items = payload?.items ?? []
@@ -128,6 +134,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     this.#moveModeUnsub = EffectBus.on<{ active: boolean }>('move:mode', ({ active }) => {
       this.#moveMode.set(active)
     })
+
   }
 
   ngOnDestroy(): void {
@@ -138,6 +145,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     if (this.#idleTimer) clearTimeout(this.#idleTimer)
     this.#clipboardUnsub?.()
     this.#selectionUnsub?.()
+    this.#moveModeUnsub?.()
     this.#moveModeUnsub?.()
   }
 
@@ -201,11 +209,21 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
 
   readonly moveItem = (): void => {
     EffectBus.emit('controls:action', { action: 'move' })
+    EffectBus.emit('controls:action', { action: 'move' })
   }
 
   readonly toggleTextOnly = (): void => {
     this.#textOnly.update(v => !v)
     EffectBus.emit('render:set-text-only', { textOnly: this.#textOnly() })
+  }
+
+  readonly toggleUtility = (): void => {
+    const next = !this.#publicUtilityOpen()
+    this.#publicUtilityOpen.set(next)
+    if (!next && this.#mode() === 'clipboard') {
+      this.#mode.set('browsing')
+      EffectBus.emit('clipboard:view', { active: false })
+    }
   }
 
   readonly openClipboard = (): void => {

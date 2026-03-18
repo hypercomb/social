@@ -94,14 +94,6 @@ export class App {
         void this.startRegisteredBees()
       })
     })
-
-    EffectBus.on<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
-      if (cmd === 'render.togglePivot') {
-        this.#pivotOn = !this.#pivotOn
-        localStorage.setItem('hc:hex-pivot', String(this.#pivotOn))
-        EffectBus.emit('render:set-pivot', { pivot: this.#pivotOn })
-      }
-    })
   }
 
   public toggleOrientation = (): void => {

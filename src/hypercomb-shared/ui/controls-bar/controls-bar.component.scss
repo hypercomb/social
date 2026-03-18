@@ -10,6 +10,43 @@
   display: contents;
 }
 
+// ── breadcrumb float ─────────────────────────────────────
+
+.breadcrumb-float {
+  position: fixed;
+  bottom: 0.3rem;
+  left: 0.6rem;
+  z-index: 59999;
+
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+
+  font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro',
+    Menlo, Consolas, 'DejaVu Sans Mono', monospace;
+  font-size: 0.55rem;
+  color: rgba(245, 245, 245, 0.3);
+  pointer-events: auto;
+  transition: opacity 200ms ease;
+
+  .path-crumb {
+    font-size: 0.55rem;
+    color: rgba(245, 245, 245, 0.25);
+    max-width: 30rem;
+    padding: 0;
+  }
+
+  .ctl-btn {
+    padding: 0.15rem 0.25rem;
+    min-width: unset;
+    .hci { font-size: 0.65rem; }
+  }
+
+  &.faded {
+    opacity: 0;
+  }
+}
+
 // ── pill ──────────────────────────────────────────────────
 
 .controls-pill {
