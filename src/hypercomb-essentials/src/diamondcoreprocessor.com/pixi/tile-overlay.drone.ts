@@ -73,7 +73,7 @@ const LABEL_X = -24
 const LABEL_Y = -14
 const LABEL_STYLE = new TextStyle({
   fontFamily: 'monospace',
-  fontSize: 3.85,
+  fontSize: 5,
   fill: 0xffffff,
   align: 'left',
 })

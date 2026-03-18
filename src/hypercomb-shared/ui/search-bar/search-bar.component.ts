@@ -64,7 +64,7 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
   // -------------------------------------------------
 
   public readonly placeholder = computed<string>(() => {
-    if (this.locked()) return 'press enter'
+    if (this.locked()) return 'enter cell name...'
     const ctx = this.context()
     if (ctx.active && ctx.mode === 'filter') return 'filter tiles...'
     return 'search actions...'
