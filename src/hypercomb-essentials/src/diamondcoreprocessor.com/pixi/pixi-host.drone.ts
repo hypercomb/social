@@ -71,7 +71,8 @@ export class PixiHostWorker extends Worker {
       resizeTo: window,
       backgroundAlpha: 0,
       resolution: devicePixelRatio || 1,
-      autoDensity: true
+      autoDensity: true,
+      antialias: true,
     })
 
     app.stage.scale.set(1.8, 1.8)

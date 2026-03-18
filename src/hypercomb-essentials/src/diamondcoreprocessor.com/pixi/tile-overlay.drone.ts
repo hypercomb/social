@@ -2,8 +2,9 @@
 // Contextual action overlay: dark underlay + icon buttons on occupied hex tiles on hover.
 
 import { Drone, EffectBus, hypercomb } from '@hypercomb/core'
-import { Application, Container, Graphics, Point, Text, TextStyle } from 'pixi.js'
+import { Application, Container, Point, Text, TextStyle } from 'pixi.js'
 import { HexIconButton } from './hex-icon-button.js'
+import { HexOverlayMesh } from './hex-overlay.shader.js'
 import type { HostReadyPayload } from './pixi-host.drone.js'
 import type { Axial, HexDetector } from '../input/hex-detector.js'
 import type { InputGate } from '../input/input-gate.service.js'
@@ -47,15 +48,10 @@ const BLOCK_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 
 // Add external tile to own collection (plus icon)
 const ADD_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96"><path fill="white" d="M50 18h-4v28H18v4h28v28h4V50h28v-4H50z"/></svg>`
 
-// Search Google Images — ')' glyph from hypercomb-icons font
-const SEARCH_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96"><text x="48" y="72" text-anchor="middle" font-family="hypercomb-icons" font-size="72" fill="white">)</text></svg>`
+// Search Google Images (magnifying glass — SVG path, not font glyph)
+const SEARCH_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96"><circle cx="40" cy="40" r="20" fill="none" stroke="white" stroke-width="8"/><line x1="54" y1="54" x2="78" y2="78" stroke="white" stroke-width="8" stroke-linecap="round"/></svg>`
 
 // ── overlay geometry constants ─────────────────────────────────────
-const HEX_FILL_COLOR = 0x001e30
-const HEX_FILL_ALPHA = 0.65
-const HEX_STROKE_COLOR = 0x4488aa
-const HEX_STROKE_ALPHA = 0.5
-const HEX_STROKE_WIDTH = 1.0
 
 // Icon positions within the overlay (measured from hex center = overlay origin)
 const ICON_SIZE = 8.75
@@ -92,7 +88,7 @@ export class TileOverlayDrone extends Drone {
   #renderer: Application['renderer'] | null = null
 
   #overlay: Container | null = null
-  #hexBg: Graphics | null = null
+  #hexBg: HexOverlayMesh | null = null
   #seedLabel: Text | null = null
   #editButton: HexIconButton | null = null
   #deleteButton: HexIconButton | null = null
@@ -167,7 +163,7 @@ export class TileOverlayDrone extends Drone {
 
     this.onEffect<{ flat: boolean }>('render:set-orientation', (payload) => {
       this.#flat = payload.flat
-      this.#drawHexBg()
+      this.#updateHexBg()
       if (this.#currentAxial) this.#positionOverlay(this.#currentAxial.q, this.#currentAxial.r)
     })
 
@@ -175,7 +171,7 @@ export class TileOverlayDrone extends Drone {
       this.#geo = geo
       const detector = this.resolve<HexDetector>('detector')
       if (detector) detector.spacing = geo.spacing
-      this.#drawHexBg()
+      this.#updateHexBg()
       if (this.#currentAxial) this.#positionOverlay(this.#currentAxial.q, this.#currentAxial.r)
     })
 
@@ -238,9 +234,8 @@ export class TileOverlayDrone extends Drone {
     this.#overlay.visible = false
     this.#overlay.zIndex = 9999
 
-    this.#hexBg = new Graphics()
-    this.#drawHexBg()
-    this.#overlay.addChild(this.#hexBg)
+    this.#hexBg = new HexOverlayMesh(this.#geo.circumRadiusPx, this.#flat)
+    this.#overlay.addChild(this.#hexBg.mesh)
 
     this.#seedLabel = new Text({ text: '', style: LABEL_STYLE, resolution: window.devicePixelRatio * 8 })
     this.#seedLabel.position.set(LABEL_X, LABEL_Y)
@@ -253,21 +248,8 @@ export class TileOverlayDrone extends Drone {
     this.#applyProfile(profile, key)
   }
 
-  #drawHexBg(): void {
-    if (!this.#hexBg) return
-    this.#hexBg.clear()
-    const r = this.#geo.circumRadiusPx
-    const angleOffset = this.#flat ? 0 : Math.PI / 6
-    const verts: number[] = []
-    for (let i = 0; i < 6; i++) {
-      const angle = (Math.PI / 3) * i + angleOffset
-      verts.push(r * Math.cos(angle))
-      verts.push(r * Math.sin(angle))
-    }
-    this.#hexBg.poly(verts, true)
-    this.#hexBg.fill({ color: HEX_FILL_COLOR, alpha: HEX_FILL_ALPHA })
-    this.#hexBg.poly(verts, true)
-    this.#hexBg.stroke({ color: HEX_STROKE_COLOR, alpha: HEX_STROKE_ALPHA, width: HEX_STROKE_WIDTH })
+  #updateHexBg(): void {
+    this.#hexBg?.update(this.#geo.circumRadiusPx, this.#flat)
   }
 
   #privateProfile(): OverlayProfile {
