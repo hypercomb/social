@@ -75,7 +75,7 @@ export class ShowHoneycombWorker extends Drone {
     axial: '@diamondcoreprocessor.com/AxialService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'seed:place-at', 'seed:reorder', 'render:set-gap', 'render:set-text-only']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'seed:place-at', 'seed:reorder', 'render:set-gap', 'render:set-text-only', 'tile:hover']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -245,6 +245,19 @@ export class ShowHoneycombWorker extends Drone {
         this.renderedCellsKey = ''
         this.requestRender()
       }
+    })
+
+    this.onEffect<{ q: number; r: number }>('tile:hover', (payload) => {
+      if (!this.shader) return
+      const axial = this.resolve<any>('axial')
+      if (!axial?.items) { this.shader.setHoveredIndex(-1); return }
+      for (const [idx, coord] of axial.items) {
+        if (coord.q === payload.q && coord.r === payload.r && idx < this.renderedCount) {
+          this.shader.setHoveredIndex(idx)
+          return
+        }
+      }
+      this.shader.setHoveredIndex(-1)
     })
 
     // emit initial geometry so consumers start in sync
@@ -689,6 +702,7 @@ export class ShowHoneycombWorker extends Drone {
   }
 
   private readonly renderFromSynchronize = async (): Promise<void> => {
+    this.shader?.setHoveredIndex(-1)
     if (!this.pixiApp || !this.pixiContainer || !this.pixiRenderer) {
       this.clearMesh()
       return
@@ -1420,9 +1434,11 @@ export class ShowHoneycombWorker extends Drone {
     const identityColor = new Float32Array(cells.length * 12)
     const branch = new Float32Array(cells.length * 4)
     const borderColor = new Float32Array(cells.length * 12)
+    const cellIndex = new Float32Array(cells.length * 4)
     const idx = new Uint32Array(cells.length * 6)
 
-    let pv = 0, uvp = 0, luvp = 0, iuvp = 0, hip = 0, hp = 0, icp = 0, bp = 0, bcp = 0, ii = 0, base = 0
+    let pv = 0, uvp = 0, luvp = 0, iuvp = 0, hip = 0, hp = 0, icp = 0, bp = 0, bcp = 0, cip = 0, ii = 0, base = 0
+    let ci = 0
 
     for (const c of cells) {
       const { x, y } = this.axialToPixel(c.q, c.r, spacing, this.#flat)
@@ -1468,6 +1484,10 @@ export class ShowHoneycombWorker extends Drone {
       borderColor.set([bcr, bcg, bcb, bcr, bcg, bcb, bcr, bcg, bcb, bcr, bcg, bcb], bcp)
       bcp += 12
 
+      cellIndex.set([ci, ci, ci, ci], cip)
+      cip += 4
+      ci++
+
       idx.set([base, base + 1, base + 2, base, base + 2, base + 3], ii)
       ii += 6
       base += 4
@@ -1483,6 +1503,7 @@ export class ShowHoneycombWorker extends Drone {
       ; (g as any).addAttribute('aIdentityColor', identityColor, 3)
       ; (g as any).addAttribute('aHasBranch', branch, 1)
       ; (g as any).addAttribute('aBorderColor', borderColor, 3)
+      ; (g as any).addAttribute('aCellIndex', cellIndex, 1)
       ; (g as any).addIndex(idx)
 
     return g

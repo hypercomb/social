@@ -77,7 +77,7 @@ const LABEL_X = -24
 const LABEL_Y = -14
 const LABEL_STYLE = new TextStyle({
   fontFamily: 'monospace',
-  fontSize: 7,
+  fontSize: 3.85,
   fill: 0xffffff,
   align: 'left',
 })
@@ -242,7 +242,7 @@ export class TileOverlayDrone extends Drone {
     this.#drawHexBg()
     this.#overlay.addChild(this.#hexBg)
 
-    this.#seedLabel = new Text({ text: '', style: LABEL_STYLE, resolution: window.devicePixelRatio * 4 })
+    this.#seedLabel = new Text({ text: '', style: LABEL_STYLE, resolution: window.devicePixelRatio * 8 })
     this.#seedLabel.position.set(LABEL_X, LABEL_Y)
     this.#overlay.addChild(this.#seedLabel)
 

@@ -20,6 +20,7 @@ export class HexSdfTextureShader {
       u_radiusPx: { value: radiusPx, type: 'f32' },
       u_flat: { value: 0, type: 'f32' },
       u_pivot: { value: 0, type: 'f32' },
+      u_hoveredIndex: { value: -1, type: 'f32' },
     }
 
     // v8 shaded mesh requires uniforms nested under a group and shader inputs using in/out
@@ -57,6 +58,11 @@ export class HexSdfTextureShader {
     this.#ug.update()
   }
 
+  public setHoveredIndex = (index: number): void => {
+    this.#ug.uniforms.u_hoveredIndex = index
+    this.#ug.update()
+  }
+
   public setLabelAtlas = (t: Texture): void => {
     ;(this.shader.resources as any).u_label = this.toSource(t)
   }
@@ -80,6 +86,7 @@ export class HexSdfTextureShader {
     in vec3 aIdentityColor;
     in float aHasBranch;
     in vec3 aBorderColor;
+    in float aCellIndex;
 
     out vec2 vUV;
     out vec4 vLabelUV;
@@ -89,6 +96,7 @@ export class HexSdfTextureShader {
     out vec3 vIdentityColor;
     out float vHasBranch;
     out vec3 vBorderColor;
+    out float vCellIndex;
 
     uniform mat3 uProjectionMatrix;
     uniform mat3 uWorldTransformMatrix;
@@ -105,6 +113,7 @@ export class HexSdfTextureShader {
       vIdentityColor = aIdentityColor;
       vHasBranch = aHasBranch;
       vBorderColor = aBorderColor;
+      vCellIndex = aCellIndex;
     }
   `
 
@@ -119,11 +128,13 @@ export class HexSdfTextureShader {
     in vec3 vIdentityColor;
     in float vHasBranch;
     in vec3 vBorderColor;
+    in float vCellIndex;
 
     uniform vec2 u_quadSize;
     uniform float u_radiusPx;
     uniform float u_flat;
     uniform float u_pivot;
+    uniform float u_hoveredIndex;
 
     uniform sampler2D u_label;
     uniform sampler2D u_cellImages;
@@ -185,8 +196,8 @@ export class HexSdfTextureShader {
 
       vec4 color = base;
 
-      if (vHasImage < 0.5) {
-        // label only for cells without snapshot
+      if (vHasImage < 0.5 && abs(vCellIndex - u_hoveredIndex) > 0.5) {
+        // label only for cells without snapshot (suppressed on hovered cell)
         vec2 luv = mix(vLabelUV.xy, vLabelUV.zw, vUV);
         float labelAlpha = texture2D(u_label, luv).a;
         color = mix(color, vec4(1.0, 1.0, 1.0, labelAlpha), labelAlpha);
