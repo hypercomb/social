@@ -90,6 +90,27 @@ export class ViewportPersistence extends EventTarget {
     }
   }
 
+  /** Switch directory without reading or dispatching restore — caller already applied the viewport. */
+  setDirSilent = (dir: FileSystemDirectoryHandle | null): void => {
+    if (this.#dir === dir) return
+
+    // flush pending writes to old dir
+    if (this.#debounceTimer) {
+      clearTimeout(this.#debounceTimer)
+      this.#debounceTimer = null
+    }
+    const flushDir = this.#dir
+    const flushPending = this.#pending
+    if (flushDir && (flushPending.zoom || flushPending.pan)) {
+      void this.#persistTo(flushDir, flushPending)
+    }
+
+    this.#dir = dir
+    this.#pending = {}
+    this.#lastRead = {}
+    this.#reading = null
+  }
+
   setDir = (dir: FileSystemDirectoryHandle | null): void => {
     if (this.#dir === dir) return
 

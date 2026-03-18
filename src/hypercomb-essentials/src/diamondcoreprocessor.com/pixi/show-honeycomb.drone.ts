@@ -13,7 +13,7 @@ import { HexSdfTextureShader } from './hex-sdf.shader.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from './hex-geometry.js'
 import { TILE_PROPERTIES_FILE, isSignature, readSeedProperties, writeSeedProperties } from '../editor/tile-properties.js'
 import type { HistoryService, HistoryOp } from '../core/history.service.js'
-import type { ViewportSnapshot } from '../input/zoom/zoom.drone.js'
+import type { ViewportPersistence, ViewportSnapshot } from '../input/zoom/zoom.drone.js'
 
 type Axial = { q: number; r: number }
 type SeedCell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; borderColor?: [number, number, number] }
@@ -858,10 +858,18 @@ export class ShowHoneycombWorker extends Drone {
       // apply saved viewport (or defaults) so the container is correct before tiles render
       await this.#applyViewportForLayer(dir)
 
+      // sync VP directory so subsequent pan/zoom writes persist to the correct layer
+      const vp = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ViewportPersistence') as ViewportPersistence | undefined
+      if (vp) vp.setDirSilent(dir)
+
+      // hide layer until streaming completes — prevents flash/jump during progressive render
+      if (this.layer) this.layer.visible = false
+
       // emit navigation guard so click handlers block during transition
       this.emitEffect('navigation:guard-start', { locationKey })
 
       if (seedNames.length === 0) {
+        if (this.layer) this.layer.visible = true
         this.clearMesh()
         this.emitEffect('navigation:guard-end', {})
         return
@@ -939,11 +947,14 @@ export class ShowHoneycombWorker extends Drone {
 
       const isLastSeed = index === seedNames.length - 1
       if (cells.length % ShowHoneycombWorker.STREAM_BATCH_SIZE === 0 || isLastSeed) {
-        await this.applyGeometry(cells)
+        await this.applyGeometry(cells, isLastSeed)
       }
 
       await this.microDelay()
     }
+
+    // only reveal the layer if this stream was not cancelled by a newer navigation
+    if (!this.cancelStreamFlag && this.layer) this.layer.visible = true
 
     this.streamActive = false
     this.emitEffect('navigation:guard-end', {})
@@ -987,7 +998,7 @@ export class ShowHoneycombWorker extends Drone {
     }
   }
 
-  private readonly applyGeometry = async (cells: SeedCell[]): Promise<void> => {
+  private readonly applyGeometry = async (cells: SeedCell[], final = true): Promise<void> => {
     if (cells.length === 0) {
       this.clearMesh()
       return
@@ -1047,7 +1058,7 @@ export class ShowHoneycombWorker extends Drone {
       this.hexMesh.shader = (this.shader as any).shader
     }
 
-    if (this.hexMesh?.getLocalBounds) {
+    if (final && this.hexMesh?.getLocalBounds) {
       this.hexMesh.position.set(0, 0)
       const bounds = this.hexMesh.getLocalBounds()
       this.hexMesh.position.set(-(bounds.x + bounds.width * 0.5), -(bounds.y + bounds.height * 0.5))
