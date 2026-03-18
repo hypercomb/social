@@ -489,22 +489,39 @@ export class TileOverlayDrone extends Drone {
   }
 
   #onContextMenu = (e: MouseEvent): void => {
-    if (this.#navigationBlocked) return
+    console.log('[TileOverlay] contextmenu fired', {
+      navigationBlocked: this.#navigationBlocked,
+      ctrlKey: e.ctrlKey,
+      metaKey: e.metaKey,
+      editing: this.#editing,
+      editCooldown: this.#editCooldown,
+    })
+
+    if (this.#navigationBlocked) {
+      console.log('[TileOverlay] BLOCKED: navigationBlocked')
+      return
+    }
 
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault()
+      console.log('[TileOverlay] BLOCKED: ctrl/meta key')
       return
     }
     const selection = window.ioc.get<{ count: number }>('@diamondcoreprocessor.com/SelectionService')
     if (selection && selection.count > 0) {
       e.preventDefault()
+      console.log('[TileOverlay] BLOCKED: selection count', selection.count)
       return
     }
 
     const gate = window.ioc.get<InputGate>('@diamondcoreprocessor.com/InputGate')
-    if (gate?.active) return
+    if (gate?.active) {
+      console.log('[TileOverlay] BLOCKED: gate active')
+      return
+    }
 
     e.preventDefault()
+    console.log('[TileOverlay] navigating back!')
     this.#navigateBack()
   }
 
