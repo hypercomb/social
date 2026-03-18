@@ -1,4 +1,4 @@
-import { AfterViewInit, Component, signal } from '@angular/core';
+import { AfterViewInit, Component, OnDestroy, signal } from '@angular/core';
 import { type Bee, EffectBus } from '@hypercomb/core';
 import type { HexOrientation } from '@hypercomb/essentials/diamondcoreprocessor.com/core/settings';
 import { RouterOutlet } from '@angular/router';
@@ -66,7 +66,7 @@ void _deps
   styleUrls: ['./app.scss'] as any,
   templateUrl: './app.html'
 })
-export class App implements AfterViewInit {
+export class App implements AfterViewInit, OnDestroy {
   protected readonly title = signal('hypercomb-dev');
 
   public readonly meshPublic = signal(true);
@@ -75,11 +75,32 @@ export class App implements AfterViewInit {
   );
 
   #runtimeReady: Promise<void>
+  #pivotOn = localStorage.getItem('hc:hex-pivot') === 'true'
 
   constructor() {
     this.#runtimeReady = initializeRuntime({
       onMeshStateChange: enabled => this.meshPublic.set(enabled),
     })
+    document.addEventListener('keydown', this.#onKeyDown)
+  }
+
+  ngOnDestroy(): void {
+    document.removeEventListener('keydown', this.#onKeyDown)
+  }
+
+  #onKeyDown = (e: KeyboardEvent): void => {
+    // Ctrl+Shift+8 toggles pivot mode (90° CW rotation)
+    if (e.ctrlKey && e.shiftKey && e.code === 'Digit8') {
+      e.preventDefault()
+      this.#pivotOn = !this.#pivotOn
+      localStorage.setItem('hc:hex-pivot', String(this.#pivotOn))
+      EffectBus.emit('render:set-pivot', { pivot: this.#pivotOn })
+    }
+    // Ctrl+Shift+O toggles orientation (point-top ↔ flat-top)
+    if (e.ctrlKey && e.shiftKey && e.code === 'KeyO') {
+      e.preventDefault()
+      this.toggleOrientation()
+    }
   }
 
   public toggleOrientation = (): void => {
@@ -127,6 +148,11 @@ export class App implements AfterViewInit {
     // restore persisted orientation
     if (this.orientation() === 'flat-top') {
       EffectBus.emit('render:set-orientation', { flat: true })
+    }
+
+    // restore persisted pivot
+    if (this.#pivotOn) {
+      EffectBus.emit('render:set-pivot', { pivot: true })
     }
 
     // broadcast initial mesh state so drones can react
