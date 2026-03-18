@@ -33,7 +33,10 @@ export class MeshHeaderComponent {
   constructor() {
     // pre-fill from store if available
     const store = this.#store
-    if (store?.value) this.#secretValue.set(store.value)
+    if (store?.value) {
+      this.#secretValue.set(store.value)
+      this.#secretExpanded.set(false)
+    }
   }
 
   get #store(): SecretStore | undefined {
