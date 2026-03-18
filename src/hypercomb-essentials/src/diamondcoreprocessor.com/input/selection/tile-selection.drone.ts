@@ -53,7 +53,7 @@ class TileSelectionDrone extends Drone {
     selection: '@diamondcoreprocessor.com/SelectionService',
   }
 
-  protected override listens = ['render:host-ready', 'render:cell-count', 'render:mesh-offset', 'render:set-orientation', 'tile:click', 'navigation:guard-start', 'navigation:guard-end']
+  protected override listens = ['render:host-ready', 'render:cell-count', 'render:mesh-offset', 'render:set-orientation', 'tile:click', 'navigation:guard-start', 'navigation:guard-end', 'move:mode']
   protected override emits: string[] = []
 
   protected override heartbeat = async (): Promise<void> => {
@@ -102,8 +102,8 @@ class TileSelectionDrone extends Drone {
       if (this.#navigationGuardTimer) clearTimeout(this.#navigationGuardTimer)
       this.#navigationGuardTimer = setTimeout(() => { this.#navigationBlocked = false }, 200)
     })
-    // move mode toggle from controls bar
-    this.onEffect<{ active: boolean }>('controls:move-mode', (payload) => {
+    // authoritative move mode state from MoveDrone
+    this.onEffect<{ active: boolean }>('move:mode', (payload) => {
       this.#moveMode = !!payload?.active
     })
 
