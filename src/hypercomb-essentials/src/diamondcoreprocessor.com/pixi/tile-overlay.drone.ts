@@ -9,7 +9,7 @@ import type { Axial, HexDetector } from '../input/hex-detector.js'
 import type { InputGate } from '../input/input-gate.service.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY } from './hex-geometry.js'
 
-type CellCountPayload = { count: number; labels: string[]; branchLabels?: string[]; externalLabels?: string[] }
+type CellCountPayload = { count: number; labels: string[]; branchLabels?: string[]; externalLabels?: string[]; noImageLabels?: string[] }
 
 type OverlayAction = {
   name: string
@@ -47,6 +47,9 @@ const BLOCK_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 
 // Add external tile to own collection (plus icon)
 const ADD_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96"><path fill="white" d="M50 18h-4v28H18v4h28v28h4V50h28v-4H50z"/></svg>`
 
+// Search Google Images — ')' glyph from hypercomb-icons font
+const SEARCH_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96"><text x="48" y="72" text-anchor="middle" font-family="hypercomb-icons" font-size="72" fill="white">)</text></svg>`
+
 // ── overlay geometry constants ─────────────────────────────────────
 const HEX_FILL_COLOR = 0x001e30
 const HEX_FILL_ALPHA = 0.65
@@ -66,6 +69,8 @@ const BLOCK_X = -2
 const BLOCK_Y = 5
 const ADD_X = 8.625
 const ADD_Y = 5
+const SEARCH_X = -12.625
+const SEARCH_Y = 5
 
 // Seed label styling
 const LABEL_X = -24
@@ -111,6 +116,8 @@ export class TileOverlayDrone extends Drone {
   #externalLabels = new Set<string>()
   #currentTileExternal = false
   #activeProfileKey: OverlayProfileKey = null
+  #noImageLabels = new Set<string>()
+  #searchAction: OverlayAction | null = null
 
   #navigationBlocked = false
   #navigationGuardTimer: ReturnType<typeof setTimeout> | null = null
@@ -149,9 +156,11 @@ export class TileOverlayDrone extends Drone {
       this.#cellLabels = payload.labels
       this.#branchLabels = new Set(payload.branchLabels ?? [])
       this.#externalLabels = new Set(payload.externalLabels ?? [])
+      this.#noImageLabels = new Set(payload.noImageLabels ?? [])
       this.#rebuildOccupiedMap()
       if (this.#overlay && this.#currentAxial) {
         this.#currentIndex = this.#lookupIndex(this.#currentAxial.q, this.#currentAxial.r)
+        this.#updateSearchVisibility()
         this.#updateVisibility()
       }
     })
@@ -284,6 +293,16 @@ export class TileOverlayDrone extends Drone {
           void this.#handleRemove(label)
         },
       },
+      {
+        name: 'search',
+        svgMarkup: SEARCH_ICON_SVG,
+        x: SEARCH_X,
+        y: SEARCH_Y,
+        hoverTint: 0xc8ffc8,
+        handler: (label) => {
+          window.open(`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(label)}`, '_blank')
+        },
+      },
     ]
   }
 
@@ -349,6 +368,7 @@ export class TileOverlayDrone extends Drone {
     this.#deleteButton = null
     this.#activeProfileKey = key ?? null
 
+    this.#searchAction = null
     for (const desc of profile) {
       const btn = new HexIconButton({
         svgMarkup: desc.svgMarkup,
@@ -361,7 +381,9 @@ export class TileOverlayDrone extends Drone {
       this.#overlay.addChild(btn)
       void btn.load()
 
-      this.#actions.push({ name: desc.name, button: btn, handler: desc.handler })
+      const action: OverlayAction = { name: desc.name, button: btn, handler: desc.handler }
+      this.#actions.push(action)
+      if (desc.name === 'search') this.#searchAction = action
     }
   }
 
@@ -413,6 +435,7 @@ export class TileOverlayDrone extends Drone {
 
       this.#positionOverlay(axial.q, axial.r)
       this.#updateSeedLabel(axial.q, axial.r)
+      this.#updateSearchVisibility()
       this.emitEffect('tile:hover', { q: axial.q, r: axial.r })
     }
 
@@ -566,6 +589,14 @@ export class TileOverlayDrone extends Drone {
     if (!this.#seedLabel) return
     const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(q, r))
     this.#seedLabel.text = entry?.label ?? ''
+  }
+
+  #updateSearchVisibility(): void {
+    if (!this.#searchAction) return
+    const entry = this.#currentAxial
+      ? this.#occupiedByAxial.get(TileOverlayDrone.axialKey(this.#currentAxial.q, this.#currentAxial.r))
+      : undefined
+    this.#searchAction.button.visible = !!(entry?.label && this.#noImageLabels.has(entry.label))
   }
 
   #getActiveActions(): OverlayAction[] {

@@ -1073,6 +1073,7 @@ export class ShowHoneycombWorker extends Drone {
       labels: cells.map(cell => cell.label),
       branchLabels: cells.filter(cell => cell.hasBranch).map(cell => cell.label),
       externalLabels: cells.filter(cell => cell.external).map(cell => cell.label),
+      noImageLabels: cells.filter(cell => !cell.imageSig).map(cell => cell.label),
     })
   }
 
