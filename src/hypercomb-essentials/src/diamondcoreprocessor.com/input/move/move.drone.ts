@@ -60,7 +60,7 @@ export class MoveDrone extends Drone {
   }
 
   protected override listens = ['render:host-ready', 'render:cell-count', 'render:mesh-offset', 'controls:action']
-  protected override emits = ['move:preview', 'move:committed', 'move:mode', 'seed:reorder']
+  protected override emits = ['move:preview', 'move:committed', 'move:mode']
 
   protected override heartbeat = async (): Promise<void> => {
     this.onEffect<HostReadyPayload>('render:host-ready', (payload) => {
@@ -155,11 +155,10 @@ export class MoveDrone extends Drone {
     }
 
     // occupancy + label reverse map for occupied cells only
-    for (let i = 0; i < this.#cellLabels.length; i++) {
-      const label = this.#cellLabels[i]
-      if (!label) continue
+    for (let i = 0; i < this.#cellCount; i++) {
       const coord = axialSvc.items.get(i) as Axial | undefined
-      if (!coord) continue
+      const label = this.#cellLabels[i]
+      if (!coord || !label) break
       const key = axialKey(coord.q, coord.r)
       this.#occupancy.set(key, label)
       this.#labelToKey.set(label, key)
@@ -178,12 +177,11 @@ export class MoveDrone extends Drone {
 
     this.#movedGroup.clear()
     if (selected && selected.size > 0 && selected.has(anchorLabel)) {
-      // move the whole selection — scan all labels, skip empty ones
-      for (let i = 0; i < this.#cellLabels.length; i++) {
-        const label = this.#cellLabels[i]
-        if (!label) continue
+      // move the whole selection
+      for (let i = 0; i < this.#cellCount; i++) {
         const coord = axialSvc.items.get(i) as Axial | undefined
-        if (!coord) continue
+        const label = this.#cellLabels[i]
+        if (!coord || !label) break
         if (selected.has(label)) {
           this.#movedGroup.set(label, { q: coord.q, r: coord.r })
         }
@@ -192,8 +190,6 @@ export class MoveDrone extends Drone {
       // single tile
       this.#movedGroup.set(anchorLabel, { q: anchorAxial.q, r: anchorAxial.r })
     }
-
-    console.log('[move] beginMove', { anchorLabel, selectedLabels: selected ? [...selected] : [], movedGroupSize: this.#movedGroup.size, movedLabels: [...this.#movedGroup.keys()], cellCount: this.#cellCount, cellLabelsLen: this.#cellLabels.length, cellLabels: [...this.#cellLabels] })
 
     this.#anchorAxial = anchorAxial
     return true
@@ -228,22 +224,19 @@ export class MoveDrone extends Drone {
     if (diff.q === 0 && diff.r === 0) { this.#reset(source); return }
 
     const placements = this.#computePlacements(diff)
-    const denseOrder = this.#reorderNames(placements).filter(n => n !== '')
+    const newOrder = this.#reorderNames(placements)
 
-    // persist via per-seed index/offset (seed:reorder → ShowHoneycomb #writeIndices)
-    this.emitEffect('seed:reorder', { labels: denseOrder })
-
-    // also write __layout__ to keep both persistence mechanisms in sync
+    // persist
     const layout = this.resolve<LayoutService>('layout')
     const lineage = this.resolve<any>('lineage')
     if (layout && lineage?.explorerDir) {
       const dir = await lineage.explorerDir()
-      if (dir) await layout.write(dir, denseOrder)
+      if (dir) await layout.write(dir, newOrder)
     }
 
     // clear preview
     this.emitEffect('move:preview', null)
-    this.emitEffect('move:committed', { order: denseOrder })
+    this.emitEffect('move:committed', { order: newOrder })
 
     this.#reset(source)
 
