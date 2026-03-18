@@ -1184,13 +1184,12 @@ export class ShowHoneycombWorker extends Drone {
    * External (mesh) seeds are always re-indexed locally.
    */
   async #orderByIndex(dir: FileSystemDirectoryHandle, names: string[], localSeedSet: Set<string>): Promise<string[]> {
-    const alphabetical = [...names].sort((a, b) => a.localeCompare(b))
-    const indexed: { name: string; index: number }[] = []
+    const indexed: { name: string; position: number }[] = []
     const unindexed: string[] = []
+    let maxIndex = -1
 
     for (const name of names) {
       if (!localSeedSet.has(name)) {
-        // external seeds always re-indexed
         unindexed.push(name)
         continue
       }
@@ -1198,7 +1197,10 @@ export class ShowHoneycombWorker extends Drone {
         const seedDir = await dir.getDirectoryHandle(name, { create: false })
         const props = await readSeedProperties(seedDir)
         if (typeof props['index'] === 'number') {
-          indexed.push({ name, index: props['index'] as number })
+          const idx = props['index'] as number
+          const off = typeof props['offset'] === 'number' ? props['offset'] as number : 0
+          indexed.push({ name, position: idx + off })
+          if (idx > maxIndex) maxIndex = idx
         } else {
           unindexed.push(name)
         }
@@ -1207,33 +1209,30 @@ export class ShowHoneycombWorker extends Drone {
       }
     }
 
-    // sort indexed seeds by their stored index
-    indexed.sort((a, b) => a.index - b.index)
+    // sort by effective position (index + offset)
+    indexed.sort((a, b) => a.position - b.position)
 
-    // assign next available indices to unindexed seeds
-    let nextIndex = indexed.length > 0 ? Math.max(...indexed.map(s => s.index)) + 1 : 0
-    // if no indexed seeds exist, start from 0 and use alphabetical order
+    // assign next available permanent index to unindexed seeds
+    let nextIndex = maxIndex + 1
     if (indexed.length === 0) {
       unindexed.sort((a, b) => a.localeCompare(b))
     }
 
     for (const name of unindexed) {
       const assignedIndex = nextIndex++
-      indexed.push({ name, index: assignedIndex })
+      // new tiles: index = permanent, offset = 0 → position = index
+      indexed.push({ name, position: assignedIndex })
 
-      // persist index + offset for local seeds
       if (localSeedSet.has(name)) {
-        const alphaIdx = alphabetical.indexOf(name)
-        const offset = assignedIndex - alphaIdx
         try {
           const seedDir = await dir.getDirectoryHandle(name, { create: false })
-          await writeSeedProperties(seedDir, { index: assignedIndex, offset })
+          await writeSeedProperties(seedDir, { index: assignedIndex, offset: 0 })
         } catch { /* seed dir missing — skip */ }
       }
     }
 
-    // re-sort all by index after appending
-    indexed.sort((a, b) => a.index - b.index)
+    // re-sort after appending new seeds
+    indexed.sort((a, b) => a.position - b.position)
     return indexed.map(s => s.name)
   }
 
@@ -1280,15 +1279,30 @@ export class ShowHoneycombWorker extends Drone {
   }
 
   async #writeIndices(dir: FileSystemDirectoryHandle, orderedNames: string[]): Promise<void> {
-    const alphabetical = [...orderedNames].sort((a, b) => a.localeCompare(b))
+    // read all existing permanent indices to find maxIndex for new tiles
+    let maxIndex = -1
+    const existingIndices = new Map<string, number>()
+    for (const name of orderedNames) {
+      try {
+        const seedDir = await dir.getDirectoryHandle(name, { create: false })
+        const props = await readSeedProperties(seedDir)
+        if (typeof props['index'] === 'number') {
+          existingIndices.set(name, props['index'] as number)
+          if ((props['index'] as number) > maxIndex) maxIndex = props['index'] as number
+        }
+      } catch { /* skip */ }
+    }
 
     for (let i = 0; i < orderedNames.length; i++) {
       const name = orderedNames[i]
-      const alphaIdx = alphabetical.indexOf(name)
-      const offset = i - alphaIdx
+      let permanentIndex = existingIndices.get(name)
+      if (permanentIndex === undefined) {
+        permanentIndex = ++maxIndex
+      }
+      const offset = i - permanentIndex
       try {
         const seedDir = await dir.getDirectoryHandle(name, { create: false })
-        await writeSeedProperties(seedDir, { index: i, offset })
+        await writeSeedProperties(seedDir, { index: permanentIndex, offset })
       } catch { /* skip missing seed dirs */ }
     }
   }
