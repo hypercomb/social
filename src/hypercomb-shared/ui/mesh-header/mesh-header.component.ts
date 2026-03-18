@@ -16,9 +16,11 @@ export class MeshHeaderComponent {
 
   #secretValue = signal('')
   #secretExpanded = signal(true)
+  #secretRevealed = signal(false)
 
   readonly secretValue = this.#secretValue.asReadonly()
   readonly secretExpanded = this.#secretExpanded.asReadonly()
+  readonly secretRevealed = this.#secretRevealed.asReadonly()
   readonly hasSecret = computed(() => this.#secretValue().trim().length > 0)
 
   readonly shieldColor = computed(() => {
@@ -45,6 +47,10 @@ export class MeshHeaderComponent {
 
   readonly onShieldClick = (): void => {
     this.#secretExpanded.update(v => !v)
+  }
+
+  readonly onEyeClick = (): void => {
+    this.#secretRevealed.update(v => !v)
   }
 
   readonly onSecretInput = (event: Event): void => {

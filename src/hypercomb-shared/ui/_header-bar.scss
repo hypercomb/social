@@ -78,6 +78,7 @@ $secret-bg: rgba(10, 12, 16, 0.85);
   padding: 0.55rem 1.1rem;
   border: 1px solid rgba(245, 245, 245, 0.12);
   border-left: none;
+  border-right: none;
   background: $secret-bg;
   color: rgba(248, 248, 244, 0.9);
   font: 600 0.72rem/1 ui-monospace, sfmono-regular, menlo, consolas, monospace;
@@ -96,8 +97,44 @@ $secret-bg: rgba(10, 12, 16, 0.85);
     outline: none;
   }
 
+  &.revealed {
+    -webkit-text-security: none;
+  }
+
   &.has-secret {
     border-color: $secret-border;
+  }
+}
+
+.eye-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 0 0.85rem;
+  border: 1px solid rgba(245, 245, 245, 0.12);
+  border-left: none;
+  background: $secret-bg;
+  color: rgba(245, 245, 245, 0.35);
+  cursor: pointer;
+  transition: color 200ms ease, background 200ms ease;
+
+  .hci {
+    font-size: 1.05rem;
+  }
+
+  &:hover {
+    filter: brightness(1.3);
+    background: rgba(245, 245, 245, 0.04);
+  }
+
+  &:active {
+    background: rgba(245, 245, 245, 0.06);
+  }
+
+  &:focus-visible {
+    outline: 1px solid rgba(245, 245, 245, 0.3);
+    outline-offset: -1px;
   }
 }
 

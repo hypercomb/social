@@ -7,12 +7,16 @@
     @if (secretExpanded()) {
       <input
         class="header-secret-input" [class.has-secret]="hasSecret()"
+        [class.revealed]="secretRevealed()"
         type="text"
         placeholder="secure your location"
         [value]="secretValue()"
         (input)="onSecretInput($event)"
         (keydown.enter)="submitSecret()"
       />
+      <button class="eye-toggle" type="button" (click)="onEyeClick()">
+        <span class="hci">c</span>
+      </button>
     }
     <button class="public-toggle" type="button" (click)="meshToggled.emit()">
       public
