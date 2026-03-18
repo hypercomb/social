@@ -83,7 +83,6 @@ export class DesktopMoveInput {
     if (!this.#isInsideRect(e.clientX, e.clientY, rect)) return
 
     const axial = this.#clientToAxial(e.clientX, e.clientY)
-    console.log('[desktop-move] pointerdown', { axial, moveActive: this.#drone?.moveActive, hasDrone: !!this.#drone })
     if (!axial) return
 
     this.#downPos = { x: e.clientX, y: e.clientY }

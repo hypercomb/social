@@ -901,6 +901,13 @@ export class ShowHoneycombWorker extends Drone {
       if (order) seedNames = layout.merge(order, seedNames)
     }
 
+    // apply layout ordering if a __layout__ file exists
+    const layout = this.resolve<any>('layout')
+    if (layout) {
+      const order = await layout.read(dir)
+      if (order) seedNames = layout.merge(order, seedNames)
+    }
+
     // apply search filter if active
     if (this.filterKeyword) {
       const kw = this.filterKeyword
