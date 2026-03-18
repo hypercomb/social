@@ -72,10 +72,10 @@ export class App implements AfterViewInit {
   }
 
   public toggleOrientation = (): void => {
-    const next: HexOrientation = this.orientation() === 'pointy' ? 'flat' : 'pointy'
+    const next: HexOrientation = this.orientation() === 'point-top' ? 'flat-top' : 'point-top'
     this.orientation.set(next)
     localStorage.setItem('hc:hex-orientation', next)
-    EffectBus.emit('render:set-orientation', { flat: next === 'flat' })
+    EffectBus.emit('render:set-orientation', { flat: next === 'flat-top' })
   }
 
   public toggleMesh = (): void => {
@@ -114,7 +114,7 @@ export class App implements AfterViewInit {
     window.dispatchEvent(new Event('synchronize'))
 
     // restore persisted orientation
-    if (this.orientation() === 'flat') {
+    if (this.orientation() === 'flat-top') {
       EffectBus.emit('render:set-orientation', { flat: true })
     }
 
