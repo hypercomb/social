@@ -284,7 +284,7 @@ class TileSelectionDrone extends Drone {
     }
 
     // compute new order: move all selected labels to the target position
-    const selected = new Set(selection.selected())
+  const selected = new Set(selection.selected)
     const currentOrder = [...this.#cellLabels].slice(0, this.#cellCount)
     if (currentOrder.length === 0) { this.#reorderSourceLabel = null; return }
 
