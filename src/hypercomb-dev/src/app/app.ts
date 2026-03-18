@@ -23,6 +23,9 @@ import { HistoryRecorder } from '@hypercomb/essentials/diamondcoreprocessor.com/
 import { TileEditorService } from '@hypercomb/essentials/diamondcoreprocessor.com/editor/tile-editor.service'
 import { TileEditorDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/editor/tile-editor.drone'
 import { ImageEditorService } from '@hypercomb/essentials/diamondcoreprocessor.com/editor/image-editor.service'
+import { KeyMapService } from '@hypercomb/essentials/diamondcoreprocessor.com/input/keymap/keymap.service'
+import { SelectionService } from '@hypercomb/essentials/diamondcoreprocessor.com/core/selection/selection.service'
+import '@hypercomb/essentials/diamondcoreprocessor.com/input/escape-cascade'
 import { TileEditorComponent } from '@hypercomb/shared/ui/tile-editor/tile-editor.component'
 import { ControlsBarComponent } from '@hypercomb/shared/ui';
 
@@ -45,6 +48,8 @@ const _deps = [
   TileEditorService,
   TileEditorDrone,
   ImageEditorService,
+  KeyMapService,
+  SelectionService,
 ]
 
 void _deps
@@ -60,7 +65,7 @@ export class App implements AfterViewInit {
 
   public readonly meshPublic = signal(true);
   public readonly orientation = signal<HexOrientation>(
-    (localStorage.getItem('hc:hex-orientation') as HexOrientation) || 'pointy'
+    (localStorage.getItem('hc:hex-orientation') as HexOrientation) || 'point-top'
   );
 
   #runtimeReady: Promise<void>

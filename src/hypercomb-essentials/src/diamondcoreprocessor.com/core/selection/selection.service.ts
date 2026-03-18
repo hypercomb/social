@@ -11,7 +11,6 @@ export class SelectionService extends EventTarget {
 
   constructor() {
     super()
-    document.addEventListener('keydown', this.#onKeyDown)
   }
 
   add(label: string): void {
@@ -44,10 +43,6 @@ export class SelectionService extends EventTarget {
   #notify(): void {
     this.dispatchEvent(new CustomEvent('change'))
     EffectBus.emit('selection:changed', { selected: Array.from(this.#items) })
-  }
-
-  #onKeyDown = (e: KeyboardEvent): void => {
-    if (e.key === 'Escape') this.clear()
   }
 }
 

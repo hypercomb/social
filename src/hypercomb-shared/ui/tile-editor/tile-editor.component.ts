@@ -241,20 +241,9 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
     this.editorDrone?.cancelEditing?.()
   }
 
-  // ── keyboard ───────────────────────────────────────────────────
-
-  #onKeyDown = (e: KeyboardEvent): void => {
-    if (!this.open()) return
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      this.cancel()
-    }
-  }
-
   // ── lifecycle ──────────────────────────────────────────────────
 
   ngOnInit(): void {
-    window.addEventListener('keydown', this.#onKeyDown)
     const target = get('@diamondcoreprocessor.com/TileEditorService') as EventTarget | undefined
     target?.addEventListener('change', this.#onEditorChange)
   }
@@ -264,7 +253,6 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
-    window.removeEventListener('keydown', this.#onKeyDown)
     const target = get('@diamondcoreprocessor.com/TileEditorService') as EventTarget | undefined
     target?.removeEventListener('change', this.#onEditorChange)
     this.imageEditor?.destroy()

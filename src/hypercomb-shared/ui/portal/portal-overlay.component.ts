@@ -1,5 +1,6 @@
 import { Component, type OnInit, type OnDestroy, signal } from "@angular/core"
 import type { SafeResourceUrl, DomSanitizer } from "@angular/platform-browser"
+import { EffectBus } from '@hypercomb/core'
 
 @Component({
   selector: 'hc-portal-overlay',
@@ -57,14 +58,9 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
   }
 
   // -------------------------------------------------
-  // escape key closes portal
+  // escape (via centralized cascade fallback)
   // -------------------------------------------------
-  private readonly onKeyDown = (e: KeyboardEvent): void => {
-    if (!this.open()) return
-    if (e.key !== 'Escape') return
-    e.preventDefault()
-    this.close()
-  }
+  #unsubEscape: (() => void) | null = null
 
   // -------------------------------------------------
   // lifecycle
@@ -72,13 +68,15 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
   public ngOnInit(): void {
     window.addEventListener('portal:open', this.onPortalOpen)
     window.addEventListener('message', this.onMessage)
-    window.addEventListener('keydown', this.onKeyDown)
+    this.#unsubEscape = EffectBus.on('global:escape', () => {
+      if (this.open()) this.close()
+    })
   }
 
   public ngOnDestroy(): void {
     window.removeEventListener('portal:open', this.onPortalOpen)
     window.removeEventListener('message', this.onMessage)
-    window.removeEventListener('keydown', this.onKeyDown)
+    this.#unsubEscape?.()
   }
 
   // -------------------------------------------------
