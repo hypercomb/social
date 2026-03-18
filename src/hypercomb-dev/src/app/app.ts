@@ -28,6 +28,12 @@ import { SelectionService } from '@hypercomb/essentials/diamondcoreprocessor.com
 import '@hypercomb/essentials/diamondcoreprocessor.com/input/escape-cascade'
 import { TileEditorComponent } from '@hypercomb/shared/ui/tile-editor/tile-editor.component'
 import { ControlsBarComponent } from '@hypercomb/shared/ui';
+import { LayoutService } from '@hypercomb/essentials/diamondcoreprocessor.com/core/layout/layout.service'
+import { MoveDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/move/move.drone'
+import { DesktopMoveInput } from '@hypercomb/essentials/diamondcoreprocessor.com/input/move/desktop-move.input'
+import { TouchMoveInput } from '@hypercomb/essentials/diamondcoreprocessor.com/input/move/touch-move.input'
+import { MovePreviewDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/move-preview.drone'
+import { BackgroundDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/background/background.drone'
 
 const _deps = [
   AxialService,
@@ -50,6 +56,12 @@ const _deps = [
   ImageEditorService,
   KeyMapService,
   SelectionService,
+  LayoutService,
+  MoveDrone,
+  DesktopMoveInput,
+  TouchMoveInput,
+  MovePreviewDrone,
+  BackgroundDrone,
 ]
 
 void _deps
@@ -60,7 +72,7 @@ void _deps
   styleUrls: ['./app.scss'] as any,
   templateUrl: './app.html'
 })
-export class App implements AfterViewInit {
+export class App {
   protected readonly title = signal('hypercomb-dev');
 
   public readonly meshPublic = signal(true);
@@ -73,6 +85,12 @@ export class App implements AfterViewInit {
   constructor() {
     this.#runtimeReady = initializeRuntime({
       onMeshStateChange: enabled => this.meshPublic.set(enabled),
+    })
+
+    queueMicrotask(() => {
+      void this.#runtimeReady.then(() => {
+        void this.startRegisteredBees()
+      })
     })
   }
 
@@ -91,14 +109,6 @@ export class App implements AfterViewInit {
     this.meshPublic.set(next);
     mesh?.setNetworkEnabled?.(next, true);
     EffectBus.emit('mesh:public-changed', { public: next })
-  }
-
-  public ngAfterViewInit(): void {
-    void this.#runtimeReady.then(() => {
-      requestAnimationFrame(() => {
-        void this.startRegisteredBees()
-      })
-    })
   }
 
   private readonly startRegisteredBees = async (): Promise<void> => {

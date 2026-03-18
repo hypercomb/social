@@ -55,11 +55,13 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #hovered = signal(false)
   #locked = signal(false)
   #utility = signal(localStorage.getItem('hc:utility-expanded') !== 'false')
+  #moveMode = signal(false)
   #mode = signal<'browsing' | 'clipboard'>('browsing')
   #clipboardItems = signal<string[]>([])
   #roomValue = signal('')
   #roomOpen = signal(false)
   #idleTimer: ReturnType<typeof setTimeout> | null = null
+  #moveModeUnsub: (() => void) | null = null
   readonly #IDLE_DELAY = 3000
 
   // ── computed ────────────────────────────────────────────
@@ -81,6 +83,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   readonly mode = this.#mode.asReadonly()
   readonly clipboardItems = this.#clipboardItems.asReadonly()
   readonly clipboardCount = computed(() => this.#clipboardItems().length)
+  readonly moveMode = this.#moveMode.asReadonly()
   readonly visible = computed(() => !this.#idle() || this.#hovered())
   readonly roomValue = this.#roomValue.asReadonly()
   readonly roomOpen = this.#roomOpen.asReadonly()
@@ -97,6 +100,9 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     window.addEventListener('keydown', this.#onActivity)
     window.addEventListener('navigate', this.#onActivity)
     this.#resetIdleTimer()
+    this.#moveModeUnsub = EffectBus.on<{ active: boolean }>('move:mode', ({ active }) => {
+      this.#moveMode.set(active)
+    })
   }
 
   ngOnDestroy(): void {
@@ -105,6 +111,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     window.removeEventListener('keydown', this.#onActivity)
     window.removeEventListener('navigate', this.#onActivity)
     if (this.#idleTimer) clearTimeout(this.#idleTimer)
+    this.#moveModeUnsub?.()
   }
 
   // ── navigation actions ────────────────────────────────

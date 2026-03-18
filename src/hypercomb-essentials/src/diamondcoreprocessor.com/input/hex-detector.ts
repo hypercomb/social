@@ -66,7 +66,6 @@ export class HexDetector {
   }
 }
 
-console.log('[HexDetector] registering @diamondcoreprocessor.com/HexDetector in ioc')
 window.ioc.register(
   '@diamondcoreprocessor.com/HexDetector',
   new HexDetector(DEFAULT_HEX_GEOMETRY.spacing)

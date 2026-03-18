@@ -45,4 +45,5 @@ class EffectBusImpl {
   }
 }
 
-export const EffectBus = new EffectBusImpl()
+export const EffectBus: EffectBusImpl =
+  (globalThis as any).__hypercombEffectBus ??= new EffectBusImpl()
