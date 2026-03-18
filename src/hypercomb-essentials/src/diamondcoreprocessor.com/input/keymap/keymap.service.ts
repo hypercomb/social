@@ -225,7 +225,11 @@ export class KeyMapService extends EventTarget {
   }
 
   #matchesSingleKey(e: KeyboardEvent, k: KeyChord): boolean {
-    if (this.#normalize(e.key) !== k.key) return false
+    if (k.code) {
+      if (e.code.toLowerCase() !== k.code) return false
+    } else {
+      if (this.#normalize(e.key) !== k.key) return false
+    }
 
     if (k.ctrl !== undefined && e.ctrlKey !== k.ctrl) return false
     if (k.shift !== undefined && e.shiftKey !== k.shift) return false

@@ -10,6 +10,7 @@
 
 export interface KeyChord {
   key: string              // normalized lowercase: 'a', 'space', 'escape', 'enter', 'delete', 'tab', etc.
+  code?: string            // layout-independent physical key (e.g. 'digit8') — checked instead of key when present
   ctrl?: boolean
   shift?: boolean
   alt?: boolean

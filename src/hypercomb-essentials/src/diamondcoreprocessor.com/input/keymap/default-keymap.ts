@@ -40,7 +40,7 @@ export const globalKeyMap: KeyMapLayer = {
     },
     {
       cmd: 'render.togglePivot',
-      sequence: [[{ key: '*', ctrl: true, shift: true }]],
+      sequence: [[{ key: '8', code: 'digit8', ctrl: true, shift: true }]],
       description: 'Toggle pivot mode',
       pierce: true,
     },
