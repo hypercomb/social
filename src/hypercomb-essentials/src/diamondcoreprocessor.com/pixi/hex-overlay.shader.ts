@@ -117,8 +117,8 @@ const FRAG = `
     vec2 rotated = u_flat > 0.5 ? local : rot30(local);
     float d = sdHex(rotated, u_radiusPx);
 
-    // fwidth gives exact screen-pixel rate of change for pixel-perfect AA
-    float fw = fwidth(d);
+    // manual smoothing width (avoids fwidth which requires OES_standard_derivatives)
+    float fw = max(u_radiusPx * 0.04, 1.5);
     float aa = fw * 1.5;
     float hexMask = 1.0 - smoothstep(-aa, aa, d);
     if (hexMask < 0.005) discard;

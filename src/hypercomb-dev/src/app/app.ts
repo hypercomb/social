@@ -26,6 +26,7 @@ import { ImageEditorService } from '@hypercomb/essentials/diamondcoreprocessor.c
 import { KeyMapService } from '@hypercomb/essentials/diamondcoreprocessor.com/input/keymap/keymap.service'
 import { SelectionService } from '@hypercomb/essentials/diamondcoreprocessor.com/core/selection/selection.service'
 import '@hypercomb/essentials/diamondcoreprocessor.com/input/escape-cascade'
+import '@hypercomb/essentials/diamondcoreprocessor.com/input/pivot-toggle'
 import { TileEditorComponent } from '@hypercomb/shared/ui/tile-editor/tile-editor.component'
 import { ControlsBarComponent } from '@hypercomb/shared/ui';
 import { LayoutService } from '@hypercomb/essentials/diamondcoreprocessor.com/core/layout/layout.service'
@@ -81,7 +82,6 @@ export class App {
   );
 
   #runtimeReady: Promise<void>
-  #pivotOn = localStorage.getItem('hc:hex-pivot') === 'true'
 
   constructor() {
     this.#runtimeReady = initializeRuntime({
@@ -92,14 +92,6 @@ export class App {
       void this.#runtimeReady.then(() => {
         void this.startRegisteredBees()
       })
-    })
-
-    EffectBus.on<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
-      if (cmd === 'render.togglePivot') {
-        this.#pivotOn = !this.#pivotOn
-        localStorage.setItem('hc:hex-pivot', String(this.#pivotOn))
-        EffectBus.emit('render:set-pivot', { pivot: this.#pivotOn })
-      }
     })
   }
 
@@ -141,11 +133,6 @@ export class App {
     // restore persisted orientation
     if (this.orientation() === 'flat-top') {
       EffectBus.emit('render:set-orientation', { flat: true })
-    }
-
-    // restore persisted pivot
-    if (this.#pivotOn) {
-      EffectBus.emit('render:set-pivot', { pivot: true })
     }
 
     // broadcast initial mesh state so drones can react
