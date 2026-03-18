@@ -38,6 +38,12 @@ export const globalKeyMap: KeyMapLayer = {
       category: 'AI',
       pierce: true,
     },
+    {
+      cmd: 'render.togglePivot',
+      sequence: [[{ key: '*', ctrl: true, shift: true }]],
+      description: 'Toggle pivot mode',
+      pierce: true,
+    },
   ],
 }
 
