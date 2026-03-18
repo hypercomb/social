@@ -9,6 +9,7 @@ import { Drone } from '@hypercomb/core'
 
 // const HARD_RELAY = 'wss://nos.lol'
 const HARD_RELAY = 'wss://relay.snort.social'
+const LOCAL_RELAY = 'ws://localhost:7777'
 
 type NostrEvent = { id?: string; pubkey?: string; created_at: number; kind: number; tags: string[][]; content: string; sig?: string }
 type MeshEvt = { relay: string; sig: string; event: NostrEvent; payload: any }
@@ -61,7 +62,7 @@ export class NostrMeshWorker extends Drone {
   // -----------------------------
 
   // note: default public relay (can be overridden by localstorage/configureRelays)
-  private relays: string[] = [HARD_RELAY]
+  private relays: string[] = [HARD_RELAY, LOCAL_RELAY]
 
   private forceHardRelay = (): void => {
     this.relays = [HARD_RELAY]
