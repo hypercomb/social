@@ -93,6 +93,8 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   readonly clipboardItems = this.#clipboardItems.asReadonly()
   readonly clipboardCount = computed(() => this.#clipboardItems().length)
   readonly moveMode = this.#moveMode.asReadonly()
+  readonly hasSelection = this.#hasSelection.asReadonly()
+  readonly textOnly = this.#textOnly.asReadonly()
   readonly visible = computed(() => !this.#idle() || this.#hovered())
   readonly roomValue = this.#roomValue.asReadonly()
   readonly roomOpen = this.#roomOpen.asReadonly()
@@ -112,6 +114,19 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     window.addEventListener('keydown', this.#onActivity)
     window.addEventListener('navigate', this.#onActivity)
     this.#resetIdleTimer()
+
+    this.#selectionUnsub = EffectBus.on<{ selected?: string[] }>('selection:changed', (payload) => {
+      this.#hasSelection.set((payload?.selected?.length ?? 0) > 0)
+    })
+
+    this.#clipboardUnsub = EffectBus.on<{ items?: { label: string }[] }>('clipboard:changed', (payload) => {
+      const items = payload?.items ?? []
+      this.#clipboardItems.set(items.map(item => item.label))
+      if (items.length === 0 && this.#mode() === 'clipboard') {
+        this.closeClipboard()
+      }
+    })
+
     this.#moveModeUnsub = EffectBus.on<{ active: boolean }>('move:mode', ({ active }) => {
       this.#moveMode.set(active)
     })
@@ -123,6 +138,8 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     window.removeEventListener('keydown', this.#onActivity)
     window.removeEventListener('navigate', this.#onActivity)
     if (this.#idleTimer) clearTimeout(this.#idleTimer)
+    this.#clipboardUnsub?.()
+    this.#selectionUnsub?.()
     this.#moveModeUnsub?.()
   }
 
