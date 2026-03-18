@@ -43,6 +43,9 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   private get roomStore(): RoomStore | undefined {
     return get('@hypercomb.social/RoomStore') as RoomStore | undefined
   }
+  private get gate(): any {
+    return get('@diamondcoreprocessor.com/InputGate')
+  }
 
   // ── reactive state ──────────────────────────────────────
 
@@ -152,15 +155,22 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
 
   readonly toggleLock = (): void => {
     this.#locked.update(v => !v)
+    if (this.#locked()) {
+      this.gate?.lock()
+    } else {
+      this.gate?.unlock()
+    }
   }
 
   readonly zoomIn = (): void => {
+    if (this.#locked()) return
     const center = this.#viewportCenter()
     this.zoom?.zoomByFactor?.(1.25, center, 'controls-bar')
     this.zoom?.end?.('controls-bar')
   }
 
   readonly zoomOut = (): void => {
+    if (this.#locked()) return
     const center = this.#viewportCenter()
     this.zoom?.zoomByFactor?.(0.8, center, 'controls-bar')
     this.zoom?.end?.('controls-bar')

@@ -11,23 +11,29 @@ type Pt = { x: number; y: number }
 // One source at a time. Context menu auto-suppressed while claimed.
 
 export class InputGate {
-  private owner: string | null = null
+  #owner: string | null = null
+  #locked = false
 
-  get active(): boolean { return this.owner !== null }
+  get active(): boolean { return this.#locked || this.#owner !== null }
+  get locked(): boolean { return this.#locked }
+
+  lock = (): void => { this.#locked = true }
+  unlock = (): void => { this.#locked = false }
 
   claim = (source: string): boolean => {
-    if (this.owner && this.owner !== source) return false
-    this.owner = source
+    if (this.#locked) return false
+    if (this.#owner && this.#owner !== source) return false
+    this.#owner = source
     return true
   }
 
   release = (source: string): void => {
-    if (this.owner === source) this.owner = null
+    if (this.#owner === source) this.#owner = null
   }
 
   constructor() {
     document.addEventListener('contextmenu', (e) => {
-      if (this.owner || e.ctrlKey || e.metaKey) e.preventDefault()
+      if (this.#owner || e.ctrlKey || e.metaKey) e.preventDefault()
     }, true)
   }
 }
