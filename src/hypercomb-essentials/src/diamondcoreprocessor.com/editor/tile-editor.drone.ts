@@ -160,15 +160,16 @@ export class TileEditorDrone {
     // 3. preserve link + border.color from service
     // (already in props via service.properties — setLink/setBorderColor mutate in-place)
 
-    // 4. write 0000 to seed directory
-    const seedDir = await store.current.getDirectoryHandle(service.seed, { create: true })
-    const fileHandle = await seedDir.getFileHandle(TILE_PROPERTIES_FILE, { create: true })
-    const writable = await fileHandle.createWritable()
-    try {
-      await writable.write(JSON.stringify(props, null, 2))
-    } finally {
-      await writable.close()
-    }
+    // 4. write tile properties as content-addressed resource
+    const json = JSON.stringify(props, null, 2)
+    const blob = new Blob([json], { type: 'application/json' })
+    const propsSig = await store.putResource(blob)
+
+    // persist seed → resource sig mapping
+    const indexKey = 'hc:tile-props-index'
+    const index: Record<string, string> = JSON.parse(localStorage.getItem(indexKey) ?? '{}')
+    index[service.seed] = propsSig
+    localStorage.setItem(indexKey, JSON.stringify(index))
 
     // 5. capture seed name before closing
     const savedSeed = service.seed

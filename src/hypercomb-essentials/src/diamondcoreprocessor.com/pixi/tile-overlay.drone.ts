@@ -553,17 +553,7 @@ export class TileOverlayDrone extends Drone {
     EffectBus.emit('seed:removed', { seed: label })
   }
 
-  #handleAdopt = async (label: string): Promise<void> => {
-    const lineage = this.resolve<{ explorerDir(): Promise<FileSystemDirectoryHandle | null> }>('lineage')
-    if (!lineage) return
-    const dir = await lineage.explorerDir()
-    if (!dir) return
-    try {
-      await dir.getDirectoryHandle(label, { create: true })
-    } catch (e) {
-      console.warn('[TileOverlay] failed to adopt seed folder:', label, e)
-      return
-    }
+  #handleAdopt = (label: string): void => {
     EffectBus.emit('seed:added', { seed: label })
     void new hypercomb().act()
   }

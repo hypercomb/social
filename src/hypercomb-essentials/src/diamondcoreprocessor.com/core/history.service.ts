@@ -12,20 +12,22 @@ export type HistoryOp = {
   at: number
 }
 
+export type LayerState = {
+  bees: string[]
+  layers: string[]
+  dependencies: string[]
+  resources: string[]
+}
+
 export class HistoryService {
 
-  private historyRoot: FileSystemDirectoryHandle | null = null
-
-  private readonly getHistoryRoot = async (): Promise<FileSystemDirectoryHandle> => {
-    if (this.historyRoot) return this.historyRoot
-
-    const opfsRoot = await navigator.storage.getDirectory()
-    this.historyRoot = await opfsRoot.getDirectoryHandle('__history__', { create: true })
-    return this.historyRoot
+  private get historyRoot(): FileSystemDirectoryHandle {
+    const store = get<{ history: FileSystemDirectoryHandle }>('@hypercomb.social/Store')
+    return store!.history
   }
 
   private readonly getBag = async (signature: string): Promise<FileSystemDirectoryHandle> => {
-    const root = await this.getHistoryRoot()
+    const root = this.historyRoot
     return await root.getDirectoryHandle(signature, { create: true })
   }
 
@@ -73,7 +75,7 @@ export class HistoryService {
    * If upTo is provided, stop at that index (inclusive).
    */
   public readonly replay = async (signature: string, upTo?: number): Promise<HistoryOp[]> => {
-    const root = await this.getHistoryRoot()
+    const root = this.historyRoot
 
     let bag: FileSystemDirectoryHandle
     try {
@@ -113,7 +115,7 @@ export class HistoryService {
    * List all signature bags in __history__/.
    */
   public readonly list = async (): Promise<{ signature: string; count: number }[]> => {
-    const root = await this.getHistoryRoot()
+    const root = this.historyRoot
     const result: { signature: string; count: number }[] = []
 
     for await (const [name, handle] of root.entries()) {
@@ -134,7 +136,7 @@ export class HistoryService {
    * Return the latest operation index and contents for a given bag.
    */
   public readonly head = async (signature: string): Promise<{ index: number; op: HistoryOp } | null> => {
-    const root = await this.getHistoryRoot()
+    const root = this.historyRoot
 
     let bag: FileSystemDirectoryHandle
     try {
@@ -165,6 +167,83 @@ export class HistoryService {
       return null
     }
   }
+
+  // -------------------------------------------------
+  // layer.json — materialized layer state
+  // -------------------------------------------------
+
+  static readonly #LAYER_FILE = 'layer.json'
+
+  static readonly #emptyLayer: LayerState = { bees: [], layers: [], dependencies: [], resources: [] }
+
+  public readonly getLayer = async (signature: string): Promise<LayerState> => {
+    try {
+      const bag = await this.historyRoot.getDirectoryHandle(signature, { create: false })
+      const handle = await bag.getFileHandle(HistoryService.#LAYER_FILE)
+      const file = await handle.getFile()
+      const text = await file.text()
+      return JSON.parse(text) as LayerState
+    } catch {
+      return { ...HistoryService.#emptyLayer }
+    }
+  }
+
+  public readonly putLayer = async (signature: string, state: LayerState): Promise<void> => {
+    const bag = await this.getBag(signature)
+    const handle = await bag.getFileHandle(HistoryService.#LAYER_FILE, { create: true })
+    const writable = await handle.createWritable()
+    try {
+      await writable.write(JSON.stringify(state))
+    } finally {
+      await writable.close()
+    }
+  }
+
+  public readonly updateLayer = async (
+    signature: string,
+    next: LayerState
+  ): Promise<{ added: Partial<LayerState>; removed: Partial<LayerState> }> => {
+
+    const prev = await this.getLayer(signature)
+
+    const added: Partial<LayerState> = {}
+    const removed: Partial<LayerState> = {}
+
+    for (const key of ['bees', 'layers', 'dependencies', 'resources'] as const) {
+      const prevSet = new Set(prev[key])
+      const nextSet = new Set(next[key])
+
+      const a = next[key].filter(s => !prevSet.has(s))
+      const r = prev[key].filter(s => !nextSet.has(s))
+
+      if (a.length) added[key] = a
+      if (r.length) removed[key] = r
+    }
+
+    const hasChanges = Object.keys(added).length > 0 || Object.keys(removed).length > 0
+
+    if (hasChanges) {
+      const bag = await this.getBag(signature)
+      const nextIndex = await this.nextIndex(bag)
+      const fileName = String(nextIndex).padStart(8, '0')
+
+      const handle = await bag.getFileHandle(fileName, { create: true })
+      const writable = await handle.createWritable()
+      try {
+        await writable.write(JSON.stringify({ added, removed, at: Date.now() }))
+      } finally {
+        await writable.close()
+      }
+
+      await this.putLayer(signature, next)
+    }
+
+    return { added, removed }
+  }
+
+  // -------------------------------------------------
+  // internal
+  // -------------------------------------------------
 
   private readonly nextIndex = async (bag: FileSystemDirectoryHandle): Promise<number> => {
     let max = 0

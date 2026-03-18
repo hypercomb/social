@@ -1,17 +1,17 @@
 // revolucionstyle.com/cigar/cigar-catalog.service.ts
-// Local cigar catalog — stores unique cigar identities in OPFS for autocomplete.
+// Local cigar catalog — stores unique cigar identities in __resources__/ for autocomplete.
+// Catalog index is persisted to localStorage; cigar data is content-addressed in OPFS.
 
 import { SignatureService } from '@hypercomb/core'
 import type { Cigar } from '../journal/journal-entry.js'
 import { cigarKey } from './cigar.js'
 
 type Store = {
-  current: FileSystemDirectoryHandle
   putResource: (blob: Blob) => Promise<string>
   getResource: (sig: string) => Promise<Blob | null>
 }
 
-const PROPERTIES_FILE = '0000'
+const INDEX_KEY = 'hc:cigar-catalog-index'
 
 export class CigarCatalogService extends EventTarget {
 
@@ -31,21 +31,17 @@ export class CigarCatalogService extends EventTarget {
     const store = window.ioc.get<Store>('@hypercomb.social/Store')
     if (!store) return
 
-    try {
-      const domainDir = await store.current.getDirectoryHandle('revolucionstyle.com')
-      const catalogDir = await domainDir.getDirectoryHandle('catalog')
+    const index = this.#readIndex()
 
-      for await (const [name, handle] of catalogDir.entries()) {
-        if (handle.kind !== 'directory') continue
-        try {
-          const fileHandle = await (handle as FileSystemDirectoryHandle).getFileHandle(PROPERTIES_FILE)
-          const file = await fileHandle.getFile()
-          const text = await file.text()
-          const cigar = JSON.parse(text) as Cigar
-          this.#cache.set(cigarKey(cigar), { sig: name, cigar })
-        } catch { /* skip corrupted */ }
-      }
-    } catch { /* no catalog dir yet */ }
+    for (const [key, sig] of Object.entries(index)) {
+      try {
+        const blob = await store.getResource(sig)
+        if (!blob) continue
+        const text = await blob.text()
+        const cigar = JSON.parse(text) as Cigar
+        this.#cache.set(key, { sig, cigar })
+      } catch { /* skip corrupted */ }
+    }
 
     this.#loaded = true
     this.#emit()
@@ -62,21 +58,11 @@ export class CigarCatalogService extends EventTarget {
     if (!store) return ''
 
     const json = JSON.stringify(cigar, null, 2)
-    const bytes = new TextEncoder().encode(json)
-    const sig = await SignatureService.sign(bytes.buffer as ArrayBuffer)
-
-    const domainDir = await store.current.getDirectoryHandle('revolucionstyle.com', { create: true })
-    const catalogDir = await domainDir.getDirectoryHandle('catalog', { create: true })
-    const entryDir = await catalogDir.getDirectoryHandle(sig, { create: true })
-    const fileHandle = await entryDir.getFileHandle(PROPERTIES_FILE, { create: true })
-    const writable = await fileHandle.createWritable()
-    try {
-      await writable.write(json)
-    } finally {
-      await writable.close()
-    }
+    const blob = new Blob([json], { type: 'application/json' })
+    const sig = await store.putResource(blob)
 
     this.#cache.set(key, { sig, cigar })
+    this.#persistIndex()
     this.#emit()
     return sig
   }
@@ -107,6 +93,22 @@ export class CigarCatalogService extends EventTarget {
   }
 
   // ── internal ───────────────────────────────────────────────────
+
+  #readIndex(): Record<string, string> {
+    try {
+      return JSON.parse(localStorage.getItem(INDEX_KEY) ?? '{}')
+    } catch {
+      return {}
+    }
+  }
+
+  #persistIndex(): void {
+    const index: Record<string, string> = {}
+    for (const [key, { sig }] of this.#cache) {
+      index[key] = sig
+    }
+    localStorage.setItem(INDEX_KEY, JSON.stringify(index))
+  }
 
   #emit(): void {
     this.dispatchEvent(new CustomEvent('change'))

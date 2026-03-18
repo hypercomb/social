@@ -156,28 +156,10 @@ export class ClipboardWorker extends Worker {
     const { items, op } = clipboardSvc.consume()
     if (items.length === 0) return
 
-    const lineage = this.#lineage
-    if (!lineage) return
-
-    const destDir = await lineage.explorerDir()
-    if (!destDir) return
-
-    const store = this.#store
-    if (!store) return
-
     EffectBus.emit('clipboard:paste-start', { count: items.length, op })
 
-    // Read from original source location — folders are still in OPFS
+    // Emit seed:added for each item — HistoryRecorder records the ops
     for (const entry of items) {
-      const sourceDir = await resolveSegments(store.hypercombRoot, entry.sourceSegments)
-      if (!sourceDir) continue
-
-      let seedDir: FileSystemDirectoryHandle
-      try {
-        seedDir = await sourceDir.getDirectoryHandle(entry.label, { create: false })
-      } catch { continue }
-
-      await copySeedTree(seedDir, destDir, entry.label)
       EffectBus.emit('seed:added', { seed: entry.label })
     }
 
@@ -185,7 +167,8 @@ export class ClipboardWorker extends Worker {
 
     // Clean up persisted meta
     if (op === 'cut') {
-      await clearDirectory(store.clipboard)
+      const store = this.#store
+      if (store) await clearDirectory(store.clipboard)
     }
   }
 
@@ -203,26 +186,8 @@ export class ClipboardWorker extends Worker {
     const toPlace = clipboardSvc.items.filter(i => selectedSet.has(i.label))
     if (toPlace.length === 0) return
 
-    const lineage = this.#lineage
-    if (!lineage) return
-
-    const destDir = await lineage.explorerDir()
-    if (!destDir) return
-
-    const store = this.#store
-    if (!store) return
-
-    // Copy each selected seed tree from source to current explorer location
+    // Emit seed:added for each selected item — HistoryRecorder records the ops
     for (const entry of toPlace) {
-      const sourceDir = await resolveSegments(store.hypercombRoot, entry.sourceSegments)
-      if (!sourceDir) continue
-
-      let seedDir: FileSystemDirectoryHandle
-      try {
-        seedDir = await sourceDir.getDirectoryHandle(entry.label, { create: false })
-      } catch { continue }
-
-      await copySeedTree(seedDir, destDir, entry.label)
       EffectBus.emit('seed:added', { seed: entry.label })
     }
 
@@ -230,12 +195,14 @@ export class ClipboardWorker extends Worker {
     clipboardSvc.removeItems(selectedSet)
     this.#selection?.clear()
 
+    const store = this.#store
+
     // Update persisted meta or clear if empty
     if (clipboardSvc.isEmpty) {
-      await clearDirectory(store.clipboard)
+      if (store) await clearDirectory(store.clipboard)
       // Auto-close clipboard mode
       EffectBus.emit('clipboard:view', { active: false })
-    } else {
+    } else if (store) {
       await writeMeta(store.clipboard, {
         op: clipboardSvc.operation,
         items: clipboardSvc.items.map(i => ({
@@ -311,44 +278,6 @@ async function readMeta(
     return JSON.parse(text) as ClipboardMeta
   } catch {
     return null
-  }
-}
-
-// ── helpers ───────────────────────────────────────────────
-
-async function resolveSegments(
-  root: FileSystemDirectoryHandle,
-  segments: readonly string[],
-): Promise<FileSystemDirectoryHandle | null> {
-  let dir = root
-  for (const seg of segments) {
-    try {
-      dir = await dir.getDirectoryHandle(seg, { create: false })
-    } catch { return null }
-  }
-  return dir
-}
-
-async function copySeedTree(
-  source: FileSystemDirectoryHandle,
-  destParent: FileSystemDirectoryHandle,
-  name: string,
-): Promise<void> {
-  const dest = await destParent.getDirectoryHandle(name, { create: true })
-
-  for await (const [entryName, handle] of (source as any).entries()) {
-    if (handle.kind === 'file') {
-      const file = await (handle as FileSystemFileHandle).getFile()
-      const target = await dest.getFileHandle(entryName, { create: true })
-      const writable = await target.createWritable()
-      try {
-        await writable.write(await file.arrayBuffer())
-      } finally {
-        await writable.close()
-      }
-    } else if (handle.kind === 'directory') {
-      await copySeedTree(handle as FileSystemDirectoryHandle, dest, entryName)
-    }
   }
 }
 

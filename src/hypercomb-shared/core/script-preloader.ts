@@ -48,17 +48,19 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     }
 
     const run = async (): Promise<Bee[]> => {
-      // Scan root for global markers (skips already-loaded signatures)
-      await this.#scanDirectoryForMarkers(this.store.hypercombRoot)
+      // Primary: load bees from cached install manifest (no filesystem scanning)
+      const manifestBees = ScriptPreloader.readManifestBees()
+      if (manifestBees.length) {
+        await this.#loadBeesFromList(manifestBees)
+      } else {
+        // Fallback: scan root for markers (dev mode — no manifest)
+        await this.#scanDirectoryForMarkers(this.store.hypercombRoot)
 
-      // Scan current directory for location-specific markers
-      const current = this.store.current
-      if (current && current !== this.store.hypercombRoot) {
-        await this.#scanDirectoryForMarkers(current)
+        const current = this.store.current
+        if (current && current !== this.store.hypercombRoot) {
+          await this.#scanDirectoryForMarkers(current)
+        }
       }
-
-      // Fire-and-forget depth radar — pre-warm child seeds
-      if (current) this.#warmChildSeeds(current)
 
       return [...this.#beeCache.values()]
     }
@@ -68,7 +70,42 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   }
 
   // -------------------------------------------------
-  // marker scanning
+  // manifest-driven loading (primary path)
+  // -------------------------------------------------
+
+  private static readManifestBees(): string[] {
+    try {
+      const raw = localStorage.getItem('core-adapter.installed-manifest')
+      if (!raw) return []
+      const manifest = JSON.parse(raw)
+      return Array.isArray(manifest?.bees) ? manifest.bees.filter(Boolean) : []
+    } catch {
+      return []
+    }
+  }
+
+  #loadBeesFromList = async (sigs: string[]): Promise<void> => {
+    const pending = sigs.filter(sig => sig && this.#isSignature(sig) && !this.#beeCache.has(sig))
+    if (!pending.length) return
+
+    EffectBus.emit('loader:bees-progress', { loading: pending.length, total: this.#beeCache.size + pending.length })
+
+    let loaded = 0
+    for (const sig of pending) {
+      try {
+        const bee = await this.#loadBeeBySignature(sig)
+        if (bee) loaded++
+      } catch { /* skip failed */ }
+    }
+
+    if (loaded) {
+      this.#refreshProjection()
+      EffectBus.emit('loader:bees-done', { loaded, failed: pending.length - loaded, total: this.#beeCache.size })
+    }
+  }
+
+  // -------------------------------------------------
+  // marker scanning (fallback for dev mode)
   // -------------------------------------------------
 
   #scanDirectoryForMarkers = async (dir: FileSystemDirectoryHandle): Promise<void> => {
@@ -183,26 +220,6 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
 
     console.log(`[script-preloader] bee ${signature} loaded as ${bee.iocKey}`)
     return bee
-  }
-
-  // -------------------------------------------------
-  // depth radar — pre-warm next depth (fire-and-forget)
-  // -------------------------------------------------
-
-  #warmChildSeeds = (parentDir: FileSystemDirectoryHandle): void => {
-    void (async () => {
-      try {
-        for await (const [name, entry] of parentDir.entries()) {
-          if (entry.kind !== 'directory') continue
-          if (name.startsWith('__') && name.endsWith('__')) continue
-
-          const childDir = entry as FileSystemDirectoryHandle
-          await this.#scanDirectoryForMarkers(childDir)
-        }
-      } catch {
-        // radar is best-effort, never fails the caller
-      }
-    })()
   }
 
   // -------------------------------------------------

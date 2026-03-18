@@ -1,9 +1,9 @@
 // revolucionstyle.com/journal/journal.service.ts
 // Journal entry CRUD — reads/writes entries in OPFS.
 
-import { EffectBus, SignatureService } from '@hypercomb/core'
+import { EffectBus } from '@hypercomb/core'
 import type { Cigar, CigarRatings, FlavorProfile, JournalEntry, Pairing } from './journal-entry.js'
-import { emptyEntry, JOURNAL_PROPERTIES_FILE } from './journal-entry.js'
+import { emptyEntry } from './journal-entry.js'
 
 type Store = {
   current: FileSystemDirectoryHandle
@@ -12,6 +12,8 @@ type Store = {
 }
 
 export class JournalService extends EventTarget {
+
+  static readonly #INDEX_KEY = 'hc:journal-index'
 
   #mode: 'idle' | 'editing' = 'idle'
   #entry: JournalEntry = emptyEntry()
@@ -103,27 +105,15 @@ export class JournalService extends EventTarget {
     const store = window.ioc.get<Store>('@hypercomb.social/Store')
     if (!store) return null
 
-    let domainDir: FileSystemDirectoryHandle
-    try {
-      domainDir = await store.current.getDirectoryHandle('revolucionstyle.com', { create: true })
-    } catch { return null }
-
-    let journalDir: FileSystemDirectoryHandle
-    try {
-      journalDir = await domainDir.getDirectoryHandle('journal', { create: true })
-    } catch { return null }
-
     const json = JSON.stringify(this.#entry, null, 2)
-    const bytes = new TextEncoder().encode(json)
-    const sig = await SignatureService.sign(bytes.buffer as ArrayBuffer)
+    const blob = new Blob([json], { type: 'application/json' })
+    const sig = await store.putResource(blob)
 
-    const entryDir = await journalDir.getDirectoryHandle(sig, { create: true })
-    const fileHandle = await entryDir.getFileHandle(JOURNAL_PROPERTIES_FILE, { create: true })
-    const writable = await fileHandle.createWritable()
-    try {
-      await writable.write(json)
-    } finally {
-      await writable.close()
+    // persist index so we can enumerate entries later
+    const index: string[] = JSON.parse(localStorage.getItem(JournalService.#INDEX_KEY) ?? '[]')
+    if (!index.includes(sig)) {
+      index.push(sig)
+      localStorage.setItem(JournalService.#INDEX_KEY, JSON.stringify(index))
     }
 
     const savedCigar = structuredClone(this.#entry.cigar)
@@ -139,12 +129,9 @@ export class JournalService extends EventTarget {
     if (!store) return null
 
     try {
-      const domainDir = await store.current.getDirectoryHandle('revolucionstyle.com')
-      const journalDir = await domainDir.getDirectoryHandle('journal')
-      const entryDir = await journalDir.getDirectoryHandle(sig)
-      const fileHandle = await entryDir.getFileHandle(JOURNAL_PROPERTIES_FILE)
-      const file = await fileHandle.getFile()
-      const text = await file.text()
+      const blob = await store.getResource(sig)
+      if (!blob) return null
+      const text = await blob.text()
       return JSON.parse(text) as JournalEntry
     } catch {
       return null
@@ -157,22 +144,17 @@ export class JournalService extends EventTarget {
     const store = window.ioc.get<Store>('@hypercomb.social/Store')
     if (!store) return []
 
+    const index: string[] = JSON.parse(localStorage.getItem(JournalService.#INDEX_KEY) ?? '[]')
     const entries: { sig: string; entry: JournalEntry }[] = []
 
-    try {
-      const domainDir = await store.current.getDirectoryHandle('revolucionstyle.com')
-      const journalDir = await domainDir.getDirectoryHandle('journal')
-
-      for await (const [name, handle] of journalDir.entries()) {
-        if (handle.kind !== 'directory') continue
-        try {
-          const fileHandle = await (handle as FileSystemDirectoryHandle).getFileHandle(JOURNAL_PROPERTIES_FILE)
-          const file = await fileHandle.getFile()
-          const text = await file.text()
-          entries.push({ sig: name, entry: JSON.parse(text) })
-        } catch { /* skip corrupted */ }
-      }
-    } catch { /* no journal dir yet */ }
+    for (const sig of index) {
+      try {
+        const blob = await store.getResource(sig)
+        if (!blob) continue
+        const text = await blob.text()
+        entries.push({ sig, entry: JSON.parse(text) })
+      } catch { /* skip corrupted */ }
+    }
 
     entries.sort((a, b) => b.entry.smokedAt - a.entry.smokedAt)
     return entries

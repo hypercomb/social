@@ -304,13 +304,7 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
       return
     }
 
-    const baseSegments = this.navigation.segments()
-    const target = [...baseSegments, ...parts]
-
-    // ensure() is idempotent — creates the full directory hierarchy as needed
-    await this.lineage.ensure(target)
-
-    // emit seed:added for the top-level seed (the one visible in the current layer)
+    // emit seed:added — HistoryRecorder will record the op
     EffectBus.emit('seed:added', { seed: parts[0] })
     this.requestSynchronize()
 
@@ -444,13 +438,7 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
   }
 
   private readonly ensureSeedInCurrentDirectory = async (seedName: string): Promise<void> => {
-    const baseSegments = this.navigation.segments()
-    const target = [...baseSegments, seedName]
-
-    // ensure() is idempotent — creates the seed directory if needed.
-    await this.lineage.ensure(target)
-
-    // reactive: notify the system a seed was added
+    // emit seed:added — HistoryRecorder will record the op
     EffectBus.emit('seed:added', { seed: seedName })
     this.requestSynchronize()
   }

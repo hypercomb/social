@@ -21,6 +21,7 @@ export class Store extends EventTarget {
   public static readonly LAYERS_DIRECTORY = '__layers__'
   public static readonly RESOURCES_DIRECTORY = '__resources__'
   public static readonly CLIPBOARD_DIRECTORY = '__clipboard__'
+  public static readonly HISTORY_DIRECTORY = '__history__'
 
   private static readonly CACHE_NAME = 'hypercomb-modules-v2'
 
@@ -31,6 +32,7 @@ export class Store extends EventTarget {
   public layers!: FileSystemDirectoryHandle
   public resources!: FileSystemDirectoryHandle
   public clipboard!: FileSystemDirectoryHandle
+  public history!: FileSystemDirectoryHandle
 
   #initialized = false
 
@@ -57,10 +59,9 @@ export class Store extends EventTarget {
     this.setCurrentHandle(this.hypercombRoot, [])
   }
 
-  // caller can use this when "moving to a seed"
+  // caller can use this when "moving to a seed" (read-only traversal)
   public readonly setCurrent = async (
-    segments: readonly string[],
-    create: boolean = false
+    segments: readonly string[]
   ): Promise<FileSystemDirectoryHandle | null> => {
 
     let dir = this.hypercombRoot
@@ -71,7 +72,7 @@ export class Store extends EventTarget {
       if (!seg || seg === '.' || seg === '..') continue
 
       try {
-        dir = await dir.getDirectoryHandle(seg, { create })
+        dir = await dir.getDirectoryHandle(seg)
         clean.push(seg)
       } catch {
         return null
@@ -109,6 +110,9 @@ export class Store extends EventTarget {
 
     this.clipboard =
       await this.opfsRoot.getDirectoryHandle(Store.CLIPBOARD_DIRECTORY, { create: true })
+
+    this.history =
+      await this.opfsRoot.getDirectoryHandle(Store.HISTORY_DIRECTORY, { create: true })
 
     // default current is the hypercomb root
     this.resetCurrent()

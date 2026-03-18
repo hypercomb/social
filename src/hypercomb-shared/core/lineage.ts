@@ -130,11 +130,10 @@ export class Lineage extends EventTarget {
   // domain selection (explicit only, reserved)
   // -------------------------------------------------
 
-  public setDomain = async (name: string, createIfMissing = false): Promise<void> => {
+  public setDomain = async (name: string): Promise<void> => {
     const raw = (name ?? '').trim()
     if (!raw) return
 
-    await this.store.opfsRoot.getDirectoryHandle(raw, { create: createIfMissing })
     this.#activeDomain = raw
     this.followLocation()
   }
@@ -148,34 +147,6 @@ export class Lineage extends EventTarget {
     start: FileSystemDirectoryHandle = this.store.current
   ): Promise<FileSystemDirectoryHandle | null> => {
     return await this.tryResolveFrom(start, segments)
-  }
-
-  public ensure = async (
-    segments: readonly string[],
-    start: FileSystemDirectoryHandle = this.store.hypercombRoot,
-  ): Promise<FileSystemDirectoryHandle | null> => {
-
-    let dir = start
-
-    for (let i = 0; i < segments.length; i++) {
-      const seg = (segments[i] ?? '').trim()
-      if (!seg) continue
-
-      try {
-        dir = await dir.getDirectoryHandle(seg, { create: true })
-      } catch {
-        this.#materialized = false
-        this.#missing = segments.slice(i)
-        this.dispatchEvent(new CustomEvent('change'))
-        return null
-      }
-    }
-
-    this.#materialized = true
-    this.#missing = []
-    this.dispatchEvent(new CustomEvent('change'))
-    this.invalidate()
-    return dir
   }
 
   private readonly tryResolveFrom = async (

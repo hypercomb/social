@@ -58,8 +58,7 @@ export const ensureInstall = async (): Promise<void> => {
     if (cached) {
       const m = tryParseManifest(cached)
       if (m?.beeDeps) (globalThis as any).__hypercombBeeDeps = m.beeDeps
-      // Ensure markers exist in hypercomb root (idempotent — safe to always run)
-      if (m?.bees) await applyBeeMarkers(store, m.bees)
+      // Manifest already in localStorage — ScriptPreloader reads it directly
     }
     return
   }
@@ -108,15 +107,15 @@ export const ensureInstall = async (): Promise<void> => {
     if (newManifest) {
       localStorage.setItem(MANIFEST_KEY, JSON.stringify(newManifest))
       if (newManifest.beeDeps) (globalThis as any).__hypercombBeeDeps = newManifest.beeDeps
-      // Place bee markers in hypercomb.io/ root so ScriptPreloader.find() discovers them
-      await applyBeeMarkers(store, newManifest.bees)
+      // Manifest already in localStorage — ScriptPreloader reads it directly
     }
     console.log('[ensure-install] done:', signature)
   } else {
-    // Still stash beeDeps and markers so partially-installed bees can load this session
+    // Still stash beeDeps so partially-installed bees can load this session
     if (newManifest) {
       if (newManifest.beeDeps) (globalThis as any).__hypercombBeeDeps = newManifest.beeDeps
-      if (newManifest.bees) await applyBeeMarkers(store, newManifest.bees)
+      // Persist partial manifest so ScriptPreloader can discover bees
+      localStorage.setItem(MANIFEST_KEY, JSON.stringify(newManifest))
     }
     console.warn('[ensure-install] install incomplete — will resume on next load')
   }
@@ -221,21 +220,8 @@ const removeStale = async (
   }
 }
 
-// Place empty marker files in hypercomb.io/ root — one per bee sig.
-// ScriptPreloader.find() always scans hypercombRoot, so all markers here
-// load globally (same behaviour as hypercomb-dev where bees are instantiated
-// directly at startup).
-const applyBeeMarkers = async (store: Store, bees: string[]): Promise<void> => {
-  let placed = 0
-  for (const sig of bees) {
-    if (!sig) continue
-    try {
-      await store.hypercombRoot.getFileHandle(sig, { create: true })
-      placed++
-    } catch { /* ignore — already exists or unwritable */ }
-  }
-  if (placed) console.log(`[ensure-install] placed ${placed} bee markers in hypercomb root`)
-}
+// No-op — bee discovery now reads directly from the cached manifest in localStorage.
+// The manifest is already persisted by ensureInstall() under MANIFEST_KEY.
 
 // ----- signature store helpers -----
 
