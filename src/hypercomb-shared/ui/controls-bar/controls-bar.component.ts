@@ -58,7 +58,9 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #idle = signal(false)
   #hovered = signal(false)
   #locked = signal(false)
+  #publicUtilityOpen = signal(false)
   #utility = signal(localStorage.getItem('hc:utility-expanded') !== 'false')
+  readonly publicUtilityOpen = this.#publicUtilityOpen.asReadonly()
   #moveMode = signal(false)
   #mode = signal<'browsing' | 'clipboard'>('browsing')
   #clipboardItems = signal<string[]>([])
@@ -128,6 +130,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     this.#moveModeUnsub = EffectBus.on<{ active: boolean }>('move:mode', ({ active }) => {
       this.#moveMode.set(active)
     })
+
   }
 
   ngOnDestroy(): void {
@@ -206,6 +209,15 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   readonly toggleTextOnly = (): void => {
     this.#textOnly.update(v => !v)
     EffectBus.emit('render:set-text-only', { textOnly: this.#textOnly() })
+  }
+
+  readonly toggleUtility = (): void => {
+    const next = !this.#publicUtilityOpen()
+    this.#publicUtilityOpen.set(next)
+    if (!next && this.#mode() === 'clipboard') {
+      this.#mode.set('browsing')
+      EffectBus.emit('clipboard:view', { active: false })
+    }
   }
 
   readonly openClipboard = (): void => {
