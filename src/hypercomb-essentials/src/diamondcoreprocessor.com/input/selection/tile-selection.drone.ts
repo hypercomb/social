@@ -32,6 +32,13 @@ class TileSelectionDrone extends Drone {
   #touched = new Set<string>()
   #justDragged = false
 
+  // selection-mode drag: pending until pointer moves beyond threshold
+  #pendingDrag = false
+  #pendingStartLabel: string | null = null
+  #pendingStartX = 0
+  #pendingStartY = 0
+  static #DRAG_THRESHOLD = 5 // px
+
   // move mode — drag-to-reorder
   #moveMode = false
   #reorderDragActive = false
@@ -85,6 +92,9 @@ class TileSelectionDrone extends Drone {
       if (payload.ctrlKey || payload.metaKey) {
         if (selection.isSelected(payload.label) && selection.count > 1) return
         selection.toggle(payload.label)
+      } else if (selection.count > 0 && selection.isSelected(payload.label)) {
+        // selection mode: click on a selected tile → change active
+        selection.setActive(payload.label)
       } else {
         selection.clear()
         selection.add(payload.label)
@@ -142,7 +152,7 @@ class TileSelectionDrone extends Drone {
 
   #onPointerDown = (e: PointerEvent): void => {
     if (this.#navigationBlocked) return
-    if (this.#dragActive || this.#reorderDragActive) return
+    if (this.#dragActive || this.#reorderDragActive || this.#pendingDrag) return
     if (!this.#renderContainer || !this.#renderer || !this.#canvas) return
 
     const label = this.#labelAtClient(e.clientX, e.clientY)
@@ -161,19 +171,50 @@ class TileSelectionDrone extends Drone {
       return
     }
 
-    // normal ctrl+drag selection
-    if (!e.ctrlKey && !e.metaKey) return
+    // ctrl+drag: immediate paint (original behavior)
+    if (e.ctrlKey || e.metaKey) {
+      this.#activePointerId = e.pointerId
+      this.#dragActive = true
+      this.#touched.clear()
+      this.#lastOp = selection.isSelected(label) ? 'remove' : 'add'
+      this.#applyOp(label)
+      return
+    }
 
-    this.#activePointerId = e.pointerId
-    this.#dragActive = true
-    this.#touched.clear()
-    this.#lastOp = selection.isSelected(label) ? 'remove' : 'add'
-    this.#applyOp(label)
+    // selection-mode drag: wait for movement threshold before committing to drag
+    if (selection.count > 0) {
+      this.#activePointerId = e.pointerId
+      this.#pendingDrag = true
+      this.#pendingStartLabel = label
+      this.#pendingStartX = e.clientX
+      this.#pendingStartY = e.clientY
+      return
+    }
   }
 
   #onPointerMove = (e: PointerEvent): void => {
-    if (!this.#dragActive || !this.#lastOp) return
     if (e.pointerId !== this.#activePointerId) return
+
+    // pending drag: check if pointer moved beyond threshold to promote to real drag
+    if (this.#pendingDrag) {
+      const dx = e.clientX - this.#pendingStartX
+      const dy = e.clientY - this.#pendingStartY
+      if (dx * dx + dy * dy >= TileSelectionDrone.#DRAG_THRESHOLD * TileSelectionDrone.#DRAG_THRESHOLD) {
+        this.#pendingDrag = false
+        this.#dragActive = true
+        this.#touched.clear()
+        const selection = this.#selection()
+        if (selection && this.#pendingStartLabel) {
+          this.#lastOp = selection.isSelected(this.#pendingStartLabel) ? 'remove' : 'add'
+          this.#applyOp(this.#pendingStartLabel)
+        }
+        const label = this.#labelAtClient(e.clientX, e.clientY)
+        if (label) this.#applyOp(label)
+      }
+      return
+    }
+
+    if (!this.#dragActive || !this.#lastOp) return
 
     const label = this.#labelAtClient(e.clientX, e.clientY)
     if (label) this.#applyOp(label)
@@ -185,6 +226,16 @@ class TileSelectionDrone extends Drone {
       this.#endReorderDrag(e.clientX, e.clientY)
       return
     }
+
+    // pending drag that never crossed threshold → treat as click (change active)
+    if (this.#pendingDrag) {
+      this.#pendingDrag = false
+      this.#activePointerId = null
+      this.#gate?.release('tile-selection')
+      // don't set #justDragged — let tile:click through for active change
+      return
+    }
+
     this.#endDrag()
   }
 
@@ -192,6 +243,8 @@ class TileSelectionDrone extends Drone {
     if (e.pointerId !== this.#activePointerId) return
     this.#reorderDragActive = false
     this.#reorderSourceLabel = null
+    this.#pendingDrag = false
+    this.#pendingStartLabel = null
     this.#endDrag()
   }
 

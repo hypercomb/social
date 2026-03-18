@@ -120,6 +120,7 @@ export class TileOverlayDrone extends Drone {
   #meshPublic = false
   #editing = false
   #editCooldown = false
+  #hasSelection = false
 
   protected override deps = {
     detector: '@diamondcoreprocessor.com/HexDetector',
@@ -127,7 +128,7 @@ export class TileOverlayDrone extends Drone {
     lineage: '@hypercomb.social/Lineage',
   }
 
-  protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count', 'render:set-orientation', 'render:geometry-changed', 'navigation:guard-start', 'navigation:guard-end', 'mesh:public-changed', 'editor:mode']
+  protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count', 'render:set-orientation', 'render:geometry-changed', 'navigation:guard-start', 'navigation:guard-end', 'mesh:public-changed', 'editor:mode', 'selection:changed']
   protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'tile:hidden', 'tile:blocked']
 
   protected override heartbeat = async (): Promise<void> => {
@@ -206,6 +207,11 @@ export class TileOverlayDrone extends Drone {
         this.#updateVisibility()
         setTimeout(() => { this.#editCooldown = false; this.#updateVisibility() }, 300)
       }
+    })
+
+    this.onEffect<{ selected: string[] }>('selection:changed', (payload) => {
+      this.#hasSelection = (payload?.selected?.length ?? 0) > 0
+      this.#updateVisibility()
     })
   }
 
@@ -471,7 +477,7 @@ export class TileOverlayDrone extends Drone {
       }
     }
 
-    if (e.ctrlKey || e.metaKey) {
+    if (e.ctrlKey || e.metaKey || this.#hasSelection) {
       this.emitEffect('tile:click', {
         q: this.#currentAxial!.q,
         r: this.#currentAxial!.r,
@@ -605,7 +611,7 @@ export class TileOverlayDrone extends Drone {
   #updateVisibility(): void {
     if (!this.#overlay) return
     const occupied = this.#currentIndex !== undefined && this.#currentIndex < this.#cellCount
-    this.#overlay.visible = occupied && !this.#editing && !this.#editCooldown
+    this.#overlay.visible = occupied && !this.#editing && !this.#editCooldown && !this.#hasSelection
   }
 
   #positionOverlay(q: number, r: number): void {

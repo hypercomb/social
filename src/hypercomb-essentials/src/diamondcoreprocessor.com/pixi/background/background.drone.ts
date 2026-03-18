@@ -75,10 +75,8 @@ export class BackgroundDrone extends Drone {
 
 import { MoveBackgroundProvider } from './move-background.provider.js'
 import { EditorBackgroundProvider } from './editor-background.provider.js'
-import { SelectionBackgroundProvider } from './selection-background.provider.js'
 
 const _background = new BackgroundDrone()
 _background.addProvider(new MoveBackgroundProvider(_background.requestRedraw))
 _background.addProvider(new EditorBackgroundProvider(_background.requestRedraw))
-_background.addProvider(new SelectionBackgroundProvider(_background.requestRedraw))
 window.ioc.register('@diamondcoreprocessor.com/BackgroundDrone', _background)
