@@ -865,7 +865,34 @@ export class ShowHoneycombWorker extends Drone {
       if (localSeedSet.has(hidden)) union.delete(hidden)
     }
 
-    let seedNames = await this.#orderByIndex(dir, Array.from(union), localSeedSet)
+    // clipboard view: show only clipboard labels
+    if (this.#clipboardView) {
+      const clipLabels = this.#clipboardView.labels
+      for (const seed of union) {
+        if (!clipLabels.has(seed)) union.delete(seed)
+      }
+    }
+
+    // order projection — use persisted order if available, else fall back to index-based ordering
+    const orderProjection = (window as any).ioc?.get?.('@diamondcoreprocessor.com/OrderProjection') as
+      { hydrate(sig: string): Promise<string[]> } | undefined
+    let seedNames: string[]
+    if (orderProjection) {
+      const locSig = await this.computeSignatureLocation(lineage)
+      const order = await orderProjection.hydrate(locSig.sig)
+      if (order.length > 0) {
+        const unionSet = new Set(union)
+        seedNames = order.filter(s => unionSet.has(s))
+        // append new seeds not yet in persisted order
+        for (const s of union) {
+          if (!seedNames.includes(s)) seedNames.push(s)
+        }
+      } else {
+        seedNames = await this.#orderByIndex(dir, Array.from(union), localSeedSet)
+      }
+    } else {
+      seedNames = await this.#orderByIndex(dir, Array.from(union), localSeedSet)
+    }
 
     // apply layout ordering if a __layout__ file exists
     const layout = this.resolve<any>('layout')

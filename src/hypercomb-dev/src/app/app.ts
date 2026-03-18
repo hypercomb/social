@@ -1,5 +1,5 @@
 import { AfterViewInit, Component, OnDestroy, signal } from '@angular/core';
-import { type Bee, EffectBus, get, list } from '@hypercomb/core';
+import { type Bee, EffectBus } from '@hypercomb/core';
 import type { HexOrientation } from '@hypercomb/essentials/diamondcoreprocessor.com/core/settings';
 import { RouterOutlet } from '@angular/router';
 import { SearchBarComponent } from '@hypercomb/shared';

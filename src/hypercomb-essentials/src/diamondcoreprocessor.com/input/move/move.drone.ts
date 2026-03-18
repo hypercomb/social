@@ -194,6 +194,7 @@ export class MoveDrone extends Drone {
     }
 
     console.log('[move] beginMove', { anchorLabel, selectedLabels: selected ? [...selected] : [], movedGroupSize: this.#movedGroup.size, movedLabels: [...this.#movedGroup.keys()], cellCount: this.#cellCount, cellLabelsLen: this.#cellLabels.length, cellLabels: [...this.#cellLabels] })
+
     this.#anchorAxial = anchorAxial
     return true
   }
