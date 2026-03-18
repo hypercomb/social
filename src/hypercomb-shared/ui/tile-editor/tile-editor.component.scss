@@ -377,8 +377,8 @@
 
 .editor-footer {
   display: flex;
-  justify-content: flex-end;
-  gap: 0.5em;
+  justify-content: space-between;
+  align-items: center;
   padding: 0.6em 0.8em;
   border-top: 1px solid #2a2a2e;
 
@@ -408,4 +408,35 @@
       }
     }
   }
+}
+
+.footer-tools {
+  display: flex;
+  gap: 0.4em;
+}
+
+.tool-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2em;
+  height: 2em;
+  padding: 0 !important;
+  border-radius: 5px;
+  border: 1px solid #3a3a3e;
+  background: #252528;
+  color: #888;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+
+  &:hover {
+    background: #333336;
+    border-color: #555;
+    color: #c8975a;
+  }
+}
+
+.footer-actions {
+  display: flex;
+  gap: 0.5em;
 }

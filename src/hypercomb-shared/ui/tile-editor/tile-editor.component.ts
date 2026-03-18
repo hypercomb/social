@@ -231,6 +231,13 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
     void this.imageEditor.setOrientation(nextOrientation, transform)
   }
 
+  // ── search ────────────────────────────────────────────────────
+
+  readonly searchGoogle = (): void => {
+    const q = this.seed()
+    if (q) window.open(`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(q)}`, '_blank')
+  }
+
   // ── save / cancel ──────────────────────────────────────────────
 
   readonly save = (): void => {
