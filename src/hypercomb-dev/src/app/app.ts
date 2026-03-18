@@ -28,6 +28,9 @@ import { SelectionService } from '@hypercomb/essentials/diamondcoreprocessor.com
 import '@hypercomb/essentials/diamondcoreprocessor.com/input/escape-cascade'
 import { TileEditorComponent } from '@hypercomb/shared/ui/tile-editor/tile-editor.component'
 import { ControlsBarComponent } from '@hypercomb/shared/ui';
+import { ClipboardService } from '@hypercomb/essentials/diamondcoreprocessor.com/core/clipboard/clipboard.service'
+import { ClipboardWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/core/clipboard/clipboard.drone'
+import { OrderProjection } from '@hypercomb/essentials/diamondcoreprocessor.com/core/order-projection'
 
 const _deps = [
   AxialService,
@@ -50,6 +53,9 @@ const _deps = [
   ImageEditorService,
   KeyMapService,
   SelectionService,
+  ClipboardService,
+  ClipboardWorker,
+  OrderProjection,
 ]
 
 void _deps

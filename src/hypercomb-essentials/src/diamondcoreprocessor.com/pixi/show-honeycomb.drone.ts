@@ -122,6 +122,9 @@ export class ShowHoneycombWorker extends Drone {
   private meshSig = ''
   private meshSeedsRev = 0
   private meshSeeds: string[] = []
+
+  // clipboard view override — when set, render from this dir instead of explorer
+  #clipboardView: { labels: Set<string>; sourceSegments: string[] } | null = null
   private meshSub: MeshSub | null = null
   private readonly publisherId: string = (() => {
     const key = 'hc:show-honeycomb:publisher-id'
@@ -726,10 +729,22 @@ export class ShowHoneycombWorker extends Drone {
       return currentKey !== locationKey || currentRev !== fsRev || currentMeshRev !== meshRev
     }
 
-    const dir = await lineage.explorerDir()
-    if (isStale()) {
-      this.renderQueued = true
-      return
+    let dir: FileSystemDirectoryHandle | null
+    if (this.#clipboardView) {
+      // clipboard view: resolve source dir from stored segments
+      const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as { hypercombRoot: FileSystemDirectoryHandle } | undefined
+      dir = store?.hypercombRoot ?? null
+      if (dir) {
+        for (const seg of this.#clipboardView.sourceSegments) {
+          try { dir = await dir!.getDirectoryHandle(seg, { create: false }) } catch { dir = null; break }
+        }
+      }
+    } else {
+      dir = await lineage.explorerDir()
+      if (isStale()) {
+        this.renderQueued = true
+        return
+      }
     }
     if (!dir) {
       console.warn('[show-honeycomb] BAIL: explorerDir returned null')
@@ -758,14 +773,15 @@ export class ShowHoneycombWorker extends Drone {
     }))
 
     // note: apply history — filter out seeds whose last operation is "remove"
+    // Skip when clipboard view is active — clipboard labels are authoritative
     const historyService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as HistoryService | undefined
-    if (historyService) {
+    if (!this.#clipboardView && historyService) {
       const sig = await this.computeSignatureLocation(lineage)
       const ops = await historyService.replay(sig.sig)
       const seedState = new Map<string, string>() // seed → last op
       for (const op of ops) seedState.set(op.seed, op.op)
       for (const [seed, lastOp] of seedState) {
-        if (lastOp === 'remove' && !localSeedSet.has(seed)) union.delete(seed)
+        if (lastOp === 'remove') union.delete(seed)
       }
     }
 
@@ -780,7 +796,34 @@ export class ShowHoneycombWorker extends Drone {
       if (localSeedSet.has(hidden)) union.delete(hidden)
     }
 
-    let seedNames = await this.#orderByIndex(dir, Array.from(union), localSeedSet)
+    // clipboard view: show only clipboard labels
+    if (this.#clipboardView) {
+      const clipLabels = this.#clipboardView.labels
+      for (const seed of union) {
+        if (!clipLabels.has(seed)) union.delete(seed)
+      }
+    }
+
+    // order projection — use persisted order if available, else fall back to index-based ordering
+    const orderProjection = (window as any).ioc?.get?.('@diamondcoreprocessor.com/OrderProjection') as
+      { hydrate(sig: string): Promise<string[]> } | undefined
+    let seedNames: string[]
+    if (orderProjection) {
+      const locSig = await this.computeSignatureLocation(lineage)
+      const order = await orderProjection.hydrate(locSig.sig)
+      if (order.length > 0) {
+        const unionSet = new Set(union)
+        seedNames = order.filter(s => unionSet.has(s))
+        // append new seeds not yet in persisted order
+        for (const s of union) {
+          if (!seedNames.includes(s)) seedNames.push(s)
+        }
+      } else {
+        seedNames = await this.#orderByIndex(dir, Array.from(union), localSeedSet)
+      }
+    } else {
+      seedNames = await this.#orderByIndex(dir, Array.from(union), localSeedSet)
+    }
 
     // apply search filter if active
     if (this.filterKeyword) {
@@ -1037,6 +1080,22 @@ export class ShowHoneycombWorker extends Drone {
     // search:filter effect — live-filter visible tiles by keyword
     this.onEffect<{ keyword: string }>('search:filter', ({ keyword }) => {
       this.filterKeyword = String(keyword ?? '').trim().toLowerCase()
+      this.requestRender()
+    })
+
+    // seed lifecycle re-renders are driven by the processor:
+    // HistoryRecorder records the op → calls hypercomb().act() → dispatches synchronize
+
+    // clipboard:view effect — filter visible seeds to clipboard contents
+    this.onEffect<{ active: boolean; labels?: string[]; sourceSegments?: string[] }>('clipboard:view', (payload) => {
+      if (payload?.active && payload.labels) {
+        this.#clipboardView = {
+          labels: new Set(payload.labels),
+          sourceSegments: payload.sourceSegments ?? [],
+        }
+      } else {
+        this.#clipboardView = null
+      }
       this.requestRender()
     })
 

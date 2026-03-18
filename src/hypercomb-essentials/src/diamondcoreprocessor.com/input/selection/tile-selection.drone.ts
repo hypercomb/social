@@ -1,12 +1,13 @@
 // hypercomb-essentials/src/diamondcoreprocessor.com/input/selection/tile-selection.drone.ts
 // Pointer-to-selection coordination: click-select, ctrl+click toggle, ctrl+drag paint-select/deselect.
 
-import { Drone } from '@hypercomb/core'
+import { Drone, EffectBus, hypercomb } from '@hypercomb/core'
 import { Application, Container, Point } from 'pixi.js'
 import type { HostReadyPayload } from '../../pixi/pixi-host.drone.js'
 import type { Axial } from '../hex-detector.js'
 import type { SelectionService } from '../../core/selection/selection.service.js'
 import type { InputGate } from '../input-gate.service.js'
+import type { OrderProjection } from '../../core/order-projection.js'
 
 type CellCountPayload = { count: number; labels: string[] }
 type TileClickPayload = { q: number; r: number; label: string; index: number; ctrlKey: boolean; metaKey: boolean }
@@ -30,6 +31,11 @@ class TileSelectionDrone extends Drone {
   #lastOp: 'add' | 'remove' | null = null
   #touched = new Set<string>()
   #justDragged = false
+
+  // move mode — drag-to-reorder
+  #moveMode = false
+  #reorderDragActive = false
+  #reorderSourceLabel: string | null = null
 
   // navigation click guard — blocks clicks during layer transitions
   #navigationBlocked = false
@@ -96,6 +102,11 @@ class TileSelectionDrone extends Drone {
       if (this.#navigationGuardTimer) clearTimeout(this.#navigationGuardTimer)
       this.#navigationGuardTimer = setTimeout(() => { this.#navigationBlocked = false }, 200)
     })
+    // move mode toggle from controls bar
+    this.onEffect<{ active: boolean }>('controls:move-mode', (payload) => {
+      this.#moveMode = !!payload?.active
+    })
+
     this.onEffect('navigation:guard-end', () => {
       this.#navigationBlocked = false
       if (this.#navigationGuardTimer) { clearTimeout(this.#navigationGuardTimer); this.#navigationGuardTimer = null }
@@ -131,8 +142,7 @@ class TileSelectionDrone extends Drone {
 
   #onPointerDown = (e: PointerEvent): void => {
     if (this.#navigationBlocked) return
-    if (!e.ctrlKey && !e.metaKey) return
-    if (this.#dragActive) return
+    if (this.#dragActive || this.#reorderDragActive) return
     if (!this.#renderContainer || !this.#renderer || !this.#canvas) return
 
     const label = this.#labelAtClient(e.clientX, e.clientY)
@@ -142,6 +152,17 @@ class TileSelectionDrone extends Drone {
     if (!selection) return
 
     if (!this.#gate?.claim('tile-selection')) return
+
+    // move mode: start reorder drag when clicking a selected tile
+    if (this.#moveMode && !e.ctrlKey && !e.metaKey && selection.isSelected(label)) {
+      this.#activePointerId = e.pointerId
+      this.#reorderDragActive = true
+      this.#reorderSourceLabel = label
+      return
+    }
+
+    // normal ctrl+drag selection
+    if (!e.ctrlKey && !e.metaKey) return
 
     this.#activePointerId = e.pointerId
     this.#dragActive = true
@@ -160,11 +181,17 @@ class TileSelectionDrone extends Drone {
 
   #onPointerUp = (e: PointerEvent): void => {
     if (e.pointerId !== this.#activePointerId) return
+    if (this.#reorderDragActive) {
+      this.#endReorderDrag(e.clientX, e.clientY)
+      return
+    }
     this.#endDrag()
   }
 
   #onPointerCancel = (e: PointerEvent): void => {
     if (e.pointerId !== this.#activePointerId) return
+    this.#reorderDragActive = false
+    this.#reorderSourceLabel = null
     this.#endDrag()
   }
 
@@ -240,6 +267,44 @@ class TileSelectionDrone extends Drone {
     return {
       x: (cx - rect.left) * (screen.width / rect.width),
       y: (cy - rect.top) * (screen.height / rect.height),
+    }
+  }
+
+  // ── reorder drag ───────────────────────────────────────────
+
+  #endReorderDrag(cx: number, cy: number): void {
+    const targetLabel = this.#labelAtClient(cx, cy)
+    this.#reorderDragActive = false
+    this.#activePointerId = null
+
+    const selection = this.#selection()
+    if (!targetLabel || !selection || targetLabel === this.#reorderSourceLabel) {
+      this.#reorderSourceLabel = null
+      return
+    }
+
+    // compute new order: move all selected labels to the target position
+    const selected = new Set(selection.selected())
+    const currentOrder = [...this.#cellLabels].slice(0, this.#cellCount)
+    if (currentOrder.length === 0) { this.#reorderSourceLabel = null; return }
+
+    const targetIdx = currentOrder.indexOf(targetLabel)
+    if (targetIdx === -1) { this.#reorderSourceLabel = null; return }
+
+    // remove selected from current positions
+    const remaining = currentOrder.filter(l => !selected.has(l))
+    // find where target ended up in remaining
+    const insertIdx = remaining.indexOf(targetLabel)
+    // insert selected right after target
+    const selectedInOrder = currentOrder.filter(l => selected.has(l))
+    remaining.splice(insertIdx + 1, 0, ...selectedInOrder)
+
+    this.#reorderSourceLabel = null
+
+    // persist via OrderProjection + trigger processor
+    const orderProjection = (window as any).ioc?.get?.('@diamondcoreprocessor.com/OrderProjection') as OrderProjection | undefined
+    if (orderProjection) {
+      void orderProjection.reorder(remaining).then(() => void new hypercomb().act())
     }
   }
 

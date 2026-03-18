@@ -58,6 +58,9 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #clipboardItems = signal<string[]>([])
   #roomValue = signal('')
   #roomOpen = signal(false)
+  #moveMode = signal(false)
+  #hasSelection = signal(false)
+
   #idleTimer: ReturnType<typeof setTimeout> | null = null
   readonly #IDLE_DELAY = 3000
 
@@ -79,11 +82,17 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   readonly mode = this.#mode.asReadonly()
   readonly clipboardItems = this.#clipboardItems.asReadonly()
   readonly clipboardCount = computed(() => this.#clipboardItems().length)
+  readonly moveMode = this.#moveMode.asReadonly()
+  readonly hasSelection = this.#hasSelection.asReadonly()
+
   readonly visible = computed(() => !this.#idle() || this.#hovered())
   readonly roomValue = this.#roomValue.asReadonly()
   readonly roomOpen = this.#roomOpen.asReadonly()
 
   // ── lifecycle ───────────────────────────────────────────
+
+  #clipboardUnsub: (() => void) | null = null
+  #selectionUnsub: (() => void) | null = null
 
   ngOnInit(): void {
     // pre-fill room from store
@@ -95,6 +104,25 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     window.addEventListener('keydown', this.#onActivity)
     window.addEventListener('navigate', this.#onActivity)
     this.#resetIdleTimer()
+
+    this.#selectionUnsub = EffectBus.on<{ selected: string[] }>(
+      'selection:changed',
+      (payload) => {
+        this.#hasSelection.set((payload?.selected?.length ?? 0) > 0)
+      },
+    )
+
+    this.#clipboardUnsub = EffectBus.on<{ items: { label: string }[]; count: number }>(
+      'clipboard:changed',
+      (payload) => {
+        const items = payload?.items ?? []
+        this.#clipboardItems.set(items.map(i => i.label))
+        // auto-close clipboard mode when clipboard empties (e.g. after place)
+        if (items.length === 0 && this.#mode() === 'clipboard') {
+          this.closeClipboard()
+        }
+      },
+    )
   }
 
   ngOnDestroy(): void {
@@ -103,6 +131,8 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     window.removeEventListener('keydown', this.#onActivity)
     window.removeEventListener('navigate', this.#onActivity)
     if (this.#idleTimer) clearTimeout(this.#idleTimer)
+    this.#clipboardUnsub?.()
+    this.#selectionUnsub?.()
   }
 
   // ── navigation actions ────────────────────────────────
@@ -157,19 +187,40 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   }
 
   readonly moveItem = (): void => {
-    EffectBus.emit('controls:action', { action: 'move' })
+    this.#moveMode.update(v => !v)
+    EffectBus.emit('controls:move-mode', { active: this.#moveMode() })
   }
 
   readonly openClipboard = (): void => {
     this.#mode.set('clipboard')
+    const clipSvc = get('@diamondcoreprocessor.com/ClipboardService') as
+      { items?: { label: string; sourceSegments: readonly string[] }[] } | undefined
+    const items = clipSvc?.items ?? []
+    EffectBus.emit('clipboard:view', {
+      active: true,
+      labels: items.map(i => i.label),
+      sourceSegments: [...(items[0]?.sourceSegments ?? [])],
+    })
   }
 
   readonly closeClipboard = (): void => {
     this.#mode.set('browsing')
+    EffectBus.emit('clipboard:view', { active: false })
+  }
+
+  readonly place = (): void => {
+    EffectBus.emit('controls:action', { action: 'place' })
+  }
+
+  readonly paste = (): void => {
+    EffectBus.emit('clipboard:view', { active: false })
+    this.#mode.set('browsing')
+    EffectBus.emit('controls:action', { action: 'paste' })
   }
 
   readonly clearClipboard = (): void => {
-    this.#clipboardItems.set([])
+    EffectBus.emit('controls:action', { action: 'clear-clipboard' })
+    EffectBus.emit('clipboard:view', { active: false })
     this.#mode.set('browsing')
   }
 

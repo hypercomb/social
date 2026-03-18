@@ -4,7 +4,7 @@
 
 import { SignatureService, SignatureStore } from '@hypercomb/core'
 
-export type HistoryOpType = 'add' | 'remove' | 'rename' | 'add-drone' | 'remove-drone'
+export type HistoryOpType = 'add' | 'remove' | 'reorder' | 'rename' | 'add-drone' | 'remove-drone'
 
 export type HistoryOp = {
   op: HistoryOpType

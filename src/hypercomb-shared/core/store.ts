@@ -20,6 +20,7 @@ export class Store extends EventTarget {
   public static readonly DEPENDENCIES_DIRECTORY = '__dependencies__'
   public static readonly LAYERS_DIRECTORY = '__layers__'
   public static readonly RESOURCES_DIRECTORY = '__resources__'
+  public static readonly CLIPBOARD_DIRECTORY = '__clipboard__'
 
   private static readonly CACHE_NAME = 'hypercomb-modules-v2'
 
@@ -29,6 +30,7 @@ export class Store extends EventTarget {
   public dependencies!: FileSystemDirectoryHandle
   public layers!: FileSystemDirectoryHandle
   public resources!: FileSystemDirectoryHandle
+  public clipboard!: FileSystemDirectoryHandle
 
   #initialized = false
 
@@ -104,6 +106,9 @@ export class Store extends EventTarget {
 
     this.resources =
       await this.opfsRoot.getDirectoryHandle(Store.RESOURCES_DIRECTORY, { create: true })
+
+    this.clipboard =
+      await this.opfsRoot.getDirectoryHandle(Store.CLIPBOARD_DIRECTORY, { create: true })
 
     // default current is the hypercomb root
     this.resetCurrent()

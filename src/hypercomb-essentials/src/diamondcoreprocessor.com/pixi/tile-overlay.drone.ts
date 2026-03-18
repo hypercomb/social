@@ -519,21 +519,10 @@ export class TileOverlayDrone extends Drone {
     void new hypercomb().act()
   }
 
-  #handleRemove = async (label: string): Promise<void> => {
-    const lineage = this.resolve<{ explorerDir(): Promise<FileSystemDirectoryHandle | null> }>('lineage')
-    if (lineage) {
-      const dir = await lineage.explorerDir()
-      if (dir) {
-        try {
-          await dir.removeEntry(label, { recursive: true })
-        } catch (e) {
-          console.warn('[TileOverlay] failed to remove seed folder:', label, e)
-        }
-      }
-    }
-
+  #handleRemove = (label: string): void => {
+    // History-driven: emit seed:removed → HistoryRecorder records the op →
+    // show-honeycomb re-renders and filters out the seed. Folder stays in OPFS.
     EffectBus.emit('seed:removed', { seed: label })
-    void new hypercomb().act()
   }
 
   #handleAdopt = async (label: string): Promise<void> => {
