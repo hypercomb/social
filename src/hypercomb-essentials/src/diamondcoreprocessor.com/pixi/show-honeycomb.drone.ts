@@ -1153,6 +1153,17 @@ export class ShowHoneycombWorker extends Drone {
       this.renderedLocationKey = ''
     }
 
+    // listen for public/private toggle — clear mesh seeds when going private so
+    // external tiles disappear immediately without requiring a manual refresh
+    this.onEffect<{ public: boolean }>('mesh:public-changed', ({ public: isPublic }) => {
+      if (!isPublic) {
+        this.meshSeeds = []
+        this.meshSeedsRev++
+      }
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
     // listen for pivot mode toggle (loads pre-rotated snapshots + rotated labels)
     this.onEffect<{ pivot: boolean }>('render:set-pivot', (payload) => {
       if (this.#pivot !== payload.pivot) {

@@ -68,10 +68,10 @@ export class NostrMeshWorker extends Drone {
   private kinds: number[] | null = [29010]
 
   // note: expiry rules live here
-  private ttlMs = 120_000
+  private ttlMs = 600_000
   private perSigCap = 128
   private expiryRules: MeshExpiryRule[] = [
-    { id: 'default', ttlMs: 120_000 }
+    { id: 'default', ttlMs: 600_000 }
   ]
 
   // -----------------------------
@@ -419,7 +419,7 @@ export class NostrMeshWorker extends Drone {
     const s = String(sig ?? '').trim()
     if (!s) return false
 
-    const tags: string[][] = [['x', s], ['expiration', String(Math.floor(Date.now() / 1000) + 120)]]
+    const tags: string[][] = [['x', s], ['expiration', String(Math.floor(Date.now() / 1000) + 600)]]
 
     if (Array.isArray(extraTags)) {
       for (const t of extraTags) {
@@ -793,7 +793,7 @@ export class NostrMeshWorker extends Drone {
     const ws = this.sockets.get(url)
     if (!ws || ws.readyState !== WebSocket.OPEN) return
 
-    const filter: any = { '#x': [b.sig], since: Math.floor(Date.now() / 1000) - 180 }
+    const filter: any = { '#x': [b.sig], since: Math.floor(Date.now() / 1000) - 900 }
     if (Array.isArray(this.kinds) && this.kinds.length > 0) filter.kinds = this.kinds
 
     this.stats.reqSent++
