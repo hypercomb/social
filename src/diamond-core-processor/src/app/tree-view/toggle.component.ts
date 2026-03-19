@@ -8,8 +8,7 @@ import { Component, input, output } from '@angular/core'
     <button
       class="toggle"
       [class.on]="enabled()"
-      [class.dimmed]="!effectivelyEnabled()"
-      [disabled]="!effectivelyEnabled() && !enabled()"
+      [class.dimmed]="!effectivelyEnabled() && enabled()"
       (click)="toggled.emit(); $event.stopPropagation()">
       <span class="track"></span>
       <span class="thumb"></span>
@@ -72,8 +71,6 @@ import { Component, input, output } from '@angular/core'
 
     .toggle.dimmed {
       opacity: 0.3;
-      cursor: default;
-      pointer-events: none;
     }
   `]
 })
