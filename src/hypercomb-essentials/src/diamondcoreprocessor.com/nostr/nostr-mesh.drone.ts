@@ -64,11 +64,6 @@ export class NostrMeshWorker extends Drone {
   // note: default public relay (can be overridden by localstorage/configureRelays)
   private relays: string[] = [HARD_RELAY, LOCAL_RELAY]
 
-  private forceHardRelay = (): void => {
-    this.relays = [HARD_RELAY]
-    try { localStorage.setItem('hc:nostrmesh:relays', JSON.stringify([HARD_RELAY])) } catch {}
-  }
-
   // note: set to null to accept any kind matching x
   private kinds: number[] | null = [29010]
 
@@ -145,16 +140,18 @@ export class NostrMeshWorker extends Drone {
   // public api
   // -----------------------------
 
-  public configureRelays = (_urls: string[], persist = true): void => {
-    this.relays = [HARD_RELAY]
-    if (persist) {
-      try { localStorage.setItem('hc:nostrmesh:relays', JSON.stringify([HARD_RELAY])) } catch {}
-    }
+  public configureRelays = (urls: string[], persist = true): void => {
+    const next = (Array.isArray(urls) ? urls : [])
+      .map(u => String(u ?? '').trim())
+      .filter(u => u.startsWith('ws://') || u.startsWith('wss://'))
+
+    this.relays = next.length > 0 ? Array.from(new Set(next)) : [HARD_RELAY]
+    if (persist) this.saveRelays(this.relays)
     this.reconnectAll()
   }
 
   private loadRelayConfig = (): void => {
-    this.forceHardRelay()
+    this.relays = this.loadRelays(this.relays)
   }
 
   public configureKinds = (kinds: number[] | null, persist = true): void => {
@@ -505,13 +502,11 @@ export class NostrMeshWorker extends Drone {
 
   private connectAll = (): void => {
   if (!this.networkEnabled) return
-  this.forceHardRelay()
-  this.ensureSocket(HARD_RELAY)
+  for (const url of this.relays) this.ensureSocket(url)
 }
 
   private ensureSocketHealth = (): void => {
     if (!this.networkEnabled || this.stopped) return
-    if (this.sockets.size > 0) return
 
     // reset backoff for relays stuck at max attempts for over 30s
     const now = Date.now()
@@ -524,7 +519,10 @@ export class NostrMeshWorker extends Drone {
       }
     }
 
-    this.connectAll()
+    // reconnect any configured relays that are missing
+    for (const url of this.relays) {
+      if (!this.sockets.has(url)) this.ensureSocket(url)
+    }
   }
 
   private reconnectAll = (): void => {
@@ -553,7 +551,6 @@ export class NostrMeshWorker extends Drone {
 
   private ensureSocket = (relay: string): void => {
     if (!this.networkEnabled) return
-    if (relay !== HARD_RELAY) return
     if (this.stopped) return
     if (this.sockets.has(relay)) return
     if (!this.canAttemptRelay(relay)) return
@@ -633,6 +630,8 @@ export class NostrMeshWorker extends Drone {
 
   private canAttemptRelay = (relay: string): boolean => {
     if (!this.isLoopbackRelay(relay)) return true
+    // allow loopback if explicitly in relay list or localStorage flag is set
+    if (this.relays.includes(relay)) return true
     if (this.allowLoopbackRelay()) return true
 
     this.note('socket:skip-loopback-relay', relay)
