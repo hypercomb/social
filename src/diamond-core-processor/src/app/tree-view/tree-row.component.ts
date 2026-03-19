@@ -1,4 +1,5 @@
-// src/app/tree-view/tree-row.component.ts
+// diamond-core-processor/src/app/tree-view/tree-row.component.ts
+
 import { Component, input, output } from '@angular/core'
 import { ToggleComponent } from './toggle.component'
 import { DiamondIconComponent } from './diamond-icon.component'

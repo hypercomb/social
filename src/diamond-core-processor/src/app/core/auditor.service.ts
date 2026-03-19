@@ -1,4 +1,5 @@
-// src/app/core/auditor.service.ts
+// diamond-core-processor/src/app/core/auditor.service.ts
+
 import { Injectable } from '@angular/core'
 import { SignatureService } from '@hypercomb/core'
 

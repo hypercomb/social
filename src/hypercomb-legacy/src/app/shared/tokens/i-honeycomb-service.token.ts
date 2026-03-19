@@ -1,4 +1,5 @@
-// src/app/shared/tokens/i-comb-service.token.ts
+// hypercomb-legacy/src/app/shared/tokens/i-honeycomb-service.token.ts
+
 import { InjectionToken, Signal } from "@angular/core"
 import { Cell } from "src/app/models/cell"
 

@@ -1,4 +1,4 @@
-// src/app/core/model.ts
+// hypercomb-shared/core/model.ts
 
 export interface FileEntry {
   name: string

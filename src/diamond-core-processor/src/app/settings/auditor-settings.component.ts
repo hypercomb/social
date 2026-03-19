@@ -1,4 +1,5 @@
-// src/app/settings/auditor-settings.component.ts
+// diamond-core-processor/src/app/settings/auditor-settings.component.ts
+
 import { Component, inject, signal } from '@angular/core'
 import { AuditorService } from '../core/auditor.service'
 

@@ -1,4 +1,5 @@
-// src/app/common/tile-editor/tile-image/image-capture-manager.ts
+// hypercomb-legacy/src/app/common/tile-editor/tile-image/image-capture-manager.ts
+
 import { Injectable } from "@angular/core"
 import { Container, RenderTexture, RenderOptions } from "pixi.js"
 import { PixiDataServiceBase } from "src/app/database/pixi-data-service-base"

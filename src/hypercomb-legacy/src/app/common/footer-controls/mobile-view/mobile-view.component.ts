@@ -1,4 +1,5 @@
-// src/app/common/footer-controls/mobile-view/mobile-view.component.ts
+// hypercomb-legacy/src/app/common/footer-controls/mobile-view/mobile-view.component.ts
+
 import { Component, inject, Input } from '@angular/core'
 import { Hypercomb } from 'src/app/core/mixins/abstraction/hypercomb.base'
 import { ACTION_REGISTRY } from 'src/app/shared/tokens/i-hypercomb.token'

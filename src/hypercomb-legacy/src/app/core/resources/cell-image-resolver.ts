@@ -1,5 +1,4 @@
-// src/app/core/resources/image-resolver.ts
-// src/app/core/hive/resolvers/image-resource.resolver.ts
+// hypercomb-legacy/src/app/core/resources/cell-image-resolver.ts
 
 import { inject, Injectable } from '@angular/core'
 import { Signature } from 'src/app/hive/storage/hash.service'

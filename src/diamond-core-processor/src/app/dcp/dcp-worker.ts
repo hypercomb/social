@@ -1,4 +1,5 @@
-// src/app/dcp/dcp-worker.ts
+// diamond-core-processor/src/app/dcp/dcp-worker.ts
+
 import { ensureEsbuild } from './esbuild-runtime'
 
 self.onmessage = async (e: MessageEvent) => {

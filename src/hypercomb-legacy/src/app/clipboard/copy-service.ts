@@ -1,4 +1,4 @@
-// src/app/clipboard/copy-service.ts
+// hypercomb-legacy/src/app/clipboard/copy-service.ts
 
 import { inject, Injectable } from "@angular/core"
 import { async } from "rxjs"

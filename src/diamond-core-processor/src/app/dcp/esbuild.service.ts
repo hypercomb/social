@@ -1,4 +1,5 @@
-// src/app/dcp/esbuild.service.ts
+// diamond-core-processor/src/app/dcp/esbuild.service.ts
+
 import { Injectable } from '@angular/core'
 import { ensureEsbuild } from './esbuild-runtime'
 

@@ -1,4 +1,5 @@
-// src/app/hive/hive-route-watcher.ts
+// hypercomb-legacy/src/app/hive/hive-route-watcher.ts
+
 import { Injectable, inject } from "@angular/core"
 import { Router, NavigationEnd } from "@angular/router"
 import { filter } from "rxjs"

@@ -1,4 +1,5 @@
-// src/app/tree-view/diamond-icon.component.ts
+// diamond-core-processor/src/app/tree-view/diamond-icon.component.ts
+
 import { Component, input, output } from '@angular/core'
 import type { TreeNodeKind } from '../core/tree-node'
 

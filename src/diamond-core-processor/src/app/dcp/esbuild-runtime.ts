@@ -1,4 +1,5 @@
-// src/app/dcp/esbuild-runtime.ts
+// diamond-core-processor/src/app/dcp/esbuild-runtime.ts
+
 import * as esbuild from 'esbuild-wasm'
 
 let initPromise: Promise<void> | null = null

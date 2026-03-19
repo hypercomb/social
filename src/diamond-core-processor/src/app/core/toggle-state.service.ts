@@ -1,4 +1,5 @@
-// src/app/core/toggle-state.service.ts
+// diamond-core-processor/src/app/core/toggle-state.service.ts
+
 import { Injectable } from '@angular/core'
 import type { TreeNode } from './tree-node'
 

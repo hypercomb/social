@@ -1,4 +1,5 @@
-// src/app/common/opfs/opfs-manager.ts
+// hypercomb-legacy/src/app/common/opfs/opfs-manager.ts
+
 import { Injectable } from "@angular/core";
 
 @Injectable({ providedIn: "root" })

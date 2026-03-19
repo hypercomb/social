@@ -1,4 +1,5 @@
-// src/app/core/hive/nucleotide.manager.ts
+// hypercomb-legacy/src/app/core/hive/nucleotide.manager.ts
+
 import { inject, Injectable } from '@angular/core'
 import { Seed, IStrand } from './i-dna.token'
 import { StrandManager } from './strand-manager'

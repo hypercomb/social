@@ -1,4 +1,5 @@
-// src/app/core/hive/i-dna.token.ts
+// hypercomb-legacy/src/app/core/hive/i-dna.token.ts
+
 import { InjectionToken } from '@angular/core'
 import { Signature } from 'src/app/hive/storage/hash.service'
 

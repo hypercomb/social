@@ -1,4 +1,4 @@
-// src/<domain>/pixi/zoom/zoom-arbiter.ts
+// hypercomb-essentials/src/diamondcoreprocessor.com/core/zoom/zoom-arbiter.ts
 
 export class ZoomArbiter {
 

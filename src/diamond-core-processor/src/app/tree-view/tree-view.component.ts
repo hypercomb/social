@@ -1,4 +1,5 @@
-// src/app/tree-view/tree-view.component.ts
+// diamond-core-processor/src/app/tree-view/tree-view.component.ts
+
 import { Component, input, output } from '@angular/core'
 import { TreeRowComponent } from './tree-row.component'
 import type { TreeNode } from '../core/tree-node'

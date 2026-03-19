@@ -1,4 +1,5 @@
-// src/app/cells/models/ghost.ts
+// hypercomb-legacy/src/app/models/ghost-cell.ts
+
 import { Cell } from "./cell"
 
 export class Ghost extends Cell {

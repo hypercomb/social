@@ -1,4 +1,5 @@
-// src/app/common/header/search-box/search-box.component.ts
+// hypercomb-legacy/src/app/common/header/search-box/search-box.component.ts
+
 import { Component, inject } from '@angular/core'
 import { Router } from '@angular/router'
 import { SearchFilter } from '../search-filter'

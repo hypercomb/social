@@ -1,4 +1,5 @@
-// src/app/common/tile-editor/tile-image/image-persistence-service.ts
+// hypercomb-legacy/src/app/common/tile-editor/tile-image/image-persistence-service.ts
+
 import { Injectable, inject } from '@angular/core'
 import { OpfsImageService } from 'src/app/hive/storage/opfs-image.service'
 import { HashService } from 'src/app/hive/storage/hash.service'

@@ -1,4 +1,5 @@
-// src/app/core/hive/layer.manager.ts
+// hypercomb-legacy/src/app/core/hive/layer.manager.ts
+
 import { inject } from '@angular/core'
 import { ILayerManager, Seed, IStrand } from './i-dna.token'
 import { StrandManager } from './strand-manager'

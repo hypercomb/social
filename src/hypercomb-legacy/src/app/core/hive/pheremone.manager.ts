@@ -1,4 +1,5 @@
-// src/app/core/hive/pheromone.manager.ts
+// hypercomb-legacy/src/app/core/hive/pheremone.manager.ts
+
 import { inject } from '@angular/core'
 import { IPheromoneManager, Seed, IStrand, StrandOp } from './i-dna.token'
 import { StrandManager } from './strand-manager'

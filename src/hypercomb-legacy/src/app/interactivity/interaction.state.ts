@@ -1,4 +1,4 @@
-// src/app/interactivity/interaction.state.ts
+// hypercomb-legacy/src/app/interactivity/interaction.state.ts
 
 // ─────────────────────────────────────────────
 // application / routing layer (ephemeral)

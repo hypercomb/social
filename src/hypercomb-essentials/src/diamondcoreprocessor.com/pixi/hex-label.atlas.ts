@@ -1,6 +1,4 @@
 // hypercomb-essentials/src/diamondcoreprocessor.com/pixi/hex-label.atlas.ts
-// @essentials/default/hex-label.atlas
-// @hypercomb/pixi
 
 import { Container, RenderTexture, Text, TextStyle, Texture } from 'pixi.js'
 

@@ -1,4 +1,5 @@
-// src/app/intent-inspector/intent-inspector-pro.component.ts
+// diamond-core-processor/src/app/intent-inspector/intent-inspector-pro.component.ts
+
 import { CommonModule } from '@angular/common'
 import { Component, computed, inject, signal } from '@angular/core'
 import { ActivatedRoute } from '@angular/router'

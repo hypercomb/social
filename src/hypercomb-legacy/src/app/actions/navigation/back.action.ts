@@ -1,4 +1,5 @@
-// src/app/actions/navigation/back.ts
+// hypercomb-legacy/src/app/actions/navigation/back.action.ts
+
 import { inject, Injectable } from "@angular/core"
 import { ActionBase } from "../action.base"
 import { PointerState } from "src/app/state/input/pointer-state"

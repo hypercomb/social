@@ -1,4 +1,5 @@
-// src/app/hive/storage/opfs-image.service.ts
+// hypercomb-legacy/src/app/hive/storage/opfs-image.service.ts
+
 import { Injectable, inject } from "@angular/core"
 import { OpfsManager } from "src/app/common/opfs/opfs-manager"
 

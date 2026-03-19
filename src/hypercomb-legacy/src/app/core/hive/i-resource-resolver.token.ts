@@ -1,4 +1,4 @@
-// src/app/core/hive/resource-resolvers.token.ts
+// hypercomb-legacy/src/app/core/hive/i-resource-resolver.token.ts
 
 import { InjectionToken } from '@angular/core'
 import { Signature } from 'src/app/hive/storage/hash.service'

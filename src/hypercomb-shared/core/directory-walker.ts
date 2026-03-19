@@ -1,4 +1,4 @@
-// src/app/core/directory-walker.service.ts
+// hypercomb-shared/core/directory-walker.ts
 
 export interface WalkedDirectory {
   handle: FileSystemDirectoryHandle

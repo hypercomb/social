@@ -1,4 +1,4 @@
-// src/global.d.ts
+// hypercomb-shared/global.d.ts
 
 // -------------------------------------------------
 // window.ioc container

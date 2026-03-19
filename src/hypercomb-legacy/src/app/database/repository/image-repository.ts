@@ -1,4 +1,5 @@
-// src/app/hive/storage/image-repository.ts
+// hypercomb-legacy/src/app/database/repository/image-repository.ts
+
 import { Injectable, inject } from "@angular/core"
 import { IHiveImage } from "src/app/core/models/i-hive-image"
 import { DebugService } from "src/app/core/diagnostics/debug-service"

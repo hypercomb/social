@@ -1,4 +1,4 @@
-// src/payload-canonical.ts
+// hypercomb-core/src/payload-canonical.ts
 
 import { SignatureService } from './core/signature.service.js'
 import { GrammarHint } from './grammar-hint.js'

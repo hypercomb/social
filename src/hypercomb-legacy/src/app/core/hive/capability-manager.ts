@@ -1,4 +1,5 @@
-// src/app/hive/storage/resource-manager.ts
+// hypercomb-legacy/src/app/core/hive/capability-manager.ts
+
 import { Injectable, inject } from '@angular/core'
 import { OpfsManager } from 'src/app/common/opfs/opfs-manager'
 import { Signature, HashService } from 'src/app/hive/storage/hash.service'

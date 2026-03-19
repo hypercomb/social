@@ -1,4 +1,5 @@
-// src/app/detail/detail-view.component.ts
+// diamond-core-processor/src/app/detail/detail-view.component.ts
+
 import { Component, inject, input, output, computed } from '@angular/core'
 import { DomSanitizer, type SafeResourceUrl } from '@angular/platform-browser'
 import type { TreeNode } from '../core/tree-node'

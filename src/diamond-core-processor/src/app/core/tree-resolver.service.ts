@@ -1,4 +1,5 @@
-// src/app/core/tree-resolver.service.ts
+// diamond-core-processor/src/app/core/tree-resolver.service.ts
+
 import { inject, Injectable } from '@angular/core'
 import { SignatureService } from '@hypercomb/core'
 import { AuditorService } from './auditor.service'

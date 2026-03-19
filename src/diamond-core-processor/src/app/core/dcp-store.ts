@@ -1,4 +1,5 @@
-// src/app/core/dcp-store.ts
+// diamond-core-processor/src/app/core/dcp-store.ts
+
 //
 // Mirrors the folder structure from hypercomb-shared/core/store.ts
 // so that OPFS data can be directly copied between DCP and Hypercomb.

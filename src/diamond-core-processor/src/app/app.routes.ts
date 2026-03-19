@@ -1,4 +1,5 @@
-// src/app/app.routes.ts
+// diamond-core-processor/src/app/app.routes.ts
+
 import { Routes } from '@angular/router'
 
 export const routes: Routes = [

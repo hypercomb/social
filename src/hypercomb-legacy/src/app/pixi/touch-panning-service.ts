@@ -1,4 +1,5 @@
-// src/app/pixi/touch-panning-service.ts
+// hypercomb-legacy/src/app/pixi/touch-panning-service.ts
+
 import { Injectable } from "@angular/core"
 import { PanningServiceBase } from "./panning-service.base"
 

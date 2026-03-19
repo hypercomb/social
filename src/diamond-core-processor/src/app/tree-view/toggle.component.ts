@@ -1,4 +1,5 @@
-// src/app/tree-view/toggle.component.ts
+// diamond-core-processor/src/app/tree-view/toggle.component.ts
+
 import { Component, input, output } from '@angular/core'
 
 @Component({

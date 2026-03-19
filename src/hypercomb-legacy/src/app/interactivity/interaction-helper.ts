@@ -1,4 +1,4 @@
-// src/app/interactivity/interaction-helpers.ts
+// hypercomb-legacy/src/app/interactivity/interaction-helper.ts
 
 import { InteractionState } from './interaction.state'
 

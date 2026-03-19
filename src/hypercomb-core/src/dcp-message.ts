@@ -1,4 +1,4 @@
-// @hypercomb/core/src/dcp-message.ts
+// hypercomb-core/src/dcp-message.ts
 
 /**
  * structured message exchanged between DCP and Hypercomb

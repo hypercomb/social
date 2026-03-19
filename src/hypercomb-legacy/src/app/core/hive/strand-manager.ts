@@ -1,4 +1,5 @@
-// src/app/core/hive/strand-manager.ts
+// hypercomb-legacy/src/app/core/hive/strand-manager.ts
+
 import { inject } from '@angular/core'
 import { IStrand, IStrandManager, StrandOp, Seed } from './i-dna.token'
 import { OpfsManager } from 'src/app/common/opfs/opfs-manager'

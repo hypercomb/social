@@ -1,5 +1,5 @@
+// hypercomb-legacy/src/app/pixi/panning-manager.ts
 
-// src/app/pixi/panning-manager.ts
 import { Injectable, inject, effect } from "@angular/core"
 import { KeyboardService } from "../interactivity/keyboard/keyboard-service"
 import { SpacebarPanningService } from "./spacebar-panning-service"

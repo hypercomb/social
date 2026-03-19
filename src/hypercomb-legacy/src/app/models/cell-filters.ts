@@ -1,4 +1,4 @@
-// src/app/models/cell-filters.ts
+// hypercomb-legacy/src/app/models/cell-filters.ts
 
 import { Sprite } from "pixi.js"
 import { CellOptions as CellOptions } from 'src/app/cells/models/cell-options'

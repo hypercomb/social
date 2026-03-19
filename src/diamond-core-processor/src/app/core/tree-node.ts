@@ -1,4 +1,4 @@
-// src/app/core/tree-node.ts
+// diamond-core-processor/src/app/core/tree-node.ts
 
 export type TreeNodeKind = 'domain' | 'layer' | 'bee' | 'dependency'
 

@@ -1,4 +1,4 @@
-// src/app/cache/seed-cache.ts
+// hypercomb-legacy/src/app/core/hive/seed-vault.ts
 
 /*
 SeedVault

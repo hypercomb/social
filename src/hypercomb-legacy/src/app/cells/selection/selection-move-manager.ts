@@ -1,4 +1,5 @@
-// src/app/cells/selection/selection-move-manager.ts
+// hypercomb-legacy/src/app/cells/selection/selection-move-manager.ts
+
 import { Injectable, inject } from "@angular/core"
 import { AxialCoordinate } from "src/app/core/models/axial-coordinate"
 import { HONEYCOMB_STORE } from "src/app/shared/tokens/i-honeycomb-store.token"

@@ -1,4 +1,4 @@
-// src/app/app.routes.ts
+// hypercomb-web/src/app/app.routes.ts
 
 import type { UrlSegment, UrlMatchResult, Routes } from '@angular/router'
 import { Home } from './home/home'

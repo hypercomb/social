@@ -1,4 +1,4 @@
-// src/app/tile/models/tile-options.ts
+// hypercomb-legacy/src/app/cells/models/cell-options.ts
 
 // bit flags for tile state
 export enum CellOptions {

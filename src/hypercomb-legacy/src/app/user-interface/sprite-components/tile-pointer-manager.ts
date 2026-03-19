@@ -1,4 +1,5 @@
-// src/app/user-interface/sprite-components/tile-pointer-manager.ts
+// hypercomb-legacy/src/app/user-interface/sprite-components/tile-pointer-manager.ts
+
 import { Injectable, inject } from "@angular/core"
 import { FederatedPointerEvent } from "pixi.js"
 import { ACTION_REGISTRY } from "src/app/shared/tokens/i-hypercomb.token"

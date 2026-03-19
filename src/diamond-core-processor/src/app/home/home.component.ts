@@ -1,4 +1,5 @@
-// src/app/home/home.component.ts
+// diamond-core-processor/src/app/home/home.component.ts
+
 import { Component, computed, effect, inject, signal } from '@angular/core'
 import { TreeResolverService } from '../core/tree-resolver.service'
 import { ToggleStateService } from '../core/toggle-state.service'

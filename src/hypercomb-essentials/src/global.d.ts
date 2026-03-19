@@ -1,4 +1,4 @@
-// src/global.d.ts
+// hypercomb-essentials/src/global.d.ts
 
 // -------------------------------------------------
 // global window extensions

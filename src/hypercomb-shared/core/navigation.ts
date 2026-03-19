@@ -1,5 +1,4 @@
 // hypercomb-shared/core/navigation.ts
-// src/app/core/navigation.ts
 
 import { hypercomb } from '@hypercomb/core'
 import { CompletionUtility } from '../core/completion-utility'

@@ -1,4 +1,5 @@
-// src/app/pixi/panning-service.base.ts
+// hypercomb-legacy/src/app/pixi/panning-service.base.ts
+
 import { Injectable, signal, inject, effect } from "@angular/core"
 import { PixiDataServiceBase } from "src/app/database/pixi-data-service-base"
 import { LinkNavigationService } from "src/app/navigation/link-navigation-service"

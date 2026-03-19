@@ -1,4 +1,4 @@
-// src/<domain>/settings/zoom-settings.ts
+// hypercomb-essentials/src/diamondcoreprocessor.com/settings/zoom-settings.ts
 
 export type ZoomSettingsType = {
   minScale: number

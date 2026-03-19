@@ -1,4 +1,5 @@
-// src/app/core/hive/hive.manager.ts
+// hypercomb-legacy/src/app/core/hive/hive.manager.ts
+
 import { inject } from '@angular/core'
 import { Hypercomb } from '../mixins/abstraction/hypercomb.base'
 import { IHiveManager, Seed } from './i-dna.token'

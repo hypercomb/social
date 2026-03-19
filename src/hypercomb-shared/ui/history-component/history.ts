@@ -1,4 +1,5 @@
-// src/app/common/history-component/history.ts
+// hypercomb-shared/ui/history-component/history.ts
+
 import { Component } from '@angular/core'
 import { Navigation } from '../../core/navigation'
 

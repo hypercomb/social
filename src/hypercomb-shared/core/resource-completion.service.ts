@@ -1,4 +1,5 @@
-// src/app/common/header/search-bar/resource-completion.service.ts
+// hypercomb-shared/core/resource-completion.service.ts
+
 import type { ScriptPreloader } from './script-preloader'
 
 export class ResourceCompletionService {

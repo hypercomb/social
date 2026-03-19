@@ -1,4 +1,5 @@
-// src/app/core/compile-payload.ts
+// diamond-core-processor/src/app/core/compile-payload.ts
+
 import type { BeePayloadV1 } from '@hypercomb/core'
 
 type CompileLoader = 'ts' | 'js'

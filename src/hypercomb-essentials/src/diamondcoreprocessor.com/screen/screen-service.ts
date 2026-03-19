@@ -1,4 +1,4 @@
-// @essentials/default/screen-service
+// hypercomb-essentials/src/diamondcoreprocessor.com/screen/screen-service.ts
 
 import { get } from "@hypercomb/core"
 import { ScreenState } from "./screen-state.js"

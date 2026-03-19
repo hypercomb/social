@@ -1,4 +1,5 @@
-// src/effect.ts
+// hypercomb-core/src/effect.ts
+
 export type Effect =
   | 'filesystem'
   | 'render'

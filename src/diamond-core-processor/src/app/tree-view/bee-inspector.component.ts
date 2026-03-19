@@ -1,4 +1,5 @@
-// src/app/tree-view/bee-inspector.component.ts
+// diamond-core-processor/src/app/tree-view/bee-inspector.component.ts
+
 import { Component, computed, effect, inject, input, output, signal } from '@angular/core'
 import { SignatureService } from '@hypercomb/core'
 import { CodeViewerComponent } from '../code-viewer/code-viewer.component'

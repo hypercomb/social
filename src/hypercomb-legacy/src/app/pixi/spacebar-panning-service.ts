@@ -1,4 +1,5 @@
-// src/app/pixi/spacebar-panning-service.ts
+// hypercomb-legacy/src/app/pixi/spacebar-panning-service.ts
+
 import { Injectable, effect } from "@angular/core"
 import { PanningServiceBase } from "./panning-service.base"
 

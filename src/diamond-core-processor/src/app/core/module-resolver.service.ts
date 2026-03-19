@@ -1,4 +1,5 @@
-// src/app/core/module-resolver.service.ts
+// diamond-core-processor/src/app/core/module-resolver.service.ts
+
 import { Injectable } from '@angular/core'
 import { SignatureService, type BeePayloadV1 } from '@hypercomb/core'
 

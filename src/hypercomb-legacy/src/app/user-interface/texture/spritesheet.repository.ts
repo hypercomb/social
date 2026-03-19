@@ -1,4 +1,5 @@
-// src/app/user-interface/texture/spritesheet-repository.ts
+// hypercomb-legacy/src/app/user-interface/texture/spritesheet.repository.ts
+
 import { Injectable } from '@angular/core'
 
 // minimal OPFS storage -------------------------------------------------------

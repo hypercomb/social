@@ -1,4 +1,5 @@
-// src/app/common/footer-controls/default-view/default-view.component.ts
+// hypercomb-legacy/src/app/common/footer-controls/default-view/default-view.component.ts
+
 import { Component, inject } from '@angular/core'
 import { Hypercomb } from 'src/app/core/mixins/abstraction/hypercomb.base'
 import { HypercombMode } from 'src/app/core/models/enumerations'

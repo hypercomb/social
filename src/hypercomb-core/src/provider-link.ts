@@ -1,4 +1,5 @@
-// src/link.ts
+// hypercomb-core/src/provider-link.ts
+
 export interface ProviderLink {
   readonly label: string
   readonly url: string

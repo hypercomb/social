@@ -1,4 +1,5 @@
-// src/app/cells/models/hive-portal.ts
+// hypercomb-legacy/src/app/models/hive-portal.ts
+
 import { Cell } from "./cell"
 
 export class HivePortal extends Cell {

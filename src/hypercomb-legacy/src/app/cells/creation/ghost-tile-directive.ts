@@ -1,4 +1,5 @@
-// src/app/cells/creation/ghost-tile.directive.ts
+// hypercomb-legacy/src/app/cells/creation/ghost-tile-directive.ts
+
 import { Directive, effect, inject } from "@angular/core"
 import { Container } from "pixi.js"
 import { HypercombLayout } from "src/app/core/mixins/abstraction/hypercomb.base"

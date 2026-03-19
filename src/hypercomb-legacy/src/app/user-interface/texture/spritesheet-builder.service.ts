@@ -1,4 +1,5 @@
-// src/app/user-interface/texture/spritesheet-builder.service.ts
+// hypercomb-legacy/src/app/user-interface/texture/spritesheet-builder.service.ts
+
 import { Injectable, inject } from "@angular/core"
 import { Assets, Container, RenderTexture, Sprite, Texture } from "pixi.js"
 import { TileLayerManager } from "src/app/cells/miscellaneous/tile-layer-manager"

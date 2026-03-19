@@ -1,4 +1,4 @@
-// src/mesh-adapter.drone.ts
+// hypercomb-essentials/src/diamondcoreprocessor.com/core/communication/mesh-adapter.drone.ts
 
 import { Drone, type Effect } from '@hypercomb/core'
 

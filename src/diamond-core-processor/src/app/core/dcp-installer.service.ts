@@ -1,4 +1,5 @@
-// src/app/core/dcp-installer.service.ts
+// diamond-core-processor/src/app/core/dcp-installer.service.ts
+
 //
 // Mirrors LayerInstaller from hypercomb-shared/core/layer-installer.ts
 // but uses DcpStore (Angular DI) instead of hypercomb's IoC.

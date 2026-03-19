@@ -1,4 +1,5 @@
-// src/app/code-viewer/code-viewer.component.ts
+// diamond-core-processor/src/app/code-viewer/code-viewer.component.ts
+
 import { Component, computed, effect, ElementRef, input, signal, viewChild } from '@angular/core'
 import hljs from 'highlight.js/lib/core'
 import javascript from 'highlight.js/lib/languages/javascript'

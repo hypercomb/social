@@ -1,4 +1,4 @@
-// src/app/core/domain-metadata.ts
+// hypercomb-shared/core/domain-metadata.ts
 
 export class DomainMetadataUtil {
 

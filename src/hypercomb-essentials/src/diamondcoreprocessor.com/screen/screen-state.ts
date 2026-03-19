@@ -1,4 +1,4 @@
-// @essentials/default/screen-state
+// hypercomb-essentials/src/diamondcoreprocessor.com/screen/screen-state.ts
 
 export class ScreenState {
   isFullScreen: boolean = false

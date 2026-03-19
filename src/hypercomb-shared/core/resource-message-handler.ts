@@ -1,4 +1,5 @@
-// src/app/messaging/resource-message-handler.ts
+// hypercomb-shared/core/resource-message-handler.ts
+
 import { ScriptPreloader, Store } from '@hypercomb/shared/core'
 
 export class ResourceMessageHandler {

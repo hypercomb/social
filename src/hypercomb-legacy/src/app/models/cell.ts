@@ -1,4 +1,5 @@
-// src/app/models/cell.ts
+// hypercomb-legacy/src/app/models/cell.ts
+
 import { CellFlags } from "./cell-flags"
 import { HashService } from "src/app/hive/storage/hash.service"
 
