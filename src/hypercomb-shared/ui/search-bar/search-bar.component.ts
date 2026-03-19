@@ -184,9 +184,21 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
   public ngAfterViewInit(): void {
     this.input.nativeElement.focus()
     this.syncSignalsFromDom()
+
+    this.#prefillUnsub = EffectBus.on<{ value: string }>('search:prefill', ({ value }) => {
+      this.input.nativeElement.value = value
+      this.input.nativeElement.focus()
+      this.placeCaretAtEnd()
+      this.suppressed.set(false)
+      this.syncSignalsFromDom()
+    })
   }
 
-  public ngOnDestroy(): void { }
+  #prefillUnsub?: () => void
+
+  public ngOnDestroy(): void {
+    this.#prefillUnsub?.()
+  }
 
   // -------------------------------------------------
   // template helpers (required)

@@ -51,13 +51,16 @@ const ADD_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96
 // Search Google Images (magnifying glass — SVG path, not font glyph)
 const SEARCH_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96"><circle cx="40" cy="40" r="20" fill="none" stroke="white" stroke-width="8"/><line x1="54" y1="54" x2="78" y2="78" stroke="white" stroke-width="8" stroke-linecap="round"/></svg>`
 
+// Add sub-seed (terminal prompt icon — path-based, no font dependency)
+const ADD_SUB_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 15.1 15.1" width="96" height="96"><path fill="white" fill-rule="evenodd" d="M2.83 0C2.054 0 1.385.28.825.84.275 1.39 0 2.054 0 2.83v9.432c0 .776.275 1.445.825 2.005.56.55 1.229.825 2.005.825h9.432c.776 0 1.44-.275 1.99-.825.56-.56.84-1.229.84-2.005V2.83c0-.776-.28-1.44-.84-1.99C13.702.28 13.039 0 12.262 0H2.83zm-1.316 2.316h11.064c.117 0 .214.041.29.122.075.082.113.186.113.313v9.589c0 .127-.038.231-.113.313-.075.082-.173.122-.29.122H1.514c-.117 0-.214-.04-.29-.122-.075-.082-.113-.186-.113-.313V2.752c0-.127.038-.232.113-.313.076-.082.173-.123.29-.123zm.804.871c-.1 0-.193.041-.276.123-.076.091-.113.191-.113.3v7.845c0 .127.037.232.113.313.075.082.173.123.29.123h10.457c.117 0 .213-.041.289-.123.075-.081.113-.186.113-.313V3.624c0-.128-.038-.232-.113-.314-.076-.081-.173-.122-.29-.122H2.318zM3.11 4.06c.1 0 .193.04.277.122l.767.845.779.845c.034.009.063.027.088.054.075.091.113.195.113.313 0 .118-.038.222-.113.313-.025.027-.054.05-.088.068L3.387 8.295c-.084.082-.176.123-.277.123-.1 0-.193-.041-.276-.123-.076-.09-.113-.19-.113-.3 0-.108.037-.209.113-.3l1.358-1.457L2.834 4.78c-.076-.09-.113-.19-.113-.3 0-.109.037-.214.113-.286.084-.09.176-.135.277-.135zM6.34 7.546h2.413c.117 0 .214.041.29.123.075.081.113.186.113.313 0 .127-.038.231-.113.313-.076.082-.173.122-.29.122H6.34c-.117 0-.214-.04-.29-.122-.075-.082-.112-.186-.112-.313 0-.127.037-.232.112-.313.076-.082.173-.123.29-.123z"/></svg>`
+
 // ── overlay geometry constants ─────────────────────────────────────
 
 // Icon positions within the overlay (measured from hex center = overlay origin)
 const ICON_SIZE = 8.75
-const EDIT_X = 8.625
+const EDIT_X = -2
 const EDIT_Y = 5
-const GARBAGE_X = -2
+const GARBAGE_X = 8.625
 const GARBAGE_Y = 5
 const HIDE_X = 8.625
 const HIDE_Y = 5
@@ -65,8 +68,10 @@ const BLOCK_X = -2
 const BLOCK_Y = 5
 const ADD_X = 8.625
 const ADD_Y = 5
-const SEARCH_X = -12.625
+const SEARCH_X = 19.25
 const SEARCH_Y = 5
+const ADD_SUB_X = -12.625
+const ADD_SUB_Y = 5
 
 // Seed label styling
 const LABEL_X = -24
@@ -266,6 +271,16 @@ export class TileOverlayDrone extends Drone {
 
   #privateProfile(): OverlayProfile {
     return [
+      {
+        name: 'add-sub',
+        svgMarkup: ADD_SUB_ICON_SVG,
+        x: ADD_SUB_X,
+        y: ADD_SUB_Y,
+        hoverTint: 0xa8ffd8,
+        handler: (label) => {
+          EffectBus.emit('search:prefill', { value: label + '/' })
+        },
+      },
       {
         name: 'edit',
         svgMarkup: EDIT_ICON_SVG,
