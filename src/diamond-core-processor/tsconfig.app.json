@@ -4,10 +4,13 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "outDir": "./out-tsc/app",
-    "types": []
+    "types": [],
+    "rootDir": "..",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"]
   },
   "include": [
-    "src/**/*.ts"
+    "src/**/*.ts",
+    "../hypercomb-shared/**/*.ts"
   ],
   "exclude": [
     "src/**/*.spec.ts"
