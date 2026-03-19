@@ -1,85 +1,75 @@
 <!-- src/app/home/home.component.html -->
-<div class="home">
-  <h1>Diamond Core Processor</h1>
-  <p class="subtitle">Trusted domains</p>
+@if (view() === 'detail' && activeNode()) {
+  <dcp-detail-view
+    [node]="activeNode()!"
+    (back)="onBack()" />
+} @else {
+  <div class="tree-home">
+    <header class="top-bar">
+      <h1 class="title">Diamond Core Processor</h1>
+      <dcp-auditor-settings />
+    </header>
 
-  <div class="domain-input">
-    <input
-      type="text"
-      placeholder="https://example.com"
-      [value]="input()"
-      (input)="input.set($any($event.target).value)"
-      (keydown.enter)="add()" />
-    <button (click)="add()">Add</button>
-  </div>
-
-  @if (domains().length) {
-    <ul class="domain-list">
-      @for (d of domains(); track d) {
-        <li>
-          <span>{{ d }}</span>
-          <button class="remove" (click)="remove(d)">✕</button>
-        </li>
-      }
-    </ul>
-  } @else {
-    <p class="empty">No domains added yet.</p>
-  }
-
-  <hr />
-
-  <p class="subtitle">Module signature</p>
-
-  <div class="domain-input">
-    <input
-      type="text"
-      placeholder="64 hex signature"
-      [value]="moduleSignature()"
-      (input)="moduleSignature.set($any($event.target).value)"
-      (keydown.enter)="loadModule()" />
-    <button class="primary" type="button" [disabled]="moduleBusy()" (click)="loadModule()">
-      {{ moduleBusy() ? 'Loading…' : 'Load module' }}
-    </button>
-  </div>
-
-  @if (moduleError()) {
-    <p class="error">{{ moduleError() }}</p>
-  }
-
-  @if (resolvedModule(); as rm) {
-    <div class="module-meta"> 
-      <div class="module-line">
-        <span class="label">module</span>
-        <span class="mono">{{ moduleName() }}</span>
-      </div>
-      <div class="module-line">
-        <span class="label">source</span>
-        <span class="mono">{{ rm.domain }}</span>
-      </div>
+    <!-- domain management -->
+    <div class="domain-input">
+      <input
+        type="text"
+        placeholder="https://example.com/content"
+        [value]="domainInput()"
+        (input)="domainInput.set($any($event.target).value)"
+        (keydown.enter)="addDomain()" />
+      <button class="btn" (click)="addDomain()">Add</button>
     </div>
 
-    @if (bees().length) {
-      <ul class="action-list">
-        @for (a of bees(); track a.signature) {
-          <li class="action-row">
-            <div class="action-left">
-              <div class="action-title">{{ actionTitle(a) }}</div>
-              <div class="action-sub">
-                <span class="mono dim">{{ a.signature }}</span>
-              </div>
-              @if (actionDescription(a)) {
-                <div class="action-desc">{{ actionDescription(a) }}</div>
-              }
-            </div>
-
-            <button class="primary" type="button" (click)="openAction(a.signature)">
-              Open
-            </button>
-          </li>
-        }
-      </ul>
-    } @else {
-      <p class="empty">No actions in this module.</p>
+    <!-- search -->
+    @if (sections().length) {
+      <input
+        type="text"
+        class="search"
+        placeholder="Filter..."
+        [value]="searchTerm()"
+        (input)="searchTerm.set($any($event.target).value)" />
     }
-  }
-</div>
+
+    <!-- domain sections -->
+    @for (section of filteredSections(); track section.domain) {
+      <section class="domain-section">
+        <div class="domain-header">
+          <span class="domain-name">{{ section.domainName }}</span>
+          <button class="remove" (click)="removeDomain(section.domain)">&times;</button>
+        </div>
+
+        @if (section.loading) {
+          <div class="section-status">Loading...</div>
+        }
+
+        @if (section.error) {
+          <div class="section-status error">{{ section.error }}</div>
+        }
+
+        @if (section.items.length) {
+          <dcp-tree-view
+            [nodes]="section.items"
+            [toggleState]="toggleMap()"
+            [nodeMap]="nodeMap()"
+            (toggle)="onToggle($event)"
+            (open)="onOpen($event)"
+            (expandToggle)="onExpandToggle($event)" />
+        }
+      </section>
+    }
+
+    @if (!domains().length) {
+      <p class="empty">Add a trusted domain to get started.</p>
+    }
+
+    @if (inspectBee() && inspectSection()) {
+      <dcp-bee-inspector
+        [signature]="inspectBee()!"
+        [contentBase]="inspectSection()!.domain"
+        [rootSig]="inspectSection()!.rootSig"
+        [visible]="true"
+        (close)="onCloseInspector()" />
+    }
+  </div>
+}

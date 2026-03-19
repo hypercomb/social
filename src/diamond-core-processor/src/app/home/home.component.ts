@@ -1,160 +1,235 @@
 // src/app/home/home.component.ts
-import { Component, computed, inject, signal } from '@angular/core'
+import { Component, computed, effect, inject, signal } from '@angular/core'
 import { Router } from '@angular/router'
-import { DraftPayloadCacheService } from '../core/draft-payload-cache.service'
-import { ModuleResolverService, type ModuleBeeV1, type ResolvedModule } from '../core/module-resolver.service'
+import { TreeResolverService } from '../core/tree-resolver.service'
+import { ToggleStateService } from '../core/toggle-state.service'
+import { TreeViewComponent } from '../tree-view/tree-view.component'
+import { DetailViewComponent } from '../detail/detail-view.component'
+import { AuditorSettingsComponent } from '../settings/auditor-settings.component'
+import { BeeInspectorComponent } from '../tree-view/bee-inspector.component'
+import type { TreeNode } from '../core/tree-node'
 
 const DOMAINS_KEY = 'dcp.domains'
-const LAST_MODULE_KEY = 'dcp.lastModuleSignature'
+
+export interface DomainSection {
+  domain: string
+  domainName: string
+  rootSig: string
+  items: TreeNode[]
+  loading: boolean
+  error: string | null
+}
 
 @Component({
   selector: 'app-home',
   standalone: true,
+  imports: [TreeViewComponent, DetailViewComponent, AuditorSettingsComponent, BeeInspectorComponent],
   templateUrl: './home.component.html',
   styleUrls: ['./home.component.scss']
 })
 export class HomeComponent {
 
-  // -----------------------------
+  readonly #router = inject(Router)
+  readonly #resolver = inject(TreeResolverService)
+  readonly #toggleState = inject(ToggleStateService)
+
   // state
-  // -----------------------------
-  public readonly domains = signal<string[]>(this.loadDomains())
-  public readonly input = signal('')
-  public readonly moduleSignature = signal<string>(this.loadLastModuleSignature())
-  public readonly moduleBusy = signal(false)
-  public readonly moduleError = signal<string | null>(null)
-  public readonly resolvedModule = signal<ResolvedModule | null>(null)
+  readonly view = signal<'tree' | 'detail'>('tree')
+  readonly domains = signal<string[]>(this.#loadDomains())
+  readonly domainInput = signal('')
+  readonly searchTerm = signal('')
+  readonly sections = signal<DomainSection[]>([])
+  readonly activeNode = signal<TreeNode | null>(null)
+  readonly inspectBee = signal<string | null>(null)
+  readonly inspectSection = signal<DomainSection | null>(null)
 
-  public readonly moduleName = computed((): string => {
-    const m = this.resolvedModule()?.module
-    const name = (m?.module?.name ?? '').trim()
-    return name || 'unnamed module'
+  // all nodes flattened for toggle lookups
+  readonly toggleMap = computed(() => {
+    const map = new Map<string, boolean>()
+    const walk = (nodes: TreeNode[]) => {
+      for (const n of nodes) {
+        map.set(n.id, this.#toggleState.isEnabled(n.id))
+        walk(n.children)
+      }
+    }
+    for (const s of this.sections()) walk(s.items)
+    return map
   })
 
-  public readonly bees = computed((): ModuleBeeV1[] => {
-    return this.resolvedModule()?.module.bees ?? []
+  readonly nodeMap = computed(() => {
+    const map = new Map<string, TreeNode>()
+    const walk = (nodes: TreeNode[]) => {
+      for (const n of nodes) {
+        map.set(n.id, n)
+        walk(n.children)
+      }
+    }
+    for (const s of this.sections()) walk(s.items)
+    return map
   })
 
-  // -----------------------------
-  // private fields
-  // -----------------------------
-  private readonly router = inject(Router)
-  private readonly cache = inject(DraftPayloadCacheService)
-  private readonly resolver = inject(ModuleResolverService)
+  readonly filteredSections = computed(() => {
+    const term = this.searchTerm().toLowerCase().trim()
+    if (!term) return this.sections()
+    return this.sections()
+      .map(s => ({ ...s, items: this.#filterTree(s.items, term) }))
+      .filter(s => s.items.length > 0)
+  })
 
-  // -----------------------------
-  // domains
-  // -----------------------------
-  protected add(): void {
-    const raw = this.input().trim()
+  constructor() {
+    // auto-load on init
+    effect(() => {
+      const doms = this.domains()
+      if (doms.length) this.#loadAllDomains(doms)
+    })
+  }
+
+  // domain management
+  addDomain(): void {
+    const raw = this.domainInput().trim()
     if (!raw) return
 
     try {
       const url = new URL(raw)
-      const scope = url.pathname && url.pathname !== '/' ? `${url.origin}${url.pathname.replace(/\/+$/, '')}` : url.origin
+      const scope = url.pathname && url.pathname !== '/'
+        ? `${url.origin}${url.pathname.replace(/\/+$/, '')}`
+        : url.origin
 
       if (this.domains().includes(scope)) {
-        this.input.set('')
+        this.domainInput.set('')
         return
       }
 
       const next = [...this.domains(), scope]
       this.domains.set(next)
       localStorage.setItem(DOMAINS_KEY, JSON.stringify(next))
-      this.input.set('')
+      this.domainInput.set('')
     } catch {
       // ignore invalid urls
     }
   }
 
-  protected remove(domain: string): void {
+  removeDomain(domain: string): void {
     const next = this.domains().filter(d => d !== domain)
     this.domains.set(next)
     localStorage.setItem(DOMAINS_KEY, JSON.stringify(next))
+    this.sections.set(this.sections().filter(s => s.domain !== domain))
   }
 
-  // -----------------------------
-  // display helpers (names from payload, fallback to source bytes)
-  // -----------------------------
-  protected actionTitle = (a: ModuleBeeV1): string => {
-    const fromMeta = (a?.payload?.bee?.name ?? '').trim()
-    if (fromMeta) return fromMeta
-
-    const fromSource = this.inferTitleFromSource(a)
-    return fromSource || 'untitled action'
-  }
-
-  protected actionDescription = (a: ModuleBeeV1): string => {
-    return (a?.payload?.bee?.description ?? '').trim()
-  }
-
-  private inferTitleFromSource(a: ModuleBeeV1): string {
-    const entry = (a?.payload?.source?.entry ?? '').trim()
-    if (!entry) return ''
-
-    const encoded = a?.payload?.source?.files?.[entry] ?? ''
-    if (!encoded) return ''
-
-    try {
-      const source = atob(encoded)
-      const m = source.match(/\bclass\s+([A-Za-z0-9_]+)\s+extends\b/)
-      return (m?.[1] ?? '').trim()
-    } catch {
-      return ''
+  // tree interactions
+  async onExpandToggle(node: TreeNode): Promise<void> {
+    if (node.expanded) {
+      node.expanded = false
+      this.#refreshSections()
+      return
     }
-  }
 
-  // -----------------------------
-  // module loading
-  // -----------------------------
-  protected loadModule = async (): Promise<void> => {
-    this.moduleBusy.set(true)
-    this.moduleError.set(null)
-    this.resolvedModule.set(null)
-
-    try {
-      const sig = (this.moduleSignature() ?? '').trim()
-      if (!sig) throw new Error('enter a module signature')
-
-      localStorage.setItem(LAST_MODULE_KEY, sig)
-
-      const resolved = await this.resolver.resolve(sig, this.domains())
-      this.resolvedModule.set(resolved)
-
-      // cache each action payload under its signature so the inspector can open instantly
-      for (const item of resolved.module.bees) {
-        const { signature, payload } = item
-        this.cache.set(signature, JSON.stringify(payload))
+    if (!node.loaded) {
+      const section = this.sections().find(s =>
+        this.#containsNode(s.items, node.id)
+      )
+      if (section) {
+        await this.#resolver.expandNode(node, section.domain, section.rootSig, section.domainName)
       }
-    } catch (e: any) {
-      this.moduleError.set(e?.message ?? 'failed to load module')
-    } finally {
-      this.moduleBusy.set(false)
+    }
+
+    node.expanded = true
+    this.#refreshSections()
+  }
+
+  onToggle(node: TreeNode): void {
+    this.#toggleState.toggle(node.id)
+    this.#refreshSections()
+  }
+
+  onOpen(node: TreeNode): void {
+    if (node.kind === 'bee' && node.signature) {
+      const section = this.sections().find(s => this.#containsNode(s.items, node.id))
+      this.inspectBee.set(node.signature)
+      this.inspectSection.set(section ?? null)
+    } else {
+      this.activeNode.set(node)
+      this.view.set('detail')
     }
   }
 
-  protected openAction = async (signature: string): Promise<void> => {
-    const sig = (signature ?? '').trim()
-    if (!sig) return
-    await this.router.navigateByUrl(`/inspect/${sig}`)
+  onCloseInspector(): void {
+    this.inspectBee.set(null)
+    this.inspectSection.set(null)
   }
 
-  // -----------------------------
-  // storage
-  // -----------------------------
-  private loadDomains(): string[] {
+  onBack(): void {
+    this.view.set('tree')
+    this.activeNode.set(null)
+  }
+
+  // auto-load all domains
+  async #loadAllDomains(doms: string[]): Promise<void> {
+    const results: DomainSection[] = []
+
+    for (const domain of doms) {
+      const domainName = new URL(domain).hostname
+      const section: DomainSection = {
+        domain, domainName, rootSig: '', items: [], loading: true, error: null
+      }
+      results.push(section)
+    }
+
+    this.sections.set([...results])
+
+    for (const section of results) {
+      try {
+        const root = await this.#resolver.resolveRoot(section.domain, section.domainName)
+        if (root) {
+          section.rootSig = root.signature ?? ''
+          // use root's children as the section items (skip the root node itself)
+          section.items = root.children
+        } else {
+          section.error = 'No content found'
+        }
+      } catch (e: unknown) {
+        section.error = e instanceof Error ? e.message : 'Failed to load'
+      } finally {
+        section.loading = false
+      }
+      this.sections.set([...results])
+    }
+  }
+
+  #containsNode(nodes: TreeNode[], id: string): boolean {
+    for (const n of nodes) {
+      if (n.id === id) return true
+      if (this.#containsNode(n.children, id)) return true
+    }
+    return false
+  }
+
+  #refreshSections(): void {
+    this.sections.set([...this.sections()])
+  }
+
+  #filterTree(nodes: TreeNode[], term: string): TreeNode[] {
+    const result: TreeNode[] = []
+    for (const node of nodes) {
+      const nameMatch = node.name.toLowerCase().includes(term)
+      const filteredChildren = this.#filterTree(node.children, term)
+
+      if (nameMatch || filteredChildren.length > 0) {
+        result.push({
+          ...node,
+          children: nameMatch ? node.children : filteredChildren,
+          expanded: filteredChildren.length > 0 ? true : node.expanded
+        })
+      }
+    }
+    return result
+  }
+
+  #loadDomains(): string[] {
     try {
       return JSON.parse(localStorage.getItem(DOMAINS_KEY) ?? '[]')
     } catch {
       return []
-    }
-  }
-
-  private loadLastModuleSignature(): string {
-    try {
-      return localStorage.getItem(LAST_MODULE_KEY) ?? ''
-    } catch {
-      return ''
     }
   }
 }
