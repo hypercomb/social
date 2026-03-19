@@ -304,6 +304,15 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
       return
     }
 
+    // create the seed directory in OPFS so listSeedFolders() can find it
+    const dir = await this.lineage.explorerDir()
+    if (dir) {
+      let parent = dir
+      for (const part of parts) {
+        parent = await parent.getDirectoryHandle(part, { create: true })
+      }
+    }
+
     // emit seed:added — HistoryRecorder will record the op
     EffectBus.emit('seed:added', { seed: parts[0] })
     this.requestSynchronize()
@@ -438,6 +447,12 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
   }
 
   private readonly ensureSeedInCurrentDirectory = async (seedName: string): Promise<void> => {
+    // create the seed directory in OPFS so listSeedFolders() can find it
+    const dir = await this.lineage.explorerDir()
+    if (dir) {
+      await dir.getDirectoryHandle(seedName, { create: true })
+    }
+
     // emit seed:added — HistoryRecorder will record the op
     EffectBus.emit('seed:added', { seed: seedName })
     this.requestSynchronize()

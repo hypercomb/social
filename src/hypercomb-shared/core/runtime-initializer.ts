@@ -39,10 +39,17 @@ export const initializeRuntime = async (
 
   console.log('[runtime-initializer] ioc keys:', list())
 
-  // restore persisted pivot state — emitted here so bees are already loaded
-  if (localStorage.getItem('hc:hex-pivot') === 'true') {
+  // pivot: restore persisted state + handle toggle command
+  let pivotOn = localStorage.getItem('hc:hex-pivot') === 'true'
+  if (pivotOn) {
     EffectBus.emit('render:set-pivot', { pivot: true })
   }
+  EffectBus.on<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
+    if (cmd !== 'render.togglePivot') return
+    pivotOn = !pivotOn
+    localStorage.setItem('hc:hex-pivot', String(pivotOn))
+    EffectBus.emit('render:set-pivot', { pivot: pivotOn })
+  })
 
   // Probe mesh state for UI toggle
   const mesh = get('@diamondcoreprocessor.com/NostrMeshWorker') as any
