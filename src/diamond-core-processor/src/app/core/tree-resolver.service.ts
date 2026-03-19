@@ -20,6 +20,8 @@ type LayerJson = {
 export class TreeResolverService {
 
   #cache = new Map<string, LayerJson>()
+  // depSig → namespace lineage (e.g. "diamondcoreprocessor.com/core/axial")
+  #depLineage = new Map<string, string>()
   #auditor = inject(AuditorService)
   #installer = inject(DcpInstallerService)
   #store = inject(DcpStore)
@@ -41,6 +43,10 @@ export class TreeResolverService {
     // upfront install: download all layers, bees, deps to OPFS
     const manifest = await this.#installer.install(base, rootSig, domain, onInstallProgress)
     if (!manifest) return null
+
+    // resolve dep → namespace lineage from first-line comments
+    this.#depLineage.clear()
+    await this.#resolveDepLineages(manifest.dependencies ?? [])
 
     // fetch root layer JSON
     const rootLayer = await this.#fetchLayer(base, rootSig, rootSig, domain)
@@ -114,7 +120,48 @@ export class TreeResolverService {
       parent.children.push(beeNode)
     }
 
+    // add deps whose namespace matches this layer's lineage
+    const parentLineage = parent.lineage || layer.rel || ''
+    for (const [depSig, depNs] of this.#depLineage) {
+      if (depNs === parentLineage) {
+        const depNode: TreeNode = {
+          id: `${parent.id}:${depSig}`,
+          name: depSig.slice(0, 12) + '...',
+          kind: 'dependency',
+          signature: depSig,
+          lineage: parentLineage,
+          parentId: parent.id,
+          children: [],
+          expanded: false,
+          loaded: true,
+          depth: parent.depth + 1
+        }
+        parent.children.push(depNode)
+      }
+    }
+
     parent.loaded = true
+  }
+
+  // -------------------------------------------------
+  // read first-line namespace comment from each dep
+  // -------------------------------------------------
+
+  async #resolveDepLineages(depSigs: string[]): Promise<void> {
+    for (const raw of depSigs) {
+      const sig = raw.replace(/\.js$/i, '')
+      const bytes = await this.#store.readFile(this.#store.dependencies, `${sig}.js`)
+      if (!bytes) continue
+
+      // read first 512 bytes to extract the alias comment
+      const slice = bytes.byteLength > 512 ? bytes.slice(0, 512) : bytes
+      const text = new TextDecoder().decode(slice)
+      const firstLine = text.split('\n')[0]
+      const match = firstLine.match(/^\/\/\s*@(.+)/)
+      if (match) {
+        this.#depLineage.set(sig, match[1].trim())
+      }
+    }
   }
 
   #buildNode(layer: LayerJson, sig: string, lineage: string, parentId: string | undefined, depth: number): TreeNode {

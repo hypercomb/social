@@ -6,11 +6,12 @@ import { CoreAdapter } from './core-adapter'
 import { TileEditorComponent } from "@hypercomb/shared/ui/tile-editor/tile-editor.component"
 import { ControlsBarComponent } from "@hypercomb/shared/ui/controls-bar/controls-bar.component"
 import { MeshHeaderComponent } from "@hypercomb/shared/ui/mesh-header/mesh-header.component"
+import { PortalOverlayComponent } from "@hypercomb/shared/ui/portal/portal-overlay.component"
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, Header, MeshHeaderComponent, TileEditorComponent, ControlsBarComponent],
+  imports: [RouterOutlet, Header, MeshHeaderComponent, TileEditorComponent, ControlsBarComponent, PortalOverlayComponent],
   templateUrl: './app.html',
   styleUrl: './app.scss'
 })

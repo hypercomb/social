@@ -37,6 +37,7 @@ export class HomeComponent {
   readonly searchTerm = signal('')
   readonly sections = signal<DomainSection[]>([])
   readonly inspectBee = signal<string | null>(null)
+  readonly inspectKind = signal<'bee' | 'dependency'>('bee')
   readonly inspectSection = signal<DomainSection | null>(null)
 
   // all nodes flattened for toggle lookups
@@ -139,9 +140,10 @@ export class HomeComponent {
   }
 
   onOpen(node: TreeNode): void {
-    if (node.kind === 'bee' && node.signature) {
+    if ((node.kind === 'bee' || node.kind === 'dependency') && node.signature) {
       const section = this.sections().find(s => this.#containsNode(s.items, node.id))
       this.inspectBee.set(node.signature)
+      this.inspectKind.set(node.kind)
       this.inspectSection.set(section ?? null)
     } else {
       this.onExpandToggle(node)
@@ -150,6 +152,7 @@ export class HomeComponent {
 
   onCloseInspector(): void {
     this.inspectBee.set(null)
+    this.inspectKind.set('bee')
     this.inspectSection.set(null)
   }
 

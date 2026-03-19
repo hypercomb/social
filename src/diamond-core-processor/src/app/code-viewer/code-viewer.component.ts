@@ -1,11 +1,15 @@
 // src/app/code-viewer/code-viewer.component.ts
-import { CommonModule } from '@angular/common'
-import { Component, computed, input, signal } from '@angular/core'
+import { Component, computed, effect, ElementRef, input, signal, viewChild } from '@angular/core'
+import hljs from 'highlight.js/lib/core'
+import javascript from 'highlight.js/lib/languages/javascript'
+import typescript from 'highlight.js/lib/languages/typescript'
+
+hljs.registerLanguage('javascript', javascript)
+hljs.registerLanguage('typescript', typescript)
 
 @Component({
   selector: 'hc-code-viewer',
   standalone: true,
-  imports: [CommonModule],
   templateUrl: './code-viewer.component.html',
   styleUrls: ['./code-viewer.component.scss']
 })
@@ -15,6 +19,18 @@ export class CodeViewerComponent {
 
   protected readonly copied = signal(false)
   protected readonly normalized = computed(() => (this.code() ?? '').replaceAll('\r\n', '\n'))
+
+  readonly codeEl = viewChild<ElementRef<HTMLElement>>('codeRef')
+
+  constructor() {
+    effect(() => {
+      const text = this.normalized()
+      const el = this.codeEl()?.nativeElement
+      if (!el || !text) return
+      el.textContent = text
+      hljs.highlightElement(el)
+    })
+  }
 
   protected copy = async (): Promise<void> => {
     const text = this.normalized()

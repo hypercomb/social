@@ -11,6 +11,7 @@ import type { TreeNodeKind } from '../core/tree-node'
       [class.domain]="kind() === 'domain'"
       [class.layer]="kind() === 'layer'"
       [class.bee]="kind() === 'bee'"
+      [class.dependency]="kind() === 'dependency'"
       (click)="clicked.emit(); $event.stopPropagation()">
     </button>
   `,
@@ -44,6 +45,10 @@ import type { TreeNodeKind } from '../core/tree-node'
 
     .diamond.bee {
       background: linear-gradient(135deg, #e8d4b8, #a58b4f);
+    }
+
+    .diamond.dependency {
+      background: linear-gradient(135deg, #b8e8d4, #4fa58b);
     }
   `]
 })

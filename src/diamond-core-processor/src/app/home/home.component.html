@@ -63,6 +63,7 @@
         [signature]="inspectBee()!"
         [contentBase]="inspectSection()!.domain"
         [rootSig]="inspectSection()!.rootSig"
+        [kind]="inspectKind()"
         [visible]="true"
         (close)="onCloseInspector()" />
     }

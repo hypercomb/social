@@ -19,7 +19,7 @@ import type { TreeNode } from '../core/tree-node'
         [kind]="node().kind"
         (clicked)="open.emit(node())" />
 
-      <button class="label" (click)="expandToggle.emit(node())">
+      <button class="label" (click)="hasChildren() ? expandToggle.emit(node()) : open.emit(node())">
         <span class="name">{{ node().name }}</span>
         @if (node().signature) {
           <span class="sig">{{ node().signature!.slice(0, 8) }}</span>

@@ -1,5 +1,6 @@
-import { Component, type OnInit, type OnDestroy, signal } from "@angular/core"
-import type { SafeResourceUrl, DomSanitizer } from "@angular/platform-browser"
+import { Component, type OnInit, type OnDestroy, signal, inject } from "@angular/core"
+import type { SafeResourceUrl } from "@angular/platform-browser"
+import { DomSanitizer } from "@angular/platform-browser"
 import { EffectBus } from '@hypercomb/core'
 
 @Component({
@@ -13,6 +14,8 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
   // dcp entry point
   private static readonly DCP_URL = 'http://localhost:2400'
 
+  readonly #sanitizer = inject(DomSanitizer)
+
   public readonly open = signal(false)
   public readonly src = signal<SafeResourceUrl | null>(null)
 
@@ -21,12 +24,11 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
   // -------------------------------------------------
   private readonly onPortalOpen = (): void => {
     this.open.set(true)
-    // this.src.set(
-    //   this.sanitizer.bypassSecurityTrustResourceUrl(
-    //     PortalOverlayComponent.DCP_URL
-    //   )
-    // )
-    throw new Error('PortalOverlayComponent: DCP integration is currently disabled')
+    this.src.set(
+      this.#sanitizer.bypassSecurityTrustResourceUrl(
+        PortalOverlayComponent.DCP_URL
+      )
+    )
   }
 
   // -------------------------------------------------
