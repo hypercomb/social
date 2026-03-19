@@ -60,6 +60,14 @@ export const ensureInstall = async (): Promise<void> => {
       if (m?.beeDeps) (globalThis as any).__hypercombBeeDeps = m.beeDeps
       // Manifest already in localStorage — ScriptPreloader reads it directly
     }
+    // In local dev, double-check Azure for a newer version the dev server might not have
+    if (isLocalDev) {
+      const remote = await fetchText(`${AZURE_CONTENT_URL}/latest.txt`)
+      const remoteSig = remote ? extractSignature(remote) : null
+      if (remoteSig && remoteSig !== signature) {
+        console.warn(`[ensure-install] WARNING: remote has newer content (${remoteSig.slice(0, 12)}…) — run build:essentials or deploy:essentials`)
+      }
+    }
     return
   }
 

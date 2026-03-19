@@ -131,88 +131,94 @@ export class TileOverlayDrone extends Drone {
   protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count', 'render:set-orientation', 'render:geometry-changed', 'navigation:guard-start', 'navigation:guard-end', 'mesh:public-changed', 'editor:mode', 'selection:changed']
   protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'tile:hidden', 'tile:blocked']
 
+  #effectsRegistered = false
+
   protected override heartbeat = async (): Promise<void> => {
-    this.onEffect<HostReadyPayload>('render:host-ready', (payload) => {
-      this.#app = payload.app
-      this.#renderContainer = payload.container
-      this.#canvas = payload.canvas
-      this.#renderer = payload.renderer
-      this.#initOverlay()
-      this.#attachListeners()
-    })
+    if (!this.#effectsRegistered) {
+      this.#effectsRegistered = true
 
-    this.onEffect<{ x: number; y: number }>('render:mesh-offset', (offset) => {
-      this.#meshOffset = offset
-      if (this.#currentAxial) {
-        this.#positionOverlay(this.#currentAxial.q, this.#currentAxial.r)
-      }
-    })
+      this.onEffect<HostReadyPayload>('render:host-ready', (payload) => {
+        this.#app = payload.app
+        this.#renderContainer = payload.container
+        this.#canvas = payload.canvas
+        this.#renderer = payload.renderer
+        this.#initOverlay()
+        this.#attachListeners()
+      })
 
-    this.onEffect<CellCountPayload>('render:cell-count', (payload) => {
-      this.#cellCount = payload.count
-      this.#cellLabels = payload.labels
-      this.#branchLabels = new Set(payload.branchLabels ?? [])
-      this.#externalLabels = new Set(payload.externalLabels ?? [])
-      this.#noImageLabels = new Set(payload.noImageLabels ?? [])
-      this.#rebuildOccupiedMap()
-      if (this.#overlay && this.#currentAxial) {
-        this.#currentIndex = this.#lookupIndex(this.#currentAxial.q, this.#currentAxial.r)
-        this.#updateSearchVisibility()
+      this.onEffect<{ x: number; y: number }>('render:mesh-offset', (offset) => {
+        this.#meshOffset = offset
+        if (this.#currentAxial) {
+          this.#positionOverlay(this.#currentAxial.q, this.#currentAxial.r)
+        }
+      })
+
+      this.onEffect<CellCountPayload>('render:cell-count', (payload) => {
+        this.#cellCount = payload.count
+        this.#cellLabels = payload.labels
+        this.#branchLabels = new Set(payload.branchLabels ?? [])
+        this.#externalLabels = new Set(payload.externalLabels ?? [])
+        this.#noImageLabels = new Set(payload.noImageLabels ?? [])
+        this.#rebuildOccupiedMap()
+        if (this.#overlay && this.#currentAxial) {
+          this.#currentIndex = this.#lookupIndex(this.#currentAxial.q, this.#currentAxial.r)
+          this.#updateSearchVisibility()
+          this.#updateVisibility()
+        }
+      })
+
+      this.onEffect<{ flat: boolean }>('render:set-orientation', (payload) => {
+        this.#flat = payload.flat
+        this.#updateHexBg()
+        if (this.#currentAxial) this.#positionOverlay(this.#currentAxial.q, this.#currentAxial.r)
+      })
+
+      this.onEffect<HexGeometry>('render:geometry-changed', (geo) => {
+        this.#geo = geo
+        const detector = this.resolve<HexDetector>('detector')
+        if (detector) detector.spacing = geo.spacing
+        this.#updateHexBg()
+        if (this.#currentAxial) this.#positionOverlay(this.#currentAxial.q, this.#currentAxial.r)
+      })
+
+      this.onEffect('navigation:guard-start', () => {
+        this.#navigationBlocked = true
+        if (this.#navigationGuardTimer) clearTimeout(this.#navigationGuardTimer)
+        this.#navigationGuardTimer = setTimeout(() => { this.#navigationBlocked = false }, 200)
+      })
+
+      this.onEffect('navigation:guard-end', () => {
+        this.#navigationBlocked = false
+        if (this.#navigationGuardTimer) {
+          clearTimeout(this.#navigationGuardTimer)
+          this.#navigationGuardTimer = null
+        }
+      })
+
+      this.onEffect<{ public: boolean }>('mesh:public-changed', (payload) => {
+        this.#meshPublic = payload.public
+        const { key, profile } = this.#resolveProfile()
+        this.#applyProfile(profile, key)
         this.#updateVisibility()
-      }
-    })
+      })
 
-    this.onEffect<{ flat: boolean }>('render:set-orientation', (payload) => {
-      this.#flat = payload.flat
-      this.#updateHexBg()
-      if (this.#currentAxial) this.#positionOverlay(this.#currentAxial.q, this.#currentAxial.r)
-    })
+      this.onEffect<{ active: boolean }>('editor:mode', (payload) => {
+        this.#editing = payload.active
+        if (payload.active) {
+          this.#editCooldown = false
+          this.#updateVisibility()
+        } else {
+          this.#editCooldown = true
+          this.#updateVisibility()
+          setTimeout(() => { this.#editCooldown = false; this.#updateVisibility() }, 300)
+        }
+      })
 
-    this.onEffect<HexGeometry>('render:geometry-changed', (geo) => {
-      this.#geo = geo
-      const detector = this.resolve<HexDetector>('detector')
-      if (detector) detector.spacing = geo.spacing
-      this.#updateHexBg()
-      if (this.#currentAxial) this.#positionOverlay(this.#currentAxial.q, this.#currentAxial.r)
-    })
-
-    this.onEffect('navigation:guard-start', () => {
-      this.#navigationBlocked = true
-      if (this.#navigationGuardTimer) clearTimeout(this.#navigationGuardTimer)
-      this.#navigationGuardTimer = setTimeout(() => { this.#navigationBlocked = false }, 200)
-    })
-
-    this.onEffect('navigation:guard-end', () => {
-      this.#navigationBlocked = false
-      if (this.#navigationGuardTimer) {
-        clearTimeout(this.#navigationGuardTimer)
-        this.#navigationGuardTimer = null
-      }
-    })
-
-    this.onEffect<{ public: boolean }>('mesh:public-changed', (payload) => {
-      this.#meshPublic = payload.public
-      const { key, profile } = this.#resolveProfile()
-      this.#applyProfile(profile, key)
-      this.#updateVisibility()
-    })
-
-    this.onEffect<{ active: boolean }>('editor:mode', (payload) => {
-      this.#editing = payload.active
-      if (payload.active) {
-        this.#editCooldown = false
+      this.onEffect<{ selected: string[] }>('selection:changed', (payload) => {
+        this.#hasSelection = (payload?.selected?.length ?? 0) > 0
         this.#updateVisibility()
-      } else {
-        this.#editCooldown = true
-        this.#updateVisibility()
-        setTimeout(() => { this.#editCooldown = false; this.#updateVisibility() }, 300)
-      }
-    })
-
-    this.onEffect<{ selected: string[] }>('selection:changed', (payload) => {
-      this.#hasSelection = (payload?.selected?.length ?? 0) > 0
-      this.#updateVisibility()
-    })
+      })
+    }
   }
 
   protected override dispose(): void {

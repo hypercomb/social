@@ -44,6 +44,7 @@ const main = () => {
 
   console.log(`[copy-to-web] copied ${rootSig} to ${WEB_CONTENT}`)
   console.log(`[copy-to-web] latest.txt → ${rootSig}`)
+  console.log(`[copy-to-web] done at ${new Date().toISOString()} — reload web app to pick up changes`)
 }
 
 main()

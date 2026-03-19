@@ -183,91 +183,6 @@ export class ShowHoneycombWorker extends Drone {
   protected override heartbeat = async (grammar: string = ''): Promise<void> => {
     this.ensureListeners()
 
-    // listen for pixi host readiness via effect bus
-    this.onEffect<HostReadyPayload>('render:host-ready', (payload) => {
-      this.pixiApp = payload.app
-      this.pixiContainer = payload.container
-      this.pixiRenderer = payload.renderer
-      this.requestRender()
-    })
-
-    // listen for orientation change
-    this.onEffect<{ flat: boolean }>('render:set-orientation', (payload) => {
-      if (this.#flat !== payload.flat) {
-        this.#flat = payload.flat
-        // invalidate image cache since we need different snapshots
-        this.seedImageCache.clear()
-        this.renderedCellsKey = ''
-        this.requestRender()
-      }
-    })
-
-    // listen for space (room) and secret changes — recompute signature
-    this.onEffect<{ room: string }>('mesh:room', ({ room }) => {
-      if (this.#space !== room) {
-        this.#space = room
-        this.renderedLocationKey = ''
-        this.requestRender()
-      }
-    })
-
-    this.onEffect<{ secret: string }>('mesh:secret', ({ secret }) => {
-      if (this.#secret !== secret) {
-        this.#secret = secret
-        this.renderedLocationKey = ''
-        this.requestRender()
-      }
-    })
-
-    // listen for pivot mode toggle (loads pre-rotated snapshots + rotated labels)
-    this.onEffect<{ pivot: boolean }>('render:set-pivot', (payload) => {
-      if (this.#pivot !== payload.pivot) {
-        this.#pivot = payload.pivot
-        this.seedImageCache.clear()
-        this.atlas?.setPivot(payload.pivot)
-        this.renderedCellsKey = ''
-        this.requestRender()
-      }
-    })
-
-    this.onEffect<{ textOnly: boolean }>('render:set-text-only', (payload) => {
-      if (this.#textOnly !== payload.textOnly) {
-        this.#textOnly = payload.textOnly
-        this.renderedCellsKey = ''
-        this.requestRender()
-      }
-    })
-
-    this.onEffect<{ seed: string; index: number }>('seed:place-at', (payload) => {
-      void this.#handlePlaceAt(payload.seed, payload.index)
-    })
-
-    this.onEffect<{ labels: string[] }>('seed:reorder', (payload) => {
-      void this.#handleReorder(payload.labels)
-    })
-
-    this.onEffect<{ gapPx: number }>('render:set-gap', (payload) => {
-      if (this.#hexGeo.gapPx !== payload.gapPx) {
-        this.#hexGeo = createHexGeometry(this.#hexGeo.circumRadiusPx, payload.gapPx, this.#hexGeo.padPx)
-        this.emitEffect('render:geometry-changed', this.#hexGeo)
-        this.renderedCellsKey = ''
-        this.requestRender()
-      }
-    })
-
-    this.onEffect<{ q: number; r: number }>('tile:hover', (payload) => {
-      if (!this.shader) return
-      const axial = this.resolve<any>('axial')
-      if (!axial?.items) { this.shader.setHoveredIndex(-1); return }
-      for (const [idx, coord] of axial.items) {
-        if (coord.q === payload.q && coord.r === payload.r && idx < this.renderedCount) {
-          this.shader.setHoveredIndex(idx)
-          return
-        }
-      }
-      this.shader.setHoveredIndex(-1)
-    })
-
     // emit initial geometry so consumers start in sync
     this.emitEffect('render:geometry-changed', this.#hexGeo)
 
@@ -1188,6 +1103,91 @@ export class ShowHoneycombWorker extends Drone {
         // clearing move preview or no cache — full render
         this.requestRender()
       }
+    })
+
+    // listen for pixi host readiness via effect bus
+    this.onEffect<HostReadyPayload>('render:host-ready', (payload) => {
+      this.pixiApp = payload.app
+      this.pixiContainer = payload.container
+      this.pixiRenderer = payload.renderer
+      this.requestRender()
+    })
+
+    // listen for orientation change
+    this.onEffect<{ flat: boolean }>('render:set-orientation', (payload) => {
+      if (this.#flat !== payload.flat) {
+        this.#flat = payload.flat
+        // invalidate image cache since we need different snapshots
+        this.seedImageCache.clear()
+        this.renderedCellsKey = ''
+        this.requestRender()
+      }
+    })
+
+    // listen for space (room) and secret changes — recompute signature
+    this.onEffect<{ room: string }>('mesh:room', ({ room }) => {
+      if (this.#space !== room) {
+        this.#space = room
+        this.renderedLocationKey = ''
+        this.requestRender()
+      }
+    })
+
+    this.onEffect<{ secret: string }>('mesh:secret', ({ secret }) => {
+      if (this.#secret !== secret) {
+        this.#secret = secret
+        this.renderedLocationKey = ''
+        this.requestRender()
+      }
+    })
+
+    // listen for pivot mode toggle (loads pre-rotated snapshots + rotated labels)
+    this.onEffect<{ pivot: boolean }>('render:set-pivot', (payload) => {
+      if (this.#pivot !== payload.pivot) {
+        this.#pivot = payload.pivot
+        this.seedImageCache.clear()
+        this.atlas?.setPivot(payload.pivot)
+        this.renderedCellsKey = ''
+        this.requestRender()
+      }
+    })
+
+    this.onEffect<{ textOnly: boolean }>('render:set-text-only', (payload) => {
+      if (this.#textOnly !== payload.textOnly) {
+        this.#textOnly = payload.textOnly
+        this.renderedCellsKey = ''
+        this.requestRender()
+      }
+    })
+
+    this.onEffect<{ seed: string; index: number }>('seed:place-at', (payload) => {
+      void this.#handlePlaceAt(payload.seed, payload.index)
+    })
+
+    this.onEffect<{ labels: string[] }>('seed:reorder', (payload) => {
+      void this.#handleReorder(payload.labels)
+    })
+
+    this.onEffect<{ gapPx: number }>('render:set-gap', (payload) => {
+      if (this.#hexGeo.gapPx !== payload.gapPx) {
+        this.#hexGeo = createHexGeometry(this.#hexGeo.circumRadiusPx, payload.gapPx, this.#hexGeo.padPx)
+        this.emitEffect('render:geometry-changed', this.#hexGeo)
+        this.renderedCellsKey = ''
+        this.requestRender()
+      }
+    })
+
+    this.onEffect<{ q: number; r: number }>('tile:hover', (payload) => {
+      if (!this.shader) return
+      const axial = this.resolve<any>('axial')
+      if (!axial?.items) { this.shader.setHoveredIndex(-1); return }
+      for (const [idx, coord] of axial.items) {
+        if (coord.q === payload.q && coord.r === payload.r && idx < this.renderedCount) {
+          this.shader.setHoveredIndex(idx)
+          return
+        }
+      }
+      this.shader.setHoveredIndex(-1)
     })
 
     ; (window as any).showCellsPoc = {
