@@ -45,7 +45,14 @@ export class HistoryService {
       : []
 
     const lineagePath = explorerSegments.join('/')
-    const key = lineagePath ? `${domain}/${lineagePath}/seed` : `${domain}/seed`
+
+    // include space (room) and secret — must match ShowHoneycomb.computeSignatureLocation()
+    const roomStore = get<any>('@hypercomb.social/RoomStore')
+    const secretStore = get<any>('@hypercomb.social/SecretStore')
+    const space = roomStore?.value ?? ''
+    const secret = secretStore?.value ?? ''
+    const parts = [space, domain, lineagePath, secret, 'seed'].filter(Boolean)
+    const key = parts.join('/')
 
     // use SignatureStore.signText() for memoization — same lineage = same sig
     const sigStore = get<SignatureStore>('@hypercomb/SignatureStore')
