@@ -129,7 +129,7 @@ async function tryCacheMatch(request) {
         ? new Request(request.url, { method: 'GET' })
         : request
 
-    return await cache.match(key, { ignoreSearch: false })
+    return await cache.match(key, { ignoreSearch: true })
   } catch {
     return null
   }
