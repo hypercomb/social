@@ -11,7 +11,7 @@ import { HexLabelAtlas } from './hex-label.atlas.js'
 import { HexImageAtlas } from './hex-image.atlas.js'
 import { HexSdfTextureShader } from './hex-sdf.shader.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from './hex-geometry.js'
-import { TILE_PROPERTIES_FILE, isSignature, readSeedProperties, writeSeedProperties } from '../editor/tile-properties.js'
+import { isSignature, readSeedProperties, writeSeedProperties } from '../editor/tile-properties.js'
 import type { HistoryService, HistoryOp } from '../core/history.service.js'
 import type { ViewportPersistence, ViewportSnapshot } from '../input/zoom/zoom.drone.js'
 
@@ -1428,15 +1428,17 @@ export class ShowHoneycombWorker extends Drone {
   }
 
   /**
-   * Load cell properties (0000 file) for each local seed and resolve
-   * the small.image signature from __resources__/ into the image atlas.
+   * Load cell properties from the content-addressed tile-props index
+   * and resolve the small.image signature from __resources__/ into the image atlas.
    * Standard: any property value matching a 64-char hex signature
    * refers to a blob in __resources__/{signature}.
    */
-  private loadCellImages = async (cells: SeedCell[], dir: FileSystemDirectoryHandle): Promise<void> => {
+  private loadCellImages = async (cells: SeedCell[], _dir: FileSystemDirectoryHandle): Promise<void> => {
     const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as
       { getResource: (sig: string) => Promise<Blob | null> } | undefined
     if (!store || !this.imageAtlas) return
+
+    const propsIndex: Record<string, string> = JSON.parse(localStorage.getItem('hc:tile-props-index') ?? '{}')
 
     for (const cell of cells) {
       // external seeds don't have local OPFS data
@@ -1449,12 +1451,13 @@ export class ShowHoneycombWorker extends Drone {
         continue
       }
 
-      // read 0000 properties file from the seed directory
+      // read tile properties from content-addressed resource
       try {
-        const seedDir = await dir.getDirectoryHandle(cell.label)
-        const fileHandle = await seedDir.getFileHandle(TILE_PROPERTIES_FILE)
-        const file = await fileHandle.getFile()
-        const text = await file.text()
+        const propsSig = propsIndex[cell.label]
+        if (!propsSig) throw new Error('no props')
+        const blob = await store.getResource(propsSig)
+        if (!blob) throw new Error('no blob')
+        const text = await blob.text()
         const props = JSON.parse(text)
 
         // extract border color from properties
