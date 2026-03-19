@@ -15,7 +15,7 @@ import { DcpStore } from '../core/dcp-store'
         <header class="modal-header">
           <div class="header-top">
             <div class="header-left">
-              <span class="kind-badge" [class.dep]="kind() === 'dependency'">{{ kind() === 'dependency' ? 'dep' : 'bee' }}</span>
+              <span class="kind-badge" [class.dep]="kind() === 'dependency'">{{ kind() === 'dependency' ? 'dependency' : 'bee' }}</span>
               <span class="display-name">{{ displayName() }}</span>
               <span class="meta-pill">{{ fileSize() }}</span>
               <span class="meta-pill">{{ loadedFrom() }}</span>
