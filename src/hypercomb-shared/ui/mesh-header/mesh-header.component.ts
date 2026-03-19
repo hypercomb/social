@@ -15,7 +15,7 @@ export class MeshHeaderComponent {
   readonly meshToggled = output<void>()
 
   #secretValue = signal('')
-  #secretExpanded = signal(true)
+  #secretExpanded = signal(false)
   #secretRevealed = signal(false)
 
   readonly secretValue = this.#secretValue.asReadonly()
@@ -61,8 +61,9 @@ export class MeshHeaderComponent {
     this.#secretValue.set((event.target as HTMLInputElement).value)
   }
 
-  readonly submitSecret = (): void => {
-    const value = this.#secretValue().trim()
+  readonly submitSecret = (event: Event): void => {
+    const value = (event.target as HTMLInputElement).value.trim()
+    this.#secretValue.set(value)
     this.#store?.set(value)
     EffectBus.emit('mesh:secret', { secret: value })
     this.#secretExpanded.set(false)

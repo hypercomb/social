@@ -12,7 +12,7 @@
         placeholder="secure your location"
         [value]="secretValue()"
         (input)="onSecretInput($event)"
-        (keydown.enter)="submitSecret()"
+        (keydown.enter)="submitSecret($event)"
       />
       <button class="eye-toggle" type="button" (click)="onEyeClick()">
         <span class="hci">c</span>
