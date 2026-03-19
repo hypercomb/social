@@ -70,4 +70,10 @@ export class MeshHeaderComponent {
     this.#secretExpanded.set(false)
     this.#secretRevealed.set(false)
   }
+
+  readonly clearSecret = (): void => {
+    this.#secretValue.set('')
+    this.#store?.set('')
+    EffectBus.emit('mesh:secret', { secret: '' })
+  }
 }

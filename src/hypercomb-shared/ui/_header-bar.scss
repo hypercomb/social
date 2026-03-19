@@ -73,9 +73,36 @@ $secret-bg: rgba(10, 12, 16, 0.85);
   }
 }
 
+.secret-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.secret-clear {
+  position: absolute;
+  right: 0.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.2rem;
+  height: 1.2rem;
+  padding: 0;
+  border: none;
+  background: none;
+  color: rgba(245, 245, 245, 0.3);
+  font-size: 0.6rem;
+  cursor: pointer;
+  transition: color 200ms ease;
+
+  &:hover {
+    color: rgba(245, 245, 245, 0.6);
+  }
+}
+
 .header-secret-input {
   width: 14rem;
-  padding: 0.44rem 0.88rem;
+  padding: 0.44rem 1.4rem 0.44rem 0.88rem;
   border: 1px solid rgba(245, 245, 245, 0.12);
   border-left: none;
   border-right: none;
