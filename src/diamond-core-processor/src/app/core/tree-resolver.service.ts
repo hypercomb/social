@@ -2,6 +2,7 @@
 import { inject, Injectable } from '@angular/core'
 import { SignatureService } from '@hypercomb/core'
 import { AuditorService } from './auditor.service'
+import { DcpInstallerService, type InstallProgress } from './dcp-installer.service'
 import { DcpStore } from './dcp-store'
 import type { AuditResult, TreeNode } from './tree-node'
 
@@ -15,22 +16,19 @@ type LayerJson = {
   children?: string[]
 }
 
-type InstallManifest = {
-  version?: number
-  layers?: string[]
-  bees?: string[]
-  dependencies?: string[]
-  beeDeps?: Record<string, string[]>
-}
-
 @Injectable({ providedIn: 'root' })
 export class TreeResolverService {
 
   #cache = new Map<string, LayerJson>()
   #auditor = inject(AuditorService)
+  #installer = inject(DcpInstallerService)
   #store = inject(DcpStore)
 
-  async resolveRoot(contentBase: string, domain: string): Promise<TreeNode | null> {
+  async resolveRoot(
+    contentBase: string,
+    domain: string,
+    onInstallProgress?: (p: InstallProgress) => void
+  ): Promise<TreeNode | null> {
     const base = (contentBase ?? '').replace(/\/+$/, '')
     if (!base) return null
 
@@ -40,8 +38,8 @@ export class TreeResolverService {
     const rootSig = await this.#fetchLatest(base)
     if (!rootSig) return null
 
-    // fetch install manifest
-    const manifest = await this.#fetchManifest(base, rootSig, domain)
+    // upfront install: download all layers, bees, deps to OPFS
+    const manifest = await this.#installer.install(base, rootSig, domain, onInstallProgress)
     if (!manifest) return null
 
     // fetch root layer JSON
@@ -89,7 +87,7 @@ export class TreeResolverService {
     if (!layer) return
 
     const childSigs = layer.layers ?? layer.children ?? []
-    const beeSigs = layer.bees ?? []
+    const beeSigs = (layer.bees ?? []).map(s => s.replace(/\.js$/i, ''))
 
     for (const childSig of childSigs) {
       const childLayer = await this.#fetchLayer(base, rootSig, childSig, domain)
@@ -140,25 +138,6 @@ export class TreeResolverService {
       if (!res.ok) return null
       const text = await res.text()
       return text.trim() || null
-    } catch {
-      return null
-    }
-  }
-
-  async #fetchManifest(base: string, rootSig: string, domain: string): Promise<InstallManifest | null> {
-    try {
-      const url = `${base}/${rootSig}/install.manifest.json`
-      const res = await fetch(url, { cache: 'no-store' })
-      if (!res.ok) return null
-
-      const bytes = await res.arrayBuffer()
-      const parsed = JSON.parse(new TextDecoder().decode(bytes)) as InstallManifest
-
-      // persist to OPFS — same path Hypercomb expects
-      const domainDir = await this.#store.domainLayersDir(domain)
-      await this.#store.writeFile(domainDir, 'install.manifest.json', bytes)
-
-      return parsed
     } catch {
       return null
     }

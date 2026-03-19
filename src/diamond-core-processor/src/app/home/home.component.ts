@@ -1,10 +1,8 @@
 // src/app/home/home.component.ts
 import { Component, computed, effect, inject, signal } from '@angular/core'
-import { Router } from '@angular/router'
 import { TreeResolverService } from '../core/tree-resolver.service'
 import { ToggleStateService } from '../core/toggle-state.service'
 import { TreeViewComponent } from '../tree-view/tree-view.component'
-import { DetailViewComponent } from '../detail/detail-view.component'
 import { AuditorSettingsComponent } from '../settings/auditor-settings.component'
 import { BeeInspectorComponent } from '../tree-view/bee-inspector.component'
 import type { TreeNode } from '../core/tree-node'
@@ -18,28 +16,26 @@ export interface DomainSection {
   items: TreeNode[]
   loading: boolean
   error: string | null
+  installStatus: string | null
 }
 
 @Component({
   selector: 'app-home',
   standalone: true,
-  imports: [TreeViewComponent, DetailViewComponent, AuditorSettingsComponent, BeeInspectorComponent],
+  imports: [TreeViewComponent, AuditorSettingsComponent, BeeInspectorComponent],
   templateUrl: './home.component.html',
   styleUrls: ['./home.component.scss']
 })
 export class HomeComponent {
 
-  readonly #router = inject(Router)
   readonly #resolver = inject(TreeResolverService)
   readonly #toggleState = inject(ToggleStateService)
 
   // state
-  readonly view = signal<'tree' | 'detail'>('tree')
   readonly domains = signal<string[]>(this.#loadDomains())
   readonly domainInput = signal('')
   readonly searchTerm = signal('')
   readonly sections = signal<DomainSection[]>([])
-  readonly activeNode = signal<TreeNode | null>(null)
   readonly inspectBee = signal<string | null>(null)
   readonly inspectSection = signal<DomainSection | null>(null)
 
@@ -148,19 +144,13 @@ export class HomeComponent {
       this.inspectBee.set(node.signature)
       this.inspectSection.set(section ?? null)
     } else {
-      this.activeNode.set(node)
-      this.view.set('detail')
+      this.onExpandToggle(node)
     }
   }
 
   onCloseInspector(): void {
     this.inspectBee.set(null)
     this.inspectSection.set(null)
-  }
-
-  onBack(): void {
-    this.view.set('tree')
-    this.activeNode.set(null)
   }
 
   // auto-load all domains
@@ -170,7 +160,7 @@ export class HomeComponent {
     for (const domain of doms) {
       const domainName = new URL(domain).hostname
       const section: DomainSection = {
-        domain, domainName, rootSig: '', items: [], loading: true, error: null
+        domain, domainName, rootSig: '', items: [], loading: true, error: null, installStatus: null
       }
       results.push(section)
     }
@@ -179,7 +169,10 @@ export class HomeComponent {
 
     for (const section of results) {
       try {
-        const root = await this.#resolver.resolveRoot(section.domain, section.domainName)
+        const root = await this.#resolver.resolveRoot(section.domain, section.domainName, (p) => {
+          section.installStatus = `Installing ${p.phase} ${p.current}/${p.total}`
+          this.sections.set([...results])
+        })
         if (root) {
           section.rootSig = root.signature ?? ''
           // use root's children as the section items (skip the root node itself)
@@ -191,6 +184,7 @@ export class HomeComponent {
         section.error = e instanceof Error ? e.message : 'Failed to load'
       } finally {
         section.loading = false
+        section.installStatus = null
       }
       this.sections.set([...results])
     }
