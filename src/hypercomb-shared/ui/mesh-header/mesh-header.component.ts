@@ -63,7 +63,6 @@ export class MeshHeaderComponent {
 
   readonly submitSecret = (): void => {
     const value = this.#secretValue().trim()
-    if (!value) return
     this.#store?.set(value)
     EffectBus.emit('mesh:secret', { secret: value })
     this.#secretExpanded.set(false)
