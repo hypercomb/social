@@ -346,6 +346,6 @@ export class BeeInspectorComponent {
   }
 
   #stripSourceMap(text: string): string {
-    return text.replace(/\n\/\/#\s*sourceMappingURL=.*$/m, '').trimEnd()
+    return text.replace(/\n?\/\/#\s*sourceMappingURL=[\s\S]*$/, '').trimEnd()
   }
 }
