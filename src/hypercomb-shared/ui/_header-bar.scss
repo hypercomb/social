@@ -76,7 +76,7 @@ $secret-bg: rgba(10, 12, 16, 0.85);
 .secret-input-wrap {
   position: relative;
   display: flex;
-  align-items: center;
+  align-items: stretch;
 }
 
 .secret-clear {
@@ -102,6 +102,7 @@ $secret-bg: rgba(10, 12, 16, 0.85);
 
 .header-secret-input {
   width: 14rem;
+  box-sizing: border-box;
   padding: 0.44rem 1.4rem 0.44rem 0.88rem;
   border: 1px solid rgba(245, 245, 245, 0.12);
   border-left: none;
