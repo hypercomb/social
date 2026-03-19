@@ -6,54 +6,77 @@ import { AuditorService } from '../core/auditor.service'
   selector: 'dcp-auditor-settings',
   standalone: true,
   template: `
-    <div class="settings-panel" [class.open]="open()">
-      <button class="settings-toggle" (click)="open.set(!open())">
+    <div class="trust-panel" [class.open]="open()">
+      <button class="toggle" (click)="open.set(!open())" title="Community Trust">
         @if (open()) { &times; } @else { &#9881; }
       </button>
 
       @if (open()) {
-        <div class="settings-body">
-          <h3>Auditor Endpoints</h3>
+        <div class="panel">
+          <header class="panel-header">
+            <h3>Community Trust</h3>
+            <span class="badge">{{ auditor.endpoints.length }} source{{ auditor.endpoints.length === 1 ? '' : 's' }}</span>
+          </header>
 
-          <div class="input-row">
-            <input
-              type="text"
-              placeholder="Auditor URL"
-              [value]="urlInput()"
-              (input)="urlInput.set($any($event.target).value)"
-              (keydown.enter)="addAuditor()" />
-            <input
-              type="text"
-              placeholder="Name"
-              [value]="nameInput()"
-              (input)="nameInput.set($any($event.target).value)"
-              (keydown.enter)="addAuditor()" />
-            <button (click)="addAuditor()">Add</button>
+          <p class="description">
+            Add trusted auditor endpoints that vouch for code signatures.
+            Content must meet the approval threshold before it is marked as trusted.
+          </p>
+
+          <div class="add-row">
+            <div class="add-fields">
+              <input
+                type="text"
+                class="field field-url"
+                placeholder="https://auditor.example.com/approvals"
+                [value]="urlInput()"
+                (input)="urlInput.set($any($event.target).value)"
+                (keydown.enter)="addAuditor()" />
+              <input
+                type="text"
+                class="field field-name"
+                placeholder="Label"
+                [value]="nameInput()"
+                (input)="nameInput.set($any($event.target).value)"
+                (keydown.enter)="addAuditor()" />
+            </div>
+            <button class="btn-add" (click)="addAuditor()" [disabled]="!urlInput().trim()">Add</button>
           </div>
 
           @if (auditor.endpoints.length) {
-            <ul class="endpoint-list">
+            <ul class="sources">
               @for (ep of auditor.endpoints; track ep.url) {
-                <li>
-                  <span class="ep-name">{{ ep.name }}</span>
-                  <span class="ep-url">{{ ep.url }}</span>
-                  <button class="remove" (click)="auditor.removeEndpoint(ep.url)">&times;</button>
+                <li class="source-item">
+                  <div class="source-info">
+                    <span class="source-name">{{ ep.name }}</span>
+                    <span class="source-url">{{ ep.url }}</span>
+                  </div>
+                  <button class="btn-remove" (click)="auditor.removeEndpoint(ep.url)" title="Remove">&times;</button>
                 </li>
               }
             </ul>
           } @else {
-            <p class="empty">No auditor endpoints configured.</p>
+            <div class="empty-state">
+              <span class="empty-icon">&#9737;</span>
+              <span class="empty-text">No trusted sources configured</span>
+            </div>
           }
 
-          <div class="threshold-row">
-            <label>Threshold: require at least</label>
-            <input
-              type="number"
-              min="0"
-              [value]="auditor.threshold"
-              (change)="auditor.setThreshold(+$any($event.target).value)" />
-            <span>of {{ auditor.endpoints.length }} auditors</span>
-          </div>
+          <footer class="panel-footer">
+            <div class="threshold">
+              <label>Approval threshold</label>
+              <div class="threshold-control">
+                <input
+                  type="number"
+                  min="0"
+                  [max]="auditor.endpoints.length"
+                  class="threshold-input"
+                  [value]="auditor.threshold"
+                  (change)="auditor.setThreshold(+$any($event.target).value)" />
+                <span class="threshold-label">of {{ auditor.endpoints.length }}</span>
+              </div>
+            </div>
+          </footer>
         </div>
       }
     </div>
@@ -61,134 +84,255 @@ import { AuditorService } from '../core/auditor.service'
   styles: [`
     :host { display: block; }
 
-    .settings-panel {
-      position: relative;
-    }
+    .trust-panel { position: relative; }
 
-    .settings-toggle {
+    .toggle {
       background: none;
-      border: 1px solid rgba(0,0,0,0.1);
+      border: 1px solid rgba(0, 0, 0, 0.08);
       border-radius: 6px;
-      width: 32px;
-      height: 32px;
+      width: 30px;
+      height: 30px;
       cursor: pointer;
-      font-size: 16px;
-      color: #666;
+      font-size: 15px;
+      color: #777;
       display: flex;
       align-items: center;
       justify-content: center;
+      transition: all 0.15s ease;
     }
 
-    .settings-toggle:hover {
-      background: rgba(0,0,0,0.04);
-    }
-
-    .settings-body {
-      position: absolute;
-      top: 40px;
-      right: 0;
-      width: 400px;
-      background: #fff;
-      border: 1px solid rgba(0,0,0,0.12);
-      border-radius: 10px;
-      padding: 16px;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.12);
-      z-index: 100;
-    }
-
-    h3 {
-      margin: 0 0 12px;
-      font-size: 14px;
-      font-weight: 700;
+    .toggle:hover {
+      background: rgba(0, 0, 0, 0.04);
+      border-color: rgba(0, 0, 0, 0.14);
       color: #333;
     }
 
-    .input-row {
+    .panel {
+      position: absolute;
+      top: 38px;
+      right: 0;
+      width: 420px;
+      background: #fff;
+      border: 1px solid rgba(0, 0, 0, 0.1);
+      border-radius: 10px;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.04);
+      z-index: 100;
+      overflow: hidden;
+      animation: panelIn 0.15s ease;
+    }
+
+    @keyframes panelIn {
+      from { opacity: 0; transform: translateY(-4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .panel-header {
       display: flex;
-      gap: 6px;
-      margin-bottom: 12px;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 16px 0;
     }
 
-    .input-row input {
+    .panel-header h3 {
+      margin: 0;
+      font-size: 13px;
+      font-weight: 700;
+      color: #1a1a1a;
+      letter-spacing: 0.01em;
+    }
+
+    .badge {
+      font-size: 10px;
+      font-weight: 600;
+      color: #666;
+      background: rgba(0, 0, 0, 0.05);
+      padding: 2px 8px;
+      border-radius: 10px;
+    }
+
+    .description {
+      margin: 8px 16px 14px;
+      font-size: 11px;
+      line-height: 1.5;
+      color: #888;
+    }
+
+    .add-row {
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+      padding: 0 16px 14px;
+    }
+
+    .add-fields {
       flex: 1;
-      padding: 6px 8px;
-      font-size: 13px;
-      border: 1px solid rgba(0,0,0,0.15);
-      border-radius: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
     }
 
-    .input-row button {
-      padding: 6px 12px;
-      font-size: 13px;
+    .field {
+      padding: 7px 10px;
+      font-size: 12px;
+      border: 1px solid rgba(0, 0, 0, 0.1);
+      border-radius: 6px;
+      outline: none;
+      transition: border-color 0.15s;
+      background: #fafafa;
+    }
+
+    .field:focus {
+      border-color: rgba(74, 111, 165, 0.5);
+      background: #fff;
+    }
+
+    .field-name {
+      width: 120px;
+      flex: none;
+    }
+
+    .btn-add {
+      padding: 7px 14px;
+      font-size: 11px;
+      font-weight: 600;
       cursor: pointer;
-      border: 1px solid rgba(0,0,0,0.15);
+      border: 1px solid rgba(0, 0, 0, 0.1);
       border-radius: 6px;
-      background: #f5f5f5;
+      background: #1a1a1a;
+      color: #fff;
+      white-space: nowrap;
+      transition: all 0.15s;
     }
 
-    .endpoint-list {
+    .btn-add:hover:not(:disabled) {
+      background: #333;
+    }
+
+    .btn-add:disabled {
+      opacity: 0.35;
+      cursor: default;
+    }
+
+    .sources {
       list-style: none;
       padding: 0;
-      margin: 0 0 12px;
+      margin: 0;
+      border-top: 1px solid rgba(0, 0, 0, 0.06);
     }
 
-    .endpoint-list li {
+    .source-item {
       display: flex;
       align-items: center;
       gap: 8px;
-      padding: 4px 0;
-      border-bottom: 1px solid rgba(0,0,0,0.06);
-      font-size: 13px;
+      padding: 10px 16px;
+      border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+      transition: background 0.1s;
     }
 
-    .ep-name {
-      font-weight: 600;
-      color: #333;
+    .source-item:hover {
+      background: rgba(0, 0, 0, 0.015);
     }
 
-    .ep-url {
+    .source-info {
       flex: 1;
-      color: #888;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .source-name {
+      font-size: 12px;
+      font-weight: 600;
+      color: #1a1a1a;
+    }
+
+    .source-url {
+      font-size: 10px;
+      color: #999;
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-size: 11px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
 
-    .remove {
+    .btn-remove {
       background: none;
       border: none;
       cursor: pointer;
-      color: #999;
+      color: #ccc;
       font-size: 16px;
+      padding: 0 4px;
+      line-height: 1;
+      flex-shrink: 0;
+      transition: color 0.15s;
     }
 
-    .remove:hover {
+    .btn-remove:hover {
       color: #c00;
     }
 
-    .empty {
-      font-size: 13px;
-      color: #999;
-      margin: 8px 0;
-    }
-
-    .threshold-row {
+    .empty-state {
       display: flex;
       align-items: center;
+      justify-content: center;
       gap: 8px;
-      font-size: 13px;
+      padding: 20px 16px;
+      border-top: 1px solid rgba(0, 0, 0, 0.06);
+    }
+
+    .empty-icon {
+      font-size: 14px;
+      color: #ccc;
+    }
+
+    .empty-text {
+      font-size: 11px;
+      color: #aaa;
+    }
+
+    .panel-footer {
+      padding: 12px 16px;
+      border-top: 1px solid rgba(0, 0, 0, 0.06);
+      background: #fafafa;
+    }
+
+    .threshold {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .threshold label {
+      font-size: 11px;
+      font-weight: 600;
       color: #555;
     }
 
-    .threshold-row input {
-      width: 48px;
+    .threshold-control {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .threshold-input {
+      width: 40px;
       padding: 4px 6px;
-      font-size: 13px;
-      border: 1px solid rgba(0,0,0,0.15);
-      border-radius: 6px;
+      font-size: 12px;
+      border: 1px solid rgba(0, 0, 0, 0.1);
+      border-radius: 5px;
       text-align: center;
+      background: #fff;
+      outline: none;
+    }
+
+    .threshold-input:focus {
+      border-color: rgba(74, 111, 165, 0.5);
+    }
+
+    .threshold-label {
+      font-size: 11px;
+      color: #888;
     }
   `]
 })
