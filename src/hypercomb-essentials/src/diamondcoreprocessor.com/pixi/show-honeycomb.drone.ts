@@ -1141,6 +1141,18 @@ export class ShowHoneycombWorker extends Drone {
       }
     })
 
+    // seed from persisted stores so secret/room survive page reload
+    const roomStore = get<any>('@hypercomb.social/RoomStore')
+    const secretStore = get<any>('@hypercomb.social/SecretStore')
+    if (roomStore?.value && this.#space !== roomStore.value) {
+      this.#space = roomStore.value
+      this.renderedLocationKey = ''
+    }
+    if (secretStore?.value && this.#secret !== secretStore.value) {
+      this.#secret = secretStore.value
+      this.renderedLocationKey = ''
+    }
+
     // listen for pivot mode toggle (loads pre-rotated snapshots + rotated labels)
     this.onEffect<{ pivot: boolean }>('render:set-pivot', (payload) => {
       if (this.#pivot !== payload.pivot) {
