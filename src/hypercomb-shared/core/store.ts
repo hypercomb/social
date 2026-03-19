@@ -170,17 +170,20 @@ export class Store extends EventTarget {
 
     try {
 
-      const opfsUrl = `/opfs/${Store.BEES_DIRECTORY}/${signature}.js`
-
       // Snapshot IoC keys before import so we can detect self-registration
       const keysBefore = new Set(window.ioc.list())
 
       let mod: Record<string, unknown> | null = null
 
-      // seed bytes first so sw can serve exact module bytes, then import
-      if (!mod) {
-        await this.seedResourceCache(signature, buffer)
-        mod = await tryImport(opfsUrl)
+      // Import directly from the verified buffer via blob URL.
+      // This bypasses the service worker entirely — no /opfs/ round-trip,
+      // no cache seeding, no dependency on SW controlling the page.
+      const blob = new Blob([buffer], { type: 'application/javascript' })
+      const blobUrl = URL.createObjectURL(blob)
+      try {
+        mod = await tryImport(blobUrl)
+      } finally {
+        URL.revokeObjectURL(blobUrl)
       }
 
       if (!mod || typeof mod !== 'object') return null
