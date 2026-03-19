@@ -14,9 +14,11 @@
         (input)="onSecretInput($event)"
         (keydown.enter)="submitSecret($event)"
       />
-      <button class="eye-toggle" type="button" (click)="onEyeClick()">
-        <span class="hci">c</span>
-      </button>
+      @if (hasSecret()) {
+        <button class="eye-toggle" type="button" (click)="onEyeClick()">
+          <span class="hci">c</span>
+        </button>
+      }
     }
     <button class="public-toggle" type="button" (click)="meshToggled.emit()">
       public

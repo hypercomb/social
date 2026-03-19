@@ -63,6 +63,7 @@ export class MeshHeaderComponent {
 
   readonly submitSecret = (event: Event): void => {
     const value = (event.target as HTMLInputElement).value.trim()
+    if (value.length > 0 && value.length < 8) return
     this.#secretValue.set(value)
     this.#store?.set(value)
     EffectBus.emit('mesh:secret', { secret: value })
