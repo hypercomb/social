@@ -303,7 +303,7 @@ export class BeeInspectorComponent {
       const actual = await SignatureService.sign(localBytes)
       if (actual === sig) {
         this.#byteSize.set(localBytes.byteLength)
-        this.source.set(new TextDecoder().decode(localBytes))
+        this.source.set(this.#stripSourceMap(new TextDecoder().decode(localBytes)))
         this.loadedFrom.set('local (OPFS)')
         this.loading.set(false)
         return
@@ -331,7 +331,7 @@ export class BeeInspectorComponent {
           await this.#store.writeFile(dir, `${sig}.js`, bytes)
 
           this.#byteSize.set(bytes.byteLength)
-          this.source.set(new TextDecoder().decode(bytes))
+          this.source.set(this.#stripSourceMap(new TextDecoder().decode(bytes)))
           this.loadedFrom.set('content server')
           this.loading.set(false)
           return
@@ -343,5 +343,9 @@ export class BeeInspectorComponent {
     } finally {
       this.loading.set(false)
     }
+  }
+
+  #stripSourceMap(text: string): string {
+    return text.replace(/\n\/\/#\s*sourceMappingURL=.*$/m, '').trimEnd()
   }
 }
