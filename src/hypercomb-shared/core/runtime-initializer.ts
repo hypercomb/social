@@ -1,3 +1,4 @@
+import { EffectBus } from '@hypercomb/core'
 import type { Lineage } from './lineage'
 import type { Navigation } from './navigation'
 import { OpfsTreeLogger } from './tree-logger'
@@ -37,6 +38,11 @@ export const initializeRuntime = async (
   await history?.run?.()
 
   console.log('[runtime-initializer] ioc keys:', list())
+
+  // restore persisted pivot state — emitted here so bees are already loaded
+  if (localStorage.getItem('hc:hex-pivot') === 'true') {
+    EffectBus.emit('render:set-pivot', { pivot: true })
+  }
 
   // Probe mesh state for UI toggle
   const mesh = get('@diamondcoreprocessor.com/NostrMeshWorker') as any

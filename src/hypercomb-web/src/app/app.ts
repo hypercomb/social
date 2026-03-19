@@ -27,8 +27,6 @@ export class App implements AfterViewInit {
     this.core.toggleMesh()
   }
 
-  #pivotOn = localStorage.getItem('hc:hex-pivot') === 'true'
-
   constructor() {
     window.addEventListener('error', e => {
       if ((e as ErrorEvent).message?.includes('ResizeObserver loop')) {
@@ -37,19 +35,6 @@ export class App implements AfterViewInit {
     })
 
     this.runtimeReady = this.core.initialize()
-
-    // restore persisted pivot state
-    if (this.#pivotOn) {
-      EffectBus.emit('render:set-pivot', { pivot: true })
-    }
-
-    EffectBus.on<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
-      if (cmd === 'render.togglePivot') {
-        this.#pivotOn = !this.#pivotOn
-        localStorage.setItem('hc:hex-pivot', String(this.#pivotOn))
-        EffectBus.emit('render:set-pivot', { pivot: this.#pivotOn })
-      }
-    })
 
     console.log('[app] initialized')
   }
