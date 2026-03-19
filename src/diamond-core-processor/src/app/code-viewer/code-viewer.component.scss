@@ -5,7 +5,7 @@
   flex-direction: column;
   width: 100%;
   min-height: 220px;
-  border-radius: 12px;
+  border-radius: 6px;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: #0d1117;
@@ -15,14 +15,14 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.65rem 0.9rem;
+  gap: 0.5rem;
+  padding: 6px 10px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   background: #161b22;
 }
 
 .label {
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -30,19 +30,20 @@
 }
 
 .copy {
-  height: 34px;
-  padding: 0 0.85rem;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.06);
-  color: #c9d1d9;
-  font-size: 12px;
-  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: #8b949e;
+  font-size: 10px;
+  font-weight: 600;
   cursor: pointer;
+  line-height: 1.3;
 }
 
 .copy:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.08);
+  color: #c9d1d9;
 }
 
 .copy:active {
@@ -56,12 +57,12 @@
 
 .pre {
   margin: 0;
-  padding: 0.9rem;
+  padding: 10px 12px;
 }
 
 .code {
   font-family: ui-monospace, SFMono-Regular, 'Cascadia Code', 'Fira Code', Menlo, monospace;
-  font-size: 9px;
+  font-size: 10px;
   line-height: 1.5;
   white-space: pre;
   tab-size: 2;
