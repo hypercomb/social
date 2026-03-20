@@ -1,49 +1,149 @@
-# Search Bar Operations
+# Search Bar Operations Reference
 
-All operations available in the search bar. Update this file as new behaviors are added.
+> Comprehensive guide to every operation available in the Hypercomb search bar.
+> Update this document as new behaviors are added.
+
+---
+
+## Quick Reference
+
+| Operation | Syntax | Trigger | Type | Status |
+|:---|:---|:---:|:---:|:---:|
+| [create](#create) | `name` or `path/to/name` | Enter | built-in | done |
+| [create-goto](#create-goto) | `/name` or `/path/to/name` | Enter | built-in | done |
+| [create-sub-child](#create-sub-child) | `parent/child` | Enter | built-in | done |
+| [navigate](#navigate) | `name` | Shift+Enter | built-in | done |
+| [shift-enter-navigate](#shift-enter-navigate) | `path/to/folder` | Shift+Enter | pluggable | done |
+| [filter](#filter) | `>?keyword` | type | built-in | done |
+| [open-dcp](#open-dcp) | `#` | Enter | built-in | done |
+| [delete-cell](#delete-cell) | `!name` or `![a,b]` | Enter | pluggable | done |
+| [batch-create](#batch-create) | `[a,b]` or `path/[a,b]` | Enter | pluggable | done |
+
+---
 
 ## Operations
 
-| Operation | Syntax | Trigger | Type | Status |
-|-----------|--------|---------|------|--------|
-| **create** | `name` or `path/to/name` | `Enter` | built-in | done |
-| **create-goto** | `/name` or `/path/to/name` | `Enter` | built-in | done |
-| **create-sub-child** | `parent/child` | `Enter` | built-in | done |
-| **navigate** | `name` | `Shift+Enter` | built-in | done |
-| **shift-enter-navigate** | `path/to/folder` | `Shift+Enter` | pluggable | done |
-| **filter** | `>?keyword` | type | built-in | done |
-| **open-dcp** | `#` | `Enter` | built-in | done |
-| **delete-cell** | `!name` or `![a,b]` | `Enter` | pluggable | done |
-| **batch-create** | `[a,b]` or `path/[a,b]` | `Enter` | pluggable | done |
-
-## Details
-
 ### create
-Plain `Enter` with a name. Creates a cell at the current level. If the input contains `/`, creates the full nested path and retains the parent prefix in the bar so the user can keep adding children.
+
+**Trigger** &mdash; Enter &ensp;|&ensp; **Type** &mdash; built-in
+
+Plain Enter with a name. Creates a cell at the current level.
+If the input contains `/`, creates the full nested path and retains the parent prefix in the bar so the user can keep adding children.
+
+```
+eggs           → creates "eggs" at current level
+meals/dinner   → creates "meals/dinner", bar retains "meals/"
+```
+
+---
 
 ### create-goto
-Prefix with `/` and press `Enter`. Creates the cell then navigates into it.
+
+**Trigger** &mdash; Enter &ensp;|&ensp; **Type** &mdash; built-in
+
+Prefix with `/` and press Enter. Creates the cell, then navigates into it.
+
+```
+/recipes       → creates "recipes" and navigates inside
+/meals/dinner  → creates nested path, navigates to "dinner"
+```
+
+---
 
 ### create-sub-child
-Type `parent/child` and press `Enter`. Creates the nested path. The parent prefix stays in the bar (e.g. `parent/`) so you can continue adding siblings.
+
+**Trigger** &mdash; Enter &ensp;|&ensp; **Type** &mdash; built-in
+
+Type `parent/child` and press Enter. Creates the nested path. The parent prefix stays in the bar (e.g. `parent/`) so you can continue adding siblings under the same parent.
+
+```
+fruits/apple   → creates path, bar retains "fruits/"
+fruits/banana  → next entry creates a sibling
+```
+
+---
 
 ### navigate
-`Shift+Enter` with a single segment. Navigates into an existing cell without creating anything.
+
+**Trigger** &mdash; Shift+Enter &ensp;|&ensp; **Type** &mdash; built-in
+
+Shift+Enter with a single segment. Navigates into an existing cell without creating anything.
+
+```
+recipes        → navigates into "recipes" (must already exist)
+```
+
+---
 
 ### shift-enter-navigate
-`Shift+Enter` with a `/` path. Creates the full folder chain and navigates into the final segment. Pluggable behavior file: `shift-enter-navigate.behavior.ts`.
+
+**Trigger** &mdash; Shift+Enter &ensp;|&ensp; **Type** &mdash; pluggable
+
+Shift+Enter with a `/` path. Creates the full folder chain and navigates into the final segment.
+
+```
+meals/dinner   → creates chain if needed, navigates to "dinner"
+```
+
+Behavior file &mdash; `shift-enter-navigate.behavior.ts`
+
+---
 
 ### filter
-Type `>?keyword` to live-filter visible tiles. Emits `search:filter` effect.
+
+**Trigger** &mdash; type &ensp;|&ensp; **Type** &mdash; built-in
+
+Type `>?keyword` to live-filter visible tiles. Emits `search:filter` effect. Results update as you type.
+
+```
+>?bread        → filters tiles matching "bread"
+```
+
+---
 
 ### open-dcp
-Type `#` and press `Enter` (or just `#` when the bar is empty and locked). Opens the Diamond Core Processor panel. Only fires once per page load.
+
+**Trigger** &mdash; Enter &ensp;|&ensp; **Type** &mdash; built-in
+
+Type `#` and press Enter (or just `#` when the bar is empty and locked). Opens the Diamond Core Processor panel. Fires only once per page load.
+
+```
+#              → opens DCP panel
+```
+
+---
 
 ### delete-cell
-Prefix with `!` and press `Enter`. Supports path syntax (`!parent/child`) and batch syntax (`![foo,bar]`). Pluggable behavior file: `delete-cell.behavior.ts`.
+
+**Trigger** &mdash; Enter &ensp;|&ensp; **Type** &mdash; pluggable
+
+Prefix with `!` and press Enter. Supports path syntax and batch syntax.
+
+```
+!recipes       → deletes "recipes"
+!meals/dinner  → deletes nested cell
+![foo,bar]     → deletes "foo" and "bar"
+```
+
+Behavior file &mdash; `delete-cell.behavior.ts`
+
+---
 
 ### batch-create
-Use bracket syntax and press `Enter`. Expands `[a,b]` into multiple cells. Supports mid-path brackets: `parent/[a,b]/child` creates `parent/a/child` and `parent/b/child`. Pluggable behavior file: `batch-create.behavior.ts`.
+
+**Trigger** &mdash; Enter &ensp;|&ensp; **Type** &mdash; pluggable
+
+Use bracket syntax and press Enter. Expands `[a,b]` into multiple cells. Supports mid-path brackets for combinatorial creation.
+
+```
+[a,b]          → creates "a" and "b"
+path/[a,b]     → creates "path/a" and "path/b"
+p/[a,b]/child  → creates "p/a/child" and "p/b/child"
+```
+
+Behavior file &mdash; `batch-create.behavior.ts`
+
+---
 
 ## Architecture
 
@@ -56,6 +156,6 @@ interface SearchBarBehavior extends SearchBarBehaviorMeta {
 }
 ```
 
-Pluggable behaviors are registered in `SearchBarComponent.#behaviors` (first match wins). Built-in behaviors are hardcoded in `onKeyDown` and listed in `SearchBarComponent.builtinBehaviors` for self-documentation.
+**Resolution order** &mdash; Pluggable behaviors are registered in `SearchBarComponent.#behaviors` and evaluated first-match-wins. Built-in behaviors are hardcoded in `onKeyDown` and listed in `SearchBarComponent.builtinBehaviors` for self-documentation.
 
-All metadata is queryable at runtime via `SearchBarComponent.behaviorReference`.
+**Runtime introspection** &mdash; All metadata is queryable via `SearchBarComponent.behaviorReference`.
