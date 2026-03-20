@@ -14,6 +14,7 @@ import type { Navigation } from '../../core/navigation'
 import type { MovementService } from '../../core/movement.service'
 import { EffectBus } from '@hypercomb/core'
 import type { RoomStore } from '../../core/room-store'
+import type { SecretStore } from '../../core/secret-store'
 
 @Component({
   selector: 'hc-controls-bar',
@@ -44,6 +45,9 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   private get roomStore(): RoomStore | undefined {
     return get('@hypercomb.social/RoomStore') as RoomStore | undefined
   }
+  private get secretStore(): SecretStore | undefined {
+    return get('@hypercomb.social/SecretStore') as SecretStore | undefined
+  }
   private get gate(): any {
     return get('@diamondcoreprocessor.com/InputGate')
   }
@@ -53,6 +57,14 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #moved$ = fromRuntime(
     get('@hypercomb.social/MovementService') as EventTarget,
     () => this.movement.moved,
+  )
+  #room$ = fromRuntime(
+    get('@hypercomb.social/RoomStore') as EventTarget,
+    () => this.roomStore?.value ?? '',
+  )
+  #secret$ = fromRuntime(
+    get('@hypercomb.social/SecretStore') as EventTarget,
+    () => this.secretStore?.value ?? '',
   )
 
   #idle = signal(false)
@@ -75,12 +87,19 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
 
   // ── computed ────────────────────────────────────────────
 
-  readonly path = computed(() => {
+  readonly prefixPath = computed(() => {
     this.#moved$()
-    return this.navigation.segmentsRaw().join(' / ')
+    const parts: string[] = []
+    const room = this.#room$()
+    if (room) parts.push(room)
+    const segs = this.navigation.segmentsRaw()
+    if (segs.length) parts.push(...segs)
+    const secret = this.#secret$()
+    if (secret) parts.push(secret)
+    return parts.join(' / ')
   })
 
-  readonly hasPath = computed(() => this.path().length > 0)
+  readonly hasPrefixPath = computed(() => this.prefixPath().length > 0)
 
   readonly canGoBack = computed(() => {
     this.#moved$()

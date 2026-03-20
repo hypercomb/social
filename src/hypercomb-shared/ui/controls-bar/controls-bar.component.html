@@ -1,12 +1,12 @@
-@if (canGoBack() || hasPath()) {
+@if (canGoBack() || hasPrefixPath()) {
   <div class="breadcrumb-float" [class.faded]="!visible()">
     @if (canGoBack()) {
       <button class="ctl-btn" (click)="goBack()" aria-label="back">
         <span class="hci">B</span>
       </button>
     }
-    @if (hasPath()) {
-      <span class="path-crumb">{{ path() }}</span>
+    @if (hasPrefixPath()) {
+      <span class="path-crumb">{{ prefixPath() }}</span>
     }
   </div>
 }
