@@ -8,6 +8,10 @@ import type { ScriptPreloader } from '../../core/script-preloader'
 import type { CompletionUtility, CompletionContext } from '@hypercomb/shared/core/completion-utility'
 import { fromRuntime } from '../../core/from-runtime'
 import { EffectBus } from '@hypercomb/core'
+import type { SearchBarBehavior, SearchBarBehaviorMeta } from './search-bar-behavior'
+import { ShiftEnterNavigateBehavior } from './shift-enter-navigate.behavior'
+import { BatchCreateBehavior } from './batch-create.behavior'
+import { DeleteCellBehavior } from './delete-cell.behavior'
 
 @Component({
   selector: 'hc-search-bar',
@@ -48,6 +52,62 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     get('@hypercomb.social/ScriptPreloader') as EventTarget,
     () => this.preloader.actionNames
   )
+
+  // pluggable behaviors — first match wins
+  #behaviors: SearchBarBehavior[] = [
+    new DeleteCellBehavior(),
+    new BatchCreateBehavior(),
+    new ShiftEnterNavigateBehavior()
+  ]
+
+  // built-in behaviors that are hardcoded in onKeyDown (not pluggable yet)
+  static readonly builtinBehaviors: readonly SearchBarBehaviorMeta[] = [
+    {
+      name: 'create',
+      description: 'Create a new cell (seed) at the current level',
+      syntax: 'name or path/to/name',
+      key: 'Enter',
+      examples: [
+        { input: 'hello', key: 'Enter', result: 'Creates cell "hello" at current level' },
+        { input: 'a/b/c', key: 'Enter', result: 'Creates nested folders a/b/c' }
+      ]
+    },
+    {
+      name: 'navigate',
+      description: 'Navigate to an existing cell',
+      syntax: 'name',
+      key: 'Shift+Enter',
+      examples: [
+        { input: 'hello', key: 'Shift+Enter', result: 'Navigates into "hello" if it exists' }
+      ]
+    },
+    {
+      name: 'filter',
+      description: 'Live-filter visible tiles by keyword',
+      syntax: '>?keyword',
+      key: 'type',
+      examples: [
+        { input: '>?cigar', key: 'type', result: 'Filters tiles to those matching "cigar"' }
+      ]
+    },
+    {
+      name: 'open-dcp',
+      description: 'Open the Diamond Core Processor',
+      syntax: '#',
+      key: 'Enter',
+      examples: [
+        { input: '#', key: 'Enter', result: 'Opens the DCP panel' }
+      ]
+    }
+  ]
+
+  /** All behavior metadata — pluggable + built-in */
+  public get behaviorReference(): readonly SearchBarBehaviorMeta[] {
+    return [
+      ...this.#behaviors,
+      ...SearchBarComponent.builtinBehaviors
+    ]
+  }
 
   // open dcp only once per page load
   private dcpOpened = false
@@ -279,6 +339,16 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     }
 
     if (this.handleCompletionKeys(e)) return
+
+    // check pluggable behaviors before default handling
+    const raw = v.trim()
+    for (const behavior of this.#behaviors) {
+      if (behavior.match(e, raw)) {
+        e.preventDefault()
+        void Promise.resolve(behavior.execute(raw)).then(() => this.clear())
+        return
+      }
+    }
 
     if (e.key === 'Enter') {
       e.preventDefault()
