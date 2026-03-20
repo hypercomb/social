@@ -24,13 +24,13 @@
 
   font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro',
     Menlo, Consolas, 'DejaVu Sans Mono', monospace;
-  font-size: 0.55rem;
+  font-size: 0.5rem;
   color: rgba(245, 245, 245, 0.3);
   pointer-events: auto;
   transition: opacity 200ms ease;
 
   .path-crumb {
-    font-size: 0.55rem;
+    font-size: 0.5rem;
     color: rgba(245, 245, 245, 0.25);
     max-width: 30rem;
     padding: 0;
@@ -39,7 +39,7 @@
   .ctl-btn {
     padding: 0.15rem 0.25rem;
     min-width: unset;
-    .hci { font-size: 0.65rem; }
+    .hci { font-size: 0.59rem; }
   }
 
   &.faded {
@@ -70,7 +70,7 @@
 
   font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro',
     Menlo, Consolas, 'DejaVu Sans Mono', monospace;
-  font-size: 0.8rem;
+  font-size: 0.65rem;
   color: rgba(245, 245, 245, 0.85);
 
   transition: opacity 200ms ease, transform 200ms ease;
@@ -121,7 +121,7 @@
   transition: color 200ms ease, background 200ms ease;
 
   .hci {
-    font-size: 0.84rem;
+    font-size: 0.76rem;
   }
 
   &:hover {
@@ -166,7 +166,7 @@
   border-radius: 7px;
   background: #c8975a;
   color: #1a1a1e;
-  font-size: 0.55rem;
+  font-size: 0.5rem;
   font-weight: 700;
   line-height: 14px;
   text-align: center;
@@ -180,7 +180,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.72rem;
+  font-size: 0.65rem;
   color: rgba(245, 245, 245, 0.5);
   padding: 0 0.3rem;
 }
@@ -193,7 +193,7 @@
 }
 
 .mode-label {
-  font-size: 0.72rem;
+  font-size: 0.65rem;
   font-weight: 500;
   letter-spacing: 0.3px;
   text-transform: uppercase;
@@ -201,19 +201,19 @@
 }
 
 .clipboard-count {
-  font-size: 0.72rem;
+  font-size: 0.65rem;
   font-weight: 600;
   color: #c8975a;
 }
 
 .clipboard-empty {
-  font-size: 0.68rem;
+  font-size: 0.61rem;
   color: rgba(245, 245, 245, 0.3);
   font-style: italic;
 }
 
 .close-x {
-  font-size: 1.1rem;
+  font-size: 0.99rem;
   line-height: 1;
   color: rgba(200, 200, 200, 0.8);
 }
@@ -246,7 +246,7 @@
   color: rgba(248, 248, 244, 0.96);
 
   font: inherit;
-  font-size: 0.62rem;
+  font-size: 0.56rem;
   font-weight: 700;
   letter-spacing: 0.18em;
   text-transform: uppercase;
@@ -273,7 +273,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.68rem;
+  font-size: 0.61rem;
   font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
