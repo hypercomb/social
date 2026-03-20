@@ -5,6 +5,7 @@ import type { Lineage } from '../../core/lineage'
 import type { MovementService } from '../../core/movement.service'
 import type { Navigation } from '../../core/navigation'
 import type { ScriptPreloader } from '../../core/script-preloader'
+import type { SeedSuggestionProvider } from '../../core/seed-suggestion.provider'
 import type { CompletionUtility, CompletionContext } from '@hypercomb/shared/core/completion-utility'
 import { fromRuntime } from '../../core/from-runtime'
 import { EffectBus } from '@hypercomb/core'
@@ -38,10 +39,13 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
   private get movement(): MovementService { return get('@hypercomb.social/MovementService') as MovementService }
   private get navigation(): Navigation { return get('@hypercomb.social/Navigation') as Navigation }
   private get preloader(): ScriptPreloader { return get('@hypercomb.social/ScriptPreloader') as ScriptPreloader }
+  private get seedProvider(): SeedSuggestionProvider { return get('@hypercomb.social/SeedSuggestionProvider') as SeedSuggestionProvider }
 
   private readonly value = signal('')
   private readonly activeIndex = signal(0)
   private readonly suppressed = signal(false)
+  private readonly seedSubPath = signal<readonly string[]>([])
+  private readonly seedLeaf = signal('')
 
   // Bridge EventTarget-based services to Angular Signals for reactivity
   private readonly resourceCount$ = fromRuntime(
@@ -51,6 +55,10 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
   private readonly actionNames$ = fromRuntime(
     get('@hypercomb.social/ScriptPreloader') as EventTarget,
     () => this.preloader.actionNames
+  )
+  private readonly seedNames$ = fromRuntime(
+    get('@hypercomb.social/SeedSuggestionProvider') as EventTarget,
+    () => this.seedProvider.suggestions()
   )
 
   // pluggable behaviors — validated at construction, no overlapping operations
@@ -248,10 +256,34 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     if (!ctx.active) return []
     if (ctx.mode === 'filter') return []
 
-    const all = this.actionNames$()
-    if (!ctx.normalized) return all
+    const subPath = this.seedSubPath()
+    const leaf = this.seedLeaf()
+    const seeds = this.seedNames$()
+    const actions = this.actionNames$()
 
-    return all.filter((n: any) => n.startsWith(ctx.normalized))
+    // when in a sub-path (e.g. "abc/"), show only seeds at that level
+    if (subPath.length > 0) {
+      if (!leaf) return seeds
+      return seeds.filter(n => n.startsWith(leaf))
+    }
+
+    // at root level: merge seeds + actions, deduplicated
+    const seen = new Set<string>()
+    const merged: string[] = []
+    for (const name of seeds) {
+      if (seen.has(name)) continue
+      seen.add(name)
+      merged.push(name)
+    }
+    for (const name of actions) {
+      if (seen.has(name)) continue
+      seen.add(name)
+      merged.push(name)
+    }
+
+    if (!ctx.normalized) return merged
+
+    return merged.filter(n => n.startsWith(ctx.normalized))
   })
 
   public readonly showCompletions = computed<boolean>(() => {
@@ -272,6 +304,18 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     const best = list[this.activeIndex()] ?? list[0]
     if (!best) return ''
 
+    const subPath = this.seedSubPath()
+    const leaf = this.seedLeaf()
+    const current = this.value()
+
+    // sub-path mode: suggestion is a child name, leaf is the typed fragment
+    if (subPath.length > 0) {
+      if (!best.startsWith(leaf)) return ''
+      const suffix = best.slice(leaf.length)
+      if (!suffix) return ''
+      return current + suffix
+    }
+
     if (!best.startsWith(ctx.normalized)) return ''
 
     const rendered = this.completions.render(best, ctx.style)
@@ -280,7 +324,6 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     let suffix = rendered.slice(prefix.length)
     if (!suffix) return ''
 
-    const current = this.value()
     const last = current.slice(-1)
 
     if ((last === '.' || /\s/.test(last)) && (suffix.startsWith('.') || suffix.startsWith(' '))) {
@@ -323,6 +366,13 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     const ctx = this.context()
     if (!ctx.active) return ''
 
+    // sub-path mode: highlight the leaf prefix within the child name
+    const subPath = this.seedSubPath()
+    if (subPath.length > 0) {
+      const leaf = this.seedLeaf()
+      return s.slice(0, Math.min(leaf.length, s.length))
+    }
+
     const rendered = this.completions.render(s, ctx.style)
     const prefix = this.completions.render(ctx.normalized, ctx.style)
     return rendered.slice(0, Math.min(prefix.length, rendered.length))
@@ -331,6 +381,13 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
   public restPart = (s: string): string => {
     const ctx = this.context()
     if (!ctx.active) return s
+
+    // sub-path mode: rest is everything after the leaf prefix
+    const subPath = this.seedSubPath()
+    if (subPath.length > 0) {
+      const leaf = this.seedLeaf()
+      return s.slice(Math.min(leaf.length, s.length))
+    }
 
     const rendered = this.completions.render(s, ctx.style)
     const prefix = this.completions.render(ctx.normalized, ctx.style)
@@ -368,6 +425,9 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     if (ctx.active && ctx.mode === 'filter') {
       this.lastFilterKeyword = ctx.normalized
     }
+
+    // update seed sub-path query when input contains '/'
+    this.updateSeedSubPath()
   }
 
   private lastFilterKeyword = ''
@@ -525,6 +585,19 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     const best = forced ?? list[this.activeIndex()] ?? list[0]
     if (!best) return
 
+    const subPath = this.seedSubPath()
+
+    // sub-path mode: rebuild the full path with the accepted child name
+    if (subPath.length > 0) {
+      const pathPrefix = subPath.join('/') + '/'
+      this.input.nativeElement.value = pathPrefix + best + '/'
+      this.suppressed.set(false)
+      this.placeCaretAtEnd()
+      this.syncSignalsFromDom()
+      this.updateSeedSubPath()
+      return
+    }
+
     const rendered = this.completions.render(best, ctx.style)
 
     this.input.nativeElement.value =
@@ -587,6 +660,9 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
   private readonly clear = (): void => {
     this.input.nativeElement.value = ''
     this.syncSignalsFromDom()
+    this.seedSubPath.set([])
+    this.seedLeaf.set('')
+    this.seedProvider.query([])
     if (this.lastFilterKeyword) {
       EffectBus.emit('search:filter', { keyword: '' })
       this.lastFilterKeyword = ''
@@ -604,5 +680,34 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
 
   private readonly requestSynchronize = (): void => {
     window.dispatchEvent(new Event('synchronize'))
+  }
+
+  // -------------------------------------------------
+  // seed sub-path tracking
+  // -------------------------------------------------
+
+  private readonly updateSeedSubPath = (): void => {
+    const raw = this.input.nativeElement.value.trim()
+
+    // strip leading '/' (create-goto prefix)
+    const clean = raw.replace(/^\/+/, '')
+
+    // no '/' means we're at the current level
+    if (!clean.includes('/')) {
+      this.seedSubPath.set([])
+      this.seedLeaf.set('')
+      this.seedProvider.query([])
+      return
+    }
+
+    // split on '/' — everything before the last segment is the sub-path,
+    // the last segment (possibly empty after trailing '/') is the leaf filter
+    const parts = clean.split('/')
+    const leaf = this.completions.normalize((parts.pop() ?? '').trim())
+    const subPath = parts.map(p => this.completions.normalize(p.trim())).filter(Boolean)
+
+    this.seedSubPath.set(subPath)
+    this.seedLeaf.set(leaf)
+    this.seedProvider.query(subPath)
   }
 }

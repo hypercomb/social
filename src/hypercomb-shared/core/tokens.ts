@@ -14,6 +14,7 @@ import { Navigation } from './navigation'
 import { ResourceCompletionService } from './resource-completion.service'
 import { ResourceMessageHandler } from './resource-message-handler'
 import { ScriptPreloader } from './script-preloader'
+import { SeedSuggestionProvider } from './seed-suggestion.provider'
 
 // -------------------------------------------------
 // token type (lightweight, no core dependency)
@@ -39,6 +40,7 @@ export const NAVIGATION = token<Navigation>('@hypercomb.social/Navigation', Navi
 export const RESOURCE_COMPLETION = token<ResourceCompletionService>('@hypercomb.social/ResourceCompletionService', ResourceCompletionService)
 export const RESOURCE_MSG_HANDLER = token<ResourceMessageHandler>('@hypercomb.social/ResourceMessageHandler', ResourceMessageHandler)
 export const SCRIPT_PRELOADER = token<ScriptPreloader>('@hypercomb.social/ScriptPreloader', ScriptPreloader)
+export const SEED_SUGGESTION = token<SeedSuggestionProvider>('@hypercomb.social/SeedSuggestionProvider', SeedSuggestionProvider)
 
 // -------------------------------------------------
 // Angular bridge helper
