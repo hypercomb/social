@@ -1,12 +1,21 @@
-@if (canGoBack() || hasPrefixPath()) {
-  <div class="breadcrumb-float" [class.faded]="!visible()">
+@if (canGoBack() || hasPrefixPath() || secretWords()) {
+  <div class="breadcrumb-float">
     @if (canGoBack()) {
       <button class="ctl-btn" (click)="goBack()" aria-label="back">
         <span class="hci">B</span>
       </button>
     }
-    @if (hasPrefixPath()) {
-      <span class="path-crumb">{{ prefixPath() }}</span>
+    @if (spaceName()) {
+      <span class="space-crumb">{{ spaceName() }}</span>
+    }
+    @if (midPath()) {
+      <span class="path-crumb">{{ spaceName() ? '/ ' : '' }}{{ midPath() }}</span>
+    }
+    @if (leafSegment()) {
+      <span class="path-crumb">{{ spaceName() || midPath() ? '/ ' : '' }}</span><span class="leaf-crumb">{{ leafSegment() }}</span>
+    }
+    @if (secretWords()) {
+      <span class="path-crumb">{{ hasPrefixPath() ? '/ ' : '' }}</span><span class="secret-crumb">{{ secretWords() }}</span>
     }
   </div>
 }

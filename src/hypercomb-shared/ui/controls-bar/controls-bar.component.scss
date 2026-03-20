@@ -14,7 +14,7 @@
 
 .breadcrumb-float {
   position: fixed;
-  bottom: 0.3rem;
+  bottom: 0.15rem;
   left: 0.6rem;
   z-index: 59999;
 
@@ -33,6 +33,24 @@
     font-size: 0.5rem;
     color: rgba(245, 245, 245, 0.25);
     max-width: 30rem;
+    padding: 0;
+  }
+
+  .space-crumb {
+    font-size: 0.5rem;
+    color: rgba(190, 140, 200, 0.85);
+    padding: 0;
+  }
+
+  .leaf-crumb {
+    font-size: 0.5rem;
+    color: rgba(120, 170, 230, 0.85);
+    padding: 0;
+  }
+
+  .secret-crumb {
+    font-size: 0.5rem;
+    color: rgba(218, 165, 100, 0.85);
     padding: 0;
   }
 
@@ -277,6 +295,6 @@
   font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: rgba(200, 151, 90, 0.8);
+  color: rgba(218, 165, 100, 0.9);
   padding: 0 0.3rem;
 }

@@ -15,6 +15,7 @@ import type { MovementService } from '../../core/movement.service'
 import { EffectBus } from '@hypercomb/core'
 import type { RoomStore } from '../../core/room-store'
 import type { SecretStore } from '../../core/secret-store'
+import { secretTag } from './secret-words'
 
 @Component({
   selector: 'hc-controls-bar',
@@ -87,16 +88,38 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
 
   // ── computed ────────────────────────────────────────────
 
-  readonly prefixPath = computed(() => {
+  readonly spaceName = computed(() => {
     this.#moved$()
-    const parts: string[] = []
-    const room = this.#room$()
-    if (room) parts.push(room)
+    return this.#room$()
+  })
+
+  readonly midPath = computed(() => {
+    this.#moved$()
     const segs = this.navigation.segmentsRaw()
-    if (segs.length) parts.push(...segs)
-    const secret = this.#secret$()
-    if (secret) parts.push(secret)
+    if (segs.length <= 1) return ''
+    return segs.slice(0, -1).join(' / ')
+  })
+
+  readonly leafSegment = computed(() => {
+    this.#moved$()
+    const segs = this.navigation.segmentsRaw()
+    return segs.length > 0 ? segs[segs.length - 1] : ''
+  })
+
+  readonly prefixPath = computed(() => {
+    const parts: string[] = []
+    const space = this.spaceName()
+    if (space) parts.push(space)
+    const mid = this.midPath()
+    if (mid) parts.push(mid)
+    const leaf = this.leafSegment()
+    if (leaf) parts.push(leaf)
     return parts.join(' / ')
+  })
+
+  readonly secretWords = computed(() => {
+    const secret = this.#secret$()
+    return secret ? secretTag(secret) : ''
   })
 
   readonly hasPrefixPath = computed(() => this.prefixPath().length > 0)
