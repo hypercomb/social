@@ -29,7 +29,8 @@
     "prebuild:web": "tsx scripts/prebuild.ts --target web",
     "prebuild:dev": "tsx scripts/prebuild.ts --target dev",
     "build:sdk": "npm --prefix hypercomb-sdk run build",
-    "build:cli": "npm --prefix hypercomb-cli run build"
+    "build:cli": "npm --prefix hypercomb-cli run build",
+    "sync:angular": "tsx scripts/sync-angular.ts"
   },
   "dependencies": {
     "@angular/animations": "21.2.4",
