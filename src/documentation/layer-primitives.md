@@ -141,14 +141,14 @@ when a peer arrives at a mesh location with no items, it sends a sync-request as
 
 ```
 opfsroot/
-  hypercomb.io/                         # seed tree (marker-driven)
-    cigars/                             # folder
-      brands/                           # subfolder
-        {beeSig}                        # marker file → loads __bees__/{beeSig}.js
+  hypercomb.io/                         # seed tree (flat content)
+    cigars/                             # seed folder
+      brands/                           # child seed folder
   __bees__/{signature}.js               # compiled bee modules
   __dependencies__/{signature}.js       # namespace service bundles
   __resources__/{signature}             # content-addressed static assets
   __layers__/{domain}/{signature}       # layer manifests (per-domain)
+  __history__/{lineage-sig}/            # history records per lineage
 ```
 
-the layer's `lineage` maps to the folder path under `hypercomb.io/`. the layer's referenced signatures map to files in the `__bees__/`, `__dependencies__/`, and `__resources__/` directories. the layer manifest itself lives in `__layers__/{domain}/`.
+the layer's `lineage` maps to the folder path under `hypercomb.io/`. the layer's referenced signatures map to files in the `__bees__/`, `__dependencies__/`, and `__resources__/` directories. the layer manifest itself lives in `__layers__/{domain}/`. bees are discovered via the install manifest (cached in `localStorage`), not by scanning seed folders.

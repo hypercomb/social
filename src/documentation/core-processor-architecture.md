@@ -262,9 +262,12 @@ A seed is a named directory inside the current lineage path. The URL
 each one is a cell in the hexagonal grid that can contain:
 
 - **Child seeds** (subdirectories) -- forming the tree's branches
-- **Markers** (files named by signature) -- associating bees with locations
+- **Properties** (zero-signature file) -- JSON identity and configuration
 - **Mesh state** (shared seeds from the Nostr relay mesh) -- external
   contributions from other nodes
+
+Bees are discovered globally via the install manifest, not per-seed. All
+installed bees are available at every location in the tree.
 
 The `Lineage` service tracks the current position in this tree. `Navigation`
 moves through it. The URL bar is a direct reflection of your position in the

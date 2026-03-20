@@ -145,7 +145,7 @@ lineage resolves paths against OPFS:
 ```
 hypercomb.io / segment1 / segment2 / seed
 ```
-each segment maps to a `FileSystemDirectoryHandle`. `tryResolve()` reads without creating. `ensure()` creates missing directories. `addMarker()` writes signature files for content addressing.
+each segment maps to a `FileSystemDirectoryHandle`. path traversal is read-only — `setCurrent(segments)` walks existing directories and returns null if a path doesn't exist. no automatic directory creation.
 
 **Store** — manages the OPFS root. initializes the directory structure:
 ```
@@ -223,7 +223,7 @@ this pattern ensures that mouse wheel zoom, pinch zoom, and programmatic zoom ne
 
 nothing crosses into persistence unless meaning was attached.
 
-lineage writes to OPFS only through explicit operations: `ensure()` creates directories, `addMarker()` writes signature files. the store does not auto-save. the navigation layer reads the url but does not write history entries automatically.
+the store does not auto-save. the navigation layer reads the url but does not write history entries automatically. OPFS writes happen only through explicit operations — seed creation via tile editing, layer installation via the install pipeline, or history recording via `HistoryService`.
 
 effects are ephemeral — they exist in the bus until the session ends. drone state is ephemeral — it exists until disposal.
 

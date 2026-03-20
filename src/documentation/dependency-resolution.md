@@ -183,11 +183,11 @@ incomplete state and resumes — the `LayerInstaller` skips files already presen
 in OPFS, so only missing artifacts are fetched. Incremental manifest diffing
 removes stale entries from the previous version without clearing everything.
 
-**Global bee markers:** After a successful install, `ensureInstall()` places
-empty marker files in the `hypercomb.io/` root for every bee signature in the
-manifest. `ScriptPreloader.find()` always scans the hypercomb root, so all
-installed bees are discovered globally without requiring per-seed marker
-placement.
+**Manifest-driven bee discovery:** After a successful install, `ensureInstall()`
+caches the install manifest in `localStorage`. `ScriptPreloader.find()` reads
+the manifest to discover all installed bees globally — no filesystem scanning
+required. A fallback path scans directories for signature-named files in dev
+environments without a cached manifest.
 
 **Resolution rules:**
 
