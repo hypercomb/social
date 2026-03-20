@@ -8,7 +8,7 @@ import type { ScriptPreloader } from '../../core/script-preloader'
 import type { CompletionUtility, CompletionContext } from '@hypercomb/shared/core/completion-utility'
 import { fromRuntime } from '../../core/from-runtime'
 import { EffectBus } from '@hypercomb/core'
-import type { SearchBarBehavior, SearchBarBehaviorMeta } from './search-bar-behavior'
+import type { SearchBarBehavior, SearchBarBehaviorMeta, SearchBarOperation } from './search-bar-behavior'
 import { ShiftEnterNavigateBehavior } from './shift-enter-navigate.behavior'
 import { BatchCreateBehavior } from './batch-create.behavior'
 import { DeleteCellBehavior } from './delete-cell.behavior'
@@ -53,50 +53,69 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     () => this.preloader.actionNames
   )
 
-  // pluggable behaviors — first match wins
-  #behaviors: SearchBarBehavior[] = [
+  // pluggable behaviors — validated at construction, no overlapping operations
+  #behaviors: SearchBarBehavior[] = this.#validateBehaviors([
     new DeleteCellBehavior(),
     new BatchCreateBehavior(),
     new ShiftEnterNavigateBehavior()
-  ]
+  ])
 
   // built-in behaviors that are hardcoded in onKeyDown (not pluggable yet)
   static readonly builtinBehaviors: readonly SearchBarBehaviorMeta[] = [
     {
       name: 'create',
-      description: 'Create a new cell (seed) at the current level',
-      syntax: 'name or path/to/name',
-      key: 'Enter',
-      examples: [
-        { input: 'hello', key: 'Enter', result: 'Creates cell "hello" at current level' },
-        { input: 'a/b/c', key: 'Enter', result: 'Creates nested folders a/b/c' }
-      ]
-    },
-    {
-      name: 'navigate',
-      description: 'Navigate to an existing cell',
-      syntax: 'name',
-      key: 'Shift+Enter',
-      examples: [
-        { input: 'hello', key: 'Shift+Enter', result: 'Navigates into "hello" if it exists' }
+      operations: [
+        {
+          trigger: 'Enter',
+          pattern: /^[^!\[#/][^/]*$/,
+          description: 'Create a new cell (seed) at the current level',
+          examples: [
+            { input: 'hello', key: 'Enter', result: 'Creates cell "hello" at current level' }
+          ]
+        },
+        {
+          trigger: 'Enter',
+          pattern: /^[^!\[#].+\/.+[^/]$/,
+          description: 'Create nested folders, stay at current level with parent path retained',
+          examples: [
+            { input: 'a/b/c', key: 'Enter', result: 'Creates a/b/c, retains "a/b/" in the bar' }
+          ]
+        },
+        {
+          trigger: 'Enter',
+          pattern: /^[^!\[#].+\/$/,
+          description: 'Go to a folder, creating it if it doesn\'t exist',
+          examples: [
+            { input: 'abc/', key: 'Enter', result: 'Creates "abc" if needed, then navigates into it' },
+            { input: 'a/b/', key: 'Enter', result: 'Creates a/b if needed, then navigates into a/b' }
+          ]
+        }
       ]
     },
     {
       name: 'filter',
-      description: 'Live-filter visible tiles by keyword',
-      syntax: '>?keyword',
-      key: 'type',
-      examples: [
-        { input: '>?cigar', key: 'type', result: 'Filters tiles to those matching "cigar"' }
+      operations: [
+        {
+          trigger: 'type',
+          pattern: /^>\?.*/,
+          description: 'Live-filter visible tiles by keyword',
+          examples: [
+            { input: '>?cigar', key: 'type', result: 'Filters tiles to those matching "cigar"' }
+          ]
+        }
       ]
     },
     {
       name: 'open-dcp',
-      description: 'Open the Diamond Core Processor',
-      syntax: '#',
-      key: 'Enter',
-      examples: [
-        { input: '#', key: 'Enter', result: 'Opens the DCP panel' }
+      operations: [
+        {
+          trigger: 'Enter',
+          pattern: /^#$/,
+          description: 'Open the Diamond Core Processor',
+          examples: [
+            { input: '#', key: 'Enter', result: 'Opens the DCP panel' }
+          ]
+        }
       ]
     }
   ]
@@ -107,6 +126,40 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
       ...this.#behaviors,
       ...SearchBarComponent.builtinBehaviors
     ]
+  }
+
+  /** All operations across all behaviors, flat */
+  public get allOperations(): readonly SearchBarOperation[] {
+    return this.behaviorReference.flatMap(b => b.operations)
+  }
+
+  /**
+   * Validate that no two behaviors claim overlapping trigger+pattern space.
+   * Uses each operation's examples as probes — if two behaviors both match
+   * the same example input under the same trigger, that's a conflict.
+   */
+  #validateBehaviors(behaviors: SearchBarBehavior[]): SearchBarBehavior[] {
+    const claimed = new Map<string, { behavior: string; pattern: RegExp }>()
+
+    for (const b of behaviors) {
+      for (const op of b.operations) {
+        for (const ex of op.examples) {
+          const key = `${op.trigger}::${ex.input}`
+          const existing = claimed.get(key)
+          if (existing) {
+            console.warn(
+              `[search-bar] overlap: "${b.name}" and "${existing.behavior}" both claim ` +
+              `trigger="${op.trigger}" for input "${ex.input}". ` +
+              `"${existing.behavior}" wins (registered first).`
+            )
+          } else {
+            claimed.set(key, { behavior: b.name, pattern: op.pattern })
+          }
+        }
+      }
+    }
+
+    return behaviors
   }
 
   // open dcp only once per page load
@@ -350,14 +403,8 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
       }
     }
 
-    if (e.key === 'Enter') {
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-
-      if (e.shiftKey) {
-        void this.commitNavigate()
-        return
-      }
-
       void this.commitCreateSeedInPlace()
       return
     }
@@ -376,8 +423,8 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
       return
     }
 
-    const navigateAfterCreate = rawInput.startsWith('/')
-    const raw = navigateAfterCreate ? rawInput.replace(/^\/+/, '').trim() : rawInput
+    const navigateAfterCreate = rawInput.startsWith('/') || rawInput.endsWith('/')
+    const raw = rawInput.replace(/^\/+|\/+$/g, '').trim()
 
     // support nested seed creation: "hello/world" → create hello, then hello/world
     const parts = raw.split('/').map(s => this.completions.normalize(s.trim())).filter(Boolean)
@@ -400,7 +447,9 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     this.requestSynchronize()
 
     if (navigateAfterCreate) {
-      await this.movement.move(parts[0])
+      const baseSegments = this.navigation.segmentsRaw()
+      const target = [...baseSegments, ...parts]
+      this.navigation.goRaw(target)
       this.clear()
     } else if (parts.length > 1) {
       // retain parent path so user can keep adding children
@@ -430,34 +479,6 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
       await this.ensureSeedInCurrentDirectory(parsed.seedName)
     }
 
-    this.clear()
-  }
-
-  private readonly commitNavigate = async (): Promise<void> => {
-    const raw = this.input.nativeElement.value.trim()
-    if (!raw) return
-
-    if (this.locked()) {
-      this.clear()
-      return
-    }
-
-    const parsed = this.parseInput(raw)
-    if (!parsed.seedName) {
-      this.clear()
-      return
-    }
-
-    const baseSegments = this.navigation.segments()
-    const target = [...baseSegments, parsed.seedName]
-
-    const exists = await this.lineage.tryResolve(target)
-    if (!exists) {
-      this.clear()
-      return
-    }
-
-    await this.movement.move(parsed.seedName)
     this.clear()
   }
 

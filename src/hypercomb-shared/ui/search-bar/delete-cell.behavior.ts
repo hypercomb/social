@@ -16,13 +16,17 @@ import { EffectBus } from '@hypercomb/core'
 export class DeleteCellBehavior implements SearchBarBehavior {
 
   readonly name = 'delete-cell'
-  readonly description = 'Delete cells from the current directory'
-  readonly syntax = '!name or !path/to/name or ![name1,name2]'
-  readonly key = 'Enter'
-  readonly examples = [
-    { input: '!cellname', key: 'Enter', result: 'Deletes cellname from current directory' },
-    { input: '!parent/child', key: 'Enter', result: 'Deletes child from parent (parent stays)' },
-    { input: '![foo,bar]', key: 'Enter', result: 'Deletes foo and bar from current directory' }
+  readonly operations = [
+    {
+      trigger: 'Enter',
+      pattern: /^!.+/,
+      description: 'Delete cells from the current directory',
+      examples: [
+        { input: '!cellname', key: 'Enter', result: 'Deletes cellname from current directory' },
+        { input: '!parent/child', key: 'Enter', result: 'Deletes child from parent (parent stays)' },
+        { input: '![foo,bar]', key: 'Enter', result: 'Deletes foo and bar from current directory' }
+      ]
+    }
   ]
 
   match(event: KeyboardEvent, input: string): boolean {

@@ -19,13 +19,17 @@ import { EffectBus } from '@hypercomb/core'
 export class BatchCreateBehavior implements SearchBarBehavior {
 
   readonly name = 'batch-create'
-  readonly description = 'Create multiple cells at once using bracket expansion'
-  readonly syntax = 'path/[name1,name2,...] or [name1,name2]'
-  readonly key = 'Enter'
-  readonly examples = [
-    { input: 'abc/[123,456]', key: 'Enter', result: 'Creates abc/123 and abc/456' },
-    { input: '[foo,bar,baz]', key: 'Enter', result: 'Creates foo, bar, baz at current level' },
-    { input: 'parent/[a,b]/child', key: 'Enter', result: 'Creates parent/a/child and parent/b/child' }
+  readonly operations = [
+    {
+      trigger: 'Enter',
+      pattern: /\[.+]/,
+      description: 'Create multiple cells at once using bracket expansion',
+      examples: [
+        { input: 'abc/[123,456]', key: 'Enter', result: 'Creates abc/123 and abc/456' },
+        { input: '[foo,bar,baz]', key: 'Enter', result: 'Creates foo, bar, baz at current level' },
+        { input: 'parent/[a,b]/child', key: 'Enter', result: 'Creates parent/a/child and parent/b/child' }
+      ]
+    }
   ]
 
   match(event: KeyboardEvent, input: string): boolean {

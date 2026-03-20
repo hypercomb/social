@@ -4,32 +4,33 @@ import type { SearchBarBehavior } from './search-bar-behavior'
 import type { CompletionUtility } from '@hypercomb/shared/core/completion-utility'
 import type { Lineage } from '../../core/lineage'
 import type { Navigation } from '../../core/navigation'
-import { EffectBus } from '@hypercomb/core'
 
 /**
- * Shift+Enter with `/` in the input → create subfolders AND navigate into them.
+ * Shift+Enter → navigate only, never create.
  *
- * Typing "hello/world" and pressing Shift+Enter:
- *   1. Creates the full folder path (hello/world) in OPFS — same as Enter
- *   2. Emits seed:added + synchronize so tiles update
- *   3. Navigates into the created path
+ *   "hello"        Shift+Enter → go to "hello" if it exists
+ *   "hello/world"  Shift+Enter → go to hello/world if it exists
  *
- * Without `/` this behavior does not match — the default single-segment
- * commitNavigate handles it instead.
+ * This is a non-destructive, read-only operation. If the path
+ * doesn't exist, nothing happens. Creation is Enter's job.
  */
 export class ShiftEnterNavigateBehavior implements SearchBarBehavior {
 
   readonly name = 'shift-enter-navigate'
-  readonly description = 'Create nested folders and navigate into the created path'
-  readonly syntax = 'path/to/folder'
-  readonly key = 'Shift+Enter'
-  readonly examples = [
-    { input: 'hello/world', key: 'Shift+Enter', result: 'Creates hello/world and navigates into hello/world' },
-    { input: 'a/b/c', key: 'Shift+Enter', result: 'Creates a/b/c and navigates to a/b/c' }
+  readonly operations = [
+    {
+      trigger: 'Shift+Enter',
+      pattern: /^.+$/,
+      description: 'Navigate to an existing path (never creates)',
+      examples: [
+        { input: 'hello', key: 'Shift+Enter', result: 'Navigates into "hello" if it exists' },
+        { input: 'hello/world', key: 'Shift+Enter', result: 'Navigates to hello/world if it exists' }
+      ]
+    }
   ]
 
   match(event: KeyboardEvent, input: string): boolean {
-    return event.key === 'Enter' && event.shiftKey && input.includes('/')
+    return event.key === 'Enter' && event.shiftKey && input.length > 0
   }
 
   async execute(input: string): Promise<void> {
@@ -38,28 +39,20 @@ export class ShiftEnterNavigateBehavior implements SearchBarBehavior {
     const navigation = get('@hypercomb.social/Navigation') as Navigation
 
     const parts = input
+      .replace(/\/+$/, '')
       .split('/')
       .map(s => completions.normalize(s.trim()))
       .filter(Boolean)
 
     if (!parts.length) return
 
-    // 1. create the full folder path in OPFS
-    const dir = await lineage.explorerDir()
-    if (dir) {
-      let parent = dir
-      for (const part of parts) {
-        parent = await parent.getDirectoryHandle(part, { create: true })
-      }
-    }
-
-    // 2. notify the system
-    EffectBus.emit('seed:added', { seed: parts[0] })
-    window.dispatchEvent(new Event('synchronize'))
-
-    // 3. navigate into the created path
-    const baseSegments = navigation.segmentsRaw()
+    // verify the path exists — bail if it doesn't
+    const baseSegments = navigation.segments()
     const target = [...baseSegments, ...parts]
-    navigation.goRaw(target)
+    const exists = await lineage.tryResolve(target)
+    if (!exists) return
+
+    // navigate (no creation, no seed:added, no synchronize)
+    navigation.goRaw([...navigation.segmentsRaw(), ...parts])
   }
 }
