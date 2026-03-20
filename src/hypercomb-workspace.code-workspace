@@ -46,5 +46,9 @@
     ],
     "compounds": []
   },
-  "settings": {},
+  "settings": {
+    "files.exclude": {
+      "hypercomb-relay/**/*.js": false
+    }
+  },
 }
