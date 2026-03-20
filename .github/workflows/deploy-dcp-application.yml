@@ -36,7 +36,7 @@ jobs:
 
       - name: Install diamond-core-processor dependencies
         working-directory: src/diamond-core-processor
-        run: npm ci
+        run: npm install
 
       - name: Build diamond-core-processor
         working-directory: src/diamond-core-processor
