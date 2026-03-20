@@ -216,10 +216,6 @@ window.ioc.get('axial')        // shorthand
 
 ---
 
-## Applied Changes Log
+## Status
 
-_Record each change here as it's applied._
-
-| Date | Proposal | Files Changed | Notes |
-|------|----------|---------------|-------|
-| | | | |
+These proposals are conventions to adopt incrementally during normal development. Apply them when touching a file for other reasons — no dedicated refactoring pass required.

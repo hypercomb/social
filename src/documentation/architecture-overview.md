@@ -170,18 +170,16 @@ no server, no cloud -- the data lives in the browser itself.
 
 ```
 opfs root
-  hypercomb.io/          <-- domain root (hypercomb root)
-    seed-a/              <-- a seed directory (becomes a hex cell)
-    seed-b/
-  __bees__/              <-- installed bee bytecode (by signature)
-  __dependencies__/      <-- resolved dependency modules
-  __layers__/            <-- layer installation state
-  __resources__/         <-- content-addressed blobs (images, JSON)
+  hypercomb.io/            domain root (seed tree)
+    Alice/                 seed directory (becomes a hex tile)
+    Bob/
+  __bees__/                compiled bee modules (by signature)
+  __dependencies__/        namespace service bundles (by signature)
+  __layers__/              layer installation manifests
+  __resources__/           content-addressed blobs (images, JSON)
 ```
 
-`Store` manages the opfs handles. `Lineage` tracks the current explorer
-path and domain context. together they are the meadow log --
-the local record of where you have been and what you have planted.
+seeds are non-reserved subdirectories under the domain root. folders prefixed with `__` are reserved for the runtime. `Store` manages the opfs handles. `Lineage` tracks the current explorer path and domain context.
 
 ---
 

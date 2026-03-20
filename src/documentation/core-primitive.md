@@ -1,45 +1,50 @@
-# Hypercomb Core Primitive: Signatures, Payloads, and Deterministic Reproducibility
+# Core Primitive: Signature + Payload
 
-## Overview
+## The Pair
 
-The core primitive underlying Hypercomb's architecture is a two-part system: immutable signatures and their corresponding payloads. Signatures represent deterministic proof of computation — what happened and why. Payloads are the evidence — the actual artifacts those computations produced. Together, they form a permanent, verifiable ledger where every meaningful transformation can be traced, reproduced, and audited.
+Every artifact in Hypercomb is a **signature-payload pair**.
 
-## Signatures as Immutable Proof
+- **Signature**: SHA-256 hash (64 hex chars) of the artifact's bytes. Deterministic, immutable, content-derived.
+- **Payload**: The artifact itself — a compiled module, a JSON document, an image, a layer manifest.
 
-A signature is the deterministic result of a computation. Once computed, it never changes. It serves as a permanent fingerprint of:
+Same content always produces the same signature. Different content always produces a different signature. The signature *is* the identity.
 
-- What was computed
-- How it was computed
-- The exact inputs and transformation rules
-- The exact output produced
+## What This Enables
 
-Because signatures are deterministic, the same inputs under the same rules will always produce the same signature. This means signatures are not just identifiers — they are cryptographic proof of causality and reproducibility.
+**Content addressing.** No version numbers, no sequential IDs, no registries. The hash of the content names the content. Two systems that have never communicated will derive the same signature for the same artifact.
 
-## Payloads as Evidence
+**Deduplication.** If two seeds reference the same image, they store one copy in `__resources__/{sig}`. The signature guarantees they are identical.
 
-A payload is the actual artifact: the file, the compiled output, the rendered result, the state snapshot. Every signature maps to exactly one payload. The payload is the proof that the computation was real and produced something tangible.
+**Integrity verification.** Before any code executes, its bytes are hashed and compared against the expected signature. Mismatch means corruption or tampering — the artifact is rejected, no fallback.
 
-Together, signature and payload form an unbreakable pair: you can always resolve a signature back to its payload, and you can always verify a payload against its signature.
+**Reproducibility.** Given the same inputs and the same build rules, the output signature is identical. If the signature matches, the artifact is proven correct without re-executing the build.
 
-## Deterministic Reproducibility
+## Where Signatures Appear
 
-Because every computation is deterministic and every result is signed, the entire system becomes reproducible. Any signature can be recomputed from its inputs, and the result will always match the original. This means:
+| Context | What is signed | Signature names |
+|---------|---------------|-----------------|
+| Bee modules | Compiled JS bundle | `__bees__/{sig}.js` |
+| Dependencies | Namespace service bundle | `__dependencies__/{sig}.js` |
+| Resources | Static asset (image, JSON) | `__resources__/{sig}` |
+| Layers | Layer manifest JSON | `__layers__/{sig}.json` |
+| Root release | `install.manifest.json` | Root signature in `latest.txt` |
+| Lineage paths | UTF-8 path string | Location signature for mesh subscription |
+| History entries | Operation content | Cell identity in history bags |
 
-- No hidden state
-- No surprise transforms
-- No cache uncertainty
-- No guesswork about what version is running
+## The Pipeline
 
-If you know the signature, you know exactly what will happen.
+```
+content bytes  →  SHA-256  →  64-char hex signature
+```
 
-## Fidelity Collapses Computational Cost
+For structured data (drone payloads, layer manifests), canonicalization ensures deterministic output:
 
-The more granular your signature ledger becomes — the more fidelity you capture about every micro-state and transformation — the less wasteful computation becomes. Instead of re-doing work that's already been proven, you simply resolve signatures to their payloads.
+```
+object  →  structuredClone  →  JSON.stringify  →  TextEncoder  →  ArrayBuffer  →  SHA-256  →  signature
+```
 
-Imagine a build pipeline where every intermediate step is signed: source files, parsed AST, transformed code, compiled output, even individual asset chunks. If any step's inputs haven't changed, its signature hasn't changed, so its payload can be reused directly. No recompilation. No rebuilding. Just resolution.
+`SignatureService.sign(buffer)` computes the hash. `SignatureStore` memoizes known signatures to avoid redundant hashing during render cycles.
 
-This is incremental compilation taken to its logical extreme: perfect knowledge of what changed and what didn't, all backed by cryptographic proof.
+## The Invariant
 
-## Superintelligence Through Architectural Transparency
-
-When every computation is deterministic, every result is signed, and every transformation is logged, the system achieves a kind of superintelligence —
+The signature is proof. If you know the signature, you know the content has not changed. If you have the content, you can independently verify the signature. No trust required — the math is the authority.

@@ -4,7 +4,7 @@
   "scripts": {
     "ng": "node ../node_modules/@angular/cli/bin/ng.js",
     "prestart": "npm run prebuild:dev --prefix ..",
-    "start": "node ../node_modules/@angular/cli/bin/ng.js serve --port 4250 --host localhost --configuration production",
+    "start": "node ../node_modules/@angular/cli/bin/ng.js serve --port 4250 --host localhost",
     "build": "node ../node_modules/@angular/cli/bin/ng.js build",
     "watch": "node ../node_modules/@angular/cli/bin/ng.js build --watch --configuration development",
     "test": "node ../node_modules/@angular/cli/bin/ng.js test"

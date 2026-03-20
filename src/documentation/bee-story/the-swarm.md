@@ -84,13 +84,9 @@ no algorithm decided what you see. the swarm decided by being present.
 
 a real swarm can be ten thousand bees or fifty thousand. the behavior scales because no bee needs to know about every other bee. each bee responds to local signals — the temperature of its immediate neighbors, the scent gradient in its vicinity, the vibration of adjacent bees. global coordination emerges from local awareness.
 
-hypercomb swarms scale the same way. at a hundred participants, every avatar is visible and every tile is rendered. at ten thousand, the client must prioritize:
-
-- **spatial proximity** — bees closest to your current grid position are most visible. distant bees fade or become aggregate indicators (a glow, a density heatmap, a count).
-- **recency** — the most recently active bees render first. idle bees dim.
-- **pheromone strength** — bees whose tiles carry stronger pheromone signals (beacon, priority) surface above neutral travelers.
-
 the mesh handles scale through its existing mechanics: per-signature capacity caps (default 128 items), ttl-based expiry (default 120 seconds), and deduplication by event id. at massive scale, the relay infrastructure naturally sheds old presences. the swarm is always current, never archival.
+
+> **Future:** At higher participant counts, the client will prioritize by spatial proximity, recency, and pheromone strength — rendering nearby and active bees first, fading distant or idle ones. These visual scaling behaviors are not yet implemented.
 
 ---
 

@@ -1,5 +1,7 @@
 # the economy
 
+> **Status: Vision.** This document describes a future economic layer for Hypercomb. None of the mechanisms below are implemented in the current codebase. It is included as a design direction, not a specification of existing behavior.
+
 when a honeybee colony decides to reproduce, the hive enters a frenzy of preparation. foragers stockpile honey. nurse bees feed royal jelly to new queen larvae. wax builders reinforce comb. every bee in the colony contributes to the effort — not because they were ordered to, but because chemical signals made the need undeniable. the colony is investing. every drop of honey consumed, every milligram of wax secreted, every hour of labor — these are expenditures toward a future that does not yet exist.
 
 the hive's economy is real. nectar is gathered, converted to honey at significant metabolic cost, stored as energy reserves, and spent on construction, brood-rearing, and defense. the currency is effort made tangible. no bee hoards. no bee speculates. the economy exists to build.

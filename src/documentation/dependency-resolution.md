@@ -213,8 +213,6 @@ environments without a cached manifest.
 - Must ensure the import map is in the DOM before any dynamic `import()` of
   OPFS modules.
 - All shared file imports resolve through the workspace root `node_modules` for
-  third-party packages.
-- All shared file imports resolve through the workspace root `node_modules` for
   third-party packages. Angular package versions must match between the workspace
   root and the app's own `node_modules` to avoid duplicate runtimes.
 
