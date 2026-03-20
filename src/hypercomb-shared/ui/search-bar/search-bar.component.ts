@@ -331,9 +331,18 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
 
     if (navigateAfterCreate) {
       await this.movement.move(parts[0])
+      this.clear()
+    } else if (parts.length > 1) {
+      // retain parent path so user can keep adding children
+      // e.g. "interests/cigars" → leaves "interests/" in the bar
+      const prefix = parts.slice(0, -1).map(p => this.completions.render(p, 'space')).join('/')
+      this.input.nativeElement.value = prefix + '/'
+      this.placeCaretAtEnd()
+      this.suppressed.set(true)
+      this.syncSignalsFromDom()
+    } else {
+      this.clear()
     }
-
-    this.clear()
   }
 
   private readonly commitLegacy = async (): Promise<void> => {
