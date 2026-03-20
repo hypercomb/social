@@ -12,6 +12,13 @@ export type { IoCContainer } from './ioc/ioc.types.js'
 export * from './keys/index.js'
 
 // -------------------------------------------------
+// Bridge — CLI ↔ browser protocol
+// -------------------------------------------------
+
+export { BRIDGE_PORT } from './bridge.js'
+export type { BridgeOp, BridgeRequest, BridgeResponse } from './bridge.js'
+
+// -------------------------------------------------
 // Build — programmatic module build pipeline
 // -------------------------------------------------
 

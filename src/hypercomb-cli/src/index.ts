@@ -1,12 +1,16 @@
 import { runBuild } from './commands/build.js'
 import { runInspect } from './commands/inspect.js'
+import { runTile } from './commands/tile.js'
+import { runBridge } from './bridge/server.js'
 
 const USAGE = `Usage: hypercomb <command> [options]
 
 Commands:
-  build [--local]          Build essentials modules (--local skips Azure deploy)
+  build [--local]              Build essentials modules (--local skips Azure deploy)
   inspect [--keys|--registry]  Show IoC keys or live registry contents
-  help                     Show this message
+  bridge                       Start WebSocket relay (port 2401)
+  tile <subcommand>            Manage tiles via bridge (add/remove/list/inspect/history)
+  help                         Show this message
 `
 
 async function main(): Promise<void> {
@@ -19,6 +23,10 @@ async function main(): Promise<void> {
       return runBuild(rest)
     case 'inspect':
       return runInspect(rest)
+    case 'bridge':
+      return runBridge()
+    case 'tile':
+      return runTile(rest)
     case 'help':
     case '--help':
     case '-h':

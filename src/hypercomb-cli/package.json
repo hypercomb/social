@@ -29,9 +29,11 @@
     "access": "public"
   },
   "dependencies": {
-    "@hypercomb/sdk": "^0.1.0"
+    "@hypercomb/sdk": "^0.1.0",
+    "ws": "^8.19.0"
   },
   "devDependencies": {
+    "@types/ws": "^8.18.1",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3"
   }
