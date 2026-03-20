@@ -1,0 +1,33 @@
+@if (open()) {
+  <div class="sheet-backdrop" (click)="close()"></div>
+  <div class="sheet-panel" role="dialog" aria-label="Keyboard Shortcuts">
+    <header class="sheet-header">
+      <h3>Keyboard Shortcuts</h3>
+      <button class="sheet-close" (click)="close()">&times;</button>
+    </header>
+    <div class="sheet-body">
+      @for (group of groups(); track group.category) {
+        <section class="shortcut-group">
+          <h4 class="group-title">{{ group.category }}</h4>
+          <div class="shortcut-list">
+            @for (binding of group.bindings; track binding.cmd) {
+              <div class="shortcut-row">
+                <span class="shortcut-desc">{{ binding.description }}</span>
+                <span class="shortcut-keys">
+                  @for (step of formatSequence(binding); track $index) {
+                    @if ($index > 0) {
+                      <span class="chord-sep">then</span>
+                    }
+                    @for (part of step; track $index) {
+                      <kbd class="key-badge">{{ part }}</kbd>
+                    }
+                  }
+                </span>
+              </div>
+            }
+          </div>
+        </section>
+      }
+    </div>
+  </div>
+}

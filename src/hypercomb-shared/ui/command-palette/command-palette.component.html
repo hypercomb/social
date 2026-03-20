@@ -1,0 +1,53 @@
+@if (open()) {
+  <div class="palette-backdrop" (click)="close()"></div>
+  <div class="palette-panel" role="dialog" aria-label="Command Palette">
+    <div class="palette-input-row">
+      <span class="palette-icon">&gt;</span>
+      <input
+        #paletteInput
+        class="palette-input"
+        type="text"
+        placeholder="Type a command..."
+        autocomplete="off"
+        spellcheck="false"
+        (input)="onInput($event)"
+        (keydown)="onKeyDown($event)"
+      />
+    </div>
+    <div class="palette-results">
+      @if (totalCount() === 0) {
+        <div class="palette-empty">No matching commands</div>
+      }
+      @for (group of groups(); track group.category) {
+        <div class="palette-group">
+          <div class="palette-group-title">{{ group.category }}</div>
+          @for (item of group.items; track item.id) {
+            <div
+              class="palette-item"
+              [class.active]="item.globalIndex === activeIndex()"
+              (mousedown)="executeAt(item.globalIndex, $event)"
+              (mouseenter)="setActive(item.globalIndex)"
+            >
+              <span class="palette-item-label">
+                @for (part of highlightLabel(item); track $index) {
+                  @if (part.highlighted) {
+                    <span class="match-highlight">{{ part.text }}</span>
+                  } @else {
+                    <span>{{ part.text }}</span>
+                  }
+                }
+              </span>
+              <span class="palette-item-shortcut">
+                @for (step of formatShortcut(item.binding); track $index) {
+                  @for (part of step; track $index) {
+                    <kbd class="key-badge">{{ part }}</kbd>
+                  }
+                }
+              </span>
+            </div>
+          }
+        </div>
+      }
+    </div>
+  </div>
+}

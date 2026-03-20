@@ -28,13 +28,15 @@ import { SelectionService } from '@hypercomb/essentials/diamondcoreprocessor.com
 import '@hypercomb/essentials/diamondcoreprocessor.com/input/escape-cascade'
 import '@hypercomb/essentials/diamondcoreprocessor.com/input/pivot-toggle'
 import { TileEditorComponent } from '@hypercomb/shared/ui/tile-editor/tile-editor.component'
-import { ControlsBarComponent } from '@hypercomb/shared/ui';
+import { ControlsBarComponent, ShortcutSheetComponent, CommandPaletteComponent } from '@hypercomb/shared/ui';
 import { LayoutService } from '@hypercomb/essentials/diamondcoreprocessor.com/core/layout/layout.service'
 import { MoveDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/move/move.drone'
 import { DesktopMoveInput } from '@hypercomb/essentials/diamondcoreprocessor.com/input/move/desktop-move.input'
 import { TouchMoveInput } from '@hypercomb/essentials/diamondcoreprocessor.com/input/move/touch-move.input'
 import { MovePreviewDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/move-preview.drone'
 import { BackgroundDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/background/background.drone'
+import { ShortcutSheetDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/ui/shortcut-sheet.drone'
+import { CommandPaletteDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/ui/command-palette.drone'
 
 const _deps = [
   AxialService,
@@ -63,13 +65,15 @@ const _deps = [
   TouchMoveInput,
   MovePreviewDrone,
   BackgroundDrone,
+  ShortcutSheetDrone,
+  CommandPaletteDrone,
 ]
 
 void _deps
 
 @Component({
   selector: 'app-root',
-  imports: [ControlsBarComponent, MeshHeaderComponent, RouterOutlet, SearchBarComponent, TileEditorComponent],
+  imports: [ControlsBarComponent, MeshHeaderComponent, RouterOutlet, SearchBarComponent, TileEditorComponent, ShortcutSheetComponent, CommandPaletteComponent],
   styleUrls: ['./app.scss'] as any,
   templateUrl: './app.html'
 })
