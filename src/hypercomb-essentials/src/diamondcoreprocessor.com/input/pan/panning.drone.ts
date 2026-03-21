@@ -21,7 +21,12 @@ export class PanningDrone extends Drone {
   }
   protected override listens = ['render:host-ready']
 
+  #effectsRegistered = false
+
   protected override heartbeat = async (): Promise<void> => {
+    if (this.#effectsRegistered) return
+    this.#effectsRegistered = true
+
     this.onEffect<HostReadyPayload>('render:host-ready', (payload) => {
       this.stage = payload.app.stage
       this.canvas = payload.canvas

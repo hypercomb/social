@@ -58,7 +58,12 @@ export class MoveDrone extends Drone {
   protected override listens = ['render:host-ready', 'render:cell-count', 'render:mesh-offset', 'controls:action']
   protected override emits = ['move:preview', 'move:committed', 'move:mode', 'seed:reorder']
 
+  #effectsRegistered = false
+
   protected override heartbeat = async (): Promise<void> => {
+    if (this.#effectsRegistered) return
+    this.#effectsRegistered = true
+
     this.onEffect<HostReadyPayload>('render:host-ready', (payload) => {
       this.#canvas = payload.canvas
       this.#container = payload.container

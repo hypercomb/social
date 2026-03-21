@@ -98,12 +98,17 @@ export class ShowHoneycombWorker extends Drone {
 
   // incremental rendering state — tracks what's currently painted (geometry cache)
   private readonly renderedCells = new Map<string, SeedCell>()
+  // per-layer cache: location key → cells array (for instant back-navigation)
+  #layerCellsCache = new Map<string, { cells: SeedCell[]; seedNames: string[]; localSeedSet: Set<string>; branchSet: Set<string> }>()
   #heatByLabel = new Map<string, number>()
   #flashLabels = new Set<string>()
   #flashTimer: ReturnType<typeof setTimeout> | null = null
   private streamActive = false
   private cancelStreamFlag = false
   private renderedLocationKey = ''
+  #axialToIndex = new Map<string, number>()
+  #heartbeatInitialized = false
+  #lastHeartbeatKey = ''
 
   // hex geometry (circumradius, gap, pad, spacing) — configurable via render:set-gap effect
   #hexGeo: HexGeometry = DEFAULT_HEX_GEOMETRY
@@ -180,14 +185,22 @@ export class ShowHoneycombWorker extends Drone {
   protected override heartbeat = async (grammar: string = ''): Promise<void> => {
     this.ensureListeners()
 
-    // emit initial geometry so consumers start in sync
-    this.emitEffect('render:geometry-changed', this.#hexGeo)
+    // emit initial geometry so consumers start in sync (first pulse only)
+    if (!this.#heartbeatInitialized) {
+      this.#heartbeatInitialized = true
+      this.emitEffect('render:geometry-changed', this.#hexGeo)
+    }
 
-    // note: always compute mesh seeds on every heartbeat
-    await this.refreshMeshSeeds(grammar)
-
-    // note: live heartbeat path; no bootstrap short-circuit
-    this.requestRender()
+    // mesh seed refresh — only when lineage/grammar actually changed
+    const lineage = this.resolve<any>('lineage')
+    const locationKey = String(lineage?.explorerLabel?.() ?? '/')
+    const fsRev = Number(lineage?.changed?.() ?? 0)
+    const heartbeatKey = `${locationKey}:${fsRev}:${grammar}`
+    if (heartbeatKey !== this.#lastHeartbeatKey) {
+      this.#lastHeartbeatKey = heartbeatKey
+      await this.refreshMeshSeeds(grammar)
+      this.requestRender()
+    }
   }
 
   private refreshMeshSeeds = async (grammar: string = ''): Promise<void> => {
@@ -359,6 +372,9 @@ export class ShowHoneycombWorker extends Drone {
     return !!ok
   }
 
+  #cachedSigLocationKey = ''
+  #cachedSigLocation: { key: string; sig: string } = { key: '', sig: '' }
+
   private computeSignatureLocation = async (lineage: any): Promise<{ key: string; sig: string }> => {
     const domain = String(lineage?.domain?.() ?? lineage?.domainLabel?.() ?? 'hypercomb.io')
     const explorerSegmentsRaw = lineage?.explorerSegments?.()
@@ -372,13 +388,19 @@ export class ShowHoneycombWorker extends Drone {
     // key = space/domain/path/secret/seed (empty segments omitted)
     const parts = [this.#space, domain, lineagePath, this.#secret, 'seed'].filter(Boolean)
     const key = parts.join('/')
+
+    // fast path: return cached result if key hasn't changed
+    if (key === this.#cachedSigLocationKey) return this.#cachedSigLocation
+
     // use SignatureStore.signText() for memoization — same lineage path = same sig
     const sigStore = get<SignatureStore>('@hypercomb/SignatureStore')
     const sig = sigStore
       ? await sigStore.signText(key)
       : await SignatureService.sign(new TextEncoder().encode(key).buffer as ArrayBuffer)
 
-    return { key, sig }
+    this.#cachedSigLocationKey = key
+    this.#cachedSigLocation = { key, sig }
+    return this.#cachedSigLocation
   }
 
   // mesh discovery — resolves whichever mesh drone is registered
@@ -601,24 +623,35 @@ export class ShowHoneycombWorker extends Drone {
     return raw
   }
 
+  #renderScheduled = false
+
   private readonly requestRender = (): void => {
     if (this.rendering) {
       this.renderQueued = true
       return
     }
 
-    this.rendering = true
-
-    void (async () => {
-      try {
-        do {
-          this.renderQueued = false
-          await this.renderFromSynchronize()
-        } while (this.renderQueued)
-      } finally {
-        this.rendering = false
+    // coalesce synchronous bursts into one render via microtask
+    if (this.#renderScheduled) return
+    this.#renderScheduled = true
+    queueMicrotask(() => {
+      this.#renderScheduled = false
+      if (this.rendering) {
+        this.renderQueued = true
+        return
       }
-    })()
+      this.rendering = true
+      void (async () => {
+        try {
+          do {
+            this.renderQueued = false
+            await this.renderFromSynchronize()
+          } while (this.renderQueued)
+        } finally {
+          this.rendering = false
+        }
+      })()
+    })
   }
 
   /** Fast path for move:preview — skips OPFS/mesh/image loading, only rebuilds geometry with reordered labels */
@@ -662,9 +695,6 @@ export class ShowHoneycombWorker extends Drone {
       return
     }
 
-    // note: query mesh before building cells so first render includes latest shared seeds
-    await this.refreshMeshSeeds()
-
     const axial = this.resolve<any>('axial')
     if (!axial?.items) {
       this.clearMesh()
@@ -674,6 +704,46 @@ export class ShowHoneycombWorker extends Drone {
     const lineage = this.resolve<any>('lineage')
     if (!lineage?.explorerDir || !lineage?.explorerLabel || !lineage?.changed) {
       this.clearMesh()
+      return
+    }
+
+    const locationKey = String(lineage.explorerLabel?.() ?? '/')
+
+    // fast path: skip all OPFS work when nothing has changed
+    // renderedCellsKey is cleared by any invalidation event (tile:saved, orientation, clipboard, etc.)
+    if (locationKey === this.renderedLocationKey && this.renderedCellsKey !== '' && !this.#clipboardView) {
+      return
+    }
+
+    // instant back-navigation: if we have cached cells for this layer, apply them directly
+    // — skips ALL OPFS reads (explorerDir, listSeedFolders, checkHasBranch, history, layout)
+    if (locationKey !== this.renderedLocationKey && this.#layerCellsCache.has(locationKey)) {
+      const cached = this.#layerCellsCache.get(locationKey)!
+
+      // ensure layer + atlases are initialized
+      if (!this.layer) {
+        this.layer = new Container()
+        this.pixiContainer.addChild(this.layer)
+        this.atlas = new HexLabelAtlas(this.pixiRenderer, 128, 8, 8)
+        this.atlas.setPivot(this.#pivot)
+        this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8)
+        this.seedImageCache.clear()
+        this.seedBorderColorCache.clear()
+        this.atlasRenderer = this.pixiRenderer
+        this.shader = null
+      }
+
+      this.cancelStreamFlag = true
+      this.renderedLocationKey = locationKey
+      this.renderedCellsKey = ''
+      this.renderedCells.clear()
+
+      for (const cell of cached.cells) this.renderedCells.set(cell.label, cell)
+      this.cachedSeedNames = cached.seedNames
+      this.cachedLocalSeedSet = cached.localSeedSet
+      this.cachedBranchSet = cached.branchSet
+      await this.applyGeometry(cached.cells)
+      if (this.layer) this.layer.visible = true
       return
     }
 
@@ -699,7 +769,6 @@ export class ShowHoneycombWorker extends Drone {
       this.shader = null
     }
 
-    const locationKey = String(lineage.explorerLabel?.() ?? '/')
     const fsRev = Number(lineage.changed?.() ?? 0)
     const meshRev = this.meshSeedsRev
 
@@ -819,15 +888,17 @@ export class ShowHoneycombWorker extends Drone {
       seedNames = seedNames.filter((s: string) => s.toLowerCase().includes(kw))
     }
 
-    const layerChanged = locationKey !== this.renderedLocationKey
+    const previousLocationKey = this.renderedLocationKey
+    const layerChanged = locationKey !== previousLocationKey
 
     // note: if streaming is active for the same layer, let the stream finish
     if (this.streamActive && !layerChanged) return
 
-    // note: layer changed — cancel active stream, start progressive streaming
+    // note: layer changed — cancel active stream, rebuild
     if (layerChanged) {
       this.cancelStreamFlag = true
       this.renderedLocationKey = locationKey
+      this.renderedCellsKey = ''
       this.renderedCells.clear()
 
       // apply saved viewport (or defaults) so the container is correct before tiles render
@@ -837,18 +908,17 @@ export class ShowHoneycombWorker extends Drone {
       const vp = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ViewportPersistence') as ViewportPersistence | undefined
       if (vp) vp.setDirSilent(dir)
 
+      if (seedNames.length === 0) {
+        if (this.layer) this.layer.visible = true
+        this.clearMesh()
+        return
+      }
+
       // hide layer until streaming completes — prevents flash/jump during progressive render
       if (this.layer) this.layer.visible = false
 
       // emit navigation guard so click handlers block during transition
       this.emitEffect('navigation:guard-start', { locationKey })
-
-      if (seedNames.length === 0) {
-        if (this.layer) this.layer.visible = true
-        this.clearMesh()
-        this.emitEffect('navigation:guard-end', {})
-        return
-      }
 
       // stream seeds progressively (async, non-blocking)
       void this.streamSeeds(dir, seedNames, localSeedSet, axial, branchSet)
@@ -890,6 +960,9 @@ export class ShowHoneycombWorker extends Drone {
     for (const cell of cells) this.renderedCells.set(cell.label, cell)
 
     await this.applyGeometry(cells)
+
+    // cache for instant back-navigation
+    this.#layerCellsCache.set(locationKey, { cells: [...cells], seedNames, localSeedSet, branchSet })
   }
 
   private readonly streamSeeds = async (
@@ -938,6 +1011,13 @@ export class ShowHoneycombWorker extends Drone {
 
     this.streamActive = false
     this.emitEffect('navigation:guard-end', {})
+
+    // cache for instant back-navigation
+    if (!this.cancelStreamFlag && cells.length > 0) {
+      const locKey = this.renderedLocationKey
+      this.#layerCellsCache.set(locKey, { cells: [...cells], seedNames, localSeedSet, branchSet: branchSet ?? new Set() })
+    }
+
     this.requestRender()
   }
 
@@ -1048,6 +1128,12 @@ export class ShowHoneycombWorker extends Drone {
     this.geom = geom
     this.renderedCellsKey = nextCellsKey
     this.renderedCount = cells.length
+
+    // rebuild reverse axial lookup for O(1) tile:hover
+    this.#axialToIndex.clear()
+    for (let i = 0; i < cells.length; i++) {
+      this.#axialToIndex.set(`${cells[i].q},${cells[i].r}`, i)
+    }
     if (!this.suppressCellCount) {
       this.emitEffect('render:cell-count', {
         count: cells.length,
@@ -1067,8 +1153,8 @@ export class ShowHoneycombWorker extends Drone {
     this.listening = true
 
     // respond to processor-emitted synchronize and URL navigation
-    window.addEventListener('synchronize', () => this.requestRender())
-    window.addEventListener('navigate', () => this.requestRender())
+    window.addEventListener('synchronize', this.requestRender)
+    window.addEventListener('navigate', this.requestRender)
 
     // tile:saved effect — invalidate image cache for the specific seed so re-render picks up new image
     this.onEffect<{ seed: string }>('tile:saved', (payload) => {
@@ -1080,6 +1166,8 @@ export class ShowHoneycombWorker extends Drone {
           this.imageAtlas.invalidate(oldSig)
         }
       }
+      this.#layerCellsCache.delete(this.renderedLocationKey)
+      this.renderedCellsKey = ''
       this.requestRender()
     })
 
@@ -1116,6 +1204,7 @@ export class ShowHoneycombWorker extends Drone {
         this.#flat = payload.flat
         // invalidate image cache since we need different snapshots
         this.seedImageCache.clear()
+        this.#layerCellsCache.clear()
         this.renderedCellsKey = ''
         this.requestRender()
       }
@@ -1193,6 +1282,7 @@ export class ShowHoneycombWorker extends Drone {
         this.meshSeeds = []
         this.meshSeedsRev++
       }
+      this.#layerCellsCache.clear()
       this.renderedCellsKey = ''
       this.requestRender()
     })
@@ -1202,6 +1292,7 @@ export class ShowHoneycombWorker extends Drone {
       if (this.#pivot !== payload.pivot) {
         this.#pivot = payload.pivot
         this.seedImageCache.clear()
+        this.#layerCellsCache.clear()
         this.atlas?.setPivot(payload.pivot)
         this.renderedCellsKey = ''
         this.requestRender()
@@ -1235,15 +1326,8 @@ export class ShowHoneycombWorker extends Drone {
 
     this.onEffect<{ q: number; r: number }>('tile:hover', (payload) => {
       if (!this.shader) return
-      const axial = this.resolve<any>('axial')
-      if (!axial?.items) { this.shader.setHoveredIndex(-1); return }
-      for (const [idx, coord] of axial.items) {
-        if (coord.q === payload.q && coord.r === payload.r && idx < this.renderedCount) {
-          this.shader.setHoveredIndex(idx)
-          return
-        }
-      }
-      this.shader.setHoveredIndex(-1)
+      const idx = this.#axialToIndex.get(`${payload.q},${payload.r}`)
+      this.shader.setHoveredIndex(idx ?? -1)
     })
 
     ; (window as any).showCellsPoc = {
@@ -1256,7 +1340,8 @@ export class ShowHoneycombWorker extends Drone {
   }
 
   protected override dispose = (): void => {
-    window.removeEventListener('synchronize', this.onSynchronize)
+    window.removeEventListener('synchronize', this.requestRender)
+    window.removeEventListener('navigate', this.requestRender)
 
     if (this.lineageChangeListening) {
       const lineage = this.resolve<EventTarget>('lineage')

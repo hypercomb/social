@@ -260,7 +260,12 @@ export class ZoomDrone extends Drone {
   protected override deps = { mouseWheel: '@diamondcoreprocessor.com/MousewheelZoomInput' }
   protected override listens = ['render:host-ready']
 
+  #effectsRegistered = false
+
   protected override heartbeat = async (): Promise<void> => {
+    if (this.#effectsRegistered) return
+    this.#effectsRegistered = true
+
     this.onEffect<HostReadyPayload>('render:host-ready', (payload) => {
       this.app = payload.app
       this.renderContainer = payload.container

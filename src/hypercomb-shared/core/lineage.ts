@@ -163,16 +163,20 @@ export class Lineage extends EventTarget {
       try {
         dir = await dir.getDirectoryHandle(seg, { create: false })
       } catch {
+        const wasMaterialized = this.#materialized
+        const hadMissing = this.#missing.length > 0
         this.#materialized = false
         this.#missing = segments.slice(i)
-        this.dispatchEvent(new CustomEvent('change'))
+        if (wasMaterialized || !hadMissing) this.dispatchEvent(new CustomEvent('change'))
         return null
       }
     }
 
-    this.#materialized = true
-    this.#missing = []
-    this.dispatchEvent(new CustomEvent('change'))
+    if (!this.#materialized || this.#missing.length > 0) {
+      this.#materialized = true
+      this.#missing = []
+      this.dispatchEvent(new CustomEvent('change'))
+    }
     return dir
   }
 

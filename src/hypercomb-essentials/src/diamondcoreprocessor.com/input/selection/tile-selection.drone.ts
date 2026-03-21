@@ -48,6 +48,7 @@ class TileSelectionDrone extends Drone {
 
   #gate: InputGate | null = null
   #listening = false
+  #effectsRegistered = false
 
   // hex orientation
   #flat = false
@@ -62,6 +63,9 @@ class TileSelectionDrone extends Drone {
   protected override emits: string[] = []
 
   protected override heartbeat = async (): Promise<void> => {
+    if (this.#effectsRegistered) return
+    this.#effectsRegistered = true
+
     this.onEffect<HostReadyPayload>('render:host-ready', (payload) => {
       this.#renderContainer = payload.container
       this.#canvas = payload.canvas

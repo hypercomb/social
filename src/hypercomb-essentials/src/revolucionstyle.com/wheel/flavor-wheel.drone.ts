@@ -82,7 +82,12 @@ export class FlavorWheelDrone extends Drone {
 
   // ── lifecycle ──────────────────────────────────────────────────
 
+  #effectsRegistered = false
+
   protected override heartbeat = async (): Promise<void> => {
+    if (this.#effectsRegistered) return
+    this.#effectsRegistered = true
+
     this.onEffect<{ profile?: FlavorProfile }>('wheel:open', (payload) => {
       const service = this.resolve<FlavorWheelService>('wheelService')
       if (!service) return

@@ -195,8 +195,11 @@ export class AvatarSwarmDrone extends Drone {
 
   // ─── pixi setup ──────────────────────────────────────────────
 
+  #effectsRegistered = false
+
   #ensurePixi = (): void => {
-    if (this.#app) return
+    if (this.#effectsRegistered) return
+    this.#effectsRegistered = true
 
     this.onEffect<HostReadyPayload>('render:host-ready', (payload) => {
       if (this.#app) return

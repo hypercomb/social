@@ -17,7 +17,12 @@ export class BackgroundDrone extends Drone {
   protected override listens = ['render:host-ready']
   protected override emits: string[] = []
 
+  #effectsRegistered = false
+
   protected override heartbeat = async (): Promise<void> => {
+    if (this.#effectsRegistered) return
+    this.#effectsRegistered = true
+
     this.onEffect<HostReadyPayload>('render:host-ready', (payload) => {
       this.#container = payload.container
       this.#initGraphics()
