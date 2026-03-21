@@ -1,3 +1,5 @@
+import { normalizeSeed } from '@hypercomb/core'
+
 export type CompletionStyle = 'space' | 'dot'
 export type CompletionMode = 'action' | 'marker' | 'filter' | 'slash'
 
@@ -14,11 +16,7 @@ export type CompletionContext =
 
 export class CompletionUtility {
 
-  public readonly normalize = (s: string): string =>
-    s.replace(/\./g, ' ')
-      .replace(/\s+/g, '-')
-      .trim()
-      .toLowerCase()
+  public readonly normalize = (s: string): string => normalizeSeed(s)
 
 
   public readonly render = (s: string, style: CompletionStyle): string =>

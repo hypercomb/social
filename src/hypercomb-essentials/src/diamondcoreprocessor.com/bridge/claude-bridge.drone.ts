@@ -1,5 +1,5 @@
 // diamondcoreprocessor.com/bridge/claude-bridge.drone.ts
-import { Worker, EffectBus } from '@hypercomb/core'
+import { Worker, EffectBus, normalizeSeed } from '@hypercomb/core'
 import { readSeedProperties } from '../editor/tile-properties.js'
 import type { HistoryService } from '../core/history.service.js'
 
@@ -111,13 +111,17 @@ export class ClaudeBridgeWorker extends Worker {
     const dir = await this.#explorerDir()
     if (!dir) return { id: req.id, ok: false, error: 'no explorer directory' }
 
+    let count = 0
     for (const name of seeds) {
-      await dir.getDirectoryHandle(name, { create: true })
-      EffectBus.emit('seed:added', { seed: name })
+      const normalized = normalizeSeed(name)
+      if (!normalized) continue
+      await dir.getDirectoryHandle(normalized, { create: true })
+      EffectBus.emit('seed:added', { seed: normalized })
+      count++
     }
 
     window.dispatchEvent(new Event('synchronize'))
-    return { id: req.id, ok: true, data: { count: seeds.length } }
+    return { id: req.id, ok: true, data: { count } }
   }
 
   async #remove(req: BridgeRequest): Promise<BridgeResponse> {
@@ -133,12 +137,16 @@ export class ClaudeBridgeWorker extends Worker {
     const seeds = req.seeds
     if (!seeds?.length) return { id: req.id, ok: false, error: 'no seeds provided' }
 
-    for (const seed of seeds) {
+    let count = 0
+    for (const raw of seeds) {
+      const seed = normalizeSeed(raw)
+      if (!seed) continue
       EffectBus.emit('seed:removed', { seed })
+      count++
     }
 
     window.dispatchEvent(new Event('synchronize'))
-    return { id: req.id, ok: true, data: { count: seeds.length } }
+    return { id: req.id, ok: true, data: { count } }
   }
 
   async #list(req: BridgeRequest): Promise<BridgeResponse> {
@@ -147,7 +155,7 @@ export class ClaudeBridgeWorker extends Worker {
   }
 
   async #inspect(req: BridgeRequest): Promise<BridgeResponse> {
-    const name = req.seed
+    const name = req.seed ? normalizeSeed(req.seed) : ''
     if (!name) return { id: req.id, ok: false, error: 'no seed name' }
 
     const dir = await this.#explorerDir()

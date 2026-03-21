@@ -1,5 +1,5 @@
 // diamondcoreprocessor.com/pixi/tile-actions.drone.ts
-import { Drone, EffectBus, hypercomb } from '@hypercomb/core'
+import { Drone, EffectBus, hypercomb, normalizeSeed } from '@hypercomb/core'
 import type { OverlayActionDescriptor, OverlayTileContext } from './tile-overlay.drone.js'
 
 // ── SVG icon markup ────────────────────────────────────────────────
@@ -82,7 +82,8 @@ export class TileActionsDrone extends Drone {
   }
 
   #handleAction(payload: TileActionPayload): void {
-    const { action, label } = payload
+    const { action, label: rawLabel } = payload
+    const label = normalizeSeed(rawLabel) || rawLabel
 
     switch (action) {
       case 'edit':
@@ -109,7 +110,6 @@ export class TileActionsDrone extends Drone {
         EffectBus.emit('seed:added', { seed: label })
         void new hypercomb().act()
         break
-
       case 'block':
         this.#hideOrBlock(label, 'hc:blocked-tiles', 'tile:blocked')
         break
