@@ -100,6 +100,7 @@ export class DeleteCellBehavior implements SearchBarBehavior {
     const name = segments[segments.length - 1]
     try {
       await parent.removeEntry(name, { recursive: true })
+      EffectBus.emit('seed:removed', { seed: name })
     } catch {
       // entry doesn't exist or can't be removed — silently skip
     }

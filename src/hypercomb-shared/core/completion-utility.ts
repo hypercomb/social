@@ -1,7 +1,7 @@
 import { normalizeSeed } from '@hypercomb/core'
 
 export type CompletionStyle = 'space' | 'dot'
-export type CompletionMode = 'action' | 'marker' | 'filter' | 'slash'
+export type CompletionMode = 'action' | 'marker' | 'filter' | 'slash' | 'delete'
 
 export type CompletionContext =
   | { active: false }

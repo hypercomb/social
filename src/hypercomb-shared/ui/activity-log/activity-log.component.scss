@@ -1,0 +1,103 @@
+:host {
+  display: contents;
+}
+
+.activity-panel {
+  position: fixed;
+  bottom: 1.6rem;
+  left: 3px;
+  z-index: 9;
+  max-width: 22rem;
+  max-height: 50vh;
+  overflow-y: auto;
+
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 0.1rem;
+  padding: 0.25rem 0;
+
+  background: transparent;
+  pointer-events: none;
+
+  font-family: ui-monospace, sfmono-regular, menlo, consolas, monospace;
+  font-size: 0.7rem;
+  color: rgba(245, 245, 245, 0.4);
+
+  &::-webkit-scrollbar { width: 4px; }
+  &::-webkit-scrollbar-track { background: transparent; }
+  &::-webkit-scrollbar-thumb {
+    background: rgba(77, 166, 255, 0.15);
+    border-radius: 2px;
+    &:hover { background: rgba(77, 166, 255, 0.3); }
+  }
+}
+
+// ── entry rows ───────────────────────────────────────────
+
+.activity-entry {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.15rem 0.3rem;
+  pointer-events: auto;
+  transition: opacity 200ms ease;
+
+  &:hover { color: rgba(245, 245, 245, 0.8); }
+  &.fading { opacity: 0; }
+}
+
+.entry-revert {
+  flex-shrink: 0;
+  width: 0.9rem;
+  background: none;
+  border: none;
+  color: rgba(77, 166, 255, 0.25);
+  font-size: 0.6rem;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  text-align: center;
+  transition: color 150ms ease;
+
+  &:hover { color: rgba(77, 166, 255, 0.7); }
+  &:focus-visible {
+    outline: 1px solid rgba(77, 166, 255, 0.3);
+    outline-offset: -1px;
+  }
+}
+
+.entry-icon {
+  flex-shrink: 0;
+  width: 0.9rem;
+  text-align: center;
+  color: rgba(77, 166, 255, 0.5);
+  font-size: 0.6rem;
+}
+
+.entry-message {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.entry-dismiss {
+  flex-shrink: 0;
+  width: 1rem;
+  background: none;
+  border: none;
+  color: rgba(245, 245, 245, 0.15);
+  font-size: 0.65rem;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  text-align: center;
+  transition: color 150ms ease;
+
+  &:hover { color: rgba(245, 245, 245, 0.5); }
+  &:focus-visible {
+    outline: 1px solid rgba(245, 245, 245, 0.3);
+    outline-offset: -1px;
+  }
+}

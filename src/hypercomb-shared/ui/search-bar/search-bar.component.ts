@@ -240,6 +240,25 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
       }
     }
 
+    // ! prefix enters delete mode — show seeds as intellisense
+    // supports: !name, ![a,b,c] (intellisense on the current segment)
+    if (v.startsWith('!')) {
+      const body = v.slice(1)
+      // find the current segment: after last ',' or '[', or the whole body
+      const lastSep = Math.max(body.lastIndexOf(','), body.lastIndexOf('['))
+      const raw = lastSep === -1 ? body : body.slice(lastSep + 1)
+      const head = v.slice(0, v.length - raw.length)
+      const normalized = this.completions.normalize(raw)
+      return {
+        active: true,
+        mode: 'delete',
+        head,
+        raw,
+        normalized,
+        style: raw.includes('.') ? 'dot' : 'space'
+      }
+    }
+
     const lastHash = v.lastIndexOf('#')
 
     if (lastHash !== -1) {
@@ -281,6 +300,23 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     if (ctx.mode === 'filter') return []
     if (ctx.mode === 'slash') return this.#slashMatches().map(m => m.command.name)
 
+    // delete mode: show only seeds (tiles) that can be deleted
+    // exclude items already chosen in bracket syntax ![a,b,...]
+    if (ctx.mode === 'delete') {
+      const already = new Set<string>()
+      const bracketMatch = ctx.head.match(/\[(.+)/)
+      if (bracketMatch) {
+        for (const item of bracketMatch[1].split(',')) {
+          const n = this.completions.normalize(item)
+          if (n) already.add(n)
+        }
+      }
+      let seeds = this.seedNames$()
+      if (already.size) seeds = seeds.filter(n => !already.has(n))
+      if (!ctx.normalized) return seeds
+      return seeds.filter(n => n.startsWith(ctx.normalized))
+    }
+
     const subPath = this.seedSubPath()
     const leaf = this.seedLeaf()
     const seeds = this.seedNames$()
@@ -312,7 +348,11 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
   })
 
   public readonly showCompletions = computed<boolean>(() => {
-    return this.suggestions().length > 0
+    if (!this.suggestions().length) return false
+    // inside bracket delete syntax: ghost text only, no dropdown
+    const ctx = this.context()
+    if (ctx.active && ctx.mode === 'delete' && ctx.head.includes('[')) return false
+    return true
   })
 
   // -------------------------------------------------
@@ -320,7 +360,7 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
   // -------------------------------------------------
 
   public readonly ghostValue = computed<string>(() => {
-    if (!this.showCompletions()) return ''
+    if (!this.suggestions().length) return ''
 
     const ctx = this.context()
     if (!ctx.active) return ''
@@ -340,6 +380,9 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
       if (!suffix) return ''
       return current + suffix
     }
+
+    // in bracket delete mode, no ghost until user starts typing the next name
+    if (ctx.mode === 'delete' && ctx.head.includes('[') && !ctx.normalized) return ''
 
     if (!best.startsWith(ctx.normalized)) return ''
 
@@ -652,7 +695,7 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     const rendered = this.completions.render(best, ctx.style)
 
     this.input.nativeElement.value =
-      ctx.mode === 'marker'
+      (ctx.mode === 'marker' || ctx.mode === 'delete')
         ? ctx.head + rendered
         : rendered
 
