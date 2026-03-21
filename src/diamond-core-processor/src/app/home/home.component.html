@@ -16,6 +16,12 @@
       <button class="btn" (click)="addDomain()">Add</button>
     </div>
 
+    @if (!domains().length) {
+      <a class="sample-link" (click)="domainInput.set('https://storagehypercomb.blob.core.windows.net/content')">
+        https://storagehypercomb.blob.core.windows.net/content
+      </a>
+    }
+
     <!-- search -->
     @if (sections().length) {
       <input
