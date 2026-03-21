@@ -30,6 +30,7 @@ import '@hypercomb/essentials/diamondcoreprocessor.com/input/escape-cascade'
 import '@hypercomb/essentials/diamondcoreprocessor.com/input/pivot-toggle'
 import { TileEditorComponent } from '@hypercomb/shared/ui/tile-editor/tile-editor.component'
 import { ControlsBarComponent, ShortcutSheetComponent, CommandPaletteComponent } from '@hypercomb/shared/ui';
+import { PortalOverlayComponent } from '@hypercomb/shared/ui/portal/portal-overlay.component'
 import { LayoutService } from '@hypercomb/essentials/diamondcoreprocessor.com/core/layout/layout.service'
 import { MoveDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/move/move.drone'
 import { DesktopMoveInput } from '@hypercomb/essentials/diamondcoreprocessor.com/input/move/desktop-move.input'
@@ -79,7 +80,7 @@ void _deps
 
 @Component({
   selector: 'app-root',
-  imports: [ControlsBarComponent, MeshHeaderComponent, RouterOutlet, SearchBarComponent, TileEditorComponent, ShortcutSheetComponent, CommandPaletteComponent],
+  imports: [ControlsBarComponent, MeshHeaderComponent, RouterOutlet, SearchBarComponent, TileEditorComponent, ShortcutSheetComponent, CommandPaletteComponent, PortalOverlayComponent],
   styleUrls: ['./app.scss'] as any,
   templateUrl: './app.html'
 })

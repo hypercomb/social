@@ -37,8 +37,8 @@
     @case ('browsing') {
       <!-- view section -->
       <div class="controls-section view">
-        <button class="ctl-btn" [class.active]="locked()" (click)="toggleLock()" aria-label="lock">
-          <span class="hci">{{ locked() ? 'a' : 'b' }}</span>
+        <button class="ctl-btn" (click)="openDcp()" aria-label="diamond core processor">
+          <span class="hci dcp-icon">$</span>
         </button>
         <button class="ctl-btn" (click)="centerView()" aria-label="center">
           <span class="hci">(</span>
@@ -48,6 +48,9 @@
         </button>
         <button class="ctl-btn" (click)="zoomIn()" aria-label="zoom in">
           <span class="hci">K</span>
+        </button>
+        <button class="ctl-btn" [class.active]="locked()" (click)="toggleLock()" aria-label="lock">
+          <span class="hci">{{ locked() ? 'a' : 'b' }}</span>
         </button>
         <button class="ctl-btn" (click)="toggleFullscreen()" aria-label="fullscreen">
           <span class="hci">'</span>

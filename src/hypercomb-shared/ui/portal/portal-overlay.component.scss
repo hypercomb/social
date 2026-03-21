@@ -2,18 +2,16 @@
 .backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
-  z-index: 1000;
+  background: rgba(0, 0, 0, 0.35);
+  z-index: 90000;
 }
 
 .panel {
   position: fixed;
-  inset: 24px;
-  background: rgba(18, 18, 18, 0.96);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 12px;
+  inset: 0;
+  background: rgba(18, 18, 18, 0.82);
   overflow: hidden;
-  z-index: 1001;
+  z-index: 90001;
 }
 
 .frame {
@@ -21,4 +19,52 @@
   height: 100%;
   border: 0;
   display: block;
+  opacity: 0.92;
+}
+
+.portal-close {
+  position: absolute;
+  bottom: 1.2rem;
+  left: 50%;
+  transform: translateX(-50%);
+
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 1.4rem;
+
+  background: rgba(14, 18, 24, 0.88);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+
+  color: rgba(245, 245, 245, 0.85);
+  font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro',
+    Menlo, Consolas, 'DejaVu Sans Mono', monospace;
+  cursor: pointer;
+  transition: opacity 200ms ease, transform 200ms ease, background 200ms ease;
+
+  &:hover {
+    background: rgba(14, 18, 24, 0.95);
+    border-color: rgba(255, 255, 255, 0.22);
+  }
+
+  &:active {
+    transform: translateX(-50%) scale(0.97);
+  }
+}
+
+.close-icon {
+  font-size: 1.1rem;
+  line-height: 1;
+  color: rgba(200, 151, 90, 0.9);
+}
+
+.close-label {
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(245, 245, 245, 0.7);
 }

@@ -136,19 +136,6 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
         }
       ]
     },
-    {
-      name: 'open-dcp',
-      operations: [
-        {
-          trigger: 'Enter',
-          pattern: /^#$/,
-          description: 'Open the Diamond Core Processor',
-          examples: [
-            { input: '#', key: 'Enter', result: 'Opens the DCP panel' }
-          ]
-        }
-      ]
-    }
   ]
 
   /** All behavior metadata — pluggable + built-in */
@@ -193,8 +180,6 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     return behaviors
   }
 
-  // open dcp only once per page load
-  private dcpOpened = false
 
   // -------------------------------------------------
   // readiness / locking
@@ -480,21 +465,6 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     const el = this.input.nativeElement
     const v = el.value
 
-    // explicit '#' + enter always opens dcp
-    if (e.key === 'Enter' && v.trim() === '#') {
-      e.preventDefault()
-      this.tryOpenDcp()
-      this.clear()
-      return
-    }
-
-    // single-press hotkey: only when locked, only on first '#', and only when starting from empty input
-    if (e.key === '#' && !this.dcpOpened && this.locked() && !v.trim()) {
-      e.preventDefault()
-      this.tryOpenDcp()
-      return
-    }
-
     if (this.handleCompletionKeys(e)) return
 
     // slash command execution
@@ -720,16 +690,6 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     // emit seed:added — HistoryRecorder will record the op
     EffectBus.emit('seed:added', { seed: seedName })
     this.requestSynchronize()
-  }
-
-  // -------------------------------------------------
-  // dcp helpers
-  // -------------------------------------------------
-
-  private readonly tryOpenDcp = (): void => {
-    if (this.dcpOpened) return
-    this.dcpOpened = true
-    window.dispatchEvent(new CustomEvent('portal:open', { detail: { target: 'dcp' } }))
   }
 
   // -------------------------------------------------

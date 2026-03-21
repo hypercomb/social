@@ -230,6 +230,10 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
 
   // ── view actions ──────────────────────────────────────
 
+  readonly openDcp = (): void => {
+    window.dispatchEvent(new CustomEvent('portal:open', { detail: { target: 'dcp' } }))
+  }
+
   readonly centerView = (): void => {
     const container = this.pixiHost?.container
     if (container) container.position.set(0, 0)

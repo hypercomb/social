@@ -194,6 +194,15 @@
     outline-offset: 1px;
   }
 
+  // ── dcp icon scale ──
+  .dcp-icon {
+    font-size: 1.02rem;
+    line-height: 0;
+    display: inline-block;
+    transform: translateY(-0.5px);
+    color: rgba(200, 151, 90, 0.75);
+  }
+
   // ── active state (lock, utility toggle) ──
   &.active {
     color: #00e5a0;

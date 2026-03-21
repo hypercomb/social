@@ -1,7 +1,13 @@
-import { Component, type OnInit, type OnDestroy, signal, inject } from "@angular/core"
+import { ChangeDetectorRef, Component, type OnInit, type OnDestroy, signal, inject } from "@angular/core"
 import type { SafeResourceUrl } from "@angular/platform-browser"
 import { DomSanitizer } from "@angular/platform-browser"
 import { EffectBus } from '@hypercomb/core'
+
+const PORTALS: Record<string, string> = {
+  dcp: 'https://diamondcoreprocessor.com',
+  meadowverse: 'https://meadowverse.com',
+  hypercomb: 'https://hypercomb.com',
+}
 
 @Component({
   selector: 'hc-portal-overlay',
@@ -11,33 +17,33 @@ import { EffectBus } from '@hypercomb/core'
 })
 export class PortalOverlayComponent implements OnInit, OnDestroy {
 
-  // dcp entry point
-  private static readonly DCP_URL = 'http://localhost:2400'
-
   readonly #sanitizer = inject(DomSanitizer)
+  readonly #cdr = inject(ChangeDetectorRef)
 
   public readonly open = signal(false)
   public readonly src = signal<SafeResourceUrl | null>(null)
+  #activeUrl: string | null = null
 
   // -------------------------------------------------
   // open portal
   // -------------------------------------------------
-  private readonly onPortalOpen = (): void => {
+  private readonly onPortalOpen = (e: Event): void => {
+    const detail = (e as CustomEvent).detail as { target?: string; url?: string } | null
+    const url = detail?.url ?? PORTALS[detail?.target ?? '']
+    if (!url) return
+
+    this.#activeUrl = url
     this.open.set(true)
-    this.src.set(
-      this.#sanitizer.bypassSecurityTrustResourceUrl(
-        PortalOverlayComponent.DCP_URL
-      )
-    )
+    this.src.set(this.#sanitizer.bypassSecurityTrustResourceUrl(url))
+    this.#cdr.detectChanges()
   }
 
   // -------------------------------------------------
   // iframe → parent messages
   // -------------------------------------------------
   private readonly onMessage = (e: MessageEvent): void => {
-    const expectedOrigin = new URL(
-      PortalOverlayComponent.DCP_URL
-    ).origin
+    if (!this.#activeUrl) return
+    const expectedOrigin = new URL(this.#activeUrl).origin
 
     // enforce origin boundary
     if (e.origin !== expectedOrigin) return
@@ -46,13 +52,13 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     if (!data?.type) return
 
     switch (data.type) {
+      case 'portal:confirm':
       case 'dcp:confirm':
         this.close()
-        window.dispatchEvent(
-          new CustomEvent('actions:available')
-        )
+        window.dispatchEvent(new CustomEvent('actions:available'))
         break
 
+      case 'portal:cancel':
       case 'dcp:cancel':
         this.close()
         break
@@ -87,5 +93,7 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
   public close = (): void => {
     this.open.set(false)
     this.src.set(null)
+    this.#activeUrl = null
+    this.#cdr.detectChanges()
   }
 }
