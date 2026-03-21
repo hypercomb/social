@@ -369,7 +369,7 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     if (!this.suggestions().length) return false
     // inside bracket delete syntax: ghost text only, no dropdown
     const ctx = this.context()
-    if (ctx.active && ctx.mode === 'delete' && ctx.head.includes('[')) return false
+    if (ctx.active && ctx.mode === 'delete' && ctx.head.includes(',')) return false
     return true
   })
 
@@ -407,9 +407,6 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
       if (!suffix) return ''
       return current + suffix
     }
-
-    // in bracket delete mode, no ghost until user starts typing the next name
-    if (ctx.mode === 'delete' && ctx.head.includes('[') && !ctx.normalized) return ''
 
     if (!best.startsWith(ctx.normalized)) return ''
 
