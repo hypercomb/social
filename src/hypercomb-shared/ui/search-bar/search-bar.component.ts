@@ -13,6 +13,7 @@ import type { SearchBarBehavior, SearchBarBehaviorMeta, SearchBarOperation } fro
 import { ShiftEnterNavigateBehavior } from './shift-enter-navigate.behavior'
 import { BatchCreateBehavior } from './batch-create.behavior'
 import { DeleteCellBehavior } from './delete-cell.behavior'
+import { GoParentBehavior } from './go-parent.behavior'
 
 @Component({
   selector: 'hc-search-bar',
@@ -86,6 +87,7 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
 
   // pluggable behaviors — validated at construction, no overlapping operations
   #behaviors: SearchBarBehavior[] = this.#validateBehaviors([
+    new GoParentBehavior(),
     new DeleteCellBehavior(),
     new BatchCreateBehavior(),
     new ShiftEnterNavigateBehavior()

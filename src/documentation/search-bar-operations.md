@@ -16,6 +16,7 @@
 | [shift-enter-navigate](#shift-enter-navigate) | `path/to/folder` | Shift+Enter | pluggable | done |
 | [filter](#filter) | `>?keyword` | type | built-in | done |
 | [open-dcp](#open-dcp) | `#` | Enter | built-in | done |
+| [go-parent](#go-parent) | `..` or `../..` | Enter | pluggable | done |
 | [delete-cell](#delete-cell) | `!name` or `![a,b]` | Enter | pluggable | done |
 | [batch-create](#batch-create) | `[a,b]` or `path/[a,b]` | Enter | pluggable | done |
 
@@ -110,6 +111,22 @@ Type `#` and press Enter (or just `#` when the bar is empty and locked). Opens t
 ```
 #              → opens DCP panel
 ```
+
+---
+
+### go-parent
+
+**Trigger** &mdash; Enter &ensp;|&ensp; **Type** &mdash; pluggable
+
+Type `..` to go up one level, `../..` to go up two levels, etc. Clamps to root — never errors if you overshoot.
+
+```
+..             → navigates up one level
+../..          → navigates up two levels
+../../..       → navigates up three levels
+```
+
+Behavior file &mdash; `go-parent.behavior.ts`
 
 ---
 
