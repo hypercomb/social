@@ -100,6 +100,7 @@
 
   &.faded {
     opacity: 0;
+    pointer-events: none;
   }
 }
 
@@ -136,9 +137,13 @@
     opacity: 0.15;
     transform: translateX(-50%) translateY(4px);
 
+    > * { pointer-events: none; }
+
     &:hover {
       opacity: 1;
       transform: translateX(-50%) translateY(0);
+
+      > * { pointer-events: auto; }
     }
   }
 }

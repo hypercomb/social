@@ -35,5 +35,9 @@ body {
   margin: 0;
   height: 100%;
 }
+*:not(input):not(textarea):not([contenteditable="true"]) {
+  caret-color: transparent;
+}
+
 /* highlight.js theme for code viewer */
 @import 'highlight.js/styles/github-dark.css';
