@@ -8,7 +8,8 @@
     "hypercomb-essentials",
     "hypercomb-sdk",
     "hypercomb-cli",
-    "hypercomb-dev"
+    "hypercomb-dev",
+    "meadowverse"
   ],
   "engines": {
     "node": ">=20.19.0",

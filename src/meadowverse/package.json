@@ -1,0 +1,20 @@
+{
+  "name": "meadowverse",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.js",
+    "dev": "node build.js && npx serve dist -l 4220"
+  },
+  "dependencies": {
+    "@hypercomb/core": "file:../hypercomb-core",
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.170.0",
+    "esbuild": "^0.27.0",
+    "serve": "^14.2.6",
+    "typescript": "~5.9.3"
+  }
+}
