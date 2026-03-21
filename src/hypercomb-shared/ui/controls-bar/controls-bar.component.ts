@@ -4,6 +4,7 @@
 import {
   Component,
   computed,
+  effect,
   input,
   signal,
   type OnInit,
@@ -12,7 +13,7 @@ import {
 import { fromRuntime } from '../../core/from-runtime'
 import type { Navigation } from '../../core/navigation'
 import type { MovementService } from '../../core/movement.service'
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, SignatureService } from '@hypercomb/core'
 import type { RoomStore } from '../../core/room-store'
 import type { SecretStore } from '../../core/secret-store'
 import { secretTag } from './secret-words'
@@ -81,6 +82,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #roomOpen = signal(false)
   #hasSelection = signal(false)
   #textOnly = signal(false)
+  readonly addressHover = signal(false)
 
   #idleTimer: ReturnType<typeof setTimeout> | null = null
   #moveModeUnsub: (() => void) | null = null
@@ -134,6 +136,25 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   })
 
   readonly hasPrefixPath = computed(() => this.prefixPath().length > 0)
+
+  /** Full FQDN key: space/domain/lineage/secret/seed */
+  readonly #fqdn = computed(() => {
+    this.#moved$()
+    const space = this.#room$()
+    const domain = window.location.hostname || 'hypercomb.io'
+    const lineagePath = this.navigation.segmentsRaw().join('/')
+    const secret = this.#secret$()
+    const parts = [space, domain, lineagePath, secret, 'seed'].filter(Boolean)
+    return parts.join('/')
+  })
+
+  /** SHA-256 mesh signature of the FQDN */
+  readonly signedAddress = signal('')
+  #signEffect = effect(() => {
+    const key = this.#fqdn()
+    SignatureService.sign(new TextEncoder().encode(key).buffer as ArrayBuffer)
+      .then(sig => this.signedAddress.set(sig))
+  })
 
   readonly canGoBack = computed(() => {
     this.#moved$()

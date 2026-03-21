@@ -1,5 +1,10 @@
-@if (canGoBack() || hasPrefixPath() || secretWords()) {
-  <div class="breadcrumb-float">
+<div class="breadcrumb-float">
+  <span class="address-icon" (mouseenter)="addressHover.set(true)" (mouseleave)="addressHover.set(false)">
+    <span class="hci">#</span>
+  </span>
+  @if (addressHover()) {
+    <span class="address-crumb">{{ signedAddress() }}</span>
+  } @else {
     @if (canGoBack()) {
       <button class="ctl-btn" (click)="goBack()" aria-label="back">
         <span class="hci">B</span>
@@ -19,8 +24,8 @@
     @if (secretWords()) {
       <span class="path-crumb">{{ hasPrefixPath() ? ' / ' : '' }}</span><span class="secret-crumb">{{ secretWords() }}</span>
     }
-  </div>
-}
+  }
+</div>
 
 <div
   class="controls-pill"

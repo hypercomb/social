@@ -60,6 +60,29 @@
     padding: 0;
   }
 
+  .address-icon {
+    cursor: default;
+    color: rgba(245, 245, 245, 0.3);
+    padding-right: 0.25rem;
+    transition: color 150ms ease;
+
+    &:hover {
+      color: rgba(245, 245, 245, 0.6);
+    }
+
+    .hci { font-size: 0.85rem; }
+  }
+
+  .address-crumb {
+    font-size: 0.5rem;
+    color: rgba(245, 245, 245, 0.45);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 40rem;
+    letter-spacing: 0.02em;
+  }
+
   .crumb-link {
     cursor: pointer;
     transition: color 150ms ease;
