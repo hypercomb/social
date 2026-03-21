@@ -3,7 +3,7 @@
 import type { SearchBarBehavior } from './search-bar-behavior'
 import type { CompletionUtility } from '@hypercomb/shared/core/completion-utility'
 import type { Lineage } from '../../core/lineage'
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, hypercomb } from '@hypercomb/core'
 
 /**
  * Enter with `!` prefix → delete a cell (folder) from the current level.
@@ -50,7 +50,7 @@ export class DeleteCellBehavior implements SearchBarBehavior {
       await this.#deleteTarget(dir, target)
     }
 
-    window.dispatchEvent(new Event('synchronize'))
+    await new hypercomb().act()
   }
 
   /**

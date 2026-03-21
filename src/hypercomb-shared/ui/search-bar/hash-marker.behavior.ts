@@ -3,7 +3,7 @@
 import type { SearchBarBehavior } from './search-bar-behavior'
 import type { CompletionUtility } from '@hypercomb/shared/core/completion-utility'
 import type { Lineage } from '../../core/lineage'
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, hypercomb } from '@hypercomb/core'
 
 /**
  * `#` is the universal action/behavior operator.
@@ -88,7 +88,7 @@ export class HashMarkerBehavior implements SearchBarBehavior {
     // ensure seed is tracked in history
     EffectBus.emit('seed:added', { seed: seedName })
     EffectBus.emit('marker:added', { seed: seedName, marker })
-    window.dispatchEvent(new Event('synchronize'))
+    await new hypercomb().act()
   }
 }
 

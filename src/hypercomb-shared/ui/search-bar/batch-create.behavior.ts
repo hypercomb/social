@@ -3,7 +3,7 @@
 import type { SearchBarBehavior } from './search-bar-behavior'
 import type { CompletionUtility } from '@hypercomb/shared/core/completion-utility'
 import type { Lineage } from '../../core/lineage'
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, hypercomb } from '@hypercomb/core'
 
 /**
  * Enter with bracket syntax → create multiple children at once.
@@ -59,7 +59,7 @@ export class BatchCreateBehavior implements SearchBarBehavior {
     for (const seed of topSeeds) {
       EffectBus.emit('seed:added', { seed })
     }
-    window.dispatchEvent(new Event('synchronize'))
+    await new hypercomb().act()
   }
 
   /**

@@ -1171,6 +1171,17 @@ export class ShowHoneycombWorker extends Drone {
       this.requestRender()
     })
 
+    // seed:added / seed:removed — invalidate render cache so next synchronize picks up new tile set
+    this.onEffect<{ seed: string }>('seed:added', () => {
+      this.#layerCellsCache.delete(this.renderedLocationKey)
+      this.renderedCellsKey = ''
+    })
+
+    this.onEffect<{ seed: string }>('seed:removed', () => {
+      this.#layerCellsCache.delete(this.renderedLocationKey)
+      this.renderedCellsKey = ''
+    })
+
     // search:filter effect — live-filter visible tiles by keyword
     this.onEffect<{ keyword: string }>('search:filter', ({ keyword }) => {
       this.filterKeyword = String(keyword ?? '').trim().toLowerCase()

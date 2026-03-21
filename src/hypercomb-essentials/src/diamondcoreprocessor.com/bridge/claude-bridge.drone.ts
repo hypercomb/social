@@ -1,5 +1,5 @@
 // diamondcoreprocessor.com/bridge/claude-bridge.drone.ts
-import { Worker, EffectBus, normalizeSeed } from '@hypercomb/core'
+import { Worker, EffectBus, normalizeSeed, hypercomb } from '@hypercomb/core'
 import { readSeedProperties } from '../editor/tile-properties.js'
 import type { HistoryService } from '../core/history.service.js'
 
@@ -120,7 +120,7 @@ export class ClaudeBridgeWorker extends Worker {
       count++
     }
 
-    window.dispatchEvent(new Event('synchronize'))
+    await new hypercomb().act()
     return { id: req.id, ok: true, data: { count } }
   }
 
@@ -130,7 +130,7 @@ export class ClaudeBridgeWorker extends Worker {
       for (const seed of visible) {
         EffectBus.emit('seed:removed', { seed })
       }
-      window.dispatchEvent(new Event('synchronize'))
+      await new hypercomb().act()
       return { id: req.id, ok: true, data: { count: visible.length } }
     }
 
@@ -145,7 +145,7 @@ export class ClaudeBridgeWorker extends Worker {
       count++
     }
 
-    window.dispatchEvent(new Event('synchronize'))
+    await new hypercomb().act()
     return { id: req.id, ok: true, data: { count } }
   }
 

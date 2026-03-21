@@ -8,7 +8,7 @@ import type { ScriptPreloader } from '../../core/script-preloader'
 import type { SeedSuggestionProvider } from '../../core/seed-suggestion.provider'
 import type { CompletionUtility, CompletionContext } from '@hypercomb/shared/core/completion-utility'
 import { fromRuntime } from '../../core/from-runtime'
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, hypercomb } from '@hypercomb/core'
 import type { SearchBarBehavior, SearchBarBehaviorMeta, SearchBarOperation } from './search-bar-behavior'
 import { ShiftEnterNavigateBehavior } from './shift-enter-navigate.behavior'
 import { BatchCreateBehavior } from './batch-create.behavior'
@@ -790,7 +790,7 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
   }
 
   private readonly requestSynchronize = (): void => {
-    window.dispatchEvent(new Event('synchronize'))
+    void new hypercomb().act()
   }
 
   // -------------------------------------------------

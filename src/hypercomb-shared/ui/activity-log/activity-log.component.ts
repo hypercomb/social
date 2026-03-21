@@ -9,7 +9,7 @@ import {
   signal,
   type OnDestroy,
 } from '@angular/core'
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, hypercomb } from '@hypercomb/core'
 import type { Lineage } from '../../core/lineage'
 
 interface ActivityEntry {
@@ -98,7 +98,7 @@ export class ActivityLogComponent implements OnDestroy {
       this.#reverting = true
       EffectBus.emit('seed:removed', { seed })
       this.#reverting = false
-      window.dispatchEvent(new Event('synchronize'))
+      await new hypercomb().act()
     } catch { /* entry doesn't exist — nothing to undo */ }
   }
 
@@ -112,7 +112,7 @@ export class ActivityLogComponent implements OnDestroy {
       this.#reverting = true
       EffectBus.emit('seed:added', { seed })
       this.#reverting = false
-      window.dispatchEvent(new Event('synchronize'))
+      await new hypercomb().act()
     } catch { /* failed to create — skip */ }
   }
 

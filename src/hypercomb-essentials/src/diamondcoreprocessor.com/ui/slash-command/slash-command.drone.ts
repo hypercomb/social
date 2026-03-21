@@ -1,5 +1,5 @@
 // diamondcoreprocessor.com/ui/slash-command/slash-command.drone.ts
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, hypercomb } from '@hypercomb/core'
 import type { SlashCommand, SlashCommandMatch, SlashCommandProvider } from './slash-command.provider.js'
 
 export class SlashCommandDrone extends EventTarget {
@@ -67,7 +67,7 @@ class ClearProvider implements SlashCommandProvider {
 
   execute(): void {
     EffectBus.emit('search:filter', { keyword: '' })
-    window.dispatchEvent(new Event('synchronize'))
+    void new hypercomb().act()
   }
 }
 

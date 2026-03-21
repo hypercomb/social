@@ -4,7 +4,7 @@ import type { SearchBarBehavior } from './search-bar-behavior'
 import type { CompletionUtility } from '@hypercomb/shared/core/completion-utility'
 import type { Lineage } from '../../core/lineage'
 import type { Navigation } from '../../core/navigation'
-import { SignatureService } from '@hypercomb/core'
+import { SignatureService, hypercomb } from '@hypercomb/core'
 
 type HistoryOp = { op: 'add' | 'remove'; seed: string; at: number }
 
@@ -102,7 +102,7 @@ export class CutPasteBehavior implements SearchBarBehavior {
       }
     }
 
-    window.dispatchEvent(new Event('synchronize'))
+    await new hypercomb().act()
 
     // navigate to destination if trailing /
     if (navigateAfter) {

@@ -1,5 +1,5 @@
 // diamondcoreprocessor.com/core/clipboard/clipboard.drone.ts
-import { Worker, EffectBus } from '@hypercomb/core'
+import { Worker, EffectBus, hypercomb } from '@hypercomb/core'
 import type { ClipboardService, ClipboardOp } from './clipboard.service.js'
 
 const META_FILE = '__meta__'
@@ -129,7 +129,7 @@ export class ClipboardWorker extends Worker {
 
     if (op === 'cut') {
       // Allow history remove ops to flush before triggering re-render
-      setTimeout(() => window.dispatchEvent(new Event('synchronize')), 80)
+      setTimeout(() => void new hypercomb().act(), 80)
     }
 
     // Persist metadata so clipboard survives reload

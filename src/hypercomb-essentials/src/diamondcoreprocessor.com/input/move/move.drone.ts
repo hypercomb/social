@@ -1,5 +1,5 @@
 // diamondcoreprocessor.com/input/move/move.drone.ts
-import { Drone, EffectBus } from '@hypercomb/core'
+import { Drone, EffectBus, hypercomb } from '@hypercomb/core'
 import type { HostReadyPayload } from '../../pixi/pixi-host.drone.js'
 import type { Axial } from '../hex-detector.js'
 import type { LayoutService } from '../../core/layout/layout.service.js'
@@ -249,7 +249,7 @@ export class MoveDrone extends Drone {
     this.#reset(source)
 
     // trigger re-render
-    window.dispatchEvent(new Event('synchronize'))
+    void new hypercomb().act()
   }
 
   cancelMove = (source: string): void => {
