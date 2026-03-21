@@ -11,7 +11,7 @@ import type { SecretStrengthProvider } from '../../core/secret-strength'
 })
 export class MeshHeaderComponent {
 
-  readonly meshPublic = input(false)
+  readonly meshPublic = input<boolean | null>(false)
   readonly meshToggled = output<void>()
 
   #secretValue = signal('')

@@ -83,7 +83,11 @@ void _deps
 export class App {
   protected readonly title = signal('hypercomb-dev');
 
-  public readonly meshPublic = signal(true);
+  public readonly meshPublic = signal(
+    localStorage.getItem('hc:mesh-public') === 'true' ? true
+    : localStorage.getItem('hc:mesh-public') === 'false' ? false
+    : null as boolean | null
+  );
   public readonly orientation = signal<HexOrientation>(
     (localStorage.getItem('hc:hex-orientation') as HexOrientation) || 'point-top'
   );
@@ -93,11 +97,22 @@ export class App {
 
   constructor() {
     this.#runtimeReady = initializeRuntime({
-      onMeshStateChange: enabled => this.meshPublic.set(enabled),
+      onMeshStateChange: enabled => {
+        if (localStorage.getItem('hc:mesh-public') === null) {
+          this.meshPublic.set(enabled)
+          localStorage.setItem('hc:mesh-public', String(enabled))
+        }
+      },
     })
 
     queueMicrotask(() => {
       void this.#runtimeReady.then(() => {
+        // push stored preference to the mesh
+        const stored = localStorage.getItem('hc:mesh-public')
+        if (stored !== null) {
+          const mesh = get('@diamondcoreprocessor.com/NostrMeshWorker') as any
+          mesh?.setNetworkEnabled?.(stored === 'true', true)
+        }
         void this.startRegisteredBees()
       })
     })
@@ -113,10 +128,9 @@ export class App {
   public toggleMesh = (): void => {
     const mesh = get('@diamondcoreprocessor.com/NostrMeshWorker') as any;
 
-    const wasPublic = this.meshPublic();
-    const next = !wasPublic;
-    
+    const next = !this.meshPublic();
     this.meshPublic.set(next);
+    localStorage.setItem('hc:mesh-public', String(next))
     mesh?.setNetworkEnabled?.(next, true);
     EffectBus.emit('mesh:public-changed', { public: next })
   }

@@ -28,7 +28,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
 
   // ── inputs ────────────────────────────────────────────────
 
-  readonly meshPublic = input(false)
+  readonly meshPublic = input<boolean | null>(false)
 
   // ── IoC resolution ──────────────────────────────────────
 

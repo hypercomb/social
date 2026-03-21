@@ -7,13 +7,22 @@ import { LayerService } from "./layer-service"
 
 const _ = [DependencyLoader, LayerInstaller, LayerService, Store]
 
+const MESH_PUBLIC_KEY = 'hc:mesh-public'
+
+function readMeshPublic(): boolean | null {
+  const v = localStorage.getItem(MESH_PUBLIC_KEY)
+  if (v === 'true') return true
+  if (v === 'false') return false
+  return null
+}
+
 @Injectable({ providedIn: 'root' })
 export class CoreAdapter {
 
   // -------------------------------------------------
   // dependencies (lazy IoC resolution)
   // -------------------------------------------------
-  public readonly meshPublic = signal(true);
+  public readonly meshPublic = signal(readMeshPublic());
 
   // -------------------------------------------------
   // state
@@ -27,8 +36,10 @@ export class CoreAdapter {
 
   public toggleMesh = (): void => {
     const mesh = get('@diamondcoreprocessor.com/NostrMeshWorker') as any
-    const next = !this.meshPublic()
+    const current = this.meshPublic()
+    const next = !current
     this.meshPublic.set(next)
+    localStorage.setItem(MESH_PUBLIC_KEY, String(next))
     mesh?.setNetworkEnabled?.(next, true)
     EffectBus.emit('mesh:public-changed', { public: next })
   }
@@ -44,7 +55,20 @@ export class CoreAdapter {
 
     await initializeRuntime({
       logOpfs: true,
-      onMeshStateChange: enabled => this.meshPublic.set(enabled),
+      onMeshStateChange: enabled => {
+        // only accept runtime-reported state when no stored preference exists
+        if (readMeshPublic() === null) {
+          this.meshPublic.set(enabled)
+          localStorage.setItem(MESH_PUBLIC_KEY, String(enabled))
+        }
+      },
     })
+
+    // push stored preference to the mesh after init
+    const stored = readMeshPublic()
+    if (stored !== null) {
+      const mesh = get('@diamondcoreprocessor.com/NostrMeshWorker') as any
+      mesh?.setNetworkEnabled?.(stored, true)
+    }
   }
 }
