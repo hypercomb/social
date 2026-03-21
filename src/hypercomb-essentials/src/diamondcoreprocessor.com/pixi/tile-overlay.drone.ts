@@ -1,7 +1,8 @@
 // hypercomb-essentials/src/diamondcoreprocessor.com/pixi/tile-overlay.drone.ts
-// Contextual action overlay: dark underlay + icon buttons on occupied hex tiles on hover.
+// Contextual action overlay host: dark underlay + externally-registered icon buttons on occupied hex tiles on hover.
+// Icons are registered/unregistered via effects — the overlay itself has no opinion about which icons exist.
 
-import { Drone, EffectBus, hypercomb } from '@hypercomb/core'
+import { Drone, EffectBus } from '@hypercomb/core'
 import { Application, Container, Point, Text, TextStyle } from 'pixi.js'
 import { HexIconButton } from './hex-icon-button.js'
 import { HexOverlayMesh } from './hex-overlay.shader.js'
@@ -15,63 +16,35 @@ type CellCountPayload = { count: number; labels: string[]; branchLabels?: string
 type OverlayAction = {
   name: string
   button: HexIconButton
-  handler: (label: string, q: number, r: number, index: number) => void
+  profile: OverlayProfileKey
+  /** If provided, called to determine per-tile visibility */
+  visibleWhen?: OverlayVisibilityFn
 }
 
-type OverlayActionDescriptor = {
+/** Descriptor emitted by provider bees via `overlay:register-action` */
+export type OverlayActionDescriptor = {
   name: string
   svgMarkup: string
   x: number
   y: number
   iconSize?: number
   hoverTint?: number
-  handler: (label: string, q: number, r: number, index: number) => void
+  profile: OverlayProfileKey
+  /** Optional: called with tile context to determine if this icon is visible on a specific tile */
+  visibleWhen?: OverlayVisibilityFn
 }
 
-type OverlayProfile = OverlayActionDescriptor[]
-type OverlayProfileKey = 'private' | 'public-own' | 'public-external' | null
+export type OverlayVisibilityFn = (ctx: OverlayTileContext) => boolean
 
-// ── SVG icon markup ────────────────────────────────────────────────
-// Path data from icon-tray.svg — each icon is a compound path (rounded-rect shell + icon cutout, evenodd fill).
-// viewBox crops tightly to the icon's bounding box; rasterised at 48×48 for crisp display at small Pixi sizes.
+export type OverlayTileContext = {
+  label: string
+  q: number
+  r: number
+  index: number
+  noImage: boolean
+}
 
-const EDIT_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="99.7 93.2 10.5 10.5" width="96" height="96"><path fill="white" fill-rule="evenodd" d="m 102.56634,99.825408 q 0.0295,0.02951 0.25579,0.245952 l 0.7477,0.75753 -0.34434,0.3345 h -0.364 v -0.62964 h -0.62964 v -0.36401 z m 2.71531,-2.5579 q 0.0984,0.08854 -0.0197,0.19676 l -1.90859,1.908588 q -0.10821,0.118057 -0.19676,0.02952 -0.0885,-0.08854 0.0197,-0.206599 l 1.90859,-1.908588 q 0.11806,-0.108219 0.19676,-0.01968 0,0 0,0 z m -1.79053,4.525512 q 0.10822,-0.10821 0.89527,-0.89526 l 2.66612,-2.666121 -1.88891,-1.888912 -3.56139,3.561386 v 1.888907 z m 3.98442,-3.984418 q 0.0197,-0.01967 0.15741,-0.157409 l 0.44271,-0.442714 q 0.18693,-0.186923 0.18693,-0.442714 0,-0.265628 -0.18693,-0.452551 l -0.99364,-0.993646 q -0.18692,-0.186923 -0.45255,-0.186923 -0.25579,0 -0.44272,0.186923 l -0.60012,0.600123 z m 2.51856,-2.518548 q 0,0.196761 0,1.574093 v 4.722273 q 0,0.77721 -0.56077,1.33798 -0.55094,0.55094 -1.32815,0.55094 h -6.29637 q -0.77721,0 -1.33798,-0.55094 -0.550929,-0.56077 -0.550929,-1.33798 v -6.296366 q 0,-0.777208 0.550929,-1.328141 0.56077,-0.56077 1.33798,-0.56077 h 6.29637 q 0.77721,0 1.32815,0.56077 0.56077,0.550933 0.56077,1.328141 z"/></svg>`
-
-const GARBAGE_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="112.2 93.2 10.4 10.5" width="96" height="96"><path fill="white" fill-rule="evenodd" d="m 114.23557,93.367129 c -0.51819,0 -0.96431,0.18841 -1.3382,0.564993 -0.36732,0.369975 -0.55093,0.815843 -0.55093,1.337773 v 6.342445 c 0,0.52192 0.18361,0.97127 0.55093,1.34786 0.37389,0.36997 0.82001,0.5549 1.3382,0.5549 h 6.29699 c 0.51819,0 0.96088,-0.18493 1.3282,-0.5549 0.37387,-0.37659 0.56094,-0.82594 0.56094,-1.34786 v -4.756922 -1.585523 c 0,-0.52193 -0.18707,-0.967798 -0.56094,-1.337773 -0.36732,-0.376583 -0.81001,-0.564993 -1.3282,-0.564993 z m 2.2286,1.368005 h 1.8398 c 0.12936,0.0048 0.23735,0.05074 0.32359,0.1376 0.0862,0.08685 0.13151,0.195289 0.13627,0.325582 v 0.926365 h 0.92008 0.91973 c 0.12936,0.0048 0.23735,0.05075 0.32358,0.1376 0.0863,0.08685 0.13185,0.195636 0.13663,0.32593 v 0.463183 h -0.46021 v 4.632516 c -0.004,0.13029 -0.0499,0.23909 -0.13628,0.32594 -0.0863,0.0868 -0.19423,0.1328 -0.32359,0.13761 h -5.51941 c -0.12935,-0.004 -0.23701,-0.0507 -0.32324,-0.13761 -0.0862,-0.0868 -0.13185,-0.19565 -0.13662,-0.32594 v -4.632516 h -0.45986 v -0.463183 c 0.004,-0.130294 0.0504,-0.239069 0.13661,-0.32593 0.0862,-0.08689 0.19389,-0.132793 0.32325,-0.1376 h 1.83981 v -0.926365 c 0.004,-0.130293 0.0504,-0.238719 0.13661,-0.325582 0.0862,-0.08688 0.19389,-0.132796 0.32325,-0.1376 z m 0.45986,0.926365 v 0.463182 h 0.92008 v -0.463182 h -0.45986 z m -1.83946,1.389895 v 4.169336 h 2.29968 2.29966 v -4.169336 z m 0.91974,0.926366 h 0.45986 0.45986 v 2.3166 h -0.91972 z m 1.8398,0 h 0.45986 0.45986 v 2.3166 h -0.91972 z"/></svg>`
-
-// Hide own tile from mesh (eye with slash)
-const HIDE_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96"><path fill="white" d="M48 28c-18 0-33 12-40 20 3.5 4 8.2 8.5 14 12l5.5-5.5C23 51 20 48 20 48s12-14 28-14c3 0 5.8.6 8.4 1.6l6-6C57.8 27 53 28 48 28zm0 40c18 0 33-12 40-20-3.5-4-8.2-8.5-14-12l-5.5 5.5C73 45 76 48 76 48S64 62 48 62c-3 0-5.8-.6-8.4-1.6l-6 6C38.2 69 43 68 48 68z"/><circle fill="white" cx="48" cy="48" r="10"/><rect fill="white" x="46" y="16" width="4" height="64" rx="2" transform="rotate(-45 48 48)"/></svg>`
-
-// Block tile by name (circle with slash)
-const BLOCK_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96"><path fill="white" fill-rule="evenodd" d="M48 12c-19.9 0-36 16.1-36 36s16.1 36 36 36 36-16.1 36-36-16.1-36-36-36zm0 8c6.5 0 12.5 2.2 17.3 6L25 66.3C21.2 61.5 20 55.5 20 48c0-15.5 12.5-28 28-28zm0 56c-6.5 0-12.5-2.2-17.3-6L71 29.7C74.8 34.5 76 40.5 76 48c0 15.5-12.5 28-28 28z"/></svg>`
-
-// Add external tile to own collection (plus icon)
-const ADD_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96"><path fill="white" d="M50 18h-4v28H18v4h28v28h4V50h28v-4H50z"/></svg>`
-
-// Search Google Images (magnifying glass — SVG path, not font glyph)
-const SEARCH_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96"><circle cx="40" cy="40" r="20" fill="none" stroke="white" stroke-width="8"/><line x1="54" y1="54" x2="78" y2="78" stroke="white" stroke-width="8" stroke-linecap="round"/></svg>`
-
-// Add sub-seed (terminal prompt icon — path-based, no font dependency)
-const ADD_SUB_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 15.1 15.1" width="96" height="96"><path fill="white" fill-rule="evenodd" d="M2.83 0C2.054 0 1.385.28.825.84.275 1.39 0 2.054 0 2.83v9.432c0 .776.275 1.445.825 2.005.56.55 1.229.825 2.005.825h9.432c.776 0 1.44-.275 1.99-.825.56-.56.84-1.229.84-2.005V2.83c0-.776-.28-1.44-.84-1.99C13.702.28 13.039 0 12.262 0H2.83zm-1.316 2.316h11.064c.117 0 .214.041.29.122.075.082.113.186.113.313v9.589c0 .127-.038.231-.113.313-.075.082-.173.122-.29.122H1.514c-.117 0-.214-.04-.29-.122-.075-.082-.113-.186-.113-.313V2.752c0-.127.038-.232.113-.313.076-.082.173-.123.29-.123zm.804.871c-.1 0-.193.041-.276.123-.076.091-.113.191-.113.3v7.845c0 .127.037.232.113.313.075.082.173.123.29.123h10.457c.117 0 .213-.041.289-.123.075-.081.113-.186.113-.313V3.624c0-.128-.038-.232-.113-.314-.076-.081-.173-.122-.29-.122H2.318zM3.11 4.06c.1 0 .193.04.277.122l.767.845.779.845c.034.009.063.027.088.054.075.091.113.195.113.313 0 .118-.038.222-.113.313-.025.027-.054.05-.088.068L3.387 8.295c-.084.082-.176.123-.277.123-.1 0-.193-.041-.276-.123-.076-.09-.113-.19-.113-.3 0-.108.037-.209.113-.3l1.358-1.457L2.834 4.78c-.076-.09-.113-.19-.113-.3 0-.109.037-.214.113-.286.084-.09.176-.135.277-.135zM6.34 7.546h2.413c.117 0 .214.041.29.123.075.081.113.186.113.313 0 .127-.038.231-.113.313-.076.082-.173.122-.29.122H6.34c-.117 0-.214-.04-.29-.122-.075-.082-.112-.186-.112-.313 0-.127.037-.232.112-.313.076-.082.173-.123.29-.123z"/></svg>`
-
-// ── overlay geometry constants ─────────────────────────────────────
-
-// Icon positions within the overlay (measured from hex center = overlay origin)
-const ICON_SIZE = 8.75
-const EDIT_X = -2
-const EDIT_Y = 5
-const GARBAGE_X = 8.625
-const GARBAGE_Y = 5
-const HIDE_X = 8.625
-const HIDE_Y = 5
-const BLOCK_X = -2
-const BLOCK_Y = 5
-const ADD_X = 8.625
-const ADD_Y = 5
-const SEARCH_X = 19.25
-const SEARCH_Y = 5
-const ADD_SUB_X = -12.625
-const ADD_SUB_Y = 5
+export type OverlayProfileKey = 'private' | 'public-own' | 'public-external'
 
 // Seed label styling
 const LABEL_X = -24
@@ -85,7 +58,7 @@ const LABEL_STYLE = new TextStyle({
 
 export class TileOverlayDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
-  override description = 'contextual action overlay on occupied hex tiles'
+  override description = 'contextual action overlay host — icons registered externally via effects'
 
   #app: Application | null = null
   #renderContainer: Container | null = null
@@ -95,8 +68,6 @@ export class TileOverlayDrone extends Drone {
   #overlay: Container | null = null
   #hexBg: HexOverlayMesh | null = null
   #seedLabel: Text | null = null
-  #editButton: HexIconButton | null = null
-  #deleteButton: HexIconButton | null = null
   #actions: OverlayAction[] = []
 
   #meshOffset = { x: 0, y: 0 }
@@ -116,9 +87,8 @@ export class TileOverlayDrone extends Drone {
   #branchLabels = new Set<string>()
   #externalLabels = new Set<string>()
   #currentTileExternal = false
-  #activeProfileKey: OverlayProfileKey = null
+  #activeProfileKey: OverlayProfileKey | null = null
   #noImageLabels = new Set<string>()
-  #searchAction: OverlayAction | null = null
 
   #navigationBlocked = false
   #navigationGuardTimer: ReturnType<typeof setTimeout> | null = null
@@ -127,14 +97,23 @@ export class TileOverlayDrone extends Drone {
   #editCooldown = false
   #hasSelection = false
 
+  /** Registered descriptors from provider bees, keyed by name */
+  #registeredDescriptors = new Map<string, OverlayActionDescriptor>()
+
   protected override deps = {
     detector: '@diamondcoreprocessor.com/HexDetector',
     axial: '@diamondcoreprocessor.com/AxialService',
     lineage: '@hypercomb.social/Lineage',
   }
 
-  protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count', 'render:set-orientation', 'render:geometry-changed', 'navigation:guard-start', 'navigation:guard-end', 'mesh:public-changed', 'editor:mode', 'selection:changed']
-  protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'tile:hidden', 'tile:blocked']
+  protected override listens = [
+    'render:host-ready', 'render:mesh-offset', 'render:cell-count',
+    'render:set-orientation', 'render:geometry-changed',
+    'navigation:guard-start', 'navigation:guard-end',
+    'mesh:public-changed', 'editor:mode', 'selection:changed',
+    'overlay:register-action', 'overlay:unregister-action',
+  ]
+  protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back']
 
   #effectsRegistered = false
 
@@ -142,6 +121,19 @@ export class TileOverlayDrone extends Drone {
     if (!this.#effectsRegistered) {
       this.#effectsRegistered = true
 
+      // ── External action registration ─────────────────────────────
+      this.onEffect<OverlayActionDescriptor | OverlayActionDescriptor[]>('overlay:register-action', (payload) => {
+        const descs = Array.isArray(payload) ? payload : [payload]
+        for (const desc of descs) this.#registeredDescriptors.set(desc.name, desc)
+        this.#rebuildActiveProfile()
+      })
+
+      this.onEffect<{ name: string }>('overlay:unregister-action', ({ name }) => {
+        this.#registeredDescriptors.delete(name)
+        this.#rebuildActiveProfile()
+      })
+
+      // ── Pixi host ────────────────────────────────────────────────
       this.onEffect<HostReadyPayload>('render:host-ready', (payload) => {
         this.#app = payload.app
         this.#renderContainer = payload.container
@@ -167,7 +159,7 @@ export class TileOverlayDrone extends Drone {
         this.#rebuildOccupiedMap()
         if (this.#overlay && this.#currentAxial) {
           this.#currentIndex = this.#lookupIndex(this.#currentAxial.q, this.#currentAxial.r)
-          this.#updateSearchVisibility()
+          this.#updatePerTileVisibility()
           this.#updateVisibility()
         }
       })
@@ -207,8 +199,7 @@ export class TileOverlayDrone extends Drone {
 
       this.onEffect<{ public: boolean }>('mesh:public-changed', (payload) => {
         this.#meshPublic = payload.public
-        const { key, profile } = this.#resolveProfile()
-        this.#applyProfile(profile, key)
+        this.#rebuildActiveProfile()
         this.#updateVisibility()
       })
 
@@ -243,11 +234,11 @@ export class TileOverlayDrone extends Drone {
       this.#overlay = null
       this.#hexBg = null
       this.#seedLabel = null
-      this.#editButton = null
-      this.#deleteButton = null
       this.#actions = []
     }
   }
+
+  // ── Overlay setup ──────────────────────────────────────────────────
 
   #initOverlay(): void {
     if (!this.#renderContainer || this.#overlay) return
@@ -266,128 +257,41 @@ export class TileOverlayDrone extends Drone {
     this.#renderContainer.addChild(this.#overlay)
     this.#renderContainer.sortableChildren = true
 
-    const { key, profile } = this.#resolveProfile()
-    this.#applyProfile(profile, key)
+    this.#rebuildActiveProfile()
   }
 
   #updateHexBg(): void {
     this.#hexBg?.update(this.#geo.circumRadiusPx, this.#flat)
   }
 
-  #privateProfile(): OverlayProfile {
-    return [
-      {
-        name: 'add-sub',
-        svgMarkup: ADD_SUB_ICON_SVG,
-        x: ADD_SUB_X,
-        y: ADD_SUB_Y,
-        hoverTint: 0xa8ffd8,
-        handler: (label) => {
-          EffectBus.emit('search:prefill', { value: label + '/' })
-        },
-      },
-      {
-        name: 'edit',
-        svgMarkup: EDIT_ICON_SVG,
-        x: EDIT_X,
-        y: EDIT_Y,
-        hoverTint: 0xc8d8ff,
-        handler: (label, q, r, index) => {
-          this.emitEffect('tile:action', { action: 'edit', q, r, index, label })
-        },
-      },
-      {
-        name: 'remove',
-        svgMarkup: GARBAGE_ICON_SVG,
-        x: GARBAGE_X,
-        y: GARBAGE_Y,
-        hoverTint: 0xffc8c8,
-        handler: (label, q, r, index) => {
-          this.emitEffect('tile:action', { action: 'remove', q, r, index, label })
-          void this.#handleRemove(label)
-        },
-      },
-      {
-        name: 'search',
-        svgMarkup: SEARCH_ICON_SVG,
-        x: SEARCH_X,
-        y: SEARCH_Y,
-        hoverTint: 0xc8ffc8,
-        handler: (label) => {
-          window.open(`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(label)}`, '_blank')
-        },
-      },
-    ]
+  // ── Profile resolution (now from registered descriptors) ───────────
+
+  #resolveProfileKey(): OverlayProfileKey {
+    if (!this.#meshPublic) return 'private'
+    return this.#currentTileExternal ? 'public-external' : 'public-own'
   }
 
-  #publicOwnProfile(): OverlayProfile {
-    return [
-      {
-        name: 'hide',
-        svgMarkup: HIDE_ICON_SVG,
-        x: HIDE_X,
-        y: HIDE_Y,
-        hoverTint: 0xffd8a8,
-        handler: (label, q, r, index) => {
-          this.emitEffect('tile:action', { action: 'hide', q, r, index, label })
-          this.#handleHide(label)
-        },
-      },
-    ]
-  }
-
-  #publicExternalProfile(): OverlayProfile {
-    return [
-      {
-        name: 'adopt',
-        svgMarkup: ADD_ICON_SVG,
-        x: ADD_X,
-        y: ADD_Y,
-        hoverTint: 0xa8ffd8,
-        handler: (label, q, r, index) => {
-          this.emitEffect('tile:action', { action: 'adopt', q, r, index, label })
-          void this.#handleAdopt(label)
-        },
-      },
-      {
-        name: 'block',
-        svgMarkup: BLOCK_ICON_SVG,
-        x: BLOCK_X,
-        y: BLOCK_Y,
-        hoverTint: 0xffc8c8,
-        handler: (label, q, r, index) => {
-          this.emitEffect('tile:action', { action: 'block', q, r, index, label })
-          this.#handleBlock(label)
-        },
-      },
-    ]
-  }
-
-  #resolveProfile(): { key: OverlayProfileKey; profile: OverlayProfile } {
-    if (!this.#meshPublic) return { key: 'private', profile: this.#privateProfile() }
-    return this.#currentTileExternal
-      ? { key: 'public-external', profile: this.#publicExternalProfile() }
-      : { key: 'public-own', profile: this.#publicOwnProfile() }
-  }
-
-  #applyProfile(profile: OverlayProfile, key?: OverlayProfileKey): void {
+  #rebuildActiveProfile(): void {
     if (!this.#overlay) return
 
+    // Tear down existing buttons
     for (const action of this.#actions) {
       this.#overlay.removeChild(action.button)
       action.button.destroy({ children: true })
     }
     this.#actions = []
-    this.#editButton = null
-    this.#deleteButton = null
-    this.#activeProfileKey = key ?? null
 
-    this.#searchAction = null
-    for (const desc of profile) {
+    const key = this.#resolveProfileKey()
+    this.#activeProfileKey = key
+
+    // Build buttons from registered descriptors matching this profile
+    for (const desc of this.#registeredDescriptors.values()) {
+      if (desc.profile !== key) continue
+
       const btn = new HexIconButton({
         svgMarkup: desc.svgMarkup,
-        width: desc.iconSize ?? ICON_SIZE,
-        height: desc.iconSize ?? ICON_SIZE,
+        width: desc.iconSize ?? 8.75,
+        height: desc.iconSize ?? 8.75,
         alias: `hc-icon-${desc.name}`,
         hoverTint: desc.hoverTint,
       })
@@ -395,11 +299,40 @@ export class TileOverlayDrone extends Drone {
       this.#overlay.addChild(btn)
       void btn.load()
 
-      const action: OverlayAction = { name: desc.name, button: btn, handler: desc.handler }
-      this.#actions.push(action)
-      if (desc.name === 'search') this.#searchAction = action
+      this.#actions.push({
+        name: desc.name,
+        button: btn,
+        profile: desc.profile,
+        visibleWhen: desc.visibleWhen,
+      })
+    }
+
+    this.#updatePerTileVisibility()
+  }
+
+  // ── Per-tile icon visibility ───────────────────────────────────────
+
+  #updatePerTileVisibility(): void {
+    if (!this.#currentAxial) return
+    const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(this.#currentAxial.q, this.#currentAxial.r))
+    if (!entry) return
+
+    const ctx: OverlayTileContext = {
+      label: entry.label,
+      q: this.#currentAxial.q,
+      r: this.#currentAxial.r,
+      index: entry.index,
+      noImage: this.#noImageLabels.has(entry.label),
+    }
+
+    for (const action of this.#actions) {
+      if (action.visibleWhen) {
+        action.button.visible = action.visibleWhen(ctx)
+      }
     }
   }
+
+  // ── Input listeners ────────────────────────────────────────────────
 
   #attachListeners(): void {
     if (this.#listening) return
@@ -438,8 +371,8 @@ export class TileOverlayDrone extends Drone {
       this.#currentTileExternal = !!(entry?.label && this.#externalLabels.has(entry.label))
 
       if (this.#meshPublic) {
-        const { key, profile } = this.#resolveProfile()
-        if (key !== this.#activeProfileKey) this.#applyProfile(profile, key)
+        const newKey = this.#resolveProfileKey()
+        if (newKey !== this.#activeProfileKey) this.#rebuildActiveProfile()
       }
 
       if (this.#hoverLog < 5) {
@@ -449,7 +382,7 @@ export class TileOverlayDrone extends Drone {
 
       this.#positionOverlay(axial.q, axial.r)
       this.#updateSeedLabel(axial.q, axial.r)
-      this.#updateSearchVisibility()
+      this.#updatePerTileVisibility()
       this.emitEffect('tile:hover', { q: axial.q, r: axial.r })
     }
 
@@ -458,14 +391,14 @@ export class TileOverlayDrone extends Drone {
 
   #updateIconHover(local: Point): void {
     if (!this.#overlay?.visible) {
-      for (const a of this.#getActiveActions()) a.button.hovered = false
+      for (const a of this.#actions) a.button.hovered = false
       return
     }
 
     const ox = this.#overlay.position.x
     const oy = this.#overlay.position.y
 
-    for (const a of this.#getActiveActions()) {
+    for (const a of this.#actions) {
       const btn = a.button
       const bx = local.x - ox - btn.position.x
       const by = local.y - oy - btn.position.y
@@ -491,13 +424,20 @@ export class TileOverlayDrone extends Drone {
       const ox = this.#overlay.position.x
       const oy = this.#overlay.position.y
 
-      for (const action of this.#getActiveActions()) {
+      for (const action of this.#actions) {
+        if (!action.button.visible) continue
         const btn = action.button
         const bx = local.x - ox - btn.position.x
         const by = local.y - oy - btn.position.y
 
         if (btn.containsPoint(bx, by)) {
-          action.handler(entry.label, this.#currentAxial!.q, this.#currentAxial!.r, this.#currentIndex!)
+          this.emitEffect('tile:action', {
+            action: action.name,
+            q: this.#currentAxial!.q,
+            r: this.#currentAxial!.r,
+            index: this.#currentIndex!,
+            label: entry.label,
+          })
           return
         }
       }
@@ -521,48 +461,33 @@ export class TileOverlayDrone extends Drone {
   }
 
   #onContextMenu = (e: MouseEvent): void => {
-    console.log('[TileOverlay] contextmenu fired', {
-      navigationBlocked: this.#navigationBlocked,
-      ctrlKey: e.ctrlKey,
-      metaKey: e.metaKey,
-      editing: this.#editing,
-      editCooldown: this.#editCooldown,
-    })
-
-    if (this.#navigationBlocked) {
-      console.log('[TileOverlay] BLOCKED: navigationBlocked')
-      return
-    }
+    if (this.#navigationBlocked) return
 
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault()
-      console.log('[TileOverlay] BLOCKED: ctrl/meta key')
       return
     }
     const selection = window.ioc.get<{ count: number }>('@diamondcoreprocessor.com/SelectionService')
     if (selection && selection.count > 0) {
       e.preventDefault()
-      console.log('[TileOverlay] BLOCKED: selection count', selection.count)
       return
     }
 
     const gate = window.ioc.get<InputGate>('@diamondcoreprocessor.com/InputGate')
-    if (gate?.active) {
-      console.log('[TileOverlay] BLOCKED: gate active')
-      return
-    }
+    if (gate?.active) return
 
     e.preventDefault()
-    console.log('[TileOverlay] navigating back!')
     this.#navigateBack()
   }
+
+  // ── Navigation ─────────────────────────────────────────────────────
 
   #navigateInto(label: string): void {
     const lineage = this.resolve<{ explorerEnter(name: string): void }>('lineage')
     if (!lineage) return
     this.emitEffect('tile:navigate-in', { label })
     lineage.explorerEnter(label)
-    void new hypercomb().act()
+    // Processor pulse triggered by lineage change
   }
 
   #navigateBack(): void {
@@ -570,58 +495,14 @@ export class TileOverlayDrone extends Drone {
     if (!lineage) return
     this.emitEffect('tile:navigate-back', {})
     lineage.explorerUp()
-    void new hypercomb().act()
   }
 
-  #handleRemove = (label: string): void => {
-    // History-driven: emit seed:removed → HistoryRecorder records the op →
-    // show-honeycomb re-renders and filters out the seed. Folder stays in OPFS.
-    EffectBus.emit('seed:removed', { seed: label })
-  }
-
-  #handleAdopt = (label: string): void => {
-    EffectBus.emit('seed:added', { seed: label })
-    void new hypercomb().act()
-  }
-
-  #handleBlock(label: string): void {
-    const lineage = this.resolve<{ explorerLabel(): string }>('lineage')
-    const location = lineage?.explorerLabel() ?? '/'
-    const key = `hc:blocked-tiles:${location}`
-    const existing: string[] = JSON.parse(localStorage.getItem(key) ?? '[]')
-    if (!existing.includes(label)) existing.push(label)
-    localStorage.setItem(key, JSON.stringify(existing))
-    EffectBus.emit('tile:blocked', { seed: label, location })
-    void new hypercomb().act()
-  }
-
-  #handleHide(label: string): void {
-    const lineage = this.resolve<{ explorerLabel(): string }>('lineage')
-    const location = lineage?.explorerLabel() ?? '/'
-    const key = `hc:hidden-tiles:${location}`
-    const existing: string[] = JSON.parse(localStorage.getItem(key) ?? '[]')
-    if (!existing.includes(label)) existing.push(label)
-    localStorage.setItem(key, JSON.stringify(existing))
-    EffectBus.emit('tile:hidden', { seed: label, location })
-    void new hypercomb().act()
-  }
+  // ── Helpers ────────────────────────────────────────────────────────
 
   #updateSeedLabel(q: number, r: number): void {
     if (!this.#seedLabel) return
     const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(q, r))
     this.#seedLabel.text = entry?.label ?? ''
-  }
-
-  #updateSearchVisibility(): void {
-    if (!this.#searchAction) return
-    const entry = this.#currentAxial
-      ? this.#occupiedByAxial.get(TileOverlayDrone.axialKey(this.#currentAxial.q, this.#currentAxial.r))
-      : undefined
-    this.#searchAction.button.visible = !!(entry?.label && this.#noImageLabels.has(entry.label))
-  }
-
-  #getActiveActions(): OverlayAction[] {
-    return this.#actions
   }
 
   #updateVisibility(): void {

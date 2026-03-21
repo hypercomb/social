@@ -17,6 +17,7 @@ import { NostrMeshWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/
 import { NostrSigner } from '@hypercomb/essentials/diamondcoreprocessor.com/nostr/nostr-signer'
 import { HexDetector } from '@hypercomb/essentials/diamondcoreprocessor.com/input/hex-detector'
 import { TileOverlayDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/tile-overlay.drone'
+import { TileActionsDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/tile-actions.drone' // overlay icon provider
 import { TileSelectionDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/tile-selection.drone'
 import { HistoryService } from '@hypercomb/essentials/diamondcoreprocessor.com/core/history.service'
 import { HistoryRecorder } from '@hypercomb/essentials/diamondcoreprocessor.com/core/history-recorder.drone'
@@ -47,6 +48,7 @@ const _deps = [
   MousewheelZoomInput,
   NostrMeshWorker,
   TileOverlayDrone,
+  TileActionsDrone,
   TileSelectionDrone,
   NostrSigner,
   HexDetector,
