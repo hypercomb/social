@@ -738,6 +738,14 @@ export class ShowHoneycombWorker extends Drone {
       this.renderedCellsKey = ''
       this.renderedCells.clear()
 
+      // restore per-layer viewport + sync VP directory
+      const cachedDir = await lineage.explorerDir()
+      if (cachedDir) {
+        await this.#applyViewportForLayer(cachedDir)
+        const vp = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ViewportPersistence') as ViewportPersistence | undefined
+        if (vp) vp.setDirSilent(cachedDir)
+      }
+
       for (const cell of cached.cells) this.renderedCells.set(cell.label, cell)
       this.cachedSeedNames = cached.seedNames
       this.cachedLocalSeedSet = cached.localSeedSet
