@@ -10,6 +10,12 @@
   display: contents;
 }
 
+// suppress mouse-click focus on all buttons
+:host button:focus:not(:focus-visible) {
+  outline: none;
+  box-shadow: none;
+}
+
 // ── breadcrumb float ─────────────────────────────────────
 
 .breadcrumb-float {

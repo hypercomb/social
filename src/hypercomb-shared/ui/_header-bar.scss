@@ -4,6 +4,16 @@
 $secret-border: rgba(200, 151, 90, 0.2);
 $secret-bg: rgba(10, 12, 16, 0.85);
 
+// ── suppress mouse-click focus on all header buttons ─────
+// Buttons receive focus on click, which can show outlines or
+// cause visual artifacts (cursor-like blinks). Allow only
+// keyboard (:focus-visible) focus styling.
+
+.header-bar button:focus:not(:focus-visible) {
+  outline: none;
+  box-shadow: none;
+}
+
 // ── layout ───────────────────────────────────────────────
 
 .header-bar {
