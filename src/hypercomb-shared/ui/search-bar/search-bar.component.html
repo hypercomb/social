@@ -35,6 +35,9 @@
         >
           <span class="typed">{{ typedPart(s) }}</span
           ><span class="rest">{{ restPart(s) }}</span>
+          @if (slashDescription(s); as desc) {
+            <span class="slash-desc">{{ desc }}</span>
+          }
         </li>
       }
     </ul>

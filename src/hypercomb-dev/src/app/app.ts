@@ -38,6 +38,7 @@ import { MovePreviewDrone } from '@hypercomb/essentials/diamondcoreprocessor.com
 import { BackgroundDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/background/background.drone'
 import { ShortcutSheetDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/ui/shortcut-sheet.drone'
 import { CommandPaletteDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/ui/command-palette.drone'
+import '@hypercomb/essentials/diamondcoreprocessor.com/ui/slash-command/slash-command.drone'
 import { AvatarSwarmDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/avatar-swarm.drone'
 import '@hypercomb/essentials/diamondcoreprocessor.com/bridge/claude-bridge.drone'
 

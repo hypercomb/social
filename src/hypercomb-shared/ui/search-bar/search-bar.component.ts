@@ -47,6 +47,29 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
   private readonly seedSubPath = signal<readonly string[]>([])
   private readonly seedLeaf = signal('')
 
+  // slash command matches — queries the drone via IoC when in slash mode
+  readonly #slashMatches = computed(() => {
+    const ctx = this.context()
+    if (!ctx.active || ctx.mode !== 'slash') return []
+    const drone = get('@diamondcoreprocessor.com/SlashCommandDrone') as any
+    if (!drone?.match) return []
+    return drone.match(ctx.normalized) as { command: { name: string; description: string }; provider: unknown }[]
+  })
+
+  readonly #slashDescriptionMap = computed(() => {
+    const map = new Map<string, string>()
+    for (const m of this.#slashMatches()) {
+      map.set(m.command.name, m.command.description)
+    }
+    return map
+  })
+
+  public slashDescription = (name: string): string => {
+    const ctx = this.context()
+    if (!ctx.active || ctx.mode !== 'slash') return ''
+    return this.#slashDescriptionMap().get(name) ?? ''
+  }
+
   // Bridge EventTarget-based services to Angular Signals for reactivity
   private readonly resourceCount$ = fromRuntime(
     get('@hypercomb.social/ScriptPreloader') as EventTarget,
@@ -188,6 +211,7 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     if (this.locked()) return 'enter cell name...'
     const ctx = this.context()
     if (ctx.active && ctx.mode === 'filter') return 'filter tiles...'
+    if (ctx.active && ctx.mode === 'slash') return 'type a command...'
     return 'share intent...'
   })
 
@@ -212,6 +236,19 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
         head: '>?',
         raw,
         normalized: keyword,
+        style: 'space'
+      }
+    }
+
+    // '/' prefix enters slash command mode
+    if (v.startsWith('/')) {
+      const raw = v.slice(1)
+      return {
+        active: true,
+        mode: 'slash',
+        head: '/',
+        raw,
+        normalized: raw.toLowerCase().trim(),
         style: 'space'
       }
     }
@@ -255,6 +292,7 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     const ctx = this.context()
     if (!ctx.active) return []
     if (ctx.mode === 'filter') return []
+    if (ctx.mode === 'slash') return this.#slashMatches().map(m => m.command.name)
 
     const subPath = this.seedSubPath()
     const leaf = this.seedLeaf()
@@ -459,6 +497,13 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
 
     if (this.handleCompletionKeys(e)) return
 
+    // slash command execution
+    if (e.key === 'Enter' && !e.shiftKey && v.startsWith('/')) {
+      e.preventDefault()
+      void this.#executeSlashCommand()
+      return
+    }
+
     // check pluggable behaviors before default handling
     const raw = v.trim()
     for (const behavior of this.#behaviors) {
@@ -489,7 +534,7 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
       return
     }
 
-    const navigateAfterCreate = rawInput.startsWith('/') || rawInput.endsWith('/')
+    const navigateAfterCreate = rawInput.endsWith('/')
     const raw = rawInput.replace(/^\/+|\/+$/g, '').trim()
 
     // support nested seed creation: "hello/world" → create hello, then hello/world
@@ -549,6 +594,25 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
   }
 
   // -------------------------------------------------
+  // slash command execution
+  // -------------------------------------------------
+
+  readonly #executeSlashCommand = async (): Promise<void> => {
+    const raw = this.input.nativeElement.value.slice(1).trim()
+    if (!raw) { this.clear(); return }
+
+    const spaceIdx = raw.indexOf(' ')
+    const commandName = spaceIdx === -1 ? raw : raw.slice(0, spaceIdx)
+    const args = spaceIdx === -1 ? '' : raw.slice(spaceIdx + 1).trim()
+
+    const drone = get('@diamondcoreprocessor.com/SlashCommandDrone') as any
+    if (drone?.execute) {
+      await drone.execute(commandName, args)
+    }
+    this.clear()
+  }
+
+  // -------------------------------------------------
   // completion logic
   // -------------------------------------------------
 
@@ -590,6 +654,15 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     const list = this.suggestions()
     const best = forced ?? list[this.activeIndex()] ?? list[0]
     if (!best) return
+
+    // slash mode: fill command name with trailing space for args
+    if (ctx.mode === 'slash') {
+      this.input.nativeElement.value = '/' + best + ' '
+      this.suppressed.set(true)
+      this.placeCaretAtEnd()
+      this.syncSignalsFromDom()
+      return
+    }
 
     const subPath = this.seedSubPath()
 

@@ -179,3 +179,10 @@
   color: whitesmoke;
   opacity: 0.4;
 }
+
+.slash-desc {
+  margin-left: auto;
+  color: rgba(var(--glow-color-rgb), 0.35);
+  font-size: 0.85em;
+  white-space: nowrap;
+}
