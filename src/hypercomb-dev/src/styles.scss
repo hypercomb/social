@@ -7,6 +7,10 @@
     font-style: normal;
 }
 
+*:not(input):not(textarea):not([contenteditable="true"]) {
+    caret-color: transparent;
+}
+
 body{
     background-color: #0b131a   ;
 }
