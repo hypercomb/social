@@ -1,5 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/settings/settings.drone.ts
-
+// diamondcoreprocessor.com/settings/settings.drone.ts
 import { Drone } from '@hypercomb/core'
 
 export class SettingsDrone extends Drone {

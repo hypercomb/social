@@ -1,5 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/pixi/hex-label.atlas.ts
-
+// diamondcoreprocessor.com/pixi/hex-label.atlas.ts
 import { Container, RenderTexture, Text, TextStyle, Texture } from 'pixi.js'
 
 export interface LabelUV {

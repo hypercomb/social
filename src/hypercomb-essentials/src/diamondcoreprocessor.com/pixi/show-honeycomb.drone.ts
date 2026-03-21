@@ -1,9 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/pixi/show-honeycomb.drone.ts
-// upgrade: heartbeat derives signed sig(domain/segment(s)/seed), pulls non-expired mesh items, unions with local seeds, and renders as tiles
-// - expiry rules are owned by NostrMeshDrone
-// - union keeps filesystem seeds as your own local truth, mesh adds shared seeds
-// - redraw stays event-driven via synchronize, but heartbeat also triggers synchronize
-
+// diamondcoreprocessor.com/pixi/show-honeycomb.drone.ts
 import { Drone, SignatureService, SignatureStore } from '@hypercomb/core'
 import { Application, Container, Geometry, Mesh, Texture } from 'pixi.js'
 import type { HostReadyPayload } from './pixi-host.drone.js'

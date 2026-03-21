@@ -1,5 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/core/communication/mesh-adapter.drone.ts
-
+// diamondcoreprocessor.com/core/communication/mesh-adapter.drone.ts
 import { Drone, type Effect } from '@hypercomb/core'
 
 type NostrRelay = string

@@ -1,6 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/core/clipboard/clipboard.service.ts
-// Pure clipboard state — tracks captured seed labels and their source location.
-
+// diamondcoreprocessor.com/core/clipboard/clipboard.service.ts
 import { EffectBus } from '@hypercomb/core'
 
 export type ClipboardOp = 'copy' | 'cut'

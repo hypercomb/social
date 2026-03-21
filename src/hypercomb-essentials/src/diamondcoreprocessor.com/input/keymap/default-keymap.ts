@@ -1,8 +1,4 @@
-// default-keymap.ts — baseline shortcut layers
-//
-// globalKeyMap:  priority 0  — always present, pierce-capable bindings
-// defaultKeyMap: priority 10 — standard context shortcuts
-
+// diamondcoreprocessor.com/input/keymap/default-keymap.ts
 import type { KeyMapLayer } from '@hypercomb/core'
 
 // -------------------------------------------------

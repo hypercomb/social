@@ -1,8 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/bridge/claude-bridge.drone.ts
-// Bridge Worker: connects to the CLI relay server (ws://localhost:BRIDGE_PORT)
-// and executes tile commands against OPFS. Bootstrap-once — connects on act(),
-// then stays connected and handles incoming requests.
-
+// diamondcoreprocessor.com/bridge/claude-bridge.drone.ts
 import { Worker, EffectBus } from '@hypercomb/core'
 import { readSeedProperties } from '../editor/tile-properties.js'
 import type { HistoryService } from '../core/history.service.js'

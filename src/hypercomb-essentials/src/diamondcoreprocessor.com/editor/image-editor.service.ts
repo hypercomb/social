@@ -1,8 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/editor/image-editor.service.ts
-// Manages a Pixi Application for image editing: drag, zoom, hex-masked capture.
-// Canvas is always square (editorSize × editorSize). Both hex orientations
-// fit within the same coordinate space — the hex frame is centered.
-
+// diamondcoreprocessor.com/editor/image-editor.service.ts
 import { Application, Container, Graphics, Sprite, Texture, RenderTexture, Rectangle } from 'pixi.js'
 import type { HexOrientation } from '../core/settings'
 

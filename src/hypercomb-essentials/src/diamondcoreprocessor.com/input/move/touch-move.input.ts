@@ -1,6 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/input/move/touch-move.input.ts
-// Mobile touch input for tile move. Long-press (300ms) + drag.
-
+// diamondcoreprocessor.com/input/move/touch-move.input.ts
 import { Point } from 'pixi.js'
 import type { Axial } from '../hex-detector.js'
 import type { MoveDroneApi } from './move.drone.js'

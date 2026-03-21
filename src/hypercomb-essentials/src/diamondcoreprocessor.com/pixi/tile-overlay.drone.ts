@@ -1,7 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/pixi/tile-overlay.drone.ts
-// Contextual action overlay host: dark underlay + externally-registered icon buttons on occupied hex tiles on hover.
-// Icons are registered/unregistered via effects — the overlay itself has no opinion about which icons exist.
-
+// diamondcoreprocessor.com/pixi/tile-overlay.drone.ts
 import { Drone, EffectBus } from '@hypercomb/core'
 import { Application, Container, Point, Text, TextStyle } from 'pixi.js'
 import { HexIconButton } from './hex-icon-button.js'

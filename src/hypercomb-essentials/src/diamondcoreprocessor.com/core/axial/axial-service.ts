@@ -1,4 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/pixi/axial/axial.service.ts
+// diamondcoreprocessor.com/core/axial/axial-service.ts
 import { Point } from 'pixi.js';
  import { AxialCoordinate } from './axial-coordinate.js';
 import type { Settings } from '../settings.js';

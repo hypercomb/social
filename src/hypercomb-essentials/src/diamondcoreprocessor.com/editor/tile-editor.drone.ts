@@ -1,8 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/editor/tile-editor.drone.ts
-// Orchestrator: wires tile:action effect → editor open/save/cancel.
-// Manages OPFS I/O for 0000 properties file and resource storage.
-// NOT a Drone subclass — follows the HistoryRecorder pattern.
-
+// diamondcoreprocessor.com/editor/tile-editor.drone.ts
 import { EffectBus } from '@hypercomb/core'
 import { TILE_PROPERTIES_FILE } from './tile-properties.js'
 import type { TileEditorService } from './tile-editor.service.js'

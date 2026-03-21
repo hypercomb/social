@@ -1,17 +1,4 @@
-// keymap.service.ts — layered keyboard shortcut engine
-//
-// Manages a priority-sorted stack of KeyMapLayers. Listens for keydown
-// events, tracks multi-step chord sequences, and emits 'keymap:invoke'
-// effects when a complete sequence matches.
-//
-// Isolation:
-//   - Suppression gate: any drone can suppress/unsuppress via effects.
-//     While suppressed, only pierce:true bindings fire.
-//   - Layer stacking IS the mode system: entering a mode = adding a layer,
-//     exiting = removing it. No separate mode tracking needed.
-//   - Navigation guard bridge: auto-suppresses during layer transitions.
-//   - Interactive focus: auto-suppresses when typing in inputs.
-
+// diamondcoreprocessor.com/input/keymap/keymap.service.ts
 import { EffectBus, type KeyBinding, type KeyChord, type KeyMapLayer } from '@hypercomb/core'
 import { globalKeyMap, defaultKeyMap } from './default-keymap.js'
 

@@ -1,5 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/pixi/hex-sdf.shader.ts
-
+// diamondcoreprocessor.com/pixi/hex-sdf.shader.ts
 import { Shader, Texture } from 'pixi.js'
 
 type Vec2 = [number, number]

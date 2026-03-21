@@ -1,6 +1,4 @@
 // revolucionstyle.com/discovery/discovery.service.ts
-// Flavor similarity engine using Jaccard index.
-
 import type { FlavorProfile, JournalEntry } from '../journal/journal-entry.js'
 
 export class DiscoveryService {

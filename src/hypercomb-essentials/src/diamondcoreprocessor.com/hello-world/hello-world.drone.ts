@@ -1,3 +1,4 @@
+// diamondcoreprocessor.com/hello-world/hello-world.drone.ts
 import { Worker } from "@hypercomb/core"
 
 export class HelloWorldWorker extends Worker {

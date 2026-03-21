@@ -1,6 +1,4 @@
 // revolucionstyle.com/wheel/flavor-data.ts
-// Static flavor taxonomy: 10 categories, ~55 specific flavors.
-
 export type FlavorCategory = {
   id: string
   label: string

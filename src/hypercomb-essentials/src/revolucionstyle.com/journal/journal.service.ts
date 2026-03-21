@@ -1,6 +1,4 @@
 // revolucionstyle.com/journal/journal.service.ts
-// Journal entry CRUD — reads/writes entries in OPFS.
-
 import { EffectBus } from '@hypercomb/core'
 import type { Cigar, CigarRatings, FlavorProfile, JournalEntry, Pairing } from './journal-entry.js'
 import { emptyEntry } from './journal-entry.js'

@@ -1,5 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/core/zoom/zoom-arbiter.ts
-
+// diamondcoreprocessor.com/core/zoom/zoom-arbiter.ts
 export class ZoomArbiter {
 
   private activeSource: string | null = null

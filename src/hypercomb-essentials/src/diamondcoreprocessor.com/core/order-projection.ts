@@ -1,8 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/core/order-projection.ts
-// History-backed order projection: derives display order from history replay,
-// caches in memory, and writes reorder ops back to history atomically.
-// Listens to seed lifecycle effects to keep the in-memory cache current.
-
+// diamondcoreprocessor.com/core/order-projection.ts
 import { EffectBus } from '@hypercomb/core'
 import type { HistoryService, HistoryOp } from './history.service.js'
 

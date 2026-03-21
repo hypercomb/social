@@ -1,8 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/pixi/move-preview.drone.ts
-// Renders swap-indicator hex overlays during tile move drag.
-// Moved tiles are displaced directly in the mesh by ShowHoneycombWorker;
-// this drone only highlights swap targets (tiles displaced to make room).
-
+// diamondcoreprocessor.com/pixi/move-preview.drone.ts
 import { Drone } from '@hypercomb/core'
 import { Container, Graphics } from 'pixi.js'
 import type { HostReadyPayload } from './pixi-host.drone.js'

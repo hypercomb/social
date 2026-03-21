@@ -1,9 +1,4 @@
-// command-palette.drone.ts — fuzzy command palette state manager
-//
-// Opens via 'ui.commandPalette' keymap command. Reads all effective
-// bindings from KeyMapService, provides fuzzy search, tracks recent
-// commands, and emits state for the Angular shell to render.
-
+// diamondcoreprocessor.com/ui/command-palette.drone.ts
 import { EffectBus, type KeyBinding } from '@hypercomb/core'
 
 export interface PaletteItem {

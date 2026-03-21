@@ -1,8 +1,4 @@
-// shortcut-sheet.drone.ts — keyboard shortcut cheat sheet state manager
-//
-// Toggles open/close, reads effective bindings from KeyMapService,
-// groups by category, and emits state for the Angular shell to render.
-
+// diamondcoreprocessor.com/ui/shortcut-sheet.drone.ts
 import { EffectBus, type KeyBinding } from '@hypercomb/core'
 
 export interface ShortcutGroup {

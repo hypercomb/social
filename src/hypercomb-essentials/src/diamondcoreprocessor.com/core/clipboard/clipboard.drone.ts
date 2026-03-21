@@ -1,13 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/core/clipboard/clipboard.drone.ts
-// Clipboard orchestrator — captures selected seeds on copy/cut, pastes seed
-// folder trees at the current explorer location, and handles cut cleanup.
-//
-// Cut records remove ops via EffectBus → HistoryRecorder. Folders stay in OPFS.
-// Paste reads from the original source location (folders are still there)
-// and emits seed:added so HistoryRecorder records add ops at the destination.
-//
-// synchronize is NEVER dispatched here — the processor owns that.
-
+// diamondcoreprocessor.com/core/clipboard/clipboard.drone.ts
 import { Worker, EffectBus } from '@hypercomb/core'
 import type { ClipboardService, ClipboardOp } from './clipboard.service.js'
 

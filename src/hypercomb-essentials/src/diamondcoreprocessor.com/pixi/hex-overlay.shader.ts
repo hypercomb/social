@@ -1,6 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/pixi/hex-overlay.shader.ts
-// Lightweight SDF shader for the hover overlay hex — smooth fill + stroke edges.
-
+// diamondcoreprocessor.com/pixi/hex-overlay.shader.ts
 import { Geometry, Mesh, Shader, Texture } from 'pixi.js'
 
 export class HexOverlayMesh {

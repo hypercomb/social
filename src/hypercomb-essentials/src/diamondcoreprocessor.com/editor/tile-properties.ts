@@ -1,5 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/editor/tile-properties.ts
-
+// diamondcoreprocessor.com/editor/tile-properties.ts
 export const TILE_PROPERTIES_FILE = '0000'
 
 export const isSignature = (value: unknown): boolean =>

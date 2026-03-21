@@ -1,8 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/pixi/tile-selection.drone.ts
-// Tile selection with Ctrl+click toggle and Ctrl+drag for range select/deselect.
-// Renders programmatic hex overlays: amber leader tile + green selected tiles.
-// Exposes leader-relative axial coordinates for computational irreducibility.
-
+// diamondcoreprocessor.com/pixi/tile-selection.drone.ts
 import { Drone } from '@hypercomb/core'
 import { Application, Container, Graphics, Point } from 'pixi.js'
 import type { HostReadyPayload } from './pixi-host.drone.js'

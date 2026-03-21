@@ -1,7 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/pixi/hex-image.atlas.ts
-// Texture atlas for per-cell images. Similar to HexLabelAtlas but
-// loads image blobs from OPFS __resources__/ into atlas slots.
-
+// diamondcoreprocessor.com/pixi/hex-image.atlas.ts
 import { Container, RenderTexture, Sprite, Texture } from 'pixi.js'
 
 export interface ImageUV {

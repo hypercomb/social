@@ -1,7 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/core/history.service.ts
-// History bag service: every operation is an append-only entry in __history__/<signature>/
-// There is no delete. A "remove" is an operation. Replaying skips removed seeds.
-
+// diamondcoreprocessor.com/core/history.service.ts
 import { SignatureService, SignatureStore } from '@hypercomb/core'
 
 export type HistoryOpType = 'add' | 'remove' | 'reorder' | 'rename' | 'add-drone' | 'remove-drone'

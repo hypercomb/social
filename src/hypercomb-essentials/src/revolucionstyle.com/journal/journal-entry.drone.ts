@@ -1,7 +1,4 @@
 // revolucionstyle.com/journal/journal-entry.drone.ts
-// Orchestrator: wires journal:action effect -> open/save/cancel.
-// Creates raw DOM form overlay (no Angular dependency).
-
 import { EffectBus } from '@hypercomb/core'
 import type { JournalService } from './journal.service.js'
 import type { CigarRatings, FlavorProfile, Pairing } from './journal-entry.js'

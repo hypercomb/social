@@ -1,6 +1,4 @@
 // revolucionstyle.com/wheel/flavor-wheel.service.ts
-// Flavor wheel selection state — tracks which flavors are selected.
-
 import { EffectBus } from '@hypercomb/core'
 import type { FlavorProfile } from '../journal/journal-entry.js'
 

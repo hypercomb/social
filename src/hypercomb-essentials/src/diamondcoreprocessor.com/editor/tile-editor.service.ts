@@ -1,7 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/editor/tile-editor.service.ts
-// Editor state service: mode, seed, properties, large image blob.
-// Extends EventTarget so Angular can bind via fromRuntime().
-
+// diamondcoreprocessor.com/editor/tile-editor.service.ts
 import { EffectBus } from '@hypercomb/core'
 
 export type EditorModePayload = { active: boolean }

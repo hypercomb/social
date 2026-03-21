@@ -1,6 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/core/layout/layout.service.ts
-// Thin OPFS read/write for __layout__ file — persists tile display order.
-
+// diamondcoreprocessor.com/core/layout/layout.service.ts
 const LAYOUT_FILE = '__layout__'
 
 export class LayoutService {

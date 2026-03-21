@@ -1,11 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/nostr/nostr-signer.ts
-// signer: nip-07 first, fallback to dev private key for public relay tests
-// - registers 'NostrSigner' for NostrMeshDrone.trySign(...)
-// - fallback key source order:
-//   1) window.NOSTR_SECRET_KEY
-//   2) localStorage['hc:nostr:secret-key']
-//   3) built-in dev test key
-
+// diamondcoreprocessor.com/nostr/nostr-signer.ts
 import { finalizeEvent, getPublicKey } from 'nostr-tools'
 
 type NostrEvent = { id?: string; pubkey?: string; created_at: number; kind: number; tags: string[][]; content: string; sig?: string }

@@ -1,7 +1,4 @@
 // revolucionstyle.com/wheel/flavor-wheel.drone.ts
-// Pixi.js flavor wheel — concentric arc segments for category/flavor selection.
-// Standalone Pixi app (not the shared honeycomb host) displayed as a modal overlay.
-
 import { Drone } from '@hypercomb/core'
 import { Application, Container, Graphics, Text, TextStyle } from 'pixi.js'
 import type { FlavorProfile } from '../journal/journal-entry.js'

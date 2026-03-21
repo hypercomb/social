@@ -1,5 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/input/zoom/zoom.drone.ts
-
+// diamondcoreprocessor.com/input/zoom/zoom.drone.ts
 import { Drone } from '@hypercomb/core'
 import { Application, Container, Point } from 'pixi.js'
 import type { HostReadyPayload } from '../../pixi/pixi-host.drone.js'

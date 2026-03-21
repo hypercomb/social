@@ -1,6 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/input/hex-detector.ts
-// O(1) pixel-to-axial coordinate detection via cube rounding.
-
+// diamondcoreprocessor.com/input/hex-detector.ts
 import { DEFAULT_HEX_GEOMETRY } from '../pixi/hex-geometry.js'
 
 export type Axial = { q: number; r: number }

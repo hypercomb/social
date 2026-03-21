@@ -1,9 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/core/history-recorder.drone.ts
-// Central history recorder: listens for seed lifecycle effects (seed:added,
-// seed:removed) via the EffectBus and records each operation into the
-// append-only OPFS history bag for the current lineage location.
-// Writes are serialized to prevent concurrent index collisions.
-
+// diamondcoreprocessor.com/core/history-recorder.drone.ts
 import { EffectBus, hypercomb } from '@hypercomb/core'
 import type { HistoryService, HistoryOpType } from './history.service.js'
 

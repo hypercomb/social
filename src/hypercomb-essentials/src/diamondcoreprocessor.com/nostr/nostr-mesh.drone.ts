@@ -1,10 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/nostr/nostr-mesh.drone.ts
-// upgrade: ttl-backed cache + non-expired query api
-// - mesh owns expiry rules
-// - consumers compute sig externally and call ensureStartedForSig(sig) + getNonExpired(sig)
-// - cache supports both network events and local fanout
-// - one network req per sig (shared across consumers)
-
+// diamondcoreprocessor.com/nostr/nostr-mesh.drone.ts
 import { Drone } from '@hypercomb/core'
 
 // const HARD_RELAY = 'wss://nos.lol'

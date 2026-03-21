@@ -1,8 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/nostr/ambient-presence.drone.ts
-// Tracks real-time Nostr presence at the current location.
-// When mesh events arrive for the location sig, seeds mentioned in their payload warm up.
-// Heat decays naturally over the mesh TTL window — no timer needed.
-
+// diamondcoreprocessor.com/nostr/ambient-presence.drone.ts
 import { Worker } from '@hypercomb/core'
 
 type MeshEvt = { relay: string; sig: string; event: any; payload: any }

@@ -1,6 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/input/move/desktop-move.input.ts
-// Desktop mouse input for tile move. Plain left-click drag (no modifiers) on occupied tiles.
-
+// diamondcoreprocessor.com/input/move/desktop-move.input.ts
 import type { Axial } from '../hex-detector.js'
 import type { MoveDroneApi } from './move.drone.js'
 

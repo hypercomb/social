@@ -1,3 +1,4 @@
+// diamondcoreprocessor.com/core/settings.ts
 export type HexOrientation = 'point-top' | 'flat-top'
 
 export class Settings  {

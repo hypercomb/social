@@ -1,6 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/pixi/hex-icon-button.ts
-// Reusable icon button for Pixi overlays: SVG-based icon rendered as texture with hover state.
-
+// diamondcoreprocessor.com/pixi/hex-icon-button.ts
 import { Container, Sprite, Assets, type Texture } from 'pixi.js'
 
 export type IconButtonConfig = {

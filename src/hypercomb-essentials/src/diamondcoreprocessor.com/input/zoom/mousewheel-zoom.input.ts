@@ -1,5 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/input/zoom/mousewheel-zoom.input.ts
-
+// diamondcoreprocessor.com/input/zoom/mousewheel-zoom.input.ts
 import type { InputGate } from '../input-gate.service.js'
 
 type Point = { x: number; y: number }

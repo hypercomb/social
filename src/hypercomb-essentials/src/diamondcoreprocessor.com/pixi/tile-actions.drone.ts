@@ -1,7 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/pixi/tile-actions.drone.ts
-// Registers the default tile overlay icons (edit, remove, search, add-sub, hide, adopt, block)
-// via the `overlay:register-action` effect. Handles `tile:action` clicks for its own action names.
-
+// diamondcoreprocessor.com/pixi/tile-actions.drone.ts
 import { Drone, EffectBus, hypercomb } from '@hypercomb/core'
 import type { OverlayActionDescriptor, OverlayTileContext } from './tile-overlay.drone.js'
 

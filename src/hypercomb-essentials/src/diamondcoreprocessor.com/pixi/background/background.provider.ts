@@ -1,5 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/pixi/background/background.provider.ts
-
+// diamondcoreprocessor.com/pixi/background/background.provider.ts
 import type { Graphics } from 'pixi.js'
 
 export interface BackgroundProvider {

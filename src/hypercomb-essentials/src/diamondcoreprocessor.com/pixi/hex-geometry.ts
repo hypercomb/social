@@ -1,3 +1,4 @@
+// diamondcoreprocessor.com/pixi/hex-geometry.ts
 export interface HexGeometry {
   circumRadiusPx: number
   gapPx: number

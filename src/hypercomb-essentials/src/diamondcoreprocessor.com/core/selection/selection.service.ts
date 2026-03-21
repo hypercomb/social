@@ -1,6 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/core/selection/selection.service.ts
-// Pure selection state — tracks which seed labels are currently selected.
-
+// diamondcoreprocessor.com/core/selection/selection.service.ts
 import { EffectBus } from '@hypercomb/core'
 
 export class SelectionService extends EventTarget {

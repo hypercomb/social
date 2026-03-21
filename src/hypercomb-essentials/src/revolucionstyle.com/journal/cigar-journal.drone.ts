@@ -1,3 +1,4 @@
+// revolucionstyle.com/journal/cigar-journal.drone.ts
 import { Worker, EffectBus } from '@hypercomb/core'
 
 export class CigarJournalWorker extends Worker {

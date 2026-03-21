@@ -1,7 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/pixi/background/background.drone.ts
-// Coordinator drone — holds an array of BackgroundProvider instances,
-// picks the highest-priority active one, and renders its background.
-
+// diamondcoreprocessor.com/pixi/background/background.drone.ts
 import { Drone } from '@hypercomb/core'
 import { Container, Graphics } from 'pixi.js'
 import type { HostReadyPayload } from '../pixi-host.drone.js'

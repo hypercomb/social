@@ -1,5 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/pixi/pixi-host.drone.ts
-
+// diamondcoreprocessor.com/pixi/pixi-host.drone.ts
 import { Worker } from '@hypercomb/core'
 import { Application, Container } from 'pixi.js'
 

@@ -1,9 +1,4 @@
-// escape-cascade.ts — centralized Escape key handler with priority cascade.
-//
-// Listens for the global.escape keymap command and dismisses the
-// highest-priority active state: editor > selection > generic fallback.
-// Replaces scattered keydown listeners with a single EffectBus subscriber.
-
+// diamondcoreprocessor.com/input/escape-cascade.ts
 import { EffectBus } from '@hypercomb/core'
 
 // ── reactive state (tracked via effects already emitted by services) ──

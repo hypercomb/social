@@ -1,8 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/input/move/move.drone.ts
-// Authoritative move coordinator. Owns drag state, swap algorithm, persistence.
-// Move mode must be toggled on (via controls:action or move:mode effect) before
-// drag input is accepted.
-
+// diamondcoreprocessor.com/input/move/move.drone.ts
 import { Drone, EffectBus } from '@hypercomb/core'
 import type { HostReadyPayload } from '../../pixi/pixi-host.drone.js'
 import type { Axial } from '../hex-detector.js'

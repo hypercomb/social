@@ -1,7 +1,4 @@
 // revolucionstyle.com/cigar/cigar-catalog.service.ts
-// Local cigar catalog — stores unique cigar identities in __resources__/ for autocomplete.
-// Catalog index is persisted to localStorage; cigar data is content-addressed in OPFS.
-
 import { SignatureService } from '@hypercomb/core'
 import type { Cigar } from '../journal/journal-entry.js'
 import { cigarKey } from './cigar.js'

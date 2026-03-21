@@ -1,5 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/pixi/background/move-background.provider.ts
-
+// diamondcoreprocessor.com/pixi/background/move-background.provider.ts
 import { EffectBus } from '@hypercomb/core'
 import type { Graphics } from 'pixi.js'
 import type { BackgroundProvider } from './background.provider.js'

@@ -1,6 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/input/selection/tile-selection.drone.ts
-// Pointer-to-selection coordination: click-select, ctrl+click toggle, ctrl+drag paint-select/deselect.
-
+// diamondcoreprocessor.com/input/selection/tile-selection.drone.ts
 import { Drone, EffectBus, hypercomb } from '@hypercomb/core'
 import { Application, Container, Point } from 'pixi.js'
 import type { HostReadyPayload } from '../../pixi/pixi-host.drone.js'
