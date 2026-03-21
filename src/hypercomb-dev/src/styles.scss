@@ -11,6 +11,10 @@
     caret-color: transparent;
 }
 
+input, textarea, [contenteditable="true"] {
+    caret-color: auto;
+}
+
 body{
     background-color: #0b131a   ;
 }

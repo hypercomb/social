@@ -15,6 +15,10 @@
   caret-color: transparent;
 }
 
+input, textarea, [contenteditable="true"] {
+  caret-color: auto;
+}
+
 html,
 body {
   margin: 0;
