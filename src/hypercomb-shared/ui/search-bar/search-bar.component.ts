@@ -602,8 +602,8 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
 
     this.input.nativeElement.value =
       ctx.mode === 'marker'
-        ? ctx.head + rendered + ' '
-        : rendered + ' '
+        ? ctx.head + rendered
+        : rendered
 
     this.suppressed.set(true)
     this.placeCaretAtEnd()
