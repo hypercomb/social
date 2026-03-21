@@ -74,14 +74,18 @@ export class MovementService extends EventTarget {
       return
     }
 
-    this.committing = Promise.resolve().then(() => {
-      this.#moved = this.#moved + 1
-      this.dispatchEvent(new CustomEvent('change'))
+    // guard must be set before synchronous work so recursive calls (from
+    // listeners triggered by dispatchEvent) are coalesced
+    this.committing = Promise.resolve()
 
-      const pending = this.waiters
-      this.waiters = []
-      for (const r of pending) r()
-    })
+    // increment synchronously — Angular signals react immediately, preventing
+    // stale breadcrumb labels between URL update and next microtask
+    this.#moved = this.#moved + 1
+    this.dispatchEvent(new CustomEvent('change'))
+
+    const pending = this.waiters
+    this.waiters = []
+    for (const r of pending) r()
 
     try {
       await this.committing

@@ -188,6 +188,11 @@ export class TileOverlayDrone extends Drone {
 
       this.onEffect('navigation:guard-start', () => {
         this.#navigationBlocked = true
+        // hide overlay immediately — stale label from the previous layer must not
+        // linger; it will reappear on the next fresh pointer move
+        this.#currentAxial = null
+        this.#currentIndex = undefined
+        if (this.#overlay) this.#overlay.visible = false
         if (this.#navigationGuardTimer) clearTimeout(this.#navigationGuardTimer)
         this.#navigationGuardTimer = setTimeout(() => { this.#navigationBlocked = false }, 200)
       })

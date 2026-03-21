@@ -6,16 +6,18 @@
       </button>
     }
     @if (spaceName()) {
-      <span class="space-crumb">{{ spaceName() }}</span>
+      <span class="space-crumb crumb-link" (click)="navigateTo([])">{{ spaceName() }}</span>
     }
-    @if (midPath()) {
-      <span class="path-crumb">{{ spaceName() ? '/ ' : '' }}{{ midPath() }}</span>
-    }
-    @if (leafSegment()) {
-      <span class="path-crumb">{{ spaceName() || midPath() ? '/ ' : '' }}</span><span class="leaf-crumb">{{ leafSegment() }}</span>
+    @for (seg of pathSegments(); track seg.target.length; let first = $first) {
+      <span class="path-crumb">{{ !first || spaceName() ? ' / ' : '' }}</span>
+      @if (seg.leaf) {
+        <span class="leaf-crumb">{{ seg.name }}</span>
+      } @else {
+        <span class="path-crumb crumb-link" (click)="navigateTo(seg.target)">{{ seg.name }}</span>
+      }
     }
     @if (secretWords()) {
-      <span class="path-crumb">{{ hasPrefixPath() ? '/ ' : '' }}</span><span class="secret-crumb">{{ secretWords() }}</span>
+      <span class="path-crumb">{{ hasPrefixPath() ? ' / ' : '' }}</span><span class="secret-crumb">{{ secretWords() }}</span>
     }
   </div>
 }

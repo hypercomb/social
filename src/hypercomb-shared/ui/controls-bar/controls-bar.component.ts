@@ -93,17 +93,28 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     return this.#room$()
   })
 
-  readonly midPath = computed(() => {
+  /** Each segment of the lineage path, with the slice needed to navigate there. */
+  readonly pathSegments = computed(() => {
     this.#moved$()
     const segs = this.navigation.segmentsRaw()
+    return segs.map((name, i) => ({
+      name,
+      /** all segments up to and including this one */
+      target: segs.slice(0, i + 1),
+      /** true for the last (leaf) segment */
+      leaf: i === segs.length - 1,
+    }))
+  })
+
+  readonly midPath = computed(() => {
+    const segs = this.pathSegments()
     if (segs.length <= 1) return ''
-    return segs.slice(0, -1).join(' / ')
+    return segs.slice(0, -1).map(s => s.name).join(' / ')
   })
 
   readonly leafSegment = computed(() => {
-    this.#moved$()
-    const segs = this.navigation.segmentsRaw()
-    return segs.length > 0 ? segs[segs.length - 1] : ''
+    const segs = this.pathSegments()
+    return segs.length > 0 ? segs[segs.length - 1].name : ''
   })
 
   readonly prefixPath = computed(() => {
@@ -190,6 +201,10 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
 
   readonly goBack = (): void => {
     void this.movement.back()
+  }
+
+  readonly navigateTo = (segments: string[]): void => {
+    this.navigation.goRaw(segments)
   }
 
   // ── view actions ──────────────────────────────────────
