@@ -14,6 +14,9 @@ import { ShiftEnterNavigateBehavior } from './shift-enter-navigate.behavior'
 import { BatchCreateBehavior } from './batch-create.behavior'
 import { DeleteCellBehavior } from './delete-cell.behavior'
 import { GoParentBehavior } from './go-parent.behavior'
+import { CutPasteBehavior } from './cut-paste.behavior'
+import { HashMarkerBehavior } from './hash-marker.behavior'
+import { SlashCommandBehavior } from './slash-command.behavior'
 
 @Component({
   selector: 'hc-search-bar',
@@ -88,7 +91,10 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
   // pluggable behaviors — validated at construction, no overlapping operations
   #behaviors: SearchBarBehavior[] = this.#validateBehaviors([
     new GoParentBehavior(),
+    new SlashCommandBehavior(),
     new DeleteCellBehavior(),
+    new CutPasteBehavior(),
+    new HashMarkerBehavior(),
     new BatchCreateBehavior(),
     new ShiftEnterNavigateBehavior()
   ])
@@ -317,10 +323,22 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
       return seeds.filter(n => n.startsWith(ctx.normalized))
     }
 
+    const bracketPhase = this.#bracketPhase()
     const subPath = this.seedSubPath()
     const leaf = this.seedLeaf()
     const seeds = this.seedNames$()
     const actions = this.actionNames$()
+
+    // bracket mode: filter by seedLeaf instead of ctx.normalized
+    if (bracketPhase === 'items' || bracketPhase === 'path') {
+      if (subPath.length > 0) {
+        if (!leaf) return seeds
+        return seeds.filter(n => n.startsWith(leaf))
+      }
+      // current level seeds only (no actions in bracket mode)
+      if (!leaf) return seeds
+      return seeds.filter(n => n.startsWith(leaf))
+    }
 
     // when in a sub-path (e.g. "abc/"), show only seeds at that level
     if (subPath.length > 0) {
@@ -372,6 +390,15 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     const subPath = this.seedSubPath()
     const leaf = this.seedLeaf()
     const current = this.value()
+    const bracketPhase = this.#bracketPhase()
+
+    // bracket mode: ghost shows the completion suffix for the active fragment
+    if (bracketPhase === 'items' || bracketPhase === 'path') {
+      if (!best.startsWith(leaf)) return ''
+      const suffix = best.slice(leaf.length)
+      if (!suffix) return ''
+      return current + suffix
+    }
 
     // sub-path mode: suggestion is a child name, leaf is the typed fragment
     if (subPath.length > 0) {
@@ -440,6 +467,13 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     const ctx = this.context()
     if (!ctx.active) return ''
 
+    // bracket mode: highlight the leaf prefix within the suggestion
+    const bracketPhase = this.#bracketPhase()
+    if (bracketPhase === 'items' || bracketPhase === 'path') {
+      const leaf = this.seedLeaf()
+      return s.slice(0, Math.min(leaf.length, s.length))
+    }
+
     // sub-path mode: highlight the leaf prefix within the child name
     const subPath = this.seedSubPath()
     if (subPath.length > 0) {
@@ -455,6 +489,13 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
   public restPart = (s: string): string => {
     const ctx = this.context()
     if (!ctx.active) return s
+
+    // bracket mode: rest is everything after the leaf prefix
+    const bracketPhase = this.#bracketPhase()
+    if (bracketPhase === 'items' || bracketPhase === 'path') {
+      const leaf = this.seedLeaf()
+      return s.slice(Math.min(leaf.length, s.length))
+    }
 
     // sub-path mode: rest is everything after the leaf prefix
     const subPath = this.seedSubPath()
@@ -544,12 +585,7 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     const rawInput = this.input.nativeElement.value.trim()
     if (!rawInput) return
 
-    if (rawInput.includes('#')) {
-      await this.commitLegacy()
-      return
-    }
-
-    const navigateAfterCreate = rawInput.endsWith('/')
+    const navigateAfterCreate = rawInput.startsWith('/') || rawInput.endsWith('/')
     const raw = rawInput.replace(/^\/+|\/+$/g, '').trim()
 
     // support nested seed creation: "hello/world" → create hello, then hello/world
@@ -588,24 +624,6 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     } else {
       this.clear()
     }
-  }
-
-  private readonly commitLegacy = async (): Promise<void> => {
-    const raw = this.input.nativeElement.value.trim()
-    if (!raw) return
-
-    if (this.locked()) {
-      this.clear()
-      return
-    }
-
-    const parsed = this.parseInput(raw)
-
-    if (parsed.seedName) {
-      await this.ensureSeedInCurrentDirectory(parsed.seedName)
-    }
-
-    this.clear()
   }
 
   // -------------------------------------------------
@@ -679,7 +697,40 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
       return
     }
 
+    const bracketPhase = this.#bracketPhase()
     const subPath = this.seedSubPath()
+    const raw = this.input.nativeElement.value
+
+    // bracket-items mode: insert name after last comma (or after [)
+    if (bracketPhase === 'items') {
+      const lastComma = raw.lastIndexOf(',')
+      const insertAt = lastComma >= 0 ? lastComma + 1 : raw.indexOf('[') + 1
+      const before = raw.slice(0, insertAt)
+      // add a space after comma for readability, then the name and a comma for the next item
+      const spacer = lastComma >= 0 ? ' ' : ''
+      this.input.nativeElement.value = before + spacer + best + ','
+      this.suppressed.set(false)
+      this.placeCaretAtEnd()
+      this.syncSignalsFromDom()
+      this.updateSeedSubPath()
+      return
+    }
+
+    // bracket-path mode: rebuild bracket prefix + path with accepted child
+    if (bracketPhase === 'path') {
+      const bracketClose = raw.indexOf(']')
+      const bracketPrefix = raw.slice(0, bracketClose + 2) // [items]/
+      if (subPath.length > 0) {
+        this.input.nativeElement.value = bracketPrefix + subPath.join('/') + '/' + best + '/'
+      } else {
+        this.input.nativeElement.value = bracketPrefix + best + '/'
+      }
+      this.suppressed.set(false)
+      this.placeCaretAtEnd()
+      this.syncSignalsFromDom()
+      this.updateSeedSubPath()
+      return
+    }
 
     // sub-path mode: rebuild the full path with the accepted child name
     if (subPath.length > 0) {
@@ -712,30 +763,6 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
   // -------------------------------------------------
   // parsing / seed creation helpers
   // -------------------------------------------------
-
-  private readonly parseInput = (raw: string): { seedName: string | null; markerName: string | null } => {
-    const hashIndex = raw.indexOf('#')
-
-    const rawSeed = hashIndex === -1 ? raw : raw.slice(0, hashIndex).trim()
-    const rawMarker = hashIndex === -1 ? null : raw.slice(hashIndex + 1).trim()
-
-    const seedName = rawSeed ? this.completions.normalize(rawSeed.replace(/^\/+/, '').trim()) : null
-    const markerName = rawMarker ? this.completions.normalize(rawMarker) : null
-
-    return { seedName, markerName }
-  }
-
-  private readonly ensureSeedInCurrentDirectory = async (seedName: string): Promise<void> => {
-    // create the seed directory in OPFS so listSeedFolders() can find it
-    const dir = await this.lineage.explorerDir()
-    if (dir) {
-      await dir.getDirectoryHandle(seedName, { create: true })
-    }
-
-    // emit seed:added — HistoryRecorder will record the op
-    EffectBus.emit('seed:added', { seed: seedName })
-    this.requestSynchronize()
-  }
 
   // -------------------------------------------------
   // ui helpers
@@ -770,8 +797,53 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
   // seed sub-path tracking
   // -------------------------------------------------
 
+  // bracket mode: 'none' | 'items' (inside []) | 'path' (after ]/)
+  #bracketPhase = signal<'none' | 'items' | 'path'>('none')
+
   private readonly updateSeedSubPath = (): void => {
     const raw = this.input.nativeElement.value.trim()
+
+    // detect bracket mode: [items]/path
+    const bracketOpen = raw.indexOf('[')
+    const bracketClose = raw.indexOf(']')
+
+    if (bracketOpen === 0 && bracketClose < 0) {
+      // inside brackets — suggest current surface tiles
+      this.#bracketPhase.set('items')
+      const inner = raw.slice(1)
+      const lastComma = inner.lastIndexOf(',')
+      const fragment = lastComma >= 0 ? inner.slice(lastComma + 1).trim() : inner.trim()
+      const leaf = this.completions.normalize(fragment)
+      this.seedSubPath.set([])
+      this.seedLeaf.set(leaf)
+      this.seedProvider.query([])
+      return
+    }
+
+    if (bracketOpen === 0 && bracketClose > 0 && bracketClose < raw.length - 1 && raw[bracketClose + 1] === '/') {
+      // after bracket-path — suggest relative subfolders
+      this.#bracketPhase.set('path')
+      const pathPart = raw.slice(bracketClose + 2) // after ]/
+      const clean = pathPart.replace(/\/+$/, '')
+      if (!clean.includes('/')) {
+        // single level: leaf is the typed fragment, query at current level
+        const leaf = this.completions.normalize(clean)
+        this.seedSubPath.set([])
+        this.seedLeaf.set(leaf)
+        this.seedProvider.query([])
+        return
+      }
+      const parts = clean.split('/')
+      const leaf = this.completions.normalize((parts.pop() ?? '').trim())
+      const subPath = parts.map(p => this.completions.normalize(p.trim())).filter(Boolean)
+      this.seedSubPath.set(subPath)
+      this.seedLeaf.set(leaf)
+      this.seedProvider.query(subPath)
+      return
+    }
+
+    // default: no bracket mode
+    this.#bracketPhase.set('none')
 
     // strip leading '/' (create-goto prefix)
     const clean = raw.replace(/^\/+/, '')

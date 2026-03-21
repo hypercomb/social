@@ -69,10 +69,10 @@
         </button>
         @if (publicUtilityOpen()) {
           <div class="controls-section utility">
-            <button class="ctl-btn" (click)="cut()" aria-label="cut">
+            <button class="ctl-btn" (click)="copy()" aria-label="copy">
               <span class="hci">%</span>
             </button>
-            <button class="ctl-btn" (click)="copy()" aria-label="copy">
+            <button class="ctl-btn" (click)="cut()" aria-label="cut">
               <span class="hci">F</span>
             </button>
             <button class="ctl-btn" (click)="remove()" aria-label="delete">
@@ -87,10 +87,10 @@
         <!-- private: full utility always visible -->
         <div class="controls-divider"></div>
         <div class="controls-section utility">
-          <button class="ctl-btn" (click)="cut()" aria-label="cut">
+          <button class="ctl-btn" (click)="copy()" aria-label="copy">
             <span class="hci">%</span>
           </button>
-          <button class="ctl-btn" (click)="copy()" aria-label="copy">
+          <button class="ctl-btn" (click)="cut()" aria-label="cut">
             <span class="hci">F</span>
           </button>
           <button class="ctl-btn" (click)="remove()" aria-label="delete">

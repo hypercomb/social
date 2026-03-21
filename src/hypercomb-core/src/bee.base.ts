@@ -33,7 +33,7 @@ export abstract class Bee {
 
   public static simplify = (name: string): string => {
     return name
-      .replace(/(?:Worker|Drone|Bee)$/, '')
+      .replace(/(?:Worker|Drone|QueenBee|Bee)$/, '')
       .replace(/([a-z])([A-Z])/g, '$1 $2')
       .trim()
   }

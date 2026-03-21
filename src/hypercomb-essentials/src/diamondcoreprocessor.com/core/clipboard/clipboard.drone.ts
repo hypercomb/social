@@ -31,6 +31,7 @@ export class ClipboardWorker extends Worker {
   ]
 
   protected override emits = [
+    'clipboard:captured',
     'clipboard:paste-start',
     'clipboard:paste-done',
     'seed:added',
@@ -121,6 +122,14 @@ export class ClipboardWorker extends Worker {
         EffectBus.emit('seed:removed', { seed: label })
       }
       this.#selection?.clear()
+    }
+
+    // Visual feedback — renderer picks this up for flash (copy) or disappear (cut)
+    EffectBus.emit('clipboard:captured', { labels: [...labels], op })
+
+    if (op === 'cut') {
+      // Allow history remove ops to flush before triggering re-render
+      setTimeout(() => window.dispatchEvent(new Event('synchronize')), 80)
     }
 
     // Persist metadata so clipboard survives reload

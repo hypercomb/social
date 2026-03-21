@@ -41,7 +41,10 @@ import { ShortcutSheetDrone } from '@hypercomb/essentials/diamondcoreprocessor.c
 import { CommandPaletteDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/ui/command-palette.drone'
 import '@hypercomb/essentials/diamondcoreprocessor.com/ui/slash-command/slash-command.drone'
 import { AvatarSwarmDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/avatar-swarm.drone'
+import { ClipboardService } from '@hypercomb/essentials/diamondcoreprocessor.com/core/clipboard/clipboard.service'
+import { ClipboardWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/core/clipboard/clipboard.drone'
 import '@hypercomb/essentials/diamondcoreprocessor.com/bridge/claude-bridge.drone'
+import { HelpQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/ui/help.queen'
 
 const _deps = [
   AxialService,
@@ -74,6 +77,9 @@ const _deps = [
   ShortcutSheetDrone,
   CommandPaletteDrone,
   AvatarSwarmDrone,
+  ClipboardService,
+  ClipboardWorker,
+  HelpQueenBee,
 ]
 
 void _deps

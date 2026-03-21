@@ -71,7 +71,7 @@ export class ShowHoneycombWorker extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'seed:place-at', 'seed:reorder', 'render:set-gap', 'move:preview']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'seed:place-at', 'seed:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -99,6 +99,8 @@ export class ShowHoneycombWorker extends Drone {
   // incremental rendering state — tracks what's currently painted (geometry cache)
   private readonly renderedCells = new Map<string, SeedCell>()
   #heatByLabel = new Map<string, number>()
+  #flashLabels = new Set<string>()
+  #flashTimer: ReturnType<typeof setTimeout> | null = null
   private streamActive = false
   private cancelStreamFlag = false
   private renderedLocationKey = ''
@@ -1134,6 +1136,42 @@ export class ShowHoneycombWorker extends Drone {
         this.renderedLocationKey = ''
         this.requestRender()
       }
+    })
+
+    // clipboard:view effect — filter visible seeds to clipboard contents
+    this.onEffect<{ active: boolean; labels?: string[]; sourceSegments?: string[] }>('clipboard:view', (payload) => {
+      if (payload?.active && payload.labels) {
+        this.#clipboardView = {
+          labels: new Set(payload.labels),
+          sourceSegments: payload.sourceSegments ?? [],
+        }
+      } else {
+        this.#clipboardView = null
+      }
+      this.requestRender()
+    })
+
+    // clipboard:captured — brief visual flash on copied tiles
+    this.onEffect<{ labels: string[]; op: string }>('clipboard:captured', (payload) => {
+      if (!payload?.labels?.length) return
+
+      if (payload.op === 'copy') {
+        // Flash copied tiles via heat override
+        if (this.#flashTimer) clearTimeout(this.#flashTimer)
+        this.#flashLabels = new Set(payload.labels)
+        for (const label of payload.labels) this.#heatByLabel.set(label, 1.0)
+        this.renderedCellsKey = '' // force geometry rebuild
+        this.requestRender()
+
+        this.#flashTimer = setTimeout(() => {
+          for (const label of this.#flashLabels) this.#heatByLabel.delete(label)
+          this.#flashLabels.clear()
+          this.#flashTimer = null
+          this.renderedCellsKey = ''
+          this.requestRender()
+        }, 600)
+      }
+      // cut: tiles disappear via history remove ops + synchronize (handled by ClipboardWorker)
     })
 
     // seed from persisted stores so secret/room survive page reload
