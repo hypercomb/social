@@ -1,0 +1,12 @@
+<div class="hive-canvas">
+  <div id="pixi-host"></div>
+</div>
+
+<div class="overlay">
+  <div class="title">hypercomb</div>
+  @if (peerCount() > 0) {
+    <div class="peer-count">{{ peerCount() }} {{ peerCount() === 1 ? 'bee' : 'bees' }} in the hive</div>
+  }
+</div>
+
+<router-outlet />
