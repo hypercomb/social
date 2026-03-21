@@ -341,6 +341,9 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     this.input.nativeElement.focus()
     this.syncSignalsFromDom()
 
+    window.addEventListener('navigate', this.#onNavigate)
+    window.addEventListener('popstate', this.#onNavigate)
+
     this.#prefillUnsub = EffectBus.on<{ value: string }>('search:prefill', ({ value }) => {
       this.input.nativeElement.value = value
       this.input.nativeElement.focus()
@@ -351,9 +354,12 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
   }
 
   #prefillUnsub?: () => void
+  readonly #onNavigate = (): void => { this.clear() }
 
   public ngOnDestroy(): void {
     this.#prefillUnsub?.()
+    window.removeEventListener('navigate', this.#onNavigate)
+    window.removeEventListener('popstate', this.#onNavigate)
   }
 
   // -------------------------------------------------
