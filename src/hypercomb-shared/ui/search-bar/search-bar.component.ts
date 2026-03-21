@@ -188,7 +188,7 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     if (this.locked()) return 'enter cell name...'
     const ctx = this.context()
     if (ctx.active && ctx.mode === 'filter') return 'filter tiles...'
-    return 'enter intent...'
+    return 'share intent...'
   })
 
   public constructor() {
