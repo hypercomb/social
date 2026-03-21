@@ -1,11 +1,16 @@
 <!-- src/app/code-viewer/code-viewer.component.html -->
-<div class="code-viewer">
+<div class="code-viewer" [class.fullscreen]="fullscreen()">
   <div class="toolbar">
     <div class="label">code</div>
 
-    <button class="copy" type="button" (click)="copy()">
-      {{ copied() ? 'copied' : 'copy' }}
-    </button>
+    <div class="actions">
+      <button class="btn" type="button" (click)="copy()">
+        {{ copied() ? 'copied' : 'copy' }}
+      </button>
+      <button class="btn" type="button" (click)="toggleFullscreen()">
+        {{ fullscreen() ? 'exit' : 'expand' }}
+      </button>
+    </div>
   </div>
 
   <div class="scroller" role="region" aria-label="code payload">

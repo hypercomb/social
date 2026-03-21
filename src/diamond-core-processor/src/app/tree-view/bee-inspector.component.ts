@@ -196,7 +196,8 @@ import { DcpStore } from '../core/dcp-store'
     .modal-body {
       flex: 1;
       overflow-y: auto;
-      padding: 0;
+      overflow-x: hidden;
+      padding: 6px;
     }
 
     .modal-body.center {

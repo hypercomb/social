@@ -19,6 +19,7 @@ export class CodeViewerComponent {
   public readonly code = input.required<string>()
 
   protected readonly copied = signal(false)
+  protected readonly fullscreen = signal(false)
   protected readonly normalized = computed(() => (this.code() ?? '').replaceAll('\r\n', '\n'))
 
   readonly codeEl = viewChild<ElementRef<HTMLElement>>('codeRef')
@@ -31,6 +32,10 @@ export class CodeViewerComponent {
       el.textContent = text
       hljs.highlightElement(el)
     })
+  }
+
+  protected toggleFullscreen = (): void => {
+    this.fullscreen.update(v => !v)
   }
 
   protected copy = async (): Promise<void> => {

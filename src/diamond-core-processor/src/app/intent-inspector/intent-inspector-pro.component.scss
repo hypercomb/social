@@ -72,7 +72,8 @@
   display: grid;
   grid-template-columns: 66fr 34fr;
   gap: 1.25rem;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 1.5rem;
   align-items: stretch;
 }
