@@ -16,7 +16,7 @@ import { DcpStore } from '../core/dcp-store'
         <header class="modal-header">
           <div class="header-top">
             <div class="header-left">
-              <span class="kind-badge" [class.dep]="kind() === 'dependency'">{{ kind() === 'dependency' ? 'dependency' : 'bee' }}</span>
+              <span class="kind-badge" [class.dep]="kind() === 'dependency'" [class.worker]="kind() === 'worker'" [class.drone]="kind() === 'drone'">{{ kind() }}</span>
               <span class="display-name">{{ displayName() }}</span>
               <span class="meta-pill">{{ fileSize() }}</span>
               <span class="meta-pill">{{ loadedFrom() }}</span>
@@ -124,6 +124,16 @@ import { DcpStore } from '../core/dcp-store'
     .kind-badge.dep {
       color: #4fa58b;
       background: rgba(79, 165, 139, 0.1);
+    }
+
+    .kind-badge.worker {
+      color: #a54f4f;
+      background: rgba(165, 79, 79, 0.1);
+    }
+
+    .kind-badge.drone {
+      color: #a59b4f;
+      background: rgba(165, 155, 79, 0.1);
     }
 
     .display-name {
@@ -238,7 +248,7 @@ export class BeeInspectorComponent {
   signature = input.required<string>()
   contentBase = input('')
   rootSig = input('')
-  kind = input<'bee' | 'dependency'>('bee')
+  kind = input<string>('bee')
   visible = input(false)
   close = output<void>()
 

@@ -5,7 +5,16 @@ import { SignatureService } from '@hypercomb/core'
 import { AuditorService } from './auditor.service'
 import { DcpInstallerService, type InstallProgress } from './dcp-installer.service'
 import { DcpStore } from './dcp-store'
-import type { AuditResult, TreeNode } from './tree-node'
+import type { AuditResult, TreeNode, TreeNodeKind } from './tree-node'
+
+/** PascalCase → 'lower case words' (e.g. MeshAdapterDrone → mesh adapter drone) */
+function humanize(name: string): string {
+  return name
+    .replace(/^_+/, '')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .toLowerCase()
+}
 
 type LayerJson = {
   version?: number
@@ -56,8 +65,8 @@ export class TreeResolverService {
     // build root tree node
     const root = this.#buildNode(rootLayer, rootSig, '', undefined, 0)
 
-    // populate immediate children
-    await this.#expandChildren(root, base, rootSig, domain)
+    // populate all children recursively
+    await this.#expandAll(root, base, rootSig, domain)
 
     // audit all known signatures
     const allSigs = this.#collectSignatures(root)
@@ -106,10 +115,11 @@ export class TreeResolverService {
     }
 
     for (const beeSig of beeSigs) {
+      const { kind: beeKind, className } = await this.#detectBeeInfo(beeSig)
       const beeNode: TreeNode = {
         id: beeSig,
-        name: beeSig.slice(0, 12) + '...',
-        kind: 'bee',
+        name: className ? humanize(className) : beeSig.slice(0, 12) + '...',
+        kind: beeKind,
         signature: beeSig,
         lineage: parent.lineage,
         parentId: parent.id,
@@ -125,9 +135,10 @@ export class TreeResolverService {
     const parentLineage = parent.lineage || layer.rel || ''
     for (const [depSig, depNs] of this.#depLineage) {
       if (depNs === parentLineage) {
+        const depName = await this.#detectDepClassName(depSig)
         const depNode: TreeNode = {
           id: `${parent.id}:${depSig}`,
-          name: depSig.slice(0, 12) + '...',
+          name: depName ? humanize(depName) : depSig.slice(0, 12) + '...',
           kind: 'dependency',
           signature: depSig,
           lineage: parentLineage,
@@ -142,6 +153,15 @@ export class TreeResolverService {
     }
 
     parent.loaded = true
+  }
+
+  async #expandAll(node: TreeNode, base: string, rootSig: string, domain: string): Promise<void> {
+    await this.#expandChildren(node, base, rootSig, domain)
+    for (const child of node.children) {
+      if (child.kind === 'layer' || child.kind === 'domain') {
+        await this.#expandAll(child, base, rootSig, domain)
+      }
+    }
   }
 
   // -------------------------------------------------
@@ -163,6 +183,36 @@ export class TreeResolverService {
         this.#depLineage.set(sig, match[1].trim())
       }
     }
+  }
+
+  async #detectBeeInfo(sig: string): Promise<{ kind: TreeNodeKind, className: string | null }> {
+    try {
+      const bytes = await this.#store.readFile(this.#store.bees, `${sig}.js`)
+      if (bytes) {
+        const text = new TextDecoder().decode(bytes)
+        // match: var ClassName = class extends Worker/Drone/Bee
+        // or:    class ClassName extends Worker/Drone/Bee
+        const m = text.match(/(?:var\s+(\w+)\s*=\s*class|class\s+(\w+))\s+extends\s+(Worker|Drone|Bee)\b/)
+        if (m) {
+          const className = m[1] || m[2]
+          const kind = m[3].toLowerCase() as TreeNodeKind
+          return { kind: kind === 'bee' ? 'bee' : kind, className }
+        }
+      }
+    } catch { /* fallback */ }
+    return { kind: 'bee', className: null }
+  }
+
+  async #detectDepClassName(sig: string): Promise<string | null> {
+    try {
+      const bytes = await this.#store.readFile(this.#store.dependencies, `${sig}.js`)
+      if (bytes) {
+        const text = new TextDecoder().decode(bytes)
+        const m = text.match(/(?:var\s+(\w+)\s*=\s*class|class\s+(\w+))/)
+        if (m) return m[1] || m[2]
+      }
+    } catch { /* fallback */ }
+    return null
   }
 
   #buildNode(layer: LayerJson, sig: string, lineage: string, parentId: string | undefined, depth: number): TreeNode {

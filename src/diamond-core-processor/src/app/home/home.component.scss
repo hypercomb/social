@@ -67,20 +67,53 @@
   text-decoration: underline;
 }
 
-/* search */
+/* search + kind filters */
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
 .search {
-  width: 100%;
+  flex: 1;
   padding: 8px 10px;
   font-size: 13px;
   border: 1px solid rgba(0,0,0,0.15);
   border-radius: 8px;
   outline: none;
-  margin-bottom: 16px;
   box-sizing: border-box;
 }
 
 .search:focus {
   border-color: #4a6fa5;
+}
+
+.kind-toggle {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 4px 6px;
+  cursor: pointer;
+  transition: opacity 0.15s, filter 0.15s, border-color 0.15s, box-shadow 0.15s;
+  opacity: 0.5;
+}
+
+.kind-toggle:hover {
+  opacity: 0.8;
+}
+
+.kind-toggle.active {
+  opacity: 1;
+}
+
+.kind-toggle.inactive {
+  opacity: 0.2;
+  filter: grayscale(1);
+}
+
+.kind-toggle dcp-diamond {
+  pointer-events: none;
 }
 
 /* domain sections */

@@ -22,14 +22,24 @@
       </a>
     }
 
-    <!-- search -->
+    <!-- search + kind filters -->
     @if (sections().length) {
-      <input
-        type="text"
-        class="search"
-        placeholder="Filter..."
-        [value]="searchTerm()"
-        (input)="searchTerm.set($any($event.target).value)" />
+      <div class="filter-row">
+        <input
+          type="text"
+          class="search"
+          placeholder="Filter..."
+          [value]="searchTerm()"
+          (input)="searchTerm.set($any($event.target).value)" />
+        @for (fk of filterKinds; track fk.key) {
+          <button class="kind-toggle"
+            [class.active]="isKindActive(fk.key)"
+            [class.inactive]="isFiltering() && !isKindActive(fk.key)"
+            (click)="toggleKindFilter(fk.key)">
+            <dcp-diamond [kind]="fk.diamond" />
+          </button>
+        }
+      </div>
     }
 
     <!-- domain sections -->

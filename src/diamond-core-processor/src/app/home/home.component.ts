@@ -6,7 +6,8 @@ import { ToggleStateService } from '../core/toggle-state.service'
 import { TreeViewComponent } from '../tree-view/tree-view.component'
 import { AuditorSettingsComponent } from '../settings/auditor-settings.component'
 import { BeeInspectorComponent } from '../tree-view/bee-inspector.component'
-import type { TreeNode } from '../core/tree-node'
+import { DiamondIconComponent } from '../tree-view/diamond-icon.component'
+import type { TreeNode, TreeNodeKind } from '../core/tree-node'
 
 const DOMAINS_KEY = 'dcp.domains'
 
@@ -23,7 +24,7 @@ export interface DomainSection {
 @Component({
   selector: 'app-home',
   standalone: true,
-  imports: [TreeViewComponent, AuditorSettingsComponent, BeeInspectorComponent],
+  imports: [TreeViewComponent, AuditorSettingsComponent, BeeInspectorComponent, DiamondIconComponent],
   templateUrl: './home.component.html',
   styleUrls: ['./home.component.scss']
 })
@@ -38,7 +39,13 @@ export class HomeComponent {
   readonly searchTerm = signal('')
   readonly sections = signal<DomainSection[]>([])
   readonly inspectBee = signal<string | null>(null)
-  readonly inspectKind = signal<'bee' | 'dependency'>('bee')
+  readonly inspectKind = signal<TreeNodeKind>('bee')
+  readonly kindFilters = signal<Set<string>>(new Set())
+  readonly filterKinds: { key: string, diamond: TreeNodeKind }[] = [
+    { key: 'bee', diamond: 'bee' },
+    { key: 'worker', diamond: 'worker' },
+    { key: 'dependency', diamond: 'dependency' }
+  ]
   readonly inspectSection = signal<DomainSection | null>(null)
 
   // all nodes flattened for toggle lookups
@@ -68,10 +75,26 @@ export class HomeComponent {
 
   readonly filteredSections = computed(() => {
     const term = this.searchTerm().toLowerCase().trim()
-    if (!term) return this.sections()
-    return this.sections()
-      .map(s => ({ ...s, items: this.#filterTree(s.items, term) }))
-      .filter(s => s.items.length > 0)
+    const active = this.kindFilters()
+    let sections = this.sections()
+
+    if (term) {
+      sections = sections
+        .map(s => ({ ...s, items: this.#filterTree(s.items, term) }))
+        .filter(s => s.items.length > 0)
+    }
+
+    if (active.size > 0) {
+      const kindSet = new Set<TreeNodeKind>()
+      if (active.has('bee')) { kindSet.add('bee'); kindSet.add('drone') }
+      if (active.has('worker')) kindSet.add('worker')
+      if (active.has('dependency')) kindSet.add('dependency')
+      sections = sections
+        .map(s => ({ ...s, items: this.#flattenByKind(s.items, kindSet) }))
+        .filter(s => s.items.length > 0)
+    }
+
+    return sections
   })
 
   constructor() {
@@ -80,6 +103,22 @@ export class HomeComponent {
       const doms = this.domains()
       if (doms.length) this.#loadAllDomains(doms)
     })
+  }
+
+  // kind filter toggles
+  toggleKindFilter(key: string): void {
+    const next = new Set(this.kindFilters())
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    this.kindFilters.set(next)
+  }
+
+  isKindActive(key: string): boolean {
+    return this.kindFilters().has(key)
+  }
+
+  isFiltering(): boolean {
+    return this.kindFilters().size > 0
   }
 
   // domain management
@@ -141,7 +180,7 @@ export class HomeComponent {
   }
 
   onOpen(node: TreeNode): void {
-    if ((node.kind === 'bee' || node.kind === 'dependency') && node.signature) {
+    if ((node.kind === 'bee' || node.kind === 'worker' || node.kind === 'drone' || node.kind === 'dependency') && node.signature) {
       const section = this.sections().find(s => this.#containsNode(s.items, node.id))
       this.inspectBee.set(node.signature)
       this.inspectKind.set(node.kind)
@@ -220,6 +259,31 @@ export class HomeComponent {
         })
       }
     }
+    return result
+  }
+
+  #filterByKind(nodes: TreeNode[], active: Set<TreeNodeKind>): TreeNode[] {
+    const result: TreeNode[] = []
+    for (const node of nodes) {
+      const filteredChildren = this.#filterByKind(node.children, active)
+      if (active.has(node.kind) || filteredChildren.length > 0) {
+        result.push({ ...node, children: filteredChildren.length ? filteredChildren : node.children })
+      }
+    }
+    return result
+  }
+
+  #flattenByKind(nodes: TreeNode[], kinds: Set<TreeNodeKind>): TreeNode[] {
+    const result: TreeNode[] = []
+    const walk = (items: TreeNode[]) => {
+      for (const node of items) {
+        if (kinds.has(node.kind)) {
+          result.push({ ...node, depth: 0, children: [], expanded: false })
+        }
+        walk(node.children)
+      }
+    }
+    walk(nodes)
     return result
   }
 

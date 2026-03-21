@@ -12,6 +12,8 @@ import type { TreeNodeKind } from '../core/tree-node'
       [class.domain]="kind() === 'domain'"
       [class.layer]="kind() === 'layer'"
       [class.bee]="kind() === 'bee'"
+      [class.worker]="kind() === 'worker'"
+      [class.drone]="kind() === 'drone'"
       [class.dependency]="kind() === 'dependency'"
       (click)="clicked.emit(); $event.stopPropagation()">
     </button>
@@ -46,6 +48,14 @@ import type { TreeNodeKind } from '../core/tree-node'
 
     .diamond.bee {
       background: linear-gradient(135deg, #e8d4b8, #a58b4f);
+    }
+
+    .diamond.worker {
+      background: linear-gradient(135deg, #e8b8b8, #a54f4f);
+    }
+
+    .diamond.drone {
+      background: linear-gradient(135deg, #e8e0b8, #a59b4f);
     }
 
     .diamond.dependency {

@@ -10,22 +10,28 @@ import type { TreeNode } from '../core/tree-node'
   standalone: true,
   imports: [ToggleComponent, DiamondIconComponent],
   template: `
-    <div class="row" [style.padding-left.px]="node().depth * 20">
-      <dcp-toggle
-        [enabled]="enabled()"
-        [effectivelyEnabled]="effectivelyEnabled()"
-        (toggled)="toggle.emit(node())" />
+    <div class="row" [style.padding-left.px]="10 + node().depth * 20">
+      @if (node().kind === 'layer' || node().kind === 'domain') {
+        <dcp-toggle
+          [enabled]="enabled()"
+          [effectivelyEnabled]="effectivelyEnabled()"
+          (toggled)="toggle.emit(node())" />
+      }
 
       <dcp-diamond
         [kind]="node().kind"
         (clicked)="open.emit(node())" />
 
       <button class="label" (click)="hasChildren() ? expandToggle.emit(node()) : open.emit(node())">
-        <span class="name">{{ node().name }}</span>
-        @if (node().signature) {
-          <span class="sig">{{ node().signature!.slice(0, 8) }}</span>
+        @if (node().lineage && node().kind !== 'layer' && node().kind !== 'domain') {
+          <span class="lineage">{{ node().lineage }}/</span>
         }
+        <span class="name">{{ node().name }}</span>
       </button>
+
+      @if (node().signature) {
+        <span class="sig">{{ node().signature!.slice(0, 8) }}</span>
+      }
 
       @if (node().audit) {
         <span class="audit-badge" [class.met]="node().audit!.meetsThreshold" [class.unmet]="!node().audit!.meetsThreshold">
@@ -46,8 +52,8 @@ import type { TreeNode } from '../core/tree-node'
     .row {
       display: flex;
       align-items: center;
-      gap: 8px;
-      padding: 5px 0;
+      gap: 6px;
+      padding: 5px 10px 5px 0;
       border-bottom: 1px solid rgba(0,0,0,0.05);
     }
 
@@ -70,18 +76,26 @@ import type { TreeNode } from '../core/tree-node'
 
     .name {
       font-size: 12px;
-      font-weight: 400;
+      font-weight: 500;
       color: #333;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
 
+    .lineage {
+      font-size: 10px;
+      color: #aaa;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
     .sig {
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       font-size: 10px;
-      color: #888;
+      color: #bbb;
       flex-shrink: 0;
+      margin-left: auto;
     }
 
     .audit-badge {
