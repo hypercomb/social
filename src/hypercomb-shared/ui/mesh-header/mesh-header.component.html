@@ -16,14 +16,14 @@
           (keydown.enter)="submitSecret($event)"
         />
         @if (hasSecret()) {
-          <button class="secret-clear" type="button" (click)="clearSecret()">
-            &times;
+          <button class="secret-eye" type="button" (click)="onEyeClick()">
+            <span class="hci">c</span>
           </button>
         }
       </div>
       @if (hasSecret()) {
-        <button class="eye-toggle" type="button" (click)="onEyeClick()">
-          <span class="hci">c</span>
+        <button class="secret-clear" type="button" (click)="clearSecret()">
+          &times;
         </button>
       }
     }

@@ -48,7 +48,6 @@ export class MeshHeaderComponent {
   readonly onShieldClick = (): void => {
     this.#secretExpanded.update(v => !v)
     if (!this.#secretExpanded()) {
-      // if collapsing, also hide the secret
       this.#secretRevealed.set(false)
     }
   }

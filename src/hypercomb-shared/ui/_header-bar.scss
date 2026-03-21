@@ -79,24 +79,66 @@ $secret-bg: rgba(10, 12, 16, 0.85);
   align-items: stretch;
 }
 
-.secret-clear {
+// eye icon inside the input — hidden until wrap is hovered
+.secret-eye {
   position: absolute;
-  right: 0.25rem;
+  right: 0;
+  top: 0;
+  bottom: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 1.2rem;
-  height: 1.2rem;
+  width: 2rem;
   padding: 0;
   border: none;
   background: none;
-  color: rgba(245, 245, 245, 0.3);
-  font-size: 0.54rem;
+  color: rgba(245, 245, 245, 0.35);
   cursor: pointer;
-  transition: color 200ms ease;
+  opacity: 0;
+  transition: opacity 200ms ease, color 200ms ease;
+  pointer-events: none;
+
+  .hci {
+    font-size: 0.76rem;
+  }
 
   &:hover {
-    color: rgba(245, 245, 245, 0.6);
+    color: rgba(245, 245, 245, 0.7);
+  }
+}
+
+.secret-input-wrap:hover .secret-eye {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+// X clear — external button (where eye-toggle used to sit)
+.secret-clear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 0 1.28rem 0 0.68rem;
+  border: 1px solid rgba(245, 245, 245, 0.12);
+  border-left: none;
+  background: $secret-bg;
+  color: rgba(245, 245, 245, 0.35);
+  font-size: 0.88rem;
+  cursor: pointer;
+  transition: color 200ms ease, background 200ms ease;
+
+  &:hover {
+    color: rgba(245, 245, 245, 0.7);
+    background: rgba(245, 245, 245, 0.04);
+  }
+
+  &:active {
+    background: rgba(245, 245, 245, 0.06);
+  }
+
+  &:focus-visible {
+    outline: 1px solid rgba(245, 245, 245, 0.3);
+    outline-offset: -1px;
   }
 }
 
@@ -131,38 +173,6 @@ $secret-bg: rgba(10, 12, 16, 0.85);
 
   &.has-secret {
     border-color: $secret-border;
-  }
-}
-
-.eye-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  padding: 0 1.28rem 0 0.68rem;
-  border: 1px solid rgba(245, 245, 245, 0.12);
-  border-left: none;
-  background: $secret-bg;
-  color: rgba(245, 245, 245, 0.35);
-  cursor: pointer;
-  transition: color 200ms ease, background 200ms ease;
-
-  .hci {
-    font-size: 0.76rem;
-  }
-
-  &:hover {
-    filter: brightness(1.3);
-    background: rgba(245, 245, 245, 0.04);
-  }
-
-  &:active {
-    background: rgba(245, 245, 245, 0.06);
-  }
-
-  &:focus-visible {
-    outline: 1px solid rgba(245, 245, 245, 0.3);
-    outline-offset: -1px;
   }
 }
 
