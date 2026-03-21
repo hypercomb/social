@@ -21,7 +21,8 @@ type OverlayAction = {
 /** Descriptor emitted by provider bees via `overlay:register-action` */
 export type OverlayActionDescriptor = {
   name: string
-  svgMarkup: string
+  svgMarkup?: string
+  fontChar?: string
   x: number
   y: number
   iconSize?: number
@@ -287,6 +288,7 @@ export class TileOverlayDrone extends Drone {
 
       const btn = new HexIconButton({
         svgMarkup: desc.svgMarkup,
+        fontChar: desc.fontChar,
         width: desc.iconSize ?? 8.75,
         height: desc.iconSize ?? 8.75,
         alias: `hc-icon-${desc.name}`,
