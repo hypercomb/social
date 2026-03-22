@@ -460,17 +460,18 @@ separation means you can replace the rendering layer (Angular -> another
 framework), the storage layer (OPFS -> IndexedDB), or the delivery mechanism
 (service worker -> native fetch) without touching core or essentials.
 
-### Global Memoization Potential
+### Deterministic Computation & Global Memoization
 
 Because every script has a signature and every payload has a signature, the
-combination `hash(scriptSig + payloadSig)` uniquely identifies a computation.
-If the result of running script S against payload P has been computed before,
-it can be retrieved by its composite hash without re-execution.
+combination `sign(scriptSig + payloadSig)` -- called the **authenticity token**
+-- uniquely identifies a computation. A two-file storage model (marker + result)
+bridges computation identity to result identity, enabling bypass of re-execution
+when the result is already known. A community authenticity layer provides
+volunteer-driven auditing of script signatures before installation.
 
-This extends naturally to a shared computation cache -- a network of nodes that
-all agree on content-addressed identity can share results. If node A has already
-computed the result for `(S, P)`, node B can retrieve it by hash instead of
-recomputing.
+See [deterministic-computation.md](deterministic-computation.md) for the full
+specification: signature composition, two-file storage model, resource
+verification, discovery properties, and use cases.
 
 ---
 
