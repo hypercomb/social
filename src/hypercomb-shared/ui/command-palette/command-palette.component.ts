@@ -13,7 +13,7 @@ import {
   type OnInit,
   type OnDestroy,
 } from '@angular/core'
-import { EffectBus, type KeyBinding, type KeyChord } from '@hypercomb/core'
+import { EffectBus, formatChord, type KeyBinding } from '@hypercomb/core'
 import { fromRuntime } from '../../core/from-runtime'
 
 import type { CommandPaletteState, PaletteItem } from
@@ -31,7 +31,6 @@ export class CommandPaletteComponent implements OnInit, AfterViewChecked, OnDest
 
   #drone: any
   #unsub: (() => void) | null = null
-  #isMac = /Mac|iMac|Macintosh/.test(navigator.userAgent)
   #needsFocus = false
 
   private readonly state$ = fromRuntime(
@@ -87,7 +86,7 @@ export class CommandPaletteComponent implements OnInit, AfterViewChecked, OnDest
 
   readonly formatShortcut = (binding: KeyBinding | null): string[][] => {
     if (!binding?.sequence?.length) return []
-    return binding.sequence.map(chord => this.#formatChord(chord))
+    return binding.sequence.map(chord => formatChord(chord))
   }
 
   readonly highlightLabel = (item: PaletteItem): { text: string; highlighted: boolean }[] => {
@@ -113,30 +112,6 @@ export class CommandPaletteComponent implements OnInit, AfterViewChecked, OnDest
     }
     if (current) parts.push({ text: current, highlighted: currentHighlighted })
     return parts
-  }
-
-  #formatChord(chord: KeyChord[]): string[] {
-    const parts: string[] = []
-    for (const k of chord) {
-      if (k.primary) parts.push(this.#isMac ? '\u2318' : 'Ctrl')
-      if (k.ctrl) parts.push('Ctrl')
-      if (k.alt) parts.push(this.#isMac ? '\u2325' : 'Alt')
-      if (k.shift) parts.push(this.#isMac ? '\u21E7' : 'Shift')
-
-      const key = k.key ?? k.code ?? ''
-      parts.push(this.#formatKey(key))
-    }
-    return parts
-  }
-
-  #formatKey(key: string): string {
-    const map: Record<string, string> = {
-      escape: 'Esc', arrowup: '\u2191', arrowdown: '\u2193',
-      arrowleft: '\u2190', arrowright: '\u2192', delete: 'Del',
-      enter: '\u21B5', space: 'Space', tab: 'Tab',
-      backspace: '\u232B',
-    }
-    return map[key] ?? key.toUpperCase()
   }
 
   ngOnInit(): void {

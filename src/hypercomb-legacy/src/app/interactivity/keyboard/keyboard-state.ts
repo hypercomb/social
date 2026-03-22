@@ -1,4 +1,5 @@
 ﻿import { Injectable, inject, signal, computed, WritableSignal } from "@angular/core"
+import { isMac } from "@hypercomb/core"
 import { Settings } from "src/app/core/settings"
 
 @Injectable({ providedIn: "root" })
@@ -73,7 +74,6 @@ export class KeyboardState {
         if (opts?.meta !== undefined && ev.metaKey !== opts.meta) return false
 
         if (opts?.primary !== undefined) {
-          const isMac = /Mac|iMac|Macintosh/.test(navigator.userAgent)
           const actual = isMac ? ev.metaKey : ev.ctrlKey
           if (actual !== opts.primary) return false
         }
@@ -97,7 +97,6 @@ export class KeyboardState {
     if (e.shiftKey) set.add("shift")
     if (e.altKey) set.add("alt")
 
-    const isMac = /Mac|iMac|Macintosh/.test(navigator.userAgent)
     if (isMac && e.metaKey) set.add("primary")
     if (!isMac && e.ctrlKey) set.add("primary")
 
@@ -118,7 +117,6 @@ export class KeyboardState {
     set.delete("alt")
     if (e.altKey) set.add("alt")
 
-    const isMac = /Mac|iMac|Macintosh/.test(navigator.userAgent)
     set.delete("primary")
     if (isMac && e.metaKey) set.add("primary")
     if (!isMac && e.ctrlKey) set.add("primary")

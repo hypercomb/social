@@ -4,10 +4,10 @@
 // in a glassmorphic modal. No business logic — just rendering.
 
 import { Component, computed, type OnInit, type OnDestroy } from '@angular/core'
-import { EffectBus, type KeyBinding, type KeyChord } from '@hypercomb/core'
+import { EffectBus, formatChord, type KeyBinding } from '@hypercomb/core'
 import { fromRuntime } from '../../core/from-runtime'
 
-import type { ShortcutSheetState, ShortcutGroup } from
+import type { ShortcutSheetState } from
   '@hypercomb/essentials/diamondcoreprocessor.com/ui/shortcut-sheet.drone'
 
 @Component({
@@ -19,7 +19,6 @@ import type { ShortcutSheetState, ShortcutGroup } from
 export class ShortcutSheetComponent implements OnInit, OnDestroy {
 
   #drone: any
-  #isMac = /Mac|iMac|Macintosh/.test(navigator.userAgent)
   #unsub: (() => void) | null = null
 
   private readonly state$ = fromRuntime(
@@ -35,32 +34,7 @@ export class ShortcutSheetComponent implements OnInit, OnDestroy {
   }
 
   readonly formatSequence = (binding: KeyBinding): string[][] => {
-    return binding.sequence.map(chord => this.#formatChord(chord))
-  }
-
-  #formatChord(chord: KeyChord[]): string[] {
-    const parts: string[] = []
-    for (const k of chord) {
-      if (k.primary) parts.push(this.#isMac ? '\u2318' : 'Ctrl')
-      if (k.ctrl) parts.push('Ctrl')
-      if (k.alt) parts.push(this.#isMac ? '\u2325' : 'Alt')
-      if (k.shift) parts.push(this.#isMac ? '\u21E7' : 'Shift')
-      if (k.meta) parts.push(this.#isMac ? '\u2318' : 'Win')
-
-      const key = k.key ?? k.code ?? ''
-      parts.push(this.#formatKey(key))
-    }
-    return parts
-  }
-
-  #formatKey(key: string): string {
-    const map: Record<string, string> = {
-      escape: 'Esc', arrowup: '\u2191', arrowdown: '\u2193',
-      arrowleft: '\u2190', arrowright: '\u2192', delete: 'Del',
-      enter: '\u21B5', space: 'Space', tab: 'Tab',
-      backspace: '\u232B', '/': '?',
-    }
-    return map[key] ?? key.toUpperCase()
+    return binding.sequence.map(chord => formatChord(chord))
   }
 
   ngOnInit(): void {

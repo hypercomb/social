@@ -30,9 +30,16 @@ export const globalKeyMap: KeyMapLayer = {
     },
     {
       cmd: 'render.togglePivot',
-      sequence: [[{ key: '8', code: 'digit8', ctrl: true, shift: true }]],
+      sequence: [[{ key: '8', code: 'digit8', primary: true, shift: true }]],
       description: 'Toggle hex orientation',
       category: 'View',
+      pierce: true,
+    },
+    {
+      cmd: 'ui.searchBarToggle',
+      sequence: [[{ key: 'space', ctrl: true }]],
+      description: 'Toggle search bar focus',
+      category: 'Navigation',
       pierce: true,
     },
   ],

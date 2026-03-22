@@ -435,7 +435,14 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
 
     window.addEventListener('navigate', this.#onNavigate)
     window.addEventListener('popstate', this.#onNavigate)
-    window.addEventListener('keydown', this.#onGlobalKeyDown)
+    this.#searchBarToggleUnsub = EffectBus.on<{ cmd: string }>('keymap:invoke', (payload) => {
+      if (payload?.cmd !== 'ui.searchBarToggle') return
+      if (document.activeElement === this.input.nativeElement) {
+        this.input.nativeElement.blur()
+      } else {
+        this.input.nativeElement.focus()
+      }
+    })
 
     this.#prefillUnsub = EffectBus.on<{ value: string }>('search:prefill', ({ value }) => {
       this.input.nativeElement.value = value
@@ -447,23 +454,14 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
   }
 
   #prefillUnsub?: () => void
+  #searchBarToggleUnsub?: () => void
   readonly #onNavigate = (): void => { this.clear() }
-
-  readonly #onGlobalKeyDown = (e: KeyboardEvent): void => {
-    if (!(e.ctrlKey && e.key === ' ')) return
-    e.preventDefault()
-    if (document.activeElement === this.input.nativeElement) {
-      this.input.nativeElement.blur()
-    } else {
-      this.input.nativeElement.focus()
-    }
-  }
 
   public ngOnDestroy(): void {
     this.#prefillUnsub?.()
+    this.#searchBarToggleUnsub?.()
     window.removeEventListener('navigate', this.#onNavigate)
     window.removeEventListener('popstate', this.#onNavigate)
-    window.removeEventListener('keydown', this.#onGlobalKeyDown)
   }
 
   // -------------------------------------------------

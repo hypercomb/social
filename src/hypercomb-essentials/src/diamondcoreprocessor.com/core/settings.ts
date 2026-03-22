@@ -1,4 +1,6 @@
 // diamondcoreprocessor.com/core/settings.ts
+import { isMac as _isMac } from '@hypercomb/core'
+
 export type HexOrientation = 'point-top' | 'flat-top'
 
 export class Settings  {
@@ -28,7 +30,7 @@ export class Settings  {
     }
 
     // platform-specific
-    public readonly isMac = /Mac|iMac|Macintosh/.test(navigator.userAgent)
+    public readonly isMac = _isMac
 
     // rendering / interaction settings
     public bitDepth = 0.8

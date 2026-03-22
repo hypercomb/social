@@ -1,5 +1,5 @@
 // diamondcoreprocessor.com/input/keymap/keymap.service.ts
-import { EffectBus, type KeyBinding, type KeyChord, type KeyMapLayer } from '@hypercomb/core'
+import { EffectBus, isMac, type KeyBinding, type KeyChord, type KeyMapLayer } from '@hypercomb/core'
 import { globalKeyMap, defaultKeyMap } from './default-keymap.js'
 
 const SEQUENCE_TIMEOUT_MS = 500
@@ -83,12 +83,6 @@ export class KeyMapService extends EventTarget {
       this.#sequenceTimer = null
     }, SEQUENCE_TIMEOUT_MS)
   }
-
-  // -------------------------------------------------
-  // platform detection
-  // -------------------------------------------------
-
-  #isMac = /Mac|iMac|Macintosh/.test(navigator.userAgent)
 
   // -------------------------------------------------
   // keyboard listener
@@ -224,7 +218,7 @@ export class KeyMapService extends EventTarget {
     if (k.meta !== undefined && e.metaKey !== k.meta) return false
 
     if (k.primary !== undefined) {
-      const actual = this.#isMac ? e.metaKey : e.ctrlKey
+      const actual = isMac ? e.metaKey : e.ctrlKey
       if (actual !== k.primary) return false
     }
 
