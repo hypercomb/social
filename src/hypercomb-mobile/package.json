@@ -1,0 +1,18 @@
+{
+  "name": "hypercomb-mobile",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "sync": "cap sync",
+    "open:android": "cap open android",
+    "build": "cap sync"
+  },
+  "dependencies": {
+    "@capacitor/core": "^8.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.0.0",
+    "@capacitor/android": "^8.0.0",
+    "typescript": "~5.9.3"
+  }
+}
