@@ -247,8 +247,28 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   }
 
   readonly centerView = (): void => {
-    const container = this.pixiHost?.container
-    if (container) container.position.set(0, 0)
+    const host = this.pixiHost
+    const container = host?.container
+    const app = host?.app
+    if (!container || !app) return
+
+    // bounding box of all content in container's local space
+    const bounds = container.getLocalBounds()
+    const cx = bounds.x + bounds.width * 0.5
+    const cy = bounds.y + bounds.height * 0.5
+
+    // offset container so content center sits at stage origin
+    const scale = container.scale?.x ?? 1
+    container.position.set(-cx * scale, -cy * scale)
+
+    // reset stage pan to screen center
+    const s = app.renderer.screen
+    app.stage.position.set(s.width * 0.5, s.height * 0.5)
+
+    // persist viewport state
+    const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
+    vp?.setZoom?.(scale, container.position.x, container.position.y)
+    vp?.setPan?.(0, 0)
   }
 
   readonly toggleLock = (): void => {
