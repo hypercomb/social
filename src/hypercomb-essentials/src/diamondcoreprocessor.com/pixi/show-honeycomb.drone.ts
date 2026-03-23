@@ -71,7 +71,7 @@ export class ShowHoneycombWorker extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'seed:place-at', 'seed:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'seed:place-at', 'seed:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -161,6 +161,7 @@ export class ShowHoneycombWorker extends Drone {
   private filterKeyword = ''
   private moveNames: string[] | null = null
   private suppressCellCount = false
+  #layoutMode: 'dense' | 'pinned' = 'dense'
 
   // cached render context for fast move:preview path (avoids full OPFS re-read)
   private cachedSeedNames: string[] | null = null
@@ -862,38 +863,53 @@ export class ShowHoneycombWorker extends Drone {
       }
     }
 
-    // order projection — use persisted order if available, else fall back to index-based ordering
-    const orderProjection = (window as any).ioc?.get?.('@diamondcoreprocessor.com/OrderProjection') as
-      { hydrate(sig: string): Promise<string[]> } | undefined
+    // read layout mode for this location
+    this.#layoutMode = this.#readLayoutMode(locationKey)
+
     let seedNames: string[]
-    if (orderProjection) {
-      const locSig = await this.computeSignatureLocation(lineage)
-      const order = await orderProjection.hydrate(locSig.sig)
-      if (order.length > 0) {
-        const unionSet = new Set(union)
-        seedNames = order.filter(s => unionSet.has(s))
-        // append new seeds not yet in persisted order
-        for (const s of union) {
-          if (!seedNames.includes(s)) seedNames.push(s)
+
+    if (this.#layoutMode === 'pinned') {
+      // pinned mode: each seed renders at its stored index position (gaps allowed)
+      seedNames = await this.#orderByIndexPinned(dir, Array.from(union), localSeedSet)
+
+      // apply search filter — blank out non-matching slots (preserve positions)
+      if (this.filterKeyword) {
+        const kw = this.filterKeyword
+        seedNames = seedNames.map(s => s && s.toLowerCase().includes(kw) ? s : '')
+      }
+    } else {
+      // dense mode: pack tiles contiguously using persisted order or index+offset sort
+      const orderProjection = (window as any).ioc?.get?.('@diamondcoreprocessor.com/OrderProjection') as
+        { hydrate(sig: string): Promise<string[]> } | undefined
+      if (orderProjection) {
+        const locSig = await this.computeSignatureLocation(lineage)
+        const order = await orderProjection.hydrate(locSig.sig)
+        if (order.length > 0) {
+          const unionSet = new Set(union)
+          seedNames = order.filter(s => unionSet.has(s))
+          // append new seeds not yet in persisted order
+          for (const s of union) {
+            if (!seedNames.includes(s)) seedNames.push(s)
+          }
+        } else {
+          seedNames = await this.#orderByIndex(dir, Array.from(union), localSeedSet)
         }
       } else {
         seedNames = await this.#orderByIndex(dir, Array.from(union), localSeedSet)
       }
-    } else {
-      seedNames = await this.#orderByIndex(dir, Array.from(union), localSeedSet)
-    }
 
-    // apply layout ordering if a __layout__ file exists
-    const layout = this.resolve<any>('layout')
-    if (layout) {
-      const order = await layout.read(dir)
-      if (order) seedNames = layout.merge(order, seedNames)
-    }
+      // apply layout ordering if a __layout__ file exists
+      const layout = this.resolve<any>('layout')
+      if (layout) {
+        const order = await layout.read(dir)
+        if (order) seedNames = layout.merge(order, seedNames)
+      }
 
-    // apply search filter if active
-    if (this.filterKeyword) {
-      const kw = this.filterKeyword
-      seedNames = seedNames.filter((s: string) => s.toLowerCase().includes(kw))
+      // apply search filter if active
+      if (this.filterKeyword) {
+        const kw = this.filterKeyword
+        seedNames = seedNames.filter((s: string) => s.toLowerCase().includes(kw))
+      }
     }
 
     const previousLocationKey = this.renderedLocationKey
@@ -1334,6 +1350,16 @@ export class ShowHoneycombWorker extends Drone {
       void this.#handleReorder(payload.labels)
     })
 
+    this.onEffect<{ mode: 'dense' | 'pinned' }>('layout:mode', (payload) => {
+      if (payload?.mode && payload.mode !== this.#layoutMode) {
+        this.#layoutMode = payload.mode
+        this.#persistLayoutMode(payload.mode)
+        this.#layerCellsCache.clear()
+        this.renderedCellsKey = ''
+        this.requestRender()
+      }
+    })
+
     this.onEffect<{ gapPx: number }>('render:set-gap', (payload) => {
       if (this.#hexGeo.gapPx !== payload.gapPx) {
         this.#hexGeo = createHexGeometry(this.#hexGeo.circumRadiusPx, payload.gapPx, this.#hexGeo.padPx)
@@ -1417,6 +1443,71 @@ export class ShowHoneycombWorker extends Drone {
 
     out.sort((a, b) => a.localeCompare(b))
     return out
+  }
+
+  #layoutModeKey(locationKey: string): string {
+    return `hc:layout-mode:${locationKey}`
+  }
+
+  #readLayoutMode(locationKey: string): 'dense' | 'pinned' {
+    const stored = localStorage.getItem(this.#layoutModeKey(locationKey))
+    return stored === 'pinned' ? 'pinned' : 'dense'
+  }
+
+  #persistLayoutMode(mode: 'dense' | 'pinned'): void {
+    const lineage = this.resolve<any>('lineage')
+    const locationKey = String(lineage?.explorerLabel?.() ?? '/')
+    localStorage.setItem(this.#layoutModeKey(locationKey), mode)
+  }
+
+  async #orderByIndexPinned(dir: FileSystemDirectoryHandle, names: string[], localSeedSet: Set<string>): Promise<string[]> {
+    const axial = this.resolve<any>('axial')
+    const maxSlot = axial?.count ?? 60
+    const sparse: string[] = new Array(maxSlot + 1).fill('')
+
+    let nextFree = 0
+    const unindexed: string[] = []
+
+    for (const name of names) {
+      if (!localSeedSet.has(name)) {
+        unindexed.push(name)
+        continue
+      }
+      try {
+        const seedDir = await dir.getDirectoryHandle(name, { create: false })
+        const props = await readSeedProperties(seedDir)
+        if (typeof props['index'] === 'number') {
+          const idx = props['index'] as number
+          if (idx >= 0 && idx <= maxSlot) {
+            sparse[idx] = name
+          } else {
+            unindexed.push(name)
+          }
+        } else {
+          unindexed.push(name)
+        }
+      } catch {
+        unindexed.push(name)
+      }
+    }
+
+    // place unindexed seeds in the first available empty slots
+    for (const name of unindexed) {
+      while (nextFree <= maxSlot && sparse[nextFree] !== '') nextFree++
+      if (nextFree <= maxSlot) {
+        sparse[nextFree] = name
+        // persist the assigned index
+        if (localSeedSet.has(name)) {
+          try {
+            const seedDir = await dir.getDirectoryHandle(name, { create: false })
+            await writeSeedProperties(seedDir, { index: nextFree, offset: 0 })
+          } catch { /* skip */ }
+        }
+        nextFree++
+      }
+    }
+
+    return sparse
   }
 
   /**

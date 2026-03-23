@@ -82,6 +82,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #roomOpen = signal(false)
   #hasSelection = signal(false)
   #textOnly = signal(false)
+  #layoutPinned = signal(false)
   readonly addressHover = signal(false)
 
   #idleTimer: ReturnType<typeof setTimeout> | null = null
@@ -169,6 +170,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   readonly moveMode = this.#moveMode.asReadonly()
   readonly hasSelection = this.#hasSelection.asReadonly()
   readonly textOnly = this.#textOnly.asReadonly()
+  readonly layoutPinned = this.#layoutPinned.asReadonly()
   readonly visible = computed(() => !this.#idle() || this.#hovered())
   readonly roomValue = this.#roomValue.asReadonly()
   readonly roomOpen = this.#roomOpen.asReadonly()
@@ -177,6 +179,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
 
   #clipboardUnsub: (() => void) | null = null
   #selectionUnsub: (() => void) | null = null
+  #layoutModeUnsub: (() => void) | null = null
 
   ngOnInit(): void {
     // pre-fill room from store
@@ -205,6 +208,14 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
       this.#moveMode.set(active)
     })
 
+    // sync layout mode from localStorage (read current location's mode)
+    const locationKey = String(this.navigation.segmentsRaw().join('/') || '/')
+    this.#layoutPinned.set(localStorage.getItem(`hc:layout-mode:${locationKey}`) === 'pinned')
+
+    this.#layoutModeUnsub = EffectBus.on<{ mode: string }>('layout:mode', ({ mode }) => {
+      this.#layoutPinned.set(mode === 'pinned')
+    })
+
   }
 
   ngOnDestroy(): void {
@@ -216,6 +227,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     this.#clipboardUnsub?.()
     this.#selectionUnsub?.()
     this.#moveModeUnsub?.()
+    this.#layoutModeUnsub?.()
   }
 
   // ── navigation actions ────────────────────────────────
@@ -291,6 +303,11 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   readonly toggleTextOnly = (): void => {
     this.#textOnly.update(v => !v)
     EffectBus.emit('render:set-text-only', { textOnly: this.#textOnly() })
+  }
+
+  readonly toggleLayout = (): void => {
+    this.#layoutPinned.update(v => !v)
+    EffectBus.emit('layout:mode', { mode: this.#layoutPinned() ? 'pinned' : 'dense' })
   }
 
   readonly toggleUtility = (): void => {
