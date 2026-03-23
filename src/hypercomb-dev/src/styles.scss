@@ -18,3 +18,13 @@ input, textarea, [contenteditable="true"] {
 body{
     background-color: #0b131a   ;
 }
+
+// ── mobile detection + safe-area insets ──────────────────
+:root {
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-top: env(safe-area-inset-top, 0px);
+}
+
+@media (max-width: 768px), (pointer: coarse) {
+  :root { --hc-mobile: 1; }
+}

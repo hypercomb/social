@@ -1737,7 +1737,7 @@ export class ShowHoneycombWorker extends Drone {
   private buildCellsKey = (cells: SeedCell[]): string => {
     const selectionService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SelectionService') as
       { isSelected: (label: string) => boolean } | undefined
-    let s = ''
+    let s = `p${this.#pivot ? 1 : 0}f${this.#flat ? 1 : 0}|`
     for (const c of cells) s += `${c.q},${c.r}:${c.label}:${c.external ? 1 : 0}:${c.imageSig ?? ''}:${c.hasBranch ? 1 : 0}|`
     return s
   }

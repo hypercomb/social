@@ -237,3 +237,33 @@ $secret-bg: rgba(10, 12, 16, 0.85);
 .private-toggle {
   @include pink-toggle;
 }
+
+// ── mobile overrides ──────────────────────────────────────
+@media (max-width: 768px), (pointer: coarse) {
+
+  // critical: pointer-events: none on children breaks touch entirely
+  .header-bar > * {
+    pointer-events: auto;
+  }
+
+  .header-secret-input {
+    width: 8rem;
+    font-size: 16px; // prevent iOS auto-zoom
+  }
+
+  .shield-toggle {
+    padding: 0 0.6rem;
+  }
+
+  // always show eye button on touch (no hover to reveal)
+  .secret-eye {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .public-toggle,
+  .private-toggle {
+    min-width: 4rem;
+    padding: 0 0.75em;
+  }
+}

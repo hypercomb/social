@@ -186,3 +186,29 @@
   font-size: 0.85em;
   white-space: nowrap;
 }
+
+// ── mobile overrides ──────────────────────────────────────
+@media (max-width: 768px), (pointer: coarse) {
+
+  // prevent iOS auto-zoom on focus (requires >= 16px)
+  .command-input {
+    font-size: 16px;
+  }
+
+  .ghost {
+    font-size: 16px;
+  }
+
+  .command-row {
+    min-height: 3rem;
+  }
+
+  // touch-sized dropdown items
+  .command-results li {
+    padding: 0.75rem 0.8rem;
+  }
+
+  .command-results {
+    max-height: 50vh;
+  }
+}

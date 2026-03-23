@@ -5,3 +5,9 @@ app-header {
   min-width: 0;
   max-width: 80%;
 }
+
+@media (max-width: 768px), (pointer: coarse) {
+  app-header {
+    max-width: 100%;
+  }
+}

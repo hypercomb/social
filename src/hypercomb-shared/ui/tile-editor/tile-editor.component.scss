@@ -440,3 +440,81 @@
   display: flex;
   gap: 0.5em;
 }
+
+// ── mobile overrides ──────────────────────────────────────
+@media (max-width: 768px), (pointer: coarse) {
+
+  // fullscreen modal instead of centered dialog
+  .editor-panel {
+    width: 100vw;
+    height: 100dvh;
+    max-height: 100dvh;
+    top: 0;
+    left: 0;
+    transform: none;
+    border-radius: 0;
+    border: none;
+  }
+
+  .editor-body {
+    padding: 0.75em;
+  }
+
+  // touch-sized buttons
+  .upload-btn,
+  .orientation-btn {
+    padding: 0.65em 1.2em;
+    font-size: 0.76em;
+  }
+
+  .link-btn {
+    padding: 0.5em;
+  }
+
+  // footer buttons: 44px touch targets
+  .editor-footer {
+    padding: 0.6em;
+    padding-bottom: calc(0.6em + var(--safe-bottom, 0px));
+
+    button {
+      padding: 0.6em 1.6em;
+      font-size: 0.9em;
+    }
+  }
+
+  .tool-btn {
+    width: 2.75em;
+    height: 2.75em;
+  }
+
+  // color picker: larger touch target
+  .color-picker {
+    width: 2.75em;
+    height: 2.75em;
+  }
+
+  .field-input {
+    padding: 0.5em 0.6em;
+    font-size: 16px; // prevent iOS auto-zoom
+  }
+
+  // stack fields vertically on small screens
+  .fields {
+    grid-template-columns: auto 1fr auto;
+  }
+
+  .color-row {
+    grid-template-columns: 1fr;
+  }
+
+  .color-control {
+    grid-column: 1 / -1;
+    grid-template-columns: auto 1fr 1fr auto;
+  }
+
+  // close button: larger touch target
+  .editor-close {
+    padding: 0.5em;
+    font-size: 1.2em;
+  }
+}
