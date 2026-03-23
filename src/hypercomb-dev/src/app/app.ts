@@ -37,6 +37,7 @@ import { MoveDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/
 import { DesktopMoveInput } from '@hypercomb/essentials/diamondcoreprocessor.com/input/move/desktop-move.input'
 import { TouchMoveInput } from '@hypercomb/essentials/diamondcoreprocessor.com/input/move/touch-move.input'
 import { MovePreviewDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/move-preview.drone'
+// import { TileIndexOverlayDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/tile-index-overlay.drone'
 import { BackgroundDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/background/background.drone'
 import { ShortcutSheetDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/ui/shortcut-sheet.drone'
 import { CommandPaletteDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/ui/command-palette.drone'
@@ -76,6 +77,7 @@ const _deps = [
   DesktopMoveInput,
   TouchMoveInput,
   MovePreviewDrone,
+  // TileIndexOverlayDrone,
   BackgroundDrone,
   ShortcutSheetDrone,
   CommandPaletteDrone,

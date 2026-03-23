@@ -18,6 +18,17 @@ import { CutPasteBehavior } from './cut-paste.behavior'
 import { HashMarkerBehavior } from './hash-marker.behavior'
 import { SlashCommandBehavior } from './slash-command.behavior'
 
+const BUILTIN_SLASH: { command: { name: string; description: string }; provider: null }[] = [
+  { command: { name: 'select', description: 'select tiles for cut/copy/move' }, provider: null },
+]
+
+const MOVE_ARROW_OFFSETS: Record<string, { dq: number; dr: number }> = {
+  ArrowLeft:  { dq: -1, dr:  0 },
+  ArrowRight: { dq:  1, dr:  0 },
+  ArrowUp:    { dq:  0, dr: -1 },
+  ArrowDown:  { dq:  0, dr:  1 },
+}
+
 @Component({
   selector: 'hc-search-bar',
   standalone: true, 
@@ -52,12 +63,16 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
   private readonly seedLeaf = signal('')
 
   // slash command matches — queries the drone via IoC when in slash mode
+  // includes built-in commands (select) alongside queen bee commands
   readonly #slashMatches = computed(() => {
     const ctx = this.context()
     if (!ctx.active || ctx.mode !== 'slash') return []
     const drone = get('@diamondcoreprocessor.com/SlashCommandDrone') as any
-    if (!drone?.match) return []
-    return drone.match(ctx.normalized) as { command: { name: string; description: string }; provider: unknown }[]
+    const droneMatches = drone?.match ? drone.match(ctx.normalized) as { command: { name: string; description: string }; provider: unknown }[] : []
+    const builtinMatches = BUILTIN_SLASH.filter(b =>
+      !ctx.normalized || b.command.name.startsWith(ctx.normalized)
+    )
+    return [...builtinMatches, ...droneMatches]
   })
 
   readonly #slashDescriptionMap = computed(() => {
@@ -233,6 +248,12 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
       }
     }
 
+    // /select[...] command mode — must be checked before general slash mode
+    const selectMatch = v.match(/^\/select\[/)
+    if (selectMatch) {
+      return this.#parseSelectContext(v)
+    }
+
     // '/' prefix enters slash command mode
     if (v.startsWith('/')) {
       const raw = v.slice(1)
@@ -305,6 +326,44 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     if (!ctx.active) return []
     if (ctx.mode === 'filter') return []
     if (ctx.mode === 'slash') return this.#slashMatches().map(m => m.command.name)
+
+    // select mode: suggestions depend on the current phase
+    if (ctx.mode === 'select') {
+      const phase = this.#selectPhase()
+
+      // selection phase: show tile names, exclude already-selected
+      if (phase === 'selection') {
+        let seeds = this.seedNames$()
+        const excluded = this.#selectExcluded()
+        if (excluded.size) seeds = seeds.filter(n => !excluded.has(n))
+        if (!ctx.normalized) return seeds
+        return seeds.filter(n => n.startsWith(ctx.normalized))
+      }
+
+      // operation phase: suggest operation keywords with / prefix
+      if (phase === 'operation') {
+        const ops = ['/cut', '/copy']
+        if (!ctx.normalized) return ops
+        return ops.filter(o => o.startsWith('/' + ctx.normalized) || o.slice(1).startsWith(ctx.normalized))
+      }
+
+      // move-path phase: suggest child directories at the current navigation depth
+      if (phase === 'move-path') {
+        const seeds = this.seedNames$()
+        if (!ctx.normalized) return seeds
+        return seeds.filter(n => n.startsWith(ctx.normalized))
+      }
+
+      // move-target-swap phase: suggest tile names at target directory
+      if (phase === 'move-target-swap') {
+        const seeds = this.seedNames$()
+        if (!ctx.normalized) return seeds
+        return seeds.filter(n => n.startsWith(ctx.normalized))
+      }
+
+      // move-target-index: no suggestions (numeric input)
+      return []
+    }
 
     // delete mode: show only seeds (tiles) that can be deleted
     // exclude items already chosen in bracket syntax ![a,b,...]
@@ -392,6 +451,25 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     const current = this.value()
     const bracketPhase = this.#bracketPhase()
 
+    // select mode: ghost text for operation/path/swap suggestions
+    if (ctx.mode === 'select') {
+      const phase = this.#selectPhase()
+      if (phase === 'operation') {
+        // operation suggestions include '/' prefix — build ghost from head + suggestion
+        const bracketClose = current.indexOf(']')
+        if (bracketClose >= 0) {
+          const prefix = current.slice(0, bracketClose + 1)
+          const op = best.startsWith('/') ? best : '/' + best
+          return prefix + op
+        }
+      }
+      // selection/path/swap: use head + raw suffix
+      if (!best.startsWith(ctx.normalized) && ctx.normalized) return ''
+      const suffix = best.slice(ctx.normalized.length)
+      if (!suffix) return ''
+      return current + suffix
+    }
+
     // bracket mode: ghost shows the completion suffix for the active fragment
     if (bracketPhase === 'items' || bracketPhase === 'path') {
       if (!best.startsWith(leaf)) return ''
@@ -443,6 +521,7 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
         this.input.nativeElement.focus()
       }
     })
+    this.input.nativeElement.addEventListener('focus', this.#onInputFocus)
 
     this.#prefillUnsub = EffectBus.on<{ value: string }>('search:prefill', ({ value }) => {
       this.input.nativeElement.value = value
@@ -459,20 +538,63 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
         this.suppressed.set(true)
       }
     })
+
+    // Bi-directional sync: external selection changes → update search bar
+    this.#selectionSyncUnsub = EffectBus.on<{ selected: string[]; active: string | null }>('selection:changed', (payload) => {
+      if (this.#syncDirection === 'command') return // prevent feedback loop
+      if (!payload?.selected) return
+
+      const selected = payload.selected
+      if (selected.length === 0) {
+        // Selection cleared externally — clear select mode if we're in it
+        if (this.#selectPhase() !== 'none') {
+          this.clear()
+        }
+        return
+      }
+
+      // Only sync if bar is empty or already in select mode
+      const ctx = this.context()
+      if (!ctx.active || ctx.mode === 'select' || this.input.nativeElement.value === '') {
+        this.#syncDirection = 'visual'
+        this.input.nativeElement.value = this.#buildSelectValue(selected, this.#shouldTruncate(selected))
+        this.suppressed.set(true)
+        this.placeCaretAtEnd()
+        this.syncSignalsFromDom()
+        this.#syncDirection = 'idle'
+      }
+    })
   }
 
   readonly touchDragging = signal(false)
   #prefillUnsub?: () => void
   #searchBarToggleUnsub?: () => void
   #touchDraggingUnsub?: () => void
+  #selectionSyncUnsub?: () => void
   readonly #onNavigate = (): void => { this.clear() }
+
+  /** On focus: expand truncated /select[...] back to full names */
+  readonly #onInputFocus = (): void => {
+    const v = this.input.nativeElement.value
+    if (!v.match(/^\/select\[/)) return
+    const selection = get('@diamondcoreprocessor.com/SelectionService') as any
+    if (!selection || selection.count === 0) return
+    const full = Array.from(selection.selected as Set<string>)
+    this.#syncDirection = 'visual'
+    this.input.nativeElement.value = '/select[' + full.join(',') + ']'
+    this.placeCaretAtEnd()
+    this.syncSignalsFromDom()
+    this.#syncDirection = 'idle'
+  }
 
   public ngOnDestroy(): void {
     this.#prefillUnsub?.()
     this.#searchBarToggleUnsub?.()
     this.#touchDraggingUnsub?.()
+    this.#selectionSyncUnsub?.()
     window.removeEventListener('navigate', this.#onNavigate)
     window.removeEventListener('popstate', this.#onNavigate)
+    this.input.nativeElement.removeEventListener('focus', this.#onInputFocus)
   }
 
   // -------------------------------------------------
@@ -544,6 +666,11 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
   // -------------------------------------------------
 
   public onInput = (): void => {
+    // Strip leading spaces — they break ghost text alignment
+    const el = this.input.nativeElement
+    if (el.value !== el.value.trimStart()) {
+      el.value = el.value.trimStart()
+    }
     this.suppressed.set(false)
     this.syncSignalsFromDom()
     this.clampActiveIndex()
@@ -559,6 +686,19 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
       this.lastFilterKeyword = ctx.normalized
     }
 
+    // select mode side-effects: index overlay, move preview, real-time navigation
+    if (ctx.active && ctx.mode === 'select') {
+      this.#handleSelectInputEffects()
+    } else if (this.#lastSelectMode) {
+      // Exited select mode — clear selection
+      this.#syncDirection = 'command'
+      const selection = get('@diamondcoreprocessor.com/SelectionService') as any
+      if (selection?.count > 0) selection.clear()
+      this.#syncDirection = 'idle'
+      EffectBus.emit('move:index-overlay', { show: false })
+    }
+    this.#lastSelectMode = ctx.active && ctx.mode === 'select'
+
     // update seed sub-path query when input contains '/'
     this.updateSeedSubPath()
   }
@@ -569,7 +709,26 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     const el = this.input.nativeElement
     const v = el.value
 
+    // Escape in select mode: collapse back to /select[tiles] or clear (before completion keys)
+    if (e.key === 'Escape' && this.#selectPhase() !== 'none') {
+      e.preventDefault()
+      this.#cancelSelectOperation()
+      return
+    }
+
+    // Ctrl+Arrow in move-target-index: scrub target index using hex offsets
+    if ((e.ctrlKey || e.metaKey) && this.#selectPhase() === 'move-target-index' && this.#handleMoveScrub(e)) {
+      return
+    }
+
     if (this.handleCompletionKeys(e)) return
+
+    // /select[...] command execution — intercept before general slash handler
+    if (e.key === 'Enter' && !e.shiftKey && v.match(/^\/select\[/)) {
+      e.preventDefault()
+      void this.#executeSelectCommand()
+      return
+    }
 
     // slash command execution
     if (e.key === 'Enter' && !e.shiftKey && v.startsWith('/')) {
@@ -664,6 +823,181 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
   }
 
   // -------------------------------------------------
+  // /select[...] command execution
+  // -------------------------------------------------
+
+  readonly #executeSelectCommand = async (): Promise<void> => {
+    const v = this.input.nativeElement.value.trim()
+    const bracketClose = v.indexOf(']')
+    if (bracketClose < 0) { return } // brackets not closed yet, no-op
+
+    const inner = v.slice(v.indexOf('[') + 1, bracketClose)
+    const labels = inner.split(',').map(s => this.completions.normalize(s.trim())).filter(Boolean)
+    if (labels.length === 0) { this.clear(); return }
+
+    const afterBracket = v.slice(bracketClose + 1)
+
+    // Parse operation: /cut, /copy, /move...
+    const opMatch = afterBracket.match(/^\/(\w+)/)
+    const op = opMatch ? opMatch[1].toLowerCase() : ''
+
+    const selection = get('@diamondcoreprocessor.com/SelectionService') as any
+    if (!selection) { this.clear(); return }
+
+    // Always select the tiles first
+    selection.clear()
+    for (const label of labels) {
+      selection.add(label)
+    }
+
+    if (op === 'cut') {
+      // Use existing ClipboardWorker via controls:action effect
+      EffectBus.emit('controls:action', { action: 'cut' })
+      this.clear()
+      return
+    }
+
+    if (op === 'copy') {
+      EffectBus.emit('controls:action', { action: 'copy' })
+      this.#collapseToSelect(labels)
+      return
+    }
+
+    if (op === 'move') {
+      // Parse target: (index) or [swapTile]
+      const afterOp = afterBracket.slice(opMatch![0].length)
+
+      // Check for (index)
+      const indexMatch = afterOp.match(/.*\((\d+)\)/)
+      if (indexMatch) {
+        const targetIndex = parseInt(indexMatch[1], 10)
+        const moveDrone = get('@diamondcoreprocessor.com/MoveDrone') as any
+        if (moveDrone) {
+          moveDrone.beginCommandMove(labels)
+          await moveDrone.commitCommandMoveAt(targetIndex)
+        }
+        EffectBus.emit('move:index-overlay', { show: false })
+        this.#collapseToSelect(labels)
+        return
+      }
+
+      // Check for [swapTile]
+      const swapMatch = afterOp.match(/.*\[([^\]]+)\]$/)
+      if (swapMatch) {
+        const swapLabel = this.completions.normalize(swapMatch[1])
+        // Resolve swap tile's index
+        const moveDrone = get('@diamondcoreprocessor.com/MoveDrone') as any
+        if (moveDrone) {
+          moveDrone.beginCommandMove(labels)
+          await moveDrone.commitCommandMoveToLabel(swapLabel)
+        }
+        EffectBus.emit('move:index-overlay', { show: false })
+        this.#collapseToSelect(labels)
+        return
+      }
+
+      // Just /move with no target — stay in move mode (don't clear)
+      return
+    }
+
+    // No operation — just /select[tiles] → select and show in bar
+    this.#collapseToSelect(labels)
+  }
+
+  /** After an operation completes, collapse the search bar to /select[remaining-tiles] */
+  /** Build /select[...] string, truncating names when unfocused and list exceeds thresholds */
+  #buildSelectValue(labels: readonly string[], truncate: boolean): string {
+    if (!truncate) return '/select[' + labels.join(',') + ']'
+    const mapped = labels.map(l => l.length <= 4 ? l : l.slice(0, 3) + '.')
+    return '/select[' + mapped.join(',') + ']'
+  }
+
+  /** Whether to truncate: 4+ items or bracket content > 64 chars, and input is unfocused */
+  #shouldTruncate(labels: readonly string[]): boolean {
+    if (document.activeElement === this.input.nativeElement) return false
+    if (labels.length >= 4) return true
+    return labels.join(',').length > 64
+  }
+
+  // ── Ctrl+Arrow move index scrub ──────────────────────────────
+
+  /** Scrub the move target index with Ctrl+Arrow. Returns true if handled. */
+  #handleMoveScrub(e: KeyboardEvent): boolean {
+    const offset = MOVE_ARROW_OFFSETS[e.key]
+    if (!offset) return false
+
+    e.preventDefault()
+
+    const v = this.input.nativeElement.value
+    const parenIdx = v.lastIndexOf('(')
+    if (parenIdx < 0) return true
+
+    const currentIndex = parseInt(v.slice(parenIdx + 1).replace(/\)$/, ''), 10)
+    if (isNaN(currentIndex)) return true
+
+    const axialSvc = get('@diamondcoreprocessor.com/AxialService') as any
+    if (!axialSvc?.items) return true
+
+    const coord = axialSvc.items.get(currentIndex)
+    if (!coord) return true
+
+    // Apply hex offset
+    const newQ = coord.q + offset.dq
+    const newR = coord.r + offset.dr
+
+    // Find the index at the new axial position
+    let newIndex = -1
+    for (const [idx, item] of axialSvc.items) {
+      if (item.q === newQ && item.r === newR) { newIndex = idx; break }
+    }
+    if (newIndex < 0) return true // out of bounds
+
+    // Update the input value with the new index
+    this.input.nativeElement.value = v.slice(0, parenIdx + 1) + newIndex
+    this.syncSignalsFromDom()
+    return true
+  }
+
+  #collapseToSelect(labels: readonly string[]): void {
+    const selection = get('@diamondcoreprocessor.com/SelectionService') as any
+    const remaining = selection ? Array.from(selection.selected as Set<string>) : labels
+    if (remaining.length > 0) {
+      const focused = document.activeElement === this.input.nativeElement
+      this.input.nativeElement.value = this.#buildSelectValue(remaining, this.#shouldTruncate(remaining))
+      this.suppressed.set(true)
+      this.placeCaretAtEnd()
+      this.syncSignalsFromDom()
+    } else {
+      this.clear()
+    }
+  }
+
+  /** Cancel select operation — collapse back to /select[tiles] or clear */
+  #cancelSelectOperation(): void {
+    const phase = this.#selectPhase()
+    const labels = this.#selectLabels()
+    EffectBus.emit('move:index-overlay', { show: false })
+    EffectBus.emit('move:preview', null)
+
+    // Restore navigation if we navigated away
+    if (this.#selectOriginalSegments) {
+      this.navigation.replaceRaw(this.#selectOriginalSegments)
+      this.#selectOriginalSegments = null
+    }
+
+    // If there's an operation after ] (e.g. /select[tiles]/cut), collapse to /select[tiles]
+    // Otherwise (selection phase or bare /select[tiles]), clear everything
+    const v = this.input.nativeElement.value
+    const bracketClose = v.indexOf(']')
+    const hasOperation = bracketClose >= 0 && v.slice(bracketClose + 1).startsWith('/')
+    if (hasOperation && labels.length > 0) {
+      this.#collapseToSelect(labels)
+    } else {
+      this.clear()
+    }
+  }
+
+  // -------------------------------------------------
   // completion logic
   // -------------------------------------------------
 
@@ -706,12 +1040,67 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     const best = forced ?? list[this.activeIndex()] ?? list[0]
     if (!best) return
 
-    // slash mode: fill command name with trailing space for args
+    // slash mode: fill command name with trailing space (or [ for select)
     if (ctx.mode === 'slash') {
-      this.input.nativeElement.value = '/' + best + ' '
-      this.suppressed.set(true)
+      if (best === 'select') {
+        this.input.nativeElement.value = '/select['
+        this.suppressed.set(false)
+      } else {
+        this.input.nativeElement.value = '/' + best + ' '
+        this.suppressed.set(true)
+      }
       this.placeCaretAtEnd()
       this.syncSignalsFromDom()
+      return
+    }
+
+    // select mode: completion depends on phase
+    if (ctx.mode === 'select') {
+      const phase = this.#selectPhase()
+      const raw = this.input.nativeElement.value
+
+      // selection phase: insert name (user adds comma or ] themselves)
+      if (phase === 'selection') {
+        const lastSep = Math.max(raw.lastIndexOf(','), raw.lastIndexOf('['))
+        const before = raw.slice(0, lastSep + 1)
+        const spacer = raw.lastIndexOf(',') >= 0 ? ' ' : ''
+        this.input.nativeElement.value = before + spacer + best
+        this.suppressed.set(false)
+        this.placeCaretAtEnd()
+        this.syncSignalsFromDom()
+        return
+      }
+
+      // operation phase: complete the operation keyword (suggestions include / prefix)
+      if (phase === 'operation') {
+        const bracketClose = raw.indexOf(']')
+        const prefix = raw.slice(0, bracketClose + 1)
+        const op = best.startsWith('/') ? best : '/' + best
+        this.input.nativeElement.value = prefix + op
+        this.suppressed.set(true)
+        this.placeCaretAtEnd()
+        this.syncSignalsFromDom()
+        return
+      }
+
+      // move-path phase: complete directory name and append /
+      if (phase === 'move-path') {
+        this.input.nativeElement.value = ctx.head + best + '/'
+        this.suppressed.set(false)
+        this.placeCaretAtEnd()
+        this.syncSignalsFromDom()
+        return
+      }
+
+      // move-target-swap: complete tile name
+      if (phase === 'move-target-swap') {
+        this.input.nativeElement.value = ctx.head + best + ']'
+        this.suppressed.set(true)
+        this.placeCaretAtEnd()
+        this.syncSignalsFromDom()
+        return
+      }
+
       return
     }
 
@@ -796,6 +1185,20 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
       EffectBus.emit('search:filter', { keyword: '' })
       this.lastFilterKeyword = ''
     }
+    // Clear selection when exiting select mode
+    if (this.#lastSelectMode) {
+      this.#syncDirection = 'command'
+      const selection = get('@diamondcoreprocessor.com/SelectionService') as any
+      if (selection?.count > 0) selection.clear()
+      this.#syncDirection = 'idle'
+      this.#lastSelectMode = false
+    }
+    EffectBus.emit('move:index-overlay', { show: false })
+    // Reset select state (phase/labels/excluded are computed from value, auto-reset)
+    if (this.#selectOriginalSegments) {
+      this.navigation.replaceRaw(this.#selectOriginalSegments)
+      this.#selectOriginalSegments = null
+    }
   }
 
   private readonly placeCaretAtEnd = (): void => {
@@ -809,6 +1212,259 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
 
   private readonly requestSynchronize = (): void => {
     void new hypercomb().act()
+  }
+
+  // -------------------------------------------------
+  // /select[...] context parsing
+  // -------------------------------------------------
+
+  /** Original navigation segments stored before real-time navigation (for rollback) */
+  #selectOriginalSegments: string[] | null = null
+
+  /** Phase derived from value — computed, no signal writes */
+  #selectPhase = computed<'none' | 'selection' | 'operation' | 'move-path' | 'move-target-index' | 'move-target-swap'>(() => {
+    const v = this.value()
+    if (!v.match(/^\/select\[/)) return 'none'
+    return this.#deriveSelectPhase(v)
+  })
+
+  /** Labels derived from value — computed. Includes committed labels during selection phase. */
+  #selectLabels = computed<readonly string[]>(() => {
+    const v = this.value()
+    if (!v.match(/^\/select\[/)) return []
+    const bracketOpen = v.indexOf('[')
+    const bracketClose = v.indexOf(']')
+    // Bracket closed — parse full list
+    if (bracketClose >= 0) {
+      const inner = v.slice(bracketOpen + 1, bracketClose)
+      return inner.split(',').map(s => this.completions.normalize(s.trim())).filter(Boolean)
+    }
+    // Bracket still open (selection phase) — include committed labels (before last comma)
+    // and the current partial if it matches an existing seed name exactly
+    const body = v.slice(bracketOpen + 1)
+    const parts = body.split(',').map(s => this.completions.normalize(s.trim())).filter(Boolean)
+    return parts
+  })
+
+  /** Excluded items derived from value — computed */
+  #selectExcluded = computed<ReadonlySet<string>>(() => {
+    const v = this.value()
+    if (!v.match(/^\/select\[/)) return new Set<string>()
+    const bracketClose = v.indexOf(']')
+    if (bracketClose >= 0) return new Set<string>() // brackets closed, no exclusion needed
+    const body = v.slice(v.indexOf('[') + 1)
+    const lastComma = body.lastIndexOf(',')
+    if (lastComma < 0) return new Set<string>()
+    const already = new Set<string>()
+    for (const item of body.slice(0, lastComma).split(',')) {
+      const n = this.completions.normalize(item.trim())
+      if (n) already.add(n)
+    }
+    return already
+  })
+
+  /** Derive the select phase from the input string (pure, no side effects) */
+  #deriveSelectPhase(v: string): 'selection' | 'operation' | 'move-path' | 'move-target-index' | 'move-target-swap' {
+    const bracketOpen = v.indexOf('[')
+    const bracketClose = v.indexOf(']')
+
+    if (bracketClose < 0) return 'selection'
+
+    const afterBracket = v.slice(bracketClose + 1)
+    if (!afterBracket || afterBracket === '/') return 'operation'
+
+    if (afterBracket.startsWith('/')) {
+      const opAndRest = afterBracket.slice(1)
+      const nextSlash = opAndRest.indexOf('/')
+      const opKeyword = nextSlash === -1 ? opAndRest : opAndRest.slice(0, nextSlash)
+      const opLower = opKeyword.toLowerCase().trim()
+
+      if (opLower === 'cut' || opLower === 'copy') return 'operation'
+
+      if (opLower === 'move' || opLower.startsWith('move')) {
+        // Check for (index) — note: the first [ is at bracketOpen
+        const parenIdx = v.lastIndexOf('(')
+        if (parenIdx > bracketClose) return 'move-target-index'
+
+        const lastBracketOpen = v.lastIndexOf('[')
+        if (lastBracketOpen > bracketClose) return 'move-target-swap'
+
+        const afterMove = nextSlash === -1 ? '' : opAndRest.slice(nextSlash)
+        if (afterMove) return 'move-path'
+
+        return 'operation'
+      }
+
+      return 'operation'
+    }
+
+    return 'operation'
+  }
+
+  /**
+   * Parse the /select[...]/operation syntax into a CompletionContext (pure function).
+   */
+  #parseSelectContext(v: string): import('@hypercomb/shared/core/completion-utility').CompletionContext {
+    const bracketOpen = v.indexOf('[')
+    const bracketClose = v.indexOf(']')
+    const phase = this.#deriveSelectPhase(v)
+
+    // Phase: selection — inside the first bracket pair
+    if (phase === 'selection') {
+      const body = v.slice(bracketOpen + 1)
+      const lastSep = Math.max(body.lastIndexOf(','), -1)
+      const raw = lastSep === -1 ? body : body.slice(lastSep + 1).trimStart()
+      const head = v.slice(0, v.length - raw.length)
+      const normalized = this.completions.normalize(raw)
+
+      return {
+        active: true,
+        mode: 'select',
+        head,
+        raw,
+        normalized,
+        style: 'space'
+      }
+    }
+
+    const afterBracket = v.slice(bracketClose + 1)
+
+    // Phase: operation keyword
+    if (phase === 'operation') {
+      if (!afterBracket || afterBracket === '/') {
+        const raw = afterBracket.startsWith('/') ? afterBracket.slice(1) : ''
+        return {
+          active: true,
+          mode: 'select',
+          head: v.slice(0, v.length - raw.length),
+          raw,
+          normalized: raw.toLowerCase().trim(),
+          style: 'space'
+        }
+      }
+      if (afterBracket.startsWith('/')) {
+        const opAndRest = afterBracket.slice(1)
+        const nextSlash = opAndRest.indexOf('/')
+        const opKeyword = nextSlash === -1 ? opAndRest : opAndRest.slice(0, nextSlash)
+        const opLower = opKeyword.toLowerCase().trim()
+
+        if (opLower === 'cut' || opLower === 'copy' || opLower === 'move') {
+          return { active: true, mode: 'select', head: v, raw: '', normalized: opLower, style: 'space' }
+        }
+        return {
+          active: true, mode: 'select',
+          head: v.slice(0, bracketClose + 2),
+          raw: opKeyword, normalized: opLower, style: 'space'
+        }
+      }
+      return { active: true, mode: 'select', head: v, raw: '', normalized: '', style: 'space' }
+    }
+
+    // Phase: move-target-index
+    if (phase === 'move-target-index') {
+      const parenStart = v.lastIndexOf('(')
+      const raw = v.slice(parenStart + 1).replace(/\)$/, '')
+      return { active: true, mode: 'select', head: v.slice(0, parenStart + 1), raw, normalized: raw.trim(), style: 'space' }
+    }
+
+    // Phase: move-target-swap
+    if (phase === 'move-target-swap') {
+      const lastBracketOpen = v.lastIndexOf('[')
+      const raw = v.slice(lastBracketOpen + 1).replace(/\]$/, '')
+      return { active: true, mode: 'select', head: v.slice(0, lastBracketOpen + 1), raw, normalized: this.completions.normalize(raw), style: 'space' }
+    }
+
+    // Phase: move-path
+    if (phase === 'move-path') {
+      const opAndRest = afterBracket.slice(1)
+      const nextSlash = opAndRest.indexOf('/')
+      const afterMove = nextSlash === -1 ? '' : opAndRest.slice(nextSlash)
+      const pathPart = afterMove.slice(1)
+      const pathSlash = pathPart.lastIndexOf('/')
+      const raw = pathSlash === -1 ? pathPart : pathPart.slice(pathSlash + 1)
+      return { active: true, mode: 'select', head: v.slice(0, v.length - raw.length), raw, normalized: this.completions.normalize(raw), style: 'space' }
+    }
+
+    return { active: true, mode: 'select', head: v, raw: '', normalized: '', style: 'space' }
+  }
+
+  /** Sync direction flag to prevent feedback loops in bi-directional sync */
+  #syncDirection: 'command' | 'visual' | 'idle' = 'idle'
+  /** Tracks whether we were in select mode last input — used to detect exit and clear selection */
+  #lastSelectMode = false
+
+  /**
+   * Handle side effects when typing in /select[...] mode:
+   * - Show/hide index overlay when entering/leaving move phases
+   * - Emit move preview when target index changes
+   * - Navigate in real-time when path changes
+   */
+  #handleSelectInputEffects(): void {
+    const phase = this.#selectPhase()
+    const labels = this.#selectLabels()
+
+    // Select tiles visually as labels are typed — bidirectional sync
+    this.#syncDirection = 'command'
+    const selection = get('@diamondcoreprocessor.com/SelectionService') as any
+    if (selection) {
+      const current = selection.selected as ReadonlySet<string>
+      const target = new Set(labels)
+      // Only update if different
+      if (current.size !== target.size || ![...target].every(l => current.has(l))) {
+        selection.clear()
+        for (const label of labels) selection.add(label)
+      }
+    }
+    this.#syncDirection = 'idle'
+
+    // Show index overlay when in move phases
+    const showOverlay = phase === 'move-path' || phase === 'move-target-index' || phase === 'move-target-swap'
+    EffectBus.emit('move:index-overlay', { show: showOverlay })
+
+    // Live preview when target index is being typed
+    if (phase === 'move-target-index') {
+      const v = this.input.nativeElement.value
+      const parenStart = v.lastIndexOf('(')
+      const rawIndex = v.slice(parenStart + 1).replace(/\)$/, '')
+      const targetIndex = parseInt(rawIndex, 10)
+      if (!isNaN(targetIndex) && labels.length > 0) {
+        const moveDrone = get('@diamondcoreprocessor.com/MoveDrone') as any
+        if (moveDrone) {
+          if (!moveDrone.moveCommandActive) moveDrone.beginCommandMove(labels)
+          moveDrone.updateCommandMove(targetIndex)
+        }
+      }
+    } else {
+      // Clear preview when not in target-index phase
+      const moveDrone = get('@diamondcoreprocessor.com/MoveDrone') as any
+      if (moveDrone?.moveCommandActive) {
+        moveDrone.cancelCommandMove()
+      }
+    }
+
+    // Real-time navigation when in move-path phase
+    if (phase === 'move-path') {
+      const v = this.input.nativeElement.value
+      const moveStart = v.indexOf('/move')
+      if (moveStart >= 0) {
+        const afterMove = v.slice(moveStart + 5) // after /move
+        if (afterMove.startsWith('/')) {
+          const pathPart = afterMove.slice(1).replace(/\/$/, '')
+          if (pathPart) {
+            const segments = pathPart.split('/').map(s => this.completions.normalize(s.trim())).filter(Boolean)
+            // Store original navigation state for rollback
+            if (!this.#selectOriginalSegments) {
+              this.#selectOriginalSegments = [...this.navigation.segmentsRaw()]
+            }
+            // Navigate to target directory
+            const target = [...this.#selectOriginalSegments, ...segments]
+            this.navigation.replaceRaw(target)
+            // Update seed suggestion provider for autocomplete at target
+            this.seedProvider.query(segments)
+          }
+        }
+      }
+    }
   }
 
   // -------------------------------------------------

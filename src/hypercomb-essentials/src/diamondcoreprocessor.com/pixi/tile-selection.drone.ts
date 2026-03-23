@@ -64,8 +64,11 @@ export class TileSelectionDrone extends Drone {
     axial: '@diamondcoreprocessor.com/AxialService',
     selection: '@diamondcoreprocessor.com/SelectionService',
   }
-  protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count', 'render:set-orientation', 'render:geometry-changed', 'keymap:invoke']
+  protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count', 'render:set-orientation', 'render:geometry-changed', 'keymap:invoke', 'selection:changed']
   protected override emits = ['selection:changed']
+
+  // flag to prevent feedback loops: this drone emits selection:changed and also listens to it
+  #syncing = false
 
   protected override heartbeat = async (): Promise<void> => {
     if (this.#effectsRegistered) return
@@ -106,6 +109,32 @@ export class TileSelectionDrone extends Drone {
 
     this.onEffect<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
       if (cmd in ARROW_OFFSETS) { this.#handleArrowNav(cmd); return }
+    })
+
+    // Sync from SelectionService (e.g. search bar command-driven selection)
+    // SelectionService emits { selected: string[], active: string | null }
+    // This drone emits { count, keys, labels, leader, relativeAxials } — ignore own emissions
+    this.onEffect<Record<string, unknown>>('selection:changed', (payload) => {
+      if (this.#syncing) return
+      if (!Array.isArray(payload?.['selected'])) return // only handle SelectionService payloads
+
+      const targetLabels = new Set(payload['selected'] as string[])
+
+      // Convert labels → axial keys
+      const targetKeys = new Set<string>()
+      for (const [key, entry] of this.#occupiedByAxial) {
+        if (targetLabels.has(entry.label)) targetKeys.add(key)
+      }
+
+      // Only update if different
+      if (targetKeys.size === this.#selected.size && [...targetKeys].every(k => this.#selected.has(k))) return
+
+      this.#selected.clear()
+      for (const k of targetKeys) this.#selected.add(k)
+      this.#leaderKey = targetKeys.size > 0 ? [...targetKeys][0] : null
+      this.#syncing = true
+      this.#redraw()
+      this.#syncing = false
     })
   }
 
@@ -172,6 +201,7 @@ export class TileSelectionDrone extends Drone {
     this.#leaderKey = null
     this.#redraw()
     this.#emitChanged()
+    this.#syncSelectionService()
   }
 
   // ── keyboard navigation ──────────────────────────────────────
@@ -235,13 +265,17 @@ export class TileSelectionDrone extends Drone {
     return Math.max(Math.abs(q), Math.abs(r), Math.abs(s)) <= 50
   }
 
-  #syncSelectionService(axialKeyStr: string): void {
-    const entry = this.#occupiedByAxial.get(axialKeyStr)
-    if (!entry) return
-    const selection = this.resolve<{ clear(): void; add(label: string): void }>('selection')
+  #syncSelectionService(_axialKeyStr?: string): void {
+    const selection = this.resolve<{ clear(): void; add(label: string): void; remove(label: string): void }>('selection')
     if (!selection) return
+    // Sync the full selection set to SelectionService
+    this.#syncing = true
     selection.clear()
-    selection.add(entry.label)
+    for (const key of this.#selected) {
+      const entry = this.#occupiedByAxial.get(key)
+      if (entry) selection.add(entry.label)
+    }
+    this.#syncing = false
   }
 
   // ── layer setup ───────────────────────────────────────────────
@@ -355,6 +389,7 @@ export class TileSelectionDrone extends Drone {
 
     this.#redraw()
     this.#emitChanged()
+    this.#syncSelectionService()
   }
 
   #pruneStaleSelections(): void {
@@ -374,6 +409,7 @@ export class TileSelectionDrone extends Drone {
   }
 
   #emitChanged(): void {
+    this.#syncing = true
     this.emitEffect('selection:changed', {
       count: this.#selected.size,
       keys: Array.from(this.#selected),
@@ -381,6 +417,7 @@ export class TileSelectionDrone extends Drone {
       leader: this.leader,
       relativeAxials: this.relativeAxials,
     })
+    this.#syncing = false
   }
 
   // ── hex drawing (all programmatic, no PNGs) ───────────────────
@@ -391,22 +428,23 @@ export class TileSelectionDrone extends Drone {
 
     if (this.#selected.size === 0) return
 
-    const r = this.#geo.circumRadiusPx
     const ox = this.#meshOffset.x
     const oy = this.#meshOffset.y
+    const axial = this.resolve<any>('axial')
 
     for (const key of this.#selected) {
-      if (!this.#occupiedByAxial.has(key)) continue
+      const entry = this.#occupiedByAxial.get(key)
+      if (!entry) continue
 
-      const [qs, rs] = key.split(',')
-      const q = Number(qs)
-      const rr = Number(rs)
-      const px = this.#axialToPixel(q, rr, this.#flat)
-      const cx = px.x + ox
-      const cy = px.y + oy
+      // Use AxialService Location for positioning (matches mesh renderer)
+      const coord = axial?.items?.get(entry.index) as { Location?: { x: number; y: number } } | undefined
+      if (!coord?.Location) continue
+
+      const cx = coord.Location.x + ox
+      const cy = coord.Location.y + oy
 
       const isLeader = key === this.#leaderKey
-      this.#drawHex(cx, cy, r, isLeader, this.#flat)
+      this.#drawHex(cx, cy, this.#geo.circumRadiusPx, isLeader, this.#flat)
     }
 
   }

@@ -355,6 +355,155 @@ export class MoveDrone extends Drone {
     return placements
   }
 
+  // ── command-driven move API (for search bar /select[...]/move) ──
+
+  #commandActive = false
+  get moveCommandActive(): boolean { return this.#commandActive }
+
+  /**
+   * Begin a command-driven move with explicit labels (no pointer).
+   * First label is the anchor.
+   */
+  beginCommandMove = (labels: string[]): void => {
+    if (labels.length === 0) return
+    if (this.#activeSource) return // another move is active
+
+    this.#activeSource = 'command'
+    this.#commandActive = true
+
+    const axialSvc = this.resolve<any>('axial')
+    if (!axialSvc?.items) { this.#end('command'); this.#commandActive = false; return }
+
+    this.#occupancy.clear()
+    this.#labelToKey.clear()
+    this.#keyToIndex.clear()
+
+    // full reverse map
+    for (const [i, coord] of axialSvc.items) {
+      const key = axialKey(coord.q, coord.r)
+      this.#keyToIndex.set(key, i)
+    }
+
+    // occupancy
+    for (let i = 0; i < this.#cellLabels.length; i++) {
+      const label = this.#cellLabels[i]
+      if (!label) continue
+      const coord = axialSvc.items.get(i) as { q: number; r: number } | undefined
+      if (!coord) continue
+      const key = axialKey(coord.q, coord.r)
+      this.#occupancy.set(key, label)
+      this.#labelToKey.set(label, key)
+    }
+
+    // build moved group from labels
+    this.#movedGroup.clear()
+    const anchorLabel = labels[0]
+    let anchorSet = false
+
+    for (const label of labels) {
+      const key = this.#labelToKey.get(label)
+      if (!key) continue
+      const parts = key.split(',')
+      const q = parseInt(parts[0], 10)
+      const r = parseInt(parts[1], 10)
+      this.#movedGroup.set(label, { q, r })
+      if (label === anchorLabel && !anchorSet) {
+        this.#anchorAxial = { q, r }
+        anchorSet = true
+      }
+    }
+
+    if (!anchorSet) {
+      this.#reset('command')
+      this.#commandActive = false
+    }
+  }
+
+  /**
+   * Update preview for a target axial index (from search bar input).
+   */
+  updateCommandMove = (targetIndex: number): void => {
+    if (this.#activeSource !== 'command') return
+    if (!this.#anchorAxial) return
+
+    const axialSvc = this.resolve<any>('axial')
+    const targetCoord = axialSvc?.items?.get(targetIndex)
+    if (!targetCoord) return
+
+    const diff: Axial = {
+      q: targetCoord.q - this.#anchorAxial.q,
+      r: targetCoord.r - this.#anchorAxial.r,
+    }
+
+    const placements = this.#computePlacements(diff)
+    const reordered = this.#reorderNames(placements)
+    const movedLabels = new Set(this.#movedGroup.keys())
+
+    this.emitEffect('move:preview', { names: reordered, movedLabels })
+  }
+
+  /**
+   * Commit the command move at a specific target index.
+   */
+  commitCommandMoveAt = async (targetIndex: number): Promise<void> => {
+    if (this.#activeSource !== 'command') return
+    if (!this.#anchorAxial) { this.#resetCommand(); return }
+
+    const axialSvc = this.resolve<any>('axial')
+    const targetCoord = axialSvc?.items?.get(targetIndex)
+    if (!targetCoord) { this.#resetCommand(); return }
+
+    const diff: Axial = {
+      q: targetCoord.q - this.#anchorAxial.q,
+      r: targetCoord.r - this.#anchorAxial.r,
+    }
+
+    if (diff.q === 0 && diff.r === 0) { this.#resetCommand(); return }
+
+    const placements = this.#computePlacements(diff)
+    const denseOrder = this.#reorderNames(placements).filter(n => n !== '')
+
+    this.emitEffect('seed:reorder', { labels: denseOrder })
+
+    const layout = this.resolve<LayoutService>('layout')
+    const lineage = this.resolve<any>('lineage')
+    if (layout && lineage?.explorerDir) {
+      const dir = await lineage.explorerDir()
+      if (dir) await layout.write(dir, denseOrder)
+    }
+
+    this.emitEffect('move:preview', null)
+    this.emitEffect('move:committed', { order: denseOrder })
+
+    this.#resetCommand()
+    void new hypercomb().act()
+  }
+
+  /**
+   * Commit the command move to a specific label's position.
+   */
+  commitCommandMoveToLabel = async (targetLabel: string): Promise<void> => {
+    const key = this.#labelToKey.get(targetLabel)
+    if (!key) { this.#resetCommand(); return }
+    const idx = this.#keyToIndex.get(key)
+    if (idx === undefined) { this.#resetCommand(); return }
+    await this.commitCommandMoveAt(idx)
+  }
+
+  /**
+   * Cancel command move — clear preview and reset.
+   */
+  cancelCommandMove = (): void => {
+    if (this.#activeSource !== 'command') return
+    this.emitEffect('move:preview', null)
+    this.#resetCommand()
+  }
+
+  #resetCommand(): void {
+    this.#reset('command')
+    this.#commandActive = false
+  }
+
   // ── reset ────────────────────────────────────────────────
 
   #reset(source: string): void {

@@ -350,11 +350,6 @@ export class TileOverlayDrone extends Drone {
   #onPointerMove = (e: PointerEvent): void => {
     if (!this.#renderContainer || !this.#overlay || !this.#renderer || !this.#canvas) return
 
-    if (e.ctrlKey || e.metaKey) {
-      this.#overlay.visible = false
-      return
-    }
-
     const detector = this.resolve<{ pixelToAxial(px: number, py: number, flat?: boolean): Axial }>('detector')
     if (!detector) return
 
@@ -385,10 +380,23 @@ export class TileOverlayDrone extends Drone {
         this.#hoverLog++
       }
 
+      // Ctrl/Meta held: track position but hide overlay (selection mode, not navigation)
+      if (e.ctrlKey || e.metaKey) {
+        this.#overlay.visible = false
+        this.emitEffect('tile:hover', { q: axial.q, r: axial.r })
+        return
+      }
+
       this.#positionOverlay(axial.q, axial.r)
       this.#updateSeedLabel(axial.q, axial.r)
       this.#updatePerTileVisibility()
       this.emitEffect('tile:hover', { q: axial.q, r: axial.r })
+    }
+
+    // Ctrl/Meta held but hex didn't change — still hide overlay
+    if (e.ctrlKey || e.metaKey) {
+      this.#overlay.visible = false
+      return
     }
 
     this.#updateIconHover(local)
@@ -415,6 +423,33 @@ export class TileOverlayDrone extends Drone {
     if (this.#navigationBlocked) return
     if (this.#editing || this.#editCooldown) return
     if (!this.#renderContainer || !this.#renderer || !this.#canvas) return
+
+    // For Ctrl/Meta clicks, resolve axial from click coordinates directly
+    // rather than relying on pointermove having set #currentIndex
+    if (e.ctrlKey || e.metaKey) {
+      const detector = this.resolve<{ pixelToAxial(px: number, py: number, flat?: boolean): Axial }>('detector')
+      if (!detector) return
+
+      const pixiGlobal = this.#clientToPixiGlobal(e.clientX, e.clientY)
+      const local = this.#renderContainer.toLocal(new Point(pixiGlobal.x, pixiGlobal.y))
+      const meshLocalX = local.x - this.#meshOffset.x
+      const meshLocalY = local.y - this.#meshOffset.y
+      const axial = detector.pixelToAxial(meshLocalX, meshLocalY, this.#flat)
+
+      const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(axial.q, axial.r))
+      if (!entry?.label) return
+
+      this.emitEffect('tile:click', {
+        q: axial.q,
+        r: axial.r,
+        label: entry.label,
+        index: entry.index,
+        ctrlKey: e.ctrlKey,
+        metaKey: e.metaKey,
+      })
+      return
+    }
+
     if (this.#currentIndex === undefined || this.#currentIndex >= this.#cellCount) return
 
     const entry = this.#occupiedByAxial.get(
@@ -448,14 +483,14 @@ export class TileOverlayDrone extends Drone {
       }
     }
 
-    if (e.ctrlKey || e.metaKey || this.#hasSelection) {
+    if (this.#hasSelection) {
       this.emitEffect('tile:click', {
         q: this.#currentAxial!.q,
         r: this.#currentAxial!.r,
         label: entry.label,
         index: this.#currentIndex!,
-        ctrlKey: e.ctrlKey,
-        metaKey: e.metaKey,
+        ctrlKey: false,
+        metaKey: false,
       })
       return
     }

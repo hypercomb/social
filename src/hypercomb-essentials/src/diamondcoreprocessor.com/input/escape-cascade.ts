@@ -14,6 +14,10 @@ EffectBus.on<{ active: boolean }>('editor:mode', ({ active }) => {
 EffectBus.on<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
   if (cmd !== 'global.escape') return
 
+  // Priority 0: search bar owns Escape when focused (select mode collapse, etc.)
+  const focused = document.activeElement
+  if (focused instanceof HTMLInputElement && focused.classList.contains('command-input')) return
+
   // Priority 1: close editor
   if (editorActive) {
     const drone = window.ioc.get<{ cancelEditing(): void }>('@diamondcoreprocessor.com/TileEditorDrone')
