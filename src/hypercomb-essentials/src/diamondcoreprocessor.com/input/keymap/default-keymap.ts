@@ -49,6 +49,13 @@ export const globalKeyMap: KeyMapLayer = {
       category: 'Mesh',
       pierce: true,
     },
+    {
+      cmd: 'render.toggleBees',
+      sequence: [[{ key: 'b', ctrl: true, shift: true }]],
+      description: 'Toggle bee avatars',
+      category: 'View',
+      pierce: true,
+    },
   ],
 }
 

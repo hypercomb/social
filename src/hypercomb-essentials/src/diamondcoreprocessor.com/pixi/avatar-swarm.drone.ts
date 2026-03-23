@@ -226,6 +226,12 @@ export class AvatarSwarmDrone extends Drone {
     this.#shader = new BeeSwarmShader()
     this.#layer = new Container()
     this.#layer.zIndex = 10 // above honeycomb, below overlays
+    this.#layer.visible = false // hidden by default — Ctrl+Shift+B to toggle
+
+    // listen for bee visibility toggle
+    this.onEffect<{ visible: boolean }>('render:set-bees-visible', ({ visible }) => {
+      if (this.#layer) this.#layer.visible = visible
+    })
 
     this.#buildGeometry()
 

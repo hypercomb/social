@@ -132,6 +132,11 @@
         } @else if (roomValue()) {
           <span class="room-display">{{ roomValue() }}</span>
         }
+
+        <!-- bee mode toggle -->
+        <button class="ctl-btn bee-btn" [class.active]="beesVisible()" (click)="toggleBees()" aria-label="toggle bees">
+          <span class="bee-icon">🐝</span>
+        </button>
       }
 
     }

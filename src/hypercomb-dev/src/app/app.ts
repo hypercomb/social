@@ -28,6 +28,7 @@ import { KeyMapService } from '@hypercomb/essentials/diamondcoreprocessor.com/in
 import { SelectionService } from '@hypercomb/essentials/diamondcoreprocessor.com/core/selection/selection.service'
 import '@hypercomb/essentials/diamondcoreprocessor.com/input/escape-cascade'
 import '@hypercomb/essentials/diamondcoreprocessor.com/input/pivot-toggle'
+import '@hypercomb/essentials/diamondcoreprocessor.com/input/bee-toggle'
 import { TileEditorComponent } from '@hypercomb/shared/ui/tile-editor/tile-editor.component'
 import { ControlsBarComponent, ShortcutSheetComponent, CommandPaletteComponent, ActivityLogComponent } from '@hypercomb/shared/ui';
 import { PortalOverlayComponent } from '@hypercomb/shared/ui/portal/portal-overlay.component'

@@ -80,6 +80,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #clipboardItems = signal<string[]>([])
   #roomValue = signal('')
   #roomOpen = signal(false)
+  #beesVisible = signal(localStorage.getItem('hc:bees-visible') === 'true')
   #hasSelection = signal(false)
   #textOnly = signal(false)
   #layoutPinned = signal(false)
@@ -176,12 +177,14 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   readonly visible = computed(() => (!this.#idle() || this.#hovered()) && !this.#touchDragging())
   readonly roomValue = this.#roomValue.asReadonly()
   readonly roomOpen = this.#roomOpen.asReadonly()
+  readonly beesVisible = this.#beesVisible.asReadonly()
 
   // ── lifecycle ───────────────────────────────────────────
 
   #clipboardUnsub: (() => void) | null = null
   #selectionUnsub: (() => void) | null = null
   #layoutModeUnsub: (() => void) | null = null
+  #beesUnsub: (() => void) | null = null
 
   ngOnInit(): void {
     // pre-fill room from store
@@ -210,6 +213,10 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
       this.#moveMode.set(active)
     })
 
+    this.#beesUnsub = EffectBus.on<{ visible: boolean }>('render:set-bees-visible', ({ visible }) => {
+      this.#beesVisible.set(visible)
+    })
+
     // sync layout mode from localStorage (read current location's mode)
     const locationKey = String(this.navigation.segmentsRaw().join('/') || '/')
     this.#layoutPinned.set(localStorage.getItem(`hc:layout-mode:${locationKey}`) === 'pinned')
@@ -235,6 +242,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     this.#moveModeUnsub?.()
     this.#layoutModeUnsub?.()
     this.#touchDraggingUnsub?.()
+    this.#beesUnsub?.()
   }
 
   // ── navigation actions ────────────────────────────────
@@ -377,6 +385,15 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     EffectBus.emit('controls:action', { action: 'clear-clipboard' })
     EffectBus.emit('clipboard:view', { active: false })
     this.#mode.set('browsing')
+  }
+
+  // ── bees ────────────────────────────────────────────
+
+  readonly toggleBees = (): void => {
+    const next = !this.#beesVisible()
+    this.#beesVisible.set(next)
+    localStorage.setItem('hc:bees-visible', String(next))
+    EffectBus.emit('render:set-bees-visible', { visible: next })
   }
 
   // ── room ────────────────────────────────────────────
