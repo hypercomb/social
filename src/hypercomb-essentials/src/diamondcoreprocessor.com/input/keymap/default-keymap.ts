@@ -42,6 +42,13 @@ export const globalKeyMap: KeyMapLayer = {
       category: 'Navigation',
       pierce: true,
     },
+    {
+      cmd: 'mesh.togglePublic',
+      sequence: [[{ key: 'p', primary: true, shift: true }]],
+      description: 'Toggle public / private mode',
+      category: 'Mesh',
+      pierce: true,
+    },
   ],
 }
 

@@ -51,6 +51,17 @@ export const initializeRuntime = async (
     EffectBus.emit('render:set-pivot', { pivot: pivotOn })
   })
 
+  // mesh: toggle public/private on keymap command
+  EffectBus.on<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
+    if (cmd !== 'mesh.togglePublic') return
+    const current = localStorage.getItem('hc:mesh-public') === 'true'
+    const next = !current
+    localStorage.setItem('hc:mesh-public', String(next))
+    const mesh = get('@diamondcoreprocessor.com/NostrMeshWorker') as any
+    mesh?.setNetworkEnabled?.(next, true)
+    EffectBus.emit('mesh:public-changed', { public: next })
+  })
+
   // Probe mesh state for UI toggle
   const mesh = get('@diamondcoreprocessor.com/NostrMeshWorker') as any
   if (mesh) {

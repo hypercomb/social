@@ -122,6 +122,10 @@ export class App {
       },
     })
 
+    EffectBus.on<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
+      if (cmd === 'mesh.togglePublic') this.toggleMesh()
+    })
+
     queueMicrotask(() => {
       void this.#runtimeReady.then(() => {
         // push stored preference to the mesh
