@@ -1,6 +1,6 @@
 <!-- src/app/common/header/search-bar/search-bar.component.html -->
 
-<div class="command-bar">
+<div class="command-bar" [style.visibility]="touchDragging() ? 'hidden' : null">
   <div class="command-shell" (mousedown)="onShellMouseDown($event)">
     <div class="command-row">
 

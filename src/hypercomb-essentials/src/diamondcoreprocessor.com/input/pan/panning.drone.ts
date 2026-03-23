@@ -19,6 +19,9 @@ export class PanningDrone extends Drone {
     spacebarPan: '@diamondcoreprocessor.com/SpacebarPanInput',
     touchPan: '@diamondcoreprocessor.com/TouchPanInput',
   }
+  // Note: touchPan is now a math delegate — the TouchGestureCoordinator
+  // calls touchPan.panUpdate() instead of touchPan managing its own pointers.
+  // The coordinator is attached by ZoomDrone (which has both zoom + pan refs).
   protected override listens = ['render:host-ready']
 
   #effectsRegistered = false
@@ -35,8 +38,10 @@ export class PanningDrone extends Drone {
       const spacebarPan = this.resolve<any>('spacebarPan')
       spacebarPan?.attach(this, this.canvas)
 
+      // touchPan is a math delegate — attach with just the pan API (no canvas)
+      // The TouchGestureCoordinator handles pointer events and calls touchPan.panUpdate()
       const touchPan = this.resolve<any>('touchPan')
-      touchPan?.attach(this, this.canvas)
+      touchPan?.attach(this)
 
       // resolve ViewportPersistence and subscribe to navigation restores
       this.vp = window.ioc.get<ViewportPersistence>('@diamondcoreprocessor.com/ViewportPersistence') ?? null

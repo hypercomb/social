@@ -7,11 +7,12 @@ import { TileEditorComponent } from "@hypercomb/shared/ui/tile-editor/tile-edito
 import { ControlsBarComponent } from "@hypercomb/shared/ui/controls-bar/controls-bar.component"
 import { MeshHeaderComponent } from "@hypercomb/shared/ui/mesh-header/mesh-header.component"
 import { PortalOverlayComponent } from "@hypercomb/shared/ui/portal/portal-overlay.component"
+import { SensitivityBarComponent } from "@hypercomb/shared/ui/sensitivity-bar/sensitivity-bar.component"
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, Header, MeshHeaderComponent, TileEditorComponent, ControlsBarComponent, PortalOverlayComponent],
+  imports: [RouterOutlet, Header, MeshHeaderComponent, TileEditorComponent, ControlsBarComponent, PortalOverlayComponent, SensitivityBarComponent],
   templateUrl: './app.html',
   styleUrl: './app.scss'
 })

@@ -87,6 +87,8 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
 
   #idleTimer: ReturnType<typeof setTimeout> | null = null
   #moveModeUnsub: (() => void) | null = null
+  #touchDraggingUnsub: (() => void) | null = null
+  #touchDragging = signal(false)
   readonly #IDLE_DELAY = 3000
 
   // ── computed ────────────────────────────────────────────
@@ -171,7 +173,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   readonly hasSelection = this.#hasSelection.asReadonly()
   readonly textOnly = this.#textOnly.asReadonly()
   readonly layoutPinned = this.#layoutPinned.asReadonly()
-  readonly visible = computed(() => !this.#idle() || this.#hovered())
+  readonly visible = computed(() => (!this.#idle() || this.#hovered()) && !this.#touchDragging())
   readonly roomValue = this.#roomValue.asReadonly()
   readonly roomOpen = this.#roomOpen.asReadonly()
 
@@ -216,6 +218,10 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
       this.#layoutPinned.set(mode === 'pinned')
     })
 
+    this.#touchDraggingUnsub = EffectBus.on<{ active: boolean }>('touch:dragging', ({ active }) => {
+      this.#touchDragging.set(active)
+    })
+
   }
 
   ngOnDestroy(): void {
@@ -228,6 +234,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     this.#selectionUnsub?.()
     this.#moveModeUnsub?.()
     this.#layoutModeUnsub?.()
+    this.#touchDraggingUnsub?.()
   }
 
   // ── navigation actions ────────────────────────────────

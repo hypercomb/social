@@ -1,145 +1,64 @@
 // diamondcoreprocessor.com/input/zoom/pinch-zoom.input.ts
-import type { InputGate } from '../input-gate.service.js'
+//
+// Pinch-zoom math delegate. Does NOT manage its own pointers — the
+// TouchGestureCoordinator calls pinchUpdate() with two touch points
+// when the gesture is classified as PINCH.
 
 type Point = { x: number; y: number }
 
 export class PinchZoomInput {
-  private enabled = false
-  private canvas: HTMLCanvasElement | null = null
-
-  private readonly source = 'pinch'
-
-  private zoom: {
+  #zoom: {
     zoomByFactor: (factor: number, pivot: Point) => void
+    zoomToFit?: () => void
   } | null = null
 
-  private gate: InputGate | null = null
+  #minScale = 0.05
 
-  private pointers = new Map<number, Point>()
-  private pinching = false
-  private lastDistance = 0
-
-  public attach = (
+  attach = (
     zoom: {
       zoomByFactor: (factor: number, pivot: Point) => void
+      zoomToFit?: () => void
     },
-    canvas: HTMLCanvasElement
+    minScale?: number,
   ): void => {
-    if (this.enabled) return
-
-    this.zoom = zoom
-    this.canvas = canvas
-    this.gate = window.ioc.get<InputGate>('@diamondcoreprocessor.com/InputGate') ?? null
-
-    // canvas has pointer-events:none so this must be global
-    // gating uses the canvas rect so behavior matches "over the container"
-    window.addEventListener('pointerdown', this.onPointerDown, { passive: false })
-    window.addEventListener('pointermove', this.onPointerMove, { passive: false })
-    window.addEventListener('pointerup', this.onPointerUp, { passive: false })
-    window.addEventListener('pointercancel', this.onPointerUp, { passive: false })
-
-    this.enabled = true
+    this.#zoom = zoom
+    if (minScale != null) this.#minScale = minScale
   }
 
-  public detach = (): void => {
-    if (!this.enabled) return
-
-    window.removeEventListener('pointerdown', this.onPointerDown)
-    window.removeEventListener('pointermove', this.onPointerMove)
-    window.removeEventListener('pointerup', this.onPointerUp)
-    window.removeEventListener('pointercancel', this.onPointerUp)
-
-    this.endPinch()
-
-    this.zoom = null
-    this.canvas = null
-    this.gate = null
-    this.enabled = false
+  detach = (): void => {
+    this.#zoom = null
   }
 
-  private onPointerDown = (event: PointerEvent): void => {
-    if (!this.zoom || !this.canvas) return
-    if (event.pointerType !== 'touch') return
+  /**
+   * Called by TouchGestureCoordinator on each move event during a pinch.
+   * Returns the new distance so the coordinator can track it.
+   */
+  pinchUpdate = (
+    p1: Point,
+    p2: Point,
+    lastDistance: number,
+    sensitivity: number,
+  ): { distance: number } => {
+    const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y)
+    if (dist <= 0 || lastDistance <= 0) return { distance: dist || lastDistance }
 
-    const rect = this.canvas.getBoundingClientRect()
-    if (!this.isInsideRect(event.clientX, event.clientY, rect)) return
-
-    this.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY })
-
-    // prevent the browser from treating this as a scroll/gesture start
-    event.preventDefault()
-    event.stopPropagation()
-  }
-
-  private onPointerMove = (event: PointerEvent): void => {
-    if (!this.zoom || !this.canvas) return
-    if (!this.pointers.has(event.pointerId)) return
-
-    this.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY })
-
-    if (this.pointers.size < 2) return
-
-    const [p1, p2] = Array.from(this.pointers.values()).slice(0, 2)
-
-    const dist = this.distance(p1, p2)
-    if (dist <= 0) return
-
-    if (!this.pinching) {
-      if (!this.gate?.claim(this.source)) return
-      this.pinching = true
-      this.lastDistance = dist
-
-      event.preventDefault()
-      event.stopPropagation()
-      return
-    }
-
-    // apply incremental factor so the gesture feels stable and never "creeps"
-    let factor = dist / this.lastDistance
-    if (!Number.isFinite(factor) || factor <= 0) return
+    let factor = dist / lastDistance
+    if (!Number.isFinite(factor) || factor <= 0) return { distance: lastDistance }
 
     // clamp per-move factor to avoid spikes on noisy touch hardware
     factor = Math.max(0.5, Math.min(2.0, factor))
 
+    // apply sensitivity multiplier
+    // sensitivity > 1 = more responsive, < 1 = less responsive
+    // We scale the deviation from 1.0 by the sensitivity
+    const deviation = factor - 1.0
+    factor = 1.0 + deviation * sensitivity
+
     const pivot = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 }
 
-    this.zoom.zoomByFactor(factor, pivot)
+    this.#zoom?.zoomByFactor(factor, pivot)
 
-    this.lastDistance = dist
-
-    event.preventDefault()
-    event.stopPropagation()
-  }
-
-  private onPointerUp = (event: PointerEvent): void => {
-    const wasTracked = this.pointers.delete(event.pointerId)
-
-    if (this.pinching && this.pointers.size < 2) {
-      this.endPinch()
-    }
-
-    if (wasTracked) {
-      event.preventDefault()
-      event.stopPropagation()
-    }
-  }
-
-  private endPinch = (): void => {
-    if (this.pinching) {
-      this.gate?.release(this.source)
-    }
-
-    this.pointers.clear()
-    this.pinching = false
-    this.lastDistance = 0
-  }
-
-  private isInsideRect = (x: number, y: number, rect: DOMRect): boolean => {
-    return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
-  }
-
-  private distance = (a: Point, b: Point): number => {
-    return Math.hypot(b.x - a.x, b.y - a.y)
+    return { distance: dist }
   }
 }
 

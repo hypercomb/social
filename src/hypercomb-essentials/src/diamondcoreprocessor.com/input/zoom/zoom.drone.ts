@@ -257,7 +257,12 @@ export class ZoomDrone extends Drone {
 
   private vp: ViewportPersistence | null = null
 
-  protected override deps = { mouseWheel: '@diamondcoreprocessor.com/MousewheelZoomInput' }
+  protected override deps = {
+    mouseWheel: '@diamondcoreprocessor.com/MousewheelZoomInput',
+    pinchZoom: '@diamondcoreprocessor.com/PinchZoomInput',
+    coordinator: '@diamondcoreprocessor.com/TouchGestureCoordinator',
+    touchPan: '@diamondcoreprocessor.com/TouchPanInput',
+  }
   protected override listens = ['render:host-ready']
 
   #effectsRegistered = false
@@ -274,6 +279,22 @@ export class ZoomDrone extends Drone {
 
       const mouseWheel = this.resolve<any>('mouseWheel')
       mouseWheel?.attach(this, this.canvas)
+
+      // attach pinch-zoom as a math delegate
+      const pinchZoom = this.resolve<any>('pinchZoom')
+      pinchZoom?.attach(this, this.minScale)
+
+      // attach touch gesture coordinator — owns all touch pointer events
+      // and delegates to pinch-zoom and touch-pan math delegates
+      const touchPan = this.resolve<any>('touchPan')
+      const coordinator = this.resolve<any>('coordinator')
+      if (coordinator && this.canvas) {
+        coordinator.attach(
+          this.canvas,
+          touchPan ?? { panUpdate: () => {} },
+          pinchZoom ?? { pinchUpdate: () => ({ distance: 0 }) },
+        )
+      }
 
       // resolve ViewportPersistence and subscribe to navigation restores
       this.vp = window.ioc.get<ViewportPersistence>('@diamondcoreprocessor.com/ViewportPersistence') ?? null
@@ -309,6 +330,12 @@ export class ZoomDrone extends Drone {
     const mouseWheel = this.resolve<any>('mouseWheel')
     mouseWheel?.detach()
 
+    const pinchZoom = this.resolve<any>('pinchZoom')
+    pinchZoom?.detach()
+
+    const coordinator = this.resolve<any>('coordinator')
+    coordinator?.detach()
+
     this.app = null
     this.renderContainer = null
     this.canvas = null
@@ -325,9 +352,78 @@ export class ZoomDrone extends Drone {
     const target = this.renderContainer
 
     const current = target.scale.x || 1
-    const next = this.clamp(current * factor)
+    const raw = current * factor
 
+    // if pinch-zoom pushes below minScale, trigger zoom-to-fit
+    if (raw < this.minScale) {
+      this.zoomToFit()
+      return
+    }
+
+    const next = this.clamp(raw)
     this.adjustZoom(target, next, pivotClient)
+  }
+
+  /**
+   * Zoom-to-fit: calculates the bounding box of all hex cells via the
+   * mesh adapter and animates the viewport to center and fit all content.
+   */
+  public zoomToFit = (): void => {
+    if (!this.renderContainer || !this.renderer) return
+
+    const target = this.renderContainer
+    const screen = this.renderer.screen
+
+    // try to get mesh bounds from the container's children
+    const bounds = target.getLocalBounds()
+    if (!bounds || bounds.width <= 0 || bounds.height <= 0) return
+
+    const padding = 40 // px padding around content
+    const availW = screen.width - padding * 2
+    const availH = screen.height - padding * 2
+
+    const scaleX = availW / bounds.width
+    const scaleY = availH / bounds.height
+    const fitScale = this.clamp(Math.min(scaleX, scaleY))
+
+    // center the bounding box in the viewport
+    const centerX = bounds.x + bounds.width / 2
+    const centerY = bounds.y + bounds.height / 2
+
+    // animate to target (200ms ease-out)
+    const startScale = target.scale.x
+    const startPosX = target.position.x
+    const startPosY = target.position.y
+
+    // target position: the center of bounds at fitScale should land at screen center
+    // stage is already centered at screen/2, so container offset = -center * scale
+    const targetPosX = -centerX * fitScale
+    const targetPosY = -centerY * fitScale
+
+    const duration = 200
+    const startTime = performance.now()
+
+    const animate = (now: number): void => {
+      const elapsed = now - startTime
+      const t = Math.min(1, elapsed / duration)
+      // ease-out cubic
+      const ease = 1 - Math.pow(1 - t, 3)
+
+      const s = startScale + (fitScale - startScale) * ease
+      const px = startPosX + (targetPosX - startPosX) * ease
+      const py = startPosY + (targetPosY - startPosY) * ease
+
+      target.scale.set(s)
+      target.position.set(px, py)
+
+      if (t < 1) {
+        requestAnimationFrame(animate)
+      } else {
+        this.#saveZoom(target)
+      }
+    }
+
+    requestAnimationFrame(animate)
   }
 
   // -------------------------------------------------
@@ -430,3 +526,12 @@ window.ioc.register('@diamondcoreprocessor.com/ViewportPersistence', _viewportPe
 
 const _zoom = new ZoomDrone()
 window.ioc.register('@diamondcoreprocessor.com/ZoomDrone', _zoom)
+
+// Co-locate touch input registrations here — plain classes get tree-shaken
+// when imported from separate modules, because esbuild considers
+// `new PlainClass()` pure/droppable. Importing them from ZoomDrone's module
+// (which extends Drone and is therefore preserved) ensures side-effects survive.
+import { PinchZoomInput } from './pinch-zoom.input.js'
+import { TouchGestureCoordinator } from '../touch/touch-gesture.coordinator.js'
+window.ioc.register('@diamondcoreprocessor.com/PinchZoomInput', new PinchZoomInput())
+window.ioc.register('@diamondcoreprocessor.com/TouchGestureCoordinator', new TouchGestureCoordinator())

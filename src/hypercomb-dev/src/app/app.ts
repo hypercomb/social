@@ -31,6 +31,7 @@ import '@hypercomb/essentials/diamondcoreprocessor.com/input/pivot-toggle'
 import { TileEditorComponent } from '@hypercomb/shared/ui/tile-editor/tile-editor.component'
 import { ControlsBarComponent, ShortcutSheetComponent, CommandPaletteComponent, ActivityLogComponent } from '@hypercomb/shared/ui';
 import { PortalOverlayComponent } from '@hypercomb/shared/ui/portal/portal-overlay.component'
+import { SensitivityBarComponent } from '@hypercomb/shared/ui/sensitivity-bar/sensitivity-bar.component'
 import { LayoutService } from '@hypercomb/essentials/diamondcoreprocessor.com/core/layout/layout.service'
 import { MoveDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/move/move.drone'
 import { DesktopMoveInput } from '@hypercomb/essentials/diamondcoreprocessor.com/input/move/desktop-move.input'
@@ -45,6 +46,8 @@ import { ClipboardService } from '@hypercomb/essentials/diamondcoreprocessor.com
 import { ClipboardWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/core/clipboard/clipboard.drone'
 import '@hypercomb/essentials/diamondcoreprocessor.com/bridge/claude-bridge.drone'
 import { HelpQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/ui/help.queen'
+import { PinchZoomInput } from '@hypercomb/essentials/diamondcoreprocessor.com/input/zoom/pinch-zoom.input'
+import { TouchGestureCoordinator } from '@hypercomb/essentials/diamondcoreprocessor.com/input/touch/touch-gesture.coordinator'
 
 const _deps = [
   AxialService,
@@ -80,13 +83,15 @@ const _deps = [
   ClipboardService,
   ClipboardWorker,
   HelpQueenBee,
+  PinchZoomInput,
+  TouchGestureCoordinator,
 ]
 
 void _deps
 
 @Component({
   selector: 'app-root',
-  imports: [ControlsBarComponent, MeshHeaderComponent, RouterOutlet, SearchBarComponent, TileEditorComponent, ShortcutSheetComponent, CommandPaletteComponent, PortalOverlayComponent, ActivityLogComponent],
+  imports: [ControlsBarComponent, MeshHeaderComponent, RouterOutlet, SearchBarComponent, TileEditorComponent, ShortcutSheetComponent, CommandPaletteComponent, PortalOverlayComponent, ActivityLogComponent, SensitivityBarComponent],
   styleUrls: ['./app.scss'] as any,
   templateUrl: './app.html'
 })

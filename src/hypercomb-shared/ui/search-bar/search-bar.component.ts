@@ -451,15 +451,26 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
       this.suppressed.set(false)
       this.syncSignalsFromDom()
     })
+
+    this.#touchDraggingUnsub = EffectBus.on<{ active: boolean }>('touch:dragging', ({ active }) => {
+      this.touchDragging.set(active)
+      if (active) {
+        this.input.nativeElement.blur()
+        this.suppressed.set(true)
+      }
+    })
   }
 
+  readonly touchDragging = signal(false)
   #prefillUnsub?: () => void
   #searchBarToggleUnsub?: () => void
+  #touchDraggingUnsub?: () => void
   readonly #onNavigate = (): void => { this.clear() }
 
   public ngOnDestroy(): void {
     this.#prefillUnsub?.()
     this.#searchBarToggleUnsub?.()
+    this.#touchDraggingUnsub?.()
     window.removeEventListener('navigate', this.#onNavigate)
     window.removeEventListener('popstate', this.#onNavigate)
   }

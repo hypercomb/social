@@ -69,6 +69,7 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
   // escape (via centralized cascade fallback)
   // -------------------------------------------------
   #unsubEscape: (() => void) | null = null
+  #unsubTouchDragging: (() => void) | null = null
 
   // -------------------------------------------------
   // lifecycle
@@ -79,12 +80,16 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     this.#unsubEscape = EffectBus.on('global:escape', () => {
       if (this.open()) this.close()
     })
+    this.#unsubTouchDragging = EffectBus.on<{ active: boolean }>('touch:dragging', ({ active }) => {
+      if (active && this.open()) this.close()
+    })
   }
 
   public ngOnDestroy(): void {
     window.removeEventListener('portal:open', this.onPortalOpen)
     window.removeEventListener('message', this.onMessage)
     this.#unsubEscape?.()
+    this.#unsubTouchDragging?.()
   }
 
   // -------------------------------------------------

@@ -94,6 +94,7 @@ export class TileOverlayDrone extends Drone {
   #editing = false
   #editCooldown = false
   #hasSelection = false
+  #touchDragging = false
 
   /** Registered descriptors from provider bees, keyed by name */
   #registeredDescriptors = new Map<string, OverlayActionDescriptor>()
@@ -193,6 +194,11 @@ export class TileOverlayDrone extends Drone {
           clearTimeout(this.#navigationGuardTimer)
           this.#navigationGuardTimer = null
         }
+      })
+
+      this.onEffect<{ active: boolean }>('touch:dragging', ({ active }) => {
+        this.#touchDragging = active
+        if (active && this.#overlay) this.#overlay.visible = false
       })
 
       this.onEffect<{ public: boolean }>('mesh:public-changed', (payload) => {
@@ -507,7 +513,7 @@ export class TileOverlayDrone extends Drone {
   #updateVisibility(): void {
     if (!this.#overlay) return
     const occupied = this.#currentIndex !== undefined && this.#currentIndex < this.#cellCount
-    this.#overlay.visible = occupied && !this.#editing && !this.#editCooldown && !this.#hasSelection
+    this.#overlay.visible = occupied && !this.#editing && !this.#editCooldown && !this.#hasSelection && !this.#touchDragging
   }
 
   #positionOverlay(q: number, r: number): void {

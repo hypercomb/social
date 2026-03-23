@@ -2,6 +2,7 @@
 import { Point } from 'pixi.js'
 import type { Axial } from '../hex-detector.js'
 import type { MoveDroneApi } from './move.drone.js'
+import type { InputGate } from '../input-gate.service.js'
 
 type MoveRefs = {
   canvas: HTMLCanvasElement
@@ -18,6 +19,7 @@ export class TouchMoveInput {
   #getMeshOffset: (() => { x: number; y: number }) | null = null
 
   #drone: MoveDroneApi | null = null
+  #gate: InputGate | null = null
 
   readonly #source = 'touch-move'
   readonly #holdMs = 300
@@ -34,6 +36,7 @@ export class TouchMoveInput {
     if (this.#enabled) return
 
     this.#drone = drone
+    this.#gate = window.ioc.get<InputGate>('@diamondcoreprocessor.com/InputGate') ?? null
     this.#canvas = refs.canvas
     this.#container = refs.container
     this.#renderer = refs.renderer
@@ -58,6 +61,7 @@ export class TouchMoveInput {
     this.#cancel()
 
     this.#drone = null
+    this.#gate = null
     this.#canvas = null
     this.#container = null
     this.#renderer = null
@@ -93,6 +97,13 @@ export class TouchMoveInput {
     this.#holdTimer = setTimeout(() => {
       this.#holdTimer = null
       if (!this.#downAxial || !this.#drone) return
+
+      // if the touch gesture coordinator already claimed the gate (e.g., pan started),
+      // don't start a move — the gate owner has priority
+      if (this.#gate?.active) {
+        this.#resetDrag()
+        return
+      }
 
       const ok = this.#drone.beginMove(this.#downAxial, this.#source)
       if (!ok) {
