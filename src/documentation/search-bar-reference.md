@@ -2,6 +2,8 @@
 
 The search bar is the primary command interface. All behaviors are pluggable via the `SearchBarBehavior` provider pattern — each behavior declares its own metadata (name, description, syntax, key, examples) so this reference can be generated from code.
 
+> For a quick-reference table of all operations, see [search-bar-operations.md](search-bar-operations.md).
+
 ## Architecture
 
 Behaviors are registered in the `#behaviors` array in `SearchBarComponent`. On each keydown, the search bar iterates the array — **first match wins**. If no behavior matches, the built-in default handlers run.
@@ -123,13 +125,65 @@ Open the Diamond Core Processor panel.
 
 ---
 
+### `..` Go Parent
+**File**: `go-parent.behavior.ts`
+**Key**: Enter
+**Syntax**: `..` | `../..` | `../../..`
+
+Navigate up one or more levels. Clamps to root — never errors if you overshoot.
+
+| Input | Key | Result |
+|-------|-----|--------|
+| `..` | Enter | Navigates up one level |
+| `../..` | Enter | Navigates up two levels |
+
+---
+
+### `#` Hash Marker
+**File**: `hash-marker.behavior.ts`
+**Key**: Enter
+**Syntax**: `seed#DroneName` | `seed#`
+
+Bind a drone marker to a seed. The drone name is stored in the seed's zero-signature properties file under `markers: string[]`. Typing `seed#` (trailing hash, no name) lists available drones.
+
+| Input | Key | Result |
+|-------|-----|--------|
+| `cigars#CigarJournal` | Enter | Binds CigarJournal marker to cigars seed |
+| `photos#` | Enter | Lists available drones for binding |
+
+---
+
+### `[items]/path` Cut-Paste
+**File**: `cut-paste.behavior.ts`
+**Key**: Enter
+**Syntax**: `[items]/destination` | `[items]/destination/`
+
+Copy seeds from the current directory to a destination path. Bracket-expanded items are copied into the destination. Trailing `/` navigates to the destination after pasting.
+
+| Input | Key | Result |
+|-------|-----|--------|
+| `[cigars,whiskey]/interests` | Enter | Copies cigars and whiskey into interests/ |
+| `[photos]/archive/` | Enter | Copies photos into archive/ and navigates there |
+
+---
+
+### `/command` Slash Commands (Queen Bees)
+
+Queen bees register `/command` handlers. Type `/paste`, `/help`, etc. to invoke them directly — bypasses the processor pulse cycle.
+
+---
+
 ## Behavior Priority Order
 
 The `#behaviors` array determines match priority for pluggable behaviors:
 
-1. **DeleteCellBehavior** — `!` prefix takes priority (destructive action should be intentional)
-2. **BatchCreateBehavior** — `[...]` bracket syntax
-3. **ShiftEnterNavigateBehavior** — `/` with Shift+Enter
+1. **GoParentBehavior** — `..` parent navigation (fastest escape hatch)
+2. **SlashCommandBehavior** — `/command` queen bee dispatch
+3. **DeleteCellBehavior** — `!` prefix (destructive action should be intentional)
+4. **CutPasteBehavior** — `[items]/path` bracket-path copy
+5. **HashMarkerBehavior** — `seed#Drone` binding
+6. **BatchCreateBehavior** — `[...]` bracket expansion
+7. **ShiftEnterNavigateBehavior** — `/` with Shift+Enter
 
 Built-in behaviors run after all pluggable behaviors have been checked.
 

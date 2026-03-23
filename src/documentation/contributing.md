@@ -45,8 +45,9 @@ the hive is layered. each ring depends only on the rings inside it.
 
 ```
 @hypercomb/core          zero dependencies. the framework.
-                         Bee, Drone, Worker, BeeState, EffectBus, IoC, ServiceToken,
-                         SignatureService, PayloadCanonical, DroneResolver,
+                         Bee, Drone, Worker, QueenBee, BeeState, EffectBus,
+                         IoC, ServiceToken, SignatureService, SignatureStore,
+                         PayloadCanonical, BeeResolver,
                          KeyChord, KeyBinding, KeyMapLayer.
                          build: tsup (ESM + CJS + .d.ts)
 
@@ -109,7 +110,8 @@ model. they must not be weakened or worked around:
 - documentation lives in `social/src/documentation/`. link to sibling files
   with plain relative names (e.g., `[glossary.md](glossary.md)`).
 - drone source files use the `.drone.ts` suffix
-  (e.g., `pixi-host.drone.ts`).
+  (e.g., `pixi-host.drone.ts`). queen bees use the `.queen.ts` suffix
+  (e.g., `help.queen.ts`).
 - key export files use the `.keys.ts` suffix. these are auto-generated
   and excluded from essentials artifacts.
 - essentials are organized by domain namespace:
@@ -122,6 +124,7 @@ model. they must not be weakened or worked around:
 - all documentation filenames are lowercase with hyphens.
 - links in docs must be readable -- no tracking parameters, no analytics.
 - drone classes end with `Drone` (e.g., `PixiHostDrone`, `ZoomDrone`).
+  queen bee classes end with `QueenBee` (e.g., `HelpQueenBee`).
 - ioc registration keys are plain strings matching the class name without
   the `Drone` suffix where appropriate (e.g., `'PixiHost'`, `'Settings'`).
 
@@ -233,6 +236,11 @@ pulse checks lifecycle state, evaluates the gate (`sense()` for drones,
 `act()` for workers) if relevant, then transitions state. there is no
 separate init phase. the intent is the lifecycle trigger.
 
+**queen bees** bypass this cycle entirely. they are invoked directly via
+`invoke(args)` when a user types `/command` in the search bar. their
+`pulse()` is a no-op. they transition to Active on first successful
+`invoke()` call.
+
 ---
 
 ## effect bus usage
@@ -279,7 +287,8 @@ before opening a pull request, verify all of these:
 ### drone lifecycle
 
 - [ ] new drones extend `Drone` and override `heartbeat` as an arrow async
-      method. workers extend `Worker` and override `act`.
+      method. workers extend `Worker` and override `act`. queen bees extend
+      `QueenBee` and override `execute`.
 - [ ] `sense()` is overridden if the drone should not respond to every grammar.
       `ready()` is overridden for workers.
 - [ ] dependencies are declared in `deps` and resolved via `this.resolve()`.

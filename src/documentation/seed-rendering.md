@@ -15,6 +15,7 @@ opfs://hypercomb.io/
   ├── Photos/           ← seed
   ├── __bees__/         ← reserved (not a seed)
   ├── __dependencies__/ ← reserved (not a seed)
+  ├── __history__/      ← reserved (not a seed)
   ├── __layers__/       ← reserved (not a seed)
   └── __resources__/    ← reserved (not a seed)
 ```

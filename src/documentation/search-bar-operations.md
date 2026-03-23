@@ -19,6 +19,9 @@
 | [go-parent](#go-parent) | `..` or `../..` | Enter | pluggable | done |
 | [delete-cell](#delete-cell) | `!name` or `![a,b]` | Enter | pluggable | done |
 | [batch-create](#batch-create) | `[a,b]` or `path/[a,b]` | Enter | pluggable | done |
+| [cut-paste](#cut-paste) | `[items]/destination` | Enter | pluggable | done |
+| [hash-marker](#hash-marker) | `seed#Drone` | Enter | pluggable | done |
+| [slash-command](#slash-command) | `/command args` | Enter | pluggable | done |
 
 ---
 
@@ -159,6 +162,51 @@ p/[a,b]/child  → creates "p/a/child" and "p/b/child"
 ```
 
 Behavior file &mdash; `batch-create.behavior.ts`
+
+---
+
+### cut-paste
+
+**Trigger** &mdash; Enter &ensp;|&ensp; **Type** &mdash; pluggable
+
+Bracket-path syntax: copy items from current directory to a destination. Trailing `/` navigates to the destination after pasting.
+
+```
+[cigars,whiskey]/interests   → copies cigars and whiskey into interests/
+[photos]/archive/            → copies photos into archive/ and navigates there
+```
+
+Behavior file &mdash; `cut-paste.behavior.ts`
+
+---
+
+### hash-marker
+
+**Trigger** &mdash; Enter &ensp;|&ensp; **Type** &mdash; pluggable
+
+Bind a drone marker to a seed via `#`. Markers are stored in the seed's zero-signature properties file.
+
+```
+cigars#CigarJournal   → binds CigarJournal marker to cigars
+photos#               → lists available drones
+```
+
+Behavior file &mdash; `hash-marker.behavior.ts`
+
+---
+
+### slash-command
+
+**Trigger** &mdash; Enter &ensp;|&ensp; **Type** &mdash; pluggable
+
+Invoke queen bees directly. Bypasses the processor pulse cycle.
+
+```
+/help                 → lists all available queen commands
+/paste interests      → invokes paste queen with args
+```
+
+Behavior file &mdash; `slash-command.behavior.ts`
 
 ---
 

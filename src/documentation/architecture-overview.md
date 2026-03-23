@@ -32,6 +32,7 @@ the two are the same system seen from different distances.
 | pheromone | effect -- a named signal on the `EffectBus` |
 | honeycomb cell | `AxialCoordinate` (q, r, s cube coords) rendered via pixi |
 | relay (stateless forwarder) | `EffectBus` (local) + `NostrMeshDrone` (network) |
+| queen bee | `QueenBee` — real-time `/command` dispatch, no pulse cycle |
 | swarm intelligence | `BeeResolver` finds relevant bees; each decides via `sense()` |
 | meadow log | opfs directory tree (origin private file system) |
 | dna (path capsule) | `PayloadCanonical` -- signed drone payload with sha-256 content address |
@@ -55,12 +56,13 @@ the two are the same system seen from different distances.
 
 ## drone lifecycle
 
-every bee in the hive is a `Bee`. bees come in two flavors:
+every bee in the hive is a `Bee`. bees come in three flavors:
 
 - **drone** — reactive bee. pulses every cycle. uses `sense()` + `heartbeat()`.
 - **worker** — bootstrap-once bee. acts once when `ready()` returns true, then goes dormant.
+- **queen bee** — real-time command bee. invoked directly via `/command` in the search bar, bypassing the processor pulse cycle. has no `sense()` or `heartbeat()` — uses `execute(args)` instead.
 
-both share the same lifecycle state machine:
+drones and workers share the same lifecycle state machine:
 
 ```
 Created --> Registered --> Active --> Disposed
@@ -177,6 +179,7 @@ opfs root
   __dependencies__/        namespace service bundles (by signature)
   __layers__/              layer installation manifests
   __resources__/           content-addressed blobs (images, JSON)
+  __history__/             history bags (sequenced operations per lineage)
 ```
 
 seeds are non-reserved subdirectories under the domain root. folders prefixed with `__` are reserved for the runtime. `Store` manages the opfs handles. `Lineage` tracks the current explorer path and domain context.
@@ -190,7 +193,7 @@ the hive is layered. each ring depends only on the rings inside it.
 ```
 @hypercomb/core          zero dependencies. the framework.
                          Drone, EffectBus, IoC, SignatureService,
-                         PayloadCanonical, DroneResolver, KeyMap types.
+                         PayloadCanonical, BeeResolver, KeyMap types.
 
 @hypercomb/essentials    pixi peer dep. the essential drones.
                          organized by domain namespace:
@@ -200,9 +203,10 @@ the hive is layered. each ring depends only on the rings inside it.
     editor/              TileEditorDrone, TileEditorService, ImageEditorService
     input/               PanningDrone, ZoomDrone, KeyMapService, TileSelectionDrone, InputGate
     nostr/               NostrMeshDrone, NostrSigner, AmbientPresenceDrone
-    pixi/                PixiHostDrone, ShowHoneycombWorker, TileOverlayDrone, TileSelectionDrone, Shaders
+    pixi/                PixiHostDrone, ShowHoneycombWorker, TileOverlayDrone, TileSelectionDrone, AvatarSwarmDrone, Shaders
     screen/              ScreenService, ScreenState
     settings/            SettingsDrone, ZoomSettings
+    ui/                  SlashCommandDrone, HelpQueenBee, CommandPaletteDrone
 
   revolucionstyle.com/
     journal/             CigarJournalDrone, JournalEntryDrone, JournalService
@@ -221,6 +225,7 @@ the hive is layered. each ring depends only on the rings inside it.
                          Store (opfs), Lineage (navigation),
                          Navigation, SecretStore, RoomStore,
                          LayerInstaller, BridgeProviders for angular DI.
+                         UI: SearchBar, ControlsBar, ActivityLog, PortalOverlay.
 
 hypercomb-web            the app. angular shell.
                          home page, setup, service worker.

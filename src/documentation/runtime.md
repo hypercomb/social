@@ -31,10 +31,11 @@ this is the spatial foundation. every higher-level navigation primitive ultimate
 
 ## the drone
 
-the bee is the unit of behavior. every runtime action is performed by a bee. bees come in two flavors:
+the bee is the unit of behavior. every runtime action is performed by a bee. bees come in three flavors:
 
 - **drone** — reactive bee. pulses every cycle. overrides `sense()` + `heartbeat()`.
 - **worker** — bootstrap-once bee. overrides `ready()` + `act()`. acts once, then goes dormant.
+- **queen bee** — real-time command bee. invoked via `/command` in the search bar. bypasses the processor pulse cycle. overrides `execute(args)`. class: `QueenBee` in `@hypercomb/core`.
 
 **lifecycle**: `Created → Registered → Active → Disposed`
 
@@ -95,6 +96,14 @@ registered effects in the current codebase:
 | `tile:navigate-back` | TileOverlayDrone | left-click navigate to parent layer |
 | `tile:saved` | TileEditorDrone | seed saved after tile editing |
 | `selection:changed` | TileSelectionDrone | tile selection set changed (leader, selected labels, relative axials) |
+| `clipboard:captured` | ClipboardWorker | seeds captured to clipboard |
+| `clipboard:paste-start` | ClipboardWorker | paste operation beginning |
+| `clipboard:paste-done` | ClipboardWorker | paste operation complete |
+| `clipboard:changed` | ClipboardService | clipboard contents mutated |
+| `seed:added` | ClipboardWorker | seed directory created during paste |
+| `seed:removed` | ClipboardWorker | seed directory removed during cut |
+| `swarm:peer-count` | AvatarSwarmDrone | live peer count changed |
+| `queen:help` | HelpQueenBee | help command output (list of available queen commands) |
 | `wheel:close` | any | close the flavor wheel overlay |
 
 ---
@@ -154,7 +163,8 @@ opfs root
   ├── __bees__/              ← compiled bee modules
   ├── __dependencies__/      ← namespace service bundles
   ├── __layers__/            ← layer installation state
-  └── __resources__/         ← content-addressed blobs (images, JSON)
+  ├── __resources__/         ← content-addressed blobs (images, JSON)
+  └── __history__/           ← history bags (sequenced operations per lineage)
 ```
 provides `setCurrent(segments)` to navigate the filesystem and `resetCurrent()` to return to root.
 
@@ -266,6 +276,14 @@ NostrMeshDrone
 
 AmbientPresenceDrone
   └──> emits: 'render:presence-heat'
+
+AvatarSwarmDrone
+  ├──> listens: 'render:host-ready', 'render:geometry-changed', 'mesh:ensure-started'
+  └──> emits: 'swarm:peer-count'
+
+ClipboardWorker
+  ├──> listens: 'controls:action', 'keymap:invoke'
+  └──> emits: 'clipboard:captured', 'clipboard:paste-done', 'seed:added', 'seed:removed'
 
 KeyMapService
   └──> listens: 'navigation:guard-start', 'navigation:guard-end'

@@ -47,10 +47,10 @@ This signature is computed client-side. No server. No registry. Any participant 
 
 ### 3. Store in the History Bag
 
-The signature names a folder in the root `history` directory. This folder is the **history bag** — a flat, ordered collection of every operation that has occurred at that lineage:
+The signature names a folder in the `__history__/` directory in OPFS. This folder is the **history bag** — a flat, ordered collection of every operation that has occurred at that lineage:
 
 ```
-history/
+__history__/
   7a3f...b812/          ← signature of the lineage
     00000001            ← first operation
     00000002            ← second operation
@@ -76,7 +76,7 @@ The history bag is not a log you append to and forget. It is a navigable structu
 Because each history bag is named by its lineage signature, all bags live as siblings in a flat directory:
 
 ```
-history/
+__history__/
   7a3f...b812/          ← /chemistry/organic
   2e91...c4a0/          ← /physics/quantum
   f1b8...39d7/          ← /music/composition
@@ -156,7 +156,7 @@ The history bag addresses this directly. Because every operation is recorded in 
 ## The Shape of Shared History
 
 ```
-history/
+__history__/
   ├── 7a3f...b812/              ← sign(/chemistry/organic)
   │     ├── 00000001            ← first operation
   │     ├── 00000002
