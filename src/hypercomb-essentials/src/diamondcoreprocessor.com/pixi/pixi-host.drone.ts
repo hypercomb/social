@@ -97,7 +97,8 @@ export class PixiHostWorker extends Worker {
     }
 
     center()
-    window.addEventListener('resize', center)
+    // defer center after resize so Pixi's ResizeObserver updates renderer.screen first
+    window.addEventListener('resize', () => requestAnimationFrame(center))
 
     // -------------------------------------------------
     // broadcast pixi resources to other drones via effect bus
