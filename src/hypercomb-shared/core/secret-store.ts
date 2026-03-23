@@ -3,6 +3,7 @@
 // On first access, captures any subdomain-derived secret from the URL.
 
 const KEY = 'hc:secret'
+const CLEARED_KEY = 'hc:secret-cleared'
 
 export class SecretStore extends EventTarget {
 
@@ -14,8 +15,8 @@ export class SecretStore extends EventTarget {
     super()
     this.#value = this.#read()
 
-    // if localStorage is empty, try to extract from the current subdomain
-    if (!this.#value) {
+    // if localStorage is empty and user hasn't explicitly cleared, try subdomain
+    if (!this.#value && !this.#wasCleared()) {
       const extracted = SecretStore.extractSubdomain()
       if (extracted) this.set(extracted)
     }
@@ -25,6 +26,10 @@ export class SecretStore extends EventTarget {
     const clean = (secret ?? '').trim()
     this.#value = clean
     this.#write(clean)
+    try {
+      if (clean) localStorage.removeItem(CLEARED_KEY)
+      else localStorage.setItem(CLEARED_KEY, '1')
+    } catch { /* ignore */ }
     this.dispatchEvent(new Event('change'))
   }
 
@@ -55,6 +60,10 @@ export class SecretStore extends EventTarget {
     // strip the last two segments (domain.tld)
     const sub = parts.slice(0, -2).join('.')
     return sub
+  }
+
+  #wasCleared = (): boolean => {
+    try { return localStorage.getItem(CLEARED_KEY) === '1' } catch { return false }
   }
 
   // ── localStorage ──────────────────────────────────────
