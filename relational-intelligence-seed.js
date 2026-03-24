@@ -1,0 +1,783 @@
+/**
+ * ============================================================================
+ * RELATIONAL INTELLIGENCE — Hypercomb Hierarchy Builder
+ * ============================================================================
+ *
+ * One-shot browser console script.
+ * Paste into the Hypercomb browser console and press Enter.
+ *
+ * Creates the entire Relational Intelligence platform hierarchy
+ * as OPFS seed folders under hypercomb.io/
+ *
+ * Author:  Dolphin & Jaime
+ * Date:    2026-03-24
+ * Version: 1.0.0
+ * ============================================================================
+ */
+
+(async () => {
+  'use strict'
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // HIERARCHY DEFINITION
+  // ──────────────────────────────────────────────────────────────────────────
+  //
+  // Nested object = folder tree.  Keys become folder names.
+  // A leaf value of `null` means "create this folder, no children."
+  // ──────────────────────────────────────────────────────────────────────────
+
+  const hierarchy = {
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // 1. VISION & FOUNDATION
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    'relational-intelligence': {
+
+      'vision': {
+        'mission-statement': null,
+        'core-values': null,
+        'guiding-principles': null,
+        'theory-of-change': null,
+        'impact-thesis': null,
+        'long-term-vision': null,
+      },
+
+      'philosophy': {
+        'what-is-relational-intelligence': null,
+        'intelligence-of-life': null,
+        'more-than-the-sum-of-parts': null,
+        'relational-field-theory': null,
+        'presence-and-groundedness': null,
+        'connection-and-fulfillment': null,
+        'wholeness-through-relationship': null,
+      },
+
+      'model': {
+        'core-framework': null,
+        'relational-pillars': {
+          'grounded': null,
+          'present': null,
+          'connected': null,
+          'fulfilled': null,
+        },
+        'relational-capacities': {
+          'attunement': null,
+          'repair': null,
+          'co-regulation': null,
+          'differentiation': null,
+          'secure-relating': null,
+          'emotional-fluency': null,
+          'relational-courage': null,
+        },
+        'developmental-stages': null,
+        'assessment-tools': null,
+        'research-base': null,
+      },
+
+      'intellectual-property': {
+        'frameworks': null,
+        'methodologies': null,
+        'assessments': null,
+        'curricula': null,
+        'trademarks': null,
+        'publications': null,
+      },
+    },
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // 2. DOLPHINS BUSINESS
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    'dolphins-business': {
+
+      'brand': {
+        'identity': null,
+        'voice-and-tone': null,
+        'visual-identity': null,
+        'brand-story': null,
+        'positioning': null,
+        'media-kit': null,
+      },
+
+      'revenue-streams': {
+        'coaching': {
+          'one-on-one': null,
+          'group-coaching': null,
+          'vip-intensives': null,
+        },
+        'consulting': {
+          'organizational': null,
+          'executive': null,
+          'team-dynamics': null,
+        },
+        'live-events': {
+          'keynote-speaking': null,
+          'workshops': null,
+          'retreats': null,
+          'immersions': null,
+        },
+        'online-programs': {
+          'evergreen-courses': null,
+          'cohort-programs': null,
+          'memberships': null,
+        },
+        'certifications': {
+          'ri-practitioner-level-1': null,
+          'ri-practitioner-level-2': null,
+          'ri-master-practitioner': null,
+          'ri-trainer': null,
+        },
+        'masterminds': {
+          'coaching-mastermind': null,
+          'business-mastermind': null,
+          'leadership-mastermind': null,
+        },
+        'licensing': null,
+        'publishing': null,
+      },
+
+      'operations': {
+        'team': null,
+        'systems-and-tools': null,
+        'finance': null,
+        'legal': null,
+        'project-management': null,
+        'sops': null,
+      },
+
+      'marketing': {
+        'content-strategy': null,
+        'social-media': null,
+        'email-marketing': null,
+        'podcast': null,
+        'youtube': null,
+        'seo-and-organic': null,
+        'paid-advertising': null,
+        'partnerships': null,
+        'pr-and-media': null,
+        'funnel-architecture': null,
+      },
+
+      'sales': {
+        'sales-process': null,
+        'discovery-calls': null,
+        'proposals': null,
+        'pricing-strategy': null,
+        'crm': null,
+        'pipeline': null,
+      },
+
+      'client-experience': {
+        'onboarding': null,
+        'delivery': null,
+        'support': null,
+        'feedback-loops': null,
+        'testimonials': null,
+        'case-studies': null,
+        'alumni-network': null,
+      },
+    },
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // 3. PROGRAMS & OFFERINGS
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    'programs': {
+
+      'live-experiences': {
+        'talks-and-keynotes': {
+          'signature-talk': null,
+          'corporate-keynote': null,
+          'conference-presentations': null,
+          'ted-style-talks': null,
+        },
+        'workshops': {
+          'half-day-workshops': null,
+          'full-day-workshops': null,
+          'multi-day-intensives': null,
+          'corporate-workshops': null,
+        },
+        'retreats': {
+          'weekend-retreats': null,
+          'week-long-immersions': null,
+          'couples-retreats': null,
+          'leadership-retreats': null,
+        },
+        'trainings': {
+          'facilitator-training': null,
+          'coach-training': null,
+          'practitioner-training': null,
+          'train-the-trainer': null,
+        },
+      },
+
+      'online-programs': {
+        'evergreen': {
+          'ri-foundations': null,
+          'relational-mastery': null,
+          'secure-attachment-blueprint': null,
+          'communication-mastery': null,
+          'emotional-fluency-course': null,
+        },
+        'cohort-based': {
+          'ri-certification-cohort': null,
+          'relational-leadership-cohort': null,
+          'couples-intensive-cohort': null,
+          'practitioner-mentorship': null,
+        },
+        'masterminds': {
+          'ri-coaches-mastermind': null,
+          'business-of-coaching-mastermind': null,
+          'thought-leader-mastermind': null,
+        },
+        'micro-learning': {
+          'daily-practices': null,
+          'relational-challenges': null,
+          'guided-reflections': null,
+          'skill-builders': null,
+        },
+      },
+
+      'certification-pathway': {
+        'level-1-foundations': {
+          'curriculum': null,
+          'assessments': null,
+          'practicum': null,
+          'supervision': null,
+        },
+        'level-2-practitioner': {
+          'curriculum': null,
+          'assessments': null,
+          'practicum': null,
+          'supervision': null,
+          'case-studies': null,
+        },
+        'level-3-master': {
+          'curriculum': null,
+          'thesis-project': null,
+          'advanced-practicum': null,
+          'peer-review': null,
+        },
+        'level-4-trainer': {
+          'teaching-methodology': null,
+          'program-design': null,
+          'mentorship': null,
+        },
+        'continuing-education': null,
+        'ethics-and-standards': null,
+      },
+    },
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // 4. TARGET MARKETS
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    'target-markets': {
+
+      'individuals': {
+        'personal-growth-seekers': null,
+        'people-in-transition': null,
+        'singles-seeking-connection': null,
+        'parents': null,
+        'men-in-growth': null,
+        'women-in-growth': null,
+      },
+
+      'couples': {
+        'couples-in-conflict': null,
+        'couples-seeking-depth': null,
+        'engaged-couples': null,
+        'new-parents': null,
+        'long-term-couples': null,
+      },
+
+      'professionals': {
+        'coaches': null,
+        'therapists': null,
+        'counselors': null,
+        'facilitators': null,
+        'consultants': null,
+        'hr-leaders': null,
+        'educators': null,
+        'healthcare-providers': null,
+      },
+
+      'organizations': {
+        'corporate-teams': null,
+        'startups': null,
+        'nonprofits': null,
+        'schools-and-universities': null,
+        'healthcare-systems': null,
+        'government-agencies': null,
+        'faith-communities': null,
+      },
+
+      'communities': {
+        'mens-groups': null,
+        'womens-circles': null,
+        'parenting-communities': null,
+        'recovery-communities': null,
+        'spiritual-communities': null,
+        'professional-networks': null,
+      },
+    },
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // 5. PLATFORM & TECHNOLOGY
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    'platform': {
+
+      'learning-environment': {
+        'course-delivery': null,
+        'live-session-hosting': null,
+        'community-forums': null,
+        'resource-library': null,
+        'progress-tracking': null,
+        'peer-matching': null,
+      },
+
+      'community-hub': {
+        'member-profiles': null,
+        'discussion-spaces': null,
+        'events-calendar': null,
+        'collaboration-tools': null,
+        'mentorship-matching': null,
+        'project-spaces': null,
+      },
+
+      'practitioner-tools': {
+        'client-management': null,
+        'session-notes': null,
+        'assessment-delivery': null,
+        'progress-dashboards': null,
+        'referral-network': null,
+        'supervision-tools': null,
+      },
+
+      'content-ecosystem': {
+        'blog': null,
+        'podcast-hub': null,
+        'video-library': null,
+        'research-repository': null,
+        'tool-library': null,
+        'template-marketplace': null,
+      },
+
+      'ai-and-automation': {
+        'relational-ai-companion': null,
+        'practice-prompts': null,
+        'journaling-assistant': null,
+        'matching-algorithms': null,
+        'analytics-and-insights': null,
+        'chatbot-support': null,
+      },
+
+      'integrations': {
+        'calendar-systems': null,
+        'payment-processing': null,
+        'email-platforms': null,
+        'video-conferencing': null,
+        'crm-connections': null,
+        'social-media-apis': null,
+      },
+    },
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // 6. COMMUNITY & CO-CREATION
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    'community': {
+
+      'roles': {
+        'founding-circle': null,
+        'advisory-board': null,
+        'core-contributors': null,
+        'certified-practitioners': null,
+        'community-champions': null,
+        'research-fellows': null,
+        'content-creators': null,
+        'event-hosts': null,
+        'ambassadors': null,
+      },
+
+      'contribution-paths': {
+        'content-creation': null,
+        'curriculum-development': null,
+        'research': null,
+        'mentorship': null,
+        'event-facilitation': null,
+        'translation': null,
+        'technology': null,
+        'outreach': null,
+        'fundraising': null,
+      },
+
+      'governance': {
+        'decision-making-process': null,
+        'community-agreements': null,
+        'conflict-resolution': null,
+        'feedback-mechanisms': null,
+        'transparency-practices': null,
+      },
+
+      'engagement': {
+        'onboarding-journey': null,
+        'gamification': null,
+        'recognition-system': null,
+        'milestone-celebrations': null,
+        'annual-gathering': null,
+      },
+    },
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // 7. COLLABORATORS — IDENTIFIED
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    'collaborators': {
+
+      'relational-science-core': {
+        'terry-real': null,
+        'john-and-julie-gottman': null,
+        'esther-perel': null,
+        'daniel-siegel': null,
+        'julie-menanno': null,
+      },
+
+      'neuroscience-bridge': {
+        'andrew-huberman': null,
+        'joe-dispenza': null,
+      },
+
+      'attachment-specialists': {
+        'sue-johnson': null,
+        'stan-tatkin': null,
+        'thais-gibson': null,
+        'diane-poole-heller': null,
+        'amir-levine': null,
+      },
+
+      'behavioral-communication': {
+        'vanessa-van-edwards': null,
+        'chase-hughes': null,
+        'vinh-giang': null,
+        'chris-voss': null,
+      },
+
+      'human-connection-practitioners': {
+        'mark-groves': null,
+        'connor-beaton': null,
+        'nicole-lepera': null,
+        'stephan-speaks': null,
+        'matthew-hussey': null,
+      },
+
+      'philosophy-and-wisdom': {
+        'alain-de-botton': null,
+        'jordan-peterson': null,
+        'robert-greene': null,
+        'yung-pueblo': null,
+        'robin-sharma': null,
+        'jay-shetty': null,
+      },
+
+      'mass-reach-distribution': {
+        'simon-sinek': null,
+        'steven-bartlett': null,
+        'tony-robbins': null,
+        'mel-robbins': null,
+        'brene-brown': null,
+        'lewis-howes': null,
+      },
+
+      'trauma-and-healing': {
+        'gabor-mate': null,
+        'peter-crone': null,
+        'john-delony': null,
+        'becky-kennedy': null,
+      },
+
+      'boundaries-and-relational-health': {
+        'nedra-glover-tawwab': null,
+        'ramani-durvasula': null,
+      },
+
+      'platform-and-business-building': {
+        'sabri-suby': null,
+        'dan-martell': null,
+        'alex-hormozi': null,
+        'chris-do': null,
+        'mark-manson': null,
+      },
+
+      'relational-intelligence-research': {
+        'adam-bandelli': null,
+        'orna-guralnik': null,
+      },
+    },
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // 8. GROWTH STRATEGY
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    'growth-strategy': {
+
+      'phase-1-foundation': {
+        'core-curriculum-build': null,
+        'brand-launch': null,
+        'signature-program': null,
+        'founding-cohort': null,
+        'initial-partnerships': null,
+        'content-engine': null,
+      },
+
+      'phase-2-traction': {
+        'certification-launch': null,
+        'evergreen-funnels': null,
+        'podcast-launch': null,
+        'speaking-circuit': null,
+        'strategic-collaborations': null,
+        'community-growth': null,
+      },
+
+      'phase-3-scale': {
+        'platform-build': null,
+        'licensee-network': null,
+        'corporate-division': null,
+        'international-expansion': null,
+        'research-partnerships': null,
+        'media-presence': null,
+      },
+
+      'phase-4-movement': {
+        'nonprofit-arm': null,
+        'policy-influence': null,
+        'academic-integration': null,
+        'global-practitioner-network': null,
+        'annual-conference': null,
+        'publishing-house': null,
+      },
+
+      'metrics': {
+        'practitioners-certified': null,
+        'lives-impacted': null,
+        'organizations-served': null,
+        'research-published': null,
+        'revenue-milestones': null,
+        'community-size': null,
+      },
+    },
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // 9. CONTENT & MEDIA
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    'content-and-media': {
+
+      'podcast': {
+        'the-relational-intelligence-podcast': null,
+        'episode-archive': null,
+        'guest-pipeline': null,
+        'production': null,
+      },
+
+      'writing': {
+        'book-manuscript': null,
+        'articles-and-essays': null,
+        'newsletter': null,
+        'white-papers': null,
+        'case-studies': null,
+      },
+
+      'video': {
+        'youtube-channel': null,
+        'course-videos': null,
+        'social-clips': null,
+        'documentary-project': null,
+        'live-streams': null,
+      },
+
+      'social-media': {
+        'instagram': null,
+        'linkedin': null,
+        'tiktok': null,
+        'twitter-x': null,
+        'facebook': null,
+        'threads': null,
+      },
+
+      'resources': {
+        'worksheets': null,
+        'guided-practices': null,
+        'assessment-tools': null,
+        'infographics': null,
+        'templates': null,
+        'reading-lists': null,
+      },
+    },
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // 10. RESEARCH & EVIDENCE
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    'research': {
+
+      'foundational-science': {
+        'attachment-theory': null,
+        'interpersonal-neurobiology': null,
+        'polyvagal-theory': null,
+        'relational-psychoanalysis': null,
+        'positive-psychology': null,
+        'complexity-science': null,
+      },
+
+      'applied-research': {
+        'program-outcomes': null,
+        'practitioner-effectiveness': null,
+        'organizational-impact': null,
+        'longitudinal-studies': null,
+      },
+
+      'academic-partnerships': {
+        'university-collaborations': null,
+        'research-grants': null,
+        'peer-reviewed-publications': null,
+        'doctoral-projects': null,
+      },
+    },
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // 11. IMPACT & LEGACY
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    'impact': {
+
+      'humanity-outcomes': {
+        'more-grounded-humans': null,
+        'more-present-humans': null,
+        'more-connected-humans': null,
+        'more-fulfilled-humans': null,
+      },
+
+      'systemic-change': {
+        'relational-education-in-schools': null,
+        'relational-intelligence-in-workplaces': null,
+        'relational-health-in-healthcare': null,
+        'relational-literacy-in-media': null,
+        'relational-wisdom-in-policy': null,
+      },
+
+      'legacy-projects': {
+        'relational-intelligence-institute': null,
+        'ri-foundation': null,
+        'open-source-curricula': null,
+        'global-practitioner-guild': null,
+        'intergenerational-research': null,
+      },
+    },
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // EXECUTION ENGINE
+  // ──────────────────────────────────────────────────────────────────────────
+
+  let created = 0
+  let skipped = 0
+  const errors = []
+  const topSeeds = new Set()
+
+  /**
+   * Recursively create folders from a hierarchy object.
+   *
+   * @param {FileSystemDirectoryHandle} parent  — parent OPFS directory
+   * @param {object}                    tree    — nested object describing children
+   * @param {string}                    path    — breadcrumb for logging
+   * @param {number}                    depth   — current depth (0 = top-level seeds)
+   */
+  async function buildTree(parent, tree, path = '', depth = 0) {
+    for (const [name, children] of Object.entries(tree)) {
+      const fullPath = path ? `${path}/${name}` : name
+
+      try {
+        const dir = await parent.getDirectoryHandle(name, { create: true })
+        created++
+
+        if (depth === 0) topSeeds.add(name)
+
+        // recurse into children
+        if (children && typeof children === 'object') {
+          await buildTree(dir, children, fullPath, depth + 1)
+        }
+      } catch (err) {
+        errors.push({ path: fullPath, error: err.message })
+        skipped++
+      }
+    }
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // MAIN
+  // ──────────────────────────────────────────────────────────────────────────
+
+  console.log('%c🐝 Relational Intelligence — Hypercomb Seed Builder', 'font-size:16px;font-weight:bold;color:#9b59b6')
+  console.log('Starting hierarchy creation...\n')
+
+  const startTime = performance.now()
+
+  // 1. Get OPFS root
+  const opfsRoot = await navigator.storage.getDirectory()
+
+  // 2. Navigate to hypercomb.io domain root
+  let domainRoot
+  try {
+    domainRoot = await opfsRoot.getDirectoryHandle('hypercomb.io', { create: true })
+  } catch (err) {
+    console.error('❌ Could not access hypercomb.io root:', err)
+    return
+  }
+
+  // 3. Build the entire tree
+  await buildTree(domainRoot, hierarchy)
+
+  // 4. Emit seed:added effects for all top-level seeds
+  const hasEffectBus = typeof EffectBus !== 'undefined'
+  const hasHypercomb = typeof hypercomb !== 'undefined'
+
+  if (hasEffectBus) {
+    for (const seed of topSeeds) {
+      EffectBus.emit('seed:added', { seed })
+    }
+    console.log(`📡 Emitted seed:added for ${topSeeds.size} top-level seeds`)
+  } else {
+    console.log('⚠️  EffectBus not found — seeds created in OPFS but effects not emitted.')
+    console.log('   Refresh the page or navigate to see the new seeds.')
+  }
+
+  // 5. Trigger processor
+  if (hasHypercomb) {
+    try {
+      await new hypercomb().act()
+      console.log('⚡ Processor triggered')
+    } catch {
+      console.log('⚠️  Processor trigger skipped (non-critical)')
+    }
+  }
+
+  // 6. Try to trigger UI refresh
+  try {
+    window.dispatchEvent(new Event('navigate'))
+  } catch { /* ignore */ }
+
+  const elapsed = ((performance.now() - startTime) / 1000).toFixed(2)
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // REPORT
+  // ──────────────────────────────────────────────────────────────────────────
+
+  console.log('\n%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'color:#9b59b6')
+  console.log(`%c✅ COMPLETE`, 'font-size:14px;font-weight:bold;color:#27ae60')
+  console.log(`   Folders created:  ${created}`)
+  console.log(`   Top-level seeds:  ${topSeeds.size}`)
+  console.log(`   Errors:           ${errors.length}`)
+  console.log(`   Time:             ${elapsed}s`)
+  console.log('%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'color:#9b59b6')
+
+  if (errors.length > 0) {
+    console.warn('Errors:', errors)
+  }
+
+  console.log('\nTop-level seeds:', [...topSeeds].join(', '))
+  console.log('\n🐝 The Relational Intelligence hive is ready.\n')
+
+  return { created, skipped, errors, topSeeds: [...topSeeds] }
+})()
