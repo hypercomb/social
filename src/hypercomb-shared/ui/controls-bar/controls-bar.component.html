@@ -37,9 +37,9 @@
   }
 </div>
 
-@if (tags().length > 0) {
-  <div class="tag-float">
-    <span class="tag-lead-icon hci">X</span>
+@if (tags().length > 0 || globalOnlyTags().length > 0) {
+  <div class="tag-float" [class.tag-expanded]="tagPanelOpen()">
+    <span class="tag-lead-icon hci" (click)="toggleTagPanel()">X</span>
     @for (tag of tags(); track tag.name) {
       <button class="tag-crumb"
               [class.tag-active]="isTagFilterActive(tag.name)"
@@ -47,6 +47,13 @@
               [style.color]="tagColor(tag.name)"
               [style.borderColor]="tagColor(tag.name)"
               (click)="toggleTagFilter(tag.name)">{{ tag.name }}</button>
+    }
+    @if (globalOnlyTags().length > 0 && tags().length > 0) {
+      <span class="tag-separator"></span>
+    }
+    @for (name of globalOnlyTags(); track name) {
+      <button class="tag-crumb tag-global"
+              (click)="toggleTagFilter(name)">{{ name }}</button>
     }
   </div>
 }

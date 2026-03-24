@@ -86,9 +86,10 @@
   font-size: 0.5rem;
   white-space: nowrap;
   padding: 0.05rem 0.45rem;
-  border: 0.5px solid;
+  border: 0.5px solid rgba(200, 200, 200, 0.5);
   border-radius: 1px;
   background: none;
+  color: rgba(200, 200, 200, 0.8);
   cursor: pointer;
   font-family: inherit;
   transition: opacity 150ms ease;
@@ -102,20 +103,29 @@
   z-index: 59999;
 
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 0.25rem;
   max-width: 18rem;
+  overflow: hidden;
 
   font-family: var(--hc-mono);
   pointer-events: auto;
   transition: opacity 200ms ease;
+
+  &.tag-expanded {
+    flex-wrap: wrap;
+    overflow: visible;
+  }
 }
 
 .tag-lead-icon {
-  font-size: 0.925rem;
+  font-size: 0.786rem;
   color: rgba(245, 245, 245, 0.3);
   line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding-right: 0.2rem;
 }
 
 .tag-active {
@@ -130,6 +140,19 @@
 
 .tag-crumb:not(.tag-active):not(.tag-hovered) {
   opacity: 0.6;
+}
+
+.tag-global {
+  opacity: 0.25 !important;
+  border-style: dashed !important;
+}
+
+.tag-separator {
+  width: 1px;
+  height: 0.7rem;
+  background: rgba(255, 255, 255, 0.15);
+  margin: 0 0.15rem;
+  flex-shrink: 0;
 }
 
 // ── pill ──────────────────────────────────────────────────
@@ -611,7 +634,7 @@
     padding: 0.08rem 0.55rem;
   }
 
-  .tag-lead-icon { font-size: 1.2rem; }
+  .tag-lead-icon { font-size: 1.36rem; }
   .room-shell { height: 2.4rem; }
   .room-input { width: 8rem; }
   .room-display { font-size: 0.8rem; }

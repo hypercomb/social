@@ -8,6 +8,7 @@ import type { ScriptPreloader } from '../../core/script-preloader'
 import type { SeedSuggestionProvider } from '../../core/seed-suggestion.provider'
 import type { CompletionUtility, CompletionContext } from '@hypercomb/shared/core/completion-utility'
 import { fromRuntime } from '../../core/from-runtime'
+import { readTagProps, writeTagProps, persistTagOps, type TagOp } from '../../core/tag-ops'
 import { EffectBus, hypercomb } from '@hypercomb/core'
 import type { CommandLineBehavior, CommandLineBehaviorMeta, CommandLineOperation } from './command-line-behavior'
 import { ShiftEnterNavigateBehavior } from './shift-enter-navigate.behavior'
@@ -315,6 +316,21 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     if (!v.trim()) return { active: false }
 
+    // plain colon tag syntax: label:tagPrefix or ~label:tagPrefix
+    // must not be bracket syntax (label:[...) and colon must be present
+    const colonIdx = v.indexOf(':')
+    if (colonIdx > 0 && !v.includes('[')) {
+      const raw = v.slice(colonIdx + 1)
+      return {
+        active: true,
+        mode: 'tag',
+        head: v.slice(0, colonIdx + 1),
+        raw,
+        normalized: raw.toLowerCase().trim(),
+        style: 'space' as const
+      }
+    }
+
     return {
       active: true,
       mode: 'action',
@@ -337,6 +353,14 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (ctx.mode === 'filter') return []
     if (ctx.mode === 'slash') return this.#slashMatches().map(m => m.command.name)
 
+    // plain colon tag mode: suggest tag names from registry
+    if (ctx.mode === 'tag') {
+      const registry = get('@hypercomb.social/TagRegistry') as { names: string[] } | undefined
+      const allTags = registry?.names ?? []
+      if (!ctx.normalized) return allTags
+      return allTags.filter(n => n.toLowerCase().startsWith(ctx.normalized))
+    }
+
     // select mode: suggestions depend on the current phase
     if (ctx.mode === 'select') {
       const phase = this.#selectPhase()
@@ -352,7 +376,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
       // operation phase: suggest operation keywords with / prefix
       if (phase === 'operation') {
-        const ops = ['/cut', '/copy']
+        const ops = ['/cut', '/copy', '/keyword']
         if (!ctx.normalized) return ops
         return ops.filter(o => o.startsWith('/' + ctx.normalized) || o.slice(1).startsWith(ctx.normalized))
       }
@@ -968,6 +992,18 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       return
     }
 
+    if (op === 'keyword' || op === 'kw' || op === 'tag') {
+      const afterOp = afterBracket.slice(opMatch![0].length).trim()
+      if (afterOp) {
+        const queen = get('@diamondcoreprocessor.com/KeywordQueenBee') as any
+        if (queen?.invoke) {
+          await queen.invoke(afterOp)
+        }
+      }
+      this.#collapseToSelect(labels)
+      return
+    }
+
     // No operation — just /select[tiles] → select and show in bar
     this.#collapseToSelect(labels)
   }
@@ -1134,49 +1170,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   }
 
   /** Persist tag add/remove operations to OPFS + master registry. */
-  async #persistTagOps(ops: { label: string; tag: string; color?: string; remove: boolean }[]): Promise<void> {
+  async #persistTagOps(ops: TagOp[]): Promise<void> {
     const dir = await this.lineage.explorerDir()
-    const registry = get('@hypercomb.social/TagRegistry') as
-      { add: (n: string, c?: string) => Promise<void>; remove: (n: string) => Promise<void>; ensureLoaded: () => Promise<void> } | undefined
-
     if (!dir) return
-
-    const updates: { seed: string; tag: string; color?: string }[] = []
-
-    for (const op of ops) {
-      try {
-        const seedDir = await dir.getDirectoryHandle(op.label, { create: true })
-        const props = await readTagProps(seedDir)
-        const tags: string[] = Array.isArray(props['tags']) ? props['tags'] : []
-
-        if (op.remove) {
-          const idx = tags.indexOf(op.tag)
-          if (idx >= 0) {
-            tags.splice(idx, 1)
-            await writeTagProps(seedDir, { tags })
-          }
-        } else {
-          if (!tags.includes(op.tag)) {
-            tags.push(op.tag)
-            await writeTagProps(seedDir, { tags })
-          }
-        }
-        updates.push({ seed: op.label, tag: op.tag, color: op.color })
-      } catch { /* seed dir access failed — skip */ }
-    }
-
-    // Update master tag list (content-addressed resource)
-    if (registry) {
-      for (const op of ops) {
-        if (!op.remove) {
-          await registry.add(op.tag, op.color)
-        }
-      }
-    }
-
-    if (updates.length > 0) {
-      EffectBus.emit('tags:changed', { updates })
-    }
+    await persistTagOps(ops, dir)
   }
 
   /** After an operation completes, collapse the command line to /select[remaining-tiles] */
@@ -1313,6 +1310,19 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const list = this.suggestions()
     const best = forced ?? list[this.activeIndex()] ?? list[0]
     if (!best) return
+
+    // tag mode: persist tag, then leave label: in input for chaining
+    if (ctx.mode === 'tag') {
+      const full = ctx.head + best
+      const head = ctx.head // e.g. "echo:"
+      void this.#extractAndPersistTags(full).then(() => {
+        this.input.nativeElement.value = head
+        this.suppressed.set(false)
+        this.placeCaretAtEnd()
+        this.syncSignalsFromDom()
+      })
+      return
+    }
 
     // slash mode: fill command name (no auto brackets or trailing chars)
     if (ctx.mode === 'slash') {
@@ -1921,25 +1931,4 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   }
 }
 
-// ── 0000 properties helpers (lightweight inline, avoids import from essentials) ──
-
-const TAG_PROPS_FILE = '0000'
-
-async function readTagProps(seedDir: FileSystemDirectoryHandle): Promise<Record<string, unknown>> {
-  try {
-    const fh = await seedDir.getFileHandle(TAG_PROPS_FILE)
-    const file = await fh.getFile()
-    return JSON.parse(await file.text())
-  } catch {
-    return {}
-  }
-}
-
-async function writeTagProps(seedDir: FileSystemDirectoryHandle, updates: Record<string, unknown>): Promise<void> {
-  const existing = await readTagProps(seedDir)
-  const merged = { ...existing, ...updates }
-  const fh = await seedDir.getFileHandle(TAG_PROPS_FILE, { create: true })
-  const writable = await fh.createWritable()
-  await writable.write(JSON.stringify(merged))
-  await writable.close()
-}
+// Tag props helpers now imported from @hypercomb/shared/core/tag-ops

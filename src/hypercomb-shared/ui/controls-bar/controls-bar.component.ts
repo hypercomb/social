@@ -189,6 +189,16 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   readonly tags = this.#tags.asReadonly()
   readonly tagPanelOpen = this.#tagPanelOpen.asReadonly()
 
+  /** Global tags not present on the current page. */
+  readonly globalOnlyTags = computed(() => {
+    const pageTagNames = new Set(this.#tags().map(t => t.name))
+    const registry = get('@hypercomb.social/TagRegistry') as { names: string[] } | undefined
+    const allNames = registry?.names ?? []
+    return allNames
+      .filter(n => !pageTagNames.has(n))
+      .sort((a, b) => a.localeCompare(b))
+  })
+
   readonly toggleTagPanel = (): void => {
     this.#tagPanelOpen.update(v => !v)
   }

@@ -76,7 +76,7 @@ export class ShowCellDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'seed:place-at', 'seed:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'seed:place-at', 'seed:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -166,6 +166,11 @@ export class ShowCellDrone extends Drone {
   #lastTriggeredRepublishAtMs = new Map<string, number>()
 
   private filterKeyword = ''
+  private filterTags = new Set<string>()
+  /** Flat list of {label, dir} from cross-page tag scan. null = normal mode. */
+  #tagFlattenResults: { label: string; dir: FileSystemDirectoryHandle }[] | null = null
+  /** Saved lineage segments before entering tag filter — restored when filter clears. */
+  #preFilterSegments: string[] | null = null
   private moveNames: string[] | null = null
   private suppressCellCount = false
   #layoutMode: 'dense' | 'pinned' = 'dense'
@@ -819,6 +824,39 @@ export class ShowCellDrone extends Drone {
       return
     }
 
+    // ── tag flatten override ──────────────────────────────
+    // When tag filter is active, use pre-scanned cross-page results instead of explorer
+    if (this.#tagFlattenResults && this.#tagFlattenResults.length > 0) {
+      const flatResults = this.#tagFlattenResults
+      const seedNames = flatResults.map(r => r.label)
+      const flatSeedSet = new Set(seedNames)
+
+      const axial = this.resolve<any>('axial')
+      if (!axial) { this.rendering = false; return }
+
+      const maxCells = Math.min(seedNames.length, typeof axial.items.size === 'number' ? axial.items.size : seedNames.length)
+      const cells = this.buildCellsFromAxial(axial, seedNames, maxCells, flatSeedSet)
+      if (cells.length === 0) { this.clearMesh(); this.rendering = false; return }
+
+      // load images from the first matching dir (best-effort)
+      await this.loadCellImages(cells, dir!)
+
+      this.cachedSeedNames = seedNames
+      this.cachedLocalSeedSet = flatSeedSet
+      this.cachedBranchSet = new Set()
+      this.renderedCellsKey = 'tag-flatten:' + [...this.filterTags].sort().join(',')
+      this.renderedLocationKey = locationKey
+
+      this.renderedCells.clear()
+      for (const cell of cells) this.renderedCells.set(cell.label, cell)
+      await this.applyGeometry(cells)
+
+      this.#emitRenderTags(cells)
+      this.emitEffect('render:cell-count', { count: cells.length, labels: seedNames })
+      this.rendering = false
+      return
+    }
+
     // note: seed collection — always fresh, never cached
     const localSeeds = await this.listSeedFolders(dir)
     if (isStale()) {
@@ -1192,6 +1230,47 @@ export class ShowCellDrone extends Drone {
     this.emitEffect('render:tags', { tags })
   }
 
+  /** Walk entire OPFS tree, find tiles matching any active filter tag, store flat results. */
+  async #scanTagsAcrossPages(): Promise<void> {
+    const store = get('@hypercomb.social/Store') as { hypercombRoot: FileSystemDirectoryHandle } | undefined
+    const root: FileSystemDirectoryHandle | undefined = store?.hypercombRoot
+    if (!root) return
+
+    const tags = this.filterTags
+    const results: { label: string; dir: FileSystemDirectoryHandle }[] = []
+
+    const walk = async (dir: FileSystemDirectoryHandle): Promise<void> => {
+      for await (const [name, handle] of dir.entries()) {
+        // abort if filter was cleared while scanning
+        if (this.filterTags.size === 0) return
+        if (handle.kind !== 'directory' || name.startsWith('__')) continue
+        const seedDir = handle as FileSystemDirectoryHandle
+        // check if this directory has a 0000 properties file with matching tags
+        try {
+          const fh = await seedDir.getFileHandle('0000')
+          const file = await fh.getFile()
+          const props = JSON.parse(await file.text())
+          const tileTags: string[] = Array.isArray(props['tags']) ? props['tags'] : []
+          if (tileTags.some(t => tags.has(t))) {
+            results.push({ label: name, dir: seedDir })
+            this.seedTagsCache.set(name, tileTags)
+          }
+        } catch { /* no 0000 = not a tagged tile, or parse error */ }
+        // recurse into children (tiles can contain sub-tiles)
+        await walk(seedDir)
+      }
+    }
+
+    await walk(root)
+
+    // Only apply if filter is still active (might have been cleared during async walk)
+    if (this.filterTags.size > 0) {
+      this.#tagFlattenResults = results
+      this.renderedCellsKey = ''
+      this.requestRender()
+    }
+  }
+
   // 1–3ms micro-pause to avoid main-thread blocking (legacy JsonHiveStreamLoader pattern)
   private readonly microDelay = (): Promise<void> =>
     new Promise(r => setTimeout(r, 1 + Math.random() * 2))
@@ -1246,6 +1325,30 @@ export class ShowCellDrone extends Drone {
     this.onEffect<{ keyword: string }>('search:filter', ({ keyword }) => {
       this.filterKeyword = String(keyword ?? '').trim().toLowerCase()
       this.requestRender()
+    })
+
+    // tags:filter effect — cross-page tag flatten
+    this.onEffect<{ active: string[] }>('tags:filter', ({ active }) => {
+      const wasFiltering = this.filterTags.size > 0
+      this.filterTags = new Set(active)
+      if (this.filterTags.size > 0) {
+        // Save location before entering filter mode
+        if (!wasFiltering) {
+          const lineage = this.resolve<any>('lineage')
+          this.#preFilterSegments = lineage?.explorerSegments?.() ? [...lineage.explorerSegments()] : []
+        }
+        void this.#scanTagsAcrossPages()
+      } else {
+        this.#tagFlattenResults = null
+        this.renderedCellsKey = ''
+        // Restore previous location
+        if (this.#preFilterSegments !== null) {
+          const nav = get('@hypercomb.social/Navigation') as { goRaw?: (segs: string[]) => void } | undefined
+          nav?.goRaw?.(this.#preFilterSegments)
+          this.#preFilterSegments = null
+        }
+        this.requestRender()
+      }
     })
 
     // move:preview — reordered names during drag (fast path avoids full OPFS re-read)

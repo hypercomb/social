@@ -71,9 +71,25 @@ class ClearProvider implements SlashCommandProvider {
   }
 }
 
+class KeywordProvider implements SlashCommandProvider {
+  readonly name = 'keyword-provider'
+  readonly priority = 100
+  readonly commands: SlashCommand[] = [
+    { name: 'keyword', description: 'Add or remove keywords (tags) on selected tiles', aliases: ['kw', 'tag'] }
+  ]
+
+  async execute(_commandName: string, args: string): Promise<void> {
+    const queen = get('@diamondcoreprocessor.com/KeywordQueenBee') as any
+    if (queen?.invoke) {
+      await queen.invoke(args)
+    }
+  }
+}
+
 // ── registration ────────────────────────────────────────
 
 const _slashCommands = new SlashCommandDrone()
 _slashCommands.addProvider(new HelpProvider())
 _slashCommands.addProvider(new ClearProvider())
+_slashCommands.addProvider(new KeywordProvider())
 window.ioc.register('@diamondcoreprocessor.com/SlashCommandDrone', _slashCommands)
