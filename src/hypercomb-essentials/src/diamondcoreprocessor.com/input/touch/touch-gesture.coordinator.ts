@@ -234,7 +234,6 @@ export class TouchGestureCoordinator {
 
       this.#state = GestureState.PAN
       this.#panLast = { ...entry.current }
-      this.#gestureWasActive = true
       this.#emitDragging(true)
     }
   }
@@ -276,7 +275,6 @@ export class TouchGestureCoordinator {
         return
       }
       this.#state = GestureState.SENSITIVITY_SWIPE
-      this.#gestureWasActive = true
       this.#swipeStartY = (a.current.y + b.current.y) / 2
       this.#swipeStartSensitivity = this.#sensitivity
       this.#emitDragging(true)
@@ -292,7 +290,6 @@ export class TouchGestureCoordinator {
       }
       this.#state = GestureState.PINCH
       this.#pinchLastDistance = curDist
-      this.#gestureWasActive = true
       this.#emitDragging(true)
       return
     }

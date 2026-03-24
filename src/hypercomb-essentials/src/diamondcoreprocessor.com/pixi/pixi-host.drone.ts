@@ -74,7 +74,10 @@ export class PixiHostWorker extends Worker {
     })
 
     app.stage.scale.set(1.8, 1.8)
+    app.stage.interactiveChildren = false
     host.appendChild(app.canvas)
+    app.canvas.style.pointerEvents = 'auto'
+    app.canvas.style.touchAction   = 'none'
 
     // -------------------------------------------------
     // root render container

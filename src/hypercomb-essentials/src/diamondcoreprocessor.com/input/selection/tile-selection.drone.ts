@@ -153,6 +153,7 @@ class TileSelectionDrone extends Drone {
   // ── pointer handlers ────────────────────────────────────────
 
   #onPointerDown = (e: PointerEvent): void => {
+    if (e.pointerType === 'touch') return
     if (this.#navigationBlocked) return
     if (this.#dragActive || this.#reorderDragActive || this.#pendingDrag) return
     if (!this.#renderContainer || !this.#renderer || !this.#canvas) return
