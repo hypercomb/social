@@ -4,7 +4,8 @@
 
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'fs'
 import { dirname, join, resolve } from 'path'
-import { execSync } from 'child_process'
+import { execSync, spawn } from 'child_process'
+import { createConnection } from 'net'
 import { fileURLToPath } from 'url'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -105,7 +106,7 @@ function hasModuleOutput(): boolean {
 
 // --- main ---
 
-function main() {
+async function main() {
   console.log(`${TAG} target=${target}`)
   const state = loadState()
   let coreDirty = false
@@ -182,7 +183,48 @@ function main() {
   }
 
   saveState(state)
+
+  // Start local nostr relay for dev if not already running
+  if (target === 'dev') {
+    await ensureLocalRelay()
+  }
+
   console.log(`${TAG} done`)
+}
+
+const RELAY_PORT = 7777
+
+function isRelayRunning(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const sock = createConnection({ port: RELAY_PORT, host: '127.0.0.1' }, () => {
+      sock.destroy()
+      resolve(true)
+    })
+    sock.on('error', () => resolve(false))
+    sock.setTimeout(500, () => { sock.destroy(); resolve(false) })
+  })
+}
+
+async function ensureLocalRelay(): Promise<void> {
+  if (await isRelayRunning()) {
+    console.log(`${TAG} local nostr relay — already running on port ${RELAY_PORT}`)
+    return
+  }
+  console.log(`${TAG} starting local nostr relay on port ${RELAY_PORT}...`)
+  const child = spawn('npx', ['tsx', join(__dirname, 'local-relay.ts')], {
+    cwd: ROOT,
+    detached: true,
+    stdio: 'ignore',
+    shell: true,
+  })
+  child.unref()
+  // Wait for the relay to bind (tsx startup can be slow on first run)
+  await new Promise(r => setTimeout(r, 4000))
+  if (await isRelayRunning()) {
+    console.log(`${TAG} local nostr relay — started (pid ${child.pid})`)
+  } else {
+    console.warn(`${TAG} ⚠ local nostr relay may not have started — check port ${RELAY_PORT}`)
+  }
 }
 
 main()
