@@ -25,10 +25,7 @@ export const register = (
 ): void => {
   const key = signature instanceof ServiceToken ? signature.key : signature
 
-  if (instances.has(key)) {
-    console.warn(`[ioc] duplicate key: ${key}`)
-    return
-  }
+  if (instances.has(key)) return
 
   instances.set(key, value)
 }
