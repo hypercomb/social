@@ -31,11 +31,14 @@ export class ClaudeBridgeWorker extends Worker {
 
   // ------- WebSocket lifecycle -------
 
+  #connected = false
+
   #connect(): void {
     try {
       const ws = new WebSocket(`ws://localhost:${BRIDGE_PORT}`)
 
       ws.onopen = () => {
+        this.#connected = true
         ws.send(JSON.stringify({ type: 'renderer' }))
         console.log('[claude-bridge] connected')
       }
@@ -45,8 +48,15 @@ export class ClaudeBridgeWorker extends Worker {
       }
 
       ws.onclose = () => {
+        const wasConnected = this.#connected
         this.#ws = null
-        this.#scheduleReconnect()
+        this.#connected = false
+        // Only reconnect if we previously had a successful connection.
+        // Avoids spamming the console when the bridge server isn't running.
+        if (wasConnected) {
+          console.log('[claude-bridge] disconnected, will reconnect')
+          this.#scheduleReconnect()
+        }
       }
 
       ws.onerror = () => {
@@ -55,7 +65,7 @@ export class ClaudeBridgeWorker extends Worker {
 
       this.#ws = ws
     } catch {
-      this.#scheduleReconnect()
+      // Initial connection failed — bridge server not running, stay silent
     }
   }
 

@@ -203,6 +203,16 @@ Self-contained modules. Lifecycle: Created → Registered → Active → Dispose
 - Over-engineering or premature abstraction
 - Hardcoding features into the web shell — if it can be a drone module, it should be
 
+## Agent Coordination (Multi-Worktree)
+
+When working in a worktree alongside other agents:
+
+1. **Before starting work**, run `/claim` to register your files and check for conflicts
+2. **When done** (or before `/cleanup`), run `/unclaim` to release your claim
+3. The coordination registry lives at `src/.claude/coordination.json`
+4. Claims older than 30 minutes without a heartbeat update are considered stale
+5. If you detect a conflict, coordinate with the user before proceeding
+
 ## Tech Stack
 
 Angular 21 · TypeScript 5.9 (ES2022, strict) · Pixi.js 8 · tsup · esbuild · nostr-tools · Node >=20.19.0
