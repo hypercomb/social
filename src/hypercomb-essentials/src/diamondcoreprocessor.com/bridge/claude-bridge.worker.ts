@@ -1,4 +1,4 @@
-// diamondcoreprocessor.com/bridge/claude-bridge.drone.ts
+// diamondcoreprocessor.com/bridge/claude-bridge.worker.ts
 import { Worker, EffectBus, normalizeSeed, hypercomb } from '@hypercomb/core'
 import { readSeedProperties } from '../editor/tile-properties.js'
 import type { HistoryService } from '../core/history.service.js'

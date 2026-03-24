@@ -1,4 +1,4 @@
-// diamondcoreprocessor.com/core/clipboard/clipboard.drone.ts
+// diamondcoreprocessor.com/core/clipboard/clipboard.worker.ts
 import { Worker, EffectBus, hypercomb } from '@hypercomb/core'
 import type { ClipboardService, ClipboardOp } from './clipboard.service.js'
 

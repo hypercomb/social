@@ -1,4 +1,4 @@
-// diamondcoreprocessor.com/nostr/ambient-presence.drone.ts
+// diamondcoreprocessor.com/nostr/ambient-presence.worker.ts
 import { Worker } from '@hypercomb/core'
 
 type MeshEvt = { relay: string; sig: string; event: any; payload: any }
@@ -7,10 +7,14 @@ type MeshApi = {
   subscribe: (sig: string, cb: (e: MeshEvt) => void) => MeshSub
 }
 
-export class AmbientPresenceDrone extends Worker {
+export class AmbientPresenceWorker extends Worker {
   readonly namespace = 'diamondcoreprocessor.com'
 
-  protected override deps = { mesh: '@diamondcoreprocessor.com/NostrMeshWorker' }
+  public override description =
+    'Aggregates peer presence into a heat map overlay by tracking mesh event timestamps.'
+  public override effects = ['network'] as const
+
+  protected override deps = { mesh: '@diamondcoreprocessor.com/NostrMeshDrone' }
   protected override listens = ['mesh:ensure-started']
   protected override emits = ['render:presence-heat']
 
@@ -54,5 +58,5 @@ export class AmbientPresenceDrone extends Worker {
   }
 }
 
-const _drone = new AmbientPresenceDrone()
-window.ioc.register('@diamondcoreprocessor.com/AmbientPresenceDrone', _drone)
+const _drone = new AmbientPresenceWorker()
+window.ioc.register('@diamondcoreprocessor.com/AmbientPresenceWorker', _drone)

@@ -1,7 +1,7 @@
 // diamondcoreprocessor.com/pixi/tile-index-overlay.drone.ts
 import { Drone } from '@hypercomb/core'
 import { Container, Graphics, Text, TextStyle } from 'pixi.js'
-import type { HostReadyPayload } from './pixi-host.drone.js'
+import type { HostReadyPayload } from './pixi-host.worker.js'
 
 const INDEX_STYLE = new TextStyle({
   fontFamily: 'monospace',

@@ -7,13 +7,13 @@ import { MeshHeaderComponent } from '@hypercomb/shared/ui';
 import { initializeRuntime } from '@hypercomb/shared/core';
 import { AxialService } from '@hypercomb/essentials/diamondcoreprocessor.com/core/axial/axial-service';
 import { PanningDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/pan/panning.drone';
-import { PixiHostWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/pixi-host.drone';
-import { ShowHoneycombWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/show-honeycomb.drone';
+import { PixiHostWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/pixi-host.worker';
+import { ShowCellDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/show-cell.drone';
 import { MousewheelZoomInput } from '@hypercomb/essentials/diamondcoreprocessor.com/input/zoom/mousewheel-zoom.input';
 import { Settings } from '@hypercomb/essentials/diamondcoreprocessor.com/core/settings';
 import { InputGate } from '@hypercomb/essentials/diamondcoreprocessor.com/input/input-gate.service';
 import { ZoomDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/zoom/zoom.drone';
-import { NostrMeshWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/nostr/nostr-mesh.drone'
+import { NostrMeshDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/nostr/nostr-mesh.drone'
 import { NostrSigner } from '@hypercomb/essentials/diamondcoreprocessor.com/nostr/nostr-signer'
 import { HexDetector } from '@hypercomb/essentials/diamondcoreprocessor.com/input/hex-detector'
 import { TileOverlayDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/tile-overlay.drone'
@@ -45,8 +45,8 @@ import { CommandPaletteDrone } from '@hypercomb/essentials/diamondcoreprocessor.
 import '@hypercomb/essentials/diamondcoreprocessor.com/ui/slash-command/slash-command.drone'
 import { AvatarSwarmDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/avatar-swarm.drone'
 import { ClipboardService } from '@hypercomb/essentials/diamondcoreprocessor.com/core/clipboard/clipboard.service'
-import { ClipboardWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/core/clipboard/clipboard.drone'
-import '@hypercomb/essentials/diamondcoreprocessor.com/bridge/claude-bridge.drone'
+import { ClipboardWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/core/clipboard/clipboard.worker'
+import '@hypercomb/essentials/diamondcoreprocessor.com/bridge/claude-bridge.worker'
 import { HelpQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/ui/help.queen'
 import { PinchZoomInput } from '@hypercomb/essentials/diamondcoreprocessor.com/input/zoom/pinch-zoom.input'
 import { TouchGestureCoordinator } from '@hypercomb/essentials/diamondcoreprocessor.com/input/touch/touch-gesture.coordinator'
@@ -55,9 +55,9 @@ const _deps = [
   AxialService,
   PanningDrone,
   PixiHostWorker,
-  ShowHoneycombWorker,
+  ShowCellDrone,
   MousewheelZoomInput,
-  NostrMeshWorker,
+  NostrMeshDrone,
   TileOverlayDrone,
   TileActionsDrone,
   TileSelectionDrone,
@@ -132,7 +132,7 @@ export class App {
         // push stored preference to the mesh
         const stored = localStorage.getItem('hc:mesh-public')
         if (stored !== null) {
-          const mesh = get('@diamondcoreprocessor.com/NostrMeshWorker') as any
+          const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any
           mesh?.setNetworkEnabled?.(stored === 'true', true)
         }
         void this.startRegisteredBees()
@@ -148,7 +148,7 @@ export class App {
   }
 
   public toggleMesh = (): void => {
-    const mesh = get('@diamondcoreprocessor.com/NostrMeshWorker') as any;
+    const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any;
 
     const next = !this.meshPublic();
     this.meshPublic.set(next);

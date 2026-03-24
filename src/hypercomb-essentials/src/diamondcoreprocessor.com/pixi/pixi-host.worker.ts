@@ -1,4 +1,4 @@
-// diamondcoreprocessor.com/pixi/pixi-host.drone.ts
+// diamondcoreprocessor.com/pixi/pixi-host.worker.ts
 import { Worker } from '@hypercomb/core'
 import { Application, Container } from 'pixi.js'
 
@@ -11,6 +11,11 @@ export type HostReadyPayload = {
 
 export class PixiHostWorker extends Worker {
   readonly namespace = 'diamondcoreprocessor.com'
+
+  public override description =
+    'Initializes the Pixi.js application, canvas, and root container for all rendering drones.'
+  public override effects = ['render'] as const
+
   public app: Application | null = null
   public host: HTMLDivElement | null = null
 

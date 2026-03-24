@@ -44,8 +44,12 @@ type MeshExpiryRule = {
   kind?: number
 }
 
-export class NostrMeshWorker extends Drone {
+export class NostrMeshDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
+
+  public override description =
+    'Maintains WebSocket connections to Nostr relays and routes mesh subscribe/publish events.'
+  public override effects = ['network'] as const
 
   protected override deps = { signer: '@diamondcoreprocessor.com/NostrSigner' }
   protected override listens = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish']
@@ -1116,5 +1120,5 @@ export class NostrMeshWorker extends Drone {
   }
 }
 
-const meshWorker = new NostrMeshWorker()
-window.ioc.register('@diamondcoreprocessor.com/NostrMeshWorker', meshWorker)
+const meshDrone = new NostrMeshDrone()
+window.ioc.register('@diamondcoreprocessor.com/NostrMeshDrone', meshDrone)

@@ -7,9 +7,9 @@ import { initializeRuntime } from '@hypercomb/shared/core'
 // Only what's needed: pixi host, mesh networking, and the swarm drone.
 import { AxialService } from '@hypercomb/essentials/diamondcoreprocessor.com/core/axial/axial-service'
 import { Settings } from '@hypercomb/essentials/diamondcoreprocessor.com/core/settings'
-import { PixiHostWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/pixi-host.drone'
-import { ShowHoneycombWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/show-honeycomb.drone'
-import { NostrMeshWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/nostr/nostr-mesh.drone'
+import { PixiHostWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/pixi-host.worker'
+import { ShowCellDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/show-cell.drone'
+import { NostrMeshDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/nostr/nostr-mesh.drone'
 import { NostrSigner } from '@hypercomb/essentials/diamondcoreprocessor.com/nostr/nostr-signer'
 import { AvatarSwarmDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/avatar-swarm.drone'
 import { ZoomDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/zoom/zoom.drone'
@@ -26,8 +26,8 @@ const _deps = [
   AxialService,
   Settings,
   PixiHostWorker,
-  ShowHoneycombWorker,
-  NostrMeshWorker,
+  ShowCellDrone,
+  NostrMeshDrone,
   NostrSigner,
   AvatarSwarmDrone,
   ZoomDrone,
@@ -59,7 +59,7 @@ export class App {
     queueMicrotask(() => {
       void this.#runtimeReady.then(() => {
         // enable mesh networking by default for avatars
-        const mesh = get('@diamondcoreprocessor.com/NostrMeshWorker') as any
+        const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any
         mesh?.setNetworkEnabled?.(true, true)
 
         void this.startBees()

@@ -1,7 +1,7 @@
 // diamondcoreprocessor.com/pixi/move-preview.drone.ts
 import { Drone } from '@hypercomb/core'
 import { Container, Graphics } from 'pixi.js'
-import type { HostReadyPayload } from './pixi-host.drone.js'
+import type { HostReadyPayload } from './pixi-host.worker.js'
 
 type MovePreviewPayload = {
   names: string[]
@@ -17,7 +17,8 @@ const STROKE_WIDTH = 0.5
 
 export class MovePreviewDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
-  override description = 'swap indicator overlays during tile move'
+  override description =
+    'Draws swap-indicator overlays showing where tiles will land during a move.'
 
   #renderContainer: Container | null = null
   #layer: Graphics | null = null

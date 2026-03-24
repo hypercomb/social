@@ -1,6 +1,6 @@
 // diamondcoreprocessor.com/input/move/move.drone.ts
 import { Drone, EffectBus, hypercomb } from '@hypercomb/core'
-import type { HostReadyPayload } from '../../pixi/pixi-host.drone.js'
+import type { HostReadyPayload } from '../../pixi/pixi-host.worker.js'
 import type { Axial } from '../hex-detector.js'
 import type { LayoutService } from '../../core/layout/layout.service.js'
 import { writeSeedProperties } from '../../editor/tile-properties.js'
@@ -27,7 +27,9 @@ function axialKey(q: number, r: number): string {
 
 export class MoveDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
-  override description = 'authoritative move coordinator'
+  override description =
+    'Coordinates multi-tile drag-and-drop — tracks move state, computes reorder, and commits placement.'
+  public override effects = ['render'] as const
 
   #canvas: HTMLCanvasElement | null = null
   #container: any = null

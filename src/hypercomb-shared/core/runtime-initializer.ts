@@ -57,13 +57,13 @@ export const initializeRuntime = async (
     const current = localStorage.getItem('hc:mesh-public') === 'true'
     const next = !current
     localStorage.setItem('hc:mesh-public', String(next))
-    const mesh = get('@diamondcoreprocessor.com/NostrMeshWorker') as any
+    const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any
     mesh?.setNetworkEnabled?.(next, true)
     EffectBus.emit('mesh:public-changed', { public: next })
   })
 
   // Probe mesh state for UI toggle
-  const mesh = get('@diamondcoreprocessor.com/NostrMeshWorker') as any
+  const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any
   if (mesh) {
     try {
       onMeshStateChange?.(!!mesh.isNetworkEnabled?.())

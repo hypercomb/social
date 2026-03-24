@@ -1,6 +1,6 @@
 // diamondcoreprocessor.com/input/pan/panning.drone.ts
 import { Drone } from '@hypercomb/core'
-import type { HostReadyPayload } from '../../pixi/pixi-host.drone.js'
+import type { HostReadyPayload } from '../../pixi/pixi-host.worker.js'
 import type { ViewportPersistence, ViewportSnapshot } from '../zoom/zoom.drone.js'
 
 type Point = { x: number; y: number }
@@ -8,7 +8,9 @@ type Point = { x: number; y: number }
 export class PanningDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
 
-  public override description = 'authoritative panning controller'
+  public override description =
+    'Handles touch, mouse, and keyboard panning — owns the viewport position.'
+  public override effects = ['render'] as const
 
   private stage: any = null
   private canvas: HTMLCanvasElement | null = null

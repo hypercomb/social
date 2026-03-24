@@ -35,7 +35,7 @@ export class CoreAdapter {
   // -------------------------------------------------
 
   public toggleMesh = (): void => {
-    const mesh = get('@diamondcoreprocessor.com/NostrMeshWorker') as any
+    const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any
     const current = this.meshPublic()
     const next = !current
     this.meshPublic.set(next)
@@ -67,7 +67,7 @@ export class CoreAdapter {
     // push stored preference to the mesh after init
     const stored = readMeshPublic()
     if (stored !== null) {
-      const mesh = get('@diamondcoreprocessor.com/NostrMeshWorker') as any
+      const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any
       mesh?.setNetworkEnabled?.(stored, true)
     }
   }

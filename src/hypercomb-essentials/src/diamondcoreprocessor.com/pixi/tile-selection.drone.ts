@@ -1,7 +1,7 @@
 // diamondcoreprocessor.com/pixi/tile-selection.drone.ts
 import { Drone } from '@hypercomb/core'
 import { Application, Container, Graphics, Point } from 'pixi.js'
-import type { HostReadyPayload } from './pixi-host.drone.js'
+import type { HostReadyPayload } from './pixi-host.worker.js'
 import type { Axial } from '../input/hex-detector.js'
 import type { InputGate } from '../input/input-gate.service.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY } from './hex-geometry.js'
@@ -26,7 +26,8 @@ export type RelativeAxial = { q: number; r: number; dq: number; dr: number; labe
 
 export class TileSelectionDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
-  override description = 'tile selection with leader tile and relative axial math'
+  override description =
+    'Draws selection highlights on the hex grid and computes relative axial offsets from the leader tile.'
 
   #app: Application | null = null
   #renderContainer: Container | null = null

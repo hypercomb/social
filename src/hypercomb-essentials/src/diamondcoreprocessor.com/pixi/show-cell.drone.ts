@@ -1,7 +1,7 @@
-// diamondcoreprocessor.com/pixi/show-honeycomb.drone.ts
+// diamondcoreprocessor.com/pixi/show-cell.drone.ts
 import { Drone, SignatureService, SignatureStore } from '@hypercomb/core'
 import { Application, Container, Geometry, Mesh, Texture } from 'pixi.js'
-import type { HostReadyPayload } from './pixi-host.drone.js'
+import type { HostReadyPayload } from './pixi-host.worker.js'
 import { HexLabelAtlas } from './hex-label.atlas.js'
 import { HexImageAtlas } from './hex-image.atlas.js'
 import { HexSdfTextureShader } from './hex-sdf.shader.js'
@@ -53,10 +53,15 @@ type PixiHostApi = {
   container?: Container | null
 }
 
-export class ShowHoneycombWorker extends Drone {
+export class ShowCellDrone extends Drone {
   private static readonly STREAM_BATCH_SIZE = 8
 
   readonly namespace = 'diamondcoreprocessor.com'
+
+  public override description =
+    'Renders the hex grid — maps seeds to cells, manages geometry, and syncs with the Nostr mesh.'
+  public override effects = ['render', 'network'] as const
+
   // pixi resources (populated via render:host-ready effect)
   private pixiApp: Application | null = null
   private pixiContainer: Container | null = null
@@ -410,7 +415,7 @@ export class ShowHoneycombWorker extends Drone {
   // note: data queries (getNonExpired, subscribe) still use the direct API
   // coordination (ensureStartedForSig, publish) also emits effects for observability
   private tryGetMesh = (): MeshApi | null => {
-    return get<MeshApi>('@diamondcoreprocessor.com/NostrMeshWorker') ?? null
+    return get<MeshApi>('@diamondcoreprocessor.com/NostrMeshDrone') ?? null
   }
 
 
@@ -1026,7 +1031,7 @@ export class ShowHoneycombWorker extends Drone {
       this.renderedCells.set(label, cell)
 
       const isLastSeed = index === seedNames.length - 1
-      if (cells.length % ShowHoneycombWorker.STREAM_BATCH_SIZE === 0 || isLastSeed) {
+      if (cells.length % ShowCellDrone.STREAM_BATCH_SIZE === 0 || isLastSeed) {
         await this.applyGeometry(cells, isLastSeed)
       }
 
@@ -1898,5 +1903,5 @@ export class ShowHoneycombWorker extends Drone {
   }
 }
 
-const _showHoneycomb = new ShowHoneycombWorker()
-window.ioc.register('@diamondcoreprocessor.com/ShowHoneycombWorker', _showHoneycomb)
+const showCell = new ShowCellDrone()
+window.ioc.register('@diamondcoreprocessor.com/ShowCellDrone', showCell)

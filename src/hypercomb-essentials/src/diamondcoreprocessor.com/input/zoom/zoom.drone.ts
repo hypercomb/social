@@ -1,7 +1,7 @@
 // diamondcoreprocessor.com/input/zoom/zoom.drone.ts
 import { Drone } from '@hypercomb/core'
 import { Application, Container, Point } from 'pixi.js'
-import type { HostReadyPayload } from '../../pixi/pixi-host.drone.js'
+import type { HostReadyPayload } from '../../pixi/pixi-host.worker.js'
 
 type Pt = { x: number; y: number }
 
@@ -245,7 +245,9 @@ export class ViewportPersistence extends EventTarget {
 
 export class ZoomDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
-  public override description = 'authoritative zoom controller'
+  public override description =
+    'Handles pinch, wheel, and keyboard zoom — owns the viewport scale.'
+  public override effects = ['render'] as const
 
   private app: Application | null = null
   private renderContainer: Container | null = null

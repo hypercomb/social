@@ -1,4 +1,4 @@
-// diamondcoreprocessor.com/hello-world/hello-world.drone.ts
+// diamondcoreprocessor.com/hello-world/hello-world.worker.ts
 import { Worker } from "@hypercomb/core"
 
 export class HelloWorldWorker extends Worker {

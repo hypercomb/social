@@ -1,7 +1,7 @@
 // diamondcoreprocessor.com/input/selection/tile-selection.drone.ts
 import { Drone, EffectBus, hypercomb } from '@hypercomb/core'
 import { Application, Container, Point } from 'pixi.js'
-import type { HostReadyPayload } from '../../pixi/pixi-host.drone.js'
+import type { HostReadyPayload } from '../../pixi/pixi-host.worker.js'
 import type { Axial } from '../hex-detector.js'
 import type { SelectionService } from '../../core/selection/selection.service.js'
 import type { InputGate } from '../input-gate.service.js'
@@ -12,7 +12,8 @@ type TileClickPayload = { q: number; r: number; label: string; index: number; ct
 
 class TileSelectionDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
-  override description = 'click and drag tile selection'
+  override description =
+    'Translates pointer clicks and drag gestures into tile selection changes.'
 
   #renderContainer: Container | null = null
   #canvas: HTMLCanvasElement | null = null

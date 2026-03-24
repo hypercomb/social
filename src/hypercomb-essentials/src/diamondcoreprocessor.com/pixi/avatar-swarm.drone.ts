@@ -7,7 +7,7 @@ import { Drone } from '@hypercomb/core'
 import { Application, Container, Geometry, Mesh, Texture } from 'pixi.js'
 import { BeeSwarmShader } from './bee-swarm.shader.js'
 import { noise2D } from './simplex-noise.js'
-import type { HostReadyPayload } from './pixi-host.drone.js'
+import type { HostReadyPayload } from './pixi-host.worker.js'
 import type { HexGeometry } from './hex-geometry.js'
 
 type MeshEvt = { relay: string; sig: string; event: any; payload: any }
@@ -80,8 +80,12 @@ function hslToRgb(h: number, s: number, l: number): [number, number, number] {
 export class AvatarSwarmDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
 
+  public override description =
+    'Renders real-time peer avatar cursors on the hex grid from mesh presence events.'
+  public override effects = ['render', 'network'] as const
+
   protected override deps = {
-    mesh: '@diamondcoreprocessor.com/NostrMeshWorker',
+    mesh: '@diamondcoreprocessor.com/NostrMeshDrone',
     lineage: '@hypercomb.social/Lineage',
   }
 
