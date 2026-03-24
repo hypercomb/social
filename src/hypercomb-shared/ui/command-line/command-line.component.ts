@@ -22,6 +22,12 @@ const BUILTIN_SLASH: { command: { name: string; description: string }; provider:
   { command: { name: 'select', description: 'select tiles for cut/copy/move' }, provider: null },
 ]
 
+/** Matches label:tagName or label:tagName(#color) (plain colon syntax, no brackets). */
+const TAG_ASSIGN_RE = /^([^:]+):([^(]+)(?:\(([^)]+)\))?$/
+
+/** Matches seed:[...] bracket-tag syntax — colon before opening bracket. */
+const BRACKET_TAG_RE = /^([^\[\/!#~]+):\[(.+?)\](.*)$/
+
 const MOVE_ARROW_OFFSETS: Record<string, { dq: number; dr: number }> = {
   ArrowLeft:  { dq: -1, dr:  0 },
   ArrowRight: { dq:  1, dr:  0 },
@@ -61,6 +67,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   private readonly suppressed = signal(false)
   private readonly seedSubPath = signal<readonly string[]>([])
   private readonly seedLeaf = signal('')
+  /** Tags currently assigned to the seed in bracket-tag mode (for intellisense filtering). */
+  readonly #bracketSeedTags = signal<ReadonlySet<string>>(new Set())
+  #bracketSeedLabel = ''
 
   // slash command matches — queries the drone via IoC when in slash mode
   // includes built-in commands (select) alongside queen bee commands
@@ -121,7 +130,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       operations: [
         {
           trigger: 'Enter',
-          pattern: /^[^!\[#/][^/]*$/,
+          pattern: /^[^~\[#/][^/]*$/,
           description: 'Create a new cell (seed) at the current level',
           examples: [
             { input: 'hello', key: 'Enter', result: 'Creates cell "hello" at current level' }
@@ -129,7 +138,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         },
         {
           trigger: 'Enter',
-          pattern: /^[^!\[#].+\/.+[^/]$/,
+          pattern: /^[^~\[#].+\/.+[^/]$/,
           description: 'Create nested folders, stay at current level with parent path retained',
           examples: [
             { input: 'a/b/c', key: 'Enter', result: 'Creates a/b/c, retains "a/b/" in the bar' }
@@ -137,7 +146,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         },
         {
           trigger: 'Enter',
-          pattern: /^[^!\[#].+\/$/,
+          pattern: /^[^~\[#].+\/$/,
           description: 'Go to a folder, creating it if it doesn\'t exist',
           examples: [
             { input: 'abc/', key: 'Enter', result: 'Creates "abc" if needed, then navigates into it' },
@@ -267,9 +276,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       }
     }
 
-    // ! prefix enters delete mode — show seeds as intellisense
-    // supports: !name, ![a,b,c] (intellisense on the current segment)
-    if (v.startsWith('!')) {
+    // ~ prefix enters delete mode — show seeds as intellisense
+    // supports: ~name, ~[a,b,c] (intellisense on the current segment)
+    // Note: ~name:tag is tag removal (handled by tag pre-processor, not here)
+    if (v.startsWith('~') && !v.includes(':')) {
       const body = v.slice(1)
       // find the current segment: after last ',' or '[', or the whole body
       const lastSep = Math.max(body.lastIndexOf(','), body.lastIndexOf('['))
@@ -390,6 +400,27 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     // bracket mode: filter by seedLeaf instead of ctx.normalized
     if (bracketPhase === 'items' || bracketPhase === 'path') {
+      // tag intellisense: when leaf starts with : or ~:, suggest tag names
+      if (leaf.startsWith(':') || leaf.startsWith('~:')) {
+        const isRemove = leaf.startsWith('~:')
+        const prefix = isRemove ? leaf.slice(2) : leaf.slice(1)
+        const registry = get('@hypercomb.social/TagRegistry') as { names: string[] } | undefined
+        const allTags = registry?.names ?? []
+        const seedTags = this.#bracketSeedTags()
+        const pending = this.#bracketPendingTags
+
+        let candidates: string[]
+        if (isRemove) {
+          // ~: → only tags currently ON the seed (minus ones already queued for removal)
+          candidates = allTags.filter(n => seedTags.has(n) && !pending.removes.has(n))
+        } else {
+          // : → only tags NOT on the seed (minus ones already queued for addition)
+          candidates = allTags.filter(n => !seedTags.has(n) && !pending.adds.has(n))
+        }
+
+        if (!prefix) return candidates
+        return candidates.filter(n => n.startsWith(prefix))
+      }
       if (subPath.length > 0) {
         if (!leaf) return seeds
         return seeds.filter(n => n.startsWith(leaf))
@@ -472,6 +503,14 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     // bracket mode: ghost shows the completion suffix for the active fragment
     if (bracketPhase === 'items' || bracketPhase === 'path') {
+      // tag suggestions: leaf is `:prefix` or `~:prefix`, best is the raw tag name
+      if (leaf.startsWith(':') || leaf.startsWith('~:')) {
+        const prefix = leaf.startsWith('~:') ? leaf.slice(2) : leaf.slice(1)
+        if (!best.startsWith(prefix)) return ''
+        const suffix = best.slice(prefix.length)
+        if (!suffix) return ''
+        return current + suffix
+      }
       if (!best.startsWith(leaf)) return ''
       const suffix = best.slice(leaf.length)
       if (!suffix) return ''
@@ -723,16 +762,47 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     if (this.handleCompletionKeys(e)) return
 
-    // /select[...] command execution — intercept before general slash handler
-    if (e.key === 'Enter' && !e.shiftKey && v.match(/^\/select\[/)) {
+    // Universal tag pre-processing: on any Enter, extract and persist tag assignments
+    // from the input, then rewrite the input with tags stripped so downstream handlers
+    // see clean labels. Handles: label:tag, label:tag(#color), ~label:tag (remove).
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
+      void this.#preprocessTagsThenExecute(v)
+      return
+    }
+  }
+
+  /**
+   * Pre-process tags from input, persist them, then dispatch to the appropriate handler
+   * with the cleaned input (tag syntax stripped).
+   */
+  async #preprocessTagsThenExecute(original: string): Promise<void> {
+    const cleaned = await this.#extractAndPersistTags(original)
+    const el = this.input.nativeElement
+
+    // Update the input element with cleaned value (tags stripped)
+    if (cleaned !== original) {
+      el.value = cleaned
+      el.dispatchEvent(new Event('input', { bubbles: true }))
+      this.syncSignalsFromDom()
+    }
+
+    const v = cleaned
+
+    // If only tag ops with nothing left, just clear and return
+    if (!v.trim()) {
+      this.clear()
+      return
+    }
+
+    // /select[...] command execution
+    if (v.match(/^\/select\[/)) {
       void this.#executeSelectCommand()
       return
     }
 
     // slash command execution
-    if (e.key === 'Enter' && !e.shiftKey && v.startsWith('/')) {
-      e.preventDefault()
+    if (v.startsWith('/')) {
       void this.#executeSlashCommand()
       return
     }
@@ -740,18 +810,16 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // check pluggable behaviors before default handling
     const raw = v.trim()
     for (const behavior of this.#behaviors) {
-      if (behavior.match(e, raw)) {
-        e.preventDefault()
+      // Create a synthetic Enter event for match()
+      const synth = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })
+      if (behavior.match(synth, raw)) {
         void Promise.resolve(behavior.execute(raw)).then(() => this.clear())
         return
       }
     }
 
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      void this.commitCreateSeedInPlace()
-      return
-    }
+    // default: create seed
+    void this.commitCreateSeedInPlace()
   }
 
   // -------------------------------------------------
@@ -832,7 +900,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (bracketClose < 0) { return } // brackets not closed yet, no-op
 
     const inner = v.slice(v.indexOf('[') + 1, bracketClose)
-    const labels = inner.split(',').map(s => this.completions.normalize(s.trim())).filter(Boolean)
+    const labels = inner.split(',').map(s => this.completions.normalize(this.#stripTagSuffix(s.trim()))).filter(Boolean)
     if (labels.length === 0) { this.clear(); return }
 
     const afterBracket = v.slice(bracketClose + 1)
@@ -904,8 +972,214 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.#collapseToSelect(labels)
   }
 
+  /**
+   * Universal tag extractor — scans any input string for tag syntax,
+   * persists adds/removes to OPFS, and returns the cleaned input.
+   *
+   * Bracket tag syntax (seed is the label before brackets):
+   *   abc[:education, :work]        → add tags to "abc"
+   *   abc[~:education, :work]       → remove "education", add "work" to "abc"
+   *   abc[:tag(#ff0), 123]          → add tag with color, "123" passes through
+   *
+   * Plain tag syntax (label:tag — no brackets):
+   *   label:tagName                 → add tag
+   *   label:tagName(#color)         → add tag with global color
+   *   ~label:tagName                → remove tag
+   *
+   * Inside /select[...] brackets, each comma-separated item is also checked.
+   */
+  async #extractAndPersistTags(input: string): Promise<string> {
+    type TagOp = { label: string; tag: string; color?: string; remove: boolean }
+    const ops: TagOp[] = []
+
+    // ── Pattern 1: seed:[tag, ~tag] bracket-tag syntax ──
+    // Colon before bracket signals ALL items are tags (no : prefix needed inside).
+    // Matches: abc:[education, ~work] or abc:[tag]
+    const bracketTagMatch = input.match(BRACKET_TAG_RE)
+    if (bracketTagMatch) {
+      const label = this.completions.normalize(bracketTagMatch[1].trim())
+      const bracketBody = bracketTagMatch[2]
+      const suffix = bracketTagMatch[3]
+      const items = bracketBody.split(',')
+
+      for (const raw of items) {
+        const trimmed = raw.trim()
+        if (!trimmed || !label) continue
+        // ~tagname → remove tag
+        if (trimmed.startsWith('~')) {
+          const tag = trimmed.slice(1).trim()
+          if (tag) ops.push({ label, tag, remove: true })
+        } else {
+          // tagname or tagname(#color) → add tag
+          const colorMatch = trimmed.match(/^([^(]+)(?:\(([^)]+)\))?$/)
+          if (colorMatch) {
+            const tag = colorMatch[1].trim()
+            const color = colorMatch[2]?.trim()
+            if (tag) ops.push({ label, tag, color, remove: false })
+          }
+        }
+      }
+
+      if (ops.length > 0) {
+        await this.#persistTagOps(ops)
+        // Tag-only bracket — return just the label (for seed creation if needed)
+        return label + suffix
+      }
+      return input
+    }
+
+    // ── Pattern 1b: label[...:tag items...] legacy bracket syntax ──
+    // Colon prefix inside brackets (e.g. abc[:education, ~:work, 123])
+    const labelBracketMatch = input.match(/^([^\[\/!#~]+)\[(.+?)\](.*)$/)
+    if (labelBracketMatch) {
+      const label = this.completions.normalize(labelBracketMatch[1].trim())
+      const bracketBody = labelBracketMatch[2]
+      const suffix = labelBracketMatch[3]
+      const items = bracketBody.split(',')
+      const cleanedItems: string[] = []
+
+      for (const raw of items) {
+        const trimmed = raw.trim()
+        // ~:tag → remove tag from label
+        const removeMatch = trimmed.match(/^~:([^(]+)(?:\(([^)]+)\))?$/)
+        if (removeMatch && label) {
+          const tag = removeMatch[1].trim()
+          if (tag) ops.push({ label, tag, remove: true })
+          continue
+        }
+        // :tag or :tag(#color) → add tag to label
+        const addMatch = trimmed.match(/^:([^(]+)(?:\(([^)]+)\))?$/)
+        if (addMatch && label) {
+          const tag = addMatch[1].trim()
+          const color = addMatch[2]?.trim()
+          if (tag) ops.push({ label, tag, color, remove: false })
+          continue
+        }
+        // non-tag item — pass through
+        cleanedItems.push(raw)
+      }
+
+      if (ops.length > 0) {
+        await this.#persistTagOps(ops)
+        // Rebuild: if only tag items remained, just return the label (seed creation)
+        if (cleanedItems.length === 0) return label + suffix
+        return label + '[' + cleanedItems.join(',') + ']' + suffix
+      }
+      return input
+    }
+
+    // ── Pattern 2: /select[...] bracket syntax ──
+    const selectMatch = input.match(/^(\/select\[)(.+?)(\].*)$/)
+    if (selectMatch) {
+      const items = selectMatch[2].split(',')
+      const cleanedItems: string[] = []
+
+      for (const raw of items) {
+        const trimmed = raw.trim()
+        const removeMatch = trimmed.match(/^~([^:]+):([^(]+)(?:\(([^)]+)\))?$/)
+        const addMatch = trimmed.match(TAG_ASSIGN_RE)
+
+        if (removeMatch) {
+          const label = this.completions.normalize(removeMatch[1])
+          const tag = removeMatch[2].trim()
+          if (label && tag) ops.push({ label, tag, remove: true })
+        } else if (addMatch) {
+          const label = this.completions.normalize(addMatch[1])
+          const tag = addMatch[2].trim()
+          const color = addMatch[3]?.trim()
+          if (label && tag) {
+            ops.push({ label, tag, color, remove: false })
+            cleanedItems.push(raw.replace(/:.*$/, ''))
+          } else {
+            cleanedItems.push(raw)
+          }
+        } else {
+          cleanedItems.push(raw)
+        }
+      }
+
+      if (ops.length > 0) {
+        await this.#persistTagOps(ops)
+        const cleaned = selectMatch[1] + cleanedItems.join(',') + selectMatch[3]
+        return cleaned.replace(/^\/select\[\s*\].*$/, '').trim()
+      }
+      return input
+    }
+
+    // ── Pattern 3: plain label:tag (no brackets) ──
+    const trimmed = input.trim()
+    const removeMatch = trimmed.match(/^~([^:]+):([^(]+)(?:\(([^)]+)\))?$/)
+    const addMatch = trimmed.match(TAG_ASSIGN_RE)
+
+    if (removeMatch) {
+      const label = this.completions.normalize(removeMatch[1])
+      const tag = removeMatch[2].trim()
+      if (label && tag) {
+        ops.push({ label, tag, remove: true })
+        await this.#persistTagOps(ops)
+        return ''
+      }
+    } else if (addMatch) {
+      const label = this.completions.normalize(addMatch[1])
+      const tag = addMatch[2].trim()
+      const color = addMatch[3]?.trim()
+      if (label && tag) {
+        ops.push({ label, tag, color, remove: false })
+        await this.#persistTagOps(ops)
+        return label // keep the label for seed creation
+      }
+    }
+
+    return input
+  }
+
+  /** Persist tag add/remove operations to OPFS + master registry. */
+  async #persistTagOps(ops: { label: string; tag: string; color?: string; remove: boolean }[]): Promise<void> {
+    const dir = await this.lineage.explorerDir()
+    const registry = get('@hypercomb.social/TagRegistry') as
+      { add: (n: string, c?: string) => Promise<void>; remove: (n: string) => Promise<void>; ensureLoaded: () => Promise<void> } | undefined
+
+    if (!dir) return
+
+    const updates: { seed: string; tag: string; color?: string }[] = []
+
+    for (const op of ops) {
+      try {
+        const seedDir = await dir.getDirectoryHandle(op.label, { create: true })
+        const props = await readTagProps(seedDir)
+        const tags: string[] = Array.isArray(props['tags']) ? props['tags'] : []
+
+        if (op.remove) {
+          const idx = tags.indexOf(op.tag)
+          if (idx >= 0) {
+            tags.splice(idx, 1)
+            await writeTagProps(seedDir, { tags })
+          }
+        } else {
+          if (!tags.includes(op.tag)) {
+            tags.push(op.tag)
+            await writeTagProps(seedDir, { tags })
+          }
+        }
+        updates.push({ seed: op.label, tag: op.tag, color: op.color })
+      } catch { /* seed dir access failed — skip */ }
+    }
+
+    // Update master tag list (content-addressed resource)
+    if (registry) {
+      for (const op of ops) {
+        if (!op.remove) {
+          await registry.add(op.tag, op.color)
+        }
+      }
+    }
+
+    if (updates.length > 0) {
+      EffectBus.emit('tags:changed', { updates })
+    }
+  }
+
   /** After an operation completes, collapse the command line to /select[remaining-tiles] */
-  /** Build /select[...] string, truncating names when unfocused and list exceeds thresholds */
   #buildSelectValue(labels: readonly string[], truncate: boolean): string {
     if (!truncate) return '/select[' + labels.join(',') + ']'
     const mapped = labels.map(l => l.length <= 4 ? l : l.slice(0, 3) + '.')
@@ -1040,15 +1314,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const best = forced ?? list[this.activeIndex()] ?? list[0]
     if (!best) return
 
-    // slash mode: fill command name with trailing space (or [ for select)
+    // slash mode: fill command name (no auto brackets or trailing chars)
     if (ctx.mode === 'slash') {
-      if (best === 'select') {
-        this.input.nativeElement.value = '/select['
-        this.suppressed.set(false)
-      } else {
-        this.input.nativeElement.value = '/' + best + ' '
-        this.suppressed.set(true)
-      }
+      this.input.nativeElement.value = '/' + best
+      this.suppressed.set(true)
       this.placeCaretAtEnd()
       this.syncSignalsFromDom()
       return
@@ -1110,12 +1379,24 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     // bracket-items mode: insert name after last comma (or after [)
     if (bracketPhase === 'items') {
+      const leaf = this.seedLeaf()
       const lastComma = raw.lastIndexOf(',')
       const insertAt = lastComma >= 0 ? lastComma + 1 : raw.indexOf('[') + 1
       const before = raw.slice(0, insertAt)
-      // add a space after comma for readability, then the name and a comma for the next item
       const spacer = lastComma >= 0 ? ' ' : ''
-      this.input.nativeElement.value = before + spacer + best + ','
+      // tag completion: colon-bracket mode uses plain names; legacy uses :prefix
+      const isTagLeaf = leaf.startsWith(':') || leaf.startsWith('~:')
+      if (isTagLeaf && this.#colonBracketMode) {
+        // seed:[...] mode: items are plain names, ~ for removal
+        const removePrefix = leaf.startsWith('~:') ? '~' : ''
+        this.input.nativeElement.value = before + spacer + removePrefix + best
+      } else if (isTagLeaf) {
+        // legacy abc[:tag] mode: preserve :prefix
+        const tagPrefix = leaf.startsWith('~:') ? '~:' : ':'
+        this.input.nativeElement.value = before + spacer + tagPrefix + best
+      } else {
+        this.input.nativeElement.value = before + spacer + best
+      }
       this.suppressed.set(false)
       this.placeCaretAtEnd()
       this.syncSignalsFromDom()
@@ -1228,6 +1509,12 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     return this.#deriveSelectPhase(v)
   })
 
+  /** Strip :tag(color) suffix from a raw select item, returning just the tile label. */
+  #stripTagSuffix(raw: string): string {
+    const colon = raw.indexOf(':')
+    return colon >= 0 ? raw.slice(0, colon) : raw
+  }
+
   /** Labels derived from value — computed. Includes committed labels during selection phase. */
   #selectLabels = computed<readonly string[]>(() => {
     const v = this.value()
@@ -1237,14 +1524,15 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // Bracket closed — parse full list
     if (bracketClose >= 0) {
       const inner = v.slice(bracketOpen + 1, bracketClose)
-      return inner.split(',').map(s => this.completions.normalize(s.trim())).filter(Boolean)
+      return inner.split(',').map(s => this.completions.normalize(this.#stripTagSuffix(s.trim()))).filter(Boolean)
     }
     // Bracket still open (selection phase) — include committed labels (before last comma)
     // and the current partial if it matches an existing seed name exactly
     const body = v.slice(bracketOpen + 1)
-    const parts = body.split(',').map(s => this.completions.normalize(s.trim())).filter(Boolean)
+    const parts = body.split(',').map(s => this.completions.normalize(this.#stripTagSuffix(s.trim()))).filter(Boolean)
     return parts
   })
+
 
   /** Excluded items derived from value — computed */
   #selectExcluded = computed<ReadonlySet<string>>(() => {
@@ -1257,7 +1545,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (lastComma < 0) return new Set<string>()
     const already = new Set<string>()
     for (const item of body.slice(0, lastComma).split(',')) {
-      const n = this.completions.normalize(item.trim())
+      const n = this.completions.normalize(this.#stripTagSuffix(item.trim()))
       if (n) already.add(n)
     }
     return already
@@ -1473,6 +1761,50 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   // bracket mode: 'none' | 'items' (inside []) | 'path' (after ]/)
   #bracketPhase = signal<'none' | 'items' | 'path'>('none')
+  /** Whether current bracket mode is colon-bracket (seed:[...]) — items are plain tag names. */
+  #colonBracketMode = false
+  /** Pending tag adds/removes typed in the current bracket input (not yet persisted). */
+  #bracketPendingTags: { adds: Set<string>; removes: Set<string> } = { adds: new Set(), removes: new Set() }
+
+  /** Load a seed's existing tags from OPFS into the cache signal. */
+  async #loadSeedTags(label: string): Promise<void> {
+    try {
+      const dir = await this.lineage.explorerDir()
+      if (!dir) { this.#bracketSeedTags.set(new Set()); return }
+      const seedDir = await dir.getDirectoryHandle(label, { create: false })
+      const props = await readTagProps(seedDir)
+      const tags: string[] = Array.isArray(props['tags']) ? props['tags'] : []
+      this.#bracketSeedTags.set(new Set(tags))
+    } catch {
+      this.#bracketSeedTags.set(new Set())
+    }
+  }
+
+  /** Parse tag items in seed:[...] syntax (no : prefix — items are plain names, ~ for removal). */
+  #parseBracketTagItems(inner: string): { adds: Set<string>; removes: Set<string> } {
+    const adds = new Set<string>()
+    const removes = new Set<string>()
+    for (const raw of inner.split(',')) {
+      const t = raw.trim()
+      if (t.startsWith('~')) { removes.add(t.slice(1).trim()); continue }
+      if (t) { adds.add(t); continue }
+    }
+    return { adds, removes }
+  }
+
+  /** Parse :tag and ~:tag items already typed in the bracket body (legacy syntax). */
+  #parsePendingBracketTags(inner: string): { adds: Set<string>; removes: Set<string> } {
+    const adds = new Set<string>()
+    const removes = new Set<string>()
+    for (const raw of inner.split(',')) {
+      const t = raw.trim()
+      const rm = t.match(/^~:(\S+)/)
+      if (rm) { removes.add(rm[1]); continue }
+      const add = t.match(/^:([^(]\S*)/)
+      if (add) { adds.add(add[1]); continue }
+    }
+    return { adds, removes }
+  }
 
   private readonly updateSeedSubPath = (): void => {
     const raw = this.input.nativeElement.value.trim()
@@ -1481,12 +1813,59 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const bracketOpen = raw.indexOf('[')
     const bracketClose = raw.indexOf(']')
 
-    if (bracketOpen === 0 && bracketClose < 0) {
-      // inside brackets — suggest current surface tiles
+    if (bracketOpen >= 0 && bracketClose < 0) {
+      // inside brackets — suggest current surface tiles or tags
       this.#bracketPhase.set('items')
-      const inner = raw.slice(1)
+      const inner = raw.slice(bracketOpen + 1)
       const lastComma = inner.lastIndexOf(',')
       const fragment = lastComma >= 0 ? inner.slice(lastComma + 1).trim() : inner.trim()
+
+      // Detect seed:[...] colon-bracket tag mode: colon immediately before '['
+      const isColonBracket = bracketOpen > 0 && raw[bracketOpen - 1] === ':'
+
+      if (isColonBracket) {
+        // ALL items in seed:[...] are tags — no : prefix needed
+        this.#colonBracketMode = true
+        const label = this.completions.normalize(raw.slice(0, bracketOpen - 1).trim())
+        if (label && label !== this.#bracketSeedLabel) {
+          this.#bracketSeedLabel = label
+          void this.#loadSeedTags(label)
+        }
+        // gather committed tags (before last comma)
+        const lastCommaIdx = inner.lastIndexOf(',')
+        const committed = lastCommaIdx >= 0 ? inner.slice(0, lastCommaIdx) : ''
+        this.#bracketPendingTags = this.#parseBracketTagItems(committed)
+        this.seedSubPath.set([])
+        // Use ~ prefix to signal removal mode, otherwise raw fragment for add mode
+        this.seedLeaf.set(fragment.startsWith('~') ? '~:' + fragment.slice(1) : ':' + fragment)
+        this.seedProvider.query([])
+        return
+      }
+
+      // Legacy colon-prefixed fragment → tag mode (e.g. abc[:tag])
+      this.#colonBracketMode = false
+      if (fragment.startsWith(':') || fragment.startsWith('~:')) {
+        const label = bracketOpen > 0
+          ? this.completions.normalize(raw.slice(0, bracketOpen).trim())
+          : ''
+        if (label && label !== this.#bracketSeedLabel) {
+          this.#bracketSeedLabel = label
+          void this.#loadSeedTags(label)
+        }
+        const lastCommaIdx = inner.lastIndexOf(',')
+        const committed = lastCommaIdx >= 0 ? inner.slice(0, lastCommaIdx) : ''
+        this.#bracketPendingTags = this.#parsePendingBracketTags(committed)
+        this.seedSubPath.set([])
+        this.seedLeaf.set(fragment)
+        this.seedProvider.query([])
+        return
+      }
+      // clear tag context when not in tag mode
+      if (this.#bracketSeedLabel) {
+        this.#bracketSeedLabel = ''
+        this.#bracketSeedTags.set(new Set())
+        this.#bracketPendingTags = { adds: new Set(), removes: new Set() }
+      }
       const leaf = this.completions.normalize(fragment)
       this.seedSubPath.set([])
       this.seedLeaf.set(leaf)
@@ -1540,4 +1919,27 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.seedLeaf.set(leaf)
     this.seedProvider.query(subPath)
   }
+}
+
+// ── 0000 properties helpers (lightweight inline, avoids import from essentials) ──
+
+const TAG_PROPS_FILE = '0000'
+
+async function readTagProps(seedDir: FileSystemDirectoryHandle): Promise<Record<string, unknown>> {
+  try {
+    const fh = await seedDir.getFileHandle(TAG_PROPS_FILE)
+    const file = await fh.getFile()
+    return JSON.parse(await file.text())
+  } catch {
+    return {}
+  }
+}
+
+async function writeTagProps(seedDir: FileSystemDirectoryHandle, updates: Record<string, unknown>): Promise<void> {
+  const existing = await readTagProps(seedDir)
+  const merged = { ...existing, ...updates }
+  const fh = await seedDir.getFileHandle(TAG_PROPS_FILE, { create: true })
+  const writable = await fh.createWritable()
+  await writable.write(JSON.stringify(merged))
+  await writable.close()
 }

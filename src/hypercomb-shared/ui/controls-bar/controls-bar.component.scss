@@ -105,6 +105,63 @@
   }
 }
 
+// ── tag panel + float (right-aligned) ─────────────────────
+
+.tag-crumb {
+  font-size: 0.5rem;
+  white-space: nowrap;
+  padding: 0.05rem 0.45rem;
+  border: 0.5px solid;
+  border-radius: 1px;
+  background: none;
+  cursor: pointer;
+  font-family: inherit;
+  transition: opacity 150ms ease;
+
+  &:hover {
+    opacity: 0.8;
+  }
+}
+
+
+.tag-float {
+  position: fixed;
+  bottom: 0.4rem;
+  right: 0.6rem;
+  z-index: 59999;
+
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  max-width: 18rem;
+
+  font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro',
+    Menlo, Consolas, 'DejaVu Sans Mono', monospace;
+  pointer-events: auto;
+  transition: opacity 200ms ease;
+}
+
+.tag-lead-icon {
+  font-size: 0.925rem;
+  color: rgba(245, 245, 245, 0.3);
+  line-height: 1;
+}
+
+.tag-active {
+  background: rgba(255, 255, 255, 0.08) !important;
+  opacity: 1 !important;
+}
+
+.tag-hovered {
+  opacity: 1 !important;
+  filter: brightness(1.4);
+}
+
+.tag-crumb:not(.tag-active):not(.tag-hovered) {
+  opacity: 0.6;
+}
+
 // ── pill ──────────────────────────────────────────────────
 
 .controls-pill {
@@ -492,5 +549,14 @@
 
   .room-shell {
     height: 2.2rem;
+  }
+
+  .tag-float {
+    bottom: calc(0.15rem + var(--safe-bottom, 0px));
+    right: 0.8rem;
+  }
+
+  .tag-crumb {
+    font-size: 0.75rem;
   }
 }

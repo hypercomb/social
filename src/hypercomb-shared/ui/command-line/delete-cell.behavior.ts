@@ -6,12 +6,15 @@ import type { Lineage } from '../../core/lineage'
 import { EffectBus, hypercomb } from '@hypercomb/core'
 
 /**
- * Enter with `!` prefix → delete a cell (folder) from the current level.
+ * Enter with `~` prefix → delete a cell (folder) from the current level.
  *
  * Examples:
- *   "!cellname"        → deletes cellname from current directory
- *   "!parent/child"    → deletes child from parent (parent stays)
- *   "![foo,bar]"       → deletes foo and bar from current directory
+ *   "~cellname"        → deletes cellname from current directory
+ *   "~parent/child"    → deletes child from parent (parent stays)
+ *   "~[foo,bar]"       → deletes foo and bar from current directory
+ *
+ * Note: `~label:tag` is handled by the universal tag pre-processor (removes a tag),
+ * so this behavior only fires when there's no colon after the label.
  */
 export class DeleteCellBehavior implements CommandLineBehavior {
 
@@ -19,25 +22,25 @@ export class DeleteCellBehavior implements CommandLineBehavior {
   readonly operations = [
     {
       trigger: 'Enter',
-      pattern: /^!.+/,
+      pattern: /^~.+/,
       description: 'Delete cells from the current directory',
       examples: [
-        { input: '!cellname', key: 'Enter', result: 'Deletes cellname from current directory' },
-        { input: '!parent/child', key: 'Enter', result: 'Deletes child from parent (parent stays)' },
-        { input: '![foo,bar]', key: 'Enter', result: 'Deletes foo and bar from current directory' }
+        { input: '~cellname', key: 'Enter', result: 'Deletes cellname from current directory' },
+        { input: '~parent/child', key: 'Enter', result: 'Deletes child from parent (parent stays)' },
+        { input: '~[foo,bar]', key: 'Enter', result: 'Deletes foo and bar from current directory' }
       ]
     }
   ]
 
   match(event: KeyboardEvent, input: string): boolean {
-    return event.key === 'Enter' && !event.shiftKey && input.startsWith('!')
+    return event.key === 'Enter' && !event.shiftKey && input.startsWith('~')
   }
 
   async execute(input: string): Promise<void> {
     const completions = get('@hypercomb.social/CompletionUtility') as CompletionUtility
     const lineage = get('@hypercomb.social/Lineage') as Lineage
 
-    const body = input.slice(1).trim()
+    const body = input.slice(1).trim() // strip leading ~
     if (!body) return
 
     const targets = this.#parseTargets(body, completions)

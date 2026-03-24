@@ -71,8 +71,8 @@ export class ShowHoneycombWorker extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'seed:place-at', 'seed:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode']
-  protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'seed:place-at', 'seed:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed']
+  protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
 
@@ -82,6 +82,8 @@ export class ShowHoneycombWorker extends Drone {
 
   // cache: seed label → small image signature (avoids re-reading 0000 on every render)
   private readonly seedImageCache = new Map<string, string | null>()
+  // cache: seed label → tag names (avoids re-reading 0000 on every render)
+  private readonly seedTagsCache = new Map<string, string[]>()
   // cache: seed label → border color RGB floats
   private readonly seedBorderColorCache = new Map<string, [number, number, number]>()
 
@@ -730,6 +732,7 @@ export class ShowHoneycombWorker extends Drone {
         this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8)
         this.seedImageCache.clear()
         this.seedBorderColorCache.clear()
+        this.seedTagsCache.clear()
         this.atlasRenderer = this.pixiRenderer
         this.shader = null
       }
@@ -1165,7 +1168,23 @@ export class ShowHoneycombWorker extends Drone {
         branchLabels: cells.filter(cell => cell.hasBranch).map(cell => cell.label),
         externalLabels: cells.filter(cell => cell.external).map(cell => cell.label),
       })
+      this.#emitRenderTags(cells)
     }
+  }
+
+  /** Emit render:tags with unique tag names + counts from all currently visible cells. */
+  #emitRenderTags(cells: SeedCell[]): void {
+    const counts = new Map<string, number>()
+    for (const cell of cells) {
+      const tags = this.seedTagsCache.get(cell.label)
+      if (tags) {
+        for (const tag of tags) {
+          counts.set(tag, (counts.get(tag) ?? 0) + 1)
+        }
+      }
+    }
+    const tags = [...counts.entries()].map(([name, count]) => ({ name, count }))
+    this.emitEffect('render:tags', { tags })
   }
 
   // 1–3ms micro-pause to avoid main-thread blocking (legacy JsonHiveStreamLoader pattern)
@@ -1186,9 +1205,21 @@ export class ShowHoneycombWorker extends Drone {
         const oldSig = this.seedImageCache.get(payload.seed)
         this.seedImageCache.delete(payload.seed)
         this.seedBorderColorCache.delete(payload.seed)
+        this.seedTagsCache.delete(payload.seed)
         if (oldSig && this.imageAtlas) {
           this.imageAtlas.invalidate(oldSig)
         }
+      }
+      this.#layerCellsCache.delete(this.renderedLocationKey)
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
+    // tags:changed effect — invalidate tag cache for affected seeds and re-emit render:tags
+    this.onEffect<{ updates: { seed: string }[] }>('tags:changed', (payload) => {
+      if (!payload?.updates) return
+      for (const { seed } of payload.updates) {
+        this.seedTagsCache.delete(seed)
       }
       this.#layerCellsCache.delete(this.renderedLocationKey)
       this.renderedCellsKey = ''
@@ -1373,6 +1404,16 @@ export class ShowHoneycombWorker extends Drone {
       if (!this.shader) return
       const idx = this.#axialToIndex.get(`${payload.q},${payload.r}`)
       this.shader.setHoveredIndex(idx ?? -1)
+
+      // Emit hovered tile's tags for UI highlight
+      let hoverTags: string[] = []
+      for (const [label, cell] of this.renderedCells) {
+        if (cell.q === payload.q && cell.r === payload.r) {
+          hoverTags = this.seedTagsCache.get(label) ?? []
+          break
+        }
+      }
+      this.emitEffect('tile:hover-tags', { tags: hoverTags })
     })
 
     ; (window as any).showCellsPoc = {
@@ -1683,6 +1724,18 @@ export class ShowHoneycombWorker extends Drone {
       // external seeds don't have local OPFS data
       if (cell.external) continue
 
+      // load tags from OPFS if not cached (independent of image cache)
+      if (!this.seedTagsCache.has(cell.label)) {
+        try {
+          const seedDir = await _dir.getDirectoryHandle(cell.label)
+          const tagProps = await readSeedProperties(seedDir)
+          const rawTags = tagProps?.['tags']
+          this.seedTagsCache.set(cell.label, Array.isArray(rawTags)
+            ? (rawTags as unknown[]).filter((t): t is string => typeof t === 'string')
+            : [])
+        } catch { this.seedTagsCache.set(cell.label, []) }
+      }
+
       // check cache first
       if (this.seedImageCache.has(cell.label)) {
         cell.imageSig = this.seedImageCache.get(cell.label) ?? undefined
@@ -1708,6 +1761,14 @@ export class ShowHoneycombWorker extends Drone {
           const b = parseInt(hex.slice(5, 7), 16) / 255
           cell.borderColor = [r, g, b]
           this.seedBorderColorCache.set(cell.label, [r, g, b])
+        }
+
+        // extract tags from properties
+        const cellTags = props?.['tags']
+        if (Array.isArray(cellTags)) {
+          this.seedTagsCache.set(cell.label, cellTags.filter((t: unknown) => typeof t === 'string'))
+        } else {
+          this.seedTagsCache.set(cell.label, [])
         }
 
         // pivot swaps orientation: pointy uses flat snapshot, flat uses pointy snapshot

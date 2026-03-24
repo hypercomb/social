@@ -27,6 +27,20 @@
   }
 </div>
 
+@if (tags().length > 0) {
+  <div class="tag-float">
+    <span class="tag-lead-icon hci">X</span>
+    @for (tag of tags(); track tag.name) {
+      <button class="tag-crumb"
+              [class.tag-active]="isTagFilterActive(tag.name)"
+              [class.tag-hovered]="isTagHovered(tag.name)"
+              [style.color]="tagColor(tag.name)"
+              [style.borderColor]="tagColor(tag.name)"
+              (click)="toggleTagFilter(tag.name)">{{ tag.name }}</button>
+    }
+  </div>
+}
+
 <div
   class="controls-pill"
   [class.faded]="!visible()"

@@ -24,7 +24,7 @@ export class HashMarkerBehavior implements CommandLineBehavior {
   readonly operations = [
     {
       trigger: 'Enter',
-      pattern: /^[^!\[].+#.+/,
+      pattern: /^[^~\[].+#.+/,
       description: 'Bind a drone marker to a seed',
       examples: [
         { input: 'cigars#CigarJournal', key: 'Enter', result: 'Marks "cigars" with CigarJournal drone' },
@@ -33,7 +33,7 @@ export class HashMarkerBehavior implements CommandLineBehavior {
     },
     {
       trigger: 'Enter',
-      pattern: /^[^!\[].+#$/,
+      pattern: /^[^~\[].+#$/,
       description: 'List available drones for a seed',
       examples: [
         { input: 'cigars#', key: 'Enter', result: 'Lists drones applicable to "cigars"' },

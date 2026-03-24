@@ -84,6 +84,10 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #hasSelection = signal(false)
   #textOnly = signal(false)
   #layoutPinned = signal(false)
+  #tags = signal<{ name: string; count: number }[]>([])
+  #tagPanelOpen = signal(false)
+  #activeTagFilters = signal<Set<string>>(new Set())
+  #hoveredTags = signal<Set<string>>(new Set())
   readonly addressHover = signal(false)
 
   #idleTimer: ReturnType<typeof setTimeout> | null = null
@@ -174,6 +178,47 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   readonly hasSelection = this.#hasSelection.asReadonly()
   readonly textOnly = this.#textOnly.asReadonly()
   readonly layoutPinned = this.#layoutPinned.asReadonly()
+  readonly tags = this.#tags.asReadonly()
+  readonly tagPanelOpen = this.#tagPanelOpen.asReadonly()
+
+  readonly toggleTagPanel = (): void => {
+    this.#tagPanelOpen.update(v => !v)
+  }
+
+  readonly isTagFilterActive = (name: string): boolean => {
+    return this.#activeTagFilters().has(name)
+  }
+
+  readonly toggleTagFilter = (name: string): void => {
+    this.#activeTagFilters.update(set => {
+      const next = new Set(set)
+      if (next.has(name)) {
+        next.delete(name)
+      } else {
+        next.add(name)
+      }
+      // Emit filter to ShowHoneycombWorker
+      EffectBus.emit('tags:filter', { active: [...next] })
+      return next
+    })
+  }
+
+  readonly isTagHovered = (name: string): boolean => {
+    return this.#hoveredTags().has(name)
+  }
+
+  readonly tagColor = (name: string): string => {
+    const registry = get('@hypercomb.social/TagRegistry') as { color: (n: string) => string } | undefined
+    const color = registry?.color(name)
+    if (color) return color
+    // fallback to localStorage for first render before registry loads
+    try {
+      const stored: Record<string, string> = JSON.parse(localStorage.getItem('hc:tag-colors') ?? '{}')
+      if (stored[name]) return stored[name]
+    } catch { /* fall through */ }
+    // deterministic vibrant color from tag name — no grays
+    return tagNameToColor(name)
+  }
   readonly visible = computed(() => (!this.#idle() || this.#hovered()) && !this.#touchDragging())
   readonly roomValue = this.#roomValue.asReadonly()
   readonly roomOpen = this.#roomOpen.asReadonly()
@@ -185,6 +230,8 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #selectionUnsub: (() => void) | null = null
   #layoutModeUnsub: (() => void) | null = null
   #beesUnsub: (() => void) | null = null
+  #tagsUnsub: (() => void) | null = null
+  #hoverTagsUnsub: (() => void) | null = null
 
   ngOnInit(): void {
     // pre-fill room from store
@@ -229,6 +276,16 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
       this.#touchDragging.set(active)
     })
 
+    this.#tagsUnsub = EffectBus.on<{ tags: { name: string; count: number }[] }>('render:tags', ({ tags }) => {
+      // sort by hue so tags form a rainbow gradient
+      const sorted = [...tags].sort((a, b) => extractHue(this.tagColor(a.name)) - extractHue(this.tagColor(b.name)))
+      this.#tags.set(sorted)
+    })
+
+    this.#hoverTagsUnsub = EffectBus.on<{ tags: string[] }>('tile:hover-tags', ({ tags }) => {
+      this.#hoveredTags.set(new Set(tags))
+    })
+
   }
 
   ngOnDestroy(): void {
@@ -243,6 +300,8 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     this.#layoutModeUnsub?.()
     this.#touchDraggingUnsub?.()
     this.#beesUnsub?.()
+    this.#tagsUnsub?.()
+    this.#hoverTagsUnsub?.()
   }
 
   // ── navigation actions ────────────────────────────────
@@ -441,4 +500,48 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     if (this.#idleTimer) clearTimeout(this.#idleTimer)
     this.#idleTimer = setTimeout(() => this.#idle.set(true), this.#IDLE_DELAY)
   }
+}
+
+/** Deterministic vibrant HSL color from a tag name — avoids grays. */
+function tagNameToColor(name: string): string {
+  let hash = 0
+  for (let i = 0; i < name.length; i++) {
+    hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0
+  }
+  const hue = ((hash >>> 0) % 360)
+  return `hsl(${hue}, 70%, 65%)`
+}
+
+/** Extract hue (0-360) from any CSS color string for sorting. */
+function extractHue(color: string): number {
+  // fast path: hsl(H, ...)
+  const hslMatch = color.match(/hsl\(\s*(\d+)/)
+  if (hslMatch) return parseInt(hslMatch[1], 10)
+
+  // rgb(...) or hex → convert to hue
+  let r = 0, g = 0, b = 0
+  const rgbMatch = color.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/)
+  if (rgbMatch) {
+    r = parseInt(rgbMatch[1], 10) / 255
+    g = parseInt(rgbMatch[2], 10) / 255
+    b = parseInt(rgbMatch[3], 10) / 255
+  } else if (color.startsWith('#')) {
+    const hex = color.length === 4
+      ? color[1] + color[1] + color[2] + color[2] + color[3] + color[3]
+      : color.slice(1, 7)
+    r = parseInt(hex.slice(0, 2), 16) / 255
+    g = parseInt(hex.slice(2, 4), 16) / 255
+    b = parseInt(hex.slice(4, 6), 16) / 255
+  } else {
+    return 0
+  }
+
+  const max = Math.max(r, g, b), min = Math.min(r, g, b)
+  const d = max - min
+  if (d === 0) return 0
+  let h = 0
+  if (max === r) h = ((g - b) / d + 6) % 6
+  else if (max === g) h = (b - r) / d + 2
+  else h = (r - g) / d + 4
+  return Math.round(h * 60)
 }
