@@ -508,18 +508,11 @@ export class TileSelectionDrone extends Drone {
       const entry = this.#occupiedByAxial.get(key)
       if (!entry) continue
 
-<<<<<<< HEAD:src/hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/tile-selection.drone.ts
-      const [qs, rs] = key.split(',')
-      const q = Number(qs)
-      const r = Number(rs)
-      const pos = this.#axialToPixel(q, r, this.#flat)
-=======
       // Compute pixel position from axial coords using hex geometry spacing
       // (matches show-honeycomb's buildFillQuadGeometry, NOT AxialService.Location
       // which uses a different scale for its internal grid)
       const [qs, rs] = key.split(',')
       const pos = this.#axialToPixel(Number(qs), Number(rs), this.#flat)
->>>>>>> bbe6a39 (feat: sophisticated selection visuals with breathing pulse, vertex markers, and leader halo):src/hypercomb-essentials/src/diamondcoreprocessor.com/pixi/tile-selection.drone.ts
       const cx = pos.x + ox
       const cy = pos.y + oy
 
