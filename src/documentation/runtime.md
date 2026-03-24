@@ -78,17 +78,17 @@ registered effects in the current codebase:
 
 | effect | emitter | purpose |
 |--------|---------|---------|
-| `render:host-ready` | PixiHostDrone | pixi app, container, canvas, renderer are available |
-| `render:mesh-offset` | ShowHoneycombWorker | hex mesh position updated (for overlay alignment) |
-| `render:cell-count` | ShowHoneycombWorker | current cell count and label list changed |
+| `render:host-ready` | PixiHostWorker | pixi app, container, canvas, renderer are available |
+| `render:mesh-offset` | ShowCellDrone | hex mesh position updated (for overlay alignment) |
+| `render:cell-count` | ShowCellDrone | current cell count and label list changed |
 | `render:presence-heat` | AmbientPresenceDrone | per-cell presence heat map for visualization |
 | `mesh:ensure-started` | any | trigger nostr mesh initialization for a signature |
 | `mesh:subscribe` | any | subscribe to mesh events for a signature |
 | `mesh:publish` | any | publish an event to nostr relays |
 | `mesh:ready` | NostrMeshDrone | mesh connection established |
 | `mesh:items-updated` | NostrMeshDrone | cached mesh items changed |
-| `navigation:guard-start` | ShowHoneycombWorker | layer navigation in progress — ignore input |
-| `navigation:guard-end` | ShowHoneycombWorker | layer navigation complete — resume input |
+| `navigation:guard-start` | ShowCellDrone | layer navigation in progress — ignore input |
+| `navigation:guard-end` | ShowCellDrone | layer navigation complete — resume input |
 | `tile:click` | TileOverlayDrone | user clicked a tile (q, r, label, modifiers) |
 | `tile:hover` | TileOverlayDrone | cursor entered a tile (q, r) |
 | `tile:action` | TileOverlayDrone | tile action triggered (edit, remove) |
@@ -132,9 +132,9 @@ window.ioc.register('AxialService', new AxialService())
 
 ## the rendering pipeline
 
-**PixiHostDrone** — creates the pixi `Application`, attaches it to the dom, initializes `AxialService` with `Settings`, and broadcasts `'render:host-ready'` carrying the app, container, canvas, and renderer.
+**PixiHostWorker** — creates the pixi `Application`, attaches it to the dom, initializes `AxialService` with `Settings`, and broadcasts `'render:host-ready'` carrying the app, container, canvas, and renderer.
 
-**ShowHoneycombWorker** — subscribes to `'render:host-ready'`. receives the pixi infrastructure and renders the hex grid.
+**ShowCellDrone** — subscribes to `'render:host-ready'`. receives the pixi infrastructure and renders the hex grid.
 
 **ZoomDrone** — manages zoom state. uses `ZoomArbiter` for exclusive control (only one input source zooms at a time). tracks min/max scale (0.05–12) and pivot-preserving zoom math. persists viewport zoom/pan snapshots to the current seed's OPFS properties file, restoring them on navigation. subscribes to `'render:host-ready'`.
 
@@ -254,10 +254,10 @@ Settings
   └──> AxialService (uses hexagonSide, rings)
          └──> AxialCoordinate (uses Settings for Location)
 
-PixiHostDrone
+PixiHostWorker
   ├──> deps: Settings, AxialService
   └──> emits: 'render:host-ready'
-         ├──> ShowHoneycombWorker (subscribes)
+         ├──> ShowCellDrone (subscribes)
          │     ├──> emits: 'render:mesh-offset', 'render:cell-count'
          │     └──> emits: 'navigation:guard-start', 'navigation:guard-end'
          ├──> TileOverlayDrone (subscribes)

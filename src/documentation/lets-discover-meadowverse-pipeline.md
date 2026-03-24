@@ -93,7 +93,7 @@ export class ParticleFieldDrone extends Drone {
 
 the bee resolves `meadowverse:scene` from IoC — the shared Three.js scene that meadowverse provides as infrastructure. it doesn't create the renderer, doesn't manage the canvas, doesn't handle the animation loop. it just adds its contribution to the scene and updates it on each pulse.
 
-this is the same pattern hypercomb-web uses. `PixiHostDrone` owns the Pixi.js application and registers it in IoC. rendering drones resolve the stage and add their sprites. meadowverse would have a `ThreeHostWorker` that owns the renderer, camera, and scene, registering them as IoC services. 3D bees resolve what they need and contribute their geometry.
+this is the same pattern hypercomb-web uses. `PixiHostWorker` owns the Pixi.js application and registers it in IoC. rendering drones resolve the stage and add their sprites. meadowverse would have a `ThreeHostWorker` that owns the renderer, camera, and scene, registering them as IoC services. 3D bees resolve what they need and contribute their geometry.
 
 ---
 

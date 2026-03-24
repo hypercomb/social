@@ -134,9 +134,9 @@ with companion payload type exports. drones import these constants instead of us
 ```
 1. Settings registers in ioc
 2. AxialService registers, calls initialize(settings)
-3. PixiHostDrone registers, creates pixi app
-4. PixiHostDrone emits 'render:host-ready'
-5. ShowHoneycombWorker, ZoomDrone, PanningDrone subscribe and activate
+3. PixiHostWorker registers, creates pixi app
+4. PixiHostWorker emits 'render:host-ready'
+5. ShowCellDrone, ZoomDrone, PanningDrone subscribe and activate
 6. NostrMeshDrone registers, awaits 'mesh:ensure-started'
 7. Store initializes OPFS root
 8. Lineage bootstraps from url

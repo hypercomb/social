@@ -102,7 +102,7 @@ This enables deduplication (multiple seeds reference the same resource by signat
 
 ### 1. Discovery
 
-`ShowHoneycombWorker` listens for `synchronize` events and runs the render pipeline:
+`ShowCellDrone` listens for `synchronize` events and runs the render pipeline:
 
 1. Get the current explorer directory from `Lineage`
 2. List all seed folders (non-reserved subdirectories)

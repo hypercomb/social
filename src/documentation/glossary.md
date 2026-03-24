@@ -174,16 +174,16 @@ layered keyboard shortcut engine. bees push and pop `KeyMapLayer` instances to r
 passive presence tracking via the nostr mesh. `AmbientPresenceDrone` aggregates mesh activity into a per-cell heat map and emits `render:presence-heat`. the hex sdf shader uses heat values to tint tiles, making collective attention visible without profiles or accounts.
 
 ### tile selection drone
-programmatic hex overlay for multi-select. `TileSelectionDrone` in `@hypercomb/essentials` (`input/selection/tile-selection.drone.ts`). ctrl+click toggles a tile; ctrl+drag range-selects. first selected tile becomes the **leader** (amber overlay), others are green. emits `selection:changed` with leader info and relative axial coordinates for computational irreducibility math. listens to `render:host-ready`, `render:mesh-offset`, `render:cell-count`.
+programmatic hex overlay for multi-select. `TileSelectionDrone` in `@hypercomb/essentials` (`selection/tile-selection.drone.ts`). ctrl+click toggles a tile; ctrl+drag range-selects. first selected tile becomes the **leader** (amber overlay), others are green. emits `selection:changed` with leader info and relative axial coordinates for computational irreducibility math. listens to `render:host-ready`, `render:mesh-offset`, `render:cell-count`.
 
 ### tile editor drone
 seed editing drone. `TileEditorDrone` in `@hypercomb/essentials` (`editor/tile-editor.drone.ts`). provides seed creation and property editing. emits `tile:saved` when a seed is persisted.
 
 ### hex sdf shader
-signed-distance-field shader for rendering hex tiles in pixi.js. `HexSdfTextureShader` in `@hypercomb/essentials` (`pixi/hex-sdf.shader.ts`). replaces the original svg-based borders with gpu-computed hex outlines and overlays. supports both pointy-top and flat-top orientations. samples from the label atlas and image atlas to render text and images clipped to the hex boundary. branch indicators and selection highlights are drawn as sdf rings.
+signed-distance-field shader for rendering hex tiles in pixi.js. `HexSdfTextureShader` in `@hypercomb/essentials` (`presentation/grid/hex-sdf.shader.ts`). replaces the original svg-based borders with gpu-computed hex outlines and overlays. supports both pointy-top and flat-top orientations. samples from the label atlas and image atlas to render text and images clipped to the hex boundary. branch indicators and selection highlights are drawn as sdf rings.
 
 ### navigation guard
-a pair of effects (`navigation:guard-start`, `navigation:guard-end`) emitted by `ShowHoneycombWorker` during layer transitions. while a guard is active, tile overlay and selection bees ignore clicks, and `KeyMapService` suspends bindings. prevents input during the incremental mesh rebuild.
+a pair of effects (`navigation:guard-start`, `navigation:guard-end`) emitted by `ShowCellDrone` during layer transitions. while a guard is active, tile overlay and selection bees ignore clicks, and `KeyMapService` suspends bindings. prevents input during the incremental mesh rebuild.
 
 ### secret store
 shared secret state in `@hypercomb/shared`. persists a single value in `localStorage` (`hc:secret`). on first access, captures any subdomain-derived secret from the url for mesh room joining. exposed in the controls bar ui via a lock icon.
@@ -192,7 +192,7 @@ shared secret state in `@hypercomb/shared`. persists a single value in `localSto
 shared room state in `@hypercomb/shared`. manages the current room identity and secret for mesh participation. provides room controls (join, leave, secret management) in the controls bar ui.
 
 ### input gate
-shared input exclusivity service in `@hypercomb/essentials` (`input/input-gate.service.ts`). ensures only one input consumer (e.g., panning, selection, editor) has control at a time. also suppresses the browser context menu when an input source is active. drones call `acquire(source)` / `release(source)` to coordinate.
+shared input exclusivity service in `@hypercomb/essentials` (`navigation/input-gate.service.ts`). ensures only one input consumer (e.g., panning, selection, editor) has control at a time. also suppresses the browser context menu when an input source is active. drones call `acquire(source)` / `release(source)` to coordinate.
 
 ### hex orientation
 the grid supports two hex orientations: **pointy-top** (default) and **flat-top**. toggled via a header bar control. the orientation propagates through `Settings` to all input drones (hex detection, panning, selection) and rendering drones (sdf shader, tile overlay). the coordinate math adapts automatically — flat-top swaps the projection axes.

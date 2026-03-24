@@ -130,9 +130,9 @@ the spatial foundation is a hexagonal grid using axial coordinates.
 - **AxialCoordinate**: (q, r, s) cube coordinates where q + r + s = 0.
 - **AxialService**: generates the grid in concentric rings, caches adjacency
   lists for all six neighbors, and provides closest-cell lookup.
-- **PixiHostDrone**: creates the pixi application and root render container.
+- **PixiHostWorker**: creates the pixi application and root render container.
   broadcasts `render:host-ready` so other drones can draw.
-- **ShowHoneycombWorker**: unions local opfs seeds with mesh seeds, maps them
+- **ShowCellDrone**: unions local opfs seeds with mesh seeds, maps them
   onto axial positions, and renders labeled hex tiles via sdf shaders.
 - **HexSdfTextureShader**: programmatic signed-distance-field rendering for
   hex tiles — replaced svg borders with gpu-computed borders and overlays.
@@ -199,14 +199,26 @@ the hive is layered. each ring depends only on the rings inside it.
                          organized by domain namespace:
 
   diamondcoreprocessor.com/
-    core/                AxialService, HistoryService, Settings, SelectionService, MeshAdapter
+    assistant/           ClaudeBridgeWorker (AI assistant integration)
+    bridge/              ClaudeBridgeDrone (WebSocket bridge)
+    clipboard/           ClipboardWorker, ClipboardService
+    commands/            CommandPaletteDrone, HelpQueenBee, ShortcutSheetDrone, SlashCommandDrone
     editor/              TileEditorDrone, TileEditorService, ImageEditorService
-    input/               PanningDrone, ZoomDrone, KeyMapService, TileSelectionDrone, InputGate
-    nostr/               NostrMeshDrone, NostrSigner, AmbientPresenceDrone
-    pixi/                PixiHostDrone, ShowHoneycombWorker, TileOverlayDrone, TileSelectionDrone, AvatarSwarmDrone, Shaders
-    screen/              ScreenService, ScreenState
-    settings/            SettingsDrone, ZoomSettings
-    ui/                  SlashCommandDrone, HelpQueenBee, CommandPaletteDrone
+    history/             HistoryRecorderDrone, HistoryService, OrderProjection
+    keyboard/            KeyMapService, DefaultKeymap, EscapeCascade
+    move/                MoveDrone, LayoutService, desktop/touch move inputs
+    navigation/          InputGate, HexDetector, BeeToggle
+      pan/               PanningDrone, SpacebarPan, TouchPan
+      zoom/              ZoomDrone, ZoomArbiter, MousewheelZoom, PinchZoom
+      touch/             TouchGestureCoordinator
+    preferences/         SettingsDrone, Settings, ZoomSettings
+    presentation/        ScreenService, ScreenState
+      avatars/           AvatarSwarmDrone, BeeSwarmShader
+      background/        BackgroundDrone, context-aware providers
+      grid/              AxialCoordinate, AxialService, HexGeometry, SDF shader, atlases
+      tiles/             PixiHostWorker, ShowCellDrone, TileOverlayDrone, MovePreviewDrone
+    selection/           SelectionService, TileSelectionDrone
+    sharing/             NostrMeshDrone, NostrSigner, AmbientPresenceWorker, MeshAdapterDrone
 
   revolucionstyle.com/
     journal/             CigarJournalDrone, JournalEntryDrone, JournalService

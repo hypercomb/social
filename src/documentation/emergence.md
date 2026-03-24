@@ -20,7 +20,7 @@ The brood phase gathers everything the mesh will need before any vertices are wr
 
 ### 1. Seed Discovery
 
-`renderFromSynchronize()` in `ShowHoneycombWorker` is the entry point, triggered by the `synchronize` window event (dispatched solely by the processor).
+`renderFromSynchronize()` in `ShowCellDrone` is the entry point, triggered by the `synchronize` window event (dispatched solely by the processor).
 
 - Lists seed folders from the OPFS explorer directory
 - Unions with mesh seeds (Nostr relay items)
@@ -179,15 +179,15 @@ Events and effects that cause re-emergence:
 
 | File | Role |
 |------|------|
-| `pixi/show-honeycomb.drone.ts` | Orchestrates the full emergence |
-| `pixi/pixi-host.drone.ts` | Creates and manages the Pixi Application |
-| `pixi/hex-geometry.ts` | Hex dimension constants (circumRadius, gap, padding) |
-| `pixi/hex-sdf.shader.ts` | SDF shader — hex clipping + atlas sampling |
-| `pixi/hex-label.atlas.ts` | Text-to-texture atlas for seed labels |
-| `pixi/hex-image.atlas.ts` | Image blob atlas for seed thumbnails |
-| `pixi/tile-overlay.drone.ts` | Hover button overlays |
-| `pixi/tile-selection.drone.ts` | Selection highlight rendering |
-| `pixi/move-preview.drone.ts` | Move swap indicator overlays |
-| `pixi/hex-detector.ts` | Pixel → axial coordinate hit detection |
+| `presentation/tiles/show-cell.drone.ts` | Orchestrates the full emergence |
+| `presentation/tiles/pixi-host.worker.ts` | Creates and manages the Pixi Application |
+| `presentation/grid/hex-geometry.ts` | Hex dimension constants (circumRadius, gap, padding) |
+| `presentation/grid/hex-sdf.shader.ts` | SDF shader — hex clipping + atlas sampling |
+| `presentation/grid/hex-label.atlas.ts` | Text-to-texture atlas for seed labels |
+| `presentation/grid/hex-image.atlas.ts` | Image blob atlas for seed thumbnails |
+| `presentation/tiles/tile-overlay.drone.ts` | Hover button overlays |
+| `presentation/tiles/tile-selection.drone.ts` | Selection highlight rendering |
+| `presentation/tiles/move-preview.drone.ts` | Move swap indicator overlays |
+| `navigation/hex-detector.ts` | Pixel → axial coordinate hit detection |
 
 All paths relative to `hypercomb-essentials/src/diamondcoreprocessor.com/`.

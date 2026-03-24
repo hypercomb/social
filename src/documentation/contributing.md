@@ -123,7 +123,7 @@ model. they must not be weakened or worked around:
 
 - all documentation filenames are lowercase with hyphens.
 - links in docs must be readable -- no tracking parameters, no analytics.
-- drone classes end with `Drone` (e.g., `PixiHostDrone`, `ZoomDrone`).
+- drone classes end with `Drone` (e.g., `PixiHostWorker`, `ZoomDrone`).
   queen bee classes end with `QueenBee` (e.g., `HelpQueenBee`).
 - ioc registration keys are plain strings matching the class name without
   the `Drone` suffix where appropriate (e.g., `'PixiHost'`, `'Settings'`).

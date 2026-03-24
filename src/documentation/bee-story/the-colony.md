@@ -28,7 +28,7 @@ the registry has four operations: `register`, `get`, `has`, `list`. that is the 
 
 real bees allocate labor through feedback loops. if there is too much nectar and not enough processing, more bees switch to processing. if there are too many nurses and not enough foragers, bees age into foraging earlier. no one decides this. the colony's chemical signals create pressure, and individual bees respond.
 
-drones self-organize through the effect bus. when `PixiHostDrone` emits `'render:host-ready'`, it is not addressing `ShowHoneycombWorker` by name. it is broadcasting a colony-wide signal: *the rendering infrastructure is available.* any drone that cares about rendering responds. any drone that doesn't, ignores it.
+drones self-organize through the effect bus. when `PixiHostWorker` emits `'render:host-ready'`, it is not addressing `ShowCellDrone` by name. it is broadcasting a colony-wide signal: *the rendering infrastructure is available.* any drone that cares about rendering responds. any drone that doesn't, ignores it.
 
 adding a new drone to the colony does not require modifying any existing drone. this is the open-closed principle expressed as biology: the colony grows by addition, not by surgery.
 

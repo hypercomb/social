@@ -37,7 +37,7 @@ export const initializeRuntime = async (
   const history = get('@hypercomb.social/BootstrapHistory') as BootstrapHistory | undefined
   await history?.run?.()
 
-  console.log('[runtime-initializer] ioc keys:', list())
+  // console.log('[runtime-initializer] ioc keys:', list())
 
   // pivot: restore persisted state + handle toggle command
   let pivotOn = localStorage.getItem('hc:hex-pivot') === 'true'

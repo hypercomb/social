@@ -271,7 +271,7 @@ installed bees are available at every location in the tree.
 
 The `Lineage` service tracks the current position in this tree. `Navigation`
 moves through it. The URL bar is a direct reflection of your position in the
-seed hierarchy. The `ShowHoneycombWorker` renders the current seed's children as
+seed hierarchy. The `ShowCellDrone` renders the current seed's children as
 hexagonal cells, unioning local filesystem seeds with seeds discovered through
 the mesh.
 

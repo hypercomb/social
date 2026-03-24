@@ -159,7 +159,7 @@ export class App {
   }
 
   private readonly startRegisteredBees = async (): Promise<void> => {
-    console.log('[core-adapter] ioc keys:', list())
+    // console.log('[core-adapter] ioc keys:', list())
 
     const values = list()
       .map(key => get(key))
