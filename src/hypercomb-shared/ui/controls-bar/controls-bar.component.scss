@@ -560,3 +560,116 @@
     font-size: 0.75rem;
   }
 }
+
+// ── phone-only: double all sizes (excludes large iPads / 13" screens) ──
+@media (max-width: 768px) and (pointer: coarse) {
+
+  .controls-pill {
+    padding: 0.7rem 1rem;
+    gap: 0.4rem;
+    font-size: 1.1rem;
+    bottom: calc(1.8rem + var(--safe-bottom, 0px));
+  }
+
+  .controls-section {
+    gap: 0.35rem;
+  }
+
+  .controls-divider {
+    height: 2.8rem;
+    margin: 0 0.35rem;
+  }
+
+  .ctl-btn {
+    min-width: 5rem;
+    min-height: 5rem;
+    padding: 0.9rem;
+
+    .hci {
+      font-size: 2.2rem;
+    }
+
+    .dcp-icon {
+      font-size: 2.6rem;
+    }
+  }
+
+  .badge {
+    min-width: 24px;
+    height: 24px;
+    font-size: 0.85rem;
+    line-height: 24px;
+    top: -6px;
+    right: -6px;
+  }
+
+  .mode-label,
+  .clipboard-count {
+    font-size: 1.3rem;
+  }
+
+  .clipboard-empty {
+    font-size: 1.2rem;
+  }
+
+  .close-x {
+    font-size: 2rem;
+  }
+
+  .bee-icon {
+    font-size: 24px;
+  }
+
+  .breadcrumb-float {
+    font-size: 1.3rem;
+    bottom: calc(6rem + var(--safe-bottom, 0px));
+
+    .path-crumb,
+    .space-crumb,
+    .leaf-crumb,
+    .secret-crumb {
+      font-size: 1.3rem;
+    }
+
+    .address-crumb {
+      font-size: 1.2rem;
+    }
+
+    .address-icon .hci {
+      font-size: 1.5rem;
+    }
+
+    .crumb-link {
+      padding: 0.4rem 0.25rem;
+    }
+
+    .ctl-btn {
+      min-width: 3.2rem;
+      min-height: 3.2rem;
+      padding: 0.35rem;
+      .hci { font-size: 1.5rem; }
+    }
+  }
+
+  .tag-crumb {
+    font-size: 1.3rem;
+    padding: 0.1rem 0.7rem;
+  }
+
+  .tag-lead-icon {
+    font-size: 1.6rem;
+  }
+
+  .room-shell {
+    height: 3.6rem;
+  }
+
+  .room-input {
+    font-size: 16px;
+    width: 10rem;
+  }
+
+  .room-display {
+    font-size: 1.3rem;
+  }
+}

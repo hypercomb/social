@@ -265,3 +265,45 @@ $secret-bg: rgba(10, 12, 16, 0.85);
     padding: 0 0.75em;
   }
 }
+
+// ── phone-only: double all sizes (excludes large iPads / 13" screens) ──
+@media (max-width: 768px) and (pointer: coarse) {
+
+  .header-bar {
+    padding: 0.4rem 0.8rem;
+  }
+
+  .shield-toggle {
+    padding: 0 1.2rem;
+
+    .hci {
+      font-size: 1.4rem;
+    }
+  }
+
+  .header-secret-input {
+    width: 12rem;
+    padding: 0.8rem 1.4rem 0.8rem 0.88rem;
+    font-size: 16px;
+  }
+
+  .secret-eye {
+    width: 3.5rem;
+
+    .hci {
+      font-size: 1.4rem;
+    }
+  }
+
+  .secret-clear {
+    padding: 0 2rem 0 1rem;
+    font-size: 1.5rem;
+  }
+
+  .public-toggle,
+  .private-toggle {
+    min-width: 7rem;
+    padding: 0 2em;
+    font-size: 1.3em;
+  }
+}

@@ -17,6 +17,7 @@ input, textarea, [contenteditable="true"] {
 
 body{
     background-color: #0b131a   ;
+    touch-action: manipulation;
 }
 
 // ── mobile detection + safe-area insets ──────────────────
