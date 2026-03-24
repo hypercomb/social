@@ -1,10 +1,10 @@
 import { Component } from '@angular/core';
-import { SearchBarComponent } from '@hypercomb/shared/ui/search-bar/search-bar.component';
+import { CommandLineComponent } from '@hypercomb/shared/ui/command-line/command-line.component';
 
 @Component({
   selector: 'app-header',
   standalone: true,
-  imports: [SearchBarComponent],
+  imports: [CommandLineComponent],
   templateUrl: './header.html',
   styleUrl: './header.scss'
 })

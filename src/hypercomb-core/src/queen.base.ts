@@ -22,7 +22,7 @@ export abstract class QueenBee extends Bee {
   public async pulse(_grammar: string): Promise<void> { }
 
   /**
-   * Direct invocation — called by the search bar (or any caller)
+   * Direct invocation — called by the command line (or any caller)
    * when the user types `/command args`.
    */
   public async invoke(args: string): Promise<void> {

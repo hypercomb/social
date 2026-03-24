@@ -237,7 +237,7 @@ pulse checks lifecycle state, evaluates the gate (`sense()` for drones,
 separate init phase. the intent is the lifecycle trigger.
 
 **queen bees** bypass this cycle entirely. they are invoked directly via
-`invoke(args)` when a user types `/command` in the search bar. their
+`invoke(args)` when a user types `/command` in the command line. their
 `pulse()` is a no-op. they transition to Active on first successful
 `invoke()` call.
 

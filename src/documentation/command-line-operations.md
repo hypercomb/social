@@ -1,6 +1,6 @@
-# Search Bar Operations Reference
+# Command Line Operations Reference
 
-> Comprehensive guide to every operation available in the Hypercomb search bar.
+> Comprehensive guide to every operation available in the Hypercomb command line.
 > Update this document as new behaviors are added.
 
 ---
@@ -212,15 +212,15 @@ Behavior file &mdash; `slash-command.behavior.ts`
 
 ## Architecture
 
-Behaviors implement the `SearchBarBehavior` interface from `search-bar-behavior.ts`:
+Behaviors implement the `CommandLineBehavior` interface from `command-line-behavior.ts`:
 
 ```typescript
-interface SearchBarBehavior extends SearchBarBehaviorMeta {
+interface CommandLineBehavior extends CommandLineBehaviorMeta {
   match(event: KeyboardEvent, input: string): boolean
   execute(input: string): Promise<void> | void
 }
 ```
 
-**Resolution order** &mdash; Pluggable behaviors are registered in `SearchBarComponent.#behaviors` and evaluated first-match-wins. Built-in behaviors are hardcoded in `onKeyDown` and listed in `SearchBarComponent.builtinBehaviors` for self-documentation.
+**Resolution order** &mdash; Pluggable behaviors are registered in `CommandLineComponent.#behaviors` and evaluated first-match-wins. Built-in behaviors are hardcoded in `onKeyDown` and listed in `CommandLineComponent.builtinBehaviors` for self-documentation.
 
-**Runtime introspection** &mdash; All metadata is queryable via `SearchBarComponent.behaviorReference`.
+**Runtime introspection** &mdash; All metadata is queryable via `CommandLineComponent.behaviorReference`.

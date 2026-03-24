@@ -1,3 +1,3 @@
 export * from './environments/environment'
-export * from './ui/search-bar/search-bar.component'
+export * from './ui/command-line/command-line.component'
 export * from './core'

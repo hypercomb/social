@@ -1,6 +1,6 @@
-// hypercomb-shared/ui/search-bar/delete-cell.behavior.ts
+// hypercomb-shared/ui/command-line/delete-cell.behavior.ts
 
-import type { SearchBarBehavior } from './search-bar-behavior'
+import type { CommandLineBehavior } from './command-line-behavior'
 import type { CompletionUtility } from '@hypercomb/shared/core/completion-utility'
 import type { Lineage } from '../../core/lineage'
 import { EffectBus, hypercomb } from '@hypercomb/core'
@@ -13,7 +13,7 @@ import { EffectBus, hypercomb } from '@hypercomb/core'
  *   "!parent/child"    → deletes child from parent (parent stays)
  *   "![foo,bar]"       → deletes foo and bar from current directory
  */
-export class DeleteCellBehavior implements SearchBarBehavior {
+export class DeleteCellBehavior implements CommandLineBehavior {
 
   readonly name = 'delete-cell'
   readonly operations = [

@@ -355,7 +355,7 @@ export class MoveDrone extends Drone {
     return placements
   }
 
-  // ── command-driven move API (for search bar /select[...]/move) ──
+  // ── command-driven move API (for command line /select[...]/move) ──
 
   #commandActive = false
   get moveCommandActive(): boolean { return this.#commandActive }
@@ -420,7 +420,7 @@ export class MoveDrone extends Drone {
   }
 
   /**
-   * Update preview for a target axial index (from search bar input).
+   * Update preview for a target axial index (from command line input).
    */
   updateCommandMove = (targetIndex: number): void => {
     if (this.#activeSource !== 'command') return

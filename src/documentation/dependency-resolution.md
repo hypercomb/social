@@ -118,7 +118,7 @@ at runtime.
 
 **What it is:** Service implementations (Lineage, Navigation, Store,
 LayerInstaller, ScriptPreloader, etc.), the `window.ioc` bridge, Angular DI
-tokens, and UI components (SearchBarComponent). Not published as an npm package;
+tokens, and UI components (CommandLineComponent). Not published as an npm package;
 instead, it is included in Angular app builds by source.
 
 **Resolution rules:**

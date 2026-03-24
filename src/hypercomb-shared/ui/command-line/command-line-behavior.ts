@@ -1,15 +1,15 @@
-// hypercomb-shared/ui/search-bar/search-bar-behavior.ts
+// hypercomb-shared/ui/command-line/command-line-behavior.ts
 
 /**
  * A single atomic operation a behavior claims.
  *
  * Each operation is a distinct trigger+pattern pair the behavior handles.
- * The search bar uses these to:
+ * The command line uses these to:
  *   - detect overlaps at registration time
  *   - drive intellisense / hint display
  *   - generate help text
  */
-export interface SearchBarOperation {
+export interface CommandLineOperation {
   /** Key combo that activates this operation, e.g. 'Enter', 'Shift+Enter', 'type' */
   readonly trigger: string
   /** Regex pattern the input must match (tested against trimmed input) */
@@ -17,33 +17,33 @@ export interface SearchBarOperation {
   /** Human-readable description of what this operation does */
   readonly description: string
   /** Concrete examples for intellisense and documentation */
-  readonly examples: readonly SearchBarBehaviorExample[]
+  readonly examples: readonly CommandLineBehaviorExample[]
 }
 
-export interface SearchBarBehaviorExample {
+export interface CommandLineBehaviorExample {
   readonly input: string
   readonly key: string
   readonly result: string
 }
 
 /**
- * Introspectable metadata — everything the search bar needs to
+ * Introspectable metadata — everything the command line needs to
  * display hints, detect conflicts, and generate documentation.
  */
-export interface SearchBarBehaviorMeta {
+export interface CommandLineBehaviorMeta {
   readonly name: string
-  readonly operations: readonly SearchBarOperation[]
+  readonly operations: readonly CommandLineOperation[]
 }
 
 /**
- * A pluggable search bar behavior.
+ * A pluggable command line behavior.
  *
  * Implementors declare their operations (for introspection) and provide
- * match/execute (for runtime dispatch). The search bar guarantees:
+ * match/execute (for runtime dispatch). The command line guarantees:
  *   - no two registered behaviors claim overlapping trigger+pattern
  *   - first match is deterministic (specificity, not insertion order)
  */
-export interface SearchBarBehavior extends SearchBarBehaviorMeta {
+export interface CommandLineBehavior extends CommandLineBehaviorMeta {
   match(event: KeyboardEvent, input: string): boolean
   execute(input: string): Promise<void> | void
 }

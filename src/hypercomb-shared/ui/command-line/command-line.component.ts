@@ -1,4 +1,4 @@
-// hypercomb-shared/ui/search-bar/search-bar.component.ts
+// hypercomb-shared/ui/command-line/command-line.component.ts
 
 import { AfterViewInit, Component, computed, ElementRef, signal, ViewChild, type OnDestroy } from '@angular/core'
 import type { Lineage } from '../../core/lineage'
@@ -9,7 +9,7 @@ import type { SeedSuggestionProvider } from '../../core/seed-suggestion.provider
 import type { CompletionUtility, CompletionContext } from '@hypercomb/shared/core/completion-utility'
 import { fromRuntime } from '../../core/from-runtime'
 import { EffectBus, hypercomb } from '@hypercomb/core'
-import type { SearchBarBehavior, SearchBarBehaviorMeta, SearchBarOperation } from './search-bar-behavior'
+import type { CommandLineBehavior, CommandLineBehaviorMeta, CommandLineOperation } from './command-line-behavior'
 import { ShiftEnterNavigateBehavior } from './shift-enter-navigate.behavior'
 import { BatchCreateBehavior } from './batch-create.behavior'
 import { DeleteCellBehavior } from './delete-cell.behavior'
@@ -30,19 +30,19 @@ const MOVE_ARROW_OFFSETS: Record<string, { dq: number; dr: number }> = {
 }
 
 @Component({
-  selector: 'hc-search-bar',
-  standalone: true, 
-  templateUrl: './search-bar.component.html',
-  styleUrls: ['./search-bar.component.scss']
+  selector: 'hc-command-line',
+  standalone: true,
+  templateUrl: './command-line.component.html',
+  styleUrls: ['./command-line.component.scss']
 })
-export class SearchBarComponent implements AfterViewInit, OnDestroy {
+export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   @ViewChild('input', { read: ElementRef })
   private inputRef?: ElementRef<HTMLInputElement>
 
   private get input(): ElementRef<HTMLInputElement> {
     if (!this.inputRef) {
-      throw new Error('SearchBarComponent input is not available before view init')
+      throw new Error('CommandLineComponent input is not available before view init')
     }
     return this.inputRef
   }
@@ -104,7 +104,7 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
   )
 
   // pluggable behaviors — validated at construction, no overlapping operations
-  #behaviors: SearchBarBehavior[] = this.#validateBehaviors([
+  #behaviors: CommandLineBehavior[] = this.#validateBehaviors([
     new GoParentBehavior(),
     new SlashCommandBehavior(),
     new DeleteCellBehavior(),
@@ -115,7 +115,7 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
   ])
 
   // built-in behaviors that are hardcoded in onKeyDown (not pluggable yet)
-  static readonly builtinBehaviors: readonly SearchBarBehaviorMeta[] = [
+  static readonly builtinBehaviors: readonly CommandLineBehaviorMeta[] = [
     {
       name: 'create',
       operations: [
@@ -162,15 +162,15 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
   ]
 
   /** All behavior metadata — pluggable + built-in */
-  public get behaviorReference(): readonly SearchBarBehaviorMeta[] {
+  public get behaviorReference(): readonly CommandLineBehaviorMeta[] {
     return [
       ...this.#behaviors,
-      ...SearchBarComponent.builtinBehaviors
+      ...CommandLineComponent.builtinBehaviors
     ]
   }
 
   /** All operations across all behaviors, flat */
-  public get allOperations(): readonly SearchBarOperation[] {
+  public get allOperations(): readonly CommandLineOperation[] {
     return this.behaviorReference.flatMap(b => b.operations)
   }
 
@@ -179,7 +179,7 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
    * Uses each operation's examples as probes — if two behaviors both match
    * the same example input under the same trigger, that's a conflict.
    */
-  #validateBehaviors(behaviors: SearchBarBehavior[]): SearchBarBehavior[] {
+  #validateBehaviors(behaviors: CommandLineBehavior[]): CommandLineBehavior[] {
     const claimed = new Map<string, { behavior: string; pattern: RegExp }>()
 
     for (const b of behaviors) {
@@ -189,7 +189,7 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
           const existing = claimed.get(key)
           if (existing) {
             console.warn(
-              `[search-bar] overlap: "${b.name}" and "${existing.behavior}" both claim ` +
+              `[command-line] overlap: "${b.name}" and "${existing.behavior}" both claim ` +
               `trigger="${op.trigger}" for input "${ex.input}". ` +
               `"${existing.behavior}" wins (registered first).`
             )
@@ -224,7 +224,7 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
   })
 
   public constructor() {
-    console.log('[search-bar] initialized with url segments:', this.navigation.segments())
+    console.log('[command-line] initialized with url segments:', this.navigation.segments())
   }
 
   // -------------------------------------------------
@@ -513,8 +513,8 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
 
     window.addEventListener('navigate', this.#onNavigate)
     window.addEventListener('popstate', this.#onNavigate)
-    this.#searchBarToggleUnsub = EffectBus.on<{ cmd: string }>('keymap:invoke', (payload) => {
-      if (payload?.cmd !== 'ui.searchBarToggle') return
+    this.#commandLineToggleUnsub = EffectBus.on<{ cmd: string }>('keymap:invoke', (payload) => {
+      if (payload?.cmd !== 'ui.commandLineToggle') return
       if (document.activeElement === this.input.nativeElement) {
         this.input.nativeElement.blur()
       } else {
@@ -539,7 +539,7 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
       }
     })
 
-    // Bi-directional sync: external selection changes → update search bar
+    // Bi-directional sync: external selection changes → update command line
     this.#selectionSyncUnsub = EffectBus.on<{ selected: string[]; active: string | null }>('selection:changed', (payload) => {
       if (this.#syncDirection === 'command') return // prevent feedback loop
       if (!payload?.selected) return
@@ -568,7 +568,7 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
 
   readonly touchDragging = signal(false)
   #prefillUnsub?: () => void
-  #searchBarToggleUnsub?: () => void
+  #commandLineToggleUnsub?: () => void
   #touchDraggingUnsub?: () => void
   #selectionSyncUnsub?: () => void
   readonly #onNavigate = (): void => { this.clear() }
@@ -589,7 +589,7 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
 
   public ngOnDestroy(): void {
     this.#prefillUnsub?.()
-    this.#searchBarToggleUnsub?.()
+    this.#commandLineToggleUnsub?.()
     this.#touchDraggingUnsub?.()
     this.#selectionSyncUnsub?.()
     window.removeEventListener('navigate', this.#onNavigate)
@@ -904,7 +904,7 @@ export class SearchBarComponent implements AfterViewInit, OnDestroy {
     this.#collapseToSelect(labels)
   }
 
-  /** After an operation completes, collapse the search bar to /select[remaining-tiles] */
+  /** After an operation completes, collapse the command line to /select[remaining-tiles] */
   /** Build /select[...] string, truncating names when unfocused and list exceeds thresholds */
   #buildSelectValue(labels: readonly string[], truncate: boolean): string {
     if (!truncate) return '/select[' + labels.join(',') + ']'

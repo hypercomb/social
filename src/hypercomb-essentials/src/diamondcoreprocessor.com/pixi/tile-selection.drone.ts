@@ -111,7 +111,7 @@ export class TileSelectionDrone extends Drone {
       if (cmd in ARROW_OFFSETS) { this.#handleArrowNav(cmd); return }
     })
 
-    // Sync from SelectionService (e.g. search bar command-driven selection)
+    // Sync from SelectionService (e.g. command line command-driven selection)
     // SelectionService emits { selected: string[], active: string | null }
     // This drone emits { count, keys, labels, leader, relativeAxials } — ignore own emissions
     this.onEffect<Record<string, unknown>>('selection:changed', (payload) => {

@@ -60,7 +60,7 @@ every bee in the hive is a `Bee`. bees come in three flavors:
 
 - **drone** — reactive bee. pulses every cycle. uses `sense()` + `heartbeat()`.
 - **worker** — bootstrap-once bee. acts once when `ready()` returns true, then goes dormant.
-- **queen bee** — real-time command bee. invoked directly via `/command` in the search bar, bypassing the processor pulse cycle. has no `sense()` or `heartbeat()` — uses `execute(args)` instead.
+- **queen bee** — real-time command bee. invoked directly via `/command` in the command line, bypassing the processor pulse cycle. has no `sense()` or `heartbeat()` — uses `execute(args)` instead.
 
 drones and workers share the same lifecycle state machine:
 
@@ -225,7 +225,7 @@ the hive is layered. each ring depends only on the rings inside it.
                          Store (opfs), Lineage (navigation),
                          Navigation, SecretStore, RoomStore,
                          LayerInstaller, BridgeProviders for angular DI.
-                         UI: SearchBar, ControlsBar, ActivityLog, PortalOverlay.
+                         UI: CommandLine, ControlsBar, ActivityLog, PortalOverlay.
 
 hypercomb-web            the app. angular shell.
                          home page, setup, service worker.

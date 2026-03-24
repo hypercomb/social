@@ -1,6 +1,6 @@
-// hypercomb-shared/ui/search-bar/go-parent.behavior.ts
+// hypercomb-shared/ui/command-line/go-parent.behavior.ts
 
-import type { SearchBarBehavior } from './search-bar-behavior'
+import type { CommandLineBehavior } from './command-line-behavior'
 import type { Navigation } from '../../core/navigation'
 
 /**
@@ -13,7 +13,7 @@ import type { Navigation } from '../../core/navigation'
  *
  * Clamps to root — never errors if you overshoot.
  */
-export class GoParentBehavior implements SearchBarBehavior {
+export class GoParentBehavior implements CommandLineBehavior {
 
   readonly name = 'go-parent'
   readonly operations = [

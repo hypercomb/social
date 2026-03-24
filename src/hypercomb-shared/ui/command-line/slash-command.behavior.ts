@@ -1,6 +1,6 @@
-// hypercomb-shared/ui/search-bar/slash-command.behavior.ts
+// hypercomb-shared/ui/command-line/slash-command.behavior.ts
 
-import type { SearchBarBehavior } from './search-bar-behavior'
+import type { CommandLineBehavior } from './command-line-behavior'
 
 /**
  * `/command args` → invoke a queen bee by its `command` property.
@@ -10,7 +10,7 @@ import type { SearchBarBehavior } from './search-bar-behavior'
  *   "/paste interests" → invokes 'paste' queen bee with args 'interests'
  *   "/?"             → alias for /help
  */
-export class SlashCommandBehavior implements SearchBarBehavior {
+export class SlashCommandBehavior implements CommandLineBehavior {
 
   readonly name = 'slash-command'
   readonly operations = [

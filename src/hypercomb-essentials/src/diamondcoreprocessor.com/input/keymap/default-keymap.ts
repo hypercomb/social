@@ -36,9 +36,9 @@ export const globalKeyMap: KeyMapLayer = {
       pierce: true,
     },
     {
-      cmd: 'ui.searchBarToggle',
+      cmd: 'ui.commandLineToggle',
       sequence: [[{ key: 'space', ctrl: true }]],
-      description: 'Toggle search bar focus',
+      description: 'Toggle command line focus',
       category: 'Navigation',
       pierce: true,
     },

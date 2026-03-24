@@ -118,7 +118,7 @@ src/
 ├── hypercomb-cli/              # CLI tool: `hypercomb build`, `hypercomb inspect`
 ├── hypercomb-shared/           # Store, Lineage, Navigation, LayerInstaller, UI components
 │   ├── core/                   # Services: Store, Lineage, Navigation, SecretStore, RoomStore, ioc.web
-│   └── ui/                     # Angular components: SearchBar, ControlsBar, FileExplorer, History
+│   └── ui/                     # Angular components: CommandLine, ControlsBar, FileExplorer, History
 ├── hypercomb-web/              # Production Angular app (runtime drone loading)
 ├── hypercomb-dev/              # Development Angular app (direct drone imports)
 ├── documentation/              # Feature docs, implementation guides, how-things-work

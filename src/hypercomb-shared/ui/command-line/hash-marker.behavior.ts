@@ -1,6 +1,6 @@
-// hypercomb-shared/ui/search-bar/hash-marker.behavior.ts
+// hypercomb-shared/ui/command-line/hash-marker.behavior.ts
 
-import type { SearchBarBehavior } from './search-bar-behavior'
+import type { CommandLineBehavior } from './command-line-behavior'
 import type { CompletionUtility } from '@hypercomb/shared/core/completion-utility'
 import type { Lineage } from '../../core/lineage'
 import { EffectBus, hypercomb } from '@hypercomb/core'
@@ -18,7 +18,7 @@ import { EffectBus, hypercomb } from '@hypercomb/core'
  * The processor reads these at pulse time to decide which bees
  * are relevant for the seed.
  */
-export class HashMarkerBehavior implements SearchBarBehavior {
+export class HashMarkerBehavior implements CommandLineBehavior {
 
   readonly name = 'hash-marker'
   readonly operations = [

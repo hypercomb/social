@@ -1,6 +1,6 @@
-// hypercomb-shared/ui/search-bar/batch-create.behavior.ts
+// hypercomb-shared/ui/command-line/batch-create.behavior.ts
 
-import type { SearchBarBehavior } from './search-bar-behavior'
+import type { CommandLineBehavior } from './command-line-behavior'
 import type { CompletionUtility } from '@hypercomb/shared/core/completion-utility'
 import type { Lineage } from '../../core/lineage'
 import { EffectBus, hypercomb } from '@hypercomb/core'
@@ -16,7 +16,7 @@ import { EffectBus, hypercomb } from '@hypercomb/core'
  * Brackets expand into all comma-separated variants. Each resulting
  * path is created as a folder chain in OPFS.
  */
-export class BatchCreateBehavior implements SearchBarBehavior {
+export class BatchCreateBehavior implements CommandLineBehavior {
 
   readonly name = 'batch-create'
   readonly operations = [

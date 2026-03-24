@@ -1,6 +1,6 @@
-// hypercomb-shared/ui/search-bar/cut-paste.behavior.ts
+// hypercomb-shared/ui/command-line/cut-paste.behavior.ts
 
-import type { SearchBarBehavior } from './search-bar-behavior'
+import type { CommandLineBehavior } from './command-line-behavior'
 import type { CompletionUtility } from '@hypercomb/shared/core/completion-utility'
 import type { Lineage } from '../../core/lineage'
 import type { Navigation } from '../../core/navigation'
@@ -24,7 +24,7 @@ interface HistoryServiceLike {
  * still create seeds at the destination (same as regular create).
  * Path is relative to the current explorer directory.
  */
-export class CutPasteBehavior implements SearchBarBehavior {
+export class CutPasteBehavior implements CommandLineBehavior {
 
   readonly name = 'cut-paste'
   readonly operations = [

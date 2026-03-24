@@ -1,28 +1,28 @@
-# Search Bar Reference
+# Command Line Reference
 
-The search bar is the primary command interface. All behaviors are pluggable via the `SearchBarBehavior` provider pattern — each behavior declares its own metadata (name, description, syntax, key, examples) so this reference can be generated from code.
+The command line is the primary command interface. All behaviors are pluggable via the `CommandLineBehavior` provider pattern — each behavior declares its own metadata (name, description, syntax, key, examples) so this reference can be generated from code.
 
-> For a quick-reference table of all operations, see [search-bar-operations.md](search-bar-operations.md).
+> For a quick-reference table of all operations, see [command-line-operations.md](command-line-operations.md).
 
 ## Architecture
 
-Behaviors are registered in the `#behaviors` array in `SearchBarComponent`. On each keydown, the search bar iterates the array — **first match wins**. If no behavior matches, the built-in default handlers run.
+Behaviors are registered in the `#behaviors` array in `CommandLineComponent`. On each keydown, the command line iterates the array — **first match wins**. If no behavior matches, the built-in default handlers run.
 
-**Interface**: `SearchBarBehavior` in `hypercomb-shared/ui/search-bar/search-bar-behavior.ts`
+**Interface**: `CommandLineBehavior` in `hypercomb-shared/ui/command-line/command-line-behavior.ts`
 
 ```typescript
-interface SearchBarBehavior {
+interface CommandLineBehavior {
   readonly name: string
   readonly description: string
   readonly syntax: string
   readonly key: string                              // trigger key(s)
-  readonly examples: readonly SearchBarBehaviorExample[]
+  readonly examples: readonly CommandLineBehaviorExample[]
   match(event: KeyboardEvent, input: string): boolean
   execute(input: string): Promise<void> | void
 }
 ```
 
-All metadata is introspectable at runtime via `SearchBarComponent.behaviorReference`.
+All metadata is introspectable at runtime via `CommandLineComponent.behaviorReference`.
 
 ---
 
@@ -192,6 +192,6 @@ Built-in behaviors run after all pluggable behaviors have been checked.
 ## Adding New Behaviors
 
 1. Create a new file: `your-behavior.behavior.ts`
-2. Implement the `SearchBarBehavior` interface with all metadata fields
-3. Import and add to the `#behaviors` array in `SearchBarComponent`
+2. Implement the `CommandLineBehavior` interface with all metadata fields
+3. Import and add to the `#behaviors` array in `CommandLineComponent`
 4. Position determines priority — more specific behaviors should come first

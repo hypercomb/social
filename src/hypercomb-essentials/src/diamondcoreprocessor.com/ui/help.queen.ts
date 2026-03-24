@@ -28,7 +28,7 @@ export class HelpQueenBee extends QueenBee {
       description: q.description ?? '',
     }))
 
-    // emit for UI to pick up (future: render in search bar dropdown or overlay)
+    // emit for UI to pick up (future: render in command line dropdown or overlay)
     EffectBus.emit('queen:help', { commands })
 
     // also log to console for immediate visibility

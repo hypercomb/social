@@ -10,9 +10,9 @@
 - “Core” behavior appears to be evolving; a large scratchpad of planned code exists in [src/app/core/_files](src/app/core/_files). If a symbol is imported but missing as a real file (e.g., `Hypercomb`, `TextIntentSource`, `HypercombMode`), check `_files` before inventing a new API.
 
 ## Conventions & gotchas (important)
-- There are **two** `SearchBarComponent`s with the same selector (`app-search-bar`):
-  - [src/app/core/components/search-bar/search-bar.component.ts](src/app/core/components/search-bar/search-bar.component.ts)
-  - [src/app/common/header/search-bar/search-bar.component.ts](src/app/common/header/search-bar/search-bar.component.ts)
+- There are **two** `CommandLineComponent`s with the same selector (`app-command-line`):
+  - [src/app/core/components/command-line/command-line.component.ts](src/app/core/components/command-line/command-line.component.ts)
+  - [src/app/common/header/command-line/command-line.component.ts](src/app/common/header/command-line/command-line.component.ts)
   Before editing, confirm which one is referenced by the route/template to avoid changing the wrong component.
 - Many files use Angular **signals** for state (`signal`, `computed`) and expose readonly signals from services (example: [src/app/history-service.ts](src/app/history-service.ts)). Prefer this style over RxJS unless the surrounding code already uses Observables.
 - Browser history integration:
@@ -31,4 +31,4 @@
 
 ## Safe change checklist
 - When touching routing or core imports, run `npm run build` to catch missing-file/alias issues early.
-- When editing `SearchBarComponent`, double-check the file path to avoid the duplicate component.
+- When editing `CommandLineComponent`, double-check the file path to avoid the duplicate component.

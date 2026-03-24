@@ -35,7 +35,7 @@ the bee is the unit of behavior. every runtime action is performed by a bee. bee
 
 - **drone** — reactive bee. pulses every cycle. overrides `sense()` + `heartbeat()`.
 - **worker** — bootstrap-once bee. overrides `ready()` + `act()`. acts once, then goes dormant.
-- **queen bee** — real-time command bee. invoked via `/command` in the search bar. bypasses the processor pulse cycle. overrides `execute(args)`. class: `QueenBee` in `@hypercomb/core`.
+- **queen bee** — real-time command bee. invoked via `/command` in the command line. bypasses the processor pulse cycle. overrides `execute(args)`. class: `QueenBee` in `@hypercomb/core`.
 
 **lifecycle**: `Created → Registered → Active → Disposed`
 

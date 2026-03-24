@@ -1,6 +1,6 @@
 // hypercomb-shared/core/seed-suggestion.provider.ts
 // Lists subdirectory names at the current explorer level as autocomplete suggestions.
-// Supports sub-path queries: when the user types "abc/" the search bar calls
+// Supports sub-path queries: when the user types "abc/" the command line calls
 // query(['abc']) to show children of "abc" instead of siblings.
 
 import type { Lineage } from './lineage'

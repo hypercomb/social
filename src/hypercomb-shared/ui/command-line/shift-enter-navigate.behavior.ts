@@ -1,6 +1,6 @@
-// hypercomb-shared/ui/search-bar/shift-enter-navigate.behavior.ts
+// hypercomb-shared/ui/command-line/shift-enter-navigate.behavior.ts
 
-import type { SearchBarBehavior } from './search-bar-behavior'
+import type { CommandLineBehavior } from './command-line-behavior'
 import type { CompletionUtility } from '@hypercomb/shared/core/completion-utility'
 import type { Lineage } from '../../core/lineage'
 import type { Navigation } from '../../core/navigation'
@@ -14,7 +14,7 @@ import type { Navigation } from '../../core/navigation'
  * This is a non-destructive, read-only operation. If the path
  * doesn't exist, nothing happens. Creation is Enter's job.
  */
-export class ShiftEnterNavigateBehavior implements SearchBarBehavior {
+export class ShiftEnterNavigateBehavior implements CommandLineBehavior {
 
   readonly name = 'shift-enter-navigate'
   readonly operations = [
