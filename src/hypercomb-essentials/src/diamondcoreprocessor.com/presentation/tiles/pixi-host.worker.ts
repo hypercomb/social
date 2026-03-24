@@ -37,6 +37,9 @@ export class PixiHostWorker extends Worker {
   protected override ready = async (): Promise<boolean> => {
     if (this.app) return false
 
+    // guard: another PixiHostWorker instance already created a canvas
+    if (document.querySelector('[data-hypercomb-pixi="root"] canvas')) return false
+
     const settings = this.resolve<any>('settings')
     const host = document.getElementById('pixi-host') as HTMLDivElement | null
 
@@ -44,6 +47,9 @@ export class PixiHostWorker extends Worker {
   }
 
   protected override act = async (): Promise<void> => {
+    // guard: prevent duplicate canvas from double-loaded modules
+    if (document.querySelector('[data-hypercomb-pixi="root"] canvas')) return
+
     const settings = this.resolve<any>('settings')
     if (!settings) return
 
@@ -61,7 +67,7 @@ export class PixiHostWorker extends Worker {
     host.style.inset = '0'
     host.style.zIndex = '59989'
     host.style.pointerEvents = 'none'
-    
+
     document.body.appendChild(host)
 
     // -------------------------------------------------

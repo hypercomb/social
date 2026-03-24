@@ -38,7 +38,7 @@ export class HexLabelAtlas {
 
     this.style = new TextStyle({
       fontFamily: 'monospace',
-      fontSize: 7.5,
+      fontSize: 10,
       fill: 0xffffff,
       align: 'center'
     })
@@ -69,7 +69,7 @@ export class HexLabelAtlas {
     const row = Math.floor(slot / this.cols)
 
     const text = new Text({ text: label, style: this.style })
-    text.resolution = 4
+    text.resolution = 8
 
     text.anchor.set(0.5)
     text.position.set(

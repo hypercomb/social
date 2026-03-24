@@ -184,7 +184,7 @@
   pointer-events: auto;
 
   &.faded {
-    opacity: 0.15;
+    opacity: 0.35;
     transform: translateX(-50%) translateY(4px);
     > * { pointer-events: none; }
     &:hover {

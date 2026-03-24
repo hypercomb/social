@@ -197,7 +197,8 @@ export class HexSdfTextureShader {
         // label only for cells without snapshot (suppressed on hovered cell)
         vec2 luv = mix(vLabelUV.xy, vLabelUV.zw, vUV);
         float labelAlpha = texture2D(u_label, luv).a;
-        color = mix(color, vec4(1.0, 1.0, 1.0, labelAlpha), labelAlpha);
+        float la = smoothstep(0.02, 0.5, labelAlpha);
+        color = mix(color, vec4(1.0, 1.0, 1.0, 1.0), la * 0.92);
 
         // ambient presence — identity color at rest, shifts to warm amber with heat
         float heatRing = smoothstep(0.0, -1.5, d) - smoothstep(-4.0, -6.0, d);
