@@ -197,7 +197,7 @@ export class ShowCellDrone extends Drone {
 
   protected override heartbeat = async (grammar: string = ''): Promise<void> => {
     this.ensureListeners()
-debugger
+    
     // emit initial geometry so consumers start in sync (first pulse only)
     if (!this.#heartbeatInitialized) {
       this.#heartbeatInitialized = true
