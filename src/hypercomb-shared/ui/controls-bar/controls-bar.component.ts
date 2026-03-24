@@ -4,8 +4,7 @@
 import {
   Component,
   computed,
-  effect,
-  input,
+  Input,
   signal,
   type OnInit,
   type OnDestroy,
@@ -28,7 +27,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
 
   // ── inputs ────────────────────────────────────────────────
 
-  readonly meshPublic = input<boolean | null>(false)
+  @Input() meshPublic: boolean | null = false
 
   // ── IoC resolution ──────────────────────────────────────
 
@@ -172,11 +171,6 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
 
   /** SHA-256 mesh signature of the FQDN */
   readonly signedAddress = signal('')
-  #signEffect = effect(() => {
-    const key = this.#fqdn()
-    SignatureService.sign(new TextEncoder().encode(key).buffer as ArrayBuffer)
-      .then(sig => this.signedAddress.set(sig))
-  })
 
   readonly canGoBack = computed(() => {
     this.#moved$()
@@ -310,6 +304,16 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
       this.#hoveredTags.set(new Set(tags))
     })
 
+    // sign address reactively (replaces effect() which needs injection context)
+    this.#recomputeAddress()
+    window.addEventListener('synchronize', this.#recomputeAddress)
+
+  }
+
+  #recomputeAddress = (): void => {
+    const key = this.#fqdn()
+    SignatureService.sign(new TextEncoder().encode(key).buffer as ArrayBuffer)
+      .then(sig => this.signedAddress.set(sig))
   }
 
   ngOnDestroy(): void {
@@ -330,6 +334,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     this.#beesUnsub?.()
     this.#tagsUnsub?.()
     this.#hoverTagsUnsub?.()
+    window.removeEventListener('synchronize', this.#recomputeAddress)
   }
 
   // ── navigation actions ────────────────────────────────

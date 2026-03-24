@@ -1,4 +1,4 @@
-@if (meshPublic()) {
+@if (meshPublic) {
   <div class="mesh-public">
     <button class="shield-toggle" [class.has-secret]="hasSecret()"
       [style.--shield-color]="shieldColor()" type="button" (click)="onShieldClick()">

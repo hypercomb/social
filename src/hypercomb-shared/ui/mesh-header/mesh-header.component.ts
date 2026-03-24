@@ -1,4 +1,4 @@
-import { Component, computed, input, output, signal } from '@angular/core'
+import { Component, computed, EventEmitter, Input, Output, signal } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import type { SecretStore } from '../../core/secret-store'
 import type { SecretStrengthProvider } from '../../core/secret-strength'
@@ -11,8 +11,8 @@ import type { SecretStrengthProvider } from '../../core/secret-strength'
 })
 export class MeshHeaderComponent {
 
-  readonly meshPublic = input<boolean | null>(false)
-  readonly meshToggled = output<void>()
+  @Input() meshPublic: boolean | null = false
+  @Output() readonly meshToggled = new EventEmitter<void>()
 
   #secretValue = signal('')
   #secretExpanded = signal(false)

@@ -104,7 +104,7 @@
         </div>
 
         <!-- utility section -->
-        @if (meshPublic()) {
+        @if (meshPublic) {
           <!-- public: clipboard button toggles utility open/closed -->
           <div class="controls-divider"></div>
           <button class="ctl-btn clipboard-btn" [class.active]="publicUtilityOpen()" (click)="toggleUtility()" aria-label="clipboard">
@@ -155,7 +155,7 @@
         }
 
         <!-- space section (public mode) -->
-        @if (meshPublic()) {
+        @if (meshPublic) {
           <div class="controls-divider"></div>
           <button class="ctl-btn" [class.active]="roomOpen()" (click)="toggleRoom()" aria-label="space">
             <span class="hci">B</span>
