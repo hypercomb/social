@@ -1,0 +1,35 @@
+// hypercomb-shared/ui/_breakpoints.scss
+// Responsive breakpoint mixins for all shared UI components.
+
+$bp-phone-max: 599px;
+$bp-tablet: 600px;
+$bp-tablet-land: 1024px;
+$bp-desktop: 1367px;
+
+@mixin phone-only {
+  @media (max-width: $bp-phone-max) { @content; }
+}
+
+@mixin phone-land {
+  @media (max-width: $bp-phone-max) and (orientation: landscape) { @content; }
+}
+
+@mixin tablet-up {
+  @media (min-width: $bp-tablet) { @content; }
+}
+
+@mixin tablet-only {
+  @media (min-width: $bp-tablet) and (max-width: $bp-tablet-land - 1) { @content; }
+}
+
+@mixin tablet-land {
+  @media (min-width: $bp-tablet-land) and (max-width: $bp-desktop - 1) { @content; }
+}
+
+@mixin desktop {
+  @media (min-width: $bp-desktop) { @content; }
+}
+
+@mixin touch {
+  @media (pointer: coarse) { @content; }
+}

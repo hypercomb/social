@@ -1,3 +1,5 @@
+@use '../breakpoints' as *;
+
 :host {
   display: contents;
 }
@@ -144,9 +146,6 @@
 }
 
 // ── hex frame mask ──────────────────────────────────────
-// Dims corners outside hex so users see where the crop boundary falls.
-// The colored border segments are drawn inside the Pixi canvas
-// (ImageEditorService) so they're included in captureSmall().
 
 .hex-frame {
   position: absolute;
@@ -154,17 +153,12 @@
   pointer-events: none;
   z-index: 1;
 
-  // Both hex masks are in a 400×400 viewBox, centered.
-  // Pointy-top: 346×400 hex centered (offset x=27)
-  // Vertices shifted: (200,0) (373,100) (373,300) (200,400) (27,300) (27,100)
   background: rgba(0, 0, 0, 0.55);
   -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 400'%3E%3Crect width='400' height='400' fill='white'/%3E%3Cpolygon points='200,0 373,100 373,300 200,400 27,300 27,100' fill='black'/%3E%3C/svg%3E");
   mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 400'%3E%3Crect width='400' height='400' fill='white'/%3E%3Cpolygon points='200,0 373,100 373,300 200,400 27,300 27,100' fill='black'/%3E%3C/svg%3E");
   -webkit-mask-size: 100% 100%;
   mask-size: 100% 100%;
 
-  // Flat-top: 400×346 hex centered (offset y=27)
-  // Vertices shifted: (400,200) (300,373) (100,373) (0,200) (100,27) (300,27)
   .flat-top & {
     -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 400'%3E%3Crect width='400' height='400' fill='white'/%3E%3Cpolygon points='400,200 300,373 100,373 0,200 100,27 300,27' fill='black'/%3E%3C/svg%3E");
     mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 400'%3E%3Crect width='400' height='400' fill='white'/%3E%3Cpolygon points='400,200 300,373 100,373 0,200 100,27 300,27' fill='black'/%3E%3C/svg%3E");
@@ -231,7 +225,6 @@
   height: 14px;
   position: relative;
 
-  // two chain links via pseudo-elements
   &::before,
   &::after {
     content: '';
@@ -254,7 +247,6 @@
     transform: rotate(-45deg);
   }
 
-  // slash through when broken
   &.broken::before {
     border-color: #666;
   }
@@ -265,8 +257,6 @@
 }
 
 // ── property fields (8-column grid) ─────────────────────
-// Columns: [label] [input] [input] [input] [label] [input] [input] [picker]
-// The label columns are auto-sized to content; input columns take remaining space.
 
 .fields {
   display: grid;
@@ -441,10 +431,61 @@
   gap: 0.5em;
 }
 
-// ── mobile overrides ──────────────────────────────────────
-@media (max-width: 768px), (pointer: coarse) {
+// ═══════════════════════════════════════════════════════════
+// RESPONSIVE OVERRIDES
+// ═══════════════════════════════════════════════════════════
 
-  // fullscreen modal instead of centered dialog
+// ── tablet portrait (600–1023px) ──────────────────────────
+@include tablet-only {
+
+  .editor-panel {
+    width: min(90vw, 32em);
+    max-height: 85vh;
+  }
+
+  .upload-btn,
+  .orientation-btn {
+    padding: 0.6em 1.1em;
+    font-size: 0.72em;
+  }
+
+  .link-btn {
+    padding: 0.4em;
+  }
+
+  .editor-footer {
+    padding: 0.6em;
+
+    button {
+      padding: 0.55em 1.4em;
+      font-size: 0.85em;
+    }
+  }
+
+  .tool-btn {
+    width: 2.5em;
+    height: 2.5em;
+  }
+
+  .color-picker {
+    width: 2.5em;
+    height: 2.5em;
+  }
+
+  .field-input {
+    padding: 0.45em 0.55em;
+    font-size: 16px; // prevent iOS auto-zoom
+  }
+
+  .editor-close {
+    padding: 0.4em;
+    font-size: 1.1em;
+  }
+}
+
+// ── phone (≤599px) — fullscreen ───────────────────────────
+@include phone-only {
+
   .editor-panel {
     width: 100vw;
     height: 100dvh;
@@ -454,13 +495,13 @@
     transform: none;
     border-radius: 0;
     border: none;
+    padding-top: var(--hc-safe-top, 0px);
   }
 
   .editor-body {
     padding: 0.75em;
   }
 
-  // touch-sized buttons
   .upload-btn,
   .orientation-btn {
     padding: 0.65em 1.2em;
@@ -471,10 +512,9 @@
     padding: 0.5em;
   }
 
-  // footer buttons: 44px touch targets
   .editor-footer {
     padding: 0.6em;
-    padding-bottom: calc(0.6em + var(--safe-bottom, 0px));
+    padding-bottom: calc(0.6em + var(--hc-safe-bottom, 0px));
 
     button {
       padding: 0.6em 1.6em;
@@ -487,7 +527,6 @@
     height: 2.75em;
   }
 
-  // color picker: larger touch target
   .color-picker {
     width: 2.75em;
     height: 2.75em;
@@ -512,9 +551,16 @@
     grid-template-columns: auto 1fr 1fr auto;
   }
 
-  // close button: larger touch target
   .editor-close {
     padding: 0.5em;
     font-size: 1.2em;
+  }
+}
+
+// ── phone landscape ───────────────────────────────────────
+@include phone-land {
+
+  .image-canvas {
+    height: min(35vh, 280px);
   }
 }

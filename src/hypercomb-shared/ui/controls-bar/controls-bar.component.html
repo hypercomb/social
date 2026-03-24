@@ -1,4 +1,14 @@
-<div class="breadcrumb-float">
+<!-- mobile back button: top-left, always visible on mobile -->
+@if (isMobile()) {
+  <button class="mobile-back-btn" [class.disabled]="!canGoBack()" [disabled]="!canGoBack()" (click)="goBack()" aria-label="go back">
+    <span class="hci">B</span>
+  </button>
+}
+
+<!-- swipe-back edge indicator -->
+<div class="swipe-back-indicator" [class.active]="swipeIndicatorActive()"></div>
+
+<div class="breadcrumb-float" [class.faded]="isMobile()">
   <span class="address-icon" (mouseenter)="addressHover.set(true)" (mouseleave)="addressHover.set(false)">
     <span class="hci">#</span>
   </span>
@@ -49,42 +59,79 @@
 >
   @switch (mode()) {
     @case ('browsing') {
-      <!-- view section -->
-      <div class="controls-section view">
-        <button class="ctl-btn" (click)="openDcp()" aria-label="diamond core processor">
-          <span class="hci dcp-icon">$</span>
-        </button>
-        <button class="ctl-btn" (click)="centerView()" aria-label="center">
-          <span class="hci">(</span>
-        </button>
-        <button class="ctl-btn" (click)="zoomOut()" aria-label="zoom out">
-          <span class="hci">I</span>
-        </button>
-        <button class="ctl-btn" (click)="zoomIn()" aria-label="zoom in">
-          <span class="hci">K</span>
-        </button>
-        <button class="ctl-btn" [class.active]="locked()" (click)="toggleLock()" aria-label="lock">
-          <span class="hci">{{ locked() ? 'a' : 'b' }}</span>
-        </button>
-        <button class="ctl-btn" (click)="toggleFullscreen()" aria-label="fullscreen">
-          <span class="hci">'</span>
-        </button>
-        <button class="ctl-btn" [class.active]="layoutPinned()" (click)="toggleLayout()" aria-label="layout mode" [title]="layoutPinned() ? 'pinned layout' : 'dense layout'">
-          <span class="hci">#</span>
-        </button>
-      </div>
 
-      <!-- utility section -->
-      @if (meshPublic()) {
-        <!-- public: clipboard button toggles utility open/closed -->
-        <div class="controls-divider"></div>
-        <button class="ctl-btn clipboard-btn" [class.active]="publicUtilityOpen()" (click)="toggleUtility()" aria-label="clipboard">
-          <span class="hci">y</span>
-          @if (clipboardCount() > 0) {
-            <span class="badge">{{ clipboardCount() }}</span>
+      @if (isMobile()) {
+        <!-- ═══ MOBILE: streamlined button bar ═══ -->
+        <div class="controls-section mobile-nav">
+          <button class="ctl-btn" (click)="openDcp()" aria-label="diamond core processor">
+            <span class="hci dcp-icon">$</span>
+          </button>
+          <button class="ctl-btn" (click)="centerView()" aria-label="center">
+            <span class="hci">(</span>
+          </button>
+          <button class="ctl-btn" [class.active]="layoutPinned()" (click)="toggleLayout()" aria-label="layout mode">
+            <span class="hci">#</span>
+          </button>
+          <button class="ctl-btn" (click)="toggleFullscreen()" aria-label="fullscreen">
+            <span class="hci">'</span>
+          </button>
+        </div>
+      } @else {
+        <!-- ═══ DESKTOP: full controls ═══ -->
+        <!-- view section -->
+        <div class="controls-section view">
+          <button class="ctl-btn" (click)="openDcp()" aria-label="diamond core processor">
+            <span class="hci dcp-icon">$</span>
+          </button>
+          <button class="ctl-btn" (click)="centerView()" aria-label="center">
+            <span class="hci">(</span>
+          </button>
+          <button class="ctl-btn" (click)="zoomOut()" aria-label="zoom out">
+            <span class="hci">I</span>
+          </button>
+          <button class="ctl-btn" (click)="zoomIn()" aria-label="zoom in">
+            <span class="hci">K</span>
+          </button>
+          <button class="ctl-btn" [class.active]="locked()" (click)="toggleLock()" aria-label="lock">
+            <span class="hci">{{ locked() ? 'a' : 'b' }}</span>
+          </button>
+          <button class="ctl-btn" (click)="toggleFullscreen()" aria-label="fullscreen">
+            <span class="hci">'</span>
+          </button>
+          <button class="ctl-btn" [class.active]="layoutPinned()" (click)="toggleLayout()" aria-label="layout mode" [title]="layoutPinned() ? 'pinned layout' : 'dense layout'">
+            <span class="hci">#</span>
+          </button>
+        </div>
+
+        <!-- utility section -->
+        @if (meshPublic()) {
+          <!-- public: clipboard button toggles utility open/closed -->
+          <div class="controls-divider"></div>
+          <button class="ctl-btn clipboard-btn" [class.active]="publicUtilityOpen()" (click)="toggleUtility()" aria-label="clipboard">
+            <span class="hci">y</span>
+            @if (clipboardCount() > 0) {
+              <span class="badge">{{ clipboardCount() }}</span>
+            }
+          </button>
+          @if (publicUtilityOpen()) {
+            <div class="controls-section utility">
+              <button class="ctl-btn" (click)="copy()" aria-label="copy">
+                <span class="hci">%</span>
+              </button>
+              <button class="ctl-btn" (click)="cut()" aria-label="cut">
+                <span class="hci">F</span>
+              </button>
+              <button class="ctl-btn" (click)="remove()" aria-label="delete">
+                <span class="hci">Q</span>
+              </button>
+              <button class="ctl-btn" [class.active]="moveMode()" (click)="moveItem()" aria-label="move">
+                <span class="hci">Z</span>
+              </button>
+            </div>
           }
-        </button>
-        @if (publicUtilityOpen()) {
+        } @else if (utility()) {
+          <!-- private: full utility always visible -->
+          <div class="controls-divider"></div>
           <div class="controls-section utility">
             <button class="ctl-btn" (click)="copy()" aria-label="copy">
               <span class="hci">%</span>
@@ -98,59 +145,42 @@
             <button class="ctl-btn" [class.active]="moveMode()" (click)="moveItem()" aria-label="move">
               <span class="hci">Z</span>
             </button>
+            <button class="ctl-btn clipboard-btn" (click)="openClipboard()" aria-label="clipboard">
+              <span class="hci">y</span>
+              @if (clipboardCount() > 0) {
+                <span class="badge">{{ clipboardCount() }}</span>
+              }
+            </button>
           </div>
         }
-      } @else if (utility()) {
-        <!-- private: full utility always visible -->
-        <div class="controls-divider"></div>
-        <div class="controls-section utility">
-          <button class="ctl-btn" (click)="copy()" aria-label="copy">
-            <span class="hci">%</span>
-          </button>
-          <button class="ctl-btn" (click)="cut()" aria-label="cut">
-            <span class="hci">F</span>
-          </button>
-          <button class="ctl-btn" (click)="remove()" aria-label="delete">
-            <span class="hci">Q</span>
-          </button>
-          <button class="ctl-btn" [class.active]="moveMode()" (click)="moveItem()" aria-label="move">
-            <span class="hci">Z</span>
-          </button>
-          <button class="ctl-btn clipboard-btn" (click)="openClipboard()" aria-label="clipboard">
-            <span class="hci">y</span>
-            @if (clipboardCount() > 0) {
-              <span class="badge">{{ clipboardCount() }}</span>
-            }
-          </button>
-        </div>
-      }
 
-      <!-- space section (public mode) -->
-      @if (meshPublic()) {
-        <div class="controls-divider"></div>
-        <button class="ctl-btn" [class.active]="roomOpen()" (click)="toggleRoom()" aria-label="space">
-          <span class="hci">B</span>
-        </button>
-        @if (roomOpen()) {
-          <div class="room-shell">
-            <input
-              class="room-input"
-              type="text"
-              placeholder="space"
-              [value]="roomValue()"
-              (input)="onRoomInput($event)"
-              (keydown.enter)="submitRoom()"
-              (keydown.escape)="toggleRoom()"
-            />
-          </div>
-        } @else if (roomValue()) {
-          <span class="room-display">{{ roomValue() }}</span>
+        <!-- space section (public mode) -->
+        @if (meshPublic()) {
+          <div class="controls-divider"></div>
+          <button class="ctl-btn" [class.active]="roomOpen()" (click)="toggleRoom()" aria-label="space">
+            <span class="hci">B</span>
+          </button>
+          @if (roomOpen()) {
+            <div class="room-shell">
+              <input
+                class="room-input"
+                type="text"
+                placeholder="space"
+                [value]="roomValue()"
+                (input)="onRoomInput($event)"
+                (keydown.enter)="submitRoom()"
+                (keydown.escape)="toggleRoom()"
+              />
+            </div>
+          } @else if (roomValue()) {
+            <span class="room-display">{{ roomValue() }}</span>
+          }
+
+          <!-- bee mode toggle -->
+          <button class="ctl-btn bee-btn" [class.active]="beesVisible()" (click)="toggleBees()" aria-label="toggle bees">
+            <span class="bee-icon">🐝</span>
+          </button>
         }
-
-        <!-- bee mode toggle -->
-        <button class="ctl-btn bee-btn" [class.active]="beesVisible()" (click)="toggleBees()" aria-label="toggle bees">
-          <span class="bee-icon">🐝</span>
-        </button>
       }
 
     }

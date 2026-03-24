@@ -1,3 +1,5 @@
+@use '../breakpoints' as *;
+
 :host {
   display: block;
   width: 100%;
@@ -187,10 +189,13 @@
   white-space: nowrap;
 }
 
-// ── mobile overrides ──────────────────────────────────────
-@media (max-width: 768px), (pointer: coarse) {
+// ═══════════════════════════════════════════════════════════
+// RESPONSIVE OVERRIDES
+// ═══════════════════════════════════════════════════════════
 
-  // prevent iOS auto-zoom on focus (requires >= 16px)
+// ── touch behavioral (iOS zoom prevention) ────────────────
+@include touch {
+
   .command-input {
     font-size: 16px;
   }
@@ -198,17 +203,36 @@
   .ghost {
     font-size: 16px;
   }
+}
+
+// ── tablet portrait (600–1023px) ──────────────────────────
+@include tablet-only {
 
   .command-row {
-    min-height: 3rem;
+    min-height: 2.75rem;
   }
 
-  // touch-sized dropdown items
   .command-results li {
-    padding: 0.75rem 0.8rem;
+    padding: 0.55rem 0.7rem;
   }
 
   .command-results {
-    max-height: 50vh;
+    max-height: 40vh;
+  }
+}
+
+// ── phone (≤599px) ────────────────────────────────────────
+@include phone-only {
+
+  .command-row {
+    min-height: 2.75rem;
+  }
+
+  .command-results li {
+    padding: 0.6rem 0.7rem;
+  }
+
+  .command-results {
+    max-height: 60vh;
   }
 }

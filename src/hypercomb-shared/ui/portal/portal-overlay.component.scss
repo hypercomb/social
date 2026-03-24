@@ -1,3 +1,5 @@
+@use '../breakpoints' as *;
+
 /* src/app/common/portal/portal-overlay.component.scss */
 .backdrop {
   position: fixed;
@@ -67,4 +69,32 @@
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: rgba(245, 245, 245, 0.7);
+}
+
+// ═══════════════════════════════════════════════════════════
+// RESPONSIVE OVERRIDES
+// ═══════════════════════════════════════════════════════════
+
+@include phone-only {
+
+  .portal-close {
+    bottom: calc(1.2rem + var(--hc-safe-bottom, 0px));
+    padding: 0.7rem 1.6rem;
+  }
+
+  .close-label {
+    font-size: 0.7rem;
+  }
+
+  .close-icon {
+    font-size: 1.2rem;
+  }
+}
+
+@include tablet-only {
+
+  .portal-close {
+    bottom: calc(1rem + var(--hc-safe-bottom, 0px));
+    padding: 0.6rem 1.5rem;
+  }
 }

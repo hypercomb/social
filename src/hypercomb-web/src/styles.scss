@@ -28,12 +28,13 @@ body {
   touch-action: manipulation;
 }
 
-// ── mobile detection + safe-area insets ──────────────────
+// ── safe-area insets + touch detection ────────────────────
 :root {
-  --safe-bottom: env(safe-area-inset-bottom, 0px);
-  --safe-top: env(safe-area-inset-top, 0px);
+  --hc-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --hc-safe-top: env(safe-area-inset-top, 0px);
+  --hc-touch: 0;
 }
 
-@media (max-width: 768px), (pointer: coarse) {
-  :root { --hc-mobile: 1; }
+@media (pointer: coarse) {
+  :root { --hc-touch: 1; }
 }

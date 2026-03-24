@@ -1,3 +1,5 @@
+@use '../breakpoints' as *;
+
 .hci {
   font-family: 'hypercomb-icons';
   font-style: normal;
@@ -423,24 +425,89 @@
   padding: 0 0.3rem;
 }
 
-// ── mobile overrides ──────────────────────────────────────
-@media (max-width: 768px), (pointer: coarse) {
+// ── mobile back button (fixed top-left) ───────────────────
 
-  // pill: larger padding, safe-area aware, always visible, scrollable
+.mobile-back-btn {
+  position: fixed;
+  top: calc(0.5rem + var(--hc-safe-top, 0px));
+  left: 0.5rem;
+  z-index: 60001;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+
+  background: rgba(14, 18, 24, 0.82);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 50%;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+
+  color: rgba(245, 245, 245, 0.85);
+  cursor: pointer;
+  transition: background 200ms ease, transform 150ms ease;
+  pointer-events: auto;
+
+  .hci {
+    font-size: 1.1rem;
+  }
+
+  &:active:not(:disabled) {
+    transform: scale(0.9);
+    background: rgba(14, 18, 24, 0.95);
+  }
+
+  &.disabled {
+    opacity: 0.25;
+    cursor: default;
+  }
+}
+
+// ── swipe-back indicator ──────────────────────────────────
+
+.swipe-back-indicator {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 4px;
+  z-index: 60002;
+
+  background: rgba(200, 151, 90, 0.6);
+  border-radius: 0 2px 2px 0;
+  opacity: 0;
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: opacity 150ms ease, transform 150ms ease;
+  pointer-events: none;
+
+  &.active {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// RESPONSIVE OVERRIDES
+// ═══════════════════════════════════════════════════════════
+
+// ── touch behavioral (all touch devices, any size) ────────
+@include touch {
+
+  // pill: safe-area, no-fade, scrollable
   .controls-pill {
-    padding: 0.4rem 0.6rem;
-    gap: 0.25rem;
-    bottom: calc(1.2rem + var(--safe-bottom, 0px));
+    bottom: calc(1.2rem + var(--hc-safe-bottom, 0px));
     max-width: calc(100vw - 1.6rem);
     overflow-x: auto;
     overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
 
-    // hide scrollbar but keep functionality
     scrollbar-width: none;
     &::-webkit-scrollbar { display: none; }
 
-    // disable idle fade — no hover on touch devices
+    // disable idle fade — no hover on touch
     &.faded {
       opacity: 1;
       transform: translateX(-50%);
@@ -449,30 +516,217 @@
   }
 
   .controls-section {
-    gap: 0.2rem;
     flex-shrink: 0;
   }
 
   .controls-divider {
-    height: 1.6rem;
-    margin: 0 0.2rem;
     flex-shrink: 0;
   }
 
-  // buttons: 44px minimum touch targets (Nielsen)
+  .ctl-btn {
+    flex-shrink: 0;
+  }
+
+  // room input: 16px prevents iOS auto-zoom
+  .room-input {
+    font-size: 16px;
+  }
+
+  // breadcrumb always visible on touch (except when explicitly hidden on phone)
+  .breadcrumb-float.faded {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+// ── tablet portrait (600–1023px) ──────────────────────────
+@include tablet-only {
+
+  .controls-pill {
+    padding: 0.35rem 0.55rem;
+    gap: 0.2rem;
+    font-size: 0.72rem;
+  }
+
+  .controls-section {
+    gap: 0.18rem;
+  }
+
+  .controls-divider {
+    height: 1.4rem;
+    margin: 0 0.2rem;
+  }
+
   .ctl-btn {
     min-width: 2.75rem;
     min-height: 2.75rem;
-    padding: 0.5rem;
+    padding: 0.4rem;
     border-radius: 4px;
-    flex-shrink: 0;
 
     .hci {
-      font-size: 1.2rem;
+      font-size: 0.95rem;
     }
 
     .dcp-icon {
-      font-size: 1.4rem;
+      font-size: 1.2rem;
+    }
+  }
+
+  .badge {
+    min-width: 16px;
+    height: 16px;
+    font-size: 0.6rem;
+    line-height: 16px;
+    top: -3px;
+    right: -3px;
+  }
+
+  .mode-label,
+  .clipboard-count {
+    font-size: 0.72rem;
+  }
+
+  .clipboard-empty {
+    font-size: 0.68rem;
+  }
+
+  .close-x {
+    font-size: 1.1rem;
+  }
+
+  .bee-icon {
+    font-size: 14px;
+  }
+
+  .breadcrumb-float {
+    font-size: 0.65rem;
+    bottom: calc(3.2rem + var(--hc-safe-bottom, 0px));
+    max-width: calc(100vw - 2rem);
+    overflow: hidden;
+    text-overflow: ellipsis;
+
+    .path-crumb,
+    .space-crumb,
+    .leaf-crumb,
+    .secret-crumb {
+      font-size: 0.65rem;
+    }
+
+    .address-crumb {
+      font-size: 0.6rem;
+      max-width: calc(100vw - 4rem);
+    }
+
+    .crumb-link {
+      padding: 0.2rem 0.1rem;
+    }
+
+    .ctl-btn {
+      min-width: 1.8rem;
+      min-height: 1.8rem;
+      padding: 0.2rem;
+      .hci { font-size: 0.75rem; }
+    }
+  }
+
+  .room-shell {
+    height: 2.2rem;
+  }
+
+  .room-input {
+    width: 8rem;
+  }
+
+  .room-display {
+    font-size: 0.7rem;
+  }
+
+  .tag-crumb {
+    font-size: 0.7rem;
+  }
+
+  .tag-lead-icon {
+    font-size: 1.1rem;
+  }
+}
+
+// ── tablet landscape / Surface (1024–1366px) ──────────────
+@include tablet-land {
+
+  .controls-pill {
+    padding: 0.3rem 0.5rem;
+    gap: 0.18rem;
+    font-size: 0.68rem;
+  }
+
+  .controls-divider {
+    height: 1.2rem;
+  }
+
+  .ctl-btn {
+    min-width: 2.5rem;
+    min-height: 2.5rem;
+    padding: 0.35rem;
+
+    .hci {
+      font-size: 0.85rem;
+    }
+
+    .dcp-icon {
+      font-size: 1.1rem;
+    }
+  }
+
+  .room-shell {
+    height: 2rem;
+  }
+
+  .room-display {
+    font-size: 0.65rem;
+  }
+}
+
+// ── phone (≤599px) ────────────────────────────────────────
+@include phone-only {
+
+  .controls-pill {
+    padding: 0.4rem 0.6rem;
+    gap: 0.25rem;
+    font-size: 0.8rem;
+    bottom: calc(1rem + var(--hc-safe-bottom, 0px));
+    // no scrolling needed — mobile layout is intentionally compact
+    overflow: visible;
+  }
+
+  // mobile nav: evenly spaced buttons filling the pill
+  .mobile-nav {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+
+  .controls-section {
+    gap: 0.2rem;
+  }
+
+  .controls-divider {
+    height: 1.8rem;
+    margin: 0 0.2rem;
+  }
+
+  // 44px touch targets (Apple HIG)
+  .ctl-btn {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    padding: 0.45rem;
+    border-radius: 4px;
+
+    .hci {
+      font-size: 1.1rem;
+    }
+
+    .dcp-icon {
+      font-size: 1.3rem;
     }
   }
 
@@ -485,7 +739,6 @@
     right: -4px;
   }
 
-  // clipboard mode labels
   .mode-label,
   .clipboard-count {
     font-size: 0.75rem;
@@ -496,180 +749,53 @@
   }
 
   .close-x {
+    font-size: 1.3rem;
+  }
+
+  .bee-icon {
+    font-size: 16px;
+  }
+
+  // breadcrumbs hidden on phone — back button is in the pill instead
+  .breadcrumb-float {
+    display: none;
+  }
+
+  .tag-crumb {
+    font-size: 0.8rem;
+    padding: 0.08rem 0.55rem;
+  }
+
+  .tag-lead-icon {
     font-size: 1.2rem;
   }
 
-  // breadcrumbs: move above pill, readable size
-  .breadcrumb-float {
-    font-size: 0.75rem;
-    bottom: calc(3.8rem + var(--safe-bottom, 0px));
-    max-width: calc(100vw - 2rem);
-    overflow: hidden;
-    text-overflow: ellipsis;
-
-    .path-crumb,
-    .space-crumb,
-    .leaf-crumb,
-    .secret-crumb {
-      font-size: 0.75rem;
-    }
-
-    .address-crumb {
-      font-size: 0.7rem;
-      max-width: calc(100vw - 4rem);
-    }
-
-    .crumb-link {
-      padding: 0.25rem 0.15rem;
-    }
-
-    .ctl-btn {
-      min-width: 1.8rem;
-      min-height: 1.8rem;
-      padding: 0.2rem;
-      .hci { font-size: 0.85rem; }
-    }
-
-    // always visible on touch
-    &.faded {
-      opacity: 1;
-      pointer-events: auto;
-    }
+  .room-shell {
+    height: 2.4rem;
   }
 
-  // room field
   .room-input {
-    font-size: 16px; // prevent iOS auto-zoom
     width: 8rem;
   }
 
   .room-display {
-    font-size: 0.75rem;
-  }
-
-  .room-shell {
-    height: 2.2rem;
+    font-size: 0.8rem;
   }
 
   .tag-float {
-    bottom: calc(0.15rem + var(--safe-bottom, 0px));
     right: 0.8rem;
-  }
-
-  .tag-crumb {
-    font-size: 0.75rem;
   }
 }
 
-// ── phone-only: double all sizes (excludes large iPads / 13" screens) ──
-@media (max-width: 768px) and (pointer: coarse) {
+// ── phone landscape ───────────────────────────────────────
+@include phone-land {
 
   .controls-pill {
-    padding: 0.7rem 1rem;
-    gap: 0.4rem;
-    font-size: 1.1rem;
-    bottom: calc(1.8rem + var(--safe-bottom, 0px));
+    bottom: calc(0.6rem + var(--hc-safe-bottom, 0px));
   }
 
-  .controls-section {
-    gap: 0.35rem;
-  }
-
-  .controls-divider {
-    height: 2.8rem;
-    margin: 0 0.35rem;
-  }
-
-  .ctl-btn {
-    min-width: 5rem;
-    min-height: 5rem;
-    padding: 0.9rem;
-
-    .hci {
-      font-size: 2.2rem;
-    }
-
-    .dcp-icon {
-      font-size: 2.6rem;
-    }
-  }
-
-  .badge {
-    min-width: 24px;
-    height: 24px;
-    font-size: 0.85rem;
-    line-height: 24px;
-    top: -6px;
-    right: -6px;
-  }
-
-  .mode-label,
-  .clipboard-count {
-    font-size: 1.3rem;
-  }
-
-  .clipboard-empty {
-    font-size: 1.2rem;
-  }
-
-  .close-x {
-    font-size: 2rem;
-  }
-
-  .bee-icon {
-    font-size: 24px;
-  }
-
+  // hide breadcrumbs in landscape to save vertical space
   .breadcrumb-float {
-    font-size: 1.3rem;
-    bottom: calc(6rem + var(--safe-bottom, 0px));
-
-    .path-crumb,
-    .space-crumb,
-    .leaf-crumb,
-    .secret-crumb {
-      font-size: 1.3rem;
-    }
-
-    .address-crumb {
-      font-size: 1.2rem;
-    }
-
-    .address-icon .hci {
-      font-size: 1.5rem;
-    }
-
-    .crumb-link {
-      padding: 0.4rem 0.25rem;
-    }
-
-    .ctl-btn {
-      min-width: 3.2rem;
-      min-height: 3.2rem;
-      padding: 0.35rem;
-      .hci { font-size: 1.5rem; }
-    }
-  }
-
-  .tag-crumb {
-    font-size: 1.3rem;
-    padding: 0.1rem 0.7rem;
-  }
-
-  .tag-lead-icon {
-    font-size: 1.6rem;
-  }
-
-  .room-shell {
-    height: 3.6rem;
-  }
-
-  .room-input {
-    font-size: 16px;
-    width: 10rem;
-  }
-
-  .room-display {
-    font-size: 1.3rem;
+    display: none;
   }
 }

@@ -1,3 +1,5 @@
+@use '../breakpoints' as *;
+
 :host {
   display: contents;
 }
@@ -189,5 +191,92 @@
   to {
     opacity: 1;
     transform: translateX(-50%) translateY(0) scale(1);
+  }
+}
+
+@keyframes palette-panel-in-phone {
+  from {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// RESPONSIVE OVERRIDES
+// ═══════════════════════════════════════════════════════════
+
+// ── tablet portrait (600–1023px) ──────────────────────────
+@include tablet-only {
+
+  .palette-panel {
+    width: min(85vw, 32rem);
+  }
+
+  .palette-input {
+    font-size: 16px; // prevent iOS auto-zoom
+  }
+
+  .palette-item {
+    padding: 0.55rem 0.75rem;
+    min-height: 2.75rem;
+  }
+
+  .palette-item-label {
+    font-size: 0.82rem;
+  }
+}
+
+// ── phone (≤599px) — bottom sheet ─────────────────────────
+@include phone-only {
+
+  .palette-panel {
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    transform: none;
+    width: 100%;
+    max-height: 85vh;
+    border-radius: 12px 12px 0 0;
+    padding-bottom: var(--hc-safe-bottom, 0px);
+    animation: palette-panel-in-phone 250ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  .palette-input {
+    font-size: 16px; // prevent iOS auto-zoom
+  }
+
+  .palette-input-row {
+    padding: 0.75rem 1rem;
+  }
+
+  .palette-results {
+    max-height: calc(85vh - 4rem);
+  }
+
+  .palette-item {
+    padding: 0.6rem 0.75rem;
+    min-height: 2.75rem;
+  }
+
+  .palette-item-label {
+    font-size: 0.85rem;
+  }
+
+  .palette-group-title {
+    font-size: 0.65rem;
+  }
+
+  .palette-empty {
+    font-size: 0.8rem;
+  }
+
+  // hide keyboard shortcuts on phone — no physical keyboard
+  .key-badge {
+    display: none;
   }
 }

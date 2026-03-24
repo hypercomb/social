@@ -1,6 +1,11 @@
 // variables.scss
+@use '../../../hypercomb-shared/ui/breakpoints' as *;
+
+// ── layout ────────────────────────────────────────────────
 $header-height: 2.5em;
 $footer-height: 2.5em;
+
+// ── colors ────────────────────────────────────────────────
 $bg-header: #1e1e2f;
 $bg-footer: #1e1e2f;
 $bg-main: #f9f9f9;

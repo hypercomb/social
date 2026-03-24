@@ -1,3 +1,5 @@
+@use '../breakpoints' as *;
+
 :host {
   display: contents;
 }
@@ -99,5 +101,46 @@
   &:focus-visible {
     outline: 1px solid rgba(245, 245, 245, 0.3);
     outline-offset: -1px;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// RESPONSIVE OVERRIDES
+// ═══════════════════════════════════════════════════════════
+
+@include phone-only {
+
+  .activity-panel {
+    bottom: calc(4rem + var(--hc-safe-bottom, 0px));
+    left: 0.5rem;
+    max-width: calc(100vw - 1rem);
+    font-size: 0.72rem;
+  }
+
+  .entry-revert {
+    width: 2rem;
+    min-height: 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+  }
+
+  .entry-dismiss {
+    width: 2rem;
+    min-height: 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+  }
+}
+
+@include tablet-only {
+
+  .activity-panel {
+    bottom: calc(3.5rem + var(--hc-safe-bottom, 0px));
+    left: 0.4rem;
+    max-width: calc(100vw - 1rem);
   }
 }

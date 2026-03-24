@@ -72,6 +72,11 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #idle = signal(false)
   #hovered = signal(false)
   #locked = signal(false)
+
+  /** True when viewport is phone-sized (≤599px). */
+  readonly isMobile = signal(false)
+  #mobileQuery: MediaQueryList | null = null
+  #mobileHandler = (e: MediaQueryListEvent) => this.isMobile.set(e.matches)
   #publicUtilityOpen = signal(false)
   #utility = signal(localStorage.getItem('hc:utility-expanded') !== 'false')
   readonly publicUtilityOpen = this.#publicUtilityOpen.asReadonly()
@@ -95,6 +100,15 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #touchDraggingUnsub: (() => void) | null = null
   #touchDragging = signal(false)
   readonly #IDLE_DELAY = 3000
+
+  // ── swipe-to-go-back gesture ────────────────────────────
+  #swipeStartX = 0
+  #swipeStartY = 0
+  #swipeActive = false
+  readonly #SWIPE_THRESHOLD = 80     // px to trigger back
+  readonly #SWIPE_EDGE_ZONE = 40     // px from right edge to start
+  readonly #SWIPE_ANGLE_MAX = 30     // max degrees from horizontal
+  readonly swipeIndicatorActive = signal(false)
 
   // ── computed ────────────────────────────────────────────
 
@@ -234,6 +248,11 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #hoverTagsUnsub: (() => void) | null = null
 
   ngOnInit(): void {
+    // ── mobile detection via matchMedia ──
+    this.#mobileQuery = window.matchMedia('(max-width: 599px)')
+    this.isMobile.set(this.#mobileQuery.matches)
+    this.#mobileQuery.addEventListener('change', this.#mobileHandler)
+
     // pre-fill room from store
     const stored = this.roomStore?.value ?? ''
     if (stored) this.#roomValue.set(stored)
@@ -243,6 +262,11 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     window.addEventListener('keydown', this.#onActivity)
     window.addEventListener('navigate', this.#onActivity)
     this.#resetIdleTimer()
+
+    // swipe-to-go-back gesture (mobile only, passive for scroll perf)
+    window.addEventListener('touchstart', this.#onSwipeStart, { passive: true })
+    window.addEventListener('touchmove', this.#onSwipeMove, { passive: true })
+    window.addEventListener('touchend', this.#onSwipeEnd, { passive: true })
 
     this.#selectionUnsub = EffectBus.on<{ selected?: string[] }>('selection:changed', (payload) => {
       this.#hasSelection.set((payload?.selected?.length ?? 0) > 0)
@@ -289,10 +313,14 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.#mobileQuery?.removeEventListener('change', this.#mobileHandler)
     window.removeEventListener('pointermove', this.#onActivity)
     window.removeEventListener('pointerdown', this.#onActivity)
     window.removeEventListener('keydown', this.#onActivity)
     window.removeEventListener('navigate', this.#onActivity)
+    window.removeEventListener('touchstart', this.#onSwipeStart)
+    window.removeEventListener('touchmove', this.#onSwipeMove)
+    window.removeEventListener('touchend', this.#onSwipeEnd)
     if (this.#idleTimer) clearTimeout(this.#idleTimer)
     this.#clipboardUnsub?.()
     this.#selectionUnsub?.()
@@ -483,6 +511,53 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
 
   readonly onBarEnter = (): void => { this.#hovered.set(true) }
   readonly onBarLeave = (): void => { this.#hovered.set(false) }
+
+  // ── swipe-to-go-back (right-to-left from right edge) ──
+
+  #onSwipeStart = (e: TouchEvent): void => {
+    if (!this.isMobile() || !this.canGoBack()) return
+    const touch = e.touches[0]
+    // only start from the right 40px edge of the screen
+    if (touch.clientX < window.innerWidth - this.#SWIPE_EDGE_ZONE) return
+    this.#swipeStartX = touch.clientX
+    this.#swipeStartY = touch.clientY
+    this.#swipeActive = true
+  }
+
+  #onSwipeMove = (e: TouchEvent): void => {
+    if (!this.#swipeActive) return
+    const touch = e.touches[0]
+    const dx = this.#swipeStartX - touch.clientX  // positive = left swipe
+    const dy = Math.abs(touch.clientY - this.#swipeStartY)
+
+    // check angle — must be mostly horizontal
+    const angle = Math.atan2(dy, Math.abs(dx)) * (180 / Math.PI)
+    if (angle > this.#SWIPE_ANGLE_MAX) {
+      this.#swipeActive = false
+      this.swipeIndicatorActive.set(false)
+      return
+    }
+
+    // show indicator when swiping left past 20px
+    this.swipeIndicatorActive.set(dx > 20)
+  }
+
+  #onSwipeEnd = (e: TouchEvent): void => {
+    if (!this.#swipeActive) {
+      this.swipeIndicatorActive.set(false)
+      return
+    }
+
+    const touch = e.changedTouches[0]
+    const dx = this.#swipeStartX - touch.clientX
+
+    this.#swipeActive = false
+    this.swipeIndicatorActive.set(false)
+
+    if (dx >= this.#SWIPE_THRESHOLD && this.canGoBack()) {
+      this.goBack()
+    }
+  }
 
   // ── internal ────────────────────────────────────────────
 
