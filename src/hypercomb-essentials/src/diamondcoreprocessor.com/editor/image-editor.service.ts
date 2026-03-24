@@ -1,6 +1,6 @@
 // diamondcoreprocessor.com/editor/image-editor.service.ts
 import { Application, Container, Graphics, Sprite, Texture, RenderTexture, Rectangle } from 'pixi.js'
-import type { HexOrientation } from '../core/settings'
+import type { HexOrientation } from '../preferences/settings.js'
 
 export class ImageEditorService extends EventTarget {
 

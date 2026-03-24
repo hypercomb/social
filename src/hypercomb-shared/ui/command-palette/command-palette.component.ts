@@ -17,7 +17,7 @@ import { EffectBus, formatChord, type KeyBinding } from '@hypercomb/core'
 import { fromRuntime } from '../../core/from-runtime'
 
 import type { CommandPaletteState, PaletteItem } from
-  '@hypercomb/essentials/diamondcoreprocessor.com/ui/command-palette.drone'
+  '@hypercomb/essentials/diamondcoreprocessor.com/commands/command-palette.drone'
 
 @Component({
   selector: 'hc-command-palette',

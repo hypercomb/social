@@ -1,55 +1,55 @@
 import { AfterViewInit, Component, OnDestroy, signal } from '@angular/core';
 import { type Bee, EffectBus } from '@hypercomb/core';
-import type { HexOrientation } from '@hypercomb/essentials/diamondcoreprocessor.com/core/settings';
+import type { HexOrientation } from '@hypercomb/essentials/diamondcoreprocessor.com/preferences/settings';
 import { RouterOutlet } from '@angular/router';
 import { CommandLineComponent } from '@hypercomb/shared';
 import { MeshHeaderComponent } from '@hypercomb/shared/ui';
 import { initializeRuntime } from '@hypercomb/shared/core';
-import { AxialService } from '@hypercomb/essentials/diamondcoreprocessor.com/core/axial/axial-service';
-import { PanningDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/pan/panning.drone';
-import { PixiHostWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/pixi-host.worker';
-import { ShowCellDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/show-cell.drone';
-import { MousewheelZoomInput } from '@hypercomb/essentials/diamondcoreprocessor.com/input/zoom/mousewheel-zoom.input';
-import { Settings } from '@hypercomb/essentials/diamondcoreprocessor.com/core/settings';
-import { InputGate } from '@hypercomb/essentials/diamondcoreprocessor.com/input/input-gate.service';
-import { ZoomDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/zoom/zoom.drone';
-import { NostrMeshDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/nostr/nostr-mesh.drone'
-import { NostrSigner } from '@hypercomb/essentials/diamondcoreprocessor.com/nostr/nostr-signer'
-import { HexDetector } from '@hypercomb/essentials/diamondcoreprocessor.com/input/hex-detector'
-import { TileOverlayDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/tile-overlay.drone'
-import { TileActionsDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/tile-actions.drone' // overlay icon provider
-import { TileSelectionDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/tile-selection.drone'
-import { HistoryService } from '@hypercomb/essentials/diamondcoreprocessor.com/core/history.service'
-import { HistoryRecorder } from '@hypercomb/essentials/diamondcoreprocessor.com/core/history-recorder.drone'
+import { AxialService } from '@hypercomb/essentials/diamondcoreprocessor.com/presentation/grid/axial-service';
+import { PanningDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/navigation/pan/panning.drone';
+import { PixiHostWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/presentation/tiles/pixi-host.worker';
+import { ShowCellDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/presentation/tiles/show-cell.drone';
+import { MousewheelZoomInput } from '@hypercomb/essentials/diamondcoreprocessor.com/navigation/zoom/mousewheel-zoom.input';
+import { Settings } from '@hypercomb/essentials/diamondcoreprocessor.com/preferences/settings';
+import { InputGate } from '@hypercomb/essentials/diamondcoreprocessor.com/navigation/input-gate.service';
+import { ZoomDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/navigation/zoom/zoom.drone';
+import { NostrMeshDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/sharing/nostr-mesh.drone'
+import { NostrSigner } from '@hypercomb/essentials/diamondcoreprocessor.com/sharing/nostr-signer'
+import { HexDetector } from '@hypercomb/essentials/diamondcoreprocessor.com/navigation/hex-detector'
+import { TileOverlayDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/presentation/tiles/tile-overlay.drone'
+import { TileActionsDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/presentation/tiles/tile-actions.drone' // overlay icon provider
+import { TileSelectionDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/presentation/tiles/tile-selection.drone'
+import { HistoryService } from '@hypercomb/essentials/diamondcoreprocessor.com/history/history.service'
+import { HistoryRecorder } from '@hypercomb/essentials/diamondcoreprocessor.com/history/history-recorder.drone'
 import { TileEditorService } from '@hypercomb/essentials/diamondcoreprocessor.com/editor/tile-editor.service'
 import { TileEditorDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/editor/tile-editor.drone'
 import { ImageEditorService } from '@hypercomb/essentials/diamondcoreprocessor.com/editor/image-editor.service'
-import { KeyMapService } from '@hypercomb/essentials/diamondcoreprocessor.com/input/keymap/keymap.service'
-import { SelectionService } from '@hypercomb/essentials/diamondcoreprocessor.com/core/selection/selection.service'
-import '@hypercomb/essentials/diamondcoreprocessor.com/input/escape-cascade'
-import '@hypercomb/essentials/diamondcoreprocessor.com/input/pivot-toggle'
-import '@hypercomb/essentials/diamondcoreprocessor.com/input/bee-toggle'
+import { KeyMapService } from '@hypercomb/essentials/diamondcoreprocessor.com/keyboard/keymap.service'
+import { SelectionService } from '@hypercomb/essentials/diamondcoreprocessor.com/selection/selection.service'
+import '@hypercomb/essentials/diamondcoreprocessor.com/keyboard/escape-cascade'
+import '@hypercomb/essentials/diamondcoreprocessor.com/keyboard/pivot-toggle'
+import '@hypercomb/essentials/diamondcoreprocessor.com/navigation/bee-toggle'
 import { TileEditorComponent } from '@hypercomb/shared/ui/tile-editor/tile-editor.component'
 import { ControlsBarComponent, ShortcutSheetComponent, CommandPaletteComponent, ActivityLogComponent } from '@hypercomb/shared/ui';
 import { PortalOverlayComponent } from '@hypercomb/shared/ui/portal/portal-overlay.component'
 import { SensitivityBarComponent } from '@hypercomb/shared/ui/sensitivity-bar/sensitivity-bar.component'
-import { LayoutService } from '@hypercomb/essentials/diamondcoreprocessor.com/core/layout/layout.service'
-import { MoveDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/input/move/move.drone'
-import { DesktopMoveInput } from '@hypercomb/essentials/diamondcoreprocessor.com/input/move/desktop-move.input'
-import { TouchMoveInput } from '@hypercomb/essentials/diamondcoreprocessor.com/input/move/touch-move.input'
-import { MovePreviewDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/move-preview.drone'
-// import { TileIndexOverlayDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/tile-index-overlay.drone'
-import { BackgroundDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/background/background.drone'
-import { ShortcutSheetDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/ui/shortcut-sheet.drone'
-import { CommandPaletteDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/ui/command-palette.drone'
-import '@hypercomb/essentials/diamondcoreprocessor.com/ui/slash-command/slash-command.drone'
-import { AvatarSwarmDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/pixi/avatar-swarm.drone'
-import { ClipboardService } from '@hypercomb/essentials/diamondcoreprocessor.com/core/clipboard/clipboard.service'
-import { ClipboardWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/core/clipboard/clipboard.worker'
-import '@hypercomb/essentials/diamondcoreprocessor.com/bridge/claude-bridge.worker'
-import { HelpQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/ui/help.queen'
-import { PinchZoomInput } from '@hypercomb/essentials/diamondcoreprocessor.com/input/zoom/pinch-zoom.input'
-import { TouchGestureCoordinator } from '@hypercomb/essentials/diamondcoreprocessor.com/input/touch/touch-gesture.coordinator'
+import { LayoutService } from '@hypercomb/essentials/diamondcoreprocessor.com/move/layout.service'
+import { MoveDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/move/move.drone'
+import { DesktopMoveInput } from '@hypercomb/essentials/diamondcoreprocessor.com/move/desktop-move.input'
+import { TouchMoveInput } from '@hypercomb/essentials/diamondcoreprocessor.com/move/touch-move.input'
+import { MovePreviewDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/presentation/tiles/move-preview.drone'
+// import { TileIndexOverlayDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/presentation/tiles/tile-index-overlay.drone'
+import { BackgroundDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/presentation/background/background.drone'
+import { ShortcutSheetDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/shortcut-sheet.drone'
+import { CommandPaletteDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/command-palette.drone'
+import '@hypercomb/essentials/diamondcoreprocessor.com/commands/slash-command.drone'
+import { AvatarSwarmDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/presentation/avatars/avatar-swarm.drone'
+import { ClipboardService } from '@hypercomb/essentials/diamondcoreprocessor.com/clipboard/clipboard.service'
+import { ClipboardWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/clipboard/clipboard.worker'
+import '@hypercomb/essentials/diamondcoreprocessor.com/assistant/claude-bridge.worker'
+import { HelpQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/help.queen'
+import { PinchZoomInput } from '@hypercomb/essentials/diamondcoreprocessor.com/navigation/zoom/pinch-zoom.input'
+import { TouchGestureCoordinator } from '@hypercomb/essentials/diamondcoreprocessor.com/navigation/touch/touch-gesture.coordinator'
 
 const _deps = [
   AxialService,

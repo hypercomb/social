@@ -8,7 +8,7 @@ import { EffectBus, formatChord, type KeyBinding } from '@hypercomb/core'
 import { fromRuntime } from '../../core/from-runtime'
 
 import type { ShortcutSheetState } from
-  '@hypercomb/essentials/diamondcoreprocessor.com/ui/shortcut-sheet.drone'
+  '@hypercomb/essentials/diamondcoreprocessor.com/commands/shortcut-sheet.drone'
 
 @Component({
   selector: 'hc-shortcut-sheet',

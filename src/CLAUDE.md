@@ -100,15 +100,26 @@ src/
 ├── hypercomb-core/             # IoC, EffectBus, Drone base, SignatureService, KeyMap types
 ├── hypercomb-essentials/       # Drones + services, organized by domain namespace
 │   └── src/
-│       ├── diamondcoreprocessor.com/   # Core rendering, navigation, input, mesh
-│       │   ├── core/                   # AxialService, HistoryService, Settings, SelectionService, MeshAdapter
-│       │   ├── editor/                 # TileEditorDrone, TileEditorService, ImageEditorService
-│       │   ├── hello-world/            # HelloWorldDrone (dev/test module)
-│       │   ├── input/                  # PanningDrone, ZoomDrone, KeyMapService, TileSelectionDrone, InputGate
-│       │   ├── nostr/                  # NostrMeshDrone, NostrSigner, AmbientPresenceDrone
-│       │   ├── pixi/                   # PixiHostDrone, ShowHoneycombWorker, TileOverlayDrone, Shaders
-│       │   ├── screen/                 # ScreenService, ScreenState
-│       │   └── settings/               # SettingsDrone, ZoomSettings
+│       ├── diamondcoreprocessor.com/   # Core processor domain — feature-oriented tree
+│       │   ├── assistant/              # AI assistant integration (ClaudeBridgeWorker)
+│       │   ├── clipboard/              # Copy, cut, paste (ClipboardWorker, ClipboardService)
+│       │   ├── commands/               # Command palette, slash commands, help, shortcut sheet
+│       │   ├── editor/                 # Tile content editing + image manipulation
+│       │   ├── history/                # Change tracking / undo-redo (HistoryRecorder, HistoryService)
+│       │   ├── keyboard/               # Keyboard shortcuts, keymap, escape cascade, pivot toggle
+│       │   ├── move/                   # Drag tiles to reorder (MoveDrone, LayoutService)
+│       │   ├── navigation/             # Pan, zoom, touch gestures, hex detection
+│       │   │   ├── pan/                # Spacebar + drag panning
+│       │   │   ├── zoom/               # Mousewheel + pinch zoom, ZoomArbiter
+│       │   │   └── touch/              # Multi-touch gesture coordination
+│       │   ├── preferences/            # User settings + zoom config (SettingsDrone, Settings)
+│       │   ├── presentation/           # Visual rendering engine (Pixi.js)
+│       │   │   ├── avatars/            # Avatar particle swarm
+│       │   │   ├── background/         # Context-aware backgrounds
+│       │   │   ├── grid/               # Hexagonal grid, coordinates, shaders, atlases
+│       │   │   └── tiles/              # Tile overlays, actions, selection highlight, move preview
+│       │   ├── selection/              # Tile selection (SelectionService, TileSelectionDrone)
+│       │   └── sharing/                # Peer-to-peer publishing via Nostr relays
 │       └── revolucionstyle.com/        # Cigar journal domain module
 │           ├── journal/                # CigarJournalDrone, JournalEntryDrone, JournalService
 │           ├── wheel/                  # FlavorWheelDrone, FlavorWheelService, flavor taxonomy
