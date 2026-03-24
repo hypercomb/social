@@ -1,7 +1,7 @@
 // diamondcoreprocessor.com/pixi/tile-selection.drone.ts
 import { Drone } from '@hypercomb/core'
 import { Application, Container, Graphics, Point } from 'pixi.js'
-import type { HostReadyPayload } from './pixi-host.worker.js'
+import type { HostReadyPayload } from './pixi-host.drone.js'
 import type { Axial } from '../input/hex-detector.js'
 import type { InputGate } from '../input/input-gate.service.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY } from './hex-geometry.js'
@@ -9,25 +9,53 @@ import { type HexGeometry, DEFAULT_HEX_GEOMETRY } from './hex-geometry.js'
 type CellCountPayload = { count: number; labels: string[] }
 
 // ── colors ──────────────────────────────────────────────────────
-const SELECTION_FILL = 0x22cc66
-const SELECTION_FILL_ALPHA = 0.15
-const SELECTION_STROKE = 0x22cc66
-const SELECTION_STROKE_ALPHA = 0.6
+// Selected tile
+const SELECTION_FILL              = 0x22cc66
+const SELECTION_FILL_ALPHA        = 0.12
+const SELECTION_STROKE            = 0x22cc66
+const SELECTION_STROKE_MIN_ALPHA  = 0.35
+const SELECTION_STROKE_MAX_ALPHA  = 0.75
+const SELECTION_STROKE_WIDTH      = 1.0
 
-const LEADER_FILL = 0xffaa00
-const LEADER_FILL_ALPHA = 0.2
-const LEADER_STROKE = 0xffaa00
-const LEADER_STROKE_ALPHA = 0.8
+// Inner inset border
+const INSET_OFFSET                = 3
+const INSET_STROKE_ALPHA          = 0.25
+const INSET_STROKE_WIDTH          = 0.75
 
-const STROKE_WIDTH = 1.0
+// Vertex accent markers (selected)
+const VERTEX_RADIUS               = 2.5
+const VERTEX_COLOR                = 0xc8975a
+const VERTEX_ALPHA                = 0.85
+
+// Leader/active tile
+const LEADER_FILL                 = 0xffaa00
+const LEADER_FILL_ALPHA           = 0.15
+const LEADER_STROKE               = 0xffaa00
+const LEADER_STROKE_MIN_ALPHA     = 0.50
+const LEADER_STROKE_MAX_ALPHA     = 0.90
+const LEADER_STROKE_WIDTH         = 2.5
+
+// Leader outer glow halo
+const HALO_OFFSET                 = 5
+const HALO_FILL                   = 0xffaa00
+const HALO_FILL_ALPHA             = 0.10
+
+// Leader vertex markers (larger with ring)
+const LEADER_VERTEX_RADIUS        = 3.5
+const LEADER_VERTEX_RING_RADIUS   = 5.0
+const LEADER_VERTEX_RING_WIDTH    = 0.75
+const LEADER_VERTEX_RING_ALPHA    = 0.50
+
+// Animation
+const PULSE_PERIOD_MS             = 3000
+const ANIM_FPS_CAP                = 30
 
 export type LeaderInfo = { q: number; r: number; label: string } | null
 export type RelativeAxial = { q: number; r: number; dq: number; dr: number; label: string }
 
 export class TileSelectionDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
-  override description =
-    'Draws selection highlights on the hex grid and computes relative axial offsets from the leader tile.'
+  override description = 'tile selection with leader tile and relative axial math'
 
   #app: Application | null = null
   #renderContainer: Container | null = null
@@ -59,6 +87,11 @@ export class TileSelectionDrone extends Drone {
 
   // hex orientation
   #flat = false
+
+  // ── animation state ───────────────────────────────────────────
+  #tickerBound = false
+  #pulsePhase = 0
+  #lastFrameTime = 0
 
   protected override deps = {
     detector: '@diamondcoreprocessor.com/HexDetector',
@@ -136,10 +169,14 @@ export class TileSelectionDrone extends Drone {
       this.#syncing = true
       this.#redraw()
       this.#syncing = false
+
+      if (this.#selected.size > 0) this.#startAnimation()
+      else this.#stopAnimation()
     })
   }
 
   protected override dispose(): void {
+    this.#stopAnimation()
     if (this.#listening) {
       document.removeEventListener('mousedown', this.#onMouseDown)
       document.removeEventListener('mousemove', this.#onMouseMove)
@@ -150,6 +187,34 @@ export class TileSelectionDrone extends Drone {
       this.#layer.destroy()
       this.#layer = null
     }
+  }
+
+  // ── animation lifecycle ──────────────────────────────────────
+
+  #startAnimation(): void {
+    if (this.#tickerBound || !this.#app) return
+    this.#tickerBound = true
+    this.#lastFrameTime = 0
+    this.#app.ticker.add(this.#onAnimTick)
+  }
+
+  #stopAnimation(): void {
+    if (!this.#tickerBound || !this.#app) return
+    this.#app.ticker.remove(this.#onAnimTick)
+    this.#tickerBound = false
+    this.#pulsePhase = 0
+  }
+
+  #onAnimTick = (): void => {
+    if (!this.#app || this.#selected.size === 0) return
+
+    const now = performance.now()
+    const minInterval = 1000 / ANIM_FPS_CAP
+    if (now - this.#lastFrameTime < minInterval) return
+    this.#lastFrameTime = now
+
+    this.#pulsePhase = (now % PULSE_PERIOD_MS) / PULSE_PERIOD_MS
+    this.#redraw()
   }
 
   // ── public API ────────────────────────────────────────────────
@@ -200,6 +265,7 @@ export class TileSelectionDrone extends Drone {
     if (this.#selected.size === 0 && !this.#leaderKey) return
     this.#selected.clear()
     this.#leaderKey = null
+    this.#stopAnimation()
     this.#redraw()
     this.#emitChanged()
     this.#syncSelectionService()
@@ -228,6 +294,7 @@ export class TileSelectionDrone extends Drone {
         this.#selected.add(first)
         this.#syncSelectionService(first)
       }
+      this.#startAnimation()
       this.#redraw()
       this.#emitChanged()
       return
@@ -251,6 +318,7 @@ export class TileSelectionDrone extends Drone {
           this.#selected.add(targetKey)
           this.#syncSelectionService(targetKey)
         }
+        this.#startAnimation()
         this.#redraw()
         this.#emitChanged()
         return
@@ -391,6 +459,9 @@ export class TileSelectionDrone extends Drone {
     this.#redraw()
     this.#emitChanged()
     this.#syncSelectionService()
+
+    if (this.#selected.size > 0) this.#startAnimation()
+    else this.#stopAnimation()
   }
 
   #pruneStaleSelections(): void {
@@ -437,12 +508,12 @@ export class TileSelectionDrone extends Drone {
       const entry = this.#occupiedByAxial.get(key)
       if (!entry) continue
 
-      // Use AxialService Location for positioning (matches mesh renderer)
-      const coord = axial?.items?.get(entry.index) as { Location?: { x: number; y: number } } | undefined
-      if (!coord?.Location) continue
-
-      const cx = coord.Location.x + ox
-      const cy = coord.Location.y + oy
+      const [qs, rs] = key.split(',')
+      const q = Number(qs)
+      const r = Number(rs)
+      const pos = this.#axialToPixel(q, r, this.#flat)
+      const cx = pos.x + ox
+      const cy = pos.y + oy
 
       const isLeader = key === this.#leaderKey
       this.#drawHex(cx, cy, this.#geo.circumRadiusPx, isLeader, this.#flat)
@@ -450,28 +521,76 @@ export class TileSelectionDrone extends Drone {
 
   }
 
-  #drawHex(cx: number, cy: number, r: number, isLeader: boolean, flat = false): void {
-    if (!this.#layer) return
-
-    // point-top: 30° offset; flat-top: 0° offset
-    const angleOffset = flat ? 0 : Math.PI / 6
+  #hexVerts(cx: number, cy: number, r: number, angleOffset: number): number[] {
     const verts: number[] = []
     for (let i = 0; i < 6; i++) {
       const angle = (Math.PI / 3) * i + angleOffset
       verts.push(cx + r * Math.cos(angle))
       verts.push(cy + r * Math.sin(angle))
     }
+    return verts
+  }
 
-    const fillColor = isLeader ? LEADER_FILL : SELECTION_FILL
-    const fillAlpha = isLeader ? LEADER_FILL_ALPHA : SELECTION_FILL_ALPHA
-    const strokeColor = isLeader ? LEADER_STROKE : SELECTION_STROKE
-    const strokeAlpha = isLeader ? LEADER_STROKE_ALPHA : SELECTION_STROKE_ALPHA
+  #drawHex(cx: number, cy: number, r: number, isLeader: boolean, flat = false): void {
+    if (!this.#layer) return
 
-    this.#layer.poly(verts, true)
-    this.#layer.fill({ color: fillColor, alpha: fillAlpha })
+    const angleOffset = flat ? 0 : Math.PI / 6
+    const verts = this.#hexVerts(cx, cy, r, angleOffset)
 
-    this.#layer.poly(verts, true)
-    this.#layer.stroke({ color: strokeColor, alpha: strokeAlpha, width: STROKE_WIDTH })
+    // sinusoidal pulse: 0..1
+    const sin01 = (Math.sin(this.#pulsePhase * Math.PI * 2) + 1) / 2
+
+    if (isLeader) {
+      // ── outer glow halo ───────────────────────────────
+      const haloVerts = this.#hexVerts(cx, cy, r + HALO_OFFSET, angleOffset)
+      this.#layer.poly(haloVerts, true)
+      this.#layer.fill({ color: HALO_FILL, alpha: HALO_FILL_ALPHA })
+
+      // ── fill ──────────────────────────────────────────
+      this.#layer.poly(verts, true)
+      this.#layer.fill({ color: LEADER_FILL, alpha: LEADER_FILL_ALPHA })
+
+      // ── pulsing border (counter-phase) ────────────────
+      const leaderAlpha = LEADER_STROKE_MIN_ALPHA +
+        (1 - sin01) * (LEADER_STROKE_MAX_ALPHA - LEADER_STROKE_MIN_ALPHA)
+      this.#layer.poly(verts, true)
+      this.#layer.stroke({ color: LEADER_STROKE, alpha: leaderAlpha, width: LEADER_STROKE_WIDTH })
+
+      // ── inner inset border ────────────────────────────
+      const insetVerts = this.#hexVerts(cx, cy, r - INSET_OFFSET, angleOffset)
+      this.#layer.poly(insetVerts, true)
+      this.#layer.stroke({ color: LEADER_STROKE, alpha: INSET_STROKE_ALPHA, width: INSET_STROKE_WIDTH })
+
+      // ── prominent vertex markers with ring ────────────
+      for (let i = 0; i < 12; i += 2) {
+        const vx = verts[i], vy = verts[i + 1]
+        this.#layer.circle(vx, vy, LEADER_VERTEX_RING_RADIUS)
+        this.#layer.stroke({ color: VERTEX_COLOR, alpha: LEADER_VERTEX_RING_ALPHA, width: LEADER_VERTEX_RING_WIDTH })
+        this.#layer.circle(vx, vy, LEADER_VERTEX_RADIUS)
+        this.#layer.fill({ color: VERTEX_COLOR, alpha: VERTEX_ALPHA })
+      }
+    } else {
+      // ── fill ──────────────────────────────────────────
+      this.#layer.poly(verts, true)
+      this.#layer.fill({ color: SELECTION_FILL, alpha: SELECTION_FILL_ALPHA })
+
+      // ── breathing edge pulse ──────────────────────────
+      const selAlpha = SELECTION_STROKE_MIN_ALPHA +
+        sin01 * (SELECTION_STROKE_MAX_ALPHA - SELECTION_STROKE_MIN_ALPHA)
+      this.#layer.poly(verts, true)
+      this.#layer.stroke({ color: SELECTION_STROKE, alpha: selAlpha, width: SELECTION_STROKE_WIDTH })
+
+      // ── inner inset border ────────────────────────────
+      const insetVerts = this.#hexVerts(cx, cy, r - INSET_OFFSET, angleOffset)
+      this.#layer.poly(insetVerts, true)
+      this.#layer.stroke({ color: SELECTION_STROKE, alpha: INSET_STROKE_ALPHA, width: INSET_STROKE_WIDTH })
+
+      // ── vertex accent markers ─────────────────────────
+      for (let i = 0; i < 12; i += 2) {
+        this.#layer.circle(verts[i], verts[i + 1], VERTEX_RADIUS)
+        this.#layer.fill({ color: VERTEX_COLOR, alpha: VERTEX_ALPHA })
+      }
+    }
   }
 
   // ── coordinate helpers ────────────────────────────────────────
