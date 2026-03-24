@@ -1,15 +1,17 @@
 @use '../breakpoints' as *;
 
+:host {
+  display: contents;
+  --hc-mono: ui-monospace, 'Cascadia Code', 'Source Code Pro',
+    Menlo, Consolas, 'DejaVu Sans Mono', monospace;
+}
+
 .hci {
   font-family: 'hypercomb-icons';
   font-style: normal;
   font-weight: normal;
   line-height: 1;
   user-select: none;
-}
-
-:host {
-  display: contents;
 }
 
 // suppress mouse-click focus on all buttons
@@ -30,54 +32,28 @@
   align-items: center;
   gap: 0.1rem;
 
-  font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro',
-    Menlo, Consolas, 'DejaVu Sans Mono', monospace;
+  font-family: var(--hc-mono);
   font-size: 0.5rem;
   color: rgba(245, 245, 245, 0.3);
   text-transform: lowercase;
   pointer-events: auto;
   transition: opacity 200ms ease;
 
-  .path-crumb {
-    font-size: 0.5rem;
-    color: rgba(245, 245, 245, 0.6);
-    max-width: 30rem;
-    padding: 0;
-  }
-
-  .space-crumb {
-    font-size: 0.5rem;
-    color: rgba(190, 140, 200, 0.85);
-    padding: 0;
-  }
-
-  .leaf-crumb {
-    font-size: 0.5rem;
-    color: rgba(245, 245, 245, 0.6);
-    padding: 0;
-  }
-
-  .secret-crumb {
-    font-size: 0.5rem;
-    color: rgba(218, 165, 100, 0.85);
-    padding: 0;
-  }
+  .path-crumb { color: rgba(245, 245, 245, 0.6); max-width: 30rem; padding: 0; }
+  .space-crumb { color: rgba(190, 140, 200, 0.85); padding: 0; }
+  .leaf-crumb { color: rgba(245, 245, 245, 0.6); padding: 0; }
+  .secret-crumb { color: rgba(218, 165, 100, 0.85); padding: 0; }
 
   .address-icon {
     cursor: default;
-    color: rgba(245, 245, 245, 0.3);
     padding-right: 0.25rem;
     transition: color 150ms ease;
 
-    &:hover {
-      color: rgba(245, 245, 245, 0.6);
-    }
-
+    &:hover { color: rgba(245, 245, 245, 0.6); }
     .hci { font-size: 0.85rem; }
   }
 
   .address-crumb {
-    font-size: 0.5rem;
     color: rgba(245, 245, 245, 0.45);
     white-space: nowrap;
     overflow: hidden;
@@ -89,10 +65,7 @@
   .crumb-link {
     cursor: pointer;
     transition: color 150ms ease;
-
-    &:hover {
-      color: rgba(245, 245, 245, 0.7);
-    }
+    &:hover { color: rgba(245, 245, 245, 0.7); }
   }
 
   .ctl-btn {
@@ -119,12 +92,8 @@
   cursor: pointer;
   font-family: inherit;
   transition: opacity 150ms ease;
-
-  &:hover {
-    opacity: 0.8;
-  }
+  &:hover { opacity: 0.8; }
 }
-
 
 .tag-float {
   position: fixed;
@@ -138,8 +107,7 @@
   gap: 0.25rem;
   max-width: 18rem;
 
-  font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro',
-    Menlo, Consolas, 'DejaVu Sans Mono', monospace;
+  font-family: var(--hc-mono);
   pointer-events: auto;
   transition: opacity 200ms ease;
 }
@@ -185,8 +153,7 @@
 
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
 
-  font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro',
-    Menlo, Consolas, 'DejaVu Sans Mono', monospace;
+  font-family: var(--hc-mono);
   font-size: 0.65rem;
   color: rgba(245, 245, 245, 0.85);
 
@@ -196,13 +163,10 @@
   &.faded {
     opacity: 0.15;
     transform: translateX(-50%) translateY(4px);
-
     > * { pointer-events: none; }
-
     &:hover {
       opacity: 1;
       transform: translateX(-50%) translateY(0);
-
       > * { pointer-events: auto; }
     }
   }
@@ -241,25 +205,20 @@
   cursor: pointer;
   transition: color 200ms ease, background 200ms ease;
 
-  .hci {
-    font-size: 0.76rem;
-  }
+  .hci { font-size: 0.76rem; }
 
   &:hover {
     color: whitesmoke;
     background: rgba(255, 255, 255, 0.08);
   }
 
-  &:active {
-    transform: scale(0.94);
-  }
+  &:active { transform: scale(0.94); }
 
   &:focus-visible {
     outline: 1px solid rgba(255, 255, 255, 0.3);
     outline-offset: 1px;
   }
 
-  // ── dcp icon scale ──
   .dcp-icon {
     font-size: 1.02rem;
     line-height: 0;
@@ -268,15 +227,9 @@
     color: rgba(200, 151, 90, 0.75);
   }
 
-  // ── active state (lock, utility toggle) ──
   &.active {
     color: #00e5a0;
     background: rgba(0, 229, 160, 0.08);
-  }
-
-  // ── utility toggle ──
-  &.toggle {
-    margin-left: 0;
   }
 }
 
@@ -296,9 +249,7 @@
 
 // ── clipboard button with badge ──────────────────────────
 
-.clipboard-btn {
-  position: relative;
-}
+.clipboard-btn { position: relative; }
 
 .badge {
   position: absolute;
@@ -324,7 +275,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.65rem;
   color: rgba(245, 245, 245, 0.5);
   padding: 0 0.3rem;
 }
@@ -337,7 +287,6 @@
 }
 
 .mode-label {
-  font-size: 0.65rem;
   font-weight: 500;
   letter-spacing: 0.3px;
   text-transform: uppercase;
@@ -345,7 +294,6 @@
 }
 
 .clipboard-count {
-  font-size: 0.65rem;
   font-weight: 600;
   color: #c8975a;
 }
@@ -384,7 +332,6 @@
   height: 100%;
   padding: 0;
   border: none;
-  border-radius: 0;
 
   background: transparent;
   color: rgba(248, 248, 244, 0.96);
@@ -395,13 +342,8 @@
   letter-spacing: 0.18em;
   text-transform: uppercase;
 
-  &::placeholder {
-    color: rgba(245, 245, 245, 0.34);
-  }
-
-  &:focus {
-    outline: none;
-  }
+  &::placeholder { color: rgba(245, 245, 245, 0.34); }
+  &:focus { outline: none; }
 }
 
 .room-shell:focus-within {
@@ -450,9 +392,7 @@
   transition: background 200ms ease, transform 150ms ease;
   pointer-events: auto;
 
-  .hci {
-    font-size: 1.1rem;
-  }
+  .hci { font-size: 1.1rem; }
 
   &:active:not(:disabled) {
     transform: scale(0.9);
@@ -496,7 +436,6 @@
 // ── touch behavioral (all touch devices, any size) ────────
 @include touch {
 
-  // pill: safe-area, no-fade, scrollable
   .controls-pill {
     bottom: calc(1.2rem + var(--hc-safe-bottom, 0px));
     max-width: calc(100vw - 1.6rem);
@@ -515,22 +454,22 @@
     }
   }
 
-  .controls-section {
-    flex-shrink: 0;
-  }
-
-  .controls-divider {
-    flex-shrink: 0;
-  }
-
+  .controls-section,
+  .controls-divider,
   .ctl-btn {
     flex-shrink: 0;
   }
 
-  // room input: 16px prevents iOS auto-zoom
-  .room-input {
-    font-size: 16px;
+  // shared touch-target badge sizing (tablet + phone)
+  .badge {
+    min-width: 16px;
+    height: 16px;
+    font-size: 0.6rem;
+    line-height: 16px;
   }
+
+  // room input: 16px prevents iOS auto-zoom
+  .room-input { font-size: 16px; }
 
   // breadcrumb always visible on touch (except when explicitly hidden on phone)
   .breadcrumb-float.faded {
@@ -548,9 +487,7 @@
     font-size: 0.72rem;
   }
 
-  .controls-section {
-    gap: 0.18rem;
-  }
+  .controls-section { gap: 0.18rem; }
 
   .controls-divider {
     height: 1.4rem;
@@ -562,41 +499,14 @@
     min-height: 2.75rem;
     padding: 0.4rem;
     border-radius: 4px;
-
-    .hci {
-      font-size: 0.95rem;
-    }
-
-    .dcp-icon {
-      font-size: 1.2rem;
-    }
+    .hci { font-size: 0.95rem; }
+    .dcp-icon { font-size: 1.2rem; }
   }
 
-  .badge {
-    min-width: 16px;
-    height: 16px;
-    font-size: 0.6rem;
-    line-height: 16px;
-    top: -3px;
-    right: -3px;
-  }
+  .badge { top: -3px; right: -3px; }
 
-  .mode-label,
-  .clipboard-count {
-    font-size: 0.72rem;
-  }
-
-  .clipboard-empty {
-    font-size: 0.68rem;
-  }
-
-  .close-x {
-    font-size: 1.1rem;
-  }
-
-  .bee-icon {
-    font-size: 14px;
-  }
+  .clipboard-empty { font-size: 0.68rem; }
+  .close-x { font-size: 1.1rem; }
 
   .breadcrumb-float {
     font-size: 0.65rem;
@@ -605,21 +515,12 @@
     overflow: hidden;
     text-overflow: ellipsis;
 
-    .path-crumb,
-    .space-crumb,
-    .leaf-crumb,
-    .secret-crumb {
-      font-size: 0.65rem;
-    }
-
     .address-crumb {
       font-size: 0.6rem;
       max-width: calc(100vw - 4rem);
     }
 
-    .crumb-link {
-      padding: 0.2rem 0.1rem;
-    }
+    .crumb-link { padding: 0.2rem 0.1rem; }
 
     .ctl-btn {
       min-width: 1.8rem;
@@ -629,25 +530,11 @@
     }
   }
 
-  .room-shell {
-    height: 2.2rem;
-  }
-
-  .room-input {
-    width: 8rem;
-  }
-
-  .room-display {
-    font-size: 0.7rem;
-  }
-
-  .tag-crumb {
-    font-size: 0.7rem;
-  }
-
-  .tag-lead-icon {
-    font-size: 1.1rem;
-  }
+  .room-shell { height: 2.2rem; }
+  .room-input { width: 8rem; }
+  .room-display { font-size: 0.7rem; }
+  .tag-crumb { font-size: 0.7rem; }
+  .tag-lead-icon { font-size: 1.1rem; }
 }
 
 // ── tablet landscape / Surface (1024–1366px) ──────────────
@@ -659,31 +546,18 @@
     font-size: 0.68rem;
   }
 
-  .controls-divider {
-    height: 1.2rem;
-  }
+  .controls-divider { height: 1.2rem; }
 
   .ctl-btn {
     min-width: 2.5rem;
     min-height: 2.5rem;
     padding: 0.35rem;
-
-    .hci {
-      font-size: 0.85rem;
-    }
-
-    .dcp-icon {
-      font-size: 1.1rem;
-    }
+    .hci { font-size: 0.85rem; }
+    .dcp-icon { font-size: 1.1rem; }
   }
 
-  .room-shell {
-    height: 2rem;
-  }
-
-  .room-display {
-    font-size: 0.65rem;
-  }
+  .room-shell { height: 2rem; }
+  .room-display { font-size: 0.65rem; }
 }
 
 // ── phone (≤599px) ────────────────────────────────────────
@@ -694,20 +568,16 @@
     gap: 0.25rem;
     font-size: 0.8rem;
     bottom: calc(1rem + var(--hc-safe-bottom, 0px));
-    // no scrolling needed — mobile layout is intentionally compact
     overflow: visible;
   }
 
-  // mobile nav: evenly spaced buttons filling the pill
   .mobile-nav {
     display: flex;
     align-items: center;
     gap: 0.6rem;
   }
 
-  .controls-section {
-    gap: 0.2rem;
-  }
+  .controls-section { gap: 0.2rem; }
 
   .controls-divider {
     height: 1.8rem;
@@ -720,82 +590,37 @@
     min-height: 2.75rem;
     padding: 0.45rem;
     border-radius: 4px;
-
-    .hci {
-      font-size: 1.1rem;
-    }
-
-    .dcp-icon {
-      font-size: 1.3rem;
-    }
+    .hci { font-size: 1.1rem; }
+    .dcp-icon { font-size: 1.3rem; }
   }
 
-  .badge {
-    min-width: 16px;
-    height: 16px;
-    font-size: 0.6rem;
-    line-height: 16px;
-    top: -4px;
-    right: -4px;
-  }
+  .badge { top: -4px; right: -4px; }
 
   .mode-label,
-  .clipboard-count {
-    font-size: 0.75rem;
-  }
+  .clipboard-count { font-size: 0.75rem; }
 
-  .clipboard-empty {
-    font-size: 0.72rem;
-  }
-
-  .close-x {
-    font-size: 1.3rem;
-  }
-
-  .bee-icon {
-    font-size: 16px;
-  }
+  .clipboard-empty { font-size: 0.72rem; }
+  .close-x { font-size: 1.3rem; }
+  .bee-icon { font-size: 16px; }
 
   // breadcrumbs hidden on phone — back button is in the pill instead
-  .breadcrumb-float {
-    display: none;
-  }
+  .breadcrumb-float { display: none; }
 
   .tag-crumb {
     font-size: 0.8rem;
     padding: 0.08rem 0.55rem;
   }
 
-  .tag-lead-icon {
-    font-size: 1.2rem;
-  }
-
-  .room-shell {
-    height: 2.4rem;
-  }
-
-  .room-input {
-    width: 8rem;
-  }
-
-  .room-display {
-    font-size: 0.8rem;
-  }
-
-  .tag-float {
-    right: 0.8rem;
-  }
+  .tag-lead-icon { font-size: 1.2rem; }
+  .room-shell { height: 2.4rem; }
+  .room-input { width: 8rem; }
+  .room-display { font-size: 0.8rem; }
+  .tag-float { right: 0.8rem; }
 }
 
 // ── phone landscape ───────────────────────────────────────
 @include phone-land {
-
   .controls-pill {
     bottom: calc(0.6rem + var(--hc-safe-bottom, 0px));
-  }
-
-  // hide breadcrumbs in landscape to save vertical space
-  .breadcrumb-float {
-    display: none;
   }
 }
