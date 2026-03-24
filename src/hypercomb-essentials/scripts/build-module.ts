@@ -77,6 +77,11 @@ const isBee = (f: string): boolean =>
 const isEntry = (f: string): boolean =>
   f.endsWith('.entry.ts') || f.endsWith('.entry.js')
 
+const isIndexFile = (f: string): boolean => {
+  const base = f.replace(/\\/g, '/').split('/').pop() ?? ''
+  return base === 'index.ts' || base === 'index.js'
+}
+
 const stripExt = (p: string): string =>
   p.slice(0, -extname(p).length)
 
@@ -159,6 +164,7 @@ const discoverSources = (): SourceFile[] =>
   walkFiles(SRC_ROOT)
     .filter(isSource)
     .filter(f => !isKeysFile(f))
+    .filter(f => !isIndexFile(f))
     .filter(f => {
       const relPath = relPosix(SRC_ROOT, f)
       if (relPath === 'types' || relPath.startsWith('types/')) return false

@@ -28,7 +28,9 @@ const TYPES_ROOT = join(SRC_ROOT, 'types')
 // -------------------------------------------------
 
 const isSource = (f: string) => (f.endsWith('.ts') || f.endsWith('.js')) && !f.endsWith('.d.ts')
-const isDrone = (f: string) => f.endsWith('.drone.ts') || f.endsWith('.drone.js')
+const isBee = (f: string) =>
+  f.endsWith('.drone.ts') || f.endsWith('.drone.js') ||
+  f.endsWith('.worker.ts') || f.endsWith('.worker.js')
 const isGenerated = (f: string) => f.endsWith('-keys.ts') || basename(f) === 'index.ts'
 
 const relFrom = (root: string, full: string) =>
@@ -73,7 +75,7 @@ const parseExports = (file: string): ExportInfo => {
     if (ts.canHaveModifiers(node) && node.modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword)) {
       if (ts.isClassDeclaration(node) || ts.isFunctionDeclaration(node) || ts.isEnumDeclaration(node)) {
         if (node.name) {
-          if (isDrone(file)) out.type.push(node.name.text)
+          if (isBee(file)) out.type.push(node.name.text)
           else out.value.push(node.name.text)
         }
       }
@@ -93,7 +95,7 @@ const parseExports = (file: string): ExportInfo => {
       node.exportClause.elements.forEach(e => {
         const name = (e.name || e.propertyName)?.text
         if (!name) return
-        if (isDrone(file)) out.type.push(name)
+        if (isBee(file)) out.type.push(name)
         else out.value.push(name)
       })
     }
@@ -244,7 +246,7 @@ const writeFolderIndex = (dir: string, meta: Map<string, DirMeta>, hasDeep: (dir
     const name = basename(full)
     const base = name.replace(extname(name), '')
     const rel = `./${base}`
-    if (isDrone(full)) lines.push(`export type * from '${rel}'`)
+    if (isBee(full)) lines.push(`export type * from '${rel}'`)
     else lines.push(`export * from '${rel}'`)
   }
 
