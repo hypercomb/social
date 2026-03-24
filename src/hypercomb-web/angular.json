@@ -28,6 +28,11 @@
               {
                 "glob": "**/*",
                 "input": "public"
+              },
+              {
+                "glob": "**/*",
+                "input": "../hypercomb-shared/fonts",
+                "output": "/fonts"
               }
             ],
             "styles": [
@@ -85,6 +90,11 @@
               {
                 "glob": "**/*",
                 "input": "public"
+              },
+              {
+                "glob": "**/*",
+                "input": "../hypercomb-shared/fonts",
+                "output": "/fonts"
               }
             ],
             "styles": ["src/styles.scss"]
