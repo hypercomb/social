@@ -45,35 +45,38 @@ export class TileEditorDrone {
     const service = window.ioc.get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
     if (!store || !service) return
 
-    // 1. resolve seed directory
-    let seedDir: FileSystemDirectoryHandle
-    try {
-      seedDir = await store.current.getDirectoryHandle(seed)
-    } catch {
-      // seed directory doesn't exist yet — open with empty properties
-      service.open(seed, {}, null)
-      return
-    }
-
-    // 2. read 0000 properties file
+    // 1. read tile properties — prefer content-addressed, fall back to legacy 0000 file
     let properties: Record<string, unknown> = {}
     try {
-      const fileHandle = await seedDir.getFileHandle(TILE_PROPERTIES_FILE)
-      const file = await fileHandle.getFile()
-      const text = await file.text()
+      const indexKey = 'hc:tile-props-index'
+      const index: Record<string, string> = JSON.parse(localStorage.getItem(indexKey) ?? '{}')
+      const propsSig = index[seed]
+      if (!propsSig) throw new Error('no index entry')
+      const propsBlob = await store.getResource(propsSig)
+      if (!propsBlob) throw new Error('props blob missing')
+      const text = await propsBlob.text()
       properties = JSON.parse(text)
     } catch {
-      // no properties file yet — use empty
+      // fall back to legacy 0000 file
+      try {
+        const seedDir = await store.current.getDirectoryHandle(seed)
+        const fileHandle = await seedDir.getFileHandle(TILE_PROPERTIES_FILE)
+        const file = await fileHandle.getFile()
+        const text = await file.text()
+        properties = JSON.parse(text)
+      } catch {
+        // no properties found — use empty
+      }
     }
 
-    // 3. load large image blob from __resources__ (if present)
+    // 2. load large image blob from __resources__ (if present)
     let largeBlob: Blob | null = null
     const largeSig = (properties as any).large?.image
     if (largeSig && typeof largeSig === 'string') {
       largeBlob = await store.getResource(largeSig)
     }
 
-    // 4. open editor service
+    // 3. open editor service
     service.open(seed, properties, largeBlob)
   }
 
@@ -108,14 +111,17 @@ export class TileEditorDrone {
       const otherW = settings.hexWidth(otherOrientation)
       const otherH = settings.hexHeight(otherOrientation)
 
-      // switch to the other orientation, capture, then switch back
-      const otherTransform = otherOrientation === 'flat-top'
+      // switch to the other orientation, capture snapshot + transform, then switch back
+      const savedOtherTransform = otherOrientation === 'flat-top'
         ? (props as any).flat?.large
         : (props as any).large
       await imageEditor.setOrientation(otherOrientation,
-        otherTransform ? { x: otherTransform.x ?? 0, y: otherTransform.y ?? 0, scale: otherTransform.scale ?? 1 } : undefined)
+        savedOtherTransform ? { x: savedOtherTransform.x ?? 0, y: savedOtherTransform.y ?? 0, scale: savedOtherTransform.scale ?? 1 } : undefined)
       const otherBlob = await imageEditor.captureSmall(otherW, otherH)
       const otherSig = await store.putResource(otherBlob)
+
+      // capture the actual transform while still in the other orientation
+      const otherActualTransform = imageEditor.getTransform()
 
       // switch back to the current orientation
       await imageEditor.setOrientation(currentOrientation,
@@ -135,20 +141,22 @@ export class TileEditorDrone {
       // 2. store large image blob + transforms
       if (service.largeBlob) {
         const largeSig = await store.putResource(service.largeBlob)
-        const pointyTransform = currentOrientation === 'point-top' ? currentTransform : imageEditor.getTransform()
+
+        // assign the correct transform to each orientation
+        const pointyTransform = currentOrientation === 'point-top' ? currentTransform : otherActualTransform
+        const flatTransform = currentOrientation === 'flat-top' ? currentTransform : otherActualTransform
+
         ;(props as any).large = {
           image: largeSig,
-          x: (props as any).large?.x ?? pointyTransform.x,
-          y: (props as any).large?.y ?? pointyTransform.y,
-          scale: (props as any).large?.scale ?? pointyTransform.scale,
+          x: pointyTransform.x,
+          y: pointyTransform.y,
+          scale: pointyTransform.scale,
         }
-        // large.image is shared; flat only stores positioning
         if (!(props as any).flat) (props as any).flat = {}
-        const flatLarge = (props as any).flat.large ?? {}
         ;(props as any).flat.large = {
-          x: flatLarge.x ?? 0,
-          y: flatLarge.y ?? 0,
-          scale: flatLarge.scale ?? 1,
+          x: flatTransform.x,
+          y: flatTransform.y,
+          scale: flatTransform.scale,
         }
       }
     }
