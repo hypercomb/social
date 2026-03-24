@@ -1,7 +1,7 @@
 // diamondcoreprocessor.com/input/selection/tile-selection.drone.ts
 import { Drone, EffectBus, hypercomb } from '@hypercomb/core'
 import { Application, Container, Point } from 'pixi.js'
-import type { HostReadyPayload } from '../presentation/pixi-host.worker.js'
+import type { HostReadyPayload } from '../presentation/tiles/pixi-host.worker.js'
 import type { Axial } from '../navigation/hex-detector.js'
 import type { SelectionService } from './selection.service.js'
 import type { InputGate } from '../navigation/input-gate.service.js'

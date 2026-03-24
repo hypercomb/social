@@ -1,7 +1,7 @@
 // diamondcoreprocessor.com/pixi/tile-selection.drone.ts
 import { Drone } from '@hypercomb/core'
 import { Application, Container, Graphics, Point } from 'pixi.js'
-import type { HostReadyPayload } from '../pixi-host.worker.js'
+import type { HostReadyPayload } from './pixi-host.worker.js'
 import type { Axial } from '../../navigation/hex-detector.js'
 import type { InputGate } from '../../navigation/input-gate.service.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY } from '../grid/hex-geometry.js'

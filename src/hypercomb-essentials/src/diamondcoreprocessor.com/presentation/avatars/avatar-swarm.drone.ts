@@ -7,7 +7,7 @@ import { Drone } from '@hypercomb/core'
 import { Application, Container, Geometry, Mesh, Texture } from 'pixi.js'
 import { BeeSwarmShader } from './bee-swarm.shader.js'
 import { noise2D } from '../grid/simplex-noise.js'
-import type { HostReadyPayload } from '../pixi-host.worker.js'
+import type { HostReadyPayload } from '../tiles/pixi-host.worker.js'
 import type { HexGeometry } from '../grid/hex-geometry.js'
 
 type MeshEvt = { relay: string; sig: string; event: any; payload: any }

@@ -1,7 +1,7 @@
 // diamondcoreprocessor.com/pixi/background/background.drone.ts
 import { Drone } from '@hypercomb/core'
 import { Container, Graphics } from 'pixi.js'
-import type { HostReadyPayload } from '../pixi-host.worker.js'
+import type { HostReadyPayload } from '../tiles/pixi-host.worker.js'
 import type { BackgroundProvider } from './background.provider.js'
 
 export class BackgroundDrone extends Drone {

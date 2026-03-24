@@ -1,7 +1,7 @@
 // diamondcoreprocessor.com/pixi/move-preview.drone.ts
 import { Drone } from '@hypercomb/core'
 import { Container, Graphics } from 'pixi.js'
-import type { HostReadyPayload } from '../pixi-host.worker.js'
+import type { HostReadyPayload } from './pixi-host.worker.js'
 
 type MovePreviewPayload = {
   names: string[]

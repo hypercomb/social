@@ -1,7 +1,7 @@
 // diamondcoreprocessor.com/input/zoom/zoom.drone.ts
 import { Drone } from '@hypercomb/core'
 import { Application, Container, Point } from 'pixi.js'
-import type { HostReadyPayload } from '../../presentation/pixi-host.worker.js'
+import type { HostReadyPayload } from '../../presentation/tiles/pixi-host.worker.js'
 
 type Pt = { x: number; y: number }
 

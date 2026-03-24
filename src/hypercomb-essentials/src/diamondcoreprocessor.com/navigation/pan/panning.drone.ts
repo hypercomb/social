@@ -1,6 +1,6 @@
 // diamondcoreprocessor.com/input/pan/panning.drone.ts
 import { Drone } from '@hypercomb/core'
-import type { HostReadyPayload } from '../../presentation/pixi-host.worker.js'
+import type { HostReadyPayload } from '../../presentation/tiles/pixi-host.worker.js'
 import type { ViewportPersistence, ViewportSnapshot } from '../zoom/zoom.drone.js'
 
 type Point = { x: number; y: number }

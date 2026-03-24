@@ -1,6 +1,6 @@
 // diamondcoreprocessor.com/input/move/move.drone.ts
 import { Drone, EffectBus, hypercomb } from '@hypercomb/core'
-import type { HostReadyPayload } from '../presentation/pixi-host.worker.js'
+import type { HostReadyPayload } from '../presentation/tiles/pixi-host.worker.js'
 import type { Axial } from '../navigation/hex-detector.js'
 import type { LayoutService } from './layout.service.js'
 import { writeSeedProperties } from '../editor/tile-properties.js'
