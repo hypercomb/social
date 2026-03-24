@@ -22,10 +22,8 @@ $secret-bg: rgba(10, 12, 16, 0.85);
   padding: 0.2rem 0.4rem;
   background-color: #050f17;
   position: relative;
-  z-index: 10;
+  z-index: 60000;
 
-  > * { pointer-events: none; }
-  &:hover > * { pointer-events: auto; }
 }
 
 // ── hci icon font ────────────────────────────────────────

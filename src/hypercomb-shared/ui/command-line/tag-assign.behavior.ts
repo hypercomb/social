@@ -1,6 +1,6 @@
-// hypercomb-shared/ui/search-bar/tag-assign.behavior.ts
+// hypercomb-shared/ui/command-line/tag-assign.behavior.ts
 
-import type { SearchBarBehavior } from './search-bar-behavior'
+import type { CommandLineBehavior } from './command-line-behavior'
 import type { CompletionUtility } from '@hypercomb/shared/core/completion-utility'
 import type { Lineage } from '../../core/lineage'
 import { EffectBus, hypercomb } from '@hypercomb/core'
@@ -16,7 +16,7 @@ import { EffectBus, hypercomb } from '@hypercomb/core'
  * `tags: string[]`. Colors are stored globally in localStorage
  * under `hc:tag-colors`.
  */
-export class TagAssignBehavior implements SearchBarBehavior {
+export class TagAssignBehavior implements CommandLineBehavior {
 
   readonly name = 'tag-assign'
   readonly operations = [
