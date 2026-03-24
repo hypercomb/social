@@ -41,6 +41,8 @@ export class HomeComponent {
   readonly inspectBee = signal<string | null>(null)
   readonly inspectKind = signal<TreeNodeKind>('bee')
   readonly kindFilters = signal<Set<string>>(new Set())
+  readonly layersCollapsed = signal(false)
+  readonly #savedExpandStates = new Map<string, boolean>()
   readonly filterKinds: { key: string, diamond: TreeNodeKind }[] = [
     { key: 'bee', diamond: 'bee' },
     { key: 'worker', diamond: 'worker' },
@@ -121,6 +123,26 @@ export class HomeComponent {
     return this.kindFilters().size > 0
   }
 
+  toggleCollapseAllLayers(): void {
+    const sections = this.sections()
+    if (!this.layersCollapsed()) {
+      this.#savedExpandStates.clear()
+      for (const s of sections) for (const top of s.items) this.#walkLayers(top.children, (node) => {
+        this.#savedExpandStates.set(node.id, node.expanded)
+        node.expanded = false
+      })
+      this.layersCollapsed.set(true)
+    } else {
+      for (const s of sections) for (const top of s.items) this.#walkLayers(top.children, (node) => {
+        const saved = this.#savedExpandStates.get(node.id)
+        if (saved !== undefined) node.expanded = saved
+      })
+      this.#savedExpandStates.clear()
+      this.layersCollapsed.set(false)
+    }
+    this.#refreshSections()
+  }
+
   // domain management
   addDomain(): void {
     const raw = this.domainInput().trim()
@@ -171,6 +193,10 @@ export class HomeComponent {
     }
 
     node.expanded = true
+    if (node.kind === 'layer' && this.layersCollapsed()) {
+      this.layersCollapsed.set(false)
+      this.#savedExpandStates.clear()
+    }
     this.#refreshSections()
   }
 
@@ -239,6 +265,13 @@ export class HomeComponent {
       if (this.#containsNode(n.children, id)) return true
     }
     return false
+  }
+
+  #walkLayers(nodes: TreeNode[], fn: (node: TreeNode) => void): void {
+    for (const node of nodes) {
+      if (node.kind === 'layer') fn(node)
+      this.#walkLayers(node.children, fn)
+    }
   }
 
   #refreshSections(): void {

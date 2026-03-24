@@ -31,6 +31,14 @@
           placeholder="Filter..."
           [value]="searchTerm()"
           (input)="searchTerm.set($any($event.target).value)" />
+        <button class="kind-toggle"
+          [class.active]="layersCollapsed()"
+          (click)="toggleCollapseAllLayers()">
+          <dcp-diamond [kind]="'layer'" />
+        </button>
+
+        <span class="filter-divider"></span>
+
         @for (fk of filterKinds; track fk.key) {
           <button class="kind-toggle"
             [class.active]="isKindActive(fk.key)"

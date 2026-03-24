@@ -116,6 +116,13 @@
   pointer-events: none;
 }
 
+.filter-divider {
+  width: 1px;
+  height: 16px;
+  background: rgba(0, 0, 0, 0.15);
+  flex-shrink: 0;
+}
+
 /* domain sections */
 .domain-section {
   margin-bottom: 20px;
