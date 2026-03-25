@@ -28,6 +28,7 @@ import type { ImageEditorService } from
 export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
 
   @ViewChild('imageCanvas', { static: false }) imageCanvas!: ElementRef<HTMLDivElement>
+  @ViewChild('cameraVideo', { static: false }) cameraVideo!: ElementRef<HTMLVideoElement>
 
   private get editorService(): TileEditorService {
     return get('@diamondcoreprocessor.com/TileEditorService') as TileEditorService
@@ -83,6 +84,9 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
   public backgroundColorValue = ''
   public isFlat = false
   public isLinked = true
+  public cameraActive = false
+  public cameraFlat = false
+  #stream: MediaStream | null = null
   // track previous open state for init/teardown
   #wasOpen = false
 
@@ -102,6 +106,7 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
       setTimeout(() => this.#initCanvas(), 0)
     }
     if (!isOpen && this.#wasOpen) {
+      if (this.cameraActive) this.closeCamera()
       this.linkValue = ''
       this.borderColorValue = ''
       this.backgroundColorValue = ''
@@ -231,6 +236,57 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
     void this.imageEditor.setOrientation(nextOrientation, transform)
   }
 
+  // ── camera ───────────────────────────────────────────────────
+
+  readonly openCamera = async (): Promise<void> => {
+    try {
+      this.#stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' },
+      })
+      this.cameraActive = true
+      this.cameraFlat = this.isFlat
+      setTimeout(() => {
+        const video = this.cameraVideo?.nativeElement
+        if (video) video.srcObject = this.#stream
+      }, 0)
+    } catch {
+      // permission denied or no camera
+    }
+  }
+
+  readonly capturePhoto = async (): Promise<void> => {
+    const video = this.cameraVideo?.nativeElement
+    if (!video || !video.videoWidth) return
+
+    const size = Math.min(video.videoWidth, video.videoHeight)
+    const sx = (video.videoWidth - size) / 2
+    const sy = (video.videoHeight - size) / 2
+
+    const canvas = document.createElement('canvas')
+    canvas.width = size
+    canvas.height = size
+    const ctx = canvas.getContext('2d')!
+    ctx.drawImage(video, sx, sy, size, size, 0, 0, size, size)
+
+    const blob = await new Promise<Blob>((resolve) =>
+      canvas.toBlob((b) => resolve(b!), 'image/webp', 0.9),
+    )
+
+    this.closeCamera()
+    this.editorService.setLargeBlob(blob)
+    await this.imageEditor.loadImage(blob)
+  }
+
+  readonly closeCamera = (): void => {
+    this.#stream?.getTracks().forEach(t => t.stop())
+    this.#stream = null
+    this.cameraActive = false
+  }
+
+  readonly toggleCameraOrientation = (): void => {
+    this.cameraFlat = !this.cameraFlat
+  }
+
   // ── search ────────────────────────────────────────────────────
 
   readonly searchGoogle = (): void => {
@@ -260,6 +316,7 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.closeCamera()
     const target = get('@diamondcoreprocessor.com/TileEditorService') as EventTarget | undefined
     target?.removeEventListener('change', this.#onEditorChange)
     this.imageEditor?.destroy()

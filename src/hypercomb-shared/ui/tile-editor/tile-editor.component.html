@@ -36,6 +36,9 @@
           <button type="button" class="upload-btn" (click)="fileInput.click()">
             <span class="hci">U</span> upload
           </button>
+          <button type="button" class="camera-btn" (click)="openCamera()">
+            <span class="hci">U</span> camera
+          </button>
           <button type="button" class="orientation-btn" (click)="toggleOrientation()" [attr.title]="isFlat ? 'switch to point-top' : 'switch to flat-top'">
             <span class="hci">r</span> {{ isFlat ? 'flat-top' : 'point-top' }}
           </button>
@@ -115,4 +118,20 @@
       </div>
     </footer>
   </div>
+
+  @if (cameraActive) {
+    <div class="camera-overlay">
+      <video #cameraVideo autoplay playsinline></video>
+      <div class="camera-hex-frame" [class.flat-top]="cameraFlat"></div>
+      <div class="camera-controls">
+        <button type="button" class="camera-control-btn" (click)="closeCamera()">
+          <span class="hci">Q</span>
+        </button>
+        <button type="button" class="camera-shutter" (click)="capturePhoto()"></button>
+        <button type="button" class="camera-control-btn" (click)="toggleCameraOrientation()">
+          <span class="hci">r</span>
+        </button>
+      </div>
+    </div>
+  }
 }
