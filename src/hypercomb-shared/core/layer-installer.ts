@@ -1,7 +1,5 @@
 // hypercomb-shared/core/layer-installer.ts
 
-
-
 import { type LocationParseResult } from './initializers/location-parser'
 import { Store } from './store'
 
@@ -151,13 +149,6 @@ export class LayerInstaller {
         continue
       }
 
-      // Verify downloaded content matches expected signature
-      const computed = await SignatureService.sign(bytes.buffer as ArrayBuffer)
-      if (computed !== sig) {
-        console.error(`[layer-installer] dep signature mismatch: expected ${sig}, got ${computed}`)
-        continue
-      }
-
       // store as: opfsroot/__dependencies__/<sig>.js
       await this.#writeBytesFile(depDir, name, bytes)
       console.log(`[layer-installer] dependency ${sig} installed`)
@@ -189,13 +180,6 @@ export class LayerInstaller {
       const bytes = await this.#fetchBytes(url)
       if (!bytes) {
         console.warn(`[layer-installer] failed to download bee ${sig}`)
-        continue
-      }
-
-      // Verify downloaded content matches expected signature
-      const computed = await SignatureService.sign(bytes.buffer as ArrayBuffer)
-      if (computed !== sig) {
-        console.error(`[layer-installer] bee signature mismatch: expected ${sig}, got ${computed}`)
         continue
       }
 
