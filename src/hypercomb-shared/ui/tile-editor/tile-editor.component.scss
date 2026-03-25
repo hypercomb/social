@@ -396,6 +396,16 @@
 
 .link-input {
   grid-column: 2 / -1;
+
+  &.link-denied {
+    border-color: #e05050;
+    color: #e05050;
+  }
+
+  &.link-warned {
+    border-color: #d4a843;
+    color: #d4a843;
+  }
 }
 
 .field-input {

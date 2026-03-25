@@ -17,6 +17,8 @@ import type { TileEditorService } from
   '@hypercomb/essentials/diamondcoreprocessor.com/editor/tile-editor.service'
 import type { ImageEditorService } from
   '@hypercomb/essentials/diamondcoreprocessor.com/editor/image-editor.service'
+import type { LinkSafetyService } from
+  '@hypercomb/essentials/diamondcoreprocessor.com/safety/link-safety.service'
 
 @Component({
   selector: 'hc-tile-editor',
@@ -80,6 +82,9 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
 
   // bound form values (updated on open, pushed on change)
   public linkValue = ''
+  public linkDenied = false
+  public linkWarned = false
+  public linkSafetyReason = ''
   public borderColorValue = ''
   public backgroundColorValue = ''
   public isFlat = false
@@ -180,8 +185,42 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
 
   // ── property changes ───────────────────────────────────────────
 
-  readonly onLinkChange = (value: string): void => {
-    this.editorService.setLink(value)
+  /** Safety-checked link update — runs on blur so we don't call LLM on every keystroke. */
+  readonly onLinkBlur = (): void => {
+    const value = this.linkValue.trim()
+
+    // reset safety state
+    this.linkDenied = false
+    this.linkWarned = false
+    this.linkSafetyReason = ''
+
+    // empty link — clear it immediately
+    if (!value) {
+      this.editorService.setLink('')
+      return
+    }
+
+    // run safety check (same service used by LinkDropWorker)
+    const safety = get('@diamondcoreprocessor.com/LinkSafetyService') as LinkSafetyService | undefined
+    if (!safety) {
+      // no safety service loaded — allow directly
+      this.editorService.setLink(value)
+      return
+    }
+
+    void safety.check(value).then(verdict => {
+      if (verdict.decision === 'deny') {
+        this.linkDenied = true
+        this.linkSafetyReason = verdict.reason
+        this.editorService.setLink('')
+        return
+      }
+      if (verdict.decision === 'warn') {
+        this.linkWarned = true
+        this.linkSafetyReason = verdict.reason
+      }
+      this.editorService.setLink(value)
+    })
   }
 
   readonly onBorderColorChange = (value: string): void => {

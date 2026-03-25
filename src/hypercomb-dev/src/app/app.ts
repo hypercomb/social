@@ -49,6 +49,8 @@ import { ClipboardWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/
 import '@hypercomb/essentials/diamondcoreprocessor.com/clipboard/image-paste.worker'
 import '@hypercomb/essentials/diamondcoreprocessor.com/assistant/claude-bridge.worker'
 import '@hypercomb/essentials/diamondcoreprocessor.com/assistant/atomize.drone'
+import '@hypercomb/essentials/diamondcoreprocessor.com/safety/link-safety.service'
+import '@hypercomb/essentials/diamondcoreprocessor.com/link/link-drop.worker'
 import { HelpQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/help.queen'
 import { KeywordQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/keyword.queen'
 import { DebugQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/debug.queen'

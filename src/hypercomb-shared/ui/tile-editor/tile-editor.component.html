@@ -52,11 +52,15 @@
           <span class="field-label"><span class="hci">*</span> link</span>
           <input
             class="field-input link-input"
+            [class.link-denied]="linkDenied"
+            [class.link-warned]="linkWarned"
             type="text"
             name="tile-link"
             placeholder="https://..."
             [ngModel]="linkValue"
-            (ngModelChange)="linkValue = $event; onLinkChange($event)"
+            (ngModelChange)="linkValue = $event"
+            (blur)="onLinkBlur()"
+            [title]="linkSafetyReason"
           />
         </label>
 
