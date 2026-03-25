@@ -4,7 +4,9 @@
 import {
   Component,
   computed,
+  EventEmitter,
   Input,
+  Output,
   signal,
   type OnInit,
   type OnDestroy,
@@ -28,6 +30,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   // ── inputs ────────────────────────────────────────────────
 
   @Input() meshPublic: boolean | null = false
+  @Output() meshToggled = new EventEmitter<void>()
 
   // ── IoC resolution ──────────────────────────────────────
 
@@ -445,6 +448,10 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   readonly toggleLayout = (): void => {
     this.#layoutPinned.update(v => !v)
     EffectBus.emit('layout:mode', { mode: this.#layoutPinned() ? 'pinned' : 'dense' })
+  }
+
+  readonly toggleMeshPublic = (): void => {
+    this.meshToggled.emit()
   }
 
   readonly toggleUtility = (): void => {

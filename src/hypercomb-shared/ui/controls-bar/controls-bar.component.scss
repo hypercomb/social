@@ -256,6 +256,19 @@
   }
 }
 
+// ── mesh (solo / swarm) toggle ──────────────────────────
+
+.mesh-toggle-btn {
+  .mesh-label {
+    font-family: var(--hc-mono);
+    font-size: 0.6rem;
+    text-transform: lowercase;
+    letter-spacing: 0.04em;
+  }
+
+  &.active .mesh-label { color: #00e5a0; }
+}
+
 // ── bee toggle ──────────────────────────────────────────
 
 .bee-icon {

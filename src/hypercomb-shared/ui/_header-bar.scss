@@ -117,6 +117,15 @@ $secret-bg: rgba(10, 12, 16, 0.85);
   user-select: none;
 }
 
+.mode-label {
+  margin-left: 0.4rem;
+  font-family: ui-monospace, sfmono-regular, menlo, consolas, monospace;
+  font-size: 0.6rem;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  user-select: none;
+}
+
 // ── secret input area ────────────────────────────────────
 
 .secret-input-wrap {
@@ -307,6 +316,10 @@ $secret-bg: rgba(10, 12, 16, 0.85);
     &.secret-mode .hci {
       font-size: 1.3rem;
     }
+  }
+
+  .mode-label {
+    display: none;
   }
 
   // ── secret-active: command-line hides, shield+secret fill row ──

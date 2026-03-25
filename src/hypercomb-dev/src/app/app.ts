@@ -131,8 +131,8 @@ export class App {
       },
     })
 
-    EffectBus.on<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
-      if (cmd === 'mesh.togglePublic') this.toggleMesh()
+    EffectBus.on<{ public: boolean }>('mesh:public-changed', ({ public: pub }) => {
+      this.meshPublic.set(pub)
     })
 
     queueMicrotask(() => {

@@ -4,6 +4,7 @@
     <button class="mode-toggle solo-mode" type="button"
       (click)="cycleMode()">
       <span class="solo-icon">&#x2726;</span>
+      <span class="mode-label">solo</span>
     </button>
   }
 
@@ -13,6 +14,7 @@
       [style.--shield-color]="shieldColor()" type="button"
       (click)="cycleMode()">
       <span class="hci">e</span>
+      <span class="mode-label">swarm</span>
     </button>
   }
 

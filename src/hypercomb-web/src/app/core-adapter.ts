@@ -27,6 +27,12 @@ export class CoreAdapter {
 
   private initialized = false
 
+  constructor() {
+    EffectBus.on<{ public: boolean }>('mesh:public-changed', ({ public: pub }) => {
+      this.meshPublic.set(pub)
+    })
+  }
+
   // -------------------------------------------------
   // mesh toggle
   // -------------------------------------------------
