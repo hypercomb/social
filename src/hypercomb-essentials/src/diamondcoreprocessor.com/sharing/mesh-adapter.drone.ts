@@ -94,3 +94,6 @@ export class MeshAdapterDrone extends Drone {
     })
   }
 }
+
+const _meshAdapter = new MeshAdapterDrone()
+window.ioc.register('@diamondcoreprocessor.com/MeshAdapterDrone', _meshAdapter)
