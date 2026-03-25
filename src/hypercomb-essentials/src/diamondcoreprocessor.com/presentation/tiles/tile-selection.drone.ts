@@ -5,7 +5,7 @@ import type { HostReadyPayload } from './pixi-host.worker.js'
 import type { Axial } from '../../navigation/hex-detector.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY } from '../grid/hex-geometry.js'
 
-type CellCountPayload = { count: number; labels: string[] }
+type CellCountPayload = { count: number; labels: string[]; coords: Axial[] }
 
 // ── colors ──────────────────────────────────────────────────────
 // Selected tile
@@ -69,6 +69,7 @@ export class TileSelectionDrone extends Drone {
 
   #cellCount = 0
   #cellLabels: string[] = []
+  #cellCoords: Axial[] = []
   #occupiedByAxial = new Map<string, { index: number; label: string }>()
 
   // ── selection state ───────────────────────────────────────────
@@ -116,6 +117,7 @@ export class TileSelectionDrone extends Drone {
     this.onEffect<CellCountPayload>('render:cell-count', (payload) => {
       this.#cellCount = payload.count
       this.#cellLabels = payload.labels
+      this.#cellCoords = payload.coords
       this.#rebuildOccupiedMap()
       this.#pruneStaleSelections()
       this.#redraw()
@@ -496,11 +498,9 @@ export class TileSelectionDrone extends Drone {
 
   #rebuildOccupiedMap(): void {
     this.#occupiedByAxial.clear()
-    const axial = this.resolve<any>('axial')
-    if (!axial?.items) return
 
     for (let i = 0; i < this.#cellCount; i++) {
-      const coord = axial.items.get(i) as Axial | undefined
+      const coord = this.#cellCoords[i]
       const label = this.#cellLabels[i]
       if (!coord || !label) break
       this.#occupiedByAxial.set(axialKey(coord.q, coord.r), { index: i, label })

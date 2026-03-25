@@ -7,7 +7,7 @@ import type { SelectionService } from './selection.service.js'
 import type { InputGate } from '../navigation/input-gate.service.js'
 import type { OrderProjection } from '../history/order-projection.js'
 
-type CellCountPayload = { count: number; labels: string[] }
+type CellCountPayload = { count: number; labels: string[]; coords: Axial[] }
 type TileClickPayload = { q: number; r: number; label: string; index: number; ctrlKey: boolean; metaKey: boolean }
 
 class TileSelectionDrone extends Drone {
@@ -22,6 +22,7 @@ class TileSelectionDrone extends Drone {
   #meshOffset = { x: 0, y: 0 }
   #cellCount = 0
   #cellLabels: string[] = []
+  #cellCoords: Axial[] = []
   #occupiedByAxial = new Map<string, { index: number; label: string }>()
 
   // drag-select gesture state
@@ -82,6 +83,7 @@ class TileSelectionDrone extends Drone {
     this.onEffect<CellCountPayload>('render:cell-count', (payload) => {
       this.#cellCount = payload.count
       this.#cellLabels = payload.labels
+      this.#cellCoords = payload.coords
       this.#rebuildOccupiedMap()
     })
 
@@ -363,11 +365,9 @@ class TileSelectionDrone extends Drone {
 
   #rebuildOccupiedMap(): void {
     this.#occupiedByAxial.clear()
-    const axial = this.resolve<any>('axial')
-    if (!axial?.items) return
 
     for (let i = 0; i < this.#cellCount; i++) {
-      const coord = axial.items.get(i) as Axial | undefined
+      const coord = this.#cellCoords[i]
       const label = this.#cellLabels[i]
       if (!coord || !label) break
       this.#occupiedByAxial.set(axialKey(coord.q, coord.r), { index: i, label })

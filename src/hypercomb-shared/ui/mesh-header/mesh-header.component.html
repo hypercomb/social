@@ -18,13 +18,13 @@
     </button>
   }
 
-  <!-- Secret state: shield left + secret input -->
+  <!-- Secret state: secret input + shield right -->
   @if (meshPublic && secretExpanded()) {
-    <button class="mode-toggle secret-mode" [class.has-secret]="hasSecret()"
-      [style.--shield-color]="shieldColor()" type="button"
-      (click)="cycleMode()">
-      <span class="hci">e</span>
-    </button>
+    @if (hasSecret()) {
+      <button class="secret-clear" type="button" (click)="clearSecret()">
+        &times;
+      </button>
+    }
     <div class="secret-input-wrap">
       <input
         class="header-secret-input" [class.has-secret]="hasSecret()"
@@ -41,10 +41,10 @@
         </button>
       }
     </div>
-    @if (hasSecret()) {
-      <button class="secret-clear" type="button" (click)="clearSecret()">
-        &times;
-      </button>
-    }
+    <button class="mode-toggle secret-mode" [class.has-secret]="hasSecret()"
+      [style.--shield-color]="shieldColor()" type="button"
+      (click)="cycleMode()">
+      <span class="hci">e</span>
+    </button>
   }
 </div>

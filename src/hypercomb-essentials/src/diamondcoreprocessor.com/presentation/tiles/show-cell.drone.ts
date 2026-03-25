@@ -172,7 +172,7 @@ export class ShowCellDrone extends Drone {
   /** Saved lineage segments before entering tag filter — restored when filter clears. */
   #preFilterSegments: string[] | null = null
   private moveNames: string[] | null = null
-  private suppressCellCount = false
+  private suppressMeshRecenter = false
   #layoutMode: 'dense' | 'pinned' = 'dense'
 
   // cached render context for fast move:preview path (avoids full OPFS re-read)
@@ -697,8 +697,8 @@ export class ShowCellDrone extends Drone {
     this.renderedCells.clear()
     for (const cell of cells) this.renderedCells.set(cell.label, cell)
 
-    this.suppressCellCount = true
-    void this.applyGeometry(cells).finally(() => { this.suppressCellCount = false })
+    this.suppressMeshRecenter = true
+    void this.applyGeometry(cells).finally(() => { this.suppressMeshRecenter = false })
   }
 
   private readonly renderFromSynchronize = async (): Promise<void> => {
@@ -1188,7 +1188,7 @@ export class ShowCellDrone extends Drone {
       this.hexMesh.shader = (this.shader as any).shader
     }
 
-    if (this.hexMesh?.getLocalBounds && !this.suppressCellCount) {
+    if (this.hexMesh?.getLocalBounds && !this.suppressMeshRecenter) {
       this.hexMesh.position.set(0, 0)
       const bounds = this.hexMesh.getLocalBounds()
       this.hexMesh.position.set(-(bounds.x + bounds.width * 0.5), -(bounds.y + bounds.height * 0.5))
@@ -1204,15 +1204,15 @@ export class ShowCellDrone extends Drone {
     for (let i = 0; i < cells.length; i++) {
       this.#axialToIndex.set(`${cells[i].q},${cells[i].r}`, i)
     }
-    if (!this.suppressCellCount) {
-      this.emitEffect('render:cell-count', {
-        count: cells.length,
-        labels: cells.map(cell => cell.label),
-        branchLabels: cells.filter(cell => cell.hasBranch).map(cell => cell.label),
-        externalLabels: cells.filter(cell => cell.external).map(cell => cell.label),
-      })
-      this.#emitRenderTags(cells)
-    }
+    this.emitEffect('render:cell-count', {
+      count: cells.length,
+      labels: cells.map(cell => cell.label),
+      coords: cells.map(cell => ({ q: cell.q, r: cell.r })),
+      branchLabels: cells.filter(cell => cell.hasBranch).map(cell => cell.label),
+      externalLabels: cells.filter(cell => cell.external).map(cell => cell.label),
+      noImageLabels: cells.filter(cell => !cell.imageSig).map(cell => cell.label),
+    })
+    this.#emitRenderTags(cells)
   }
 
   /** Emit render:tags with unique tag names + counts from all currently visible cells. */
@@ -1312,12 +1312,12 @@ export class ShowCellDrone extends Drone {
 
     // seed:added / seed:removed — invalidate render cache so next synchronize picks up new tile set
     this.onEffect<{ seed: string }>('seed:added', () => {
-      this.#layerCellsCache.delete(this.renderedLocationKey)
+      this.#layerCellsCache.clear()
       this.renderedCellsKey = ''
     })
 
     this.onEffect<{ seed: string }>('seed:removed', () => {
-      this.#layerCellsCache.delete(this.renderedLocationKey)
+      this.#layerCellsCache.clear()
       this.renderedCellsKey = ''
     })
 

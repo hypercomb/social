@@ -8,7 +8,7 @@ import type { Axial, HexDetector } from '../../navigation/hex-detector.js'
 import type { InputGate } from '../../navigation/input-gate.service.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY } from '../grid/hex-geometry.js'
 
-type CellCountPayload = { count: number; labels: string[]; branchLabels?: string[]; externalLabels?: string[]; noImageLabels?: string[] }
+type CellCountPayload = { count: number; labels: string[]; coords: Axial[]; branchLabels?: string[]; externalLabels?: string[]; noImageLabels?: string[] }
 
 type OverlayAction = {
   name: string
@@ -76,6 +76,7 @@ export class TileOverlayDrone extends Drone {
 
   #cellCount = 0
   #cellLabels: string[] = []
+  #cellCoords: Axial[] = []
 
   #listening = false
   #flat = false
@@ -151,6 +152,7 @@ export class TileOverlayDrone extends Drone {
       this.onEffect<CellCountPayload>('render:cell-count', (payload) => {
         this.#cellCount = payload.count
         this.#cellLabels = payload.labels
+        this.#cellCoords = payload.coords
         this.#branchLabels = new Set(payload.branchLabels ?? [])
         this.#externalLabels = new Set(payload.externalLabels ?? [])
         this.#noImageLabels = new Set(payload.noImageLabels ?? [])
@@ -357,6 +359,15 @@ export class TileOverlayDrone extends Drone {
     const meshLocalX = local.x - this.#meshOffset.x
     const meshLocalY = local.y - this.#meshOffset.y
     const axial = detector.pixelToAxial(meshLocalX, meshLocalY, this.#flat)
+
+    // dev-mode: warn if occupied map is out of sync with visual mesh
+    if (typeof (globalThis as any).ngDevMode !== 'undefined') {
+      const key = TileOverlayDrone.axialKey(axial.q, axial.r)
+      const entry = this.#occupiedByAxial.get(key)
+      if (entry && entry.index >= this.#cellCount) {
+        console.warn('[tile-overlay] stale occupied entry:', key, entry, 'cellCount:', this.#cellCount)
+      }
+    }
 
     const hexChanged = !this.#currentAxial
       || this.#currentAxial.q !== axial.q
@@ -567,11 +578,9 @@ export class TileOverlayDrone extends Drone {
 
   #rebuildOccupiedMap(): void {
     this.#occupiedByAxial.clear()
-    const axial = this.resolve<any>('axial')
-    if (!axial?.items) return
 
     for (let i = 0; i < this.#cellCount; i++) {
-      const coord = axial.items.get(i) as Axial | undefined
+      const coord = this.#cellCoords[i]
       const label = this.#cellLabels[i]
       if (!coord || !label) break
       this.#occupiedByAxial.set(TileOverlayDrone.axialKey(coord.q, coord.r), { index: i, label })
