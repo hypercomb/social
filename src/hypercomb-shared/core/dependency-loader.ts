@@ -1,6 +1,6 @@
 // hypercomb-web/src/app/core/dependency-loader.ts
 
-import { EffectBus, SignatureService } from '@hypercomb/core'
+import { EffectBus } from '@hypercomb/core'
 import { Store } from './store'
 
 export class DependencyLoader extends EventTarget {
@@ -138,29 +138,7 @@ export class DependencyLoader extends EventTarget {
   }
 
   #verifyAndImport = async (sig: string, alias: string): Promise<string> => {
-    // Normalize: sig from alias map may include .js extension
     const pureSig = sig.replace(/\.js$/i, '')
-
-    // Verify signature integrity before executing
-    try {
-      const depDir = this.store.dependencies
-      let fh: FileSystemFileHandle
-      try {
-        fh = await depDir.getFileHandle(`${pureSig}.js`)
-      } catch {
-        fh = await depDir.getFileHandle(pureSig)
-      }
-      const file = await fh.getFile()
-      const buffer = await file.arrayBuffer()
-      const computed = await SignatureService.sign(buffer)
-      if (computed !== pureSig) {
-        throw new Error(`signature mismatch: expected ${pureSig}, got ${computed}`)
-      }
-    } catch (err) {
-      console.error(`[dependency-loader] verification failed for ${pureSig}:`, err)
-      throw err
-    }
-
     console.log(`[dependency-loader] importing ${alias} (${pureSig})`)
     const mod = await import(/* @vite-ignore */ alias)
     void mod

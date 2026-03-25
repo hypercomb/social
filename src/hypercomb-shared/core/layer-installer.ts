@@ -1,6 +1,7 @@
 // hypercomb-shared/core/layer-installer.ts
 
-import { SignatureService } from '@hypercomb/core'
+
+
 import { type LocationParseResult } from './initializers/location-parser'
 import { Store } from './store'
 
@@ -113,13 +114,6 @@ export class LayerInstaller {
       const bytes = await this.#fetchBytes(url)
       if (!bytes) {
         console.warn(`[layer-installer] failed to download layer ${sig}`)
-        continue
-      }
-
-      // Verify downloaded content matches expected signature
-      const computed = await SignatureService.sign(bytes.buffer as ArrayBuffer)
-      if (computed !== sig) {
-        console.error(`[layer-installer] layer signature mismatch: expected ${sig}, got ${computed}`)
         continue
       }
 

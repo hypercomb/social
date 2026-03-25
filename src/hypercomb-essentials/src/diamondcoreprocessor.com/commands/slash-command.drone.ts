@@ -86,10 +86,26 @@ class KeywordProvider implements SlashCommandProvider {
   }
 }
 
+class DebugProvider implements SlashCommandProvider {
+  readonly name = 'debug-provider'
+  readonly priority = 100
+  readonly commands: SlashCommand[] = [
+    { name: 'debug', description: 'Toggle the Pixi display-tree inspector', aliases: ['inspect', 'dbg'] }
+  ]
+
+  async execute(): Promise<void> {
+    const queen = get('@diamondcoreprocessor.com/DebugQueenBee') as any
+    if (queen?.invoke) {
+      await queen.invoke('')
+    }
+  }
+}
+
 // ── registration ────────────────────────────────────────
 
 const _slashCommands = new SlashCommandDrone()
 _slashCommands.addProvider(new HelpProvider())
 _slashCommands.addProvider(new ClearProvider())
 _slashCommands.addProvider(new KeywordProvider())
+_slashCommands.addProvider(new DebugProvider())
 window.ioc.register('@diamondcoreprocessor.com/SlashCommandDrone', _slashCommands)

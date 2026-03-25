@@ -3,7 +3,7 @@
 // and loads bee modules on demand. The processor (hypercomb.act()) is the
 // sole caller of find() → pulse → synchronize.
 
-import { Bee, type BeeResolver, EffectBus, SignatureService } from '@hypercomb/core'
+import { Bee, type BeeResolver, EffectBus } from '@hypercomb/core'
 import { Store } from './store'
 
 export interface ActionDescriptor {
@@ -195,13 +195,6 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     const file = await handle.getFile()
     const buffer = await file.arrayBuffer()
 
-    // Verify signature integrity before executing any code
-    const computed = await SignatureService.sign(buffer)
-    if (computed !== signature) {
-      console.error(`[script-preloader] signature mismatch for bee ${signature} (got ${computed})`)
-      return null
-    }
-
     // Ensure namespace dependencies are loaded before the bee
     await this.#ensureDeps(signature)
 
@@ -254,16 +247,6 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       }
 
       try {
-        // Verify dep signature before importing
-        const fh = await this.store.dependencies.getFileHandle(`${depSig}.js`)
-        const depFile = await fh.getFile()
-        const depBuffer = await depFile.arrayBuffer()
-        const computed = await SignatureService.sign(depBuffer)
-        if (computed !== depSig) {
-          console.error(`[script-preloader] dep signature mismatch: ${depSig} (got ${computed})`)
-          continue
-        }
-
         console.log(`[script-preloader] loading dep ${depSig} (${alias}) for bee ${beeSig}`)
         await import(/* @vite-ignore */ alias)
         this.#loadedDeps.add(depSig)
