@@ -151,7 +151,7 @@ export class PixiDebugDrone extends Drone {
   #panel: HTMLDivElement | null = null
   #hitListPanel: HTMLDivElement | null = null
   #listening = false
-  #active = true
+  #active = false
   #pinnedObj: DisplayObject | null = null
 
   protected override listens = ['render:host-ready']
@@ -177,6 +177,10 @@ export class PixiDebugDrone extends Drone {
     this.#listening = true
     this.#panel = createPanel()
     this.#hitListPanel = createHitListPanel()
+
+    // start hidden — queen command toggles visibility
+    this.#panel.style.display = 'none'
+    this.#hitListPanel.style.display = 'none'
 
     document.addEventListener('pointermove', this.#onMove)
     document.addEventListener('keydown', this.#onKey)
