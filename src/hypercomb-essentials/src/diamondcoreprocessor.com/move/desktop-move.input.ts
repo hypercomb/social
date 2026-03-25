@@ -1,4 +1,5 @@
 // diamondcoreprocessor.com/input/move/desktop-move.input.ts
+import { Point } from 'pixi.js'
 import type { Axial } from '../navigation/hex-detector.js'
 import type { MoveDroneApi } from './move.drone.js'
 
@@ -181,6 +182,12 @@ export class DesktopMoveInput {
   }
 
   #clientToPixiGlobal(cx: number, cy: number) {
+    const events = this.#renderer?.events
+    if (events?.mapPositionToPoint) {
+      const out = new Point()
+      events.mapPositionToPoint(out, cx, cy)
+      return { x: out.x, y: out.y }
+    }
     const rect = this.#canvas!.getBoundingClientRect()
     const screen = this.#renderer!.screen
     return {

@@ -78,6 +78,12 @@ export class TouchGestureCoordinator {
 
   get sensitivity(): number { return this.#sensitivity }
   get sensitivityLocked(): boolean { return this.#sensitivityLocked }
+
+  /** Sensitivity adjusted for Retina displays — same physical feel on 1x, 2x, 3x screens. */
+  get #effectiveSensitivity(): number {
+    const dpr = globalThis.devicePixelRatio || 1
+    return dpr <= 1 ? this.#sensitivity : this.#sensitivity / dpr
+  }
   get state(): string {
     return ['IDLE', 'PENDING_PAN', 'PAN', 'PENDING_TWO_FINGER', 'PINCH', 'SENSITIVITY_SWIPE'][this.#state]
   }
@@ -241,7 +247,7 @@ export class TouchGestureCoordinator {
   #handlePan(prev: Point, current: Point): void {
     if (!this.#panLast) return
 
-    this.#panDelegate?.panUpdate(this.#panLast, current, this.#sensitivity)
+    this.#panDelegate?.panUpdate(this.#panLast, current, this.#effectiveSensitivity)
     this.#panLast = { ...current }
   }
 
@@ -301,7 +307,7 @@ export class TouchGestureCoordinator {
 
     const [a, b] = pts
     const result = this.#pinchDelegate?.pinchUpdate(
-      a.current, b.current, this.#pinchLastDistance, this.#sensitivity,
+      a.current, b.current, this.#pinchLastDistance, this.#effectiveSensitivity,
     )
     if (result) {
       this.#pinchLastDistance = result.distance
