@@ -52,12 +52,22 @@ const toCamel = (name: string) => {
 // walking
 // -------------------------------------------------
 
+const safeStat = (path: string) => {
+  try {
+    return statSync(path)
+  } catch (error: any) {
+    if (error && error.code === 'ENOENT') return null
+    throw error
+  }
+}
+
 const walkDirs = (dir: string): string[] => {
   if (!existsSync(dir)) return []
   const out: string[] = []
   for (const name of readdirSync(dir).sort()) {
     const full = join(dir, name)
-    if (statSync(full).isDirectory()) {
+    const st = safeStat(full)
+    if (st?.isDirectory()) {
       out.push(full)
       out.push(...walkDirs(full))
     }
@@ -70,7 +80,8 @@ const walkFiles = (dir: string): string[] => {
   const out: string[] = []
   for (const name of readdirSync(dir).sort()) {
     const full = join(dir, name)
-    const st = statSync(full)
+    const st = safeStat(full)
+    if (!st) continue
     if (st.isDirectory()) out.push(...walkFiles(full))
     else if (st.isFile()) out.push(full)
   }
