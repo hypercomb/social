@@ -1,42 +1,104 @@
 // diamondcoreprocessor.com/meeting/meeting.queen.ts
-// /meeting — toggle meeting availability (join/leave).
-// When joining, camera starts immediately so your video appears in your tile.
 
-import { QueenBee } from '@hypercomb/core'
+import { QueenBee, EffectBus, hypercomb } from '@hypercomb/core'
 
 /**
- * meeting — join or leave the hive meeting.
+ * /meeting — tag the selected tile with `cascade` to create a meeting room,
+ * or join/leave an existing meeting.
  *
- * Type `/meeting` to toggle your availability.
- * Joining starts your camera; leaving stops it and disconnects peers.
+ * Syntax:
+ *   /meeting              — toggle meeting on selected tile (tags `cascade` if untagged, joins if tagged)
+ *   /meeting join         — explicitly join the meeting on the selected tile
+ *   /meeting leave        — leave the active meeting
+ *   /meeting cascade      — use the default Hypercomb template (1+6)
+ *   /meeting cascade:19   — use a 2-ring template (1+6+12)
  */
 export class MeetingQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'meeting'
-  override readonly aliases = ['meet', 'join']
+  override readonly aliases = ['meet', 'call']
+  override description = 'Start or join a video meeting on the selected tile'
 
-  override description = 'Join or leave the hive meeting'
+  protected async execute(args: string): Promise<void> {
+    const trimmed = args.trim().toLowerCase()
 
-  protected execute(_args: string): void {
-    const drone = window.ioc.get('@diamondcoreprocessor.com/HiveMeetingDrone') as any
-    const isJoined = drone?.localAvailable === true
+    // get selected tiles
+    const selection = get('@diamondcoreprocessor.com/SelectionService') as
+      { selected: ReadonlySet<string> } | undefined
+    const selectedLabels = selection ? Array.from(selection.selected) : []
 
-    if (!isJoined) {
-      // joining — request camera from user gesture context
-      navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-        .then(stream => {
-          window.dispatchEvent(new CustomEvent('meeting:toggle-available', { detail: { stream } }))
-        })
-        .catch(() => {
-          // camera denied — join without camera
-          window.dispatchEvent(new CustomEvent('meeting:toggle-available'))
-        })
-    } else {
-      // leaving
-      window.dispatchEvent(new CustomEvent('meeting:toggle-available'))
+    if (trimmed === 'leave') {
+      // leave meeting on all selected tiles
+      for (const label of selectedLabels) {
+        EffectBus.emit('tile:action', { action: 'meeting', label, q: 0, r: 0, index: 0 })
+      }
+      return
     }
+
+    // determine template keyword
+    const template = trimmed === 'join' || !trimmed ? 'cascade' : trimmed
+
+    if (selectedLabels.length === 0) {
+      console.warn('[/meeting] No tiles selected. Select a tile first.')
+      return
+    }
+
+    // for each selected tile: tag it with the meeting keyword, then trigger join
+    const lineage = get('@hypercomb.social/Lineage') as
+      { explorerDir: () => Promise<FileSystemDirectoryHandle | null> } | undefined
+    const dir = lineage ? await lineage.explorerDir() : null
+
+    for (const label of selectedLabels) {
+      if (dir) {
+        // read current tags
+        const seedDir = await dir.getDirectoryHandle(label, { create: true })
+        const props = await readProps(seedDir)
+        const tags: string[] = Array.isArray(props['tags']) ? props['tags'] : []
+
+        // check if already has a meeting tag
+        const hasMeetingTag = tags.some(t => t === template || t.startsWith(template + ':'))
+
+        if (!hasMeetingTag) {
+          // add the meeting keyword tag
+          tags.push(template)
+          await writeProps(seedDir, { tags })
+          EffectBus.emit('tags:changed', { updates: [{ seed: label, tag: template }] })
+        }
+      }
+
+      // trigger the meeting action (join/toggle)
+      EffectBus.emit('tile:action', { action: 'meeting', label, q: 0, r: 0, index: 0 })
+    }
+
+    // pulse processor to pick up changes
+    void new hypercomb().act()
   }
 }
+
+// ── OPFS 0000 props helpers ─────────────────────────────────
+
+const PROPS_FILE = '0000'
+
+async function readProps(seedDir: FileSystemDirectoryHandle): Promise<Record<string, unknown>> {
+  try {
+    const fh = await seedDir.getFileHandle(PROPS_FILE)
+    const file = await fh.getFile()
+    return JSON.parse(await file.text())
+  } catch {
+    return {}
+  }
+}
+
+async function writeProps(seedDir: FileSystemDirectoryHandle, updates: Record<string, unknown>): Promise<void> {
+  const existing = await readProps(seedDir)
+  const merged = { ...existing, ...updates }
+  const fh = await seedDir.getFileHandle(PROPS_FILE, { create: true })
+  const writable = await fh.createWritable()
+  await writable.write(JSON.stringify(merged))
+  await writable.close()
+}
+
+// ── registration ────────────────────────────────────────────
 
 const _meeting = new MeetingQueenBee()
 window.ioc.register('@diamondcoreprocessor.com/MeetingQueenBee', _meeting)

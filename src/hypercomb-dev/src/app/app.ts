@@ -58,6 +58,7 @@ import { TouchGestureCoordinator } from '@hypercomb/essentials/diamondcoreproces
 import { HiveMeetingDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/meeting/hive-meeting.drone'
 import { MeetingVideoDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/meeting/meeting-video.drone'
 import { MeetingControlsWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/meeting/meeting-controls.worker'
+import { HypercombMeetingDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/meeting/meeting.drone'
 import { MeetingQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/meeting/meeting.queen'
 
 const _deps = [
@@ -103,6 +104,7 @@ const _deps = [
   HiveMeetingDrone,
   MeetingVideoDrone,
   MeetingControlsWorker,
+  HypercombMeetingDrone,
   MeetingQueenBee,
 ]
 

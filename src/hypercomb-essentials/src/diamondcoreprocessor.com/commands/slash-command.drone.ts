@@ -86,6 +86,21 @@ class KeywordProvider implements SlashCommandProvider {
   }
 }
 
+class MeetingProvider implements SlashCommandProvider {
+  readonly name = 'meeting-provider'
+  readonly priority = 100
+  readonly commands: SlashCommand[] = [
+    { name: 'meeting', description: 'Start or join a video meeting on the selected tile', aliases: ['meet', 'call'] }
+  ]
+
+  async execute(_commandName: string, args: string): Promise<void> {
+    const queen = get('@diamondcoreprocessor.com/MeetingQueenBee') as any
+    if (queen?.invoke) {
+      await queen.invoke(args)
+    }
+  }
+}
+
 class DebugProvider implements SlashCommandProvider {
   readonly name = 'debug-provider'
   readonly priority = 100
@@ -107,5 +122,6 @@ const _slashCommands = new SlashCommandDrone()
 _slashCommands.addProvider(new HelpProvider())
 _slashCommands.addProvider(new ClearProvider())
 _slashCommands.addProvider(new KeywordProvider())
+_slashCommands.addProvider(new MeetingProvider())
 _slashCommands.addProvider(new DebugProvider())
 window.ioc.register('@diamondcoreprocessor.com/SlashCommandDrone', _slashCommands)
