@@ -10,7 +10,6 @@ import { fileURLToPath } from 'url'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
 import { dirname, extname, join, relative, resolve } from 'path'
 import { build } from 'esbuild'
-import { SignatureService } from '@hypercomb/core'
 
 // -------------------------------------------------
 // esm globals
@@ -26,6 +25,23 @@ const __dirname = dirname(__filename)
 const PROJECT_ROOT = resolve(__dirname, '..')
 const SRC_ROOT = resolve(PROJECT_ROOT, 'src')
 const DIST_ROOT = resolve(PROJECT_ROOT, 'dist')
+
+// -------------------------------------------------
+// ensure @hypercomb/core is built
+// -------------------------------------------------
+
+const CORE_DIST = resolve(PROJECT_ROOT, '..', 'hypercomb-core', 'dist', 'index.js')
+if (!existsSync(CORE_DIST)) {
+  console.log('⚙ @hypercomb/core not built — building now…')
+  const r = spawnSync('npm', ['run', 'build'], {
+    cwd: resolve(PROJECT_ROOT, '..', 'hypercomb-core'),
+    stdio: 'inherit',
+    shell: true,
+  })
+  if (r.status !== 0) throw new Error('@hypercomb/core build failed')
+}
+
+const { SignatureService } = await import('@hypercomb/core')
 
 const TARGET = 'es2022'
 
