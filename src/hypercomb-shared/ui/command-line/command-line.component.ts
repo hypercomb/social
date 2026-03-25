@@ -1382,6 +1382,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         this.suppressed.set(false)
         this.placeCaretAtEnd()
         this.syncSignalsFromDom()
+        this.input.nativeElement.dispatchEvent(new Event('input', { bubbles: true }))
         return
       }
 

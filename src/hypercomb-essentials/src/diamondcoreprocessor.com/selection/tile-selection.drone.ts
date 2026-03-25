@@ -380,4 +380,4 @@ function axialKey(q: number, r: number): string {
 }
 
 const _tileSelection = new TileSelectionDrone()
-window.ioc.register('@diamondcoreprocessor.com/TileSelectionDrone', _tileSelection)
+window.ioc.register('@diamondcoreprocessor.com/SelectionInputDrone', _tileSelection)

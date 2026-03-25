@@ -1,9 +1,8 @@
 // diamondcoreprocessor.com/pixi/tile-selection.drone.ts
 import { Drone } from '@hypercomb/core'
-import { Application, Container, Graphics, Point } from 'pixi.js'
+import { Application, Container, Graphics } from 'pixi.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
 import type { Axial } from '../../navigation/hex-detector.js'
-import type { InputGate } from '../../navigation/input-gate.service.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY } from '../grid/hex-geometry.js'
 
 type CellCountPayload = { count: number; labels: string[] }
@@ -75,14 +74,7 @@ export class TileSelectionDrone extends Drone {
   // ── selection state ───────────────────────────────────────────
   #selected = new Set<string>() // axial keys "q,r"
   #leaderKey: string | null = null // axial key of the leader tile
-  // ── drag state ────────────────────────────────────────────────
-  #dragActive = false
-  #dragOp: 'add' | 'remove' | null = null
-  #touched = new Set<string>()
-  #lastDragAxial: Axial | null = null
 
-  #gate: InputGate | null = null
-  #listening = false
   #effectsRegistered = false
 
   // hex orientation
@@ -113,9 +105,7 @@ export class TileSelectionDrone extends Drone {
       this.#renderContainer = payload.container
       this.#canvas = payload.canvas
       this.#renderer = payload.renderer
-      this.#gate = window.ioc.get<InputGate>('@diamondcoreprocessor.com/InputGate') ?? null
       this.#initLayer()
-      this.#attachListeners()
     })
 
     this.onEffect<{ x: number; y: number }>('render:mesh-offset', (offset) => {
@@ -160,15 +150,25 @@ export class TileSelectionDrone extends Drone {
         if (targetLabels.has(entry.label)) targetKeys.add(key)
       }
 
-      // Only update if different
-      if (targetKeys.size === this.#selected.size && [...targetKeys].every(k => this.#selected.has(k))) return
+      // Resolve leader from active label
+      const activeLabel = payload['active'] as string | null
+      let leaderKey: string | null = null
+      if (activeLabel) {
+        for (const [key, entry] of this.#occupiedByAxial) {
+          if (entry.label === activeLabel) { leaderKey = key; break }
+        }
+      }
+      leaderKey = leaderKey ?? (targetKeys.size > 0 ? [...targetKeys][0] : null)
+
+      // Only update if selection set AND leader are both unchanged
+      const sameSet = targetKeys.size === this.#selected.size && [...targetKeys].every(k => this.#selected.has(k))
+      if (sameSet && leaderKey === this.#leaderKey) return
 
       this.#selected.clear()
       for (const k of targetKeys) this.#selected.add(k)
-      this.#leaderKey = targetKeys.size > 0 ? [...targetKeys][0] : null
-      this.#syncing = true
+      this.#leaderKey = leaderKey
       this.#redraw()
-      this.#syncing = false
+      this.#emitChanged()
 
       if (this.#selected.size > 0) this.#startAnimation()
       else this.#stopAnimation()
@@ -177,12 +177,6 @@ export class TileSelectionDrone extends Drone {
 
   protected override dispose(): void {
     this.#stopAnimation()
-    if (this.#listening) {
-      document.removeEventListener('mousedown', this.#onMouseDown)
-      document.removeEventListener('mousemove', this.#onMouseMove)
-      document.removeEventListener('mouseup', this.#onMouseUp)
-      this.#listening = false
-    }
     if (this.#layer) {
       this.#layer.destroy()
       this.#layer = null
@@ -357,113 +351,6 @@ export class TileSelectionDrone extends Drone {
     this.#renderContainer.sortableChildren = true
   }
 
-  // ── listener setup ────────────────────────────────────────────
-
-  #attachListeners(): void {
-    if (this.#listening) return
-    this.#listening = true
-    document.addEventListener('mousedown', this.#onMouseDown)
-    document.addEventListener('mousemove', this.#onMouseMove)
-    document.addEventListener('mouseup', this.#onMouseUp)
-  }
-
-  // ── mouse handlers ────────────────────────────────────────────
-
-  #onMouseDown = (e: MouseEvent): void => {
-    if (e.button !== 0) return
-    if (!e.ctrlKey && !e.metaKey) return
-    if (!this.#canvas) return
-    if (this.#isInteractiveTarget(e.target)) return
-
-    const rect = this.#canvas.getBoundingClientRect()
-    if (!this.#isInsideRect(e.clientX, e.clientY, rect)) return
-
-    const axial = this.#clientToAxial(e.clientX, e.clientY)
-    if (!axial) return
-
-    const key = axialKey(axial.q, axial.r)
-    const isOccupied = this.#occupiedByAxial.has(key)
-
-    if (!this.#gate?.claim('tile-selection')) return
-
-    this.#dragActive = true
-    this.#touched.clear()
-    this.#lastDragAxial = axial
-
-    if (isOccupied) {
-      const isSelected = this.#selected.has(key)
-      if (isSelected && this.#selected.size > 1) {
-        // promote to leader instead of removing
-        this.#leaderKey = key
-        this.#dragOp = null
-        this.#redraw()
-        this.#emitChanged()
-      } else {
-        this.#dragOp = isSelected ? 'remove' : 'add'
-        this.#applyOp(key)
-      }
-    } else {
-      this.#dragOp = 'add'
-    }
-
-    e.preventDefault()
-    e.stopPropagation()
-  }
-
-  #onMouseMove = (e: MouseEvent): void => {
-    if (!this.#dragActive || !this.#dragOp) return
-
-    const axial = this.#clientToAxial(e.clientX, e.clientY)
-    if (!axial) return
-
-    if (this.#lastDragAxial && this.#lastDragAxial.q === axial.q && this.#lastDragAxial.r === axial.r) return
-    this.#lastDragAxial = axial
-
-    const key = axialKey(axial.q, axial.r)
-    if (!this.#occupiedByAxial.has(key)) return
-
-    this.#applyOp(key)
-
-    e.preventDefault()
-    e.stopPropagation()
-  }
-
-  #onMouseUp = (_e: MouseEvent): void => {
-    if (!this.#dragActive) return
-    this.#gate?.release('tile-selection')
-    this.#dragActive = false
-    this.#dragOp = null
-    this.#touched.clear()
-    this.#lastDragAxial = null
-  }
-
-  // ── selection logic ───────────────────────────────────────────
-
-  #applyOp(key: string): void {
-    if (this.#touched.has(key)) return
-    this.#touched.add(key)
-
-    if (this.#dragOp === 'add') {
-      // first tile added becomes leader
-      if (this.#selected.size === 0) this.#leaderKey = key
-      this.#selected.add(key)
-    } else if (this.#dragOp === 'remove') {
-      this.#selected.delete(key)
-      // if leader was removed, promote next selected tile (or clear)
-      if (key === this.#leaderKey) {
-        const next = this.#selected.values().next()
-        this.#leaderKey = next.done ? null : next.value
-      }
-    }
-
-    this.#redraw()
-    this.#emitChanged()
-    this.#syncSelectionService()
-
-    if (this.#selected.size > 0) this.#startAnimation()
-    else this.#stopAnimation()
-  }
-
   #pruneStaleSelections(): void {
     let pruned = false
     for (const key of this.#selected) {
@@ -482,10 +369,13 @@ export class TileSelectionDrone extends Drone {
 
   #emitChanged(): void {
     this.#syncing = true
+    const labels = this.selectedLabels
     this.emitEffect('selection:changed', {
+      selected: labels,
+      active: this.leader?.label ?? null,
       count: this.#selected.size,
       keys: Array.from(this.#selected),
-      labels: this.selectedLabels,
+      labels,
       leader: this.leader,
       relativeAxials: this.relativeAxials,
     })
@@ -602,33 +492,6 @@ export class TileSelectionDrone extends Drone {
       : { x: Math.sqrt(3) * this.#geo.spacing * (q + r / 2), y: this.#geo.spacing * 1.5 * r }
   }
 
-  #clientToAxial(cx: number, cy: number): Axial | null {
-    if (!this.#renderContainer || !this.#renderer || !this.#canvas) return null
-    const detector = this.resolve<{ pixelToAxial(px: number, py: number, flat?: boolean): Axial }>('detector')
-    if (!detector) return null
-
-    const pixiGlobal = this.#clientToPixiGlobal(cx, cy)
-    const local = this.#renderContainer.toLocal(new Point(pixiGlobal.x, pixiGlobal.y))
-    const meshLocalX = local.x - this.#meshOffset.x
-    const meshLocalY = local.y - this.#meshOffset.y
-    return detector.pixelToAxial(meshLocalX, meshLocalY, this.#flat)
-  }
-
-  #clientToPixiGlobal(cx: number, cy: number) {
-    const events = (this.#renderer as any)?.events
-    if (events?.mapPositionToPoint) {
-      const out = new Point()
-      events.mapPositionToPoint(out, cx, cy)
-      return { x: out.x, y: out.y }
-    }
-    const rect = this.#canvas!.getBoundingClientRect()
-    const screen = this.#renderer!.screen
-    return {
-      x: (cx - rect.left) * (screen.width / rect.width),
-      y: (cy - rect.top) * (screen.height / rect.height),
-    }
-  }
-
   // ── occupied lookup ───────────────────────────────────────────
 
   #rebuildOccupiedMap(): void {
@@ -644,14 +507,6 @@ export class TileSelectionDrone extends Drone {
     }
   }
 
-  #isInteractiveTarget(target: EventTarget | null): boolean {
-    if (!target || !(target instanceof HTMLElement)) return false
-    return !!target.closest('input, textarea, button, select, option, a, [contenteditable="true"], [contenteditable=""], [role="textbox"]')
-  }
-
-  #isInsideRect(x: number, y: number, rect: DOMRect): boolean {
-    return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
-  }
 }
 
 // ── arrow-key direction offsets ─────────────────────────────────
