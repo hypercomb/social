@@ -1,6 +1,18 @@
 @use '../../../hypercomb-shared/ui/header-bar';
+@use '../../../hypercomb-shared/ui/breakpoints' as *;
+
+:host {
+  display: block;
+}
 
 hc-command-line {
   flex: 1;
   min-width: 0;
+}
+
+@include phone-only {
+  // hide command-line when secret input is expanded
+  .header-bar.secret-open hc-command-line {
+    display: none;
+  }
 }

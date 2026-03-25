@@ -1,38 +1,48 @@
-@if (meshPublic) {
-  <div class="mesh-public">
-    <button class="shield-toggle" [class.has-secret]="hasSecret()"
-      [style.--shield-color]="shieldColor()" type="button" (click)="onShieldClick()">
+<div class="mesh-header" [class.secret-active]="secretExpanded()">
+  <!-- Solo state: lens flare icon -->
+  @if (!meshPublic) {
+    <button class="mode-toggle solo-mode" type="button"
+      (click)="cycleMode()">
+      <span class="solo-icon">&#x2726;</span>
+    </button>
+  }
+
+  <!-- Public state: shield icon -->
+  @if (meshPublic && !secretExpanded()) {
+    <button class="mode-toggle public-mode" [class.has-secret]="hasSecret()"
+      [style.--shield-color]="shieldColor()" type="button"
+      (click)="cycleMode()">
       <span class="hci">e</span>
     </button>
-    @if (secretExpanded()) {
-      <div class="secret-input-wrap">
-        <input
-          class="header-secret-input" [class.has-secret]="hasSecret()"
-          [class.revealed]="secretRevealed()"
-          type="text"
-          placeholder="secure your location"
-          [value]="secretValue()"
-          (input)="onSecretInput($event)"
-          (keydown.enter)="submitSecret($event)"
-        />
-        @if (hasSecret()) {
-          <button class="secret-eye" type="button" (click)="onEyeClick()">
-            <span class="hci">c</span>
-          </button>
-        }
-      </div>
+  }
+
+  <!-- Secret state: shield left + secret input -->
+  @if (meshPublic && secretExpanded()) {
+    <button class="mode-toggle secret-mode" [class.has-secret]="hasSecret()"
+      [style.--shield-color]="shieldColor()" type="button"
+      (click)="cycleMode()">
+      <span class="hci">e</span>
+    </button>
+    <div class="secret-input-wrap">
+      <input
+        class="header-secret-input" [class.has-secret]="hasSecret()"
+        [class.revealed]="secretRevealed()"
+        type="text"
+        placeholder="secure your location"
+        [value]="secretValue()"
+        (input)="onSecretInput($event)"
+        (keydown.enter)="submitSecret($event)"
+      />
       @if (hasSecret()) {
-        <button class="secret-clear" type="button" (click)="clearSecret()">
-          &times;
+        <button class="secret-eye" type="button" (click)="onEyeClick()">
+          <span class="hci">c</span>
         </button>
       }
+    </div>
+    @if (hasSecret()) {
+      <button class="secret-clear" type="button" (click)="clearSecret()">
+        &times;
+      </button>
     }
-    <button class="public-toggle" type="button" (click)="meshToggled.emit()">
-      public
-    </button>
-  </div>
-} @else {
-  <button class="private-toggle" type="button" (click)="meshToggled.emit()">
-    private
-  </button>
-}
+  }
+</div>

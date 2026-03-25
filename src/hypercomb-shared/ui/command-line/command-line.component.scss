@@ -224,8 +224,27 @@
 // ── phone (≤599px) ────────────────────────────────────────
 @include phone-only {
 
+  .command-shell {
+    border-radius: 3px 0 0 3px;
+  }
+
   .command-row {
-    min-height: 2.75rem;
+    min-height: 3.2rem; // ~2× default for mobile
+
+    &::before {
+      font-size: 1.1em;
+      padding-left: 0.75rem;
+    }
+  }
+
+  .command-input {
+    font-size: 16px;
+    padding: 0.75rem;
+  }
+
+  .ghost {
+    font-size: 16px;
+    padding-left: calc(0.75rem + 0.7em + 0.75rem);
   }
 
   .command-results li {

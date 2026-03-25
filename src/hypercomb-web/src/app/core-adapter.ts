@@ -9,11 +9,8 @@ const _ = [DependencyLoader, LayerInstaller, LayerService, Store]
 
 const MESH_PUBLIC_KEY = 'hc:mesh-public'
 
-function readMeshPublic(): boolean | null {
-  const v = localStorage.getItem(MESH_PUBLIC_KEY)
-  if (v === 'true') return true
-  if (v === 'false') return false
-  return null
+function readMeshPublic(): boolean {
+  return localStorage.getItem(MESH_PUBLIC_KEY) === 'true'
 }
 
 @Injectable({ providedIn: 'root' })

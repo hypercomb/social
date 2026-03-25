@@ -17,4 +17,9 @@ app-header {
   app-header {
     max-width: 100%;
   }
+
+  // hide command-line when secret input is expanded
+  .header-bar.secret-open app-header {
+    display: none;
+  }
 }

@@ -1,6 +1,6 @@
-<div class="header-bar">
+<div class="header-bar" [class.secret-open]="secretOpen()">
   <hc-command-line></hc-command-line>
-  <hc-mesh-header [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()"></hc-mesh-header>
+  <hc-mesh-header [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()" (secretExpandedChange)="secretOpen.set($event)"></hc-mesh-header>
 </div>
 <hc-activity-log></hc-activity-log>
 <router-outlet />

@@ -1,3 +1,5 @@
+@use '../../../../hypercomb-shared/ui/breakpoints' as *;
+
 :host {
   display: contents;
 }
@@ -5,4 +7,10 @@
 hc-command-line {
   flex: 1;
   min-width: 0;
+}
+
+@include phone-only {
+  :host {
+    order: 0; // command-line stays at natural position
+  }
 }

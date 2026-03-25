@@ -104,9 +104,9 @@ export class App {
 
   public readonly meshPublic = signal(
     localStorage.getItem('hc:mesh-public') === 'true' ? true
-    : localStorage.getItem('hc:mesh-public') === 'false' ? false
-    : null as boolean | null
+    : false // default: solo mode
   );
+  public readonly secretOpen = signal(false);
   public readonly orientation = signal<HexOrientation>(
     (localStorage.getItem('hc:hex-orientation') as HexOrientation) || 'point-top'
   );

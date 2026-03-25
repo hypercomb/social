@@ -394,7 +394,7 @@
 
 .mobile-back-btn {
   position: fixed;
-  top: calc(0.5rem + var(--hc-safe-top, 0px));
+  top: calc(4rem + var(--hc-safe-top, 0px));
   left: 0.5rem;
   z-index: 60001;
 
@@ -423,7 +423,8 @@
   }
 
   &.disabled {
-    opacity: 0.25;
+    opacity: 0;
+    pointer-events: none;
     cursor: default;
   }
 }

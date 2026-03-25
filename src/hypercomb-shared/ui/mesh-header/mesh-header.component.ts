@@ -13,6 +13,7 @@ export class MeshHeaderComponent {
 
   @Input() meshPublic: boolean | null = false
   @Output() readonly meshToggled = new EventEmitter<void>()
+  @Output() readonly secretExpandedChange = new EventEmitter<boolean>()
 
   #secretValue = signal('')
   #secretExpanded = signal(false)
@@ -45,10 +46,21 @@ export class MeshHeaderComponent {
     return get('@hypercomb.social/SecretStore') as SecretStore | undefined
   }
 
-  readonly onShieldClick = (): void => {
-    this.#secretExpanded.update(v => !v)
-    if (!this.#secretExpanded()) {
+  /** Cycle: solo → public → secret → solo */
+  readonly cycleMode = (): void => {
+    if (!this.meshPublic) {
+      // solo → public
+      this.meshToggled.emit()
+    } else if (!this.#secretExpanded()) {
+      // public → secret
+      this.#secretExpanded.set(true)
+      this.secretExpandedChange.emit(true)
+    } else {
+      // secret → solo
+      this.#secretExpanded.set(false)
       this.#secretRevealed.set(false)
+      this.secretExpandedChange.emit(false)
+      this.meshToggled.emit()
     }
   }
 
@@ -66,15 +78,11 @@ export class MeshHeaderComponent {
     this.#secretValue.set(value)
     this.#store?.set(value)
     EffectBus.emit('mesh:secret', { secret: value })
-    this.#secretExpanded.set(false)
-    this.#secretRevealed.set(false)
   }
 
   readonly clearSecret = (): void => {
     this.#secretValue.set('')
     this.#store?.set('')
     EffectBus.emit('mesh:secret', { secret: '' })
-    this.#secretExpanded.set(false)
-    this.#secretRevealed.set(false)
   }
 }

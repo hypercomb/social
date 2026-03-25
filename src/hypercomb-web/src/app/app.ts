@@ -19,6 +19,7 @@ import { SensitivityBarComponent } from "@hypercomb/shared/ui/sensitivity-bar/se
 export class App implements AfterViewInit {
 
   protected readonly title = signal('hypercomb-web')
+  protected readonly secretOpen = signal(false)
   public showHeader = true
   private runtimeReady: Promise<void> = Promise.resolve()
 
