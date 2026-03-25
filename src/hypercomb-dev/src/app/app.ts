@@ -26,6 +26,7 @@ import { TileEditorDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/
 import { ImageEditorService } from '@hypercomb/essentials/diamondcoreprocessor.com/editor/image-editor.service'
 import { KeyMapService } from '@hypercomb/essentials/diamondcoreprocessor.com/keyboard/keymap.service'
 import { SelectionService } from '@hypercomb/essentials/diamondcoreprocessor.com/selection/selection.service'
+import '@hypercomb/essentials/diamondcoreprocessor.com/selection/tile-selection.drone'
 import '@hypercomb/essentials/diamondcoreprocessor.com/keyboard/escape-cascade'
 import '@hypercomb/essentials/diamondcoreprocessor.com/navigation/bee-toggle'
 import { TileEditorComponent } from '@hypercomb/shared/ui/tile-editor/tile-editor.component'

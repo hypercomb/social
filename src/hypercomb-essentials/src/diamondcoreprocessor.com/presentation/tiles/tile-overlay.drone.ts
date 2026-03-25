@@ -78,7 +78,6 @@ export class TileOverlayDrone extends Drone {
   #cellLabels: string[] = []
 
   #listening = false
-  #hoverLog = 0
   #flat = false
 
   #occupiedByAxial = new Map<string, { index: number; label: string }>()
@@ -373,11 +372,6 @@ export class TileOverlayDrone extends Drone {
       if (this.#meshPublic) {
         const newKey = this.#resolveProfileKey()
         if (newKey !== this.#activeProfileKey) this.#rebuildActiveProfile()
-      }
-
-      if (this.#hoverLog < 5) {
-        console.log('[TileOverlay] hover q:', axial.q, 'r:', axial.r, '-> index:', this.#currentIndex)
-        this.#hoverLog++
       }
 
       // Ctrl/Meta held: track position but hide overlay (selection mode, not navigation)
