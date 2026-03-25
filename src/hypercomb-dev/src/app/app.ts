@@ -51,6 +51,8 @@ import '@hypercomb/essentials/diamondcoreprocessor.com/assistant/claude-bridge.w
 import '@hypercomb/essentials/diamondcoreprocessor.com/assistant/atomize.drone'
 import { HelpQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/help.queen'
 import { KeywordQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/keyword.queen'
+import { DebugQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/debug.queen'
+import { PixiDebugDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/presentation/tiles/pixi-debug.drone'
 import { PinchZoomInput } from '@hypercomb/essentials/diamondcoreprocessor.com/navigation/zoom/pinch-zoom.input'
 import { TouchGestureCoordinator } from '@hypercomb/essentials/diamondcoreprocessor.com/navigation/touch/touch-gesture.coordinator'
 
@@ -90,6 +92,8 @@ const _deps = [
   ClipboardWorker,
   HelpQueenBee,
   KeywordQueenBee,
+  DebugQueenBee,
+  PixiDebugDrone,
   PinchZoomInput,
   TouchGestureCoordinator,
 ]
