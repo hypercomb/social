@@ -130,7 +130,7 @@ export class ImageEditorService extends EventTarget {
     blob: Blob,
     transform?: { x: number; y: number; scale: number }
   ): Promise<void> => {
-    if (!this.#container || !this.#app) return
+    if (!this.#initialized || !this.#container || !this.#app) return
 
     if (this.#sprite) {
       this.#container.removeChild(this.#sprite)

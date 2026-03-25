@@ -46,6 +46,7 @@ import '@hypercomb/essentials/diamondcoreprocessor.com/commands/slash-command.dr
 import { AvatarSwarmDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/presentation/avatars/avatar-swarm.drone'
 import { ClipboardService } from '@hypercomb/essentials/diamondcoreprocessor.com/clipboard/clipboard.service'
 import { ClipboardWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/clipboard/clipboard.worker'
+import '@hypercomb/essentials/diamondcoreprocessor.com/clipboard/image-paste.worker'
 import '@hypercomb/essentials/diamondcoreprocessor.com/assistant/claude-bridge.worker'
 import { HelpQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/help.queen'
 import { KeywordQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/keyword.queen'
