@@ -27,6 +27,25 @@ export class LayerService {
     if (local) return local
 
     // step 2: remote fetch -> save -> return
+    // Prefer sentinel bridge (DCP) if connected — isolates server contact
+    const bridge = (globalThis as any).__sentinelBridge
+    if (bridge?.fetchContent) {
+      try {
+        const buf: ArrayBuffer | null = await bridge.fetchContent(requestedSig, 'layer', rootSig)
+        if (buf) {
+          const bytes = new Uint8Array(buf)
+          const text = new TextDecoder().decode(bytes).trim()
+          const layer = this.tryParseLayer(text, requestedSig)
+          if (layer) {
+            await this.writeBytesFile(dir, requestedSig, bytes)
+            return layer
+          }
+        }
+      } catch {
+        // sentinel failed — fall through to direct fetch
+      }
+    }
+
     const baseUrl = (parsed?.baseUrl ?? '').trim().replace(/\/+$/, '')
     const url = `${baseUrl}/${rootSig}/__layers__/${requestedSig}.json`
 

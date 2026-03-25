@@ -5,6 +5,7 @@
 import { SignatureStore } from '@hypercomb/core'
 import { Store, LayerInstaller } from '@hypercomb/shared/core'
 import { LocationParser } from '@hypercomb/shared/core/initializers/location-parser'
+import type { SentinelBridge } from './sentinel-bridge'
 
 const AZURE_CONTENT_URL = 'https://storagehypercomb.blob.core.windows.net/content'
 const isLocalDev = typeof window !== 'undefined'
@@ -16,6 +17,7 @@ const SIGNATURE_REGEX = /^[a-f0-9]{64}$/i
 const INSTALLED_KEY = 'core-adapter.installed-signature'
 const MANIFEST_KEY = 'core-adapter.installed-manifest'
 const SIG_STORE_KEY = 'hypercomb.signature-store'
+const SYNC_SIG_KEY = 'sentinel.sync-signature'
 
 // ensure side-effect registrations
 const _deps = [Store, LayerInstaller]
@@ -28,7 +30,7 @@ type InstallManifest = {
   beeDeps?: Record<string, string[]>
 }
 
-export const ensureInstall = async (): Promise<void> => {
+export const ensureInstall = async (sentinel?: SentinelBridge | null): Promise<void> => {
   // register the central signature allowlist — scripts in the store skip re-verification
   const sigStore = new SignatureStore()
   register('@hypercomb/SignatureStore', sigStore)
@@ -41,6 +43,87 @@ export const ensureInstall = async (): Promise<void> => {
 
   await store.initialize()
 
+  // ── Sentinel path: DCP handles all server contact ──
+  // Uses sync (toggle-aware) — web becomes a snapshot of DCP's enabled state
+  if (sentinel) {
+    const currentSyncSig = (localStorage.getItem(SYNC_SIG_KEY) ?? '').trim() || undefined
+    const result = await sentinel.sync(currentSyncSig)
+
+    if (result) {
+      const { syncSig, enabledBees, enabledDeps, enabledLayers, beeDeps, files } = result
+
+      // Short-circuit: already in sync
+      if (!files.length && currentSyncSig === syncSig) {
+        console.log('[ensure-install] sentinel sync — already in sync:', syncSig.slice(0, 12))
+        restoreSignatureStore(sigStore)
+        const cached = localStorage.getItem(MANIFEST_KEY)
+        if (cached) {
+          const m = tryParseManifest(cached)
+          if (m?.beeDeps) (globalThis as any).__hypercombBeeDeps = m.beeDeps
+        }
+        return
+      }
+
+      // Compute what web currently has vs what DCP says should be enabled
+      const enabledBeeSet = new Set(enabledBees)
+      const enabledDepSet = new Set(enabledDeps)
+      const enabledLayerSet = new Set(enabledLayers)
+
+      // Remove bees that are no longer enabled
+      await removeDisabled(store.bees, enabledBeeSet, '.js')
+      // Remove deps that are no longer enabled
+      await removeDisabled(store.dependencies, enabledDepSet, '.js')
+      // Remove layers that are no longer enabled
+      const layerDir = await store.domainLayersDirectory('sentinel', true)
+      await removeDisabled(layerDir, enabledLayerSet, '')
+
+      // Write new/updated files from sentinel
+      for (const file of files) {
+        switch (file.kind) {
+          case 'layer':
+            await writeBytes(layerDir, file.signature, file.bytes)
+            break
+          case 'bee':
+            await writeBytes(store.bees, `${file.signature}.js`, file.bytes)
+            break
+          case 'dependency':
+            await writeBytes(store.dependencies, `${file.signature}.js`, file.bytes)
+            break
+        }
+      }
+
+      // Populate signature store
+      const allSigs = [...enabledBees, ...enabledDeps, ...enabledLayers]
+      sigStore.trustAll(allSigs)
+      localStorage.setItem(SIG_STORE_KEY, JSON.stringify(sigStore.toJSON()))
+
+      // Build a manifest matching what's now installed
+      const syncManifest = {
+        version: 2,
+        layers: enabledLayers,
+        bees: enabledBees,
+        dependencies: enabledDeps,
+        beeDeps
+      }
+
+      // Mark synced — transaction complete
+      localStorage.setItem(SYNC_SIG_KEY, syncSig)
+      localStorage.setItem(INSTALLED_KEY, syncSig)
+      localStorage.setItem(MANIFEST_KEY, JSON.stringify(syncManifest))
+      if (beeDeps) (globalThis as any).__hypercombBeeDeps = beeDeps
+
+      // Clear stale SW cache so removed modules aren't served from cache
+      await clearStaleCaches()
+
+      console.log(`[ensure-install] sentinel sync complete: ${syncSig.slice(0, 12)} (${enabledBees.length} bees, ${enabledDeps.length} deps, ${enabledLayers.length} layers)`)
+      return
+    }
+
+    // Sentinel returned null — fall through to direct fetch
+    console.warn('[ensure-install] sentinel sync returned no result — falling back to direct fetch')
+  }
+
+  // ── Direct fetch path (fallback when sentinel unavailable) ──
   const signature = resolveSignatureFromUrl()
     ?? await resolveLatestSignature()
   if (!signature) {
@@ -242,8 +325,29 @@ const removeStale = async (
   }
 }
 
-// No-op — bee discovery now reads directly from the cached manifest in localStorage.
-// The manifest is already persisted by ensureInstall() under MANIFEST_KEY.
+const writeBytes = async (dir: FileSystemDirectoryHandle, name: string, bytes: ArrayBuffer): Promise<void> => {
+  const handle = await dir.getFileHandle(name, { create: true })
+  const writable = await handle.createWritable()
+  await writable.write(bytes)
+  await writable.close()
+}
+
+/**
+ * Remove files from a directory whose signature is NOT in the enabled set.
+ * Handles files stored as `{sig}{ext}` or bare `{sig}`.
+ */
+const removeDisabled = async (
+  dir: FileSystemDirectoryHandle,
+  enabledSigs: Set<string>,
+  ext: string
+): Promise<void> => {
+  for await (const [name] of dir.entries()) {
+    const sig = ext ? name.replace(new RegExp(`\\${ext}$`, 'i'), '') : name
+    if (/^[a-f0-9]{64}$/i.test(sig) && !enabledSigs.has(sig)) {
+      try { await dir.removeEntry(name) } catch { /* skip */ }
+    }
+  }
+}
 
 // ----- signature store helpers -----
 

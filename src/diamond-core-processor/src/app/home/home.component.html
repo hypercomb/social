@@ -13,7 +13,7 @@
         [value]="domainInput()"
         (input)="domainInput.set($any($event.target).value)"
         (keydown.enter)="addDomain()" />
-      <button class="btn" (click)="addDomain()">Add</button>
+      <button class="btn" (click)="addDomain()">Install</button>
     </div>
 
     @if (!domains().length) {

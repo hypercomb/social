@@ -4,6 +4,7 @@ import '@hypercomb/shared/core/ioc.web'
 
 import { bootstrapApplication } from '@angular/platform-browser'
 import { ensureInstall } from './setup/ensure-install'
+import { initSentinel } from './setup/sentinel-bridge'
 import { resolveImportMap } from './setup/resolve-import-map'
 import { appConfig } from './app.config'
 import { App } from './app/app'
@@ -40,7 +41,8 @@ const attachImportMap = async (): Promise<void> => {
 
 const bootstrap = async (): Promise<void> => {
   await ensureSwControl()
-  await ensureInstall()
+  const sentinel = await initSentinel()
+  await ensureInstall(sentinel)
   await attachImportMap()
 
   // Load dependency namespaces so services self-register before Angular renders
