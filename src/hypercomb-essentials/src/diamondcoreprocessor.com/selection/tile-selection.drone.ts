@@ -186,14 +186,11 @@ class TileSelectionDrone extends Drone {
     }
 
     // selection-mode drag: wait for movement threshold before committing to drag
-    if (selection.count > 0) {
-      this.#activePointerId = e.pointerId
-      this.#pendingDrag = true
-      this.#pendingStartLabel = label
-      this.#pendingStartX = e.clientX
-      this.#pendingStartY = e.clientY
-      return
-    }
+    this.#activePointerId = e.pointerId
+    this.#pendingDrag = true
+    this.#pendingStartLabel = label
+    this.#pendingStartX = e.clientX
+    this.#pendingStartY = e.clientY
   }
 
   #onPointerMove = (e: PointerEvent): void => {
