@@ -113,7 +113,7 @@ function createPanel(): HTMLDivElement {
   el.style.cssText = `
     position: fixed; bottom: 8px; left: 8px; z-index: 999999;
     background: rgba(0,0,0,0.88); color: #0f0; font: 11px/1.4 monospace;
-    padding: 8px 10px; border-radius: 4px; pointer-events: none;
+    padding: 8px 10px; border-radius: 1px; pointer-events: none;
     max-width: 420px; white-space: pre-wrap; word-break: break-all;
     border: 1px solid rgba(0,255,0,0.3);
     transition: opacity 0.15s;
@@ -128,7 +128,7 @@ function createHitListPanel(): HTMLDivElement {
   el.style.cssText = `
     position: fixed; top: 8px; right: 8px; z-index: 999999;
     background: rgba(0,0,0,0.88); color: #0f0; font: 11px/1.4 monospace;
-    padding: 8px 10px; border-radius: 4px; pointer-events: auto;
+    padding: 8px 10px; border-radius: 1px; pointer-events: auto;
     max-width: 360px; max-height: 60vh; overflow-y: auto;
     white-space: pre-wrap; word-break: break-all;
     border: 1px solid rgba(0,255,0,0.3);
@@ -327,7 +327,7 @@ export class PixiDebugDrone extends Drone {
       const row = document.createElement('div')
       row.dataset['hitIdx'] = String(i)
       row.style.cssText = `
-        cursor: pointer; padding: 2px 4px; border-radius: 2px;
+        cursor: pointer; padding: 2px 4px; border-radius: 1px;
         color: ${this.#pinnedObj === obj ? '#ff0' : '#0f0'};
       `
       row.textContent = `${i}: ${describeObject(obj)}  z:${(obj as any).zIndex ?? '-'}  d:${treeDepth(obj)}`
