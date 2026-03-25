@@ -537,4 +537,3 @@ import { PinchZoomInput } from './pinch-zoom.input.js'
 import { TouchGestureCoordinator } from '../touch/touch-gesture.coordinator.js'
 window.ioc.register('@diamondcoreprocessor.com/PinchZoomInput', new PinchZoomInput())
 window.ioc.register('@diamondcoreprocessor.com/TouchGestureCoordinator', new TouchGestureCoordinator())
-// bench
