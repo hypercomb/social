@@ -37,7 +37,9 @@
     (pointerleave)="onPointerUp()">
     @if (!meshPublic) {
       <span class="mode-label">solo</span>
-    } @else if (hasSecret() && !secretExpanded()) {
+    } @else if (hasSecret()) {
+      <span class="mode-label">secured</span>
+    } @else {
       <span class="mode-label">swarm</span>
     }
     <span class="hci">e</span>

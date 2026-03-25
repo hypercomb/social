@@ -48,6 +48,7 @@ $secret-bg: rgba(10, 12, 16, 0.85);
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  min-width: 5.8rem;
   padding: 0 1rem;
   border: 1px solid rgba(245, 245, 245, 0.12);
   border-right: none;
@@ -133,6 +134,24 @@ $secret-bg: rgba(10, 12, 16, 0.85);
   position: relative;
   display: flex;
   align-items: stretch;
+
+  &::before {
+    content: '>';
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    padding-left: 0.6rem;
+    font: 600 0.9em/1 ui-monospace, sfmono-regular, menlo, consolas, monospace;
+    color: rgba(245, 245, 245, 0.35);
+    background: $secret-bg;
+    border: 1px solid rgba(245, 245, 245, 0.12);
+    border-right: none;
+    transition: border-color 200ms ease;
+  }
+
+  &:has(.has-secret)::before {
+    border-color: $secret-border;
+  }
 }
 
 .secret-eye {
@@ -199,7 +218,7 @@ $secret-bg: rgba(10, 12, 16, 0.85);
 .header-secret-input {
   width: 14rem;
   box-sizing: border-box;
-  padding: 0.44rem 1.4rem 0.44rem 0.88rem;
+  padding: 0.6rem 1.4rem 0.6rem 0.75rem;
   border: 1px solid rgba(245, 245, 245, 0.12);
   border-left: none;
   border-right: none;
@@ -256,15 +275,21 @@ $secret-bg: rgba(10, 12, 16, 0.85);
 
   .mode-toggle {
     padding: 0 0.65rem;
+    min-width: 5.3rem;
 
     .hci {
       font-size: 0.9rem;
     }
   }
 
+  .secret-input-wrap::before {
+    padding-left: 0.7rem;
+    font-size: 1.0em;
+  }
+
   .header-secret-input {
     width: 10rem;
-    padding: 0.5rem 1rem 0.5rem 0.88rem;
+    padding: 0.5rem 1rem 0.5rem 0.75rem;
   }
 
   .secret-eye {
@@ -286,6 +311,7 @@ $secret-bg: rgba(10, 12, 16, 0.85);
 
   .mode-toggle {
     padding: 0 0.7rem;
+    min-width: 5.5rem;
 
     .hci {
       font-size: 0.82rem;
@@ -308,6 +334,7 @@ $secret-bg: rgba(10, 12, 16, 0.85);
   .mode-toggle {
     padding: 0 1rem;
     min-height: 3.2rem;
+    min-width: auto;
 
     &.solo-mode .hci,
     &.public-mode .hci,
@@ -332,12 +359,20 @@ $secret-bg: rgba(10, 12, 16, 0.85);
     .secret-input-wrap {
       flex: 1;
       min-width: 0;
+
+      &::before {
+        border-radius: 3px 0 0 3px;
+      }
     }
 
     .header-secret-input {
-      border-left: 1px solid rgba(245, 245, 245, 0.12);
-      border-radius: 3px 0 0 3px;
+      border-left: none;
     }
+  }
+
+  .secret-input-wrap::before {
+    padding-left: 1rem;
+    font-size: 1.35em;
   }
 
   .header-secret-input {
