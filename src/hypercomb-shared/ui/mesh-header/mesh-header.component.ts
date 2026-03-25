@@ -70,17 +70,28 @@ export class MeshHeaderComponent {
   }
 
   readonly #handleTap = (): void => {
-    if (this.#secretExpanded()) {
-      // collapse secret input (only if already secured)
-      this.#secretExpanded.set(false)
-      this.#secretRevealed.set(false)
-      this.secretExpandedChange.emit(false)
-    } else {
-      // toggle solo ↔ swarm
-      const goingToSwarm = !this.meshPublic
+    if (!this.meshPublic) {
+      // solo → swarm: always open the secret input
+      this.#secretExpanded.set(true)
       this.meshToggled.emit()
-      // input will be visible in swarm if no secret is set
-      this.secretExpandedChange.emit(goingToSwarm && !this.hasSecret())
+      this.secretExpandedChange.emit(true)
+    } else if (this.showSecretInput()) {
+      // swarm with input showing → close it
+      if (this.hasSecret()) {
+        // has secret: just collapse, stay in swarm
+        this.#secretExpanded.set(false)
+        this.#secretRevealed.set(false)
+        this.secretExpandedChange.emit(false)
+      } else {
+        // no secret: go back to solo
+        this.#secretExpanded.set(false)
+        this.meshToggled.emit()
+        this.secretExpandedChange.emit(false)
+      }
+    } else {
+      // swarm with input collapsed → back to solo
+      this.meshToggled.emit()
+      this.secretExpandedChange.emit(false)
     }
   }
 

@@ -1756,6 +1756,8 @@ export class ShowCellDrone extends Drone {
     if (!dir) return
 
     await this.#writeIndices(dir, labels)
+    this.renderedCellsKey = ''          // invalidate so renderFromSynchronize re-reads order
+    this.#layerCellsCache.clear()       // clear stale cached cells for this layer
     this.requestRender()
   }
 

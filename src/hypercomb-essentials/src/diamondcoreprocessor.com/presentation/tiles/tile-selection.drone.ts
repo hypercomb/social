@@ -91,7 +91,13 @@ export class TileSelectionDrone extends Drone {
     axial: '@diamondcoreprocessor.com/AxialService',
     selection: '@diamondcoreprocessor.com/SelectionService',
   }
-  protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count', 'render:set-orientation', 'render:geometry-changed', 'keymap:invoke', 'selection:changed']
+  protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count', 'render:set-orientation', 'render:geometry-changed', 'keymap:invoke', 'selection:changed', 'move:preview', 'move:committed']
+
+  // When true, the selection layer is hidden until the next render:cell-count arrives
+  #hiddenForMove = false
+
+  // During a move preview, override selection positions to follow the tiles
+  #previewOccupied: Map<string, { index: number; label: string }> | null = null
   protected override emits = ['selection:changed']
 
   // flag to prevent feedback loops: this drone emits selection:changed and also listens to it
@@ -119,8 +125,45 @@ export class TileSelectionDrone extends Drone {
       this.#cellLabels = payload.labels
       this.#cellCoords = payload.coords
       this.#rebuildOccupiedMap()
-      this.#pruneStaleSelections()
+      this.#resyncFromService()
+
+      // After a move commit, tiles have been rebuilt at new positions — re-show
+      if (this.#hiddenForMove) {
+        this.#hiddenForMove = false
+      }
       this.#redraw()
+    })
+
+    // During move preview, rebuild occupied map from preview names so
+    // selection overlays follow the tiles to their preview positions.
+    this.onEffect<{ names: string[]; movedLabels: Set<string> } | null>('move:preview', (payload) => {
+      if (!payload) {
+        // Preview cleared — revert to real positions
+        this.#previewOccupied = null
+        return // don't redraw here; move:committed will handle hide→re-show
+      }
+
+      const axial = this.resolve<any>('axial')
+      if (!axial?.items) return
+
+      const preview = new Map<string, { index: number; label: string }>()
+      for (let i = 0; i < payload.names.length; i++) {
+        const label = payload.names[i]
+        if (!label) continue
+        const coord = axial.items.get(i)
+        if (!coord) continue
+        preview.set(axialKey(coord.q, coord.r), { index: i, label })
+      }
+      this.#previewOccupied = preview
+      this.#redraw()
+    })
+
+    // Hide selection overlays immediately when a move commits,
+    // before tiles rebuild at new positions. render:cell-count re-shows them.
+    this.onEffect('move:committed', () => {
+      this.#previewOccupied = null
+      this.#hiddenForMove = true
+      if (this.#layer) this.#layer.clear()
     })
 
     this.onEffect<{ flat: boolean }>('render:set-orientation', (payload) => {
@@ -353,20 +396,40 @@ export class TileSelectionDrone extends Drone {
     this.#renderContainer.sortableChildren = true
   }
 
-  #pruneStaleSelections(): void {
-    let pruned = false
-    for (const key of this.#selected) {
-      if (!this.#occupiedByAxial.has(key)) {
-        this.#selected.delete(key)
-        pruned = true
+  /**
+   * Re-derive visual selection from SelectionService after the occupied map
+   * has been rebuilt.  This handles moves (tiles at new axial positions)
+   * and deletions (tiles removed entirely) in one pass.
+   */
+  #resyncFromService(): void {
+    const selection = this.resolve<{ selected: ReadonlySet<string>; active: string | null }>('selection')
+    if (!selection) return
+
+    const targetLabels = selection.selected
+    const newKeys = new Set<string>()
+    for (const [key, entry] of this.#occupiedByAxial) {
+      if (targetLabels.has(entry.label)) newKeys.add(key)
+    }
+
+    // Resolve leader
+    let leaderKey: string | null = null
+    if (selection.active) {
+      for (const [key, entry] of this.#occupiedByAxial) {
+        if (entry.label === selection.active) { leaderKey = key; break }
       }
     }
-    if (this.#leaderKey && !this.#occupiedByAxial.has(this.#leaderKey)) {
-      const next = this.#selected.values().next()
-      this.#leaderKey = next.done ? null : next.value
-      pruned = true
-    }
-    if (pruned) this.#emitChanged()
+    leaderKey = leaderKey ?? (newKeys.size > 0 ? [...newKeys][0] : null)
+
+    const sameSet = newKeys.size === this.#selected.size && [...newKeys].every(k => this.#selected.has(k))
+    if (sameSet && leaderKey === this.#leaderKey) return
+
+    this.#selected.clear()
+    for (const k of newKeys) this.#selected.add(k)
+    this.#leaderKey = leaderKey
+    this.#emitChanged()
+
+    if (this.#selected.size > 0) this.#startAnimation()
+    else this.#stopAnimation()
   }
 
   #emitChanged(): void {
@@ -390,25 +453,42 @@ export class TileSelectionDrone extends Drone {
     if (!this.#layer) return
     this.#layer.clear()
 
+    // During a move commit, stay hidden until render:cell-count arrives with new positions
+    if (this.#hiddenForMove) return
+
     if (this.#selected.size === 0) return
 
     const ox = this.#meshOffset.x
     const oy = this.#meshOffset.y
-    const axial = this.resolve<any>('axial')
 
-    for (const key of this.#selected) {
-      const entry = this.#occupiedByAxial.get(key)
-      if (!entry) continue
+    // Collect selected labels so we can find them in either the real or preview map
+    const selectedLabels = this.selectedLabels
+    if (selectedLabels.length === 0) return
 
-      // Compute pixel position from axial coords using hex geometry spacing
-      // (matches show-honeycomb's buildFillQuadGeometry, NOT AxialService.Location
-      // which uses a different scale for its internal grid)
-      const [qs, rs] = key.split(',')
-      const pos = this.#axialToPixel(Number(qs), Number(rs), this.#flat)
+    const leaderLabel = this.leader?.label ?? null
+
+    // Use preview positions when a move preview is active, otherwise real positions
+    const occupied = this.#previewOccupied ?? this.#occupiedByAxial
+
+    for (const label of selectedLabels) {
+      // Find this label's axial key in the active occupied map
+      let axialQ: number | null = null
+      let axialR: number | null = null
+      for (const [key, entry] of occupied) {
+        if (entry.label === label) {
+          const [qs, rs] = key.split(',')
+          axialQ = Number(qs)
+          axialR = Number(rs)
+          break
+        }
+      }
+      if (axialQ === null || axialR === null) continue
+
+      const pos = this.#axialToPixel(axialQ, axialR, this.#flat)
       const cx = pos.x + ox
       const cy = pos.y + oy
 
-      const isLeader = key === this.#leaderKey
+      const isLeader = label === leaderLabel
       this.#drawHex(cx, cy, this.#geo.circumRadiusPx, isLeader, this.#flat)
     }
 

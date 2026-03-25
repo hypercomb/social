@@ -376,7 +376,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
       // operation phase: suggest operation keywords with / prefix
       if (phase === 'operation') {
-        const ops = ['/cut', '/copy', '/keyword']
+        const ops = ['/cut', '/copy', '/move', '/keyword']
         if (!ctx.normalized) return ops
         return ops.filter(o => o.startsWith('/' + ctx.normalized) || o.slice(1).startsWith(ctx.normalized))
       }
@@ -995,7 +995,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       const afterOp = afterBracket.slice(opMatch![0].length)
 
       // Check for (index)
-      const indexMatch = afterOp.match(/.*\((\d+)\)/)
+      const indexMatch = afterOp.match(/\((\d+)\)/) || afterOp.match(/\((\d+)$/)
       if (indexMatch) {
         const targetIndex = parseInt(indexMatch[1], 10)
         const moveDrone = get('@diamondcoreprocessor.com/MoveDrone') as any
@@ -1285,6 +1285,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     EffectBus.emit('move:index-overlay', { show: false })
     EffectBus.emit('move:preview', null)
 
+    // Cancel any active command move
+    const moveDrone = get('@diamondcoreprocessor.com/MoveDrone') as any
+    if (moveDrone?.moveCommandActive) moveDrone.cancelCommandMove()
+
     // Restore navigation if we navigated away
     if (this.#selectOriginalSegments) {
       this.navigation.replaceRaw(this.#selectOriginalSegments)
@@ -1521,6 +1525,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       this.#lastSelectMode = false
     }
     EffectBus.emit('move:index-overlay', { show: false })
+    // Cancel any active command move
+    const moveDrone = get('@diamondcoreprocessor.com/MoveDrone') as any
+    if (moveDrone?.moveCommandActive) moveDrone.cancelCommandMove()
     // Reset select state (phase/labels/excluded are computed from value, auto-reset)
     if (this.#selectOriginalSegments) {
       this.navigation.replaceRaw(this.#selectOriginalSegments)
