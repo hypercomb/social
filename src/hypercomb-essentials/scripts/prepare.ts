@@ -1,13 +1,12 @@
 // hypercomb-essentials/scripts/prepare.ts
 // production-grade prepare script
-// - generates per-folder *-keys.ts
-// - generates per-folder index.ts
-// - generates per-domain root index.ts
-// - generates root index.ts
+// - pre-cleans stale generated files (index.ts, *-keys.ts)
+// - generates per-folder index.ts (barrel exports for tsup)
+// - generates one master essentials-keys.ts (all IoC keys in one place)
 // - drones exported as types only
 // - deterministic
 // - overwrites generated files
-debugger
+
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
 import { basename, dirname, extname, join, resolve } from 'path'
 import ts from 'typescript'
@@ -44,6 +43,11 @@ const toPascal = (name: string) =>
     .map(p => p[0].toUpperCase() + p.slice(1))
     .join('')
 
+const toCamel = (name: string) => {
+  const pascal = toPascal(name)
+  return pascal[0].toLowerCase() + pascal.slice(1)
+}
+
 // -------------------------------------------------
 // walking
 // -------------------------------------------------
@@ -59,6 +63,40 @@ const walkDirs = (dir: string): string[] => {
     }
   }
   return out
+}
+
+const walkFiles = (dir: string): string[] => {
+  if (!existsSync(dir)) return []
+  const out: string[] = []
+  for (const name of readdirSync(dir).sort()) {
+    const full = join(dir, name)
+    const st = statSync(full)
+    if (st.isDirectory()) out.push(...walkFiles(full))
+    else if (st.isFile()) out.push(full)
+  }
+  return out
+}
+
+// -------------------------------------------------
+// pre-clean: remove all generated files before regenerating
+// -------------------------------------------------
+
+const preClean = () => {
+  let removed = 0
+  for (const file of walkFiles(SRC_ROOT)) {
+    const name = basename(file)
+    if (name === 'index.ts' || name.endsWith('-keys.ts')) {
+      rmSync(file, { force: true })
+      removed++
+    }
+  }
+  // also remove the master keys file if it exists
+  const masterKeys = join(SRC_ROOT, 'essentials-keys.ts')
+  if (existsSync(masterKeys)) {
+    rmSync(masterKeys, { force: true })
+    removed++
+  }
+  if (removed) console.log(`[prepare] cleaned ${removed} stale generated file(s)`)
 }
 
 // -------------------------------------------------
@@ -108,50 +146,81 @@ const parseExports = (file: string): ExportInfo => {
 }
 
 // -------------------------------------------------
-// folder keys
+// master keys: one file with all IoC keys
 // -------------------------------------------------
 
-const writeFolderKeys = (domain: string, domainRoot: string, dir: string) => {
-  const dirName = dir.split(/[\\/]/).pop()
-  if (!dirName) return
+type FolderSymbols = { folderRel: string; symbols: Map<string, string> }
 
-  const folderRel = relFrom(domainRoot, dir)
-  const moduleKey = folderRel ? `${domain}/${folderRel}` : `${domain}`
+const collectAllKeys = (domain: string, domainRoot: string): FolderSymbols[] => {
+  const allDirs = [domainRoot, ...walkDirs(domainRoot)]
+  const result: FolderSymbols[] = []
 
-  const keysConst = `${toPascal(dirName)}Keys`
-  const moduleConst = `${toPascal(dirName)}Module`
-  const outFile = join(dir, `${dirName}-keys.ts`)
+  for (const dir of allDirs) {
+    const folderRel = relFrom(domainRoot, dir)
+    const moduleKey = folderRel ? `${domain}/${folderRel}` : `${domain}`
+    const bySymbol = new Map<string, string>()
 
-  const bySymbol = new Map<string, string>()
+    for (const name of readdirSync(dir).sort()) {
+      const full = join(dir, name)
+      if (!statSync(full).isFile()) continue
+      if (!isSource(full)) continue
+      if (isGenerated(full)) continue
 
-  for (const name of readdirSync(dir).sort()) {
-    const full = join(dir, name)
-    if (!statSync(full).isFile()) continue
-    if (!isSource(full)) continue
-    if (isGenerated(full)) continue
+      const exp = parseExports(full)
+      const stem = name.replace(extname(name), '')
+      const keyBase = `@${moduleKey}/${stem}`
 
-    const exp = parseExports(full)
-    const stem = name.replace(extname(name), '')
-    const keyBase = `${moduleKey}/${stem}`
+      for (const sym of [...exp.value, ...exp.type]) bySymbol.set(sym, keyBase)
+    }
 
-    for (const sym of [...exp.value, ...exp.type]) bySymbol.set(sym, keyBase)
+    if (bySymbol.size) result.push({ folderRel, symbols: bySymbol })
   }
 
-  if (!bySymbol.size) return
+  return result
+}
 
-  const symbols = Array.from(bySymbol.keys()).sort()
+const writeMasterKeys = (allDomainKeys: Map<string, FolderSymbols[]>) => {
+  const lines: string[] = [
+    '// auto-generated — single facade for all IoC keys',
+    '// do not edit manually',
+    '',
+  ]
 
-  let out = `// auto-generated
-// do not edit manually
+  // flat exports: every symbol as a named constant
+  const allSymbols = new Map<string, string>()
+  for (const [, folders] of allDomainKeys) {
+    for (const folder of folders) {
+      for (const [sym, key] of folder.symbols) allSymbols.set(sym, key)
+    }
+  }
 
-export const ${moduleConst} = '@${moduleKey}'
-`
+  for (const sym of Array.from(allSymbols.keys()).sort()) {
+    lines.push(`export const ${sym} = '${allSymbols.get(sym)}'`)
+  }
 
-  for (const s of symbols) out += `export const ${s} = '@${bySymbol.get(s)}'\n`
+  lines.push('')
 
-  out += `export const ${keysConst} = { ${symbols.join(', ')} } as const\n`
+  // hierarchical object: EssentialsKeys.domain.folder.Symbol
+  lines.push('export const EssentialsKeys = {')
+  for (const [domain, folders] of Array.from(allDomainKeys.entries()).sort(([a], [b]) => a.localeCompare(b))) {
+    const domainProp = toCamel(domain.replace(/\.com$|\.ca$|\.io$/i, ''))
+    lines.push(`  ${domainProp}: {`)
 
-  writeFileSync(outFile, out, 'utf8')
+    for (const folder of folders) {
+      const folderProp = folder.folderRel
+        ? toCamel(folder.folderRel.split('/').pop()!)
+        : '_root'
+
+      const symbols = Array.from(folder.symbols.keys()).sort()
+      lines.push(`    ${folderProp}: { ${symbols.join(', ')} },`)
+    }
+
+    lines.push('  },')
+  }
+  lines.push('} as const')
+  lines.push('')
+
+  writeFileSync(join(SRC_ROOT, 'essentials-keys.ts'), lines.join('\n'), 'utf8')
 }
 
 // -------------------------------------------------
@@ -226,7 +295,7 @@ const computeHasDeepSources = (meta: Map<string, DirMeta>) => {
 }
 
 // -------------------------------------------------
-// folder index (exports subfolders + files; subfolders ensure you don't "stop after the first")
+// folder index (exports subfolders + files)
 // -------------------------------------------------
 
 const writeFolderIndex = (dir: string, meta: Map<string, DirMeta>, hasDeep: (dir: string) => boolean) => {
@@ -265,14 +334,18 @@ ${lines.join('\n')}
 // main
 // -------------------------------------------------
 
+// step 0: pre-clean stale generated files
+preClean()
+
 rmSync(TYPES_ROOT, { recursive: true, force: true })
 mkdirSync(TYPES_ROOT, { recursive: true })
 
 const domains = readdirSync(SRC_ROOT)
-  .filter(n => n !== 'types' && statSync(join(SRC_ROOT, n)).isDirectory())
+  .filter(n => n !== 'types' && n !== 'essentials-keys.ts' && statSync(join(SRC_ROOT, n)).isDirectory())
   .sort()
 
 const rootExports: string[] = []
+const allDomainKeys = new Map<string, FolderSymbols[]>()
 
 for (const domain of domains) {
   const domainRoot = join(SRC_ROOT, domain)
@@ -284,16 +357,19 @@ for (const domain of domains) {
     rootExports.push(`export * from './${domain}'`)
   }
 
+  // collect keys for master file
+  allDomainKeys.set(domain, collectAllKeys(domain, domainRoot))
+
+  // generate index files only (no per-folder keys)
   const allDirs = [domainRoot, ...walkDirs(domainRoot)]
-
-  for (const dir of allDirs) {
-    writeFolderKeys(domain, domainRoot, dir)
-  }
-
   for (const dir of allDirs) {
     writeFolderIndex(dir, meta, hasDeep)
   }
 }
+
+// write one master keys file
+writeMasterKeys(allDomainKeys)
+rootExports.push(`export * from './essentials-keys'`)
 
 const rootIndex = `// auto-generated
 // package root entrypoint
