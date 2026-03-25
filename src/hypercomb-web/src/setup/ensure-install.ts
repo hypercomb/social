@@ -50,6 +50,10 @@ export const ensureInstall = async (): Promise<void> => {
   console.log(`[ensure-install] active signature: ${signature} (source: ${resolveSignatureFromUrl() ? 'url' : 'latest.txt'})`)
   const shouldInstall = await needsInstall(store, signature)
 
+  if (shouldInstall) {
+    await clearStaleCaches()
+  }
+
   if (!shouldInstall) {
     console.log('[ensure-install] already installed:', signature)
     restoreSignatureStore(sigStore)
@@ -130,6 +134,16 @@ export const ensureInstall = async (): Promise<void> => {
 }
 
 // ----- helpers -----
+
+const clearStaleCaches = async (): Promise<void> => {
+  // Clear Service Worker Cache API — old signature entries are stale after reinstall
+  if ('caches' in self) {
+    const deleted = await caches.delete('hypercomb-modules-v2')
+    if (deleted) console.log('[ensure-install] cleared SW module cache')
+  }
+  // Prune signature store — old trusted sigs are irrelevant after reinstall
+  localStorage.removeItem(SIG_STORE_KEY)
+}
 
 const needsInstall = async (store: Store, signature: string): Promise<boolean> => {
   const installed = (localStorage.getItem(INSTALLED_KEY) ?? '').trim().toLowerCase()
