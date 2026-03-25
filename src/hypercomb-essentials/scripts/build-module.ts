@@ -7,7 +7,7 @@
 
 import { spawnSync } from 'child_process'
 import { fileURLToPath } from 'url'
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
 import { dirname, extname, join, relative, resolve } from 'path'
 import { build } from 'esbuild'
 import { SignatureService } from '@hypercomb/core'
@@ -39,6 +39,98 @@ const EMIT_DOMAIN_ROOT_NAMESPACE = false
 
 // new: minimal manifest name
 const INSTALL_MANIFEST_FILE = 'install.manifest.json'
+
+// -------------------------------------------------
+// build cache — Merkle tree with mtime pre-filter
+// -------------------------------------------------
+
+/** Leaf: per-source-file mtime + content hash */
+interface FileLeaf { mtime: number; sig: string }
+
+/** Namespace or bee compilation unit cache */
+interface UnitCache {
+  files: Record<string, FileLeaf>   // relPath → { mtime, sig }
+  inputSig: string                  // Merkle hash of all file sigs + entry source
+  outputSig: string                 // SHA-256 of compiled output
+}
+
+interface BuildCache {
+  version: 2
+  rootHash: string                            // Merkle root of all unit hashes
+  rootLayerSig: string                        // last output root signature
+  namespaces: Record<string, UnitCache>
+  bees: Record<string, UnitCache>
+}
+
+const CACHE_FILE = join(PROJECT_ROOT, '.build-cache.json')
+const OUTPUT_CACHE_DIR = join(DIST_ROOT, '.cache')
+
+const loadCache = (): BuildCache | null => {
+  try {
+    const raw = JSON.parse(readFileSync(CACHE_FILE, 'utf8'))
+    if (raw?.version === 2) return raw
+  } catch {}
+  return null
+}
+
+const saveCache = (c: BuildCache): void =>
+  writeFileSync(CACHE_FILE, JSON.stringify(c, null, 2), 'utf8')
+
+/**
+ * For each file: if mtime matches cache, reuse cached sig.
+ * Otherwise read + hash the file (and record new mtime).
+ * Returns the per-file leaves and a combined inputSig (Merkle node).
+ */
+const resolveUnitInputs = async (
+  files: string[],
+  cachedFiles: Record<string, FileLeaf> | undefined,
+  extra?: string
+): Promise<{ leaves: Record<string, FileLeaf>; inputSig: string; changed: boolean }> => {
+  const sorted = [...files].sort()
+  const leaves: Record<string, FileLeaf> = {}
+  let changed = false
+  const sigParts: string[] = []
+
+  for (const f of sorted) {
+    const relKey = f  // absolute path as key
+    const st = statSync(f)
+    const mtime = st.mtimeMs
+    const prev = cachedFiles?.[relKey]
+
+    if (prev && prev.mtime === mtime) {
+      // mtime match — trust cached content hash, skip file read
+      leaves[relKey] = prev
+      sigParts.push(prev.sig)
+    } else {
+      // mtime changed or no cache — read + hash
+      const content = readFileSync(f, 'utf8')
+      const sig = await SignatureService.sign(toArrayBuffer(textToBytes(content)))
+      leaves[relKey] = { mtime, sig }
+      changed = changed || (prev?.sig !== sig)  // content actually changed?
+      sigParts.push(sig)
+    }
+  }
+
+  if (extra) sigParts.push(extra)
+
+  // Merkle node = hash of concatenated child sigs
+  const inputSig = await SignatureService.sign(
+    toArrayBuffer(textToBytes(sigParts.join(':')))
+  )
+
+  // If we had no previous cache at all, it's changed
+  if (!cachedFiles) changed = true
+  // If the combined sig differs from what we'd compute, mark changed
+  // (handles case where mtime changed but content didn't — still need to check inputSig)
+
+  return { leaves, inputSig, changed }
+}
+
+/**
+ * Compute Merkle root from all unit inputSigs.
+ */
+const computeRootHash = async (unitSigs: string[]): Promise<string> =>
+  SignatureService.sign(toArrayBuffer(textToBytes(unitSigs.sort().join(':'))))
 
 // -------------------------------------------------
 // helpers
@@ -319,18 +411,16 @@ const buildBee = async (entry: string, externals: string[]): Promise<Uint8Array>
 // -------------------------------------------------
 
 const main = async (): Promise<void> => {
-  rmSync(DIST_ROOT, { recursive: true, force: true })
-  ensureDir(DIST_ROOT)
+  const t0 = performance.now()
 
   const sources = discoverSources()
   if (!sources.length) throw new Error('no sources found')
 
-  const resourcesByDir = new Map<string, { bees: string[]; deps: string[] }>()
-  const dependencyBytes = new Map<string, Uint8Array>()
-  const resourceBytes = new Map<string, Uint8Array>()
-  const layers = new Map<string, string>()
+  // --- Phase 1: Merkle tree mtime scan (cheap: stat only, no file reads) ---
 
-  // dependencies
+  const cache = loadCache()
+
+  // Classify sources into namespaces and bees
   const deps = sources.filter(s => s.kind === 'dependency')
   const namespaceToMembers = new Map<string, SourceFile[]>()
   const nsDerived = new Set<string>()
@@ -350,15 +440,130 @@ const main = async (): Promise<void> => {
 
   const allNs = Array.from(nsAll).sort()
   const allSpecifiers = allNs.map(specifierFromNamespaceRelDir)
+  const beeSources = sources.filter(s => s.kind === 'bee')
+
+  // Quick mtime scan: check if ANY file has a changed mtime
+  let anyMtimeChanged = !cache
+  if (cache && !anyMtimeChanged) {
+    // Check namespace files
+    for (const ns of allNs) {
+      const members = namespaceToMembers.get(ns) ?? []
+      const cachedUnit = cache.namespaces[ns]
+      if (!cachedUnit) { anyMtimeChanged = true; break }
+      for (const m of members) {
+        const prev = cachedUnit.files[m.entry]
+        if (!prev) { anyMtimeChanged = true; break }
+        const mt = statSync(m.entry).mtimeMs
+        if (mt !== prev.mtime) { anyMtimeChanged = true; break }
+      }
+      if (anyMtimeChanged) break
+    }
+    // Check bee files
+    if (!anyMtimeChanged) {
+      for (const src of beeSources) {
+        const cachedUnit = cache.bees[src.relPath]
+        if (!cachedUnit) { anyMtimeChanged = true; break }
+        const prev = cachedUnit.files[src.entry]
+        if (!prev) { anyMtimeChanged = true; break }
+        const mt = statSync(src.entry).mtimeMs
+        if (mt !== prev.mtime) { anyMtimeChanged = true; break }
+      }
+    }
+    // Also check file count hasn't changed (files added/removed)
+    if (!anyMtimeChanged) {
+      const cachedNsCount = Object.keys(cache.namespaces).length
+      const cachedBeeCount = Object.keys(cache.bees).length
+      if (cachedNsCount !== allNs.length || cachedBeeCount !== beeSources.length) {
+        anyMtimeChanged = true
+      }
+    }
+  }
+
+  // --- Early exit: nothing changed at all ---
+  if (!anyMtimeChanged && cache) {
+    const rootDir = join(DIST_ROOT, cache.rootLayerSig)
+
+    // Verify output still exists (not wiped externally)
+    if (existsSync(rootDir) && existsSync(join(rootDir, INSTALL_MANIFEST_FILE))) {
+      const elapsed = ((performance.now() - t0) / 1000).toFixed(3)
+      console.log(`[build-module] Merkle root unchanged — skipping build entirely`)
+      console.log(`[build-module] root signature: ${cache.rootLayerSig}`)
+      console.log(`[build-module] completed in ${elapsed}s`)
+      return
+    }
+
+    // Output missing — need to reconstruct from .cache/ files
+    console.log(`[build-module] Merkle root unchanged but output missing — reconstructing`)
+  }
+
+  // --- Phase 2: Preserve .cache/, clean old root sig directories ---
+  if (existsSync(DIST_ROOT)) {
+    for (const name of readdirSync(DIST_ROOT)) {
+      if (name === '.cache') continue
+      rmSync(join(DIST_ROOT, name), { recursive: true, force: true })
+    }
+  }
+  ensureDir(DIST_ROOT)
+  ensureDir(OUTPUT_CACHE_DIR)
+
+  // --- Phase 3: Per-unit builds with mtime-aware Merkle caching ---
+
+  const resourcesByDir = new Map<string, { bees: string[]; deps: string[] }>()
+  const dependencyBytes = new Map<string, Uint8Array>()
+  const resourceBytes = new Map<string, Uint8Array>()
+  const layers = new Map<string, string>()
+
+  const newNamespaces: Record<string, UnitCache> = {}
+  const newBees: Record<string, UnitCache> = {}
+  const allUnitSigs: string[] = []
+
+  let cacheHits = 0
+  let cacheMisses = 0
 
   for (const ns of allNs) {
     const members = namespaceToMembers.get(ns) ?? []
-    const built = await buildNamespaceDependency(ns, members, allSpecifiers)
-    if (!built) continue
-    dependencyBytes.set(built.sig, built.bytes)
-    addToBucket(resourcesByDir, ns, jsFileName(built.sig), 'dep')
-    for (const f of members) addToBucket(resourcesByDir, f.relDir, jsFileName(built.sig), 'dep')
+
+    // Build the same virtual entry source used by buildNamespaceDependency for hashing
+    const namespaceRootFs = join(SRC_ROOT, ns)
+    const entrySource = members.length
+      ? members.map(f => {
+          const relFromNs = relPosix(namespaceRootFs, f.entry)
+          const relNoExt = stripExt(relFromNs)
+          const spec = relNoExt.startsWith('.') ? relNoExt : `./${relNoExt}`
+          return `export * from '${spec}';`
+        }).sort().join('\n') + '\n'
+      : 'export {};\n'
+
+    const { leaves, inputSig } = await resolveUnitInputs(
+      members.map(m => m.entry),
+      cache?.namespaces[ns]?.files,
+      entrySource
+    )
+
+    allUnitSigs.push(inputSig)
+    const cachedUnit = cache?.namespaces[ns]
+    const cachedFile = cachedUnit ? join(OUTPUT_CACHE_DIR, `${cachedUnit.outputSig}.js`) : null
+
+    if (cachedUnit?.inputSig === inputSig && cachedFile && existsSync(cachedFile)) {
+      const bytes = new Uint8Array(readFileSync(cachedFile))
+      dependencyBytes.set(cachedUnit.outputSig, bytes)
+      addToBucket(resourcesByDir, ns, jsFileName(cachedUnit.outputSig), 'dep')
+      for (const f of members) addToBucket(resourcesByDir, f.relDir, jsFileName(cachedUnit.outputSig), 'dep')
+      newNamespaces[ns] = { files: leaves, inputSig, outputSig: cachedUnit.outputSig }
+      cacheHits++
+    } else {
+      const built = await buildNamespaceDependency(ns, members, allSpecifiers)
+      if (!built) continue
+      dependencyBytes.set(built.sig, built.bytes)
+      addToBucket(resourcesByDir, ns, jsFileName(built.sig), 'dep')
+      for (const f of members) addToBucket(resourcesByDir, f.relDir, jsFileName(built.sig), 'dep')
+      writeFileSync(join(OUTPUT_CACHE_DIR, `${built.sig}.js`), built.bytes)
+      newNamespaces[ns] = { files: leaves, inputSig, outputSig: built.sig }
+      cacheMisses++
+    }
   }
+
+  console.log(`[build-module] dependencies: ${cacheHits} cached, ${cacheMisses} built`)
 
   const rootDependencies = uniqSorted(Array.from(dependencyBytes.keys()).map(jsFileName))
   const dependencySigs = Array.from(dependencyBytes.keys()).sort((a, b) => a.localeCompare(b))
@@ -377,9 +582,35 @@ const main = async (): Promise<void> => {
   // bees — extract deps from compiled output and map to dep sigs
   const beeDepsMap = new Map<string, string[]>()
   const beeExternals = [...PLATFORM_EXTERNALS, ...allSpecifiers]
-  for (const src of sources.filter(s => s.kind === 'bee')) {
-    const bytes = await buildBee(src.entry, beeExternals)
-    const sig = await SignatureService.sign(toArrayBuffer(bytes))
+  let beeCacheHits = 0
+  let beeCacheMisses = 0
+
+  for (const src of beeSources) {
+    const { leaves, inputSig } = await resolveUnitInputs(
+      [src.entry],
+      cache?.bees[src.relPath]?.files
+    )
+
+    allUnitSigs.push(inputSig)
+    const cachedUnit = cache?.bees[src.relPath]
+    const cachedFile = cachedUnit ? join(OUTPUT_CACHE_DIR, `${cachedUnit.outputSig}.js`) : null
+
+    let bytes: Uint8Array
+    let sig: string
+
+    if (cachedUnit?.inputSig === inputSig && cachedFile && existsSync(cachedFile)) {
+      bytes = new Uint8Array(readFileSync(cachedFile))
+      sig = cachedUnit.outputSig
+      newBees[src.relPath] = { files: leaves, inputSig, outputSig: cachedUnit.outputSig }
+      beeCacheHits++
+    } else {
+      bytes = await buildBee(src.entry, beeExternals)
+      sig = await SignatureService.sign(toArrayBuffer(bytes))
+      writeFileSync(join(OUTPUT_CACHE_DIR, `${sig}.js`), bytes)
+      newBees[src.relPath] = { files: leaves, inputSig, outputSig: sig }
+      beeCacheMisses++
+    }
+
     resourceBytes.set(sig, bytes)
     addToBucket(resourcesByDir, src.relDir, jsFileName(sig), 'bee')
 
@@ -400,7 +631,10 @@ const main = async (): Promise<void> => {
     }
   }
 
-  // layers
+  console.log(`[build-module] bees: ${beeCacheHits} cached, ${beeCacheMisses} built`)
+
+  // --- Phase 4: layers + manifest (always regenerated, cheap) ---
+
   const tree = readDirTree(SRC_ROOT, '')
   const rootLayerSig = await buildLayersFromTree(tree, resourcesByDir, layers, rootDependencies)
 
@@ -428,12 +662,32 @@ const main = async (): Promise<void> => {
   }
   writeFileSync(join(rootDir, INSTALL_MANIFEST_FILE), JSON.stringify(installManifest) + '\n', 'utf8')
 
+  // --- Phase 5: persist Merkle cache + GC ---
+
+  const rootHash = await computeRootHash(allUnitSigs)
+  saveCache({
+    version: 2,
+    rootHash,
+    rootLayerSig,
+    namespaces: newNamespaces,
+    bees: newBees,
+  })
+
+  const liveSigs = new Set([...dependencyBytes.keys(), ...resourceBytes.keys()])
+  for (const name of readdirSync(OUTPUT_CACHE_DIR)) {
+    const sig = name.replace(/\.js$/, '')
+    if (isSig(sig) && !liveSigs.has(sig)) rmSync(join(OUTPUT_CACHE_DIR, name), { force: true })
+  }
+
+  const elapsed = ((performance.now() - t0) / 1000).toFixed(2)
+
   // deploy (skip with --local flag)
   const skipDeploy = process.argv.includes('--local')
   if (skipDeploy) {
     console.log(`[build-module] --local: skipping Azure deploy`)
     console.log(`[build-module] root signature: ${rootLayerSig}`)
     console.log(`[build-module] output: ${rootDir}`)
+    console.log(`[build-module] completed in ${elapsed}s`)
   } else {
     const ps1 = resolve(__dirname, 'deploy-azure.ps1')
     if (existsSync(ps1)) {

@@ -4,3 +4,6 @@ src/**/*-keys.ts
 
 # build output
 dist/
+
+# build cache (local optimization, not shared)
+.build-cache.json
