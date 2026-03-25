@@ -88,6 +88,8 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #roomValue = signal('')
   #roomOpen = signal(false)
   #beesVisible = signal(localStorage.getItem('hc:bees-visible') === 'true')
+  #meetingJoined = signal(false)
+  #meetingCameraOn = signal(false)
   #hasSelection = signal(false)
   #textOnly = signal(false)
   #layoutPinned = signal(false)
@@ -244,6 +246,8 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   readonly roomValue = this.#roomValue.asReadonly()
   readonly roomOpen = this.#roomOpen.asReadonly()
   readonly beesVisible = this.#beesVisible.asReadonly()
+  readonly meetingJoined = this.#meetingJoined.asReadonly()
+  readonly meetingCameraOn = this.#meetingCameraOn.asReadonly()
 
   // ── lifecycle ───────────────────────────────────────────
 
@@ -253,6 +257,8 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #beesUnsub: (() => void) | null = null
   #tagsUnsub: (() => void) | null = null
   #hoverTagsUnsub: (() => void) | null = null
+  #onMeetingState: EventListener | null = null
+  #onMeetingCamera: EventListener | null = null
 
   ngOnInit(): void {
     // ── mobile detection via matchMedia ──
@@ -317,6 +323,17 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
       this.#hoveredTags.set(new Set(tags))
     })
 
+    this.#onMeetingState = ((e: CustomEvent) => {
+      const state = e.detail?.state
+      this.#meetingJoined.set(state === 'gathering' || state === 'active')
+    }) as EventListener
+    window.addEventListener('meeting:state', this.#onMeetingState)
+
+    this.#onMeetingCamera = ((e: CustomEvent) => {
+      this.#meetingCameraOn.set(e.detail?.on === true)
+    }) as EventListener
+    window.addEventListener('meeting:local-camera', this.#onMeetingCamera)
+
     // sign address reactively (replaces effect() which needs injection context)
     this.#recomputeAddress()
     window.addEventListener('synchronize', this.#recomputeAddress)
@@ -347,6 +364,8 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     this.#beesUnsub?.()
     this.#tagsUnsub?.()
     this.#hoverTagsUnsub?.()
+    if (this.#onMeetingState) window.removeEventListener('meeting:state', this.#onMeetingState)
+    if (this.#onMeetingCamera) window.removeEventListener('meeting:local-camera', this.#onMeetingCamera)
     window.removeEventListener('synchronize', this.#recomputeAddress)
   }
 
@@ -503,6 +522,30 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     this.#beesVisible.set(next)
     localStorage.setItem('hc:bees-visible', String(next))
     EffectBus.emit('render:set-bees-visible', { visible: next })
+  }
+
+  // ── meeting ──────────────────────────────────────────
+
+  readonly toggleMeeting = (): void => {
+    if (!this.#meetingJoined()) {
+      // joining — request camera directly from user gesture context
+      // so the browser shows the permission prompt
+      navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+        .then(stream => {
+          window.dispatchEvent(new CustomEvent('meeting:toggle-available', { detail: { stream } }))
+        })
+        .catch(() => {
+          // camera denied — still join but without camera
+          window.dispatchEvent(new CustomEvent('meeting:toggle-available'))
+        })
+    } else {
+      // leaving
+      window.dispatchEvent(new CustomEvent('meeting:toggle-available'))
+    }
+  }
+
+  readonly toggleCamera = (): void => {
+    window.dispatchEvent(new CustomEvent('meeting:toggle-camera'))
   }
 
   // ── room ────────────────────────────────────────────

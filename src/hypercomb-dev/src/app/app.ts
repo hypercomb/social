@@ -55,6 +55,10 @@ import { DebugQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/co
 import { PixiDebugDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/presentation/tiles/pixi-debug.drone'
 import { PinchZoomInput } from '@hypercomb/essentials/diamondcoreprocessor.com/navigation/zoom/pinch-zoom.input'
 import { TouchGestureCoordinator } from '@hypercomb/essentials/diamondcoreprocessor.com/navigation/touch/touch-gesture.coordinator'
+import { HiveMeetingDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/meeting/hive-meeting.drone'
+import { MeetingVideoDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/meeting/meeting-video.drone'
+import { MeetingControlsWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/meeting/meeting-controls.worker'
+import { MeetingQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/meeting/meeting.queen'
 
 const _deps = [
   AxialService,
@@ -96,6 +100,10 @@ const _deps = [
   PixiDebugDrone,
   PinchZoomInput,
   TouchGestureCoordinator,
+  HiveMeetingDrone,
+  MeetingVideoDrone,
+  MeetingControlsWorker,
+  MeetingQueenBee,
 ]
 
 void _deps

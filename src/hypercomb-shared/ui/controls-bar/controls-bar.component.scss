@@ -271,6 +271,17 @@
 
 // ── bee toggle ──────────────────────────────────────────
 
+.meeting-icon {
+  font-size: 11px;
+  line-height: 1;
+  opacity: 0.85;
+
+  &.leave {
+    font-size: 9px;
+    opacity: 0.6;
+  }
+}
+
 .bee-icon {
   font-size: 14px;
   line-height: 1;

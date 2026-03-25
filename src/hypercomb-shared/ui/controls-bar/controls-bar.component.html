@@ -85,6 +85,18 @@
           <button class="ctl-btn" (click)="toggleFullscreen()" aria-label="fullscreen">
             <span class="hci">'</span>
           </button>
+          @if (!meetingJoined()) {
+            <button class="ctl-btn" (click)="toggleMeeting()" aria-label="join meeting">
+              <span class="meeting-icon">▶</span>
+            </button>
+          } @else {
+            <button class="ctl-btn" [class.active]="meetingCameraOn()" (click)="toggleCamera()" aria-label="toggle camera">
+              <span class="meeting-icon">{{ meetingCameraOn() ? '◉' : '◎' }}</span>
+            </button>
+            <button class="ctl-btn" (click)="toggleMeeting()" aria-label="leave meeting">
+              <span class="meeting-icon leave">■</span>
+            </button>
+          }
         </div>
       } @else {
         <!-- ═══ DESKTOP: full controls ═══ -->
@@ -193,6 +205,21 @@
           <!-- bee mode toggle -->
           <button class="ctl-btn bee-btn" [class.active]="beesVisible()" (click)="toggleBees()" aria-label="toggle bees">
             <span class="bee-icon">🐝</span>
+          </button>
+        }
+
+        <!-- meeting join / camera toggle (always available) -->
+        <div class="controls-divider"></div>
+        @if (!meetingJoined()) {
+          <button class="ctl-btn" (click)="toggleMeeting()" aria-label="join meeting">
+            <span class="meeting-icon">▶</span>
+          </button>
+        } @else {
+          <button class="ctl-btn" [class.active]="meetingCameraOn()" (click)="toggleCamera()" aria-label="toggle camera">
+            <span class="meeting-icon">{{ meetingCameraOn() ? '◉' : '◎' }}</span>
+          </button>
+          <button class="ctl-btn" (click)="toggleMeeting()" aria-label="leave meeting">
+            <span class="meeting-icon leave">■</span>
           </button>
         }
       }
