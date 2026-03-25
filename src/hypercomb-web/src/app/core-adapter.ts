@@ -59,10 +59,9 @@ export class CoreAdapter {
     await initializeRuntime({
       logOpfs: true,
       onMeshStateChange: enabled => {
-        // only accept runtime-reported state when no stored preference exists
+        // first visit: always start in solo mode, then sticky
         if (readMeshPublic() === null) {
-          this.meshPublic.set(enabled)
-          localStorage.setItem(MESH_PUBLIC_KEY, String(enabled))
+          localStorage.setItem(MESH_PUBLIC_KEY, 'false')
         }
       },
     })

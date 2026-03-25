@@ -53,7 +53,7 @@ $secret-bg: rgba(10, 12, 16, 0.85);
   border-right: none;
   background: $secret-bg;
   cursor: pointer;
-  transition: color 200ms ease, background 200ms ease, border-color 200ms ease;
+  transition: background 200ms ease, border-color 200ms ease;
 
   &:hover {
     filter: brightness(1.3);
@@ -76,6 +76,10 @@ $secret-bg: rgba(10, 12, 16, 0.85);
     border-radius: 0 3px 3px 0;
     border-right: 1px solid rgba(255, 45, 138, 0.2);
 
+    .hci {
+      font-size: 0.76rem;
+    }
+
     &:hover {
       border-color: rgba(255, 45, 138, 0.4);
       color: rgba(255, 45, 138, 0.9);
@@ -97,12 +101,11 @@ $secret-bg: rgba(10, 12, 16, 0.85);
     }
   }
 
-  // ── secret state (shield always on right) ──
+  // ── secret state ──
   &.secret-mode {
     color: var(--shield-color, rgba(245, 245, 245, 0.35));
-    border-left: none;
-    border-right: 1px solid rgba(245, 245, 245, 0.12);
     border-radius: 0 3px 3px 0;
+    border-right: 1px solid rgba(245, 245, 245, 0.12);
 
     .hci {
       font-size: 0.76rem;
@@ -110,24 +113,18 @@ $secret-bg: rgba(10, 12, 16, 0.85);
 
     &.has-secret {
       border-color: $secret-border;
-      border-right-color: $secret-border;
+      border-right: 1px solid $secret-border;
     }
   }
 }
 
-.solo-icon {
-  font-size: 0.76rem;
-  line-height: 1;
-  user-select: none;
-}
-
 .mode-label {
-  margin-left: 0.4rem;
-  font-family: ui-monospace, sfmono-regular, menlo, consolas, monospace;
-  font-size: 0.6rem;
-  letter-spacing: 0.04em;
-  text-transform: lowercase;
+  font: 600 0.55rem/1 ui-monospace, sfmono-regular, menlo, consolas, monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-right: 0.4rem;
   user-select: none;
+  white-space: nowrap;
 }
 
 // ── secret input area ────────────────────────────────────
@@ -175,9 +172,9 @@ $secret-bg: rgba(10, 12, 16, 0.85);
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  padding: 0 0.68rem 0 1.28rem;
+  padding: 0 1.28rem 0 0.68rem;
   border: 1px solid rgba(245, 245, 245, 0.12);
-  border-right: none;
+  border-left: none;
   background: $secret-bg;
   color: rgba(245, 245, 245, 0.35);
   font-size: 0.88rem;
@@ -312,10 +309,7 @@ $secret-bg: rgba(10, 12, 16, 0.85);
     padding: 0 1rem;
     min-height: 3.2rem;
 
-    &.solo-mode .solo-icon {
-      font-size: 1.3rem;
-    }
-
+    &.solo-mode .hci,
     &.public-mode .hci,
     &.secret-mode .hci {
       font-size: 1.3rem;
@@ -331,15 +325,18 @@ $secret-bg: rgba(10, 12, 16, 0.85);
     flex: 1;
     min-width: 0;
 
-    .mode-toggle.secret-mode {
-      border-radius: 0 3px 3px 0;
-      border-right: 1px solid rgba(245, 245, 245, 0.12);
-      border-left: none;
+    .mode-label {
+      display: none;
     }
 
     .secret-input-wrap {
       flex: 1;
       min-width: 0;
+    }
+
+    .header-secret-input {
+      border-left: 1px solid rgba(245, 245, 245, 0.12);
+      border-radius: 3px 0 0 3px;
     }
   }
 
@@ -358,9 +355,8 @@ $secret-bg: rgba(10, 12, 16, 0.85);
   }
 
   .secret-clear {
-    padding: 0 0.6rem 0 1.2rem;
+    padding: 0 1.2rem 0 0.6rem;
     font-size: 1.0rem;
-    border-radius: 3px 0 0 3px;
   }
 }
 

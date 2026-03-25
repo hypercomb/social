@@ -23,6 +23,7 @@ export class MeshHeaderComponent {
   readonly secretExpanded = this.#secretExpanded.asReadonly()
   readonly secretRevealed = this.#secretRevealed.asReadonly()
   readonly hasSecret = computed(() => this.#secretValue().trim().length > 0)
+  readonly showSecretInput = () => !!this.meshPublic && (!this.hasSecret() || this.#secretExpanded())
 
   readonly shieldColor = computed(() => {
     const secret = this.#secretValue().trim()
@@ -46,21 +47,40 @@ export class MeshHeaderComponent {
     return get('@hypercomb.social/SecretStore') as SecretStore | undefined
   }
 
-  /** Cycle: solo → public → secret → solo */
-  readonly cycleMode = (): void => {
-    if (!this.meshPublic) {
-      // solo → public
-      this.meshToggled.emit()
-    } else if (!this.#secretExpanded()) {
-      // public → secret
-      this.#secretExpanded.set(true)
-      this.secretExpandedChange.emit(true)
-    } else {
-      // secret → solo
+  #longPressTimer: ReturnType<typeof setTimeout> | null = null
+
+  /** Tap: toggle solo ↔ swarm. Long-press in swarm: expand secret input. */
+  readonly onPointerDown = (): void => {
+    this.#longPressTimer = setTimeout(() => {
+      this.#longPressTimer = null
+      if (this.meshPublic && !this.#secretExpanded()) {
+        this.#secretExpanded.set(true)
+        this.secretExpandedChange.emit(true)
+      }
+    }, 500)
+  }
+
+  readonly onPointerUp = (): void => {
+    if (this.#longPressTimer !== null) {
+      // short tap — timer didn't fire
+      clearTimeout(this.#longPressTimer)
+      this.#longPressTimer = null
+      this.#handleTap()
+    }
+  }
+
+  readonly #handleTap = (): void => {
+    if (this.#secretExpanded()) {
+      // collapse secret input (only if already secured)
       this.#secretExpanded.set(false)
       this.#secretRevealed.set(false)
       this.secretExpandedChange.emit(false)
+    } else {
+      // toggle solo ↔ swarm
+      const goingToSwarm = !this.meshPublic
       this.meshToggled.emit()
+      // input will be visible in swarm if no secret is set
+      this.secretExpandedChange.emit(goingToSwarm && !this.hasSecret())
     }
   }
 

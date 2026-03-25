@@ -135,8 +135,8 @@ export class App {
     this.#runtimeReady = initializeRuntime({
       onMeshStateChange: enabled => {
         if (localStorage.getItem('hc:mesh-public') === null) {
-          this.meshPublic.set(enabled)
-          localStorage.setItem('hc:mesh-public', String(enabled))
+          // first visit: always start in solo mode
+          localStorage.setItem('hc:mesh-public', 'false')
         }
       },
     })
