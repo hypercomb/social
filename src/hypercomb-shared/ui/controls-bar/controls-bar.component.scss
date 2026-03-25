@@ -414,12 +414,12 @@
   padding: 0 0.3rem;
 }
 
-// ── mobile back button (fixed top-left) ───────────────────
+// ── mobile back button (fixed top-right) ──────────────────
 
 .mobile-back-btn {
   position: fixed;
   top: calc(4rem + var(--hc-safe-top, 0px));
-  left: 0.5rem;
+  right: 0.5rem;
   z-index: 60001;
 
   display: flex;

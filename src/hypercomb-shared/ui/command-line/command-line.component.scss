@@ -208,16 +208,38 @@
 // ── tablet portrait (600–1023px) ──────────────────────────
 @include tablet-only {
 
-  .command-row {
-    min-height: 2.75rem;
+  .command-shell {
+    border-radius: 4px 0 0 4px;
   }
 
-  .command-results li {
-    padding: 0.55rem 0.7rem;
+  .command-row {
+    min-height: 2.85rem;
+
+    &::before {
+      font-size: 1.0em;
+      font-weight: 500;
+      padding-left: 0.7rem;
+    }
+  }
+
+  .command-input {
+    font-weight: 450;
+    letter-spacing: 0.03em;
+  }
+
+  .ghost {
+    font-weight: 450;
+    letter-spacing: 0.03em;
   }
 
   .command-results {
     max-height: 40vh;
+    border-radius: 4px;
+  }
+
+  .command-results li {
+    padding: 0.55rem 0.7rem;
+    border-radius: 3px;
   }
 }
 
@@ -225,33 +247,59 @@
 @include phone-only {
 
   .command-shell {
-    border-radius: 3px 0 0 3px;
+    border-radius: 6px 0 0 6px;
+    box-shadow:
+      0 0 6px rgba(var(--glow-color-rgb), 0.10),
+      inset 0 0 6px rgba(var(--glow-color-rgb), 0.04);
+  }
+
+  .command-shell:focus-within {
+    box-shadow:
+      0 0 8px rgba(var(--glow-color-rgb), 0.18),
+      0 0 24px rgba(var(--glow-color-rgb), 0.08),
+      inset 0 0 8px rgba(var(--glow-color-rgb), 0.06);
   }
 
   .command-row {
-    min-height: 3.2rem; // ~2× default for mobile
+    min-height: 3.5rem;
 
     &::before {
-      font-size: 1.1em;
-      padding-left: 0.75rem;
+      font-size: 1.35em;
+      font-weight: 500;
+      padding-left: 1rem;
+      opacity: 0.6;
     }
   }
 
   .command-input {
-    font-size: 16px;
-    padding: 0.75rem;
+    font-size: 18px;
+    font-weight: 450;
+    letter-spacing: 0.035em;
+    padding: 1rem 1rem;
   }
 
   .ghost {
-    font-size: 16px;
-    padding-left: calc(0.75rem + 0.7em + 0.75rem);
-  }
-
-  .command-results li {
-    padding: 0.6rem 0.7rem;
+    font-size: 18px;
+    font-weight: 450;
+    letter-spacing: 0.035em;
+    padding-left: calc(1rem + 0.75em + 1rem);
   }
 
   .command-results {
+    top: calc(100% + 0.5rem);
+    padding: 0.5rem;
+    border-radius: 6px;
     max-height: 60vh;
+    font-size: 0.92em;
+    letter-spacing: 0.03em;
+  }
+
+  .command-results li {
+    padding: 0.7rem 0.85rem;
+    border-radius: 4px;
+  }
+
+  .slash-desc {
+    font-size: 0.82em;
   }
 }
