@@ -2,6 +2,7 @@ import { Component, signal } from '@angular/core'
 import { type Bee, EffectBus } from '@hypercomb/core'
 import { RouterOutlet } from '@angular/router'
 import { initializeRuntime } from '@hypercomb/shared/core'
+import { OrientationService } from './orientation.service'
 
 // ─── minimal drone imports for avatar swarm ────────────────────
 // Only what's needed: pixi host, mesh networking, and the swarm drone.
@@ -90,5 +91,34 @@ export class App {
     })
 
     console.log('[hypercomb-avatars] all bees started')
+
+    this.#applyOrientation()
+  }
+
+  #orientation = new OrientationService()
+
+  #applyOrientation = (): void => {
+    const host = document.getElementById('pixi-host')
+    const overlay = document.querySelector('.overlay') as HTMLElement | null
+
+    // PixiHostWorker moves #pixi-host to body with fixed/inset:0 inline styles,
+    // so we override here for oversized coverage when rotated 90°/270°.
+    if (host) {
+      host.style.width = '142vw'
+      host.style.height = '142vh'
+      host.style.inset = ''
+      host.style.left = '-21vw'
+      host.style.top = '-21vh'
+      host.style.transformOrigin = 'center center'
+      host.style.transition = 'transform 0.3s ease-out'
+    }
+
+    const apply = (): void => {
+      const deg = this.#orientation.angle
+      if (host) host.style.transform = `rotate(${deg}deg)`
+      if (overlay) overlay.style.transform = `translateX(-50%) rotate(${deg}deg)`
+    }
+    apply()
+    this.#orientation.addEventListener('change', apply)
   }
 }
