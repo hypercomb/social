@@ -29,6 +29,12 @@ const SENSITIVITY_DEFAULT = 1.0
 const LOCK_DOUBLE_SWIPE_MS = 800
 const SWIPE_MIN_DISTANCE = 60
 
+const MOMENTUM_VELOCITY_THRESHOLD = 0.3  // px/ms — min release speed to trigger coast
+const MOMENTUM_FRICTION = 0.92           // per-frame decay at 60fps
+const MOMENTUM_STOP_THRESHOLD = 0.5      // px/frame — below this, stop
+const MOMENTUM_MAX_SAMPLES = 4           // velocity window size
+const MOMENTUM_MAX_AGE_MS = 80           // discard stale samples
+
 const LS_KEY = 'hypercomb:touch-sensitivity'
 
 export type PanDelegate = {
@@ -72,6 +78,12 @@ export class TouchGestureCoordinator {
   // track whether gesture was active (for poisoning)
   #gestureWasActive = false
 
+  // momentum / inertia state
+  #velocitySamples: { dx: number; dy: number; t: number }[] = []
+  #momentumRaf: number | null = null
+  #momentumVx = 0
+  #momentumVy = 0
+
   constructor() {
     this.#loadSensitivity()
   }
@@ -111,6 +123,7 @@ export class TouchGestureCoordinator {
   detach = (): void => {
     if (!this.#enabled) return
 
+    this.#cancelMomentum()
     window.removeEventListener('pointerdown', this.#onPointerDown)
     window.removeEventListener('pointermove', this.#onPointerMove)
     window.removeEventListener('pointerup', this.#onPointerUp)
@@ -130,6 +143,13 @@ export class TouchGestureCoordinator {
   #onPointerDown = (e: PointerEvent): void => {
     if (e.pointerType !== 'touch') return
     if (!this.#canvas) return
+
+    // cancel any active momentum immediately
+    if (this.#momentumRaf !== null) {
+      this.#cancelMomentum()
+      this.#gate?.release(this.#source)
+      this.#emitDragging(false)
+    }
 
     const rect = this.#canvas.getBoundingClientRect()
     if (!this.#isInsideRect(e.clientX, e.clientY, rect)) return
@@ -248,6 +268,16 @@ export class TouchGestureCoordinator {
     if (!this.#panLast) return
 
     this.#panDelegate?.panUpdate(this.#panLast, current, this.#effectiveSensitivity)
+
+    // record velocity sample (raw screen deltas, pre-sensitivity)
+    const now = performance.now()
+    const dx = current.x - this.#panLast.x
+    const dy = current.y - this.#panLast.y
+    this.#velocitySamples.push({ dx, dy, t: now })
+    if (this.#velocitySamples.length > MOMENTUM_MAX_SAMPLES) {
+      this.#velocitySamples.shift()
+    }
+
     this.#panLast = { ...current }
   }
 
@@ -365,14 +395,27 @@ export class TouchGestureCoordinator {
   // ── lifecycle helpers ───────────────────────────────────────
 
   #finishGesture(): void {
-    if (this.#state !== GestureState.IDLE) {
-      this.#gate?.release(this.#source)
-    }
+    const wasPan = this.#state === GestureState.PAN
 
     if (this.#state === GestureState.SENSITIVITY_SWIPE) {
       this.#saveSensitivity()
-      // hide bar after a delay (the component handles the fade)
       this.#emitSensitivityBar(false)
+    }
+
+    // try momentum coast for fast flicks
+    if (wasPan && this.#startMomentum()) {
+      // gate stays claimed, touch:dragging stays true
+      this.#state = GestureState.IDLE
+      this.#panLast = null
+      this.#pinchLastDistance = 0
+      this.#gestureWasActive = false
+      this.#pointers.clear()
+      return
+    }
+
+    // no momentum — immediate cleanup (original behavior)
+    if (this.#state !== GestureState.IDLE) {
+      this.#gate?.release(this.#source)
     }
 
     this.#state = GestureState.IDLE
@@ -380,11 +423,74 @@ export class TouchGestureCoordinator {
     this.#pinchLastDistance = 0
     this.#gestureWasActive = false
     this.#pointers.clear()
+    this.#velocitySamples.length = 0
 
     this.#emitDragging(false)
   }
 
+  // ── momentum / inertia ──────────────────────────────────────
+
+  #startMomentum(): boolean {
+    const now = performance.now()
+    const cutoff = now - MOMENTUM_MAX_AGE_MS
+
+    const recent = this.#velocitySamples.filter(s => s.t >= cutoff)
+    if (recent.length < 2) return false
+
+    const totalTime = recent[recent.length - 1].t - recent[0].t
+    if (totalTime <= 0) return false
+
+    let sumDx = 0, sumDy = 0
+    for (const s of recent) { sumDx += s.dx; sumDy += s.dy }
+
+    const vxPerMs = sumDx / totalTime
+    const vyPerMs = sumDy / totalTime
+    const speed = Math.hypot(vxPerMs, vyPerMs)
+
+    if (speed < MOMENTUM_VELOCITY_THRESHOLD) return false
+
+    // convert to px/frame at 60fps
+    this.#momentumVx = vxPerMs * 16.667
+    this.#momentumVy = vyPerMs * 16.667
+    this.#velocitySamples.length = 0
+
+    this.#momentumRaf = requestAnimationFrame(this.#momentumTick)
+    return true
+  }
+
+  #momentumTick = (): void => {
+    this.#momentumVx *= MOMENTUM_FRICTION
+    this.#momentumVy *= MOMENTUM_FRICTION
+
+    if (Math.abs(this.#momentumVx) + Math.abs(this.#momentumVy) < MOMENTUM_STOP_THRESHOLD) {
+      this.#momentumRaf = null
+      this.#momentumVx = 0
+      this.#momentumVy = 0
+      this.#gate?.release(this.#source)
+      this.#emitDragging(false)
+      return
+    }
+
+    // apply via panDelegate with synthetic points
+    const origin: Point = { x: 0, y: 0 }
+    const delta: Point = { x: this.#momentumVx, y: this.#momentumVy }
+    this.#panDelegate?.panUpdate(origin, delta, this.#effectiveSensitivity)
+
+    this.#momentumRaf = requestAnimationFrame(this.#momentumTick)
+  }
+
+  #cancelMomentum(): void {
+    if (this.#momentumRaf !== null) {
+      cancelAnimationFrame(this.#momentumRaf)
+      this.#momentumRaf = null
+    }
+    this.#momentumVx = 0
+    this.#momentumVy = 0
+    this.#velocitySamples.length = 0
+  }
+
   #reset(): void {
+    this.#cancelMomentum()
     if (this.#state !== GestureState.IDLE) {
       this.#gate?.release(this.#source)
     }
