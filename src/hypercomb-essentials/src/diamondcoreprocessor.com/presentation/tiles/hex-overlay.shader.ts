@@ -1,143 +1,201 @@
 // diamondcoreprocessor.com/pixi/hex-overlay.shader.ts
-import { Geometry, Mesh, Shader, Texture } from 'pixi.js'
+// Vector-drawn hex hover overlay with per-edge directional lighting
+import { Graphics } from 'pixi.js'
+
+// ── Light direction (top-left, 10 o'clock) ─────────────────────
+const LIGHT_DIR_X = -0.5
+const LIGHT_DIR_Y = -0.866
+
+// ── Palette ────────────────────────────────────────────────────
+const FILL_COLOR   = 0x000d18
+const FILL_ALPHA   = 0.62
+
+const SHADOW_COLOR = 0x0a1520   // dark bezel stop
+const MID_COLOR    = 0x2a5570   // mid bezel stop
+const HI_COLOR     = 0x6aafc8   // bright bezel stop
+
+const BEZEL_OUTER  = 0.92       // outer edge fraction of circumradius
+const BEZEL_INNER  = 0.84       // inner edge fraction
+
+// ── Drop shadow ────────────────────────────────────────────────
+const SHADOW_OFFSET_X = 2
+const SHADOW_OFFSET_Y = 3
+const SHADOW_ALPHA    = 0.35
+const SHADOW_BLUR     = 6
+
+// ── Rim + inner line ───────────────────────────────────────────
+const RIM_WIDTH       = 0.75
+const RIM_BASE_ALPHA  = 0.15
+const RIM_HI_ALPHA    = 0.55
+
+const INNER_WIDTH     = 0.5
+const INNER_BASE_ALPHA = 0.08
+const INNER_HI_ALPHA   = 0.30
+
+// ── Corner jewels ──────────────────────────────────────────────
+const JEWEL_RADIUS     = 1.4
+const JEWEL_BASE_ALPHA = 0.15
+const JEWEL_HI_ALPHA   = 0.65
+const JEWEL_COLOR      = 0x88ccdd
+
+// ── Specular ───────────────────────────────────────────────────
+const SPEC_RADIUS      = 1.8
+const SPEC_COLOR       = 0xddffff
+const SPEC_ALPHA       = 0.45
 
 export class HexOverlayMesh {
-  readonly mesh: Mesh
+  readonly mesh: Graphics
 
-  #ug: any
+  #radiusPx: number
+  #flat: boolean
 
   constructor(radiusPx: number, flat: boolean) {
-    // quad half-extents: pad slightly beyond circumradius so AA fringe isn't clipped
-    const pad = radiusPx + 6
-    const pos = new Float32Array([
-      -pad, -pad,  pad, -pad,  pad, pad,  -pad, pad,
-    ])
-    const uv = new Float32Array([
-      0, 0,  1, 0,  1, 1,  0, 1,
-    ])
-    const idx = new Uint32Array([0, 1, 2, 0, 2, 3])
-
-    const geom = new Geometry()
-    ;(geom as any).addAttribute('aPosition', pos, 2)
-    ;(geom as any).addAttribute('aUV', uv, 2)
-    ;(geom as any).addIndex(idx)
-
-    const uniformDefs = {
-      u_quadSize:    { value: [pad * 2, pad * 2], type: 'vec2<f32>' },
-      u_radiusPx:    { value: radiusPx,           type: 'f32' },
-      u_flat:        { value: flat ? 1.0 : 0.0,   type: 'f32' },
-      u_fillColor:   { value: [0.0, 0.118, 0.188], type: 'vec3<f32>' }, // 0x001e30
-      u_fillAlpha:   { value: 0.65,                type: 'f32' },
-      u_strokeColor: { value: [0.267, 0.533, 0.667], type: 'vec3<f32>' }, // 0x4488aa
-      u_strokeAlpha: { value: 0.5,                 type: 'f32' },
-    }
-
-    const shader = Shader.from({
-      gl: { vertex: VERT, fragment: FRAG },
-      resources: { uniforms: uniformDefs },
-    })
-
-    this.#ug = (shader.resources as any).uniforms
-
-    this.mesh = new Mesh({
-      geometry: geom as any,
-      shader: shader as any,
-      texture: Texture.WHITE as any,
-    } as any)
-    ;(this.mesh as any).blendMode = 'pre-multiply'
+    this.#radiusPx = radiusPx
+    this.#flat = flat
+    this.mesh = new Graphics()
+    this.#draw()
   }
 
   update(radiusPx: number, flat: boolean): void {
-    const pad = radiusPx + 6
-    const u = this.#ug.uniforms
-    u.u_quadSize[0] = pad * 2
-    u.u_quadSize[1] = pad * 2
-    u.u_radiusPx = radiusPx
-    u.u_flat = flat ? 1.0 : 0.0
-    this.#ug.update()
+    if (radiusPx === this.#radiusPx && flat === this.#flat) return
+    this.#radiusPx = radiusPx
+    this.#flat = flat
+    this.#draw()
+  }
 
-    // resize quad vertices
-    const pos = (this.mesh.geometry as any).getBuffer('aPosition')
-    if (pos) {
-      const d = pos.data as Float32Array
-      d[0] = -pad; d[1] = -pad
-      d[2] =  pad; d[3] = -pad
-      d[4] =  pad; d[5] =  pad
-      d[6] = -pad; d[7] =  pad
-      pos.update()
+  // ── hex vertex generation ──────────────────────────────────────
+
+  #hexVerts(r: number): number[] {
+    const verts: number[] = []
+    for (let i = 0; i < 6; i++) {
+      const angle = (Math.PI / 3) * i + (this.#flat ? 0 : Math.PI / 6)
+      verts.push(Math.cos(angle) * r, Math.sin(angle) * r)
+    }
+    return verts
+  }
+
+  // ── per-edge directional lighting ──────────────────────────────
+
+  #edgeLighting(edgeIndex: number): number {
+    // outward-facing normal of edge i
+    const a0 = (Math.PI / 3) * edgeIndex + (this.#flat ? 0 : Math.PI / 6)
+    const a1 = (Math.PI / 3) * (edgeIndex + 1) + (this.#flat ? 0 : Math.PI / 6)
+    const mx = (Math.cos(a0) + Math.cos(a1)) / 2
+    const my = (Math.sin(a0) + Math.sin(a1)) / 2
+    const len = Math.sqrt(mx * mx + my * my)
+    const nx = mx / len
+    const ny = my / len
+    // dot with light direction → [-1..1], remap to [0..1]
+    const dot = nx * LIGHT_DIR_X + ny * LIGHT_DIR_Y
+    return dot * 0.5 + 0.5
+  }
+
+  // ── color interpolation ────────────────────────────────────────
+
+  #lerpColor(lo: number, hi: number, t: number): number {
+    const lr = (lo >> 16) & 0xff, lg = (lo >> 8) & 0xff, lb = lo & 0xff
+    const hr = (hi >> 16) & 0xff, hg = (hi >> 8) & 0xff, hb = hi & 0xff
+    const r = Math.round(lr + (hr - lr) * t)
+    const g = Math.round(lg + (hg - lg) * t)
+    const b = Math.round(lb + (hb - lb) * t)
+    return (r << 16) | (g << 8) | b
+  }
+
+  #lerpColor3(lo: number, mid: number, hi: number, t: number): number {
+    if (t < 0.5) return this.#lerpColor(lo, mid, t * 2)
+    return this.#lerpColor(mid, hi, (t - 0.5) * 2)
+  }
+
+  // ── main draw ──────────────────────────────────────────────────
+
+  #draw(): void {
+    const g = this.mesh
+    g.clear()
+
+    const R = this.#radiusPx
+    const outerV = this.#hexVerts(R * BEZEL_OUTER)
+    const innerV = this.#hexVerts(R * BEZEL_INNER)
+    const fillV  = this.#hexVerts(R * BEZEL_INNER)
+
+    // ─── 1. Drop shadow ────────────────────────────────────────
+    const shadowV = this.#hexVerts(R * BEZEL_OUTER)
+    g.poly(shadowV.map((v, i) => v + (i % 2 === 0 ? SHADOW_OFFSET_X : SHADOW_OFFSET_Y)))
+    g.fill({ color: 0x000000, alpha: SHADOW_ALPHA })
+
+    // penumbra — slightly larger, more transparent
+    const penV = this.#hexVerts(R * BEZEL_OUTER + SHADOW_BLUR)
+    g.poly(penV.map((v, i) => v + (i % 2 === 0 ? SHADOW_OFFSET_X : SHADOW_OFFSET_Y)))
+    g.fill({ color: 0x000000, alpha: SHADOW_ALPHA * 0.3 })
+
+    // ─── 2. Dark fill ──────────────────────────────────────────
+    g.poly(fillV)
+    g.fill({ color: FILL_COLOR, alpha: FILL_ALPHA })
+
+    // ─── 3. Bezel trapezoids (6 segments) ──────────────────────
+    let brightestEdge = 0
+    let brightestVal = -1
+
+    for (let i = 0; i < 6; i++) {
+      const lighting = this.#edgeLighting(i)
+      if (lighting > brightestVal) { brightestVal = lighting; brightestEdge = i }
+
+      const i0 = i * 2, i1 = ((i + 1) % 6) * 2
+      const bezelColor = this.#lerpColor3(SHADOW_COLOR, MID_COLOR, HI_COLOR, lighting)
+      const bezelAlpha = 0.3 + lighting * 0.5
+
+      // trapezoid: outer[i] → outer[i+1] → inner[i+1] → inner[i]
+      g.poly([
+        outerV[i0], outerV[i0 + 1],
+        outerV[i1], outerV[i1 + 1],
+        innerV[i1], innerV[i1 + 1],
+        innerV[i0], innerV[i0 + 1],
+      ])
+      g.fill({ color: bezelColor, alpha: bezelAlpha })
+    }
+
+    // ─── 4. Outer rim highlight ────────────────────────────────
+    for (let i = 0; i < 6; i++) {
+      const lighting = this.#edgeLighting(i)
+      const rimAlpha = RIM_BASE_ALPHA + (RIM_HI_ALPHA - RIM_BASE_ALPHA) * lighting
+      const i0 = i * 2, i1 = ((i + 1) % 6) * 2
+
+      g.moveTo(outerV[i0], outerV[i0 + 1])
+      g.lineTo(outerV[i1], outerV[i1 + 1])
+      g.stroke({ width: RIM_WIDTH, color: this.#lerpColor(MID_COLOR, HI_COLOR, lighting), alpha: rimAlpha })
+    }
+
+    // ─── 5. Inner edge lines (inverted lighting for ridge) ─────
+    for (let i = 0; i < 6; i++) {
+      const lighting = 1.0 - this.#edgeLighting(i) // inverted → lit edges on opposite side
+      const innerAlpha = INNER_BASE_ALPHA + (INNER_HI_ALPHA - INNER_BASE_ALPHA) * lighting
+      const i0 = i * 2, i1 = ((i + 1) % 6) * 2
+
+      g.moveTo(innerV[i0], innerV[i0 + 1])
+      g.lineTo(innerV[i1], innerV[i1 + 1])
+      g.stroke({ width: INNER_WIDTH, color: this.#lerpColor(SHADOW_COLOR, MID_COLOR, lighting), alpha: innerAlpha })
+    }
+
+    // ─── 6. Corner jewel dots ──────────────────────────────────
+    for (let i = 0; i < 6; i++) {
+      // average lighting of two adjacent edges
+      const l0 = this.#edgeLighting(i)
+      const l1 = this.#edgeLighting((i + 5) % 6)
+      const cornerLight = (l0 + l1) / 2
+      const jewelAlpha = JEWEL_BASE_ALPHA + (JEWEL_HI_ALPHA - JEWEL_BASE_ALPHA) * cornerLight
+
+      g.circle(outerV[i * 2], outerV[i * 2 + 1], JEWEL_RADIUS)
+      g.fill({ color: JEWEL_COLOR, alpha: jewelAlpha })
+    }
+
+    // ─── 7. Specular dot at brightest edge midpoint ────────────
+    {
+      const i0 = brightestEdge * 2
+      const i1 = ((brightestEdge + 1) % 6) * 2
+      const sx = (outerV[i0] + outerV[i1]) / 2
+      const sy = (outerV[i0 + 1] + outerV[i1 + 1]) / 2
+
+      g.circle(sx, sy, SPEC_RADIUS)
+      g.fill({ color: SPEC_COLOR, alpha: SPEC_ALPHA })
     }
   }
 }
-
-const VERT = `
-  in vec2 aPosition;
-  in vec2 aUV;
-  out vec2 vUV;
-
-  uniform mat3 uProjectionMatrix;
-  uniform mat3 uWorldTransformMatrix;
-  uniform mat3 uTransformMatrix;
-
-  void main() {
-    mat3 mvp = uProjectionMatrix * uWorldTransformMatrix * uTransformMatrix;
-    gl_Position = vec4((mvp * vec3(aPosition, 1.0)).xy, 0.0, 1.0);
-    vUV = aUV;
-  }
-`
-
-const FRAG = `
-  precision highp float;
-
-  in vec2 vUV;
-
-  uniform vec2  u_quadSize;
-  uniform float u_radiusPx;
-  uniform float u_flat;
-  uniform vec3  u_fillColor;
-  uniform float u_fillAlpha;
-  uniform vec3  u_strokeColor;
-  uniform float u_strokeAlpha;
-
-  float sdHex(vec2 p, float r) {
-    p = abs(p);
-    return max(p.x * 0.8660254 + p.y * 0.5, p.y) - r;
-  }
-
-  vec2 rot30(vec2 p) {
-    return vec2(
-      0.8660254 * p.x - 0.5 * p.y,
-      0.5 * p.x + 0.8660254 * p.y
-    );
-  }
-
-  void main() {
-    vec2 local = (vUV - 0.5) * u_quadSize;
-    vec2 rotated = u_flat > 0.5 ? local : rot30(local);
-    float d = sdHex(rotated, u_radiusPx);
-
-    // manual smoothing width (avoids fwidth which requires OES_standard_derivatives)
-    float fw = max(u_radiusPx * 0.04, 1.5);
-    float aa = fw * 1.5;
-    float hexMask = 1.0 - smoothstep(-aa, aa, d);
-    if (hexMask < 0.005) discard;
-
-    // fill
-    vec3 col = u_fillColor;
-    float alpha = hexMask * u_fillAlpha;
-
-    // stroke — 2 screen-pixel ring centered on the hex edge
-    float sw = fw * 2.0;
-    float strokeMask = 1.0 - smoothstep(0.0, aa, abs(d) - sw);
-    strokeMask *= hexMask;
-    float strokeA = strokeMask * u_strokeAlpha;
-
-    // composite stroke over fill
-    float outA = alpha + strokeA - alpha * strokeA;
-    vec3 outC = (outA > 0.001)
-      ? (col * alpha * (1.0 - strokeA) + u_strokeColor * strokeA) / outA
-      : col;
-
-    // premultiplied alpha output
-    gl_FragColor = vec4(outC * outA, outA);
-  }
-`
