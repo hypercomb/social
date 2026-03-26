@@ -445,7 +445,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
       // operation phase: suggest operation keywords with / prefix
       if (phase === 'operation') {
-        const ops = ['/cut', '/copy', '/move', '/keyword', '/delete']
+        const ops = ['/cut', '/copy', '/move', '/keyword', '/delete', '/opus', '/sonnet', '/haiku']
         if (!ctx.normalized) return ops
         return ops.filter(o => o.startsWith('/' + ctx.normalized) || o.slice(1).startsWith(ctx.normalized))
       }
@@ -1128,6 +1128,17 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       return
     }
 
+    if (['opus', 'sonnet', 'haiku', 'o', 's', 'h'].includes(op)) {
+      const afterOp = afterBracket.slice(opMatch![0].length).trim()
+      const queen = get('@diamondcoreprocessor.com/LlmQueenBee') as any
+      if (queen) {
+        queen.activeModel = op
+        await queen.invoke(afterOp)
+      }
+      this.#collapseToSelect(labels)
+      return
+    }
+
     // No operation — just /select[tiles] → select and show in bar
     this.#collapseToSelect(labels)
   }
@@ -1727,7 +1738,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       const opKeyword = nextSlash === -1 ? opAndRest : opAndRest.slice(0, nextSlash)
       const opLower = opKeyword.toLowerCase().trim()
 
-      if (opLower === 'cut' || opLower === 'copy' || opLower === 'delete' || opLower === 'del' || opLower === 'rm') return 'operation'
+      if (opLower === 'cut' || opLower === 'copy' || opLower === 'delete' || opLower === 'del' || opLower === 'rm' || opLower === 'opus' || opLower === 'sonnet' || opLower === 'haiku' || opLower === 'o' || opLower === 's' || opLower === 'h') return 'operation'
 
       if (opLower === 'move' || opLower.startsWith('move')) {
         // Check for (index) — note: the first [ is at bracketOpen
@@ -1813,7 +1824,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         const opKeyword = nextSlash === -1 ? opAndRest : opAndRest.slice(0, nextSlash)
         const opLower = opKeyword.toLowerCase().trim()
 
-        if (opLower === 'cut' || opLower === 'copy' || opLower === 'move') {
+        if (opLower === 'cut' || opLower === 'copy' || opLower === 'move' || opLower === 'opus' || opLower === 'sonnet' || opLower === 'haiku' || opLower === 'o' || opLower === 's' || opLower === 'h') {
           return { active: true, mode: 'select', head: v, raw: '', normalized: opLower, style: 'space' }
         }
         return {

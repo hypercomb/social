@@ -131,6 +131,24 @@ class DeleteProvider implements SlashCommandProvider {
   }
 }
 
+class LlmProvider implements SlashCommandProvider {
+  readonly name = 'llm-provider'
+  readonly priority = 100
+  readonly commands: SlashCommand[] = [
+    { name: 'opus', description: 'Send context to Claude Opus 4.6', aliases: ['o'] },
+    { name: 'sonnet', description: 'Send context to Claude Sonnet', aliases: ['s'] },
+    { name: 'haiku', description: 'Send context to Claude Haiku', aliases: ['h'] },
+  ]
+
+  async execute(commandName: string, args: string): Promise<void> {
+    const queen = get('@diamondcoreprocessor.com/LlmQueenBee') as any
+    if (queen) {
+      queen.activeModel = commandName
+      await queen.invoke(args)
+    }
+  }
+}
+
 // ── registration ────────────────────────────────────────
 
 const _slashCommands = new SlashCommandDrone()
@@ -140,4 +158,5 @@ _slashCommands.addProvider(new KeywordProvider())
 _slashCommands.addProvider(new MeetingProvider())
 _slashCommands.addProvider(new DebugProvider())
 _slashCommands.addProvider(new DeleteProvider())
+_slashCommands.addProvider(new LlmProvider())
 window.ioc.register('@diamondcoreprocessor.com/SlashCommandDrone', _slashCommands)

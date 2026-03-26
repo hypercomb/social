@@ -2,7 +2,7 @@
 import { Drone, EffectBus, hypercomb, normalizeSeed } from '@hypercomb/core'
 import type { OverlayActionDescriptor } from '../presentation/tiles/tile-overlay.drone.js'
 
-const ATOMIZE_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96"><circle fill="white" cx="48" cy="48" r="8"/><circle fill="white" cx="48" cy="20" r="5"/><circle fill="white" cx="23" cy="64" r="5"/><circle fill="white" cx="73" cy="64" r="5"/><line stroke="white" stroke-width="2" x1="48" y1="40" x2="48" y2="25"/><line stroke="white" stroke-width="2" x1="41" y1="53" x2="27" y2="62"/><line stroke="white" stroke-width="2" x1="55" y1="53" x2="69" y2="62"/></svg>`
+const ATOMIZE_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96"><circle fill="white" cx="48" cy="48" r="6" opacity="0.9"/><line stroke="white" stroke-width="2" stroke-linecap="round" x1="48" y1="42" x2="48" y2="18"/><line stroke="white" stroke-width="2" stroke-linecap="round" x1="48" y1="54" x2="48" y2="78"/><line stroke="white" stroke-width="2" stroke-linecap="round" x1="42" y1="45" x2="22" y2="28"/><line stroke="white" stroke-width="2" stroke-linecap="round" x1="54" y1="45" x2="74" y2="28"/><line stroke="white" stroke-width="2" stroke-linecap="round" x1="42" y1="51" x2="22" y2="68"/><line stroke="white" stroke-width="2" stroke-linecap="round" x1="54" y1="51" x2="74" y2="68"/><circle fill="white" r="3" cx="48" cy="18"/><circle fill="white" r="3" cx="48" cy="78"/><circle fill="white" r="3" cx="22" cy="28"/><circle fill="white" r="3" cx="74" cy="28"/><circle fill="white" r="3" cx="22" cy="68"/><circle fill="white" r="3" cx="74" cy="68"/></svg>`
 
 const ACTION_DESCRIPTOR: OverlayActionDescriptor = {
   name: 'atomize',

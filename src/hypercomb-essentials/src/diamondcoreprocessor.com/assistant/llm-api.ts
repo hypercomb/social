@@ -1,0 +1,50 @@
+// diamondcoreprocessor.com/assistant/llm-api.ts
+
+const ANTHROPIC_ENDPOINT = 'https://api.anthropic.com/v1/messages'
+const ANTHROPIC_VERSION = '2023-06-01'
+
+export const MODELS: Record<string, string> = {
+  opus: 'claude-opus-4-6',
+  o: 'claude-opus-4-6',
+  sonnet: 'claude-sonnet-4-6',
+  s: 'claude-sonnet-4-6',
+  haiku: 'claude-haiku-4-5-20251001',
+  h: 'claude-haiku-4-5-20251001',
+}
+
+export const API_KEY_STORAGE = 'hc:anthropic-api-key'
+
+export const getApiKey = (): string | null =>
+  localStorage.getItem(API_KEY_STORAGE)
+
+export const callAnthropic = async (
+  model: string,
+  systemPrompt: string,
+  userMessage: string,
+  apiKey: string,
+  maxTokens = 4096,
+): Promise<string> => {
+  const response = await fetch(ANTHROPIC_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': ANTHROPIC_VERSION,
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: maxTokens,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userMessage }],
+    }),
+  })
+
+  if (!response.ok) {
+    const text = await response.text()
+    throw new Error(`Anthropic API ${response.status}: ${text}`)
+  }
+
+  const json = await response.json()
+  return json.content?.[0]?.text ?? ''
+}

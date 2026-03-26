@@ -50,6 +50,7 @@ import '@hypercomb/essentials/diamondcoreprocessor.com/assistant/claude-bridge.w
 import '@hypercomb/essentials/diamondcoreprocessor.com/assistant/atomize.drone'
 import '@hypercomb/essentials/diamondcoreprocessor.com/safety/link-safety.service'
 import '@hypercomb/essentials/diamondcoreprocessor.com/link/link-drop.worker'
+import '@hypercomb/essentials/diamondcoreprocessor.com/assistant/llm.queen'
 import { HelpQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/help.queen'
 import { KeywordQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/keyword.queen'
 import { DebugQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/debug.queen'

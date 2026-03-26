@@ -70,7 +70,8 @@
           "builder": "@angular/build:dev-server",
           "options": {
             "port": 4200,
-            "open": false
+            "open": false,
+            "proxyConfig": "proxy.conf.json"
           },
           "configurations": {
             "development": {
