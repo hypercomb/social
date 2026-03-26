@@ -1,24 +1,27 @@
-// diamondcoreprocessor.com/commands/delete.queen.ts
+// diamondcoreprocessor.com/commands/remove.queen.ts
 
 import { QueenBee, EffectBus, hypercomb } from '@hypercomb/core'
 
 /**
- * /delete — remove tiles from the current directory.
+ * /remove — remove tiles from the current directory.
+ *
+ * Removes tiles from the visible hierarchy. The underlying data
+ * persists in OPFS and can be navigated to again later.
  *
  * Syntax:
- *   /delete                         — delete currently selected tiles
- *   /delete tileName                — delete a single tile
- *   /delete [tile1, tile2, tile3]   — delete multiple tiles
- *   /select[a,b]/delete             — chained: select then delete
+ *   /remove                         — remove currently selected tiles
+ *   /remove tileName                — remove a single tile
+ *   /remove [tile1, tile2, tile3]   — remove multiple tiles
+ *   /select[a,b]/remove             — chained: select then remove
  */
-export class DeleteQueenBee extends QueenBee {
+export class RemoveQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
-  readonly command = 'delete'
-  override readonly aliases = ['del', 'rm']
-  override description = 'Delete tiles from the current directory'
+  readonly command = 'remove'
+  override readonly aliases = ['rm']
+  override description = 'Remove tiles from the current directory'
 
   protected async execute(args: string): Promise<void> {
-    const targets = parseDeleteArgs(args)
+    const targets = parseRemoveArgs(args)
 
     // No args → operate on current selection
     if (targets.length === 0) {
@@ -52,7 +55,7 @@ export class DeleteQueenBee extends QueenBee {
 
 // ── arg parsing ──────────────────────────────────────────
 
-function parseDeleteArgs(args: string): string[] {
+function parseRemoveArgs(args: string): string[] {
   const trimmed = args.trim()
   if (!trimmed) return []
 
@@ -85,5 +88,15 @@ function normalizeName(s: string): string {
 
 // ── registration ────────────────────────────────────────
 
-const _delete = new DeleteQueenBee()
-window.ioc.register('@diamondcoreprocessor.com/DeleteQueenBee', _delete)
+const _remove = new RemoveQueenBee()
+window.ioc.register('@diamondcoreprocessor.com/RemoveQueenBee', _remove)
+
+// Listen for controls-bar / context-menu "remove" action
+EffectBus.on<{ action: string }>('controls:action', (payload) => {
+  if (payload?.action === 'remove') void _remove.invoke('')
+})
+
+// Listen for keyboard shortcut (Delete / Backspace)
+EffectBus.on<{ cmd: string }>('keymap:invoke', (payload) => {
+  if (payload?.cmd === 'selection.remove') void _remove.invoke('')
+})

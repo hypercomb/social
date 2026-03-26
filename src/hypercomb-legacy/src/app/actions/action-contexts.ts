@@ -7,7 +7,7 @@ export type ContextKind =
     | "cell"
     | "copy-cells"
     | "cut-cells"
-    | "delete-cells"
+    | "remove-cells"
     | "change-mode"
     | "keyboard"
     | "mouse"
@@ -53,8 +53,8 @@ export interface CutPayload extends PayloadBase {
     cells: Cell[],
     hasSelections: boolean
 }
-export interface DeletePayload extends PayloadBase {
-    kind: "delete-cells"
+export interface RemovePayload extends PayloadBase {
+    kind: "remove-cells"
     cells: Cell[],
     hasSelections: boolean
 }
@@ -87,7 +87,7 @@ export type ActionContext =
     | KeyboardPayload
     | MousePayload
     | CellPayload
-    | DeletePayload
+    | RemovePayload
     | CopyPayload
     | CutPayload
     | RenameHiveContext

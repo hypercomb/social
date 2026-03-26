@@ -179,7 +179,7 @@ The `#behaviors` array determines match priority for pluggable behaviors:
 
 1. **GoParentBehavior** — `..` parent navigation (fastest escape hatch)
 2. **SlashCommandBehavior** — `/command` queen bee dispatch
-3. **DeleteCellBehavior** — `!` prefix (destructive action should be intentional)
+3. **RemoveCellBehavior** — `~` prefix (removes from visible hierarchy)
 4. **CutPasteBehavior** — `[items]/path` bracket-path copy
 5. **HashMarkerBehavior** — `seed#Drone` binding
 6. **BatchCreateBehavior** — `[...]` bracket expansion

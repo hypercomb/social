@@ -193,7 +193,7 @@ export class OpfsExplorerComponent extends hypercomb {
     }
   }
 
-  public delete = async (e: ExplorerEntry, ev: MouseEvent): Promise<void> => {
+  public remove = async (e: ExplorerEntry, ev: MouseEvent): Promise<void> => {
     ev.stopPropagation()
 
     const dir = await this.lineage.explorerDir()

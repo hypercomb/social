@@ -116,15 +116,15 @@ class DebugProvider implements SlashCommandProvider {
   }
 }
 
-class DeleteProvider implements SlashCommandProvider {
-  readonly name = 'delete-provider'
+class RemoveProvider implements SlashCommandProvider {
+  readonly name = 'remove-provider'
   readonly priority = 100
   readonly commands: SlashCommand[] = [
-    { name: 'delete', description: 'Delete tiles from the current directory', aliases: ['del', 'rm'] }
+    { name: 'remove', description: 'Remove tiles from the current directory', aliases: ['rm'] }
   ]
 
   async execute(_commandName: string, args: string): Promise<void> {
-    const queen = get('@diamondcoreprocessor.com/DeleteQueenBee') as any
+    const queen = get('@diamondcoreprocessor.com/RemoveQueenBee') as any
     if (queen?.invoke) {
       await queen.invoke(args)
     }
@@ -182,7 +182,7 @@ _slashCommands.addProvider(new ClearProvider())
 _slashCommands.addProvider(new KeywordProvider())
 _slashCommands.addProvider(new MeetingProvider())
 _slashCommands.addProvider(new DebugProvider())
-_slashCommands.addProvider(new DeleteProvider())
+_slashCommands.addProvider(new RemoveProvider())
 _slashCommands.addProvider(new FormatSlashProvider())
 _slashCommands.addProvider(new NeonProvider())
 _slashCommands.addProvider(new LlmProvider())

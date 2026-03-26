@@ -112,5 +112,13 @@ export const defaultKeyMap: KeyMapLayer = {
       description: 'Cut selected tiles',
       category: 'Clipboard',
     },
+
+    // Remove
+    {
+      cmd: 'selection.remove',
+      sequence: [[{ key: 'delete' }], [{ key: 'backspace' }]],
+      description: 'Remove selected tiles',
+      category: 'Editing',
+    },
   ],
 }

@@ -13,9 +13,8 @@ import { SELECTIONS } from 'src/app/shared/tokens/i-selection.token'
 import { BackHiveAction } from 'src/app/actions/navigation/back.action'
 import { LockCellAction } from 'src/app/actions/cells/lock-cell.action'
 import { CopyAction } from 'src/app/actions/clipboard/copy-honeycomb'
-import { DeleteCellsAction } from 'src/app/actions/cells/delete-cells'
 import { ChangeModeAction } from 'src/app/actions/modes/change-mode'
-import { CellPayload, ChangeModeContext, CopyPayload, DeletePayload } from 'src/app/actions/action-contexts'
+import { CellPayload, ChangeModeContext, CopyPayload } from 'src/app/actions/action-contexts'
 import { Constants } from 'src/app/helper/constants'
 import { PasteClipboardButtonComponent } from '../paste-clipboard-button/paste-clipboard-button.component'
 import { ScreenService } from 'src/app/services/screen-service'
@@ -118,13 +117,12 @@ public cut = async (): Promise<void> => {
     this.state.setMode(HypercombMode.AiPrompt)
   }
 
-  public delete = async (): Promise<void> => {
-    const payload = <DeletePayload>{
-      kind: 'delete-cells',
-      cells: this.selections.items(),
-      hasSelections: this.selections.items().length > 0
+  public remove = async (): Promise<void> => {
+    const queen = window.ioc?.get('@diamondcoreprocessor.com/RemoveQueenBee') as
+      { invoke: (args: string) => Promise<void> } | undefined
+    if (queen) {
+      await queen.invoke('')
     }
-    await this.registry.invoke(DeleteCellsAction.ActionId, payload)
   }
 
   public select = async (): Promise<void> => {

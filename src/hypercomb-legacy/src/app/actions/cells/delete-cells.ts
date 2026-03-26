@@ -1,20 +1,20 @@
-﻿// delete-cells.action.ts
+// remove-cells.action.ts
 import { Injectable, inject } from "@angular/core"
 import { HypercombMode } from "src/app/core/models/enumerations"
 import { HypercombState } from "src/app/state/core/hypercomb-state"
 import { ActionBase } from "src/app/actions/action.base"
 import { CLIPBOARD_REPOSITORY } from "src/app/shared/tokens/i-clipboard-repository"
 import { HIVE_HYDRATION } from "src/app/shared/tokens/i-honeycomb-service.token"
-import { DeletePayload } from "../action-contexts"
+import { RemovePayload } from "../action-contexts"
 
 @Injectable({ providedIn: "root" })
-export class DeleteCellsAction extends ActionBase<DeletePayload> {
+export class RemoveCellsAction extends ActionBase<RemovePayload> {
   public readonly hydration = inject(HIVE_HYDRATION)
   public readonly repository = inject(CLIPBOARD_REPOSITORY)
-  public static ActionId = "tile.delete"
-  public override id = DeleteCellsAction.ActionId
-  public override label = "Delete Cell(s)"
-  public override description = "Delete one or more cells and their hierarchy unless blocked by host"
+  public static ActionId = "tile.remove"
+  public override id = RemoveCellsAction.ActionId
+  public override label = "Remove Cell(s)"
+  public override description = "Remove one or more cells and their hierarchy unless blocked by host"
   public override category = "Editing"
   public override risk: "danger" = "danger"
 
@@ -22,7 +22,7 @@ export class DeleteCellsAction extends ActionBase<DeletePayload> {
 
   private readonly blockedHosts = ["hypercomb.io", "localhost:4200"]
 
-  public override enabled = async (payload: DeletePayload): Promise<boolean> => {
+  public override enabled = async (payload: RemovePayload): Promise<boolean> => {
     if (!payload.cells?.length) return false
 
     // protect special links
@@ -34,13 +34,13 @@ export class DeleteCellsAction extends ActionBase<DeletePayload> {
 
     return allowed && this.hypercomb.hasMode(HypercombMode.Normal)
   }
-  
-  public override run = async (payload: DeletePayload): Promise<void> => {
+
+  public override run = async (payload: RemovePayload): Promise<void> => {
     for (const cell of payload.cells) {
       if (!cell.seed) continue
       const hierarchy = await this.repository.fetchHierarchy(cell.seed)
       await this.modify.deleteAll(cell, hierarchy)
-      this.hydration.invalidateTile(cell.seed) // ensure not in memory      this.hydration.invalidateTile(cell.seed) // ensure not in memory
+      this.hydration.invalidateTile(cell.seed)
     }
   }
 }

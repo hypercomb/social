@@ -6,7 +6,7 @@ import { BackHiveAction } from '../actions/navigation/back.action'
 import { BranchAction } from '../actions/navigation/branch.action'
 import { CenterHiveAction } from '../actions/layout/center-hive'
 import { ChangeModeAction } from '../actions/modes/change-mode'
-import { DeleteCellsAction } from '../actions/cells/delete-cells'
+import { RemoveCellsAction } from '../actions/cells/delete-cells'
 import { EditTileAction } from '../actions/cells/edit-cell'
 import { ExploreStorageAction } from '../actions/storage/explore-storage'
 import { FocusModeAction } from '../actions/modes/focus-mode'
@@ -105,7 +105,7 @@ export class StartUpService {
     inject(ChangeModeAction),
     inject(CloseExternalAction),
     inject(CopyAction),
-    inject(DeleteCellsAction),
+    inject(RemoveCellsAction),
     inject(EditTileAction),
     inject(ExploreStorageAction),
     inject(FocusModeAction),
