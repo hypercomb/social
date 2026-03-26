@@ -175,7 +175,15 @@ export class HomeComponent {
     const next = this.domains().filter(d => d !== domain)
     this.domains.set(next)
     localStorage.setItem(DOMAINS_KEY, JSON.stringify(next))
-    this.sections.set(this.sections().filter(s => s.domain !== domain))
+    const remaining = this.sections().filter(s => s.domain !== domain)
+    this.sections.set(remaining)
+
+    // clear search/filter state if no sections remain
+    if (remaining.length === 0) {
+      this.searchTerm.set('')
+      this.kindFilters.set(new Set())
+      this.layersCollapsed.set(false)
+    }
   }
 
   // tree interactions

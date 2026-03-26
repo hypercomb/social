@@ -1,6 +1,6 @@
 // diamond-core-processor/src/app/tree-view/tree-row.component.ts
 
-import { Component, computed, input, output } from '@angular/core'
+import { Component, computed, ElementRef, inject, input, OnDestroy, OnInit, output, signal } from '@angular/core'
 import { ToggleComponent } from './toggle.component'
 import { DiamondIconComponent } from './diamond-icon.component'
 import type { TreeNode } from '../core/tree-node'
@@ -10,51 +10,64 @@ import type { TreeNode } from '../core/tree-node'
   standalone: true,
   imports: [ToggleComponent, DiamondIconComponent],
   template: `
-    <div class="row" [style.--depth]="node().depth">
-      @if (node().kind === 'layer' || node().kind === 'domain') {
-        <dcp-toggle
-          [enabled]="enabled()"
-          [effectivelyEnabled]="effectivelyEnabled()"
-          (toggled)="toggle.emit(node())" />
-      }
-
-      <dcp-diamond
-        [kind]="node().kind"
-        (clicked)="open.emit(node())" />
-
-      <button class="label" (click)="hasChildren() ? expandToggle.emit(node()) : open.emit(node())">
-        @if (node().lineage && node().kind !== 'layer' && node().kind !== 'domain') {
-          <span class="lineage">{{ node().lineage }}/</span>
+    @if (visible()) {
+      <div class="row" [style.--depth]="node().depth">
+        @if (node().kind === 'layer' || node().kind === 'domain') {
+          <dcp-toggle
+            [enabled]="enabled()"
+            [effectivelyEnabled]="effectivelyEnabled()"
+            (toggled)="toggle.emit(node())" />
         }
-        <span class="name">{{ node().name }}</span>
-        @if (description()) {
-          <span class="description">{{ description() }}</span>
-        }
-      </button>
 
-      @if (node().signature) {
-        <span class="sig">{{ node().signature!.slice(0, 8) }}</span>
-      }
+        <dcp-diamond
+          [kind]="node().kind"
+          (clicked)="open.emit(node())" />
 
-      @if (node().audit) {
-        <span class="audit-badge" [class.met]="node().audit!.meetsThreshold" [class.unmet]="!node().audit!.meetsThreshold">
-          {{ node().audit!.approvedBy.length }}/{{ node().audit!.total }}
-        </span>
-      }
-
-      @if (node().signature && (node().kind === 'bee' || node().kind === 'worker' || node().kind === 'drone' || node().kind === 'dependency')) {
-        <button class="info-btn" (click)="openDetail.emit(node()); $event.stopPropagation()">&#9432;</button>
-      }
-
-      @if (hasChildren()) {
-        <button class="chevron" (click)="expandToggle.emit(node())">
-          {{ node().expanded ? '\u25BE' : '\u25B8' }}
+        <button class="label" (click)="hasChildren() ? expandToggle.emit(node()) : open.emit(node())">
+          @if (node().lineage && node().kind !== 'layer' && node().kind !== 'domain') {
+            <span class="lineage">{{ node().lineage }}</span>
+          }
+          @if (kindLabel()) {
+            <span class="kind-label" [class]="node().kind">{{ kindLabel() }}</span>
+            <span class="breadcrumb-sep">/</span>
+          }
+          <span class="name" [class]="node().kind">{{ node().name }}</span>
+          @if (description()) {
+            <span class="description">{{ description() }}</span>
+          }
         </button>
-      }
-    </div>
+
+        @if (node().signature) {
+          <span class="sig">{{ node().signature!.slice(0, 8) }}</span>
+        }
+
+        @if (node().audit) {
+          <span class="audit-badge" [class.met]="node().audit!.meetsThreshold" [class.unmet]="!node().audit!.meetsThreshold">
+            {{ node().audit!.approvedBy.length }}/{{ node().audit!.total }}
+          </span>
+        }
+
+        @if (node().signature && (node().kind === 'bee' || node().kind === 'worker' || node().kind === 'drone' || node().kind === 'dependency')) {
+          <button class="info-btn" (click)="openDetail.emit(node()); $event.stopPropagation()">&#9432;</button>
+        }
+
+        @if (hasChildren()) {
+          <button class="chevron" (click)="expandToggle.emit(node())">
+            {{ node().expanded ? '\u25BE' : '\u25B8' }}
+          </button>
+        }
+      </div>
+    } @else {
+      <div class="row-placeholder" [style.--depth]="node().depth"></div>
+    }
   `,
   styles: [`
-    :host { display: block; }
+    :host { display: block; min-height: 1px; }
+
+    .row-placeholder {
+      height: 32px;
+      padding-left: calc(10px + var(--depth, 0) * 20px);
+    }
 
     .row {
       display: flex;
@@ -83,14 +96,38 @@ import type { TreeNode } from '../core/tree-node'
       flex-wrap: wrap;
     }
 
+    .kind-label {
+      font-size: 11px;
+      font-weight: 500;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .kind-label.bee { color: #a58b4f; }
+    .kind-label.worker { color: #a54f4f; }
+    .kind-label.drone { color: #a59b4f; }
+    .kind-label.dependency { color: #4fa58b; }
+
+    .breadcrumb-sep {
+      font-size: 11px;
+      color: #ddd;
+      flex-shrink: 0;
+      margin: 0 -2px;
+    }
+
     .name {
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 500;
       color: #333;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
+
+    .name.bee { color: #a58b4f; }
+    .name.worker { color: #a54f4f; }
+    .name.drone { color: #a59b4f; }
+    .name.dependency { color: #4fa58b; }
 
     .description {
       font-size: 10px;
@@ -171,6 +208,8 @@ import type { TreeNode } from '../core/tree-node'
       /* hide technical details — tap to see them in the detail view */
       .description,
       .lineage,
+      .kind-label,
+      .breadcrumb-sep,
       .sig,
       .audit-badge {
         display: none;
@@ -197,6 +236,11 @@ import type { TreeNode } from '../core/tree-node'
         background: rgba(74, 111, 165, 0.08);
       }
 
+      .row-placeholder {
+        height: 48px;
+        padding-left: calc(8px + var(--depth, 0) * 14px);
+      }
+
       .chevron {
         font-size: 18px;
         padding: 4px 8px;
@@ -209,7 +253,10 @@ import type { TreeNode } from '../core/tree-node'
     }
   `]
 })
-export class TreeRowComponent {
+export class TreeRowComponent implements OnInit, OnDestroy {
+  #el = inject(ElementRef)
+  #observer: IntersectionObserver | null = null
+
   node = input.required<TreeNode>()
   enabled = input(true)
   effectivelyEnabled = input(true)
@@ -220,8 +267,28 @@ export class TreeRowComponent {
   openDetail = output<TreeNode>()
   expandToggle = output<TreeNode>()
 
+  visible = signal(true)
+
+  kindLabel = computed(() => {
+    const k = this.node().kind
+    if (k === 'bee' || k === 'worker' || k === 'drone' || k === 'dependency') return k
+    return ''
+  })
+
   description = computed(() => {
     const n = this.node()
     return n.doc?.description || n.layerDocs?.description || ''
   })
+
+  ngOnInit(): void {
+    this.#observer = new IntersectionObserver(
+      ([entry]) => this.visible.set(entry.isIntersecting),
+      { rootMargin: '200px 0px' }
+    )
+    this.#observer.observe(this.#el.nativeElement)
+  }
+
+  ngOnDestroy(): void {
+    this.#observer?.disconnect()
+  }
 }
