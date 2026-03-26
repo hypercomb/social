@@ -1,0 +1,15 @@
+@if (embedUrl(); as url) {
+  <div class="viewer-backdrop" [class.chrome-hidden]="!chromeVisible()" (click)="onBackdropClick()">
+    <div class="video-container" (click)="$event.stopPropagation()">
+      <iframe
+        [src]="url"
+        frameborder="0"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+        allowfullscreen>
+      </iframe>
+    </div>
+    @if (chromeVisible()) {
+      <button class="close-btn" (click)="close()">&#x2715;</button>
+    }
+  </div>
+}

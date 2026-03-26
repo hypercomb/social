@@ -36,6 +36,7 @@ import { ControlsBarComponent, ShortcutSheetComponent, CommandPaletteComponent, 
 import { FormatPainterComponent } from '@hypercomb/shared/ui/format-painter/format-painter.component'
 import { PortalOverlayComponent } from '@hypercomb/shared/ui/portal/portal-overlay.component'
 import { SensitivityBarComponent } from '@hypercomb/shared/ui/sensitivity-bar/sensitivity-bar.component'
+import { YoutubeViewerComponent } from '@hypercomb/shared/ui/youtube-viewer/youtube-viewer.component'
 import { LayoutService } from '@hypercomb/essentials/diamondcoreprocessor.com/move/layout.service'
 import { MoveDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/move/move.drone'
 import { DesktopMoveInput } from '@hypercomb/essentials/diamondcoreprocessor.com/move/desktop-move.input'
@@ -71,6 +72,7 @@ import { FormatPainterDrone } from '@hypercomb/essentials/diamondcoreprocessor.c
 import { NeonQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/neon.queen'
 import { NeonToolbarDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/presentation/tiles/neon-toolbar.drone'
 import { LayoutQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/move/layout.queen'
+import { TileLinkActionDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/link/tile-link-action.drone'
 
 const _deps = [
   AxialService,
@@ -124,13 +126,14 @@ const _deps = [
   NeonQueenBee,
   NeonToolbarDrone,
   LayoutQueenBee,
+  TileLinkActionDrone,
 ]
 
 void _deps
 
 @Component({
   selector: 'app-root',
-  imports: [ControlsBarComponent, MeshHeaderComponent, RouterOutlet, CommandLineComponent, TileEditorComponent, ShortcutSheetComponent, CommandPaletteComponent, PortalOverlayComponent, ActivityLogComponent, SensitivityBarComponent, SelectionContextMenuComponent, FormatPainterComponent],
+  imports: [ControlsBarComponent, MeshHeaderComponent, RouterOutlet, CommandLineComponent, TileEditorComponent, ShortcutSheetComponent, CommandPaletteComponent, PortalOverlayComponent, ActivityLogComponent, SensitivityBarComponent, SelectionContextMenuComponent, FormatPainterComponent, YoutubeViewerComponent],
   styleUrls: ['./app.scss'] as any,
   templateUrl: './app.html'
 })
