@@ -188,10 +188,6 @@ import { AuditorService } from '../core/auditor.service'
       background: #fff;
     }
 
-    .field-name {
-      width: 120px;
-      flex: none;
-    }
 
     .btn-add {
       padding: 7px 14px;
