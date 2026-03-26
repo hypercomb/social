@@ -88,7 +88,9 @@
         [contentBase]="inspectSection()!.domain"
         [rootSig]="inspectSection()!.rootSig"
         [kind]="inspectKind()"
+        [doc]="inspectDoc()"
         [visible]="true"
-        (close)="onCloseInspector()" />
+        (close)="onCloseInspector()"
+        (navigateSig)="onNavigateSig($event)" />
     }
 </div>

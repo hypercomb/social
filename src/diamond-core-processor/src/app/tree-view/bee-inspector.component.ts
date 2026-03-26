@@ -4,6 +4,7 @@ import { Component, computed, effect, inject, input, output, signal } from '@ang
 import { SignatureService } from '@hypercomb/core'
 import { CodeViewerComponent } from '../code-viewer/code-viewer.component'
 import { DcpStore } from '../core/dcp-store'
+import type { BeeDocEntry } from '../core/tree-node'
 
 @Component({
   selector: 'dcp-bee-inspector',
@@ -16,7 +17,7 @@ import { DcpStore } from '../core/dcp-store'
         <header class="modal-header">
           <div class="header-top">
             <div class="header-left">
-              <span class="kind-badge" [class.dep]="kind() === 'dependency'" [class.worker]="kind() === 'worker'" [class.drone]="kind() === 'drone'">{{ kind() }}</span>
+              <span class="kind-badge" [class.dep]="kind() === 'dependency'" [class.worker]="kind() === 'worker'" [class.drone]="kind() === 'drone'" [class.queen]="doc()?.kind === 'queen'">{{ doc()?.kind ?? kind() }}</span>
               <span class="display-name">{{ displayName() }}</span>
               <span class="meta-pill">{{ fileSize() }}</span>
               <span class="meta-pill">{{ loadedFrom() }}</span>
@@ -28,6 +29,83 @@ import { DcpStore } from '../core/dcp-store'
             <button class="sig-copy" (click)="copySig()">{{ sigCopied() ? 'copied' : 'copy' }}</button>
           </div>
         </header>
+
+        <!-- doc panel -->
+        @if (doc(); as d) {
+          <div class="doc-panel">
+            @if (d.description) {
+              <p class="doc-description">{{ d.description }}</p>
+            }
+
+            @if (d.command) {
+              <div class="doc-section">
+                <span class="doc-label">command</span>
+                <code class="doc-command">/{{ d.command }}</code>
+                @for (alias of d.aliases; track alias) {
+                  <code class="doc-alias">/{{ alias }}</code>
+                }
+              </div>
+            }
+
+            @if (d.listens.length) {
+              <div class="doc-section">
+                <span class="doc-label">listens</span>
+                <div class="doc-pills">
+                  @for (e of d.listens; track e) {
+                    <span class="doc-pill listen">{{ e }}</span>
+                  }
+                </div>
+              </div>
+            }
+
+            @if (d.emits.length) {
+              <div class="doc-section">
+                <span class="doc-label">emits</span>
+                <div class="doc-pills">
+                  @for (e of d.emits; track e) {
+                    <span class="doc-pill emit">{{ e }}</span>
+                  }
+                </div>
+              </div>
+            }
+
+            @if (depEntries().length) {
+              <div class="doc-section">
+                <span class="doc-label">depends on</span>
+                <div class="doc-deps">
+                  @for (dep of depEntries(); track dep.key) {
+                    <div class="doc-dep">
+                      <span class="dep-name">{{ dep.name }}</span>
+                      <code class="dep-key">{{ dep.key }}</code>
+                    </div>
+                  }
+                </div>
+              </div>
+            }
+
+            @if (d.effects.length) {
+              <div class="doc-section">
+                <span class="doc-label">effects</span>
+                <div class="doc-pills">
+                  @for (e of d.effects; track e) {
+                    <span class="doc-pill effect">{{ e }}</span>
+                  }
+                </div>
+              </div>
+            }
+
+            @if (d.links.length) {
+              <div class="doc-section">
+                <span class="doc-label">links</span>
+                <div class="doc-links">
+                  @for (link of d.links; track link.url) {
+                    <a class="doc-link" [href]="link.url" target="_blank" rel="noopener">{{ link.label }}</a>
+                  }
+                </div>
+              </div>
+            }
+          </div>
+        }
 
         @if (loading()) {
           <div class="modal-body center">
@@ -136,6 +214,11 @@ import { DcpStore } from '../core/dcp-store'
       background: rgba(165, 155, 79, 0.1);
     }
 
+    .kind-badge.queen {
+      color: #7b4fa5;
+      background: rgba(123, 79, 165, 0.1);
+    }
+
     .display-name {
       font-size: 14px;
       font-weight: 600;
@@ -203,6 +286,135 @@ import { DcpStore } from '../core/dcp-store'
       background: rgba(0, 0, 0, 0.08);
     }
 
+    /* --- doc panel --- */
+
+    .doc-panel {
+      padding: 12px 18px;
+      border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .doc-description {
+      font-size: 13px;
+      color: #444;
+      line-height: 1.5;
+      margin: 0;
+    }
+
+    .doc-section {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 6px;
+    }
+
+    .doc-label {
+      font-size: 9px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #999;
+      width: 70px;
+      flex-shrink: 0;
+    }
+
+    .doc-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+
+    .doc-pill {
+      font-size: 10px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      padding: 1px 6px;
+      border-radius: 3px;
+      white-space: nowrap;
+    }
+
+    .doc-pill.listen {
+      color: #2e7d32;
+      background: rgba(46, 125, 50, 0.08);
+    }
+
+    .doc-pill.emit {
+      color: #c62828;
+      background: rgba(198, 40, 40, 0.08);
+    }
+
+    .doc-pill.effect {
+      color: #1565c0;
+      background: rgba(21, 101, 192, 0.08);
+    }
+
+    .doc-command {
+      font-size: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-weight: 600;
+      color: #7b4fa5;
+    }
+
+    .doc-alias {
+      font-size: 10px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: #999;
+    }
+
+    .doc-deps {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .doc-dep {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      background: none;
+      border: 1px solid rgba(0, 0, 0, 0.06);
+      border-radius: 4px;
+      padding: 3px 8px;
+      cursor: pointer;
+      text-align: left;
+    }
+
+    .doc-dep:hover {
+      background: rgba(0, 0, 0, 0.03);
+      border-color: rgba(0, 0, 0, 0.12);
+    }
+
+    .dep-name {
+      font-size: 11px;
+      font-weight: 500;
+      color: #333;
+    }
+
+    .dep-key {
+      font-size: 9px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: #aaa;
+    }
+
+    .doc-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .doc-link {
+      font-size: 11px;
+      color: #1565c0;
+      text-decoration: none;
+    }
+
+    .doc-link:hover {
+      text-decoration: underline;
+    }
+
+    /* --- body --- */
+
     .modal-body {
       flex: 1;
       overflow-y: auto;
@@ -249,8 +461,10 @@ export class BeeInspectorComponent {
   contentBase = input('')
   rootSig = input('')
   kind = input<string>('bee')
+  doc = input<BeeDocEntry | undefined>(undefined)
   visible = input(false)
   close = output<void>()
+  navigateSig = output<string>()
 
   #store = inject(DcpStore)
 
@@ -263,9 +477,17 @@ export class BeeInspectorComponent {
   #byteSize = signal(0)
 
   displayName = computed(() => {
+    const d = this.doc()
+    if (d?.className) return d.className
     const src = this.source()
     const match = src.match(/class\s+([A-Za-z0-9_]+)\s+extends/)
     return match?.[1] ?? this.signature().slice(0, 16) + '...'
+  })
+
+  depEntries = computed(() => {
+    const d = this.doc()
+    if (!d?.deps) return []
+    return Object.entries(d.deps).map(([name, key]) => ({ name, key }))
   })
 
   fileSize = computed(() => {

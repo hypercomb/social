@@ -1,6 +1,6 @@
 // diamond-core-processor/src/app/tree-view/tree-row.component.ts
 
-import { Component, input, output } from '@angular/core'
+import { Component, computed, input, output } from '@angular/core'
 import { ToggleComponent } from './toggle.component'
 import { DiamondIconComponent } from './diamond-icon.component'
 import type { TreeNode } from '../core/tree-node'
@@ -27,6 +27,9 @@ import type { TreeNode } from '../core/tree-node'
           <span class="lineage">{{ node().lineage }}/</span>
         }
         <span class="name">{{ node().name }}</span>
+        @if (description()) {
+          <span class="description">{{ description() }}</span>
+        }
       </button>
 
       @if (node().signature) {
@@ -72,6 +75,7 @@ import type { TreeNode } from '../core/tree-node'
       flex: 1;
       min-width: 0;
       text-align: left;
+      flex-wrap: wrap;
     }
 
     .name {
@@ -81,6 +85,16 @@ import type { TreeNode } from '../core/tree-node'
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+    }
+
+    .description {
+      font-size: 10px;
+      color: #999;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      width: 100%;
+      line-height: 1.2;
     }
 
     .lineage {
@@ -140,4 +154,9 @@ export class TreeRowComponent {
   toggle = output<TreeNode>()
   open = output<TreeNode>()
   expandToggle = output<TreeNode>()
+
+  description = computed(() => {
+    const n = this.node()
+    return n.doc?.description || n.layerDocs?.description || ''
+  })
 }

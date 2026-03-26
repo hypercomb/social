@@ -9,6 +9,25 @@ export interface AuditResult {
   meetsThreshold: boolean
 }
 
+export interface BeeDocEntry {
+  className: string
+  kind: 'drone' | 'worker' | 'queen' | 'bee'
+  description: string
+  effects: string[]
+  listens: string[]
+  emits: string[]
+  deps: Record<string, string>
+  grammar: { example: string; meaning?: string }[]
+  links: { label: string; url: string; purpose?: string }[]
+  command: string | null
+  aliases: string[]
+}
+
+export interface LayerDocs {
+  description?: string
+  bees?: Record<string, BeeDocEntry>
+}
+
 export interface TreeNode {
   id: string
   name: string
@@ -21,4 +40,6 @@ export interface TreeNode {
   loaded: boolean
   depth: number
   audit?: AuditResult
+  doc?: BeeDocEntry
+  layerDocs?: LayerDocs
 }

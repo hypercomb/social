@@ -208,6 +208,107 @@ const toArrayBuffer = (bytes: Uint8Array): ArrayBuffer => {
 const isSig = (v: string): boolean =>
   /^[a-f0-9]{64}$/i.test(v)
 
+// -------------------------------------------------
+// bee doc extraction (from TypeScript source)
+// -------------------------------------------------
+
+interface BeeDocEntry {
+  className: string
+  kind: 'drone' | 'worker' | 'queen' | 'bee'
+  description: string
+  effects: string[]
+  listens: string[]
+  emits: string[]
+  deps: Record<string, string>
+  grammar: { example: string; meaning?: string }[]
+  links: { label: string; url: string; purpose?: string }[]
+  command: string | null
+  aliases: string[]
+}
+
+const extractBeeDoc = (sourceText: string): BeeDocEntry | null => {
+  // class name + kind from extends clause
+  const classMatch = sourceText.match(
+    /export\s+class\s+(\w+)\s+extends\s+(QueenBee|Worker|Drone|Bee)\b/
+  )
+  if (!classMatch) return null
+
+  const className = classMatch[1]
+  const extendsName = classMatch[2]
+  const kind: BeeDocEntry['kind'] =
+    extendsName === 'QueenBee' ? 'queen'
+    : extendsName === 'Drone' ? 'drone'
+    : extendsName === 'Worker' ? 'worker'
+    : 'bee'
+
+  // description — single-line or multi-line string literal
+  const descMatch = sourceText.match(
+    /(?:override\s+)?description\s*=\s*\n?\s*['"`]([^'"`]+)['"`]/
+  )
+
+  // effects array
+  const effectsMatch = sourceText.match(
+    /(?:override\s+)?effects\s*=\s*\[([^\]]*)\]/
+  )
+  const effects = effectsMatch
+    ? [...effectsMatch[1].matchAll(/['"]([^'"]+)['"]/g)].map(m => m[1])
+    : []
+
+  // listens array (may span multiple lines)
+  const listensMatch = sourceText.match(
+    /(?:override\s+)?listens\s*=\s*\[([\s\S]*?)\]/
+  )
+  const listens = listensMatch
+    ? [...listensMatch[1].matchAll(/['"]([^'"]+)['"]/g)].map(m => m[1])
+    : []
+
+  // emits array (may span multiple lines)
+  const emitsMatch = sourceText.match(
+    /(?:override\s+)?emits\s*=\s*\[([\s\S]*?)\]/
+  )
+  const emits = emitsMatch
+    ? [...emitsMatch[1].matchAll(/['"]([^'"]+)['"]/g)].map(m => m[1])
+    : []
+
+  // deps object (may span multiple lines)
+  const depsMatch = sourceText.match(
+    /(?:override\s+)?deps\s*=\s*\{([\s\S]*?)\}/
+  )
+  const deps: Record<string, string> = {}
+  if (depsMatch) {
+    for (const m of depsMatch[1].matchAll(/(\w+)\s*:\s*['"]([^'"]+)['"]/g)) {
+      deps[m[1]] = m[2]
+    }
+  }
+
+  // queen: command
+  const cmdMatch = sourceText.match(
+    /(?:readonly\s+)?command\s*=\s*['"]([^'"]+)['"]/
+  )
+
+  // queen: aliases
+  const aliasMatch = sourceText.match(
+    /(?:override\s+)?(?:readonly\s+)?aliases\s*=\s*\[([^\]]*)\]/
+  )
+  const aliases = aliasMatch
+    ? [...aliasMatch[1].matchAll(/['"]([^'"]+)['"]/g)].map(m => m[1])
+    : []
+
+  return {
+    className,
+    kind,
+    description: descMatch?.[1]?.trim() ?? '',
+    effects,
+    listens,
+    emits,
+    deps,
+    grammar: [],
+    links: [],
+    command: cmdMatch?.[1] ?? null,
+    aliases,
+  }
+}
+
 const jsFileName = (sig: string): string => `${sig}.js`
 
 const writeSigJsFile = (dir: string, sig: string, bytes: Uint8Array): void => {
@@ -324,16 +425,36 @@ const buildLayersFromTree = async (
   node: DirNode,
   resourcesByDir: Map<string, { bees: string[]; deps: string[] }>,
   out: Map<string, string>,
-  rootDependencies: string[]
+  rootDependencies: string[],
+  docsByDir: Map<string, Record<string, BeeDocEntry>>
 ): Promise<string> => {
   const layers: string[] = []
   for (const c of node.children) {
-    layers.push(await buildLayersFromTree(c, resourcesByDir, out, rootDependencies))
+    layers.push(await buildLayersFromTree(c, resourcesByDir, out, rootDependencies, docsByDir))
   }
 
   const entry = resourcesByDir.get(node.rel) ?? { bees: [], deps: [] }
 
-  const layer = {
+  // build docs block for this layer
+  const beeDocs = docsByDir.get(node.rel)
+
+  // read optional _doc.txt for folder-level description
+  let folderDescription = ''
+  if (node.rel) {
+    const docFile = join(SRC_ROOT, node.rel, '_doc.txt')
+    if (existsSync(docFile)) {
+      folderDescription = readFileSync(docFile, 'utf8').trim()
+    }
+  }
+
+  const docs = (beeDocs && Object.keys(beeDocs).length > 0) || folderDescription
+    ? {
+        ...(folderDescription ? { description: folderDescription } : {}),
+        ...(beeDocs && Object.keys(beeDocs).length > 0 ? { bees: beeDocs } : {}),
+      }
+    : undefined
+
+  const layer: Record<string, unknown> = {
     version: 1,
     name: node.rel.split('/').pop() || 'root',
     rel: node.rel,
@@ -341,6 +462,8 @@ const buildLayersFromTree = async (
     dependencies: node.rel ? [] : rootDependencies,
     layers,
   }
+
+  if (docs) layer.docs = docs
 
   const { sig, json } = await signJson(layer)
   out.set(sig, json)
@@ -595,8 +718,24 @@ const main = async (): Promise<void> => {
   }
   console.log(`[build-module] class-to-dep index: ${classToDepSig.size} classes across ${dependencyBytes.size} namespaces`)
 
+  // pre-extract docs from ALL source files that extend Bee/Drone/Worker/QueenBee
+  // (queens are bundled into namespace deps, not built as individual bees,
+  //  so we extract docs from source before compilation for all bee types)
+  const queenDocsByDir = new Map<string, Record<string, BeeDocEntry>>()
+  for (const src of deps) {
+    const tsSource = readFileSync(src.entry, 'utf8')
+    const doc = extractBeeDoc(tsSource)
+    if (doc && doc.kind === 'queen') {
+      const dirDocs = queenDocsByDir.get(src.relDir) ?? {}
+      // queens don't have individual sigs — key by className
+      dirDocs[`queen:${doc.className}`] = doc
+      queenDocsByDir.set(src.relDir, dirDocs)
+    }
+  }
+
   // bees — extract deps from compiled output and map to dep sigs
   const beeDepsMap = new Map<string, string[]>()
+  const docsByDir = new Map<string, Record<string, BeeDocEntry>>()
   const beeExternals = [...PLATFORM_EXTERNALS, ...allSpecifiers]
   let beeCacheHits = 0
   let beeCacheMisses = 0
@@ -630,6 +769,15 @@ const main = async (): Promise<void> => {
     resourceBytes.set(sig, bytes)
     addToBucket(resourcesByDir, src.relDir, jsFileName(sig), 'bee')
 
+    // Extract doc metadata from TypeScript source (pre-compilation, sig-safe)
+    const tsSource = readFileSync(src.entry, 'utf8')
+    const beeDoc = extractBeeDoc(tsSource)
+    if (beeDoc) {
+      const dirDocs = docsByDir.get(src.relDir) ?? {}
+      dirDocs[sig] = beeDoc
+      docsByDir.set(src.relDir, dirDocs)
+    }
+
     // Extract deps = { ... } from compiled output, map IoC keys to dep sigs
     const text = new TextDecoder().decode(bytes)
     const depSigs = new Set<string>()
@@ -651,8 +799,20 @@ const main = async (): Promise<void> => {
 
   // --- Phase 4: layers + manifest (always regenerated, cheap) ---
 
+  // merge queen docs into docsByDir (queens are keyed by className, not sig)
+  for (const [dir, queenDocs] of queenDocsByDir) {
+    const dirDocs = docsByDir.get(dir) ?? {}
+    Object.assign(dirDocs, queenDocs)
+    docsByDir.set(dir, dirDocs)
+  }
+
   const tree = readDirTree(SRC_ROOT, '')
-  const rootLayerSig = await buildLayersFromTree(tree, resourcesByDir, layers, rootDependencies)
+  const rootLayerSig = await buildLayersFromTree(tree, resourcesByDir, layers, rootDependencies, docsByDir)
+
+  // report doc extraction stats
+  let docCount = 0
+  for (const dirDocs of docsByDir.values()) docCount += Object.keys(dirDocs).length
+  console.log(`[build-module] docs: ${docCount} bee doc(s) extracted across ${docsByDir.size} lineage(s)`)
 
   // write package
   const rootDir = join(DIST_ROOT, rootLayerSig)

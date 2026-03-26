@@ -5,7 +5,7 @@ import { SignatureService } from '@hypercomb/core'
 import { AuditorService } from './auditor.service'
 import { DcpInstallerService, type InstallProgress } from './dcp-installer.service'
 import { DcpStore } from './dcp-store'
-import type { AuditResult, TreeNode, TreeNodeKind } from './tree-node'
+import type { AuditResult, BeeDocEntry, LayerDocs, TreeNode, TreeNodeKind } from './tree-node'
 
 /** PascalCase → 'lower case words' (e.g. MeshAdapterDrone → mesh adapter drone) */
 function humanize(name: string): string {
@@ -24,6 +24,7 @@ type LayerJson = {
   dependencies?: string[]
   layers?: string[]
   children?: string[]
+  docs?: LayerDocs
 }
 
 @Injectable({ providedIn: 'root' })
@@ -114,8 +115,13 @@ export class TreeResolverService {
       parent.children.push(child)
     }
 
+    const beeDocs = layer.docs?.bees
+
     for (const beeSig of beeSigs) {
-      const { kind: beeKind, className } = await this.#detectBeeInfo(beeSig)
+      const doc = beeDocs?.[beeSig]
+      const { kind: beeKind, className } = doc
+        ? { kind: doc.kind as TreeNodeKind, className: doc.className }
+        : await this.#detectBeeInfo(beeSig)
       const beeNode: TreeNode = {
         id: beeSig,
         name: className ? humanize(className) : beeSig.slice(0, 12) + '...',
@@ -126,9 +132,30 @@ export class TreeResolverService {
         children: [],
         expanded: false,
         loaded: true,
-        depth: parent.depth + 1
+        depth: parent.depth + 1,
+        doc,
       }
       parent.children.push(beeNode)
+    }
+
+    // add queen docs (keyed by "queen:ClassName", no individual sig)
+    if (beeDocs) {
+      for (const [key, doc] of Object.entries(beeDocs)) {
+        if (!key.startsWith('queen:')) continue
+        const queenNode: TreeNode = {
+          id: `${parent.id}:${key}`,
+          name: humanize(doc.className),
+          kind: 'bee',
+          lineage: parent.lineage,
+          parentId: parent.id,
+          children: [],
+          expanded: false,
+          loaded: true,
+          depth: parent.depth + 1,
+          doc,
+        }
+        parent.children.push(queenNode)
+      }
     }
 
     // add deps whose namespace matches this layer's lineage
@@ -226,7 +253,8 @@ export class TreeResolverService {
       children: [],
       expanded: false,
       loaded: false,
-      depth
+      depth,
+      layerDocs: layer.docs,
     }
   }
 

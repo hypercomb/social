@@ -7,7 +7,7 @@ import { TreeViewComponent } from '../tree-view/tree-view.component'
 import { AuditorSettingsComponent } from '../settings/auditor-settings.component'
 import { BeeInspectorComponent } from '../tree-view/bee-inspector.component'
 import { DiamondIconComponent } from '../tree-view/diamond-icon.component'
-import type { TreeNode, TreeNodeKind } from '../core/tree-node'
+import type { BeeDocEntry, TreeNode, TreeNodeKind } from '../core/tree-node'
 
 const DOMAINS_KEY = 'dcp.domains'
 
@@ -49,6 +49,7 @@ export class HomeComponent {
     { key: 'dependency', diamond: 'dependency' }
   ]
   readonly inspectSection = signal<DomainSection | null>(null)
+  readonly inspectDoc = signal<BeeDocEntry | undefined>(undefined)
 
   // all nodes flattened for toggle lookups
   readonly toggleMap = computed(() => {
@@ -211,6 +212,7 @@ export class HomeComponent {
       this.inspectBee.set(node.signature)
       this.inspectKind.set(node.kind)
       this.inspectSection.set(section ?? null)
+      this.inspectDoc.set(node.doc)
     } else {
       this.onExpandToggle(node)
     }
@@ -220,6 +222,27 @@ export class HomeComponent {
     this.inspectBee.set(null)
     this.inspectKind.set('bee')
     this.inspectSection.set(null)
+    this.inspectDoc.set(undefined)
+  }
+
+  onNavigateSig(sig: string): void {
+    // find a node with this signature in any section
+    for (const section of this.sections()) {
+      const node = this.#findNodeBySig(section.items, sig)
+      if (node) {
+        this.onOpen(node)
+        return
+      }
+    }
+  }
+
+  #findNodeBySig(nodes: TreeNode[], sig: string): TreeNode | null {
+    for (const n of nodes) {
+      if (n.signature === sig) return n
+      const found = this.#findNodeBySig(n.children, sig)
+      if (found) return found
+    }
+    return null
   }
 
   // auto-load all domains
