@@ -126,25 +126,10 @@ async function main() {
   const essentialsSrc = join(ROOT, 'hypercomb-essentials', 'src')
   const essentialsDir = join(ROOT, 'hypercomb-essentials')
 
-  if (target === 'dev') {
-    // Dev: needs tsup build (dist/index.js) for direct imports via file: link
-    const essentialsMarker = join(ROOT, 'hypercomb-essentials', 'dist', 'index.js')
-    if (coreDirty || needsBuild(state, 'essentials', essentialsSrc, essentialsMarker)) {
-      console.log(`${TAG} building essentials (prepare + tsup)...`)
-      run('npm run prepare', essentialsDir)
-      run('npm run build', essentialsDir, true) // DTS may fail on pixi.js types; ESM/CJS still succeed
-      // Only record if the output actually exists
-      if (existsSync(join(essentialsDir, 'dist', 'index.js'))) {
-        recordBuild(state, 'essentials', essentialsSrc)
-      }
-    } else {
-      console.log(`${TAG} essentials — up to date`)
-    }
-  }
-
-  if (target === 'web') {
-    // Web: needs module build (signature-addressed bundles). build-module.ts wipes dist/,
-    // so tsup output doesn't survive — and web doesn't need it (loads from OPFS at runtime).
+  // Module build (signature-addressed bundles) + web vendor staging.
+  // Runs for both targets so web's public/content/ is always pre-staged.
+  // Must run BEFORE the dev tsup build because build-module.ts wipes dist/.
+  {
     const moduleUpToDate = !coreDirty
       && hasModuleOutput()
       && !needsBuild(state, 'essentials:module', essentialsSrc)
@@ -179,6 +164,23 @@ async function main() {
       state['web:pixi-vendor'] = { builtAt: Date.now() }
     } else {
       console.log(`${TAG} pixi vendor — up to date`)
+    }
+  }
+
+  if (target === 'dev') {
+    // Dev: needs tsup build (dist/index.js) for direct imports via file: link.
+    // Runs after module build — tsup overwrites dist/ but modules are already copied to web.
+    const essentialsMarker = join(ROOT, 'hypercomb-essentials', 'dist', 'index.js')
+    if (coreDirty || needsBuild(state, 'essentials', essentialsSrc, essentialsMarker)) {
+      console.log(`${TAG} building essentials (prepare + tsup)...`)
+      run('npm run prepare', essentialsDir)
+      run('npm run build', essentialsDir, true) // DTS may fail on pixi.js types; ESM/CJS still succeed
+      // Only record if the output actually exists
+      if (existsSync(join(essentialsDir, 'dist', 'index.js'))) {
+        recordBuild(state, 'essentials', essentialsSrc)
+      }
+    } else {
+      console.log(`${TAG} essentials — up to date`)
     }
   }
 
