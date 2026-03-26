@@ -10,23 +10,25 @@ import type { TreeNode } from '../core/tree-node'
   imports: [TreeRowComponent],
   template: `
     @for (node of nodes(); track node.id) {
-      <dcp-tree-row
-        [node]="node"
-        [enabled]="isEnabled(node)"
-        [effectivelyEnabled]="isEffectivelyEnabled(node)"
-        [hasChildren]="node.children.length > 0 || !node.loaded"
-        (toggle)="toggle.emit($event)"
-        (open)="open.emit($event)"
-        (expandToggle)="expandToggle.emit($event)" />
-
-      @if (node.expanded && node.children.length) {
-        <dcp-tree-view
-          [nodes]="node.children"
-          [toggleState]="toggleState()"
-          [nodeMap]="nodeMap()"
+      @if (!isEmptyFolder(node)) {
+        <dcp-tree-row
+          [node]="node"
+          [enabled]="isEnabled(node)"
+          [effectivelyEnabled]="isEffectivelyEnabled(node)"
+          [hasChildren]="node.children.length > 0 || !node.loaded"
           (toggle)="toggle.emit($event)"
           (open)="open.emit($event)"
           (expandToggle)="expandToggle.emit($event)" />
+
+        @if (node.expanded && node.children.length) {
+          <dcp-tree-view
+            [nodes]="node.children"
+            [toggleState]="toggleState()"
+            [nodeMap]="nodeMap()"
+            (toggle)="toggle.emit($event)"
+            (open)="open.emit($event)"
+            (expandToggle)="expandToggle.emit($event)" />
+        }
       }
     }
   `,
@@ -40,6 +42,10 @@ export class TreeViewComponent {
   toggle = output<TreeNode>()
   open = output<TreeNode>()
   expandToggle = output<TreeNode>()
+
+  isEmptyFolder(node: TreeNode): boolean {
+    return (node.kind === 'layer' || node.kind === 'domain') && node.loaded && node.children.length === 0
+  }
 
   isEnabled(node: TreeNode): boolean {
     return this.toggleState().get(node.id) ?? true

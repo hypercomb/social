@@ -628,6 +628,11 @@ const main = async (): Promise<void> => {
       console.log(`[build-module] Merkle root unchanged — skipping build entirely`)
       console.log(`[build-module] root signature: ${cache.rootLayerSig}`)
       console.log(`[build-module] completed in ${elapsed}s`)
+
+      // still deploy if not --local (output exists but may not be on Azure yet)
+      if (!process.argv.includes('--local')) {
+        deployToAzure(cache.rootLayerSig)
+      }
       return
     }
 

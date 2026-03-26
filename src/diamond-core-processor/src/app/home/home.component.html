@@ -54,7 +54,7 @@
     @for (section of filteredSections(); track section.domain) {
       <section class="domain-section">
         <div class="domain-header">
-          <span class="domain-name">{{ section.domainName }}</span>
+          <span class="domain-url" [title]="section.domain">{{ section.domain }}</span>
           <button class="remove" (click)="removeDomain(section.domain)">&times;</button>
         </div>
 
