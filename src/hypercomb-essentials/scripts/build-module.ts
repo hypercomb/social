@@ -442,10 +442,11 @@ const buildLayersFromTree = async (
   out: Map<string, string>,
   rootDependencies: string[],
   docsByDir: Map<string, Record<string, BeeDocEntry>>
-): Promise<string> => {
+): Promise<string | null> => {
   const layers: string[] = []
   for (const c of node.children) {
-    layers.push(await buildLayersFromTree(c, resourcesByDir, out, rootDependencies, docsByDir))
+    const childSig = await buildLayersFromTree(c, resourcesByDir, out, rootDependencies, docsByDir)
+    if (childSig) layers.push(childSig)
   }
 
   const entry = resourcesByDir.get(node.rel) ?? { bees: [], deps: [] }
@@ -468,6 +469,8 @@ const buildLayersFromTree = async (
         ...(beeDocs && Object.keys(beeDocs).length > 0 ? { bees: beeDocs } : {}),
       }
     : undefined
+
+  if (!entry.bees.length && !entry.deps.length && !layers.length && node.rel) return null
 
   const layer: Record<string, unknown> = {
     version: 1,

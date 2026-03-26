@@ -56,19 +56,22 @@ export class DcpInstallerService {
     const bees = manifest.bees ?? []
     const deps = manifest.dependencies ?? []
 
-    // 2) install layers
+    // 2) purge stale layers from previous installs
+    await this.#purgeStale(domainDir, new Set(layers))
+
+    // 3) install layers
     for (let i = 0; i < layers.length; i++) {
       onProgress?.({ phase: 'layers', current: i + 1, total: layers.length })
       await this.#installFile(domainDir, `${endpoint}/__layers__/${layers[i]}.json`, layers[i], layers[i])
     }
 
-    // 3) install bees
+    // 4) install bees
     for (let i = 0; i < bees.length; i++) {
       onProgress?.({ phase: 'bees', current: i + 1, total: bees.length })
       await this.#installFile(this.#store.bees, `${endpoint}/__bees__/${bees[i]}.js`, bees[i], `${bees[i]}.js`)
     }
 
-    // 4) install dependencies
+    // 5) install dependencies
     for (let i = 0; i < deps.length; i++) {
       onProgress?.({ phase: 'dependencies', current: i + 1, total: deps.length })
       await this.#installFile(this.#store.dependencies, `${endpoint}/__dependencies__/${deps[i]}.js`, deps[i], `${deps[i]}.js`)
@@ -80,6 +83,18 @@ export class DcpInstallerService {
   // -------------------------------------------------
   // internal
   // -------------------------------------------------
+
+  async #purgeStale(dir: FileSystemDirectoryHandle, liveSigs: Set<string>): Promise<void> {
+    const stale: string[] = []
+    for await (const name of (dir as any).keys()) {
+      const sig = name.replace(/\.json$/i, '').replace(/\.js$/i, '')
+      if (!liveSigs.has(sig)) stale.push(name)
+    }
+    for (const name of stale) {
+      try { await dir.removeEntry(name) } catch { /* ignore */ }
+    }
+    if (stale.length) console.log(`[dcp-installer] purged ${stale.length} stale layer(s)`)
+  }
 
   async #fetchManifest(endpoint: string): Promise<InstallManifest | null> {
     try {
