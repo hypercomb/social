@@ -1,6 +1,6 @@
 // diamond-core-processor/src/app/detail/detail-view.component.ts
 
-import { Component, inject, input, output, computed } from '@angular/core'
+import { Component, inject, input, output, computed, signal } from '@angular/core'
 import { DomSanitizer, type SafeResourceUrl } from '@angular/platform-browser'
 import type { TreeNode } from '../core/tree-node'
 
@@ -18,6 +18,7 @@ import type { TreeNode } from '../core/tree-node'
         <h2 class="detail-name">{{ node().name }}</h2>
         @if (node().signature) {
           <span class="detail-sig">{{ node().signature }}</span>
+          <button class="copy-sig" (click)="copySig()">{{ sigCopied() ? '&#10003;' : '&#x2398;' }}</button>
         }
         <span class="detail-kind">{{ node().kind }}</span>
         @if (node().audit) {
@@ -96,6 +97,23 @@ import type { TreeNode } from '../core/tree-node'
       word-break: break-all;
     }
 
+    .copy-sig {
+      background: none;
+      border: 1px solid rgba(0, 0, 0, 0.1);
+      border-radius: 4px;
+      padding: 2px 6px;
+      cursor: pointer;
+      font-size: 13px;
+      color: #888;
+      line-height: 1;
+      flex-shrink: 0;
+    }
+
+    .copy-sig:hover {
+      background: rgba(0, 0, 0, 0.04);
+      color: #444;
+    }
+
     .detail-kind {
       font-size: 11px;
       font-weight: 700;
@@ -140,11 +158,22 @@ export class DetailViewComponent {
   back = output<void>()
 
   #sanitizer = inject(DomSanitizer)
+  sigCopied = signal(false)
 
   breadcrumb = computed(() => {
     const lineage = this.node().lineage
     return lineage ? `/ ${lineage.replace(/\//g, ' / ')}` : '/ root'
   })
+
+  async copySig(): Promise<void> {
+    const sig = this.node().signature
+    if (!sig) return
+    try {
+      await navigator.clipboard.writeText(sig)
+      this.sigCopied.set(true)
+      setTimeout(() => this.sigCopied.set(false), 900)
+    } catch { /* ignore */ }
+  }
 
   iframeSrc = computed((): SafeResourceUrl => {
     const lineage = this.node().lineage
