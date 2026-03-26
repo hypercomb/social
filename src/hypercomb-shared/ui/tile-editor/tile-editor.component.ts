@@ -11,6 +11,7 @@ import {
   type OnDestroy,
 } from '@angular/core'
 import { FormsModule } from '@angular/forms'
+import { EffectBus } from '@hypercomb/core'
 import { fromRuntime } from '../../core/from-runtime'
 
 import type { TileEditorService } from
@@ -19,6 +20,10 @@ import type { ImageEditorService } from
   '@hypercomb/essentials/diamondcoreprocessor.com/editor/image-editor.service'
 import type { LinkSafetyService } from
   '@hypercomb/essentials/diamondcoreprocessor.com/safety/link-safety.service'
+
+// Neon preset core colors — mirrors NEON_PRESETS in hex-overlay.shader.ts
+// Duplicated here to avoid pulling pixi.js into the Angular bundle.
+const NEON_CORES = [0x00ffff, 0xff00ff, 0x00ff88, 0xffcc00, 0x8844ff]
 
 @Component({
   selector: 'hc-tile-editor',
@@ -89,6 +94,8 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
   public backgroundColorValue = ''
   public isFlat = false
   public isLinked = true
+  public neonIndex = loadNeonIndex()
+  public readonly neonColors = NEON_CORES.map(c => ({ hex: '#' + c.toString(16).padStart(6, '0') }))
   public cameraActive = false
   public cameraFlat = false
   #stream: MediaStream | null = null
@@ -103,6 +110,7 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
       this.linkValue = this.editorService?.link ?? ''
       this.borderColorValue = this.editorService?.borderColor || '#c8975a'
       this.backgroundColorValue = this.editorService?.backgroundColor || '#1e1e1e'
+      this.neonIndex = loadNeonIndex()
 
       // ensure defaults are persisted in properties
       if (!this.editorService?.borderColor) this.editorService.setBorderColor(this.borderColorValue)
@@ -326,6 +334,14 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
     this.cameraFlat = !this.cameraFlat
   }
 
+  // ── neon color ────────────────────────────────────────────────
+
+  readonly selectNeon = (index: number): void => {
+    this.neonIndex = index
+    localStorage.setItem('hc:neon-color', String(index))
+    EffectBus.emit('overlay:neon-color', { index })
+  }
+
   // ── search ────────────────────────────────────────────────────
 
   readonly searchGoogle = (): void => {
@@ -360,4 +376,13 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
     target?.removeEventListener('change', this.#onEditorChange)
     this.imageEditor?.destroy()
   }
+}
+
+// ── helpers ──────────────────────────────────────────────────
+
+function loadNeonIndex(): number {
+  const stored = localStorage.getItem('hc:neon-color')
+  if (!stored) return 0
+  const n = parseInt(stored, 10)
+  return (n >= 0 && n < NEON_CORES.length) ? n : 0
 }

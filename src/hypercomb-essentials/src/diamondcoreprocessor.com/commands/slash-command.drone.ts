@@ -144,6 +144,18 @@ class FormatSlashProvider implements SlashCommandProvider {
   }
 }
 
+class NeonProvider implements SlashCommandProvider {
+  readonly name = 'neon-provider'
+  readonly priority = 100
+  readonly commands: SlashCommand[] = [
+    { name: 'neon', description: 'Toggle the neon hover color toolbar' }
+  ]
+
+  execute(): void {
+    EffectBus.emit('neon:toggle-toolbar', {})
+  }
+}
+
 class LlmProvider implements SlashCommandProvider {
   readonly name = 'llm-provider'
   readonly priority = 100
@@ -172,5 +184,6 @@ _slashCommands.addProvider(new MeetingProvider())
 _slashCommands.addProvider(new DebugProvider())
 _slashCommands.addProvider(new DeleteProvider())
 _slashCommands.addProvider(new FormatSlashProvider())
+_slashCommands.addProvider(new NeonProvider())
 _slashCommands.addProvider(new LlmProvider())
 window.ioc.register('@diamondcoreprocessor.com/SlashCommandDrone', _slashCommands)

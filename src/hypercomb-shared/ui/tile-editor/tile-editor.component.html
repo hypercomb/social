@@ -107,6 +107,21 @@
             />
           </label>
         </div>
+
+        <div class="accent-row">
+          <span class="field-label">hover accent</span>
+          <span class="accent-swatches">
+            @for (color of neonColors; track color.hex; let i = $index) {
+              <button
+                type="button"
+                class="accent-swatch"
+                [class.active]="i === neonIndex"
+                [style.background]="color.hex"
+                (click)="selectNeon(i)"
+              ></button>
+            }
+          </span>
+        </div>
       </div>
     </div>
 

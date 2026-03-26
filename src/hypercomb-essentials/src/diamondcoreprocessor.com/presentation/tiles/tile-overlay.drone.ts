@@ -109,7 +109,7 @@ export class TileOverlayDrone extends Drone {
     'render:set-orientation', 'render:geometry-changed',
     'navigation:guard-start', 'navigation:guard-end',
     'mesh:public-changed', 'editor:mode', 'selection:changed',
-    'overlay:register-action', 'overlay:unregister-action',
+    'overlay:register-action', 'overlay:unregister-action', 'overlay:neon-color',
     'drop:dragging', 'drop:pending',
   ]
   protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'drop:target']
@@ -133,6 +133,10 @@ export class TileOverlayDrone extends Drone {
       this.onEffect<{ name: string }>('overlay:unregister-action', ({ name }) => {
         this.#registeredDescriptors.delete(name)
         this.#rebuildActiveProfile()
+      })
+
+      this.onEffect<{ index: number }>('overlay:neon-color', ({ index }) => {
+        this.#hexBg?.setColorIndex(index)
       })
 
       // ── Pixi host ────────────────────────────────────────────────
