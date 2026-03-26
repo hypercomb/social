@@ -22,7 +22,6 @@ const ACTIONS: OverlayActionDescriptor[] = [
   // ── private profile ──
   { name: 'add-sub', fontChar: '~', x: -14, y: ICON_Y, hoverTint: 0xa8ffd8, profile: 'private' },
   { name: 'edit', fontChar: '2', x: -2, y: ICON_Y, hoverTint: 0xc8d8ff, profile: 'private' },
-  { name: 'remove', fontChar: 'Q', x: 7.9375, y: ICON_Y, hoverTint: 0xffc8c8, profile: 'private' },
   {
     name: 'search',
     svgMarkup: SEARCH_ICON_SVG,
@@ -39,7 +38,7 @@ const ACTIONS: OverlayActionDescriptor[] = [
 ]
 
 // ── Action names this bee handles ──────────────────────────────────
-const HANDLED_ACTIONS = new Set(['edit', 'remove', 'search', 'add-sub', 'hide', 'adopt', 'block'])
+const HANDLED_ACTIONS = new Set(['edit', 'search', 'add-sub', 'hide', 'adopt', 'block'])
 
 type TileActionPayload = { action: string; label: string; q: number; r: number; index: number }
 
@@ -83,10 +82,6 @@ export class TileActionsDrone extends Drone {
     switch (action) {
       case 'edit':
         // tile:action already emitted by overlay — editor listens for it
-        break
-
-      case 'remove':
-        EffectBus.emit('seed:removed', { seed: label })
         break
 
       case 'search':
