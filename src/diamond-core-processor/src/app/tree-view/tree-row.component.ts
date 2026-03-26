@@ -24,8 +24,8 @@ import type { TreeNode } from '../core/tree-node'
           (clicked)="open.emit(node())" />
 
         <button class="label" (click)="hasChildren() ? expandToggle.emit(node()) : open.emit(node())">
-          @if (node().lineage && node().kind !== 'layer' && node().kind !== 'domain') {
-            <span class="lineage">{{ node().lineage }}</span>
+          @if (lineageDisplay()) {
+            <span class="lineage">{{ lineageDisplay() }}</span>
           }
           <span class="name" [class]="node().kind">{{ node().name }}</span>
           @if (description()) {
@@ -33,8 +33,8 @@ import type { TreeNode } from '../core/tree-node'
           }
         </button>
 
-        @if (kindLabel()) {
-          <span class="kind-label" [class]="node().kind">{{ kindLabel() }}</span>
+        @if (splitClassName()) {
+          <span class="kind-label" [class]="docKind()">{{ splitClassName() }}</span>
         }
 
         @if (node().signature) {
@@ -96,19 +96,6 @@ import type { TreeNode } from '../core/tree-node'
       flex-wrap: wrap;
     }
 
-    .kind-label {
-      font-size: 10px;
-      font-weight: 500;
-      white-space: nowrap;
-      flex-shrink: 0;
-      margin-left: auto;
-    }
-
-    .kind-label.bee { color: #a58b4f; }
-    .kind-label.worker { color: #a54f4f; }
-    .kind-label.drone { color: #a59b4f; }
-    .kind-label.dependency { color: #4fa58b; }
-
     .name {
       font-size: 11px;
       font-weight: 500;
@@ -140,12 +127,25 @@ import type { TreeNode } from '../core/tree-node'
       flex-shrink: 0;
     }
 
+    .kind-label {
+      font-size: 12px;
+      font-weight: 500;
+      white-space: nowrap;
+      flex-shrink: 0;
+      margin-left: auto;
+      color: #a58b4f;
+    }
+
+    .kind-label.worker { color: #a54f4f; }
+    .kind-label.drone { color: #a59b4f; }
+    .kind-label.queen { color: #7b4fa5; }
+    .kind-label.dependency { color: #4fa58b; }
+
     .sig {
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       font-size: 10px;
       color: #bbb;
       flex-shrink: 0;
-      margin-left: auto;
     }
 
     .audit-badge {
@@ -262,10 +262,20 @@ export class TreeRowComponent implements OnInit, OnDestroy {
 
   visible = signal(true)
 
-  kindLabel = computed(() => {
-    const k = this.node().kind
-    if (k === 'bee' || k === 'worker' || k === 'drone' || k === 'dependency') return k
-    return ''
+  docKind = computed(() => this.node().doc?.kind || this.node().kind)
+
+  lineageDisplay = computed(() => {
+    const n = this.node()
+    if (!n.lineage || n.kind === 'layer' || n.kind === 'domain') return ''
+    const parts = n.lineage.split('/')
+    if (parts.length <= 1) return n.lineage + ' /'
+    return parts.slice(0, -1).join('/') + ' / ' + parts[parts.length - 1] + ' /'
+  })
+
+  splitClassName = computed(() => {
+    const name = this.node().doc?.className
+    if (!name) return ''
+    return name.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase()
   })
 
   description = computed(() => {
