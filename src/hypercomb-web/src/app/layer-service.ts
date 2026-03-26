@@ -42,22 +42,14 @@ export class LayerService {
           }
         }
       } catch {
-        // sentinel failed — fall through to direct fetch
+        // sentinel failed — no direct fetch fallback, DCP is the sole gateway
+        console.warn(`[layer-service] sentinel fetch failed for ${requestedSig.slice(0, 12)}`)
       }
+    } else {
+      console.warn(`[layer-service] no sentinel bridge — cannot fetch layer ${requestedSig.slice(0, 12)}`)
     }
 
-    const baseUrl = (parsed?.baseUrl ?? '').trim().replace(/\/+$/, '')
-    const url = `${baseUrl}/${rootSig}/__layers__/${requestedSig}.json`
-
-    const bytes = await this.fetchBytes(url)
-    if (!bytes) return null
-
-    const text = new TextDecoder().decode(bytes).trim()
-    const layer = this.tryParseLayer(text, requestedSig)
-    if (!layer) return null
-
-    await this.writeBytesFile(dir, requestedSig, bytes)
-    return layer
+    return null
   }
 
   private tryReadLayer = async (dir: FileSystemDirectoryHandle, name: string): Promise<LayerFile | null> => {
@@ -110,19 +102,7 @@ export class LayerService {
     await writable.close()
   }
 
-  private fetchBytes = async (url: string): Promise<Uint8Array<ArrayBuffer> | null> => {
-    try {
-      const res = await fetch(url, { cache: 'no-store' })
-      const ct = (res.headers.get('content-type') ?? '').toLowerCase()
-      console.log(`[layer-service] fetch ${url} -> ${res.status} ${ct}`)
-      if (!res.ok) return null
-      if (ct.includes('text/html')) return null
-      const buf: ArrayBuffer = await res.arrayBuffer()
-      return new Uint8Array(buf)
-    } catch {
-      return null
-    }
-  }
+
 }
 
 register('@hypercomb.social/LayerService', new LayerService())

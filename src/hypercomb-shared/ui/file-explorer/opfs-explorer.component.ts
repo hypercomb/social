@@ -313,15 +313,28 @@ export class OpfsExplorerComponent extends hypercomb {
     const sig = this.newName.trim()
     if (!sig) return
 
-    const url = `https://storagehypercomb.blob.core.windows.net/content/__dependencies__/`
-    const res = await fetch(`${url}${sig}`)
+    const bridge = (globalThis as any).__sentinelBridge
+    let bytes: ArrayBuffer | null = null
 
-    if (!res.ok) {
+    if (bridge?.fetchContent) {
+      try {
+        bytes = await bridge.fetchContent(sig, 'dependency', '')
+      } catch {
+        console.error('[opfs-explorer] sentinel fetch failed for dependency', sig)
+      }
+    }
+
+    // Fallback to direct fetch only in dev (no sentinel available)
+    if (!bytes && !bridge) {
+      const url = `https://storagehypercomb.blob.core.windows.net/content/__dependencies__/`
+      const res = await fetch(`${url}${sig}`)
+      if (res.ok) bytes = await res.arrayBuffer()
+    }
+
+    if (!bytes) {
       console.error('failed to fetch dependency', sig)
       return
     }
-
-    const bytes = await res.arrayBuffer()
 
     const root = this.store.opfsRoot
     const depsDir = await root.getDirectoryHandle('__dependencies__', { create: true })
