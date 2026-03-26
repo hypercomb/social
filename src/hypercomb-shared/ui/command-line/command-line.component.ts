@@ -710,7 +710,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       const ctx = this.context()
       if (!ctx.active || ctx.mode === 'select' || this.input.nativeElement.value === '') {
         this.#syncDirection = 'visual'
-        this.input.nativeElement.value = this.#buildSelectValue(selected, this.#shouldTruncate(selected))
+        // Preserve any corded command tail after ']' (e.g., /select[a,b]/cut → /select[a,b,c]/cut)
+        const currentValue = this.input.nativeElement.value
+        const bracketCloseIdx = currentValue.indexOf(']')
+        const tail = bracketCloseIdx >= 0 ? currentValue.slice(bracketCloseIdx + 1) : ''
+        this.input.nativeElement.value = this.#buildSelectValue(selected, this.#shouldTruncate(selected)) + tail
         this.suppressed.set(true)
         this.placeCaretAtEnd()
         this.syncSignalsFromDom()
@@ -733,8 +737,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const selection = get('@diamondcoreprocessor.com/SelectionService') as any
     if (!selection || selection.count === 0) return
     const full = Array.from(selection.selected as Set<string>)
+    // Preserve any corded command tail after ']'
+    const bracketCloseIdx = v.indexOf(']')
+    const tail = bracketCloseIdx >= 0 ? v.slice(bracketCloseIdx + 1) : ''
     this.#syncDirection = 'visual'
-    this.input.nativeElement.value = '/select[' + full.join(',') + ']'
+    this.input.nativeElement.value = '/select[' + full.join(',') + ']' + tail
     this.placeCaretAtEnd()
     this.syncSignalsFromDom()
     this.#syncDirection = 'idle'
