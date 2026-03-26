@@ -61,6 +61,7 @@ import { MeetingVideoDrone } from '@hypercomb/essentials/diamondcoreprocessor.co
 import { MeetingControlsWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/meeting/meeting-controls.worker'
 import { HypercombMeetingDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/meeting/meeting.drone'
 import { MeetingQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/meeting/meeting.queen'
+import { DeleteQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/delete.queen'
 
 const _deps = [
   AxialService,
@@ -106,6 +107,7 @@ const _deps = [
   MeetingControlsWorker,
   HypercombMeetingDrone,
   MeetingQueenBee,
+  DeleteQueenBee,
 ]
 
 void _deps

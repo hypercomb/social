@@ -116,6 +116,21 @@ class DebugProvider implements SlashCommandProvider {
   }
 }
 
+class DeleteProvider implements SlashCommandProvider {
+  readonly name = 'delete-provider'
+  readonly priority = 100
+  readonly commands: SlashCommand[] = [
+    { name: 'delete', description: 'Delete tiles from the current directory', aliases: ['del', 'rm'] }
+  ]
+
+  async execute(_commandName: string, args: string): Promise<void> {
+    const queen = get('@diamondcoreprocessor.com/DeleteQueenBee') as any
+    if (queen?.invoke) {
+      await queen.invoke(args)
+    }
+  }
+}
+
 // ── registration ────────────────────────────────────────
 
 const _slashCommands = new SlashCommandDrone()
@@ -124,4 +139,5 @@ _slashCommands.addProvider(new ClearProvider())
 _slashCommands.addProvider(new KeywordProvider())
 _slashCommands.addProvider(new MeetingProvider())
 _slashCommands.addProvider(new DebugProvider())
+_slashCommands.addProvider(new DeleteProvider())
 window.ioc.register('@diamondcoreprocessor.com/SlashCommandDrone', _slashCommands)

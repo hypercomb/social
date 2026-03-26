@@ -21,6 +21,7 @@ import { SlashCommandBehavior } from './slash-command.behavior'
 
 const BUILTIN_SLASH: { command: { name: string; description: string }; provider: null }[] = [
   { command: { name: 'select', description: 'select tiles for cut/copy/move' }, provider: null },
+  { command: { name: 'delete', description: 'delete selected tiles' }, provider: null },
 ]
 
 /** Matches label:tagName or label:tagName(#color) (plain colon syntax, no brackets). */
@@ -28,6 +29,8 @@ const TAG_ASSIGN_RE = /^([^:]+):([^(]+)(?:\(([^)]+)\))?$/
 
 /** Matches seed:[...] bracket-tag syntax — colon before opening bracket. */
 const BRACKET_TAG_RE = /^([^\[\/!#~]+):\[(.+?)\](.*)$/
+
+const DELETE_CMDS = new Set(['delete', 'del', 'rm'])
 
 const MOVE_ARROW_OFFSETS: Record<string, { dq: number; dr: number }> = {
   ArrowLeft:  { dq: -1, dr:  0 },
@@ -97,6 +100,31 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const ctx = this.context()
     if (!ctx.active || ctx.mode !== 'slash') return ''
     return this.#slashDescriptionMap().get(name) ?? ''
+  }
+
+
+  /**
+   * If the slash raw text represents a delete command with args, return the args portion.
+   * Handles both `/delete name` (space) and `/delete[items` (bracket).
+   * Returns null if this isn't a delete command with args.
+   */
+  #extractDeleteArgs(raw: string): string | null {
+    const spaceIdx = raw.indexOf(' ')
+    const bracketIdx = raw.indexOf('[')
+
+    // space-separated: `/delete name` or `/delete [items`
+    if (spaceIdx > 0 && (bracketIdx < 0 || spaceIdx < bracketIdx)) {
+      const cmd = raw.slice(0, spaceIdx).toLowerCase()
+      if (DELETE_CMDS.has(cmd)) return raw.slice(spaceIdx + 1)
+    }
+
+    // bracket directly after command: `/delete[items`
+    if (bracketIdx > 0) {
+      const cmd = raw.slice(0, bracketIdx).toLowerCase()
+      if (DELETE_CMDS.has(cmd)) return raw.slice(bracketIdx)
+    }
+
+    return null
   }
 
   // Bridge EventTarget-based services to Angular Signals for reactivity
@@ -264,9 +292,29 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       return this.#parseSelectContext(v)
     }
 
+    // /delete[...] bracket mode — provide head/raw per current fragment for intellisense
+    if (v.match(/^\/(delete|del|rm)\[/i)) {
+      return this.#parseDeleteBracketContext(v)
+    }
+
     // '/' prefix enters slash command mode
     if (v.startsWith('/')) {
       const raw = v.slice(1)
+      // detect `/delete ` with space — provide head/raw for the arg fragment
+      const deleteArgs = this.#extractDeleteArgs(raw)
+      if (deleteArgs !== null) {
+        const lastSep = Math.max(deleteArgs.lastIndexOf(','), deleteArgs.lastIndexOf('['))
+        const fragment = lastSep === -1 ? deleteArgs : deleteArgs.slice(lastSep + 1).trimStart()
+        const head = v.slice(0, v.length - fragment.length)
+        return {
+          active: true,
+          mode: 'slash',
+          head,
+          raw: fragment,
+          normalized: this.completions.normalize(fragment),
+          style: 'space'
+        }
+      }
       return {
         active: true,
         mode: 'slash',
@@ -351,7 +399,28 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const ctx = this.context()
     if (!ctx.active) return []
     if (ctx.mode === 'filter') return []
-    if (ctx.mode === 'slash') return this.#slashMatches().map(m => m.command.name)
+    if (ctx.mode === 'slash') {
+      // Check if we're in a delete-args context (both space and bracket syntax)
+      // The context parser already splits head/raw, so head contains the delete prefix.
+      const isDeleteContext = ctx.head.match(/^\/(delete|del|rm)[\s\[]/i)
+      if (isDeleteContext) {
+        // ctx.normalized is the current fragment, already parsed by context
+        // exclude already-chosen items from the head's bracket content
+        const already = new Set<string>()
+        const bracketStart = ctx.head.indexOf('[')
+        if (bracketStart >= 0) {
+          const committed = ctx.head.slice(bracketStart + 1)
+          for (const item of committed.split(',')) {
+            const n = this.completions.normalize(item.trim())
+            if (n) already.add(n)
+          }
+        }
+        let seeds = this.seedNames$()
+        if (already.size) seeds = seeds.filter(n => !already.has(n))
+        return ctx.normalized ? seeds.filter(n => n.startsWith(ctx.normalized)) : seeds
+      }
+      return this.#slashMatches().map(m => m.command.name)
+    }
 
     // plain colon tag mode: suggest tag names from registry
     if (ctx.mode === 'tag') {
@@ -376,7 +445,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
       // operation phase: suggest operation keywords with / prefix
       if (phase === 'operation') {
-        const ops = ['/cut', '/copy', '/move', '/keyword']
+        const ops = ['/cut', '/copy', '/move', '/keyword', '/delete']
         if (!ctx.normalized) return ops
         return ops.filter(o => o.startsWith('/' + ctx.normalized) || o.slice(1).startsWith(ctx.normalized))
       }
@@ -1042,6 +1111,23 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       return
     }
 
+    if (op === 'delete' || op === 'del' || op === 'rm') {
+      const lineage = this.lineage
+      const dir = await lineage.explorerDir()
+      if (dir) {
+        for (const label of labels) {
+          try {
+            await dir.removeEntry(label, { recursive: true })
+            EffectBus.emit('seed:removed', { seed: label })
+          } catch { /* skip */ }
+        }
+      }
+      selection.clear()
+      await new hypercomb().act()
+      this.clear()
+      return
+    }
+
     // No operation — just /select[tiles] → select and show in bar
     this.#collapseToSelect(labels)
   }
@@ -1364,8 +1450,17 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       return
     }
 
-    // slash mode: fill command name (no auto brackets or trailing chars)
+    // slash mode: fill command name or delete-arg seed name
     if (ctx.mode === 'slash') {
+      // delete context: head contains the prefix (e.g. "/delete[" or "/delete[a,")
+      // so we append the seed name to it
+      if (ctx.head.match(/^\/(delete|del|rm)[\s\[]/i)) {
+        this.input.nativeElement.value = ctx.head + best
+        this.suppressed.set(false)
+        this.placeCaretAtEnd()
+        this.syncSignalsFromDom()
+        return
+      }
       this.input.nativeElement.value = '/' + best
       this.suppressed.set(true)
       this.placeCaretAtEnd()
@@ -1632,7 +1727,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       const opKeyword = nextSlash === -1 ? opAndRest : opAndRest.slice(0, nextSlash)
       const opLower = opKeyword.toLowerCase().trim()
 
-      if (opLower === 'cut' || opLower === 'copy') return 'operation'
+      if (opLower === 'cut' || opLower === 'copy' || opLower === 'delete' || opLower === 'del' || opLower === 'rm') return 'operation'
 
       if (opLower === 'move' || opLower.startsWith('move')) {
         // Check for (index) — note: the first [ is at bracketOpen
@@ -1655,8 +1750,25 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   }
 
   /**
-   * Parse the /select[...]/operation syntax into a CompletionContext (pure function).
+   * Parse /delete[items] bracket context — provides head/raw for current fragment.
+   * Uses 'slash' mode so suggestions route through the delete autocomplete path.
    */
+  #parseDeleteBracketContext(v: string): import('@hypercomb/shared/core/completion-utility').CompletionContext {
+    const bracketOpen = v.indexOf('[')
+    const body = v.slice(bracketOpen + 1)
+    const lastSep = Math.max(body.lastIndexOf(','), -1)
+    const raw = lastSep === -1 ? body : body.slice(lastSep + 1).trimStart()
+    const head = v.slice(0, v.length - raw.length)
+    return {
+      active: true,
+      mode: 'slash',
+      head,
+      raw,
+      normalized: this.completions.normalize(raw),
+      style: 'space'
+    }
+  }
+
   #parseSelectContext(v: string): import('@hypercomb/shared/core/completion-utility').CompletionContext {
     const bracketOpen = v.indexOf('[')
     const bracketClose = v.indexOf(']')

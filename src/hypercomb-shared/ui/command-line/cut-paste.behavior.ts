@@ -4,7 +4,9 @@ import type { CommandLineBehavior } from './command-line-behavior'
 import type { CompletionUtility } from '@hypercomb/shared/core/completion-utility'
 import type { Lineage } from '../../core/lineage'
 import type { Navigation } from '../../core/navigation'
-import { SignatureService, hypercomb } from '@hypercomb/core'
+import { EffectBus, SignatureService, hypercomb } from '@hypercomb/core'
+import { parseArrayItems } from '../../core/array-parser'
+import { persistTagOps, type TagOp } from '../../core/tag-ops'
 
 type HistoryOp = { op: 'add' | 'remove'; seed: string; at: number }
 
@@ -19,6 +21,7 @@ interface HistoryServiceLike {
  *   "[cigars,whiskey]/interests"       → copies items to ./interests, stays here
  *   "[cigars,whiskey]/interests/"      → copies items to ./interests, navigates there
  *   "[a,b]/sub/deep"                   → copies to ./sub/deep
+ *   "[new, ~old]/dest"                 → copies new to dest, deletes old from current
  *
  * Items autocomplete from current surface tiles. Non-matching items
  * still create seeds at the destination (same as regular create).
@@ -56,11 +59,8 @@ export class CutPasteBehavior implements CommandLineBehavior {
     const itemsPart = input.slice(1, close)
     const pathPart = input.slice(close + 2) // skip ]/
 
-    const items = itemsPart
-      .split(',')
-      .map(s => completions.normalize(s.trim()))
-      .filter(Boolean)
-    if (items.length === 0) return
+    const parsed = parseArrayItems(itemsPart, completions.normalize)
+    if (parsed.length === 0) return
 
     const navigateAfter = pathPart.endsWith('/')
     const pathRaw = pathPart.replace(/\/+$/, '').trim()
@@ -70,36 +70,62 @@ export class CutPasteBehavior implements CommandLineBehavior {
       .filter(Boolean)
     if (pathSegments.length === 0) return
 
-    // guard: prevent pasting into self — if the destination path starts
-    // with one of the items, the item would be copied inside itself
-    const destFirst = pathSegments[0]
-    const safeItems = items.filter(item => {
-      if (item === destFirst && pathSegments.length === 1) return false // [x]/x → skip
-      return true
-    })
-    if (safeItems.length === 0) return
-
-    // resolve destination OPFS directory (create if needed)
     const currentDir = await lineage.explorerDir()
     if (!currentDir) return
 
-    let destDir = currentDir
-    for (const seg of pathSegments) {
-      destDir = await destDir.getDirectoryHandle(seg, { create: true })
-    }
+    // Process delete and tag ops from source
+    const tagOps: TagOp[] = []
+    const createItems: string[] = []
 
-    // create seed directories at destination
-    for (const item of safeItems) {
-      await destDir.getDirectoryHandle(item, { create: true })
-    }
+    for (const item of parsed) {
+      const label = item.segments[item.segments.length - 1]
 
-    // record history ops at the destination's signature
-    if (historyService) {
-      const destSig = await this.#computeDestSig(lineage, pathSegments)
-      const now = Date.now()
-      for (const item of safeItems) {
-        await historyService.record(destSig, { op: 'add', seed: item, at: now })
+      if (item.op === 'delete') {
+        // delete from current directory
+        await this.#deleteTarget(currentDir, item.segments)
+      } else if (item.op === 'tag-add' || item.op === 'tag-remove') {
+        if (item.tag) {
+          tagOps.push({ label, tag: item.tag, color: item.tagColor, remove: item.op === 'tag-remove' })
+        }
+        // tag-add items also get copied to destination
+        if (item.op === 'tag-add') createItems.push(label)
+      } else {
+        createItems.push(label)
       }
+    }
+
+    // guard: prevent pasting into self
+    const destFirst = pathSegments[0]
+    const safeItems = createItems.filter(item => {
+      if (item === destFirst && pathSegments.length === 1) return false
+      return true
+    })
+
+    if (safeItems.length > 0) {
+      // resolve destination OPFS directory
+      let destDir = currentDir
+      for (const seg of pathSegments) {
+        destDir = await destDir.getDirectoryHandle(seg, { create: true })
+      }
+
+      // create seed directories at destination
+      for (const item of safeItems) {
+        await destDir.getDirectoryHandle(item, { create: true })
+      }
+
+      // record history ops at the destination's signature
+      if (historyService) {
+        const destSig = await this.#computeDestSig(lineage, pathSegments)
+        const now = Date.now()
+        for (const item of safeItems) {
+          await historyService.record(destSig, { op: 'add', seed: item, at: now })
+        }
+      }
+    }
+
+    // persist tag ops at current directory
+    if (tagOps.length > 0) {
+      await persistTagOps(tagOps, currentDir)
     }
 
     await new hypercomb().act()
@@ -111,11 +137,25 @@ export class CutPasteBehavior implements CommandLineBehavior {
     }
   }
 
-  /**
-   * Compute the history signature for a destination path relative to
-   * the current lineage. Mirrors HistoryService.sign() but with
-   * destination segments appended to the current explorer path.
-   */
+  async #deleteTarget(root: FileSystemDirectoryHandle, segments: string[]): Promise<void> {
+    if (!segments.length) return
+
+    let parent = root
+    for (let i = 0; i < segments.length - 1; i++) {
+      try {
+        parent = await parent.getDirectoryHandle(segments[i], { create: false })
+      } catch {
+        return
+      }
+    }
+
+    const name = segments[segments.length - 1]
+    try {
+      await parent.removeEntry(name, { recursive: true })
+      EffectBus.emit('seed:removed', { seed: name })
+    } catch { /* skip */ }
+  }
+
   async #computeDestSig(lineage: Lineage, extraSegments: string[]): Promise<string> {
     const domain = lineage.domain?.() ?? 'hypercomb.io'
     const currentSegments = lineage.explorerSegments?.() ?? []

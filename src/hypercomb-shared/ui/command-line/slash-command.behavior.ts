@@ -31,17 +31,13 @@ export class SlashCommandBehavior implements CommandLineBehavior {
 
     // only match if a queen bee recognizes the command — otherwise fall through
     // to path-based behaviors (e.g. /folder/ for navigation)
-    const stripped = input.slice(1).trim()
-    const spaceIndex = stripped.indexOf(' ')
-    const commandName = spaceIndex === -1 ? stripped : stripped.slice(0, spaceIndex)
+    const commandName = this.#extractCommandName(input)
     return this.#findQueen(commandName) !== null
   }
 
   async execute(input: string): Promise<void> {
-    const stripped = input.slice(1).trim()
-    const spaceIndex = stripped.indexOf(' ')
-    const commandName = spaceIndex === -1 ? stripped : stripped.slice(0, spaceIndex)
-    const args = spaceIndex === -1 ? '' : stripped.slice(spaceIndex + 1).trim()
+    const commandName = this.#extractCommandName(input)
+    const args = this.#extractArgs(input)
 
     const queen = this.#findQueen(commandName)
     if (!queen) {
@@ -50,6 +46,31 @@ export class SlashCommandBehavior implements CommandLineBehavior {
     }
 
     await queen.invoke(args)
+  }
+
+  /** Extract command name from input, handling both `/cmd args` and `/cmd[args]` syntax. */
+  #extractCommandName(input: string): string {
+    const stripped = input.slice(1).trim()
+    // bracket syntax: /delete[items] → command is 'delete'
+    const bracketIdx = stripped.indexOf('[')
+    const spaceIdx = stripped.indexOf(' ')
+    // pick whichever delimiter comes first
+    const end = bracketIdx >= 0 && (spaceIdx < 0 || bracketIdx < spaceIdx) ? bracketIdx
+      : spaceIdx >= 0 ? spaceIdx
+      : stripped.length
+    return stripped.slice(0, end)
+  }
+
+  /** Extract args from input, handling both `/cmd args` and `/cmd[args]` syntax. */
+  #extractArgs(input: string): string {
+    const stripped = input.slice(1).trim()
+    const bracketIdx = stripped.indexOf('[')
+    const spaceIdx = stripped.indexOf(' ')
+    // bracket syntax: /delete[items] → args is '[items]'
+    if (bracketIdx >= 0 && (spaceIdx < 0 || bracketIdx < spaceIdx)) {
+      return stripped.slice(bracketIdx)
+    }
+    return spaceIdx >= 0 ? stripped.slice(spaceIdx + 1).trim() : ''
   }
 
   #findQueen(commandName: string): any | null {
