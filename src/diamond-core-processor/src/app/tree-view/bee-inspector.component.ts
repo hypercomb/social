@@ -480,8 +480,8 @@ export class BeeInspectorComponent {
     const d = this.doc()
     if (d?.className) return d.className
     const src = this.source()
-    const match = src.match(/class\s+([A-Za-z0-9_]+)\s+extends/)
-    return match?.[1] ?? this.signature().slice(0, 16) + '...'
+    const match = src.match(/(?:var\s+([A-Za-z0-9_]+)\s*=\s*class|class\s+([A-Za-z0-9_]+))\s+extends/)
+    return match?.[1] ?? match?.[2] ?? this.signature().slice(0, 16) + '...'
   })
 
   depEntries = computed(() => {
