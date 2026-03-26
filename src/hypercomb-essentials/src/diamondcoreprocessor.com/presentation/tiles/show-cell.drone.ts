@@ -8,10 +8,12 @@ import { HexSdfTextureShader } from '../grid/hex-sdf.shader.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from '../grid/hex-geometry.js'
 import { isSignature, readSeedProperties, writeSeedProperties } from '../../editor/tile-properties.js'
 import type { HistoryService, HistoryOp } from '../../history/history.service.js'
+import type { HistoryCursorService } from '../../history/history-cursor.service.js'
 import type { ViewportPersistence, ViewportSnapshot } from '../../navigation/zoom/zoom.drone.js'
 
 type Axial = { q: number; r: number }
-type SeedCell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; borderColor?: [number, number, number] }
+/** divergence: 0 = current, 1 = future-add (ghost), 2 = future-remove (marked) */
+type SeedCell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; borderColor?: [number, number, number]; divergence?: number }
 
 /** Deterministic label → RGB via DJB2 hash → HSL → RGB. Returns [r, g, b] in 0–1 range. */
 function labelToRgb(label: string): [number, number, number] {
@@ -76,7 +78,7 @@ export class ShowCellDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'seed:place-at', 'seed:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'seed:place-at', 'seed:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'history:cursor-changed']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -172,6 +174,8 @@ export class ShowCellDrone extends Drone {
   /** Saved lineage segments before entering tag filter — restored when filter clears. */
   #preFilterSegments: string[] | null = null
   private moveNames: string[] | null = null
+  #divergenceFutureAdds = new Set<string>()
+  #divergenceFutureRemoves = new Set<string>()
   private suppressMeshRecenter = false
   #layoutMode: 'dense' | 'pinned' = 'dense'
 
@@ -878,15 +882,42 @@ export class ShowCellDrone extends Drone {
     }))
 
     // note: apply history — filter out seeds whose last operation is "remove"
+    // When a cursor is rewound, also compute divergence (future adds/removes)
     // Skip when clipboard view is active — clipboard labels are authoritative
     const historyService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as HistoryService | undefined
+    const cursorService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryCursorService') as HistoryCursorService | undefined
+    this.#divergenceFutureAdds = new Set<string>()
+    this.#divergenceFutureRemoves = new Set<string>()
     if (!this.#clipboardView && historyService) {
       const sig = await this.computeSignatureLocation(lineage)
-      const ops = await historyService.replay(sig.sig)
-      const seedState = new Map<string, string>() // seed → last op
-      for (const op of ops) seedState.set(op.seed, op.op)
-      for (const [seed, lastOp] of seedState) {
-        if (lastOp === 'remove') union.delete(seed)
+
+      // Load cursor for this location (keeps cursor position if already set)
+      if (cursorService) await cursorService.load(sig.sig)
+
+      const cursorState = cursorService?.state
+      const isRewound = cursorState?.rewound ?? false
+
+      if (isRewound && cursorService) {
+        // Rewound: use cursor's divergence computation
+        const divergence = cursorService.computeDivergence()
+        // Remove seeds not in current set
+        for (const seed of [...union]) {
+          if (!divergence.current.has(seed) && !divergence.futureAdds.has(seed)) {
+            union.delete(seed)
+          }
+        }
+        // Add future-add seeds back to union (they'll render as ghosts)
+        for (const seed of divergence.futureAdds) union.add(seed)
+        this.#divergenceFutureAdds = divergence.futureAdds
+        this.#divergenceFutureRemoves = divergence.futureRemoves
+      } else {
+        // Not rewound: standard replay — filter out removed seeds
+        const ops = await historyService.replay(sig.sig)
+        const seedState = new Map<string, string>()
+        for (const op of ops) seedState.set(op.seed, op.op)
+        for (const [seed, lastOp] of seedState) {
+          if (lastOp === 'remove') union.delete(seed)
+        }
       }
     }
 
@@ -1054,12 +1085,14 @@ export class ShowCellDrone extends Drone {
       const axialCell = axial.items.get(index) as Axial | undefined
       if (!axialCell || !label) continue
 
+      const div = this.#divergenceFutureAdds.has(label) ? 1 : this.#divergenceFutureRemoves.has(label) ? 2 : 0
       const cell: SeedCell = {
         q: axialCell.q,
         r: axialCell.r,
         label,
         external: !localSeedSet.has(label),
         hasBranch: branchSet?.has(label) ?? false,
+        divergence: div,
       }
 
       await this.loadCellImages([cell], dir)
@@ -1319,6 +1352,13 @@ export class ShowCellDrone extends Drone {
     this.onEffect<{ seed: string }>('seed:removed', () => {
       this.#layerCellsCache.clear()
       this.renderedCellsKey = ''
+    })
+
+    // history:cursor-changed — re-render with divergence when cursor moves
+    this.onEffect('history:cursor-changed', () => {
+      this.#layerCellsCache.clear()
+      this.renderedCellsKey = ''
+      this.requestRender()
     })
 
     // search:filter effect — live-filter visible tiles by keyword
@@ -1809,7 +1849,8 @@ export class ShowCellDrone extends Drone {
       if (!a) break
       if (!label) continue
 
-      out.push({ q: a.q, r: a.r, label, external: !localSeedSet.has(label), heat: this.#heatByLabel.get(label) ?? 0, hasBranch: branchSet?.has(label) ?? false })
+      const div = this.#divergenceFutureAdds.has(label) ? 1 : this.#divergenceFutureRemoves.has(label) ? 2 : 0
+      out.push({ q: a.q, r: a.r, label, external: !localSeedSet.has(label), heat: this.#heatByLabel.get(label) ?? 0, hasBranch: branchSet?.has(label) ?? false, divergence: div })
     }
 
     return out
@@ -1905,7 +1946,7 @@ export class ShowCellDrone extends Drone {
     const selectionService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SelectionService') as
       { isSelected: (label: string) => boolean } | undefined
     let s = `p${this.#pivot ? 1 : 0}f${this.#flat ? 1 : 0}|`
-    for (const c of cells) s += `${c.q},${c.r}:${c.label}:${c.external ? 1 : 0}:${c.imageSig ?? ''}:${c.hasBranch ? 1 : 0}|`
+    for (const c of cells) s += `${c.q},${c.r}:${c.label}:${c.external ? 1 : 0}:${c.imageSig ?? ''}:${c.hasBranch ? 1 : 0}:${c.divergence ?? 0}|`
     return s
   }
 
@@ -1929,9 +1970,10 @@ export class ShowCellDrone extends Drone {
     const branch = new Float32Array(cells.length * 4)
     const borderColor = new Float32Array(cells.length * 12)
     const cellIndex = new Float32Array(cells.length * 4)
+    const divergence = new Float32Array(cells.length * 4)
     const idx = new Uint32Array(cells.length * 6)
 
-    let pv = 0, uvp = 0, luvp = 0, iuvp = 0, hip = 0, hp = 0, icp = 0, bp = 0, bcp = 0, cip = 0, ii = 0, base = 0
+    let pv = 0, uvp = 0, luvp = 0, iuvp = 0, hip = 0, hp = 0, icp = 0, bp = 0, bcp = 0, cip = 0, dp = 0, ii = 0, base = 0
     let ci = 0
 
     for (const c of cells) {
@@ -1982,6 +2024,10 @@ export class ShowCellDrone extends Drone {
       cip += 4
       ci++
 
+      const dv = c.divergence ?? 0
+      divergence.set([dv, dv, dv, dv], dp)
+      dp += 4
+
       idx.set([base, base + 1, base + 2, base, base + 2, base + 3], ii)
       ii += 6
       base += 4
@@ -1998,6 +2044,7 @@ export class ShowCellDrone extends Drone {
       ; (g as any).addAttribute('aHasBranch', branch, 1)
       ; (g as any).addAttribute('aBorderColor', borderColor, 3)
       ; (g as any).addAttribute('aCellIndex', cellIndex, 1)
+      ; (g as any).addAttribute('aDivergence', divergence, 1)
       ; (g as any).addIndex(idx)
 
     return g

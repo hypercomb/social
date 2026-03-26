@@ -1,6 +1,7 @@
 // diamondcoreprocessor.com/core/history-recorder.drone.ts
 import { EffectBus, hypercomb } from '@hypercomb/core'
 import type { HistoryService, HistoryOpType } from './history.service.js'
+import type { HistoryCursorService } from './history-cursor.service.js'
 
 export class HistoryRecorder {
 
@@ -30,6 +31,10 @@ export class HistoryRecorder {
 
     const sig = await historyService.sign(lineage)
     await historyService.record(sig, { op, seed, at: Date.now() })
+
+    // Notify cursor service so slider stays in sync
+    const cursor = get<HistoryCursorService>('@diamondcoreprocessor.com/HistoryCursorService')
+    if (cursor) await cursor.onNewOp()
   }
 }
 

@@ -84,6 +84,7 @@ export class HexSdfTextureShader {
     in float aHasBranch;
     in vec3 aBorderColor;
     in float aCellIndex;
+    in float aDivergence;
 
     out vec2 vUV;
     out vec4 vLabelUV;
@@ -94,6 +95,7 @@ export class HexSdfTextureShader {
     out float vHasBranch;
     out vec3 vBorderColor;
     out float vCellIndex;
+    out float vDivergence;
 
     uniform mat3 uProjectionMatrix;
     uniform mat3 uWorldTransformMatrix;
@@ -111,6 +113,7 @@ export class HexSdfTextureShader {
       vHasBranch = aHasBranch;
       vBorderColor = aBorderColor;
       vCellIndex = aCellIndex;
+      vDivergence = aDivergence;
     }
   `
 
@@ -126,6 +129,7 @@ export class HexSdfTextureShader {
     in float vHasBranch;
     in vec3 vBorderColor;
     in float vCellIndex;
+    in float vDivergence;
 
     uniform vec2 u_quadSize;
     uniform float u_radiusPx;
@@ -217,6 +221,27 @@ export class HexSdfTextureShader {
         float dist = length(local) / u_radiusPx;
         float glow = exp(-dist * dist * 2.2);
         color.rgb += ringColor * glow * 0.10;
+      }
+
+      // divergence overlay: 1 = future-add (ghost), 2 = future-remove (marked)
+      if (vDivergence > 0.5) {
+        if (vDivergence < 1.5) {
+          // future-add: translucent cyan ghost
+          color.rgb = mix(color.rgb, vec3(0.15, 0.35, 0.45), 0.5);
+          color.a *= 0.35;
+          // dashed border hint — stripe pattern along hex edge
+          float edgeDist = abs(d);
+          float stripe = step(0.5, fract(edgeDist * 0.3));
+          float edgeMask = 1.0 - smoothstep(0.0, aa * 3.0, edgeDist);
+          color.rgb = mix(color.rgb, vec3(0.3, 0.7, 0.9), edgeMask * stripe * 0.6);
+        } else {
+          // future-remove: warm amber tint + strikethrough diagonal
+          color.rgb = mix(color.rgb, vec3(0.6, 0.3, 0.1), 0.25);
+          vec2 local2 = (vUV - 0.5) * u_quadSize;
+          float diag = abs(local2.x + local2.y);
+          float strikeMask = 1.0 - smoothstep(0.0, 2.0, abs(diag - u_radiusPx * 0.3));
+          color.rgb = mix(color.rgb, vec3(1.0, 0.5, 0.15), strikeMask * 0.4);
+        }
       }
 
       // premultiplied alpha output for correct blending at hex edges

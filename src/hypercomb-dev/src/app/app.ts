@@ -21,6 +21,8 @@ import { TileActionsDrone } from '@hypercomb/essentials/diamondcoreprocessor.com
 import { TileSelectionDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/presentation/tiles/tile-selection.drone'
 import { HistoryService } from '@hypercomb/essentials/diamondcoreprocessor.com/history/history.service'
 import { HistoryRecorder } from '@hypercomb/essentials/diamondcoreprocessor.com/history/history-recorder.drone'
+import { HistoryCursorService } from '@hypercomb/essentials/diamondcoreprocessor.com/history/history-cursor.service'
+import { HistorySliderDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/history/history-slider.drone'
 import { TileEditorService } from '@hypercomb/essentials/diamondcoreprocessor.com/editor/tile-editor.service'
 import { TileEditorDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/editor/tile-editor.drone'
 import { ImageEditorService } from '@hypercomb/essentials/diamondcoreprocessor.com/editor/image-editor.service'
@@ -86,6 +88,8 @@ const _deps = [
   ZoomDrone,
   HistoryService,
   HistoryRecorder,
+  HistoryCursorService,
+  HistorySliderDrone,
   TileEditorService,
   TileEditorDrone,
   ImageEditorService,
