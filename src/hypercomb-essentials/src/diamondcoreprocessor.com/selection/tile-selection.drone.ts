@@ -95,7 +95,11 @@ class TileSelectionDrone extends Drone {
       if (!selection) return
 
       if (payload.ctrlKey || payload.metaKey) {
-        selection.toggle(payload.label)
+        if (selection.isSelected(payload.label)) {
+          selection.remove(payload.label)
+        } else {
+          selection.clear()
+        }
       } else if (selection.isSelected(payload.label)) {
         selection.setActive(payload.label)
       } else {
