@@ -27,15 +27,15 @@ import type { TreeNode } from '../core/tree-node'
           @if (node().lineage && node().kind !== 'layer' && node().kind !== 'domain') {
             <span class="lineage">{{ node().lineage }}</span>
           }
-          @if (kindLabel()) {
-            <span class="kind-label" [class]="node().kind">{{ kindLabel() }}</span>
-            <span class="breadcrumb-sep">/</span>
-          }
           <span class="name" [class]="node().kind">{{ node().name }}</span>
           @if (description()) {
             <span class="description">{{ description() }}</span>
           }
         </button>
+
+        @if (kindLabel()) {
+          <span class="kind-label" [class]="node().kind">{{ kindLabel() }}</span>
+        }
 
         @if (node().signature) {
           <span class="sig">{{ node().signature!.slice(0, 8) }}</span>
@@ -97,23 +97,17 @@ import type { TreeNode } from '../core/tree-node'
     }
 
     .kind-label {
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 500;
       white-space: nowrap;
       flex-shrink: 0;
+      margin-left: auto;
     }
 
     .kind-label.bee { color: #a58b4f; }
     .kind-label.worker { color: #a54f4f; }
     .kind-label.drone { color: #a59b4f; }
     .kind-label.dependency { color: #4fa58b; }
-
-    .breadcrumb-sep {
-      font-size: 11px;
-      color: #ddd;
-      flex-shrink: 0;
-      margin: 0 -2px;
-    }
 
     .name {
       font-size: 11px;
@@ -209,7 +203,6 @@ import type { TreeNode } from '../core/tree-node'
       .description,
       .lineage,
       .kind-label,
-      .breadcrumb-sep,
       .sig,
       .audit-badge {
         display: none;
