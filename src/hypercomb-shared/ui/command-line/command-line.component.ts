@@ -908,6 +908,24 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       return
     }
 
+    // Plain Up/Down in move-target-index: increment/decrement the index number.
+    // Works even with an empty paren — /move( + Up → /move(1
+    if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && this.#selectPhase() === 'move-target-index') {
+      e.preventDefault()
+      const parenIdx = v.lastIndexOf('(')
+      if (parenIdx >= 0) {
+        const raw = v.slice(parenIdx + 1).replace(/\)$/, '')
+        const current = raw === '' ? 0 : parseInt(raw, 10)
+        if (!isNaN(current)) {
+          const next = e.key === 'ArrowUp' ? current + 1 : Math.max(0, current - 1)
+          el.value = v.slice(0, parenIdx + 1) + next
+          this.syncSignalsFromDom()
+          el.dispatchEvent(new Event('input', { bubbles: true }))
+        }
+      }
+      return
+    }
+
     if (this.handleCompletionKeys(e)) return
 
     // Universal tag pre-processing: on any Enter, extract and persist tag assignments
@@ -1359,18 +1377,20 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   // ── Ctrl+Arrow move index scrub ──────────────────────────────
 
-  /** Scrub the move target index with Ctrl+Arrow. Returns true if handled. */
+  /** Scrub the move target index with Ctrl+Arrow using hex offsets. Returns true if handled. */
   #handleMoveScrub(e: KeyboardEvent): boolean {
     const offset = MOVE_ARROW_OFFSETS[e.key]
     if (!offset) return false
 
     e.preventDefault()
 
-    const v = this.input.nativeElement.value
+    const el = this.input.nativeElement
+    const v = el.value
     const parenIdx = v.lastIndexOf('(')
     if (parenIdx < 0) return true
 
-    const currentIndex = parseInt(v.slice(parenIdx + 1).replace(/\)$/, ''), 10)
+    const raw = v.slice(parenIdx + 1).replace(/\)$/, '')
+    const currentIndex = raw === '' ? 0 : parseInt(raw, 10)
     if (isNaN(currentIndex)) return true
 
     const axialSvc = get('@diamondcoreprocessor.com/AxialService') as any
@@ -1390,9 +1410,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     }
     if (newIndex < 0) return true // out of bounds
 
-    // Update the input value with the new index
-    this.input.nativeElement.value = v.slice(0, parenIdx + 1) + newIndex
+    // Update the input and trigger preview
+    el.value = v.slice(0, parenIdx + 1) + newIndex
     this.syncSignalsFromDom()
+    el.dispatchEvent(new Event('input', { bubbles: true }))
     return true
   }
 
@@ -1911,7 +1932,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const phase = this.#selectPhase()
     const labels = this.#selectLabels()
 
-    // Select tiles visually as labels are typed — bidirectional sync
+    // Select tiles visually as labels are typed — bidirectional sync.
+    // Keep #syncDirection = 'command' for the entire method so that
+    // synchronous side-effects (move:preview → render:cell-count →
+    // selection:changed) don't feed back and overwrite the input.
     this.#syncDirection = 'command'
     const selection = get('@diamondcoreprocessor.com/SelectionService') as any
     if (selection) {
@@ -1923,7 +1947,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         for (const label of labels) selection.add(label)
       }
     }
-    this.#syncDirection = 'idle'
 
     // Live preview when target index is being typed
     if (phase === 'move-target-index') {
@@ -1977,6 +2000,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         }
       }
     }
+
+    this.#syncDirection = 'idle'
   }
 
   // -------------------------------------------------
