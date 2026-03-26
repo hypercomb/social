@@ -121,7 +121,7 @@ import type { TreeNode } from '../core/tree-node'
       font-size: 10px;
       font-weight: 500;
       padding: 1px 6px;
-      border-radius: 8px;
+      border-radius: 2px;
       flex-shrink: 0;
     }
 
@@ -182,7 +182,7 @@ import type { TreeNode } from '../core/tree-node'
         justify-content: center;
         background: none;
         border: 1px solid rgba(0, 0, 0, 0.08);
-        border-radius: 8px;
+        border-radius: 2px;
         cursor: pointer;
         font-size: 18px;
         color: #4a6fa5;

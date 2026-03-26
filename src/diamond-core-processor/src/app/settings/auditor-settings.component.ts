@@ -90,7 +90,7 @@ import { AuditorService } from '../core/auditor.service'
     .toggle {
       background: none;
       border: 1px solid rgba(0, 0, 0, 0.08);
-      border-radius: 6px;
+      border-radius: 2px;
       width: 30px;
       height: 30px;
       cursor: pointer;
@@ -115,7 +115,7 @@ import { AuditorService } from '../core/auditor.service'
       width: 420px;
       background: #fff;
       border: 1px solid rgba(0, 0, 0, 0.1);
-      border-radius: 10px;
+      border-radius: 2px;
       box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.04);
       z-index: 100;
       overflow: hidden;
@@ -148,7 +148,7 @@ import { AuditorService } from '../core/auditor.service'
       color: #666;
       background: rgba(0, 0, 0, 0.05);
       padding: 2px 8px;
-      border-radius: 10px;
+      border-radius: 2px;
     }
 
     .description {
@@ -176,7 +176,7 @@ import { AuditorService } from '../core/auditor.service'
       padding: 7px 10px;
       font-size: 12px;
       border: 1px solid rgba(0, 0, 0, 0.1);
-      border-radius: 6px;
+      border-radius: 2px;
       outline: none;
       transition: border-color 0.15s;
       background: #fafafa;
@@ -195,7 +195,7 @@ import { AuditorService } from '../core/auditor.service'
       font-weight: 600;
       cursor: pointer;
       border: 1px solid rgba(0, 0, 0, 0.1);
-      border-radius: 6px;
+      border-radius: 2px;
       background: #1a1a1a;
       color: #fff;
       white-space: nowrap;
@@ -318,7 +318,7 @@ import { AuditorService } from '../core/auditor.service'
       padding: 4px 6px;
       font-size: 12px;
       border: 1px solid rgba(0, 0, 0, 0.1);
-      border-radius: 5px;
+      border-radius: 2px;
       text-align: center;
       background: #fff;
       outline: none;

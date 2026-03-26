@@ -57,7 +57,7 @@ import type { TreeNode } from '../core/tree-node'
     .back {
       background: none;
       border: 1px solid rgba(0,0,0,0.12);
-      border-radius: 6px;
+      border-radius: 2px;
       padding: 6px 12px;
       cursor: pointer;
       font-size: 13px;
@@ -108,7 +108,7 @@ import type { TreeNode } from '../core/tree-node'
       font-size: 12px;
       font-weight: 600;
       padding: 2px 8px;
-      border-radius: 10px;
+      border-radius: 2px;
     }
 
     .detail-audit.met {

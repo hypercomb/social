@@ -12,462 +12,292 @@ import type { BeeDocEntry } from '../core/tree-node'
   imports: [CodeViewerComponent],
   template: `
     @if (visible()) {
-      <div class="backdrop" (click)="close.emit()"></div>
-      <div class="modal">
-        <header class="modal-header">
-          <div class="header-top">
-            <div class="header-left">
-              <span class="kind-badge" [class.dep]="kind() === 'dependency'" [class.worker]="kind() === 'worker'" [class.drone]="kind() === 'drone'" [class.queen]="doc()?.kind === 'queen'">{{ doc()?.kind ?? kind() }}</span>
-              <span class="display-name">{{ displayName() }}</span>
-              <span class="meta-pill">{{ fileSize() }}</span>
-              <span class="meta-pill">{{ loadedFrom() }}</span>
-            </div>
-            <button class="close-btn" (click)="close.emit()">&times;</button>
+      <div class="page">
+        <header class="hdr">
+          <button class="hdr-back" (click)="close.emit()">&larr; Back</button>
+          <div class="hdr-title">
+            <span class="hdr-kind" [class.dep]="kind() === 'dependency'" [class.worker]="kind() === 'worker'" [class.drone]="kind() === 'drone'" [class.queen]="doc()?.kind === 'queen'">{{ doc()?.kind ?? kind() }}</span>
+            <span class="hdr-name">{{ displayName() }}</span>
           </div>
-          <div class="sig-row">
-            <code class="sig-value">{{ signature() }}</code>
-            <button class="sig-copy" (click)="copySig()">{{ sigCopied() ? 'copied' : 'copy' }}</button>
+          <div class="hdr-meta">
+            <span>{{ fileSize() }}</span>
+            <span class="hdr-sep">&middot;</span>
+            <span>{{ loadedFrom() }}</span>
+            <span class="hdr-sep">&middot;</span>
+            <code class="hdr-sig">{{ signature().slice(0, 12) }}&hellip;</code>
+            <button class="hdr-copy" (click)="copySig()">{{ sigCopied() ? 'copied' : 'copy sig' }}</button>
           </div>
         </header>
 
-        <!-- doc panel — shown always on detail mode, shown as collapsible on code mode -->
-        @if (doc(); as d) {
-          <div class="doc-panel" [class.detail-mode]="activeView() === 'detail'">
-            @if (d.description) {
-              <p class="doc-description">{{ d.description }}</p>
-            }
+        <div class="content">
 
-            @if (lineage()) {
-              <div class="doc-section">
-                <span class="doc-label">location</span>
-                <span class="doc-lineage">{{ lineage() }}</span>
-              </div>
-            }
-
-            @if (d.command) {
-              <div class="doc-section">
-                <span class="doc-label">command</span>
-                <code class="doc-command">/{{ d.command }}</code>
-                @for (alias of d.aliases; track alias) {
-                  <code class="doc-alias">/{{ alias }}</code>
+          @if (doc(); as d) {
+            <div class="details">
+              @if (d.description) {
+                <p class="desc">{{ d.description }}</p>
+              }
+              <table class="props">
+                @if (lineage()) {
+                  <tr><td class="prop-label">location</td><td><code>{{ lineage() }}</code></td></tr>
                 }
-              </div>
-            }
+                @if (d.command) {
+                  <tr><td class="prop-label">command</td><td><code class="cmd">/{{ d.command }}</code>@for (alias of d.aliases; track alias) { <code class="alias">/{{ alias }}</code>}</td></tr>
+                }
+                @if (d.listens.length) {
+                  <tr><td class="prop-label">listens</td><td>@for (e of d.listens; track e) {<code class="pill listen">{{ e }}</code> }</td></tr>
+                }
+                @if (d.emits.length) {
+                  <tr><td class="prop-label">emits</td><td>@for (e of d.emits; track e) {<code class="pill emit">{{ e }}</code> }</td></tr>
+                }
+                @if (d.effects.length) {
+                  <tr><td class="prop-label">effects</td><td>@for (e of d.effects; track e) {<code class="pill effect">{{ e }}</code> }</td></tr>
+                }
+                @if (depEntries().length) {
+                  <tr><td class="prop-label">deps</td><td>@for (dep of depEntries(); track dep.key) {<code class="pill dep">{{ dep.name }}</code> }</td></tr>
+                }
+                @if (d.links.length) {
+                  <tr><td class="prop-label">links</td><td>@for (link of d.links; track link.url) {<a class="link" [href]="link.url" target="_blank" rel="noopener">{{ link.label }}</a> }</td></tr>
+                }
+              </table>
+              @if (activeView() === 'detail') {
+                <button class="source-btn" (click)="activeView.set('code')">View Source</button>
+              }
+            </div>
+          }
 
-            @if (d.listens.length) {
-              <div class="doc-section">
-                <span class="doc-label">listens</span>
-                <div class="doc-pills">
-                  @for (e of d.listens; track e) {
-                    <span class="doc-pill listen">{{ e }}</span>
-                  }
-                </div>
-              </div>
-            }
+          @if (loading()) {
+            <div class="status">
+              <span class="loading-dot"></span>
+              Resolving {{ signature().slice(0, 12) }}...
+            </div>
+          }
 
-            @if (d.emits.length) {
-              <div class="doc-section">
-                <span class="doc-label">emits</span>
-                <div class="doc-pills">
-                  @for (e of d.emits; track e) {
-                    <span class="doc-pill emit">{{ e }}</span>
-                  }
-                </div>
-              </div>
-            }
+          @if (error()) {
+            <div class="status error">{{ error() }}</div>
+          }
 
-            @if (depEntries().length) {
-              <div class="doc-section">
-                <span class="doc-label">depends on</span>
-                <div class="doc-deps">
-                  @for (dep of depEntries(); track dep.key) {
-                    <div class="doc-dep">
-                      <span class="dep-name">{{ dep.name }}</span>
-                      <code class="dep-key">{{ dep.key }}</code>
-                    </div>
-                  }
-                </div>
-              </div>
-            }
-
-            @if (d.effects.length) {
-              <div class="doc-section">
-                <span class="doc-label">effects</span>
-                <div class="doc-pills">
-                  @for (e of d.effects; track e) {
-                    <span class="doc-pill effect">{{ e }}</span>
-                  }
-                </div>
-              </div>
-            }
-
-            @if (d.links.length) {
-              <div class="doc-section">
-                <span class="doc-label">links</span>
-                <div class="doc-links">
-                  @for (link of d.links; track link.url) {
-                    <a class="doc-link" [href]="link.url" target="_blank" rel="noopener">{{ link.label }}</a>
-                  }
-                </div>
-              </div>
-            }
-
-            <!-- view source button in detail mode -->
-            @if (activeView() === 'detail') {
-              <button class="view-source-btn" (click)="activeView.set('code')">View Source</button>
-            }
-          </div>
-        }
-
-        @if (loading()) {
-          <div class="modal-body center">
-            <span class="loading-dot"></span>
-            <span class="loading-text">Resolving {{ signature().slice(0, 12) }}...</span>
-          </div>
-        }
-
-        @if (error()) {
-          <div class="modal-body center">
-            <span class="error-text">{{ error() }}</span>
-          </div>
-        }
-
-        <!-- code viewer — shown when activeView is 'code' -->
-        @if (source() && !loading() && activeView() === 'code') {
-          <div class="modal-body">
+          @if (source() && !loading() && activeView() === 'code') {
             <hc-code-viewer [code]="source()" />
-          </div>
-        }
+          }
+        </div>
       </div>
     }
   `,
   styles: [`
-    .backdrop {
+    :host { display: contents; }
+
+    .page {
       position: fixed;
       inset: 0;
-      background: rgba(0, 0, 0, 0.5);
-      backdrop-filter: blur(6px);
       z-index: 1000;
-      animation: fadeIn 0.15s ease;
-    }
-
-    .modal {
-      position: fixed;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      width: min(780px, 92vw);
-      max-height: 88vh;
       background: #fff;
-      border-radius: 12px;
-      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.22), 0 0 0 1px rgba(0, 0, 0, 0.06);
-      z-index: 1001;
       display: flex;
       flex-direction: column;
       overflow: hidden;
-      animation: slideUp 0.2s cubic-bezier(0.16, 1, 0.3, 1);
     }
 
-    @keyframes fadeIn {
-      from { opacity: 0; }
-      to { opacity: 1; }
-    }
+    /* --- header --- */
 
-    @keyframes slideUp {
-      from { opacity: 0; transform: translate(-50%, -48%); }
-      to { opacity: 1; transform: translate(-50%, -50%); }
-    }
-
-    .modal-header {
+    .hdr {
+      flex-shrink: 0;
       display: flex;
-      flex-direction: column;
-      gap: 8px;
-      padding: 14px 18px 12px;
-      border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+      align-items: center;
+      gap: 16px;
+      padding: 10px 20px;
+      border-bottom: 1px solid #e0e0e0;
       background: #fafafa;
+      min-height: 44px;
     }
 
-    .header-top {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
+    .hdr-back {
+      background: none;
+      border: 1px solid #ddd;
+      padding: 4px 10px;
+      font-size: 12px;
+      color: #555;
+      cursor: pointer;
+      white-space: nowrap;
+      flex-shrink: 0;
     }
 
-    .header-left {
+    .hdr-back:hover { color: #111; border-color: #bbb; }
+
+    .hdr-title {
       display: flex;
-      align-items: center;
+      align-items: baseline;
       gap: 8px;
       min-width: 0;
     }
 
-    .kind-badge {
+    .hdr-kind {
       font-size: 9px;
-      font-weight: 600;
+      font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 0.1em;
+      letter-spacing: 0.08em;
       color: #a58b4f;
-      background: rgba(165, 139, 79, 0.1);
-      padding: 2px 7px;
-      border-radius: 3px;
       flex-shrink: 0;
     }
 
-    .kind-badge.dep {
-      color: #4fa58b;
-      background: rgba(79, 165, 139, 0.1);
-    }
+    .hdr-kind.dep { color: #4fa58b; }
+    .hdr-kind.worker { color: #a54f4f; }
+    .hdr-kind.drone { color: #a59b4f; }
+    .hdr-kind.queen { color: #7b4fa5; }
 
-    .kind-badge.worker {
-      color: #a54f4f;
-      background: rgba(165, 79, 79, 0.1);
-    }
-
-    .kind-badge.drone {
-      color: #a59b4f;
-      background: rgba(165, 155, 79, 0.1);
-    }
-
-    .kind-badge.queen {
-      color: #7b4fa5;
-      background: rgba(123, 79, 165, 0.1);
-    }
-
-    .display-name {
-      font-size: 14px;
+    .hdr-name {
+      font-size: 15px;
       font-weight: 600;
-      color: #1a1a1a;
+      color: #111;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
 
-    .meta-pill {
-      font-size: 10px;
-      color: #888;
-      background: rgba(0, 0, 0, 0.04);
-      padding: 1px 6px;
-      border-radius: 3px;
-      flex-shrink: 0;
-      white-space: nowrap;
-    }
-
-    .close-btn {
-      background: none;
-      border: none;
-      font-size: 18px;
-      color: #aaa;
-      cursor: pointer;
-      padding: 0 2px;
-      line-height: 1;
-      flex-shrink: 0;
-    }
-
-    .close-btn:hover {
-      color: #333;
-    }
-
-    .sig-row {
+    .hdr-meta {
       display: flex;
       align-items: center;
-      gap: 8px;
-    }
-
-    .sig-value {
+      gap: 6px;
+      margin-left: auto;
+      flex-shrink: 0;
+      font-size: 11px;
+      color: #999;
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-size: 10px;
-      color: #777;
-      letter-spacing: 0.02em;
-      word-break: break-all;
-      line-height: 1.3;
-      flex: 1;
     }
 
-    .sig-copy {
+    .hdr-sep { color: #ccc; }
+
+    .hdr-sig { color: #aaa; }
+
+    .hdr-copy {
       font-size: 10px;
       font-weight: 600;
       color: #666;
-      background: rgba(0, 0, 0, 0.04);
-      border: 1px solid rgba(0, 0, 0, 0.08);
-      border-radius: 4px;
-      padding: 2px 8px;
+      background: none;
+      border: 1px solid #ddd;
+      padding: 1px 8px;
       cursor: pointer;
-      flex-shrink: 0;
-      white-space: nowrap;
+      margin-left: 2px;
     }
 
-    .sig-copy:hover {
-      background: rgba(0, 0, 0, 0.08);
+    .hdr-copy:hover { background: #f0f0f0; border-color: #bbb; }
+
+    /* --- scrollable content --- */
+
+    .content {
+      flex: 1;
+      overflow-y: auto;
+      overflow-x: hidden;
+      --gutter: 20px;
     }
 
-    /* --- doc panel --- */
-
-    .doc-panel {
-      padding: 12px 18px;
-      border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
+    .content > * {
+      display: block;
+      max-width: 680px;
+      margin-left: auto;
+      margin-right: auto;
+      padding-left: var(--gutter);
+      padding-right: var(--gutter);
+      box-sizing: border-box;
     }
 
-    .doc-description {
+    /* --- details section --- */
+
+    .details {
+      padding-top: 12px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid #f0f0f0;
+    }
+
+    .desc {
       font-size: 13px;
       color: #444;
       line-height: 1.5;
-      margin: 0;
+      margin: 0 0 10px;
     }
 
-    .doc-section {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: baseline;
-      gap: 6px;
+    .props {
+      border-collapse: collapse;
+      width: 100%;
+      font-size: 11px;
     }
 
-    .doc-label {
-      font-size: 9px;
+    .props td {
+      padding: 3px 0;
+      vertical-align: baseline;
+    }
+
+    .prop-label {
       font-weight: 600;
       text-transform: uppercase;
-      letter-spacing: 0.08em;
+      letter-spacing: 0.06em;
+      font-size: 9px;
       color: #999;
-      width: 70px;
-      flex-shrink: 0;
+      width: 65px;
+      padding-right: 10px;
     }
 
-    .doc-pills {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 4px;
-    }
-
-    .doc-pill {
-      font-size: 10px;
+    .props code {
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      padding: 1px 6px;
-      border-radius: 3px;
-      white-space: nowrap;
+      font-size: 11px;
+      color: #555;
     }
 
-    .doc-pill.listen {
-      color: #2e7d32;
-      background: rgba(46, 125, 50, 0.08);
-    }
-
-    .doc-pill.emit {
-      color: #c62828;
-      background: rgba(198, 40, 40, 0.08);
-    }
-
-    .doc-pill.effect {
-      color: #1565c0;
-      background: rgba(21, 101, 192, 0.08);
-    }
-
-    .doc-command {
-      font-size: 12px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    .cmd {
       font-weight: 600;
       color: #7b4fa5;
     }
 
-    .doc-alias {
-      font-size: 10px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    .alias {
       color: #999;
+      margin-left: 6px;
     }
 
-    .doc-deps {
-      display: flex;
-      flex-direction: column;
-      gap: 3px;
+    .pill {
+      display: inline-block;
+      padding: 0 4px;
+      margin: 1px 2px 1px 0;
     }
 
-    .doc-dep {
-      display: flex;
-      align-items: baseline;
-      gap: 8px;
-      background: none;
-      border: 1px solid rgba(0, 0, 0, 0.06);
-      border-radius: 4px;
-      padding: 3px 8px;
-      cursor: pointer;
-      text-align: left;
-    }
+    .pill.listen { color: #2e7d32; background: rgba(46, 125, 50, 0.07); }
+    .pill.emit { color: #c62828; background: rgba(198, 40, 40, 0.07); }
+    .pill.effect { color: #1565c0; background: rgba(21, 101, 192, 0.07); }
+    .pill.dep { color: #4fa58b; background: rgba(79, 165, 139, 0.07); }
 
-    .doc-dep:hover {
-      background: rgba(0, 0, 0, 0.03);
-      border-color: rgba(0, 0, 0, 0.12);
-    }
-
-    .dep-name {
-      font-size: 11px;
-      font-weight: 500;
-      color: #333;
-    }
-
-    .dep-key {
-      font-size: 9px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      color: #aaa;
-    }
-
-    .doc-links {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-    }
-
-    .doc-link {
+    .link {
       font-size: 11px;
       color: #1565c0;
       text-decoration: none;
+      margin-right: 8px;
     }
 
-    .doc-link:hover {
-      text-decoration: underline;
-    }
+    .link:hover { text-decoration: underline; }
 
-    .doc-lineage {
-      font-size: 12px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      color: #666;
-    }
-
-    .view-source-btn {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 10px 16px;
-      font-size: 12px;
+    .source-btn {
+      margin-top: 10px;
+      padding: 6px 14px;
+      font-size: 11px;
       font-weight: 600;
       color: #4a6fa5;
-      background: rgba(74, 111, 165, 0.06);
-      border: 1px solid rgba(74, 111, 165, 0.15);
-      border-radius: 6px;
+      background: none;
+      border: 1px solid rgba(74, 111, 165, 0.2);
       cursor: pointer;
-      margin-top: 4px;
     }
 
-    .view-source-btn:hover {
-      background: rgba(74, 111, 165, 0.12);
-    }
+    .source-btn:hover { background: rgba(74, 111, 165, 0.06); }
 
-    /* --- body --- */
+    /* --- loading / error --- */
 
-    .modal-body {
-      flex: 1;
-      overflow-y: auto;
-      overflow-x: hidden;
-      padding: 6px;
-    }
-
-    .modal-body.center {
+    .status {
       display: flex;
       align-items: center;
-      justify-content: center;
-      gap: 10px;
-      min-height: 120px;
-      padding: 16px;
+      gap: 8px;
+      padding-top: 24px;
+      padding-bottom: 24px;
+      font-size: 11px;
+      color: #888;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     }
+
+    .status.error { color: #b00020; }
 
     .loading-dot {
       width: 6px;
@@ -482,190 +312,61 @@ import type { BeeDocEntry } from '../core/tree-node'
       50% { opacity: 1; }
     }
 
-    .loading-text {
-      font-size: 11px;
-      color: #888;
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    /* --- responsive widths --- */
+
+    @media (min-width: 1200px) {
+      .content > * { max-width: 800px; }
     }
 
-    .error-text {
-      font-size: 12px;
-      color: #b00020;
+    @media (max-width: 768px) {
+      .content > * { max-width: 560px; }
     }
 
     @media (max-width: 600px) {
-      .modal {
-        width: 100vw;
-        height: 100dvh;
-        max-height: 100dvh;
-        top: 0;
-        left: 0;
-        transform: none;
-        border-radius: 0;
-        animation: none;
-      }
+      .content > * { max-width: none; }
+      .content { --gutter: 12px; }
+    }
 
-      .modal-header {
-        padding: 20px 20px 16px;
-        gap: 10px;
-      }
+    /* --- mobile --- */
 
-      .header-left {
-        flex-direction: column;
-        align-items: flex-start;
+    @media (max-width: 600px) {
+      .hdr {
+        flex-wrap: wrap;
+        padding: 8px 12px;
         gap: 8px;
       }
 
-      .kind-badge {
-        font-size: 10px;
-        padding: 4px 10px;
-        border-radius: 4px;
-      }
-
-      .display-name {
-        font-size: 20px;
-        font-weight: 700;
-        white-space: normal;
-        word-break: break-word;
-        line-height: 1.25;
-        color: #111;
-      }
-
-      .meta-pill {
-        font-size: 11px;
-        padding: 3px 10px;
-        border-radius: 6px;
-      }
-
-      .close-btn {
-        font-size: 22px;
+      .hdr-back {
         min-width: 44px;
+        min-height: 36px;
+        font-size: 13px;
+      }
+
+      .hdr-title { gap: 6px; }
+      .hdr-kind { font-size: 10px; }
+      .hdr-name { font-size: 14px; }
+
+      .hdr-meta {
+        width: 100%;
+        font-size: 10px;
+        gap: 4px;
+      }
+
+      .hdr-copy { font-size: 10px; padding: 2px 10px; min-height: 28px; }
+
+      .details { padding-top: 14px; padding-bottom: 14px; }
+      .desc { font-size: 14px; }
+      .props { font-size: 13px; }
+      .props code { font-size: 13px; }
+      .prop-label { font-size: 10px; width: 60px; }
+
+      .pill { padding: 2px 8px; margin: 2px 4px 2px 0; }
+
+      .source-btn {
+        font-size: 14px;
+        padding: 12px 20px;
         min-height: 44px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        position: absolute;
-        top: 12px;
-        right: 8px;
-      }
-
-      .header-top {
-        position: relative;
-      }
-
-      .sig-row {
-        background: rgba(0, 0, 0, 0.03);
-        padding: 10px 12px;
-        border-radius: 8px;
-        gap: 10px;
-      }
-
-      .sig-value {
-        font-size: 11px;
-        color: #555;
-      }
-
-      .sig-copy {
-        font-size: 11px;
-        padding: 6px 14px;
-        min-height: 32px;
-        border-radius: 6px;
-      }
-
-      /* doc panel — card-style sections */
-      .doc-panel {
-        padding: 20px;
-        gap: 16px;
-        overflow-y: auto;
-        flex: 1;
-      }
-
-      .doc-description {
-        font-size: 15px;
-        line-height: 1.6;
-        color: #333;
-      }
-
-      .doc-section {
-        flex-direction: column;
-        gap: 6px;
-        padding: 12px 14px;
-        background: rgba(0, 0, 0, 0.02);
-        border-radius: 10px;
-        border: 1px solid rgba(0, 0, 0, 0.04);
-      }
-
-      .doc-label {
-        font-size: 11px;
-        font-weight: 700;
-        width: auto;
-        color: #777;
-      }
-
-      .doc-lineage {
-        font-size: 14px;
-        color: #444;
-      }
-
-      .doc-pills {
-        gap: 8px;
-      }
-
-      .doc-pill {
-        font-size: 13px;
-        padding: 5px 12px;
-        border-radius: 6px;
-      }
-
-      .doc-command {
-        font-size: 16px;
-      }
-
-      .doc-alias {
-        font-size: 13px;
-      }
-
-      .dep-name {
-        font-size: 14px;
-      }
-
-      .dep-key {
-        font-size: 11px;
-      }
-
-      .doc-dep {
-        padding: 10px 12px;
-        min-height: 44px;
-        align-items: center;
-        border-radius: 8px;
-      }
-
-      .doc-deps {
-        gap: 6px;
-      }
-
-      .doc-link {
-        font-size: 14px;
-        padding: 6px 0;
-      }
-
-      .view-source-btn {
-        font-size: 14px;
-        padding: 14px 20px;
-        min-height: 48px;
-        border-radius: 10px;
-      }
-
-      .modal-body {
-        padding: 8px;
-      }
-
-      .loading-text {
-        font-size: 12px;
-      }
-
-      .error-text {
-        font-size: 13px;
+        width: 100%;
       }
     }
   `]

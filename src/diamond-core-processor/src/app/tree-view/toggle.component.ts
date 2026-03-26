@@ -33,7 +33,7 @@ import { Component, input, output } from '@angular/core'
       position: absolute;
       inset: 2px 0;
       height: 8px;
-      border-radius: 4px;
+      border-radius: 2px;
       background: rgba(0,0,0,0.10);
       transition: background 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     }
@@ -83,7 +83,7 @@ import { Component, input, output } from '@angular/core'
       .track {
         inset: 3px 0;
         height: 14px;
-        border-radius: 7px;
+        border-radius: 2px;
       }
 
       .thumb {
