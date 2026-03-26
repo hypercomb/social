@@ -211,12 +211,12 @@ export class HexSdfTextureShader {
       // branch indicator: hex ring at edge + subtle portal glow
       if (vHasBranch > 0.5) {
         float branchRing = 1.0 - smoothstep(0.0, aa * 3.0, abs(d));
-        vec3 ringColor = vec3(0.45, 0.72, 1.0);
-        color.rgb = mix(color.rgb, ringColor, branchRing * 0.8);
+        vec3 ringColor = vec3(0.55, 0.55, 0.55);
+        color.rgb = mix(color.rgb, ringColor, branchRing * 0.45);
 
         float dist = length(local) / u_radiusPx;
         float glow = exp(-dist * dist * 2.2);
-        color.rgb += ringColor * glow * 0.18;
+        color.rgb += ringColor * glow * 0.10;
       }
 
       // premultiplied alpha output for correct blending at hex edges
