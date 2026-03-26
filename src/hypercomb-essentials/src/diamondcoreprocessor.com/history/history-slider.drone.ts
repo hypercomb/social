@@ -18,6 +18,7 @@ export class HistorySliderDrone {
   #label: HTMLElement | null = null
   #promoteBtn: HTMLButtonElement | null = null
   #visible = false
+  #reviseActive = false
   #state: CursorState = { locationSig: '', position: 0, total: 0, rewound: false }
 
   constructor() {
@@ -27,10 +28,17 @@ export class HistorySliderDrone {
       this.#syncUI()
     })
 
+    // Listen for revision mode toggle
+    EffectBus.on<{ active: boolean }>('revise:mode-changed', ({ active }) => {
+      this.#reviseActive = active
+      this.#syncUI()
+    })
+
     // Listen for keymap invocations
     EffectBus.on<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
       if (cmd === 'history.undo') this.#undo()
       if (cmd === 'history.redo') this.#redo()
+      if (cmd === 'history.exit-revise') this.#exitRevise()
     })
 
     // Register keybindings
@@ -61,6 +69,13 @@ export class HistorySliderDrone {
           category: 'History',
           pierce: true,
         },
+        {
+          cmd: 'history.exit-revise',
+          sequence: [[{ key: 'Escape' }]],
+          description: 'Exit revision mode',
+          category: 'History',
+          pierce: true,
+        },
       ],
     }
 
@@ -82,6 +97,12 @@ export class HistorySliderDrone {
   #promote(): void {
     const cursor = get<HistoryCursorService>('@diamondcoreprocessor.com/HistoryCursorService')
     cursor?.promote()
+  }
+
+  #exitRevise(): void {
+    if (!this.#reviseActive) return
+    const queen = get('@diamondcoreprocessor.com/ReviseQueenBee') as any
+    if (queen?.invoke) queen.invoke('')
   }
 
   // ── DOM ──────────────────────────────────────────────────────
@@ -185,7 +206,10 @@ export class HistorySliderDrone {
 
     const { position, total, rewound } = this.#state
 
-    if (total === 0) {
+    // Slider is only visible when revision mode is active AND there's history
+    const shouldShow = this.#reviseActive && total > 0
+
+    if (!shouldShow) {
       if (this.#visible) {
         this.#bar.style.display = 'none'
         this.#visible = false

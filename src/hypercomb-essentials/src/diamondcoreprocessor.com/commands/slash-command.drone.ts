@@ -200,6 +200,19 @@ class MoveProvider implements SlashCommandProvider {
   }
 }
 
+class ReviseProvider implements SlashCommandProvider {
+  readonly name = 'revise-provider'
+  readonly priority = 100
+  readonly commands: SlashCommand[] = [
+    { name: 'revise', description: 'Toggle revision mode (history clock)', aliases: ['rev', 'history'] }
+  ]
+
+  async execute(_commandName: string, args: string): Promise<void> {
+    const queen = get('@diamondcoreprocessor.com/ReviseQueenBee') as any
+    if (queen?.invoke) await queen.invoke(args)
+  }
+}
+
 class LlmProvider implements SlashCommandProvider {
   readonly name = 'llm-provider'
   readonly priority = 100
@@ -231,5 +244,6 @@ _slashCommands.addProvider(new FormatSlashProvider())
 _slashCommands.addProvider(new LayoutProvider())
 _slashCommands.addProvider(new NeonProvider())
 _slashCommands.addProvider(new MoveProvider())
+_slashCommands.addProvider(new ReviseProvider())
 _slashCommands.addProvider(new LlmProvider())
 window.ioc.register('@diamondcoreprocessor.com/SlashCommandDrone', _slashCommands)
