@@ -247,6 +247,7 @@ export class TileOverlayDrone extends Drone {
       document.removeEventListener('pointermove', this.#onPointerMove)
       document.removeEventListener('dragover', this.#onDragOverTrack)
       document.removeEventListener('click', this.#onClick)
+      document.removeEventListener('pointerup', this.#onPointerUp)
       document.removeEventListener('contextmenu', this.#onContextMenu)
       this.#listening = false
     }
@@ -372,6 +373,7 @@ export class TileOverlayDrone extends Drone {
     document.addEventListener('pointermove', this.#onPointerMove)
     document.addEventListener('dragover', this.#onDragOverTrack)
     document.addEventListener('click', this.#onClick)
+    document.addEventListener('pointerup', this.#onPointerUp)
     document.addEventListener('contextmenu', this.#onContextMenu)
   }
 
@@ -569,14 +571,20 @@ export class TileOverlayDrone extends Drone {
     }
   }
 
+  // Cancel editor on right-click release (mirrors Escape cascade priority 1)
+  #onPointerUp = (e: PointerEvent): void => {
+    if (e.button !== 2) return
+    if (!this.#editing) return
+    const drone = window.ioc.get<{ cancelEditing(): void }>('@diamondcoreprocessor.com/TileEditorDrone')
+    drone?.cancelEditing()
+  }
+
   #onContextMenu = (e: MouseEvent): void => {
     if (this.#navigationBlocked) return
 
-    // Cancel editor on right-click (mirrors Escape cascade priority 1)
+    // Suppress browser menu while editing (cancel handled by pointerup)
     if (this.#editing) {
       e.preventDefault()
-      const drone = window.ioc.get<{ cancelEditing(): void }>('@diamondcoreprocessor.com/TileEditorDrone')
-      drone?.cancelEditing()
       return
     }
 
