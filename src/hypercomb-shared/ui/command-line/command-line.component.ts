@@ -828,6 +828,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.syncSignalsFromDom()
     this.clampActiveIndex()
 
+    // auto-populate index when typing '(' after /move
+    if (this.#autoPopulateMoveIndex(el)) {
+      this.syncSignalsFromDom()
+    }
+
     // direct command — bare word matches a queen bee, fire immediately
     if (this.#tryDirectCommand(el)) return
 
@@ -903,9 +908,14 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       return
     }
 
-    // Ctrl+Arrow in move-target-index: scrub target index using hex offsets
-    if ((e.ctrlKey || e.metaKey) && this.#selectPhase() === 'move-target-index' && this.#handleMoveScrub(e)) {
-      return
+    // Arrow keys inside /move(N) — scrub index (works with or without /select[...] prefix)
+    if (this.#isInMoveParen(v)) {
+      if ((e.ctrlKey || e.metaKey) && this.#handleMoveScrub(e)) return
+      if (!e.ctrlKey && !e.metaKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+        e.preventDefault()
+        this.#scrubMoveIndex(e.key === 'ArrowUp' ? -1 : 1)
+        return
+      }
     }
 
     // Plain Up/Down in move-target-index: increment/decrement the index number.
@@ -1046,9 +1056,14 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const raw = this.input.nativeElement.value.slice(1).trim()
     if (!raw) { this.clear(); return }
 
+    // split on first space or '(' — /move(5) → command 'move', args '(5)'
     const spaceIdx = raw.indexOf(' ')
-    const commandName = spaceIdx === -1 ? raw : raw.slice(0, spaceIdx)
-    const args = spaceIdx === -1 ? '' : raw.slice(spaceIdx + 1).trim()
+    const parenIdx = raw.indexOf('(')
+    const delimIdx = spaceIdx >= 0 && (parenIdx < 0 || spaceIdx < parenIdx) ? spaceIdx
+      : parenIdx >= 0 ? parenIdx
+      : -1
+    const commandName = delimIdx === -1 ? raw : raw.slice(0, delimIdx)
+    const args = delimIdx === -1 ? '' : raw.slice(delimIdx === parenIdx ? delimIdx : delimIdx + 1).trim()
 
     const drone = get('@diamondcoreprocessor.com/SlashCommandDrone') as any
     if (drone?.execute) {
@@ -1375,7 +1390,63 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     return labels.join(',').length > 64
   }
 
-  // ── Ctrl+Arrow move index scrub ──────────────────────────────
+  // ── move index helpers ─────────────────────────────────────
+
+  /**
+   * When the user types '(' right after /move, auto-insert the active tile's
+   * current index so they can immediately scrub with arrow keys.
+   * Returns true if the value was modified.
+   */
+  #autoPopulateMoveIndex(el: HTMLInputElement): boolean {
+    const v = el.value
+    // Match /move( at the end with nothing after the paren (just typed it)
+    if (!v.match(/\/move\($/i)) return false
+
+    const selection = get('@diamondcoreprocessor.com/SelectionService') as
+      { active: string | null; selected: ReadonlySet<string> } | undefined
+    const activeLabel = selection?.active
+    if (!activeLabel) {
+      // No active tile — default to 0
+      el.value = v + '0'
+      return true
+    }
+
+    // Find the index of the active tile
+    const axialSvc = get('@diamondcoreprocessor.com/AxialService') as any
+    const cellLabels = (get('@diamondcoreprocessor.com/MoveDrone') as any)?._cellLabels
+    // Fall back to scanning axial items for the label's position
+    const seedNames = this.seedNames$()
+    const idx = seedNames.indexOf(activeLabel)
+    el.value = v + (idx >= 0 ? idx : 0)
+    return true
+  }
+
+  /** Detect if cursor is inside a /move( parenthesized index — works with or without /select[...] prefix */
+  #isInMoveParen(v: string): boolean {
+    const moveIdx = v.lastIndexOf('/move')
+    if (moveIdx < 0) return false
+    const afterMove = v.slice(moveIdx + 5)
+    return afterMove.includes('(')
+  }
+
+  /** Increment/decrement the numeric index inside /move(N) by `delta` (+1 or -1). */
+  #scrubMoveIndex(delta: number): void {
+    const v = this.input.nativeElement.value
+    const parenIdx = v.lastIndexOf('(')
+    if (parenIdx < 0) return
+
+    const currentIndex = parseInt(v.slice(parenIdx + 1).replace(/\)$/, ''), 10)
+    if (isNaN(currentIndex)) return
+
+    const axialSvc = get('@diamondcoreprocessor.com/AxialService') as any
+    if (!axialSvc?.items) return
+
+    const maxIndex = axialSvc.items.size - 1
+    const newIndex = Math.max(0, Math.min(currentIndex + delta, maxIndex))
+
+    this.input.nativeElement.value = v.slice(0, parenIdx + 1) + newIndex
+    this.syncSignalsFromDom()
+  }
 
   /** Scrub the move target index with Ctrl+Arrow using hex offsets. Returns true if handled. */
   #handleMoveScrub(e: KeyboardEvent): boolean {

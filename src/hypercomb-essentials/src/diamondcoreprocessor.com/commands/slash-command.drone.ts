@@ -156,6 +156,37 @@ class NeonProvider implements SlashCommandProvider {
   }
 }
 
+class MoveProvider implements SlashCommandProvider {
+  readonly name = 'move-provider'
+  readonly priority = 100
+  readonly commands: SlashCommand[] = [
+    { name: 'move', description: 'Toggle move mode for drag-reordering tiles' }
+  ]
+
+  async execute(_commandName: string, args: string): Promise<void> {
+    // /move(index) — commit a move using the current selection
+    const indexMatch = args.match(/\((\d+)\)/) || args.match(/\((\d+)$/)
+    if (indexMatch) {
+      const targetIndex = parseInt(indexMatch[1], 10)
+      const selection = get('@diamondcoreprocessor.com/SelectionService') as
+        { selected: ReadonlySet<string> } | undefined
+      const labels = selection ? Array.from(selection.selected) : []
+      if (labels.length > 0) {
+        const moveDrone = get('@diamondcoreprocessor.com/MoveDrone') as any
+        if (moveDrone) {
+          if (moveDrone.moveCommandActive) moveDrone.cancelCommandMove()
+          moveDrone.beginCommandMove(labels)
+          await moveDrone.commitCommandMoveAt(targetIndex)
+        }
+      }
+      return
+    }
+
+    // /move — toggle move mode
+    EffectBus.emit('controls:action', { action: 'move' })
+  }
+}
+
 class LlmProvider implements SlashCommandProvider {
   readonly name = 'llm-provider'
   readonly priority = 100
@@ -185,5 +216,6 @@ _slashCommands.addProvider(new DebugProvider())
 _slashCommands.addProvider(new RemoveProvider())
 _slashCommands.addProvider(new FormatSlashProvider())
 _slashCommands.addProvider(new NeonProvider())
+_slashCommands.addProvider(new MoveProvider())
 _slashCommands.addProvider(new LlmProvider())
 window.ioc.register('@diamondcoreprocessor.com/SlashCommandDrone', _slashCommands)

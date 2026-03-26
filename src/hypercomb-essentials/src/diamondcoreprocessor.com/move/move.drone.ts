@@ -182,8 +182,11 @@ export class MoveDrone extends Drone {
     const selected = selection?.selected as ReadonlySet<string> | undefined
 
     this.#movedGroup.clear()
-    if (selected && selected.size > 0 && selected.has(anchorLabel)) {
-      // move the whole selection — scan all labels, skip empty ones
+    if (selected && selected.size > 0) {
+      if (!selected.has(anchorLabel)) {
+        this.#end(source)
+        return false
+      }
       for (let i = 0; i < this.#cellLabels.length; i++) {
         const label = this.#cellLabels[i]
         if (!label) continue
@@ -194,7 +197,6 @@ export class MoveDrone extends Drone {
         }
       }
     } else {
-      // single tile
       this.#movedGroup.set(anchorLabel, { q: anchorAxial.q, r: anchorAxial.r })
     }
 
