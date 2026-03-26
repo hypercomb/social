@@ -61,6 +61,21 @@ import type { TreeNodeKind } from '../core/tree-node'
     .diamond.dependency {
       background: linear-gradient(135deg, #b8e8d4, #4fa58b);
     }
+
+    @media (max-width: 600px) {
+      :host {
+        min-width: 32px;
+        min-height: 32px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .diamond {
+        width: 16px;
+        height: 16px;
+      }
+    }
   `]
 })
 export class DiamondIconComponent {

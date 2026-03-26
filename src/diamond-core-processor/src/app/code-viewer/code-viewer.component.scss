@@ -83,3 +83,28 @@
   word-break: break-all;
   tab-size: 2;
 }
+
+@media (max-width: 600px) {
+  .toolbar {
+    padding: 8px 12px;
+  }
+
+  .label {
+    font-size: 11px;
+  }
+
+  .btn {
+    font-size: 11px;
+    padding: 6px 12px;
+    min-height: 36px;
+  }
+
+  .pre {
+    padding: 12px;
+  }
+
+  .code {
+    font-size: 12px;
+    line-height: 1.6;
+  }
+}

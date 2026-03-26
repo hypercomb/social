@@ -189,3 +189,65 @@
   box-shadow: 0 12px 18px rgba(0, 0, 0, 0.08);
   transform: translateY(-1px);
 }
+
+@media (max-width: 600px) {
+  .outer-container {
+    padding: 0;
+  }
+
+  .main-container {
+    border-radius: 0;
+    max-width: none;
+  }
+
+  .topbar {
+    padding: 1rem;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
+  .intent-title {
+    font-size: 18px;
+  }
+
+  .intent-subtitle {
+    font-size: 13px;
+  }
+
+  .page-grid {
+    grid-template-columns: 1fr;
+    padding: 1rem;
+    gap: 1rem;
+  }
+
+  .left, .right {
+    height: auto;
+  }
+
+  .panel {
+    border-radius: 12px;
+    padding: 0.875rem;
+  }
+
+  .panel-title {
+    font-size: 12px;
+  }
+
+  .list {
+    font-size: 14px;
+    padding-left: 1rem;
+  }
+
+  .bottom-buttons {
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+    padding: 0.875rem;
+  }
+
+  .button {
+    font-size: 15px;
+    height: 48px;
+    border-radius: 10px;
+  }
+}

@@ -73,6 +73,28 @@ import { Component, input, output } from '@angular/core'
     .toggle.dimmed {
       opacity: 0.3;
     }
+
+    @media (max-width: 600px) {
+      .toggle {
+        width: 36px;
+        height: 20px;
+      }
+
+      .track {
+        inset: 3px 0;
+        height: 14px;
+        border-radius: 7px;
+      }
+
+      .thumb {
+        width: 20px;
+        height: 20px;
+      }
+
+      .toggle.on .thumb {
+        transform: translateX(16px);
+      }
+    }
   `]
 })
 export class ToggleComponent {

@@ -41,3 +41,7 @@ body {
 
 /* highlight.js theme for code viewer */
 @import 'highlight.js/styles/github-dark.css';
+
+@media (max-width: 600px) {
+  input, textarea, select { font-size: 16px !important; }
+}

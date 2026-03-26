@@ -10,7 +10,7 @@ import type { TreeNode } from '../core/tree-node'
   standalone: true,
   imports: [ToggleComponent, DiamondIconComponent],
   template: `
-    <div class="row" [style.padding-left.px]="10 + node().depth * 20">
+    <div class="row" [style.--depth]="node().depth">
       @if (node().kind === 'layer' || node().kind === 'domain') {
         <dcp-toggle
           [enabled]="enabled()"
@@ -42,6 +42,10 @@ import type { TreeNode } from '../core/tree-node'
         </span>
       }
 
+      @if (node().signature && (node().kind === 'bee' || node().kind === 'worker' || node().kind === 'drone' || node().kind === 'dependency')) {
+        <button class="info-btn" (click)="openDetail.emit(node()); $event.stopPropagation()">&#9432;</button>
+      }
+
       @if (hasChildren()) {
         <button class="chevron" (click)="expandToggle.emit(node())">
           {{ node().expanded ? '\u25BE' : '\u25B8' }}
@@ -57,6 +61,7 @@ import type { TreeNode } from '../core/tree-node'
       align-items: center;
       gap: 6px;
       padding: 5px 10px 5px 0;
+      padding-left: calc(10px + var(--depth, 0) * 20px);
       border-bottom: 1px solid rgba(0,0,0,0.05);
     }
 
@@ -143,6 +148,65 @@ import type { TreeNode } from '../core/tree-node'
     .chevron:hover {
       color: #222;
     }
+
+    /* info button — hidden on desktop, visible on mobile */
+    .info-btn {
+      display: none;
+    }
+
+    @media (max-width: 600px) {
+      .row {
+        padding-left: calc(8px + var(--depth, 0) * 14px);
+        gap: 8px;
+        padding-top: 10px;
+        padding-bottom: 10px;
+        min-height: 48px;
+      }
+
+      .name {
+        font-size: 15px;
+        font-weight: 500;
+      }
+
+      /* hide technical details — tap to see them in the detail view */
+      .description,
+      .lineage,
+      .sig,
+      .audit-badge {
+        display: none;
+      }
+
+      .info-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: none;
+        border: 1px solid rgba(0, 0, 0, 0.08);
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 18px;
+        color: #4a6fa5;
+        min-width: 40px;
+        min-height: 40px;
+        flex-shrink: 0;
+        margin-left: auto;
+        transition: background 0.15s;
+      }
+
+      .info-btn:active {
+        background: rgba(74, 111, 165, 0.08);
+      }
+
+      .chevron {
+        font-size: 18px;
+        padding: 4px 8px;
+        min-width: 44px;
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+    }
   `]
 })
 export class TreeRowComponent {
@@ -153,6 +217,7 @@ export class TreeRowComponent {
 
   toggle = output<TreeNode>()
   open = output<TreeNode>()
+  openDetail = output<TreeNode>()
   expandToggle = output<TreeNode>()
 
   description = computed(() => {

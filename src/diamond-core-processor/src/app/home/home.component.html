@@ -73,6 +73,7 @@
             [nodeMap]="nodeMap()"
             (toggle)="onToggle($event)"
             (open)="onOpen($event)"
+            (openDetail)="onOpenDetail($event)"
             (expandToggle)="onExpandToggle($event)" />
         }
       </section>
@@ -89,6 +90,8 @@
         [rootSig]="inspectSection()!.rootSig"
         [kind]="inspectKind()"
         [doc]="inspectDoc()"
+        [lineage]="inspectLineage()"
+        [mode]="inspectMode()"
         [visible]="true"
         (close)="onCloseInspector()"
         (navigateSig)="onNavigateSig($event)" />

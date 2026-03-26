@@ -18,6 +18,7 @@ import type { TreeNode } from '../core/tree-node'
           [hasChildren]="node.children.length > 0 || !node.loaded"
           (toggle)="toggle.emit($event)"
           (open)="open.emit($event)"
+          (openDetail)="openDetail.emit($event)"
           (expandToggle)="expandToggle.emit($event)" />
 
         @if (node.expanded && node.children.length) {
@@ -27,6 +28,7 @@ import type { TreeNode } from '../core/tree-node'
             [nodeMap]="nodeMap()"
             (toggle)="toggle.emit($event)"
             (open)="open.emit($event)"
+            (openDetail)="openDetail.emit($event)"
             (expandToggle)="expandToggle.emit($event)" />
         }
       }
@@ -41,6 +43,7 @@ export class TreeViewComponent {
 
   toggle = output<TreeNode>()
   open = output<TreeNode>()
+  openDetail = output<TreeNode>()
   expandToggle = output<TreeNode>()
 
   isEmptyFolder(node: TreeNode): boolean {

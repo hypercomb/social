@@ -180,6 +180,7 @@ import { AuditorService } from '../core/auditor.service'
       outline: none;
       transition: border-color 0.15s;
       background: #fafafa;
+      cursor: text;
     }
 
     .field:focus {
@@ -325,6 +326,7 @@ import { AuditorService } from '../core/auditor.service'
       text-align: center;
       background: #fff;
       outline: none;
+      cursor: text;
     }
 
     .threshold-input:focus {
@@ -334,6 +336,122 @@ import { AuditorService } from '../core/auditor.service'
     .threshold-label {
       font-size: 11px;
       color: #888;
+    }
+
+    @media (max-width: 600px) {
+      .toggle {
+        width: 36px;
+        height: 36px;
+        font-size: 17px;
+      }
+
+      .panel {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        width: 100%;
+        border-radius: 0;
+        z-index: 1000;
+        overflow-y: auto;
+        animation: none;
+      }
+
+      .panel-header {
+        padding: 16px;
+      }
+
+      .panel-header h3 {
+        font-size: 16px;
+      }
+
+      .badge {
+        font-size: 12px;
+        padding: 3px 10px;
+      }
+
+      .description {
+        font-size: 13px;
+        margin: 10px 16px 16px;
+      }
+
+      .add-row {
+        flex-direction: column;
+        padding: 0 16px 16px;
+        gap: 10px;
+      }
+
+      .add-fields {
+        gap: 8px;
+      }
+
+      .field {
+        font-size: 16px;
+        padding: 10px 12px;
+        min-height: 44px;
+        box-sizing: border-box;
+      }
+
+      .field-name {
+        width: 100%;
+      }
+
+      .btn-add {
+        font-size: 14px;
+        padding: 12px 16px;
+        min-height: 44px;
+        width: 100%;
+      }
+
+      .source-item {
+        padding: 12px 16px;
+        min-height: 48px;
+      }
+
+      .source-name {
+        font-size: 14px;
+      }
+
+      .source-url {
+        font-size: 12px;
+      }
+
+      .btn-remove {
+        min-width: 44px;
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+      }
+
+      .empty-icon {
+        font-size: 18px;
+      }
+
+      .empty-text {
+        font-size: 13px;
+      }
+
+      .panel-footer {
+        padding: 14px 16px;
+      }
+
+      .threshold label {
+        font-size: 13px;
+      }
+
+      .threshold-input {
+        font-size: 16px;
+        width: 50px;
+        padding: 6px 8px;
+        min-height: 36px;
+      }
+
+      .threshold-label {
+        font-size: 13px;
+      }
     }
   `]
 })

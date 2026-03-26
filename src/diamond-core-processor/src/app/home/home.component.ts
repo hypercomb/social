@@ -50,6 +50,8 @@ export class HomeComponent {
   ]
   readonly inspectSection = signal<DomainSection | null>(null)
   readonly inspectDoc = signal<BeeDocEntry | undefined>(undefined)
+  readonly inspectLineage = signal('')
+  readonly inspectMode = signal<'code' | 'detail'>('code')
 
   // all nodes flattened for toggle lookups
   readonly toggleMap = computed(() => {
@@ -208,14 +210,26 @@ export class HomeComponent {
 
   onOpen(node: TreeNode): void {
     if ((node.kind === 'bee' || node.kind === 'worker' || node.kind === 'drone' || node.kind === 'dependency') && node.signature) {
-      const section = this.sections().find(s => this.#containsNode(s.items, node.id))
-      this.inspectBee.set(node.signature)
-      this.inspectKind.set(node.kind)
-      this.inspectSection.set(section ?? null)
-      this.inspectDoc.set(node.doc)
+      this.#openInspector(node, 'code')
     } else {
       this.onExpandToggle(node)
     }
+  }
+
+  onOpenDetail(node: TreeNode): void {
+    if ((node.kind === 'bee' || node.kind === 'worker' || node.kind === 'drone' || node.kind === 'dependency') && node.signature) {
+      this.#openInspector(node, 'detail')
+    }
+  }
+
+  #openInspector(node: TreeNode, mode: 'code' | 'detail'): void {
+    const section = this.sections().find(s => this.#containsNode(s.items, node.id))
+    this.inspectBee.set(node.signature!)
+    this.inspectKind.set(node.kind)
+    this.inspectSection.set(section ?? null)
+    this.inspectDoc.set(node.doc)
+    this.inspectLineage.set(node.lineage)
+    this.inspectMode.set(mode)
   }
 
   onCloseInspector(): void {
@@ -223,6 +237,7 @@ export class HomeComponent {
     this.inspectKind.set('bee')
     this.inspectSection.set(null)
     this.inspectDoc.set(undefined)
+    this.inspectLineage.set('')
   }
 
   onNavigateSig(sig: string): void {

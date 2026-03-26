@@ -30,11 +30,18 @@ import type { BeeDocEntry } from '../core/tree-node'
           </div>
         </header>
 
-        <!-- doc panel -->
+        <!-- doc panel — shown always on detail mode, shown as collapsible on code mode -->
         @if (doc(); as d) {
-          <div class="doc-panel">
+          <div class="doc-panel" [class.detail-mode]="activeView() === 'detail'">
             @if (d.description) {
               <p class="doc-description">{{ d.description }}</p>
+            }
+
+            @if (lineage()) {
+              <div class="doc-section">
+                <span class="doc-label">location</span>
+                <span class="doc-lineage">{{ lineage() }}</span>
+              </div>
             }
 
             @if (d.command) {
@@ -104,6 +111,11 @@ import type { BeeDocEntry } from '../core/tree-node'
                 </div>
               </div>
             }
+
+            <!-- view source button in detail mode -->
+            @if (activeView() === 'detail') {
+              <button class="view-source-btn" (click)="activeView.set('code')">View Source</button>
+            }
           </div>
         }
 
@@ -120,7 +132,8 @@ import type { BeeDocEntry } from '../core/tree-node'
           </div>
         }
 
-        @if (source() && !loading()) {
+        <!-- code viewer — shown when activeView is 'code' -->
+        @if (source() && !loading() && activeView() === 'code') {
           <div class="modal-body">
             <hc-code-viewer [code]="source()" />
           </div>
@@ -413,6 +426,31 @@ import type { BeeDocEntry } from '../core/tree-node'
       text-decoration: underline;
     }
 
+    .doc-lineage {
+      font-size: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: #666;
+    }
+
+    .view-source-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 10px 16px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #4a6fa5;
+      background: rgba(74, 111, 165, 0.06);
+      border: 1px solid rgba(74, 111, 165, 0.15);
+      border-radius: 6px;
+      cursor: pointer;
+      margin-top: 4px;
+    }
+
+    .view-source-btn:hover {
+      background: rgba(74, 111, 165, 0.12);
+    }
+
     /* --- body --- */
 
     .modal-body {
@@ -454,6 +492,182 @@ import type { BeeDocEntry } from '../core/tree-node'
       font-size: 12px;
       color: #b00020;
     }
+
+    @media (max-width: 600px) {
+      .modal {
+        width: 100vw;
+        height: 100dvh;
+        max-height: 100dvh;
+        top: 0;
+        left: 0;
+        transform: none;
+        border-radius: 0;
+        animation: none;
+      }
+
+      .modal-header {
+        padding: 20px 20px 16px;
+        gap: 10px;
+      }
+
+      .header-left {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+      }
+
+      .kind-badge {
+        font-size: 10px;
+        padding: 4px 10px;
+        border-radius: 4px;
+      }
+
+      .display-name {
+        font-size: 20px;
+        font-weight: 700;
+        white-space: normal;
+        word-break: break-word;
+        line-height: 1.25;
+        color: #111;
+      }
+
+      .meta-pill {
+        font-size: 11px;
+        padding: 3px 10px;
+        border-radius: 6px;
+      }
+
+      .close-btn {
+        font-size: 22px;
+        min-width: 44px;
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: absolute;
+        top: 12px;
+        right: 8px;
+      }
+
+      .header-top {
+        position: relative;
+      }
+
+      .sig-row {
+        background: rgba(0, 0, 0, 0.03);
+        padding: 10px 12px;
+        border-radius: 8px;
+        gap: 10px;
+      }
+
+      .sig-value {
+        font-size: 11px;
+        color: #555;
+      }
+
+      .sig-copy {
+        font-size: 11px;
+        padding: 6px 14px;
+        min-height: 32px;
+        border-radius: 6px;
+      }
+
+      /* doc panel — card-style sections */
+      .doc-panel {
+        padding: 20px;
+        gap: 16px;
+        overflow-y: auto;
+        flex: 1;
+      }
+
+      .doc-description {
+        font-size: 15px;
+        line-height: 1.6;
+        color: #333;
+      }
+
+      .doc-section {
+        flex-direction: column;
+        gap: 6px;
+        padding: 12px 14px;
+        background: rgba(0, 0, 0, 0.02);
+        border-radius: 10px;
+        border: 1px solid rgba(0, 0, 0, 0.04);
+      }
+
+      .doc-label {
+        font-size: 11px;
+        font-weight: 700;
+        width: auto;
+        color: #777;
+      }
+
+      .doc-lineage {
+        font-size: 14px;
+        color: #444;
+      }
+
+      .doc-pills {
+        gap: 8px;
+      }
+
+      .doc-pill {
+        font-size: 13px;
+        padding: 5px 12px;
+        border-radius: 6px;
+      }
+
+      .doc-command {
+        font-size: 16px;
+      }
+
+      .doc-alias {
+        font-size: 13px;
+      }
+
+      .dep-name {
+        font-size: 14px;
+      }
+
+      .dep-key {
+        font-size: 11px;
+      }
+
+      .doc-dep {
+        padding: 10px 12px;
+        min-height: 44px;
+        align-items: center;
+        border-radius: 8px;
+      }
+
+      .doc-deps {
+        gap: 6px;
+      }
+
+      .doc-link {
+        font-size: 14px;
+        padding: 6px 0;
+      }
+
+      .view-source-btn {
+        font-size: 14px;
+        padding: 14px 20px;
+        min-height: 48px;
+        border-radius: 10px;
+      }
+
+      .modal-body {
+        padding: 8px;
+      }
+
+      .loading-text {
+        font-size: 12px;
+      }
+
+      .error-text {
+        font-size: 13px;
+      }
+    }
   `]
 })
 export class BeeInspectorComponent {
@@ -462,6 +676,8 @@ export class BeeInspectorComponent {
   rootSig = input('')
   kind = input<string>('bee')
   doc = input<BeeDocEntry | undefined>(undefined)
+  lineage = input('')
+  mode = input<'code' | 'detail'>('code')
   visible = input(false)
   close = output<void>()
   navigateSig = output<string>()
@@ -473,6 +689,7 @@ export class BeeInspectorComponent {
   error = signal<string | null>(null)
   loadedFrom = signal('')
   sigCopied = signal(false)
+  activeView = signal<'code' | 'detail'>('code')
   #loaded = ''
   #byteSize = signal(0)
 
@@ -501,8 +718,11 @@ export class BeeInspectorComponent {
     effect(() => {
       const sig = this.signature()
       const vis = this.visible()
-      if (vis && sig && this.#loaded !== sig) {
-        this.#load(sig)
+      if (vis && sig) {
+        this.activeView.set(this.mode())
+        if (this.#loaded !== sig) {
+          this.#load(sig)
+        }
       }
     })
   }
