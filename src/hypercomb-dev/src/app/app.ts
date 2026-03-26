@@ -31,6 +31,7 @@ import '@hypercomb/essentials/diamondcoreprocessor.com/keyboard/escape-cascade'
 import '@hypercomb/essentials/diamondcoreprocessor.com/navigation/bee-toggle'
 import { TileEditorComponent } from '@hypercomb/shared/ui/tile-editor/tile-editor.component'
 import { ControlsBarComponent, ShortcutSheetComponent, CommandPaletteComponent, ActivityLogComponent, SelectionContextMenuComponent } from '@hypercomb/shared/ui';
+import { FormatPainterComponent } from '@hypercomb/shared/ui/format-painter/format-painter.component'
 import { PortalOverlayComponent } from '@hypercomb/shared/ui/portal/portal-overlay.component'
 import { SensitivityBarComponent } from '@hypercomb/shared/ui/sensitivity-bar/sensitivity-bar.component'
 import { LayoutService } from '@hypercomb/essentials/diamondcoreprocessor.com/move/layout.service'
@@ -63,6 +64,8 @@ import { MeetingControlsWorker } from '@hypercomb/essentials/diamondcoreprocesso
 import { HypercombMeetingDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/meeting/meeting.drone'
 import { MeetingQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/meeting/meeting.queen'
 import { DeleteQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/delete.queen'
+import { FormatQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/format/format.queen'
+import { FormatPainterDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/format/format-painter.drone'
 
 const _deps = [
   AxialService,
@@ -109,13 +112,15 @@ const _deps = [
   HypercombMeetingDrone,
   MeetingQueenBee,
   DeleteQueenBee,
+  FormatQueenBee,
+  FormatPainterDrone,
 ]
 
 void _deps
 
 @Component({
   selector: 'app-root',
-  imports: [ControlsBarComponent, MeshHeaderComponent, RouterOutlet, CommandLineComponent, TileEditorComponent, ShortcutSheetComponent, CommandPaletteComponent, PortalOverlayComponent, ActivityLogComponent, SensitivityBarComponent, SelectionContextMenuComponent],
+  imports: [ControlsBarComponent, MeshHeaderComponent, RouterOutlet, CommandLineComponent, TileEditorComponent, ShortcutSheetComponent, CommandPaletteComponent, PortalOverlayComponent, ActivityLogComponent, SensitivityBarComponent, SelectionContextMenuComponent, FormatPainterComponent],
   styleUrls: ['./app.scss'] as any,
   templateUrl: './app.html'
 })

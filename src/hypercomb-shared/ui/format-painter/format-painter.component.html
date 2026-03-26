@@ -1,0 +1,41 @@
+@if (open()) {
+  <div class="fp-panel" role="dialog" aria-label="Format Painter">
+    <header class="fp-header">
+      <h3>Format Painter</h3>
+      <button class="fp-close" (click)="close()">&times;</button>
+    </header>
+
+    <div class="fp-body">
+      @if (!hasEntries()) {
+        <div class="fp-empty">No visual properties on this tile</div>
+      }
+
+      @for (entry of entries(); track entry.key) {
+        <div class="fp-entry" [class.disabled]="!entry.enabled" (click)="toggleEntry(entry.key)">
+          <input
+            type="checkbox"
+            [checked]="entry.enabled"
+            style="pointer-events: none"
+          />
+          @if (entry.preview) {
+            <span class="fp-swatch" [style.background]="entry.preview"></span>
+          }
+          <span class="fp-label">{{ entry.label }}</span>
+          <span class="fp-value">{{ entry.value }}</span>
+        </div>
+      }
+    </div>
+
+    @if (hasEntries()) {
+      <footer class="fp-footer">
+        <button
+          class="fp-apply"
+          [disabled]="enabledCount() === 0"
+          (click)="apply()"
+        >
+          Apply to selection
+        </button>
+      </footer>
+    }
+  </div>
+}

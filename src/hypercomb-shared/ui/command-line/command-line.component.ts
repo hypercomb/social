@@ -32,6 +32,28 @@ const BRACKET_TAG_RE = /^([^\[\/!#~]+):\[(.+?)\](.*)$/
 
 const DELETE_CMDS = new Set(['delete', 'del', 'rm'])
 
+/**
+ * Bracket commands — any `/command[items]` that is internally a select operation.
+ * `/format[abc]` is a shorthand for `/select[abc]/format`, etc.
+ * The regex matches the prefix; `normalizeSelectInput` rewrites to `/select[`.
+ */
+const BRACKET_CMD_RE = /^\/(select|format|fmt|fp)\[/i
+/** Normalise any bracket command to `/select[...` form for shared parsing. */
+function normalizeSelectInput(v: string): string {
+  if (v.match(/^\/select\[/)) return v
+  const m = v.match(/^\/(format|fmt|fp)\[/i)
+  if (!m) return v
+  const op = m[1].toLowerCase()
+  const rest = v.slice(m[0].length) // everything after the opening bracket
+  const bracketClose = rest.indexOf(']')
+  if (bracketClose < 0) {
+    // bracket still open: /format[abc → /select[abc
+    return '/select[' + rest
+  }
+  // bracket closed: /format[abc] → /select[abc]/format
+  return '/select[' + rest.slice(0, bracketClose) + ']/' + (op === 'fmt' || op === 'fp' ? 'format' : op) + rest.slice(bracketClose + 1)
+}
+
 const MOVE_ARROW_OFFSETS: Record<string, { dq: number; dr: number }> = {
   ArrowLeft:  { dq: -1, dr:  0 },
   ArrowRight: { dq:  1, dr:  0 },
@@ -286,10 +308,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       }
     }
 
-    // /select[...] command mode — must be checked before general slash mode
-    const selectMatch = v.match(/^\/select\[/)
-    if (selectMatch) {
-      return this.#parseSelectContext(v)
+    // bracket command mode (/select[, /format[, /fmt[, /fp[) — normalise and parse
+    if (BRACKET_CMD_RE.test(v)) {
+      return this.#parseSelectContext(normalizeSelectInput(v))
     }
 
     // /delete[...] bracket mode — provide head/raw per current fragment for intellisense
@@ -445,7 +466,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
       // operation phase: suggest operation keywords with / prefix
       if (phase === 'operation') {
-        const ops = ['/cut', '/copy', '/move', '/keyword', '/delete', '/opus', '/sonnet', '/haiku']
+        const ops = ['/cut', '/copy', '/move', '/keyword', '/delete', '/format', '/opus', '/sonnet', '/haiku']
         if (!ctx.normalized) return ops
         return ops.filter(o => o.startsWith('/' + ctx.normalized) || o.slice(1).startsWith(ctx.normalized))
       }
@@ -708,7 +729,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   /** On focus: expand truncated /select[...] back to full names */
   readonly #onInputFocus = (): void => {
     const v = this.input.nativeElement.value
-    if (!v.match(/^\/select\[/)) return
+    if (!BRACKET_CMD_RE.test(v)) return
     const selection = get('@diamondcoreprocessor.com/SelectionService') as any
     if (!selection || selection.count === 0) return
     const full = Array.from(selection.selected as Set<string>)
@@ -922,8 +943,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       return
     }
 
-    // /select[...] command execution
-    if (v.match(/^\/select\[/)) {
+    // bracket command execution (/select[, /format[, /fmt[, /fp[)
+    if (BRACKET_CMD_RE.test(v)) {
+      this.input.nativeElement.value = normalizeSelectInput(v)
       void this.#executeSelectCommand()
       return
     }
@@ -1128,6 +1150,15 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       return
     }
 
+    if (op === 'format' || op === 'fmt' || op === 'fp') {
+      // Set first selected tile as active so FormatQueenBee reads its properties
+      if (labels.length > 0) selection.setActive(labels[0])
+      const queen = get('@diamondcoreprocessor.com/FormatQueenBee') as any
+      if (queen?.invoke) await queen.invoke('')
+      this.#collapseToSelect(labels)
+      return
+    }
+
     if (['opus', 'sonnet', 'haiku', 'o', 's', 'h'].includes(op)) {
       const afterOp = afterBracket.slice(opMatch![0].length).trim()
       const queen = get('@diamondcoreprocessor.com/LlmQueenBee') as any
@@ -1239,8 +1270,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       return input
     }
 
-    // ── Pattern 2: /select[...] bracket syntax ──
-    const selectMatch = input.match(/^(\/select\[)(.+?)(\].*)$/)
+    // ── Pattern 2: bracket command syntax (/select[, /format[, etc.) ──
+    const normalizedInput = normalizeSelectInput(input)
+    const selectMatch = normalizedInput.match(/^(\/select\[)(.+?)(\].*)$/)
     if (selectMatch) {
       const items = selectMatch[2].split(',')
       const cleanedItems: string[] = []
@@ -1670,8 +1702,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   /** Phase derived from value — computed, no signal writes */
   #selectPhase = computed<'none' | 'selection' | 'operation' | 'move-path' | 'move-target-index' | 'move-target-swap'>(() => {
     const v = this.value()
-    if (!v.match(/^\/select\[/)) return 'none'
-    return this.#deriveSelectPhase(v)
+    if (!BRACKET_CMD_RE.test(v)) return 'none'
+    return this.#deriveSelectPhase(normalizeSelectInput(v))
   })
 
   /** Strip :tag(color) suffix from a raw select item, returning just the tile label. */
@@ -1683,7 +1715,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   /** Labels derived from value — computed. During selection phase, only includes
    *  committed labels (before last comma) + the current partial IFF it exactly matches a seed name. */
   #selectLabels = computed<readonly string[]>(() => {
-    const v = this.value()
+    const v = normalizeSelectInput(this.value())
     if (!v.match(/^\/select\[/)) return []
     const bracketOpen = v.indexOf('[')
     const bracketClose = v.indexOf(']')
@@ -1707,7 +1739,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   /** Excluded items derived from value — computed */
   #selectExcluded = computed<ReadonlySet<string>>(() => {
-    const v = this.value()
+    const v = normalizeSelectInput(this.value())
     if (!v.match(/^\/select\[/)) return new Set<string>()
     const bracketClose = v.indexOf(']')
     if (bracketClose >= 0) return new Set<string>() // brackets closed, no exclusion needed
@@ -1738,7 +1770,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       const opKeyword = nextSlash === -1 ? opAndRest : opAndRest.slice(0, nextSlash)
       const opLower = opKeyword.toLowerCase().trim()
 
-      if (opLower === 'cut' || opLower === 'copy' || opLower === 'delete' || opLower === 'del' || opLower === 'rm' || opLower === 'opus' || opLower === 'sonnet' || opLower === 'haiku' || opLower === 'o' || opLower === 's' || opLower === 'h') return 'operation'
+      if (opLower === 'cut' || opLower === 'copy' || opLower === 'delete' || opLower === 'del' || opLower === 'rm' || opLower === 'format' || opLower === 'fmt' || opLower === 'fp' || opLower === 'opus' || opLower === 'sonnet' || opLower === 'haiku' || opLower === 'o' || opLower === 's' || opLower === 'h') return 'operation'
 
       if (opLower === 'move' || opLower.startsWith('move')) {
         // Check for (index) — note: the first [ is at bracketOpen
@@ -1824,7 +1856,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         const opKeyword = nextSlash === -1 ? opAndRest : opAndRest.slice(0, nextSlash)
         const opLower = opKeyword.toLowerCase().trim()
 
-        if (opLower === 'cut' || opLower === 'copy' || opLower === 'move' || opLower === 'opus' || opLower === 'sonnet' || opLower === 'haiku' || opLower === 'o' || opLower === 's' || opLower === 'h') {
+        if (opLower === 'cut' || opLower === 'copy' || opLower === 'move' || opLower === 'format' || opLower === 'fmt' || opLower === 'fp' || opLower === 'opus' || opLower === 'sonnet' || opLower === 'haiku' || opLower === 'o' || opLower === 's' || opLower === 'h') {
           return { active: true, mode: 'select', head: v, raw: '', normalized: opLower, style: 'space' }
         }
         return {

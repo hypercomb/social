@@ -131,6 +131,19 @@ class DeleteProvider implements SlashCommandProvider {
   }
 }
 
+class FormatSlashProvider implements SlashCommandProvider {
+  readonly name = 'format-provider'
+  readonly priority = 100
+  readonly commands: SlashCommand[] = [
+    { name: 'format', description: 'Copy visual formatting from the active tile', aliases: ['fmt', 'fp'] }
+  ]
+
+  async execute(_commandName: string, args: string): Promise<void> {
+    const queen = get('@diamondcoreprocessor.com/FormatQueenBee') as any
+    if (queen?.invoke) await queen.invoke(args)
+  }
+}
+
 class LlmProvider implements SlashCommandProvider {
   readonly name = 'llm-provider'
   readonly priority = 100
@@ -158,5 +171,6 @@ _slashCommands.addProvider(new KeywordProvider())
 _slashCommands.addProvider(new MeetingProvider())
 _slashCommands.addProvider(new DebugProvider())
 _slashCommands.addProvider(new DeleteProvider())
+_slashCommands.addProvider(new FormatSlashProvider())
 _slashCommands.addProvider(new LlmProvider())
 window.ioc.register('@diamondcoreprocessor.com/SlashCommandDrone', _slashCommands)
