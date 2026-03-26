@@ -5,4 +5,5 @@ export * from './mesh-header/mesh-header.component'
 export * from './shortcut-sheet/shortcut-sheet.component'
 export * from './command-palette/command-palette.component'
 export * from './activity-log/activity-log.component'
+export * from './selection-context-menu/selection-context-menu.component'
 

@@ -572,6 +572,14 @@ export class TileOverlayDrone extends Drone {
   #onContextMenu = (e: MouseEvent): void => {
     if (this.#navigationBlocked) return
 
+    // Cancel editor on right-click (mirrors Escape cascade priority 1)
+    if (this.#editing) {
+      e.preventDefault()
+      const drone = window.ioc.get<{ cancelEditing(): void }>('@diamondcoreprocessor.com/TileEditorDrone')
+      drone?.cancelEditing()
+      return
+    }
+
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault()
       return

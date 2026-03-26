@@ -1,0 +1,34 @@
+@if (visible()) {
+  <div class="context-menu"
+       [style.left.px]="posX()"
+       [style.top.px]="posY()"
+       [class.dragging]="dragging()">
+
+    <!-- drag handle -->
+    <div class="drag-handle"
+         (pointerdown)="onDragStart($event)">
+      <span class="handle-dots">&#x283F;</span>
+    </div>
+
+    <!-- action buttons -->
+    <button class="ctx-btn" (click)="moveItem()" [class.active]="moveMode()" aria-label="move">
+      <span class="hci">Z</span>
+    </button>
+    <button class="ctx-btn" (click)="cut()" aria-label="cut">
+      <span class="hci">F</span>
+    </button>
+    <button class="ctx-btn" (click)="copy()" aria-label="copy">
+      <span class="hci">%</span>
+    </button>
+    <button class="ctx-btn" (click)="remove()" aria-label="delete">
+      <span class="hci">Q</span>
+    </button>
+
+    @if (clipboardCount() > 0) {
+      <div class="ctx-divider"></div>
+      <button class="ctx-btn" (click)="paste()" aria-label="paste">
+        <span class="hci" style="color:#4caf50">G</span>
+      </button>
+    }
+  </div>
+}

@@ -30,7 +30,7 @@ import '@hypercomb/essentials/diamondcoreprocessor.com/selection/tile-selection.
 import '@hypercomb/essentials/diamondcoreprocessor.com/keyboard/escape-cascade'
 import '@hypercomb/essentials/diamondcoreprocessor.com/navigation/bee-toggle'
 import { TileEditorComponent } from '@hypercomb/shared/ui/tile-editor/tile-editor.component'
-import { ControlsBarComponent, ShortcutSheetComponent, CommandPaletteComponent, ActivityLogComponent } from '@hypercomb/shared/ui';
+import { ControlsBarComponent, ShortcutSheetComponent, CommandPaletteComponent, ActivityLogComponent, SelectionContextMenuComponent } from '@hypercomb/shared/ui';
 import { PortalOverlayComponent } from '@hypercomb/shared/ui/portal/portal-overlay.component'
 import { SensitivityBarComponent } from '@hypercomb/shared/ui/sensitivity-bar/sensitivity-bar.component'
 import { LayoutService } from '@hypercomb/essentials/diamondcoreprocessor.com/move/layout.service'
@@ -115,7 +115,7 @@ void _deps
 
 @Component({
   selector: 'app-root',
-  imports: [ControlsBarComponent, MeshHeaderComponent, RouterOutlet, CommandLineComponent, TileEditorComponent, ShortcutSheetComponent, CommandPaletteComponent, PortalOverlayComponent, ActivityLogComponent, SensitivityBarComponent],
+  imports: [ControlsBarComponent, MeshHeaderComponent, RouterOutlet, CommandLineComponent, TileEditorComponent, ShortcutSheetComponent, CommandPaletteComponent, PortalOverlayComponent, ActivityLogComponent, SensitivityBarComponent, SelectionContextMenuComponent],
   styleUrls: ['./app.scss'] as any,
   templateUrl: './app.html'
 })

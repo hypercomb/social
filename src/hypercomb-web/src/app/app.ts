@@ -8,11 +8,12 @@ import { ControlsBarComponent } from "@hypercomb/shared/ui/controls-bar/controls
 import { MeshHeaderComponent } from "@hypercomb/shared/ui/mesh-header/mesh-header.component"
 import { PortalOverlayComponent } from "@hypercomb/shared/ui/portal/portal-overlay.component"
 import { SensitivityBarComponent } from "@hypercomb/shared/ui/sensitivity-bar/sensitivity-bar.component"
+import { SelectionContextMenuComponent } from "@hypercomb/shared/ui/selection-context-menu/selection-context-menu.component"
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, Header, MeshHeaderComponent, TileEditorComponent, ControlsBarComponent, PortalOverlayComponent, SensitivityBarComponent],
+  imports: [RouterOutlet, Header, MeshHeaderComponent, TileEditorComponent, ControlsBarComponent, PortalOverlayComponent, SensitivityBarComponent, SelectionContextMenuComponent],
   templateUrl: './app.html',
   styleUrl: './app.scss'
 })

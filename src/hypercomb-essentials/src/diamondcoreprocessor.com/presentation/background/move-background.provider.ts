@@ -3,7 +3,7 @@ import { EffectBus } from '@hypercomb/core'
 import type { Graphics } from 'pixi.js'
 import type { BackgroundProvider } from './background.provider.js'
 
-const FILL = 0x1a0508
+const FILL = 0x0a2e3d
 const FILL_ALPHA = 0.85
 const MODE_FILL_ALPHA = 0.4
 

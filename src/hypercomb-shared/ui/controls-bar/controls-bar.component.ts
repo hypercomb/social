@@ -79,9 +79,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   readonly isMobile = signal(false)
   #mobileQuery: MediaQueryList | null = null
   #mobileHandler = (e: MediaQueryListEvent) => this.isMobile.set(e.matches)
-  #publicUtilityOpen = signal(false)
   #utility = signal(localStorage.getItem('hc:utility-expanded') !== 'false')
-  readonly publicUtilityOpen = this.#publicUtilityOpen.asReadonly()
   #moveMode = signal(false)
   #mode = signal<'browsing' | 'clipboard'>('browsing')
   #clipboardItems = signal<string[]>([])
@@ -471,15 +469,6 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
 
   readonly toggleMeshPublic = (): void => {
     this.meshToggled.emit()
-  }
-
-  readonly toggleUtility = (): void => {
-    const next = !this.#publicUtilityOpen()
-    this.#publicUtilityOpen.set(next)
-    if (!next && this.#mode() === 'clipboard') {
-      this.#mode.set('browsing')
-      EffectBus.emit('clipboard:view', { active: false })
-    }
   }
 
   readonly openClipboard = (): void => {

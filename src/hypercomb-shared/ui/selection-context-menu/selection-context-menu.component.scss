@@ -1,0 +1,113 @@
+@use '../breakpoints' as *;
+
+:host { display: contents; }
+
+.hci {
+  font-family: 'hypercomb-icons';
+  font-style: normal;
+  font-weight: normal;
+  line-height: 1;
+  user-select: none;
+}
+
+// suppress mouse-click focus
+:host button:focus:not(:focus-visible) {
+  outline: none;
+  box-shadow: none;
+}
+
+.context-menu {
+  position: fixed;
+  z-index: 60000;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.3rem;
+
+  background: rgba(14, 18, 24, 0.82);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+
+  animation: ctx-slide-in 150ms ease-out;
+
+  &.dragging { cursor: grabbing; }
+}
+
+@keyframes ctx-slide-in {
+  from { opacity: 0; transform: translateX(8px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+.drag-handle {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  cursor: grab;
+  padding: 0.15rem 0;
+  color: rgba(200, 200, 200, 0.4);
+  font-size: 0.7rem;
+  user-select: none;
+  touch-action: none;
+
+  &:hover { color: rgba(200, 200, 200, 0.7); }
+  &:active { cursor: grabbing; }
+}
+
+.ctx-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.8rem;
+  height: 1.8rem;
+
+  background: none;
+  border: none;
+  border-radius: 3px;
+  color: rgba(200, 200, 200, 0.8);
+  cursor: pointer;
+  transition: color 200ms ease, background 200ms ease;
+
+  .hci { font-size: 0.76rem; }
+
+  &:hover {
+    color: whitesmoke;
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  &:active { transform: scale(0.94); }
+
+  &:focus-visible {
+    outline: 1px solid rgba(255, 255, 255, 0.3);
+    outline-offset: 1px;
+  }
+
+  &.active {
+    color: #00e5a0;
+    background: rgba(0, 229, 160, 0.08);
+  }
+}
+
+.ctx-divider {
+  width: 70%;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 0.1rem 0;
+}
+
+// ── responsive ──────────────────────────────────────────
+
+@include touch {
+  .ctx-btn {
+    width: 2.75rem;
+    height: 2.75rem;
+    .hci { font-size: 1rem; }
+  }
+}
+
+@include phone-only {
+  .context-menu { display: none; }
+}
