@@ -380,7 +380,7 @@ for (const domain of domains) {
 
 // write one master keys file
 writeMasterKeys(allDomainKeys)
-rootExports.push(`export * from './essentials-keys'`)
+rootExports.push(`export { EssentialsKeys } from './essentials-keys'`)
 
 const rootIndex = `// auto-generated
 // package root entrypoint

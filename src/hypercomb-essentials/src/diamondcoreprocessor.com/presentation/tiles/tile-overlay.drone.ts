@@ -67,8 +67,6 @@ export class TileOverlayDrone extends Drone {
   #hexBg: HexOverlayMesh | null = null
   #seedLabel: Text | null = null
   #actions: OverlayAction[] = []
-  #animating = false
-
   #meshOffset = { x: 0, y: 0 }
   #currentAxial: Axial | null = null
   #currentIndex: number | undefined = undefined
@@ -229,7 +227,6 @@ export class TileOverlayDrone extends Drone {
   }
 
   protected override dispose(): void {
-    this.#stopHoverAnim()
     if (this.#listening) {
       document.removeEventListener('pointermove', this.#onPointerMove)
       document.removeEventListener('click', this.#onClick)
@@ -269,23 +266,6 @@ export class TileOverlayDrone extends Drone {
 
   #updateHexBg(): void {
     this.#hexBg?.update(this.#geo.circumRadiusPx, this.#flat)
-  }
-
-  #onHoverTick = (): void => {
-    if (!this.#hexBg || !this.#overlay?.visible) return
-    this.#hexBg.setTime(performance.now() / 1000)
-  }
-
-  #startHoverAnim(): void {
-    if (this.#animating || !this.#app) return
-    this.#animating = true
-    this.#app.ticker.add(this.#onHoverTick)
-  }
-
-  #stopHoverAnim(): void {
-    if (!this.#animating || !this.#app) return
-    this.#app.ticker.remove(this.#onHoverTick)
-    this.#animating = false
   }
 
   // ── Profile resolution (now from registered descriptors) ───────────
@@ -574,8 +554,6 @@ export class TileOverlayDrone extends Drone {
     const occupied = this.#currentIndex !== undefined && this.#currentIndex < this.#cellCount
     this.#overlay.visible = occupied && !this.#editing && !this.#editCooldown && !this.#hasSelection && !this.#touchDragging
 
-    if (this.#overlay.visible) this.#startHoverAnim()
-    else this.#stopHoverAnim()
   }
 
   #positionOverlay(q: number, r: number): void {
