@@ -87,7 +87,8 @@ export class MoveDrone extends Drone {
     })
 
     this.onEffect<CellCountPayload>('render:cell-count', (payload) => {
-      if (this.#activeSource) return // freeze snapshot during active drag
+      // freeze snapshot only during pointer drags — command moves rebuild on label changes
+      if (this.#activeSource && this.#activeSource !== 'command') return
       this.#cellCount = payload.count
       this.#cellLabels = payload.labels
     })
@@ -232,44 +233,8 @@ export class MoveDrone extends Drone {
     if (diff.q === 0 && diff.r === 0) { this.#reset(source); return }
 
     const placements = this.#computePlacements(diff)
-
-    const lineage = this.resolve<any>('lineage')
-    const locationKey = String(lineage?.explorerLabel?.() ?? '/')
-    const layoutMode = localStorage.getItem(`hc:layout-mode:${locationKey}`) === 'pinned' ? 'pinned' : 'dense'
-
-    if (layoutMode === 'pinned') {
-      // pinned mode: write each tile's target index directly to its 0000 properties
-      const dir = lineage?.explorerDir ? await lineage.explorerDir() : null
-      if (dir) {
-        for (const [label, axial] of placements) {
-          const targetKey = axialKey(axial.q, axial.r)
-          const targetIndex = this.#keyToIndex.get(targetKey)
-          if (targetIndex === undefined) continue
-          try {
-            const seedDir = await dir.getDirectoryHandle(label, { create: false })
-            await writeSeedProperties(seedDir, { index: targetIndex, offset: 0 })
-          } catch { /* seed dir missing */ }
-        }
-      }
-    } else {
-      // dense mode: reorder the dense list and persist via seed:reorder + __layout__
-      const denseOrder = this.#reorderNames(placements).filter(n => n !== '')
-      this.emitEffect('seed:reorder', { labels: denseOrder })
-
-      const layout = this.resolve<LayoutService>('layout')
-      if (layout && lineage?.explorerDir) {
-        const dir = await lineage.explorerDir()
-        if (dir) await layout.write(dir, denseOrder)
-      }
-    }
-
-    // clear preview
-    this.emitEffect('move:preview', null)
-    this.emitEffect('move:committed', { order: layoutMode === 'pinned' ? [...placements.keys()] : this.#reorderNames(placements).filter(n => n !== '') })
-
+    await this.#commitPlacements(placements)
     this.#reset(source)
-
-    // trigger re-render
     void new hypercomb().act()
   }
 
@@ -463,20 +428,7 @@ export class MoveDrone extends Drone {
     if (diff.q === 0 && diff.r === 0) { this.#resetCommand(); return }
 
     const placements = this.#computePlacements(diff)
-    const denseOrder = this.#reorderNames(placements).filter(n => n !== '')
-
-    this.emitEffect('seed:reorder', { labels: denseOrder })
-
-    const layout = this.resolve<LayoutService>('layout')
-    const lineage = this.resolve<any>('lineage')
-    if (layout && lineage?.explorerDir) {
-      const dir = await lineage.explorerDir()
-      if (dir) await layout.write(dir, denseOrder)
-    }
-
-    this.emitEffect('move:preview', null)
-    this.emitEffect('move:committed', { order: denseOrder })
-
+    await this.#commitPlacements(placements)
     this.#resetCommand()
     void new hypercomb().act()
   }
@@ -504,6 +456,45 @@ export class MoveDrone extends Drone {
   #resetCommand(): void {
     this.#reset('command')
     this.#commandActive = false
+  }
+
+  // ── shared commit logic (pinned vs dense) ────────────────
+
+  async #commitPlacements(placements: Map<string, Axial>): Promise<void> {
+    const lineage = this.resolve<any>('lineage')
+    const locationKey = String(lineage?.explorerLabel?.() ?? '/')
+    const layoutMode = localStorage.getItem(`hc:layout-mode:${locationKey}`) === 'pinned' ? 'pinned' : 'dense'
+
+    if (layoutMode === 'pinned') {
+      const dir = lineage?.explorerDir ? await lineage.explorerDir() : null
+      if (dir) {
+        for (const [label, axial] of placements) {
+          const targetKey = axialKey(axial.q, axial.r)
+          const targetIndex = this.#keyToIndex.get(targetKey)
+          if (targetIndex === undefined) continue
+          try {
+            const seedDir = await dir.getDirectoryHandle(label, { create: false })
+            await writeSeedProperties(seedDir, { index: targetIndex, offset: 0 })
+          } catch { /* seed dir missing */ }
+        }
+      }
+    } else {
+      const denseOrder = this.#reorderNames(placements).filter(n => n !== '')
+      this.emitEffect('seed:reorder', { labels: denseOrder })
+
+      const layout = this.resolve<LayoutService>('layout')
+      if (layout && lineage?.explorerDir) {
+        const dir = await lineage.explorerDir()
+        if (dir) await layout.write(dir, denseOrder)
+      }
+    }
+
+    this.emitEffect('move:preview', null)
+    this.emitEffect('move:committed', {
+      order: layoutMode === 'pinned'
+        ? [...placements.keys()]
+        : this.#reorderNames(placements).filter(n => n !== ''),
+    })
   }
 
   // ── reset ────────────────────────────────────────────────

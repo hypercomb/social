@@ -761,7 +761,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       const selection = get('@diamondcoreprocessor.com/SelectionService') as any
       if (selection?.count > 0) selection.clear()
       this.#syncDirection = 'idle'
-      EffectBus.emit('move:index-overlay', { show: false })
     }
     this.#lastSelectMode = ctx.active && ctx.mode === 'select'
 
@@ -971,11 +970,13 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const selection = get('@diamondcoreprocessor.com/SelectionService') as any
     if (!selection) { this.clear(); return }
 
-    // Always select the tiles first
+    // Always select the tiles first — guard against sync feedback
+    this.#syncDirection = 'command'
     selection.clear()
     for (const label of labels) {
       selection.add(label)
     }
+    this.#syncDirection = 'idle'
 
     if (op === 'cut') {
       // Use existing ClipboardWorker via controls:action effect
@@ -1000,10 +1001,12 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         const targetIndex = parseInt(indexMatch[1], 10)
         const moveDrone = get('@diamondcoreprocessor.com/MoveDrone') as any
         if (moveDrone) {
-          moveDrone.beginCommandMove(labels)
+          // Always restart fresh — labels may have changed since typing started the preview
+          if (moveDrone.moveCommandActive) moveDrone.cancelCommandMove()
+          moveDrone.beginCommandMove([...labels])
           await moveDrone.commitCommandMoveAt(targetIndex)
         }
-        EffectBus.emit('move:index-overlay', { show: false })
+        this.#lastMoveLabels = []
         this.#collapseToSelect(labels)
         return
       }
@@ -1012,13 +1015,13 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       const swapMatch = afterOp.match(/.*\[([^\]]+)\]$/)
       if (swapMatch) {
         const swapLabel = this.completions.normalize(swapMatch[1])
-        // Resolve swap tile's index
         const moveDrone = get('@diamondcoreprocessor.com/MoveDrone') as any
         if (moveDrone) {
-          moveDrone.beginCommandMove(labels)
+          if (moveDrone.moveCommandActive) moveDrone.cancelCommandMove()
+          moveDrone.beginCommandMove([...labels])
           await moveDrone.commitCommandMoveToLabel(swapLabel)
         }
-        EffectBus.emit('move:index-overlay', { show: false })
+        this.#lastMoveLabels = []
         this.#collapseToSelect(labels)
         return
       }
@@ -1265,11 +1268,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   }
 
   #collapseToSelect(labels: readonly string[]): void {
-    const selection = get('@diamondcoreprocessor.com/SelectionService') as any
-    const remaining = selection ? Array.from(selection.selected as Set<string>) : labels
-    if (remaining.length > 0) {
-      const focused = document.activeElement === this.input.nativeElement
-      this.input.nativeElement.value = this.#buildSelectValue(remaining, this.#shouldTruncate(remaining))
+    // Trust the labels parameter — SelectionService may be stale after async operations
+    if (labels.length > 0) {
+      this.input.nativeElement.value = this.#buildSelectValue([...labels], this.#shouldTruncate(labels))
       this.suppressed.set(true)
       this.placeCaretAtEnd()
       this.syncSignalsFromDom()
@@ -1282,12 +1283,12 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   #cancelSelectOperation(): void {
     const phase = this.#selectPhase()
     const labels = this.#selectLabels()
-    EffectBus.emit('move:index-overlay', { show: false })
     EffectBus.emit('move:preview', null)
 
     // Cancel any active command move
     const moveDrone = get('@diamondcoreprocessor.com/MoveDrone') as any
     if (moveDrone?.moveCommandActive) moveDrone.cancelCommandMove()
+    this.#lastMoveLabels = []
 
     // Restore navigation if we navigated away
     if (this.#selectOriginalSegments) {
@@ -1382,11 +1383,13 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         const lastSep = Math.max(raw.lastIndexOf(','), raw.lastIndexOf('['))
         const before = raw.slice(0, lastSep + 1)
         const spacer = raw.lastIndexOf(',') >= 0 ? ' ' : ''
+        this.#syncDirection = 'command'
         this.input.nativeElement.value = before + spacer + best
         this.suppressed.set(false)
         this.placeCaretAtEnd()
         this.syncSignalsFromDom()
         this.input.nativeElement.dispatchEvent(new Event('input', { bubbles: true }))
+        this.#syncDirection = 'idle'
         return
       }
 
@@ -1524,10 +1527,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       this.#syncDirection = 'idle'
       this.#lastSelectMode = false
     }
-    EffectBus.emit('move:index-overlay', { show: false })
     // Cancel any active command move
     const moveDrone = get('@diamondcoreprocessor.com/MoveDrone') as any
     if (moveDrone?.moveCommandActive) moveDrone.cancelCommandMove()
+    this.#lastMoveLabels = []
     // Reset select state (phase/labels/excluded are computed from value, auto-reset)
     if (this.#selectOriginalSegments) {
       this.navigation.replaceRaw(this.#selectOriginalSegments)
@@ -1555,6 +1558,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   /** Original navigation segments stored before real-time navigation (for rollback) */
   #selectOriginalSegments: string[] | null = null
 
+  /** Labels last passed to beginCommandMove — detect changes and restart */
+  #lastMoveLabels: readonly string[] = []
+
   /** Phase derived from value — computed, no signal writes */
   #selectPhase = computed<'none' | 'selection' | 'operation' | 'move-path' | 'move-target-index' | 'move-target-swap'>(() => {
     const v = this.value()
@@ -1568,7 +1574,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     return colon >= 0 ? raw.slice(0, colon) : raw
   }
 
-  /** Labels derived from value — computed. Includes committed labels during selection phase. */
+  /** Labels derived from value — computed. During selection phase, only includes
+   *  committed labels (before last comma) + the current partial IFF it exactly matches a seed name. */
   #selectLabels = computed<readonly string[]>(() => {
     const v = this.value()
     if (!v.match(/^\/select\[/)) return []
@@ -1579,11 +1586,16 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       const inner = v.slice(bracketOpen + 1, bracketClose)
       return inner.split(',').map(s => this.completions.normalize(this.#stripTagSuffix(s.trim()))).filter(Boolean)
     }
-    // Bracket still open (selection phase) — include committed labels (before last comma)
-    // and the current partial if it matches an existing seed name exactly
+    // Bracket still open (selection phase) — committed labels (before last comma)
+    // plus current partial only if it exactly matches a known seed name
     const body = v.slice(bracketOpen + 1)
-    const parts = body.split(',').map(s => this.completions.normalize(this.#stripTagSuffix(s.trim()))).filter(Boolean)
-    return parts
+    const allParts = body.split(',').map(s => this.completions.normalize(this.#stripTagSuffix(s.trim()))).filter(Boolean)
+    if (allParts.length === 0) return []
+    const committed = allParts.slice(0, -1)
+    const partial = allParts[allParts.length - 1]
+    const seeds = new Set(this.seedNames$())
+    if (seeds.has(partial)) return allParts
+    return committed
   })
 
 
@@ -1758,10 +1770,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     }
     this.#syncDirection = 'idle'
 
-    // Show index overlay when in move phases
-    const showOverlay = phase === 'move-path' || phase === 'move-target-index' || phase === 'move-target-swap'
-    EffectBus.emit('move:index-overlay', { show: showOverlay })
-
     // Live preview when target index is being typed
     if (phase === 'move-target-index') {
       const v = this.input.nativeElement.value
@@ -1771,7 +1779,14 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       if (!isNaN(targetIndex) && labels.length > 0) {
         const moveDrone = get('@diamondcoreprocessor.com/MoveDrone') as any
         if (moveDrone) {
-          if (!moveDrone.moveCommandActive) moveDrone.beginCommandMove(labels)
+          // Detect label changes — restart command move with fresh occupancy
+          const labelsChanged = labels.length !== this.#lastMoveLabels.length
+            || labels.some((l, i) => l !== this.#lastMoveLabels[i])
+          if (!moveDrone.moveCommandActive || labelsChanged) {
+            if (moveDrone.moveCommandActive) moveDrone.cancelCommandMove()
+            moveDrone.beginCommandMove([...labels])
+            this.#lastMoveLabels = labels
+          }
           moveDrone.updateCommandMove(targetIndex)
         }
       }
@@ -1780,6 +1795,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       const moveDrone = get('@diamondcoreprocessor.com/MoveDrone') as any
       if (moveDrone?.moveCommandActive) {
         moveDrone.cancelCommandMove()
+        this.#lastMoveLabels = []
       }
     }
 
