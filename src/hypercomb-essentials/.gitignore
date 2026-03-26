@@ -7,3 +7,5 @@ dist/
 
 # build cache (local optimization, not shared)
 .build-cache.json
+
+public/contet/

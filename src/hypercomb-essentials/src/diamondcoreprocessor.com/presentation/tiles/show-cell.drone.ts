@@ -1465,8 +1465,6 @@ export class ShowCellDrone extends Drone {
     this.onEffect<{ pivot: boolean }>('render:set-pivot', (payload) => {
       if (this.#pivot !== payload.pivot) {
         this.#pivot = payload.pivot
-        this.seedImageCache.clear()
-        this.#layerCellsCache.clear()
         this.atlas?.setPivot(payload.pivot)
         this.renderedCellsKey = ''
         this.requestRender()
@@ -1881,9 +1879,7 @@ export class ShowCellDrone extends Drone {
           this.seedTagsCache.set(cell.label, [])
         }
 
-        // pivot swaps orientation: pointy uses flat snapshot, flat uses pointy snapshot
-        const effectiveFlat = this.#pivot ? !this.#flat : this.#flat
-        const smallSig = (effectiveFlat && props?.flat?.small?.image) || props?.small?.image
+        const smallSig = (this.#flat && props?.flat?.small?.image) || props?.small?.image
         if (smallSig && isSignature(smallSig)) {
           cell.imageSig = smallSig
           this.seedImageCache.set(cell.label, smallSig)
