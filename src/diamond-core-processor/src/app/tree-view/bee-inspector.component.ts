@@ -53,7 +53,7 @@ import type { BeeDocEntry } from '../core/tree-node'
                   <tr><td class="prop-label">effects</td><td>@for (e of d.effects; track e) {<code class="pill effect">{{ e }}</code> }</td></tr>
                 }
                 @if (depEntries().length) {
-                  <tr><td class="prop-label">deps</td><td>@for (dep of depEntries(); track dep.key) {<code class="pill dep">{{ dep.name }}</code> }</td></tr>
+                  <tr><td class="prop-label">deps</td><td>@for (dep of depEntries(); track dep.key) {<code class="pill dep dep-link" (click)="navigateDep.emit(dep.key)" [title]="dep.key">{{ dep.name }}</code> }</td></tr>
                 }
                 @if (d.links.length) {
                   <tr><td class="prop-label">links</td><td>@for (link of d.links; track link.url) {<a class="link" [href]="link.url" target="_blank" rel="noopener">{{ link.label }}</a> }</td></tr>
@@ -262,6 +262,16 @@ import type { BeeDocEntry } from '../core/tree-node'
     .pill.effect { color: #1565c0; background: rgba(21, 101, 192, 0.07); }
     .pill.dep { color: #4fa58b; background: rgba(79, 165, 139, 0.07); }
 
+    .dep-link {
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+
+    .dep-link:hover {
+      background: rgba(79, 165, 139, 0.18);
+      color: #2e7d5b;
+    }
+
     .link {
       font-size: 11px;
       color: #1565c0;
@@ -382,6 +392,7 @@ export class BeeInspectorComponent {
   visible = input(false)
   close = output<void>()
   navigateSig = output<string>()
+  navigateDep = output<string>()
 
   #store = inject(DcpStore)
 

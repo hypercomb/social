@@ -251,10 +251,36 @@ export class HomeComponent {
     }
   }
 
+  onNavigateDep(iocKey: string): void {
+    // extract class name from IoC key (e.g. "@domain.com/ClassName" → "ClassName")
+    const className = iocKey.includes('/') ? iocKey.slice(iocKey.lastIndexOf('/') + 1) : iocKey
+    // humanize: PascalCase → "lower case words" to match tree node names
+    const humanized = className
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+      .toLowerCase()
+    for (const section of this.sections()) {
+      const node = this.#findNodeByClassName(section.items, className, humanized)
+      if (node) {
+        this.#openInspector(node, 'detail')
+        return
+      }
+    }
+  }
+
   #findNodeBySig(nodes: TreeNode[], sig: string): TreeNode | null {
     for (const n of nodes) {
       if (n.signature === sig) return n
       const found = this.#findNodeBySig(n.children, sig)
+      if (found) return found
+    }
+    return null
+  }
+
+  #findNodeByClassName(nodes: TreeNode[], className: string, humanized: string): TreeNode | null {
+    for (const n of nodes) {
+      if (n.doc?.className === className || n.name === className || n.name === humanized) return n
+      const found = this.#findNodeByClassName(n.children, className, humanized)
       if (found) return found
     }
     return null
