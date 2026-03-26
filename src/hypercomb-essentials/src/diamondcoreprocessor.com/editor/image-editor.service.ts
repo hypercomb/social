@@ -14,6 +14,12 @@ export class ImageEditorService extends EventTarget {
   #isDragging = false
   #dragStart = { x: 0, y: 0 }
 
+  // ── pinch zoom state ───────────────────────────────────────────
+  #pointers = new Map<number, { x: number; y: number }>()
+  #isPinching = false
+  #pinchStartDist = 0
+  #pinchStartScale = 1
+
   #size = 0  // always square: editorSize × editorSize
   #borderColor = '#c8975a'
   #backgroundColor = 0x1e1e1e
@@ -55,16 +61,20 @@ export class ImageEditorService extends EventTarget {
     this.#app.canvas.style.width = '100%'
     this.#app.canvas.style.height = '100%'
     this.#app.canvas.style.cursor = 'auto'
+    this.#app.canvas.style.touchAction = 'none'
     hostElement.appendChild(this.#app.canvas)
 
     this.#container = new Container()
-    this.#container.eventMode = 'dynamic'
-    this.#container.cursor = 'move'
+    this.#container.eventMode = 'static'
     this.#container.hitArea = new Rectangle(0, 0, size, size)
-    this.#container.on('pointerdown', this.#onPointerDown)
     this.#app.stage.addChild(this.#container)
 
-    this.#app.canvas.addEventListener('wheel', this.#onWheel, { passive: false })
+    const canvas = this.#app.canvas
+    canvas.addEventListener('pointerdown', this.#onPointerDown)
+    canvas.addEventListener('pointermove', this.#onPointerMove)
+    canvas.addEventListener('pointerup', this.#onPointerUp)
+    canvas.addEventListener('pointercancel', this.#onPointerUp)
+    canvas.addEventListener('wheel', this.#onWheel, { passive: false })
 
     this.#drawHexFrame()
 
@@ -77,8 +87,11 @@ export class ImageEditorService extends EventTarget {
 
     const canvas = this.#app?.canvas ?? null
 
+    canvas?.removeEventListener('pointerdown', this.#onPointerDown)
+    canvas?.removeEventListener('pointermove', this.#onPointerMove)
+    canvas?.removeEventListener('pointerup', this.#onPointerUp)
+    canvas?.removeEventListener('pointercancel', this.#onPointerUp)
     canvas?.removeEventListener('wheel', this.#onWheel)
-    this.#container?.removeAllListeners()
     this.#app?.stage.removeChildren()
     this.#app?.stop()
     this.#app?.destroy()
@@ -94,6 +107,8 @@ export class ImageEditorService extends EventTarget {
     this.#hostElement = null
     this.#initialized = false
     this.#isDragging = false
+    this.#isPinching = false
+    this.#pointers.clear()
     this.#orientation = 'point-top'
     this.#linked = true
     this.#emit()
@@ -297,43 +312,84 @@ export class ImageEditorService extends EventTarget {
     this.#container.addChild(this.#hexFrame)
   }
 
-  // ── drag handling ──────────────────────────────────────────────
+  // ── pointer handling (drag + pinch zoom) ───────────────────────
 
-  #onPointerDown = (e: any): void => {
-    if (!this.#sprite || !this.#container) return
-
-    const start = this.#container.toLocal(e.global)
-    this.#dragStart.x = start.x - this.#sprite.x
-    this.#dragStart.y = start.y - this.#sprite.y
-
-    this.#app!.stage.on('pointermove', this.#onPointerMove)
-    this.#app!.stage.on('pointerup', this.#onPointerUp)
-    this.#app!.stage.on('pointerupoutside', this.#onPointerUp)
-
-    this.#isDragging = true
-    this.#app!.canvas.style.cursor = 'grabbing'
+  #clientToLocal(clientX: number, clientY: number): { x: number; y: number } {
+    const canvas = this.#app!.canvas
+    const rect = canvas.getBoundingClientRect()
+    const scaleX = this.#size / rect.width
+    const scaleY = this.#size / rect.height
+    return {
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY,
+    }
   }
 
-  #onPointerMove = (e: any): void => {
-    if (!this.#isDragging || !this.#sprite || !this.#container) return
-    const pos = this.#container.toLocal(e.global)
-    this.#sprite.position.set(
-      pos.x - this.#dragStart.x,
-      pos.y - this.#dragStart.y,
-    )
+  #onPointerDown = (e: PointerEvent): void => {
+    if (!this.#sprite || !this.#app) return
+
+    this.#pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
+
+    if (this.#pointers.size === 2) {
+      // second finger → enter pinch, cancel any drag
+      this.#isDragging = false
+      this.#isPinching = true
+      const [a, b] = [...this.#pointers.values()]
+      this.#pinchStartDist = Math.hypot(b.x - a.x, b.y - a.y) || 1
+      this.#pinchStartScale = this.#sprite.scale.x
+      this.#app.canvas.style.cursor = 'auto'
+    } else if (this.#pointers.size === 1 && !this.#isPinching) {
+      // single finger → start drag
+      const local = this.#clientToLocal(e.clientX, e.clientY)
+      this.#dragStart.x = local.x - this.#sprite.x
+      this.#dragStart.y = local.y - this.#sprite.y
+      this.#isDragging = true
+      this.#app.canvas.style.cursor = 'grabbing'
+    }
   }
 
-  #onPointerUp = (): void => {
-    this.#isDragging = false
-    this.#app?.stage.off('pointermove', this.#onPointerMove)
-    this.#app?.stage.off('pointerup', this.#onPointerUp)
-    this.#app?.stage.off('pointerupoutside', this.#onPointerUp)
-    if (this.#app) this.#app.canvas.style.cursor = 'auto'
+  #onPointerMove = (e: PointerEvent): void => {
+    if (!this.#sprite || !this.#app) return
+    if (!this.#pointers.has(e.pointerId)) return
 
-    this.#syncTransform()
+    this.#pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
+
+    if (this.#isPinching && this.#pointers.size >= 2) {
+      const [a, b] = [...this.#pointers.values()]
+      const dist = Math.hypot(b.x - a.x, b.y - a.y) || 1
+      let newScale = (dist / this.#pinchStartDist) * this.#pinchStartScale
+      newScale = Math.max(0.05, Math.min(10, newScale))
+      this.#sprite.scale.set(newScale)
+      this.#syncTransform()
+    } else if (this.#isDragging && !this.#isPinching) {
+      const local = this.#clientToLocal(e.clientX, e.clientY)
+      this.#sprite.position.set(
+        local.x - this.#dragStart.x,
+        local.y - this.#dragStart.y,
+      )
+    }
   }
 
-  // ── zoom handling ──────────────────────────────────────────────
+  #onPointerUp = (e: PointerEvent): void => {
+    this.#pointers.delete(e.pointerId)
+
+    if (this.#isPinching) {
+      // end pinch — do NOT transition to drag
+      if (this.#pointers.size < 2) {
+        this.#isPinching = false
+        this.#syncTransform()
+      }
+    }
+
+    if (this.#pointers.size === 0) {
+      this.#isDragging = false
+      this.#isPinching = false
+      if (this.#app) this.#app.canvas.style.cursor = 'auto'
+      this.#syncTransform()
+    }
+  }
+
+  // ── wheel zoom ────────────────────────────────────────────────
 
   #onWheel = (event: WheelEvent): void => {
     if (!this.#sprite || !this.#app) return
