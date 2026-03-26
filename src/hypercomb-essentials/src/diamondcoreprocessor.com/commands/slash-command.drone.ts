@@ -144,6 +144,19 @@ class FormatSlashProvider implements SlashCommandProvider {
   }
 }
 
+class LayoutProvider implements SlashCommandProvider {
+  readonly name = 'layout-provider'
+  readonly priority = 100
+  readonly commands: SlashCommand[] = [
+    { name: 'layout', description: 'Save, apply, list, or remove layout templates', aliases: ['lo'] }
+  ]
+
+  async execute(_commandName: string, args: string): Promise<void> {
+    const queen = get('@diamondcoreprocessor.com/LayoutQueenBee') as any
+    if (queen?.invoke) await queen.invoke(args)
+  }
+}
+
 class NeonProvider implements SlashCommandProvider {
   readonly name = 'neon-provider'
   readonly priority = 100
@@ -215,6 +228,7 @@ _slashCommands.addProvider(new MeetingProvider())
 _slashCommands.addProvider(new DebugProvider())
 _slashCommands.addProvider(new RemoveProvider())
 _slashCommands.addProvider(new FormatSlashProvider())
+_slashCommands.addProvider(new LayoutProvider())
 _slashCommands.addProvider(new NeonProvider())
 _slashCommands.addProvider(new MoveProvider())
 _slashCommands.addProvider(new LlmProvider())

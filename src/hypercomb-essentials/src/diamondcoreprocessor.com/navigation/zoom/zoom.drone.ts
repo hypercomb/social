@@ -280,7 +280,14 @@ export class ZoomDrone extends Drone {
       this.renderer = payload.renderer
 
       const mouseWheel = this.resolve<any>('mouseWheel')
-      mouseWheel?.attach(this, this.canvas)
+      mouseWheel?.attach(
+        {
+          zoomByFactor: this.zoomByFactor,
+          zoomToScale: this.zoomToScale,
+          currentScale: this.currentScale,
+        },
+        this.canvas,
+      )
 
       // attach pinch-zoom as a math delegate
       const pinchZoom = this.resolve<any>('pinchZoom')
@@ -348,6 +355,16 @@ export class ZoomDrone extends Drone {
   // zoom api (used by inputs)
   // -------------------------------------------------
 
+  public currentScale = (): number => {
+    return this.renderContainer?.scale.x ?? 1
+  }
+
+  public zoomToScale = (scale: number, pivotClient: Pt): void => {
+    if (!this.renderContainer || !this.canvas) return
+    const clamped = this.clamp(scale)
+    this.adjustZoom(this.renderContainer, clamped, pivotClient)
+  }
+
   public zoomByFactor = (factor: number, pivotClient: Pt): void => {
     if (!this.renderContainer || !this.canvas) return
 
@@ -371,7 +388,7 @@ export class ZoomDrone extends Drone {
    * mesh adapter and animates the viewport to center and fit all content.
    */
   public zoomToFit = (): void => {
-    if (!this.renderContainer || !this.renderer) return
+    if (!this.renderContainer || !this.renderer || !this.app) return
 
     const target = this.renderContainer
     const screen = this.renderer.screen
@@ -380,27 +397,48 @@ export class ZoomDrone extends Drone {
     const bounds = target.getLocalBounds()
     if (!bounds || bounds.width <= 0 || bounds.height <= 0) return
 
-    const padding = 40 // px padding around content
-    const availW = screen.width - padding * 2
-    const availH = screen.height - padding * 2
+    // measure UI chrome to define the safe area
+    const padding = 5 // px margin from UI chrome edges
+    const headerEl = document.querySelector('.header-bar') as HTMLElement | null
+    const pillEl = document.querySelector('.controls-pill') as HTMLElement | null
+    const safeTop = headerEl ? headerEl.getBoundingClientRect().bottom + padding : padding
+    const safeBottom = pillEl ? pillEl.getBoundingClientRect().top - padding : screen.height - padding
 
-    const scaleX = availW / bounds.width
-    const scaleY = availH / bounds.height
+    const safeLeft = padding
+    const safeRight = screen.width - padding
+    const availW = safeRight - safeLeft
+    const availH = safeBottom - safeTop
+
+    // stage transform (position + uniform scale applied to container)
+    const stageX = this.app.stage.position.x
+    const stageY = this.app.stage.position.y
+    const stageScale = this.app.stage.scale.x || 1
+
+    // content screen size = bounds * containerScale * stageScale
+    // so containerScale = availPx / (bounds * stageScale)
+    const scaleX = availW / (bounds.width * stageScale)
+    const scaleY = availH / (bounds.height * stageScale)
     const fitScale = this.clamp(Math.min(scaleX, scaleY))
 
-    // center the bounding box in the viewport
+    // content center in local coords
     const centerX = bounds.x + bounds.width / 2
     const centerY = bounds.y + bounds.height / 2
+
+    // safe area center in screen coords
+    const safeMidX = (safeLeft + safeRight) / 2
+    const safeMidY = (safeTop + safeBottom) / 2
+
+    // container position so that content center at fitScale lands at safe-area center
+    // screen = stagePos + (containerPos + localPoint * containerScale) * stageScale
+    // solve for containerPos:
+    //   containerPos = (safeMid - stagePos) / stageScale - center * fitScale
+    const targetPosX = (safeMidX - stageX) / stageScale - centerX * fitScale
+    const targetPosY = (safeMidY - stageY) / stageScale - centerY * fitScale
 
     // animate to target (200ms ease-out)
     const startScale = target.scale.x
     const startPosX = target.position.x
     const startPosY = target.position.y
-
-    // target position: the center of bounds at fitScale should land at screen center
-    // stage is already centered at screen/2, so container offset = -center * scale
-    const targetPosX = -centerX * fitScale
-    const targetPosY = -centerY * fitScale
 
     const duration = 200
     const startTime = performance.now()

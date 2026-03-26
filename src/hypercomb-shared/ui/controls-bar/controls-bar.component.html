@@ -79,6 +79,9 @@
           <button class="ctl-btn" (click)="centerView()" aria-label="center">
             <span class="hci">(</span>
           </button>
+          <button class="ctl-btn" (click)="fitContent()" aria-label="fit to content">
+            <span class="hci">)</span>
+          </button>
           <button class="ctl-btn" [class.active]="layoutPinned()" (click)="toggleLayout()" aria-label="layout mode">
             <span class="hci">#</span>
           </button>
@@ -111,6 +114,9 @@
           </button>
           <button class="ctl-btn" (click)="centerView()" aria-label="center">
             <span class="hci">(</span>
+          </button>
+          <button class="ctl-btn" (click)="fitContent()" aria-label="fit to content">
+            <span class="hci">)</span>
           </button>
           <button class="ctl-btn" (click)="zoomOut()" aria-label="zoom out">
             <span class="hci">I</span>

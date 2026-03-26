@@ -3,14 +3,24 @@ import type { InputGate } from '../input-gate.service.js'
 
 type Point = { x: number; y: number }
 
+// Predefined snap levels for coarse zoom (no modifier key)
+const SNAP_LEVELS = [
+  0.05, 0.08, 0.1, 0.15, 0.2, 0.25, 0.33, 0.5,
+  0.67, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0,
+  6.0, 8.0, 12.0,
+]
+
 export class MousewheelZoomInput {
   private enabled = false
   private canvas: HTMLCanvasElement | null = null
 
-  private readonly step = 1.05
+  // fine-grained step used when Ctrl is held
+  private readonly fineStep = 1.02
 
   private zoom: {
     zoomByFactor: (factor: number, pivot: Point) => void
+    zoomToScale: (scale: number, pivot: Point) => void
+    currentScale: () => number
   } | null = null
 
   private gate: InputGate | null = null
@@ -18,6 +28,8 @@ export class MousewheelZoomInput {
   public attach = (
     zoom: {
       zoomByFactor: (factor: number, pivot: Point) => void
+      zoomToScale: (scale: number, pivot: Point) => void
+      currentScale: () => number
     },
     canvas: HTMLCanvasElement
   ): void => {
@@ -56,15 +68,40 @@ export class MousewheelZoomInput {
       event.clientY < rect.top || event.clientY > rect.bottom
     ) return
 
-    const factor = event.deltaY < 0 ? this.step : 1 / this.step
+    const pivot = { x: event.clientX, y: event.clientY }
+    const zoomIn = event.deltaY < 0
 
-    this.zoom.zoomByFactor(
-      factor,
-      { x: event.clientX, y: event.clientY },
-    )
+    if (event.ctrlKey || event.metaKey) {
+      // fine-grained smooth zoom when Ctrl/Cmd is held
+      const factor = zoomIn ? this.fineStep : 1 / this.fineStep
+      this.zoom.zoomByFactor(factor, pivot)
+    } else {
+      // snap to next/previous level
+      const current = this.zoom.currentScale()
+      const next = this.#nextSnapLevel(current, zoomIn)
+      if (next !== current) {
+        this.zoom.zoomToScale(next, pivot)
+      }
+    }
 
     event.preventDefault()
     event.stopPropagation()
+  }
+
+  #nextSnapLevel = (current: number, zoomIn: boolean): number => {
+    if (zoomIn) {
+      // find next level above current
+      for (const level of SNAP_LEVELS) {
+        if (level > current + 0.001) return level
+      }
+      return SNAP_LEVELS[SNAP_LEVELS.length - 1]
+    } else {
+      // find next level below current
+      for (let i = SNAP_LEVELS.length - 1; i >= 0; i--) {
+        if (SNAP_LEVELS[i] < current - 0.001) return SNAP_LEVELS[i]
+      }
+      return SNAP_LEVELS[0]
+    }
   }
 }
 

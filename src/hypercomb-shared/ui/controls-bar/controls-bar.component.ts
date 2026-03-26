@@ -408,6 +408,10 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     vp?.setPan?.(0, 0)
   }
 
+  readonly fitContent = (): void => {
+    this.zoom?.zoomToFit?.()
+  }
+
   readonly toggleLock = (): void => {
     this.#locked.update(v => !v)
     if (this.#locked()) {

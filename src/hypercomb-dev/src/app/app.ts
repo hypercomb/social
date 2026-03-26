@@ -70,6 +70,7 @@ import { FormatQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/f
 import { FormatPainterDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/format/format-painter.drone'
 import { NeonQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/neon.queen'
 import { NeonToolbarDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/presentation/tiles/neon-toolbar.drone'
+import { LayoutQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/move/layout.queen'
 
 const _deps = [
   AxialService,
@@ -122,6 +123,7 @@ const _deps = [
   FormatPainterDrone,
   NeonQueenBee,
   NeonToolbarDrone,
+  LayoutQueenBee,
 ]
 
 void _deps
