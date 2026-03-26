@@ -1,47 +1,36 @@
 // diamondcoreprocessor.com/pixi/hex-overlay.shader.ts
-// Vector-drawn hex hover overlay with per-edge directional lighting
+// Vector-drawn neon hex hover overlay with bloom glow and lens flare
 import { Graphics } from 'pixi.js'
 
 // ── Light direction (top-left, 10 o'clock) ─────────────────────
 const LIGHT_DIR_X = -0.5
 const LIGHT_DIR_Y = -0.866
 
-// ── Palette ────────────────────────────────────────────────────
-const FILL_COLOR   = 0x000d18
-const FILL_ALPHA   = 0.62
+// ── Neon palette ─────────────────────────────────────────────────
+const NEON_CORE   = 0x00ffff   // bright cyan — primary neon line
+const NEON_BRIGHT = 0x44ffff   // lighter cyan for hot core overlay
+const NEON_MID    = 0x0088cc   // mid blue-cyan for bloom layers
+const NEON_DIM    = 0x004466   // dark teal for outermost bloom
+const NEON_WHITE  = 0xccffff   // near-white for flare hotspots
+const FILL_COLOR  = 0x000a14   // dark blue-black interior
+const FLARE_WHITE = 0xffffff   // pure white for lens flare streaks
 
-const SHADOW_COLOR = 0x0a1520   // dark bezel stop
-const MID_COLOR    = 0x2a5570   // mid bezel stop
-const HI_COLOR     = 0x6aafc8   // bright bezel stop
+// ── Size fractions (of circumRadius) ─────────────────────────────
+const NEON_EDGE    = 0.96      // primary neon stroke
+const FILL_RADIUS  = 0.88      // dark interior fill
+const GLOW_OUTER_1 = 1.02      // first outer bloom ring
+const GLOW_OUTER_2 = 1.08      // second outer bloom ring (softest)
+const GLOW_INNER_1 = 0.90      // first inner bloom ring
+const GLOW_INNER_2 = 0.84      // second inner bloom ring (softest)
 
-const BEZEL_OUTER  = 0.92       // outer edge fraction of circumradius
-const BEZEL_INNER  = 0.84       // inner edge fraction
+// ── Vertex flare ─────────────────────────────────────────────────
+const FLARE_DOT_RADIUS  = 2.2
+const FLARE_HALO_RADIUS = 4.5
 
-// ── Drop shadow ────────────────────────────────────────────────
-const SHADOW_OFFSET_X = 2
-const SHADOW_OFFSET_Y = 3
-const SHADOW_ALPHA    = 0.35
-const SHADOW_BLUR     = 6
-
-// ── Rim + inner line ───────────────────────────────────────────
-const RIM_WIDTH       = 0.75
-const RIM_BASE_ALPHA  = 0.15
-const RIM_HI_ALPHA    = 0.55
-
-const INNER_WIDTH     = 0.5
-const INNER_BASE_ALPHA = 0.08
-const INNER_HI_ALPHA   = 0.30
-
-// ── Corner jewels ──────────────────────────────────────────────
-const JEWEL_RADIUS     = 1.4
-const JEWEL_BASE_ALPHA = 0.15
-const JEWEL_HI_ALPHA   = 0.65
-const JEWEL_COLOR      = 0x88ccdd
-
-// ── Specular ───────────────────────────────────────────────────
-const SPEC_RADIUS      = 1.8
-const SPEC_COLOR       = 0xddffff
-const SPEC_ALPHA       = 0.45
+// ── Lens flare cross ─────────────────────────────────────────────
+const FLARE_H_LEN = 5
+const FLARE_V_LEN = 3
+const FLARE_CENTER_R = 1.8
 
 export class HexOverlayMesh {
   readonly mesh: Graphics
@@ -77,7 +66,6 @@ export class HexOverlayMesh {
   // ── per-edge directional lighting ──────────────────────────────
 
   #edgeLighting(edgeIndex: number): number {
-    // outward-facing normal of edge i
     const a0 = (Math.PI / 3) * edgeIndex + (this.#flat ? 0 : Math.PI / 6)
     const a1 = (Math.PI / 3) * (edgeIndex + 1) + (this.#flat ? 0 : Math.PI / 6)
     const mx = (Math.cos(a0) + Math.cos(a1)) / 2
@@ -85,7 +73,6 @@ export class HexOverlayMesh {
     const len = Math.sqrt(mx * mx + my * my)
     const nx = mx / len
     const ny = my / len
-    // dot with light direction → [-1..1], remap to [0..1]
     const dot = nx * LIGHT_DIR_X + ny * LIGHT_DIR_Y
     return dot * 0.5 + 0.5
   }
@@ -101,9 +88,26 @@ export class HexOverlayMesh {
     return (r << 16) | (g << 8) | b
   }
 
-  #lerpColor3(lo: number, mid: number, hi: number, t: number): number {
-    if (t < 0.5) return this.#lerpColor(lo, mid, t * 2)
-    return this.#lerpColor(mid, hi, (t - 0.5) * 2)
+  // ── per-edge bloom stroke helper ───────────────────────────────
+
+  #strokeEdges(
+    g: Graphics,
+    verts: number[],
+    width: number,
+    color: number,
+    alphaLo: number,
+    alphaHi: number,
+    colorHi?: number,
+  ): void {
+    for (let i = 0; i < 6; i++) {
+      const lighting = this.#edgeLighting(i)
+      const alpha = alphaLo + (alphaHi - alphaLo) * lighting
+      const c = colorHi !== undefined ? this.#lerpColor(color, colorHi, lighting) : color
+      const i0 = i * 2, i1 = ((i + 1) % 6) * 2
+      g.moveTo(verts[i0], verts[i0 + 1])
+      g.lineTo(verts[i1], verts[i1 + 1])
+      g.stroke({ width, color: c, alpha })
+    }
   }
 
   // ── main draw ──────────────────────────────────────────────────
@@ -113,89 +117,80 @@ export class HexOverlayMesh {
     g.clear()
 
     const R = this.#radiusPx
-    const outerV = this.#hexVerts(R * BEZEL_OUTER)
-    const innerV = this.#hexVerts(R * BEZEL_INNER)
-    const fillV  = this.#hexVerts(R * BEZEL_INNER)
 
-    // ─── 1. Drop shadow ────────────────────────────────────────
-    const shadowV = this.#hexVerts(R * BEZEL_OUTER)
-    g.poly(shadowV.map((v, i) => v + (i % 2 === 0 ? SHADOW_OFFSET_X : SHADOW_OFFSET_Y)))
-    g.fill({ color: 0x000000, alpha: SHADOW_ALPHA })
+    // vertex sets at each radius
+    const neonV    = this.#hexVerts(R * NEON_EDGE)
+    const fillV    = this.#hexVerts(R * FILL_RADIUS)
+    const gOuter1V = this.#hexVerts(R * GLOW_OUTER_1)
+    const gOuter2V = this.#hexVerts(R * GLOW_OUTER_2)
+    const gInner1V = this.#hexVerts(R * GLOW_INNER_1)
+    const gInner2V = this.#hexVerts(R * GLOW_INNER_2)
 
-    // penumbra — slightly larger, more transparent
-    const penV = this.#hexVerts(R * BEZEL_OUTER + SHADOW_BLUR)
-    g.poly(penV.map((v, i) => v + (i % 2 === 0 ? SHADOW_OFFSET_X : SHADOW_OFFSET_Y)))
-    g.fill({ color: 0x000000, alpha: SHADOW_ALPHA * 0.3 })
+    // ─── 1. Outermost bloom ring (outside) ────────────────────
+    this.#strokeEdges(g, gOuter2V, 3.0, NEON_DIM, 0.04, 0.10)
 
-    // ─── 2. Dark fill ──────────────────────────────────────────
+    // ─── 2. Outer bloom ring ──────────────────────────────────
+    this.#strokeEdges(g, gOuter1V, 2.5, NEON_MID, 0.06, 0.18)
+
+    // ─── 3. Dark fill ─────────────────────────────────────────
     g.poly(fillV)
-    g.fill({ color: FILL_COLOR, alpha: FILL_ALPHA })
+    g.fill({ color: FILL_COLOR, alpha: 0.55 })
 
-    // ─── 3. Bezel trapezoids (6 segments) ──────────────────────
+    // ─── 4. Inner bloom ring (far) ────────────────────────────
+    this.#strokeEdges(g, gInner2V, 2.5, NEON_DIM, 0.04, 0.10)
+
+    // ─── 5. Inner bloom ring (near) ───────────────────────────
+    this.#strokeEdges(g, gInner1V, 2.0, NEON_MID, 0.08, 0.22)
+
+    // ─── 6. Primary neon edge (wide, saturated) ───────────────
+    this.#strokeEdges(g, neonV, 1.5, NEON_MID, 0.50, 0.95, NEON_CORE)
+
+    // ─── 7. Hot core edge (thin, bright) ──────────────────────
+    this.#strokeEdges(g, neonV, 0.75, NEON_BRIGHT, 0.15, 0.70, NEON_WHITE)
+
+    // ─── 8-9. Vertex flare dots + bloom halos ─────────────────
     let brightestEdge = 0
     let brightestVal = -1
 
     for (let i = 0; i < 6; i++) {
-      const lighting = this.#edgeLighting(i)
-      if (lighting > brightestVal) { brightestVal = lighting; brightestEdge = i }
-
-      const i0 = i * 2, i1 = ((i + 1) % 6) * 2
-      const bezelColor = this.#lerpColor3(SHADOW_COLOR, MID_COLOR, HI_COLOR, lighting)
-      const bezelAlpha = 0.3 + lighting * 0.5
-
-      // trapezoid: outer[i] → outer[i+1] → inner[i+1] → inner[i]
-      g.poly([
-        outerV[i0], outerV[i0 + 1],
-        outerV[i1], outerV[i1 + 1],
-        innerV[i1], innerV[i1 + 1],
-        innerV[i0], innerV[i0 + 1],
-      ])
-      g.fill({ color: bezelColor, alpha: bezelAlpha })
-    }
-
-    // ─── 4. Outer rim highlight ────────────────────────────────
-    for (let i = 0; i < 6; i++) {
-      const lighting = this.#edgeLighting(i)
-      const rimAlpha = RIM_BASE_ALPHA + (RIM_HI_ALPHA - RIM_BASE_ALPHA) * lighting
-      const i0 = i * 2, i1 = ((i + 1) % 6) * 2
-
-      g.moveTo(outerV[i0], outerV[i0 + 1])
-      g.lineTo(outerV[i1], outerV[i1 + 1])
-      g.stroke({ width: RIM_WIDTH, color: this.#lerpColor(MID_COLOR, HI_COLOR, lighting), alpha: rimAlpha })
-    }
-
-    // ─── 5. Inner edge lines (inverted lighting for ridge) ─────
-    for (let i = 0; i < 6; i++) {
-      const lighting = 1.0 - this.#edgeLighting(i) // inverted → lit edges on opposite side
-      const innerAlpha = INNER_BASE_ALPHA + (INNER_HI_ALPHA - INNER_BASE_ALPHA) * lighting
-      const i0 = i * 2, i1 = ((i + 1) % 6) * 2
-
-      g.moveTo(innerV[i0], innerV[i0 + 1])
-      g.lineTo(innerV[i1], innerV[i1 + 1])
-      g.stroke({ width: INNER_WIDTH, color: this.#lerpColor(SHADOW_COLOR, MID_COLOR, lighting), alpha: innerAlpha })
-    }
-
-    // ─── 6. Corner jewel dots ──────────────────────────────────
-    for (let i = 0; i < 6; i++) {
-      // average lighting of two adjacent edges
       const l0 = this.#edgeLighting(i)
       const l1 = this.#edgeLighting((i + 5) % 6)
+      if (l0 > brightestVal) { brightestVal = l0; brightestEdge = i }
       const cornerLight = (l0 + l1) / 2
-      const jewelAlpha = JEWEL_BASE_ALPHA + (JEWEL_HI_ALPHA - JEWEL_BASE_ALPHA) * cornerLight
 
-      g.circle(outerV[i * 2], outerV[i * 2 + 1], JEWEL_RADIUS)
-      g.fill({ color: JEWEL_COLOR, alpha: jewelAlpha })
+      const vx = neonV[i * 2], vy = neonV[i * 2 + 1]
+
+      // bloom halo (behind)
+      const haloAlpha = 0.05 + cornerLight * 0.20
+      g.circle(vx, vy, FLARE_HALO_RADIUS)
+      g.fill({ color: NEON_CORE, alpha: haloAlpha })
+
+      // bright dot (on top)
+      const dotAlpha = 0.10 + cornerLight * 0.50
+      g.circle(vx, vy, FLARE_DOT_RADIUS)
+      g.fill({ color: NEON_WHITE, alpha: dotAlpha })
     }
 
-    // ─── 7. Specular dot at brightest edge midpoint ────────────
+    // ─── 10. Lens flare cross at brightest edge midpoint ──────
     {
       const i0 = brightestEdge * 2
       const i1 = ((brightestEdge + 1) % 6) * 2
-      const sx = (outerV[i0] + outerV[i1]) / 2
-      const sy = (outerV[i0 + 1] + outerV[i1 + 1]) / 2
+      const sx = (neonV[i0] + neonV[i1]) / 2
+      const sy = (neonV[i0 + 1] + neonV[i1 + 1]) / 2
 
-      g.circle(sx, sy, SPEC_RADIUS)
-      g.fill({ color: SPEC_COLOR, alpha: SPEC_ALPHA })
+      // horizontal streak
+      g.moveTo(sx - FLARE_H_LEN, sy)
+      g.lineTo(sx + FLARE_H_LEN, sy)
+      g.stroke({ width: 0.6, color: FLARE_WHITE, alpha: 0.40 })
+
+      // vertical streak
+      g.moveTo(sx, sy - FLARE_V_LEN)
+      g.lineTo(sx, sy + FLARE_V_LEN)
+      g.stroke({ width: 0.6, color: FLARE_WHITE, alpha: 0.30 })
+
+      // central dot
+      g.circle(sx, sy, FLARE_CENTER_R)
+      g.fill({ color: NEON_WHITE, alpha: 0.55 })
     }
   }
 }

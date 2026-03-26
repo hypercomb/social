@@ -110,8 +110,11 @@ export class TileOverlayDrone extends Drone {
     'navigation:guard-start', 'navigation:guard-end',
     'mesh:public-changed', 'editor:mode', 'selection:changed',
     'overlay:register-action', 'overlay:unregister-action',
+    'drop:dragging',
   ]
   protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back']
+
+  #dropDragging = false
 
   #effectsRegistered = false
 
@@ -223,12 +226,19 @@ export class TileOverlayDrone extends Drone {
         this.#hasSelection = (payload?.selected?.length ?? 0) > 0
         this.#updateVisibility()
       })
+
+      this.onEffect<{ active: boolean }>('drop:dragging', ({ active }) => {
+        this.#dropDragging = active
+        this.#updatePerTileVisibility()
+        this.#updateVisibility()
+      })
     }
   }
 
   protected override dispose(): void {
     if (this.#listening) {
       document.removeEventListener('pointermove', this.#onPointerMove)
+      document.removeEventListener('dragover', this.#onDragOverTrack)
       document.removeEventListener('click', this.#onClick)
       document.removeEventListener('contextmenu', this.#onContextMenu)
       this.#listening = false
@@ -319,6 +329,16 @@ export class TileOverlayDrone extends Drone {
 
   #updatePerTileVisibility(): void {
     if (!this.#currentAxial) return
+
+    // during image drag-over, hide all action buttons — overlay is just a drop target
+    if (this.#dropDragging) {
+      for (const action of this.#actions) action.button.visible = false
+      if (this.#seedLabel) this.#seedLabel.visible = false
+      return
+    }
+
+    if (this.#seedLabel) this.#seedLabel.visible = true
+
     const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(this.#currentAxial.q, this.#currentAxial.r))
     if (!entry) return
 
@@ -343,8 +363,35 @@ export class TileOverlayDrone extends Drone {
     if (this.#listening) return
     this.#listening = true
     document.addEventListener('pointermove', this.#onPointerMove)
+    document.addEventListener('dragover', this.#onDragOverTrack)
     document.addEventListener('click', this.#onClick)
     document.addEventListener('contextmenu', this.#onContextMenu)
+  }
+
+  /** Track hex position during image drag-over (pointermove doesn't fire during drag). */
+  #onDragOverTrack = (e: DragEvent): void => {
+    if (!this.#dropDragging) return
+    if (!this.#renderContainer || !this.#overlay || !this.#renderer || !this.#canvas) return
+
+    const detector = this.resolve<{ pixelToAxial(px: number, py: number, flat?: boolean): Axial }>('detector')
+    if (!detector) return
+
+    const pixiGlobal = this.#clientToPixiGlobal(e.clientX, e.clientY)
+    const local = this.#renderContainer.toLocal(new Point(pixiGlobal.x, pixiGlobal.y))
+    const meshLocalX = local.x - this.#meshOffset.x
+    const meshLocalY = local.y - this.#meshOffset.y
+    const axial = detector.pixelToAxial(meshLocalX, meshLocalY, this.#flat)
+
+    const hexChanged = !this.#currentAxial
+      || this.#currentAxial.q !== axial.q
+      || this.#currentAxial.r !== axial.r
+
+    if (hexChanged) {
+      this.#currentAxial = axial
+      this.#currentIndex = this.#lookupIndex(axial.q, axial.r)
+      this.#positionOverlay(axial.q, axial.r)
+      this.#updateSeedLabel(axial.q, axial.r)
+    }
   }
 
   #onPointerMove = (e: PointerEvent): void => {
@@ -552,8 +599,15 @@ export class TileOverlayDrone extends Drone {
   #updateVisibility(): void {
     if (!this.#overlay) return
     const occupied = this.#currentIndex !== undefined && this.#currentIndex < this.#cellCount
-    this.#overlay.visible = occupied && !this.#editing && !this.#editCooldown && !this.#hasSelection && !this.#touchDragging
 
+    // during image drag-over, show the overlay as a drop target indicator
+    // regardless of editing/selection state
+    if (this.#dropDragging) {
+      this.#overlay.visible = occupied
+      return
+    }
+
+    this.#overlay.visible = occupied && !this.#editing && !this.#editCooldown && !this.#hasSelection && !this.#touchDragging
   }
 
   #positionOverlay(q: number, r: number): void {

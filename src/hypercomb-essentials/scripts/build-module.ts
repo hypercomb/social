@@ -156,6 +156,21 @@ const ensureDir = (dir: string): void => {
   mkdirSync(dir, { recursive: true })
 }
 
+const deployToAzure = (rootLayerSig: string): void => {
+  if (process.argv.includes('--local')) return
+
+  const ps1 = resolve(__dirname, 'deploy-azure.ps1')
+  if (!existsSync(ps1)) return
+
+  const result = spawnSync(
+    'powershell',
+    ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1, '-Signature', rootLayerSig],
+    { stdio: 'inherit' }
+  )
+
+  if (result.status !== 0) throw new Error('deployment failed')
+}
+
 const relPosix = (from: string, to: string): string =>
   relative(from, to).replace(/\\/g, '/') || ''
 
@@ -621,12 +636,19 @@ const main = async (): Promise<void> => {
   // --- Early exit: nothing changed at all ---
   if (!anyMtimeChanged && cache) {
     const rootDir = join(DIST_ROOT, cache.rootLayerSig)
+    const skipDeploy = process.argv.includes('--local')
 
     // Verify output still exists (not wiped externally)
     if (existsSync(rootDir) && existsSync(join(rootDir, INSTALL_MANIFEST_FILE))) {
       const elapsed = ((performance.now() - t0) / 1000).toFixed(3)
       console.log(`[build-module] Merkle root unchanged — skipping build entirely`)
       console.log(`[build-module] root signature: ${cache.rootLayerSig}`)
+      if (skipDeploy) {
+        console.log(`[build-module] --local: skipping Azure deploy`)
+      } else {
+        console.log(`[build-module] deploying cached output to Azure`)
+        deployToAzure(cache.rootLayerSig)
+      }
       console.log(`[build-module] completed in ${elapsed}s`)
 
       // still deploy if not --local (output exists but may not be on Azure yet)
@@ -870,15 +892,7 @@ const main = async (): Promise<void> => {
     console.log(`[build-module] output: ${rootDir}`)
     console.log(`[build-module] completed in ${elapsed}s`)
   } else {
-    const ps1 = resolve(__dirname, 'deploy-azure.ps1')
-    if (existsSync(ps1)) {
-      const r = spawnSync(
-        'powershell',
-        ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1, '-Signature', rootLayerSig],
-        { stdio: 'inherit' }
-      )
-      if (r.status !== 0) throw new Error('deployment failed')
-    }
+    deployToAzure(rootLayerSig)
   }
 }
 
