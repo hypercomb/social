@@ -2,22 +2,11 @@
 @use '../../../hypercomb-shared/ui/breakpoints' as *;
 
 app-header {
-  flex: 1;
+  flex: 3;
   min-width: 0;
-  max-width: 80%;
-}
-
-@include tablet-only {
-  app-header {
-    max-width: 90%;
-  }
 }
 
 @include phone-only {
-  app-header {
-    max-width: 100%;
-  }
-
   // hide command-line when secret input is expanded
   .header-bar.secret-open app-header {
     display: none;

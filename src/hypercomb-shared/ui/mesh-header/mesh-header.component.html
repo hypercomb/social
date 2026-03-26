@@ -1,47 +1,32 @@
 <div class="mesh-header" [class.secret-active]="showSecretInput()">
-  <!-- Secret input: visible in swarm when no secret or manually expanded -->
+  <!-- Secret input: visible when in shield mode and editing -->
   @if (showSecretInput()) {
     <div class="secret-input-wrap">
       <input
-        class="header-secret-input" [class.has-secret]="hasSecret()"
-        [class.revealed]="secretRevealed()"
+        class="header-secret-input"
         type="text"
         placeholder="secure your location"
         [value]="secretValue()"
         (input)="onSecretInput($event)"
         (keydown.enter)="submitSecret($event)"
       />
-      @if (hasSecret()) {
-        <button class="secret-eye" type="button" (click)="onEyeClick()">
-          <span class="hci">c</span>
-        </button>
-      }
     </div>
-    @if (hasSecret()) {
-      <button class="secret-clear" type="button" (click)="clearSecret()">
-        &times;
-      </button>
-    }
   }
 
-  <!-- Shield: always visible, always rightmost -->
+  <!-- Secured label: visible when has secret and input is collapsed -->
+  @if (meshPublic && hasSecret() && !showSecretInput()) {
+    <span class="secured-label" [style.color]="shieldColor()" (click)="expandSecret()">secured</span>
+  }
+
+  <!-- Mode icon: always visible, always rightmost -->
   <button class="mode-toggle"
     [class.solo-mode]="!meshPublic"
-    [class.public-mode]="meshPublic && !showSecretInput()"
-    [class.secret-mode]="meshPublic && showSecretInput()"
-    [class.has-secret]="hasSecret()"
+    [class.shield-mode]="!!meshPublic"
     [style.--shield-color]="shieldColor()"
     type="button"
     (pointerdown)="onPointerDown()"
     (pointerup)="onPointerUp()"
     (pointerleave)="onPointerUp()">
-    @if (!meshPublic) {
-      <span class="mode-label">solo</span>
-    } @else if (hasSecret()) {
-      <span class="mode-label">secured</span>
-    } @else {
-      <span class="mode-label">swarm</span>
-    }
-    <span class="hci">e</span>
+    <span class="hci">{{ meshPublic ? 'e' : 'i' }}</span>
   </button>
 </div>

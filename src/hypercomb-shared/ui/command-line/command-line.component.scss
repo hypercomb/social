@@ -61,7 +61,7 @@
   display: flex;
   align-items: center;
   width: 100%;
-  min-height: 2.6rem;
+  min-height: 2.2rem;
 
   &::before {
     content: '>';
@@ -98,7 +98,7 @@
 
 .command-input {
   width: 100%;
-  padding: 0.6rem 0.75rem;
+  padding: 0.4rem 0.75rem;
   background: transparent;
   border: none;
   outline: none;
@@ -269,7 +269,7 @@
   }
 
   .command-row {
-    min-height: 3.5rem;
+    min-height: 3.8rem;
 
     &::before {
       font-size: 1.35em;
@@ -283,7 +283,7 @@
     font-size: 18px;
     font-weight: 450;
     letter-spacing: 0.035em;
-    padding: 1rem 1rem;
+    padding: 1.1rem 1rem;
   }
 
   .ghost {

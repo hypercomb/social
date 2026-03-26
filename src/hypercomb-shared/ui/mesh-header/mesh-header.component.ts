@@ -17,13 +17,10 @@ export class MeshHeaderComponent {
 
   #secretValue = signal('')
   #secretExpanded = signal(false)
-  #secretRevealed = signal(false)
 
   readonly secretValue = this.#secretValue.asReadonly()
-  readonly secretExpanded = this.#secretExpanded.asReadonly()
-  readonly secretRevealed = this.#secretRevealed.asReadonly()
   readonly hasSecret = computed(() => this.#secretValue().trim().length > 0)
-  readonly showSecretInput = () => !!this.meshPublic && (!this.hasSecret() || this.#secretExpanded())
+  readonly showSecretInput = () => (!!this.meshPublic && !this.hasSecret()) || this.#secretExpanded()
 
   readonly shieldColor = computed(() => {
     const secret = this.#secretValue().trim()
@@ -35,7 +32,6 @@ export class MeshHeaderComponent {
   })
 
   constructor() {
-    // pre-fill from store if available
     const store = this.#store
     if (store?.value) {
       this.#secretValue.set(store.value)
@@ -49,7 +45,7 @@ export class MeshHeaderComponent {
 
   #longPressTimer: ReturnType<typeof setTimeout> | null = null
 
-  /** Tap: toggle solo ↔ swarm. Long-press in swarm: expand secret input. */
+  /** Tap: toggle solo ↔ shield. Long-press in shield: expand secret input. */
   readonly onPointerDown = (): void => {
     this.#longPressTimer = setTimeout(() => {
       this.#longPressTimer = null
@@ -62,7 +58,6 @@ export class MeshHeaderComponent {
 
   readonly onPointerUp = (): void => {
     if (this.#longPressTimer !== null) {
-      // short tap — timer didn't fire
       clearTimeout(this.#longPressTimer)
       this.#longPressTimer = null
       this.#handleTap()
@@ -71,16 +66,14 @@ export class MeshHeaderComponent {
 
   readonly #handleTap = (): void => {
     if (!this.meshPublic) {
-      // solo → swarm: always open the secret input
+      // solo → shield: open the secret input
       this.#secretExpanded.set(true)
       this.meshToggled.emit()
       this.secretExpandedChange.emit(true)
     } else if (this.showSecretInput()) {
-      // swarm with input showing → close it
       if (this.hasSecret()) {
-        // has secret: just collapse, stay in swarm
+        // has secret: collapse input, show "secured"
         this.#secretExpanded.set(false)
-        this.#secretRevealed.set(false)
         this.secretExpandedChange.emit(false)
       } else {
         // no secret: go back to solo
@@ -89,14 +82,16 @@ export class MeshHeaderComponent {
         this.secretExpandedChange.emit(false)
       }
     } else {
-      // swarm with input collapsed → back to solo
+      // secured (collapsed) → back to solo, clear secret
+      this.clearSecret()
       this.meshToggled.emit()
       this.secretExpandedChange.emit(false)
     }
   }
 
-  readonly onEyeClick = (): void => {
-    this.#secretRevealed.update(v => !v)
+  readonly expandSecret = (): void => {
+    this.#secretExpanded.set(true)
+    this.secretExpandedChange.emit(true)
   }
 
   readonly onSecretInput = (event: Event): void => {
@@ -109,6 +104,10 @@ export class MeshHeaderComponent {
     this.#secretValue.set(value)
     this.#store?.set(value)
     EffectBus.emit('mesh:secret', { secret: value })
+    if (value.length > 0) {
+      this.#secretExpanded.set(false)
+      this.secretExpandedChange.emit(false)
+    }
   }
 
   readonly clearSecret = (): void => {
