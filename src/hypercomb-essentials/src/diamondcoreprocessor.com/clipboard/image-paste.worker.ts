@@ -10,7 +10,10 @@ export class ImagePasteWorker extends Worker {
   public override description =
     'Intercepts browser paste events containing images and routes them into the tile editor.'
 
-  protected override emits = ['seed:added']
+  protected override emits = ['drop:pending', 'search:prefill']
+
+  #pendingBlob: Blob | null = null
+  #pendingSeedUnsub: (() => void) | null = null
 
   constructor() {
     super()
@@ -48,7 +51,7 @@ export class ImagePasteWorker extends Worker {
   async #routeImage(blob: Blob): Promise<void> {
     const editorSvc = this.#editorService
 
-    // Path A: editor already open — replace image
+    // Path A: editor already open — replace image (user can still cancel)
     if (editorSvc?.mode === 'editing') {
       editorSvc.setLargeBlob(blob)
       await this.#loadImageWhenReady(blob)
@@ -66,22 +69,43 @@ export class ImagePasteWorker extends Worker {
       return
     }
 
-    // Path C: nothing selected — create new seed, open editor, load image
-    const label = 'image-' + Date.now()
-    EffectBus.emit('seed:added', { seed: label })
+    // Path C: nothing selected — stash blob, focus command line for seed name
+    this.#pendingBlob = blob
+    EffectBus.emit('drop:pending', { active: true })
+    EffectBus.emit('search:prefill', { value: '' })
 
-    // let history record the add before opening editor
-    await new Promise<void>(r => setTimeout(r, 100))
+    // listen for seed:added — when user creates a seed, attach the image
+    this.#pendingSeedUnsub?.()
+    this.#pendingSeedUnsub = EffectBus.on<{ seed: string }>('seed:added', ({ seed }) => {
+      if (!this.#pendingBlob) return
+      const stashedBlob = this.#pendingBlob
+      this.#clearPending()
 
-    EffectBus.emit('tile:action', { action: 'edit', label, q: 0, r: 0, index: 0 })
-    await this.#waitForEditorMode()
-    this.#editorService?.setLargeBlob(blob)
-    await this.#loadImageWhenReady(blob)
+      void (async () => {
+        await new Promise<void>(r => setTimeout(r, 150))
+
+        EffectBus.emit('tile:action', { action: 'edit', label: seed, q: 0, r: 0, index: 0 })
+        await this.#waitForEditorMode()
+        this.#editorService?.setLargeBlob(stashedBlob)
+        await this.#loadImageWhenReady(stashedBlob)
+      })()
+    })
+
+    // auto-cancel after 30s
+    setTimeout(() => {
+      if (this.#pendingBlob) this.#clearPending()
+    }, 30_000)
   }
 
   // ── helpers ──────────────────────────────────────────────────
 
-  /** Wait for editor:mode { active: true } effect. */
+  #clearPending(): void {
+    this.#pendingBlob = null
+    this.#pendingSeedUnsub?.()
+    this.#pendingSeedUnsub = null
+    EffectBus.emit('drop:pending', { active: false })
+  }
+
   async #waitForEditorMode(): Promise<void> {
     if (this.#editorService?.mode === 'editing') return
     await new Promise<void>(resolve => {
@@ -92,7 +116,6 @@ export class ImagePasteWorker extends Worker {
     })
   }
 
-  /** Retry loadImage until the Pixi canvas is ready (Angular defers init). */
   async #loadImageWhenReady(blob: Blob): Promise<void> {
     for (let attempt = 0; attempt < 20; attempt++) {
       const ie = this.#imageEditor

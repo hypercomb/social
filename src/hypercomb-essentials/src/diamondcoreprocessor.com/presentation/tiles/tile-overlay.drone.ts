@@ -110,11 +110,12 @@ export class TileOverlayDrone extends Drone {
     'navigation:guard-start', 'navigation:guard-end',
     'mesh:public-changed', 'editor:mode', 'selection:changed',
     'overlay:register-action', 'overlay:unregister-action',
-    'drop:dragging',
+    'drop:dragging', 'drop:pending',
   ]
-  protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back']
+  protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'drop:target']
 
   #dropDragging = false
+  #dropPending = false
 
   #effectsRegistered = false
 
@@ -232,6 +233,12 @@ export class TileOverlayDrone extends Drone {
         this.#updatePerTileVisibility()
         this.#updateVisibility()
       })
+
+      this.onEffect<{ active: boolean }>('drop:pending', ({ active }) => {
+        this.#dropPending = active
+        this.#updatePerTileVisibility()
+        this.#updateVisibility()
+      })
     }
   }
 
@@ -330,8 +337,8 @@ export class TileOverlayDrone extends Drone {
   #updatePerTileVisibility(): void {
     if (!this.#currentAxial) return
 
-    // during image drag-over, hide all action buttons — overlay is just a drop target
-    if (this.#dropDragging) {
+    // during image drag-over or pending drop, hide all action buttons — overlay is just a drop target
+    if (this.#dropDragging || this.#dropPending) {
       for (const action of this.#actions) action.button.visible = false
       if (this.#seedLabel) this.#seedLabel.visible = false
       return
@@ -391,6 +398,17 @@ export class TileOverlayDrone extends Drone {
       this.#currentIndex = this.#lookupIndex(axial.q, axial.r)
       this.#positionOverlay(axial.q, axial.r)
       this.#updateSeedLabel(axial.q, axial.r)
+
+      // tell ImageDropDrone what's under the cursor
+      const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(axial.q, axial.r))
+      this.emitEffect('drop:target', {
+        q: axial.q,
+        r: axial.r,
+        occupied: !!entry,
+        label: entry?.label ?? null,
+        index: entry?.index ?? -1,
+        hasImage: entry ? !this.#noImageLabels.has(entry.label) : false,
+      })
     }
   }
 
@@ -598,15 +616,14 @@ export class TileOverlayDrone extends Drone {
 
   #updateVisibility(): void {
     if (!this.#overlay) return
-    const occupied = this.#currentIndex !== undefined && this.#currentIndex < this.#cellCount
 
-    // during image drag-over, show the overlay as a drop target indicator
-    // regardless of editing/selection state
-    if (this.#dropDragging) {
-      this.#overlay.visible = occupied
+    // during image drag-over or pending drop, show overlay as a drop target / placeholder
+    if (this.#dropDragging || this.#dropPending) {
+      this.#overlay.visible = true
       return
     }
 
+    const occupied = this.#currentIndex !== undefined && this.#currentIndex < this.#cellCount
     this.#overlay.visible = occupied && !this.#editing && !this.#editCooldown && !this.#hasSelection && !this.#touchDragging
   }
 
