@@ -16,6 +16,7 @@ export class HistorySliderDrone {
   #bar: HTMLElement | null = null
   #slider: HTMLInputElement | null = null
   #label: HTMLElement | null = null
+  #promoteBtn: HTMLButtonElement | null = null
   #visible = false
   #state: CursorState = { locationSig: '', position: 0, total: 0, rewound: false }
 
@@ -78,6 +79,11 @@ export class HistorySliderDrone {
     cursor?.redo()
   }
 
+  #promote(): void {
+    const cursor = get<HistoryCursorService>('@diamondcoreprocessor.com/HistoryCursorService')
+    cursor?.promote()
+  }
+
   // ── DOM ──────────────────────────────────────────────────────
 
   #buildBar(): void {
@@ -133,10 +139,25 @@ export class HistorySliderDrone {
     redoBtn.style.cssText = this.#btnStyle()
     redoBtn.addEventListener('click', () => this.#redo())
 
+    const promoteBtn = document.createElement('button')
+    promoteBtn.textContent = 'Restore'
+    promoteBtn.title = 'Promote this state to head'
+    promoteBtn.style.cssText = `
+      ${this.#btnStyle()}
+      display: none;
+      background: rgba(255, 170, 60, 0.12);
+      border-color: rgba(255, 170, 60, 0.4);
+      color: rgba(255, 200, 120, 0.9);
+      font-weight: 600;
+      letter-spacing: 0.3px;
+    `
+    promoteBtn.addEventListener('click', () => this.#promote())
+
     const label = document.createElement('span')
     label.style.cssText = 'white-space: nowrap; min-width: 60px; text-align: right;'
 
-    bar.append(undoBtn, slider, redoBtn, label)
+    bar.append(undoBtn, slider, redoBtn, promoteBtn, label)
+    this.#promoteBtn = promoteBtn
     document.body.appendChild(bar)
 
     this.#bar = bar
@@ -179,6 +200,11 @@ export class HistorySliderDrone {
 
     this.#slider.max = String(total)
     this.#slider.value = String(position)
+
+    // Show/hide restore button based on rewind state
+    if (this.#promoteBtn) {
+      this.#promoteBtn.style.display = rewound ? 'inline-block' : 'none'
+    }
 
     if (rewound) {
       this.#label.textContent = `${position} / ${total}`

@@ -104,6 +104,80 @@ export class HistoryCursorService extends EventTarget {
   }
 
   /**
+   * Promote the state at the current cursor position to head.
+   * Computes the diff (cursor-state vs head-state), writes the
+   * necessary add / remove ops, then a reorder op to preserve
+   * the display order at cursor time. Cursor jumps to new head.
+   */
+  async promote(): Promise<void> {
+    if (!this.state.rewound) return          // nothing to promote
+    if (this.#allOps.length === 0) return
+
+    const historyService = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
+    if (!historyService) return
+
+    // ── Compute seed set at cursor position ─────────────────────
+    const cursorSeeds: string[] = []
+    const cursorSeedSet = new Set<string>()
+    for (let i = 0; i < this.#position; i++) {
+      const op = this.#allOps[i]
+      if (op.op === 'add') {
+        if (!cursorSeedSet.has(op.seed)) {
+          cursorSeedSet.add(op.seed)
+          cursorSeeds.push(op.seed)
+        }
+      } else if (op.op === 'remove') {
+        cursorSeedSet.delete(op.seed)
+        const idx = cursorSeeds.indexOf(op.seed)
+        if (idx !== -1) cursorSeeds.splice(idx, 1)
+      }
+    }
+
+    // ── Compute seed set at head ────────────────────────────────
+    const headSeedSet = new Set<string>()
+    for (const op of this.#allOps) {
+      if (op.op === 'add') headSeedSet.add(op.seed)
+      else if (op.op === 'remove') headSeedSet.delete(op.seed)
+    }
+
+    // ── Diff: write remove ops then add ops ─────────────────────
+    const now = Date.now()
+
+    // Seeds at head but not at cursor → remove
+    for (const seed of headSeedSet) {
+      if (!cursorSeedSet.has(seed)) {
+        await historyService.record(this.#locationSig, { op: 'remove', seed, at: now })
+      }
+    }
+
+    // Seeds at cursor but not at head → add
+    for (const seed of cursorSeedSet) {
+      if (!headSeedSet.has(seed)) {
+        await historyService.record(this.#locationSig, { op: 'add', seed, at: now })
+      }
+    }
+
+    // ── Preserve display order via reorder op ───────────────────
+    if (cursorSeeds.length > 0) {
+      const store = get<any>('@hypercomb.social/Store')
+      if (store) {
+        const payload = JSON.stringify(cursorSeeds)
+        const payloadSig: string = await store.putResource(new Blob([payload]))
+        await historyService.record(this.#locationSig, { op: 'reorder', seed: payloadSig, at: now })
+      }
+    }
+
+    // ── Invalidate order cache & reload ─────────────────────────
+    const orderProjection = get<any>('@diamondcoreprocessor.com/OrderProjection')
+    if (orderProjection?.evict) orderProjection.evict(this.#locationSig)
+
+    // Reload and jump to new head
+    await this.load(this.#locationSig)
+    this.#position = this.#total
+    this.#emit()
+  }
+
+  /**
    * Compute divergence info: which seeds are current vs future.
    * Used by ShowCellDrone to decide ghost overlays.
    */
