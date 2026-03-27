@@ -4,7 +4,7 @@
 
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'fs'
 import { dirname, join, resolve } from 'path'
-import { execSync, spawn } from 'child_process'
+import { spawn, spawnSync } from 'child_process'
 import { createConnection } from 'net'
 import { fileURLToPath } from 'url'
 
@@ -34,6 +34,12 @@ interface StepState {
 }
 
 type BuildState = Record<string, StepState>
+
+interface CommandSpec {
+  label: string
+  file: string
+  args: string[]
+}
 
 // --- utilities ---
 
@@ -75,13 +81,58 @@ function saveState(state: BuildState): void {
   writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), 'utf8')
 }
 
-function run(cmd: string, cwd: string, allowFailure = false): void {
-  console.log(`${TAG} > ${cmd}`)
-  try {
-    execSync(cmd, { cwd, stdio: 'inherit' })
-  } catch (e) {
-    if (!allowFailure) throw e
-    console.warn(`${TAG} ⚠ command exited with error (non-fatal)`)
+const npmExecutable = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+const npmCli = process.env.npm_execpath
+const tsxCli = join(ROOT, 'node_modules', 'tsx', 'dist', 'cli.mjs')
+
+function run(command: CommandSpec, cwd: string, allowFailure = false): void {
+  console.log(`${TAG} > ${command.label}`)
+  const result = spawnSync(command.file, command.args, {
+    cwd,
+    stdio: 'inherit',
+    env: process.env,
+  })
+
+  if (result.status === 0) {
+    return
+  }
+
+  if (!allowFailure) {
+    throw new Error(`command failed: ${command.label}`)
+  }
+
+  console.warn(`${TAG} ⚠ command exited with error (non-fatal)`)
+}
+
+function npmRun(script: string): CommandSpec {
+  if (npmCli) {
+    return {
+      label: `npm run ${script}`,
+      file: process.execPath,
+      args: [npmCli, 'run', script],
+    }
+  }
+
+  return {
+    label: `npm run ${script}`,
+    file: npmExecutable,
+    args: ['run', script],
+  }
+}
+
+function tsxRun(scriptPath: string, args: string[] = []): CommandSpec {
+  return {
+    label: `tsx ${scriptPath}${args.length ? ` ${args.join(' ')}` : ''}`,
+    file: process.execPath,
+    args: [tsxCli, scriptPath, ...args],
+  }
+}
+
+function nodeRun(scriptPath: string, args: string[] = []): CommandSpec {
+  return {
+    label: `node ${scriptPath}${args.length ? ` ${args.join(' ')}` : ''}`,
+    file: process.execPath,
+    args: [scriptPath, ...args],
   }
 }
 
@@ -116,7 +167,7 @@ async function main() {
   const coreMarker = join(ROOT, 'hypercomb-core', 'dist', 'index.js')
   if (needsBuild(state, 'core', coreSrc, coreMarker)) {
     console.log(`${TAG} building core...`)
-    run('npm run build', join(ROOT, 'hypercomb-core'))
+    run(npmRun('build'), join(ROOT, 'hypercomb-core'))
     recordBuild(state, 'core', coreSrc)
     coreDirty = true
   } else {
@@ -136,12 +187,12 @@ async function main() {
 
     if (!moduleUpToDate) {
       console.log(`${TAG} building essentials modules...`)
-      run('npm run prepare', essentialsDir)
-      run('tsx ./scripts/build-module.ts --local', essentialsDir)
+      run(npmRun('prepare'), essentialsDir)
+      run(tsxRun('./scripts/build-module.ts', ['--local']), essentialsDir)
       recordBuild(state, 'essentials:module', essentialsSrc)
 
       console.log(`${TAG} copying modules to web...`)
-      run('tsx ./scripts/copy-to-web.ts', essentialsDir)
+      run(tsxRun('./scripts/copy-to-web.ts'), essentialsDir)
     } else {
       console.log(`${TAG} essentials modules — up to date`)
     }
@@ -150,7 +201,7 @@ async function main() {
     const coreVendorMarker = join(ROOT, 'hypercomb-web', 'public', 'core', 'dist', 'index.js')
     if (coreDirty || !existsSync(coreVendorMarker)) {
       console.log(`${TAG} copying core to web public...`)
-      run('node ./scripts/build-core-vendor.cjs', join(ROOT, 'hypercomb-web'))
+      run(nodeRun('./scripts/build-core-vendor.cjs'), join(ROOT, 'hypercomb-web'))
       state['web:core-vendor'] = { builtAt: Date.now() }
     } else {
       console.log(`${TAG} core vendor — up to date`)
@@ -160,7 +211,7 @@ async function main() {
     const pixiMarker = join(ROOT, 'hypercomb-web', 'public', 'vendor', 'pixi.runtime.js')
     if (!existsSync(pixiMarker)) {
       console.log(`${TAG} bundling pixi.js vendor...`)
-      run('npx tsx ./scripts/build-pixi-vendor.ts', join(ROOT, 'hypercomb-web'))
+      run(tsxRun('./scripts/build-pixi-vendor.ts'), join(ROOT, 'hypercomb-web'))
       state['web:pixi-vendor'] = { builtAt: Date.now() }
     } else {
       console.log(`${TAG} pixi vendor — up to date`)
@@ -173,8 +224,8 @@ async function main() {
     const essentialsMarker = join(ROOT, 'hypercomb-essentials', 'dist', 'index.js')
     if (coreDirty || needsBuild(state, 'essentials', essentialsSrc, essentialsMarker)) {
       console.log(`${TAG} building essentials (prepare + tsup)...`)
-      run('npm run prepare', essentialsDir)
-      run('npm run build', essentialsDir, true) // DTS may fail on pixi.js types; ESM/CJS still succeed
+      run(npmRun('prepare'), essentialsDir)
+      run(npmRun('build'), essentialsDir, true) // DTS may fail on pixi.js types; ESM/CJS still succeed
       // Only record if the output actually exists
       if (existsSync(join(essentialsDir, 'dist', 'index.js'))) {
         recordBuild(state, 'essentials', essentialsSrc)
@@ -213,11 +264,10 @@ async function ensureLocalRelay(): Promise<void> {
     return
   }
   console.log(`${TAG} starting local nostr relay on port ${RELAY_PORT}...`)
-  const child = spawn('npx', ['tsx', join(__dirname, 'local-relay.ts')], {
+  const child = spawn(process.execPath, [tsxCli, join(__dirname, 'local-relay.ts')], {
     cwd: ROOT,
     detached: true,
     stdio: 'ignore',
-    shell: true,
   })
   child.unref()
   // Wait for the relay to bind (tsx startup can be slow on first run)

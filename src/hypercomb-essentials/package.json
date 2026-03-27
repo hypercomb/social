@@ -18,8 +18,8 @@
   ],
   "scripts": {
     "build-dev": "tsc -p tsconfig.json",
-    "prepare": "tsx ./scripts/prepare.ts",
-    "prebuild": "tsx ./scripts/prepare.ts",
+    "prepare": "tsx ./scripts/prepare.js",
+    "prebuild": "tsx ./scripts/prepare.js",
     "build": "tsup",
     "build:module": "tsx ./scripts/build-module.ts --local && tsx ./scripts/copy-to-web.ts",
     "build:module:deploy": "tsx ./scripts/build-module.ts",

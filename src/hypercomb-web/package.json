@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "prestart": "npm run prebuild:web --prefix ..",
+    "prestart": "npm --prefix .. run prebuild:web",
     "start": "ng serve --port 4200 --host localhost --configuration development",
     "build": "ng build",
     "runtime": "npm run runtime:core ; npm run runtime:pixi",
