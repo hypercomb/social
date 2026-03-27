@@ -83,7 +83,12 @@ function saveState(state: BuildState): void {
 
 const npmExecutable = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 const npmCli = process.env.npm_execpath
-const tsxCli = join(ROOT, 'node_modules', 'tsx', 'dist', 'cli.mjs')
+
+// use cli.mjs if present, fall back to .bin/tsx
+const tsxCliMjs = join(ROOT, 'node_modules', 'tsx', 'dist', 'cli.mjs')
+const tsxCli = existsSync(tsxCliMjs)
+  ? tsxCliMjs
+  : join(ROOT, 'node_modules', '.bin', 'tsx')
 
 function run(command: CommandSpec, cwd: string, allowFailure = false): void {
   console.log(`${TAG} > ${command.label}`)
@@ -91,6 +96,7 @@ function run(command: CommandSpec, cwd: string, allowFailure = false): void {
     cwd,
     stdio: 'inherit',
     env: process.env,
+    shell: true,
   })
 
   if (result.status === 0) {
