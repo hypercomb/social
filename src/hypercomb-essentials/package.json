@@ -18,7 +18,7 @@
   ],
   "scripts": {
     "build-dev": "tsc -p tsconfig.json",
-    "prepare": "tsx ./scripts/prepare.ts",
+    "prepare": "node ./scripts/run-prepare.cjs",
     "prebuild": "tsx ./scripts/prebuild.ts",
     "build": "tsup",
     "build:module": "tsx ./scripts/build-module.ts --local && tsx ./scripts/copy-to-web.ts",
