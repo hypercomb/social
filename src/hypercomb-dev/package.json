@@ -2,12 +2,12 @@
   "name": "hypercomb-dev",
   "version": "0.0.0",
   "scripts": {
-    "ng": "ng",
-    "prestart": "npm --prefix .. run prebuild:dev",
-    "start": "ng serve --port 4250 --host localhost --configuration development",
-    "build": "ng build --configuration production",
-    "watch": "ng build --watch --configuration development",
-    "test": "ng test"
+    "ng": "node ../node_modules/@angular/cli/bin/ng.js",
+    "prestart": "cmd /d /s /c \"node ..\\node_modules\\tsx\\dist\\cli.mjs ..\\scripts\\prebuild.ts --target dev\"",
+    "start": "node ../node_modules/@angular/cli/bin/ng.js serve --port 4250 --host localhost --configuration development",
+    "build": "node ../node_modules/@angular/cli/bin/ng.js build --configuration production",
+    "watch": "node ../node_modules/@angular/cli/bin/ng.js build --watch --configuration development",
+    "test": "node ../node_modules/@angular/cli/bin/ng.js test"
   },
   "prettier": {
     "printWidth": 100,

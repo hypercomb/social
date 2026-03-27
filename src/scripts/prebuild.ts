@@ -89,6 +89,7 @@ const tsxCliMjs = join(ROOT, 'node_modules', 'tsx', 'dist', 'cli.mjs')
 const tsxCli = existsSync(tsxCliMjs)
   ? tsxCliMjs
   : join(ROOT, 'node_modules', '.bin', 'tsx')
+const tsupCli = join(ROOT, 'node_modules', 'tsup', 'dist', 'cli-default.js')
 
 function run(command: CommandSpec, cwd: string, allowFailure = false): void {
   console.log(`${TAG} > ${command.label}`)
@@ -96,7 +97,7 @@ function run(command: CommandSpec, cwd: string, allowFailure = false): void {
     cwd,
     stdio: 'inherit',
     env: process.env,
-    shell: true,
+    shell: false,
   })
 
   if (result.status === 0) {
@@ -142,6 +143,14 @@ function nodeRun(scriptPath: string, args: string[] = []): CommandSpec {
   }
 }
 
+function tsupRun(args: string[] = []): CommandSpec {
+  return {
+    label: `tsup${args.length ? ` ${args.join(' ')}` : ''}`,
+    file: process.execPath,
+    args: [tsupCli, ...args],
+  }
+}
+
 function needsBuild(state: BuildState, key: string, srcDir: string, outputMarker?: string): boolean {
   if (outputMarker && !existsSync(outputMarker)) return true
   const prev = state[key]
@@ -173,7 +182,7 @@ async function main() {
   const coreMarker = join(ROOT, 'hypercomb-core', 'dist', 'index.js')
   if (needsBuild(state, 'core', coreSrc, coreMarker)) {
     console.log(`${TAG} building core...`)
-    run(npmRun('build'), join(ROOT, 'hypercomb-core'))
+    run(tsupRun(), join(ROOT, 'hypercomb-core'))
     recordBuild(state, 'core', coreSrc)
     coreDirty = true
   } else {
@@ -193,7 +202,7 @@ async function main() {
 
     if (!moduleUpToDate) {
       console.log(`${TAG} building essentials modules...`)
-      run(npmRun('prebuild'), essentialsDir)
+      run(nodeRun('./scripts/run-prepare.cjs'), essentialsDir)
       run(tsxRun('./scripts/build-module.ts', ['--local']), essentialsDir)
       recordBuild(state, 'essentials:module', essentialsSrc)
 
@@ -230,8 +239,8 @@ async function main() {
     const essentialsMarker = join(ROOT, 'hypercomb-essentials', 'dist', 'index.js')
     if (coreDirty || needsBuild(state, 'essentials', essentialsSrc, essentialsMarker)) {
       console.log(`${TAG} building essentials (prebuild + tsup)...`)
-      run(npmRun('prebuild'), essentialsDir)
-      run(npmRun('build'), essentialsDir, true) // DTS may fail on pixi.js types; ESM/CJS still succeed
+      run(nodeRun('./scripts/run-prepare.cjs'), essentialsDir)
+      run(tsupRun(), essentialsDir, true) // DTS may fail on pixi.js types; ESM/CJS still succeed
       // Only record if the output actually exists
       if (existsSync(join(essentialsDir, 'dist', 'index.js'))) {
         recordBuild(state, 'essentials', essentialsSrc)
