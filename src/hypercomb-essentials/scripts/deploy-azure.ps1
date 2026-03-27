@@ -78,7 +78,8 @@ function invoke-az {
     [string[]]$Arguments
   )
 
-  & az @Arguments
+  $cmdExe = if ([string]::IsNullOrWhiteSpace($env:ComSpec)) { 'cmd.exe' } else { $env:ComSpec }
+  & $cmdExe '/d' '/s' '/c' 'az' @Arguments
 
   if ($LASTEXITCODE -ne 0) {
     fail "azure cli command failed: az $($Arguments -join ' ')"
