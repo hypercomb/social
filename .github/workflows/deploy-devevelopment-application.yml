@@ -39,8 +39,12 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Setup esbuild
-        run: node src/node_modules/esbuild/install.js
-
+        run: |
+          node src/node_modules/esbuild/install.js || \
+          node src/node_modules/@esbuild/linux-x64/install.js || \
+          node src/node_modules/esbuild/lib/main.js || true
+          ls src/node_modules/esbuild/
+          
       - name: Build hypercomb-core
         working-directory: src/hypercomb-core
         run: npm run build
