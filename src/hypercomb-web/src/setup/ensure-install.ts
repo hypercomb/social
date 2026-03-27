@@ -51,6 +51,7 @@ export const ensureInstall = async (sentinel?: SentinelBridge | null): Promise<v
         const cached = localStorage.getItem(MANIFEST_KEY)
         if (cached) {
           const m = tryParseManifest(cached)
+          await seedManifestCache(store, m)
           if (m?.beeDeps) (globalThis as any).__hypercombBeeDeps = m.beeDeps
         }
         return
@@ -69,17 +70,23 @@ export const ensureInstall = async (sentinel?: SentinelBridge | null): Promise<v
       const layerDir = await store.domainLayersDirectory('sentinel', true)
       await removeDisabled(layerDir, enabledLayerSet, '')
 
+      // Clear stale SW cache before seeding freshly synced artifacts.
+      await clearStaleCaches()
+
       // Write new/updated files from sentinel
       for (const file of files) {
         switch (file.kind) {
           case 'layer':
             await writeBytes(layerDir, file.signature, file.bytes)
+            await seedCacheEntry(`/opfs/__layers__/${file.signature}.json`, file.bytes, 'application/json; charset=utf-8')
             break
           case 'bee':
             await writeBytes(store.bees, `${file.signature}.js`, file.bytes)
+            await seedCacheEntry(`/opfs/__bees__/${file.signature}.js`, file.bytes, 'application/javascript; charset=utf-8')
             break
           case 'dependency':
             await writeBytes(store.dependencies, `${file.signature}.js`, file.bytes)
+            await seedCacheEntry(`/opfs/__dependencies__/${file.signature}.js`, file.bytes, 'application/javascript; charset=utf-8')
             break
         }
       }
@@ -104,9 +111,6 @@ export const ensureInstall = async (sentinel?: SentinelBridge | null): Promise<v
       localStorage.setItem(MANIFEST_KEY, JSON.stringify(syncManifest))
       if (beeDeps) (globalThis as any).__hypercombBeeDeps = beeDeps
 
-      // Clear stale SW cache so removed modules aren't served from cache
-      await clearStaleCaches()
-
       console.log(`[ensure-install] sentinel sync complete: ${syncSig.slice(0, 12)} (${enabledBees.length} bees, ${enabledDeps.length} deps, ${enabledLayers.length} layers)`)
       return
     }
@@ -115,6 +119,7 @@ export const ensureInstall = async (sentinel?: SentinelBridge | null): Promise<v
     console.warn('[ensure-install] sentinel sync returned no result — using cached OPFS state')
     restoreSignatureStore(sigStore)
     restoreCachedBeeDeps()
+    await seedManifestCache(store, tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? ''))
     return
   }
 
@@ -123,6 +128,7 @@ export const ensureInstall = async (sentinel?: SentinelBridge | null): Promise<v
   console.warn('[ensure-install] no sentinel available — using cached OPFS state (DCP required for new content)')
   restoreSignatureStore(sigStore)
   restoreCachedBeeDeps()
+  await seedManifestCache(store, tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? ''))
 }
 
 // ----- helpers -----
@@ -158,6 +164,67 @@ const writeBytes = async (dir: FileSystemDirectoryHandle, name: string, bytes: A
   const writable = await handle.createWritable()
   await writable.write(bytes)
   await writable.close()
+}
+
+const seedManifestCache = async (store: Store, manifest: InstallManifest | null): Promise<void> => {
+  if (!manifest) return
+
+  await Promise.all([
+    seedDirEntries(store.bees, manifest.bees, '/opfs/__bees__', '.js', 'application/javascript; charset=utf-8'),
+    seedDirEntries(store.dependencies, manifest.dependencies, '/opfs/__dependencies__', '.js', 'application/javascript; charset=utf-8'),
+    seedLayerEntries(store, manifest.layers),
+  ])
+}
+
+const seedDirEntries = async (
+  dir: FileSystemDirectoryHandle,
+  signatures: string[],
+  basePath: string,
+  suffix: string,
+  contentType: string
+): Promise<void> => {
+  for (const signature of signatures) {
+    try {
+      const handle = await dir.getFileHandle(`${signature}${suffix}`)
+      const file = await handle.getFile()
+      await seedCacheEntry(`${basePath}/${signature}${suffix}`, await file.arrayBuffer(), contentType)
+    } catch {
+      // skip missing cached artifact
+    }
+  }
+}
+
+const seedLayerEntries = async (store: Store, signatures: string[]): Promise<void> => {
+  if (!signatures.length) return
+
+  for await (const [domain, handle] of store.layers.entries()) {
+    if (handle.kind !== 'directory') continue
+    for (const signature of signatures) {
+      try {
+        const fileHandle = await (handle as FileSystemDirectoryHandle).getFileHandle(signature)
+        const file = await fileHandle.getFile()
+        await seedCacheEntry(`/opfs/__layers__/${signature}.json`, await file.arrayBuffer(), 'application/json; charset=utf-8')
+      } catch {
+        // continue searching other domain layer directories
+      }
+    }
+  }
+}
+
+const seedCacheEntry = async (path: string, bytes: ArrayBuffer, contentType: string): Promise<void> => {
+  try {
+    const cache = await caches.open('hypercomb-modules-v2')
+    const url = new URL(path, location.origin).toString()
+    const existing = await cache.match(url)
+    if (existing) return
+
+    const headers = new Headers()
+    headers.set('content-type', contentType)
+    headers.set('cache-control', 'no-store')
+    await cache.put(url, new Response(bytes, { headers }))
+  } catch {
+    // non-fatal
+  }
 }
 
 /**
