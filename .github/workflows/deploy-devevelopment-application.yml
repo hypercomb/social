@@ -32,7 +32,7 @@ jobs:
 
       - name: Install essentials dependencies
         working-directory: src/hypercomb-essentials
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Build hypercomb-core
         working-directory: src/hypercomb-core
@@ -40,7 +40,7 @@ jobs:
 
       - name: Install web dependencies
         working-directory: src/hypercomb-web
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Link shared node_modules to web (prevents dual Angular runtime)
         working-directory: src
