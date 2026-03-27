@@ -38,9 +38,8 @@ jobs:
         working-directory: src/hypercomb-web
         run: npm ci --ignore-scripts
 
-      - name: Rebuild native binaries
-        working-directory: src
-        run: npm rebuild
+      - name: Setup esbuild
+        run: node src/node_modules/esbuild/install.js
 
       - name: Build hypercomb-core
         working-directory: src/hypercomb-core
