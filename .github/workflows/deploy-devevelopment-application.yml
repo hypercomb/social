@@ -12,6 +12,11 @@ jobs:
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed')
     runs-on: ubuntu-latest
     name: Build and Deploy Job
+    env:
+      NPM_CONFIG_SCRIPT_SHELL: /bin/bash
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - uses: actions/checkout@v4
@@ -24,15 +29,18 @@ jobs:
         with:
           node-version: 20.19.0
           cache: 'npm'
-          cache-dependency-path: 'src/package-lock.json'
+          cache-dependency-path: |
+            src/package-lock.json
+            src/hypercomb-essentials/package-lock.json
+            src/hypercomb-web/package-lock.json
 
       - name: Install workspace root dependencies
         working-directory: src
-        run: npm install --omit=optional
+        run: npm install --omit=dev
 
       - name: Install essentials dependencies
         working-directory: src/hypercomb-essentials
-        run: npm install --omit=optional
+        run: npm ci
 
       - name: Build hypercomb-core
         working-directory: src/hypercomb-core
@@ -40,7 +48,7 @@ jobs:
 
       - name: Install web dependencies
         working-directory: src/hypercomb-web
-        run: npm install --omit=optional
+        run: npm ci
 
       - name: Link shared node_modules to web (prevents dual Angular runtime)
         working-directory: src
