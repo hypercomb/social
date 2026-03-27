@@ -193,7 +193,7 @@ async function main() {
 
     if (!moduleUpToDate) {
       console.log(`${TAG} building essentials modules...`)
-      run(npmRun('prepare'), essentialsDir)
+      run(npmRun('prebuild'), essentialsDir)
       run(tsxRun('./scripts/build-module.ts', ['--local']), essentialsDir)
       recordBuild(state, 'essentials:module', essentialsSrc)
 
@@ -229,8 +229,8 @@ async function main() {
     // Runs after module build — tsup overwrites dist/ but modules are already copied to web.
     const essentialsMarker = join(ROOT, 'hypercomb-essentials', 'dist', 'index.js')
     if (coreDirty || needsBuild(state, 'essentials', essentialsSrc, essentialsMarker)) {
-      console.log(`${TAG} building essentials (prepare + tsup)...`)
-      run(npmRun('prepare'), essentialsDir)
+      console.log(`${TAG} building essentials (prebuild + tsup)...`)
+      run(npmRun('prebuild'), essentialsDir)
       run(npmRun('build'), essentialsDir, true) // DTS may fail on pixi.js types; ESM/CJS still succeed
       // Only record if the output actually exists
       if (existsSync(join(essentialsDir, 'dist', 'index.js'))) {
