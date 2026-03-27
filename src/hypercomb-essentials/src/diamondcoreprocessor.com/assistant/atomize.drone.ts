@@ -1,85 +1,47 @@
 // diamondcoreprocessor.com/assistant/atomize.drone.ts
 import { Drone, EffectBus, hypercomb, normalizeSeed } from '@hypercomb/core'
 import type { OverlayActionDescriptor } from '../presentation/tiles/tile-overlay.drone.js'
-
-const ATOMIZE_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96"><circle fill="white" cx="48" cy="48" r="6" opacity="0.9"/><line stroke="white" stroke-width="2" stroke-linecap="round" x1="48" y1="42" x2="48" y2="18"/><line stroke="white" stroke-width="2" stroke-linecap="round" x1="48" y1="54" x2="48" y2="78"/><line stroke="white" stroke-width="2" stroke-linecap="round" x1="42" y1="45" x2="22" y2="28"/><line stroke="white" stroke-width="2" stroke-linecap="round" x1="54" y1="45" x2="74" y2="28"/><line stroke="white" stroke-width="2" stroke-linecap="round" x1="42" y1="51" x2="22" y2="68"/><line stroke="white" stroke-width="2" stroke-linecap="round" x1="54" y1="51" x2="74" y2="68"/><circle fill="white" r="3" cx="48" cy="18"/><circle fill="white" r="3" cx="48" cy="78"/><circle fill="white" r="3" cx="22" cy="28"/><circle fill="white" r="3" cx="74" cy="28"/><circle fill="white" r="3" cx="22" cy="68"/><circle fill="white" r="3" cx="74" cy="68"/></svg>`
+import { MODELS, getApiKey, callAnthropic, API_KEY_STORAGE } from './llm-api.js'
 
 const ACTION_DESCRIPTOR: OverlayActionDescriptor = {
-  name: 'atomize',
-  svgMarkup: ATOMIZE_ICON_SVG,
+  name: 'expand',
+  fontChar: '{',
   x: -25.25,
   y: 5,
   hoverTint: 0xd8c8ff,
   profile: 'private',
 }
 
-const LLM_ENDPOINT = 'http://127.0.0.1:4220/v1/chat/completions'
-const LLM_MODEL = 'llama-3.2-3b-instruct'
 const SUBTOPIC_COUNT = 7
 
-const SYSTEM_PROMPT = `
-You are a precise list generator.
+const SYSTEM_PROMPT = `You are a precise decomposition engine for a spatial knowledge graph called Hypercomb.
 
-Your job:
-Given a single subject, produce a flat JSON array where each element is an object with:
-- "name": a short 1–3 word label directly related to the subject
+Your job: Given a single subject, break it down into its constituent parts — the smaller, more specific pieces that compose it. Each piece should be concrete enough to explore further on its own.
+
+Produce a flat JSON array where each element is an object with:
+- "name": a short 1–3 word label (will become a tile label, lowercase, no special characters)
 - "detail": a concise descriptive phrase (5–12 words)
 
 Rules:
-1. The list size is determined by user instruction.
-2. If no count is given, output exactly 10 items.
-3. Items must be unique.
-4. Format is strictly: { "name": "...", "detail": "..." }.
-5. Output ONLY the JSON array. No markdown, no text.
-6. Must conform to the provided JSON schema.
-`
-
-const FOLLOWUP_PROMPT = `
-You are generating new topics for the next layer of a hierarchical Hive.
-Given a parent topic, create a list of short, digestible subtopics that explore the parent subject.
-
-Each item must be:
-- a short topic (1-3 words)
-- general and easy to understand
-- suitable as a tile label
-- not a question
-- not detailed or domain-expert language
-
-Output only the short subtopics that naturally branch from the parent topic.
-`
-
-const JSON_SCHEMA = {
-  type: 'json_schema',
-  json_schema: {
-    name: 'FlatNamedList',
-    schema: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          name: { type: 'string' },
-          detail: { type: 'string' },
-        },
-        required: ['name', 'detail'],
-      },
-      minItems: 1,
-      maxItems: 20,
-    },
-  },
-}
+1. Output exactly ${SUBTOPIC_COUNT} items.
+2. Items must be unique and non-overlapping.
+3. Items should be concrete constituents, not vague categories.
+4. Output ONLY the JSON array. No markdown, no wrapping text.`
 
 type TileActionPayload = { action: string; label: string; q: number; r: number; index: number }
 
 export class AtomizeDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
-  override description = 'atomizes a tile into subtopics via LLM'
+  override description = 'expands a tile into constituent parts via Claude Haiku'
 
   protected override deps = {
     lineage: '@hypercomb.social/Lineage',
+    navigation: '@hypercomb.social/Navigation',
+    store: '@hypercomb.social/Store',
   }
 
   protected override listens = ['render:host-ready', 'tile:action']
-  protected override emits = ['overlay:register-action']
+  protected override emits = ['overlay:register-action', 'seed:added']
 
   #registered = false
   #effectsRegistered = false
@@ -96,62 +58,130 @@ export class AtomizeDrone extends Drone {
     })
 
     this.onEffect<TileActionPayload>('tile:action', (payload) => {
-      if (payload.action !== 'atomize') return
-      void this.#atomize(payload.label)
+      if (payload.action !== 'expand') return
+      void this.#expand(payload.label)
     })
   }
 
-  async #atomize(rawLabel: string): Promise<void> {
+  async #expand(rawLabel: string): Promise<void> {
     if (this.#busy) return
     this.#busy = true
 
     try {
+      const apiKey = getApiKey()
+      if (!apiKey) {
+        console.warn(`[expand] No API key. Set via: localStorage.setItem('${API_KEY_STORAGE}', 'sk-ant-...')`)
+        EffectBus.emit('llm:api-key-required', {})
+        return
+      }
+
       const label = normalizeSeed(rawLabel) || rawLabel
       const lineage = this.resolve<{ explorerDir(): Promise<FileSystemDirectoryHandle> }>('lineage')
       const dir = await lineage?.explorerDir()
       if (!dir) return
 
       const tileDir = await dir.getDirectoryHandle(label, { create: true })
-      const subtopics = await this.#callLLM(label)
 
-      for (const item of subtopics) {
+      // Build lineage stem — snapshot from root down to this tile
+      const stem = await this.#buildStem(label)
+
+      // Gather sibling context — what else is at this level?
+      const siblings: string[] = []
+      for await (const [name, handle] of (dir as any).entries()) {
+        if (handle.kind === 'directory' && !name.startsWith('__')) {
+          siblings.push(name)
+        }
+      }
+
+      const siblingContext = siblings.length > 1
+        ? `\nSiblings at the same level: ${siblings.filter(s => s !== label).join(', ')}`
+        : ''
+
+      const userMessage = `Decompose this into ${SUBTOPIC_COUNT} constituent parts:\n\nTopic: ${label}\n\nLineage (path from root to this tile):\n${stem}${siblingContext}`
+
+      const responseText = await callAnthropic(
+        MODELS['haiku'],
+        SYSTEM_PROMPT,
+        userMessage,
+        apiKey,
+        1024,
+      )
+
+      const parts = this.#extractArray(responseText)
+      if (parts.length === 0) {
+        console.warn('[expand] No parts extracted from response')
+        return
+      }
+
+      for (const item of parts) {
         const name = normalizeSeed(item.name)
         if (!name) continue
         await tileDir.getDirectoryHandle(name, { create: true })
         EffectBus.emit('seed:added', { seed: name })
       }
 
+      console.log(`[expand] ${label} → ${parts.length} parts`)
       await new hypercomb().act()
     } catch (err) {
-      console.warn('[atomize] failed:', err)
+      console.warn('[expand] failed:', err)
     } finally {
       this.#busy = false
     }
   }
 
-  async #callLLM(topic: string): Promise<{ name: string; detail: string }[]> {
-    const response = await fetch(LLM_ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: LLM_MODEL,
-        temperature: 0.15,
-        top_p: 0.85,
-        top_k: 40,
-        min_p: 0.05,
-        repeat_penalty: 1.1,
-        response_format: JSON_SCHEMA,
-        messages: [
-          { role: 'system', content: `${SYSTEM_PROMPT}\nRequested count: ${SUBTOPIC_COUNT}` },
-          { role: 'user', content: `${FOLLOWUP_PROMPT}\n\nTopic: ${topic}` },
-        ],
-      }),
-    })
+  /** Walk from OPFS root through each navigation segment, collecting children at each level. */
+  async #buildStem(targetLabel: string): Promise<string> {
+    const nav = this.resolve<{ segments(): string[] }>('navigation')
+    const store = this.resolve<{ hypercombRoot: FileSystemDirectoryHandle }>('store')
+    if (!nav || !store?.hypercombRoot) return targetLabel
 
-    if (!response.ok) throw new Error(await response.text())
+    const segments = nav.segments()
+    const lines: string[] = []
+    let cursor: FileSystemDirectoryHandle = store.hypercombRoot
 
-    const raw: string = (await response.json())?.choices?.[0]?.message?.content ?? ''
-    return this.#extractArray(raw)
+    // Walk domain root first (hypercomb.io)
+    try {
+      cursor = await cursor.getDirectoryHandle('hypercomb.io')
+    } catch {
+      return targetLabel
+    }
+
+    // Walk each segment, collecting children names at each level
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i]
+      const indent = '  '.repeat(i)
+      const children = await this.#listChildren(cursor)
+      const childList = children.filter(c => c !== seg).join(', ')
+      const suffix = childList ? ` (also: ${childList})` : ''
+      lines.push(`${indent}${seg}${suffix}`)
+
+      try {
+        cursor = await cursor.getDirectoryHandle(seg)
+      } catch {
+        break
+      }
+    }
+
+    // Add the target tile at the deepest level
+    const targetIndent = '  '.repeat(segments.length)
+    const targetChildren = await this.#listChildren(cursor)
+    const targetSiblings = targetChildren.filter(c => c !== targetLabel).join(', ')
+    const targetSuffix = targetSiblings ? ` (also: ${targetSiblings})` : ''
+    lines.push(`${targetIndent}> ${targetLabel}${targetSuffix}  ← EXPAND THIS`)
+
+    return lines.join('\n')
+  }
+
+  async #listChildren(dir: FileSystemDirectoryHandle): Promise<string[]> {
+    const names: string[] = []
+    try {
+      for await (const [name, handle] of (dir as any).entries()) {
+        if (handle.kind === 'directory' && !name.startsWith('__') && !name.startsWith('.')) {
+          names.push(name)
+        }
+      }
+    } catch {}
+    return names
   }
 
   #extractArray(text: string): { name: string; detail: string }[] {

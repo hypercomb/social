@@ -213,6 +213,26 @@ class ReviseProvider implements SlashCommandProvider {
   }
 }
 
+class ExpandProvider implements SlashCommandProvider {
+  readonly name = 'expand-provider'
+  readonly priority = 100
+  readonly commands: SlashCommand[] = [
+    { name: 'expand', description: 'Expand selected tiles into constituent parts via Claude Haiku', aliases: ['atomize'] }
+  ]
+
+  async execute(_commandName: string, _args: string): Promise<void> {
+    const selection = get('@diamondcoreprocessor.com/SelectionService') as
+      { selected: ReadonlySet<string> } | undefined
+    const targets = selection ? Array.from(selection.selected) : []
+
+    if (targets.length === 0) return
+
+    for (const label of targets) {
+      EffectBus.emit('tile:action', { action: 'expand', label, q: 0, r: 0, index: 0 })
+    }
+  }
+}
+
 class LlmProvider implements SlashCommandProvider {
   readonly name = 'llm-provider'
   readonly priority = 100
@@ -245,5 +265,6 @@ _slashCommands.addProvider(new LayoutProvider())
 _slashCommands.addProvider(new NeonProvider())
 _slashCommands.addProvider(new MoveProvider())
 _slashCommands.addProvider(new ReviseProvider())
+_slashCommands.addProvider(new ExpandProvider())
 _slashCommands.addProvider(new LlmProvider())
 window.ioc.register('@diamondcoreprocessor.com/SlashCommandDrone', _slashCommands)
