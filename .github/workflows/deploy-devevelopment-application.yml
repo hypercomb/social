@@ -28,22 +28,19 @@ jobs:
 
       - name: Install workspace root dependencies
         working-directory: src
-        run: npm install --ignore-scripts
+        run: npm install
 
       - name: Install essentials dependencies
         working-directory: src/hypercomb-essentials
-        run: npm ci --ignore-scripts
+        run: npm ci
 
-      - name: Install web dependencies
-        working-directory: src/hypercomb-web
-        run: npm ci --ignore-scripts
-
-      - name: Setup esbuild binaries
-        run: find src -name "install.js" -path "*/esbuild/install.js" -exec node {} \; 2>/dev/null || true
-          
       - name: Build hypercomb-core
         working-directory: src/hypercomb-core
         run: npm run build
+
+      - name: Install web dependencies
+        working-directory: src/hypercomb-web
+        run: npm ci
 
       - name: Link shared node_modules to web (prevents dual Angular runtime)
         working-directory: src
