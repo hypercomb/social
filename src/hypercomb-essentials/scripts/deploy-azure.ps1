@@ -1,87 +1,194 @@
-# hypercomb-essentials/scripts/deploy-azure.ps1
-# deploys:
-#   dist/<signature>/** -> content/<signature>/**
-
-param (
+param(
   [Parameter(Mandatory = $true)]
   [string]$Signature
 )
 
-$ScriptDir   = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ProjectRoot = Resolve-Path (Join-Path $ScriptDir "..")
-$DistPath    = Join-Path $ProjectRoot "dist"
+$ErrorActionPreference = 'Stop'
 
-$PackageSource = Join-Path $DistPath $Signature
-$PackageDest   = "content/$Signature"
-$LatestTxtPath = Join-Path $DistPath "latest.txt"
+function fail {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Message
+  )
 
-$AccountName = "storagehypercomb"
-
-if (-not (Test-Path $DistPath)) {
-  Write-Error "dist folder does not exist: $DistPath"
+  Write-Error $Message
   exit 1
 }
 
-if (-not (Test-Path $PackageSource)) {
-  Write-Error "package folder does not exist: $PackageSource"
-  exit 1
+function write-step {
+  param(
+    [AllowEmptyString()]
+    [string]$Message = ''
+  )
+
+  Write-Host $Message
 }
 
-if (-not (Test-Path (Join-Path $PackageSource "__layers__"))) {
-  Write-Error "__layers__ missing in package: $PackageSource"
-  exit 1
+function test-command {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Name
+  )
+
+  return $null -ne (Get-Command $Name -ErrorAction SilentlyContinue)
 }
 
-if (-not (Test-Path (Join-Path $PackageSource "__bees__"))) {
-  Write-Error "__bees__ missing in package: $PackageSource"
-  exit 1
+function normalize-local-path {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  return [System.IO.Path]::GetFullPath($Path)
 }
 
-if (-not (Test-Path (Join-Path $PackageSource "__dependencies__"))) {
-  Write-Error "__dependencies__ missing in package: $PackageSource"
-  exit 1
+function normalize-blob-path {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  $value = $Path.Trim()
+  $value = $value -replace '\\', '/'
+  $value = $value.Trim('/')
+
+  return $value
 }
 
-Write-Host ""
-Write-Host "deploying hypercomb package"
-Write-Host "--------------------------------"
-Write-Host " signature : $Signature"
-Write-Host " source    : $PackageSource"
-Write-Host " dest      : $PackageDest"
-Write-Host ""
+function get-optional-env {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string[]]$Names
+  )
 
-az storage blob upload-batch `
-  --account-name $AccountName `
-  --destination $PackageDest `
-  --source $PackageSource `
-  --auth-mode login `
-  --overwrite `
-  --no-progress
+  foreach ($name in $Names) {
+    $value = [Environment]::GetEnvironmentVariable($name)
 
-if ($LASTEXITCODE -ne 0) {
-  Write-Error "package deployment failed"
-  exit 1
+    if (-not [string]::IsNullOrWhiteSpace($value)) {
+      return $value
+    }
+  }
+
+  return $null
 }
 
-Set-Content -Path $LatestTxtPath -Value $Signature -NoNewline -Encoding utf8
+function invoke-az {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string[]]$Arguments
+  )
 
-az storage blob upload `
-  --account-name $AccountName `
-  --container-name content `
-  --name latest.txt `
-  --file $LatestTxtPath `
-  --auth-mode login `
-  --overwrite `
-  --no-progress
+  & az @Arguments
 
-if ($LASTEXITCODE -ne 0) {
-  Write-Error "latest.txt deployment failed"
-  exit 1
+  if ($LASTEXITCODE -ne 0) {
+    fail "azure cli command failed: az $($Arguments -join ' ')"
+  }
 }
 
-Write-Host ""
-Write-Host "deployment complete"
-Write-Host "--------------------------------"
-Write-Host " package : https://$AccountName.blob.core.windows.net/$PackageDest/"
-Write-Host " latest  : https://$AccountName.blob.core.windows.net/content/latest.txt"
-Write-Host ""
+function get-relative-file-path {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$BasePath,
+
+    [Parameter(Mandatory = $true)]
+    [string]$FullPath
+  )
+
+  $baseUri = New-Object System.Uri(($BasePath.TrimEnd('\') + '\'))
+  $fileUri = New-Object System.Uri($FullPath)
+  $relativeUri = $baseUri.MakeRelativeUri($fileUri).ToString()
+
+  return [System.Uri]::UnescapeDataString($relativeUri) -replace '\\', '/'
+}
+
+function get-auth-arguments {
+  $connectionString = get-optional-env -Names @(
+    'AZURE_STORAGE_CONNECTION_STRING'
+  )
+
+  if (-not [string]::IsNullOrWhiteSpace($connectionString)) {
+    return @('--connection-string', $connectionString)
+  }
+
+  $storageAccount = get-optional-env -Names @(
+    'AZURE_STORAGE_ACCOUNT',
+    'AZURE_STORAGE_ACCOUNT_NAME'
+  )
+
+  $accountKey = get-optional-env -Names @(
+    'AZURE_STORAGE_KEY',
+    'AZURE_STORAGE_ACCOUNT_KEY'
+  )
+
+  if (-not [string]::IsNullOrWhiteSpace($storageAccount) -and -not [string]::IsNullOrWhiteSpace($accountKey)) {
+    return @('--account-name', $storageAccount, '--account-key', $accountKey)
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($storageAccount)) {
+    return @('--account-name', $storageAccount, '--auth-mode', 'login')
+  }
+
+  return @()
+}
+
+if (-not (test-command -Name 'az')) {
+  fail 'azure cli (az) is not installed or is not on PATH'
+}
+
+if ($Signature -notmatch '^[a-fA-F0-9]{64}$') {
+  fail "invalid signature: $Signature"
+}
+
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$distRoot = normalize-local-path -Path (Join-Path $scriptDir '..\dist')
+$resolvedSource = normalize-local-path -Path (Join-Path $distRoot $Signature)
+$resolvedDestination = normalize-blob-path -Path ("content/$Signature")
+
+if (-not (Test-Path -LiteralPath $resolvedSource)) {
+  fail "source path does not exist: $resolvedSource"
+}
+
+if (-not (Test-Path -LiteralPath $resolvedSource -PathType Container)) {
+  fail "source path must be a directory: $resolvedSource"
+}
+
+$containerName = get-optional-env -Names @(
+  'AZURE_STORAGE_CONTAINER',
+  'AZURE_STORAGE_CONTAINER_NAME'
+)
+
+if ([string]::IsNullOrWhiteSpace($containerName)) {
+  $containerName = '$web'
+}
+
+$authArguments = get-auth-arguments
+$files = @(Get-ChildItem -LiteralPath $resolvedSource -Recurse -File | Sort-Object FullName)
+
+if ($files.Count -eq 0) {
+  fail "no files found in source directory: $resolvedSource"
+}
+
+write-step ''
+write-step 'deploying hypercomb package'
+write-step '--------------------------------'
+write-step " signature : $Signature"
+write-step " source    : $resolvedSource"
+write-step " dest      : $resolvedDestination"
+write-step " files     : $($files.Count)"
+write-step ''
+
+foreach ($file in $files) {
+  $relativePath = get-relative-file-path -BasePath $resolvedSource -FullPath $file.FullName
+  $blobName = "$resolvedDestination/$relativePath"
+
+  $arguments = @(
+    'storage', 'blob', 'upload',
+    '--container-name', $containerName,
+    '--file', $file.FullName,
+    '--name', $blobName,
+    '--overwrite', 'true',
+    '--only-show-errors'
+  ) + $authArguments
+
+  invoke-az -Arguments $arguments
+}

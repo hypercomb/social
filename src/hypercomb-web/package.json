@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "prestart": "npm --prefix .. run prebuild:web",
-    "start": "ng serve --port 4200 --host localhost --configuration development",
-    "build": "ng build",
+    "start": "cmd /d /s /c \"node .\\node_modules\\@angular\\cli\\bin\\ng.js serve --port 4200 --host localhost --configuration development\"",
+    "build": "cmd /d /s /c \"node .\\node_modules\\@angular\\cli\\bin\\ng.js build\"",
     "runtime": "npm run runtime:core ; npm run runtime:pixi",
     "runtime:core": "node ./scripts/build-core-vendor.cjs",
     "runtime:pixi": "npx tsx ./scripts/build-pixi-vendor.ts"
