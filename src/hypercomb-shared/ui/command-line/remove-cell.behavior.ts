@@ -3,6 +3,7 @@
 import type { CommandLineBehavior } from './command-line-behavior'
 import type { CompletionUtility } from '@hypercomb/shared/core/completion-utility'
 import type { Lineage } from '../../core/lineage'
+import type { Navigation } from '../../core/navigation'
 import { EffectBus, hypercomb } from '@hypercomb/core'
 import { parseArrayItems, parseOneItem } from '../../core/array-parser'
 import { persistTagOps, type TagOp } from '../../core/tag-ops'
@@ -86,6 +87,22 @@ export class RemoveCellBehavior implements CommandLineBehavior {
     }
 
     await new hypercomb().act()
+
+    // if all seeds removed, navigate to parent
+    if (await this.#isDirEmpty(dir)) {
+      const navigation = get('@hypercomb.social/Navigation') as Navigation
+      const segments = navigation.segmentsRaw()
+      if (segments.length > 0) {
+        navigation.goRaw(segments.slice(0, -1))
+      }
+    }
+  }
+
+  async #isDirEmpty(dir: FileSystemDirectoryHandle): Promise<boolean> {
+    for await (const [name, handle] of dir.entries()) {
+      if (handle.kind === 'directory' && !name.startsWith('__')) return false
+    }
+    return true
   }
 
   async #removeTarget(root: FileSystemDirectoryHandle, segments: string[]): Promise<void> {

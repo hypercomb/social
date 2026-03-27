@@ -1032,6 +1032,8 @@ export class ShowCellDrone extends Drone {
       return
     }
 
+    const wasEmpty = this.renderedCount === 0
+
     const axialMax = typeof axial.items.size === 'number' ? axial.items.size : seedNames.length
     const maxCells = Math.min(seedNames.length, axialMax)
     if (maxCells <= 0) {
@@ -1061,6 +1063,19 @@ export class ShowCellDrone extends Drone {
     for (const cell of cells) this.renderedCells.set(cell.label, cell)
 
     await this.applyGeometry(cells)
+
+    // first tile on empty screen → center viewport and zoom 2×
+    if (wasEmpty && cells.length > 0 && this.pixiApp && this.pixiContainer && this.pixiRenderer) {
+      const s = this.pixiRenderer.screen
+      this.pixiApp.stage.position.set(s.width * 0.5, s.height * 0.5)
+      this.pixiContainer.scale.set(2)
+      this.pixiContainer.position.set(0, 0)
+      const vp = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ViewportPersistence') as ViewportPersistence | undefined
+      if (vp) {
+        vp.setZoom(2, 0, 0)
+        vp.setPan(0, 0)
+      }
+    }
 
     // cache for instant back-navigation
     this.#layerCellsCache.set(locationKey, { cells: [...cells], seedNames, localSeedSet, branchSet })

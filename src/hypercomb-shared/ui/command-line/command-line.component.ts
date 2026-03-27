@@ -1187,6 +1187,20 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       selection.clear()
       await new hypercomb().act()
       this.clear()
+
+      // if all seeds removed, navigate to parent
+      if (dir) {
+        let hasSeeds = false
+        for await (const [name, handle] of dir.entries()) {
+          if (handle.kind === 'directory' && !name.startsWith('__')) { hasSeeds = true; break }
+        }
+        if (!hasSeeds) {
+          const segments = this.navigation.segmentsRaw()
+          if (segments.length > 0) {
+            this.navigation.goRaw(segments.slice(0, -1))
+          }
+        }
+      }
       return
     }
 
