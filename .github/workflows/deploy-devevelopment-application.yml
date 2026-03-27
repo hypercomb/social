@@ -28,7 +28,7 @@ jobs:
 
       - name: Install workspace root dependencies
         working-directory: src
-        run: npm install
+        run: npm install --omit=dev
 
       - name: Install essentials dependencies
         working-directory: src/hypercomb-essentials
