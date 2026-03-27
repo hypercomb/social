@@ -428,6 +428,11 @@ export class BeeInspectorComponent {
 
   constructor() {
     effect(() => {
+      const vis = this.visible()
+      document.documentElement.style.overflow = vis ? 'hidden' : ''
+    })
+
+    effect(() => {
       const sig = this.signature()
       const vis = this.visible()
       if (vis && sig) {
