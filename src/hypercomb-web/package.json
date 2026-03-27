@@ -4,9 +4,9 @@
   "private": true,
   "scripts": {
     "prestart": "npm --prefix .. run prebuild:web",
-    "start": "cmd /d /s /c \"node .\\node_modules\\@angular\\cli\\bin\\ng.js serve --port 4200 --host localhost --configuration development\"",
-    "build": "cmd /d /s /c \"node .\\node_modules\\@angular\\cli\\bin\\ng.js build\"",
-    "runtime": "npm run runtime:core ; npm run runtime:pixi",
+    "start": "node ./node_modules/@angular/cli/bin/ng.js serve --port 4200 --host localhost --configuration development",
+    "build": "node ./node_modules/@angular/cli/bin/ng.js build",
+    "runtime": "npm run runtime:core && npm run runtime:pixi",
     "runtime:core": "node ./scripts/build-core-vendor.cjs",
     "runtime:pixi": "npx tsx ./scripts/build-pixi-vendor.ts"
   },
@@ -29,8 +29,8 @@
     "zone.js": "~0.16.1"
   },
   "devDependencies": {
-    "@angular/cli": "21.2.2",
     "@angular/build": "21.2.2",
+    "@angular/cli": "21.2.2",
     "@angular/compiler-cli": "21.2.4",
     "esbuild": "^0.27.0",
     "ng-packagr": "21.2.0",
