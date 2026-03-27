@@ -352,6 +352,12 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
   // ── save / cancel ──────────────────────────────────────────────
 
   readonly save = (): void => {
+    // Commit the current link input value in case blur hasn't fired yet
+    // (e.g. user pastes a URL and clicks save directly)
+    const link = this.linkValue?.trim()
+    if (link !== undefined) {
+      this.editorService.setLink(link ?? '')
+    }
     this.editorDrone?.saveAndComplete?.()
   }
 

@@ -32,6 +32,10 @@ export class PixiHostWorker extends Worker {
       if (!this.host) return
       this.host.style.visibility = active ? 'hidden' : 'visible'
     })
+    this.onEffect<{ active: boolean }>('view:active', ({ active }) => {
+      if (!this.host) return
+      this.host.style.visibility = active ? 'hidden' : 'visible'
+    })
   }
 
   protected override ready = async (): Promise<boolean> => {

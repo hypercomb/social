@@ -4,6 +4,7 @@
 
 import { Worker, EffectBus } from '@hypercomb/core'
 import { parseYouTubeVideoId, youTubeThumbnailUrl } from './youtube.js'
+import { fetchImageBlob } from './photo.js'
 import type { TileEditorService } from '../editor/tile-editor.service.js'
 import type { ImageEditorService } from '../editor/image-editor.service.js'
 import type { SelectionService } from '../selection/selection.service.js'
@@ -98,8 +99,10 @@ export class LinkDropWorker extends Worker {
         return
       }
 
-      // 2. resolve thumbnail (YouTube only for now)
+      // 2. resolve thumbnail / image
       let thumbnailBlob: Blob | null = null
+
+      // 2a. YouTube — fetch video thumbnail
       const videoId = parseYouTubeVideoId(url)
       if (videoId) {
         try {
@@ -109,6 +112,13 @@ export class LinkDropWorker extends Worker {
         } catch {
           // thumbnail fetch failed — proceed without image
         }
+      }
+
+      // 2b. Direct image URL — fetch with forced MIME type (safe: no script execution)
+      // Handles both extension-based URLs (.jpg, .png, etc.) and extensionless
+      // URLs (picsum.photos, CDN redirects) via HEAD probe fallback.
+      if (!thumbnailBlob) {
+        thumbnailBlob = await fetchImageBlob(url)
       }
 
       // 3. three-path routing (same as ImagePasteWorker)

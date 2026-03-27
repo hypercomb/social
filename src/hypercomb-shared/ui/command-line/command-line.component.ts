@@ -692,6 +692,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       }
     })
 
+    this.#viewActiveUnsub = EffectBus.on<{ active: boolean }>('view:active', ({ active }) => {
+      this.viewActive.set(active)
+    })
+
     // Bi-directional sync: external selection changes → update command line
     this.#selectionSyncUnsub = EffectBus.on<{ selected: string[]; active: string | null }>('selection:changed', (payload) => {
       if (this.#syncDirection === 'command') return // prevent feedback loop
@@ -724,9 +728,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   }
 
   readonly touchDragging = signal(false)
+  readonly viewActive = signal(false)
   #prefillUnsub?: () => void
   #commandLineToggleUnsub?: () => void
   #touchDraggingUnsub?: () => void
+  #viewActiveUnsub?: () => void
   #selectionSyncUnsub?: () => void
   readonly #onNavigate = (): void => { this.clear() }
 
@@ -751,6 +757,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.#prefillUnsub?.()
     this.#commandLineToggleUnsub?.()
     this.#touchDraggingUnsub?.()
+    this.#viewActiveUnsub?.()
     this.#selectionSyncUnsub?.()
     window.removeEventListener('navigate', this.#onNavigate)
     window.removeEventListener('popstate', this.#onNavigate)

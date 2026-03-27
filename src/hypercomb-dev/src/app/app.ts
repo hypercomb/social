@@ -54,6 +54,8 @@ import '@hypercomb/essentials/diamondcoreprocessor.com/assistant/claude-bridge.w
 import '@hypercomb/essentials/diamondcoreprocessor.com/assistant/atomize.drone'
 import '@hypercomb/essentials/diamondcoreprocessor.com/safety/link-safety.service'
 import '@hypercomb/essentials/diamondcoreprocessor.com/link/link-drop.worker'
+import '@hypercomb/essentials/diamondcoreprocessor.com/link/photo.view'
+import '@hypercomb/essentials/diamondcoreprocessor.com/link/link-open.worker'
 import '@hypercomb/essentials/diamondcoreprocessor.com/assistant/llm.queen'
 import { HelpQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/help.queen'
 import { KeywordQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/keyword.queen'
@@ -145,6 +147,7 @@ export class App {
     : false // default: solo mode
   );
   public readonly secretOpen = signal(false);
+  public readonly viewActive = signal(false);
   public readonly orientation = signal<HexOrientation>(
     (localStorage.getItem('hc:hex-orientation') as HexOrientation) || 'point-top'
   );
@@ -164,6 +167,10 @@ export class App {
 
     EffectBus.on<{ public: boolean }>('mesh:public-changed', ({ public: pub }) => {
       this.meshPublic.set(pub)
+    })
+
+    EffectBus.on<{ active: boolean }>('view:active', ({ active }) => {
+      this.viewActive.set(active)
     })
 
     queueMicrotask(() => {

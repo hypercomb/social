@@ -1,11 +1,11 @@
 @if(showHeader){
-<div class="header-bar" [class.secret-open]="secretOpen()">
+<div class="header-bar" [class.secret-open]="secretOpen()" [style.visibility]="viewActive() ? 'hidden' : null">
   <app-header></app-header>
   <hc-mesh-header [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()" (secretExpandedChange)="secretOpen.set($event)"></hc-mesh-header>
 </div>
 }
 <router-outlet></router-outlet>
-<hc-controls-bar [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()"></hc-controls-bar>
+<hc-controls-bar [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()" [style.visibility]="viewActive() ? 'hidden' : null"></hc-controls-bar>
 <hc-selection-context-menu></hc-selection-context-menu>
 <hc-tile-editor></hc-tile-editor>
 <hc-portal-overlay></hc-portal-overlay>

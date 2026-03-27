@@ -22,6 +22,7 @@ export class App implements AfterViewInit {
   protected readonly title = signal('hypercomb-web')
   protected readonly secretOpen = signal(false)
   public showHeader = true
+  public readonly viewActive = signal(false)
   private runtimeReady: Promise<void> = Promise.resolve()
 
   protected readonly core = inject(CoreAdapter)
@@ -39,6 +40,10 @@ export class App implements AfterViewInit {
     })
 
     this.runtimeReady = this.core.initialize()
+
+    EffectBus.on<{ active: boolean }>('view:active', ({ active }) => {
+      this.viewActive.set(active)
+    })
 
     console.log('[app] initialized')
   }

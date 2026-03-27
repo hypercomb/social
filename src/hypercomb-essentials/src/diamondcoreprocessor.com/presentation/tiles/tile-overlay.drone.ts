@@ -572,6 +572,15 @@ export class TileOverlayDrone extends Drone {
 
     if (this.#branchLabels.has(entry.label)) {
       this.#navigateInto(entry.label)
+    } else {
+      // Non-branch tile with no action button hit → default "open" action
+      this.emitEffect('tile:action', {
+        action: 'open',
+        q: this.#currentAxial!.q,
+        r: this.#currentAxial!.r,
+        index: this.#currentIndex!,
+        label: entry.label,
+      })
     }
   }
 

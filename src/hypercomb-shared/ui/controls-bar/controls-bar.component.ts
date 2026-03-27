@@ -101,6 +101,8 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #moveModeUnsub: (() => void) | null = null
   #touchDraggingUnsub: (() => void) | null = null
   #touchDragging = signal(false)
+  #viewActiveUnsub: (() => void) | null = null
+  #viewActive = signal(false)
   readonly #IDLE_DELAY = 3000
 
   // ── swipe-to-go-back gesture ────────────────────────────
@@ -240,7 +242,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     // deterministic vibrant color from tag name — no grays
     return tagNameToColor(name)
   }
-  readonly visible = computed(() => (!this.#idle() || this.#hovered()) && !this.#touchDragging())
+  readonly visible = computed(() => (!this.#idle() || this.#hovered()) && !this.#touchDragging() && !this.#viewActive())
   readonly roomValue = this.#roomValue.asReadonly()
   readonly roomOpen = this.#roomOpen.asReadonly()
   readonly beesVisible = this.#beesVisible.asReadonly()
@@ -311,6 +313,10 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
       this.#touchDragging.set(active)
     })
 
+    this.#viewActiveUnsub = EffectBus.on<{ active: boolean }>('view:active', ({ active }) => {
+      this.#viewActive.set(active)
+    })
+
     this.#tagsUnsub = EffectBus.on<{ tags: { name: string; count: number }[] }>('render:tags', ({ tags }) => {
       // sort by hue so tags form a rainbow gradient
       const sorted = [...tags].sort((a, b) => extractHue(this.tagColor(a.name)) - extractHue(this.tagColor(b.name)))
@@ -359,6 +365,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     this.#moveModeUnsub?.()
     this.#layoutModeUnsub?.()
     this.#touchDraggingUnsub?.()
+    this.#viewActiveUnsub?.()
     this.#beesUnsub?.()
     this.#tagsUnsub?.()
     this.#hoverTagsUnsub?.()
