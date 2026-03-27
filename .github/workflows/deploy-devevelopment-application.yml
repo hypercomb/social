@@ -34,13 +34,17 @@ jobs:
         working-directory: src/hypercomb-essentials
         run: npm ci --ignore-scripts
 
-      - name: Build hypercomb-core
-        working-directory: src/hypercomb-core
-        run: npm run build
-
       - name: Install web dependencies
         working-directory: src/hypercomb-web
         run: npm ci --ignore-scripts
+
+      - name: Rebuild native binaries
+        working-directory: src
+        run: npm rebuild
+
+      - name: Build hypercomb-core
+        working-directory: src/hypercomb-core
+        run: npm run build
 
       - name: Link shared node_modules to web (prevents dual Angular runtime)
         working-directory: src
