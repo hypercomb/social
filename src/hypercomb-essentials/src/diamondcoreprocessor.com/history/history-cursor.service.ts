@@ -11,6 +11,8 @@ export type CursorState = {
   total: number
   /** true when cursor is not at the latest op. */
   rewound: boolean
+  /** Timestamp (ms epoch) of the op at cursor position. 0 = no history. */
+  at: number
 }
 
 export type DivergenceInfo = {
@@ -35,11 +37,13 @@ export class HistoryCursorService extends EventTarget {
   #allOps: HistoryOp[] = []
 
   get state(): CursorState {
+    const op = this.#position > 0 ? this.#allOps[this.#position - 1] : null
     return {
       locationSig: this.#locationSig,
       position: this.#position,
       total: this.#total,
       rewound: this.#total > 0 && this.#position < this.#total,
+      at: op?.at ?? 0,
     }
   }
 

@@ -1,7 +1,7 @@
 <!-- mobile back button: top-left, always visible on mobile -->
 @if (isMobile()) {
   <button class="mobile-back-btn" [class.disabled]="!canGoBack()" [disabled]="!canGoBack()" (click)="goBack()" aria-label="go back">
-    <span class="hci">B</span>
+    <span class="hci">A</span>
   </button>
 }
 
@@ -77,7 +77,7 @@
             <span class="hci dcp-icon">$</span>
           </button>
           <button class="ctl-btn" (click)="centerView()" aria-label="center">
-            <span class="hci">(</span>
+            <span class="hci"q</span>
           </button>
           <button class="ctl-btn" (click)="fitContent()" aria-label="fit to content">
             <span class="hci">)</span>
@@ -113,7 +113,7 @@
             <span class="hci dcp-icon">$</span>
           </button>
           <button class="ctl-btn" (click)="centerView()" aria-label="center">
-            <span class="hci">(</span>
+            <span class="hci">q</span>
           </button>
           <button class="ctl-btn" (click)="fitContent()" aria-label="fit to content">
             <span class="hci">)</span>

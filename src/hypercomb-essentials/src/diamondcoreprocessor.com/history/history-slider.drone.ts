@@ -3,49 +3,42 @@ import { EffectBus, type KeyMapLayer } from '@hypercomb/core'
 import type { HistoryCursorService, CursorState } from './history-cursor.service.js'
 
 /**
- * History slider drone — renders a bottom-bar range input for navigating
- * through history ops, and handles Ctrl+Z / Ctrl+Y keyboard shortcuts.
+ * Revision clock — a compact timestamp display that appears under the
+ * command line (top-right) when in revision mode.
  *
- * The slider is only visible when the current location has >= 1 history op.
- * Moving the slider calls HistoryCursorService.seek(), which emits
- * `history:cursor-changed` — ShowCellDrone picks that up to re-render
- * with divergence overlays.
+ * Shows the `at` timestamp from the history op at the cursor position.
+ * Ctrl+Z / Ctrl+Y step through ops. Escape exits revision mode.
+ * "Restore" appears when rewound — clicking it promotes cursor state to head.
  */
 export class HistorySliderDrone {
 
-  #bar: HTMLElement | null = null
-  #slider: HTMLInputElement | null = null
-  #label: HTMLElement | null = null
-  #promoteBtn: HTMLButtonElement | null = null
+  #clock: HTMLElement | null = null
+  #timeLabel: HTMLElement | null = null
+  #restoreBtn: HTMLElement | null = null
+  #posLabel: HTMLElement | null = null
   #visible = false
   #reviseActive = false
-  #state: CursorState = { locationSig: '', position: 0, total: 0, rewound: false }
+  #state: CursorState = { locationSig: '', position: 0, total: 0, rewound: false, at: 0 }
 
   constructor() {
-    // Listen for cursor changes
     EffectBus.on<CursorState>('history:cursor-changed', (state) => {
       this.#state = state
       this.#syncUI()
     })
 
-    // Listen for revision mode toggle
     EffectBus.on<{ active: boolean }>('revise:mode-changed', ({ active }) => {
       this.#reviseActive = active
       this.#syncUI()
     })
 
-    // Listen for keymap invocations
     EffectBus.on<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
       if (cmd === 'history.undo') this.#undo()
       if (cmd === 'history.redo') this.#redo()
       if (cmd === 'history.exit-revise') this.#exitRevise()
     })
 
-    // Register keybindings
     this.#registerKeybindings()
-
-    // Build DOM (hidden initially)
-    this.#buildBar()
+    this.#buildClock()
   }
 
   // ── keybindings ──────────────────────────────────────────────
@@ -82,7 +75,7 @@ export class HistorySliderDrone {
     EffectBus.emit('keymap:add-layer', { layer })
   }
 
-  // ── undo / redo ──────────────────────────────────────────────
+  // ── actions ────────────────────────────────────────────────
 
   #undo(): void {
     const cursor = get<HistoryCursorService>('@diamondcoreprocessor.com/HistoryCursorService')
@@ -105,138 +98,101 @@ export class HistorySliderDrone {
     if (queen?.invoke) queen.invoke('')
   }
 
-  // ── DOM ──────────────────────────────────────────────────────
+  // ── DOM ────────────────────────────────────────────────────
 
-  #buildBar(): void {
-    const bar = document.createElement('div')
-    bar.id = 'hc-history-bar'
-    bar.style.cssText = `
+  #buildClock(): void {
+    const clock = document.createElement('div')
+    clock.id = 'hc-revision-clock'
+    clock.style.cssText = `
       position: fixed;
-      bottom: 48px;
-      left: 50%;
-      transform: translateX(-50%);
+      top: 8px;
+      right: 16px;
       z-index: 9000;
       display: none;
       align-items: center;
-      gap: 10px;
-      padding: 6px 16px;
+      gap: 8px;
+      padding: 4px 12px;
       background: rgba(10, 12, 18, 0.92);
-      border: 1px solid rgba(100, 200, 255, 0.15);
-      border-radius: 8px;
+      border: 1px solid rgba(255, 170, 60, 0.35);
+      border-radius: 6px;
       backdrop-filter: blur(8px);
       font-family: 'JetBrains Mono', 'Fira Code', monospace;
       font-size: 11px;
-      color: rgba(200, 220, 240, 0.8);
+      color: rgba(255, 200, 120, 0.9);
       user-select: none;
       pointer-events: auto;
-      min-width: 320px;
     `
 
-    const undoBtn = document.createElement('button')
-    undoBtn.textContent = '\u25C0'
-    undoBtn.title = 'Undo (Ctrl+Z)'
-    undoBtn.style.cssText = this.#btnStyle()
-    undoBtn.addEventListener('click', () => this.#undo())
+    const timeLabel = document.createElement('span')
+    timeLabel.style.cssText = 'white-space: nowrap; letter-spacing: 0.5px;'
 
-    const slider = document.createElement('input')
-    slider.type = 'range'
-    slider.min = '0'
-    slider.max = '0'
-    slider.value = '0'
-    slider.style.cssText = `
-      flex: 1;
-      accent-color: #44aaff;
-      cursor: pointer;
-      height: 4px;
+    const posLabel = document.createElement('span')
+    posLabel.style.cssText = `
+      white-space: nowrap;
+      color: rgba(200, 220, 240, 0.5);
+      font-size: 10px;
     `
-    slider.addEventListener('input', () => {
-      const cursor = get<HistoryCursorService>('@diamondcoreprocessor.com/HistoryCursorService')
-      cursor?.seek(parseInt(slider.value, 10))
-    })
 
-    const redoBtn = document.createElement('button')
-    redoBtn.textContent = '\u25B6'
-    redoBtn.title = 'Redo (Ctrl+Y)'
-    redoBtn.style.cssText = this.#btnStyle()
-    redoBtn.addEventListener('click', () => this.#redo())
-
-    const promoteBtn = document.createElement('button')
-    promoteBtn.textContent = 'Restore'
-    promoteBtn.title = 'Promote this state to head'
-    promoteBtn.style.cssText = `
-      ${this.#btnStyle()}
+    const restoreBtn = document.createElement('span')
+    restoreBtn.textContent = 'Restore'
+    restoreBtn.title = 'Promote this state to head'
+    restoreBtn.style.cssText = `
       display: none;
+      cursor: pointer;
+      padding: 1px 6px;
+      margin-left: 4px;
+      border: 1px solid rgba(255, 170, 60, 0.4);
+      border-radius: 3px;
       background: rgba(255, 170, 60, 0.12);
-      border-color: rgba(255, 170, 60, 0.4);
       color: rgba(255, 200, 120, 0.9);
       font-weight: 600;
+      font-size: 10px;
       letter-spacing: 0.3px;
     `
-    promoteBtn.addEventListener('click', () => this.#promote())
+    restoreBtn.addEventListener('click', () => this.#promote())
 
-    const label = document.createElement('span')
-    label.style.cssText = 'white-space: nowrap; min-width: 60px; text-align: right;'
+    clock.append(timeLabel, posLabel, restoreBtn)
+    document.body.appendChild(clock)
 
-    bar.append(undoBtn, slider, redoBtn, promoteBtn, label)
-    this.#promoteBtn = promoteBtn
-    document.body.appendChild(bar)
-
-    this.#bar = bar
-    this.#slider = slider
-    this.#label = label
+    this.#clock = clock
+    this.#timeLabel = timeLabel
+    this.#posLabel = posLabel
+    this.#restoreBtn = restoreBtn
   }
 
-  #btnStyle(): string {
-    return `
-      background: none;
-      border: 1px solid rgba(100, 200, 255, 0.2);
-      border-radius: 4px;
-      color: rgba(200, 220, 240, 0.8);
-      cursor: pointer;
-      padding: 2px 8px;
-      font-size: 11px;
-      line-height: 1;
-    `
-  }
-
-  // ── sync UI ──────────────────────────────────────────────────
+  // ── sync UI ────────────────────────────────────────────────
 
   #syncUI(): void {
-    if (!this.#bar || !this.#slider || !this.#label) return
+    if (!this.#clock || !this.#timeLabel || !this.#posLabel || !this.#restoreBtn) return
 
-    const { position, total, rewound } = this.#state
-
-    // Slider is only visible when revision mode is active AND there's history
+    const { position, total, rewound, at } = this.#state
     const shouldShow = this.#reviseActive && total > 0
 
     if (!shouldShow) {
       if (this.#visible) {
-        this.#bar.style.display = 'none'
+        this.#clock.style.display = 'none'
         this.#visible = false
       }
       return
     }
 
     if (!this.#visible) {
-      this.#bar.style.display = 'flex'
+      this.#clock.style.display = 'flex'
       this.#visible = true
     }
 
-    this.#slider.max = String(total)
-    this.#slider.value = String(position)
-
-    // Show/hide restore button based on rewind state
-    if (this.#promoteBtn) {
-      this.#promoteBtn.style.display = rewound ? 'inline-block' : 'none'
-    }
-
-    if (rewound) {
-      this.#label.textContent = `${position} / ${total}`
-      this.#bar.style.borderColor = 'rgba(255, 170, 60, 0.35)'
+    // Format timestamp from the op
+    if (at > 0) {
+      const d = new Date(at)
+      const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      const date = d.toLocaleDateString([], { month: 'short', day: 'numeric' })
+      this.#timeLabel.textContent = `${date} ${time}`
     } else {
-      this.#label.textContent = `${total} ops`
-      this.#bar.style.borderColor = 'rgba(100, 200, 255, 0.15)'
+      this.#timeLabel.textContent = '--:--:--'
     }
+
+    this.#posLabel.textContent = `${position}/${total}`
+    this.#restoreBtn.style.display = rewound ? 'inline-block' : 'none'
   }
 }
 
