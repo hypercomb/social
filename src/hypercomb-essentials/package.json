@@ -21,11 +21,11 @@
     "prepare": "node ./scripts/run-prepare.cjs",
     "prebuild": "node ./scripts/run-prepare.cjs",
     "build": "tsup",
-    "build:module": "tsx ./scripts/build-module.ts --local && tsx ./scripts/copy-to-web.ts",
+    "build:module": "tsx ./scripts/build-module.ts --local ; tsx ./scripts/copy-to-web.ts",
     "build:module:deploy": "tsx ./scripts/build-module.ts",
     "build:deploy": "npm run build:module:deploy",
     "copy-to-web": "tsx ./scripts/copy-to-web.ts",
-    "build-legacy": "tsc -p tsconfig.json && tsx ./scripts/build-module-legacy.ts",
+    "build-legacy": "tsc -p tsconfig.json ; tsx ./scripts/build-module-legacy.ts",
     "build:watch": "tsx watch --include \"./src/**/*\" --include \"./scripts/**/*\" ./scripts/build-module.ts",
     "build-legacy:watch": "tsx watch --include \"./src/**/*\" --include \"./scripts/**/*\" ./scripts/build-module-legacy.ts",
     "prepublishOnly": "npm run build"
