@@ -233,6 +233,19 @@ class ExpandProvider implements SlashCommandProvider {
   }
 }
 
+class ChatProvider implements SlashCommandProvider {
+  readonly name = 'chat-provider'
+  readonly priority = 100
+  readonly commands: SlashCommand[] = [
+    { name: 'chat', description: 'Multi-turn conversation with Claude', aliases: ['c', 'ask'] }
+  ]
+
+  async execute(_commandName: string, args: string): Promise<void> {
+    const queen = get('@diamondcoreprocessor.com/ConversationQueenBee') as any
+    if (queen?.invoke) await queen.invoke(args)
+  }
+}
+
 class LlmProvider implements SlashCommandProvider {
   readonly name = 'llm-provider'
   readonly priority = 100
@@ -266,5 +279,6 @@ _slashCommands.addProvider(new NeonProvider())
 _slashCommands.addProvider(new MoveProvider())
 _slashCommands.addProvider(new ReviseProvider())
 _slashCommands.addProvider(new ExpandProvider())
+_slashCommands.addProvider(new ChatProvider())
 _slashCommands.addProvider(new LlmProvider())
 window.ioc.register('@diamondcoreprocessor.com/SlashCommandDrone', _slashCommands)

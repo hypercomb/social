@@ -48,3 +48,53 @@ export const callAnthropic = async (
   const json = await response.json()
   return json.content?.[0]?.text ?? ''
 }
+
+// ── multi-turn conversation support ─────────────────────
+
+export type ChatMessage = { role: 'user' | 'assistant'; content: string }
+
+export type LlmResult = {
+  text: string
+  stopReason: string
+  inputTokens: number
+  outputTokens: number
+  model: string
+}
+
+export const callAnthropicMultiTurn = async (
+  model: string,
+  systemPrompt: string,
+  messages: ChatMessage[],
+  apiKey: string,
+  maxTokens = 4096,
+): Promise<LlmResult> => {
+  const response = await fetch(ANTHROPIC_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': ANTHROPIC_VERSION,
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: maxTokens,
+      system: systemPrompt,
+      messages,
+    }),
+  })
+
+  if (!response.ok) {
+    const text = await response.text()
+    throw new Error(`Anthropic API ${response.status}: ${text}`)
+  }
+
+  const json = await response.json()
+  return {
+    text: json.content?.[0]?.text ?? '',
+    stopReason: json.stop_reason ?? 'end_turn',
+    inputTokens: json.usage?.input_tokens ?? 0,
+    outputTokens: json.usage?.output_tokens ?? 0,
+    model: json.model ?? model,
+  }
+}
