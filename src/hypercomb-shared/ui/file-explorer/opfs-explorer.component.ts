@@ -6,6 +6,7 @@ import { FormsModule } from '@angular/forms'
 import type { Lineage } from '../../core/lineage'
 import type { Store } from '../../core/store'
 import { hypercomb } from '@hypercomb/core'
+import { TranslatePipe } from '../../core/i18n.pipe'
 import type { ScriptPreloader } from '../../core/script-preloader'
 import { LocationParser } from '../../core/initializers/location-parser'
 import { RuntimeMediator } from '../runtime-mediator'
@@ -20,7 +21,7 @@ interface ExplorerEntry {
 @Component({
   selector: 'hc-opfs-explorer',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, TranslatePipe],
   templateUrl: './opfs-explorer.component.html',
   styleUrls: ['./opfs-explorer.component.scss']
 })

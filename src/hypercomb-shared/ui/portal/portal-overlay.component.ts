@@ -2,6 +2,7 @@ import { ChangeDetectorRef, Component, type OnInit, type OnDestroy, signal, inje
 import type { SafeResourceUrl } from "@angular/platform-browser"
 import { DomSanitizer } from "@angular/platform-browser"
 import { EffectBus } from '@hypercomb/core'
+import { TranslatePipe } from '../../core/i18n.pipe'
 
 const PORTALS: Record<string, string> = {
   dcp: 'https://diamondcoreprocessor.com',
@@ -12,6 +13,7 @@ const PORTALS: Record<string, string> = {
 @Component({
   selector: 'hc-portal-overlay',
   standalone: true,
+  imports: [TranslatePipe],
   templateUrl: './portal-overlay.component.html',
   styleUrls: ['./portal-overlay.component.scss']
 })

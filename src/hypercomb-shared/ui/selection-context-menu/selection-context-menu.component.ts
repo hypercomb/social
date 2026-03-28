@@ -9,6 +9,7 @@ import {
   type OnDestroy,
 } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
+import { TranslatePipe } from '../../core/i18n.pipe'
 
 const STORAGE_KEY = 'hc:selection-menu-pos'
 const MENU_WIDTH = 44
@@ -17,6 +18,7 @@ const MENU_HEIGHT_BASE = 160 // approximate height without paste
 @Component({
   selector: 'hc-selection-context-menu',
   standalone: true,
+  imports: [TranslatePipe],
   templateUrl: './selection-context-menu.component.html',
   styleUrls: ['./selection-context-menu.component.scss'],
 })

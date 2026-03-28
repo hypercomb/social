@@ -10,6 +10,7 @@
 import {
   bridgeProviders,
   COMPLETION_UTILITY,
+  I18N,
   LINEAGE,
   MOVEMENT,
   NAVIGATION,
@@ -20,6 +21,7 @@ import {
 
 export const sharedProviders = bridgeProviders([
   COMPLETION_UTILITY,
+  I18N,
   LINEAGE,
   MOVEMENT,
   NAVIGATION,

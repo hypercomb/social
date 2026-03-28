@@ -1,8 +1,8 @@
 @if (open()) {
   <div class="sheet-backdrop" (click)="close()"></div>
-  <div class="sheet-panel" role="dialog" aria-label="Keyboard Shortcuts">
+  <div class="sheet-panel" role="dialog" [attr.aria-label]="'shortcuts.title' | t">
     <header class="sheet-header">
-      <h3>Keyboard Shortcuts</h3>
+      <h3>{{ 'shortcuts.title' | t }}</h3>
       <button class="sheet-close" (click)="close()">&times;</button>
     </header>
     <div class="sheet-body">
@@ -16,7 +16,7 @@
                 <span class="shortcut-keys">
                   @for (step of formatSequence(binding); track $index) {
                     @if ($index > 0) {
-                      <span class="chord-sep">then</span>
+                      <span class="chord-sep">{{ 'shortcuts.chord-sep' | t }}</span>
                     }
                     @for (part of step; track $index) {
                       <kbd class="key-badge">{{ part }}</kbd>

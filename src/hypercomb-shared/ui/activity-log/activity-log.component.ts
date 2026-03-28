@@ -9,7 +9,8 @@ import {
   signal,
   type OnDestroy,
 } from '@angular/core'
-import { EffectBus, hypercomb } from '@hypercomb/core'
+import { EffectBus, hypercomb, type I18nProvider } from '@hypercomb/core'
+import { TranslatePipe } from '../../core/i18n.pipe'
 import type { Lineage } from '../../core/lineage'
 
 interface ActivityEntry {
@@ -31,6 +32,7 @@ const HIDDEN: Set<string> = new Set([
 @Component({
   selector: 'hc-activity-log',
   standalone: true,
+  imports: [TranslatePipe],
   templateUrl: './activity-log.component.html',
   styleUrls: ['./activity-log.component.scss'],
 })
@@ -43,6 +45,10 @@ export class ActivityLogComponent implements OnDestroy {
   #reverting = false
   #unsubs: (() => void)[] = []
 
+  get #i18n(): I18nProvider | undefined {
+    return get('@hypercomb.social/I18n') as I18nProvider | undefined
+  }
+
   readonly entries = this.#entries.asReadonly()
   readonly hasEntries = computed(() => this.#entries().length > 0)
 
@@ -50,25 +56,29 @@ export class ActivityLogComponent implements OnDestroy {
     this.#unsubs.push(
       EffectBus.on<{ seed: string }>('seed:added', p => {
         if (!this.#ready || !p?.seed || HIDDEN.has('seed:added')) return
-        if (this.#reverting) { this.#addEntry('+', `added "${p.seed}"`); return }
-        this.#addEntry('+', `added "${p.seed}"`, () => this.#revertAdd(p.seed))
+        const msg = this.#i18n?.t('activity.added', { seed: p.seed }) ?? `added "${p.seed}"`
+        if (this.#reverting) { this.#addEntry('+', msg); return }
+        this.#addEntry('+', msg, () => this.#revertAdd(p.seed))
       }),
       EffectBus.on<{ seed: string }>('seed:removed', p => {
         if (!this.#ready || !p?.seed || HIDDEN.has('seed:removed')) return
-        if (this.#reverting) { this.#addEntry('\u2212', `removed "${p.seed}"`); return }
-        this.#addEntry('\u2212', `removed "${p.seed}"`, () => this.#revertRemove(p.seed))
+        const msg = this.#i18n?.t('activity.removed', { seed: p.seed }) ?? `removed "${p.seed}"`
+        if (this.#reverting) { this.#addEntry('\u2212', msg); return }
+        this.#addEntry('\u2212', msg, () => this.#revertRemove(p.seed))
       }),
       EffectBus.on<{ count: number; op: string }>('clipboard:paste-done', p => {
         if (!this.#ready || !p || HIDDEN.has('clipboard:paste-done')) return
-        this.#addEntry('\u2398', `pasted ${p.count} tile${p.count === 1 ? '' : 's'}`)
+        const msg = this.#i18n?.t('activity.pasted', { count: p.count }) ?? `pasted ${p.count} tile${p.count === 1 ? '' : 's'}`
+        this.#addEntry('\u2398', msg)
       }),
       EffectBus.on('move:committed', () => {
         if (!this.#ready || HIDDEN.has('move:committed')) return
-        this.#addEntry('\u2194', 'tile moved')
+        this.#addEntry('\u2194', this.#i18n?.t('activity.moved') ?? 'tile moved')
       }),
       EffectBus.on<{ public: boolean }>('mesh:public-changed', p => {
         if (!this.#ready || !p || HIDDEN.has('mesh:public-changed')) return
-        this.#addEntry('\u25C6', p.public ? 'mesh \u2192 public' : 'mesh \u2192 private')
+        const key = p.public ? 'activity.mesh-public' : 'activity.mesh-private'
+        this.#addEntry('\u25C6', this.#i18n?.t(key) ?? (p.public ? 'mesh \u2192 public' : 'mesh \u2192 private'))
       }),
     )
 

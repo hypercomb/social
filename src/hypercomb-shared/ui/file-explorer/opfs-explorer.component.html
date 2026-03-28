@@ -5,16 +5,16 @@
   <div class="title">
     <div class="title-left">
       <span class="title-icon" aria-hidden="true">📁</span>
-      <span>OPFS Explorer</span>
+      <span>{{ 'explorer.title' | t }}</span>
     </div>
 
     <button
       type="button"
       class="icon-button gear"
       [class.is-on]="showAll()"
-      title="toggle raw view"
+      [title]="'explorer.toggle-raw' | t"
       (click)="toggleShowAll()"
-      aria-label="toggle raw view"
+      [attr.aria-label]="'explorer.toggle-raw' | t"
     >
       <span aria-hidden="true">⚙</span>
     </button>
@@ -30,21 +30,21 @@
     <input
       type="text"
       name="entry-name"
-      placeholder="name"
+      [placeholder]="'explorer.name-placeholder' | t"
       [(ngModel)]="newName"
       class="name-input"
     />
 
     <button type="button" class="btn" (click)="createFolder()">
-      add folder
+      {{ 'explorer.add-folder' | t }}
     </button>
 
     <button type="button" class="btn" (click)="createFile()">
-      add file
+      {{ 'explorer.add-file' | t }}
     </button>
 
     <button type="button" class="btn" (click)="addDependency()">
-      add dependency
+      {{ 'explorer.add-dependency' | t }}
     </button>
   </div>
 
@@ -54,8 +54,8 @@
       <thead>
         <tr>
           <th class="col-icon" aria-hidden="true"></th>
-          <th class="col-name">name</th>
-          <th class="col-actions">actions</th>
+          <th class="col-name">{{ 'explorer.col-name' | t }}</th>
+          <th class="col-actions">{{ 'explorer.col-actions' | t }}</th>
         </tr>
       </thead>
 
@@ -78,22 +78,22 @@
           </td>
 
           <td class="cell-actions">
-            <button type="button" class="icon-button" title="run" aria-label="run" (click)="run(e, $event)">
+            <button type="button" class="icon-button" [title]="'explorer.run' | t" [attr.aria-label]="'explorer.run' | t" (click)="run(e, $event)">
               <span aria-hidden="true">▶</span>
             </button>
 
-            <button type="button" class="btn-small" title="copy" aria-label="copy" (click)="copyDetails(e, $event)">
-              copy
+            <button type="button" class="btn-small" [title]="'explorer.copy' | t" [attr.aria-label]="'explorer.copy' | t" (click)="copyDetails(e, $event)">
+              {{ 'explorer.copy' | t }}
             </button>
 
-            <button type="button" class="icon-button danger" title="remove" aria-label="remove" (click)="remove(e, $event)">
+            <button type="button" class="icon-button danger" [title]="'explorer.remove' | t" [attr.aria-label]="'explorer.remove' | t" (click)="remove(e, $event)">
               <span aria-hidden="true">🗑</span>
             </button>
           </td>
         </tr>
 
         <tr *ngIf="entries().length === 0">
-          <td class="empty" colspan="3">no entries</td>
+          <td class="empty" colspan="3">{{ 'explorer.no-entries' | t }}</td>
         </tr>
       </tbody>
     </table>

@@ -1,5 +1,5 @@
 // diamondcoreprocessor.com/ui/slash-command/slash-command.drone.ts
-import { EffectBus, hypercomb } from '@hypercomb/core'
+import { EffectBus, hypercomb, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import type { SlashCommand, SlashCommandMatch, SlashCommandProvider } from './slash-command.provider.js'
 
 export class SlashCommandDrone extends EventTarget {
@@ -11,7 +11,7 @@ export class SlashCommandDrone extends EventTarget {
   }
 
   all(): SlashCommand[] {
-    return this.#providers.flatMap(p => p.commands)
+    return this.#providers.flatMap(p => p.commands).map(c => this.#localize(c))
   }
 
   match(query: string): SlashCommandMatch[] {
@@ -22,12 +22,21 @@ export class SlashCommandDrone extends EventTarget {
       for (const command of provider.commands) {
         const names = [command.name, ...(command.aliases ?? [])]
         if (!q || names.some(n => n.startsWith(q))) {
-          results.push({ command, provider })
+          results.push({ command: this.#localize(command), provider })
         }
       }
     }
 
     return results
+  }
+
+  #localize(command: SlashCommand): SlashCommand {
+    if (!command.descriptionKey) return command
+    const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined
+    if (!i18n) return command
+    const translated = i18n.t(command.descriptionKey)
+    if (translated === command.descriptionKey) return command
+    return { ...command, description: translated }
   }
 
   execute(commandName: string, args: string): Promise<void> | void {
@@ -50,7 +59,7 @@ class HelpProvider implements SlashCommandProvider {
   readonly name = 'help-provider'
   readonly priority = 100
   readonly commands: SlashCommand[] = [
-    { name: 'help', description: 'Show keyboard shortcuts' }
+    { name: 'help', description: 'Show keyboard shortcuts', descriptionKey: 'slash.help' }
   ]
 
   execute(): void {
@@ -62,7 +71,7 @@ class ClearProvider implements SlashCommandProvider {
   readonly name = 'clear-provider'
   readonly priority = 100
   readonly commands: SlashCommand[] = [
-    { name: 'clear', description: 'Clear active filter' }
+    { name: 'clear', description: 'Clear active filter', descriptionKey: 'slash.clear' }
   ]
 
   execute(): void {
@@ -75,7 +84,7 @@ class KeywordProvider implements SlashCommandProvider {
   readonly name = 'keyword-provider'
   readonly priority = 100
   readonly commands: SlashCommand[] = [
-    { name: 'keyword', description: 'Add or remove keywords (tags) on selected tiles', aliases: ['kw', 'tag'] }
+    { name: 'keyword', description: 'Add or remove keywords (tags) on selected tiles', descriptionKey: 'slash.keyword', aliases: ['kw', 'tag'] }
   ]
 
   async execute(_commandName: string, args: string): Promise<void> {
@@ -90,7 +99,7 @@ class MeetingProvider implements SlashCommandProvider {
   readonly name = 'meeting-provider'
   readonly priority = 100
   readonly commands: SlashCommand[] = [
-    { name: 'meeting', description: 'Start or join a video meeting on the selected tile', aliases: ['meet', 'call'] }
+    { name: 'meeting', description: 'Start or join a video meeting on the selected tile', descriptionKey: 'slash.meeting', aliases: ['meet', 'call'] }
   ]
 
   async execute(_commandName: string, args: string): Promise<void> {
@@ -105,7 +114,7 @@ class DebugProvider implements SlashCommandProvider {
   readonly name = 'debug-provider'
   readonly priority = 100
   readonly commands: SlashCommand[] = [
-    { name: 'debug', description: 'Toggle the Pixi display-tree inspector', aliases: ['inspect', 'dbg'] }
+    { name: 'debug', description: 'Toggle the Pixi display-tree inspector', descriptionKey: 'slash.debug', aliases: ['inspect', 'dbg'] }
   ]
 
   async execute(): Promise<void> {
@@ -120,7 +129,7 @@ class RemoveProvider implements SlashCommandProvider {
   readonly name = 'remove-provider'
   readonly priority = 100
   readonly commands: SlashCommand[] = [
-    { name: 'remove', description: 'Remove tiles from the current directory', aliases: ['rm'] }
+    { name: 'remove', description: 'Remove tiles from the current directory', descriptionKey: 'slash.remove', aliases: ['rm'] }
   ]
 
   async execute(_commandName: string, args: string): Promise<void> {
@@ -135,7 +144,7 @@ class FormatSlashProvider implements SlashCommandProvider {
   readonly name = 'format-provider'
   readonly priority = 100
   readonly commands: SlashCommand[] = [
-    { name: 'format', description: 'Copy visual formatting from the active tile', aliases: ['fmt', 'fp'] }
+    { name: 'format', description: 'Copy visual formatting from the active tile', descriptionKey: 'slash.format', aliases: ['fmt', 'fp'] }
   ]
 
   async execute(_commandName: string, args: string): Promise<void> {
@@ -148,7 +157,7 @@ class LayoutProvider implements SlashCommandProvider {
   readonly name = 'layout-provider'
   readonly priority = 100
   readonly commands: SlashCommand[] = [
-    { name: 'layout', description: 'Save, apply, list, or remove layout templates', aliases: ['lo'] }
+    { name: 'layout', description: 'Save, apply, list, or remove layout templates', descriptionKey: 'slash.layout', aliases: ['lo'] }
   ]
 
   async execute(_commandName: string, args: string): Promise<void> {
@@ -161,7 +170,7 @@ class NeonProvider implements SlashCommandProvider {
   readonly name = 'neon-provider'
   readonly priority = 100
   readonly commands: SlashCommand[] = [
-    { name: 'neon', description: 'Toggle the neon hover color toolbar' }
+    { name: 'neon', description: 'Toggle the neon hover color toolbar', descriptionKey: 'slash.neon' }
   ]
 
   execute(): void {
@@ -173,7 +182,7 @@ class MoveProvider implements SlashCommandProvider {
   readonly name = 'move-provider'
   readonly priority = 100
   readonly commands: SlashCommand[] = [
-    { name: 'move', description: 'Toggle move mode for drag-reordering tiles' }
+    { name: 'move', description: 'Toggle move mode for drag-reordering tiles', descriptionKey: 'slash.move' }
   ]
 
   async execute(_commandName: string, args: string): Promise<void> {
@@ -204,7 +213,7 @@ class ReviseProvider implements SlashCommandProvider {
   readonly name = 'revise-provider'
   readonly priority = 100
   readonly commands: SlashCommand[] = [
-    { name: 'revise', description: 'Toggle revision mode (history clock)', aliases: ['rev', 'history'] }
+    { name: 'revise', description: 'Toggle revision mode (history clock)', descriptionKey: 'slash.revise', aliases: ['rev', 'history'] }
   ]
 
   async execute(_commandName: string, args: string): Promise<void> {
@@ -217,7 +226,7 @@ class ExpandProvider implements SlashCommandProvider {
   readonly name = 'expand-provider'
   readonly priority = 100
   readonly commands: SlashCommand[] = [
-    { name: 'expand', description: 'Expand selected tiles into constituent parts via Claude Haiku', aliases: ['atomize'] }
+    { name: 'expand', description: 'Expand selected tiles into constituent parts via Claude Haiku', descriptionKey: 'slash.expand', aliases: ['atomize'] }
   ]
 
   async execute(_commandName: string, _args: string): Promise<void> {
@@ -250,9 +259,9 @@ class LlmProvider implements SlashCommandProvider {
   readonly name = 'llm-provider'
   readonly priority = 100
   readonly commands: SlashCommand[] = [
-    { name: 'opus', description: 'Send context to Claude Opus 4.6', aliases: ['o'] },
-    { name: 'sonnet', description: 'Send context to Claude Sonnet', aliases: ['s'] },
-    { name: 'haiku', description: 'Send context to Claude Haiku', aliases: ['h'] },
+    { name: 'opus', description: 'Send context to Claude Opus 4.6', descriptionKey: 'slash.opus', aliases: ['o'] },
+    { name: 'sonnet', description: 'Send context to Claude Sonnet', descriptionKey: 'slash.sonnet', aliases: ['s'] },
+    { name: 'haiku', description: 'Send context to Claude Haiku', descriptionKey: 'slash.haiku', aliases: ['h'] },
   ]
 
   async execute(commandName: string, args: string): Promise<void> {
@@ -261,6 +270,19 @@ class LlmProvider implements SlashCommandProvider {
       queen.activeModel = commandName
       await queen.invoke(args)
     }
+  }
+}
+
+class LanguageProvider implements SlashCommandProvider {
+  readonly name = 'language-provider'
+  readonly priority = 100
+  readonly commands: SlashCommand[] = [
+    { name: 'language', description: 'Switch the UI language', descriptionKey: 'slash.language', aliases: ['lang', 'locale'] }
+  ]
+
+  async execute(_commandName: string, args: string): Promise<void> {
+    const queen = get('@diamondcoreprocessor.com/LanguageQueenBee') as any
+    if (queen?.invoke) await queen.invoke(args)
   }
 }
 
@@ -281,4 +303,5 @@ _slashCommands.addProvider(new ReviseProvider())
 _slashCommands.addProvider(new ExpandProvider())
 _slashCommands.addProvider(new ChatProvider())
 _slashCommands.addProvider(new LlmProvider())
+_slashCommands.addProvider(new LanguageProvider())
 window.ioc.register('@diamondcoreprocessor.com/SlashCommandDrone', _slashCommands)

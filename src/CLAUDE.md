@@ -32,7 +32,7 @@ If a drone or service in essentials needs something that currently lives in shar
 
 ### What belongs where
 
-- **Core**: Primitives that any module on any platform needs — IoC, EffectBus, Drone base, Signatures.
+- **Core**: Primitives that any module on any platform needs — IoC, EffectBus, Drone base, Signatures, I18nProvider.
 - **Essentials (modules)**: All features and functionality — drones, supporting services, resources (static assets like images, text, styles, JSON, byte arrays), and domain logic. These are signed, interchangeable, and community-shareable.
 - **Shared**: Shell-level plumbing shared between web implementations — bootstrapping, installing/deploying files, Angular UI chrome. Temporary home for code migrating toward modules.
 - **Web / Dev**: Bootstrapping shells. Deploy files, initialize the runtime, load modules. A different platform (e.g., Windows native, mobile) would replace the shell but load the same signed modules.
@@ -97,7 +97,7 @@ Essentials are built as **signature-addressed modules** and auto-installed into 
 
 ```
 src/
-├── hypercomb-core/             # IoC, EffectBus, Drone base, SignatureService, KeyMap types
+├── hypercomb-core/             # IoC, EffectBus, Drone base, SignatureService, KeyMap types, I18nProvider
 ├── hypercomb-essentials/       # Drones + services, organized by domain namespace
 │   └── src/
 │       ├── diamondcoreprocessor.com/   # Core processor domain — feature-oriented tree
@@ -128,7 +128,8 @@ src/
 ├── hypercomb-sdk/              # Facade: re-exports core types, env-agnostic IoC proxy, build API
 ├── hypercomb-cli/              # CLI tool: `hypercomb build`, `hypercomb inspect`
 ├── hypercomb-shared/           # Store, Lineage, Navigation, LayerInstaller, UI components
-│   ├── core/                   # Services: Store, Lineage, Navigation, SecretStore, RoomStore, ioc.web
+│   ├── core/                   # Services: Store, Lineage, Navigation, SecretStore, RoomStore, ioc.web, i18n
+│   ├── i18n/                   # Translation catalogs: en.json, ja.json
 │   └── ui/                     # Angular components: CommandLine, ControlsBar, FileExplorer, History
 ├── hypercomb-web/              # Production Angular app (runtime drone loading)
 ├── hypercomb-dev/              # Development Angular app (direct drone imports)
@@ -182,6 +183,72 @@ Self-contained modules. Lifecycle: Created → Registered → Active → Dispose
   __layers__/{domain}/            # Domain-scoped layer manifests + install.manifest.json
   hypercomb.io/                   # User content tree
 ```
+
+## Localization (i18n)
+
+Runtime localization framework — no build-time compilation. All UI text goes through `LocalizationService` so the app can switch languages instantly.
+
+### Architecture
+
+```
+hypercomb-core/src/i18n.types.ts        ← I18nProvider interface + I18N_IOC_KEY (modules import this)
+hypercomb-shared/core/i18n.service.ts   ← LocalizationService (extends EventTarget, self-registers)
+hypercomb-shared/core/i18n.pipe.ts      ← Angular `| t` pipe for templates
+hypercomb-shared/core/i18n.signal.ts    ← ti18n() signal helper for component classes
+hypercomb-shared/i18n/en.json           ← English catalog
+hypercomb-shared/i18n/ja.json           ← Japanese catalog
+```
+
+### Usage in Angular templates
+
+```html
+{{ 'editor.save' | t }}                          <!-- simple key -->
+{{ 'activity.pasted' | t: { count: 5 } }}        <!-- with interpolation -->
+[placeholder]="'palette.placeholder' | t"         <!-- attribute binding -->
+[attr.aria-label]="'controls.center' | t"         <!-- aria-label -->
+```
+
+### Usage in TypeScript (components/bees)
+
+```typescript
+const i18n = get('@hypercomb.social/I18n') as I18nProvider | undefined
+const msg = i18n?.t('activity.added', { seed: name }) ?? `added "${name}"`
+```
+
+### Slash command descriptions
+
+Slash commands use `descriptionKey` on `SlashCommand` for localized autocomplete:
+```typescript
+{ name: 'help', description: 'Show keyboard shortcuts', descriptionKey: 'slash.help' }
+```
+`SlashCommandDrone.match()` resolves descriptions via i18n at match time.
+
+### Community module translations
+
+Bees register namespace-scoped translations at load time:
+```typescript
+import type { I18nProvider, I18N_IOC_KEY } from '@hypercomb/core'
+window.ioc.whenReady(I18N_IOC_KEY, (i18n: I18nProvider) => {
+  i18n.registerTranslations('my-module.com', 'en', { 'greeting': 'Hello' })
+  i18n.registerTranslations('my-module.com', 'ja', { 'greeting': 'こんにちは' })
+})
+```
+
+### Locale switching
+
+```typescript
+window.ioc.get('@hypercomb.social/I18n').setLocale('ja')  // persists to localStorage, updates document.lang
+```
+
+Or via slash command: `/language ja`, `/language en`, `/lang jp`
+
+### Key conventions
+
+- Flat dot-separated keys: `component.element` (e.g., `editor.save`, `controls.clipboard`)
+- Slash command keys: `slash.commandName` (e.g., `slash.help`, `slash.language`)
+- Plurals: `key.zero`, `key.one`, `key.other` (triggered when `params.count` is present)
+- Interpolation: `{token}` placeholders (e.g., `added "{seed}"`)
+- Namespace: `'app'` for host, domain name for modules (e.g., `'revolucionstyle.com'`)
 
 ## Coding Conventions
 

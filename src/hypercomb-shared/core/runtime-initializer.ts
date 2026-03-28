@@ -1,5 +1,6 @@
 import { EffectBus } from '@hypercomb/core'
 import type { Lineage } from './lineage'
+import type { LocalizationService } from './i18n.service'
 import type { Navigation } from './navigation'
 import { OpfsTreeLogger } from './tree-logger'
 import type { BootstrapHistory } from './bootstrap-history'
@@ -25,6 +26,19 @@ export const initializeRuntime = async (
 
   const store = get('@hypercomb.social/Store') as Store | undefined
   await store?.initialize?.()
+
+  // Load host translations for the i18n service
+  const i18n = get('@hypercomb.social/I18n') as LocalizationService | undefined
+  if (i18n) {
+    try {
+      const [en, ja] = await Promise.all([
+        import('../i18n/en.json', { with: { type: 'json' } }),
+        import('../i18n/ja.json', { with: { type: 'json' } }),
+      ])
+      i18n.registerTranslations('app', 'en', en.default)
+      i18n.registerTranslations('app', 'ja', ja.default)
+    } catch { /* translations unavailable — graceful degradation */ }
+  }
 
   const lineage = get('@hypercomb.social/Lineage') as Lineage | undefined
   await lineage?.initialize?.()

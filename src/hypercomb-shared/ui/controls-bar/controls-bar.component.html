@@ -1,6 +1,6 @@
 <!-- mobile back button: top-left, always visible on mobile -->
 @if (isMobile()) {
-  <button class="mobile-back-btn" [class.disabled]="!canGoBack()" [disabled]="!canGoBack()" (click)="goBack()" aria-label="go back">
+  <button class="mobile-back-btn" [class.disabled]="!canGoBack()" [disabled]="!canGoBack()" (click)="goBack()" [attr.aria-label]="'controls.go-back' | t">
     <span class="hci">A</span>
   </button>
 }
@@ -70,33 +70,33 @@
       @if (isMobile()) {
         <!-- ═══ MOBILE: streamlined button bar ═══ -->
         <div class="controls-section mobile-nav">
-          <button class="ctl-btn" [disabled]="!canGoBack()" (click)="goBack()" aria-label="go back">
+          <button class="ctl-btn" [disabled]="!canGoBack()" (click)="goBack()" [attr.aria-label]="'controls.go-back' | t">
             <span class="hci">A</span>
           </button>
-          <button class="ctl-btn" (click)="openDcp()" aria-label="diamond core processor">
+          <button class="ctl-btn" (click)="openDcp()" [attr.aria-label]="'controls.dcp' | t">
             <span class="hci dcp-icon">$</span>
           </button>
-          <button class="ctl-btn" (click)="centerView()" aria-label="center">
+          <button class="ctl-btn" (click)="centerView()" [attr.aria-label]="'controls.center' | t">
             <span class="hci">q</span>
           </button>
-          <button class="ctl-btn" (click)="fitContent()" aria-label="fit to content">
+          <button class="ctl-btn" (click)="fitContent()" [attr.aria-label]="'controls.fit-content' | t">
             <span class="hci">)</span>
           </button>
-          <button class="ctl-btn" [class.active]="layoutPinned()" (click)="toggleLayout()" aria-label="layout mode">
+          <button class="ctl-btn" [class.active]="layoutPinned()" (click)="toggleLayout()" [attr.aria-label]="'controls.layout-mode' | t">
             <span class="hci">#</span>
           </button>
-          <button class="ctl-btn" (click)="toggleFullscreen()" aria-label="fullscreen">
+          <button class="ctl-btn" (click)="toggleFullscreen()" [attr.aria-label]="'controls.fullscreen' | t">
             <span class="hci">'</span>
           </button>
           @if (!meetingJoined()) {
-            <button class="ctl-btn" (click)="toggleMeeting()" aria-label="join meeting">
+            <button class="ctl-btn" (click)="toggleMeeting()" [attr.aria-label]="'controls.join-meeting' | t">
               <span class="meeting-icon">▶</span>
             </button>
           } @else {
-            <button class="ctl-btn" [class.active]="meetingCameraOn()" (click)="toggleCamera()" aria-label="toggle camera">
+            <button class="ctl-btn" [class.active]="meetingCameraOn()" (click)="toggleCamera()" [attr.aria-label]="'controls.toggle-camera' | t">
               <span class="meeting-icon">{{ meetingCameraOn() ? '◉' : '◎' }}</span>
             </button>
-            <button class="ctl-btn" (click)="toggleMeeting()" aria-label="leave meeting">
+            <button class="ctl-btn" (click)="toggleMeeting()" [attr.aria-label]="'controls.leave-meeting' | t">
               <span class="meeting-icon leave">■</span>
             </button>
           }
@@ -105,39 +105,39 @@
         <!-- ═══ DESKTOP: full controls ═══ -->
         <!-- view section -->
         <div class="controls-section view">
-          <button class="ctl-btn" aria-label="back button">
+          <button class="ctl-btn" [attr.aria-label]="'controls.back' | t">
             <span class="hci">A</span>
           </button>
           
-          <button class="ctl-btn" (click)="openDcp()" aria-label="diamond core processor">
+          <button class="ctl-btn" (click)="openDcp()" [attr.aria-label]="'controls.dcp' | t">
             <span class="hci dcp-icon">$</span>
           </button>
-          <button class="ctl-btn" (click)="centerView()" aria-label="center">
+          <button class="ctl-btn" (click)="centerView()" [attr.aria-label]="'controls.center' | t">
             <span class="hci">q</span>
           </button>
-          <button class="ctl-btn" (click)="fitContent()" aria-label="fit to content">
+          <button class="ctl-btn" (click)="fitContent()" [attr.aria-label]="'controls.fit-content' | t">
             <span class="hci">)</span>
           </button>
-          <button class="ctl-btn" (click)="zoomOut()" aria-label="zoom out">
+          <button class="ctl-btn" (click)="zoomOut()" [attr.aria-label]="'controls.zoom-out' | t">
             <span class="hci">I</span>
           </button>
-          <button class="ctl-btn" (click)="zoomIn()" aria-label="zoom in">
+          <button class="ctl-btn" (click)="zoomIn()" [attr.aria-label]="'controls.zoom-in' | t">
             <span class="hci">K</span>
           </button>
-          <button class="ctl-btn" [class.active]="locked()" (click)="toggleLock()" aria-label="lock">
+          <button class="ctl-btn" [class.active]="locked()" (click)="toggleLock()" [attr.aria-label]="'controls.lock' | t">
             <span class="hci">{{ locked() ? 'a' : 'b' }}</span>
           </button>
-          <button class="ctl-btn" (click)="toggleFullscreen()" aria-label="fullscreen">
+          <button class="ctl-btn" (click)="toggleFullscreen()" [attr.aria-label]="'controls.fullscreen' | t">
             <span class="hci">'</span>
           </button>
-          <button class="ctl-btn" [class.active]="layoutPinned()" (click)="toggleLayout()" aria-label="layout mode" [title]="layoutPinned() ? 'pinned layout' : 'dense layout'">
+          <button class="ctl-btn" [class.active]="layoutPinned()" (click)="toggleLayout()" [attr.aria-label]="'controls.layout-mode' | t" [title]="(layoutPinned() ? 'controls.pinned-layout' : 'controls.dense-layout') | t">
             <span class="hci">#</span>
           </button>
         </div>
 
         <!-- clipboard button -->
         <div class="controls-divider"></div>
-        <button class="ctl-btn clipboard-btn" (click)="openClipboard()" aria-label="clipboard">
+        <button class="ctl-btn clipboard-btn" (click)="openClipboard()" [attr.aria-label]="'controls.clipboard' | t">
           <span class="hci">y</span>
           @if (clipboardCount() > 0) {
             <span class="badge">{{ clipboardCount() }}</span>
@@ -147,7 +147,7 @@
         <!-- space section (public mode) -->
         @if (meshPublic) {
           <div class="controls-divider"></div>
-          <button class="ctl-btn" [class.active]="roomOpen()" (click)="toggleRoom()" aria-label="space">
+          <button class="ctl-btn" [class.active]="roomOpen()" (click)="toggleRoom()" [attr.aria-label]="'controls.space' | t">
             <span class="hci">B</span>
           </button>
           @if (roomOpen()) {
@@ -155,7 +155,7 @@
               <input
                 class="room-input"
                 type="text"
-                placeholder="space"
+                [placeholder]="'controls.room-placeholder' | t"
                 [value]="roomValue()"
                 (input)="onRoomInput($event)"
                 (keydown.enter)="submitRoom()"
@@ -167,7 +167,7 @@
           }
 
           <!-- bee mode toggle -->
-          <button class="ctl-btn bee-btn" [class.active]="beesVisible()" (click)="toggleBees()" aria-label="toggle bees">
+          <button class="ctl-btn bee-btn" [class.active]="beesVisible()" (click)="toggleBees()" [attr.aria-label]="'controls.toggle-bees' | t">
             <span class="bee-icon">🐝</span>
           </button>
         }
@@ -175,14 +175,14 @@
         <!-- meeting join / camera toggle (always available) -->
         <div class="controls-divider"></div>
         @if (!meetingJoined()) {
-          <button class="ctl-btn" (click)="toggleMeeting()" aria-label="join meeting">
+          <button class="ctl-btn" (click)="toggleMeeting()" [attr.aria-label]="'controls.join-meeting' | t">
             <span class="meeting-icon">▶</span>
           </button>
         } @else {
-          <button class="ctl-btn" [class.active]="meetingCameraOn()" (click)="toggleCamera()" aria-label="toggle camera">
+          <button class="ctl-btn" [class.active]="meetingCameraOn()" (click)="toggleCamera()" [attr.aria-label]="'controls.toggle-camera' | t">
             <span class="meeting-icon">{{ meetingCameraOn() ? '◉' : '◎' }}</span>
           </button>
-          <button class="ctl-btn" (click)="toggleMeeting()" aria-label="leave meeting">
+          <button class="ctl-btn" (click)="toggleMeeting()" [attr.aria-label]="'controls.leave-meeting' | t">
             <span class="meeting-icon leave">■</span>
           </button>
         }
@@ -193,26 +193,26 @@
 
     @case ('clipboard') {
       <div class="controls-section clipboard-mode">
-        <span class="mode-label">clipboard</span>
+        <span class="mode-label">{{ 'controls.clipboard' | t }}</span>
         @if (clipboardCount() > 0) {
           <span class="clipboard-count">{{ clipboardCount() }}</span>
         } @else {
-          <span class="clipboard-empty">empty</span>
+          <span class="clipboard-empty">{{ 'controls.clipboard-empty' | t }}</span>
         }
       </div>
       <div class="controls-divider"></div>
       @if (clipboardCount() > 0) {
-        <button class="ctl-btn" (click)="place()" aria-label="place selected">
+        <button class="ctl-btn" (click)="place()" [attr.aria-label]="'controls.place-selected' | t">
           <span class="hci" [style.display]="'inline-block'" [style.transform]="'rotate(90deg)'" [style.color]="hasSelection() ? '#4caf50' : ''">A</span>
         </button>
-        <button class="ctl-btn" (click)="paste()" aria-label="paste clipboard">
+        <button class="ctl-btn" (click)="paste()" [attr.aria-label]="'controls.paste-clipboard' | t">
           <span class="hci" style="color:#4caf50">G</span>
         </button>
       }
-      <button class="ctl-btn" (click)="clearClipboard()" aria-label="clear clipboard">
+      <button class="ctl-btn" (click)="clearClipboard()" [attr.aria-label]="'controls.clear-clipboard' | t">
         <span class="hci">Q</span>
       </button>
-      <button class="ctl-btn" (click)="closeClipboard()" aria-label="close clipboard">
+      <button class="ctl-btn" (click)="closeClipboard()" [attr.aria-label]="'controls.close-clipboard' | t">
         <span class="close-x">&times;</span>
       </button>
     }

@@ -12,6 +12,7 @@ import {
   type OnDestroy,
 } from '@angular/core'
 import { fromRuntime } from '../../core/from-runtime'
+import { TranslatePipe } from '../../core/i18n.pipe'
 import type { Navigation } from '../../core/navigation'
 import type { MovementService } from '../../core/movement.service'
 import { EffectBus, SignatureService } from '@hypercomb/core'
@@ -22,6 +23,7 @@ import { secretTag } from './secret-words'
 @Component({
   selector: 'hc-controls-bar',
   standalone: true,
+  imports: [TranslatePipe],
   templateUrl: './controls-bar.component.html',
   styleUrls: ['./controls-bar.component.scss'],
 })

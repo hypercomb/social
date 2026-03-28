@@ -1,11 +1,13 @@
 import { Component, computed, EventEmitter, Input, Output, signal } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
+import { TranslatePipe } from '../../core/i18n.pipe'
 import type { SecretStore } from '../../core/secret-store'
 import type { SecretStrengthProvider } from '../../core/secret-strength'
 
 @Component({
   selector: 'hc-mesh-header',
   standalone: true,
+  imports: [TranslatePipe],
   templateUrl: './mesh-header.component.html',
   styleUrls: ['./mesh-header.component.scss'],
 })

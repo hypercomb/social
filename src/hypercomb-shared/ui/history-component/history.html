@@ -1,16 +1,16 @@
 <!-- src/app/history-component/history.html -->
 
 <div id="history">
-  <h2>browser history</h2>
+  <h2>{{ 'history.title' | t }}</h2>
 
   <div class="controls">
-    <button (click)="back()">back</button>
-    <button (click)="forward()">forward</button>
+    <button (click)="back()">{{ 'history.back' | t }}</button>
+    <button (click)="forward()">{{ 'history.forward' | t }}</button>
   </div>
 
-  <p><strong>length:</strong> {{ length() }}</p>
-  <p><strong>index:</strong> {{ current() }}</p>
-  <p><strong>path:</strong> {{ path() }}</p>
-  <p><strong>depth:</strong> {{ depth() }}</p>
-  <p><strong>active:</strong> {{ active() }}</p>
+  <p><strong>{{ 'history.length' | t }}</strong> {{ length() }}</p>
+  <p><strong>{{ 'history.index' | t }}</strong> {{ current() }}</p>
+  <p><strong>{{ 'history.path' | t }}</strong> {{ path() }}</p>
+  <p><strong>{{ 'history.depth' | t }}</strong> {{ depth() }}</p>
+  <p><strong>{{ 'history.active' | t }}</strong> {{ active() }}</p>
 </div>

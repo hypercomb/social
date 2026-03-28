@@ -13,6 +13,7 @@ import {
 import { FormsModule } from '@angular/forms'
 import { EffectBus } from '@hypercomb/core'
 import { fromRuntime } from '../../core/from-runtime'
+import { TranslatePipe } from '../../core/i18n.pipe'
 
 import type { TileEditorService } from
   '@hypercomb/essentials/diamondcoreprocessor.com/editor/tile-editor.service'
@@ -28,7 +29,7 @@ const NEON_CORES = [0x00ffff, 0xff00ff, 0x00ff88, 0xffcc00, 0x8844ff]
 @Component({
   selector: 'hc-tile-editor',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, TranslatePipe],
   templateUrl: './tile-editor.component.html',
   styleUrls: ['./tile-editor.component.scss'],
 })

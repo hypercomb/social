@@ -9,7 +9,7 @@ import type { SeedSuggestionProvider } from '../../core/seed-suggestion.provider
 import type { CompletionUtility, CompletionContext } from '@hypercomb/shared/core/completion-utility'
 import { fromRuntime } from '../../core/from-runtime'
 import { readTagProps, writeTagProps, persistTagOps, type TagOp } from '../../core/tag-ops'
-import { EffectBus, hypercomb } from '@hypercomb/core'
+import { EffectBus, hypercomb, type I18nProvider } from '@hypercomb/core'
 import { VoiceInputService } from '../../core/voice-input.service'
 import type { CommandLineBehavior, CommandLineBehaviorMeta, CommandLineOperation } from './command-line-behavior'
 import { ShiftEnterNavigateBehavior } from './shift-enter-navigate.behavior'
@@ -21,9 +21,9 @@ import { HashMarkerBehavior } from './hash-marker.behavior'
 import { SlashCommandBehavior } from './slash-command.behavior'
 import { SELECT_OPS } from './select-ops'
 
-const BUILTIN_SLASH: { command: { name: string; description: string }; provider: null }[] = [
-  { command: { name: 'select', description: 'select tiles for cut/copy/move' }, provider: null },
-  { command: { name: 'remove', description: 'remove selected tiles' }, provider: null },
+const BUILTIN_SLASH: { command: { name: string; description: string; descriptionKey: string }; provider: null }[] = [
+  { command: { name: 'select', description: 'select tiles for cut/copy/move', descriptionKey: 'slash.select' }, provider: null },
+  { command: { name: 'remove', description: 'remove selected tiles', descriptionKey: 'slash.remove-builtin' }, provider: null },
 ]
 
 /** Matches label:tagName or label:tagName(#color) (plain colon syntax, no brackets). */
@@ -137,9 +137,13 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (!ctx.active || ctx.mode !== 'slash') return []
     const drone = get('@diamondcoreprocessor.com/SlashCommandDrone') as any
     const droneMatches = drone?.match ? drone.match(ctx.normalized) as { command: { name: string; description: string }; provider: unknown }[] : []
+    const t = this.#i18n
     const builtinMatches = BUILTIN_SLASH.filter(b =>
       !ctx.normalized || b.command.name.startsWith(ctx.normalized)
-    )
+    ).map(b => ({
+      command: { name: b.command.name, description: t?.t(b.command.descriptionKey) ?? b.command.description },
+      provider: null,
+    }))
     return [...builtinMatches, ...droneMatches]
   })
 
@@ -308,12 +312,17 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   // placeholder
   // -------------------------------------------------
 
+  get #i18n(): I18nProvider | undefined {
+    return get('@hypercomb.social/I18n') as I18nProvider | undefined
+  }
+
   public readonly placeholder = computed<string>(() => {
-    if (this.locked()) return 'enter cell name...'
+    const t = this.#i18n
+    if (this.locked()) return t?.t('command-line.placeholder.locked') ?? 'enter cell name...'
     const ctx = this.context()
-    if (ctx.active && ctx.mode === 'filter') return 'filter tiles...'
-    if (ctx.active && ctx.mode === 'slash') return 'type a command...'
-    return 'share intent...'
+    if (ctx.active && ctx.mode === 'filter') return t?.t('command-line.placeholder.filter') ?? 'filter tiles...'
+    if (ctx.active && ctx.mode === 'slash') return t?.t('command-line.placeholder.slash') ?? 'type a command...'
+    return t?.t('command-line.placeholder.default') ?? 'share intent...'
   })
 
   public constructor() {

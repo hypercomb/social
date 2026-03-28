@@ -5,6 +5,7 @@
 
 import { ChangeDetectorRef, Component, computed, inject, signal, type OnInit, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
+import { TranslatePipe } from '../../core/i18n.pipe'
 
 import type { FormatPainterState } from
   '@hypercomb/essentials/diamondcoreprocessor.com/format/format-painter.drone'
@@ -14,6 +15,7 @@ const EMPTY: FormatPainterState = { open: false, sourceSeed: null, entries: [] }
 @Component({
   selector: 'hc-format-painter',
   standalone: true,
+  imports: [TranslatePipe],
   templateUrl: './format-painter.component.html',
   styleUrls: ['./format-painter.component.scss'],
 })

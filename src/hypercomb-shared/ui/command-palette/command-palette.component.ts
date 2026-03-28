@@ -15,6 +15,7 @@ import {
 } from '@angular/core'
 import { EffectBus, formatChord, type KeyBinding } from '@hypercomb/core'
 import { fromRuntime } from '../../core/from-runtime'
+import { TranslatePipe } from '../../core/i18n.pipe'
 
 import type { CommandPaletteState, PaletteItem } from
   '@hypercomb/essentials/diamondcoreprocessor.com/commands/command-palette.drone'
@@ -22,6 +23,7 @@ import type { CommandPaletteState, PaletteItem } from
 @Component({
   selector: 'hc-command-palette',
   standalone: true,
+  imports: [TranslatePipe],
   templateUrl: './command-palette.component.html',
   styleUrls: ['./command-palette.component.scss'],
 })

@@ -1,10 +1,13 @@
 // hypercomb-shared/ui/history-component/history.ts
 
 import { Component } from '@angular/core'
+import { TranslatePipe } from '../../core/i18n.pipe'
 import { Navigation } from '../../core/navigation'
 
 @Component({
   selector: 'hc-history',
+  standalone: true,
+  imports: [TranslatePipe],
   styleUrls: ['./history.scss'],
   templateUrl: './history.html'
 })

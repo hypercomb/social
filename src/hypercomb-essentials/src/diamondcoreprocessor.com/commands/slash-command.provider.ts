@@ -3,6 +3,7 @@
 export interface SlashCommand {
   readonly name: string
   readonly description: string
+  readonly descriptionKey?: string
   readonly aliases?: readonly string[]
 }
 

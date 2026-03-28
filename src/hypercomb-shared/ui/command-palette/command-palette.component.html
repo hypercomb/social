@@ -7,7 +7,7 @@
         #paletteInput
         class="palette-input"
         type="text"
-        placeholder="Type a command..."
+        [placeholder]="'palette.placeholder' | t"
         autocomplete="off"
         spellcheck="false"
         (input)="onInput($event)"
@@ -16,7 +16,7 @@
     </div>
     <div class="palette-results">
       @if (totalCount() === 0) {
-        <div class="palette-empty">No matching commands</div>
+        <div class="palette-empty">{{ 'palette.empty' | t }}</div>
       }
       @for (group of groups(); track group.category) {
         <div class="palette-group">

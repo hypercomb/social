@@ -5,7 +5,7 @@
       <input
         class="header-secret-input"
         type="text"
-        placeholder="secure your location"
+        [placeholder]="'mesh.secret-placeholder' | t"
         [value]="secretValue()"
         (input)="onSecretInput($event)"
         (keydown.enter)="submitSecret($event)"
@@ -15,7 +15,7 @@
 
   <!-- Secured label: visible when has secret and input is collapsed -->
   @if (meshPublic && hasSecret() && !showSecretInput()) {
-    <span class="secured-label" [style.color]="shieldColor()" (click)="expandSecret()">secured</span>
+    <span class="secured-label" [style.color]="shieldColor()" (click)="expandSecret()">{{ 'mesh.secured' | t }}</span>
   }
 
   <!-- Mode icon: always visible, always rightmost -->

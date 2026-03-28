@@ -21,7 +21,7 @@
 | [batch-create](#batch-create) | `[a,b]` or `path/[a,b]` | Enter | pluggable | done |
 | [cut-paste](#cut-paste) | `[items]/destination` | Enter | pluggable | done |
 | [hash-marker](#hash-marker) | `seed#Drone` | Enter | pluggable | done |
-| [slash-command](#slash-command) | `/command args` | Enter | pluggable | done |
+| [slash-command](#slash-command) | `/command args` | Enter | pluggable | done (16 commands) |
 
 ---
 
@@ -199,14 +199,46 @@ Behavior file &mdash; `hash-marker.behavior.ts`
 
 **Trigger** &mdash; Enter &ensp;|&ensp; **Type** &mdash; pluggable
 
-Invoke queen bees directly. Bypasses the processor pulse cycle.
+Invoke queen bees directly. Bypasses the processor pulse cycle. Slash commands are localized — descriptions update when the UI language changes.
 
 ```
 /help                 → lists all available queen commands
-/paste interests      → invokes paste queen with args
+/language ja          → switch UI to Japanese
 ```
 
 Behavior file &mdash; `slash-command.behavior.ts`
+
+---
+
+## Slash Command Registry
+
+All slash commands are registered as `SlashCommandProvider` instances on `SlashCommandDrone`. Commands support `descriptionKey` for i18n — when a translation exists, the autocomplete dropdown shows the localized description.
+
+| Command | Aliases | Description |
+|:--------|:--------|:------------|
+| `/help` | `?`, `commands` | Show keyboard shortcuts |
+| `/clear` | | Clear active filter |
+| `/keyword` | `kw`, `tag` | Add or remove keywords (tags) on selected tiles |
+| `/meeting` | `meet`, `call` | Start or join a video meeting on the selected tile |
+| `/debug` | `inspect`, `dbg` | Toggle the Pixi display-tree inspector |
+| `/remove` | `rm` | Remove tiles from the current directory |
+| `/format` | `fmt`, `fp` | Copy visual formatting from the active tile |
+| `/layout` | `lo` | Save, apply, list, or remove layout templates |
+| `/neon` | | Toggle the neon hover color toolbar |
+| `/move` | | Toggle move mode for drag-reordering tiles |
+| `/revise` | `rev`, `history` | Toggle revision mode (history clock) |
+| `/expand` | `atomize` | Expand selected tiles into constituent parts via Claude Haiku |
+| `/opus` | `o` | Send context to Claude Opus 4.6 |
+| `/sonnet` | `s` | Send context to Claude Sonnet |
+| `/haiku` | `h` | Send context to Claude Haiku |
+| `/language` | `lang`, `locale` | Switch the UI language |
+
+**Built-in commands** (hardcoded in `CommandLineComponent`, not in `SlashCommandDrone`):
+
+| Command | Description |
+|:--------|:------------|
+| `/select` | Select tiles for cut/copy/move |
+| `/remove` (builtin) | Remove selected tiles |
 
 ---
 

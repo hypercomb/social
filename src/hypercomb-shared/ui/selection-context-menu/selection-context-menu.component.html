@@ -11,22 +11,22 @@
     </div>
 
     <!-- action buttons -->
-    <button class="ctx-btn" (click)="moveItem()" [class.active]="moveMode()" aria-label="move">
+    <button class="ctx-btn" (click)="moveItem()" [class.active]="moveMode()" [attr.aria-label]="'selection.move' | t">
       <span class="hci">Z</span>
     </button>
-    <button class="ctx-btn" (click)="cut()" aria-label="cut">
+    <button class="ctx-btn" (click)="cut()" [attr.aria-label]="'selection.cut' | t">
       <span class="hci">F</span>
     </button>
-    <button class="ctx-btn" (click)="copy()" aria-label="copy">
+    <button class="ctx-btn" (click)="copy()" [attr.aria-label]="'selection.copy' | t">
       <span class="hci">%</span>
     </button>
-    <button class="ctx-btn" (click)="remove()" aria-label="remove">
+    <button class="ctx-btn" (click)="remove()" [attr.aria-label]="'selection.remove' | t">
       <span class="hci">Q</span>
     </button>
 
     @if (clipboardCount() > 0) {
       <div class="ctx-divider"></div>
-      <button class="ctx-btn" (click)="paste()" aria-label="paste">
+      <button class="ctx-btn" (click)="paste()" [attr.aria-label]="'selection.paste' | t">
         <span class="hci" style="color:#4caf50">G</span>
       </button>
     }

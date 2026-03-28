@@ -3,11 +3,11 @@
     @for (entry of entries(); track entry.id) {
       <div class="activity-entry" [class.fading]="entry.fading">
         @if (entry.revert) {
-          <button class="entry-revert" (click)="revertEntry(entry.id)" title="Undo">&#x21A9;</button>
+          <button class="entry-revert" (click)="revertEntry(entry.id)" [title]="'activity.undo' | t">&#x21A9;</button>
         }
         <span class="entry-icon">{{ entry.icon }}</span>
         <span class="entry-message">{{ entry.message }}</span>
-        <button class="entry-dismiss" (click)="dismiss(entry.id)" title="Dismiss">&times;</button>
+        <button class="entry-dismiss" (click)="dismiss(entry.id)" [title]="'activity.dismiss' | t">&times;</button>
       </div>
     }
   </div>

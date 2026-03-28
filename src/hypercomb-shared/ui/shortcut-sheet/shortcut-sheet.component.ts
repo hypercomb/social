@@ -6,6 +6,7 @@
 import { Component, computed, type OnInit, type OnDestroy } from '@angular/core'
 import { EffectBus, formatChord, type KeyBinding } from '@hypercomb/core'
 import { fromRuntime } from '../../core/from-runtime'
+import { TranslatePipe } from '../../core/i18n.pipe'
 
 import type { ShortcutSheetState } from
   '@hypercomb/essentials/diamondcoreprocessor.com/commands/shortcut-sheet.drone'
@@ -13,6 +14,7 @@ import type { ShortcutSheetState } from
 @Component({
   selector: 'hc-shortcut-sheet',
   standalone: true,
+  imports: [TranslatePipe],
   templateUrl: './shortcut-sheet.component.html',
   styleUrls: ['./shortcut-sheet.component.scss'],
 })

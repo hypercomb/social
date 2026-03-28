@@ -71,6 +71,7 @@ import { MeetingQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/
 import { RemoveQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/remove.queen'
 import { FormatQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/format/format.queen'
 import { FormatPainterDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/format/format-painter.drone'
+import { LanguageQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/language.queen'
 import { NeonQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/neon.queen'
 import { NeonToolbarDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/presentation/tiles/neon-toolbar.drone'
 import { LayoutQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/move/layout.queen'
@@ -125,6 +126,7 @@ const _deps = [
   RemoveQueenBee,
   FormatQueenBee,
   FormatPainterDrone,
+  LanguageQueenBee,
   NeonQueenBee,
   NeonToolbarDrone,
   LayoutQueenBee,

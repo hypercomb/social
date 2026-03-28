@@ -1,7 +1,7 @@
 @if (open()) {
   <div class="editor-backdrop" (click)="cancel()"></div>
 
-  <div class="editor-panel" role="dialog" aria-label="tile editor">
+  <div class="editor-panel" role="dialog" [attr.aria-label]="'editor.title' | t">
     <header class="editor-header">
       <span class="hci header-icon">k</span>
       <h3>{{ seed() }}</h3>
@@ -23,24 +23,24 @@
           @if (!hasImage()) {
             <div class="image-placeholder">
               <span class="hci placeholder-icon">U</span>
-              <span>drop image here</span>
+              <span>{{ 'editor.drop-image' | t }}</span>
             </div>
           }
           <div class="hex-frame"></div>
         </div>
 
         <div class="image-controls">
-          <button type="button" class="link-btn" [class.linked]="isLinked" (click)="toggleLink()" [attr.title]="isLinked ? 'unlink transforms' : 'link transforms'">
+          <button type="button" class="link-btn" [class.linked]="isLinked" (click)="toggleLink()" [attr.title]="(isLinked ? 'editor.unlink-transforms' : 'editor.link-transforms') | t">
             <span class="link-icon" [class.broken]="!isLinked"></span>
           </button>
           <button type="button" class="upload-btn" (click)="fileInput.click()">
-            <span class="hci">U</span> upload
+            <span class="hci">U</span> {{ 'editor.upload' | t }}
           </button>
           <button type="button" class="camera-btn" (click)="openCamera()">
-            <span class="hci">U</span> camera
+            <span class="hci">U</span> {{ 'editor.camera' | t }}
           </button>
-          <button type="button" class="orientation-btn" (click)="toggleOrientation()" [attr.title]="isFlat ? 'switch to point-top' : 'switch to flat-top'">
-            <span class="hci">r</span> {{ isFlat ? 'flat-top' : 'point-top' }}
+          <button type="button" class="orientation-btn" (click)="toggleOrientation()" [attr.title]="(isFlat ? 'editor.switch-to-point' : 'editor.switch-to-flat') | t">
+            <span class="hci">r</span> {{ (isFlat ? 'editor.flat-top' : 'editor.point-top') | t }}
           </button>
           <input #fileInput type="file" name="tile-image" accept="image/*" hidden (change)="onFileSelect($event)" />
         </div>
@@ -49,7 +49,7 @@
       <!-- property fields -->
       <div class="fields">
         <label class="field-row">
-          <span class="field-label"><span class="hci">*</span> link</span>
+          <span class="field-label"><span class="hci">*</span> {{ 'editor.link' | t }}</span>
           <input
             class="field-input link-input"
             [class.link-denied]="linkDenied"
@@ -67,7 +67,7 @@
         <div class="color-row">
           <label class="color-control">
             <span class="color-btn">
-              <span class="hci">s</span> bg
+              <span class="hci">s</span> {{ 'editor.bg' | t }}
             </span>
             <input
               class="field-input color-text"
@@ -88,7 +88,7 @@
 
           <label class="color-control">
             <span class="color-btn">
-              <span class="hci">s</span> border
+              <span class="hci">s</span> {{ 'editor.border' | t }}
             </span>
             <input
               class="field-input color-text"
@@ -109,7 +109,7 @@
         </div>
 
         <div class="accent-row">
-          <span class="field-label">hover accent</span>
+          <span class="field-label">{{ 'editor.hover-accent' | t }}</span>
           <span class="accent-swatches">
             @for (color of neonColors; track color.hex; let i = $index) {
               <button
@@ -127,13 +127,13 @@
 
     <footer class="editor-footer">
       <div class="footer-tools">
-        <button type="button" class="tool-btn" title="Search Google Images" (click)="searchGoogle()">
+        <button type="button" class="tool-btn" [title]="'editor.search-google' | t" (click)="searchGoogle()">
           <span class="hci">)</span>
         </button>
       </div>
       <div class="footer-actions">
-        <button type="button" (click)="cancel()">cancel</button>
-        <button type="button" class="primary" (click)="save()">save</button>
+        <button type="button" (click)="cancel()">{{ 'editor.cancel' | t }}</button>
+        <button type="button" class="primary" (click)="save()">{{ 'editor.save' | t }}</button>
       </div>
     </footer>
   </div>
