@@ -27,7 +27,7 @@ Same content always produces the same signature. Different content always produc
 | Dependencies | Namespace service bundle | `__dependencies__/{sig}.js` |
 | Resources | Static asset (image, JSON) | `__resources__/{sig}` |
 | Layers | Layer manifest JSON | `__layers__/{sig}.json` |
-| Root release | `install.manifest.json` | Root signature in `latest.txt` |
+| Root release | `install.manifest.json` | Root signature in `latest.json` |
 | Lineage paths | UTF-8 path string | Location signature for mesh subscription |
 | History entries | Operation content | Cell identity in history bags |
 

@@ -83,7 +83,7 @@ jobs:
         if: steps.azure_creds.outputs.ready == 'true' && steps.az_login.outcome == 'success'
         run: |
           set -euo pipefail
-          SIG=$(curl -fsSL https://storagehypercomb.blob.core.windows.net/content/latest.txt | tr -d '\357\273\277' | tr -d '\r\n')
+          SIG=$(curl -fsSL https://storagehypercomb.blob.core.windows.net/content/latest.json | jq -r '.seed')
           echo "latest signature: $SIG"
           if ! echo "$SIG" | grep -Eq '^[a-f0-9]{64}$'; then
             echo "Invalid latest signature: $SIG"

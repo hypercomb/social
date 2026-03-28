@@ -39,11 +39,11 @@ const main = () => {
   // copy the root signature directory
   cpSync(srcDir, join(WEB_CONTENT, rootSig), { recursive: true })
 
-  // write latest.txt
-  writeFileSync(join(WEB_CONTENT, 'latest.txt'), rootSig, 'utf8')
+  // write latest.json
+  writeFileSync(join(WEB_CONTENT, 'latest.json'), JSON.stringify({ seed: rootSig }, null, 2), 'utf8')
 
   console.log(`[copy-to-web] copied ${rootSig} to ${WEB_CONTENT}`)
-  console.log(`[copy-to-web] latest.txt → ${rootSig}`)
+  console.log(`[copy-to-web] latest.json → ${rootSig}`)
   console.log(`[copy-to-web] done at ${new Date().toISOString()} — reload web app to pick up changes`)
 }
 

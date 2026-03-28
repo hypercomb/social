@@ -121,7 +121,7 @@ When Hypercomb deploys a new version:
 
 1. The CI pipeline builds the package and computes its signature.
 2. The signature is published to the hosting domain.
-3. The `latest.txt` pointer is updated to point to the new signature.
+3. The `latest.json` pointer is updated to point to the new signature.
 4. Third-party vetters can independently verify the build and add the signature to their safe lists.
 5. End users who trust those vetters get the update with confidence.
 

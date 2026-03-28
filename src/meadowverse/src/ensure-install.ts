@@ -43,10 +43,10 @@ export const ensureInstall = async (): Promise<void> => {
   const signature = resolveSignatureFromUrl()
     ?? await resolveLatestSignature()
   if (!signature) {
-    console.warn('[meadowverse:install] no content signature — add ?content=<sig> or ensure latest.txt is served')
+    console.warn('[meadowverse:install] no content signature — add ?content=<sig> or ensure latest.json is served')
     return
   }
-  console.log(`[meadowverse:install] active signature: ${signature} (source: ${resolveSignatureFromUrl() ? 'url' : 'latest.txt'})`)
+  console.log(`[meadowverse:install] active signature: ${signature} (source: ${resolveSignatureFromUrl() ? 'url' : 'latest.json'})`)
   const shouldInstall = await needsInstall(store, signature)
 
   if (!shouldInstall) {
@@ -137,12 +137,12 @@ const resolveSignatureFromUrl = (): string | null => {
 }
 
 const resolveLatestSignature = async (): Promise<string | null> => {
-  const local = await fetchText(`${CONTENT_BASE_URL}/latest.txt`)
-  if (local) return extractSignature(local)
+  const local = await fetchJson(`${CONTENT_BASE_URL}/latest.json`)
+  if (local) return extractSignature(local.seed)
   if (isLocalDev) {
-    console.log('[meadowverse:install] local latest.txt not found, falling back to server')
-    const remote = await fetchText(`${AZURE_CONTENT_URL}/latest.txt`)
-    return remote ? extractSignature(remote) : null
+    console.log('[meadowverse:install] local latest.json not found, falling back to server')
+    const remote = await fetchJson(`${AZURE_CONTENT_URL}/latest.json`)
+    return remote ? extractSignature(remote.seed) : null
   }
   return null
 }
@@ -151,6 +151,13 @@ const fetchText = async (url: string): Promise<string | null> => {
   try {
     const r = await fetch(url, { cache: 'no-store' })
     return r.ok ? await r.text() : null
+  } catch { return null }
+}
+
+const fetchJson = async (url: string): Promise<Record<string, unknown> | null> => {
+  try {
+    const r = await fetch(url, { cache: 'no-store' })
+    return r.ok ? await r.json() : null
   } catch { return null }
 }
 

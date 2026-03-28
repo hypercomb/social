@@ -47,7 +47,7 @@ export class TreeResolverService {
 
     await this.#store.initialize()
 
-    // fetch latest.txt to get root signature
+    // fetch latest.json to get root signature
     const rootSig = await this.#fetchLatest(base)
     if (!rootSig) return null
 
@@ -260,10 +260,11 @@ export class TreeResolverService {
 
   async #fetchLatest(base: string): Promise<string | null> {
     try {
-      const res = await fetch(`${base}/latest.txt`, { cache: 'no-store' })
+      const res = await fetch(`${base}/latest.json`, { cache: 'no-store' })
       if (!res.ok) return null
-      const text = await res.text()
-      return text.trim() || null
+      const data = await res.json()
+      const seed = (data?.seed ?? '').trim()
+      return seed || null
     } catch {
       return null
     }

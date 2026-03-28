@@ -367,10 +367,11 @@ export class SentinelHandler {
 
   async #fetchLatest(base: string): Promise<string | null> {
     try {
-      const res = await fetch(`${base}/latest.txt`, { cache: 'no-store' })
+      const res = await fetch(`${base}/latest.json`, { cache: 'no-store' })
       if (!res.ok) return null
-      const text = (await res.text()).replace(/\uFEFF/g, '').trim()
-      return /^[a-f0-9]{64}$/i.test(text) ? text.toLowerCase() : null
+      const data = await res.json()
+      const seed = ((data?.seed ?? '') as string).replace(/\uFEFF/g, '').trim()
+      return /^[a-f0-9]{64}$/i.test(seed) ? seed.toLowerCase() : null
     } catch {
       return null
     }
