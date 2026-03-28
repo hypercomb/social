@@ -18,6 +18,7 @@ import { GoParentBehavior } from './go-parent.behavior'
 import { CutPasteBehavior } from './cut-paste.behavior'
 import { HashMarkerBehavior } from './hash-marker.behavior'
 import { SlashCommandBehavior } from './slash-command.behavior'
+import { SELECT_OPS } from './select-ops'
 
 const BUILTIN_SLASH: { command: { name: string; description: string }; provider: null }[] = [
   { command: { name: 'select', description: 'select tiles for cut/copy/move' }, provider: null },
@@ -41,6 +42,25 @@ const BRACKET_CMD_RE = /^\/(select|format|fmt|fp)\[/i
 /** Normalise any bracket command to `/select[...` form for shared parsing. */
 function normalizeSelectInput(v: string): string {
   if (v.match(/^\/select\[/)) return v
+
+  // Bracket-first syntax: [items]/op... → /select[items]/op...
+  if (v.startsWith('[')) {
+    const close = v.indexOf(']')
+    if (close > 1 && v[close + 1] === '/') {
+      const afterSlash = v.slice(close + 2)
+      const nextSlash = afterSlash.indexOf('/')
+      const firstSeg = (nextSlash === -1 ? afterSlash : afterSlash.slice(0, nextSlash)).toLowerCase().replace(/\(.*$/, '')
+      if (SELECT_OPS.has(firstSeg)) {
+        const items = v.slice(1, close)
+        const tail = firstSeg === 'select'
+          ? (nextSlash === -1 ? '' : afterSlash.slice(nextSlash))
+          : '/' + afterSlash
+        return '/select[' + items + ']' + tail
+      }
+    }
+    return v
+  }
+
   const m = v.match(/^\/(format|fmt|fp)\[/i)
   if (!m) return v
   const op = m[1].toLowerCase()
@@ -52,6 +72,18 @@ function normalizeSelectInput(v: string): string {
   }
   // bracket closed: /format[abc] → /select[abc]/format
   return '/select[' + rest.slice(0, bracketClose) + ']/' + (op === 'fmt' || op === 'fp' ? 'format' : op) + rest.slice(bracketClose + 1)
+}
+
+/** Check if input is any form of select command (slash-first or bracket-first). */
+function isSelectInput(v: string): boolean {
+  if (BRACKET_CMD_RE.test(v)) return true
+  if (!v.startsWith('[')) return false
+  const close = v.indexOf(']')
+  if (close <= 1 || v[close + 1] !== '/') return false
+  const afterSlash = v.slice(close + 2)
+  const nextSlash = afterSlash.indexOf('/')
+  const firstSeg = (nextSlash === -1 ? afterSlash : afterSlash.slice(0, nextSlash)).toLowerCase().replace(/\(.*$/, '')
+  return SELECT_OPS.has(firstSeg)
 }
 
 const MOVE_ARROW_OFFSETS: Record<string, { dq: number; dr: number }> = {
@@ -309,7 +341,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     }
 
     // bracket command mode (/select[, /format[, /fmt[, /fp[) — normalise and parse
-    if (BRACKET_CMD_RE.test(v)) {
+    if (isSelectInput(v)) {
       return this.#parseSelectContext(normalizeSelectInput(v))
     }
 
@@ -739,7 +771,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   /** On focus: expand truncated /select[...] back to full names */
   readonly #onInputFocus = (): void => {
     const v = this.input.nativeElement.value
-    if (!BRACKET_CMD_RE.test(v)) return
+    if (!isSelectInput(v)) return
     const selection = get('@diamondcoreprocessor.com/SelectionService') as any
     if (!selection || selection.count === 0) return
     const full = Array.from(selection.selected as Set<string>)
@@ -986,7 +1018,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     }
 
     // bracket command execution (/select[, /format[, /fmt[, /fp[)
-    if (BRACKET_CMD_RE.test(v)) {
+    if (isSelectInput(v)) {
       this.input.nativeElement.value = normalizeSelectInput(v)
       void this.#executeSelectCommand()
       return
@@ -1822,7 +1854,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   /** Phase derived from value — computed, no signal writes */
   #selectPhase = computed<'none' | 'selection' | 'operation' | 'move-path' | 'move-target-index' | 'move-target-swap'>(() => {
     const v = this.value()
-    if (!BRACKET_CMD_RE.test(v)) return 'none'
+    if (!isSelectInput(v)) return 'none'
     return this.#deriveSelectPhase(normalizeSelectInput(v))
   })
 

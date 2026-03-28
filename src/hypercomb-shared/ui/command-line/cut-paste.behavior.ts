@@ -7,6 +7,7 @@ import type { Navigation } from '../../core/navigation'
 import { EffectBus, SignatureService, hypercomb } from '@hypercomb/core'
 import { parseArrayItems } from '../../core/array-parser'
 import { persistTagOps, type TagOp } from '../../core/tag-ops'
+import { SELECT_OPS } from './select-ops'
 
 type HistoryOp = { op: 'add' | 'remove'; seed: string; at: number }
 
@@ -45,7 +46,13 @@ export class CutPasteBehavior implements CommandLineBehavior {
   match(event: KeyboardEvent, input: string): boolean {
     if (event.key !== 'Enter' || event.shiftKey) return false
     const close = input.indexOf(']')
-    return input.startsWith('[') && close > 1 && close < input.length - 1 && input[close + 1] === '/'
+    if (!(input.startsWith('[') && close > 1 && close < input.length - 1 && input[close + 1] === '/')) return false
+    // Exclude bracket-first select syntax: [items]/move(8) is select, not cut-paste
+    const afterSlash = input.slice(close + 2)
+    const nextSlash = afterSlash.indexOf('/')
+    const firstSeg = (nextSlash === -1 ? afterSlash : afterSlash.slice(0, nextSlash)).toLowerCase().replace(/\(.*$/, '')
+    if (SELECT_OPS.has(firstSeg)) return false
+    return true
   }
 
   async execute(input: string): Promise<void> {
