@@ -37,10 +37,18 @@ export class HexLabelAtlas {
     this.renderer.render({ container: new Container(), target: this.atlas, clear: true })
 
     this.style = new TextStyle({
-      fontFamily: 'monospace',
+      fontFamily: "'SF Mono', 'Cascadia Code', 'JetBrains Mono', ui-monospace, monospace",
       fontSize: 10,
       fill: 0xffffff,
-      align: 'center'
+      align: 'center',
+      letterSpacing: 0.5,
+      dropShadow: {
+        alpha: 0.35,
+        angle: Math.PI / 2,
+        blur: 1,
+        color: 0x000000,
+        distance: 1,
+      },
     })
   }
 

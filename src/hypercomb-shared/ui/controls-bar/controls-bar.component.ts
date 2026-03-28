@@ -248,7 +248,6 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   readonly beesVisible = this.#beesVisible.asReadonly()
   readonly meetingJoined = this.#meetingJoined.asReadonly()
   readonly meetingCameraOn = this.#meetingCameraOn.asReadonly()
-
   // ── lifecycle ───────────────────────────────────────────
 
   #clipboardUnsub: (() => void) | null = null

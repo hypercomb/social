@@ -97,6 +97,18 @@ const FLASH_END    = 0.58      // brief flash
 // ── Supersampling ────────────────────────────────────────────────
 const SS = 8                   // 8× supersample — drawn once, reused; embers are trivial
 
+// ── Entry animation ─────────────────────────────────────────
+const ENTER_DURATION = 0.18    // seconds to fully appear
+const ENTER_SCALE_FROM = 0.95  // scale on first frame
+const ENTER_SCALE_TO   = 1.0
+
+// ── Ambient particle config ─────────────────────────────────
+const AMBIENT_COUNT = 2
+const AMBIENT_PERIOD = 8.0     // seconds per drift cycle
+const AMBIENT_RADIUS = 0.55    // fraction of hex radius
+const AMBIENT_ALPHA  = 0.08
+const AMBIENT_SIZE   = 1.5     // px radius
+
 export class HexOverlayMesh {
   readonly mesh: Container
 
@@ -105,9 +117,12 @@ export class HexOverlayMesh {
   #palette: NeonPalette
   #hex: Graphics       // static hex glow (drawn once)
   #ember: Graphics     // animated ember dot (redrawn per frame)
+  #ambient: Graphics   // slow-drifting interior particles
   #neonVerts: number[] = []  // cached neon edge verts for ember path
   #edgeLengths: number[] = []
   #totalPerimeter = 0
+  #enterStart = -1     // timestamp when overlay was shown (-1 = not animating)
+  #shown = false       // tracks if overlay is currently visible
 
   constructor(radiusPx: number, flat: boolean) {
     this.#radiusPx = radiusPx
@@ -120,11 +135,26 @@ export class HexOverlayMesh {
 
     this.#hex = new Graphics()
     this.#ember = new Graphics()
+    this.#ambient = new Graphics()
     this.#ember.filters = [new BlurFilter({ strength: EMBER_BLUR * SS })]
 
-    this.mesh.addChild(this.#hex, this.#ember)
+    this.mesh.addChild(this.#hex, this.#ambient, this.#ember)
 
     this.#draw()
+  }
+
+  /** Call when the overlay becomes visible (hover enters). */
+  show(t: number): void {
+    if (!this.#shown) {
+      this.#enterStart = t
+      this.#shown = true
+    }
+  }
+
+  /** Call when hover leaves. */
+  hide(): void {
+    this.#shown = false
+    this.#enterStart = -1
   }
 
   update(radiusPx: number, flat: boolean): void {
@@ -142,11 +172,30 @@ export class HexOverlayMesh {
   }
 
   setTime(t: number): void {
+    // entry animation: scale-in + fade-in
+    let enterProgress = 1.0
+    if (this.#enterStart >= 0) {
+      const elapsed = t - this.#enterStart
+      enterProgress = Math.min(elapsed / ENTER_DURATION, 1.0)
+      // ease out cubic
+      enterProgress = 1.0 - Math.pow(1.0 - enterProgress, 3)
+
+      const scale = (ENTER_SCALE_FROM + (ENTER_SCALE_TO - ENTER_SCALE_FROM) * enterProgress) / SS
+      this.mesh.scale.set(scale)
+      this.mesh.alpha = OVERLAY_ALPHA * enterProgress
+
+      if (enterProgress >= 1.0) {
+        this.mesh.scale.set(1 / SS)
+        this.mesh.alpha = OVERLAY_ALPHA
+      }
+    }
+
     // breathe: slow sine pulse on hex glow intensity
     const breathe = Math.sin((t / BREATHE_PERIOD) * Math.PI * 2) * 0.5 + 0.5
     this.#hex.alpha = BREATHE_LO + (BREATHE_HI - BREATHE_LO) * breathe
 
     this.#drawEmber(t)
+    this.#drawAmbient(t)
   }
 
   // ── hex vertex generation ──────────────────────────────────────
@@ -286,6 +335,28 @@ export class HexOverlayMesh {
         g.circle(pos.x, pos.y, (EMBER_GLOW_R + 2.0 * flash) * SS)
         g.fill({ color: spec.glow, alpha: flash * 0.20 })
       }
+    }
+  }
+
+  // ── ambient interior particles (very faint drifting dots) ──────
+
+  #drawAmbient(t: number): void {
+    const g = this.#ambient
+    g.clear()
+
+    const R = this.#radiusPx * AMBIENT_RADIUS * SS
+    const p = this.#palette
+
+    for (let i = 0; i < AMBIENT_COUNT; i++) {
+      const phase = ((t / AMBIENT_PERIOD) + i * 0.5) % 1.0
+      // Lissajous drift pattern — each particle gets a unique path
+      const angle1 = phase * Math.PI * 2
+      const angle2 = phase * Math.PI * 2 * (1.5 + i * 0.7)
+      const x = Math.sin(angle1) * R * 0.6
+      const y = Math.cos(angle2) * R * 0.4
+
+      g.circle(x, y, AMBIENT_SIZE * SS)
+      g.fill({ color: p.dim, alpha: AMBIENT_ALPHA })
     }
   }
 

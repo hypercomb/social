@@ -67,6 +67,8 @@ export class TileOverlayDrone extends Drone {
   #hexBg: HexOverlayMesh | null = null
   #seedLabel: Text | null = null
   #actions: OverlayAction[] = []
+  #animTime = 0
+  #animTickBound: ((ticker: any) => void) | null = null
   #meshOffset = { x: 0, y: 0 }
   #currentAxial: Axial | null = null
   #currentIndex: number | undefined = undefined
@@ -255,6 +257,10 @@ export class TileOverlayDrone extends Drone {
       document.removeEventListener('contextmenu', this.#onContextMenu)
       this.#listening = false
     }
+    if (this.#animTickBound && this.#app) {
+      this.#app.ticker.remove(this.#animTickBound)
+      this.#animTickBound = null
+    }
     if (this.#overlay) {
       this.#overlay.destroy({ children: true })
       this.#overlay = null
@@ -282,6 +288,17 @@ export class TileOverlayDrone extends Drone {
 
     this.#renderContainer.addChild(this.#overlay)
     this.#renderContainer.sortableChildren = true
+
+    // drive hex overlay animations (breathe, embers, ambient, entry)
+    if (this.#app && !this.#animTickBound) {
+      this.#animTickBound = (ticker: any) => {
+        this.#animTime += (ticker.deltaMS ?? 16) / 1000
+        if (this.#hexBg && this.#overlay?.visible) {
+          this.#hexBg.setTime(this.#animTime)
+        }
+      }
+      this.#app.ticker.add(this.#animTickBound)
+    }
 
     this.#rebuildActiveProfile()
   }
@@ -653,7 +670,15 @@ export class TileOverlayDrone extends Drone {
     }
 
     const occupied = this.#currentIndex !== undefined && this.#currentIndex < this.#cellCount
-    this.#overlay.visible = occupied && !this.#editing && !this.#editCooldown && !this.#hasSelection && !this.#touchDragging
+    const shouldShow = occupied && !this.#editing && !this.#editCooldown && !this.#hasSelection && !this.#touchDragging
+    this.#overlay.visible = shouldShow
+
+    // trigger entry animation on show transition
+    if (shouldShow && this.#hexBg) {
+      this.#hexBg.show(this.#animTime)
+    } else if (!shouldShow && this.#hexBg) {
+      this.#hexBg.hide()
+    }
   }
 
   #positionOverlay(q: number, r: number): void {

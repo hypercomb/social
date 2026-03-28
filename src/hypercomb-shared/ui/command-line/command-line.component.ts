@@ -10,6 +10,7 @@ import type { CompletionUtility, CompletionContext } from '@hypercomb/shared/cor
 import { fromRuntime } from '../../core/from-runtime'
 import { readTagProps, writeTagProps, persistTagOps, type TagOp } from '../../core/tag-ops'
 import { EffectBus, hypercomb } from '@hypercomb/core'
+import { VoiceInputService } from '../../core/voice-input.service'
 import type { CommandLineBehavior, CommandLineBehaviorMeta, CommandLineOperation } from './command-line-behavior'
 import { ShiftEnterNavigateBehavior } from './shift-enter-navigate.behavior'
 import { BatchCreateBehavior } from './batch-create.behavior'
@@ -757,15 +758,40 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         this.#syncDirection = 'idle'
       }
     })
+
+    // voice input: live interim preview while speaking
+    this.#voiceInterimUnsub = EffectBus.on<{ text: string }>('voice:interim', ({ text }) => {
+      this.input.nativeElement.value = text
+      this.suppressed.set(false)
+      this.syncSignalsFromDom()
+    })
+
+    // voice input: auto-submit on release (push-to-talk complete)
+    this.#voiceSubmitUnsub = EffectBus.on<{ text: string }>('voice:submit', ({ text }) => {
+      this.input.nativeElement.value = text
+      this.suppressed.set(false)
+      this.syncSignalsFromDom()
+      void this.#preprocessTagsThenExecute(text)
+    })
+
+    // voice active state sync (for mic button visual)
+    this.#voiceActiveUnsub = EffectBus.on<{ active: boolean }>('voice:active', ({ active }) => {
+      this.voiceActive.set(active)
+    })
   }
 
   readonly touchDragging = signal(false)
   readonly viewActive = signal(false)
+  readonly voiceActive = signal(false)
+  readonly voiceSupported = VoiceInputService.supported()
+  #voiceActiveUnsub?: () => void
   #prefillUnsub?: () => void
   #commandLineToggleUnsub?: () => void
   #touchDraggingUnsub?: () => void
   #viewActiveUnsub?: () => void
   #selectionSyncUnsub?: () => void
+  #voiceInterimUnsub?: () => void
+  #voiceSubmitUnsub?: () => void
   readonly #onNavigate = (): void => { this.clear() }
 
   /** On focus: expand truncated /select[...] back to full names */
@@ -785,12 +811,30 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.#syncDirection = 'idle'
   }
 
+  // ── voice input (push-to-hold mic button) ────────────
+
+  private get voiceService(): VoiceInputService | undefined {
+    return get('@hypercomb.social/VoiceInputService') as VoiceInputService | undefined
+  }
+
+  readonly startVoice = (event: PointerEvent): void => {
+    ;(event.target as HTMLElement)?.setPointerCapture?.(event.pointerId)
+    this.voiceService?.start()
+  }
+
+  readonly stopVoice = (): void => {
+    this.voiceService?.stop()
+  }
+
   public ngOnDestroy(): void {
     this.#prefillUnsub?.()
     this.#commandLineToggleUnsub?.()
     this.#touchDraggingUnsub?.()
     this.#viewActiveUnsub?.()
     this.#selectionSyncUnsub?.()
+    this.#voiceInterimUnsub?.()
+    this.#voiceSubmitUnsub?.()
+    this.#voiceActiveUnsub?.()
     window.removeEventListener('navigate', this.#onNavigate)
     window.removeEventListener('popstate', this.#onNavigate)
     this.input.nativeElement.removeEventListener('focus', this.#onInputFocus)

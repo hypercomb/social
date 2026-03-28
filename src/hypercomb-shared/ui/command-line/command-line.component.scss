@@ -115,6 +115,53 @@
   color: rgba(var(--glow-color-rgb), 0.3);
 }
 
+// ── mic button (right side of input) ──────────────────
+
+.mic-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  margin-right: 0.25rem;
+  padding: 0;
+
+  background: none;
+  border: 1px solid rgba(var(--glow-color-rgb), 0.15);
+  border-radius: 50%;
+  color: rgba(200, 200, 200, 0.5);
+  cursor: pointer;
+  user-select: none;
+  touch-action: none;
+  transition: color 200ms ease, border-color 200ms ease, background 200ms ease;
+
+  &:hover {
+    color: rgba(200, 200, 200, 0.8);
+    border-color: rgba(var(--glow-color-rgb), 0.3);
+  }
+
+  &.recording {
+    color: #ff4444;
+    border-color: rgba(255, 68, 68, 0.5);
+    background: rgba(255, 68, 68, 0.08);
+
+    .mic-dot {
+      animation: mic-pulse 1.2s ease-in-out infinite;
+    }
+  }
+}
+
+.mic-dot {
+  font-size: 10px;
+  line-height: 1;
+}
+
+@keyframes mic-pulse {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.2); }
+}
+
 .command-results {
   position: absolute;
   left: 0;

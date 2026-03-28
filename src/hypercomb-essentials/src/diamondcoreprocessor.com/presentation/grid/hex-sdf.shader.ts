@@ -140,6 +140,9 @@ export class HexSdfTextureShader {
     uniform sampler2D u_label;
     uniform sampler2D u_cellImages;
 
+    // ── light direction (top-left, 10 o'clock) ──────────────
+    const vec2 LIGHT_DIR = normalize(vec2(-0.5, -0.866));
+
     float sdHex(vec2 p, float r) {
       p = abs(p);
       return max(p.x * 0.8660254 + p.y * 0.5, p.y) - r;
@@ -163,6 +166,14 @@ export class HexSdfTextureShader {
       float hexAlpha = 1.0 - smoothstep(-aa, aa, d);
       if (hexAlpha < 0.005) discard;
 
+      // normalized distance from center (0 at center, 1 at edge)
+      float dist = length(local) / u_radiusPx;
+
+      // bevel: directional lighting based on surface normal at edge
+      vec2 edgeNormal = normalize(rotated);
+      float bevelDot = dot(edgeNormal, LIGHT_DIR);
+      float edgeProximity = 1.0 - smoothstep(0.0, -aa * 4.0, d);
+
       vec4 base;
 
       if (vHasImage > 0.5) {
@@ -178,22 +189,42 @@ export class HexSdfTextureShader {
         vec2 imgUV = mix(vImageUV.xy, vImageUV.zw, hexUV);
         base = texture2D(u_cellImages, imgUV);
 
-        // border ring on image cells — flush with hex edge, DPI-aware width
-        float imgRing = 1.0 - smoothstep(0.0, aa * 2.0, abs(d));
-        base.rgb = mix(base.rgb, vBorderColor, imgRing * 0.4);
+        // vignette: darken image edges so snapshots blend into border
+        float vignette = smoothstep(0.5, 1.0, dist);
+        base.rgb *= 1.0 - vignette * 0.45;
+
+        // outer border ring — crisp bright line
+        float outerRing = 1.0 - smoothstep(0.0, aa * 1.2, abs(d));
+        base.rgb = mix(base.rgb, vBorderColor, outerRing * 0.6);
+
+        // inner glow border — wider, softer
+        float innerGlow = 1.0 - smoothstep(0.0, aa * 3.5, abs(d + aa * 1.5));
+        base.rgb = mix(base.rgb, vBorderColor, innerGlow * 0.12);
       } else {
-        // no snapshot: dark fill + border ring (branch-indicator style)
-        vec3 bgColor = vec3(0.04, 0.10, 0.16);
+        // radial gradient fill: lighter center → darker edges (depth illusion)
+        vec3 bgCenter = vec3(0.06, 0.14, 0.22);
+        vec3 bgEdge   = vec3(0.03, 0.08, 0.13);
+        vec3 bgColor  = mix(bgCenter, bgEdge, smoothstep(0.0, 1.0, dist));
         base = vec4(bgColor, 1.0);
 
-        // border ring — flush with hex edge, DPI-aware width
-        float ring = 1.0 - smoothstep(0.0, aa * 2.0, abs(d));
-        base.rgb = mix(base.rgb, vBorderColor, ring * 0.5);
+        // outer border ring — crisp bright line
+        float outerRing = 1.0 - smoothstep(0.0, aa * 1.2, abs(d));
+        base.rgb = mix(base.rgb, vBorderColor, outerRing * 0.6);
+
+        // inner glow border — wider, softer, identity-tinted
+        float innerGlow = 1.0 - smoothstep(0.0, aa * 3.5, abs(d + aa * 1.5));
+        base.rgb = mix(base.rgb, vBorderColor, innerGlow * 0.15);
 
         // subtle identity wash on cell interior
         float innerMask = smoothstep(0.0, -2.0, d);
-        base.rgb = mix(base.rgb, vIdentityColor, innerMask * 0.05);
+        base.rgb = mix(base.rgb, vIdentityColor, innerMask * 0.06);
       }
+
+      // bevel highlight (top-left light) and shadow (bottom-right)
+      float highlightStrength = max(bevelDot, 0.0) * edgeProximity * 0.06;
+      float shadowStrength = max(-bevelDot, 0.0) * edgeProximity * 0.08;
+      base.rgb += vec3(1.0) * highlightStrength;
+      base.rgb -= vec3(1.0) * shadowStrength;
 
       vec4 color = base;
 
@@ -212,15 +243,27 @@ export class HexSdfTextureShader {
         color.rgb = mix(color.rgb, heatTint, heatRing * heatAlpha);
       }
 
-      // branch indicator: hex ring at edge + subtle portal glow
+      // branch indicator: identity-tinted ring + chevron hint + portal glow
       if (vHasBranch > 0.5) {
-        float branchRing = 1.0 - smoothstep(0.0, aa * 3.0, abs(d));
-        vec3 ringColor = vec3(0.55, 0.55, 0.55);
-        color.rgb = mix(color.rgb, ringColor, branchRing * 0.45);
+        vec3 branchColor = mix(vec3(0.55), vIdentityColor, 0.35);
 
-        float dist = length(local) / u_radiusPx;
+        // refined ring at edge
+        float branchRing = 1.0 - smoothstep(0.0, aa * 3.0, abs(d));
+        color.rgb = mix(color.rgb, branchColor, branchRing * 0.4);
+
+        // chevron hint at bottom of hex: small downward arrow
+        // use local coords — bottom is positive Y
+        float chevronY = local.y / u_radiusPx - 0.55;
+        float chevronX = abs(local.x / u_radiusPx);
+        float chevronLine = abs(chevronY + chevronX * 0.6 - 0.12);
+        float chevronMask = smoothstep(0.06, 0.02, chevronLine)
+                          * step(chevronX, 0.22)
+                          * step(0.0, chevronY + 0.08);
+        color.rgb = mix(color.rgb, branchColor, chevronMask * 0.25);
+
+        // subtle center glow
         float glow = exp(-dist * dist * 2.2);
-        color.rgb += ringColor * glow * 0.10;
+        color.rgb += branchColor * glow * 0.12;
       }
 
       // divergence overlay: 1 = future-add (ghost), 2 = future-remove (marked)
