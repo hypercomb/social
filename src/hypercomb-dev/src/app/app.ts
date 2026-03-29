@@ -75,6 +75,7 @@ import { LanguageQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com
 import { NeonQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/neon.queen'
 import { NeonToolbarDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/presentation/tiles/neon-toolbar.drone'
 import { LayoutQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/move/layout.queen'
+import { ArrangeQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/arrange.queen'
 import { TileLinkActionDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/link/tile-link-action.drone'
 
 const _deps = [
@@ -130,6 +131,7 @@ const _deps = [
   NeonQueenBee,
   NeonToolbarDrone,
   LayoutQueenBee,
+  ArrangeQueenBee,
   TileLinkActionDrone,
 ]
 

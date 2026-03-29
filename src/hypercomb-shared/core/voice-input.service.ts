@@ -1,18 +1,16 @@
 // hypercomb-shared/core/voice-input.service.ts
-// Push-to-hold speech recognition via Web Speech API.
+// Speech recognition via Web Speech API.
 // Emits EffectBus events: voice:interim, voice:final, voice:active, voice:error
+// Activated via /voice slash command, mic button in controls bar, or mic button in command line.
 
 import { EffectBus } from '@hypercomb/core'
-
-type SpeechRecognitionType = typeof window extends { SpeechRecognition: infer T } ? T : any
 
 export class VoiceInputService extends EventTarget {
 
   #recognition: any = null
   #active = false
   #finalText = ''
-  #wantActive = false  // true while user is holding the button
-  #keyHeld = false     // true while B key is physically held
+  #wantActive = false
 
   static supported(): boolean {
     return !!(
@@ -23,34 +21,13 @@ export class VoiceInputService extends EventTarget {
 
   get active(): boolean { return this.#active }
 
-  /** Attach hold-B keyboard listeners for push-to-talk. Works everywhere including input fields. */
-  attachKeyboard(): void {
-    if (!VoiceInputService.supported()) return
-    document.addEventListener('keydown', this.#onKeyDown, true)
-    document.addEventListener('keyup', this.#onKeyUp, true)
-  }
-
-  detachKeyboard(): void {
-    document.removeEventListener('keydown', this.#onKeyDown, true)
-    document.removeEventListener('keyup', this.#onKeyUp, true)
-  }
-
-  #onKeyDown = (e: KeyboardEvent): void => {
-    if (e.key !== 'b' && e.key !== 'B') return
-    if (e.repeat) return
-    if (e.ctrlKey || e.metaKey || e.altKey) return
-
-    e.preventDefault()
-    this.#keyHeld = true
-    this.start()
-  }
-
-  #onKeyUp = (e: KeyboardEvent): void => {
-    if (e.key !== 'b' && e.key !== 'B') return
-    if (!this.#keyHeld) return
-
-    this.#keyHeld = false
-    this.stop()
+  /** Toggle voice input on/off. */
+  toggle(): void {
+    if (this.#active) {
+      this.stop()
+    } else {
+      this.start()
+    }
   }
 
   start(): void {
@@ -158,5 +135,4 @@ export class VoiceInputService extends EventTarget {
 }
 
 const _voiceInput = new VoiceInputService()
-_voiceInput.attachKeyboard()
 window.ioc.register('@hypercomb.social/VoiceInputService', _voiceInput)

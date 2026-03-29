@@ -1,10 +1,9 @@
 // diamondcoreprocessor.com/pixi/tile-actions.drone.ts
 import { Drone, EffectBus, hypercomb, normalizeSeed } from '@hypercomb/core'
-import type { OverlayActionDescriptor, OverlayTileContext } from './tile-overlay.drone.js'
+import type { OverlayActionDescriptor, OverlayTileContext, OverlayProfileKey } from './tile-overlay.drone.js'
+import { readSeedProperties, writeSeedProperties } from '../../editor/tile-properties.js'
 
 // ── SVG icon markup ────────────────────────────────────────────────
-// Path data from icon-tray.svg — each icon is a compound path (rounded-rect shell + icon cutout, evenodd fill).
-// viewBox crops tightly to the icon's bounding box; rasterised at 48×48 for crisp display at small Pixi sizes.
 
 const HIDE_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96"><path fill="white" d="M48 28c-18 0-33 12-40 20 3.5 4 8.2 8.5 14 12l5.5-5.5C23 51 20 48 20 48s12-14 28-14c3 0 5.8.6 8.4 1.6l6-6C57.8 27 53 28 48 28zm0 40c18 0 33-12 40-20-3.5-4-8.2-8.5-14-12l-5.5 5.5C73 45 76 48 76 48S64 62 48 62c-3 0-5.8-.6-8.4-1.6l-6 6C38.2 69 43 68 48 68z"/><circle fill="white" cx="48" cy="48" r="10"/><rect fill="white" x="46" y="16" width="4" height="64" rx="2" transform="rotate(-45 48 48)"/></svg>`
 
@@ -12,45 +11,59 @@ const BLOCK_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 
 
 const ADD_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96"><path fill="white" d="M50 18h-4v28H18v4h28v28h4V50h28v-4H50z"/></svg>`
 
-
 const SEARCH_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 15.1 15.1" width="96" height="96"><path fill="white" fill-rule="evenodd" d="M 2.8298014 0 C 2.0535814 0 1.3853227 0.28019878 0.82527262 0.84025879 C 0.27504258 1.3904888 1.566648e-16 2.0535915 0 2.8298014 L 0 12.262301 C 0 13.038511 0.27504258 13.706769 0.82527262 14.266829 C 1.3853227 14.817049 2.0535814 15.092102 2.8298014 15.092102 L 12.262301 15.092102 C 13.038521 15.092102 13.701603 14.817049 14.251843 14.266829 C 14.811893 13.706769 15.092102 13.038511 15.092102 12.262301 L 15.092102 7.5457926 L 15.092102 2.8298014 C 15.092102 2.0535915 14.811893 1.3904888 14.251843 0.84025879 C 13.701603 0.28019878 13.038521 7.8332402e-17 12.262301 0 L 2.8298014 0 z M 3.319694 3.5077962 C 3.5118105 3.5046951 3.7067928 3.5434545 3.8943359 3.6261353 C 4.2137567 3.7669554 4.944518 4.3190538 5.5557332 4.8813558 C 6.2614729 5.5306175 7.1542248 6.6726222 7.3070475 7.1220459 C 7.3884558 7.3614603 7.3888166 7.6958551 7.3080811 7.9493856 C 7.1958204 8.3019157 6.6316395 9.0778904 5.9495076 9.8185221 C 5.3889302 10.427175 4.3753569 11.239887 3.8803833 11.477336 C 3.693628 11.566927 3.6539908 11.575272 3.3863566 11.583272 C 2.9356228 11.596609 2.7023992 11.510162 2.3931356 11.215853 C 1.9647425 10.808173 1.856547 10.117053 2.1430216 9.6175008 C 2.2752388 9.3869412 2.402257 9.2624528 2.7300659 9.0402751 C 2.9100569 8.918283 3.1769104 8.7222221 3.3233114 8.6051595 C 3.5800197 8.3998964 4.2840211 7.6999139 4.3413371 7.5928182 C 4.3651233 7.5483733 4.3292908 7.4972618 4.102592 7.2491699 C 3.7142112 6.8241389 3.207673 6.3941377 2.668571 6.0321899 C 2.3097797 5.7913004 2.1232913 5.5343147 2.0226156 5.141805 C 1.9114818 4.7085268 2.0788761 4.1912971 2.436027 3.8648804 C 2.6878883 3.6346939 2.9994998 3.5129647 3.319694 3.5077962 z M 10.210746 9.5410197 C 12.177422 9.5322323 12.305877 9.539367 12.586829 9.6702108 C 12.988418 9.8572346 13.187864 10.268004 13.080339 10.68772 C 13.002739 10.990623 12.816096 11.193262 12.496395 11.322306 L 12.337748 11.386385 L 10.39058 11.391553 C 8.2140054 11.397096 8.2237479 11.397809 7.9514526 11.213269 C 7.6536494 11.011442 7.5323973 10.758912 7.5597453 10.397298 C 7.5892645 10.00698 7.7913159 9.7649324 8.2150024 9.6118164 C 8.3883187 9.5491824 8.3911151 9.5491497 10.210746 9.5410197 z"/></svg>`
 
-const REMOVE_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96"><rect fill="white" x="24" y="28" width="48" height="52" rx="4"/><path fill="white" d="M20 24h56a4 4 0 010 8H20a4 4 0 010-8z"/><path fill="white" d="M36 16h24a4 4 0 014 4v4H32v-4a4 4 0 014-4z"/><rect fill="white" x="36" y="38" width="6" height="32" rx="3" opacity=".5"/><rect fill="white" x="45" y="38" width="6" height="32" rx="3" opacity=".5"/><rect fill="white" x="54" y="38" width="6" height="32" rx="3" opacity=".5"/></svg>`
+// ── Icon registry (identity only — no positions) ──────────────────
 
-const EYE_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96"><path fill="white" d="M48 28c-18 0-33 12-40 20 7 8 22 20 40 20s33-12 40-20c-7-8-22-20-40-20zm0 32c-6.6 0-12-5.4-12-12s5.4-12 12-12 12 5.4 12 12-5.4 12-12 12z"/><circle fill="white" cx="48" cy="48" r="6"/></svg>`
+export type IconRegistryEntry = {
+  name: string
+  svgMarkup?: string
+  fontChar?: string
+  iconSize?: number
+  hoverTint?: number
+  profile: OverlayProfileKey
+  visibleWhen?: (ctx: OverlayTileContext) => boolean
+}
 
-// ── Icon positions ─────────────────────────────────────────────────
-// Hex circumRadius=32 (pointy-top). At ICON_Y the hex half-width is ~27.7px.
-// Icons are 8.75px wide (default). Five slots spaced 10px apart keep
-// everything inside the hex boundary: leftmost edge −24, rightmost edge 24.75.
-const ICON_Y = 5
-const ICON_X_0 = -24   // slot 0 (leftmost)
-const ICON_STEP = 10    // left-edge-to-left-edge spacing
-
-const ACTIONS: OverlayActionDescriptor[] = [
-  // ── private profile (5 slots: 0–4, slots 3–4 conditional) ──
-  { name: 'add-sub',    fontChar: '~', x: ICON_X_0,                  y: ICON_Y, hoverTint: 0xa8ffd8, profile: 'private' },
-  { name: 'edit',       fontChar: '2', x: ICON_X_0 + ICON_STEP,      y: ICON_Y, hoverTint: 0xc8d8ff, profile: 'private' },
-  { name: 'remove',     fontChar: 'Q', x: ICON_X_0 + ICON_STEP * 2,  y: ICON_Y, hoverTint: 0xffc8c8, profile: 'private' },
-  { name: 'toggle-text', fontChar: 'J', x: ICON_X_0 + ICON_STEP * 3, y: ICON_Y, hoverTint: 0xfff0c8, profile: 'private' },
-  {
-    name: 'search',
-    svgMarkup: SEARCH_ICON_SVG,
-    x: ICON_X_0 + ICON_STEP * 4, y: ICON_Y,
-    hoverTint: 0xc8ffc8,
-    profile: 'private',
-    visibleWhen: (ctx: OverlayTileContext) => ctx.noImage,
-  },
-  { name: 'toggle-visibility', svgMarkup: EYE_ICON_SVG, x: ICON_X_0 + ICON_STEP * 4, y: ICON_Y, hoverTint: 0xc8e8ff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => !ctx.noImage },
+const ICON_REGISTRY: IconRegistryEntry[] = [
+  // ── private profile ──
+  { name: 'add-sub', fontChar: '~', hoverTint: 0xa8ffd8, profile: 'private' },
+  { name: 'edit', fontChar: '2', hoverTint: 0xc8d8ff, profile: 'private' },
+  { name: 'search', svgMarkup: SEARCH_ICON_SVG, hoverTint: 0xc8ffc8, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.noImage },
   // ── public-own profile ──
-  { name: 'hide', svgMarkup: HIDE_ICON_SVG, x: ICON_X_0 + ICON_STEP * 2, y: ICON_Y, hoverTint: 0xffd8a8, profile: 'public-own' },
+  { name: 'hide', svgMarkup: HIDE_ICON_SVG, hoverTint: 0xffd8a8, profile: 'public-own' },
   // ── public-external profile ──
-  { name: 'adopt', svgMarkup: ADD_ICON_SVG, x: ICON_X_0 + ICON_STEP * 2, y: ICON_Y, hoverTint: 0xa8ffd8, profile: 'public-external' },
-  { name: 'block', svgMarkup: BLOCK_ICON_SVG, x: ICON_X_0 + ICON_STEP, y: ICON_Y, hoverTint: 0xffc8c8, profile: 'public-external' },
+  { name: 'adopt', svgMarkup: ADD_ICON_SVG, hoverTint: 0xa8ffd8, profile: 'public-external' },
+  { name: 'block', svgMarkup: BLOCK_ICON_SVG, hoverTint: 0xffc8c8, profile: 'public-external' },
 ]
 
-// ── Action names this bee handles ──────────────────────────────────
-const HANDLED_ACTIONS = new Set(['edit', 'search', 'add-sub', 'hide', 'adopt', 'block', 'toggle-text', 'toggle-visibility'])
+// Default active icons per profile (defines the fallback order)
+const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
+  'private': ['add-sub', 'edit', 'search'],
+  'public-own': ['hide'],
+  'public-external': ['adopt', 'block'],
+}
+
+// ── Position computation ──────────────────────────────────────────
+
+const ICON_Y = 5
+const ICON_SPACING = 12
+
+function computeIconPositions(activeNames: string[]): { x: number; y: number }[] {
+  const count = activeNames.length
+  if (count === 0) return []
+  const startX = -(count - 1) * ICON_SPACING / 2
+  return activeNames.map((_, i) => ({ x: startX + i * ICON_SPACING, y: ICON_Y }))
+}
+
+// ── Persistence key in root properties ────────────────────────────
+
+const ARRANGEMENT_KEY = 'iconArrangement'
+
+type IconArrangement = Partial<Record<OverlayProfileKey, string[]>>
+
+// ── Action names this bee handles ─────────────────────────────────
+const HANDLED_ACTIONS = new Set(['edit', 'search', 'add-sub', 'hide', 'adopt', 'block'])
 
 type TileActionPayload = { action: string; label: string; q: number; r: number; index: number }
 
@@ -62,11 +75,12 @@ export class TileActionsDrone extends Drone {
     lineage: '@hypercomb.social/Lineage',
   }
 
-  protected override listens = ['render:host-ready', 'tile:action']
-  protected override emits = ['overlay:register-action', 'search:prefill', 'tile:hidden', 'tile:blocked', 'tile:toggle-text']
+  protected override listens = ['render:host-ready', 'tile:action', 'overlay:icons-reordered', 'overlay:arrange-mode']
+  protected override emits = ['overlay:register-action', 'overlay:pool-icons', 'search:prefill', 'tile:hidden', 'tile:blocked']
 
   #registered = false
   #effectsRegistered = false
+  #arrangement: IconArrangement = {}
 
   protected override heartbeat = async (): Promise<void> => {
     if (!this.#effectsRegistered) {
@@ -76,7 +90,7 @@ export class TileActionsDrone extends Drone {
       this.onEffect('render:host-ready', () => {
         if (this.#registered) return
         this.#registered = true
-        this.emitEffect('overlay:register-action', ACTIONS)
+        void this.#loadArrangementAndRegister()
       })
 
       // Handle clicks on our own actions
@@ -84,8 +98,150 @@ export class TileActionsDrone extends Drone {
         if (!HANDLED_ACTIONS.has(payload.action)) return
         this.#handleAction(payload)
       })
+
+      // Handle icon reorder from arrange mode
+      this.onEffect<{ profile: OverlayProfileKey; order: string[] }>('overlay:icons-reordered', (payload) => {
+        this.#arrangement[payload.profile] = payload.order
+        void this.#persistArrangement()
+        this.#registerProfileIcons(payload.profile)
+      })
     }
   }
+
+  // ── Arrangement loading & registration ──────────────────────────
+
+  async #loadArrangementAndRegister(): Promise<void> {
+    // Load saved arrangement from root properties
+    try {
+      const lineage = this.resolve<{ explorerDir(): Promise<FileSystemDirectoryHandle | null> }>('lineage')
+      const rootDir = await this.#getRootDir(lineage)
+      if (rootDir) {
+        const props = await readSeedProperties(rootDir)
+        const saved = props[ARRANGEMENT_KEY] as IconArrangement | undefined
+        if (saved && typeof saved === 'object') {
+          this.#arrangement = saved
+        }
+      }
+    } catch {
+      // fallback to defaults — no saved arrangement
+    }
+
+    // Register icons for all profiles
+    const descriptors = this.#buildAllDescriptors()
+    this.emitEffect('overlay:register-action', descriptors)
+
+    // Emit pool info for arrange mode
+    this.#emitPoolIcons()
+  }
+
+  #buildAllDescriptors(): OverlayActionDescriptor[] {
+    const descriptors: OverlayActionDescriptor[] = []
+
+    for (const profile of ['private', 'public-own', 'public-external'] as OverlayProfileKey[]) {
+      const activeNames = this.#getActiveNames(profile)
+      const positions = computeIconPositions(activeNames)
+
+      for (let i = 0; i < activeNames.length; i++) {
+        const entry = ICON_REGISTRY.find(e => e.name === activeNames[i] && e.profile === profile)
+        if (!entry) continue
+
+        descriptors.push({
+          name: entry.name,
+          svgMarkup: entry.svgMarkup,
+          fontChar: entry.fontChar,
+          iconSize: entry.iconSize,
+          hoverTint: entry.hoverTint,
+          profile: entry.profile,
+          visibleWhen: entry.visibleWhen,
+          x: positions[i].x,
+          y: positions[i].y,
+        })
+      }
+    }
+
+    return descriptors
+  }
+
+  #registerProfileIcons(profile: OverlayProfileKey): void {
+    // Unregister existing icons for this profile
+    const profileEntries = ICON_REGISTRY.filter(e => e.profile === profile)
+    for (const entry of profileEntries) {
+      EffectBus.emit('overlay:unregister-action', { name: entry.name })
+    }
+
+    // Re-register with new positions
+    const activeNames = this.#getActiveNames(profile)
+    const positions = computeIconPositions(activeNames)
+    const descriptors: OverlayActionDescriptor[] = []
+
+    for (let i = 0; i < activeNames.length; i++) {
+      const entry = ICON_REGISTRY.find(e => e.name === activeNames[i] && e.profile === profile)
+      if (!entry) continue
+
+      descriptors.push({
+        name: entry.name,
+        svgMarkup: entry.svgMarkup,
+        fontChar: entry.fontChar,
+        iconSize: entry.iconSize,
+        hoverTint: entry.hoverTint,
+        profile: entry.profile,
+        visibleWhen: entry.visibleWhen,
+        x: positions[i].x,
+        y: positions[i].y,
+      })
+    }
+
+    if (descriptors.length > 0) {
+      this.emitEffect('overlay:register-action', descriptors)
+    }
+
+    // Update pool
+    this.#emitPoolIcons()
+  }
+
+  #getActiveNames(profile: OverlayProfileKey): string[] {
+    const saved = this.#arrangement[profile]
+    if (saved && saved.length > 0) {
+      // Filter out names that no longer exist in the registry for this profile
+      const available = new Set(ICON_REGISTRY.filter(e => e.profile === profile).map(e => e.name))
+      return saved.filter(n => available.has(n))
+    }
+    return [...DEFAULT_ACTIVE[profile]]
+  }
+
+  #emitPoolIcons(): void {
+    // For each profile, compute which icons are NOT active (the pool)
+    const pool: Record<string, IconRegistryEntry[]> = {}
+    for (const profile of ['private', 'public-own', 'public-external'] as OverlayProfileKey[]) {
+      const activeNames = new Set(this.#getActiveNames(profile))
+      pool[profile] = ICON_REGISTRY
+        .filter(e => e.profile === profile && !activeNames.has(e.name))
+    }
+    EffectBus.emit('overlay:pool-icons', { pool, registry: ICON_REGISTRY })
+  }
+
+  // ── Persistence ─────────────────────────────────────────────────
+
+  async #persistArrangement(): Promise<void> {
+    try {
+      const lineage = this.resolve<{ explorerDir(): Promise<FileSystemDirectoryHandle | null> }>('lineage')
+      const rootDir = await this.#getRootDir(lineage)
+      if (rootDir) {
+        await writeSeedProperties(rootDir, { [ARRANGEMENT_KEY]: this.#arrangement })
+      }
+    } catch {
+      // persistence failure — silently ignore
+    }
+  }
+
+  async #getRootDir(lineage: { explorerDir(): Promise<FileSystemDirectoryHandle | null> } | null | undefined): Promise<FileSystemDirectoryHandle | null> {
+    if (!lineage) return null
+    // Access the Store directly to get hypercombRoot (the domain root)
+    const store = get('@hypercomb.social/Store') as { hypercombRoot: FileSystemDirectoryHandle } | undefined
+    return store?.hypercombRoot ?? null
+  }
+
+  // ── Action handlers ─────────────────────────────────────────────
 
   #handleAction(payload: TileActionPayload): void {
     const { action, label: rawLabel } = payload
@@ -104,10 +260,6 @@ export class TileActionsDrone extends Drone {
         EffectBus.emit('search:prefill', { value: label + '/' })
         break
 
-      case 'remove':
-        EffectBus.emit('seed:removed', { seed: label })
-        break
-
       case 'hide':
         this.#hideOrBlock(label, 'hc:hidden-tiles', 'tile:hidden')
         break
@@ -119,31 +271,7 @@ export class TileActionsDrone extends Drone {
       case 'block':
         this.#hideOrBlock(label, 'hc:blocked-tiles', 'tile:blocked')
         break
-
-      case 'toggle-text':
-        EffectBus.emit('tile:toggle-text', {})
-        break
-
-      case 'toggle-visibility':
-        this.#toggleHidden(label)
-        break
     }
-  }
-
-  #toggleHidden(label: string): void {
-    const lineage = this.resolve<{ explorerLabel(): string }>('lineage')
-    const location = lineage?.explorerLabel() ?? '/'
-    const key = `hc:hidden-tiles:${location}`
-    const existing: string[] = JSON.parse(localStorage.getItem(key) ?? '[]')
-    const idx = existing.indexOf(label)
-    if (idx >= 0) {
-      existing.splice(idx, 1)
-    } else {
-      existing.push(label)
-    }
-    localStorage.setItem(key, JSON.stringify(existing))
-    EffectBus.emit('tile:hidden', { seed: label, location })
-    void new hypercomb().act()
   }
 
   #hideOrBlock(label: string, storagePrefix: string, effect: string): void {
@@ -157,6 +285,11 @@ export class TileActionsDrone extends Drone {
     void new hypercomb().act()
   }
 }
+
+// ── Exports for overlay arrange mode ──────────────────────────────
+
+export { ICON_REGISTRY, DEFAULT_ACTIVE, ICON_SPACING, ICON_Y, computeIconPositions }
+export type { IconArrangement }
 
 const _tileActions = new TileActionsDrone()
 window.ioc.register('@diamondcoreprocessor.com/TileActionsDrone', _tileActions)

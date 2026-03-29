@@ -286,6 +286,32 @@ class LanguageProvider implements SlashCommandProvider {
   }
 }
 
+class ArrangeProvider implements SlashCommandProvider {
+  readonly name = 'arrange-provider'
+  readonly priority = 100
+  readonly commands: SlashCommand[] = [
+    { name: 'arrange', description: 'Toggle icon arrangement mode on the tile overlay', descriptionKey: 'slash.arrange' }
+  ]
+
+  async execute(): Promise<void> {
+    const queen = get('@diamondcoreprocessor.com/ArrangeQueenBee') as any
+    if (queen?.invoke) await queen.invoke('')
+  }
+}
+
+class VoiceProvider implements SlashCommandProvider {
+  readonly name = 'voice-provider'
+  readonly priority = 100
+  readonly commands: SlashCommand[] = [
+    { name: 'voice', description: 'Toggle voice input (speech-to-text)', descriptionKey: 'slash.voice' }
+  ]
+
+  async execute(): Promise<void> {
+    const svc = get('@hypercomb.social/VoiceInputService') as { toggle?: () => void } | undefined
+    svc?.toggle?.()
+  }
+}
+
 // ── registration ────────────────────────────────────────
 
 const _slashCommands = new SlashCommandDrone()
@@ -304,4 +330,6 @@ _slashCommands.addProvider(new ExpandProvider())
 _slashCommands.addProvider(new ChatProvider())
 _slashCommands.addProvider(new LlmProvider())
 _slashCommands.addProvider(new LanguageProvider())
+_slashCommands.addProvider(new ArrangeProvider())
+_slashCommands.addProvider(new VoiceProvider())
 window.ioc.register('@diamondcoreprocessor.com/SlashCommandDrone', _slashCommands)

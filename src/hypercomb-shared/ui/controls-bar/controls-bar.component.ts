@@ -18,6 +18,7 @@ import type { MovementService } from '../../core/movement.service'
 import { EffectBus, SignatureService } from '@hypercomb/core'
 import type { RoomStore } from '../../core/room-store'
 import type { SecretStore } from '../../core/secret-store'
+import { VoiceInputService } from '../../core/voice-input.service'
 import { secretTag } from './secret-words'
 
 @Component({
@@ -252,6 +253,8 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   readonly meetingJoined = this.#meetingJoined.asReadonly()
   readonly meetingCameraOn = this.#meetingCameraOn.asReadonly()
   readonly microphoneOn = this.#microphoneOn.asReadonly()
+  readonly voiceActive = signal(false)
+  readonly voiceSupported = VoiceInputService.supported()
 
   // ── lifecycle ───────────────────────────────────────────
 
@@ -261,6 +264,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #beesUnsub: (() => void) | null = null
   #tagsUnsub: (() => void) | null = null
   #hoverTagsUnsub: (() => void) | null = null
+  #voiceActiveUnsub: (() => void) | null = null
   #onMeetingState: EventListener | null = null
   #onMeetingCamera: EventListener | null = null
   #onMeetingMic: EventListener | null = null
@@ -332,6 +336,10 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
       this.#hoveredTags.set(new Set(tags))
     })
 
+    this.#voiceActiveUnsub = EffectBus.on<{ active: boolean }>('voice:active', ({ active }) => {
+      this.voiceActive.set(active)
+    })
+
     this.#onMeetingState = ((e: CustomEvent) => {
       const state = e.detail?.state
       this.#meetingJoined.set(state === 'gathering' || state === 'active')
@@ -377,6 +385,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     this.#touchDraggingUnsub?.()
     this.#viewActiveUnsub?.()
     this.#beesUnsub?.()
+    this.#voiceActiveUnsub?.()
     this.#tagsUnsub?.()
     this.#hoverTagsUnsub?.()
     if (this.#onMeetingState) window.removeEventListener('meeting:state', this.#onMeetingState)
@@ -533,6 +542,13 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     this.#beesVisible.set(next)
     localStorage.setItem('hc:bees-visible', String(next))
     EffectBus.emit('render:set-bees-visible', { visible: next })
+  }
+
+  // ── voice ────────────────────────────────────────────
+
+  readonly toggleVoice = (): void => {
+    const svc = get('@hypercomb.social/VoiceInputService') as { toggle?: () => void } | undefined
+    svc?.toggle?.()
   }
 
   // ── meeting ──────────────────────────────────────────
