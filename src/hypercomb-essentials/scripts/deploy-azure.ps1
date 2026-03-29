@@ -1,7 +1,4 @@
-param(
-  [Parameter(Mandatory = $true)]
-  [string]$Signature
-)
+param()
 
 $ErrorActionPreference = 'Stop'
 
@@ -136,14 +133,9 @@ if (-not (test-command -Name 'az')) {
   fail 'azure cli (az) is not installed or is not on PATH'
 }
 
-if ($Signature -notmatch '^[a-fA-F0-9]{64}$') {
-  fail "invalid signature: $Signature"
-}
-
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$distRoot = normalize-local-path -Path (Join-Path $scriptDir '..\dist')
-$resolvedSource = normalize-local-path -Path (Join-Path $distRoot $Signature)
-$resolvedDestination = normalize-blob-path -Path ("content/$Signature")
+$resolvedSource = normalize-local-path -Path (Join-Path $scriptDir '..\dist')
+$resolvedDestination = normalize-blob-path -Path 'content'
 
 if (-not (Test-Path -LiteralPath $resolvedSource)) {
   fail "source path does not exist: $resolvedSource"
@@ -163,16 +155,26 @@ if ([string]::IsNullOrWhiteSpace($containerName)) {
 }
 
 $authArguments = get-auth-arguments
-$files = @(Get-ChildItem -LiteralPath $resolvedSource -Recurse -File | Sort-Object FullName)
+
+# only upload content directories and manifest — skip .cache/
+$contentItems = @('__layers__', '__bees__', '__dependencies__', 'manifest.json')
+$files = @()
+foreach ($item in $contentItems) {
+  $itemPath = Join-Path $resolvedSource $item
+  if (Test-Path -LiteralPath $itemPath -PathType Container) {
+    $files += @(Get-ChildItem -LiteralPath $itemPath -Recurse -File | Sort-Object FullName)
+  } elseif (Test-Path -LiteralPath $itemPath -PathType Leaf) {
+    $files += @(Get-Item -LiteralPath $itemPath)
+  }
+}
 
 if ($files.Count -eq 0) {
   fail "no files found in source directory: $resolvedSource"
 }
 
 write-step ''
-write-step 'deploying hypercomb package'
+write-step 'deploying hypercomb content'
 write-step '--------------------------------'
-write-step " signature : $Signature"
 write-step " source    : $resolvedSource"
 write-step " dest      : $resolvedDestination"
 write-step " files     : $($files.Count)"

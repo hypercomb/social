@@ -1,7 +1,7 @@
 // hypercomb-essentials/scripts/copy-to-web.ts
 // Copies built module output to hypercomb-web/public/content/ for local development.
 
-import { cpSync, existsSync, mkdirSync, readdirSync, writeFileSync, rmSync } from 'fs'
+import { cpSync, existsSync, mkdirSync, rmSync } from 'fs'
 import { dirname, join, resolve } from 'path'
 import { fileURLToPath } from 'url'
 
@@ -11,24 +11,19 @@ const __dirname = dirname(__filename)
 const DIST_ROOT = resolve(__dirname, '..', 'dist')
 const WEB_CONTENT = resolve(__dirname, '..', '..', 'hypercomb-web', 'public', 'content')
 
+const CONTENT_DIRS = ['__layers__', '__bees__', '__dependencies__']
+const MANIFEST_FILE = 'manifest.json'
+
 const main = () => {
   if (!existsSync(DIST_ROOT)) {
     console.error('[copy-to-web] dist/ not found — run build:module first')
     process.exit(1)
   }
 
-  // find the root signature directory (only one expected)
-  const entries = readdirSync(DIST_ROOT).filter(
-    name => /^[a-f0-9]{64}$/i.test(name)
-  )
-
-  if (entries.length === 0) {
-    console.error('[copy-to-web] no signature directory found in dist/')
+  if (!existsSync(join(DIST_ROOT, MANIFEST_FILE))) {
+    console.error('[copy-to-web] dist/manifest.json not found — run build:module first')
     process.exit(1)
   }
-
-  const rootSig = entries[0]
-  const srcDir = join(DIST_ROOT, rootSig)
 
   // clean and recreate content dir
   if (existsSync(WEB_CONTENT)) {
@@ -36,14 +31,18 @@ const main = () => {
   }
   mkdirSync(WEB_CONTENT, { recursive: true })
 
-  // copy the root signature directory
-  cpSync(srcDir, join(WEB_CONTENT, rootSig), { recursive: true })
+  // copy content directories flat
+  for (const dir of CONTENT_DIRS) {
+    const src = join(DIST_ROOT, dir)
+    if (existsSync(src)) {
+      cpSync(src, join(WEB_CONTENT, dir), { recursive: true })
+    }
+  }
 
-  // write latest.json
-  writeFileSync(join(WEB_CONTENT, 'latest.json'), JSON.stringify({ seed: rootSig }, null, 2), 'utf8')
+  // copy manifest.json
+  cpSync(join(DIST_ROOT, MANIFEST_FILE), join(WEB_CONTENT, MANIFEST_FILE))
 
-  console.log(`[copy-to-web] copied ${rootSig} to ${WEB_CONTENT}`)
-  console.log(`[copy-to-web] latest.json → ${rootSig}`)
+  console.log(`[copy-to-web] copied flat content to ${WEB_CONTENT}`)
   console.log(`[copy-to-web] done at ${new Date().toISOString()} — reload web app to pick up changes`)
 }
 

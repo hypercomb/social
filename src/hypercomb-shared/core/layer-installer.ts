@@ -4,23 +4,21 @@ import { type LocationParseResult } from './initializers/location-parser'
 import { Store } from './store'
 
 type InstallManifest = { version: number; layers: string[]; bees: string[]; dependencies: string[] }
+type ContentManifest = { version: number; packages: Record<string, InstallManifest> }
 
 // global get/register/list available via ioc.web.ts
 
 export class LayerInstaller {
 
-  readonly #manifestName = 'install.manifest.json'
+  readonly #localManifestName = '__install_cache__.json'
 
   public install = async (parsed: LocationParseResult): Promise<boolean> => {
     const baseUrl = parsed?.baseUrl ?? ''
-    const rootSig = parsed?.signature ?? ''
-    if (!baseUrl || !rootSig) return false
-
-    // endpoint: [baseUrl]/[path]/[signature]
-    const endpoint =  `${baseUrl}/${rootSig}`
+    const packageSig = parsed?.signature ?? ''
+    if (!baseUrl || !packageSig) return false
 
     // domain folder key used for: opfsroot/__layers__/<domain>/
-    const domainKey = parsed?.domain || this.#tryHost(endpoint)
+    const domainKey = parsed?.domain || this.#tryHost(baseUrl)
     if (!domainKey) return false
 
     const store = get('@hypercomb.social/Store') as Store
@@ -28,20 +26,20 @@ export class LayerInstaller {
     // layers are stored per domain: opfsroot/__layers__/<domain>/
     const domainLayersDir = await store.domainLayersDirectory(domainKey, true)
 
-    // 1) d/l the manifest (resume if present)
-    const manifest = await this.#getOrFetchManifest(domainLayersDir, endpoint)
+    // 1) fetch content manifest and resolve the package by signature
+    const manifest = await this.#getOrFetchPackage(domainLayersDir, baseUrl, packageSig)
     if (!manifest) return false
 
-    // 2) install all files
-    await this.#installLayers(domainLayersDir, endpoint, manifest.layers || [])
-    await this.#installDependencies(store, endpoint, manifest.dependencies || [])
-    await this.#installBees(store, endpoint, manifest.bees || [])
+    // 2) install all files (flat — files live at baseUrl root)
+    await this.#installLayers(domainLayersDir, baseUrl, manifest.layers || [])
+    await this.#installDependencies(store, baseUrl, manifest.dependencies || [])
+    await this.#installBees(store, baseUrl, manifest.bees || [])
 
-    // 3) remove manifest when complete
+    // 3) remove cached manifest when complete
     const complete = await this.#isComplete(domainLayersDir, store, manifest)
     if (complete) {
-      await this.#safeRemove(domainLayersDir, this.#manifestName)
-      console.log('[layer-installer] install complete (manifest removed)')
+      await this.#safeRemove(domainLayersDir, this.#localManifestName)
+      console.log('[layer-installer] install complete')
     } else {
       console.warn('[layer-installer] install incomplete — missing files will be retried on next load')
     }
@@ -52,33 +50,52 @@ export class LayerInstaller {
   // manifest
   // -------------------------------------------------
 
-  #getOrFetchManifest = async (
+  #getOrFetchPackage = async (
     domainLayersDir: FileSystemDirectoryHandle,
-    endpoint: string
+    baseUrl: string,
+    packageSig: string
   ): Promise<InstallManifest | null> => {
 
-    // local first (resume)
-    const localText = await this.#tryReadText(domainLayersDir, this.#manifestName)
+    // local first (resume — cached package entry)
+    const localText = await this.#tryReadText(domainLayersDir, this.#localManifestName)
     if (localText) {
-      const local = this.#tryParseManifest(localText)
+      const local = this.#tryParseInstallManifest(localText)
       if (local) return local
-      await this.#safeRemove(domainLayersDir, this.#manifestName)
+      await this.#safeRemove(domainLayersDir, this.#localManifestName)
     }
 
-    // remote
-    const url = `${endpoint}/${this.#manifestName}`
+    // remote — fetch content manifest and extract package
+    const url = `${baseUrl}/manifest.json`
     const bytes = await this.#fetchBytes(url)
     if (!bytes) return null
 
     const text = new TextDecoder().decode(bytes)
-    const parsed = this.#tryParseManifest(text)
-    if (!parsed) return null
+    const content = this.#tryParseContentManifest(text)
+    if (!content) return null
 
-    await this.#writeBytesFile(domainLayersDir, this.#manifestName, bytes)
-    return parsed
+    const pkg = content.packages?.[packageSig]
+    if (!pkg) {
+      console.warn(`[layer-installer] package ${packageSig.slice(0, 12)} not found in manifest`)
+      return null
+    }
+
+    // cache the resolved package entry locally for resume
+    const pkgBytes = new TextEncoder().encode(JSON.stringify(pkg))
+    await this.#writeBytesFile(domainLayersDir, this.#localManifestName, pkgBytes)
+    return pkg
   }
 
-  #tryParseManifest = (text: string): InstallManifest | null => {
+  #tryParseContentManifest = (text: string): ContentManifest | null => {
+    try {
+      const parsed = JSON.parse(text)
+      if (parsed?.packages && typeof parsed.packages === 'object') return parsed as ContentManifest
+      return null
+    } catch {
+      return null
+    }
+  }
+
+  #tryParseInstallManifest = (text: string): InstallManifest | null => {
     try {
       return JSON.parse(text) as InstallManifest
     } catch {

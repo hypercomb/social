@@ -53,8 +53,8 @@ const PLATFORM_EXTERNALS = ['@hypercomb/core', 'pixi.js']
 // hard rule: never generate @<domain> root aggregator
 const EMIT_DOMAIN_ROOT_NAMESPACE = false
 
-// new: minimal manifest name
-const INSTALL_MANIFEST_FILE = 'install.manifest.json'
+// content manifest (replaces latest.json — supports multiple entry points)
+const MANIFEST_FILE = 'manifest.json'
 
 // -------------------------------------------------
 // build cache — Merkle tree with mtime pre-filter
@@ -156,7 +156,7 @@ const ensureDir = (dir: string): void => {
   mkdirSync(dir, { recursive: true })
 }
 
-const deployToAzure = (rootLayerSig: string): void => {
+const deployToAzure = (): void => {
   if (process.argv.includes('--local')) return
 
   const ps1 = resolve(__dirname, 'deploy-azure.ps1')
@@ -164,7 +164,7 @@ const deployToAzure = (rootLayerSig: string): void => {
 
   const result = spawnSync(
     'powershell',
-    ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1, '-Signature', rootLayerSig],
+    ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1],
     { stdio: 'inherit' }
   )
 
@@ -638,11 +638,11 @@ const main = async (): Promise<void> => {
 
   // --- Early exit: nothing changed at all ---
   if (!anyMtimeChanged && cache) {
-    const rootDir = join(DIST_ROOT, cache.rootLayerSig)
+    const manifestFile = join(DIST_ROOT, MANIFEST_FILE)
     const skipDeploy = process.argv.includes('--local')
 
     // Verify output still exists (not wiped externally)
-    if (existsSync(rootDir) && existsSync(join(rootDir, INSTALL_MANIFEST_FILE))) {
+    if (existsSync(manifestFile)) {
       const elapsed = ((performance.now() - t0) / 1000).toFixed(3)
       console.log(`[build-module] Merkle root unchanged — skipping build entirely`)
       console.log(`[build-module] root signature: ${cache.rootLayerSig}`)
@@ -650,14 +650,9 @@ const main = async (): Promise<void> => {
         console.log(`[build-module] --local: skipping Azure deploy`)
       } else {
         console.log(`[build-module] deploying cached output to Azure`)
-        deployToAzure(cache.rootLayerSig)
+        deployToAzure()
       }
       console.log(`[build-module] completed in ${elapsed}s`)
-
-      // still deploy if not --local (output exists but may not be on Azure yet)
-      if (!process.argv.includes('--local')) {
-        deployToAzure(cache.rootLayerSig)
-      }
       return
     }
 
@@ -844,11 +839,10 @@ const main = async (): Promise<void> => {
   for (const dirDocs of docsByDir.values()) docCount += Object.keys(dirDocs).length
   console.log(`[build-module] docs: ${docCount} bee doc(s) extracted across ${docsByDir.size} lineage(s)`)
 
-  // write package
-  const rootDir = join(DIST_ROOT, rootLayerSig)
-  const layersDir  = join(rootDir, '__layers__')
-  const resDir     = join(rootDir, '__bees__')
-  const depDir     = join(rootDir, '__dependencies__')
+  // write package — flat at dist root
+  const layersDir  = join(DIST_ROOT, '__layers__')
+  const resDir     = join(DIST_ROOT, '__bees__')
+  const depDir     = join(DIST_ROOT, '__dependencies__')
 
   ensureDir(layersDir)
   ensureDir(resDir)
@@ -858,15 +852,23 @@ const main = async (): Promise<void> => {
   for (const [sig, bytes] of dependencyBytes) writeSigJsFile(depDir, sig, bytes)
   for (const [sig, bytes] of resourceBytes) writeSigJsFile(resDir, sig, bytes)
 
-  // install manifest with bee-to-dep mapping
-  const installManifest = {
+  // content manifest — package entry keyed by root signature
+  const packageEntry = {
     version: 2,
     layers: Array.from(layers.keys()).sort((a, b) => a.localeCompare(b)),
     bees: Array.from(resourceBytes.keys()).sort((a, b) => a.localeCompare(b)),
     dependencies: dependencySigs,
     beeDeps: Object.fromEntries(beeDepsMap),
   }
-  writeFileSync(join(rootDir, INSTALL_MANIFEST_FILE), JSON.stringify(installManifest) + '\n', 'utf8')
+
+  // merge with existing manifest (additive — preserves other package entries)
+  const manifestPath = join(DIST_ROOT, MANIFEST_FILE)
+  let manifest: { version: number; packages: Record<string, unknown> } = { version: 1, packages: {} }
+  if (existsSync(manifestPath)) {
+    try { manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) } catch { /* start fresh */ }
+  }
+  manifest.packages[rootLayerSig] = packageEntry
+  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n', 'utf8')
 
   // --- Phase 5: persist Merkle cache + GC ---
 
@@ -892,10 +894,10 @@ const main = async (): Promise<void> => {
   if (skipDeploy) {
     console.log(`[build-module] --local: skipping Azure deploy`)
     console.log(`[build-module] root signature: ${rootLayerSig}`)
-    console.log(`[build-module] output: ${rootDir}`)
+    console.log(`[build-module] output: ${DIST_ROOT}`)
     console.log(`[build-module] completed in ${elapsed}s`)
   } else {
-    deployToAzure(rootLayerSig)
+    deployToAzure()
   }
 }
 

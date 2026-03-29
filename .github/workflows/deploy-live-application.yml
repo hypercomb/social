@@ -79,23 +79,29 @@ jobs:
         working-directory: src/hypercomb-essentials
         run: npm run build
 
-      - name: Verify latest essentials pointer
+      - name: Verify essentials manifest
         if: steps.azure_creds.outputs.ready == 'true' && steps.az_login.outcome == 'success'
         run: |
           set -euo pipefail
-          SIG=$(curl -fsSL https://storagehypercomb.blob.core.windows.net/content/latest.json | jq -r '.seed')
-          echo "latest signature: $SIG"
-          if ! echo "$SIG" | grep -Eq '^[a-f0-9]{64}$'; then
-            echo "Invalid latest signature: $SIG"
+          MANIFEST=$(curl -fsSL https://storagehypercomb.blob.core.windows.net/content/manifest.json)
+          KEYS=$(echo "$MANIFEST" | jq -r '.packages | keys[]')
+          if [ -z "$KEYS" ]; then
+            echo "manifest.json contains no package entries"
             exit 1
           fi
-          curl -fsSI "https://storagehypercomb.blob.core.windows.net/content/$SIG/install.manifest.json" >/dev/null
+          for KEY in $KEYS; do
+            if ! echo "$KEY" | grep -Eq '^[a-f0-9]{64}$'; then
+              echo "Invalid package key: $KEY"
+              exit 1
+            fi
+            echo "package: $KEY"
+          done
 
       - name: Warn if essentials publish skipped
         if: steps.azure_creds.outputs.ready != 'true' || steps.az_login.outcome != 'success'
         env:
           SKIP_REASON: ${{ steps.azure_creds.outputs.reason }}
-        run: echo "Skipped essentials publish ($SKIP_REASON); web deploy continues with existing latest resources."
+        run: echo "Skipped essentials publish ($SKIP_REASON); web deploy continues with existing manifest resources."
 
       - name: Build hypercomb-core
         working-directory: src/hypercomb-core

@@ -80,9 +80,9 @@ npm run runtime:core            # Copy core dist to public/core/
 
 Essentials are built as **signature-addressed modules** and auto-installed into OPFS at runtime:
 
-1. **Build** (`npm run build:essentials`): esbuild bundles drones into `dist/{rootSig}/` with `__layers__/`, `__bees__/`, `__dependencies__/`, and `install.manifest.json`. Then `copy-to-web.ts` copies output to `hypercomb-web/public/content/{rootSig}/` and writes `latest.json`.
-2. **Deploy** (`npm run deploy:essentials`): Same build, but uploads to Azure blob storage (`storagehypercomb`) instead of copying locally. Uploads `latest.json` and `latest.json` for discovery.
-3. **Runtime auto-install**: On app load, `ensureInstall()` fetches `latest.json` → gets root signature → `LayerInstaller` downloads `install.manifest.json` and all listed layers/bees/deps → writes to OPFS. Skips if already installed (checked via `localStorage` + OPFS directory presence).
+1. **Build** (`npm run build:essentials`): esbuild bundles drones into flat `dist/` with `__layers__/`, `__bees__/`, `__dependencies__/`, and `manifest.json`. Then `copy-to-web.ts` copies output to `hypercomb-web/public/content/`.
+2. **Deploy** (`npm run deploy:essentials`): Same build, but uploads flat content to Azure blob storage (`storagehypercomb`) instead of copying locally. Uploads `manifest.json` for discovery.
+3. **Runtime auto-install**: On app load, `ensureInstall()` uses sentinel sync or `LayerInstaller` fetches `manifest.json` → looks up package by signature → downloads all listed layers/bees/deps → writes to OPFS. Skips if already installed (checked via `localStorage` + OPFS directory presence).
 4. **Import map**: `resolveImportMap()` reads `__dependencies__/` from OPFS, extracts aliases from first-line comments (`// @scope/name`), and injects a dynamic `<script type="importmap">`.
 5. **Module loading**: `DependencyLoader` imports dependencies via the import map. `ScriptPreloader` loads bees from OPFS, instantiates them, and registers in IoC.
 

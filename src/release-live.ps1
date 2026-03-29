@@ -51,16 +51,30 @@ if (-not $SkipEssentialsDeploy) {
     Invoke-Npm $essentials 'build'
   }
 
-  Invoke-Step 'Verify latest pointers are readable' {
-    $latestJson = Invoke-WebRequest -UseBasicParsing -Uri "https://$StorageAccount.blob.core.windows.net/content/latest.json"
+  Invoke-Step 'Verify manifest is readable' {
+    $manifestJson = Invoke-WebRequest -UseBasicParsing -Uri "https://$StorageAccount.blob.core.windows.net/content/manifest.json"
 
-    $data = $latestJson.Content | ConvertFrom-Json
-    $sig = ($data.seed -replace "`uFEFF", '').Trim()
-    if ($sig -notmatch '^[a-f0-9]{64}$') {
-      throw "latest.json does not contain a valid seed signature: '$sig'"
+    $data = $manifestJson.Content | ConvertFrom-Json
+    if (-not $data.packages) {
+      throw "manifest.json does not contain a packages object"
     }
 
-    Write-Host "latest signature: $sig"
+    $packageKeys = @($data.packages.PSObject.Properties.Name)
+    if ($packageKeys.Count -eq 0) {
+      throw "manifest.json contains no package entries"
+    }
+
+    foreach ($key in $packageKeys) {
+      $cleanKey = ($key -replace "`uFEFF", '').Trim()
+      if ($cleanKey -notmatch '^[a-f0-9]{64}$') {
+        throw "manifest.json contains invalid package key: '$cleanKey'"
+      }
+    }
+
+    Write-Host "manifest packages: $($packageKeys.Count) entry/entries"
+    foreach ($key in $packageKeys) {
+      Write-Host "  $key"
+    }
   }
 }
 
