@@ -113,20 +113,20 @@ function get-auth-arguments {
     'AZURE_STORAGE_ACCOUNT_NAME'
   )
 
+  if ([string]::IsNullOrWhiteSpace($storageAccount)) {
+    $storageAccount = 'storagehypercomb'
+  }
+
   $accountKey = get-optional-env -Names @(
     'AZURE_STORAGE_KEY',
     'AZURE_STORAGE_ACCOUNT_KEY'
   )
 
-  if (-not [string]::IsNullOrWhiteSpace($storageAccount) -and -not [string]::IsNullOrWhiteSpace($accountKey)) {
+  if (-not [string]::IsNullOrWhiteSpace($accountKey)) {
     return @('--account-name', $storageAccount, '--account-key', $accountKey)
   }
 
-  if (-not [string]::IsNullOrWhiteSpace($storageAccount)) {
-    return @('--account-name', $storageAccount, '--auth-mode', 'login')
-  }
-
-  return @()
+  return @('--account-name', $storageAccount, '--auth-mode', 'login')
 }
 
 if (-not (test-command -Name 'az')) {
