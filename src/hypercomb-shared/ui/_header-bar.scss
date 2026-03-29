@@ -101,6 +101,7 @@ $secret-bg: rgba(10, 12, 16, 0.85);
   &.shield-mode {
     color: var(--shield-color, rgba(245, 245, 245, 0.35));
     border-right: 1px solid rgba(245, 245, 245, 0.12);
+    border-left: 1px solid rgba(245, 245, 245, 0.12);
   }
 }
 
@@ -243,6 +244,7 @@ $secret-bg: rgba(10, 12, 16, 0.85);
   .mode-toggle {
     padding: 0 1rem;
     min-height: 3.8rem;
+    border-radius: 0 6px 6px 0;
 
     .hci {
       font-size: 1.3rem;
@@ -250,8 +252,7 @@ $secret-bg: rgba(10, 12, 16, 0.85);
   }
 
   .secured-label {
-    font-size: 0.6rem;
-    min-height: 3.8rem;
+    display: none;
   }
 
   // ── secret-active: secret input fills remaining space ──

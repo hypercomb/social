@@ -22,7 +22,7 @@ export class MeshHeaderComponent {
 
   readonly secretValue = this.#secretValue.asReadonly()
   readonly hasSecret = computed(() => this.#secretValue().trim().length > 0)
-  readonly showSecretInput = () => (!!this.meshPublic && !this.hasSecret()) || this.#secretExpanded()
+  readonly showSecretInput = () => !!this.meshPublic && this.#secretExpanded()
 
   readonly shieldColor = computed(() => {
     const secret = this.#secretValue().trim()
@@ -68,26 +68,31 @@ export class MeshHeaderComponent {
 
   readonly #handleTap = (): void => {
     if (!this.meshPublic) {
-      // solo → shield: open the secret input
-      this.#secretExpanded.set(true)
+      // solo → shield (just show shield icon; secret input only via long-press)
       this.meshToggled.emit()
-      this.secretExpandedChange.emit(true)
     } else if (this.showSecretInput()) {
       if (this.hasSecret()) {
-        // has secret: collapse input, show "secured"
+        // has secret: persist if needed, then collapse to just the shield icon
+        this.#persistSecret()
         this.#secretExpanded.set(false)
         this.secretExpandedChange.emit(false)
       } else {
-        // no secret: go back to solo
+        // no secret entered: go back to solo
         this.#secretExpanded.set(false)
         this.meshToggled.emit()
         this.secretExpandedChange.emit(false)
       }
     } else {
-      // secured (collapsed) → back to solo, clear secret
-      this.clearSecret()
+      // shield collapsed (has secret) → toggle to solo (keep secret)
       this.meshToggled.emit()
-      this.secretExpandedChange.emit(false)
+    }
+  }
+
+  readonly #persistSecret = (): void => {
+    const value = this.#secretValue().trim()
+    if (value.length > 0) {
+      this.#store?.set(value)
+      EffectBus.emit('mesh:secret', { secret: value })
     }
   }
 
