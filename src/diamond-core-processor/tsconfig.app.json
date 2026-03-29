@@ -6,11 +6,10 @@
     "outDir": "./out-tsc/app",
     "types": [],
     "rootDir": "..",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"]
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
   },
   "include": [
-    "src/**/*.ts",
-    "../hypercomb-shared/**/*.ts"
+    "src/**/*.ts"
   ],
   "exclude": [
     "src/**/*.spec.ts"

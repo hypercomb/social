@@ -1,8 +1,156 @@
 // diamond-core-processor/src/app/command-line/dcp-command-line.component.scss
-//
-// Minimal wrapper — visual shell is owned by hc-command-shell.
+// Light-theme command shell — matches DCP's light background.
 
 :host {
   display: block;
   width: 100%;
+  overflow: hidden;
+
+  --accent: #4a6fa5;
+  --accent-rgb: 74, 111, 165;
+  --shell-bg: #fff;
+  --shell-border: rgba(0, 0, 0, 0.15);
+  --shell-border-focus: var(--accent);
+  --terminal-font: ui-monospace, sfmono-regular, menlo, consolas, monospace;
+  --transition-speed: 200ms;
+}
+
+.command-bar { position: relative; width: 100%; }
+
+.command-shell {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--shell-bg);
+  border: 1px solid var(--shell-border);
+  border-radius: 2px;
+  padding: 0 0.25rem;
+  transition: border-color var(--transition-speed) ease, box-shadow var(--transition-speed) ease;
+  user-select: none;
+  cursor: default;
+}
+
+.command-shell:focus-within {
+  border-color: var(--shell-border-focus);
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.12);
+}
+
+.command-shell:focus-within .command-row::before { opacity: 1; }
+
+.command-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 2.2rem;
+
+  &::before {
+    content: '>';
+    flex-shrink: 0;
+    padding-left: 0.6rem;
+    font-family: var(--terminal-font);
+    font-size: 0.9em;
+    font-weight: 600;
+    color: var(--accent);
+    opacity: 0.5;
+    transition: opacity var(--transition-speed) ease;
+  }
+}
+
+.ghost {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 0.75rem;
+  padding-left: calc(0.6rem + 0.6em + 0.75rem);
+  background: transparent;
+  border: none;
+  outline: none;
+  font-family: var(--terminal-font);
+  font-size: 0.85em;
+  letter-spacing: 0.02em;
+  color: rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+  user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.command-input {
+  width: 100%;
+  padding: 0.4rem 0.75rem;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-family: var(--terminal-font);
+  font-size: 0.85em;
+  letter-spacing: 0.02em;
+  color: #1a1a1a;
+  caret-color: var(--accent);
+  user-select: text;
+  cursor: text;
+}
+
+.command-input::placeholder { color: rgba(0, 0, 0, 0.3); }
+
+.command-results {
+  position: absolute;
+  left: 0; right: 0;
+  top: calc(100% + 0.3rem);
+  z-index: 10;
+  margin: 0;
+  padding: 0.35rem;
+  list-style: none;
+  border-radius: 2px;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.06);
+  max-height: 16rem;
+  overflow: auto;
+  font-family: var(--terminal-font);
+  font-size: 0.85em;
+  letter-spacing: 0.02em;
+
+  &::-webkit-scrollbar { width: 4px; }
+  &::-webkit-scrollbar-track { background: transparent; }
+  &::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.12);
+    border-radius: 2px;
+    &:hover { background: rgba(0, 0, 0, 0.2); }
+  }
+}
+
+.command-results li {
+  display: flex;
+  padding: 0.4rem 0.6rem;
+  border-radius: 2px;
+  user-select: none;
+  cursor: pointer;
+  transition: background var(--transition-speed) ease;
+}
+
+.command-results li:hover { background: rgba(var(--accent-rgb), 0.06); }
+.command-results li.active { background: rgba(var(--accent-rgb), 0.1); box-shadow: inset 2px 0 0 var(--accent); }
+
+.typed { color: var(--accent); }
+.rest { color: #555; opacity: 0.6; }
+
+// responsive: touch (iOS zoom prevention)
+@media (pointer: coarse) {
+  .command-input { font-size: 16px; }
+  .ghost { font-size: 16px; }
+}
+
+// phone (≤599px)
+@media (max-width: 599px) {
+  .command-row {
+    min-height: 3rem;
+    &::before { font-size: 1.2em; padding-left: 0.8rem; }
+  }
+  .command-input { font-size: 16px; padding: 0.8rem 0.75rem; }
+  .ghost { font-size: 16px; padding-left: calc(0.8rem + 0.7em + 0.75rem); }
+  .command-results { top: calc(100% + 0.4rem); padding: 0.4rem; max-height: 60vh; }
+  .command-results li { padding: 0.6rem 0.7rem; }
 }

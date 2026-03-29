@@ -1,11 +1,11 @@
 // diamond-core-processor/src/app/command-line/dcp-command-line.component.ts
 //
-// DCP-specific command line — wraps the shared command shell with tree
-// node filtering, bracket selection, and kind-prefix support.
+// DCP command line — self-contained terminal-style input with tree node
+// filtering, bracket selection, and kind-prefix support.
+// Visual design matches the shared command shell but is inlined here to
+// avoid cross-project Angular module resolution issues.
 
-import { Component, computed, input, output, signal, ViewChild } from '@angular/core'
-import { CommandShellComponent } from '@hypercomb/shared/ui/command-shell/command-shell.component'
-import { parseArrayItems } from '@hypercomb/shared/core/array-parser'
+import { Component, computed, ElementRef, input, output, signal, ViewChild, type AfterViewInit } from '@angular/core'
 import type { TreeNode, TreeNodeKind } from '../core/tree-node'
 
 /** Kind prefixes recognized in the command line. */
@@ -20,34 +20,31 @@ const KIND_PREFIXES: Record<string, TreeNodeKind[]> = {
 @Component({
   selector: 'dcp-command-line',
   standalone: true,
-  imports: [CommandShellComponent],
   templateUrl: './dcp-command-line.component.html',
   styleUrls: ['./dcp-command-line.component.scss']
 })
-export class DcpCommandLineComponent {
+export class DcpCommandLineComponent implements AfterViewInit {
 
-  @ViewChild('shell')
-  private shell!: CommandShellComponent
+  @ViewChild('shellInput', { read: ElementRef })
+  private inputRef?: ElementRef<HTMLInputElement>
+
+  private get inputElement(): HTMLInputElement { return this.inputRef!.nativeElement }
 
   // ── inputs ─────────────────────────────────────────────
 
-  /** Flat list of all tree nodes (for autocomplete suggestions). */
   readonly nodes = input<TreeNode[]>([])
 
   // ── outputs ────────────────────────────────────────────
 
-  /** Plain text filter term (bare text mode). */
   readonly filterTerm = output<string>()
-
-  /** Kind-based filter (e.g. typing "bee:" activates bee+drone filter). */
   readonly kindFilter = output<Set<string>>()
-
-  /** Bracket-selected node names. */
   readonly selectedNames = output<string[]>()
 
   // ── internal state ─────────────────────────────────────
 
-  private readonly value = signal('')
+  readonly value = signal('')
+  readonly activeIndex = signal(0)
+  readonly suppressed = signal(false)
 
   /** All unique node names from the tree, sorted. */
   readonly allNames = computed(() => {
@@ -67,7 +64,6 @@ export class DcpCommandLineComponent {
     const v = this.value()
     if (!v.trim()) return { mode: 'empty' as const }
 
-    // bracket selection: [item1,item2]
     if (v.startsWith('[')) {
       const bracketClose = v.indexOf(']')
       const inner = bracketClose >= 0 ? v.slice(1, bracketClose) : v.slice(1)
@@ -76,7 +72,6 @@ export class DcpCommandLineComponent {
       return { mode: 'select' as const, fragment, inner, closed: bracketClose >= 0 }
     }
 
-    // kind prefix: bee:, worker:, dependency:
     for (const [prefix, kinds] of Object.entries(KIND_PREFIXES)) {
       if (v.toLowerCase().startsWith(prefix)) {
         const after = v.slice(prefix.length)
@@ -84,25 +79,22 @@ export class DcpCommandLineComponent {
       }
     }
 
-    // plain text filter
     return { mode: 'filter' as const, term: v }
   })
 
   /** Suggestions based on current context. */
   readonly suggestions = computed<readonly string[]>(() => {
-    const ctx = this.context
-    const c = ctx()
+    if (this.suppressed()) return []
+    const c = this.context()
     const names = this.allNames()
 
     if (c.mode === 'empty') return []
 
     if (c.mode === 'select') {
       if (c.closed) return []
-      // exclude already-selected items
       const already = new Set(
         c.inner.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
       )
-      // remove the current fragment from the excluded set (it's still being typed)
       already.delete(c.fragment.toLowerCase())
       let filtered = names.filter(n => !already.has(n.toLowerCase()))
       if (c.fragment) {
@@ -112,12 +104,16 @@ export class DcpCommandLineComponent {
     }
 
     if (c.mode === 'kind') {
-      // filter by kind, then optionally by text
-      const kindNodes = this.#flatNodesByKind(c.kinds)
-      let kindNames = kindNodes.map(n => n.name)
-      if (c.filter) {
-        kindNames = kindNames.filter(n => n.toLowerCase().startsWith(c.filter.toLowerCase()))
+      const kindSet = new Set(c.kinds)
+      const kindNames: string[] = []
+      const walk = (nodes: TreeNode[]) => {
+        for (const n of nodes) {
+          if (kindSet.has(n.kind) && n.name) kindNames.push(n.name)
+          walk(n.children)
+        }
       }
+      walk(this.nodes())
+      if (c.filter) return kindNames.filter(n => n.toLowerCase().startsWith(c.filter.toLowerCase()))
       return kindNames
     }
 
@@ -129,41 +125,28 @@ export class DcpCommandLineComponent {
     return []
   })
 
-  readonly showSuggestions = computed(() => this.suggestions().length > 0)
+  readonly showCompletions = computed(() => this.suggestions().length > 0 && !this.suppressed())
 
   readonly ghostText = computed(() => {
     const list = this.suggestions()
     if (!list.length) return ''
-    const best = list[this.shell?.activeIndex() ?? 0] ?? list[0]
+    const best = list[this.activeIndex()] ?? list[0]
     if (!best) return ''
-
-    const ctx = this.context()
     const current = this.value()
+    const ctx = this.context()
 
-    if (ctx.mode === 'select') {
-      if (!('fragment' in ctx)) return ''
-      if (!best.toLowerCase().startsWith(ctx.fragment.toLowerCase())) return ''
-      const suffix = best.slice(ctx.fragment.length)
-      return suffix ? current + suffix : ''
-    }
+    let prefix = ''
+    if (ctx.mode === 'select' && 'fragment' in ctx) prefix = ctx.fragment
+    else if (ctx.mode === 'kind' && 'filter' in ctx) prefix = ctx.filter
+    else if (ctx.mode === 'filter' && 'term' in ctx) prefix = ctx.term
+    else return ''
 
-    if (ctx.mode === 'kind' && 'filter' in ctx) {
-      if (!ctx.filter) return ''
-      if (!best.toLowerCase().startsWith(ctx.filter.toLowerCase())) return ''
-      const suffix = best.slice(ctx.filter.length)
-      return suffix ? current + suffix : ''
-    }
-
-    if (ctx.mode === 'filter' && 'term' in ctx) {
-      if (!best.toLowerCase().startsWith(ctx.term.toLowerCase())) return ''
-      const suffix = best.slice(ctx.term.length)
-      return suffix ? current + suffix : ''
-    }
-
-    return ''
+    if (!prefix) return ''
+    if (!best.toLowerCase().startsWith(prefix.toLowerCase())) return ''
+    const suffix = best.slice(prefix.length)
+    return suffix ? current + suffix : ''
   })
 
-  /** Typed prefix for highlight splitting in suggestion dropdown. */
   readonly typedPrefix = computed(() => {
     const ctx = this.context()
     if (ctx.mode === 'select' && 'fragment' in ctx) return ctx.fragment
@@ -172,12 +155,117 @@ export class DcpCommandLineComponent {
     return ''
   })
 
-  // ── shell bridge ───────────────────────────────────────
+  // ── lifecycle ──────────────────────────────────────────
 
-  onValueChange(v: string): void {
-    this.value.set(v)
+  ngAfterViewInit(): void {
+    this.inputElement.focus()
+  }
+
+  // ── template helpers ───────────────────────────────────
+
+  getActiveIndex = (): number => this.activeIndex()
+
+  typedPart = (s: string): string => {
+    const p = this.typedPrefix()
+    if (!p) return ''
+    return s.slice(0, Math.min(p.length, s.length))
+  }
+
+  restPart = (s: string): string => {
+    const p = this.typedPrefix()
+    if (!p) return s
+    return s.slice(Math.min(p.length, s.length))
+  }
+
+  // ── event handlers ─────────────────────────────────────
+
+  onInput = (): void => {
+    const el = this.inputElement
+    if (el.value !== el.value.trimStart()) el.value = el.value.trimStart()
+    this.suppressed.set(false)
+    this.value.set(el.value)
+    this.clampActiveIndex()
+    this.emitState()
+  }
+
+  onKeyDown = (e: KeyboardEvent): void => {
+    if (this.handleCompletionKeys(e)) return
+
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      this.onCommit()
+    }
+  }
+
+  onShellMouseDown = (e: MouseEvent): void => {
+    if (e.target === this.inputElement) return
+    e.preventDefault()
+    this.inputElement.focus()
+  }
+
+  onSuggestionMouseDown = (e: MouseEvent, s: string, i: number): void => {
+    e.preventDefault()
+    this.activeIndex.set(i)
+    this.acceptCompletion(s)
+  }
+
+  // ── completion logic ───────────────────────────────────
+
+  private handleCompletionKeys(e: KeyboardEvent): boolean {
+    const list = this.suggestions()
+    if (!list.length || this.suppressed()) return false
+
+    if (e.key === 'Escape') { e.preventDefault(); this.suppressed.set(true); return true }
+    if (e.key === 'ArrowDown') { e.preventDefault(); this.activeIndex.update(v => Math.min(v + 1, list.length - 1)); return true }
+    if (e.key === 'ArrowUp') { e.preventDefault(); this.activeIndex.update(v => Math.max(v - 1, 0)); return true }
+    if (e.key === 'Tab' || e.key === 'ArrowRight') {
+      e.preventDefault()
+      const best = list[this.activeIndex()] ?? list[0]
+      if (best) this.acceptCompletion(best)
+      return true
+    }
+    return false
+  }
+
+  private acceptCompletion(suggestion: string): void {
     const ctx = this.context()
+    const raw = this.value()
 
+    if (ctx.mode === 'select' && 'fragment' in ctx) {
+      const lastSep = Math.max(raw.lastIndexOf(','), raw.lastIndexOf('['))
+      const before = raw.slice(0, lastSep + 1)
+      const spacer = raw.lastIndexOf(',') >= 0 ? ' ' : ''
+      this.setInputValue(before + spacer + suggestion)
+      this.suppressed.set(false)
+      return
+    }
+
+    if (ctx.mode === 'kind' && 'filter' in ctx) {
+      for (const prefix of Object.keys(KIND_PREFIXES)) {
+        if (raw.toLowerCase().startsWith(prefix)) {
+          this.setInputValue(prefix + suggestion)
+          this.suppressed.set(true)
+          return
+        }
+      }
+    }
+
+    this.setInputValue(suggestion)
+    this.suppressed.set(true)
+  }
+
+  private onCommit(): void {
+    const ctx = this.context()
+    if (ctx.mode === 'select' && 'inner' in ctx) {
+      const names = ctx.inner.split(',').map(s => s.trim()).filter(Boolean)
+      this.selectedNames.emit(names)
+    }
+  }
+
+  // ── helpers ────────────────────────────────────────────
+
+  private emitState(): void {
+    const ctx = this.context()
     if (ctx.mode === 'filter' && 'term' in ctx) {
       this.filterTerm.emit(ctx.term)
       this.kindFilter.emit(new Set())
@@ -191,10 +279,6 @@ export class DcpCommandLineComponent {
       this.kindFilter.emit(kindKeys)
       this.filterTerm.emit(ctx.filter)
       this.selectedNames.emit([])
-    } else if (ctx.mode === 'select') {
-      this.filterTerm.emit('')
-      this.kindFilter.emit(new Set())
-      // don't emit selectedNames until committed
     } else {
       this.filterTerm.emit('')
       this.kindFilter.emit(new Set())
@@ -202,69 +286,14 @@ export class DcpCommandLineComponent {
     }
   }
 
-  onCommit(v: string): void {
-    const ctx = this.context()
-
-    if (ctx.mode === 'select' && 'inner' in ctx) {
-      const items = parseArrayItems(ctx.inner, s => s.trim())
-      const names = items.map(i => i.segments.join('/'))
-      this.selectedNames.emit(names)
-      return
-    }
-
-    // on Enter in filter/kind mode, just keep the current filter (no-op)
+  private setInputValue(v: string): void {
+    this.inputElement.value = v
+    this.value.set(v)
+    queueMicrotask(() => this.inputElement.setSelectionRange(v.length, v.length))
   }
 
-  onCompletionAccepted(suggestion: string): void {
-    const ctx = this.context()
-    const raw = this.value()
-
-    if (ctx.mode === 'select' && 'fragment' in ctx) {
-      // insert after last comma or after [
-      const lastSep = Math.max(raw.lastIndexOf(','), raw.lastIndexOf('['))
-      const before = raw.slice(0, lastSep + 1)
-      const spacer = raw.lastIndexOf(',') >= 0 ? ' ' : ''
-      const newValue = before + spacer + suggestion
-      this.shell.setValue(newValue)
-      this.shell.unsuppress()
-      this.shell.placeCaretAtEnd()
-      this.value.set(newValue)
-      return
-    }
-
-    if (ctx.mode === 'kind' && 'filter' in ctx) {
-      // replace the filter part after the kind prefix
-      for (const prefix of Object.keys(KIND_PREFIXES)) {
-        if (raw.toLowerCase().startsWith(prefix)) {
-          const newValue = prefix + suggestion
-          this.shell.setValue(newValue)
-          this.shell.suppress()
-          this.shell.placeCaretAtEnd()
-          this.value.set(newValue)
-          return
-        }
-      }
-    }
-
-    // plain filter: replace with suggestion
-    this.shell.setValue(suggestion)
-    this.shell.suppress()
-    this.shell.placeCaretAtEnd()
-    this.value.set(suggestion)
-  }
-
-  // ── helpers ────────────────────────────────────────────
-
-  #flatNodesByKind(kinds: TreeNodeKind[]): TreeNode[] {
-    const kindSet = new Set(kinds)
-    const result: TreeNode[] = []
-    const walk = (nodes: TreeNode[]) => {
-      for (const n of nodes) {
-        if (kindSet.has(n.kind)) result.push(n)
-        walk(n.children)
-      }
-    }
-    walk(this.nodes())
-    return result
+  private clampActiveIndex(): void {
+    const max = this.suggestions().length - 1
+    this.activeIndex.update(v => Math.max(0, Math.min(v, max)))
   }
 }
