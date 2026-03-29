@@ -51,6 +51,10 @@ import type { TreeNode } from '../core/tree-node'
           <button class="info-btn" (click)="openDetail.emit(node()); $event.stopPropagation()">&#9432;</button>
         }
 
+        @if (node().kind === 'layer' && node().signature) {
+          <button class="promote-btn" (click)="promoteToPackage.emit(node()); $event.stopPropagation()" title="Promote to package root">&#8689;</button>
+        }
+
         @if (hasChildren()) {
           <button class="chevron" (click)="expandToggle.emit(node())">
             {{ node().expanded ? '\u25BE' : '\u25B8' }}
@@ -180,6 +184,27 @@ import type { TreeNode } from '../core/tree-node'
       color: #222;
     }
 
+    .promote-btn {
+      background: none;
+      border: 1px solid rgba(0,0,0,0.08);
+      border-radius: 2px;
+      cursor: pointer;
+      font-size: 12px;
+      color: #4a6fa5;
+      padding: 1px 4px;
+      flex-shrink: 0;
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+
+    .row:hover .promote-btn {
+      opacity: 1;
+    }
+
+    .promote-btn:hover {
+      background: rgba(74, 111, 165, 0.08);
+    }
+
     /* info button — hidden on desktop, visible on mobile */
     .info-btn {
       display: none;
@@ -259,6 +284,7 @@ export class TreeRowComponent implements OnInit, OnDestroy {
   open = output<TreeNode>()
   openDetail = output<TreeNode>()
   expandToggle = output<TreeNode>()
+  promoteToPackage = output<TreeNode>()
 
   visible = signal(true)
 

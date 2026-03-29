@@ -47,8 +47,8 @@ export class TreeResolverService {
 
     await this.#store.initialize()
 
-    // fetch latest.json to get root signature
-    const rootSig = await this.#fetchLatest(base)
+    // fetch manifest.json to get root signature
+    const rootSig = await this.#fetchRootSignature(base)
     if (!rootSig) return null
 
     // upfront install: download all layers, bees, deps to OPFS
@@ -289,13 +289,14 @@ export class TreeResolverService {
     }
   }
 
-  async #fetchLatest(base: string): Promise<string | null> {
+  async #fetchRootSignature(base: string): Promise<string | null> {
     try {
-      const res = await fetch(`${base}/latest.json`, { cache: 'no-store' })
+      const res = await fetch(`${base}/manifest.json`, { cache: 'no-store' })
       if (!res.ok) return null
-      const data = await res.json()
-      const seed = (data?.seed ?? '').trim()
-      return seed || null
+      const content = await res.json()
+      const sigs = Object.keys(content?.packages ?? {})
+      const sig = sigs[0]?.trim()
+      return sig && /^[a-f0-9]{64}$/i.test(sig) ? sig.toLowerCase() : null
     } catch {
       return null
     }

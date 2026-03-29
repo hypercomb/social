@@ -43,10 +43,10 @@ export const ensureInstall = async (): Promise<void> => {
   const signature = resolveSignatureFromUrl()
     ?? await resolveLatestSignature()
   if (!signature) {
-    console.warn('[meadowverse:install] no content signature — add ?content=<sig> or ensure latest.json is served')
+    console.warn('[meadowverse:install] no content signature — add ?content=<sig> or ensure manifest.json is served')
     return
   }
-  console.log(`[meadowverse:install] active signature: ${signature} (source: ${resolveSignatureFromUrl() ? 'url' : 'latest.json'})`)
+  console.log(`[meadowverse:install] active signature: ${signature} (source: ${resolveSignatureFromUrl() ? 'url' : 'manifest.json'})`)
   const shouldInstall = await needsInstall(store, signature)
 
   if (!shouldInstall) {
@@ -137,14 +137,19 @@ const resolveSignatureFromUrl = (): string | null => {
 }
 
 const resolveLatestSignature = async (): Promise<string | null> => {
-  const local = await fetchJson(`${CONTENT_BASE_URL}/latest.json`)
-  if (local) return extractSignature(local.seed)
+  const local = await fetchJson(`${CONTENT_BASE_URL}/manifest.json`)
+  if (local) return extractRootFromManifest(local)
   if (isLocalDev) {
-    console.log('[meadowverse:install] local latest.json not found, falling back to server')
-    const remote = await fetchJson(`${AZURE_CONTENT_URL}/latest.json`)
-    return remote ? extractSignature(remote.seed) : null
+    console.log('[meadowverse:install] local manifest.json not found, falling back to server')
+    const remote = await fetchJson(`${AZURE_CONTENT_URL}/manifest.json`)
+    return remote ? extractRootFromManifest(remote) : null
   }
   return null
+}
+
+const extractRootFromManifest = (content: any): string | null => {
+  const sigs = Object.keys(content?.packages ?? {})
+  return extractSignature(sigs[0])
 }
 
 const fetchText = async (url: string): Promise<string | null> => {

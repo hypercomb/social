@@ -302,6 +302,37 @@ export class HomeComponent {
     await this.#exporter.exportPackage(section.rootSig, section.domainName)
   }
 
+  /**
+   * Promote a branch (layer) to its own package root within the same domain.
+   * Creates a new DomainSection using the branch signature as root.
+   */
+  async promoteBranchToPackage(node: TreeNode, sourceSection: DomainSection): Promise<void> {
+    if (!node.signature || node.kind !== 'layer') return
+
+    const branchSig = node.signature
+
+    // check if already promoted
+    if (this.sections().some(s => s.rootSig === branchSig)) return
+
+    // resolve the subtree from local OPFS using the branch as root
+    const root = await this.#resolver.resolveFromLocal(branchSig, sourceSection.domainName)
+    if (!root) return
+
+    const section: DomainSection = {
+      domain: sourceSection.domain,
+      domainName: sourceSection.domainName,
+      rootSig: branchSig,
+      originalRootSig: branchSig,
+      items: root.children,
+      loading: false,
+      error: null,
+      installStatus: null,
+      patches: []
+    }
+
+    this.sections.set([...this.sections(), section])
+  }
+
   #openInspector(node: TreeNode, mode: 'code' | 'detail'): void {
     const section = this.sections().find(s => this.#containsNode(s.items, node.id))
     this.inspectBee.set(node.signature!)

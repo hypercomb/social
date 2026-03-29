@@ -59,7 +59,7 @@ export class SentinelHandler {
     await this.#store.initialize()
 
     for (const domain of domains) {
-      const rootSig = await this.#fetchLatest(domain)
+      const rootSig = await this.#fetchRootSignature(domain)
       if (!rootSig) continue
 
       // Skip install if caller already has this signature
@@ -184,7 +184,7 @@ export class SentinelHandler {
       // Check if this domain is toggled off
       if (toggles[domain] === false || toggles[domainName] === false) continue
 
-      const rootSig = await this.#fetchLatest(domain)
+      const rootSig = await this.#fetchRootSignature(domain)
       if (!rootSig) continue
 
       const manifest = await this.#readCachedManifest(domain, rootSig)
@@ -272,7 +272,7 @@ export class SentinelHandler {
     // Fetch from trusted domains
     const domains = this.#loadDomains()
     for (const domain of domains) {
-      const rootSig = msg.rootSig || await this.#fetchLatest(domain)
+      const rootSig = msg.rootSig || await this.#fetchRootSignature(domain)
       if (!rootSig) continue
 
       const bytes = await this.#fetchAndVerify(domain, rootSig, signature, kind)
@@ -366,13 +366,14 @@ export class SentinelHandler {
     }
   }
 
-  async #fetchLatest(base: string): Promise<string | null> {
+  async #fetchRootSignature(base: string): Promise<string | null> {
     try {
-      const res = await fetch(`${base}/latest.json`, { cache: 'no-store' })
+      const res = await fetch(`${base}/manifest.json`, { cache: 'no-store' })
       if (!res.ok) return null
-      const data = await res.json()
-      const seed = ((data?.seed ?? '') as string).replace(/\uFEFF/g, '').trim()
-      return /^[a-f0-9]{64}$/i.test(seed) ? seed.toLowerCase() : null
+      const content = await res.json()
+      const sigs = Object.keys(content?.packages ?? {})
+      const sig = sigs[0]?.replace(/\uFEFF/g, '').trim()
+      return sig && /^[a-f0-9]{64}$/i.test(sig) ? sig.toLowerCase() : null
     } catch {
       return null
     }

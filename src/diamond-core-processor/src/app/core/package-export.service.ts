@@ -33,6 +33,25 @@ export class PackageExportService {
   #store = inject(DcpStore)
 
   /**
+   * Collect the install manifest for a subtree rooted at the given signature.
+   * Walks layers/bees/deps from that branch — usable as an independent package.
+   */
+  async collectSubtreeManifest(branchSig: string, domain: string): Promise<{
+    layers: string[]
+    bees: string[]
+    dependencies: string[]
+  }> {
+    await this.#store.initialize()
+
+    const layers: string[] = []
+    const bees: string[] = []
+    const dependencies: string[] = []
+    await this.#collectSigs(branchSig, domain, layers, bees, dependencies)
+
+    return { layers, bees, dependencies }
+  }
+
+  /**
    * Export the full package for a given root signature.
    * Tries showDirectoryPicker first, falls back to JSON bundle download.
    */
@@ -78,11 +97,9 @@ export class PackageExportService {
     const dirHandle: FileSystemDirectoryHandle = await picker({ mode: 'readwrite' })
     const rootDir = await dirHandle.getDirectoryHandle(rootSig, { create: true })
 
-    // write latest.json
-    await this.#writeTextFile(rootDir, 'latest.json', JSON.stringify({ seed: rootSig }))
-
-    // write manifest
-    await this.#writeTextFile(rootDir, 'install.manifest.json', JSON.stringify(manifest))
+    // write manifest.json (ContentManifest format)
+    const contentManifest = { version: 1, packages: { [rootSig]: manifest } }
+    await this.#writeTextFile(rootDir, 'manifest.json', JSON.stringify(contentManifest))
 
     // write layers
     const layersDir = await rootDir.getDirectoryHandle('__layers__', { create: true })
