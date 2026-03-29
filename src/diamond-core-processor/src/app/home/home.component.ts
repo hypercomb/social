@@ -3,10 +3,14 @@
 import { Component, computed, effect, inject, signal } from '@angular/core'
 import { TreeResolverService } from '../core/tree-resolver.service'
 import { ToggleStateService } from '../core/toggle-state.service'
+import { PatchStore, type PatchRecord } from '../core/patch-store'
+import { PackageExportService } from '../core/package-export.service'
 import { TreeViewComponent } from '../tree-view/tree-view.component'
 import { AuditorSettingsComponent } from '../settings/auditor-settings.component'
 import { BeeInspectorComponent } from '../tree-view/bee-inspector.component'
 import { DiamondIconComponent } from '../tree-view/diamond-icon.component'
+import { PatchListComponent } from '../patch-list/patch-list.component'
+import type { PatchResult } from '../core/merkle-patch.service'
 import type { BeeDocEntry, TreeNode, TreeNodeKind } from '../core/tree-node'
 
 const DOMAINS_KEY = 'dcp.domains'
@@ -15,16 +19,18 @@ export interface DomainSection {
   domain: string
   domainName: string
   rootSig: string
+  originalRootSig: string
   items: TreeNode[]
   loading: boolean
   error: string | null
   installStatus: string | null
+  patches: PatchRecord[]
 }
 
 @Component({
   selector: 'app-home',
   standalone: true,
-  imports: [TreeViewComponent, AuditorSettingsComponent, BeeInspectorComponent, DiamondIconComponent],
+  imports: [TreeViewComponent, AuditorSettingsComponent, BeeInspectorComponent, DiamondIconComponent, PatchListComponent],
   templateUrl: './home.component.html',
   styleUrls: ['./home.component.scss']
 })
@@ -32,6 +38,8 @@ export class HomeComponent {
 
   readonly #resolver = inject(TreeResolverService)
   readonly #toggleState = inject(ToggleStateService)
+  readonly #patchStore = inject(PatchStore)
+  readonly #exporter = inject(PackageExportService)
 
   // state
   readonly domains = signal<string[]>(this.#loadDomains())
@@ -230,6 +238,42 @@ export class HomeComponent {
     }
   }
 
+  // patch handling
+  async onPatchApplied(result: PatchResult): Promise<void> {
+    const section = this.inspectSection()
+    if (!section) return
+
+    // record the patch
+    await this.#patchStore.record(section.domainName, {
+      originalFileSig: result.originalSig,
+      newFileSig: result.newFileSig,
+      originalRootSig: section.rootSig,
+      newRootSig: result.newRootSig,
+      kind: result.kind,
+      lineage: result.lineage,
+      timestamp: Date.now(),
+      cascadedLayers: result.cascadedLayers
+    })
+
+    // reload patches for this domain
+    section.patches = await this.#patchStore.list(section.domainName)
+
+    // switch to new root
+    await this.#switchSectionRoot(section, result.newRootSig)
+
+    // close inspector
+    this.onCloseInspector()
+  }
+
+  async onSwitchRoot(section: DomainSection, rootSig: string): Promise<void> {
+    await this.#patchStore.setActiveRoot(section.domainName, rootSig)
+    await this.#switchSectionRoot(section, rootSig)
+  }
+
+  async downloadPackage(section: DomainSection): Promise<void> {
+    await this.#exporter.exportPackage(section.rootSig, section.domainName)
+  }
+
   #openInspector(node: TreeNode, mode: 'code' | 'detail'): void {
     const section = this.sections().find(s => this.#containsNode(s.items, node.id))
     this.inspectBee.set(node.signature!)
@@ -276,6 +320,28 @@ export class HomeComponent {
     }
   }
 
+  async #switchSectionRoot(section: DomainSection, rootSig: string): Promise<void> {
+    section.loading = true
+    section.rootSig = rootSig
+    this.#refreshSections()
+
+    try {
+      const root = await this.#resolver.resolveFromLocal(rootSig, section.domainName)
+      if (root) {
+        section.items = root.children
+        section.rootSig = root.signature ?? rootSig
+      } else {
+        section.error = 'Failed to resolve patched tree'
+      }
+    } catch (e: unknown) {
+      section.error = e instanceof Error ? e.message : 'Failed to load patched tree'
+    } finally {
+      section.loading = false
+    }
+
+    this.#refreshSections()
+  }
+
   #findNodeBySig(nodes: TreeNode[], sig: string): TreeNode | null {
     for (const n of nodes) {
       if (n.signature === sig) return n
@@ -301,7 +367,7 @@ export class HomeComponent {
     for (const domain of doms) {
       const domainName = new URL(domain).hostname
       const section: DomainSection = {
-        domain, domainName, rootSig: '', items: [], loading: true, error: null, installStatus: null
+        domain, domainName, rootSig: '', originalRootSig: '', items: [], loading: true, error: null, installStatus: null, patches: []
       }
       results.push(section)
     }
@@ -316,8 +382,20 @@ export class HomeComponent {
         })
         if (root) {
           section.rootSig = root.signature ?? ''
-          // use root's children as the section items (skip the root node itself)
+          section.originalRootSig = root.signature ?? ''
           section.items = root.children
+
+          // load patches and check for active patched root
+          section.patches = await this.#patchStore.list(section.domainName)
+          const activeRoot = await this.#patchStore.activeRoot(section.domainName)
+          if (activeRoot && activeRoot !== section.rootSig) {
+            // hot-swap to the active patched root
+            const patched = await this.#resolver.resolveFromLocal(activeRoot, section.domainName)
+            if (patched) {
+              section.rootSig = patched.signature ?? activeRoot
+              section.items = patched.children
+            }
+          }
         } else {
           section.error = 'No content found'
         }

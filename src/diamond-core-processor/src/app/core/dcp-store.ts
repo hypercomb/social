@@ -17,12 +17,14 @@ export class DcpStore {
   static readonly DEPENDENCIES_DIRECTORY = '__dependencies__'
   static readonly LAYERS_DIRECTORY = '__layers__'
   static readonly RESOURCES_DIRECTORY = '__resources__'
+  static readonly PATCHES_DIRECTORY = '__patches__'
 
   #root!: FileSystemDirectoryHandle
   #bees!: FileSystemDirectoryHandle
   #dependencies!: FileSystemDirectoryHandle
   #layers!: FileSystemDirectoryHandle
   #resources!: FileSystemDirectoryHandle
+  #patches!: FileSystemDirectoryHandle
   #initialized = false
 
   get root(): FileSystemDirectoryHandle { return this.#root }
@@ -30,6 +32,7 @@ export class DcpStore {
   get dependencies(): FileSystemDirectoryHandle { return this.#dependencies }
   get layers(): FileSystemDirectoryHandle { return this.#layers }
   get resources(): FileSystemDirectoryHandle { return this.#resources }
+  get patches(): FileSystemDirectoryHandle { return this.#patches }
 
   async initialize(): Promise<void> {
     if (this.#initialized) return
@@ -40,10 +43,42 @@ export class DcpStore {
     this.#dependencies = await this.#root.getDirectoryHandle(DcpStore.DEPENDENCIES_DIRECTORY, { create: true })
     this.#layers = await this.#root.getDirectoryHandle(DcpStore.LAYERS_DIRECTORY, { create: true })
     this.#resources = await this.#root.getDirectoryHandle(DcpStore.RESOURCES_DIRECTORY, { create: true })
+    this.#patches = await this.#root.getDirectoryHandle(DcpStore.PATCHES_DIRECTORY, { create: true })
   }
 
   async domainLayersDir(domain: string): Promise<FileSystemDirectoryHandle> {
     return await this.#layers.getDirectoryHandle(domain, { create: true })
+  }
+
+  async domainPatchesDir(domain: string): Promise<FileSystemDirectoryHandle> {
+    return await this.#patches.getDirectoryHandle(domain, { create: true })
+  }
+
+  /**
+   * Returns the __layers__ subdirectory within a domain's patch folder.
+   * Patched layers are stored here, separate from the original installation.
+   */
+  async patchedLayersDir(domain: string): Promise<FileSystemDirectoryHandle> {
+    const patchDir = await this.domainPatchesDir(domain)
+    return await patchDir.getDirectoryHandle('__layers__', { create: true })
+  }
+
+  /**
+   * Returns the __bees__ subdirectory within a domain's patch folder.
+   * Patched bees are stored here, separate from the original installation.
+   */
+  async patchedBeesDir(domain: string): Promise<FileSystemDirectoryHandle> {
+    const patchDir = await this.domainPatchesDir(domain)
+    return await patchDir.getDirectoryHandle('__bees__', { create: true })
+  }
+
+  /**
+   * Returns the __dependencies__ subdirectory within a domain's patch folder.
+   * Patched dependencies are stored here, separate from the original installation.
+   */
+  async patchedDepsDir(domain: string): Promise<FileSystemDirectoryHandle> {
+    const patchDir = await this.domainPatchesDir(domain)
+    return await patchDir.getDirectoryHandle('__dependencies__', { create: true })
   }
 
   async writeFile(dir: FileSystemDirectoryHandle, name: string, bytes: ArrayBuffer): Promise<void> {

@@ -79,6 +79,37 @@ export class TreeResolverService {
     return root
   }
 
+  /**
+   * Resolve a tree from local OPFS only — no network calls.
+   * Used after patching to rebuild the tree from a new root sig
+   * where all layers/bees/deps are already stored locally.
+   */
+  async resolveFromLocal(rootSig: string, domain: string): Promise<TreeNode | null> {
+    await this.#store.initialize()
+
+    // resolve dep lineages from all deps in patched + original OPFS
+    this.#depLineage.clear()
+    await this.#resolveDepLineagesFromLocal(domain)
+
+    // fetch root layer JSON from local (patched layers first, then originals)
+    const rootLayer = await this.#fetchLayerLocal(rootSig, domain)
+    if (!rootLayer) return null
+
+    const root = this.#buildNode(rootLayer, rootSig, '', undefined, 0)
+
+    // populate all children recursively (local only)
+    await this.#expandAllLocal(root, domain)
+
+    // audit
+    const allSigs = this.#collectSignatures(root)
+    if (allSigs.length > 0 && this.#auditor.endpoints.length > 0) {
+      const auditResults = await this.#auditor.auditBatch(allSigs)
+      this.#applyAuditResults(root, auditResults)
+    }
+
+    return root
+  }
+
   async expandNode(node: TreeNode, contentBase: string, rootSig: string, domain: string): Promise<void> {
     if (node.loaded) return
     const base = (contentBase ?? '').replace(/\/+$/, '')
@@ -323,5 +354,176 @@ export class TreeResolverService {
     for (const child of node.children) {
       this.#applyAuditResults(child, results)
     }
+  }
+
+  // -------------------------------------------------
+  // local-only resolution (for patched trees)
+  // -------------------------------------------------
+
+  async #fetchLayerLocal(layerSig: string, domain: string): Promise<LayerJson | null> {
+    if (this.#cache.has(layerSig)) return this.#cache.get(layerSig)!
+
+    // check patched layers first
+    const patchedDir = await this.#store.patchedLayersDir(domain)
+    const patchedBytes = await this.#store.readFile(patchedDir, layerSig)
+    if (patchedBytes) {
+      const parsed = JSON.parse(new TextDecoder().decode(patchedBytes)) as LayerJson
+      this.#cache.set(layerSig, parsed)
+      return parsed
+    }
+
+    // check original layers
+    const domainDir = await this.#store.domainLayersDir(domain)
+    const bytes = await this.#store.readFile(domainDir, layerSig)
+    if (bytes) {
+      const parsed = JSON.parse(new TextDecoder().decode(bytes)) as LayerJson
+      this.#cache.set(layerSig, parsed)
+      return parsed
+    }
+
+    return null
+  }
+
+  async #expandChildrenLocal(parent: TreeNode, domain: string): Promise<void> {
+    if (parent.kind !== 'domain' && parent.kind !== 'layer') return
+
+    const layer = this.#cache.get(parent.signature ?? parent.id)
+    if (!layer) return
+
+    const childSigs = layer.layers ?? layer.children ?? []
+    const beeSigs = (layer.bees ?? []).map(s => s.replace(/\.js$/i, ''))
+
+    for (const childSig of childSigs) {
+      const childLayer = await this.#fetchLayerLocal(childSig, domain)
+      if (!childLayer) continue
+
+      const lineage = parent.lineage ? `${parent.lineage}/${childLayer.name}` : childLayer.name
+      const child = this.#buildNode(childLayer, childSig, lineage, parent.id, parent.depth + 1)
+      parent.children.push(child)
+    }
+
+    const beeDocs = layer.docs?.bees
+
+    for (const beeSig of beeSigs) {
+      const doc = beeDocs?.[beeSig]
+      const { kind: beeKind, className } = doc
+        ? { kind: doc.kind as TreeNodeKind, className: doc.className }
+        : await this.#detectBeeInfoLocal(beeSig, domain)
+      const beeNode: TreeNode = {
+        id: beeSig,
+        name: className ? humanize(className) : beeSig.slice(0, 12) + '...',
+        kind: beeKind,
+        signature: beeSig,
+        lineage: parent.lineage,
+        parentId: parent.id,
+        children: [],
+        expanded: false,
+        loaded: true,
+        depth: parent.depth + 1,
+        doc,
+      }
+      parent.children.push(beeNode)
+    }
+
+    if (beeDocs) {
+      for (const [key, doc] of Object.entries(beeDocs)) {
+        if (!key.startsWith('queen:')) continue
+        const queenNode: TreeNode = {
+          id: `${parent.id}:${key}`,
+          name: humanize(doc.className),
+          kind: 'bee',
+          lineage: parent.lineage,
+          parentId: parent.id,
+          children: [],
+          expanded: false,
+          loaded: true,
+          depth: parent.depth + 1,
+          doc,
+        }
+        parent.children.push(queenNode)
+      }
+    }
+
+    const parentLineage = parent.lineage || layer.rel || ''
+    for (const [depSig, depNs] of this.#depLineage) {
+      if (depNs === parentLineage) {
+        const depName = await this.#detectDepClassNameLocal(depSig, domain)
+        const depNode: TreeNode = {
+          id: `${parent.id}:${depSig}`,
+          name: depName ? humanize(depName) : depSig.slice(0, 12) + '...',
+          kind: 'dependency',
+          signature: depSig,
+          lineage: parentLineage,
+          parentId: parent.id,
+          children: [],
+          expanded: false,
+          loaded: true,
+          depth: parent.depth + 1
+        }
+        parent.children.push(depNode)
+      }
+    }
+
+    parent.loaded = true
+  }
+
+  async #expandAllLocal(node: TreeNode, domain: string): Promise<void> {
+    await this.#expandChildrenLocal(node, domain)
+    for (const child of node.children) {
+      if (child.kind === 'layer' || child.kind === 'domain') {
+        await this.#expandAllLocal(child, domain)
+      }
+    }
+  }
+
+  async #resolveDepLineagesFromLocal(domain: string): Promise<void> {
+    // scan both patched and original dependency directories
+    const dirs = [
+      await this.#store.patchedDepsDir(domain),
+      this.#store.dependencies
+    ]
+    for (const dir of dirs) {
+      try {
+        for await (const name of (dir as any).keys()) {
+          if (!name.endsWith('.js')) continue
+          const sig = name.replace(/\.js$/i, '')
+          if (this.#depLineage.has(sig)) continue
+          const bytes = await this.#store.readFile(dir, name)
+          if (!bytes) continue
+          const slice = bytes.byteLength > 512 ? bytes.slice(0, 512) : bytes
+          const text = new TextDecoder().decode(slice)
+          const firstLine = text.split('\n')[0]
+          const match = firstLine.match(/^\/\/\s*@(.+)/)
+          if (match) this.#depLineage.set(sig, match[1].trim())
+        }
+      } catch { /* directory might not exist yet */ }
+    }
+  }
+
+  async #detectBeeInfoLocal(sig: string, domain: string): Promise<{ kind: TreeNodeKind, className: string | null }> {
+    // check patched bees first
+    try {
+      const patchedDir = await this.#store.patchedBeesDir(domain)
+      const bytes = await this.#store.readFile(patchedDir, `${sig}.js`)
+      if (bytes) {
+        const text = new TextDecoder().decode(bytes)
+        const m = text.match(/(?:var\s+(\w+)\s*=\s*class|class\s+(\w+))\s+extends\s+(Worker|Drone|Bee)\b/)
+        if (m) return { kind: (m[3].toLowerCase() === 'bee' ? 'bee' : m[3].toLowerCase()) as TreeNodeKind, className: m[1] || m[2] }
+      }
+    } catch { /* fallback */ }
+    return this.#detectBeeInfo(sig)
+  }
+
+  async #detectDepClassNameLocal(sig: string, domain: string): Promise<string | null> {
+    try {
+      const patchedDir = await this.#store.patchedDepsDir(domain)
+      const bytes = await this.#store.readFile(patchedDir, `${sig}.js`)
+      if (bytes) {
+        const text = new TextDecoder().decode(bytes)
+        const m = text.match(/(?:var\s+(\w+)\s*=\s*class|class\s+(\w+))/)
+        if (m) return m[1] || m[2]
+      }
+    } catch { /* fallback */ }
+    return this.#detectDepClassName(sig)
   }
 }

@@ -3,18 +3,20 @@
 import { Component, computed, effect, inject, input, output, signal } from '@angular/core'
 import { SignatureService } from '@hypercomb/core'
 import { CodeViewerComponent } from '../code-viewer/code-viewer.component'
+import { CodeEditorComponent } from '../code-editor/code-editor.component'
 import { DcpStore } from '../core/dcp-store'
+import { MerklePatchService, type PatchResult } from '../core/merkle-patch.service'
 import type { BeeDocEntry } from '../core/tree-node'
 
 @Component({
   selector: 'dcp-bee-inspector',
   standalone: true,
-  imports: [CodeViewerComponent],
+  imports: [CodeViewerComponent, CodeEditorComponent],
   template: `
     @if (visible()) {
       <div class="page">
         <header class="hdr">
-          <button class="hdr-back" (click)="close.emit()">&larr; Back</button>
+          <button class="hdr-back" (click)="onBack()">&larr; Back</button>
           <div class="hdr-title">
             <span class="hdr-kind" [class.dep]="kind() === 'dependency'" [class.worker]="kind() === 'worker'" [class.drone]="kind() === 'drone'" [class.queen]="doc()?.kind === 'queen'">{{ doc()?.kind ?? kind() }}</span>
             <span class="hdr-name">{{ displayName() }}</span>
@@ -26,6 +28,9 @@ import type { BeeDocEntry } from '../core/tree-node'
             <span class="hdr-sep">&middot;</span>
             <code class="hdr-sig">{{ signature().slice(0, 12) }}&hellip;</code>
             <button class="hdr-copy" (click)="copySig()">{{ sigCopied() ? 'copied' : 'copy sig' }}</button>
+            @if (!editMode() && source() && !loading() && canPatch()) {
+              <button class="hdr-edit" (click)="enterEditMode()">edit</button>
+            }
           </div>
         </header>
 
@@ -77,7 +82,22 @@ import type { BeeDocEntry } from '../core/tree-node'
           }
 
           @if (source() && !loading() && activeView() === 'code') {
-            <hc-code-viewer [code]="source()" />
+            @if (editMode()) {
+              <div class="edit-area">
+                <dcp-code-editor [code]="editSource()" (codeChange)="editSource.set($event)" />
+                @if (patchError()) {
+                  <div class="status error">{{ patchError() }}</div>
+                }
+                <div class="edit-actions">
+                  <button class="patch-btn" (click)="applyPatch()" [disabled]="patching()">
+                    {{ patching() ? 'Compiling...' : 'Apply Patch' }}
+                  </button>
+                  <button class="cancel-btn" (click)="cancelEdit()">Cancel</button>
+                </div>
+              </div>
+            } @else {
+              <hc-code-viewer [code]="source()" />
+            }
           }
         </div>
       </div>
@@ -167,7 +187,7 @@ import type { BeeDocEntry } from '../core/tree-node'
 
     .hdr-sig { color: #aaa; }
 
-    .hdr-copy {
+    .hdr-copy, .hdr-edit {
       font-size: 10px;
       font-weight: 600;
       color: #666;
@@ -178,7 +198,10 @@ import type { BeeDocEntry } from '../core/tree-node'
       margin-left: 2px;
     }
 
-    .hdr-copy:hover { background: #f0f0f0; border-color: #bbb; }
+    .hdr-copy:hover, .hdr-edit:hover { background: #f0f0f0; border-color: #bbb; }
+
+    .hdr-edit { color: #4a6fa5; border-color: rgba(74, 111, 165, 0.3); }
+    .hdr-edit:hover { background: rgba(74, 111, 165, 0.06); }
 
     /* --- scrollable content --- */
 
@@ -294,6 +317,44 @@ import type { BeeDocEntry } from '../core/tree-node'
 
     .source-btn:hover { background: rgba(74, 111, 165, 0.06); }
 
+    /* --- edit mode --- */
+
+    .edit-area {
+      padding-top: 12px;
+      padding-bottom: 24px;
+    }
+
+    .edit-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .patch-btn {
+      padding: 8px 20px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #fff;
+      background: #4a6fa5;
+      border: none;
+      cursor: pointer;
+    }
+
+    .patch-btn:hover:not(:disabled) { background: #3d5d8a; }
+    .patch-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .cancel-btn {
+      padding: 8px 20px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #666;
+      background: none;
+      border: 1px solid #ddd;
+      cursor: pointer;
+    }
+
+    .cancel-btn:hover { background: #f5f5f5; }
+
     /* --- loading / error --- */
 
     .status {
@@ -362,7 +423,7 @@ import type { BeeDocEntry } from '../core/tree-node'
         gap: 4px;
       }
 
-      .hdr-copy { font-size: 10px; padding: 2px 10px; min-height: 28px; }
+      .hdr-copy, .hdr-edit { font-size: 10px; padding: 2px 10px; min-height: 28px; }
 
       .details { padding-top: 14px; padding-bottom: 14px; }
       .desc { font-size: 14px; }
@@ -378,6 +439,13 @@ import type { BeeDocEntry } from '../core/tree-node'
         min-height: 44px;
         width: 100%;
       }
+
+      .patch-btn, .cancel-btn {
+        font-size: 14px;
+        padding: 12px 20px;
+        min-height: 44px;
+        flex: 1;
+      }
     }
   `]
 })
@@ -385,6 +453,7 @@ export class BeeInspectorComponent {
   signature = input.required<string>()
   contentBase = input('')
   rootSig = input('')
+  domainName = input('')
   kind = input<string>('bee')
   doc = input<BeeDocEntry | undefined>(undefined)
   lineage = input('')
@@ -393,8 +462,10 @@ export class BeeInspectorComponent {
   close = output<void>()
   navigateSig = output<string>()
   navigateDep = output<string>()
+  patchApplied = output<PatchResult>()
 
   #store = inject(DcpStore)
+  #patcher = inject(MerklePatchService)
 
   source = signal('')
   loading = signal(false)
@@ -404,6 +475,17 @@ export class BeeInspectorComponent {
   activeView = signal<'code' | 'detail'>('code')
   #loaded = ''
   #byteSize = signal(0)
+
+  // edit mode state
+  editMode = signal(false)
+  editSource = signal('')
+  patching = signal(false)
+  patchError = signal<string | null>(null)
+
+  canPatch = computed(() => {
+    const k = this.kind()
+    return k === 'bee' || k === 'dependency' || k === 'worker' || k === 'drone'
+  })
 
   displayName = computed(() => {
     const d = this.doc()
@@ -437,11 +519,64 @@ export class BeeInspectorComponent {
       const vis = this.visible()
       if (vis && sig) {
         this.activeView.set(this.mode())
+        this.editMode.set(false)
+        this.patchError.set(null)
         if (this.#loaded !== sig) {
           this.#load(sig)
         }
       }
     })
+  }
+
+  onBack(): void {
+    if (this.editMode()) {
+      this.cancelEdit()
+    } else {
+      this.close.emit()
+    }
+  }
+
+  enterEditMode(): void {
+    this.editSource.set(this.source())
+    this.editMode.set(true)
+    this.patchError.set(null)
+  }
+
+  cancelEdit(): void {
+    this.editMode.set(false)
+    this.editSource.set('')
+    this.patchError.set(null)
+  }
+
+  async applyPatch(): Promise<void> {
+    const modified = this.editSource()
+    if (!modified.trim()) {
+      this.patchError.set('Source cannot be empty')
+      return
+    }
+
+    this.patching.set(true)
+    this.patchError.set(null)
+
+    try {
+      const patchKind = (this.kind() === 'dependency' ? 'dependency' : 'bee') as 'bee' | 'dependency'
+
+      const result = await this.#patcher.applyPatch({
+        originalSig: this.signature(),
+        kind: patchKind,
+        modifiedSource: modified,
+        rootSig: this.rootSig(),
+        domain: this.domainName(),
+        lineage: this.lineage()
+      })
+
+      this.editMode.set(false)
+      this.patchApplied.emit(result)
+    } catch (e: unknown) {
+      this.patchError.set(e instanceof Error ? e.message : 'Compilation failed')
+    } finally {
+      this.patching.set(false)
+    }
   }
 
   async copySig(): Promise<void> {
@@ -467,6 +602,25 @@ export class BeeInspectorComponent {
     const dir = isDep ? this.#store.dependencies : this.#store.bees
     const folder = isDep ? '__dependencies__' : '__bees__'
     const label = isDep ? 'Dependency' : 'Bee'
+
+    // check patched files first, then originals
+    const domain = this.domainName()
+    if (domain) {
+      const patchedDir = isDep
+        ? await this.#store.patchedDepsDir(domain)
+        : await this.#store.patchedBeesDir(domain)
+      const patchedBytes = await this.#store.readFile(patchedDir, `${sig}.js`)
+      if (patchedBytes) {
+        const actual = await SignatureService.sign(patchedBytes)
+        if (actual === sig) {
+          this.#byteSize.set(patchedBytes.byteLength)
+          this.source.set(this.#stripSourceMap(new TextDecoder().decode(patchedBytes)))
+          this.loadedFrom.set('local (patched)')
+          this.loading.set(false)
+          return
+        }
+      }
+    }
 
     // 1. check local OPFS first (DCP's own store — same folder structure)
     const localBytes = await this.#store.readFile(dir, `${sig}.js`)

@@ -55,8 +55,15 @@
       <section class="domain-section">
         <div class="domain-header">
           <span class="domain-url" [title]="section.domain">{{ section.domain }}</span>
+          <button class="domain-action" (click)="downloadPackage(section)" title="Download package">&#8615;</button>
           <button class="remove" (click)="removeDomain(section.domain)">&times;</button>
         </div>
+
+        <dcp-patch-list
+          [patches]="section.patches"
+          [activeRootSig]="section.rootSig"
+          [originalRootSig]="section.originalRootSig"
+          (switchRoot)="onSwitchRoot(section, $event)" />
 
         @if (section.loading) {
           <div class="section-status">{{ section.installStatus ?? 'Loading...' }}</div>
@@ -88,6 +95,7 @@
         [signature]="inspectBee()!"
         [contentBase]="inspectSection()!.domain"
         [rootSig]="inspectSection()!.rootSig"
+        [domainName]="inspectSection()!.domainName"
         [kind]="inspectKind()"
         [doc]="inspectDoc()"
         [lineage]="inspectLineage()"
@@ -95,6 +103,7 @@
         [visible]="true"
         (close)="onCloseInspector()"
         (navigateSig)="onNavigateSig($event)"
-        (navigateDep)="onNavigateDep($event)" />
+        (navigateDep)="onNavigateDep($event)"
+        (patchApplied)="onPatchApplied($event)" />
     }
 </div>
