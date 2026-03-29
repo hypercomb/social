@@ -96,6 +96,7 @@ export class TileOverlayDrone extends Drone {
   #editCooldown = false
   #hasSelection = false
   #touchDragging = false
+  #moveActive = false
 
   /** Registered descriptors from provider bees, keyed by name */
   #registeredDescriptors = new Map<string, OverlayActionDescriptor>()
@@ -112,7 +113,7 @@ export class TileOverlayDrone extends Drone {
     'navigation:guard-start', 'navigation:guard-end',
     'mesh:public-changed', 'editor:mode', 'selection:changed',
     'overlay:register-action', 'overlay:unregister-action', 'overlay:neon-color',
-    'drop:dragging', 'drop:pending',
+    'drop:dragging', 'drop:pending', 'move:mode',
   ]
   protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'drop:target']
 
@@ -243,6 +244,11 @@ export class TileOverlayDrone extends Drone {
       this.onEffect<{ active: boolean }>('drop:pending', ({ active }) => {
         this.#dropPending = active
         this.#updatePerTileVisibility()
+        this.#updateVisibility()
+      })
+
+      this.onEffect<{ active: boolean }>('move:mode', ({ active }) => {
+        this.#moveActive = active
         this.#updateVisibility()
       })
     }
@@ -670,7 +676,7 @@ export class TileOverlayDrone extends Drone {
     }
 
     const occupied = this.#currentIndex !== undefined && this.#currentIndex < this.#cellCount
-    const shouldShow = occupied && !this.#editing && !this.#editCooldown && !this.#hasSelection && !this.#touchDragging
+    const shouldShow = occupied && !this.#editing && !this.#editCooldown && !this.#hasSelection && !this.#touchDragging && !this.#moveActive
     this.#overlay.visible = shouldShow
 
     // trigger entry animation on show transition

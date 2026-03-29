@@ -20,28 +20,33 @@ const REMOVE_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96
 const EYE_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96"><path fill="white" d="M48 28c-18 0-33 12-40 20 7 8 22 20 40 20s33-12 40-20c-7-8-22-20-40-20zm0 32c-6.6 0-12-5.4-12-12s5.4-12 12-12 12 5.4 12 12-5.4 12-12 12z"/><circle fill="white" cx="48" cy="48" r="6"/></svg>`
 
 // ── Icon positions ─────────────────────────────────────────────────
+// Hex circumRadius=32 (pointy-top). At ICON_Y the hex half-width is ~27.7px.
+// Icons are 8.75px wide (default). Five slots spaced 10px apart keep
+// everything inside the hex boundary: leftmost edge −24, rightmost edge 24.75.
 const ICON_Y = 5
+const ICON_X_0 = -24   // slot 0 (leftmost)
+const ICON_STEP = 10    // left-edge-to-left-edge spacing
 
 const ACTIONS: OverlayActionDescriptor[] = [
-  // ── private profile ──
-  { name: 'add-sub', fontChar: '~', x: -14, y: ICON_Y, hoverTint: 0xa8ffd8, profile: 'private' },
-  { name: 'edit', fontChar: '2', x: -2, y: ICON_Y, hoverTint: 0xc8d8ff, profile: 'private' },
-  { name: 'remove', svgMarkup: REMOVE_ICON_SVG, x: 7.9375, y: ICON_Y, hoverTint: 0xffc8c8, profile: 'private' },
+  // ── private profile (5 slots: 0–4, slots 3–4 conditional) ──
+  { name: 'add-sub',    fontChar: '~', x: ICON_X_0,                  y: ICON_Y, hoverTint: 0xa8ffd8, profile: 'private' },
+  { name: 'edit',       fontChar: '2', x: ICON_X_0 + ICON_STEP,      y: ICON_Y, hoverTint: 0xc8d8ff, profile: 'private' },
+  { name: 'remove',     fontChar: 'Q', x: ICON_X_0 + ICON_STEP * 2,  y: ICON_Y, hoverTint: 0xffc8c8, profile: 'private' },
+  { name: 'toggle-text', fontChar: 'J', x: ICON_X_0 + ICON_STEP * 3, y: ICON_Y, hoverTint: 0xfff0c8, profile: 'private' },
   {
     name: 'search',
     svgMarkup: SEARCH_ICON_SVG,
-    x: 19.25, y: ICON_Y,
+    x: ICON_X_0 + ICON_STEP * 4, y: ICON_Y,
     hoverTint: 0xc8ffc8,
     profile: 'private',
     visibleWhen: (ctx: OverlayTileContext) => ctx.noImage,
   },
-  { name: 'toggle-text', fontChar: 'J', x: 8.625, y: ICON_Y, iconSize: 10, hoverTint: 0xfff0c8, profile: 'private' },
-  { name: 'toggle-visibility', svgMarkup: EYE_ICON_SVG, x: 19.25, y: ICON_Y, hoverTint: 0xc8e8ff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => !ctx.noImage },
+  { name: 'toggle-visibility', svgMarkup: EYE_ICON_SVG, x: ICON_X_0 + ICON_STEP * 4, y: ICON_Y, hoverTint: 0xc8e8ff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => !ctx.noImage },
   // ── public-own profile ──
-  { name: 'hide', svgMarkup: HIDE_ICON_SVG, x: 8.625, y: ICON_Y, hoverTint: 0xffd8a8, profile: 'public-own' },
+  { name: 'hide', svgMarkup: HIDE_ICON_SVG, x: ICON_X_0 + ICON_STEP * 2, y: ICON_Y, hoverTint: 0xffd8a8, profile: 'public-own' },
   // ── public-external profile ──
-  { name: 'adopt', svgMarkup: ADD_ICON_SVG, x: 8.625, y: ICON_Y, hoverTint: 0xa8ffd8, profile: 'public-external' },
-  { name: 'block', svgMarkup: BLOCK_ICON_SVG, x: -2, y: ICON_Y, hoverTint: 0xffc8c8, profile: 'public-external' },
+  { name: 'adopt', svgMarkup: ADD_ICON_SVG, x: ICON_X_0 + ICON_STEP * 2, y: ICON_Y, hoverTint: 0xa8ffd8, profile: 'public-external' },
+  { name: 'block', svgMarkup: BLOCK_ICON_SVG, x: ICON_X_0 + ICON_STEP, y: ICON_Y, hoverTint: 0xffc8c8, profile: 'public-external' },
 ]
 
 // ── Action names this bee handles ──────────────────────────────────
