@@ -2,35 +2,7 @@
 <div class="tree-home">
     <header class="top-bar">
       <h1 class="title">Diamond Core Processor</h1>
-      <dcp-auditor-settings />
-    </header>
-
-    <!-- domain management -->
-    <div class="domain-input">
-      <input
-        type="text"
-        placeholder="https://example.com/content"
-        [value]="domainInput()"
-        (input)="domainInput.set($any($event.target).value)"
-        (keydown.enter)="addDomain()" />
-      <button class="btn" (click)="addDomain()">Install</button>
-    </div>
-
-    @if (!domains().length) {
-      <a class="sample-link" (click)="domainInput.set('https://storagehypercomb.blob.core.windows.net/dcp')">
-        https://storagehypercomb.blob.core.windows.net/dcp
-      </a>
-    }
-
-    <!-- search + kind filters -->
-    @if (sections().length) {
-      <div class="filter-row">
-        <input
-          type="text"
-          class="search"
-          placeholder="Filter..."
-          [value]="searchTerm()"
-          (input)="searchTerm.set($any($event.target).value)" />
+      <div class="top-bar-right">
         <button class="kind-toggle"
           [class.active]="layersCollapsed()"
           (click)="toggleCollapseAllLayers()">
@@ -47,7 +19,35 @@
             <dcp-diamond [kind]="fk.diamond" />
           </button>
         }
+
+        <dcp-auditor-settings />
       </div>
+    </header>
+
+    <!-- command line -->
+    @if (sections().length) {
+      <dcp-command-line
+        [nodes]="allNodes()"
+        (filterTerm)="onFilterTerm($event)"
+        (kindFilter)="onKindFilter($event)"
+        (selectedNames)="onSelectedNames($event)" />
+    }
+
+    <!-- domain management -->
+    <div class="domain-input">
+      <input
+        type="text"
+        placeholder="https://example.com/content"
+        [value]="domainInput()"
+        (input)="domainInput.set($any($event.target).value)"
+        (keydown.enter)="addDomain()" />
+      <button class="btn" (click)="addDomain()">Install</button>
+    </div>
+
+    @if (!domains().length) {
+      <a class="sample-link" (click)="domainInput.set('https://storagehypercomb.blob.core.windows.net/dcp')">
+        https://storagehypercomb.blob.core.windows.net/dcp
+      </a>
     }
 
     <!-- domain sections -->

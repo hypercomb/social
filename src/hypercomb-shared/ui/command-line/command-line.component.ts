@@ -1,6 +1,7 @@
 // hypercomb-shared/ui/command-line/command-line.component.ts
 
-import { AfterViewInit, Component, computed, ElementRef, signal, ViewChild, type OnDestroy } from '@angular/core'
+import { AfterViewInit, Component, computed, signal, ViewChild, type OnDestroy } from '@angular/core'
+import { CommandShellComponent } from '../command-shell/command-shell.component'
 import type { Lineage } from '../../core/lineage'
 import type { MovementService } from '../../core/movement.service'
 import type { Navigation } from '../../core/navigation'
@@ -97,20 +98,14 @@ const MOVE_ARROW_OFFSETS: Record<string, { dq: number; dr: number }> = {
 @Component({
   selector: 'hc-command-line',
   standalone: true,
+  imports: [CommandShellComponent],
   templateUrl: './command-line.component.html',
   styleUrls: ['./command-line.component.scss']
 })
 export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
-  @ViewChild('input', { read: ElementRef })
-  private inputRef?: ElementRef<HTMLInputElement>
-
-  private get input(): ElementRef<HTMLInputElement> {
-    if (!this.inputRef) {
-      throw new Error('CommandLineComponent input is not available before view init')
-    }
-    return this.inputRef
-  }
+  @ViewChild('shell')
+  private shell!: CommandShellComponent
 
   // Resolve via IoC container (not Angular DI) — these are shared services
   // registered at module load time, available globally via get()
@@ -122,8 +117,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   private get seedProvider(): SeedSuggestionProvider { return get('@hypercomb.social/SeedSuggestionProvider') as SeedSuggestionProvider }
 
   private readonly value = signal('')
-  private readonly activeIndex = signal(0)
-  private readonly suppressed = signal(false)
   private readonly seedSubPath = signal<readonly string[]>([])
   private readonly seedLeaf = signal('')
   /** Tags currently assigned to the seed in bracket-tag mode (for intellisense filtering). */
@@ -147,19 +140,33 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     return [...builtinMatches, ...droneMatches]
   })
 
-  readonly #slashDescriptionMap = computed(() => {
+  readonly slashDescriptionMap = computed<ReadonlyMap<string, string>>(() => {
     const map = new Map<string, string>()
+    const ctx = this.context()
+    if (!ctx.active || ctx.mode !== 'slash') return map
     for (const m of this.#slashMatches()) {
       map.set(m.command.name, m.command.description)
     }
     return map
   })
 
-  public slashDescription = (name: string): string => {
+  /** Prefix of the current suggestion fragment — used by shell for highlight split. */
+  readonly completionTypedPrefix = computed<string>(() => {
     const ctx = this.context()
-    if (!ctx.active || ctx.mode !== 'slash') return ''
-    return this.#slashDescriptionMap().get(name) ?? ''
-  }
+    if (!ctx.active) return ''
+
+    const bracketPhase = this.#bracketPhase()
+    if (bracketPhase === 'items' || bracketPhase === 'path') {
+      return this.seedLeaf()
+    }
+
+    const subPath = this.seedSubPath()
+    if (subPath.length > 0) {
+      return this.seedLeaf()
+    }
+
+    return this.completions.render(ctx.normalized, ctx.style)
+  })
 
 
   /**
@@ -457,7 +464,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   // -------------------------------------------------
 
   public readonly suggestions = computed<readonly string[]>(() => {
-    if (this.suppressed()) return []
+    if (this.shell?.suppressed()) return []
 
     const ctx = this.context()
     if (!ctx.active) return []
@@ -630,7 +637,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (!ctx.active) return ''
 
     const list = this.suggestions()
-    const best = list[this.activeIndex()] ?? list[0]
+    const best = list[this.shell?.activeIndex() ?? 0] ?? list[0]
     if (!best) return ''
 
     const subPath = this.seedSubPath()
@@ -703,34 +710,23 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   // -------------------------------------------------
 
   public ngAfterViewInit(): void {
-    this.input.nativeElement.focus()
-    this.syncSignalsFromDom()
+    this.shell.focus()
 
     window.addEventListener('navigate', this.#onNavigate)
     window.addEventListener('popstate', this.#onNavigate)
     this.#commandLineToggleUnsub = EffectBus.on<{ cmd: string }>('keymap:invoke', (payload) => {
       if (payload?.cmd !== 'ui.commandLineToggle') return
-      if (document.activeElement === this.input.nativeElement) {
-        this.input.nativeElement.blur()
-      } else {
-        this.input.nativeElement.focus()
-      }
+      this.shell.focus()
     })
-    this.input.nativeElement.addEventListener('focus', this.#onInputFocus)
 
     this.#prefillUnsub = EffectBus.on<{ value: string }>('search:prefill', ({ value }) => {
-      this.input.nativeElement.value = value
-      this.input.nativeElement.focus()
-      this.placeCaretAtEnd()
-      this.suppressed.set(false)
-      this.syncSignalsFromDom()
+      this.#setShellValue(value, false)
     })
 
     this.#touchDraggingUnsub = EffectBus.on<{ active: boolean }>('touch:dragging', ({ active }) => {
       this.touchDragging.set(active)
       if (active) {
-        this.input.nativeElement.blur()
-        this.suppressed.set(true)
+        this.shell.suppress()
       }
     })
 
@@ -745,41 +741,31 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
       const selected = payload.selected
       if (selected.length === 0) {
-        // Selection cleared externally — clear select mode if we're in it
         if (this.#selectPhase() !== 'none') {
           this.clear()
         }
         return
       }
 
-      // Only sync if bar is empty or already in select mode
       const ctx = this.context()
-      if (!ctx.active || ctx.mode === 'select' || this.input.nativeElement.value === '') {
+      if (!ctx.active || ctx.mode === 'select' || this.value() === '') {
         this.#syncDirection = 'visual'
-        // Preserve any corded command tail after ']' (e.g., /select[a,b]/cut → /select[a,b,c]/cut)
-        const currentValue = this.input.nativeElement.value
+        const currentValue = this.value()
         const bracketCloseIdx = currentValue.indexOf(']')
         const tail = bracketCloseIdx >= 0 ? currentValue.slice(bracketCloseIdx + 1) : ''
-        this.input.nativeElement.value = this.#buildSelectValue(selected, this.#shouldTruncate(selected)) + tail
-        this.suppressed.set(true)
-        this.placeCaretAtEnd()
-        this.syncSignalsFromDom()
+        this.#setShellValue(this.#buildSelectValue(selected, this.#shouldTruncate(selected)) + tail, true)
         this.#syncDirection = 'idle'
       }
     })
 
     // voice input: live interim preview while speaking
     this.#voiceInterimUnsub = EffectBus.on<{ text: string }>('voice:interim', ({ text }) => {
-      this.input.nativeElement.value = text
-      this.suppressed.set(false)
-      this.syncSignalsFromDom()
+      this.#setShellValue(text, false)
     })
 
     // voice input: auto-submit on release (push-to-talk complete)
     this.#voiceSubmitUnsub = EffectBus.on<{ text: string }>('voice:submit', ({ text }) => {
-      this.input.nativeElement.value = text
-      this.suppressed.set(false)
-      this.syncSignalsFromDom()
+      this.#setShellValue(text, false)
       void this.#preprocessTagsThenExecute(text)
     })
 
@@ -802,23 +788,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   #voiceInterimUnsub?: () => void
   #voiceSubmitUnsub?: () => void
   readonly #onNavigate = (): void => { this.clear() }
-
-  /** On focus: expand truncated /select[...] back to full names */
-  readonly #onInputFocus = (): void => {
-    const v = this.input.nativeElement.value
-    if (!isSelectInput(v)) return
-    const selection = get('@diamondcoreprocessor.com/SelectionService') as any
-    if (!selection || selection.count === 0) return
-    const full = Array.from(selection.selected as Set<string>)
-    // Preserve any corded command tail after ']'
-    const bracketCloseIdx = v.indexOf(']')
-    const tail = bracketCloseIdx >= 0 ? v.slice(bracketCloseIdx + 1) : ''
-    this.#syncDirection = 'visual'
-    this.input.nativeElement.value = '/select[' + full.join(',') + ']' + tail
-    this.placeCaretAtEnd()
-    this.syncSignalsFromDom()
-    this.#syncDirection = 'idle'
-  }
 
   // ── voice input (push-to-hold mic button) ────────────
 
@@ -846,94 +815,25 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.#voiceActiveUnsub?.()
     window.removeEventListener('navigate', this.#onNavigate)
     window.removeEventListener('popstate', this.#onNavigate)
-    this.input.nativeElement.removeEventListener('focus', this.#onInputFocus)
   }
 
-  // -------------------------------------------------
-  // template helpers (required)
-  // -------------------------------------------------
-
-  public getActiveIndex = (): number => this.activeIndex()
-
-  public typedPart = (s: string): string => {
-    const ctx = this.context()
-    if (!ctx.active) return ''
-
-    // bracket mode: highlight the leaf prefix within the suggestion
-    const bracketPhase = this.#bracketPhase()
-    if (bracketPhase === 'items' || bracketPhase === 'path') {
-      const leaf = this.seedLeaf()
-      return s.slice(0, Math.min(leaf.length, s.length))
-    }
-
-    // sub-path mode: highlight the leaf prefix within the child name
-    const subPath = this.seedSubPath()
-    if (subPath.length > 0) {
-      const leaf = this.seedLeaf()
-      return s.slice(0, Math.min(leaf.length, s.length))
-    }
-
-    const rendered = this.completions.render(s, ctx.style)
-    const prefix = this.completions.render(ctx.normalized, ctx.style)
-    return rendered.slice(0, Math.min(prefix.length, rendered.length))
-  }
-
-  public restPart = (s: string): string => {
-    const ctx = this.context()
-    if (!ctx.active) return s
-
-    // bracket mode: rest is everything after the leaf prefix
-    const bracketPhase = this.#bracketPhase()
-    if (bracketPhase === 'items' || bracketPhase === 'path') {
-      const leaf = this.seedLeaf()
-      return s.slice(Math.min(leaf.length, s.length))
-    }
-
-    // sub-path mode: rest is everything after the leaf prefix
-    const subPath = this.seedSubPath()
-    if (subPath.length > 0) {
-      const leaf = this.seedLeaf()
-      return s.slice(Math.min(leaf.length, s.length))
-    }
-
-    const rendered = this.completions.render(s, ctx.style)
-    const prefix = this.completions.render(ctx.normalized, ctx.style)
-    return rendered.slice(Math.min(prefix.length, rendered.length))
-  }
-
-  public onShellMouseDown = (e: MouseEvent): void => {
-    if (e.target === this.input.nativeElement) return
-    e.preventDefault()
-    this.input.nativeElement.focus()
-  }
-
-  public onSuggestionMouseDown = (e: MouseEvent, s: string, i: number): void => {
-    e.preventDefault()
-    this.activeIndex.set(i)
-    this.acceptCompletion(s)
-  }
+  // template helpers removed — now owned by CommandShellComponent
 
   // -------------------------------------------------
   // input handling
   // -------------------------------------------------
 
-  public onInput = (): void => {
-    // Strip leading spaces — they break ghost text alignment
-    const el = this.input.nativeElement
-    if (el.value !== el.value.trimStart()) {
-      el.value = el.value.trimStart()
-    }
-    this.suppressed.set(false)
-    this.syncSignalsFromDom()
-    this.clampActiveIndex()
+  /** Bridge: shell value changed (fires on every keystroke). */
+  public onShellValueChange = (v: string): void => {
+    this.value.set(v)
 
     // auto-populate index when typing '(' after /move
-    if (this.#autoPopulateMoveIndex(el)) {
-      this.syncSignalsFromDom()
+    if (this.#autoPopulateMoveIndex(v)) {
+      // shell value was mutated — re-sync
     }
 
     // direct command — bare word matches a queen bee, fire immediately
-    if (this.#tryDirectCommand(el)) return
+    if (this.#tryDirectCommand(v)) return
 
     const ctx = this.context()
     if (ctx.active && ctx.mode === 'filter') {
@@ -967,8 +867,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    * queen bee's command or alias, fire it immediately and clear the input.
    * No Enter, no slash — the queen speaks and the hive acts.
    */
-  #tryDirectCommand(el: HTMLInputElement): boolean {
-    const raw = el.value.trim()
+  #tryDirectCommand(v: string): boolean {
+    const raw = v.trim()
     if (!raw || raw.length < 2) return false
 
     // skip anything that looks like another mode
@@ -985,8 +885,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         && typeof instance.matches === 'function'
         && instance.matches(raw)) {
         // fire and clear
-        el.value = ''
-        el.dispatchEvent(new Event('input', { bubbles: true }))
+        this.clear()
         void instance.invoke('')
         return true
       }
@@ -996,11 +895,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   private lastFilterKeyword = ''
 
-  public onKeyDown = (e: KeyboardEvent): void => {
-    const el = this.input.nativeElement
-    const v = el.value
+  /** Bridge: shell forwarded a keydown it didn't consume (not Escape/Up/Down/Tab/Enter). */
+  public onShellKeydown = (e: KeyboardEvent): void => {
+    const v = this.value()
 
-    // Escape in select mode: collapse back to /select[tiles] or clear (before completion keys)
+    // Escape in select mode: collapse back to /select[tiles] or clear
     if (e.key === 'Escape' && this.#selectPhase() !== 'none') {
       e.preventDefault()
       this.#cancelSelectOperation()
@@ -1018,7 +917,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     }
 
     // Plain Up/Down in move-target-index: increment/decrement the index number.
-    // Works even with an empty paren — /move( + Up → /move(1
     if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && this.#selectPhase() === 'move-target-index') {
       e.preventDefault()
       const parenIdx = v.lastIndexOf('(')
@@ -1027,24 +925,17 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         const current = raw === '' ? 0 : parseInt(raw, 10)
         if (!isNaN(current)) {
           const next = e.key === 'ArrowUp' ? current + 1 : Math.max(0, current - 1)
-          el.value = v.slice(0, parenIdx + 1) + next
-          this.syncSignalsFromDom()
-          el.dispatchEvent(new Event('input', { bubbles: true }))
+          this.shell.setValue(v.slice(0, parenIdx + 1) + next)
+          this.value.set(this.shell.value())
         }
       }
       return
     }
+  }
 
-    if (this.handleCompletionKeys(e)) return
-
-    // Universal tag pre-processing: on any Enter, extract and persist tag assignments
-    // from the input, then rewrite the input with tags stripped so downstream handlers
-    // see clean labels. Handles: label:tag, label:tag(#color), ~label:tag (remove).
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      void this.#preprocessTagsThenExecute(v)
-      return
-    }
+  /** Bridge: shell Enter pressed — tag pre-process then execute. */
+  public onShellCommit = (v: string): void => {
+    void this.#preprocessTagsThenExecute(v)
   }
 
   /**
@@ -1053,13 +944,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    */
   async #preprocessTagsThenExecute(original: string): Promise<void> {
     const cleaned = await this.#extractAndPersistTags(original)
-    const el = this.input.nativeElement
 
-    // Update the input element with cleaned value (tags stripped)
+    // Update the shell value with cleaned value (tags stripped)
     if (cleaned !== original) {
-      el.value = cleaned
-      el.dispatchEvent(new Event('input', { bubbles: true }))
-      this.syncSignalsFromDom()
+      this.shell.setValue(cleaned)
+      this.value.set(cleaned)
     }
 
     const v = cleaned
@@ -1072,7 +961,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     // bracket command execution (/select[, /format[, /fmt[, /fp[)
     if (isSelectInput(v)) {
-      this.input.nativeElement.value = normalizeSelectInput(v)
+      this.shell.setValue(normalizeSelectInput(v))
+      this.value.set(this.shell.value())
       void this.#executeSelectCommand()
       return
     }
@@ -1103,7 +993,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   // -------------------------------------------------
 
   private readonly commitCreateSeedInPlace = async (): Promise<void> => {
-    const rawInput = this.input.nativeElement.value.trim()
+    const rawInput = this.value().trim()
     if (!rawInput) return
 
     const navigateAfterCreate = rawInput.startsWith('/') || rawInput.endsWith('/')
@@ -1138,10 +1028,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       // retain parent path so user can keep adding children
       // e.g. "interests/cigars" → leaves "interests/" in the bar
       const prefix = parts.slice(0, -1).map(p => this.completions.render(p, 'space')).join('/')
-      this.input.nativeElement.value = prefix + '/'
-      this.placeCaretAtEnd()
-      this.suppressed.set(true)
-      this.syncSignalsFromDom()
+      this.#setShellValue(prefix + '/', true)
     } else {
       this.clear()
     }
@@ -1152,7 +1039,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   // -------------------------------------------------
 
   readonly #executeSlashCommand = async (): Promise<void> => {
-    const raw = this.input.nativeElement.value.slice(1).trim()
+    const raw = this.value().slice(1).trim()
     if (!raw) { this.clear(); return }
 
     // split on first space or '(' — /move(5) → command 'move', args '(5)'
@@ -1176,7 +1063,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   // -------------------------------------------------
 
   readonly #executeSelectCommand = async (): Promise<void> => {
-    const v = this.input.nativeElement.value.trim()
+    const v = this.value().trim()
     const bracketClose = v.indexOf(']')
     if (bracketClose < 0) { return } // brackets not closed yet, no-op
 
@@ -1498,7 +1385,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   /** Whether to truncate: 4+ items or bracket content > 64 chars, and input is unfocused */
   #shouldTruncate(labels: readonly string[]): boolean {
-    if (document.activeElement === this.input.nativeElement) return false
+    if (document.activeElement?.closest('hc-command-shell')) return false
     if (labels.length >= 4) return true
     return labels.join(',').length > 64
   }
@@ -1510,8 +1397,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    * current index so they can immediately scrub with arrow keys.
    * Returns true if the value was modified.
    */
-  #autoPopulateMoveIndex(el: HTMLInputElement): boolean {
-    const v = el.value
+  #autoPopulateMoveIndex(v: string): boolean {
     // Match /move( at the end with nothing after the paren (just typed it)
     if (!v.match(/\/move\($/i)) return false
 
@@ -1520,17 +1406,16 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const activeLabel = selection?.active
     if (!activeLabel) {
       // No active tile — default to 0
-      el.value = v + '0'
+      this.shell.setValue(v + '0')
+      this.value.set(this.shell.value())
       return true
     }
 
     // Find the index of the active tile
-    const axialSvc = get('@diamondcoreprocessor.com/AxialService') as any
-    const cellLabels = (get('@diamondcoreprocessor.com/MoveDrone') as any)?._cellLabels
-    // Fall back to scanning axial items for the label's position
     const seedNames = this.seedNames$()
     const idx = seedNames.indexOf(activeLabel)
-    el.value = v + (idx >= 0 ? idx : 0)
+    this.shell.setValue(v + (idx >= 0 ? idx : 0))
+    this.value.set(this.shell.value())
     return true
   }
 
@@ -1544,7 +1429,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   /** Increment/decrement the numeric index inside /move(N) by `delta` (+1 or -1). */
   #scrubMoveIndex(delta: number): void {
-    const v = this.input.nativeElement.value
+    const v = this.value()
     const parenIdx = v.lastIndexOf('(')
     if (parenIdx < 0) return
 
@@ -1557,8 +1442,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const maxIndex = axialSvc.items.size - 1
     const newIndex = Math.max(0, Math.min(currentIndex + delta, maxIndex))
 
-    this.input.nativeElement.value = v.slice(0, parenIdx + 1) + newIndex
-    this.syncSignalsFromDom()
+    this.shell.setValue(v.slice(0, parenIdx + 1) + newIndex)
+    this.value.set(this.shell.value())
   }
 
   /** Scrub the move target index with Ctrl+Arrow using hex offsets. Returns true if handled. */
@@ -1568,8 +1453,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     e.preventDefault()
 
-    const el = this.input.nativeElement
-    const v = el.value
+    const v = this.value()
     const parenIdx = v.lastIndexOf('(')
     if (parenIdx < 0) return true
 
@@ -1594,20 +1478,16 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     }
     if (newIndex < 0) return true // out of bounds
 
-    // Update the input and trigger preview
-    el.value = v.slice(0, parenIdx + 1) + newIndex
-    this.syncSignalsFromDom()
-    el.dispatchEvent(new Event('input', { bubbles: true }))
+    // Update the shell and sync
+    this.shell.setValue(v.slice(0, parenIdx + 1) + newIndex)
+    this.value.set(this.shell.value())
     return true
   }
 
   #collapseToSelect(labels: readonly string[]): void {
     // Trust the labels parameter — SelectionService may be stale after async operations
     if (labels.length > 0) {
-      this.input.nativeElement.value = this.#buildSelectValue([...labels], this.#shouldTruncate(labels))
-      this.suppressed.set(true)
-      this.placeCaretAtEnd()
-      this.syncSignalsFromDom()
+      this.#setShellValue(this.#buildSelectValue([...labels], this.#shouldTruncate(labels)), true)
     } else {
       this.clear()
     }
@@ -1632,7 +1512,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     // If there's an operation after ] (e.g. /select[tiles]/cut), collapse to /select[tiles]
     // Otherwise (selection phase or bare /select[tiles]), clear everything
-    const v = this.input.nativeElement.value
+    const v = this.value()
     const bracketClose = v.indexOf(']')
     const hasOperation = bracketClose >= 0 && v.slice(bracketClose + 1).startsWith('/')
     if (hasOperation && labels.length > 0) {
@@ -1646,123 +1526,61 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   // completion logic
   // -------------------------------------------------
 
-  private readonly handleCompletionKeys = (e: KeyboardEvent): boolean => {
-    const list = this.suggestions()
-    if (!list.length) return false
-
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      this.suppressed.set(true)
-      return true
-    }
-
-    if (e.key === 'ArrowDown') {
-      e.preventDefault()
-      this.activeIndex.update((v: number) => Math.min(v + 1, list.length - 1))
-      return true
-    }
-
-    if (e.key === 'ArrowUp') {
-      e.preventDefault()
-      this.activeIndex.update((v: number) => Math.max(v - 1, 0))
-      return true
-    }
-
-    if (e.key === 'Tab' || e.key === 'ArrowRight') {
-      e.preventDefault()
-      this.acceptCompletion()
-      return true
-    }
-
-    return false
-  }
-
-  private readonly acceptCompletion = (forced?: string): void => {
+  /** Bridge: shell accepted a suggestion (Tab/ArrowRight/click). */
+  public onShellCompletionAccepted = (best: string): void => {
     const ctx = this.context()
     if (!ctx.active) return
-
-    const list = this.suggestions()
-    const best = forced ?? list[this.activeIndex()] ?? list[0]
-    if (!best) return
 
     // tag mode: persist tag, then leave label: in input for chaining
     if (ctx.mode === 'tag') {
       const full = ctx.head + best
       const head = ctx.head // e.g. "echo:"
       void this.#extractAndPersistTags(full).then(() => {
-        this.input.nativeElement.value = head
-        this.suppressed.set(false)
-        this.placeCaretAtEnd()
-        this.syncSignalsFromDom()
+        this.#setShellValue(head, false)
       })
       return
     }
 
     // slash mode: fill command name or remove-arg seed name
     if (ctx.mode === 'slash') {
-      // remove context: head contains the prefix (e.g. "/remove[" or "/remove[a,")
-      // so we append the seed name to it
       if (ctx.head.match(/^\/(remove|rm)[\s\[]/i)) {
-        this.input.nativeElement.value = ctx.head + best
-        this.suppressed.set(false)
-        this.placeCaretAtEnd()
-        this.syncSignalsFromDom()
+        this.#setShellValue(ctx.head + best, false)
         return
       }
-      this.input.nativeElement.value = '/' + best
-      this.suppressed.set(true)
-      this.placeCaretAtEnd()
-      this.syncSignalsFromDom()
+      this.#setShellValue('/' + best, true)
       return
     }
 
     // select mode: completion depends on phase
     if (ctx.mode === 'select') {
       const phase = this.#selectPhase()
-      const raw = this.input.nativeElement.value
+      const raw = this.value()
 
-      // selection phase: insert name (user adds comma or ] themselves)
       if (phase === 'selection') {
         const lastSep = Math.max(raw.lastIndexOf(','), raw.lastIndexOf('['))
         const before = raw.slice(0, lastSep + 1)
         const spacer = raw.lastIndexOf(',') >= 0 ? ' ' : ''
         this.#syncDirection = 'command'
-        this.input.nativeElement.value = before + spacer + best
-        this.suppressed.set(false)
-        this.placeCaretAtEnd()
-        this.syncSignalsFromDom()
-        this.input.nativeElement.dispatchEvent(new Event('input', { bubbles: true }))
+        this.#setShellValue(before + spacer + best, false)
         this.#syncDirection = 'idle'
         return
       }
 
-      // operation phase: complete the operation keyword (suggestions include / prefix)
       if (phase === 'operation') {
         const bracketClose = raw.indexOf(']')
         const prefix = raw.slice(0, bracketClose + 1)
         const op = best.startsWith('/') ? best : '/' + best
-        this.input.nativeElement.value = prefix + op
-        this.suppressed.set(true)
-        this.placeCaretAtEnd()
-        this.syncSignalsFromDom()
+        this.#setShellValue(prefix + op, true)
         return
       }
 
-      // move-path phase: complete directory name and append /
       if (phase === 'move-path') {
-        this.input.nativeElement.value = ctx.head + best + '/'
-        this.suppressed.set(false)
-        this.placeCaretAtEnd()
-        this.syncSignalsFromDom()
+        this.#setShellValue(ctx.head + best + '/', false)
         return
       }
 
-      // move-target-swap: complete tile name
       if (phase === 'move-target-swap') {
-        this.input.nativeElement.value = ctx.head + best + ']'
-        this.suppressed.set(true)
-        this.placeCaretAtEnd()
-        this.syncSignalsFromDom()
+        this.#setShellValue(ctx.head + best + ']', true)
         return
       }
 
@@ -1771,7 +1589,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     const bracketPhase = this.#bracketPhase()
     const subPath = this.seedSubPath()
-    const raw = this.input.nativeElement.value
+    const raw = this.value()
 
     // bracket-items mode: insert name after last comma (or after [)
     if (bracketPhase === 'items') {
@@ -1780,22 +1598,16 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       const insertAt = lastComma >= 0 ? lastComma + 1 : raw.indexOf('[') + 1
       const before = raw.slice(0, insertAt)
       const spacer = lastComma >= 0 ? ' ' : ''
-      // tag completion: colon-bracket mode uses plain names; legacy uses :prefix
       const isTagLeaf = leaf.startsWith(':') || leaf.startsWith('~:')
       if (isTagLeaf && this.#colonBracketMode) {
-        // seed:[...] mode: items are plain names, ~ for removal
         const removePrefix = leaf.startsWith('~:') ? '~' : ''
-        this.input.nativeElement.value = before + spacer + removePrefix + best
+        this.#setShellValue(before + spacer + removePrefix + best, false)
       } else if (isTagLeaf) {
-        // legacy abc[:tag] mode: preserve :prefix
         const tagPrefix = leaf.startsWith('~:') ? '~:' : ':'
-        this.input.nativeElement.value = before + spacer + tagPrefix + best
+        this.#setShellValue(before + spacer + tagPrefix + best, false)
       } else {
-        this.input.nativeElement.value = before + spacer + best
+        this.#setShellValue(before + spacer + best, false)
       }
-      this.suppressed.set(false)
-      this.placeCaretAtEnd()
-      this.syncSignalsFromDom()
       this.updateSeedSubPath()
       return
     }
@@ -1803,15 +1615,12 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // bracket-path mode: rebuild bracket prefix + path with accepted child
     if (bracketPhase === 'path') {
       const bracketClose = raw.indexOf(']')
-      const bracketPrefix = raw.slice(0, bracketClose + 2) // [items]/
+      const bracketPrefix = raw.slice(0, bracketClose + 2)
       if (subPath.length > 0) {
-        this.input.nativeElement.value = bracketPrefix + subPath.join('/') + '/' + best + '/'
+        this.#setShellValue(bracketPrefix + subPath.join('/') + '/' + best + '/', false)
       } else {
-        this.input.nativeElement.value = bracketPrefix + best + '/'
+        this.#setShellValue(bracketPrefix + best + '/', false)
       }
-      this.suppressed.set(false)
-      this.placeCaretAtEnd()
-      this.syncSignalsFromDom()
       this.updateSeedSubPath()
       return
     }
@@ -1819,42 +1628,35 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // sub-path mode: rebuild the full path with the accepted child name
     if (subPath.length > 0) {
       const pathPrefix = subPath.join('/') + '/'
-      this.input.nativeElement.value = pathPrefix + best + '/'
-      this.suppressed.set(false)
-      this.placeCaretAtEnd()
-      this.syncSignalsFromDom()
+      this.#setShellValue(pathPrefix + best + '/', false)
       this.updateSeedSubPath()
       return
     }
 
     const rendered = this.completions.render(best, ctx.style)
+    const newValue = (ctx.mode === 'marker' || ctx.mode === 'remove')
+      ? ctx.head + rendered
+      : rendered
 
-    this.input.nativeElement.value =
-      (ctx.mode === 'marker' || ctx.mode === 'remove')
-        ? ctx.head + rendered
-        : rendered
-
-    this.suppressed.set(true)
-    this.placeCaretAtEnd()
-    this.syncSignalsFromDom()
-  }
-
-  private readonly clampActiveIndex = (): void => {
-    const max = this.suggestions().length - 1
-    this.activeIndex.update((v: number) => Math.max(0, Math.min(v, max)))
+    this.#setShellValue(newValue, true)
   }
 
   // -------------------------------------------------
-  // parsing / seed creation helpers
+  // ui helpers (delegated to shell)
   // -------------------------------------------------
 
-  // -------------------------------------------------
-  // ui helpers
-  // -------------------------------------------------
+  /** Set shell value and sync local state. */
+  #setShellValue(v: string, suppress: boolean): void {
+    this.shell.setValue(v)
+    this.value.set(v)
+    if (suppress) this.shell.suppress()
+    else this.shell.unsuppress()
+    this.shell.placeCaretAtEnd()
+  }
 
   private readonly clear = (): void => {
-    this.input.nativeElement.value = ''
-    this.syncSignalsFromDom()
+    this.shell.clear()
+    this.value.set('')
     this.seedSubPath.set([])
     this.seedLeaf.set('')
     this.seedProvider.query([])
@@ -1879,15 +1681,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       this.navigation.replaceRaw(this.#selectOriginalSegments)
       this.#selectOriginalSegments = null
     }
-  }
-
-  private readonly placeCaretAtEnd = (): void => {
-    const el = this.input.nativeElement
-    queueMicrotask(() => el.setSelectionRange(el.value.length, el.value.length))
-  }
-
-  private readonly syncSignalsFromDom = (): void => {
-    this.value.set(this.input.nativeElement.value)
   }
 
   private readonly requestSynchronize = (): void => {
@@ -2134,7 +1927,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     // Live preview when target index is being typed
     if (phase === 'move-target-index') {
-      const v = this.input.nativeElement.value
+      const v = this.value()
       const parenStart = v.lastIndexOf('(')
       const rawIndex = v.slice(parenStart + 1).replace(/\)$/, '')
       const targetIndex = parseInt(rawIndex, 10)
@@ -2163,7 +1956,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     // Real-time navigation when in move-path phase
     if (phase === 'move-path') {
-      const v = this.input.nativeElement.value
+      const v = this.value()
       const moveStart = v.indexOf('/move')
       if (moveStart >= 0) {
         const afterMove = v.slice(moveStart + 5) // after /move
@@ -2240,7 +2033,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   }
 
   private readonly updateSeedSubPath = (): void => {
-    const raw = this.input.nativeElement.value.trim()
+    const raw = this.value().trim()
 
     // detect bracket mode: [items]/path
     const bracketOpen = raw.indexOf('[')

@@ -1,0 +1,316 @@
+// hypercomb-shared/ui/command-shell/command-shell.component.scss
+//
+// Shared terminal-style command shell — visual layer only.
+// Inlines breakpoint values so consumers don't need the shared mixin.
+
+$bp-phone-max: 599px;
+$bp-tablet: 600px;
+$bp-tablet-land: 1024px;
+
+:host {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+
+  --glow-color: #4da6ff;
+  --glow-color-rgb: 77, 166, 255;
+  --glow-dim: rgba(var(--glow-color-rgb), 0.25);
+  --shell-bg: rgba(8, 18, 28, 0.65);
+  --shell-border: rgba(var(--glow-color-rgb), 0.2);
+  --shell-border-focus: rgba(var(--glow-color-rgb), 0.5);
+  --terminal-font: ui-monospace, sfmono-regular, menlo, consolas, monospace;
+  --transition-speed: 200ms;
+}
+
+.command-bar {
+  position: relative;
+  width: 100%;
+}
+
+.command-shell {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--shell-bg);
+  border: 1px solid var(--shell-border);
+  border-radius: 3px;
+  padding: 0 0.25rem;
+  box-shadow:
+    0 0 4px rgba(var(--glow-color-rgb), 0.08),
+    0 -2px 4px rgba(var(--glow-color-rgb), 0.06),
+    0 2px 4px rgba(var(--glow-color-rgb), 0.06),
+    inset 0 0 4px rgba(var(--glow-color-rgb), 0.03);
+  transition:
+    border-color var(--transition-speed) ease,
+    box-shadow var(--transition-speed) ease;
+  user-select: none;
+  cursor: default;
+}
+
+.command-shell:focus-within {
+  border-color: var(--shell-border-focus);
+  box-shadow:
+    0 0 6px var(--glow-dim),
+    0 -3px 6px rgba(var(--glow-color-rgb), 0.12),
+    0 3px 6px rgba(var(--glow-color-rgb), 0.12),
+    0 0 20px rgba(var(--glow-color-rgb), 0.1),
+    inset 0 0 6px rgba(var(--glow-color-rgb), 0.05);
+}
+
+.command-shell:focus-within .command-row::before {
+  opacity: 1;
+}
+
+.command-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 2.2rem;
+
+  &::before {
+    content: '>';
+    flex-shrink: 0;
+    padding-left: 0.6rem;
+    font-family: var(--terminal-font);
+    font-size: 0.9em;
+    font-weight: 600;
+    color: var(--glow-color);
+    opacity: 0.7;
+    transition: opacity var(--transition-speed) ease;
+  }
+}
+
+.ghost {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 0.75rem;
+  padding-left: calc(0.6rem + 0.6em + 0.75rem);
+  background: transparent;
+  border: none;
+  outline: none;
+  font-family: var(--terminal-font);
+  font-size: 0.85em;
+  letter-spacing: 0.02em;
+  color: rgba(var(--glow-color-rgb), 0.3);
+  pointer-events: none;
+  user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.command-input {
+  width: 100%;
+  padding: 0.4rem 0.75rem;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-family: var(--terminal-font);
+  font-size: 0.85em;
+  letter-spacing: 0.02em;
+  color: whitesmoke;
+  caret-color: var(--glow-color);
+  user-select: text;
+  cursor: text;
+}
+
+.command-input::placeholder {
+  color: rgba(var(--glow-color-rgb), 0.3);
+}
+
+.command-results {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 0.4rem);
+  z-index: 10;
+  margin: 0;
+  padding: 0.45rem;
+  list-style: none;
+  border-radius: 3px;
+  background: rgba(8, 14, 22, 0.92);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--shell-border);
+  box-shadow:
+    0 0 6px var(--glow-dim),
+    0 0 16px rgba(var(--glow-color-rgb), 0.08),
+    0 8px 32px rgba(0, 0, 0, 0.5);
+  max-height: 16rem;
+  overflow: auto;
+  font-family: var(--terminal-font);
+  font-size: 0.85em;
+  letter-spacing: 0.02em;
+
+  &::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: rgba(var(--glow-color-rgb), 0.2);
+    border-radius: 2px;
+
+    &:hover {
+      background: rgba(var(--glow-color-rgb), 0.35);
+    }
+  }
+}
+
+.command-results li {
+  display: flex;
+  padding: 0.45rem 0.6rem;
+  border-radius: 2px;
+  user-select: none;
+  cursor: pointer;
+  transition:
+    background var(--transition-speed) ease,
+    box-shadow var(--transition-speed) ease;
+}
+
+.command-results li:hover {
+  background: rgba(var(--glow-color-rgb), 0.06);
+}
+
+.command-results li.active {
+  background: rgba(var(--glow-color-rgb), 0.1);
+  box-shadow: inset 2px 0 0 var(--glow-color);
+}
+
+.typed {
+  color: var(--glow-color);
+  opacity: 0.9;
+}
+
+.rest {
+  color: whitesmoke;
+  opacity: 0.4;
+}
+
+.slash-desc {
+  margin-left: auto;
+  color: rgba(var(--glow-color-rgb), 0.35);
+  font-size: 0.85em;
+  white-space: nowrap;
+}
+
+// ═══════════════════════════════════════════════════════════
+// RESPONSIVE
+// ═══════════════════════════════════════════════════════════
+
+// touch (iOS zoom prevention)
+@media (pointer: coarse) {
+  .command-input {
+    font-size: 16px;
+  }
+
+  .ghost {
+    font-size: 16px;
+  }
+}
+
+// tablet portrait (600–1023px)
+@media (min-width: $bp-tablet) and (max-width: $bp-tablet-land - 1) {
+  .command-shell {
+    border-radius: 4px;
+  }
+
+  .command-row {
+    min-height: 2.85rem;
+
+    &::before {
+      font-size: 1.0em;
+      font-weight: 500;
+      padding-left: 0.7rem;
+    }
+  }
+
+  .command-input {
+    font-weight: 450;
+    letter-spacing: 0.03em;
+  }
+
+  .ghost {
+    font-weight: 450;
+    letter-spacing: 0.03em;
+  }
+
+  .command-results {
+    max-height: 40vh;
+    border-radius: 4px;
+  }
+
+  .command-results li {
+    padding: 0.55rem 0.7rem;
+    border-radius: 3px;
+  }
+}
+
+// phone (≤599px)
+@media (max-width: $bp-phone-max) {
+  .command-shell {
+    border-radius: 6px;
+    box-shadow:
+      0 0 6px rgba(var(--glow-color-rgb), 0.10),
+      0 -2px 6px rgba(var(--glow-color-rgb), 0.08),
+      0 2px 6px rgba(var(--glow-color-rgb), 0.08),
+      inset 0 0 6px rgba(var(--glow-color-rgb), 0.04);
+  }
+
+  .command-shell:focus-within {
+    box-shadow:
+      0 0 8px rgba(var(--glow-color-rgb), 0.18),
+      0 -3px 8px rgba(var(--glow-color-rgb), 0.12),
+      0 3px 8px rgba(var(--glow-color-rgb), 0.12),
+      0 0 24px rgba(var(--glow-color-rgb), 0.08),
+      inset 0 0 8px rgba(var(--glow-color-rgb), 0.06);
+  }
+
+  .command-row {
+    min-height: 3.8rem;
+
+    &::before {
+      font-size: 1.35em;
+      font-weight: 500;
+      padding-left: 1rem;
+      opacity: 0.6;
+    }
+  }
+
+  .command-input {
+    font-size: 18px;
+    font-weight: 450;
+    letter-spacing: 0.035em;
+    padding: 1.1rem 1rem;
+  }
+
+  .ghost {
+    font-size: 18px;
+    font-weight: 450;
+    letter-spacing: 0.035em;
+    padding-left: calc(1rem + 0.75em + 1rem);
+  }
+
+  .command-results {
+    top: calc(100% + 0.5rem);
+    padding: 0.5rem;
+    border-radius: 6px;
+    max-height: 60vh;
+    font-size: 0.92em;
+    letter-spacing: 0.03em;
+  }
+
+  .command-results li {
+    padding: 0.7rem 0.85rem;
+    border-radius: 4px;
+  }
+
+  .slash-desc {
+    font-size: 0.82em;
+  }
+}

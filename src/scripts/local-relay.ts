@@ -21,11 +21,10 @@ type Filter = {
   ids?: string[]
   authors?: string[]
   kinds?: number[]
-  '#e'?: string[]
-  '#p'?: string[]
   since?: number
   until?: number
   limit?: number
+  [tagFilter: `#${string}`]: string[] | undefined
 }
 
 const events = new Map<string, NostrEvent>()
@@ -37,13 +36,12 @@ function matchesFilter(e: NostrEvent, f: Filter): boolean {
   if (f.kinds?.length && !f.kinds.includes(e.kind)) return false
   if (f.since && e.created_at < f.since) return false
   if (f.until && e.created_at > f.until) return false
-  if (f['#e']?.length) {
-    const eTags = e.tags.filter(t => t[0] === 'e').map(t => t[1])
-    if (!f['#e'].some(id => eTags.includes(id))) return false
-  }
-  if (f['#p']?.length) {
-    const pTags = e.tags.filter(t => t[0] === 'p').map(t => t[1])
-    if (!f['#p'].some(id => pTags.includes(id))) return false
+  // generic single-letter tag filters (#e, #p, #x, #t, etc.)
+  for (const [key, values] of Object.entries(f)) {
+    if (!key.startsWith('#') || key.length !== 2 || !Array.isArray(values)) continue
+    const tagName = key[1]
+    const tagValues = e.tags.filter(t => t[0] === tagName).map(t => t[1])
+    if (!values.some(v => tagValues.includes(v))) return false
   }
   return true
 }

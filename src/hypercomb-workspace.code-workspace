@@ -46,6 +46,33 @@
     ],
     "compounds": []
   },
+  "tasks": {
+    "tasks": [
+      {
+        "label": "web",
+        "type": "shell",
+        "command": "npm run start:web",
+        "options": { "cwd": "${workspaceFolder:hypercomb-web}/.." },
+        "isBackground": true,
+        "problemMatcher": [],
+        "presentation": { "reveal": "always", "panel": "dedicated", "group": "servers" }
+      },
+      {
+        "label": "dev",
+        "type": "shell",
+        "command": "npm run start:dev",
+        "options": { "cwd": "${workspaceFolder:hypercomb-dev}/.." },
+        "isBackground": true,
+        "problemMatcher": [],
+        "presentation": { "reveal": "always", "panel": "dedicated", "group": "servers" }
+      },
+      {
+        "label": "web dev",
+        "dependsOn": ["web", "dev"],
+        "problemMatcher": []
+      }
+    ]
+  },
   "settings": {
     "files.exclude": {
       "hypercomb-relay/**/*.js": false

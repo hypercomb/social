@@ -31,6 +31,9 @@
     "prebuild:dev": "tsx scripts/prebuild.ts --target dev",
     "build:sdk": "npm --prefix hypercomb-sdk run build",
     "build:cli": "npm --prefix hypercomb-cli run build",
+    "start": "concurrently --names web,dev --prefix-colors blue,green \"npm --prefix hypercomb-web start\" \"npm --prefix hypercomb-dev start\"",
+    "start:web": "npm --prefix hypercomb-web start",
+    "start:dev": "npm --prefix hypercomb-dev start",
     "sync:angular": "tsx scripts/sync-angular.ts"
   },
   "dependencies": {
@@ -67,6 +70,7 @@
     "@typescript-eslint/eslint-plugin": "^8.41.0",
     "@typescript-eslint/parser": "^8.41.0",
     "babel-plugin-transform-typescript-metadata": "^0.3.2",
+    "concurrently": "^9.2.1",
     "dexie-export-import": "^4.1.4",
     "eslint": "^9.34.0",
     "eslint-plugin-unused-imports": "^4.2.0",

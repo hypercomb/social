@@ -11,7 +11,13 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 20px;
+  margin-bottom: 12px;
+}
+
+.top-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .title {
@@ -68,27 +74,9 @@
   text-decoration: underline;
 }
 
-/* search + kind filters */
-.filter-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+/* command line */
+dcp-command-line {
   margin-bottom: 16px;
-}
-
-.search {
-  flex: 1;
-  padding: 8px 10px;
-  font-size: 13px;
-  border: 1px solid rgba(0,0,0,0.15);
-  border-radius: 2px;
-  outline: none;
-  box-sizing: border-box;
-  cursor: text;
-}
-
-.search:focus {
-  border-color: #4a6fa5;
 }
 
 .kind-toggle {
@@ -227,16 +215,6 @@
   .sample-link {
     font-size: 13px;
     padding: 8px 0;
-  }
-
-  .filter-row {
-    flex-wrap: wrap;
-  }
-
-  .search {
-    font-size: 16px;
-    padding: 10px 12px;
-    min-height: 44px;
   }
 
   .kind-toggle {

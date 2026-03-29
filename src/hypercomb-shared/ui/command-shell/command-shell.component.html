@@ -1,0 +1,45 @@
+<!-- hypercomb-shared/ui/command-shell/command-shell.component.html -->
+
+<div class="command-bar">
+  <div class="command-shell" (mousedown)="onShellMouseDown($event)">
+    <div class="command-row">
+
+      <span
+        class="ghost"
+        aria-hidden="true"
+      >{{ ghostValue() }}</span>
+
+      <input
+        #shellInput
+        class="command-input"
+        type="text"
+        name="command-input"
+        autocomplete="off"
+        autocapitalize="off"
+        spellcheck="false"
+        [placeholder]="placeholder()"
+        (keydown)="onKeyDown($event)"
+        (input)="onInput()"
+      />
+
+    </div>
+  </div>
+
+  @if (effectiveShowCompletions()) {
+    <ul class="command-results" role="listbox">
+      @for (s of suggestions(); track s; let i = $index) {
+        <li
+          role="option"
+          [class.active]="i === getActiveIndex()"
+          (mousedown)="onSuggestionMouseDown($event, s, i)"
+        >
+          <span class="typed">{{ typedPart(s) }}</span
+          ><span class="rest">{{ restPart(s) }}</span>
+          @if (descriptionFor(s); as desc) {
+            <span class="slash-desc">{{ desc }}</span>
+          }
+        </li>
+      }
+    </ul>
+  }
+</div>

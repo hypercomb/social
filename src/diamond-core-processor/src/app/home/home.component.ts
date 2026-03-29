@@ -10,6 +10,7 @@ import { AuditorSettingsComponent } from '../settings/auditor-settings.component
 import { BeeInspectorComponent } from '../tree-view/bee-inspector.component'
 import { DiamondIconComponent } from '../tree-view/diamond-icon.component'
 import { PatchListComponent } from '../patch-list/patch-list.component'
+import { DcpCommandLineComponent } from '../command-line/dcp-command-line.component'
 import type { PatchResult } from '../core/merkle-patch.service'
 import type { BeeDocEntry, TreeNode, TreeNodeKind } from '../core/tree-node'
 
@@ -30,7 +31,7 @@ export interface DomainSection {
 @Component({
   selector: 'app-home',
   standalone: true,
-  imports: [TreeViewComponent, AuditorSettingsComponent, BeeInspectorComponent, DiamondIconComponent, PatchListComponent],
+  imports: [TreeViewComponent, AuditorSettingsComponent, BeeInspectorComponent, DiamondIconComponent, PatchListComponent, DcpCommandLineComponent],
   templateUrl: './home.component.html',
   styleUrls: ['./home.component.scss']
 })
@@ -60,6 +61,20 @@ export class HomeComponent {
   readonly inspectDoc = signal<BeeDocEntry | undefined>(undefined)
   readonly inspectLineage = signal('')
   readonly inspectMode = signal<'code' | 'detail'>('code')
+  readonly selectedNodeNames = signal<string[]>([])
+
+  // flat list of all nodes for command line suggestions
+  readonly allNodes = computed(() => {
+    const result: TreeNode[] = []
+    const walk = (nodes: TreeNode[]) => {
+      for (const n of nodes) {
+        result.push(n)
+        walk(n.children)
+      }
+    }
+    for (const s of this.sections()) walk(s.items)
+    return result
+  })
 
   // all nodes flattened for toggle lookups
   readonly toggleMap = computed(() => {
@@ -132,6 +147,19 @@ export class HomeComponent {
 
   isFiltering(): boolean {
     return this.kindFilters().size > 0
+  }
+
+  // command line bridge
+  onFilterTerm(term: string): void {
+    this.searchTerm.set(term)
+  }
+
+  onKindFilter(kinds: Set<string>): void {
+    this.kindFilters.set(kinds)
+  }
+
+  onSelectedNames(names: string[]): void {
+    this.selectedNodeNames.set(names)
   }
 
   toggleCollapseAllLayers(): void {

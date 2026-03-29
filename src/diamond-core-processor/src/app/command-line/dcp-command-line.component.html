@@ -1,0 +1,13 @@
+<!-- diamond-core-processor/src/app/command-line/dcp-command-line.component.html -->
+
+<hc-command-shell
+  #shell
+  [suggestions]="suggestions()"
+  [placeholder]="'Filter or [select]...'"
+  [ghostValue]="ghostText()"
+  [showSuggestions]="showSuggestions()"
+  [typedPrefix]="typedPrefix()"
+  (valueChange)="onValueChange($event)"
+  (commit)="onCommit($event)"
+  (completionAccepted)="onCompletionAccepted($event)"
+/>

@@ -1,53 +1,25 @@
-<!-- src/app/common/header/command-line/command-line.component.html -->
+<!-- hypercomb-shared/ui/command-line/command-line.component.html -->
 
-<div class="command-bar" [style.visibility]="touchDragging() || viewActive() ? 'hidden' : null">
-  <div class="command-shell" (mousedown)="onShellMouseDown($event)">
-    <div class="command-row">
+<div class="command-line-wrapper" [style.visibility]="touchDragging() || viewActive() ? 'hidden' : null">
+  <hc-command-shell
+    #shell
+    [suggestions]="suggestions()"
+    [placeholder]="placeholder()"
+    [ghostValue]="ghostValue()"
+    [showSuggestions]="showCompletions()"
+    [typedPrefix]="completionTypedPrefix()"
+    [descriptionMap]="slashDescriptionMap()"
+    (valueChange)="onShellValueChange($event)"
+    (commit)="onShellCommit($event)"
+    (completionAccepted)="onShellCompletionAccepted($event)"
+    (shellKeydown)="onShellKeydown($event)"
+  />
 
-      <span
-        class="ghost"
-        aria-hidden="true"
-      >{{ ghostValue() }}</span>
-
-      <input
-        #input
-        class="command-input"
-        type="text"
-        name="command-input"
-        autocomplete="off"
-        autocapitalize="off"
-        spellcheck="false"
-        [placeholder]="placeholder()"
-        (keydown)="onKeyDown($event)"
-        (input)="onInput()"
-      />
-
-      @if (voiceSupported) {
-        <button class="mic-btn" [class.recording]="voiceActive()"
-          (pointerdown)="startVoice($event)" (pointerup)="stopVoice()" (pointerleave)="stopVoice()"
-          aria-label="voice input" title="hold to speak">
-          <span class="mic-dot">{{ voiceActive() ? '●' : '○' }}</span>
-        </button>
-      }
-
-    </div>
-  </div>
-
-  @if (showCompletions()) {
-    <ul class="command-results" role="listbox">
-      @for (s of suggestions(); track s; let i = $index) {
-        <li
-          role="option"
-          [class.active]="i === getActiveIndex()"
-          (mousedown)="onSuggestionMouseDown($event, s, i)"
-        >
-          <span class="typed">{{ typedPart(s) }}</span
-          ><span class="rest">{{ restPart(s) }}</span>
-          @if (slashDescription(s); as desc) {
-            <span class="slash-desc">{{ desc }}</span>
-          }
-        </li>
-      }
-    </ul>
+  @if (voiceSupported) {
+    <button class="mic-btn" [class.recording]="voiceActive()"
+      (pointerdown)="startVoice($event)" (pointerup)="stopVoice()" (pointerleave)="stopVoice()"
+      aria-label="voice input" title="hold to speak (or hold B)">
+      <span class="mic-dot">{{ voiceActive() ? '●' : '○' }}</span>
+    </button>
   }
 </div>
