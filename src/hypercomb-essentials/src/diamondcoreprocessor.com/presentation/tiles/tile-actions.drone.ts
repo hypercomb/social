@@ -15,6 +15,8 @@ const ADD_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96
 
 const SEARCH_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 15.1 15.1" width="96" height="96"><path fill="white" fill-rule="evenodd" d="M 2.8298014 0 C 2.0535814 0 1.3853227 0.28019878 0.82527262 0.84025879 C 0.27504258 1.3904888 1.566648e-16 2.0535915 0 2.8298014 L 0 12.262301 C 0 13.038511 0.27504258 13.706769 0.82527262 14.266829 C 1.3853227 14.817049 2.0535814 15.092102 2.8298014 15.092102 L 12.262301 15.092102 C 13.038521 15.092102 13.701603 14.817049 14.251843 14.266829 C 14.811893 13.706769 15.092102 13.038511 15.092102 12.262301 L 15.092102 7.5457926 L 15.092102 2.8298014 C 15.092102 2.0535915 14.811893 1.3904888 14.251843 0.84025879 C 13.701603 0.28019878 13.038521 7.8332402e-17 12.262301 0 L 2.8298014 0 z M 3.319694 3.5077962 C 3.5118105 3.5046951 3.7067928 3.5434545 3.8943359 3.6261353 C 4.2137567 3.7669554 4.944518 4.3190538 5.5557332 4.8813558 C 6.2614729 5.5306175 7.1542248 6.6726222 7.3070475 7.1220459 C 7.3884558 7.3614603 7.3888166 7.6958551 7.3080811 7.9493856 C 7.1958204 8.3019157 6.6316395 9.0778904 5.9495076 9.8185221 C 5.3889302 10.427175 4.3753569 11.239887 3.8803833 11.477336 C 3.693628 11.566927 3.6539908 11.575272 3.3863566 11.583272 C 2.9356228 11.596609 2.7023992 11.510162 2.3931356 11.215853 C 1.9647425 10.808173 1.856547 10.117053 2.1430216 9.6175008 C 2.2752388 9.3869412 2.402257 9.2624528 2.7300659 9.0402751 C 2.9100569 8.918283 3.1769104 8.7222221 3.3233114 8.6051595 C 3.5800197 8.3998964 4.2840211 7.6999139 4.3413371 7.5928182 C 4.3651233 7.5483733 4.3292908 7.4972618 4.102592 7.2491699 C 3.7142112 6.8241389 3.207673 6.3941377 2.668571 6.0321899 C 2.3097797 5.7913004 2.1232913 5.5343147 2.0226156 5.141805 C 1.9114818 4.7085268 2.0788761 4.1912971 2.436027 3.8648804 C 2.6878883 3.6346939 2.9994998 3.5129647 3.319694 3.5077962 z M 10.210746 9.5410197 C 12.177422 9.5322323 12.305877 9.539367 12.586829 9.6702108 C 12.988418 9.8572346 13.187864 10.268004 13.080339 10.68772 C 13.002739 10.990623 12.816096 11.193262 12.496395 11.322306 L 12.337748 11.386385 L 10.39058 11.391553 C 8.2140054 11.397096 8.2237479 11.397809 7.9514526 11.213269 C 7.6536494 11.011442 7.5323973 10.758912 7.5597453 10.397298 C 7.5892645 10.00698 7.7913159 9.7649324 8.2150024 9.6118164 C 8.3883187 9.5491824 8.3911151 9.5491497 10.210746 9.5410197 z"/></svg>`
 
+const REMOVE_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96"><rect fill="white" x="24" y="28" width="48" height="52" rx="4"/><path fill="white" d="M20 24h56a4 4 0 010 8H20a4 4 0 010-8z"/><path fill="white" d="M36 16h24a4 4 0 014 4v4H32v-4a4 4 0 014-4z"/><rect fill="white" x="36" y="38" width="6" height="32" rx="3" opacity=".5"/><rect fill="white" x="45" y="38" width="6" height="32" rx="3" opacity=".5"/><rect fill="white" x="54" y="38" width="6" height="32" rx="3" opacity=".5"/></svg>`
+
 // ── Icon positions ─────────────────────────────────────────────────
 const ICON_Y = 5
 
@@ -22,6 +24,7 @@ const ACTIONS: OverlayActionDescriptor[] = [
   // ── private profile ──
   { name: 'add-sub', fontChar: '~', x: -14, y: ICON_Y, hoverTint: 0xa8ffd8, profile: 'private' },
   { name: 'edit', fontChar: '2', x: -2, y: ICON_Y, hoverTint: 0xc8d8ff, profile: 'private' },
+  { name: 'remove', svgMarkup: REMOVE_ICON_SVG, x: 7.9375, y: ICON_Y, hoverTint: 0xffc8c8, profile: 'private' },
   {
     name: 'search',
     svgMarkup: SEARCH_ICON_SVG,
@@ -38,7 +41,7 @@ const ACTIONS: OverlayActionDescriptor[] = [
 ]
 
 // ── Action names this bee handles ──────────────────────────────────
-const HANDLED_ACTIONS = new Set(['edit', 'search', 'add-sub', 'hide', 'adopt', 'block'])
+const HANDLED_ACTIONS = new Set(['edit', 'search', 'add-sub', 'remove', 'hide', 'adopt', 'block'])
 
 type TileActionPayload = { action: string; label: string; q: number; r: number; index: number }
 
@@ -51,7 +54,7 @@ export class TileActionsDrone extends Drone {
   }
 
   protected override listens = ['render:host-ready', 'tile:action']
-  protected override emits = ['overlay:register-action', 'search:prefill', 'tile:hidden', 'tile:blocked']
+  protected override emits = ['overlay:register-action', 'search:prefill', 'seed:removed', 'tile:hidden', 'tile:blocked']
 
   #registered = false
   #effectsRegistered = false
@@ -90,6 +93,10 @@ export class TileActionsDrone extends Drone {
 
       case 'add-sub':
         EffectBus.emit('search:prefill', { value: label + '/' })
+        break
+
+      case 'remove':
+        EffectBus.emit('seed:removed', { seed: label })
         break
 
       case 'hide':
