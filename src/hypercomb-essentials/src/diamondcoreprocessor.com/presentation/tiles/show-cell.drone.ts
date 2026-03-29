@@ -78,7 +78,7 @@ export class ShowCellDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'seed:place-at', 'seed:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'history:cursor-changed']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'seed:place-at', 'seed:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -126,6 +126,9 @@ export class ShowCellDrone extends Drone {
   #flat = false
   #pivot = false
   #textOnly = false
+  #labelsVisible = true
+  #showHiddenItems = false
+  #currentHiddenSet = new Set<string>()
 
   // mesh scoping — space + secret feed into the signature key
   #space = ''
@@ -928,8 +931,11 @@ export class ShowCellDrone extends Drone {
     }
 
     const hiddenSet = new Set<string>(JSON.parse(localStorage.getItem(`hc:hidden-tiles:${locationKey}`) ?? '[]'))
-    for (const hidden of hiddenSet) {
-      if (localSeedSet.has(hidden)) union.delete(hidden)
+    this.#currentHiddenSet = hiddenSet
+    if (!this.#showHiddenItems) {
+      for (const hidden of hiddenSet) {
+        if (localSeedSet.has(hidden)) union.delete(hidden)
+      }
     }
 
     // clipboard view: show only clipboard labels
@@ -1225,6 +1231,7 @@ export class ShowCellDrone extends Drone {
     }
     this.shader.setFlat(this.#flat)
     this.shader.setPivot(this.#pivot)
+    this.shader.setLabelMix(this.#labelsVisible ? 1.0 : 0.0)
 
     if (!this.hexMesh) {
       this.hexMesh = new Mesh({ geometry: geom as any, shader: (this.shader as any).shader, texture: Texture.WHITE as any } as any)
@@ -1532,6 +1539,20 @@ export class ShowCellDrone extends Drone {
         this.renderedCellsKey = ''
         this.requestRender()
       }
+    })
+
+    // toggle tile label text visibility via shader uniform
+    this.onEffect('tile:toggle-text', () => {
+      this.#labelsVisible = !this.#labelsVisible
+      this.shader?.setLabelMix(this.#labelsVisible ? 1.0 : 0.0)
+    })
+
+    // show hidden items grayed out when eye toggle is active
+    this.onEffect<{ active: boolean }>('visibility:show-hidden', ({ active }) => {
+      this.#showHiddenItems = active
+      this.#layerCellsCache.clear()
+      this.renderedCellsKey = ''
+      this.requestRender()
     })
 
     this.onEffect<{ seed: string; index: number }>('seed:place-at', (payload) => {
@@ -2023,7 +2044,13 @@ export class ShowCellDrone extends Drone {
       heat.set([h, h, h, h], hp)
       hp += 4
 
-      const [cr, cg, cb] = labelToRgb(c.label)
+      let [cr, cg, cb] = labelToRgb(c.label)
+      // gray out hidden items when show-hidden is active
+      const isHiddenItem = this.#showHiddenItems && this.#currentHiddenSet.has(c.label)
+      if (isHiddenItem) {
+        const gray = cr * 0.3 + cg * 0.3 + cb * 0.3
+        cr = gray * 0.5; cg = gray * 0.5; cb = gray * 0.5
+      }
       identityColor.set([cr, cg, cb, cr, cg, cb, cr, cg, cb, cr, cg, cb], icp)
       icp += 12
 
@@ -2031,7 +2058,11 @@ export class ShowCellDrone extends Drone {
       branch.set([b, b, b, b], bp)
       bp += 4
 
-      const [bcr, bcg, bcb] = c.borderColor ?? [0.784, 0.592, 0.353]
+      let [bcr, bcg, bcb] = c.borderColor ?? [0.784, 0.592, 0.353]
+      if (isHiddenItem) {
+        const bgray = bcr * 0.3 + bcg * 0.3 + bcb * 0.3
+        bcr = bgray * 0.5; bcg = bgray * 0.5; bcb = bgray * 0.5
+      }
       borderColor.set([bcr, bcg, bcb, bcr, bcg, bcb, bcr, bcg, bcb, bcr, bcg, bcb], bcp)
       bcp += 12
 

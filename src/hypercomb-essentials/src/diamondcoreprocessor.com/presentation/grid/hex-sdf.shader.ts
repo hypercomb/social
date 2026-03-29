@@ -18,6 +18,7 @@ export class HexSdfTextureShader {
       u_flat: { value: 0, type: 'f32' },
       u_pivot: { value: 0, type: 'f32' },
       u_hoveredIndex: { value: -1, type: 'f32' },
+      u_labelMix: { value: 1.0, type: 'f32' },
     }
 
     // v8 shaded mesh requires uniforms nested under a group and shader inputs using in/out
@@ -57,6 +58,11 @@ export class HexSdfTextureShader {
 
   public setHoveredIndex = (index: number): void => {
     this.#ug.uniforms.u_hoveredIndex = index
+    this.#ug.update()
+  }
+
+  public setLabelMix = (mix: number): void => {
+    this.#ug.uniforms.u_labelMix = mix
     this.#ug.update()
   }
 
@@ -136,6 +142,7 @@ export class HexSdfTextureShader {
     uniform float u_flat;
     uniform float u_pivot;
     uniform float u_hoveredIndex;
+    uniform float u_labelMix;
 
     uniform sampler2D u_label;
     uniform sampler2D u_cellImages;
@@ -233,7 +240,7 @@ export class HexSdfTextureShader {
         vec2 luv = mix(vLabelUV.xy, vLabelUV.zw, vUV);
         float labelAlpha = texture2D(u_label, luv).a;
         float la = smoothstep(0.02, 0.5, labelAlpha);
-        color = mix(color, vec4(1.0, 1.0, 1.0, 1.0), la * 0.92);
+        color = mix(color, vec4(1.0, 1.0, 1.0, 1.0), la * 0.92 * u_labelMix);
 
         // ambient presence — identity color at rest, shifts to warm amber with heat
         float heatRing = smoothstep(0.0, -1.5, d) - smoothstep(-4.0, -6.0, d);

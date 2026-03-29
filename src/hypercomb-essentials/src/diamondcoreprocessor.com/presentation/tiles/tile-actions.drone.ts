@@ -17,6 +17,8 @@ const SEARCH_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 15
 
 const REMOVE_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96"><rect fill="white" x="24" y="28" width="48" height="52" rx="4"/><path fill="white" d="M20 24h56a4 4 0 010 8H20a4 4 0 010-8z"/><path fill="white" d="M36 16h24a4 4 0 014 4v4H32v-4a4 4 0 014-4z"/><rect fill="white" x="36" y="38" width="6" height="32" rx="3" opacity=".5"/><rect fill="white" x="45" y="38" width="6" height="32" rx="3" opacity=".5"/><rect fill="white" x="54" y="38" width="6" height="32" rx="3" opacity=".5"/></svg>`
 
+const EYE_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96"><path fill="white" d="M48 28c-18 0-33 12-40 20 7 8 22 20 40 20s33-12 40-20c-7-8-22-20-40-20zm0 32c-6.6 0-12-5.4-12-12s5.4-12 12-12 12 5.4 12 12-5.4 12-12 12z"/><circle fill="white" cx="48" cy="48" r="6"/></svg>`
+
 // ── Icon positions ─────────────────────────────────────────────────
 const ICON_Y = 5
 
@@ -33,6 +35,8 @@ const ACTIONS: OverlayActionDescriptor[] = [
     profile: 'private',
     visibleWhen: (ctx: OverlayTileContext) => ctx.noImage,
   },
+  { name: 'toggle-text', fontChar: 'J', x: 8.625, y: ICON_Y, iconSize: 10, hoverTint: 0xfff0c8, profile: 'private' },
+  { name: 'toggle-visibility', svgMarkup: EYE_ICON_SVG, x: 19.25, y: ICON_Y, hoverTint: 0xc8e8ff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => !ctx.noImage },
   // ── public-own profile ──
   { name: 'hide', svgMarkup: HIDE_ICON_SVG, x: 8.625, y: ICON_Y, hoverTint: 0xffd8a8, profile: 'public-own' },
   // ── public-external profile ──
@@ -41,7 +45,7 @@ const ACTIONS: OverlayActionDescriptor[] = [
 ]
 
 // ── Action names this bee handles ──────────────────────────────────
-const HANDLED_ACTIONS = new Set(['edit', 'search', 'add-sub', 'remove', 'hide', 'adopt', 'block'])
+const HANDLED_ACTIONS = new Set(['edit', 'search', 'add-sub', 'hide', 'adopt', 'block', 'toggle-text', 'toggle-visibility'])
 
 type TileActionPayload = { action: string; label: string; q: number; r: number; index: number }
 
@@ -54,7 +58,7 @@ export class TileActionsDrone extends Drone {
   }
 
   protected override listens = ['render:host-ready', 'tile:action']
-  protected override emits = ['overlay:register-action', 'search:prefill', 'seed:removed', 'tile:hidden', 'tile:blocked']
+  protected override emits = ['overlay:register-action', 'search:prefill', 'tile:hidden', 'tile:blocked', 'tile:toggle-text']
 
   #registered = false
   #effectsRegistered = false
@@ -110,7 +114,31 @@ export class TileActionsDrone extends Drone {
       case 'block':
         this.#hideOrBlock(label, 'hc:blocked-tiles', 'tile:blocked')
         break
+
+      case 'toggle-text':
+        EffectBus.emit('tile:toggle-text', {})
+        break
+
+      case 'toggle-visibility':
+        this.#toggleHidden(label)
+        break
     }
+  }
+
+  #toggleHidden(label: string): void {
+    const lineage = this.resolve<{ explorerLabel(): string }>('lineage')
+    const location = lineage?.explorerLabel() ?? '/'
+    const key = `hc:hidden-tiles:${location}`
+    const existing: string[] = JSON.parse(localStorage.getItem(key) ?? '[]')
+    const idx = existing.indexOf(label)
+    if (idx >= 0) {
+      existing.splice(idx, 1)
+    } else {
+      existing.push(label)
+    }
+    localStorage.setItem(key, JSON.stringify(existing))
+    EffectBus.emit('tile:hidden', { seed: label, location })
+    void new hypercomb().act()
   }
 
   #hideOrBlock(label: string, storagePrefix: string, effect: string): void {
