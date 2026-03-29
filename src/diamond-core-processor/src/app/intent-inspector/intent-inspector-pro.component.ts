@@ -98,7 +98,7 @@ export class IntentInspectorProComponent {
         return
       }
 
-      const url = `https://storagehypercomb.blob.core.windows.net/hypercomb-data/${signature}`
+      const url = `https://storagehypercomb.blob.core.windows.net/dcp/${signature}`
       const res = await fetch(url, { cache: 'no-store' })
       if (!res.ok) throw new Error(`payload not found (${res.status})`)
 
