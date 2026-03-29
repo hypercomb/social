@@ -12,7 +12,7 @@ export class RuntimeMediator {
       const installer = get('@hypercomb.social/LayerInstaller') as LayerInstaller
       const dependency = get('@hypercomb.social/DependencyLoader') as DependencyLoader
 
-      // 1) download + install all files via install.manifest.json (resumable)
+      // 1) download + install all files via manifest.json (resumable)
       await installer.install(parsed)
 
       // 2) load dependencies into memory

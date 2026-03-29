@@ -4,7 +4,7 @@
 // Mirrors LayerInstaller from hypercomb-shared/core/layer-installer.ts
 // but uses DcpStore (Angular DI) instead of hypercomb's IoC.
 //
-// Downloads all layers, bees, and dependencies listed in install.manifest.json
+// Downloads all layers, bees, and dependencies listed in manifest.json
 // to OPFS upfront — same folder structure as Hypercomb.
 
 import { inject, Injectable } from '@angular/core'
@@ -17,6 +17,11 @@ type InstallManifest = {
   bees?: string[]
   dependencies?: string[]
   beeDeps?: Record<string, string[]>
+}
+
+type ContentManifest = {
+  version: number
+  packages: Record<string, InstallManifest>
 }
 
 export type InstallProgress = {
@@ -45,11 +50,10 @@ export class DcpInstallerService {
 
     await this.#store.initialize()
 
-    const endpoint = `${base}/${rootSig}`
     const domainDir = await this.#store.domainLayersDir(domain)
 
-    // 1) fetch manifest
-    const manifest = await this.#fetchManifest(endpoint)
+    // 1) fetch content manifest and resolve package by root signature
+    const manifest = await this.#fetchManifest(base, rootSig)
     if (!manifest) return null
 
     const layers = manifest.layers ?? []
@@ -59,23 +63,26 @@ export class DcpInstallerService {
     // 2) purge stale layers from previous installs
     await this.#purgeStale(domainDir, new Set(layers))
 
-    // 3) install layers
+    // 3) install layers (flat — files live at base root)
     for (let i = 0; i < layers.length; i++) {
       onProgress?.({ phase: 'layers', current: i + 1, total: layers.length })
-      await this.#installFile(domainDir, `${endpoint}/__layers__/${layers[i]}.json`, layers[i], layers[i])
+      await this.#installFile(domainDir, `${base}/__layers__/${layers[i]}.json`, layers[i], layers[i])
     }
 
     // 4) install bees
     for (let i = 0; i < bees.length; i++) {
       onProgress?.({ phase: 'bees', current: i + 1, total: bees.length })
-      await this.#installFile(this.#store.bees, `${endpoint}/__bees__/${bees[i]}.js`, bees[i], `${bees[i]}.js`)
+      await this.#installFile(this.#store.bees, `${base}/__bees__/${bees[i]}.js`, bees[i], `${bees[i]}.js`)
     }
 
     // 5) install dependencies
     for (let i = 0; i < deps.length; i++) {
       onProgress?.({ phase: 'dependencies', current: i + 1, total: deps.length })
-      await this.#installFile(this.#store.dependencies, `${endpoint}/__dependencies__/${deps[i]}.js`, deps[i], `${deps[i]}.js`)
+      await this.#installFile(this.#store.dependencies, `${base}/__dependencies__/${deps[i]}.js`, deps[i], `${deps[i]}.js`)
     }
+
+    // 6) cache resolved manifest in OPFS for offline sync
+    await this.#cacheManifest(domainDir, manifest)
 
     return manifest
   }
@@ -88,6 +95,7 @@ export class DcpInstallerService {
     const stale: string[] = []
     for await (const name of (dir as any).keys()) {
       const sig = name.replace(/\.json$/i, '').replace(/\.js$/i, '')
+      if (!/^[a-f0-9]{64}$/i.test(sig)) continue  // skip non-signature files (e.g. manifest.cache.json)
       if (!liveSigs.has(sig)) stale.push(name)
     }
     for (const name of stale) {
@@ -96,13 +104,28 @@ export class DcpInstallerService {
     if (stale.length) console.log(`[dcp-installer] purged ${stale.length} stale layer(s)`)
   }
 
-  async #fetchManifest(endpoint: string): Promise<InstallManifest | null> {
+  async #fetchManifest(base: string, rootSig: string): Promise<InstallManifest | null> {
     try {
-      const res = await fetch(`${endpoint}/install.manifest.json`, { cache: 'no-store' })
+      const res = await fetch(`${base}/manifest.json`, { cache: 'no-store' })
       if (!res.ok) return null
-      return await res.json() as InstallManifest
+      const content = await res.json() as ContentManifest
+      const pkg = content?.packages?.[rootSig]
+      if (!pkg) {
+        console.warn(`[dcp-installer] package ${rootSig.slice(0, 12)} not found in manifest`)
+        return null
+      }
+      return pkg
     } catch {
       return null
+    }
+  }
+
+  async #cacheManifest(domainDir: FileSystemDirectoryHandle, manifest: InstallManifest): Promise<void> {
+    try {
+      const bytes = new TextEncoder().encode(JSON.stringify(manifest))
+      await this.#store.writeFile(domainDir, 'manifest.cache.json', bytes.buffer as ArrayBuffer)
+    } catch {
+      // non-fatal — sync will re-fetch from network
     }
   }
 

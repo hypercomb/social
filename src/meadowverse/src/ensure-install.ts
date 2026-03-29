@@ -171,15 +171,17 @@ const extractSignature = (raw: string | null | undefined): string | null => {
 
 const resolveContentBase = async (signature: string): Promise<string> => {
   if (!isLocalDev) return AZURE_CONTENT_URL
-  const localManifest = await fetchText(`${CONTENT_BASE_URL}/${signature}/install.manifest.json`)
-  if (localManifest) return CONTENT_BASE_URL
+  const localManifest = await fetchJson(`${CONTENT_BASE_URL}/manifest.json`)
+  if (localManifest?.packages && (localManifest.packages as Record<string, unknown>)[signature]) return CONTENT_BASE_URL
   console.log('[meadowverse:install] content not found locally, using server')
   return AZURE_CONTENT_URL
 }
 
 const fetchManifest = async (contentBase: string, signature: string): Promise<InstallManifest | null> => {
-  const json = await fetchText(`${contentBase}/${signature}/install.manifest.json`)
-  return json ? tryParseManifest(json) : null
+  const content = await fetchJson(`${contentBase}/manifest.json`)
+  if (!content?.packages) return null
+  const pkg = (content.packages as Record<string, unknown>)[signature]
+  return pkg ? tryParseManifest(JSON.stringify(pkg)) : null
 }
 
 const tryParseManifest = (json: string): InstallManifest | null => {
@@ -214,10 +216,11 @@ const removeStale = async (
 
 const populateSignatureStore = async (sigStore: SignatureStore, contentBase: string, rootSig: string): Promise<void> => {
   try {
-    const url = `${contentBase}/${rootSig}/install.manifest.json`
-    const res = await fetch(url)
+    const res = await fetch(`${contentBase}/manifest.json`)
     if (!res.ok) return
-    const manifest = await res.json()
+    const content = await res.json()
+    const manifest = content?.packages?.[rootSig]
+    if (!manifest) return
 
     const allSigs = [
       ...(manifest.layers || []),

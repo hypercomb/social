@@ -226,15 +226,16 @@ export class SentinelHandler {
     // Try reading from DCP's OPFS first (already installed)
     const domainName = new URL(domain).hostname
     const dir = await this.#store.domainLayersDir(domainName)
-    const bytes = await this.#store.readFile(dir, 'install.manifest.json')
+    const bytes = await this.#store.readFile(dir, 'manifest.cache.json')
     if (bytes) {
       try { return JSON.parse(new TextDecoder().decode(bytes)) } catch { /* fall through */ }
     }
-    // Fetch fresh
+    // Fetch fresh content manifest and extract package by rootSig
     try {
-      const res = await fetch(`${domain}/${rootSig}/install.manifest.json`, { cache: 'no-store' })
+      const res = await fetch(`${domain}/manifest.json`, { cache: 'no-store' })
       if (!res.ok) return null
-      return await res.json()
+      const content = await res.json()
+      return content?.packages?.[rootSig] ?? null
     } catch {
       return null
     }
@@ -347,7 +348,7 @@ export class SentinelHandler {
   ): Promise<ArrayBuffer | null> {
     const ext = kind === 'layer' ? '.json' : '.js'
     const folder = kind === 'layer' ? '__layers__' : kind === 'bee' ? '__bees__' : '__dependencies__'
-    const url = `${base}/${rootSig}/${folder}/${sig}${ext}`
+    const url = `${base}/${folder}/${sig}${ext}`
 
     try {
       const res = await fetch(url, { cache: 'no-store' })

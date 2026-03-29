@@ -3,7 +3,7 @@
 import { type LocationParseResult } from './initializers/location-parser'
 import { Store } from './store'
 
-type InstallManifest = { version: number; layers: string[]; bees: string[]; dependencies: string[] }
+type InstallManifest = { version: number; layers: string[]; bees: string[]; dependencies: string[]; beeDeps?: Record<string, string[]> }
 type ContentManifest = { version: number; packages: Record<string, InstallManifest> }
 
 // global get/register/list available via ioc.web.ts

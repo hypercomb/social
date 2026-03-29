@@ -316,9 +316,9 @@ export class TreeResolverService {
       }
     }
 
-    // fetch from network
+    // fetch from network (flat — files live at base root)
     try {
-      const url = `${base}/${rootSig}/__layers__/${layerSig}.json`
+      const url = `${base}/__layers__/${layerSig}.json`
       const res = await fetch(url, { cache: 'no-store' })
       if (!res.ok) return null
 
