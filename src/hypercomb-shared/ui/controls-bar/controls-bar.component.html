@@ -79,6 +79,9 @@
           <button class="ctl-btn" (click)="centerView()" [attr.aria-label]="'controls.center' | t">
             <span class="hci">q</span>
           </button>
+          <button class="ctl-btn" [class.active]="microphoneOn()" (click)="toggleMicrophone()" [attr.aria-label]="'controls.microphone' | t">
+            <span class="mic-icon">{{ microphoneOn() ? '🎙' : '🎤' }}</span>
+          </button>
           <button class="ctl-btn" (click)="fitContent()" [attr.aria-label]="'controls.fit-content' | t">
             <span class="hci">)</span>
           </button>
@@ -88,18 +91,6 @@
           <button class="ctl-btn" (click)="toggleFullscreen()" [attr.aria-label]="'controls.fullscreen' | t">
             <span class="hci">'</span>
           </button>
-          @if (!meetingJoined()) {
-            <button class="ctl-btn" (click)="toggleMeeting()" [attr.aria-label]="'controls.join-meeting' | t">
-              <span class="meeting-icon">▶</span>
-            </button>
-          } @else {
-            <button class="ctl-btn" [class.active]="meetingCameraOn()" (click)="toggleCamera()" [attr.aria-label]="'controls.toggle-camera' | t">
-              <span class="meeting-icon">{{ meetingCameraOn() ? '◉' : '◎' }}</span>
-            </button>
-            <button class="ctl-btn" (click)="toggleMeeting()" [attr.aria-label]="'controls.leave-meeting' | t">
-              <span class="meeting-icon leave">■</span>
-            </button>
-          }
         </div>
       } @else {
         <!-- ═══ DESKTOP: full controls ═══ -->

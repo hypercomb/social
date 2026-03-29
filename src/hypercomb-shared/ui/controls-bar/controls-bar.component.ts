@@ -90,6 +90,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #beesVisible = signal(localStorage.getItem('hc:bees-visible') === 'true')
   #meetingJoined = signal(false)
   #meetingCameraOn = signal(false)
+  #microphoneOn = signal(false)
   #hasSelection = signal(false)
   #textOnly = signal(false)
   #layoutPinned = signal(false)
@@ -250,6 +251,8 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   readonly beesVisible = this.#beesVisible.asReadonly()
   readonly meetingJoined = this.#meetingJoined.asReadonly()
   readonly meetingCameraOn = this.#meetingCameraOn.asReadonly()
+  readonly microphoneOn = this.#microphoneOn.asReadonly()
+
   // ── lifecycle ───────────────────────────────────────────
 
   #clipboardUnsub: (() => void) | null = null
@@ -260,6 +263,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #hoverTagsUnsub: (() => void) | null = null
   #onMeetingState: EventListener | null = null
   #onMeetingCamera: EventListener | null = null
+  #onMeetingMic: EventListener | null = null
 
   ngOnInit(): void {
     // ── mobile detection via matchMedia ──
@@ -339,6 +343,11 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     }) as EventListener
     window.addEventListener('meeting:local-camera', this.#onMeetingCamera)
 
+    this.#onMeetingMic = ((e: CustomEvent) => {
+      this.#microphoneOn.set(e.detail?.on === true)
+    }) as EventListener
+    window.addEventListener('meeting:local-mic', this.#onMeetingMic)
+
     // sign address reactively (replaces effect() which needs injection context)
     this.#recomputeAddress()
     window.addEventListener('synchronize', this.#recomputeAddress)
@@ -372,6 +381,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     this.#hoverTagsUnsub?.()
     if (this.#onMeetingState) window.removeEventListener('meeting:state', this.#onMeetingState)
     if (this.#onMeetingCamera) window.removeEventListener('meeting:local-camera', this.#onMeetingCamera)
+    if (this.#onMeetingMic) window.removeEventListener('meeting:local-mic', this.#onMeetingMic)
     window.removeEventListener('synchronize', this.#recomputeAddress)
   }
 
@@ -547,6 +557,10 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
 
   readonly toggleCamera = (): void => {
     window.dispatchEvent(new CustomEvent('meeting:toggle-camera'))
+  }
+
+  readonly toggleMicrophone = (): void => {
+    window.dispatchEvent(new CustomEvent('meeting:toggle-mic'))
   }
 
   // ── room ────────────────────────────────────────────
