@@ -23,6 +23,7 @@ export class Store extends EventTarget {
   public static readonly CLIPBOARD_DIRECTORY = '__clipboard__'
   public static readonly HISTORY_DIRECTORY = '__history__'
   public static readonly THREADS_DIRECTORY = '__threads__'
+  public static readonly COMPUTATION_DIRECTORY = '__computation__'
 
   private static readonly CACHE_NAME = 'hypercomb-modules-v2'
 
@@ -35,6 +36,7 @@ export class Store extends EventTarget {
   public clipboard!: FileSystemDirectoryHandle
   public history!: FileSystemDirectoryHandle
   public threads!: FileSystemDirectoryHandle
+  public computation!: FileSystemDirectoryHandle
 
   #initialized = false
 
@@ -118,6 +120,9 @@ export class Store extends EventTarget {
 
     this.threads =
       await this.opfsRoot.getDirectoryHandle(Store.THREADS_DIRECTORY, { create: true })
+
+    this.computation =
+      await this.opfsRoot.getDirectoryHandle(Store.COMPUTATION_DIRECTORY, { create: true })
 
     // default current is the hypercomb root
     this.resetCurrent()
