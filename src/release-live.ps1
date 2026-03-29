@@ -52,7 +52,7 @@ if (-not $SkipEssentialsDeploy) {
   }
 
   Invoke-Step 'Verify manifest is readable' {
-    $manifestJson = Invoke-WebRequest -UseBasicParsing -Uri "https://$StorageAccount.blob.core.windows.net/content/manifest.json"
+    $manifestJson = Invoke-WebRequest -UseBasicParsing -Uri "https://$StorageAccount.blob.core.windows.net/dcp/manifest.json"
 
     $data = $manifestJson.Content | ConvertFrom-Json
     if (-not $data.packages) {

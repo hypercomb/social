@@ -9,6 +9,7 @@
         [value]="secretValue()"
         (input)="onSecretInput($event)"
         (keydown.enter)="submitSecret($event)"
+        (keydown.escape)="cancelSecret()"
       />
     </div>
   }

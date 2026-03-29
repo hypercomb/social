@@ -10,7 +10,7 @@ export type LocationParseResult = {
   // signature = last segment (or segment after __install__), ex: 1321d4...
   signature: string
 
-  // base url = protocol + host + path, ex: https://storagehypercomb.blob.core.windows.net/content
+  // base url = protocol + host + path, ex: https://storagehypercomb.blob.core.windows.net/dcp
   baseUrl: string
 }
 

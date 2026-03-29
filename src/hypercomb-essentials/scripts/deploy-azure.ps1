@@ -135,7 +135,7 @@ if (-not (test-command -Name 'az')) {
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $resolvedSource = normalize-local-path -Path (Join-Path $scriptDir '..\dist')
-$resolvedDestination = normalize-blob-path -Path 'content'
+$resolvedDestination = ''
 
 if (-not (Test-Path -LiteralPath $resolvedSource)) {
   fail "source path does not exist: $resolvedSource"
@@ -151,7 +151,7 @@ $containerName = get-optional-env -Names @(
 )
 
 if ([string]::IsNullOrWhiteSpace($containerName)) {
-  $containerName = '$web'
+  $containerName = 'dcp'
 }
 
 $authArguments = get-auth-arguments
@@ -182,7 +182,7 @@ write-step ''
 
 foreach ($file in $files) {
   $relativePath = get-relative-file-path -BasePath $resolvedSource -FullPath $file.FullName
-  $blobName = "$resolvedDestination/$relativePath"
+  $blobName = if ($resolvedDestination) { "$resolvedDestination/$relativePath" } else { $relativePath }
 
   $arguments = @(
     'storage', 'blob', 'upload',

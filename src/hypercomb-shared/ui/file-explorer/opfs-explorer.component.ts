@@ -327,7 +327,7 @@ export class OpfsExplorerComponent extends hypercomb {
 
     // Fallback to direct fetch only in dev (no sentinel available)
     if (!bytes && !bridge) {
-      const url = `https://storagehypercomb.blob.core.windows.net/content/__dependencies__/`
+      const url = `https://storagehypercomb.blob.core.windows.net/dcp/__dependencies__/`
       const res = await fetch(`${url}${sig}`)
       if (res.ok) bytes = await res.arrayBuffer()
     }

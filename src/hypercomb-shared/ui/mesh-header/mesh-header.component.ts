@@ -71,28 +71,11 @@ export class MeshHeaderComponent {
       // solo → shield (just show shield icon; secret input only via long-press)
       this.meshToggled.emit()
     } else if (this.showSecretInput()) {
-      if (this.hasSecret()) {
-        // has secret: persist if needed, then collapse to just the shield icon
-        this.#persistSecret()
-        this.#secretExpanded.set(false)
-        this.secretExpandedChange.emit(false)
-      } else {
-        // no secret entered: go back to solo
-        this.#secretExpanded.set(false)
-        this.meshToggled.emit()
-        this.secretExpandedChange.emit(false)
-      }
+      // shield tap while editing: save current value and collapse (same as Enter)
+      this.#saveAndCollapse()
     } else {
       // shield collapsed (has secret) → toggle to solo (keep secret)
       this.meshToggled.emit()
-    }
-  }
-
-  readonly #persistSecret = (): void => {
-    const value = this.#secretValue().trim()
-    if (value.length > 0) {
-      this.#store?.set(value)
-      EffectBus.emit('mesh:secret', { secret: value })
     }
   }
 
@@ -109,10 +92,32 @@ export class MeshHeaderComponent {
     const value = (event.target as HTMLInputElement).value.trim()
     if (value.length > 0 && value.length < 8) return
     this.#secretValue.set(value)
+    this.#saveAndCollapse()
+  }
+
+  readonly cancelSecret = (): void => {
+    // Revert to last persisted value and collapse
+    const stored = this.#store?.value ?? ''
+    this.#secretValue.set(stored)
+    this.#secretExpanded.set(false)
+    this.secretExpandedChange.emit(false)
+    if (!stored) {
+      this.meshToggled.emit()
+    }
+  }
+
+  readonly #saveAndCollapse = (): void => {
+    const value = this.#secretValue().trim()
+    if (value.length > 0 && value.length < 8) return
     this.#store?.set(value)
     EffectBus.emit('mesh:secret', { secret: value })
     if (value.length > 0) {
       this.#secretExpanded.set(false)
+      this.secretExpandedChange.emit(false)
+    } else {
+      // No secret: go back to solo
+      this.#secretExpanded.set(false)
+      this.meshToggled.emit()
       this.secretExpandedChange.emit(false)
     }
   }

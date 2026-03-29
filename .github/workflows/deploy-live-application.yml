@@ -77,13 +77,13 @@ jobs:
         if: steps.azure_creds.outputs.ready == 'true' && steps.az_login.outcome == 'success'
         shell: pwsh
         working-directory: src/hypercomb-essentials
-        run: npm run build
+        run: npm run build:deploy
 
       - name: Verify essentials manifest
         if: steps.azure_creds.outputs.ready == 'true' && steps.az_login.outcome == 'success'
         run: |
           set -euo pipefail
-          MANIFEST=$(curl -fsSL https://storagehypercomb.blob.core.windows.net/content/manifest.json)
+          MANIFEST=$(curl -fsSL https://storagehypercomb.blob.core.windows.net/dcp/manifest.json)
           KEYS=$(echo "$MANIFEST" | jq -r '.packages | keys[]')
           if [ -z "$KEYS" ]; then
             echo "manifest.json contains no package entries"
@@ -156,6 +156,7 @@ jobs:
           action: upload
           skip_app_build: true
           app_location: src/hypercomb-web/dist/hypercomb-web/browser
+          output_location: ""
           api_location: ""
 
   close_pull_request_job:
