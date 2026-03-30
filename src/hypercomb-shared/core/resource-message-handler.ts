@@ -10,8 +10,7 @@ export class ResourceMessageHandler {
   // whitelist for allowed postmessage origins
   private readonly allowedOrigins = new Set<string>([
     window.origin,
-    'http://localhost:2400',
-    // 'https://dcp.hypercomb.io',
+    'https://diamondcoreprocessor.com',
   ])
 
   constructor() {

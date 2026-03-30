@@ -60,7 +60,7 @@ export class NostrMeshDrone extends Drone {
   // -----------------------------
 
   // note: default public relay (can be overridden by localstorage/configureRelays)
-  private relays: string[] = [HARD_RELAY, LOCAL_RELAY]
+  private relays: string[] = [HARD_RELAY]
 
   // note: set to null to accept any kind matching x
   private kinds: number[] | null = [29010]

@@ -34,6 +34,10 @@ export class ClaudeBridgeWorker extends Worker {
 
   #isEnabled(): boolean {
     try {
+      // bridge only operates on localhost — never attempt in production
+      const host = window.location.hostname
+      if (host !== 'localhost' && host !== '127.0.0.1' && host !== '::1') return false
+
       const queryValue = new URLSearchParams(window.location.search).get(BRIDGE_ENABLED_QUERY_KEY)
       if (queryValue !== null) return /^(1|true|yes|on)$/i.test(queryValue)
 
