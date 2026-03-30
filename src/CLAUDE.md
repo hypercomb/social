@@ -88,10 +88,11 @@ Essentials are built as **signature-addressed modules** and auto-installed into 
 
 ## Documentation File Placement
 
-- **`docs/`** — Project architecture docs only: protocol specs, governance, licensing, glossary, contributing guides, and other top-level hypercomb design documents.
-- **`src/documentation/`** — **All other markdown files.** Any `.md` documentation that is not a top-level project architecture document **must** go in `src/documentation/`. This includes feature docs, how-things-work explanations, implementation guides, runtime behavior docs, and any new documentation you create.
+**All documentation lives in `src/documentation/`.** There is no `docs/` folder. Do **not** create a `docs/` directory at the repository root or anywhere else — it has been removed and all content consolidated into `src/documentation/`.
 
-**Rule**: Always place new markdown documentation in `src/documentation/` unless it is a top-level project architecture document (protocol specs, governance, licensing, glossary, contributing guides).
+- **`src/documentation/`** — The **sole** location for all markdown documentation: protocol specs, governance, licensing, glossary, contributing guides, feature docs, implementation guides, runtime behavior docs, architecture docs, and any new documentation you create.
+
+**Rule**: Never create or write to a `docs/` folder. Always place all markdown documentation in `src/documentation/`.
 
 ## Monorepo Structure
 
@@ -133,8 +134,7 @@ src/
 │   └── ui/                     # Angular components: CommandLine, ControlsBar, FileExplorer, History
 ├── hypercomb-web/              # Production Angular app (runtime drone loading)
 ├── hypercomb-dev/              # Development Angular app (direct drone imports)
-├── documentation/              # Feature docs, implementation guides, how-things-work
-└── docs/                       # ARCHITECTURE.md, BYTE-PROTOCOL.md, GLOSSARY.md
+└── documentation/              # ALL documentation: protocol specs, governance, licensing, feature docs, guides
 ```
 
 ## Path Aliases (tsconfig.base.json)
