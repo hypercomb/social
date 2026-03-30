@@ -4,6 +4,7 @@ import { Injectable, computed, inject, signal } from '@angular/core'
 import { HiveScout } from 'src/app/hive/hive-scout'
 import { HypercombMode } from 'src/app/core/models/enumerations'
 import { ParentContext } from 'src/app/core/controller/context-stack'
+import { Cell } from 'src/app/models/cell'
 
 @Injectable({ providedIn: 'root' })
 export class HypercombState {
@@ -261,5 +262,13 @@ export class HypercombState {
 
   public log(value: string): void {
     this._log.set(value)
+  }
+
+  // ─────────────────────────────────────────────
+  // texture cache id
+  // ─────────────────────────────────────────────
+
+  public cacheId(cell: Cell): string {
+    return `texture-${cell.seed}`
   }
 }

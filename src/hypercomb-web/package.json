@@ -3,13 +3,13 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "prebuild": "node ./scripts/build-core-vendor.cjs && node ../node_modules/tsx/dist/cli.mjs ./scripts/build-pixi-vendor.ts",
+    "prebuild": "node ./scripts/build-core-vendor.cjs && npx tsx ./scripts/build-pixi-vendor.ts",
     "prestart": "npm --prefix .. run prebuild:web",
-    "start": "node ./node_modules/@angular/cli/bin/ng.js serve --port 4200 --host localhost --configuration development",
-    "build": "node ./node_modules/@angular/cli/bin/ng.js build",
+    "start": "npx ng serve --port 4200 --host localhost --configuration development",
+    "build": "npx ng build",
     "runtime": "npm run runtime:core && npm run runtime:pixi",
     "runtime:core": "node ./scripts/build-core-vendor.cjs",
-    "runtime:pixi": "node ../node_modules/tsx/dist/cli.mjs ./scripts/build-pixi-vendor.ts"
+    "runtime:pixi": "npx tsx ./scripts/build-pixi-vendor.ts"
   },
   "overrides": {
     "undici": "7.24.1"

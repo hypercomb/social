@@ -20,7 +20,7 @@ export class HashService {
   // low-level sha-256
   // ---------------------------------------------
 
-  private static async sha256Hex(
+  public static async sha256Hex(
     input: string | ArrayBuffer
   ): Promise<HashString> {
     const buffer =

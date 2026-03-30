@@ -2,9 +2,9 @@
   "name": "hypercomb-avatars",
   "version": "0.0.0",
   "scripts": {
-    "ng": "node ../node_modules/@angular/cli/bin/ng.js",
-    "start": "node ../node_modules/@angular/cli/bin/ng.js serve --port 4220 --host localhost",
-    "build": "node ../node_modules/@angular/cli/bin/ng.js build"
+    "ng": "npx ng",
+    "start": "npx ng serve --port 4220 --host localhost",
+    "build": "npx ng build"
   },
   "private": true,
   "dependencies": {

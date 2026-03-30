@@ -50,8 +50,8 @@
     "uuid": "^9.0.1"
   },
   "devDependencies": {
-    "@angular-devkit/build-angular": "^20.3.3",
-    "@angular/cli": "^20.1.6",
+    "@angular-devkit/build-angular": "^21.2.5",
+    "@angular/cli": "^21.2.5",
     "@typescript-eslint/eslint-plugin": "^8.42.0",
     "@typescript-eslint/parser": "^8.42.0",
     "eslint": "^9.34.0",
