@@ -17,7 +17,6 @@ export class Store extends EventTarget {
 
   public static readonly BEES_DIRECTORY = '__bees__'
   public static readonly DEPENDENCIES_DIRECTORY = '__dependencies__'
-  public static readonly LAYERS_DIRECTORY = '__layers__'
   public static readonly RESOURCES_DIRECTORY = '__resources__'
   public static readonly CLIPBOARD_DIRECTORY = '__clipboard__'
   public static readonly HISTORY_DIRECTORY = '__history__'
@@ -26,10 +25,24 @@ export class Store extends EventTarget {
 
   private static readonly CACHE_NAME = 'hypercomb-modules-v2'
 
+  /**
+   * Serialize a domain URL into an OPFS-safe folder name.
+   * Strips the protocol, replaces `/` with `-`, lowercases.
+   *
+   *   https://mydomain.com/content  →  mydomain.com-content
+   *   mydomain.com                  →  mydomain.com
+   */
+  public static serializeDomain(input: string): string {
+    let result = (input ?? '').trim()
+    result = result.replace(/^https?:\/\//, '')
+    result = result.replace(/\//g, '-')
+    result = result.replace(/-+$/, '')
+    return result.toLowerCase()
+  }
+
   public opfsRoot!: FileSystemDirectoryHandle
   public bees!: FileSystemDirectoryHandle
   public dependencies!: FileSystemDirectoryHandle
-  public layers!: FileSystemDirectoryHandle
   public resources!: FileSystemDirectoryHandle
   public clipboard!: FileSystemDirectoryHandle
   public history!: FileSystemDirectoryHandle
@@ -54,9 +67,6 @@ export class Store extends EventTarget {
     this.dependencies =
       await this.opfsRoot.getDirectoryHandle(Store.DEPENDENCIES_DIRECTORY, { create: true })
 
-    this.layers =
-      await this.opfsRoot.getDirectoryHandle(Store.LAYERS_DIRECTORY, { create: true })
-
     this.resources =
       await this.opfsRoot.getDirectoryHandle(Store.RESOURCES_DIRECTORY, { create: true })
 
@@ -77,7 +87,8 @@ export class Store extends EventTarget {
     domain: string,
     create: boolean = false
   ): Promise<FileSystemDirectoryHandle> => {
-    return await this.layers.getDirectoryHandle(domain, { create })
+    const key = Store.serializeDomain(domain)
+    return await this.opfsRoot.getDirectoryHandle(key, { create })
   }
 
   // -------------------------------------------------

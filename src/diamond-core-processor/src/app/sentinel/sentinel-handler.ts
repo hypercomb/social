@@ -68,8 +68,7 @@ export class SentinelHandler {
         return
       }
 
-      const domainName = new URL(domain).hostname
-      const manifest = await this.#installer.install(domain, rootSig, domainName, (p) => {
+      const manifest = await this.#installer.install(domain, rootSig, domain, (p) => {
         port.postMessage({ type: 'progress', rid: msg.rid, phase: p.phase, current: p.current, total: p.total })
       })
 
@@ -136,8 +135,7 @@ export class SentinelHandler {
       // Layers are domain-scoped — check each domain dir
       let bytes: ArrayBuffer | null = null
       for (const domain of this.#loadDomains()) {
-        const domainName = new URL(domain).hostname
-        const dir = await this.#store.domainLayersDir(domainName)
+        const dir = await this.#store.domainLayersDir(domain)
         bytes = await this.#store.readFile(dir, sig)
           ?? await this.#store.readFile(dir, `${sig}.json`)
         if (bytes) break
@@ -180,9 +178,9 @@ export class SentinelHandler {
     const toggles = this.#loadToggles()
 
     for (const domain of domains) {
-      const domainName = new URL(domain).hostname
+      const domainKey = DcpStore.serializeDomain(domain)
       // Check if this domain is toggled off
-      if (toggles[domain] === false || toggles[domainName] === false) continue
+      if (toggles[domain] === false || toggles[domainKey] === false) continue
 
       const rootSig = await this.#fetchRootSignature(domain)
       if (!rootSig) continue
@@ -224,8 +222,7 @@ export class SentinelHandler {
 
   async #readCachedManifest(domain: string, rootSig: string): Promise<any> {
     // Try reading from DCP's OPFS first (already installed)
-    const domainName = new URL(domain).hostname
-    const dir = await this.#store.domainLayersDir(domainName)
+    const dir = await this.#store.domainLayersDir(domain)
     const bytes = await this.#store.readFile(dir, 'manifest.cache.json')
     if (bytes) {
       try { return JSON.parse(new TextDecoder().decode(bytes)) } catch { /* fall through */ }
@@ -301,11 +298,9 @@ export class SentinelHandler {
     rootSig: string,
     manifest: any
   ): Promise<void> {
-    const domainName = new URL(domain).hostname
-
     // Stream layers
     for (const sig of (manifest.layers ?? [])) {
-      const domainDir = await this.#store.domainLayersDir(domainName)
+      const domainDir = await this.#store.domainLayersDir(domain)
       const bytes = await this.#store.readFile(domainDir, sig)
         ?? await this.#store.readFile(domainDir, `${sig}.json`)
       if (bytes) {
