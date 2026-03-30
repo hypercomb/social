@@ -313,7 +313,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   // -------------------------------------------------
 
   private readonly hasAnyResources = computed<boolean>(() => this.resourceCount$() > 0)
-  private readonly locked = computed<boolean>(() => !this.hasAnyResources())
+  public readonly locked = computed<boolean>(() => !this.hasAnyResources())
 
   // -------------------------------------------------
   // placeholder
@@ -334,6 +334,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   public constructor() {
     console.log('[command-line] initialized with url segments:', this.navigation.segments())
+  }
+
+  public readonly openDcp = (): void => {
+    window.dispatchEvent(new CustomEvent('portal:open', { detail: { target: 'dcp' } }))
   }
 
   // -------------------------------------------------

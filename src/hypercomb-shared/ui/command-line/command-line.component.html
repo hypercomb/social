@@ -1,25 +1,29 @@
 <!-- hypercomb-shared/ui/command-line/command-line.component.html -->
 
 <div class="command-line-wrapper" [style.visibility]="touchDragging() || viewActive() ? 'hidden' : null">
-  <hc-command-shell
-    #shell
-    [suggestions]="suggestions()"
-    [placeholder]="placeholder()"
-    [ghostValue]="ghostValue()"
-    [showSuggestions]="showCompletions()"
-    [typedPrefix]="completionTypedPrefix()"
-    [descriptionMap]="slashDescriptionMap()"
-    (valueChange)="onShellValueChange($event)"
-    (commit)="onShellCommit($event)"
-    (completionAccepted)="onShellCompletionAccepted($event)"
-    (shellKeydown)="onShellKeydown($event)"
-  />
+  @if (locked()) {
+    <a class="install-prompt" (click)="openDcp()">Install Hypercomb</a>
+  } @else {
+    <hc-command-shell
+      #shell
+      [suggestions]="suggestions()"
+      [placeholder]="placeholder()"
+      [ghostValue]="ghostValue()"
+      [showSuggestions]="showCompletions()"
+      [typedPrefix]="completionTypedPrefix()"
+      [descriptionMap]="slashDescriptionMap()"
+      (valueChange)="onShellValueChange($event)"
+      (commit)="onShellCommit($event)"
+      (completionAccepted)="onShellCompletionAccepted($event)"
+      (shellKeydown)="onShellKeydown($event)"
+    />
 
-  @if (voiceSupported) {
-    <button class="mic-btn" [class.recording]="voiceActive()"
-      (pointerdown)="startVoice($event)" (pointerup)="stopVoice()" (pointerleave)="stopVoice()"
-      aria-label="voice input" title="hold to speak (or hold B)">
-      <span class="mic-dot">{{ voiceActive() ? '●' : '○' }}</span>
-    </button>
+    @if (voiceSupported) {
+      <button class="mic-btn" [class.recording]="voiceActive()"
+        (pointerdown)="startVoice($event)" (pointerup)="stopVoice()" (pointerleave)="stopVoice()"
+        aria-label="voice input" title="hold to speak (or hold B)">
+        <span class="mic-dot">{{ voiceActive() ? '●' : '○' }}</span>
+      </button>
+    }
   }
 </div>
