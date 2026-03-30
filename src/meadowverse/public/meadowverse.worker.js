@@ -71,9 +71,7 @@ async function handleLayerRequest(request) {
   const cached = await tryCacheMatch(request)
   if (cached) return toHeadIfNeeded(request, cached)
 
-  // Layers live in domain folders at opfsRoot (no __layers__ intermediary).
-  // Search all non-reserved directories for the layer file.
-  const opfs = await tryReadLayerFromDomainDirs(sig)
+  const opfs = await tryReadFromOpfs('__layers__', `${sig}.json`)
   if (opfs) {
     await cachePut(request, opfs)
     return toHeadIfNeeded(request, opfs)
@@ -141,21 +139,6 @@ function readSignature(pathname) {
 /* ----------------------------------------
  * opfs helpers
  * ------------------------------------- */
-
-async function tryReadLayerFromDomainDirs(sig) {
-  try {
-    const root = await self.navigator.storage.getDirectory()
-    for await (const [name, handle] of root.entries()) {
-      if (handle.kind !== 'directory') continue
-      if (name.startsWith('__')) continue
-      try {
-        const fileHandle = await handle.getFileHandle(sig)
-        return asJsResponse(await fileHandle.getFile())
-      } catch { /* not in this domain dir */ }
-    }
-  } catch { /* opfs unavailable */ }
-  return null
-}
 
 async function tryReadFromOpfs(dirName, fileName) {
   try {

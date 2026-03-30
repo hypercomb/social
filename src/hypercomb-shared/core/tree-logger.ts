@@ -1,7 +1,7 @@
 // hypercomb-shared/core/tree-logger.ts
 
 const SIG_RE = /^[a-f0-9]{64}$/i
-const SYSTEM_DIRS = new Set(['__bees__', '__dependencies__', '__resources__', '__history__'])
+const SYSTEM_DIRS = new Set(['__bees__', '__dependencies__', '__layers__', '__resources__', '__history__'])
 
 export class OpfsTreeLogger {
 

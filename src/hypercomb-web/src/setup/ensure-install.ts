@@ -256,11 +256,8 @@ const seedDirEntries = async (
 const seedLayerEntries = async (store: Store, signatures: string[]): Promise<void> => {
   if (!signatures.length) return
 
-  // Domain folders now live at opfsRoot (no __layers__ intermediary).
-  // Iterate root entries and check non-reserved directories.
-  for await (const [name, handle] of store.opfsRoot.entries()) {
+  for await (const [domain, handle] of store.layers.entries()) {
     if (handle.kind !== 'directory') continue
-    if (name.startsWith('__')) continue  // skip __bees__, __dependencies__, etc.
     for (const signature of signatures) {
       try {
         const fileHandle = await (handle as FileSystemDirectoryHandle).getFileHandle(signature)

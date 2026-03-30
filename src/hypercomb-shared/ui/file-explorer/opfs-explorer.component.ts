@@ -458,6 +458,7 @@ export class OpfsExplorerComponent extends hypercomb {
     if (this.showAll()) return false
     if (name === '__location__') return true
     if (name === '__bees__') return true
+    if (name === '__layers__') return true
     if (name === '__dependencies__') return true
     if (name.startsWith('install-')) return true
     if (name.endsWith(OpfsExplorerComponent.INSTALL_SUFFIX)) return true

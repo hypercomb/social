@@ -73,21 +73,20 @@ export const ensureInstall = async (): Promise<void> => {
   const oldManifestJson = localStorage.getItem(MANIFEST_KEY)
   const oldManifest = oldManifestJson ? tryParseManifest(oldManifestJson) : null
 
-  const installUrl = `${contentBase}/${signature}`
-  const parsed = LocationParser.parse(installUrl)
-  const domainLayersDir = await store.domainLayersDirectory(parsed.domain || parsed.baseUrl, true)
-
   if (oldManifest && newManifest) {
     console.log('[meadowverse:install] incremental update:', signature)
-    await removeStale(domainLayersDir, oldManifest.layers, newManifest.layers, '.json')
+    await removeStale(store.layers, oldManifest.layers, newManifest.layers, '.json')
     await removeStale(store.bees, oldManifest.bees, newManifest.bees, '.js')
     await removeStale(store.dependencies, oldManifest.dependencies, newManifest.dependencies, '.js')
   } else {
     console.log('[meadowverse:install] full install:', signature)
-    await clearDirectory(domainLayersDir)
+    await clearDirectory(store.layers)
     await clearDirectory(store.bees)
     await clearDirectory(store.dependencies)
   }
+
+  const installUrl = `${contentBase}/${signature}`
+  const parsed = LocationParser.parse(installUrl)
 
   const complete = await installer.install(parsed)
 
@@ -115,14 +114,7 @@ const needsInstall = async (store: Store, signature: string): Promise<boolean> =
   const installed = (localStorage.getItem(INSTALLED_KEY) ?? '').trim().toLowerCase()
   if (installed !== signature) return true
 
-  // Domain folders now live at opfsRoot (no __layers__ intermediary).
-  // Check that the domain folder for the content base has entries.
-  const domainKey = Store.serializeDomain(CONTENT_BASE_URL)
-  let hasLayers = false
-  try {
-    const domainDir = await store.opfsRoot.getDirectoryHandle(domainKey)
-    hasLayers = await hasAny(domainDir)
-  } catch { /* domain folder doesn't exist yet */ }
+  const hasLayers = await hasAny(store.layers)
   const hasBees = await hasAny(store.bees)
   const hasDeps = await hasAny(store.dependencies)
   return !(hasLayers && hasBees && hasDeps)

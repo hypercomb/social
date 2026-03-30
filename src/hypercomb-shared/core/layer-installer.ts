@@ -17,13 +17,13 @@ export class LayerInstaller {
     const packageSig = parsed?.signature ?? ''
     if (!baseUrl || !packageSig) return false
 
-    // domain folder key: serialized domain lives at opfsroot/<domain>/
+    // domain folder key used for: opfsroot/__layers__/<domain>/
     const domainKey = parsed?.domain || this.#tryHost(baseUrl)
     if (!domainKey) return false
 
     const store = get('@hypercomb.social/Store') as Store
 
-    // layers are stored per domain: opfsroot/<serialized-domain>/
+    // layers are stored per domain: opfsroot/__layers__/<domain>/
     const domainLayersDir = await store.domainLayersDirectory(domainKey, true)
 
     // 1) fetch content manifest and resolve the package by signature
@@ -132,7 +132,7 @@ export class LayerInstaller {
         continue
       }
 
-      // store as: opfsroot/<serialized-domain>/<sig>
+      // store as: opfsroot/__layers__/<domain>/<sig>
       await this.#writeBytesFile(domainLayersDir, sig, bytes)
       console.log(`[layer-installer] layer ${sig} installed`)
     }

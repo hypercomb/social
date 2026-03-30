@@ -15,12 +15,14 @@ export class DcpStore {
 
   static readonly BEES_DIRECTORY = '__bees__'
   static readonly DEPENDENCIES_DIRECTORY = '__dependencies__'
+  static readonly LAYERS_DIRECTORY = '__layers__'
   static readonly RESOURCES_DIRECTORY = '__resources__'
   static readonly PATCHES_DIRECTORY = '__patches__'
 
   #root!: FileSystemDirectoryHandle
   #bees!: FileSystemDirectoryHandle
   #dependencies!: FileSystemDirectoryHandle
+  #layers!: FileSystemDirectoryHandle
   #resources!: FileSystemDirectoryHandle
   #patches!: FileSystemDirectoryHandle
   #initialized = false
@@ -28,23 +30,9 @@ export class DcpStore {
   get root(): FileSystemDirectoryHandle { return this.#root }
   get bees(): FileSystemDirectoryHandle { return this.#bees }
   get dependencies(): FileSystemDirectoryHandle { return this.#dependencies }
+  get layers(): FileSystemDirectoryHandle { return this.#layers }
   get resources(): FileSystemDirectoryHandle { return this.#resources }
   get patches(): FileSystemDirectoryHandle { return this.#patches }
-
-  /**
-   * Serialize a domain URL into an OPFS-safe folder name.
-   * Strips the protocol, replaces `/` with `-`, lowercases.
-   *
-   *   https://mydomain.com/content  →  mydomain.com-content
-   *   mydomain.com                  →  mydomain.com
-   */
-  static serializeDomain(input: string): string {
-    let result = (input ?? '').trim()
-    result = result.replace(/^https?:\/\//, '')
-    result = result.replace(/\//g, '-')
-    result = result.replace(/-+$/, '')
-    return result.toLowerCase()
-  }
 
   async initialize(): Promise<void> {
     if (this.#initialized) return
@@ -53,18 +41,17 @@ export class DcpStore {
     this.#root = await navigator.storage.getDirectory()
     this.#bees = await this.#root.getDirectoryHandle(DcpStore.BEES_DIRECTORY, { create: true })
     this.#dependencies = await this.#root.getDirectoryHandle(DcpStore.DEPENDENCIES_DIRECTORY, { create: true })
+    this.#layers = await this.#root.getDirectoryHandle(DcpStore.LAYERS_DIRECTORY, { create: true })
     this.#resources = await this.#root.getDirectoryHandle(DcpStore.RESOURCES_DIRECTORY, { create: true })
     this.#patches = await this.#root.getDirectoryHandle(DcpStore.PATCHES_DIRECTORY, { create: true })
   }
 
   async domainLayersDir(domain: string): Promise<FileSystemDirectoryHandle> {
-    const key = DcpStore.serializeDomain(domain)
-    return await this.#root.getDirectoryHandle(key, { create: true })
+    return await this.#layers.getDirectoryHandle(domain, { create: true })
   }
 
   async domainPatchesDir(domain: string): Promise<FileSystemDirectoryHandle> {
-    const key = DcpStore.serializeDomain(domain)
-    return await this.#patches.getDirectoryHandle(key, { create: true })
+    return await this.#patches.getDirectoryHandle(domain, { create: true })
   }
 
   /**
