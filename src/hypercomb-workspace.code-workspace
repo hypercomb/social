@@ -23,6 +23,9 @@
     {
       "name": "hypercomb-web",
       "path": "hypercomb-web"
+    },
+    {
+      "path": "diamond-core-processor"
     }
   ],
   "launch": {
@@ -52,23 +55,38 @@
         "label": "web",
         "type": "shell",
         "command": "npm run start:web",
-        "options": { "cwd": "${workspaceFolder:hypercomb-web}/.." },
+        "options": {
+          "cwd": "${workspaceFolder:hypercomb-web}/.."
+        },
         "isBackground": true,
         "problemMatcher": [],
-        "presentation": { "reveal": "always", "panel": "dedicated", "group": "servers" }
+        "presentation": {
+          "reveal": "always",
+          "panel": "dedicated",
+          "group": "servers"
+        }
       },
       {
         "label": "dev",
         "type": "shell",
         "command": "npm run start:dev",
-        "options": { "cwd": "${workspaceFolder:hypercomb-dev}/.." },
+        "options": {
+          "cwd": "${workspaceFolder:hypercomb-dev}/.."
+        },
         "isBackground": true,
         "problemMatcher": [],
-        "presentation": { "reveal": "always", "panel": "dedicated", "group": "servers" }
+        "presentation": {
+          "reveal": "always",
+          "panel": "dedicated",
+          "group": "servers"
+        }
       },
       {
         "label": "web dev",
-        "dependsOn": ["web", "dev"],
+        "dependsOn": [
+          "web",
+          "dev"
+        ],
         "problemMatcher": []
       }
     ]
