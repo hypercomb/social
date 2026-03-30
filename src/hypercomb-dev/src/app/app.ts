@@ -224,6 +224,11 @@ export class App {
 
     window.dispatchEvent(new Event('synchronize'))
 
+    // Dev mode: bees are imported directly, not through ScriptPreloader.
+    // Set resourceCount so the command line unlocks.
+    const preloader = get('@hypercomb.social/ScriptPreloader') as any
+    preloader?.setResourceCount?.(values.length)
+
     // restore persisted orientation
     if (this.orientation() === 'flat-top') {
       EffectBus.emit('render:set-orientation', { flat: true })

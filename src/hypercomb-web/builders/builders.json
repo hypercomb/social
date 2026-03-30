@@ -1,0 +1,14 @@
+{
+  "builders": {
+    "application": {
+      "implementation": "./signature-cache/index",
+      "schema": "@angular/build/src/builders/application/schema.json",
+      "description": "Builds the application with signature-addressed compiled output caching."
+    },
+    "dev-server": {
+      "implementation": "./signature-cache/index#serveApplication",
+      "schema": "@angular/build/src/builders/dev-server/schema.json",
+      "description": "Dev server with signature-addressed compiled output caching."
+    }
+  }
+}

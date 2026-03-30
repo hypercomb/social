@@ -1,8 +1,5 @@
-import { ChangeDetectorRef, Component, type OnInit, type OnDestroy, signal, inject } from "@angular/core"
-import type { SafeResourceUrl } from "@angular/platform-browser"
-import { DomSanitizer } from "@angular/platform-browser"
+import { Component, type OnInit, type OnDestroy } from "@angular/core"
 import { EffectBus } from '@hypercomb/core'
-import { TranslatePipe } from '../../core/i18n.pipe'
 
 const DEFAULT_PORTALS: Record<string, string> = {
   dcp: 'https://diamondcoreprocessor.com',
@@ -18,23 +15,14 @@ function resolvePortalUrl(target: string): string | undefined {
 @Component({
   selector: 'hc-portal-overlay',
   standalone: true,
-  imports: [TranslatePipe],
+  imports: [],
   templateUrl: './portal-overlay.component.html',
   styleUrls: ['./portal-overlay.component.scss']
 })
 export class PortalOverlayComponent implements OnInit, OnDestroy {
 
-  #sanitizer: DomSanitizer
-  #cdr: ChangeDetectorRef
-
-  public readonly open = signal(false)
-  public readonly src = signal<SafeResourceUrl | null>(null)
+  isOpen = false
   #activeUrl: string | null = null
-
-  constructor() {
-    this.#sanitizer = inject(DomSanitizer)
-    this.#cdr = inject(ChangeDetectorRef)
-  }
 
   // -------------------------------------------------
   // open portal
@@ -45,9 +33,11 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     if (!url) return
 
     this.#activeUrl = url
-    this.open.set(true)
-    this.src.set(this.#sanitizer.bypassSecurityTrustResourceUrl(url))
-    this.#cdr.detectChanges()
+    this.isOpen = true
+    queueMicrotask(() => {
+      const frame = document.querySelector<HTMLIFrameElement>('.portal-frame')
+      if (frame) frame.src = url
+    })
   }
 
   // -------------------------------------------------
@@ -90,10 +80,10 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     window.addEventListener('portal:open', this.onPortalOpen)
     window.addEventListener('message', this.onMessage)
     this.#unsubEscape = EffectBus.on('global:escape', () => {
-      if (this.open()) this.close()
+      if (this.isOpen) this.close()
     })
     this.#unsubTouchDragging = EffectBus.on<{ active: boolean }>('touch:dragging', ({ active }) => {
-      if (active && this.open()) this.close()
+      if (active && this.isOpen) this.close()
     })
   }
 
@@ -108,9 +98,7 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
   // close portal
   // -------------------------------------------------
   public close = (): void => {
-    this.open.set(false)
-    this.src.set(null)
+    this.isOpen = false
     this.#activeUrl = null
-    this.#cdr.detectChanges()
   }
 }

@@ -3,7 +3,7 @@
 // Usage: tsx scripts/prebuild.ts --target web|dev
 
 import { createHash } from 'crypto'
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'fs'
+import { existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
 import { dirname, join, resolve } from 'path'
 import { spawn, spawnSync } from 'child_process'
 import { createConnection } from 'net'
@@ -173,12 +173,53 @@ function hasModuleOutput(): boolean {
   return readdirSync(distRoot).some(name => /^[a-f0-9]{64}$/i.test(name))
 }
 
+// --- Angular cache hygiene ---
+// Purges stale .angular/cache directories whose version folder doesn't match
+// the installed @angular/build version.  This prevents NG0203 injection errors
+// caused by serving pre-compiled component factories from a mismatched Angular.
+
+function purgeStaleAngularCache(projectDir: string): void {
+  const cacheRoot = join(projectDir, '.angular', 'cache')
+  if (!existsSync(cacheRoot)) return
+
+  // Installed @angular/build version is the one Angular CLI uses for caching
+  let installedVersion: string | undefined
+  try {
+    const pkg = JSON.parse(readFileSync(join(projectDir, 'node_modules', '@angular', 'build', 'package.json'), 'utf8'))
+    installedVersion = pkg.version
+  } catch {
+    // If we can't read the version, nuke everything to be safe
+    console.log(`${TAG} cannot determine @angular/build version — clearing entire cache`)
+    for (const entry of readdirSync(cacheRoot)) {
+      const full = join(cacheRoot, entry)
+      if (statSync(full).isDirectory()) {
+        rmSync(full, { recursive: true, force: true })
+        console.log(`${TAG} removed stale Angular cache: ${entry}`)
+      }
+    }
+    return
+  }
+
+  for (const entry of readdirSync(cacheRoot)) {
+    if (entry === installedVersion) continue
+    const full = join(cacheRoot, entry)
+    if (statSync(full).isDirectory()) {
+      rmSync(full, { recursive: true, force: true })
+      console.log(`${TAG} removed stale Angular cache: ${entry} (installed: ${installedVersion})`)
+    }
+  }
+}
+
 // --- main ---
 
 async function main() {
   console.log(`${TAG} target=${target}`)
   const state = loadState()
   let coreDirty = false
+
+  // Purge stale Angular caches before anything else
+  purgeStaleAngularCache(join(ROOT, 'hypercomb-web'))
+  purgeStaleAngularCache(join(ROOT, 'hypercomb-dev'))
 
   // Step 1: Core
   const coreSrc = join(ROOT, 'hypercomb-core', 'src')
@@ -209,8 +250,8 @@ async function main() {
       run(tsxRun('./scripts/build-module.ts', ['--local']), essentialsDir)
       recordBuild(state, 'essentials:module', essentialsSrc)
 
-      console.log(`${TAG} copying modules to web...`)
-      run(tsxRun('./scripts/copy-to-web.ts'), essentialsDir)
+      console.log(`${TAG} copying modules to dcp...`)
+      run(tsxRun('./scripts/copy-to-dcp.ts'), essentialsDir)
     } else {
       console.log(`${TAG} essentials modules — up to date`)
     }

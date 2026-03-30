@@ -123,12 +123,19 @@ export const ensureInstall = async (sentinel?: SentinelBridge | null): Promise<v
     return
   }
 
-  // No sentinel available — DCP is the sole gateway for executable content.
-  // Operate with whatever is already in OPFS from a previous successful sync.
-  console.warn('[ensure-install] no sentinel available — using cached OPFS state (DCP required for new content)')
-  restoreSignatureStore(sigStore)
-  restoreCachedBeeDeps()
-  await seedManifestCache(store, tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? ''))
+  // No sentinel — try cached OPFS first, then fall back to local content
+  const cachedManifest = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
+  if (cachedManifest && cachedManifest.bees.length > 0) {
+    console.log('[ensure-install] no sentinel — using cached OPFS state')
+    restoreSignatureStore(sigStore)
+    restoreCachedBeeDeps()
+    await seedManifestCache(store, cachedManifest)
+    return
+  }
+
+  // OPFS empty and no sentinel — install directly from DCP's static files
+  console.log('[ensure-install] no sentinel, OPFS empty — installing from DCP')
+  await localInstall(store, sigStore)
 }
 
 // -------------------------------------------------
@@ -322,4 +329,82 @@ const restoreSignatureStore = (sigStore: SignatureStore): void => {
   } catch {
     // non-fatal
   }
+}
+
+// ----- local install fallback -----
+// Tries DCP first, then falls back to local /content/ (dev server).
+
+const CONTENT_SOURCES = [
+  'https://diamondcoreprocessor.com',
+  `${location.origin}/content`,
+]
+
+const localInstall = async (store: Store, sigStore: SignatureStore): Promise<void> => {
+  let baseUrl = ''
+  let manifest: InstallManifest | null = null
+
+  for (const source of CONTENT_SOURCES) {
+    try {
+      const res = await fetch(`${source}/manifest.json`, { cache: 'no-store' })
+      if (!res.ok) continue
+      const content = await res.json()
+      const packageSig = Object.keys(content.packages ?? {})[0]
+      if (!packageSig) continue
+      manifest = content.packages[packageSig] as InstallManifest
+      baseUrl = source
+      console.log(`[ensure-install] using content source: ${source}`)
+      break
+    } catch {
+      console.warn(`[ensure-install] source unreachable: ${source}`)
+    }
+  }
+
+  if (!manifest || !baseUrl) {
+    console.warn('[ensure-install] no content source available')
+    return
+  }
+
+  if (!manifest) return
+
+  const layerDir = await store.domainLayersDirectory('local', true)
+
+  // Install layers
+  for (const sig of manifest.layers) {
+    try {
+      const res = await fetch(`${baseUrl}/__layers__/${sig}.json`, { cache: 'no-store' })
+      if (!res.ok) continue
+      await writeBytes(layerDir, sig, await res.arrayBuffer())
+    } catch { /* skip */ }
+  }
+
+  // Install dependencies
+  for (const sig of manifest.dependencies) {
+    try {
+      const res = await fetch(`${baseUrl}/__dependencies__/${sig}.js`, { cache: 'no-store' })
+      if (!res.ok) continue
+      await writeBytes(store.dependencies, `${sig}.js`, await res.arrayBuffer())
+    } catch { /* skip */ }
+  }
+
+  // Install bees
+  for (const sig of manifest.bees) {
+    try {
+      const res = await fetch(`${baseUrl}/__bees__/${sig}.js`, { cache: 'no-store' })
+      if (!res.ok) continue
+      await writeBytes(store.bees, `${sig}.js`, await res.arrayBuffer())
+    } catch { /* skip */ }
+  }
+
+  // Trust all signatures and persist manifest
+  const allSigs = [...manifest.bees, ...manifest.dependencies, ...manifest.layers]
+  sigStore.trustAll(allSigs)
+  localStorage.setItem(SIG_STORE_KEY, JSON.stringify(sigStore.toJSON()))
+
+  const installSig = allSigs.length > 0 ? allSigs[0] : 'local'
+  localStorage.setItem(SYNC_SIG_KEY, installSig)
+  localStorage.setItem(INSTALLED_KEY, installSig)
+  localStorage.setItem(MANIFEST_KEY, JSON.stringify(manifest))
+  if (manifest.beeDeps) (globalThis as any).__hypercombBeeDeps = manifest.beeDeps
+
+  console.log(`[ensure-install] local install complete (${manifest.bees.length} bees, ${manifest.dependencies.length} deps, ${manifest.layers.length} layers)`)
 }

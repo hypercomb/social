@@ -714,13 +714,13 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   // -------------------------------------------------
 
   public ngAfterViewInit(): void {
-    this.shell.focus()
+    this.shell?.focus()
 
     window.addEventListener('navigate', this.#onNavigate)
     window.addEventListener('popstate', this.#onNavigate)
     this.#commandLineToggleUnsub = EffectBus.on<{ cmd: string }>('keymap:invoke', (payload) => {
       if (payload?.cmd !== 'ui.commandLineToggle') return
-      this.shell.focus()
+      this.shell?.focus()
     })
 
     this.#prefillUnsub = EffectBus.on<{ value: string }>('search:prefill', ({ value }) => {

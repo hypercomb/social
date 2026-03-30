@@ -380,10 +380,14 @@ export class SentinelHandler {
   }
 
   #loadDomains(): string[] {
+    const selfOrigin = location.origin
     try {
-      return JSON.parse(localStorage.getItem(DOMAINS_KEY) ?? '[]')
+      const stored: string[] = JSON.parse(localStorage.getItem(DOMAINS_KEY) ?? '[]')
+      // DCP always includes its own origin — modules are bundled in public/
+      if (!stored.includes(selfOrigin)) return [selfOrigin, ...stored]
+      return stored
     } catch {
-      return []
+      return [selfOrigin]
     }
   }
 }

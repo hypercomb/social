@@ -24,6 +24,12 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   public get actionNames(): readonly string[] { return this.#actionNames }
   public get resourceCount(): number { return this.#resourceCount }
 
+  /** Dev mode: mark directly-imported bees as loaded so the command line unlocks. */
+  public setResourceCount(count: number): void {
+    this.#resourceCount = count
+    this.dispatchEvent(new CustomEvent('change'))
+  }
+
   readonly #bySignature = new Map<string, ActionDescriptor>()
   readonly #beeCache = new Map<string, Bee>()
   readonly #loadedDeps = new Set<string>()

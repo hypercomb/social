@@ -1,17 +1,16 @@
 <!-- src/app/common/portal/portal-overlay.component.html -->
-@if (open()) {
+@if (isOpen) {
   <div class="backdrop" (click)="close()"></div>
 
-  <div class="panel" role="dialog" [attr.aria-label]="'portal.title' | t">
+  <div class="panel" role="dialog">
     <iframe
-      class="frame"
-      [src]="src()!"
+      class="portal-frame"
       sandbox="allow-scripts allow-forms allow-same-origin"
       referrerpolicy="no-referrer"
     ></iframe>
-    <button class="portal-close" (click)="close()" [attr.aria-label]="'portal.close' | t">
+    <button class="portal-close" (click)="close()">
       <span class="close-icon">&times;</span>
-      <span class="close-label">{{ 'portal.back' | t }}</span>
+      <span class="close-label">Back</span>
     </button>
   </div>
 }

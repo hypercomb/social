@@ -52,11 +52,27 @@ const bootstrap = async (): Promise<void> => {
 
   const appRef = await bootstrapApplication(App, appConfig)
 
-  // After DCP portal installs, resync with sentinel, reload bees, then force CD
+  // After DCP portal installs, resync with sentinel then reload so the
+  // browser picks up the new import-map entries (import maps are immutable
+  // once injected).  If nothing changed, skip the reload.
   window.addEventListener('actions:available', async () => {
+    const previousSyncSig = localStorage.getItem('sentinel.sync-signature') ?? ''
+
     if (sentinel) {
       await resyncFromSentinel(sentinel)
     }
+
+    const currentSyncSig = localStorage.getItem('sentinel.sync-signature') ?? ''
+
+    // Sync signature changed → new content was installed.
+    // A page reload is required because the browser import map is frozen.
+    if (currentSyncSig && currentSyncSig !== previousSyncSig) {
+      location.reload()
+      return
+    }
+
+    // No new content — just refresh bees in case manifest changed without
+    // new dependencies (e.g. toggling existing bees on/off).
     const preloader = get('@hypercomb.social/ScriptPreloader') as any
     if (preloader?.find) await preloader.find('')
     appRef.tick()
