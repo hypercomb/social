@@ -43,6 +43,8 @@
   .space-crumb { color: rgba(190, 140, 200, 0.85); padding: 0; }
   .leaf-crumb { color: rgba(245, 245, 245, 0.6); padding: 0; }
   .secret-crumb { color: rgba(218, 165, 100, 0.85); padding: 0; }
+  .domain-crumb { color: rgba(245, 245, 245, 0.25); padding: 0; }
+  .branch-crumb { color: rgba(190, 140, 200, 0.85); padding: 0; font-weight: 500; }
 
   .address-icon {
     cursor: default;
@@ -747,4 +749,61 @@
   .controls-pill {
     bottom: calc(0.6rem + var(--hc-safe-bottom, 0px));
   }
+}
+
+// ── 27" monitor (2560px+) ────────────────────────────────
+@include desktop-wide {
+
+  .controls-pill {
+    padding: 0.3rem 0.6rem;
+    gap: 0.2rem;
+    font-size: 0.7rem;
+    border-radius: 5px;
+  }
+
+  .ctl-btn {
+    min-width: 1.6rem;
+    padding: 0.32rem 0.42rem;
+    .hci { font-size: 0.82rem; }
+    .dcp-icon { font-size: 1.1rem; }
+  }
+
+  .breadcrumb-float {
+    font-size: 0.58rem;
+    max-width: 60rem;
+
+    .path-crumb { max-width: 40rem; }
+    .address-crumb { max-width: 60rem; }
+  }
+
+  .tag-float { max-width: 28rem; }
+}
+
+// ── 34" ultrawide (3440px+) ──────────────────────────────
+@include desktop-ultrawide {
+
+  .controls-pill {
+    padding: 0.35rem 0.7rem;
+    gap: 0.24rem;
+    font-size: 0.74rem;
+    border-radius: 6px;
+  }
+
+  .ctl-btn {
+    min-width: 1.72rem;
+    padding: 0.36rem 0.48rem;
+    .hci { font-size: 0.88rem; }
+    .dcp-icon { font-size: 1.16rem; }
+  }
+
+  .breadcrumb-float {
+    font-size: 0.62rem;
+    max-width: 80rem;
+
+    .path-crumb { max-width: 50rem; }
+    .address-crumb { max-width: 80rem; }
+  }
+
+  .tag-float { max-width: 36rem; }
+  .tag-crumb { font-size: 0.56rem; }
 }

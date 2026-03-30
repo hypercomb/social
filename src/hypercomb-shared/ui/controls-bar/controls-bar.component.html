@@ -20,19 +20,16 @@
         <span class="hci">B</span>
       </button>
     }
-    @if (spaceName()) {
-      <span class="space-crumb crumb-link" (click)="navigateTo([])">{{ spaceName() }}</span>
-    }
-    @for (seg of pathSegments(); track seg.target.length; let first = $first) {
-      <span class="path-crumb">{{ !first || spaceName() ? ' / ' : '' }}</span>
-      @if (seg.leaf) {
-        <span class="leaf-crumb">{{ seg.name }}</span>
+    <span class="domain-crumb crumb-link" (click)="navigateTo([])">{{ activeDomain() }}</span>
+    @for (seg of pathSegments(); track seg.target.length; let last = $last) {
+      @if (last) {
+        <span class="domain-crumb">/</span><span class="branch-crumb">{{ seg.name }}</span>
       } @else {
-        <span class="path-crumb crumb-link" (click)="navigateTo(seg.target)">{{ seg.name }}</span>
+        <span class="domain-crumb crumb-link" (click)="navigateTo(seg.target)">/{{ seg.name }}</span>
       }
     }
     @if (secretWords()) {
-      <span class="path-crumb">{{ hasPrefixPath() ? ' / ' : '' }}</span><span class="secret-crumb">{{ secretWords() }}</span>
+      <span class="domain-crumb">/</span><span class="secret-crumb">{{ secretWords() }}</span>
     }
   }
 </div>

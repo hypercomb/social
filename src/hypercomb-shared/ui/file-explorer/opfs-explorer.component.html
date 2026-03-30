@@ -48,54 +48,114 @@
     </button>
   </div>
 
-  <!-- table -->
-  <div class="table-container" role="region" aria-label="opfs entries">
-    <table class="opfs-table" aria-label="opfs entries table">
-      <thead>
-        <tr>
-          <th class="col-icon" aria-hidden="true"></th>
-          <th class="col-name">{{ 'explorer.col-name' | t }}</th>
-          <th class="col-actions">{{ 'explorer.col-actions' | t }}</th>
-        </tr>
-      </thead>
+  <!-- grouped view (root level) -->
+  <ng-container *ngIf="isAtRoot() && domainGroups().length > 0; else flatView">
+    <div class="table-container" role="region" aria-label="opfs entries" *ngFor="let group of domainGroups()">
+      <div class="domain-header">
+        <span class="domain-label">{{ group.domain }}</span>
+        <span class="domain-count">{{ group.branches.length }}</span>
+      </div>
 
-      <tbody>
-        <tr
-          *ngFor="let e of entries(); trackBy: trackByName"
-          class="row"
-          [class.is-dir]="e.kind === 'directory'"
-          (click)="explore(e.name)"
-          tabindex="0"
-          (keydown.enter)="explore(e.name)"
-        >
-          <td class="cell-icon" aria-hidden="true">
-            <span class="icon">{{ icon(e) }}</span>
-          </td>
+      <table class="opfs-table" aria-label="domain packages table">
+        <thead>
+          <tr>
+            <th class="col-icon" aria-hidden="true"></th>
+            <th class="col-name">{{ 'explorer.col-name' | t }}</th>
+            <th class="col-actions">{{ 'explorer.col-actions' | t }}</th>
+          </tr>
+        </thead>
 
-          <td class="cell-name">
-            <span class="label">{{ e.label }}</span>
-            <span class="sub" *ngIf="showAll()">{{ e.name }}</span>
-          </td>
+        <tbody>
+          <tr
+            *ngFor="let branch of group.branches; trackBy: trackByName"
+            class="row branch-row"
+            [class.is-dir]="branch.kind === 'directory'"
+            (click)="exploreBranch(group.domain, branch.name)"
+            tabindex="0"
+            (keydown.enter)="exploreBranch(group.domain, branch.name)"
+          >
+            <td class="cell-icon" aria-hidden="true">
+              <span class="icon">{{ icon(branch) }}</span>
+            </td>
 
-          <td class="cell-actions">
-            <button type="button" class="icon-button" [title]="'explorer.run' | t" [attr.aria-label]="'explorer.run' | t" (click)="run(e, $event)">
-              <span aria-hidden="true">▶</span>
-            </button>
+            <td class="cell-name">
+              <span class="branch-label">{{ branch.rootGrammar || branch.label }}</span>
+              <span class="sub" *ngIf="showAll()">{{ branch.name }}</span>
+            </td>
 
-            <button type="button" class="btn-small" [title]="'explorer.copy' | t" [attr.aria-label]="'explorer.copy' | t" (click)="copyDetails(e, $event)">
-              {{ 'explorer.copy' | t }}
-            </button>
+            <td class="cell-actions">
+              <button type="button" class="icon-button" [title]="'explorer.run' | t" [attr.aria-label]="'explorer.run' | t" (click)="run(branch, $event)">
+                <span aria-hidden="true">▶</span>
+              </button>
 
-            <button type="button" class="icon-button danger" [title]="'explorer.remove' | t" [attr.aria-label]="'explorer.remove' | t" (click)="remove(e, $event)">
-              <span aria-hidden="true">🗑</span>
-            </button>
-          </td>
-        </tr>
+              <button type="button" class="btn-small" title="Copy package" aria-label="Copy package" (click)="copyBranch(branch, $event)">
+                {{ 'explorer.copy' | t }}
+              </button>
 
-        <tr *ngIf="entries().length === 0">
-          <td class="empty" colspan="3">{{ 'explorer.no-entries' | t }}</td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
+              <button type="button" class="icon-button danger" [title]="'explorer.remove' | t" [attr.aria-label]="'explorer.remove' | t" (click)="remove(branch, $event)">
+                <span aria-hidden="true">🗑</span>
+              </button>
+            </td>
+          </tr>
+
+          <tr *ngIf="group.branches.length === 0">
+            <td class="empty" colspan="3">{{ 'explorer.no-entries' | t }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </ng-container>
+
+  <!-- flat view (non-root levels) -->
+  <ng-template #flatView>
+    <div class="table-container" role="region" aria-label="opfs entries">
+      <table class="opfs-table" aria-label="opfs entries table">
+        <thead>
+          <tr>
+            <th class="col-icon" aria-hidden="true"></th>
+            <th class="col-name">{{ 'explorer.col-name' | t }}</th>
+            <th class="col-actions">{{ 'explorer.col-actions' | t }}</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          <tr
+            *ngFor="let e of entries(); trackBy: trackByName"
+            class="row"
+            [class.is-dir]="e.kind === 'directory'"
+            (click)="explore(e.name)"
+            tabindex="0"
+            (keydown.enter)="explore(e.name)"
+          >
+            <td class="cell-icon" aria-hidden="true">
+              <span class="icon">{{ icon(e) }}</span>
+            </td>
+
+            <td class="cell-name">
+              <span class="label">{{ e.label }}</span>
+              <span class="sub" *ngIf="showAll()">{{ e.name }}</span>
+            </td>
+
+            <td class="cell-actions">
+              <button type="button" class="icon-button" [title]="'explorer.run' | t" [attr.aria-label]="'explorer.run' | t" (click)="run(e, $event)">
+                <span aria-hidden="true">▶</span>
+              </button>
+
+              <button type="button" class="btn-small" [title]="'explorer.copy' | t" [attr.aria-label]="'explorer.copy' | t" (click)="copyDetails(e, $event)">
+                {{ 'explorer.copy' | t }}
+              </button>
+
+              <button type="button" class="icon-button danger" [title]="'explorer.remove' | t" [attr.aria-label]="'explorer.remove' | t" (click)="remove(e, $event)">
+                <span aria-hidden="true">🗑</span>
+              </button>
+            </td>
+          </tr>
+
+          <tr *ngIf="entries().length === 0">
+            <td class="empty" colspan="3">{{ 'explorer.no-entries' | t }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </ng-template>
 </div>

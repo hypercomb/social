@@ -167,6 +167,11 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
 
   readonly hasPrefixPath = computed(() => this.prefixPath().length > 0)
 
+  /** Active domain for breadcrumb display */
+  readonly activeDomain = computed(() => {
+    return window.location.hostname || 'hypercomb.io'
+  })
+
   /** Full FQDN key: space/domain/lineage/secret/seed */
   readonly #fqdn = computed(() => {
     this.#moved$()

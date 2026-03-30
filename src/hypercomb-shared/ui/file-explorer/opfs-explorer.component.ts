@@ -16,6 +16,15 @@ interface ExplorerEntry {
   name: string
   label: string
   kind: 'file' | 'directory'
+  /** domain key that owns this branch (set at root level) */
+  domainKey?: string
+  /** root grammar name resolved from the branch */
+  rootGrammar?: string
+}
+
+interface DomainGroup {
+  domain: string
+  branches: ExplorerEntry[]
 }
 
 @Component({
@@ -55,9 +64,11 @@ export class OpfsExplorerComponent extends hypercomb {
   // -------------------------------------------------
 
   public readonly entries = signal<readonly ExplorerEntry[]>([])
+  public readonly domainGroups = signal<readonly DomainGroup[]>([])
   public newName = ''
 
   public readonly showAll = signal(this.readInitialShowAll())
+  public readonly isAtRoot = (): boolean => this.directory() === '/'
 
   public readonly directory = (): string => this.lineage.explorerLabel()
 
@@ -194,6 +205,45 @@ export class OpfsExplorerComponent extends hypercomb {
     }
   }
 
+  public exploreBranch = (domainKey: string, branchName: string): void => {
+    this.lineage.explorerEnter(domainKey)
+    this.lineage.explorerEnter(branchName)
+    void this.runProcessorForLocation()
+  }
+
+  public copyBranch = async (entry: ExplorerEntry, ev: MouseEvent): Promise<void> => {
+    ev.stopPropagation()
+    if (!entry.domainKey) return
+
+    const rootDir = this.store.hypercombRoot
+    let domainDir: FileSystemDirectoryHandle
+    try {
+      domainDir = await rootDir.getDirectoryHandle(entry.domainKey, { create: false })
+    } catch { return }
+
+    let branchDir: FileSystemDirectoryHandle
+    try {
+      branchDir = await domainDir.getDirectoryHandle(entry.name, { create: false })
+    } catch {
+      await this.copyDetails(entry, ev)
+      return
+    }
+
+    const files: string[] = []
+    for await (const [name, handle] of branchDir.entries()) {
+      if (handle.kind === 'file') files.push(name)
+    }
+
+    const manifest = {
+      domain: entry.domainKey,
+      branch: entry.name,
+      rootGrammar: entry.rootGrammar || entry.name,
+      files,
+    }
+
+    await this.writeClipboard(JSON.stringify(manifest, null, 2))
+  }
+
   public remove = async (e: ExplorerEntry, ev: MouseEvent): Promise<void> => {
     ev.stopPropagation()
 
@@ -260,6 +310,60 @@ export class OpfsExplorerComponent extends hypercomb {
     })
 
     this.entries.set(out)
+
+    // build domain groups when at root level
+    if (this.directory() === '/') {
+      await this.buildDomainGroups(dir, out)
+    } else {
+      this.domainGroups.set([])
+    }
+  }
+
+  private readonly buildDomainGroups = async (
+    rootDir: FileSystemDirectoryHandle,
+    flatEntries: readonly ExplorerEntry[]
+  ): Promise<void> => {
+    const groups = new Map<string, ExplorerEntry[]>()
+
+    for (const entry of flatEntries) {
+      if (entry.name === '..' || entry.kind !== 'directory') continue
+
+      let domainDir: FileSystemDirectoryHandle
+      try {
+        domainDir = await rootDir.getDirectoryHandle(entry.name, { create: false })
+      } catch { continue }
+
+      const domainKey = entry.name
+      if (!groups.has(domainKey)) groups.set(domainKey, [])
+      const branches = groups.get(domainKey)!
+
+      for await (const [childName, childHandle] of domainDir.entries()) {
+        if (this.isHiddenEntry(childName)) continue
+
+        let rootGrammar = childName
+        if (childHandle.kind === 'file') {
+          const resolved = this.preloader.getActionName(childName)
+          if (resolved) rootGrammar = resolved
+        }
+
+        branches.push({
+          name: childName,
+          label: rootGrammar,
+          kind: childHandle.kind,
+          domainKey,
+          rootGrammar,
+        })
+      }
+
+      branches.sort((a, b) => {
+        if (a.kind !== b.kind) return a.kind === 'directory' ? -1 : 1
+        return a.label.localeCompare(b.label)
+      })
+    }
+
+    this.domainGroups.set(
+      Array.from(groups.entries()).map(([domain, branches]) => ({ domain, branches }))
+    )
   }
 
   // -------------------------------------------------

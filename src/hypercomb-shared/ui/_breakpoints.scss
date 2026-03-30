@@ -5,6 +5,8 @@ $bp-phone-max: 599px;
 $bp-tablet: 600px;
 $bp-tablet-land: 1024px;
 $bp-desktop: 1367px;
+$bp-desktop-wide: 2560px;    // 27" monitor
+$bp-desktop-ultrawide: 3440px; // 34" ultrawide
 
 @mixin phone-only {
   @media (max-width: $bp-phone-max) { @content; }
@@ -26,8 +28,19 @@ $bp-desktop: 1367px;
   @media (min-width: $bp-tablet-land) and (max-width: $bp-desktop - 1) { @content; }
 }
 
+// 13" laptop — 1367px to 2559px
 @mixin desktop {
   @media (min-width: $bp-desktop) { @content; }
+}
+
+// 27" monitor — 2560px to 3439px
+@mixin desktop-wide {
+  @media (min-width: $bp-desktop-wide) { @content; }
+}
+
+// 34" ultrawide — 3440px+
+@mixin desktop-ultrawide {
+  @media (min-width: $bp-desktop-ultrawide) { @content; }
 }
 
 @mixin touch {

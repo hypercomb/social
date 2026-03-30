@@ -253,4 +253,58 @@
     color: #9a9a9a;
     text-align: center;
   }
+
+  // ── domain grouped view ──────────────────────────────
+
+  .domain-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.65rem 1rem;
+    background: #1b1b1b;
+    border-bottom: 1px solid #232323;
+  }
+
+  .domain-label {
+    font-family: ui-monospace, sfmono-regular, menlo, consolas, monospace;
+    font-size: 0.8rem;
+    color: rgba(245, 245, 245, 0.3);
+    letter-spacing: 0.02em;
+  }
+
+  .domain-count {
+    font-size: 0.7rem;
+    color: #9a9a9a;
+    background: rgba(255, 255, 255, 0.06);
+    padding: 0.1rem 0.5rem;
+    border-radius: 8px;
+  }
+
+  .branch-row .cell-name .branch-label {
+    display: block;
+    color: rgba(190, 140, 200, 0.85);
+    font-weight: 500;
+  }
+
+  .table-container + .table-container {
+    margin-top: 1rem;
+  }
+
+  // ── 27" monitor (2560px+) ────────────────────────────
+  @media (min-width: 2560px) {
+    .title,
+    .toolbar,
+    .table-container {
+      width: 1600px;
+    }
+  }
+
+  // ── 34" ultrawide (3440px+) ──────────────────────────
+  @media (min-width: 3440px) {
+    .title,
+    .toolbar,
+    .table-container {
+      width: 2200px;
+    }
+  }
 }
