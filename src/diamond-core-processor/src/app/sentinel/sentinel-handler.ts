@@ -120,28 +120,32 @@ export class SentinelHandler {
     // Stream all enabled files, mark the sync sig for web to store.
     const add: { signature: string; kind: string; bytes: ArrayBuffer }[] = []
 
+    const domains = this.#loadDomains()
+
     for (const sig of syncManifest.bees) {
-      const bytes = await this.#store.readFile(this.#store.bees, `${sig}.js`)
+      let bytes = await this.#store.readFile(this.#store.bees, `${sig}.js`)
         ?? await this.#store.readFile(this.#store.bees, sig)
+      if (!bytes) bytes = await this.#fetchFromDomains(domains, sig, 'bee')
       if (bytes) add.push({ signature: sig, kind: 'bee', bytes })
     }
 
     for (const sig of syncManifest.dependencies) {
-      const bytes = await this.#store.readFile(this.#store.dependencies, `${sig}.js`)
+      let bytes = await this.#store.readFile(this.#store.dependencies, `${sig}.js`)
         ?? await this.#store.readFile(this.#store.dependencies, sig)
+      if (!bytes) bytes = await this.#fetchFromDomains(domains, sig, 'dependency')
       if (bytes) add.push({ signature: sig, kind: 'dependency', bytes })
     }
 
     for (const sig of syncManifest.layers) {
-      // Layers are domain-scoped — check each domain dir
       let bytes: ArrayBuffer | null = null
-      for (const domain of this.#loadDomains()) {
+      for (const domain of domains) {
         const domainName = new URL(domain).hostname
         const dir = await this.#store.domainLayersDir(domainName)
         bytes = await this.#store.readFile(dir, sig)
           ?? await this.#store.readFile(dir, `${sig}.json`)
         if (bytes) break
       }
+      if (!bytes) bytes = await this.#fetchFromDomains(domains, sig, 'layer')
       if (bytes) add.push({ signature: sig, kind: 'layer', bytes })
     }
 
@@ -338,6 +342,14 @@ export class SentinelHandler {
       case 'dependency': return this.#store.dependencies
       default: return null  // layers need domain-scoped dir, handled separately
     }
+  }
+
+  async #fetchFromDomains(domains: string[], sig: string, kind: 'layer' | 'bee' | 'dependency'): Promise<ArrayBuffer | null> {
+    for (const domain of domains) {
+      const bytes = await this.#fetchAndVerify(domain, '', sig, kind)
+      if (bytes) return bytes
+    }
+    return null
   }
 
   async #fetchAndVerify(

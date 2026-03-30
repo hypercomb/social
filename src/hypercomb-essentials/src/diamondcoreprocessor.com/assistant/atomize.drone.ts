@@ -130,3 +130,4 @@ export class AtomizeDrone extends Drone {
 
 const _atomize = new AtomizeDrone()
 window.ioc.register('@diamondcoreprocessor.com/AtomizeDrone', _atomize)
+console.log('[AtomizeDrone] Loaded')

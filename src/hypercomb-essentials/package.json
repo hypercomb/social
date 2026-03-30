@@ -22,7 +22,7 @@
     "prebuild": "node ./scripts/run-prepare.cjs",
     "build": "tsup",
     "build:module": "tsx ./scripts/build-module.ts --local && tsx ./scripts/copy-to-dcp.ts",
-    "build:module:deploy": "tsx ./scripts/build-module.ts && tsx ./scripts/copy-to-dcp.ts",
+    "build:module:deploy": "tsx ./scripts/build-module.ts --local && tsx ./scripts/copy-to-dcp.ts",
     "build:deploy": "npm run build:module:deploy",
     "copy-to-dcp": "tsx ./scripts/copy-to-dcp.ts",
     "build:watch": "tsx watch --include \"./src/**/*\" --include \"./scripts/**/*\" ./scripts/build-module.ts",

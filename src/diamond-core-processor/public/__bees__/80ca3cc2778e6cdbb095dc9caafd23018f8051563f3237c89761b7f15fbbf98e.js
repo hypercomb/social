@@ -146,6 +146,7 @@ Topic: ${label}`;
 };
 var _atomize = new AtomizeDrone();
 window.ioc.register("@diamondcoreprocessor.com/AtomizeDrone", _atomize);
+console.log("[AtomizeDrone] Loaded");
 export {
   AtomizeDrone
 };
