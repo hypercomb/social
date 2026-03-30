@@ -23,14 +23,11 @@ type OverlayAction = {
 /** Descriptor emitted by provider bees via `overlay:register-action` */
 export type OverlayActionDescriptor = {
   name: string
-  svgMarkup?: string
-  fontChar?: string
+  svgMarkup: string
   x: number
   y: number
-  iconSize?: number
   hoverTint?: number
   profile: OverlayProfileKey
-  /** Optional: called with tile context to determine if this icon is visible on a specific tile */
   visibleWhen?: OverlayVisibilityFn
 }
 
@@ -56,12 +53,15 @@ const LABEL_STYLE = new TextStyle({
   align: 'left',
 })
 
+// ── Icon sizing ──────────────────────────────────────────────────
+const DEFAULT_ICON_SIZE = 6.5   // 75 % of original 8.75
+
 // ── Arrange mode constants ────────────────────────────────────────
 
-const POOL_Y_OFFSET = 22
-const POOL_ICON_SIZE = 7
-const POOL_SPACING = 10
-const POOL_BG_PADDING = 3
+const POOL_Y_OFFSET = 16
+const POOL_ICON_SIZE = 5        // pool icons scaled proportionally
+const POOL_SPACING = 8         // tighter to match smaller pool icons
+const POOL_BG_PADDING = 2
 const POOL_BG_COLOR = 0x222244
 const POOL_BG_ALPHA = 0.6
 const WIGGLE_SPEED = 4
@@ -363,7 +363,7 @@ export class TileOverlayDrone extends Drone {
     this.#renderContainer.addChild(this.#overlay)
     this.#renderContainer.sortableChildren = true
 
-    // drive hex overlay animations (breathe, embers, ambient, entry) + arrange wiggle
+    // drive hex overlay animations (breathe, embers, ambient, entry) + icon float + arrange wiggle
     if (this.#app && !this.#animTickBound) {
       this.#animTickBound = (ticker: any) => {
         this.#animTime += (ticker.deltaMS ?? 16) / 1000
@@ -404,19 +404,15 @@ export class TileOverlayDrone extends Drone {
     const key = this.#resolveProfileKey()
     this.#activeProfileKey = key
 
-    // Build buttons from registered descriptors matching this profile
-    for (const desc of this.#registeredDescriptors.values()) {
-      if (desc.profile !== key) continue
-
+    // Collect descriptors for this profile, build buttons
+    const descs = [...this.#registeredDescriptors.values()].filter(d => d.profile === key)
+    for (const desc of descs) {
       const btn = new HexIconButton({
         svgMarkup: desc.svgMarkup,
-        fontChar: desc.fontChar,
-        width: desc.iconSize ?? 8.75,
-        height: desc.iconSize ?? 8.75,
-        alias: `hc-icon-${desc.name}`,
+        size: DEFAULT_ICON_SIZE,
+        cacheKey: `hc-icon-${desc.name}`,
         hoverTint: desc.hoverTint,
       })
-      btn.position.set(desc.x, desc.y)
       this.#overlay.addChild(btn)
       void btn.load()
 
@@ -428,7 +424,24 @@ export class TileOverlayDrone extends Drone {
       })
     }
 
+    // Layout: single centered row, evenly spaced at ICON_Y
+    this.#layoutIconRow()
     this.#updatePerTileVisibility()
+  }
+
+  // ── Icon row layout (centered, inline) ──────────────────────────────
+
+  #layoutIconRow(): void {
+    const visible = this.#actions.filter(a => a.button.visible)
+    const count = visible.length
+    if (count === 0) return
+
+    const spacing = ICON_SPACING
+    const startX = -(count - 1) * spacing / 2
+
+    for (let i = 0; i < count; i++) {
+      visible[i].button.position.set(startX + i * spacing, ICON_Y)
+    }
   }
 
   // ── Per-tile icon visibility ───────────────────────────────────────
@@ -467,6 +480,9 @@ export class TileOverlayDrone extends Drone {
         action.button.visible = action.visibleWhen(ctx)
       }
     }
+
+    // Re-layout so visible icons form a tight centered row
+    this.#layoutIconRow()
   }
 
   // ── Arrange mode ────────────────────────────────────────────────────
@@ -639,16 +655,14 @@ export class TileOverlayDrone extends Drone {
       return
     }
 
-    // Create pool icon buttons
+    // Create pool icon buttons — center positions, symmetric about x=0
     const startX = -(entries.length - 1) * POOL_SPACING / 2
     for (let i = 0; i < entries.length; i++) {
       const entry = entries[i]
       const btn = new HexIconButton({
         svgMarkup: entry.svgMarkup,
-        fontChar: entry.fontChar,
-        width: POOL_ICON_SIZE,
-        height: POOL_ICON_SIZE,
-        alias: `hc-pool-${entry.name}`,
+        size: POOL_ICON_SIZE,
+        cacheKey: `hc-pool-${entry.name}`,
         hoverTint: entry.hoverTint,
       })
       btn.position.set(startX + i * POOL_SPACING, 0)
@@ -659,12 +673,11 @@ export class TileOverlayDrone extends Drone {
       this.#poolIcons.push({ name: entry.name, profile: entry.profile, button: btn })
     }
 
-    // Draw pool background
+    // Draw pool background — centered around the row
     this.#poolBackground.clear()
-    const totalWidth = (entries.length - 1) * POOL_SPACING + POOL_ICON_SIZE + POOL_BG_PADDING * 2
-    const bgX = startX - POOL_BG_PADDING
-    const bgY = -POOL_BG_PADDING
-    this.#poolBackground.roundRect(bgX, bgY, totalWidth, POOL_ICON_SIZE + POOL_BG_PADDING * 2, 3)
+    const halfW = ((entries.length - 1) * POOL_SPACING) / 2 + POOL_ICON_SIZE / 2 + POOL_BG_PADDING
+    const halfH = POOL_ICON_SIZE / 2 + POOL_BG_PADDING
+    this.#poolBackground.roundRect(-halfW, -halfH, halfW * 2, halfH * 2, 1.5)
     this.#poolBackground.fill({ color: POOL_BG_COLOR, alpha: POOL_BG_ALPHA })
   }
 
@@ -802,18 +815,18 @@ export class TileOverlayDrone extends Drone {
     let centerY: number
 
     if (dragSource === 'pool' && this.#poolContainer) {
-      centerX = dragButton.position.x + this.#poolContainer.position.x + POOL_ICON_SIZE / 2
-      centerY = dragButton.position.y + this.#poolContainer.position.y + POOL_ICON_SIZE / 2
+      centerX = dragButton.position.x + this.#poolContainer.position.x
+      centerY = dragButton.position.y + this.#poolContainer.position.y
     } else {
-      centerX = dragButton.position.x + 8.75 / 2
-      centerY = dragButton.position.y + 8.75 / 2
+      centerX = dragButton.position.x
+      centerY = dragButton.position.y
     }
 
     // Check active icons
     for (const action of this.#actions) {
       if (action.name === this.#dragName && dragSource === 'active') continue
-      const ax = action.button.position.x + 8.75 / 2
-      const ay = action.button.position.y + 8.75 / 2
+      const ax = action.button.position.x
+      const ay = action.button.position.y
       const dist = Math.sqrt((centerX - ax) ** 2 + (centerY - ay) ** 2)
       if (dist < ICON_SPACING * 0.7) {
         return { type: 'active', name: action.name }
@@ -824,8 +837,8 @@ export class TileOverlayDrone extends Drone {
     if (this.#poolContainer) {
       for (const poolIcon of this.#poolIcons) {
         if (poolIcon.name === this.#dragName && dragSource === 'pool') continue
-        const px = poolIcon.button.position.x + this.#poolContainer.position.x + POOL_ICON_SIZE / 2
-        const py = poolIcon.button.position.y + this.#poolContainer.position.y + POOL_ICON_SIZE / 2
+        const px = poolIcon.button.position.x + this.#poolContainer.position.x
+        const py = poolIcon.button.position.y + this.#poolContainer.position.y
         const dist = Math.sqrt((centerX - px) ** 2 + (centerY - py) ** 2)
         if (dist < POOL_SPACING * 0.7) {
           return { type: 'pool', name: poolIcon.name }
@@ -845,8 +858,8 @@ export class TileOverlayDrone extends Drone {
     // Simple highlight: tint potential drop targets
     for (const action of this.#actions) {
       if (action.name === this.#dragName && this.#dragSource === 'active') continue
-      const ax = action.button.position.x + 8.75 / 2
-      const ay = action.button.position.y + 8.75 / 2
+      const ax = action.button.position.x
+      const ay = action.button.position.y
       const dist = Math.sqrt((localX - ax) ** 2 + (localY - ay) ** 2)
       action.button.hovered = dist < ICON_SPACING * 0.7
     }
@@ -981,8 +994,6 @@ export class TileOverlayDrone extends Drone {
       const desc: OverlayActionDescriptor = {
         name: entry.name,
         svgMarkup: entry.svgMarkup,
-        fontChar: entry.fontChar,
-        iconSize: entry.iconSize,
         hoverTint: entry.hoverTint,
         profile: entry.profile,
         visibleWhen: entry.visibleWhen,

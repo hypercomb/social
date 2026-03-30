@@ -1,59 +1,61 @@
 // diamondcoreprocessor.com/pixi/hex-icon-button.ts
-import { Container, Sprite, Text, TextStyle, Assets, type Texture } from 'pixi.js'
+//
+// Tile overlay icon button — renders an SVG sprite, center-anchored.
+// The button's .position IS the center point. No offset math.
+
+import { Container, Graphics, Sprite, Assets, type Texture } from 'pixi.js'
+
+// ── Hover backdrop ──────────────────────────────────────────────────
+
+const BACKDROP_PAD = 2
+const BACKDROP_RADIUS = 1.5
+const BACKDROP_FILL = 0x0c0c1a
+const BACKDROP_FILL_ALPHA = 0.72
+const BACKDROP_STROKE = 0x6688cc
+const BACKDROP_STROKE_ALPHA = 0.35
+const BACKDROP_STROKE_WIDTH = 0.6
 
 export type IconButtonConfig = {
-  /** Complete SVG markup string (loaded as data URI texture) */
-  svgMarkup?: string
-  /** Single character from hypercomb-icons font */
-  fontChar?: string
-  /** Display width in Pixi coordinate pixels */
-  width: number
-  /** Display height in Pixi coordinate pixels */
-  height: number
-  /** Normal-state tint (default: 0xffffff) */
+  /** SVG markup string — rendered as a texture */
+  svgMarkup: string
+  /** Display size in Pixi units (square) */
+  size: number
+  /** Normal tint (default white) */
   tint?: number
-  /** Hover-state tint */
+  /** Hover tint */
   hoverTint?: number
-  /** Unique alias for texture caching */
-  alias?: string
+  /** Texture cache key */
+  cacheKey?: string
 }
 
 export class HexIconButton extends Container {
-  #display: Sprite | Text | null = null
+  #sprite: Sprite | null = null
+  #backdrop: Graphics
   #config: IconButtonConfig
   #hovered = false
 
   constructor(config: IconButtonConfig) {
     super()
     this.#config = config
+    this.#backdrop = this.#createBackdrop()
+    this.addChild(this.#backdrop)
   }
 
   async load(): Promise<void> {
+    const { svgMarkup, size, tint, cacheKey } = this.#config
     try {
-      if (this.#config.fontChar) {
-        await document.fonts.ready
-        const style = new TextStyle({
-          fontFamily: 'hypercomb-icons',
-          fontSize: this.#config.width,
-          fill: this.#config.tint ?? 0xffffff,
-        })
-        const text = new Text({ text: this.#config.fontChar, style, resolution: window.devicePixelRatio * 4 })
-        text.anchor.set(0.5, 0.5)
-        text.position.set(this.#config.width / 2, this.#config.height / 2)
-        this.#display = text
-        this.addChild(text)
-      } else if (this.#config.svgMarkup) {
-        const dataUri = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(this.#config.svgMarkup)}`
-        const loadOpts: any = { src: dataUri }
-        if (this.#config.alias) loadOpts.alias = this.#config.alias
-        const texture: Texture = await Assets.load(loadOpts)
-        const sprite = new Sprite(texture)
-        sprite.width = this.#config.width
-        sprite.height = this.#config.height
-        sprite.tint = this.#config.tint ?? 0xffffff
-        this.#display = sprite
-        this.addChild(sprite)
-      }
+      const dataUri = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgMarkup)}`
+      const loadOpts: any = { src: dataUri }
+      if (cacheKey) loadOpts.alias = cacheKey
+      const texture: Texture = await Assets.load(loadOpts)
+
+      const sprite = new Sprite(texture)
+      sprite.width = size
+      sprite.height = size
+      sprite.anchor.set(0.5, 0.5)
+      sprite.tint = tint ?? 0xffffff
+      this.#sprite = sprite
+      this.addChild(sprite)
     } catch (e) {
       console.warn('[HexIconButton] load failed:', e)
     }
@@ -64,14 +66,27 @@ export class HexIconButton extends Container {
   set hovered(value: boolean) {
     if (this.#hovered === value) return
     this.#hovered = value
-    if (!this.#display) return
-    this.#display.tint = value
-      ? (this.#config.hoverTint ?? 0xc8d8ff)
-      : (this.#config.tint ?? 0xffffff)
+    this.#backdrop.visible = value
+    if (this.#sprite) {
+      this.#sprite.tint = value
+        ? (this.#config.hoverTint ?? 0xc8d8ff)
+        : (this.#config.tint ?? 0xffffff)
+    }
   }
 
   containsPoint(localX: number, localY: number): boolean {
-    return localX >= 0 && localX <= this.#config.width
-      && localY >= 0 && localY <= this.#config.height
+    const r = this.#config.size / 2 + BACKDROP_PAD
+    return localX >= -r && localX <= r && localY >= -r && localY <= r
+  }
+
+  #createBackdrop(): Graphics {
+    const r = this.#config.size / 2 + BACKDROP_PAD
+    const g = new Graphics()
+    g.roundRect(-r, -r, r * 2, r * 2, BACKDROP_RADIUS)
+    g.fill({ color: BACKDROP_FILL, alpha: BACKDROP_FILL_ALPHA })
+    g.roundRect(-r, -r, r * 2, r * 2, BACKDROP_RADIUS)
+    g.stroke({ color: BACKDROP_STROKE, alpha: BACKDROP_STROKE_ALPHA, width: BACKDROP_STROKE_WIDTH })
+    g.visible = false
+    return g
   }
 }

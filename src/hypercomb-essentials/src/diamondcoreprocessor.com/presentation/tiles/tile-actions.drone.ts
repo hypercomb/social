@@ -3,23 +3,32 @@ import { Drone, EffectBus, hypercomb, normalizeSeed } from '@hypercomb/core'
 import type { OverlayActionDescriptor, OverlayTileContext, OverlayProfileKey } from './tile-overlay.drone.js'
 import { readSeedProperties, writeSeedProperties } from '../../editor/tile-properties.js'
 
-// ── SVG icon markup ────────────────────────────────────────────────
+// ── SVG icons ─────────────────────────────────────────────────────
+// Clean line icons — 24×24 viewBox, 2px stroke, round caps/joins, white fill.
 
-const HIDE_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96"><path fill="white" d="M48 28c-18 0-33 12-40 20 3.5 4 8.2 8.5 14 12l5.5-5.5C23 51 20 48 20 48s12-14 28-14c3 0 5.8.6 8.4 1.6l6-6C57.8 27 53 28 48 28zm0 40c18 0 33-12 40-20-3.5-4-8.2-8.5-14-12l-5.5 5.5C73 45 76 48 76 48S64 62 48 62c-3 0-5.8-.6-8.4-1.6l-6 6C38.2 69 43 68 48 68z"/><circle fill="white" cx="48" cy="48" r="10"/><rect fill="white" x="46" y="16" width="4" height="64" rx="2" transform="rotate(-45 48 48)"/></svg>`
+const svg = (d: string) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`
 
-const BLOCK_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96"><path fill="white" fill-rule="evenodd" d="M48 12c-19.9 0-36 16.1-36 36s16.1 36 36 36 36-16.1 36-36-16.1-36-36-36zm0 8c6.5 0 12.5 2.2 17.3 6L25 66.3C21.2 61.5 20 55.5 20 48c0-15.5 12.5-28 28-28zm0 56c-6.5 0-12.5-2.2-17.3-6L71 29.7C74.8 34.5 76 40.5 76 48c0 15.5-12.5 28-28 28z"/></svg>`
+const ICONS = {
+  // Pencil
+  edit: svg('<path d="M17 3l4 4L7 21H3v-4L17 3z"/>'),
+  // Tree branch (parent + child node)
+  'add-sub': svg('<circle cx="12" cy="6" r="3"/><circle cx="12" cy="18" r="3"/><line x1="12" y1="9" x2="12" y2="15"/>'),
+  // Magnifying glass
+  search: svg('<circle cx="11" cy="11" r="7"/><line x1="16" y1="16" x2="21" y2="21"/>'),
+  // Eye with slash
+  hide: svg('<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/><circle cx="12" cy="12" r="3"/><line x1="4" y1="4" x2="20" y2="20"/>'),
+  // Plus
+  adopt: svg('<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>'),
+  // Circle with slash
+  block: svg('<circle cx="12" cy="12" r="9"/><line x1="5.7" y1="5.7" x2="18.3" y2="18.3"/>'),
+} as const
 
-const ADD_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96"><path fill="white" d="M50 18h-4v28H18v4h28v28h4V50h28v-4H50z"/></svg>`
-
-const SEARCH_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 15.1 15.1" width="96" height="96"><path fill="white" fill-rule="evenodd" d="M 2.8298014 0 C 2.0535814 0 1.3853227 0.28019878 0.82527262 0.84025879 C 0.27504258 1.3904888 1.566648e-16 2.0535915 0 2.8298014 L 0 12.262301 C 0 13.038511 0.27504258 13.706769 0.82527262 14.266829 C 1.3853227 14.817049 2.0535814 15.092102 2.8298014 15.092102 L 12.262301 15.092102 C 13.038521 15.092102 13.701603 14.817049 14.251843 14.266829 C 14.811893 13.706769 15.092102 13.038511 15.092102 12.262301 L 15.092102 7.5457926 L 15.092102 2.8298014 C 15.092102 2.0535915 14.811893 1.3904888 14.251843 0.84025879 C 13.701603 0.28019878 13.038521 7.8332402e-17 12.262301 0 L 2.8298014 0 z M 3.319694 3.5077962 C 3.5118105 3.5046951 3.7067928 3.5434545 3.8943359 3.6261353 C 4.2137567 3.7669554 4.944518 4.3190538 5.5557332 4.8813558 C 6.2614729 5.5306175 7.1542248 6.6726222 7.3070475 7.1220459 C 7.3884558 7.3614603 7.3888166 7.6958551 7.3080811 7.9493856 C 7.1958204 8.3019157 6.6316395 9.0778904 5.9495076 9.8185221 C 5.3889302 10.427175 4.3753569 11.239887 3.8803833 11.477336 C 3.693628 11.566927 3.6539908 11.575272 3.3863566 11.583272 C 2.9356228 11.596609 2.7023992 11.510162 2.3931356 11.215853 C 1.9647425 10.808173 1.856547 10.117053 2.1430216 9.6175008 C 2.2752388 9.3869412 2.402257 9.2624528 2.7300659 9.0402751 C 2.9100569 8.918283 3.1769104 8.7222221 3.3233114 8.6051595 C 3.5800197 8.3998964 4.2840211 7.6999139 4.3413371 7.5928182 C 4.3651233 7.5483733 4.3292908 7.4972618 4.102592 7.2491699 C 3.7142112 6.8241389 3.207673 6.3941377 2.668571 6.0321899 C 2.3097797 5.7913004 2.1232913 5.5343147 2.0226156 5.141805 C 1.9114818 4.7085268 2.0788761 4.1912971 2.436027 3.8648804 C 2.6878883 3.6346939 2.9994998 3.5129647 3.319694 3.5077962 z M 10.210746 9.5410197 C 12.177422 9.5322323 12.305877 9.539367 12.586829 9.6702108 C 12.988418 9.8572346 13.187864 10.268004 13.080339 10.68772 C 13.002739 10.990623 12.816096 11.193262 12.496395 11.322306 L 12.337748 11.386385 L 10.39058 11.391553 C 8.2140054 11.397096 8.2237479 11.397809 7.9514526 11.213269 C 7.6536494 11.011442 7.5323973 10.758912 7.5597453 10.397298 C 7.5892645 10.00698 7.7913159 9.7649324 8.2150024 9.6118164 C 8.3883187 9.5491824 8.3911151 9.5491497 10.210746 9.5410197 z"/></svg>`
-
-// ── Icon registry (identity only — no positions) ──────────────────
+// ── Icon registry ─────────────────────────────────────────────────
 
 export type IconRegistryEntry = {
   name: string
-  svgMarkup?: string
-  fontChar?: string
-  iconSize?: number
+  svgMarkup: string
   hoverTint?: number
   profile: OverlayProfileKey
   visibleWhen?: (ctx: OverlayTileContext) => boolean
@@ -27,14 +36,14 @@ export type IconRegistryEntry = {
 
 const ICON_REGISTRY: IconRegistryEntry[] = [
   // ── private profile ──
-  { name: 'add-sub', fontChar: '~', hoverTint: 0xa8ffd8, profile: 'private' },
-  { name: 'edit', fontChar: '2', hoverTint: 0xc8d8ff, profile: 'private' },
-  { name: 'search', svgMarkup: SEARCH_ICON_SVG, hoverTint: 0xc8ffc8, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.noImage },
+  { name: 'add-sub', svgMarkup: ICONS['add-sub'], hoverTint: 0xa8ffd8, profile: 'private' },
+  { name: 'edit', svgMarkup: ICONS.edit, hoverTint: 0xc8d8ff, profile: 'private' },
+  { name: 'search', svgMarkup: ICONS.search, hoverTint: 0xc8ffc8, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.noImage },
   // ── public-own profile ──
-  { name: 'hide', svgMarkup: HIDE_ICON_SVG, hoverTint: 0xffd8a8, profile: 'public-own' },
+  { name: 'hide', svgMarkup: ICONS.hide, hoverTint: 0xffd8a8, profile: 'public-own' },
   // ── public-external profile ──
-  { name: 'adopt', svgMarkup: ADD_ICON_SVG, hoverTint: 0xa8ffd8, profile: 'public-external' },
-  { name: 'block', svgMarkup: BLOCK_ICON_SVG, hoverTint: 0xffc8c8, profile: 'public-external' },
+  { name: 'adopt', svgMarkup: ICONS.adopt, hoverTint: 0xa8ffd8, profile: 'public-external' },
+  { name: 'block', svgMarkup: ICONS.block, hoverTint: 0xffc8c8, profile: 'public-external' },
 ]
 
 // Default active icons per profile (defines the fallback order)
@@ -46,14 +55,28 @@ const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
 
 // ── Position computation ──────────────────────────────────────────
 
-const ICON_Y = 5
-const ICON_SPACING = 12
+const ICON_Y = 3
+const ICON_SPACING = 10       // tighter to match 75 % icon scale
+const ICON_SIZE = 6.5         // matches DEFAULT_ICON_SIZE in tile-overlay
+const HEX_INRADIUS = 27.7     // √3/2 × 32 — safe horizontal bound
+const EDGE_MARGIN = 3         // keep icons this far from hex edge
 
 function computeIconPositions(activeNames: string[]): { x: number; y: number }[] {
   const count = activeNames.length
   if (count === 0) return []
-  const startX = -(count - 1) * ICON_SPACING / 2
-  return activeNames.map((_, i) => ({ x: startX + i * ICON_SPACING, y: ICON_Y }))
+
+  let spacing = ICON_SPACING
+
+  // Compress spacing when the row would overflow the hex
+  const available = (HEX_INRADIUS - EDGE_MARGIN) * 2
+  const idealWidth = (count - 1) * spacing
+  if (idealWidth > available && count > 1) {
+    spacing = available / (count - 1)
+  }
+
+  // Return CENTER positions — evenly spaced, symmetric about x=0
+  const startX = -(count - 1) * spacing / 2
+  return activeNames.map((_, i) => ({ x: startX + i * spacing, y: ICON_Y }))
 }
 
 // ── Persistence key in root properties ────────────────────────────
@@ -148,8 +171,6 @@ export class TileActionsDrone extends Drone {
         descriptors.push({
           name: entry.name,
           svgMarkup: entry.svgMarkup,
-          fontChar: entry.fontChar,
-          iconSize: entry.iconSize,
           hoverTint: entry.hoverTint,
           profile: entry.profile,
           visibleWhen: entry.visibleWhen,
@@ -181,8 +202,6 @@ export class TileActionsDrone extends Drone {
       descriptors.push({
         name: entry.name,
         svgMarkup: entry.svgMarkup,
-        fontChar: entry.fontChar,
-        iconSize: entry.iconSize,
         hoverTint: entry.hoverTint,
         profile: entry.profile,
         visibleWhen: entry.visibleWhen,
