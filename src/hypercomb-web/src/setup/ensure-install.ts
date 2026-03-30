@@ -131,6 +131,65 @@ export const ensureInstall = async (sentinel?: SentinelBridge | null): Promise<v
   await seedManifestCache(store, tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? ''))
 }
 
+// -------------------------------------------------
+// resync — callable after DCP portal install
+// -------------------------------------------------
+
+export const resyncFromSentinel = async (sentinel: SentinelBridge): Promise<void> => {
+  const store = get('@hypercomb.social/Store') as Store | undefined
+  if (!store) return
+
+  const currentSyncSig = (localStorage.getItem(SYNC_SIG_KEY) ?? '').trim() || undefined
+  const result = await sentinel.sync(currentSyncSig)
+  if (!result) return
+
+  const { syncSig, enabledBees, enabledDeps, enabledLayers, beeDeps, files } = result
+
+  if (!files.length && currentSyncSig === syncSig) return
+
+  const enabledBeeSet = new Set(enabledBees)
+  const enabledDepSet = new Set(enabledDeps)
+  const enabledLayerSet = new Set(enabledLayers)
+
+  await removeDisabled(store.bees, enabledBeeSet, '.js')
+  await removeDisabled(store.dependencies, enabledDepSet, '.js')
+  const layerDir = await store.domainLayersDirectory('sentinel', true)
+  await removeDisabled(layerDir, enabledLayerSet, '')
+  await clearStaleCaches()
+
+  for (const file of files) {
+    switch (file.kind) {
+      case 'layer':
+        await writeBytes(layerDir, file.signature, file.bytes)
+        await seedCacheEntry(`/opfs/__layers__/${file.signature}.json`, file.bytes, 'application/json; charset=utf-8')
+        break
+      case 'bee':
+        await writeBytes(store.bees, `${file.signature}.js`, file.bytes)
+        await seedCacheEntry(`/opfs/__bees__/${file.signature}.js`, file.bytes, 'application/javascript; charset=utf-8')
+        break
+      case 'dependency':
+        await writeBytes(store.dependencies, `${file.signature}.js`, file.bytes)
+        await seedCacheEntry(`/opfs/__dependencies__/${file.signature}.js`, file.bytes, 'application/javascript; charset=utf-8')
+        break
+    }
+  }
+
+  const sigStore = get('@hypercomb/SignatureStore') as SignatureStore | undefined
+  if (sigStore) {
+    const allSigs = [...enabledBees, ...enabledDeps, ...enabledLayers]
+    sigStore.trustAll(allSigs)
+    localStorage.setItem(SIG_STORE_KEY, JSON.stringify(sigStore.toJSON()))
+  }
+
+  const syncManifest = { version: 2, layers: enabledLayers, bees: enabledBees, dependencies: enabledDeps, beeDeps }
+  localStorage.setItem(SYNC_SIG_KEY, syncSig)
+  localStorage.setItem(INSTALLED_KEY, syncSig)
+  localStorage.setItem(MANIFEST_KEY, JSON.stringify(syncManifest))
+  if (beeDeps) (globalThis as any).__hypercombBeeDeps = beeDeps
+
+  console.log(`[ensure-install] resync complete: ${syncSig.slice(0, 12)} (${enabledBees.length} bees, ${enabledDeps.length} deps, ${enabledLayers.length} layers)`)
+}
+
 // ----- helpers -----
 
 const clearStaleCaches = async (): Promise<void> => {

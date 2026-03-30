@@ -2,8 +2,9 @@
 /// <reference path="../../hypercomb-shared/global.d.ts" />
 import '@hypercomb/shared/core/ioc.web'
 
+import { ApplicationRef } from '@angular/core'
 import { bootstrapApplication } from '@angular/platform-browser'
-import { ensureInstall } from './setup/ensure-install'
+import { ensureInstall, resyncFromSentinel } from './setup/ensure-install'
 import { initSentinel } from './setup/sentinel-bridge'
 import { resolveImportMap } from './setup/resolve-import-map'
 import { appConfig } from './app.config'
@@ -49,7 +50,17 @@ const bootstrap = async (): Promise<void> => {
   const loader = get('@hypercomb.social/DependencyLoader') as DependencyLoader | undefined
   await loader?.load?.()
 
-  await bootstrapApplication(App, appConfig)
+  const appRef = await bootstrapApplication(App, appConfig)
+
+  // After DCP portal installs, resync with sentinel, reload bees, then force CD
+  window.addEventListener('actions:available', async () => {
+    if (sentinel) {
+      await resyncFromSentinel(sentinel)
+    }
+    const preloader = get('@hypercomb.social/ScriptPreloader') as any
+    if (preloader?.find) await preloader.find('')
+    appRef.tick()
+  })
 }
 
 bootstrap().catch(err => console.error(err))

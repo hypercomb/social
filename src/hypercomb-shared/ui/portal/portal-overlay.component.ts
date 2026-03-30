@@ -24,12 +24,17 @@ function resolvePortalUrl(target: string): string | undefined {
 })
 export class PortalOverlayComponent implements OnInit, OnDestroy {
 
-  #sanitizer = inject(DomSanitizer)
-  #cdr = inject(ChangeDetectorRef)
+  #sanitizer: DomSanitizer
+  #cdr: ChangeDetectorRef
 
   public readonly open = signal(false)
   public readonly src = signal<SafeResourceUrl | null>(null)
   #activeUrl: string | null = null
+
+  constructor() {
+    this.#sanitizer = inject(DomSanitizer)
+    this.#cdr = inject(ChangeDetectorRef)
+  }
 
   // -------------------------------------------------
   // open portal
