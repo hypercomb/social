@@ -716,10 +716,10 @@ const main = async (): Promise<void> => {
     console.log(`[build-module] Merkle root unchanged but output missing — reconstructing`)
   }
 
-  // --- Phase 2: Preserve .cache/, clean old root sig directories ---
+  // --- Phase 2: Preserve .cache/ and manifest.json, clean old root sig directories ---
   if (existsSync(DIST_ROOT)) {
     for (const name of readdirSync(DIST_ROOT)) {
-      if (name === '.cache') continue
+      if (name === '.cache' || name === MANIFEST_FILE) continue
       rmSync(join(DIST_ROOT, name), { recursive: true, force: true })
     }
   }

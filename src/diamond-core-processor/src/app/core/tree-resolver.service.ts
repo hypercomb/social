@@ -37,19 +37,22 @@ export class TreeResolverService {
   #installer = inject(DcpInstallerService)
   #store = inject(DcpStore)
 
+  async fetchAllRootSignatures(contentBase: string): Promise<string[]> {
+    const base = (contentBase ?? '').replace(/\/+$/, '')
+    if (!base) return []
+    return this.#fetchAllRootSignatures(base)
+  }
+
   async resolveRoot(
     contentBase: string,
+    rootSig: string,
     domain: string,
     onInstallProgress?: (p: InstallProgress) => void
   ): Promise<TreeNode | null> {
     const base = (contentBase ?? '').replace(/\/+$/, '')
-    if (!base) return null
+    if (!base || !rootSig) return null
 
     await this.#store.initialize()
-
-    // fetch manifest.json to get root signature
-    const rootSig = await this.#fetchRootSignature(base)
-    if (!rootSig) return null
 
     // upfront install: download all layers, bees, deps to OPFS
     const manifest = await this.#installer.install(base, rootSig, domain, onInstallProgress)
@@ -289,16 +292,17 @@ export class TreeResolverService {
     }
   }
 
-  async #fetchRootSignature(base: string): Promise<string | null> {
+  async #fetchAllRootSignatures(base: string): Promise<string[]> {
     try {
       const res = await fetch(`${base}/manifest.json`, { cache: 'no-store' })
-      if (!res.ok) return null
+      if (!res.ok) return []
       const content = await res.json()
       const sigs = Object.keys(content?.packages ?? {})
-      const sig = sigs[0]?.trim()
-      return sig && /^[a-f0-9]{64}$/i.test(sig) ? sig.toLowerCase() : null
+      return sigs
+        .map(s => s.trim().toLowerCase())
+        .filter(s => /^[a-f0-9]{64}$/i.test(s))
     } catch {
-      return null
+      return []
     }
   }
 

@@ -419,29 +419,48 @@ export class HomeComponent {
     return null
   }
 
-  // auto-load all domains
+  // auto-load all domains — each root signature in the manifest becomes its own section
   async #loadAllDomains(doms: string[]): Promise<void> {
     const results: DomainSection[] = []
 
     for (const domain of doms) {
       const domainName = new URL(domain).hostname
-      const section: DomainSection = {
-        domain, domainName, rootSig: '', originalRootSig: '', items: [], loading: true, error: null, installStatus: null, patches: []
+
+      // fetch all root signatures from the manifest
+      const rootSigs = await this.#resolver.fetchAllRootSignatures(domain)
+
+      if (rootSigs.length === 0) {
+        // no packages found — show placeholder with error
+        results.push({
+          domain, domainName, rootSig: '', originalRootSig: '', items: [],
+          loading: false, error: 'No packages found in manifest', installStatus: null, patches: []
+        })
+        continue
       }
-      results.push(section)
+
+      // create a section per root signature
+      for (const rootSig of rootSigs) {
+        results.push({
+          domain, domainName, rootSig, originalRootSig: rootSig, items: [],
+          loading: true, error: null, installStatus: null, patches: []
+        })
+      }
     }
 
     this.sections.set([...results])
 
+    // load each section in parallel
     for (const section of results) {
+      if (!section.rootSig) continue
+
       try {
-        const root = await this.#resolver.resolveRoot(section.domain, section.domainName, (p) => {
+        const root = await this.#resolver.resolveRoot(section.domain, section.rootSig, section.domainName, (p) => {
           section.installStatus = `Installing ${p.phase} ${p.current}/${p.total}`
           this.sections.set([...results])
         })
         if (root) {
-          section.rootSig = root.signature ?? ''
-          section.originalRootSig = root.signature ?? ''
+          section.rootSig = root.signature ?? section.rootSig
+          section.originalRootSig = root.signature ?? section.originalRootSig
           section.items = root.children
 
           // load patches and check for active patched root

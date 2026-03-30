@@ -83,6 +83,17 @@ function invoke-az {
   }
 }
 
+function invoke-az-silent {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string[]]$Arguments
+  )
+
+  $cmdExe = if ([string]::IsNullOrWhiteSpace($env:ComSpec)) { 'cmd.exe' } else { $env:ComSpec }
+  $output = & $cmdExe '/d' '/s' '/c' 'az' @Arguments 2>&1
+  return @{ ExitCode = $LASTEXITCODE; Output = ($output -join "`n") }
+}
+
 function get-relative-file-path {
   param(
     [Parameter(Mandatory = $true)]
@@ -129,6 +140,39 @@ function get-auth-arguments {
   return @('--account-name', $storageAccount, '--auth-mode', 'login')
 }
 
+function test-blob-exists {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ContainerName,
+
+    [Parameter(Mandatory = $true)]
+    [string]$BlobName,
+
+    [Parameter(Mandatory = $true)]
+    [string[]]$AuthArguments
+  )
+
+  $result = invoke-az-silent -Arguments @(
+    'storage', 'blob', 'exists',
+    '--container-name', $ContainerName,
+    '--name', $BlobName,
+    '--only-show-errors',
+    '--output', 'tsv'
+  ) + $AuthArguments
+
+  if ($result.ExitCode -ne 0) { return $false }
+  return $result.Output.Trim().ToLower() -eq 'true'
+}
+
+function is-content-addressed {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$RelativePath
+  )
+
+  return $RelativePath -match '^(__layers__|__bees__|__dependencies__)/'
+}
+
 if (-not (test-command -Name 'az')) {
   fail 'azure cli (az) is not installed or is not on PATH'
 }
@@ -173,16 +217,74 @@ if ($files.Count -eq 0) {
 }
 
 write-step ''
-write-step 'deploying hypercomb content'
+write-step 'deploying hypercomb content (incremental)'
 write-step '--------------------------------'
 write-step " source    : $resolvedSource"
 write-step " dest      : $resolvedDestination"
 write-step " files     : $($files.Count)"
 write-step ''
 
+# --- Phase 1: Merge manifest with remote before uploading ---
+
+$localManifestPath = Join-Path $resolvedSource 'manifest.json'
+if (Test-Path -LiteralPath $localManifestPath -PathType Leaf) {
+  $manifestBlobName = if ($resolvedDestination) { "$resolvedDestination/manifest.json" } else { 'manifest.json' }
+  $tempManifestPath = Join-Path $env:TEMP 'hypercomb-remote-manifest.json'
+
+  # download existing remote manifest (if any)
+  $downloadResult = invoke-az-silent -Arguments @(
+    'storage', 'blob', 'download',
+    '--container-name', $containerName,
+    '--name', $manifestBlobName,
+    '--file', $tempManifestPath,
+    '--overwrite', 'true',
+    '--only-show-errors'
+  ) + $authArguments
+
+  if ($downloadResult.ExitCode -eq 0 -and (Test-Path -LiteralPath $tempManifestPath -PathType Leaf)) {
+    write-step 'merging with existing remote manifest'
+
+    # merge: remote packages + local packages (local wins on collision)
+    $remoteManifest = Get-Content -LiteralPath $tempManifestPath -Raw | ConvertFrom-Json
+    $localManifest = Get-Content -LiteralPath $localManifestPath -Raw | ConvertFrom-Json
+
+    if ($null -ne $remoteManifest.packages -and $null -ne $localManifest.packages) {
+      # add remote packages that are not in the local manifest
+      foreach ($property in $remoteManifest.packages.PSObject.Properties) {
+        if (-not $localManifest.packages.PSObject.Properties[$property.Name]) {
+          $localManifest.packages | Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value
+        }
+      }
+
+      # write merged manifest back to local dist
+      $localManifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $localManifestPath -Encoding utf8NoBOM
+      $packageCount = @($localManifest.packages.PSObject.Properties).Count
+      write-step " manifest packages: $packageCount"
+    }
+
+    Remove-Item -LiteralPath $tempManifestPath -Force -ErrorAction SilentlyContinue
+  } else {
+    write-step 'no existing remote manifest — uploading fresh'
+  }
+}
+
+# --- Phase 2: Upload files (skip existing content-addressed blobs) ---
+
+$uploaded = 0
+$skipped = 0
+
 foreach ($file in $files) {
   $relativePath = get-relative-file-path -BasePath $resolvedSource -FullPath $file.FullName
   $blobName = if ($resolvedDestination) { "$resolvedDestination/$relativePath" } else { $relativePath }
+
+  # content-addressed files: skip if blob already exists on remote
+  if (is-content-addressed -RelativePath $relativePath) {
+    $exists = test-blob-exists -ContainerName $containerName -BlobName $blobName -AuthArguments $authArguments
+    if ($exists) {
+      $skipped++
+      continue
+    }
+  }
 
   $arguments = @(
     'storage', 'blob', 'upload',
@@ -194,4 +296,10 @@ foreach ($file in $files) {
   ) + $authArguments
 
   invoke-az -Arguments $arguments
+  $uploaded++
 }
+
+write-step ''
+write-step " uploaded  : $uploaded"
+write-step " skipped   : $skipped (already exist)"
+write-step ''
