@@ -1,7 +1,9 @@
 // hypercomb-essentials/scripts/copy-to-web.ts
 // Copies built module output to hypercomb-web/public/content/ for local development.
+// Signature beeline: files are named by their signature, so if a file exists in
+// the target with the same name, it IS the correct content. No hashing needed.
 
-import { cpSync, existsSync, mkdirSync, rmSync } from 'fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'fs'
 import { dirname, join, resolve } from 'path'
 import { fileURLToPath } from 'url'
 
@@ -25,25 +27,62 @@ const main = () => {
     process.exit(1)
   }
 
-  // clean and recreate content dir
-  if (existsSync(WEB_CONTENT)) {
-    rmSync(WEB_CONTENT, { recursive: true, force: true })
-  }
   mkdirSync(WEB_CONTENT, { recursive: true })
 
-  // copy content directories flat
+  let copied = 0
+  let skipped = 0
+  let removed = 0
+
+  // sync each content directory: copy new files, remove stale ones
   for (const dir of CONTENT_DIRS) {
-    const src = join(DIST_ROOT, dir)
-    if (existsSync(src)) {
-      cpSync(src, join(WEB_CONTENT, dir), { recursive: true })
+    const srcDir = join(DIST_ROOT, dir)
+    const tgtDir = join(WEB_CONTENT, dir)
+
+    if (!existsSync(srcDir)) continue
+
+    mkdirSync(tgtDir, { recursive: true })
+
+    const srcFiles = new Set(readdirSync(srcDir))
+    const tgtFiles = existsSync(tgtDir) ? new Set(readdirSync(tgtDir)) : new Set<string>()
+
+    // beeline: filename IS the signature — if it exists in target, it's correct
+    for (const file of srcFiles) {
+      if (tgtFiles.has(file)) {
+        skipped++
+      } else {
+        copyFileSync(join(srcDir, file), join(tgtDir, file))
+        copied++
+      }
+    }
+
+    // remove stale files (signatures no longer in source)
+    for (const file of tgtFiles) {
+      if (!srcFiles.has(file)) {
+        rmSync(join(tgtDir, file), { force: true })
+        removed++
+      }
     }
   }
 
-  // copy manifest.json
-  cpSync(join(DIST_ROOT, MANIFEST_FILE), join(WEB_CONTENT, MANIFEST_FILE))
+  // manifest.json: compare content before copying
+  const srcManifest = join(DIST_ROOT, MANIFEST_FILE)
+  const tgtManifest = join(WEB_CONTENT, MANIFEST_FILE)
+  if (existsSync(tgtManifest)) {
+    const srcContent = readFileSync(srcManifest, 'utf8')
+    const tgtContent = readFileSync(tgtManifest, 'utf8')
+    if (srcContent === tgtContent) {
+      skipped++
+    } else {
+      copyFileSync(srcManifest, tgtManifest)
+      copied++
+    }
+  } else {
+    copyFileSync(srcManifest, tgtManifest)
+    copied++
+  }
 
-  console.log(`[copy-to-web] copied flat content to ${WEB_CONTENT}`)
-  console.log(`[copy-to-web] done at ${new Date().toISOString()} — reload web app to pick up changes`)
+  console.log(`[copy-to-web] synced to ${WEB_CONTENT}`)
+  console.log(`[copy-to-web] ${copied} copied, ${skipped} unchanged, ${removed} removed`)
 }
 
 main()

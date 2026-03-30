@@ -6,7 +6,9 @@
 // - drones exported as types only
 // - deterministic
 // - overwrites generated files
+// - signature-cached: skips work when inputs haven't changed
 
+import { createHash } from 'crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
 import { basename, dirname, extname, join, resolve } from 'path'
 import ts from 'typescript'
@@ -21,6 +23,48 @@ const __dirname = dirname(__filename)
 
 const SRC_ROOT = resolve(__dirname, '../src')
 const TYPES_ROOT = join(SRC_ROOT, 'types')
+const CACHE_DIR = resolve(__dirname, '..', 'dist', '.cache')
+const PREPARE_CACHE_FILE = join(CACHE_DIR, 'prepare-cache.json')
+
+// -------------------------------------------------
+// signature beeline: hash content → skip recomputation
+// -------------------------------------------------
+
+const signContent = (content: string): string =>
+  createHash('sha256').update(content).digest('hex')
+
+interface PrepareFileCache {
+  contentSignature: string
+  exports: ExportInfo
+}
+
+interface PrepareCache {
+  treeSignature: string
+  files: Record<string, PrepareFileCache>
+}
+
+const loadPrepareCache = (): PrepareCache | null => {
+  try {
+    return JSON.parse(readFileSync(PREPARE_CACHE_FILE, 'utf8'))
+  } catch {
+    return null
+  }
+}
+
+const savePrepareCache = (cache: PrepareCache): void => {
+  mkdirSync(CACHE_DIR, { recursive: true })
+  writeFileSync(PREPARE_CACHE_FILE, JSON.stringify(cache, null, 2), 'utf8')
+}
+
+/** Write file only if content differs from what's on disk */
+const writeIfChanged = (filePath: string, content: string): boolean => {
+  if (existsSync(filePath)) {
+    const existing = readFileSync(filePath, 'utf8')
+    if (existing === content) return false
+  }
+  writeFileSync(filePath, content, 'utf8')
+  return true
+}
 
 // -------------------------------------------------
 // helpers
@@ -116,8 +160,9 @@ const preClean = () => {
 
 type ExportInfo = { value: string[]; type: string[] }
 
-const parseExports = (file: string): ExportInfo => {
-  const source = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true)
+/** Parse exports via TypeScript AST — the actual work behind the beeline */
+const parseExportsRaw = (file: string, content: string): ExportInfo => {
+  const source = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true)
   const out: ExportInfo = { value: [], type: [] }
 
   source.forEachChild(node => {
@@ -156,6 +201,27 @@ const parseExports = (file: string): ExportInfo => {
   }
 }
 
+// beeline: signature → cached exports (skip AST parsing on cache hit)
+let prepareCache = loadPrepareCache()
+const newFileCache: Record<string, PrepareFileCache> = {}
+
+const parseExports = (file: string): ExportInfo => {
+  const content = readFileSync(file, 'utf8')
+  const contentSignature = signContent(content)
+
+  // beeline: same content signature → same exports
+  const cached = prepareCache?.files[file]
+  if (cached && cached.contentSignature === contentSignature) {
+    newFileCache[file] = cached
+    return cached.exports
+  }
+
+  // cache miss — do the work
+  const exports = parseExportsRaw(file, content)
+  newFileCache[file] = { contentSignature, exports }
+  return exports
+}
+
 // -------------------------------------------------
 // master keys: one file with all IoC keys
 // -------------------------------------------------
@@ -190,7 +256,7 @@ const collectAllKeys = (domain: string, domainRoot: string): FolderSymbols[] => 
   return result
 }
 
-const writeMasterKeys = (allDomainKeys: Map<string, FolderSymbols[]>) => {
+const buildMasterKeysContent = (allDomainKeys: Map<string, FolderSymbols[]>): string => {
   const lines: string[] = [
     '// auto-generated — single facade for all IoC keys',
     '// do not edit manually',
@@ -231,7 +297,7 @@ const writeMasterKeys = (allDomainKeys: Map<string, FolderSymbols[]>) => {
   lines.push('} as const')
   lines.push('')
 
-  writeFileSync(join(SRC_ROOT, 'essentials-keys.ts'), lines.join('\n'), 'utf8')
+  return lines.join('\n')
 }
 
 // -------------------------------------------------
@@ -345,6 +411,33 @@ ${lines.join('\n')}
 // main
 // -------------------------------------------------
 
+// compute source tree signature: sorted list of all non-generated source files + their mtimes
+// this is the top-level beeline — if tree structure hasn't changed, skip everything
+const computeTreeSignature = (): string => {
+  const sourceFiles = walkFiles(SRC_ROOT)
+    .filter(f => isSource(f) && !isGenerated(f))
+    .sort()
+  const parts = sourceFiles.map(f => {
+    const st = safeStat(f)
+    return `${relFrom(SRC_ROOT, f)}:${st?.mtimeMs ?? 0}`
+  })
+  return signContent(parts.join('\n'))
+}
+
+const treeSignature = computeTreeSignature()
+
+// beeline: if tree signature unchanged AND all generated files still exist, skip entirely
+if (prepareCache?.treeSignature === treeSignature) {
+  // verify generated output still exists (not wiped externally)
+  const masterKeysFile = join(SRC_ROOT, 'essentials-keys.ts')
+  const rootIndexFile = join(SRC_ROOT, 'index.ts')
+  if (existsSync(masterKeysFile) && existsSync(rootIndexFile)) {
+    console.log('[prepare] tree signature unchanged — skipping (beeline)')
+    process.exit(0)
+  }
+  console.log('[prepare] tree signature unchanged but output missing — regenerating')
+}
+
 // step 0: pre-clean stale generated files
 preClean()
 
@@ -357,6 +450,8 @@ const domains = readdirSync(SRC_ROOT)
 
 const rootExports: string[] = []
 const allDomainKeys = new Map<string, FolderSymbols[]>()
+let filesWritten = 0
+let filesSkipped = 0
 
 for (const domain of domains) {
   const domainRoot = join(SRC_ROOT, domain)
@@ -378,8 +473,13 @@ for (const domain of domains) {
   }
 }
 
-// write one master keys file
-writeMasterKeys(allDomainKeys)
+// write one master keys file (with beeline: skip if content unchanged)
+{
+  const masterKeysContent = buildMasterKeysContent(allDomainKeys)
+  if (writeIfChanged(join(SRC_ROOT, 'essentials-keys.ts'), masterKeysContent)) filesWritten++
+  else filesSkipped++
+}
+
 rootExports.push(`export { EssentialsKeys } from './essentials-keys'`)
 
 const rootIndex = `// auto-generated
@@ -389,6 +489,10 @@ const rootIndex = `// auto-generated
 ${rootExports.sort().join('\n')}
 `
 
-writeFileSync(join(SRC_ROOT, 'index.ts'), rootIndex, 'utf8')
+if (writeIfChanged(join(SRC_ROOT, 'index.ts'), rootIndex)) filesWritten++
+else filesSkipped++
 
-console.log('[prepare] complete')
+// persist cache for next run
+savePrepareCache({ treeSignature, files: newFileCache })
+
+console.log(`[prepare] complete (${filesWritten} written, ${filesSkipped} unchanged)`)

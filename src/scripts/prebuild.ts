@@ -1,7 +1,8 @@
 // scripts/prebuild.ts
-// Smart prebuild: detects source changes via mtime, only rebuilds what's needed.
+// Smart prebuild: detects source changes via signature gates, only rebuilds what's needed.
 // Usage: tsx scripts/prebuild.ts --target web|dev
 
+import { createHash } from 'crypto'
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'fs'
 import { dirname, join, resolve } from 'path'
 import { spawn, spawnSync } from 'child_process'
@@ -29,7 +30,7 @@ if (target !== 'web' && target !== 'dev') {
 // --- types ---
 
 interface StepState {
-  srcMtime?: number
+  inputSignature?: string
   builtAt?: number
 }
 
@@ -58,14 +59,16 @@ function walkFiles(dir: string, exts: string[]): string[] {
   return out
 }
 
-function maxMtime(dir: string): number {
-  const files = walkFiles(dir, ['.ts', '.js', '.json'])
-  let max = 0
-  for (const f of files) {
+/** Signature gate: hash all source file paths + mtimes in a directory tree.
+ *  Mtime changes trigger a signature change, but the signature itself is
+ *  the stable identity — immune to clock skew across machines. */
+function treeSignature(dir: string): string {
+  const files = walkFiles(dir, ['.ts', '.js', '.json']).sort()
+  const parts = files.map(f => {
     const mt = statSync(f).mtimeMs
-    if (mt > max) max = mt
-  }
-  return max
+    return `${f}:${mt}`
+  })
+  return createHash('sha256').update(parts.join('\n')).digest('hex')
 }
 
 function loadState(): BuildState {
@@ -154,13 +157,13 @@ function tsupRun(args: string[] = []): CommandSpec {
 function needsBuild(state: BuildState, key: string, srcDir: string, outputMarker?: string): boolean {
   if (outputMarker && !existsSync(outputMarker)) return true
   const prev = state[key]
-  if (!prev?.srcMtime) return true
-  const current = maxMtime(srcDir)
-  return current > prev.srcMtime
+  if (!prev?.inputSignature) return true
+  const current = treeSignature(srcDir)
+  return current !== prev.inputSignature
 }
 
 function recordBuild(state: BuildState, key: string, srcDir: string): void {
-  state[key] = { srcMtime: maxMtime(srcDir), builtAt: Date.now() }
+  state[key] = { inputSignature: treeSignature(srcDir), builtAt: Date.now() }
 }
 
 /** Check if dist/ contains a 64-hex-char signature directory */

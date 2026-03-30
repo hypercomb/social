@@ -70,12 +70,34 @@ interface UnitCache {
   outputSig: string                 // SHA-256 of compiled output
 }
 
+/** Cached layer: input components → layer signature + JSON */
+interface LayerCacheEntry {
+  inputSig: string     // hash of (beeSigs + depSigs + childLayerSigs + docs)
+  layerSig: string     // signature of the output layer JSON
+  layerJson: string    // the JSON itself
+}
+
+/** Cached bee doc extraction */
+interface DocCacheEntry {
+  contentSignature: string   // hash of source file content
+  doc: BeeDocEntry | null
+}
+
+/** Cached bee dependency mapping */
+interface BeeDepCacheEntry {
+  outputSig: string     // signature of compiled bee output
+  depSigs: string[]     // resolved dependency signatures
+}
+
 interface BuildCache {
   version: 2
   rootHash: string                            // Merkle root of all unit hashes
   rootLayerSig: string                        // last output root signature
   namespaces: Record<string, UnitCache>
   bees: Record<string, UnitCache>
+  layerCache?: Record<string, LayerCacheEntry>
+  docCache?: Record<string, DocCacheEntry>
+  beeDepCache?: Record<string, BeeDepCacheEntry>
 }
 
 const CACHE_FILE = join(PROJECT_ROOT, '.build-cache.json')
@@ -436,48 +458,80 @@ const signJson = async (value: unknown) => {
   return { sig, json }
 }
 
+// beeline caches populated during build, persisted at end
+const newLayerCache: Record<string, LayerCacheEntry> = {}
+const newDocCache: Record<string, DocCacheEntry> = {}
+const newBeeDepCache: Record<string, BeeDepCacheEntry> = {}
+let layerCacheHits = 0
+let layerCacheMisses = 0
+
 const buildLayersFromTree = async (
   node: DirNode,
   resourcesByDir: Map<string, { bees: string[]; deps: string[] }>,
   out: Map<string, string>,
   rootDependencies: string[],
-  docsByDir: Map<string, Record<string, BeeDocEntry>>
+  docsByDir: Map<string, Record<string, BeeDocEntry>>,
+  prevLayerCache?: Record<string, LayerCacheEntry>
 ): Promise<string | null> => {
   const layers: string[] = []
   for (const c of node.children) {
-    const childSig = await buildLayersFromTree(c, resourcesByDir, out, rootDependencies, docsByDir)
+    const childSig = await buildLayersFromTree(c, resourcesByDir, out, rootDependencies, docsByDir, prevLayerCache)
     if (childSig) layers.push(childSig)
   }
 
   const entry = resourcesByDir.get(node.rel) ?? { bees: [], deps: [] }
 
-  // build docs block for this layer
-  const beeDocs = docsByDir.get(node.rel)
+  if (!entry.bees.length && !entry.deps.length && !layers.length && node.rel) return null
 
-  // read optional _doc.txt for folder-level description
-  let folderDescription = ''
+  // beeline: compute layer input signature from all components
+  const beeSigs = uniqSorted(entry.bees)
+  const depSigs = node.rel ? [] : rootDependencies
+  const docsKey = docsByDir.has(node.rel) ? JSON.stringify(docsByDir.get(node.rel)) : ''
+  let folderDocSig = ''
   if (node.rel) {
     const docFile = join(SRC_ROOT, node.rel, '_doc.txt')
     if (existsSync(docFile)) {
-      folderDescription = readFileSync(docFile, 'utf8').trim()
+      folderDocSig = readFileSync(docFile, 'utf8').trim()
     }
   }
 
-  const docs = (beeDocs && Object.keys(beeDocs).length > 0) || folderDescription
+  const layerInputParts = [
+    node.rel,
+    beeSigs.join(':'),
+    depSigs.join(':'),
+    layers.join(':'),
+    docsKey,
+    folderDocSig,
+  ]
+  const layerInputSig = await SignatureService.sign(
+    toArrayBuffer(textToBytes(layerInputParts.join('|')))
+  )
+
+  // beeline: check layer cache
+  const cached = prevLayerCache?.[node.rel]
+  if (cached && cached.inputSig === layerInputSig) {
+    out.set(cached.layerSig, cached.layerJson)
+    newLayerCache[node.rel] = cached
+    layerCacheHits++
+    return cached.layerSig
+  }
+
+  // cache miss — build the layer
+  const beeDocs = docsByDir.get(node.rel)
+
+  const docs = (beeDocs && Object.keys(beeDocs).length > 0) || folderDocSig
     ? {
-        ...(folderDescription ? { description: folderDescription } : {}),
+        ...(folderDocSig ? { description: folderDocSig } : {}),
         ...(beeDocs && Object.keys(beeDocs).length > 0 ? { bees: beeDocs } : {}),
       }
     : undefined
-
-  if (!entry.bees.length && !entry.deps.length && !layers.length && node.rel) return null
 
   const layer: Record<string, unknown> = {
     version: 1,
     name: node.rel.split('/').pop() || 'root',
     rel: node.rel,
-    bees: uniqSorted(entry.bees),
-    dependencies: node.rel ? [] : rootDependencies,
+    bees: beeSigs,
+    dependencies: depSigs,
     layers,
   }
 
@@ -485,6 +539,8 @@ const buildLayersFromTree = async (
 
   const { sig, json } = await signJson(layer)
   out.set(sig, json)
+  newLayerCache[node.rel] = { inputSig: layerInputSig, layerSig: sig, layerJson: json }
+  layerCacheMisses++
   return sig
 }
 
@@ -744,15 +800,34 @@ const main = async (): Promise<void> => {
   console.log(`[build-module] class-to-dep index: ${classToDepSig.size} classes across ${dependencyBytes.size} namespaces`)
 
   // pre-extract docs from ALL source files that extend Bee/Drone/Worker/QueenBee
-  // (queens are bundled into namespace deps, not built as individual bees,
-  //  so we extract docs from source before compilation for all bee types)
+  // beeline: cache doc extraction by file content signature
+  const prevDocCache = cache?.docCache
   const queenDocsByDir = new Map<string, Record<string, BeeDocEntry>>()
+  let docCacheHits = 0
+  let docCacheMisses = 0
+
   for (const src of deps) {
-    const tsSource = readFileSync(src.entry, 'utf8')
-    const doc = extractBeeDoc(tsSource)
+    // beeline: check doc cache by content signature from unit cache
+    const unitFiles = newNamespaces[namespaceRelDirFromRelDir(src.relDir)]?.files
+    const fileLeaf = unitFiles?.[src.entry]
+    const prevDoc = fileLeaf?.sig ? prevDocCache?.[src.entry] : undefined
+
+    let doc: BeeDocEntry | null
+    if (prevDoc && fileLeaf && prevDoc.contentSignature === fileLeaf.sig) {
+      doc = prevDoc.doc
+      newDocCache[src.entry] = prevDoc
+      docCacheHits++
+    } else {
+      const tsSource = readFileSync(src.entry, 'utf8')
+      doc = extractBeeDoc(tsSource)
+      if (fileLeaf) {
+        newDocCache[src.entry] = { contentSignature: fileLeaf.sig, doc }
+      }
+      docCacheMisses++
+    }
+
     if (doc && doc.kind === 'queen') {
       const dirDocs = queenDocsByDir.get(src.relDir) ?? {}
-      // queens don't have individual sigs — key by className
       dirDocs[`queen:${doc.className}`] = doc
       queenDocsByDir.set(src.relDir, dirDocs)
     }
@@ -794,29 +869,56 @@ const main = async (): Promise<void> => {
     resourceBytes.set(sig, bytes)
     addToBucket(resourcesByDir, src.relDir, jsFileName(sig), 'bee')
 
-    // Extract doc metadata from TypeScript source (pre-compilation, sig-safe)
-    const tsSource = readFileSync(src.entry, 'utf8')
-    const beeDoc = extractBeeDoc(tsSource)
+    // beeline: cache bee doc extraction by content signature
+    const beeFileLeaf = newBees[src.relPath]?.files[src.entry]
+    const prevBeeDoc = beeFileLeaf?.sig ? prevDocCache?.[src.entry] : undefined
+
+    let beeDoc: BeeDocEntry | null
+    if (prevBeeDoc && beeFileLeaf && prevBeeDoc.contentSignature === beeFileLeaf.sig) {
+      beeDoc = prevBeeDoc.doc
+      newDocCache[src.entry] = prevBeeDoc
+      docCacheHits++
+    } else {
+      const tsSource = readFileSync(src.entry, 'utf8')
+      beeDoc = extractBeeDoc(tsSource)
+      if (beeFileLeaf) {
+        newDocCache[src.entry] = { contentSignature: beeFileLeaf.sig, doc: beeDoc }
+      }
+      docCacheMisses++
+    }
+
     if (beeDoc) {
       const dirDocs = docsByDir.get(src.relDir) ?? {}
       dirDocs[sig] = beeDoc
       docsByDir.set(src.relDir, dirDocs)
     }
 
-    // Extract deps = { ... } from compiled output, map IoC keys to dep sigs
-    const text = new TextDecoder().decode(bytes)
-    const depSigs = new Set<string>()
-    const depsMatch = text.match(/deps\s*=\s*\{([^}]+)\}/)
-    if (depsMatch) {
-      for (const m of depsMatch[1].matchAll(/@[^"'/]+\/(\w+)/g)) {
-        const cls = m[1]
-        if (cls && classToDepSig.has(cls)) depSigs.add(classToDepSig.get(cls)!)
+    // beeline: cache bee dependency mapping by outputSig
+    const prevBeeDep = cache?.beeDepCache?.[src.relPath]
+    if (prevBeeDep && prevBeeDep.outputSig === sig) {
+      // beeline hit: same compiled output → same deps
+      if (prevBeeDep.depSigs.length) {
+        beeDepsMap.set(sig, prevBeeDep.depSigs)
       }
-    }
-    if (depSigs.size) {
-      beeDepsMap.set(sig, [...depSigs].sort())
-      const relName = src.relPath.split('/').pop() ?? src.relPath
-      console.log(`[build-module] ${relName} → ${depSigs.size} dep(s)`)
+      newBeeDepCache[src.relPath] = prevBeeDep
+    } else {
+      // cache miss: extract deps from compiled output
+      const text = new TextDecoder().decode(bytes)
+      const resolvedDepSigs = new Set<string>()
+      const depsMatch = text.match(/deps\s*=\s*\{([^}]+)\}/)
+      if (depsMatch) {
+        for (const m of depsMatch[1].matchAll(/@[^"'/]+\/(\w+)/g)) {
+          const cls = m[1]
+          if (cls && classToDepSig.has(cls)) resolvedDepSigs.add(classToDepSig.get(cls)!)
+        }
+      }
+      const sortedDepSigs = [...resolvedDepSigs].sort()
+      if (sortedDepSigs.length) {
+        beeDepsMap.set(sig, sortedDepSigs)
+        const relName = src.relPath.split('/').pop() ?? src.relPath
+        console.log(`[build-module] ${relName} → ${resolvedDepSigs.size} dep(s)`)
+      }
+      newBeeDepCache[src.relPath] = { outputSig: sig, depSigs: sortedDepSigs }
     }
   }
 
@@ -832,7 +934,10 @@ const main = async (): Promise<void> => {
   }
 
   const tree = readDirTree(SRC_ROOT, '')
-  const rootLayerSig = await buildLayersFromTree(tree, resourcesByDir, layers, rootDependencies, docsByDir)
+  const rootLayerSig = await buildLayersFromTree(tree, resourcesByDir, layers, rootDependencies, docsByDir, cache?.layerCache)
+
+  console.log(`[build-module] layers: ${layerCacheHits} cached, ${layerCacheMisses} built`)
+  console.log(`[build-module] doc extraction: ${docCacheHits} cached, ${docCacheMisses} parsed`)
 
   // report doc extraction stats
   let docCount = 0
@@ -861,14 +966,21 @@ const main = async (): Promise<void> => {
     beeDeps: Object.fromEntries(beeDepsMap),
   }
 
-  // merge with existing manifest (additive — preserves other package entries)
+  // beeline: merge with existing manifest, skip write if entry already matches
   const manifestPath = join(DIST_ROOT, MANIFEST_FILE)
   let manifest: { version: number; packages: Record<string, unknown> } = { version: 1, packages: {} }
   if (existsSync(manifestPath)) {
     try { manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) } catch { /* start fresh */ }
   }
-  manifest.packages[rootLayerSig] = packageEntry
-  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n', 'utf8')
+  const newManifestJson = JSON.stringify(packageEntry)
+  const existingEntryJson = manifest.packages[rootLayerSig] ? JSON.stringify(manifest.packages[rootLayerSig]) : ''
+  if (newManifestJson !== existingEntryJson) {
+    manifest.packages[rootLayerSig] = packageEntry
+    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n', 'utf8')
+    console.log(`[build-module] manifest updated`)
+  } else {
+    console.log(`[build-module] manifest unchanged — skipped write`)
+  }
 
   // --- Phase 5: persist Merkle cache + GC ---
 
@@ -879,6 +991,9 @@ const main = async (): Promise<void> => {
     rootLayerSig,
     namespaces: newNamespaces,
     bees: newBees,
+    layerCache: newLayerCache,
+    docCache: newDocCache,
+    beeDepCache: newBeeDepCache,
   })
 
   const liveSigs = new Set([...dependencyBytes.keys(), ...resourceBytes.keys()])
