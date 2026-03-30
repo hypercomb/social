@@ -1,6 +1,6 @@
 // hypercomb-shared/core/tag-registry.ts
 // Master tag list — content-addressed resource in __resources__/,
-// sig pointer stored in root hypercomb.io/0000 properties.
+// sig pointer stored in OPFS root 0000 properties.
 //
 // In-memory map populated on first load, mutated via add/remove,
 // persisted by writing a new resource blob and updating the root sig.
@@ -128,7 +128,7 @@ export class TagRegistry extends EventTarget {
 
   async #readRootProps(store: any): Promise<Record<string, unknown>> {
     try {
-      const root = store.hypercombRoot as FileSystemDirectoryHandle
+      const root = store.opfsRoot as FileSystemDirectoryHandle
       const fh = await root.getFileHandle(PROPS_FILE)
       const file = await fh.getFile()
       return JSON.parse(await file.text())
@@ -138,7 +138,7 @@ export class TagRegistry extends EventTarget {
   }
 
   async #writeRootProps(store: any, updates: Record<string, unknown>): Promise<void> {
-    const root = store.hypercombRoot as FileSystemDirectoryHandle
+    const root = store.opfsRoot as FileSystemDirectoryHandle
     const existing = await this.#readRootProps(store)
     const merged = { ...existing, ...updates }
     const fh = await root.getFileHandle(PROPS_FILE, { create: true })

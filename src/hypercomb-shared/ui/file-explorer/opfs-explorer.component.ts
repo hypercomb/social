@@ -213,35 +213,7 @@ export class OpfsExplorerComponent extends hypercomb {
 
   public copyBranch = async (entry: ExplorerEntry, ev: MouseEvent): Promise<void> => {
     ev.stopPropagation()
-    if (!entry.domainKey) return
-
-    const rootDir = this.store.hypercombRoot
-    let domainDir: FileSystemDirectoryHandle
-    try {
-      domainDir = await rootDir.getDirectoryHandle(entry.domainKey, { create: false })
-    } catch { return }
-
-    let branchDir: FileSystemDirectoryHandle
-    try {
-      branchDir = await domainDir.getDirectoryHandle(entry.name, { create: false })
-    } catch {
-      await this.copyDetails(entry, ev)
-      return
-    }
-
-    const files: string[] = []
-    for await (const [name, handle] of branchDir.entries()) {
-      if (handle.kind === 'file') files.push(name)
-    }
-
-    const manifest = {
-      domain: entry.domainKey,
-      branch: entry.name,
-      rootGrammar: entry.rootGrammar || entry.name,
-      files,
-    }
-
-    await this.writeClipboard(JSON.stringify(manifest, null, 2))
+    await this.copyDetails(entry, ev)
   }
 
   public remove = async (e: ExplorerEntry, ev: MouseEvent): Promise<void> => {

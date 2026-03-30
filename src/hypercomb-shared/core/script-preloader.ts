@@ -48,18 +48,10 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     }
 
     const run = async (): Promise<Bee[]> => {
-      // Primary: load bees from cached install manifest (no filesystem scanning)
+      // Load bees from cached install manifest
       const manifestBees = ScriptPreloader.readManifestBees()
       if (manifestBees.length) {
         await this.#loadBeesFromList(manifestBees)
-      } else {
-        // Fallback: scan root for markers (dev mode — no manifest)
-        await this.#scanDirectoryForMarkers(this.store.hypercombRoot)
-
-        const current = this.store.current
-        if (current && current !== this.store.hypercombRoot) {
-          await this.#scanDirectoryForMarkers(current)
-        }
       }
 
       return [...this.#beeCache.values()]
@@ -99,55 +91,6 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     }
 
     if (loaded) {
-      this.#refreshProjection()
-      EffectBus.emit('loader:bees-done', { loaded, failed: pending.length - loaded, total: this.#beeCache.size })
-    }
-  }
-
-  // -------------------------------------------------
-  // marker scanning (fallback for dev mode)
-  // -------------------------------------------------
-
-  #scanDirectoryForMarkers = async (dir: FileSystemDirectoryHandle): Promise<void> => {
-    if (!dir) return
-
-    const pending: string[] = []
-
-    try {
-      for await (const [name, entry] of dir.entries()) {
-        if (entry.kind !== 'file') continue
-        const sig = name.replace('.js', '')
-        if (!this.#isSignature(sig)) continue
-        if (this.#beeCache.has(sig)) continue
-        pending.push(sig)
-      }
-    } catch {
-      return
-    }
-
-    if (!pending.length) return
-
-    EffectBus.emit('loader:bees-progress', { loading: pending.length, total: this.#beeCache.size + pending.length })
-
-    // Load markers sequentially so each getBee() call sees an accurate
-    // keysBefore snapshot (parallel imports share the same snapshot and
-    // can return the wrong self-registered instance for each signature).
-    const results: Array<PromiseSettledResult<Bee | null>> = []
-    for (const sig of pending) {
-      try {
-        results.push({ status: 'fulfilled', value: await this.#loadBeeBySignature(sig) })
-      } catch (e) {
-        results.push({ status: 'rejected', reason: e })
-      }
-    }
-
-    let changed = false
-    let loaded = 0
-    for (const r of results) {
-      if (r.status === 'fulfilled' && r.value) { changed = true; loaded++ }
-    }
-
-    if (changed) {
       this.#refreshProjection()
       EffectBus.emit('loader:bees-done', { loaded, failed: pending.length - loaded, total: this.#beeCache.size })
     }

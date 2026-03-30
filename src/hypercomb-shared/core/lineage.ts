@@ -2,7 +2,6 @@
 // synchronize is dispatched only by the processor — lineage fires 'change' on itself
 
 import type { Navigation } from './navigation'
-import type { Store } from './store'
 
 // global get/register/list available via ioc.web.ts
 
@@ -12,16 +11,7 @@ export class Lineage extends EventTarget {
   // dependencies
   // -------------------------------------------------
 
-  private get store(): Store { return get('@hypercomb.social/Store') as Store }
   private get navigation(): Navigation { return get('@hypercomb.social/Navigation') as Navigation }
-
-  // -------------------------------------------------
-  // domain context (reserved for later)
-  // -------------------------------------------------
-
-  #activeDomain = 'hypercomb.io'
-
-  public domain = (): string => this.#activeDomain
 
   // -------------------------------------------------
   // explorer path (domain-relative)
@@ -79,12 +69,7 @@ export class Lineage extends EventTarget {
   }
 
   public explorerDir = async (): Promise<FileSystemDirectoryHandle | null> => {
-    try {
-      // domain root (hypercomb.io)
-      return await this.tryResolveFrom(this.store.hypercombRoot, this.explorerPath)
-    } catch {
-      return null
-    }
+    return null
   }
 
   // -------------------------------------------------
@@ -120,22 +105,9 @@ export class Lineage extends EventTarget {
   }
 
   public initialize = async (): Promise<void> => {
-    this.#activeDomain = 'hypercomb.io'
     this.followLocation()
     this.#ready = true
     this.dispatchEvent(new CustomEvent('change'))
-  }
-
-  // -------------------------------------------------
-  // domain selection (explicit only, reserved)
-  // -------------------------------------------------
-
-  public setDomain = async (name: string): Promise<void> => {
-    const raw = (name ?? '').trim()
-    if (!raw) return
-
-    this.#activeDomain = raw
-    this.followLocation()
   }
 
   // -------------------------------------------------
@@ -144,8 +116,9 @@ export class Lineage extends EventTarget {
 
   public tryResolve = async (
     segments: readonly string[],
-    start: FileSystemDirectoryHandle = this.store.current
+    start?: FileSystemDirectoryHandle
   ): Promise<FileSystemDirectoryHandle | null> => {
+    if (!start) return null
     return await this.tryResolveFrom(start, segments)
   }
 
@@ -180,19 +153,8 @@ export class Lineage extends EventTarget {
     return dir
   }
 
-  public addMarker = async (segments: readonly string[], signature: string): Promise<void> => {
-    const sig = (signature ?? '').trim()
-    if (!sig) return
-
-    const dir = await this.tryResolve(segments, this.store.hypercombRoot)
-    if (!dir) return
-
-    try {
-      await dir.getFileHandle(sig, { create: true })
-      this.invalidate()
-    } catch {
-      // ignore duplicates
-    }
+  public addMarker = async (_segments: readonly string[], _signature: string): Promise<void> => {
+    // no-op: directory-based markers removed
   }
 
   // -------------------------------------------------

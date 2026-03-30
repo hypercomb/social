@@ -45,7 +45,6 @@ export interface FormatPainterState {
 // ── store type (matches TileEditorDrone's local type) ───
 
 type Store = {
-  current: FileSystemDirectoryHandle
   resources: FileSystemDirectoryHandle
   putResource: (blob: Blob) => Promise<string>
   getResource: (signature: string) => Promise<Blob | null>
@@ -84,14 +83,7 @@ export class FormatPainterDrone extends EventTarget {
       if (!propsBlob) throw new Error('props blob missing')
       properties = JSON.parse(await propsBlob.text())
     } catch {
-      try {
-        const seedDir = await store.current.getDirectoryHandle(seed)
-        const fh = await seedDir.getFileHandle('0000')
-        const file = await fh.getFile()
-        properties = JSON.parse(await file.text())
-      } catch {
-        // no properties
-      }
+      // no properties
     }
 
     this.#openPainter(seed, properties)
@@ -190,14 +182,7 @@ export class FormatPainterDrone extends EventTarget {
         if (!propsBlob) throw new Error('props blob missing')
         props = JSON.parse(await propsBlob.text())
       } catch {
-        try {
-          const seedDir = await store.current.getDirectoryHandle(seed)
-          const fh = await seedDir.getFileHandle('0000')
-          const file = await fh.getFile()
-          props = JSON.parse(await file.text())
-        } catch {
-          // no existing props — start fresh
-        }
+        // no existing props — start fresh
       }
 
       // 2. apply each enabled entry via its provider

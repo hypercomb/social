@@ -48,21 +48,12 @@ export class LinkOpenWorker extends Worker {
       if (!store) return null
 
       const sig = index[label]
-      if (sig) {
-        const blob = await store.getResource(sig)
-        if (blob) {
-          const text = await blob.text()
-          const props = JSON.parse(text)
-          return typeof props.link === 'string' ? props.link : null
-        }
-      }
+      if (!sig) return null
 
-      // Fallback: read 0000 file from seed directory
-      const seedDir = await store.current.getDirectoryHandle(label)
-      if (!seedDir) return null
-      const fileHandle = await seedDir.getFileHandle('0000')
-      const file = await fileHandle.getFile()
-      const text = await file.text()
+      const blob = await store.getResource(sig)
+      if (!blob) return null
+
+      const text = await blob.text()
       const props = JSON.parse(text)
       return typeof props.link === 'string' ? props.link : null
     } catch {

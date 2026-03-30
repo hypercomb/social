@@ -15,7 +15,6 @@ interface LineageLike {
 }
 
 interface StoreLike {
-  readonly hypercombRoot: FileSystemDirectoryHandle
   readonly clipboard: FileSystemDirectoryHandle
 }
 

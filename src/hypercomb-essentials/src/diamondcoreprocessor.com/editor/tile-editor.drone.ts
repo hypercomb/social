@@ -13,7 +13,6 @@ type TileActionPayload = {
 }
 
 type Store = {
-  current: FileSystemDirectoryHandle
   resources: FileSystemDirectoryHandle
   putResource: (blob: Blob) => Promise<string>
   getResource: (signature: string) => Promise<Blob | null>
@@ -57,16 +56,7 @@ export class TileEditorDrone {
       const text = await propsBlob.text()
       properties = JSON.parse(text)
     } catch {
-      // fall back to legacy 0000 file
-      try {
-        const seedDir = await store.current.getDirectoryHandle(seed)
-        const fileHandle = await seedDir.getFileHandle(TILE_PROPERTIES_FILE)
-        const file = await fileHandle.getFile()
-        const text = await file.text()
-        properties = JSON.parse(text)
-      } catch {
-        // no properties found — use empty
-      }
+      // no properties found — use empty
     }
 
     // 2. load large image blob from __resources__ (if present)

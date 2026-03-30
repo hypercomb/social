@@ -15,7 +15,6 @@ export type DevManifest = {
 
 export class Store extends EventTarget {
 
-  private static readonly HYPERCOMB_DIRECTORY = 'hypercomb.io'
   public static readonly BEES_DIRECTORY = '__bees__'
   public static readonly DEPENDENCIES_DIRECTORY = '__dependencies__'
   public static readonly LAYERS_DIRECTORY = '__layers__'
@@ -28,7 +27,6 @@ export class Store extends EventTarget {
   private static readonly CACHE_NAME = 'hypercomb-modules-v2'
 
   public opfsRoot!: FileSystemDirectoryHandle
-  public hypercombRoot!: FileSystemDirectoryHandle
   public bees!: FileSystemDirectoryHandle
   public dependencies!: FileSystemDirectoryHandle
   public layers!: FileSystemDirectoryHandle
@@ -41,53 +39,6 @@ export class Store extends EventTarget {
   #initialized = false
 
   // -------------------------------------------------
-  // current folder (within hypercomb root)
-  // -------------------------------------------------
-
-  public current!: FileSystemDirectoryHandle
-
-  #currentSegments: readonly string[] = []
-
-  public get currentSegments(): readonly string[] { return this.#currentSegments }
-
-  public readonly setCurrentHandle = (
-    dir: FileSystemDirectoryHandle,
-    segments: readonly string[]
-  ): void => {
-    this.current = dir
-    this.#currentSegments = [...segments]
-    this.dispatchEvent(new CustomEvent('change'))
-  }
-
-  public readonly resetCurrent = (): void => {
-    this.setCurrentHandle(this.hypercombRoot, [])
-  }
-
-  // caller can use this when "moving to a seed" (read-only traversal)
-  public readonly setCurrent = async (
-    segments: readonly string[]
-  ): Promise<FileSystemDirectoryHandle | null> => {
-
-    let dir = this.hypercombRoot
-    const clean: string[] = []
-
-    for (let i = 0; i < segments.length; i++) {
-      const seg = (segments[i] ?? '').trim()
-      if (!seg || seg === '.' || seg === '..') continue
-
-      try {
-        dir = await dir.getDirectoryHandle(seg)
-        clean.push(seg)
-      } catch {
-        return null
-      }
-    }
-
-    this.setCurrentHandle(dir, clean)
-    return dir
-  }
-
-  // -------------------------------------------------
   // init
   // -------------------------------------------------
 
@@ -96,9 +47,6 @@ export class Store extends EventTarget {
     this.#initialized = true
 
     this.opfsRoot = await navigator.storage.getDirectory()
-
-    this.hypercombRoot =
-      await this.opfsRoot.getDirectoryHandle(Store.HYPERCOMB_DIRECTORY, { create: true })
 
     this.bees =
       await this.opfsRoot.getDirectoryHandle(Store.BEES_DIRECTORY, { create: true })
@@ -123,9 +71,6 @@ export class Store extends EventTarget {
 
     this.computation =
       await this.opfsRoot.getDirectoryHandle(Store.COMPUTATION_DIRECTORY, { create: true })
-
-    // default current is the hypercomb root
-    this.resetCurrent()
   }
 
   public domainLayersDirectory = async (

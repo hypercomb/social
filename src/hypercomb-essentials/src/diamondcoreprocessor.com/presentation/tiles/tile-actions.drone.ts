@@ -253,11 +253,8 @@ export class TileActionsDrone extends Drone {
     }
   }
 
-  async #getRootDir(lineage: { explorerDir(): Promise<FileSystemDirectoryHandle | null> } | null | undefined): Promise<FileSystemDirectoryHandle | null> {
-    if (!lineage) return null
-    // Access the Store directly to get hypercombRoot (the domain root)
-    const store = get('@hypercomb.social/Store') as { hypercombRoot: FileSystemDirectoryHandle } | undefined
-    return store?.hypercombRoot ?? null
+  async #getRootDir(_lineage: unknown): Promise<FileSystemDirectoryHandle | null> {
+    return null
   }
 
   // ── Action handlers ─────────────────────────────────────────────

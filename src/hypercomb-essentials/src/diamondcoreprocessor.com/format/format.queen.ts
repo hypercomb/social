@@ -2,7 +2,6 @@
 import { QueenBee, EffectBus } from '@hypercomb/core'
 
 type Store = {
-  current: FileSystemDirectoryHandle
   getResource: (signature: string) => Promise<Blob | null>
 }
 
@@ -41,14 +40,7 @@ export class FormatQueenBee extends QueenBee {
           if (!propsBlob) throw new Error('props blob missing')
           properties = JSON.parse(await propsBlob.text())
         } catch {
-          try {
-            const seedDir = await store.current.getDirectoryHandle(active)
-            const fh = await seedDir.getFileHandle('0000')
-            const file = await fh.getFile()
-            properties = JSON.parse(await file.text())
-          } catch {
-            // no properties — open with empty
-          }
+          // no properties — open with empty
         }
       }
     }

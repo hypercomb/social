@@ -78,28 +78,8 @@ export class AtomizeDrone extends Drone {
       }
 
       const label = normalizeSeed(rawLabel) || rawLabel
-      const lineage = this.resolve<{ explorerDir(): Promise<FileSystemDirectoryHandle> }>('lineage')
-      const dir = await lineage?.explorerDir()
-      if (!dir) return
 
-      const tileDir = await dir.getDirectoryHandle(label, { create: true })
-
-      // Build lineage stem — snapshot from root down to this tile
-      const stem = await this.#buildStem(label)
-
-      // Gather sibling context — what else is at this level?
-      const siblings: string[] = []
-      for await (const [name, handle] of (dir as any).entries()) {
-        if (handle.kind === 'directory' && !name.startsWith('__')) {
-          siblings.push(name)
-        }
-      }
-
-      const siblingContext = siblings.length > 1
-        ? `\nSiblings at the same level: ${siblings.filter(s => s !== label).join(', ')}`
-        : ''
-
-      const userMessage = `Decompose this into ${SUBTOPIC_COUNT} constituent parts:\n\nTopic: ${label}\n\nLineage (path from root to this tile):\n${stem}${siblingContext}`
+      const userMessage = `Decompose this into ${SUBTOPIC_COUNT} constituent parts:\n\nTopic: ${label}`
 
       const responseText = await callAnthropic(
         MODELS['haiku'],
@@ -118,7 +98,6 @@ export class AtomizeDrone extends Drone {
       for (const item of parts) {
         const name = normalizeSeed(item.name)
         if (!name) continue
-        await tileDir.getDirectoryHandle(name, { create: true })
         EffectBus.emit('seed:added', { seed: name })
       }
 
@@ -129,61 +108,6 @@ export class AtomizeDrone extends Drone {
     } finally {
       this.#busy = false
     }
-  }
-
-  /** Walk from OPFS root through each navigation segment, collecting children at each level. */
-  async #buildStem(targetLabel: string): Promise<string> {
-    const nav = this.resolve<{ segments(): string[] }>('navigation')
-    const store = this.resolve<{ hypercombRoot: FileSystemDirectoryHandle }>('store')
-    if (!nav || !store?.hypercombRoot) return targetLabel
-
-    const segments = nav.segments()
-    const lines: string[] = []
-    let cursor: FileSystemDirectoryHandle = store.hypercombRoot
-
-    // Walk domain root first (hypercomb.io)
-    try {
-      cursor = await cursor.getDirectoryHandle('hypercomb.io')
-    } catch {
-      return targetLabel
-    }
-
-    // Walk each segment, collecting children names at each level
-    for (let i = 0; i < segments.length; i++) {
-      const seg = segments[i]
-      const indent = '  '.repeat(i)
-      const children = await this.#listChildren(cursor)
-      const childList = children.filter(c => c !== seg).join(', ')
-      const suffix = childList ? ` (also: ${childList})` : ''
-      lines.push(`${indent}${seg}${suffix}`)
-
-      try {
-        cursor = await cursor.getDirectoryHandle(seg)
-      } catch {
-        break
-      }
-    }
-
-    // Add the target tile at the deepest level
-    const targetIndent = '  '.repeat(segments.length)
-    const targetChildren = await this.#listChildren(cursor)
-    const targetSiblings = targetChildren.filter(c => c !== targetLabel).join(', ')
-    const targetSuffix = targetSiblings ? ` (also: ${targetSiblings})` : ''
-    lines.push(`${targetIndent}> ${targetLabel}${targetSuffix}  ← EXPAND THIS`)
-
-    return lines.join('\n')
-  }
-
-  async #listChildren(dir: FileSystemDirectoryHandle): Promise<string[]> {
-    const names: string[] = []
-    try {
-      for await (const [name, handle] of (dir as any).entries()) {
-        if (handle.kind === 'directory' && !name.startsWith('__') && !name.startsWith('.')) {
-          names.push(name)
-        }
-      }
-    } catch {}
-    return names
   }
 
   #extractArray(text: string): { name: string; detail: string }[] {

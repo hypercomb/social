@@ -136,36 +136,9 @@ async function gatherContext(refs: string[]): Promise<string> {
   return sections.join('\n\n')
 }
 
-async function readLineageContext(lineagePath: string): Promise<string | null> {
-  const store = get('@hypercomb.social/Store') as
-    { hypercombRoot: FileSystemDirectoryHandle } | undefined
-  if (!store?.hypercombRoot) return null
-
-  let dir = store.hypercombRoot
-  for (const segment of lineagePath.split('/').filter(Boolean)) {
-    try {
-      dir = await dir.getDirectoryHandle(segment)
-    } catch {
-      return null
-    }
-  }
-
-  const entries: string[] = []
-  for await (const [name, handle] of (dir as any).entries()) {
-    if (handle.kind !== 'directory') continue
-    if (name.startsWith('__')) continue
-    try {
-      const fh = await (handle as FileSystemDirectoryHandle).getFileHandle('0000')
-      const file = await fh.getFile()
-      const props = JSON.parse(await file.text())
-      const propsStr = Object.keys(props).length > 0 ? ` ${JSON.stringify(props)}` : ''
-      entries.push(`- ${name}${propsStr}`)
-    } catch {
-      entries.push(`- ${name}`)
-    }
-  }
-
-  return entries.length > 0 ? entries.join('\n') : null
+async function readLineageContext(_lineagePath: string): Promise<string | null> {
+  // directory-based lineage context removed
+  return null
 }
 
 // ── registration ────────────────────────────────────────

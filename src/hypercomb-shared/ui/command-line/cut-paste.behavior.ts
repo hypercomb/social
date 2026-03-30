@@ -164,7 +164,7 @@ export class CutPasteBehavior implements CommandLineBehavior {
   }
 
   async #computeDestSig(lineage: Lineage, extraSegments: string[]): Promise<string> {
-    const domain = lineage.domain?.() ?? 'hypercomb.io'
+    const domain = window.location.hostname || 'hypercomb.io'
     const currentSegments = lineage.explorerSegments?.() ?? []
     const destPath = [...currentSegments, ...extraSegments].join('/')
 

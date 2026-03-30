@@ -810,14 +810,7 @@ export class ShowCellDrone extends Drone {
 
     let dir: FileSystemDirectoryHandle | null
     if (this.#clipboardView) {
-      // clipboard view: resolve source dir from stored segments
-      const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as { hypercombRoot: FileSystemDirectoryHandle } | undefined
-      dir = store?.hypercombRoot ?? null
-      if (dir) {
-        for (const seg of this.#clipboardView.sourceSegments) {
-          try { dir = await dir!.getDirectoryHandle(seg, { create: false }) } catch { dir = null; break }
-        }
-      }
+      dir = null
     } else {
       dir = await lineage.explorerDir()
       if (isStale()) {
@@ -1285,45 +1278,9 @@ export class ShowCellDrone extends Drone {
     this.emitEffect('render:tags', { tags })
   }
 
-  /** Walk entire OPFS tree, find tiles matching any active filter tag, store flat results. */
+  /** Tag scanning across directory tree removed — no-op. */
   async #scanTagsAcrossPages(): Promise<void> {
-    const store = get('@hypercomb.social/Store') as { hypercombRoot: FileSystemDirectoryHandle } | undefined
-    const root: FileSystemDirectoryHandle | undefined = store?.hypercombRoot
-    if (!root) return
-
-    const tags = this.filterTags
-    const results: { label: string; dir: FileSystemDirectoryHandle }[] = []
-
-    const walk = async (dir: FileSystemDirectoryHandle): Promise<void> => {
-      for await (const [name, handle] of dir.entries()) {
-        // abort if filter was cleared while scanning
-        if (this.filterTags.size === 0) return
-        if (handle.kind !== 'directory' || name.startsWith('__')) continue
-        const seedDir = handle as FileSystemDirectoryHandle
-        // check if this directory has a 0000 properties file with matching tags
-        try {
-          const fh = await seedDir.getFileHandle('0000')
-          const file = await fh.getFile()
-          const props = JSON.parse(await file.text())
-          const tileTags: string[] = Array.isArray(props['tags']) ? props['tags'] : []
-          if (tileTags.some(t => tags.has(t))) {
-            results.push({ label: name, dir: seedDir })
-            this.seedTagsCache.set(name, tileTags)
-          }
-        } catch { /* no 0000 = not a tagged tile, or parse error */ }
-        // recurse into children (tiles can contain sub-tiles)
-        await walk(seedDir)
-      }
-    }
-
-    await walk(root)
-
-    // Only apply if filter is still active (might have been cleared during async walk)
-    if (this.filterTags.size > 0) {
-      this.#tagFlattenResults = results
-      this.renderedCellsKey = ''
-      this.requestRender()
-    }
+    // directory-based tag scanning removed
   }
 
   // 1–3ms micro-pause to avoid main-thread blocking (legacy JsonHiveStreamLoader pattern)

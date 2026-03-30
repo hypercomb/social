@@ -2,8 +2,6 @@
 // hypercomb-web/src/bootstrap/bootstrap-history.ts
 
 import { CompletionUtility } from './completion-utility'
-import { DirectoryWalker } from './directory-walker'
-import { Store } from './store'
 
 type BootstrapStep = {
   index: number
@@ -13,16 +11,12 @@ type BootstrapStep = {
 
 export class BootstrapHistory {
 
-  // note: reserved for later; current bootstrap starts at store.hypercombRoot
-  private readonly defaultDomain = 'hypercomb.io'
-
   #hasRun = false
 
   public run = async (): Promise<void> => {
     if (this.#hasRun) return
     this.#hasRun = true
 
-    const store = get('@hypercomb.social/Store') as Store
     const preloader = get('@hypercomb.social/ScriptPreloader') as any
     const utility = get('@hypercomb.social/CompletionUtility') as CompletionUtility
 
@@ -32,13 +26,6 @@ export class BootstrapHistory {
     // use the same decode + normalize rules as navigation.cleanSegment
     const urlSegments = this.parsePath(inputPath, utility)
 
-    // root for now is just the hypercomb root
-    // note: when you introduce per-domain roots, swap this for getDirectoryHandle(this.defaultDomain)
-    const domainRoot = store.hypercombRoot
-
-    // current starts at domain root
-    store.setCurrentHandle(domainRoot, [])
-
     // prefer lineage segments if they exist and lineage is ready
     const lineage = this.tryGetLineage()
     const lineageSegments = this.tryGetLineageSegments(lineage)
@@ -47,48 +34,7 @@ export class BootstrapHistory {
         ? lineageSegments
         : urlSegments
 
-    // walker strategy: build a path->handle lookup so we never mutate url until we know the answer
-    const walker = get('@hypercomb.social/DirectoryWalker') as DirectoryWalker
-    const directories = await walker.walk(domainRoot)
-
-    // map key is "a/b/c" (no leading slash), rooted at domainRoot
-    const byPath = new Map<string, FileSystemDirectoryHandle>()
-    byPath.set('', domainRoot)
-
-    for (const d of directories as any[]) {
-      const parts = (d?.path ?? []) as string[]
-      const handle = (d?.handle ?? null) as FileSystemDirectoryHandle | null
-      if (!handle) continue
-      byPath.set(parts.join('/'), handle)
-    }
-
-    // resolve deepest existing lineage for the current segments
-    const existingSegments: string[] = []
-    const existingDirs: FileSystemDirectoryHandle[] = []
-
-    let cursor = ''
-
-    for (let i = 0; i < rawSegments.length; i++) {
-      const seg = (rawSegments[i] ?? '').trim()
-      if (!seg) continue
-
-      cursor = cursor ? `${cursor}/${seg}` : seg
-
-      const dir = byPath.get(cursor)
-      if (!dir) break
-
-      existingSegments.push(seg)
-      existingDirs.push(dir)
-    }
-
-    const fullExists = existingSegments.length === rawSegments.length
-
-    const finalPath =
-      fullExists
-        ? inputPath
-        : (existingSegments.length ? ('/' + existingSegments.join('/')) : '/')
-
-    const finalUrl = finalPath + inputSuffix
+    const finalUrl = inputPath + inputSuffix
 
     // rebuild history stack
     // important: always restore finalUrl even if something fails, so the url never gets stuck at '/'
@@ -102,18 +48,15 @@ export class BootstrapHistory {
       let index = 0
       const steps: BootstrapStep[] = []
 
-      for (let i = 0; i < existingSegments.length; i++) {
-        const seg = existingSegments[i]
-        const dir = existingDirs[i]
+      for (let i = 0; i < rawSegments.length; i++) {
+        const seg = (rawSegments[i] ?? '').trim()
+        if (!seg) continue
 
         path += `/${seg}`
         index++
 
         window.history.pushState({ i: index }, '', path)
         steps.push({ index, segment: seg, path })
-
-        // advance current folder for runtime
-        store.setCurrentHandle(dir, existingSegments.slice(0, i + 1))
 
         // replay: encounter this segment
         await this.encounter(preloader, seg)
@@ -165,10 +108,6 @@ export class BootstrapHistory {
 
   private safeDecode = (s: string): string => {
     try { return decodeURIComponent(s) } catch { return s }
-  }
-
-  private tryGetCompletions = (get: any): CompletionUtility | null => {
-    try { return get('@hypercomb.social/CompletionUtility') as CompletionUtility } catch { return null }
   }
 
   private tryGetLineage = (): any | null => {
