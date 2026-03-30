@@ -24,28 +24,17 @@ function resolvePortalUrl(target: string): string | undefined {
 })
 export class PortalOverlayComponent implements OnInit, OnDestroy {
 
-  #sanitizer: DomSanitizer | null = null
-  #cdr: ChangeDetectorRef | null = null
+  #sanitizer = inject(DomSanitizer)
+  #cdr = inject(ChangeDetectorRef)
 
   public readonly open = signal(false)
   public readonly src = signal<SafeResourceUrl | null>(null)
   #activeUrl: string | null = null
 
-  constructor() {
-    try {
-      this.#sanitizer = inject(DomSanitizer)
-      this.#cdr = inject(ChangeDetectorRef)
-    } catch (error) {
-      console.warn('[portal-overlay] DI unavailable — portal disabled', error)
-    }
-  }
-
   // -------------------------------------------------
   // open portal
   // -------------------------------------------------
   private readonly onPortalOpen = (e: Event): void => {
-    if (!this.#sanitizer) return
-
     const detail = (e as CustomEvent).detail as { target?: string; url?: string } | null
     const url = detail?.url ?? resolvePortalUrl(detail?.target ?? '')
     if (!url) return
@@ -53,7 +42,7 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     this.#activeUrl = url
     this.open.set(true)
     this.src.set(this.#sanitizer.bypassSecurityTrustResourceUrl(url))
-    this.#cdr?.detectChanges()
+    this.#cdr.detectChanges()
   }
 
   // -------------------------------------------------
@@ -117,6 +106,6 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     this.open.set(false)
     this.src.set(null)
     this.#activeUrl = null
-    this.#cdr?.detectChanges()
+    this.#cdr.detectChanges()
   }
 }
