@@ -149,6 +149,12 @@ export class SentinelHandler {
       if (bytes) add.push({ signature: sig, kind: 'layer', bytes })
     }
 
+    // Log all resolved files with signatures
+    console.log(`[sentinel] sync resolved ${add.length} files:`)
+    for (const item of add) {
+      console.log(`  [${item.signature}] ${item.kind}`)
+    }
+
     // Transfer files — web will diff against its own OPFS
     for (const item of add) {
       port.postMessage(
@@ -227,22 +233,23 @@ export class SentinelHandler {
   }
 
   async #readCachedManifest(domain: string, rootSig: string): Promise<any> {
-    // Try reading from DCP's OPFS first (already installed)
+    // Always fetch fresh — manifest lives in public/ and must reflect the latest deploy
+    try {
+      const res = await fetch(`${domain}/manifest.json`, { cache: 'no-store' })
+      if (res.ok) {
+        const content = await res.json()
+        return content?.packages?.[rootSig] ?? null
+      }
+    } catch { /* fall through to OPFS cache */ }
+
+    // Offline fallback: read from DCP's OPFS cache
     const domainName = new URL(domain).hostname
     const dir = await this.#store.domainLayersDir(domainName)
     const bytes = await this.#store.readFile(dir, 'manifest.cache.json')
     if (bytes) {
-      try { return JSON.parse(new TextDecoder().decode(bytes)) } catch { /* fall through */ }
+      try { return JSON.parse(new TextDecoder().decode(bytes)) } catch { /* ignore */ }
     }
-    // Fetch fresh content manifest and extract package by rootSig
-    try {
-      const res = await fetch(`${domain}/manifest.json`, { cache: 'no-store' })
-      if (!res.ok) return null
-      const content = await res.json()
-      return content?.packages?.[rootSig] ?? null
-    } catch {
-      return null
-    }
+    return null
   }
 
   #loadToggles(): Record<string, boolean> {

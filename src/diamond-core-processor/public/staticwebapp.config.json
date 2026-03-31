@@ -1,6 +1,6 @@
 {
   "navigationFallback": {
     "rewrite": "/index.html",
-    "exclude": ["/assets/*", "*.js", "*.css", "*.ico", "*.wasm"]
+    "exclude": ["/assets/*", "*.js", "*.css", "*.ico", "*.wasm", "/__layers__/*", "/__bees__/*", "/__dependencies__/*", "/__resources__/*", "/manifest.json"]
   }
 }
