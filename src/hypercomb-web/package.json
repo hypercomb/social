@@ -21,6 +21,7 @@
     "zone.js": "~0.16.1"
   },
   "devDependencies": {
+    "@angular/cli": "21.2.5",
     "esbuild": "^0.27.0",
     "ng-packagr": "21.2.0",
     "pixi.js": "^8.16.0",
