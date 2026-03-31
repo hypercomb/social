@@ -43,6 +43,7 @@
     "start": "concurrently --names web,dev --prefix-colors blue,green \"npm --prefix hypercomb-web start\" \"npm --prefix hypercomb-dev start\"",
     "start:web": "npm --prefix hypercomb-web start",
     "start:dev": "npm --prefix hypercomb-dev start",
+    "start:dcp": "npm --prefix diamond-core-processor start",
     "sync:angular": "tsx scripts/sync-angular.ts"
   },
   "dependencies": {
