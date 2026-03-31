@@ -301,7 +301,10 @@ export class TreeRowComponent implements OnInit, OnDestroy {
   splitClassName = computed(() => {
     const name = this.node().doc?.className
     if (!name) return ''
-    return name.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase()
+    const split = name.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase()
+    // don't duplicate when it matches the node name
+    if (split === this.node().name) return ''
+    return split
   })
 
   description = computed(() => {
