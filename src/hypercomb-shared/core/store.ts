@@ -27,6 +27,7 @@ export class Store extends EventTarget {
   private static readonly CACHE_NAME = 'hypercomb-modules-v2'
 
   public opfsRoot!: FileSystemDirectoryHandle
+  public hypercombRoot!: FileSystemDirectoryHandle
   public bees!: FileSystemDirectoryHandle
   public dependencies!: FileSystemDirectoryHandle
   public layers!: FileSystemDirectoryHandle
@@ -47,6 +48,9 @@ export class Store extends EventTarget {
     this.#initialized = true
 
     this.opfsRoot = await navigator.storage.getDirectory()
+
+    this.hypercombRoot =
+      await this.opfsRoot.getDirectoryHandle('hypercomb.io', { create: true })
 
     this.bees =
       await this.opfsRoot.getDirectoryHandle(Store.BEES_DIRECTORY, { create: true })

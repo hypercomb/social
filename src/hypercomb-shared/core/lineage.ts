@@ -2,6 +2,7 @@
 // synchronize is dispatched only by the processor — lineage fires 'change' on itself
 
 import type { Navigation } from './navigation'
+import type { Store } from './store'
 
 // global get/register/list available via ioc.web.ts
 
@@ -11,6 +12,7 @@ export class Lineage extends EventTarget {
   // dependencies
   // -------------------------------------------------
 
+  private get store(): Store { return get('@hypercomb.social/Store') as Store }
   private get navigation(): Navigation { return get('@hypercomb.social/Navigation') as Navigation }
 
   // -------------------------------------------------
@@ -69,7 +71,11 @@ export class Lineage extends EventTarget {
   }
 
   public explorerDir = async (): Promise<FileSystemDirectoryHandle | null> => {
-    return null
+    try {
+      return await this.tryResolveFrom(this.store.hypercombRoot, this.explorerPath)
+    } catch {
+      return null
+    }
   }
 
   // -------------------------------------------------
