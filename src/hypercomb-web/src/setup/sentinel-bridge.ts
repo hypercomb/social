@@ -9,7 +9,10 @@
 // runs inside web's origin, it cannot tamper with DCP's verification
 // logic, trusted domain list, or auditor endpoints.
 
-const DCP_ORIGIN = 'https://diamondcoreprocessor.com'
+const DCP_ORIGIN =
+  globalThis.location?.hostname === 'localhost'
+    ? 'http://localhost:2400'
+    : 'https://diamondcoreprocessor.com'
 
 const HANDSHAKE_TIMEOUT = 5_000
 

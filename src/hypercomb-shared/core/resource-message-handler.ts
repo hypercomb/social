@@ -11,6 +11,7 @@ export class ResourceMessageHandler {
   private readonly allowedOrigins = new Set<string>([
     window.origin,
     'https://diamondcoreprocessor.com',
+    ...(window.location.hostname === 'localhost' ? ['http://localhost:2400'] : []),
   ])
 
   constructor() {

@@ -1,4 +1,5 @@
-import { Component, type OnInit, type OnDestroy } from "@angular/core"
+import { ChangeDetectorRef, Component, inject, type OnInit, type OnDestroy } from "@angular/core"
+import { DomSanitizer, type SafeResourceUrl } from "@angular/platform-browser"
 import { EffectBus } from '@hypercomb/core'
 
 const DEFAULT_PORTALS: Record<string, string> = {
@@ -31,7 +32,11 @@ function resolvePortalUrl(target: string): string | undefined {
 })
 export class PortalOverlayComponent implements OnInit, OnDestroy {
 
+  readonly #cdr = inject(ChangeDetectorRef)
+  readonly #sanitizer = inject(DomSanitizer)
+
   isOpen = false
+  portalSrc: SafeResourceUrl | null = null
   #activeUrl: string | null = null
 
   // -------------------------------------------------
@@ -43,11 +48,9 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     if (!url) return
 
     this.#activeUrl = url
+    this.portalSrc = this.#sanitizer.bypassSecurityTrustResourceUrl(url)
     this.isOpen = true
-    queueMicrotask(() => {
-      const frame = document.querySelector<HTMLIFrameElement>('.portal-frame')
-      if (frame) frame.src = url
-    })
+    this.#cdr.detectChanges()
   }
 
   // -------------------------------------------------
@@ -109,6 +112,8 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
   // -------------------------------------------------
   public close = (): void => {
     this.isOpen = false
+    this.portalSrc = null
     this.#activeUrl = null
+    this.#cdr.detectChanges()
   }
 }
