@@ -7,9 +7,19 @@ const DEFAULT_PORTALS: Record<string, string> = {
   hypercomb: 'https://hypercomb.com',
 }
 
+const DCP_LOCAL_URL = 'http://localhost:2400'
+
+function resolveDcpUrl(): string {
+  const host = window.location.hostname
+  const isLocalHost = host === 'localhost' || host === '127.0.0.1'
+  return isLocalHost ? DCP_LOCAL_URL : DEFAULT_PORTALS['dcp']
+}
+
 function resolvePortalUrl(target: string): string | undefined {
   const override = localStorage.getItem(`portal:${target}`)
-  return override ?? DEFAULT_PORTALS[target]
+  if (override) return override
+  if (target === 'dcp') return resolveDcpUrl()
+  return DEFAULT_PORTALS[target]
 }
 
 @Component({

@@ -45,6 +45,10 @@ var MousewheelZoomInput = class {
   canvas = null;
   // fine-grained step used when Ctrl is held
   fineStep = 1.02;
+  // tracks the target of any in-flight animated zoom so rapid scrolling
+  // chains from the destination rather than the mid-animation scale
+  animTarget = null;
+  animClearTimer = null;
   zoom = null;
   gate = null;
   attach = (zoom, canvas) => {
@@ -71,13 +75,19 @@ var MousewheelZoomInput = class {
     const pivot = { x: event.clientX, y: event.clientY };
     const zoomIn = event.deltaY < 0;
     if (event.ctrlKey || event.metaKey) {
+      this.animTarget = null;
       const factor = zoomIn ? this.fineStep : 1 / this.fineStep;
       this.zoom.zoomByFactor(factor, pivot);
     } else {
-      const current = this.zoom.currentScale();
-      const next = this.#nextSnapLevel(current, zoomIn);
-      if (next !== current) {
-        this.zoom.zoomToScale(next, pivot);
+      const base = this.animTarget ?? this.zoom.currentScale();
+      const next = this.#nextSnapLevel(base, zoomIn);
+      if (next !== base) {
+        this.animTarget = next;
+        if (this.animClearTimer) clearTimeout(this.animClearTimer);
+        this.animClearTimer = setTimeout(() => {
+          this.animTarget = null;
+        }, 200);
+        this.zoom.animateToScale(next, pivot);
       }
     }
     event.preventDefault();

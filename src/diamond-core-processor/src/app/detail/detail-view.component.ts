@@ -178,6 +178,8 @@ export class DetailViewComponent {
   iframeSrc = computed((): SafeResourceUrl => {
     const lineage = this.node().lineage
     const base = this.hypercombUrl()
+    console.log('setting iframeSrc', { base, lineage })
+
     const url = lineage ? `${base}/${lineage}` : base
     return this.#sanitizer.bypassSecurityTrustResourceUrl(url)
   })
