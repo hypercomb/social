@@ -440,6 +440,14 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     vp?.setPan?.(0, 0)
   }
 
+  readonly fitOrCenter = (event: MouseEvent): void => {
+    if (event.ctrlKey || event.metaKey) {
+      this.centerView()
+    } else {
+      this.zoom?.zoomToFit?.()
+    }
+  }
+
   readonly fitContent = (): void => {
     this.zoom?.zoomToFit?.()
   }

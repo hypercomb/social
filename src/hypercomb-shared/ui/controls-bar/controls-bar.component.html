@@ -73,14 +73,11 @@
           <button class="ctl-btn" (click)="openDcp()" [attr.aria-label]="'controls.dcp' | t">
             <span class="hci dcp-icon">$</span>
           </button>
-          <button class="ctl-btn" (click)="centerView()" [attr.aria-label]="'controls.center' | t">
+          <button class="ctl-btn" (click)="fitOrCenter($event)" [attr.aria-label]="'controls.fit-content' | t">
             <span class="hci">q</span>
           </button>
           <button class="ctl-btn" [class.active]="microphoneOn()" (click)="toggleMicrophone()" [attr.aria-label]="'controls.microphone' | t">
             <span class="mic-icon">{{ microphoneOn() ? '🎙' : '🎤' }}</span>
-          </button>
-          <button class="ctl-btn" (click)="fitContent()" [attr.aria-label]="'controls.fit-content' | t">
-            <span class="hci">)</span>
           </button>
           <button class="ctl-btn" [class.active]="layoutPinned()" (click)="toggleLayout()" [attr.aria-label]="'controls.layout-mode' | t">
             <span class="hci">#</span>
@@ -100,11 +97,8 @@
           <button class="ctl-btn" (click)="openDcp()" [attr.aria-label]="'controls.dcp' | t">
             <span class="hci dcp-icon">$</span>
           </button>
-          <button class="ctl-btn" (click)="centerView()" [attr.aria-label]="'controls.center' | t">
+          <button class="ctl-btn" (click)="fitOrCenter($event)" [attr.aria-label]="'controls.fit-content' | t">
             <span class="hci">q</span>
-          </button>
-          <button class="ctl-btn" (click)="fitContent()" [attr.aria-label]="'controls.fit-content' | t">
-            <span class="hci">)</span>
           </button>
           <button class="ctl-btn" (click)="zoomOut()" [attr.aria-label]="'controls.zoom-out' | t">
             <span class="hci">I</span>
