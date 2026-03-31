@@ -17,8 +17,8 @@ export class CommandShellComponent implements AfterViewInit {
   @ViewChild('shellInput', { read: ElementRef })
   private inputRef?: ElementRef<HTMLInputElement>
 
-  private get inputElement(): HTMLInputElement {
-    return this.inputRef!.nativeElement
+  private get inputElement(): HTMLInputElement | undefined {
+    return this.inputRef?.nativeElement
   }
 
   // ── inputs from parent ──────────────────────────────────
@@ -72,7 +72,7 @@ export class CommandShellComponent implements AfterViewInit {
   // ── lifecycle ───────────────────────────────────────────
 
   ngAfterViewInit(): void {
-    this.inputElement.focus()
+    this.inputElement?.focus()
   }
 
   // ── public API for parent ───────────────────────────────
@@ -81,13 +81,16 @@ export class CommandShellComponent implements AfterViewInit {
 
   /** Set the input value programmatically (e.g. after completion). */
   setValue(v: string): void {
-    this.inputElement.value = v
+    const el = this.inputElement
+    if (!el) return
+    el.value = v
     this.syncSignalsFromDom()
   }
 
   /** Clear the input and reset state. */
   clear(): void {
-    this.inputElement.value = ''
+    const el = this.inputElement
+    if (el) el.value = ''
     this.value.set('')
     this.activeIndex.set(0)
     this.suppressed.set(false)
@@ -95,12 +98,13 @@ export class CommandShellComponent implements AfterViewInit {
 
   /** Focus the input element. */
   focus(): void {
-    this.inputElement.focus()
+    this.inputElement?.focus()
   }
 
   /** Place caret at end of input. */
   placeCaretAtEnd(): void {
     const el = this.inputElement
+    if (!el) return
     queueMicrotask(() => el.setSelectionRange(el.value.length, el.value.length))
   }
 
@@ -136,6 +140,7 @@ export class CommandShellComponent implements AfterViewInit {
 
   onInput = (): void => {
     const el = this.inputElement
+    if (!el) return
     // Strip leading spaces — they break ghost text alignment
     if (el.value !== el.value.trimStart()) {
       el.value = el.value.trimStart()
@@ -164,7 +169,7 @@ export class CommandShellComponent implements AfterViewInit {
   onShellMouseDown = (e: MouseEvent): void => {
     if (e.target === this.inputElement) return
     e.preventDefault()
-    this.inputElement.focus()
+    this.inputElement?.focus()
   }
 
   onSuggestionMouseDown = (e: MouseEvent, suggestion: string, index: number): void => {
@@ -210,7 +215,7 @@ export class CommandShellComponent implements AfterViewInit {
   // ── internal helpers ────────────────────────────────────
 
   private syncSignalsFromDom(): void {
-    this.value.set(this.inputElement.value)
+    this.value.set(this.inputElement?.value ?? '')
   }
 
   private clampActiveIndex(): void {
