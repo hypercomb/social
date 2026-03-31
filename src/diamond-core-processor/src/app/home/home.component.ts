@@ -19,6 +19,8 @@ const DOMAINS_KEY = 'dcp.domains'
 export interface DomainSection {
   domain: string
   domainName: string
+  /** Display name derived from the root layer's domain folder (e.g. "diamondcoreprocessor.com") */
+  displayDomain: string
   rootSig: string
   originalRootSig: string
   items: TreeNode[]
@@ -113,10 +115,11 @@ export class HomeComponent {
   readonly domainGrouped = computed<DomainGroup[]>(() => {
     const groups = new Map<string, DomainGroup>()
     for (const s of this.filteredSections()) {
-      let group = groups.get(s.domain)
+      const key = s.displayDomain
+      let group = groups.get(key)
       if (!group) {
-        group = { domain: s.domain, domainName: s.domainName, sections: [] }
-        groups.set(s.domain, group)
+        group = { domain: s.domain, domainName: s.displayDomain, sections: [] }
+        groups.set(key, group)
       }
       group.sections.push(s)
     }
@@ -346,12 +349,14 @@ export class HomeComponent {
     const root = await this.#resolver.resolveFromLocal(branchSig, sourceSection.domainName)
     if (!root) return
 
+    const flat = this.#flattenDomainSubfolder(root.children)
     const section: DomainSection = {
       domain: sourceSection.domain,
       domainName: sourceSection.domainName,
+      displayDomain: flat.displayDomain ?? sourceSection.displayDomain,
       rootSig: branchSig,
       originalRootSig: branchSig,
-      items: this.#flattenDomainSubfolder(root.children),
+      items: flat.items,
       loading: false,
       error: null,
       installStatus: null,
@@ -416,7 +421,9 @@ export class HomeComponent {
     try {
       const root = await this.#resolver.resolveFromLocal(rootSig, section.domainName)
       if (root) {
-        section.items = this.#flattenDomainSubfolder(root.children)
+        const flat = this.#flattenDomainSubfolder(root.children)
+        section.items = flat.items
+        if (flat.displayDomain) section.displayDomain = flat.displayDomain
         section.rootSig = root.signature ?? rootSig
       } else {
         section.error = 'Failed to resolve patched tree'
@@ -461,7 +468,7 @@ export class HomeComponent {
       if (rootSigs.length === 0) {
         // no packages found — show placeholder with error
         results.push({
-          domain, domainName, rootSig: '', originalRootSig: '', items: [],
+          domain, domainName, displayDomain: domainName, rootSig: '', originalRootSig: '', items: [],
           loading: false, error: 'No packages found in manifest', installStatus: null, patches: [], enabled: true
         })
         continue
@@ -470,7 +477,7 @@ export class HomeComponent {
       // create a section per root signature
       for (const rootSig of rootSigs) {
         results.push({
-          domain, domainName, rootSig, originalRootSig: rootSig, items: [],
+          domain, domainName, displayDomain: domainName, rootSig, originalRootSig: rootSig, items: [],
           loading: true, error: null, installStatus: null, patches: [], enabled: true
         })
       }
@@ -490,7 +497,9 @@ export class HomeComponent {
         if (root) {
           section.rootSig = root.signature ?? section.rootSig
           section.originalRootSig = root.signature ?? section.originalRootSig
-          section.items = this.#flattenDomainSubfolder(root.children)
+          const flat = this.#flattenDomainSubfolder(root.children)
+          section.items = flat.items
+          if (flat.displayDomain) section.displayDomain = flat.displayDomain
 
           // load patches and check for active patched root
           section.patches = await this.#patchStore.list(section.domainName)
@@ -500,7 +509,9 @@ export class HomeComponent {
             const patched = await this.#resolver.resolveFromLocal(activeRoot, section.domainName)
             if (patched) {
               section.rootSig = patched.signature ?? activeRoot
-              section.items = patched.children
+              const patchedFlat = this.#flattenDomainSubfolder(patched.children)
+              section.items = patchedFlat.items
+              if (patchedFlat.displayDomain) section.displayDomain = patchedFlat.displayDomain
             }
           }
         } else {
@@ -519,13 +530,14 @@ export class HomeComponent {
   /**
    * Skip domain-name subfolder layers that exist only for development organization.
    * In deployment, packages go to the root — so if the only child is a layer whose
-   * name looks like a domain (contains a dot), promote its children up.
+   * name looks like a domain (contains a dot), promote its children up and return
+   * the domain name for display.
    */
-  #flattenDomainSubfolder(items: TreeNode[]): TreeNode[] {
+  #flattenDomainSubfolder(items: TreeNode[]): { items: TreeNode[], displayDomain: string | null } {
     if (items.length === 1 && items[0].kind === 'layer' && items[0].name.includes('.')) {
-      return items[0].children
+      return { items: items[0].children, displayDomain: items[0].name }
     }
-    return items
+    return { items, displayDomain: null }
   }
 
   #containsNode(nodes: TreeNode[], id: string): boolean {

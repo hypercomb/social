@@ -54,7 +54,7 @@
     @for (group of domainGrouped(); track group.domain) {
       <section class="domain-section">
         <div class="domain-header">
-          <span class="domain-url" [title]="group.domain">{{ group.domain }}/</span>
+          <span class="domain-url" [title]="group.domain">{{ group.domainName }}/</span>
           <span class="header-sig">{{ group.sections[0]?.rootSig }}</span>
           <button class="domain-action" (click)="downloadPackage(group.sections[0])" title="Download package">&#8615;</button>
           <button class="remove" (click)="removeDomain(group.domain)">&times;</button>
