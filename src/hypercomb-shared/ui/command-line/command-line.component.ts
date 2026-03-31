@@ -730,7 +730,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.#touchDraggingUnsub = EffectBus.on<{ active: boolean }>('touch:dragging', ({ active }) => {
       this.touchDragging.set(active)
       if (active) {
-        this.shell.suppress()
+        this.shell?.suppress()
       }
     })
 
@@ -929,8 +929,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         const current = raw === '' ? 0 : parseInt(raw, 10)
         if (!isNaN(current)) {
           const next = e.key === 'ArrowUp' ? current + 1 : Math.max(0, current - 1)
-          this.shell.setValue(v.slice(0, parenIdx + 1) + next)
-          this.value.set(this.shell.value())
+          this.shell?.setValue(v.slice(0, parenIdx + 1) + next)
+          this.value.set(this.shell?.value() ?? '')
         }
       }
       return
@@ -951,7 +951,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     // Update the shell value with cleaned value (tags stripped)
     if (cleaned !== original) {
-      this.shell.setValue(cleaned)
+      this.shell?.setValue(cleaned)
       this.value.set(cleaned)
     }
 
@@ -965,8 +965,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     // bracket command execution (/select[, /format[, /fmt[, /fp[)
     if (isSelectInput(v)) {
-      this.shell.setValue(normalizeSelectInput(v))
-      this.value.set(this.shell.value())
+      this.shell?.setValue(normalizeSelectInput(v))
+      this.value.set(this.shell?.value() ?? '')
       void this.#executeSelectCommand()
       return
     }
@@ -1410,16 +1410,16 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const activeLabel = selection?.active
     if (!activeLabel) {
       // No active tile — default to 0
-      this.shell.setValue(v + '0')
-      this.value.set(this.shell.value())
+      this.shell?.setValue(v + '0')
+      this.value.set(this.shell?.value() ?? '')
       return true
     }
 
     // Find the index of the active tile
     const seedNames = this.seedNames$()
     const idx = seedNames.indexOf(activeLabel)
-    this.shell.setValue(v + (idx >= 0 ? idx : 0))
-    this.value.set(this.shell.value())
+    this.shell?.setValue(v + (idx >= 0 ? idx : 0))
+    this.value.set(this.shell?.value() ?? '')
     return true
   }
 
@@ -1446,8 +1446,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const maxIndex = axialSvc.items.size - 1
     const newIndex = Math.max(0, Math.min(currentIndex + delta, maxIndex))
 
-    this.shell.setValue(v.slice(0, parenIdx + 1) + newIndex)
-    this.value.set(this.shell.value())
+    this.shell?.setValue(v.slice(0, parenIdx + 1) + newIndex)
+    this.value.set(this.shell?.value() ?? '')
   }
 
   /** Scrub the move target index with Ctrl+Arrow using hex offsets. Returns true if handled. */
@@ -1483,8 +1483,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (newIndex < 0) return true // out of bounds
 
     // Update the shell and sync
-    this.shell.setValue(v.slice(0, parenIdx + 1) + newIndex)
-    this.value.set(this.shell.value())
+    this.shell?.setValue(v.slice(0, parenIdx + 1) + newIndex)
+    this.value.set(this.shell?.value() ?? '')
     return true
   }
 
@@ -1651,6 +1651,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   /** Set shell value and sync local state. */
   #setShellValue(v: string, suppress: boolean): void {
+    if (!this.shell) return
     this.shell.setValue(v)
     this.value.set(v)
     if (suppress) this.shell.suppress()
@@ -1659,7 +1660,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   }
 
   private readonly clear = (): void => {
-    this.shell.clear()
+    this.shell?.clear()
     this.value.set('')
     this.seedSubPath.set([])
     this.seedLeaf.set('')
