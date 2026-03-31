@@ -12,9 +12,14 @@ const ALLOWED_ORIGINS = [
   'http://localhost:4200',
   'http://localhost:4201',
   'http://localhost:4210',
-  'https://hypercom.io',
-  'https://www.hypercom.io'
+  'https://hypercomb.io',
+  'https://www.hypercomb.io'
 ]
+
+/** Accept any *.hypercomb.io subdomain (e.g. development.hypercomb.io). */
+const isAllowedOrigin = (origin: string): boolean =>
+  ALLOWED_ORIGINS.includes(origin) ||
+  /^https:\/\/[\w-]+\.hypercomb\.io$/.test(origin)
 
 @Component({
   selector: 'dcp-sentinel',
@@ -47,7 +52,7 @@ export class SentinelComponent implements OnInit, OnDestroy {
   }
 
   #handleHandshake(e: MessageEvent): void {
-    if (!ALLOWED_ORIGINS.includes(e.origin)) return
+    if (!isAllowedOrigin(e.origin)) return
     if (e.data?.scope !== 'dcp-sentinel' || e.data?.type !== 'handshake') return
 
     const port = e.ports?.[0]
