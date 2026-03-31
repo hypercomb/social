@@ -18,7 +18,6 @@ const DIST_ROOT = resolve(__dirname, '..', 'dist')
 
 const TARGETS = [
   resolve(__dirname, '..', '..', 'diamond-core-processor', 'public'),
-  resolve(__dirname, '..', '..', 'hypercomb-web', 'public', 'content'),
 ]
 
 const CONTENT_DIRS = ['__layers__', '__bees__', '__dependencies__', '__resources__']

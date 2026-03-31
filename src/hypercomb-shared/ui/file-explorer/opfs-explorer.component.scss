@@ -257,33 +257,81 @@
   // ── domain grouped view ──────────────────────────────
 
   .domain-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
     padding: 0.65rem 1rem;
     background: #1b1b1b;
     border-bottom: 1px solid #232323;
   }
 
-  .domain-label {
+  .domain-url {
     font-family: ui-monospace, sfmono-regular, menlo, consolas, monospace;
     font-size: 0.8rem;
     color: rgba(245, 245, 245, 0.3);
     letter-spacing: 0.02em;
   }
 
-  .domain-count {
-    font-size: 0.7rem;
-    color: #9a9a9a;
-    background: rgba(255, 255, 255, 0.06);
-    padding: 0.1rem 0.5rem;
-    border-radius: 8px;
+  .domain-protocol {
+    color: rgba(245, 245, 245, 0.15);
   }
 
-  .branch-row .cell-name .branch-label {
-    display: block;
+  .package-section {
+    cursor: pointer;
+    transition: background-color 140ms ease;
+
+    &:hover {
+      background-color: #1a1a1a;
+    }
+
+    &:focus-visible {
+      outline: 2px solid rgba(90, 162, 255, 0.45);
+      outline-offset: -2px;
+    }
+
+    & + .package-section {
+      border-top: 1px solid #202020;
+    }
+  }
+
+  .package-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding: 0.7rem 1rem 0.25rem;
+    gap: 1rem;
+  }
+
+  .package-url {
+    font-family: ui-monospace, sfmono-regular, menlo, consolas, monospace;
+    font-size: 0.8rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+
+  .package-domain {
+    color: rgba(245, 245, 245, 0.25);
+  }
+
+  .package-name {
     color: rgba(190, 140, 200, 0.85);
     font-weight: 500;
+  }
+
+  .package-id {
+    font-family: ui-monospace, sfmono-regular, menlo, consolas, monospace;
+    font-size: 0.65rem;
+    color: rgba(245, 245, 245, 0.2);
+    white-space: nowrap;
+    flex-shrink: 0;
+    letter-spacing: 0.01em;
+  }
+
+  .package-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    align-items: center;
+    padding: 0 1rem 0.7rem;
   }
 
   .table-container + .table-container {

@@ -52,57 +52,41 @@
   <ng-container *ngIf="isAtRoot() && domainGroups().length > 0; else flatView">
     <div class="table-container" role="region" aria-label="opfs entries" *ngFor="let group of domainGroups()">
       <div class="domain-header">
-        <span class="domain-label">{{ group.domain }}</span>
-        <span class="domain-count">{{ group.branches.length }}</span>
+        <span class="domain-url"><span class="domain-protocol">https://</span>{{ group.domain }}</span>
       </div>
 
-      <table class="opfs-table" aria-label="domain packages table">
-        <thead>
-          <tr>
-            <th class="col-icon" aria-hidden="true"></th>
-            <th class="col-name">{{ 'explorer.col-name' | t }}</th>
-            <th class="col-actions">{{ 'explorer.col-actions' | t }}</th>
-          </tr>
-        </thead>
+      <div
+        *ngFor="let branch of group.branches; trackBy: trackByName"
+        class="package-section"
+        [class.is-dir]="branch.kind === 'directory'"
+        (click)="exploreBranch(group.domain, branch.name)"
+        tabindex="0"
+        (keydown.enter)="exploreBranch(group.domain, branch.name)"
+      >
+        <div class="package-header">
+          <span class="package-url">
+            <span class="package-domain">https://{{ group.domain }}/</span><span class="package-name">{{ branch.rootGrammar || branch.label }}</span>
+          </span>
 
-        <tbody>
-          <tr
-            *ngFor="let branch of group.branches; trackBy: trackByName"
-            class="row branch-row"
-            [class.is-dir]="branch.kind === 'directory'"
-            (click)="exploreBranch(group.domain, branch.name)"
-            tabindex="0"
-            (keydown.enter)="exploreBranch(group.domain, branch.name)"
-          >
-            <td class="cell-icon" aria-hidden="true">
-              <span class="icon">{{ icon(branch) }}</span>
-            </td>
+          <span class="package-id">{{ branch.name }}</span>
+        </div>
 
-            <td class="cell-name">
-              <span class="branch-label">{{ branch.rootGrammar || branch.label }}</span>
-              <span class="sub" *ngIf="showAll()">{{ branch.name }}</span>
-            </td>
+        <div class="package-actions">
+          <button type="button" class="icon-button" [title]="'explorer.run' | t" [attr.aria-label]="'explorer.run' | t" (click)="run(branch, $event)">
+            <span aria-hidden="true">▶</span>
+          </button>
 
-            <td class="cell-actions">
-              <button type="button" class="icon-button" [title]="'explorer.run' | t" [attr.aria-label]="'explorer.run' | t" (click)="run(branch, $event)">
-                <span aria-hidden="true">▶</span>
-              </button>
+          <button type="button" class="btn-small" title="Copy package" aria-label="Copy package" (click)="copyBranch(branch, $event)">
+            {{ 'explorer.copy' | t }}
+          </button>
 
-              <button type="button" class="btn-small" title="Copy package" aria-label="Copy package" (click)="copyBranch(branch, $event)">
-                {{ 'explorer.copy' | t }}
-              </button>
+          <button type="button" class="icon-button danger" [title]="'explorer.remove' | t" [attr.aria-label]="'explorer.remove' | t" (click)="remove(branch, $event)">
+            <span aria-hidden="true">🗑</span>
+          </button>
+        </div>
+      </div>
 
-              <button type="button" class="icon-button danger" [title]="'explorer.remove' | t" [attr.aria-label]="'explorer.remove' | t" (click)="remove(branch, $event)">
-                <span aria-hidden="true">🗑</span>
-              </button>
-            </td>
-          </tr>
-
-          <tr *ngIf="group.branches.length === 0">
-            <td class="empty" colspan="3">{{ 'explorer.no-entries' | t }}</td>
-          </tr>
-        </tbody>
-      </table>
+      <div *ngIf="group.branches.length === 0" class="empty">{{ 'explorer.no-entries' | t }}</div>
     </div>
   </ng-container>
 

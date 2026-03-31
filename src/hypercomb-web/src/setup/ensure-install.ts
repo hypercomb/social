@@ -332,11 +332,10 @@ const restoreSignatureStore = (sigStore: SignatureStore): void => {
 }
 
 // ----- local install fallback -----
-// Tries DCP first, then falls back to local /content/ (dev server).
+// Content loads exclusively through the DCP proxy.
 
 const CONTENT_SOURCES = [
   'https://diamondcoreprocessor.com',
-  `${location.origin}/content`,
 ]
 
 const localInstall = async (store: Store, sigStore: SignatureStore): Promise<void> => {
