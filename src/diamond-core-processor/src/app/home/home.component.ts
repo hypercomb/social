@@ -109,6 +109,7 @@ export class HomeComponent {
     return map
   })
 
+
   readonly domainGrouped = computed<DomainGroup[]>(() => {
     const groups = new Map<string, DomainGroup>()
     for (const s of this.filteredSections()) {
@@ -248,12 +249,6 @@ export class HomeComponent {
     this.#refreshSections()
   }
 
-  packageName(section: DomainSection): string {
-    if (section.items.length > 0 && section.items[0].name) {
-      return section.items[0].name
-    }
-    return section.rootSig.slice(0, 12)
-  }
 
   // tree interactions
   async onExpandToggle(node: TreeNode): Promise<void> {
@@ -356,7 +351,7 @@ export class HomeComponent {
       domainName: sourceSection.domainName,
       rootSig: branchSig,
       originalRootSig: branchSig,
-      items: root.children,
+      items: this.#flattenDomainSubfolder(root.children),
       loading: false,
       error: null,
       installStatus: null,
@@ -421,7 +416,7 @@ export class HomeComponent {
     try {
       const root = await this.#resolver.resolveFromLocal(rootSig, section.domainName)
       if (root) {
-        section.items = root.children
+        section.items = this.#flattenDomainSubfolder(root.children)
         section.rootSig = root.signature ?? rootSig
       } else {
         section.error = 'Failed to resolve patched tree'
@@ -495,7 +490,7 @@ export class HomeComponent {
         if (root) {
           section.rootSig = root.signature ?? section.rootSig
           section.originalRootSig = root.signature ?? section.originalRootSig
-          section.items = root.children
+          section.items = this.#flattenDomainSubfolder(root.children)
 
           // load patches and check for active patched root
           section.patches = await this.#patchStore.list(section.domainName)
@@ -519,6 +514,18 @@ export class HomeComponent {
       }
       this.sections.set([...results])
     }
+  }
+
+  /**
+   * Skip domain-name subfolder layers that exist only for development organization.
+   * In deployment, packages go to the root — so if the only child is a layer whose
+   * name looks like a domain (contains a dot), promote its children up.
+   */
+  #flattenDomainSubfolder(items: TreeNode[]): TreeNode[] {
+    if (items.length === 1 && items[0].kind === 'layer' && items[0].name.includes('.')) {
+      return items[0].children
+    }
+    return items
   }
 
   #containsNode(nodes: TreeNode[], id: string): boolean {

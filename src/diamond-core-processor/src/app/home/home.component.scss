@@ -125,7 +125,6 @@ dcp-command-line {
 .domain-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   padding: 10px 14px;
   background: #f0f2f5;
@@ -144,6 +143,16 @@ dcp-command-line {
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+  user-select: all;
+}
+
+.header-sig {
+  margin-left: auto;
+  font-family: ui-monospace, sfmono-regular, menlo, consolas, monospace;
+  font-size: 9px;
+  color: #bbb;
+  white-space: nowrap;
+  flex-shrink: 0;
   user-select: all;
 }
 
@@ -173,19 +182,7 @@ dcp-command-line {
   color: #c00;
 }
 
-/* package rows */
-.package-row {
-  border-top: 1px solid rgba(0,0,0,0.06);
-}
-
-.package-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
-  min-width: 0;
-}
-
+/* package toggle in header */
 .package-toggle {
   background: none;
   border: none;
@@ -204,33 +201,6 @@ dcp-command-line {
   display: inline-block;
   width: 14px;
   text-align: center;
-}
-
-.package-url {
-  font-family: ui-monospace, sfmono-regular, menlo, consolas, monospace;
-  font-size: 11px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-}
-
-.package-domain {
-  color: #aaa;
-}
-
-.package-name {
-  color: #7b5ea7;
-  font-weight: 600;
-}
-
-.package-id {
-  margin-left: auto;
-  font-family: ui-monospace, sfmono-regular, menlo, consolas, monospace;
-  font-size: 9px;
-  color: #ccc;
-  white-space: nowrap;
-  flex-shrink: 0;
 }
 
 .section-status {

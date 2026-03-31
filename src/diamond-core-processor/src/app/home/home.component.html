@@ -54,50 +54,39 @@
     @for (group of domainGrouped(); track group.domain) {
       <section class="domain-section">
         <div class="domain-header">
-          <span class="domain-url" [title]="group.domain">https://{{ group.domainName }}</span>
+          <span class="domain-url" [title]="group.domain">{{ group.domain }}/</span>
+          <span class="header-sig">{{ group.sections[0]?.rootSig }}</span>
           <button class="domain-action" (click)="downloadPackage(group.sections[0])" title="Download package">&#8615;</button>
           <button class="remove" (click)="removeDomain(group.domain)">&times;</button>
         </div>
 
         @for (section of group.sections; track section.rootSig) {
           <div class="package-row">
-            <div class="package-header">
-              <button class="package-toggle" [class.off]="!section.enabled" (click)="togglePackage(section)" title="Toggle package">
-                <span class="toggle-indicator">{{ section.enabled ? '●' : '○' }}</span>
-              </button>
-              <span class="package-url">
-                <span class="package-domain">https://{{ group.domainName }}/</span><span class="package-name">{{ packageName(section) }}</span>
-              </span>
-              <span class="package-id">{{ section.rootSig }}</span>
-            </div>
-
-            @if (section.enabled) {
-              <dcp-patch-list
-                [patches]="section.patches"
-                [activeRootSig]="section.rootSig"
-                [originalRootSig]="section.originalRootSig"
-                (switchRoot)="onSwitchRoot(section, $event)" />
-
-              @if (section.loading) {
-                <div class="section-status">{{ section.installStatus ?? 'Loading...' }}</div>
-              }
-
-              @if (section.error) {
-                <div class="section-status error">{{ section.error }}</div>
-              }
-
-              @if (section.items.length) {
-                <dcp-tree-view
-                  [nodes]="section.items"
-                  [toggleState]="toggleMap()"
-                  [nodeMap]="nodeMap()"
-                  (toggle)="onToggle($event)"
-                  (open)="onOpen($event)"
-                  (openDetail)="onOpenDetail($event)"
-                  (expandToggle)="onExpandToggle($event)"
-                  (promoteToPackage)="promoteBranchToPackage($event, section)" />
-              }
+            @if (section.loading) {
+              <div class="section-status">{{ section.installStatus ?? 'Loading...' }}</div>
             }
+
+            @if (section.error) {
+              <div class="section-status error">{{ section.error }}</div>
+            }
+
+            @if (section.items.length) {
+              <dcp-tree-view
+                [nodes]="section.items"
+                [toggleState]="toggleMap()"
+                [nodeMap]="nodeMap()"
+                (toggle)="onToggle($event)"
+                (open)="onOpen($event)"
+                (openDetail)="onOpenDetail($event)"
+                (expandToggle)="onExpandToggle($event)"
+                (promoteToPackage)="promoteBranchToPackage($event, section)" />
+            }
+
+            <dcp-patch-list
+              [patches]="section.patches"
+              [activeRootSig]="section.rootSig"
+              [originalRootSig]="section.originalRootSig"
+              (switchRoot)="onSwitchRoot(section, $event)" />
           </div>
         }
       </section>
