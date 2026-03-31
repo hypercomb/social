@@ -42,15 +42,15 @@ jobs:
         working-directory: src/hypercomb-web
         run: npm ci
 
+      - name: Build web runtime assets
+        working-directory: src/hypercomb-web
+        run: npm run runtime
+
       - name: Link shared node_modules to web (prevents dual Angular runtime)
         working-directory: src
         run: |
           rm -rf node_modules
           ln -s hypercomb-web/node_modules node_modules
-
-      - name: Build web runtime assets
-        working-directory: src/hypercomb-web
-        run: npm run runtime
 
       - name: Build web app
         working-directory: src/hypercomb-web
