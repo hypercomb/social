@@ -6,6 +6,10 @@
 /out-tsc
 /bazel-out
 public/content/
+public/__bees__/
+public/__dependencies__/
+public/__layers__/
+public/manifest.json
 # Node
 /node_modules
 npm-debug.log
