@@ -106,8 +106,26 @@ $bp-phone-max: 599px;
 // ═══════════════════════════════════════════════════════════
 
 @media (max-width: $bp-phone-max) {
+  .command-line-wrapper {
+    hc-command-shell {
+      ::ng-deep .command-shell {
+        border-radius: 6px 0 0 6px;
+      }
+    }
+  }
+
   .mic-btn {
-    width: 2.4rem;
+    width: 3rem;
+    border-radius: 0 6px 6px 0;
+  }
+
+  .mic-dot {
+    font-size: 14px;
+  }
+
+  .install-prompt {
     min-height: 3rem;
+    font-size: 1em;
+    border-radius: 6px;
   }
 }

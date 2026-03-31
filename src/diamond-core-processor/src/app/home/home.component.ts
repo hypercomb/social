@@ -26,6 +26,13 @@ export interface DomainSection {
   error: string | null
   installStatus: string | null
   patches: PatchRecord[]
+  enabled: boolean
+}
+
+export interface DomainGroup {
+  domain: string
+  domainName: string
+  sections: DomainSection[]
 }
 
 @Component({
@@ -43,6 +50,7 @@ export class HomeComponent {
   readonly #exporter = inject(PackageExportService)
 
   // state
+  readonly selfOrigin = location.origin
   readonly domains = signal<string[]>(this.#loadDomains())
   readonly domainInput = signal('')
   readonly searchTerm = signal('')
@@ -99,6 +107,19 @@ export class HomeComponent {
     }
     for (const s of this.sections()) walk(s.items)
     return map
+  })
+
+  readonly domainGrouped = computed<DomainGroup[]>(() => {
+    const groups = new Map<string, DomainGroup>()
+    for (const s of this.filteredSections()) {
+      let group = groups.get(s.domain)
+      if (!group) {
+        group = { domain: s.domain, domainName: s.domainName, sections: [] }
+        groups.set(s.domain, group)
+      }
+      group.sections.push(s)
+    }
+    return Array.from(groups.values())
   })
 
   readonly filteredSections = computed(() => {
@@ -222,6 +243,18 @@ export class HomeComponent {
     }
   }
 
+  togglePackage(section: DomainSection): void {
+    section.enabled = !section.enabled
+    this.#refreshSections()
+  }
+
+  packageName(section: DomainSection): string {
+    if (section.items.length > 0 && section.items[0].name) {
+      return section.items[0].name
+    }
+    return section.rootSig.slice(0, 12)
+  }
+
   // tree interactions
   async onExpandToggle(node: TreeNode): Promise<void> {
     if (node.expanded) {
@@ -327,7 +360,8 @@ export class HomeComponent {
       loading: false,
       error: null,
       installStatus: null,
-      patches: []
+      patches: [],
+      enabled: true,
     }
 
     this.sections.set([...this.sections(), section])
@@ -433,7 +467,7 @@ export class HomeComponent {
         // no packages found — show placeholder with error
         results.push({
           domain, domainName, rootSig: '', originalRootSig: '', items: [],
-          loading: false, error: 'No packages found in manifest', installStatus: null, patches: []
+          loading: false, error: 'No packages found in manifest', installStatus: null, patches: [], enabled: true
         })
         continue
       }
@@ -442,7 +476,7 @@ export class HomeComponent {
       for (const rootSig of rootSigs) {
         results.push({
           domain, domainName, rootSig, originalRootSig: rootSig, items: [],
-          loading: true, error: null, installStatus: null, patches: []
+          loading: true, error: null, installStatus: null, patches: [], enabled: true
         })
       }
     }

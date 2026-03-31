@@ -243,7 +243,6 @@ $secret-bg: rgba(10, 12, 16, 0.85);
 
   .mode-toggle {
     padding: 0 1rem;
-    min-height: 3.8rem;
     border-radius: 0 6px 6px 0;
 
     .hci {
@@ -262,7 +261,7 @@ $secret-bg: rgba(10, 12, 16, 0.85);
 
     .secret-input-wrap {
       &::before {
-        border-radius: 3px 0 0 3px;
+        border-radius: 6px 0 0 6px;
       }
     }
 

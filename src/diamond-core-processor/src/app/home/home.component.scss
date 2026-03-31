@@ -173,6 +173,66 @@ dcp-command-line {
   color: #c00;
 }
 
+/* package rows */
+.package-row {
+  border-top: 1px solid rgba(0,0,0,0.06);
+}
+
+.package-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  min-width: 0;
+}
+
+.package-toggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  font-size: 10px;
+  color: #4a6fa5;
+  flex-shrink: 0;
+}
+
+.package-toggle.off {
+  color: #ccc;
+}
+
+.toggle-indicator {
+  display: inline-block;
+  width: 14px;
+  text-align: center;
+}
+
+.package-url {
+  font-family: ui-monospace, sfmono-regular, menlo, consolas, monospace;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.package-domain {
+  color: #aaa;
+}
+
+.package-name {
+  color: #7b5ea7;
+  font-weight: 600;
+}
+
+.package-id {
+  margin-left: auto;
+  font-family: ui-monospace, sfmono-regular, menlo, consolas, monospace;
+  font-size: 9px;
+  color: #ccc;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 .section-status {
   padding: 10px 14px;
   font-size: 13px;

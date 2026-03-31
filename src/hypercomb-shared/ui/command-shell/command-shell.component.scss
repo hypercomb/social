@@ -161,6 +161,9 @@ $bp-phone-max: 599px;
 
 // phone (≤599px)
 @media (max-width: $bp-phone-max) {
+  .command-shell {
+    border-radius: 6px;
+  }
   .command-row {
     min-height: 3rem;
     &::before { font-size: 1.2em; padding-left: 0.8rem; }

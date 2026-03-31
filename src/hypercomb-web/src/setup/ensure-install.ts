@@ -335,6 +335,7 @@ const restoreSignatureStore = (sigStore: SignatureStore): void => {
 // Content loads exclusively through the DCP proxy.
 
 const CONTENT_SOURCES = [
+  `${location.origin}/content`,
   'https://diamondcoreprocessor.com',
 ]
 

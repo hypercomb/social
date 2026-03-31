@@ -45,44 +45,60 @@
     </div>
 
     @if (!domains().length) {
-      <a class="sample-link" (click)="domainInput.set('https://storagehypercomb.blob.core.windows.net/dcp')">
-        https://storagehypercomb.blob.core.windows.net/dcp
+      <a class="sample-link" (click)="domainInput.set(selfOrigin)">
+        {{ selfOrigin }}
       </a>
     }
 
     <!-- domain sections -->
-    @for (section of filteredSections(); track section.domain) {
+    @for (group of domainGrouped(); track group.domain) {
       <section class="domain-section">
         <div class="domain-header">
-          <span class="domain-url" [title]="section.domain">{{ section.domain }}</span>
-          <button class="domain-action" (click)="downloadPackage(section)" title="Download package">&#8615;</button>
-          <button class="remove" (click)="removeDomain(section.domain)">&times;</button>
+          <span class="domain-url" [title]="group.domain">https://{{ group.domainName }}</span>
+          <button class="domain-action" (click)="downloadPackage(group.sections[0])" title="Download package">&#8615;</button>
+          <button class="remove" (click)="removeDomain(group.domain)">&times;</button>
         </div>
 
-        <dcp-patch-list
-          [patches]="section.patches"
-          [activeRootSig]="section.rootSig"
-          [originalRootSig]="section.originalRootSig"
-          (switchRoot)="onSwitchRoot(section, $event)" />
+        @for (section of group.sections; track section.rootSig) {
+          <div class="package-row">
+            <div class="package-header">
+              <button class="package-toggle" [class.off]="!section.enabled" (click)="togglePackage(section)" title="Toggle package">
+                <span class="toggle-indicator">{{ section.enabled ? '●' : '○' }}</span>
+              </button>
+              <span class="package-url">
+                <span class="package-domain">https://{{ group.domainName }}/</span><span class="package-name">{{ packageName(section) }}</span>
+              </span>
+              <span class="package-id">{{ section.rootSig }}</span>
+            </div>
 
-        @if (section.loading) {
-          <div class="section-status">{{ section.installStatus ?? 'Loading...' }}</div>
-        }
+            @if (section.enabled) {
+              <dcp-patch-list
+                [patches]="section.patches"
+                [activeRootSig]="section.rootSig"
+                [originalRootSig]="section.originalRootSig"
+                (switchRoot)="onSwitchRoot(section, $event)" />
 
-        @if (section.error) {
-          <div class="section-status error">{{ section.error }}</div>
-        }
+              @if (section.loading) {
+                <div class="section-status">{{ section.installStatus ?? 'Loading...' }}</div>
+              }
 
-        @if (section.items.length) {
-          <dcp-tree-view
-            [nodes]="section.items"
-            [toggleState]="toggleMap()"
-            [nodeMap]="nodeMap()"
-            (toggle)="onToggle($event)"
-            (open)="onOpen($event)"
-            (openDetail)="onOpenDetail($event)"
-            (expandToggle)="onExpandToggle($event)"
-            (promoteToPackage)="promoteBranchToPackage($event, section)" />
+              @if (section.error) {
+                <div class="section-status error">{{ section.error }}</div>
+              }
+
+              @if (section.items.length) {
+                <dcp-tree-view
+                  [nodes]="section.items"
+                  [toggleState]="toggleMap()"
+                  [nodeMap]="nodeMap()"
+                  (toggle)="onToggle($event)"
+                  (open)="onOpen($event)"
+                  (openDetail)="onOpenDetail($event)"
+                  (expandToggle)="onExpandToggle($event)"
+                  (promoteToPackage)="promoteBranchToPackage($event, section)" />
+              }
+            }
+          </div>
         }
       </section>
     }
