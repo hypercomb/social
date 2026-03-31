@@ -4,7 +4,6 @@
   "private": true,
   "builders": "./builders/builders.json",
   "scripts": {
-    "prebuild": "node ./scripts/build-core-vendor.cjs && npx tsx ./scripts/build-pixi-vendor.ts",
     "prestart": "npm --prefix .. run prebuild:web",
     "start": "npx ng serve --port 4200 --host localhost --configuration development",
     "build": "npx ng build",
