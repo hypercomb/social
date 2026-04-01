@@ -1,9 +1,18 @@
 // diamondcoreprocessor.com/commands/accent.queen.ts
 
 import { QueenBee, EffectBus, hypercomb } from '@hypercomb/core'
-import { ACCENT_NAMES, ACCENT_INDEX_TO_NAME } from '../presentation/tiles/hex-overlay.shader.js'
-
 const STORAGE_KEY = 'hc:neon-color'
+
+// Accent preset names → neon color index (maps to NEON_PRESETS in hex-overlay.shader)
+const ACCENT_NAMES: Record<string, number> = {
+  glacier: 0,
+  bloom: 1,
+  aurora: 2,
+  ember: 3,
+  nebula: 4,
+}
+
+const ACCENT_INDEX_TO_NAME: string[] = ['glacier', 'bloom', 'aurora', 'ember', 'nebula']
 const get = (key: string) => (window as any).ioc?.get?.(key)
 
 /**

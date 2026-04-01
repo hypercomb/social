@@ -23,10 +23,16 @@ jobs:
         working-directory: src
         run: |
           rm -rf node_modules package-lock.json
-          npm install --ignore-scripts
+          npm install
       - name: Build hypercomb-core
         working-directory: src/hypercomb-core
         run: npm run build
+      - name: Build essentials modules
+        working-directory: src/hypercomb-essentials
+        run: |
+          npm run build
+          node ../node_modules/tsx/dist/cli.mjs ./scripts/build-module.ts --local
+          node ../node_modules/tsx/dist/cli.mjs ./scripts/copy-to-dcp.ts
       - name: Install diamond-core-processor dependencies
         working-directory: src/diamond-core-processor
         run: npm install

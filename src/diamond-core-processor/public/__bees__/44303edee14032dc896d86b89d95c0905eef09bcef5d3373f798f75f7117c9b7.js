@@ -88,18 +88,12 @@ var AtomizerDropWorker = class extends Bee {
   #findMatchingTargets(targetTypes) {
     const targets = [];
     const container = ioc();
-    if (!container?.entries) {
-      for (const type of targetTypes) {
-        const key = `${ATOMIZABLE_TARGET_PREFIX}${type}`;
-        const target = container?.get(key);
-        if (target) targets.push(target);
-      }
-      return targets;
-    }
-    for (const [key, value] of container.entries()) {
+    if (!container?.list) return targets;
+    const keys = container.list();
+    for (const key of keys) {
       if (!key.startsWith(ATOMIZABLE_TARGET_PREFIX)) continue;
-      const target = value;
-      if (targetTypes.includes(target.targetType)) {
+      const target = container.get(key);
+      if (target && targetTypes.includes(target.targetType)) {
         targets.push(target);
       }
     }

@@ -212,19 +212,13 @@ var HexOverlayMesh = class {
   #flat;
   #palette;
   #hex;
-  // static hex glow (drawn once)
   #ember;
-  // animated ember dot (redrawn per frame)
   #ambient;
-  // slow-drifting interior particles
   #neonVerts = [];
-  // cached neon edge verts for ember path
   #edgeLengths = [];
   #totalPerimeter = 0;
   #enterStart = -1;
-  // timestamp when overlay was shown (-1 = not animating)
   #shown = false;
-  // tracks if overlay is currently visible
   constructor(radiusPx, flat) {
     this.#radiusPx = radiusPx;
     this.#flat = flat;
@@ -239,14 +233,12 @@ var HexOverlayMesh = class {
     this.mesh.addChild(this.#hex, this.#ambient, this.#ember);
     this.#draw();
   }
-  /** Call when the overlay becomes visible (hover enters). */
   show(t) {
     if (!this.#shown) {
       this.#enterStart = t;
       this.#shown = true;
     }
   }
-  /** Call when hover leaves. */
   hide() {
     this.#shown = false;
     this.#enterStart = -1;
@@ -282,7 +274,6 @@ var HexOverlayMesh = class {
     this.#drawEmber(t);
     this.#drawAmbient(t);
   }
-  // ── hex vertex generation ──────────────────────────────────────
   #hexVerts(r) {
     const verts = [];
     for (let i = 0; i < 6; i++) {
@@ -291,7 +282,6 @@ var HexOverlayMesh = class {
     }
     return verts;
   }
-  // ── per-edge directional lighting ──────────────────────────────
   #edgeLighting(edgeIndex) {
     const a0 = Math.PI / 3 * edgeIndex + (this.#flat ? 0 : Math.PI / 6);
     const a1 = Math.PI / 3 * (edgeIndex + 1) + (this.#flat ? 0 : Math.PI / 6);
@@ -303,7 +293,6 @@ var HexOverlayMesh = class {
     const dot = nx * LIGHT_DIR_X + ny * LIGHT_DIR_Y;
     return dot * 0.5 + 0.5;
   }
-  // ── color interpolation ────────────────────────────────────────
   #lerpColor(lo, hi, t) {
     const lr = lo >> 16 & 255, lg = lo >> 8 & 255, lb = lo & 255;
     const hr = hi >> 16 & 255, hg = hi >> 8 & 255, hb = hi & 255;
@@ -312,7 +301,6 @@ var HexOverlayMesh = class {
     const b = Math.round(lb + (hb - lb) * t);
     return r << 16 | g << 8 | b;
   }
-  // ── per-edge bloom stroke helper ───────────────────────────────
   #strokeEdges(g, verts, width, color, alphaLo, alphaHi, colorHi) {
     g.poly(verts);
     g.closePath();
@@ -323,7 +311,6 @@ var HexOverlayMesh = class {
     const c = colorHi !== void 0 ? this.#lerpColor(color, colorHi, avgLight) : color;
     g.stroke({ width: width * SS, color: c, alpha, join: "miter" });
   }
-  // ── point along hex perimeter (0..1 → x,y) ────────────────────
   #perimeterPoint(t) {
     const v = this.#neonVerts;
     const frac = (t % 1 + 1) % 1;
@@ -341,11 +328,9 @@ var HexOverlayMesh = class {
     }
     return { x: v[0], y: v[1] };
   }
-  // ── ease in-out cubic ──────────────────────────────────────────
   #ease(t) {
     return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
   }
-  // ── draw embers (per frame) ─────────────────────────────────────
   #drawEmber(t) {
     const g = this.#ember;
     g.clear();
@@ -382,7 +367,6 @@ var HexOverlayMesh = class {
       }
     }
   }
-  // ── ambient interior particles (very faint drifting dots) ──────
   #drawAmbient(t) {
     const g = this.#ambient;
     g.clear();
@@ -398,7 +382,6 @@ var HexOverlayMesh = class {
       g.fill({ color: p.dim, alpha: AMBIENT_ALPHA });
     }
   }
-  // ── main draw (static hex, drawn once) ─────────────────────────
   #draw() {
     const g = this.#hex;
     g.clear();
@@ -1096,6 +1079,8 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
     for (const action of this.#actions) {
       if (action.visibleWhen) {
         action.button.visible = action.visibleWhen(ctx);
+      } else {
+        action.button.visible = true;
       }
     }
     this.#layoutIconRow();
@@ -1743,8 +1728,7 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
     }
     const occupied = this.#currentIndex !== void 0 && this.#currentIndex < this.#cellCount;
     if (this.#meshPublic && !this.#hasSelection) {
-      const show = occupied && !this.#editing && !this.#editCooldown && !this.#touchDragging;
-      this.#overlay.visible = show;
+      this.#overlay.visible = false;
       if (this.#hexBg) this.#hexBg.hide();
       for (const action of this.#actions) action.button.visible = false;
       if (this.#crackOverlay) this.#crackOverlay.visible = false;

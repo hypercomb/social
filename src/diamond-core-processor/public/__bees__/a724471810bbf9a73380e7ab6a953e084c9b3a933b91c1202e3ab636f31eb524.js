@@ -643,6 +643,16 @@ var ZoomDrone = class extends Drone {
   minScale = 0.05;
   maxScale = 12;
   vp = null;
+  // ── smooth zoom animation state ──
+  #animFrameId = null;
+  #animStartTime = 0;
+  #animStartScale = 1;
+  #animTargetScale = 1;
+  #animPivotClient = { x: 0, y: 0 };
+  // snapshot of the local point under the pivot at animation start
+  #animPivotLocal = { x: 0, y: 0 };
+  #animDuration = 150;
+  // ms — short for crisp feel
   deps = {
     mouseWheel: "@diamondcoreprocessor.com/MousewheelZoomInput",
     pinchZoom: "@diamondcoreprocessor.com/PinchZoomInput",
@@ -664,6 +674,7 @@ var ZoomDrone = class extends Drone {
         {
           zoomByFactor: this.zoomByFactor,
           zoomToScale: this.zoomToScale,
+          animateToScale: this.animateToScale,
           currentScale: this.currentScale
         },
         this.canvas
@@ -730,6 +741,10 @@ var ZoomDrone = class extends Drone {
   };
   zoomByFactor = (factor, pivotClient) => {
     if (!this.renderContainer || !this.canvas) return;
+    if (this.#animFrameId !== null) {
+      cancelAnimationFrame(this.#animFrameId);
+      this.#animFrameId = null;
+    }
     const target = this.renderContainer;
     const current = target.scale.x || 1;
     const raw = current * factor;
@@ -744,8 +759,12 @@ var ZoomDrone = class extends Drone {
    * Zoom-to-fit: calculates the bounding box of all hex cells via the
    * mesh adapter and animates the viewport to center and fit all content.
    */
-  zoomToFit = () => {
+  zoomToFit = (snap = false) => {
     if (!this.renderContainer || !this.renderer || !this.app) return;
+    if (this.#animFrameId !== null) {
+      cancelAnimationFrame(this.#animFrameId);
+      this.#animFrameId = null;
+    }
     const target = this.renderContainer;
     const bounds = target.getLocalBounds();
     if (!bounds || bounds.width <= 0 || bounds.height <= 0) return;
@@ -772,6 +791,12 @@ var ZoomDrone = class extends Drone {
     const safeMidY = (safeTop + safeBottom) / 2;
     const targetPosX = (safeMidX - screenCx) / stageScale - centerX * fitScale;
     const targetPosY = (safeMidY - screenCy) / stageScale - centerY * fitScale;
+    if (snap) {
+      target.scale.set(fitScale);
+      target.position.set(targetPosX, targetPosY);
+      this.#saveZoom(target);
+      return;
+    }
     const startScale = target.scale.x;
     const startPosX = target.position.x;
     const startPosY = target.position.y;
@@ -793,6 +818,58 @@ var ZoomDrone = class extends Drone {
       }
     };
     requestAnimationFrame(animate);
+  };
+  // -------------------------------------------------
+  // smooth animated zoom (mousewheel snap levels)
+  // -------------------------------------------------
+  animateToScale = (scale, pivotClient) => {
+    if (!this.renderContainer || !this.canvas || !this.renderer) return;
+    const target = this.renderContainer;
+    const clamped = this.clamp(scale);
+    if (this.#animFrameId !== null) {
+      cancelAnimationFrame(this.#animFrameId);
+    }
+    this.#animStartScale = target.scale.x;
+    this.#animTargetScale = clamped;
+    this.#animPivotClient = pivotClient;
+    const pivotGlobal = this.clientToPixiGlobal(pivotClient);
+    this.#animPivotLocal = target.toLocal(new Point(pivotGlobal.x, pivotGlobal.y));
+    this.#animStartTime = performance.now();
+    this.#animFrameId = requestAnimationFrame(this.#animTick);
+  };
+  #animTick = (now) => {
+    if (!this.renderContainer || !this.renderer) {
+      this.#animFrameId = null;
+      return;
+    }
+    const target = this.renderContainer;
+    const elapsed = now - this.#animStartTime;
+    const t = Math.min(1, elapsed / this.#animDuration);
+    const ease = t * t * t;
+    const newScale = this.#animStartScale + (this.#animTargetScale - this.#animStartScale) * ease;
+    target.scale.set(newScale);
+    const pivotGlobal = this.clientToPixiGlobal(this.#animPivotClient);
+    const postGlobal = target.toGlobal(this.#animPivotLocal);
+    const parent = target.parent;
+    if (parent?.toLocal) {
+      const pivP = parent.toLocal(new Point(pivotGlobal.x, pivotGlobal.y));
+      const postP = parent.toLocal(postGlobal);
+      target.position.set(
+        target.position.x + (pivP.x - postP.x),
+        target.position.y + (pivP.y - postP.y)
+      );
+    } else {
+      target.position.set(
+        target.position.x + (pivotGlobal.x - postGlobal.x),
+        target.position.y + (pivotGlobal.y - postGlobal.y)
+      );
+    }
+    if (t < 1) {
+      this.#animFrameId = requestAnimationFrame(this.#animTick);
+    } else {
+      this.#animFrameId = null;
+      this.#saveZoom(target);
+    }
   };
   // -------------------------------------------------
   // pixel-perfect zoom (no creep)

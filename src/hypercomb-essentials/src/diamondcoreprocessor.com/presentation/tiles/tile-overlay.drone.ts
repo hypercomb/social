@@ -1369,13 +1369,11 @@ export class TileOverlayDrone extends Drone {
 
     const occupied = this.#currentIndex !== undefined && this.#currentIndex < this.#cellCount
 
-    // Public mode: seed label only — no hex bg, no icons, no hover label
+    // Public mode: no overlay at all — text renders identically whether hovering or not
     if (this.#meshPublic && !this.#hasSelection) {
-      const show = occupied && !this.#editing && !this.#editCooldown && !this.#touchDragging
-      this.#overlay.visible = show
+      this.#overlay.visible = false
       if (this.#hexBg) this.#hexBg.hide()
       for (const action of this.#actions) action.button.visible = false
-
       if (this.#crackOverlay) this.#crackOverlay.visible = false
       return
     }

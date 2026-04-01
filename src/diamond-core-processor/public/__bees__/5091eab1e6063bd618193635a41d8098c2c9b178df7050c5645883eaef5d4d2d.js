@@ -137,14 +137,15 @@ var LayoutProvider = class {
     if (queen?.invoke) await queen.invoke(args);
   }
 };
-var NeonProvider = class {
-  name = "neon-provider";
+var AccentProvider = class {
+  name = "accent-provider";
   priority = 100;
   commands = [
-    { name: "neon", description: "Toggle the neon hover color toolbar", descriptionKey: "slash.neon" }
+    { name: "accent", description: "Set the hover accent color by name", descriptionKey: "slash.accent", aliases: ["ac"] }
   ];
-  execute() {
-    EffectBus.emit("neon:toggle-toolbar", {});
+  async execute(_commandName, args) {
+    const queen = get("@diamondcoreprocessor.com/AccentQueenBee");
+    if (queen?.invoke) await queen.invoke(args);
   }
 };
 var MoveProvider = class {
@@ -290,7 +291,7 @@ _slashCommands.addProvider(new DebugProvider());
 _slashCommands.addProvider(new RemoveProvider());
 _slashCommands.addProvider(new FormatSlashProvider());
 _slashCommands.addProvider(new LayoutProvider());
-_slashCommands.addProvider(new NeonProvider());
+_slashCommands.addProvider(new AccentProvider());
 _slashCommands.addProvider(new MoveProvider());
 _slashCommands.addProvider(new ReviseProvider());
 _slashCommands.addProvider(new ExpandProvider());
