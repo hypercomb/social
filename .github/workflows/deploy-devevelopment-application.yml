@@ -176,10 +176,10 @@ jobs:
           ls -la node_modules 2>/dev/null | head -10 || echo "No node_modules yet"
           echo ""
           echo "--- npm config list ---"
-          npm config list 2>&1
+          npm config list 2>&1 || echo "(npm config list failed, likely ENOWORKSPACES)"
           echo ""
           echo "--- npm cache verify ---"
-          npm cache verify 2>&1 | tail -5
+          npm cache verify 2>&1 | tail -5 || true
 
       - name: Install essentials dependencies
         working-directory: src/hypercomb-essentials
