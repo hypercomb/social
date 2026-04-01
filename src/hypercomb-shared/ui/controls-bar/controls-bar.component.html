@@ -63,6 +63,9 @@
   class="controls-pill"
   [class.faded]="!visible()"
   [class.public-mode]="meshPublic"
+  [class.power-ctrl]="powerKey() === 'ctrl'"
+  [class.power-shift]="powerKey() === 'shift'"
+  [class.power-alt]="powerKey() === 'alt'"
   (mouseenter)="onBarEnter()"
   (mouseleave)="onBarLeave()"
 >

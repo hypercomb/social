@@ -178,6 +178,18 @@
 // ── public mode ──────────────────────────────────────────
 // Tooltips use the same hover-above behavior as private mode.
 
+// ── power key tints ──────────────────────────────────────
+
+.controls-pill.power-ctrl {
+  border-color: rgba(100, 180, 255, 0.25);
+}
+.controls-pill.power-shift {
+  border-color: rgba(255, 180, 100, 0.25);
+}
+.controls-pill.power-alt {
+  border-color: rgba(180, 100, 255, 0.25);
+}
+
 // ── sections ──────────────────────────────────────────────
 
 .controls-section {
