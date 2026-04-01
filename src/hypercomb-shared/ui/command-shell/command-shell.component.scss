@@ -62,36 +62,16 @@ $bp-phone-max: 599px;
 }
 
 .input-wrap {
-  position: relative;
+  display: grid;
   flex: 1;
   min-width: 0;
   height: 100%;
-  display: flex;
   align-items: center;
 }
 
-.ghost {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  padding: 0 0.75rem;
-  background: transparent;
-  border: none;
-  outline: none;
-  font-family: var(--terminal-font);
-  font-size: 1.4em;
-  letter-spacing: 0.02em;
-  color: rgba(var(--glow-color-rgb), 0.55);
-  pointer-events: none;
-  user-select: none;
-  white-space: nowrap;
-  overflow: hidden;
-}
-
+.ghost,
 .command-input {
-  width: 100%;
-  height: 100%;
+  grid-area: 1 / 1;
   padding: 0 0.75rem;
   margin: 0;
   background: transparent;
@@ -99,8 +79,21 @@ $bp-phone-max: 599px;
   outline: none;
   font-family: var(--terminal-font);
   font-size: 1.4em;
-  line-height: 1;
   letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.ghost {
+  color: rgba(var(--glow-color-rgb), 0.55);
+  pointer-events: none;
+  user-select: none;
+}
+
+.command-input {
+  width: 100%;
+  height: 100%;
+  line-height: 1;
   color: #ffffff;
   caret-color: var(--glow-color);
   user-select: text;

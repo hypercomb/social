@@ -50,9 +50,13 @@ export class PinchZoomInput {
 
     // apply sensitivity multiplier
     // sensitivity > 1 = more responsive, < 1 = less responsive
-    // We scale the deviation from 1.0 by the sensitivity
+    // We scale the deviation from 1.0 by the sensitivity.
+    // The coordinator divides by devicePixelRatio for pan (pixel-delta based),
+    // but pinch is ratio-based and already DPR-neutral — undo that division.
+    const dpr = globalThis.devicePixelRatio || 1
+    const pinchSensitivity = dpr > 1 ? sensitivity * dpr : sensitivity
     const deviation = factor - 1.0
-    factor = 1.0 + deviation * sensitivity
+    factor = 1.0 + deviation * pinchSensitivity
 
     const pivot = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 }
 

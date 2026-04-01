@@ -3,6 +3,7 @@ import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import type { SecretStore } from '../../core/secret-store'
 import type { SecretStrengthProvider } from '../../core/secret-strength'
+import { secretTag } from '../controls-bar/secret-words'
 
 @Component({
   selector: 'hc-mesh-header',
@@ -23,6 +24,11 @@ export class MeshHeaderComponent {
   readonly secretValue = this.#secretValue.asReadonly()
   readonly hasSecret = computed(() => this.#secretValue().trim().length > 0)
   readonly showSecretInput = () => !!this.meshPublic && this.#secretExpanded()
+
+  readonly secretWords = computed(() => {
+    const secret = this.#secretValue().trim()
+    return secret ? secretTag(secret) : ''
+  })
 
   readonly shieldTooltip = computed(() => {
     if (!this.meshPublic) return ''

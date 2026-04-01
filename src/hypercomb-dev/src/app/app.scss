@@ -4,7 +4,7 @@
 :host {
   display: block;
 
-  &::after {
+  &.clipboard-mode::after {
     content:
       'clipboard  clipboard  clipboard  clipboard  clipboard  '
       'clipboard  clipboard  clipboard  clipboard  clipboard  '

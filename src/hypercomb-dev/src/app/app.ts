@@ -1,4 +1,4 @@
-import { AfterViewInit, Component, OnDestroy, signal } from '@angular/core';
+import { Component, HostBinding, signal } from '@angular/core';
 import { type Bee, EffectBus } from '@hypercomb/core';
 import type { HexOrientation } from '@hypercomb/essentials/diamondcoreprocessor.com/preferences/settings';
 import { RouterOutlet } from '@angular/router';
@@ -145,6 +145,10 @@ void _deps
 })
 export class App {
   protected readonly title = signal('hypercomb-dev');
+  readonly clipboardMode = signal(false);
+
+  @HostBinding('class.clipboard-mode')
+  get clipboardModeClass() { return this.clipboardMode(); }
 
   public readonly meshPublic = signal(
     localStorage.getItem('hc:mesh-public') === 'true' ? true
@@ -175,6 +179,10 @@ export class App {
 
     EffectBus.on<{ active: boolean }>('view:active', ({ active }) => {
       this.viewActive.set(active)
+    })
+
+    EffectBus.on<{ active: boolean }>('clipboard:view', ({ active }) => {
+      this.clipboardMode.set(active)
     })
 
     queueMicrotask(() => {

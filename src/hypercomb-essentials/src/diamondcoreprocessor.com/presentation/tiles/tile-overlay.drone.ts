@@ -449,13 +449,11 @@ export class TileOverlayDrone extends Drone {
       .sort((a, b) => (a.name === 'remove' ? 1 : 0) - (b.name === 'remove' ? 1 : 0))
     for (const desc of descs) {
       const btn = new HexIconButton({
-        svgMarkup: desc.svgMarkup,
         size: DEFAULT_ICON_SIZE,
-        cacheKey: `hc-icon-${desc.name}`,
         hoverTint: desc.hoverTint,
       })
       this.#overlay.addChild(btn)
-      void btn.load()
+      void btn.load(desc.svgMarkup)
 
       this.#actions.push({
         name: desc.name,
@@ -704,15 +702,13 @@ export class TileOverlayDrone extends Drone {
     for (let i = 0; i < entries.length; i++) {
       const entry = entries[i]
       const btn = new HexIconButton({
-        svgMarkup: entry.svgMarkup,
         size: POOL_ICON_SIZE,
-        cacheKey: `hc-pool-${entry.name}`,
         hoverTint: entry.hoverTint,
       })
       btn.position.set(startX + i * POOL_SPACING, 0)
       btn.alpha = 0.5
       this.#poolContainer.addChild(btn)
-      void btn.load()
+      void btn.load(entry.svgMarkup)
 
       this.#poolIcons.push({ name: entry.name, profile: entry.profile, button: btn })
     }

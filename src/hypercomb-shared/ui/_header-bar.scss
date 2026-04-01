@@ -126,6 +126,34 @@
   }
 }
 
+// ── mode crumb (subtle breadcrumb beside the toggle) ────
+
+.mode-crumb {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0 0.5rem;
+  border-left: 1.5px solid rgba(77, 166, 255, 0.4);
+  font: 400 0.5rem/1 ui-monospace, sfmono-regular, menlo, consolas, monospace;
+  letter-spacing: 0.08em;
+  text-transform: lowercase;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.mode-crumb-label {
+  &.solo-mode { color: rgba(255, 45, 138, 0.6); }
+  &.shield-mode { opacity: 0.6; }
+}
+
+.mode-crumb-sep {
+  color: rgba(245, 245, 245, 0.2);
+}
+
+.mode-crumb-words {
+  color: rgba(218, 165, 100, 0.85);
+}
+
 // ── secret input area ────────────────────────────────────
 
 .secret-input-wrap {
@@ -190,7 +218,8 @@
 // ── phone (≤599px) ────────────────────────────────────────
 @include phone-only {
 
-  .secured-label {
+  .secured-label,
+  .mode-crumb {
     display: none;
   }
 

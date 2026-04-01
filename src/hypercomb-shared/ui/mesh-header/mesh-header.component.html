@@ -19,6 +19,16 @@
     <span class="secured-label" [style.color]="shieldColor()" (click)="expandSecret()">{{ 'mesh.secured' | t }}</span>
   }
 
+  <!-- Mode label + word pair breadcrumb -->
+  @if (!showSecretInput()) {
+    <span class="mode-crumb">
+      <span class="mode-crumb-label" [class.solo-mode]="!meshPublic" [class.shield-mode]="!!meshPublic" [style.color]="meshPublic ? shieldColor() : null">{{ meshPublic ? 'public' : 'solo' }}</span>
+      @if (secretWords()) {
+        <span class="mode-crumb-sep">/</span><span class="mode-crumb-words">{{ secretWords() }}</span>
+      }
+    </span>
+  }
+
   <!-- Mode icon: always visible, always rightmost -->
   <button class="mode-toggle"
     [class.solo-mode]="!meshPublic"
