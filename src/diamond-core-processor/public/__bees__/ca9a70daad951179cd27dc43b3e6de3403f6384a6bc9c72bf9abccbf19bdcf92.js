@@ -208,7 +208,11 @@ var ClaudeBridgeWorker = class extends Worker {
     const ops = await historyService.replay(sig);
     const cellState = /* @__PURE__ */ new Map();
     for (const op of ops) cellState.set(op.cell, op.op);
-    return all.filter((cell) => cellState.get(cell) !== "remove");
+    const allSet = new Set(all);
+    return all.filter((cell) => {
+      const lastOp = cellState.get(cell);
+      return lastOp !== "remove" || allSet.has(cell);
+    });
   }
 };
 var _claudeBridgeWorker = new ClaudeBridgeWorker();

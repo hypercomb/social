@@ -401,27 +401,21 @@ var HexSdfTextureShader = class _HexSdfTextureShader {
         color.rgb = mix(color.rgb, heatTint, heatRing * heatAlpha);
       }
 
-      // branch indicator: identity-tinted ring + chevron hint + portal glow
+      // branch indicator: accent-style inlay for tiles with children
       if (vHasBranch > 0.5) {
         vec3 branchColor = mix(vec3(0.55), vIdentityColor, 0.35);
 
-        // refined ring at edge
-        float branchRing = 1.0 - smoothstep(0.0, aa * 3.0, abs(d));
-        color.rgb = mix(color.rgb, branchColor, branchRing * 0.4);
+        // crisp bright edge ring
+        float branchRing = 1.0 - smoothstep(0.0, aa * 1.8, abs(d));
+        color.rgb = mix(color.rgb, branchColor, branchRing * 0.8);
 
-        // chevron hint at bottom of hex: small downward arrow
-        // use local coords \u2014 bottom is positive Y
-        float chevronY = local.y / u_radiusPx - 0.55;
-        float chevronX = abs(local.x / u_radiusPx);
-        float chevronLine = abs(chevronY + chevronX * 0.6 - 0.12);
-        float chevronMask = smoothstep(0.06, 0.02, chevronLine)
-                          * step(chevronX, 0.22)
-                          * step(0.0, chevronY + 0.08);
-        color.rgb = mix(color.rgb, branchColor, chevronMask * 0.25);
+        // soft inner bloom
+        float branchBloom = 1.0 - smoothstep(0.0, aa * 6.0, abs(d + aa * 2.0));
+        color.rgb += branchColor * branchBloom * 0.18;
 
-        // subtle center glow
-        float glow = exp(-dist * dist * 2.2);
-        color.rgb += branchColor * glow * 0.12;
+        // gentle center wash
+        float branchWash = exp(-dist * dist * 3.0);
+        color.rgb += branchColor * branchWash * 0.08;
       }
 
       // divergence overlay: 1 = future-add (ghost), 2 = future-remove (marked)
@@ -445,19 +439,15 @@ var HexSdfTextureShader = class _HexSdfTextureShader {
         }
       }
 
-      // hover accent: neon edge glow using the active accent color
+      // hover accent: simple border glow using the active accent color
       if (u_hoveredIndex >= 0.0 && abs(vCellIndex - u_hoveredIndex) < 0.5) {
-        // crisp bright edge ring
+        // crisp border ring
         float hoverRing = 1.0 - smoothstep(0.0, aa * 1.8, abs(d));
-        color.rgb = mix(color.rgb, u_accentColor, hoverRing * 0.8);
+        color.rgb = mix(color.rgb, u_accentColor, hoverRing * 0.75);
 
-        // soft inner bloom
-        float bloom = 1.0 - smoothstep(0.0, aa * 6.0, abs(d + aa * 2.0));
-        color.rgb += u_accentColor * bloom * 0.18;
-
-        // gentle center wash
-        float wash = exp(-dist * dist * 3.0);
-        color.rgb += u_accentColor * wash * 0.08;
+        // softer outer bloom that stays near the edge
+        float hoverBloom = 1.0 - smoothstep(0.0, aa * 3.5, abs(d + aa * 1.5));
+        color.rgb += u_accentColor * hoverBloom * 0.12;
       }
 
       // premultiplied alpha output for correct blending at hex edges
@@ -1204,7 +1194,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
         const cellState = /* @__PURE__ */ new Map();
         for (const op of ops) cellState.set(op.cell, op.op);
         for (const [cell, lastOp] of cellState) {
-          if (lastOp === "remove") union.delete(cell);
+          if (lastOp === "remove" && !localCellSet.has(cell)) union.delete(cell);
         }
       }
     }

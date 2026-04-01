@@ -907,11 +907,14 @@ export class ShowCellDrone extends Drone {
         this.#divergenceFutureRemoves = divergence.futureRemoves
       } else {
         // Not rewound: standard replay — filter out removed cells
+        // Only honor 'remove' when the cell's OPFS directory no longer exists.
+        // A directory that still (or again) exists means the cell was just
+        // recreated — the async HistoryRecorder hasn't written the 'add' op yet.
         const ops = await historyService.replay(sig.sig)
         const cellState = new Map<string, string>()
         for (const op of ops) cellState.set(op.cell, op.op)
         for (const [cell, lastOp] of cellState) {
-          if (lastOp === 'remove') union.delete(cell)
+          if (lastOp === 'remove' && !localCellSet.has(cell)) union.delete(cell)
         }
       }
     }

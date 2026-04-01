@@ -248,7 +248,14 @@ export class ClaudeBridgeWorker extends Worker {
     const cellState = new Map<string, string>()
     for (const op of ops) cellState.set(op.cell, op.op)
 
-    return all.filter(cell => cellState.get(cell) !== 'remove')
+    // Only honor 'remove' for cells whose OPFS directory no longer exists.
+    // Every cell in `all` physically exists — if its last op is 'remove' the
+    // cell was just recreated and the async HistoryRecorder hasn't caught up.
+    const allSet = new Set(all)
+    return all.filter(cell => {
+      const lastOp = cellState.get(cell)
+      return lastOp !== 'remove' || allSet.has(cell)
+    })
   }
 }
 
