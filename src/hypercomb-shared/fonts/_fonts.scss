@@ -1,0 +1,23 @@
+// ── single source of truth for all font declarations ─────
+
+@font-face {
+  font-family: 'Source Sans Pro Light';
+  src: url('./SourceSansPro-Light.ttf') format('truetype');
+  font-weight: 300;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'hypercomb-icons';
+  src: url('./hypercomb-icons.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+}
+
+// ── typography tokens ─────────────────────────────────────
+:root {
+  --hc-font: 'Source Sans Pro Light', system-ui, -apple-system,
+    BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --hc-mono: ui-monospace, 'Cascadia Code', 'Source Code Pro', 'Fira Code',
+    Menlo, Consolas, 'DejaVu Sans Mono', monospace;
+}

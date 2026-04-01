@@ -1,9 +1,4 @@
-:root {
-  --hc-font: 'Inter', system-ui, -apple-system, BlinkMacSystemFont,
-    'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  --hc-mono: ui-monospace, 'Cascadia Code', 'Source Code Pro', 'Fira Code',
-    Menlo, Consolas, 'DejaVu Sans Mono', monospace;
-}
+@use '../../../../hypercomb-shared/fonts/fonts';
 
 html,
 body {
