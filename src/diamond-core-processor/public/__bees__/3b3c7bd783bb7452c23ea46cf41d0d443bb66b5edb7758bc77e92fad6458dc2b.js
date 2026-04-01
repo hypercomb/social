@@ -60,15 +60,20 @@ var PixiHostWorker = class extends Worker {
     this.container = new Container();
     app.stage.addChild(this.container);
     const center = () => {
-      const s = app.renderer.screen;
-      const cx = s.width * 0.5;
-      const cy = s.height * 0.5;
+      const cx = window.innerWidth * 0.5;
+      const cy = window.innerHeight * 0.5;
       const vp = window.ioc?.get("@diamondcoreprocessor.com/ViewportPersistence");
       const pan = vp?.lastPan;
       app.stage.position.set(cx + (pan?.dx ?? 0), cy + (pan?.dy ?? 0));
     };
     center();
     window.addEventListener("resize", center);
+    window.addEventListener("orientationchange", () => {
+      setTimeout(center, 50);
+    });
+    document.addEventListener("fullscreenchange", () => {
+      setTimeout(center, 50);
+    });
     this.emitEffect("render:host-ready", {
       app: this.app,
       container: this.container,

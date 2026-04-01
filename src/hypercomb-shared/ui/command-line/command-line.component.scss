@@ -1,7 +1,7 @@
 // hypercomb-shared/ui/command-line/command-line.component.scss
 //
-// Tiles command-line wrapper — wraps hc-command-shell with mic button.
-// All spacing/sizing synced with the shell's 2.2rem / 0.85em base.
+// Tiles command-line wrapper — wraps hc-command-shell seamlessly
+// with the mesh-header buttons to form one continuous bar.
 
 @use '../breakpoints' as *;
 
@@ -19,7 +19,8 @@ $bp-phone-max: 599px;
   align-items: stretch;
   width: 100%;
 
-  // When mic button is present, flatten shell's right border
+  // Shell always loses its right border so the mesh-header
+  // buttons fuse seamlessly to the right.
   hc-command-shell {
     flex: 1;
     min-width: 0;
@@ -36,12 +37,12 @@ $bp-phone-max: 599px;
   display: flex;
   align-items: center;
   width: 100%;
-  min-height: 2.2rem;
+  min-height: 2.4rem;
   padding: 0 0.75rem;
-  font-size: 0.85em;
+  font-size: 1em;
   color: rgba(77, 166, 255, 0.8);
   background: rgba(8, 18, 28, 0.65);
-  border: 1px solid rgba(77, 166, 255, 0.2);
+  border: 1.5px solid rgba(77, 166, 255, 0.4);
   border-radius: 2px;
   cursor: pointer;
   text-decoration: none;
@@ -49,7 +50,7 @@ $bp-phone-max: 599px;
 
   &:hover {
     color: rgba(77, 166, 255, 1);
-    border-color: rgba(77, 166, 255, 0.45);
+    border-color: rgba(77, 166, 255, 0.55);
     background: rgba(77, 166, 255, 0.06);
   }
 }
@@ -62,22 +63,23 @@ $bp-phone-max: 599px;
   align-items: center;
   justify-content: center;
   width: 2rem;
-  min-height: 2.2rem;
+  min-height: 2.4rem;
   padding: 0;
 
   background: rgba(8, 18, 28, 0.65);
-  border: 1px solid rgba(77, 166, 255, 0.2);
+  border: 1.5px solid rgba(77, 166, 255, 0.4);
   border-left: none;
-  border-radius: 0 2px 2px 0;
-  color: rgba(200, 200, 200, 0.5);
+  border-right: none;
+  border-radius: 0;
+  color: rgba(200, 200, 200, 0.6);
   cursor: pointer;
   user-select: none;
   touch-action: none;
   transition: color 200ms ease, border-color 200ms ease, background 200ms ease;
 
   &:hover {
-    color: rgba(200, 200, 200, 0.8);
-    border-color: rgba(77, 166, 255, 0.3);
+    color: rgba(200, 200, 200, 0.9);
+    border-color: rgba(77, 166, 255, 0.5);
   }
 
   &.recording {
@@ -116,7 +118,6 @@ $bp-phone-max: 599px;
 
   .mic-btn {
     width: 3rem;
-    border-radius: 0 6px 6px 0;
   }
 
   .mic-dot {
@@ -124,8 +125,8 @@ $bp-phone-max: 599px;
   }
 
   .install-prompt {
-    min-height: 3rem;
-    font-size: 1em;
+    min-height: 3.2rem;
+    font-size: 1.1em;
     border-radius: 6px;
   }
 }

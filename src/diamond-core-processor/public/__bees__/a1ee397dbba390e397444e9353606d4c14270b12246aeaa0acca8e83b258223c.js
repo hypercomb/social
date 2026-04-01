@@ -754,21 +754,22 @@ var ZoomDrone = class extends Drone {
       this.#animFrameId = null;
     }
     const target = this.renderContainer;
-    const screen = this.renderer.screen;
     const bounds = target.getLocalBounds();
     if (!bounds || bounds.width <= 0 || bounds.height <= 0) return;
     const padding = 5;
     const headerEl = document.querySelector(".header-bar");
     const pillEl = document.querySelector(".controls-pill");
     const safeTop = headerEl ? headerEl.getBoundingClientRect().bottom + padding : padding;
-    const safeBottom = pillEl ? pillEl.getBoundingClientRect().top - padding : screen.height - padding;
+    const safeBottom = pillEl ? pillEl.getBoundingClientRect().top - padding : window.innerHeight - padding;
     const safeLeft = padding;
-    const safeRight = screen.width - padding;
+    const safeRight = window.innerWidth - padding;
     const availW = safeRight - safeLeft;
     const availH = safeBottom - safeTop;
-    const stageX = this.app.stage.position.x;
-    const stageY = this.app.stage.position.y;
     const stageScale = this.app.stage.scale.x || 1;
+    const screenCx = window.innerWidth * 0.5;
+    const screenCy = window.innerHeight * 0.5;
+    this.app.stage.position.set(screenCx, screenCy);
+    this.vp?.setPan(0, 0);
     const scaleX = availW / (bounds.width * stageScale);
     const scaleY = availH / (bounds.height * stageScale);
     const fitScale = this.clamp(Math.min(scaleX, scaleY));
@@ -776,8 +777,8 @@ var ZoomDrone = class extends Drone {
     const centerY = bounds.y + bounds.height / 2;
     const safeMidX = (safeLeft + safeRight) / 2;
     const safeMidY = (safeTop + safeBottom) / 2;
-    const targetPosX = (safeMidX - stageX) / stageScale - centerX * fitScale;
-    const targetPosY = (safeMidY - stageY) / stageScale - centerY * fitScale;
+    const targetPosX = (safeMidX - screenCx) / stageScale - centerX * fitScale;
+    const targetPosY = (safeMidY - screenCy) / stageScale - centerY * fitScale;
     const startScale = target.scale.x;
     const startPosX = target.position.x;
     const startPosY = target.position.y;
