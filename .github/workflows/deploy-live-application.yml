@@ -110,14 +110,12 @@ jobs:
       - name: Build web runtime assets
         working-directory: src/hypercomb-web
         run: |
-          export PATH="$(cd .. && pwd)/node_modules/.bin:$PATH"
-          npm run runtime
+          node ./scripts/build-core-vendor.cjs
+          node ../node_modules/tsx/dist/cli.mjs ./scripts/build-pixi-vendor.ts
 
       - name: Build web app
         working-directory: src/hypercomb-web
-        run: |
-          export PATH="$(cd .. && pwd)/node_modules/.bin:$PATH"
-          npm run build
+        run: node ../node_modules/@angular/cli/bin/ng.js build --configuration production
 
       - name: Verify build output
         run: ls -al src/hypercomb-web/dist/hypercomb-web/browser || true
