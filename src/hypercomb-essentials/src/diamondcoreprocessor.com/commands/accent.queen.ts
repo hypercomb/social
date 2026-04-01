@@ -131,10 +131,10 @@ export class AccentQueenBee extends QueenBee {
 
     for (const label of labels) {
       try {
-        const seedDir = await dir.getDirectoryHandle(label, { create: true })
-        const props = await readProps(seedDir)
+        const cellDir = await dir.getDirectoryHandle(label, { create: true })
+        const props = await readProps(cellDir)
         props['accent'] = presetName
-        await writeProps(seedDir, props)
+        await writeProps(cellDir, props)
       } catch { /* skip inaccessible tiles */ }
     }
 
@@ -146,9 +146,9 @@ export class AccentQueenBee extends QueenBee {
 
 const PROPS_FILE = '0000'
 
-async function readProps(seedDir: FileSystemDirectoryHandle): Promise<Record<string, unknown>> {
+async function readProps(cellDir: FileSystemDirectoryHandle): Promise<Record<string, unknown>> {
   try {
-    const fh = await seedDir.getFileHandle(PROPS_FILE)
+    const fh = await cellDir.getFileHandle(PROPS_FILE)
     const file = await fh.getFile()
     return JSON.parse(await file.text())
   } catch {
@@ -156,8 +156,8 @@ async function readProps(seedDir: FileSystemDirectoryHandle): Promise<Record<str
   }
 }
 
-async function writeProps(seedDir: FileSystemDirectoryHandle, updates: Record<string, unknown>): Promise<void> {
-  const fh = await seedDir.getFileHandle(PROPS_FILE, { create: true })
+async function writeProps(cellDir: FileSystemDirectoryHandle, updates: Record<string, unknown>): Promise<void> {
+  const fh = await cellDir.getFileHandle(PROPS_FILE, { create: true })
   const writable = await fh.createWritable()
   await writable.write(JSON.stringify(updates))
   await writable.close()

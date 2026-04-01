@@ -30,6 +30,7 @@ type ComputationVerified = {
 export class ComputationDrone extends Drone {
 
   readonly namespace = 'diamondcoreprocessor.com'
+  override genotype = 'computation'
 
   public override description =
     'Processes computation requests, caches results, and shares receipts across the community mesh.'

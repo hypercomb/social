@@ -86,7 +86,7 @@ The `SignatureService` in `@hypercomb/core` is architecturally significant. By p
 Fowler hasn't written extensively about decentralized identity, but his principles on **Cross-Cutting Concerns** apply. Authentication and authorization typically belong in infrastructure, not business logic. Hypercomb gets this right.
 
 **What Fowler would commend:**
-- The lineage path model (`domain/path/seed` → signature) creates a **natural key** system that is content-addressable. This is sound — identifiers derive from the thing they identify.
+- The lineage path model (`domain/path/cell` → signature) creates a **natural key** system that is content-addressable. This is sound — identifiers derive from the thing they identify.
 - Signatures are computed in the drone layer (essentials) but the signing mechanism lives in core. This separation means the cryptographic implementation can be swapped without touching any drone code.
 
 **What Fowler would challenge:**

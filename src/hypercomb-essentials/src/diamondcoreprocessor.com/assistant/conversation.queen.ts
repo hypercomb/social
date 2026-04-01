@@ -12,6 +12,7 @@ import { QueenBee, EffectBus } from '@hypercomb/core'
  */
 export class ConversationQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
+  override genotype = 'assistant'
   readonly command = 'chat'
   override readonly aliases = ['c', 'ask']
   override description = 'Multi-turn conversation with Claude — creates thread tiles with Q&A children'

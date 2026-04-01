@@ -26,7 +26,7 @@ in a real hive, a sealed cell of honey is identified by its position and its cap
 
 hypercomb works identically. every artifact is identified by its content hash. there are no version numbers, no sequential ids, no registry of "who made what when." the content IS the identity. two identical payloads produce identical seals. this eliminates duplication without any coordination.
 
-the lineage path model extends this: `domain/path/seed` is hashed to produce a signature. the path to a resource IS the resource's identity. like a cell's position in the comb IS the cell's address.
+the lineage path model extends this: `domain/path/cell` is hashed to produce a signature. the path to a resource IS the resource's identity. like a cell's position in the comb IS the cell's address.
 
 ---
 

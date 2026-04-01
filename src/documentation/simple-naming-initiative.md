@@ -185,7 +185,7 @@ Model as machines:
 
 ```typescript
 // Lineage — the explorer IS the machine:
-this.explorer.enter(seed)
+this.explorer.enter(cell)
 this.explorer.up()
 this.explorer.label()
 this.explorer.dir()

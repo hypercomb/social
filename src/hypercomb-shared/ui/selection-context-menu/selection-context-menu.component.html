@@ -24,6 +24,11 @@
       <span class="hci">Q</span>
     </button>
 
+    <div class="ctx-divider"></div>
+    <button class="ctx-btn" (click)="hide()" [attr.aria-label]="'selection.hide' | t">
+      <span class="eye-icon" [class.struck]="!allHidden()"></span>
+    </button>
+
     @if (clipboardCount() > 0) {
       <div class="ctx-divider"></div>
       <button class="ctx-btn" (click)="paste()" [attr.aria-label]="'selection.paste' | t">

@@ -11,7 +11,8 @@ import { BeeInspectorComponent } from '../tree-view/bee-inspector.component'
 import { DiamondIconComponent } from '../tree-view/diamond-icon.component'
 import { PatchListComponent } from '../patch-list/patch-list.component'
 import { DcpCommandLineComponent } from '../command-line/dcp-command-line.component'
-import type { PatchResult } from '../core/merkle-patch.service'
+import { LayerEditorComponent } from '../layer-editor/layer-editor.component'
+import type { BatchPatchResult, PatchResult } from '../core/merkle-patch.service'
 import type { BeeDocEntry, TreeNode, TreeNodeKind } from '../core/tree-node'
 
 const DOMAINS_KEY = 'dcp.domains'
@@ -40,7 +41,7 @@ export interface DomainGroup {
 @Component({
   selector: 'app-home',
   standalone: true,
-  imports: [TreeViewComponent, AuditorSettingsComponent, BeeInspectorComponent, DiamondIconComponent, PatchListComponent, DcpCommandLineComponent],
+  imports: [TreeViewComponent, AuditorSettingsComponent, BeeInspectorComponent, DiamondIconComponent, PatchListComponent, DcpCommandLineComponent, LayerEditorComponent],
   templateUrl: './home.component.html',
   styleUrls: ['./home.component.scss']
 })
@@ -72,6 +73,10 @@ export class HomeComponent {
   readonly inspectLineage = signal('')
   readonly inspectMode = signal<'code' | 'detail'>('code')
   readonly selectedNodeNames = signal<string[]>([])
+
+  // layer editor state
+  readonly inspectLayer = signal<TreeNode | null>(null)
+  readonly inspectLayerSection = signal<DomainSection | null>(null)
 
   // flat list of all nodes for command line suggestions
   readonly allNodes = computed(() => {
@@ -383,6 +388,41 @@ export class HomeComponent {
     this.inspectSection.set(null)
     this.inspectDoc.set(undefined)
     this.inspectLineage.set('')
+  }
+
+  // layer editor
+  onOpenLayerEditor(node: TreeNode, section?: DomainSection): void {
+    const resolved = section ?? this.sections().find(s => this.#containsNode(s.items, node.id)) ?? null
+    console.log('[LayerEditor] opening', node.name, node.kind, node.signature?.slice(0, 12), resolved?.domainName)
+    this.inspectLayer.set(node)
+    this.inspectLayerSection.set(resolved)
+  }
+
+  onLayerEditorClose(): void {
+    this.inspectLayer.set(null)
+    this.inspectLayerSection.set(null)
+  }
+
+  async onLayerPatchApplied(result: BatchPatchResult): Promise<void> {
+    const section = this.inspectLayerSection()
+    if (!section) return
+
+    for (const file of result.patchedFiles) {
+      await this.#patchStore.record(section.domainName, {
+        originalFileSig: file.originalSig,
+        newFileSig: file.newFileSig,
+        originalRootSig: section.rootSig,
+        newRootSig: result.newRootSig,
+        kind: file.kind,
+        lineage: '',
+        timestamp: Date.now(),
+        cascadedLayers: result.cascadedLayers,
+      })
+    }
+
+    section.patches = await this.#patchStore.list(section.domainName)
+    await this.#switchSectionRoot(section, result.newRootSig)
+    this.onLayerEditorClose()
   }
 
   onNavigateSig(sig: string): void {

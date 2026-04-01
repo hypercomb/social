@@ -10,7 +10,7 @@ import { TranslatePipe } from '../../core/i18n.pipe'
 import type { FormatPainterState } from
   '@hypercomb/essentials/diamondcoreprocessor.com/format/format-painter.drone'
 
-const EMPTY: FormatPainterState = { open: false, sourceSeed: null, entries: [] }
+const EMPTY: FormatPainterState = { open: false, sourceCell: null, entries: [] }
 
 @Component({
   selector: 'hc-format-painter',
@@ -27,7 +27,7 @@ export class FormatPainterComponent implements OnInit, OnDestroy {
   private readonly state$ = signal<FormatPainterState>(EMPTY)
 
   readonly open = computed(() => this.state$().open)
-  readonly sourceSeed = computed(() => this.state$().sourceSeed)
+  readonly sourceCell = computed(() => this.state$().sourceCell)
   readonly entries = computed(() => this.state$().entries)
   readonly hasEntries = computed(() => this.state$().entries.length > 0)
   readonly enabledCount = computed(() => this.state$().entries.filter(e => e.enabled).length)

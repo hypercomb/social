@@ -6,14 +6,14 @@ import { HexLabelAtlas } from '../grid/hex-label.atlas.js'
 import { HexImageAtlas } from '../grid/hex-image.atlas.js'
 import { HexSdfTextureShader } from '../grid/hex-sdf.shader.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from '../grid/hex-geometry.js'
-import { isSignature, readSeedProperties, writeSeedProperties } from '../../editor/tile-properties.js'
+import { isSignature, readCellProperties, writeCellProperties } from '../../editor/tile-properties.js'
 import type { HistoryService, HistoryOp } from '../../history/history.service.js'
 import type { HistoryCursorService } from '../../history/history-cursor.service.js'
 import type { ViewportPersistence, ViewportSnapshot } from '../../navigation/zoom/zoom.drone.js'
 
 type Axial = { q: number; r: number }
 /** divergence: 0 = current, 1 = future-add (ghost), 2 = future-remove (marked) */
-type SeedCell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; hasLink?: boolean; borderColor?: [number, number, number]; divergence?: number }
+type Cell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; hasLink?: boolean; borderColor?: [number, number, number]; divergence?: number }
 
 /** Deterministic label → RGB via DJB2 hash → HSL → RGB. Returns [r, g, b] in 0–1 range. */
 function labelToRgb(label: string): [number, number, number] {
@@ -61,7 +61,7 @@ export class ShowCellDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
 
   public override description =
-    'Renders the hex grid — maps seeds to cells, manages geometry, and syncs with the Nostr mesh.'
+    'Renders the hex grid — maps cells to coordinates, manages geometry, and syncs with the Nostr mesh.'
   public override effects = ['render', 'network'] as const
 
   // pixi resources (populated via render:host-ready effect)
@@ -78,7 +78,7 @@ export class ShowCellDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'seed:place-at', 'seed:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'overlay:neon-color']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -87,14 +87,14 @@ export class ShowCellDrone extends Drone {
   private imageAtlas: HexImageAtlas | null = null
   private atlasRenderer: unknown = null
 
-  // cache: seed label → small image signature (avoids re-reading 0000 on every render)
-  private readonly seedImageCache = new Map<string, string | null>()
-  // cache: seed label → tag names (avoids re-reading 0000 on every render)
-  private readonly seedTagsCache = new Map<string, string[]>()
-  // cache: seed label → border color RGB floats
-  private readonly seedBorderColorCache = new Map<string, [number, number, number]>()
-  // cache: seed label → has link property
-  private readonly seedLinkCache = new Map<string, boolean>()
+  // cache: cell label → small image signature (avoids re-reading 0000 on every render)
+  private readonly cellImageCache = new Map<string, string | null>()
+  // cache: cell label → tag names (avoids re-reading 0000 on every render)
+  private readonly cellTagsCache = new Map<string, string[]>()
+  // cache: cell label → border color RGB floats
+  private readonly cellBorderColorCache = new Map<string, [number, number, number]>()
+  // cache: cell label → has link property
+  private readonly cellLinkCache = new Map<string, boolean>()
 
   private lastKey = ''
 
@@ -108,9 +108,9 @@ export class ShowCellDrone extends Drone {
   private lineageChangeListening = false
 
   // incremental rendering state — tracks what's currently painted (geometry cache)
-  private readonly renderedCells = new Map<string, SeedCell>()
+  private readonly renderedCells = new Map<string, Cell>()
   // per-layer cache: location key → cells array (for instant back-navigation)
-  #layerCellsCache = new Map<string, { cells: SeedCell[]; seedNames: string[]; localSeedSet: Set<string>; branchSet: Set<string> }>()
+  #layerCellsCache = new Map<string, { cells: Cell[]; cellNames: string[]; localCellSet: Set<string>; branchSet: Set<string> }>()
   #heatByLabel = new Map<string, number>()
   #flashLabels = new Set<string>()
   #flashTimer: ReturnType<typeof setTimeout> | null = null
@@ -120,6 +120,7 @@ export class ShowCellDrone extends Drone {
   #axialToIndex = new Map<string, number>()
   #heartbeatInitialized = false
   #lastHeartbeatKey = ''
+  #accentColor: [number, number, number] = [0.4, 0.85, 1.0]
 
   // hex geometry (circumradius, gap, pad, spacing) — configurable via render:set-gap effect
   #hexGeo: HexGeometry = DEFAULT_HEX_GEOMETRY
@@ -136,10 +137,10 @@ export class ShowCellDrone extends Drone {
   #space = ''
   #secret = ''
 
-  // note: mesh seed state (derived on heartbeat)
+  // note: mesh cell state (derived on heartbeat)
   private meshSig = ''
-  private meshSeedsRev = 0
-  private meshSeeds: string[] = []
+  private meshCellsRev = 0
+  private meshCells: string[] = []
 
   // clipboard view override — when set, render from this dir instead of explorer
   #clipboardView: { labels: Set<string>; sourceSegments: string[] } | null = null
@@ -161,9 +162,9 @@ export class ShowCellDrone extends Drone {
     }
   })()
   private snapshotPostedBySig = new Set<string>()
-  private lastLocalSeedsBySig = new Map<string, string[]>()
+  private lastLocalCellsBySig = new Map<string, string[]>()
   private lastPublishedGrammarSig = ''
-  private lastPublishedGrammarSeed = ''
+  private lastPublishedGrammarCell = ''
 
   // lease renewal: periodic refresh to keep tiles alive for late joiners
   #lastRefreshAtMs = new Map<string, number>()
@@ -185,8 +186,8 @@ export class ShowCellDrone extends Drone {
   #layoutMode: 'dense' | 'pinned' = 'dense'
 
   // cached render context for fast move:preview path (avoids full OPFS re-read)
-  private cachedSeedNames: string[] | null = null
-  private cachedLocalSeedSet: Set<string> | null = null
+  private cachedCellNames: string[] | null = null
+  private cachedLocalCellSet: Set<string> | null = null
   private cachedBranchSet: Set<string> | null = null
 
   private readonly onSynchronize = (): void => {
@@ -213,19 +214,19 @@ export class ShowCellDrone extends Drone {
       this.emitEffect('render:geometry-changed', this.#hexGeo)
     }
 
-    // mesh seed refresh — only when lineage/grammar actually changed
+    // mesh cell refresh — only when lineage/grammar actually changed
     const lineage = this.resolve<any>('lineage')
     const locationKey = String(lineage?.explorerLabel?.() ?? '/')
     const fsRev = Number(lineage?.changed?.() ?? 0)
     const heartbeatKey = `${locationKey}:${fsRev}:${grammar}`
     if (heartbeatKey !== this.#lastHeartbeatKey) {
       this.#lastHeartbeatKey = heartbeatKey
-      await this.refreshMeshSeeds(grammar)
+      await this.refreshMeshCells(grammar)
       this.requestRender()
     }
   }
 
-  private refreshMeshSeeds = async (grammar: string = ''): Promise<void> => {
+  private refreshMeshCells = async (grammar: string = ''): Promise<void> => {
 
     const lineage = this.resolve<any>('lineage')
     const mesh = this.tryGetMesh()
@@ -236,7 +237,7 @@ export class ShowCellDrone extends Drone {
 
     if (sig !== this.meshSig) {
       const NOSTR = 'wss://relay.snort.social'
-      const nakPayload = '{"seeds":["external.alpha","Street Fighter"]}'
+      const nakPayload = '{"cells":["external.alpha","Street Fighter"]}'
       const nakCmd = `nak event ${NOSTR} --kind 29010 --tag "x=${sig}" --content '${nakPayload}'`
       ; (window as any).__showHoneycombNakCommand = nakCmd
       console.log('[show-honeycomb] signature location', signatureLocation.key)
@@ -254,8 +255,8 @@ export class ShowCellDrone extends Drone {
       }
 
       this.meshSig = sig
-      this.meshSeeds = []
-      this.meshSeedsRev++
+      this.meshCells = []
+      this.meshCellsRev++
 
       if (typeof mesh.subscribe === 'function') {
         this.meshSub = mesh.subscribe(sig, (evt) => {
@@ -263,7 +264,7 @@ export class ShowCellDrone extends Drone {
           this.#handleIncomingSyncRequest(evt, mesh, sig)
 
           void (async () => {
-            await this.refreshMeshSeeds()
+            await this.refreshMeshCells()
             this.requestRender()
           })()
         })
@@ -275,8 +276,8 @@ export class ShowCellDrone extends Drone {
     this.emitEffect('mesh:ensure-started', { signature: sig })
 
 
-    // note: publish local filesystem seeds for this sig when changed
-    await this.publishLocalSeeds(lineage, mesh, sig, grammar)
+    // note: publish local filesystem cells for this sig when changed
+    await this.publishLocalCells(lineage, mesh, sig, grammar)
 
     // note: get non-expired items (mesh owns ttl)
     const items = mesh.getNonExpired(sig)
@@ -298,16 +299,16 @@ export class ShowCellDrone extends Drone {
     }
 
     if (!items || items.length === 0) {
-      if (this.meshSeeds.length !== 0) {
-        this.meshSeeds = []
-        this.meshSeedsRev++
+      if (this.meshCells.length !== 0) {
+        this.meshCells = []
+        this.meshCellsRev++
       }
       return
     }
 
-    // note: union seeds across all non-expired payloads
+    // note: union cells across all non-expired payloads
     // - supports payload shapes:
-    //   1) { seeds: string[] }
+    //   1) { cells: string[] }
     //   2) string[] (direct)
     // - any other shape is ignored
     const set = new Set<string>()
@@ -320,60 +321,60 @@ export class ShowCellDrone extends Drone {
         continue
       }
 
-      const fromContent = this.extractSeedsFromEventContent(it?.event?.content)
+      const fromContent = this.extractCellsFromEventContent(it?.event?.content)
       if (fromContent.length > 0) {
-        for (const seed of fromContent) set.add(seed)
+        for (const cell of fromContent) set.add(cell)
         continue
       }
 
       if (Array.isArray(p)) {
         for (const x of p) {
           const s = String(x ?? '').trim()
-          this.addCsvSeeds(set, s)
+          this.addCsvCells(set, s)
         }
         continue
       }
 
       if (typeof p === 'string') {
-        const parsed = this.extractSeedsFromEventContent(p)
+        const parsed = this.extractCellsFromEventContent(p)
         if (parsed.length > 0) {
-          for (const seed of parsed) set.add(seed)
+          for (const cell of parsed) set.add(cell)
         } else if (!this.looksStructuredContent(p)) {
-          this.addCsvSeeds(set, p)
+          this.addCsvCells(set, p)
         }
         continue
       }
 
-      const seedsArr = p?.seeds
-      if (Array.isArray(seedsArr)) {
-        for (const x of seedsArr) {
+      const cellsArr = p?.cells ?? p?.seeds
+      if (Array.isArray(cellsArr)) {
+        for (const x of cellsArr) {
           const s = String(x ?? '').trim()
-          this.addCsvSeeds(set, s)
+          this.addCsvCells(set, s)
         }
       }
 
-      const singleSeed = String(p?.seed ?? '').trim()
-      this.addCsvSeeds(set, singleSeed)
+      const singleCell = String(p?.cell ?? p?.seed ?? '').trim()
+      this.addCsvCells(set, singleCell)
     }
 
     const next = Array.from(set)
     next.sort((a, b) => a.localeCompare(b))
 
-    const sameLen = next.length === this.meshSeeds.length
+    const sameLen = next.length === this.meshCells.length
     let same = sameLen
     if (same) {
       for (let i = 0; i < next.length; i++) {
-        if (next[i] !== this.meshSeeds[i]) { same = false; break }
+        if (next[i] !== this.meshCells[i]) { same = false; break }
       }
     }
 
     if (!same) {
-      this.meshSeeds = next
-      this.meshSeedsRev++
+      this.meshCells = next
+      this.meshCellsRev++
     }
   }
 
-  public publishExplicitSeedList = async (seeds: string[]): Promise<boolean> => {
+  public publishExplicitCellList = async (cells: string[]): Promise<boolean> => {
     const lineage = this.resolve<any>('lineage')
     const mesh = this.tryGetMesh()
     if (!lineage || !mesh || typeof mesh.publish !== 'function') return false
@@ -381,14 +382,14 @@ export class ShowCellDrone extends Drone {
     const signatureLocation = await this.computeSignatureLocation(lineage)
     if (!signatureLocation.sig) return false
 
-    const normalized = Array.isArray(seeds)
-      ? seeds.map(s => String(s ?? '').trim()).filter(s => s.length > 0)
+    const normalized = Array.isArray(cells)
+      ? cells.map(s => String(s ?? '').trim()).filter(s => s.length > 0)
       : []
 
     const payload = normalized.join(',')
     const ok = await mesh.publish(29010, signatureLocation.sig, payload, [['publisher', this.publisherId]])
 
-    await this.refreshMeshSeeds()
+    await this.refreshMeshCells()
     this.requestRender()
 
     return !!ok
@@ -407,8 +408,8 @@ export class ShowCellDrone extends Drone {
       : []
 
     const lineagePath = explorerSegments.join('/')
-    // key = space/domain/path/secret/seed (empty segments omitted)
-    const parts = [this.#space, domain, lineagePath, this.#secret, 'seed'].filter(Boolean)
+    // key = space/domain/path/secret/cell (empty segments omitted)
+    const parts = [this.#space, domain, lineagePath, this.#secret, 'cell'].filter(Boolean)
     const key = parts.join('/')
 
     // fast path: return cached result if key hasn't changed
@@ -433,20 +434,20 @@ export class ShowCellDrone extends Drone {
   }
 
 
-  private publishLocalSeeds = async (lineage: any, mesh: MeshApi, sig: string, grammar: string = ''): Promise<void> => {
+  private publishLocalCells = async (lineage: any, mesh: MeshApi, sig: string, grammar: string = ''): Promise<void> => {
     if (typeof mesh.publish !== 'function') return
     if (!lineage?.explorerDir) return
 
     const dir = await lineage.explorerDir()
     if (!dir) return
 
-    const localSeeds = await this.listSeedFolders(dir)
-    const previousSeeds = this.lastLocalSeedsBySig.get(sig) ?? []
+    const localCells = await this.listCellFolders(dir)
+    const previousCells = this.lastLocalCellsBySig.get(sig) ?? []
 
     // 1) one snapshot post per signature: full array of items
     if (!this.snapshotPostedBySig.has(sig)) {
       await mesh.publish(29010, sig, {
-        seeds: localSeeds,
+        cells: localCells,
         publisherId: this.publisherId,
         mode: 'snapshot',
         publishedAtMs: Date.now()
@@ -456,21 +457,21 @@ export class ShowCellDrone extends Drone {
     }
 
     // 2) thereafter post only newly added single items
-    const prevSet = new Set(previousSeeds)
-    for (const seed of localSeeds) {
-      if (prevSet.has(seed)) continue
-      await mesh.publish(29010, sig, seed, [['publisher', this.publisherId], ['mode', 'delta']])
+    const prevSet = new Set(previousCells)
+    for (const cell of localCells) {
+      if (prevSet.has(cell)) continue
+      await mesh.publish(29010, sig, cell, [['publisher', this.publisherId], ['mode', 'delta']])
     }
 
-    this.lastLocalSeedsBySig.set(sig, localSeeds)
+    this.lastLocalCellsBySig.set(sig, localCells)
 
-    // 3) periodic refresh (lease renewal) — re-publish full seed list so late joiners see tiles
+    // 3) periodic refresh (lease renewal) — re-publish full cell list so late joiners see tiles
     const now = Date.now()
     const lastRefresh = this.#lastRefreshAtMs.get(sig) ?? 0
     const refreshInterval = this.#computeRefreshInterval(mesh, sig)
     if (lastRefresh > 0 && (now - lastRefresh) >= refreshInterval) {
       await mesh.publish(29010, sig, {
-        seeds: localSeeds,
+        cells: localCells,
         publisherId: this.publisherId,
         mode: 'refresh',
         publishedAtMs: now
@@ -478,13 +479,13 @@ export class ShowCellDrone extends Drone {
       this.#lastRefreshAtMs.set(sig, now)
     }
 
-    const grammarSeed = this.toGrammarSeed(grammar)
-    const grammarIsNew = grammarSeed && (sig !== this.lastPublishedGrammarSig || grammarSeed !== this.lastPublishedGrammarSeed)
+    const grammarCell = this.toGrammarCell(grammar)
+    const grammarIsNew = grammarCell && (sig !== this.lastPublishedGrammarSig || grammarCell !== this.lastPublishedGrammarCell)
     if (grammarIsNew) {
-      await mesh.publish(29010, sig, grammarSeed, [['publisher', this.publisherId], ['source', 'show-honeycomb:grammar-heartbeat']])
+      await mesh.publish(29010, sig, grammarCell, [['publisher', this.publisherId], ['source', 'show-honeycomb:grammar-heartbeat']])
 
       this.lastPublishedGrammarSig = sig
-      this.lastPublishedGrammarSeed = grammarSeed
+      this.lastPublishedGrammarCell = grammarCell
     }
   }
 
@@ -524,12 +525,12 @@ export class ShowCellDrone extends Drone {
 
     this.#lastTriggeredRepublishAtMs.set(sig, now)
 
-    // republish current local seeds as snapshot
-    const localSeeds = this.lastLocalSeedsBySig.get(sig) ?? []
-    if (localSeeds.length === 0) return
+    // republish current local cells as snapshot
+    const localCells = this.lastLocalCellsBySig.get(sig) ?? []
+    if (localCells.length === 0) return
 
     void mesh.publish(29010, sig, {
-      seeds: localSeeds,
+      cells: localCells,
       publisherId: this.publisherId,
       mode: 'snapshot',
       publishedAtMs: now
@@ -539,14 +540,14 @@ export class ShowCellDrone extends Drone {
     this.#lastRefreshAtMs.set(sig, now)
   }
 
-  private addCsvSeeds = (set: Set<string>, raw: string): void => {
+  private addCsvCells = (set: Set<string>, raw: string): void => {
     const text = String(raw ?? '').trim()
     if (!text) return
 
     const parts = text.split(',')
     for (const part of parts) {
-      const seed = String(part ?? '').trim()
-      if (seed) set.add(seed)
+      const cell = String(part ?? '').trim()
+      if (cell) set.add(cell)
     }
   }
 
@@ -566,7 +567,7 @@ export class ShowCellDrone extends Drone {
     return ''
   }
 
-  private extractSeedsFromEventContent = (content: any): string[] => {
+  private extractCellsFromEventContent = (content: any): string[] => {
     const raw = String(content ?? '').trim()
     if (!raw) return []
 
@@ -589,21 +590,21 @@ export class ShowCellDrone extends Drone {
 
       if (parsed && typeof parsed === 'object') {
         const out: string[] = []
-        const seeds = (parsed as any).seeds
-        if (Array.isArray(seeds)) {
-          for (const x of seeds) out.push(...this.splitCsv(String(x ?? '')))
+        const cells = (parsed as any).cells ?? (parsed as any).seeds
+        if (Array.isArray(cells)) {
+          for (const x of cells) out.push(...this.splitCsv(String(x ?? '')))
         }
 
-        const seed = String((parsed as any).seed ?? '').trim()
-        if (seed) out.push(...this.splitCsv(seed))
+        const cell = String((parsed as any).cell ?? (parsed as any).seed ?? '').trim()
+        if (cell) out.push(...this.splitCsv(cell))
         return out
       }
     } catch {
       // tolerant fallback for non-strict object-like payloads:
-      // {seeds:[hello2,world2],pubs:123}
-      const seedsMatch = raw.match(/seeds\s*:\s*\[([^\]]*)\]/i)
-      if (seedsMatch && seedsMatch[1]) {
-        return this.splitCsv(String(seedsMatch[1] ?? ''))
+      // {cells:[hello2,world2],pubs:123}
+      const cellsMatch = raw.match(/(?:cells|seeds)\s*:\s*\[([^\]]*)\]/i)
+      if (cellsMatch && cellsMatch[1]) {
+        return this.splitCsv(String(cellsMatch[1] ?? ''))
       }
 
       // do not split structured text blindly into junk tiles
@@ -626,19 +627,19 @@ export class ShowCellDrone extends Drone {
     const out: string[] = []
     const parts = String(raw ?? '').split(',')
     for (const part of parts) {
-      let seed = String(part ?? '').trim()
-      if (seed.startsWith('"') && seed.endsWith('"') && seed.length >= 2) {
-        seed = seed.slice(1, -1).trim()
+      let cell = String(part ?? '').trim()
+      if (cell.startsWith('"') && cell.endsWith('"') && cell.length >= 2) {
+        cell = cell.slice(1, -1).trim()
       }
-      if (seed.startsWith("'") && seed.endsWith("'") && seed.length >= 2) {
-        seed = seed.slice(1, -1).trim()
+      if (cell.startsWith("'") && cell.endsWith("'") && cell.length >= 2) {
+        cell = cell.slice(1, -1).trim()
       }
-      if (seed) out.push(seed)
+      if (cell) out.push(cell)
     }
     return out
   }
 
-  private toGrammarSeed = (grammar: string): string => {
+  private toGrammarCell = (grammar: string): string => {
     const raw = String(grammar ?? '').trim()
     if (!raw) return ''
     if (raw.startsWith('show-honeycomb:')) return ''
@@ -679,27 +680,27 @@ export class ShowCellDrone extends Drone {
   /** Fast path for move:preview — skips OPFS/mesh/image loading, only rebuilds geometry with reordered labels */
   private readonly renderMovePreview = (): void => {
     const axial = this.resolve<any>('axial')
-    if (!axial?.items || !this.cachedSeedNames || !this.cachedLocalSeedSet) {
+    if (!axial?.items || !this.cachedCellNames || !this.cachedLocalCellSet) {
       this.requestRender()
       return
     }
 
-    const seedNames = this.cachedSeedNames
-    const localSeedSet = this.cachedLocalSeedSet
+    const cellNames = this.cachedCellNames
+    const localCellSet = this.cachedLocalCellSet
     const branchSet = this.cachedBranchSet ?? new Set<string>()
 
-    const axialMax = typeof axial.items.size === 'number' ? axial.items.size : seedNames.length
-    const effectiveLen = this.moveNames ? this.moveNames.length : seedNames.length
+    const axialMax = typeof axial.items.size === 'number' ? axial.items.size : cellNames.length
+    const effectiveLen = this.moveNames ? this.moveNames.length : cellNames.length
     const maxCells = Math.min(effectiveLen, axialMax)
     if (maxCells <= 0) return
 
-    const cells = this.buildCellsFromAxial(axial, seedNames, maxCells, localSeedSet, branchSet)
+    const cells = this.buildCellsFromAxial(axial, cellNames, maxCells, localCellSet, branchSet)
     if (cells.length === 0) return
 
     // reuse cached image sigs (no OPFS read needed)
     for (const cell of cells) {
-      if (this.seedImageCache.has(cell.label)) {
-        cell.imageSig = this.seedImageCache.get(cell.label) ?? undefined
+      if (this.cellImageCache.has(cell.label)) {
+        cell.imageSig = this.cellImageCache.get(cell.label) ?? undefined
       }
     }
 
@@ -738,7 +739,7 @@ export class ShowCellDrone extends Drone {
     }
 
     // instant back-navigation: if we have cached cells for this layer, apply them directly
-    // — skips ALL OPFS reads (explorerDir, listSeedFolders, checkHasBranch, history, layout)
+    // — skips ALL OPFS reads (explorerDir, listCellFolders, checkCellHasBranch, history, layout)
     if (locationKey !== this.renderedLocationKey && this.#layerCellsCache.has(locationKey)) {
       const cached = this.#layerCellsCache.get(locationKey)!
 
@@ -749,10 +750,10 @@ export class ShowCellDrone extends Drone {
         this.atlas = new HexLabelAtlas(this.pixiRenderer, 128, 8, 8)
         this.atlas.setPivot(this.#pivot)
         this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8)
-        this.seedImageCache.clear()
-        this.seedBorderColorCache.clear()
-        this.seedTagsCache.clear()
-        this.seedLinkCache.clear()
+        this.cellImageCache.clear()
+        this.cellBorderColorCache.clear()
+        this.cellTagsCache.clear()
+        this.cellLinkCache.clear()
         this.atlasRenderer = this.pixiRenderer
         this.shader = null
       }
@@ -771,8 +772,8 @@ export class ShowCellDrone extends Drone {
       }
 
       for (const cell of cached.cells) this.renderedCells.set(cell.label, cell)
-      this.cachedSeedNames = cached.seedNames
-      this.cachedLocalSeedSet = cached.localSeedSet
+      this.cachedCellNames = cached.cellNames
+      this.cachedLocalCellSet = cached.localCellSet
       this.cachedBranchSet = cached.branchSet
       await this.applyGeometry(cached.cells)
       if (this.layer) this.layer.visible = true
@@ -787,27 +788,27 @@ export class ShowCellDrone extends Drone {
       this.atlas = new HexLabelAtlas(this.pixiRenderer, 128, 8, 8)
       this.atlas.setPivot(this.#pivot)
       this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8)
-      this.seedImageCache.clear()
-      this.seedBorderColorCache.clear()
+      this.cellImageCache.clear()
+      this.cellBorderColorCache.clear()
       this.atlasRenderer = this.pixiRenderer
       this.shader = null
     } else if (!this.atlas || this.atlasRenderer !== this.pixiRenderer) {
       this.atlas = new HexLabelAtlas(this.pixiRenderer, 128, 8, 8)
       this.atlas.setPivot(this.#pivot)
       this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8)
-      this.seedImageCache.clear()
-      this.seedBorderColorCache.clear()
+      this.cellImageCache.clear()
+      this.cellBorderColorCache.clear()
       this.atlasRenderer = this.pixiRenderer
       this.shader = null
     }
 
     const fsRev = Number(lineage.changed?.() ?? 0)
-    const meshRev = this.meshSeedsRev
+    const meshRev = this.meshCellsRev
 
     const isStale = (): boolean => {
       const currentKey = String(lineage.explorerLabel?.() ?? '/')
       const currentRev = Number(lineage.changed?.() ?? 0)
-      const currentMeshRev = this.meshSeedsRev
+      const currentMeshRev = this.meshCellsRev
       return currentKey !== locationKey || currentRev !== fsRev || currentMeshRev !== meshRev
     }
 
@@ -826,21 +827,21 @@ export class ShowCellDrone extends Drone {
     // When tag filter is active, use pre-scanned cross-page results instead of explorer
     if (this.#tagFlattenResults && this.#tagFlattenResults.length > 0) {
       const flatResults = this.#tagFlattenResults
-      const seedNames = flatResults.map(r => r.label)
-      const flatSeedSet = new Set(seedNames)
+      const cellNames = flatResults.map(r => r.label)
+      const flatSeedSet = new Set(cellNames)
 
       const axial = this.resolve<any>('axial')
       if (!axial) { this.rendering = false; return }
 
-      const maxCells = Math.min(seedNames.length, typeof axial.items.size === 'number' ? axial.items.size : seedNames.length)
-      const cells = this.buildCellsFromAxial(axial, seedNames, maxCells, flatSeedSet)
+      const maxCells = Math.min(cellNames.length, typeof axial.items.size === 'number' ? axial.items.size : cellNames.length)
+      const cells = this.buildCellsFromAxial(axial, cellNames, maxCells, flatSeedSet)
       if (cells.length === 0) { this.clearMesh(); this.rendering = false; return }
 
       // load images from the first matching dir (best-effort)
       await this.loadCellImages(cells, dir!)
 
-      this.cachedSeedNames = seedNames
-      this.cachedLocalSeedSet = flatSeedSet
+      this.cachedCellNames = cellNames
+      this.cachedLocalCellSet = flatSeedSet
       this.cachedBranchSet = new Set()
       this.renderedCellsKey = 'tag-flatten:' + [...this.filterTags].sort().join(',')
       this.renderedLocationKey = locationKey
@@ -850,32 +851,32 @@ export class ShowCellDrone extends Drone {
       await this.applyGeometry(cells)
 
       this.#emitRenderTags(cells)
-      this.emitEffect('render:cell-count', { count: cells.length, labels: seedNames })
+      this.emitEffect('render:cell-count', { count: cells.length, labels: cellNames })
       this.rendering = false
       return
     }
 
-    // note: seed collection — always fresh, never cached
-    const localSeeds = await this.listSeedFolders(dir)
+    // note: cell collection — always fresh, never cached
+    const localCells = await this.listCellFolders(dir)
     if (isStale()) {
       this.renderQueued = true
       return
     }
 
-    // note: union with mesh seeds (shared)
+    // note: union with mesh cells (shared)
     const union = new Set<string>()
-    for (const s of localSeeds) union.add(s)
-    for (const s of this.meshSeeds) union.add(s)
+    for (const s of localCells) union.add(s)
+    for (const s of this.meshCells) union.add(s)
 
-    const localSeedSet = new Set(localSeeds)
+    const localCellSet = new Set(localCells)
 
-    // detect which local seeds have children (branches)
+    // detect which local cells have children (branches)
     const branchSet = new Set<string>()
-    await Promise.all(localSeeds.map(async (name) => {
-      if (await this.checkHasBranch(dir, name)) branchSet.add(name)
+    await Promise.all(localCells.map(async (name) => {
+      if (await this.checkCellHasBranch(dir, name)) branchSet.add(name)
     }))
 
-    // note: apply history — filter out seeds whose last operation is "remove"
+    // note: apply history — filter out cells whose last operation is "remove"
     // When a cursor is rewound, also compute divergence (future adds/removes)
     // Skip when clipboard view is active — clipboard labels are authoritative
     const historyService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as HistoryService | undefined
@@ -894,23 +895,23 @@ export class ShowCellDrone extends Drone {
       if (isRewound && cursorService) {
         // Rewound: use cursor's divergence computation
         const divergence = cursorService.computeDivergence()
-        // Remove seeds not in current set
-        for (const seed of [...union]) {
-          if (!divergence.current.has(seed) && !divergence.futureAdds.has(seed)) {
-            union.delete(seed)
+        // Remove cells not in current set
+        for (const cell of [...union]) {
+          if (!divergence.current.has(cell) && !divergence.futureAdds.has(cell)) {
+            union.delete(cell)
           }
         }
-        // Add future-add seeds back to union (they'll render as ghosts)
-        for (const seed of divergence.futureAdds) union.add(seed)
+        // Add future-add cells back to union (they'll render as ghosts)
+        for (const cell of divergence.futureAdds) union.add(cell)
         this.#divergenceFutureAdds = divergence.futureAdds
         this.#divergenceFutureRemoves = divergence.futureRemoves
       } else {
-        // Not rewound: standard replay — filter out removed seeds
+        // Not rewound: standard replay — filter out removed cells
         const ops = await historyService.replay(sig.sig)
-        const seedState = new Map<string, string>()
-        for (const op of ops) seedState.set(op.seed, op.op)
-        for (const [seed, lastOp] of seedState) {
-          if (lastOp === 'remove') union.delete(seed)
+        const cellState = new Map<string, string>()
+        for (const op of ops) cellState.set(op.cell, op.op)
+        for (const [cell, lastOp] of cellState) {
+          if (lastOp === 'remove') union.delete(cell)
         }
       }
     }
@@ -918,38 +919,38 @@ export class ShowCellDrone extends Drone {
     // filter out blocked external tiles and hidden local tiles before ordering
     const blockedSet = new Set<string>(JSON.parse(localStorage.getItem(`hc:blocked-tiles:${locationKey}`) ?? '[]'))
     for (const blocked of blockedSet) {
-      if (!localSeedSet.has(blocked)) union.delete(blocked)
+      if (!localCellSet.has(blocked)) union.delete(blocked)
     }
 
     const hiddenSet = new Set<string>(JSON.parse(localStorage.getItem(`hc:hidden-tiles:${locationKey}`) ?? '[]'))
     this.#currentHiddenSet = hiddenSet
     if (!this.#showHiddenItems) {
       for (const hidden of hiddenSet) {
-        if (localSeedSet.has(hidden)) union.delete(hidden)
+        if (localCellSet.has(hidden)) union.delete(hidden)
       }
     }
 
     // clipboard view: show only clipboard labels
     if (this.#clipboardView) {
       const clipLabels = this.#clipboardView.labels
-      for (const seed of union) {
-        if (!clipLabels.has(seed)) union.delete(seed)
+      for (const cell of union) {
+        if (!clipLabels.has(cell)) union.delete(cell)
       }
     }
 
     // read layout mode for this location
     this.#layoutMode = this.#readLayoutMode(locationKey)
 
-    let seedNames: string[]
+    let cellNames: string[]
 
     if (this.#layoutMode === 'pinned') {
-      // pinned mode: each seed renders at its stored index position (gaps allowed)
-      seedNames = await this.#orderByIndexPinned(dir, Array.from(union), localSeedSet)
+      // pinned mode: each cell renders at its stored index position (gaps allowed)
+      cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet)
 
       // apply search filter — blank out non-matching slots (preserve positions)
       if (this.filterKeyword) {
         const kw = this.filterKeyword
-        seedNames = seedNames.map(s => s && s.toLowerCase().includes(kw) ? s : '')
+        cellNames = cellNames.map(s => s && s.toLowerCase().includes(kw) ? s : '')
       }
     } else {
       // dense mode: pack tiles contiguously using persisted order or index+offset sort
@@ -960,29 +961,29 @@ export class ShowCellDrone extends Drone {
         const order = await orderProjection.hydrate(locSig.sig)
         if (order.length > 0) {
           const unionSet = new Set(union)
-          seedNames = order.filter(s => unionSet.has(s))
-          // append new seeds not yet in persisted order
+          cellNames = order.filter(s => unionSet.has(s))
+          // append new cells not yet in persisted order
           for (const s of union) {
-            if (!seedNames.includes(s)) seedNames.push(s)
+            if (!cellNames.includes(s)) cellNames.push(s)
           }
         } else {
-          seedNames = await this.#orderByIndex(dir, Array.from(union), localSeedSet)
+          cellNames = await this.#orderByIndex(dir, Array.from(union), localCellSet)
         }
       } else {
-        seedNames = await this.#orderByIndex(dir, Array.from(union), localSeedSet)
+        cellNames = await this.#orderByIndex(dir, Array.from(union), localCellSet)
       }
 
       // apply layout ordering if a __layout__ file exists
       const layout = this.resolve<any>('layout')
       if (layout) {
         const order = await layout.read(dir)
-        if (order) seedNames = layout.merge(order, seedNames)
+        if (order) cellNames = layout.merge(order, cellNames)
       }
 
       // apply search filter if active
       if (this.filterKeyword) {
         const kw = this.filterKeyword
-        seedNames = seedNames.filter((s: string) => s.toLowerCase().includes(kw))
+        cellNames = cellNames.filter((s: string) => s.toLowerCase().includes(kw))
       }
     }
 
@@ -1006,7 +1007,7 @@ export class ShowCellDrone extends Drone {
       const vp = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ViewportPersistence') as ViewportPersistence | undefined
       if (vp) vp.setDirSilent(dir)
 
-      if (seedNames.length === 0) {
+      if (cellNames.length === 0) {
         if (this.layer) this.layer.visible = true
         this.clearMesh()
         return
@@ -1018,27 +1019,27 @@ export class ShowCellDrone extends Drone {
       // emit navigation guard so click handlers block during transition
       this.emitEffect('navigation:guard-start', { locationKey })
 
-      // stream seeds progressively (async, non-blocking)
-      void this.streamSeeds(dir, seedNames, localSeedSet, axial, branchSet)
+      // stream cells progressively (async, non-blocking)
+      void this.streamCells(dir, cellNames, localCellSet, axial, branchSet)
       return
     }
 
-    // note: same layer — incremental path (seed collection was fresh, images are cached)
-    if (seedNames.length === 0) {
+    // note: same layer — incremental path (cell collection was fresh, images are cached)
+    if (cellNames.length === 0) {
       this.clearMesh()
       return
     }
 
     const wasEmpty = this.renderedCount === 0
 
-    const axialMax = typeof axial.items.size === 'number' ? axial.items.size : seedNames.length
-    const maxCells = Math.min(seedNames.length, axialMax)
+    const axialMax = typeof axial.items.size === 'number' ? axial.items.size : cellNames.length
+    const maxCells = Math.min(cellNames.length, axialMax)
     if (maxCells <= 0) {
       this.clearMesh()
       return
     }
 
-    const cells = this.buildCellsFromAxial(axial, seedNames, maxCells, localSeedSet, branchSet)
+    const cells = this.buildCellsFromAxial(axial, cellNames, maxCells, localCellSet, branchSet)
     if (cells.length === 0) {
       this.clearMesh()
       return
@@ -1052,8 +1053,8 @@ export class ShowCellDrone extends Drone {
     }
 
     // cache render context for fast move:preview path
-    this.cachedSeedNames = seedNames
-    this.cachedLocalSeedSet = localSeedSet
+    this.cachedCellNames = cellNames
+    this.cachedLocalCellSet = localCellSet
     this.cachedBranchSet = branchSet
 
     this.renderedCells.clear()
@@ -1075,34 +1076,34 @@ export class ShowCellDrone extends Drone {
     }
 
     // cache for instant back-navigation
-    this.#layerCellsCache.set(locationKey, { cells: [...cells], seedNames, localSeedSet, branchSet })
+    this.#layerCellsCache.set(locationKey, { cells: [...cells], cellNames, localCellSet, branchSet })
   }
 
-  private readonly streamSeeds = async (
+  private readonly streamCells = async (
     dir: FileSystemDirectoryHandle,
-    seedNames: string[],
-    localSeedSet: Set<string>,
+    cellNames: string[],
+    localCellSet: Set<string>,
     axial: any,
     branchSet?: Set<string>,
   ): Promise<void> => {
     this.streamActive = true
     this.cancelStreamFlag = false
 
-    const cells: SeedCell[] = []
+    const cells: Cell[] = []
 
-    for (let index = 0; index < seedNames.length; index++) {
+    for (let index = 0; index < cellNames.length; index++) {
       if (this.cancelStreamFlag) break
 
-      const label = seedNames[index]
+      const label = cellNames[index]
       const axialCell = axial.items.get(index) as Axial | undefined
       if (!axialCell || !label) continue
 
       const div = this.#divergenceFutureAdds.has(label) ? 1 : this.#divergenceFutureRemoves.has(label) ? 2 : 0
-      const cell: SeedCell = {
+      const cell: Cell = {
         q: axialCell.q,
         r: axialCell.r,
         label,
-        external: !localSeedSet.has(label),
+        external: !localCellSet.has(label),
         hasBranch: branchSet?.has(label) ?? false,
         divergence: div,
       }
@@ -1113,7 +1114,7 @@ export class ShowCellDrone extends Drone {
       cells.push(cell)
       this.renderedCells.set(label, cell)
 
-      const isLastSeed = index === seedNames.length - 1
+      const isLastSeed = index === cellNames.length - 1
       if (cells.length % ShowCellDrone.STREAM_BATCH_SIZE === 0 || isLastSeed) {
         await this.applyGeometry(cells, isLastSeed)
       }
@@ -1130,7 +1131,7 @@ export class ShowCellDrone extends Drone {
     // cache for instant back-navigation
     if (!this.cancelStreamFlag && cells.length > 0) {
       const locKey = this.renderedLocationKey
-      this.#layerCellsCache.set(locKey, { cells: [...cells], seedNames, localSeedSet, branchSet: branchSet ?? new Set() })
+      this.#layerCellsCache.set(locKey, { cells: [...cells], cellNames, localCellSet, branchSet: branchSet ?? new Set() })
     }
 
     this.requestRender()
@@ -1173,7 +1174,7 @@ export class ShowCellDrone extends Drone {
     }
   }
 
-  private readonly applyGeometry = async (cells: SeedCell[], final = true): Promise<void> => {
+  private readonly applyGeometry = async (cells: Cell[], final = true): Promise<void> => {
     if (cells.length === 0) {
       this.clearMesh()
       return
@@ -1208,6 +1209,8 @@ export class ShowCellDrone extends Drone {
 
     if (!this.shader) {
       this.shader = new HexSdfTextureShader(labelTex, cellImageTex, quadW, quadH, circumRadiusPx)
+      const [ar, ag, ab] = this.#accentColor
+      this.shader.setAccentColor(ar, ag, ab)
     } else {
       try {
         this.shader.setLabelAtlas(labelTex)
@@ -1264,10 +1267,10 @@ export class ShowCellDrone extends Drone {
   }
 
   /** Emit render:tags with unique tag names + counts from all currently visible cells. */
-  #emitRenderTags(cells: SeedCell[]): void {
+  #emitRenderTags(cells: Cell[]): void {
     const counts = new Map<string, number>()
     for (const cell of cells) {
-      const tags = this.seedTagsCache.get(cell.label)
+      const tags = this.cellTagsCache.get(cell.label)
       if (tags) {
         for (const tag of tags) {
           counts.set(tag, (counts.get(tag) ?? 0) + 1)
@@ -1295,14 +1298,14 @@ export class ShowCellDrone extends Drone {
     window.addEventListener('synchronize', this.requestRender)
     window.addEventListener('navigate', this.requestRender)
 
-    // tile:saved effect — invalidate image cache for the specific seed so re-render picks up new image
-    this.onEffect<{ seed: string }>('tile:saved', (payload) => {
-      if (payload?.seed) {
-        const oldSig = this.seedImageCache.get(payload.seed)
-        this.seedImageCache.delete(payload.seed)
-        this.seedBorderColorCache.delete(payload.seed)
-        this.seedTagsCache.delete(payload.seed)
-        this.seedLinkCache.delete(payload.seed)
+    // tile:saved effect — invalidate image cache for the specific cell so re-render picks up new image
+    this.onEffect<{ cell: string }>('tile:saved', (payload) => {
+      if (payload?.cell) {
+        const oldSig = this.cellImageCache.get(payload.cell)
+        this.cellImageCache.delete(payload.cell)
+        this.cellBorderColorCache.delete(payload.cell)
+        this.cellTagsCache.delete(payload.cell)
+        this.cellLinkCache.delete(payload.cell)
         if (oldSig && this.imageAtlas) {
           this.imageAtlas.invalidate(oldSig)
         }
@@ -1312,24 +1315,24 @@ export class ShowCellDrone extends Drone {
       this.requestRender()
     })
 
-    // tags:changed effect — invalidate tag cache for affected seeds and re-emit render:tags
-    this.onEffect<{ updates: { seed: string }[] }>('tags:changed', (payload) => {
+    // tags:changed effect — invalidate tag cache for affected cells and re-emit render:tags
+    this.onEffect<{ updates: { cell: string }[] }>('tags:changed', (payload) => {
       if (!payload?.updates) return
-      for (const { seed } of payload.updates) {
-        this.seedTagsCache.delete(seed)
+      for (const { cell } of payload.updates) {
+        this.cellTagsCache.delete(cell)
       }
       this.#layerCellsCache.delete(this.renderedLocationKey)
       this.renderedCellsKey = ''
       this.requestRender()
     })
 
-    // seed:added / seed:removed — invalidate render cache so next synchronize picks up new tile set
-    this.onEffect<{ seed: string }>('seed:added', () => {
+    // cell:added / cell:removed — invalidate render cache so next synchronize picks up new tile set
+    this.onEffect<{ cell: string }>('cell:added', () => {
       this.#layerCellsCache.clear()
       this.renderedCellsKey = ''
     })
 
-    this.onEffect<{ seed: string }>('seed:removed', () => {
+    this.onEffect<{ cell: string }>('cell:removed', () => {
       this.#layerCellsCache.clear()
       this.renderedCellsKey = ''
     })
@@ -1375,7 +1378,7 @@ export class ShowCellDrone extends Drone {
     this.onEffect<{ names: string[]; movedLabels: Set<string> } | null>('move:preview', (payload) => {
       this.moveNames = payload?.names ?? null
       this.renderedCellsKey = '' // force geometry rebuild
-      if (payload && this.cachedSeedNames) {
+      if (payload && this.cachedCellNames) {
         // fast path: reuse cached render context, only rebuild geometry with swapped labels
         this.renderMovePreview()
       } else {
@@ -1397,7 +1400,7 @@ export class ShowCellDrone extends Drone {
       if (this.#flat !== payload.flat) {
         this.#flat = payload.flat
         // invalidate image cache since we need different snapshots
-        this.seedImageCache.clear()
+        this.cellImageCache.clear()
         this.#layerCellsCache.clear()
         this.renderedCellsKey = ''
         this.requestRender()
@@ -1421,7 +1424,7 @@ export class ShowCellDrone extends Drone {
       }
     })
 
-    // clipboard:view effect — filter visible seeds to clipboard contents
+    // clipboard:view effect — filter visible cells to clipboard contents
     this.onEffect<{ active: boolean; labels?: string[]; sourceSegments?: string[] }>('clipboard:view', (payload) => {
       if (payload?.active && payload.labels) {
         this.#clipboardView = {
@@ -1457,7 +1460,7 @@ export class ShowCellDrone extends Drone {
       // cut: tiles disappear via history remove ops + synchronize (handled by ClipboardWorker)
     })
 
-    // seed from persisted stores so secret/room survive page reload
+    // cell from persisted stores so secret/room survive page reload
     const roomStore = get<any>('@hypercomb.social/RoomStore')
     const secretStore = get<any>('@hypercomb.social/SecretStore')
     if (roomStore?.value && this.#space !== roomStore.value) {
@@ -1469,12 +1472,12 @@ export class ShowCellDrone extends Drone {
       this.renderedLocationKey = ''
     }
 
-    // listen for public/private toggle — clear mesh seeds when going private so
+    // listen for public/private toggle — clear mesh cells when going private so
     // external tiles disappear immediately without requiring a manual refresh
     this.onEffect<{ public: boolean }>('mesh:public-changed', ({ public: isPublic }) => {
       if (!isPublic) {
-        this.meshSeeds = []
-        this.meshSeedsRev++
+        this.meshCells = []
+        this.meshCellsRev++
       }
       this.#layerCellsCache.clear()
       this.renderedCellsKey = ''
@@ -1513,11 +1516,11 @@ export class ShowCellDrone extends Drone {
       this.requestRender()
     })
 
-    this.onEffect<{ seed: string; index: number }>('seed:place-at', (payload) => {
-      void this.#handlePlaceAt(payload.seed, payload.index)
+    this.onEffect<{ cell: string; index: number }>('cell:place-at', (payload) => {
+      void this.#handlePlaceAt(payload.cell, payload.index)
     })
 
-    this.onEffect<{ labels: string[] }>('seed:reorder', (payload) => {
+    this.onEffect<{ labels: string[] }>('cell:reorder', (payload) => {
       void this.#handleReorder(payload.labels)
     })
 
@@ -1549,15 +1552,41 @@ export class ShowCellDrone extends Drone {
       let hoverTags: string[] = []
       for (const [label, cell] of this.renderedCells) {
         if (cell.q === payload.q && cell.r === payload.r) {
-          hoverTags = this.seedTagsCache.get(label) ?? []
+          hoverTags = this.cellTagsCache.get(label) ?? []
           break
         }
       }
       this.emitEffect('tile:hover-tags', { tags: hoverTags })
     })
 
+    // accent color presets: glacier, bloom, aurora, ember, nebula
+    const ACCENT_COLORS: [number, number, number][] = [
+      [0.4, 0.85, 1.0],    // glacier — cyan
+      [1.0, 0.4, 0.7],     // bloom — magenta-pink
+      [0.2, 1.0, 0.6],     // aurora — green
+      [1.0, 0.6, 0.15],    // ember — warm amber
+      [0.65, 0.35, 1.0],   // nebula — violet
+    ]
+
+    // restore persisted accent color
+    const stored = parseInt(localStorage.getItem('hc:neon-color') ?? '0', 10)
+    if (stored >= 0 && stored < ACCENT_COLORS.length) {
+      this.#accentColor = ACCENT_COLORS[stored]
+    }
+    if (this.shader) {
+      const [r, g, b] = this.#accentColor
+      this.shader.setAccentColor(r, g, b)
+    }
+
+    this.onEffect<{ index: number }>('overlay:neon-color', ({ index }) => {
+      this.#accentColor = ACCENT_COLORS[index] ?? ACCENT_COLORS[0]
+      if (!this.shader) return
+      const [r, g, b] = this.#accentColor
+      this.shader.setAccentColor(r, g, b)
+    })
+
     ; (window as any).showCellsPoc = {
-      publishSeeds: async (seeds: string[]) => this.publishExplicitSeedList(seeds),
+      publishCells: async (cells: string[]) => this.publishExplicitCellList(cells),
       signature: async () => {
         const lineage = this.resolve<any>('lineage')
         return await this.computeSignatureLocation(lineage)
@@ -1591,8 +1620,8 @@ export class ShowCellDrone extends Drone {
     this.renderedCellsKey = ''
     this.renderedCount = 0
     this.renderedCells.clear()
-    this.cachedSeedNames = null
-    this.cachedLocalSeedSet = null
+    this.cachedCellNames = null
+    this.cachedLocalCellSet = null
     this.cachedBranchSet = null
     this.emitEffect('render:cell-count', { count: 0, labels: [] })
   }
@@ -1602,11 +1631,11 @@ export class ShowCellDrone extends Drone {
     this.shader = null
     this.atlas = new HexLabelAtlas(renderer, 128, 8, 8)
     this.imageAtlas = new HexImageAtlas(renderer, 256, 8, 8)
-    this.seedImageCache.clear()
+    this.cellImageCache.clear()
     this.atlasRenderer = renderer
   }
 
-  private listSeedFolders = async (dir: FileSystemDirectoryHandle): Promise<string[]> => {
+  private listCellFolders = async (dir: FileSystemDirectoryHandle): Promise<string[]> => {
     const out: string[] = []
 
     for await (const [name, handle] of dir.entries()) {
@@ -1641,7 +1670,7 @@ export class ShowCellDrone extends Drone {
     localStorage.setItem(this.#layoutModeKey(locationKey), mode)
   }
 
-  async #orderByIndexPinned(dir: FileSystemDirectoryHandle, names: string[], localSeedSet: Set<string>): Promise<string[]> {
+  async #orderByIndexPinned(dir: FileSystemDirectoryHandle, names: string[], localCellSet: Set<string>): Promise<string[]> {
     const axial = this.resolve<any>('axial')
     const maxSlot = axial?.count ?? 60
     const sparse: string[] = new Array(maxSlot + 1).fill('')
@@ -1650,13 +1679,13 @@ export class ShowCellDrone extends Drone {
     const unindexed: string[] = []
 
     for (const name of names) {
-      if (!localSeedSet.has(name)) {
+      if (!localCellSet.has(name)) {
         unindexed.push(name)
         continue
       }
       try {
-        const seedDir = await dir.getDirectoryHandle(name, { create: false })
-        const props = await readSeedProperties(seedDir)
+        const cellDir = await dir.getDirectoryHandle(name, { create: false })
+        const props = await readCellProperties(cellDir)
         if (typeof props['index'] === 'number') {
           const idx = props['index'] as number
           if (idx >= 0 && idx <= maxSlot) {
@@ -1672,16 +1701,16 @@ export class ShowCellDrone extends Drone {
       }
     }
 
-    // place unindexed seeds in the first available empty slots
+    // place unindexed cells in the first available empty slots
     for (const name of unindexed) {
       while (nextFree <= maxSlot && sparse[nextFree] !== '') nextFree++
       if (nextFree <= maxSlot) {
         sparse[nextFree] = name
         // persist the assigned index
-        if (localSeedSet.has(name)) {
+        if (localCellSet.has(name)) {
           try {
-            const seedDir = await dir.getDirectoryHandle(name, { create: false })
-            await writeSeedProperties(seedDir, { index: nextFree, offset: 0 })
+            const cellDir = await dir.getDirectoryHandle(name, { create: false })
+            await writeCellProperties(cellDir, { index: nextFree, offset: 0 })
           } catch { /* skip */ }
         }
         nextFree++
@@ -1692,23 +1721,23 @@ export class ShowCellDrone extends Drone {
   }
 
   /**
-   * Order seeds by their persisted index in the 0000 properties file.
-   * Seeds without an index get the next available index and are written back.
-   * External (mesh) seeds are always re-indexed locally.
+   * Order cells by their persisted index in the 0000 properties file.
+   * Cells without an index get the next available index and are written back.
+   * External (mesh) cells are always re-indexed locally.
    */
-  async #orderByIndex(dir: FileSystemDirectoryHandle, names: string[], localSeedSet: Set<string>): Promise<string[]> {
+  async #orderByIndex(dir: FileSystemDirectoryHandle, names: string[], localCellSet: Set<string>): Promise<string[]> {
     const indexed: { name: string; position: number }[] = []
     const unindexed: string[] = []
     let maxIndex = -1
 
     for (const name of names) {
-      if (!localSeedSet.has(name)) {
+      if (!localCellSet.has(name)) {
         unindexed.push(name)
         continue
       }
       try {
-        const seedDir = await dir.getDirectoryHandle(name, { create: false })
-        const props = await readSeedProperties(seedDir)
+        const cellDir = await dir.getDirectoryHandle(name, { create: false })
+        const props = await readCellProperties(cellDir)
         if (typeof props['index'] === 'number') {
           const idx = props['index'] as number
           const off = typeof props['offset'] === 'number' ? props['offset'] as number : 0
@@ -1725,7 +1754,7 @@ export class ShowCellDrone extends Drone {
     // sort by effective position (index + offset)
     indexed.sort((a, b) => a.position - b.position)
 
-    // assign next available permanent index to unindexed seeds
+    // assign next available permanent index to unindexed cells
     let nextIndex = maxIndex + 1
     if (indexed.length === 0) {
       unindexed.sort((a, b) => a.localeCompare(b))
@@ -1736,33 +1765,33 @@ export class ShowCellDrone extends Drone {
       // new tiles: index = permanent, offset = 0 → position = index
       indexed.push({ name, position: assignedIndex })
 
-      if (localSeedSet.has(name)) {
+      if (localCellSet.has(name)) {
         try {
-          const seedDir = await dir.getDirectoryHandle(name, { create: false })
-          await writeSeedProperties(seedDir, { index: assignedIndex, offset: 0 })
-        } catch { /* seed dir missing — skip */ }
+          const cellDir = await dir.getDirectoryHandle(name, { create: false })
+          await writeCellProperties(cellDir, { index: assignedIndex, offset: 0 })
+        } catch { /* cell dir missing — skip */ }
       }
     }
 
-    // re-sort after appending new seeds
+    // re-sort after appending new cells
     indexed.sort((a, b) => a.position - b.position)
     return indexed.map(s => s.name)
   }
 
-  async #handlePlaceAt(seed: string, targetIndex: number): Promise<void> {
+  async #handlePlaceAt(cell: string, targetIndex: number): Promise<void> {
     const lineage = this.resolve<any>('lineage')
     if (!lineage) return
     const dir = await lineage.explorerDir() as FileSystemDirectoryHandle | null
     if (!dir) return
 
-    // read all local seeds and their current indices
-    const localSeeds = await this.listSeedFolders(dir)
+    // read all local cells and their current indices
+    const localSeeds = await this.listCellFolders(dir)
     const entries: { name: string; index: number }[] = []
 
     for (const name of localSeeds) {
       try {
-        const seedDir = await dir.getDirectoryHandle(name, { create: false })
-        const props = await readSeedProperties(seedDir)
+        const cellDir = await dir.getDirectoryHandle(name, { create: false })
+        const props = await readCellProperties(cellDir)
         entries.push({ name, index: typeof props['index'] === 'number' ? props['index'] as number : entries.length })
       } catch {
         entries.push({ name, index: entries.length })
@@ -1771,10 +1800,10 @@ export class ShowCellDrone extends Drone {
 
     entries.sort((a, b) => a.index - b.index)
 
-    // remove seed if already present, then insert at target
-    const names = entries.map(e => e.name).filter(n => n !== seed)
+    // remove cell if already present, then insert at target
+    const names = entries.map(e => e.name).filter(n => n !== cell)
     const clamped = Math.max(0, Math.min(targetIndex, names.length))
-    names.splice(clamped, 0, seed)
+    names.splice(clamped, 0, cell)
 
     // write updated indices
     await this.#writeIndices(dir, names)
@@ -1799,8 +1828,8 @@ export class ShowCellDrone extends Drone {
     const existingIndices = new Map<string, number>()
     for (const name of orderedNames) {
       try {
-        const seedDir = await dir.getDirectoryHandle(name, { create: false })
-        const props = await readSeedProperties(seedDir)
+        const cellDir = await dir.getDirectoryHandle(name, { create: false })
+        const props = await readCellProperties(cellDir)
         if (typeof props['index'] === 'number') {
           existingIndices.set(name, props['index'] as number)
           if ((props['index'] as number) > maxIndex) maxIndex = props['index'] as number
@@ -1816,24 +1845,24 @@ export class ShowCellDrone extends Drone {
       }
       const offset = i - permanentIndex
       try {
-        const seedDir = await dir.getDirectoryHandle(name, { create: false })
-        await writeSeedProperties(seedDir, { index: permanentIndex, offset })
-      } catch { /* skip missing seed dirs */ }
+        const cellDir = await dir.getDirectoryHandle(name, { create: false })
+        await writeCellProperties(cellDir, { index: permanentIndex, offset })
+      } catch { /* skip missing cell dirs */ }
     }
   }
 
-  private checkHasBranch = async (parentDir: FileSystemDirectoryHandle, seedName: string): Promise<boolean> => {
+  private checkCellHasBranch = async (parentDir: FileSystemDirectoryHandle, cellName: string): Promise<boolean> => {
     try {
-      const seedDir = await parentDir.getDirectoryHandle(seedName, { create: false })
-      for await (const [name, handle] of seedDir.entries()) {
+      const cellDir = await parentDir.getDirectoryHandle(cellName, { create: false })
+      for await (const [name, handle] of cellDir.entries()) {
         if (handle.kind === 'directory' && !name.startsWith('__')) return true
       }
-    } catch { /* seed doesn't exist or can't be read */ }
+    } catch { /* cell doesn't exist or can't be read */ }
     return false
   }
 
-  private buildCellsFromAxial = (axial: any, names: string[], max: number, localSeedSet: Set<string>, branchSet?: Set<string>): SeedCell[] => {
-    const out: SeedCell[] = []
+  private buildCellsFromAxial = (axial: any, names: string[], max: number, localCellSet: Set<string>, branchSet?: Set<string>): Cell[] => {
+    const out: Cell[] = []
     // during move drag, use reordered names so labels map to correct indices
     const effectiveNames = this.moveNames ?? names
 
@@ -1844,7 +1873,7 @@ export class ShowCellDrone extends Drone {
       if (!label) continue
 
       const div = this.#divergenceFutureAdds.has(label) ? 1 : this.#divergenceFutureRemoves.has(label) ? 2 : 0
-      out.push({ q: a.q, r: a.r, label, external: !localSeedSet.has(label), heat: this.#heatByLabel.get(label) ?? 0, hasBranch: branchSet?.has(label) ?? false, divergence: div })
+      out.push({ q: a.q, r: a.r, label, external: !localCellSet.has(label), heat: this.#heatByLabel.get(label) ?? 0, hasBranch: branchSet?.has(label) ?? false, divergence: div })
     }
 
     return out
@@ -1856,7 +1885,7 @@ export class ShowCellDrone extends Drone {
    * Standard: any property value matching a 64-char hex signature
    * refers to a blob in __resources__/{signature}.
    */
-  private loadCellImages = async (cells: SeedCell[], _dir: FileSystemDirectoryHandle): Promise<void> => {
+  private loadCellImages = async (cells: Cell[], _dir: FileSystemDirectoryHandle): Promise<void> => {
     const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as
       { getResource: (sig: string) => Promise<Blob | null> } | undefined
     if (!store || !this.imageAtlas) return
@@ -1864,29 +1893,29 @@ export class ShowCellDrone extends Drone {
     const propsIndex: Record<string, string> = JSON.parse(localStorage.getItem('hc:tile-props-index') ?? '{}')
 
     for (const cell of cells) {
-      // external seeds don't have local OPFS data
+      // external cells don't have local OPFS data
       if (cell.external) continue
 
       // load tags + link from OPFS if not cached (independent of image cache)
-      if (!this.seedTagsCache.has(cell.label)) {
+      if (!this.cellTagsCache.has(cell.label)) {
         try {
-          const seedDir = await _dir.getDirectoryHandle(cell.label)
-          const tagProps = await readSeedProperties(seedDir)
+          const cellDir = await _dir.getDirectoryHandle(cell.label)
+          const tagProps = await readCellProperties(cellDir)
           const rawTags = tagProps?.['tags']
-          this.seedTagsCache.set(cell.label, Array.isArray(rawTags)
+          this.cellTagsCache.set(cell.label, Array.isArray(rawTags)
             ? (rawTags as unknown[]).filter((t): t is string => typeof t === 'string')
             : [])
-          if (!this.seedLinkCache.has(cell.label)) {
-            this.seedLinkCache.set(cell.label, typeof tagProps?.['link'] === 'string' && (tagProps['link'] as string).length > 0)
+          if (!this.cellLinkCache.has(cell.label)) {
+            this.cellLinkCache.set(cell.label, typeof tagProps?.['link'] === 'string' && (tagProps['link'] as string).length > 0)
           }
-        } catch { this.seedTagsCache.set(cell.label, []) }
+        } catch { this.cellTagsCache.set(cell.label, []) }
       }
 
       // check cache first
-      if (this.seedImageCache.has(cell.label)) {
-        cell.imageSig = this.seedImageCache.get(cell.label) ?? undefined
-        cell.borderColor = this.seedBorderColorCache.get(cell.label)
-        cell.hasLink = this.seedLinkCache.get(cell.label) ?? false
+      if (this.cellImageCache.has(cell.label)) {
+        cell.imageSig = this.cellImageCache.get(cell.label) ?? undefined
+        cell.borderColor = this.cellBorderColorCache.get(cell.label)
+        cell.hasLink = this.cellLinkCache.get(cell.label) ?? false
         continue
       }
 
@@ -1907,26 +1936,26 @@ export class ShowCellDrone extends Drone {
           const g = parseInt(hex.slice(3, 5), 16) / 255
           const b = parseInt(hex.slice(5, 7), 16) / 255
           cell.borderColor = [r, g, b]
-          this.seedBorderColorCache.set(cell.label, [r, g, b])
+          this.cellBorderColorCache.set(cell.label, [r, g, b])
         }
 
         // extract tags from properties
         const cellTags = props?.['tags']
         if (Array.isArray(cellTags)) {
-          this.seedTagsCache.set(cell.label, cellTags.filter((t: unknown) => typeof t === 'string'))
+          this.cellTagsCache.set(cell.label, cellTags.filter((t: unknown) => typeof t === 'string'))
         } else {
-          this.seedTagsCache.set(cell.label, [])
+          this.cellTagsCache.set(cell.label, [])
         }
 
         // extract link presence
         const hasLink = typeof props?.link === 'string' && props.link.length > 0
-        this.seedLinkCache.set(cell.label, hasLink)
+        this.cellLinkCache.set(cell.label, hasLink)
         cell.hasLink = hasLink
 
         const smallSig = (this.#flat && props?.flat?.small?.image) || props?.small?.image
         if (smallSig && isSignature(smallSig)) {
           cell.imageSig = smallSig
-          this.seedImageCache.set(cell.label, smallSig)
+          this.cellImageCache.set(cell.label, smallSig)
 
           // load blob into image atlas if not already there
           if (!this.imageAtlas.hasImage(smallSig)) {
@@ -1936,16 +1965,16 @@ export class ShowCellDrone extends Drone {
             }
           }
         } else {
-          this.seedImageCache.set(cell.label, null)
+          this.cellImageCache.set(cell.label, null)
         }
       } catch {
-        // no seed dir or no properties file — no image
-        this.seedImageCache.set(cell.label, null)
+        // no cell dir or no properties file — no image
+        this.cellImageCache.set(cell.label, null)
       }
     }
   }
 
-  private buildCellsKey = (cells: SeedCell[]): string => {
+  private buildCellsKey = (cells: Cell[]): string => {
     const selectionService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SelectionService') as
       { isSelected: (label: string) => boolean } | undefined
     let s = `p${this.#pivot ? 1 : 0}f${this.#flat ? 1 : 0}|`
@@ -1957,7 +1986,7 @@ export class ShowCellDrone extends Drone {
     ? { x: 1.5 * s * q, y: Math.sqrt(3) * s * (r + q / 2) }
     : { x: Math.sqrt(3) * s * (q + r / 2), y: s * 1.5 * r }
 
-  private buildFillQuadGeometry(cells: SeedCell[], r: number, gap: number, hw: number, hh: number): Geometry {
+  private buildFillQuadGeometry(cells: Cell[], r: number, gap: number, hw: number, hh: number): Geometry {
     const spacing = r + gap
 
     const selectionService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SelectionService') as

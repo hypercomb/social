@@ -18,6 +18,7 @@ const HOVER_CLASS = 'atomizer-drop-hover'
 
 export class AtomizerDropWorker extends Bee {
   readonly namespace = 'diamondcoreprocessor.com'
+  override genotype = 'assistant'
   override description = 'Manages atomizer drag-and-drop onto controls'
 
   protected override listens = ['atomizer:drag-start', 'atomizer:drag-end']

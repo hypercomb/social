@@ -38,7 +38,7 @@ const backgroundColorProvider: FormatProvider = {
 
 export interface FormatPainterState {
   open: boolean
-  sourceSeed: string | null
+  sourceCell: string | null
   entries: Array<FormatEntry & { enabled: boolean }>
 }
 
@@ -55,21 +55,21 @@ type Store = {
 export class FormatPainterDrone extends EventTarget {
 
   #open = false
-  #sourceSeed: string | null = null
+  #sourceCell: string | null = null
   #entries: Array<FormatEntry & { enabled: boolean }> = []
   #providers: FormatProvider[] = [borderColorProvider, backgroundColorProvider]
 
   get state(): FormatPainterState {
     return {
       open: this.#open,
-      sourceSeed: this.#sourceSeed,
+      sourceCell: this.#sourceCell,
       entries: this.#entries.map(e => ({ ...e })),
     }
   }
 
   // ── load source tile's properties ──────────────────────
 
-  async #loadSource(seed: string): Promise<void> {
+  async #loadSource(cell: string): Promise<void> {
     const store = window.ioc.get<Store>('@hypercomb.social/Store')
     if (!store) return
 
@@ -77,7 +77,7 @@ export class FormatPainterDrone extends EventTarget {
     try {
       const indexKey = 'hc:tile-props-index'
       const index: Record<string, string> = JSON.parse(localStorage.getItem(indexKey) ?? '{}')
-      const propsSig = index[seed]
+      const propsSig = index[cell]
       if (!propsSig) throw new Error('no index entry')
       const propsBlob = await store.getResource(propsSig)
       if (!propsBlob) throw new Error('props blob missing')
@@ -86,14 +86,14 @@ export class FormatPainterDrone extends EventTarget {
       // no properties
     }
 
-    this.#openPainter(seed, properties)
+    this.#openPainter(cell, properties)
   }
 
   constructor() {
     super()
 
-    EffectBus.on<{ seed: string; properties: Record<string, unknown> }>('format:open', (payload) => {
-      this.#openPainter(payload.seed, payload.properties)
+    EffectBus.on<{ cell: string; properties: Record<string, unknown> }>('format:open', (payload) => {
+      this.#openPainter(payload.cell, payload.properties)
     })
 
     EffectBus.on('format:close', () => {
@@ -111,7 +111,7 @@ export class FormatPainterDrone extends EventTarget {
     // when panel is open and user clicks a different tile, load its properties
     EffectBus.on<{ selected: string[]; active: string | null }>('selection:changed', (payload) => {
       if (!this.#open || !payload?.active) return
-      if (payload.active === this.#sourceSeed) return
+      if (payload.active === this.#sourceCell) return
       void this.#loadSource(payload.active)
     })
   }
@@ -122,8 +122,8 @@ export class FormatPainterDrone extends EventTarget {
 
   // ── open ────────────────────────────────────────────────
 
-  #openPainter(seed: string, props: Record<string, unknown>): void {
-    this.#sourceSeed = seed
+  #openPainter(cell: string, props: Record<string, unknown>): void {
+    this.#sourceCell = cell
     this.#entries = []
 
     for (const provider of this.#providers) {
@@ -141,7 +141,7 @@ export class FormatPainterDrone extends EventTarget {
 
   #close(): void {
     this.#open = false
-    this.#sourceSeed = null
+    this.#sourceCell = null
     this.#entries = []
     this.#emit()
   }
@@ -169,14 +169,14 @@ export class FormatPainterDrone extends EventTarget {
     const indexKey = 'hc:tile-props-index'
     const index: Record<string, string> = JSON.parse(localStorage.getItem(indexKey) ?? '{}')
 
-    for (const seed of selection.selected) {
+    for (const cell of selection.selected) {
       // skip source tile
-      if (seed === this.#sourceSeed) continue
+      if (cell === this.#sourceCell) continue
 
       // 1. read current props (content-addressed → legacy 0000 fallback)
       let props: Record<string, unknown> = {}
       try {
-        const propsSig = index[seed]
+        const propsSig = index[cell]
         if (!propsSig) throw new Error('no index entry')
         const propsBlob = await store.getResource(propsSig)
         if (!propsBlob) throw new Error('props blob missing')
@@ -199,10 +199,10 @@ export class FormatPainterDrone extends EventTarget {
       const propsSig = await store.putResource(blob)
 
       // 4. update index
-      index[seed] = propsSig
+      index[cell] = propsSig
 
       // 5. notify renderer
-      EffectBus.emit<{ seed: string }>('tile:saved', { seed })
+      EffectBus.emit<{ cell: string }>('tile:saved', { cell })
     }
 
     // persist updated index

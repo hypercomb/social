@@ -1,5 +1,5 @@
 // diamondcoreprocessor.com/assistant/atomize.drone.ts
-import { Drone, EffectBus, hypercomb, normalizeSeed } from '@hypercomb/core'
+import { Drone, EffectBus, hypercomb, normalizeCell } from '@hypercomb/core'
 import { MODELS, getApiKey, callAnthropic, API_KEY_STORAGE } from './llm-api.js'
 
 const SUBTOPIC_COUNT = 7
@@ -22,6 +22,7 @@ type TileActionPayload = { action: string; label: string; q: number; r: number; 
 
 export class AtomizeDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
+  override genotype = 'assistant'
   override description = 'expands a tile into constituent parts via Claude Haiku'
 
   protected override deps = {
@@ -31,7 +32,7 @@ export class AtomizeDrone extends Drone {
   }
 
   protected override listens = ['tile:action']
-  protected override emits = ['seed:added']
+  protected override emits = ['cell:added']
 
   #effectsRegistered = false
   #busy = false
@@ -58,7 +59,7 @@ export class AtomizeDrone extends Drone {
         return
       }
 
-      const label = normalizeSeed(rawLabel) || rawLabel
+      const label = normalizeCell(rawLabel) || rawLabel
 
       const userMessage = `Decompose this into ${SUBTOPIC_COUNT} constituent parts:\n\nTopic: ${label}`
 
@@ -77,9 +78,9 @@ export class AtomizeDrone extends Drone {
       }
 
       for (const item of parts) {
-        const name = normalizeSeed(item.name)
+        const name = normalizeCell(item.name)
         if (!name) continue
-        EffectBus.emit('seed:added', { seed: name })
+        EffectBus.emit('cell:added', { cell: name })
       }
 
       console.log(`[expand] ${label} → ${parts.length} parts`)

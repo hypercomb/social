@@ -56,15 +56,15 @@ export class OpfsTreeLogger {
                 const file = await handle.getFile()
                 const text = await file.text()
                 const props = JSON.parse(text) as Record<string, unknown>
-                return `  (seed)  ${this.#formatSeedProps(props)}`
+                return `  (cell)  ${this.#formatCellProps(props)}`
             } catch {
-                return '  (seed)'
+                return '  (cell)'
             }
         }
         return ''
     }
 
-    #formatSeedProps = (props: Record<string, unknown>): string => {
+    #formatCellProps = (props: Record<string, unknown>): string => {
         const parts: string[] = []
         if (props['name']) parts.push(`name="${props['name']}"`)
         if (props['link']) parts.push(`link="${props['link']}"`)

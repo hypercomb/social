@@ -80,7 +80,7 @@ what you walked.
 
 when a drone finds something meaningful, it can share the path in real time.
 `NostrMeshDrone` opens a decentralized relay connection to the Nostr network,
-enabling cross-device and cross-instance presence. drones publish seeds to signed
+enabling cross-device and cross-instance presence. drones publish cells to signed
 locations and subscribe to discover what others have planted.
 
 only drones who are present in the hive session can follow. outside observers

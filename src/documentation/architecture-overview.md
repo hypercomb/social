@@ -48,7 +48,7 @@ the two are the same system seen from different distances.
 - **signature**: sha-256 content address computed by `SignatureService`.
   like git or ipfs -- the content is the identity.
 - **opfs tree**: local filesystem rooted at `hypercomb.io/` in the browser's
-  origin private file system. seeds, bees, dependencies, resources, and layers live here.
+  origin private file system. cells, bees, dependencies, resources, and layers live here.
 - **(optional) mesh events**: nostr events tagged with a content-addressed
   signature. ttl-backed cache, auto-expiring, deduplicated across relays.
 
@@ -132,7 +132,7 @@ the spatial foundation is a hexagonal grid using axial coordinates.
   lists for all six neighbors, and provides closest-cell lookup.
 - **PixiHostWorker**: creates the pixi application and root render container.
   broadcasts `render:host-ready` so other drones can draw.
-- **ShowCellDrone**: unions local opfs seeds with mesh seeds, maps them
+- **ShowCellDrone**: unions local opfs cells with mesh cells, maps them
   onto axial positions, and renders labeled hex tiles via sdf shaders.
 - **HexSdfTextureShader**: programmatic signed-distance-field rendering for
   hex tiles — replaced svg borders with gpu-computed borders and overlays.
@@ -140,8 +140,8 @@ the spatial foundation is a hexagonal grid using axial coordinates.
   hex orientations, toggled via a header bar control. orientation changes
   propagate through settings to all input and rendering drones.
 
-the grid is what the byte protocol navigates. each cell is a seed.
-entering a cell means navigating into that seed's opfs directory.
+the grid is what the byte protocol navigates. each hex position is a cell.
+entering a cell means navigating into that cell's opfs directory.
 
 ---
 
@@ -172,8 +172,8 @@ no server, no cloud -- the data lives in the browser itself.
 
 ```
 opfs root
-  hypercomb.io/            domain root (seed tree)
-    Alice/                 seed directory (becomes a hex tile)
+  hypercomb.io/            domain root (cell tree)
+    Alice/                 cell directory (becomes a hex tile)
     Bob/
   __bees__/                compiled bee modules (by signature)
   __dependencies__/        namespace service bundles (by signature)
@@ -182,7 +182,7 @@ opfs root
   __history__/             history bags (sequenced operations per lineage)
 ```
 
-seeds are non-reserved subdirectories under the domain root. folders prefixed with `__` are reserved for the runtime. `Store` manages the opfs handles. `Lineage` tracks the current explorer path and domain context.
+cells are non-reserved subdirectories under the domain root. folders prefixed with `__` are reserved for the runtime. `Store` manages the opfs handles. `Lineage` tracks the current explorer path and domain context.
 
 ---
 
@@ -278,7 +278,7 @@ bridge providers connect ioc registrations to angular's DI when needed.
 ## session security
 
 - content-addressed signatures replace session nonces.
-  the signature of the current domain + explorer path + seed is computed
+  the signature of the current domain + explorer path + cell is computed
   on every heartbeat. only drones that resolve the same signature see
   the same mesh events.
 - nostr event signing via nip-07 or fallback key provides authenticity.
@@ -312,9 +312,9 @@ when a path should persist beyond a single session:
 
 - the driver publishes a nostr event with kind 29010,
   tagged with the content-addressed signature of the current location.
-- the event contains seed names (local filesystem folders shared
+- the event contains cell names (local filesystem folders shared
   with the mesh).
-- other bees with the same signature see these seeds appear
+- other bees with the same signature see these cells appear
   as external hex cells on their grid.
 - events expire after their ttl. republish to keep them alive.
 

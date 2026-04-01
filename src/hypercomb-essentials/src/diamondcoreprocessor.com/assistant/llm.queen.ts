@@ -21,6 +21,7 @@ Respond concisely and helpfully based on the provided context. Your response wil
  */
 export class LlmQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
+  override genotype = 'assistant'
   readonly command = 'opus'
   override readonly aliases = ['sonnet', 'haiku', 'o', 's', 'h']
   override description = 'Send context to a Claude LLM and store the response as a resource'
@@ -122,7 +123,7 @@ async function gatherContext(refs: string[]): Promise<string> {
           sections.push(`## Resource ${ref.slice(0, 12)}...\n${text}`)
         }
       } else {
-        // Lineage: walk OPFS path and read seeds
+        // Lineage: walk OPFS path and read cells
         const lineageContext = await readLineageContext(ref)
         if (lineageContext) {
           sections.push(`## Lineage: ${ref}\n${lineageContext}`)

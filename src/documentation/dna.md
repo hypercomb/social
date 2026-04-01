@@ -43,7 +43,7 @@ the capsule is intentionally tiny and self-contained.
 | FLAGS (1B): bitfield         |  0=none, 1<<0=anchored, 1<<1=attested, 1<<2=encrypted(reserved)
 +------------------------------+
 | POLICY (1B)                  |  0=creator-opt-in, 1=creator+cohort, 2=community-threshold
-| START_HASH (32B)             |  SHA-256 of the start seed (lineage entry point)
+| START_HASH (32B)             |  SHA-256 of the start cell (lineage entry point)
 | SALT (16B)                   |  random; mitigates preimage/rainbow on START_HASH
 +------------------------------+
 | INSTR_LEN (4B, LE)           |  number of instruction bytes
@@ -83,15 +83,15 @@ all of these produce **content-addressed hashes** (like git or ipfs), not asymme
 ## start_hash (entry point)
 
 ```
-start_hash = SHA-256(start_seed)
+start_hash = SHA-256(start_cell)
 ```
 
-- `start_seed` maps to a **lineage path** in the current architecture: `domain/path/seed` segments that `Lineage` resolves against opfs.
-- the seed can be a public category (e.g., `"chemistry"`) or an opaque community taxonomy byte string.
-- you may publish the cleartext `start_seed`, but it is optional.
-- `salt` prevents trivial dictionary reversal if seeds remain private.
+- `start_cell` maps to a **lineage path** in the current architecture: `domain/path/cell` segments that `Lineage` resolves against opfs.
+- the cell can be a public category (e.g., `"chemistry"`) or an opaque community taxonomy byte string.
+- you may publish the cleartext `start_cell`, but it is optional.
+- `salt` prevents trivial dictionary reversal if cells remain private.
 
-in the running system, `Lineage` manages the explorer path (`domain -> segments -> current handle`) and resolves content within the opfs tree rooted at `hypercomb.io`. the start_hash in a dna capsule corresponds to the sha-256 of the lineage seed that begins the path.
+in the running system, `Lineage` manages the explorer path (`domain -> segments -> current handle`) and resolves content within the opfs tree rooted at `hypercomb.io`. the start_hash in a dna capsule corresponds to the sha-256 of the lineage cell that begins the path.
 
 ---
 
@@ -143,7 +143,7 @@ no personal identifiers are required for any of the above.
 - no urls or server locations disclosed
 - no user identities embedded
 - `start_hash` can be public or opaque
-- `salt` defends against seed reversal
+- `salt` defends against cell name reversal
 - attestation keys may be pseudonymous; reputation is social (see: [hive.md](./hive.md))
 
 ---
@@ -153,7 +153,7 @@ no personal identifiers are required for any of the above.
 1. parse capsule, recompute `commitment` via `SHA-256(header || instr || length)`, compare.
 2. if attested, verify signatures against known keys/registry (future: nostr pubkeys).
 3. if anchored, confirm the commitment appears on-chain.
-4. resolve `start_hash` to a lineage entry point -- look up the seed in opfs via `Lineage.tryResolve()`.
+4. resolve `start_hash` to a lineage entry point -- look up the cell in opfs via `Lineage.tryResolve()`.
 5. re-execute `instr_bytes` in a **new live session** against the hex grid (`AxialService`).
 6. render the path; apply pheromone hints and local safety rules.
 

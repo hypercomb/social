@@ -9,11 +9,12 @@ import { MeshHeaderComponent } from "@hypercomb/shared/ui/mesh-header/mesh-heade
 import { PortalOverlayComponent } from "@hypercomb/shared/ui/portal/portal-overlay.component"
 import { SensitivityBarComponent } from "@hypercomb/shared/ui/sensitivity-bar/sensitivity-bar.component"
 import { SelectionContextMenuComponent } from "@hypercomb/shared/ui/selection-context-menu/selection-context-menu.component"
+import { ConfirmDialogComponent } from "@hypercomb/shared/ui/confirm-dialog/confirm-dialog.component"
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, Header, MeshHeaderComponent, TileEditorComponent, ControlsBarComponent, PortalOverlayComponent, SensitivityBarComponent, SelectionContextMenuComponent],
+  imports: [RouterOutlet, Header, MeshHeaderComponent, TileEditorComponent, ControlsBarComponent, PortalOverlayComponent, SensitivityBarComponent, SelectionContextMenuComponent, ConfirmDialogComponent],
   templateUrl: './app.html',
   styleUrl: './app.scss'
 })
@@ -50,9 +51,7 @@ export class App implements AfterViewInit {
 
   public ngAfterViewInit(): void {
     void this.runtimeReady.then(() => {
-      requestAnimationFrame(() => {
-        void this.startRegisteredBees()
-      })
+      void this.startRegisteredBees()
     })
   }
 
@@ -61,13 +60,11 @@ export class App implements AfterViewInit {
       .map(key => get(key))
       .filter((value): value is Bee => !!value && typeof (value as Bee).pulse === 'function')
 
-    for (const bee of values) {
-      try {
-        await bee.pulse('')
-      } catch (error) {
+    await Promise.allSettled(
+      values.map(bee => bee.pulse('').catch(error =>
         console.warn('[app] failed to start bee', bee.constructor?.name, error)
-      }
-    }
+      ))
+    )
 
     window.dispatchEvent(new Event('synchronize'))
 

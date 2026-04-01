@@ -63,6 +63,7 @@ type HitZone = {
 
 export class FlavorWheelDrone extends Drone {
   readonly namespace = 'revolucionstyle.com'
+  override genotype = 'revolucionstyle'
   public override description = 'interactive flavor wheel for cigar tasting notes'
 
   protected override listens = ['wheel:open', 'wheel:close']

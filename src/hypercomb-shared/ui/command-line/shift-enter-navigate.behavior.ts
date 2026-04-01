@@ -52,7 +52,7 @@ export class ShiftEnterNavigateBehavior implements CommandLineBehavior {
     const exists = await lineage.tryResolve(target)
     if (!exists) return
 
-    // navigate (no creation, no seed:added, no synchronize)
+    // navigate (no creation, no cell:added, no synchronize)
     navigation.goRaw([...navigation.segmentsRaw(), ...parts])
   }
 }

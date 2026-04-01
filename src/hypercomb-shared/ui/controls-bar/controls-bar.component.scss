@@ -39,8 +39,8 @@
   pointer-events: auto;
   transition: opacity 200ms ease;
 
-  .public-crumb { color: rgba(210, 215, 220, 0.7); padding: 0; }
-  .private-crumb { color: rgba(210, 215, 220, 0.7); padding: 0; }
+  .public-crumb { padding: 0; font-weight: 500; }
+  .private-crumb { color: rgba(140, 170, 210, 0.7); padding: 0; }
   .sep-crumb { color: rgba(210, 215, 220, 0.3); padding: 0 0.3em; font-size: 0.55em; vertical-align: middle; }
   .secure-crumb { padding: 0; font-weight: 500; }
   .unsecure-crumb { color: hsl(0, 70%, 50%); padding: 0; }

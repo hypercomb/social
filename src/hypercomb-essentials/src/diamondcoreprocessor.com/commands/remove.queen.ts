@@ -49,7 +49,7 @@ export class RemoveQueenBee extends QueenBee {
     for (const name of targets) {
       try {
         await dir.removeEntry(name, { recursive: true })
-        EffectBus.emit('seed:removed', { seed: name, groupId })
+        EffectBus.emit('cell:removed', { cell: name, groupId })
       } catch { /* entry doesn't exist or can't be removed — skip */ }
     }
 

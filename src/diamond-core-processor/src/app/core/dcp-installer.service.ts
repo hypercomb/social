@@ -63,23 +63,26 @@ export class DcpInstallerService {
     // 2) purge stale layers from previous installs
     await this.#purgeStale(domainDir, new Set(layers))
 
-    // 3) install layers (flat — files live at base root)
-    for (let i = 0; i < layers.length; i++) {
-      onProgress?.({ phase: 'layers', current: i + 1, total: layers.length })
-      await this.#installFile(domainDir, `${base}/__layers__/${layers[i]}.json`, layers[i], layers[i])
-    }
+    // 3) install layers (flat — files live at base root) — parallel
+    onProgress?.({ phase: 'layers', current: 0, total: layers.length })
+    await Promise.all(layers.map((sig, i) =>
+      this.#installFile(domainDir, `${base}/__layers__/${sig}.json`, sig, sig)
+        .then(() => onProgress?.({ phase: 'layers', current: i + 1, total: layers.length }))
+    ))
 
-    // 4) install bees
-    for (let i = 0; i < bees.length; i++) {
-      onProgress?.({ phase: 'bees', current: i + 1, total: bees.length })
-      await this.#installFile(this.#store.bees, `${base}/__bees__/${bees[i]}.js`, bees[i], `${bees[i]}.js`)
-    }
+    // 4) install bees — parallel
+    onProgress?.({ phase: 'bees', current: 0, total: bees.length })
+    await Promise.all(bees.map((sig, i) =>
+      this.#installFile(this.#store.bees, `${base}/__bees__/${sig}.js`, sig, `${sig}.js`)
+        .then(() => onProgress?.({ phase: 'bees', current: i + 1, total: bees.length }))
+    ))
 
-    // 5) install dependencies
-    for (let i = 0; i < deps.length; i++) {
-      onProgress?.({ phase: 'dependencies', current: i + 1, total: deps.length })
-      await this.#installFile(this.#store.dependencies, `${base}/__dependencies__/${deps[i]}.js`, deps[i], `${deps[i]}.js`)
-    }
+    // 5) install dependencies — parallel
+    onProgress?.({ phase: 'dependencies', current: 0, total: deps.length })
+    await Promise.all(deps.map((sig, i) =>
+      this.#installFile(this.#store.dependencies, `${base}/__dependencies__/${sig}.js`, sig, `${sig}.js`)
+        .then(() => onProgress?.({ phase: 'dependencies', current: i + 1, total: deps.length }))
+    ))
 
     // 6) cache resolved manifest in OPFS for offline sync
     await this.#cacheManifest(domainDir, manifest)

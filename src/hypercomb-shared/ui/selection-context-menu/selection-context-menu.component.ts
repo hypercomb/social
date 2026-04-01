@@ -27,6 +27,7 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
   // ── reactive state ──────────────────────────────────────
 
   #hasSelection = signal(false)
+  #allHidden = signal(false)
   #moveMode = signal(false)
   #clipboardCount = signal(0)
   #posX = signal(0)
@@ -34,6 +35,7 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
   #dragging = signal(false)
 
   readonly visible = computed(() => this.#hasSelection())
+  readonly allHidden = this.#allHidden.asReadonly()
   readonly moveMode = this.#moveMode.asReadonly()
   readonly clipboardCount = this.#clipboardCount.asReadonly()
   readonly posX = this.#posX.asReadonly()
@@ -49,6 +51,7 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
   // ── subscriptions ───────────────────────────────────────
 
   #selectionUnsub: (() => void) | null = null
+  #showHiddenUnsub: (() => void) | null = null
   #moveModeUnsub: (() => void) | null = null
   #clipboardUnsub: (() => void) | null = null
 
@@ -58,7 +61,15 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
     this.#restorePosition()
 
     this.#selectionUnsub = EffectBus.on<{ selected?: string[] }>('selection:changed', (payload) => {
-      this.#hasSelection.set((payload?.selected?.length ?? 0) > 0)
+      const selected = payload?.selected ?? []
+      this.#hasSelection.set(selected.length > 0)
+      this.#updateAllHidden(selected)
+    })
+
+    this.#showHiddenUnsub = EffectBus.on<{ active: boolean }>('visibility:show-hidden', () => {
+      // Re-check hidden state when show-hidden toggles (hidden set may have changed)
+      const selection = window.ioc.get<{ selected: ReadonlySet<string> }>('@diamondcoreprocessor.com/SelectionService')
+      if (selection) this.#updateAllHidden([...selection.selected])
     })
 
     this.#moveModeUnsub = EffectBus.on<{ active: boolean }>('move:mode', ({ active }) => {
@@ -74,6 +85,7 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.#selectionUnsub?.()
+    this.#showHiddenUnsub?.()
     this.#moveModeUnsub?.()
     this.#clipboardUnsub?.()
     window.removeEventListener('resize', this.#onResize)
@@ -101,6 +113,21 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
 
   readonly paste = (): void => {
     EffectBus.emit('controls:action', { action: 'paste' })
+  }
+
+  readonly hide = (): void => {
+    EffectBus.emit('controls:action', { action: 'hide' })
+  }
+
+  // ── hidden-state check ──────────────────────────────────
+
+  #updateAllHidden(selected: string[]): void {
+    if (selected.length === 0) { this.#allHidden.set(false); return }
+    const lineage = window.ioc.get<{ explorerLabel(): string }>('@hypercomb.social/Lineage')
+    const location = lineage?.explorerLabel() ?? '/'
+    const key = `hc:hidden-tiles:${location}`
+    const hiddenSet = new Set<string>(JSON.parse(localStorage.getItem(key) ?? '[]'))
+    this.#allHidden.set(selected.every(label => hiddenSet.has(label)))
   }
 
   // ── drag handle ─────────────────────────────────────────

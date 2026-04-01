@@ -6,6 +6,7 @@ import type { SelectionService } from '../selection/selection.service.js'
 
 export class ImagePasteWorker extends Worker {
   readonly namespace = 'diamondcoreprocessor.com'
+  override genotype = 'clipboard'
 
   public override description =
     'Intercepts browser paste events containing images and routes them into the tile editor.'
@@ -13,7 +14,7 @@ export class ImagePasteWorker extends Worker {
   protected override emits = ['drop:pending', 'search:prefill']
 
   #pendingBlob: Blob | null = null
-  #pendingSeedUnsub: (() => void) | null = null
+  #pendingCellUnsub: (() => void) | null = null
 
   constructor() {
     super()
@@ -61,22 +62,22 @@ export class ImagePasteWorker extends Worker {
     // Path B: tile selected — open editor for that tile, then load image
     const selection = this.#selection
     if (selection && selection.count > 0 && selection.active) {
-      const seed = selection.active
-      EffectBus.emit('tile:action', { action: 'edit', label: seed, q: 0, r: 0, index: 0 })
+      const cell = selection.active
+      EffectBus.emit('tile:action', { action: 'edit', label: cell, q: 0, r: 0, index: 0 })
       await this.#waitForEditorMode()
       this.#editorService?.setLargeBlob(blob)
       await this.#loadImageWhenReady(blob)
       return
     }
 
-    // Path C: nothing selected — stash blob, focus command line for seed name
+    // Path C: nothing selected — stash blob, focus command line for cell name
     this.#pendingBlob = blob
     EffectBus.emit('drop:pending', { active: true })
     EffectBus.emit('search:prefill', { value: '' })
 
-    // listen for seed:added — when user creates a seed, attach the image
-    this.#pendingSeedUnsub?.()
-    this.#pendingSeedUnsub = EffectBus.on<{ seed: string }>('seed:added', ({ seed }) => {
+    // listen for cell:added — when user creates a cell, attach the image
+    this.#pendingCellUnsub?.()
+    this.#pendingCellUnsub = EffectBus.on<{ cell: string }>('cell:added', ({ cell }) => {
       if (!this.#pendingBlob) return
       const stashedBlob = this.#pendingBlob
       this.#clearPending()
@@ -84,7 +85,7 @@ export class ImagePasteWorker extends Worker {
       void (async () => {
         await new Promise<void>(r => setTimeout(r, 150))
 
-        EffectBus.emit('tile:action', { action: 'edit', label: seed, q: 0, r: 0, index: 0 })
+        EffectBus.emit('tile:action', { action: 'edit', label: cell, q: 0, r: 0, index: 0 })
         await this.#waitForEditorMode()
         this.#editorService?.setLargeBlob(stashedBlob)
         await this.#loadImageWhenReady(stashedBlob)
@@ -101,8 +102,8 @@ export class ImagePasteWorker extends Worker {
 
   #clearPending(): void {
     this.#pendingBlob = null
-    this.#pendingSeedUnsub?.()
-    this.#pendingSeedUnsub = null
+    this.#pendingCellUnsub?.()
+    this.#pendingCellUnsub = null
     EffectBus.emit('drop:pending', { active: false })
   }
 

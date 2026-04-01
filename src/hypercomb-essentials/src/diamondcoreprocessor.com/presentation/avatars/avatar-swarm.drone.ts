@@ -79,6 +79,7 @@ function hslToRgb(h: number, s: number, l: number): [number, number, number] {
 
 export class AvatarSwarmDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
+  override genotype = 'sharing'
 
   public override description =
     'Renders real-time peer avatar cursors on the hex grid from mesh presence events.'
@@ -127,7 +128,7 @@ export class AvatarSwarmDrone extends Drone {
 
   // publish state
   #lastPublishMs = 0
-  #viewingSeed = ''
+  #viewingCell = ''
   #viewingQ = 0
   #viewingR = 0
 
@@ -218,7 +219,7 @@ export class AvatarSwarmDrone extends Drone {
 
     // track which tile the local user is hovering / viewing
     this.onEffect<{ label: string; q: number; r: number }>('tile:hover', ({ label, q, r }) => {
-      this.#viewingSeed = label
+      this.#viewingCell = label
       this.#viewingQ = q
       this.#viewingR = r
     })
@@ -457,7 +458,7 @@ export class AvatarSwarmDrone extends Drone {
       type: 'swarm-presence',
       publisherId: this.#publisherId,
       avatar: this.#ownAvatar,
-      viewingSeed: this.#viewingSeed,
+      viewingCell: this.#viewingCell,
       viewingQ: this.#viewingQ,
       viewingR: this.#viewingR,
       ts: now,

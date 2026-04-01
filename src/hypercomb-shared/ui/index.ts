@@ -8,4 +8,8 @@ export * from './activity-log/activity-log.component'
 export * from './selection-context-menu/selection-context-menu.component'
 export * from './atomizer-bar/atomizer-bar.component'
 export * from './atomizer-bar/atomizer-sidebar.component'
+export * from './confirm-dialog/confirm-dialog.component'
+export * from './toast/toast.component'
+export * from './guide/guide.component'
+export * from './hint-bar/hint-bar.component'
 

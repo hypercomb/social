@@ -12,6 +12,7 @@
       [showSuggestions]="showCompletions()"
       [typedPrefix]="completionTypedPrefix()"
       [descriptionMap]="slashDescriptionMap()"
+      [colorMap]="accentColorMap()"
       (valueChange)="onShellValueChange($event)"
       (commit)="onShellCommit($event)"
       (completionAccepted)="onShellCompletionAccepted($event)"
@@ -27,3 +28,11 @@
     }
   }
 </div>
+
+<hc-hint-bar
+  [items]="hintItems()"
+  [filter]="hintFilter()"
+  [chosen]="hintChosen()"
+  [colorMap]="accentColorMap()"
+  (pick)="onHintPick($event)"
+/>

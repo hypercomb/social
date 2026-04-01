@@ -32,7 +32,7 @@
 
 //     const location = await this.readLocation(domainLayersDir)
 
-//     const seeds: string[] = []
+//     const cells: string[] = []
 
 //     for await (const [name, entry] of domainLayersDir.entries()) {
 //       if (entry.kind !== 'file') continue
@@ -41,12 +41,12 @@
 //       const sig = name.slice(0, -LayerRestorationService.INSTALL_SUFFIX.length).toLowerCase()
 //       if (!this.isSignature(sig)) continue
 
-//       seeds.push(sig)
+//       cells.push(sig)
 //     }
 
 //     const visited = new Set<string>()
 
-//     for (const sig of seeds) {
+//     for (const sig of cells) {
 //       await this.restoreRecursive(domain, domainLayersDir, location, sig, visited)
 //     }
 //   }

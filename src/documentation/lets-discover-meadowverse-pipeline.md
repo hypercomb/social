@@ -10,7 +10,7 @@ a honeybee colony doesn't build comb in the field. it builds inside the hive —
 
 hypercomb has two environments, and they mirror this separation:
 
-**hypercomb.io** is the hive. Angular, Pixi.js, the hex grid, the Diamond Core Processor, the seed hierarchy. this is where you author bees, compile TypeScript in the browser, sign payloads, organize layers, navigate the comb. it is structured, opinionated, full of tooling. it is where you *build*.
+**hypercomb.io** is the hive. Angular, Pixi.js, the hex grid, the Diamond Core Processor, the cell hierarchy. this is where you author bees, compile TypeScript in the browser, sign payloads, organize layers, navigate the comb. it is structured, opinionated, full of tooling. it is where you *build*.
 
 **meadowverse.ca** is the meadow. vanilla JavaScript, Three.js, a single `<canvas>`. no Angular, no hex grid, no editor chrome. just a runtime surface where signed bees arrive, pulse, and render into a 3D scene. it is where things *run*.
 
@@ -283,7 +283,7 @@ these components exist today and would transfer directly to meadowverse:
 
 ## the vision
 
-you open hypercomb.io. you navigate to a seed. you open the Diamond Core Processor. you write a drone that creates a glowing wireframe torus. you compile it. 64 hex characters appear — that's your torus.
+you open hypercomb.io. you navigate to a cell. you open the Diamond Core Processor. you write a drone that creates a glowing wireframe torus. you compile it. 64 hex characters appear — that's your torus.
 
 you open meadowverse.ca in another tab. you paste the signature into the URL. the canvas shows a glowing wireframe torus, spinning slowly in empty space. nothing else. just your torus. you inspect it. you profile the shader. you adjust the geometry. each change produces a new signature. each signature produces the same torus, forever.
 

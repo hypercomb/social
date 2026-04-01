@@ -2,11 +2,12 @@
 
 import { AfterViewInit, Component, computed, signal, ViewChild, type OnDestroy } from '@angular/core'
 import { CommandShellComponent } from '../command-shell/command-shell.component'
+import { HintBarComponent } from '../hint-bar/hint-bar.component'
 import type { Lineage } from '../../core/lineage'
 import type { MovementService } from '../../core/movement.service'
 import type { Navigation } from '../../core/navigation'
 import type { ScriptPreloader } from '../../core/script-preloader'
-import type { SeedSuggestionProvider } from '../../core/seed-suggestion.provider'
+import type { CellSuggestionProvider } from '../../core/cell-suggestion.provider'
 import type { CompletionUtility, CompletionContext } from '@hypercomb/shared/core/completion-utility'
 import { fromRuntime } from '../../core/from-runtime'
 import { readTagProps, writeTagProps, persistTagOps, type TagOp } from '../../core/tag-ops'
@@ -30,7 +31,7 @@ const BUILTIN_SLASH: { command: { name: string; description: string; description
 /** Matches label:tagName or label:tagName(#color) (plain colon syntax, no brackets). */
 const TAG_ASSIGN_RE = /^([^:]+):([^(]+)(?:\(([^)]+)\))?$/
 
-/** Matches seed:[...] bracket-tag syntax — colon before opening bracket. */
+/** Matches cell:[...] bracket-tag syntax — colon before opening bracket. */
 const BRACKET_TAG_RE = /^([^\[\/!#~]+):\[(.+?)\](.*)$/
 
 const REMOVE_CMDS = new Set(['remove', 'rm'])
@@ -98,7 +99,7 @@ const MOVE_ARROW_OFFSETS: Record<string, { dq: number; dr: number }> = {
 @Component({
   selector: 'hc-command-line',
   standalone: true,
-  imports: [CommandShellComponent],
+  imports: [CommandShellComponent, HintBarComponent],
   templateUrl: './command-line.component.html',
   styleUrls: ['./command-line.component.scss']
 })
@@ -114,14 +115,14 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   private get movement(): MovementService { return get('@hypercomb.social/MovementService') as MovementService }
   private get navigation(): Navigation { return get('@hypercomb.social/Navigation') as Navigation }
   private get preloader(): ScriptPreloader { return get('@hypercomb.social/ScriptPreloader') as ScriptPreloader }
-  private get seedProvider(): SeedSuggestionProvider { return get('@hypercomb.social/SeedSuggestionProvider') as SeedSuggestionProvider }
+  private get cellProvider(): CellSuggestionProvider { return get('@hypercomb.social/CellSuggestionProvider') as CellSuggestionProvider }
 
   private readonly value = signal('')
-  private readonly seedSubPath = signal<readonly string[]>([])
-  private readonly seedLeaf = signal('')
-  /** Tags currently assigned to the seed in bracket-tag mode (for intellisense filtering). */
-  readonly #bracketSeedTags = signal<ReadonlySet<string>>(new Set())
-  #bracketSeedLabel = ''
+  private readonly cellSubPath = signal<readonly string[]>([])
+  private readonly cellLeaf = signal('')
+  /** Tags currently assigned to the cell in bracket-tag mode (for intellisense filtering). */
+  readonly #bracketCellTags = signal<ReadonlySet<string>>(new Set())
+  #bracketCellLabel = ''
 
   // slash command matches — queries the drone via IoC when in slash mode
   // includes built-in commands (select) alongside queen bee commands
@@ -157,12 +158,12 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     const bracketPhase = this.#bracketPhase()
     if (bracketPhase === 'items' || bracketPhase === 'path') {
-      return this.seedLeaf()
+      return this.cellLeaf()
     }
 
-    const subPath = this.seedSubPath()
+    const subPath = this.cellSubPath()
     if (subPath.length > 0) {
-      return this.seedLeaf()
+      return this.cellLeaf()
     }
 
     return this.completions.render(ctx.normalized, ctx.style)
@@ -265,9 +266,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     get('@hypercomb.social/ScriptPreloader') as EventTarget,
     () => this.preloader.actionNames
   )
-  private readonly seedNames$ = fromRuntime(
-    get('@hypercomb.social/SeedSuggestionProvider') as EventTarget,
-    () => this.seedProvider.suggestions()
+  private readonly cellNames$ = fromRuntime(
+    get('@hypercomb.social/CellSuggestionProvider') as EventTarget,
+    () => this.cellProvider.suggestions()
   )
 
   // pluggable behaviors — validated at construction, no overlapping operations
@@ -289,7 +290,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         {
           trigger: 'Enter',
           pattern: /^[^~\[#/][^/]*$/,
-          description: 'Create a new cell (seed) at the current level',
+          description: 'Create a new cell at the current level',
           examples: [
             { input: 'hello', key: 'Enter', result: 'Creates cell "hello" at current level' }
           ]
@@ -476,7 +477,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       }
     }
 
-    // ~ prefix enters remove mode — show seeds as intellisense
+    // ~ prefix enters remove mode — show cells as intellisense
     // supports: ~name, ~[a,b,c] (intellisense on the current segment)
     // Note: ~name:tag is tag removal (handled by tag pre-processor, not here)
     if (v.startsWith('~') && !v.includes(':')) {
@@ -597,9 +598,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
             if (n) already.add(n)
           }
         }
-        let seeds = this.seedNames$()
-        if (already.size) seeds = seeds.filter(n => !already.has(n))
-        return ctx.normalized ? seeds.filter(n => n.startsWith(ctx.normalized)) : seeds
+        let cells = this.cellNames$()
+        if (already.size) cells = cells.filter(n => !already.has(n))
+        return ctx.normalized ? cells.filter(n => n.startsWith(ctx.normalized)) : cells
       }
       return this.#slashMatches().map(m => m.command.name)
     }
@@ -618,11 +619,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
       // selection phase: show tile names, exclude already-selected
       if (phase === 'selection') {
-        let seeds = this.seedNames$()
+        let cells = this.cellNames$()
         const excluded = this.#selectExcluded()
-        if (excluded.size) seeds = seeds.filter(n => !excluded.has(n))
-        if (!ctx.normalized) return seeds
-        return seeds.filter(n => n.startsWith(ctx.normalized))
+        if (excluded.size) cells = cells.filter(n => !excluded.has(n))
+        if (!ctx.normalized) return cells
+        return cells.filter(n => n.startsWith(ctx.normalized))
       }
 
       // operation phase: suggest operation keywords with / prefix
@@ -634,23 +635,23 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
       // move-path phase: suggest child directories at the current navigation depth
       if (phase === 'move-path') {
-        const seeds = this.seedNames$()
-        if (!ctx.normalized) return seeds
-        return seeds.filter(n => n.startsWith(ctx.normalized))
+        const cells = this.cellNames$()
+        if (!ctx.normalized) return cells
+        return cells.filter(n => n.startsWith(ctx.normalized))
       }
 
       // move-target-swap phase: suggest tile names at target directory
       if (phase === 'move-target-swap') {
-        const seeds = this.seedNames$()
-        if (!ctx.normalized) return seeds
-        return seeds.filter(n => n.startsWith(ctx.normalized))
+        const cells = this.cellNames$()
+        if (!ctx.normalized) return cells
+        return cells.filter(n => n.startsWith(ctx.normalized))
       }
 
       // move-target-index: no suggestions (numeric input)
       return []
     }
 
-    // remove mode: show only seeds (tiles) that can be removed
+    // remove mode: show only cells (tiles) that can be removed
     // exclude items already chosen in bracket syntax ~[a,b,...]
     if (ctx.mode === 'remove') {
       const already = new Set<string>()
@@ -661,19 +662,19 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
           if (n) already.add(n)
         }
       }
-      let seeds = this.seedNames$()
-      if (already.size) seeds = seeds.filter(n => !already.has(n))
-      if (!ctx.normalized) return seeds
-      return seeds.filter(n => n.startsWith(ctx.normalized))
+      let cells = this.cellNames$()
+      if (already.size) cells = cells.filter(n => !already.has(n))
+      if (!ctx.normalized) return cells
+      return cells.filter(n => n.startsWith(ctx.normalized))
     }
 
     const bracketPhase = this.#bracketPhase()
-    const subPath = this.seedSubPath()
-    const leaf = this.seedLeaf()
-    const seeds = this.seedNames$()
+    const subPath = this.cellSubPath()
+    const leaf = this.cellLeaf()
+    const cells = this.cellNames$()
     const actions = this.actionNames$()
 
-    // bracket mode: filter by seedLeaf instead of ctx.normalized
+    // bracket mode: filter by cellLeaf instead of ctx.normalized
     if (bracketPhase === 'items' || bracketPhase === 'path') {
       // tag intellisense: when leaf starts with : or ~:, suggest tag names
       if (leaf.startsWith(':') || leaf.startsWith('~:')) {
@@ -681,40 +682,40 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         const prefix = isRemove ? leaf.slice(2) : leaf.slice(1)
         const registry = get('@hypercomb.social/TagRegistry') as { names: string[] } | undefined
         const allTags = registry?.names ?? []
-        const seedTags = this.#bracketSeedTags()
+        const cellTags = this.#bracketCellTags()
         const pending = this.#bracketPendingTags
 
         let candidates: string[]
         if (isRemove) {
-          // ~: → only tags currently ON the seed (minus ones already queued for removal)
-          candidates = allTags.filter(n => seedTags.has(n) && !pending.removes.has(n))
+          // ~: → only tags currently ON the cell (minus ones already queued for removal)
+          candidates = allTags.filter(n => cellTags.has(n) && !pending.removes.has(n))
         } else {
-          // : → only tags NOT on the seed (minus ones already queued for addition)
-          candidates = allTags.filter(n => !seedTags.has(n) && !pending.adds.has(n))
+          // : → only tags NOT on the cell (minus ones already queued for addition)
+          candidates = allTags.filter(n => !cellTags.has(n) && !pending.adds.has(n))
         }
 
         if (!prefix) return candidates
         return candidates.filter(n => n.startsWith(prefix))
       }
       if (subPath.length > 0) {
-        if (!leaf) return seeds
-        return seeds.filter(n => n.startsWith(leaf))
+        if (!leaf) return cells
+        return cells.filter(n => n.startsWith(leaf))
       }
-      // current level seeds only (no actions in bracket mode)
-      if (!leaf) return seeds
-      return seeds.filter(n => n.startsWith(leaf))
+      // current level cells only (no actions in bracket mode)
+      if (!leaf) return cells
+      return cells.filter(n => n.startsWith(leaf))
     }
 
-    // when in a sub-path (e.g. "abc/"), show only seeds at that level
+    // when in a sub-path (e.g. "abc/"), show only cells at that level
     if (subPath.length > 0) {
-      if (!leaf) return seeds
-      return seeds.filter(n => n.startsWith(leaf))
+      if (!leaf) return cells
+      return cells.filter(n => n.startsWith(leaf))
     }
 
-    // at root level: merge seeds + actions, deduplicated
+    // at root level: merge cells + actions, deduplicated
     const seen = new Set<string>()
     const merged: string[] = []
-    for (const name of seeds) {
+    for (const name of cells) {
       if (seen.has(name)) continue
       seen.add(name)
       merged.push(name)
@@ -739,6 +740,61 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   })
 
   // -------------------------------------------------
+  // hint bar (intellisense breadcrumbs)
+  // -------------------------------------------------
+
+  static readonly ACCENT_PRESETS: readonly string[] = ['glacier', 'bloom', 'aurora', 'ember', 'nebula']
+
+  /** CSS colors for each accent preset (derived from shader RGB values). */
+  static readonly ACCENT_COLOR_MAP: ReadonlyMap<string, string> = new Map([
+    ['glacier', 'rgb(102, 217, 255)'],
+    ['bloom',   'rgb(255, 102, 179)'],
+    ['aurora',  'rgb(51, 255, 153)'],
+    ['ember',   'rgb(255, 153, 38)'],
+    ['nebula',  'rgb(166, 89, 255)'],
+  ])
+
+  /** Full set of hint items — shown when accent mode is active. */
+  public readonly hintItems = computed<readonly string[]>(() => {
+    const ctx = this.context()
+    if (!ctx.active || ctx.mode !== 'slash') return []
+    const isAccent = ctx.head.match(/^\/(accent|ac)[\s\[]/i)
+    if (!isAccent) return []
+    // In preset phase, show all 5 presets
+    const inBrackets = ctx.head.includes('[') && !ctx.head.includes(']')
+    if (inBrackets) return []   // tags phase — hint bar not needed
+    return CommandLineComponent.ACCENT_PRESETS
+  })
+
+  /** Current filter for the hint bar — typed fragment. */
+  public readonly hintFilter = computed<string>(() => {
+    const ctx = this.context()
+    if (!ctx.active) return ''
+    return ctx.normalized
+  })
+
+  /** Items already chosen in the hint bar. */
+  public readonly hintChosen = computed<ReadonlySet<string>>(() => {
+    return new Set<string>()
+  })
+
+  /** Accent color map — active when in accent command context. */
+  public readonly accentColorMap = computed<ReadonlyMap<string, string>>(() => {
+    const ctx = this.context()
+    if (!ctx.active || ctx.mode !== 'slash') return new Map()
+    const isAccent = ctx.head.match(/^\/(accent|ac)[\s\[]/i)
+    if (!isAccent) return new Map()
+    return CommandLineComponent.ACCENT_COLOR_MAP
+  })
+
+  /** Handle a hint-bar crumb click — accept that preset. */
+  public onHintPick(preset: string): void {
+    const ctx = this.context()
+    if (!ctx.active) return
+    this.#setShellValue(ctx.head + preset, true)
+  }
+
+  // -------------------------------------------------
   // ghost mirror (second input layer)
   // -------------------------------------------------
 
@@ -752,8 +808,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const best = list[this.shell?.activeIndex() ?? 0] ?? list[0]
     if (!best) return ''
 
-    const subPath = this.seedSubPath()
-    const leaf = this.seedLeaf()
+    const subPath = this.cellSubPath()
+    const leaf = this.cellLeaf()
     const current = this.value()
     const bracketPhase = this.#bracketPhase()
 
@@ -835,8 +891,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       this.#setShellValue(value, false)
     })
 
-    this.#commandFocusUnsub = EffectBus.on<{ seed: string }>('command:focus', ({ seed }) => {
-      this.#setShellValue(seed, false)
+    this.#commandFocusUnsub = EffectBus.on<{ cell: string }>('command:focus', ({ cell }) => {
+      this.#setShellValue(cell, false)
       this.shell?.focus()
     })
 
@@ -986,8 +1042,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     }
     this.#lastSelectMode = ctx.active && ctx.mode === 'select'
 
-    // update seed sub-path query when input contains '/'
-    this.updateSeedSubPath()
+    // update cell sub-path query when input contains '/'
+    this.updateCellSubPath()
   }
 
   /**
@@ -1112,29 +1168,29 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       }
     }
 
-    // default: create seed
-    void this.commitCreateSeedInPlace()
+    // default: create cell
+    void this.commitCreateCellInPlace()
   }
 
   // -------------------------------------------------
-  // create seed in place
+  // create cell in place
   // -------------------------------------------------
 
-  private readonly commitCreateSeedInPlace = async (): Promise<void> => {
+  private readonly commitCreateCellInPlace = async (): Promise<void> => {
     const rawInput = this.value().trim()
     if (!rawInput) return
 
     const navigateAfterCreate = rawInput.startsWith('/') || rawInput.endsWith('/')
     const raw = rawInput.replace(/^\/+|\/+$/g, '').trim()
 
-    // support nested seed creation: "hello/world" → create hello, then hello/world
+    // support nested cell creation: "hello/world" → create hello, then hello/world
     const parts = raw.split('/').map(s => this.completions.normalize(s.trim())).filter(Boolean)
     if (parts.length === 0) {
       this.clear()
       return
     }
 
-    // create the seed directory in OPFS so listSeedFolders() can find it
+    // create the cell directory in OPFS so listCellFolders() can find it
     const dir = await this.lineage.explorerDir()
     if (dir) {
       let parent = dir
@@ -1143,8 +1199,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       }
     }
 
-    // emit seed:added — HistoryRecorder will record the op
-    EffectBus.emit('seed:added', { seed: parts[0] })
+    // emit cell:added — HistoryRecorder will record the op
+    EffectBus.emit('cell:added', { cell: parts[0] })
     this.requestSynchronize()
 
     if (navigateAfterCreate) {
@@ -1287,7 +1343,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         for (const label of labels) {
           try {
             await dir.removeEntry(label, { recursive: true })
-            EffectBus.emit('seed:removed', { seed: label })
+            EffectBus.emit('cell:removed', { cell: label })
           } catch { /* skip */ }
         }
       }
@@ -1295,13 +1351,13 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       await new hypercomb().act()
       this.clear()
 
-      // if all seeds removed, navigate to parent
+      // if all cells removed, navigate to parent
       if (dir) {
-        let hasSeeds = false
+        let hasCells = false
         for await (const [name, handle] of dir.entries()) {
-          if (handle.kind === 'directory' && !name.startsWith('__')) { hasSeeds = true; break }
+          if (handle.kind === 'directory' && !name.startsWith('__')) { hasCells = true; break }
         }
-        if (!hasSeeds) {
+        if (!hasCells) {
           const segments = this.navigation.segmentsRaw()
           if (segments.length > 0) {
             this.navigation.goRaw(segments.slice(0, -1))
@@ -1339,7 +1395,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    * Universal tag extractor — scans any input string for tag syntax,
    * persists adds/removes to OPFS, and returns the cleaned input.
    *
-   * Bracket tag syntax (seed is the label before brackets):
+   * Bracket tag syntax (cell is the label before brackets):
    *   abc[:education, :work]        → add tags to "abc"
    *   abc[~:education, :work]       → remove "education", add "work" to "abc"
    *   abc[:tag(#ff0), 123]          → add tag with color, "123" passes through
@@ -1355,7 +1411,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     type TagOp = { label: string; tag: string; color?: string; remove: boolean }
     const ops: TagOp[] = []
 
-    // ── Pattern 1: seed:[tag, ~tag] bracket-tag syntax ──
+    // ── Pattern 1: cell:[tag, ~tag] bracket-tag syntax ──
     // Colon before bracket signals ALL items are tags (no : prefix needed inside).
     // Matches: abc:[education, ~work] or abc:[tag]
     const bracketTagMatch = input.match(BRACKET_TAG_RE)
@@ -1385,7 +1441,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
       if (ops.length > 0) {
         await this.#persistTagOps(ops)
-        // Tag-only bracket — return just the label (for seed creation if needed)
+        // Tag-only bracket — return just the label (for cell creation if needed)
         return label + suffix
       }
       return input
@@ -1424,7 +1480,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
       if (ops.length > 0) {
         await this.#persistTagOps(ops)
-        // Rebuild: if only tag items remained, just return the label (seed creation)
+        // Rebuild: if only tag items remained, just return the label (cell creation)
         if (cleanedItems.length === 0) return label + suffix
         return label + '[' + cleanedItems.join(',') + ']' + suffix
       }
@@ -1490,7 +1546,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       if (label && tag) {
         ops.push({ label, tag, color, remove: false })
         await this.#persistTagOps(ops)
-        return label // keep the label for seed creation
+        return label // keep the label for cell creation
       }
     }
 
@@ -1540,8 +1596,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     }
 
     // Find the index of the active tile
-    const seedNames = this.seedNames$()
-    const idx = seedNames.indexOf(activeLabel)
+    const cellNames = this.cellNames$()
+    const idx = cellNames.indexOf(activeLabel)
     this.shell?.setValue(v + (idx >= 0 ? idx : 0))
     this.value.set(this.shell?.value() ?? '')
     return true
@@ -1728,12 +1784,12 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     }
 
     const bracketPhase = this.#bracketPhase()
-    const subPath = this.seedSubPath()
+    const subPath = this.cellSubPath()
     const raw = this.value()
 
     // bracket-items mode: insert name after last comma (or after [)
     if (bracketPhase === 'items') {
-      const leaf = this.seedLeaf()
+      const leaf = this.cellLeaf()
       const lastComma = raw.lastIndexOf(',')
       const insertAt = lastComma >= 0 ? lastComma + 1 : raw.indexOf('[') + 1
       const before = raw.slice(0, insertAt)
@@ -1748,7 +1804,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       } else {
         this.#setShellValue(before + spacer + best, false)
       }
-      this.updateSeedSubPath()
+      this.updateCellSubPath()
       return
     }
 
@@ -1761,7 +1817,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       } else {
         this.#setShellValue(bracketPrefix + best + '/', false)
       }
-      this.updateSeedSubPath()
+      this.updateCellSubPath()
       return
     }
 
@@ -1769,7 +1825,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (subPath.length > 0) {
       const pathPrefix = subPath.join('/') + '/'
       this.#setShellValue(pathPrefix + best + '/', false)
-      this.updateSeedSubPath()
+      this.updateCellSubPath()
       return
     }
 
@@ -1798,9 +1854,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   private readonly clear = (): void => {
     this.shell?.clear()
     this.value.set('')
-    this.seedSubPath.set([])
-    this.seedLeaf.set('')
-    this.seedProvider.query([])
+    this.cellSubPath.set([])
+    this.cellLeaf.set('')
+    this.cellProvider.query([])
     if (this.lastFilterKeyword) {
       EffectBus.emit('search:filter', { keyword: '' })
       this.lastFilterKeyword = ''
@@ -1852,7 +1908,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   }
 
   /** Labels derived from value — computed. During selection phase, only includes
-   *  committed labels (before last comma) + the current partial IFF it exactly matches a seed name. */
+   *  committed labels (before last comma) + the current partial IFF it exactly matches a cell name. */
   #selectLabels = computed<readonly string[]>(() => {
     const v = normalizeSelectInput(this.value())
     if (!v.match(/^\/select\[/)) return []
@@ -1864,14 +1920,14 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       return inner.split(',').map(s => this.completions.normalize(this.#stripTagSuffix(s.trim()))).filter(Boolean)
     }
     // Bracket still open (selection phase) — committed labels (before last comma)
-    // plus current partial only if it exactly matches a known seed name
+    // plus current partial only if it exactly matches a known cell name
     const body = v.slice(bracketOpen + 1)
     const allParts = body.split(',').map(s => this.completions.normalize(this.#stripTagSuffix(s.trim()))).filter(Boolean)
     if (allParts.length === 0) return []
     const committed = allParts.slice(0, -1)
     const partial = allParts[allParts.length - 1]
-    const seeds = new Set(this.seedNames$())
-    if (seeds.has(partial)) return allParts
+    const cells = new Set(this.cellNames$())
+    if (cells.has(partial)) return allParts
     return committed
   })
 
@@ -2112,8 +2168,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
             // Navigate to target directory
             const target = [...this.#selectOriginalSegments, ...segments]
             this.navigation.replaceRaw(target)
-            // Update seed suggestion provider for autocomplete at target
-            this.seedProvider.query(segments)
+            // Update cell suggestion provider for autocomplete at target
+            this.cellProvider.query(segments)
           }
         }
       }
@@ -2123,31 +2179,31 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   }
 
   // -------------------------------------------------
-  // seed sub-path tracking
+  // cell sub-path tracking
   // -------------------------------------------------
 
   // bracket mode: 'none' | 'items' (inside []) | 'path' (after ]/)
   #bracketPhase = signal<'none' | 'items' | 'path'>('none')
-  /** Whether current bracket mode is colon-bracket (seed:[...]) — items are plain tag names. */
+  /** Whether current bracket mode is colon-bracket (cell:[...]) — items are plain tag names. */
   #colonBracketMode = false
   /** Pending tag adds/removes typed in the current bracket input (not yet persisted). */
   #bracketPendingTags: { adds: Set<string>; removes: Set<string> } = { adds: new Set(), removes: new Set() }
 
-  /** Load a seed's existing tags from OPFS into the cache signal. */
-  async #loadSeedTags(label: string): Promise<void> {
+  /** Load a cell's existing tags from OPFS into the cache signal. */
+  async #loadCellTags(label: string): Promise<void> {
     try {
       const dir = await this.lineage.explorerDir()
-      if (!dir) { this.#bracketSeedTags.set(new Set()); return }
-      const seedDir = await dir.getDirectoryHandle(label, { create: false })
-      const props = await readTagProps(seedDir)
+      if (!dir) { this.#bracketCellTags.set(new Set()); return }
+      const cellDir = await dir.getDirectoryHandle(label, { create: false })
+      const props = await readTagProps(cellDir)
       const tags: string[] = Array.isArray(props['tags']) ? props['tags'] : []
-      this.#bracketSeedTags.set(new Set(tags))
+      this.#bracketCellTags.set(new Set(tags))
     } catch {
-      this.#bracketSeedTags.set(new Set())
+      this.#bracketCellTags.set(new Set())
     }
   }
 
-  /** Parse tag items in seed:[...] syntax (no : prefix — items are plain names, ~ for removal). */
+  /** Parse tag items in cell:[...] syntax (no : prefix — items are plain names, ~ for removal). */
   #parseBracketTagItems(inner: string): { adds: Set<string>; removes: Set<string> } {
     const adds = new Set<string>()
     const removes = new Set<string>()
@@ -2173,7 +2229,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     return { adds, removes }
   }
 
-  private readonly updateSeedSubPath = (): void => {
+  private readonly updateCellSubPath = (): void => {
     const raw = this.value().trim()
 
     // detect bracket mode: [items]/path
@@ -2187,25 +2243,25 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       const lastComma = inner.lastIndexOf(',')
       const fragment = lastComma >= 0 ? inner.slice(lastComma + 1).trim() : inner.trim()
 
-      // Detect seed:[...] colon-bracket tag mode: colon immediately before '['
+      // Detect cell:[...] colon-bracket tag mode: colon immediately before '['
       const isColonBracket = bracketOpen > 0 && raw[bracketOpen - 1] === ':'
 
       if (isColonBracket) {
-        // ALL items in seed:[...] are tags — no : prefix needed
+        // ALL items in cell:[...] are tags — no : prefix needed
         this.#colonBracketMode = true
         const label = this.completions.normalize(raw.slice(0, bracketOpen - 1).trim())
-        if (label && label !== this.#bracketSeedLabel) {
-          this.#bracketSeedLabel = label
-          void this.#loadSeedTags(label)
+        if (label && label !== this.#bracketCellLabel) {
+          this.#bracketCellLabel = label
+          void this.#loadCellTags(label)
         }
         // gather committed tags (before last comma)
         const lastCommaIdx = inner.lastIndexOf(',')
         const committed = lastCommaIdx >= 0 ? inner.slice(0, lastCommaIdx) : ''
         this.#bracketPendingTags = this.#parseBracketTagItems(committed)
-        this.seedSubPath.set([])
+        this.cellSubPath.set([])
         // Use ~ prefix to signal removal mode, otherwise raw fragment for add mode
-        this.seedLeaf.set(fragment.startsWith('~') ? '~:' + fragment.slice(1) : ':' + fragment)
-        this.seedProvider.query([])
+        this.cellLeaf.set(fragment.startsWith('~') ? '~:' + fragment.slice(1) : ':' + fragment)
+        this.cellProvider.query([])
         return
       }
 
@@ -2215,28 +2271,28 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         const label = bracketOpen > 0
           ? this.completions.normalize(raw.slice(0, bracketOpen).trim())
           : ''
-        if (label && label !== this.#bracketSeedLabel) {
-          this.#bracketSeedLabel = label
-          void this.#loadSeedTags(label)
+        if (label && label !== this.#bracketCellLabel) {
+          this.#bracketCellLabel = label
+          void this.#loadCellTags(label)
         }
         const lastCommaIdx = inner.lastIndexOf(',')
         const committed = lastCommaIdx >= 0 ? inner.slice(0, lastCommaIdx) : ''
         this.#bracketPendingTags = this.#parsePendingBracketTags(committed)
-        this.seedSubPath.set([])
-        this.seedLeaf.set(fragment)
-        this.seedProvider.query([])
+        this.cellSubPath.set([])
+        this.cellLeaf.set(fragment)
+        this.cellProvider.query([])
         return
       }
       // clear tag context when not in tag mode
-      if (this.#bracketSeedLabel) {
-        this.#bracketSeedLabel = ''
-        this.#bracketSeedTags.set(new Set())
+      if (this.#bracketCellLabel) {
+        this.#bracketCellLabel = ''
+        this.#bracketCellTags.set(new Set())
         this.#bracketPendingTags = { adds: new Set(), removes: new Set() }
       }
       const leaf = this.completions.normalize(fragment)
-      this.seedSubPath.set([])
-      this.seedLeaf.set(leaf)
-      this.seedProvider.query([])
+      this.cellSubPath.set([])
+      this.cellLeaf.set(leaf)
+      this.cellProvider.query([])
       return
     }
 
@@ -2248,17 +2304,17 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       if (!clean.includes('/')) {
         // single level: leaf is the typed fragment, query at current level
         const leaf = this.completions.normalize(clean)
-        this.seedSubPath.set([])
-        this.seedLeaf.set(leaf)
-        this.seedProvider.query([])
+        this.cellSubPath.set([])
+        this.cellLeaf.set(leaf)
+        this.cellProvider.query([])
         return
       }
       const parts = clean.split('/')
       const leaf = this.completions.normalize((parts.pop() ?? '').trim())
       const subPath = parts.map(p => this.completions.normalize(p.trim())).filter(Boolean)
-      this.seedSubPath.set(subPath)
-      this.seedLeaf.set(leaf)
-      this.seedProvider.query(subPath)
+      this.cellSubPath.set(subPath)
+      this.cellLeaf.set(leaf)
+      this.cellProvider.query(subPath)
       return
     }
 
@@ -2270,9 +2326,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     // no '/' means we're at the current level
     if (!clean.includes('/')) {
-      this.seedSubPath.set([])
-      this.seedLeaf.set('')
-      this.seedProvider.query([])
+      this.cellSubPath.set([])
+      this.cellLeaf.set('')
+      this.cellProvider.query([])
       return
     }
 
@@ -2282,9 +2338,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const leaf = this.completions.normalize((parts.pop() ?? '').trim())
     const subPath = parts.map(p => this.completions.normalize(p.trim())).filter(Boolean)
 
-    this.seedSubPath.set(subPath)
-    this.seedLeaf.set(leaf)
-    this.seedProvider.query(subPath)
+    this.cellSubPath.set(subPath)
+    this.cellLeaf.set(leaf)
+    this.cellProvider.query(subPath)
   }
 }
 

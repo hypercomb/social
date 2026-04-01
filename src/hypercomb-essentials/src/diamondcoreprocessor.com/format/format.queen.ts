@@ -11,6 +11,7 @@ type FormatPainterDrone = {
 
 export class FormatQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
+  override genotype = 'editor'
   readonly command = 'format'
   override readonly aliases = ['fmt', 'fp']
   override description = 'Copy visual formatting from the active tile'
@@ -46,7 +47,7 @@ export class FormatQueenBee extends QueenBee {
     }
 
     // always open — shows empty state if no tile or no visual properties
-    EffectBus.emit('format:open', { seed: active ?? '', properties })
+    EffectBus.emit('format:open', { cell: active ?? '', properties })
   }
 }
 

@@ -83,16 +83,16 @@ bootstrap-once bee. extends `Bee`. overrides `ready(grammar)` (gate) and `act(gr
 real-time command bee. extends `Bee`. invoked directly via `/command` in the command line — bypasses the processor pulse cycle entirely. declares an abstract `command` property (the identity) and optional `aliases`. `invoke(args)` calls `execute(args)` immediately. `pulse()` is a no-op. class: `QueenBee` in `@hypercomb/core` (`queen.base.ts`).
 
 ### hash marker
-a binding between a drone name and a seed. syntax: `seed#DroneName` in the command line. the drone name (or IoC key or signature) is stored in the seed's zero-signature properties file under `markers: string[]`. markers are metadata for UI and introspection — they do not affect bee discovery, which is always manifest-driven.
+a binding between a drone name and a cell. syntax: `cell#DroneName` in the command line. the drone name (or IoC key or signature) is stored in the cell's zero-signature properties file under `markers: string[]`. markers are metadata for UI and introspection — they do not affect bee discovery, which is always manifest-driven.
 
 ### slash command
 a `/command` pattern typed into the command line. `SlashCommandBehavior` matches the input, looks up queen bees via duck-typing (checks for `command` property and `invoke()` method on all IoC entries), and dispatches directly. falls through to path-based behaviors if no queen matches. `SlashCommandDrone` in `@hypercomb/essentials` provides the provider registry.
 
 ### clipboard
-cut/copy/paste system for seeds. `ClipboardWorker` (a `Worker` in `@hypercomb/essentials`) captures selected seeds, persists metadata to OPFS, and pastes by copying seed directories to the current location. `ClipboardService` tracks entries with `label` and `sourceSegments`. operations: copy, cut, paste, place, clear. emits `clipboard:captured`, `clipboard:paste-start`, `clipboard:paste-done`. integrates with `HistoryService` for revert support.
+cut/copy/paste system for cells. `ClipboardWorker` (a `Worker` in `@hypercomb/essentials`) captures selected cells, persists metadata to OPFS, and pastes by copying cell directories to the current location. `ClipboardService` tracks entries with `label` and `sourceSegments`. operations: copy, cut, paste, place, clear. emits `clipboard:captured`, `clipboard:paste-start`, `clipboard:paste-done`. integrates with `HistoryService` for revert support.
 
 ### activity log
-auto-dismissing notification feed in `@hypercomb/shared` (`ActivityLogComponent`). subscribes to operational effects (`seed:added`, `seed:removed`, `clipboard:paste-done`, `move:committed`, `mesh:public-changed`) and displays recent operations with revert buttons. entries expire after 10 seconds. max 20 visible.
+auto-dismissing notification feed in `@hypercomb/shared` (`ActivityLogComponent`). subscribes to operational effects (`cell:added`, `cell:removed`, `clipboard:paste-done`, `move:committed`, `mesh:public-changed`) and displays recent operations with revert buttons. entries expire after 10 seconds. max 20 visible.
 
 ### avatar swarm drone
 gpu-instanced real-time peer presence. `AvatarSwarmDrone` in `@hypercomb/essentials` renders up to 2048 live peer avatars on the hex grid using a custom `BeeSwarmShader`. deterministic colors derived from nostr pubkeys via DJB2 hashing. peers fade out after 15 seconds of inactivity. publishes local position every 3 seconds. emits `swarm:peer-count`.
@@ -177,7 +177,7 @@ passive presence tracking via the nostr mesh. `AmbientPresenceDrone` aggregates 
 programmatic hex overlay for multi-select. `TileSelectionDrone` in `@hypercomb/essentials` (`selection/tile-selection.drone.ts`). ctrl+click toggles a tile; ctrl+drag range-selects. first selected tile becomes the **leader** (amber overlay), others are green. emits `selection:changed` with leader info and relative axial coordinates for computational irreducibility math. listens to `render:host-ready`, `render:mesh-offset`, `render:cell-count`.
 
 ### tile editor drone
-seed editing drone. `TileEditorDrone` in `@hypercomb/essentials` (`editor/tile-editor.drone.ts`). provides seed creation and property editing. emits `tile:saved` when a seed is persisted.
+cell editing drone. `TileEditorDrone` in `@hypercomb/essentials` (`editor/tile-editor.drone.ts`). provides cell creation and property editing. emits `tile:saved` when a cell is persisted.
 
 ### hex sdf shader
 signed-distance-field shader for rendering hex tiles in pixi.js. `HexSdfTextureShader` in `@hypercomb/essentials` (`presentation/grid/hex-sdf.shader.ts`). replaces the original svg-based borders with gpu-computed hex outlines and overlays. supports both pointy-top and flat-top orientations. samples from the label atlas and image atlas to render text and images clipped to the hex boundary. branch indicators and selection highlights are drawn as sdf rings.

@@ -1,0 +1,30 @@
+@if (open()) {
+  <div class="confirm-backdrop" (click)="dismiss()"></div>
+  <div class="confirm-panel" role="alertdialog" [attr.aria-label]="request()!.title | t">
+
+    <header class="confirm-header">
+      <h3>{{ request()!.title | t }}</h3>
+      <button class="confirm-close" (click)="dismiss()">&times;</button>
+    </header>
+
+    <div class="confirm-body">
+      <p class="confirm-message">{{ request()!.message | t: request()!.messageParams }}</p>
+      @if (request()!.warning) {
+        <p class="confirm-warning">{{ request()!.warning! | t: request()!.warningParams }}</p>
+      }
+    </div>
+
+    <footer class="confirm-actions">
+      <button class="confirm-btn cancel" (click)="dismiss()">
+        {{ (request()!.cancelLabel ?? 'confirm.cancel') | t }}
+      </button>
+      <button
+        class="confirm-btn"
+        [class.danger]="request()!.danger !== false"
+        (click)="confirm()">
+        {{ (request()!.confirmLabel ?? 'confirm.delete') | t }}
+      </button>
+    </footer>
+
+  </div>
+}

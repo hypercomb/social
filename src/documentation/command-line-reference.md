@@ -80,7 +80,7 @@ These are hardcoded in `onKeyDown` and run after pluggable behaviors have been c
 **Key**: Enter
 **Syntax**: `name` | `path/to/name`
 
-Create a new cell (seed) at the current level. Supports nested paths with `/`.
+Create a new cell at the current level. Supports nested paths with `/`.
 
 | Input | Key | Result |
 |-------|-----|--------|
@@ -142,13 +142,13 @@ Navigate up one or more levels. Clamps to root — never errors if you overshoot
 ### `#` Hash Marker
 **File**: `hash-marker.behavior.ts`
 **Key**: Enter
-**Syntax**: `seed#DroneName` | `seed#`
+**Syntax**: `cell#DroneName` | `cell#`
 
-Bind a drone marker to a seed. The drone name is stored in the seed's zero-signature properties file under `markers: string[]`. Typing `seed#` (trailing hash, no name) lists available drones.
+Bind a drone marker to a cell. The drone name is stored in the cell's zero-signature properties file under `markers: string[]`. Typing `cell#` (trailing hash, no name) lists available drones.
 
 | Input | Key | Result |
 |-------|-----|--------|
-| `cigars#CigarJournal` | Enter | Binds CigarJournal marker to cigars seed |
+| `cigars#CigarJournal` | Enter | Binds CigarJournal marker to cigars cell |
 | `photos#` | Enter | Lists available drones for binding |
 
 ---
@@ -158,7 +158,7 @@ Bind a drone marker to a seed. The drone name is stored in the seed's zero-signa
 **Key**: Enter
 **Syntax**: `[items]/destination` | `[items]/destination/`
 
-Copy seeds from the current directory to a destination path. Bracket-expanded items are copied into the destination. Trailing `/` navigates to the destination after pasting.
+Copy cells from the current directory to a destination path. Bracket-expanded items are copied into the destination. Trailing `/` navigates to the destination after pasting.
 
 | Input | Key | Result |
 |-------|-----|--------|
@@ -181,7 +181,7 @@ The `#behaviors` array determines match priority for pluggable behaviors:
 2. **SlashCommandBehavior** — `/command` queen bee dispatch
 3. **RemoveCellBehavior** — `~` prefix (removes from visible hierarchy)
 4. **CutPasteBehavior** — `[items]/path` bracket-path copy
-5. **HashMarkerBehavior** — `seed#Drone` binding
+5. **HashMarkerBehavior** — `cell#Drone` binding
 6. **BatchCreateBehavior** — `[...]` bracket expansion
 7. **ShiftEnterNavigateBehavior** — `/` with Shift+Enter
 

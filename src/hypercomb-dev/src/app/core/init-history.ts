@@ -6,7 +6,7 @@ export type InitHistoryStep = {
   phase: 'boot' | 'runtime'
   at: number
   segments: readonly string[]
-  seed: string
+  cell: string
   markers: readonly string[]
   ok: boolean
   error?: string

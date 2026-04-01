@@ -1,0 +1,38 @@
+@if (hasToasts()) {
+  <div class="toast-stack" role="status" aria-live="polite">
+    @for (toast of toasts(); track toast.id) {
+      <div
+        class="toast-item"
+        [class.fading]="toast.fading"
+        [attr.data-type]="toast.type">
+
+        <div class="toast-accent"></div>
+
+        <div class="toast-icon">{{ typeIcon(toast.type) }}</div>
+
+        <div class="toast-body">
+          @if (toast.title) {
+            <div class="toast-title">{{ toast.title }}</div>
+          }
+          <div class="toast-message">{{ toast.message }}</div>
+        </div>
+
+        <div class="toast-actions">
+          @if (toast.actionLabel) {
+            <button class="toast-action" (click)="executeAction(toast.id)">
+              {{ toast.actionLabel }}
+            </button>
+          }
+          <button
+            class="toast-dismiss"
+            (click)="dismiss(toast.id)"
+            [attr.aria-label]="'toast.dismiss' | t">&times;</button>
+        </div>
+
+        @if (toast.duration > 0) {
+          <div class="toast-progress" [style.animation-duration.ms]="toast.duration"></div>
+        }
+      </div>
+    }
+  </div>
+}

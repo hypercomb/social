@@ -15,6 +15,7 @@ import type { HistoryCursorService } from './history-cursor.service.js'
  */
 export class ReviseQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
+  override genotype = 'history'
   readonly command = 'revise'
   override readonly aliases = ['rev', 'history']
 

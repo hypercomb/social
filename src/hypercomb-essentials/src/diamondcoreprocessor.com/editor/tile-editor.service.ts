@@ -6,14 +6,14 @@ export type EditorModePayload = { active: boolean }
 export class TileEditorService extends EventTarget {
 
   #mode: 'idle' | 'editing' = 'idle'
-  #seed = ''
+  #cell = ''
   #properties: Record<string, unknown> = {}
   #largeBlob: Blob | null = null
 
   // ── getters ────────────────────────────────────────────────────
 
   get mode(): 'idle' | 'editing' { return this.#mode }
-  get seed(): string { return this.#seed }
+  get cell(): string { return this.#cell }
   get properties(): Record<string, unknown> { return this.#properties }
   get largeBlob(): Blob | null { return this.#largeBlob }
 
@@ -34,11 +34,11 @@ export class TileEditorService extends EventTarget {
   // ── state mutations ────────────────────────────────────────────
 
   readonly open = (
-    seed: string,
+    cell: string,
     properties: Record<string, unknown>,
     largeBlob: Blob | null
   ): void => {
-    this.#seed = seed
+    this.#cell = cell
     this.#properties = { ...properties }
     this.#largeBlob = largeBlob
     this.#mode = 'editing'
@@ -48,7 +48,7 @@ export class TileEditorService extends EventTarget {
 
   readonly close = (): void => {
     this.#mode = 'idle'
-    this.#seed = ''
+    this.#cell = ''
     this.#properties = {}
     this.#largeBlob = null
     this.#emit()

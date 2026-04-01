@@ -41,6 +41,9 @@ export class CommandShellComponent implements AfterViewInit {
   /** Optional descriptions keyed by suggestion name (shown right-aligned). */
   readonly descriptionMap = input<ReadonlyMap<string, string>>(new Map())
 
+  /** Optional color swatches keyed by suggestion name (CSS color string). */
+  readonly colorMap = input<ReadonlyMap<string, string>>(new Map())
+
   // ── outputs to parent ───────────────────────────────────
 
   /** Emitted on every input change (after leading-space strip). */
@@ -134,6 +137,10 @@ export class CommandShellComponent implements AfterViewInit {
 
   descriptionFor = (suggestion: string): string => {
     return this.descriptionMap().get(suggestion) ?? ''
+  }
+
+  colorFor = (suggestion: string): string => {
+    return this.colorMap().get(suggestion) ?? ''
   }
 
   // ── event handlers ──────────────────────────────────────

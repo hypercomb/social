@@ -1,5 +1,5 @@
 // hypercomb-shared/core/script-preloader.ts
-// Marker-driven bee resolver: reads signature markers from the seed tree
+// Marker-driven bee resolver: reads signature markers from the cell tree
 // and loads bee modules on demand. The processor (hypercomb.act()) is the
 // sole caller of find() → pulse → synchronize.
 
@@ -68,7 +68,9 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
         for (const [sig, bee] of this.#beeCache) {
           if (!enabledSet.has(sig)) {
             console.log(`[script-preloader] evicting disabled bee ${sig} (${bee.iocKey})`)
+            const key = bee.iocKey
             bee.markDisposed()
+            window.ioc.unregister(key)
             this.#beeCache.delete(sig)
             this.#bySignature.delete(sig)
             this.#resourceCount = Math.max(0, this.#resourceCount - 1)
@@ -106,13 +108,10 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
 
     EffectBus.emit('loader:bees-progress', { loading: pending.length, total: this.#beeCache.size + pending.length })
 
-    let loaded = 0
-    for (const sig of pending) {
-      try {
-        const bee = await this.#loadBeeBySignature(sig)
-        if (bee) loaded++
-      } catch { /* skip failed */ }
-    }
+    const results = await Promise.allSettled(
+      pending.map(sig => this.#loadBeeBySignature(sig))
+    )
+    const loaded = results.filter(r => r.status === 'fulfilled' && r.value !== null).length
 
     if (loaded) {
       this.#refreshProjection()

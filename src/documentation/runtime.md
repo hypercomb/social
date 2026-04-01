@@ -94,14 +94,14 @@ registered effects in the current codebase:
 | `tile:action` | TileOverlayDrone | tile action triggered (edit, remove) |
 | `tile:navigate-in` | TileOverlayDrone | right-click navigate into child layer |
 | `tile:navigate-back` | TileOverlayDrone | left-click navigate to parent layer |
-| `tile:saved` | TileEditorDrone | seed saved after tile editing |
+| `tile:saved` | TileEditorDrone | cell saved after tile editing |
 | `selection:changed` | TileSelectionDrone | tile selection set changed (leader, selected labels, relative axials) |
-| `clipboard:captured` | ClipboardWorker | seeds captured to clipboard |
+| `clipboard:captured` | ClipboardWorker | cells captured to clipboard |
 | `clipboard:paste-start` | ClipboardWorker | paste operation beginning |
 | `clipboard:paste-done` | ClipboardWorker | paste operation complete |
 | `clipboard:changed` | ClipboardService | clipboard contents mutated |
-| `seed:added` | ClipboardWorker | seed directory created during paste |
-| `seed:removed` | ClipboardWorker | seed directory removed during cut |
+| `cell:added` | ClipboardWorker | cell directory created during paste |
+| `cell:removed` | ClipboardWorker | cell directory removed during cut |
 | `swarm:peer-count` | AvatarSwarmDrone | live peer count changed |
 | `queen:help` | HelpQueenBee | help command output (list of available queen commands) |
 | `wheel:close` | any | close the flavor wheel overlay |
@@ -136,7 +136,7 @@ window.ioc.register('AxialService', new AxialService())
 
 **ShowCellDrone** — subscribes to `'render:host-ready'`. receives the pixi infrastructure and renders the hex grid.
 
-**ZoomDrone** — manages zoom state. uses `ZoomArbiter` for exclusive control (only one input source zooms at a time). tracks min/max scale (0.05–12) and pivot-preserving zoom math. persists viewport zoom/pan snapshots to the current seed's OPFS properties file, restoring them on navigation. subscribes to `'render:host-ready'`.
+**ZoomDrone** — manages zoom state. uses `ZoomArbiter` for exclusive control (only one input source zooms at a time). tracks min/max scale (0.05–12) and pivot-preserving zoom math. persists viewport zoom/pan snapshots to the current cell's OPFS properties file, restoring them on navigation. subscribes to `'render:host-ready'`.
 
 **PanningDrone** — manages panning. uses a similar exclusive-control pattern via `begin(source)` / `end(source)`. delegates to `MousePanInput` for mouse-based panning. persists pan offset to OPFS alongside zoom state. subscribes to `'render:host-ready'`.
 
@@ -152,14 +152,14 @@ the rendering pipeline is entirely effect-driven. no bee in the pipeline imports
 
 lineage resolves paths against OPFS:
 ```
-hypercomb.io / segment1 / segment2 / seed
+hypercomb.io / segment1 / segment2 / cell
 ```
 each segment maps to a `FileSystemDirectoryHandle`. path traversal is read-only — `setCurrent(segments)` walks existing directories and returns null if a path doesn't exist. no automatic directory creation.
 
 **Store** — manages the OPFS root. initializes the directory structure:
 ```
 opfs root
-  ├── hypercomb.io/          ← domain root (seed tree)
+  ├── hypercomb.io/          ← domain root (cell tree)
   ├── __bees__/              ← compiled bee modules
   ├── __dependencies__/      ← namespace service bundles
   ├── __layers__/            ← layer installation state
@@ -221,7 +221,7 @@ zoom and pan use an exclusive-control pattern to prevent conflicts:
 
 **ZoomArbiter** — `acquire(source)` grants exclusive zoom control to one source (mouse wheel, pinch, programmatic). `release(source)` frees it. only the current holder can zoom.
 
-**ZoomDrone** — owns the zoom lifecycle. reads persisted viewport state from the current seed's OPFS properties on navigation, applies saved scale/pivot, and debounce-persists changes back. `zoomToScale(scale, pivot)` preserves the screen point under the cursor during zoom.
+**ZoomDrone** — owns the zoom lifecycle. reads persisted viewport state from the current cell's OPFS properties on navigation, applies saved scale/pivot, and debounce-persists changes back. `zoomToScale(scale, pivot)` preserves the screen point under the cursor during zoom.
 
 **PanningDrone** — `begin(source)` / `end(source)` for exclusive pan control. persists pan offset alongside zoom state.
 
@@ -233,7 +233,7 @@ this pattern ensures that mouse wheel zoom, pinch zoom, and programmatic zoom ne
 
 nothing crosses into persistence unless meaning was attached.
 
-the store does not auto-save. the navigation layer reads the url but does not write history entries automatically. OPFS writes happen only through explicit operations — seed creation via tile editing, layer installation via the install pipeline, or history recording via `HistoryService`.
+the store does not auto-save. the navigation layer reads the url but does not write history entries automatically. OPFS writes happen only through explicit operations — cell creation via tile editing, layer installation via the install pipeline, or history recording via `HistoryService`.
 
 effects are ephemeral — they exist in the bus until the session ends. drone state is ephemeral — it exists until disposal.
 
@@ -241,7 +241,7 @@ the only durable state is:
 1. OPFS directory structure (explicit writes via lineage/store)
 2. nostr events published to relays (explicit publish via mesh)
 3. url path and hash (explicit writes via navigation)
-4. viewport state — zoom/pan snapshots persisted to the current seed's OPFS properties file by ZoomDrone and PanningDrone
+4. viewport state — zoom/pan snapshots persisted to the current cell's OPFS properties file by ZoomDrone and PanningDrone
 
 everything else is runtime turbulence. if the intent never resolves, nothing persists.
 
@@ -283,7 +283,7 @@ AvatarSwarmDrone
 
 ClipboardWorker
   ├──> listens: 'controls:action', 'keymap:invoke'
-  └──> emits: 'clipboard:captured', 'clipboard:paste-done', 'seed:added', 'seed:removed'
+  └──> emits: 'clipboard:captured', 'clipboard:paste-done', 'cell:added', 'cell:removed'
 
 KeyMapService
   └──> listens: 'navigation:guard-start', 'navigation:guard-end'

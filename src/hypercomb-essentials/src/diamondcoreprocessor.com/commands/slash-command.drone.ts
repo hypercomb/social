@@ -11,7 +11,17 @@ export class SlashCommandDrone extends EventTarget {
   }
 
   all(): SlashCommand[] {
-    return this.#providers.flatMap(p => p.commands).map(c => this.#localize(c))
+    const results: SlashCommand[] = []
+    for (const provider of this.#providers) {
+      for (const command of provider.commands) {
+        const localized = this.#localize(command)
+        results.push(localized)
+        for (const alias of command.aliases ?? []) {
+          results.push({ ...localized, name: alias })
+        }
+      }
+    }
+    return results
   }
 
   match(query: string): SlashCommandMatch[] {
@@ -20,9 +30,20 @@ export class SlashCommandDrone extends EventTarget {
 
     for (const provider of this.#providers) {
       for (const command of provider.commands) {
+        const localized = this.#localize(command)
         const names = [command.name, ...(command.aliases ?? [])]
-        if (!q || names.some(n => n.startsWith(q))) {
-          results.push({ command: this.#localize(command), provider })
+
+        for (const name of names) {
+          if (!q || name.startsWith(q)) {
+            // each matching name (primary or alias) becomes its own entry
+            // so autocomplete sees every reachable name, not just the primary
+            results.push({
+              command: name === command.name
+                ? localized
+                : { ...localized, name },
+              provider,
+            })
+          }
         }
       }
     }
@@ -328,6 +349,18 @@ class PushToTalkProvider implements SlashCommandProvider {
   }
 }
 
+class GuideProvider implements SlashCommandProvider {
+  readonly name = 'guide-provider'
+  readonly priority = 100
+  readonly commands: SlashCommand[] = [
+    { name: 'guide', description: 'Open the learning guide', descriptionKey: 'slash.guide', aliases: ['learn', 'tutorial'] }
+  ]
+
+  execute(): void {
+    EffectBus.emit('guide:open', undefined)
+  }
+}
+
 class AtomizeUiProvider implements SlashCommandProvider {
   readonly name = 'atomize-ui-provider'
   readonly priority = 100
@@ -361,5 +394,6 @@ _slashCommands.addProvider(new LanguageProvider())
 _slashCommands.addProvider(new ArrangeProvider())
 _slashCommands.addProvider(new VoiceProvider())
 _slashCommands.addProvider(new PushToTalkProvider())
+_slashCommands.addProvider(new GuideProvider())
 _slashCommands.addProvider(new AtomizeUiProvider())
 window.ioc.register('@diamondcoreprocessor.com/SlashCommandDrone', _slashCommands)

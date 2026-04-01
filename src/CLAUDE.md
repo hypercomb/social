@@ -212,7 +212,7 @@ hypercomb-shared/i18n/ja.json           ← Japanese catalog
 
 ```typescript
 const i18n = get('@hypercomb.social/I18n') as I18nProvider | undefined
-const msg = i18n?.t('activity.added', { seed: name }) ?? `added "${name}"`
+const msg = i18n?.t('activity.added', { cell: name }) ?? `added "${name}"`
 ```
 
 ### Slash command descriptions
@@ -247,7 +247,7 @@ Or via slash command: `/language ja`, `/language en`, `/lang jp`
 - Flat dot-separated keys: `component.element` (e.g., `editor.save`, `controls.clipboard`)
 - Slash command keys: `slash.commandName` (e.g., `slash.help`, `slash.language`)
 - Plurals: `key.zero`, `key.one`, `key.other` (triggered when `params.count` is present)
-- Interpolation: `{token}` placeholders (e.g., `added "{seed}"`)
+- Interpolation: `{token}` placeholders (e.g., `added "{cell}"`)
 - Namespace: `'app'` for host, domain name for modules (e.g., `'revolucionstyle.com'`)
 
 ## Coding Conventions

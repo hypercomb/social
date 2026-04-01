@@ -20,9 +20,10 @@ interface StoreLike {
 
 export class ClipboardWorker extends Worker {
   readonly namespace = 'diamondcoreprocessor.com'
+  override genotype = 'clipboard'
 
   public override description =
-    'Captures selected seeds into clipboard and pastes them at the current location.'
+    'Captures selected cells into clipboard and pastes them at the current location.'
 
   protected override listens = [
     'controls:action',
@@ -33,8 +34,8 @@ export class ClipboardWorker extends Worker {
     'clipboard:captured',
     'clipboard:paste-start',
     'clipboard:paste-done',
-    'seed:added',
-    'seed:removed',
+    'cell:added',
+    'cell:removed',
   ]
 
   constructor() {
@@ -106,7 +107,7 @@ export class ClipboardWorker extends Worker {
 
   // ── capture (copy or cut) ─────────────────────────────
   // Both record labels + source in clipboard service + persist meta.
-  // Cut additionally emits seed:removed → HistoryRecorder records remove ops.
+  // Cut additionally emits cell:removed → HistoryRecorder records remove ops.
   // Folders stay in OPFS. History is the genome.
 
   #capture(op: ClipboardOp): void {
@@ -118,7 +119,7 @@ export class ClipboardWorker extends Worker {
 
     if (op === 'cut') {
       for (const label of labels) {
-        EffectBus.emit('seed:removed', { seed: label })
+        EffectBus.emit('cell:removed', { cell: label })
       }
       this.#selection?.clear()
     }
@@ -145,8 +146,8 @@ export class ClipboardWorker extends Worker {
   }
 
   // ── paste ─────────────────────────────────────────────
-  // Reads seed trees from original source location (folders are still there).
-  // Copies to current destination. Emits seed:added per label.
+  // Reads cell trees from original source location (folders are still there).
+  // Copies to current destination. Emits cell:added per label.
 
   async #paste(): Promise<void> {
     const clipboardSvc = this.#clipboardSvc
@@ -157,9 +158,9 @@ export class ClipboardWorker extends Worker {
 
     EffectBus.emit('clipboard:paste-start', { count: items.length, op })
 
-    // Emit seed:added for each item — HistoryRecorder records the ops
+    // Emit cell:added for each item — HistoryRecorder records the ops
     for (const entry of items) {
-      EffectBus.emit('seed:added', { seed: entry.label })
+      EffectBus.emit('cell:added', { cell: entry.label })
     }
 
     EffectBus.emit('clipboard:paste-done', { count: items.length, op })
@@ -185,9 +186,9 @@ export class ClipboardWorker extends Worker {
     const toPlace = clipboardSvc.items.filter(i => selectedSet.has(i.label))
     if (toPlace.length === 0) return
 
-    // Emit seed:added for each selected item — HistoryRecorder records the ops
+    // Emit cell:added for each selected item — HistoryRecorder records the ops
     for (const entry of toPlace) {
-      EffectBus.emit('seed:added', { seed: entry.label })
+      EffectBus.emit('cell:added', { cell: entry.label })
     }
 
     // Remove placed items from clipboard

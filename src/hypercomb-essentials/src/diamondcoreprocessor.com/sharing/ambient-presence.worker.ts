@@ -9,6 +9,7 @@ type MeshApi = {
 
 export class AmbientPresenceWorker extends Worker {
   readonly namespace = 'diamondcoreprocessor.com'
+  override genotype = 'sharing'
 
   public override description =
     'Aggregates peer presence into a heat map overlay by tracking mesh event timestamps.'
@@ -36,19 +37,19 @@ export class AmbientPresenceWorker extends Worker {
   }
 
   #onEvent = (evt: MeshEvt): void => {
-    const seeds: string[] = Array.isArray(evt.payload?.seeds) ? evt.payload.seeds : []
+    const cells: string[] = Array.isArray(evt.payload?.cells) ? evt.payload.cells : Array.isArray(evt.payload?.seeds) ? evt.payload.seeds : []
     const now = Date.now()
-    for (const seed of seeds) this.#lastSeenMs.set(seed, now)
+    for (const cell of cells) this.#lastSeenMs.set(cell, now)
     this.#emitHeat()
   }
 
   #emitHeat = (): void => {
     const now = Date.now()
     const heat: Record<string, number> = {}
-    for (const [seed, ms] of this.#lastSeenMs) {
+    for (const [cell, ms] of this.#lastSeenMs) {
       const age = now - ms
-      if (age >= this.#ttlMs) { this.#lastSeenMs.delete(seed); continue }
-      heat[seed] = 1 - age / this.#ttlMs
+      if (age >= this.#ttlMs) { this.#lastSeenMs.delete(cell); continue }
+      heat[cell] = 1 - age / this.#ttlMs
     }
     this.emitEffect('render:presence-heat', heat)
   }

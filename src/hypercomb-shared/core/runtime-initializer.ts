@@ -149,7 +149,7 @@ export const initializeRuntime = async (
   const navigation = get('@hypercomb.social/Navigation') as Navigation | undefined
   navigation?.listen?.()
 
-  // Walk the seed tree from root to current URL, loading markers at each depth.
+  // Walk the cell tree from root to current URL, loading markers at each depth.
   // encounter() calls find() → reads markers → loads bees → pulses them.
   const history = get('@hypercomb.social/BootstrapHistory') as BootstrapHistory | undefined
   await history?.run?.()

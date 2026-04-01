@@ -21,6 +21,7 @@ const ICON_Y = -12 // above the label row, in the upper hex area
 
 export class MeetingControlsWorker extends Worker {
   readonly namespace = 'diamondcoreprocessor.com'
+  override genotype = 'meeting'
 
   public override description =
     'Registers join/camera overlay buttons for hive meetings.'
@@ -88,6 +89,7 @@ export class MeetingControlsWorker extends Worker {
     if (!available) {
       actions.push({
         name: 'meeting-join',
+        owner: this.iocKey,
         svgMarkup: JOIN_ICON_SVG,
         x: -14,
         y: ICON_Y,
@@ -101,6 +103,7 @@ export class MeetingControlsWorker extends Worker {
     if (available) {
       actions.push({
         name: 'meeting-camera',
+        owner: this.iocKey,
         svgMarkup: cameraOn ? CAMERA_ON_SVG : CAMERA_OFF_SVG,
         x: -14,
         y: ICON_Y,

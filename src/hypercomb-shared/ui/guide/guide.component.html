@@ -1,0 +1,86 @@
+@if (open()) {
+  <div class="guide-backdrop" (click)="close()"></div>
+  <div class="guide-panel" role="dialog" [attr.aria-label]="'guide.title' | t">
+
+    <!-- ── header ────────────────────────────────────── -->
+    <header class="guide-header">
+      <div class="guide-header-top">
+        <h2>{{ 'guide.title' | t }}</h2>
+        <button class="guide-close" (click)="close()">&times;</button>
+      </div>
+      <div class="guide-progress-bar">
+        <div class="guide-progress-fill" [style.width.%]="progress()"></div>
+      </div>
+      <div class="guide-progress-label">{{ progress() }}% {{ 'guide.progress' | t }}</div>
+    </header>
+
+    <!-- ── category sidebar + content ────────────────── -->
+    <div class="guide-content">
+
+      <!-- categories -->
+      <nav class="guide-categories">
+        @for (cat of categories; track cat.id) {
+          <button
+            class="guide-category-button"
+            [class.active]="activeCategory() === cat.id"
+            (click)="selectCategory(cat.id)">
+            <span class="category-label">{{ cat.labelKey | t }}</span>
+            <span class="category-badge">{{ categoryCount(cat.id).done }}/{{ categoryCount(cat.id).total }}</span>
+          </button>
+        }
+      </nav>
+
+      <!-- topics -->
+      <div class="guide-topics">
+        @if (!activeCategory()) {
+          <div class="guide-welcome-message">
+            <p>{{ 'guide.select-category' | t }}</p>
+          </div>
+        } @else {
+          @for (topic of visibleTopics(); track topic.id) {
+            <div class="guide-topic" [class.completed]="isCompleted(topic.id)">
+              <div class="topic-header">
+                <span class="topic-status">
+                  @if (isCompleted(topic.id)) {
+                    <span class="status-done">&check;</span>
+                  } @else {
+                    <span class="status-pending">&cir;</span>
+                  }
+                </span>
+                <div class="topic-info">
+                  <h4 class="topic-title">{{ topic.titleKey | t }}</h4>
+                  <p class="topic-description">{{ topic.descriptionKey | t }}</p>
+                </div>
+                @if (!isCompleted(topic.id)) {
+                  <button class="topic-complete" (click)="completeTopic(topic.id)"
+                    [attr.aria-label]="'guide.mark-complete' | t">
+                    {{ 'guide.mark-complete' | t }}
+                  </button>
+                }
+              </div>
+
+              <ol class="topic-steps">
+                @for (step of topic.steps; track step.key) {
+                  <li class="topic-step">
+                    <span class="step-text">{{ step.key | t }}</span>
+                    @if (step.shortcut) {
+                      <kbd class="step-shortcut">{{ step.shortcut }}</kbd>
+                    }
+                    @if (step.command) {
+                      <code class="step-command">{{ step.command }}</code>
+                    }
+                  </li>
+                }
+              </ol>
+            </div>
+          }
+        }
+      </div>
+    </div>
+
+    <!-- ── footer ────────────────────────────────────── -->
+    <footer class="guide-footer">
+      <button class="guide-reset" (click)="resetProgress()">{{ 'guide.reset' | t }}</button>
+    </footer>
+  </div>
+}

@@ -8,19 +8,19 @@ export class OrderProjection {
   #currentSig: string | null = null
 
   constructor() {
-    EffectBus.on<{ seed: string }>('seed:added', (payload) => {
-      if (!payload?.seed || !this.#currentSig) return
+    EffectBus.on<{ cell: string }>('cell:added', (payload) => {
+      if (!payload?.cell || !this.#currentSig) return
       const order = this.#cache.get(this.#currentSig)
-      if (order && !order.includes(payload.seed)) {
-        order.push(payload.seed)
+      if (order && !order.includes(payload.cell)) {
+        order.push(payload.cell)
       }
     })
 
-    EffectBus.on<{ seed: string }>('seed:removed', (payload) => {
-      if (!payload?.seed || !this.#currentSig) return
+    EffectBus.on<{ cell: string }>('cell:removed', (payload) => {
+      if (!payload?.cell || !this.#currentSig) return
       const order = this.#cache.get(this.#currentSig)
       if (order) {
-        const idx = order.indexOf(payload.seed)
+        const idx = order.indexOf(payload.cell)
         if (idx !== -1) order.splice(idx, 1)
       }
     })
@@ -48,28 +48,28 @@ export class OrderProjection {
 
   /**
    * Write a reorder op to history and update the in-memory cache.
-   * Stores the ordered seed list as a content-addressed resource.
+   * Stores the ordered cell list as a content-addressed resource.
    */
-  async reorder(seeds: string[]): Promise<string[]> {
-    if (!this.#currentSig) return seeds
+  async reorder(cells: string[]): Promise<string[]> {
+    if (!this.#currentSig) return cells
 
     const historyService = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
     const store = get<any>('@hypercomb.social/Store')
-    if (!historyService || !store) return seeds
+    if (!historyService || !store) return cells
 
     // Store ordered list as content-addressed resource
-    const payload = JSON.stringify(seeds)
+    const payload = JSON.stringify(cells)
     const payloadSig: string = await store.putResource(new Blob([payload]))
 
-    // Record reorder op — seed field holds the resource signature
+    // Record reorder op — cell field holds the resource signature
     await historyService.record(this.#currentSig, {
       op: 'reorder',
-      seed: payloadSig,
+      cell: payloadSig,
       at: Date.now(),
     })
 
     // Update in-memory cache
-    const copy = [...seeds]
+    const copy = [...cells]
     this.#cache.set(this.#currentSig, copy)
     return copy
   }
@@ -86,8 +86,8 @@ export class OrderProjection {
 
   /**
    * Walk history ops to derive display order:
-   * - add → append seed (if not present)
-   * - remove → remove seed from list
+   * - add → append cell (if not present)
+   * - remove → remove cell from list
    * - reorder → resolve payload from resources, replace list
    */
   async #buildOrder(ops: HistoryOp[]): Promise<string[]> {
@@ -97,14 +97,14 @@ export class OrderProjection {
     for (const op of ops) {
       switch (op.op) {
         case 'add':
-          if (!order.includes(op.seed)) order.push(op.seed)
+          if (!order.includes(op.cell)) order.push(op.cell)
           break
         case 'remove':
-          order = order.filter(s => s !== op.seed)
+          order = order.filter(s => s !== op.cell)
           break
         case 'reorder':
           if (store) {
-            const blob: Blob | null = await store.getResource(op.seed)
+            const blob: Blob | null = await store.getResource(op.cell)
             if (blob) {
               try {
                 const parsed = JSON.parse(await blob.text())

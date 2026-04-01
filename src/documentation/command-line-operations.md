@@ -20,7 +20,7 @@
 | [delete-cell](#delete-cell) | `!name` or `![a,b]` | Enter | pluggable | done |
 | [batch-create](#batch-create) | `[a,b]` or `path/[a,b]` | Enter | pluggable | done |
 | [cut-paste](#cut-paste) | `[items]/destination` | Enter | pluggable | done |
-| [hash-marker](#hash-marker) | `seed#Drone` | Enter | pluggable | done |
+| [hash-marker](#hash-marker) | `cell#Drone` | Enter | pluggable | done |
 | [slash-command](#slash-command) | `/command args` | Enter | pluggable | done (16 commands) |
 
 ---
@@ -184,7 +184,7 @@ Behavior file &mdash; `cut-paste.behavior.ts`
 
 **Trigger** &mdash; Enter &ensp;|&ensp; **Type** &mdash; pluggable
 
-Bind a drone marker to a seed via `#`. Markers are stored in the seed's zero-signature properties file.
+Bind a drone marker to a cell via `#`. Markers are stored in the cell's zero-signature properties file.
 
 ```
 cigars#CigarJournal   → binds CigarJournal marker to cigars

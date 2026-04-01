@@ -12,11 +12,12 @@ import type { LinkSafetyService, SafetyVerdict } from '../safety/link-safety.ser
 
 export class LinkDropWorker extends Worker {
   readonly namespace = 'diamondcoreprocessor.com'
+  override genotype = 'linking'
 
   public override description =
     'Intercepts browser drag-and-drop link events and routes URLs into the tile editor.'
 
-  protected override emits = ['seed:added', 'link:safety-blocked', 'link:safety-warning']
+  protected override emits = ['cell:added', 'link:safety-blocked', 'link:safety-warning']
 
   #busy = false
 
@@ -134,8 +135,8 @@ export class LinkDropWorker extends Worker {
       }
       // Path B: tile selected — open editor, then set link + image
       else if (this.#selection && this.#selection.count > 0 && this.#selection.active) {
-        const seed = this.#selection.active
-        EffectBus.emit('tile:action', { action: 'edit', label: seed, q: 0, r: 0, index: 0 })
+        const cell = this.#selection.active
+        EffectBus.emit('tile:action', { action: 'edit', label: cell, q: 0, r: 0, index: 0 })
         await this.#waitForEditorMode()
         this.#editorService?.setLink(url)
         if (thumbnailBlob) {
@@ -143,10 +144,10 @@ export class LinkDropWorker extends Worker {
           await this.#loadImageWhenReady(thumbnailBlob)
         }
       }
-      // Path C: nothing selected — create new seed, open editor, set link + image
+      // Path C: nothing selected — create new cell, open editor, set link + image
       else {
         const label = 'link-' + Date.now()
-        EffectBus.emit('seed:added', { seed: label })
+        EffectBus.emit('cell:added', { cell: label })
 
         // let history record the add before opening editor
         await new Promise<void>(r => setTimeout(r, 100))

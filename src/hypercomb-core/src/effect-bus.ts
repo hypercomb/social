@@ -18,6 +18,14 @@ class EffectBusImpl {
     for (const fn of set) fn(payload)
   }
 
+  /** Emit without storing in last-value — for point-in-time events that
+   *  should NOT replay to late subscribers (e.g. bee:disposed). */
+  emitTransient<T = unknown>(effect: string, payload: T): void {
+    const set = this.handlers.get(effect)
+    if (!set) return
+    for (const fn of set) fn(payload)
+  }
+
   on<T = unknown>(effect: string, handler: EffectHandler<T>): () => void {
     let set = this.handlers.get(effect)
     if (!set) { set = new Set(); this.handlers.set(effect, set) }

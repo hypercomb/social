@@ -148,7 +148,7 @@ Some icons only appear on certain tiles. The `visibleWhen` callback receives:
 
 ```typescript
 type OverlayTileContext = {
-  label: string      // tile's seed label
+  label: string      // tile's cell label
   q: number          // axial q
   r: number          // axial r
   index: number      // position in cell array
@@ -166,9 +166,9 @@ Registered by `TileActionsDrone` when `render:host-ready` fires:
 
 | Name | Render | Position | Hover Tint | Visibility | Action |
 |------|--------|----------|-----------|------------|--------|
-| `command` | SVG (terminal prompt) | centered | Green `0xa8ffd8` | Always | Emits `command:focus` with seed label |
+| `command` | SVG (terminal prompt) | centered | Green `0xa8ffd8` | Always | Emits `command:focus` with cell label |
 | `edit` | Font `2` | x:-2, y:5 | Blue `0xc8d8ff` | Always | Emits `tile:action` (editor listens) |
-| `remove` | SVG (trash can) | x:7.9375, y:5 | Red `0xffc8c8` | Always | Emits `seed:removed` |
+| `remove` | SVG (trash can) | x:7.9375, y:5 | Red `0xffc8c8` | Always | Emits `cell:removed` |
 | `search` | SVG (magnifier) | x:19.25, y:5 | Green `0xc8ffc8` | `noImage` only | Prefills search with label |
 | `toggle-text` | Font `J` | x:8.625, y:5 | Yellow `0xfff0c8` | Always | Emits `tile:toggle-text` |
 | `toggle-visibility` | SVG (eye) | x:19.25, y:5 | Cyan `0xc8e8ff` | Has image only | Toggles hidden state in localStorage |
@@ -183,7 +183,7 @@ Registered by `TileActionsDrone` when `render:host-ready` fires:
 
 | Name | Render | Position | Hover Tint | Action |
 |------|--------|----------|-----------|--------|
-| `adopt` | SVG (plus) | x:8.625, y:5 | Green `0xa8ffd8` | Emits `seed:added`, runs processor |
+| `adopt` | SVG (plus) | x:8.625, y:5 | Green `0xa8ffd8` | Emits `cell:added`, runs processor |
 | `block` | SVG (circle-slash) | x:-2, y:5 | Red `0xffc8c8` | Adds to `hc:blocked-tiles:{location}` in localStorage |
 
 ## How to Add a New Icon

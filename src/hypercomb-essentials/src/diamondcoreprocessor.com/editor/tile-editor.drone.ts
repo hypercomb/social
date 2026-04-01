@@ -39,7 +39,7 @@ export class TileEditorDrone {
 
   // ── open editor ────────────────────────────────────────────────
 
-  async #openEditing(seed: string): Promise<void> {
+  async #openEditing(cell: string): Promise<void> {
     const store = window.ioc.get<Store>('@hypercomb.social/Store')
     const service = window.ioc.get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
     if (!store || !service) return
@@ -49,7 +49,7 @@ export class TileEditorDrone {
     try {
       const indexKey = 'hc:tile-props-index'
       const index: Record<string, string> = JSON.parse(localStorage.getItem(indexKey) ?? '{}')
-      const propsSig = index[seed]
+      const propsSig = index[cell]
       if (!propsSig) throw new Error('no index entry')
       const propsBlob = await store.getResource(propsSig)
       if (!propsBlob) throw new Error('props blob missing')
@@ -67,7 +67,7 @@ export class TileEditorDrone {
     }
 
     // 3. open editor service
-    service.open(seed, properties, largeBlob)
+    service.open(cell, properties, largeBlob)
   }
 
   // ── save (called by Angular component) ─────────────────────────
@@ -159,21 +159,21 @@ export class TileEditorDrone {
     const blob = new Blob([json], { type: 'application/json' })
     const propsSig = await store.putResource(blob)
 
-    // persist seed → resource sig mapping
+    // persist cell → resource sig mapping
     const indexKey = 'hc:tile-props-index'
     const index: Record<string, string> = JSON.parse(localStorage.getItem(indexKey) ?? '{}')
-    index[service.seed] = propsSig
+    index[service.cell] = propsSig
     localStorage.setItem(indexKey, JSON.stringify(index))
 
-    // 5. capture seed name before closing
-    const savedSeed = service.seed
+    // 5. capture cell name before closing
+    const savedCell = service.cell
 
     // 6. cleanup
     imageEditor.destroy()
     service.close()
 
     // 7. notify via effect bus (processor owns synchronize; drones use effects)
-    EffectBus.emit<{ seed: string }>('tile:saved', { seed: savedSeed })
+    EffectBus.emit<{ cell: string }>('tile:saved', { cell: savedCell })
   }
 
   // ── cancel ─────────────────────────────────────────────────────

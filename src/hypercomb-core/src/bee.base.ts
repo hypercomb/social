@@ -61,7 +61,12 @@ export abstract class Bee {
 
   /** Mark this bee as disposed, clean up effect subscriptions, call dispose() if defined */
   public markDisposed(): void {
+    if (this._state === BeeState.Disposed) return
     this._state = BeeState.Disposed
+    // Broadcast disposal BEFORE cleaning subscriptions — listeners must
+    // see this event so they can tear down UI owned by this bee.
+    // Transient: disposal is a point-in-time event, not replayable state.
+    EffectBus.emitTransient('bee:disposed', { iocKey: this.iocKey })
     for (const unsub of this._effectSubs) unsub()
     this._effectSubs.length = 0
     this.dispose?.()
@@ -107,6 +112,17 @@ export abstract class Bee {
     const key = this.deps?.[localName] ?? localName
     return (globalThis as any).ioc?.get(key) as T | undefined
   }
+
+  // --------------------------------
+  // genotype (feature group identity)
+  // --------------------------------
+
+  /**
+   * Stable, human-readable feature-group identifier.
+   * All bees sharing a genotype form a cohort whose UI contributions
+   * can be toggled on/off as a unit via `genotype:set-visible`.
+   */
+  public genotype?: string
 
   // --------------------------------
   // meaning

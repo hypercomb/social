@@ -18,7 +18,7 @@ export type MeetingState = 'idle' | 'gathering' | 'active' | 'ended'
 type PeerAvailability = {
   publisherId: string
   lastSeenMs: number
-  seed: string
+  cell: string
 }
 
 type PeerConnection = {
@@ -40,6 +40,7 @@ const DEFAULT_THRESHOLD = 7
 
 export class HiveMeetingDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
+  override genotype = 'meeting'
 
   public override description =
     'Orchestrates hive meetings — availability tracking, WebRTC signaling, peer connections.'
@@ -191,7 +192,7 @@ export class HiveMeetingDrone extends Drone {
     this.#availability.set(id, {
       publisherId: id,
       lastSeenMs: Date.now(),
-      seed: p.seed ?? '',
+      cell: p.cell ?? p.seed ?? '',
     })
   }
 

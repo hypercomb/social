@@ -28,7 +28,7 @@ export interface ParsedArrayItem {
  *   ~name:tag(#color) → tag-remove (color ignored but parsed)
  *
  * @param raw       The raw string INSIDE brackets (no outer [ ]).
- * @param normalize Normalization function for seed names (CompletionUtility.normalize).
+ * @param normalize Normalization function for cell names (CompletionUtility.normalize).
  */
 export function parseArrayItems(
   raw: string,

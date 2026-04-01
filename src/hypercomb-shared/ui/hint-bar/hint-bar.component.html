@@ -1,0 +1,15 @@
+<!-- hypercomb-shared/ui/hint-bar/hint-bar.component.html -->
+
+@if (visible()) {
+  <div class="hint-bar">
+    @for (item of items(); track item) {
+      <button
+        class="hint-crumb"
+        [class.hint-matched]="isMatched(item)"
+        [class.hint-chosen]="isChosen(item)"
+        [style.border-color]="colorFor(item) || null"
+        (mousedown)="onPick(item, $event)"
+      >@if (colorFor(item); as color) {<span class="hint-dot" [style.background]="color"></span>}{{ item }}</button>
+    }
+  </div>
+}

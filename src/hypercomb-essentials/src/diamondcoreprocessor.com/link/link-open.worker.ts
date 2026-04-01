@@ -10,6 +10,7 @@ type TileActionPayload = { action: string; label: string; q: number; r: number; 
 
 export class LinkOpenWorker extends Worker {
   readonly namespace = 'diamondcoreprocessor.com'
+  override genotype = 'linking'
 
   public override description =
     'Handles the default tile open action — routes image links to the photo view.'

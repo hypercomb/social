@@ -141,6 +141,16 @@ $bp-phone-max: 599px;
 .command-results li:hover { background: rgba(var(--glow-color-rgb), 0.06); }
 .command-results li.active { background: rgba(var(--glow-color-rgb), 0.1); box-shadow: inset 2px 0 0 var(--glow-color); }
 
+.color-dot {
+  display: inline-block;
+  width: 0.55em;
+  height: 0.55em;
+  border-radius: 50%;
+  margin-right: 0.5em;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
 .typed { color: var(--glow-color); }
 .rest { color: whitesmoke; opacity: 0.6; }
 

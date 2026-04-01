@@ -44,14 +44,13 @@ export const ensureInstall = async (sentinel?: SentinelBridge | null): Promise<v
     if (result) {
       const { syncSig, enabledBees, enabledDeps, enabledLayers, beeDeps, files } = result
 
-      // Short-circuit: already in sync
+      // Short-circuit: already in sync — signatures match, skip all OPFS work
       if (!files.length && currentSyncSig === syncSig) {
         console.log('[ensure-install] sentinel sync — already in sync:', syncSig.slice(0, 12))
         restoreSignatureStore(sigStore)
         const cached = localStorage.getItem(MANIFEST_KEY)
         if (cached) {
           const m = tryParseManifest(cached)
-          await seedManifestCache(store, m)
           if (m?.beeDeps) (globalThis as any).__hypercombBeeDeps = m.beeDeps
         }
         return
@@ -111,6 +110,12 @@ export const ensureInstall = async (sentinel?: SentinelBridge | null): Promise<v
       localStorage.setItem(MANIFEST_KEY, JSON.stringify(syncManifest))
       if (beeDeps) (globalThis as any).__hypercombBeeDeps = beeDeps
 
+      // Verify all synced artifacts are present before proceeding
+      const sentinelVerification = await verifyInstall(store, syncManifest)
+      if (!sentinelVerification.ok) {
+        throw new Error(`[ensure-install] sentinel sync incomplete — ${sentinelVerification.missing.length} artifact(s) missing: ${sentinelVerification.missing.join(', ')}`)
+      }
+
       console.log(`[ensure-install] sentinel sync complete: ${syncSig.slice(0, 12)} (${enabledBees.length} bees, ${enabledDeps.length} deps, ${enabledLayers.length} layers)`)
       return
     }
@@ -119,7 +124,18 @@ export const ensureInstall = async (sentinel?: SentinelBridge | null): Promise<v
     console.warn('[ensure-install] sentinel sync returned no result — using cached OPFS state')
     restoreSignatureStore(sigStore)
     restoreCachedBeeDeps()
-    await seedManifestCache(store, tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? ''))
+    const sentinelCachedManifest = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
+    await seedManifestCache(store, sentinelCachedManifest)
+
+    // Verify cached state is still intact
+    const cachedVerification = await verifyInstall(store, sentinelCachedManifest)
+    if (!cachedVerification.ok) {
+      console.warn(`[ensure-install] cached OPFS state incomplete — ${cachedVerification.missing.length} artifact(s) missing, clearing stale manifest`)
+      localStorage.removeItem(MANIFEST_KEY)
+      localStorage.removeItem(INSTALLED_KEY)
+      localStorage.removeItem(SYNC_SIG_KEY)
+      throw new Error(`[ensure-install] cached install invalid — ${cachedVerification.missing.join(', ')}`)
+    }
     return
   }
 
@@ -129,8 +145,22 @@ export const ensureInstall = async (sentinel?: SentinelBridge | null): Promise<v
     console.log('[ensure-install] no sentinel — using cached OPFS state')
     restoreSignatureStore(sigStore)
     restoreCachedBeeDeps()
-    await seedManifestCache(store, cachedManifest)
-    return
+
+    // Spot-check a single bee to avoid full verification on every startup
+    const spotOk = cachedManifest.bees.length > 0
+      ? await fileExists(store.bees, `${cachedManifest.bees[0]}.js`)
+      : true
+    if (spotOk) return
+
+    // Spot-check failed — run full verification
+    const cachedVerification = await verifyInstall(store, cachedManifest)
+    if (!cachedVerification.ok) {
+      console.warn(`[ensure-install] cached OPFS incomplete — ${cachedVerification.missing.length} artifact(s) missing, falling through to local install`)
+      localStorage.removeItem(MANIFEST_KEY)
+      localStorage.removeItem(INSTALLED_KEY)
+    } else {
+      return
+    }
   }
 
   // OPFS empty and no sentinel — install directly from DCP's static files
@@ -331,6 +361,59 @@ const restoreSignatureStore = (sigStore: SignatureStore): void => {
   }
 }
 
+// ----- install verification -----
+// Blocks bootstrap until EVERY artifact in the manifest is confirmed present in OPFS.
+
+type VerificationResult = { ok: boolean; missing: string[] }
+
+const verifyInstall = async (store: Store, manifest: InstallManifest | null): Promise<VerificationResult> => {
+  if (!manifest) return { ok: true, missing: [] }
+
+  // Collect all domain layer directories upfront
+  const layerDirs: FileSystemDirectoryHandle[] = []
+  for await (const [, handle] of store.layers.entries()) {
+    if (handle.kind === 'directory') layerDirs.push(handle as FileSystemDirectoryHandle)
+  }
+
+  // Verify all artifacts in parallel
+  const checks = [
+    ...manifest.bees.filter(Boolean).map(async sig => {
+      const found = await fileExists(store.bees, `${sig}.js`) || await fileExists(store.bees, sig)
+      return found ? null : `bee:${sig}`
+    }),
+    ...manifest.dependencies.filter(Boolean).map(async sig => {
+      const found = await fileExists(store.dependencies, `${sig}.js`) || await fileExists(store.dependencies, sig)
+      return found ? null : `dependency:${sig}`
+    }),
+    ...manifest.layers.filter(Boolean).map(async sig => {
+      for (const dir of layerDirs) {
+        if (await fileExists(dir, sig) || await fileExists(dir, `${sig}.json`)) return null
+      }
+      return `layer:${sig}`
+    }),
+  ]
+
+  const results = await Promise.all(checks)
+  const missing = results.filter((r): r is string => r !== null)
+
+  if (missing.length) {
+    console.error(`[ensure-install] verification failed — ${missing.length} missing artifact(s):`, missing)
+  } else {
+    console.log(`[ensure-install] verification passed (${manifest.bees.length} bees, ${manifest.dependencies.length} deps, ${manifest.layers.length} layers)`)
+  }
+
+  return { ok: missing.length === 0, missing }
+}
+
+const fileExists = async (dir: FileSystemDirectoryHandle, name: string): Promise<boolean> => {
+  try {
+    await dir.getFileHandle(name)
+    return true
+  } catch {
+    return false
+  }
+}
+
 // ----- local install fallback -----
 // Content loads exclusively through the DCP proxy.
 
@@ -364,35 +447,34 @@ const localInstall = async (store: Store, sigStore: SignatureStore): Promise<voi
     return
   }
 
-  if (!manifest) return
-
   const layerDir = await store.domainLayersDirectory('local', true)
 
-  // Install layers
-  for (const sig of manifest.layers) {
-    try {
-      const res = await fetch(`${baseUrl}/__layers__/${sig}.json`, { cache: 'no-store' })
-      if (!res.ok) continue
-      await writeBytes(layerDir, sig, await res.arrayBuffer())
-    } catch { /* skip */ }
-  }
+  // Install layers, dependencies, and bees in parallel
+  await Promise.all([
+    ...manifest.layers.map(async sig => {
+      try {
+        const res = await fetch(`${baseUrl}/__layers__/${sig}.json`, { cache: 'no-store' })
+        if (res.ok) await writeBytes(layerDir, sig, await res.arrayBuffer())
+      } catch { /* skip */ }
+    }),
+    ...manifest.dependencies.map(async sig => {
+      try {
+        const res = await fetch(`${baseUrl}/__dependencies__/${sig}.js`, { cache: 'no-store' })
+        if (res.ok) await writeBytes(store.dependencies, `${sig}.js`, await res.arrayBuffer())
+      } catch { /* skip */ }
+    }),
+    ...manifest.bees.map(async sig => {
+      try {
+        const res = await fetch(`${baseUrl}/__bees__/${sig}.js`, { cache: 'no-store' })
+        if (res.ok) await writeBytes(store.bees, `${sig}.js`, await res.arrayBuffer())
+      } catch { /* skip */ }
+    }),
+  ])
 
-  // Install dependencies
-  for (const sig of manifest.dependencies) {
-    try {
-      const res = await fetch(`${baseUrl}/__dependencies__/${sig}.js`, { cache: 'no-store' })
-      if (!res.ok) continue
-      await writeBytes(store.dependencies, `${sig}.js`, await res.arrayBuffer())
-    } catch { /* skip */ }
-  }
-
-  // Install bees
-  for (const sig of manifest.bees) {
-    try {
-      const res = await fetch(`${baseUrl}/__bees__/${sig}.js`, { cache: 'no-store' })
-      if (!res.ok) continue
-      await writeBytes(store.bees, `${sig}.js`, await res.arrayBuffer())
-    } catch { /* skip */ }
+  // Verify all artifacts landed in OPFS before committing
+  const verification = await verifyInstall(store, manifest)
+  if (!verification.ok) {
+    throw new Error(`[ensure-install] local install incomplete — ${verification.missing.length} artifact(s) missing: ${verification.missing.join(', ')}`)
   }
 
   // Trust all signatures and persist manifest

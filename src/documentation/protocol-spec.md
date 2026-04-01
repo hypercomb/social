@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-Hypercomb is a decentralized, presence-based navigation protocol. There is no central server. Clients connect to one or more Nostr relays to exchange ephemeral seed data. Users do not log in. Identity is visual and ephemeral. The local filesystem (OPFS) is the source of truth. Relays are stateless forwarders.
+Hypercomb is a decentralized, presence-based navigation protocol. There is no central server. Clients connect to one or more Nostr relays to exchange ephemeral cell data. Users do not log in. Identity is visual and ephemeral. The local filesystem (OPFS) is the source of truth. Relays are stateless forwarders.
 
 This document specifies the wire protocol, message formats, addressing, storage model, signing, and lifecycle.
 
@@ -70,7 +70,7 @@ All messages use the standard Nostr event envelope.
 
 | Kind  | Purpose                         |
 |-------|---------------------------------|
-| 29010 | Hypercomb seed exchange         |
+| 29010 | Hypercomb cell exchange         |
 
 Configuration key: `localStorage['hc:nostrmesh:kinds']` (JSON array of integers, or `null` for any kind).
 
@@ -87,7 +87,7 @@ Every hypercomb event MUST include an `x` tag containing the signature (address)
 | Tag         | Format                        | Purpose                          |
 |-------------|-------------------------------|----------------------------------|
 | `publisher` | `["publisher", "<client-id>"]`| Self-identification for filtering own events |
-| `mode`      | `["mode", "snapshot"\|"delta"]` | Snapshot = full seed list; Delta = single addition |
+| `mode`      | `["mode", "snapshot"\|"delta"]` | Snapshot = full cell list; Delta = single addition |
 | `source`    | `["source", "<origin>"]`      | Origin context for the publish   |
 
 ---
@@ -99,22 +99,22 @@ A signature addresses a specific location in the hierarchy. It is computed deter
 ### 4.1 Computation
 
 ```
-key   = "{domain}/{segment_0}/{segment_1}/.../{segment_n}/seed"
+key   = "{domain}/{segment_0}/{segment_1}/.../{segment_n}/cell"
 bytes = UTF-8(key)
 sig   = lowercase(hex(SHA-256(bytes)))
 ```
 
 - `domain`: The active domain. Default: `hypercomb.io`.
 - `segments`: The current OPFS explorer path segments, in order.
-- If no segments exist: `key = "{domain}/seed"`.
+- If no segments exist: `key = "{domain}/cell"`.
 
 ### 4.2 Example
 
 ```
 Path:       /chemistry/organic
 Domain:     hypercomb.io
-Key:        "hypercomb.io/chemistry/organic/seed"
-Signature:  SHA-256("hypercomb.io/chemistry/organic/seed") → 64-char hex
+Key:        "hypercomb.io/chemistry/organic/cell"
+Signature:  SHA-256("hypercomb.io/chemistry/organic/cell") → 64-char hex
 ```
 
 The resulting signature is used as the `x` tag value in all subscribe/publish operations for that location.
@@ -175,7 +175,7 @@ Subscription IDs are generated as: `hc-{timestamp_hex}-{random_hex}`.
 
 ## 6. Payload Formats
 
-The `content` field of a Nostr event carries the seed payload. Three formats are supported.
+The `content` field of a Nostr event carries the cell payload. Three formats are supported.
 
 ### 6.1 CSV String (Preferred)
 
@@ -183,16 +183,16 @@ The `content` field of a Nostr event carries the seed payload. Three formats are
 "alpha,beta,gamma"
 ```
 
-Seeds are comma-separated. Leading/trailing whitespace per seed is trimmed. Quoted seeds (`"name"` or `'name'`) are unquoted.
+Cells are comma-separated. Leading/trailing whitespace per cell is trimmed. Quoted cells (`"name"` or `'name'`) are unquoted.
 
 ### 6.2 JSON Object
 
 ```json
-{"seeds": ["alpha", "beta"], "publisherId": "<id>", "mode": "snapshot", "publishedAtMs": 1234567890}
+{"cells": ["alpha", "beta"], "publisherId": "<id>", "mode": "snapshot", "publishedAtMs": 1234567890}
 ```
 
-Required field: `seeds` (string array).
-Optional fields: `publisherId`, `mode`, `publishedAtMs`, `seed` (single string).
+Required field: `cells` (string array).
+Optional fields: `publisherId`, `mode`, `publishedAtMs`, `cell` (single string).
 
 ### 6.3 JSON Array
 
@@ -205,8 +205,8 @@ Direct string array.
 ### 6.4 Parsing Order
 
 1. If content does not start with `{`, `[`, or `"`: parse as CSV.
-2. Attempt `JSON.parse`. If result is string: parse as CSV. If array: iterate. If object: read `.seeds` and `.seed`.
-3. Fallback: regex extract `seeds:[...]` from malformed JSON, then CSV split.
+2. Attempt `JSON.parse`. If result is string: parse as CSV. If array: iterate. If object: read `.cells` and `.cell`.
+3. Fallback: regex extract `cells:[...]` from malformed JSON, then CSV split.
 4. If content looks structured but unparseable: discard (do not produce junk tiles).
 
 ---
@@ -219,11 +219,11 @@ Every publish is delivered locally first, before network send. This ensures the 
 
 ### 7.2 Snapshot (Initial)
 
-On first encounter with a signature, the client publishes a full snapshot of local seeds:
+On first encounter with a signature, the client publishes a full snapshot of local cells:
 
 ```json
 {
-  "seeds": ["alpha", "beta", "gamma"],
+  "cells": ["alpha", "beta", "gamma"],
   "publisherId": "<uuid>",
   "mode": "snapshot",
   "publishedAtMs": <unix-ms>
@@ -234,10 +234,10 @@ Tags: `["x", "<sig>"], ["publisher", "<uuid>"], ["mode", "snapshot"]`
 
 ### 7.3 Delta (Subsequent)
 
-When new seeds appear locally after the initial snapshot, each new seed is published individually:
+When new cells appear locally after the initial snapshot, each new cell is published individually:
 
 ```
-content: "new-seed-name"
+content: "new-cell-name"
 ```
 
 Tags: `["x", "<sig>"], ["publisher", "<uuid>"], ["mode", "delta"]`
@@ -348,9 +348,9 @@ The Origin Private File System is the persistent local store. No server storage 
 
 ```
 opfsRoot/                          (navigator.storage.getDirectory())
-  hypercomb.io/                    (domain root — user seed hierarchy)
-    {seed}/                        (directory = seed)
-      {child-seed}/                (nested seed)
+  hypercomb.io/                    (domain root — user cell hierarchy)
+    {cell}/                        (directory = cell)
+      {child-cell}/                (nested cell)
       ...
   __drones__/                      (compiled drone modules, keyed by SHA-256)
   __dependencies__/                (shared JS libraries, keyed by SHA-256)
@@ -360,9 +360,9 @@ opfsRoot/                          (navigator.storage.getDirectory())
       {signature}-install          (installation manifest)
 ```
 
-### 12.2 Seeds
+### 12.2 Cells
 
-A seed is a directory under the domain root. The directory name IS the seed name. Seeds form a hierarchy:
+A cell is a directory under the domain root. The directory name IS the cell name. Cells form a hierarchy:
 
 ```
 hypercomb.io/
@@ -373,11 +373,11 @@ hypercomb.io/
     jazz/
 ```
 
-Hidden directories (`__*__`) and install markers (`*-install`) are excluded from seed listings.
+Hidden directories (`__*__`) and install markers (`*-install`) are excluded from cell listings.
 
 ### 12.3 Lineage
 
-Lineage is the client's current position in the seed hierarchy, expressed as an ordered path of segments:
+Lineage is the client's current position in the cell hierarchy, expressed as an ordered path of segments:
 
 ```
 segments: ["chemistry", "organic"]
@@ -449,7 +449,7 @@ Lookup is by name: `window.ioc.get<T>('NostrMeshDrone')`.
 
 ---
 
-## 14. Seed Exchange Sequence
+## 14. Cell Exchange Sequence
 
 Complete flow for two clients at the same lineage path.
 
@@ -461,18 +461,18 @@ Client A                          Relay                         Client B
    │                                │◄── REQ [sub-b, {#x:[sig]}] ─┤
    │                                │                              ├─ compute sig from lineage
    │                                │                              │
-   ├─ EVENT {seeds, publisher:A} ──►│──► EVENT [sub-b, evt] ──────►│
+   ├─ EVENT {cells, publisher:A} ──►│──► EVENT [sub-b, evt] ──────►│
    │                                │                              ├─ filter: publisher != B
    │                                │                              ├─ cache event
-   │                                │                              ├─ union seeds
+   │                                │                              ├─ union cells
    │                                │                              │
-   │◄── EVENT [sub-a, evt] ────────│◄── EVENT {seeds, pub:B} ─────┤
+   │◄── EVENT [sub-a, evt] ────────│◄── EVENT {cells, pub:B} ─────┤
    ├─ filter: publisher != A        │                              │
    ├─ cache event                   │                              │
-   ├─ union seeds                   │                              │
+   ├─ union cells                   │                              │
    │                                │                              │
    ├─ render honeycomb grid         │              render honeycomb─┤
-   │  (local + remote seeds)        │              (local + remote) │
+   │  (local + remote cells)        │              (local + remote) │
 ```
 
 ---
@@ -550,7 +550,7 @@ DNA captures a navigation path for voluntary publication. Live behavior is unaff
 | VERSION       | 1 byte   | `0x01`                                             |
 | FLAGS         | 1 byte   | bit 0: anchored, bit 1: attested, bit 2: encrypted (reserved) |
 | POLICY        | 1 byte   | 0 = creator, 1 = creator+cohort, 2 = community    |
-| START_HASH    | 32 bytes | SHA-256 of start seed                              |
+| START_HASH    | 32 bytes | SHA-256 of start cell                              |
 | SALT          | 16 bytes | Random, mitigates rainbow tables on START_HASH     |
 | INSTR_LEN     | 4 bytes  | Little-endian, number of instruction bytes         |
 | INSTR_BYTES   | N bytes  | 1-byte navigation instructions (section 15)        |

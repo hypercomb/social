@@ -53,23 +53,23 @@ export class BatchCreateBehavior implements CommandLineBehavior {
     const expanded = this.#expand(input, completions)
     if (!expanded.length) return
 
-    const topSeeds = new Set<string>()
+    const topCells = new Set<string>()
     const tagOps: TagOp[] = []
 
     for (const item of expanded) {
       if (item.op === 'delete') {
         await this.#deleteTarget(dir, item.segments)
         if (item.segments[0]) {
-          EffectBus.emit('seed:removed', { seed: item.segments[0] })
+          EffectBus.emit('cell:removed', { cell: item.segments[0] })
         }
       } else if (item.op === 'tag-add' || item.op === 'tag-remove') {
-        // ensure the seed exists for tag-add
+        // ensure the cell exists for tag-add
         if (item.op === 'tag-add') {
           let parent = dir
           for (const part of item.segments) {
             parent = await parent.getDirectoryHandle(part, { create: true })
           }
-          if (item.segments[0]) topSeeds.add(item.segments[0])
+          if (item.segments[0]) topCells.add(item.segments[0])
         }
         if (item.tag) {
           tagOps.push({
@@ -85,7 +85,7 @@ export class BatchCreateBehavior implements CommandLineBehavior {
         for (const part of item.segments) {
           parent = await parent.getDirectoryHandle(part, { create: true })
         }
-        if (item.segments[0]) topSeeds.add(item.segments[0])
+        if (item.segments[0]) topCells.add(item.segments[0])
       }
     }
 
@@ -94,8 +94,8 @@ export class BatchCreateBehavior implements CommandLineBehavior {
       await persistTagOps(tagOps, dir)
     }
 
-    for (const seed of topSeeds) {
-      EffectBus.emit('seed:added', { seed })
+    for (const cell of topCells) {
+      EffectBus.emit('cell:added', { cell })
     }
     await new hypercomb().act()
   }

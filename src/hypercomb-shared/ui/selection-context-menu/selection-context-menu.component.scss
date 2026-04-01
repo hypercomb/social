@@ -98,6 +98,48 @@
   margin: 0.1rem 0;
 }
 
+// ── eye icon (hide button) ──────────────────────────────
+
+.eye-icon {
+  display: inline-block;
+  width: 0.76rem;
+  height: 0.76rem;
+  position: relative;
+
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3C/svg%3E");
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+
+  background: rgba(200, 200, 200, 0.8);
+  transition: background 200ms ease;
+
+  &::after {
+    content: '';
+    position: absolute;
+    top: 10%;
+    left: -5%;
+    width: 130%;
+    height: 1.5px;
+    background: #cc4444;
+    transform: rotate(-25deg);
+    transform-origin: center;
+    pointer-events: none;
+    transition: opacity 200ms ease;
+  }
+
+  &.struck::after { opacity: 0.85; }
+  &:not(.struck)::after { opacity: 0; }
+}
+
+.ctx-btn:hover .eye-icon {
+  background: whitesmoke;
+}
+
 // ── responsive ──────────────────────────────────────────
 
 @include touch {

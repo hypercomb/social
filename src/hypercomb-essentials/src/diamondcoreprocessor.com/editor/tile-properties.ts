@@ -5,14 +5,14 @@ export const isSignature = (value: unknown): boolean =>
   typeof value === 'string' && /^[0-9a-f]{64}$/.test(value)
 
 /**
- * Read and parse the 0000 properties JSON from a seed directory.
+ * Read and parse the 0000 properties JSON from a cell directory.
  * Returns empty object if file doesn't exist or can't be parsed.
  */
-export const readSeedProperties = async (
-  seedDir: FileSystemDirectoryHandle
+export const readCellProperties = async (
+  cellDir: FileSystemDirectoryHandle
 ): Promise<Record<string, unknown>> => {
   try {
-    const fileHandle = await seedDir.getFileHandle(TILE_PROPERTIES_FILE)
+    const fileHandle = await cellDir.getFileHandle(TILE_PROPERTIES_FILE)
     const file = await fileHandle.getFile()
     const text = await file.text()
     return JSON.parse(text)
@@ -22,16 +22,16 @@ export const readSeedProperties = async (
 }
 
 /**
- * Write properties JSON to a seed's 0000 file.
+ * Write properties JSON to a cell's 0000 file.
  * Merges with existing properties — pass only the fields to update.
  */
-export const writeSeedProperties = async (
-  seedDir: FileSystemDirectoryHandle,
+export const writeCellProperties = async (
+  cellDir: FileSystemDirectoryHandle,
   updates: Record<string, unknown>
 ): Promise<void> => {
-  const existing = await readSeedProperties(seedDir)
+  const existing = await readCellProperties(cellDir)
   const merged = { ...existing, ...updates }
-  const fileHandle = await seedDir.getFileHandle(TILE_PROPERTIES_FILE, { create: true })
+  const fileHandle = await cellDir.getFileHandle(TILE_PROPERTIES_FILE, { create: true })
   const writable = await fileHandle.createWritable()
   await writable.write(JSON.stringify(merged))
   await writable.close()

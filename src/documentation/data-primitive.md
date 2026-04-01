@@ -21,7 +21,7 @@ Every mutation in Hypercomb follows the same path:
 A cell is the atomic unit of content. When a cell is created, its identity is derived from its name through SHA-256:
 
 ```
-cell.seed = SHA-256("organic-chemistry")
+cell.identity = SHA-256("organic-chemistry")
 → 7a3f...b812 (64-char hex)
 ```
 
@@ -39,7 +39,7 @@ The lineage — the explorer path from root to the current cell — is signed to
 
 ```
 lineage:    /hypercomb.io/chemistry/organic
-key:        "hypercomb.io/chemistry/organic/seed"
+key:        "hypercomb.io/chemistry/organic/cell"
 signature:  SHA-256(key) → 64-char hex
 ```
 

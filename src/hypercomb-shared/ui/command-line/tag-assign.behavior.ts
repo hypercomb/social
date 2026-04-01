@@ -6,13 +6,13 @@ import type { Lineage } from '../../core/lineage'
 import { EffectBus, hypercomb } from '@hypercomb/core'
 
 /**
- * `label:tagName` or `label:tagName(#color)` assigns a tag to a seed.
+ * `label:tagName` or `label:tagName(#color)` assigns a tag to a cell.
  *
  * Examples:
  *   "navtest:education"            → tag "navtest" with "education"
  *   "navtest:education(#ff4444)"   → tag with color
  *
- * Tags are stored in the seed's 0000 properties file under
+ * Tags are stored in the cell's 0000 properties file under
  * `tags: string[]`. Colors are stored globally in localStorage
  * under `hc:tag-colors`.
  */
@@ -23,7 +23,7 @@ export class TagAssignBehavior implements CommandLineBehavior {
     {
       trigger: 'Enter',
       pattern: /^[^\/!#\[].+:[^(]+(\([^)]+\))?$/,
-      description: 'Assign a tag to a seed',
+      description: 'Assign a tag to a cell',
       examples: [
         { input: 'navtest:education', key: 'Enter', result: 'Tags "navtest" with "education"' },
         { input: 'navtest:work(#4caf50)', key: 'Enter', result: 'Tags "navtest" with "work" in green' },
@@ -37,7 +37,7 @@ export class TagAssignBehavior implements CommandLineBehavior {
     if (input.startsWith('/') || input.startsWith('!') || input.includes('[')) return false
     const colonIdx = input.indexOf(':')
     if (colonIdx <= 0 || colonIdx >= input.length - 1) return false
-    // reject hash marker syntax: seed#Drone (# outside parentheses)
+    // reject hash marker syntax: cell#Drone (# outside parentheses)
     const beforeParen = input.indexOf('(')
     const hashIdx = input.indexOf('#')
     if (hashIdx >= 0 && (beforeParen < 0 || hashIdx < beforeParen)) return false
@@ -49,11 +49,11 @@ export class TagAssignBehavior implements CommandLineBehavior {
     const lineage = get('@hypercomb.social/Lineage') as Lineage
 
     const colonIdx = input.indexOf(':')
-    const seedRaw = input.slice(0, colonIdx).trim()
+    const cellRaw = input.slice(0, colonIdx).trim()
     const tagRaw = input.slice(colonIdx + 1).trim()
 
-    const seedName = completions.normalize(seedRaw)
-    if (!seedName || !tagRaw) return
+    const cellName = completions.normalize(cellRaw)
+    if (!cellName || !tagRaw) return
 
     // parse optional color: tagName(#color)
     const colorMatch = tagRaw.match(/^([^(]+)(?:\(([^)]+)\))?$/)
@@ -62,18 +62,18 @@ export class TagAssignBehavior implements CommandLineBehavior {
     const color = colorMatch[2]?.trim()
     if (!tagName) return
 
-    // ensure seed exists
+    // ensure cell exists
     const dir = await lineage.explorerDir()
     if (!dir) return
 
-    const seedDir = await dir.getDirectoryHandle(seedName, { create: true })
+    const cellDir = await dir.getDirectoryHandle(cellName, { create: true })
 
     // read existing tags, append if not present
-    const props = await readProps(seedDir)
+    const props = await readProps(cellDir)
     const tags: string[] = Array.isArray(props['tags']) ? props['tags'] : []
     if (!tags.includes(tagName)) {
       tags.push(tagName)
-      await writeProps(seedDir, { tags })
+      await writeProps(cellDir, { tags })
     }
 
     // persist global tag color
@@ -83,8 +83,8 @@ export class TagAssignBehavior implements CommandLineBehavior {
       localStorage.setItem('hc:tag-colors', JSON.stringify(stored))
     }
 
-    EffectBus.emit('tags:changed', { updates: [{ seed: seedName, tag: tagName, color }] })
-    EffectBus.emit('seed:added', { seed: seedName })
+    EffectBus.emit('tags:changed', { updates: [{ cell: cellName, tag: tagName, color }] })
+    EffectBus.emit('cell:added', { cell: cellName })
     await new hypercomb().act()
   }
 }
@@ -93,9 +93,9 @@ export class TagAssignBehavior implements CommandLineBehavior {
 
 const PROPS_FILE = '0000'
 
-async function readProps(seedDir: FileSystemDirectoryHandle): Promise<Record<string, unknown>> {
+async function readProps(cellDir: FileSystemDirectoryHandle): Promise<Record<string, unknown>> {
   try {
-    const fh = await seedDir.getFileHandle(PROPS_FILE)
+    const fh = await cellDir.getFileHandle(PROPS_FILE)
     const file = await fh.getFile()
     return JSON.parse(await file.text())
   } catch {
@@ -103,10 +103,10 @@ async function readProps(seedDir: FileSystemDirectoryHandle): Promise<Record<str
   }
 }
 
-async function writeProps(seedDir: FileSystemDirectoryHandle, updates: Record<string, unknown>): Promise<void> {
-  const existing = await readProps(seedDir)
+async function writeProps(cellDir: FileSystemDirectoryHandle, updates: Record<string, unknown>): Promise<void> {
+  const existing = await readProps(cellDir)
   const merged = { ...existing, ...updates }
-  const fh = await seedDir.getFileHandle(PROPS_FILE, { create: true })
+  const fh = await cellDir.getFileHandle(PROPS_FILE, { create: true })
   const writable = await fh.createWritable()
   await writable.write(JSON.stringify(merged))
   await writable.close()

@@ -16,11 +16,11 @@ export type CursorState = {
 }
 
 export type DivergenceInfo = {
-  /** Seeds that exist at cursor position (normal rendering). */
+  /** Cells that exist at cursor position (normal rendering). */
   current: Set<string>
-  /** Seeds that were added AFTER cursor position (ghost / future). */
+  /** Cells that were added AFTER cursor position (ghost / future). */
   futureAdds: Set<string>
-  /** Seeds that exist at cursor but are removed later (marked for removal). */
+  /** Cells that exist at cursor but are removed later (marked for removal). */
   futureRemoves: Set<string>
 }
 
@@ -128,54 +128,54 @@ export class HistoryCursorService extends EventTarget {
     const historyService = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
     if (!historyService) return
 
-    // ── Compute seed set at cursor position ─────────────────────
-    const cursorSeeds: string[] = []
-    const cursorSeedSet = new Set<string>()
+    // ── Compute cell set at cursor position ─────────────────────
+    const cursorCells: string[] = []
+    const cursorCellSet = new Set<string>()
     for (let i = 0; i < this.#position; i++) {
       const op = this.#allOps[i]
       if (op.op === 'add') {
-        if (!cursorSeedSet.has(op.seed)) {
-          cursorSeedSet.add(op.seed)
-          cursorSeeds.push(op.seed)
+        if (!cursorCellSet.has(op.cell)) {
+          cursorCellSet.add(op.cell)
+          cursorCells.push(op.cell)
         }
       } else if (op.op === 'remove') {
-        cursorSeedSet.delete(op.seed)
-        const idx = cursorSeeds.indexOf(op.seed)
-        if (idx !== -1) cursorSeeds.splice(idx, 1)
+        cursorCellSet.delete(op.cell)
+        const idx = cursorCells.indexOf(op.cell)
+        if (idx !== -1) cursorCells.splice(idx, 1)
       }
     }
 
-    // ── Compute seed set at head ────────────────────────────────
-    const headSeedSet = new Set<string>()
+    // ── Compute cell set at head ────────────────────────────────
+    const headCellSet = new Set<string>()
     for (const op of this.#allOps) {
-      if (op.op === 'add') headSeedSet.add(op.seed)
-      else if (op.op === 'remove') headSeedSet.delete(op.seed)
+      if (op.op === 'add') headCellSet.add(op.cell)
+      else if (op.op === 'remove') headCellSet.delete(op.cell)
     }
 
     // ── Diff: write remove ops then add ops ─────────────────────
     const now = Date.now()
 
-    // Seeds at head but not at cursor → remove
-    for (const seed of headSeedSet) {
-      if (!cursorSeedSet.has(seed)) {
-        await historyService.record(this.#locationSig, { op: 'remove', seed, at: now })
+    // Cells at head but not at cursor → remove
+    for (const cell of headCellSet) {
+      if (!cursorCellSet.has(cell)) {
+        await historyService.record(this.#locationSig, { op: 'remove', cell, at: now })
       }
     }
 
-    // Seeds at cursor but not at head → add
-    for (const seed of cursorSeedSet) {
-      if (!headSeedSet.has(seed)) {
-        await historyService.record(this.#locationSig, { op: 'add', seed, at: now })
+    // Cells at cursor but not at head → add
+    for (const cell of cursorCellSet) {
+      if (!headCellSet.has(cell)) {
+        await historyService.record(this.#locationSig, { op: 'add', cell, at: now })
       }
     }
 
     // ── Preserve display order via reorder op ───────────────────
-    if (cursorSeeds.length > 0) {
+    if (cursorCells.length > 0) {
       const store = get<any>('@hypercomb.social/Store')
       if (store) {
-        const payload = JSON.stringify(cursorSeeds)
+        const payload = JSON.stringify(cursorCells)
         const payloadSig: string = await store.putResource(new Blob([payload]))
-        await historyService.record(this.#locationSig, { op: 'reorder', seed: payloadSig, at: now })
+        await historyService.record(this.#locationSig, { op: 'reorder', cell: payloadSig, at: now })
       }
     }
 
@@ -190,7 +190,7 @@ export class HistoryCursorService extends EventTarget {
   }
 
   /**
-   * Compute divergence info: which seeds are current vs future.
+   * Compute divergence info: which cells are current vs future.
    * Used by ShowCellDrone to decide ghost overlays.
    */
   computeDivergence(): DivergenceInfo {
@@ -202,17 +202,17 @@ export class HistoryCursorService extends EventTarget {
       return { current, futureAdds, futureRemoves }
     }
 
-    // Replay up to cursor position to get "current" seed set
-    const seedStateAtCursor = new Map<string, string>()
+    // Replay up to cursor position to get "current" cell set
+    const cellStateAtCursor = new Map<string, string>()
     for (let i = 0; i < this.#position; i++) {
       const op = this.#allOps[i]
       if (op.op === 'add' || op.op === 'remove') {
-        seedStateAtCursor.set(op.seed, op.op)
+        cellStateAtCursor.set(op.cell, op.op)
       }
     }
 
-    for (const [seed, lastOp] of seedStateAtCursor) {
-      if (lastOp !== 'remove') current.add(seed)
+    for (const [cell, lastOp] of cellStateAtCursor) {
+      if (lastOp !== 'remove') current.add(cell)
     }
 
     // If not rewound, no divergence
@@ -221,24 +221,24 @@ export class HistoryCursorService extends EventTarget {
     }
 
     // Replay ops AFTER cursor to find future changes
-    const seedStateAtEnd = new Map(seedStateAtCursor)
+    const cellStateAtEnd = new Map(cellStateAtCursor)
     for (let i = this.#position; i < this.#total; i++) {
       const op = this.#allOps[i]
       if (op.op === 'add' || op.op === 'remove') {
-        seedStateAtEnd.set(op.seed, op.op)
+        cellStateAtEnd.set(op.cell, op.op)
       }
     }
 
-    for (const [seed, lastOp] of seedStateAtEnd) {
-      const existsAtCursor = current.has(seed)
+    for (const [cell, lastOp] of cellStateAtEnd) {
+      const existsAtCursor = current.has(cell)
       const existsAtEnd = lastOp !== 'remove'
 
       if (!existsAtCursor && existsAtEnd) {
         // Added after cursor
-        futureAdds.add(seed)
+        futureAdds.add(cell)
       } else if (existsAtCursor && !existsAtEnd) {
         // Exists at cursor but removed later
-        futureRemoves.add(seed)
+        futureRemoves.add(cell)
       }
     }
 

@@ -52,6 +52,7 @@ import type { TreeNode } from '../core/tree-node'
         }
 
         @if (node().kind === 'layer' && node().signature) {
+          <button class="edit-btn" (click)="openEditor.emit(node()); $event.stopPropagation()" title="AI Edit">&#9998;</button>
           <button class="promote-btn" (click)="promoteToPackage.emit(node()); $event.stopPropagation()" title="Promote to package root">&#8689;</button>
         }
 
@@ -184,6 +185,7 @@ import type { TreeNode } from '../core/tree-node'
       color: #222;
     }
 
+    .edit-btn,
     .promote-btn {
       background: none;
       border: 1px solid rgba(0,0,0,0.08);
@@ -197,10 +199,12 @@ import type { TreeNode } from '../core/tree-node'
       transition: opacity 0.15s;
     }
 
+    .row:hover .edit-btn,
     .row:hover .promote-btn {
       opacity: 1;
     }
 
+    .edit-btn:hover,
     .promote-btn:hover {
       background: rgba(74, 111, 165, 0.08);
     }
@@ -285,6 +289,7 @@ export class TreeRowComponent implements OnInit, OnDestroy {
   openDetail = output<TreeNode>()
   expandToggle = output<TreeNode>()
   promoteToPackage = output<TreeNode>()
+  openEditor = output<TreeNode>()
 
   visible = signal(true)
 

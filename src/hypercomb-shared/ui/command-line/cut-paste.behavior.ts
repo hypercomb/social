@@ -9,7 +9,7 @@ import { parseArrayItems } from '../../core/array-parser'
 import { persistTagOps, type TagOp } from '../../core/tag-ops'
 import { SELECT_OPS } from './select-ops'
 
-type HistoryOp = { op: 'add' | 'remove'; seed: string; at: number }
+type HistoryOp = { op: 'add' | 'remove'; cell: string; at: number }
 
 interface HistoryServiceLike {
   record(signature: string, operation: HistoryOp): Promise<void>
@@ -25,7 +25,7 @@ interface HistoryServiceLike {
  *   "[new, ~old]/dest"                 → copies new to dest, deletes old from current
  *
  * Items autocomplete from current surface tiles. Non-matching items
- * still create seeds at the destination (same as regular create).
+ * still create cells at the destination (same as regular create).
  * Path is relative to the current explorer directory.
  */
 export class CutPasteBehavior implements CommandLineBehavior {
@@ -115,7 +115,7 @@ export class CutPasteBehavior implements CommandLineBehavior {
         destDir = await destDir.getDirectoryHandle(seg, { create: true })
       }
 
-      // create seed directories at destination
+      // create cell directories at destination
       for (const item of safeItems) {
         await destDir.getDirectoryHandle(item, { create: true })
       }
@@ -125,7 +125,7 @@ export class CutPasteBehavior implements CommandLineBehavior {
         const destSig = await this.#computeDestSig(lineage, pathSegments)
         const now = Date.now()
         for (const item of safeItems) {
-          await historyService.record(destSig, { op: 'add', seed: item, at: now })
+          await historyService.record(destSig, { op: 'add', cell: item, at: now })
         }
       }
     }
@@ -159,7 +159,7 @@ export class CutPasteBehavior implements CommandLineBehavior {
     const name = segments[segments.length - 1]
     try {
       await parent.removeEntry(name, { recursive: true })
-      EffectBus.emit('seed:removed', { seed: name })
+      EffectBus.emit('cell:removed', { cell: name })
     } catch { /* skip */ }
   }
 
@@ -172,7 +172,7 @@ export class CutPasteBehavior implements CommandLineBehavior {
     const secretStore = get<any>('@hypercomb.social/SecretStore')
     const space = roomStore?.value ?? ''
     const secret = secretStore?.value ?? ''
-    const parts = [space, domain, destPath, secret, 'seed'].filter(Boolean)
+    const parts = [space, domain, destPath, secret, 'cell'].filter(Boolean)
     const key = parts.join('/')
 
     return await SignatureService.sign(new TextEncoder().encode(key).buffer as ArrayBuffer)

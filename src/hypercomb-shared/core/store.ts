@@ -49,32 +49,30 @@ export class Store extends EventTarget {
 
     this.opfsRoot = await navigator.storage.getDirectory()
 
-    this.hypercombRoot =
-      await this.opfsRoot.getDirectoryHandle('hypercomb.io', { create: true })
+    const dir = (name: string) =>
+      this.opfsRoot.getDirectoryHandle(name, { create: true })
 
-    this.bees =
-      await this.opfsRoot.getDirectoryHandle(Store.BEES_DIRECTORY, { create: true })
-
-    this.dependencies =
-      await this.opfsRoot.getDirectoryHandle(Store.DEPENDENCIES_DIRECTORY, { create: true })
-
-    this.layers =
-      await this.opfsRoot.getDirectoryHandle(Store.LAYERS_DIRECTORY, { create: true })
-
-    this.resources =
-      await this.opfsRoot.getDirectoryHandle(Store.RESOURCES_DIRECTORY, { create: true })
-
-    this.clipboard =
-      await this.opfsRoot.getDirectoryHandle(Store.CLIPBOARD_DIRECTORY, { create: true })
-
-    this.history =
-      await this.opfsRoot.getDirectoryHandle(Store.HISTORY_DIRECTORY, { create: true })
-
-    this.threads =
-      await this.opfsRoot.getDirectoryHandle(Store.THREADS_DIRECTORY, { create: true })
-
-    this.computation =
-      await this.opfsRoot.getDirectoryHandle(Store.COMPUTATION_DIRECTORY, { create: true })
+    ;[
+      this.hypercombRoot,
+      this.bees,
+      this.dependencies,
+      this.layers,
+      this.resources,
+      this.clipboard,
+      this.history,
+      this.threads,
+      this.computation,
+    ] = await Promise.all([
+      dir('hypercomb.io'),
+      dir(Store.BEES_DIRECTORY),
+      dir(Store.DEPENDENCIES_DIRECTORY),
+      dir(Store.LAYERS_DIRECTORY),
+      dir(Store.RESOURCES_DIRECTORY),
+      dir(Store.CLIPBOARD_DIRECTORY),
+      dir(Store.HISTORY_DIRECTORY),
+      dir(Store.THREADS_DIRECTORY),
+      dir(Store.COMPUTATION_DIRECTORY),
+    ])
   }
 
   public domainLayersDirectory = async (
@@ -170,7 +168,7 @@ export class Store extends EventTarget {
     }
   }
 
-  private seedResourceCache = async (
+  private cellResourceCache = async (
     signature: string,
     buffer: ArrayBuffer
   ): Promise<void> => {

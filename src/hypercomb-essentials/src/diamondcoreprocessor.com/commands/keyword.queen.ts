@@ -35,28 +35,28 @@ export class KeywordQueenBee extends QueenBee {
       // Apply to all selected tiles
       const dir = await lineage.explorerDir()
       if (dir) {
-        const updates: { seed: string; tag: string; color?: string }[] = []
+        const updates: { cell: string; tag: string; color?: string }[] = []
 
         for (const label of selectedLabels) {
           for (const op of parsed) {
             try {
-              const seedDir = await dir.getDirectoryHandle(label, { create: true })
-              const props = await readProps(seedDir)
+              const cellDir = await dir.getDirectoryHandle(label, { create: true })
+              const props = await readProps(cellDir)
               const tags: string[] = Array.isArray(props['tags']) ? props['tags'] : []
 
               if (op.remove) {
                 const idx = tags.indexOf(op.tag)
                 if (idx >= 0) {
                   tags.splice(idx, 1)
-                  await writeProps(seedDir, { tags })
+                  await writeProps(cellDir, { tags })
                 }
               } else {
                 if (!tags.includes(op.tag)) {
                   tags.push(op.tag)
-                  await writeProps(seedDir, { tags })
+                  await writeProps(cellDir, { tags })
                 }
               }
-              updates.push({ seed: label, tag: op.tag, color: op.color })
+              updates.push({ cell: label, tag: op.tag, color: op.color })
             } catch { /* skip inaccessible tiles */ }
           }
         }
@@ -130,9 +130,9 @@ function parseKeywordArgs(args: string): { tag: string; color?: string; remove: 
 
 const PROPS_FILE = '0000'
 
-async function readProps(seedDir: FileSystemDirectoryHandle): Promise<Record<string, unknown>> {
+async function readProps(cellDir: FileSystemDirectoryHandle): Promise<Record<string, unknown>> {
   try {
-    const fh = await seedDir.getFileHandle(PROPS_FILE)
+    const fh = await cellDir.getFileHandle(PROPS_FILE)
     const file = await fh.getFile()
     return JSON.parse(await file.text())
   } catch {
@@ -140,10 +140,10 @@ async function readProps(seedDir: FileSystemDirectoryHandle): Promise<Record<str
   }
 }
 
-async function writeProps(seedDir: FileSystemDirectoryHandle, updates: Record<string, unknown>): Promise<void> {
-  const existing = await readProps(seedDir)
+async function writeProps(cellDir: FileSystemDirectoryHandle, updates: Record<string, unknown>): Promise<void> {
+  const existing = await readProps(cellDir)
   const merged = { ...existing, ...updates }
-  const fh = await seedDir.getFileHandle(PROPS_FILE, { create: true })
+  const fh = await cellDir.getFileHandle(PROPS_FILE, { create: true })
   const writable = await fh.createWritable()
   await writable.write(JSON.stringify(merged))
   await writable.close()

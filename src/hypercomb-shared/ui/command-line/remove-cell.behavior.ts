@@ -88,7 +88,7 @@ export class RemoveCellBehavior implements CommandLineBehavior {
 
     await new hypercomb().act()
 
-    // if all seeds removed, navigate to parent
+    // if all cells removed, navigate to parent
     if (await this.#isDirEmpty(dir)) {
       const navigation = get('@hypercomb.social/Navigation') as Navigation
       const segments = navigation.segmentsRaw()
@@ -120,7 +120,7 @@ export class RemoveCellBehavior implements CommandLineBehavior {
     const name = segments[segments.length - 1]
     try {
       await parent.removeEntry(name, { recursive: true })
-      EffectBus.emit('seed:removed', { seed: name })
+      EffectBus.emit('cell:removed', { cell: name })
     } catch { /* skip */ }
   }
 }

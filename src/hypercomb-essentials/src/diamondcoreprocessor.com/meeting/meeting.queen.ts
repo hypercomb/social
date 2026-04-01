@@ -15,6 +15,7 @@ import { QueenBee, EffectBus, hypercomb } from '@hypercomb/core'
  */
 export class MeetingQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
+  override genotype = 'meeting'
   readonly command = 'meeting'
   override readonly aliases = ['meet', 'call']
   override description = 'Start or join a video meeting on the selected tile'
@@ -51,8 +52,8 @@ export class MeetingQueenBee extends QueenBee {
     for (const label of selectedLabels) {
       if (dir) {
         // read current tags
-        const seedDir = await dir.getDirectoryHandle(label, { create: true })
-        const props = await readProps(seedDir)
+        const cellDir = await dir.getDirectoryHandle(label, { create: true })
+        const props = await readProps(cellDir)
         const tags: string[] = Array.isArray(props['tags']) ? props['tags'] : []
 
         // check if already has a meeting tag
@@ -61,8 +62,8 @@ export class MeetingQueenBee extends QueenBee {
         if (!hasMeetingTag) {
           // add the meeting keyword tag
           tags.push(template)
-          await writeProps(seedDir, { tags })
-          EffectBus.emit('tags:changed', { updates: [{ seed: label, tag: template }] })
+          await writeProps(cellDir, { tags })
+          EffectBus.emit('tags:changed', { updates: [{ cell: label, tag: template }] })
         }
       }
 
@@ -79,9 +80,9 @@ export class MeetingQueenBee extends QueenBee {
 
 const PROPS_FILE = '0000'
 
-async function readProps(seedDir: FileSystemDirectoryHandle): Promise<Record<string, unknown>> {
+async function readProps(cellDir: FileSystemDirectoryHandle): Promise<Record<string, unknown>> {
   try {
-    const fh = await seedDir.getFileHandle(PROPS_FILE)
+    const fh = await cellDir.getFileHandle(PROPS_FILE)
     const file = await fh.getFile()
     return JSON.parse(await file.text())
   } catch {
@@ -89,10 +90,10 @@ async function readProps(seedDir: FileSystemDirectoryHandle): Promise<Record<str
   }
 }
 
-async function writeProps(seedDir: FileSystemDirectoryHandle, updates: Record<string, unknown>): Promise<void> {
-  const existing = await readProps(seedDir)
+async function writeProps(cellDir: FileSystemDirectoryHandle, updates: Record<string, unknown>): Promise<void> {
+  const existing = await readProps(cellDir)
   const merged = { ...existing, ...updates }
-  const fh = await seedDir.getFileHandle(PROPS_FILE, { create: true })
+  const fh = await cellDir.getFileHandle(PROPS_FILE, { create: true })
   const writable = await fh.createWritable()
   await writable.write(JSON.stringify(merged))
   await writable.close()

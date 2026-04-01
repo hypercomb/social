@@ -3,7 +3,7 @@ import { Drone, EffectBus, hypercomb } from '@hypercomb/core'
 import type { HostReadyPayload } from '../presentation/tiles/pixi-host.worker.js'
 import type { Axial } from '../navigation/hex-detector.js'
 import type { LayoutService } from './layout.service.js'
-import { writeSeedProperties } from '../editor/tile-properties.js'
+import { writeCellProperties } from '../editor/tile-properties.js'
 
 type CellCountPayload = { count: number; labels: string[] }
 type MoveRefs = {
@@ -27,6 +27,7 @@ function axialKey(q: number, r: number): string {
 
 export class MoveDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
+  override genotype = 'movement'
   override description =
     'Coordinates multi-tile drag-and-drop — tracks move state, computes reorder, and commits placement.'
   public override effects = ['render'] as const
@@ -59,7 +60,7 @@ export class MoveDrone extends Drone {
   }
 
   protected override listens = ['render:host-ready', 'render:cell-count', 'render:mesh-offset', 'controls:action']
-  protected override emits = ['move:preview', 'move:committed', 'move:mode', 'seed:reorder']
+  protected override emits = ['move:preview', 'move:committed', 'move:mode', 'cell:reorder']
 
   #effectsRegistered = false
 
@@ -475,14 +476,14 @@ export class MoveDrone extends Drone {
           const targetIndex = this.#keyToIndex.get(targetKey)
           if (targetIndex === undefined) continue
           try {
-            const seedDir = await dir.getDirectoryHandle(label, { create: false })
-            await writeSeedProperties(seedDir, { index: targetIndex, offset: 0 })
-          } catch { /* seed dir missing */ }
+            const cellDir = await dir.getDirectoryHandle(label, { create: false })
+            await writeCellProperties(cellDir, { index: targetIndex, offset: 0 })
+          } catch { /* cell dir missing */ }
         }
       }
     } else {
       const denseOrder = this.#reorderNames(placements).filter(n => n !== '')
-      this.emitEffect('seed:reorder', { labels: denseOrder })
+      this.emitEffect('cell:reorder', { labels: denseOrder })
 
       const layout = this.resolve<LayoutService>('layout')
       if (layout && lineage?.explorerDir) {

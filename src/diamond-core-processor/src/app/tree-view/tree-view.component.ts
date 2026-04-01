@@ -20,7 +20,8 @@ import type { TreeNode } from '../core/tree-node'
           (open)="open.emit($event)"
           (openDetail)="openDetail.emit($event)"
           (expandToggle)="expandToggle.emit($event)"
-          (promoteToPackage)="promoteToPackage.emit($event)" />
+          (promoteToPackage)="promoteToPackage.emit($event)"
+          (openEditor)="openEditor.emit($event)" />
 
         @if (node.expanded && node.children.length) {
           <dcp-tree-view
@@ -31,7 +32,8 @@ import type { TreeNode } from '../core/tree-node'
             (open)="open.emit($event)"
             (openDetail)="openDetail.emit($event)"
             (expandToggle)="expandToggle.emit($event)"
-            (promoteToPackage)="promoteToPackage.emit($event)" />
+            (promoteToPackage)="promoteToPackage.emit($event)"
+            (openEditor)="openEditor.emit($event)" />
         }
       }
     }
@@ -48,6 +50,7 @@ export class TreeViewComponent {
   openDetail = output<TreeNode>()
   expandToggle = output<TreeNode>()
   promoteToPackage = output<TreeNode>()
+  openEditor = output<TreeNode>()
 
   isEmptyFolder(node: TreeNode): boolean {
     return (node.kind === 'layer' || node.kind === 'domain') && node.loaded && node.children.length === 0

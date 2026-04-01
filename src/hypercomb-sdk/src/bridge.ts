@@ -7,9 +7,9 @@ export type BridgeOp = 'add' | 'remove' | 'list' | 'inspect' | 'history'
 export type BridgeRequest = {
   id: string
   op: BridgeOp
-  seeds?: string[]
+  cells?: string[]
   all?: boolean
-  seed?: string
+  cell?: string
 }
 
 export type BridgeResponse = {

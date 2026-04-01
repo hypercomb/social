@@ -4,7 +4,7 @@
 //
 // Two paths:
 //   Empty hex → stash blob, show placeholder, focus command line.
-//               User types seed name → Enter → seed created → editor opens with image.
+//               User types cell name → Enter → cell created → editor opens with image.
 //   Occupied hex → open editor for that tile with the new image for reposition/save/cancel.
 
 import { Drone, EffectBus } from '@hypercomb/core'
@@ -22,12 +22,13 @@ type DropTarget = {
 
 export class ImageDropDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
+  override genotype = 'editor'
 
   public override description =
     'Intercepts drag-and-drop image files from the desktop and routes them into the tile editor.'
 
   protected override emits = ['drop:dragging', 'drop:pending', 'search:prefill']
-  protected override listens = ['render:host-ready', 'drop:target', 'seed:added', 'editor:mode']
+  protected override listens = ['render:host-ready', 'drop:target', 'cell:added', 'editor:mode']
 
   #canvas: HTMLCanvasElement | null = null
   #dragging = false
@@ -37,9 +38,9 @@ export class ImageDropDrone extends Drone {
   /** Last hex position reported by TileOverlayDrone during drag. */
   #lastTarget: DropTarget | null = null
 
-  /** Stashed image blob waiting for the user to name the seed. */
+  /** Stashed image blob waiting for the user to name the cell. */
   #pendingBlob: Blob | null = null
-  #pendingSeedUnsub: (() => void) | null = null
+  #pendingCellUnsub: (() => void) | null = null
 
   constructor() {
     super()
@@ -71,7 +72,7 @@ export class ImageDropDrone extends Drone {
     // to keep the browser from doing its own thing while user types in the command line)
     const el = document.activeElement
     if (el && (el as HTMLElement).matches?.('input, textarea, select, [contenteditable]')) {
-      // still allow if we're in pending-drop state (user is typing seed name)
+      // still allow if we're in pending-drop state (user is typing cell name)
       if (!this.#pendingBlob) return
     }
 
@@ -176,29 +177,29 @@ export class ImageDropDrone extends Drone {
     this.#pendingBlob = blob
     this.emitEffect('drop:pending', { active: true })
 
-    // focus the command line so user can type the seed name
+    // focus the command line so user can type the cell name
     EffectBus.emit('search:prefill', { value: '' })
 
-    // listen for seed:added — when the user creates a seed, attach the image
-    this.#pendingSeedUnsub?.()
-    this.#pendingSeedUnsub = EffectBus.on<{ seed: string }>('seed:added', ({ seed }) => {
+    // listen for cell:added — when the user creates a cell, attach the image
+    this.#pendingCellUnsub?.()
+    this.#pendingCellUnsub = EffectBus.on<{ cell: string }>('cell:added', ({ cell }) => {
       if (!this.#pendingBlob) return
       const stashedBlob = this.#pendingBlob
       this.#clearPending()
 
-      // open editor for the new seed with the stashed image
+      // open editor for the new cell with the stashed image
       void (async () => {
-        // brief delay — let history record the seed:added op and processor pulse
+        // brief delay — let history record the cell:added op and processor pulse
         await new Promise<void>(r => setTimeout(r, 150))
 
-        EffectBus.emit('tile:action', { action: 'edit', label: seed, q: 0, r: 0, index: 0 })
+        EffectBus.emit('tile:action', { action: 'edit', label: cell, q: 0, r: 0, index: 0 })
         await this.#waitForEditorMode()
         this.#editorService?.setLargeBlob(stashedBlob)
         await this.#loadImageWhenReady(stashedBlob)
       })()
     })
 
-    // auto-cancel if no seed is created within 30 seconds
+    // auto-cancel if no cell is created within 30 seconds
     setTimeout(() => {
       if (this.#pendingBlob) this.#clearPending()
     }, 30_000)
@@ -257,8 +258,8 @@ export class ImageDropDrone extends Drone {
 
   #clearPending(): void {
     this.#pendingBlob = null
-    this.#pendingSeedUnsub?.()
-    this.#pendingSeedUnsub = null
+    this.#pendingCellUnsub?.()
+    this.#pendingCellUnsub = null
     this.emitEffect('drop:pending', { active: false })
   }
 

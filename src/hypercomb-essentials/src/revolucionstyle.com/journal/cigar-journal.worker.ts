@@ -3,6 +3,7 @@ import { Worker, EffectBus } from '@hypercomb/core'
 
 export class CigarJournalWorker extends Worker {
   readonly namespace = 'revolucionstyle.com'
+  override genotype = 'revolucionstyle'
 
   public override description =
     'Open the cigar journal to log a new smoke session.'

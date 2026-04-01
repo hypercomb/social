@@ -46,6 +46,7 @@ type MeshExpiryRule = {
 
 export class NostrMeshDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
+  override genotype = 'sharing'
 
   public override description =
     'Maintains WebSocket connections to Nostr relays and routes mesh subscribe/publish events.'

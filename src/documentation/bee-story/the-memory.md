@@ -18,8 +18,8 @@ a path capsule contains:
 
 - **the route** — a sequence of 1-byte navigation steps (the dance, written down)
 - **a content seal** — SHA-256 hash proving the route has not been altered
-- **a start seed** — where the path begins (hashed, so it can be public or private)
-- **a salt** — random bytes preventing dictionary reversal of the seed
+- **a start cell** — where the path begins (hashed, so it can be public or private)
+- **a salt** — random bytes preventing dictionary reversal of the cell
 
 that is all. no timestamps, no user ids, no server addresses. the smallest possible memory a community can share.
 
@@ -29,7 +29,7 @@ that is all. no timestamps, no user ids, no server addresses. the smallest possi
 
 before publishing, a drone can keep a local record in the browser's origin private file system (opfs). this is the **meadow log** — a private notebook that never leaves the device.
 
-the opfs directory mirrors the lineage path: `domain/path/seed` becomes a directory structure. each entry is a sealed payload. the drone decides what to write and what to discard.
+the opfs directory mirrors the lineage path: `domain/path/cell` becomes a directory structure. each entry is a sealed payload. the drone decides what to write and what to discard.
 
 this is like a bee's personal familiarity with a route — repeated flights reinforce the memory. but the memory belongs to that bee alone. it is not shared with the colony unless the bee dances.
 

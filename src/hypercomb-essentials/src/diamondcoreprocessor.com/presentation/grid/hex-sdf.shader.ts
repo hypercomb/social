@@ -19,6 +19,7 @@ export class HexSdfTextureShader {
       u_pivot: { value: 0, type: 'f32' },
       u_hoveredIndex: { value: -1, type: 'f32' },
       u_labelMix: { value: 1.0, type: 'f32' },
+      u_accentColor: { value: [0.4, 0.85, 1.0], type: 'vec3<f32>' },
     }
 
     // v8 shaded mesh requires uniforms nested under a group and shader inputs using in/out
@@ -63,6 +64,12 @@ export class HexSdfTextureShader {
 
   public setLabelMix = (mix: number): void => {
     this.#ug.uniforms.u_labelMix = mix
+    this.#ug.update()
+  }
+
+  public setAccentColor = (r: number, g: number, b: number): void => {
+    const v = this.#ug.uniforms.u_accentColor
+    v[0] = r; v[1] = g; v[2] = b
     this.#ug.update()
   }
 
@@ -143,6 +150,7 @@ export class HexSdfTextureShader {
     uniform float u_pivot;
     uniform float u_hoveredIndex;
     uniform float u_labelMix;
+    uniform vec3 u_accentColor;
 
     uniform sampler2D u_label;
     uniform sampler2D u_cellImages;
@@ -250,27 +258,21 @@ export class HexSdfTextureShader {
         color.rgb = mix(color.rgb, heatTint, heatRing * heatAlpha);
       }
 
-      // branch indicator: identity-tinted ring + chevron hint + portal glow
+      // branch indicator: accent-style inlay for tiles with children
       if (vHasBranch > 0.5) {
         vec3 branchColor = mix(vec3(0.55), vIdentityColor, 0.35);
 
-        // refined ring at edge
-        float branchRing = 1.0 - smoothstep(0.0, aa * 3.0, abs(d));
-        color.rgb = mix(color.rgb, branchColor, branchRing * 0.4);
+        // crisp bright edge ring
+        float branchRing = 1.0 - smoothstep(0.0, aa * 1.8, abs(d));
+        color.rgb = mix(color.rgb, branchColor, branchRing * 0.8);
 
-        // chevron hint at bottom of hex: small downward arrow
-        // use local coords — bottom is positive Y
-        float chevronY = local.y / u_radiusPx - 0.55;
-        float chevronX = abs(local.x / u_radiusPx);
-        float chevronLine = abs(chevronY + chevronX * 0.6 - 0.12);
-        float chevronMask = smoothstep(0.06, 0.02, chevronLine)
-                          * step(chevronX, 0.22)
-                          * step(0.0, chevronY + 0.08);
-        color.rgb = mix(color.rgb, branchColor, chevronMask * 0.25);
+        // soft inner bloom
+        float branchBloom = 1.0 - smoothstep(0.0, aa * 6.0, abs(d + aa * 2.0));
+        color.rgb += branchColor * branchBloom * 0.18;
 
-        // subtle center glow
-        float glow = exp(-dist * dist * 2.2);
-        color.rgb += branchColor * glow * 0.12;
+        // gentle center wash
+        float branchWash = exp(-dist * dist * 3.0);
+        color.rgb += branchColor * branchWash * 0.08;
       }
 
       // divergence overlay: 1 = future-add (ghost), 2 = future-remove (marked)
@@ -292,6 +294,17 @@ export class HexSdfTextureShader {
           float strikeMask = 1.0 - smoothstep(0.0, 2.0, abs(diag - u_radiusPx * 0.3));
           color.rgb = mix(color.rgb, vec3(1.0, 0.5, 0.15), strikeMask * 0.4);
         }
+      }
+
+      // hover accent: simple border glow using the active accent color
+      if (u_hoveredIndex >= 0.0 && abs(vCellIndex - u_hoveredIndex) < 0.5) {
+        // crisp border ring
+        float hoverRing = 1.0 - smoothstep(0.0, aa * 1.8, abs(d));
+        color.rgb = mix(color.rgb, u_accentColor, hoverRing * 0.75);
+
+        // softer outer bloom that stays near the edge
+        float hoverBloom = 1.0 - smoothstep(0.0, aa * 3.5, abs(d + aa * 1.5));
+        color.rgb += u_accentColor * hoverBloom * 0.12;
       }
 
       // premultiplied alpha output for correct blending at hex edges

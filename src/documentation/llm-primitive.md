@@ -72,7 +72,7 @@ The response is now a first-class vertex in the hypergraph.
 
 ## Recursive Composition
 
-Because signatures reference other signatures, and lineages expand to trees of seeds (each with their own properties and signatures), the context surface of any hyperedge is unbounded.
+Because signatures reference other signatures, and lineages expand to trees of cells (each with their own properties and signatures), the context surface of any hyperedge is unbounded.
 
 A single `/opus('[cigars/brands]')` pulls in an entire subtree. The response signature from that call becomes input to the next:
 
@@ -105,7 +105,7 @@ The harness is extensible. Model selection is the first dimension of the hypered
 - Structured request types (typed output schemas — constrained hyperedges)
 - System prompt templates (domain-specific transforms)
 - Multi-step chains (hyperedge pipelines)
-- Output routing (create child seeds, update properties, emit effects)
+- Output routing (create child cells, update properties, emit effects)
 
 All composable with the same signature-based vertex mechanism.
 

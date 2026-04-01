@@ -40,7 +40,7 @@ export class HexLabelAtlas {
 
     this.style = new TextStyle({
       fontFamily: hcFont || "'Source Sans Pro Light', system-ui, sans-serif",
-      fontSize: 8,
+      fontSize: 9,
       fill: 0xffffff,
       align: 'center',
       letterSpacing: 0.5,

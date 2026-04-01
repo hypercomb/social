@@ -13,7 +13,7 @@ Same content always produces the same signature. Different content always produc
 
 **Content addressing.** No version numbers, no sequential IDs, no registries. The hash of the content names the content. Two systems that have never communicated will derive the same signature for the same artifact.
 
-**Deduplication.** If two seeds reference the same image, they store one copy in `__resources__/{sig}`. The signature guarantees they are identical.
+**Deduplication.** If two cells reference the same image, they store one copy in `__resources__/{sig}`. The signature guarantees they are identical.
 
 **Integrity verification.** Before any code executes, its bytes are hashed and compared against the expected signature. Mismatch means corruption or tampering — the artifact is rejected, no fallback.
 

@@ -5,7 +5,7 @@ The visual rendering of the hive follows a lifecycle borrowed from the colony it
 | Term | Meaning | Analogy |
 |------|---------|---------|
 | **Emergence** | The full rendering lifecycle | The colony's reproductive cycle |
-| **Brood** | Preparation — gathering seeds, mapping coordinates, loading atlases | Larvae incubating in capped cells |
+| **Brood** | Preparation — gathering cells, mapping coordinates, loading atlases | Larvae incubating in capped cells |
 | **Eclosion** | Birth onto screen — geometry built, mesh created, stage populated | Adult bee chewing through the wax cap |
 
 ## Current Model
@@ -18,18 +18,18 @@ All tiles render as a **single mesh** — one geometry, one draw call, one SDF s
 
 The brood phase gathers everything the mesh will need before any vertices are written.
 
-### 1. Seed Discovery
+### 1. Cell Discovery
 
 `renderFromSynchronize()` in `ShowCellDrone` is the entry point, triggered by the `synchronize` window event (dispatched solely by the processor).
 
-- Lists seed folders from the OPFS explorer directory
-- Unions with mesh seeds (Nostr relay items)
-- Filters out deleted seeds via history
+- Lists cell folders from the OPFS explorer directory
+- Unions with mesh cells (Nostr relay items)
+- Filters out deleted cells via history
 - Orders by `OrderProjection` or persisted index
 
 ### 2. Coordinate Mapping
 
-Each seed gets an axial coordinate `(q, r)` via `AxialService`. Index 0 sits at the center; subsequent seeds spiral outward in concentric rings.
+Each cell gets an axial coordinate `(q, r)` via `AxialService`. Index 0 sits at the center; subsequent cells spiral outward in concentric rings.
 
 ```
 axial.items.get(index) → { q, r }
@@ -39,14 +39,14 @@ Axial coordinates convert to pixel positions via `axialToPixel(q, r, spacing, fl
 
 ### 3. Cell Building
 
-`buildCellsFromAxial()` maps the ordered seed names to their axial coordinates and decorates each with metadata:
+`buildCellsFromAxial()` maps the ordered cell names to their axial coordinates and decorates each with metadata:
 
 - `external` — mesh (Nostr) vs local
-- `hasBranch` — seed has child layers
-- `borderColor` — from seed properties
+- `hasBranch` — cell has child layers
+- `borderColor` — from cell properties
 - `heat` — activity indicator
 
-Returns `SeedCell[]` — the canonical cell array that drives geometry.
+Returns `Cell[]` — the canonical cell array that drives geometry.
 
 ### 4. Atlas Loading
 
@@ -54,10 +54,10 @@ Two texture atlases are prepared:
 
 | Atlas | Class | Purpose |
 |-------|-------|---------|
-| **Label** | `HexLabelAtlas` | Renders seed names as text into a shared texture |
-| **Image** | `HexImageAtlas` | Loads seed thumbnail blobs from `__resources__/` into a shared texture |
+| **Label** | `HexLabelAtlas` | Renders cell names as text into a shared texture |
+| **Image** | `HexImageAtlas` | Loads cell thumbnail blobs from `__resources__/` into a shared texture |
 
-`loadCellImages()` reads each seed's `0000` properties file, extracts the image signature, and loads the blob into the image atlas. Signatures that are already in the atlas are skipped.
+`loadCellImages()` reads each cell's `0000` properties file, extracts the image signature, and loads the blob into the image atlas. Signatures that are already in the atlas are skipped.
 
 ---
 
@@ -124,13 +124,13 @@ Full brood → eclosion cycle. The mesh is destroyed and rebuilt from scratch. T
 
 ### Streaming (Layer Transition)
 
-During layer changes, `streamSeeds()` ecloses tiles incrementally — batches of 8 cells with microtask delays between each. Each batch calls `applyGeometry()` with a partial cell array, so the hive fills in progressively rather than popping in all at once.
+During layer changes, `streamCells()` ecloses tiles incrementally — batches of 8 cells with microtask delays between each. Each batch calls `applyGeometry()` with a partial cell array, so the hive fills in progressively rather than popping in all at once.
 
 ### Move Preview (Fast Path)
 
 When tiles are dragged, `renderMovePreview()` takes a shortcut:
 
-- Reuses cached `seedNames`, `localSeedSet`, `branchSet`
+- Reuses cached `cellNames`, `localCellSet`, `branchSet`
 - Reorders labels per the move's swap array
 - Rebuilds geometry **without** re-reading OPFS or reloading images
 - Still a full geometry rebuild, but skips all I/O
@@ -164,14 +164,14 @@ Events and effects that cause re-emergence:
 | `synchronize` | Processor | Full brood → eclosion |
 | `navigate` | URL change | Full brood → eclosion |
 | `tile:saved` | TileEditorDrone | Invalidates image cache → full cycle |
-| `search:filter` | SearchDrone | Filters seeds → full cycle |
+| `search:filter` | SearchDrone | Filters cells → full cycle |
 | `move:preview` | MoveDrone | Fast-path eclosion (no I/O) |
 | `render:set-orientation` | SettingsDrone | Invalidates images → full cycle |
 | `render:set-pivot` | SettingsDrone | Invalidates images → full cycle |
 | `render:set-gap` | SettingsDrone | Recomputes spacing → full cycle |
-| `seed:place-at` | PlacementDrone | Persists order → full cycle |
-| `seed:reorder` | ReorderDrone | Applies order → full cycle |
-| `mesh:items-updated` | NostrMeshDrone | Mesh seeds changed → full cycle |
+| `cell:place-at` | PlacementDrone | Persists order → full cycle |
+| `cell:reorder` | ReorderDrone | Applies order → full cycle |
+| `mesh:items-updated` | NostrMeshDrone | Mesh cells changed → full cycle |
 
 ---
 
@@ -183,8 +183,8 @@ Events and effects that cause re-emergence:
 | `presentation/tiles/pixi-host.worker.ts` | Creates and manages the Pixi Application |
 | `presentation/grid/hex-geometry.ts` | Hex dimension constants (circumRadius, gap, padding) |
 | `presentation/grid/hex-sdf.shader.ts` | SDF shader — hex clipping + atlas sampling |
-| `presentation/grid/hex-label.atlas.ts` | Text-to-texture atlas for seed labels |
-| `presentation/grid/hex-image.atlas.ts` | Image blob atlas for seed thumbnails |
+| `presentation/grid/hex-label.atlas.ts` | Text-to-texture atlas for cell labels |
+| `presentation/grid/hex-image.atlas.ts` | Image blob atlas for cell thumbnails |
 | `presentation/tiles/tile-overlay.drone.ts` | Hover button overlays |
 | `presentation/tiles/tile-selection.drone.ts` | Selection highlight rendering |
 | `presentation/tiles/move-preview.drone.ts` | Move swap indicator overlays |

@@ -3,11 +3,11 @@ import { send } from '../bridge/client.js'
 const USAGE = `Usage: hypercomb tile <subcommand> [options]
 
 Subcommands:
-  add <name> [name2...]         Create one or more seeds
-  remove <name> [name2...]      Remove specific seeds
-  remove --all                  Remove all seeds at current location
-  list                          List visible seeds
-  inspect <name>                Show seed properties
+  add <name> [name2...]         Create one or more tiles
+  remove <name> [name2...]      Remove specific tiles
+  remove --all                  Remove all tiles at current location
+  list                          List visible tiles
+  inspect <name>                Show tile properties
   history                       Show operation log for current location
 `
 
@@ -45,15 +45,15 @@ async function tileAdd(args: string[]): Promise<void> {
     process.exit(1)
   }
 
-  const res = await send({ op: 'add', seeds: args })
+  const res = await send({ op: 'add', cells: args })
 
   if (!res.ok) {
     console.error(`[tile] add failed: ${res.error}`)
     process.exit(1)
   }
 
-  for (const seed of args) {
-    console.log(`[tile] added: ${seed}`)
+  for (const cell of args) {
+    console.log(`[tile] added: ${cell}`)
   }
 }
 
@@ -67,7 +67,7 @@ async function tileRemove(args: string[]): Promise<void> {
 
   const res = all
     ? await send({ op: 'remove', all: true })
-    : await send({ op: 'remove', seeds: args })
+    : await send({ op: 'remove', cells: args })
 
   if (!res.ok) {
     console.error(`[tile] remove failed: ${res.error}`)
@@ -76,10 +76,10 @@ async function tileRemove(args: string[]): Promise<void> {
 
   if (all) {
     const count = res.data?.count ?? 0
-    console.log(`[tile] removed all (${count} seeds)`)
+    console.log(`[tile] removed all (${count} tiles)`)
   } else {
-    for (const seed of args) {
-      console.log(`[tile] removed: ${seed}`)
+    for (const cell of args) {
+      console.log(`[tile] removed: ${cell}`)
     }
   }
 }
@@ -92,14 +92,14 @@ async function tileList(): Promise<void> {
     process.exit(1)
   }
 
-  const seeds: string[] = res.data ?? []
-  if (seeds.length === 0) {
+  const cells: string[] = res.data ?? []
+  if (cells.length === 0) {
     console.log('[tile] (empty)')
   } else {
-    for (const seed of seeds) {
-      console.log(`  ${seed}`)
+    for (const cell of cells) {
+      console.log(`  ${cell}`)
     }
-    console.log(`[tile] ${seeds.length} seed(s)`)
+    console.log(`[tile] ${cells.length} tile(s)`)
   }
 }
 
@@ -109,7 +109,7 @@ async function tileInspect(args: string[]): Promise<void> {
     process.exit(1)
   }
 
-  const res = await send({ op: 'inspect', seed: args[0] })
+  const res = await send({ op: 'inspect', cell: args[0] })
 
   if (!res.ok) {
     console.error(`[tile] inspect failed: ${res.error}`)
@@ -127,13 +127,13 @@ async function tileHistory(): Promise<void> {
     process.exit(1)
   }
 
-  const ops: { op: string; seed: string; at: number }[] = res.data ?? []
+  const ops: { op: string; cell: string; at: number }[] = res.data ?? []
   if (ops.length === 0) {
     console.log('[tile] (no history)')
   } else {
     for (const entry of ops) {
       const time = new Date(entry.at).toISOString()
-      console.log(`  ${time}  ${entry.op.padEnd(8)} ${entry.seed}`)
+      console.log(`  ${time}  ${entry.op.padEnd(8)} ${entry.cell}`)
     }
     console.log(`[tile] ${ops.length} operation(s)`)
   }

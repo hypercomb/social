@@ -27,6 +27,7 @@ export type LayoutTemplate = {
 
 export class LayoutQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
+  override genotype = 'movement'
   readonly command = 'layout'
   override readonly aliases = ['lo']
   override description = 'Save, apply, list, or remove layout templates'
@@ -91,13 +92,13 @@ export class LayoutQueenBee extends QueenBee {
       if (!Array.isArray(template.order)) return
     } catch { return }
 
-    // current filesystem seeds — merge handles label drift gracefully:
+    // current filesystem cells — merge handles label drift gracefully:
     // keeps saved order for tiles that still exist, appends new ones
-    const currentSeeds = await this.#currentSeeds(dir)
-    const merged = layout.merge(template.order, currentSeeds)
+    const currentCells = await this.#currentCells(dir)
+    const merged = layout.merge(template.order, currentCells)
 
     await layout.write(dir, merged)
-    EffectBus.emit('seed:reorder', { labels: merged })
+    EffectBus.emit('cell:reorder', { labels: merged })
     EffectBus.emit('layout:applied', { name, count: merged.length })
 
     void new hypercomb().act()
@@ -145,14 +146,14 @@ export class LayoutQueenBee extends QueenBee {
     return lineage ? await lineage.explorerDir() : null
   }
 
-  async #currentSeeds(dir: FileSystemDirectoryHandle): Promise<string[]> {
-    const seeds: string[] = []
+  async #currentCells(dir: FileSystemDirectoryHandle): Promise<string[]> {
+    const cells: string[] = []
     for await (const [key, handle] of (dir as any).entries()) {
       if (handle.kind === 'directory' && !key.startsWith('__')) {
-        seeds.push(key)
+        cells.push(key)
       }
     }
-    return seeds
+    return cells
   }
 }
 

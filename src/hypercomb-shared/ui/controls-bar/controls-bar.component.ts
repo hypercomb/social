@@ -188,14 +188,14 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     return window.location.hostname || 'hypercomb.io'
   })
 
-  /** Full FQDN key: space/domain/lineage/secret/seed */
+  /** Full FQDN key: space/domain/lineage/secret/cell */
   readonly #fqdn = computed(() => {
     this.#moved$()
     const space = this.#room$()
     const domain = window.location.hostname || 'hypercomb.io'
     const lineagePath = this.navigation.segmentsRaw().join('/')
     const secret = this.#secret$()
-    const parts = [space, domain, lineagePath, secret, 'seed'].filter(Boolean)
+    const parts = [space, domain, lineagePath, secret, 'cell'].filter(Boolean)
     return parts.join('/')
   })
 

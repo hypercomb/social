@@ -79,7 +79,8 @@
                 (open)="onOpen($event)"
                 (openDetail)="onOpenDetail($event)"
                 (expandToggle)="onExpandToggle($event)"
-                (promoteToPackage)="promoteBranchToPackage($event, section)" />
+                (promoteToPackage)="promoteBranchToPackage($event, section)"
+                (openEditor)="onOpenLayerEditor($event, section)" />
             }
 
             <dcp-patch-list
@@ -94,6 +95,15 @@
 
     @if (!domains().length) {
       <p class="empty">Add a trusted domain to get started.</p>
+    }
+
+    @if (inspectLayer() && inspectLayerSection()) {
+      <dcp-layer-editor
+        [layerNode]="inspectLayer()!"
+        [section]="inspectLayerSection()!"
+        [visible]="true"
+        (close)="onLayerEditorClose()"
+        (patchApplied)="onLayerPatchApplied($event)" />
     }
 
     @if (inspectBee() && inspectSection()) {

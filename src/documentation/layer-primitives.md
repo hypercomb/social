@@ -41,7 +41,7 @@ this signature is the local lookup key. any client that knows the lineage can in
 lineage is the **local** identity. the mesh key is the **network** identity:
 
 ```
-mesh key:   space/domain/cigars/brands/secret/seed → SHA-256 → mesh signature
+mesh key:   space/domain/cigars/brands/secret/cell → SHA-256 → mesh signature
 local key:  cigars/brands → SHA-256 → history folder name
 ```
 
@@ -83,7 +83,7 @@ layers move between peers over the nostr mesh. the flow:
 the sender computes the mesh signature from the full fqdn key:
 
 ```
-space / domain / lineagePath / secret / seed → SHA-256 → mesh signature
+space / domain / lineagePath / secret / cell → SHA-256 → mesh signature
 ```
 
 the layer file is the payload. it is published as a nostr kind 29010 event with tag `['x', meshSignature]`.
@@ -141,9 +141,9 @@ when a peer arrives at a mesh location with no items, it sends a sync-request as
 
 ```
 opfsroot/
-  hypercomb.io/                         # seed tree (flat content)
-    cigars/                             # seed folder
-      brands/                           # child seed folder
+  hypercomb.io/                         # cell tree (flat content)
+    cigars/                             # cell folder
+      brands/                           # child cell folder
   __bees__/{signature}.js               # compiled bee modules
   __dependencies__/{signature}.js       # namespace service bundles
   __resources__/{signature}             # content-addressed static assets
@@ -151,4 +151,4 @@ opfsroot/
   __history__/{lineage-sig}/            # history records per lineage
 ```
 
-the layer's `lineage` maps to the folder path under `hypercomb.io/`. the layer's referenced signatures map to files in the `__bees__/`, `__dependencies__/`, and `__resources__/` directories. the layer manifest itself lives in `__layers__/{domain}/`. bees are discovered via the install manifest (cached in `localStorage`), not by scanning seed folders.
+the layer's `lineage` maps to the folder path under `hypercomb.io/`. the layer's referenced signatures map to files in the `__bees__/`, `__dependencies__/`, and `__resources__/` directories. the layer manifest itself lives in `__layers__/{domain}/`. bees are discovered via the install manifest (cached in `localStorage`), not by scanning cell folders.

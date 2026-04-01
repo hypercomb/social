@@ -11,7 +11,7 @@
 <!-- breadcrumb: below header, right-aligned -->
 <div class="breadcrumb-top" [class.faded]="isMobile()">
   @if (meshPublic) {
-    <span class="public-crumb">public</span><span class="sep-crumb">◆</span>
+    <span class="public-crumb" [style.color]="shieldColor()">public</span><span class="sep-crumb">◆</span>
   } @else {
     <span class="private-crumb">private</span><span class="sep-crumb">◆</span>
   }

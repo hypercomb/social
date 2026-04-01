@@ -4,7 +4,6 @@ import type { HexOrientation } from '@hypercomb/essentials/diamondcoreprocessor.
 import { RouterOutlet } from '@angular/router';
 import { CommandLineComponent } from '@hypercomb/shared';
 import { MeshHeaderComponent } from '@hypercomb/shared/ui';
-import { initializeRuntime } from '@hypercomb/shared/core';
 import { AxialService } from '@hypercomb/essentials/diamondcoreprocessor.com/presentation/grid/axial-service';
 import { PanningDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/navigation/pan/panning.drone';
 import { PixiHostWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/presentation/tiles/pixi-host.worker';
@@ -32,7 +31,7 @@ import '@hypercomb/essentials/diamondcoreprocessor.com/selection/tile-selection.
 import '@hypercomb/essentials/diamondcoreprocessor.com/keyboard/escape-cascade'
 import '@hypercomb/essentials/diamondcoreprocessor.com/navigation/bee-toggle'
 import { TileEditorComponent } from '@hypercomb/shared/ui/tile-editor/tile-editor.component'
-import { ControlsBarComponent, ShortcutSheetComponent, CommandPaletteComponent, ActivityLogComponent, SelectionContextMenuComponent, AtomizerBarComponent, AtomizerSidebarComponent } from '@hypercomb/shared/ui';
+import { ControlsBarComponent, ShortcutSheetComponent, CommandPaletteComponent, ActivityLogComponent, SelectionContextMenuComponent, AtomizerBarComponent, AtomizerSidebarComponent, ConfirmDialogComponent, ToastComponent, GuideComponent } from '@hypercomb/shared/ui';
 import { FormatPainterComponent } from '@hypercomb/shared/ui/format-painter/format-painter.component'
 import { PortalOverlayComponent } from '@hypercomb/shared/ui/portal/portal-overlay.component'
 import { SensitivityBarComponent } from '@hypercomb/shared/ui/sensitivity-bar/sensitivity-bar.component'
@@ -45,6 +44,8 @@ import { MovePreviewDrone } from '@hypercomb/essentials/diamondcoreprocessor.com
 import { BackgroundDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/presentation/background/background.drone'
 import { ShortcutSheetDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/shortcut-sheet.drone'
 import { CommandPaletteDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/command-palette.drone'
+import { ToastDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/toast.drone'
+import { GuideDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/guide.drone'
 import '@hypercomb/essentials/diamondcoreprocessor.com/commands/slash-command.drone'
 import { AvatarSwarmDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/presentation/avatars/avatar-swarm.drone'
 import { ClipboardService } from '@hypercomb/essentials/diamondcoreprocessor.com/clipboard/clipboard.service'
@@ -132,13 +133,15 @@ const _deps = [
   LayoutQueenBee,
   ArrangeQueenBee,
   TileLinkActionDrone,
+  ToastDrone,
+  GuideDrone,
 ]
 
 void _deps
 
 @Component({
   selector: 'app-root',
-  imports: [ControlsBarComponent, MeshHeaderComponent, RouterOutlet, CommandLineComponent, TileEditorComponent, ShortcutSheetComponent, CommandPaletteComponent, PortalOverlayComponent, ActivityLogComponent, SensitivityBarComponent, SelectionContextMenuComponent, FormatPainterComponent, YoutubeViewerComponent, AtomizerBarComponent, AtomizerSidebarComponent],
+  imports: [ControlsBarComponent, MeshHeaderComponent, RouterOutlet, CommandLineComponent, TileEditorComponent, ShortcutSheetComponent, CommandPaletteComponent, PortalOverlayComponent, ActivityLogComponent, SensitivityBarComponent, SelectionContextMenuComponent, FormatPainterComponent, YoutubeViewerComponent, AtomizerBarComponent, AtomizerSidebarComponent, ConfirmDialogComponent, ToastComponent, GuideComponent],
   styleUrls: ['./app.scss'] as any,
   templateUrl: './app.html'
 })
@@ -159,19 +162,7 @@ export class App {
     (localStorage.getItem('hc:hex-orientation') as HexOrientation) || 'point-top'
   );
 
-  #pivotOn = localStorage.getItem('hc:hex-pivot') === 'true'
-  #runtimeReady: Promise<void>
-
   constructor() {
-    this.#runtimeReady = initializeRuntime({
-      onMeshStateChange: enabled => {
-        if (localStorage.getItem('hc:mesh-public') === null) {
-          // first visit: always start in solo mode
-          localStorage.setItem('hc:mesh-public', 'false')
-        }
-      },
-    })
-
     EffectBus.on<{ public: boolean }>('mesh:public-changed', ({ public: pub }) => {
       this.meshPublic.set(pub)
     })
@@ -184,16 +175,17 @@ export class App {
       this.clipboardMode.set(active)
     })
 
+    // Runtime already initialized by main.ts — go straight to bee startup
     queueMicrotask(() => {
-      void this.#runtimeReady.then(() => {
-        // push stored preference to the mesh
-        const stored = localStorage.getItem('hc:mesh-public')
-        if (stored !== null) {
-          const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any
-          mesh?.setNetworkEnabled?.(stored === 'true', true)
-        }
-        void this.startRegisteredBees()
-      })
+      if (localStorage.getItem('hc:mesh-public') === null) {
+        localStorage.setItem('hc:mesh-public', 'false')
+      }
+      const stored = localStorage.getItem('hc:mesh-public')
+      if (stored !== null) {
+        const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any
+        mesh?.setNetworkEnabled?.(stored === 'true', true)
+      }
+      void this.startRegisteredBees()
     })
   }
 
@@ -215,19 +207,15 @@ export class App {
   }
 
   private readonly startRegisteredBees = async (): Promise<void> => {
-    // console.log('[core-adapter] ioc keys:', list())
-
     const values = list()
       .map(key => get(key))
       .filter((value): value is Bee => !!value && typeof (value as Bee).pulse === 'function')
 
-    for (const bee of values) {
-      try {
-        await bee.pulse('')
-      } catch (error) {
+    await Promise.allSettled(
+      values.map(bee => bee.pulse('').catch(error =>
         console.warn('[app] failed to start bee', bee.constructor?.name, error)
-      }
-    }
+      ))
+    )
 
     window.dispatchEvent(new Event('synchronize'))
 

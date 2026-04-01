@@ -8,29 +8,29 @@ export class HistoryRecorder {
   #queue: Promise<void> = Promise.resolve()
 
   constructor() {
-    EffectBus.on<{ seed: string }>('seed:added', (payload) => {
-      if (payload?.seed) this.#enqueue('add', payload.seed)
+    EffectBus.on<{ cell: string }>('cell:added', (payload) => {
+      if (payload?.cell) this.#enqueue('add', payload.cell)
     })
 
-    EffectBus.on<{ seed: string; groupId?: string }>('seed:removed', (payload) => {
-      if (payload?.seed) this.#enqueue('remove', payload.seed, payload.groupId)
+    EffectBus.on<{ cell: string; groupId?: string }>('cell:removed', (payload) => {
+      if (payload?.cell) this.#enqueue('remove', payload.cell, payload.groupId)
     })
   }
 
-  #enqueue(op: HistoryOpType, seed: string, groupId?: string): void {
+  #enqueue(op: HistoryOpType, cell: string, groupId?: string): void {
     this.#queue = this.#queue
-      .then(() => this.#recordOp(op, seed, groupId))
+      .then(() => this.#recordOp(op, cell, groupId))
       .then(() => void new hypercomb().act())
       .catch(() => { })
   }
 
-  async #recordOp(op: HistoryOpType, seed: string, groupId?: string): Promise<void> {
+  async #recordOp(op: HistoryOpType, cell: string, groupId?: string): Promise<void> {
     const lineage = get<any>('@hypercomb.social/Lineage')
     const historyService = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
     if (!lineage || !historyService) return
 
     const sig = await historyService.sign(lineage)
-    await historyService.record(sig, { op, seed, at: Date.now(), groupId })
+    await historyService.record(sig, { op, cell, at: Date.now(), groupId })
 
     // Notify cursor service so slider stays in sync
     const cursor = get<HistoryCursorService>('@diamondcoreprocessor.com/HistoryCursorService')

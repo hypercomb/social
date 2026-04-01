@@ -18,7 +18,7 @@ export class Navigation extends hypercomb {
   // reads
   // ----------------------------------
 
-  // normalized segments (good for actions/seeds)
+  // normalized segments (good for actions/cells)
   public segments = (): string[] => {
     const raw = window.location.pathname.split('/').filter(Boolean)
     return raw.map(this.cleanSegment).filter(Boolean)

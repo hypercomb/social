@@ -30,6 +30,13 @@ if (!window.ioc) {
       }
     },
 
+    unregister(key: any): void {
+      const k: string = key && typeof key === 'object' && 'key' in key
+        ? key.key
+        : key
+      instances.delete(k)
+    },
+
     get<T = unknown>(key: any): T | undefined {
       const k: string = key && typeof key === 'object' && 'key' in key
         ? key.key

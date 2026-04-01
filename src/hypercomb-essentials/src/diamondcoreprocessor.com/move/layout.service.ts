@@ -4,7 +4,7 @@ const LAYOUT_FILE = '__layout__'
 export class LayoutService {
 
   /**
-   * Read the ordered seed list from __layout__ in the given directory.
+   * Read the ordered cell list from __layout__ in the given directory.
    * Returns null if no layout file exists (fall back to alphabetical).
    */
   async read(dir: FileSystemDirectoryHandle): Promise<string[] | null> {
@@ -21,7 +21,7 @@ export class LayoutService {
   }
 
   /**
-   * Write the ordered seed list to __layout__.
+   * Write the ordered cell list to __layout__.
    */
   async write(dir: FileSystemDirectoryHandle, order: string[]): Promise<void> {
     const handle = await dir.getFileHandle(LAYOUT_FILE, { create: true })
@@ -31,15 +31,15 @@ export class LayoutService {
   }
 
   /**
-   * Merge a saved layout order with current filesystem seeds.
-   * Keeps layout order, removes deleted seeds, appends new seeds alphabetically.
+   * Merge a saved layout order with current filesystem cells.
+   * Keeps layout order, removes deleted cells, appends new cells alphabetically.
    */
-  merge(layoutOrder: string[], fsSeeds: string[]): string[] {
-    const fsSet = new Set(fsSeeds)
+  merge(layoutOrder: string[], fsCells: string[]): string[] {
+    const fsSet = new Set(fsCells)
     const result: string[] = []
     const seen = new Set<string>()
 
-    // keep layout order for seeds that still exist
+    // keep layout order for cells that still exist
     for (const label of layoutOrder) {
       if (fsSet.has(label) && !seen.has(label)) {
         result.push(label)
@@ -47,10 +47,10 @@ export class LayoutService {
       }
     }
 
-    // append new seeds not in layout (alphabetically)
-    const newSeeds = fsSeeds.filter(s => !seen.has(s))
-    newSeeds.sort((a, b) => a.localeCompare(b))
-    for (const s of newSeeds) result.push(s)
+    // append new cells not in layout (alphabetically)
+    const newCells = fsCells.filter(s => !seen.has(s))
+    newCells.sort((a, b) => a.localeCompare(b))
+    for (const s of newCells) result.push(s)
 
     return result
   }

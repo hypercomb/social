@@ -5,7 +5,7 @@ export type HistoryOpType = 'add' | 'remove' | 'reorder' | 'rename' | 'add-drone
 
 export type HistoryOp = {
   op: HistoryOpType
-  seed: string
+  cell: string
   at: number
   groupId?: string
 }
@@ -49,7 +49,7 @@ export class HistoryService {
     const secretStore = get<any>('@hypercomb.social/SecretStore')
     const space = roomStore?.value ?? ''
     const secret = secretStore?.value ?? ''
-    const parts = [space, domain, lineagePath, secret, 'seed'].filter(Boolean)
+    const parts = [space, domain, lineagePath, secret, 'cell'].filter(Boolean)
     const key = parts.join('/')
 
     // use SignatureStore.signText() for memoization — same lineage = same sig

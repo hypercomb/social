@@ -4,7 +4,7 @@
 // Re-evaluates automatically when the locale changes.
 //
 // Usage:
-//   readonly greeting = ti18n('activity.added', { seed: 'hello' })
+//   readonly greeting = ti18n('activity.added', { cell: 'hello' })
 //   // in template: {{ greeting() }}
 
 import type { Signal } from '@angular/core'

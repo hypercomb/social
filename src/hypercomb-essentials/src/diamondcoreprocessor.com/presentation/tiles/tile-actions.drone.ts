@@ -1,7 +1,7 @@
 // diamondcoreprocessor.com/pixi/tile-actions.drone.ts
-import { Drone, EffectBus, hypercomb, normalizeSeed } from '@hypercomb/core'
+import { Drone, EffectBus, hypercomb, normalizeCell, requestConfirm } from '@hypercomb/core'
 import type { OverlayActionDescriptor, OverlayTileContext, OverlayProfileKey } from './tile-overlay.drone.js'
-import { readSeedProperties, writeSeedProperties } from '../../editor/tile-properties.js'
+import { readCellProperties, writeCellProperties } from '../../editor/tile-properties.js'
 
 // ── SVG icons ─────────────────────────────────────────────────────
 // Clean line icons — 24×24 viewBox, 2px stroke, round caps/joins, white fill.
@@ -16,10 +16,10 @@ const ICONS = {
   edit: svg('<path d="M17 3l4 4L7 21H3v-4L17 3z"/>'),
   // Magnifying glass
   search: svg('<circle cx="11" cy="11" r="7"/><line x1="16" y1="16" x2="21" y2="21"/>'),
-  // Eye with slash (hide)
+  // Eye with slash
   hide: svg('<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/><circle cx="12" cy="12" r="3"/><line x1="4" y1="4" x2="20" y2="20"/>'),
-  // Eye without slash (unhide / make visible)
-  unhide: svg('<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/><circle cx="12" cy="12" r="3"/>'),
+  // Break apart — four fragments separating
+  breakApart: svg('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>'),
   // Plus
   adopt: svg('<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>'),
   // Circle with slash
@@ -44,11 +44,10 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   { name: 'edit', svgMarkup: ICONS.edit, hoverTint: 0xc8d8ff, profile: 'private' },
   { name: 'search', svgMarkup: ICONS.search, hoverTint: 0xc8ffc8, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.noImage },
   { name: 'remove', svgMarkup: ICONS.remove, hoverTint: 0xffc8c8, profile: 'private' },
-  { name: 'hide', svgMarkup: ICONS.hide, hoverTint: 0xffd8a8, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => !ctx.isHidden },
-  { name: 'unhide', svgMarkup: ICONS.unhide, hoverTint: 0xa8d8ff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden },
+  { name: 'break-apart', svgMarkup: ICONS.breakApart, hoverTint: 0x66ccff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden },
   // ── public-own profile ──
   { name: 'hide', svgMarkup: ICONS.hide, hoverTint: 0xffd8a8, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => !ctx.isHidden },
-  { name: 'unhide', svgMarkup: ICONS.unhide, hoverTint: 0xa8d8ff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden },
+  { name: 'break-apart', svgMarkup: ICONS.breakApart, hoverTint: 0x66ccff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden },
   // ── public-external profile ──
   { name: 'adopt', svgMarkup: ICONS.adopt, hoverTint: 0xa8ffd8, profile: 'public-external' },
   { name: 'block', svgMarkup: ICONS.block, hoverTint: 0xffc8c8, profile: 'public-external' },
@@ -56,8 +55,8 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
 
 // Default active icons per profile (defines the fallback order)
 const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
-  'private': ['command', 'edit', 'remove', 'hide', 'unhide'],
-  'public-own': ['hide', 'unhide'],
+  'private': ['command', 'edit', 'remove', 'break-apart'],
+  'public-own': ['hide', 'break-apart'],
   'public-external': ['adopt', 'block'],
 }
 
@@ -94,7 +93,7 @@ const ARRANGEMENT_KEY = 'iconArrangement'
 type IconArrangement = Partial<Record<OverlayProfileKey, string[]>>
 
 // ── Action names this bee handles ─────────────────────────────────
-const HANDLED_ACTIONS = new Set(['edit', 'search', 'command', 'hide', 'unhide', 'adopt', 'block', 'remove'])
+const HANDLED_ACTIONS = new Set(['edit', 'search', 'command', 'hide', 'break-apart', 'adopt', 'block', 'remove'])
 
 type TileActionPayload = { action: string; label: string; q: number; r: number; index: number }
 
@@ -106,8 +105,8 @@ export class TileActionsDrone extends Drone {
     lineage: '@hypercomb.social/Lineage',
   }
 
-  protected override listens = ['render:host-ready', 'tile:action', 'overlay:icons-reordered', 'overlay:arrange-mode']
-  protected override emits = ['overlay:register-action', 'overlay:pool-icons', 'search:prefill', 'command:focus', 'tile:hidden', 'tile:unhidden', 'tile:blocked', 'seed:removed']
+  protected override listens = ['render:host-ready', 'tile:action', 'controls:action', 'overlay:icons-reordered', 'overlay:arrange-mode']
+  protected override emits = ['overlay:register-action', 'overlay:pool-icons', 'search:prefill', 'command:focus', 'tile:hidden', 'tile:unhidden', 'tile:blocked', 'cell:removed', 'visibility:show-hidden']
 
   #registered = false
   #effectsRegistered = false
@@ -130,6 +129,11 @@ export class TileActionsDrone extends Drone {
         this.#handleAction(payload)
       })
 
+      // Handle hide from selection context menu (controls:action)
+      this.onEffect<{ action: string }>('controls:action', (payload) => {
+        if (payload?.action === 'hide') this.#bulkHideSelected()
+      })
+
       // Handle icon reorder from arrange mode
       this.onEffect<{ profile: OverlayProfileKey; order: string[] }>('overlay:icons-reordered', (payload) => {
         this.#arrangement[payload.profile] = payload.order
@@ -147,7 +151,7 @@ export class TileActionsDrone extends Drone {
       const lineage = this.resolve<{ explorerDir(): Promise<FileSystemDirectoryHandle | null> }>('lineage')
       const rootDir = await this.#getRootDir(lineage)
       if (rootDir) {
-        const props = await readSeedProperties(rootDir)
+        const props = await readCellProperties(rootDir)
         const saved = props[ARRANGEMENT_KEY] as IconArrangement | undefined
         if (saved && typeof saved === 'object') {
           this.#arrangement = saved
@@ -178,6 +182,7 @@ export class TileActionsDrone extends Drone {
 
         descriptors.push({
           name: entry.name,
+          owner: this.iocKey,
           svgMarkup: entry.svgMarkup,
           hoverTint: entry.hoverTint,
           profile: entry.profile,
@@ -209,6 +214,7 @@ export class TileActionsDrone extends Drone {
 
       descriptors.push({
         name: entry.name,
+        owner: this.iocKey,
         svgMarkup: entry.svgMarkup,
         hoverTint: entry.hoverTint,
         profile: entry.profile,
@@ -254,7 +260,7 @@ export class TileActionsDrone extends Drone {
       const lineage = this.resolve<{ explorerDir(): Promise<FileSystemDirectoryHandle | null> }>('lineage')
       const rootDir = await this.#getRootDir(lineage)
       if (rootDir) {
-        await writeSeedProperties(rootDir, { [ARRANGEMENT_KEY]: this.#arrangement })
+        await writeCellProperties(rootDir, { [ARRANGEMENT_KEY]: this.#arrangement })
       }
     } catch {
       // persistence failure — silently ignore
@@ -269,7 +275,7 @@ export class TileActionsDrone extends Drone {
 
   #handleAction(payload: TileActionPayload): void {
     const { action, label: rawLabel } = payload
-    const label = normalizeSeed(rawLabel) || rawLabel
+    const label = normalizeCell(rawLabel) || rawLabel
 
     switch (action) {
       case 'edit':
@@ -281,30 +287,19 @@ export class TileActionsDrone extends Drone {
         break
 
       case 'command':
-        EffectBus.emit('command:focus', { seed: label })
+        EffectBus.emit('command:focus', { cell: label })
         break
 
-      case 'hide': {
-        // Bulk hide: if tiles are selected, hide all selected tiles
-        const selection = window.ioc.get<{ selected: ReadonlySet<string>; count: number; clear(): void }>('@diamondcoreprocessor.com/SelectionService')
-        if (selection && selection.count > 0) {
-          for (const selectedLabel of selection.selected) {
-            this.#hideOrBlock(normalizeSeed(selectedLabel) || selectedLabel, 'hc:hidden-tiles', 'tile:hidden', true)
-          }
-          selection.clear()
-          void new hypercomb().act()
-        } else {
-          this.#hideOrBlock(label, 'hc:hidden-tiles', 'tile:hidden')
-        }
+      case 'hide':
+        this.#hideOrBlock(label, 'hc:hidden-tiles', 'tile:hidden')
         break
-      }
 
-      case 'unhide':
+      case 'break-apart':
         this.#unhide(label)
         break
 
       case 'adopt':
-        EffectBus.emit('seed:added', { seed: label })
+        EffectBus.emit('cell:added', { cell: label })
         void new hypercomb().act()
         break
       case 'block':
@@ -323,17 +318,25 @@ export class TileActionsDrone extends Drone {
     const dir = await lineage.explorerDir()
     if (!dir) return
 
-    // Check if tile is a directory with children — warn before recursive delete
+    // Check if tile is a directory with children
+    let hasChildren = false
     try {
       const child = await dir.getDirectoryHandle(label)
-      let hasChildren = false
       for await (const _ of (child as any).entries()) { hasChildren = true; break }
-      if (hasChildren && !confirm(`"${label}" contains children. Delete anyway?`)) return
-    } catch { /* not a directory or doesn't exist — proceed without warning */ }
+    } catch { /* not a directory or doesn't exist */ }
+
+    const confirmed = await requestConfirm({
+      title: 'confirm.delete-title',
+      message: 'confirm.delete-message',
+      messageParams: { name: label },
+      warning: hasChildren ? 'confirm.delete-children-warning' : undefined,
+      danger: true,
+    })
+    if (!confirmed) return
 
     try {
       await dir.removeEntry(label, { recursive: true })
-      EffectBus.emit('seed:removed', { seed: label })
+      EffectBus.emit('cell:removed', { cell: label })
     } catch { /* entry doesn't exist or can't be removed */ }
     void new hypercomb().act()
   }
@@ -345,19 +348,53 @@ export class TileActionsDrone extends Drone {
     const existing: string[] = JSON.parse(localStorage.getItem(key) ?? '[]')
     const updated = existing.filter(l => l !== label)
     localStorage.setItem(key, JSON.stringify(updated))
-    EffectBus.emit('tile:unhidden', { seed: label, location })
+    EffectBus.emit('tile:unhidden', { cell: label, location })
     void new hypercomb().act()
   }
 
-  #hideOrBlock(label: string, storagePrefix: string, effect: string, skipAct = false): void {
+  #bulkHideSelected(): void {
+    const selection = window.ioc.get<{ selected: ReadonlySet<string>; count: number; clear(): void }>('@diamondcoreprocessor.com/SelectionService')
+    if (!selection || selection.count === 0) return
+
+    const lineage = this.resolve<{ explorerLabel(): string }>('lineage')
+    const location = lineage?.explorerLabel() ?? '/'
+    const key = `hc:hidden-tiles:${location}`
+    const hidden: string[] = JSON.parse(localStorage.getItem(key) ?? '[]')
+    const hiddenSet = new Set(hidden)
+
+    const labels = [...selection.selected]
+    const allHidden = labels.every(l => hiddenSet.has(l))
+
+    if (allHidden) {
+      // Every selected tile is hidden → remove them from the hidden list
+      const removeSet = new Set(labels)
+      localStorage.setItem(key, JSON.stringify(hidden.filter(l => !removeSet.has(l))))
+      for (const label of labels) EffectBus.emit('tile:unhidden', { cell: label, location })
+      // Re-emit to force show-cell cache clear and re-render without the grayed state
+      EffectBus.emit('visibility:show-hidden', { active: localStorage.getItem('hc:show-hidden') === '1' })
+    } else {
+      // At least one visible → add all to the hidden list
+      for (const label of labels) if (!hiddenSet.has(label)) hidden.push(label)
+      localStorage.setItem(key, JSON.stringify(hidden))
+      for (const label of labels) EffectBus.emit('tile:hidden', { cell: label, location })
+      // Auto-enable show-hidden so grayed tiles are visible
+      localStorage.setItem('hc:show-hidden', '1')
+      EffectBus.emit('visibility:show-hidden', { active: true })
+    }
+
+    selection.clear()
+    void new hypercomb().act()
+  }
+
+  #hideOrBlock(label: string, storagePrefix: string, effect: string): void {
     const lineage = this.resolve<{ explorerLabel(): string }>('lineage')
     const location = lineage?.explorerLabel() ?? '/'
     const key = `${storagePrefix}:${location}`
     const existing: string[] = JSON.parse(localStorage.getItem(key) ?? '[]')
     if (!existing.includes(label)) existing.push(label)
     localStorage.setItem(key, JSON.stringify(existing))
-    EffectBus.emit(effect, { seed: label, location })
-    if (!skipAct) void new hypercomb().act()
+    EffectBus.emit(effect, { cell: label, location })
+    void new hypercomb().act()
   }
 }
 

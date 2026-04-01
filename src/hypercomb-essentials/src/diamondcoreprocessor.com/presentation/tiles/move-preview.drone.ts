@@ -17,6 +17,7 @@ const STROKE_WIDTH = 0.5
 
 export class MovePreviewDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
+  override genotype = 'movement'
   override description =
     'Draws swap-indicator overlays showing where tiles will land during a move.'
 

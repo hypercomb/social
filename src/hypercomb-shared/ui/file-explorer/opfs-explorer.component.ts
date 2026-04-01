@@ -5,7 +5,7 @@ import { Component, signal, type OnDestroy } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import type { Lineage } from '../../core/lineage'
 import type { Store } from '../../core/store'
-import { hypercomb } from '@hypercomb/core'
+import { hypercomb, requestConfirm } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import type { ScriptPreloader } from '../../core/script-preloader'
 import { LocationParser } from '../../core/initializers/location-parser'
@@ -218,6 +218,14 @@ export class OpfsExplorerComponent extends hypercomb {
 
   public remove = async (e: ExplorerEntry, ev: MouseEvent): Promise<void> => {
     ev.stopPropagation()
+
+    const confirmed = await requestConfirm({
+      title: 'confirm.delete-title',
+      message: 'confirm.delete-message',
+      messageParams: { name: e.label || e.name },
+      danger: true,
+    })
+    if (!confirmed) return
 
     const dir = await this.lineage.explorerDir()
     if (!dir) return

@@ -35,6 +35,9 @@
           [class.active]="i === getActiveIndex()"
           (mousedown)="onSuggestionMouseDown($event, s, i)"
         >
+          @if (colorFor(s); as color) {
+            <span class="color-dot" [style.background]="color"></span>
+          }
           <span class="typed">{{ typedPart(s) }}</span
           ><span class="rest">{{ restPart(s) }}</span>
           @if (descriptionFor(s); as desc) {

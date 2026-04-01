@@ -53,9 +53,9 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
     () => this.editorService?.mode ?? 'idle',
   )
 
-  private readonly seed$ = fromRuntime(
+  private readonly cell$ = fromRuntime(
     get('@diamondcoreprocessor.com/TileEditorService') as EventTarget,
-    () => this.editorService?.seed ?? '',
+    () => this.editorService?.cell ?? '',
   )
 
   private readonly link$ = fromRuntime(
@@ -79,7 +79,7 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
   )
 
   public readonly open = computed(() => this.mode$() === 'editing')
-  public readonly seed = computed(() => this.seed$())
+  public readonly cell = computed(() => this.cell$())
   public readonly hasImage = computed(() => this.hasImage$())
 
   // bound form values (updated on open, pushed on change)
@@ -330,7 +330,7 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
   // ── search ────────────────────────────────────────────────────
 
   readonly searchGoogle = (): void => {
-    const q = this.seed()
+    const q = this.cell()
     if (q) window.open(`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(q)}`, '_blank')
   }
 

@@ -14,6 +14,12 @@ export type PatchResult = {
   cascadedLayers: { oldSig: string; newSig: string }[]
 }
 
+export type BatchPatchResult = {
+  patchedFiles: { originalSig: string; newFileSig: string; kind: 'bee' | 'dependency' }[]
+  newRootSig: string
+  cascadedLayers: { oldSig: string; newSig: string }[]
+}
+
 type LayerJson = {
   version?: number
   name: string
@@ -110,6 +116,89 @@ export class MerklePatchService {
       lineage,
       cascadedLayers
     }
+  }
+
+  /**
+   * Apply multiple patches in a single Merkle cascade. Compiles all changed files,
+   * builds the ancestry index once, then cascades all replacements upward.
+   */
+  async applyBatch(params: {
+    changes: { originalSig: string; kind: 'bee' | 'dependency'; modifiedSource: string; lineage: string }[]
+    rootSig: string
+    domain: string
+  }): Promise<BatchPatchResult> {
+    const { changes, rootSig, domain } = params
+
+    await this.#store.initialize()
+
+    const patchedBeesDir = await this.#store.patchedBeesDir(domain)
+    const patchedDepsDir = await this.#store.patchedDepsDir(domain)
+    const patchedLayersDir = await this.#store.patchedLayersDir(domain)
+
+    // 1. compile, sign, and store all changed files
+    const replacements: { originalSig: string; newFileSig: string; kind: 'bee' | 'dependency' }[] = []
+
+    for (const change of changes) {
+      const compiled = await this.#esbuild.transform(change.modifiedSource)
+      const compiledBytes = new TextEncoder().encode(compiled).buffer as ArrayBuffer
+      const newFileSig = await SignatureService.sign(compiledBytes)
+      const dir = change.kind === 'bee' ? patchedBeesDir : patchedDepsDir
+      await this.#store.writeFile(dir, `${newFileSig}.js`, compiledBytes)
+      replacements.push({ originalSig: change.originalSig, newFileSig, kind: change.kind })
+    }
+
+    // 2. build ancestry index once
+    const ancestry = await this.#buildAncestryIndex(rootSig, domain)
+
+    // 3. collect all affected layers and apply replacements bottom-up
+    //    track which layers have been rewritten so cascading picks up intermediate changes
+    const layerRewrites = new Map<string, string>() // oldLayerSig → newLayerSig
+    const cascadedLayers: { oldSig: string; newSig: string }[] = []
+
+    for (const { originalSig, newFileSig, kind } of replacements) {
+      let currentOldSig = originalSig
+      let currentNewSig = newFileSig
+      let currentKind: 'bee' | 'dependency' = kind
+
+      while (true) {
+        // resolve through any already-rewritten layers
+        let parentLayerSig = ancestry.get(currentOldSig)
+        if (!parentLayerSig) break
+
+        // if this parent was already rewritten by a prior replacement, use the new sig
+        const rewrittenParent = layerRewrites.get(parentLayerSig)
+        const readSig = rewrittenParent ?? parentLayerSig
+
+        const layerJson = await this.#readLayerJson(readSig, domain)
+        if (!layerJson) {
+          throw new Error(`Layer ${readSig.slice(0, 12)} not found in OPFS`)
+        }
+
+        this.#replaceSigInLayer(layerJson, currentOldSig, currentNewSig, currentKind)
+
+        const layerBytes = new TextEncoder().encode(JSON.stringify(layerJson)).buffer as ArrayBuffer
+        const newLayerSig = await SignatureService.sign(layerBytes)
+        await this.#store.writeFile(patchedLayersDir, newLayerSig, layerBytes)
+
+        // update ancestry so subsequent replacements find the rewritten layer
+        const originalParent = rewrittenParent ? parentLayerSig : parentLayerSig
+        layerRewrites.set(originalParent, newLayerSig)
+        // also map the intermediate rewritten sig so the next walk-up finds it
+        if (rewrittenParent) layerRewrites.set(rewrittenParent, newLayerSig)
+
+        cascadedLayers.push({ oldSig: readSig, newSig: newLayerSig })
+
+        currentOldSig = parentLayerSig
+        currentNewSig = newLayerSig
+        currentKind = 'bee' // layers reference child layers in layers[]
+      }
+    }
+
+    const newRootSig = cascadedLayers.length > 0
+      ? cascadedLayers[cascadedLayers.length - 1].newSig
+      : rootSig
+
+    return { patchedFiles: replacements, newRootSig, cascadedLayers }
   }
 
   /**

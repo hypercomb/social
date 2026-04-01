@@ -1,19 +1,20 @@
 // diamondcoreprocessor.com/bridge/claude-bridge.worker.ts
-import { Worker, EffectBus, normalizeSeed, hypercomb } from '@hypercomb/core'
-import { readSeedProperties } from '../editor/tile-properties.js'
+import { Worker, EffectBus, normalizeCell, hypercomb } from '@hypercomb/core'
+import { readCellProperties } from '../editor/tile-properties.js'
 import type { HistoryService } from '../history/history.service.js'
 
 // Bridge protocol — matches @hypercomb/sdk/bridge
 const BRIDGE_PORT = 2401
 const BRIDGE_ENABLED_QUERY_KEY = 'claudeBridge'
 const BRIDGE_ENABLED_STORAGE_KEY = 'hypercomb.claudeBridge.enabled'
-type BridgeRequest = { id: string; op: string; seeds?: string[]; all?: boolean; seed?: string }
+type BridgeRequest = { id: string; op: string; cells?: string[]; all?: boolean; cell?: string }
 type BridgeResponse = { id: string; ok: boolean; data?: unknown; error?: string }
 
 const RECONNECT_MS = 3_000
 
 export class ClaudeBridgeWorker extends Worker {
   readonly namespace = 'diamondcoreprocessor.com'
+  override genotype = 'assistant'
 
   public override description =
     'Claude CLI bridge — receives tile commands over WebSocket and executes against OPFS.'
@@ -136,18 +137,18 @@ export class ClaudeBridgeWorker extends Worker {
   // ------- operations -------
 
   async #add(req: BridgeRequest): Promise<BridgeResponse> {
-    const seeds = req.seeds
-    if (!seeds?.length) return { id: req.id, ok: false, error: 'no seeds provided' }
+    const cells = req.cells
+    if (!cells?.length) return { id: req.id, ok: false, error: 'no cells provided' }
 
     const dir = await this.#explorerDir()
     if (!dir) return { id: req.id, ok: false, error: 'no explorer directory' }
 
     let count = 0
-    for (const name of seeds) {
-      const normalized = normalizeSeed(name)
+    for (const name of cells) {
+      const normalized = normalizeCell(name)
       if (!normalized) continue
       await dir.getDirectoryHandle(normalized, { create: true })
-      EffectBus.emit('seed:added', { seed: normalized })
+      EffectBus.emit('cell:added', { cell: normalized })
       count++
     }
 
@@ -157,22 +158,22 @@ export class ClaudeBridgeWorker extends Worker {
 
   async #remove(req: BridgeRequest): Promise<BridgeResponse> {
     if (req.all) {
-      const visible = await this.#visibleSeeds()
-      for (const seed of visible) {
-        EffectBus.emit('seed:removed', { seed })
+      const visible = await this.#visibleCells()
+      for (const cell of visible) {
+        EffectBus.emit('cell:removed', { cell })
       }
       await new hypercomb().act()
       return { id: req.id, ok: true, data: { count: visible.length } }
     }
 
-    const seeds = req.seeds
-    if (!seeds?.length) return { id: req.id, ok: false, error: 'no seeds provided' }
+    const cells = req.cells
+    if (!cells?.length) return { id: req.id, ok: false, error: 'no cells provided' }
 
     let count = 0
-    for (const raw of seeds) {
-      const seed = normalizeSeed(raw)
-      if (!seed) continue
-      EffectBus.emit('seed:removed', { seed })
+    for (const raw of cells) {
+      const cell = normalizeCell(raw)
+      if (!cell) continue
+      EffectBus.emit('cell:removed', { cell })
       count++
     }
 
@@ -181,23 +182,23 @@ export class ClaudeBridgeWorker extends Worker {
   }
 
   async #list(req: BridgeRequest): Promise<BridgeResponse> {
-    const seeds = await this.#visibleSeeds()
-    return { id: req.id, ok: true, data: seeds }
+    const cells = await this.#visibleCells()
+    return { id: req.id, ok: true, data: cells }
   }
 
   async #inspect(req: BridgeRequest): Promise<BridgeResponse> {
-    const name = req.seed ? normalizeSeed(req.seed) : ''
-    if (!name) return { id: req.id, ok: false, error: 'no seed name' }
+    const name = req.cell ? normalizeCell(req.cell) : ''
+    if (!name) return { id: req.id, ok: false, error: 'no cell name' }
 
     const dir = await this.#explorerDir()
     if (!dir) return { id: req.id, ok: false, error: 'no explorer directory' }
 
     try {
-      const seedDir = await dir.getDirectoryHandle(name, { create: false })
-      const props = await readSeedProperties(seedDir)
+      const cellDir = await dir.getDirectoryHandle(name, { create: false })
+      const props = await readCellProperties(cellDir)
       return { id: req.id, ok: true, data: props }
     } catch {
-      return { id: req.id, ok: false, error: `seed not found: ${name}` }
+      return { id: req.id, ok: false, error: `cell not found: ${name}` }
     }
   }
 
@@ -220,7 +221,7 @@ export class ClaudeBridgeWorker extends Worker {
     return lineage?.explorerDir?.() ?? null
   }
 
-  async #listSeedFolders(dir: FileSystemDirectoryHandle): Promise<string[]> {
+  async #listCellFolders(dir: FileSystemDirectoryHandle): Promise<string[]> {
     const out: string[] = []
     for await (const [name, handle] of (dir as any).entries()) {
       if (handle.kind !== 'directory') continue
@@ -232,11 +233,11 @@ export class ClaudeBridgeWorker extends Worker {
     return out
   }
 
-  async #visibleSeeds(): Promise<string[]> {
+  async #visibleCells(): Promise<string[]> {
     const dir = await this.#explorerDir()
     if (!dir) return []
 
-    const all = await this.#listSeedFolders(dir)
+    const all = await this.#listCellFolders(dir)
 
     const historyService = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
     const lineage = get<any>('@hypercomb.social/Lineage')
@@ -244,10 +245,10 @@ export class ClaudeBridgeWorker extends Worker {
 
     const sig = await historyService.sign(lineage)
     const ops = await historyService.replay(sig)
-    const seedState = new Map<string, string>()
-    for (const op of ops) seedState.set(op.seed, op.op)
+    const cellState = new Map<string, string>()
+    for (const op of ops) cellState.set(op.cell, op.op)
 
-    return all.filter(seed => seedState.get(seed) !== 'remove')
+    return all.filter(cell => cellState.get(cell) !== 'remove')
   }
 }
 

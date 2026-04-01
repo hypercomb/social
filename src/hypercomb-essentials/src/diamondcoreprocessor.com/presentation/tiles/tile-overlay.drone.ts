@@ -16,6 +16,7 @@ type OverlayAction = {
   name: string
   button: HexIconButton
   profile: OverlayProfileKey
+  genotype?: string
   /** If provided, called to determine per-tile visibility */
   visibleWhen?: OverlayVisibilityFn
 }
@@ -23,6 +24,10 @@ type OverlayAction = {
 /** Descriptor emitted by provider bees via `overlay:register-action` */
 export type OverlayActionDescriptor = {
   name: string
+  /** IoC key of the bee that owns this action — used for cleanup on disposal */
+  owner?: string
+  /** Feature-group identifier — all actions sharing a genotype are toggled as a unit */
+  genotype?: string
   svgMarkup: string
   x: number
   y: number
@@ -122,6 +127,9 @@ export class TileOverlayDrone extends Drone {
   /** Registered descriptors from provider bees, keyed by name */
   #registeredDescriptors = new Map<string, OverlayActionDescriptor>()
 
+  /** Genotype visibility — missing key means visible (default-on) */
+  #genotypeVisible = new Map<string, boolean>()
+
   // ── Arrange mode state ──────────────────────────────────────────
 
   #arrangeMode = false
@@ -156,6 +164,7 @@ export class TileOverlayDrone extends Drone {
     'overlay:register-action', 'overlay:unregister-action', 'overlay:neon-color',
     'drop:dragging', 'drop:pending',
     'overlay:arrange-mode', 'overlay:pool-icons',
+    'bee:disposed', 'genotype:set-visible',
   ]
   protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'drop:target', 'overlay:icons-reordered']
 
@@ -171,7 +180,14 @@ export class TileOverlayDrone extends Drone {
       // ── External action registration ─────────────────────────────
       this.onEffect<OverlayActionDescriptor | OverlayActionDescriptor[]>('overlay:register-action', (payload) => {
         const descs = Array.isArray(payload) ? payload : [payload]
-        for (const desc of descs) this.#registeredDescriptors.set(desc.name, desc)
+        for (const desc of descs) {
+          this.#registeredDescriptors.set(desc.name, desc)
+          // Hydrate genotype visibility from localStorage on first encounter
+          if (desc.genotype && !this.#genotypeVisible.has(desc.genotype)) {
+            const stored = localStorage.getItem(`hc:genotype:${desc.genotype}`)
+            if (stored !== null) this.#genotypeVisible.set(desc.genotype, stored === 'true')
+          }
+        }
         // Track active order from descriptors — keep 'remove' last
         for (const desc of descs) {
           if (!this.#activeOrder.has(desc.profile)) this.#activeOrder.set(desc.profile, [])
@@ -198,6 +214,30 @@ export class TileOverlayDrone extends Drone {
           }
         }
         this.#registeredDescriptors.delete(name)
+        this.#rebuildActiveProfile()
+      })
+
+      // ── Bee disposal cleanup ─────────────────────────────────────
+      // When a bee is toggled off, remove every action it owns.
+      this.onEffect<{ iocKey: string }>('bee:disposed', ({ iocKey }) => {
+        let changed = false
+        for (const [name, desc] of this.#registeredDescriptors) {
+          if (desc.owner !== iocKey) continue
+          const order = this.#activeOrder.get(desc.profile)
+          if (order) {
+            const idx = order.indexOf(name)
+            if (idx >= 0) order.splice(idx, 1)
+          }
+          this.#registeredDescriptors.delete(name)
+          changed = true
+        }
+        if (changed) this.#rebuildActiveProfile()
+      })
+
+      // ── Genotype visibility toggling ────────────────────────────
+      this.onEffect<{ genotype: string; visible: boolean }>('genotype:set-visible', ({ genotype, visible }) => {
+        this.#genotypeVisible.set(genotype, visible)
+        localStorage.setItem(`hc:genotype:${genotype}`, String(visible))
         this.#rebuildActiveProfile()
       })
 
@@ -348,7 +388,6 @@ export class TileOverlayDrone extends Drone {
       this.#overlay = null
       this.#hexBg = null
       this.#crackOverlay = null
-      this.#separatorLine = null
       this.#actions = []
     }
   }
@@ -417,8 +456,10 @@ export class TileOverlayDrone extends Drone {
 
     // Collect descriptors for this profile, build buttons
     // Sort so 'remove' is always the rightmost action
+    // Filter out actions whose genotype is currently hidden
     const descs = [...this.#registeredDescriptors.values()]
       .filter(d => d.profile === key)
+      .filter(d => !d.genotype || this.#genotypeVisible.get(d.genotype) !== false)
       .sort((a, b) => (a.name === 'remove' ? 1 : 0) - (b.name === 'remove' ? 1 : 0))
     for (const desc of descs) {
       const btn = new HexIconButton({
@@ -432,6 +473,7 @@ export class TileOverlayDrone extends Drone {
         name: desc.name,
         button: btn,
         profile: desc.profile,
+        genotype: desc.genotype,
         visibleWhen: desc.visibleWhen,
       })
     }
@@ -443,57 +485,16 @@ export class TileOverlayDrone extends Drone {
 
   // ── Icon row layout (centered, inline) ──────────────────────────────
 
-  /** Icons placed below the main row, beneath a separator line. */
-  static readonly #BELOW_ICONS = new Set(['hide', 'unhide'])
-  static readonly #SEPARATOR_Y_GAP = 6
-  static readonly #SEPARATOR_LINE_WIDTH = 16
-  #separatorLine: Graphics | null = null
-
   #layoutIconRow(): void {
     const visible = this.#actions.filter(a => a.button.visible)
-    if (visible.length === 0) {
-      if (this.#separatorLine) this.#separatorLine.visible = false
-      return
-    }
+    const count = visible.length
+    if (count === 0) return
 
     const spacing = ICON_SPACING
-    const mainIcons = visible.filter(a => !TileOverlayDrone.#BELOW_ICONS.has(a.name))
-    const belowIcons = visible.filter(a => TileOverlayDrone.#BELOW_ICONS.has(a.name))
+    const startX = Math.round(-(count - 1) * spacing / 2)
 
-    // Layout main row (centered at y = ICON_Y)
-    if (mainIcons.length > 0) {
-      const startX = Math.round(-(mainIcons.length - 1) * spacing / 2)
-      for (let i = 0; i < mainIcons.length; i++) {
-        mainIcons[i].button.position.set(Math.round(startX + i * spacing), ICON_Y)
-      }
-    }
-
-    // Layout below-row icons (centered, below a separator)
-    const belowY = ICON_Y + ICON_SPACING + TileOverlayDrone.#SEPARATOR_Y_GAP
-    if (belowIcons.length > 0) {
-      const startX = Math.round(-(belowIcons.length - 1) * spacing / 2)
-      for (let i = 0; i < belowIcons.length; i++) {
-        belowIcons[i].button.position.set(Math.round(startX + i * spacing), belowY)
-      }
-    }
-
-    // Draw / update separator line between main row and below row
-    if (mainIcons.length > 0 && belowIcons.length > 0) {
-      if (!this.#separatorLine && this.#overlay) {
-        this.#separatorLine = new Graphics()
-        this.#overlay.addChild(this.#separatorLine)
-      }
-      if (this.#separatorLine) {
-        const lineY = ICON_Y + ICON_SPACING / 2 + TileOverlayDrone.#SEPARATOR_Y_GAP / 2
-        const halfW = TileOverlayDrone.#SEPARATOR_LINE_WIDTH / 2
-        this.#separatorLine.clear()
-          .moveTo(-halfW, lineY)
-          .lineTo(halfW, lineY)
-          .stroke({ width: 0.5, color: 0x6688cc, alpha: 0.4 })
-        this.#separatorLine.visible = true
-      }
-    } else if (this.#separatorLine) {
-      this.#separatorLine.visible = false
+    for (let i = 0; i < count; i++) {
+      visible[i].button.position.set(Math.round(startX + i * spacing), ICON_Y)
     }
   }
 
@@ -536,22 +537,6 @@ export class TileOverlayDrone extends Drone {
       isHidden: this.#hiddenLabels.has(entry.label),
     }
 
-    // Selection mode: only show hide/unhide icons
-    if (this.#hasSelection) {
-      const SELECTION_ICONS = new Set(['hide', 'unhide'])
-      for (const action of this.#actions) {
-        if (!SELECTION_ICONS.has(action.name)) {
-          action.button.visible = false
-        } else if (action.visibleWhen) {
-          action.button.visible = action.visibleWhen(ctx)
-        } else {
-          action.button.visible = true
-        }
-      }
-      this.#layoutIconRow()
-      return
-    }
-
     for (const action of this.#actions) {
       if (action.visibleWhen) {
         action.button.visible = action.visibleWhen(ctx)
@@ -579,7 +564,7 @@ export class TileOverlayDrone extends Drone {
         this.#currentAxial = { q: coord.q, r: coord.r }
         this.#currentIndex = 0
         this.#positionOverlay(coord.q, coord.r)
-        this.#updateSeedLabel(coord.q, coord.r)
+        this.#updateCellLabel(coord.q, coord.r)
       }
     }
 
@@ -1130,7 +1115,7 @@ export class TileOverlayDrone extends Drone {
       this.#currentAxial = axial
       this.#currentIndex = this.#lookupIndex(axial.q, axial.r)
       this.#positionOverlay(axial.q, axial.r)
-      this.#updateSeedLabel(axial.q, axial.r)
+      this.#updateCellLabel(axial.q, axial.r)
 
       // tell ImageDropDrone what's under the cursor
       const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(axial.q, axial.r))
@@ -1191,7 +1176,7 @@ export class TileOverlayDrone extends Drone {
       }
 
       this.#positionOverlay(axial.q, axial.r)
-      this.#updateSeedLabel(axial.q, axial.r)
+      this.#updateCellLabel(axial.q, axial.r)
       this.#updatePerTileVisibility()
       this.emitEffect('tile:hover', { q: axial.q, r: axial.r })
     }
@@ -1305,6 +1290,15 @@ export class TileOverlayDrone extends Drone {
         const by = local.y - oy - btn.position.y
 
         if (btn.containsPoint(bx, by)) {
+          // break-apart: play shatter animation first, then emit action
+          if (action.name === 'break-apart') {
+            this.playShatterAnimation(
+              this.#currentAxial!.q,
+              this.#currentAxial!.r,
+              entry.label,
+            )
+            return
+          }
           this.emitEffect('tile:action', {
             action: action.name,
             q: this.#currentAxial!.q,
@@ -1397,7 +1391,7 @@ export class TileOverlayDrone extends Drone {
 
   // ── Helpers ────────────────────────────────────────────────────────
 
-  #updateSeedLabel(_q: number, _r: number): void {
+  #updateCellLabel(_q: number, _r: number): void {
     // shader-rendered label stays visible — no overlay text needed
   }
 
@@ -1429,11 +1423,12 @@ export class TileOverlayDrone extends Drone {
 
     const shouldShow = occupied && !this.#editing && !this.#editCooldown && !this.#touchDragging
 
-    // When tiles are selected, show overlay with hide/unhide icons only (no hex bg)
+    // When tiles are selected, show only the cell label (no hex bg, icons, or hover label)
     if (this.#hasSelection) {
       this.#overlay.visible = occupied && !this.#editing && !this.#editCooldown
       if (this.#hexBg) this.#hexBg.hide()
-      this.#updatePerTileVisibility()
+      for (const action of this.#actions) action.button.visible = false
+
       return
     }
 

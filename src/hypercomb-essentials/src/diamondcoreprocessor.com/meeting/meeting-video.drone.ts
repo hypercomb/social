@@ -26,6 +26,7 @@ const FADE_SPEED = 0.04 // per frame
 
 export class MeetingVideoDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
+  override genotype = 'meeting'
 
   public override description =
     'Renders peer video streams into hex tiles — hex-clipped, faded in/out on connect/disconnect.'

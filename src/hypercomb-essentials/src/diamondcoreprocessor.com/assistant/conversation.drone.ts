@@ -1,6 +1,6 @@
 // diamondcoreprocessor.com/assistant/conversation.drone.ts
 
-import { Drone, EffectBus, normalizeSeed, hypercomb } from '@hypercomb/core'
+import { Drone, EffectBus, normalizeCell, hypercomb } from '@hypercomb/core'
 import {
   MODELS, API_KEY_STORAGE, getApiKey, callAnthropicMultiTurn,
 } from './llm-api.js'
@@ -31,6 +31,7 @@ const PROPS_FILE = '0000'
  */
 export class ConversationDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
+  override genotype = 'assistant'
   override description = 'Orchestrates multi-turn Claude conversations as question tiles with response children'
 
   protected override deps = {
@@ -41,7 +42,7 @@ export class ConversationDrone extends Drone {
   protected override listens = ['conversation:send']
   protected override emits = [
     'conversation:response', 'conversation:turn-added',
-    'seed:added', 'llm:request-start', 'llm:request-done', 'llm:error',
+    'cell:added', 'llm:request-start', 'llm:request-done', 'llm:error',
   ]
 
   #effectsRegistered = false
@@ -112,7 +113,7 @@ export class ConversationDrone extends Drone {
       } else {
         // New thread — create question tile at current level
         const threadId = await computeThreadId(SYSTEM_PROMPT, payload.message)
-        const tileName = normalizeSeed(payload.message.slice(0, 40)) || `chat-${threadId.slice(0, 8)}`
+        const tileName = normalizeCell(payload.message.slice(0, 40)) || `chat-${threadId.slice(0, 8)}`
 
         questionDir = await explorerDir.getDirectoryHandle(tileName, { create: true })
 
@@ -125,7 +126,7 @@ export class ConversationDrone extends Drone {
           contentSig: questionSig,
           tags: ['question', modelAlias],
         })
-        EffectBus.emit('seed:added', { seed: tileName })
+        EffectBus.emit('cell:added', { cell: tileName })
 
         manifest = {
           id: threadId,
@@ -160,7 +161,7 @@ export class ConversationDrone extends Drone {
           contentSig: userSig,
           tags: ['followup'],
         })
-        EffectBus.emit('seed:added', { seed: followUpName })
+        EffectBus.emit('cell:added', { cell: followUpName })
 
         manifest.turns.push({
           role: 'user',
@@ -199,7 +200,7 @@ export class ConversationDrone extends Drone {
         model: result.model,
         tags: ['response', modelAlias, stopReasonTag],
       })
-      EffectBus.emit('seed:added', { seed: responseName })
+      EffectBus.emit('cell:added', { cell: responseName })
 
       const responseTurn: ThreadTurn = {
         role: 'assistant',
@@ -251,9 +252,9 @@ export class ConversationDrone extends Drone {
     return null
   }
 
-  async #readProps(seedDir: FileSystemDirectoryHandle): Promise<Record<string, unknown>> {
+  async #readProps(cellDir: FileSystemDirectoryHandle): Promise<Record<string, unknown>> {
     try {
-      const fh = await seedDir.getFileHandle(PROPS_FILE)
+      const fh = await cellDir.getFileHandle(PROPS_FILE)
       const file = await fh.getFile()
       return JSON.parse(await file.text())
     } catch {
@@ -261,10 +262,10 @@ export class ConversationDrone extends Drone {
     }
   }
 
-  async #writeProps(seedDir: FileSystemDirectoryHandle, updates: Record<string, unknown>): Promise<void> {
-    const existing = await this.#readProps(seedDir)
+  async #writeProps(cellDir: FileSystemDirectoryHandle, updates: Record<string, unknown>): Promise<void> {
+    const existing = await this.#readProps(cellDir)
     const merged = { ...existing, ...updates }
-    const fh = await seedDir.getFileHandle(PROPS_FILE, { create: true })
+    const fh = await cellDir.getFileHandle(PROPS_FILE, { create: true })
     const writable = await fh.createWritable()
     try {
       await writable.write(JSON.stringify(merged))

@@ -93,7 +93,7 @@ model. they must not be weakened or worked around:
   permanently. the nostr mesh relays encrypted frames to decentralized relays,
   not to a central server.
 - **session nonce rotation.** content-addressed signatures replace session
-  nonces. the signature of the current domain + explorer path + seed is
+  nonces. the signature of the current domain + explorer path + cell is
   computed on every heartbeat.
 - **meadow log is local-only.** opfs data never crosses the network without
   explicit user action (dna publish).

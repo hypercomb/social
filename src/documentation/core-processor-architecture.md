@@ -248,36 +248,36 @@ class hypercomb extends web {
 
 ---
 
-## The Seed Hierarchy: The Runtime IS the Data Structure
+## The Cell Hierarchy: The Runtime IS the Data Structure
 
-The central runtime concept in Hypercomb is the **seed hierarchy** -- a tree of
-cells stored as nested directories in OPFS, where each directory is a seed and
+The central runtime concept in Hypercomb is the **cell hierarchy** -- a tree of
+cells stored as nested directories in OPFS, where each directory is a cell and
 the tree structure itself is the program's execution space.
 
-### Seeds as Cells
+### Cells
 
-A seed is a named directory inside the current lineage path. The URL
-`/domain/path/to/seed` maps directly to an OPFS directory path
-`hypercomb.io/domain/path/to/seed`. Seeds are the atoms of the hierarchy --
-each one is a cell in the hexagonal grid that can contain:
+A cell is a named directory inside the current lineage path. The URL
+`/domain/path/to/cell` maps directly to an OPFS directory path
+`hypercomb.io/domain/path/to/cell`. Cells are the atoms of the hierarchy --
+each one is a position in the hexagonal grid that can contain:
 
-- **Child seeds** (subdirectories) -- forming the tree's branches
+- **Child cells** (subdirectories) -- forming the tree's branches
 - **Properties** (zero-signature file) -- JSON identity and configuration
-- **Mesh state** (shared seeds from the Nostr relay mesh) -- external
+- **Mesh state** (shared cells from the Nostr relay mesh) -- external
   contributions from other nodes
 
-Bees are discovered globally via the install manifest, not per-seed. All
+Bees are discovered globally via the install manifest, not per-cell. All
 installed bees are available at every location in the tree.
 
 The `Lineage` service tracks the current position in this tree. `Navigation`
 moves through it. The URL bar is a direct reflection of your position in the
-seed hierarchy. The `ShowCellDrone` renders the current seed's children as
-hexagonal cells, unioning local filesystem seeds with seeds discovered through
+cell hierarchy. The `ShowCellDrone` renders the current cell's children as
+hexagonal tiles, unioning local filesystem cells with cells discovered through
 the mesh.
 
 ### The Runtime Loop
 
-When the application starts, it begins at the root of the seed tree. At each
+When the application starts, it begins at the root of the cell tree. At each
 position in the tree, the runtime checks whether any scripts should run at this
 location and then moves on. The loop works as follows:
 
@@ -288,19 +288,19 @@ location and then moves on. The loop works as follows:
 2. **`hypercomb.act(grammar)`** broadcasts the grammar to all registered bees.
 3. Each bee's **`pulse(grammar)`** fires: check lifecycle state, evaluate
    the gate (`sense`/`ready`), execute the action (`heartbeat`/`act`) if relevant.
-4. The action examines the current seed (via Lineage) -- does this location
-   have scripts to run? Are there child seeds to traverse? What mesh state
+4. The action examines the current cell (via Lineage) -- does this location
+   have scripts to run? Are there child cells to traverse? What mesh state
    exists here?
 5. **`synchronize`** event fires, coalescing all visual updates into a single
    render pass.
 
-The seed doesn't "run" in the traditional sense. It is a location in the tree
+The cell doesn't "run" in the traditional sense. It is a location in the tree
 that bees inspect and act upon. The bee checks what exists at the current
-seed, performs its work, and the tree is both the data and the execution context.
+cell, performs its work, and the tree is both the data and the execution context.
 
 ### Tree Traversal and Parallel Execution
 
-When the seed hierarchy branches -- when a seed has many children -- the runtime
+When the cell hierarchy branches -- when a cell has many children -- the runtime
 can dispatch work across branches concurrently. Each path from root to leaf is
 an independent line of execution:
 
@@ -326,18 +326,18 @@ the tree structure providing natural task boundaries. Each branch of the tree is
 a self-contained unit of work. When there are many paths out to each leaf, all
 active branches can execute their pulses in parallel.
 
-### Seeds Are Content-Addressable Locations
+### Cells Are Content-Addressable Locations
 
-The seed hierarchy isn't just a folder structure. Each location in the tree has
+The cell hierarchy isn't just a folder structure. Each location in the tree has
 a **signature** computed from its lineage path:
 
 ```
-sig = SHA-256("hypercomb.io/domain/path/to/seed")
+sig = SHA-256("hypercomb.io/domain/path/to/cell")
 ```
 
 This signature is used to:
 - **Subscribe to mesh updates** for that location (via Nostr relays)
-- **Publish local seeds** to the mesh so other nodes can discover them
+- **Publish local cells** to the mesh so other nodes can discover them
 - **Deduplicate** -- two users at the same path are at the same signed location
 
 The signature makes every position in the tree globally addressable. Two
@@ -432,14 +432,14 @@ This means:
 ### The Tree as Runtime
 
 Most applications separate "code" from "data" -- the program is a fixed binary
-that acts on mutable state. In Hypercomb, the seed hierarchy is both. The tree
-of seeds is the data structure the user navigates, and it is simultaneously the
+that acts on mutable state. In Hypercomb, the cell hierarchy is both. The tree
+of cells is the data structure the user navigates, and it is simultaneously the
 execution context that determines which drones fire and what they see.
 
 This means:
-- **Adding a seed IS adding behavior.** If a bee senses a particular seed
-  name, creating that seed directory activates that bee at that location.
-- **Navigation IS execution.** Moving to a new seed changes the execution
+- **Adding a cell IS adding behavior.** If a bee senses a particular cell
+  name, creating that cell directory activates that bee at that location.
+- **Navigation IS execution.** Moving to a new cell changes the execution
   context. Different bees may sense relevance at different positions in the
   tree.
 - **The tree scales naturally.** Each branch is independent. A tree with a
@@ -447,7 +447,7 @@ This means:
   coordination, because the bees at each leaf are self-contained.
 - **The tree is the API.** External consumers (mesh peers, other Hypercomb
   instances) don't call methods -- they navigate to signed locations and publish
-  seeds. The tree structure IS the shared interface.
+  cells. The tree structure IS the shared interface.
 
 ### Separation of Framework and Domain
 

@@ -5,9 +5,9 @@ import { EffectBus, hypercomb } from '@hypercomb/core'
 
 const TAG_PROPS_FILE = '0000'
 
-export async function readTagProps(seedDir: FileSystemDirectoryHandle): Promise<Record<string, unknown>> {
+export async function readTagProps(cellDir: FileSystemDirectoryHandle): Promise<Record<string, unknown>> {
   try {
-    const fh = await seedDir.getFileHandle(TAG_PROPS_FILE)
+    const fh = await cellDir.getFileHandle(TAG_PROPS_FILE)
     const file = await fh.getFile()
     return JSON.parse(await file.text())
   } catch {
@@ -15,10 +15,10 @@ export async function readTagProps(seedDir: FileSystemDirectoryHandle): Promise<
   }
 }
 
-export async function writeTagProps(seedDir: FileSystemDirectoryHandle, updates: Record<string, unknown>): Promise<void> {
-  const existing = await readTagProps(seedDir)
+export async function writeTagProps(cellDir: FileSystemDirectoryHandle, updates: Record<string, unknown>): Promise<void> {
+  const existing = await readTagProps(cellDir)
   const merged = { ...existing, ...updates }
-  const fh = await seedDir.getFileHandle(TAG_PROPS_FILE, { create: true })
+  const fh = await cellDir.getFileHandle(TAG_PROPS_FILE, { create: true })
   const writable = await fh.createWritable()
   await writable.write(JSON.stringify(merged))
   await writable.close()
@@ -37,28 +37,28 @@ export async function persistTagOps(
   const registry = get('@hypercomb.social/TagRegistry') as
     { add: (n: string, c?: string) => Promise<void>; remove: (n: string) => Promise<void>; ensureLoaded: () => Promise<void> } | undefined
 
-  const updates: { seed: string; tag: string; color?: string }[] = []
+  const updates: { cell: string; tag: string; color?: string }[] = []
 
   for (const op of ops) {
     try {
-      const seedDir = await dir.getDirectoryHandle(op.label, { create: true })
-      const props = await readTagProps(seedDir)
+      const cellDir = await dir.getDirectoryHandle(op.label, { create: true })
+      const props = await readTagProps(cellDir)
       const tags: string[] = Array.isArray(props['tags']) ? props['tags'] : []
 
       if (op.remove) {
         const idx = tags.indexOf(op.tag)
         if (idx >= 0) {
           tags.splice(idx, 1)
-          await writeTagProps(seedDir, { tags })
+          await writeTagProps(cellDir, { tags })
         }
       } else {
         if (!tags.includes(op.tag)) {
           tags.push(op.tag)
-          await writeTagProps(seedDir, { tags })
+          await writeTagProps(cellDir, { tags })
         }
       }
-      updates.push({ seed: op.label, tag: op.tag, color: op.color })
-    } catch { /* seed dir access failed — skip */ }
+      updates.push({ cell: op.label, tag: op.tag, color: op.color })
+    } catch { /* cell dir access failed — skip */ }
   }
 
   // Update master tag list (content-addressed resource)

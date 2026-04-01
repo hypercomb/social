@@ -54,17 +54,17 @@ export class ActivityLogComponent implements OnDestroy {
 
   constructor() {
     this.#unsubs.push(
-      EffectBus.on<{ seed: string }>('seed:added', p => {
-        if (!this.#ready || !p?.seed || HIDDEN.has('seed:added')) return
-        const msg = this.#i18n?.t('activity.added', { seed: p.seed }) ?? `added "${p.seed}"`
+      EffectBus.on<{ cell: string }>('cell:added', p => {
+        if (!this.#ready || !p?.cell || HIDDEN.has('cell:added')) return
+        const msg = this.#i18n?.t('activity.added', { cell: p.cell }) ?? `added "${p.cell}"`
         if (this.#reverting) { this.#addEntry('+', msg); return }
-        this.#addEntry('+', msg, () => this.#revertAdd(p.seed))
+        this.#addEntry('+', msg, () => this.#revertAdd(p.cell))
       }),
-      EffectBus.on<{ seed: string }>('seed:removed', p => {
-        if (!this.#ready || !p?.seed || HIDDEN.has('seed:removed')) return
-        const msg = this.#i18n?.t('activity.removed', { seed: p.seed }) ?? `removed "${p.seed}"`
+      EffectBus.on<{ cell: string }>('cell:removed', p => {
+        if (!this.#ready || !p?.cell || HIDDEN.has('cell:removed')) return
+        const msg = this.#i18n?.t('activity.removed', { cell: p.cell }) ?? `removed "${p.cell}"`
         if (this.#reverting) { this.#addEntry('\u2212', msg); return }
-        this.#addEntry('\u2212', msg, () => this.#revertRemove(p.seed))
+        this.#addEntry('\u2212', msg, () => this.#revertRemove(p.cell))
       }),
       EffectBus.on<{ count: number; op: string }>('clipboard:paste-done', p => {
         if (!this.#ready || !p || HIDDEN.has('clipboard:paste-done')) return
@@ -98,29 +98,29 @@ export class ActivityLogComponent implements OnDestroy {
     this.#appRef.tick()
   }
 
-  /** Revert an add — remove the seed directory and emit seed:removed. */
-  async #revertAdd(seed: string): Promise<void> {
+  /** Revert an add — remove the cell directory and emit cell:removed. */
+  async #revertAdd(cell: string): Promise<void> {
     const lineage = get('@hypercomb.social/Lineage') as Lineage
     const dir = await lineage.explorerDir()
     if (!dir) return
     try {
-      await dir.removeEntry(seed, { recursive: true })
+      await dir.removeEntry(cell, { recursive: true })
       this.#reverting = true
-      EffectBus.emit('seed:removed', { seed })
+      EffectBus.emit('cell:removed', { cell })
       this.#reverting = false
       await new hypercomb().act()
     } catch { /* entry doesn't exist — nothing to undo */ }
   }
 
-  /** Revert a remove — re-create the seed directory and emit seed:added. */
-  async #revertRemove(seed: string): Promise<void> {
+  /** Revert a remove — re-create the cell directory and emit cell:added. */
+  async #revertRemove(cell: string): Promise<void> {
     const lineage = get('@hypercomb.social/Lineage') as Lineage
     const dir = await lineage.explorerDir()
     if (!dir) return
     try {
-      await dir.getDirectoryHandle(seed, { create: true })
+      await dir.getDirectoryHandle(cell, { create: true })
       this.#reverting = true
-      EffectBus.emit('seed:added', { seed })
+      EffectBus.emit('cell:added', { cell })
       this.#reverting = false
       await new hypercomb().act()
     } catch { /* failed to create — skip */ }

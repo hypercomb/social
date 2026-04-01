@@ -105,7 +105,7 @@ real apis return domain-shaped json. opfs layers store hypercomb-format data. a 
   "schema": {
     "source": "layer",
     "transform": {
-      "id": "$.seed",
+      "id": "$.cell",
       "name": "$.properties.name",
       "price": "$.properties.price",
       "image": "$.resources[0]"

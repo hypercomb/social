@@ -27,7 +27,7 @@ type MeshApi = {
 }
 
 type MeetingRoom = {
-  seed: string
+  cell: string
   roomSig: string
   template: string
   localStream: MediaStream | null
@@ -40,7 +40,7 @@ type MeetingRoom = {
   active: boolean
 }
 
-type TagsChangedPayload = { updates: { seed: string; tag: string; color?: string }[] }
+type TagsChangedPayload = { updates: { cell: string; tag: string; color?: string }[] }
 type TileActionPayload = { action: string; label: string; q: number; r: number; index: number }
 
 // ── meeting icon SVG ──────────────────────────────────────────
@@ -72,10 +72,10 @@ function templateForTag(tag: string): { maxSlots: number; name: string } {
   return { maxSlots, name: base }
 }
 
-// ── derive room signature from seed ──────────────────────────
+// ── derive room signature from cell ──────────────────────────
 
-async function deriveRoomSig(seed: string): Promise<string> {
-  const data = new TextEncoder().encode(seed + '/meeting')
+async function deriveRoomSig(cell: string): Promise<string> {
+  const data = new TextEncoder().encode(cell + '/meeting')
   const hash = await crypto.subtle.digest('SHA-256', data)
   return Array.from(new Uint8Array(hash), b => b.toString(16).padStart(2, '0')).join('')
 }
@@ -84,6 +84,7 @@ async function deriveRoomSig(seed: string): Promise<string> {
 
 export class HypercombMeetingDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
+  override genotype = 'meeting'
 
   override description = 'Enables video meetings on tiles tagged with meeting keywords (e.g. cascade).'
 
@@ -92,9 +93,9 @@ export class HypercombMeetingDrone extends Drone {
   protected override emits = ['overlay:register-action', 'meeting:stream-ready', 'meeting:slot-assigned', 'mesh:publish', 'mesh:subscribe']
 
   #localPeerId = meetingPeerId()
-  #rooms: Map<string, MeetingRoom> = new Map()  // seed → room
-  #meetingSeeds: Set<string> = new Set()         // seeds that have a meeting tag
-  #seedTemplates: Map<string, string> = new Map() // seed → tag (e.g. 'cascade')
+  #rooms: Map<string, MeetingRoom> = new Map()  // cell → room
+  #meetingCells: Set<string> = new Set()         // cells that have a meeting tag
+  #cellTemplates: Map<string, string> = new Map() // cell → tag (e.g. 'cascade')
   #effectsRegistered = false
   #iconRegistered = false
 
@@ -107,10 +108,10 @@ export class HypercombMeetingDrone extends Drone {
       for (const u of updates) {
         const mtag = isMeetingTag(u.tag)
         if (!mtag) continue
-        this.#meetingSeeds.add(u.seed)
-        this.#seedTemplates.set(u.seed, u.tag)
+        this.#meetingCells.add(u.cell)
+        this.#cellTemplates.set(u.cell, u.tag)
         // pre-subscribe to room sig so we can hear joins
-        void this.#ensureRoomSubscription(u.seed, u.tag)
+        void this.#ensureRoomSubscription(u.cell, u.tag)
       }
     })
 
@@ -120,12 +121,13 @@ export class HypercombMeetingDrone extends Drone {
       this.#iconRegistered = true
       this.emitEffect('overlay:register-action', [{
         name: 'meeting',
+        owner: this.iocKey,
         svgMarkup: MEETING_ICON_SVG,
         x: -14,
         y: -10,
         hoverTint: 0xa8ffd8,
         profile: 'private' as const,
-        visibleWhen: (ctx: { label: string }) => this.#meetingSeeds.has(ctx.label),
+        visibleWhen: (ctx: { label: string }) => this.#meetingCells.has(ctx.label),
       }])
     })
 
@@ -138,14 +140,14 @@ export class HypercombMeetingDrone extends Drone {
 
   // ── room subscription (passive, before joining) ────────────
 
-  async #ensureRoomSubscription(seed: string, tag: string): Promise<void> {
-    if (this.#rooms.has(seed)) return
+  async #ensureRoomSubscription(cell: string, tag: string): Promise<void> {
+    if (this.#rooms.has(cell)) return
 
-    const roomSig = await deriveRoomSig(seed)
+    const roomSig = await deriveRoomSig(cell)
     const tpl = templateForTag(tag)
 
     const room: MeetingRoom = {
-      seed,
+      cell,
       roomSig,
       template: tpl.name,
       localStream: null,
@@ -158,7 +160,7 @@ export class HypercombMeetingDrone extends Drone {
       active: false,
     }
 
-    this.#rooms.set(seed, room)
+    this.#rooms.set(cell, room)
 
     // subscribe to signaling events for this room
     const mesh = this.resolve<MeshApi>('mesh')
@@ -174,8 +176,8 @@ export class HypercombMeetingDrone extends Drone {
 
   // ── toggle join/leave ──────────────────────────────────────
 
-  async #toggleMeeting(seed: string): Promise<void> {
-    const room = this.#rooms.get(seed)
+  async #toggleMeeting(cell: string): Promise<void> {
+    const room = this.#rooms.get(cell)
     if (!room) return
 
     if (room.active) {
@@ -216,7 +218,7 @@ export class HypercombMeetingDrone extends Drone {
 
     // emit local stream for rendering
     this.emitEffect('meeting:stream-ready', {
-      seed: room.seed,
+      cell: room.cell,
       slot: -1,  // -1 = leader/self (center hex)
       stream: room.localStream,
       peerId: this.#localPeerId,
@@ -341,14 +343,14 @@ export class HypercombMeetingDrone extends Drone {
 
         // emit for rendering
         this.emitEffect('meeting:stream-ready', {
-          seed: room.seed,
+          cell: room.cell,
           slot,
           stream,
           peerId: remotePeerId,
         })
 
         this.emitEffect('meeting:slot-assigned', {
-          seed: room.seed,
+          cell: room.cell,
           slotIndex: slot,
           peerId: remotePeerId,
         })
