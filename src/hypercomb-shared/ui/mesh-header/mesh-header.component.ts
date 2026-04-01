@@ -24,6 +24,11 @@ export class MeshHeaderComponent {
   readonly hasSecret = computed(() => this.#secretValue().trim().length > 0)
   readonly showSecretInput = () => !!this.meshPublic && this.#secretExpanded()
 
+  readonly shieldTooltip = computed(() => {
+    if (!this.meshPublic) return ''
+    return this.hasSecret() ? 'Public · SEC' : 'Public · unsecure'
+  })
+
   readonly shieldColor = computed(() => {
     const secret = this.#secretValue().trim()
     if (!secret) return 'rgba(245, 245, 245, 0.35)'

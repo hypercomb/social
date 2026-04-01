@@ -159,20 +159,7 @@
           </button>
         }
 
-        <!-- meeting join / camera toggle (always available) -->
-        <div class="controls-divider"></div>
-        @if (!meetingJoined()) {
-          <button class="ctl-btn" (click)="toggleMeeting()" [attr.aria-label]="'controls.join-meeting' | t">
-            <span class="meeting-icon">▶</span>
-          </button>
-        } @else {
-          <button class="ctl-btn" [class.active]="meetingCameraOn()" (click)="toggleCamera()" [attr.aria-label]="'controls.toggle-camera' | t">
-            <span class="meeting-icon">{{ meetingCameraOn() ? '◉' : '◎' }}</span>
-          </button>
-          <button class="ctl-btn" (click)="toggleMeeting()" [attr.aria-label]="'controls.leave-meeting' | t">
-            <span class="meeting-icon leave">■</span>
-          </button>
-        }
+        <!-- meeting join / camera toggle — hidden for now -->
 
       }
 

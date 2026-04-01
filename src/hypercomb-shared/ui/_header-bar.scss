@@ -1,10 +1,10 @@
 // hypercomb-shared/ui/_header-bar.scss
 // Shared header-bar styles consumed by both web and dev apps.
+// Fixed height — same on all screen sizes.
+// The header-bar itself is the bordered container; children are
+// borderless flex items that fill it seamlessly.
 
 @use 'breakpoints' as *;
-
-$secret-border: rgba(200, 151, 90, 0.2);
-$secret-bg: rgba(10, 12, 16, 0.85);
 
 // ── suppress mouse-click focus on all header buttons ─────
 .header-bar button:focus:not(:focus-visible) {
@@ -17,9 +17,11 @@ $secret-bg: rgba(10, 12, 16, 0.85);
 .header-bar {
   display: flex;
   align-items: stretch;
-  padding: 0.08rem 0.2rem;
-  margin-top: 0.075rem;
-  background-color: #050f17;
+  height: 3.6rem;
+  padding: 0.25rem;
+  background: rgba(8, 18, 28, 0.85);
+  border: 1.5px solid rgba(77, 166, 255, 0.6);
+  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.4), inset 0 0 8px rgba(0, 0, 0, 0.15);
   position: relative;
   z-index: 60000;
 }
@@ -55,16 +57,15 @@ $secret-bg: rgba(10, 12, 16, 0.85);
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  padding: 0 0.75rem;
-  border: 1.5px solid rgba(77, 166, 255, 0.4);
-  border-radius: 0 4px 4px 0;
-  border-left: none;
-  background: rgba(8, 18, 28, 0.65);
+  padding: 0 1.2rem;
+  border: none;
+  border-left: 1.5px solid rgba(77, 166, 255, 0.4);
+  border-radius: 0;
+  background: transparent;
   cursor: pointer;
-  transition: background 200ms ease, border-color 200ms ease;
+  transition: background 200ms ease;
 
   &:hover {
-    filter: brightness(1.3);
     background: rgba(245, 245, 245, 0.04);
   }
 
@@ -78,18 +79,14 @@ $secret-bg: rgba(10, 12, 16, 0.85);
   }
 
   .hci {
-    font-size: 1rem;
+    font-size: 1.3rem;
   }
 
   // ── solo ──
   &.solo-mode {
     color: rgba(255, 45, 138, 0.8);
-    border-color: rgba(255, 45, 138, 0.4);
-    border-right: 1.5px solid rgba(255, 45, 138, 0.4);
-    border-left: 1.5px solid rgba(255, 45, 138, 0.4);
 
     &:hover {
-      border-color: rgba(255, 45, 138, 0.55);
       color: rgba(255, 45, 138, 0.95);
     }
 
@@ -101,8 +98,6 @@ $secret-bg: rgba(10, 12, 16, 0.85);
   // ── shield ──
   &.shield-mode {
     color: var(--shield-color, rgba(245, 245, 245, 0.45));
-    border-right: 1.5px solid rgba(77, 166, 255, 0.4);
-    border-left: 1.5px solid rgba(77, 166, 255, 0.4);
   }
 }
 
@@ -115,10 +110,9 @@ $secret-bg: rgba(10, 12, 16, 0.85);
   flex: 1;
   min-width: 0;
   padding: 0 0.6rem;
-  border: 1.5px solid rgba(77, 166, 255, 0.4);
-  border-right: none;
-  border-left: none;
-  background: rgba(8, 18, 28, 0.65);
+  border: none;
+  border-left: 1.5px solid rgba(77, 166, 255, 0.4);
+  background: transparent;
   font: 600 0.6rem/1 ui-monospace, sfmono-regular, menlo, consolas, monospace;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -140,19 +134,18 @@ $secret-bg: rgba(10, 12, 16, 0.85);
   align-items: stretch;
   flex: 1;
   min-width: 0;
+  border-left: 1.5px solid rgba(77, 166, 255, 0.4);
 
   &::before {
     content: '>';
     display: flex;
     align-items: center;
     flex-shrink: 0;
-    padding-left: 0.6rem;
-    font: 600 0.9em/1 ui-monospace, sfmono-regular, menlo, consolas, monospace;
+    padding-left: 0.8rem;
+    font: 600 1em/1 ui-monospace, sfmono-regular, menlo, consolas, monospace;
     color: rgba(245, 245, 245, 0.35);
-    background: $secret-bg;
-    border: 1.5px solid rgba(77, 166, 255, 0.4);
-    border-right: none;
-    transition: border-color 200ms ease;
+    background: transparent;
+    border: none;
   }
 }
 
@@ -160,15 +153,12 @@ $secret-bg: rgba(10, 12, 16, 0.85);
   width: 100%;
   box-sizing: border-box;
   padding: 0.6rem 0.75rem;
-  border: 1.5px solid rgba(77, 166, 255, 0.4);
-  border-left: none;
-  border-right: none;
-  background: rgba(8, 18, 28, 0.65);
+  border: none;
+  background: transparent;
   color: rgba(248, 248, 244, 0.9);
-  font: 600 0.65rem/1 ui-monospace, sfmono-regular, menlo, consolas, monospace;
+  font: 600 0.7rem/1 ui-monospace, sfmono-regular, menlo, consolas, monospace;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  transition: border-color 200ms ease;
 
   &::placeholder {
     color: rgba(245, 245, 245, 0.24);
@@ -182,7 +172,7 @@ $secret-bg: rgba(10, 12, 16, 0.85);
 }
 
 // ═══════════════════════════════════════════════════════════
-// RESPONSIVE OVERRIDES
+// RESPONSIVE OVERRIDES — minimal, layout-only
 // ═══════════════════════════════════════════════════════════
 
 // ── touch behavioral (all touch devices) ──────────────────
@@ -197,95 +187,14 @@ $secret-bg: rgba(10, 12, 16, 0.85);
   }
 }
 
-// ── tablet portrait (600–1023px) ──────────────────────────
-@include tablet-only {
-
-  .mode-toggle {
-    padding: 0 0.65rem;
-
-    .hci {
-      font-size: 0.9rem;
-    }
-  }
-
-  .secret-input-wrap::before {
-    padding-left: 0.7rem;
-    font-size: 1.0em;
-  }
-
-  .header-secret-input {
-    padding: 0.5rem 1rem 0.5rem 0.75rem;
-  }
-
-  .secured-label {
-    font-size: 0.6rem;
-  }
-}
-
-// ── tablet landscape / Surface (1024–1366px) ──────────────
-@include tablet-land {
-
-  .mode-toggle {
-    padding: 0 0.7rem;
-
-    .hci {
-      font-size: 0.82rem;
-    }
-  }
-}
-
 // ── phone (≤599px) ────────────────────────────────────────
 @include phone-only {
-
-  .header-bar {
-    padding: 0.15rem 0.25rem;
-    min-height: 3.2rem;
-  }
-
-  .mode-toggle {
-    padding: 0 1rem;
-    border-radius: 0 4px 4px 0;
-
-    .hci {
-      font-size: 1.3rem;
-    }
-  }
 
   .secured-label {
     display: none;
   }
 
-  // ── secret-active: secret input fills remaining space ──
-  .mesh-header.secret-active {
-    flex: 1;
-    min-width: 0;
-
-    .secret-input-wrap {
-      &::before {
-        border-radius: 4px 0 0 4px;
-      }
-    }
-
-    .header-secret-input {
-      border-left: none;
-    }
-  }
-
-  .secret-input-wrap::before {
-    padding-left: 1rem;
-    font-size: 1.35em;
-  }
-
   .header-secret-input {
-    padding: 0.55rem 0.9rem 0.55rem 0.6rem;
     font-size: 16px;
-  }
-}
-
-// ── phone landscape ───────────────────────────────────────
-@include phone-land {
-
-  .header-bar {
-    padding: 0.15rem 0.4rem;
   }
 }

@@ -24,6 +24,7 @@
     [class.solo-mode]="!meshPublic"
     [class.shield-mode]="!!meshPublic"
     [style.--shield-color]="shieldColor()"
+    [title]="shieldTooltip()"
     type="button"
     (pointerdown)="onPointerDown()"
     (pointerup)="onPointerUp()"
