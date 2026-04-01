@@ -91,10 +91,11 @@ export class TouchGestureCoordinator {
   get sensitivity(): number { return this.#sensitivity }
   get sensitivityLocked(): boolean { return this.#sensitivityLocked }
 
-  /** Sensitivity adjusted for Retina displays — same physical feel on 1x, 2x, 3x screens. */
+  /** Effective sensitivity — browsers report touch coordinates in CSS pixels
+   *  (already DPR-neutral), so no devicePixelRatio correction is needed.
+   *  Users fine-tune via the two-finger vertical sensitivity swipe gesture. */
   get #effectiveSensitivity(): number {
-    const dpr = globalThis.devicePixelRatio || 1
-    return dpr <= 1 ? this.#sensitivity : this.#sensitivity / dpr
+    return this.#sensitivity
   }
   get state(): string {
     return ['IDLE', 'PENDING_PAN', 'PAN', 'PENDING_TWO_FINGER', 'PINCH', 'SENSITIVITY_SWIPE'][this.#state]
