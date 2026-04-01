@@ -23,8 +23,6 @@ const SVG_VIEWBOX = 24
 const SVG_RENDER_SCALE = 4
 
 export type IconButtonConfig = {
-  /** SVG markup string — rendered as a texture */
-  svgMarkup: string
   /** Display size in Pixi units (square) */
   size: number
   /** Normal tint (default white) */
