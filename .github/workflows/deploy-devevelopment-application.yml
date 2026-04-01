@@ -39,12 +39,12 @@ jobs:
         run: npm run build
 
       - name: Build web runtime assets
-        working-directory: src/hypercomb-web
-        run: npm run runtime
+        working-directory: src
+        run: npm -w hypercomb-web run runtime
 
       - name: Build web app
-        working-directory: src/hypercomb-web
-        run: npm run build
+        working-directory: src
+        run: npm -w hypercomb-web run build
 
       - name: Verify build output
         run: ls -al src/hypercomb-web/dist/hypercomb-web/browser || true

@@ -6,7 +6,7 @@
   "scripts": {
     "prestart": "npm --prefix .. run prebuild:web",
     "start": "npx ng serve --port 4200 --host localhost --configuration development",
-    "build": "npx ng build --configuration production",
+    "build": "ng build --configuration production",
     "runtime": "npm run runtime:core && npm run runtime:pixi",
     "runtime:core": "node ./scripts/build-core-vendor.cjs",
     "runtime:pixi": "npx tsx ./scripts/build-pixi-vendor.ts"
