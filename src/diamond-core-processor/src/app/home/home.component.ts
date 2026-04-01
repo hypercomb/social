@@ -565,6 +565,63 @@ export class HomeComponent {
       }
       this.sections.set([...results])
     }
+
+    // Check for navigate query param (from structure atomizer drop in Hypercomb.io)
+    this.#handleNavigateQueryParam()
+  }
+
+  #handleNavigateQueryParam(): void {
+    const params = new URLSearchParams(window.location.search)
+    const navigateLineage = params.get('navigate')
+    if (!navigateLineage) return
+
+    const signature = params.get('signature')
+
+    // Clean up URL to prevent re-navigation on refresh
+    const url = new URL(window.location.href)
+    url.searchParams.delete('navigate')
+    url.searchParams.delete('signature')
+    url.searchParams.delete('kind')
+    window.history.replaceState({}, '', url.toString())
+
+    // If we have a signature, try direct lookup first
+    if (signature) {
+      this.onNavigateSig(signature)
+      return
+    }
+
+    // Walk lineage path segments to find the target node
+    // Lineage format: "domain.com/layer/sublayer/BeeName"
+    const segments = navigateLineage.split('/').filter(Boolean)
+    if (!segments.length) return
+
+    // Find the matching node by walking the tree with path segments
+    const node = this.#findNodeByLineagePath(segments)
+    if (node) {
+      this.onOpen(node)
+    }
+  }
+
+  #findNodeByLineagePath(segments: string[]): TreeNode | null {
+    // Start from all section items
+    let candidates: TreeNode[] = []
+    for (const section of this.sections()) {
+      candidates.push(...section.items)
+    }
+
+    let target: TreeNode | null = null
+
+    // Walk through segments, narrowing candidates at each level
+    for (const segment of segments) {
+      const match = candidates.find(n => n.name === segment || n.doc?.className === segment)
+      if (!match) return target // return last matched node
+      target = match
+      match.expanded = true
+      candidates = match.children
+    }
+
+    this.#refreshSections()
+    return target
   }
 
   /**

@@ -416,6 +416,53 @@ async function readLineageContext(_lineagePath) {
 var _llm = new LlmQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/LlmQueenBee", _llm);
 
+// src/diamondcoreprocessor.com/assistant/structure.atomizer.ts
+import { EffectBus as EffectBus4 } from "@hypercomb/core";
+import { ATOMIZER_IOC_PREFIX as ATOMIZER_IOC_PREFIX2 } from "@hypercomb/core";
+var STRUCTURE_ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2"/><line x1="12" y1="22" x2="12" y2="15.5"/><polyline points="22 8.5 12 15.5 2 8.5"/></svg>';
+var StructureAtomizer = class {
+  atomizerId = "structure-atomizer";
+  name = "Structure";
+  description = "Open a program node in DCP for editing";
+  icon = STRUCTURE_ICON;
+  targetTypes = ["structure-cell"];
+  discover(target) {
+    this.#openInDcp(target);
+    return [];
+  }
+  apply() {
+  }
+  reset() {
+  }
+  #openInDcp(target) {
+    const props = target.structureProps;
+    if (!props) {
+      console.warn("[StructureAtomizer] No structure properties on target:", target.targetId);
+      return;
+    }
+    const lineage = String(props.lineage ?? "");
+    const signature = String(props.signature ?? "");
+    const kind = String(props.kind ?? "");
+    if (!lineage) {
+      console.warn("[StructureAtomizer] Missing lineage for target:", target.targetId);
+      return;
+    }
+    const dcpOrigin = location.hostname === "localhost" ? "http://localhost:2400" : "https://diamondcoreprocessor.com";
+    const params = new URLSearchParams();
+    params.set("navigate", lineage);
+    if (signature) params.set("signature", signature);
+    if (kind) params.set("kind", kind);
+    const url = `${dcpOrigin}?${params.toString()}`;
+    window.open(url, "_blank");
+    EffectBus4.emit("dcp:navigate", { lineage, signature, kind });
+    console.log(`[StructureAtomizer] Opening DCP: ${lineage} (${kind})`);
+  }
+};
+var _structureAtomizer = new StructureAtomizer();
+window.ioc.register(`${ATOMIZER_IOC_PREFIX2}structure-atomizer`, _structureAtomizer);
+EffectBus4.emit("atomizer:registered", { atomizer: _structureAtomizer });
+console.log("[StructureAtomizer] Loaded");
+
 // src/diamondcoreprocessor.com/assistant/thread.ts
 import { SignatureService } from "@hypercomb/core";
 var computeThreadId = async (systemPrompt, firstMessage) => {
@@ -467,6 +514,7 @@ export {
   InputAtomizer,
   LlmQueenBee,
   MODELS,
+  StructureAtomizer,
   buildMessages,
   callAnthropic,
   callAnthropicMultiTurn,

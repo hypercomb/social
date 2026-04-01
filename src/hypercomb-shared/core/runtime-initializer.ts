@@ -5,6 +5,7 @@ import type { Navigation } from './navigation'
 import { OpfsTreeLogger } from './tree-logger'
 import type { BootstrapHistory } from './bootstrap-history'
 import { Store } from './store'
+import { materializeStructure } from './structure-materializer'
 
 // ─── layer tree materialization ───────────────────────────────────────────────
 // After a sentinel or local install the layer JSON files land in
@@ -129,6 +130,9 @@ export const initializeRuntime = async (
 
   // Materialize layer tree → tile directories in hypercomb.io/ (no-op if tiles already exist)
   if (store) await materializeInstalledLayers(store)
+
+  // Materialize install structure tree → __structure__/ for program inspection
+  if (store) await materializeStructure(store)
 
   // Load host translations for the i18n service
   const i18n = get('@hypercomb.social/I18n') as LocalizationService | undefined
