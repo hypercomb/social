@@ -13,8 +13,8 @@ $bp-phone-max: 599px;
   --glow-color: #4da6ff;
   --glow-color-rgb: 77, 166, 255;
   --shell-bg: rgba(8, 18, 28, 0.65);
-  --shell-border: rgba(var(--glow-color-rgb), 0.2);
-  --shell-border-focus: rgba(var(--glow-color-rgb), 0.5);
+  --shell-border: rgba(var(--glow-color-rgb), 0.4);
+  --shell-border-focus: rgba(var(--glow-color-rgb), 0.65);
   --terminal-font: ui-monospace, sfmono-regular, menlo, consolas, monospace;
   --transition-speed: 200ms;
 }
@@ -27,7 +27,7 @@ $bp-phone-max: 599px;
   width: 100%;
   box-sizing: border-box;
   background: var(--shell-bg);
-  border: 1px solid var(--shell-border);
+  border: 1.5px solid var(--shell-border);
   border-radius: 2px;
   padding: 0 0.25rem;
   transition: border-color var(--transition-speed) ease, box-shadow var(--transition-speed) ease;
@@ -54,10 +54,10 @@ $bp-phone-max: 599px;
     flex-shrink: 0;
     padding-left: 0.6rem;
     font-family: var(--terminal-font);
-    font-size: 0.95em;
+    font-size: 1em;
     font-weight: 600;
     color: var(--glow-color);
-    opacity: 0.5;
+    opacity: 0.7;
     transition: opacity var(--transition-speed) ease;
   }
 }
@@ -73,9 +73,9 @@ $bp-phone-max: 599px;
   border: none;
   outline: none;
   font-family: var(--terminal-font);
-  font-size: 0.9em;
+  font-size: 1em;
   letter-spacing: 0.02em;
-  color: rgba(var(--glow-color-rgb), 0.3);
+  color: rgba(var(--glow-color-rgb), 0.4);
   pointer-events: none;
   user-select: none;
   white-space: nowrap;
@@ -89,15 +89,15 @@ $bp-phone-max: 599px;
   border: none;
   outline: none;
   font-family: var(--terminal-font);
-  font-size: 0.9em;
+  font-size: 1em;
   letter-spacing: 0.02em;
-  color: whitesmoke;
+  color: #f5f5f5;
   caret-color: var(--glow-color);
   user-select: text;
   cursor: text;
 }
 
-.command-input::placeholder { color: rgba(var(--glow-color-rgb), 0.3); }
+.command-input::placeholder { color: rgba(var(--glow-color-rgb), 0.45); }
 
 .command-results {
   position: absolute;
@@ -110,7 +110,7 @@ $bp-phone-max: 599px;
   border-radius: 2px;
   background: rgba(8, 14, 22, 0.92);
   backdrop-filter: blur(12px);
-  border: 1px solid var(--shell-border);
+  border: 1.5px solid var(--shell-border);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.2);
   max-height: 16rem;
   overflow: auto;
@@ -164,7 +164,8 @@ $bp-phone-max: 599px;
   .command-shell {
     border-radius: 6px;
     background: rgba(8, 18, 28, 0.85);
-    border-color: rgba(var(--glow-color-rgb), 0.35);
+    border-color: rgba(var(--glow-color-rgb), 0.45);
+    border-width: 1.5px;
   }
   .command-row {
     min-height: 3.2rem;
@@ -176,13 +177,13 @@ $bp-phone-max: 599px;
     }
   }
   .command-input {
-    font-size: 17px;
+    font-size: 18px;
     padding: 0.8rem 0.75rem;
     color: #f0f0f0;
   }
   .command-input::placeholder { color: rgba(var(--glow-color-rgb), 0.5); }
   .ghost {
-    font-size: 17px;
+    font-size: 18px;
     padding-left: calc(0.8rem + 0.7em + 0.75rem);
     color: rgba(var(--glow-color-rgb), 0.45);
   }

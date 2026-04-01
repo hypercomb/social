@@ -546,6 +546,8 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
   seedTagsCache = /* @__PURE__ */ new Map();
   // cache: seed label → border color RGB floats
   seedBorderColorCache = /* @__PURE__ */ new Map();
+  // cache: seed label → has link property
+  seedLinkCache = /* @__PURE__ */ new Map();
   lastKey = "";
   listening = false;
   rendering = false;
@@ -1050,6 +1052,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
         this.seedImageCache.clear();
         this.seedBorderColorCache.clear();
         this.seedTagsCache.clear();
+        this.seedLinkCache.clear();
         this.atlasRenderer = this.pixiRenderer;
         this.shader = null;
       }
@@ -1430,7 +1433,8 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       coords: cells.map((cell) => ({ q: cell.q, r: cell.r })),
       branchLabels: cells.filter((cell) => cell.hasBranch).map((cell) => cell.label),
       externalLabels: cells.filter((cell) => cell.external).map((cell) => cell.label),
-      noImageLabels: cells.filter((cell) => !cell.imageSig).map((cell) => cell.label)
+      noImageLabels: cells.filter((cell) => !cell.imageSig).map((cell) => cell.label),
+      linkLabels: cells.filter((cell) => cell.hasLink).map((cell) => cell.label)
     });
     this.#emitRenderTags(cells);
   };
@@ -1464,6 +1468,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
         this.seedImageCache.delete(payload.seed);
         this.seedBorderColorCache.delete(payload.seed);
         this.seedTagsCache.delete(payload.seed);
+        this.seedLinkCache.delete(payload.seed);
         if (oldSig && this.imageAtlas) {
           this.imageAtlas.invalidate(oldSig);
         }
@@ -1937,6 +1942,9 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
           const tagProps = await readSeedProperties(seedDir);
           const rawTags = tagProps?.["tags"];
           this.seedTagsCache.set(cell.label, Array.isArray(rawTags) ? rawTags.filter((t) => typeof t === "string") : []);
+          if (!this.seedLinkCache.has(cell.label)) {
+            this.seedLinkCache.set(cell.label, typeof tagProps?.["link"] === "string" && tagProps["link"].length > 0);
+          }
         } catch {
           this.seedTagsCache.set(cell.label, []);
         }
@@ -1944,6 +1952,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       if (this.seedImageCache.has(cell.label)) {
         cell.imageSig = this.seedImageCache.get(cell.label) ?? void 0;
         cell.borderColor = this.seedBorderColorCache.get(cell.label);
+        cell.hasLink = this.seedLinkCache.get(cell.label) ?? false;
         continue;
       }
       try {
@@ -1968,6 +1977,9 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
         } else {
           this.seedTagsCache.set(cell.label, []);
         }
+        const hasLink = typeof props?.link === "string" && props.link.length > 0;
+        this.seedLinkCache.set(cell.label, hasLink);
+        cell.hasLink = hasLink;
         const smallSig = this.#flat && props?.flat?.small?.image || props?.small?.image;
         if (smallSig && isSignature(smallSig)) {
           cell.imageSig = smallSig;

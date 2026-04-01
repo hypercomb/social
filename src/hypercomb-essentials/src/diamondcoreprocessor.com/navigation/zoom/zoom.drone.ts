@@ -414,7 +414,6 @@ export class ZoomDrone extends Drone {
     }
 
     const target = this.renderContainer
-    const screen = this.renderer.screen
 
     // try to get mesh bounds from the container's children
     const bounds = target.getLocalBounds()
@@ -425,17 +424,22 @@ export class ZoomDrone extends Drone {
     const headerEl = document.querySelector('.header-bar') as HTMLElement | null
     const pillEl = document.querySelector('.controls-pill') as HTMLElement | null
     const safeTop = headerEl ? headerEl.getBoundingClientRect().bottom + padding : padding
-    const safeBottom = pillEl ? pillEl.getBoundingClientRect().top - padding : screen.height - padding
+    const safeBottom = pillEl ? pillEl.getBoundingClientRect().top - padding : window.innerHeight - padding
 
     const safeLeft = padding
-    const safeRight = screen.width - padding
+    const safeRight = window.innerWidth - padding
     const availW = safeRight - safeLeft
     const availH = safeBottom - safeTop
 
-    // stage transform (position + uniform scale applied to container)
-    const stageX = this.app.stage.position.x
-    const stageY = this.app.stage.position.y
     const stageScale = this.app.stage.scale.x || 1
+
+    // reset stage to screen center and clear pan so that the fit position
+    // is not relative to a stale pan offset — this keeps content centered
+    // after viewport resizes (desktop ↔ mobile, orientation, fullscreen)
+    const screenCx = window.innerWidth * 0.5
+    const screenCy = window.innerHeight * 0.5
+    this.app.stage.position.set(screenCx, screenCy)
+    this.vp?.setPan(0, 0)
 
     // content screen size = bounds * containerScale * stageScale
     // so containerScale = availPx / (bounds * stageScale)
@@ -455,8 +459,8 @@ export class ZoomDrone extends Drone {
     // screen = stagePos + (containerPos + localPoint * containerScale) * stageScale
     // solve for containerPos:
     //   containerPos = (safeMid - stagePos) / stageScale - center * fitScale
-    const targetPosX = (safeMidX - stageX) / stageScale - centerX * fitScale
-    const targetPosY = (safeMidY - stageY) / stageScale - centerY * fitScale
+    const targetPosX = (safeMidX - screenCx) / stageScale - centerX * fitScale
+    const targetPosY = (safeMidY - screenCy) / stageScale - centerY * fitScale
 
     // animate to target (200ms ease-out)
     const startScale = target.scale.x

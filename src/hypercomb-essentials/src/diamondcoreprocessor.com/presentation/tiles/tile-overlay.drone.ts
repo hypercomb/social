@@ -515,6 +515,8 @@ export class TileOverlayDrone extends Drone {
       r: this.#currentAxial.r,
       index: entry.index,
       noImage: this.#noImageLabels.has(entry.label),
+      isBranch: this.#branchLabels.has(entry.label),
+      hasLink: this.#linkLabels.has(entry.label),
     }
 
     for (const action of this.#actions) {

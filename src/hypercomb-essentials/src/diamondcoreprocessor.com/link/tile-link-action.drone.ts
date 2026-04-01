@@ -1,7 +1,8 @@
 // diamondcoreprocessor.com/link/tile-link-action.drone.ts
 //
-// Registers a link icon ('t') on the tile overlay.
-// On click, emits `viewer:open` with a URL (hardcoded for now).
+// Registers a link icon on the tile overlay.
+// Only visible when a tile has both a link and children — leaf tiles with
+// links are opened directly by clicking the tile itself.
 
 import { Drone, EffectBus } from '@hypercomb/core'
 import type { OverlayActionDescriptor } from '../presentation/tiles/tile-overlay.drone.js'
@@ -15,6 +16,7 @@ const LINK_ICON: OverlayActionDescriptor = {
   y: -7,
   hoverTint: 0xa8d8ff,
   profile: 'private',
+  visibleWhen: (ctx) => ctx.isBranch && ctx.hasLink,
 }
 
 type TileActionPayload = { action: string; label: string; q: number; r: number; index: number }
@@ -24,7 +26,7 @@ export class TileLinkActionDrone extends Drone {
   override description = 'link action icon — opens content viewer for tile links'
 
   protected override listens = ['render:host-ready', 'tile:action']
-  protected override emits = ['overlay:register-action', 'viewer:open']
+  protected override emits = ['overlay:register-action']
 
   #registered = false
   #effectsRegistered = false
@@ -42,11 +44,14 @@ export class TileLinkActionDrone extends Drone {
     this.onEffect<TileActionPayload>('tile:action', (payload) => {
       if (payload.action !== 'link') return
 
-      // TODO: resolve URL from tile properties — hardcoded for testing
-      EffectBus.emit('viewer:open', {
-        kind: 'youtube',
-        url: 'https://www.youtube.com/watch?v=4cuT-LKcmWs',
+      // Re-emit as 'open' — LinkOpenWorker reads the link from tile properties
+      // and routes to the photo viewer or opens in a new tab
+      EffectBus.emit('tile:action', {
+        action: 'open',
         label: payload.label,
+        q: payload.q,
+        r: payload.r,
+        index: payload.index,
       })
     })
   }

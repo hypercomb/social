@@ -739,6 +739,7 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
   #currentTileExternal = false;
   #activeProfileKey = null;
   #noImageLabels = /* @__PURE__ */ new Set();
+  #linkLabels = /* @__PURE__ */ new Set();
   #navigationBlocked = false;
   #navigationGuardTimer = null;
   #meshPublic = false;
@@ -861,6 +862,7 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
         this.#branchLabels = new Set(payload.branchLabels ?? []);
         this.#externalLabels = new Set(payload.externalLabels ?? []);
         this.#noImageLabels = new Set(payload.noImageLabels ?? []);
+        this.#linkLabels = new Set(payload.linkLabels ?? []);
         this.#rebuildOccupiedMap();
         if (this.#overlay && this.#currentAxial) {
           this.#currentIndex = this.#lookupIndex(this.#currentAxial.q, this.#currentAxial.r);
@@ -1060,7 +1062,9 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
       q: this.#currentAxial.q,
       r: this.#currentAxial.r,
       index: entry.index,
-      noImage: this.#noImageLabels.has(entry.label)
+      noImage: this.#noImageLabels.has(entry.label),
+      isBranch: this.#branchLabels.has(entry.label),
+      hasLink: this.#linkLabels.has(entry.label)
     };
     for (const action of this.#actions) {
       if (action.visibleWhen) {

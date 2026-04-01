@@ -7,13 +7,14 @@ var LINK_ICON = {
   x: -2,
   y: -7,
   hoverTint: 11065599,
-  profile: "private"
+  profile: "private",
+  visibleWhen: (ctx) => ctx.isBranch && ctx.hasLink
 };
 var TileLinkActionDrone = class extends Drone {
   namespace = "diamondcoreprocessor.com";
   description = "link action icon \u2014 opens content viewer for tile links";
   listens = ["render:host-ready", "tile:action"];
-  emits = ["overlay:register-action", "viewer:open"];
+  emits = ["overlay:register-action"];
   #registered = false;
   #effectsRegistered = false;
   heartbeat = async () => {
@@ -26,10 +27,12 @@ var TileLinkActionDrone = class extends Drone {
     });
     this.onEffect("tile:action", (payload) => {
       if (payload.action !== "link") return;
-      EffectBus.emit("viewer:open", {
-        kind: "youtube",
-        url: "https://www.youtube.com/watch?v=4cuT-LKcmWs",
-        label: payload.label
+      EffectBus.emit("tile:action", {
+        action: "open",
+        label: payload.label,
+        q: payload.q,
+        r: payload.r,
+        index: payload.index
       });
     });
   };

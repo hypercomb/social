@@ -102,21 +102,27 @@ export class PixiHostWorker extends Worker {
     app.stage.addChild(this.container)
 
     // -------------------------------------------------
-    // center stage (no scaling!) + keep coordinates in renderer.screen units
+    // center stage (no scaling!) — use window dimensions directly
     // -------------------------------------------------
+    // renderer.screen may lag behind the actual viewport when DPR changes
+    // (e.g. desktop → mobile DevTools emulation) because Pixi's internal
+    // resize fires on the same event and the resolution/autoDensity
+    // recalculation can return stale CSS-pixel values.  window.innerWidth
+    // and window.innerHeight are guaranteed correct at resize-event time.
 
     const center = (): void => {
-      const s = app.renderer.screen
-      const cx = s.width * 0.5
-      const cy = s.height * 0.5
+      const cx = window.innerWidth * 0.5
+      const cy = window.innerHeight * 0.5
       const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
       const pan = vp?.lastPan
       app.stage.position.set(cx + (pan?.dx ?? 0), cy + (pan?.dy ?? 0))
     }
 
     center()
-    // synchronous: Pixi's ResizeObserver updates renderer.screen before the resize event fires
     window.addEventListener('resize', center)
+    // orientation and fullscreen changes don't always fire 'resize'
+    window.addEventListener('orientationchange', () => { setTimeout(center, 50) })
+    document.addEventListener('fullscreenchange', () => { setTimeout(center, 50) })
 
     // -------------------------------------------------
     // broadcast pixi resources to other drones via effect bus
