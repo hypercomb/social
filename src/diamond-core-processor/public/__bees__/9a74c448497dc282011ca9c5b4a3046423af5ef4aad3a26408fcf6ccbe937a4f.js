@@ -801,7 +801,14 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
         for (const desc of descs) {
           if (!this.#activeOrder.has(desc.profile)) this.#activeOrder.set(desc.profile, []);
           const order = this.#activeOrder.get(desc.profile);
-          if (!order.includes(desc.name)) order.push(desc.name);
+          if (!order.includes(desc.name)) {
+            const removeIdx = order.indexOf("remove");
+            if (desc.name !== "remove" && removeIdx >= 0) {
+              order.splice(removeIdx, 0, desc.name);
+            } else {
+              order.push(desc.name);
+            }
+          }
         }
         this.#rebuildActiveProfile();
       });
@@ -1001,7 +1008,7 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
     this.#actions = [];
     const key = this.#resolveProfileKey();
     this.#activeProfileKey = key;
-    const descs = [...this.#registeredDescriptors.values()].filter((d) => d.profile === key);
+    const descs = [...this.#registeredDescriptors.values()].filter((d) => d.profile === key).sort((a, b) => (a.name === "remove" ? 1 : 0) - (b.name === "remove" ? 1 : 0));
     for (const desc of descs) {
       const btn = new HexIconButton({
         svgMarkup: desc.svgMarkup,

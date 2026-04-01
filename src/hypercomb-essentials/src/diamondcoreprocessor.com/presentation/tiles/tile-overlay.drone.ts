@@ -193,11 +193,18 @@ export class TileOverlayDrone extends Drone {
       this.onEffect<OverlayActionDescriptor | OverlayActionDescriptor[]>('overlay:register-action', (payload) => {
         const descs = Array.isArray(payload) ? payload : [payload]
         for (const desc of descs) this.#registeredDescriptors.set(desc.name, desc)
-        // Track active order from descriptors
+        // Track active order from descriptors — keep 'remove' last
         for (const desc of descs) {
           if (!this.#activeOrder.has(desc.profile)) this.#activeOrder.set(desc.profile, [])
           const order = this.#activeOrder.get(desc.profile)!
-          if (!order.includes(desc.name)) order.push(desc.name)
+          if (!order.includes(desc.name)) {
+            const removeIdx = order.indexOf('remove')
+            if (desc.name !== 'remove' && removeIdx >= 0) {
+              order.splice(removeIdx, 0, desc.name)
+            } else {
+              order.push(desc.name)
+            }
+          }
         }
         this.#rebuildActiveProfile()
       })
@@ -432,7 +439,10 @@ export class TileOverlayDrone extends Drone {
     this.#activeProfileKey = key
 
     // Collect descriptors for this profile, build buttons
-    const descs = [...this.#registeredDescriptors.values()].filter(d => d.profile === key)
+    // Sort so 'remove' is always the rightmost action
+    const descs = [...this.#registeredDescriptors.values()]
+      .filter(d => d.profile === key)
+      .sort((a, b) => (a.name === 'remove' ? 1 : 0) - (b.name === 'remove' ? 1 : 0))
     for (const desc of descs) {
       const btn = new HexIconButton({
         svgMarkup: desc.svgMarkup,
