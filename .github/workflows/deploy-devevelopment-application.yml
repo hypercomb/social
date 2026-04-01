@@ -163,47 +163,22 @@ jobs:
           echo "--- Workspace packages detected by npm ---"
           npm ls --depth=0 2>&1 | head -30 || true
 
-      - name: "DEBUG: Pre-essentials npm ci check"
-        working-directory: src/hypercomb-essentials
+      - name: "DEBUG: Verify essentials deps from workspace install"
+        working-directory: src
         run: |
           echo "============================================"
-          echo "  PRE npm ci - ESSENTIALS"
+          echo "  ESSENTIALS - installed via workspace root"
           echo "============================================"
-          echo "--- package.json vs package-lock.json sync check ---"
-          npm ci --dry-run 2>&1 || true
-          echo ""
-          echo "--- essentials node_modules exists? ---"
-          ls -la node_modules 2>/dev/null | head -10 || echo "No node_modules yet"
-          echo ""
-          echo "--- npm config list ---"
-          npm config list 2>&1 || echo "(npm config list failed, likely ENOWORKSPACES)"
-          echo ""
-          echo "--- npm cache verify ---"
-          npm cache verify 2>&1 | tail -5 || true
-
-      - name: Install essentials dependencies
-        working-directory: src/hypercomb-essentials
-        run: |
-          echo "--- Running npm ci ---"
-          npm ci 2>&1
-          echo "--- npm ci exit code: $? ---"
-
-      - name: "DEBUG: Post-essentials install state"
-        working-directory: src/hypercomb-essentials
-        run: |
-          echo "============================================"
-          echo "  POST npm ci - ESSENTIALS"
-          echo "============================================"
-          echo "--- essentials node_modules top-level (first 30) ---"
-          ls node_modules/ 2>/dev/null | head -30 || echo "node_modules MISSING"
-          echo ""
-          echo "--- @noble/hashes in essentials node_modules ---"
+          echo "--- @noble/hashes in root node_modules ---"
           find node_modules -path "*/@noble/hashes/package.json" 2>/dev/null | while read f; do
             echo "$f -> $(node -e "console.log(require('./$f').version)")"
           done
           echo ""
           echo "--- npm ls @noble/hashes ---"
           npm ls @noble/hashes 2>&1 || true
+          echo ""
+          echo "--- @angular/cli still present after workspace install? ---"
+          ls -la node_modules/@angular/cli/bin/ng.js 2>/dev/null || echo "MISSING - @angular/cli was removed!"
 
       - name: "DEBUG: Pre-core-build state"
         working-directory: src/hypercomb-core

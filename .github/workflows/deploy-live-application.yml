@@ -30,10 +30,6 @@ jobs:
           rm -rf node_modules package-lock.json
           npm install
 
-      - name: Install essentials dependencies
-        working-directory: src/hypercomb-essentials
-        run: npm ci
-
       - name: Validate Azure credentials (live)
         id: azure_creds
         shell: bash
