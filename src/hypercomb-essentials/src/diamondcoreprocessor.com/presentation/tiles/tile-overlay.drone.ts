@@ -1234,6 +1234,23 @@ export class TileOverlayDrone extends Drone {
       return
     }
 
+    // If pointermove hasn't fired since navigation (e.g. click without moving
+    // the mouse after changing levels), resolve axial from click coordinates
+    // so the click isn't swallowed.
+    if (this.#currentIndex === undefined || this.#currentAxial === null) {
+      const detector = this.resolve<{ pixelToAxial(px: number, py: number, flat?: boolean): Axial }>('detector')
+      if (!detector) return
+
+      const pixiGlobal = this.#clientToPixiGlobal(e.clientX, e.clientY)
+      const local = this.#renderContainer.toLocal(new Point(pixiGlobal.x, pixiGlobal.y))
+      const meshLocalX = local.x - this.#meshOffset.x
+      const meshLocalY = local.y - this.#meshOffset.y
+      const axial = detector.pixelToAxial(meshLocalX, meshLocalY, this.#flat)
+
+      this.#currentAxial = axial
+      this.#currentIndex = this.#lookupIndex(axial.q, axial.r)
+    }
+
     if (this.#currentIndex === undefined || this.#currentIndex >= this.#cellCount) return
 
     const entry = this.#occupiedByAxial.get(
