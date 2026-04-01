@@ -24,15 +24,18 @@ const STROKE_COLOR = 0xFFFFFF
 const STROKE_ALPHA = 0.5
 const STROKE_WIDTH = 2
 
+const HC_FONT = getComputedStyle(document.documentElement).getPropertyValue('--hc-font').trim()
+  || "'Source Sans Pro Light', system-ui, sans-serif"
+
 const LABEL_STYLE = new TextStyle({
-  fontFamily: "'Segoe UI', system-ui, sans-serif",
+  fontFamily: HC_FONT,
   fontSize: 9,
   fill: 0xFFFFFF,
   align: 'center',
 })
 
 const CAT_LABEL_STYLE = new TextStyle({
-  fontFamily: "'Segoe UI', system-ui, sans-serif",
+  fontFamily: HC_FONT,
   fontSize: 10,
   fontWeight: 'bold',
   fill: 0xFFFFFF,
@@ -40,7 +43,7 @@ const CAT_LABEL_STYLE = new TextStyle({
 })
 
 const CENTER_STYLE = new TextStyle({
-  fontFamily: "'Segoe UI', system-ui, sans-serif",
+  fontFamily: HC_FONT,
   fontSize: 16,
   fontWeight: 'bold',
   fill: 0xe0d5c8,
@@ -156,7 +159,7 @@ export class FlavorWheelDrone extends Drone {
       color: '#e0d5c8',
       fontSize: '14px',
       cursor: 'pointer',
-      fontFamily: "'Segoe UI', system-ui, sans-serif",
+      fontFamily: HC_FONT,
     })
     closeBtn.addEventListener('click', () => this.#hide())
 
