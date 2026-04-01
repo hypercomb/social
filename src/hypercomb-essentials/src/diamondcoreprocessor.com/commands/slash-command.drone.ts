@@ -312,6 +312,21 @@ class VoiceProvider implements SlashCommandProvider {
   }
 }
 
+class PushToTalkProvider implements SlashCommandProvider {
+  readonly name = 'push-to-talk-provider'
+  readonly priority = 100
+  readonly commands: SlashCommand[] = [
+    { name: 'push-to-talk', description: 'Toggle push-to-talk mic button', descriptionKey: 'slash.push-to-talk' }
+  ]
+
+  async execute(): Promise<void> {
+    const current = localStorage.getItem('hc:push-to-talk') === 'true'
+    const next = !current
+    localStorage.setItem('hc:push-to-talk', String(next))
+    EffectBus.emit('push-to-talk:toggle', { enabled: next })
+  }
+}
+
 // ── registration ────────────────────────────────────────
 
 const _slashCommands = new SlashCommandDrone()
@@ -332,4 +347,5 @@ _slashCommands.addProvider(new LlmProvider())
 _slashCommands.addProvider(new LanguageProvider())
 _slashCommands.addProvider(new ArrangeProvider())
 _slashCommands.addProvider(new VoiceProvider())
+_slashCommands.addProvider(new PushToTalkProvider())
 window.ioc.register('@diamondcoreprocessor.com/SlashCommandDrone', _slashCommands)

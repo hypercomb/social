@@ -777,13 +777,21 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.#voiceActiveUnsub = EffectBus.on<{ active: boolean }>('voice:active', ({ active }) => {
       this.voiceActive.set(active)
     })
+
+    // push-to-talk toggle (from /push-to-talk slash command)
+    this.#pushToTalkUnsub = EffectBus.on<{ enabled: boolean }>('push-to-talk:toggle', ({ enabled }) => {
+      this.pushToTalkEnabled.set(enabled)
+      localStorage.setItem('hc:push-to-talk', String(enabled))
+    })
   }
 
   readonly touchDragging = signal(false)
   readonly viewActive = signal(false)
   readonly voiceActive = signal(false)
   readonly voiceSupported = VoiceInputService.supported()
+  readonly pushToTalkEnabled = signal(localStorage.getItem('hc:push-to-talk') === 'true')
   #voiceActiveUnsub?: () => void
+  #pushToTalkUnsub?: () => void
   #prefillUnsub?: () => void
   #commandLineToggleUnsub?: () => void
   #touchDraggingUnsub?: () => void
@@ -817,6 +825,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.#voiceInterimUnsub?.()
     this.#voiceSubmitUnsub?.()
     this.#voiceActiveUnsub?.()
+    this.#pushToTalkUnsub?.()
     window.removeEventListener('navigate', this.#onNavigate)
     window.removeEventListener('popstate', this.#onNavigate)
   }

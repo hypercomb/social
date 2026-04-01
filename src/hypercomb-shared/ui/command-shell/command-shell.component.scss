@@ -28,7 +28,7 @@ $bp-phone-max: 599px;
   box-sizing: border-box;
   background: var(--shell-bg);
   border: 1.5px solid var(--shell-border);
-  border-radius: 2px;
+  border-radius: 4px;
   padding: 0 0.25rem;
   transition: border-color var(--transition-speed) ease, box-shadow var(--transition-speed) ease;
   user-select: none;
@@ -107,7 +107,7 @@ $bp-phone-max: 599px;
   margin: 0;
   padding: 0.35rem;
   list-style: none;
-  border-radius: 2px;
+  border-radius: 4px;
   background: rgba(8, 14, 22, 0.92);
   backdrop-filter: blur(12px);
   border: 1.5px solid var(--shell-border);
@@ -162,7 +162,7 @@ $bp-phone-max: 599px;
 // phone (≤599px)
 @media (max-width: $bp-phone-max) {
   .command-shell {
-    border-radius: 6px;
+    border-radius: 4px;
     background: rgba(8, 18, 28, 0.85);
     border-color: rgba(var(--glow-color-rgb), 0.45);
     border-width: 1.5px;
