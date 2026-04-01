@@ -10,10 +10,10 @@ const svg = (d: string) =>
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`
 
 const ICONS = {
+  // Terminal prompt >_
+  command: svg('<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>'),
   // Pencil
   edit: svg('<path d="M17 3l4 4L7 21H3v-4L17 3z"/>'),
-  // Tree branch (parent + child node)
-  'add-sub': svg('<circle cx="12" cy="6" r="3"/><circle cx="12" cy="18" r="3"/><line x1="12" y1="9" x2="12" y2="15"/>'),
   // Magnifying glass
   search: svg('<circle cx="11" cy="11" r="7"/><line x1="16" y1="16" x2="21" y2="21"/>'),
   // Eye with slash
@@ -38,7 +38,7 @@ export type IconRegistryEntry = {
 
 const ICON_REGISTRY: IconRegistryEntry[] = [
   // ── private profile ──
-  { name: 'add-sub', svgMarkup: ICONS['add-sub'], hoverTint: 0xa8ffd8, profile: 'private' },
+  { name: 'command', svgMarkup: ICONS.command, hoverTint: 0xa8ffd8, profile: 'private' },
   { name: 'edit', svgMarkup: ICONS.edit, hoverTint: 0xc8d8ff, profile: 'private' },
   { name: 'search', svgMarkup: ICONS.search, hoverTint: 0xc8ffc8, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.noImage },
   { name: 'remove', svgMarkup: ICONS.remove, hoverTint: 0xffc8c8, profile: 'private' },
@@ -51,7 +51,7 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
 
 // Default active icons per profile (defines the fallback order)
 const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
-  'private': ['add-sub', 'edit', 'search', 'remove'],
+  'private': ['command', 'edit', 'remove'],
   'public-own': ['hide'],
   'public-external': ['adopt', 'block'],
 }
@@ -60,7 +60,7 @@ const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
 
 const ICON_Y = 6
 const ICON_SPACING = 10       // tighter to match 75 % icon scale
-const ICON_SIZE = 6.5         // matches DEFAULT_ICON_SIZE in tile-overlay
+const ICON_SIZE = 7           // matches DEFAULT_ICON_SIZE in tile-overlay
 const HEX_INRADIUS = 27.7     // √3/2 × 32 — safe horizontal bound
 const EDGE_MARGIN = 3         // keep icons this far from hex edge
 
@@ -77,9 +77,9 @@ function computeIconPositions(activeNames: string[]): { x: number; y: number }[]
     spacing = available / (count - 1)
   }
 
-  // Return CENTER positions — evenly spaced, symmetric about x=0
-  const startX = -(count - 1) * spacing / 2
-  return activeNames.map((_, i) => ({ x: startX + i * spacing, y: ICON_Y }))
+  // Return CENTER positions — evenly spaced, symmetric about x=0, rounded to integers
+  const startX = Math.round(-(count - 1) * spacing / 2)
+  return activeNames.map((_, i) => ({ x: Math.round(startX + i * spacing), y: ICON_Y }))
 }
 
 // ── Persistence key in root properties ────────────────────────────
@@ -89,7 +89,7 @@ const ARRANGEMENT_KEY = 'iconArrangement'
 type IconArrangement = Partial<Record<OverlayProfileKey, string[]>>
 
 // ── Action names this bee handles ─────────────────────────────────
-const HANDLED_ACTIONS = new Set(['edit', 'search', 'add-sub', 'hide', 'adopt', 'block', 'remove'])
+const HANDLED_ACTIONS = new Set(['edit', 'search', 'command', 'hide', 'adopt', 'block', 'remove'])
 
 type TileActionPayload = { action: string; label: string; q: number; r: number; index: number }
 
@@ -102,7 +102,7 @@ export class TileActionsDrone extends Drone {
   }
 
   protected override listens = ['render:host-ready', 'tile:action', 'overlay:icons-reordered', 'overlay:arrange-mode']
-  protected override emits = ['overlay:register-action', 'overlay:pool-icons', 'search:prefill', 'tile:hidden', 'tile:blocked', 'seed:removed']
+  protected override emits = ['overlay:register-action', 'overlay:pool-icons', 'search:prefill', 'command:focus', 'tile:hidden', 'tile:blocked', 'seed:removed']
 
   #registered = false
   #effectsRegistered = false
@@ -275,8 +275,8 @@ export class TileActionsDrone extends Drone {
         EffectBus.emit('search:prefill', { value: label })
         break
 
-      case 'add-sub':
-        EffectBus.emit('search:prefill', { value: label + '/' })
+      case 'command':
+        EffectBus.emit('command:focus', { seed: label })
         break
 
       case 'hide':

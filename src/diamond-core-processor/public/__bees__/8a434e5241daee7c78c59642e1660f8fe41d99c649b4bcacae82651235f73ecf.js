@@ -25,10 +25,10 @@ var writeSeedProperties = async (seedDir, updates) => {
 // src/diamondcoreprocessor.com/presentation/tiles/tile-actions.drone.ts
 var svg = (d) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 var ICONS = {
+  // Terminal prompt >_
+  command: svg('<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>'),
   // Pencil
   edit: svg('<path d="M17 3l4 4L7 21H3v-4L17 3z"/>'),
-  // Tree branch (parent + child node)
-  "add-sub": svg('<circle cx="12" cy="6" r="3"/><circle cx="12" cy="18" r="3"/><line x1="12" y1="9" x2="12" y2="15"/>'),
   // Magnifying glass
   search: svg('<circle cx="11" cy="11" r="7"/><line x1="16" y1="16" x2="21" y2="21"/>'),
   // Eye with slash
@@ -42,7 +42,7 @@ var ICONS = {
 };
 var ICON_REGISTRY = [
   // ── private profile ──
-  { name: "add-sub", svgMarkup: ICONS["add-sub"], hoverTint: 11075544, profile: "private" },
+  { name: "command", svgMarkup: ICONS.command, hoverTint: 11075544, profile: "private" },
   { name: "edit", svgMarkup: ICONS.edit, hoverTint: 13162751, profile: "private" },
   { name: "search", svgMarkup: ICONS.search, hoverTint: 13172680, profile: "private", visibleWhen: (ctx) => ctx.noImage },
   { name: "remove", svgMarkup: ICONS.remove, hoverTint: 16763080, profile: "private" },
@@ -53,7 +53,7 @@ var ICON_REGISTRY = [
   { name: "block", svgMarkup: ICONS.block, hoverTint: 16763080, profile: "public-external" }
 ];
 var DEFAULT_ACTIVE = {
-  "private": ["add-sub", "edit", "search", "remove"],
+  "private": ["command", "edit", "remove"],
   "public-own": ["hide"],
   "public-external": ["adopt", "block"]
 };
@@ -70,11 +70,11 @@ function computeIconPositions(activeNames) {
   if (idealWidth > available && count > 1) {
     spacing = available / (count - 1);
   }
-  const startX = -(count - 1) * spacing / 2;
-  return activeNames.map((_, i) => ({ x: startX + i * spacing, y: ICON_Y }));
+  const startX = Math.round(-(count - 1) * spacing / 2);
+  return activeNames.map((_, i) => ({ x: Math.round(startX + i * spacing), y: ICON_Y }));
 }
 var ARRANGEMENT_KEY = "iconArrangement";
-var HANDLED_ACTIONS = /* @__PURE__ */ new Set(["edit", "search", "add-sub", "hide", "adopt", "block", "remove"]);
+var HANDLED_ACTIONS = /* @__PURE__ */ new Set(["edit", "search", "command", "hide", "adopt", "block", "remove"]);
 var TileActionsDrone = class extends Drone {
   namespace = "diamondcoreprocessor.com";
   description = "registers default tile overlay icons and handles their click actions";
@@ -82,7 +82,7 @@ var TileActionsDrone = class extends Drone {
     lineage: "@hypercomb.social/Lineage"
   };
   listens = ["render:host-ready", "tile:action", "overlay:icons-reordered", "overlay:arrange-mode"];
-  emits = ["overlay:register-action", "overlay:pool-icons", "search:prefill", "tile:hidden", "tile:blocked", "seed:removed"];
+  emits = ["overlay:register-action", "overlay:pool-icons", "search:prefill", "command:focus", "tile:hidden", "tile:blocked", "seed:removed"];
   #registered = false;
   #effectsRegistered = false;
   #arrangement = {};
@@ -210,8 +210,8 @@ var TileActionsDrone = class extends Drone {
       case "search":
         EffectBus.emit("search:prefill", { value: label });
         break;
-      case "add-sub":
-        EffectBus.emit("search:prefill", { value: label + "/" });
+      case "command":
+        EffectBus.emit("command:focus", { seed: label });
         break;
       case "hide":
         this.#hideOrBlock(label, "hc:hidden-tiles", "tile:hidden");

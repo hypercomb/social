@@ -437,10 +437,10 @@ var writeSeedProperties = async (seedDir, updates) => {
 // src/diamondcoreprocessor.com/presentation/tiles/tile-actions.drone.ts
 var svg = (d) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 var ICONS = {
+  // Terminal prompt >_
+  command: svg('<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>'),
   // Pencil
   edit: svg('<path d="M17 3l4 4L7 21H3v-4L17 3z"/>'),
-  // Tree branch (parent + child node)
-  "add-sub": svg('<circle cx="12" cy="6" r="3"/><circle cx="12" cy="18" r="3"/><line x1="12" y1="9" x2="12" y2="15"/>'),
   // Magnifying glass
   search: svg('<circle cx="11" cy="11" r="7"/><line x1="16" y1="16" x2="21" y2="21"/>'),
   // Eye with slash
@@ -454,7 +454,7 @@ var ICONS = {
 };
 var ICON_REGISTRY = [
   // ── private profile ──
-  { name: "add-sub", svgMarkup: ICONS["add-sub"], hoverTint: 11075544, profile: "private" },
+  { name: "command", svgMarkup: ICONS.command, hoverTint: 11075544, profile: "private" },
   { name: "edit", svgMarkup: ICONS.edit, hoverTint: 13162751, profile: "private" },
   { name: "search", svgMarkup: ICONS.search, hoverTint: 13172680, profile: "private", visibleWhen: (ctx) => ctx.noImage },
   { name: "remove", svgMarkup: ICONS.remove, hoverTint: 16763080, profile: "private" },
@@ -465,7 +465,7 @@ var ICON_REGISTRY = [
   { name: "block", svgMarkup: ICONS.block, hoverTint: 16763080, profile: "public-external" }
 ];
 var DEFAULT_ACTIVE = {
-  "private": ["add-sub", "edit", "search", "remove"],
+  "private": ["command", "edit", "remove"],
   "public-own": ["hide"],
   "public-external": ["adopt", "block"]
 };
@@ -482,11 +482,11 @@ function computeIconPositions(activeNames) {
   if (idealWidth > available && count > 1) {
     spacing = available / (count - 1);
   }
-  const startX = -(count - 1) * spacing / 2;
-  return activeNames.map((_, i) => ({ x: startX + i * spacing, y: ICON_Y }));
+  const startX = Math.round(-(count - 1) * spacing / 2);
+  return activeNames.map((_, i) => ({ x: Math.round(startX + i * spacing), y: ICON_Y }));
 }
 var ARRANGEMENT_KEY = "iconArrangement";
-var HANDLED_ACTIONS = /* @__PURE__ */ new Set(["edit", "search", "add-sub", "hide", "adopt", "block", "remove"]);
+var HANDLED_ACTIONS = /* @__PURE__ */ new Set(["edit", "search", "command", "hide", "adopt", "block", "remove"]);
 var TileActionsDrone = class extends Drone {
   namespace = "diamondcoreprocessor.com";
   description = "registers default tile overlay icons and handles their click actions";
@@ -494,7 +494,7 @@ var TileActionsDrone = class extends Drone {
     lineage: "@hypercomb.social/Lineage"
   };
   listens = ["render:host-ready", "tile:action", "overlay:icons-reordered", "overlay:arrange-mode"];
-  emits = ["overlay:register-action", "overlay:pool-icons", "search:prefill", "tile:hidden", "tile:blocked", "seed:removed"];
+  emits = ["overlay:register-action", "overlay:pool-icons", "search:prefill", "command:focus", "tile:hidden", "tile:blocked", "seed:removed"];
   #registered = false;
   #effectsRegistered = false;
   #arrangement = {};
@@ -622,8 +622,8 @@ var TileActionsDrone = class extends Drone {
       case "search":
         EffectBus.emit("search:prefill", { value: label });
         break;
-      case "add-sub":
-        EffectBus.emit("search:prefill", { value: label + "/" });
+      case "command":
+        EffectBus.emit("command:focus", { seed: label });
         break;
       case "hide":
         this.#hideOrBlock(label, "hc:hidden-tiles", "tile:hidden");
@@ -685,7 +685,7 @@ var LABEL_STYLE = new TextStyle({
   fill: 16777215,
   align: "left"
 });
-var DEFAULT_ICON_SIZE = 6.5;
+var DEFAULT_ICON_SIZE = 7;
 var HOVER_LABEL_Y = 0;
 var HOVER_LABEL_STYLE = new TextStyle({
   fontFamily: "monospace",
@@ -694,8 +694,8 @@ var HOVER_LABEL_STYLE = new TextStyle({
   align: "center"
 });
 var ICON_DISPLAY_NAMES = {
+  "command": "command",
   "edit": "edit",
-  "add-sub": "branch",
   "search": "search",
   "hide": "hide",
   "adopt": "adopt",
@@ -1036,9 +1036,9 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
     const count = visible.length;
     if (count === 0) return;
     const spacing = ICON_SPACING;
-    const startX = -(count - 1) * spacing / 2;
+    const startX = Math.round(-(count - 1) * spacing / 2);
     for (let i = 0; i < count; i++) {
-      visible[i].button.position.set(startX + i * spacing, ICON_Y);
+      visible[i].button.position.set(Math.round(startX + i * spacing), ICON_Y);
     }
   }
   // ── Per-tile icon visibility ───────────────────────────────────────
@@ -1592,6 +1592,17 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
       });
       return;
     }
+    if (this.#currentIndex === void 0 || this.#currentAxial === null) {
+      const detector = this.resolve("detector");
+      if (!detector) return;
+      const pixiGlobal2 = this.#clientToPixiGlobal(e.clientX, e.clientY);
+      const local2 = this.#renderContainer.toLocal(new Point(pixiGlobal2.x, pixiGlobal2.y));
+      const meshLocalX = local2.x - this.#meshOffset.x;
+      const meshLocalY = local2.y - this.#meshOffset.y;
+      const axial = detector.pixelToAxial(meshLocalX, meshLocalY, this.#flat);
+      this.#currentAxial = axial;
+      this.#currentIndex = this.#lookupIndex(axial.q, axial.r);
+    }
     if (this.#currentIndex === void 0 || this.#currentIndex >= this.#cellCount) return;
     const entry = this.#occupiedByAxial.get(
       _TileOverlayDrone.axialKey(this.#currentAxial.q, this.#currentAxial.r)
@@ -1703,7 +1714,15 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
       return;
     }
     const occupied = this.#currentIndex !== void 0 && this.#currentIndex < this.#cellCount;
-    const shouldShow = occupied && !this.#editing && !this.#editCooldown && !this.#hasSelection && !this.#touchDragging;
+    const shouldShow = occupied && !this.#editing && !this.#editCooldown && !this.#touchDragging;
+    if (this.#hasSelection) {
+      this.#overlay.visible = occupied && !this.#editing && !this.#editCooldown;
+      if (this.#hexBg) this.#hexBg.hide();
+      for (const action of this.#actions) action.button.visible = false;
+      if (this.#hoverLabel) this.#hoverLabel.visible = false;
+      if (this.#seedLabel) this.#seedLabel.visible = true;
+      return;
+    }
     this.#overlay.visible = shouldShow;
     if (shouldShow && this.#hexBg) {
       this.#hexBg.show(this.#animTime);

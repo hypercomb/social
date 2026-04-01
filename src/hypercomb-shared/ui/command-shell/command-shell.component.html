@@ -4,23 +4,25 @@
   <div class="command-shell" (mousedown)="onShellMouseDown($event)">
     <div class="command-row">
 
-      <span
-        class="ghost"
-        aria-hidden="true"
-      >{{ ghostValue() }}</span>
+      <div class="input-wrap">
+        <span
+          class="ghost"
+          aria-hidden="true"
+        >{{ ghostValue() }}</span>
 
-      <input
-        #shellInput
-        class="command-input"
-        type="text"
-        name="command-input"
-        autocomplete="off"
-        autocapitalize="off"
-        spellcheck="false"
-        [placeholder]="placeholder()"
-        (keydown)="onKeyDown($event)"
-        (input)="onInput()"
-      />
+        <input
+          #shellInput
+          class="command-input"
+          type="text"
+          name="command-input"
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck="false"
+          [placeholder]="placeholder()"
+          (keydown)="onKeyDown($event)"
+          (input)="onInput()"
+        />
+      </div>
 
     </div>
   </div>

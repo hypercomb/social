@@ -56,7 +56,7 @@ const LABEL_STYLE = new TextStyle({
 })
 
 // ── Icon sizing ──────────────────────────────────────────────────
-const DEFAULT_ICON_SIZE = 6.5   // 75 % of original 8.75
+const DEFAULT_ICON_SIZE = 7     // integer for pixel-perfect rendering
 
 // ── Hover label styling ─────────────────────────────────────────
 const HOVER_LABEL_Y = 0         // just above the icon row (ICON_Y = 6)
@@ -69,8 +69,8 @@ const HOVER_LABEL_STYLE = new TextStyle({
 
 /** Human-readable display names for icon actions */
 const ICON_DISPLAY_NAMES: Record<string, string> = {
+  'command': 'command',
   'edit': 'edit',
-  'add-sub': 'branch',
   'search': 'search',
   'hide': 'hide',
   'adopt': 'adopt',
@@ -478,10 +478,10 @@ export class TileOverlayDrone extends Drone {
     if (count === 0) return
 
     const spacing = ICON_SPACING
-    const startX = -(count - 1) * spacing / 2
+    const startX = Math.round(-(count - 1) * spacing / 2)
 
     for (let i = 0; i < count; i++) {
-      visible[i].button.position.set(startX + i * spacing, ICON_Y)
+      visible[i].button.position.set(Math.round(startX + i * spacing), ICON_Y)
     }
   }
 
@@ -1386,7 +1386,18 @@ export class TileOverlayDrone extends Drone {
     }
 
     const occupied = this.#currentIndex !== undefined && this.#currentIndex < this.#cellCount
-    const shouldShow = occupied && !this.#editing && !this.#editCooldown && !this.#hasSelection && !this.#touchDragging
+    const shouldShow = occupied && !this.#editing && !this.#editCooldown && !this.#touchDragging
+
+    // When tiles are selected, show only the seed label (no hex bg, icons, or hover label)
+    if (this.#hasSelection) {
+      this.#overlay.visible = occupied && !this.#editing && !this.#editCooldown
+      if (this.#hexBg) this.#hexBg.hide()
+      for (const action of this.#actions) action.button.visible = false
+      if (this.#hoverLabel) this.#hoverLabel.visible = false
+      if (this.#seedLabel) this.#seedLabel.visible = true
+      return
+    }
+
     this.#overlay.visible = shouldShow
 
     // trigger entry animation on show transition
