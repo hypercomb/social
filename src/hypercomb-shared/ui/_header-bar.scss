@@ -126,19 +126,24 @@
   }
 }
 
-// ── mode crumb (subtle breadcrumb beside the toggle) ────
+// ── mode crumb (subtle breadcrumb below header, right-aligned) ──
 
 .mode-crumb {
+  position: fixed;
+  top: 3.85rem;
+  right: 0.6rem;
+  z-index: 59999;
+
   display: flex;
   align-items: center;
-  gap: 0.25rem;
-  padding: 0 0.5rem;
-  border-left: 1.5px solid rgba(77, 166, 255, 0.4);
+  gap: 0.2rem;
+
   font: 400 0.5rem/1 ui-monospace, sfmono-regular, menlo, consolas, monospace;
   letter-spacing: 0.08em;
   text-transform: lowercase;
   white-space: nowrap;
   user-select: none;
+  pointer-events: none;
 }
 
 .mode-crumb-label {

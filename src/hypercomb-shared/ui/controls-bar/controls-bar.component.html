@@ -118,13 +118,13 @@
         </div>
 
         <!-- clipboard + voice buttons -->
-        <div class="controls-divider"></div>
-        <button class="ctl-btn clipboard-btn" (click)="openClipboard()" [attr.aria-label]="'controls.clipboard' | t">
-          <span class="hci">y</span>
-          @if (clipboardCount() > 0) {
+        @if (clipboardCount() > 0) {
+          <div class="controls-divider"></div>
+          <button class="ctl-btn clipboard-btn" (click)="openClipboard()" [attr.aria-label]="'controls.clipboard' | t">
+            <span class="hci">y</span>
             <span class="badge">{{ clipboardCount() }}</span>
-          }
-        </button>
+          </button>
+        }
         @if (voiceSupported) {
           <button class="ctl-btn mic-btn" [class.active]="voiceActive()" (click)="toggleVoice()" [attr.aria-label]="'controls.voice' | t">
             <span class="mic-icon">{{ voiceActive() ? '🎙' : '🎤' }}</span>

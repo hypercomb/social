@@ -36,19 +36,19 @@
     color: transparent;
     text-shadow:
       // front face — subtle light highlight
-      0 0 0 rgba(255, 255, 255, 0.04),
+      0 0 0 rgba(255, 255, 255, 0.025),
       // 3D depth layers
-      1px 1px 0 rgba(180, 210, 255, 0.03),
-      2px 2px 0 rgba(150, 190, 255, 0.025),
-      3px 3px 0 rgba(120, 170, 255, 0.02),
-      4px 4px 0 rgba(100, 150, 240, 0.018),
-      5px 5px 0 rgba(80, 130, 220, 0.015),
-      6px 6px 0 rgba(60, 110, 200, 0.012),
+      1px 1px 0 rgba(180, 210, 255, 0.02),
+      2px 2px 0 rgba(150, 190, 255, 0.016),
+      3px 3px 0 rgba(120, 170, 255, 0.013),
+      4px 4px 0 rgba(100, 150, 240, 0.01),
+      5px 5px 0 rgba(80, 130, 220, 0.008),
+      6px 6px 0 rgba(60, 110, 200, 0.006),
       // soft shadow beneath
-      8px 8px 12px rgba(0, 0, 0, 0.08);
+      8px 8px 12px rgba(0, 0, 0, 0.05);
     transform: rotate(-30deg);
     pointer-events: none;
-    z-index: 0;
+    z-index: -1;
     white-space: pre-wrap;
     overflow: hidden;
   }
