@@ -811,15 +811,10 @@ export class ShowCellDrone extends Drone {
       return currentKey !== locationKey || currentRev !== fsRev || currentMeshRev !== meshRev
     }
 
-    let dir: FileSystemDirectoryHandle | null
-    if (this.#clipboardView) {
-      dir = null
-    } else {
-      dir = await lineage.explorerDir()
-      if (isStale()) {
-        this.renderQueued = true
-        return
-      }
+    const dir = await lineage.explorerDir()
+    if (!this.#clipboardView && isStale()) {
+      this.renderQueued = true
+      return
     }
     if (!dir) {
       console.warn('[show-honeycomb] BAIL: explorerDir returned null')
