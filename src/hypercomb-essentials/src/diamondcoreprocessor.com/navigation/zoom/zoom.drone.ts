@@ -267,6 +267,16 @@ export class ZoomDrone extends Drone {
 
   private vp: ViewportPersistence | null = null
 
+  // ── smooth zoom animation state ──
+  #animFrameId: number | null = null
+  #animStartTime = 0
+  #animStartScale = 1
+  #animTargetScale = 1
+  #animPivotClient: Pt = { x: 0, y: 0 }
+  // snapshot of the local point under the pivot at animation start
+  #animPivotLocal: Pt = { x: 0, y: 0 }
+  readonly #animDuration = 150 // ms — short for crisp feel
+
   protected override deps = {
     mouseWheel: '@diamondcoreprocessor.com/MousewheelZoomInput',
     pinchZoom: '@diamondcoreprocessor.com/PinchZoomInput',
@@ -292,6 +302,7 @@ export class ZoomDrone extends Drone {
         {
           zoomByFactor: this.zoomByFactor,
           zoomToScale: this.zoomToScale,
+          animateToScale: this.animateToScale,
           currentScale: this.currentScale,
         },
         this.canvas,
@@ -376,6 +387,12 @@ export class ZoomDrone extends Drone {
   public zoomByFactor = (factor: number, pivotClient: Pt): void => {
     if (!this.renderContainer || !this.canvas) return
 
+    // cancel any in-flight smooth zoom animation
+    if (this.#animFrameId !== null) {
+      cancelAnimationFrame(this.#animFrameId)
+      this.#animFrameId = null
+    }
+
     const target = this.renderContainer
 
     const current = target.scale.x || 1
@@ -397,6 +414,12 @@ export class ZoomDrone extends Drone {
    */
   public zoomToFit = (snap = false): void => {
     if (!this.renderContainer || !this.renderer || !this.app) return
+
+    // cancel any in-flight smooth zoom animation
+    if (this.#animFrameId !== null) {
+      cancelAnimationFrame(this.#animFrameId)
+      this.#animFrameId = null
+    }
 
     const target = this.renderContainer
 
@@ -483,6 +506,77 @@ export class ZoomDrone extends Drone {
     }
 
     requestAnimationFrame(animate)
+  }
+
+  // -------------------------------------------------
+  // smooth animated zoom (mousewheel snap levels)
+  // -------------------------------------------------
+
+  public animateToScale = (scale: number, pivotClient: Pt): void => {
+    if (!this.renderContainer || !this.canvas || !this.renderer) return
+
+    const target = this.renderContainer
+    const clamped = this.clamp(scale)
+
+    // cancel any in-flight zoom-to-fit animation
+    if (this.#animFrameId !== null) {
+      cancelAnimationFrame(this.#animFrameId)
+    }
+
+    // snapshot starting state
+    this.#animStartScale = target.scale.x
+    this.#animTargetScale = clamped
+    this.#animPivotClient = pivotClient
+
+    // compute the local point under the pivot at the current scale
+    const pivotGlobal = this.clientToPixiGlobal(pivotClient)
+    this.#animPivotLocal = target.toLocal(new Point(pivotGlobal.x, pivotGlobal.y))
+
+    this.#animStartTime = performance.now()
+    this.#animFrameId = requestAnimationFrame(this.#animTick)
+  }
+
+  #animTick = (now: number): void => {
+    if (!this.renderContainer || !this.renderer) {
+      this.#animFrameId = null
+      return
+    }
+
+    const target = this.renderContainer
+    const elapsed = now - this.#animStartTime
+    const t = Math.min(1, elapsed / this.#animDuration)
+    // ease-in cubic — accelerates into target for a crisp finish
+    const ease = t * t * t
+
+    const newScale = this.#animStartScale + (this.#animTargetScale - this.#animStartScale) * ease
+
+    // apply scale then correct position so pivot pixel stays fixed
+    target.scale.set(newScale)
+
+    const pivotGlobal = this.clientToPixiGlobal(this.#animPivotClient)
+    const postGlobal = target.toGlobal(this.#animPivotLocal)
+
+    const parent = target.parent
+    if (parent?.toLocal) {
+      const pivP = parent.toLocal(new Point(pivotGlobal.x, pivotGlobal.y))
+      const postP = parent.toLocal(postGlobal)
+      target.position.set(
+        target.position.x + (pivP.x - postP.x),
+        target.position.y + (pivP.y - postP.y),
+      )
+    } else {
+      target.position.set(
+        target.position.x + (pivotGlobal.x - postGlobal.x),
+        target.position.y + (pivotGlobal.y - postGlobal.y),
+      )
+    }
+
+    if (t < 1) {
+      this.#animFrameId = requestAnimationFrame(this.#animTick)
+    } else {
+      this.#animFrameId = null
+      this.#saveZoom(target)
+    }
   }
 
   // -------------------------------------------------
