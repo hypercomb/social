@@ -271,6 +271,21 @@ var PushToTalkProvider = class {
     EffectBus.emit("push-to-talk:toggle", { enabled: next });
   }
 };
+var AtomizeUiProvider = class {
+  name = "atomize-ui-provider";
+  priority = 100;
+  commands = [
+    { name: "atomize-ui", description: "Atomize a UI component into constituent parts", descriptionKey: "slash.atomize-ui", aliases: ["au"] }
+  ];
+  execute(_commandName, args) {
+    const parts = args.trim().split(/\s+/);
+    const target = parts[0] || "command-line";
+    const modeIdx = parts.indexOf("--mode");
+    const strategy = modeIdx >= 0 && parts[modeIdx + 1] ? parts[modeIdx + 1] : void 0;
+    const iocKey = target.includes("/") ? target : `@hypercomb.social/Atomizer:${target}`;
+    EffectBus.emit("atomize:trigger", { target: iocKey, strategy });
+  }
+};
 var _slashCommands = new SlashCommandDrone();
 _slashCommands.addProvider(new HelpProvider());
 _slashCommands.addProvider(new ClearProvider());
@@ -290,6 +305,7 @@ _slashCommands.addProvider(new LanguageProvider());
 _slashCommands.addProvider(new ArrangeProvider());
 _slashCommands.addProvider(new VoiceProvider());
 _slashCommands.addProvider(new PushToTalkProvider());
+_slashCommands.addProvider(new AtomizeUiProvider());
 window.ioc.register("@diamondcoreprocessor.com/SlashCommandDrone", _slashCommands);
 export {
   SlashCommandDrone

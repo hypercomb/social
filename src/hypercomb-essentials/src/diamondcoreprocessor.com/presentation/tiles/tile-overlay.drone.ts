@@ -46,14 +46,13 @@ export type OverlayTileContext = {
 
 export type OverlayProfileKey = 'private' | 'public-own' | 'public-external'
 
-// Seed label styling
-const LABEL_X = -24
-const LABEL_Y = -14
+// Seed label styling — matches HexLabelAtlas (centered in tile)
 const LABEL_STYLE = new TextStyle({
-  fontFamily: 'monospace',
-  fontSize: 5,
+  fontFamily: "'SF Mono', 'Cascadia Code', 'JetBrains Mono', ui-monospace, monospace",
+  fontSize: 10,
   fill: 0xffffff,
-  align: 'left',
+  align: 'center',
+  letterSpacing: 0.5,
 })
 
 // ── Icon sizing ──────────────────────────────────────────────────
@@ -74,6 +73,7 @@ const ICON_DISPLAY_NAMES: Record<string, string> = {
   'edit': 'edit',
   'search': 'search',
   'hide': 'hide',
+  'break-apart': 'restore',
   'adopt': 'adopt',
   'block': 'block',
 }
@@ -136,6 +136,11 @@ export class TileOverlayDrone extends Drone {
   #noImageLabels = new Set<string>()
   #linkLabels = new Set<string>()
   #hiddenLabels = new Set<string>()
+
+  // break-apart effect state
+  #crackOverlay: Graphics | null = null
+  #shatterContainer: Container | null = null
+  #shatterAnimating = false
 
   #navigationBlocked = false
   #navigationGuardTimer: ReturnType<typeof setTimeout> | null = null
@@ -375,6 +380,7 @@ export class TileOverlayDrone extends Drone {
       this.#hexBg = null
       this.#seedLabel = null
       this.#hoverLabel = null
+      this.#crackOverlay = null
       this.#actions = []
     }
   }
@@ -392,7 +398,8 @@ export class TileOverlayDrone extends Drone {
     this.#overlay.addChild(this.#hexBg.mesh)
 
     this.#seedLabel = new Text({ text: '', style: LABEL_STYLE, resolution: window.devicePixelRatio * 8 })
-    this.#seedLabel.position.set(LABEL_X, LABEL_Y)
+    this.#seedLabel.anchor.set(0.5, 0.5)
+    this.#seedLabel.position.set(0, 0)
     this.#overlay.addChild(this.#seedLabel)
 
     this.#hoverLabel = new Text({ text: '', style: HOVER_LABEL_STYLE, resolution: window.devicePixelRatio * 8 })
@@ -400,6 +407,12 @@ export class TileOverlayDrone extends Drone {
     this.#hoverLabel.position.set(0, HOVER_LABEL_Y)
     this.#hoverLabel.visible = false
     this.#overlay.addChild(this.#hoverLabel)
+
+    // crack overlay for break-apart preview
+    this.#crackOverlay = new Graphics()
+    this.#crackOverlay.visible = false
+    this.#crackOverlay.zIndex = 100
+    this.#overlay.addChild(this.#crackOverlay)
 
     this.#renderContainer.addChild(this.#overlay)
     this.#renderContainer.sortableChildren = true
@@ -500,6 +513,13 @@ export class TileOverlayDrone extends Drone {
     }
 
     if (this.#seedLabel) this.#seedLabel.visible = true
+
+    // Public mode: no icons, only seed label
+    if (this.#meshPublic && !this.#hasSelection) {
+      for (const action of this.#actions) action.button.visible = false
+      if (this.#hoverLabel) this.#hoverLabel.visible = false
+      return
+    }
 
     // In arrange mode, all icons are always visible
     if (this.#arrangeMode) {
@@ -1200,6 +1220,15 @@ export class TileOverlayDrone extends Drone {
         this.#hoverLabel.visible = false
       }
     }
+
+    // show/hide crack preview when hovering break-apart icon
+    if (this.#crackOverlay) {
+      if (hoveredName === 'break-apart') {
+        this.#showCrackPreview()
+      } else {
+        this.#crackOverlay.visible = false
+      }
+    }
   }
 
   #onClick = (e: MouseEvent): void => {
@@ -1272,6 +1301,15 @@ export class TileOverlayDrone extends Drone {
         const by = local.y - oy - btn.position.y
 
         if (btn.containsPoint(bx, by)) {
+          // break-apart: play shatter animation first, then emit action
+          if (action.name === 'break-apart') {
+            this.playShatterAnimation(
+              this.#currentAxial!.q,
+              this.#currentAxial!.r,
+              entry.label,
+            )
+            return
+          }
           this.emitEffect('tile:action', {
             action: action.name,
             q: this.#currentAxial!.q,
@@ -1387,10 +1425,15 @@ export class TileOverlayDrone extends Drone {
 
     const occupied = this.#currentIndex !== undefined && this.#currentIndex < this.#cellCount
 
-    // Public mode: hide overlay entirely unless a tile is selected
+    // Public mode: seed label only — no hex bg, no icons, no hover label
     if (this.#meshPublic && !this.#hasSelection) {
-      this.#overlay.visible = false
+      const show = occupied && !this.#editing && !this.#editCooldown && !this.#touchDragging
+      this.#overlay.visible = show
       if (this.#hexBg) this.#hexBg.hide()
+      for (const action of this.#actions) action.button.visible = false
+      if (this.#hoverLabel) this.#hoverLabel.visible = false
+      if (this.#crackOverlay) this.#crackOverlay.visible = false
+      if (this.#seedLabel) this.#seedLabel.visible = show
       return
     }
 
@@ -1464,6 +1507,136 @@ export class TileOverlayDrone extends Drone {
       x: (cx - rect.left) * (screen.width / rect.width),
       y: (cy - rect.top) * (screen.height / rect.height),
     }
+  }
+
+  // ── Break-apart: crack preview + shatter animation ─────────────────
+
+  #showCrackPreview(): void {
+    const g = this.#crackOverlay
+    if (!g || g.visible) return
+
+    g.clear()
+    const R = this.#geo.circumRadiusPx
+
+    // draw 5 crack lines radiating from a point near center
+    const cx = (Math.random() - 0.5) * R * 0.3
+    const cy = (Math.random() - 0.5) * R * 0.3
+    const cracks = 5
+
+    for (let i = 0; i < cracks; i++) {
+      const angle = (i / cracks) * Math.PI * 2 + (Math.random() - 0.5) * 0.6
+      const len = R * (0.5 + Math.random() * 0.4)
+      const midAngle = angle + (Math.random() - 0.5) * 0.3
+      const midLen = len * (0.3 + Math.random() * 0.3)
+
+      g.moveTo(cx, cy)
+      g.lineTo(cx + Math.cos(midAngle) * midLen, cy + Math.sin(midAngle) * midLen)
+      g.lineTo(cx + Math.cos(angle) * len, cy + Math.sin(angle) * len)
+      g.stroke({ width: 0.8, color: 0xffffff, alpha: 0.5 })
+
+      // small branch from midpoint
+      if (Math.random() > 0.4) {
+        const bAngle = midAngle + (Math.random() > 0.5 ? 0.7 : -0.7)
+        const bLen = len * 0.25
+        const mx = cx + Math.cos(midAngle) * midLen
+        const my = cy + Math.sin(midAngle) * midLen
+        g.moveTo(mx, my)
+        g.lineTo(mx + Math.cos(bAngle) * bLen, my + Math.sin(bAngle) * bLen)
+        g.stroke({ width: 0.5, color: 0xffffff, alpha: 0.35 })
+      }
+    }
+
+    g.visible = true
+  }
+
+  /** Run the shatter animation then emit the action. */
+  playShatterAnimation(q: number, r: number, label: string): void {
+    if (this.#shatterAnimating || !this.#renderContainer || !this.#app) return
+    this.#shatterAnimating = true
+
+    const R = this.#geo.circumRadiusPx
+    const px = this.#axialToPixel(q, r)
+    const ox = px.x + this.#meshOffset.x
+    const oy = px.y + this.#meshOffset.y
+
+    // hide the overlay during animation
+    if (this.#overlay) this.#overlay.visible = false
+    if (this.#crackOverlay) this.#crackOverlay.visible = false
+
+    // create fragment container at tile position
+    const container = new Container()
+    container.position.set(ox, oy)
+    container.zIndex = 10001
+    this.#renderContainer.addChild(container)
+    this.#shatterContainer = container
+
+    // create 6 triangular wedges (hex split from center)
+    const fragments: { g: Graphics; angle: number; speed: number; spin: number }[] = []
+    const wedges = 6
+    for (let i = 0; i < wedges; i++) {
+      const a1 = (i / wedges) * Math.PI * 2 - Math.PI / 2
+      const a2 = ((i + 1) / wedges) * Math.PI * 2 - Math.PI / 2
+      const g = new Graphics()
+
+      g.moveTo(0, 0)
+      g.lineTo(Math.cos(a1) * R, Math.sin(a1) * R)
+      g.lineTo(Math.cos(a2) * R, Math.sin(a2) * R)
+      g.closePath()
+      g.fill({ color: 0x445566, alpha: 0.6 })
+      g.stroke({ width: 0.5, color: 0x88aacc, alpha: 0.4 })
+
+      container.addChild(g)
+
+      const midAngle = (a1 + a2) / 2
+      fragments.push({
+        g,
+        angle: midAngle,
+        speed: 0.8 + Math.random() * 0.6,
+        spin: (Math.random() - 0.5) * 4,
+      })
+    }
+
+    // animate via ticker
+    const duration = 500
+    const startTime = performance.now()
+
+    const tick = () => {
+      const elapsed = performance.now() - startTime
+      const t = Math.min(elapsed / duration, 1)
+
+      // ease-out cubic
+      const ease = 1 - Math.pow(1 - t, 3)
+
+      for (const frag of fragments) {
+        const dist = ease * R * 1.8 * frag.speed
+        frag.g.position.set(
+          Math.cos(frag.angle) * dist,
+          Math.sin(frag.angle) * dist,
+        )
+        frag.g.rotation = ease * frag.spin
+        frag.g.alpha = 1 - ease
+        frag.g.scale.set(1 - ease * 0.3)
+      }
+
+      if (t >= 1) {
+        // cleanup
+        this.#app!.ticker.remove(tick)
+        this.#renderContainer!.removeChild(container)
+        container.destroy({ children: true })
+        this.#shatterContainer = null
+        this.#shatterAnimating = false
+
+        // fire the actual break-apart action
+        this.emitEffect('tile:action', {
+          action: 'break-apart',
+          q, r,
+          index: this.#lookupIndex(q, r) ?? 0,
+          label,
+        })
+      }
+    }
+
+    this.#app.ticker.add(tick)
   }
 }
 

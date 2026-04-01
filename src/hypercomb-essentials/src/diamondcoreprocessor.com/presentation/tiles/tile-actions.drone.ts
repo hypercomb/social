@@ -18,8 +18,8 @@ const ICONS = {
   search: svg('<circle cx="11" cy="11" r="7"/><line x1="16" y1="16" x2="21" y2="21"/>'),
   // Eye with slash
   hide: svg('<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/><circle cx="12" cy="12" r="3"/><line x1="4" y1="4" x2="20" y2="20"/>'),
-  // Eye open (unhide)
-  unhide: svg('<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/><circle cx="12" cy="12" r="3"/>'),
+  // Break apart — four fragments separating
+  breakApart: svg('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>'),
   // Plus
   adopt: svg('<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>'),
   // Circle with slash
@@ -44,10 +44,10 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   { name: 'edit', svgMarkup: ICONS.edit, hoverTint: 0xc8d8ff, profile: 'private' },
   { name: 'search', svgMarkup: ICONS.search, hoverTint: 0xc8ffc8, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.noImage },
   { name: 'remove', svgMarkup: ICONS.remove, hoverTint: 0xffc8c8, profile: 'private' },
-  { name: 'unhide', svgMarkup: ICONS.unhide, hoverTint: 0x66ccff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden },
+  { name: 'break-apart', svgMarkup: ICONS.breakApart, hoverTint: 0x66ccff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden },
   // ── public-own profile ──
   { name: 'hide', svgMarkup: ICONS.hide, hoverTint: 0xffd8a8, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => !ctx.isHidden },
-  { name: 'unhide', svgMarkup: ICONS.unhide, hoverTint: 0x66ccff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden },
+  { name: 'break-apart', svgMarkup: ICONS.breakApart, hoverTint: 0x66ccff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden },
   // ── public-external profile ──
   { name: 'adopt', svgMarkup: ICONS.adopt, hoverTint: 0xa8ffd8, profile: 'public-external' },
   { name: 'block', svgMarkup: ICONS.block, hoverTint: 0xffc8c8, profile: 'public-external' },
@@ -55,8 +55,8 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
 
 // Default active icons per profile (defines the fallback order)
 const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
-  'private': ['command', 'edit', 'remove', 'unhide'],
-  'public-own': ['hide', 'unhide'],
+  'private': ['command', 'edit', 'remove', 'break-apart'],
+  'public-own': ['hide', 'break-apart'],
   'public-external': ['adopt', 'block'],
 }
 
@@ -93,7 +93,7 @@ const ARRANGEMENT_KEY = 'iconArrangement'
 type IconArrangement = Partial<Record<OverlayProfileKey, string[]>>
 
 // ── Action names this bee handles ─────────────────────────────────
-const HANDLED_ACTIONS = new Set(['edit', 'search', 'command', 'hide', 'unhide', 'adopt', 'block', 'remove'])
+const HANDLED_ACTIONS = new Set(['edit', 'search', 'command', 'hide', 'break-apart', 'adopt', 'block', 'remove'])
 
 type TileActionPayload = { action: string; label: string; q: number; r: number; index: number }
 
@@ -287,7 +287,7 @@ export class TileActionsDrone extends Drone {
         this.#hideOrBlock(label, 'hc:hidden-tiles', 'tile:hidden')
         break
 
-      case 'unhide':
+      case 'break-apart':
         this.#unhide(label)
         break
 

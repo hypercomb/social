@@ -84,12 +84,14 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #mobileHandler = (e: MediaQueryListEvent) => this.isMobile.set(e.matches)
   #utility = signal(localStorage.getItem('hc:utility-expanded') !== 'false')
   #moveMode = signal(false)
-  #mode = signal<'browsing' | 'clipboard'>('browsing')
+  #mode = signal<'browsing' | 'clipboard' | 'atomize'>('browsing')
   #clipboardItems = signal<string[]>([])
   #roomValue = signal('')
   #roomOpen = signal(false)
   #beesVisible = signal(localStorage.getItem('hc:bees-visible') === 'true')
   #showHidden = signal(localStorage.getItem('hc:show-hidden') === '1')
+  #fitLocked = signal(localStorage.getItem('hc:fit-locked') === '1')
+  #fitLockedSnapshot: { scale: number; cx: number; cy: number; dx: number; dy: number } | null = null
   #clipboardAvailable = signal(false)
   #meetingJoined = signal(false)
   #meetingCameraOn = signal(false)
@@ -102,6 +104,9 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #activeTagFilters = signal<Set<string>>(new Set())
   #hoveredTags = signal<Set<string>>(new Set())
   readonly addressHover = signal(false)
+  #atomizeTarget = signal('')
+  #atomizeStrategy = signal('')
+  #atomizeAtomCount = signal(0)
 
   #idleTimer: ReturnType<typeof setTimeout> | null = null
   #moveModeUnsub: (() => void) | null = null
@@ -194,6 +199,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   })
 
   readonly locked = this.#locked.asReadonly()
+  readonly fitLocked = this.#fitLocked.asReadonly()
   readonly mode = this.#mode.asReadonly()
   readonly utility = this.#utility.asReadonly()
   readonly clipboardItems = this.#clipboardItems.asReadonly()
@@ -264,9 +270,13 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   readonly microphoneOn = this.#microphoneOn.asReadonly()
   readonly voiceActive = signal(false)
   readonly voiceSupported = VoiceInputService.supported()
+  readonly atomizeTarget = this.#atomizeTarget.asReadonly()
+  readonly atomizeStrategy = this.#atomizeStrategy.asReadonly()
+  readonly atomizeAtomCount = this.#atomizeAtomCount.asReadonly()
 
   // ── lifecycle ───────────────────────────────────────────
 
+  #fitLockedUnsub: (() => void) | null = null
   #clipboardUnsub: (() => void) | null = null
   #selectionUnsub: (() => void) | null = null
   #layoutModeUnsub: (() => void) | null = null
@@ -276,6 +286,9 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #voiceActiveUnsub: (() => void) | null = null
   #showHiddenUnsub: (() => void) | null = null
   #clipboardAvailableUnsub: (() => void) | null = null
+  #atomizeModeUnsub: (() => void) | null = null
+  #atomizeAtomsUnsub: (() => void) | null = null
+  #atomizeStrategyUnsub: (() => void) | null = null
   #onMeetingState: EventListener | null = null
   #onMeetingCamera: EventListener | null = null
   #onMeetingMic: EventListener | null = null
@@ -363,9 +376,46 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
       this.#showHidden.set(active)
     })
 
+    this.#atomizeModeUnsub = EffectBus.on<{ active: boolean; target: string; strategy: string }>(
+      'atomize:mode',
+      ({ active, target, strategy }) => {
+        if (active) {
+          this.#mode.set('atomize')
+          this.#atomizeTarget.set(target)
+          this.#atomizeStrategy.set(strategy)
+        } else {
+          this.#mode.set('browsing')
+          this.#atomizeTarget.set('')
+          this.#atomizeStrategy.set('')
+          this.#atomizeAtomCount.set(0)
+        }
+      },
+    )
+
+    this.#atomizeAtomsUnsub = EffectBus.on<{ atoms: unknown[]; target: string }>(
+      'atomize:atoms',
+      ({ atoms }) => {
+        this.#atomizeAtomCount.set(atoms.length)
+      },
+    )
+
+    this.#atomizeStrategyUnsub = EffectBus.on<{ strategy: string }>(
+      'atomize:strategy-changed',
+      ({ strategy }) => {
+        this.#atomizeStrategy.set(strategy)
+      },
+    )
+
     // emit initial show-hidden state so drones pick it up
     if (this.#showHidden()) {
       EffectBus.emit('visibility:show-hidden', { active: true })
+    }
+
+    // fit-locked: auto fit-to-screen on every navigation
+    if (this.#fitLocked()) {
+      const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
+      vp?.suspend?.()
+      this.#enableFitLocked()
     }
 
     this.#onMeetingState = ((e: CustomEvent) => {
@@ -406,6 +456,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     window.removeEventListener('touchmove', this.#onSwipeMove)
     window.removeEventListener('touchend', this.#onSwipeEnd)
     if (this.#idleTimer) clearTimeout(this.#idleTimer)
+    this.#fitLockedUnsub?.()
     this.#clipboardUnsub?.()
     this.#selectionUnsub?.()
     this.#moveModeUnsub?.()
@@ -418,6 +469,9 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     this.#clipboardAvailableUnsub?.()
     this.#tagsUnsub?.()
     this.#hoverTagsUnsub?.()
+    this.#atomizeModeUnsub?.()
+    this.#atomizeAtomsUnsub?.()
+    this.#atomizeStrategyUnsub?.()
     if (this.#onMeetingState) window.removeEventListener('meeting:state', this.#onMeetingState)
     if (this.#onMeetingCamera) window.removeEventListener('meeting:local-camera', this.#onMeetingCamera)
     if (this.#onMeetingMic) window.removeEventListener('meeting:local-mic', this.#onMeetingMic)
@@ -467,7 +521,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
 
   readonly fitOrCenter = (event: MouseEvent): void => {
     if (event.ctrlKey || event.metaKey) {
-      this.centerView()
+      this.#toggleFitLocked()
     } else {
       this.zoom?.zoomToFit?.()
     }
@@ -475,6 +529,84 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
 
   readonly fitContent = (): void => {
     this.zoom?.zoomToFit?.()
+  }
+
+  #toggleFitLocked(): void {
+    const next = !this.#fitLocked()
+    this.#fitLocked.set(next)
+    localStorage.setItem('hc:fit-locked', next ? '1' : '0')
+    const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
+    if (next) {
+      // snapshot current viewport so we can restore on unlock
+      this.#fitLockedSnapshot = this.#captureViewport()
+      // suspend persistence so per-layer saved positions aren't overwritten
+      vp?.suspend?.()
+      this.zoom?.zoomToFit?.()
+      this.#enableFitLocked()
+    } else {
+      this.#fitLockedUnsub?.()
+      this.#fitLockedUnsub = null
+      vp?.resume?.()
+      this.#restoreViewport()
+    }
+  }
+
+  #enableFitLocked(): void {
+    this.#fitLockedUnsub?.()
+    const movement = get('@hypercomb.social/MovementService') as EventTarget | undefined
+    if (!movement) return
+    let pending: number | null = null
+    const handler = () => {
+      // wait for synchronize (processor renders new content) then fit
+      if (pending !== null) return
+      const onSync = () => {
+        window.removeEventListener('synchronize', onSync)
+        pending = null
+        this.zoom?.zoomToFit?.()
+      }
+      pending = 1
+      window.addEventListener('synchronize', onSync, { once: true })
+    }
+    movement.addEventListener('change', handler)
+    this.#fitLockedUnsub = () => {
+      movement.removeEventListener('change', handler)
+    }
+  }
+
+  #captureViewport(): { scale: number; cx: number; cy: number; dx: number; dy: number } | null {
+    const host = this.pixiHost
+    const container = host?.container
+    const app = host?.app
+    if (!container || !app) return null
+    const s = app.renderer.screen
+    return {
+      scale: container.scale?.x ?? 1,
+      cx: container.position.x,
+      cy: container.position.y,
+      dx: app.stage.position.x - s.width * 0.5,
+      dy: app.stage.position.y - s.height * 0.5,
+    }
+  }
+
+  #restoreViewport(): void {
+    const snap = this.#fitLockedSnapshot
+    if (!snap) return
+    this.#fitLockedSnapshot = null
+
+    const host = this.pixiHost
+    const container = host?.container
+    const app = host?.app
+    if (!container || !app) return
+
+    const s = app.renderer.screen
+    container.scale.set(snap.scale)
+    container.position.set(snap.cx, snap.cy)
+    app.stage.position.set(s.width * 0.5 + snap.dx, s.height * 0.5 + snap.dy)
+
+    // persist restored state
+    const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
+    vp?.setZoom?.(snap.scale, snap.cx, snap.cy)
+    vp?.setPan?.(snap.dx, snap.dy)
   }
 
   readonly toggleLock = (): void => {
@@ -572,6 +704,23 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     EffectBus.emit('controls:action', { action: 'clear-clipboard' })
     EffectBus.emit('clipboard:view', { active: false })
     this.#mode.set('browsing')
+  }
+
+  // ── atomize ──────────────────────────────────────────
+
+  readonly STRATEGY_NAMES = ['shatter', 'orbital', 'blueprint', 'cascade', 'particle'] as const
+
+  readonly setAtomizeStrategy = (strategy: string): void => {
+    EffectBus.emit('atomize:set-strategy', { strategy })
+  }
+
+  readonly closeAtomize = (): void => {
+    EffectBus.emit('atomize:close', {})
+    this.#mode.set('browsing')
+  }
+
+  readonly reassemble = (): void => {
+    this.closeAtomize()
   }
 
   // ── bees ────────────────────────────────────────────

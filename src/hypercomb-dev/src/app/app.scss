@@ -59,10 +59,8 @@ hc-command-line {
   min-width: 0;
 }
 
-@include phone-only {
-  // hide command-line when secret input is expanded
-  .header-bar.secret-open hc-command-line {
-    display: none;
-  }
+// hide command-line when secret input is expanded (all screen sizes)
+.header-bar.secret-open hc-command-line {
+  display: none;
 }
 

@@ -126,38 +126,6 @@
   }
 }
 
-// ── mode crumb (subtle breadcrumb below header, right-aligned) ──
-
-.mode-crumb {
-  position: fixed;
-  top: 4.6rem;
-  right: 0.6rem;
-  z-index: 59999;
-
-  display: flex;
-  align-items: center;
-  gap: 0.2rem;
-
-  font: 400 0.5rem/1 ui-monospace, sfmono-regular, menlo, consolas, monospace;
-  letter-spacing: 0.08em;
-  text-transform: lowercase;
-  white-space: nowrap;
-  user-select: none;
-  pointer-events: none;
-}
-
-.mode-crumb-label {
-  &.solo-mode { color: rgba(255, 45, 138, 0.6); }
-  &.shield-mode { opacity: 0.6; }
-}
-
-.mode-crumb-sep {
-  color: rgba(245, 245, 245, 0.2);
-}
-
-.mode-crumb-words {
-  color: rgba(218, 165, 100, 0.85);
-}
 
 // ── secret input area ────────────────────────────────────
 

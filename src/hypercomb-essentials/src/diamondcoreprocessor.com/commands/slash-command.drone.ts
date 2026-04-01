@@ -327,6 +327,27 @@ class PushToTalkProvider implements SlashCommandProvider {
   }
 }
 
+class AtomizeUiProvider implements SlashCommandProvider {
+  readonly name = 'atomize-ui-provider'
+  readonly priority = 100
+  readonly commands: SlashCommand[] = [
+    { name: 'atomize-ui', description: 'Atomize a UI component into constituent parts', descriptionKey: 'slash.atomize-ui', aliases: ['au'] }
+  ]
+
+  execute(_commandName: string, args: string): void {
+    const parts = args.trim().split(/\s+/)
+    const target = parts[0] || 'command-line'
+
+    // Parse optional --mode flag
+    const modeIdx = parts.indexOf('--mode')
+    const strategy = modeIdx >= 0 && parts[modeIdx + 1] ? parts[modeIdx + 1] : undefined
+
+    const iocKey = target.includes('/') ? target : `@hypercomb.social/Atomizer:${target}`
+
+    EffectBus.emit('atomize:trigger', { target: iocKey, strategy })
+  }
+}
+
 // ── registration ────────────────────────────────────────
 
 const _slashCommands = new SlashCommandDrone()
@@ -348,4 +369,5 @@ _slashCommands.addProvider(new LanguageProvider())
 _slashCommands.addProvider(new ArrangeProvider())
 _slashCommands.addProvider(new VoiceProvider())
 _slashCommands.addProvider(new PushToTalkProvider())
+_slashCommands.addProvider(new AtomizeUiProvider())
 window.ioc.register('@diamondcoreprocessor.com/SlashCommandDrone', _slashCommands)

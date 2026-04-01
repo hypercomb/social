@@ -479,8 +479,8 @@ var ICONS = {
   search: svg('<circle cx="11" cy="11" r="7"/><line x1="16" y1="16" x2="21" y2="21"/>'),
   // Eye with slash
   hide: svg('<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/><circle cx="12" cy="12" r="3"/><line x1="4" y1="4" x2="20" y2="20"/>'),
-  // Eye open (unhide)
-  unhide: svg('<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/><circle cx="12" cy="12" r="3"/>'),
+  // Break apart — four fragments separating
+  breakApart: svg('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>'),
   // Plus
   adopt: svg('<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>'),
   // Circle with slash
@@ -494,17 +494,17 @@ var ICON_REGISTRY = [
   { name: "edit", svgMarkup: ICONS.edit, hoverTint: 13162751, profile: "private" },
   { name: "search", svgMarkup: ICONS.search, hoverTint: 13172680, profile: "private", visibleWhen: (ctx) => ctx.noImage },
   { name: "remove", svgMarkup: ICONS.remove, hoverTint: 16763080, profile: "private" },
-  { name: "unhide", svgMarkup: ICONS.unhide, hoverTint: 6737151, profile: "private", visibleWhen: (ctx) => ctx.isHidden },
+  { name: "break-apart", svgMarkup: ICONS.breakApart, hoverTint: 6737151, profile: "private", visibleWhen: (ctx) => ctx.isHidden },
   // ── public-own profile ──
   { name: "hide", svgMarkup: ICONS.hide, hoverTint: 16767144, profile: "public-own", visibleWhen: (ctx) => !ctx.isHidden },
-  { name: "unhide", svgMarkup: ICONS.unhide, hoverTint: 6737151, profile: "public-own", visibleWhen: (ctx) => ctx.isHidden },
+  { name: "break-apart", svgMarkup: ICONS.breakApart, hoverTint: 6737151, profile: "public-own", visibleWhen: (ctx) => ctx.isHidden },
   // ── public-external profile ──
   { name: "adopt", svgMarkup: ICONS.adopt, hoverTint: 11075544, profile: "public-external" },
   { name: "block", svgMarkup: ICONS.block, hoverTint: 16763080, profile: "public-external" }
 ];
 var DEFAULT_ACTIVE = {
-  "private": ["command", "edit", "remove", "unhide"],
-  "public-own": ["hide", "unhide"],
+  "private": ["command", "edit", "remove", "break-apart"],
+  "public-own": ["hide", "break-apart"],
   "public-external": ["adopt", "block"]
 };
 var ICON_Y = 6;
@@ -524,7 +524,7 @@ function computeIconPositions(activeNames) {
   return activeNames.map((_, i) => ({ x: Math.round(startX + i * spacing), y: ICON_Y }));
 }
 var ARRANGEMENT_KEY = "iconArrangement";
-var HANDLED_ACTIONS = /* @__PURE__ */ new Set(["edit", "search", "command", "hide", "unhide", "adopt", "block", "remove"]);
+var HANDLED_ACTIONS = /* @__PURE__ */ new Set(["edit", "search", "command", "hide", "break-apart", "adopt", "block", "remove"]);
 var TileActionsDrone = class extends Drone {
   namespace = "diamondcoreprocessor.com";
   description = "registers default tile overlay icons and handles their click actions";
@@ -666,7 +666,7 @@ var TileActionsDrone = class extends Drone {
       case "hide":
         this.#hideOrBlock(label, "hc:hidden-tiles", "tile:hidden");
         break;
-      case "unhide":
+      case "break-apart":
         this.#unhide(label);
         break;
       case "adopt":
@@ -749,6 +749,7 @@ var ICON_DISPLAY_NAMES = {
   "edit": "edit",
   "search": "search",
   "hide": "hide",
+  "break-apart": "restore",
   "adopt": "adopt",
   "block": "block"
 };
@@ -792,6 +793,10 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
   #noImageLabels = /* @__PURE__ */ new Set();
   #linkLabels = /* @__PURE__ */ new Set();
   #hiddenLabels = /* @__PURE__ */ new Set();
+  // break-apart effect state
+  #crackOverlay = null;
+  #shatterContainer = null;
+  #shatterAnimating = false;
   #navigationBlocked = false;
   #navigationGuardTimer = null;
   #meshPublic = false;
@@ -1011,6 +1016,7 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
       this.#hexBg = null;
       this.#seedLabel = null;
       this.#hoverLabel = null;
+      this.#crackOverlay = null;
       this.#actions = [];
     }
   }
@@ -1030,6 +1036,10 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
     this.#hoverLabel.position.set(0, HOVER_LABEL_Y);
     this.#hoverLabel.visible = false;
     this.#overlay.addChild(this.#hoverLabel);
+    this.#crackOverlay = new Graphics3();
+    this.#crackOverlay.visible = false;
+    this.#crackOverlay.zIndex = 100;
+    this.#overlay.addChild(this.#crackOverlay);
     this.#renderContainer.addChild(this.#overlay);
     this.#renderContainer.sortableChildren = true;
     if (this.#app && !this.#animTickBound) {
@@ -1102,6 +1112,11 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
       return;
     }
     if (this.#seedLabel) this.#seedLabel.visible = true;
+    if (this.#meshPublic && !this.#hasSelection) {
+      for (const action of this.#actions) action.button.visible = false;
+      if (this.#hoverLabel) this.#hoverLabel.visible = false;
+      return;
+    }
     if (this.#arrangeMode) {
       for (const action of this.#actions) action.button.visible = true;
       return;
@@ -1616,6 +1631,13 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
         this.#hoverLabel.visible = false;
       }
     }
+    if (this.#crackOverlay) {
+      if (hoveredName === "break-apart") {
+        this.#showCrackPreview();
+      } else {
+        this.#crackOverlay.visible = false;
+      }
+    }
   }
   #onClick = (e) => {
     if (this.#arrangeMode) return;
@@ -1669,6 +1691,14 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
         const bx = local.x - ox - btn.position.x;
         const by = local.y - oy - btn.position.y;
         if (btn.containsPoint(bx, by)) {
+          if (action.name === "break-apart") {
+            this.playShatterAnimation(
+              this.#currentAxial.q,
+              this.#currentAxial.r,
+              entry.label
+            );
+            return;
+          }
           this.emitEffect("tile:action", {
             action: action.name,
             q: this.#currentAxial.q,
@@ -1764,6 +1794,16 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
       return;
     }
     const occupied = this.#currentIndex !== void 0 && this.#currentIndex < this.#cellCount;
+    if (this.#meshPublic && !this.#hasSelection) {
+      const show = occupied && !this.#editing && !this.#editCooldown && !this.#touchDragging;
+      this.#overlay.visible = show;
+      if (this.#hexBg) this.#hexBg.hide();
+      for (const action of this.#actions) action.button.visible = false;
+      if (this.#hoverLabel) this.#hoverLabel.visible = false;
+      if (this.#crackOverlay) this.#crackOverlay.visible = false;
+      if (this.#seedLabel) this.#seedLabel.visible = show;
+      return;
+    }
     const shouldShow = occupied && !this.#editing && !this.#editCooldown && !this.#touchDragging;
     if (this.#hasSelection) {
       this.#overlay.visible = occupied && !this.#editing && !this.#editCooldown;
@@ -1820,6 +1860,105 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
       x: (cx - rect.left) * (screen.width / rect.width),
       y: (cy - rect.top) * (screen.height / rect.height)
     };
+  }
+  // ── Break-apart: crack preview + shatter animation ─────────────────
+  #showCrackPreview() {
+    const g = this.#crackOverlay;
+    if (!g || g.visible) return;
+    g.clear();
+    const R = this.#geo.circumRadiusPx;
+    const cx = (Math.random() - 0.5) * R * 0.3;
+    const cy = (Math.random() - 0.5) * R * 0.3;
+    const cracks = 5;
+    for (let i = 0; i < cracks; i++) {
+      const angle = i / cracks * Math.PI * 2 + (Math.random() - 0.5) * 0.6;
+      const len = R * (0.5 + Math.random() * 0.4);
+      const midAngle = angle + (Math.random() - 0.5) * 0.3;
+      const midLen = len * (0.3 + Math.random() * 0.3);
+      g.moveTo(cx, cy);
+      g.lineTo(cx + Math.cos(midAngle) * midLen, cy + Math.sin(midAngle) * midLen);
+      g.lineTo(cx + Math.cos(angle) * len, cy + Math.sin(angle) * len);
+      g.stroke({ width: 0.8, color: 16777215, alpha: 0.5 });
+      if (Math.random() > 0.4) {
+        const bAngle = midAngle + (Math.random() > 0.5 ? 0.7 : -0.7);
+        const bLen = len * 0.25;
+        const mx = cx + Math.cos(midAngle) * midLen;
+        const my = cy + Math.sin(midAngle) * midLen;
+        g.moveTo(mx, my);
+        g.lineTo(mx + Math.cos(bAngle) * bLen, my + Math.sin(bAngle) * bLen);
+        g.stroke({ width: 0.5, color: 16777215, alpha: 0.35 });
+      }
+    }
+    g.visible = true;
+  }
+  /** Run the shatter animation then emit the action. */
+  playShatterAnimation(q, r, label) {
+    if (this.#shatterAnimating || !this.#renderContainer || !this.#app) return;
+    this.#shatterAnimating = true;
+    const R = this.#geo.circumRadiusPx;
+    const px = this.#axialToPixel(q, r);
+    const ox = px.x + this.#meshOffset.x;
+    const oy = px.y + this.#meshOffset.y;
+    if (this.#overlay) this.#overlay.visible = false;
+    if (this.#crackOverlay) this.#crackOverlay.visible = false;
+    const container = new Container3();
+    container.position.set(ox, oy);
+    container.zIndex = 10001;
+    this.#renderContainer.addChild(container);
+    this.#shatterContainer = container;
+    const fragments = [];
+    const wedges = 6;
+    for (let i = 0; i < wedges; i++) {
+      const a1 = i / wedges * Math.PI * 2 - Math.PI / 2;
+      const a2 = (i + 1) / wedges * Math.PI * 2 - Math.PI / 2;
+      const g = new Graphics3();
+      g.moveTo(0, 0);
+      g.lineTo(Math.cos(a1) * R, Math.sin(a1) * R);
+      g.lineTo(Math.cos(a2) * R, Math.sin(a2) * R);
+      g.closePath();
+      g.fill({ color: 4478310, alpha: 0.6 });
+      g.stroke({ width: 0.5, color: 8956620, alpha: 0.4 });
+      container.addChild(g);
+      const midAngle = (a1 + a2) / 2;
+      fragments.push({
+        g,
+        angle: midAngle,
+        speed: 0.8 + Math.random() * 0.6,
+        spin: (Math.random() - 0.5) * 4
+      });
+    }
+    const duration = 500;
+    const startTime = performance.now();
+    const tick = () => {
+      const elapsed = performance.now() - startTime;
+      const t = Math.min(elapsed / duration, 1);
+      const ease = 1 - Math.pow(1 - t, 3);
+      for (const frag of fragments) {
+        const dist = ease * R * 1.8 * frag.speed;
+        frag.g.position.set(
+          Math.cos(frag.angle) * dist,
+          Math.sin(frag.angle) * dist
+        );
+        frag.g.rotation = ease * frag.spin;
+        frag.g.alpha = 1 - ease;
+        frag.g.scale.set(1 - ease * 0.3);
+      }
+      if (t >= 1) {
+        this.#app.ticker.remove(tick);
+        this.#renderContainer.removeChild(container);
+        container.destroy({ children: true });
+        this.#shatterContainer = null;
+        this.#shatterAnimating = false;
+        this.emitEffect("tile:action", {
+          action: "break-apart",
+          q,
+          r,
+          index: this.#lookupIndex(q, r) ?? 0,
+          label
+        });
+      }
+    };
+    this.#app.ticker.add(tick);
   }
 };
 var _tileOverlay = new TileOverlayDrone();

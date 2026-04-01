@@ -14,12 +14,7 @@
     </div>
   }
 
-  <!-- Secured label: visible when has secret and input is collapsed -->
-  @if (meshPublic && hasSecret() && !showSecretInput()) {
-    <span class="secured-label" [style.color]="shieldColor()" (click)="expandSecret()">{{ 'mesh.secured' | t }}</span>
-  }
-
-  <!-- Mode icon: always visible, always rightmost -->
+  <!-- Mode toggle: invisible tap/long-press target -->
   <button class="mode-toggle"
     [class.solo-mode]="!meshPublic"
     [class.shield-mode]="!!meshPublic"
@@ -33,12 +28,3 @@
   </button>
 </div>
 
-<!-- Mode breadcrumb: fixed below header, right-aligned -->
-@if (!showSecretInput()) {
-  <div class="mode-crumb">
-    <span class="mode-crumb-label" [class.solo-mode]="!meshPublic" [class.shield-mode]="!!meshPublic" [style.color]="meshPublic ? shieldColor() : null">{{ meshPublic ? 'public' : 'solo' }}</span>
-    @if (secretWords()) {
-      <span class="mode-crumb-sep">/</span><span class="mode-crumb-words">{{ secretWords() }}</span>
-    }
-  </div>
-}

@@ -20,12 +20,12 @@
   box-shadow: none;
 }
 
-// ── breadcrumb float ─────────────────────────────────────
+// ── breadcrumb (below header, right-aligned) ────────────
 
-.breadcrumb-float {
+.breadcrumb-top {
   position: fixed;
-  bottom: 0.15rem;
-  left: 0.6rem;
+  top: 4.6rem;
+  right: 0.6rem;
   z-index: 59999;
 
   display: flex;
@@ -39,42 +39,14 @@
   pointer-events: auto;
   transition: opacity 200ms ease;
 
-  .path-crumb { color: rgba(245, 245, 245, 0.6); max-width: 30rem; padding: 0; }
-  .space-crumb { color: rgba(190, 140, 200, 0.85); padding: 0; }
-  .leaf-crumb { color: rgba(245, 245, 245, 0.6); padding: 0; }
   .secret-crumb { color: rgba(218, 165, 100, 0.85); padding: 0; }
   .domain-crumb { color: rgba(245, 245, 245, 0.25); padding: 0; }
   .branch-crumb { color: rgba(190, 140, 200, 0.85); padding: 0; font-weight: 500; }
-
-  .address-icon {
-    cursor: default;
-    padding-right: 0.25rem;
-    transition: color 150ms ease;
-
-    &:hover { color: rgba(245, 245, 245, 0.6); }
-    .hci { font-size: 0.85rem; }
-  }
-
-  .address-crumb {
-    color: rgba(245, 245, 245, 0.45);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 40rem;
-    letter-spacing: 0.02em;
-  }
 
   .crumb-link {
     cursor: pointer;
     transition: color 150ms ease;
     &:hover { color: rgba(245, 245, 245, 0.7); }
-  }
-
-  .ctl-btn {
-    padding: 0.15rem 0.25rem;
-    min-width: unset;
-    .hci { font-size: 0.59rem; }
-    &::after { display: none; } // no tooltip in breadcrumb
   }
 
   &.faded {
@@ -262,6 +234,7 @@
   }
   &:hover::after { opacity: 1; }
 
+
   &:focus-visible {
     outline: 1px solid rgba(255, 255, 255, 0.3);
     outline-offset: 1px;
@@ -437,17 +410,6 @@
   line-height: 14px;
   text-align: center;
   font-family: system-ui;
-}
-
-// ── breadcrumb ────────────────────────────────────────────
-
-.path-crumb {
-  max-width: 14rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: rgba(245, 245, 245, 0.5);
-  padding: 0 0.3rem;
 }
 
 // ── clipboard mode ───────────────────────────────────────
@@ -645,11 +607,6 @@
   // room input: 16px prevents iOS auto-zoom
   .room-input { font-size: 16px; }
 
-  // breadcrumb always visible on touch (except when explicitly hidden on phone)
-  .breadcrumb-float.faded {
-    opacity: 1;
-    pointer-events: auto;
-  }
 }
 
 // ── tablet portrait (600–1023px) ──────────────────────────
@@ -681,28 +638,6 @@
 
   .clipboard-empty { font-size: 0.68rem; }
   .close-x { font-size: 1.1rem; }
-
-  .breadcrumb-float {
-    font-size: 0.65rem;
-    bottom: calc(3.2rem + var(--hc-safe-bottom, 0px));
-    max-width: calc(100vw - 2rem);
-    overflow: hidden;
-    text-overflow: ellipsis;
-
-    .address-crumb {
-      font-size: 0.6rem;
-      max-width: calc(100vw - 4rem);
-    }
-
-    .crumb-link { padding: 0.2rem 0.1rem; }
-
-    .ctl-btn {
-      min-width: 1.8rem;
-      min-height: 1.8rem;
-      padding: 0.2rem;
-      .hci { font-size: 0.75rem; }
-    }
-  }
 
   .room-shell { height: 2.2rem; }
   .room-input { width: 8rem; }
@@ -777,9 +712,6 @@
   .close-x { font-size: 1.3rem; }
   .bee-icon { font-size: 16px; }
 
-  // breadcrumbs hidden on phone — back button is in the pill instead
-  .breadcrumb-float { display: none; }
-
   .tag-crumb {
     font-size: 0.8rem;
     padding: 0.08rem 0.55rem;
@@ -816,14 +748,6 @@
     .dcp-icon { font-size: 1.1rem; }
   }
 
-  .breadcrumb-float {
-    font-size: 0.58rem;
-    max-width: 60rem;
-
-    .path-crumb { max-width: 40rem; }
-    .address-crumb { max-width: 60rem; }
-  }
-
   .tag-float { max-width: 28rem; }
 }
 
@@ -842,14 +766,6 @@
     padding: 0.36rem 0.48rem;
     .hci { font-size: 0.88rem; }
     .dcp-icon { font-size: 1.16rem; }
-  }
-
-  .breadcrumb-float {
-    font-size: 0.62rem;
-    max-width: 80rem;
-
-    .path-crumb { max-width: 50rem; }
-    .address-crumb { max-width: 80rem; }
   }
 
   .tag-float { max-width: 36rem; }

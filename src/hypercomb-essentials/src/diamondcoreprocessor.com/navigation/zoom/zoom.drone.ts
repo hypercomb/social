@@ -73,6 +73,12 @@ export class ViewportPersistence extends EventTarget {
   #writing = false
   #storeListening = false
   #reading: Promise<ViewportSnapshot> | null = null
+  #suspended = false
+
+  /** Suspend persistence — viewport changes are applied visually but not saved to OPFS. */
+  suspend = (): void => { this.#suspended = true }
+  /** Resume persistence. */
+  resume = (): void => { this.#suspended = false }
 
   // -- directory tracking --
 
@@ -140,12 +146,14 @@ export class ViewportPersistence extends EventTarget {
   // -- drone-facing api --
 
   setZoom = (scale: number, cx: number, cy: number): void => {
+    if (this.#suspended) return
     if (!this.#dir) this.#syncWithStore()
     this.#pending.zoom = { scale, cx, cy }
     if (this.#dir) this.#schedulePersist()
   }
 
   setPan = (dx: number, dy: number): void => {
+    if (this.#suspended) return
     if (!this.#dir) this.#syncWithStore()
     this.#pending.pan = { dx, dy }
     if (this.#dir) this.#schedulePersist()
