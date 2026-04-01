@@ -78,6 +78,9 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #hovered = signal(false)
   #locked = signal(false)
 
+  // ── power key state (ctrl / shift / alt held) ──────────
+  readonly powerKey = signal<'ctrl' | 'shift' | 'alt' | null>(null)
+
   /** True when viewport is phone-sized (≤599px). */
   readonly isMobile = signal(false)
   #mobileQuery: MediaQueryList | null = null
@@ -309,6 +312,11 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     window.addEventListener('navigate', this.#onActivity)
     this.#resetIdleTimer()
 
+    // power key tracking
+    window.addEventListener('keydown', this.#onPowerKeyDown)
+    window.addEventListener('keyup', this.#onPowerKeyUp)
+    window.addEventListener('blur', this.#onPowerKeyReset)
+
     // swipe-to-go-back gesture (mobile only, passive for scroll perf)
     window.addEventListener('touchstart', this.#onSwipeStart, { passive: true })
     window.addEventListener('touchmove', this.#onSwipeMove, { passive: true })
@@ -456,6 +464,9 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     this.#atomizeModeUnsub?.()
     this.#atomizeAtomsUnsub?.()
     this.#atomizeStrategyUnsub?.()
+    window.removeEventListener('keydown', this.#onPowerKeyDown)
+    window.removeEventListener('keyup', this.#onPowerKeyUp)
+    window.removeEventListener('blur', this.#onPowerKeyReset)
     window.removeEventListener('synchronize', this.#recomputeAddress)
   }
 
@@ -501,7 +512,10 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   }
 
   readonly fitOrCenter = (event: MouseEvent): void => {
-    if (event.ctrlKey || event.metaKey) {
+    if (this.#fitLocked()) {
+      // any click turns off fit-lock once active
+      this.#toggleFitLocked()
+    } else if (event.ctrlKey || event.metaKey) {
       this.#toggleFitLocked()
     } else {
       this.zoom?.zoomToFit?.()
@@ -534,24 +548,11 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
 
   #enableFitLocked(): void {
     this.#fitLockedUnsub?.()
-    const movement = get('@hypercomb.social/MovementService') as EventTarget | undefined
-    if (!movement) return
-    let pending: number | null = null
-    const handler = () => {
-      // wait for synchronize (processor renders new content) then fit
-      if (pending !== null) return
-      const onSync = () => {
-        window.removeEventListener('synchronize', onSync)
-        pending = null
-        this.zoom?.zoomToFit?.()
-      }
-      pending = 1
-      window.addEventListener('synchronize', onSync, { once: true })
-    }
-    movement.addEventListener('change', handler)
-    this.#fitLockedUnsub = () => {
-      movement.removeEventListener('change', handler)
-    }
+    // navigation:guard-end fires after all tiles are positioned and layer is visible
+    const unsub = EffectBus.on('navigation:guard-end', () => {
+      this.zoom?.zoomToFit?.(true)
+    })
+    this.#fitLockedUnsub = unsub
   }
 
   #captureViewport(): { scale: number; cx: number; cy: number; dx: number; dy: number } | null {
@@ -821,6 +822,25 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     if (this.#idleTimer) clearTimeout(this.#idleTimer)
     this.#idleTimer = setTimeout(() => this.#idle.set(true), this.#IDLE_DELAY)
   }
+
+  // ── power key tracking ────────────────────────────────
+
+  #onPowerKeyDown = (e: KeyboardEvent): void => {
+    if (e.key === 'Control' || e.key === 'Meta') this.powerKey.set('ctrl')
+    else if (e.key === 'Shift') this.powerKey.set('shift')
+    else if (e.key === 'Alt') this.powerKey.set('alt')
+  }
+
+  #onPowerKeyUp = (e: KeyboardEvent): void => {
+    const k = this.powerKey()
+    if ((k === 'ctrl' && (e.key === 'Control' || e.key === 'Meta'))
+      || (k === 'shift' && e.key === 'Shift')
+      || (k === 'alt' && e.key === 'Alt')) {
+      this.powerKey.set(null)
+    }
+  }
+
+  #onPowerKeyReset = (): void => { this.powerKey.set(null) }
 }
 
 /** Deterministic vibrant HSL color from a tag name — avoids grays. */

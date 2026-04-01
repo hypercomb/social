@@ -2,8 +2,6 @@
 
 :host {
   display: contents;
-  --hc-mono: ui-monospace, 'Cascadia Code', 'Source Code Pro',
-    Menlo, Consolas, 'DejaVu Sans Mono', monospace;
 }
 
 .hci {
@@ -177,31 +175,8 @@
   }
 }
 
-// ── public mode: inline labels, no hover overlay ─────────
-
-.controls-pill.public-mode .ctl-btn[aria-label] {
-  &::after {
-    position: static;
-    transform: none;
-    display: inline;
-    margin-left: 0.25rem;
-    padding: 0;
-    background: none;
-    border: none;
-    border-radius: 0;
-    opacity: 1;
-    pointer-events: auto;
-    transition: none;
-    white-space: nowrap;
-  }
-  &:hover::after {
-    position: static;
-    transform: none;
-    background: none;
-    border: none;
-    opacity: 1;
-  }
-}
+// ── public mode ──────────────────────────────────────────
+// Tooltips use the same hover-above behavior as private mode.
 
 // ── sections ──────────────────────────────────────────────
 
@@ -425,7 +400,7 @@
   font-weight: 700;
   line-height: 14px;
   text-align: center;
-  font-family: system-ui;
+  font-family: var(--hc-font);
 }
 
 // ── clipboard mode ───────────────────────────────────────

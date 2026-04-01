@@ -6,4 +6,6 @@ export * from './shortcut-sheet/shortcut-sheet.component'
 export * from './command-palette/command-palette.component'
 export * from './activity-log/activity-log.component'
 export * from './selection-context-menu/selection-context-menu.component'
+export * from './atomizer-bar/atomizer-bar.component'
+export * from './atomizer-bar/atomizer-sidebar.component'
 

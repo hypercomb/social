@@ -32,7 +32,7 @@ import '@hypercomb/essentials/diamondcoreprocessor.com/selection/tile-selection.
 import '@hypercomb/essentials/diamondcoreprocessor.com/keyboard/escape-cascade'
 import '@hypercomb/essentials/diamondcoreprocessor.com/navigation/bee-toggle'
 import { TileEditorComponent } from '@hypercomb/shared/ui/tile-editor/tile-editor.component'
-import { ControlsBarComponent, ShortcutSheetComponent, CommandPaletteComponent, ActivityLogComponent, SelectionContextMenuComponent } from '@hypercomb/shared/ui';
+import { ControlsBarComponent, ShortcutSheetComponent, CommandPaletteComponent, ActivityLogComponent, SelectionContextMenuComponent, AtomizerBarComponent, AtomizerSidebarComponent } from '@hypercomb/shared/ui';
 import { FormatPainterComponent } from '@hypercomb/shared/ui/format-painter/format-painter.component'
 import { PortalOverlayComponent } from '@hypercomb/shared/ui/portal/portal-overlay.component'
 import { SensitivityBarComponent } from '@hypercomb/shared/ui/sensitivity-bar/sensitivity-bar.component'
@@ -52,11 +52,8 @@ import { ClipboardWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/
 import '@hypercomb/essentials/diamondcoreprocessor.com/clipboard/image-paste.worker'
 import '@hypercomb/essentials/diamondcoreprocessor.com/assistant/claude-bridge.worker'
 import '@hypercomb/essentials/diamondcoreprocessor.com/assistant/atomize.drone'
-import '@hypercomb/essentials/diamondcoreprocessor.com/assistant/strategies/shatter-to-hex.strategy'
-import '@hypercomb/essentials/diamondcoreprocessor.com/assistant/strategies/orbital-inspector.strategy'
-import '@hypercomb/essentials/diamondcoreprocessor.com/assistant/strategies/blueprint-mode.strategy'
-import '@hypercomb/essentials/diamondcoreprocessor.com/assistant/strategies/cascade-waterfall.strategy'
-import '@hypercomb/essentials/diamondcoreprocessor.com/assistant/strategies/particle-disassembly.strategy'
+import '@hypercomb/essentials/diamondcoreprocessor.com/assistant/atomizer-drop.worker'
+import '@hypercomb/essentials/diamondcoreprocessor.com/assistant/input.atomizer'
 import '@hypercomb/shared/ui/command-line/command-line.atomizer'
 import '@hypercomb/essentials/diamondcoreprocessor.com/safety/link-safety.service'
 import '@hypercomb/essentials/diamondcoreprocessor.com/link/link-drop.worker'
@@ -78,8 +75,6 @@ import { RemoveQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/c
 import { FormatQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/format/format.queen'
 import { FormatPainterDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/format/format-painter.drone'
 import { LanguageQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/language.queen'
-import { NeonQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/neon.queen'
-import { NeonToolbarDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/presentation/tiles/neon-toolbar.drone'
 import { LayoutQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/move/layout.queen'
 import { ArrangeQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/arrange.queen'
 import { TileLinkActionDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/link/tile-link-action.drone'
@@ -134,8 +129,6 @@ const _deps = [
   FormatQueenBee,
   FormatPainterDrone,
   LanguageQueenBee,
-  NeonQueenBee,
-  NeonToolbarDrone,
   LayoutQueenBee,
   ArrangeQueenBee,
   TileLinkActionDrone,
@@ -145,7 +138,7 @@ void _deps
 
 @Component({
   selector: 'app-root',
-  imports: [ControlsBarComponent, MeshHeaderComponent, RouterOutlet, CommandLineComponent, TileEditorComponent, ShortcutSheetComponent, CommandPaletteComponent, PortalOverlayComponent, ActivityLogComponent, SensitivityBarComponent, SelectionContextMenuComponent, FormatPainterComponent, YoutubeViewerComponent],
+  imports: [ControlsBarComponent, MeshHeaderComponent, RouterOutlet, CommandLineComponent, TileEditorComponent, ShortcutSheetComponent, CommandPaletteComponent, PortalOverlayComponent, ActivityLogComponent, SensitivityBarComponent, SelectionContextMenuComponent, FormatPainterComponent, YoutubeViewerComponent, AtomizerBarComponent, AtomizerSidebarComponent],
   styleUrls: ['./app.scss'] as any,
   templateUrl: './app.html'
 })

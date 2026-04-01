@@ -77,7 +77,12 @@
   "controls.atomize-reassemble": "再組立",
   "controls.atomize-close": "アトマイザーを閉じる",
 
-  "slash.atomize-ui": "UIコンポーネントをアトムに分解",
+  "slash.atomize-ui": "アトマイザーツールバーを切替",
+
+  "atomizer.title": "アトマイザー",
+  "atomizer.close": "アトマイザーバーを閉じる",
+  "atomizer.empty": "アトマイザーなし",
+  "atomizer.reset": "プロパティをリセット",
 
   "explorer.title": "OPFSエクスプローラ",
   "explorer.toggle-raw": "Raw表示切替",
@@ -128,12 +133,12 @@
   "slash.remove": "現在のディレクトリからタイルを削除",
   "slash.format": "アクティブタイルのビジュアル書式をコピー",
   "slash.layout": "レイアウトテンプレートの保存・適用・一覧・削除",
-  "slash.neon": "ネオンホバーカラーツールバーの切替",
   "slash.move": "タイルのドラッグ並べ替えモードの切替",
   "slash.revise": "リビジョンモード（履歴クロック）の切替",
   "slash.expand": "Claude Haikuで選択タイルを構成部品に展開",
   "slash.opus": "Claude Opus 4.6にコンテキストを送信",
   "slash.sonnet": "Claude Sonnetにコンテキストを送信",
   "slash.haiku": "Claude Haikuにコンテキストを送信",
-  "slash.language": "UI言語を切り替え"
+  "slash.language": "UI言語を切り替え",
+  "slash.accent": "ホバーアクセントカラーを名前で設定"
 }

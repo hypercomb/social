@@ -76,7 +76,7 @@
 }
 
 .code {
-  font-family: ui-monospace, SFMono-Regular, 'Cascadia Code', 'Fira Code', Menlo, monospace;
+  font-family: var(--hc-mono);
   font-size: 10px;
   line-height: 1.5;
   white-space: pre-wrap;

@@ -67,7 +67,7 @@ import { EffectBus } from '@hypercomb/core'
     .lock-icon {
       font-size: 10px;
       color: rgba(255, 166, 77, 0.8);
-      font-family: ui-monospace, monospace;
+      font-family: var(--hc-mono);
       font-weight: bold;
     }
 

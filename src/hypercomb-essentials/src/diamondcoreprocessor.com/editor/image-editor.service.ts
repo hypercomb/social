@@ -22,7 +22,7 @@ export class ImageEditorService extends EventTarget {
 
   #size = 0  // always square: editorSize × editorSize
   #borderColor = '#c8975a'
-  #backgroundColor = 0x1e1e1e
+  #backgroundColor = 0xd0d0d4
   #orientation: HexOrientation = 'point-top'
   #linked = true
 
@@ -51,7 +51,7 @@ export class ImageEditorService extends EventTarget {
     await this.#app.init({
       width: size,
       height: size,
-      backgroundColor: 0x1e1e1e,
+      backgroundColor: 0xd0d0d4,
       antialias: true,
       autoDensity: true,
     })
@@ -240,8 +240,8 @@ export class ImageEditorService extends EventTarget {
   readonly setBackgroundColor = (color: string): void => {
     if (!this.#app) return
     const parsed = color
-      ? (parseInt(color.replace('#', ''), 16) || 0x1e1e1e)
-      : 0x1e1e1e
+      ? (parseInt(color.replace('#', ''), 16) || 0xd0d0d4)
+      : 0xd0d0d4
     this.#backgroundColor = parsed
     this.#app.renderer.background.color = parsed
   }

@@ -146,7 +146,7 @@ import type { TreeNode } from '../core/tree-node'
     .kind-label.dependency { color: #4fa58b; }
 
     .sig {
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-family: var(--hc-mono);
       font-size: 10px;
       color: #bbb;
       flex-shrink: 0;

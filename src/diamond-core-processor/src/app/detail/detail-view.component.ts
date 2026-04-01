@@ -72,7 +72,7 @@ import type { TreeNode } from '../core/tree-node'
     .breadcrumb {
       font-size: 13px;
       color: #666;
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-family: var(--hc-mono);
     }
 
     .detail-meta {
@@ -91,7 +91,7 @@ import type { TreeNode } from '../core/tree-node'
     }
 
     .detail-sig {
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-family: var(--hc-mono);
       font-size: 11px;
       color: #888;
       word-break: break-all;

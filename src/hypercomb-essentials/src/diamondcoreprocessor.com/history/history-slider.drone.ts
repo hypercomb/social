@@ -116,7 +116,7 @@ export class HistorySliderDrone {
       border: 1px solid rgba(255, 170, 60, 0.35);
       border-radius: 6px;
       backdrop-filter: blur(8px);
-      font-family: 'JetBrains Mono', 'Fira Code', monospace;
+      font-family: var(--hc-mono);
       font-size: 11px;
       color: rgba(255, 200, 120, 0.9);
       user-select: none;

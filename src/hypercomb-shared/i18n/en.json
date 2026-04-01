@@ -56,7 +56,7 @@
   "controls.clipboard": "clipboard",
   "controls.clipboard-empty": "empty",
   "controls.room-placeholder": "space",
-  "controls.space": "space",
+  "controls.space": "locaion",
   "controls.toggle-bees": "toggle bees",
   "controls.join-meeting": "join meeting",
   "controls.toggle-camera": "toggle camera",
@@ -77,7 +77,12 @@
   "controls.atomize-reassemble": "reassemble",
   "controls.atomize-close": "close atomizer",
 
-  "slash.atomize-ui": "atomize a UI component into atoms",
+  "slash.atomize-ui": "toggle the atomizer toolbar",
+
+  "atomizer.title": "atomizers",
+  "atomizer.close": "close atomizer bar",
+  "atomizer.empty": "no atomizers loaded",
+  "atomizer.reset": "reset properties",
 
   "explorer.title": "OPFS Explorer",
   "explorer.toggle-raw": "toggle raw view",
@@ -128,12 +133,12 @@
   "slash.remove": "Remove tiles from the current directory",
   "slash.format": "Copy visual formatting from the active tile",
   "slash.layout": "Save, apply, list, or remove layout templates",
-  "slash.neon": "Toggle the neon hover color toolbar",
   "slash.move": "Toggle move mode for drag-reordering tiles",
   "slash.revise": "Toggle revision mode (history clock)",
   "slash.expand": "Expand selected tiles into constituent parts via Claude Haiku",
   "slash.opus": "Send context to Claude Opus 4.6",
   "slash.sonnet": "Send context to Claude Sonnet",
   "slash.haiku": "Send context to Claude Haiku",
-  "slash.language": "Switch the UI language"
+  "slash.language": "Switch the UI language",
+  "slash.accent": "Set the hover accent color by name"
 }

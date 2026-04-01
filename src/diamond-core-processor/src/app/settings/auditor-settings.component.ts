@@ -248,7 +248,7 @@ import { AuditorService } from '../core/auditor.service'
     .source-url {
       font-size: 10px;
       color: #999;
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-family: var(--hc-mono);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;

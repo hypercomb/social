@@ -193,6 +193,69 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     return null
   }
 
+  /**
+   * Extract accent command args with phase awareness.
+   * Returns { fragment, phase } where phase indicates what to suggest:
+   *   'tags'    — inside brackets, suggest tag names
+   *   'presets' — after brackets or single-arg position, suggest preset names
+   */
+  #extractAccentArgs(raw: string): { fragment: string; phase: 'tags' | 'presets' } | null {
+    const ACCENT_CMDS = new Set(['accent', 'ac'])
+    const spaceIdx = raw.indexOf(' ')
+    const bracketIdx = raw.indexOf('[')
+
+    // `/accent[tags` — bracket directly after command
+    if (bracketIdx > 0 && (spaceIdx < 0 || bracketIdx < spaceIdx)) {
+      const cmd = raw.slice(0, bracketIdx).toLowerCase()
+      if (!ACCENT_CMDS.has(cmd)) return null
+      const bracketClose = raw.indexOf(']', bracketIdx)
+      if (bracketClose < 0) {
+        // still inside brackets — fragment is current tag being typed
+        const inner = raw.slice(bracketIdx + 1)
+        const lastComma = inner.lastIndexOf(',')
+        const fragment = lastComma >= 0 ? inner.slice(lastComma + 1).trimStart() : inner.trimStart()
+        return { fragment, phase: 'tags' }
+      }
+      // after closed brackets — suggest preset names
+      const after = raw.slice(bracketClose + 1).trimStart()
+      return { fragment: after, phase: 'presets' }
+    }
+
+    // `/accent ` with space
+    if (spaceIdx > 0) {
+      const cmd = raw.slice(0, spaceIdx).toLowerCase()
+      if (!ACCENT_CMDS.has(cmd)) return null
+      const args = raw.slice(spaceIdx + 1)
+
+      // `/accent [tags` — space then bracket
+      const argBracket = args.indexOf('[')
+      if (argBracket >= 0) {
+        const bracketClose = args.indexOf(']', argBracket)
+        if (bracketClose < 0) {
+          // inside brackets
+          const inner = args.slice(argBracket + 1)
+          const lastComma = inner.lastIndexOf(',')
+          const fragment = lastComma >= 0 ? inner.slice(lastComma + 1).trimStart() : inner.trimStart()
+          return { fragment, phase: 'tags' }
+        }
+        // after closed brackets
+        const after = args.slice(bracketClose + 1).trimStart()
+        return { fragment: after, phase: 'presets' }
+      }
+
+      // `/accent word1 word2` — two-arg form: first arg is tag/preset, second is preset
+      const parts = args.split(/\s+/)
+      if (parts.length >= 2) {
+        return { fragment: parts[parts.length - 1], phase: 'presets' }
+      }
+
+      // single arg position — suggest presets + tags
+      return { fragment: args, phase: 'presets' }
+    }
+
+    return null
+  }
+
   // Bridge EventTarget-based services to Angular Signals for reactivity
   private readonly resourceCount$ = fromRuntime(
     get('@hypercomb.social/ScriptPreloader') as EventTarget,
@@ -389,6 +452,20 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
           style: 'space'
         }
       }
+
+      // detect `/accent ` or `/accent[` — context-specific arg intellisense
+      const accentArgs = this.#extractAccentArgs(raw)
+      if (accentArgs !== null) {
+        const head = v.slice(0, v.length - accentArgs.fragment.length)
+        return {
+          active: true,
+          mode: 'slash',
+          head,
+          raw: accentArgs.fragment,
+          normalized: accentArgs.fragment.toLowerCase().trim(),
+          style: 'space'
+        }
+      }
       return {
         active: true,
         mode: 'slash',
@@ -476,6 +553,37 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (ctx.mode === 'slash') {
       // Check if we're in a delete-args context (both space and bracket syntax)
       // The context parser already splits head/raw, so head contains the delete prefix.
+      // Accent command: context-specific suggestions based on phase
+      const isAccentContext = ctx.head.match(/^\/(accent|ac)[\s\[]/i)
+      if (isAccentContext) {
+        const presets = ['glacier', 'bloom', 'aurora', 'ember', 'nebula']
+        const registry = get('@hypercomb.social/TagRegistry') as { names: string[] } | undefined
+        const tagNames = registry?.names ?? []
+
+        // Detect phase: inside brackets → tags, otherwise → presets + tags
+        const inBrackets = ctx.head.includes('[') && !ctx.head.includes(']')
+        if (inBrackets) {
+          // Inside brackets: suggest tag names, exclude already chosen
+          const already = new Set<string>()
+          const bracketStart = ctx.head.indexOf('[')
+          if (bracketStart >= 0) {
+            const committed = ctx.head.slice(bracketStart + 1)
+            for (const item of committed.split(',')) {
+              const n = item.trim().toLowerCase()
+              if (n) already.add(n)
+            }
+          }
+          let tags = tagNames.filter(t => !already.has(t.toLowerCase()))
+          if (ctx.normalized) tags = tags.filter(t => t.toLowerCase().startsWith(ctx.normalized))
+          return tags
+        }
+
+        // After brackets or single-arg: suggest presets first, then tags
+        const all = [...presets, ...tagNames.filter(t => !presets.includes(t))]
+        if (!ctx.normalized) return all
+        return all.filter(n => n.toLowerCase().startsWith(ctx.normalized))
+      }
+
       const isDeleteContext = ctx.head.match(/^\/(delete|del|rm)[\s\[]/i)
       if (isDeleteContext) {
         // ctx.normalized is the current fragment, already parsed by context
@@ -519,7 +627,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
       // operation phase: suggest operation keywords with / prefix
       if (phase === 'operation') {
-        const ops = ['/cut', '/copy', '/move', '/keyword', '/remove', '/format', '/opus', '/sonnet', '/haiku']
+        const ops = ['/cut', '/copy', '/move', '/keyword', '/remove', '/format', '/accent', '/opus', '/sonnet', '/haiku']
         if (!ctx.normalized) return ops
         return ops.filter(o => o.startsWith('/' + ctx.normalized) || o.slice(1).startsWith(ctx.normalized))
       }
@@ -1554,10 +1662,22 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       return
     }
 
-    // slash mode: fill command name or remove-arg seed name
+    // slash mode: fill command name or command-specific arg completion
     if (ctx.mode === 'slash') {
       if (ctx.head.match(/^\/(remove|rm)[\s\[]/i)) {
         this.#setShellValue(ctx.head + best, false)
+        return
+      }
+      // Accent bracket mode: append tag with comma separator, or preset after brackets
+      if (ctx.head.match(/^\/(accent|ac)[\s\[]/i)) {
+        const inBrackets = ctx.head.includes('[') && !ctx.head.includes(']')
+        if (inBrackets) {
+          // Inside brackets: append tag, add comma + space for chaining
+          this.#setShellValue(ctx.head + best + ', ', false)
+        } else {
+          // Preset position (after brackets or single arg)
+          this.#setShellValue(ctx.head + best, false)
+        }
         return
       }
       this.#setShellValue('/' + best, true)

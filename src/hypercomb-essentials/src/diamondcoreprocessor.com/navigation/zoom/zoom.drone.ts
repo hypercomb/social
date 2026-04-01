@@ -395,7 +395,7 @@ export class ZoomDrone extends Drone {
    * Zoom-to-fit: calculates the bounding box of all hex cells via the
    * mesh adapter and animates the viewport to center and fit all content.
    */
-  public zoomToFit = (): void => {
+  public zoomToFit = (snap = false): void => {
     if (!this.renderContainer || !this.renderer || !this.app) return
 
     const target = this.renderContainer
@@ -446,6 +446,13 @@ export class ZoomDrone extends Drone {
     //   containerPos = (safeMid - stagePos) / stageScale - center * fitScale
     const targetPosX = (safeMidX - screenCx) / stageScale - centerX * fitScale
     const targetPosY = (safeMidY - screenCy) / stageScale - centerY * fitScale
+
+    if (snap) {
+      target.scale.set(fitScale)
+      target.position.set(targetPosX, targetPosY)
+      this.#saveZoom(target)
+      return
+    }
 
     // animate to target (200ms ease-out)
     const startScale = target.scale.x

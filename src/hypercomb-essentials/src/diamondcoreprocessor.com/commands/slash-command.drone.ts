@@ -166,15 +166,16 @@ class LayoutProvider implements SlashCommandProvider {
   }
 }
 
-class NeonProvider implements SlashCommandProvider {
-  readonly name = 'neon-provider'
+class AccentProvider implements SlashCommandProvider {
+  readonly name = 'accent-provider'
   readonly priority = 100
   readonly commands: SlashCommand[] = [
-    { name: 'neon', description: 'Toggle the neon hover color toolbar', descriptionKey: 'slash.neon' }
+    { name: 'accent', description: 'Set the hover accent color by name', descriptionKey: 'slash.accent', aliases: ['ac'] }
   ]
 
-  execute(): void {
-    EffectBus.emit('neon:toggle-toolbar', {})
+  async execute(_commandName: string, args: string): Promise<void> {
+    const queen = get('@diamondcoreprocessor.com/AccentQueenBee') as any
+    if (queen?.invoke) await queen.invoke(args)
   }
 }
 
@@ -331,20 +332,11 @@ class AtomizeUiProvider implements SlashCommandProvider {
   readonly name = 'atomize-ui-provider'
   readonly priority = 100
   readonly commands: SlashCommand[] = [
-    { name: 'atomize-ui', description: 'Atomize a UI component into constituent parts', descriptionKey: 'slash.atomize-ui', aliases: ['au'] }
+    { name: 'atomize-ui', description: 'Toggle the atomizer toolbar', descriptionKey: 'slash.atomize-ui', aliases: ['au', 'atomizer'] }
   ]
 
-  execute(_commandName: string, args: string): void {
-    const parts = args.trim().split(/\s+/)
-    const target = parts[0] || 'command-line'
-
-    // Parse optional --mode flag
-    const modeIdx = parts.indexOf('--mode')
-    const strategy = modeIdx >= 0 && parts[modeIdx + 1] ? parts[modeIdx + 1] : undefined
-
-    const iocKey = target.includes('/') ? target : `@hypercomb.social/Atomizer:${target}`
-
-    EffectBus.emit('atomize:trigger', { target: iocKey, strategy })
+  execute(): void {
+    EffectBus.emit('atomizer-bar:toggle', { active: true })
   }
 }
 
@@ -359,7 +351,7 @@ _slashCommands.addProvider(new DebugProvider())
 _slashCommands.addProvider(new RemoveProvider())
 _slashCommands.addProvider(new FormatSlashProvider())
 _slashCommands.addProvider(new LayoutProvider())
-_slashCommands.addProvider(new NeonProvider())
+_slashCommands.addProvider(new AccentProvider())
 _slashCommands.addProvider(new MoveProvider())
 _slashCommands.addProvider(new ReviseProvider())
 _slashCommands.addProvider(new ExpandProvider())

@@ -275,15 +275,10 @@ var AtomizeUiProvider = class {
   name = "atomize-ui-provider";
   priority = 100;
   commands = [
-    { name: "atomize-ui", description: "Atomize a UI component into constituent parts", descriptionKey: "slash.atomize-ui", aliases: ["au"] }
+    { name: "atomize-ui", description: "Toggle the atomizer toolbar", descriptionKey: "slash.atomize-ui", aliases: ["au", "atomizer"] }
   ];
-  execute(_commandName, args) {
-    const parts = args.trim().split(/\s+/);
-    const target = parts[0] || "command-line";
-    const modeIdx = parts.indexOf("--mode");
-    const strategy = modeIdx >= 0 && parts[modeIdx + 1] ? parts[modeIdx + 1] : void 0;
-    const iocKey = target.includes("/") ? target : `@hypercomb.social/Atomizer:${target}`;
-    EffectBus.emit("atomize:trigger", { target: iocKey, strategy });
+  execute() {
+    EffectBus.emit("atomizer-bar:toggle", { active: true });
   }
 };
 var _slashCommands = new SlashCommandDrone();

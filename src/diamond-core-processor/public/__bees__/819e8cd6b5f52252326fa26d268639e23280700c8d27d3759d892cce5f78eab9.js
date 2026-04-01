@@ -1,6 +1,6 @@
 // src/diamondcoreprocessor.com/presentation/tiles/tile-overlay.drone.ts
 import { Drone as Drone2, EffectBus as EffectBus2 } from "@hypercomb/core";
-import { Container as Container3, Graphics as Graphics3, Point, Text, TextStyle } from "pixi.js";
+import { Container as Container3, Graphics as Graphics3, Point } from "pixi.js";
 
 // src/diamondcoreprocessor.com/presentation/tiles/hex-icon-button.ts
 import { Container, Graphics, Sprite, Texture } from "pixi.js";
@@ -507,7 +507,7 @@ var DEFAULT_ACTIVE = {
   "public-own": ["hide", "break-apart"],
   "public-external": ["adopt", "block"]
 };
-var ICON_Y = 6;
+var ICON_Y = 10;
 var ICON_SPACING = 10;
 var HEX_INRADIUS = 27.7;
 var EDGE_MARGIN = 3;
@@ -728,31 +728,7 @@ var _tileActions = new TileActionsDrone();
 window.ioc.register("@diamondcoreprocessor.com/TileActionsDrone", _tileActions);
 
 // src/diamondcoreprocessor.com/presentation/tiles/tile-overlay.drone.ts
-var LABEL_X = -24;
-var LABEL_Y = -14;
-var LABEL_STYLE = new TextStyle({
-  fontFamily: "monospace",
-  fontSize: 5,
-  fill: 16777215,
-  align: "left"
-});
 var DEFAULT_ICON_SIZE = 7;
-var HOVER_LABEL_Y = 0;
-var HOVER_LABEL_STYLE = new TextStyle({
-  fontFamily: "monospace",
-  fontSize: 3.5,
-  fill: 10066329,
-  align: "center"
-});
-var ICON_DISPLAY_NAMES = {
-  "command": "command",
-  "edit": "edit",
-  "search": "search",
-  "hide": "hide",
-  "break-apart": "restore",
-  "adopt": "adopt",
-  "block": "block"
-};
 var POOL_Y_OFFSET = 16;
 var POOL_ICON_SIZE = 5;
 var POOL_SPACING = 8;
@@ -771,8 +747,6 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
   #renderer = null;
   #overlay = null;
   #hexBg = null;
-  #seedLabel = null;
-  #hoverLabel = null;
   #actions = [];
   #animTime = 0;
   #animTickBound = null;
@@ -1014,8 +988,6 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
       this.#overlay.destroy({ children: true });
       this.#overlay = null;
       this.#hexBg = null;
-      this.#seedLabel = null;
-      this.#hoverLabel = null;
       this.#crackOverlay = null;
       this.#actions = [];
     }
@@ -1028,14 +1000,6 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
     this.#overlay.zIndex = 9999;
     this.#hexBg = new HexOverlayMesh(this.#geo.circumRadiusPx, this.#flat);
     this.#overlay.addChild(this.#hexBg.mesh);
-    this.#seedLabel = new Text({ text: "", style: LABEL_STYLE, resolution: window.devicePixelRatio * 8 });
-    this.#seedLabel.position.set(LABEL_X, LABEL_Y);
-    this.#overlay.addChild(this.#seedLabel);
-    this.#hoverLabel = new Text({ text: "", style: HOVER_LABEL_STYLE, resolution: window.devicePixelRatio * 8 });
-    this.#hoverLabel.anchor.set(0.5, 1);
-    this.#hoverLabel.position.set(0, HOVER_LABEL_Y);
-    this.#hoverLabel.visible = false;
-    this.#overlay.addChild(this.#hoverLabel);
     this.#crackOverlay = new Graphics3();
     this.#crackOverlay.visible = false;
     this.#crackOverlay.zIndex = 100;
@@ -1107,14 +1071,10 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
     if (!this.#currentAxial) return;
     if (this.#dropDragging || this.#dropPending) {
       for (const action of this.#actions) action.button.visible = false;
-      if (this.#seedLabel) this.#seedLabel.visible = false;
-      if (this.#hoverLabel) this.#hoverLabel.visible = false;
       return;
     }
-    if (this.#seedLabel) this.#seedLabel.visible = true;
     if (this.#meshPublic && !this.#hasSelection) {
       for (const action of this.#actions) action.button.visible = false;
-      if (this.#hoverLabel) this.#hoverLabel.visible = false;
       return;
     }
     if (this.#arrangeMode) {
@@ -1609,7 +1569,6 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
   #updateIconHover(local) {
     if (!this.#overlay?.visible) {
       for (const a of this.#actions) a.button.hovered = false;
-      if (this.#hoverLabel) this.#hoverLabel.visible = false;
       return;
     }
     const ox = this.#overlay.position.x;
@@ -1622,14 +1581,6 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
       const isHovered = btn.containsPoint(bx, by);
       btn.hovered = isHovered;
       if (isHovered) hoveredName = a.name;
-    }
-    if (this.#hoverLabel) {
-      if (hoveredName) {
-        this.#hoverLabel.text = ICON_DISPLAY_NAMES[hoveredName] ?? hoveredName;
-        this.#hoverLabel.visible = true;
-      } else {
-        this.#hoverLabel.visible = false;
-      }
     }
     if (this.#crackOverlay) {
       if (hoveredName === "break-apart") {
@@ -1778,10 +1729,7 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
     lineage.explorerUp();
   }
   // ── Helpers ────────────────────────────────────────────────────────
-  #updateSeedLabel(q, r) {
-    if (!this.#seedLabel) return;
-    const entry = this.#occupiedByAxial.get(_TileOverlayDrone.axialKey(q, r));
-    this.#seedLabel.text = entry?.label ?? "";
+  #updateSeedLabel(_q, _r) {
   }
   #updateVisibility() {
     if (!this.#overlay) return;
@@ -1799,9 +1747,7 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
       this.#overlay.visible = show;
       if (this.#hexBg) this.#hexBg.hide();
       for (const action of this.#actions) action.button.visible = false;
-      if (this.#hoverLabel) this.#hoverLabel.visible = false;
       if (this.#crackOverlay) this.#crackOverlay.visible = false;
-      if (this.#seedLabel) this.#seedLabel.visible = show;
       return;
     }
     const shouldShow = occupied && !this.#editing && !this.#editCooldown && !this.#touchDragging;
@@ -1809,8 +1755,6 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
       this.#overlay.visible = occupied && !this.#editing && !this.#editCooldown;
       if (this.#hexBg) this.#hexBg.hide();
       for (const action of this.#actions) action.button.visible = false;
-      if (this.#hoverLabel) this.#hoverLabel.visible = false;
-      if (this.#seedLabel) this.#seedLabel.visible = true;
       return;
     }
     this.#overlay.visible = shouldShow;

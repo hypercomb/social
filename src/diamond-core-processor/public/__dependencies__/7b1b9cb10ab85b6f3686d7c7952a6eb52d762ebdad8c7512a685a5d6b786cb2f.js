@@ -18,7 +18,7 @@ var ImageEditorService = class extends EventTarget {
   #size = 0;
   // always square: editorSize × editorSize
   #borderColor = "#c8975a";
-  #backgroundColor = 1973790;
+  #backgroundColor = 13684948;
   #orientation = "point-top";
   #linked = true;
   // ── public state ───────────────────────────────────────────────
@@ -44,7 +44,7 @@ var ImageEditorService = class extends EventTarget {
     await this.#app.init({
       width: size,
       height: size,
-      backgroundColor: 1973790,
+      backgroundColor: 13684948,
       antialias: true,
       autoDensity: true
     });
@@ -188,7 +188,7 @@ var ImageEditorService = class extends EventTarget {
   // Matches the branch indicator / border ring style (full hexagon stroke).
   setBackgroundColor = (color) => {
     if (!this.#app) return;
-    const parsed = color ? parseInt(color.replace("#", ""), 16) || 1973790 : 1973790;
+    const parsed = color ? parseInt(color.replace("#", ""), 16) || 13684948 : 13684948;
     this.#backgroundColor = parsed;
     this.#app.renderer.background.color = parsed;
   };

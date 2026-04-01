@@ -497,6 +497,8 @@ export class TileOverlayDrone extends Drone {
     for (const action of this.#actions) {
       if (action.visibleWhen) {
         action.button.visible = action.visibleWhen(ctx)
+      } else {
+        action.button.visible = true
       }
     }
 

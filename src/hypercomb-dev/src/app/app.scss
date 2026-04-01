@@ -28,7 +28,7 @@
     justify-content: center;
     font-size: 4.5rem;
     font-weight: 900;
-    font-family: 'Arial Black', 'Helvetica Neue', sans-serif;
+    font-family: 'Inter', 'Arial Black', 'Helvetica Neue', sans-serif;
     letter-spacing: 0.08em;
     word-spacing: 1.5rem;
     line-height: 3.5;
@@ -62,5 +62,18 @@ hc-command-line {
 // hide command-line when secret input is expanded (all screen sizes)
 .header-bar.secret-open hc-command-line {
   display: none;
+}
+
+// ── atomizer drop target highlights ──────────────────────
+// Applied by AtomizerDropWorker during drag
+:global(.atomizer-drop-target) {
+  outline: 1.5px dashed rgba(0, 229, 255, 0.35) !important;
+  outline-offset: 2px;
+  transition: outline-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+:global(.atomizer-drop-hover) {
+  outline-color: rgba(0, 229, 255, 0.8) !important;
+  box-shadow: 0 0 12px rgba(0, 229, 255, 0.25), inset 0 0 6px rgba(0, 229, 255, 0.08) !important;
 }
 

@@ -180,7 +180,7 @@ import type { BeeDocEntry } from '../core/tree-node'
       flex-shrink: 0;
       font-size: 11px;
       color: #999;
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-family: var(--hc-mono);
     }
 
     .hdr-sep { color: #ccc; }
@@ -259,7 +259,7 @@ import type { BeeDocEntry } from '../core/tree-node'
     }
 
     .props code {
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-family: var(--hc-mono);
       font-size: 11px;
       color: #555;
     }
@@ -365,7 +365,7 @@ import type { BeeDocEntry } from '../core/tree-node'
       padding-bottom: 24px;
       font-size: 11px;
       color: #888;
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-family: var(--hc-mono);
     }
 
     .status.error { color: #b00020; }

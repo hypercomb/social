@@ -1,3 +1,10 @@
+:root {
+  --hc-font: 'Inter', system-ui, -apple-system, BlinkMacSystemFont,
+    'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --hc-mono: ui-monospace, 'Cascadia Code', 'Source Code Pro', 'Fira Code',
+    Menlo, Consolas, 'DejaVu Sans Mono', monospace;
+}
+
 html,
 body {
   margin: 0;
@@ -6,5 +13,5 @@ body {
 }
 
 body {
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: var(--hc-font);
 }

@@ -107,7 +107,7 @@ import type { PatchRecord } from '../core/patch-store'
     }
 
     .patch-sig {
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-family: var(--hc-mono);
       font-size: 10px;
       color: #aaa;
       flex-shrink: 0;

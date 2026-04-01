@@ -62,79 +62,19 @@ Rules:
 2. Items must be unique and non-overlapping.
 3. Items should be concrete constituents, not vague categories.
 4. Output ONLY the JSON array. No markdown, no wrapping text.`;
-var AtomizerSession = class {
-  target;
-  provider;
-  atoms;
-  activeStrategy;
-  #strategies;
-  constructor(target, provider, atoms, strategies, initialStrategy) {
-    this.target = target;
-    this.provider = provider;
-    this.atoms = atoms;
-    this.#strategies = strategies;
-    this.activeStrategy = initialStrategy;
-  }
-  setStrategy(name) {
-    if (name === this.activeStrategy) return;
-    const current = this.#strategies.get(this.activeStrategy);
-    const next = this.#strategies.get(name);
-    if (!next) return;
-    current?.exit();
-    this.activeStrategy = name;
-    next.switchTo(this.atoms);
-  }
-  enter() {
-    const strategy = this.#strategies.get(this.activeStrategy);
-    strategy?.enter(this.provider, this.atoms);
-  }
-  exit() {
-    const strategy = this.#strategies.get(this.activeStrategy);
-    strategy?.exit();
-    this.provider.reassemble();
-  }
-};
 var AtomizeDrone = class extends Drone {
   namespace = "diamondcoreprocessor.com";
-  description = "atomizes tiles (Claude Haiku) and UI components (display strategies)";
+  description = "expands a tile into constituent parts via Claude Haiku";
   deps = {
     lineage: "@hypercomb.social/Lineage",
     navigation: "@hypercomb.social/Navigation",
     store: "@hypercomb.social/Store"
   };
-  listens = [
-    "render:host-ready",
-    "tile:action",
-    "atomize:trigger",
-    "atomize:set-strategy",
-    "atomize:close"
-  ];
-  emits = [
-    "overlay:register-action",
-    "seed:added",
-    "atomize:mode",
-    "atomize:atoms",
-    "atomize:strategy-changed"
-  ];
+  listens = ["render:host-ready", "tile:action"];
+  emits = ["overlay:register-action", "seed:added"];
   #registered = false;
   #effectsRegistered = false;
   #busy = false;
-  // --- strategy registry ---
-  #strategies = /* @__PURE__ */ new Map();
-  #session = null;
-  /** Register a display strategy (called by strategy modules at load time) */
-  registerStrategy(strategy) {
-    this.#strategies.set(strategy.name, strategy);
-  }
-  /** Get the current atomizer session (for external queries) */
-  get session() {
-    return this.#session;
-  }
-  /** Get all registered strategy names */
-  get availableStrategies() {
-    return [...this.#strategies.keys()];
-  }
-  // --- lifecycle ---
   heartbeat = async () => {
     if (this.#effectsRegistered) return;
     this.#effectsRegistered = true;
@@ -147,70 +87,7 @@ var AtomizeDrone = class extends Drone {
       if (payload.action !== "expand") return;
       void this.#expand(payload.label);
     });
-    this.onEffect(
-      "atomize:trigger",
-      (payload) => {
-        void this.#atomizeComponent(payload.target, payload.strategy);
-      }
-    );
-    this.onEffect(
-      "atomize:set-strategy",
-      (payload) => {
-        if (!this.#session) return;
-        this.#session.setStrategy(payload.strategy);
-        this.emitEffect("atomize:strategy-changed", {
-          strategy: payload.strategy
-        });
-      }
-    );
-    this.onEffect("atomize:close", () => {
-      this.#closeSession();
-    });
   };
-  // ---------------------------------------------------------------------------
-  // UI component atomization
-  // ---------------------------------------------------------------------------
-  async #atomizeComponent(target, strategyName) {
-    this.#closeSession();
-    const ioc = globalThis.ioc;
-    const provider = ioc?.get(target);
-    if (!provider) {
-      console.warn(`[atomize] No AtomizerProvider found for: ${target}`);
-      return;
-    }
-    const atoms = provider.discover();
-    if (atoms.length === 0) {
-      console.warn(`[atomize] No atoms discovered for: ${target}`);
-      return;
-    }
-    const strategy = strategyName ?? this.#strategies.keys().next().value;
-    if (!strategy || !this.#strategies.has(strategy)) {
-      console.warn(`[atomize] No display strategy available`);
-      return;
-    }
-    this.#session = new AtomizerSession(
-      target,
-      provider,
-      atoms,
-      this.#strategies,
-      strategy
-    );
-    this.#session.enter();
-    this.emitEffect("atomize:mode", { active: true, target, strategy });
-    this.emitEffect("atomize:atoms", { atoms, target });
-    console.log(
-      `[atomize] ${target} \u2192 ${atoms.length} atoms (strategy: ${strategy})`
-    );
-  }
-  #closeSession() {
-    if (!this.#session) return;
-    this.#session.exit();
-    this.#session = null;
-    this.emitEffect("atomize:mode", { active: false, target: "", strategy: "" });
-  }
-  // ---------------------------------------------------------------------------
-  // Tile decomposition (original behavior, unchanged)
-  // ---------------------------------------------------------------------------
   async #expand(rawLabel) {
     if (this.#busy) return;
     this.#busy = true;

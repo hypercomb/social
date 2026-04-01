@@ -19,6 +19,15 @@ body {
   caret-color: transparent;
   background-color: #050f17;
   touch-action: manipulation;
+  font-family: var(--hc-font);
+}
+
+// ── typography tokens ─────────────────────────────────────
+:root {
+  --hc-font: 'Inter', system-ui, -apple-system, BlinkMacSystemFont,
+    'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --hc-mono: ui-monospace, 'Cascadia Code', 'Source Code Pro', 'Fira Code',
+    Menlo, Consolas, 'DejaVu Sans Mono', monospace;
 }
 
 // ── safe-area insets + touch detection ────────────────────

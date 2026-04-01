@@ -7,7 +7,7 @@
 
 import { EffectBus, SignatureService } from '@hypercomb/core'
 
-type TagEntry = { color?: string; enabled?: boolean }
+type TagEntry = { color?: string; enabled?: boolean; accent?: string }
 type TagMap = Record<string, TagEntry>
 
 const PROPS_FILE = '0000'
@@ -33,6 +33,21 @@ export class TagRegistry extends EventTarget {
 
   /** Whether a tag is enabled (defaults to true if not set). */
   enabled(name: string): boolean { return this.#tags[name]?.enabled !== false }
+
+  /** Get accent preset name for a tag (e.g. 'glacier', 'bloom'). */
+  accent(name: string): string | undefined { return this.#tags[name]?.accent }
+
+  /** Set accent preset name for a tag. Pass undefined to clear. */
+  async setAccent(name: string, accent: string | undefined): Promise<void> {
+    await this.ensureLoaded()
+    const existing = this.#tags[name]
+    if (!existing) {
+      this.#tags[name] = { accent, enabled: true }
+    } else {
+      this.#tags[name] = { ...existing, accent }
+    }
+    await this.#save()
+  }
 
   /** Ensure loaded — call before reading. Returns immediately if already loaded. */
   async ensureLoaded(): Promise<void> {

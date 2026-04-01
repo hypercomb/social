@@ -34,7 +34,7 @@
 
 .atomizer-bar-title {
   font-size: 9px;
-  font-family: monospace;
+  font-family: var(--hc-mono);
   letter-spacing: 0.5px;
   color: rgba(255, 255, 255, 0.4);
   text-transform: uppercase;
@@ -110,7 +110,7 @@
 
 .atomizer-name {
   font-size: 8px;
-  font-family: monospace;
+  font-family: var(--hc-mono);
   color: rgba(255, 255, 255, 0.45);
   text-align: center;
   line-height: 1.1;
@@ -126,7 +126,7 @@
 
 .atomizer-empty {
   font-size: 8px;
-  font-family: monospace;
+  font-family: var(--hc-mono);
   color: rgba(255, 255, 255, 0.25);
   text-align: center;
   padding: 8px 4px;

@@ -61,7 +61,7 @@ var DEFAULT_ACTIVE = {
   "public-own": ["hide", "break-apart"],
   "public-external": ["adopt", "block"]
 };
-var ICON_Y = 6;
+var ICON_Y = 10;
 var ICON_SPACING = 10;
 var HEX_INRADIUS = 27.7;
 var EDGE_MARGIN = 3;

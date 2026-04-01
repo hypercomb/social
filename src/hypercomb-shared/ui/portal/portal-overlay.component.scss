@@ -42,8 +42,7 @@
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
 
   color: rgba(245, 245, 245, 0.85);
-  font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro',
-    Menlo, Consolas, 'DejaVu Sans Mono', monospace;
+  font-family: var(--hc-mono);
   cursor: pointer;
   transition: opacity 200ms ease, transform 200ms ease, background 200ms ease;
 

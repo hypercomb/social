@@ -11,7 +11,7 @@
   --shell-bg: #fff;
   --shell-border: rgba(0, 0, 0, 0.15);
   --shell-border-focus: var(--accent);
-  --terminal-font: ui-monospace, sfmono-regular, menlo, consolas, monospace;
+  --terminal-font: var(--hc-mono);
   --transition-speed: 200ms;
 }
 

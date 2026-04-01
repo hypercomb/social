@@ -127,21 +127,14 @@ export class AtomizerDropWorker extends Bee {
   #findMatchingTargets(targetTypes: readonly string[]): AtomizableTarget[] {
     const targets: AtomizableTarget[] = []
     const container = ioc()
-    if (!container?.entries) {
-      // Fallback: scan known target keys
-      for (const type of targetTypes) {
-        const key = `${ATOMIZABLE_TARGET_PREFIX}${type}`
-        const target = container?.get(key) as AtomizableTarget | undefined
-        if (target) targets.push(target)
-      }
-      return targets
-    }
+    if (!container?.list) return targets
 
-    // If IoC supports iteration, find all matching targets
-    for (const [key, value] of container.entries()) {
+    // Scan all IoC keys that start with the atomizable target prefix
+    const keys = container.list() as readonly string[]
+    for (const key of keys) {
       if (!key.startsWith(ATOMIZABLE_TARGET_PREFIX)) continue
-      const target = value as AtomizableTarget
-      if (targetTypes.includes(target.targetType)) {
+      const target = container.get(key) as AtomizableTarget | undefined
+      if (target && targetTypes.includes(target.targetType)) {
         targets.push(target)
       }
     }
