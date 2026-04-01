@@ -33,14 +33,21 @@
   gap: 0.1rem;
 
   font-family: var(--hc-mono);
-  font-size: 0.5rem;
+  font-size: 0.65rem;
+  font-style: italic;
+  letter-spacing: 0.08em;
   color: rgba(245, 245, 245, 0.3);
   text-transform: lowercase;
   pointer-events: auto;
   transition: opacity 200ms ease;
 
+  .public-crumb { color: rgba(210, 215, 220, 0.7); padding: 0; }
+  .private-crumb { color: rgba(210, 215, 220, 0.7); padding: 0; }
+  .sep-crumb { color: rgba(210, 215, 220, 0.3); padding: 0 0.3em; font-size: 0.55em; vertical-align: middle; }
+  .secure-crumb { padding: 0; font-weight: 500; }
+  .unsecure-crumb { color: hsl(0, 70%, 50%); padding: 0; }
   .secret-crumb { color: rgba(218, 165, 100, 0.85); padding: 0; }
-  .domain-crumb { color: rgba(245, 245, 245, 0.25); padding: 0; }
+  .domain-crumb { color: rgba(210, 215, 220, 0.6); padding: 0; }
   .branch-crumb { color: rgba(190, 140, 200, 0.85); padding: 0; font-weight: 500; }
 
   .crumb-link {
@@ -134,7 +141,7 @@
 
 .controls-pill {
   position: fixed;
-  bottom: 1.2rem;
+  bottom: 0.6rem;
   left: 50%;
   transform: translateX(-50%);
   z-index: 60000;
@@ -167,6 +174,32 @@
       transform: translateX(-50%) translateY(0);
       > * { pointer-events: auto; }
     }
+  }
+}
+
+// ── public mode: inline labels, no hover overlay ─────────
+
+.controls-pill.public-mode .ctl-btn[aria-label] {
+  &::after {
+    position: static;
+    transform: none;
+    display: inline;
+    margin-left: 0.25rem;
+    padding: 0;
+    background: none;
+    border: none;
+    border-radius: 0;
+    opacity: 1;
+    pointer-events: auto;
+    transition: none;
+    white-space: nowrap;
+  }
+  &:hover::after {
+    position: static;
+    transform: none;
+    background: none;
+    border: none;
+    opacity: 1;
   }
 }
 
@@ -268,23 +301,6 @@
 }
 
 // ── bee toggle ──────────────────────────────────────────
-
-.meeting-icon {
-  font-size: 11px;
-  line-height: 1;
-  opacity: 0.85;
-
-  &.leave {
-    font-size: 9px;
-    opacity: 0.6;
-  }
-}
-
-.mic-icon {
-  font-size: 13px;
-  line-height: 1;
-  opacity: 0.85;
-}
 
 .bee-icon {
   font-size: 14px;

@@ -235,8 +235,8 @@ export class HexSdfTextureShader {
 
       vec4 color = base;
 
-      if (vHasImage < 0.5 && abs(vCellIndex - u_hoveredIndex) > 0.5) {
-        // label only for cells without snapshot (suppressed on hovered cell)
+      if (vHasImage < 0.5) {
+        // label for cells without snapshot
         vec2 luv = mix(vLabelUV.xy, vLabelUV.zw, vUV);
         float labelAlpha = texture2D(u_label, luv).a;
         float la = smoothstep(0.02, 0.5, labelAlpha);

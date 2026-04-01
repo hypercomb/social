@@ -10,16 +10,27 @@
 
 <!-- breadcrumb: below header, right-aligned -->
 <div class="breadcrumb-top" [class.faded]="isMobile()">
+  @if (meshPublic) {
+    <span class="public-crumb">public</span>
+    @if (secretWords()) {
+      <span class="sep-crumb">◆</span><span class="secure-crumb" [style.color]="shieldColor()">secure</span>
+    } @else {
+      <span class="sep-crumb">◆</span><span class="unsecure-crumb">unsecure</span>
+    }
+    <span class="sep-crumb">◆</span>
+  } @else {
+    <span class="private-crumb">private</span><span class="sep-crumb">◆</span>
+  }
   <span class="domain-crumb crumb-link" (click)="navigateTo([])">{{ activeDomain() }}</span>
   @for (seg of pathSegments(); track seg.target.length; let last = $last) {
     @if (last) {
-      <span class="domain-crumb">/</span><span class="branch-crumb">{{ seg.name }}</span>
+      <span class="sep-crumb">◆</span><span class="branch-crumb">{{ seg.name }}</span>
     } @else {
-      <span class="domain-crumb crumb-link" (click)="navigateTo(seg.target)">/{{ seg.name }}</span>
+      <span class="domain-crumb crumb-link" (click)="navigateTo(seg.target)"><span class="sep-crumb">◆</span>{{ seg.name }}</span>
     }
   }
   @if (secretWords()) {
-    <span class="domain-crumb">/</span><span class="secret-crumb">{{ secretWords() }}</span>
+    <span class="sep-crumb">◆</span><span class="secret-crumb">{{ secretWords() }}</span>
   }
 </div>
 
@@ -66,9 +77,6 @@
           <button class="ctl-btn" [class.active]="fitLocked()" (click)="fitOrCenter($event)" [attr.aria-label]="'controls.fit-content' | t">
             <span class="hci">q</span>
           </button>
-          <button class="ctl-btn" [class.active]="microphoneOn()" (click)="toggleMicrophone()" [attr.aria-label]="'controls.microphone' | t">
-            <span class="mic-icon">{{ microphoneOn() ? '🎙' : '🎤' }}</span>
-          </button>
           <button class="ctl-btn" [class.active]="layoutPinned()" (click)="toggleLayout()" [attr.aria-label]="'controls.layout-mode' | t">
             <span class="hci">#</span>
           </button>
@@ -102,7 +110,7 @@
           <button class="ctl-btn" (click)="toggleFullscreen()" [attr.aria-label]="'controls.fullscreen' | t">
             <span class="hci">'</span>
           </button>
-          <button class="ctl-btn" [class.active]="layoutPinned()" (click)="toggleLayout()" [attr.aria-label]="'controls.layout-mode' | t" [title]="(layoutPinned() ? 'controls.pinned-layout' : 'controls.dense-layout') | t">
+          <button class="ctl-btn" [class.active]="layoutPinned()" (click)="toggleLayout()" [attr.aria-label]="'controls.layout-mode' | t" [title]="meshPublic ? null : ((layoutPinned() ? 'controls.pinned-layout' : 'controls.dense-layout') | t)">
             <span class="hci">#</span>
           </button>
         </div>
@@ -154,8 +162,6 @@
             <span class="bee-icon">🐝</span>
           </button>
         }
-
-        <!-- meeting join / camera toggle — hidden for now -->
 
       }
 

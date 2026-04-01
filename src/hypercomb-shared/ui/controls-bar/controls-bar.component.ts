@@ -93,9 +93,6 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #fitLocked = signal(localStorage.getItem('hc:fit-locked') === '1')
   #fitLockedSnapshot: { scale: number; cx: number; cy: number; dx: number; dy: number } | null = null
   #clipboardAvailable = signal(false)
-  #meetingJoined = signal(false)
-  #meetingCameraOn = signal(false)
-  #microphoneOn = signal(false)
   #hasSelection = signal(false)
   #textOnly = signal(false)
   #layoutPinned = signal(false)
@@ -170,6 +167,15 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   readonly secretWords = computed(() => {
     const secret = this.#secret$()
     return secret ? secretTag(secret) : ''
+  })
+
+  readonly shieldColor = computed(() => {
+    const secret = this.#secret$().trim()
+    if (!secret) return 'rgba(245, 245, 245, 0.35)'
+    const provider = get('@hypercomb.social/SecretStrengthProvider') as { evaluate: (s: string) => number } | undefined
+    const score = provider?.evaluate(secret) ?? 0.5
+    const hue = Math.round(160 + score * 30)
+    return `hsl(${hue}, 65%, 50%)`
   })
 
   readonly hasPrefixPath = computed(() => this.prefixPath().length > 0)
@@ -265,9 +271,6 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   readonly roomOpen = this.#roomOpen.asReadonly()
   readonly beesVisible = this.#beesVisible.asReadonly()
   readonly showHidden = this.#showHidden.asReadonly()
-  readonly meetingJoined = this.#meetingJoined.asReadonly()
-  readonly meetingCameraOn = this.#meetingCameraOn.asReadonly()
-  readonly microphoneOn = this.#microphoneOn.asReadonly()
   readonly voiceActive = signal(false)
   readonly voiceSupported = VoiceInputService.supported()
   readonly atomizeTarget = this.#atomizeTarget.asReadonly()
@@ -289,9 +292,6 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #atomizeModeUnsub: (() => void) | null = null
   #atomizeAtomsUnsub: (() => void) | null = null
   #atomizeStrategyUnsub: (() => void) | null = null
-  #onMeetingState: EventListener | null = null
-  #onMeetingCamera: EventListener | null = null
-  #onMeetingMic: EventListener | null = null
 
   ngOnInit(): void {
     // ── mobile detection via matchMedia ──
@@ -418,22 +418,6 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
       this.#enableFitLocked()
     }
 
-    this.#onMeetingState = ((e: CustomEvent) => {
-      const state = e.detail?.state
-      this.#meetingJoined.set(state === 'gathering' || state === 'active')
-    }) as EventListener
-    window.addEventListener('meeting:state', this.#onMeetingState)
-
-    this.#onMeetingCamera = ((e: CustomEvent) => {
-      this.#meetingCameraOn.set(e.detail?.on === true)
-    }) as EventListener
-    window.addEventListener('meeting:local-camera', this.#onMeetingCamera)
-
-    this.#onMeetingMic = ((e: CustomEvent) => {
-      this.#microphoneOn.set(e.detail?.on === true)
-    }) as EventListener
-    window.addEventListener('meeting:local-mic', this.#onMeetingMic)
-
     // sign address reactively (replaces effect() which needs injection context)
     this.#recomputeAddress()
     window.addEventListener('synchronize', this.#recomputeAddress)
@@ -472,9 +456,6 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     this.#atomizeModeUnsub?.()
     this.#atomizeAtomsUnsub?.()
     this.#atomizeStrategyUnsub?.()
-    if (this.#onMeetingState) window.removeEventListener('meeting:state', this.#onMeetingState)
-    if (this.#onMeetingCamera) window.removeEventListener('meeting:local-camera', this.#onMeetingCamera)
-    if (this.#onMeetingMic) window.removeEventListener('meeting:local-mic', this.#onMeetingMic)
     window.removeEventListener('synchronize', this.#recomputeAddress)
   }
 
@@ -746,34 +727,6 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   readonly toggleVoice = (): void => {
     const svc = get('@hypercomb.social/VoiceInputService') as { toggle?: () => void } | undefined
     svc?.toggle?.()
-  }
-
-  // ── meeting ──────────────────────────────────────────
-
-  readonly toggleMeeting = (): void => {
-    if (!this.#meetingJoined()) {
-      // joining — request camera directly from user gesture context
-      // so the browser shows the permission prompt
-      navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-        .then(stream => {
-          window.dispatchEvent(new CustomEvent('meeting:toggle-available', { detail: { stream } }))
-        })
-        .catch(() => {
-          // camera denied — still join but without camera
-          window.dispatchEvent(new CustomEvent('meeting:toggle-available'))
-        })
-    } else {
-      // leaving
-      window.dispatchEvent(new CustomEvent('meeting:toggle-available'))
-    }
-  }
-
-  readonly toggleCamera = (): void => {
-    window.dispatchEvent(new CustomEvent('meeting:toggle-camera'))
-  }
-
-  readonly toggleMicrophone = (): void => {
-    window.dispatchEvent(new CustomEvent('meeting:toggle-mic'))
   }
 
   // ── room ────────────────────────────────────────────

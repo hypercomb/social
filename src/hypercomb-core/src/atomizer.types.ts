@@ -1,105 +1,108 @@
 // hypercomb-core/src/atomizer.types.ts
 //
-// Atomizer contract. Lets any UI component declare itself atomizable —
-// breakable into constituent visual/functional atoms that can be
-// restyled, rearranged, or replaced. Display strategies control how
-// the decomposed atoms are presented to the user.
+// Atomizer contract. An atomizer is a pluggable module that knows how to
+// break apart a specific type of control into its configurable properties.
+// Community members can create and share atomizers — signed modules that
+// expose property-setting interfaces for any target type.
+//
+// Controls register as atomizable drop targets with their type. When an
+// atomizer is dragged over a matching target, the target lights up. On
+// drop, the atomizer's property descriptors appear in a sidebar for editing.
 
 // ---------------------------------------------------------------------------
-// Atom descriptor — one constituent piece of a UI component
+// Property descriptor — one configurable knob exposed by an atomizer
 // ---------------------------------------------------------------------------
 
-export interface AtomDescriptor {
-  /** Short identifier, e.g. "input-field", "ghost-text", "suggestion-dropdown" */
-  readonly name: string
+export interface AtomizerProperty {
+  /** Property key, e.g. "border-radius", "placeholder-text", "font-size" */
+  readonly key: string
 
-  /** Structural role inside the parent component */
-  readonly type: 'container' | 'control' | 'decorator' | 'text' | 'icon'
+  /** Human-readable label for the sidebar */
+  readonly label: string
 
-  /** Nesting level (0 = root container) */
-  readonly depth: number
+  /** Property type determines which editor widget renders in the sidebar */
+  readonly type: 'color' | 'number' | 'text' | 'select' | 'boolean' | 'range' | 'spacing'
 
-  /** Current computed CSS custom-property overrides */
-  readonly styles: Record<string, string>
+  /** Current value (read from the target) */
+  value: string | number | boolean
 
-  /** Bounding rect within the parent component */
-  readonly bounds: DOMRect
+  /** Default value (for reset) */
+  readonly defaultValue: string | number | boolean
 
-  /** Nested atoms (recursive decomposition) */
-  readonly children?: AtomDescriptor[]
+  /** For 'select' type: available options */
+  readonly options?: readonly { label: string; value: string }[]
+
+  /** For 'range' type: min/max/step */
+  readonly min?: number
+  readonly max?: number
+  readonly step?: number
+
+  /** Optional group name — properties with the same group render together */
+  readonly group?: string
 }
 
 // ---------------------------------------------------------------------------
-// Atomizer provider — implemented by any component that can be atomized
+// Atomizer — a pluggable decomposition/configuration module
 // ---------------------------------------------------------------------------
 
-export interface AtomizerProvider {
-  /** Unique key, e.g. 'command-line', 'controls-bar' */
+export interface Atomizer {
+  /** Unique identifier, e.g. 'input-atomizer', 'tile-style-atomizer' */
   readonly atomizerId: string
 
-  /** Introspect and return constituent atoms */
-  discover(): AtomDescriptor[]
+  /** Human-readable name for the toolbar */
+  readonly name: string
 
-  /** Apply style overrides to a named atom */
-  applyStyle(atomName: string, styles: Record<string, string>): void
+  /** Short description */
+  readonly description: string
 
-  /** Restore the component to its original, pre-atomized state */
-  reassemble(): void
-}
-
-// ---------------------------------------------------------------------------
-// Display strategy — one of 5 selectable visualization modes
-// ---------------------------------------------------------------------------
-
-export type DisplayStrategyName =
-  | 'shatter'
-  | 'orbital'
-  | 'blueprint'
-  | 'cascade'
-  | 'particle'
-
-export interface DisplayStrategy {
-  readonly name: DisplayStrategyName
-
-  /** SVG markup for the strategy picker icon */
+  /** SVG icon markup for the toolbar */
   readonly icon: string
 
-  /** Activate this strategy with the given atoms */
-  enter(target: AtomizerProvider, atoms: AtomDescriptor[]): void
+  /** Target types this atomizer can be dropped on */
+  readonly targetTypes: readonly string[]
 
-  /** Deactivate and clean up visuals */
-  exit(): void
+  /**
+   * Discover configurable properties for a given target element.
+   * Called when the atomizer is dropped on a valid target.
+   */
+  discover(target: AtomizableTarget): AtomizerProperty[]
 
-  /** Animate transition from a previously active strategy */
-  switchTo(atoms: AtomDescriptor[]): void
+  /**
+   * Apply a property change to the target.
+   * Called when the user edits a value in the sidebar.
+   */
+  apply(target: AtomizableTarget, key: string, value: string | number | boolean): void
 
-  /** Optional: handle atom selection within this strategy */
-  onAtomSelect?(atom: AtomDescriptor): void
+  /**
+   * Reset all properties to defaults.
+   */
+  reset(target: AtomizableTarget): void
 }
 
 // ---------------------------------------------------------------------------
-// Atomizer contract — the runtime session for one atomization
+// Atomizable target — any control that can receive an atomizer drop
 // ---------------------------------------------------------------------------
 
-export interface AtomizerContract {
-  /** IoC key or component selector of the atomized target */
-  readonly target: string
+export interface AtomizableTarget {
+  /** The target type, e.g. 'input', 'tile', 'container', 'button' */
+  readonly targetType: string
 
-  /** The provider that describes the target's atoms */
-  readonly provider: AtomizerProvider
+  /** Unique identifier for this specific target instance */
+  readonly targetId: string
 
-  /** Discovered atoms for the current target */
-  readonly atoms: AtomDescriptor[]
+  /** The DOM element (for computing bounds, applying styles) */
+  readonly element: Element
 
-  /** Currently active display strategy */
-  activeStrategy: DisplayStrategyName
-
-  /** Switch to a different display strategy (re-animates) */
-  setStrategy(name: DisplayStrategyName): void
+  /** Optional: the tile label if this is a hex tile */
+  readonly tileLabel?: string
 }
 
 // ---------------------------------------------------------------------------
-// IoC keys
+// IoC keys & constants
 // ---------------------------------------------------------------------------
 
+/** Prefix for atomizer module registrations: @hypercomb.social/Atomizer:{id} */
 export const ATOMIZER_IOC_PREFIX = '@hypercomb.social/Atomizer:'
+
+/** Prefix for atomizable target registrations: @hypercomb.social/AtomizableTarget:{id} */
+export const ATOMIZABLE_TARGET_PREFIX = '@hypercomb.social/AtomizableTarget:'

@@ -1,6 +1,6 @@
 // diamondcoreprocessor.com/pixi/tile-overlay.drone.ts
 import { Drone, EffectBus } from '@hypercomb/core'
-import { Application, Container, Graphics, Point, Text, TextStyle } from 'pixi.js'
+import { Application, Container, Graphics, Point } from 'pixi.js'
 import { HexIconButton } from './hex-icon-button.js'
 import { HexOverlayMesh } from './hex-overlay.shader.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
@@ -46,37 +46,8 @@ export type OverlayTileContext = {
 
 export type OverlayProfileKey = 'private' | 'public-own' | 'public-external'
 
-// Seed label styling — matches HexLabelAtlas (centered in tile)
-const LABEL_STYLE = new TextStyle({
-  fontFamily: "'SF Mono', 'Cascadia Code', 'JetBrains Mono', ui-monospace, monospace",
-  fontSize: 10,
-  fill: 0xffffff,
-  align: 'center',
-  letterSpacing: 0.5,
-})
-
 // ── Icon sizing ──────────────────────────────────────────────────
 const DEFAULT_ICON_SIZE = 7     // integer for pixel-perfect rendering
-
-// ── Hover label styling ─────────────────────────────────────────
-const HOVER_LABEL_Y = 0         // just above the icon row (ICON_Y = 6)
-const HOVER_LABEL_STYLE = new TextStyle({
-  fontFamily: 'monospace',
-  fontSize: 3.5,
-  fill: 0x999999,
-  align: 'center',
-})
-
-/** Human-readable display names for icon actions */
-const ICON_DISPLAY_NAMES: Record<string, string> = {
-  'command': 'command',
-  'edit': 'edit',
-  'search': 'search',
-  'hide': 'hide',
-  'break-apart': 'restore',
-  'adopt': 'adopt',
-  'block': 'block',
-}
 
 // ── Arrange mode constants ────────────────────────────────────────
 
@@ -110,8 +81,6 @@ export class TileOverlayDrone extends Drone {
 
   #overlay: Container | null = null
   #hexBg: HexOverlayMesh | null = null
-  #seedLabel: Text | null = null
-  #hoverLabel: Text | null = null
   #actions: OverlayAction[] = []
   #animTime = 0
   #animTickBound: ((ticker: any) => void) | null = null
@@ -378,8 +347,6 @@ export class TileOverlayDrone extends Drone {
       this.#overlay.destroy({ children: true })
       this.#overlay = null
       this.#hexBg = null
-      this.#seedLabel = null
-      this.#hoverLabel = null
       this.#crackOverlay = null
       this.#actions = []
     }
@@ -396,17 +363,6 @@ export class TileOverlayDrone extends Drone {
 
     this.#hexBg = new HexOverlayMesh(this.#geo.circumRadiusPx, this.#flat)
     this.#overlay.addChild(this.#hexBg.mesh)
-
-    this.#seedLabel = new Text({ text: '', style: LABEL_STYLE, resolution: window.devicePixelRatio * 8 })
-    this.#seedLabel.anchor.set(0.5, 0.5)
-    this.#seedLabel.position.set(0, 0)
-    this.#overlay.addChild(this.#seedLabel)
-
-    this.#hoverLabel = new Text({ text: '', style: HOVER_LABEL_STYLE, resolution: window.devicePixelRatio * 8 })
-    this.#hoverLabel.anchor.set(0.5, 1)
-    this.#hoverLabel.position.set(0, HOVER_LABEL_Y)
-    this.#hoverLabel.visible = false
-    this.#overlay.addChild(this.#hoverLabel)
 
     // crack overlay for break-apart preview
     this.#crackOverlay = new Graphics()
@@ -507,17 +463,14 @@ export class TileOverlayDrone extends Drone {
     // during image drag-over or pending drop, hide all action buttons — overlay is just a drop target
     if (this.#dropDragging || this.#dropPending) {
       for (const action of this.#actions) action.button.visible = false
-      if (this.#seedLabel) this.#seedLabel.visible = false
-      if (this.#hoverLabel) this.#hoverLabel.visible = false
+
       return
     }
 
-    if (this.#seedLabel) this.#seedLabel.visible = true
-
-    // Public mode: no icons, only seed label
+    // Public mode: no icons
     if (this.#meshPublic && !this.#hasSelection) {
       for (const action of this.#actions) action.button.visible = false
-      if (this.#hoverLabel) this.#hoverLabel.visible = false
+
       return
     }
 
@@ -1195,7 +1148,7 @@ export class TileOverlayDrone extends Drone {
   #updateIconHover(local: Point): void {
     if (!this.#overlay?.visible) {
       for (const a of this.#actions) a.button.hovered = false
-      if (this.#hoverLabel) this.#hoverLabel.visible = false
+
       return
     }
 
@@ -1210,15 +1163,6 @@ export class TileOverlayDrone extends Drone {
       const isHovered = btn.containsPoint(bx, by)
       btn.hovered = isHovered
       if (isHovered) hoveredName = a.name
-    }
-
-    if (this.#hoverLabel) {
-      if (hoveredName) {
-        this.#hoverLabel.text = ICON_DISPLAY_NAMES[hoveredName] ?? hoveredName
-        this.#hoverLabel.visible = true
-      } else {
-        this.#hoverLabel.visible = false
-      }
     }
 
     // show/hide crack preview when hovering break-apart icon
@@ -1402,10 +1346,8 @@ export class TileOverlayDrone extends Drone {
 
   // ── Helpers ────────────────────────────────────────────────────────
 
-  #updateSeedLabel(q: number, r: number): void {
-    if (!this.#seedLabel) return
-    const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(q, r))
-    this.#seedLabel.text = entry?.label ?? ''
+  #updateSeedLabel(_q: number, _r: number): void {
+    // shader-rendered label stays visible — no overlay text needed
   }
 
   #updateVisibility(): void {
@@ -1431,9 +1373,8 @@ export class TileOverlayDrone extends Drone {
       this.#overlay.visible = show
       if (this.#hexBg) this.#hexBg.hide()
       for (const action of this.#actions) action.button.visible = false
-      if (this.#hoverLabel) this.#hoverLabel.visible = false
+
       if (this.#crackOverlay) this.#crackOverlay.visible = false
-      if (this.#seedLabel) this.#seedLabel.visible = show
       return
     }
 
@@ -1444,8 +1385,7 @@ export class TileOverlayDrone extends Drone {
       this.#overlay.visible = occupied && !this.#editing && !this.#editCooldown
       if (this.#hexBg) this.#hexBg.hide()
       for (const action of this.#actions) action.button.visible = false
-      if (this.#hoverLabel) this.#hoverLabel.visible = false
-      if (this.#seedLabel) this.#seedLabel.visible = true
+
       return
     }
 

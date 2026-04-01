@@ -1,0 +1,33 @@
+<!-- hypercomb-shared/ui/atomizer-bar/atomizer-bar.component.html -->
+
+@if (visible()) {
+  <div class="atomizer-bar">
+    <div class="atomizer-bar-header">
+      <span class="atomizer-bar-title">{{ 'atomizer.title' | t }}</span>
+      <button class="atomizer-close-btn" (click)="close()" [attr.aria-label]="'atomizer.close' | t">
+        <span class="close-x">&times;</span>
+      </button>
+    </div>
+
+    <div class="atomizer-list">
+      @for (atomizer of atomizers(); track atomizer.atomizerId) {
+        <div
+          class="atomizer-item"
+          [class.active]="activeAtomizer()?.atomizerId === atomizer.atomizerId"
+          draggable="true"
+          (dragstart)="onDragStart($event, atomizer)"
+          (dragend)="onDragEnd($event)"
+          [attr.title]="atomizer.description"
+          [attr.aria-label]="atomizer.name"
+        >
+          <span class="atomizer-icon" [innerHTML]="atomizer.icon"></span>
+          <span class="atomizer-name">{{ atomizer.name }}</span>
+        </div>
+      }
+
+      @if (atomizers().length === 0) {
+        <div class="atomizer-empty">{{ 'atomizer.empty' | t }}</div>
+      }
+    </div>
+  </div>
+}

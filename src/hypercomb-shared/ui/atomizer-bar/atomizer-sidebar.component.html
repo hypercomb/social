@@ -1,0 +1,105 @@
+<!-- hypercomb-shared/ui/atomizer-bar/atomizer-sidebar.component.html -->
+
+@if (visible()) {
+  <div class="atomizer-sidebar">
+    <div class="sidebar-header">
+      <span class="sidebar-title">{{ atomizer()?.name }}</span>
+      <div class="sidebar-actions">
+        <button class="sidebar-btn" (click)="reset()" [attr.aria-label]="'atomizer.reset' | t">
+          <span class="hci">H</span>
+        </button>
+        <button class="sidebar-btn" (click)="close()" [attr.aria-label]="'atomizer.close' | t">
+          <span class="close-x">&times;</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="sidebar-target">
+      <span class="target-label">{{ target()?.targetId }}</span>
+      <span class="target-type">{{ target()?.targetType }}</span>
+    </div>
+
+    <div class="sidebar-properties">
+      @for (group of groupedProperties(); track group[0]) {
+        <div class="property-group">
+          <span class="group-label">{{ group[0] }}</span>
+          @for (prop of group[1]; track prop.key) {
+            <div class="property-row">
+              <label class="property-label">{{ prop.label }}</label>
+
+              @switch (prop.type) {
+                @case ('color') {
+                  <input
+                    type="color"
+                    class="property-color"
+                    [value]="prop.value"
+                    (input)="onInputChange(prop, $event)"
+                  />
+                }
+                @case ('number') {
+                  <input
+                    type="number"
+                    class="property-number"
+                    [value]="prop.value"
+                    [min]="prop.min ?? ''"
+                    [max]="prop.max ?? ''"
+                    [step]="prop.step ?? 1"
+                    (input)="onInputChange(prop, $event)"
+                  />
+                }
+                @case ('range') {
+                  <div class="property-range-wrap">
+                    <input
+                      type="range"
+                      class="property-range"
+                      [value]="prop.value"
+                      [min]="prop.min ?? 0"
+                      [max]="prop.max ?? 100"
+                      [step]="prop.step ?? 1"
+                      (input)="onInputChange(prop, $event)"
+                    />
+                    <span class="range-value">{{ prop.value }}</span>
+                  </div>
+                }
+                @case ('text') {
+                  <input
+                    type="text"
+                    class="property-text"
+                    [value]="prop.value"
+                    (input)="onInputChange(prop, $event)"
+                  />
+                }
+                @case ('boolean') {
+                  <label class="property-toggle">
+                    <input
+                      type="checkbox"
+                      [checked]="prop.value"
+                      (change)="onInputChange(prop, $event)"
+                    />
+                    <span class="toggle-track"></span>
+                  </label>
+                }
+                @case ('select') {
+                  <select class="property-select" (change)="onSelectChange(prop, $event)">
+                    @for (opt of prop.options ?? []; track opt.value) {
+                      <option [value]="opt.value" [selected]="opt.value === prop.value">{{ opt.label }}</option>
+                    }
+                  </select>
+                }
+                @case ('spacing') {
+                  <input
+                    type="text"
+                    class="property-text"
+                    [value]="prop.value"
+                    placeholder="e.g. 8px 12px"
+                    (input)="onInputChange(prop, $event)"
+                  />
+                }
+              }
+            </div>
+          }
+        </div>
+      }
+    </div>
+  </div>
+}

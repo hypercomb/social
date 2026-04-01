@@ -1,0 +1,133 @@
+// hypercomb-shared/ui/atomizer-bar/atomizer-bar.component.scss
+
+:host {
+  display: contents;
+}
+
+.atomizer-bar {
+  position: fixed;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 40000;
+
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 6px;
+  min-width: 52px;
+
+  background: rgba(10, 10, 18, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  backdrop-filter: blur(12px);
+}
+
+.atomizer-bar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 4px 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: 4px;
+}
+
+.atomizer-bar-title {
+  font-size: 9px;
+  font-family: monospace;
+  letter-spacing: 0.5px;
+  color: rgba(255, 255, 255, 0.4);
+  text-transform: uppercase;
+}
+
+.atomizer-close-btn {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.3);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+
+  &:hover {
+    color: rgba(255, 255, 255, 0.7);
+  }
+}
+
+.close-x {
+  display: block;
+}
+
+.atomizer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.atomizer-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 6px 4px;
+  border-radius: 6px;
+  cursor: grab;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  &:active {
+    cursor: grabbing;
+    background: rgba(255, 255, 255, 0.1);
+    box-shadow: 0 0 8px rgba(0, 229, 255, 0.2);
+  }
+
+  &.active {
+    background: rgba(0, 229, 255, 0.08);
+    box-shadow: inset 0 0 0 1px rgba(0, 229, 255, 0.2);
+  }
+}
+
+.atomizer-icon {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.7;
+
+  .atomizer-item:hover & {
+    opacity: 1;
+  }
+
+  :host ::ng-deep svg {
+    width: 18px;
+    height: 18px;
+  }
+}
+
+.atomizer-name {
+  font-size: 8px;
+  font-family: monospace;
+  color: rgba(255, 255, 255, 0.45);
+  text-align: center;
+  line-height: 1.1;
+  max-width: 48px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  .atomizer-item:hover & {
+    color: rgba(255, 255, 255, 0.7);
+  }
+}
+
+.atomizer-empty {
+  font-size: 8px;
+  font-family: monospace;
+  color: rgba(255, 255, 255, 0.25);
+  text-align: center;
+  padding: 8px 4px;
+}
