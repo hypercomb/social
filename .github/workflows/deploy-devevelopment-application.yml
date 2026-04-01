@@ -26,22 +26,7 @@ jobs:
 
       - name: Install workspace root dependencies
         working-directory: src
-        run: |
-          rm -rf node_modules package-lock.json
-          npm install
-
-      - name: Debug node_modules
-        working-directory: src
-        run: |
-          echo "=== workspace root .bin ==="
-          ls node_modules/.bin/ng 2>/dev/null && echo "ng binary exists" || echo "ng binary MISSING"
-          echo "=== @angular/cli ==="
-          ls node_modules/@angular/cli/bin/ng.js 2>/dev/null && echo "cli exists" || echo "cli MISSING"
-          echo "=== @angular/build ==="
-          ls node_modules/@angular/build/ 2>/dev/null | head -5 || echo "build MISSING"
-          echo "=== web node_modules ==="
-          ls hypercomb-web/node_modules/.bin/ng 2>/dev/null && echo "web ng binary exists" || echo "web ng binary MISSING"
-          ls hypercomb-web/node_modules/@angular/cli/bin/ng.js 2>/dev/null && echo "web cli exists" || echo "web cli MISSING"
+        run: npm ci
 
       - name: Install essentials dependencies
         working-directory: src/hypercomb-essentials
