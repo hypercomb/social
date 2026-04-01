@@ -40,7 +40,33 @@ jobs:
         working-directory: src/diamond-core-processor
         run: npx ng build --configuration production
       - name: Verify build output
-        run: ls -al src/diamond-core-processor/dist/diamond-core-processor/browser || true
+        run: |
+          set -euo pipefail
+          ROOT="src/diamond-core-processor/dist/diamond-core-processor/browser"
+          REQUIRED=(
+            "index.html"
+            "manifest.json"
+            "staticwebapp.config.json"
+          )
+          for f in "${REQUIRED[@]}"; do
+            if [ ! -f "$ROOT/$f" ]; then
+              echo "MISSING required artifact: $ROOT/$f"
+              exit 1
+            else
+              echo "OK: $ROOT/$f"
+            fi
+          done
+          # Verify essentials content was copied into the build
+          for dir in __bees__ __layers__ __dependencies__; do
+            if [ ! -d "$ROOT/$dir" ] || [ -z "$(ls -A "$ROOT/$dir")" ]; then
+              echo "MISSING or empty essentials directory: $ROOT/$dir"
+              exit 1
+            else
+              echo "OK: $ROOT/$dir ($(ls "$ROOT/$dir" | wc -l) files)"
+            fi
+          done
+          echo ""
+          echo "All required artifacts present."
       - name: Upload to Azure Static Web Apps
         uses: Azure/static-web-apps-deploy@v1
         with:
