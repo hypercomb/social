@@ -55,7 +55,7 @@ const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
 
 // ── Position computation ──────────────────────────────────────────
 
-const ICON_Y = 3
+const ICON_Y = 6
 const ICON_SPACING = 10       // tighter to match 75 % icon scale
 const ICON_SIZE = 6.5         // matches DEFAULT_ICON_SIZE in tile-overlay
 const HEX_INRADIUS = 27.7     // √3/2 × 32 — safe horizontal bound

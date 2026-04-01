@@ -56,6 +56,25 @@ const LABEL_STYLE = new TextStyle({
 // ── Icon sizing ──────────────────────────────────────────────────
 const DEFAULT_ICON_SIZE = 6.5   // 75 % of original 8.75
 
+// ── Hover label styling ─────────────────────────────────────────
+const HOVER_LABEL_Y = 0         // just above the icon row (ICON_Y = 6)
+const HOVER_LABEL_STYLE = new TextStyle({
+  fontFamily: 'monospace',
+  fontSize: 3.5,
+  fill: 0x999999,
+  align: 'center',
+})
+
+/** Human-readable display names for icon actions */
+const ICON_DISPLAY_NAMES: Record<string, string> = {
+  'edit': 'edit',
+  'add-sub': 'branch',
+  'search': 'search',
+  'hide': 'hide',
+  'adopt': 'adopt',
+  'block': 'block',
+}
+
 // ── Arrange mode constants ────────────────────────────────────────
 
 const POOL_Y_OFFSET = 16
@@ -89,6 +108,7 @@ export class TileOverlayDrone extends Drone {
   #overlay: Container | null = null
   #hexBg: HexOverlayMesh | null = null
   #seedLabel: Text | null = null
+  #hoverLabel: Text | null = null
   #actions: OverlayAction[] = []
   #animTime = 0
   #animTickBound: ((ticker: any) => void) | null = null
@@ -340,6 +360,7 @@ export class TileOverlayDrone extends Drone {
       this.#overlay = null
       this.#hexBg = null
       this.#seedLabel = null
+      this.#hoverLabel = null
       this.#actions = []
     }
   }
@@ -359,6 +380,12 @@ export class TileOverlayDrone extends Drone {
     this.#seedLabel = new Text({ text: '', style: LABEL_STYLE, resolution: window.devicePixelRatio * 8 })
     this.#seedLabel.position.set(LABEL_X, LABEL_Y)
     this.#overlay.addChild(this.#seedLabel)
+
+    this.#hoverLabel = new Text({ text: '', style: HOVER_LABEL_STYLE, resolution: window.devicePixelRatio * 8 })
+    this.#hoverLabel.anchor.set(0.5, 1)
+    this.#hoverLabel.position.set(0, HOVER_LABEL_Y)
+    this.#hoverLabel.visible = false
+    this.#overlay.addChild(this.#hoverLabel)
 
     this.#renderContainer.addChild(this.#overlay)
     this.#renderContainer.sortableChildren = true
@@ -453,6 +480,7 @@ export class TileOverlayDrone extends Drone {
     if (this.#dropDragging || this.#dropPending) {
       for (const action of this.#actions) action.button.visible = false
       if (this.#seedLabel) this.#seedLabel.visible = false
+      if (this.#hoverLabel) this.#hoverLabel.visible = false
       return
     }
 
@@ -1131,17 +1159,30 @@ export class TileOverlayDrone extends Drone {
   #updateIconHover(local: Point): void {
     if (!this.#overlay?.visible) {
       for (const a of this.#actions) a.button.hovered = false
+      if (this.#hoverLabel) this.#hoverLabel.visible = false
       return
     }
 
     const ox = this.#overlay.position.x
     const oy = this.#overlay.position.y
 
+    let hoveredName: string | null = null
     for (const a of this.#actions) {
       const btn = a.button
       const bx = local.x - ox - btn.position.x
       const by = local.y - oy - btn.position.y
-      btn.hovered = btn.containsPoint(bx, by)
+      const isHovered = btn.containsPoint(bx, by)
+      btn.hovered = isHovered
+      if (isHovered) hoveredName = a.name
+    }
+
+    if (this.#hoverLabel) {
+      if (hoveredName) {
+        this.#hoverLabel.text = ICON_DISPLAY_NAMES[hoveredName] ?? hoveredName
+        this.#hoverLabel.visible = true
+      } else {
+        this.#hoverLabel.visible = false
+      }
     }
   }
 
