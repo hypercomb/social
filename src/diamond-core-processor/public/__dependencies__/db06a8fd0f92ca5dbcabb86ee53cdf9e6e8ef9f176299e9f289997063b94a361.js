@@ -249,8 +249,9 @@ var HexLabelAtlas = class {
       resolution: 8
     });
     this.renderer.render({ container: new Container2(), target: this.atlas, clear: true });
+    const hcFont = getComputedStyle(document.documentElement).getPropertyValue("--hc-font").trim();
     this.style = new TextStyle({
-      fontFamily: "'SF Mono', 'Cascadia Code', 'JetBrains Mono', ui-monospace, monospace",
+      fontFamily: hcFont || "'Source Sans Pro Light', system-ui, sans-serif",
       fontSize: 10,
       fill: 16777215,
       align: "center",

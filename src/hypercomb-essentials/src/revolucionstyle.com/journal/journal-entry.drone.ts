@@ -95,7 +95,7 @@ export class JournalEntryDrone {
       position: 'fixed', inset: '0', zIndex: '70000',
       backgroundColor: 'rgba(0, 0, 0, 0.82)',
       display: 'flex', justifyContent: 'center', alignItems: 'center',
-      fontFamily: "'Segoe UI', system-ui, sans-serif",
+      fontFamily: 'var(--hc-font)',
       color: TEXT,
     })
 
@@ -219,7 +219,7 @@ export class JournalEntryDrone {
     const btn = this.#el('button', {
       padding: '8px 16px', border: `1px solid ${ACCENT}`, borderRadius: '6px',
       backgroundColor: BG_INPUT, color: ACCENT, fontSize: '13px',
-      cursor: 'pointer', fontFamily: "'Segoe UI', system-ui, sans-serif",
+      cursor: 'pointer', fontFamily: 'var(--hc-font)',
     })
     btn.textContent = 'Open Flavor Wheel'
     btn.addEventListener('click', () => {
@@ -286,7 +286,7 @@ export class JournalEntryDrone {
     Object.assign(textarea.style, {
       width: '100%', minHeight: '80px', padding: '10px', boxSizing: 'border-box',
       backgroundColor: BG_INPUT, color: TEXT, border: `1px solid ${BORDER}`,
-      borderRadius: '6px', fontSize: '13px', fontFamily: "'Segoe UI', system-ui, sans-serif",
+      borderRadius: '6px', fontSize: '13px', fontFamily: 'var(--hc-font)',
       resize: 'vertical',
     })
     textarea.value = service.entry.notes
@@ -337,7 +337,7 @@ export class JournalEntryDrone {
     const addBtn = this.#el('button', {
       padding: '6px 12px', border: `1px solid ${BORDER}`, borderRadius: '4px',
       backgroundColor: BG_INPUT, color: TEXT, cursor: 'pointer', fontSize: '12px',
-      fontFamily: "'Segoe UI', system-ui, sans-serif", whiteSpace: 'nowrap',
+      fontFamily: 'var(--hc-font)', whiteSpace: 'nowrap',
     })
     addBtn.textContent = '+ Add'
     addBtn.addEventListener('click', () => {
@@ -386,7 +386,7 @@ export class JournalEntryDrone {
     const cancelBtn = this.#el('button', {
       padding: '10px 20px', border: `1px solid ${BORDER}`, borderRadius: '6px',
       backgroundColor: 'transparent', color: TEXT_DIM, fontSize: '14px',
-      cursor: 'pointer', fontFamily: "'Segoe UI', system-ui, sans-serif",
+      cursor: 'pointer', fontFamily: 'var(--hc-font)',
     })
     cancelBtn.textContent = 'Cancel'
     cancelBtn.addEventListener('click', this.#cancel)
@@ -395,7 +395,7 @@ export class JournalEntryDrone {
       padding: '10px 24px', border: 'none', borderRadius: '6px',
       backgroundColor: ACCENT, color: BG_DARK, fontSize: '14px',
       fontWeight: '600', cursor: 'pointer',
-      fontFamily: "'Segoe UI', system-ui, sans-serif",
+      fontFamily: 'var(--hc-font)',
     })
     saveBtn.textContent = 'Save Entry'
     saveBtn.addEventListener('click', () => void this.#save())
@@ -432,7 +432,7 @@ export class JournalEntryDrone {
     Object.assign(input.style, {
       flex: '1', padding: '8px 10px', backgroundColor: BG_INPUT,
       color: TEXT, border: `1px solid ${BORDER}`, borderRadius: '4px',
-      fontSize: '13px', fontFamily: "'Segoe UI', system-ui, sans-serif",
+      fontSize: '13px', fontFamily: 'var(--hc-font)',
       outline: 'none', boxSizing: 'border-box',
     })
     return input
@@ -443,7 +443,7 @@ export class JournalEntryDrone {
     Object.assign(select.style, {
       padding: '8px 10px', backgroundColor: BG_INPUT, color: TEXT,
       border: `1px solid ${BORDER}`, borderRadius: '4px', fontSize: '13px',
-      fontFamily: "'Segoe UI', system-ui, sans-serif", outline: 'none',
+      fontFamily: 'var(--hc-font)', outline: 'none',
     })
     for (const opt of options) {
       const option = document.createElement('option')
@@ -471,7 +471,7 @@ export class JournalEntryDrone {
     Object.assign(input.style, {
       padding: '8px 10px', backgroundColor: BG_INPUT, color: TEXT,
       border: `1px solid ${BORDER}`, borderRadius: '4px', fontSize: '13px',
-      fontFamily: "'Segoe UI', system-ui, sans-serif", outline: 'none',
+      fontFamily: 'var(--hc-font)', outline: 'none',
     })
     input.addEventListener('input', () => onChange(input.value))
 
