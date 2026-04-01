@@ -72,14 +72,15 @@ $bp-phone-max: 599px;
 .ghost,
 .command-input {
   grid-area: 1 / 1;
+  box-sizing: border-box;
   padding: 0 0.75rem;
   margin: 0;
   background: transparent;
   border: none;
   outline: none;
-  font-family: var(--terminal-font);
-  font-size: 1.4em;
+  font: 1.4em / 1 var(--terminal-font);
   letter-spacing: 0.02em;
+  text-indent: 0;
   white-space: nowrap;
   overflow: hidden;
 }
@@ -93,7 +94,6 @@ $bp-phone-max: 599px;
 .command-input {
   width: 100%;
   height: 100%;
-  line-height: 1;
   color: #ffffff;
   caret-color: var(--glow-color);
   user-select: text;
