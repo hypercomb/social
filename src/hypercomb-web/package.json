@@ -5,11 +5,11 @@
   "builders": "./builders/builders.json",
   "scripts": {
     "prestart": "npm --prefix .. run prebuild:web",
-    "start": "npx ng serve --port 4200 --host localhost --configuration development",
+    "start": "ng serve --port 4200 --host localhost --configuration development",
     "build": "ng build --configuration production",
     "runtime": "npm run runtime:core && npm run runtime:pixi",
     "runtime:core": "node ./scripts/build-core-vendor.cjs",
-    "runtime:pixi": "npx tsx ./scripts/build-pixi-vendor.ts"
+    "runtime:pixi": "tsx ./scripts/build-pixi-vendor.ts"
   },
   "overrides": {
     "undici": "7.24.1"
