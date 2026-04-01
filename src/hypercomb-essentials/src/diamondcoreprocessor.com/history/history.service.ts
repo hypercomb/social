@@ -7,6 +7,7 @@ export type HistoryOp = {
   op: HistoryOpType
   seed: string
   at: number
+  groupId?: string
 }
 
 export type LayerState = {

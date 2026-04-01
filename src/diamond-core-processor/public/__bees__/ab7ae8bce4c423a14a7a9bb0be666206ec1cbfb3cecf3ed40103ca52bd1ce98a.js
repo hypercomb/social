@@ -36,13 +36,16 @@ var ICONS = {
   // Plus
   adopt: svg('<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>'),
   // Circle with slash
-  block: svg('<circle cx="12" cy="12" r="9"/><line x1="5.7" y1="5.7" x2="18.3" y2="18.3"/>')
+  block: svg('<circle cx="12" cy="12" r="9"/><line x1="5.7" y1="5.7" x2="18.3" y2="18.3"/>'),
+  // Trash bin
+  remove: svg('<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>')
 };
 var ICON_REGISTRY = [
   // ── private profile ──
   { name: "add-sub", svgMarkup: ICONS["add-sub"], hoverTint: 11075544, profile: "private" },
   { name: "edit", svgMarkup: ICONS.edit, hoverTint: 13162751, profile: "private" },
   { name: "search", svgMarkup: ICONS.search, hoverTint: 13172680, profile: "private", visibleWhen: (ctx) => ctx.noImage },
+  { name: "remove", svgMarkup: ICONS.remove, hoverTint: 16763080, profile: "private" },
   // ── public-own profile ──
   { name: "hide", svgMarkup: ICONS.hide, hoverTint: 16767144, profile: "public-own" },
   // ── public-external profile ──
@@ -50,11 +53,11 @@ var ICON_REGISTRY = [
   { name: "block", svgMarkup: ICONS.block, hoverTint: 16763080, profile: "public-external" }
 ];
 var DEFAULT_ACTIVE = {
-  "private": ["add-sub", "edit", "search"],
+  "private": ["add-sub", "edit", "search", "remove"],
   "public-own": ["hide"],
   "public-external": ["adopt", "block"]
 };
-var ICON_Y = 3;
+var ICON_Y = 6;
 var ICON_SPACING = 10;
 var HEX_INRADIUS = 27.7;
 var EDGE_MARGIN = 3;
@@ -71,7 +74,7 @@ function computeIconPositions(activeNames) {
   return activeNames.map((_, i) => ({ x: startX + i * spacing, y: ICON_Y }));
 }
 var ARRANGEMENT_KEY = "iconArrangement";
-var HANDLED_ACTIONS = /* @__PURE__ */ new Set(["edit", "search", "add-sub", "hide", "adopt", "block"]);
+var HANDLED_ACTIONS = /* @__PURE__ */ new Set(["edit", "search", "add-sub", "hide", "adopt", "block", "remove"]);
 var TileActionsDrone = class extends Drone {
   namespace = "diamondcoreprocessor.com";
   description = "registers default tile overlay icons and handles their click actions";
@@ -79,7 +82,7 @@ var TileActionsDrone = class extends Drone {
     lineage: "@hypercomb.social/Lineage"
   };
   listens = ["render:host-ready", "tile:action", "overlay:icons-reordered", "overlay:arrange-mode"];
-  emits = ["overlay:register-action", "overlay:pool-icons", "search:prefill", "tile:hidden", "tile:blocked"];
+  emits = ["overlay:register-action", "overlay:pool-icons", "search:prefill", "tile:hidden", "tile:blocked", "seed:removed"];
   #registered = false;
   #effectsRegistered = false;
   #arrangement = {};
@@ -220,7 +223,32 @@ var TileActionsDrone = class extends Drone {
       case "block":
         this.#hideOrBlock(label, "hc:blocked-tiles", "tile:blocked");
         break;
+      case "remove":
+        void this.#removeTile(label);
+        break;
     }
+  }
+  async #removeTile(label) {
+    const lineage = this.resolve("lineage");
+    if (!lineage) return;
+    const dir = await lineage.explorerDir();
+    if (!dir) return;
+    try {
+      const child = await dir.getDirectoryHandle(label);
+      let hasChildren = false;
+      for await (const _ of child.entries()) {
+        hasChildren = true;
+        break;
+      }
+      if (hasChildren && !confirm(`"${label}" contains children. Delete anyway?`)) return;
+    } catch {
+    }
+    try {
+      await dir.removeEntry(label, { recursive: true });
+      EffectBus.emit("seed:removed", { seed: label });
+    } catch {
+    }
+    void new hypercomb().act();
   }
   #hideOrBlock(label, storagePrefix, effect) {
     const lineage = this.resolve("lineage");

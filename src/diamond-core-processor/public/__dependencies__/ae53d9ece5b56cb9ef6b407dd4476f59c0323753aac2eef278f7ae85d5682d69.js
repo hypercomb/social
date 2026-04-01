@@ -252,6 +252,7 @@ var RemoveQueenBee = class extends QueenBee7 {
       }
     }
     if (targets.length === 0) return;
+    const groupId = targets.length > 1 ? `remove:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 8)}` : void 0;
     const lineage = get("@hypercomb.social/Lineage");
     if (!lineage) return;
     const dir = await lineage.explorerDir();
@@ -259,7 +260,7 @@ var RemoveQueenBee = class extends QueenBee7 {
     for (const name of targets) {
       try {
         await dir.removeEntry(name, { recursive: true });
-        EffectBus6.emit("seed:removed", { seed: name });
+        EffectBus6.emit("seed:removed", { seed: name, groupId });
       } catch {
       }
     }

@@ -22,6 +22,8 @@ const ICONS = {
   adopt: svg('<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>'),
   // Circle with slash
   block: svg('<circle cx="12" cy="12" r="9"/><line x1="5.7" y1="5.7" x2="18.3" y2="18.3"/>'),
+  // Trash bin
+  remove: svg('<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>'),
 } as const
 
 // ── Icon registry ─────────────────────────────────────────────────
@@ -39,6 +41,7 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   { name: 'add-sub', svgMarkup: ICONS['add-sub'], hoverTint: 0xa8ffd8, profile: 'private' },
   { name: 'edit', svgMarkup: ICONS.edit, hoverTint: 0xc8d8ff, profile: 'private' },
   { name: 'search', svgMarkup: ICONS.search, hoverTint: 0xc8ffc8, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.noImage },
+  { name: 'remove', svgMarkup: ICONS.remove, hoverTint: 0xffc8c8, profile: 'private' },
   // ── public-own profile ──
   { name: 'hide', svgMarkup: ICONS.hide, hoverTint: 0xffd8a8, profile: 'public-own' },
   // ── public-external profile ──
@@ -48,7 +51,7 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
 
 // Default active icons per profile (defines the fallback order)
 const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
-  'private': ['add-sub', 'edit', 'search'],
+  'private': ['add-sub', 'edit', 'search', 'remove'],
   'public-own': ['hide'],
   'public-external': ['adopt', 'block'],
 }
@@ -86,7 +89,7 @@ const ARRANGEMENT_KEY = 'iconArrangement'
 type IconArrangement = Partial<Record<OverlayProfileKey, string[]>>
 
 // ── Action names this bee handles ─────────────────────────────────
-const HANDLED_ACTIONS = new Set(['edit', 'search', 'add-sub', 'hide', 'adopt', 'block'])
+const HANDLED_ACTIONS = new Set(['edit', 'search', 'add-sub', 'hide', 'adopt', 'block', 'remove'])
 
 type TileActionPayload = { action: string; label: string; q: number; r: number; index: number }
 
@@ -99,7 +102,7 @@ export class TileActionsDrone extends Drone {
   }
 
   protected override listens = ['render:host-ready', 'tile:action', 'overlay:icons-reordered', 'overlay:arrange-mode']
-  protected override emits = ['overlay:register-action', 'overlay:pool-icons', 'search:prefill', 'tile:hidden', 'tile:blocked']
+  protected override emits = ['overlay:register-action', 'overlay:pool-icons', 'search:prefill', 'tile:hidden', 'tile:blocked', 'seed:removed']
 
   #registered = false
   #effectsRegistered = false
@@ -287,7 +290,32 @@ export class TileActionsDrone extends Drone {
       case 'block':
         this.#hideOrBlock(label, 'hc:blocked-tiles', 'tile:blocked')
         break
+
+      case 'remove':
+        void this.#removeTile(label)
+        break
     }
+  }
+
+  async #removeTile(label: string): Promise<void> {
+    const lineage = this.resolve<{ explorerDir(): Promise<FileSystemDirectoryHandle | null> }>('lineage')
+    if (!lineage) return
+    const dir = await lineage.explorerDir()
+    if (!dir) return
+
+    // Check if tile is a directory with children — warn before recursive delete
+    try {
+      const child = await dir.getDirectoryHandle(label)
+      let hasChildren = false
+      for await (const _ of (child as any).entries()) { hasChildren = true; break }
+      if (hasChildren && !confirm(`"${label}" contains children. Delete anyway?`)) return
+    } catch { /* not a directory or doesn't exist — proceed without warning */ }
+
+    try {
+      await dir.removeEntry(label, { recursive: true })
+      EffectBus.emit('seed:removed', { seed: label })
+    } catch { /* entry doesn't exist or can't be removed */ }
+    void new hypercomb().act()
   }
 
   #hideOrBlock(label: string, storagePrefix: string, effect: string): void {

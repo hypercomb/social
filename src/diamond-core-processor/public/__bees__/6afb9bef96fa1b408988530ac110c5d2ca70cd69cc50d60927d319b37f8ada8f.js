@@ -448,13 +448,16 @@ var ICONS = {
   // Plus
   adopt: svg('<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>'),
   // Circle with slash
-  block: svg('<circle cx="12" cy="12" r="9"/><line x1="5.7" y1="5.7" x2="18.3" y2="18.3"/>')
+  block: svg('<circle cx="12" cy="12" r="9"/><line x1="5.7" y1="5.7" x2="18.3" y2="18.3"/>'),
+  // Trash bin
+  remove: svg('<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>')
 };
 var ICON_REGISTRY = [
   // ── private profile ──
   { name: "add-sub", svgMarkup: ICONS["add-sub"], hoverTint: 11075544, profile: "private" },
   { name: "edit", svgMarkup: ICONS.edit, hoverTint: 13162751, profile: "private" },
   { name: "search", svgMarkup: ICONS.search, hoverTint: 13172680, profile: "private", visibleWhen: (ctx) => ctx.noImage },
+  { name: "remove", svgMarkup: ICONS.remove, hoverTint: 16763080, profile: "private" },
   // ── public-own profile ──
   { name: "hide", svgMarkup: ICONS.hide, hoverTint: 16767144, profile: "public-own" },
   // ── public-external profile ──
@@ -462,11 +465,11 @@ var ICON_REGISTRY = [
   { name: "block", svgMarkup: ICONS.block, hoverTint: 16763080, profile: "public-external" }
 ];
 var DEFAULT_ACTIVE = {
-  "private": ["add-sub", "edit", "search"],
+  "private": ["add-sub", "edit", "search", "remove"],
   "public-own": ["hide"],
   "public-external": ["adopt", "block"]
 };
-var ICON_Y = 3;
+var ICON_Y = 6;
 var ICON_SPACING = 10;
 var HEX_INRADIUS = 27.7;
 var EDGE_MARGIN = 3;
@@ -483,7 +486,7 @@ function computeIconPositions(activeNames) {
   return activeNames.map((_, i) => ({ x: startX + i * spacing, y: ICON_Y }));
 }
 var ARRANGEMENT_KEY = "iconArrangement";
-var HANDLED_ACTIONS = /* @__PURE__ */ new Set(["edit", "search", "add-sub", "hide", "adopt", "block"]);
+var HANDLED_ACTIONS = /* @__PURE__ */ new Set(["edit", "search", "add-sub", "hide", "adopt", "block", "remove"]);
 var TileActionsDrone = class extends Drone {
   namespace = "diamondcoreprocessor.com";
   description = "registers default tile overlay icons and handles their click actions";
@@ -491,7 +494,7 @@ var TileActionsDrone = class extends Drone {
     lineage: "@hypercomb.social/Lineage"
   };
   listens = ["render:host-ready", "tile:action", "overlay:icons-reordered", "overlay:arrange-mode"];
-  emits = ["overlay:register-action", "overlay:pool-icons", "search:prefill", "tile:hidden", "tile:blocked"];
+  emits = ["overlay:register-action", "overlay:pool-icons", "search:prefill", "tile:hidden", "tile:blocked", "seed:removed"];
   #registered = false;
   #effectsRegistered = false;
   #arrangement = {};
@@ -632,7 +635,32 @@ var TileActionsDrone = class extends Drone {
       case "block":
         this.#hideOrBlock(label, "hc:blocked-tiles", "tile:blocked");
         break;
+      case "remove":
+        void this.#removeTile(label);
+        break;
     }
+  }
+  async #removeTile(label) {
+    const lineage = this.resolve("lineage");
+    if (!lineage) return;
+    const dir = await lineage.explorerDir();
+    if (!dir) return;
+    try {
+      const child = await dir.getDirectoryHandle(label);
+      let hasChildren = false;
+      for await (const _ of child.entries()) {
+        hasChildren = true;
+        break;
+      }
+      if (hasChildren && !confirm(`"${label}" contains children. Delete anyway?`)) return;
+    } catch {
+    }
+    try {
+      await dir.removeEntry(label, { recursive: true });
+      EffectBus.emit("seed:removed", { seed: label });
+    } catch {
+    }
+    void new hypercomb().act();
   }
   #hideOrBlock(label, storagePrefix, effect) {
     const lineage = this.resolve("lineage");
@@ -658,6 +686,21 @@ var LABEL_STYLE = new TextStyle({
   align: "left"
 });
 var DEFAULT_ICON_SIZE = 6.5;
+var HOVER_LABEL_Y = 0;
+var HOVER_LABEL_STYLE = new TextStyle({
+  fontFamily: "monospace",
+  fontSize: 3.5,
+  fill: 10066329,
+  align: "center"
+});
+var ICON_DISPLAY_NAMES = {
+  "edit": "edit",
+  "add-sub": "branch",
+  "search": "search",
+  "hide": "hide",
+  "adopt": "adopt",
+  "block": "block"
+};
 var POOL_Y_OFFSET = 16;
 var POOL_ICON_SIZE = 5;
 var POOL_SPACING = 8;
@@ -677,6 +720,7 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
   #overlay = null;
   #hexBg = null;
   #seedLabel = null;
+  #hoverLabel = null;
   #actions = [];
   #animTime = 0;
   #animTickBound = null;
@@ -904,6 +948,7 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
       this.#overlay = null;
       this.#hexBg = null;
       this.#seedLabel = null;
+      this.#hoverLabel = null;
       this.#actions = [];
     }
   }
@@ -918,6 +963,11 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
     this.#seedLabel = new Text({ text: "", style: LABEL_STYLE, resolution: window.devicePixelRatio * 8 });
     this.#seedLabel.position.set(LABEL_X, LABEL_Y);
     this.#overlay.addChild(this.#seedLabel);
+    this.#hoverLabel = new Text({ text: "", style: HOVER_LABEL_STYLE, resolution: window.devicePixelRatio * 8 });
+    this.#hoverLabel.anchor.set(0.5, 1);
+    this.#hoverLabel.position.set(0, HOVER_LABEL_Y);
+    this.#hoverLabel.visible = false;
+    this.#overlay.addChild(this.#hoverLabel);
     this.#renderContainer.addChild(this.#overlay);
     this.#renderContainer.sortableChildren = true;
     if (this.#app && !this.#animTickBound) {
@@ -988,6 +1038,7 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
     if (this.#dropDragging || this.#dropPending) {
       for (const action of this.#actions) action.button.visible = false;
       if (this.#seedLabel) this.#seedLabel.visible = false;
+      if (this.#hoverLabel) this.#hoverLabel.visible = false;
       return;
     }
     if (this.#seedLabel) this.#seedLabel.visible = true;
@@ -1482,15 +1533,27 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
   #updateIconHover(local) {
     if (!this.#overlay?.visible) {
       for (const a of this.#actions) a.button.hovered = false;
+      if (this.#hoverLabel) this.#hoverLabel.visible = false;
       return;
     }
     const ox = this.#overlay.position.x;
     const oy = this.#overlay.position.y;
+    let hoveredName = null;
     for (const a of this.#actions) {
       const btn = a.button;
       const bx = local.x - ox - btn.position.x;
       const by = local.y - oy - btn.position.y;
-      btn.hovered = btn.containsPoint(bx, by);
+      const isHovered = btn.containsPoint(bx, by);
+      btn.hovered = isHovered;
+      if (isHovered) hoveredName = a.name;
+    }
+    if (this.#hoverLabel) {
+      if (hoveredName) {
+        this.#hoverLabel.text = ICON_DISPLAY_NAMES[hoveredName] ?? hoveredName;
+        this.#hoverLabel.visible = true;
+      } else {
+        this.#hoverLabel.visible = false;
+      }
     }
   }
   #onClick = (e) => {

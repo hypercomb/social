@@ -94,12 +94,20 @@ export class HistoryCursorService extends EventTarget {
 
   /** Step backward one op. */
   undo(): void {
-    this.seek(this.#position - 1)
+    if (this.#position <= 0) return
+    let i = this.#position - 1
+    const groupKey = this.#groupKeyForIndex(i)
+    while (i >= 0 && this.#groupKeyForIndex(i) === groupKey) i--
+    this.seek(i + 1)
   }
 
   /** Step forward one op. */
   redo(): void {
-    this.seek(this.#position + 1)
+    if (this.#position >= this.#total) return
+    let i = this.#position
+    const groupKey = this.#groupKeyForIndex(i)
+    while (i < this.#total && this.#groupKeyForIndex(i) === groupKey) i++
+    this.seek(i)
   }
 
   /** Jump to latest (exit rewind mode). */
@@ -240,6 +248,13 @@ export class HistoryCursorService extends EventTarget {
   #emit(): void {
     this.dispatchEvent(new CustomEvent('change'))
     EffectBus.emit<CursorState>('history:cursor-changed', this.state)
+  }
+
+  #groupKeyForIndex(index: number): string {
+    const op = this.#allOps[index]
+    const groupId = String(op?.groupId ?? '').trim()
+    if (groupId.length > 0) return `g:${groupId}`
+    return `i:${index}`
   }
 }
 

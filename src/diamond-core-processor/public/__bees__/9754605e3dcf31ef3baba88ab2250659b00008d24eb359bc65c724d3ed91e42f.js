@@ -7,19 +7,19 @@ var HistoryRecorder = class {
       if (payload?.seed) this.#enqueue("add", payload.seed);
     });
     EffectBus.on("seed:removed", (payload) => {
-      if (payload?.seed) this.#enqueue("remove", payload.seed);
+      if (payload?.seed) this.#enqueue("remove", payload.seed, payload.groupId);
     });
   }
-  #enqueue(op, seed) {
-    this.#queue = this.#queue.then(() => this.#recordOp(op, seed)).then(() => void new hypercomb().act()).catch(() => {
+  #enqueue(op, seed, groupId) {
+    this.#queue = this.#queue.then(() => this.#recordOp(op, seed, groupId)).then(() => void new hypercomb().act()).catch(() => {
     });
   }
-  async #recordOp(op, seed) {
+  async #recordOp(op, seed, groupId) {
     const lineage = get("@hypercomb.social/Lineage");
     const historyService = get("@diamondcoreprocessor.com/HistoryService");
     if (!lineage || !historyService) return;
     const sig = await historyService.sign(lineage);
-    await historyService.record(sig, { op, seed, at: Date.now() });
+    await historyService.record(sig, { op, seed, at: Date.now(), groupId });
     const cursor = get("@diamondcoreprocessor.com/HistoryCursorService");
     if (cursor) await cursor.onNewOp();
   }

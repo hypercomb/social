@@ -35,6 +35,10 @@ export class RemoveQueenBee extends QueenBee {
 
     if (targets.length === 0) return
 
+    const groupId = targets.length > 1
+      ? `remove:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 8)}`
+      : undefined
+
     const lineage = get('@hypercomb.social/Lineage') as
       { explorerDir: () => Promise<FileSystemDirectoryHandle | null> } | undefined
     if (!lineage) return
@@ -45,7 +49,7 @@ export class RemoveQueenBee extends QueenBee {
     for (const name of targets) {
       try {
         await dir.removeEntry(name, { recursive: true })
-        EffectBus.emit('seed:removed', { seed: name })
+        EffectBus.emit('seed:removed', { seed: name, groupId })
       } catch { /* entry doesn't exist or can't be removed — skip */ }
     }
 
