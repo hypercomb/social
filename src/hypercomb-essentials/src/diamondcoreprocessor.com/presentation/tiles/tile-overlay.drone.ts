@@ -1344,7 +1344,7 @@ export class TileOverlayDrone extends Drone {
   #updateSeedLabel(q: number, r: number): void {
     if (!this.#seedLabel) return
     const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(q, r))
-    this.#seedLabel.text = entry ? `${String(entry.index).padStart(3, '0')}-${entry.label}` : ''
+    this.#seedLabel.text = entry?.label ?? ''
   }
 
   #updateVisibility(): void {
