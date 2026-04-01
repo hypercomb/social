@@ -30,6 +30,16 @@ jobs:
           rm -rf node_modules package-lock.json
           npm install
 
+      - name: Build hypercomb-core
+        working-directory: src/hypercomb-core
+        run: npm run build
+
+      - name: Build essentials modules
+        working-directory: src/hypercomb-essentials
+        run: |
+          npm run build
+          node ../node_modules/tsx/dist/cli.mjs ./scripts/build-module.ts --local
+
       - name: Validate Azure credentials (live)
         id: azure_creds
         shell: bash
@@ -69,7 +79,7 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS_LIVE }}
 
-      - name: Publish essentials package + latest pointers
+      - name: Publish essentials to Azure Blob Storage
         if: steps.azure_creds.outputs.ready == 'true' && steps.az_login.outcome == 'success'
         shell: pwsh
         working-directory: src/hypercomb-essentials
@@ -98,10 +108,6 @@ jobs:
         env:
           SKIP_REASON: ${{ steps.azure_creds.outputs.reason }}
         run: echo "Skipped essentials publish ($SKIP_REASON); web deploy continues with existing manifest resources."
-
-      - name: Build hypercomb-core
-        working-directory: src/hypercomb-core
-        run: npm run build
 
       - name: Build web runtime assets
         working-directory: src/hypercomb-web
