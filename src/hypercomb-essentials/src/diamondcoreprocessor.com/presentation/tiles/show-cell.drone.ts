@@ -13,7 +13,7 @@ import type { ViewportPersistence, ViewportSnapshot } from '../../navigation/zoo
 
 type Axial = { q: number; r: number }
 /** divergence: 0 = current, 1 = future-add (ghost), 2 = future-remove (marked) */
-type SeedCell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; borderColor?: [number, number, number]; divergence?: number }
+type SeedCell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; hasLink?: boolean; borderColor?: [number, number, number]; divergence?: number }
 
 /** Deterministic label → RGB via DJB2 hash → HSL → RGB. Returns [r, g, b] in 0–1 range. */
 function labelToRgb(label: string): [number, number, number] {
@@ -93,6 +93,8 @@ export class ShowCellDrone extends Drone {
   private readonly seedTagsCache = new Map<string, string[]>()
   // cache: seed label → border color RGB floats
   private readonly seedBorderColorCache = new Map<string, [number, number, number]>()
+  // cache: seed label → has link property
+  private readonly seedLinkCache = new Map<string, boolean>()
 
   private lastKey = ''
 
@@ -750,6 +752,7 @@ export class ShowCellDrone extends Drone {
         this.seedImageCache.clear()
         this.seedBorderColorCache.clear()
         this.seedTagsCache.clear()
+        this.seedLinkCache.clear()
         this.atlasRenderer = this.pixiRenderer
         this.shader = null
       }
@@ -1259,6 +1262,7 @@ export class ShowCellDrone extends Drone {
       branchLabels: cells.filter(cell => cell.hasBranch).map(cell => cell.label),
       externalLabels: cells.filter(cell => cell.external).map(cell => cell.label),
       noImageLabels: cells.filter(cell => !cell.imageSig).map(cell => cell.label),
+      linkLabels: cells.filter(cell => cell.hasLink).map(cell => cell.label),
     })
     this.#emitRenderTags(cells)
   }
@@ -1302,6 +1306,7 @@ export class ShowCellDrone extends Drone {
         this.seedImageCache.delete(payload.seed)
         this.seedBorderColorCache.delete(payload.seed)
         this.seedTagsCache.delete(payload.seed)
+        this.seedLinkCache.delete(payload.seed)
         if (oldSig && this.imageAtlas) {
           this.imageAtlas.invalidate(oldSig)
         }
@@ -1866,7 +1871,7 @@ export class ShowCellDrone extends Drone {
       // external seeds don't have local OPFS data
       if (cell.external) continue
 
-      // load tags from OPFS if not cached (independent of image cache)
+      // load tags + link from OPFS if not cached (independent of image cache)
       if (!this.seedTagsCache.has(cell.label)) {
         try {
           const seedDir = await _dir.getDirectoryHandle(cell.label)
@@ -1875,6 +1880,9 @@ export class ShowCellDrone extends Drone {
           this.seedTagsCache.set(cell.label, Array.isArray(rawTags)
             ? (rawTags as unknown[]).filter((t): t is string => typeof t === 'string')
             : [])
+          if (!this.seedLinkCache.has(cell.label)) {
+            this.seedLinkCache.set(cell.label, typeof tagProps?.['link'] === 'string' && (tagProps['link'] as string).length > 0)
+          }
         } catch { this.seedTagsCache.set(cell.label, []) }
       }
 
@@ -1882,6 +1890,7 @@ export class ShowCellDrone extends Drone {
       if (this.seedImageCache.has(cell.label)) {
         cell.imageSig = this.seedImageCache.get(cell.label) ?? undefined
         cell.borderColor = this.seedBorderColorCache.get(cell.label)
+        cell.hasLink = this.seedLinkCache.get(cell.label) ?? false
         continue
       }
 
@@ -1912,6 +1921,11 @@ export class ShowCellDrone extends Drone {
         } else {
           this.seedTagsCache.set(cell.label, [])
         }
+
+        // extract link presence
+        const hasLink = typeof props?.link === 'string' && props.link.length > 0
+        this.seedLinkCache.set(cell.label, hasLink)
+        cell.hasLink = hasLink
 
         const smallSig = (this.#flat && props?.flat?.small?.image) || props?.small?.image
         if (smallSig && isSignature(smallSig)) {

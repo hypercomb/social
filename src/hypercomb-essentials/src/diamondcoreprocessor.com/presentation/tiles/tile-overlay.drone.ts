@@ -10,7 +10,7 @@ import { type HexGeometry, DEFAULT_HEX_GEOMETRY } from '../grid/hex-geometry.js'
 import type { IconRegistryEntry } from './tile-actions.drone.js'
 import { ICON_SPACING, ICON_Y, computeIconPositions } from './tile-actions.drone.js'
 
-type CellCountPayload = { count: number; labels: string[]; coords: Axial[]; branchLabels?: string[]; externalLabels?: string[]; noImageLabels?: string[] }
+type CellCountPayload = { count: number; labels: string[]; coords: Axial[]; branchLabels?: string[]; externalLabels?: string[]; noImageLabels?: string[]; linkLabels?: string[] }
 
 type OverlayAction = {
   name: string
@@ -39,6 +39,8 @@ export type OverlayTileContext = {
   r: number
   index: number
   noImage: boolean
+  isBranch: boolean
+  hasLink: boolean
 }
 
 export type OverlayProfileKey = 'private' | 'public-own' | 'public-external'
@@ -131,6 +133,7 @@ export class TileOverlayDrone extends Drone {
   #currentTileExternal = false
   #activeProfileKey: OverlayProfileKey | null = null
   #noImageLabels = new Set<string>()
+  #linkLabels = new Set<string>()
 
   #navigationBlocked = false
   #navigationGuardTimer: ReturnType<typeof setTimeout> | null = null
@@ -267,6 +270,7 @@ export class TileOverlayDrone extends Drone {
         this.#branchLabels = new Set(payload.branchLabels ?? [])
         this.#externalLabels = new Set(payload.externalLabels ?? [])
         this.#noImageLabels = new Set(payload.noImageLabels ?? [])
+        this.#linkLabels = new Set(payload.linkLabels ?? [])
         this.#rebuildOccupiedMap()
         if (this.#overlay && this.#currentAxial) {
           this.#currentIndex = this.#lookupIndex(this.#currentAxial.q, this.#currentAxial.r)
