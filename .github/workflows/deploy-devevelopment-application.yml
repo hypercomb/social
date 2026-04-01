@@ -38,22 +38,9 @@ jobs:
         working-directory: src/hypercomb-core
         run: npm run build
 
-      - name: Install web dependencies
-        working-directory: src/hypercomb-web
-        run: npm ci
-
       - name: Build web runtime assets
         working-directory: src/hypercomb-web
         run: npm run runtime
-
-      - name: Link shared node_modules to web (prevents dual Angular runtime)
-        working-directory: src
-        run: |
-          # Preserve esbuild — prebuild (build-pixi-vendor.ts) needs it after the link
-          cp -r node_modules/esbuild hypercomb-web/node_modules/ 2>/dev/null || true
-          cp -r "node_modules/@esbuild" hypercomb-web/node_modules/ 2>/dev/null || true
-          rm -rf node_modules
-          ln -s hypercomb-web/node_modules node_modules
 
       - name: Build web app
         working-directory: src/hypercomb-web
