@@ -55,7 +55,8 @@ export class ClipboardService extends EventTarget {
   }
 }
 
-window.ioc.register(
-  '@diamondcoreprocessor.com/ClipboardService',
-  new ClipboardService()
-)
+const _clipboardService = new ClipboardService()
+window.ioc.register('@diamondcoreprocessor.com/ClipboardService', _clipboardService)
+
+// Announce clipboard availability so shared UI can gate clipboard controls
+EffectBus.emit('clipboard:available', { available: true })

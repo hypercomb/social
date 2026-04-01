@@ -83,7 +83,6 @@ var MOVE_FRAC = MOVE_DUR / CYCLE_PERIOD;
 
 // src/diamondcoreprocessor.com/presentation/tiles/neon-toolbar.drone.ts
 var STORAGE_KEY = "hc:neon-color";
-var SHOW_HIDDEN_KEY = "hc:show-hidden";
 var SWATCH_SIZE = 18;
 var SWATCH_GAP = 6;
 var SWATCH_CORNER = 4;
@@ -93,8 +92,8 @@ var AUTO_HIDE_MS = 6e3;
 var NeonToolbarDrone = class extends Drone {
   namespace = "diamondcoreprocessor.com";
   description = "neon color swatch toolbar, toggled via /neon";
-  listens = ["render:host-ready", "neon:toggle-toolbar", "visibility:toggle-toolbar"];
-  emits = ["overlay:neon-color", "visibility:show-hidden"];
+  listens = ["render:host-ready", "neon:toggle-toolbar"];
+  emits = ["overlay:neon-color"];
   #app = null;
   #toolbar = null;
   #swatches = [];
@@ -102,11 +101,6 @@ var NeonToolbarDrone = class extends Drone {
   #effectsRegistered = false;
   #hideTimer = null;
   #canvas = null;
-  // visibility toolbar (bottom-left, independent of neon toolbar)
-  #visibilityToolbar = null;
-  #showHidden = false;
-  #eyeGraphic = null;
-  #eyeLabel = null;
   heartbeat = async () => {
     if (this.#effectsRegistered) return;
     this.#effectsRegistered = true;
@@ -114,13 +108,9 @@ var NeonToolbarDrone = class extends Drone {
       this.#app = payload.app;
       this.#canvas = payload.canvas;
       this.#buildToolbar();
-      this.#buildVisibilityToolbar();
     });
     this.onEffect("neon:toggle-toolbar", () => {
       this.#toggle();
-    });
-    this.onEffect("visibility:toggle-toolbar", () => {
-      this.#toggleVisibilityToolbar();
     });
   };
   #buildToolbar() {
@@ -205,72 +195,6 @@ var NeonToolbarDrone = class extends Drone {
       if (this.#toolbar) this.#toolbar.visible = false;
       this.#hideTimer = null;
     }, AUTO_HIDE_MS);
-  }
-  // ── Visibility toolbar (eye toggle for showing hidden items) ────
-  #buildVisibilityToolbar() {
-    if (!this.#app || this.#visibilityToolbar) return;
-    this.#showHidden = localStorage.getItem(SHOW_HIDDEN_KEY) === "1";
-    this.#visibilityToolbar = new Container2();
-    this.#visibilityToolbar.zIndex = 1e4;
-    this.#visibilityToolbar.eventMode = "static";
-    const btnSize = SWATCH_SIZE;
-    const totalW = btnSize + TOOLBAR_PAD * 2;
-    const totalH = btnSize + TOOLBAR_PAD * 2;
-    const bg = new Graphics2();
-    bg.roundRect(0, 0, totalW, totalH, 6);
-    bg.fill({ color: 657940, alpha: 0.75 });
-    bg.roundRect(0, 0, totalW, totalH, 6);
-    bg.stroke({ width: 1, color: 3359829, alpha: 0.5 });
-    this.#visibilityToolbar.addChild(bg);
-    const eye = new Graphics2();
-    this.#eyeGraphic = eye;
-    eye.position.set(TOOLBAR_PAD, TOOLBAR_PAD);
-    eye.eventMode = "static";
-    eye.cursor = "pointer";
-    eye.on("pointerdown", () => this.#toggleShowHidden());
-    this.#drawEyeIcon(eye, this.#showHidden);
-    this.#visibilityToolbar.addChild(eye);
-    this.#positionVisibilityToolbar(totalW, totalH);
-    this.#app.stage.addChild(this.#visibilityToolbar);
-    if (this.#canvas) {
-      const observer = new ResizeObserver(() => this.#positionVisibilityToolbar(totalW, totalH));
-      observer.observe(this.#canvas);
-    }
-    if (this.#showHidden) {
-      EffectBus.emit("visibility:show-hidden", { active: true });
-    }
-  }
-  #positionVisibilityToolbar(w, h) {
-    if (!this.#app) return;
-    const screenH = this.#app.screen.height;
-    this.#visibilityToolbar.position.set(TOOLBAR_X, screenH - h - 12);
-  }
-  #drawEyeIcon(g, active) {
-    g.clear();
-    const s = SWATCH_SIZE;
-    const color = active ? 6737151 : 8947848;
-    const alpha = active ? 0.95 : 0.5;
-    g.moveTo(0, s / 2);
-    g.bezierCurveTo(s * 0.2, s * 0.15, s * 0.8, s * 0.15, s, s / 2);
-    g.bezierCurveTo(s * 0.8, s * 0.85, s * 0.2, s * 0.85, 0, s / 2);
-    g.fill({ color, alpha });
-    g.circle(s / 2, s / 2, s * 0.18);
-    g.fill({ color: 657940, alpha: 0.9 });
-    if (!active) {
-      g.moveTo(s * 0.1, s * 0.85);
-      g.lineTo(s * 0.9, s * 0.15);
-      g.stroke({ width: 1.5, color: 13386820, alpha: 0.8 });
-    }
-  }
-  #toggleShowHidden() {
-    this.#showHidden = !this.#showHidden;
-    localStorage.setItem(SHOW_HIDDEN_KEY, this.#showHidden ? "1" : "0");
-    if (this.#eyeGraphic) this.#drawEyeIcon(this.#eyeGraphic, this.#showHidden);
-    EffectBus.emit("visibility:show-hidden", { active: this.#showHidden });
-  }
-  #toggleVisibilityToolbar() {
-    if (!this.#visibilityToolbar) return;
-    this.#visibilityToolbar.visible = !this.#visibilityToolbar.visible;
   }
 };
 function loadIndex() {

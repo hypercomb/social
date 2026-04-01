@@ -10,7 +10,7 @@ import { type HexGeometry, DEFAULT_HEX_GEOMETRY } from '../grid/hex-geometry.js'
 import type { IconRegistryEntry } from './tile-actions.drone.js'
 import { ICON_SPACING, ICON_Y, computeIconPositions } from './tile-actions.drone.js'
 
-type CellCountPayload = { count: number; labels: string[]; coords: Axial[]; branchLabels?: string[]; externalLabels?: string[]; noImageLabels?: string[]; linkLabels?: string[] }
+type CellCountPayload = { count: number; labels: string[]; coords: Axial[]; branchLabels?: string[]; externalLabels?: string[]; noImageLabels?: string[]; linkLabels?: string[]; hiddenLabels?: string[] }
 
 type OverlayAction = {
   name: string
@@ -41,6 +41,7 @@ export type OverlayTileContext = {
   noImage: boolean
   isBranch: boolean
   hasLink: boolean
+  isHidden: boolean
 }
 
 export type OverlayProfileKey = 'private' | 'public-own' | 'public-external'
@@ -134,6 +135,7 @@ export class TileOverlayDrone extends Drone {
   #activeProfileKey: OverlayProfileKey | null = null
   #noImageLabels = new Set<string>()
   #linkLabels = new Set<string>()
+  #hiddenLabels = new Set<string>()
 
   #navigationBlocked = false
   #navigationGuardTimer: ReturnType<typeof setTimeout> | null = null
@@ -271,6 +273,7 @@ export class TileOverlayDrone extends Drone {
         this.#externalLabels = new Set(payload.externalLabels ?? [])
         this.#noImageLabels = new Set(payload.noImageLabels ?? [])
         this.#linkLabels = new Set(payload.linkLabels ?? [])
+        this.#hiddenLabels = new Set(payload.hiddenLabels ?? [])
         this.#rebuildOccupiedMap()
         if (this.#overlay && this.#currentAxial) {
           this.#currentIndex = this.#lookupIndex(this.#currentAxial.q, this.#currentAxial.r)
@@ -515,6 +518,7 @@ export class TileOverlayDrone extends Drone {
       noImage: this.#noImageLabels.has(entry.label),
       isBranch: this.#branchLabels.has(entry.label),
       hasLink: this.#linkLabels.has(entry.label),
+      isHidden: this.#hiddenLabels.has(entry.label),
     }
 
     for (const action of this.#actions) {
@@ -1382,6 +1386,14 @@ export class TileOverlayDrone extends Drone {
     }
 
     const occupied = this.#currentIndex !== undefined && this.#currentIndex < this.#cellCount
+
+    // Public mode: hide overlay entirely unless a tile is selected
+    if (this.#meshPublic && !this.#hasSelection) {
+      this.#overlay.visible = false
+      if (this.#hexBg) this.#hexBg.hide()
+      return
+    }
+
     const shouldShow = occupied && !this.#editing && !this.#editCooldown && !this.#touchDragging
 
     // When tiles are selected, show only the seed label (no hex bg, icons, or hover label)

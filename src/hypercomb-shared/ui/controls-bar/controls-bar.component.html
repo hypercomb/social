@@ -117,8 +117,14 @@
           </button>
         </div>
 
+        <!-- show hidden items toggle -->
+        <div class="controls-divider"></div>
+        <button class="ctl-btn eye-btn" [class.active]="showHidden()" (click)="toggleShowHidden()" [attr.aria-label]="'controls.show-hidden' | t">
+          <span class="eye-icon" [class.struck]="!showHidden()"></span>
+        </button>
+
         <!-- clipboard + voice buttons -->
-        @if (clipboardCount() > 0) {
+        @if (clipboardAvailable() && clipboardCount() > 0) {
           <div class="controls-divider"></div>
           <button class="ctl-btn clipboard-btn" (click)="openClipboard()" [attr.aria-label]="'controls.clipboard' | t">
             <span class="hci">y</span>
@@ -166,29 +172,31 @@
     }
 
     @case ('clipboard') {
-      <div class="controls-section clipboard-mode">
-        <span class="mode-label">{{ 'controls.clipboard' | t }}</span>
+      @if (clipboardAvailable()) {
+        <div class="controls-section clipboard-mode">
+          <span class="mode-label">{{ 'controls.clipboard' | t }}</span>
+          @if (clipboardCount() > 0) {
+            <span class="clipboard-count">{{ clipboardCount() }}</span>
+          } @else {
+            <span class="clipboard-empty">{{ 'controls.clipboard-empty' | t }}</span>
+          }
+        </div>
+        <div class="controls-divider"></div>
         @if (clipboardCount() > 0) {
-          <span class="clipboard-count">{{ clipboardCount() }}</span>
-        } @else {
-          <span class="clipboard-empty">{{ 'controls.clipboard-empty' | t }}</span>
+          <button class="ctl-btn" (click)="place()" [attr.aria-label]="'controls.place-selected' | t">
+            <span class="hci" [style.display]="'inline-block'" [style.transform]="'rotate(90deg)'" [style.color]="hasSelection() ? '#4caf50' : ''">A</span>
+          </button>
+          <button class="ctl-btn" (click)="paste()" [attr.aria-label]="'controls.paste-clipboard' | t">
+            <span class="hci" style="color:#4caf50">G</span>
+          </button>
         }
-      </div>
-      <div class="controls-divider"></div>
-      @if (clipboardCount() > 0) {
-        <button class="ctl-btn" (click)="place()" [attr.aria-label]="'controls.place-selected' | t">
-          <span class="hci" [style.display]="'inline-block'" [style.transform]="'rotate(90deg)'" [style.color]="hasSelection() ? '#4caf50' : ''">A</span>
+        <button class="ctl-btn" (click)="clearClipboard()" [attr.aria-label]="'controls.clear-clipboard' | t">
+          <span class="hci">Q</span>
         </button>
-        <button class="ctl-btn" (click)="paste()" [attr.aria-label]="'controls.paste-clipboard' | t">
-          <span class="hci" style="color:#4caf50">G</span>
+        <button class="ctl-btn" (click)="closeClipboard()" [attr.aria-label]="'controls.close-clipboard' | t">
+          <span class="close-x">&times;</span>
         </button>
       }
-      <button class="ctl-btn" (click)="clearClipboard()" [attr.aria-label]="'controls.clear-clipboard' | t">
-        <span class="hci">Q</span>
-      </button>
-      <button class="ctl-btn" (click)="closeClipboard()" [attr.aria-label]="'controls.close-clipboard' | t">
-        <span class="close-x">&times;</span>
-      </button>
     }
 
   }

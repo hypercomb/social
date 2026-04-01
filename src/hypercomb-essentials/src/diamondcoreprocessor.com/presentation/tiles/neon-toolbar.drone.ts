@@ -3,12 +3,11 @@
 // Toggled by the /neon queen command.
 
 import { Drone, EffectBus } from '@hypercomb/core'
-import { Application, Container, Graphics, Text, TextStyle } from 'pixi.js'
+import { Application, Container, Graphics } from 'pixi.js'
 import { NEON_PRESETS } from './hex-overlay.shader.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
 
 const STORAGE_KEY = 'hc:neon-color'
-const SHOW_HIDDEN_KEY = 'hc:show-hidden'
 const SWATCH_SIZE = 18
 const SWATCH_GAP  = 6
 const SWATCH_CORNER = 4
@@ -20,8 +19,8 @@ export class NeonToolbarDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override description = 'neon color swatch toolbar, toggled via /neon'
 
-  protected override listens = ['render:host-ready', 'neon:toggle-toolbar', 'visibility:toggle-toolbar']
-  protected override emits = ['overlay:neon-color', 'visibility:show-hidden']
+  protected override listens = ['render:host-ready', 'neon:toggle-toolbar']
+  protected override emits = ['overlay:neon-color']
 
   #app: Application | null = null
   #toolbar: Container | null = null
@@ -31,12 +30,6 @@ export class NeonToolbarDrone extends Drone {
   #hideTimer: ReturnType<typeof setTimeout> | null = null
   #canvas: HTMLCanvasElement | null = null
 
-  // visibility toolbar (bottom-left, independent of neon toolbar)
-  #visibilityToolbar: Container | null = null
-  #showHidden = false
-  #eyeGraphic: Graphics | null = null
-  #eyeLabel: Text | null = null
-
   protected override heartbeat = async (): Promise<void> => {
     if (this.#effectsRegistered) return
     this.#effectsRegistered = true
@@ -45,15 +38,10 @@ export class NeonToolbarDrone extends Drone {
       this.#app = payload.app
       this.#canvas = payload.canvas
       this.#buildToolbar()
-      this.#buildVisibilityToolbar()
     })
 
     this.onEffect('neon:toggle-toolbar', () => {
       this.#toggle()
-    })
-
-    this.onEffect('visibility:toggle-toolbar', () => {
-      this.#toggleVisibilityToolbar()
     })
   }
 
@@ -174,95 +162,6 @@ export class NeonToolbarDrone extends Drone {
     }, AUTO_HIDE_MS)
   }
 
-  // ── Visibility toolbar (eye toggle for showing hidden items) ────
-
-  #buildVisibilityToolbar(): void {
-    if (!this.#app || this.#visibilityToolbar) return
-
-    this.#showHidden = localStorage.getItem(SHOW_HIDDEN_KEY) === '1'
-
-    this.#visibilityToolbar = new Container()
-    this.#visibilityToolbar.zIndex = 10000
-    this.#visibilityToolbar.eventMode = 'static'
-
-    const btnSize = SWATCH_SIZE
-    const totalW = btnSize + TOOLBAR_PAD * 2
-    const totalH = btnSize + TOOLBAR_PAD * 2
-
-    // background panel
-    const bg = new Graphics()
-    bg.roundRect(0, 0, totalW, totalH, 6)
-    bg.fill({ color: 0x0a0a14, alpha: 0.75 })
-    bg.roundRect(0, 0, totalW, totalH, 6)
-    bg.stroke({ width: 1, color: 0x334455, alpha: 0.5 })
-    this.#visibilityToolbar.addChild(bg)
-
-    // eye icon drawn as graphics
-    const eye = new Graphics()
-    this.#eyeGraphic = eye
-    eye.position.set(TOOLBAR_PAD, TOOLBAR_PAD)
-    eye.eventMode = 'static'
-    eye.cursor = 'pointer'
-    eye.on('pointerdown', () => this.#toggleShowHidden())
-    this.#drawEyeIcon(eye, this.#showHidden)
-    this.#visibilityToolbar.addChild(eye)
-
-    // position: bottom-left
-    this.#positionVisibilityToolbar(totalW, totalH)
-    this.#app.stage.addChild(this.#visibilityToolbar)
-
-    if (this.#canvas) {
-      const observer = new ResizeObserver(() => this.#positionVisibilityToolbar(totalW, totalH))
-      observer.observe(this.#canvas)
-    }
-
-    // emit initial state
-    if (this.#showHidden) {
-      EffectBus.emit('visibility:show-hidden', { active: true })
-    }
-  }
-
-  #positionVisibilityToolbar(w: number, h: number): void {
-    if (!this.#app) return
-    const screenH = this.#app.screen.height
-    this.#visibilityToolbar!.position.set(TOOLBAR_X, screenH - h - 12)
-  }
-
-  #drawEyeIcon(g: Graphics, active: boolean): void {
-    g.clear()
-    const s = SWATCH_SIZE
-    const color = active ? 0x66ccff : 0x888888
-    const alpha = active ? 0.95 : 0.5
-
-    // eye shape: two arcs
-    g.moveTo(0, s / 2)
-    g.bezierCurveTo(s * 0.2, s * 0.15, s * 0.8, s * 0.15, s, s / 2)
-    g.bezierCurveTo(s * 0.8, s * 0.85, s * 0.2, s * 0.85, 0, s / 2)
-    g.fill({ color, alpha })
-
-    // pupil
-    g.circle(s / 2, s / 2, s * 0.18)
-    g.fill({ color: 0x0a0a14, alpha: 0.9 })
-
-    // strike-through when inactive
-    if (!active) {
-      g.moveTo(s * 0.1, s * 0.85)
-      g.lineTo(s * 0.9, s * 0.15)
-      g.stroke({ width: 1.5, color: 0xcc4444, alpha: 0.8 })
-    }
-  }
-
-  #toggleShowHidden(): void {
-    this.#showHidden = !this.#showHidden
-    localStorage.setItem(SHOW_HIDDEN_KEY, this.#showHidden ? '1' : '0')
-    if (this.#eyeGraphic) this.#drawEyeIcon(this.#eyeGraphic, this.#showHidden)
-    EffectBus.emit('visibility:show-hidden', { active: this.#showHidden })
-  }
-
-  #toggleVisibilityToolbar(): void {
-    if (!this.#visibilityToolbar) return
-    this.#visibilityToolbar.visible = !this.#visibilityToolbar.visible
-  }
 }
 
 function loadIndex(): number {

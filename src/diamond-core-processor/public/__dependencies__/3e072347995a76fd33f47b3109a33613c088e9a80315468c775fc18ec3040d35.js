@@ -49,10 +49,9 @@ var ClipboardService = class extends EventTarget {
     });
   }
 };
-window.ioc.register(
-  "@diamondcoreprocessor.com/ClipboardService",
-  new ClipboardService()
-);
+var _clipboardService = new ClipboardService();
+window.ioc.register("@diamondcoreprocessor.com/ClipboardService", _clipboardService);
+EffectBus.emit("clipboard:available", { available: true });
 export {
   ClipboardService
 };

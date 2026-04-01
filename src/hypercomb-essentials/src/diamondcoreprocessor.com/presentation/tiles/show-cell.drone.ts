@@ -1258,6 +1258,7 @@ export class ShowCellDrone extends Drone {
       externalLabels: cells.filter(cell => cell.external).map(cell => cell.label),
       noImageLabels: cells.filter(cell => !cell.imageSig).map(cell => cell.label),
       linkLabels: cells.filter(cell => cell.hasLink).map(cell => cell.label),
+      hiddenLabels: this.#showHiddenItems ? [...this.#currentHiddenSet] : [],
     })
     this.#emitRenderTags(cells)
   }

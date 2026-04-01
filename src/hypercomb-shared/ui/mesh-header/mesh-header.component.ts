@@ -77,15 +77,23 @@ export class MeshHeaderComponent {
     }
   }
 
+  /** pointerleave cancels the gesture entirely — no tap, no long-press. */
+  readonly onPointerLeave = (): void => {
+    if (this.#longPressTimer !== null) {
+      clearTimeout(this.#longPressTimer)
+      this.#longPressTimer = null
+    }
+  }
+
   readonly #handleTap = (): void => {
     if (!this.meshPublic) {
-      // solo → shield (just show shield icon; secret input only via long-press)
+      // solo → shield
       this.meshToggled.emit()
     } else if (this.showSecretInput()) {
-      // shield tap while editing: save current value and collapse (same as Enter)
-      this.#saveAndCollapse()
+      // shield tap while editing: do nothing — only Enter or Escape should close
+      return
     } else {
-      // shield collapsed (has secret) → toggle to solo (keep secret)
+      // shield collapsed → toggle to solo
       this.meshToggled.emit()
     }
   }

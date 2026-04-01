@@ -1101,15 +1101,10 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       const currentMeshRev = this.meshSeedsRev;
       return currentKey !== locationKey || currentRev !== fsRev || currentMeshRev !== meshRev;
     };
-    let dir;
-    if (this.#clipboardView) {
-      dir = null;
-    } else {
-      dir = await lineage.explorerDir();
-      if (isStale()) {
-        this.renderQueued = true;
-        return;
-      }
+    const dir = await lineage.explorerDir();
+    if (!this.#clipboardView && isStale()) {
+      this.renderQueued = true;
+      return;
     }
     if (!dir) {
       console.warn("[show-honeycomb] BAIL: explorerDir returned null");
@@ -1434,7 +1429,8 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       branchLabels: cells.filter((cell) => cell.hasBranch).map((cell) => cell.label),
       externalLabels: cells.filter((cell) => cell.external).map((cell) => cell.label),
       noImageLabels: cells.filter((cell) => !cell.imageSig).map((cell) => cell.label),
-      linkLabels: cells.filter((cell) => cell.hasLink).map((cell) => cell.label)
+      linkLabels: cells.filter((cell) => cell.hasLink).map((cell) => cell.label),
+      hiddenLabels: this.#showHiddenItems ? [...this.#currentHiddenSet] : []
     });
     this.#emitRenderTags(cells);
   };

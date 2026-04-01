@@ -33,6 +33,8 @@ var ICONS = {
   search: svg('<circle cx="11" cy="11" r="7"/><line x1="16" y1="16" x2="21" y2="21"/>'),
   // Eye with slash
   hide: svg('<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/><circle cx="12" cy="12" r="3"/><line x1="4" y1="4" x2="20" y2="20"/>'),
+  // Eye open (unhide)
+  unhide: svg('<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/><circle cx="12" cy="12" r="3"/>'),
   // Plus
   adopt: svg('<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>'),
   // Circle with slash
@@ -46,15 +48,17 @@ var ICON_REGISTRY = [
   { name: "edit", svgMarkup: ICONS.edit, hoverTint: 13162751, profile: "private" },
   { name: "search", svgMarkup: ICONS.search, hoverTint: 13172680, profile: "private", visibleWhen: (ctx) => ctx.noImage },
   { name: "remove", svgMarkup: ICONS.remove, hoverTint: 16763080, profile: "private" },
+  { name: "unhide", svgMarkup: ICONS.unhide, hoverTint: 6737151, profile: "private", visibleWhen: (ctx) => ctx.isHidden },
   // ── public-own profile ──
-  { name: "hide", svgMarkup: ICONS.hide, hoverTint: 16767144, profile: "public-own" },
+  { name: "hide", svgMarkup: ICONS.hide, hoverTint: 16767144, profile: "public-own", visibleWhen: (ctx) => !ctx.isHidden },
+  { name: "unhide", svgMarkup: ICONS.unhide, hoverTint: 6737151, profile: "public-own", visibleWhen: (ctx) => ctx.isHidden },
   // ── public-external profile ──
   { name: "adopt", svgMarkup: ICONS.adopt, hoverTint: 11075544, profile: "public-external" },
   { name: "block", svgMarkup: ICONS.block, hoverTint: 16763080, profile: "public-external" }
 ];
 var DEFAULT_ACTIVE = {
-  "private": ["command", "edit", "remove"],
-  "public-own": ["hide"],
+  "private": ["command", "edit", "remove", "unhide"],
+  "public-own": ["hide", "unhide"],
   "public-external": ["adopt", "block"]
 };
 var ICON_Y = 6;
@@ -74,7 +78,7 @@ function computeIconPositions(activeNames) {
   return activeNames.map((_, i) => ({ x: Math.round(startX + i * spacing), y: ICON_Y }));
 }
 var ARRANGEMENT_KEY = "iconArrangement";
-var HANDLED_ACTIONS = /* @__PURE__ */ new Set(["edit", "search", "command", "hide", "adopt", "block", "remove"]);
+var HANDLED_ACTIONS = /* @__PURE__ */ new Set(["edit", "search", "command", "hide", "unhide", "adopt", "block", "remove"]);
 var TileActionsDrone = class extends Drone {
   namespace = "diamondcoreprocessor.com";
   description = "registers default tile overlay icons and handles their click actions";
@@ -82,7 +86,7 @@ var TileActionsDrone = class extends Drone {
     lineage: "@hypercomb.social/Lineage"
   };
   listens = ["render:host-ready", "tile:action", "overlay:icons-reordered", "overlay:arrange-mode"];
-  emits = ["overlay:register-action", "overlay:pool-icons", "search:prefill", "command:focus", "tile:hidden", "tile:blocked", "seed:removed"];
+  emits = ["overlay:register-action", "overlay:pool-icons", "search:prefill", "command:focus", "tile:hidden", "tile:unhidden", "tile:blocked", "seed:removed"];
   #registered = false;
   #effectsRegistered = false;
   #arrangement = {};
@@ -216,6 +220,9 @@ var TileActionsDrone = class extends Drone {
       case "hide":
         this.#hideOrBlock(label, "hc:hidden-tiles", "tile:hidden");
         break;
+      case "unhide":
+        this.#unhide(label);
+        break;
       case "adopt":
         EffectBus.emit("seed:added", { seed: label });
         void new hypercomb().act();
@@ -248,6 +255,16 @@ var TileActionsDrone = class extends Drone {
       EffectBus.emit("seed:removed", { seed: label });
     } catch {
     }
+    void new hypercomb().act();
+  }
+  #unhide(label) {
+    const lineage = this.resolve("lineage");
+    const location = lineage?.explorerLabel() ?? "/";
+    const key = `hc:hidden-tiles:${location}`;
+    const existing = JSON.parse(localStorage.getItem(key) ?? "[]");
+    const updated = existing.filter((l) => l !== label);
+    localStorage.setItem(key, JSON.stringify(updated));
+    EffectBus.emit("tile:unhidden", { seed: label, location });
     void new hypercomb().act();
   }
   #hideOrBlock(label, storagePrefix, effect) {

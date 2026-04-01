@@ -120,10 +120,8 @@ var PinchZoomInput = class {
     let factor = dist / lastDistance;
     if (!Number.isFinite(factor) || factor <= 0) return { distance: lastDistance };
     factor = Math.max(0.5, Math.min(2, factor));
-    const dpr = globalThis.devicePixelRatio || 1;
-    const pinchSensitivity = dpr > 1 ? sensitivity * dpr : sensitivity;
     const deviation = factor - 1;
-    factor = 1 + deviation * pinchSensitivity;
+    factor = 1 + deviation * sensitivity;
     const pivot = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
     this.#zoom?.zoomByFactor(factor, pivot);
     return { distance: dist };

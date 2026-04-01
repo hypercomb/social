@@ -325,6 +325,54 @@
   }
 }
 
+// ── eye toggle (show hidden items) ───────────────────
+
+.eye-btn {
+  &.active .eye-icon {
+    background: rgba(102, 204, 255, 0.9);
+    &::after { opacity: 0; }
+  }
+}
+
+.eye-icon {
+  display: inline-block;
+  width: 0.86rem;
+  height: 0.86rem;
+  position: relative;
+
+  // eye shape via mask
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3C/svg%3E");
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+
+  background: rgba(200, 200, 200, 0.6);
+  transition: background 200ms ease;
+
+  // diagonal strike-through for "hidden" state
+  &::after {
+    content: '';
+    position: absolute;
+    top: 10%;
+    left: -5%;
+    width: 130%;
+    height: 1.5px;
+    background: #cc4444;
+    transform: rotate(-25deg);
+    transform-origin: center;
+    opacity: 0.85;
+    transition: opacity 200ms ease;
+    pointer-events: none;
+  }
+
+  &.struck::after { opacity: 0.85; }
+  &:not(.struck)::after { opacity: 0; }
+}
+
 // ── voice input mic button ────────────────────────────
 
 .mic-icon {

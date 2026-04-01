@@ -18,6 +18,8 @@ const ICONS = {
   search: svg('<circle cx="11" cy="11" r="7"/><line x1="16" y1="16" x2="21" y2="21"/>'),
   // Eye with slash
   hide: svg('<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/><circle cx="12" cy="12" r="3"/><line x1="4" y1="4" x2="20" y2="20"/>'),
+  // Eye open (unhide)
+  unhide: svg('<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/><circle cx="12" cy="12" r="3"/>'),
   // Plus
   adopt: svg('<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>'),
   // Circle with slash
@@ -42,8 +44,10 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   { name: 'edit', svgMarkup: ICONS.edit, hoverTint: 0xc8d8ff, profile: 'private' },
   { name: 'search', svgMarkup: ICONS.search, hoverTint: 0xc8ffc8, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.noImage },
   { name: 'remove', svgMarkup: ICONS.remove, hoverTint: 0xffc8c8, profile: 'private' },
+  { name: 'unhide', svgMarkup: ICONS.unhide, hoverTint: 0x66ccff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden },
   // ── public-own profile ──
-  { name: 'hide', svgMarkup: ICONS.hide, hoverTint: 0xffd8a8, profile: 'public-own' },
+  { name: 'hide', svgMarkup: ICONS.hide, hoverTint: 0xffd8a8, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => !ctx.isHidden },
+  { name: 'unhide', svgMarkup: ICONS.unhide, hoverTint: 0x66ccff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden },
   // ── public-external profile ──
   { name: 'adopt', svgMarkup: ICONS.adopt, hoverTint: 0xa8ffd8, profile: 'public-external' },
   { name: 'block', svgMarkup: ICONS.block, hoverTint: 0xffc8c8, profile: 'public-external' },
@@ -51,8 +55,8 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
 
 // Default active icons per profile (defines the fallback order)
 const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
-  'private': ['command', 'edit', 'remove'],
-  'public-own': ['hide'],
+  'private': ['command', 'edit', 'remove', 'unhide'],
+  'public-own': ['hide', 'unhide'],
   'public-external': ['adopt', 'block'],
 }
 
@@ -89,7 +93,7 @@ const ARRANGEMENT_KEY = 'iconArrangement'
 type IconArrangement = Partial<Record<OverlayProfileKey, string[]>>
 
 // ── Action names this bee handles ─────────────────────────────────
-const HANDLED_ACTIONS = new Set(['edit', 'search', 'command', 'hide', 'adopt', 'block', 'remove'])
+const HANDLED_ACTIONS = new Set(['edit', 'search', 'command', 'hide', 'unhide', 'adopt', 'block', 'remove'])
 
 type TileActionPayload = { action: string; label: string; q: number; r: number; index: number }
 
@@ -102,7 +106,7 @@ export class TileActionsDrone extends Drone {
   }
 
   protected override listens = ['render:host-ready', 'tile:action', 'overlay:icons-reordered', 'overlay:arrange-mode']
-  protected override emits = ['overlay:register-action', 'overlay:pool-icons', 'search:prefill', 'command:focus', 'tile:hidden', 'tile:blocked', 'seed:removed']
+  protected override emits = ['overlay:register-action', 'overlay:pool-icons', 'search:prefill', 'command:focus', 'tile:hidden', 'tile:unhidden', 'tile:blocked', 'seed:removed']
 
   #registered = false
   #effectsRegistered = false
@@ -283,6 +287,10 @@ export class TileActionsDrone extends Drone {
         this.#hideOrBlock(label, 'hc:hidden-tiles', 'tile:hidden')
         break
 
+      case 'unhide':
+        this.#unhide(label)
+        break
+
       case 'adopt':
         EffectBus.emit('seed:added', { seed: label })
         void new hypercomb().act()
@@ -315,6 +323,17 @@ export class TileActionsDrone extends Drone {
       await dir.removeEntry(label, { recursive: true })
       EffectBus.emit('seed:removed', { seed: label })
     } catch { /* entry doesn't exist or can't be removed */ }
+    void new hypercomb().act()
+  }
+
+  #unhide(label: string): void {
+    const lineage = this.resolve<{ explorerLabel(): string }>('lineage')
+    const location = lineage?.explorerLabel() ?? '/'
+    const key = `hc:hidden-tiles:${location}`
+    const existing: string[] = JSON.parse(localStorage.getItem(key) ?? '[]')
+    const updated = existing.filter(l => l !== label)
+    localStorage.setItem(key, JSON.stringify(updated))
+    EffectBus.emit('tile:unhidden', { seed: label, location })
     void new hypercomb().act()
   }
 

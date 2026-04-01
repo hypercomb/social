@@ -89,6 +89,8 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #roomValue = signal('')
   #roomOpen = signal(false)
   #beesVisible = signal(localStorage.getItem('hc:bees-visible') === 'true')
+  #showHidden = signal(localStorage.getItem('hc:show-hidden') === '1')
+  #clipboardAvailable = signal(false)
   #meetingJoined = signal(false)
   #meetingCameraOn = signal(false)
   #microphoneOn = signal(false)
@@ -196,6 +198,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   readonly utility = this.#utility.asReadonly()
   readonly clipboardItems = this.#clipboardItems.asReadonly()
   readonly clipboardCount = computed(() => this.#clipboardItems().length)
+  readonly clipboardAvailable = this.#clipboardAvailable.asReadonly()
   readonly moveMode = this.#moveMode.asReadonly()
   readonly hasSelection = this.#hasSelection.asReadonly()
   readonly textOnly = this.#textOnly.asReadonly()
@@ -255,6 +258,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   readonly roomValue = this.#roomValue.asReadonly()
   readonly roomOpen = this.#roomOpen.asReadonly()
   readonly beesVisible = this.#beesVisible.asReadonly()
+  readonly showHidden = this.#showHidden.asReadonly()
   readonly meetingJoined = this.#meetingJoined.asReadonly()
   readonly meetingCameraOn = this.#meetingCameraOn.asReadonly()
   readonly microphoneOn = this.#microphoneOn.asReadonly()
@@ -270,6 +274,8 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #tagsUnsub: (() => void) | null = null
   #hoverTagsUnsub: (() => void) | null = null
   #voiceActiveUnsub: (() => void) | null = null
+  #showHiddenUnsub: (() => void) | null = null
+  #clipboardAvailableUnsub: (() => void) | null = null
   #onMeetingState: EventListener | null = null
   #onMeetingCamera: EventListener | null = null
   #onMeetingMic: EventListener | null = null
@@ -294,6 +300,14 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     window.addEventListener('touchstart', this.#onSwipeStart, { passive: true })
     window.addEventListener('touchmove', this.#onSwipeMove, { passive: true })
     window.addEventListener('touchend', this.#onSwipeEnd, { passive: true })
+
+    this.#clipboardAvailableUnsub = EffectBus.on<{ available: boolean }>('clipboard:available', (payload) => {
+      const available = payload?.available ?? false
+      this.#clipboardAvailable.set(available)
+      if (!available && this.#mode() === 'clipboard') {
+        this.closeClipboard()
+      }
+    })
 
     this.#selectionUnsub = EffectBus.on<{ selected?: string[] }>('selection:changed', (payload) => {
       this.#hasSelection.set((payload?.selected?.length ?? 0) > 0)
@@ -345,6 +359,15 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
       this.voiceActive.set(active)
     })
 
+    this.#showHiddenUnsub = EffectBus.on<{ active: boolean }>('visibility:show-hidden', ({ active }) => {
+      this.#showHidden.set(active)
+    })
+
+    // emit initial show-hidden state so drones pick it up
+    if (this.#showHidden()) {
+      EffectBus.emit('visibility:show-hidden', { active: true })
+    }
+
     this.#onMeetingState = ((e: CustomEvent) => {
       const state = e.detail?.state
       this.#meetingJoined.set(state === 'gathering' || state === 'active')
@@ -391,6 +414,8 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     this.#viewActiveUnsub?.()
     this.#beesUnsub?.()
     this.#voiceActiveUnsub?.()
+    this.#showHiddenUnsub?.()
+    this.#clipboardAvailableUnsub?.()
     this.#tagsUnsub?.()
     this.#hoverTagsUnsub?.()
     if (this.#onMeetingState) window.removeEventListener('meeting:state', this.#onMeetingState)
@@ -516,6 +541,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   }
 
   readonly openClipboard = (): void => {
+    if (!this.#clipboardAvailable()) return
     this.#mode.set('clipboard')
     const clipSvc = get('@diamondcoreprocessor.com/ClipboardService') as
       { items?: { label: string; sourceSegments: readonly string[] }[] } | undefined
@@ -555,6 +581,15 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     this.#beesVisible.set(next)
     localStorage.setItem('hc:bees-visible', String(next))
     EffectBus.emit('render:set-bees-visible', { visible: next })
+  }
+
+  // ── show hidden items ────────────────────────────────
+
+  readonly toggleShowHidden = (): void => {
+    const next = !this.#showHidden()
+    this.#showHidden.set(next)
+    localStorage.setItem('hc:show-hidden', next ? '1' : '0')
+    EffectBus.emit('visibility:show-hidden', { active: next })
   }
 
   // ── voice ────────────────────────────────────────────
