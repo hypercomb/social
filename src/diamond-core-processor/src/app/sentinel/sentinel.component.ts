@@ -32,10 +32,24 @@ export class SentinelComponent implements OnInit, OnDestroy {
   #handler = inject(SentinelHandler)
   #port: MessagePort | null = null
   #onMessage = (e: MessageEvent) => this.#handleHandshake(e)
+  #toggleChannel: BroadcastChannel | null = null
 
   ngOnInit(): void {
     window.addEventListener('message', this.#onMessage)
     console.log('[sentinel] ready — waiting for handshake')
+
+    // Listen for toggle changes from the DCP main tab (same origin).
+    // When a user toggles a bee on/off in DCP, relay immediately to web
+    // so it can resync and stop/start the affected bee.
+    try {
+      this.#toggleChannel = new BroadcastChannel('dcp-toggle-state')
+      this.#toggleChannel.onmessage = () => {
+        if (this.#port) {
+          this.#port.postMessage({ type: 'toggle-changed' })
+          console.log('[sentinel] relayed toggle-changed to web')
+        }
+      }
+    } catch { /* BroadcastChannel unavailable */ }
 
     // Announce to parent that the sentinel is ready to accept a handshake.
     // The iframe 'load' event fires before Angular mounts this component,
@@ -49,6 +63,7 @@ export class SentinelComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     window.removeEventListener('message', this.#onMessage)
     this.#port?.close()
+    this.#toggleChannel?.close()
   }
 
   #handleHandshake(e: MessageEvent): void {

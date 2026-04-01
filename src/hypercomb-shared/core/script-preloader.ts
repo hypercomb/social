@@ -60,6 +60,24 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
         await this.#loadBeesFromList(manifestBees)
       }
 
+      // Enforce manifest: dispose and evict bees that are no longer enabled.
+      // This is the trust boundary — if DCP says a bee is off, it must not pulse.
+      if (manifestBees.length) {
+        const enabledSet = new Set(manifestBees)
+        let evicted = false
+        for (const [sig, bee] of this.#beeCache) {
+          if (!enabledSet.has(sig)) {
+            console.log(`[script-preloader] evicting disabled bee ${sig} (${bee.iocKey})`)
+            bee.markDisposed()
+            this.#beeCache.delete(sig)
+            this.#bySignature.delete(sig)
+            this.#resourceCount = Math.max(0, this.#resourceCount - 1)
+            evicted = true
+          }
+        }
+        if (evicted) this.#refreshProjection()
+      }
+
       return [...this.#beeCache.values()]
     }
 

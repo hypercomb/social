@@ -4,11 +4,13 @@ import { Injectable } from '@angular/core'
 import type { TreeNode } from './tree-node'
 
 const STORAGE_KEY = 'dcp.toggleState'
+const TOGGLE_CHANNEL = 'dcp-toggle-state'
 
 @Injectable({ providedIn: 'root' })
 export class ToggleStateService {
 
   #state: Map<string, boolean>
+  #channel: BroadcastChannel | null = null
 
   constructor() {
     this.#state = this.#load()
@@ -18,6 +20,15 @@ export class ToggleStateService {
     const current = this.isEnabled(nodeId)
     this.#state.set(nodeId, !current)
     this.#persist()
+    this.#broadcastChange()
+  }
+
+  /** Notify the sentinel iframe (and any same-origin listener) that toggles changed. */
+  #broadcastChange(): void {
+    try {
+      if (!this.#channel) this.#channel = new BroadcastChannel(TOGGLE_CHANNEL)
+      this.#channel.postMessage({ type: 'toggle-changed' })
+    } catch { /* BroadcastChannel unavailable — sentinel sync will pick up on next poll */ }
   }
 
   isEnabled(nodeId: string): boolean {

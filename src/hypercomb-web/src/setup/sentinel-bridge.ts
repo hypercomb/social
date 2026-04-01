@@ -45,10 +45,16 @@ export class SentinelBridge {
   #fileCollectors = new Map<string, SentinelFile[]>()
   #progressListeners = new Map<string, (p: { phase: string; current: number; total: number }) => void>()
   #ridCounter = 0
+  #onToggleChanged: (() => void) | null = null
 
   constructor(port: MessagePort) {
     this.#port = port
     this.#port.onmessage = (e) => this.#onMessage(e.data)
+  }
+
+  /** Register a callback for when DCP toggles a bee on/off. */
+  set onToggleChanged(fn: (() => void) | null) {
+    this.#onToggleChanged = fn
   }
 
   /**
@@ -101,7 +107,16 @@ export class SentinelBridge {
   }
 
   #onMessage(msg: any): void {
-    if (!msg || !msg.rid) return
+    if (!msg) return
+
+    // DCP toggle change — no rid, fire callback immediately
+    if (msg.type === 'toggle-changed') {
+      console.log('[sentinel-bridge] received toggle-changed from DCP')
+      this.#onToggleChanged?.()
+      return
+    }
+
+    if (!msg.rid) return
     const { rid } = msg
 
     switch (msg.type) {

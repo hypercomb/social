@@ -52,16 +52,13 @@ const bootstrap = async (): Promise<void> => {
 
   const appRef = await bootstrapApplication(App, appConfig)
 
-  // After DCP portal installs, resync with sentinel then reload so the
-  // browser picks up the new import-map entries (import maps are immutable
-  // once injected).  If nothing changed, skip the reload.
-  window.addEventListener('actions:available', async () => {
+  // Shared resync logic: resync with sentinel, reload if import map changed,
+  // otherwise let find() enforce the updated manifest (evicts disabled bees).
+  const resyncAndEnforce = async () => {
+    if (!sentinel) return
+
     const previousSyncSig = localStorage.getItem('sentinel.sync-signature') ?? ''
-
-    if (sentinel) {
-      await resyncFromSentinel(sentinel)
-    }
-
+    await resyncFromSentinel(sentinel)
     const currentSyncSig = localStorage.getItem('sentinel.sync-signature') ?? ''
 
     // Sync signature changed → new content was installed.
@@ -73,10 +70,22 @@ const bootstrap = async (): Promise<void> => {
 
     // No new content — just refresh bees in case manifest changed without
     // new dependencies (e.g. toggling existing bees on/off).
+    // find() enforces the manifest: disabled bees are disposed and evicted.
     const preloader = get('@hypercomb.social/ScriptPreloader') as any
     if (preloader?.find) await preloader.find('')
     appRef.tick()
-  })
+  }
+
+  // After DCP portal installs, resync with sentinel then reload so the
+  // browser picks up the new import-map entries (import maps are immutable
+  // once injected).  If nothing changed, skip the reload.
+  window.addEventListener('actions:available', resyncAndEnforce)
+
+  // Live toggle enforcement: when DCP toggles a bee on/off, resync
+  // immediately so the bee stops (or starts) on the very next pulse.
+  if (sentinel) {
+    sentinel.onToggleChanged = resyncAndEnforce
+  }
 }
 
 bootstrap().catch(err => console.error(err))
