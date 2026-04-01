@@ -39,15 +39,6 @@ var callAnthropic = async (model, systemPrompt, userMessage, apiKey, maxTokens =
 };
 
 // src/diamondcoreprocessor.com/assistant/atomize.drone.ts
-var EXPAND_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>';
-var ACTION_DESCRIPTOR = {
-  name: "expand",
-  svgMarkup: EXPAND_SVG,
-  x: -25.25,
-  y: 5,
-  hoverTint: 14207231,
-  profile: "private"
-};
 var SUBTOPIC_COUNT = 7;
 var SYSTEM_PROMPT = `You are a precise decomposition engine for a spatial knowledge graph called Hypercomb.
 
@@ -70,19 +61,13 @@ var AtomizeDrone = class extends Drone {
     navigation: "@hypercomb.social/Navigation",
     store: "@hypercomb.social/Store"
   };
-  listens = ["render:host-ready", "tile:action"];
-  emits = ["overlay:register-action", "seed:added"];
-  #registered = false;
+  listens = ["tile:action"];
+  emits = ["seed:added"];
   #effectsRegistered = false;
   #busy = false;
   heartbeat = async () => {
     if (this.#effectsRegistered) return;
     this.#effectsRegistered = true;
-    this.onEffect("render:host-ready", () => {
-      if (this.#registered) return;
-      this.#registered = true;
-      this.emitEffect("overlay:register-action", [ACTION_DESCRIPTOR]);
-    });
     this.onEffect("tile:action", (payload) => {
       if (payload.action !== "expand") return;
       void this.#expand(payload.label);

@@ -835,6 +835,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       this.#setShellValue(value, false)
     })
 
+    this.#commandFocusUnsub = EffectBus.on<{ seed: string }>('command:focus', ({ seed }) => {
+      this.#setShellValue(seed, false)
+      this.shell?.focus()
+    })
+
     this.#touchDraggingUnsub = EffectBus.on<{ active: boolean }>('touch:dragging', ({ active }) => {
       this.touchDragging.set(active)
       if (active) {
@@ -901,6 +906,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   #voiceActiveUnsub?: () => void
   #pushToTalkUnsub?: () => void
   #prefillUnsub?: () => void
+  #commandFocusUnsub?: () => void
   #commandLineToggleUnsub?: () => void
   #touchDraggingUnsub?: () => void
   #viewActiveUnsub?: () => void
@@ -926,6 +932,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   public ngOnDestroy(): void {
     this.#prefillUnsub?.()
+    this.#commandFocusUnsub?.()
     this.#commandLineToggleUnsub?.()
     this.#touchDraggingUnsub?.()
     this.#viewActiveUnsub?.()

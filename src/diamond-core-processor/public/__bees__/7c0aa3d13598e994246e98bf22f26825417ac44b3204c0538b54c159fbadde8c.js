@@ -1,6 +1,6 @@
 // src/diamondcoreprocessor.com/presentation/tiles/tile-overlay.drone.ts
 import { Drone as Drone2, EffectBus as EffectBus2 } from "@hypercomb/core";
-import { Container as Container3, Graphics as Graphics3, Point } from "pixi.js";
+import { Container as Container3, Graphics as Graphics2, Point } from "pixi.js";
 
 // src/diamondcoreprocessor.com/presentation/tiles/hex-icon-button.ts
 import { Container, Graphics, Sprite, Texture } from "pixi.js";
@@ -102,324 +102,23 @@ var HexIconButton = class extends Container {
 };
 
 // src/diamondcoreprocessor.com/presentation/tiles/hex-overlay.shader.ts
-import { BlurFilter, Container as Container2, Graphics as Graphics2 } from "pixi.js";
-var LIGHT_DIR_X = -0.5;
-var LIGHT_DIR_Y = -0.866;
-var NEON_PRESETS = [
-  {
-    // 0 — Cyan (default)
-    core: 65535,
-    bright: 4521983,
-    mid: 35020,
-    dim: 17510,
-    white: 13434879,
-    fill: 2580,
-    embers: [
-      { glow: 4500223, core: 13426175, startEdge: 0 },
-      { glow: 6741503, core: 15663103, startEdge: 2 },
-      { glow: 13395711, core: 16764159, startEdge: 4 }
-    ]
-  },
-  {
-    // 1 — Magenta / Hot Pink
-    core: 16711935,
-    bright: 16729343,
-    mid: 13369480,
-    dim: 6684740,
-    white: 16764159,
-    fill: 655370,
-    embers: [
-      { glow: 16729258, core: 16764125, startEdge: 0 },
-      { glow: 16738013, core: 16772863, startEdge: 2 },
-      { glow: 11158783, core: 14535935, startEdge: 4 }
-    ]
-  },
-  {
-    // 2 — Green / Emerald
-    core: 65416,
-    bright: 4521898,
-    mid: 52326,
-    dim: 17442,
-    white: 13434862,
-    fill: 2566,
-    embers: [
-      { glow: 4521898, core: 13434845, startEdge: 0 },
-      { glow: 6750156, core: 15663086, startEdge: 2 },
-      { glow: 4500223, core: 13426175, startEdge: 4 }
-    ]
-  },
-  {
-    // 3 — Gold / Amber
-    core: 16763904,
-    bright: 16768324,
-    mid: 13404160,
-    dim: 6702080,
-    white: 16772812,
-    fill: 657408,
-    embers: [
-      { glow: 16755268, core: 16768460, startEdge: 0 },
-      { glow: 16764006, core: 16772846, startEdge: 2 },
-      { glow: 16737860, core: 16764108, startEdge: 4 }
-    ]
-  },
-  {
-    // 4 — Violet / Purple
-    core: 8930559,
-    bright: 11167487,
-    mid: 6693580,
-    dim: 3346790,
-    white: 14535935,
-    fill: 393226,
-    embers: [
-      { glow: 8939263, core: 13417471, startEdge: 0 },
-      { glow: 11176191, core: 15654399, startEdge: 2 },
-      { glow: 16737962, core: 16764125, startEdge: 4 }
-    ]
-  }
-];
-var STORAGE_KEY = "hc:neon-color";
-var OVERLAY_ALPHA = 0.85;
-var BREATHE_PERIOD = 4;
-var BREATHE_LO = 0.8;
-var BREATHE_HI = 1;
-var NEON_EDGE = 1.15;
-var FILL_RADIUS = 1.07;
-var GLOW_OUTER_1 = 1.21;
-var GLOW_OUTER_2 = 1.27;
-var GLOW_INNER_1 = 1.09;
-var GLOW_INNER_2 = 1.03;
-var EMBER_CORE_R = 1;
-var EMBER_GLOW_R = 1.8;
-var EMBER_BLUR = 2;
-var MOVE_DUR = 3;
-var DWELL_DUR = 3;
-var CYCLE_PERIOD = MOVE_DUR + DWELL_DUR;
-var MOVE_FRAC = MOVE_DUR / CYCLE_PERIOD;
-var FLASH_START = 0.48;
-var FLASH_END = 0.58;
-var SS = 8;
-var ENTER_DURATION = 0.18;
-var ENTER_SCALE_FROM = 0.95;
-var ENTER_SCALE_TO = 1;
-var AMBIENT_COUNT = 2;
-var AMBIENT_PERIOD = 8;
-var AMBIENT_RADIUS = 0.55;
-var AMBIENT_ALPHA = 0.08;
-var AMBIENT_SIZE = 1.5;
+import { Container as Container2 } from "pixi.js";
 var HexOverlayMesh = class {
   mesh;
-  #radiusPx;
-  #flat;
-  #palette;
-  #hex;
-  #ember;
-  #ambient;
-  #neonVerts = [];
-  #edgeLengths = [];
-  #totalPerimeter = 0;
-  #enterStart = -1;
-  #shown = false;
-  constructor(radiusPx, flat) {
-    this.#radiusPx = radiusPx;
-    this.#flat = flat;
-    this.#palette = NEON_PRESETS[loadNeonIndex()];
+  constructor(_radiusPx, _flat) {
     this.mesh = new Container2();
-    this.mesh.scale.set(1 / SS);
-    this.mesh.alpha = OVERLAY_ALPHA;
-    this.#hex = new Graphics2();
-    this.#ember = new Graphics2();
-    this.#ambient = new Graphics2();
-    this.#ember.filters = [new BlurFilter({ strength: EMBER_BLUR * SS })];
-    this.mesh.addChild(this.#hex, this.#ambient, this.#ember);
-    this.#draw();
   }
-  show(t) {
-    if (!this.#shown) {
-      this.#enterStart = t;
-      this.#shown = true;
-    }
+  show(_t) {
   }
   hide() {
-    this.#shown = false;
-    this.#enterStart = -1;
   }
-  update(radiusPx, flat) {
-    if (radiusPx === this.#radiusPx && flat === this.#flat) return;
-    this.#radiusPx = radiusPx;
-    this.#flat = flat;
-    this.#draw();
+  update(_radiusPx, _flat) {
   }
-  setColorIndex(index) {
-    const clamped = Math.max(0, Math.min(index, NEON_PRESETS.length - 1));
-    this.#palette = NEON_PRESETS[clamped];
-    localStorage.setItem(STORAGE_KEY, String(clamped));
-    this.#draw();
+  setColorIndex(_index) {
   }
-  setTime(t) {
-    let enterProgress = 1;
-    if (this.#enterStart >= 0) {
-      const elapsed = t - this.#enterStart;
-      enterProgress = Math.min(elapsed / ENTER_DURATION, 1);
-      enterProgress = 1 - Math.pow(1 - enterProgress, 3);
-      const scale = (ENTER_SCALE_FROM + (ENTER_SCALE_TO - ENTER_SCALE_FROM) * enterProgress) / SS;
-      this.mesh.scale.set(scale);
-      this.mesh.alpha = OVERLAY_ALPHA * enterProgress;
-      if (enterProgress >= 1) {
-        this.mesh.scale.set(1 / SS);
-        this.mesh.alpha = OVERLAY_ALPHA;
-      }
-    }
-    const breathe = Math.sin(t / BREATHE_PERIOD * Math.PI * 2) * 0.5 + 0.5;
-    this.#hex.alpha = BREATHE_LO + (BREATHE_HI - BREATHE_LO) * breathe;
-    this.#drawEmber(t);
-    this.#drawAmbient(t);
-  }
-  #hexVerts(r) {
-    const verts = [];
-    for (let i = 0; i < 6; i++) {
-      const angle = Math.PI / 3 * i + (this.#flat ? 0 : Math.PI / 6);
-      verts.push(Math.cos(angle) * r * SS, Math.sin(angle) * r * SS);
-    }
-    return verts;
-  }
-  #edgeLighting(edgeIndex) {
-    const a0 = Math.PI / 3 * edgeIndex + (this.#flat ? 0 : Math.PI / 6);
-    const a1 = Math.PI / 3 * (edgeIndex + 1) + (this.#flat ? 0 : Math.PI / 6);
-    const mx = (Math.cos(a0) + Math.cos(a1)) / 2;
-    const my = (Math.sin(a0) + Math.sin(a1)) / 2;
-    const len = Math.sqrt(mx * mx + my * my);
-    const nx = mx / len;
-    const ny = my / len;
-    const dot = nx * LIGHT_DIR_X + ny * LIGHT_DIR_Y;
-    return dot * 0.5 + 0.5;
-  }
-  #lerpColor(lo, hi, t) {
-    const lr = lo >> 16 & 255, lg = lo >> 8 & 255, lb = lo & 255;
-    const hr = hi >> 16 & 255, hg = hi >> 8 & 255, hb = hi & 255;
-    const r = Math.round(lr + (hr - lr) * t);
-    const g = Math.round(lg + (hg - lg) * t);
-    const b = Math.round(lb + (hb - lb) * t);
-    return r << 16 | g << 8 | b;
-  }
-  #strokeEdges(g, verts, width, color, alphaLo, alphaHi, colorHi) {
-    g.poly(verts);
-    g.closePath();
-    let avgLight = 0;
-    for (let i = 0; i < 6; i++) avgLight += this.#edgeLighting(i);
-    avgLight /= 6;
-    const alpha = alphaLo + (alphaHi - alphaLo) * avgLight;
-    const c = colorHi !== void 0 ? this.#lerpColor(color, colorHi, avgLight) : color;
-    g.stroke({ width: width * SS, color: c, alpha, join: "miter" });
-  }
-  #perimeterPoint(t) {
-    const v = this.#neonVerts;
-    const frac = (t % 1 + 1) % 1;
-    let target = frac * this.#totalPerimeter;
-    for (let i = 0; i < 6; i++) {
-      if (target <= this.#edgeLengths[i]) {
-        const i0 = i * 2, i1 = (i + 1) % 6 * 2;
-        const lerp = target / this.#edgeLengths[i];
-        return {
-          x: v[i0] + (v[i1] - v[i0]) * lerp,
-          y: v[i0 + 1] + (v[i1 + 1] - v[i0 + 1]) * lerp
-        };
-      }
-      target -= this.#edgeLengths[i];
-    }
-    return { x: v[0], y: v[1] };
-  }
-  #ease(t) {
-    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-  }
-  #drawEmber(t) {
-    const g = this.#ember;
-    g.clear();
-    const STEP = 1 / 6;
-    for (const spec of this.#palette.embers) {
-      const origin = (spec.startEdge + 0.5) / 6;
-      const cycleIndex = Math.floor(t / CYCLE_PERIOD);
-      const phase = t % CYCLE_PERIOD / CYCLE_PERIOD;
-      const fromT = (origin + cycleIndex * STEP) % 1;
-      const toT = (origin + (cycleIndex + 1) * STEP) % 1;
-      let perimT;
-      if (phase < MOVE_FRAC) {
-        const eased = this.#ease(phase / MOVE_FRAC);
-        let delta = toT - fromT;
-        if (delta < 0) delta += 1;
-        perimT = fromT + delta * eased;
-      } else {
-        perimT = toT;
-      }
-      const pos = this.#perimeterPoint(perimT);
-      let flash = 0;
-      if (phase >= FLASH_START && phase <= FLASH_END) {
-        const flashPhase = (phase - FLASH_START) / (FLASH_END - FLASH_START);
-        flash = Math.sin(flashPhase * Math.PI);
-      }
-      const baseAlpha = phase < MOVE_FRAC ? 0.35 : 0.5;
-      g.circle(pos.x, pos.y, EMBER_GLOW_R * SS);
-      g.fill({ color: spec.glow, alpha: baseAlpha + flash * 0.3 });
-      g.circle(pos.x, pos.y, EMBER_CORE_R * SS);
-      g.fill({ color: spec.core, alpha: baseAlpha + flash * 0.45 });
-      if (flash > 0.01) {
-        g.circle(pos.x, pos.y, (EMBER_GLOW_R + 2 * flash) * SS);
-        g.fill({ color: spec.glow, alpha: flash * 0.2 });
-      }
-    }
-  }
-  #drawAmbient(t) {
-    const g = this.#ambient;
-    g.clear();
-    const R = this.#radiusPx * AMBIENT_RADIUS * SS;
-    const p = this.#palette;
-    for (let i = 0; i < AMBIENT_COUNT; i++) {
-      const phase = (t / AMBIENT_PERIOD + i * 0.5) % 1;
-      const angle1 = phase * Math.PI * 2;
-      const angle2 = phase * Math.PI * 2 * (1.5 + i * 0.7);
-      const x = Math.sin(angle1) * R * 0.6;
-      const y = Math.cos(angle2) * R * 0.4;
-      g.circle(x, y, AMBIENT_SIZE * SS);
-      g.fill({ color: p.dim, alpha: AMBIENT_ALPHA });
-    }
-  }
-  #draw() {
-    const g = this.#hex;
-    g.clear();
-    const R = this.#radiusPx;
-    const neonV = this.#hexVerts(R * NEON_EDGE);
-    const fillV = this.#hexVerts(R * FILL_RADIUS);
-    const gOuter1V = this.#hexVerts(R * GLOW_OUTER_1);
-    const gOuter2V = this.#hexVerts(R * GLOW_OUTER_2);
-    const gInner1V = this.#hexVerts(R * GLOW_INNER_1);
-    const gInner2V = this.#hexVerts(R * GLOW_INNER_2);
-    this.#neonVerts = neonV;
-    this.#edgeLengths = [];
-    this.#totalPerimeter = 0;
-    for (let i = 0; i < 6; i++) {
-      const i0 = i * 2, i1 = (i + 1) % 6 * 2;
-      const dx = neonV[i1] - neonV[i0];
-      const dy = neonV[i1 + 1] - neonV[i0 + 1];
-      const len = Math.sqrt(dx * dx + dy * dy);
-      this.#edgeLengths.push(len);
-      this.#totalPerimeter += len;
-    }
-    const p = this.#palette;
-    this.#strokeEdges(g, gOuter2V, 3, p.dim, 0.04, 0.1);
-    this.#strokeEdges(g, gOuter1V, 2.5, p.mid, 0.06, 0.18);
-    g.poly(fillV);
-    g.fill({ color: p.fill, alpha: 0.55 });
-    this.#strokeEdges(g, gInner2V, 2.5, p.dim, 0.04, 0.1);
-    this.#strokeEdges(g, gInner1V, 2, p.mid, 0.08, 0.22);
-    this.#strokeEdges(g, neonV, 2, p.mid, 0.45, 0.9, p.core);
-    this.#strokeEdges(g, neonV, 1, p.bright, 0.2, 0.75, p.white);
+  setTime(_t) {
   }
 };
-function loadNeonIndex() {
-  const stored = localStorage.getItem(STORAGE_KEY);
-  if (!stored) return 0;
-  const n = parseInt(stored, 10);
-  return n >= 0 && n < NEON_PRESETS.length ? n : 0;
-}
 
 // src/diamondcoreprocessor.com/presentation/grid/hex-geometry.ts
 function createHexGeometry(circumRadiusPx, gapPx, padPx = 10) {
@@ -460,10 +159,10 @@ var ICONS = {
   edit: svg('<path d="M17 3l4 4L7 21H3v-4L17 3z"/>'),
   // Magnifying glass
   search: svg('<circle cx="11" cy="11" r="7"/><line x1="16" y1="16" x2="21" y2="21"/>'),
-  // Eye with slash
+  // Eye with slash (hide)
   hide: svg('<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/><circle cx="12" cy="12" r="3"/><line x1="4" y1="4" x2="20" y2="20"/>'),
-  // Break apart — four fragments separating
-  breakApart: svg('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>'),
+  // Eye without slash (unhide / make visible)
+  unhide: svg('<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/><circle cx="12" cy="12" r="3"/>'),
   // Plus
   adopt: svg('<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>'),
   // Circle with slash
@@ -477,17 +176,18 @@ var ICON_REGISTRY = [
   { name: "edit", svgMarkup: ICONS.edit, hoverTint: 13162751, profile: "private" },
   { name: "search", svgMarkup: ICONS.search, hoverTint: 13172680, profile: "private", visibleWhen: (ctx) => ctx.noImage },
   { name: "remove", svgMarkup: ICONS.remove, hoverTint: 16763080, profile: "private" },
-  { name: "break-apart", svgMarkup: ICONS.breakApart, hoverTint: 6737151, profile: "private", visibleWhen: (ctx) => ctx.isHidden },
+  { name: "hide", svgMarkup: ICONS.hide, hoverTint: 16767144, profile: "private", visibleWhen: (ctx) => !ctx.isHidden },
+  { name: "unhide", svgMarkup: ICONS.unhide, hoverTint: 11065599, profile: "private", visibleWhen: (ctx) => ctx.isHidden },
   // ── public-own profile ──
   { name: "hide", svgMarkup: ICONS.hide, hoverTint: 16767144, profile: "public-own", visibleWhen: (ctx) => !ctx.isHidden },
-  { name: "break-apart", svgMarkup: ICONS.breakApart, hoverTint: 6737151, profile: "public-own", visibleWhen: (ctx) => ctx.isHidden },
+  { name: "unhide", svgMarkup: ICONS.unhide, hoverTint: 11065599, profile: "public-own", visibleWhen: (ctx) => ctx.isHidden },
   // ── public-external profile ──
   { name: "adopt", svgMarkup: ICONS.adopt, hoverTint: 11075544, profile: "public-external" },
   { name: "block", svgMarkup: ICONS.block, hoverTint: 16763080, profile: "public-external" }
 ];
 var DEFAULT_ACTIVE = {
-  "private": ["command", "edit", "remove", "break-apart"],
-  "public-own": ["hide", "break-apart"],
+  "private": ["command", "edit", "remove", "hide", "unhide"],
+  "public-own": ["hide", "unhide"],
   "public-external": ["adopt", "block"]
 };
 var ICON_Y = 10;
@@ -507,7 +207,7 @@ function computeIconPositions(activeNames) {
   return activeNames.map((_, i) => ({ x: Math.round(startX + i * spacing), y: ICON_Y }));
 }
 var ARRANGEMENT_KEY = "iconArrangement";
-var HANDLED_ACTIONS = /* @__PURE__ */ new Set(["edit", "search", "command", "hide", "break-apart", "adopt", "block", "remove"]);
+var HANDLED_ACTIONS = /* @__PURE__ */ new Set(["edit", "search", "command", "hide", "unhide", "adopt", "block", "remove"]);
 var TileActionsDrone = class extends Drone {
   namespace = "diamondcoreprocessor.com";
   description = "registers default tile overlay icons and handles their click actions";
@@ -646,10 +346,20 @@ var TileActionsDrone = class extends Drone {
       case "command":
         EffectBus.emit("command:focus", { seed: label });
         break;
-      case "hide":
-        this.#hideOrBlock(label, "hc:hidden-tiles", "tile:hidden");
+      case "hide": {
+        const selection = window.ioc.get("@diamondcoreprocessor.com/SelectionService");
+        if (selection && selection.count > 0) {
+          for (const selectedLabel of selection.selected) {
+            this.#hideOrBlock(normalizeSeed(selectedLabel) || selectedLabel, "hc:hidden-tiles", "tile:hidden", true);
+          }
+          selection.clear();
+          void new hypercomb().act();
+        } else {
+          this.#hideOrBlock(label, "hc:hidden-tiles", "tile:hidden");
+        }
         break;
-      case "break-apart":
+      }
+      case "unhide":
         this.#unhide(label);
         break;
       case "adopt":
@@ -696,7 +406,7 @@ var TileActionsDrone = class extends Drone {
     EffectBus.emit("tile:unhidden", { seed: label, location });
     void new hypercomb().act();
   }
-  #hideOrBlock(label, storagePrefix, effect) {
+  #hideOrBlock(label, storagePrefix, effect, skipAct = false) {
     const lineage = this.resolve("lineage");
     const location = lineage?.explorerLabel() ?? "/";
     const key = `${storagePrefix}:${location}`;
@@ -704,7 +414,7 @@ var TileActionsDrone = class extends Drone {
     if (!existing.includes(label)) existing.push(label);
     localStorage.setItem(key, JSON.stringify(existing));
     EffectBus.emit(effect, { seed: label, location });
-    void new hypercomb().act();
+    if (!skipAct) void new hypercomb().act();
   }
 };
 var _tileActions = new TileActionsDrone();
@@ -972,6 +682,7 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
       this.#overlay = null;
       this.#hexBg = null;
       this.#crackOverlay = null;
+      this.#separatorLine = null;
       this.#actions = [];
     }
   }
@@ -983,7 +694,7 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
     this.#overlay.zIndex = 9999;
     this.#hexBg = new HexOverlayMesh(this.#geo.circumRadiusPx, this.#flat);
     this.#overlay.addChild(this.#hexBg.mesh);
-    this.#crackOverlay = new Graphics3();
+    this.#crackOverlay = new Graphics2();
     this.#crackOverlay.visible = false;
     this.#crackOverlay.zIndex = 100;
     this.#overlay.addChild(this.#crackOverlay);
@@ -1039,14 +750,46 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
     this.#updatePerTileVisibility();
   }
   // ── Icon row layout (centered, inline) ──────────────────────────────
+  /** Icons placed below the main row, beneath a separator line. */
+  static #BELOW_ICONS = /* @__PURE__ */ new Set(["hide", "unhide"]);
+  static #SEPARATOR_Y_GAP = 6;
+  static #SEPARATOR_LINE_WIDTH = 16;
+  #separatorLine = null;
   #layoutIconRow() {
     const visible = this.#actions.filter((a) => a.button.visible);
-    const count = visible.length;
-    if (count === 0) return;
+    if (visible.length === 0) {
+      if (this.#separatorLine) this.#separatorLine.visible = false;
+      return;
+    }
     const spacing = ICON_SPACING;
-    const startX = Math.round(-(count - 1) * spacing / 2);
-    for (let i = 0; i < count; i++) {
-      visible[i].button.position.set(Math.round(startX + i * spacing), ICON_Y);
+    const mainIcons = visible.filter((a) => !_TileOverlayDrone.#BELOW_ICONS.has(a.name));
+    const belowIcons = visible.filter((a) => _TileOverlayDrone.#BELOW_ICONS.has(a.name));
+    if (mainIcons.length > 0) {
+      const startX = Math.round(-(mainIcons.length - 1) * spacing / 2);
+      for (let i = 0; i < mainIcons.length; i++) {
+        mainIcons[i].button.position.set(Math.round(startX + i * spacing), ICON_Y);
+      }
+    }
+    const belowY = ICON_Y + ICON_SPACING + _TileOverlayDrone.#SEPARATOR_Y_GAP;
+    if (belowIcons.length > 0) {
+      const startX = Math.round(-(belowIcons.length - 1) * spacing / 2);
+      for (let i = 0; i < belowIcons.length; i++) {
+        belowIcons[i].button.position.set(Math.round(startX + i * spacing), belowY);
+      }
+    }
+    if (mainIcons.length > 0 && belowIcons.length > 0) {
+      if (!this.#separatorLine && this.#overlay) {
+        this.#separatorLine = new Graphics2();
+        this.#overlay.addChild(this.#separatorLine);
+      }
+      if (this.#separatorLine) {
+        const lineY = ICON_Y + ICON_SPACING / 2 + _TileOverlayDrone.#SEPARATOR_Y_GAP / 2;
+        const halfW = _TileOverlayDrone.#SEPARATOR_LINE_WIDTH / 2;
+        this.#separatorLine.clear().moveTo(-halfW, lineY).lineTo(halfW, lineY).stroke({ width: 0.5, color: 6719692, alpha: 0.4 });
+        this.#separatorLine.visible = true;
+      }
+    } else if (this.#separatorLine) {
+      this.#separatorLine.visible = false;
     }
   }
   // ── Per-tile icon visibility ───────────────────────────────────────
@@ -1076,6 +819,20 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
       hasLink: this.#linkLabels.has(entry.label),
       isHidden: this.#hiddenLabels.has(entry.label)
     };
+    if (this.#hasSelection) {
+      const SELECTION_ICONS = /* @__PURE__ */ new Set(["hide", "unhide"]);
+      for (const action of this.#actions) {
+        if (!SELECTION_ICONS.has(action.name)) {
+          action.button.visible = false;
+        } else if (action.visibleWhen) {
+          action.button.visible = action.visibleWhen(ctx);
+        } else {
+          action.button.visible = true;
+        }
+      }
+      this.#layoutIconRow();
+      return;
+    }
     for (const action of this.#actions) {
       if (action.visibleWhen) {
         action.button.visible = action.visibleWhen(ctx);
@@ -1163,7 +920,7 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
     this.#poolContainer = new Container3();
     this.#poolContainer.position.set(0, POOL_Y_OFFSET);
     this.#overlay.addChild(this.#poolContainer);
-    this.#poolBackground = new Graphics3();
+    this.#poolBackground = new Graphics2();
     this.#poolContainer.addChild(this.#poolBackground);
     this.#requestPoolRebuild();
   }
@@ -1627,14 +1384,6 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
         const bx = local.x - ox - btn.position.x;
         const by = local.y - oy - btn.position.y;
         if (btn.containsPoint(bx, by)) {
-          if (action.name === "break-apart") {
-            this.playShatterAnimation(
-              this.#currentAxial.q,
-              this.#currentAxial.r,
-              entry.label
-            );
-            return;
-          }
           this.emitEffect("tile:action", {
             action: action.name,
             q: this.#currentAxial.q,
@@ -1738,7 +1487,7 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
     if (this.#hasSelection) {
       this.#overlay.visible = occupied && !this.#editing && !this.#editCooldown;
       if (this.#hexBg) this.#hexBg.hide();
-      for (const action of this.#actions) action.button.visible = false;
+      this.#updatePerTileVisibility();
       return;
     }
     this.#overlay.visible = shouldShow;
@@ -1839,7 +1588,7 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
     for (let i = 0; i < wedges; i++) {
       const a1 = i / wedges * Math.PI * 2 - Math.PI / 2;
       const a2 = (i + 1) / wedges * Math.PI * 2 - Math.PI / 2;
-      const g = new Graphics3();
+      const g = new Graphics2();
       g.moveTo(0, 0);
       g.lineTo(Math.cos(a1) * R, Math.sin(a1) * R);
       g.lineTo(Math.cos(a2) * R, Math.sin(a2) * R);

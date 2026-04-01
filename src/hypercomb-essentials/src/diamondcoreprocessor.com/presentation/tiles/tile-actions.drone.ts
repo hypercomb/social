@@ -16,10 +16,10 @@ const ICONS = {
   edit: svg('<path d="M17 3l4 4L7 21H3v-4L17 3z"/>'),
   // Magnifying glass
   search: svg('<circle cx="11" cy="11" r="7"/><line x1="16" y1="16" x2="21" y2="21"/>'),
-  // Eye with slash
+  // Eye with slash (hide)
   hide: svg('<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/><circle cx="12" cy="12" r="3"/><line x1="4" y1="4" x2="20" y2="20"/>'),
-  // Break apart — four fragments separating
-  breakApart: svg('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>'),
+  // Eye without slash (unhide / make visible)
+  unhide: svg('<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/><circle cx="12" cy="12" r="3"/>'),
   // Plus
   adopt: svg('<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>'),
   // Circle with slash
@@ -44,10 +44,11 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   { name: 'edit', svgMarkup: ICONS.edit, hoverTint: 0xc8d8ff, profile: 'private' },
   { name: 'search', svgMarkup: ICONS.search, hoverTint: 0xc8ffc8, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.noImage },
   { name: 'remove', svgMarkup: ICONS.remove, hoverTint: 0xffc8c8, profile: 'private' },
-  { name: 'break-apart', svgMarkup: ICONS.breakApart, hoverTint: 0x66ccff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden },
+  { name: 'hide', svgMarkup: ICONS.hide, hoverTint: 0xffd8a8, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => !ctx.isHidden },
+  { name: 'unhide', svgMarkup: ICONS.unhide, hoverTint: 0xa8d8ff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden },
   // ── public-own profile ──
   { name: 'hide', svgMarkup: ICONS.hide, hoverTint: 0xffd8a8, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => !ctx.isHidden },
-  { name: 'break-apart', svgMarkup: ICONS.breakApart, hoverTint: 0x66ccff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden },
+  { name: 'unhide', svgMarkup: ICONS.unhide, hoverTint: 0xa8d8ff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden },
   // ── public-external profile ──
   { name: 'adopt', svgMarkup: ICONS.adopt, hoverTint: 0xa8ffd8, profile: 'public-external' },
   { name: 'block', svgMarkup: ICONS.block, hoverTint: 0xffc8c8, profile: 'public-external' },
@@ -55,8 +56,8 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
 
 // Default active icons per profile (defines the fallback order)
 const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
-  'private': ['command', 'edit', 'remove', 'break-apart'],
-  'public-own': ['hide', 'break-apart'],
+  'private': ['command', 'edit', 'remove', 'hide', 'unhide'],
+  'public-own': ['hide', 'unhide'],
   'public-external': ['adopt', 'block'],
 }
 
@@ -93,7 +94,7 @@ const ARRANGEMENT_KEY = 'iconArrangement'
 type IconArrangement = Partial<Record<OverlayProfileKey, string[]>>
 
 // ── Action names this bee handles ─────────────────────────────────
-const HANDLED_ACTIONS = new Set(['edit', 'search', 'command', 'hide', 'break-apart', 'adopt', 'block', 'remove'])
+const HANDLED_ACTIONS = new Set(['edit', 'search', 'command', 'hide', 'unhide', 'adopt', 'block', 'remove'])
 
 type TileActionPayload = { action: string; label: string; q: number; r: number; index: number }
 
@@ -283,11 +284,22 @@ export class TileActionsDrone extends Drone {
         EffectBus.emit('command:focus', { seed: label })
         break
 
-      case 'hide':
-        this.#hideOrBlock(label, 'hc:hidden-tiles', 'tile:hidden')
+      case 'hide': {
+        // Bulk hide: if tiles are selected, hide all selected tiles
+        const selection = window.ioc.get<{ selected: ReadonlySet<string>; count: number; clear(): void }>('@diamondcoreprocessor.com/SelectionService')
+        if (selection && selection.count > 0) {
+          for (const selectedLabel of selection.selected) {
+            this.#hideOrBlock(normalizeSeed(selectedLabel) || selectedLabel, 'hc:hidden-tiles', 'tile:hidden', true)
+          }
+          selection.clear()
+          void new hypercomb().act()
+        } else {
+          this.#hideOrBlock(label, 'hc:hidden-tiles', 'tile:hidden')
+        }
         break
+      }
 
-      case 'break-apart':
+      case 'unhide':
         this.#unhide(label)
         break
 
@@ -337,7 +349,7 @@ export class TileActionsDrone extends Drone {
     void new hypercomb().act()
   }
 
-  #hideOrBlock(label: string, storagePrefix: string, effect: string): void {
+  #hideOrBlock(label: string, storagePrefix: string, effect: string, skipAct = false): void {
     const lineage = this.resolve<{ explorerLabel(): string }>('lineage')
     const location = lineage?.explorerLabel() ?? '/'
     const key = `${storagePrefix}:${location}`
@@ -345,7 +357,7 @@ export class TileActionsDrone extends Drone {
     if (!existing.includes(label)) existing.push(label)
     localStorage.setItem(key, JSON.stringify(existing))
     EffectBus.emit(effect, { seed: label, location })
-    void new hypercomb().act()
+    if (!skipAct) void new hypercomb().act()
   }
 }
 

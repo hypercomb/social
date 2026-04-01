@@ -348,6 +348,7 @@ export class TileOverlayDrone extends Drone {
       this.#overlay = null
       this.#hexBg = null
       this.#crackOverlay = null
+      this.#separatorLine = null
       this.#actions = []
     }
   }
@@ -442,16 +443,57 @@ export class TileOverlayDrone extends Drone {
 
   // ── Icon row layout (centered, inline) ──────────────────────────────
 
+  /** Icons placed below the main row, beneath a separator line. */
+  static readonly #BELOW_ICONS = new Set(['hide', 'unhide'])
+  static readonly #SEPARATOR_Y_GAP = 6
+  static readonly #SEPARATOR_LINE_WIDTH = 16
+  #separatorLine: Graphics | null = null
+
   #layoutIconRow(): void {
     const visible = this.#actions.filter(a => a.button.visible)
-    const count = visible.length
-    if (count === 0) return
+    if (visible.length === 0) {
+      if (this.#separatorLine) this.#separatorLine.visible = false
+      return
+    }
 
     const spacing = ICON_SPACING
-    const startX = Math.round(-(count - 1) * spacing / 2)
+    const mainIcons = visible.filter(a => !TileOverlayDrone.#BELOW_ICONS.has(a.name))
+    const belowIcons = visible.filter(a => TileOverlayDrone.#BELOW_ICONS.has(a.name))
 
-    for (let i = 0; i < count; i++) {
-      visible[i].button.position.set(Math.round(startX + i * spacing), ICON_Y)
+    // Layout main row (centered at y = ICON_Y)
+    if (mainIcons.length > 0) {
+      const startX = Math.round(-(mainIcons.length - 1) * spacing / 2)
+      for (let i = 0; i < mainIcons.length; i++) {
+        mainIcons[i].button.position.set(Math.round(startX + i * spacing), ICON_Y)
+      }
+    }
+
+    // Layout below-row icons (centered, below a separator)
+    const belowY = ICON_Y + ICON_SPACING + TileOverlayDrone.#SEPARATOR_Y_GAP
+    if (belowIcons.length > 0) {
+      const startX = Math.round(-(belowIcons.length - 1) * spacing / 2)
+      for (let i = 0; i < belowIcons.length; i++) {
+        belowIcons[i].button.position.set(Math.round(startX + i * spacing), belowY)
+      }
+    }
+
+    // Draw / update separator line between main row and below row
+    if (mainIcons.length > 0 && belowIcons.length > 0) {
+      if (!this.#separatorLine && this.#overlay) {
+        this.#separatorLine = new Graphics()
+        this.#overlay.addChild(this.#separatorLine)
+      }
+      if (this.#separatorLine) {
+        const lineY = ICON_Y + ICON_SPACING / 2 + TileOverlayDrone.#SEPARATOR_Y_GAP / 2
+        const halfW = TileOverlayDrone.#SEPARATOR_LINE_WIDTH / 2
+        this.#separatorLine.clear()
+          .moveTo(-halfW, lineY)
+          .lineTo(halfW, lineY)
+          .stroke({ width: 0.5, color: 0x6688cc, alpha: 0.4 })
+        this.#separatorLine.visible = true
+      }
+    } else if (this.#separatorLine) {
+      this.#separatorLine.visible = false
     }
   }
 
@@ -492,6 +534,22 @@ export class TileOverlayDrone extends Drone {
       isBranch: this.#branchLabels.has(entry.label),
       hasLink: this.#linkLabels.has(entry.label),
       isHidden: this.#hiddenLabels.has(entry.label),
+    }
+
+    // Selection mode: only show hide/unhide icons
+    if (this.#hasSelection) {
+      const SELECTION_ICONS = new Set(['hide', 'unhide'])
+      for (const action of this.#actions) {
+        if (!SELECTION_ICONS.has(action.name)) {
+          action.button.visible = false
+        } else if (action.visibleWhen) {
+          action.button.visible = action.visibleWhen(ctx)
+        } else {
+          action.button.visible = true
+        }
+      }
+      this.#layoutIconRow()
+      return
     }
 
     for (const action of this.#actions) {
@@ -1247,15 +1305,6 @@ export class TileOverlayDrone extends Drone {
         const by = local.y - oy - btn.position.y
 
         if (btn.containsPoint(bx, by)) {
-          // break-apart: play shatter animation first, then emit action
-          if (action.name === 'break-apart') {
-            this.playShatterAnimation(
-              this.#currentAxial!.q,
-              this.#currentAxial!.r,
-              entry.label,
-            )
-            return
-          }
           this.emitEffect('tile:action', {
             action: action.name,
             q: this.#currentAxial!.q,
@@ -1380,12 +1429,11 @@ export class TileOverlayDrone extends Drone {
 
     const shouldShow = occupied && !this.#editing && !this.#editCooldown && !this.#touchDragging
 
-    // When tiles are selected, show only the seed label (no hex bg, icons, or hover label)
+    // When tiles are selected, show overlay with hide/unhide icons only (no hex bg)
     if (this.#hasSelection) {
       this.#overlay.visible = occupied && !this.#editing && !this.#editCooldown
       if (this.#hexBg) this.#hexBg.hide()
-      for (const action of this.#actions) action.button.visible = false
-
+      this.#updatePerTileVisibility()
       return
     }
 

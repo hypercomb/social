@@ -252,7 +252,7 @@ var HexLabelAtlas = class {
     const hcFont = getComputedStyle(document.documentElement).getPropertyValue("--hc-font").trim();
     this.style = new TextStyle({
       fontFamily: hcFont || "'Source Sans Pro Light', system-ui, sans-serif",
-      fontSize: 10,
+      fontSize: 8,
       fill: 16777215,
       align: "center",
       letterSpacing: 0.5,

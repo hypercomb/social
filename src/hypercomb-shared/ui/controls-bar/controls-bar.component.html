@@ -10,6 +10,11 @@
 
 <!-- breadcrumb: below header, right-aligned -->
 <div class="breadcrumb-top" [class.faded]="isMobile()">
+  @if (meshPublic) {
+    <span class="public-crumb">public</span><span class="sep-crumb">◆</span>
+  } @else {
+    <span class="private-crumb">private</span><span class="sep-crumb">◆</span>
+  }
   <span class="domain-crumb crumb-link" (click)="navigateTo([])">{{ activeDomain() }}</span>
   @for (seg of pathSegments(); track seg.target.length; let last = $last) {
     @if (last) {
@@ -21,20 +26,10 @@
   @if (secretWords()) {
     <span class="sep-crumb">◆</span><span class="secret-crumb">{{ secretWords() }}</span>
   }
-  @if (meshPublic) {
-    <span class="sep-crumb">◆</span><span class="public-crumb">public</span>
-    @if (secretWords()) {
-      <span class="sep-crumb">◆</span><span class="secure-crumb" [style.color]="shieldColor()">secure</span>
-    } @else {
-      <span class="sep-crumb">◆</span><span class="unsecure-crumb">unsecured</span>
-    }
+  @if (secretWords()) {
+    <span class="sep-crumb">◆</span><span class="secure-crumb" [style.color]="shieldColor()">secure</span>
   } @else {
-    <span class="sep-crumb">◆</span><span class="private-crumb">private</span>
-    @if (secretWords()) {
-      <span class="sep-crumb">◆</span><span class="secure-crumb" [style.color]="shieldColor()">secure</span>
-    } @else {
-      <span class="sep-crumb">◆</span><span class="unsecure-crumb">unsecured</span>
-    }
+    <span class="sep-crumb">◆</span><span class="unsecure-crumb">unsecured</span>
   }
 </div>
 

@@ -31,10 +31,10 @@ var ICONS = {
   edit: svg('<path d="M17 3l4 4L7 21H3v-4L17 3z"/>'),
   // Magnifying glass
   search: svg('<circle cx="11" cy="11" r="7"/><line x1="16" y1="16" x2="21" y2="21"/>'),
-  // Eye with slash
+  // Eye with slash (hide)
   hide: svg('<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/><circle cx="12" cy="12" r="3"/><line x1="4" y1="4" x2="20" y2="20"/>'),
-  // Break apart — four fragments separating
-  breakApart: svg('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>'),
+  // Eye without slash (unhide / make visible)
+  unhide: svg('<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/><circle cx="12" cy="12" r="3"/>'),
   // Plus
   adopt: svg('<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>'),
   // Circle with slash
@@ -48,17 +48,18 @@ var ICON_REGISTRY = [
   { name: "edit", svgMarkup: ICONS.edit, hoverTint: 13162751, profile: "private" },
   { name: "search", svgMarkup: ICONS.search, hoverTint: 13172680, profile: "private", visibleWhen: (ctx) => ctx.noImage },
   { name: "remove", svgMarkup: ICONS.remove, hoverTint: 16763080, profile: "private" },
-  { name: "break-apart", svgMarkup: ICONS.breakApart, hoverTint: 6737151, profile: "private", visibleWhen: (ctx) => ctx.isHidden },
+  { name: "hide", svgMarkup: ICONS.hide, hoverTint: 16767144, profile: "private", visibleWhen: (ctx) => !ctx.isHidden },
+  { name: "unhide", svgMarkup: ICONS.unhide, hoverTint: 11065599, profile: "private", visibleWhen: (ctx) => ctx.isHidden },
   // ── public-own profile ──
   { name: "hide", svgMarkup: ICONS.hide, hoverTint: 16767144, profile: "public-own", visibleWhen: (ctx) => !ctx.isHidden },
-  { name: "break-apart", svgMarkup: ICONS.breakApart, hoverTint: 6737151, profile: "public-own", visibleWhen: (ctx) => ctx.isHidden },
+  { name: "unhide", svgMarkup: ICONS.unhide, hoverTint: 11065599, profile: "public-own", visibleWhen: (ctx) => ctx.isHidden },
   // ── public-external profile ──
   { name: "adopt", svgMarkup: ICONS.adopt, hoverTint: 11075544, profile: "public-external" },
   { name: "block", svgMarkup: ICONS.block, hoverTint: 16763080, profile: "public-external" }
 ];
 var DEFAULT_ACTIVE = {
-  "private": ["command", "edit", "remove", "break-apart"],
-  "public-own": ["hide", "break-apart"],
+  "private": ["command", "edit", "remove", "hide", "unhide"],
+  "public-own": ["hide", "unhide"],
   "public-external": ["adopt", "block"]
 };
 var ICON_Y = 10;
@@ -78,7 +79,7 @@ function computeIconPositions(activeNames) {
   return activeNames.map((_, i) => ({ x: Math.round(startX + i * spacing), y: ICON_Y }));
 }
 var ARRANGEMENT_KEY = "iconArrangement";
-var HANDLED_ACTIONS = /* @__PURE__ */ new Set(["edit", "search", "command", "hide", "break-apart", "adopt", "block", "remove"]);
+var HANDLED_ACTIONS = /* @__PURE__ */ new Set(["edit", "search", "command", "hide", "unhide", "adopt", "block", "remove"]);
 var TileActionsDrone = class extends Drone {
   namespace = "diamondcoreprocessor.com";
   description = "registers default tile overlay icons and handles their click actions";
@@ -217,10 +218,20 @@ var TileActionsDrone = class extends Drone {
       case "command":
         EffectBus.emit("command:focus", { seed: label });
         break;
-      case "hide":
-        this.#hideOrBlock(label, "hc:hidden-tiles", "tile:hidden");
+      case "hide": {
+        const selection = window.ioc.get("@diamondcoreprocessor.com/SelectionService");
+        if (selection && selection.count > 0) {
+          for (const selectedLabel of selection.selected) {
+            this.#hideOrBlock(normalizeSeed(selectedLabel) || selectedLabel, "hc:hidden-tiles", "tile:hidden", true);
+          }
+          selection.clear();
+          void new hypercomb().act();
+        } else {
+          this.#hideOrBlock(label, "hc:hidden-tiles", "tile:hidden");
+        }
         break;
-      case "break-apart":
+      }
+      case "unhide":
         this.#unhide(label);
         break;
       case "adopt":
@@ -267,7 +278,7 @@ var TileActionsDrone = class extends Drone {
     EffectBus.emit("tile:unhidden", { seed: label, location });
     void new hypercomb().act();
   }
-  #hideOrBlock(label, storagePrefix, effect) {
+  #hideOrBlock(label, storagePrefix, effect, skipAct = false) {
     const lineage = this.resolve("lineage");
     const location = lineage?.explorerLabel() ?? "/";
     const key = `${storagePrefix}:${location}`;
@@ -275,7 +286,7 @@ var TileActionsDrone = class extends Drone {
     if (!existing.includes(label)) existing.push(label);
     localStorage.setItem(key, JSON.stringify(existing));
     EffectBus.emit(effect, { seed: label, location });
-    void new hypercomb().act();
+    if (!skipAct) void new hypercomb().act();
   }
 };
 var _tileActions = new TileActionsDrone();
