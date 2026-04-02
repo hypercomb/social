@@ -1,4 +1,4 @@
-import { AfterViewInit, Component, inject, signal } from '@angular/core'
+import { AfterViewInit, Component, HostBinding, inject, signal } from '@angular/core'
 import { type Bee, EffectBus } from '@hypercomb/core'
 import { RouterOutlet } from '@angular/router'
 import { Header } from './header/header'
@@ -24,6 +24,14 @@ export class App implements AfterViewInit {
   protected readonly secretOpen = signal(false)
   public showHeader = true
   public readonly viewActive = signal(false)
+  readonly clipboardMode = signal(false)
+  readonly moveMode = signal(false)
+
+  @HostBinding('class.clipboard-mode')
+  get clipboardModeClass() { return this.clipboardMode(); }
+
+  @HostBinding('class.move-mode')
+  get moveModeClass() { return this.moveMode(); }
   private runtimeReady: Promise<void> = Promise.resolve()
 
   protected readonly core = inject(CoreAdapter)
@@ -44,6 +52,14 @@ export class App implements AfterViewInit {
 
     EffectBus.on<{ active: boolean }>('view:active', ({ active }) => {
       this.viewActive.set(active)
+    })
+
+    EffectBus.on<{ active: boolean }>('clipboard:view', ({ active }) => {
+      this.clipboardMode.set(active)
+    })
+
+    EffectBus.on<{ active: boolean }>('move:mode', ({ active }) => {
+      this.moveMode.set(active)
     })
 
     console.log('[app] initialized')

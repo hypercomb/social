@@ -148,9 +148,13 @@ void _deps
 export class App {
   protected readonly title = signal('hypercomb-dev');
   readonly clipboardMode = signal(false);
+  readonly moveMode = signal(false);
 
   @HostBinding('class.clipboard-mode')
   get clipboardModeClass() { return this.clipboardMode(); }
+
+  @HostBinding('class.move-mode')
+  get moveModeClass() { return this.moveMode(); }
 
   public readonly meshPublic = signal(
     localStorage.getItem('hc:mesh-public') === 'true' ? true
@@ -173,6 +177,10 @@ export class App {
 
     EffectBus.on<{ active: boolean }>('clipboard:view', ({ active }) => {
       this.clipboardMode.set(active)
+    })
+
+    EffectBus.on<{ active: boolean }>('move:mode', ({ active }) => {
+      this.moveMode.set(active)
     })
 
     // Runtime already initialized by main.ts — go straight to bee startup

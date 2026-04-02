@@ -10,3 +10,99 @@ app-header {
 .header-bar.secret-open app-header {
   display: none;
 }
+
+:host {
+  display: block;
+
+  &.clipboard-mode::after {
+    content:
+      'clipboard  clipboard  clipboard  clipboard  clipboard  '
+      'clipboard  clipboard  clipboard  clipboard  clipboard  '
+      'clipboard  clipboard  clipboard  clipboard  clipboard  '
+      'clipboard  clipboard  clipboard  clipboard  clipboard  '
+      'clipboard  clipboard  clipboard  clipboard  clipboard  '
+      'clipboard  clipboard  clipboard  clipboard  clipboard  '
+      'clipboard  clipboard  clipboard  clipboard  clipboard  '
+      'clipboard  clipboard  clipboard  clipboard  clipboard  '
+      'clipboard  clipboard  clipboard  clipboard  clipboard  '
+      'clipboard  clipboard  clipboard  clipboard  clipboard  '
+      'clipboard  clipboard  clipboard  clipboard  clipboard  '
+      'clipboard  clipboard  clipboard  clipboard  clipboard  ';
+    position: fixed;
+    inset: -50% -50%;
+    width: 200%;
+    height: 200%;
+    display: flex;
+    flex-wrap: wrap;
+    align-content: center;
+    justify-content: center;
+    font-size: 4.5rem;
+    font-weight: 900;
+    font-family: var(--hc-font);
+    letter-spacing: 0.08em;
+    word-spacing: 1.5rem;
+    line-height: 3.5;
+    text-transform: uppercase;
+    color: transparent;
+    text-shadow:
+      0 0 0 rgba(255, 255, 255, 0.025),
+      1px 1px 0 rgba(180, 210, 255, 0.02),
+      2px 2px 0 rgba(150, 190, 255, 0.016),
+      3px 3px 0 rgba(120, 170, 255, 0.013),
+      4px 4px 0 rgba(100, 150, 240, 0.01),
+      5px 5px 0 rgba(80, 130, 220, 0.008),
+      6px 6px 0 rgba(60, 110, 200, 0.006),
+      8px 8px 12px rgba(0, 0, 0, 0.05);
+    transform: rotate(-30deg);
+    pointer-events: none;
+    z-index: 1;
+    white-space: pre-wrap;
+    overflow: hidden;
+  }
+
+  &.move-mode::after {
+    content:
+      'select and drag to move tiles  select and drag to move tiles  '
+      'select and drag to move tiles  select and drag to move tiles  '
+      'select and drag to move tiles  select and drag to move tiles  '
+      'select and drag to move tiles  select and drag to move tiles  '
+      'select and drag to move tiles  select and drag to move tiles  '
+      'select and drag to move tiles  select and drag to move tiles  '
+      'select and drag to move tiles  select and drag to move tiles  '
+      'select and drag to move tiles  select and drag to move tiles  '
+      'select and drag to move tiles  select and drag to move tiles  '
+      'select and drag to move tiles  select and drag to move tiles  '
+      'select and drag to move tiles  select and drag to move tiles  '
+      'select and drag to move tiles  select and drag to move tiles  ';
+    position: fixed;
+    inset: -50% -50%;
+    width: 200%;
+    height: 200%;
+    display: flex;
+    flex-wrap: wrap;
+    align-content: center;
+    justify-content: center;
+    font-size: 4.5rem;
+    font-weight: 900;
+    font-family: var(--hc-font);
+    letter-spacing: 0.08em;
+    word-spacing: 1.5rem;
+    line-height: 3.5;
+    text-transform: uppercase;
+    color: transparent;
+    text-shadow:
+      0 0 0 rgba(255, 255, 255, 0.025),
+      1px 1px 0 rgba(180, 210, 255, 0.02),
+      2px 2px 0 rgba(150, 190, 255, 0.016),
+      3px 3px 0 rgba(120, 170, 255, 0.013),
+      4px 4px 0 rgba(100, 150, 240, 0.01),
+      5px 5px 0 rgba(80, 130, 220, 0.008),
+      6px 6px 0 rgba(60, 110, 200, 0.006),
+      8px 8px 12px rgba(0, 0, 0, 0.05);
+    transform: rotate(-30deg);
+    pointer-events: none;
+    z-index: 1;
+    white-space: pre-wrap;
+    overflow: hidden;
+  }
+}
