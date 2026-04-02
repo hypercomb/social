@@ -51,7 +51,7 @@ export class ImageEditorService extends EventTarget {
     await this.#app.init({
       width: size,
       height: size,
-      backgroundColor: 0xd0d0d4,
+      backgroundColor: 'transparent',
       antialias: true,
       autoDensity: true,
     })
@@ -238,12 +238,10 @@ export class ImageEditorService extends EventTarget {
   // Matches the branch indicator / border ring style (full hexagon stroke).
 
   readonly setBackgroundColor = (color: string): void => {
-    if (!this.#app) return
     const parsed = color
       ? (parseInt(color.replace('#', ''), 16) || 0xd0d0d4)
       : 0xd0d0d4
     this.#backgroundColor = parsed
-    this.#app.renderer.background.color = parsed
   }
 
   readonly setBorderColor = (color: string): void => {
@@ -307,7 +305,7 @@ export class ImageEditorService extends EventTarget {
 
     // stroke outline matching branch indicator style
     this.#hexFrame.poly(verts, true)
-    this.#hexFrame.stroke({ color, alpha: 0.7, width: strokeWidth })
+    this.#hexFrame.stroke({ color, alpha: 1, width: strokeWidth })
 
     this.#container.addChild(this.#hexFrame)
   }

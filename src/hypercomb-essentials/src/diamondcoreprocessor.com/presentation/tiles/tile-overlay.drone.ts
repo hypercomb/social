@@ -86,6 +86,7 @@ export class TileOverlayDrone extends Drone {
 
   #overlay: Container | null = null
   #hexBg: HexOverlayMesh | null = null
+  #buttonTray: Graphics | null = null
   #actions: OverlayAction[] = []
   #animTime = 0
   #animTickBound: ((ticker: any) => void) | null = null
@@ -387,6 +388,7 @@ export class TileOverlayDrone extends Drone {
       this.#overlay.destroy({ children: true })
       this.#overlay = null
       this.#hexBg = null
+      this.#buttonTray = null
       this.#crackOverlay = null
       this.#actions = []
     }
@@ -403,6 +405,11 @@ export class TileOverlayDrone extends Drone {
 
     this.#hexBg = new HexOverlayMesh(this.#geo.circumRadiusPx, this.#flat)
     this.#overlay.addChild(this.#hexBg.mesh)
+
+    // semi-transparent tray behind action buttons (visible only when tile has an image)
+    this.#buttonTray = new Graphics()
+    this.#buttonTray.visible = false
+    this.#overlay.addChild(this.#buttonTray)
 
     // crack overlay for break-apart preview
     this.#crackOverlay = new Graphics()
@@ -496,6 +503,24 @@ export class TileOverlayDrone extends Drone {
     for (let i = 0; i < count; i++) {
       visible[i].button.position.set(Math.round(startX + i * spacing), ICON_Y)
     }
+
+    this.#drawButtonTray(count, spacing)
+  }
+
+  #drawButtonTray(iconCount: number, spacing: number): void {
+    if (!this.#buttonTray) return
+
+    this.#buttonTray.clear()
+
+    const halfIcon = DEFAULT_ICON_SIZE / 2
+    const pad = 3
+    const totalWidth = (iconCount - 1) * spacing + DEFAULT_ICON_SIZE + pad * 2
+    const trayHeight = DEFAULT_ICON_SIZE + pad * 2
+    const x = -(totalWidth / 2)
+    const y = ICON_Y - halfIcon - pad
+
+    this.#buttonTray.roundRect(x, y, totalWidth, trayHeight, 2)
+    this.#buttonTray.fill({ color: 0x0c0c1a, alpha: 0.6 })
   }
 
   // ── Per-tile icon visibility ───────────────────────────────────────
@@ -506,14 +531,14 @@ export class TileOverlayDrone extends Drone {
     // during image drag-over or pending drop, hide all action buttons — overlay is just a drop target
     if (this.#dropDragging || this.#dropPending) {
       for (const action of this.#actions) action.button.visible = false
-
+      if (this.#buttonTray) this.#buttonTray.visible = false
       return
     }
 
     // Public mode: no icons
     if (this.#meshPublic && !this.#hasSelection) {
       for (const action of this.#actions) action.button.visible = false
-
+      if (this.#buttonTray) this.#buttonTray.visible = false
       return
     }
 
@@ -543,6 +568,10 @@ export class TileOverlayDrone extends Drone {
       } else {
         action.button.visible = true
       }
+    }
+
+    if (this.#buttonTray) {
+      this.#buttonTray.visible = true
     }
 
     // Re-layout so visible icons form a tight centered row

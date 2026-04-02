@@ -1,5 +1,5 @@
 // src/diamondcoreprocessor.com/presentation/tiles/tile-actions.drone.ts
-import { Drone, EffectBus, hypercomb, normalizeCell, requestConfirm } from "@hypercomb/core";
+import { Drone, EffectBus, hypercomb, normalizeCell } from "@hypercomb/core";
 
 // src/diamondcoreprocessor.com/editor/tile-properties.ts
 var TILE_PROPERTIES_FILE = "0000";
@@ -245,23 +245,6 @@ var TileActionsDrone = class extends Drone {
     if (!lineage) return;
     const dir = await lineage.explorerDir();
     if (!dir) return;
-    let hasChildren = false;
-    try {
-      const child = await dir.getDirectoryHandle(label);
-      for await (const _ of child.entries()) {
-        hasChildren = true;
-        break;
-      }
-    } catch {
-    }
-    const confirmed = await requestConfirm({
-      title: "confirm.delete-title",
-      message: "confirm.delete-message",
-      messageParams: { name: label },
-      warning: hasChildren ? "confirm.delete-children-warning" : void 0,
-      danger: true
-    });
-    if (!confirmed) return;
     try {
       await dir.removeEntry(label, { recursive: true });
       EffectBus.emit("cell:removed", { cell: label });

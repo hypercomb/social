@@ -110,7 +110,13 @@ export class PixiHostWorker extends Worker {
     // recalculation can return stale CSS-pixel values.  window.innerWidth
     // and window.innerHeight are guaranteed correct at resize-event time.
 
+    let fullscreenTransition = false
+
     const center = (): void => {
+      // During fullscreen transitions, keep tiles exactly where they are.
+      // The canvas resizes (more/less visible area) but the stage stays put.
+      if (fullscreenTransition) return
+
       const cx = window.innerWidth * 0.5
       const cy = window.innerHeight * 0.5
       const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
@@ -120,9 +126,14 @@ export class PixiHostWorker extends Worker {
 
     center()
     window.addEventListener('resize', center)
-    // orientation and fullscreen changes don't always fire 'resize'
+    // orientation changes don't always fire 'resize'
     window.addEventListener('orientationchange', () => { setTimeout(center, 50) })
-    document.addEventListener('fullscreenchange', () => { setTimeout(center, 50) })
+    // Fullscreen: suppress recenter so tiles stay pixel-perfect.
+    // Block recenter for the duration of the transition, then release.
+    document.addEventListener('fullscreenchange', () => {
+      fullscreenTransition = true
+      setTimeout(() => { fullscreenTransition = false }, 200)
+    })
 
     // -------------------------------------------------
     // broadcast pixi resources to other drones via effect bus

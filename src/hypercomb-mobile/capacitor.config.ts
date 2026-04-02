@@ -5,13 +5,17 @@ const config: CapacitorConfig = {
   appName: 'Hypercomb',
   webDir: 'www',
   server: {
-    url: 'https://hypercom.io',
+    url: 'https://hypercomb.io',
     allowNavigation: [
+      'hypercomb.io',
       'hypercom.io',
       'meadowverse.ca',
       'diamondcoreprocessor.com',
       'hypercomb.com',
     ],
+  },
+  android: {
+    backgroundColor: '#000000',
   },
 };
 

@@ -1,6 +1,6 @@
 // hypercomb-shared/ui/_header-bar.scss
 // Shared header-bar styles consumed by both web and dev apps.
-// Fixed height — same on all screen sizes.
+// 2.8rem on desktop, 3.5rem on touch devices.
 // The header-bar itself is the bordered container; children are
 // borderless flex items that fill it seamlessly.
 
@@ -17,8 +17,8 @@
 .header-bar {
   display: flex;
   align-items: stretch;
-  height: 3.6rem;
-  padding: 0.25rem;
+  height: 2.8rem;
+  padding: 0.1rem 0.25rem;
   background: rgba(8, 18, 28, 0.85);
   border: 1.5px solid rgba(77, 166, 255, 0.6);
   box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.4), inset 0 0 8px rgba(0, 0, 0, 0.15);
@@ -178,6 +178,10 @@
 
 // ── touch behavioral (all touch devices) ──────────────────
 @include touch {
+
+  .header-bar {
+    height: 3.5rem;
+  }
 
   .header-bar > * {
     pointer-events: auto;

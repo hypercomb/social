@@ -44,7 +44,7 @@ var ImageEditorService = class extends EventTarget {
     await this.#app.init({
       width: size,
       height: size,
-      backgroundColor: 13684948,
+      backgroundColor: "transparent",
       antialias: true,
       autoDensity: true
     });
@@ -187,10 +187,8 @@ var ImageEditorService = class extends EventTarget {
   // Programmatic hex polygon outline centered within the square canvas.
   // Matches the branch indicator / border ring style (full hexagon stroke).
   setBackgroundColor = (color) => {
-    if (!this.#app) return;
     const parsed = color ? parseInt(color.replace("#", ""), 16) || 13684948 : 13684948;
     this.#backgroundColor = parsed;
-    this.#app.renderer.background.color = parsed;
   };
   setBorderColor = (color) => {
     this.#borderColor = color && /^#?[0-9a-fA-F]{6}$/.test(color.replace("#", "")) ? color.startsWith("#") ? color : `#${color}` : "#c8975a";
@@ -232,7 +230,7 @@ var ImageEditorService = class extends EventTarget {
     this.#hexFrame = new Graphics();
     this.#hexFrame.eventMode = "none";
     this.#hexFrame.poly(verts, true);
-    this.#hexFrame.stroke({ color, alpha: 0.7, width: strokeWidth });
+    this.#hexFrame.stroke({ color, alpha: 1, width: strokeWidth });
     this.#container.addChild(this.#hexFrame);
   }
   // ── pointer handling (drag + pinch zoom) ───────────────────────

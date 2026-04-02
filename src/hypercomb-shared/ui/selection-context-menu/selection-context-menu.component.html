@@ -2,6 +2,7 @@
   <div class="context-menu"
        [style.left.px]="posX()"
        [style.top.px]="posY()"
+       [style.transform]="'scale(' + zoom() + ')'"
        [class.dragging]="dragging()">
 
     <!-- drag handle -->

@@ -127,7 +127,7 @@ function createHexGeometry(circumRadiusPx, gapPx, padPx = 10) {
 var DEFAULT_HEX_GEOMETRY = createHexGeometry(32, 6);
 
 // src/diamondcoreprocessor.com/presentation/tiles/tile-actions.drone.ts
-import { Drone, EffectBus, hypercomb, normalizeCell, requestConfirm } from "@hypercomb/core";
+import { Drone, EffectBus, hypercomb, normalizeCell } from "@hypercomb/core";
 
 // src/diamondcoreprocessor.com/editor/tile-properties.ts
 var TILE_PROPERTIES_FILE = "0000";
@@ -373,23 +373,6 @@ var TileActionsDrone = class extends Drone {
     if (!lineage) return;
     const dir = await lineage.explorerDir();
     if (!dir) return;
-    let hasChildren = false;
-    try {
-      const child = await dir.getDirectoryHandle(label);
-      for await (const _ of child.entries()) {
-        hasChildren = true;
-        break;
-      }
-    } catch {
-    }
-    const confirmed = await requestConfirm({
-      title: "confirm.delete-title",
-      message: "confirm.delete-message",
-      messageParams: { name: label },
-      warning: hasChildren ? "confirm.delete-children-warning" : void 0,
-      danger: true
-    });
-    if (!confirmed) return;
     try {
       await dir.removeEntry(label, { recursive: true });
       EffectBus.emit("cell:removed", { cell: label });
@@ -466,6 +449,7 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
   #renderer = null;
   #overlay = null;
   #hexBg = null;
+  #buttonTray = null;
   #actions = [];
   #animTime = 0;
   #animTickBound = null;
@@ -736,6 +720,7 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
       this.#overlay.destroy({ children: true });
       this.#overlay = null;
       this.#hexBg = null;
+      this.#buttonTray = null;
       this.#crackOverlay = null;
       this.#actions = [];
     }
@@ -748,6 +733,9 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
     this.#overlay.zIndex = 9999;
     this.#hexBg = new HexOverlayMesh(this.#geo.circumRadiusPx, this.#flat);
     this.#overlay.addChild(this.#hexBg.mesh);
+    this.#buttonTray = new Graphics2();
+    this.#buttonTray.visible = false;
+    this.#overlay.addChild(this.#buttonTray);
     this.#crackOverlay = new Graphics2();
     this.#crackOverlay.visible = false;
     this.#crackOverlay.zIndex = 100;
@@ -814,16 +802,31 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
     for (let i = 0; i < count; i++) {
       visible[i].button.position.set(Math.round(startX + i * spacing), ICON_Y);
     }
+    this.#drawButtonTray(count, spacing);
+  }
+  #drawButtonTray(iconCount, spacing) {
+    if (!this.#buttonTray) return;
+    this.#buttonTray.clear();
+    const halfIcon = DEFAULT_ICON_SIZE / 2;
+    const pad = 3;
+    const totalWidth = (iconCount - 1) * spacing + DEFAULT_ICON_SIZE + pad * 2;
+    const trayHeight = DEFAULT_ICON_SIZE + pad * 2;
+    const x = -(totalWidth / 2);
+    const y = ICON_Y - halfIcon - pad;
+    this.#buttonTray.roundRect(x, y, totalWidth, trayHeight, 2);
+    this.#buttonTray.fill({ color: 789530, alpha: 0.6 });
   }
   // ── Per-tile icon visibility ───────────────────────────────────────
   #updatePerTileVisibility() {
     if (!this.#currentAxial) return;
     if (this.#dropDragging || this.#dropPending) {
       for (const action of this.#actions) action.button.visible = false;
+      if (this.#buttonTray) this.#buttonTray.visible = false;
       return;
     }
     if (this.#meshPublic && !this.#hasSelection) {
       for (const action of this.#actions) action.button.visible = false;
+      if (this.#buttonTray) this.#buttonTray.visible = false;
       return;
     }
     if (this.#arrangeMode) {
@@ -848,6 +851,9 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
       } else {
         action.button.visible = true;
       }
+    }
+    if (this.#buttonTray) {
+      this.#buttonTray.visible = !ctx.noImage;
     }
     this.#layoutIconRow();
   }

@@ -5,7 +5,7 @@ import type { Axial } from '../navigation/hex-detector.js'
 import type { LayoutService } from './layout.service.js'
 import { writeCellProperties } from '../editor/tile-properties.js'
 
-type CellCountPayload = { count: number; labels: string[] }
+type CellCountPayload = { count: number; labels: string[]; coords?: Axial[] }
 type MoveRefs = {
   canvas: HTMLCanvasElement
   container: any
@@ -45,6 +45,7 @@ export class MoveDrone extends Drone {
   #labelToKey = new Map<string, string>()       // label → axialKey (reverse map)
   #keyToIndex = new Map<string, number>()       // axialKey → index (for reordering)
   #cellLabels: string[] = []
+  #cellCoords: Axial[] = []
   #cellCount = 0
 
   get moveActive(): boolean { return this.#moveActive }
@@ -92,6 +93,7 @@ export class MoveDrone extends Drone {
       if (this.#activeSource && this.#activeSource !== 'command') return
       this.#cellCount = payload.count
       this.#cellLabels = payload.labels
+      this.#cellCoords = payload.coords ?? []
     })
 
     this.onEffect<{ x: number; y: number }>('render:mesh-offset', (offset) => {
@@ -161,10 +163,11 @@ export class MoveDrone extends Drone {
     }
 
     // occupancy + label reverse map for occupied cells only
+    // use stored coords from render:cell-count (matches labels 1:1, works in pinned mode)
     for (let i = 0; i < this.#cellLabels.length; i++) {
       const label = this.#cellLabels[i]
       if (!label) continue
-      const coord = axialSvc.items.get(i) as Axial | undefined
+      const coord = this.#cellCoords[i] as Axial | undefined
       if (!coord) continue
       const key = axialKey(coord.q, coord.r)
       this.#occupancy.set(key, label)
@@ -191,7 +194,7 @@ export class MoveDrone extends Drone {
       for (let i = 0; i < this.#cellLabels.length; i++) {
         const label = this.#cellLabels[i]
         if (!label) continue
-        const coord = axialSvc.items.get(i) as Axial | undefined
+        const coord = this.#cellCoords[i] as Axial | undefined
         if (!coord) continue
         if (selected.has(label)) {
           this.#movedGroup.set(label, { q: coord.q, r: coord.r })
@@ -250,8 +253,21 @@ export class MoveDrone extends Drone {
   // ── reorder names by index ──────────────────────────────
 
   #reorderNames(placements: Map<string, Axial>): string[] {
-    // start with original label order
-    const names = [...this.#cellLabels]
+    // build a sparse array indexed by grid position (not dense cell index)
+    // so buildCellsFromAxial can use moveNames[gridIndex] directly
+    const axialSvc = this.resolve<any>('axial')
+    const gridSize = axialSvc?.count ?? 0
+    const names: string[] = new Array(Math.max(gridSize, this.#cellLabels.length)).fill('')
+
+    // place each label at its grid index using stored coords
+    for (let i = 0; i < this.#cellLabels.length; i++) {
+      const label = this.#cellLabels[i]
+      if (!label) continue
+      const coord = this.#cellCoords[i]
+      if (!coord) continue
+      const gridIndex = this.#keyToIndex.get(axialKey(coord.q, coord.r))
+      if (gridIndex !== undefined) names[gridIndex] = label
+    }
 
     // find max target index so we can extend the array if needed
     let maxIdx = names.length - 1
@@ -260,7 +276,6 @@ export class MoveDrone extends Drone {
       const targetIndex = this.#keyToIndex.get(targetKey)
       if (targetIndex !== undefined && targetIndex > maxIdx) maxIdx = targetIndex
     }
-    // extend array with empty strings for out-of-range positions
     while (names.length <= maxIdx) names.push('')
 
     // clear original positions of all placed labels first
@@ -269,7 +284,7 @@ export class MoveDrone extends Drone {
       if (placedLabels.has(names[i])) names[i] = ''
     }
 
-    // write each placed label to its target index
+    // write each placed label to its target grid index
     for (const [label, axial] of placements) {
       const targetKey = axialKey(axial.q, axial.r)
       const targetIndex = this.#keyToIndex.get(targetKey)
@@ -354,11 +369,11 @@ export class MoveDrone extends Drone {
       this.#keyToIndex.set(key, i)
     }
 
-    // occupancy
+    // occupancy — use stored coords from render:cell-count (works in pinned mode)
     for (let i = 0; i < this.#cellLabels.length; i++) {
       const label = this.#cellLabels[i]
       if (!label) continue
-      const coord = axialSvc.items.get(i) as { q: number; r: number } | undefined
+      const coord = this.#cellCoords[i] as Axial | undefined
       if (!coord) continue
       const key = axialKey(coord.q, coord.r)
       this.#occupancy.set(key, label)

@@ -59,7 +59,9 @@ var PixiHostWorker = class extends Worker {
     app.canvas.style.touchAction = "none";
     this.container = new Container();
     app.stage.addChild(this.container);
+    let fullscreenTransition = false;
     const center = () => {
+      if (fullscreenTransition) return;
       const cx = window.innerWidth * 0.5;
       const cy = window.innerHeight * 0.5;
       const vp = window.ioc?.get("@diamondcoreprocessor.com/ViewportPersistence");
@@ -72,7 +74,10 @@ var PixiHostWorker = class extends Worker {
       setTimeout(center, 50);
     });
     document.addEventListener("fullscreenchange", () => {
-      setTimeout(center, 50);
+      fullscreenTransition = true;
+      setTimeout(() => {
+        fullscreenTransition = false;
+      }, 200);
     });
     this.emitEffect("render:host-ready", {
       app: this.app,

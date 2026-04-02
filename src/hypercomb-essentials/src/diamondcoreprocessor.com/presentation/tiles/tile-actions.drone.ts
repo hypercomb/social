@@ -1,5 +1,5 @@
 // diamondcoreprocessor.com/pixi/tile-actions.drone.ts
-import { Drone, EffectBus, hypercomb, normalizeCell, requestConfirm } from '@hypercomb/core'
+import { Drone, EffectBus, hypercomb, normalizeCell } from '@hypercomb/core'
 import type { OverlayActionDescriptor, OverlayTileContext, OverlayProfileKey } from './tile-overlay.drone.js'
 import { readCellProperties, writeCellProperties } from '../../editor/tile-properties.js'
 
@@ -317,22 +317,6 @@ export class TileActionsDrone extends Drone {
     if (!lineage) return
     const dir = await lineage.explorerDir()
     if (!dir) return
-
-    // Check if tile is a directory with children
-    let hasChildren = false
-    try {
-      const child = await dir.getDirectoryHandle(label)
-      for await (const _ of (child as any).entries()) { hasChildren = true; break }
-    } catch { /* not a directory or doesn't exist */ }
-
-    const confirmed = await requestConfirm({
-      title: 'confirm.delete-title',
-      message: 'confirm.delete-message',
-      messageParams: { name: label },
-      warning: hasChildren ? 'confirm.delete-children-warning' : undefined,
-      danger: true,
-    })
-    if (!confirmed) return
 
     try {
       await dir.removeEntry(label, { recursive: true })
