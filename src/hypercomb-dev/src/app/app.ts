@@ -25,6 +25,7 @@ import { HistorySliderDrone } from '@hypercomb/essentials/diamondcoreprocessor.c
 import { TileEditorService } from '@hypercomb/essentials/diamondcoreprocessor.com/editor/tile-editor.service'
 import { TileEditorDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/editor/tile-editor.drone'
 import { ImageEditorService } from '@hypercomb/essentials/diamondcoreprocessor.com/editor/image-editor.service'
+import '@hypercomb/essentials/diamondcoreprocessor.com/editor/image-drop.drone'
 import { KeyMapService } from '@hypercomb/essentials/diamondcoreprocessor.com/keyboard/keymap.service'
 import { SelectionService } from '@hypercomb/essentials/diamondcoreprocessor.com/selection/selection.service'
 import '@hypercomb/essentials/diamondcoreprocessor.com/selection/tile-selection.drone'

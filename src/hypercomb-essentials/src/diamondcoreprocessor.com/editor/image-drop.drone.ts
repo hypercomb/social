@@ -68,14 +68,6 @@ export class ImageDropDrone extends Drone {
   // ── drag handlers ─────────────────────────────────────────────
 
   #onDragOver = (e: DragEvent): void => {
-    // don't claim if over form inputs (unless we have a pending drop — then we want
-    // to keep the browser from doing its own thing while user types in the command line)
-    const el = document.activeElement
-    if (el && (el as HTMLElement).matches?.('input, textarea, select, [contenteditable]')) {
-      // still allow if we're in pending-drop state (user is typing cell name)
-      if (!this.#pendingBlob) return
-    }
-
     // only claim if it looks like files (not a link-only drag)
     const types = e.dataTransfer?.types ?? []
     if (!types.includes('Files')) return
@@ -104,11 +96,7 @@ export class ImageDropDrone extends Drone {
   }
 
   #onDrop = (e: DragEvent): void => {
-    // don't steal drops from inputs
-    const el = document.activeElement
-    if (el && (el as HTMLElement).matches?.('input, textarea, select, [contenteditable]')) return
-
-    // don't steal non-file drops (those go to LinkDropWorker)
+    // don't steal non-file drops (those go to LinkDropWorker or native input handling)
     const types = e.dataTransfer?.types ?? []
     if (!types.includes('Files')) return
 
