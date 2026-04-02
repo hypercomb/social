@@ -326,21 +326,29 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     const stored = this.roomStore?.value ?? ''
     if (stored) this.#roomValue.set(stored)
 
-    // restore persisted pill position / width
+    // restore persisted pill position / zoom — reset if off-screen or too small
     try {
       const pos = localStorage.getItem('hc:pill-pos')
       if (pos) {
         const { x, y } = JSON.parse(pos)
-        if (typeof x === 'number' && typeof y === 'number') {
-          const clamped = this.#clampPosition(x, y)
-          this.#dragX.set(clamped.x)
-          this.#dragY.set(clamped.y)
+        if (typeof x === 'number' && typeof y === 'number'
+            && x > -this.#VIEWPORT_MARGIN && x < window.innerWidth - this.#VIEWPORT_MARGIN
+            && y > -this.#VIEWPORT_MARGIN && y < window.innerHeight - this.#VIEWPORT_MARGIN) {
+          this.#dragX.set(x)
+          this.#dragY.set(y)
+        } else {
+          localStorage.removeItem('hc:pill-pos')
         }
       }
       const z = localStorage.getItem('hc:pill-zoom')
       if (z) {
         const n = parseFloat(z)
-        if (n >= this.#MIN_ZOOM && n <= this.#MAX_ZOOM) this.#pillZoom.set(n)
+        if (n >= this.#MIN_ZOOM && n <= this.#MAX_ZOOM) {
+          this.#pillZoom.set(n)
+        } else {
+          this.#pillZoom.set(Math.max(this.#MIN_ZOOM, Math.min(this.#MAX_ZOOM, n)))
+          localStorage.setItem('hc:pill-zoom', String(this.#pillZoom()))
+        }
       }
     } catch { /* ignore corrupted storage */ }
 
@@ -877,12 +885,10 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
 
   readonly onDragHandleMove = (e: PointerEvent): void => {
     if (this.#dragging) {
-      const raw = this.#clampPosition(
-        e.clientX - this.#dragOffsetX,
-        e.clientY - this.#dragOffsetY,
-      )
-      this.#dragX.set(raw.x)
-      this.#dragY.set(raw.y)
+      const x = e.clientX - this.#dragOffsetX
+      const y = e.clientY - this.#dragOffsetY
+      this.#dragX.set(x)
+      this.#dragY.set(y)
     } else if (this.#resizing) {
       const delta = e.clientX - this.#resizeStartX
       const next = Math.min(this.#MAX_ZOOM, Math.max(this.#MIN_ZOOM, this.#resizeStartZoom + delta / 200))
@@ -918,17 +924,6 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   }
 
   // ── internal ────────────────────────────────────────────
-
-  /** Clamp x/y so the pill stays within the viewport. */
-  #clampPosition = (x: number, y: number): { x: number; y: number } => {
-    const m = this.#VIEWPORT_MARGIN
-    const vw = window.innerWidth
-    const vh = window.innerHeight
-    return {
-      x: Math.max(-m, Math.min(x, vw - m)),
-      y: Math.max(-m, Math.min(y, vh - m)),
-    }
-  }
 
   #viewportCenter = (): { x: number; y: number } => ({
     x: window.innerWidth / 2,
