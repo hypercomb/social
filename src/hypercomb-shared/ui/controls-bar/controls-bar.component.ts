@@ -108,6 +108,23 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #atomizeStrategy = signal('')
   #atomizeAtomCount = signal(0)
 
+  // ── drag / resize state ──────────────────────────────────
+  readonly #dragX = signal<number | null>(null)
+  readonly #dragY = signal<number | null>(null)
+  readonly #pillWidth = signal<number | null>(null)
+  #dragging = false
+  #resizing = false
+  #dragOffsetX = 0
+  #dragOffsetY = 0
+  #resizeStartX = 0
+  #resizeStartWidth = 0
+
+  /** True when the pill has a custom position (not default center). */
+  readonly pillCustomPosition = computed(() => this.#dragX() !== null && this.#dragY() !== null)
+  readonly pillLeft = this.#dragX.asReadonly()
+  readonly pillTop = this.#dragY.asReadonly()
+  readonly pillWidth = this.#pillWidth.asReadonly()
+
   #idleTimer: ReturnType<typeof setTimeout> | null = null
   #moveModeUnsub: (() => void) | null = null
   #touchDraggingUnsub: (() => void) | null = null
@@ -305,6 +322,23 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     // pre-fill room from store
     const stored = this.roomStore?.value ?? ''
     if (stored) this.#roomValue.set(stored)
+
+    // restore persisted pill position / width
+    try {
+      const pos = localStorage.getItem('hc:pill-pos')
+      if (pos) {
+        const { x, y } = JSON.parse(pos)
+        if (typeof x === 'number' && typeof y === 'number') {
+          this.#dragX.set(x)
+          this.#dragY.set(y)
+        }
+      }
+      const w = localStorage.getItem('hc:pill-width')
+      if (w) {
+        const n = parseFloat(w)
+        if (n > 0) this.#pillWidth.set(n)
+      }
+    } catch { /* ignore corrupted storage */ }
 
     window.addEventListener('pointermove', this.#onActivity)
     window.addEventListener('pointerdown', this.#onActivity)
@@ -813,6 +847,72 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     if (dx >= this.#SWIPE_THRESHOLD && this.canGoBack()) {
       this.goBack()
     }
+  }
+
+  // ── drag handle ─────────────────────────────────────────
+
+  readonly onDragHandleDown = (e: PointerEvent): void => {
+    if (e.button !== 0) return
+    const pill = (e.target as HTMLElement).closest('.controls-pill') as HTMLElement | null
+    if (!pill) return
+
+    if (e.ctrlKey || e.metaKey) {
+      // ctrl+drag = resize
+      this.#resizing = true
+      this.#resizeStartX = e.clientX
+      this.#resizeStartWidth = this.#pillWidth() ?? pill.offsetWidth
+      e.preventDefault()
+    } else {
+      // regular drag = reposition
+      this.#dragging = true
+      const rect = pill.getBoundingClientRect()
+      this.#dragOffsetX = e.clientX - rect.left
+      this.#dragOffsetY = e.clientY - rect.top
+      e.preventDefault()
+    }
+
+    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+  }
+
+  readonly onDragHandleMove = (e: PointerEvent): void => {
+    if (this.#dragging) {
+      const x = e.clientX - this.#dragOffsetX
+      const y = e.clientY - this.#dragOffsetY
+      this.#dragX.set(x)
+      this.#dragY.set(y)
+    } else if (this.#resizing) {
+      const delta = e.clientX - this.#resizeStartX
+      const next = Math.max(120, this.#resizeStartWidth + delta)
+      this.#pillWidth.set(next)
+    }
+  }
+
+  readonly onDragHandleUp = (e: PointerEvent): void => {
+    if (this.#dragging) {
+      this.#dragging = false
+      // persist position
+      const x = this.#dragX()
+      const y = this.#dragY()
+      if (x !== null && y !== null) {
+        localStorage.setItem('hc:pill-pos', JSON.stringify({ x, y }))
+      }
+    }
+    if (this.#resizing) {
+      this.#resizing = false
+      const w = this.#pillWidth()
+      if (w !== null) {
+        localStorage.setItem('hc:pill-width', String(w))
+      }
+    }
+    ;(e.target as HTMLElement).releasePointerCapture(e.pointerId)
+  }
+
+  readonly onDragHandleDblClick = (): void => {
+    this.#dragX.set(null)
+    this.#dragY.set(null)
+    this.#pillWidth.set(null)
+    localStorage.removeItem('hc:pill-pos')
+    localStorage.removeItem('hc:pill-width')
   }
 
   // ── internal ────────────────────────────────────────────

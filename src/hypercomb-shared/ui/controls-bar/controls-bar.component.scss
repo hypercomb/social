@@ -173,6 +173,51 @@
       > * { pointer-events: auto; }
     }
   }
+
+  // ── custom position (dragged) ────────────────────────
+  &.custom-pos {
+    transform: none;
+
+    &.faded {
+      transform: translateY(4px);
+      &:hover {
+        transform: translateY(0);
+      }
+    }
+  }
+}
+
+// ── drag handle ────────────────────────────────────────────
+
+.drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 10px;
+  align-self: stretch;
+  cursor: grab;
+  flex-shrink: 0;
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  margin-right: 0.25rem;
+  transition: background 150ms ease;
+  touch-action: none;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  &:active {
+    cursor: grabbing;
+  }
+}
+
+.drag-dots {
+  display: block;
+  width: 4px;
+  height: 14px;
+  background-image: radial-gradient(circle, rgba(255,255,255,0.35) 1px, transparent 1px);
+  background-size: 4px 4px;
+  background-position: 0 1px;
 }
 
 // ── public mode ──────────────────────────────────────────
@@ -591,6 +636,10 @@
       transform: translateX(-50%);
       > * { pointer-events: auto; }
     }
+
+    &.custom-pos.faded {
+      transform: none;
+    }
   }
 
   .controls-section,
@@ -674,6 +723,8 @@
 
 // ── phone (≤599px) ────────────────────────────────────────
 @include phone-only {
+
+  .drag-handle { display: none; }
 
   .controls-pill {
     padding: 0.4rem 0.6rem;

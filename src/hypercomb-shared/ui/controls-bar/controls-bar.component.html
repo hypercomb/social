@@ -57,13 +57,27 @@
 <div
   class="controls-pill"
   [class.faded]="!visible()"
+  [class.custom-pos]="pillCustomPosition()"
   [class.public-mode]="meshPublic"
   [class.power-ctrl]="powerKey() === 'ctrl'"
   [class.power-shift]="powerKey() === 'shift'"
   [class.power-alt]="powerKey() === 'alt'"
+  [style.left.px]="pillLeft()"
+  [style.top.px]="pillTop()"
+  [style.bottom]="pillCustomPosition() ? 'auto' : null"
+  [style.width.px]="pillWidth()"
   (mouseenter)="onBarEnter()"
   (mouseleave)="onBarLeave()"
 >
+  <!-- drag handle -->
+  <div class="drag-handle"
+       (pointerdown)="onDragHandleDown($event)"
+       (pointermove)="onDragHandleMove($event)"
+       (pointerup)="onDragHandleUp($event)"
+       (dblclick)="onDragHandleDblClick()"
+       [attr.aria-label]="'controls.drag-handle' | t">
+    <span class="drag-dots"></span>
+  </div>
   @switch (mode()) {
     @case ('browsing') {
 

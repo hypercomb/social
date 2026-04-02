@@ -4,7 +4,7 @@
   "scripts": {
     "ng": "npx ng",
     "prestart": "npx tsx ../scripts/prebuild.ts --target dev",
-    "start": "npx ng serve --port 4250 --host localhost --configuration development",
+    "start": "npx ng serve --port 4250 --host localhost --configuration development --no-hmr",
     "build": "npx ng build --configuration production",
     "watch": "npx ng build --watch --configuration development",
     "test": "npx ng test"
