@@ -118,6 +118,9 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #dragOffsetY = 0
   #resizeStartX = 0
   #resizeStartZoom = 1
+  readonly #MIN_ZOOM = 0.7
+  readonly #MAX_ZOOM = 2
+  readonly #VIEWPORT_MARGIN = 20 // px – keep at least this much visible
 
   /** True when the pill has a custom position (not default center). */
   readonly pillCustomPosition = computed(() => this.#dragX() !== null && this.#dragY() !== null)
@@ -329,14 +332,15 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
       if (pos) {
         const { x, y } = JSON.parse(pos)
         if (typeof x === 'number' && typeof y === 'number') {
-          this.#dragX.set(x)
-          this.#dragY.set(y)
+          const clamped = this.#clampPosition(x, y)
+          this.#dragX.set(clamped.x)
+          this.#dragY.set(clamped.y)
         }
       }
       const z = localStorage.getItem('hc:pill-zoom')
       if (z) {
         const n = parseFloat(z)
-        if (n >= 0.5 && n <= 2) this.#pillZoom.set(n)
+        if (n >= this.#MIN_ZOOM && n <= this.#MAX_ZOOM) this.#pillZoom.set(n)
       }
     } catch { /* ignore corrupted storage */ }
 
@@ -873,14 +877,15 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
 
   readonly onDragHandleMove = (e: PointerEvent): void => {
     if (this.#dragging) {
-      const x = e.clientX - this.#dragOffsetX
-      const y = e.clientY - this.#dragOffsetY
-      this.#dragX.set(x)
-      this.#dragY.set(y)
+      const raw = this.#clampPosition(
+        e.clientX - this.#dragOffsetX,
+        e.clientY - this.#dragOffsetY,
+      )
+      this.#dragX.set(raw.x)
+      this.#dragY.set(raw.y)
     } else if (this.#resizing) {
       const delta = e.clientX - this.#resizeStartX
-      // 200px of drag = 1x zoom change; clamp between 0.5 and 2
-      const next = Math.min(2, Math.max(0.5, this.#resizeStartZoom + delta / 200))
+      const next = Math.min(this.#MAX_ZOOM, Math.max(this.#MIN_ZOOM, this.#resizeStartZoom + delta / 200))
       this.#pillZoom.set(next)
     }
   }
@@ -913,6 +918,17 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   }
 
   // ── internal ────────────────────────────────────────────
+
+  /** Clamp x/y so the pill stays within the viewport. */
+  #clampPosition = (x: number, y: number): { x: number; y: number } => {
+    const m = this.#VIEWPORT_MARGIN
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    return {
+      x: Math.max(-m, Math.min(x, vw - m)),
+      y: Math.max(-m, Math.min(y, vh - m)),
+    }
+  }
 
   #viewportCenter = (): { x: number; y: number } => ({
     x: window.innerWidth / 2,
