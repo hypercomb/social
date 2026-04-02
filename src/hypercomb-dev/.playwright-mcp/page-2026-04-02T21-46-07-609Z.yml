@@ -1,0 +1,234 @@
+- generic [active] [ref=e1]:
+  - navigation [ref=e2]:
+    - generic [ref=e3]:
+      - img [ref=e5]
+      - generic [ref=e7]: Diamond Core Processor
+      - generic [ref=e8]:
+        - button "Modules" [ref=e9] [cursor=pointer]
+        - button "Inspector" [ref=e10] [cursor=pointer]
+        - button "Code" [ref=e11] [cursor=pointer]
+    - generic [ref=e12]:
+      - button "☷" [ref=e13] [cursor=pointer]
+      - button "⚙" [ref=e14] [cursor=pointer]
+  - generic [ref=e15]:
+    - complementary [ref=e16]:
+      - generic [ref=e17]:
+        - generic [ref=e18]: Domains
+        - button "+" [ref=e19] [cursor=pointer]
+      - generic [ref=e20]:
+        - textbox "https://example.com/content" [ref=e21]
+        - button "Install" [ref=e22] [cursor=pointer]
+      - generic [ref=e23]:
+        - generic [ref=e24] [cursor=pointer]:
+          - text: diamondcoreprocessor.com
+          - generic [ref=e26]: ▶
+        - generic [ref=e27]:
+          - generic [ref=e28] [cursor=pointer]: assistant
+          - generic [ref=e30] [cursor=pointer]: clipboard
+          - generic [ref=e32] [cursor=pointer]: commands
+          - generic [ref=e34] [cursor=pointer]: computation
+          - generic [ref=e36] [cursor=pointer]: editor
+          - generic [ref=e38] [cursor=pointer]: format
+          - generic [ref=e40] [cursor=pointer]: history
+          - generic [ref=e42] [cursor=pointer]: link
+          - generic [ref=e44] [cursor=pointer]: meeting
+          - generic [ref=e46] [cursor=pointer]: move
+          - generic [ref=e48] [cursor=pointer]: navigation
+          - generic [ref=e50] [cursor=pointer]: preferences
+          - generic [ref=e52] [cursor=pointer]: presentation
+          - generic [ref=e54] [cursor=pointer]: selection
+          - generic [ref=e56] [cursor=pointer]: sharing
+      - generic [ref=e59] [cursor=pointer]:
+        - text: revolucionstyle.com
+        - generic [ref=e61]: ▶
+    - generic [ref=e62]:
+      - generic [ref=e63]:
+        - generic: 🔍
+        - textbox "Filter modules..." [ref=e64]
+        - generic [ref=e65]:
+          - button "Bees" [ref=e66] [cursor=pointer]: Bees
+          - button "Workers" [ref=e68] [cursor=pointer]: Workers
+          - button "Deps" [ref=e70] [cursor=pointer]: Deps
+      - generic [ref=e72]:
+        - generic [ref=e73] [cursor=pointer]:
+          - generic [ref=e74]:
+            - generic [ref=e75]: ♦
+            - generic [ref=e76]:
+              - generic [ref=e77]: assistant
+              - generic [ref=e78]: Bee · Layer
+          - generic [ref=e79]: 3fd198c0...a7b2
+          - generic [ref=e80]:
+            - generic [ref=e81]:
+              - generic [ref=e82]: "3"
+              - text: deps
+            - generic [ref=e83]:
+              - generic [ref=e84]: "2"
+              - text: effects
+            - generic [ref=e85]:
+              - generic [ref=e86]: "1"
+              - text: worker
+        - generic [ref=e87] [cursor=pointer]:
+          - generic [ref=e88]:
+            - generic [ref=e89]: ♦
+            - generic [ref=e90]:
+              - generic [ref=e91]: clipboard
+              - generic [ref=e92]: Bee · Layer
+          - generic [ref=e93]: e95cddc9...f1c8
+          - generic [ref=e94]:
+            - generic [ref=e95]:
+              - generic [ref=e96]: "2"
+              - text: deps
+            - generic [ref=e97]:
+              - generic [ref=e98]: "4"
+              - text: effects
+            - generic [ref=e99]:
+              - generic [ref=e100]: "1"
+              - text: worker
+        - generic [ref=e101] [cursor=pointer]:
+          - generic [ref=e102]:
+            - generic [ref=e103]: ♦
+            - generic [ref=e104]:
+              - generic [ref=e105]: commands
+              - generic [ref=e106]: Bee · Layer
+          - generic [ref=e107]: ca15b7ae...9d3e
+          - generic [ref=e108]:
+            - generic [ref=e109]:
+              - generic [ref=e110]: "1"
+              - text: deps
+            - generic [ref=e111]:
+              - generic [ref=e112]: "3"
+              - text: effects
+            - generic [ref=e113]:
+              - generic [ref=e114]: "0"
+              - text: workers
+        - generic [ref=e115] [cursor=pointer]:
+          - generic [ref=e116]:
+            - generic [ref=e117]: ⚙
+            - generic [ref=e118]:
+              - generic [ref=e119]: computation
+              - generic [ref=e120]: Worker
+          - generic [ref=e121]: 918b7fb8...c44a
+          - generic [ref=e122]:
+            - generic [ref=e123]:
+              - generic [ref=e124]: "5"
+              - text: deps
+            - generic [ref=e125]:
+              - generic [ref=e126]: "1"
+              - text: effect
+        - generic [ref=e127] [cursor=pointer]:
+          - generic [ref=e128]:
+            - generic [ref=e129]: ♦
+            - generic [ref=e130]:
+              - generic [ref=e131]: editor
+              - generic [ref=e132]: Bee · Layer
+          - generic [ref=e133]: db61c386...e7f0
+          - generic [ref=e134]:
+            - generic [ref=e135]:
+              - generic [ref=e136]: "4"
+              - text: deps
+            - generic [ref=e137]:
+              - generic [ref=e138]: "6"
+              - text: effects
+            - generic [ref=e139]:
+              - generic [ref=e140]: "2"
+              - text: workers
+        - generic [ref=e141] [cursor=pointer]:
+          - generic [ref=e142]:
+            - generic [ref=e143]: ⇄
+            - generic [ref=e144]:
+              - generic [ref=e145]: format
+              - generic [ref=e146]: Dependency
+          - generic [ref=e147]: 3fc7ae5d...b112
+          - generic [ref=e148]:
+            - generic [ref=e149]:
+              - generic [ref=e150]: "0"
+              - text: deps
+            - generic [ref=e151]:
+              - generic [ref=e152]: "2"
+              - text: exports
+        - generic [ref=e153] [cursor=pointer]:
+          - generic [ref=e154]:
+            - generic [ref=e155]: ♦
+            - generic [ref=e156]:
+              - generic [ref=e157]: history
+              - generic [ref=e158]: Bee · Layer
+          - generic [ref=e159]: f816f717...aa91
+          - generic [ref=e160]:
+            - generic [ref=e161]:
+              - generic [ref=e162]: "2"
+              - text: deps
+            - generic [ref=e163]:
+              - generic [ref=e164]: "3"
+              - text: effects
+            - generic [ref=e165]:
+              - generic [ref=e166]: "1"
+              - text: worker
+        - generic [ref=e167] [cursor=pointer]:
+          - generic [ref=e168]:
+            - generic [ref=e169]: ♦
+            - generic [ref=e170]:
+              - generic [ref=e171]: navigation
+              - generic [ref=e172]: Bee · Layer
+          - generic [ref=e173]: e16490cc...7bf3
+          - generic [ref=e174]:
+            - generic [ref=e175]:
+              - generic [ref=e176]: "3"
+              - text: deps
+            - generic [ref=e177]:
+              - generic [ref=e178]: "5"
+              - text: effects
+            - generic [ref=e179]:
+              - generic [ref=e180]: "2"
+              - text: workers
+        - generic [ref=e181] [cursor=pointer]:
+          - generic [ref=e182]:
+            - generic [ref=e183]: ♦
+            - generic [ref=e184]:
+              - generic [ref=e185]: presentation
+              - generic [ref=e186]: Bee · Layer
+          - generic [ref=e187]: efa73fcc...d8e2
+          - generic [ref=e188]:
+            - generic [ref=e189]:
+              - generic [ref=e190]: "6"
+              - text: deps
+            - generic [ref=e191]:
+              - generic [ref=e192]: "8"
+              - text: effects
+            - generic [ref=e193]:
+              - generic [ref=e194]: "3"
+              - text: workers
+    - generic [ref=e195]:
+      - generic [ref=e196]:
+        - generic [ref=e197]:
+          - generic [ref=e198]: ♦
+          - generic [ref=e199]:
+            - generic [ref=e200]: assistant
+            - generic [ref=e201]: Bee · diamondcoreprocessor.com
+        - generic [ref=e202]: 3fd198c04b7f68488f306b28e9b2fdacf14b009787a1a66ef1fd0932406bdc8c
+      - generic [ref=e203]:
+        - generic [ref=e204]: Properties
+        - generic [ref=e205]:
+          - generic [ref=e206]: Kind
+          - generic [ref=e207]: Bee
+        - generic [ref=e208]:
+          - generic [ref=e209]: Layer
+          - generic [ref=e210]: assistant
+        - generic [ref=e211]:
+          - generic [ref=e212]: Workers
+          - generic [ref=e213]: "1"
+        - generic [ref=e214]:
+          - generic [ref=e215]: Effects
+          - generic [ref=e216]: 2 emits, 1 listens
+      - generic [ref=e217]:
+        - generic [ref=e218]: Dependencies
+        - generic [ref=e219]:
+          - generic [ref=e220]: "@hypercomb/core"
+          - generic [ref=e222]: ClaudeBridgeWorker
+          - generic [ref=e224]: EffectBus
+      - generic [ref=e226]:
+        - button "View Source" [ref=e227] [cursor=pointer]
+        - button "Edit Layer" [ref=e228] [cursor=pointer]
+  - generic [ref=e229]:
+    - generic [ref=e230]: Connected
+    - generic [ref=e232]: diamondcoreprocessor.com
+    - generic [ref=e233]: 15 modules · 12 bees · 2 workers · 1 dep

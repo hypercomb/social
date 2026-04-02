@@ -1,0 +1,165 @@
+- generic [ref=e4]:
+  - banner [ref=e5]:
+    - heading "Diamond Core Processor" [level=1] [ref=e6]
+    - generic [ref=e7]:
+      - button [ref=e8] [cursor=pointer]:
+        - generic:
+          - button
+      - button [ref=e10] [cursor=pointer]:
+        - generic:
+          - button
+      - button [ref=e11] [cursor=pointer]:
+        - generic:
+          - button
+      - button [ref=e12] [cursor=pointer]:
+        - generic:
+          - button
+      - button "⚙" [ref=e15] [cursor=pointer]
+  - generic [ref=e24]:
+    - text: ">"
+    - textbox "Filter or [select]..." [active] [ref=e25]
+  - generic [ref=e16]:
+    - textbox "https://example.com/content" [ref=e17]
+    - button "Install" [ref=e18] [cursor=pointer]
+  - generic [ref=e26]:
+    - generic [ref=e27]:
+      - generic "http://localhost:4200" [ref=e28]: diamondcoreprocessor.com/
+      - generic [ref=e29]: cd16f904b78f68488f30b0b28e9b2fdcd14b009787a1a66ef1fd0922406bdc8c
+      - button "↧" [ref=e30] [cursor=pointer]
+      - button "×" [ref=e31] [cursor=pointer]
+    - generic [ref=e33]:
+      - generic [ref=e35]:
+        - button [ref=e37] [cursor=pointer]
+        - button [ref=e41] [cursor=pointer]
+        - button "assistant" [ref=e42] [cursor=pointer]:
+          - generic [ref=e43]: assistant
+        - generic [ref=e44]: 3fd198c0
+        - button "✎" [ref=e45] [cursor=pointer]
+        - button "⇱" [ref=e46] [cursor=pointer]
+        - button "▸" [ref=e47] [cursor=pointer]
+      - generic [ref=e49]:
+        - button [ref=e51] [cursor=pointer]
+        - button [ref=e55] [cursor=pointer]
+        - button "clipboard" [ref=e56] [cursor=pointer]:
+          - generic [ref=e57]: clipboard
+        - generic [ref=e58]: e95cddc9
+        - button "✎" [ref=e59] [cursor=pointer]
+        - button "⇱" [ref=e60] [cursor=pointer]
+        - button "▸" [ref=e61] [cursor=pointer]
+      - generic [ref=e63]:
+        - button [ref=e65] [cursor=pointer]
+        - button [ref=e69] [cursor=pointer]
+        - button "commands" [ref=e70] [cursor=pointer]:
+          - generic [ref=e71]: commands
+        - generic [ref=e72]: ca15b7ae
+        - button "✎" [ref=e73] [cursor=pointer]
+        - button "⇱" [ref=e74] [cursor=pointer]
+        - button "▸" [ref=e75] [cursor=pointer]
+      - generic [ref=e77]:
+        - button [ref=e79] [cursor=pointer]
+        - button [ref=e83] [cursor=pointer]
+        - button "computation" [ref=e84] [cursor=pointer]:
+          - generic [ref=e85]: computation
+        - generic [ref=e86]: 918b7fb8
+        - button "✎" [ref=e87] [cursor=pointer]
+        - button "⇱" [ref=e88] [cursor=pointer]
+        - button "▸" [ref=e89] [cursor=pointer]
+      - generic [ref=e91]:
+        - button [ref=e93] [cursor=pointer]
+        - button [ref=e97] [cursor=pointer]
+        - button "editor" [ref=e98] [cursor=pointer]:
+          - generic [ref=e99]: editor
+        - generic [ref=e100]: db61c386
+        - button "✎" [ref=e101] [cursor=pointer]
+        - button "⇱" [ref=e102] [cursor=pointer]
+        - button "▸" [ref=e103] [cursor=pointer]
+      - generic [ref=e105]:
+        - button [ref=e107] [cursor=pointer]
+        - button [ref=e111] [cursor=pointer]
+        - button "format" [ref=e112] [cursor=pointer]:
+          - generic [ref=e113]: format
+        - generic [ref=e114]: 3fc7ae5d
+        - button "✎" [ref=e115] [cursor=pointer]
+        - button "⇱" [ref=e116] [cursor=pointer]
+        - button "▸" [ref=e117] [cursor=pointer]
+      - generic [ref=e119]:
+        - button [ref=e121] [cursor=pointer]
+        - button [ref=e125] [cursor=pointer]
+        - button "history" [ref=e126] [cursor=pointer]:
+          - generic [ref=e127]: history
+        - generic [ref=e128]: f816f717
+        - button "✎" [ref=e129] [cursor=pointer]
+        - button "⇱" [ref=e130] [cursor=pointer]
+        - button "▸" [ref=e131] [cursor=pointer]
+      - generic [ref=e133]:
+        - button [ref=e135] [cursor=pointer]
+        - button [ref=e139] [cursor=pointer]
+        - button "link" [ref=e140] [cursor=pointer]:
+          - generic [ref=e141]: link
+        - generic [ref=e142]: c968247e
+        - button "✎" [ref=e143] [cursor=pointer]
+        - button "⇱" [ref=e144] [cursor=pointer]
+        - button "▸" [ref=e145] [cursor=pointer]
+      - generic [ref=e147]:
+        - button [ref=e149] [cursor=pointer]
+        - button [ref=e153] [cursor=pointer]
+        - button "meeting" [ref=e154] [cursor=pointer]:
+          - generic [ref=e155]: meeting
+        - generic [ref=e156]: a4d58d05
+        - button "✎" [ref=e157] [cursor=pointer]
+        - button "⇱" [ref=e158] [cursor=pointer]
+        - button "▸" [ref=e159] [cursor=pointer]
+      - generic [ref=e161]:
+        - button [ref=e163] [cursor=pointer]
+        - button [ref=e167] [cursor=pointer]
+        - button "move" [ref=e168] [cursor=pointer]:
+          - generic [ref=e169]: move
+        - generic [ref=e170]: 404c55a6
+        - button "✎" [ref=e171] [cursor=pointer]
+        - button "⇱" [ref=e172] [cursor=pointer]
+        - button "▸" [ref=e173] [cursor=pointer]
+      - generic [ref=e175]:
+        - button [ref=e177] [cursor=pointer]
+        - button [ref=e181] [cursor=pointer]
+        - button "navigation" [ref=e182] [cursor=pointer]:
+          - generic [ref=e183]: navigation
+        - generic [ref=e184]: e16490cc
+        - button "✎" [ref=e185] [cursor=pointer]
+        - button "⇱" [ref=e186] [cursor=pointer]
+        - button "▸" [ref=e187] [cursor=pointer]
+      - generic [ref=e189]:
+        - button [ref=e191] [cursor=pointer]
+        - button [ref=e195] [cursor=pointer]
+        - button "preferences" [ref=e196] [cursor=pointer]:
+          - generic [ref=e197]: preferences
+        - generic [ref=e198]: 34b9db42
+        - button "✎" [ref=e199] [cursor=pointer]
+        - button "⇱" [ref=e200] [cursor=pointer]
+        - button "▸" [ref=e201] [cursor=pointer]
+      - generic [ref=e203]:
+        - button [ref=e205] [cursor=pointer]
+        - button [ref=e209] [cursor=pointer]
+        - button "presentation" [ref=e210] [cursor=pointer]:
+          - generic [ref=e211]: presentation
+        - generic [ref=e212]: efa73fcc
+        - button "✎" [ref=e213] [cursor=pointer]
+        - button "⇱" [ref=e214] [cursor=pointer]
+        - button "▸" [ref=e215] [cursor=pointer]
+      - generic [ref=e217]:
+        - button [ref=e219] [cursor=pointer]
+        - button [ref=e223] [cursor=pointer]
+        - button "selection" [ref=e224] [cursor=pointer]:
+          - generic [ref=e225]: selection
+        - generic [ref=e226]: 8fb5eb43
+        - button "✎" [ref=e227] [cursor=pointer]
+        - button "⇱" [ref=e228] [cursor=pointer]
+        - button "▸" [ref=e229] [cursor=pointer]
+      - generic [ref=e231]:
+        - button [ref=e233] [cursor=pointer]
+        - button [ref=e237] [cursor=pointer]
+        - button "sharing" [ref=e238] [cursor=pointer]:
+          - generic [ref=e239]: sharing
+        - generic [ref=e240]: e2621c35
+        - button "✎" [ref=e241] [cursor=pointer]
+        - button "⇱" [ref=e242] [cursor=pointer]
+        - button "▸" [ref=e243] [cursor=pointer]
