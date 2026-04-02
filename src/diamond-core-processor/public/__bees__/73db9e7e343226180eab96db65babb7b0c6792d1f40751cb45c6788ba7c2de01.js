@@ -47,6 +47,7 @@ var MoveDrone = class extends Drone {
   #keyToIndex = /* @__PURE__ */ new Map();
   // axialKey → index (for reordering)
   #cellLabels = [];
+  #cellCoords = [];
   #cellCount = 0;
   get moveActive() {
     return this.#moveActive;
@@ -85,6 +86,7 @@ var MoveDrone = class extends Drone {
       if (this.#activeSource && this.#activeSource !== "command") return;
       this.#cellCount = payload.count;
       this.#cellLabels = payload.labels;
+      this.#cellCoords = payload.coords ?? [];
     });
     this.onEffect("render:mesh-offset", (offset) => {
       this.#meshOffset = offset;
@@ -140,7 +142,7 @@ var MoveDrone = class extends Drone {
     for (let i = 0; i < this.#cellLabels.length; i++) {
       const label = this.#cellLabels[i];
       if (!label) continue;
-      const coord = axialSvc.items.get(i);
+      const coord = this.#cellCoords[i];
       if (!coord) continue;
       const key = axialKey(coord.q, coord.r);
       this.#occupancy.set(key, label);
@@ -162,7 +164,7 @@ var MoveDrone = class extends Drone {
       for (let i = 0; i < this.#cellLabels.length; i++) {
         const label = this.#cellLabels[i];
         if (!label) continue;
-        const coord = axialSvc.items.get(i);
+        const coord = this.#cellCoords[i];
         if (!coord) continue;
         if (selected.has(label)) {
           this.#movedGroup.set(label, { q: coord.q, r: coord.r });
@@ -213,7 +215,17 @@ var MoveDrone = class extends Drone {
   };
   // ── reorder names by index ──────────────────────────────
   #reorderNames(placements) {
-    const names = [...this.#cellLabels];
+    const axialSvc = this.resolve("axial");
+    const gridSize = axialSvc?.count ?? 0;
+    const names = new Array(Math.max(gridSize, this.#cellLabels.length)).fill("");
+    for (let i = 0; i < this.#cellLabels.length; i++) {
+      const label = this.#cellLabels[i];
+      if (!label) continue;
+      const coord = this.#cellCoords[i];
+      if (!coord) continue;
+      const gridIndex = this.#keyToIndex.get(axialKey(coord.q, coord.r));
+      if (gridIndex !== void 0) names[gridIndex] = label;
+    }
     let maxIdx = names.length - 1;
     for (const [, axial] of placements) {
       const targetKey = axialKey(axial.q, axial.r);
@@ -295,7 +307,7 @@ var MoveDrone = class extends Drone {
     for (let i = 0; i < this.#cellLabels.length; i++) {
       const label = this.#cellLabels[i];
       if (!label) continue;
-      const coord = axialSvc.items.get(i);
+      const coord = this.#cellCoords[i];
       if (!coord) continue;
       const key = axialKey(coord.q, coord.r);
       this.#occupancy.set(key, label);

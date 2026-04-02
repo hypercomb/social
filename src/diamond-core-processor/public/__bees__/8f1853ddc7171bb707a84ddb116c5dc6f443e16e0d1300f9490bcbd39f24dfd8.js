@@ -853,7 +853,7 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
       }
     }
     if (this.#buttonTray) {
-      this.#buttonTray.visible = !ctx.noImage;
+      this.#buttonTray.visible = true;
     }
     this.#layoutIconRow();
   }

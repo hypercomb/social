@@ -55,21 +55,17 @@
 }
 
 <div
-  class="controls-pill"
+  class="pill-stage"
   [class.faded]="!visible()"
   [class.custom-pos]="pillCustomPosition()"
-  [class.public-mode]="meshPublic"
-  [class.power-ctrl]="powerKey() === 'ctrl'"
-  [class.power-shift]="powerKey() === 'shift'"
-  [class.power-alt]="powerKey() === 'alt'"
   [style.left.px]="pillLeft()"
   [style.top.px]="pillTop()"
   [style.bottom]="pillCustomPosition() ? 'auto' : null"
-  [style.width.px]="pillWidth()"
+  [style.zoom]="pillZoom()"
   (mouseenter)="onBarEnter()"
   (mouseleave)="onBarLeave()"
 >
-  <!-- drag handle -->
+  <!-- drag handle (left edge) -->
   <div class="drag-handle"
        (pointerdown)="onDragHandleDown($event)"
        (pointermove)="onDragHandleMove($event)"
@@ -78,6 +74,14 @@
        [attr.aria-label]="'controls.drag-handle' | t">
     <span class="drag-dots"></span>
   </div>
+
+  <div
+    class="controls-pill"
+    [class.public-mode]="meshPublic"
+    [class.power-ctrl]="powerKey() === 'ctrl'"
+    [class.power-shift]="powerKey() === 'shift'"
+    [class.power-alt]="powerKey() === 'alt'"
+  >
   @switch (mode()) {
     @case ('browsing') {
 
@@ -236,4 +240,5 @@
     }
 
   }
+  </div>
 </div>
