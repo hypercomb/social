@@ -733,10 +733,19 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   // ── room ────────────────────────────────────────────
 
   readonly toggleRoom = (): void => {
-    this.#roomOpen.update(v => !v)
     if (this.#roomOpen()) {
+      // closing: save current value
+      const value = this.#roomValue().trim()
+      if (value) {
+        this.roomStore?.set(value)
+        EffectBus.emit('mesh:room', { room: value })
+      }
+      this.#roomOpen.set(false)
+    } else {
+      // opening: load stored value and focus
       const stored = this.roomStore?.value ?? ''
       if (stored) this.#roomValue.set(stored)
+      this.#roomOpen.set(true)
       queueMicrotask(() => {
         document.querySelector<HTMLInputElement>('.room-input')?.focus()
       })
