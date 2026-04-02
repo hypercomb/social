@@ -17,7 +17,7 @@ import { QueenBee, EffectBus, hypercomb } from '@hypercomb/core'
 export class RemoveQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'remove'
-  override readonly aliases = ['rm']
+  override readonly aliases = ['rm', 'delete', 'del']
   override description = 'Remove tiles from the current directory'
 
   protected async execute(args: string): Promise<void> {

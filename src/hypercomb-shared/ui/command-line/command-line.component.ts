@@ -34,7 +34,7 @@ const TAG_ASSIGN_RE = /^([^:]+):([^(]+)(?:\(([^)]+)\))?$/
 /** Matches cell:[...] bracket-tag syntax — colon before opening bracket. */
 const BRACKET_TAG_RE = /^([^\[\/!#~]+):\[(.+?)\](.*)$/
 
-const REMOVE_CMDS = new Set(['remove', 'rm'])
+const REMOVE_CMDS = new Set(['remove', 'rm', 'delete', 'del'])
 
 /**
  * Bracket commands — any `/command[items]` that is internally a select operation.
@@ -431,7 +431,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     }
 
     // /remove[...] bracket mode — provide head/raw per current fragment for intellisense
-    if (v.match(/^\/(remove|rm)\[/i)) {
+    if (v.match(/^\/(remove|rm|delete|del)\[/i)) {
       return this.#parseRemoveBracketContext(v)
     }
 
@@ -628,7 +628,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
       // operation phase: suggest operation keywords with / prefix
       if (phase === 'operation') {
-        const ops = ['/cut', '/copy', '/move', '/keyword', '/remove', '/format', '/accent', '/opus', '/sonnet', '/haiku']
+        const ops = ['/cut', '/copy', '/move', '/keyword', '/remove', '/delete', '/format', '/accent', '/opus', '/sonnet', '/haiku']
         if (!ctx.normalized) return ops
         return ops.filter(o => o.startsWith('/' + ctx.normalized) || o.slice(1).startsWith(ctx.normalized))
       }
@@ -1336,7 +1336,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       return
     }
 
-    if (op === 'remove' || op === 'rm') {
+    if (op === 'remove' || op === 'rm' || op === 'delete' || op === 'del') {
       const lineage = this.lineage
       const dir = await lineage.explorerDir()
       if (dir) {
@@ -1727,7 +1727,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     // slash mode: fill command name or command-specific arg completion
     if (ctx.mode === 'slash') {
-      if (ctx.head.match(/^\/(remove|rm)[\s\[]/i)) {
+      if (ctx.head.match(/^\/(remove|rm|delete|del)[\s\[]/i)) {
         this.#setShellValue(ctx.head + best, false)
         return
       }

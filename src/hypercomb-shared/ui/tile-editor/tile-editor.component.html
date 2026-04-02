@@ -1,11 +1,11 @@
 @if (open()) {
-  <div class="editor-backdrop" (click)="cancel()"></div>
+  <div class="editor-backdrop" (click)="save()"></div>
 
   <div class="editor-panel" role="dialog" [attr.aria-label]="'editor.title' | t">
     <header class="editor-header">
       <span class="hci header-icon">k</span>
       <h3>{{ cell() }}</h3>
-      <button class="editor-close" type="button" (click)="cancel()">
+      <button class="editor-close" type="button" (click)="save()">
         <span class="hci">Q</span>
       </button>
     </header>

@@ -3,7 +3,7 @@
  * bracket-first select syntax `[items]/move(8)` from cut-paste `[items]/dest`.
  */
 export const SELECT_OPS = new Set([
-  'select', 'cut', 'copy', 'move', 'remove', 'rm',
+  'select', 'cut', 'copy', 'move', 'remove', 'rm', 'delete', 'del',
   'format', 'fmt', 'fp', 'keyword', 'kw', 'tag',
   'opus', 'o', 'sonnet', 's', 'haiku', 'h'
 ])

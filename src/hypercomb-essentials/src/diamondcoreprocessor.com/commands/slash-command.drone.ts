@@ -150,7 +150,7 @@ class RemoveProvider implements SlashCommandProvider {
   readonly name = 'remove-provider'
   readonly priority = 100
   readonly commands: SlashCommand[] = [
-    { name: 'remove', description: 'Remove tiles from the current directory', descriptionKey: 'slash.remove', aliases: ['rm'] }
+    { name: 'remove', description: 'Remove tiles from the current directory', descriptionKey: 'slash.remove', aliases: ['rm', 'delete', 'del'] }
   ]
 
   async execute(_commandName: string, args: string): Promise<void> {

@@ -768,12 +768,10 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
 
   readonly toggleRoom = (): void => {
     if (this.#roomOpen()) {
-      // closing: save current value
+      // closing: save current value (including empty to clear)
       const value = this.#roomValue().trim()
-      if (value) {
-        this.roomStore?.set(value)
-        EffectBus.emit('mesh:room', { room: value })
-      }
+      this.roomStore?.set(value)
+      EffectBus.emit('mesh:room', { room: value })
       this.#roomOpen.set(false)
     } else {
       // opening: load stored value and focus
@@ -792,7 +790,6 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
 
   readonly submitRoom = (): void => {
     const value = this.#roomValue().trim()
-    if (!value) return
     this.roomStore?.set(value)
     EffectBus.emit('mesh:room', { room: value })
     this.#roomOpen.set(false)

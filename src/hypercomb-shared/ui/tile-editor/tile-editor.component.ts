@@ -109,15 +109,26 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
       if (!this.editorService?.borderColor) this.editorService.setBorderColor(this.borderColorValue)
       if (!this.editorService?.backgroundColor) this.editorService.setBackgroundColor(this.backgroundColorValue)
 
+      document.addEventListener('keydown', this.#onKeyDown)
       setTimeout(() => this.#initCanvas(), 0)
     }
     if (!isOpen && this.#wasOpen) {
+      document.removeEventListener('keydown', this.#onKeyDown)
       if (this.cameraActive) this.closeCamera()
       this.linkValue = ''
       this.borderColorValue = ''
       this.backgroundColorValue = ''
     }
     this.#wasOpen = isOpen
+  }
+
+  #onKeyDown = (e: KeyboardEvent): void => {
+    if (e.key !== 'Enter') return
+    // allow Enter inside text inputs for normal behavior — only save on bare Enter
+    const tag = (e.target as HTMLElement)?.tagName
+    if (tag === 'TEXTAREA') return
+    e.preventDefault()
+    this.save()
   }
 
   // ── canvas initialization ──────────────────────────────────────
@@ -362,6 +373,7 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    document.removeEventListener('keydown', this.#onKeyDown)
     this.closeCamera()
     const target = get('@diamondcoreprocessor.com/TileEditorService') as EventTarget | undefined
     target?.removeEventListener('change', this.#onEditorChange)
