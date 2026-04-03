@@ -11,9 +11,10 @@
 
   "command-line.placeholder.locked": "セル名を入力...",
   "command-line.placeholder.filter": "タイルを絞り込み...",
-  "command-line.placeholder.slash": "コマンドを入力...",
+  "command-line.placeholder.slash": "ビヘイビアを入力...",
   "command-line.placeholder.default": "意図を共有...",
 
+  "palette.title": "コマンドパレット",
   "palette.placeholder": "コマンドを入力...",
   "palette.empty": "一致するコマンドがありません",
 
@@ -67,6 +68,7 @@
   "controls.close-clipboard": "クリップボードを閉じる",
   "controls.show-hidden": "非表示を表示",
   "controls.voice": "音声入力",
+  "controls.voice-hold": "長押しで話す（またはBを長押し）",
   "controls.microphone": "マイク",
   "controls.atomize": "アトマイズ",
   "controls.atomize-shatter": "ヘックスに分裂",
@@ -79,12 +81,15 @@
 
   "slash.atomize-ui": "アトマイザーツールバーを切替",
 
+  "atomizer.spacing-placeholder": "例: 8px 12px",
   "atomizer.title": "アトマイザー",
   "atomizer.close": "アトマイザーバーを閉じる",
   "atomizer.empty": "アトマイザーなし",
   "atomizer.reset": "プロパティをリセット",
 
   "explorer.title": "OPFSエクスプローラ",
+  "explorer.entries-label": "OPFSエントリ",
+  "explorer.copy-package": "パッケージをコピー",
   "explorer.toggle-raw": "Raw表示切替",
   "explorer.name-placeholder": "名前",
   "explorer.add-folder": "フォルダを追加",
@@ -140,5 +145,29 @@
   "slash.sonnet": "Claude Sonnetにコンテキストを送信",
   "slash.haiku": "Claude Haikuにコンテキストを送信",
   "slash.language": "UI言語を切り替え",
-  "slash.accent": "ホバーアクセントカラーを名前で設定"
+  "slash.accent": "ホバーアクセントカラーを名前で設定",
+  "slash.instructions": "インストラクションオーバーレイの切替",
+  "slash.docs": "プロジェクトドキュメントを閲覧",
+
+  "toast.dismiss": "閉じる",
+
+  "instruction.click-to-restore": "クリックして復元",
+  "instruction.catalog-title": "すべてのインストラクション",
+  "instruction.no-instructions": "インストラクションはありません。ドローンがインストラクションを宣言するとここに表示されます。",
+  "controls.instructions": "インストラクション切替（Ctrl+クリックでカタログ）",
+
+  "instruction.dcp.open-processor": "ダイヤモンドコアプロセッサを開く",
+  "instruction.dcp.fit-content": "すべてのタイルを表示に合わせる",
+  "instruction.dcp.zoom-out": "キャンバスを縮小",
+  "instruction.dcp.zoom-in": "キャンバスを拡大",
+  "instruction.dcp.lock": "ワークスペースをロックして誤操作を防止",
+  "instruction.dcp.fullscreen": "全画面モードの切替",
+  "instruction.dcp.layout-mode": "固定レイアウトと密集レイアウトの切替",
+  "instruction.dcp.instructions-toggle": "すべてのコントロールのインストラクションラベルを表示・非表示",
+
+  "confirm.delete-title": "削除の確認",
+  "confirm.delete-message": "「{name}」を削除してもよろしいですか？",
+  "confirm.delete-children-warning": "この項目には子要素が含まれており、すべて完全に削除されます。",
+  "confirm.delete": "削除",
+  "confirm.cancel": "キャンセル"
 }

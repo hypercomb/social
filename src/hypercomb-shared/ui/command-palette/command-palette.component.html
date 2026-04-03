@@ -1,6 +1,6 @@
 @if (open()) {
   <div class="palette-backdrop" (click)="close()"></div>
-  <div class="palette-panel" role="dialog" aria-label="Command Palette">
+  <div class="palette-panel" role="dialog" [attr.aria-label]="'palette.title' | t">
     <div class="palette-input-row">
       <span class="palette-icon">&gt;</span>
       <input

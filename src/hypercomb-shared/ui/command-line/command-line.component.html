@@ -22,7 +22,7 @@
     @if (voiceSupported && pushToTalkEnabled()) {
       <button class="mic-btn" [class.recording]="voiceActive()"
         (pointerdown)="startVoice($event)" (pointerup)="stopVoice()" (pointerleave)="stopVoice()"
-        aria-label="voice input" title="hold to speak (or hold B)">
+        [attr.aria-label]="'controls.voice' | t" [title]="'controls.voice-hold' | t">
         <span class="mic-dot">{{ voiceActive() ? '●' : '○' }}</span>
       </button>
     }

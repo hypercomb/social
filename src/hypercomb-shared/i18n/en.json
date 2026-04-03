@@ -11,9 +11,10 @@
 
   "command-line.placeholder.locked": "enter cell name...",
   "command-line.placeholder.filter": "filter tiles...",
-  "command-line.placeholder.slash": "type a command...",
+  "command-line.placeholder.slash": "type a behaviour...",
   "command-line.placeholder.default": "share intent...",
 
+  "palette.title": "Command Palette",
   "palette.placeholder": "Type a command...",
   "palette.empty": "No matching commands",
 
@@ -56,7 +57,7 @@
   "controls.clipboard": "clipboard",
   "controls.clipboard-empty": "empty",
   "controls.room-placeholder": "space",
-  "controls.space": "locaion",
+  "controls.space": "location",
   "controls.toggle-bees": "toggle bees",
   "controls.join-meeting": "join meeting",
   "controls.toggle-camera": "toggle camera",
@@ -67,6 +68,7 @@
   "controls.close-clipboard": "close clipboard",
   "controls.show-hidden": "show hidden",
   "controls.voice": "voice input",
+  "controls.voice-hold": "hold to speak (or hold B)",
   "controls.microphone": "microphone",
   "controls.atomize": "atomize",
   "controls.atomize-shatter": "shatter to hex",
@@ -79,12 +81,15 @@
 
   "slash.atomize-ui": "toggle the atomizer toolbar",
 
+  "atomizer.spacing-placeholder": "e.g. 8px 12px",
   "atomizer.title": "atomizers",
   "atomizer.close": "close atomizer bar",
   "atomizer.empty": "no atomizers loaded",
   "atomizer.reset": "reset properties",
 
   "explorer.title": "OPFS Explorer",
+  "explorer.entries-label": "opfs entries",
+  "explorer.copy-package": "Copy package",
   "explorer.toggle-raw": "toggle raw view",
   "explorer.name-placeholder": "name",
   "explorer.add-folder": "add folder",
@@ -142,6 +147,7 @@
   "slash.language": "Switch the UI language",
   "slash.accent": "Set the hover accent color by name",
   "slash.instructions": "Toggle instruction overlay",
+  "slash.docs": "Browse project documentation",
 
   "toast.dismiss": "Dismiss",
 
