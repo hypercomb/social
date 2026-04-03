@@ -98,7 +98,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #clipboardAvailable = signal(false)
   #clipboardViewportSnapshot: { scale: number; px: number; py: number; sx: number; sy: number } | null = null
   #hasSelection = signal(false)
-  #textOnly = signal(false)
+  #textOnly = signal(localStorage.getItem('hc:text-only') === '1')
   #layoutPinned = signal(false)
   #tags = signal<{ name: string; count: number }[]>([])
   #tagPanelOpen = signal(false)
@@ -300,6 +300,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #hoverTagsUnsub: (() => void) | null = null
   #voiceActiveUnsub: (() => void) | null = null
   #showHiddenUnsub: (() => void) | null = null
+  #textOnlyUnsub: (() => void) | null = null
   #clipboardAvailableUnsub: (() => void) | null = null
   #atomizeModeUnsub: (() => void) | null = null
   #atomizeAtomsUnsub: (() => void) | null = null
@@ -394,6 +395,10 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
       this.#showHidden.set(active)
     })
 
+    this.#textOnlyUnsub = EffectBus.on<{ textOnly: boolean }>('render:set-text-only', ({ textOnly }) => {
+      this.#textOnly.set(textOnly)
+    })
+
     this.#atomizeModeUnsub = EffectBus.on<{ active: boolean; target: string; strategy: string }>(
       'atomize:mode',
       ({ active, target, strategy }) => {
@@ -427,6 +432,11 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     // emit initial show-hidden state so drones pick it up
     if (this.#showHidden()) {
       EffectBus.emit('visibility:show-hidden', { active: true })
+    }
+
+    // emit initial text-only state so drones pick it up
+    if (this.#textOnly()) {
+      EffectBus.emit('render:set-text-only', { textOnly: true })
     }
 
     // fit-locked: auto fit-to-screen on every navigation
@@ -469,6 +479,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     this.#beesUnsub?.()
     this.#voiceActiveUnsub?.()
     this.#showHiddenUnsub?.()
+    this.#textOnlyUnsub?.()
     this.#clipboardAvailableUnsub?.()
     this.#tagsUnsub?.()
     this.#hoverTagsUnsub?.()
@@ -660,8 +671,10 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   }
 
   readonly toggleTextOnly = (): void => {
-    this.#textOnly.update(v => !v)
-    EffectBus.emit('render:set-text-only', { textOnly: this.#textOnly() })
+    const next = !this.#textOnly()
+    this.#textOnly.set(next)
+    localStorage.setItem('hc:text-only', next ? '1' : '0')
+    EffectBus.emit('render:set-text-only', { textOnly: next })
   }
 
   readonly toggleLayout = (): void => {

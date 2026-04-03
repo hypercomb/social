@@ -358,6 +358,54 @@
   &:not(.struck)::after { opacity: 0; }
 }
 
+// ── text-only toggle (suppress images) ───────────────
+
+.text-only-btn {
+  &.active .text-only-icon {
+    background: rgba(102, 204, 255, 0.9);
+    &::after { opacity: 0; }
+  }
+}
+
+.text-only-icon {
+  display: inline-block;
+  width: 0.86rem;
+  height: 0.86rem;
+  position: relative;
+
+  // image icon via mask (mountain + sun)
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='2' ry='2'/%3E%3Ccircle cx='8.5' cy='8.5' r='1.5'/%3E%3Cpolyline points='21 15 16 10 5 21'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='2' ry='2'/%3E%3Ccircle cx='8.5' cy='8.5' r='1.5'/%3E%3Cpolyline points='21 15 16 10 5 21'/%3E%3C/svg%3E");
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+
+  background: rgba(200, 200, 200, 0.6);
+  transition: background 200ms ease;
+
+  // diagonal strike-through for "images off" state
+  &::after {
+    content: '';
+    position: absolute;
+    top: 10%;
+    left: -5%;
+    width: 130%;
+    height: 1.5px;
+    background: #cc4444;
+    transform: rotate(-25deg);
+    transform-origin: center;
+    opacity: 0;
+    transition: opacity 200ms ease;
+    pointer-events: none;
+  }
+
+  &.struck::after { opacity: 0.85; }
+  &:not(.struck)::after { opacity: 0; }
+}
+
 // ── voice input mic button ────────────────────────────
 
 .mic-icon {

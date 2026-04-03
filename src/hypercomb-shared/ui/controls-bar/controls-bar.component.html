@@ -133,6 +133,11 @@
           <span class="eye-icon" [class.struck]="!showHidden()"></span>
         </button>
 
+        <!-- text-only toggle (suppress images) -->
+        <button class="ctl-btn text-only-btn" [class.active]="textOnly()" (click)="toggleTextOnly()" [attr.aria-label]="'controls.text-only' | t">
+          <span class="text-only-icon" [class.struck]="!textOnly()"></span>
+        </button>
+
         <!-- clipboard + voice buttons -->
         @if (clipboardAvailable() && clipboardCount() > 0) {
           <div class="controls-divider"></div>

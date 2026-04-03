@@ -67,6 +67,7 @@
   "controls.clear-clipboard": "クリップボードをクリア",
   "controls.close-clipboard": "クリップボードを閉じる",
   "controls.show-hidden": "非表示を表示",
+  "controls.text-only": "テキストのみ（画像を非表示）",
   "controls.voice": "音声入力",
   "controls.voice-hold": "長押しで話す（またはBを長押し）",
   "controls.microphone": "マイク",
@@ -148,6 +149,7 @@
   "slash.accent": "ホバーアクセントカラーを名前で設定",
   "slash.instructions": "インストラクションオーバーレイの切替",
   "slash.docs": "プロジェクトドキュメントを閲覧",
+  "slash.text-only": "テキストのみモードの切替（画像を非表示）",
   "slash.substrate": "新しいタイルのデフォルト背景画像を管理",
 
   "substrate.active": "サブストレート有効 → {path}",

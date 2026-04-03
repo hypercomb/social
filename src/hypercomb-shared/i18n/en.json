@@ -67,6 +67,7 @@
   "controls.clear-clipboard": "clear clipboard",
   "controls.close-clipboard": "close clipboard",
   "controls.show-hidden": "show hidden",
+  "controls.text-only": "text only (hide images)",
   "controls.voice": "voice input",
   "controls.voice-hold": "hold to speak (or hold B)",
   "controls.microphone": "microphone",
@@ -148,6 +149,7 @@
   "slash.accent": "Set the hover accent color by name",
   "slash.instructions": "Toggle instruction overlay",
   "slash.docs": "Browse project documentation",
+  "slash.text-only": "Toggle text-only mode (hide images)",
   "slash.substrate": "Manage default background images for new tiles",
 
   "substrate.active": "substrate active → {path}",

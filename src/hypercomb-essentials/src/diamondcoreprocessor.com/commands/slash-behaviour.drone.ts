@@ -458,6 +458,21 @@ class PushToTalkProvider implements SlashBehaviourProvider {
   }
 }
 
+class TextOnlyProvider implements SlashBehaviourProvider {
+  readonly name = 'text-only-provider'
+  readonly priority = 100
+  readonly behaviours: SlashBehaviour[] = [
+    { name: 'text-only', description: 'Toggle text-only mode (hide images)', descriptionKey: 'slash.text-only', aliases: ['text', 'textonly'] }
+  ]
+
+  execute(): void {
+    const current = localStorage.getItem('hc:text-only') === '1'
+    const next = !current
+    localStorage.setItem('hc:text-only', next ? '1' : '0')
+    EffectBus.emit('render:set-text-only', { textOnly: next })
+  }
+}
+
 class InstructionsProvider implements SlashBehaviourProvider {
   readonly name = 'instructions-provider'
   readonly priority = 100
@@ -541,6 +556,7 @@ _slashBehaviours.addProvider(new LanguageProvider())
 _slashBehaviours.addProvider(new ArrangeProvider())
 _slashBehaviours.addProvider(new VoiceProvider())
 _slashBehaviours.addProvider(new PushToTalkProvider())
+_slashBehaviours.addProvider(new TextOnlyProvider())
 _slashBehaviours.addProvider(new InstructionsProvider())
 _slashBehaviours.addProvider(new AtomizeUiProvider())
 _slashBehaviours.addProvider(new DocsProvider())
