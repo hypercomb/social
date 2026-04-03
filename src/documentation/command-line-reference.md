@@ -28,18 +28,18 @@ All metadata is introspectable at runtime via `CommandLineComponent.behaviorRefe
 
 ## Pluggable Behaviors
 
-### `!` Delete Cell
-**File**: `delete-cell.behavior.ts`
+### `~` Remove Cell
+**File**: `remove-cell.behavior.ts`
 **Key**: Enter
-**Syntax**: `!name` | `!path/to/name` | `![name1,name2]`
+**Syntax**: `~name` | `~path/to/name` | `~[name1,name2]`
 
-Delete cells (folders) from the current directory. Supports path-based deletion and bracket syntax for deleting multiple cells at once.
+Remove cells (folders) from the current directory. Removes from the visible hierarchy only — data persists in OPFS. Supports path-based removal and bracket syntax for removing multiple cells at once.
 
 | Input | Key | Result |
 |-------|-----|--------|
-| `!cellname` | Enter | Deletes cellname from current directory |
-| `!parent/child` | Enter | Deletes child from parent (parent stays) |
-| `![foo,bar]` | Enter | Deletes foo and bar from current directory |
+| `~cellname` | Enter | Removes cellname from current directory |
+| `~parent/child` | Enter | Removes child from parent (parent stays) |
+| `~[foo,bar]` | Enter | Removes foo and bar from current directory |
 
 ---
 

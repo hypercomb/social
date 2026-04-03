@@ -15,7 +15,7 @@ when a bee emerges as an adult, it enters the colony's workforce. other bees can
 the ioc container serves this purpose. when a drone registers, it becomes visible to the colony:
 
 ```
-window.ioc.register('AxialService', axialService)
+window.ioc.register('@diamondcoreprocessor.com/AxialService', axialService)
 ```
 
 any drone that needs the axial service can resolve it by name. no drone needs to know where the service was created, who created it, or how it works internally. it asks the colony, and the colony provides.

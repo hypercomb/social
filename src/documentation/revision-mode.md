@@ -109,7 +109,6 @@ type HistoryOpType =
 | `unhide` | Cell label | A cell was made visible again |
 | `add-drone` | Drone IoC key | A drone/bee was added to this location |
 | `remove-drone` | Drone IoC key | A drone/bee was removed/disposed |
-| `remove-drone` | — | Reserved for future use |
 
 ### Storage format
 

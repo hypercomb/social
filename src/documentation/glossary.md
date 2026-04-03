@@ -66,6 +66,30 @@ optional on-chain reference to prove when a dna commitment existed.
 
 ---
 
+## foundational terms
+
+these terms are the most fundamental concepts in the architecture. they appear across all documents and form the shared vocabulary between metaphor and implementation.
+
+### signature
+sha-256 hash (64 hex chars) of canonical content. the universal reference primitive — signatures name drones, layers, dependencies, history entries, and resources. created via `SignatureService.sign(bytes)`. immutable identity: same content always produces the same signature. signatures are not just identifiers — they are the composition mechanism. see [core-primitive.md](core-primitive.md) and [signature-expansion-doctrine.md](signature-expansion-doctrine.md).
+
+### cell
+the atomic unit of content in the hierarchy. a cell is an opfs folder under the user content tree (e.g., `hypercomb.io/path/cell`). cells contain a zero-signature properties file, optional resources, and child cells. developer-facing term — see **tile** for the user-facing equivalent.
+
+### tile
+the user-facing name for a **cell**. what appears on the hex grid as an interactive hexagonal element. "tile" is used in ui, help text, and user communication. "cell" is used in code, architecture docs, and developer communication.
+
+### lineage
+the path from root to the current cell in the hierarchy. a lineage like `domain/parent/child` is hashed via `SignatureService` to produce a **location signature** — the key used for mesh addressing, history bag storage, and opfs directory mapping. the `Lineage` service in `@hypercomb/shared` tracks the current path and provides navigation.
+
+### layer
+a snapshot of a folder — the atomic unit of hypercomb content distribution. layers are content-addressed by sha-256 and contain references to bees, dependencies, resources, and child layers. distributed over the nostr mesh as kind 29010 events. see [layer-primitives.md](layer-primitives.md).
+
+### history bag
+an append-only sequence of history operations stored in opfs under `__history__/{locationSig}/`. each operation is a numbered file (e.g., `00000001`). replaying all ops from zero to head produces the current state. the bag is permanent — "removal" is an appended `remove` op, not a file deletion. see [data-primitive.md](data-primitive.md).
+
+---
+
 ## architecture layer
 
 these terms describe the implemented system. they live in code and map back to the metaphor layer where noted.
@@ -214,8 +238,11 @@ origin private file system. browser-native local storage api. used for persistin
 |---|---|
 | bee | `Bee` (base), `Drone` (reactive), `Worker` (one-shot), `QueenBee` (command) |
 | hive (spatial) | axial coordinate grid |
+| tile (user-facing) | cell (developer-facing) |
 | relay (local) | effect bus |
 | relay (network) | nostr mesh |
-| dna integrity | signature service |
+| wax seal / dna integrity | signature service (sha-256 content addressing) |
 | dna capsule format | drone payload v1 |
+| meadow log | history bag (`__history__/{locationSig}/`) |
 | neighbor (nnn) | axial coordinate adjacency (6 edges) |
+| path / trail | lineage (hashed to location signature) |

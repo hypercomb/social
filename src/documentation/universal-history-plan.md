@@ -27,41 +27,32 @@ When you rewind the clock to any timestamp and then navigate through the hive, e
 
 ---
 
-## Current State (What Exists)
+## Current State (Fully Implemented)
 
-### Tracked in history today
+All phases of the universal history plan have been completed. The following operations are now tracked:
 
 | Op Type | Trigger | Source |
 |---------|---------|--------|
 | `add` | Cell created | `cell:added` effect → HistoryRecorder |
 | `remove` | Cell deleted | `cell:removed` effect → HistoryRecorder |
 | `reorder` | Cells reordered | OrderProjection.reorder() |
+| `rename` | Cell renamed | `/rename` command → `cell:renamed` effect |
 | `instruction-state` | Instruction visibility changed | InstructionDrone.recordState() |
+| `tag-state` | Tag assignments changed | `tags:changed` effect → HistoryRecorder |
+| `content-state` | Tile content saved | `tile:saved` effect → HistoryRecorder |
+| `layout-state` | Layout/geometry changed | `layout:mode`, `render:set-orientation`, `render:set-pivot`, `render:set-gap` effects |
+| `hide` | Cell hidden | `tile:hidden` effect → HistoryRecorder |
+| `unhide` | Cell made visible | `tile:unhidden` effect → HistoryRecorder |
+| `add-drone` | Drone added | Drone registration effect |
+| `remove-drone` | Drone removed/disposed | `bee:disposed` effect → HistoryRecorder |
 
-### Defined but never recorded
+### Clock capabilities
 
-| Op Type | Intended Use |
-|---------|-------------|
-| `rename` | Cell renamed |
-| `add-drone` | Drone added to location |
-| `remove-drone` | Drone removed from location |
-
-### Not tracked at all (no op type exists)
-
-| Feature | Effect Emitted | Impact |
-|---------|---------------|--------|
-| Tag assignment/removal | `tags:changed` | Tags not versioned, can't undo tag changes |
-| Tile content edits | `tile:saved` | Content changes not in history |
-| Marker creation/deletion | Various marker effects | Markers vanish on undo |
-| Layout/geometry changes | `render:set-orientation`, `render:set-gap`, etc. | Visual state not captured |
-| Selection state | `selection:changed` | Selection not versioned |
-| Editor mode | `editor:mode` | Transient — may not need tracking |
-
-### Clock limitations
-
-- Clock is **per-location** (cursor loads one bag at a time)
-- No **global timestamp** mode — navigating to a new location doesn't sync to a time
-- Divergence visualization only handles cell add/remove, not other op types
+- **Per-location cursor**: loads one bag and positions within it
+- **Global timestamp mode**: `GlobalTimeClock` synchronizes all locations to a session-wide timestamp
+- **Scope toggle**: switch between local and global time (Ctrl+Shift+G)
+- **Clock scrubbing**: range slider for continuous time navigation
+- **Activity log**: human-readable op description at cursor position
 
 ---
 

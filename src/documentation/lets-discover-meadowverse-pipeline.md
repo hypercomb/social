@@ -124,7 +124,7 @@ here's the workflow, step by step:
 ```
 1. AUTHOR    hypercomb.io → Diamond Core Processor
              write TypeScript bee, target Three.js
-             esbuild-wasm compiles in browser → BeePayloadV1
+             esbuild-wasm compiles in browser → DronePayloadV1
              sign payload → SHA-256 signature
 
 2. PUBLISH   signed bytes → OPFS on hypercomb.io (postMessage from DCP iframe)
