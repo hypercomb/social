@@ -1,6 +1,6 @@
-// src/diamondcoreprocessor.com/commands/slash-command.drone.ts
+// src/diamondcoreprocessor.com/commands/slash-behaviour.drone.ts
 import { EffectBus, hypercomb, I18N_IOC_KEY } from "@hypercomb/core";
-var SlashCommandDrone = class extends EventTarget {
+var SlashBehaviourDrone = class extends EventTarget {
   #providers = [];
   addProvider(provider) {
     this.#providers.push(provider);
@@ -9,10 +9,10 @@ var SlashCommandDrone = class extends EventTarget {
   all() {
     const results = [];
     for (const provider of this.#providers) {
-      for (const command of provider.commands) {
-        const localized = this.#localize(command);
+      for (const behaviour of provider.behaviours) {
+        const localized = this.#localize(behaviour);
         results.push(localized);
-        for (const alias of command.aliases ?? []) {
+        for (const alias of behaviour.aliases ?? []) {
           results.push({ ...localized, name: alias });
         }
       }
@@ -23,13 +23,13 @@ var SlashCommandDrone = class extends EventTarget {
     const q = query.toLowerCase().trim();
     const results = [];
     for (const provider of this.#providers) {
-      for (const command of provider.commands) {
-        const localized = this.#localize(command);
-        const names = [command.name, ...command.aliases ?? []];
+      for (const behaviour of provider.behaviours) {
+        const localized = this.#localize(behaviour);
+        const names = [behaviour.name, ...behaviour.aliases ?? []];
         for (const name of names) {
           if (!q || name.startsWith(q)) {
             results.push({
-              command: name === command.name ? localized : { ...localized, name },
+              behaviour: name === behaviour.name ? localized : { ...localized, name },
               provider
             });
           }
@@ -38,21 +38,33 @@ var SlashCommandDrone = class extends EventTarget {
     }
     return results;
   }
-  #localize(command) {
-    if (!command.descriptionKey) return command;
+  #localize(behaviour) {
+    if (!behaviour.descriptionKey) return behaviour;
     const i18n = get(I18N_IOC_KEY);
-    if (!i18n) return command;
-    const translated = i18n.t(command.descriptionKey);
-    if (translated === command.descriptionKey) return command;
-    return { ...command, description: translated };
+    if (!i18n) return behaviour;
+    const translated = i18n.t(behaviour.descriptionKey);
+    if (translated === behaviour.descriptionKey) return behaviour;
+    return { ...behaviour, description: translated };
   }
-  execute(commandName, args) {
-    const name = commandName.toLowerCase().trim();
+  complete(behaviourName, args) {
+    const name = behaviourName.toLowerCase().trim();
     for (const provider of this.#providers) {
-      for (const command of provider.commands) {
-        const names = [command.name, ...command.aliases ?? []];
+      for (const behaviour of provider.behaviours) {
+        const names = [behaviour.name, ...behaviour.aliases ?? []];
+        if (names.includes(name) && provider.complete) {
+          return provider.complete(behaviour.name, args);
+        }
+      }
+    }
+    return [];
+  }
+  execute(behaviourName, args) {
+    const name = behaviourName.toLowerCase().trim();
+    for (const provider of this.#providers) {
+      for (const behaviour of provider.behaviours) {
+        const names = [behaviour.name, ...behaviour.aliases ?? []];
         if (names.includes(name)) {
-          return provider.execute(command.name, args);
+          return provider.execute(behaviour.name, args);
         }
       }
     }
@@ -61,7 +73,7 @@ var SlashCommandDrone = class extends EventTarget {
 var HelpProvider = class {
   name = "help-provider";
   priority = 100;
-  commands = [
+  behaviours = [
     { name: "help", description: "Show keyboard shortcuts", descriptionKey: "slash.help" }
   ];
   execute() {
@@ -71,7 +83,7 @@ var HelpProvider = class {
 var ClearProvider = class {
   name = "clear-provider";
   priority = 100;
-  commands = [
+  behaviours = [
     { name: "clear", description: "Clear active filter", descriptionKey: "slash.clear" }
   ];
   execute() {
@@ -82,23 +94,31 @@ var ClearProvider = class {
 var KeywordProvider = class {
   name = "keyword-provider";
   priority = 100;
-  commands = [
+  behaviours = [
     { name: "keyword", description: "Add or remove keywords (tags) on selected tiles", descriptionKey: "slash.keyword", aliases: ["kw", "tag"] }
   ];
-  async execute(_commandName, args) {
+  async execute(_behaviourName, args) {
     const queen = get("@diamondcoreprocessor.com/KeywordQueenBee");
     if (queen?.invoke) {
       await queen.invoke(args);
     }
   }
+  complete(_behaviourName, args) {
+    const registry = get("@hypercomb.social/TagRegistry");
+    const tagNames = registry?.names ?? [];
+    const q = args.toLowerCase().trim();
+    const prefix = q.startsWith("~") ? q.slice(1) : q;
+    if (!prefix) return tagNames;
+    return tagNames.filter((t) => t.toLowerCase().startsWith(prefix));
+  }
 };
 var MeetingProvider = class {
   name = "meeting-provider";
   priority = 100;
-  commands = [
+  behaviours = [
     { name: "meeting", description: "Start or join a video meeting on the selected tile", descriptionKey: "slash.meeting", aliases: ["meet", "call"] }
   ];
-  async execute(_commandName, args) {
+  async execute(_behaviourName, args) {
     const queen = get("@diamondcoreprocessor.com/MeetingQueenBee");
     if (queen?.invoke) {
       await queen.invoke(args);
@@ -108,7 +128,7 @@ var MeetingProvider = class {
 var DebugProvider = class {
   name = "debug-provider";
   priority = 100;
-  commands = [
+  behaviours = [
     { name: "debug", description: "Toggle the Pixi display-tree inspector", descriptionKey: "slash.debug", aliases: ["inspect", "dbg"] }
   ];
   async execute() {
@@ -121,23 +141,44 @@ var DebugProvider = class {
 var RemoveProvider = class {
   name = "remove-provider";
   priority = 100;
-  commands = [
+  behaviours = [
     { name: "remove", description: "Remove tiles from the current directory", descriptionKey: "slash.remove", aliases: ["rm", "delete", "del"] }
   ];
-  async execute(_commandName, args) {
+  async execute(_behaviourName, args) {
     const queen = get("@diamondcoreprocessor.com/RemoveQueenBee");
     if (queen?.invoke) {
       await queen.invoke(args);
     }
   }
+  complete(_behaviourName, args) {
+    const cellProvider = get("@hypercomb.social/CellSuggestionProvider");
+    const cells = cellProvider?.suggestions() ?? [];
+    const bracketStart = args.indexOf("[");
+    if (bracketStart >= 0) {
+      const inner = args.slice(bracketStart + 1);
+      const lastComma = inner.lastIndexOf(",");
+      const fragment = (lastComma >= 0 ? inner.slice(lastComma + 1) : inner).trimStart().toLowerCase();
+      const already = /* @__PURE__ */ new Set();
+      for (const item of inner.split(",")) {
+        const n = item.trim().toLowerCase();
+        if (n && n !== fragment) already.add(n);
+      }
+      let filtered = cells.filter((n) => !already.has(n));
+      if (fragment) filtered = filtered.filter((n) => n.startsWith(fragment));
+      return filtered;
+    }
+    const q = args.toLowerCase().trim();
+    if (!q) return cells;
+    return cells.filter((n) => n.startsWith(q));
+  }
 };
 var FormatSlashProvider = class {
   name = "format-provider";
   priority = 100;
-  commands = [
+  behaviours = [
     { name: "format", description: "Copy visual formatting from the active tile", descriptionKey: "slash.format", aliases: ["fmt", "fp"] }
   ];
-  async execute(_commandName, args) {
+  async execute(_behaviourName, args) {
     const queen = get("@diamondcoreprocessor.com/FormatQueenBee");
     if (queen?.invoke) await queen.invoke(args);
   }
@@ -145,32 +186,73 @@ var FormatSlashProvider = class {
 var LayoutProvider = class {
   name = "layout-provider";
   priority = 100;
-  commands = [
+  behaviours = [
     { name: "layout", description: "Save, apply, list, or remove layout templates", descriptionKey: "slash.layout", aliases: ["lo"] }
   ];
-  async execute(_commandName, args) {
+  async execute(_behaviourName, args) {
     const queen = get("@diamondcoreprocessor.com/LayoutQueenBee");
     if (queen?.invoke) await queen.invoke(args);
+  }
+  complete(_behaviourName, args) {
+    const subcommands = ["save", "apply", "list", "remove"];
+    const q = args.toLowerCase().trim();
+    if (!q) return subcommands;
+    return subcommands.filter((s) => s.startsWith(q));
   }
 };
 var AccentProvider = class {
   name = "accent-provider";
   priority = 100;
-  commands = [
+  behaviours = [
     { name: "accent", description: "Set the hover accent color by name", descriptionKey: "slash.accent", aliases: ["ac"] }
   ];
-  async execute(_commandName, args) {
+  async execute(_behaviourName, args) {
     const queen = get("@diamondcoreprocessor.com/AccentQueenBee");
     if (queen?.invoke) await queen.invoke(args);
+  }
+  complete(_behaviourName, args) {
+    const presets = ["glacier", "bloom", "aurora", "ember", "nebula"];
+    const registry = get("@hypercomb.social/TagRegistry");
+    const tagNames = registry?.names ?? [];
+    const bracketStart = args.indexOf("[");
+    if (bracketStart >= 0) {
+      const bracketClose = args.indexOf("]", bracketStart);
+      if (bracketClose < 0) {
+        const inner = args.slice(bracketStart + 1);
+        const lastComma = inner.lastIndexOf(",");
+        const fragment = (lastComma >= 0 ? inner.slice(lastComma + 1) : inner).trimStart().toLowerCase();
+        const already = /* @__PURE__ */ new Set();
+        for (const item of inner.split(",")) {
+          const n = item.trim().toLowerCase();
+          if (n && n !== fragment) already.add(n);
+        }
+        let tags = tagNames.filter((t) => !already.has(t.toLowerCase()));
+        if (fragment) tags = tags.filter((t) => t.toLowerCase().startsWith(fragment));
+        return tags;
+      }
+      const after = args.slice(bracketClose + 1).trimStart().toLowerCase();
+      if (!after) return presets;
+      return presets.filter((p) => p.startsWith(after));
+    }
+    const all = [...presets, ...tagNames.filter((t) => !presets.includes(t))];
+    const parts = args.split(/\s+/);
+    if (parts.length >= 2) {
+      const q2 = parts[parts.length - 1].toLowerCase();
+      if (!q2) return presets;
+      return presets.filter((p) => p.startsWith(q2));
+    }
+    const q = args.toLowerCase().trim();
+    if (!q) return all;
+    return all.filter((n) => n.toLowerCase().startsWith(q));
   }
 };
 var MoveProvider = class {
   name = "move-provider";
   priority = 100;
-  commands = [
+  behaviours = [
     { name: "move", description: "Toggle move mode for drag-reordering tiles", descriptionKey: "slash.move" }
   ];
-  async execute(_commandName, args) {
+  async execute(_behaviourName, args) {
     const indexMatch = args.match(/\((\d+)\)/) || args.match(/\((\d+)$/);
     if (indexMatch) {
       const targetIndex = parseInt(indexMatch[1], 10);
@@ -192,10 +274,10 @@ var MoveProvider = class {
 var ReviseProvider = class {
   name = "revise-provider";
   priority = 100;
-  commands = [
+  behaviours = [
     { name: "revise", description: "Toggle revision mode (history clock)", descriptionKey: "slash.revise", aliases: ["rev", "history"] }
   ];
-  async execute(_commandName, args) {
+  async execute(_behaviourName, args) {
     const queen = get("@diamondcoreprocessor.com/ReviseQueenBee");
     if (queen?.invoke) await queen.invoke(args);
   }
@@ -203,10 +285,10 @@ var ReviseProvider = class {
 var ExpandProvider = class {
   name = "expand-provider";
   priority = 100;
-  commands = [
+  behaviours = [
     { name: "expand", description: "Expand selected tiles into constituent parts via Claude Haiku", descriptionKey: "slash.expand", aliases: ["atomize"] }
   ];
-  async execute(_commandName, _args) {
+  async execute(_behaviourName, _args) {
     const selection = get("@diamondcoreprocessor.com/SelectionService");
     const targets = selection ? Array.from(selection.selected) : [];
     if (targets.length === 0) return;
@@ -218,10 +300,10 @@ var ExpandProvider = class {
 var ChatProvider = class {
   name = "chat-provider";
   priority = 100;
-  commands = [
+  behaviours = [
     { name: "chat", description: "Multi-turn conversation with Claude", aliases: ["c", "ask"] }
   ];
-  async execute(_commandName, args) {
+  async execute(_behaviourName, args) {
     const queen = get("@diamondcoreprocessor.com/ConversationQueenBee");
     if (queen?.invoke) await queen.invoke(args);
   }
@@ -229,15 +311,15 @@ var ChatProvider = class {
 var LlmProvider = class {
   name = "llm-provider";
   priority = 100;
-  commands = [
+  behaviours = [
     { name: "opus", description: "Send context to Claude Opus 4.6", descriptionKey: "slash.opus", aliases: ["o"] },
     { name: "sonnet", description: "Send context to Claude Sonnet", descriptionKey: "slash.sonnet", aliases: ["s"] },
     { name: "haiku", description: "Send context to Claude Haiku", descriptionKey: "slash.haiku", aliases: ["h"] }
   ];
-  async execute(commandName, args) {
+  async execute(behaviourName, args) {
     const queen = get("@diamondcoreprocessor.com/LlmQueenBee");
     if (queen) {
-      queen.activeModel = commandName;
+      queen.activeModel = behaviourName;
       await queen.invoke(args);
     }
   }
@@ -245,18 +327,24 @@ var LlmProvider = class {
 var LanguageProvider = class {
   name = "language-provider";
   priority = 100;
-  commands = [
+  behaviours = [
     { name: "language", description: "Switch the UI language", descriptionKey: "slash.language", aliases: ["lang", "locale"] }
   ];
-  async execute(_commandName, args) {
+  async execute(_behaviourName, args) {
     const queen = get("@diamondcoreprocessor.com/LanguageQueenBee");
     if (queen?.invoke) await queen.invoke(args);
+  }
+  complete(_behaviourName, args) {
+    const locales = ["en", "ja"];
+    const q = args.toLowerCase().trim();
+    if (!q) return locales;
+    return locales.filter((l) => l.startsWith(q));
   }
 };
 var ArrangeProvider = class {
   name = "arrange-provider";
   priority = 100;
-  commands = [
+  behaviours = [
     { name: "arrange", description: "Toggle icon arrangement mode on the tile overlay", descriptionKey: "slash.arrange" }
   ];
   async execute() {
@@ -267,7 +355,7 @@ var ArrangeProvider = class {
 var VoiceProvider = class {
   name = "voice-provider";
   priority = 100;
-  commands = [
+  behaviours = [
     { name: "voice", description: "Toggle voice input (speech-to-text)", descriptionKey: "slash.voice" }
   ];
   async execute() {
@@ -278,7 +366,7 @@ var VoiceProvider = class {
 var PushToTalkProvider = class {
   name = "push-to-talk-provider";
   priority = 100;
-  commands = [
+  behaviours = [
     { name: "push-to-talk", description: "Toggle push-to-talk mic button", descriptionKey: "slash.push-to-talk" }
   ];
   async execute() {
@@ -291,7 +379,7 @@ var PushToTalkProvider = class {
 var InstructionsProvider = class {
   name = "instructions-provider";
   priority = 100;
-  commands = [
+  behaviours = [
     { name: "instructions", description: "Toggle instruction overlay", descriptionKey: "slash.instructions", aliases: ["instruct", "labels"] }
   ];
   execute() {
@@ -301,35 +389,69 @@ var InstructionsProvider = class {
 var AtomizeUiProvider = class {
   name = "atomize-ui-provider";
   priority = 100;
-  commands = [
+  behaviours = [
     { name: "atomize-ui", description: "Toggle the atomizer toolbar", descriptionKey: "slash.atomize-ui", aliases: ["au", "atomizer"] }
   ];
   execute() {
     EffectBus.emit("atomizer-bar:toggle", { active: true });
   }
 };
-var _slashCommands = new SlashCommandDrone();
-_slashCommands.addProvider(new HelpProvider());
-_slashCommands.addProvider(new ClearProvider());
-_slashCommands.addProvider(new KeywordProvider());
-_slashCommands.addProvider(new MeetingProvider());
-_slashCommands.addProvider(new DebugProvider());
-_slashCommands.addProvider(new RemoveProvider());
-_slashCommands.addProvider(new FormatSlashProvider());
-_slashCommands.addProvider(new LayoutProvider());
-_slashCommands.addProvider(new AccentProvider());
-_slashCommands.addProvider(new MoveProvider());
-_slashCommands.addProvider(new ReviseProvider());
-_slashCommands.addProvider(new ExpandProvider());
-_slashCommands.addProvider(new ChatProvider());
-_slashCommands.addProvider(new LlmProvider());
-_slashCommands.addProvider(new LanguageProvider());
-_slashCommands.addProvider(new ArrangeProvider());
-_slashCommands.addProvider(new VoiceProvider());
-_slashCommands.addProvider(new PushToTalkProvider());
-_slashCommands.addProvider(new InstructionsProvider());
-_slashCommands.addProvider(new AtomizeUiProvider());
-window.ioc.register("@diamondcoreprocessor.com/SlashCommandDrone", _slashCommands);
+var DocsProvider = class {
+  name = "docs-provider";
+  priority = 100;
+  behaviours = [
+    { name: "docs", description: "Browse project documentation", descriptionKey: "slash.docs", aliases: ["documentation", "doc"] }
+  ];
+  execute(_behaviourName, args) {
+    EffectBus.emit("docs:open", { page: args.trim() || "" });
+  }
+};
+var SubstrateProvider = class {
+  name = "substrate-provider";
+  priority = 100;
+  behaviours = [
+    { name: "substrate", description: "Manage default background images for new tiles", descriptionKey: "slash.substrate", aliases: ["sub"] }
+  ];
+  async execute(_behaviourName, args) {
+    const queen = get("@diamondcoreprocessor.com/SubstrateQueenBee");
+    if (queen?.invoke) await queen.invoke(args);
+  }
+  complete(_behaviourName, args) {
+    const subcommands = ["set", "global", "clear", "off", "on"];
+    const q = args.toLowerCase().trim();
+    if (!q) return subcommands;
+    if (q === "clear" || q === "clear ") return ["global"];
+    if (q.startsWith("clear ")) {
+      const mod = q.slice(6).trim();
+      return mod ? ["global"].filter((s) => s.startsWith(mod)) : ["global"];
+    }
+    return subcommands.filter((s) => s.startsWith(q));
+  }
+};
+var _slashBehaviours = new SlashBehaviourDrone();
+_slashBehaviours.addProvider(new HelpProvider());
+_slashBehaviours.addProvider(new ClearProvider());
+_slashBehaviours.addProvider(new KeywordProvider());
+_slashBehaviours.addProvider(new MeetingProvider());
+_slashBehaviours.addProvider(new DebugProvider());
+_slashBehaviours.addProvider(new RemoveProvider());
+_slashBehaviours.addProvider(new FormatSlashProvider());
+_slashBehaviours.addProvider(new LayoutProvider());
+_slashBehaviours.addProvider(new AccentProvider());
+_slashBehaviours.addProvider(new MoveProvider());
+_slashBehaviours.addProvider(new ReviseProvider());
+_slashBehaviours.addProvider(new ExpandProvider());
+_slashBehaviours.addProvider(new ChatProvider());
+_slashBehaviours.addProvider(new LlmProvider());
+_slashBehaviours.addProvider(new LanguageProvider());
+_slashBehaviours.addProvider(new ArrangeProvider());
+_slashBehaviours.addProvider(new VoiceProvider());
+_slashBehaviours.addProvider(new PushToTalkProvider());
+_slashBehaviours.addProvider(new InstructionsProvider());
+_slashBehaviours.addProvider(new AtomizeUiProvider());
+_slashBehaviours.addProvider(new DocsProvider());
+_slashBehaviours.addProvider(new SubstrateProvider());
+window.ioc.register("@diamondcoreprocessor.com/SlashBehaviourDrone", _slashBehaviours);
 export {
-  SlashCommandDrone
+  SlashBehaviourDrone
 };

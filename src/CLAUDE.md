@@ -104,7 +104,7 @@ src/
 │       ├── diamondcoreprocessor.com/   # Core processor domain — feature-oriented tree
 │       │   ├── assistant/              # AI assistant integration (ClaudeBridgeWorker)
 │       │   ├── clipboard/              # Copy, cut, paste (ClipboardWorker, ClipboardService)
-│       │   ├── commands/               # Command palette, slash commands, help, shortcut sheet
+│       │   ├── commands/               # Command palette, slash behaviours, help, shortcut sheet
 │       │   ├── editor/                 # Tile content editing + image manipulation
 │       │   ├── history/                # Change tracking / undo-redo (HistoryRecorder, HistoryService)
 │       │   ├── keyboard/               # Keyboard shortcuts, keymap, escape cascade, pivot toggle
@@ -249,13 +249,13 @@ const i18n = get('@hypercomb.social/I18n') as I18nProvider | undefined
 const msg = i18n?.t('activity.added', { cell: name }) ?? `added "${name}"`
 ```
 
-### Slash command descriptions
+### Slash behaviour descriptions
 
-Slash commands use `descriptionKey` on `SlashCommand` for localized autocomplete:
+Slash behaviours use `descriptionKey` on `SlashBehaviour` for localized autocomplete:
 ```typescript
 { name: 'help', description: 'Show keyboard shortcuts', descriptionKey: 'slash.help' }
 ```
-`SlashCommandDrone.match()` resolves descriptions via i18n at match time.
+`SlashBehaviourDrone.match()` resolves descriptions via i18n at match time.
 
 ### Community module translations
 
@@ -274,12 +274,12 @@ window.ioc.whenReady(I18N_IOC_KEY, (i18n: I18nProvider) => {
 window.ioc.get('@hypercomb.social/I18n').setLocale('ja')  // persists to localStorage, updates document.lang
 ```
 
-Or via slash command: `/language ja`, `/language en`, `/lang jp`
+Or via slash behaviour: `/language ja`, `/language en`, `/lang jp`
 
 ### Key conventions
 
 - Flat dot-separated keys: `component.element` (e.g., `editor.save`, `controls.clipboard`)
-- Slash command keys: `slash.commandName` (e.g., `slash.help`, `slash.language`)
+- Slash behaviour keys: `slash.behaviourName` (e.g., `slash.help`, `slash.language`)
 - Plurals: `key.zero`, `key.one`, `key.other` (triggered when `params.count` is present)
 - Interpolation: `{token}` placeholders (e.g., `added "{cell}"`)
 - Namespace: `'app'` for host, domain name for modules (e.g., `'revolucionstyle.com'`)

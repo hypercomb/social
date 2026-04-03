@@ -148,6 +148,11 @@
   "slash.accent": "ホバーアクセントカラーを名前で設定",
   "slash.instructions": "インストラクションオーバーレイの切替",
   "slash.docs": "プロジェクトドキュメントを閲覧",
+  "slash.substrate": "新しいタイルのデフォルト背景画像を管理",
+
+  "substrate.active": "サブストレート有効 → {path}",
+  "substrate.none": "サブストレート未設定",
+  "substrate.global": "グローバルサブストレート → {path}",
 
   "toast.dismiss": "閉じる",
 

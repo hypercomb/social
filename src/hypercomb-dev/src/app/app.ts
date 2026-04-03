@@ -31,7 +31,7 @@ import '@hypercomb/essentials/diamondcoreprocessor.com/selection/tile-selection.
 import '@hypercomb/essentials/diamondcoreprocessor.com/keyboard/escape-cascade'
 import '@hypercomb/essentials/diamondcoreprocessor.com/navigation/bee-toggle'
 import { TileEditorComponent } from '@hypercomb/shared/ui/tile-editor/tile-editor.component'
-import { ControlsBarComponent, ShortcutSheetComponent, CommandPaletteComponent, ActivityLogComponent, SelectionContextMenuComponent, AtomizerBarComponent, AtomizerSidebarComponent, ConfirmDialogComponent, ToastComponent, InstructionOverlayComponent } from '@hypercomb/shared/ui';
+import { ControlsBarComponent, ShortcutSheetComponent, CommandPaletteComponent, ActivityLogComponent, SelectionContextMenuComponent, AtomizerBarComponent, AtomizerSidebarComponent, ConfirmDialogComponent, ToastComponent, InstructionOverlayComponent, DocsOverlayComponent } from '@hypercomb/shared/ui';
 import { FormatPainterComponent } from '@hypercomb/shared/ui/format-painter/format-painter.component'
 import { PortalOverlayComponent } from '@hypercomb/shared/ui/portal/portal-overlay.component'
 import { SensitivityBarComponent } from '@hypercomb/shared/ui/sensitivity-bar/sensitivity-bar.component'
@@ -46,7 +46,7 @@ import { ShortcutSheetDrone } from '@hypercomb/essentials/diamondcoreprocessor.c
 import { CommandPaletteDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/command-palette.drone'
 import { ToastDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/toast.drone'
 import { InstructionDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/instructions/instruction.drone'
-import '@hypercomb/essentials/diamondcoreprocessor.com/commands/slash-command.drone'
+import '@hypercomb/essentials/diamondcoreprocessor.com/commands/slash-behaviour.drone'
 import { AvatarSwarmDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/presentation/avatars/avatar-swarm.drone'
 import { ClipboardService } from '@hypercomb/essentials/diamondcoreprocessor.com/clipboard/clipboard.service'
 import { ClipboardWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/clipboard/clipboard.worker'
@@ -78,6 +78,14 @@ import { FormatPainterDrone } from '@hypercomb/essentials/diamondcoreprocessor.c
 import { LanguageQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/language.queen'
 import { LayoutQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/move/layout.queen'
 import { ArrangeQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/arrange.queen'
+import { AccentQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/accent.queen'
+import { RenameQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/rename.queen'
+import { ConversationQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/assistant/conversation.queen'
+import { ReviseQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/history/revise.queen'
+import { FitQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/navigation/zoom/fit.queen'
+import { SubstrateQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/substrate/substrate.queen'
+import { SubstrateDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/substrate/substrate.drone'
+import { SubstrateService } from '@hypercomb/essentials/diamondcoreprocessor.com/substrate/substrate.service'
 import { TileLinkActionDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/link/tile-link-action.drone'
 
 const _deps = [
@@ -132,6 +140,14 @@ const _deps = [
   LanguageQueenBee,
   LayoutQueenBee,
   ArrangeQueenBee,
+  AccentQueenBee,
+  RenameQueenBee,
+  ConversationQueenBee,
+  ReviseQueenBee,
+  FitQueenBee,
+  SubstrateQueenBee,
+  SubstrateDrone,
+  SubstrateService,
   TileLinkActionDrone,
   ToastDrone,
   InstructionDrone,
@@ -141,7 +157,7 @@ void _deps
 
 @Component({
   selector: 'app-root',
-  imports: [ControlsBarComponent, MeshHeaderComponent, RouterOutlet, CommandLineComponent, TileEditorComponent, ShortcutSheetComponent, CommandPaletteComponent, PortalOverlayComponent, ActivityLogComponent, SensitivityBarComponent, SelectionContextMenuComponent, FormatPainterComponent, YoutubeViewerComponent, AtomizerBarComponent, AtomizerSidebarComponent, ConfirmDialogComponent, ToastComponent, InstructionOverlayComponent],
+  imports: [ControlsBarComponent, MeshHeaderComponent, RouterOutlet, CommandLineComponent, TileEditorComponent, ShortcutSheetComponent, CommandPaletteComponent, PortalOverlayComponent, ActivityLogComponent, SensitivityBarComponent, SelectionContextMenuComponent, FormatPainterComponent, YoutubeViewerComponent, AtomizerBarComponent, AtomizerSidebarComponent, ConfirmDialogComponent, ToastComponent, InstructionOverlayComponent, DocsOverlayComponent],
   styleUrls: ['./app.scss'] as any,
   templateUrl: './app.html'
 })

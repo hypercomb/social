@@ -13,10 +13,12 @@
       [typedPrefix]="completionTypedPrefix()"
       [descriptionMap]="slashDescriptionMap()"
       [colorMap]="accentColorMap()"
+      [indicators]="activeIndicators()"
       (valueChange)="onShellValueChange($event)"
       (commit)="onShellCommit($event)"
       (completionAccepted)="onShellCompletionAccepted($event)"
       (shellKeydown)="onShellKeydown($event)"
+      (indicatorDismiss)="onIndicatorDismiss($event)"
     />
 
     @if (voiceSupported && pushToTalkEnabled()) {

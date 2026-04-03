@@ -33,7 +33,7 @@ export class TagAssignBehavior implements CommandLineBehavior {
 
   match(event: KeyboardEvent, input: string): boolean {
     if (event.key !== 'Enter' || event.shiftKey) return false
-    // must have content before : and after :, and not be a slash command, hash marker, or bracket syntax
+    // must have content before : and after :, and not be a slash behaviour, hash marker, or bracket syntax
     if (input.startsWith('/') || input.startsWith('!') || input.includes('[')) return false
     const colonIdx = input.indexOf(':')
     if (colonIdx <= 0 || colonIdx >= input.length - 1) return false

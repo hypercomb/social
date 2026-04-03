@@ -1,18 +1,18 @@
 import { Bee, BeeState } from './bee.base.js'
 
 // -------------------------------------------------
-// queen bee — real-time command dispatch, no lifecycle
+// queen bee — real-time slash behaviour dispatch, no lifecycle
 // -------------------------------------------------
 
 export abstract class QueenBee extends Bee {
 
-  /** The slash command this queen bee responds to (e.g. 'paste', 'export', 'publish') */
+  /** The slash behaviour this queen bee responds to (e.g. 'paste', 'export', 'publish') */
   abstract readonly command: string
 
   /** Optional aliases — additional names that resolve to this queen bee */
   readonly aliases: string[] = []
 
-  /** Real-time execution — called immediately when `/command` is invoked */
+  /** Real-time execution — called immediately when `/behaviour` is invoked */
   protected abstract execute(args: string): void | Promise<void>
 
   /**
@@ -23,7 +23,7 @@ export abstract class QueenBee extends Bee {
 
   /**
    * Direct invocation — called by the command line (or any caller)
-   * when the user types `/command args`.
+   * when the user types `/behaviour args`.
    */
   public async invoke(args: string): Promise<void> {
     if (this._state === BeeState.Disposed) return
@@ -34,7 +34,7 @@ export abstract class QueenBee extends Bee {
   }
 
   /**
-   * Check if this queen bee matches a given command string.
+   * Check if this queen bee matches a given behaviour string.
    * Checks canonical `command` first, then `aliases`.
    */
   public matches(input: string): boolean {

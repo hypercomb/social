@@ -1,20 +1,17 @@
 // src/diamondcoreprocessor.com/editor/image-drop.drone.ts
-import { Drone, EffectBus } from "@hypercomb/core";
+import { Drone, EffectBus, hypercomb } from "@hypercomb/core";
 var ImageDropDrone = class extends Drone {
   namespace = "diamondcoreprocessor.com";
   genotype = "editor";
   description = "Intercepts drag-and-drop image files from the desktop and routes them into the tile editor.";
-  emits = ["drop:dragging", "drop:pending", "search:prefill"];
-  listens = ["render:host-ready", "drop:target", "cell:added", "editor:mode"];
+  emits = ["drop:dragging"];
+  listens = ["render:host-ready", "drop:target", "editor:mode"];
   #canvas = null;
   #dragging = false;
   #previewUrl = null;
   #effectsRegistered = false;
   /** Last hex position reported by TileOverlayDrone during drag. */
   #lastTarget = null;
-  /** Stashed image blob waiting for the user to name the cell. */
-  #pendingBlob = null;
-  #pendingCellUnsub = null;
   constructor() {
     super();
     document.addEventListener("dragover", this.#onDragOver);
@@ -36,9 +33,7 @@ var ImageDropDrone = class extends Drone {
   // ── drag handlers ─────────────────────────────────────────────
   #onDragOver = (e) => {
     const el = document.activeElement;
-    if (el && el.matches?.("input, textarea, select, [contenteditable]")) {
-      if (!this.#pendingBlob) return;
-    }
+    if (el && el.matches?.("input, textarea, select, [contenteditable]")) return;
     const types = e.dataTransfer?.types ?? [];
     if (!types.includes("Files")) return;
     e.preventDefault();
@@ -112,25 +107,13 @@ var ImageDropDrone = class extends Drone {
       await this.#loadImageWhenReady(blob);
       return;
     }
-    this.#pendingBlob = blob;
-    this.emitEffect("drop:pending", { active: true });
-    EffectBus.emit("search:prefill", { value: "" });
-    this.#pendingCellUnsub?.();
-    this.#pendingCellUnsub = EffectBus.on("cell:added", ({ cell }) => {
-      if (!this.#pendingBlob) return;
-      const stashedBlob = this.#pendingBlob;
-      this.#clearPending();
-      void (async () => {
-        await new Promise((r) => setTimeout(r, 150));
-        EffectBus.emit("tile:action", { action: "edit", label: cell, q: 0, r: 0, index: 0 });
-        await this.#waitForEditorMode();
-        this.#editorService?.setLargeBlob(stashedBlob);
-        await this.#loadImageWhenReady(stashedBlob);
-      })();
-    });
-    setTimeout(() => {
-      if (this.#pendingBlob) this.#clearPending();
-    }, 3e4);
+    const cellName = await this.#createCellFromFile(file.name);
+    if (!cellName) return;
+    await new Promise((r) => setTimeout(r, 150));
+    EffectBus.emit("tile:action", { action: "edit", label: cellName, q: 0, r: 0, index: 0 });
+    await this.#waitForEditorMode();
+    this.#editorService?.setLargeBlob(blob);
+    await this.#loadImageWhenReady(blob);
   }
   // ── preview extraction ────────────────────────────────────────
   #tryExtractPreview(e) {
@@ -173,11 +156,28 @@ var ImageDropDrone = class extends Drone {
     }
     this.emitEffect("drop:dragging", { active: false, previewUrl: null });
   }
-  #clearPending() {
-    this.#pendingBlob = null;
-    this.#pendingCellUnsub?.();
-    this.#pendingCellUnsub = null;
-    this.emitEffect("drop:pending", { active: false });
+  async #createCellFromFile(fileName) {
+    const lineage = get("@hypercomb.social/Lineage");
+    if (!lineage) return null;
+    const dir = await lineage.explorerDir();
+    if (!dir) return null;
+    const baseName = fileName.replace(/\.[^.]+$/, "");
+    let cellName = baseName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    if (!cellName) cellName = "image";
+    const existing = /* @__PURE__ */ new Set();
+    for await (const key of dir.keys()) {
+      existing.add(key);
+    }
+    let finalName = cellName;
+    if (existing.has(finalName)) {
+      let counter = 2;
+      while (existing.has(`${cellName}-${counter}`)) counter++;
+      finalName = `${cellName}-${counter}`;
+    }
+    await dir.getDirectoryHandle(finalName, { create: true });
+    EffectBus.emit("cell:added", { cell: finalName });
+    void new hypercomb().act();
+    return finalName;
   }
   async #waitForEditorMode() {
     if (this.#editorService?.mode === "editing") return;

@@ -1,6 +1,7 @@
 import { ChangeDetectorRef, Component, inject, type OnInit, type OnDestroy } from "@angular/core"
 import { DomSanitizer, type SafeResourceUrl } from "@angular/platform-browser"
 import { EffectBus } from '@hypercomb/core'
+import { TranslatePipe } from '../../core/i18n.pipe'
 
 const DEFAULT_PORTALS: Record<string, string> = {
   dcp: 'https://diamondcoreprocessor.com',
@@ -26,7 +27,7 @@ function resolvePortalUrl(target: string): string | undefined {
 @Component({
   selector: 'hc-portal-overlay',
   standalone: true,
-  imports: [],
+  imports: [TranslatePipe],
   templateUrl: './portal-overlay.component.html',
   styleUrls: ['./portal-overlay.component.scss']
 })

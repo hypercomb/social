@@ -43,6 +43,22 @@
   to   { opacity: 1; transform: translateX(0); }
 }
 
+.position-lock {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  cursor: default;
+  padding: 0.1rem 0;
+  user-select: none;
+  touch-action: none;
+
+  .lock-icon {
+    font-size: 0.45rem;
+    color: rgba(160, 160, 160, 0.4);
+    line-height: 1;
+  }
+}
+
 .drag-handle {
   width: 100%;
   display: flex;

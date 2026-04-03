@@ -2,12 +2,12 @@
 // Intercepts browser drag-and-drop image file events on the document
 // and routes them into the tile editor for confirm/cancel.
 //
-// Two paths:
-//   Empty hex → stash blob, show placeholder, focus command line.
-//               User types cell name → Enter → cell created → editor opens with image.
-//   Occupied hex → open editor for that tile with the new image for reposition/save/cancel.
+// Three paths:
+//   Editor open  → replace image in current editor session.
+//   Occupied hex → open editor for that tile with the new image.
+//   Empty area   → auto-create cell from file name, open editor immediately.
 
-import { Drone, EffectBus } from '@hypercomb/core'
+import { Drone, EffectBus, hypercomb } from '@hypercomb/core'
 import type { TileEditorService } from './tile-editor.service.js'
 import type { ImageEditorService } from './image-editor.service.js'
 
@@ -20,6 +20,10 @@ type DropTarget = {
   hasImage: boolean
 }
 
+type Lineage = {
+  explorerDir: () => Promise<FileSystemDirectoryHandle | null>
+}
+
 export class ImageDropDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'editor'
@@ -27,8 +31,8 @@ export class ImageDropDrone extends Drone {
   public override description =
     'Intercepts drag-and-drop image files from the desktop and routes them into the tile editor.'
 
-  protected override emits = ['drop:dragging', 'drop:pending', 'search:prefill']
-  protected override listens = ['render:host-ready', 'drop:target', 'cell:added', 'editor:mode']
+  protected override emits = ['drop:dragging']
+  protected override listens = ['render:host-ready', 'drop:target', 'editor:mode']
 
   #canvas: HTMLCanvasElement | null = null
   #dragging = false
@@ -37,10 +41,6 @@ export class ImageDropDrone extends Drone {
 
   /** Last hex position reported by TileOverlayDrone during drag. */
   #lastTarget: DropTarget | null = null
-
-  /** Stashed image blob waiting for the user to name the cell. */
-  #pendingBlob: Blob | null = null
-  #pendingCellUnsub: (() => void) | null = null
 
   constructor() {
     super()
@@ -68,13 +68,9 @@ export class ImageDropDrone extends Drone {
   // ── drag handlers ─────────────────────────────────────────────
 
   #onDragOver = (e: DragEvent): void => {
-    // don't claim if over form inputs (unless we have a pending drop — then we want
-    // to keep the browser from doing its own thing while user types in the command line)
+    // don't claim if over form inputs
     const el = document.activeElement
-    if (el && (el as HTMLElement).matches?.('input, textarea, select, [contenteditable]')) {
-      // still allow if we're in pending-drop state (user is typing cell name)
-      if (!this.#pendingBlob) return
-    }
+    if (el && (el as HTMLElement).matches?.('input, textarea, select, [contenteditable]')) return
 
     // only claim if it looks like files (not a link-only drag)
     const types = e.dataTransfer?.types ?? []
@@ -173,36 +169,17 @@ export class ImageDropDrone extends Drone {
       return
     }
 
-    // Path C: dropped on empty position — stash blob, show placeholder, focus command line
-    this.#pendingBlob = blob
-    this.emitEffect('drop:pending', { active: true })
+    // Path C: dropped on empty position — auto-create cell from file name, open editor immediately
+    const cellName = await this.#createCellFromFile(file.name)
+    if (!cellName) return
 
-    // focus the command line so user can type the cell name
-    EffectBus.emit('search:prefill', { value: '' })
+    // brief delay — let history record the cell:added op and processor pulse
+    await new Promise<void>(r => setTimeout(r, 150))
 
-    // listen for cell:added — when the user creates a cell, attach the image
-    this.#pendingCellUnsub?.()
-    this.#pendingCellUnsub = EffectBus.on<{ cell: string }>('cell:added', ({ cell }) => {
-      if (!this.#pendingBlob) return
-      const stashedBlob = this.#pendingBlob
-      this.#clearPending()
-
-      // open editor for the new cell with the stashed image
-      void (async () => {
-        // brief delay — let history record the cell:added op and processor pulse
-        await new Promise<void>(r => setTimeout(r, 150))
-
-        EffectBus.emit('tile:action', { action: 'edit', label: cell, q: 0, r: 0, index: 0 })
-        await this.#waitForEditorMode()
-        this.#editorService?.setLargeBlob(stashedBlob)
-        await this.#loadImageWhenReady(stashedBlob)
-      })()
-    })
-
-    // auto-cancel if no cell is created within 30 seconds
-    setTimeout(() => {
-      if (this.#pendingBlob) this.#clearPending()
-    }, 30_000)
+    EffectBus.emit('tile:action', { action: 'edit', label: cellName, q: 0, r: 0, index: 0 })
+    await this.#waitForEditorMode()
+    this.#editorService?.setLargeBlob(blob)
+    await this.#loadImageWhenReady(blob)
   }
 
   // ── preview extraction ────────────────────────────────────────
@@ -256,11 +233,43 @@ export class ImageDropDrone extends Drone {
     this.emitEffect('drop:dragging', { active: false, previewUrl: null })
   }
 
-  #clearPending(): void {
-    this.#pendingBlob = null
-    this.#pendingCellUnsub?.()
-    this.#pendingCellUnsub = null
-    this.emitEffect('drop:pending', { active: false })
+  async #createCellFromFile(fileName: string): Promise<string | null> {
+    const lineage = get('@hypercomb.social/Lineage') as Lineage | undefined
+    if (!lineage) return null
+
+    const dir = await lineage.explorerDir()
+    if (!dir) return null
+
+    // derive cell name: strip extension, lowercase, replace non-alphanumeric with hyphens
+    const baseName = fileName.replace(/\.[^.]+$/, '')
+    let cellName = baseName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+    if (!cellName) cellName = 'image'
+
+    // deduplicate: if cell already exists, append incrementing number
+    const existing = new Set<string>()
+    for await (const key of dir.keys()) {
+      existing.add(key)
+    }
+    let finalName = cellName
+    if (existing.has(finalName)) {
+      let counter = 2
+      while (existing.has(`${cellName}-${counter}`)) counter++
+      finalName = `${cellName}-${counter}`
+    }
+
+    // create cell directory in OPFS
+    await dir.getDirectoryHandle(finalName, { create: true })
+
+    // emit cell:added — HistoryRecorder will record the op
+    EffectBus.emit('cell:added', { cell: finalName })
+
+    // trigger processor pulse
+    void new hypercomb().act()
+
+    return finalName
   }
 
   async #waitForEditorMode(): Promise<void> {

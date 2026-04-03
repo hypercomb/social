@@ -182,6 +182,11 @@ export class ShowCellDrone extends Drone {
   private moveNames: string[] | null = null
   #divergenceFutureAdds = new Set<string>()
   #divergenceFutureRemoves = new Set<string>()
+  #pendingRemoves = new Set<string>()
+  /** When cursor is rewound, holds cell→propertiesSig overrides from content-state ops. */
+  #cursorPropsOverride: Map<string, string> | null = null
+  /** Cache key for cursor-time reconstruction: `{locationSig}:{position}` — avoids redundant OPFS reads */
+  #cursorReconstructionKey = ''
   private suppressMeshRecenter = false
   #layoutMode: 'dense' | 'pinned' = 'dense'
 
@@ -738,6 +743,7 @@ export class ShowCellDrone extends Drone {
       return
     }
 
+
     // instant back-navigation: if we have cached cells for this layer, apply them directly
     // — skips ALL OPFS reads (explorerDir, listCellFolders, checkCellHasBranch, history, layout)
     if (locationKey !== this.renderedLocationKey && this.#layerCellsCache.has(locationKey)) {
@@ -883,6 +889,8 @@ export class ShowCellDrone extends Drone {
     const cursorService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryCursorService') as HistoryCursorService | undefined
     this.#divergenceFutureAdds = new Set<string>()
     this.#divergenceFutureRemoves = new Set<string>()
+    this.#cursorPropsOverride = null
+    this.#cursorReconstructionKey = ''
     if (!this.#clipboardView && historyService) {
       const sig = await this.computeSignatureLocation(lineage)
 
@@ -905,6 +913,93 @@ export class ShowCellDrone extends Drone {
         for (const cell of divergence.futureAdds) union.add(cell)
         this.#divergenceFutureAdds = divergence.futureAdds
         this.#divergenceFutureRemoves = divergence.futureRemoves
+
+        // ── Reconstruct tag/content/layout state at cursor time ──
+        const reconKey = `${cursorState!.locationSig}:${cursorState!.position}`
+        const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as
+          { getResource: (sig: string) => Promise<Blob | null> } | undefined
+        if (store && reconKey !== this.#cursorReconstructionKey) {
+          this.#cursorReconstructionKey = reconKey
+          const tagSigs = cursorService.collectTagStateSignatures()
+          const cursorTagMap = new Map<string, string[]>()
+          for (const tagSig of tagSigs) {
+            try {
+              const blob = await store.getResource(tagSig)
+              if (!blob) continue
+              const snapshot = JSON.parse(await blob.text())
+              if (snapshot?.cellTags) {
+                for (const [cellLabel, tags] of Object.entries(snapshot.cellTags)) {
+                  cursorTagMap.set(cellLabel, tags as string[])
+                }
+              }
+            } catch { /* skip corrupted */ }
+          }
+          // Override tag cache with cursor-time state
+          for (const [cellLabel, tags] of cursorTagMap) {
+            this.cellTagsCache.set(cellLabel, tags)
+          }
+
+          // ── Reconstruct content state at cursor time ──────────
+          const contentOps = cursorService.opsAtCursor('content-state')
+          const cursorPropsOverride = new Map<string, string>()
+          for (const op of contentOps) {
+            try {
+              const blob = await store.getResource(op.cell)
+              if (!blob) continue
+              const snapshot = JSON.parse(await blob.text())
+              if (snapshot?.cellLabel && snapshot?.propertiesSig) {
+                cursorPropsOverride.set(snapshot.cellLabel, snapshot.propertiesSig)
+              }
+            } catch { /* skip corrupted */ }
+          }
+          if (cursorPropsOverride.size > 0) {
+            this.#cursorPropsOverride = cursorPropsOverride
+          }
+
+          // ── Reconstruct layout state at cursor time ──────────
+          const layoutOps = cursorService.opsAtCursor('layout-state')
+          for (const op of layoutOps) {
+            try {
+              const blob = await store.getResource(op.cell)
+              if (!blob) continue
+              const snapshot = JSON.parse(await blob.text())
+              if (snapshot?.property && snapshot?.value !== undefined) {
+                switch (snapshot.property) {
+                  case 'orientation': {
+                    const flat = snapshot.value === 'flat-top'
+                    if (this.#flat !== flat) {
+                      this.#flat = flat
+                      this.cellImageCache.clear()
+                    }
+                    break
+                  }
+                  case 'pivot': {
+                    const pivot = snapshot.value === 'true'
+                    if (this.#pivot !== pivot) {
+                      this.#pivot = pivot
+                      this.atlas?.setPivot(pivot)
+                    }
+                    break
+                  }
+                  case 'gap': {
+                    const gapPx = parseFloat(snapshot.value)
+                    if (!isNaN(gapPx) && this.#hexGeo.gapPx !== gapPx) {
+                      this.#hexGeo = createHexGeometry(this.#hexGeo.circumRadiusPx, gapPx, this.#hexGeo.padPx)
+                    }
+                    break
+                  }
+                  case 'mode': {
+                    const mode = snapshot.value as 'dense' | 'pinned'
+                    if (mode === 'dense' || mode === 'pinned') {
+                      this.#layoutMode = mode
+                    }
+                    break
+                  }
+                }
+              }
+            } catch { /* skip corrupted */ }
+          }
+        }
       } else {
         // Not rewound: standard replay — filter out removed cells
         // Only honor 'remove' when the cell's OPFS directory no longer exists.
@@ -919,13 +1014,38 @@ export class ShowCellDrone extends Drone {
       }
     }
 
+    // filter out cells removed via effect — only honor for active clipboard cut
+    // or confirmed OPFS deletion. Stale #pendingRemoves entries must not hide
+    // tiles that still exist in OPFS (prevents ghost removal after add/rename).
+    if (!this.#clipboardView) {
+      const clipSvc = get<any>('@diamondcoreprocessor.com/ClipboardService')
+      const cutLabels = clipSvc?.operation === 'cut'
+        ? new Set<string>((clipSvc.items as { label: string }[]).map((i: { label: string }) => i.label))
+        : new Set<string>()
+      const reconciled: string[] = []
+      for (const cell of this.#pendingRemoves) {
+        if (cutLabels.has(cell) || !localCellSet.has(cell)) {
+          // active cut OR OPFS directory already deleted — honor the remove
+          union.delete(cell)
+        } else {
+          // cell exists in OPFS but is not a cut item — stale pendingRemove, clear it
+          reconciled.push(cell)
+        }
+      }
+      for (const cell of reconciled) this.#pendingRemoves.delete(cell)
+    }
+
     // filter out blocked external tiles and hidden local tiles before ordering
     const blockedSet = new Set<string>(JSON.parse(localStorage.getItem(`hc:blocked-tiles:${locationKey}`) ?? '[]'))
     for (const blocked of blockedSet) {
       if (!localCellSet.has(blocked)) union.delete(blocked)
     }
 
-    const hiddenSet = new Set<string>(JSON.parse(localStorage.getItem(`hc:hidden-tiles:${locationKey}`) ?? '[]'))
+    // When cursor is rewound, use history-reconstructed hidden set instead of localStorage
+    const cursorState = cursorService?.state
+    const hiddenSet = (cursorState?.rewound && cursorService)
+      ? cursorService.computeDivergence().hiddenAtCursor
+      : new Set<string>(JSON.parse(localStorage.getItem(`hc:hidden-tiles:${locationKey}`) ?? '[]'))
     this.#currentHiddenSet = hiddenSet
     if (!this.#showHiddenItems) {
       for (const hidden of hiddenSet) {
@@ -944,51 +1064,8 @@ export class ShowCellDrone extends Drone {
     // read layout mode for this location
     this.#layoutMode = this.#readLayoutMode(locationKey)
 
-    let cellNames: string[]
-
-    if (this.#layoutMode === 'pinned') {
-      // pinned mode: each cell renders at its stored index position (gaps allowed)
-      cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet)
-
-      // apply search filter — blank out non-matching slots (preserve positions)
-      if (this.filterKeyword) {
-        const kw = this.filterKeyword
-        cellNames = cellNames.map(s => s && s.toLowerCase().includes(kw) ? s : '')
-      }
-    } else {
-      // dense mode: pack tiles contiguously using persisted order or index+offset sort
-      const orderProjection = (window as any).ioc?.get?.('@diamondcoreprocessor.com/OrderProjection') as
-        { hydrate(sig: string): Promise<string[]> } | undefined
-      if (orderProjection) {
-        const locSig = await this.computeSignatureLocation(lineage)
-        const order = await orderProjection.hydrate(locSig.sig)
-        if (order.length > 0) {
-          const unionSet = new Set(union)
-          cellNames = order.filter(s => unionSet.has(s))
-          // append new cells not yet in persisted order
-          for (const s of union) {
-            if (!cellNames.includes(s)) cellNames.push(s)
-          }
-        } else {
-          cellNames = await this.#orderByIndex(dir, Array.from(union), localCellSet)
-        }
-      } else {
-        cellNames = await this.#orderByIndex(dir, Array.from(union), localCellSet)
-      }
-
-      // apply layout ordering if a __layout__ file exists
-      const layout = this.resolve<any>('layout')
-      if (layout) {
-        const order = await layout.read(dir)
-        if (order) cellNames = layout.merge(order, cellNames)
-      }
-
-      // apply search filter if active
-      if (this.filterKeyword) {
-        const kw = this.filterKeyword
-        cellNames = cellNames.filter((s: string) => s.toLowerCase().includes(kw))
-      }
-    }
+    // resolve cell ordering through the layout mode strategy
+    const cellNames = await this.#resolveCellOrder(this.#layoutMode, dir, union, localCellSet, lineage)
 
     const previousLocationKey = this.renderedLocationKey
     const layerChanged = locationKey !== previousLocationKey
@@ -1002,6 +1079,7 @@ export class ShowCellDrone extends Drone {
       this.renderedLocationKey = locationKey
       this.renderedCellsKey = ''
       this.renderedCells.clear()
+      this.#pendingRemoves.clear()
 
       // apply saved viewport (or defaults) so the container is correct before tiles render
       await this.#applyViewportForLayer(dir)
@@ -1092,34 +1170,27 @@ export class ShowCellDrone extends Drone {
     this.streamActive = true
     this.cancelStreamFlag = false
 
+    // resolve all cell→axial positions through the single mapping function
+    const axialMax = typeof axial.items.size === 'number' ? axial.items.size : cellNames.length
+    const maxCells = Math.min(cellNames.length, axialMax)
+    const allCells = this.buildCellsFromAxial(axial, cellNames, maxCells, localCellSet, branchSet)
+
     const cells: Cell[] = []
 
-    for (let index = 0; index < cellNames.length; index++) {
+    for (let i = 0; i < allCells.length; i++) {
       if (this.cancelStreamFlag) break
 
-      const label = cellNames[index]
-      const axialCell = axial.items.get(index) as Axial | undefined
-      if (!axialCell || !label) continue
-
-      const div = this.#divergenceFutureAdds.has(label) ? 1 : this.#divergenceFutureRemoves.has(label) ? 2 : 0
-      const cell: Cell = {
-        q: axialCell.q,
-        r: axialCell.r,
-        label,
-        external: !localCellSet.has(label),
-        hasBranch: branchSet?.has(label) ?? false,
-        divergence: div,
-      }
+      const cell = allCells[i]
 
       await this.loadCellImages([cell], dir)
       if (this.cancelStreamFlag) break
 
       cells.push(cell)
-      this.renderedCells.set(label, cell)
+      this.renderedCells.set(cell.label, cell)
 
-      const isLastSeed = index === cellNames.length - 1
-      if (cells.length % ShowCellDrone.STREAM_BATCH_SIZE === 0 || isLastSeed) {
-        await this.applyGeometry(cells, isLastSeed)
+      const isLast = i === allCells.length - 1
+      if (cells.length % ShowCellDrone.STREAM_BATCH_SIZE === 0 || isLast) {
+        await this.applyGeometry(cells, isLast)
       }
 
       await this.microDelay()
@@ -1330,14 +1401,22 @@ export class ShowCellDrone extends Drone {
     })
 
     // cell:added / cell:removed — invalidate render cache so next synchronize picks up new tile set
-    this.onEffect<{ cell: string }>('cell:added', () => {
+    this.onEffect<{ cell: string }>('cell:added', (payload) => {
       this.#layerCellsCache.clear()
       this.renderedCellsKey = ''
+      if (payload?.cell) this.#pendingRemoves.delete(payload.cell)
     })
 
-    this.onEffect<{ cell: string }>('cell:removed', () => {
+    this.onEffect<{ cell: string }>('cell:removed', (payload) => {
       this.#layerCellsCache.clear()
       this.renderedCellsKey = ''
+      if (payload?.cell) {
+        this.#pendingRemoves.add(payload.cell)
+        this.cellImageCache.delete(payload.cell)
+        this.cellTagsCache.delete(payload.cell)
+        this.cellLinkCache.delete(payload.cell)
+        this.cellBorderColorCache.delete(payload.cell)
+      }
     })
 
     // history:cursor-changed — re-render with divergence when cursor moves
@@ -1437,6 +1516,7 @@ export class ShowCellDrone extends Drone {
       } else {
         this.#clipboardView = null
       }
+      this.renderedCellsKey = '' // force full geometry rebuild on enter/exit
       this.requestRender()
     })
 
@@ -1692,7 +1772,12 @@ export class ShowCellDrone extends Drone {
         if (typeof props['index'] === 'number') {
           const idx = props['index'] as number
           if (idx >= 0 && idx <= maxSlot) {
-            sparse[idx] = name
+            // collision detection: if slot is already occupied, demote to unindexed
+            if (sparse[idx] !== '') {
+              unindexed.push(name)
+            } else {
+              sparse[idx] = name
+            }
           } else {
             unindexed.push(name)
           }
@@ -1704,12 +1789,11 @@ export class ShowCellDrone extends Drone {
       }
     }
 
-    // place unindexed cells in the first available empty slots
+    // place unindexed cells in the first available empty slots and persist their index
     for (const name of unindexed) {
       while (nextFree <= maxSlot && sparse[nextFree] !== '') nextFree++
       if (nextFree <= maxSlot) {
         sparse[nextFree] = name
-        // persist the assigned index
         if (localCellSet.has(name)) {
           try {
             const cellDir = await dir.getDirectoryHandle(name, { create: false })
@@ -1721,6 +1805,73 @@ export class ShowCellDrone extends Drone {
     }
 
     return sparse
+  }
+
+  /**
+   * Central ordering strategy — all render paths route through here.
+   * Each layout mode implements its own ordering logic; new modes add a case.
+   * Returns a name array ready for buildCellsFromAxial:
+   *   - dense: packed array (cellNames[i] → axial position i)
+   *   - pinned: sparse array with empty-string gaps (cellNames[i] → axial position i)
+   */
+  async #resolveCellOrder(
+    mode: string,
+    dir: FileSystemDirectoryHandle,
+    union: Set<string>,
+    localCellSet: Set<string>,
+    lineage: any,
+  ): Promise<string[]> {
+    switch (mode) {
+      case 'pinned': {
+        let cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet)
+        if (this.filterKeyword) {
+          const kw = this.filterKeyword
+          cellNames = cellNames.map(s => s && s.toLowerCase().includes(kw) ? s : '')
+        }
+        return cellNames
+      }
+
+      // dense (default): pack tiles contiguously
+      default: {
+        let cellNames: string[]
+        let orderFromProjection = false
+
+        const orderProjection = (window as any).ioc?.get?.('@diamondcoreprocessor.com/OrderProjection') as
+          { hydrate(sig: string): Promise<string[]> } | undefined
+        if (orderProjection) {
+          const locSig = await this.computeSignatureLocation(lineage)
+          const order = await orderProjection.hydrate(locSig.sig)
+          if (order.length > 0) {
+            orderFromProjection = true
+            const unionSet = new Set(union)
+            cellNames = order.filter(s => unionSet.has(s))
+            for (const s of union) {
+              if (!cellNames.includes(s)) cellNames.push(s)
+            }
+          } else {
+            cellNames = await this.#orderByIndex(dir, Array.from(union), localCellSet)
+          }
+        } else {
+          cellNames = await this.#orderByIndex(dir, Array.from(union), localCellSet)
+        }
+
+        // apply __layout__ ONLY as initial fallback — OrderProjection is authoritative
+        // once it has data from add/remove/reorder history
+        if (!orderFromProjection) {
+          const layout = this.resolve<any>('layout')
+          if (layout) {
+            const order = await layout.read(dir)
+            if (order) cellNames = layout.merge(order, cellNames)
+          }
+        }
+
+        if (this.filterKeyword) {
+          const kw = this.filterKeyword
+          cellNames = cellNames.filter((s: string) => s.toLowerCase().includes(kw))
+        }
+        return cellNames
+      }
+    }
   }
 
   /**
@@ -1893,7 +2044,11 @@ export class ShowCellDrone extends Drone {
       { getResource: (sig: string) => Promise<Blob | null> } | undefined
     if (!store || !this.imageAtlas) return
 
-    const propsIndex: Record<string, string> = JSON.parse(localStorage.getItem('hc:tile-props-index') ?? '{}')
+    const livePropsIndex: Record<string, string> = JSON.parse(localStorage.getItem('hc:tile-props-index') ?? '{}')
+    // When cursor is rewound and we have content-state overrides, use those
+    const propsIndex = this.#cursorPropsOverride
+      ? Object.fromEntries([...Object.entries(livePropsIndex), ...this.#cursorPropsOverride])
+      : livePropsIndex
 
     for (const cell of cells) {
       // external cells don't have local OPFS data

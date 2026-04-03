@@ -24,6 +24,11 @@
               {
                 "glob": "**/*",
                 "input": "public"
+              },
+              {
+                "glob": "**/*.md",
+                "input": "../documentation",
+                "output": "/documentation"
               }
             ],
 

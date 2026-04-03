@@ -96,6 +96,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #fitLocked = signal(localStorage.getItem('hc:fit-locked') === '1')
   #fitLockedSnapshot: { scale: number; cx: number; cy: number; dx: number; dy: number } | null = null
   #clipboardAvailable = signal(false)
+  #clipboardViewportSnapshot: { scale: number; px: number; py: number; sx: number; sy: number } | null = null
   #hasSelection = signal(false)
   #textOnly = signal(false)
   #layoutPinned = signal(false)
@@ -108,25 +109,13 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #atomizeStrategy = signal('')
   #atomizeAtomCount = signal(0)
 
-  // ── drag / resize state ──────────────────────────────────
-  readonly #dragX = signal<number | null>(null)
-  readonly #dragY = signal<number | null>(null)
-  readonly #pillZoom = signal<number | null>(null)
-  #dragging = false
-  #resizing = false
-  #dragOffsetX = 0
-  #dragOffsetY = 0
-  #resizeStartX = 0
-  #resizeStartZoom = 1
-  readonly #MIN_ZOOM = 0.7
-  readonly #MAX_ZOOM = 2
-  readonly #VIEWPORT_MARGIN = 20 // px – keep at least this much visible
+  // ── pill zoom (fixed at max size) ──────────────────────────
+  readonly pillZoom = signal(2).asReadonly()
 
-  /** True when the pill has a custom position (not default center). */
-  readonly pillCustomPosition = computed(() => this.#dragX() !== null && this.#dragY() !== null)
-  readonly pillLeft = this.#dragX.asReadonly()
-  readonly pillTop = this.#dragY.asReadonly()
-  readonly pillZoom = this.#pillZoom.asReadonly()
+  #viewportCenter = (): { x: number; y: number } => ({
+    x: window.innerWidth / 2,
+    y: window.innerHeight / 2,
+  })
 
   #idleTimer: ReturnType<typeof setTimeout> | null = null
   #moveModeUnsub: (() => void) | null = null
@@ -289,7 +278,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     // deterministic vibrant color from tag name — no grays
     return tagNameToColor(name)
   }
-  readonly visible = computed(() => (!this.#idle() || this.#hovered()) && !this.#touchDragging() && !this.#viewActive())
+  readonly visible = computed(() => !this.#touchDragging() && !this.#viewActive())
   readonly roomValue = this.#roomValue.asReadonly()
   readonly roomOpen = this.#roomOpen.asReadonly()
   readonly beesVisible = this.#beesVisible.asReadonly()
@@ -326,32 +315,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     const stored = this.roomStore?.value ?? ''
     if (stored) this.#roomValue.set(stored)
 
-    // restore persisted pill position / zoom — reset if off-screen or too small
-    try {
-      const pos = localStorage.getItem('hc:pill-pos')
-      if (pos) {
-        const { x, y } = JSON.parse(pos)
-        if (typeof x === 'number' && typeof y === 'number'
-            && x > -this.#VIEWPORT_MARGIN && x < window.innerWidth - this.#VIEWPORT_MARGIN
-            && y > -this.#VIEWPORT_MARGIN && y < window.innerHeight - this.#VIEWPORT_MARGIN) {
-          this.#dragX.set(x)
-          this.#dragY.set(y)
-        } else {
-          localStorage.removeItem('hc:pill-pos')
-        }
-      }
-      const z = localStorage.getItem('hc:pill-zoom')
-      if (z) {
-        const n = parseFloat(z)
-        if (n >= this.#MIN_ZOOM && n <= this.#MAX_ZOOM) {
-          this.#pillZoom.set(n)
-        } else {
-          this.#pillZoom.set(Math.max(this.#MIN_ZOOM, Math.min(this.#MAX_ZOOM, n)))
-          localStorage.setItem('hc:pill-zoom', String(this.#pillZoom()))
-        }
-      }
-    } catch { /* ignore corrupted storage */ }
-
+    window.addEventListener('resize', this.#onResize)
     window.addEventListener('pointermove', this.#onActivity)
     window.addEventListener('pointerdown', this.#onActivity)
     window.addEventListener('keydown', this.#onActivity)
@@ -486,6 +450,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.#mobileQuery?.removeEventListener('change', this.#mobileHandler)
+    window.removeEventListener('resize', this.#onResize)
     window.removeEventListener('pointermove', this.#onActivity)
     window.removeEventListener('pointerdown', this.#onActivity)
     window.removeEventListener('keydown', this.#onActivity)
@@ -710,6 +675,20 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
 
   readonly openClipboard = (): void => {
     if (!this.#clipboardAvailable()) return
+
+    // save current viewport so we can restore it when exiting clipboard mode
+    const container = this.pixiHost?.container
+    const app = this.pixiHost?.app
+    if (container && app) {
+      this.#clipboardViewportSnapshot = {
+        scale: container.scale?.x ?? 1,
+        px: container.position?.x ?? 0,
+        py: container.position?.y ?? 0,
+        sx: app.stage.position?.x ?? 0,
+        sy: app.stage.position?.y ?? 0,
+      }
+    }
+
     this.#mode.set('clipboard')
     const clipSvc = get('@diamondcoreprocessor.com/ClipboardService') as
       { items?: { label: string; sourceSegments: readonly string[] }[] } | undefined
@@ -719,11 +698,20 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
       labels: items.map(i => i.label),
       sourceSegments: [...(items[0]?.sourceSegments ?? [])],
     })
+
+    // fit-to-center after render completes (geometry must exist for bounds)
+    const unsub = EffectBus.on('render:cell-count', () => {
+      unsub()
+      requestAnimationFrame(() => this.zoom?.zoomToFit?.())
+    })
+    // fallback if render:cell-count never fires (empty clipboard)
+    setTimeout(() => { unsub(); this.zoom?.zoomToFit?.() }, 500)
   }
 
   readonly closeClipboard = (): void => {
     this.#mode.set('browsing')
     EffectBus.emit('clipboard:view', { active: false })
+    this.#restoreClipboardViewport()
   }
 
   readonly place = (): void => {
@@ -733,6 +721,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   readonly paste = (): void => {
     EffectBus.emit('clipboard:view', { active: false })
     this.#mode.set('browsing')
+    this.#restoreClipboardViewport()
     EffectBus.emit('controls:action', { action: 'paste' })
   }
 
@@ -740,6 +729,24 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     EffectBus.emit('controls:action', { action: 'clear-clipboard' })
     EffectBus.emit('clipboard:view', { active: false })
     this.#mode.set('browsing')
+    this.#restoreClipboardViewport()
+  }
+
+  #restoreClipboardViewport(): void {
+    const snap = this.#clipboardViewportSnapshot
+    if (!snap) return
+    this.#clipboardViewportSnapshot = null
+
+    const container = this.pixiHost?.container
+    const app = this.pixiHost?.app
+    if (!container || !app) return
+
+    container.scale.set(snap.scale)
+    container.position.set(snap.px, snap.py)
+    app.stage.position.set(snap.sx, snap.sy)
+
+    const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
+    vp?.setZoom?.(snap.scale, snap.px, snap.py)
   }
 
   // ── atomize ──────────────────────────────────────────
@@ -866,77 +873,11 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     }
   }
 
-  // ── drag handle ─────────────────────────────────────────
-
-  readonly onDragHandleDown = (e: PointerEvent): void => {
-    if (e.button !== 0) return
-    const stage = (e.target as HTMLElement).closest('.pill-stage') as HTMLElement | null
-    if (!stage) return
-
-    if (e.ctrlKey || e.metaKey) {
-      // ctrl+drag = zoom resize
-      this.#resizing = true
-      this.#resizeStartX = e.clientX
-      this.#resizeStartZoom = this.#pillZoom() ?? 1
-      e.preventDefault()
-    } else {
-      // regular drag = reposition
-      this.#dragging = true
-      const rect = stage.getBoundingClientRect()
-      this.#dragOffsetX = e.clientX - rect.left
-      this.#dragOffsetY = e.clientY - rect.top
-      e.preventDefault()
-    }
-
-    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
-  }
-
-  readonly onDragHandleMove = (e: PointerEvent): void => {
-    if (this.#dragging) {
-      const x = e.clientX - this.#dragOffsetX
-      const y = e.clientY - this.#dragOffsetY
-      this.#dragX.set(x)
-      this.#dragY.set(y)
-    } else if (this.#resizing) {
-      const delta = e.clientX - this.#resizeStartX
-      const next = Math.min(this.#MAX_ZOOM, Math.max(this.#MIN_ZOOM, this.#resizeStartZoom + delta / 200))
-      this.#pillZoom.set(next)
-    }
-  }
-
-  readonly onDragHandleUp = (e: PointerEvent): void => {
-    if (this.#dragging) {
-      this.#dragging = false
-      const x = this.#dragX()
-      const y = this.#dragY()
-      if (x !== null && y !== null) {
-        localStorage.setItem('hc:pill-pos', JSON.stringify({ x, y }))
-      }
-    }
-    if (this.#resizing) {
-      this.#resizing = false
-      const z = this.#pillZoom()
-      if (z !== null) {
-        localStorage.setItem('hc:pill-zoom', String(z))
-      }
-    }
-    ;(e.target as HTMLElement).releasePointerCapture(e.pointerId)
-  }
-
-  readonly onDragHandleDblClick = (): void => {
-    this.#dragX.set(null)
-    this.#dragY.set(null)
-    this.#pillZoom.set(null)
-    localStorage.removeItem('hc:pill-pos')
-    localStorage.removeItem('hc:pill-zoom')
-  }
-
   // ── internal ────────────────────────────────────────────
 
-  #viewportCenter = (): { x: number; y: number } => ({
-    x: window.innerWidth / 2,
-    y: window.innerHeight / 2,
-  })
+  #onResize = (): void => {
+    // no-op — pill is always centered, no custom position to clamp
+  }
 
   #onActivity = (): void => {
     this.#idle.set(false)

@@ -416,6 +416,15 @@ var HexSdfTextureShader = class _HexSdfTextureShader {
         // gentle center wash
         float branchWash = exp(-dist * dist * 3.0);
         color.rgb += branchColor * branchWash * 0.08;
+
+        // chevron hint at bottom of hex: small downward arrow
+        float chevronY = local.y / u_radiusPx - 0.55;
+        float chevronX = abs(local.x / u_radiusPx);
+        float chevronLine = abs(chevronY + chevronX * 0.6 - 0.12);
+        float chevronMask = smoothstep(0.02, 0.007, chevronLine)
+                          * step(chevronX, 0.22)
+                          * step(0.0, chevronY + 0.08);
+        color.rgb = mix(color.rgb, branchColor, chevronMask * 0.125);
       }
 
       // divergence overlay: 1 = future-add (ghost), 2 = future-remove (marked)
@@ -634,6 +643,11 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
   moveNames = null;
   #divergenceFutureAdds = /* @__PURE__ */ new Set();
   #divergenceFutureRemoves = /* @__PURE__ */ new Set();
+  #pendingRemoves = /* @__PURE__ */ new Set();
+  /** When cursor is rewound, holds cell→propertiesSig overrides from content-state ops. */
+  #cursorPropsOverride = null;
+  /** Cache key for cursor-time reconstruction: `{locationSig}:{position}` — avoids redundant OPFS reads */
+  #cursorReconstructionKey = "";
   suppressMeshRecenter = false;
   #layoutMode = "dense";
   // cached render context for fast move:preview path (avoids full OPFS re-read)
@@ -1057,6 +1071,25 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
     if (locationKey === this.renderedLocationKey && this.renderedCellsKey !== "" && !this.#clipboardView) {
       return;
     }
+    if (locationKey === this.renderedLocationKey && this.cachedCellNames && this.cachedLocalCellSet && !this.#clipboardView) {
+      const cellNames2 = this.moveNames ?? this.cachedCellNames;
+      const localCellSet2 = this.cachedLocalCellSet;
+      const branchSet2 = this.cachedBranchSet ?? /* @__PURE__ */ new Set();
+      const axialMax2 = typeof axial.items.size === "number" ? axial.items.size : cellNames2.length;
+      const maxCells2 = Math.min(cellNames2.length, axialMax2);
+      if (maxCells2 > 0) {
+        const cells2 = this.buildCellsFromAxial(axial, cellNames2, maxCells2, localCellSet2, branchSet2);
+        if (cells2.length > 0) {
+          const dir2 = await lineage.explorerDir();
+          if (dir2) await this.loadCellImages(cells2, dir2);
+          this.renderedCells.clear();
+          for (const cell of cells2) this.renderedCells.set(cell.label, cell);
+          this.cachedCellNames = cellNames2;
+          await this.applyGeometry(cells2);
+        }
+      }
+      return;
+    }
     if (locationKey !== this.renderedLocationKey && this.#layerCellsCache.has(locationKey)) {
       const cached = this.#layerCellsCache.get(locationKey);
       if (!this.layer) {
@@ -1174,11 +1207,13 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
     const cursorService = window.ioc?.get?.("@diamondcoreprocessor.com/HistoryCursorService");
     this.#divergenceFutureAdds = /* @__PURE__ */ new Set();
     this.#divergenceFutureRemoves = /* @__PURE__ */ new Set();
+    this.#cursorPropsOverride = null;
+    this.#cursorReconstructionKey = "";
     if (!this.#clipboardView && historyService) {
       const sig = await this.computeSignatureLocation(lineage);
       if (cursorService) await cursorService.load(sig.sig);
-      const cursorState = cursorService?.state;
-      const isRewound = cursorState?.rewound ?? false;
+      const cursorState2 = cursorService?.state;
+      const isRewound = cursorState2?.rewound ?? false;
       if (isRewound && cursorService) {
         const divergence = cursorService.computeDivergence();
         for (const cell of [...union]) {
@@ -1189,6 +1224,88 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
         for (const cell of divergence.futureAdds) union.add(cell);
         this.#divergenceFutureAdds = divergence.futureAdds;
         this.#divergenceFutureRemoves = divergence.futureRemoves;
+        const reconKey = `${cursorState2.locationSig}:${cursorState2.position}`;
+        const store = window.ioc?.get?.("@hypercomb.social/Store");
+        if (store && reconKey !== this.#cursorReconstructionKey) {
+          this.#cursorReconstructionKey = reconKey;
+          const tagSigs = cursorService.collectTagStateSignatures();
+          const cursorTagMap = /* @__PURE__ */ new Map();
+          for (const tagSig of tagSigs) {
+            try {
+              const blob = await store.getResource(tagSig);
+              if (!blob) continue;
+              const snapshot = JSON.parse(await blob.text());
+              if (snapshot?.cellTags) {
+                for (const [cellLabel, tags] of Object.entries(snapshot.cellTags)) {
+                  cursorTagMap.set(cellLabel, tags);
+                }
+              }
+            } catch {
+            }
+          }
+          for (const [cellLabel, tags] of cursorTagMap) {
+            this.cellTagsCache.set(cellLabel, tags);
+          }
+          const contentOps = cursorService.opsAtCursor("content-state");
+          const cursorPropsOverride = /* @__PURE__ */ new Map();
+          for (const op of contentOps) {
+            try {
+              const blob = await store.getResource(op.cell);
+              if (!blob) continue;
+              const snapshot = JSON.parse(await blob.text());
+              if (snapshot?.cellLabel && snapshot?.propertiesSig) {
+                cursorPropsOverride.set(snapshot.cellLabel, snapshot.propertiesSig);
+              }
+            } catch {
+            }
+          }
+          if (cursorPropsOverride.size > 0) {
+            this.#cursorPropsOverride = cursorPropsOverride;
+          }
+          const layoutOps = cursorService.opsAtCursor("layout-state");
+          for (const op of layoutOps) {
+            try {
+              const blob = await store.getResource(op.cell);
+              if (!blob) continue;
+              const snapshot = JSON.parse(await blob.text());
+              if (snapshot?.property && snapshot?.value !== void 0) {
+                switch (snapshot.property) {
+                  case "orientation": {
+                    const flat = snapshot.value === "flat-top";
+                    if (this.#flat !== flat) {
+                      this.#flat = flat;
+                      this.cellImageCache.clear();
+                    }
+                    break;
+                  }
+                  case "pivot": {
+                    const pivot = snapshot.value === "true";
+                    if (this.#pivot !== pivot) {
+                      this.#pivot = pivot;
+                      this.atlas?.setPivot(pivot);
+                    }
+                    break;
+                  }
+                  case "gap": {
+                    const gapPx = parseFloat(snapshot.value);
+                    if (!isNaN(gapPx) && this.#hexGeo.gapPx !== gapPx) {
+                      this.#hexGeo = createHexGeometry(this.#hexGeo.circumRadiusPx, gapPx, this.#hexGeo.padPx);
+                    }
+                    break;
+                  }
+                  case "mode": {
+                    const mode = snapshot.value;
+                    if (mode === "dense" || mode === "pinned") {
+                      this.#layoutMode = mode;
+                    }
+                    break;
+                  }
+                }
+              }
+            } catch {
+            }
+          }
+        }
       } else {
         const ops = await historyService.replay(sig.sig);
         const cellState = /* @__PURE__ */ new Map();
@@ -1198,11 +1315,25 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
         }
       }
     }
+    if (!this.#clipboardView) {
+      const clipSvc = get("@diamondcoreprocessor.com/ClipboardService");
+      const cutLabels = clipSvc?.operation === "cut" ? new Set(clipSvc.items.map((i) => i.label)) : /* @__PURE__ */ new Set();
+      const reconciled = [];
+      for (const cell of this.#pendingRemoves) {
+        if (cutLabels.has(cell) || !localCellSet.has(cell)) {
+          union.delete(cell);
+        } else {
+          reconciled.push(cell);
+        }
+      }
+      for (const cell of reconciled) this.#pendingRemoves.delete(cell);
+    }
     const blockedSet = new Set(JSON.parse(localStorage.getItem(`hc:blocked-tiles:${locationKey}`) ?? "[]"));
     for (const blocked of blockedSet) {
       if (!localCellSet.has(blocked)) union.delete(blocked);
     }
-    const hiddenSet = new Set(JSON.parse(localStorage.getItem(`hc:hidden-tiles:${locationKey}`) ?? "[]"));
+    const cursorState = cursorService?.state;
+    const hiddenSet = cursorState?.rewound && cursorService ? cursorService.computeDivergence().hiddenAtCursor : new Set(JSON.parse(localStorage.getItem(`hc:hidden-tiles:${locationKey}`) ?? "[]"));
     this.#currentHiddenSet = hiddenSet;
     if (!this.#showHiddenItems) {
       for (const hidden of hiddenSet) {
@@ -1216,40 +1347,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       }
     }
     this.#layoutMode = this.#readLayoutMode(locationKey);
-    let cellNames;
-    if (this.#layoutMode === "pinned") {
-      cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet);
-      if (this.filterKeyword) {
-        const kw = this.filterKeyword;
-        cellNames = cellNames.map((s) => s && s.toLowerCase().includes(kw) ? s : "");
-      }
-    } else {
-      const orderProjection = window.ioc?.get?.("@diamondcoreprocessor.com/OrderProjection");
-      if (orderProjection) {
-        const locSig = await this.computeSignatureLocation(lineage);
-        const order = await orderProjection.hydrate(locSig.sig);
-        if (order.length > 0) {
-          const unionSet = new Set(union);
-          cellNames = order.filter((s) => unionSet.has(s));
-          for (const s of union) {
-            if (!cellNames.includes(s)) cellNames.push(s);
-          }
-        } else {
-          cellNames = await this.#orderByIndex(dir, Array.from(union), localCellSet);
-        }
-      } else {
-        cellNames = await this.#orderByIndex(dir, Array.from(union), localCellSet);
-      }
-      const layout = this.resolve("layout");
-      if (layout) {
-        const order = await layout.read(dir);
-        if (order) cellNames = layout.merge(order, cellNames);
-      }
-      if (this.filterKeyword) {
-        const kw = this.filterKeyword;
-        cellNames = cellNames.filter((s) => s.toLowerCase().includes(kw));
-      }
-    }
+    const cellNames = await this.#resolveCellOrder(this.#layoutMode, dir, union, localCellSet, lineage);
     const previousLocationKey = this.renderedLocationKey;
     const layerChanged = locationKey !== previousLocationKey;
     if (this.streamActive && !layerChanged) return;
@@ -1258,6 +1356,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       this.renderedLocationKey = locationKey;
       this.renderedCellsKey = "";
       this.renderedCells.clear();
+      this.#pendingRemoves.clear();
       await this.#applyViewportForLayer(dir);
       const vp = window.ioc?.get?.("@diamondcoreprocessor.com/ViewportPersistence");
       if (vp) vp.setDirSilent(dir);
@@ -1314,28 +1413,20 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
   streamCells = async (dir, cellNames, localCellSet, axial, branchSet) => {
     this.streamActive = true;
     this.cancelStreamFlag = false;
+    const axialMax = typeof axial.items.size === "number" ? axial.items.size : cellNames.length;
+    const maxCells = Math.min(cellNames.length, axialMax);
+    const allCells = this.buildCellsFromAxial(axial, cellNames, maxCells, localCellSet, branchSet);
     const cells = [];
-    for (let index = 0; index < cellNames.length; index++) {
+    for (let i = 0; i < allCells.length; i++) {
       if (this.cancelStreamFlag) break;
-      const label = cellNames[index];
-      const axialCell = axial.items.get(index);
-      if (!axialCell || !label) continue;
-      const div = this.#divergenceFutureAdds.has(label) ? 1 : this.#divergenceFutureRemoves.has(label) ? 2 : 0;
-      const cell = {
-        q: axialCell.q,
-        r: axialCell.r,
-        label,
-        external: !localCellSet.has(label),
-        hasBranch: branchSet?.has(label) ?? false,
-        divergence: div
-      };
+      const cell = allCells[i];
       await this.loadCellImages([cell], dir);
       if (this.cancelStreamFlag) break;
       cells.push(cell);
-      this.renderedCells.set(label, cell);
-      const isLastSeed = index === cellNames.length - 1;
-      if (cells.length % _ShowCellDrone.STREAM_BATCH_SIZE === 0 || isLastSeed) {
-        await this.applyGeometry(cells, isLastSeed);
+      this.renderedCells.set(cell.label, cell);
+      const isLast = i === allCells.length - 1;
+      if (cells.length % _ShowCellDrone.STREAM_BATCH_SIZE === 0 || isLast) {
+        await this.applyGeometry(cells, isLast);
       }
       await this.microDelay();
     }
@@ -1500,13 +1591,35 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       this.renderedCellsKey = "";
       this.requestRender();
     });
-    this.onEffect("cell:added", () => {
+    this.onEffect("cell:added", (payload) => {
       this.#layerCellsCache.clear();
       this.renderedCellsKey = "";
+      if (payload?.cell) {
+        this.#pendingRemoves.delete(payload.cell);
+        if (this.cachedCellNames && this.cachedLocalCellSet) {
+          if (!this.cachedCellNames.includes(payload.cell)) {
+            this.cachedCellNames.push(payload.cell);
+            this.cachedLocalCellSet.add(payload.cell);
+          }
+        }
+      }
     });
-    this.onEffect("cell:removed", () => {
+    this.onEffect("cell:removed", (payload) => {
       this.#layerCellsCache.clear();
       this.renderedCellsKey = "";
+      if (payload?.cell) {
+        this.#pendingRemoves.add(payload.cell);
+        if (this.cachedCellNames) {
+          const idx = this.cachedCellNames.indexOf(payload.cell);
+          if (idx !== -1) this.cachedCellNames.splice(idx, 1);
+          this.cachedLocalCellSet?.delete(payload.cell);
+          this.cachedBranchSet?.delete(payload.cell);
+          this.cellImageCache.delete(payload.cell);
+          this.cellTagsCache.delete(payload.cell);
+          this.cellLinkCache.delete(payload.cell);
+          this.cellBorderColorCache.delete(payload.cell);
+        }
+      }
     });
     this.onEffect("history:cursor-changed", () => {
       this.#layerCellsCache.clear();
@@ -1584,6 +1697,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       } else {
         this.#clipboardView = null;
       }
+      this.renderedCellsKey = "";
       this.requestRender();
     });
     this.onEffect("clipboard:captured", (payload) => {
@@ -1805,7 +1919,11 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
         if (typeof props["index"] === "number") {
           const idx = props["index"];
           if (idx >= 0 && idx <= maxSlot) {
-            sparse[idx] = name;
+            if (sparse[idx] !== "") {
+              unindexed.push(name);
+            } else {
+              sparse[idx] = name;
+            }
           } else {
             unindexed.push(name);
           }
@@ -1831,6 +1949,59 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       }
     }
     return sparse;
+  }
+  /**
+   * Central ordering strategy — all render paths route through here.
+   * Each layout mode implements its own ordering logic; new modes add a case.
+   * Returns a name array ready for buildCellsFromAxial:
+   *   - dense: packed array (cellNames[i] → axial position i)
+   *   - pinned: sparse array with empty-string gaps (cellNames[i] → axial position i)
+   */
+  async #resolveCellOrder(mode, dir, union, localCellSet, lineage) {
+    switch (mode) {
+      case "pinned": {
+        let cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet);
+        if (this.filterKeyword) {
+          const kw = this.filterKeyword;
+          cellNames = cellNames.map((s) => s && s.toLowerCase().includes(kw) ? s : "");
+        }
+        return cellNames;
+      }
+      // dense (default): pack tiles contiguously
+      default: {
+        let cellNames;
+        let orderFromProjection = false;
+        const orderProjection = window.ioc?.get?.("@diamondcoreprocessor.com/OrderProjection");
+        if (orderProjection) {
+          const locSig = await this.computeSignatureLocation(lineage);
+          const order = await orderProjection.hydrate(locSig.sig);
+          if (order.length > 0) {
+            orderFromProjection = true;
+            const unionSet = new Set(union);
+            cellNames = order.filter((s) => unionSet.has(s));
+            for (const s of union) {
+              if (!cellNames.includes(s)) cellNames.push(s);
+            }
+          } else {
+            cellNames = await this.#orderByIndex(dir, Array.from(union), localCellSet);
+          }
+        } else {
+          cellNames = await this.#orderByIndex(dir, Array.from(union), localCellSet);
+        }
+        if (!orderFromProjection) {
+          const layout = this.resolve("layout");
+          if (layout) {
+            const order = await layout.read(dir);
+            if (order) cellNames = layout.merge(order, cellNames);
+          }
+        }
+        if (this.filterKeyword) {
+          const kw = this.filterKeyword;
+          cellNames = cellNames.filter((s) => s.toLowerCase().includes(kw));
+        }
+        return cellNames;
+      }
+    }
   }
   /**
    * Order cells by their persisted index in the 0000 properties file.
@@ -1973,7 +2144,8 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
   loadCellImages = async (cells, _dir) => {
     const store = window.ioc?.get?.("@hypercomb.social/Store");
     if (!store || !this.imageAtlas) return;
-    const propsIndex = JSON.parse(localStorage.getItem("hc:tile-props-index") ?? "{}");
+    const livePropsIndex = JSON.parse(localStorage.getItem("hc:tile-props-index") ?? "{}");
+    const propsIndex = this.#cursorPropsOverride ? Object.fromEntries([...Object.entries(livePropsIndex), ...this.#cursorPropsOverride]) : livePropsIndex;
     for (const cell of cells) {
       if (cell.external) continue;
       if (!this.cellTagsCache.has(cell.label)) {

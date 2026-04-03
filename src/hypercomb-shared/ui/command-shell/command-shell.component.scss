@@ -161,6 +161,50 @@ $bp-phone-max: 599px;
   white-space: nowrap;
 }
 
+// ── status indicators (right side of input) ──────────────
+
+.indicators {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding-right: 0.5rem;
+  flex-shrink: 0;
+}
+
+.indicator-pill {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.15rem 0.35rem;
+  background: rgba(var(--glow-color-rgb), 0.12);
+  border: 1px solid rgba(var(--glow-color-rgb), 0.25);
+  border-radius: 3px;
+  color: rgba(var(--glow-color-rgb), 0.7);
+  font: 0.75em / 1 var(--terminal-font);
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease;
+  user-select: none;
+
+  &:hover {
+    background: rgba(var(--glow-color-rgb), 0.2);
+    border-color: rgba(var(--glow-color-rgb), 0.45);
+  }
+
+  &:hover .indicator-x {
+    opacity: 1;
+  }
+}
+
+.indicator-icon {
+  font-size: 0.9em;
+}
+
+.indicator-x {
+  opacity: 0.35;
+  font-size: 0.85em;
+  transition: opacity 150ms ease;
+}
+
 // ═══════════════════════════════════════════════════════════
 // RESPONSIVE — only touch zoom prevention, no layout changes
 // ═══════════════════════════════════════════════════════════

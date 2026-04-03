@@ -80,6 +80,10 @@ export class ActivityLogComponent implements OnDestroy {
         const key = p.public ? 'activity.mesh-public' : 'activity.mesh-private'
         this.#addEntry('\u25C6', this.#i18n?.t(key) ?? (p.public ? 'mesh \u2192 public' : 'mesh \u2192 private'))
       }),
+      EffectBus.on<{ icon?: string; message: string }>('activity:log', p => {
+        if (!this.#ready || !p?.message) return
+        this.#addEntry(p.icon ?? '\u2139', p.message)
+      }),
     )
 
     queueMicrotask(() => { this.#ready = true })

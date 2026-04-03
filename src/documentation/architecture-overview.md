@@ -202,7 +202,7 @@ the hive is layered. each ring depends only on the rings inside it.
     assistant/           ClaudeBridgeWorker (AI assistant integration)
     bridge/              ClaudeBridgeDrone (WebSocket bridge)
     clipboard/           ClipboardWorker, ClipboardService
-    commands/            CommandPaletteDrone, HelpQueenBee, ShortcutSheetDrone, SlashCommandDrone
+    commands/            CommandPaletteDrone, HelpQueenBee, ShortcutSheetDrone, SlashBehaviourDrone
     editor/              TileEditorDrone, TileEditorService, ImageEditorService
     history/             HistoryRecorderDrone, HistoryService, OrderProjection
     keyboard/            KeyMapService, DefaultKeymap, EscapeCascade

@@ -82,6 +82,17 @@ var TileSelectionDrone = class _TileSelectionDrone extends Drone {
     });
     this.onEffect("navigation:guard-start", () => {
       this.#navigationBlocked = true;
+      if (this.#dragActive || this.#pendingDrag || this.#reorderDragActive) {
+        this.#dragActive = false;
+        this.#pendingDrag = false;
+        this.#pendingStartLabel = null;
+        this.#reorderDragActive = false;
+        this.#reorderSourceLabel = null;
+        this.#activePointerId = null;
+        this.#lastOp = null;
+        this.#touched.clear();
+        this.#gate?.release("tile-selection");
+      }
       if (this.#navigationGuardTimer) clearTimeout(this.#navigationGuardTimer);
       this.#navigationGuardTimer = setTimeout(() => {
         this.#navigationBlocked = false;

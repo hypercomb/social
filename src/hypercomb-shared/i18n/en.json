@@ -148,6 +148,11 @@
   "slash.accent": "Set the hover accent color by name",
   "slash.instructions": "Toggle instruction overlay",
   "slash.docs": "Browse project documentation",
+  "slash.substrate": "Manage default background images for new tiles",
+
+  "substrate.active": "substrate active → {path}",
+  "substrate.none": "no substrate configured",
+  "substrate.global": "global substrate → {path}",
 
   "toast.dismiss": "Dismiss",
 

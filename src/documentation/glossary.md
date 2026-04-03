@@ -85,8 +85,8 @@ real-time command bee. extends `Bee`. invoked directly via `/command` in the com
 ### hash marker
 a binding between a drone name and a cell. syntax: `cell#DroneName` in the command line. the drone name (or IoC key or signature) is stored in the cell's zero-signature properties file under `markers: string[]`. markers are metadata for UI and introspection — they do not affect bee discovery, which is always manifest-driven.
 
-### slash command
-a `/command` pattern typed into the command line. `SlashCommandBehavior` matches the input, looks up queen bees via duck-typing (checks for `command` property and `invoke()` method on all IoC entries), and dispatches directly. falls through to path-based behaviors if no queen matches. `SlashCommandDrone` in `@hypercomb/essentials` provides the provider registry.
+### slash behaviour
+a `/behaviour` pattern typed into the command line. `SlashBehaviourBehavior` matches the input, looks up queen bees via duck-typing (checks for `command` property and `invoke()` method on all IoC entries), and dispatches directly. falls through to path-based behaviors if no queen matches. `SlashBehaviourDrone` in `@hypercomb/essentials` provides the provider registry.
 
 ### clipboard
 cut/copy/paste system for cells. `ClipboardWorker` (a `Worker` in `@hypercomb/essentials`) captures selected cells, persists metadata to OPFS, and pastes by copying cell directories to the current location. `ClipboardService` tracks entries with `label` and `sourceSegments`. operations: copy, cut, paste, place, clear. emits `clipboard:captured`, `clipboard:paste-start`, `clipboard:paste-done`. integrates with `HistoryService` for revert support.

@@ -57,24 +57,10 @@
 <div
   class="pill-stage"
   [class.faded]="!visible()"
-  [class.custom-pos]="pillCustomPosition()"
-  [style.left.px]="pillLeft()"
-  [style.top.px]="pillTop()"
-  [style.bottom]="pillCustomPosition() ? 'auto' : null"
   [style.zoom]="pillZoom()"
   (mouseenter)="onBarEnter()"
   (mouseleave)="onBarLeave()"
 >
-  <!-- drag handle (left edge) -->
-  <div class="drag-handle"
-       (pointerdown)="onDragHandleDown($event)"
-       (pointermove)="onDragHandleMove($event)"
-       (pointerup)="onDragHandleUp($event)"
-       (dblclick)="onDragHandleDblClick()"
-       [attr.aria-label]="'controls.drag-handle' | t">
-    <span class="drag-dots"></span>
-  </div>
-
   <div
     class="controls-pill"
     [class.public-mode]="meshPublic"

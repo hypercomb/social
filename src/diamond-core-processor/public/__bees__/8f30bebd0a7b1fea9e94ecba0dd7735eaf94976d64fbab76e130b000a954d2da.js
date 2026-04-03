@@ -476,6 +476,8 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
   #shatterAnimating = false;
   #navigationBlocked = false;
   #navigationGuardTimer = null;
+  /** Tracks the pointerId that triggered a pointerdown-navigation, so the trailing pointerup + click can be suppressed. */
+  #consumedPointerId = null;
   #meshPublic = false;
   #editing = false;
   #editCooldown = false;
@@ -658,6 +660,7 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
       });
       this.onEffect("navigation:guard-end", () => {
         this.#navigationBlocked = false;
+        this.#consumedPointerId = null;
         if (this.#navigationGuardTimer) {
           clearTimeout(this.#navigationGuardTimer);
           this.#navigationGuardTimer = null;
@@ -705,6 +708,7 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
   dispose() {
     if (this.#arrangeMode) this.#exitArrangeMode();
     if (this.#listening) {
+      document.removeEventListener("pointerdown", this.#onPointerDown);
       document.removeEventListener("pointermove", this.#onPointerMove);
       document.removeEventListener("dragover", this.#onDragOverTrack);
       document.removeEventListener("click", this.#onClick);
@@ -1246,6 +1250,7 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
   #attachListeners() {
     if (this.#listening) return;
     this.#listening = true;
+    document.addEventListener("pointerdown", this.#onPointerDown);
     document.addEventListener("pointermove", this.#onPointerMove);
     document.addEventListener("dragover", this.#onDragOverTrack);
     document.addEventListener("click", this.#onClick);
@@ -1347,7 +1352,45 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
       }
     }
   }
+  // ── Instant branch navigation on pointerdown ────────────────────────
+  #onPointerDown = (e) => {
+    if (e.button !== 0) return;
+    if (this.#arrangeMode) return;
+    if (this.#navigationBlocked) return;
+    if (this.#editing || this.#editCooldown) return;
+    if (this.#hasSelection) return;
+    if (this.#touchDragging) return;
+    if (e.ctrlKey || e.metaKey) return;
+    if (!this.#renderContainer || !this.#renderer || !this.#canvas) return;
+    const detector = this.resolve("detector");
+    if (!detector) return;
+    const pixiGlobal = this.#clientToPixiGlobal(e.clientX, e.clientY);
+    const local = this.#renderContainer.toLocal(new Point(pixiGlobal.x, pixiGlobal.y));
+    const meshLocalX = local.x - this.#meshOffset.x;
+    const meshLocalY = local.y - this.#meshOffset.y;
+    const axial = detector.pixelToAxial(meshLocalX, meshLocalY, this.#flat);
+    const entry = this.#occupiedByAxial.get(_TileOverlayDrone.axialKey(axial.q, axial.r));
+    if (!entry?.label) return;
+    if (!this.#branchLabels.has(entry.label)) return;
+    if (this.#overlay?.visible) {
+      const ox = this.#overlay.position.x;
+      const oy = this.#overlay.position.y;
+      for (const action of this.#actions) {
+        if (!action.button.visible) continue;
+        const btn = action.button;
+        const bx = local.x - ox - btn.position.x;
+        const by = local.y - oy - btn.position.y;
+        if (btn.containsPoint(bx, by)) return;
+      }
+    }
+    this.#consumedPointerId = e.pointerId;
+    this.#navigateInto(entry.label);
+  };
   #onClick = (e) => {
+    if (this.#consumedPointerId !== null) {
+      this.#consumedPointerId = null;
+      return;
+    }
     if (this.#arrangeMode) return;
     if (this.#navigationBlocked) return;
     if (this.#editing || this.#editCooldown) return;
@@ -1443,6 +1486,7 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
   };
   // Cancel editor on right-click release (mirrors Escape cascade priority 1)
   #onPointerUp = (e) => {
+    if (this.#consumedPointerId === e.pointerId && e.button === 0) return;
     if (e.button !== 2) return;
     if (!this.#editing) return;
     const drone = window.ioc.get("@diamondcoreprocessor.com/TileEditorDrone");
@@ -1476,14 +1520,22 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
   #navigateInto(label) {
     const lineage = this.resolve("lineage");
     if (!lineage) return;
+    this.#clearSelectionOnNavigate();
     this.emitEffect("tile:navigate-in", { label });
     lineage.explorerEnter(label);
   }
   #navigateBack() {
     const lineage = this.resolve("lineage");
     if (!lineage) return;
+    this.#clearSelectionOnNavigate();
     this.emitEffect("tile:navigate-back", {});
     lineage.explorerUp();
+  }
+  #clearSelectionOnNavigate() {
+    const selection = window.ioc.get("@diamondcoreprocessor.com/SelectionService");
+    if (selection && selection.count > 0) selection.clear();
+    const pixi = window.ioc.get("@diamondcoreprocessor.com/TileSelectionDrone");
+    if (pixi && pixi.selectedAxialKeys.size > 0) pixi.clearSelection();
   }
   // ── Helpers ────────────────────────────────────────────────────────
   #updateCellLabel(_q, _r) {

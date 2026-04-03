@@ -109,9 +109,21 @@ class TileSelectionDrone extends Drone {
       this.#flat = payload.flat
     })
 
-    // navigation guard — block clicks during layer transitions
+    // navigation guard — block clicks during layer transitions and reset drag state
     this.onEffect('navigation:guard-start', () => {
       this.#navigationBlocked = true
+      // Abort any in-progress drag/pending gesture so stale state doesn't bleed into the new view
+      if (this.#dragActive || this.#pendingDrag || this.#reorderDragActive) {
+        this.#dragActive = false
+        this.#pendingDrag = false
+        this.#pendingStartLabel = null
+        this.#reorderDragActive = false
+        this.#reorderSourceLabel = null
+        this.#activePointerId = null
+        this.#lastOp = null
+        this.#touched.clear()
+        this.#gate?.release('tile-selection')
+      }
       if (this.#navigationGuardTimer) clearTimeout(this.#navigationGuardTimer)
       this.#navigationGuardTimer = setTimeout(() => { this.#navigationBlocked = false }, 200)
     })

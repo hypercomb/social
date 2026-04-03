@@ -1,7 +1,23 @@
 // diamondcoreprocessor.com/core/history.service.ts
 import { SignatureService, SignatureStore } from '@hypercomb/core'
 
-export type HistoryOpType = 'add' | 'remove' | 'reorder' | 'rename' | 'add-drone' | 'remove-drone' | 'instruction-state'
+export type HistoryOpType =
+  // Cell lifecycle
+  | 'add'
+  | 'remove'
+  | 'reorder'
+  | 'rename'
+  // Drone lifecycle
+  | 'add-drone'
+  | 'remove-drone'
+  // Feature state (signature-addressed payloads)
+  | 'instruction-state'
+  | 'tag-state'
+  | 'content-state'
+  | 'layout-state'
+  // Visibility markers
+  | 'hide'
+  | 'unhide'
 
 export type HistoryOp = {
   op: HistoryOpType

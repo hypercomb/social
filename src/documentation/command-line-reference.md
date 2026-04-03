@@ -178,7 +178,7 @@ Queen bees register `/command` handlers. Type `/paste`, `/help`, etc. to invoke 
 The `#behaviors` array determines match priority for pluggable behaviors:
 
 1. **GoParentBehavior** — `..` parent navigation (fastest escape hatch)
-2. **SlashCommandBehavior** — `/command` queen bee dispatch
+2. **SlashBehaviourBehavior** — `/behaviour` queen bee dispatch
 3. **RemoveCellBehavior** — `~` prefix (removes from visible hierarchy)
 4. **CutPasteBehavior** — `[items]/path` bracket-path copy
 5. **HashMarkerBehavior** — `cell#Drone` binding

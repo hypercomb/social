@@ -1,6 +1,7 @@
 // diamondcoreprocessor.com/core/history-cursor.service.ts
 import { EffectBus } from '@hypercomb/core'
 import type { HistoryService, HistoryOp } from './history.service.js'
+import type { GlobalTimeClock } from './global-time-clock.service.js'
 
 export type CursorState = {
   /** History bag signature for the current location. */
@@ -22,6 +23,8 @@ export type DivergenceInfo = {
   futureAdds: Set<string>
   /** Cells that exist at cursor but are removed later (marked for removal). */
   futureRemoves: Set<string>
+  /** Cells hidden at cursor position (via hide/unhide ops). */
+  hiddenAtCursor: Set<string>
 }
 
 /**
@@ -60,8 +63,15 @@ export class HistoryCursorService extends EventTarget {
     this.#total = ops.length
 
     if (this.#locationSig !== locationSig) {
-      // new location — jump to latest
+      // new location — check if global time clock is active
       this.#locationSig = locationSig
+      const clock = get<GlobalTimeClock>('@diamondcoreprocessor.com/GlobalTimeClock')
+      if (clock?.active && clock.timestamp !== null) {
+        // Global time mode: seek to the clock's timestamp
+        this.seekToTime(clock.timestamp)
+        return   // seekToTime calls #emit
+      }
+      // Live mode: jump to latest
       this.#position = this.#total
     } else if (this.#position > this.#total) {
       // history grew shorter (shouldn't happen, but safety)
@@ -113,6 +123,35 @@ export class HistoryCursorService extends EventTarget {
   /** Jump to latest (exit rewind mode). */
   jumpToLatest(): void {
     this.seek(this.#total)
+  }
+
+  /**
+   * Seek to the last op at or before the given timestamp.
+   * Returns the position it landed on (0 if no ops before timestamp).
+   */
+  seekToTime(timestamp: number): number {
+    if (this.#allOps.length === 0) return 0
+
+    // Find last op whose `at` <= timestamp
+    let pos = 0
+    for (let i = 0; i < this.#allOps.length; i++) {
+      if (this.#allOps[i].at <= timestamp) {
+        pos = i + 1   // 1-based position
+      } else {
+        break
+      }
+    }
+
+    this.seek(pos)
+    return pos
+  }
+
+  /**
+   * Get all operation timestamps for this location's bag.
+   * Used by GlobalTimeClock for stepping across locations.
+   */
+  get allTimestamps(): number[] {
+    return this.#allOps.map(op => op.at)
   }
 
   /**
@@ -197,17 +236,22 @@ export class HistoryCursorService extends EventTarget {
     const current = new Set<string>()
     const futureAdds = new Set<string>()
     const futureRemoves = new Set<string>()
+    const hiddenAtCursor = new Set<string>()
 
     if (this.#allOps.length === 0) {
-      return { current, futureAdds, futureRemoves }
+      return { current, futureAdds, futureRemoves, hiddenAtCursor }
     }
 
-    // Replay up to cursor position to get "current" cell set
+    // Replay up to cursor position to get "current" cell set and hidden set
     const cellStateAtCursor = new Map<string, string>()
     for (let i = 0; i < this.#position; i++) {
       const op = this.#allOps[i]
       if (op.op === 'add' || op.op === 'remove') {
         cellStateAtCursor.set(op.cell, op.op)
+      } else if (op.op === 'hide') {
+        hiddenAtCursor.add(op.cell)
+      } else if (op.op === 'unhide') {
+        hiddenAtCursor.delete(op.cell)
       }
     }
 
@@ -217,7 +261,7 @@ export class HistoryCursorService extends EventTarget {
 
     // If not rewound, no divergence
     if (this.#position >= this.#total) {
-      return { current, futureAdds, futureRemoves }
+      return { current, futureAdds, futureRemoves, hiddenAtCursor }
     }
 
     // Replay ops AFTER cursor to find future changes
@@ -242,7 +286,57 @@ export class HistoryCursorService extends EventTarget {
       }
     }
 
-    return { current, futureAdds, futureRemoves }
+    return { current, futureAdds, futureRemoves, hiddenAtCursor }
+  }
+
+  /**
+   * Collect all tag-state resource signatures up to cursor position.
+   * Returns the signatures in order — the caller resolves them to get
+   * cumulative tag state at cursor time.
+   *
+   * Reconstruction: walk the returned sigs, each resolves to
+   * { version, cellTags: Record<cellLabel, string[]>, at }.
+   * Last write wins per cell — build a Map<cellLabel, string[]>.
+   */
+  collectTagStateSignatures(): string[] {
+    const sigs: string[] = []
+    for (let i = 0; i < this.#position; i++) {
+      const op = this.#allOps[i]
+      if (op.op === 'tag-state') sigs.push(op.cell)
+    }
+    return sigs
+  }
+
+  /**
+   * Collect the last content-state resource signature per cell up to cursor position.
+   * Returns Map<cellLabel, resourceSig> — the caller resolves each sig to get
+   * { version, cellLabel, propertiesSig, at }.
+   *
+   * The propertiesSig points to the cell's properties resource at that moment.
+   */
+  collectContentStateSignatures(): Map<string, string> {
+    const lastSigPerCell = new Map<string, string>()
+    for (let i = 0; i < this.#position; i++) {
+      const op = this.#allOps[i]
+      if (op.op === 'content-state') {
+        // We don't know the cellLabel without resolving — store all and let caller handle
+        lastSigPerCell.set(`__idx_${i}`, op.cell)
+      }
+    }
+    return lastSigPerCell
+  }
+
+  /**
+   * Get all ops up to cursor position, filtered by type.
+   * Generic method for any op type that needs reconstruction.
+   */
+  opsAtCursor(opType?: string): HistoryOp[] {
+    const ops: HistoryOp[] = []
+    for (let i = 0; i < this.#position; i++) {
+      const op = this.#allOps[i]
+      if (!opType || op.op === opType) ops.push(op)
+    }
+    return ops
   }
 
   #emit(): void {

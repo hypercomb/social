@@ -1,6 +1,83 @@
 // @diamondcoreprocessor.com/history
-// src/diamondcoreprocessor.com/history/history-cursor.service.ts
+// src/diamondcoreprocessor.com/history/global-time-clock.service.ts
 import { EffectBus } from "@hypercomb/core";
+var GlobalTimeClock = class extends EventTarget {
+  #timestamp = null;
+  /** null = live mode (no time override). number = frozen timestamp (ms epoch). */
+  get timestamp() {
+    return this.#timestamp;
+  }
+  /** Whether the clock is in global time mode (not live). */
+  get active() {
+    return this.#timestamp !== null;
+  }
+  /**
+   * Set the global clock to a specific timestamp.
+   * All locations will sync to show state at this moment.
+   */
+  setTime(timestamp) {
+    if (this.#timestamp === timestamp) return;
+    this.#timestamp = timestamp;
+    this.#emit();
+  }
+  /**
+   * Return to live mode. All locations show head state.
+   */
+  goLive() {
+    if (this.#timestamp === null) return;
+    this.#timestamp = null;
+    this.#emit();
+  }
+  /**
+   * Step to the previous op timestamp across all known history bags.
+   * Finds the nearest op timestamp that is strictly before the current timestamp.
+   */
+  stepBack(allOpsTimestamps) {
+    if (allOpsTimestamps.length === 0) return;
+    if (this.#timestamp === null) {
+      const last = allOpsTimestamps[allOpsTimestamps.length - 1];
+      if (last !== void 0) this.setTime(last);
+      return;
+    }
+    let candidate = null;
+    for (const t of allOpsTimestamps) {
+      if (t < this.#timestamp) {
+        if (candidate === null || t > candidate) candidate = t;
+      }
+    }
+    if (candidate !== null) {
+      this.setTime(candidate);
+    }
+  }
+  /**
+   * Step to the next op timestamp across all known history bags.
+   * Finds the nearest op timestamp that is strictly after the current timestamp.
+   * If stepping past the last op, returns to live mode.
+   */
+  stepForward(allOpsTimestamps) {
+    if (this.#timestamp === null || allOpsTimestamps.length === 0) return;
+    let candidate = null;
+    for (const t of allOpsTimestamps) {
+      if (t > this.#timestamp) {
+        if (candidate === null || t < candidate) candidate = t;
+      }
+    }
+    if (candidate !== null) {
+      this.setTime(candidate);
+    } else {
+      this.goLive();
+    }
+  }
+  #emit() {
+    this.dispatchEvent(new CustomEvent("change"));
+    EffectBus.emit("time:changed", { timestamp: this.#timestamp });
+  }
+};
+var _globalTimeClock = new GlobalTimeClock();
+window.ioc.register("@diamondcoreprocessor.com/GlobalTimeClock", _globalTimeClock);
+
+// src/diamondcoreprocessor.com/history/history-cursor.service.ts
+import { EffectBus as EffectBus2 } from "@hypercomb/core";
 var HistoryCursorService = class extends EventTarget {
   #locationSig = "";
   #position = 0;
@@ -28,6 +105,11 @@ var HistoryCursorService = class extends EventTarget {
     this.#total = ops.length;
     if (this.#locationSig !== locationSig) {
       this.#locationSig = locationSig;
+      const clock = get("@diamondcoreprocessor.com/GlobalTimeClock");
+      if (clock?.active && clock.timestamp !== null) {
+        this.seekToTime(clock.timestamp);
+        return;
+      }
       this.#position = this.#total;
     } else if (this.#position > this.#total) {
       this.#position = this.#total;
@@ -72,6 +154,30 @@ var HistoryCursorService = class extends EventTarget {
   /** Jump to latest (exit rewind mode). */
   jumpToLatest() {
     this.seek(this.#total);
+  }
+  /**
+   * Seek to the last op at or before the given timestamp.
+   * Returns the position it landed on (0 if no ops before timestamp).
+   */
+  seekToTime(timestamp) {
+    if (this.#allOps.length === 0) return 0;
+    let pos = 0;
+    for (let i = 0; i < this.#allOps.length; i++) {
+      if (this.#allOps[i].at <= timestamp) {
+        pos = i + 1;
+      } else {
+        break;
+      }
+    }
+    this.seek(pos);
+    return pos;
+  }
+  /**
+   * Get all operation timestamps for this location's bag.
+   * Used by GlobalTimeClock for stepping across locations.
+   */
+  get allTimestamps() {
+    return this.#allOps.map((op) => op.at);
   }
   /**
    * Promote the state at the current cursor position to head.
@@ -137,21 +243,26 @@ var HistoryCursorService = class extends EventTarget {
     const current = /* @__PURE__ */ new Set();
     const futureAdds = /* @__PURE__ */ new Set();
     const futureRemoves = /* @__PURE__ */ new Set();
+    const hiddenAtCursor = /* @__PURE__ */ new Set();
     if (this.#allOps.length === 0) {
-      return { current, futureAdds, futureRemoves };
+      return { current, futureAdds, futureRemoves, hiddenAtCursor };
     }
     const cellStateAtCursor = /* @__PURE__ */ new Map();
     for (let i = 0; i < this.#position; i++) {
       const op = this.#allOps[i];
       if (op.op === "add" || op.op === "remove") {
         cellStateAtCursor.set(op.cell, op.op);
+      } else if (op.op === "hide") {
+        hiddenAtCursor.add(op.cell);
+      } else if (op.op === "unhide") {
+        hiddenAtCursor.delete(op.cell);
       }
     }
     for (const [cell, lastOp] of cellStateAtCursor) {
       if (lastOp !== "remove") current.add(cell);
     }
     if (this.#position >= this.#total) {
-      return { current, futureAdds, futureRemoves };
+      return { current, futureAdds, futureRemoves, hiddenAtCursor };
     }
     const cellStateAtEnd = new Map(cellStateAtCursor);
     for (let i = this.#position; i < this.#total; i++) {
@@ -169,11 +280,57 @@ var HistoryCursorService = class extends EventTarget {
         futureRemoves.add(cell);
       }
     }
-    return { current, futureAdds, futureRemoves };
+    return { current, futureAdds, futureRemoves, hiddenAtCursor };
+  }
+  /**
+   * Collect all tag-state resource signatures up to cursor position.
+   * Returns the signatures in order — the caller resolves them to get
+   * cumulative tag state at cursor time.
+   *
+   * Reconstruction: walk the returned sigs, each resolves to
+   * { version, cellTags: Record<cellLabel, string[]>, at }.
+   * Last write wins per cell — build a Map<cellLabel, string[]>.
+   */
+  collectTagStateSignatures() {
+    const sigs = [];
+    for (let i = 0; i < this.#position; i++) {
+      const op = this.#allOps[i];
+      if (op.op === "tag-state") sigs.push(op.cell);
+    }
+    return sigs;
+  }
+  /**
+   * Collect the last content-state resource signature per cell up to cursor position.
+   * Returns Map<cellLabel, resourceSig> — the caller resolves each sig to get
+   * { version, cellLabel, propertiesSig, at }.
+   *
+   * The propertiesSig points to the cell's properties resource at that moment.
+   */
+  collectContentStateSignatures() {
+    const lastSigPerCell = /* @__PURE__ */ new Map();
+    for (let i = 0; i < this.#position; i++) {
+      const op = this.#allOps[i];
+      if (op.op === "content-state") {
+        lastSigPerCell.set(`__idx_${i}`, op.cell);
+      }
+    }
+    return lastSigPerCell;
+  }
+  /**
+   * Get all ops up to cursor position, filtered by type.
+   * Generic method for any op type that needs reconstruction.
+   */
+  opsAtCursor(opType) {
+    const ops = [];
+    for (let i = 0; i < this.#position; i++) {
+      const op = this.#allOps[i];
+      if (!opType || op.op === opType) ops.push(op);
+    }
+    return ops;
   }
   #emit() {
     this.dispatchEvent(new CustomEvent("change"));
-    EffectBus.emit("history:cursor-changed", this.state);
+    EffectBus2.emit("history:cursor-changed", this.state);
   }
   #groupKeyForIndex(index) {
     const op = this.#allOps[index];
@@ -377,25 +534,29 @@ var _historyService = new HistoryService();
 window.ioc.register("@diamondcoreprocessor.com/HistoryService", _historyService);
 
 // src/diamondcoreprocessor.com/history/order-projection.ts
-import { EffectBus as EffectBus2 } from "@hypercomb/core";
+import { EffectBus as EffectBus3 } from "@hypercomb/core";
 var OrderProjection = class {
   #cache = /* @__PURE__ */ new Map();
   #currentSig = null;
   constructor() {
-    EffectBus2.on("cell:added", (payload) => {
+    EffectBus3.on("cell:added", (payload) => {
       if (!payload?.cell || !this.#currentSig) return;
       const order = this.#cache.get(this.#currentSig);
       if (order && !order.includes(payload.cell)) {
         order.push(payload.cell);
       }
     });
-    EffectBus2.on("cell:removed", (payload) => {
+    EffectBus3.on("cell:removed", (payload) => {
       if (!payload?.cell || !this.#currentSig) return;
       const order = this.#cache.get(this.#currentSig);
       if (order) {
         const idx = order.indexOf(payload.cell);
         if (idx !== -1) order.splice(idx, 1);
       }
+    });
+    EffectBus3.on("cell:reorder", (payload) => {
+      if (!payload?.labels?.length || !this.#currentSig) return;
+      this.#cache.set(this.#currentSig, [...payload.labels]);
     });
   }
   /**
@@ -470,6 +631,23 @@ var OrderProjection = class {
             }
           }
           break;
+        case "rename":
+          if (store) {
+            const blob = await store.getResource(op.cell);
+            if (blob) {
+              try {
+                const parsed = JSON.parse(await blob.text());
+                if (parsed?.oldName && parsed?.newName) {
+                  const idx = order.indexOf(parsed.oldName);
+                  if (idx !== -1) {
+                    order[idx] = parsed.newName;
+                  }
+                }
+              } catch {
+              }
+            }
+          }
+          break;
       }
     }
     return order;
@@ -479,7 +657,7 @@ var _orderProjection = new OrderProjection();
 window.ioc.register("@diamondcoreprocessor.com/OrderProjection", _orderProjection);
 
 // src/diamondcoreprocessor.com/history/revise.queen.ts
-import { QueenBee, EffectBus as EffectBus3 } from "@hypercomb/core";
+import { QueenBee, EffectBus as EffectBus4 } from "@hypercomb/core";
 var ReviseQueenBee = class extends QueenBee {
   namespace = "diamondcoreprocessor.com";
   genotype = "history";
@@ -499,22 +677,25 @@ var ReviseQueenBee = class extends QueenBee {
   }
   #enter() {
     this.#active = true;
-    EffectBus3.emit("revise:mode-changed", { active: true });
+    EffectBus4.emit("revise:mode-changed", { active: true });
     console.log("[/revise] Revision mode ON \u2014 scrub the clock, Restore to promote.");
   }
   #exit() {
+    const clock = get("@diamondcoreprocessor.com/GlobalTimeClock");
+    if (clock?.active) clock.goLive();
     const cursor = get("@diamondcoreprocessor.com/HistoryCursorService");
     if (cursor?.state.rewound) {
       cursor.jumpToLatest();
     }
     this.#active = false;
-    EffectBus3.emit("revise:mode-changed", { active: false });
+    EffectBus4.emit("revise:mode-changed", { active: false });
     console.log("[/revise] Revision mode OFF \u2014 back to head.");
   }
 };
 var _revise = new ReviseQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/ReviseQueenBee", _revise);
 export {
+  GlobalTimeClock,
   HistoryCursorService,
   HistoryService,
   OrderProjection,

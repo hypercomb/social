@@ -2,6 +2,7 @@
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
 import type { HistoryCursorService } from './history-cursor.service.js'
+import type { GlobalTimeClock } from './global-time-clock.service.js'
 
 /**
  * /revise — toggles revision mode (the history clock).
@@ -42,6 +43,10 @@ export class ReviseQueenBee extends QueenBee {
   }
 
   #exit(): void {
+    // Return to live mode if global time clock is active
+    const clock = get<GlobalTimeClock>('@diamondcoreprocessor.com/GlobalTimeClock')
+    if (clock?.active) clock.goLive()
+
     // Jump cursor to head before closing
     const cursor = get<HistoryCursorService>('@diamondcoreprocessor.com/HistoryCursorService')
     if (cursor?.state.rewound) {

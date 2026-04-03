@@ -1,12 +1,10 @@
 // src/diamondcoreprocessor.com/clipboard/image-paste.worker.ts
-import { Worker, EffectBus } from "@hypercomb/core";
+import { Worker, EffectBus, hypercomb } from "@hypercomb/core";
 var ImagePasteWorker = class extends Worker {
   namespace = "diamondcoreprocessor.com";
   genotype = "clipboard";
   description = "Intercepts browser paste events containing images and routes them into the tile editor.";
-  emits = ["drop:pending", "search:prefill"];
-  #pendingBlob = null;
-  #pendingCellUnsub = null;
+  emits = [];
   constructor() {
     super();
     document.addEventListener("paste", this.#onPaste);
@@ -47,32 +45,34 @@ var ImagePasteWorker = class extends Worker {
       await this.#loadImageWhenReady(blob);
       return;
     }
-    this.#pendingBlob = blob;
-    EffectBus.emit("drop:pending", { active: true });
-    EffectBus.emit("search:prefill", { value: "" });
-    this.#pendingCellUnsub?.();
-    this.#pendingCellUnsub = EffectBus.on("cell:added", ({ cell }) => {
-      if (!this.#pendingBlob) return;
-      const stashedBlob = this.#pendingBlob;
-      this.#clearPending();
-      void (async () => {
-        await new Promise((r) => setTimeout(r, 150));
-        EffectBus.emit("tile:action", { action: "edit", label: cell, q: 0, r: 0, index: 0 });
-        await this.#waitForEditorMode();
-        this.#editorService?.setLargeBlob(stashedBlob);
-        await this.#loadImageWhenReady(stashedBlob);
-      })();
-    });
-    setTimeout(() => {
-      if (this.#pendingBlob) this.#clearPending();
-    }, 3e4);
+    const cellName = await this.#createImageCell();
+    if (!cellName) return;
+    await new Promise((r) => setTimeout(r, 150));
+    EffectBus.emit("tile:action", { action: "edit", label: cellName, q: 0, r: 0, index: 0 });
+    await this.#waitForEditorMode();
+    this.#editorService?.setLargeBlob(blob);
+    await this.#loadImageWhenReady(blob);
   }
   // ── helpers ──────────────────────────────────────────────────
-  #clearPending() {
-    this.#pendingBlob = null;
-    this.#pendingCellUnsub?.();
-    this.#pendingCellUnsub = null;
-    EffectBus.emit("drop:pending", { active: false });
+  async #createImageCell() {
+    const lineage = get("@hypercomb.social/Lineage");
+    if (!lineage) return null;
+    const dir = await lineage.explorerDir();
+    if (!dir) return null;
+    const existing = /* @__PURE__ */ new Set();
+    for await (const [key] of dir.entries()) {
+      existing.add(key);
+    }
+    let finalName = "image";
+    if (existing.has(finalName)) {
+      let counter = 2;
+      while (existing.has(`image-${counter}`)) counter++;
+      finalName = `image-${counter}`;
+    }
+    await dir.getDirectoryHandle(finalName, { create: true });
+    EffectBus.emit("cell:added", { cell: finalName });
+    void new hypercomb().act();
+    return finalName;
   }
   async #waitForEditorMode() {
     if (this.#editorService?.mode === "editing") return;

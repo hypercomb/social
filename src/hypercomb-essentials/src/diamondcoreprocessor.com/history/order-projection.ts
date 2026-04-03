@@ -24,6 +24,11 @@ export class OrderProjection {
         if (idx !== -1) order.splice(idx, 1)
       }
     })
+
+    EffectBus.on<{ labels: string[] }>('cell:reorder', (payload) => {
+      if (!payload?.labels?.length || !this.#currentSig) return
+      this.#cache.set(this.#currentSig, [...payload.labels])
+    })
   }
 
   /**
@@ -113,7 +118,24 @@ export class OrderProjection {
             }
           }
           break
-        // other op types (rename, add-drone, remove-drone) don't affect order
+        case 'rename':
+          // Rename op: cell field is resource sig → { oldName, newName }
+          if (store) {
+            const blob: Blob | null = await store.getResource(op.cell)
+            if (blob) {
+              try {
+                const parsed = JSON.parse(await blob.text())
+                if (parsed?.oldName && parsed?.newName) {
+                  const idx = order.indexOf(parsed.oldName)
+                  if (idx !== -1) {
+                    order[idx] = parsed.newName
+                  }
+                }
+              } catch { /* skip corrupted payload */ }
+            }
+          }
+          break
+        // other op types (add-drone, remove-drone, tag-state, content-state, layout-state, instruction-state) don't affect order
       }
     }
 

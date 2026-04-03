@@ -178,3 +178,10 @@ Every bag is a complete, replayable, explorable history of its lineage. Every ba
 This is not a database. It is not an API. It is not a format that requires a parser, a library, or a runtime. It is files in folders, named by what they represent, ordered by when they happened.
 
 That is the Hypercomb history primitive. And it is sufficient.
+
+---
+
+## Related Documents
+
+- [revision-mode.md](revision-mode.md) — The interactive revision system built on top of history bags: undo, redo, the revision time clock, divergence visualization, and promote (restore)
+- [signature-node-pattern.md](signature-node-pattern.md) — How features wire into history for free undo/redo/time-travel

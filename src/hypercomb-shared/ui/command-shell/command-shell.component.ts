@@ -44,6 +44,9 @@ export class CommandShellComponent implements AfterViewInit {
   /** Optional color swatches keyed by suggestion name (CSS color string). */
   readonly colorMap = input<ReadonlyMap<string, string>>(new Map())
 
+  /** Active status indicators shown as pills on the right side of the input. */
+  readonly indicators = input<readonly { key: string; icon: string; label: string }[]>([])
+
   // ── outputs to parent ───────────────────────────────────
 
   /** Emitted on every input change (after leading-space strip). */
@@ -61,6 +64,9 @@ export class CommandShellComponent implements AfterViewInit {
    * are visible). Parent can handle Shift+Enter, special modes, etc.
    */
   readonly shellKeydown = output<KeyboardEvent>()
+
+  /** Emitted when an indicator pill is clicked (to turn it off). */
+  readonly indicatorDismiss = output<string>()
 
   // ── internal state ────────────────────────────────���─────
 

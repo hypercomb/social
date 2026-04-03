@@ -119,6 +119,8 @@ export class TileOverlayDrone extends Drone {
 
   #navigationBlocked = false
   #navigationGuardTimer: ReturnType<typeof setTimeout> | null = null
+  /** Tracks the pointerId that triggered a pointerdown-navigation, so the trailing pointerup + click can be suppressed. */
+  #consumedPointerId: number | null = null
   #meshPublic = false
   #editing = false
   #editCooldown = false
@@ -322,6 +324,7 @@ export class TileOverlayDrone extends Drone {
 
       this.onEffect('navigation:guard-end', () => {
         this.#navigationBlocked = false
+        this.#consumedPointerId = null
         if (this.#navigationGuardTimer) {
           clearTimeout(this.#navigationGuardTimer)
           this.#navigationGuardTimer = null
@@ -373,6 +376,7 @@ export class TileOverlayDrone extends Drone {
   protected override dispose(): void {
     if (this.#arrangeMode) this.#exitArrangeMode()
     if (this.#listening) {
+      document.removeEventListener('pointerdown', this.#onPointerDown)
       document.removeEventListener('pointermove', this.#onPointerMove)
       document.removeEventListener('dragover', this.#onDragOverTrack)
       document.removeEventListener('click', this.#onClick)
@@ -1115,6 +1119,7 @@ export class TileOverlayDrone extends Drone {
   #attachListeners(): void {
     if (this.#listening) return
     this.#listening = true
+    document.addEventListener('pointerdown', this.#onPointerDown)
     document.addEventListener('pointermove', this.#onPointerMove)
     document.addEventListener('dragover', this.#onDragOverTrack)
     document.addEventListener('click', this.#onClick)
@@ -1249,7 +1254,53 @@ export class TileOverlayDrone extends Drone {
     }
   }
 
+  // ── Instant branch navigation on pointerdown ────────────────────────
+  #onPointerDown = (e: PointerEvent): void => {
+    if (e.button !== 0) return
+    if (this.#arrangeMode) return
+    if (this.#navigationBlocked) return
+    if (this.#editing || this.#editCooldown) return
+    if (this.#hasSelection) return
+    if (this.#touchDragging) return
+    if (e.ctrlKey || e.metaKey) return
+    if (!this.#renderContainer || !this.#renderer || !this.#canvas) return
+
+    const detector = this.resolve<{ pixelToAxial(px: number, py: number, flat?: boolean): Axial }>('detector')
+    if (!detector) return
+
+    const pixiGlobal = this.#clientToPixiGlobal(e.clientX, e.clientY)
+    const local = this.#renderContainer.toLocal(new Point(pixiGlobal.x, pixiGlobal.y))
+    const meshLocalX = local.x - this.#meshOffset.x
+    const meshLocalY = local.y - this.#meshOffset.y
+    const axial = detector.pixelToAxial(meshLocalX, meshLocalY, this.#flat)
+
+    const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(axial.q, axial.r))
+    if (!entry?.label) return
+    if (!this.#branchLabels.has(entry.label)) return
+
+    // Check that pointer is not on an action button — those use click
+    if (this.#overlay?.visible) {
+      const ox = this.#overlay.position.x
+      const oy = this.#overlay.position.y
+      for (const action of this.#actions) {
+        if (!action.button.visible) continue
+        const btn = action.button
+        const bx = local.x - ox - btn.position.x
+        const by = local.y - oy - btn.position.y
+        if (btn.containsPoint(bx, by)) return
+      }
+    }
+
+    this.#consumedPointerId = e.pointerId
+    this.#navigateInto(entry.label)
+  }
+
   #onClick = (e: MouseEvent): void => {
+    // Suppress the orphaned click from a pointerdown that already triggered navigation
+    if (this.#consumedPointerId !== null) {
+      this.#consumedPointerId = null
+      return
+    }
     if (this.#arrangeMode) return // arrange mode absorbs clicks
     if (this.#navigationBlocked) return
     if (this.#editing || this.#editCooldown) return
@@ -1368,6 +1419,8 @@ export class TileOverlayDrone extends Drone {
 
   // Cancel editor on right-click release (mirrors Escape cascade priority 1)
   #onPointerUp = (e: PointerEvent): void => {
+    // Suppress orphaned pointerup from navigation gesture (click event still pending)
+    if (this.#consumedPointerId === e.pointerId && e.button === 0) return
     if (e.button !== 2) return
     if (!this.#editing) return
     const drone = window.ioc.get<{ cancelEditing(): void }>('@diamondcoreprocessor.com/TileEditorDrone')
@@ -1406,6 +1459,7 @@ export class TileOverlayDrone extends Drone {
   #navigateInto(label: string): void {
     const lineage = this.resolve<{ explorerEnter(name: string): void }>('lineage')
     if (!lineage) return
+    this.#clearSelectionOnNavigate()
     this.emitEffect('tile:navigate-in', { label })
     lineage.explorerEnter(label)
     // Processor pulse triggered by lineage change
@@ -1414,8 +1468,16 @@ export class TileOverlayDrone extends Drone {
   #navigateBack(): void {
     const lineage = this.resolve<{ explorerUp(): void }>('lineage')
     if (!lineage) return
+    this.#clearSelectionOnNavigate()
     this.emitEffect('tile:navigate-back', {})
     lineage.explorerUp()
+  }
+
+  #clearSelectionOnNavigate(): void {
+    const selection = window.ioc.get<{ count: number; clear(): void }>('@diamondcoreprocessor.com/SelectionService')
+    if (selection && selection.count > 0) selection.clear()
+    const pixi = window.ioc.get<{ selectedAxialKeys: ReadonlySet<string>; clearSelection(): void }>('@diamondcoreprocessor.com/TileSelectionDrone')
+    if (pixi && pixi.selectedAxialKeys.size > 0) pixi.clearSelection()
   }
 
   // ── Helpers ────────────────────────────────────────────────────────

@@ -21,7 +21,7 @@
 | [batch-create](#batch-create) | `[a,b]` or `path/[a,b]` | Enter | pluggable | done |
 | [cut-paste](#cut-paste) | `[items]/destination` | Enter | pluggable | done |
 | [hash-marker](#hash-marker) | `cell#Drone` | Enter | pluggable | done |
-| [slash-command](#slash-command) | `/command args` | Enter | pluggable | done (16 commands) |
+| [slash-behaviour](#slash-behaviour) | `/behaviour args` | Enter | pluggable | done (21 behaviours) |
 
 ---
 
@@ -195,48 +195,56 @@ Behavior file &mdash; `hash-marker.behavior.ts`
 
 ---
 
-### slash-command
+### slash-behaviour
 
 **Trigger** &mdash; Enter &ensp;|&ensp; **Type** &mdash; pluggable
 
-Invoke queen bees directly. Bypasses the processor pulse cycle. Slash commands are localized — descriptions update when the UI language changes.
+Invoke queen bees directly. Bypasses the processor pulse cycle. Slash behaviours are localized — descriptions update when the UI language changes.
 
 ```
-/help                 → lists all available queen commands
+/help                 → lists all available queen behaviours
 /language ja          → switch UI to Japanese
+/docs                 → browse project documentation
 ```
 
-Behavior file &mdash; `slash-command.behavior.ts`
+Behavior file &mdash; `slash-behaviour.behavior.ts`
 
 ---
 
-## Slash Command Registry
+## Slash Behaviour Registry
 
-All slash commands are registered as `SlashCommandProvider` instances on `SlashCommandDrone`. Commands support `descriptionKey` for i18n — when a translation exists, the autocomplete dropdown shows the localized description.
+All slash behaviours are registered as `SlashBehaviourProvider` instances on `SlashBehaviourDrone`. Behaviours support `descriptionKey` for i18n — when a translation exists, the autocomplete dropdown shows the localized description.
 
-| Command | Aliases | Description |
-|:--------|:--------|:------------|
-| `/help` | `?`, `commands` | Show keyboard shortcuts |
+| Behaviour | Aliases | Description |
+|:----------|:--------|:------------|
+| `/help` | `?` | Show keyboard shortcuts |
 | `/clear` | | Clear active filter |
 | `/keyword` | `kw`, `tag` | Add or remove keywords (tags) on selected tiles |
 | `/meeting` | `meet`, `call` | Start or join a video meeting on the selected tile |
 | `/debug` | `inspect`, `dbg` | Toggle the Pixi display-tree inspector |
-| `/remove` | `rm` | Remove tiles from the current directory |
+| `/remove` | `rm`, `delete`, `del` | Remove tiles from the current directory |
 | `/format` | `fmt`, `fp` | Copy visual formatting from the active tile |
 | `/layout` | `lo` | Save, apply, list, or remove layout templates |
-| `/neon` | | Toggle the neon hover color toolbar |
+| `/accent` | `ac` | Set the hover accent color by name |
 | `/move` | | Toggle move mode for drag-reordering tiles |
 | `/revise` | `rev`, `history` | Toggle revision mode (history clock) |
 | `/expand` | `atomize` | Expand selected tiles into constituent parts via Claude Haiku |
+| `/chat` | `c`, `ask` | Multi-turn conversation with Claude |
 | `/opus` | `o` | Send context to Claude Opus 4.6 |
 | `/sonnet` | `s` | Send context to Claude Sonnet |
 | `/haiku` | `h` | Send context to Claude Haiku |
 | `/language` | `lang`, `locale` | Switch the UI language |
+| `/arrange` | | Toggle icon arrangement mode on the tile overlay |
+| `/voice` | | Toggle voice input (speech-to-text) |
+| `/push-to-talk` | | Toggle push-to-talk mic button |
+| `/instructions` | `instruct`, `labels` | Toggle instruction overlay |
+| `/atomize-ui` | `au`, `atomizer` | Toggle the atomizer toolbar |
+| `/docs` | `documentation`, `doc` | Browse project documentation |
 
-**Built-in commands** (hardcoded in `CommandLineComponent`, not in `SlashCommandDrone`):
+**Built-in behaviours** (hardcoded in `CommandLineComponent`, not in `SlashBehaviourDrone`):
 
-| Command | Description |
-|:--------|:------------|
+| Behaviour | Description |
+|:----------|:------------|
 | `/select` | Select tiles for cut/copy/move |
 | `/remove` (builtin) | Remove selected tiles |
 

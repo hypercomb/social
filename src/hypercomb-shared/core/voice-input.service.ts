@@ -1,7 +1,7 @@
 // hypercomb-shared/core/voice-input.service.ts
 // Speech recognition via Web Speech API.
 // Emits EffectBus events: voice:interim, voice:final, voice:active, voice:error
-// Activated via /voice slash command, mic button in controls bar, or mic button in command line.
+// Activated via /voice slash behaviour, mic button in controls bar, or mic button in command line.
 
 import { EffectBus } from '@hypercomb/core'
 

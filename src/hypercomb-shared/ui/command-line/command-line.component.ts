@@ -12,6 +12,7 @@ import type { CompletionUtility, CompletionContext } from '@hypercomb/shared/cor
 import { fromRuntime } from '../../core/from-runtime'
 import { readTagProps, writeTagProps, persistTagOps, type TagOp } from '../../core/tag-ops'
 import { EffectBus, hypercomb, type I18nProvider } from '@hypercomb/core'
+import { TranslatePipe } from '../../core/i18n.pipe'
 import { VoiceInputService } from '../../core/voice-input.service'
 import type { CommandLineBehavior, CommandLineBehaviorMeta, CommandLineOperation } from './command-line-behavior'
 import { ShiftEnterNavigateBehavior } from './shift-enter-navigate.behavior'
@@ -20,12 +21,12 @@ import { RemoveCellBehavior } from './remove-cell.behavior'
 import { GoParentBehavior } from './go-parent.behavior'
 import { CutPasteBehavior } from './cut-paste.behavior'
 import { HashMarkerBehavior } from './hash-marker.behavior'
-import { SlashCommandBehavior } from './slash-command.behavior'
+import { SlashBehaviourBehavior } from './slash-behaviour.behavior'
 import { SELECT_OPS } from './select-ops'
 
-const BUILTIN_SLASH: { command: { name: string; description: string; descriptionKey: string }; provider: null }[] = [
-  { command: { name: 'select', description: 'select tiles for cut/copy/move', descriptionKey: 'slash.select' }, provider: null },
-  { command: { name: 'remove', description: 'remove selected tiles', descriptionKey: 'slash.remove-builtin' }, provider: null },
+const BUILTIN_SLASH: { behaviour: { name: string; description: string; descriptionKey: string }; provider: null }[] = [
+  { behaviour: { name: 'select', description: 'select tiles for cut/copy/move', descriptionKey: 'slash.select' }, provider: null },
+  { behaviour: { name: 'remove', description: 'remove selected tiles', descriptionKey: 'slash.remove-builtin' }, provider: null },
 ]
 
 /** Matches label:tagName or label:tagName(#color) (plain colon syntax, no brackets). */
@@ -33,8 +34,6 @@ const TAG_ASSIGN_RE = /^([^:]+):([^(]+)(?:\(([^)]+)\))?$/
 
 /** Matches cell:[...] bracket-tag syntax — colon before opening bracket. */
 const BRACKET_TAG_RE = /^([^\[\/!#~]+):\[(.+?)\](.*)$/
-
-const REMOVE_CMDS = new Set(['remove', 'rm', 'delete', 'del'])
 
 /**
  * Bracket commands — any `/command[items]` that is internally a select operation.
@@ -99,7 +98,7 @@ const MOVE_ARROW_OFFSETS: Record<string, { dq: number; dr: number }> = {
 @Component({
   selector: 'hc-command-line',
   standalone: true,
-  imports: [CommandShellComponent, HintBarComponent],
+  imports: [CommandShellComponent, HintBarComponent, TranslatePipe],
   templateUrl: './command-line.component.html',
   styleUrls: ['./command-line.component.scss']
 })
@@ -124,18 +123,18 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   readonly #bracketCellTags = signal<ReadonlySet<string>>(new Set())
   #bracketCellLabel = ''
 
-  // slash command matches — queries the drone via IoC when in slash mode
-  // includes built-in commands (select) alongside queen bee commands
+  // slash behaviour matches — queries the drone via IoC when in slash mode
+  // includes built-in behaviours (select) alongside queen bee behaviours
   readonly #slashMatches = computed(() => {
     const ctx = this.context()
     if (!ctx.active || ctx.mode !== 'slash') return []
-    const drone = get('@diamondcoreprocessor.com/SlashCommandDrone') as any
-    const droneMatches = drone?.match ? drone.match(ctx.normalized) as { command: { name: string; description: string }; provider: unknown }[] : []
+    const drone = get('@diamondcoreprocessor.com/SlashBehaviourDrone') as any
+    const droneMatches = drone?.match ? drone.match(ctx.normalized) as { behaviour: { name: string; description: string }; provider: unknown }[] : []
     const t = this.#i18n
     const builtinMatches = BUILTIN_SLASH.filter(b =>
-      !ctx.normalized || b.command.name.startsWith(ctx.normalized)
+      !ctx.normalized || b.behaviour.name.startsWith(ctx.normalized)
     ).map(b => ({
-      command: { name: b.command.name, description: t?.t(b.command.descriptionKey) ?? b.command.description },
+      behaviour: { name: b.behaviour.name, description: t?.t(b.behaviour.descriptionKey) ?? b.behaviour.description },
       provider: null,
     }))
     return [...builtinMatches, ...droneMatches]
@@ -146,7 +145,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const ctx = this.context()
     if (!ctx.active || ctx.mode !== 'slash') return map
     for (const m of this.#slashMatches()) {
-      map.set(m.command.name, m.command.description)
+      map.set(m.behaviour.name, m.behaviour.description)
     }
     return map
   })
@@ -171,90 +170,61 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
 
   /**
-   * If the slash raw text represents a remove command with args, return the args portion.
-   * Handles both `/remove name` (space) and `/remove[items` (bracket).
-   * Returns null if this isn't a remove command with args.
+   * Generic slash command arg extraction. Detects `/command args` or `/command[args`
+   * for any command that has completions registered via SlashBehaviourDrone.complete().
+   * Returns { command, fragment, fullArgs } or null if not in arg mode.
    */
-  #extractRemoveArgs(raw: string): string | null {
+  #extractSlashCommandArgs(raw: string): { command: string; fragment: string; fullArgs: string } | null {
     const spaceIdx = raw.indexOf(' ')
     const bracketIdx = raw.indexOf('[')
 
-    // space-separated: `/remove name` or `/remove [items`
+    // Need at least a space or bracket after the command name
+    if (spaceIdx <= 0 && bracketIdx <= 0) return null
+
+    // Determine separator position (whichever comes first)
+    let sepIdx: number
     if (spaceIdx > 0 && (bracketIdx < 0 || spaceIdx < bracketIdx)) {
-      const cmd = raw.slice(0, spaceIdx).toLowerCase()
-      if (REMOVE_CMDS.has(cmd)) return raw.slice(spaceIdx + 1)
+      sepIdx = spaceIdx
+    } else if (bracketIdx > 0) {
+      sepIdx = bracketIdx
+    } else {
+      return null
     }
 
-    // bracket directly after command: `/remove[items`
-    if (bracketIdx > 0) {
-      const cmd = raw.slice(0, bracketIdx).toLowerCase()
-      if (REMOVE_CMDS.has(cmd)) return raw.slice(bracketIdx)
-    }
+    const command = raw.slice(0, sepIdx).toLowerCase()
 
-    return null
-  }
+    // Verify this is an exact match for a known slash command (including aliases)
+    const drone = get('@diamondcoreprocessor.com/SlashBehaviourDrone') as
+      { complete?(name: string, args: string): readonly string[]; match?(q: string): { behaviour: { name: string } }[] } | undefined
+    if (!drone?.match) return null
+    const matches = drone.match(command)
+    const isExactMatch = matches.some(m => m.behaviour.name === command)
+    if (!isExactMatch) return null
 
-  /**
-   * Extract accent command args with phase awareness.
-   * Returns { fragment, phase } where phase indicates what to suggest:
-   *   'tags'    — inside brackets, suggest tag names
-   *   'presets' — after brackets or single-arg position, suggest preset names
-   */
-  #extractAccentArgs(raw: string): { fragment: string; phase: 'tags' | 'presets' } | null {
-    const ACCENT_CMDS = new Set(['accent', 'ac'])
-    const spaceIdx = raw.indexOf(' ')
-    const bracketIdx = raw.indexOf('[')
+    // Build full args string (everything after the command name)
+    const fullArgs = raw.slice(sepIdx === spaceIdx ? spaceIdx + 1 : sepIdx)
 
-    // `/accent[tags` — bracket directly after command
-    if (bracketIdx > 0 && (spaceIdx < 0 || bracketIdx < spaceIdx)) {
-      const cmd = raw.slice(0, bracketIdx).toLowerCase()
-      if (!ACCENT_CMDS.has(cmd)) return null
-      const bracketClose = raw.indexOf(']', bracketIdx)
+    // Bracket mode: find current fragment
+    const bStart = fullArgs.indexOf('[')
+    if (bStart >= 0 || raw[sepIdx] === '[') {
+      const actualBStart = bStart >= 0 ? bStart : 0
+      const inner = fullArgs.slice(actualBStart + (fullArgs[actualBStart] === '[' ? 1 : 0))
+      const bracketClose = inner.indexOf(']')
       if (bracketClose < 0) {
-        // still inside brackets — fragment is current tag being typed
-        const inner = raw.slice(bracketIdx + 1)
+        // Inside brackets — fragment is after last comma
         const lastComma = inner.lastIndexOf(',')
         const fragment = lastComma >= 0 ? inner.slice(lastComma + 1).trimStart() : inner.trimStart()
-        return { fragment, phase: 'tags' }
+        return { command, fragment, fullArgs }
       }
-      // after closed brackets — suggest preset names
-      const after = raw.slice(bracketClose + 1).trimStart()
-      return { fragment: after, phase: 'presets' }
+      // After closed brackets
+      const after = inner.slice(bracketClose + 1).trimStart()
+      return { command, fragment: after, fullArgs }
     }
 
-    // `/accent ` with space
-    if (spaceIdx > 0) {
-      const cmd = raw.slice(0, spaceIdx).toLowerCase()
-      if (!ACCENT_CMDS.has(cmd)) return null
-      const args = raw.slice(spaceIdx + 1)
-
-      // `/accent [tags` — space then bracket
-      const argBracket = args.indexOf('[')
-      if (argBracket >= 0) {
-        const bracketClose = args.indexOf(']', argBracket)
-        if (bracketClose < 0) {
-          // inside brackets
-          const inner = args.slice(argBracket + 1)
-          const lastComma = inner.lastIndexOf(',')
-          const fragment = lastComma >= 0 ? inner.slice(lastComma + 1).trimStart() : inner.trimStart()
-          return { fragment, phase: 'tags' }
-        }
-        // after closed brackets
-        const after = args.slice(bracketClose + 1).trimStart()
-        return { fragment: after, phase: 'presets' }
-      }
-
-      // `/accent word1 word2` — two-arg form: first arg is tag/preset, second is preset
-      const parts = args.split(/\s+/)
-      if (parts.length >= 2) {
-        return { fragment: parts[parts.length - 1], phase: 'presets' }
-      }
-
-      // single arg position — suggest presets + tags
-      return { fragment: args, phase: 'presets' }
-    }
-
-    return null
+    // Space mode: fragment is the last whitespace-separated token
+    const parts = fullArgs.split(/\s+/)
+    const fragment = parts[parts.length - 1] ?? ''
+    return { command, fragment, fullArgs }
   }
 
   // Bridge EventTarget-based services to Angular Signals for reactivity
@@ -274,7 +244,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   // pluggable behaviors — validated at construction, no overlapping operations
   #behaviors: CommandLineBehavior[] = this.#validateBehaviors([
     new GoParentBehavior(),
-    new SlashCommandBehavior(),
+    new SlashBehaviourBehavior(),
     new RemoveCellBehavior(),
     new CutPasteBehavior(),
     new HashMarkerBehavior(),
@@ -396,8 +366,53 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     return t?.t('command-line.placeholder.default') ?? 'share intent...'
   })
 
+  // ── status indicators ─────────────────────────────────
+
+  readonly #indicators = signal<Map<string, { key: string; icon: string; label: string }>>(new Map())
+  readonly activeIndicators = computed(() => [...this.#indicators().values()])
+
+  #indicatorUnsubs: (() => void)[] = []
+
   public constructor() {
     console.log('[command-line] initialized with url segments:', this.navigation.segments())
+
+    // Listen for indicator registration/removal
+    this.#indicatorUnsubs.push(
+      EffectBus.on<{ key: string; icon: string; label: string }>('indicator:set', (p) => {
+        if (!p?.key) return
+        this.#indicators.update(m => { const n = new Map(m); n.set(p.key, p); return n })
+      }),
+      EffectBus.on<{ key: string }>('indicator:clear', (p) => {
+        if (!p?.key) return
+        this.#indicators.update(m => { const n = new Map(m); n.delete(p.key); return n })
+      }),
+    )
+
+    // Restore sticky indicators from localStorage
+    const saved = localStorage.getItem('hc:indicators')
+    if (saved) {
+      try {
+        const list = JSON.parse(saved) as { key: string; icon: string; label: string }[]
+        const m = new Map<string, { key: string; icon: string; label: string }>()
+        for (const ind of list) m.set(ind.key, ind)
+        this.#indicators.set(m)
+      } catch { /* ignore corrupt data */ }
+    }
+  }
+
+  onIndicatorDismiss(key: string): void {
+    EffectBus.emit('indicator:dismiss', { key })
+    this.#indicators.update(m => { const n = new Map(m); n.delete(key); return n })
+    this.#persistIndicators()
+  }
+
+  #persistIndicators(): void {
+    const list = [...this.#indicators().values()]
+    if (list.length > 0) {
+      localStorage.setItem('hc:indicators', JSON.stringify(list))
+    } else {
+      localStorage.removeItem('hc:indicators')
+    }
   }
 
   public readonly openDcp = (): void => {
@@ -430,43 +445,24 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       return this.#parseSelectContext(normalizeSelectInput(v))
     }
 
-    // /remove[...] bracket mode — provide head/raw per current fragment for intellisense
-    if (v.match(/^\/(remove|rm|delete|del)\[/i)) {
-      return this.#parseRemoveBracketContext(v)
-    }
-
-    // '/' prefix enters slash command mode
+    // '/' prefix enters slash behaviour mode
     if (v.startsWith('/')) {
       const raw = v.slice(1)
-      // detect `/remove ` with space — provide head/raw for the arg fragment
-      const removeArgs = this.#extractRemoveArgs(raw)
-      if (removeArgs !== null) {
-        const lastSep = Math.max(removeArgs.lastIndexOf(','), removeArgs.lastIndexOf('['))
-        const fragment = lastSep === -1 ? removeArgs : removeArgs.slice(lastSep + 1).trimStart()
-        const head = v.slice(0, v.length - fragment.length)
+
+      // detect `/command args` or `/command[args` — generic arg intellisense
+      const slashArgs = this.#extractSlashCommandArgs(raw)
+      if (slashArgs !== null) {
+        const head = v.slice(0, v.length - slashArgs.fragment.length)
         return {
           active: true,
           mode: 'slash',
           head,
-          raw: fragment,
-          normalized: this.completions.normalize(fragment),
+          raw: slashArgs.fragment,
+          normalized: slashArgs.fragment.toLowerCase().trim(),
           style: 'space'
         }
       }
 
-      // detect `/accent ` or `/accent[` — context-specific arg intellisense
-      const accentArgs = this.#extractAccentArgs(raw)
-      if (accentArgs !== null) {
-        const head = v.slice(0, v.length - accentArgs.fragment.length)
-        return {
-          active: true,
-          mode: 'slash',
-          head,
-          raw: accentArgs.fragment,
-          normalized: accentArgs.fragment.toLowerCase().trim(),
-          style: 'space'
-        }
-      }
       return {
         active: true,
         mode: 'slash',
@@ -552,57 +548,21 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (!ctx.active) return []
     if (ctx.mode === 'filter') return []
     if (ctx.mode === 'slash') {
-      // Check if we're in a delete-args context (both space and bracket syntax)
-      // The context parser already splits head/raw, so head contains the delete prefix.
-      // Accent command: context-specific suggestions based on phase
-      const isAccentContext = ctx.head.match(/^\/(accent|ac)[\s\[]/i)
-      if (isAccentContext) {
-        const presets = ['glacier', 'bloom', 'aurora', 'ember', 'nebula']
-        const registry = get('@hypercomb.social/TagRegistry') as { names: string[] } | undefined
-        const tagNames = registry?.names ?? []
-
-        // Detect phase: inside brackets → tags, otherwise → presets + tags
-        const inBrackets = ctx.head.includes('[') && !ctx.head.includes(']')
-        if (inBrackets) {
-          // Inside brackets: suggest tag names, exclude already chosen
-          const already = new Set<string>()
-          const bracketStart = ctx.head.indexOf('[')
-          if (bracketStart >= 0) {
-            const committed = ctx.head.slice(bracketStart + 1)
-            for (const item of committed.split(',')) {
-              const n = item.trim().toLowerCase()
-              if (n) already.add(n)
-            }
-          }
-          let tags = tagNames.filter(t => !already.has(t.toLowerCase()))
-          if (ctx.normalized) tags = tags.filter(t => t.toLowerCase().startsWith(ctx.normalized))
-          return tags
+      // Detect slash command with args: head matches /command followed by space or bracket
+      const cmdArgMatch = ctx.head.match(/^\/(\S+?)[\s\[]/i)
+      if (cmdArgMatch) {
+        const cmdName = cmdArgMatch[1].toLowerCase()
+        const drone = get('@diamondcoreprocessor.com/SlashBehaviourDrone') as
+          { complete?(name: string, args: string): readonly string[] } | undefined
+        if (drone?.complete) {
+          // Reconstruct full args from head (after command+separator) + current fragment
+          const cmdPrefix = cmdArgMatch[0]
+          const headArgs = ctx.head.slice(cmdPrefix.length)
+          const fullArgs = ctx.head[cmdPrefix.length - 1] === '[' ? '[' + headArgs + ctx.raw : headArgs + ctx.raw
+          return [...drone.complete(cmdName, fullArgs)]
         }
-
-        // After brackets or single-arg: suggest presets first, then tags
-        const all = [...presets, ...tagNames.filter(t => !presets.includes(t))]
-        if (!ctx.normalized) return all
-        return all.filter(n => n.toLowerCase().startsWith(ctx.normalized))
       }
-
-      const isDeleteContext = ctx.head.match(/^\/(delete|del|rm)[\s\[]/i)
-      if (isDeleteContext) {
-        // ctx.normalized is the current fragment, already parsed by context
-        // exclude already-chosen items from the head's bracket content
-        const already = new Set<string>()
-        const bracketStart = ctx.head.indexOf('[')
-        if (bracketStart >= 0) {
-          const committed = ctx.head.slice(bracketStart + 1)
-          for (const item of committed.split(',')) {
-            const n = this.completions.normalize(item.trim())
-            if (n) already.add(n)
-          }
-        }
-        let cells = this.cellNames$()
-        if (already.size) cells = cells.filter(n => !already.has(n))
-        return ctx.normalized ? cells.filter(n => n.startsWith(ctx.normalized)) : cells
-      }
-      return this.#slashMatches().map(m => m.command.name)
+      return this.#slashMatches().map(m => m.behaviour.name)
     }
 
     // plain colon tag mode: suggest tag names from registry
@@ -947,7 +907,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       this.voiceActive.set(active)
     })
 
-    // push-to-talk toggle (from /push-to-talk slash command)
+    // push-to-talk toggle (from /push-to-talk slash behaviour)
     this.#pushToTalkUnsub = EffectBus.on<{ enabled: boolean }>('push-to-talk:toggle', ({ enabled }) => {
       this.pushToTalkEnabled.set(enabled)
       localStorage.setItem('hc:push-to-talk', String(enabled))
@@ -997,6 +957,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.#voiceSubmitUnsub?.()
     this.#voiceActiveUnsub?.()
     this.#pushToTalkUnsub?.()
+    for (const unsub of this.#indicatorUnsubs) unsub()
     window.removeEventListener('navigate', this.#onNavigate)
     window.removeEventListener('popstate', this.#onNavigate)
   }
@@ -1151,9 +1112,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       return
     }
 
-    // slash command execution
+    // slash behaviour execution
     if (v.startsWith('/')) {
-      void this.#executeSlashCommand()
+      void this.#executeSlashBehaviour()
       return
     }
 
@@ -1219,10 +1180,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   }
 
   // -------------------------------------------------
-  // slash command execution
+  // slash behaviour execution
   // -------------------------------------------------
 
-  readonly #executeSlashCommand = async (): Promise<void> => {
+  readonly #executeSlashBehaviour = async (): Promise<void> => {
     const raw = this.value().slice(1).trim()
     if (!raw) { this.clear(); return }
 
@@ -1235,7 +1196,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const commandName = delimIdx === -1 ? raw : raw.slice(0, delimIdx)
     const args = delimIdx === -1 ? '' : raw.slice(delimIdx === parenIdx ? delimIdx : delimIdx + 1).trim()
 
-    const drone = get('@diamondcoreprocessor.com/SlashCommandDrone') as any
+    const drone = get('@diamondcoreprocessor.com/SlashBehaviourDrone') as any
     if (drone?.execute) {
       await drone.execute(commandName, args)
     }
@@ -1985,26 +1946,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     }
 
     return 'operation'
-  }
-
-  /**
-   * Parse /remove[items] bracket context — provides head/raw for current fragment.
-   * Uses 'slash' mode so suggestions route through the remove autocomplete path.
-   */
-  #parseRemoveBracketContext(v: string): import('@hypercomb/shared/core/completion-utility').CompletionContext {
-    const bracketOpen = v.indexOf('[')
-    const body = v.slice(bracketOpen + 1)
-    const lastSep = Math.max(body.lastIndexOf(','), -1)
-    const raw = lastSep === -1 ? body : body.slice(lastSep + 1).trimStart()
-    const head = v.slice(0, v.length - raw.length)
-    return {
-      active: true,
-      mode: 'slash',
-      head,
-      raw,
-      normalized: this.completions.normalize(raw),
-      style: 'space'
-    }
   }
 
   #parseSelectContext(v: string): import('@hypercomb/shared/core/completion-utility').CompletionContext {

@@ -41,6 +41,10 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
 
   #zoom = signal(ZOOM_DEFAULT)
 
+  // ── position lock (always locked on page load) ────────────
+  readonly #positionLocked = signal(true)
+  readonly positionLocked = this.#positionLocked.asReadonly()
+
   readonly visible = computed(() => this.#hasSelection())
   readonly allHidden = this.#allHidden.asReadonly()
   readonly moveMode = this.#moveMode.asReadonly()
@@ -132,6 +136,10 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
 
   readonly hide = (): void => {
     EffectBus.emit('controls:action', { action: 'hide' })
+  }
+
+  readonly onPositionLockDblClick = (): void => {
+    this.#positionLocked.update(v => !v)
   }
 
   // ── hidden-state check ──────────────────────────────────

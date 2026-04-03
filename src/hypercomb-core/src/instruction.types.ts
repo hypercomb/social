@@ -23,7 +23,7 @@ export interface InstructionAnchor {
   readonly category?: string
   /** Optional keyboard shortcut hint */
   readonly shortcut?: string
-  /** Optional slash command hint */
+  /** Optional slash behaviour hint */
   readonly command?: string
 }
 

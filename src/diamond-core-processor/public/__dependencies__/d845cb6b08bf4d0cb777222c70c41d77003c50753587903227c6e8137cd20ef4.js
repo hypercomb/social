@@ -400,6 +400,91 @@ EffectBus6.on("controls:action", (payload) => {
 EffectBus6.on("keymap:invoke", (payload) => {
   if (payload?.cmd === "selection.remove") void _remove.invoke("");
 });
+
+// src/diamondcoreprocessor.com/commands/rename.queen.ts
+import { QueenBee as QueenBee8, EffectBus as EffectBus7, SignatureService, hypercomb as hypercomb4 } from "@hypercomb/core";
+var RenameQueenBee = class extends QueenBee8 {
+  namespace = "diamondcoreprocessor.com";
+  command = "rename";
+  aliases = ["mv"];
+  description = "Rename a tile";
+  async execute(args) {
+    const newName = normalizeName2(args.trim());
+    if (!newName) return;
+    const selection = get("@diamondcoreprocessor.com/SelectionService");
+    if (!selection || selection.selected.size !== 1) return;
+    const oldName = [...selection.selected][0];
+    if (oldName === newName) return;
+    const lineage = get("@hypercomb.social/Lineage");
+    if (!lineage) return;
+    const dir = await lineage.explorerDir();
+    if (!dir) return;
+    try {
+      const oldDir = await dir.getDirectoryHandle(oldName, { create: false });
+      try {
+        await dir.getDirectoryHandle(newName, { create: false });
+        return;
+      } catch {
+      }
+      const newDir = await dir.getDirectoryHandle(newName, { create: true });
+      await copyDirectory(oldDir, newDir);
+      await dir.removeEntry(oldName, { recursive: true });
+      await this.#recordRenameOp(oldName, newName);
+      const groupId = `rename:${Date.now().toString(36)}`;
+      EffectBus7.emit("cell:removed", { cell: oldName, groupId });
+      EffectBus7.emit("cell:added", { cell: newName, groupId });
+      EffectBus7.emit("cell:renamed", { oldName, newName });
+      selection.clear();
+      void new hypercomb4().act();
+    } catch {
+    }
+  }
+  async #recordRenameOp(oldName, newName) {
+    const lineage = get("@hypercomb.social/Lineage");
+    const historyService = get("@diamondcoreprocessor.com/HistoryService");
+    const store = get("@hypercomb.social/Store");
+    if (!lineage || !historyService || !store) return;
+    const locationSig = await historyService.sign(lineage);
+    const snapshot = {
+      version: 1,
+      oldName,
+      newName,
+      at: Date.now()
+    };
+    const json = JSON.stringify(snapshot, Object.keys(snapshot).sort(), 0);
+    const blob = new Blob([json], { type: "application/json" });
+    const bytes = await blob.arrayBuffer();
+    const resourceSig = await SignatureService.sign(bytes);
+    await store.putResource(blob);
+    await historyService.record(locationSig, {
+      op: "rename",
+      cell: resourceSig,
+      at: snapshot.at
+    });
+    const cursor = get("@diamondcoreprocessor.com/HistoryCursorService");
+    if (cursor) await cursor.onNewOp();
+  }
+};
+async function copyDirectory(src, dest) {
+  for await (const [name, handle] of src.entries()) {
+    if (handle.kind === "file") {
+      const srcFile = await handle.getFile();
+      const destFile = await dest.getFileHandle(name, { create: true });
+      const writable = await destFile.createWritable();
+      await writable.write(await srcFile.arrayBuffer());
+      await writable.close();
+    } else if (handle.kind === "directory") {
+      const srcDir = handle;
+      const destDir = await dest.getDirectoryHandle(name, { create: true });
+      await copyDirectory(srcDir, destDir);
+    }
+  }
+}
+function normalizeName2(s) {
+  return s.trim().toLocaleLowerCase().replace(/[._\s]+/g, "-").replace(/[^\p{L}\p{N}\-]/gu, "").replace(/-{2,}/g, "-").replace(/^-|-$/g, "").slice(0, 64).replace(/-$/, "");
+}
+var _rename = new RenameQueenBee();
+window.ioc.register("@diamondcoreprocessor.com/RenameQueenBee", _rename);
 export {
   AccentQueenBee,
   ArrangeQueenBee,
@@ -407,5 +492,6 @@ export {
   HelpQueenBee,
   KeywordQueenBee,
   LanguageQueenBee,
-  RemoveQueenBee
+  RemoveQueenBee,
+  RenameQueenBee
 };

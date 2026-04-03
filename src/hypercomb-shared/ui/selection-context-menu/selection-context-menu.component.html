@@ -5,11 +5,20 @@
        [style.transform]="'scale(' + zoom() + ')'"
        [class.dragging]="dragging()">
 
-    <!-- drag handle -->
-    <div class="drag-handle"
-         (pointerdown)="onDragStart($event)">
-      <span class="handle-dots">&#x283F;</span>
-    </div>
+    @if (positionLocked()) {
+      <!-- position lock (double-click to unlock and reveal drag handle) -->
+      <div class="position-lock"
+           (dblclick)="onPositionLockDblClick()">
+        <span class="hci lock-icon">a</span>
+      </div>
+    } @else {
+      <!-- drag handle (visible when unlocked) -->
+      <div class="drag-handle"
+           (pointerdown)="onDragStart($event)"
+           (dblclick)="onPositionLockDblClick()">
+        <span class="handle-dots">&#x283F;</span>
+      </div>
+    }
 
     <!-- action buttons -->
     <button class="ctx-btn" (click)="moveItem()" [class.active]="moveMode()" [attr.aria-label]="'selection.move' | t">
