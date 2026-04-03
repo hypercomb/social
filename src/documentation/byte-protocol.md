@@ -301,8 +301,8 @@ a drone reads a byte, looks up a neighbor, moves, and either keeps going or stop
 
 ## source files
 
-- `@hypercomb/essentials` axial coordinate: `hypercomb-essentials/src/diamondcoreprocessor.com/core/axial/axial-coordinate.ts`
-- `@hypercomb/essentials` axial service: `hypercomb-essentials/src/diamondcoreprocessor.com/core/axial/axial-service.ts`
+- `@hypercomb/essentials` axial coordinate: `hypercomb-essentials/src/diamondcoreprocessor.com/presentation/grid/axial-coordinate.ts`
+- `@hypercomb/essentials` axial service: `hypercomb-essentials/src/diamondcoreprocessor.com/presentation/grid/axial-service.ts`
 - `@hypercomb/core` effect bus: `hypercomb-core/src/effect-bus.ts`
 - `@hypercomb/core` drone base: `hypercomb-core/src/drone.base.ts`
 - `@hypercomb/core` effect types: `hypercomb-core/src/effect.ts`

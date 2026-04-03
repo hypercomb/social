@@ -57,7 +57,7 @@ if you experience or witness a violation:
 2) save only what’s necessary to describe the event (no broad logging).  
 3) contact the maintainers:
 
-- email: **<add-contact-email@yourdomain>**  
+- email: **jaime@pointblanksolutions.ca**  
 - or open a private discussion with the title prefix: **“conduct:”**
 
 > note: this project does not collect persistent logs. include minimal context in your report (links, screenshots) if you choose.

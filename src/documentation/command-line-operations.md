@@ -17,7 +17,7 @@
 | [filter](#filter) | `>?keyword` | type | built-in | done |
 | [open-dcp](#open-dcp) | `#` | Enter | built-in | done |
 | [go-parent](#go-parent) | `..` or `../..` | Enter | pluggable | done |
-| [delete-cell](#delete-cell) | `!name` or `![a,b]` | Enter | pluggable | done |
+| [delete-cell](#delete-cell) | `~name` or `~[a,b]` | Enter | pluggable | done |
 | [batch-create](#batch-create) | `[a,b]` or `path/[a,b]` | Enter | pluggable | done |
 | [cut-paste](#cut-paste) | `[items]/destination` | Enter | pluggable | done |
 | [hash-marker](#hash-marker) | `cell#Drone` | Enter | pluggable | done |
@@ -137,15 +137,15 @@ Behavior file &mdash; `go-parent.behavior.ts`
 
 **Trigger** &mdash; Enter &ensp;|&ensp; **Type** &mdash; pluggable
 
-Prefix with `!` and press Enter. Supports path syntax and batch syntax.
+Prefix with `~` and press Enter. Supports path syntax and batch syntax.
 
 ```
-!recipes       → deletes "recipes"
-!meals/dinner  → deletes nested cell
-![foo,bar]     → deletes "foo" and "bar"
+~recipes       → deletes "recipes"
+~meals/dinner  → deletes nested cell
+~[foo,bar]     → deletes "foo" and "bar"
 ```
 
-Behavior file &mdash; `delete-cell.behavior.ts`
+Behavior file &mdash; `remove-cell.behavior.ts`
 
 ---
 

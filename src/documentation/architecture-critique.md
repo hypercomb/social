@@ -26,7 +26,7 @@ Fowler's seminal 2004 article *"Inversion of Control Containers and the Dependen
 
 The "Drone" is Hypercomb's core abstraction, and it deserves scrutiny because it is doing a lot of work. Each drone is simultaneously:
 
-- A **lifecycle-managed component** (created, installed, destroyed)
+- A **lifecycle-managed component** (created, registered, active, disposed)
 - An **event participant** (responds to signals from other drones)
 - A **renderer** (some drones manage PixiJS display objects)
 - A **domain actor** (some drones encapsulate business logic like signature publishing)
@@ -39,7 +39,7 @@ Fowler would recognize this as an instance of what he calls the **"God Object"**
 
 **What Fowler would challenge:**
 - There is no explicit **lifecycle contract** visible in the type system. When does a drone initialize? When is it safe to call `window.ioc.get()`? These temporal dependencies are implicit. Fowler's work on **Temporal Coupling** warns that when the order of method calls matters but isn't enforced by the compiler, bugs follow.
-- The drone pattern would benefit from a formal **state machine** — `Created → Installed → Running → Disposed` — with transitions enforced at the type level.
+- The drone pattern would benefit from a formal **state machine** — `Created → Registered → Active → Disposed` — with transitions enforced at the type level.
 
 ---
 
@@ -66,7 +66,7 @@ Hypercomb's Effect system appears to operate primarily at level 1 (notification)
 
 ## 4. Module Boundaries — Strong on Separation, Weak on Contracts
 
-The package structure (`core`, `essentials`, `shared`, `web`, `legacy`) demonstrates thoughtful modular thinking. Fowler's **Modular Monolith** concept applies here — these aren't microservices, but they have clear boundaries.
+The package structure (`core`, `essentials`, `shared`, `sdk`, `cli`, `web`, `dev`) demonstrates thoughtful modular thinking. Fowler's **Modular Monolith** concept applies here — these aren't microservices, but they have clear boundaries.
 
 **What Fowler would commend:**
 - `@hypercomb/core` has zero runtime dependencies. This is exceptional discipline for a framework's foundation layer.

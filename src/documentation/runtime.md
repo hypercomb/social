@@ -176,11 +176,11 @@ lineage dispatches `'change'` events on itself when paths change. it listens to 
 
 ## the signature system
 
-**SignatureService** — takes bytes, returns a 64-character hex string via `crypto.subtle.digest('SHA-256', bytes)`. deterministic: same bytes always produce the same seal.
+**SignatureService** — takes bytes, returns a 64-character hex string via `crypto.subtle.digest('SHA-256', bytes)`. deterministic: same bytes always produce the same signature.
 
 **PayloadCanonical** — the signing pipeline for drone artifacts:
 ```
-DronePayloadV1 → structuredClone → JSON.stringify → TextEncoder → ArrayBuffer → SHA-256 → hex seal
+DronePayloadV1 → structuredClone → JSON.stringify → TextEncoder → ArrayBuffer → SHA-256 → hex signature
 ```
 canonicalization (via structured clone + stringify) ensures deterministic output regardless of property ordering.
 

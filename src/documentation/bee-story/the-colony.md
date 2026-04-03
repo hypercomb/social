@@ -73,11 +73,20 @@ hypercomb's package structure follows the same logic:
                          concrete drones, axial grid, pixi rendering.
                          the things that make the hive functional.
 
+@hypercomb/sdk           the royal jelly. facade for external consumers.
+                         re-exports core types and build API.
+
+@hypercomb/cli           the waggle dance encoder. terminal tool.
+                         hypercomb build, hypercomb inspect.
+
 @hypercomb/shared        the honey bridge. angular integration.
                          connects the framework layer to the app layer.
 
-hypercomb-web            the outer comb. the application shell.
+hypercomb-web            the outer comb. the production shell.
                          where humans interact with the hive.
+
+hypercomb-dev            the nursery comb. the development shell.
+                         where drones are tested before deployment.
 ```
 
 dependencies flow inward, never outward. the brood chamber does not depend on honey. core does not depend on essentials. the innermost layer is the most protected, the most stable, and the most essential.

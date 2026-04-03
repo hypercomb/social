@@ -58,14 +58,24 @@ the hive is layered. each ring depends only on the rings inside it.
                            journal, wheel, cigar, discovery
                          build: esbuild via custom build-module.ts pipeline
 
+@hypercomb/sdk           facade. re-exports core types, env-agnostic IoC proxy,
+                         build API. build: tsup
+
+@hypercomb/cli           CLI tool. hypercomb build, hypercomb inspect.
+                         build: tsup
+
 @hypercomb/shared        angular bridge. path aliases. not published to npm.
                          Store (opfs), Lineage (navigation),
                          Navigation, SecretStore, LayerInstaller,
                          BridgeProviders for angular DI.
                          compiled inline as part of angular app builds.
 
-hypercomb-web            the app. angular 21+ shell.
+hypercomb-web            the production app. angular 21+ shell.
                          home page, setup, service worker.
+                         build: angular cli (esbuild)
+
+hypercomb-dev            the development app. angular 21+ shell.
+                         imports drones directly at dev-time.
                          build: angular cli (esbuild)
 ```
 

@@ -289,7 +289,7 @@ opfs is the only persistent storage mechanism. security properties:
 if you discover a security vulnerability, please report it through one of the
 following channels:
 
-- **email:** security@yourdomain (preferred for sensitive issues)
+- **email:** jaime@pointblanksolutions.ca (preferred for sensitive issues)
 - **github:** open a private security advisory on the repository at
   https://github.com/hypercomb/social
 
