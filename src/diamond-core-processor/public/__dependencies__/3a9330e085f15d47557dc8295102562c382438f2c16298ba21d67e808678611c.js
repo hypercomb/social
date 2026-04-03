@@ -547,11 +547,13 @@ var HexSdfTextureShader = class _HexSdfTextureShader {
 
       vec4 color = base;
 
+      // label text \u2014 always rendered
+      vec2 luv = mix(vLabelUV.xy, vLabelUV.zw, vUV);
+      float labelAlpha = texture2D(u_label, luv).a;
+      float la = smoothstep(0.02, 0.5, labelAlpha);
+
       if (vHasImage < 0.5) {
-        // label for cells without snapshot
-        vec2 luv = mix(vLabelUV.xy, vLabelUV.zw, vUV);
-        float labelAlpha = texture2D(u_label, luv).a;
-        float la = smoothstep(0.02, 0.5, labelAlpha);
+        // no image: bright white label
         color = mix(color, vec4(1.0, 1.0, 1.0, 1.0), la * 0.92 * u_labelMix);
 
         // ambient presence \u2014 identity color at rest, shifts to warm amber with heat
@@ -560,6 +562,17 @@ var HexSdfTextureShader = class _HexSdfTextureShader {
         vec3 heatTint = mix(vIdentityColor, warmColor, vHeat);
         float heatAlpha = mix(0.07, 0.68, vHeat);
         color.rgb = mix(color.rgb, heatTint, heatRing * heatAlpha);
+      } else {
+        // has image: translucent rounded-rect pill behind label text
+        float pillW = u_radiusPx * 0.88;
+        float pillH = u_radiusPx * 0.15;
+        float pillR = 0.0;
+        vec2 pillP = abs(local) - vec2(pillW - pillR, pillH - pillR);
+        float pillD = length(max(pillP, 0.0)) + min(max(pillP.x, pillP.y), 0.0) - pillR;
+        float pillMask = 1.0 - smoothstep(0.0, aa * 1.5, pillD);
+        color.rgb = mix(color.rgb, vec3(0.0), pillMask * 0.55 * u_labelMix);
+
+        color = mix(color, vec4(1.0, 1.0, 1.0, 1.0), la * 0.88 * u_labelMix);
       }
 
       // branch indicator: accent-style inlay for tiles with children

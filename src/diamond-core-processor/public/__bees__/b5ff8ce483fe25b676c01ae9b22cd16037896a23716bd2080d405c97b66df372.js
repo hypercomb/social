@@ -14,7 +14,13 @@ var SubstrateDrone = class extends Drone {
     if (this.#initialized) return;
     this.#initialized = true;
     const service = this.#service();
-    if (service) void service.warmUp();
+    if (service) {
+      void service.warmUp().then(() => {
+        if (service.pickRandomImageSync()) {
+          EffectBus.emit("indicator:set", { key: "substrate", icon: "\u25C8", label: "Substrate active" });
+        }
+      });
+    }
     this.onEffect("drop:pending", (payload) => {
       this.#dropPending = payload?.active ?? false;
     });
@@ -55,7 +61,21 @@ var SubstrateDrone = class extends Drone {
       const svc = this.#service();
       if (svc) {
         svc.invalidateCache();
-        void svc.warmUp();
+        void svc.warmUp().then(() => {
+          if (svc.pickRandomImageSync()) {
+            EffectBus.emit("indicator:set", { key: "substrate", icon: "\u25C8", label: "Substrate active" });
+          } else {
+            EffectBus.emit("indicator:clear", { key: "substrate" });
+          }
+        });
+      }
+    });
+    this.onEffect("indicator:dismiss", ({ key }) => {
+      if (key !== "substrate") return;
+      const svc = this.#service();
+      if (svc) {
+        void svc.clearHive();
+        void svc.clearGlobal();
       }
     });
   };

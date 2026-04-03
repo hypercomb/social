@@ -376,6 +376,19 @@ var PushToTalkProvider = class {
     EffectBus.emit("push-to-talk:toggle", { enabled: next });
   }
 };
+var TextOnlyProvider = class {
+  name = "text-only-provider";
+  priority = 100;
+  behaviours = [
+    { name: "text-only", description: "Toggle text-only mode (hide images)", descriptionKey: "slash.text-only", aliases: ["text", "textonly"] }
+  ];
+  execute() {
+    const current = localStorage.getItem("hc:text-only") === "1";
+    const next = !current;
+    localStorage.setItem("hc:text-only", next ? "1" : "0");
+    EffectBus.emit("render:set-text-only", { textOnly: next });
+  }
+};
 var InstructionsProvider = class {
   name = "instructions-provider";
   priority = 100;
@@ -417,7 +430,7 @@ var SubstrateProvider = class {
     if (queen?.invoke) await queen.invoke(args);
   }
   complete(_behaviourName, args) {
-    const subcommands = ["set", "global", "clear", "off", "on"];
+    const subcommands = ["set", "global", "clear", "off", "on", "refresh", "replay", "reroll"];
     const q = args.toLowerCase().trim();
     if (!q) return subcommands;
     if (q === "clear" || q === "clear ") return ["global"];
@@ -447,6 +460,7 @@ _slashBehaviours.addProvider(new LanguageProvider());
 _slashBehaviours.addProvider(new ArrangeProvider());
 _slashBehaviours.addProvider(new VoiceProvider());
 _slashBehaviours.addProvider(new PushToTalkProvider());
+_slashBehaviours.addProvider(new TextOnlyProvider());
 _slashBehaviours.addProvider(new InstructionsProvider());
 _slashBehaviours.addProvider(new AtomizeUiProvider());
 _slashBehaviours.addProvider(new DocsProvider());

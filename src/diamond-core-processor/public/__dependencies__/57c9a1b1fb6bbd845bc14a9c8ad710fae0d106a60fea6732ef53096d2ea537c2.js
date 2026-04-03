@@ -1,6 +1,6 @@
 // @diamondcoreprocessor.com/substrate
 // src/diamondcoreprocessor.com/substrate/substrate.queen.ts
-import { QueenBee, EffectBus } from "@hypercomb/core";
+import { QueenBee, EffectBus, hypercomb } from "@hypercomb/core";
 var get = (key) => window.ioc?.get?.(key);
 var SubstrateQueenBee = class extends QueenBee {
   namespace = "diamondcoreprocessor.com";
@@ -37,6 +37,7 @@ var SubstrateQueenBee = class extends QueenBee {
           return;
         }
         await service.setHive(path);
+        this.#setIndicator(true);
         this.#log(`substrate set \u2192 ${path}`);
         return;
       }
@@ -47,17 +48,18 @@ var SubstrateQueenBee = class extends QueenBee {
           return;
         }
         await service.setGlobal(path);
+        this.#setIndicator(true);
         this.#log(`global substrate \u2192 ${path}`);
         return;
       }
       case "clear": {
         if (parts[1] === "global") {
           await service.clearGlobal();
-          this.#log("global substrate cleared");
         } else {
           await service.clearHive();
-          this.#log("hive substrate cleared");
         }
+        this.#setIndicator(false);
+        this.#log("substrate cleared");
         return;
       }
       case "off": {
@@ -70,6 +72,21 @@ var SubstrateQueenBee = class extends QueenBee {
         this.#log("substrate inheritance enabled");
         return;
       }
+      case "refresh":
+      case "replay":
+      case "reroll": {
+        const lineage = get("@hypercomb.social/Lineage");
+        const dir = await lineage?.explorerDir();
+        if (!dir) return;
+        const labels = [];
+        for await (const [name, handle] of dir.entries()) {
+          if (handle.kind === "directory") labels.push(name);
+        }
+        const count = await service.refresh(labels);
+        this.#log(`substrate refreshed ${count} tile${count === 1 ? "" : "s"}`);
+        void new hypercomb().act();
+        return;
+      }
       default: {
         this.#log(`unknown subcommand: ${subcommand}`);
         return;
@@ -78,6 +95,23 @@ var SubstrateQueenBee = class extends QueenBee {
   }
   #log(message, icon) {
     EffectBus.emit("activity:log", { message, icon });
+  }
+  #setIndicator(active) {
+    if (active) {
+      EffectBus.emit("indicator:set", { key: "substrate", icon: "\u25C8", label: "Substrate active" });
+    } else {
+      EffectBus.emit("indicator:clear", { key: "substrate" });
+    }
+    const saved = JSON.parse(localStorage.getItem("hc:indicators") ?? "[]");
+    if (active) {
+      if (!saved.find((i) => i.key === "substrate")) {
+        saved.push({ key: "substrate", icon: "\u25C8", label: "Substrate active" });
+      }
+    } else {
+      const idx = saved.findIndex((i) => i.key === "substrate");
+      if (idx !== -1) saved.splice(idx, 1);
+    }
+    localStorage.setItem("hc:indicators", JSON.stringify(saved));
   }
   async #currentPath() {
     const lineage = get("@hypercomb.social/Lineage");
@@ -96,6 +130,7 @@ var GLOBAL_KEY = "substrate-global";
 var HIVE_KEY = "substrate";
 var INHERIT_KEY = "substrate-inherit";
 var STORAGE_KEY = "hc:substrate-global";
+var RESOLVED_KEY = "hc:substrate-resolved";
 var get2 = (key) => window.ioc?.get?.(key);
 var SubstrateService = class extends EventTarget {
   #loaded = false;
@@ -122,7 +157,9 @@ var SubstrateService = class extends EventTarget {
   /** Clear the global substrate. */
   async clearGlobal() {
     this.#globalSignature = null;
+    this.#resolvedCache = null;
     localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(RESOLVED_KEY);
     await this.#saveGlobal(null);
     EffectBus2.emit("substrate:changed", { scope: "global", signature: null });
   }
@@ -139,6 +176,8 @@ var SubstrateService = class extends EventTarget {
     const dir = await this.#explorerDir();
     if (!dir) return;
     await this.#writeProps(dir, { [HIVE_KEY]: null });
+    this.#resolvedCache = null;
+    localStorage.removeItem(RESOLVED_KEY);
     EffectBus2.emit("substrate:changed", { scope: "hive", signature: null });
   }
   /** Suppress child overrides — only global applies under this hive. */
@@ -221,6 +260,12 @@ var SubstrateService = class extends EventTarget {
   /** Warm up: resolve + collect + preload so sync picks are instant. */
   async warmUp() {
     this.#resolvedCache = await this.resolve();
+    if (this.#resolvedCache) {
+      localStorage.setItem(RESOLVED_KEY, this.#resolvedCache);
+    }
+    if (!this.#resolvedCache) {
+      this.#resolvedCache = localStorage.getItem(RESOLVED_KEY);
+    }
     if (!this.#resolvedCache) return;
     await this.#collectImages(this.#resolvedCache);
     await this.preloadImages();
@@ -235,15 +280,28 @@ var SubstrateService = class extends EventTarget {
     if (!path) return;
     const images = this.#imageCache.get(path);
     if (!images || images.length === 0) return;
+    const byImage = /* @__PURE__ */ new Map();
     this.#propsPool = [];
     for (const imageSig of images) {
+      if (byImage.has(imageSig)) {
+        this.#propsPool.push({ imageSig, propsSig: byImage.get(imageSig) });
+        continue;
+      }
       try {
         const props = { small: { image: imageSig }, substrate: true };
         const json = JSON.stringify(props, null, 2);
         const blob = new Blob([json], { type: "application/json" });
         const propsSig = await store.putResource(blob);
+        byImage.set(imageSig, propsSig);
         this.#propsPool.push({ imageSig, propsSig });
       } catch {
+      }
+    }
+    const minPool = 50;
+    if (this.#propsPool.length > 0 && this.#propsPool.length < minPool) {
+      const base = [...this.#propsPool];
+      while (this.#propsPool.length < minPool) {
+        this.#propsPool.push(base[this.#propsPool.length % base.length]);
       }
     }
   }
@@ -294,6 +352,32 @@ var SubstrateService = class extends EventTarget {
       localStorage.setItem(indexKey, JSON.stringify(index));
     }
     return applied;
+  }
+  /**
+   * Re-roll all substrate-assigned tiles with fresh random images.
+   * Clears substrate entries from the props index, re-warms the pool,
+   * then re-applies to all blanks on the next render cycle.
+   * Returns the number of tiles refreshed.
+   */
+  async refresh(visibleLabels) {
+    if (this.#propsPool.length === 0) return 0;
+    const indexKey = "hc:tile-props-index";
+    const index = JSON.parse(localStorage.getItem(indexKey) ?? "{}");
+    const substrateSigs = new Set(this.#propsPool.map((p) => p.propsSig));
+    let cleared = 0;
+    for (const label of visibleLabels) {
+      if (index[label] && substrateSigs.has(index[label])) {
+        delete index[label];
+        cleared++;
+      }
+    }
+    if (cleared > 0) {
+      localStorage.setItem(indexKey, JSON.stringify(index));
+    }
+    this.invalidateCache();
+    await this.warmUp();
+    const applied = this.applyToAllBlanks(visibleLabels);
+    return applied.length;
   }
   // ── private: image collection ──
   async #collectImages(layerPath) {

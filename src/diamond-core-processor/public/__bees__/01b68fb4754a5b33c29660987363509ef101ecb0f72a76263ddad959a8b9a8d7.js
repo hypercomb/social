@@ -386,11 +386,13 @@ var HexSdfTextureShader = class _HexSdfTextureShader {
 
       vec4 color = base;
 
+      // label text \u2014 always rendered
+      vec2 luv = mix(vLabelUV.xy, vLabelUV.zw, vUV);
+      float labelAlpha = texture2D(u_label, luv).a;
+      float la = smoothstep(0.02, 0.5, labelAlpha);
+
       if (vHasImage < 0.5) {
-        // label for cells without snapshot
-        vec2 luv = mix(vLabelUV.xy, vLabelUV.zw, vUV);
-        float labelAlpha = texture2D(u_label, luv).a;
-        float la = smoothstep(0.02, 0.5, labelAlpha);
+        // no image: bright white label
         color = mix(color, vec4(1.0, 1.0, 1.0, 1.0), la * 0.92 * u_labelMix);
 
         // ambient presence \u2014 identity color at rest, shifts to warm amber with heat
@@ -399,6 +401,17 @@ var HexSdfTextureShader = class _HexSdfTextureShader {
         vec3 heatTint = mix(vIdentityColor, warmColor, vHeat);
         float heatAlpha = mix(0.07, 0.68, vHeat);
         color.rgb = mix(color.rgb, heatTint, heatRing * heatAlpha);
+      } else {
+        // has image: translucent rounded-rect pill behind label text
+        float pillW = u_radiusPx * 0.88;
+        float pillH = u_radiusPx * 0.15;
+        float pillR = 0.0;
+        vec2 pillP = abs(local) - vec2(pillW - pillR, pillH - pillR);
+        float pillD = length(max(pillP, 0.0)) + min(max(pillP.x, pillP.y), 0.0) - pillR;
+        float pillMask = 1.0 - smoothstep(0.0, aa * 1.5, pillD);
+        color.rgb = mix(color.rgb, vec3(0.0), pillMask * 0.55 * u_labelMix);
+
+        color = mix(color, vec4(1.0, 1.0, 1.0, 1.0), la * 0.88 * u_labelMix);
       }
 
       // branch indicator: accent-style inlay for tiles with children
@@ -1071,25 +1084,6 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
     if (locationKey === this.renderedLocationKey && this.renderedCellsKey !== "" && !this.#clipboardView) {
       return;
     }
-    if (locationKey === this.renderedLocationKey && this.cachedCellNames && this.cachedLocalCellSet && !this.#clipboardView) {
-      const cellNames2 = this.moveNames ?? this.cachedCellNames;
-      const localCellSet2 = this.cachedLocalCellSet;
-      const branchSet2 = this.cachedBranchSet ?? /* @__PURE__ */ new Set();
-      const axialMax2 = typeof axial.items.size === "number" ? axial.items.size : cellNames2.length;
-      const maxCells2 = Math.min(cellNames2.length, axialMax2);
-      if (maxCells2 > 0) {
-        const cells2 = this.buildCellsFromAxial(axial, cellNames2, maxCells2, localCellSet2, branchSet2);
-        if (cells2.length > 0) {
-          const dir2 = await lineage.explorerDir();
-          if (dir2) await this.loadCellImages(cells2, dir2);
-          this.renderedCells.clear();
-          for (const cell of cells2) this.renderedCells.set(cell.label, cell);
-          this.cachedCellNames = cellNames2;
-          await this.applyGeometry(cells2);
-        }
-      }
-      return;
-    }
     if (locationKey !== this.renderedLocationKey && this.#layerCellsCache.has(locationKey)) {
       const cached = this.#layerCellsCache.get(locationKey);
       if (!this.layer) {
@@ -1357,6 +1351,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       this.renderedCellsKey = "";
       this.renderedCells.clear();
       this.#pendingRemoves.clear();
+      this.suppressMeshRecenter = false;
       await this.#applyViewportForLayer(dir);
       const vp = window.ioc?.get?.("@diamondcoreprocessor.com/ViewportPersistence");
       if (vp) vp.setDirSilent(dir);
@@ -1594,31 +1589,19 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
     this.onEffect("cell:added", (payload) => {
       this.#layerCellsCache.clear();
       this.renderedCellsKey = "";
-      if (payload?.cell) {
-        this.#pendingRemoves.delete(payload.cell);
-        if (this.cachedCellNames && this.cachedLocalCellSet) {
-          if (!this.cachedCellNames.includes(payload.cell)) {
-            this.cachedCellNames.push(payload.cell);
-            this.cachedLocalCellSet.add(payload.cell);
-          }
-        }
-      }
+      this.suppressMeshRecenter = true;
+      if (payload?.cell) this.#pendingRemoves.delete(payload.cell);
     });
     this.onEffect("cell:removed", (payload) => {
       this.#layerCellsCache.clear();
       this.renderedCellsKey = "";
+      this.suppressMeshRecenter = true;
       if (payload?.cell) {
         this.#pendingRemoves.add(payload.cell);
-        if (this.cachedCellNames) {
-          const idx = this.cachedCellNames.indexOf(payload.cell);
-          if (idx !== -1) this.cachedCellNames.splice(idx, 1);
-          this.cachedLocalCellSet?.delete(payload.cell);
-          this.cachedBranchSet?.delete(payload.cell);
-          this.cellImageCache.delete(payload.cell);
-          this.cellTagsCache.delete(payload.cell);
-          this.cellLinkCache.delete(payload.cell);
-          this.cellBorderColorCache.delete(payload.cell);
-        }
+        this.cellImageCache.delete(payload.cell);
+        this.cellTagsCache.delete(payload.cell);
+        this.cellLinkCache.delete(payload.cell);
+        this.cellBorderColorCache.delete(payload.cell);
       }
     });
     this.onEffect("history:cursor-changed", () => {
@@ -2034,21 +2017,24 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
     }
     indexed.sort((a, b) => a.position - b.position);
     let nextIndex = maxIndex + 1;
+    const maxEffective = indexed.length > 0 ? indexed[indexed.length - 1].position : -1;
+    let nextPosition = maxEffective + 1;
     if (indexed.length === 0) {
       unindexed.sort((a, b) => a.localeCompare(b));
     }
     for (const name of unindexed) {
       const assignedIndex = nextIndex++;
-      indexed.push({ name, position: assignedIndex });
+      const effectivePosition = nextPosition++;
+      const offset = effectivePosition - assignedIndex;
+      indexed.push({ name, position: effectivePosition });
       if (localCellSet.has(name)) {
         try {
           const cellDir = await dir.getDirectoryHandle(name, { create: false });
-          await writeCellProperties(cellDir, { index: assignedIndex, offset: 0 });
+          await writeCellProperties(cellDir, { index: assignedIndex, offset });
         } catch {
         }
       }
     }
-    indexed.sort((a, b) => a.position - b.position);
     return indexed.map((s) => s.name);
   }
   async #handlePlaceAt(cell, targetIndex) {

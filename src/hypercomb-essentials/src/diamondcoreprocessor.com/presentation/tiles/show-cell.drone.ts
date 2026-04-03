@@ -1080,6 +1080,7 @@ export class ShowCellDrone extends Drone {
       this.renderedCellsKey = ''
       this.renderedCells.clear()
       this.#pendingRemoves.clear()
+      this.suppressMeshRecenter = false  // allow recenter on page navigation
 
       // apply saved viewport (or defaults) so the container is correct before tiles render
       await this.#applyViewportForLayer(dir)
@@ -1401,15 +1402,18 @@ export class ShowCellDrone extends Drone {
     })
 
     // cell:added / cell:removed — invalidate render cache so next synchronize picks up new tile set
+    // suppress mesh recenter so existing tiles don't shift visually on add/remove
     this.onEffect<{ cell: string }>('cell:added', (payload) => {
       this.#layerCellsCache.clear()
       this.renderedCellsKey = ''
+      this.suppressMeshRecenter = true
       if (payload?.cell) this.#pendingRemoves.delete(payload.cell)
     })
 
     this.onEffect<{ cell: string }>('cell:removed', (payload) => {
       this.#layerCellsCache.clear()
       this.renderedCellsKey = ''
+      this.suppressMeshRecenter = true
       if (payload?.cell) {
         this.#pendingRemoves.add(payload.cell)
         this.cellImageCache.delete(payload.cell)
@@ -1909,26 +1913,28 @@ export class ShowCellDrone extends Drone {
     indexed.sort((a, b) => a.position - b.position)
 
     // assign next available permanent index to unindexed cells
+    // offset must place new tiles AFTER all existing tiles so existing positions don't shift
     let nextIndex = maxIndex + 1
+    const maxEffective = indexed.length > 0 ? indexed[indexed.length - 1].position : -1
+    let nextPosition = maxEffective + 1
+
     if (indexed.length === 0) {
       unindexed.sort((a, b) => a.localeCompare(b))
     }
 
     for (const name of unindexed) {
       const assignedIndex = nextIndex++
-      // new tiles: index = permanent, offset = 0 → position = index
-      indexed.push({ name, position: assignedIndex })
+      const effectivePosition = nextPosition++
+      const offset = effectivePosition - assignedIndex
+      indexed.push({ name, position: effectivePosition })
 
       if (localCellSet.has(name)) {
         try {
           const cellDir = await dir.getDirectoryHandle(name, { create: false })
-          await writeCellProperties(cellDir, { index: assignedIndex, offset: 0 })
+          await writeCellProperties(cellDir, { index: assignedIndex, offset })
         } catch { /* cell dir missing — skip */ }
       }
     }
-
-    // re-sort after appending new cells
-    indexed.sort((a, b) => a.position - b.position)
     return indexed.map(s => s.name)
   }
 
