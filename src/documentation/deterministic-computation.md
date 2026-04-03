@@ -5,6 +5,13 @@ with a community authenticity layer. builds on the primitives defined in
 [core-processor-architecture.md](core-processor-architecture.md) and the
 verification model in [security.md](security.md).
 
+**related critical documents:**
+- [signature-expansion-doctrine.md](signature-expansion-doctrine.md) — mandatory practice for all data structures
+- [collapsed-compute.md](collapsed-compute.md) — how deterministic computation + signature caching eliminates redundant work across the network
+- [core-primitive.md](core-primitive.md) — the signature-payload pair
+- [signature-node-pattern.md](signature-node-pattern.md) — plug-and-play implementation guide
+- [signature-algebra.md](signature-algebra.md) — algebraic operations over signatures
+
 ---
 
 ## signature composition

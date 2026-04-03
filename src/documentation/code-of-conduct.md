@@ -16,7 +16,7 @@ this code of conduct sets the **minimum expectations** for behavior in repos, is
 - **no extraction** — don’t scrape, log, or publish people’s paths without consent.
 - **repair over blame** — if something goes wrong, help fix it and keep moving.
 
-see also: [Social Governance](./docs/social-governance.md)
+see also: [Social Governance](./social-governance.md)
 
 ---
 

@@ -1,0 +1,95 @@
+name: Azure Static Web Apps CI/CD (Playground)
+
+on:
+  push:
+    branches: [playground-jaime, playground-dylan]
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    branches: [playground-jaime, playground-dylan]
+
+jobs:
+  build_and_deploy_job:
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed')
+    runs-on: ubuntu-latest
+    name: Build and Deploy Job
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          lfs: false
+
+      - name: Use Node 24.14.1
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.14.1'
+
+      - name: Install workspace root dependencies
+        working-directory: src
+        run: |
+          rm -rf node_modules package-lock.json
+          npm install
+
+      - name: Build hypercomb-core
+        working-directory: src/hypercomb-core
+        run: npm run build
+
+      - name: Build web runtime assets
+        working-directory: src/hypercomb-web
+        run: |
+          node ./scripts/build-core-vendor.cjs
+          node ../node_modules/tsx/dist/cli.mjs ./scripts/build-pixi-vendor.ts
+
+      - name: Build web app
+        working-directory: src/hypercomb-web
+        run: node ../node_modules/@angular/cli/bin/ng.js build --configuration production
+
+      - name: Verify build output
+        run: ls -al src/hypercomb-web/dist/hypercomb-web/browser || true
+
+      - name: Verify required web artifacts
+        run: |
+          set -euo pipefail
+          ROOT="src/hypercomb-web/dist/hypercomb-web/browser"
+          REQUIRED=(
+            "index.html"
+            "hypercomb.worker.js"
+            "hypercomb-core.runtime.js"
+            "local.png"
+            "external.png"
+            "house.png"
+            "spw.png"
+            "vendor/pixi.runtime.js"
+          )
+          for f in "${REQUIRED[@]}"; do
+            if [ ! -f "$ROOT/$f" ]; then
+              echo "MISSING required artifact: $ROOT/$f"
+              exit 1
+            else
+              echo "OK: $ROOT/$f ($(stat --format='%s bytes' "$ROOT/$f"))"
+            fi
+          done
+          echo ""
+          echo "All required artifacts present."
+
+      - name: Upload to Azure Static Web Apps
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.STATIC_WEBSITE_PLAYGROUND_DEPLOYMENT_TOKEN }}
+          action: upload
+          skip_app_build: true
+          app_location: src/hypercomb-web/dist/hypercomb-web/browser
+          output_location: ""
+          api_location: ""
+
+  close_pull_request_job:
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    name: Close Pull Request Job
+    steps:
+      - name: Close Pull Request
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.STATIC_WEBSITE_PLAYGROUND_DEPLOYMENT_TOKEN }}
+          action: close
+          app_location: src/hypercomb-web/dist/hypercomb-web/browser

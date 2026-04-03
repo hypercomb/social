@@ -122,7 +122,7 @@ var RemoveProvider = class {
   name = "remove-provider";
   priority = 100;
   commands = [
-    { name: "remove", description: "Remove tiles from the current directory", descriptionKey: "slash.remove", aliases: ["rm"] }
+    { name: "remove", description: "Remove tiles from the current directory", descriptionKey: "slash.remove", aliases: ["rm", "delete", "del"] }
   ];
   async execute(_commandName, args) {
     const queen = get("@diamondcoreprocessor.com/RemoveQueenBee");
@@ -288,14 +288,14 @@ var PushToTalkProvider = class {
     EffectBus.emit("push-to-talk:toggle", { enabled: next });
   }
 };
-var GuideProvider = class {
-  name = "guide-provider";
+var InstructionsProvider = class {
+  name = "instructions-provider";
   priority = 100;
   commands = [
-    { name: "guide", description: "Open the learning guide", descriptionKey: "slash.guide", aliases: ["learn", "tutorial"] }
+    { name: "instructions", description: "Toggle instruction overlay", descriptionKey: "slash.instructions", aliases: ["instruct", "labels"] }
   ];
   execute() {
-    EffectBus.emit("guide:open", void 0);
+    EffectBus.emit("instruction:toggle", void 0);
   }
 };
 var AtomizeUiProvider = class {
@@ -327,7 +327,7 @@ _slashCommands.addProvider(new LanguageProvider());
 _slashCommands.addProvider(new ArrangeProvider());
 _slashCommands.addProvider(new VoiceProvider());
 _slashCommands.addProvider(new PushToTalkProvider());
-_slashCommands.addProvider(new GuideProvider());
+_slashCommands.addProvider(new InstructionsProvider());
 _slashCommands.addProvider(new AtomizeUiProvider());
 window.ioc.register("@diamondcoreprocessor.com/SlashCommandDrone", _slashCommands);
 export {

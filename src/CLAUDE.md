@@ -147,8 +147,42 @@ src/
 
 ## Core Primitives
 
-### Signatures
-SHA-256 hash (64 hex chars) of canonical content. Created via `SignatureService.sign(bytes)`. Used to name and identify everything: drones, layers, dependencies, history entries. Immutable identity.
+### Signatures — The Universal Reference Primitive
+
+SHA-256 hash (64 hex chars) of canonical content. Created via `SignatureService.sign(bytes)`. Immutable identity.
+
+**Signatures are not just identifiers — they are the composition mechanism.** Any JSON field, class property, array element, or configuration value that references content must hold a signature pointing to a resource in `__resources__/`, not inline data. This is the fundamental pattern of the architecture:
+
+```typescript
+// ✅ CORRECT: signature references — content lives in __resources__/<sig>
+{ "op": "reorder", "cell": "a1b2c3d4...", "at": 1712345678 }
+{ "turns": [{ "role": "user", "contentSig": "e5f6a7b8..." }] }
+{ "manifestSig": "c9d0e1f2...", "hidden": ["selector1", "selector2"] }
+
+// ❌ WRONG: inline data that should be a resource
+{ "op": "reorder", "cell": "my-tile-name", "data": { "order": ["a","b","c"] } }
+{ "turns": [{ "role": "user", "content": "Hello, this is a long message..." }] }
+```
+
+**Why this matters:**
+- **Deduplication**: same content → same signature → stored once, referenced many times
+- **Instant cache hits**: hold the signature, load from `__resources__/<sig>` — no queries, no lookups
+- **History composition**: history ops point at resource signatures. Undo = load the previous resource. Time-travel = load the resource at any timestamp. Infinitely expandable.
+- **Sharing**: a signature can be shared, imported, or bundled. The recipient resolves it against their own OPFS.
+- **Immutability**: content never changes. New content = new signature. Old signatures remain valid forever.
+
+**The expansion pattern**: JSON files embed signatures as string values. At runtime, code resolves them lazily via `Store.getResource(sig)` or `Store.getBee(sig)`. The resolution is always on-demand — signatures remain as lightweight string pointers until explicitly expanded.
+
+**Where this applies (non-exhaustive):**
+- History operations (`cell` field holds resource signatures for complex payloads)
+- Thread manifests (`contentSig` holds message content signatures)
+- Layer files (`bees[]`, `layers[]`, `dependencies[]` are all signature arrays)
+- Install manifests (`packages` keyed by package signature)
+- Settings and presets (stored as resources, referenced by signature in history)
+- Instruction manifests and instruction settings (signature-addressed resources)
+- Any new feature that stores structured data
+
+**Rule**: When designing a new feature, data structure, or JSON format — if a field contains content that could be shared, cached, versioned, or composed, it must be a signature reference to a resource. Never store expandable content inline when it can be content-addressed. See `src/documentation/signature-algebra.md` for the formal theory and `src/documentation/signature-expansion-doctrine.md` for the practical guide.
 
 ### IoC (Service Locator)
 ```typescript

@@ -352,7 +352,7 @@ opfsRoot/                          (navigator.storage.getDirectory())
     {cell}/                        (directory = cell)
       {child-cell}/                (nested cell)
       ...
-  __drones__/                      (compiled drone modules, keyed by SHA-256)
+  __bees__/                        (compiled bee modules, keyed by SHA-256)
   __dependencies__/                (shared JS libraries, keyed by SHA-256)
   __layers__/                      (layer metadata, per-domain)
     {domain}/
@@ -414,14 +414,14 @@ Drones are the unit of behavior. The mesh, renderer, and all I/O are implemented
 ### 13.1 Lifecycle
 
 ```
-encounter(grammar)
+pulse(grammar)
   └─► sense(grammar) → boolean
        └─► if true: heartbeat(grammar)
 ```
 
 - `sense()`: Does this drone respond to the current context? Default: `true`.
 - `heartbeat()`: Execute behavior. This is where mesh queries, publishes, and renders happen.
-- `encounter()`: Framework entrypoint. Chains sense and heartbeat.
+- `pulse()`: Framework entrypoint. Called by the processor (`hypercomb.act()`). Chains sense and heartbeat.
 
 ### 13.2 Effects Declaration
 
@@ -441,8 +441,8 @@ Each drone declares its side effects:
 Drones self-register in the global IOC container:
 
 ```typescript
-window.ioc.register('NostrMeshDrone', meshDrone)
-window.ioc.register('ShowHoneycomb', new ShowHoneycombDrone())
+window.ioc.register('@diamondcoreprocessor.com/NostrMeshDrone', meshDrone)
+window.ioc.register('@diamondcoreprocessor.com/ShowCellDrone', new ShowCellDrone())
 ```
 
 Lookup is by name: `window.ioc.get<T>('NostrMeshDrone')`.
@@ -603,9 +603,9 @@ Client initialization order:
 5. bootstrapApplication  Start Angular.
 6. BootstrapHistory.run  Walk URL segments against OPFS tree.
                          Rebuild browser history stack.
-                         Encounter drones per segment.
+                         Pulse drones per segment.
 7. Lineage follows URL   Explorer path syncs to URL.
-8. ShowHoneycomb heartbeat  Compute sig, subscribe mesh, render.
+8. ShowCellDrone heartbeat  Compute sig, subscribe mesh, render.
 ```
 
 ---

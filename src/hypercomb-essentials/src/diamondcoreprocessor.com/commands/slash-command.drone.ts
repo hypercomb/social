@@ -349,15 +349,15 @@ class PushToTalkProvider implements SlashCommandProvider {
   }
 }
 
-class GuideProvider implements SlashCommandProvider {
-  readonly name = 'guide-provider'
+class InstructionsProvider implements SlashCommandProvider {
+  readonly name = 'instructions-provider'
   readonly priority = 100
   readonly commands: SlashCommand[] = [
-    { name: 'guide', description: 'Open the learning guide', descriptionKey: 'slash.guide', aliases: ['learn', 'tutorial'] }
+    { name: 'instructions', description: 'Toggle instruction overlay', descriptionKey: 'slash.instructions', aliases: ['instruct', 'labels'] }
   ]
 
   execute(): void {
-    EffectBus.emit('guide:open', undefined)
+    EffectBus.emit('instruction:toggle', undefined)
   }
 }
 
@@ -394,6 +394,6 @@ _slashCommands.addProvider(new LanguageProvider())
 _slashCommands.addProvider(new ArrangeProvider())
 _slashCommands.addProvider(new VoiceProvider())
 _slashCommands.addProvider(new PushToTalkProvider())
-_slashCommands.addProvider(new GuideProvider())
+_slashCommands.addProvider(new InstructionsProvider())
 _slashCommands.addProvider(new AtomizeUiProvider())
 window.ioc.register('@diamondcoreprocessor.com/SlashCommandDrone', _slashCommands)

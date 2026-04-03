@@ -48,3 +48,12 @@ object  →  structuredClone  →  JSON.stringify  →  TextEncoder  →  ArrayB
 ## The Invariant
 
 The signature is proof. If you know the signature, you know the content has not changed. If you have the content, you can independently verify the signature. No trust required — the math is the authority.
+
+## Related Critical Documents
+
+- [signature-expansion-doctrine.md](signature-expansion-doctrine.md) — **Mandatory practice**: every fragment must be signature-addressed. Inline data breaks composition.
+- [collapsed-compute.md](collapsed-compute.md) — Why signature-addressed fragments eliminate redundant computation across the network.
+- [signature-algebra.md](signature-algebra.md) — The formal algebra: set operations, projections, and reactive pipelines over signatures.
+- [signature-node-pattern.md](signature-node-pattern.md) — Plug-and-play implementation guide: copy the node template, your feature is signature-addressed.
+- [deterministic-computation.md](deterministic-computation.md) — Authenticity layer: composing script + resource signatures for global memoization.
+- [core-processor-architecture.md](core-processor-architecture.md) — The runtime: `hypercomb.act()` is the single entry point. All bees pulse through this bottleneck.

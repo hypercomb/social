@@ -74,7 +74,7 @@ If hex changed:
     - Resolve profile (private / public-own / public-external)
     - Rebuild icons if profile changed
     - positionOverlay() moves the Container to the hex center + mesh offset
-    - updateSeedLabel() shows "index-label" debug text
+    - updateCellLabel() shows "index-label" debug text
     - updatePerTileVisibility() shows/hides conditional icons
     - Emit tile:hover effect
     |

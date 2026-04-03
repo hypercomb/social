@@ -660,6 +660,14 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     this.zoom?.end?.('controls-bar')
   }
 
+  readonly toggleInstructions = (event: MouseEvent): void => {
+    if (event.ctrlKey || event.metaKey) {
+      EffectBus.emit('instruction:catalog', undefined)
+    } else {
+      EffectBus.emit('instruction:toggle', undefined)
+    }
+  }
+
   readonly toggleFullscreen = (): void => {
     if (document.fullscreenElement) {
       void document.exitFullscreen()

@@ -352,7 +352,7 @@ import { QueenBee as QueenBee7, EffectBus as EffectBus6, hypercomb as hypercomb3
 var RemoveQueenBee = class extends QueenBee7 {
   namespace = "diamondcoreprocessor.com";
   command = "remove";
-  aliases = ["rm"];
+  aliases = ["rm", "delete", "del"];
   description = "Remove tiles from the current directory";
   async execute(args) {
     const targets = parseRemoveArgs(args);

@@ -1,0 +1,72 @@
+@if (visible() && !catalogOpen()) {
+  <div class="instruction-overlay">
+    <!-- SVG leader lines -->
+    <svg class="leader-lines">
+      @for (a of activeAnchors(); track a.anchor.selector) {
+        <line
+          [attr.x1]="a.x"
+          [attr.y1]="a.y"
+          [attr.x2]="a.targetX"
+          [attr.y2]="a.targetY"
+        />
+      }
+    </svg>
+
+    <!-- Floating labels -->
+    @for (a of activeAnchors(); track a.anchor.selector) {
+      <div
+        class="instruction-label"
+        [class]="'placement-' + a.anchor.placement"
+        [style.left.px]="a.x"
+        [style.top.px]="a.y"
+      >
+        <span class="label-text">{{ a.anchor.labelKey | t }}</span>
+        @if (a.anchor.shortcut) {
+          <kbd class="label-shortcut">{{ a.anchor.shortcut }}</kbd>
+        }
+        @if (a.anchor.command) {
+          <code class="label-command">{{ a.anchor.command }}</code>
+        }
+        <button class="dismiss-btn" (click)="dismiss(a.anchor.selector)">&#215;</button>
+      </div>
+    }
+  </div>
+}
+
+@if (catalogOpen()) {
+  <div class="catalog-backdrop" (click)="closeCatalog()"></div>
+  <div class="instruction-catalog">
+    <div class="catalog-header">
+      <h2>{{ 'instruction.catalog-title' | t }}</h2>
+      <button class="catalog-close" (click)="closeCatalog()">&#215;</button>
+    </div>
+    <div class="catalog-body">
+      @for (group of catalogGroups(); track group.owner) {
+        <div class="catalog-group">
+          <h3 class="group-label">{{ group.label }}</h3>
+          @for (a of group.anchors; track a.selector) {
+            <div
+              class="catalog-item"
+              [class.dismissed]="isHidden(a.selector)"
+              (click)="toggleItem(a.selector)"
+            >
+              <span class="item-label">{{ a.labelKey | t }}</span>
+              @if (a.shortcut) {
+                <kbd class="item-shortcut">{{ a.shortcut }}</kbd>
+              }
+              @if (a.command) {
+                <code class="item-command">{{ a.command }}</code>
+              }
+              @if (isHidden(a.selector)) {
+                <span class="restore-hint">{{ 'instruction.click-to-restore' | t }}</span>
+              }
+            </div>
+          }
+        </div>
+      }
+      @if (!catalogGroups().length) {
+        <p class="catalog-empty">{{ 'instruction.no-instructions' | t }}</p>
+      }
+    </div>
+  </div>
+}
