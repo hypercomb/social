@@ -1,6 +1,6 @@
 // diamondcoreprocessor.com/editor/tile-editor.drone.ts
 import { EffectBus } from '@hypercomb/core'
-import { TILE_PROPERTIES_FILE } from './tile-properties.js'
+import { TILE_PROPERTIES_FILE, writeCellProperties } from './tile-properties.js'
 import type { TileEditorService } from './tile-editor.service.js'
 import type { ImageEditorService } from './image-editor.service.js'
 
@@ -164,6 +164,16 @@ export class TileEditorDrone {
     const index: Record<string, string> = JSON.parse(localStorage.getItem(indexKey) ?? '{}')
     index[service.cell] = propsSig
     localStorage.setItem(indexKey, JSON.stringify(index))
+
+    // also persist propsSig in the cell's 0000 file for cross-hive reads (substrate)
+    try {
+      const lineage = window.ioc.get<{ explorerDir: () => Promise<FileSystemDirectoryHandle | null> }>('@hypercomb.social/Lineage')
+      const explorerDir = await lineage?.explorerDir()
+      if (explorerDir) {
+        const cellDir = await explorerDir.getDirectoryHandle(service.cell, { create: true })
+        await writeCellProperties(cellDir, { propsSig })
+      }
+    } catch { /* best-effort — localStorage is the primary */ }
 
     // 5. capture cell name before closing
     const savedCell = service.cell

@@ -13,7 +13,7 @@ export class SubstrateDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override description = 'Auto-assign substrate background images to new cells'
 
-  protected override listens = ['cell:added', 'cell:removed', 'substrate:changed', 'drop:pending', 'clipboard:paste-start', 'editor:mode', 'render:cell-count']
+  protected override listens = ['cell:added', 'cell:removed', 'substrate:changed', 'drop:pending', 'clipboard:paste-start', 'clipboard:paste-done', 'editor:mode', 'render:cell-count', 'indicator:dismiss', 'substrate:navigate']
   protected override emits = ['substrate:applied']
 
   #initialized = false
@@ -28,10 +28,14 @@ export class SubstrateDrone extends Drone {
     // Warm up: resolve path, collect image sigs, preload atlas + props pool
     const service = this.#service()
     if (service) {
-      void service.warmUp().then(() => {
+      void service.warmUp().then(async () => {
         // Show indicator if substrate is active
         if (service.pickRandomImageSync()) {
-          EffectBus.emit('indicator:set', { key: 'substrate', icon: '◈', label: 'Substrate active' })
+          const resolved = await service.resolve()
+          const action = resolved
+            ? { effect: 'substrate:navigate', payload: { segments: resolved.split('/') } }
+            : undefined
+          EffectBus.emit('indicator:set', { key: 'substrate', icon: '◈', label: 'Substrate active', action })
         }
       })
     }
@@ -88,9 +92,13 @@ export class SubstrateDrone extends Drone {
       const svc = this.#service()
       if (svc) {
         svc.invalidateCache()
-        void svc.warmUp().then(() => {
+        void svc.warmUp().then(async () => {
           if (svc.pickRandomImageSync()) {
-            EffectBus.emit('indicator:set', { key: 'substrate', icon: '◈', label: 'Substrate active' })
+            const resolved = await svc.resolve()
+            const action = resolved
+              ? { effect: 'substrate:navigate', payload: { segments: resolved.split('/') } }
+              : undefined
+            EffectBus.emit('indicator:set', { key: 'substrate', icon: '◈', label: 'Substrate active', action })
           } else {
             EffectBus.emit('indicator:clear', { key: 'substrate' })
           }
@@ -98,14 +106,29 @@ export class SubstrateDrone extends Drone {
       }
     })
 
-    // Handle indicator dismiss — user clicked × on substrate indicator
+    // Handle indicator click — navigate to the substrate source hive
+    this.onEffect<{ segments: string[] }>('substrate:navigate', ({ segments }) => {
+      if (!segments?.length) return
+      const navigation = get('@hypercomb.social/Navigation') as
+        { goRaw: (segments: readonly string[]) => void } | undefined
+      navigation?.goRaw(segments)
+    })
+
+    // Handle indicator dismiss — clear only the resolved level
     this.onEffect<{ key: string }>('indicator:dismiss', ({ key }) => {
       if (key !== 'substrate') return
       const svc = this.#service()
-      if (svc) {
-        void svc.clearHive()
-        void svc.clearGlobal()
-      }
+      if (!svc) return
+
+      void svc.resolve().then(resolved => {
+        if (!resolved) return
+        // If resolved differs from global, a hive override is active — clear it
+        if (resolved !== svc.globalPath) {
+          void svc.clearHive()
+        } else {
+          void svc.clearGlobal()
+        }
+      })
     })
   }
 

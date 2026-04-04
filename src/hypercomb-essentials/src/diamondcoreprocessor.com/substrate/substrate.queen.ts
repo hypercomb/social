@@ -29,6 +29,9 @@ export class SubstrateQueenBee extends QueenBee {
 
     await service.ensureLoaded()
 
+    const i18n = get('@hypercomb.social/I18n') as any
+    const t = (key: string, params?: Record<string, unknown>) => i18n?.t?.(key, params) ?? key
+
     const trimmed = args.trim().toLowerCase()
     const parts = trimmed.split(/\s+/).filter(Boolean)
     const subcommand = parts[0] ?? ''
@@ -36,17 +39,23 @@ export class SubstrateQueenBee extends QueenBee {
     switch (subcommand) {
       case '': {
         const resolved = await service.resolve()
-        const global = service.globalSignature
-        const i18n = get('@hypercomb.social/I18n') as any
-        const t = (key: string, params?: Record<string, unknown>) => i18n?.t?.(key, params) ?? key
+        const global = service.globalPath
 
         if (resolved) {
-          this.#log(t('substrate.active', { path: resolved }))
+          this.#log(
+            t('substrate.active', { path: resolved }),
+            undefined,
+            { label: t('substrate.go'), effect: 'substrate:navigate', payload: { segments: resolved.split('/') } },
+          )
         } else {
           this.#log(t('substrate.none'))
         }
         if (global && global !== resolved) {
-          this.#log(t('substrate.global', { path: global }))
+          this.#log(
+            t('substrate.global', { path: global }),
+            undefined,
+            { label: t('substrate.go'), effect: 'substrate:navigate', payload: { segments: global.split('/') } },
+          )
         }
         return
       }
@@ -54,24 +63,24 @@ export class SubstrateQueenBee extends QueenBee {
       case 'set': {
         const path = await this.#currentPath()
         if (!path) {
-          this.#log('navigate into a hive first')
+          this.#log(t('substrate.navigate-first'))
           return
         }
         await service.setHive(path)
-        this.#setIndicator(true)
-        this.#log(`substrate set → ${path}`)
+        this.#setIndicator(true, path)
+        this.#log(t('substrate.set', { path }))
         return
       }
 
       case 'global': {
         const path = await this.#currentPath()
         if (!path) {
-          this.#log('navigate into a hive first')
+          this.#log(t('substrate.navigate-first'))
           return
         }
         await service.setGlobal(path)
-        this.#setIndicator(true)
-        this.#log(`global substrate → ${path}`)
+        this.#setIndicator(true, path)
+        this.#log(t('substrate.global-set', { path }))
         return
       }
 
@@ -82,19 +91,19 @@ export class SubstrateQueenBee extends QueenBee {
           await service.clearHive()
         }
         this.#setIndicator(false)
-        this.#log('substrate cleared')
+        this.#log(t('substrate.cleared'))
         return
       }
 
       case 'off': {
         await service.setInherit(false)
-        this.#log('substrate inheritance disabled')
+        this.#log(t('substrate.inherit-disabled'))
         return
       }
 
       case 'on': {
         await service.setInherit(true)
-        this.#log('substrate inheritance enabled')
+        this.#log(t('substrate.inherit-enabled'))
         return
       }
 
@@ -112,33 +121,46 @@ export class SubstrateQueenBee extends QueenBee {
         }
 
         const count = await service.refresh(labels)
-        this.#log(`substrate refreshed ${count} tile${count === 1 ? '' : 's'}`)
+        // Invalidate renderer cache for refreshed tiles so new images show immediately
+        for (const label of labels) {
+          EffectBus.emit('tile:saved', { cell: label })
+        }
+        this.#log(t('substrate.refreshed', { count }))
         void new hypercomb().act()
         return
       }
 
       default: {
-        this.#log(`unknown subcommand: ${subcommand}`)
+        this.#log(t('substrate.unknown-subcommand', { subcommand }))
         return
       }
     }
   }
 
-  #log(message: string, icon?: string): void {
-    EffectBus.emit('activity:log', { message, icon })
+  #log(message: string, icon?: string, action?: { label: string; effect: string; payload?: unknown }): void {
+    EffectBus.emit('activity:log', { message, icon, action })
   }
 
-  #setIndicator(active: boolean): void {
+  #setIndicator(active: boolean, path?: string): void {
     if (active) {
-      EffectBus.emit('indicator:set', { key: 'substrate', icon: '◈', label: 'Substrate active' })
+      const action = path
+        ? { effect: 'substrate:navigate', payload: { segments: path.split('/') } }
+        : undefined
+      EffectBus.emit('indicator:set', { key: 'substrate', icon: '◈', label: 'Substrate active', action })
     } else {
       EffectBus.emit('indicator:clear', { key: 'substrate' })
     }
     // Persist indicator state
-    const saved = JSON.parse(localStorage.getItem('hc:indicators') ?? '[]') as { key: string; icon: string; label: string }[]
+    const action = path
+      ? { effect: 'substrate:navigate', payload: { segments: path.split('/') } }
+      : undefined
+    const saved = JSON.parse(localStorage.getItem('hc:indicators') ?? '[]') as { key: string; icon: string; label: string; action?: unknown }[]
     if (active) {
-      if (!saved.find(i => i.key === 'substrate')) {
-        saved.push({ key: 'substrate', icon: '◈', label: 'Substrate active' })
+      const existing = saved.find(i => i.key === 'substrate')
+      if (existing) {
+        existing.action = action
+      } else {
+        saved.push({ key: 'substrate', icon: '◈', label: 'Substrate active', action })
       }
     } else {
       const idx = saved.findIndex(i => i.key === 'substrate')

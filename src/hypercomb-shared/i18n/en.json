@@ -155,6 +155,15 @@
   "substrate.active": "substrate active → {path}",
   "substrate.none": "no substrate configured",
   "substrate.global": "global substrate → {path}",
+  "substrate.navigate-first": "navigate into a hive first",
+  "substrate.set": "substrate set → {path}",
+  "substrate.global-set": "global substrate → {path}",
+  "substrate.cleared": "substrate cleared",
+  "substrate.inherit-disabled": "substrate inheritance disabled",
+  "substrate.inherit-enabled": "substrate inheritance enabled",
+  "substrate.refreshed": "substrate refreshed {count} tile(s)",
+  "substrate.go": "go →",
+  "substrate.unknown-subcommand": "unknown subcommand: {subcommand}",
 
   "toast.dismiss": "Dismiss",
 

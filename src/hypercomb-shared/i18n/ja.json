@@ -155,6 +155,15 @@
   "substrate.active": "サブストレート有効 → {path}",
   "substrate.none": "サブストレート未設定",
   "substrate.global": "グローバルサブストレート → {path}",
+  "substrate.navigate-first": "先にハイブに移動してください",
+  "substrate.set": "サブストレート設定 → {path}",
+  "substrate.global-set": "グローバルサブストレート → {path}",
+  "substrate.cleared": "サブストレート解除",
+  "substrate.inherit-disabled": "サブストレート継承を無効化",
+  "substrate.inherit-enabled": "サブストレート継承を有効化",
+  "substrate.refreshed": "サブストレート {count} タイルを更新",
+  "substrate.go": "移動 →",
+  "substrate.unknown-subcommand": "不明なサブコマンド: {subcommand}",
 
   "toast.dismiss": "閉じる",
 

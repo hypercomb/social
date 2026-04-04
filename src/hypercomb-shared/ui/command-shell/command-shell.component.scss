@@ -174,35 +174,51 @@ $bp-phone-max: 599px;
 .indicator-pill {
   display: flex;
   align-items: center;
-  gap: 0.15rem;
-  padding: 0.15rem 0.35rem;
   background: rgba(var(--glow-color-rgb), 0.12);
   border: 1px solid rgba(var(--glow-color-rgb), 0.25);
   border-radius: 3px;
   color: rgba(var(--glow-color-rgb), 0.7);
   font: 0.75em / 1 var(--terminal-font);
-  cursor: pointer;
-  transition: background 150ms ease, border-color 150ms ease;
+  transition: border-color 150ms ease;
   user-select: none;
 
   &:hover {
-    background: rgba(var(--glow-color-rgb), 0.2);
     border-color: rgba(var(--glow-color-rgb), 0.45);
   }
 
-  &:hover .indicator-x {
+  &:hover .indicator-x-btn {
     opacity: 1;
   }
 }
 
-.indicator-icon {
-  font-size: 0.9em;
+.indicator-icon-btn,
+.indicator-x-btn {
+  all: unset;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  display: flex;
+  align-items: center;
 }
 
-.indicator-x {
+.indicator-icon-btn {
+  padding: 0.15rem 0.2rem 0.15rem 0.35rem;
+  font-size: 0.9em;
+
+  &:hover {
+    background: rgba(var(--glow-color-rgb), 0.2);
+  }
+}
+
+.indicator-x-btn {
+  padding: 0.15rem 0.35rem 0.15rem 0.2rem;
   opacity: 0.35;
   font-size: 0.85em;
   transition: opacity 150ms ease;
+
+  &:hover {
+    opacity: 1;
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
