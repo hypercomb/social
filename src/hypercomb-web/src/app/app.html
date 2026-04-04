@@ -1,6 +1,9 @@
 @if (introPlaying()) {
   <div class="intro-splash">
-    <div class="intro-tile">hypercomb</div>
+    <svg class="intro-tile" viewBox="0 0 200 231" xmlns="http://www.w3.org/2000/svg">
+      <polygon points="100,0 200,57.7 200,173.2 100,231 0,173.2 0,57.7" fill="rgb(15,35,56)" stroke="rgb(200,151,90)" stroke-width="2"/>
+      <text x="100" y="122" text-anchor="middle" fill="white" font-family="'Source Sans Pro', sans-serif" font-size="22" font-weight="300" letter-spacing="0.5">hypercomb</text>
+    </svg>
   </div>
   <audio #introAudio src="hypercomb.m4a" preload="auto" (ended)="onIntroEnded()"></audio>
 } @else {
