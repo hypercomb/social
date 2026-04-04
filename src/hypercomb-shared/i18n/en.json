@@ -4,6 +4,7 @@
   "activity.pasted.one": "pasted {count} tile",
   "activity.pasted.other": "pasted {count} tiles",
   "activity.moved": "tile moved",
+  "activity.droppedThrough": "moved \"{cell}\" into \"{layer}\"",
   "activity.mesh-public": "mesh \u2192 public",
   "activity.mesh-private": "mesh \u2192 private",
   "activity.undo": "Undo",

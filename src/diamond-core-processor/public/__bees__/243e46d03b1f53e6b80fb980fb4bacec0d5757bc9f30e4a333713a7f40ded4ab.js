@@ -1,5 +1,5 @@
 // src/diamondcoreprocessor.com/move/move.drone.ts
-import { Drone, hypercomb } from "@hypercomb/core";
+import { Drone, EffectBus, hypercomb } from "@hypercomb/core";
 
 // src/diamondcoreprocessor.com/editor/tile-properties.ts
 var TILE_PROPERTIES_FILE = "0000";
@@ -49,9 +49,33 @@ var MoveDrone = class extends Drone {
   #cellLabels = [];
   #cellCoords = [];
   #cellCount = 0;
+  // ── layer dwell state ────────────────────────────────────
+  #branchLabels = /* @__PURE__ */ new Set();
+  #dwellLabel = null;
+  #dwellTimer = null;
+  #dwellStart = 0;
+  #dwellRaf = 0;
+  #droppedThrough = false;
+  #pendingDragLabel = null;
+  #pendingSource = null;
   get moveActive() {
     return this.#moveActive;
   }
+  get isDwelling() {
+    return this.#dwellLabel !== null;
+  }
+  get branchLabels() {
+    return this.#branchLabels;
+  }
+  labelAtAxial = (axial) => {
+    for (let i = 0; i < this.#cellLabels.length; i++) {
+      const coord = this.#cellCoords[i];
+      if (coord && coord.q === axial.q && coord.r === axial.r) {
+        return this.#cellLabels[i] ?? null;
+      }
+    }
+    return null;
+  };
   deps = {
     desktopMove: "@diamondcoreprocessor.com/DesktopMoveInput",
     touchMove: "@diamondcoreprocessor.com/TouchMoveInput",
@@ -59,10 +83,11 @@ var MoveDrone = class extends Drone {
     axial: "@diamondcoreprocessor.com/AxialService",
     layout: "@diamondcoreprocessor.com/LayoutService",
     lineage: "@hypercomb.social/Lineage",
-    selection: "@diamondcoreprocessor.com/SelectionService"
+    selection: "@diamondcoreprocessor.com/SelectionService",
+    transfer: "@diamondcoreprocessor.com/LayerTransferService"
   };
   listens = ["render:host-ready", "render:cell-count", "render:mesh-offset", "controls:action"];
-  emits = ["move:preview", "move:committed", "move:mode", "cell:reorder"];
+  emits = ["move:preview", "move:committed", "move:mode", "cell:reorder", "move:layer-dwell"];
   #effectsRegistered = false;
   heartbeat = async () => {
     if (this.#effectsRegistered) return;
@@ -83,6 +108,14 @@ var MoveDrone = class extends Drone {
       touchMove?.attach(this, refs);
     });
     this.onEffect("render:cell-count", (payload) => {
+      this.#branchLabels = new Set(payload.branchLabels ?? []);
+      if (this.#pendingDragLabel && payload.labels.includes(this.#pendingDragLabel)) {
+        this.#cellCount = payload.count;
+        this.#cellLabels = payload.labels;
+        this.#cellCoords = payload.coords ?? [];
+        this.#autoResumeDrag();
+        return;
+      }
       if (this.#activeSource && this.#activeSource !== "command") return;
       this.#cellCount = payload.count;
       this.#cellLabels = payload.labels;
@@ -180,6 +213,18 @@ var MoveDrone = class extends Drone {
   updateMove = (hoverAxial, source) => {
     if (this.#activeSource !== source) return;
     if (!this.#anchorAxial) return;
+    if (this.#droppedThrough) {
+      const insertOrder = this.#computeInsertPlacements(hoverAxial);
+      const movedLabels2 = new Set(this.#movedGroup.keys());
+      const axialSvc = this.resolve("axial");
+      const gridSize = axialSvc?.count ?? 0;
+      const names = new Array(Math.max(gridSize, insertOrder.length)).fill("");
+      for (let i = 0; i < insertOrder.length; i++) {
+        if (insertOrder[i]) names[i] = insertOrder[i];
+      }
+      this.emitEffect("move:preview", { names, movedLabels: movedLabels2 });
+      return;
+    }
     const diff = {
       q: hoverAxial.q - this.#anchorAxial.q,
       r: hoverAxial.r - this.#anchorAxial.r
@@ -191,8 +236,25 @@ var MoveDrone = class extends Drone {
   };
   commitMoveAt = async (finalAxial, source) => {
     if (this.#activeSource !== source) return;
+    this.cancelDwell();
     if (!this.#anchorAxial) {
       this.#reset(source);
+      return;
+    }
+    if (this.#droppedThrough) {
+      const insertOrder = this.#computeInsertPlacements(finalAxial).filter((n) => n !== "");
+      this.emitEffect("cell:reorder", { labels: insertOrder });
+      const lineage = this.resolve("lineage");
+      const layout = this.resolve("layout");
+      if (layout && lineage?.explorerDir) {
+        const dir = await lineage.explorerDir();
+        if (dir) await layout.write(dir, insertOrder);
+      }
+      this.emitEffect("move:preview", null);
+      this.emitEffect("move:committed", { order: insertOrder });
+      this.#droppedThrough = false;
+      this.#reset(source);
+      void new hypercomb().act();
       return;
     }
     const diff = {
@@ -210,6 +272,8 @@ var MoveDrone = class extends Drone {
   };
   cancelMove = (source) => {
     if (this.#activeSource !== source) return;
+    this.cancelDwell();
+    this.#droppedThrough = false;
     this.emitEffect("move:preview", null);
     this.#reset(source);
   };
@@ -407,6 +471,142 @@ var MoveDrone = class extends Drone {
     this.#reset("command");
     this.#commandActive = false;
   }
+  // ── layer dwell (Ctrl + hover on branch tile) ─────────────
+  #dwellMs = 750;
+  startDwell = (label) => {
+    if (!this.#activeSource) return;
+    if (!this.#branchLabels.has(label)) return;
+    if (this.#movedGroup.has(label)) return;
+    if (this.#dwellLabel === label) return;
+    this.cancelDwell();
+    this.#dwellLabel = label;
+    this.#dwellStart = performance.now();
+    const tick = () => {
+      if (!this.#dwellLabel) return;
+      const elapsed = performance.now() - this.#dwellStart;
+      const progress = Math.min(elapsed / this.#dwellMs, 1);
+      this.emitEffect("move:layer-dwell", { label: this.#dwellLabel, progress });
+      if (progress < 1) {
+        this.#dwellRaf = requestAnimationFrame(tick);
+      }
+    };
+    this.#dwellRaf = requestAnimationFrame(tick);
+    this.#dwellTimer = setTimeout(() => {
+      this.#dwellTimer = null;
+      cancelAnimationFrame(this.#dwellRaf);
+      this.#dwellRaf = 0;
+      this.emitEffect("move:layer-dwell", { label: this.#dwellLabel, progress: 1 });
+      void this.#dropThrough();
+    }, this.#dwellMs);
+  };
+  cancelDwell = () => {
+    if (this.#dwellTimer) {
+      clearTimeout(this.#dwellTimer);
+      this.#dwellTimer = null;
+    }
+    if (this.#dwellRaf) {
+      cancelAnimationFrame(this.#dwellRaf);
+      this.#dwellRaf = 0;
+    }
+    if (this.#dwellLabel) {
+      this.#dwellLabel = null;
+      this.emitEffect("move:layer-dwell", null);
+    }
+  };
+  // ── drop through into child layer ────────────────────────
+  async #dropThrough() {
+    const targetLabel = this.#dwellLabel;
+    if (!targetLabel) return;
+    const source = this.#activeSource;
+    if (!source) return;
+    const lineage = this.resolve("lineage");
+    const transfer = this.resolve("transfer");
+    if (!lineage || !transfer) return;
+    const sourceDir = lineage.explorerDir ? await lineage.explorerDir() : null;
+    if (!sourceDir) return;
+    let targetLayerDir;
+    try {
+      targetLayerDir = await sourceDir.getDirectoryHandle(targetLabel, { create: false });
+    } catch {
+      return;
+    }
+    const movedLabels = [...this.#movedGroup.keys()];
+    for (const label of movedLabels) {
+      try {
+        await transfer.transfer(sourceDir, targetLayerDir, label);
+      } catch (err) {
+        console.warn("[move] drop-through transfer failed for", label, err);
+      }
+    }
+    for (const label of movedLabels) {
+      EffectBus.emit("cell:removed", { cell: label });
+    }
+    this.#dwellLabel = null;
+    this.emitEffect("move:layer-dwell", null);
+    this.emitEffect("move:preview", null);
+    this.#pendingDragLabel = movedLabels[0] ?? null;
+    this.#pendingSource = source;
+    this.#droppedThrough = true;
+    this.#anchorAxial = null;
+    this.#movedGroup.clear();
+    this.#occupancy.clear();
+    this.#labelToKey.clear();
+    this.#keyToIndex.clear();
+    lineage.explorerEnter(targetLabel);
+  }
+  // ── auto-resume drag after navigation ─────────────────────
+  #autoResumeDrag() {
+    const label = this.#pendingDragLabel;
+    const source = this.#pendingSource;
+    this.#pendingDragLabel = null;
+    this.#pendingSource = null;
+    if (!label || !source) return;
+    const idx = this.#cellLabels.indexOf(label);
+    if (idx < 0) return;
+    const coord = this.#cellCoords[idx];
+    if (!coord) return;
+    this.#moveActive = true;
+    this.#activeSource = source;
+    const axialSvc = this.resolve("axial");
+    if (!axialSvc?.items) return;
+    this.#occupancy.clear();
+    this.#labelToKey.clear();
+    this.#keyToIndex.clear();
+    for (const [i, c] of axialSvc.items) {
+      this.#keyToIndex.set(axialKey(c.q, c.r), i);
+    }
+    for (let i = 0; i < this.#cellLabels.length; i++) {
+      const l = this.#cellLabels[i];
+      if (!l) continue;
+      const c = this.#cellCoords[i];
+      if (!c) continue;
+      const key = axialKey(c.q, c.r);
+      this.#occupancy.set(key, l);
+      this.#labelToKey.set(l, key);
+    }
+    this.#movedGroup.clear();
+    this.#movedGroup.set(label, { q: coord.q, r: coord.r });
+    this.#anchorAxial = { q: coord.q, r: coord.r };
+    EffectBus.emit("cell:added", { cell: label });
+    this.emitEffect("move:mode", { active: true });
+  }
+  // ── insert-push reorder (used after drop-through) ─────────
+  #computeInsertPlacements(hoverAxial) {
+    if (this.#movedGroup.size === 0) return [...this.#cellLabels];
+    const movedLabels = new Set(this.#movedGroup.keys());
+    const denseWithout = this.#cellLabels.filter((l) => l && !movedLabels.has(l));
+    const hoverKey = axialKey(hoverAxial.q, hoverAxial.r);
+    const hoverLabel = this.#occupancy.get(hoverKey);
+    let insertIdx = denseWithout.length;
+    if (hoverLabel) {
+      const pos = denseWithout.indexOf(hoverLabel);
+      if (pos >= 0) insertIdx = pos;
+    }
+    const movedList = [...movedLabels];
+    const result = [...denseWithout];
+    result.splice(insertIdx, 0, ...movedList);
+    return result;
+  }
   // ── shared commit logic (pinned vs dense) ────────────────
   async #commitPlacements(placements) {
     const lineage = this.resolve("lineage");
@@ -442,11 +642,14 @@ var MoveDrone = class extends Drone {
   }
   // ── reset ────────────────────────────────────────────────
   #reset(source) {
+    this.cancelDwell();
     this.#anchorAxial = null;
     this.#movedGroup.clear();
     this.#occupancy.clear();
     this.#labelToKey.clear();
     this.#keyToIndex.clear();
+    this.#pendingDragLabel = null;
+    this.#pendingSource = null;
     this.#end(source);
   }
 };

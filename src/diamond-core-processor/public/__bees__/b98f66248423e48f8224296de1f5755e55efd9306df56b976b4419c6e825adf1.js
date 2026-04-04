@@ -40,13 +40,16 @@ var ICONS = {
   // Circle with slash
   block: svg('<circle cx="12" cy="12" r="9"/><line x1="5.7" y1="5.7" x2="18.3" y2="18.3"/>'),
   // Trash bin
-  remove: svg('<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>')
+  remove: svg('<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>'),
+  // Refresh / reroll — two curved arrows
+  reroll: svg('<path d="M1 4v6h6"/><path d="M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10"/><path d="M3.51 15A9 9 0 0 0 18.36 18.36L23 14"/>')
 };
 var ICON_REGISTRY = [
   // ── private profile ──
   { name: "command", svgMarkup: ICONS.command, hoverTint: 11075544, profile: "private" },
   { name: "edit", svgMarkup: ICONS.edit, hoverTint: 13162751, profile: "private" },
   { name: "search", svgMarkup: ICONS.search, hoverTint: 13172680, profile: "private", visibleWhen: (ctx) => ctx.noImage },
+  { name: "reroll", svgMarkup: ICONS.reroll, hoverTint: 14207231, profile: "private", visibleWhen: (ctx) => ctx.hasSubstrate },
   { name: "remove", svgMarkup: ICONS.remove, hoverTint: 16763080, profile: "private" },
   { name: "break-apart", svgMarkup: ICONS.breakApart, hoverTint: 6737151, profile: "private", visibleWhen: (ctx) => ctx.isHidden },
   // ── public-own profile ──
@@ -78,7 +81,7 @@ function computeIconPositions(activeNames) {
   return activeNames.map((_, i) => ({ x: Math.round(startX + i * spacing), y: ICON_Y }));
 }
 var ARRANGEMENT_KEY = "iconArrangement";
-var HANDLED_ACTIONS = /* @__PURE__ */ new Set(["edit", "search", "command", "hide", "break-apart", "adopt", "block", "remove"]);
+var HANDLED_ACTIONS = /* @__PURE__ */ new Set(["edit", "search", "command", "hide", "break-apart", "adopt", "block", "remove", "reroll"]);
 var TileActionsDrone = class extends Drone {
   namespace = "diamondcoreprocessor.com";
   description = "registers default tile overlay icons and handles their click actions";
@@ -86,7 +89,7 @@ var TileActionsDrone = class extends Drone {
     lineage: "@hypercomb.social/Lineage"
   };
   listens = ["render:host-ready", "tile:action", "controls:action", "overlay:icons-reordered", "overlay:arrange-mode"];
-  emits = ["overlay:register-action", "overlay:pool-icons", "search:prefill", "command:focus", "tile:hidden", "tile:unhidden", "tile:blocked", "cell:removed", "visibility:show-hidden"];
+  emits = ["overlay:register-action", "overlay:pool-icons", "search:prefill", "command:focus", "tile:hidden", "tile:unhidden", "tile:blocked", "cell:removed", "visibility:show-hidden", "substrate:rerolled"];
   #registered = false;
   #effectsRegistered = false;
   #arrangement = {};
@@ -235,6 +238,9 @@ var TileActionsDrone = class extends Drone {
       case "block":
         this.#hideOrBlock(label, "hc:blocked-tiles", "tile:blocked");
         break;
+      case "reroll":
+        void this.#rerollSubstrate(label);
+        break;
       case "remove":
         void this.#removeTile(label);
         break;
@@ -251,6 +257,16 @@ var TileActionsDrone = class extends Drone {
     } catch {
     }
     void new hypercomb().act();
+  }
+  async #rerollSubstrate(label) {
+    const svc = window.ioc?.get?.("@diamondcoreprocessor.com/SubstrateService");
+    if (svc?.rerollCell(label)) {
+      const showCell = window.ioc?.get?.("@diamondcoreprocessor.com/ShowCellDrone");
+      showCell?.cellImageCache.delete(label);
+      showCell?.cellSubstrateCache.delete(label);
+      EffectBus.emit("substrate:rerolled", { cell: label });
+      void new hypercomb().act();
+    }
   }
   #unhide(label) {
     const lineage = this.resolve("lineage");

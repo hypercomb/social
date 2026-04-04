@@ -276,6 +276,27 @@ export class SubstrateService extends EventTarget {
     return true
   }
 
+  /**
+   * Re-roll a single cell's substrate image.
+   * Clears its current props entry and assigns a new random one from the pool.
+   * Returns true if a new image was assigned.
+   */
+  rerollCell(label: string): boolean {
+    if (this.#propsPool.length === 0) return false
+
+    const indexKey = 'hc:tile-props-index'
+    const index: Record<string, string> = JSON.parse(localStorage.getItem(indexKey) ?? '{}')
+
+    // Remove current entry so we can assign a fresh one
+    delete index[label]
+
+    const entry = this.#propsPool[Math.floor(Math.random() * this.#propsPool.length)]
+    index[label] = entry.propsSig
+    localStorage.setItem(indexKey, JSON.stringify(index))
+
+    return true
+  }
+
   /** Remove a cell from the props index (call on cell:removed). */
   clearCell(label: string): void {
     const indexKey = 'hc:tile-props-index'

@@ -86,14 +86,16 @@ window.ioc.register("@diamondcoreprocessor.com/HexLabelAtlasFactory", new HexLab
 
 // src/diamondcoreprocessor.com/presentation/grid/hex-image.atlas.ts
 import { Container as Container2, RenderTexture as RenderTexture2, Sprite, Texture as Texture2 } from "pixi.js";
-var HexImageAtlas = class {
+var HexImageAtlas = class _HexImageAtlas {
   #atlas;
   #map = /* @__PURE__ */ new Map();
+  #failures = /* @__PURE__ */ new Map();
   #nextSlot = 0;
   #cols;
   #rows;
   #cellPx;
   #renderer;
+  static MAX_RETRIES = 3;
   constructor(renderer, cellPx = 256, cols = 8, rows = 8) {
     this.#renderer = renderer;
     this.#cellPx = Math.max(1, cellPx);
@@ -117,15 +119,39 @@ var HexImageAtlas = class {
   getImageUV(sig) {
     return this.#map.get(sig) ?? null;
   }
+  /** Returns true if the signature has permanently failed loading (exceeded max retries). */
+  hasFailed(sig) {
+    return (this.#failures.get(sig) ?? 0) >= _HexImageAtlas.MAX_RETRIES;
+  }
+  /** Clear failure count for a signature so it can be retried (e.g. after re-save). */
+  clearFailure(sig) {
+    this.#failures.delete(sig);
+  }
   async loadImage(sig, blob) {
     const existing = this.#map.get(sig);
     if (existing) return existing;
+    if (this.hasFailed(sig)) return null;
     const slot = this.#nextSlot % (this.#cols * this.#rows);
     this.#nextSlot++;
     const col = slot % this.#cols;
     const row = Math.floor(slot / this.#cols);
-    const bitmap = await createImageBitmap(blob);
-    const texture = Texture2.from(bitmap);
+    let bitmap;
+    try {
+      bitmap = await createImageBitmap(blob);
+    } catch {
+      this.#failures.set(sig, (this.#failures.get(sig) ?? 0) + 1);
+      console.warn(`[HexImageAtlas] createImageBitmap failed for ${sig.slice(0, 12)}\u2026 (attempt ${this.#failures.get(sig)}/${_HexImageAtlas.MAX_RETRIES})`);
+      return null;
+    }
+    let texture;
+    try {
+      texture = Texture2.from(bitmap);
+    } catch {
+      bitmap.close();
+      this.#failures.set(sig, (this.#failures.get(sig) ?? 0) + 1);
+      console.warn(`[HexImageAtlas] Texture.from failed for ${sig.slice(0, 12)}\u2026 (attempt ${this.#failures.get(sig)}/${_HexImageAtlas.MAX_RETRIES})`);
+      return null;
+    }
     const sprite = new Sprite(texture);
     const scaleX = this.#cellPx / bitmap.width;
     const scaleY = this.#cellPx / bitmap.height;
@@ -153,6 +179,7 @@ var HexImageAtlas = class {
   /** Remove a specific entry (e.g. after re-save) so next load picks up the new image */
   invalidate(sig) {
     this.#map.delete(sig);
+    this.#failures.delete(sig);
   }
 };
 
@@ -615,6 +642,8 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
   cellBorderColorCache = /* @__PURE__ */ new Map();
   // cache: cell label → has link property
   cellLinkCache = /* @__PURE__ */ new Map();
+  // cache: cell label → is substrate-assigned image
+  cellSubstrateCache = /* @__PURE__ */ new Map();
   lastKey = "";
   listening = false;
   rendering = false;
@@ -1130,6 +1159,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
         this.cellBorderColorCache.clear();
         this.cellTagsCache.clear();
         this.cellLinkCache.clear();
+        this.cellSubstrateCache.clear();
         this.atlasRenderer = this.pixiRenderer;
         this.shader = null;
       }
@@ -1159,6 +1189,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8);
       this.cellImageCache.clear();
       this.cellBorderColorCache.clear();
+      this.cellSubstrateCache.clear();
       this.atlasRenderer = this.pixiRenderer;
       this.shader = null;
     } else if (!this.atlas || this.atlasRenderer !== this.pixiRenderer) {
@@ -1167,6 +1198,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8);
       this.cellImageCache.clear();
       this.cellBorderColorCache.clear();
+      this.cellSubstrateCache.clear();
       this.atlasRenderer = this.pixiRenderer;
       this.shader = null;
     }
@@ -1568,6 +1600,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       branchLabels: cells.filter((cell) => cell.hasBranch).map((cell) => cell.label),
       externalLabels: cells.filter((cell) => cell.external).map((cell) => cell.label),
       noImageLabels: cells.filter((cell) => !cell.imageSig).map((cell) => cell.label),
+      substrateLabels: cells.filter((cell) => cell.hasSubstrate).map((cell) => cell.label),
       linkLabels: cells.filter((cell) => cell.hasLink).map((cell) => cell.label),
       hiddenLabels: this.#showHiddenItems ? [...this.#currentHiddenSet] : []
     });
@@ -2253,6 +2286,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
         cell.imageSig = this.cellImageCache.get(cell.label) ?? void 0;
         cell.borderColor = this.cellBorderColorCache.get(cell.label);
         cell.hasLink = this.cellLinkCache.get(cell.label) ?? false;
+        cell.hasSubstrate = this.cellSubstrateCache.get(cell.label) ?? false;
         continue;
       }
       try {
@@ -2280,14 +2314,21 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
         const hasLink = typeof props?.link === "string" && props.link.length > 0;
         this.cellLinkCache.set(cell.label, hasLink);
         cell.hasLink = hasLink;
+        const isSubstrate = props?.substrate === true;
+        this.cellSubstrateCache.set(cell.label, isSubstrate);
+        cell.hasSubstrate = isSubstrate;
         const smallSig = this.#flat && props?.flat?.small?.image || props?.small?.image;
         if (smallSig && isSignature(smallSig)) {
           cell.imageSig = smallSig;
           this.cellImageCache.set(cell.label, smallSig);
-          if (!this.imageAtlas.hasImage(smallSig)) {
-            const blob2 = await store.getResource(smallSig);
-            if (blob2) {
-              await this.imageAtlas.loadImage(smallSig, blob2);
+          if (!this.imageAtlas.hasImage(smallSig) && !this.imageAtlas.hasFailed(smallSig)) {
+            try {
+              const blob2 = await store.getResource(smallSig);
+              if (blob2) {
+                await this.imageAtlas.loadImage(smallSig, blob2);
+              }
+            } catch {
+              console.warn(`[ShowCell] failed to load image for cell ${cell.label}`);
             }
           }
         } else {

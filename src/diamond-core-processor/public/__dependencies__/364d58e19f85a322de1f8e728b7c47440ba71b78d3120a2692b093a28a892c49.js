@@ -165,14 +165,16 @@ var DEFAULT_HEX_GEOMETRY = createHexGeometry(32, 6);
 
 // src/diamondcoreprocessor.com/presentation/grid/hex-image.atlas.ts
 import { Container, RenderTexture, Sprite, Texture } from "pixi.js";
-var HexImageAtlas = class {
+var HexImageAtlas = class _HexImageAtlas {
   #atlas;
   #map = /* @__PURE__ */ new Map();
+  #failures = /* @__PURE__ */ new Map();
   #nextSlot = 0;
   #cols;
   #rows;
   #cellPx;
   #renderer;
+  static MAX_RETRIES = 3;
   constructor(renderer, cellPx = 256, cols = 8, rows = 8) {
     this.#renderer = renderer;
     this.#cellPx = Math.max(1, cellPx);
@@ -196,15 +198,39 @@ var HexImageAtlas = class {
   getImageUV(sig) {
     return this.#map.get(sig) ?? null;
   }
+  /** Returns true if the signature has permanently failed loading (exceeded max retries). */
+  hasFailed(sig) {
+    return (this.#failures.get(sig) ?? 0) >= _HexImageAtlas.MAX_RETRIES;
+  }
+  /** Clear failure count for a signature so it can be retried (e.g. after re-save). */
+  clearFailure(sig) {
+    this.#failures.delete(sig);
+  }
   async loadImage(sig, blob) {
     const existing = this.#map.get(sig);
     if (existing) return existing;
+    if (this.hasFailed(sig)) return null;
     const slot = this.#nextSlot % (this.#cols * this.#rows);
     this.#nextSlot++;
     const col = slot % this.#cols;
     const row = Math.floor(slot / this.#cols);
-    const bitmap = await createImageBitmap(blob);
-    const texture = Texture.from(bitmap);
+    let bitmap;
+    try {
+      bitmap = await createImageBitmap(blob);
+    } catch {
+      this.#failures.set(sig, (this.#failures.get(sig) ?? 0) + 1);
+      console.warn(`[HexImageAtlas] createImageBitmap failed for ${sig.slice(0, 12)}\u2026 (attempt ${this.#failures.get(sig)}/${_HexImageAtlas.MAX_RETRIES})`);
+      return null;
+    }
+    let texture;
+    try {
+      texture = Texture.from(bitmap);
+    } catch {
+      bitmap.close();
+      this.#failures.set(sig, (this.#failures.get(sig) ?? 0) + 1);
+      console.warn(`[HexImageAtlas] Texture.from failed for ${sig.slice(0, 12)}\u2026 (attempt ${this.#failures.get(sig)}/${_HexImageAtlas.MAX_RETRIES})`);
+      return null;
+    }
     const sprite = new Sprite(texture);
     const scaleX = this.#cellPx / bitmap.width;
     const scaleY = this.#cellPx / bitmap.height;
@@ -232,6 +258,7 @@ var HexImageAtlas = class {
   /** Remove a specific entry (e.g. after re-save) so next load picks up the new image */
   invalidate(sig) {
     this.#map.delete(sig);
+    this.#failures.delete(sig);
   }
 };
 

@@ -10,7 +10,7 @@ import { type HexGeometry, DEFAULT_HEX_GEOMETRY } from '../grid/hex-geometry.js'
 import type { IconRegistryEntry } from './tile-actions.drone.js'
 import { ICON_SPACING, ICON_Y, computeIconPositions } from './tile-actions.drone.js'
 
-type CellCountPayload = { count: number; labels: string[]; coords: Axial[]; branchLabels?: string[]; externalLabels?: string[]; noImageLabels?: string[]; linkLabels?: string[]; hiddenLabels?: string[] }
+type CellCountPayload = { count: number; labels: string[]; coords: Axial[]; branchLabels?: string[]; externalLabels?: string[]; noImageLabels?: string[]; substrateLabels?: string[]; linkLabels?: string[]; hiddenLabels?: string[] }
 
 type OverlayAction = {
   name: string
@@ -44,6 +44,7 @@ export type OverlayTileContext = {
   r: number
   index: number
   noImage: boolean
+  hasSubstrate: boolean
   isBranch: boolean
   hasLink: boolean
   isHidden: boolean
@@ -109,6 +110,7 @@ export class TileOverlayDrone extends Drone {
   #currentTileExternal = false
   #activeProfileKey: OverlayProfileKey | null = null
   #noImageLabels = new Set<string>()
+  #substrateLabels = new Set<string>()
   #linkLabels = new Set<string>()
   #hiddenLabels = new Set<string>()
 
@@ -289,6 +291,7 @@ export class TileOverlayDrone extends Drone {
         this.#branchLabels = new Set(payload.branchLabels ?? [])
         this.#externalLabels = new Set(payload.externalLabels ?? [])
         this.#noImageLabels = new Set(payload.noImageLabels ?? [])
+        this.#substrateLabels = new Set(payload.substrateLabels ?? [])
         this.#linkLabels = new Set(payload.linkLabels ?? [])
         this.#hiddenLabels = new Set(payload.hiddenLabels ?? [])
         this.#rebuildOccupiedMap()
@@ -561,6 +564,7 @@ export class TileOverlayDrone extends Drone {
       r: this.#currentAxial.r,
       index: entry.index,
       noImage: this.#noImageLabels.has(entry.label),
+      hasSubstrate: this.#substrateLabels.has(entry.label),
       isBranch: this.#branchLabels.has(entry.label),
       hasLink: this.#linkLabels.has(entry.label),
       isHidden: this.#hiddenLabels.has(entry.label),

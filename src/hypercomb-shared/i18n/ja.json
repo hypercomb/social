@@ -1,6 +1,7 @@
 {
   "activity.added": "「{cell}」を追加しました",
   "activity.removed": "「{cell}」を削除しました",
+  "activity.droppedThrough": "「{cell}」を「{layer}」に移動しました",
   "activity.pasted.one": "{count}個のタイルを貼り付けました",
   "activity.pasted.other": "{count}個のタイルを貼り付けました",
   "activity.moved": "タイルを移動しました",

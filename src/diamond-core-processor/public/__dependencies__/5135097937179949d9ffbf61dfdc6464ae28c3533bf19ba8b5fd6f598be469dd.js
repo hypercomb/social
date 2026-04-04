@@ -200,7 +200,7 @@ var SubstrateService = class extends EventTarget {
     const showCell = get2("@diamondcoreprocessor.com/ShowCellDrone");
     if (!showCell?.imageAtlas) return;
     for (const sig of images) {
-      if (showCell.imageAtlas.hasImage(sig)) continue;
+      if (showCell.imageAtlas.hasImage(sig) || showCell.imageAtlas.hasFailed(sig)) continue;
       try {
         const blob = await store.getResource(sig);
         if (blob) await showCell.imageAtlas.loadImage(sig, blob);
@@ -283,6 +283,21 @@ var SubstrateService = class extends EventTarget {
     const indexKey = "hc:tile-props-index";
     const index = JSON.parse(localStorage.getItem(indexKey) ?? "{}");
     if (index[label]) return false;
+    const entry = this.#propsPool[Math.floor(Math.random() * this.#propsPool.length)];
+    index[label] = entry.propsSig;
+    localStorage.setItem(indexKey, JSON.stringify(index));
+    return true;
+  }
+  /**
+   * Re-roll a single cell's substrate image.
+   * Clears its current props entry and assigns a new random one from the pool.
+   * Returns true if a new image was assigned.
+   */
+  rerollCell(label) {
+    if (this.#propsPool.length === 0) return false;
+    const indexKey = "hc:tile-props-index";
+    const index = JSON.parse(localStorage.getItem(indexKey) ?? "{}");
+    delete index[label];
     const entry = this.#propsPool[Math.floor(Math.random() * this.#propsPool.length)];
     index[label] = entry.propsSig;
     localStorage.setItem(indexKey, JSON.stringify(index));

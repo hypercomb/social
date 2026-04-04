@@ -26,6 +26,8 @@ const ICONS = {
   block: svg('<circle cx="12" cy="12" r="9"/><line x1="5.7" y1="5.7" x2="18.3" y2="18.3"/>'),
   // Trash bin
   remove: svg('<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>'),
+  // Refresh / reroll — two curved arrows
+  reroll: svg('<path d="M1 4v6h6"/><path d="M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10"/><path d="M3.51 15A9 9 0 0 0 18.36 18.36L23 14"/>'),
 } as const
 
 // ── Icon registry ─────────────────────────────────────────────────
@@ -43,6 +45,7 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   { name: 'command', svgMarkup: ICONS.command, hoverTint: 0xa8ffd8, profile: 'private' },
   { name: 'edit', svgMarkup: ICONS.edit, hoverTint: 0xc8d8ff, profile: 'private' },
   { name: 'search', svgMarkup: ICONS.search, hoverTint: 0xc8ffc8, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.noImage },
+  { name: 'reroll', svgMarkup: ICONS.reroll, hoverTint: 0xd8c8ff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.hasSubstrate },
   { name: 'remove', svgMarkup: ICONS.remove, hoverTint: 0xffc8c8, profile: 'private' },
   { name: 'break-apart', svgMarkup: ICONS.breakApart, hoverTint: 0x66ccff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden },
   // ── public-own profile ──
@@ -93,7 +96,7 @@ const ARRANGEMENT_KEY = 'iconArrangement'
 type IconArrangement = Partial<Record<OverlayProfileKey, string[]>>
 
 // ── Action names this bee handles ─────────────────────────────────
-const HANDLED_ACTIONS = new Set(['edit', 'search', 'command', 'hide', 'break-apart', 'adopt', 'block', 'remove'])
+const HANDLED_ACTIONS = new Set(['edit', 'search', 'command', 'hide', 'break-apart', 'adopt', 'block', 'remove', 'reroll'])
 
 type TileActionPayload = { action: string; label: string; q: number; r: number; index: number }
 
@@ -106,7 +109,7 @@ export class TileActionsDrone extends Drone {
   }
 
   protected override listens = ['render:host-ready', 'tile:action', 'controls:action', 'overlay:icons-reordered', 'overlay:arrange-mode']
-  protected override emits = ['overlay:register-action', 'overlay:pool-icons', 'search:prefill', 'command:focus', 'tile:hidden', 'tile:unhidden', 'tile:blocked', 'cell:removed', 'visibility:show-hidden']
+  protected override emits = ['overlay:register-action', 'overlay:pool-icons', 'search:prefill', 'command:focus', 'tile:hidden', 'tile:unhidden', 'tile:blocked', 'cell:removed', 'visibility:show-hidden', 'substrate:rerolled']
 
   #registered = false
   #effectsRegistered = false
@@ -306,6 +309,10 @@ export class TileActionsDrone extends Drone {
         this.#hideOrBlock(label, 'hc:blocked-tiles', 'tile:blocked')
         break
 
+      case 'reroll':
+        void this.#rerollSubstrate(label)
+        break
+
       case 'remove':
         void this.#removeTile(label)
         break
@@ -323,6 +330,20 @@ export class TileActionsDrone extends Drone {
       EffectBus.emit('cell:removed', { cell: label })
     } catch { /* entry doesn't exist or can't be removed */ }
     void new hypercomb().act()
+  }
+
+  async #rerollSubstrate(label: string): Promise<void> {
+    const svc = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SubstrateService') as
+      { rerollCell(label: string): boolean } | undefined
+    if (svc?.rerollCell(label)) {
+      // Clear the show-cell image cache for this cell so it re-reads props
+      const showCell = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ShowCellDrone') as
+        { cellImageCache: Map<string, string | null>; cellSubstrateCache: Map<string, boolean> } | undefined
+      showCell?.cellImageCache.delete(label)
+      showCell?.cellSubstrateCache.delete(label)
+      EffectBus.emit('substrate:rerolled', { cell: label })
+      void new hypercomb().act()
+    }
   }
 
   #unhide(label: string): void {

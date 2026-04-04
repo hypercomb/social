@@ -14,6 +14,8 @@ var DesktopMoveInput = class {
   #downAxial = null;
   #dragging = false;
   #spaceHeld = false;
+  #ctrlHeld = false;
+  #lastDwellLabel = null;
   attach = (drone, refs) => {
     if (this.#enabled) return;
     this.#drone = drone;
@@ -83,6 +85,7 @@ var DesktopMoveInput = class {
     const axial = this.#clientToAxial(e.clientX, e.clientY);
     if (axial) {
       this.#drone.updateMove(axial, this.#source);
+      this.#updateDwell(axial);
     }
   };
   #onPointerUp = (e) => {
@@ -100,6 +103,9 @@ var DesktopMoveInput = class {
   };
   #onKeyDown = (e) => {
     if (e.key === " ") this.#spaceHeld = true;
+    if (e.key === "Control") {
+      this.#ctrlHeld = true;
+    }
     if (e.key === "Escape" && this.#dragging) {
       this.#drone?.cancelMove(this.#source);
       this.#resetDrag();
@@ -107,6 +113,13 @@ var DesktopMoveInput = class {
   };
   #onKeyUp = (e) => {
     if (e.key === " ") this.#spaceHeld = false;
+    if (e.key === "Control") {
+      this.#ctrlHeld = false;
+      if (this.#drone?.isDwelling) {
+        this.#drone.cancelDwell();
+        this.#lastDwellLabel = null;
+      }
+    }
   };
   #onBlur = () => {
     if (this.#dragging) {
@@ -114,6 +127,8 @@ var DesktopMoveInput = class {
     }
     this.#resetDrag();
     this.#spaceHeld = false;
+    this.#ctrlHeld = false;
+    this.#lastDwellLabel = null;
   };
   // ── helpers ───────────────────────────────────────────────
   #cancel() {
@@ -124,7 +139,30 @@ var DesktopMoveInput = class {
     this.#downPos = null;
     this.#downAxial = null;
     this.#dragging = false;
+    this.#lastDwellLabel = null;
     this.#setCursor("");
+  }
+  #updateDwell(axial) {
+    if (!this.#drone || !this.#dragging) return;
+    if (!this.#ctrlHeld) {
+      if (this.#lastDwellLabel) {
+        this.#drone.cancelDwell();
+        this.#lastDwellLabel = null;
+      }
+      return;
+    }
+    const hoverLabel = this.#drone.labelAtAxial(axial);
+    if (!hoverLabel || !this.#drone.branchLabels.has(hoverLabel)) {
+      if (this.#lastDwellLabel) {
+        this.#drone.cancelDwell();
+        this.#lastDwellLabel = null;
+      }
+      return;
+    }
+    if (this.#lastDwellLabel !== hoverLabel) {
+      this.#lastDwellLabel = hoverLabel;
+      this.#drone.startDwell(hoverLabel);
+    }
   }
   #clientToAxial(cx, cy) {
     if (!this.#container || !this.#renderer || !this.#getMeshOffset) return null;
@@ -163,6 +201,41 @@ var DesktopMoveInput = class {
   }
 };
 window.ioc.register("@diamondcoreprocessor.com/DesktopMoveInput", new DesktopMoveInput());
+
+// src/diamondcoreprocessor.com/move/layer-transfer.service.ts
+var LayerTransferService = class {
+  /**
+   * Transfer a cell directory from sourceDir into targetLayerDir.
+   * Creates `targetLayerDir/{cellLabel}/` as a deep copy of `sourceDir/{cellLabel}/`,
+   * then removes the original.
+   */
+  transfer = async (sourceDir, targetLayerDir, cellLabel) => {
+    const srcCell = await sourceDir.getDirectoryHandle(cellLabel, { create: false });
+    const destCell = await targetLayerDir.getDirectoryHandle(cellLabel, { create: true });
+    await this.#copyRecursive(srcCell, destCell);
+    await sourceDir.removeEntry(cellLabel, { recursive: true });
+  };
+  async #copyRecursive(src, dest) {
+    for await (const [name, handle] of src.entries()) {
+      if (handle.kind === "file") {
+        const srcFile = handle;
+        const file = await srcFile.getFile();
+        const destFile = await dest.getFileHandle(name, { create: true });
+        const writable = await destFile.createWritable();
+        await writable.write(await file.arrayBuffer());
+        await writable.close();
+      } else {
+        const srcSub = handle;
+        const destSub = await dest.getDirectoryHandle(name, { create: true });
+        await this.#copyRecursive(srcSub, destSub);
+      }
+    }
+  }
+};
+window.ioc.register(
+  "@diamondcoreprocessor.com/LayerTransferService",
+  new LayerTransferService()
+);
 
 // src/diamondcoreprocessor.com/move/layout.queen.ts
 import { QueenBee, EffectBus, hypercomb } from "@hypercomb/core";
@@ -507,6 +580,7 @@ var TouchMoveInput = class {
 window.ioc.register("@diamondcoreprocessor.com/TouchMoveInput", new TouchMoveInput());
 export {
   DesktopMoveInput,
+  LayerTransferService,
   LayoutQueenBee,
   LayoutService,
   TouchMoveInput

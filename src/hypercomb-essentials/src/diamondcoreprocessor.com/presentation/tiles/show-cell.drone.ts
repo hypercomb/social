@@ -95,6 +95,8 @@ export class ShowCellDrone extends Drone {
   private readonly cellBorderColorCache = new Map<string, [number, number, number]>()
   // cache: cell label → has link property
   private readonly cellLinkCache = new Map<string, boolean>()
+  // cache: cell label → is substrate-assigned image
+  private readonly cellSubstrateCache = new Map<string, boolean>()
 
   private lastKey = ''
 
@@ -764,6 +766,7 @@ export class ShowCellDrone extends Drone {
         this.cellBorderColorCache.clear()
         this.cellTagsCache.clear()
         this.cellLinkCache.clear()
+        this.cellSubstrateCache.clear()
         this.atlasRenderer = this.pixiRenderer
         this.shader = null
       }
@@ -800,6 +803,7 @@ export class ShowCellDrone extends Drone {
       this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8)
       this.cellImageCache.clear()
       this.cellBorderColorCache.clear()
+      this.cellSubstrateCache.clear()
       this.atlasRenderer = this.pixiRenderer
       this.shader = null
     } else if (!this.atlas || this.atlasRenderer !== this.pixiRenderer) {
@@ -808,6 +812,7 @@ export class ShowCellDrone extends Drone {
       this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8)
       this.cellImageCache.clear()
       this.cellBorderColorCache.clear()
+      this.cellSubstrateCache.clear()
       this.atlasRenderer = this.pixiRenderer
       this.shader = null
     }
@@ -1340,6 +1345,7 @@ export class ShowCellDrone extends Drone {
       branchLabels: cells.filter(cell => cell.hasBranch).map(cell => cell.label),
       externalLabels: cells.filter(cell => cell.external).map(cell => cell.label),
       noImageLabels: cells.filter(cell => !cell.imageSig).map(cell => cell.label),
+      substrateLabels: cells.filter(cell => cell.hasSubstrate).map(cell => cell.label),
       linkLabels: cells.filter(cell => cell.hasLink).map(cell => cell.label),
       hiddenLabels: this.#showHiddenItems ? [...this.#currentHiddenSet] : [],
     })
@@ -2164,6 +2170,7 @@ export class ShowCellDrone extends Drone {
         cell.imageSig = this.cellImageCache.get(cell.label) ?? undefined
         cell.borderColor = this.cellBorderColorCache.get(cell.label)
         cell.hasLink = this.cellLinkCache.get(cell.label) ?? false
+        cell.hasSubstrate = this.cellSubstrateCache.get(cell.label) ?? false
         continue
       }
 
@@ -2199,6 +2206,10 @@ export class ShowCellDrone extends Drone {
         const hasLink = typeof props?.link === 'string' && props.link.length > 0
         this.cellLinkCache.set(cell.label, hasLink)
         cell.hasLink = hasLink
+
+        const isSubstrate = props?.substrate === true
+        this.cellSubstrateCache.set(cell.label, isSubstrate)
+        cell.hasSubstrate = isSubstrate
 
         const smallSig = (this.#flat && props?.flat?.small?.image) || props?.small?.image
         if (smallSig && isSignature(smallSig)) {

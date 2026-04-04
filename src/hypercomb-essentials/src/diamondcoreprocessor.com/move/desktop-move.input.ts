@@ -26,6 +26,8 @@ export class DesktopMoveInput {
   #downAxial: Axial | null = null
   #dragging = false
   #spaceHeld = false
+  #ctrlHeld = false
+  #lastDwellLabel: string | null = null
 
   attach = (drone: MoveDroneApi, refs: MoveRefs): void => {
     if (this.#enabled) return
@@ -114,6 +116,7 @@ export class DesktopMoveInput {
     const axial = this.#clientToAxial(e.clientX, e.clientY)
     if (axial) {
       this.#drone.updateMove(axial, this.#source)
+      this.#updateDwell(axial)
     }
   }
 
@@ -135,6 +138,10 @@ export class DesktopMoveInput {
 
   #onKeyDown = (e: KeyboardEvent): void => {
     if (e.key === ' ') this.#spaceHeld = true
+    if (e.key === 'Control') {
+      this.#ctrlHeld = true
+      // if already dragging, re-evaluate dwell at current position
+    }
     if (e.key === 'Escape' && this.#dragging) {
       this.#drone?.cancelMove(this.#source)
       this.#resetDrag()
@@ -143,6 +150,14 @@ export class DesktopMoveInput {
 
   #onKeyUp = (e: KeyboardEvent): void => {
     if (e.key === ' ') this.#spaceHeld = false
+    if (e.key === 'Control') {
+      this.#ctrlHeld = false
+      // cancel any active dwell when Ctrl is released
+      if (this.#drone?.isDwelling) {
+        this.#drone.cancelDwell()
+        this.#lastDwellLabel = null
+      }
+    }
   }
 
   #onBlur = (): void => {
@@ -151,6 +166,8 @@ export class DesktopMoveInput {
     }
     this.#resetDrag()
     this.#spaceHeld = false
+    this.#ctrlHeld = false
+    this.#lastDwellLabel = null
   }
 
   // ── helpers ───────────────────────────────────────────────
@@ -164,7 +181,37 @@ export class DesktopMoveInput {
     this.#downPos = null
     this.#downAxial = null
     this.#dragging = false
+    this.#lastDwellLabel = null
     this.#setCursor('')
+  }
+
+  #updateDwell(axial: { q: number; r: number }): void {
+    if (!this.#drone || !this.#dragging) return
+
+    if (!this.#ctrlHeld) {
+      if (this.#lastDwellLabel) {
+        this.#drone.cancelDwell()
+        this.#lastDwellLabel = null
+      }
+      return
+    }
+
+    // Ctrl held — resolve label at this axial position via MoveDrone
+    const hoverLabel = this.#drone.labelAtAxial(axial)
+
+    if (!hoverLabel || !this.#drone.branchLabels.has(hoverLabel)) {
+      if (this.#lastDwellLabel) {
+        this.#drone.cancelDwell()
+        this.#lastDwellLabel = null
+      }
+      return
+    }
+
+    // hovering on a branch tile with Ctrl held
+    if (this.#lastDwellLabel !== hoverLabel) {
+      this.#lastDwellLabel = hoverLabel
+      this.#drone.startDwell(hoverLabel)
+    }
   }
 
   #clientToAxial(cx: number, cy: number): Axial | null {
