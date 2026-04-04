@@ -283,13 +283,21 @@ export class ZoomDrone extends Drone {
     coordinator: '@diamondcoreprocessor.com/TouchGestureCoordinator',
     touchPan: '@diamondcoreprocessor.com/TouchPanInput',
   }
-  protected override listens = ['render:host-ready']
+  protected override listens = ['render:host-ready', 'editor:mode']
 
   #effectsRegistered = false
 
   protected override heartbeat = async (): Promise<void> => {
     if (this.#effectsRegistered) return
     this.#effectsRegistered = true
+
+    // lock the input gate while the editor is open so wheel/pinch zoom
+    // doesn't fire underneath the editor overlay
+    const gate = window.ioc.get<InputGate>('@diamondcoreprocessor.com/InputGate')
+    this.onEffect<{ active: boolean }>('editor:mode', ({ active }) => {
+      if (active) gate?.lock()
+      else gate?.unlock()
+    })
 
     this.onEffect<HostReadyPayload>('render:host-ready', (payload) => {
       this.app = payload.app

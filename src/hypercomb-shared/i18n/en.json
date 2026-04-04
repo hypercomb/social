@@ -150,11 +150,13 @@
   "slash.instructions": "Toggle instruction overlay",
   "slash.docs": "Browse project documentation",
   "slash.text-only": "Toggle text-only mode (hide images)",
-  "slash.substrate": "Manage default background images for new tiles",
+  "slash.record": "Start AI-powered meeting recording with live hierarchy compilation",
+  "slash.domain": "Add, remove, or list mesh relay domains",
+  "slash.substrate": "Toggle default background images for new tiles",
 
-  "substrate.active": "substrate active → {path}",
-  "substrate.none": "no substrate configured",
-  "substrate.global": "global substrate → {path}",
+  "substrate.on": "substrate on → {path}",
+  "substrate.off": "substrate off",
+  "substrate.here": "substrate → {path}",
 
   "toast.dismiss": "Dismiss",
 

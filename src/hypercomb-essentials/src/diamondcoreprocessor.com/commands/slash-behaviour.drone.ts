@@ -119,7 +119,7 @@ class KeywordProvider implements SlashBehaviourProvider {
   readonly name = 'keyword-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'keyword', description: 'Add or remove keywords (tags) on selected tiles', descriptionKey: 'slash.keyword', aliases: ['kw', 'tag'] }
+    { name: 'keyword', description: 'Add or remove keywords (tags) on selected tiles', descriptionKey: 'slash.keyword' }
   ]
 
   async execute(_behaviourName: string, args: string): Promise<void> {
@@ -144,7 +144,7 @@ class MeetingProvider implements SlashBehaviourProvider {
   readonly name = 'meeting-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'meeting', description: 'Start or join a video meeting on the selected tile', descriptionKey: 'slash.meeting', aliases: ['meet', 'call'] }
+    { name: 'meeting', description: 'Start or join a video meeting on the selected tile', descriptionKey: 'slash.meeting' }
   ]
 
   async execute(_behaviourName: string, args: string): Promise<void> {
@@ -159,7 +159,7 @@ class DebugProvider implements SlashBehaviourProvider {
   readonly name = 'debug-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'debug', description: 'Toggle the Pixi display-tree inspector', descriptionKey: 'slash.debug', aliases: ['inspect', 'dbg'] }
+    { name: 'debug', description: 'Toggle the Pixi display-tree inspector', descriptionKey: 'slash.debug' }
   ]
 
   async execute(): Promise<void> {
@@ -174,7 +174,7 @@ class RemoveProvider implements SlashBehaviourProvider {
   readonly name = 'remove-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'remove', description: 'Remove tiles from the current directory', descriptionKey: 'slash.remove', aliases: ['rm', 'delete', 'del'] }
+    { name: 'remove', description: 'Remove tiles from the current directory', descriptionKey: 'slash.remove' }
   ]
 
   async execute(_behaviourName: string, args: string): Promise<void> {
@@ -215,7 +215,7 @@ class FormatSlashProvider implements SlashBehaviourProvider {
   readonly name = 'format-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'format', description: 'Copy visual formatting from the active tile', descriptionKey: 'slash.format', aliases: ['fmt', 'fp'] }
+    { name: 'format', description: 'Copy visual formatting from the active tile', descriptionKey: 'slash.format' }
   ]
 
   async execute(_behaviourName: string, args: string): Promise<void> {
@@ -228,7 +228,7 @@ class LayoutProvider implements SlashBehaviourProvider {
   readonly name = 'layout-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'layout', description: 'Save, apply, list, or remove layout templates', descriptionKey: 'slash.layout', aliases: ['lo'] }
+    { name: 'layout', description: 'Save, apply, list, or remove layout templates', descriptionKey: 'slash.layout' }
   ]
 
   async execute(_behaviourName: string, args: string): Promise<void> {
@@ -248,7 +248,7 @@ class AccentProvider implements SlashBehaviourProvider {
   readonly name = 'accent-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'accent', description: 'Set the hover accent color by name', descriptionKey: 'slash.accent', aliases: ['ac'] }
+    { name: 'accent', description: 'Set the hover accent color by name', descriptionKey: 'slash.accent' }
   ]
 
   async execute(_behaviourName: string, args: string): Promise<void> {
@@ -337,7 +337,7 @@ class ReviseProvider implements SlashBehaviourProvider {
   readonly name = 'revise-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'revise', description: 'Toggle revision mode (history clock)', descriptionKey: 'slash.revise', aliases: ['rev', 'history'] }
+    { name: 'revise', description: 'Toggle revision mode (history clock)', descriptionKey: 'slash.revise' }
   ]
 
   async execute(_behaviourName: string, args: string): Promise<void> {
@@ -350,7 +350,7 @@ class ExpandProvider implements SlashBehaviourProvider {
   readonly name = 'expand-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'expand', description: 'Expand selected tiles into constituent parts via Claude Haiku', descriptionKey: 'slash.expand', aliases: ['atomize'] }
+    { name: 'expand', description: 'Expand selected tiles into constituent parts via Claude Haiku', descriptionKey: 'slash.expand' }
   ]
 
   async execute(_behaviourName: string, _args: string): Promise<void> {
@@ -370,7 +370,7 @@ class ChatProvider implements SlashBehaviourProvider {
   readonly name = 'chat-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'chat', description: 'Multi-turn conversation with Claude', aliases: ['c', 'ask'] }
+    { name: 'chat', description: 'Multi-turn conversation with Claude' }
   ]
 
   async execute(_behaviourName: string, args: string): Promise<void> {
@@ -383,9 +383,9 @@ class LlmProvider implements SlashBehaviourProvider {
   readonly name = 'llm-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'opus', description: 'Send context to Claude Opus 4.6', descriptionKey: 'slash.opus', aliases: ['o'] },
-    { name: 'sonnet', description: 'Send context to Claude Sonnet', descriptionKey: 'slash.sonnet', aliases: ['s'] },
-    { name: 'haiku', description: 'Send context to Claude Haiku', descriptionKey: 'slash.haiku', aliases: ['h'] },
+    { name: 'opus', description: 'Send context to Claude Opus 4.6', descriptionKey: 'slash.opus' },
+    { name: 'sonnet', description: 'Send context to Claude Sonnet', descriptionKey: 'slash.sonnet' },
+    { name: 'haiku', description: 'Send context to Claude Haiku', descriptionKey: 'slash.haiku' },
   ]
 
   async execute(behaviourName: string, args: string): Promise<void> {
@@ -401,7 +401,7 @@ class LanguageProvider implements SlashBehaviourProvider {
   readonly name = 'language-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'language', description: 'Switch the UI language', descriptionKey: 'slash.language', aliases: ['lang', 'locale'] }
+    { name: 'language', description: 'Switch the UI language', descriptionKey: 'slash.language' }
   ]
 
   async execute(_behaviourName: string, args: string): Promise<void> {
@@ -462,14 +462,14 @@ class TextOnlyProvider implements SlashBehaviourProvider {
   readonly name = 'text-only-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'text-only', description: 'Toggle text-only mode (hide images)', descriptionKey: 'slash.text-only', aliases: ['text', 'textonly'] }
+    { name: 'text-only', description: 'Toggle text-only mode (hide images)', descriptionKey: 'slash.text-only' }
   ]
 
+  #active = false
+
   execute(): void {
-    const current = localStorage.getItem('hc:text-only') === '1'
-    const next = !current
-    localStorage.setItem('hc:text-only', next ? '1' : '0')
-    EffectBus.emit('render:set-text-only', { textOnly: next })
+    this.#active = !this.#active
+    EffectBus.emit('render:set-text-only', { textOnly: this.#active })
   }
 }
 
@@ -477,7 +477,7 @@ class InstructionsProvider implements SlashBehaviourProvider {
   readonly name = 'instructions-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'instructions', description: 'Toggle instruction overlay', descriptionKey: 'slash.instructions', aliases: ['instruct', 'labels'] }
+    { name: 'instructions', description: 'Toggle instruction overlay', descriptionKey: 'slash.instructions' }
   ]
 
   execute(): void {
@@ -489,7 +489,7 @@ class AtomizeUiProvider implements SlashBehaviourProvider {
   readonly name = 'atomize-ui-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'atomize-ui', description: 'Toggle the atomizer toolbar', descriptionKey: 'slash.atomize-ui', aliases: ['au', 'atomizer'] }
+    { name: 'atomize-ui', description: 'Toggle the atomizer toolbar', descriptionKey: 'slash.atomize-ui' }
   ]
 
   execute(): void {
@@ -501,7 +501,7 @@ class DocsProvider implements SlashBehaviourProvider {
   readonly name = 'docs-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'docs', description: 'Browse project documentation', descriptionKey: 'slash.docs', aliases: ['documentation', 'doc'] }
+    { name: 'docs', description: 'Browse project documentation', descriptionKey: 'slash.docs' }
   ]
 
   execute(_behaviourName: string, args: string): void {
@@ -509,11 +509,31 @@ class DocsProvider implements SlashBehaviourProvider {
   }
 }
 
+class DomainProvider implements SlashBehaviourProvider {
+  readonly name = 'domain-provider'
+  readonly priority = 100
+  readonly behaviours: SlashBehaviour[] = [
+    { name: 'domain', description: 'Add, remove, or list mesh relay domains', descriptionKey: 'slash.domain' }
+  ]
+
+  async execute(_behaviourName: string, args: string): Promise<void> {
+    const queen = get('@diamondcoreprocessor.com/DomainQueenBee') as any
+    if (queen?.invoke) await queen.invoke(args)
+  }
+
+  complete(_behaviourName: string, args: string): readonly string[] {
+    const subcommands = ['list', 'remove', 'clear']
+    const q = args.toLowerCase().trim()
+    if (!q) return subcommands
+    return subcommands.filter(s => s.startsWith(q))
+  }
+}
+
 class SubstrateProvider implements SlashBehaviourProvider {
   readonly name = 'substrate-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'substrate', description: 'Manage default background images for new tiles', descriptionKey: 'slash.substrate', aliases: ['sub'] }
+    { name: 'substrate', description: 'Toggle default background images for new tiles', descriptionKey: 'slash.substrate' }
   ]
 
   async execute(_behaviourName: string, args: string): Promise<void> {
@@ -522,16 +542,29 @@ class SubstrateProvider implements SlashBehaviourProvider {
   }
 
   complete(_behaviourName: string, args: string): readonly string[] {
-    const subcommands = ['set', 'global', 'clear', 'off', 'on', 'refresh', 'replay', 'reroll']
     const q = args.toLowerCase().trim()
-    if (!q) return subcommands
-    // after "clear", suggest "global" modifier
-    if (q === 'clear' || q === 'clear ') return ['global']
-    if (q.startsWith('clear ')) {
-      const mod = q.slice(6).trim()
-      return mod ? ['global'].filter(s => s.startsWith(mod)) : ['global']
-    }
-    return subcommands.filter(s => s.startsWith(q))
+    if (!q) return ['here']
+    return ['here'].filter(s => s.startsWith(q))
+  }
+}
+
+class RecordingProvider implements SlashBehaviourProvider {
+  readonly name = 'recording-provider'
+  readonly priority = 100
+  readonly behaviours: SlashBehaviour[] = [
+    { name: 'record', description: 'Start AI-powered meeting recording with live hierarchy compilation', descriptionKey: 'slash.record' }
+  ]
+
+  async execute(_behaviourName: string, args: string): Promise<void> {
+    const queen = get('@diamondcoreprocessor.com/RecordingQueenBee') as any
+    if (queen?.invoke) await queen.invoke(args)
+  }
+
+  complete(_behaviourName: string, args: string): readonly string[] {
+    const q = args.toLowerCase().trim()
+    const options = ['start', 'stop', 'interval', 'model']
+    if (!q) return options
+    return options.filter(s => s.startsWith(q))
   }
 }
 
@@ -560,5 +593,7 @@ _slashBehaviours.addProvider(new TextOnlyProvider())
 _slashBehaviours.addProvider(new InstructionsProvider())
 _slashBehaviours.addProvider(new AtomizeUiProvider())
 _slashBehaviours.addProvider(new DocsProvider())
+_slashBehaviours.addProvider(new DomainProvider())
 _slashBehaviours.addProvider(new SubstrateProvider())
+_slashBehaviours.addProvider(new RecordingProvider())
 window.ioc.register('@diamondcoreprocessor.com/SlashBehaviourDrone', _slashBehaviours)

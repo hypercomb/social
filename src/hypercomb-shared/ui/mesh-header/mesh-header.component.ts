@@ -90,8 +90,8 @@ export class MeshHeaderComponent {
       // solo → shield
       this.meshToggled.emit()
     } else if (this.showSecretInput()) {
-      // shield tap while editing: do nothing — only Enter or Escape should close
-      return
+      // shield tap while editing: save and collapse
+      this.#saveAndCollapse()
     } else {
       // shield collapsed → toggle to solo
       this.meshToggled.emit()

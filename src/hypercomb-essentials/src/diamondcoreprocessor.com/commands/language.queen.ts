@@ -11,11 +11,15 @@ import { QueenBee, type I18nProvider, I18N_IOC_KEY } from '@hypercomb/core'
  *   /language ja         — Japanese
  *   /language jp         — Japanese (alias)
  *   /language            — print current locale
+ *
+ * When an AI API key is configured, TranslationService passively listens
+ * for locale:changed and auto-translates visible tile content via Claude,
+ * caching each translation as a signature-addressed resource.
  */
 export class LanguageQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'language'
-  override readonly aliases = ['lang', 'locale']
+  override readonly aliases = []
   override description = 'Switch the UI language — /language en, /language ja'
 
   protected execute(args: string): void {

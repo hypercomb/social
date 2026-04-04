@@ -977,9 +977,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       // shell value was mutated — re-sync
     }
 
-    // direct command — bare word matches a queen bee, fire immediately
-    if (this.#tryDirectCommand(v)) return
-
     const ctx = this.context()
     if (ctx.active && ctx.mode === 'filter') {
       EffectBus.emit('search:filter', { keyword: ctx.normalized })
@@ -1005,37 +1002,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     // update cell sub-path query when input contains '/'
     this.updateCellSubPath()
-  }
-
-  /**
-   * Direct command — if the input is a bare word that exactly matches a
-   * queen bee's command or alias, fire it immediately and clear the input.
-   * No Enter, no slash — the queen speaks and the hive acts.
-   */
-  #tryDirectCommand(v: string): boolean {
-    const raw = v.trim()
-    if (!raw || raw.length < 2) return false
-
-    // skip anything that looks like another mode
-    if (raw.startsWith('/') || raw.startsWith('~') || raw.startsWith('[')
-      || raw.startsWith('#') || raw.startsWith('..') || raw.includes(':')
-      || raw.includes('/') || raw.includes(' ')) return false
-
-    // scan IoC for a queen bee that matches this word
-    const keys = list()
-    for (const key of keys) {
-      const instance = get(key) as any
-      if (instance && typeof instance.command === 'string'
-        && typeof instance.invoke === 'function'
-        && typeof instance.matches === 'function'
-        && instance.matches(raw)) {
-        // fire and clear
-        this.clear()
-        void instance.invoke('')
-        return true
-      }
-    }
-    return false
   }
 
   private lastFilterKeyword = ''
@@ -1704,7 +1670,13 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         }
         return
       }
-      this.#setShellValue('/' + best, true)
+      // If head is just '/', we're completing the command name itself
+      // If head is longer (e.g. '/language '), we're completing an argument
+      if (ctx.head === '/') {
+        this.#setShellValue('/' + best, true)
+      } else {
+        this.#setShellValue(ctx.head + best, false)
+      }
       return
     }
 

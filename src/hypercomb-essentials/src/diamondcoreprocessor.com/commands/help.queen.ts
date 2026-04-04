@@ -9,7 +9,7 @@ import { QueenBee, EffectBus } from '@hypercomb/core'
 export class HelpQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'help'
-  override readonly aliases = ['?', 'commands']
+  override readonly aliases = []
 
   override description = 'List all available queen bee commands'
 

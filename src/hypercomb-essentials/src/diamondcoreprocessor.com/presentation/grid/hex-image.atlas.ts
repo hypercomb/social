@@ -11,12 +11,14 @@ export interface ImageUV {
 export class HexImageAtlas {
   #atlas: RenderTexture
   readonly #map = new Map<string, ImageUV>()
+  readonly #failures = new Map<string, number>()
   #nextSlot = 0
 
   readonly #cols: number
   readonly #rows: number
   readonly #cellPx: number
   readonly #renderer: any
+  static readonly MAX_RETRIES = 3
 
   constructor(renderer: any, cellPx = 256, cols = 8, rows = 8) {
     this.#renderer = renderer
@@ -48,9 +50,21 @@ export class HexImageAtlas {
     return this.#map.get(sig) ?? null
   }
 
-  async loadImage(sig: string, blob: Blob): Promise<ImageUV> {
+  /** Returns true if the signature has permanently failed loading (exceeded max retries). */
+  hasFailed(sig: string): boolean {
+    return (this.#failures.get(sig) ?? 0) >= HexImageAtlas.MAX_RETRIES
+  }
+
+  /** Clear failure count for a signature so it can be retried (e.g. after re-save). */
+  clearFailure(sig: string): void {
+    this.#failures.delete(sig)
+  }
+
+  async loadImage(sig: string, blob: Blob): Promise<ImageUV | null> {
     const existing = this.#map.get(sig)
     if (existing) return existing
+
+    if (this.hasFailed(sig)) return null
 
     const slot = this.#nextSlot % (this.#cols * this.#rows)
     this.#nextSlot++
@@ -58,8 +72,25 @@ export class HexImageAtlas {
     const col = slot % this.#cols
     const row = Math.floor(slot / this.#cols)
 
-    const bitmap = await createImageBitmap(blob)
-    const texture = Texture.from(bitmap)
+    let bitmap: ImageBitmap
+    try {
+      bitmap = await createImageBitmap(blob)
+    } catch {
+      this.#failures.set(sig, (this.#failures.get(sig) ?? 0) + 1)
+      console.warn(`[HexImageAtlas] createImageBitmap failed for ${sig.slice(0, 12)}… (attempt ${this.#failures.get(sig)}/${HexImageAtlas.MAX_RETRIES})`)
+      return null
+    }
+
+    let texture: Texture
+    try {
+      texture = Texture.from(bitmap)
+    } catch {
+      bitmap.close()
+      this.#failures.set(sig, (this.#failures.get(sig) ?? 0) + 1)
+      console.warn(`[HexImageAtlas] Texture.from failed for ${sig.slice(0, 12)}… (attempt ${this.#failures.get(sig)}/${HexImageAtlas.MAX_RETRIES})`)
+      return null
+    }
+
     const sprite = new Sprite(texture)
 
     // contain-fill: scale image to fit entirely within the atlas cell (no overflow)
@@ -99,5 +130,6 @@ export class HexImageAtlas {
   /** Remove a specific entry (e.g. after re-save) so next load picks up the new image */
   invalidate(sig: string): void {
     this.#map.delete(sig)
+    this.#failures.delete(sig)
   }
 }

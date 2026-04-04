@@ -1,8 +1,6 @@
 // diamondcoreprocessor.com/nostr/nostr-mesh.drone.ts
 import { Drone } from '@hypercomb/core'
 
-// const HARD_RELAY = 'wss://nos.lol'
-const HARD_RELAY = 'wss://relay.snort.social'
 const LOCAL_RELAY = 'ws://localhost:7777'
 
 type NostrEvent = { id?: string; pubkey?: string; created_at: number; kind: number; tags: string[][]; content: string; sig?: string }
@@ -60,8 +58,8 @@ export class NostrMeshDrone extends Drone {
   // config
   // -----------------------------
 
-  // note: default public relay (can be overridden by localstorage/configureRelays)
-  private relays: string[] = [HARD_RELAY]
+  // note: no default relay — user must configure their own (or use local dev relay)
+  private relays: string[] = []
 
   // note: set to null to accept any kind matching x
   private kinds: number[] | null = [29010]
@@ -144,7 +142,7 @@ export class NostrMeshDrone extends Drone {
       .map(u => String(u ?? '').trim())
       .filter(u => u.startsWith('ws://') || u.startsWith('wss://'))
 
-    this.relays = next.length > 0 ? Array.from(new Set(next)) : [HARD_RELAY]
+    this.relays = Array.from(new Set(next))
     if (persist) this.saveRelays(this.relays)
     this.reconnectAll()
   }

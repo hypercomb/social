@@ -23,7 +23,7 @@ export class LlmQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'assistant'
   readonly command = 'opus'
-  override readonly aliases = ['sonnet', 'haiku', 'o', 's', 'h']
+  override readonly aliases = []
   override description = 'Send context to a Claude LLM and store the response as a resource'
 
   /** Set by the provider before invoke() to select which model to use */

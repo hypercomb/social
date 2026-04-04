@@ -26,6 +26,9 @@
     },
     {
       "path": "diamond-core-processor"
+    },
+    {
+      "path": "hypercomb-relay"
     }
   ],
   "launch": {

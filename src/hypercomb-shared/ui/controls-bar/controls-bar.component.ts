@@ -98,7 +98,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #clipboardAvailable = signal(false)
   #clipboardViewportSnapshot: { scale: number; px: number; py: number; sx: number; sy: number } | null = null
   #hasSelection = signal(false)
-  #textOnly = signal(localStorage.getItem('hc:text-only') === '1')
+  #textOnly = signal(false)
   #layoutPinned = signal(false)
   #tags = signal<{ name: string; count: number }[]>([])
   #tagPanelOpen = signal(false)
@@ -434,11 +434,6 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
       EffectBus.emit('visibility:show-hidden', { active: true })
     }
 
-    // emit initial text-only state so drones pick it up
-    if (this.#textOnly()) {
-      EffectBus.emit('render:set-text-only', { textOnly: true })
-    }
-
     // fit-locked: auto fit-to-screen on every navigation
     if (this.#fitLocked()) {
       const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
@@ -673,7 +668,6 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   readonly toggleTextOnly = (): void => {
     const next = !this.#textOnly()
     this.#textOnly.set(next)
-    localStorage.setItem('hc:text-only', next ? '1' : '0')
     EffectBus.emit('render:set-text-only', { textOnly: next })
   }
 

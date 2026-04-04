@@ -19,6 +19,7 @@ export class HexSdfTextureShader {
       u_pivot: { value: 0, type: 'f32' },
       u_hoveredIndex: { value: -1, type: 'f32' },
       u_labelMix: { value: 1.0, type: 'f32' },
+      u_imageMix: { value: 1.0, type: 'f32' },
       u_accentColor: { value: [0.4, 0.85, 1.0], type: 'vec3<f32>' },
     }
 
@@ -64,6 +65,11 @@ export class HexSdfTextureShader {
 
   public setLabelMix = (mix: number): void => {
     this.#ug.uniforms.u_labelMix = mix
+    this.#ug.update()
+  }
+
+  public setImageMix = (mix: number): void => {
+    this.#ug.uniforms.u_imageMix = mix
     this.#ug.update()
   }
 
@@ -150,6 +156,7 @@ export class HexSdfTextureShader {
     uniform float u_pivot;
     uniform float u_hoveredIndex;
     uniform float u_labelMix;
+    uniform float u_imageMix;
     uniform vec3 u_accentColor;
 
     uniform sampler2D u_label;
@@ -191,7 +198,22 @@ export class HexSdfTextureShader {
 
       vec4 base;
 
-      if (vHasImage > 0.5) {
+      // effective image blend factor: 0 = empty tile look, 1 = full image
+      float imgBlend = vHasImage > 0.5 ? u_imageMix : 0.0;
+
+      // empty-tile base (always computed for blending during fade)
+      vec3 bgCenter = vec3(0.06, 0.14, 0.22);
+      vec3 bgEdge   = vec3(0.03, 0.08, 0.13);
+      vec3 bgColor  = mix(bgCenter, bgEdge, smoothstep(0.0, 1.0, dist));
+      vec4 emptyBase = vec4(bgColor, 1.0);
+      float outerRingE = 1.0 - smoothstep(0.0, aa * 1.2, abs(d));
+      emptyBase.rgb = mix(emptyBase.rgb, vBorderColor, outerRingE * 0.6);
+      float innerGlowE = 1.0 - smoothstep(0.0, aa * 3.5, abs(d + aa * 1.5));
+      emptyBase.rgb = mix(emptyBase.rgb, vBorderColor, innerGlowE * 0.15);
+      float innerMask = smoothstep(0.0, -2.0, d);
+      emptyBase.rgb = mix(emptyBase.rgb, vIdentityColor, innerMask * 0.06);
+
+      if (imgBlend > 0.001) {
         // snapshot cell: fill full hex with the snapshot image
         float hexW = u_flat > 0.5 ? 2.0 * u_radiusPx / 0.8660254 : 2.0 * u_radiusPx;
         float hexH = u_flat > 0.5 ? 2.0 * u_radiusPx : 2.0 * u_radiusPx / 0.8660254;
@@ -202,37 +224,24 @@ export class HexSdfTextureShader {
           hexUV = vec2(hexUV.y, 1.0 - hexUV.x);
         }
         vec2 imgUV = mix(vImageUV.xy, vImageUV.zw, hexUV);
-        base = texture2D(u_cellImages, imgUV);
+        vec4 imgBase = texture2D(u_cellImages, imgUV);
 
         // vignette: darken image edges so snapshots blend into border
         float vignette = smoothstep(0.5, 1.0, dist);
-        base.rgb *= 1.0 - vignette * 0.45;
+        imgBase.rgb *= 1.0 - vignette * 0.45;
 
         // outer border ring — crisp bright line
         float outerRing = 1.0 - smoothstep(0.0, aa * 1.2, abs(d));
-        base.rgb = mix(base.rgb, vBorderColor, outerRing * 0.6);
+        imgBase.rgb = mix(imgBase.rgb, vBorderColor, outerRing * 0.6);
 
         // inner glow border — wider, softer
         float innerGlow = 1.0 - smoothstep(0.0, aa * 3.5, abs(d + aa * 1.5));
-        base.rgb = mix(base.rgb, vBorderColor, innerGlow * 0.12);
+        imgBase.rgb = mix(imgBase.rgb, vBorderColor, innerGlow * 0.12);
+
+        // blend between empty and image based on imageMix
+        base = mix(emptyBase, imgBase, imgBlend);
       } else {
-        // radial gradient fill: lighter center → darker edges (depth illusion)
-        vec3 bgCenter = vec3(0.06, 0.14, 0.22);
-        vec3 bgEdge   = vec3(0.03, 0.08, 0.13);
-        vec3 bgColor  = mix(bgCenter, bgEdge, smoothstep(0.0, 1.0, dist));
-        base = vec4(bgColor, 1.0);
-
-        // outer border ring — crisp bright line
-        float outerRing = 1.0 - smoothstep(0.0, aa * 1.2, abs(d));
-        base.rgb = mix(base.rgb, vBorderColor, outerRing * 0.6);
-
-        // inner glow border — wider, softer, identity-tinted
-        float innerGlow = 1.0 - smoothstep(0.0, aa * 3.5, abs(d + aa * 1.5));
-        base.rgb = mix(base.rgb, vBorderColor, innerGlow * 0.15);
-
-        // subtle identity wash on cell interior
-        float innerMask = smoothstep(0.0, -2.0, d);
-        base.rgb = mix(base.rgb, vIdentityColor, innerMask * 0.06);
+        base = emptyBase;
       }
 
       // bevel highlight (top-left light) and shadow (bottom-right)
@@ -248,7 +257,7 @@ export class HexSdfTextureShader {
       float labelAlpha = texture2D(u_label, luv).a;
       float la = smoothstep(0.02, 0.5, labelAlpha);
 
-      if (vHasImage < 0.5) {
+      if (imgBlend < 0.001) {
         // no image: bright white label
         color = mix(color, vec4(1.0, 1.0, 1.0, 1.0), la * 0.92 * u_labelMix);
 
@@ -258,8 +267,8 @@ export class HexSdfTextureShader {
         vec3 heatTint = mix(vIdentityColor, warmColor, vHeat);
         float heatAlpha = mix(0.07, 0.68, vHeat);
         color.rgb = mix(color.rgb, heatTint, heatRing * heatAlpha);
-      } else {
-        // has image: translucent rounded-rect pill behind label text
+      } else if (imgBlend > 0.999) {
+        // fully visible image: translucent rounded-rect pill behind label text
         float pillW = u_radiusPx * 0.88;
         float pillH = u_radiusPx * 0.15;
         float pillR = 0.0;
@@ -269,6 +278,28 @@ export class HexSdfTextureShader {
         color.rgb = mix(color.rgb, vec3(0.0), pillMask * 0.55 * u_labelMix);
 
         color = mix(color, vec4(1.0, 1.0, 1.0, 1.0), la * 0.88 * u_labelMix);
+      } else {
+        // fading in: crossfade label styles
+        // empty-style label
+        vec4 emptyLabel = mix(color, vec4(1.0, 1.0, 1.0, 1.0), la * 0.92 * u_labelMix);
+        float heatRing = smoothstep(0.0, -1.5, d) - smoothstep(-4.0, -6.0, d);
+        vec3 warmColor = vec3(1.0, 0.62, 0.12);
+        vec3 heatTint = mix(vIdentityColor, warmColor, vHeat);
+        float heatAlpha = mix(0.07, 0.68, vHeat);
+        emptyLabel.rgb = mix(emptyLabel.rgb, heatTint, heatRing * heatAlpha);
+
+        // image-style label
+        vec4 imgLabel = color;
+        float pillW = u_radiusPx * 0.88;
+        float pillH = u_radiusPx * 0.15;
+        float pillR = 0.0;
+        vec2 pillP = abs(local) - vec2(pillW - pillR, pillH - pillR);
+        float pillD = length(max(pillP, 0.0)) + min(max(pillP.x, pillP.y), 0.0) - pillR;
+        float pillMask = 1.0 - smoothstep(0.0, aa * 1.5, pillD);
+        imgLabel.rgb = mix(imgLabel.rgb, vec3(0.0), pillMask * 0.55 * u_labelMix);
+        imgLabel = mix(imgLabel, vec4(1.0, 1.0, 1.0, 1.0), la * 0.88 * u_labelMix);
+
+        color = mix(emptyLabel, imgLabel, imgBlend);
       }
 
       // branch indicator: accent-style inlay for tiles with children

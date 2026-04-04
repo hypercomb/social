@@ -15,7 +15,7 @@ import { QueenBee, EffectBus, hypercomb } from '@hypercomb/core'
 export class KeywordQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'keyword'
-  override readonly aliases = ['kw', 'tag']
+  override readonly aliases = []
   override description = 'Add or remove keywords (tags) on selected tiles'
 
   protected async execute(args: string): Promise<void> {

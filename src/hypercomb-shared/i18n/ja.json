@@ -150,11 +150,13 @@
   "slash.instructions": "インストラクションオーバーレイの切替",
   "slash.docs": "プロジェクトドキュメントを閲覧",
   "slash.text-only": "テキストのみモードの切替（画像を非表示）",
-  "slash.substrate": "新しいタイルのデフォルト背景画像を管理",
+  "slash.record": "AIによるリアルタイム会議録音とライブ階層構築",
+  "slash.domain": "メッシュリレードメインの追加・削除・一覧",
+  "slash.substrate": "新しいタイルのデフォルト背景画像の切替",
 
-  "substrate.active": "サブストレート有効 → {path}",
-  "substrate.none": "サブストレート未設定",
-  "substrate.global": "グローバルサブストレート → {path}",
+  "substrate.on": "サブストレート有効 → {path}",
+  "substrate.off": "サブストレート無効",
+  "substrate.here": "サブストレート → {path}",
 
   "toast.dismiss": "閉じる",
 

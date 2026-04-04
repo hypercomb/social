@@ -29,7 +29,7 @@ export class LayoutQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'movement'
   readonly command = 'layout'
-  override readonly aliases = ['lo']
+  override readonly aliases = []
   override description = 'Save, apply, list, or remove layout templates'
 
   protected async execute(args: string): Promise<void> {

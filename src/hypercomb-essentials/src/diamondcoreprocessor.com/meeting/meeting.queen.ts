@@ -17,7 +17,7 @@ export class MeetingQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'meeting'
   readonly command = 'meeting'
-  override readonly aliases = ['meet', 'call']
+  override readonly aliases = []
   override description = 'Start or join a video meeting on the selected tile'
 
   protected async execute(args: string): Promise<void> {

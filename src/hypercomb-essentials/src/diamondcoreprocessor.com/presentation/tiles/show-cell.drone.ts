@@ -78,7 +78,7 @@ export class ShowCellDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'overlay:neon-color']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'substrate:changed']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -114,6 +114,8 @@ export class ShowCellDrone extends Drone {
   #heatByLabel = new Map<string, number>()
   #flashLabels = new Set<string>()
   #flashTimer: ReturnType<typeof setTimeout> | null = null
+  #translatingLabels = new Set<string>()
+  #translationPulseTimer: ReturnType<typeof setInterval> | null = null
   private streamActive = false
   private cancelStreamFlag = false
   private renderedLocationKey = ''
@@ -130,6 +132,8 @@ export class ShowCellDrone extends Drone {
   #pivot = false
   #textOnly = false
   #labelsVisible = true
+  #substrateFadeStart: number | null = null
+  #substrateFadeRaf = 0
   #showHiddenItems = false
   #currentHiddenSet = new Set<string>()
 
@@ -1301,6 +1305,7 @@ export class ShowCellDrone extends Drone {
     this.shader.setFlat(this.#flat)
     this.shader.setPivot(this.#pivot)
     this.shader.setLabelMix(this.#labelsVisible ? 1.0 : 0.0)
+    this.shader.setImageMix(this.#textOnly ? 0.0 : this.#substrateFadeMix())
 
     if (!this.hexMesh) {
       this.hexMesh = new Mesh({ geometry: geom as any, shader: (this.shader as any).shader, texture: Texture.WHITE as any } as any)
@@ -1364,6 +1369,42 @@ export class ShowCellDrone extends Drone {
   // 1–3ms micro-pause to avoid main-thread blocking (legacy JsonHiveStreamLoader pattern)
   private readonly microDelay = (): Promise<void> =>
     new Promise(r => setTimeout(r, 1 + Math.random() * 2))
+
+  /** Returns the current imageMix value, accounting for substrate fade-in animation. */
+  #substrateFadeMix(): number {
+    if (this.#substrateFadeStart === null) return 1.0
+    const elapsed = performance.now() - this.#substrateFadeStart
+    if (elapsed >= 1000) {
+      this.#substrateFadeStart = null
+      return 1.0
+    }
+    const t = elapsed / 1000
+    // Phase 1 (0–500ms): quadratic ease-in from 0 → 0.5 (slow build)
+    // Phase 2 (500–1000ms): linear ramp from 0.5 → 1.0 (quick finish)
+    if (t < 0.5) {
+      const p = t / 0.5
+      return 0.5 * p * p
+    }
+    return 0.5 + 0.5 * ((t - 0.5) / 0.5)
+  }
+
+  /** Kick off the substrate fade-in animation loop. */
+  #startSubstrateFade(): void {
+    if (this.#textOnly) return
+    this.#substrateFadeStart = performance.now()
+    cancelAnimationFrame(this.#substrateFadeRaf)
+    const tick = (): void => {
+      if (this.#substrateFadeStart === null) return
+      const mix = this.#substrateFadeMix()
+      this.shader?.setImageMix(mix)
+      if (mix < 1.0) {
+        this.#substrateFadeRaf = requestAnimationFrame(tick)
+      } else {
+        this.#substrateFadeStart = null
+      }
+    }
+    this.#substrateFadeRaf = requestAnimationFrame(tick)
+  }
 
   private ensureListeners = (): void => {
     if (this.listening) return
@@ -1547,6 +1588,42 @@ export class ShowCellDrone extends Drone {
       // cut: tiles disappear via history remove ops + synchronize (handled by ClipboardWorker)
     })
 
+    // translation:tile-start — apply sustained heat glow on tiles being translated
+    this.onEffect<{ labels: string[]; locale: string }>('translation:tile-start', (payload) => {
+      if (!payload?.labels?.length) return
+      for (const label of payload.labels) {
+        this.#translatingLabels.add(label)
+        this.#heatByLabel.set(label, 0.5)
+      }
+      this.renderedCellsKey = ''
+      this.requestRender()
+
+      // Pulse the heat to show ongoing activity
+      if (!this.#translationPulseTimer) {
+        this.#translationPulseTimer = setInterval(() => {
+          if (!this.#translatingLabels.size) {
+            clearInterval(this.#translationPulseTimer!)
+            this.#translationPulseTimer = null
+            return
+          }
+          const t = Date.now() / 1000
+          const pulse = 0.3 + 0.2 * Math.sin(t * 3)
+          for (const label of this.#translatingLabels) this.#heatByLabel.set(label, pulse)
+          this.renderedCellsKey = ''
+          this.requestRender()
+        }, 100)
+      }
+    })
+
+    // translation:tile-done — clear heat on individual tile when its translation finishes
+    this.onEffect<{ label: string }>('translation:tile-done', (payload) => {
+      if (!payload?.label) return
+      this.#translatingLabels.delete(payload.label)
+      this.#heatByLabel.delete(payload.label)
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
     // cell from persisted stores so secret/room survive page reload
     const roomStore = get<any>('@hypercomb.social/RoomStore')
     const secretStore = get<any>('@hypercomb.social/SecretStore')
@@ -1584,9 +1661,16 @@ export class ShowCellDrone extends Drone {
     this.onEffect<{ textOnly: boolean }>('render:set-text-only', (payload) => {
       if (this.#textOnly !== payload.textOnly) {
         this.#textOnly = payload.textOnly
-        this.renderedCellsKey = ''
+        this.shader?.setImageMix(payload.textOnly ? 0.0 : 1.0)
+        cancelAnimationFrame(this.#substrateFadeRaf)
+        this.#substrateFadeStart = null
         this.requestRender()
       }
+    })
+
+    // substrate fade-in: when substrate config changes, animate images from 0 → 1
+    this.onEffect('substrate:changed', () => {
+      this.#startSubstrateFade()
     })
 
     // toggle tile label text visibility via shader uniform
@@ -2190,8 +2274,8 @@ export class ShowCellDrone extends Drone {
         luvp += 4
       }
 
-      // cell image atlas UVs (suppressed in text-only mode)
-      const imgUV = !this.#textOnly && c.imageSig ? this.imageAtlas?.getImageUV(c.imageSig) ?? null : null
+      // cell image atlas UVs (text-only suppression handled by u_imageMix shader uniform)
+      const imgUV = c.imageSig ? this.imageAtlas?.getImageUV(c.imageSig) ?? null : null
       const hi = imgUV ? 1 : 0
       for (let i = 0; i < 4; i++) {
         imageUV.set(imgUV ? [imgUV.u0, imgUV.v0, imgUV.u1, imgUV.v1] : [0, 0, 0, 0], iuvp)

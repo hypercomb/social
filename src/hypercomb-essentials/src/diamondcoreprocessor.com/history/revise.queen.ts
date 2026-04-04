@@ -18,7 +18,7 @@ export class ReviseQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'history'
   readonly command = 'revise'
-  override readonly aliases = ['rev', 'history']
+  override readonly aliases = []
 
   override description = 'Toggle revision mode (history clock)'
 

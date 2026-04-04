@@ -10,7 +10,7 @@ import { QueenBee } from '@hypercomb/core'
 export class FitQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'fit'
-  override readonly aliases = ['zoom-fit', 'fitcontent']
+  override readonly aliases = []
 
   override description = 'Zoom to fit all visible content'
 

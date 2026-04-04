@@ -250,8 +250,8 @@ export class ImageDropDrone extends Drone {
 
     // deduplicate: if cell already exists, append incrementing number
     const existing = new Set<string>()
-    for await (const key of dir.keys()) {
-      existing.add(key)
+    for await (const [name] of (dir as any).entries()) {
+      existing.add(name)
     }
     let finalName = cellName
     if (existing.has(finalName)) {

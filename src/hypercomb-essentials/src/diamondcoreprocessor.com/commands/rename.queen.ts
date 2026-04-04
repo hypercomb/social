@@ -21,7 +21,7 @@ import type { HistoryCursorService } from '../history/history-cursor.service.js'
 export class RenameQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'rename'
-  override readonly aliases = ['mv']
+  override readonly aliases = []
   override description = 'Rename a tile'
 
   protected async execute(args: string): Promise<void> {
