@@ -1,30 +1,24 @@
-@if (introPlaying()) {
-  <div class="intro-splash">
-    <div class="intro-tile">hypercomb</div>
-  </div>
-  <audio #introAudio src="hypercomb.m4a" preload="auto" (ended)="onIntroEnded()"></audio>
-} @else {
-  <div class="header-bar" [class.secret-open]="secretOpen()" [style.visibility]="viewActive() ? 'hidden' : null">
-    <hc-command-line></hc-command-line>
-    <hc-mesh-header [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()" (secretExpandedChange)="secretOpen.set($event)"></hc-mesh-header>
-  </div>
-  <hc-activity-log></hc-activity-log>
-  <router-outlet />
-  <div id="pixi-host" style="z-index: 0; position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></div>
-  <hc-controls-bar [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()" [style.visibility]="viewActive() ? 'hidden' : null"></hc-controls-bar>
-  <hc-selection-context-menu></hc-selection-context-menu>
-  <hc-tile-editor></hc-tile-editor>
-  <hc-shortcut-sheet></hc-shortcut-sheet>
-  <hc-command-palette></hc-command-palette>
-  <!-- <hc-opfs-explorer></hc-opfs-explorer> -->
-  <hc-portal-overlay></hc-portal-overlay>
-  <hc-confirm-dialog></hc-confirm-dialog>
-  <hc-sensitivity-bar></hc-sensitivity-bar>
-  <hc-format-painter></hc-format-painter>
-  <hc-youtube-viewer></hc-youtube-viewer>
-  <hc-atomizer-bar></hc-atomizer-bar>
-  <hc-atomizer-sidebar></hc-atomizer-sidebar>
-  <hc-toast></hc-toast>
-  <hc-instruction-overlay></hc-instruction-overlay>
-  <hc-docs-overlay></hc-docs-overlay>
-}
+<div class="header-bar" [class.secret-open]="secretOpen()" [style.visibility]="viewActive() ? 'hidden' : null">
+  <hc-command-line></hc-command-line>
+  <hc-mesh-header [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()" (secretExpandedChange)="secretOpen.set($event)"></hc-mesh-header>
+</div>
+<hc-activity-log></hc-activity-log>
+<router-outlet />
+<div id="pixi-host" style="z-index: 0; position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></div>
+<hc-controls-bar [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()" [style.visibility]="viewActive() ? 'hidden' : null"></hc-controls-bar>
+<hc-selection-context-menu></hc-selection-context-menu>
+<hc-tile-editor></hc-tile-editor>
+<hc-shortcut-sheet></hc-shortcut-sheet>
+<hc-command-palette></hc-command-palette>
+<!-- <hc-opfs-explorer></hc-opfs-explorer> -->
+<hc-portal-overlay></hc-portal-overlay>
+<hc-confirm-dialog></hc-confirm-dialog>
+<hc-sensitivity-bar></hc-sensitivity-bar>
+<hc-format-painter></hc-format-painter>
+<hc-youtube-viewer></hc-youtube-viewer>
+<hc-atomizer-bar></hc-atomizer-bar>
+<hc-atomizer-sidebar></hc-atomizer-sidebar>
+<hc-toast></hc-toast>
+<hc-instruction-overlay></hc-instruction-overlay>
+<hc-docs-overlay></hc-docs-overlay>
+<audio #introAudio src="hypercomb.m4a" preload="auto"></audio>

@@ -1,34 +1,6 @@
 @use '../../../hypercomb-shared/ui/header-bar';
 @use '../../../hypercomb-shared/ui/breakpoints' as *;
 
-.intro-splash {
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #0a0a0a;
-}
-
-.intro-tile {
-  padding: 2.5rem 4rem;
-  font-size: 3rem;
-  font-weight: 700;
-  font-family: var(--hc-font, system-ui, sans-serif);
-  letter-spacing: 0.12em;
-  text-transform: lowercase;
-  color: rgba(255, 255, 255, 0.85);
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
-  aspect-ratio: 1 / 1.155;
-  width: 320px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
 :host {
   display: block;
 

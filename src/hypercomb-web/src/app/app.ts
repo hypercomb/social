@@ -27,14 +27,13 @@ export class App implements AfterViewInit {
   public readonly viewActive = signal(false)
   readonly clipboardMode = signal(false)
   readonly moveMode = signal(false)
-  readonly introPlaying = signal(localStorage.getItem('hc:intro-played') !== 'true')
 
   @HostBinding('class.clipboard-mode')
   get clipboardModeClass() { return this.clipboardMode(); }
 
   @HostBinding('class.move-mode')
   get moveModeClass() { return this.moveMode(); }
-  @ViewChild('introAudio') introAudioRef?: ElementRef<HTMLAudioElement>
+  @ViewChild('introAudio') introAudioRef!: ElementRef<HTMLAudioElement>
   private runtimeReady: Promise<void> = Promise.resolve()
 
   protected readonly core = inject(CoreAdapter)
@@ -73,24 +72,17 @@ export class App implements AfterViewInit {
       void this.startRegisteredBees()
     })
 
-    if (this.introPlaying() && this.introAudioRef) {
-      const audio = this.introAudioRef.nativeElement
-      const play = () => audio.play().catch(() => {})
-      audio.play().catch(() => {
-        const handler = () => {
-          play()
-          window.removeEventListener('pointerdown', handler)
-          window.removeEventListener('keydown', handler)
-        }
-        window.addEventListener('pointerdown', handler, { once: false })
-        window.addEventListener('keydown', handler, { once: false })
-      })
-    }
-  }
-
-  onIntroEnded(): void {
-    localStorage.setItem('hc:intro-played', 'true')
-    this.introPlaying.set(false)
+    const audio = this.introAudioRef.nativeElement
+    const play = () => audio.play().catch(() => {})
+    audio.play().catch(() => {
+      const handler = () => {
+        play()
+        window.removeEventListener('pointerdown', handler)
+        window.removeEventListener('keydown', handler)
+      }
+      window.addEventListener('pointerdown', handler, { once: false })
+      window.addEventListener('keydown', handler, { once: false })
+    })
   }
 
   private readonly startRegisteredBees = async (): Promise<void> => {
