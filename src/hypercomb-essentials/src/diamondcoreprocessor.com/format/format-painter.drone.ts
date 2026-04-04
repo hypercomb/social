@@ -1,5 +1,6 @@
 // diamondcoreprocessor.com/format/format-painter.drone.ts
 import { EffectBus } from '@hypercomb/core'
+import { writeCellProperties } from '../editor/tile-properties.js'
 import type { FormatEntry, FormatProvider } from './format.provider.js'
 
 // ── built-in providers ──────────────────────────────────
@@ -200,6 +201,16 @@ export class FormatPainterDrone extends EventTarget {
 
       // 4. update index
       index[cell] = propsSig
+
+      // 4b. persist propsSig in the cell's 0000 file for cross-hive reads (substrate)
+      try {
+        const lineage = window.ioc.get<{ explorerDir: () => Promise<FileSystemDirectoryHandle | null> }>('@hypercomb.social/Lineage')
+        const explorerDir = await lineage?.explorerDir()
+        if (explorerDir) {
+          const cellDir = await explorerDir.getDirectoryHandle(cell, { create: true })
+          await writeCellProperties(cellDir, { propsSig })
+        }
+      } catch { /* best-effort */ }
 
       // 5. notify renderer
       EffectBus.emit<{ cell: string }>('tile:saved', { cell })

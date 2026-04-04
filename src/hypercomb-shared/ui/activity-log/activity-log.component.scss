@@ -8,7 +8,7 @@
   position: fixed;
   bottom: 1.6rem;
   left: 3px;
-  z-index: 9;
+  z-index: 100000;
   max-width: 22rem;
   max-height: 50vh;
   overflow-y: auto;
@@ -84,6 +84,7 @@
   text-overflow: ellipsis;
 }
 
+
 .entry-dismiss {
   flex-shrink: 0;
   width: 1rem;
@@ -102,6 +103,12 @@
     outline: 1px solid rgba(245, 245, 245, 0.3);
     outline-offset: -1px;
   }
+}
+
+.entry-go {
+  width: auto;
+  color: rgba(77, 166, 255, 0.4);
+  &:hover { color: rgba(77, 166, 255, 0.85); }
 }
 
 // ═══════════════════════════════════════════════════════════

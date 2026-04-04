@@ -7,6 +7,9 @@
         }
         <span class="entry-icon">{{ entry.icon }}</span>
         <span class="entry-message">{{ entry.message }}</span>
+        @if (entry.action) {
+          <button class="entry-dismiss entry-go" (click)="executeAction(entry.id)" [title]="entry.action.label">{{ entry.action.label }}</button>
+        }
         <button class="entry-dismiss" (click)="dismiss(entry.id)" [title]="'activity.dismiss' | t">&times;</button>
       </div>
     }

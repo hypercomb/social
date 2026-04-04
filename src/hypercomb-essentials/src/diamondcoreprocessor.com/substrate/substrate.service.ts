@@ -25,6 +25,7 @@ type StoreHandle = {
   opfsRoot: FileSystemDirectoryHandle
   hypercombRoot: FileSystemDirectoryHandle
   getResource: (sig: string) => Promise<Blob | null>
+  putResource: (blob: Blob) => Promise<string>
 }
 
 type LineageHandle = {
@@ -34,12 +35,12 @@ type LineageHandle = {
 
 export class SubstrateService extends EventTarget {
   #loaded = false
-  #globalSignature: string | null = null
+  #globalPath: string | null = null
   #imageCache = new Map<string, string[]>() // layerSig → image sigs
 
   // ── public API ──
 
-  get globalSignature(): string | null { return this.#globalSignature }
+  get globalPath(): string | null { return this.#globalPath }
 
   async ensureLoaded(): Promise<void> {
     if (this.#loaded) return
@@ -47,32 +48,32 @@ export class SubstrateService extends EventTarget {
     this.#loaded = true
   }
 
-  /** Set the global substrate layer signature. */
-  async setGlobal(layerSignature: string): Promise<void> {
-    this.#globalSignature = layerSignature
-    localStorage.setItem(STORAGE_KEY, layerSignature)
-    await this.#saveGlobal(layerSignature)
-    this.#imageCache.delete(layerSignature) // force refresh
-    EffectBus.emit('substrate:changed', { scope: 'global', signature: layerSignature })
+  /** Set the global substrate hive path. */
+  async setGlobal(hivePath: string): Promise<void> {
+    this.#globalPath = hivePath
+    localStorage.setItem(STORAGE_KEY, hivePath)
+    await this.#saveGlobal(hivePath)
+    this.#imageCache.delete(hivePath) // force refresh
+    EffectBus.emit('substrate:changed', { scope: 'global', path: hivePath })
   }
 
   /** Clear the global substrate. */
   async clearGlobal(): Promise<void> {
-    this.#globalSignature = null
+    this.#globalPath = null
     this.#resolvedCache = null
     localStorage.removeItem(STORAGE_KEY)
     localStorage.removeItem(RESOLVED_KEY)
     await this.#saveGlobal(null)
-    EffectBus.emit('substrate:changed', { scope: 'global', signature: null })
+    EffectBus.emit('substrate:changed', { scope: 'global', path: null })
   }
 
   /** Set per-hive substrate on the current explorer directory. */
-  async setHive(layerSignature: string): Promise<void> {
+  async setHive(hivePath: string): Promise<void> {
     const dir = await this.#explorerDir()
     if (!dir) return
-    await this.#writeProps(dir, { [HIVE_KEY]: layerSignature })
-    this.#imageCache.delete(layerSignature)
-    EffectBus.emit('substrate:changed', { scope: 'hive', signature: layerSignature })
+    await this.#writeProps(dir, { [HIVE_KEY]: hivePath })
+    this.#imageCache.delete(hivePath)
+    EffectBus.emit('substrate:changed', { scope: 'hive', path: hivePath })
   }
 
   /** Clear per-hive substrate override. */
@@ -82,7 +83,7 @@ export class SubstrateService extends EventTarget {
     await this.#writeProps(dir, { [HIVE_KEY]: null })
     this.#resolvedCache = null
     localStorage.removeItem(RESOLVED_KEY)
-    EffectBus.emit('substrate:changed', { scope: 'hive', signature: null })
+    EffectBus.emit('substrate:changed', { scope: 'hive', path: null })
   }
 
   /** Suppress child overrides — only global applies under this hive. */
@@ -102,10 +103,10 @@ export class SubstrateService extends EventTarget {
     await this.ensureLoaded()
 
     const store = this.#store()
-    if (!store) return this.#globalSignature
+    if (!store) return this.#globalPath
 
     const lineage = this.#lineage()
-    if (!lineage) return this.#globalSignature
+    if (!lineage) return this.#globalPath
 
     const segments = [...lineage.explorerSegments()]
 
@@ -119,7 +120,7 @@ export class SubstrateService extends EventTarget {
         const props = await this.#readProps(dir)
 
         // If this hive says don't inherit, stop and use global
-        if (props[INHERIT_KEY] === false) return this.#globalSignature
+        if (props[INHERIT_KEY] === false) return this.#globalPath
 
         // If this hive has a substrate, use it
         const sig = props[HIVE_KEY]
@@ -129,7 +130,7 @@ export class SubstrateService extends EventTarget {
       segments.pop()
     }
 
-    return this.#globalSignature
+    return this.#globalPath
   }
 
   /**
@@ -234,7 +235,7 @@ export class SubstrateService extends EventTarget {
         const props = { small: { image: imageSig }, substrate: true }
         const json = JSON.stringify(props, null, 2)
         const blob = new Blob([json], { type: 'application/json' })
-        const propsSig = await (store as any).putResource(blob)
+        const propsSig = await store.putResource(blob)
         byImage.set(imageSig, propsSig)
         this.#propsPool.push({ imageSig, propsSig })
       } catch { /* skip */ }
@@ -250,11 +251,6 @@ export class SubstrateService extends EventTarget {
     }
   }
 
-  /**
-   * Synchronously assign a substrate image to a cell.
-   * Writes to the props index (localStorage) immediately — no async work.
-   * Returns true if an image was assigned.
-   */
   /**
    * Assign a substrate image to a cell that has NO props at all.
    * Skips any cell that already has an entry in the props index.
@@ -318,28 +314,30 @@ export class SubstrateService extends EventTarget {
    * Returns the number of tiles refreshed.
    */
   async refresh(visibleLabels: string[]): Promise<number> {
-    if (this.#propsPool.length === 0) return 0
+    // Clear any existing substrate-assigned entries before re-warming
+    if (this.#propsPool.length > 0) {
+      const indexKey = 'hc:tile-props-index'
+      const index: Record<string, string> = JSON.parse(localStorage.getItem(indexKey) ?? '{}')
+      const substrateSigs = new Set(this.#propsPool.map(p => p.propsSig))
 
-    const indexKey = 'hc:tile-props-index'
-    const index: Record<string, string> = JSON.parse(localStorage.getItem(indexKey) ?? '{}')
-    const substrateSigs = new Set(this.#propsPool.map(p => p.propsSig))
+      let cleared = 0
+      for (const label of visibleLabels) {
+        if (index[label] && substrateSigs.has(index[label])) {
+          delete index[label]
+          cleared++
+        }
+      }
 
-    // Clear all substrate-assigned entries
-    let cleared = 0
-    for (const label of visibleLabels) {
-      if (index[label] && substrateSigs.has(index[label])) {
-        delete index[label]
-        cleared++
+      if (cleared > 0) {
+        localStorage.setItem(indexKey, JSON.stringify(index))
       }
     }
 
-    if (cleared > 0) {
-      localStorage.setItem(indexKey, JSON.stringify(index))
-    }
-
-    // Re-warm pool (may pick up new images if substrate source changed)
+    // Re-warm pool (fills it if empty, refreshes if substrate source changed)
     this.invalidateCache()
     await this.warmUp()
+
+    if (this.#propsPool.length === 0) return 0
 
     // Re-apply to all now-blank tiles
     const applied = this.applyToAllBlanks(visibleLabels)
@@ -356,7 +354,6 @@ export class SubstrateService extends EventTarget {
     if (!store) return []
 
     const images: string[] = []
-    const propsIndex: Record<string, string> = JSON.parse(localStorage.getItem('hc:tile-props-index') ?? '{}')
 
     try {
       let dir: FileSystemDirectoryHandle = store.hypercombRoot
@@ -365,11 +362,29 @@ export class SubstrateService extends EventTarget {
         dir = await dir.getDirectoryHandle(seg)
       }
 
+      // Fallback: localStorage index (for backward compat with pre-fix cells)
+      const propsIndex: Record<string, string> = JSON.parse(localStorage.getItem('hc:tile-props-index') ?? '{}')
+
       for await (const [name, handle] of (dir as any).entries()) {
         if (handle.kind !== 'directory') continue
         try {
-          // Read image sig from content-addressed props (same source as show-cell)
-          const propsSig = propsIndex[name]
+          // 1. Try reading propsSig from the cell's own 0000 file (cross-hive safe)
+          let propsSig: string | undefined
+          try {
+            const cellDir = handle as FileSystemDirectoryHandle
+            const fh = await cellDir.getFileHandle(PROPS_FILE)
+            const file = await fh.getFile()
+            const cellProps = JSON.parse(await file.text())
+            if (typeof cellProps.propsSig === 'string') {
+              propsSig = cellProps.propsSig
+            }
+          } catch { /* no 0000 file or no propsSig field */ }
+
+          // 2. Fallback to localStorage index (backward compat)
+          if (!propsSig) {
+            propsSig = propsIndex[name]
+          }
+
           if (propsSig) {
             const blob = await store.getResource(propsSig)
             if (blob) {
@@ -399,7 +414,7 @@ export class SubstrateService extends EventTarget {
   async #loadGlobal(): Promise<void> {
     // Fast path: localStorage cache
     const cached = localStorage.getItem(STORAGE_KEY)
-    if (cached) this.#globalSignature = cached
+    if (cached) this.#globalPath = cached
 
     try {
       const store = this.#store()
@@ -407,7 +422,7 @@ export class SubstrateService extends EventTarget {
       const props = await this.#readRootProps(store)
       const sig = props[GLOBAL_KEY]
       if (typeof sig === 'string' && sig.length > 0) {
-        this.#globalSignature = sig
+        this.#globalPath = sig
         localStorage.setItem(STORAGE_KEY, sig)
       }
     } catch { /* no root props */ }

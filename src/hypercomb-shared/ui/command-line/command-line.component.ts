@@ -368,7 +368,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   // ── status indicators ─────────────────────────────────
 
-  readonly #indicators = signal<Map<string, { key: string; icon: string; label: string }>>(new Map())
+  readonly #indicators = signal<Map<string, { key: string; icon: string; label: string; action?: { effect: string; payload?: unknown } }>>(new Map())
   readonly activeIndicators = computed(() => [...this.#indicators().values()])
 
   #indicatorUnsubs: (() => void)[] = []
@@ -378,7 +378,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     // Listen for indicator registration/removal
     this.#indicatorUnsubs.push(
-      EffectBus.on<{ key: string; icon: string; label: string }>('indicator:set', (p) => {
+      EffectBus.on<{ key: string; icon: string; label: string; action?: { effect: string; payload?: unknown } }>('indicator:set', (p) => {
         if (!p?.key) return
         this.#indicators.update(m => { const n = new Map(m); n.set(p.key, p); return n })
       }),
@@ -392,11 +392,18 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const saved = localStorage.getItem('hc:indicators')
     if (saved) {
       try {
-        const list = JSON.parse(saved) as { key: string; icon: string; label: string }[]
-        const m = new Map<string, { key: string; icon: string; label: string }>()
+        const list = JSON.parse(saved) as { key: string; icon: string; label: string; action?: { effect: string; payload?: unknown } }[]
+        const m = new Map<string, { key: string; icon: string; label: string; action?: { effect: string; payload?: unknown } }>()
         for (const ind of list) m.set(ind.key, ind)
         this.#indicators.set(m)
       } catch { /* ignore corrupt data */ }
+    }
+  }
+
+  onIndicatorAction(key: string): void {
+    const ind = this.#indicators().get(key)
+    if (ind?.action) {
+      EffectBus.emit(ind.action.effect, ind.action.payload)
     }
   }
 

@@ -13,6 +13,12 @@ import { EffectBus, hypercomb, type I18nProvider } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import type { Lineage } from '../../core/lineage'
 
+interface ActivityAction {
+  label: string
+  effect: string
+  payload?: unknown
+}
+
 interface ActivityEntry {
   id: number
   icon: string
@@ -20,6 +26,7 @@ interface ActivityEntry {
   timer: ReturnType<typeof setTimeout> | null
   fading: boolean
   revert: (() => Promise<void>) | null
+  action: ActivityAction | null
 }
 
 const TIMEOUT_S = 10
@@ -80,9 +87,9 @@ export class ActivityLogComponent implements OnDestroy {
         const key = p.public ? 'activity.mesh-public' : 'activity.mesh-private'
         this.#addEntry('\u25C6', this.#i18n?.t(key) ?? (p.public ? 'mesh \u2192 public' : 'mesh \u2192 private'))
       }),
-      EffectBus.on<{ icon?: string; message: string }>('activity:log', p => {
+      EffectBus.on<{ icon?: string; message: string; action?: ActivityAction }>('activity:log', p => {
         if (!this.#ready || !p?.message) return
-        this.#addEntry(p.icon ?? '\u2139', p.message)
+        this.#addEntry(p.icon ?? '\u2139', p.message, undefined, p.action)
       }),
     )
 
@@ -94,12 +101,18 @@ export class ActivityLogComponent implements OnDestroy {
     for (const entry of this.#entries()) entry.timer != null && clearTimeout(entry.timer)
   }
 
-  #addEntry(icon: string, message: string, revert?: () => Promise<void>): void {
+  #addEntry(icon: string, message: string, revert?: () => Promise<void>, action?: ActivityAction): void {
     const id = this.#nextId++
     const timer = setTimeout(() => this.dismiss(id), TIMEOUT_S * 1000)
-    const entry: ActivityEntry = { id, icon, message, timer, fading: false, revert: revert ?? null }
+    const entry: ActivityEntry = { id, icon, message, timer, fading: false, revert: revert ?? null, action: action ?? null }
     this.#entries.update(list => [entry, ...list].slice(0, 20))
     this.#appRef.tick()
+  }
+
+  executeAction(id: number): void {
+    const entry = this.#entries().find(e => e.id === id)
+    if (!entry?.action) return
+    EffectBus.emit(entry.action.effect, entry.action.payload)
   }
 
   /** Revert an add — remove the cell directory and emit cell:removed. */
