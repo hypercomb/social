@@ -3,9 +3,10 @@ import { Drone, EffectBus, hypercomb } from '@hypercomb/core'
 import type { HostReadyPayload } from '../presentation/tiles/pixi-host.worker.js'
 import type { Axial } from '../navigation/hex-detector.js'
 import type { LayoutService } from './layout.service.js'
+import type { LayerTransferService } from './layer-transfer.service.js'
 import { writeCellProperties } from '../editor/tile-properties.js'
 
-type CellCountPayload = { count: number; labels: string[]; coords?: Axial[] }
+type CellCountPayload = { count: number; labels: string[]; coords?: Axial[]; branchLabels?: string[] }
 type MoveRefs = {
   canvas: HTMLCanvasElement
   container: any
@@ -19,6 +20,10 @@ export type MoveDroneApi = {
   updateMove: (hoverAxial: Axial, source: string) => void
   commitMoveAt: (finalAxial: Axial, source: string) => Promise<void>
   cancelMove: (source: string) => void
+  startDwell: (label: string) => void
+  cancelDwell: () => void
+  readonly isDwelling: boolean
+  readonly branchLabels: ReadonlySet<string>
 }
 
 function axialKey(q: number, r: number): string {
@@ -48,7 +53,19 @@ export class MoveDrone extends Drone {
   #cellCoords: Axial[] = []
   #cellCount = 0
 
+  // ── layer dwell state ────────────────────────────────────
+  #branchLabels = new Set<string>()
+  #dwellLabel: string | null = null
+  #dwellTimer: ReturnType<typeof setTimeout> | null = null
+  #dwellStart = 0
+  #dwellRaf = 0
+  #droppedThrough = false
+  #pendingDragLabel: string | null = null
+  #pendingSource: string | null = null
+
   get moveActive(): boolean { return this.#moveActive }
+  get isDwelling(): boolean { return this.#dwellLabel !== null }
+  get branchLabels(): ReadonlySet<string> { return this.#branchLabels }
 
   protected override deps = {
     desktopMove: '@diamondcoreprocessor.com/DesktopMoveInput',
@@ -58,10 +75,11 @@ export class MoveDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
     lineage: '@hypercomb.social/Lineage',
     selection: '@diamondcoreprocessor.com/SelectionService',
+    transfer: '@diamondcoreprocessor.com/LayerTransferService',
   }
 
   protected override listens = ['render:host-ready', 'render:cell-count', 'render:mesh-offset', 'controls:action']
-  protected override emits = ['move:preview', 'move:committed', 'move:mode', 'cell:reorder']
+  protected override emits = ['move:preview', 'move:committed', 'move:mode', 'cell:reorder', 'move:layer-dwell']
 
   #effectsRegistered = false
 
@@ -89,6 +107,18 @@ export class MoveDrone extends Drone {
     })
 
     this.onEffect<CellCountPayload>('render:cell-count', (payload) => {
+      // always update branch labels (needed for dwell detection)
+      this.#branchLabels = new Set(payload.branchLabels ?? [])
+
+      // auto-resume drag after drop-through navigation
+      if (this.#pendingDragLabel && payload.labels.includes(this.#pendingDragLabel)) {
+        this.#cellCount = payload.count
+        this.#cellLabels = payload.labels
+        this.#cellCoords = payload.coords ?? []
+        this.#autoResumeDrag()
+        return
+      }
+
       // freeze snapshot only during pointer drags — command moves rebuild on label changes
       if (this.#activeSource && this.#activeSource !== 'command') return
       this.#cellCount = payload.count

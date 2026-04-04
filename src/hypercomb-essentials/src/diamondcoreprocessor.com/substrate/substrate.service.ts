@@ -158,11 +158,11 @@ export class SubstrateService extends EventTarget {
     if (!store) return
 
     const showCell = get('@diamondcoreprocessor.com/ShowCellDrone') as
-      { imageAtlas: { hasImage: (sig: string) => boolean; loadImage: (sig: string, blob: Blob) => Promise<void> } | null } | undefined
+      { imageAtlas: { hasImage: (sig: string) => boolean; hasFailed: (sig: string) => boolean; loadImage: (sig: string, blob: Blob) => Promise<import('../presentation/grid/hex-image.atlas.js').ImageUV | null> } | null } | undefined
     if (!showCell?.imageAtlas) return
 
     for (const sig of images) {
-      if (showCell.imageAtlas.hasImage(sig)) continue
+      if (showCell.imageAtlas.hasImage(sig) || showCell.imageAtlas.hasFailed(sig)) continue
       try {
         const blob = await store.getResource(sig)
         if (blob) await showCell.imageAtlas.loadImage(sig, blob)

@@ -13,7 +13,7 @@ import type { ViewportPersistence, ViewportSnapshot } from '../../navigation/zoo
 
 type Axial = { q: number; r: number }
 /** divergence: 0 = current, 1 = future-add (ghost), 2 = future-remove (marked) */
-type Cell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; hasLink?: boolean; borderColor?: [number, number, number]; divergence?: number }
+type Cell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; hasLink?: boolean; hasSubstrate?: boolean; borderColor?: [number, number, number]; divergence?: number }
 
 /** Deterministic label → RGB via DJB2 hash → HSL → RGB. Returns [r, g, b] in 0–1 range. */
 function labelToRgb(label: string): [number, number, number] {
@@ -2206,10 +2206,14 @@ export class ShowCellDrone extends Drone {
           this.cellImageCache.set(cell.label, smallSig)
 
           // load blob into image atlas if not already there
-          if (!this.imageAtlas.hasImage(smallSig)) {
-            const blob = await store.getResource(smallSig)
-            if (blob) {
-              await this.imageAtlas.loadImage(smallSig, blob)
+          if (!this.imageAtlas.hasImage(smallSig) && !this.imageAtlas.hasFailed(smallSig)) {
+            try {
+              const blob = await store.getResource(smallSig)
+              if (blob) {
+                await this.imageAtlas.loadImage(smallSig, blob)
+              }
+            } catch {
+              console.warn(`[ShowCell] failed to load image for cell ${cell.label}`)
             }
           }
         } else {
