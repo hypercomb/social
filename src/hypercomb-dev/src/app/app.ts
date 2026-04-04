@@ -166,8 +166,9 @@ export class App implements AfterViewInit {
   protected readonly title = signal('hypercomb-dev');
   readonly clipboardMode = signal(false);
   readonly moveMode = signal(false);
+  readonly introPlaying = signal(localStorage.getItem('hc:intro-played') !== 'true');
 
-  @ViewChild('introAudio') introAudioRef!: ElementRef<HTMLAudioElement>;
+  @ViewChild('introAudio') introAudioRef?: ElementRef<HTMLAudioElement>;
 
   @HostBinding('class.clipboard-mode')
   get clipboardModeClass() { return this.clipboardMode(); }
@@ -217,18 +218,24 @@ export class App implements AfterViewInit {
   }
 
   ngAfterViewInit(): void {
-    const audio = this.introAudioRef.nativeElement;
-    const play = () => audio.play().catch(() => {});
-    // Try autoplay; if browser blocks it, play on first user interaction
-    audio.play().catch(() => {
-      const handler = () => {
-        play();
-        window.removeEventListener('pointerdown', handler);
-        window.removeEventListener('keydown', handler);
-      };
-      window.addEventListener('pointerdown', handler, { once: false });
-      window.addEventListener('keydown', handler, { once: false });
-    });
+    if (this.introPlaying() && this.introAudioRef) {
+      const audio = this.introAudioRef.nativeElement;
+      const play = () => audio.play().catch(() => {});
+      audio.play().catch(() => {
+        const handler = () => {
+          play();
+          window.removeEventListener('pointerdown', handler);
+          window.removeEventListener('keydown', handler);
+        };
+        window.addEventListener('pointerdown', handler, { once: false });
+        window.addEventListener('keydown', handler, { once: false });
+      });
+    }
+  }
+
+  onIntroEnded(): void {
+    localStorage.setItem('hc:intro-played', 'true');
+    this.introPlaying.set(false);
   }
 
   public toggleOrientation = (): void => {

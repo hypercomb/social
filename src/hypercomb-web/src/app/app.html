@@ -1,15 +1,21 @@
-@if(showHeader){
-<div class="header-bar" [class.secret-open]="secretOpen()" [style.visibility]="viewActive() ? 'hidden' : null">
-  <app-header></app-header>
-  <hc-mesh-header [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()" (secretExpandedChange)="secretOpen.set($event)"></hc-mesh-header>
-</div>
+@if (introPlaying()) {
+  <div class="intro-splash">
+    <div class="intro-tile">hypercomb</div>
+  </div>
+  <audio #introAudio src="hypercomb.m4a" preload="auto" (ended)="onIntroEnded()"></audio>
+} @else {
+  @if(showHeader){
+  <div class="header-bar" [class.secret-open]="secretOpen()" [style.visibility]="viewActive() ? 'hidden' : null">
+    <app-header></app-header>
+    <hc-mesh-header [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()" (secretExpandedChange)="secretOpen.set($event)"></hc-mesh-header>
+  </div>
+  }
+  <router-outlet></router-outlet>
+  <hc-controls-bar [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()" [style.visibility]="viewActive() ? 'hidden' : null"></hc-controls-bar>
+  <hc-selection-context-menu></hc-selection-context-menu>
+  <hc-tile-editor></hc-tile-editor>
+  <hc-portal-overlay></hc-portal-overlay>
+  <hc-confirm-dialog></hc-confirm-dialog>
+  <hc-sensitivity-bar></hc-sensitivity-bar>
+  <hc-docs-overlay></hc-docs-overlay>
 }
-<router-outlet></router-outlet>
-<hc-controls-bar [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()" [style.visibility]="viewActive() ? 'hidden' : null"></hc-controls-bar>
-<hc-selection-context-menu></hc-selection-context-menu>
-<hc-tile-editor></hc-tile-editor>
-<hc-portal-overlay></hc-portal-overlay>
-<hc-confirm-dialog></hc-confirm-dialog>
-<hc-sensitivity-bar></hc-sensitivity-bar>
-<hc-docs-overlay></hc-docs-overlay>
-<audio #introAudio src="hypercomb.m4a" preload="auto"></audio>
