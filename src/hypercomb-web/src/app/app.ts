@@ -1,4 +1,4 @@
-import { AfterViewInit, Component, ElementRef, HostBinding, inject, signal, ViewChild } from '@angular/core'
+import { AfterViewInit, Component, HostBinding, inject, signal } from '@angular/core'
 import { type Bee, EffectBus } from '@hypercomb/core'
 import { RouterOutlet } from '@angular/router'
 import { Header } from './header/header'
@@ -33,7 +33,6 @@ export class App implements AfterViewInit {
 
   @HostBinding('class.move-mode')
   get moveModeClass() { return this.moveMode(); }
-  @ViewChild('introAudio') introAudioRef!: ElementRef<HTMLAudioElement>
   private runtimeReady: Promise<void> = Promise.resolve()
 
   protected readonly core = inject(CoreAdapter)
@@ -70,18 +69,6 @@ export class App implements AfterViewInit {
   public ngAfterViewInit(): void {
     void this.runtimeReady.then(() => {
       void this.startRegisteredBees()
-    })
-
-    const audio = this.introAudioRef.nativeElement
-    const play = () => audio.play().catch(() => {})
-    audio.play().catch(() => {
-      const handler = () => {
-        play()
-        window.removeEventListener('pointerdown', handler)
-        window.removeEventListener('keydown', handler)
-      }
-      window.addEventListener('pointerdown', handler, { once: false })
-      window.addEventListener('keydown', handler, { once: false })
     })
   }
 
