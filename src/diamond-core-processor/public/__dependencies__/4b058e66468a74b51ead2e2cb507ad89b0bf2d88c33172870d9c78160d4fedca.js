@@ -26855,7 +26855,7 @@ var LEGACY_LS_GLOBAL = "hc:substrate-global";
 var BUILTIN_DEFAULTS = {
   type: "url",
   id: "builtin:defaults",
-  baseUrl: "substrate/",
+  baseUrl: "/substrate/",
   label: "Hypercomb defaults",
   builtin: true
 };

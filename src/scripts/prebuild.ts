@@ -235,6 +235,30 @@ function generateEnvJs(): void {
   }
 }
 
+// Scans public/substrate/ in each app and writes a manifest.json listing
+// every image file found. Runs every prebuild so users can just drop images
+// into the folder without touching any code.
+function generateSubstrateManifests(): void {
+  const imageExts = new Set(['.webp', '.png', '.jpg', '.jpeg', '.gif', '.avif', '.bmp'])
+  for (const app of ['hypercomb-web', 'hypercomb-dev', 'diamond-core-processor']) {
+    const substrateDir = join(ROOT, app, 'public', 'substrate')
+    if (!existsSync(substrateDir)) continue
+    const images = readdirSync(substrateDir)
+      .filter(name => {
+        const dot = name.lastIndexOf('.')
+        if (dot < 0) return false
+        return imageExts.has(name.slice(dot).toLowerCase())
+      })
+      .sort()
+    writeFileSync(
+      join(substrateDir, 'manifest.json'),
+      JSON.stringify({ images }, null, 2),
+      'utf8',
+    )
+    console.log(`${TAG} wrote ${app}/public/substrate/manifest.json (${images.length} images)`)
+  }
+}
+
 // --- main ---
 
 async function main() {
@@ -242,6 +266,9 @@ async function main() {
 
   // Generate env.js before anything else so the key is available at first serve
   generateEnvJs()
+
+  // Scan public/substrate/ and write manifest.json in each app
+  generateSubstrateManifests()
 
   const state = loadState()
   let coreDirty = false

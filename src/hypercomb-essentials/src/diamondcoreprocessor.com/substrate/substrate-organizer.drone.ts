@@ -24,13 +24,17 @@ export class SubstrateOrganizerDrone {
   #root: HTMLElement | null = null
   #backdrop: HTMLElement | null = null
   #panel: HTMLElement | null = null
-  #listEl: HTMLElement | null = null
+  #listEl: HTMLElement | null = null           // horizontal card strip
+  #leftArrow: HTMLElement | null = null
+  #rightArrow: HTMLElement | null = null
   #previewEl: HTMLElement | null = null
   #previewLabel: HTMLElement | null = null
   #footerEl: HTMLElement | null = null
   #visible = false
   #thumbUrls = new Map<string, string>() // sig → object URL (for cleanup)
   #keydownHandler: ((ev: KeyboardEvent) => void) | null = null
+  #cardStep = 138                               // card width + gap, set on build
+  #dragSuppressClick = false
 
   constructor() {
     EffectBus.on('substrate-organizer:open', () => { void this.#open() })
@@ -68,7 +72,7 @@ export class SubstrateOrganizerDrone {
     const panel = document.createElement('div')
     panel.style.cssText = `
       position: relative;
-      width: min(560px, 92vw);
+      width: min(720px, 94vw);
       max-height: 82vh;
       display: flex;
       flex-direction: column;
@@ -102,14 +106,113 @@ export class SubstrateOrganizerDrone {
     closeBtn.addEventListener('click', () => this.#close())
     header.append(title, closeBtn)
 
-    // Source list
-    const listEl = document.createElement('div')
-    listEl.style.cssText = `
-      padding: 8px;
-      overflow-y: auto;
-      max-height: 180px;
+    // Source carousel — horizontal card strip with arrows + drag-to-pan.
+    const carousel = document.createElement('div')
+    carousel.style.cssText = `
+      position: relative;
+      padding: 12px 0;
       border-bottom: 1px solid rgba(140, 170, 220, 0.12);
     `
+
+    const listEl = document.createElement('div')
+    listEl.style.cssText = `
+      display: flex;
+      gap: 10px;
+      padding: 4px 44px;
+      overflow-x: auto;
+      scroll-snap-type: x mandatory;
+      scroll-behavior: smooth;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+      cursor: grab;
+    `
+    // Hide webkit scrollbar
+    const styleHide = document.createElement('style')
+    styleHide.textContent = `#hc-substrate-organizer .hc-so-strip::-webkit-scrollbar { display: none; }`
+    document.head.appendChild(styleHide)
+    listEl.classList.add('hc-so-strip')
+
+    // Drag-to-pan handlers
+    let dragStartX = 0
+    let dragStartScroll = 0
+    let dragging = false
+    let dragDelta = 0
+    listEl.addEventListener('pointerdown', (ev) => {
+      dragging = true
+      dragStartX = ev.clientX
+      dragStartScroll = listEl.scrollLeft
+      dragDelta = 0
+      listEl.style.cursor = 'grabbing'
+      listEl.style.scrollBehavior = 'auto'
+      ;(ev.target as HTMLElement).setPointerCapture?.(ev.pointerId)
+    })
+    listEl.addEventListener('pointermove', (ev) => {
+      if (!dragging) return
+      const dx = ev.clientX - dragStartX
+      dragDelta = Math.abs(dx)
+      listEl.scrollLeft = dragStartScroll - dx
+    })
+    const endDrag = () => {
+      if (!dragging) return
+      dragging = false
+      listEl.style.cursor = 'grab'
+      listEl.style.scrollBehavior = 'smooth'
+      this.#dragSuppressClick = dragDelta > 5
+      // Reset suppression on next tick so the click event fires first
+      setTimeout(() => { this.#dragSuppressClick = false }, 50)
+    }
+    listEl.addEventListener('pointerup', endDrag)
+    listEl.addEventListener('pointercancel', endDrag)
+    listEl.addEventListener('pointerleave', endDrag)
+
+    // Arrow buttons — overlay the strip edges
+    const mkArrow = (dir: 'left' | 'right'): HTMLElement => {
+      const btn = document.createElement('button')
+      btn.textContent = dir === 'left' ? '‹' : '›'
+      btn.title = dir === 'left' ? 'Previous' : 'Next'
+      btn.style.cssText = `
+        position: absolute;
+        top: 50%;
+        ${dir}: 6px;
+        transform: translateY(-50%);
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        background: rgba(12, 16, 24, 0.85);
+        border: 1px solid rgba(140, 170, 220, 0.35);
+        color: rgba(220, 230, 240, 0.88);
+        font-size: 18px;
+        line-height: 1;
+        cursor: pointer;
+        z-index: 2;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: background 0.12s, opacity 0.12s;
+      `
+      btn.addEventListener('mouseenter', () => { btn.style.background = 'rgba(140, 170, 220, 0.25)' })
+      btn.addEventListener('mouseleave', () => { btn.style.background = 'rgba(12, 16, 24, 0.85)' })
+      btn.addEventListener('click', () => {
+        const delta = (dir === 'left' ? -1 : 1) * this.#cardStep
+        listEl.scrollBy({ left: delta, behavior: 'smooth' })
+      })
+      return btn
+    }
+    const leftArrow = mkArrow('left')
+    const rightArrow = mkArrow('right')
+
+    // Update arrow visibility based on scroll position
+    const updateArrows = () => {
+      const max = listEl.scrollWidth - listEl.clientWidth - 1
+      leftArrow.style.opacity = listEl.scrollLeft > 2 ? '1' : '0.3'
+      leftArrow.style.pointerEvents = listEl.scrollLeft > 2 ? 'auto' : 'none'
+      const atEnd = listEl.scrollLeft >= max
+      rightArrow.style.opacity = atEnd ? '0.3' : '1'
+      rightArrow.style.pointerEvents = atEnd ? 'none' : 'auto'
+    }
+    listEl.addEventListener('scroll', updateArrows)
+
+    carousel.append(listEl, leftArrow, rightArrow)
 
     // Preview area
     const previewWrap = document.createElement('div')
@@ -145,7 +248,7 @@ export class SubstrateOrganizerDrone {
       flex-wrap: wrap;
     `
 
-    panel.append(header, listEl, previewWrap, footer)
+    panel.append(header, carousel, previewWrap, footer)
     root.append(backdrop, panel)
     document.body.appendChild(root)
 
@@ -153,9 +256,14 @@ export class SubstrateOrganizerDrone {
     this.#backdrop = backdrop
     this.#panel = panel
     this.#listEl = listEl
+    this.#leftArrow = leftArrow
+    this.#rightArrow = rightArrow
     this.#previewEl = previewGrid
     this.#previewLabel = previewLabel
     this.#footerEl = footer
+
+    // Initial arrow state (after first render).
+    queueMicrotask(updateArrows)
   }
 
   // ── open / close ──────────────────────────────────────────────────
@@ -198,17 +306,19 @@ export class SubstrateOrganizerDrone {
     const sources = svc.listSources()
     const activeId = svc.registry.activeId
 
-    // Source list rows
+    // Source cards (horizontal strip)
     this.#listEl.innerHTML = ''
     for (const source of sources) {
-      this.#listEl.appendChild(this.#renderRow(source, source.id === activeId))
+      this.#listEl.appendChild(this.#renderCard(source, source.id === activeId))
     }
     if (sources.length === 0) {
       const empty = document.createElement('div')
       empty.textContent = 'no substrate sources yet'
-      empty.style.cssText = 'padding: 12px; font-size: 11px; color: rgba(180, 200, 220, 0.4);'
+      empty.style.cssText = 'padding: 24px; font-size: 11px; color: rgba(180, 200, 220, 0.4);'
       this.#listEl.appendChild(empty)
     }
+    // Refresh arrow state now that content is in place.
+    queueMicrotask(() => this.#listEl?.dispatchEvent(new Event('scroll')))
 
     // Footer buttons
     this.#footerEl.innerHTML = ''
@@ -242,41 +352,111 @@ export class SubstrateOrganizerDrone {
     await this.#renderPreview()
   }
 
-  #renderRow(source: SubstrateSource, isActive: boolean): HTMLElement {
-    const row = document.createElement('div')
-    row.style.cssText = `
+  #renderCard(source: SubstrateSource, isActive: boolean): HTMLElement {
+    const card = document.createElement('div')
+    card.style.cssText = `
+      flex: 0 0 128px;
+      scroll-snap-align: start;
+      display: flex;
+      flex-direction: column;
+      background: rgba(140, 170, 220, 0.05);
+      border: 1px solid ${isActive ? 'rgba(160, 200, 255, 0.65)' : 'rgba(140, 170, 220, 0.18)'};
+      border-radius: 8px;
+      overflow: hidden;
+      cursor: pointer;
+      transition: border-color 0.15s, transform 0.15s;
+      position: relative;
+      ${isActive ? 'box-shadow: 0 0 0 1px rgba(160, 200, 255, 0.35), 0 4px 12px rgba(60, 120, 200, 0.2);' : ''}
+    `
+    card.addEventListener('mouseenter', () => {
+      if (!isActive) card.style.borderColor = 'rgba(140, 170, 220, 0.4)'
+    })
+    card.addEventListener('mouseleave', () => {
+      if (!isActive) card.style.borderColor = 'rgba(140, 170, 220, 0.18)'
+    })
+
+    // Thumbnail area
+    const thumb = document.createElement('div')
+    thumb.style.cssText = `
+      height: 88px;
+      background: linear-gradient(135deg, rgba(60, 90, 140, 0.25), rgba(30, 40, 60, 0.35));
+      background-size: cover;
+      background-position: center;
+      position: relative;
       display: flex;
       align-items: center;
-      gap: 8px;
-      padding: 8px 10px;
-      border-radius: 6px;
-      cursor: pointer;
-      transition: background 0.12s;
-      ${isActive ? 'background: rgba(120, 180, 255, 0.1);' : ''}
+      justify-content: center;
+      font-size: 22px;
+      color: rgba(180, 200, 220, 0.45);
     `
-    row.addEventListener('mouseenter', () => {
-      if (!isActive) row.style.background = 'rgba(140, 170, 220, 0.05)'
-    })
-    row.addEventListener('mouseleave', () => {
-      if (!isActive) row.style.background = 'transparent'
-    })
+    // Type glyph placeholder (shown until a thumbnail loads)
+    const glyphs: Record<SubstrateSource['type'], string> = {
+      folder: '📁', url: '◈', hive: '⬡', layer: '▧',
+    }
+    thumb.textContent = glyphs[source.type] ?? '◈'
 
-    // Radio marker
-    const radio = document.createElement('span')
+    // Try to show a real thumbnail: active source uses the pool pick; other
+    // sources get a placeholder (they'll render a thumbnail the moment they
+    // become active).
+    if (isActive) {
+      const svc = this.#service()
+      const sig = svc?.pickRandomImageSync() ?? null
+      if (sig) void this.#loadThumbInto(thumb, sig)
+    }
+
+    // Active radio badge (top-left)
+    const radio = document.createElement('div')
     radio.textContent = isActive ? '●' : '○'
     radio.style.cssText = `
-      font-size: 12px;
-      color: ${isActive ? 'rgba(160, 200, 255, 0.95)' : 'rgba(180, 200, 220, 0.4)'};
-      width: 12px;
+      position: absolute;
+      top: 6px;
+      left: 8px;
+      font-size: 11px;
+      color: ${isActive ? 'rgba(160, 200, 255, 0.95)' : 'rgba(220, 230, 240, 0.5)'};
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
     `
+    thumb.appendChild(radio)
 
-    // Label + meta
+    // Remove button (top-right, hidden for builtin)
+    if (!source.builtin) {
+      const removeBtn = document.createElement('button')
+      removeBtn.textContent = '✕'
+      removeBtn.title = 'Remove source'
+      removeBtn.style.cssText = `
+        position: absolute;
+        top: 4px;
+        right: 4px;
+        width: 18px;
+        height: 18px;
+        padding: 0;
+        border: none;
+        border-radius: 50%;
+        background: rgba(12, 16, 24, 0.7);
+        color: rgba(220, 120, 120, 0.75);
+        font-size: 10px;
+        line-height: 1;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      `
+      removeBtn.addEventListener('mouseenter', () => { removeBtn.style.background = 'rgba(220, 120, 120, 0.3)' })
+      removeBtn.addEventListener('mouseleave', () => { removeBtn.style.background = 'rgba(12, 16, 24, 0.7)' })
+      removeBtn.addEventListener('click', async (ev) => {
+        ev.stopPropagation()
+        if (this.#dragSuppressClick) return
+        await this.#service()?.removeSource(source.id)
+      })
+      thumb.appendChild(removeBtn)
+    }
+
+    // Text area
     const textWrap = document.createElement('div')
-    textWrap.style.cssText = 'flex: 1; min-width: 0;'
+    textWrap.style.cssText = 'padding: 8px 10px;'
     const label = document.createElement('div')
     label.textContent = source.label
     label.style.cssText = `
-      font-size: 12px;
+      font-size: 11px;
       color: rgba(220, 230, 240, 0.92);
       overflow: hidden;
       text-overflow: ellipsis;
@@ -284,43 +464,40 @@ export class SubstrateOrganizerDrone {
     `
     const meta = document.createElement('div')
     const typeLabel = source.type + (source.builtin ? ' · built-in' : '')
-    const countSuffix = isActive ? ` · ${this.#service()?.resolvedImageCount ?? 0} images` : ''
+    const countSuffix = isActive ? ` · ${this.#service()?.resolvedImageCount ?? 0}` : ''
     meta.textContent = typeLabel + countSuffix
     meta.style.cssText = `
       font-size: 9px;
       color: rgba(180, 200, 220, 0.4);
       text-transform: uppercase;
       letter-spacing: 0.5px;
-      margin-top: 1px;
+      margin-top: 2px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     `
     textWrap.append(label, meta)
 
-    // Remove button (hidden for builtin)
-    const removeBtn = document.createElement('span')
-    if (!source.builtin) {
-      removeBtn.textContent = '✕'
-      removeBtn.title = 'Remove source'
-      removeBtn.style.cssText = `
-        cursor: pointer;
-        padding: 2px 6px;
-        font-size: 11px;
-        color: rgba(220, 120, 120, 0.55);
-        border-radius: 3px;
-      `
-      removeBtn.addEventListener('mouseenter', () => { removeBtn.style.background = 'rgba(220, 120, 120, 0.15)' })
-      removeBtn.addEventListener('mouseleave', () => { removeBtn.style.background = 'transparent' })
-      removeBtn.addEventListener('click', async (ev) => {
-        ev.stopPropagation()
-        await this.#service()?.removeSource(source.id)
-      })
-    }
-
-    row.append(radio, textWrap, removeBtn)
-    row.addEventListener('click', async () => {
+    card.append(thumb, textWrap)
+    card.addEventListener('click', async () => {
+      if (this.#dragSuppressClick) return
       if (isActive) return
       await this.#service()?.setActive(source.id)
     })
-    return row
+    return card
+  }
+
+  async #loadThumbInto(el: HTMLElement, sig: string): Promise<void> {
+    const store = get('@hypercomb.social/Store') as { getResource: (sig: string) => Promise<Blob | null> } | undefined
+    if (!store) return
+    try {
+      const blob = await store.getResource(sig)
+      if (!blob) return
+      const url = URL.createObjectURL(blob)
+      this.#thumbUrls.set(`card:${sig}`, url)
+      el.style.backgroundImage = `url(${url})`
+      el.textContent = ''
+    } catch { /* ignore */ }
   }
 
   async #renderPreview(): Promise<void> {

@@ -39,10 +39,11 @@ const LEGACY_GLOBAL_KEY = 'substrate-global' // migrated into registry on load
 const LEGACY_LS_GLOBAL = 'hc:substrate-global'
 
 // Default bundled URL source shipped with the app. Seeded on first load.
+// Origin-absolute path so deep navigation paths don't break relative fetch.
 const BUILTIN_DEFAULTS: SubstrateSource = {
   type: 'url',
   id: 'builtin:defaults',
-  baseUrl: 'substrate/',
+  baseUrl: '/substrate/',
   label: 'Hypercomb defaults',
   builtin: true,
 }

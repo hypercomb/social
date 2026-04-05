@@ -144,6 +144,9 @@ var MoveDrone = class extends Drone {
       this.emitEffect("move:preview", null);
       this.#reset(this.#activeSource);
     }
+    if (this.#moveActive) {
+      this.emitEffect("layout:mode", { mode: "pinned" });
+    }
     this.emitEffect("move:mode", { active: this.#moveActive });
   }
   // ── exclusivity ──────────────────────────────────────────
@@ -567,6 +570,7 @@ var MoveDrone = class extends Drone {
     if (!coord) return;
     this.#moveActive = true;
     this.#activeSource = source;
+    this.emitEffect("layout:mode", { mode: "pinned" });
     const axialSvc = this.resolve("axial");
     if (!axialSvc?.items) return;
     this.#occupancy.clear();
