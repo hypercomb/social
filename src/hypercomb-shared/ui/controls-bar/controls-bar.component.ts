@@ -21,6 +21,8 @@ import type { SecretStore } from '../../core/secret-store'
 import { VoiceInputService } from '../../core/voice-input.service'
 import { secretTag } from './secret-words'
 
+const PILL_POS_KEY = 'hc:controls-pill-pos'
+
 @Component({
   selector: 'hc-controls-bar',
   standalone: true,
@@ -115,7 +117,6 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   // ── pill position (drag-to-move; no resize) ───────────────
   // null = use default CSS positioning (bottom-center). Once dragged,
   // we switch to explicit left/top and persist across sessions.
-  static readonly #PILL_POS_KEY = 'hc:controls-pill-pos'
   readonly #pillPos = signal<{ x: number; y: number } | null>(null)
   readonly pillPos = this.#pillPos.asReadonly()
   readonly #pillDragging = signal(false)
@@ -940,7 +941,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     this.#pillDragging.set(false)
     const pos = this.#pillPos()
     if (pos) {
-      try { localStorage.setItem(ControlsBarComponent.#PILL_POS_KEY, JSON.stringify(pos)) } catch { /* ignore */ }
+      try { localStorage.setItem(PILL_POS_KEY, JSON.stringify(pos)) } catch { /* ignore */ }
     }
     window.removeEventListener('pointermove', this.#onPillDragMove)
     window.removeEventListener('pointerup', this.#onPillDragEnd)
@@ -959,7 +960,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
 
   #restorePillPos(): void {
     try {
-      const raw = localStorage.getItem(ControlsBarComponent.#PILL_POS_KEY)
+      const raw = localStorage.getItem(PILL_POS_KEY)
       if (!raw) return
       const parsed = JSON.parse(raw) as { x: number; y: number }
       if (typeof parsed?.x === 'number' && typeof parsed?.y === 'number') {
