@@ -166,12 +166,6 @@ export class MoveDrone extends Drone {
       this.emitEffect('move:preview', null)
       this.#reset(this.#activeSource)
     }
-    if (this.#moveActive) {
-      // move mode implies layout mode — sticky pin the layout so tiles
-      // stay addressable while being rearranged. Toggling layout back to
-      // dense afterward collapses everything back to centered.
-      this.emitEffect('layout:mode', { mode: 'pinned' })
-    }
     this.emitEffect('move:mode', { active: this.#moveActive })
   }
 
@@ -691,8 +685,6 @@ export class MoveDrone extends Drone {
     // ensure move mode stays active and source is set
     this.#moveActive = true
     this.#activeSource = source
-    // move mode implies layout mode — keep the new layer pinned too
-    this.emitEffect('layout:mode', { mode: 'pinned' })
 
     // rebuild occupancy maps for the new layer
     const axialSvc = this.resolve<any>('axial')
