@@ -1,4 +1,4 @@
-import { AfterViewInit, Component, ElementRef, HostBinding, ViewChild, signal } from '@angular/core';
+import { AfterViewInit, Component, HostBinding, ViewChild, signal } from '@angular/core';
 import { type Bee, EffectBus } from '@hypercomb/core';
 import type { HexOrientation } from '@hypercomb/essentials/diamondcoreprocessor.com/preferences/settings';
 import { RouterOutlet } from '@angular/router';
@@ -31,6 +31,7 @@ import '@hypercomb/essentials/diamondcoreprocessor.com/selection/tile-selection.
 import '@hypercomb/essentials/diamondcoreprocessor.com/keyboard/escape-cascade'
 import '@hypercomb/essentials/diamondcoreprocessor.com/navigation/bee-toggle'
 import { TileEditorComponent } from '@hypercomb/shared/ui/tile-editor/tile-editor.component'
+import { AudioPlayerComponent } from '@hypercomb/shared/ui/audio-player/audio-player.component'
 import { ControlsBarComponent, ShortcutSheetComponent, CommandPaletteComponent, ActivityLogComponent, SelectionContextMenuComponent, AtomizerBarComponent, AtomizerSidebarComponent, ConfirmDialogComponent, ToastComponent, InstructionOverlayComponent, DocsOverlayComponent } from '@hypercomb/shared/ui';
 import { FormatPainterComponent } from '@hypercomb/shared/ui/format-painter/format-painter.component'
 import { PortalOverlayComponent } from '@hypercomb/shared/ui/portal/portal-overlay.component'
@@ -158,7 +159,7 @@ void _deps
 
 @Component({
   selector: 'app-root',
-  imports: [ControlsBarComponent, MeshHeaderComponent, RouterOutlet, CommandLineComponent, TileEditorComponent, ShortcutSheetComponent, CommandPaletteComponent, PortalOverlayComponent, ActivityLogComponent, SensitivityBarComponent, SelectionContextMenuComponent, FormatPainterComponent, YoutubeViewerComponent, AtomizerBarComponent, AtomizerSidebarComponent, ConfirmDialogComponent, ToastComponent, InstructionOverlayComponent, DocsOverlayComponent],
+  imports: [ControlsBarComponent, MeshHeaderComponent, RouterOutlet, CommandLineComponent, TileEditorComponent, ShortcutSheetComponent, CommandPaletteComponent, PortalOverlayComponent, ActivityLogComponent, SensitivityBarComponent, SelectionContextMenuComponent, FormatPainterComponent, YoutubeViewerComponent, AtomizerBarComponent, AtomizerSidebarComponent, ConfirmDialogComponent, ToastComponent, InstructionOverlayComponent, DocsOverlayComponent, AudioPlayerComponent],
   styleUrls: ['./app.scss'] as any,
   templateUrl: './app.html'
 })
@@ -167,14 +168,20 @@ export class App implements AfterViewInit {
   readonly clipboardMode = signal(false);
   readonly moveMode = signal(false);
   readonly introPlaying = signal(localStorage.getItem('hc:intro-played') !== 'true');
+  readonly introPhase = signal<'speech' | 'interlude' | 'outro'>('speech');
 
-  @ViewChild('introAudio') introAudioRef?: ElementRef<HTMLAudioElement>;
+  @ViewChild('speechAudio') speechAudioRef?: AudioPlayerComponent;
+  @ViewChild('outroAudio') outroAudioRef?: AudioPlayerComponent;
+  #interludeTimer?: ReturnType<typeof setTimeout>;
 
   @HostBinding('class.clipboard-mode')
   get clipboardModeClass() { return this.clipboardMode(); }
 
   @HostBinding('class.move-mode')
   get moveModeClass() { return this.moveMode(); }
+
+  @HostBinding('class.intro-active')
+  get introActiveClass() { return this.introPlaying(); }
 
   public readonly meshPublic = signal(
     localStorage.getItem('hc:mesh-public') === 'true' ? true
@@ -218,31 +225,47 @@ export class App implements AfterViewInit {
   }
 
   ngAfterViewInit(): void {
-    if (!this.introPlaying() || !this.introAudioRef) return;
-    const audio = this.introAudioRef.nativeElement;
-    const play = () => audio.play().catch(() => {});
-    audio.play().catch(() => {
-      const handler = () => {
-        play();
-        window.removeEventListener('pointerdown', handler);
-        window.removeEventListener('keydown', handler);
-      };
-      window.addEventListener('pointerdown', handler);
-      window.addEventListener('keydown', handler);
-    });
+    // autoplay + gesture fallback is handled inside AudioPlayerComponent
   }
 
-  onIntroEnded(): void {
+  onSpeechEnded(): void {
+    this.enterInterlude();
+  }
+
+  skipSpeech(): void {
+    this.speechAudioRef?.reset();
+    this.enterInterlude();
+  }
+
+  skipInterlude(): void {
+    this.enterOutro();
+  }
+
+  onOutroEnded(): void {
     this.dismissIntro();
   }
 
-  skipIntro(): void {
-    if (this.introAudioRef) {
-      const audio = this.introAudioRef.nativeElement;
-      audio.pause();
-      audio.currentTime = 0;
+  skipOutro(): void {
+    this.outroAudioRef?.reset();
+    this.dismissIntro();
+  }
+
+  startIntroAudio(): void {
+    if (this.introPhase() === 'speech') void this.speechAudioRef?.play();
+    else if (this.introPhase() === 'outro') void this.outroAudioRef?.play();
+  }
+
+  private enterInterlude(): void {
+    this.introPhase.set('interlude');
+    this.#interludeTimer = setTimeout(() => this.enterOutro(), 2500);
+  }
+
+  private enterOutro(): void {
+    if (this.#interludeTimer) {
+      clearTimeout(this.#interludeTimer);
+      this.#interludeTimer = undefined;
     }
-    this.dismissIntro();
+    this.introPhase.set('outro');
   }
 
   private dismissIntro(): void {

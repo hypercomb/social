@@ -1,0 +1,42 @@
+<div class="hc-audio-player" role="group" [attr.aria-label]="ariaLabel" tabindex="0">
+  <audio #audio [src]="src" preload="auto"></audio>
+
+  <button
+    type="button"
+    class="hc-audio-player__play"
+    [attr.aria-label]="playing() ? 'pause' : 'play'"
+    (click)="togglePlay()"
+  >
+    @if (playing()) {
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="7" y="5" width="3.5" height="14" rx="0.8"></rect>
+        <rect x="13.5" y="5" width="3.5" height="14" rx="0.8"></rect>
+      </svg>
+    } @else {
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M7.5 4.8v14.4c0 .6.66.97 1.18.66l11.2-6.9a.78.78 0 0 0 0-1.33L8.68 4.73A.78.78 0 0 0 7.5 4.8z"></path>
+      </svg>
+    }
+  </button>
+
+  <span class="hc-audio-player__separator" aria-hidden="true"></span>
+
+  <div
+    class="hc-audio-player__scrub"
+    role="slider"
+    aria-label="seek"
+    [attr.aria-valuemin]="0"
+    [attr.aria-valuemax]="duration()"
+    [attr.aria-valuenow]="currentTime()"
+    (pointerdown)="onScrubPointerDown($event)"
+    (pointermove)="onScrubPointerMove($event)"
+    (pointerup)="onScrubPointerUp($event)"
+    (pointercancel)="onScrubPointerUp($event)"
+  >
+    <div class="hc-audio-player__track">
+      <div class="hc-audio-player__buffered" [style.width.%]="bufferedPercent()"></div>
+      <div class="hc-audio-player__progress" [style.width.%]="progressPercent()"></div>
+      <div class="hc-audio-player__thumb" [style.left.%]="progressPercent()"></div>
+    </div>
+  </div>
+</div>

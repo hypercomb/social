@@ -1,0 +1,109 @@
+:host {
+  display: inline-block;
+}
+
+.hc-audio-player {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.9rem;
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: rgba(255, 255, 255, 0.9);
+  outline: none;
+  min-width: min(22rem, 78vw);
+
+  &__play {
+    flex-shrink: 0;
+    width: 2.35rem;
+    height: 2.35rem;
+    display: grid;
+    place-items: center;
+    background: transparent;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    padding: 0;
+    transition: transform 0.12s ease, opacity 0.15s ease;
+    opacity: 0.85;
+
+    svg {
+      width: 1.4rem;
+      height: 1.4rem;
+      fill: currentColor;
+    }
+
+    &:hover {
+      opacity: 1;
+    }
+
+    &:active {
+      transform: scale(0.95);
+    }
+  }
+
+  &__separator {
+    flex-shrink: 0;
+    width: 1px;
+    height: 1.4rem;
+    background: rgba(255, 255, 255, 0.22);
+  }
+
+  &__scrub {
+    flex: 1;
+    position: relative;
+    height: 1.5rem;
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    touch-action: none;
+
+    &:hover .hc-audio-player__thumb,
+    &:active .hc-audio-player__thumb {
+      opacity: 1;
+      transform: translate(-50%, -50%) scale(1);
+    }
+  }
+
+  &__track {
+    position: relative;
+    width: 100%;
+    height: 2px;
+    background: rgba(255, 255, 255, 0.14);
+    border-radius: 2px;
+  }
+
+  &__buffered {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    background: rgba(255, 255, 255, 0.22);
+    border-radius: inherit;
+    pointer-events: none;
+  }
+
+  &__progress {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    background: rgba(255, 255, 255, 0.92);
+    border-radius: inherit;
+    pointer-events: none;
+  }
+
+  &__thumb {
+    position: absolute;
+    top: 50%;
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+    transform: translate(-50%, -50%) scale(0.7);
+    opacity: 0.85;
+    transition: opacity 0.15s ease, transform 0.15s ease;
+    pointer-events: none;
+  }
+}

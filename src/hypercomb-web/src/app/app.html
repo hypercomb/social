@@ -13,9 +13,21 @@
 <hc-sensitivity-bar></hc-sensitivity-bar>
 <hc-docs-overlay></hc-docs-overlay>
 @if (introPlaying()) {
-  <div class="intro-lock" role="dialog" aria-modal="true" aria-label="hypercomb intro">
-    <span class="intro-text">hypercomb</span>
-    <button type="button" class="intro-skip" (click)="skipIntro()">skip</button>
-    <audio #introAudio src="hypercomb.m4a" preload="auto" (ended)="onIntroEnded()"></audio>
+  <div class="intro-lock" role="dialog" aria-modal="true" aria-label="hypercomb intro" (pointerdown)="startIntroAudio()">
+    @if (introPhase() === 'speech') {
+      <span class="intro-text">hypercomb</span>
+      <hc-audio-player #speechAudio src="episode-1.m4a" [autoplay]="true" ariaLabel="hypercomb episode 1" (ended)="onSpeechEnded()"></hc-audio-player>
+      <button type="button" class="intro-skip" (click)="skipSpeech()" (pointerdown)="$event.stopPropagation()">skip</button>
+    } @else if (introPhase() === 'interlude') {
+      <div class="intro-no-signal" aria-label="no signal">
+        <div class="intro-no-signal__noise"></div>
+        <span class="intro-no-signal__label">no signal</span>
+      </div>
+      <button type="button" class="intro-skip" (click)="skipInterlude()" (pointerdown)="$event.stopPropagation()">skip</button>
+    } @else {
+      <span class="intro-text">hypercomb</span>
+      <hc-audio-player #outroAudio src="hypercomb.m4a" [autoplay]="true" ariaLabel="hypercomb intro audio" (ended)="onOutroEnded()"></hc-audio-player>
+      <button type="button" class="intro-skip" (click)="skipOutro()" (pointerdown)="$event.stopPropagation()">skip</button>
+    }
   </div>
 }
