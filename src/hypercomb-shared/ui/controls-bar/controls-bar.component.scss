@@ -145,7 +145,7 @@
   z-index: 60000;
 
   display: flex;
-  align-items: stretch;
+  align-items: center;
   min-width: 60px;
 
   transition: opacity 200ms ease, transform 200ms ease;
@@ -162,6 +162,57 @@
     }
   }
 
+  // When the user has drag-moved the pill, drop the bottom/transform default
+  // and honor explicit [style.left] / [style.top] bindings.
+  &.positioned {
+    bottom: auto;
+    left: 0;
+    top: 0;
+    transform: none;
+
+    &.faded {
+      transform: translateY(4px);
+      &:hover { transform: translateY(0); }
+    }
+  }
+
+  &.dragging { transition: none; }
+
+}
+
+// ── pill-scaled: inner zoom wrapper (just the pill) ────
+.pill-scaled { display: block; }
+
+// ── grip drag handle (move-only) ────────────────────────
+// Lives in the unzoomed .pill-stage so its footprint is independent of zoom.
+.pill-stage > .drag-handle {
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  color: rgba(220, 220, 220, 0.6);
+  transition: color 150ms ease;
+  flex-shrink: 0;
+
+  &:hover  { color: rgba(240, 240, 240, 0.95); }
+  &:active { cursor: grabbing; }
+
+  // 2 columns × 4 rows grid of dots for the vertical (side of pill) grip.
+  &.vertical {
+    display: grid;
+    grid-template-columns: 2px 2px;
+    grid-template-rows: repeat(4, 2px);
+    gap: 2px;
+    padding: 3px 4px;
+    margin-right: 0.3rem;
+    margin-left: 0.15rem;
+  }
+
+  .dot {
+    width: 2px;
+    height: 2px;
+    background: currentColor;
+    border-radius: 50%;
+  }
 }
 
 // ── pill ──────────────────────────────────────────────────

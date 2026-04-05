@@ -43,35 +43,36 @@
   to   { opacity: 1; transform: translateX(0); }
 }
 
-.position-lock {
-  width: 100%;
-  display: flex;
-  justify-content: center;
-  cursor: default;
-  padding: 0.1rem 0;
-  user-select: none;
-  touch-action: none;
-
-  .lock-icon {
-    font-size: 0.45rem;
-    color: rgba(160, 160, 160, 0.4);
-    line-height: 1;
-  }
-}
+// ── grip drag handle (move-only) ────────────────────────
+// Explicit dots grid — matches controls-bar pill grip.
+// `.horizontal` = 4 cols × 2 rows (sits atop a vertical bar).
 
 .drag-handle {
-  width: 100%;
-  display: flex;
-  justify-content: center;
   cursor: grab;
-  padding: 0.15rem 0;
-  color: rgba(200, 200, 200, 0.4);
-  font-size: 0.7rem;
   user-select: none;
   touch-action: none;
+  color: rgba(220, 220, 220, 0.6);
+  transition: color 150ms ease;
 
-  &:hover { color: rgba(200, 200, 200, 0.7); }
+  &:hover  { color: rgba(240, 240, 240, 0.95); }
   &:active { cursor: grabbing; }
+
+  &.horizontal {
+    display: grid;
+    grid-template-columns: repeat(4, 2px);
+    grid-template-rows: 2px 2px;
+    gap: 2px;
+    padding: 3px 4px;
+    margin: 0.15rem auto 0.2rem;
+    width: fit-content;
+  }
+
+  .dot {
+    width: 2px;
+    height: 2px;
+    background: currentColor;
+    border-radius: 50%;
+  }
 }
 
 .ctx-btn {

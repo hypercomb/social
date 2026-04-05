@@ -1,8 +1,12 @@
 // diamondcoreprocessor.com/substrate/substrate.drone.ts
 //
-// SubstrateDrone — ensures every blank tile gets a substrate background image.
-// Images and props resources are preloaded into a pool on startup.
-// Assignment is a synchronous localStorage write — no render delay.
+// SubstrateDrone — orchestrates the substrate system:
+//   • Warms up the active source on startup and after changes
+//   • Applies substrate to blank tiles as they render
+//   • Clears cell assignments when cells are removed
+//   • Opens the organizer on indicator click
+//   • Prompts for folder re-grant when a linked folder needs permission
+//   • Re-scans linked folders on tab focus so new images appear live
 
 import { Drone, EffectBus } from '@hypercomb/core'
 import type { SubstrateService } from './substrate.service.js'
@@ -13,100 +17,123 @@ export class SubstrateDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override description = 'Auto-assign substrate background images to new cells'
 
-  protected override listens = ['cell:added', 'cell:removed', 'substrate:changed', 'drop:pending', 'clipboard:paste-start', 'editor:mode', 'render:cell-count']
-  protected override emits = ['substrate:applied']
+  protected override listens = [
+    'cell:added', 'cell:removed',
+    'substrate:changed', 'substrate:folder-permission',
+    'drop:pending', 'clipboard:paste-start', 'clipboard:paste-done',
+    'editor:mode', 'render:cell-count',
+    'indicator:click',
+  ]
+  protected override emits = ['substrate:applied', 'indicator:set', 'indicator:clear', 'substrate-organizer:open', 'activity:log']
 
   #initialized = false
   #dropPending = false
   #pastePending = false
   #editorActive = false
+  #visibilityBound = false
+  #pendingPermissionHandleId: string | null = null
 
   protected override heartbeat = async (): Promise<void> => {
     if (this.#initialized) return
     this.#initialized = true
 
-    // Warm up: resolve path, collect image sigs, preload atlas + props pool
     const service = this.#service()
     if (service) {
-      void service.warmUp().then(() => {
-        // Show indicator if substrate is active
-        if (service.pickRandomImageSync()) {
-          EffectBus.emit('indicator:set', { key: 'substrate', icon: '◈', label: 'Substrate active' })
-        }
-      })
+      void service.warmUp().then(() => this.#syncIndicator())
     }
 
-    this.onEffect<{ active: boolean }>('drop:pending', (payload) => {
-      this.#dropPending = payload?.active ?? false
-    })
+    this.onEffect<{ active: boolean }>('drop:pending', (p) => { this.#dropPending = p?.active ?? false })
+    this.onEffect('clipboard:paste-start', () => { this.#pastePending = true })
+    this.onEffect('clipboard:paste-done',  () => { this.#pastePending = false })
+    this.onEffect<{ active: boolean }>('editor:mode', (p) => { this.#editorActive = p?.active ?? false })
 
-    this.onEffect('clipboard:paste-start', () => {
-      this.#pastePending = true
-    })
-    this.onEffect('clipboard:paste-done', () => {
-      this.#pastePending = false
-    })
-
-    this.onEffect<{ active: boolean }>('editor:mode', (payload) => {
-      this.#editorActive = payload?.active ?? false
-    })
-
-    // Apply substrate to new cells synchronously
+    // Apply substrate to new cells synchronously.
     this.onEffect<{ cell: string }>('cell:added', ({ cell }) => {
       if (!cell) return
       if (this.#dropPending || this.#pastePending || this.#editorActive) return
-
       const svc = this.#service()
-      if (svc?.applyToCell(cell)) {
-        EffectBus.emit('substrate:applied', { cell })
-      }
+      if (svc?.applyToCell(cell)) EffectBus.emit('substrate:applied', { cell })
     })
 
-    // Clear props index when cell is removed so recreated cells get fresh substrate
     this.onEffect<{ cell: string }>('cell:removed', ({ cell }) => {
       if (!cell) return
-      const svc = this.#service()
-      svc?.clearCell(cell)
+      this.#service()?.clearCell(cell)
     })
 
-    // When the renderer reports tiles with no image, fill them in
+    // Fill tiles the renderer reports as blank.
     this.onEffect<{ noImageLabels?: string[] }>('render:cell-count', (payload) => {
-      if (!payload?.noImageLabels?.length) return
+      const labels = payload?.noImageLabels
+      if (!labels?.length) return
       const svc = this.#service()
       if (!svc) return
-
-      const applied = svc.applyToAllBlanks(payload.noImageLabels)
-      if (applied.length > 0) {
-        for (const cell of applied) {
-          EffectBus.emit('substrate:applied', { cell })
-        }
-      }
+      const applied = svc.applyToAllBlanks(labels)
+      for (const cell of applied) EffectBus.emit('substrate:applied', { cell })
     })
 
-    // When substrate config changes, re-warm the pool and sync indicator
+    // Registry / active-source / per-hive changes → re-warm and re-sync indicator.
     this.onEffect('substrate:changed', () => {
       const svc = this.#service()
-      if (svc) {
-        svc.invalidateCache()
-        void svc.warmUp().then(() => {
-          if (svc.pickRandomImageSync()) {
-            EffectBus.emit('indicator:set', { key: 'substrate', icon: '◈', label: 'Substrate active' })
-          } else {
-            EffectBus.emit('indicator:clear', { key: 'substrate' })
-          }
-        })
+      if (!svc) return
+      void svc.warmUp().then(() => this.#syncIndicator())
+    })
+
+    // Folder source needs a user-gesture re-grant. Show an indicator; clicking
+    // it triggers requestPermission inside the gesture.
+    this.onEffect<{ handleId: string; permission: string }>('substrate:folder-permission', ({ handleId, permission }) => {
+      if (permission === 'granted') return
+      this.#pendingPermissionHandleId = handleId
+      EffectBus.emit('indicator:set', {
+        key: 'substrate-reconnect',
+        icon: '◈',
+        label: 'Substrate folder — click to reconnect',
+      })
+    })
+
+    // Indicator clicks → either reconnect a folder or open the organizer.
+    this.onEffect<{ key: string }>('indicator:click', async ({ key }) => {
+      const svc = this.#service()
+      if (!svc) return
+      if (key === 'substrate-reconnect' && this.#pendingPermissionHandleId) {
+        const result = await svc.requestFolderAccess(this.#pendingPermissionHandleId)
+        if (result === 'granted') {
+          EffectBus.emit('indicator:clear', { key: 'substrate-reconnect' })
+          this.#pendingPermissionHandleId = null
+          await svc.warmUp()
+          this.#syncIndicator()
+          EffectBus.emit('activity:log', { message: 'substrate folder reconnected', icon: '◈' })
+        } else {
+          EffectBus.emit('activity:log', { message: 'substrate folder access denied', icon: '◈' })
+        }
+        return
+      }
+      if (key === 'substrate') {
+        EffectBus.emit('substrate-organizer:open', {})
       }
     })
 
-    // Handle indicator dismiss — user clicked × on substrate indicator
-    this.onEffect<{ key: string }>('indicator:dismiss', ({ key }) => {
-      if (key !== 'substrate') return
-      const svc = this.#service()
-      if (svc) {
-        void svc.clearHive()
-        void svc.clearGlobal()
-      }
-    })
+    // Re-scan linked folders when the tab regains focus — new images dropped
+    // into the folder appear without a manual refresh.
+    if (!this.#visibilityBound && typeof document !== 'undefined') {
+      this.#visibilityBound = true
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState !== 'visible') return
+        const s = this.#service()
+        if (!s) return
+        const active = s.resolvedSource
+        if (active?.type !== 'folder') return
+        void s.warmUp()
+      })
+    }
+  }
+
+  #syncIndicator(): void {
+    const svc = this.#service()
+    if (!svc) return
+    if (svc.pickRandomImageSync()) {
+      EffectBus.emit('indicator:set', { key: 'substrate', icon: '◈', label: 'Substrate — click to organize' })
+    } else {
+      EffectBus.emit('indicator:clear', { key: 'substrate' })
+    }
   }
 
   #service(): SubstrateService | undefined {

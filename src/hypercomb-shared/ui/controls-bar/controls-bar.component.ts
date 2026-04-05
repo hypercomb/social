@@ -112,6 +112,19 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   // ── pill zoom (fixed at max size) ──────────────────────────
   readonly pillZoom = signal(2).asReadonly()
 
+  // ── pill position (drag-to-move; no resize) ───────────────
+  // null = use default CSS positioning (bottom-center). Once dragged,
+  // we switch to explicit left/top and persist across sessions.
+  static readonly #PILL_POS_KEY = 'hc:controls-pill-pos'
+  readonly #pillPos = signal<{ x: number; y: number } | null>(null)
+  readonly pillPos = this.#pillPos.asReadonly()
+  readonly #pillDragging = signal(false)
+  readonly pillDragging = this.#pillDragging.asReadonly()
+  #pillDragOffsetX = 0
+  #pillDragOffsetY = 0
+  #pillPointerId: number | null = null
+  #pillStageEl: HTMLElement | null = null
+
   #viewportCenter = (): { x: number; y: number } => ({
     x: window.innerWidth / 2,
     y: window.innerHeight / 2,
@@ -316,6 +329,8 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     const stored = this.roomStore?.value ?? ''
     if (stored) this.#roomValue.set(stored)
 
+    this.#restorePillPos()
+
     window.addEventListener('resize', this.#onResize)
     window.addEventListener('pointermove', this.#onActivity)
     window.addEventListener('pointerdown', this.#onActivity)
@@ -463,6 +478,8 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     window.removeEventListener('touchstart', this.#onSwipeStart)
     window.removeEventListener('touchmove', this.#onSwipeMove)
     window.removeEventListener('touchend', this.#onSwipeEnd)
+    window.removeEventListener('pointermove', this.#onPillDragMove)
+    window.removeEventListener('pointerup', this.#onPillDragEnd)
     if (this.#idleTimer) clearTimeout(this.#idleTimer)
     this.#fitLockedUnsub?.()
     this.#clipboardUnsub?.()
@@ -883,7 +900,72 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   // ── internal ────────────────────────────────────────────
 
   #onResize = (): void => {
-    // no-op — pill is always centered, no custom position to clamp
+    // clamp persisted pill position to viewport on window resize
+    const pos = this.#pillPos()
+    if (pos) this.#pillPos.set(this.#clampPillPos(pos.x, pos.y))
+  }
+
+  // ── pill drag-to-move ─────────────────────────────────────
+
+  readonly onPillDragStart = (e: PointerEvent): void => {
+    e.preventDefault()
+    const stage = (e.currentTarget as HTMLElement)?.closest('.pill-stage') as HTMLElement | null
+    if (!stage) return
+    this.#pillStageEl = stage
+    const rect = stage.getBoundingClientRect()
+    // Start from current visual position (whether default or persisted).
+    const startX = rect.left
+    const startY = rect.top
+    this.#pillDragOffsetX = e.clientX - startX
+    this.#pillDragOffsetY = e.clientY - startY
+    this.#pillPointerId = e.pointerId
+    this.#pillDragging.set(true)
+    // Commit to explicit coords on first move so the transform override
+    // (translateX(-50%)) no longer fights us.
+    this.#pillPos.set({ x: startX, y: startY })
+    window.addEventListener('pointermove', this.#onPillDragMove)
+    window.addEventListener('pointerup', this.#onPillDragEnd)
+  }
+
+  #onPillDragMove = (e: PointerEvent): void => {
+    if (e.pointerId !== this.#pillPointerId) return
+    const x = e.clientX - this.#pillDragOffsetX
+    const y = e.clientY - this.#pillDragOffsetY
+    this.#pillPos.set(this.#clampPillPos(x, y))
+  }
+
+  #onPillDragEnd = (e: PointerEvent): void => {
+    if (e.pointerId !== this.#pillPointerId) return
+    this.#pillPointerId = null
+    this.#pillDragging.set(false)
+    const pos = this.#pillPos()
+    if (pos) {
+      try { localStorage.setItem(ControlsBarComponent.#PILL_POS_KEY, JSON.stringify(pos)) } catch { /* ignore */ }
+    }
+    window.removeEventListener('pointermove', this.#onPillDragMove)
+    window.removeEventListener('pointerup', this.#onPillDragEnd)
+  }
+
+  #clampPillPos(x: number, y: number): { x: number; y: number } {
+    const w = this.#pillStageEl?.offsetWidth ?? 0
+    const h = this.#pillStageEl?.offsetHeight ?? 0
+    const maxX = Math.max(0, window.innerWidth - w)
+    const maxY = Math.max(0, window.innerHeight - h)
+    return {
+      x: Math.max(0, Math.min(x, maxX)),
+      y: Math.max(0, Math.min(y, maxY)),
+    }
+  }
+
+  #restorePillPos(): void {
+    try {
+      const raw = localStorage.getItem(ControlsBarComponent.#PILL_POS_KEY)
+      if (!raw) return
+      const parsed = JSON.parse(raw) as { x: number; y: number }
+      if (typeof parsed?.x === 'number' && typeof parsed?.y === 'number') {
+        this.#pillPos.set(parsed)
+      }
+    } catch { /* ignore */ }
   }
 
   #onActivity = (): void => {

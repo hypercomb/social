@@ -3,28 +3,59 @@
 // SubstrateService — manages the image collection used as default
 // backgrounds for cells that have no image of their own.
 //
-// Storage:
-//   Global  → root OPFS 0000 property `substrate-global` (layer signature)
-//   Per-hive → cell 0000 property `substrate` (layer signature)
-//   Suppress → cell 0000 property `substrate-inherit` = false (blocks children)
+// Sources (unified abstraction):
+//   layer   — a layer package in OPFS __layers__/<domain>/<sig>
+//   hive    — a directory path under hypercomb.io/ (cells with images)
+//   folder  — a live FileSystemDirectoryHandle persisted in IDB
+//   url     — a remote bundle with manifest.json { images: string[] }
 //
-// Resolution cascade: per-hive (walk up lineage) → global → none.
+// Resolution cascade:
+//   per-hive substrate (walk lineage, respect inherit=false)
+//     → registry.activeId
+//     → first builtin in registry
+//     → none
+//
+// Storage:
+//   Root OPFS 0000 → `substrate-registry` (SubstrateRegistry JSON)
+//   Per-hive 0000  → `substrate` (hive path, legacy property name)
+//   Per-hive 0000  → `substrate-inherit` = false (barrier)
 
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, type SubstrateSource, type SubstrateRegistry, EMPTY_SUBSTRATE_REGISTRY } from '@hypercomb/core'
+import {
+  linkFolder as linkFolderHandle,
+  getHandle as getFolderHandle,
+  removeHandle as removeFolderHandle,
+  queryPermission as queryFolderPermission,
+  requestPermission as requestFolderPermission,
+  readImagesFromHandle,
+  isFolderAccessSupported,
+} from '@hypercomb/shared'
 
 const PROPS_FILE = '0000'
-const GLOBAL_KEY = 'substrate-global'
-const HIVE_KEY = 'substrate'
-const INHERIT_KEY = 'substrate-inherit'
-const STORAGE_KEY = 'hc:substrate-global'
-const RESOLVED_KEY = 'hc:substrate-resolved'
+const HIVE_KEY = 'substrate'                 // per-hive override (path string)
+const INHERIT_KEY = 'substrate-inherit'      // per-hive barrier
+const REGISTRY_KEY = 'substrate-registry'    // root OPFS 0000 property
+const LEGACY_GLOBAL_KEY = 'substrate-global' // migrated into registry on load
+const LEGACY_LS_GLOBAL = 'hc:substrate-global'
+
+// Default bundled URL source shipped with the app. Seeded on first load.
+const BUILTIN_DEFAULTS: SubstrateSource = {
+  type: 'url',
+  id: 'builtin:defaults',
+  baseUrl: 'substrate/',
+  label: 'Hypercomb defaults',
+  builtin: true,
+}
 
 const get = (key: string) => (window as any).ioc?.get?.(key)
 
 type StoreHandle = {
   opfsRoot: FileSystemDirectoryHandle
   hypercombRoot: FileSystemDirectoryHandle
+  layers: FileSystemDirectoryHandle
   getResource: (sig: string) => Promise<Blob | null>
+  putResource: (blob: Blob) => Promise<string>
+  domainLayersDirectory?: (domain: string, create?: boolean) => Promise<FileSystemDirectoryHandle>
 }
 
 type LineageHandle = {
@@ -32,60 +63,168 @@ type LineageHandle = {
   explorerSegments: () => readonly string[]
 }
 
+type ResolvedSource = {
+  source: SubstrateSource
+  images: string[]       // image signatures
+}
+
+// Distributive Omit so each branch of the union keeps its own fields.
+type DistributiveOmit<T, K extends keyof any> = T extends unknown ? Omit<T, K> : never
+type SourceInput = DistributiveOmit<SubstrateSource, 'id'> & { id?: string }
+
 export class SubstrateService extends EventTarget {
   #loaded = false
-  #globalSignature: string | null = null
-  #imageCache = new Map<string, string[]>() // layerSig → image sigs
+  #registry: SubstrateRegistry = EMPTY_SUBSTRATE_REGISTRY
+  #resolved: ResolvedSource | null = null
+  #propsPool: { imageSig: string; propsSig: string }[] = []
 
-  // ── public API ──
+  // ───────────────────────── registry ─────────────────────────
 
-  get globalSignature(): string | null { return this.#globalSignature }
+  get registry(): SubstrateRegistry { return this.#registry }
+  get activeSource(): SubstrateSource | null {
+    return this.#registry.sources.find(s => s.id === this.#registry.activeId) ?? null
+  }
+  get resolvedSource(): SubstrateSource | null { return this.#resolved?.source ?? null }
+  get resolvedImageCount(): number { return this.#resolved?.images.length ?? 0 }
 
   async ensureLoaded(): Promise<void> {
     if (this.#loaded) return
-    await this.#loadGlobal()
+    await this.#loadRegistry()
     this.#loaded = true
   }
 
-  /** Set the global substrate layer signature. */
-  async setGlobal(layerSignature: string): Promise<void> {
-    this.#globalSignature = layerSignature
-    localStorage.setItem(STORAGE_KEY, layerSignature)
-    await this.#saveGlobal(layerSignature)
-    this.#imageCache.delete(layerSignature) // force refresh
-    EffectBus.emit('substrate:changed', { scope: 'global', signature: layerSignature })
+  async #loadRegistry(): Promise<void> {
+    const store = this.#store()
+    if (!store) return
+    let registry: SubstrateRegistry | null = null
+    try {
+      const props = await this.#readRootProps(store)
+      const raw = props[REGISTRY_KEY]
+      if (raw && typeof raw === 'object' && Array.isArray((raw as any).sources)) {
+        registry = raw as SubstrateRegistry
+      }
+    } catch { /* no root props */ }
+
+    if (!registry) {
+      // First-ever load — seed with builtin defaults (active).
+      registry = { sources: [BUILTIN_DEFAULTS], activeId: BUILTIN_DEFAULTS.id }
+
+      // Migrate legacy substrate-global if present.
+      try {
+        const props = await this.#readRootProps(store)
+        const legacy = props[LEGACY_GLOBAL_KEY] ?? localStorage.getItem(LEGACY_LS_GLOBAL)
+        if (typeof legacy === 'string' && legacy.length > 0) {
+          const hiveSource: SubstrateSource = {
+            type: 'hive',
+            id: `hive:${legacy}`,
+            path: legacy,
+            label: legacy,
+          }
+          registry = { sources: [BUILTIN_DEFAULTS, hiveSource], activeId: hiveSource.id }
+        }
+      } catch { /* ignore */ }
+
+      await this.#saveRegistry(registry)
+    } else {
+      // Ensure builtin defaults are always present (forward compat).
+      if (!registry.sources.some(s => s.id === BUILTIN_DEFAULTS.id)) {
+        registry = { sources: [BUILTIN_DEFAULTS, ...registry.sources], activeId: registry.activeId }
+        await this.#saveRegistry(registry)
+      }
+    }
+
+    this.#registry = registry
   }
 
-  /** Clear the global substrate. */
-  async clearGlobal(): Promise<void> {
-    this.#globalSignature = null
-    this.#resolvedCache = null
-    localStorage.removeItem(STORAGE_KEY)
-    localStorage.removeItem(RESOLVED_KEY)
-    await this.#saveGlobal(null)
-    EffectBus.emit('substrate:changed', { scope: 'global', signature: null })
+  async #saveRegistry(next: SubstrateRegistry): Promise<void> {
+    this.#registry = next
+    const store = this.#store()
+    if (!store) return
+    try {
+      await this.#writeRootProps(store, { [REGISTRY_KEY]: next })
+    } catch { /* store not ready */ }
   }
 
-  /** Set per-hive substrate on the current explorer directory. */
-  async setHive(layerSignature: string): Promise<void> {
+  listSources(): readonly SubstrateSource[] { return this.#registry.sources }
+
+  async addSource(source: SourceInput, setActive = true): Promise<SubstrateSource> {
+    await this.ensureLoaded()
+    const id = source.id ?? `${source.type}:${crypto.randomUUID()}`
+    const full = { ...source, id } as SubstrateSource
+    const sources = [...this.#registry.sources, full]
+    const activeId = setActive ? full.id : this.#registry.activeId
+    await this.#saveRegistry({ sources, activeId })
+    EffectBus.emit('substrate:changed', { scope: 'registry', sourceId: full.id })
+    return full
+  }
+
+  async removeSource(id: string): Promise<void> {
+    await this.ensureLoaded()
+    const target = this.#registry.sources.find(s => s.id === id)
+    if (!target || target.builtin) return
+    if (target.type === 'folder') {
+      await removeFolderHandle(target.handleId)
+    }
+    const sources = this.#registry.sources.filter(s => s.id !== id)
+    const activeId = this.#registry.activeId === id ? null : this.#registry.activeId
+    await this.#saveRegistry({ sources, activeId })
+    EffectBus.emit('substrate:changed', { scope: 'registry', sourceId: id })
+  }
+
+  async setActive(id: string | null): Promise<void> {
+    await this.ensureLoaded()
+    if (id !== null && !this.#registry.sources.some(s => s.id === id)) return
+    await this.#saveRegistry({ sources: this.#registry.sources, activeId: id })
+    this.#resolved = null
+    this.#propsPool = []
+    EffectBus.emit('substrate:changed', { scope: 'active', sourceId: id })
+  }
+
+  async renameSource(id: string, label: string): Promise<void> {
+    await this.ensureLoaded()
+    const sources = this.#registry.sources.map(s => s.id === id ? { ...s, label } as SubstrateSource : s)
+    await this.#saveRegistry({ sources, activeId: this.#registry.activeId })
+  }
+
+  /** Prompt the user for a local folder and register it as a new source. */
+  async linkLocalFolder(): Promise<SubstrateSource | null> {
+    if (!isFolderAccessSupported()) return null
+    const entry = await linkFolderHandle()
+    if (!entry) return null
+    return this.addSource({
+      type: 'folder',
+      handleId: entry.id,
+      label: entry.label,
+    }, true)
+  }
+
+  /** Add a hive source for the given path (e.g. from `/substrate here`). */
+  async addHiveSource(path: string, label?: string): Promise<SubstrateSource> {
+    // Reuse existing hive source if same path already registered.
+    const existing = this.#registry.sources.find(s => s.type === 'hive' && s.path === path)
+    if (existing) {
+      await this.setActive(existing.id)
+      return existing
+    }
+    return this.addSource({ type: 'hive', path, label: label ?? path }, true)
+  }
+
+  // ─────────────────────── per-hive overrides ───────────────────────
+
+  async setHive(path: string): Promise<void> {
     const dir = await this.#explorerDir()
     if (!dir) return
-    await this.#writeProps(dir, { [HIVE_KEY]: layerSignature })
-    this.#imageCache.delete(layerSignature)
-    EffectBus.emit('substrate:changed', { scope: 'hive', signature: layerSignature })
+    await this.#writeProps(dir, { [HIVE_KEY]: path })
+    EffectBus.emit('substrate:changed', { scope: 'hive', path })
   }
 
-  /** Clear per-hive substrate override. */
   async clearHive(): Promise<void> {
     const dir = await this.#explorerDir()
     if (!dir) return
     await this.#writeProps(dir, { [HIVE_KEY]: null })
-    this.#resolvedCache = null
-    localStorage.removeItem(RESOLVED_KEY)
-    EffectBus.emit('substrate:changed', { scope: 'hive', signature: null })
+    EffectBus.emit('substrate:changed', { scope: 'hive', path: null })
   }
 
-  /** Suppress child overrides — only global applies under this hive. */
   async setInherit(inherit: boolean): Promise<void> {
     const dir = await this.#explorerDir()
     if (!dir) return
@@ -93,211 +232,251 @@ export class SubstrateService extends EventTarget {
     EffectBus.emit('substrate:changed', { scope: 'inherit', inherit })
   }
 
+  // ───────────────────────── resolution ─────────────────────────
+
   /**
-   * Resolve the effective substrate layer signature for the current location.
-   * Walks up from current hive checking for per-hive overrides, respecting
-   * inherit=false barriers. Falls back to global.
+   * Resolve the active substrate source for the current location.
+   * Walks per-hive overrides first, falls back to registry.activeId,
+   * then to the first builtin source.
    */
-  async resolve(): Promise<string | null> {
+  async resolve(): Promise<SubstrateSource | null> {
     await this.ensureLoaded()
 
-    const store = this.#store()
-    if (!store) return this.#globalSignature
+    // 1. Per-hive override walk
+    const hiveOverride = await this.#resolveHiveOverride()
+    if (hiveOverride) return hiveOverride
 
+    // 2. Registry active
+    const active = this.activeSource
+    if (active) return active
+
+    // 3. First builtin fallback (if any)
+    return this.#registry.sources.find(s => s.builtin) ?? null
+  }
+
+  async #resolveHiveOverride(): Promise<SubstrateSource | null> {
+    const store = this.#store()
+    if (!store) return null
     const lineage = this.#lineage()
-    if (!lineage) return this.#globalSignature
+    if (!lineage) return null
 
     const segments = [...lineage.explorerSegments()]
-
-    // Walk from current depth up to root, checking each hive's 0000
     while (segments.length > 0) {
       try {
         let dir: FileSystemDirectoryHandle = store.hypercombRoot
-        for (const seg of segments) {
-          dir = await dir.getDirectoryHandle(seg)
-        }
+        for (const seg of segments) dir = await dir.getDirectoryHandle(seg)
         const props = await this.#readProps(dir)
 
-        // If this hive says don't inherit, stop and use global
-        if (props[INHERIT_KEY] === false) return this.#globalSignature
+        if (props[INHERIT_KEY] === false) return null // barrier → fall through to registry
 
-        // If this hive has a substrate, use it
-        const sig = props[HIVE_KEY]
-        if (typeof sig === 'string' && sig.length > 0) return sig
-      } catch { /* directory doesn't exist or no props — continue up */ }
-
+        const path = props[HIVE_KEY]
+        if (typeof path === 'string' && path.length > 0) {
+          return {
+            type: 'hive',
+            id: `hive:override:${path}`,
+            path,
+            label: path,
+          }
+        }
+      } catch { /* missing dir / props */ }
       segments.pop()
     }
+    return null
+  }
 
-    return this.#globalSignature
+  // ─────────────────── source resolvers (per type) ───────────────────
+
+  async #loadSourceImages(source: SubstrateSource): Promise<string[]> {
+    switch (source.type) {
+      case 'hive':   return this.#loadHiveImages(source.path)
+      case 'url':    return this.#loadUrlImages(source.baseUrl)
+      case 'folder': return this.#loadFolderImages(source.handleId)
+      case 'layer':  return this.#loadLayerImages(source.signature)
+    }
+  }
+
+  async #loadHiveImages(layerPath: string): Promise<string[]> {
+    const store = this.#store()
+    if (!store) return []
+    const images: string[] = []
+    const propsIndex: Record<string, string> = JSON.parse(localStorage.getItem('hc:tile-props-index') ?? '{}')
+    try {
+      let dir: FileSystemDirectoryHandle = store.hypercombRoot
+      for (const seg of layerPath.split('/').filter(Boolean)) {
+        dir = await dir.getDirectoryHandle(seg)
+      }
+      for await (const [name, handle] of (dir as any).entries()) {
+        if (handle.kind !== 'directory') continue
+        try {
+          const propsSig = propsIndex[name]
+          if (!propsSig) continue
+          const blob = await store.getResource(propsSig)
+          if (!blob) continue
+          const props = JSON.parse(await blob.text())
+          const sig = props?.small?.image ?? props?.flat?.small?.image
+          if (typeof sig === 'string' && /^[0-9a-f]{64}$/.test(sig)) images.push(sig)
+        } catch { /* skip */ }
+      }
+    } catch { /* hive missing */ }
+    return images
+  }
+
+  async #loadUrlImages(baseUrl: string): Promise<string[]> {
+    const store = this.#store()
+    if (!store) return []
+    let manifest: { images?: string[] }
+    try {
+      const res = await fetch(`${baseUrl}manifest.json`, { cache: 'force-cache' })
+      if (!res.ok) return []
+      manifest = await res.json()
+    } catch { return [] }
+    const names = manifest.images ?? []
+    const sigs: string[] = []
+    for (const name of names) {
+      try {
+        const r = await fetch(`${baseUrl}${name}`, { cache: 'force-cache' })
+        if (!r.ok) continue
+        const blob = await r.blob()
+        const sig = await store.putResource(blob)
+        sigs.push(sig)
+      } catch { /* skip */ }
+    }
+    return sigs
+  }
+
+  async #loadFolderImages(handleId: string): Promise<string[]> {
+    const store = this.#store()
+    if (!store) return []
+    const entry = await getFolderHandle(handleId)
+    if (!entry) return []
+    const permission = await queryFolderPermission(entry.handle)
+    if (permission !== 'granted') {
+      EffectBus.emit('substrate:folder-permission', { handleId, permission })
+      return []
+    }
+    const files = await readImagesFromHandle(entry.handle)
+    const sigs: string[] = []
+    for (const { blob } of files) {
+      try {
+        const sig = await store.putResource(blob)
+        sigs.push(sig)
+      } catch { /* skip */ }
+    }
+    return sigs
+  }
+
+  async #loadLayerImages(_layerSignature: string): Promise<string[]> {
+    // v1: layer-as-substrate resolution is stubbed. Substrate layer packages
+    // require a manifest format that lists resource signatures for images —
+    // deferred with the layer creation flow. Returning empty means the
+    // source shows in the registry but contributes no images yet.
+    return []
   }
 
   /**
-   * Pick a random image signature from the resolved substrate layer.
-   * Reads the tile images within that hive and caches them.
+   * Request permission for a folder source from a user gesture.
+   * Call this from a click handler in the organizer UI.
    */
-  async pickRandomImage(): Promise<string | null> {
-    const layerSignature = await this.resolve()
-    if (!layerSignature) return null
-
-    const images = await this.#collectImages(layerSignature)
-    if (images.length === 0) return null
-
-    return images[Math.floor(Math.random() * images.length)]
+  async requestFolderAccess(handleId: string): Promise<'granted' | 'denied' | 'prompt'> {
+    const entry = await getFolderHandle(handleId)
+    if (!entry) return 'denied'
+    return requestFolderPermission(entry.handle)
   }
 
-  /** Preload all substrate images into the image atlas for instant rendering. */
-  async preloadImages(): Promise<void> {
-    const layerSignature = await this.resolve()
-    if (!layerSignature) return
+  // ─────────────────────── warm-up & picking ───────────────────────
 
-    const images = await this.#collectImages(layerSignature)
+  /** Resolve active source, fetch images, preload atlas, build props pool. */
+  async warmUp(): Promise<void> {
+    await this.ensureLoaded()
+    const source = await this.resolve()
+    if (!source) {
+      this.#resolved = null
+      this.#propsPool = []
+      return
+    }
+
+    const images = await this.#loadSourceImages(source)
+    this.#resolved = { source, images }
+
+    await this.#preloadAtlas(images)
+    await this.#fillPropsPool(images)
+  }
+
+  async #preloadAtlas(images: string[]): Promise<void> {
     if (images.length === 0) return
-
     const store = this.#store()
     if (!store) return
-
     const showCell = get('@diamondcoreprocessor.com/ShowCellDrone') as
-      { imageAtlas: { hasImage: (sig: string) => boolean; hasFailed: (sig: string) => boolean; loadImage: (sig: string, blob: Blob) => Promise<import('../presentation/grid/hex-image.atlas.js').ImageUV | null> } | null } | undefined
-    if (!showCell?.imageAtlas) return
-
+      { imageAtlas: { hasImage: (sig: string) => boolean; hasFailed: (sig: string) => boolean; loadImage: (sig: string, blob: Blob) => Promise<unknown> } | null } | undefined
+    const atlas = showCell?.imageAtlas
+    if (!atlas) return
     for (const sig of images) {
-      if (showCell.imageAtlas.hasImage(sig) || showCell.imageAtlas.hasFailed(sig)) continue
+      if (atlas.hasImage(sig) || atlas.hasFailed(sig)) continue
       try {
         const blob = await store.getResource(sig)
-        if (blob) await showCell.imageAtlas.loadImage(sig, blob)
-      } catch { /* skip failed loads */ }
+        if (blob) await atlas.loadImage(sig, blob)
+      } catch { /* skip */ }
     }
   }
 
-  /**
-   * Synchronous pick — returns a pre-resolved image sig from cache.
-   * Returns null if substrate is not loaded or pool is empty.
-   */
-  pickRandomImageSync(): string | null {
-    // Use cached resolved path
-    const path = this.#resolvedCache
-    if (!path) return null
-
-    const images = this.#imageCache.get(path)
-    if (!images || images.length === 0) return null
-
-    return images[Math.floor(Math.random() * images.length)]
-  }
-
-  #resolvedCache: string | null = null
-
-  /** Warm up: resolve + collect + preload so sync picks are instant. */
-  async warmUp(): Promise<void> {
-    this.#resolvedCache = await this.resolve()
-
-    // Persist resolved path so it survives reload
-    if (this.#resolvedCache) {
-      localStorage.setItem(RESOLVED_KEY, this.#resolvedCache)
-    }
-
-    // Fall back to last known resolved path if resolve() returned null
-    // (e.g. Lineage not ready yet at startup)
-    if (!this.#resolvedCache) {
-      this.#resolvedCache = localStorage.getItem(RESOLVED_KEY)
-    }
-
-    if (!this.#resolvedCache) return
-    await this.#collectImages(this.#resolvedCache)
-    await this.preloadImages()
-    await this.#fillPropsPool()
-  }
-
-  // ── pre-generated props pool ──
-
-  #propsPool: { imageSig: string; propsSig: string }[] = []
-
-  async #fillPropsPool(): Promise<void> {
+  async #fillPropsPool(images: string[]): Promise<void> {
     const store = this.#store()
-    if (!store) return
+    if (!store || images.length === 0) { this.#propsPool = []; return }
 
-    const path = this.#resolvedCache
-    if (!path) return
-
-    const images = this.#imageCache.get(path)
-    if (!images || images.length === 0) return
-
-    // Pre-generate props resources — one per unique image (deduped by content)
     const byImage = new Map<string, string>()
-    this.#propsPool = []
+    const pool: { imageSig: string; propsSig: string }[] = []
     for (const imageSig of images) {
       if (byImage.has(imageSig)) {
-        this.#propsPool.push({ imageSig, propsSig: byImage.get(imageSig)! })
+        pool.push({ imageSig, propsSig: byImage.get(imageSig)! })
         continue
       }
       try {
         const props = { small: { image: imageSig }, substrate: true }
-        const json = JSON.stringify(props, null, 2)
-        const blob = new Blob([json], { type: 'application/json' })
-        const propsSig = await (store as any).putResource(blob)
+        const blob = new Blob([JSON.stringify(props, null, 2)], { type: 'application/json' })
+        const propsSig = await store.putResource(blob)
         byImage.set(imageSig, propsSig)
-        this.#propsPool.push({ imageSig, propsSig })
+        pool.push({ imageSig, propsSig })
       } catch { /* skip */ }
     }
 
-    // Pad pool to at least 50 entries by cycling through source images
-    const minPool = 50
-    if (this.#propsPool.length > 0 && this.#propsPool.length < minPool) {
-      const base = [...this.#propsPool]
-      while (this.#propsPool.length < minPool) {
-        this.#propsPool.push(base[this.#propsPool.length % base.length])
-      }
+    // Pad to minimum pool size by cycling.
+    const MIN_POOL = 50
+    if (pool.length > 0 && pool.length < MIN_POOL) {
+      const base = [...pool]
+      while (pool.length < MIN_POOL) pool.push(base[pool.length % base.length])
     }
+    this.#propsPool = pool
   }
 
-  /**
-   * Synchronously assign a substrate image to a cell.
-   * Writes to the props index (localStorage) immediately — no async work.
-   * Returns true if an image was assigned.
-   */
-  /**
-   * Assign a substrate image to a cell that has NO props at all.
-   * Skips any cell that already has an entry in the props index.
-   * Returns true if an image was assigned.
-   */
+  pickRandomImageSync(): string | null {
+    if (this.#propsPool.length === 0) return null
+    return this.#propsPool[Math.floor(Math.random() * this.#propsPool.length)].imageSig
+  }
+
+  // ────────────────────── cell assignment API ──────────────────────
+
   applyToCell(label: string): boolean {
     if (this.#propsPool.length === 0) return false
-
     const indexKey = 'hc:tile-props-index'
     const index: Record<string, string> = JSON.parse(localStorage.getItem(indexKey) ?? '{}')
-
-    // Already has props (substrate or user-edited) — don't touch
     if (index[label]) return false
-
     const entry = this.#propsPool[Math.floor(Math.random() * this.#propsPool.length)]
     index[label] = entry.propsSig
     localStorage.setItem(indexKey, JSON.stringify(index))
-
     return true
   }
 
-  /**
-   * Re-roll a single cell's substrate image.
-   * Clears its current props entry and assigns a new random one from the pool.
-   * Returns true if a new image was assigned.
-   */
   rerollCell(label: string): boolean {
     if (this.#propsPool.length === 0) return false
-
     const indexKey = 'hc:tile-props-index'
     const index: Record<string, string> = JSON.parse(localStorage.getItem(indexKey) ?? '{}')
-
-    // Remove current entry so we can assign a fresh one
     delete index[label]
-
     const entry = this.#propsPool[Math.floor(Math.random() * this.#propsPool.length)]
     index[label] = entry.propsSig
     localStorage.setItem(indexKey, JSON.stringify(index))
-
     return true
   }
 
-  /** Remove a cell from the props index (call on cell:removed). */
   clearCell(label: string): void {
     const indexKey = 'hc:tile-props-index'
     const index: Record<string, string> = JSON.parse(localStorage.getItem(indexKey) ?? '{}')
@@ -305,47 +484,33 @@ export class SubstrateService extends EventTarget {
     localStorage.setItem(indexKey, JSON.stringify(index))
   }
 
-  /**
-   * Apply substrate images to blank tiles (tiles with no props entry).
-   * Only called with noImageLabels — tiles the renderer confirms have no image.
-   * Never re-rolls existing assignments.
-   */
   applyToAllBlanks(labels: string[]): string[] {
     if (this.#propsPool.length === 0 || labels.length === 0) return []
-
     const indexKey = 'hc:tile-props-index'
     const index: Record<string, string> = JSON.parse(localStorage.getItem(indexKey) ?? '{}')
     const applied: string[] = []
-
     for (const label of labels) {
-      if (index[label]) continue // already has props — skip
-
+      if (index[label]) continue
       const entry = this.#propsPool[Math.floor(Math.random() * this.#propsPool.length)]
       index[label] = entry.propsSig
       applied.push(label)
     }
-
-    if (applied.length > 0) {
-      localStorage.setItem(indexKey, JSON.stringify(index))
-    }
-
+    if (applied.length > 0) localStorage.setItem(indexKey, JSON.stringify(index))
     return applied
   }
 
   /**
-   * Re-roll all substrate-assigned tiles with fresh random images.
-   * Clears substrate entries from the props index, re-warms the pool,
-   * then re-applies to all blanks on the next render cycle.
-   * Returns the number of tiles refreshed.
+   * Reroll every substrate-assigned tile with a fresh pick from the current
+   * pool. Optionally re-runs warm-up first (e.g. after a linked folder got
+   * new files). Returns the count of tiles reassigned.
    */
-  async refresh(visibleLabels: string[]): Promise<number> {
+  async refresh(visibleLabels: string[], rewarm = true): Promise<number> {
+    if (rewarm) await this.warmUp()
     if (this.#propsPool.length === 0) return 0
 
     const indexKey = 'hc:tile-props-index'
     const index: Record<string, string> = JSON.parse(localStorage.getItem(indexKey) ?? '{}')
     const substrateSigs = new Set(this.#propsPool.map(p => p.propsSig))
-
-    // Clear all substrate-assigned entries
     let cleared = 0
     for (const label of visibleLabels) {
       if (index[label] && substrateSigs.has(index[label])) {
@@ -353,110 +518,25 @@ export class SubstrateService extends EventTarget {
         cleared++
       }
     }
+    if (cleared > 0) localStorage.setItem(indexKey, JSON.stringify(index))
 
-    if (cleared > 0) {
-      localStorage.setItem(indexKey, JSON.stringify(index))
-    }
-
-    // Re-warm pool (may pick up new images if substrate source changed)
-    this.invalidateCache()
-    await this.warmUp()
-
-    // Re-apply to all now-blank tiles
-    const applied = this.applyToAllBlanks(visibleLabels)
-
-    return applied.length
+    return this.applyToAllBlanks(visibleLabels).length
   }
 
-  // ── private: image collection ──
-
-  async #collectImages(layerPath: string): Promise<string[]> {
-    if (this.#imageCache.has(layerPath)) return this.#imageCache.get(layerPath)!
-
-    const store = this.#store()
-    if (!store) return []
-
-    const images: string[] = []
-    const propsIndex: Record<string, string> = JSON.parse(localStorage.getItem('hc:tile-props-index') ?? '{}')
-
-    try {
-      let dir: FileSystemDirectoryHandle = store.hypercombRoot
-      const segments = layerPath.split('/').filter(Boolean)
-      for (const seg of segments) {
-        dir = await dir.getDirectoryHandle(seg)
-      }
-
-      for await (const [name, handle] of (dir as any).entries()) {
-        if (handle.kind !== 'directory') continue
-        try {
-          // Read image sig from content-addressed props (same source as show-cell)
-          const propsSig = propsIndex[name]
-          if (propsSig) {
-            const blob = await store.getResource(propsSig)
-            if (blob) {
-              const props = JSON.parse(await blob.text())
-              const sig = props?.small?.image ?? props?.flat?.small?.image
-              if (typeof sig === 'string' && /^[0-9a-f]{64}$/.test(sig)) {
-                images.push(sig)
-              }
-            }
-          }
-        } catch { /* skip cells without images */ }
-      }
-    } catch { /* substrate hive not found */ }
-
-    this.#imageCache.set(layerPath, images)
-    return images
-  }
-
-  /** Invalidate the image cache for a given layer (or all). */
-  invalidateCache(layerPath?: string): void {
-    if (layerPath) this.#imageCache.delete(layerPath)
-    else this.#imageCache.clear()
-  }
-
-  // ── private: global persistence (root 0000) ──
-
-  async #loadGlobal(): Promise<void> {
-    // Fast path: localStorage cache
-    const cached = localStorage.getItem(STORAGE_KEY)
-    if (cached) this.#globalSignature = cached
-
-    try {
-      const store = this.#store()
-      if (!store) return
-      const props = await this.#readRootProps(store)
-      const sig = props[GLOBAL_KEY]
-      if (typeof sig === 'string' && sig.length > 0) {
-        this.#globalSignature = sig
-        localStorage.setItem(STORAGE_KEY, sig)
-      }
-    } catch { /* no root props */ }
-  }
-
-  async #saveGlobal(signature: string | null): Promise<void> {
-    try {
-      const store = this.#store()
-      if (!store) return
-      await this.#writeRootProps(store, { [GLOBAL_KEY]: signature })
-    } catch { /* store not ready */ }
-  }
-
-  // ── private: OPFS helpers ──
+  // ───────────────────────── OPFS helpers ─────────────────────────
 
   async #readProps(dir: FileSystemDirectoryHandle): Promise<Record<string, any>> {
     try {
       const fh = await dir.getFileHandle(PROPS_FILE)
       const file = await fh.getFile()
       return JSON.parse(await file.text())
-    } catch {
-      return {}
-    }
+    } catch { return {} }
   }
 
   async #writeProps(dir: FileSystemDirectoryHandle, updates: Record<string, unknown>): Promise<void> {
     const existing = await this.#readProps(dir)
-    const merged = { ...existing, ...updates }
+    const merged: Record<string, unknown> = { ...existing, ...updates }
+    for (const k of Object.keys(updates)) if (merged[k] === null) delete merged[k]
     const fh = await dir.getFileHandle(PROPS_FILE, { create: true })
     const writable = await fh.createWritable()
     await writable.write(JSON.stringify(merged))
@@ -468,9 +548,7 @@ export class SubstrateService extends EventTarget {
       const fh = await store.opfsRoot.getFileHandle(PROPS_FILE)
       const file = await fh.getFile()
       return JSON.parse(await file.text())
-    } catch {
-      return {}
-    }
+    } catch { return {} }
   }
 
   async #writeRootProps(store: StoreHandle, updates: Record<string, unknown>): Promise<void> {
@@ -482,16 +560,10 @@ export class SubstrateService extends EventTarget {
     await writable.close()
   }
 
-  // ── private: IoC resolution ──
+  // ───────────────────────── IoC helpers ─────────────────────────
 
-  #store(): StoreHandle | undefined {
-    return get('@hypercomb.social/Store')
-  }
-
-  #lineage(): LineageHandle | undefined {
-    return get('@hypercomb.social/Lineage')
-  }
-
+  #store(): StoreHandle | undefined { return get('@hypercomb.social/Store') }
+  #lineage(): LineageHandle | undefined { return get('@hypercomb.social/Lineage') }
   async #explorerDir(): Promise<FileSystemDirectoryHandle | null> {
     return this.#lineage()?.explorerDir() ?? null
   }

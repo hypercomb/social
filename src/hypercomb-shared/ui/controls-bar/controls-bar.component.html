@@ -57,10 +57,26 @@
 <div
   class="pill-stage"
   [class.faded]="!visible()"
-  [style.zoom]="pillZoom()"
+  [class.positioned]="!!pillPos()"
+  [class.dragging]="pillDragging()"
+  [style.left.px]="pillPos()?.x"
+  [style.top.px]="pillPos()?.y"
   (mouseenter)="onBarEnter()"
   (mouseleave)="onBarLeave()"
 >
+  <!-- drag handle (move only; no resize) — sits in unzoomed stage -->
+  @if (!isMobile()) {
+    <div class="drag-handle vertical"
+         (pointerdown)="onPillDragStart($event)"
+         aria-label="drag to move">
+      <span class="dot"></span><span class="dot"></span>
+      <span class="dot"></span><span class="dot"></span>
+      <span class="dot"></span><span class="dot"></span>
+      <span class="dot"></span><span class="dot"></span>
+    </div>
+  }
+  <!-- zoomed wrapper keeps pill visuals 2× without scaling stage position or grip -->
+  <div class="pill-scaled" [style.zoom]="pillZoom()">
   <div
     class="controls-pill"
     [class.public-mode]="meshPublic"
@@ -237,5 +253,6 @@
     }
 
   }
+  </div>
   </div>
 </div>

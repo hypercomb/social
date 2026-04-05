@@ -12,13 +12,10 @@ import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 
 const STORAGE_KEY = 'hc:selection-menu-pos'
-const ZOOM_STORAGE_KEY = 'hc:selection-menu-zoom'
 const MENU_WIDTH = 44
 const MENU_HEIGHT_BASE = 160 // approximate height without paste
-const ZOOM_MIN = 0.6
-const ZOOM_MAX = 2.5
-const ZOOM_DEFAULT = 1
-const ZOOM_SENSITIVITY = 0.005 // zoom change per pixel dragged
+// Fixed zoom at 75% of the former max (2.5) — not user-resizable
+const ZOOM_FIXED = 1.875
 
 @Component({
   selector: 'hc-selection-context-menu',
@@ -39,12 +36,6 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
   #posY = signal(0)
   #dragging = signal(false)
 
-  #zoom = signal(ZOOM_DEFAULT)
-
-  // ── position lock (always locked on page load) ────────────
-  readonly #positionLocked = signal(true)
-  readonly positionLocked = this.#positionLocked.asReadonly()
-
   readonly visible = computed(() => this.#hasSelection())
   readonly allHidden = this.#allHidden.asReadonly()
   readonly moveMode = this.#moveMode.asReadonly()
@@ -52,19 +43,13 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
   readonly posX = this.#posX.asReadonly()
   readonly posY = this.#posY.asReadonly()
   readonly dragging = this.#dragging.asReadonly()
-  readonly zoom = this.#zoom.asReadonly()
+  readonly zoom = signal(ZOOM_FIXED).asReadonly()
 
   // ── drag state ──────────────────────────────────────────
 
   #dragOffsetX = 0
   #dragOffsetY = 0
   #pointerId: number | null = null
-
-  // ── zoom state ──────────────────────────────────────────
-
-  #zoomMode = false
-  #zoomStartY = 0
-  #zoomStartValue = 1
 
   // ── subscriptions ───────────────────────────────────────
 
@@ -77,7 +62,6 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.#restorePosition()
-    this.#restoreZoom()
 
     this.#selectionUnsub = EffectBus.on<{ selected?: string[] }>('selection:changed', (payload) => {
       const selected = payload?.selected ?? []
@@ -138,10 +122,6 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
     EffectBus.emit('controls:action', { action: 'hide' })
   }
 
-  readonly onPositionLockDblClick = (): void => {
-    this.#positionLocked.update(v => !v)
-  }
-
   // ── hidden-state check ──────────────────────────────────
 
   #updateAllHidden(selected: string[]): void {
@@ -157,18 +137,8 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
 
   readonly onDragStart = (e: PointerEvent): void => {
     this.#pointerId = e.pointerId
-
-    if (e.ctrlKey) {
-      // Ctrl+drag → zoom mode
-      this.#zoomMode = true
-      this.#zoomStartY = e.clientY
-      this.#zoomStartValue = this.#zoom()
-    } else {
-      // Normal drag → reposition
-      this.#zoomMode = false
-      this.#dragOffsetX = e.clientX - this.#posX()
-      this.#dragOffsetY = e.clientY - this.#posY()
-    }
+    this.#dragOffsetX = e.clientX - this.#posX()
+    this.#dragOffsetY = e.clientY - this.#posY()
 
     this.#dragging.set(true)
     window.addEventListener('pointermove', this.#onDragMove)
@@ -177,29 +147,17 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
 
   #onDragMove = (e: PointerEvent): void => {
     if (e.pointerId !== this.#pointerId) return
-
-    if (this.#zoomMode) {
-      const deltaY = this.#zoomStartY - e.clientY // drag up = zoom in
-      this.#zoom.set(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, this.#zoomStartValue + deltaY * ZOOM_SENSITIVITY)))
-    } else {
-      const x = this.#clampX(e.clientX - this.#dragOffsetX)
-      const y = this.#clampY(e.clientY - this.#dragOffsetY)
-      this.#posX.set(x)
-      this.#posY.set(y)
-    }
+    const x = this.#clampX(e.clientX - this.#dragOffsetX)
+    const y = this.#clampY(e.clientY - this.#dragOffsetY)
+    this.#posX.set(x)
+    this.#posY.set(y)
   }
 
   #onDragEnd = (e: PointerEvent): void => {
     if (e.pointerId !== this.#pointerId) return
     this.#dragging.set(false)
     this.#pointerId = null
-
-    if (this.#zoomMode) {
-      this.#saveZoom()
-      this.#zoomMode = false
-    } else {
-      this.#savePosition()
-    }
+    this.#savePosition()
 
     window.removeEventListener('pointermove', this.#onDragMove)
     window.removeEventListener('pointerup', this.#onDragEnd)
@@ -241,20 +199,5 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
   #onResize = (): void => {
     this.#posX.set(this.#clampX(this.#posX()))
     this.#posY.set(this.#clampY(this.#posY()))
-  }
-
-  // ── zoom persistence ──────────────────────────────────
-
-  #restoreZoom(): void {
-    try {
-      const stored = localStorage.getItem(ZOOM_STORAGE_KEY)
-      if (stored) {
-        this.#zoom.set(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, parseFloat(stored))))
-      }
-    } catch { /* ignore */ }
-  }
-
-  #saveZoom(): void {
-    localStorage.setItem(ZOOM_STORAGE_KEY, String(this.#zoom()))
   }
 }
