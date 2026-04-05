@@ -125,6 +125,10 @@
 
 :host {
   display: block;
+  width: 50vw;
+  height: 100vh;
+  position: relative;
+  overflow: hidden;
 
   &.clipboard-mode::after {
     content:
