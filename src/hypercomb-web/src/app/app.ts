@@ -1,4 +1,4 @@
-import { AfterViewInit, Component, HostBinding, inject, signal } from '@angular/core'
+import { AfterViewInit, Component, ElementRef, HostBinding, ViewChild, inject, signal } from '@angular/core'
 import { type Bee, EffectBus } from '@hypercomb/core'
 import { RouterOutlet } from '@angular/router'
 import { Header } from './header/header'
@@ -27,6 +27,9 @@ export class App implements AfterViewInit {
   public readonly viewActive = signal(false)
   readonly clipboardMode = signal(false)
   readonly moveMode = signal(false)
+  readonly introPlaying = signal(localStorage.getItem('hc:intro-played') !== 'true')
+
+  @ViewChild('introAudio') introAudioRef?: ElementRef<HTMLAudioElement>
 
   @HostBinding('class.clipboard-mode')
   get clipboardModeClass() { return this.clipboardMode(); }
@@ -70,6 +73,38 @@ export class App implements AfterViewInit {
     void this.runtimeReady.then(() => {
       void this.startRegisteredBees()
     })
+
+    if (this.introPlaying() && this.introAudioRef) {
+      const audio = this.introAudioRef.nativeElement
+      const play = () => audio.play().catch(() => {})
+      audio.play().catch(() => {
+        const handler = () => {
+          play()
+          window.removeEventListener('pointerdown', handler)
+          window.removeEventListener('keydown', handler)
+        }
+        window.addEventListener('pointerdown', handler)
+        window.addEventListener('keydown', handler)
+      })
+    }
+  }
+
+  onIntroEnded(): void {
+    this.dismissIntro()
+  }
+
+  skipIntro(): void {
+    if (this.introAudioRef) {
+      const audio = this.introAudioRef.nativeElement
+      audio.pause()
+      audio.currentTime = 0
+    }
+    this.dismissIntro()
+  }
+
+  private dismissIntro(): void {
+    localStorage.setItem('hc:intro-played', 'true')
+    this.introPlaying.set(false)
   }
 
   private readonly startRegisteredBees = async (): Promise<void> => {

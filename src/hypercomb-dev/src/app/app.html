@@ -21,3 +21,10 @@
 <hc-toast></hc-toast>
 <hc-instruction-overlay></hc-instruction-overlay>
 <hc-docs-overlay></hc-docs-overlay>
+@if (introPlaying()) {
+  <div class="intro-lock" role="dialog" aria-modal="true" aria-label="hypercomb intro">
+    <span class="intro-text">hypercomb</span>
+    <button type="button" class="intro-skip" (click)="skipIntro()">skip</button>
+    <audio #introAudio src="hypercomb.m4a" preload="auto" (ended)="onIntroEnded()"></audio>
+  </div>
+}

@@ -1,4 +1,4 @@
-import { Component, HostBinding, signal } from '@angular/core';
+import { AfterViewInit, Component, ElementRef, HostBinding, ViewChild, signal } from '@angular/core';
 import { type Bee, EffectBus } from '@hypercomb/core';
 import type { HexOrientation } from '@hypercomb/essentials/diamondcoreprocessor.com/preferences/settings';
 import { RouterOutlet } from '@angular/router';
@@ -162,10 +162,13 @@ void _deps
   styleUrls: ['./app.scss'] as any,
   templateUrl: './app.html'
 })
-export class App {
+export class App implements AfterViewInit {
   protected readonly title = signal('hypercomb-dev');
   readonly clipboardMode = signal(false);
   readonly moveMode = signal(false);
+  readonly introPlaying = signal(localStorage.getItem('hc:intro-played') !== 'true');
+
+  @ViewChild('introAudio') introAudioRef?: ElementRef<HTMLAudioElement>;
 
   @HostBinding('class.clipboard-mode')
   get clipboardModeClass() { return this.clipboardMode(); }
@@ -212,6 +215,39 @@ export class App {
       }
       void this.startRegisteredBees()
     })
+  }
+
+  ngAfterViewInit(): void {
+    if (!this.introPlaying() || !this.introAudioRef) return;
+    const audio = this.introAudioRef.nativeElement;
+    const play = () => audio.play().catch(() => {});
+    audio.play().catch(() => {
+      const handler = () => {
+        play();
+        window.removeEventListener('pointerdown', handler);
+        window.removeEventListener('keydown', handler);
+      };
+      window.addEventListener('pointerdown', handler);
+      window.addEventListener('keydown', handler);
+    });
+  }
+
+  onIntroEnded(): void {
+    this.dismissIntro();
+  }
+
+  skipIntro(): void {
+    if (this.introAudioRef) {
+      const audio = this.introAudioRef.nativeElement;
+      audio.pause();
+      audio.currentTime = 0;
+    }
+    this.dismissIntro();
+  }
+
+  private dismissIntro(): void {
+    localStorage.setItem('hc:intro-played', 'true');
+    this.introPlaying.set(false);
   }
 
   public toggleOrientation = (): void => {
