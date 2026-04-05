@@ -1,14 +1,33 @@
-@if(showHeader){
-<div class="header-bar" [class.secret-open]="secretOpen()" [style.visibility]="viewActive() ? 'hidden' : null">
-  <app-header></app-header>
-  <hc-mesh-header [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()" (secretExpandedChange)="secretOpen.set($event)"></hc-mesh-header>
-</div>
+@if (introPlaying()) {
+  <div class="intro-splash">
+    <div class="intro-tile">hypercomb</div>
+    @if (interludePlaying()) {
+      <div class="intro-interlude">
+        <div class="intro-interlude-static" aria-hidden="true"></div>
+        <div class="intro-interlude-message">NO SIGNAL</div>
+      </div>
+    }
+  </div>
+  <audio #introAudio1 src="episode-1.m4a" preload="auto"
+         (timeupdate)="onIntroTimeUpdate(1, $event)"
+         (ended)="onIntroEnded(1)"></audio>
+  <audio #introAudio0 src="episode-0.m4a" preload="auto"
+         (timeupdate)="onIntroTimeUpdate(0, $event)"
+         (ended)="onIntroEnded(0)"></audio>
+  <button type="button" class="intro-skip" (click)="skipCurrentIntro()">skip intro</button>
+} @else {
+  @if(showHeader){
+  <div class="header-bar" [class.secret-open]="secretOpen()" [style.visibility]="viewActive() ? 'hidden' : null">
+    <app-header></app-header>
+    <hc-mesh-header [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()" (secretExpandedChange)="secretOpen.set($event)"></hc-mesh-header>
+  </div>
+  }
+  <router-outlet></router-outlet>
+  <hc-controls-bar [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()" [style.visibility]="viewActive() ? 'hidden' : null"></hc-controls-bar>
+  <hc-selection-context-menu></hc-selection-context-menu>
+  <hc-tile-editor></hc-tile-editor>
+  <hc-portal-overlay></hc-portal-overlay>
+  <hc-confirm-dialog></hc-confirm-dialog>
+  <hc-sensitivity-bar></hc-sensitivity-bar>
+  <hc-docs-overlay></hc-docs-overlay>
 }
-<router-outlet></router-outlet>
-<hc-controls-bar [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()" [style.visibility]="viewActive() ? 'hidden' : null"></hc-controls-bar>
-<hc-selection-context-menu></hc-selection-context-menu>
-<hc-tile-editor></hc-tile-editor>
-<hc-portal-overlay></hc-portal-overlay>
-<hc-confirm-dialog></hc-confirm-dialog>
-<hc-sensitivity-bar></hc-sensitivity-bar>
-<hc-docs-overlay></hc-docs-overlay>
