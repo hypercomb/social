@@ -283,13 +283,17 @@ export class ZoomDrone extends Drone {
     coordinator: '@diamondcoreprocessor.com/TouchGestureCoordinator',
     touchPan: '@diamondcoreprocessor.com/TouchPanInput',
   }
-  protected override listens = ['render:host-ready', 'editor:mode']
+  protected override listens = ['render:host-ready', 'editor:mode', 'keymap:invoke']
 
   #effectsRegistered = false
 
   protected override heartbeat = async (): Promise<void> => {
     if (this.#effectsRegistered) return
     this.#effectsRegistered = true
+
+    this.onEffect<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
+      if (cmd === 'navigation.fitToScreen') this.zoomToFit()
+    })
 
     // lock the input gate while the editor is open so wheel/pinch zoom
     // doesn't fire underneath the editor overlay

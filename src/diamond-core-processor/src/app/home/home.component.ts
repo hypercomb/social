@@ -7,6 +7,7 @@ import { PatchStore, type PatchRecord } from '../core/patch-store'
 import { PackageExportService } from '../core/package-export.service'
 import { TreeViewComponent } from '../tree-view/tree-view.component'
 import { AuditorSettingsComponent } from '../settings/auditor-settings.component'
+import { RelayPanelComponent } from '../relay/relay-panel.component'
 import { BeeInspectorComponent } from '../tree-view/bee-inspector.component'
 import { DiamondIconComponent } from '../tree-view/diamond-icon.component'
 import { PatchListComponent } from '../patch-list/patch-list.component'
@@ -41,7 +42,7 @@ export interface DomainGroup {
 @Component({
   selector: 'app-home',
   standalone: true,
-  imports: [TreeViewComponent, AuditorSettingsComponent, BeeInspectorComponent, DiamondIconComponent, PatchListComponent, DcpCommandLineComponent, LayerEditorComponent],
+  imports: [TreeViewComponent, AuditorSettingsComponent, RelayPanelComponent, BeeInspectorComponent, DiamondIconComponent, PatchListComponent, DcpCommandLineComponent, LayerEditorComponent],
   templateUrl: './home.component.html',
   styleUrls: ['./home.component.scss']
 })

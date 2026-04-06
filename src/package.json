@@ -44,6 +44,7 @@
     "start:web": "npm --prefix hypercomb-web start",
     "start:dev": "npm --prefix hypercomb-dev start",
     "start:dcp": "npm --prefix diamond-core-processor start",
+    "start:relay": "node hypercomb-relay/setup.js",
     "sync:angular": "tsx scripts/sync-angular.ts"
   },
   "dependencies": {

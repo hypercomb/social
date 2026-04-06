@@ -33,7 +33,7 @@
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
 
   animation: ctx-slide-in 150ms ease-out;
-  transform-origin: top right;
+  transform-origin: top left;
 
   &.dragging { cursor: grabbing; }
 }

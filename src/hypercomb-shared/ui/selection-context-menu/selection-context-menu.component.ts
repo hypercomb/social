@@ -14,8 +14,8 @@ import { TranslatePipe } from '../../core/i18n.pipe'
 const STORAGE_KEY = 'hc:selection-menu-pos'
 const MENU_WIDTH = 44
 const MENU_HEIGHT_BASE = 160 // approximate height without paste
-// Fixed zoom at 75% of the former max (2.5) — not user-resizable
-const ZOOM_FIXED = 1.875
+// Fixed zoom at 80% of the former max (2.5) — not user-resizable
+const ZOOM_FIXED = 2.0
 
 @Component({
   selector: 'hc-selection-context-menu',
@@ -177,7 +177,7 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
     } catch { /* fall through to default */ }
 
     // default: right side, vertically centered
-    this.#posX.set(window.innerWidth - 60)
+    this.#posX.set(window.innerWidth - MENU_WIDTH * ZOOM_FIXED - 8)
     this.#posY.set(Math.round(window.innerHeight / 2 - 100))
   }
 
@@ -189,11 +189,13 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
   }
 
   #clampX(x: number): number {
-    return Math.max(0, Math.min(x, window.innerWidth - MENU_WIDTH))
+    const scaledWidth = MENU_WIDTH * ZOOM_FIXED
+    return Math.max(0, Math.min(x, window.innerWidth - scaledWidth))
   }
 
   #clampY(y: number): number {
-    return Math.max(0, Math.min(y, window.innerHeight - MENU_HEIGHT_BASE))
+    const scaledHeight = MENU_HEIGHT_BASE * ZOOM_FIXED
+    return Math.max(0, Math.min(y, window.innerHeight - scaledHeight))
   }
 
   #onResize = (): void => {

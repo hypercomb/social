@@ -659,11 +659,14 @@ var ZoomDrone = class extends Drone {
     coordinator: "@diamondcoreprocessor.com/TouchGestureCoordinator",
     touchPan: "@diamondcoreprocessor.com/TouchPanInput"
   };
-  listens = ["render:host-ready", "editor:mode"];
+  listens = ["render:host-ready", "editor:mode", "keymap:invoke"];
   #effectsRegistered = false;
   heartbeat = async () => {
     if (this.#effectsRegistered) return;
     this.#effectsRegistered = true;
+    this.onEffect("keymap:invoke", ({ cmd }) => {
+      if (cmd === "navigation.fitToScreen") this.zoomToFit();
+    });
     const gate = window.ioc.get("@diamondcoreprocessor.com/InputGate");
     this.onEffect("editor:mode", ({ active }) => {
       if (active) gate?.lock();
