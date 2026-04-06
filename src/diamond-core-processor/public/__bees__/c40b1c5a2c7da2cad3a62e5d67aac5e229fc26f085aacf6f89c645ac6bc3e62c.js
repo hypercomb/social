@@ -122,7 +122,7 @@ var RemoveProvider = class {
   name = "remove-provider";
   priority = 100;
   commands = [
-    { name: "remove", description: "Remove tiles from the current directory", descriptionKey: "slash.remove", aliases: ["rm"] }
+    { name: "remove", description: "Remove tiles from the current directory", descriptionKey: "slash.remove", aliases: ["rm", "delete", "del"] }
   ];
   async execute(_commandName, args) {
     const queen = get("@diamondcoreprocessor.com/RemoveQueenBee");

@@ -416,6 +416,15 @@ var HexSdfTextureShader = class _HexSdfTextureShader {
         // gentle center wash
         float branchWash = exp(-dist * dist * 3.0);
         color.rgb += branchColor * branchWash * 0.08;
+
+        // chevron hint at bottom of hex: small downward arrow
+        float chevronY = local.y / u_radiusPx - 0.55;
+        float chevronX = abs(local.x / u_radiusPx);
+        float chevronLine = abs(chevronY + chevronX * 0.6 - 0.12);
+        float chevronMask = smoothstep(0.02, 0.007, chevronLine)
+                          * step(chevronX, 0.22)
+                          * step(0.0, chevronY + 0.08);
+        color.rgb = mix(color.rgb, branchColor, chevronMask * 0.125);
       }
 
       // divergence overlay: 1 = future-add (ghost), 2 = future-remove (marked)

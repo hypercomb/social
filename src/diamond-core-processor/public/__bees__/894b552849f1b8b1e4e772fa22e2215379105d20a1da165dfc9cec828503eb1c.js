@@ -35,10 +35,6 @@ var ImageDropDrone = class extends Drone {
   };
   // ── drag handlers ─────────────────────────────────────────────
   #onDragOver = (e) => {
-    const el = document.activeElement;
-    if (el && el.matches?.("input, textarea, select, [contenteditable]")) {
-      if (!this.#pendingBlob) return;
-    }
     const types = e.dataTransfer?.types ?? [];
     if (!types.includes("Files")) return;
     e.preventDefault();
@@ -57,8 +53,6 @@ var ImageDropDrone = class extends Drone {
     this.#clearDragging();
   };
   #onDrop = (e) => {
-    const el = document.activeElement;
-    if (el && el.matches?.("input, textarea, select, [contenteditable]")) return;
     const types = e.dataTransfer?.types ?? [];
     if (!types.includes("Files")) return;
     const editorSvc = this.#editorService;

@@ -256,16 +256,21 @@ console.log("[InputAtomizer] Loaded");
 // src/diamondcoreprocessor.com/assistant/llm-api.ts
 var ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages";
 var ANTHROPIC_VERSION = "2023-06-01";
+var GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
 var MODELS = {
   opus: "claude-opus-4-6",
   o: "claude-opus-4-6",
   sonnet: "claude-sonnet-4-6",
   s: "claude-sonnet-4-6",
   haiku: "claude-haiku-4-5-20251001",
-  h: "claude-haiku-4-5-20251001"
+  h: "claude-haiku-4-5-20251001",
+  gemini: "gemini-2.5-flash",
+  g: "gemini-2.5-flash"
 };
 var API_KEY_STORAGE = "hc:anthropic-api-key";
+var GEMINI_API_KEY_STORAGE = "hc:gemini-api-key";
 var getApiKey = () => localStorage.getItem(API_KEY_STORAGE);
+var getGeminiApiKey = () => localStorage.getItem(GEMINI_API_KEY_STORAGE);
 var callAnthropic = async (model, systemPrompt, userMessage, apiKey, maxTokens = 4096) => {
   const response = await fetch(ANTHROPIC_ENDPOINT, {
     method: "POST",
@@ -317,6 +322,24 @@ var callAnthropicMultiTurn = async (model, systemPrompt, messages, apiKey, maxTo
     outputTokens: json.usage?.output_tokens ?? 0,
     model: json.model ?? model
   };
+};
+var callGemini = async (model, systemPrompt, userMessage, apiKey, maxTokens = 4096) => {
+  const url = `${GEMINI_ENDPOINT}/${model}:generateContent?key=${apiKey}`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      system_instruction: { parts: [{ text: systemPrompt }] },
+      contents: [{ parts: [{ text: userMessage }] }],
+      generationConfig: { maxOutputTokens: maxTokens }
+    })
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Gemini API ${response.status}: ${text}`);
+  }
+  const json = await response.json();
+  return json.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
 };
 
 // src/diamondcoreprocessor.com/assistant/llm.queen.ts
@@ -511,6 +534,7 @@ var buildMessages = async (getResource, manifest) => {
 export {
   API_KEY_STORAGE,
   ConversationQueenBee,
+  GEMINI_API_KEY_STORAGE,
   InputAtomizer,
   LlmQueenBee,
   MODELS,
@@ -518,8 +542,10 @@ export {
   buildMessages,
   callAnthropic,
   callAnthropicMultiTurn,
+  callGemini,
   computeThreadId,
   getApiKey,
+  getGeminiApiKey,
   listThreads,
   loadThread,
   saveThread
