@@ -1,6 +1,7 @@
 // diamondcoreprocessor.com/editor/tile-editor.drone.ts
 import { EffectBus } from '@hypercomb/core'
 import { TILE_PROPERTIES_FILE } from './tile-properties.js'
+import type { Slot, SlotContent, FileSlot, EmbedContent } from './slot.types.js'
 import type { TileEditorService } from './tile-editor.service.js'
 import type { ImageEditorService } from './image-editor.service.js'
 
@@ -66,8 +67,24 @@ export class TileEditorDrone {
       largeBlob = await store.getResource(largeSig)
     }
 
-    // 3. open editor service
-    service.open(cell, properties, largeBlob)
+    // 3. load slot content from __resources__
+    const rawSlots = Array.isArray((properties as any).slots) ? (properties as any).slots as Slot[] : []
+    const slotContents = new Map<string, SlotContent>()
+    for (const slot of rawSlots) {
+      const blob = await store.getResource(slot.contentSig)
+      if (slot.type === 'text') {
+        slotContents.set(slot.contentSig, blob ? await blob.text() : '')
+      } else if (slot.type === 'checklist' || slot.type === 'data') {
+        if (blob) { try { slotContents.set(slot.contentSig, JSON.parse(await blob.text())) } catch { /* skip corrupt */ } }
+      } else if (slot.type === 'embed') {
+        if (blob) { try { slotContents.set(slot.contentSig, JSON.parse(await blob.text()) as EmbedContent) } catch { /* skip */ } }
+      } else if (slot.type === 'file') {
+        slotContents.set(slot.contentSig, blob)
+      }
+    }
+
+    // 4. open editor service
+    service.open(cell, properties, largeBlob, rawSlots, slotContents)
   }
 
   // ── save (called by Angular component) ─────────────────────────
@@ -153,6 +170,43 @@ export class TileEditorDrone {
 
     // 3. preserve link + border.color from service
     // (already in props via service.properties — setLink/setBorderColor mutate in-place)
+
+    // 3b. serialize slot content to signatures
+    const savedSlots: Slot[] = []
+    for (let si = 0; si < service.slots.length; si++) {
+      const slot = service.slots[si]
+      const content = service.slotContents.get(slot.contentSig)
+      if (content === undefined) continue
+
+      if (slot.type === 'text') {
+        if (typeof content !== 'string' || !content.trim()) continue
+        const sig = await store.putResource(new Blob([content], { type: 'text/plain' }))
+        savedSlots.push({ type: 'text', contentSig: sig })
+      } else if (slot.type === 'checklist') {
+        if (!Array.isArray(content) || content.length === 0) continue
+        const sig = await store.putResource(new Blob([JSON.stringify(content)], { type: 'application/json' }))
+        savedSlots.push({ type: 'checklist', contentSig: sig })
+      } else if (slot.type === 'embed') {
+        const embed = content as EmbedContent | null
+        if (!embed || !embed.url) continue
+        const sig = await store.putResource(new Blob([JSON.stringify(embed)], { type: 'application/json' }))
+        savedSlots.push({ type: 'embed', contentSig: sig })
+      } else if (slot.type === 'file') {
+        if (!(content instanceof Blob)) continue
+        const fileSlot = slot as FileSlot
+        const sig = await store.putResource(content)
+        savedSlots.push({ type: 'file', contentSig: sig, name: fileSlot.name, mime: fileSlot.mime, size: fileSlot.size })
+      } else if (slot.type === 'data') {
+        if (!Array.isArray(content) || content.length === 0) continue
+        const sig = await store.putResource(new Blob([JSON.stringify(content)], { type: 'application/json' }))
+        savedSlots.push({ type: 'data', contentSig: sig })
+      }
+    }
+    if (savedSlots.length > 0) {
+      (props as any).slots = savedSlots
+    } else {
+      delete (props as any).slots
+    }
 
     // 4. write tile properties as content-addressed resource
     const json = JSON.stringify(props, null, 2)

@@ -14,6 +14,7 @@ import { FormsModule } from '@angular/forms'
 import { EffectBus } from '@hypercomb/core'
 import { fromRuntime } from '../../core/from-runtime'
 import { TranslatePipe } from '../../core/i18n.pipe'
+import { SlotEditorComponent } from './slot-editor.component'
 
 import type { TileEditorService } from
   '@hypercomb/essentials/diamondcoreprocessor.com/editor/tile-editor.service'
@@ -25,7 +26,7 @@ import type { LinkSafetyService } from
 @Component({
   selector: 'hc-tile-editor',
   standalone: true,
-  imports: [FormsModule, TranslatePipe],
+  imports: [FormsModule, TranslatePipe, SlotEditorComponent],
   templateUrl: './tile-editor.component.html',
   styleUrls: ['./tile-editor.component.scss'],
 })
@@ -127,6 +128,7 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
     // allow Enter inside text inputs for normal behavior — only save on bare Enter
     const tag = (e.target as HTMLElement)?.tagName
     if (tag === 'TEXTAREA') return
+    if ((e.target as HTMLElement)?.closest('hc-slot-editor')) return
     e.preventDefault()
     this.save()
   }

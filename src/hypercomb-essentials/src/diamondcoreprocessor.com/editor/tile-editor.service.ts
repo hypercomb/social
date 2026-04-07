@@ -1,5 +1,6 @@
 // diamondcoreprocessor.com/editor/tile-editor.service.ts
 import { EffectBus } from '@hypercomb/core'
+import type { Slot, SlotContent, SlotType, FileSlot } from './slot.types.js'
 
 export type EditorModePayload = { active: boolean }
 
@@ -9,6 +10,8 @@ export class TileEditorService extends EventTarget {
   #cell = ''
   #properties: Record<string, unknown> = {}
   #largeBlob: Blob | null = null
+  #slots: Slot[] = []
+  #slotContents = new Map<string, SlotContent>()
 
   // ── getters ────────────────────────────────────────────────────
 
@@ -18,6 +21,9 @@ export class TileEditorService extends EventTarget {
   get largeBlob(): Blob | null { return this.#largeBlob }
 
   // ── specific property accessors (object notation) ──────────────
+
+  get slots(): Slot[] { return this.#slots }
+  get slotContents(): Map<string, SlotContent> { return this.#slotContents }
 
   get link(): string {
     return String((this.#properties as any).link ?? '')
@@ -36,11 +42,15 @@ export class TileEditorService extends EventTarget {
   readonly open = (
     cell: string,
     properties: Record<string, unknown>,
-    largeBlob: Blob | null
+    largeBlob: Blob | null,
+    slots?: Slot[],
+    slotContents?: Map<string, SlotContent>,
   ): void => {
     this.#cell = cell
     this.#properties = { ...properties }
     this.#largeBlob = largeBlob
+    this.#slots = slots ? [...slots] : []
+    this.#slotContents = slotContents ? new Map(slotContents) : new Map()
     this.#mode = 'editing'
     this.#emit()
     EffectBus.emit<EditorModePayload>('editor:mode', { active: true })
@@ -51,6 +61,8 @@ export class TileEditorService extends EventTarget {
     this.#cell = ''
     this.#properties = {}
     this.#largeBlob = null
+    this.#slots = []
+    this.#slotContents = new Map()
     this.#emit()
     EffectBus.emit<EditorModePayload>('editor:mode', { active: false })
   }
@@ -95,6 +107,67 @@ export class TileEditorService extends EventTarget {
         }
       }
     }
+    this.#emit()
+  }
+
+  // ── slot mutations ──────────────────────────────────────────
+
+  readonly addSlot = (type: SlotType): void => {
+    const tempId = crypto.randomUUID()
+    switch (type) {
+      case 'text':
+        this.#slots.push({ type: 'text', contentSig: tempId })
+        this.#slotContents.set(tempId, '')
+        break
+      case 'checklist':
+        this.#slots.push({ type: 'checklist', contentSig: tempId })
+        this.#slotContents.set(tempId, [])
+        break
+      case 'embed':
+        this.#slots.push({ type: 'embed', contentSig: tempId })
+        this.#slotContents.set(tempId, { url: '' })
+        break
+      case 'file':
+        this.#slots.push({ type: 'file', contentSig: tempId, name: '', mime: '', size: 0 })
+        this.#slotContents.set(tempId, null)
+        break
+      case 'data':
+        this.#slots.push({ type: 'data', contentSig: tempId })
+        this.#slotContents.set(tempId, [])
+        break
+    }
+    this.#emit()
+  }
+
+  readonly removeSlot = (index: number): void => {
+    const slot = this.#slots[index]
+    if (!slot) return
+    this.#slotContents.delete(slot.contentSig)
+    this.#slots.splice(index, 1)
+    this.#emit()
+  }
+
+  readonly setSlotContent = (contentSig: string, content: SlotContent): void => {
+    this.#slotContents.set(contentSig, content)
+    this.#emit()
+  }
+
+  readonly moveSlot = (from: number, to: number): void => {
+    if (from === to) return
+    if (from < 0 || from >= this.#slots.length) return
+    if (to < 0 || to >= this.#slots.length) return
+    const [slot] = this.#slots.splice(from, 1)
+    this.#slots.splice(to, 0, slot)
+    this.#emit()
+  }
+
+  readonly updateFileSlotMeta = (index: number, name: string, mime: string, size: number): void => {
+    const slot = this.#slots[index]
+    if (!slot || slot.type !== 'file') return
+    const fileSlot = slot as FileSlot
+    fileSlot.name = name
+    fileSlot.mime = mime
+    fileSlot.size = size
     this.#emit()
   }
 

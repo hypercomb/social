@@ -13,7 +13,7 @@ import type { ViewportPersistence, ViewportSnapshot } from '../../navigation/zoo
 
 type Axial = { q: number; r: number }
 /** divergence: 0 = current, 1 = future-add (ghost), 2 = future-remove (marked) */
-type Cell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; hasLink?: boolean; hasSubstrate?: boolean; borderColor?: [number, number, number]; divergence?: number }
+type Cell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; hasLink?: boolean; hasSubstrate?: boolean; hasSlots?: boolean; borderColor?: [number, number, number]; divergence?: number }
 
 /** Deterministic label → RGB via DJB2 hash → HSL → RGB. Returns [r, g, b] in 0–1 range. */
 function labelToRgb(label: string): [number, number, number] {
@@ -97,6 +97,8 @@ export class ShowCellDrone extends Drone {
   private readonly cellLinkCache = new Map<string, boolean>()
   // cache: cell label → is substrate-assigned image
   private readonly cellSubstrateCache = new Map<string, boolean>()
+  // cache: cell label → has content slots
+  private readonly cellSlotsCache = new Map<string, boolean>()
 
   private lastKey = ''
 
@@ -767,6 +769,7 @@ export class ShowCellDrone extends Drone {
         this.cellTagsCache.clear()
         this.cellLinkCache.clear()
         this.cellSubstrateCache.clear()
+        this.cellSlotsCache.clear()
         this.atlasRenderer = this.pixiRenderer
         this.shader = null
       }
@@ -1347,6 +1350,7 @@ export class ShowCellDrone extends Drone {
       noImageLabels: cells.filter(cell => !cell.imageSig).map(cell => cell.label),
       substrateLabels: cells.filter(cell => cell.hasSubstrate).map(cell => cell.label),
       linkLabels: cells.filter(cell => cell.hasLink).map(cell => cell.label),
+      slotsLabels: cells.filter(cell => cell.hasSlots).map(cell => cell.label),
       hiddenLabels: this.#showHiddenItems ? [...this.#currentHiddenSet] : [],
     })
     this.#emitRenderTags(cells)
@@ -1428,6 +1432,7 @@ export class ShowCellDrone extends Drone {
         this.cellBorderColorCache.delete(payload.cell)
         this.cellTagsCache.delete(payload.cell)
         this.cellLinkCache.delete(payload.cell)
+        this.cellSlotsCache.delete(payload.cell)
         if (oldSig && this.imageAtlas) {
           this.imageAtlas.invalidate(oldSig)
         }
@@ -1466,6 +1471,7 @@ export class ShowCellDrone extends Drone {
         this.cellImageCache.delete(payload.cell)
         this.cellTagsCache.delete(payload.cell)
         this.cellLinkCache.delete(payload.cell)
+        this.cellSlotsCache.delete(payload.cell)
         this.cellBorderColorCache.delete(payload.cell)
       }
     })
@@ -2171,6 +2177,7 @@ export class ShowCellDrone extends Drone {
         cell.borderColor = this.cellBorderColorCache.get(cell.label)
         cell.hasLink = this.cellLinkCache.get(cell.label) ?? false
         cell.hasSubstrate = this.cellSubstrateCache.get(cell.label) ?? false
+        cell.hasSlots = this.cellSlotsCache.get(cell.label) ?? false
         continue
       }
 
@@ -2210,6 +2217,10 @@ export class ShowCellDrone extends Drone {
         const isSubstrate = props?.substrate === true
         this.cellSubstrateCache.set(cell.label, isSubstrate)
         cell.hasSubstrate = isSubstrate
+
+        const hasSlots = Array.isArray(props?.slots) && props.slots.length > 0
+        this.cellSlotsCache.set(cell.label, hasSlots)
+        cell.hasSlots = hasSlots
 
         const smallSig = (this.#flat && props?.flat?.small?.image) || props?.small?.image
         if (smallSig && isSignature(smallSig)) {

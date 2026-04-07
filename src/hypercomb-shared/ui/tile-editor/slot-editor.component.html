@@ -1,0 +1,184 @@
+@if (slots$().length > 0) {
+  <div class="slots-section">
+    @for (slot of slots$(); track slot.contentSig; let i = $index) {
+      <div
+        class="slot-card"
+        [class.collapsed]="isCollapsed(slot)"
+        [class.dragging]="dragIndex === i"
+        [class.drag-over]="dragOverIndex === i"
+        (pointerenter)="onDragOverSlot(i)"
+      >
+        <div class="slot-header">
+          <span
+            class="slot-drag-handle"
+            (pointerdown)="onDragStart(i, $event)"
+            (pointerup)="onDragEnd()"
+            (pointercancel)="onDragCancel()"
+          >
+            <span class="hci">g</span>
+          </span>
+          <button type="button" class="slot-collapse-btn" (click)="toggleCollapse(slot)">
+            <span class="collapse-chevron" [class.collapsed]="isCollapsed(slot)"></span>
+          </button>
+          <span class="slot-type-badge">{{ slotTypeKey(slot) | t }}</span>
+          <button type="button" class="slot-remove" (click)="removeSlot(i)">
+            <span class="hci">Q</span>
+          </button>
+        </div>
+
+        @if (!isCollapsed(slot)) {
+          @if (slot.type === 'text') {
+            <textarea
+              class="slot-textarea"
+              [ngModel]="getTextContent(slot)"
+              (ngModelChange)="setTextContent(slot, $event)"
+              [placeholder]="'slots.text-placeholder' | t"
+              rows="3"
+            ></textarea>
+          }
+
+          @if (slot.type === 'checklist') {
+            <div class="checklist-items">
+              @for (item of getChecklistItems(slot); track $index; let j = $index) {
+                <div class="checklist-item">
+                  <button
+                    type="button"
+                    class="checklist-check"
+                    [class.checked]="item.done"
+                    (click)="toggleChecklistItem(slot, j)"
+                  ></button>
+                  <input
+                    class="checklist-input"
+                    [class.done]="item.done"
+                    type="text"
+                    [ngModel]="item.text"
+                    (ngModelChange)="setChecklistItemText(slot, j, $event)"
+                    (keydown)="onChecklistKeydown($event, slot, j)"
+                    [placeholder]="'slots.item-placeholder' | t"
+                  />
+                  <button type="button" class="checklist-remove" (click)="removeChecklistItem(slot, j)">
+                    <span class="hci">Q</span>
+                  </button>
+                </div>
+              }
+              <button type="button" class="checklist-add" (click)="addChecklistItem(slot)">
+                + {{ 'slots.add-item' | t }}
+              </button>
+            </div>
+          }
+
+          @if (slot.type === 'embed') {
+            <div class="embed-body">
+              <input
+                class="embed-url-input"
+                type="url"
+                [ngModel]="getEmbedContent(slot).url"
+                (ngModelChange)="setEmbedUrl(slot, $event)"
+                [placeholder]="'slots.embed-url-placeholder' | t"
+              />
+              @if (getYouTubeId(getEmbedContent(slot).url); as ytId) {
+                <a class="embed-preview youtube-preview" [href]="getEmbedContent(slot).url" target="_blank" rel="noopener">
+                  <img [src]="getYouTubeThumbnail(getEmbedContent(slot).url)" alt="" loading="lazy" />
+                  <div class="play-overlay">
+                    <svg viewBox="0 0 24 24" width="32" height="32"><polygon points="8,5 19,12 8,19" fill="white"/></svg>
+                  </div>
+                </a>
+              } @else if (getEmbedContent(slot).url) {
+                <a class="embed-link" [href]="getEmbedContent(slot).url" target="_blank" rel="noopener">
+                  <span class="hci">*</span> {{ getEmbedContent(slot).url }}
+                </a>
+              }
+            </div>
+          }
+
+          @if (slot.type === 'file') {
+            <div class="file-body">
+              @if (getFileName(slot)) {
+                <div class="file-info" (click)="downloadFile(slot)">
+                  <span class="hci file-icon">{{ getFileMimeIcon(slot) }}</span>
+                  <span class="file-name">{{ getFileName(slot) }}</span>
+                  <span class="file-size">{{ getFileSize(slot) }}</span>
+                </div>
+              } @else {
+                <div
+                  class="file-dropzone"
+                  (dragover)="$event.preventDefault()"
+                  (drop)="onFileDrop(slot, $event, i)"
+                >
+                  <span class="hci dropzone-icon">U</span>
+                  <span class="dropzone-text">{{ 'slots.file-drop' | t }}</span>
+                  <button type="button" class="dropzone-browse" (click)="fileSlotInput.click()">{{ 'slots.file-browse' | t }}</button>
+                  <input #fileSlotInput type="file" hidden (change)="onFilePick(slot, $event, i)" />
+                </div>
+              }
+            </div>
+          }
+
+          @if (slot.type === 'data') {
+            <div class="data-body">
+              @for (entry of getDataEntries(slot); track $index; let j = $index) {
+                <div class="data-row">
+                  <input
+                    class="data-key"
+                    type="text"
+                    [ngModel]="entry.key"
+                    (ngModelChange)="setDataKey(slot, j, $event)"
+                    [placeholder]="'slots.data-key' | t"
+                  />
+                  <input
+                    class="data-value"
+                    type="text"
+                    [ngModel]="entry.value"
+                    (ngModelChange)="setDataValue(slot, j, $event)"
+                    [placeholder]="'slots.data-value' | t"
+                  />
+                  <button type="button" class="data-remove" (click)="removeDataRow(slot, j)">
+                    <span class="hci">Q</span>
+                  </button>
+                </div>
+              }
+              <button type="button" class="data-add" (click)="addDataRow(slot)">
+                + {{ 'slots.data-add-row' | t }}
+              </button>
+            </div>
+          }
+        }
+      </div>
+    }
+  </div>
+}
+
+<div class="slot-add-bar">
+  @if (showAddMenu) {
+    <div class="slot-add-menu">
+      <button type="button" class="slot-add-option" (click)="addSlot('text')">
+        <span class="hci slot-add-icon">e</span>
+        <span class="slot-add-label">{{ 'slots.add-text' | t }}</span>
+        <span class="slot-add-desc">{{ 'slots.add-text-desc' | t }}</span>
+      </button>
+      <button type="button" class="slot-add-option" (click)="addSlot('checklist')">
+        <span class="hci slot-add-icon">f</span>
+        <span class="slot-add-label">{{ 'slots.add-checklist' | t }}</span>
+        <span class="slot-add-desc">{{ 'slots.add-checklist-desc' | t }}</span>
+      </button>
+      <button type="button" class="slot-add-option" (click)="addSlot('embed')">
+        <span class="hci slot-add-icon">*</span>
+        <span class="slot-add-label">{{ 'slots.add-embed' | t }}</span>
+        <span class="slot-add-desc">{{ 'slots.add-embed-desc' | t }}</span>
+      </button>
+      <button type="button" class="slot-add-option" (click)="addSlot('file')">
+        <span class="hci slot-add-icon">b</span>
+        <span class="slot-add-label">{{ 'slots.add-file' | t }}</span>
+        <span class="slot-add-desc">{{ 'slots.add-file-desc' | t }}</span>
+      </button>
+      <button type="button" class="slot-add-option" (click)="addSlot('data')">
+        <span class="hci slot-add-icon">$</span>
+        <span class="slot-add-label">{{ 'slots.add-data' | t }}</span>
+        <span class="slot-add-desc">{{ 'slots.add-data-desc' | t }}</span>
+      </button>
+    </div>
+  }
+  <button type="button" class="slot-add-trigger" (click)="toggleAddMenu()">
+    + {{ 'slots.add-slot' | t }}
+  </button>
+</div>
