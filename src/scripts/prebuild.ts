@@ -3,8 +3,8 @@
 // Usage: tsx scripts/prebuild.ts --target web|dev
 
 import { createHash } from 'crypto'
-import { existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
-import { dirname, join, resolve } from 'path'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
+import { basename, dirname, extname, join, relative, resolve } from 'path'
 import { spawn, spawnSync } from 'child_process'
 import { createConnection } from 'net'
 import { fileURLToPath } from 'url'
@@ -259,6 +259,61 @@ function generateSubstrateManifests(): void {
   }
 }
 
+interface TrackManifestEntry {
+  file: string
+  title: string
+  src: string
+}
+
+function formatTrackTitle(filePath: string): string {
+  return basename(filePath, extname(filePath))
+    .replace(/[-_]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, char => char.toUpperCase())
+}
+
+function generateTrackManifest(): void {
+  const audioExts = new Set(['.mp3', '.m4a', '.wav', '.ogg', '.flac', '.aac'])
+  const publicDir = join(ROOT, 'hypercomb-web', 'public')
+  const tracksDir = join(publicDir, 'tracks')
+
+  mkdirSync(tracksDir, { recursive: true })
+
+  const rootTracks = readdirSync(publicDir)
+    .filter(name => {
+      const full = join(publicDir, name)
+      if (!statSync(full).isFile()) return false
+      return audioExts.has(extname(name).toLowerCase())
+    })
+    .map(name => ({
+      file: name,
+      title: formatTrackTitle(name),
+      src: `/${name}`,
+    }))
+
+  const nestedTracks = walkFiles(tracksDir, Array.from(audioExts))
+    .map(fullPath => {
+      const relativePath = relative(tracksDir, fullPath).replace(/\\/g, '/')
+      return {
+        file: relativePath,
+        title: formatTrackTitle(relativePath),
+        src: `/tracks/${relativePath}`,
+      }
+    })
+
+  const tracks = [...rootTracks, ...nestedTracks]
+    .sort((left, right) => left.title.localeCompare(right.title))
+
+  writeFileSync(
+    join(tracksDir, 'manifest.json'),
+    JSON.stringify({ tracks }, null, 2),
+    'utf8',
+  )
+
+  console.log(`${TAG} wrote hypercomb-web/public/tracks/manifest.json (${tracks.length} tracks)`)
+}
+
 // --- main ---
 
 async function main() {
@@ -269,6 +324,9 @@ async function main() {
 
   // Scan public/substrate/ and write manifest.json in each app
   generateSubstrateManifests()
+
+  // Scan public audio assets and write a manifest for the front-page music player
+  generateTrackManifest()
 
   const state = loadState()
   let coreDirty = false

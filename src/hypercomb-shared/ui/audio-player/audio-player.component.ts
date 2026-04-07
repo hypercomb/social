@@ -12,8 +12,10 @@ import {
   EventEmitter,
   HostListener,
   Input,
+  OnChanges,
   OnDestroy,
   Output,
+  SimpleChanges,
   ViewChild,
   computed,
   signal,
@@ -51,8 +53,10 @@ export class AudioPlayerComponent implements AfterViewInit, OnDestroy {
   })
 
   #gestureHandler: (() => void) | null = null
+  #viewReady = false
 
   ngAfterViewInit(): void {
+    this.#viewReady = true
     const audio = this.audioRef.nativeElement
     audio.addEventListener('loadedmetadata', this.#onMetadata)
     audio.addEventListener('durationchange', this.#onMetadata)
@@ -63,6 +67,18 @@ export class AudioPlayerComponent implements AfterViewInit, OnDestroy {
     audio.addEventListener('timeupdate', this.#onTimeUpdate)
 
     if (this.autoplay) void this.#attemptPlayWithGestureFallback()
+  }
+
+  ngOnChanges(changes: SimpleChanges): void {
+    if (!this.#viewReady || !changes['src']) return
+
+    const audio = this.audioRef.nativeElement
+    audio.pause()
+    audio.load()
+    this.playing.set(false)
+    this.currentTime.set(0)
+    this.duration.set(0)
+    this.buffered.set(0)
   }
 
   ngOnDestroy(): void {
