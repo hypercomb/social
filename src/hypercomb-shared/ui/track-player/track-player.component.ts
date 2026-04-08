@@ -1,6 +1,5 @@
 import { DOCUMENT } from '@angular/common'
-import { Component, EventEmitter, OnDestroy, OnInit, Output, computed, inject, signal } from '@angular/core'
-import type { I18nProvider } from '@hypercomb/core'
+import { Component, EventEmitter, OnDestroy, OnInit, Output, inject, signal } from '@angular/core'
 import { AudioPlayerComponent } from '../audio-player/audio-player.component'
 import { TranslatePipe } from '../../core/i18n.pipe'
 
@@ -23,6 +22,14 @@ interface TrackSequenceState {
 const TRACK_SEQUENCE_STORAGE_KEY = 'hc:track-player:sequence'
 const NO_SIGNAL_DURATION_MS = 2500
 
+interface TrackSequenceState {
+  episodeOneCompleted: boolean
+  prequelCompleted: boolean
+}
+
+const TRACK_SEQUENCE_STORAGE_KEY = 'hc:track-player:sequence'
+const NO_SIGNAL_DURATION_MS = 2500
+
 @Component({
   selector: 'hc-track-player',
   standalone: true,
@@ -30,6 +37,7 @@ const NO_SIGNAL_DURATION_MS = 2500
   templateUrl: './track-player.component.html',
   styleUrl: './track-player.component.scss',
 })
+export class TrackPlayerComponent implements OnInit, OnDestroy {
 export class TrackPlayerComponent implements OnInit, OnDestroy {
   @Output() closed = new EventEmitter<void>()
 
@@ -39,12 +47,13 @@ export class TrackPlayerComponent implements OnInit, OnDestroy {
   readonly trackLoadError = signal('')
   readonly autoplaySelectedTrack = signal(false)
   readonly showNoSignal = signal(false)
-  readonly hasLimitedTracks = computed(() => this.tracks().some(t => t.limited))
 
   #document = inject(DOCUMENT)
   #noSignalTimer?: ReturnType<typeof setTimeout>
+  #noSignalTimer?: ReturnType<typeof setTimeout>
 
   dismiss(): void {
+    this.#cancelNoSignalTimer()
     this.#cancelNoSignalTimer()
     this.closed.emit()
   }
@@ -57,7 +66,13 @@ export class TrackPlayerComponent implements OnInit, OnDestroy {
     this.#cancelNoSignalTimer()
   }
 
+  ngOnDestroy(): void {
+    this.#cancelNoSignalTimer()
+  }
+
   selectTrack(track: TrackEntry): void {
+    this.#cancelNoSignalTimer()
+    this.showNoSignal.set(false)
     this.#cancelNoSignalTimer()
     this.showNoSignal.set(false)
     this.selectedTrack.set(track)
@@ -68,7 +83,7 @@ export class TrackPlayerComponent implements OnInit, OnDestroy {
     const currentTrack = this.selectedTrack()
     const tracks = this.tracks()
     const episodeOne = tracks[0] ?? null
-    const prequel = tracks.at(-1) ?? null
+    const prequel = tracks[1] ?? null
 
     if (!currentTrack) return
 
@@ -98,7 +113,7 @@ export class TrackPlayerComponent implements OnInit, OnDestroy {
   }
 
   skipNoSignal(): void {
-    const prequel = this.tracks().at(-1) ?? null
+    const prequel = this.tracks()[1] ?? null
     if (!prequel) return
     this.#beginTrackPlayback(prequel)
   }
@@ -121,6 +136,7 @@ export class TrackPlayerComponent implements OnInit, OnDestroy {
 
       this.tracks.set(tracks)
       this.#restoreSequence(tracks)
+      this.#restoreSequence(tracks)
     } catch (error) {
       console.error('[track-player] failed to load tracks', error)
       const i18n = window.ioc?.get<I18nProvider>('@hypercomb.social/I18n')
@@ -132,7 +148,7 @@ export class TrackPlayerComponent implements OnInit, OnDestroy {
 
   #restoreSequence(tracks: TrackEntry[]): void {
     const episodeOne = tracks[0] ?? null
-    const prequel = tracks.at(-1) ?? null
+    const prequel = tracks[1] ?? null
     const state = this.#readSequenceState()
 
     if (!episodeOne) {
