@@ -26,6 +26,11 @@
                 "input": "public"
               },
               {
+                "glob": "**/*",
+                "input": "../hypercomb-shared/tracks",
+                "output": "/tracks"
+              },
+              {
                 "glob": "**/*.md",
                 "input": "../documentation",
                 "output": "/documentation"

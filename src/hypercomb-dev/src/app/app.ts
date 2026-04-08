@@ -1,4 +1,4 @@
-import { AfterViewInit, Component, HostBinding, ViewChild, signal } from '@angular/core';
+import { AfterViewInit, Component, HostBinding, signal } from '@angular/core';
 import { type Bee, EffectBus } from '@hypercomb/core';
 import type { HexOrientation } from '@hypercomb/essentials/diamondcoreprocessor.com/preferences/settings';
 import { RouterOutlet } from '@angular/router';
@@ -31,7 +31,7 @@ import '@hypercomb/essentials/diamondcoreprocessor.com/selection/tile-selection.
 import '@hypercomb/essentials/diamondcoreprocessor.com/keyboard/escape-cascade'
 import '@hypercomb/essentials/diamondcoreprocessor.com/navigation/bee-toggle'
 import { TileEditorComponent } from '@hypercomb/shared/ui/tile-editor/tile-editor.component'
-import { AudioPlayerComponent } from '@hypercomb/shared/ui/audio-player/audio-player.component'
+import { TrackPlayerComponent } from '@hypercomb/shared/ui/track-player/track-player.component'
 import { ControlsBarComponent, ShortcutSheetComponent, CommandPaletteComponent, ActivityLogComponent, SelectionContextMenuComponent, AtomizerBarComponent, AtomizerSidebarComponent, ConfirmDialogComponent, ToastComponent, InstructionOverlayComponent, DocsOverlayComponent } from '@hypercomb/shared/ui';
 import { FormatPainterComponent } from '@hypercomb/shared/ui/format-painter/format-painter.component'
 import { PortalOverlayComponent } from '@hypercomb/shared/ui/portal/portal-overlay.component'
@@ -159,7 +159,7 @@ void _deps
 
 @Component({
   selector: 'app-root',
-  imports: [ControlsBarComponent, MeshHeaderComponent, RouterOutlet, CommandLineComponent, TileEditorComponent, ShortcutSheetComponent, CommandPaletteComponent, PortalOverlayComponent, ActivityLogComponent, SensitivityBarComponent, SelectionContextMenuComponent, FormatPainterComponent, YoutubeViewerComponent, AtomizerBarComponent, AtomizerSidebarComponent, ConfirmDialogComponent, ToastComponent, InstructionOverlayComponent, DocsOverlayComponent, AudioPlayerComponent],
+  imports: [ControlsBarComponent, MeshHeaderComponent, RouterOutlet, CommandLineComponent, TileEditorComponent, ShortcutSheetComponent, CommandPaletteComponent, PortalOverlayComponent, ActivityLogComponent, SensitivityBarComponent, SelectionContextMenuComponent, FormatPainterComponent, YoutubeViewerComponent, AtomizerBarComponent, AtomizerSidebarComponent, ConfirmDialogComponent, ToastComponent, InstructionOverlayComponent, DocsOverlayComponent, TrackPlayerComponent],
   styleUrls: ['./app.scss'] as any,
   templateUrl: './app.html'
 })
@@ -167,21 +167,17 @@ export class App implements AfterViewInit {
   protected readonly title = signal('hypercomb-dev');
   readonly clipboardMode = signal(false);
   readonly moveMode = signal(false);
-  readonly introPlaying = signal(localStorage.getItem('hc:intro-played') !== 'true');
-  readonly introPhase = signal<'speech' | 'interlude' | 'outro'>('speech');
+  readonly playerOpen = signal(true);
 
-  @ViewChild('speechAudio') speechAudioRef?: AudioPlayerComponent;
-  @ViewChild('outroAudio') outroAudioRef?: AudioPlayerComponent;
-  #interludeTimer?: ReturnType<typeof setTimeout>;
+  dismissPlayer(): void {
+    this.playerOpen.set(false);
+  }
 
   @HostBinding('class.clipboard-mode')
   get clipboardModeClass() { return this.clipboardMode(); }
 
   @HostBinding('class.move-mode')
   get moveModeClass() { return this.moveMode(); }
-
-  @HostBinding('class.intro-active')
-  get introActiveClass() { return this.introPlaying(); }
 
   public readonly meshPublic = signal(
     localStorage.getItem('hc:mesh-public') === 'true' ? true
@@ -225,52 +221,6 @@ export class App implements AfterViewInit {
   }
 
   ngAfterViewInit(): void {
-    // autoplay + gesture fallback is handled inside AudioPlayerComponent
-  }
-
-  onSpeechEnded(): void {
-    this.enterInterlude();
-  }
-
-  skipSpeech(): void {
-    this.speechAudioRef?.reset();
-    this.enterInterlude();
-  }
-
-  skipInterlude(): void {
-    this.enterOutro();
-  }
-
-  onOutroEnded(): void {
-    this.dismissIntro();
-  }
-
-  skipOutro(): void {
-    this.outroAudioRef?.reset();
-    this.dismissIntro();
-  }
-
-  startIntroAudio(): void {
-    if (this.introPhase() === 'speech') void this.speechAudioRef?.play();
-    else if (this.introPhase() === 'outro') void this.outroAudioRef?.play();
-  }
-
-  private enterInterlude(): void {
-    this.introPhase.set('interlude');
-    this.#interludeTimer = setTimeout(() => this.enterOutro(), 2500);
-  }
-
-  private enterOutro(): void {
-    if (this.#interludeTimer) {
-      clearTimeout(this.#interludeTimer);
-      this.#interludeTimer = undefined;
-    }
-    this.introPhase.set('outro');
-  }
-
-  private dismissIntro(): void {
-    localStorage.setItem('hc:intro-played', 'true');
-    this.introPlaying.set(false);
   }
 
   public toggleOrientation = (): void => {

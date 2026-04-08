@@ -1,0 +1,20 @@
+{
+  "tracks": [
+    {
+      "file": "01-episode-1.m4a",
+      "title": "Episode 1",
+      "src": "/tracks/01-episode-1.m4a"
+    },
+    {
+      "file": "02-prequel.m4a",
+      "title": "Prequel",
+      "src": "/tracks/02-prequel.m4a"
+    },
+    {
+      "file": "06-ideas-on-the-frontline.mp3",
+      "title": "Ideas On The Frontline",
+      "src": "/tracks/06-ideas-on-the-frontline.mp3",
+      "limited": true
+    }
+  ]
+}

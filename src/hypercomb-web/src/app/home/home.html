@@ -1,55 +1,7 @@
-<!-- <hc-history></hc-history> -->
 @if(ready()){
     <div id="pixi-host" style="z-index: 0; position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></div>
-    <!-- <div style="z-index: 100;"><hc-opfs-explorer></hc-opfs-explorer></div> -->
 }
 
-<section class="home-player">
-    <div class="home-player__backdrop"></div>
-
-    <div class="home-player__panel">
-        <div class="home-player__eyebrow">hypercomb audio</div>
-        <h1 class="home-player__title">Pick a track when you want it.</h1>
-        <p class="home-player__copy">
-            Nothing starts on its own. Drop a new audio file into the tracks folder and it will show up here on the next build or when you restart the dev server.
-        </p>
-
-        @if (loadingTracks()) {
-            <div class="home-player__status">Loading tracks…</div>
-        } @else if (trackLoadError()) {
-            <div class="home-player__status home-player__status--error">{{ trackLoadError() }}</div>
-        } @else if (!tracks().length) {
-            <div class="home-player__status">No tracks found yet. Add files to <span>hypercomb-web/public/tracks</span>.</div>
-        } @else {
-            <div class="home-player__current">
-                <div>
-                    <div class="home-player__label">Selected track</div>
-                    <div class="home-player__track-title">{{ selectedTrack()?.title }}</div>
-                    <div class="home-player__track-file">{{ selectedTrack()?.file }}</div>
-                </div>
-
-                @if (selectedTrack(); as track) {
-                    <hc-audio-player
-                        class="home-player__controls"
-                        [src]="track.src"
-                        [ariaLabel]="track.title + ' audio player'"
-                    ></hc-audio-player>
-                }
-            </div>
-
-            <div class="home-player__list" role="list" aria-label="Available tracks">
-                @for (track of tracks(); track track.file) {
-                    <button
-                        type="button"
-                        class="home-player__track"
-                        [class.is-active]="selectedTrack()?.file === track.file"
-                        (click)="selectTrack(track)"
-                    >
-                        <span class="home-player__track-name">{{ track.title }}</span>
-                        <span class="home-player__track-path">{{ track.file }}</span>
-                    </button>
-                }
-            </div>
-        }
-    </div>
-</section>
+@if (playerOpen()) {
+    <hc-track-player (closed)="dismissPlayer()"></hc-track-player>
+}
