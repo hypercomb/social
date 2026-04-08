@@ -73,12 +73,15 @@ export class AudioPlayerComponent implements AfterViewInit, OnDestroy {
     if (!this.#viewReady || !changes['src']) return
 
     const audio = this.audioRef.nativeElement
+    this.#removeGestureFallback()
     audio.pause()
     audio.load()
     this.playing.set(false)
     this.currentTime.set(0)
     this.duration.set(0)
     this.buffered.set(0)
+
+    if (this.autoplay && this.src) void this.#attemptPlayWithGestureFallback()
   }
 
   ngOnDestroy(): void {

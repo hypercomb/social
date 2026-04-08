@@ -1,6 +1,14 @@
 <section class="track-player">
     <div class="track-player__backdrop"></div>
 
+    @if (showNoSignal()) {
+        <div class="track-player__no-signal" aria-live="polite" aria-label="no signal interlude">
+            <div class="track-player__no-signal-noise"></div>
+            <span class="track-player__no-signal-label">no signal</span>
+            <button type="button" class="track-player__skip" (click)="skipNoSignal()">play prequel now</button>
+        </div>
+    }
+
     <div class="track-player__panel">
         <div class="track-player__header">
             <div class="track-player__eyebrow">hypercomb audio</div>
@@ -31,8 +39,9 @@
                     <hc-audio-player
                         class="track-player__controls"
                         [src]="track.src"
-                        [autoplay]="true"
+                        [autoplay]="autoplaySelectedTrack()"
                         [ariaLabel]="track.title + ' audio player'"
+                        (ended)="onTrackEnded()"
                     ></hc-audio-player>
                 }
             </div>
