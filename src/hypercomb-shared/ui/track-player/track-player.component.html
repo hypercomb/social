@@ -4,33 +4,39 @@
     @if (showNoSignal()) {
         <div class="track-player__no-signal" aria-live="polite" aria-label="no signal interlude">
             <div class="track-player__no-signal-noise"></div>
-            <span class="track-player__no-signal-label">no signal</span>
-            <button type="button" class="track-player__skip" (click)="skipNoSignal()">play prequel now</button>
+            <span class="track-player__no-signal-label">{{ 'trackplayer.no-signal' | t }}</span>
+            <button type="button" class="track-player__skip" (click)="skipNoSignal()">{{ 'trackplayer.play-prequel' | t }}</button>
         </div>
     }
 
     <div class="track-player__panel">
         <div class="track-player__header">
-            <div class="track-player__eyebrow">hypercomb audio</div>
+            <div class="track-player__eyebrow">{{ 'trackplayer.eyebrow' | t }}</div>
             <button type="button" class="track-player__close" (click)="dismiss()" aria-label="close player">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
             </button>
         </div>
-        <h1 class="track-player__title">Pick a track when you want it.</h1>
-        <p class="track-player__copy">
-            Nothing starts on its own. Drop a new audio file into the tracks folder and it will show up here on the next build or when you restart the dev server.
-        </p>
+        <h1 class="track-player__title">{{ 'trackplayer.title' | t }}</h1>
+        <p class="track-player__copy">{{ 'trackplayer.description' | t }}</p>
 
         @if (loadingTracks()) {
-            <div class="track-player__status">Loading tracks...</div>
+            <div class="track-player__status">{{ 'trackplayer.loading' | t }}</div>
         } @else if (trackLoadError()) {
             <div class="track-player__status track-player__status--error">{{ trackLoadError() }}</div>
         } @else if (!tracks().length) {
-            <div class="track-player__status">No tracks found yet. Add files to <span>hypercomb-shared/tracks</span>.</div>
+            <div class="track-player__status">{{ 'trackplayer.empty' | t }}</div>
         } @else {
             <div class="track-player__current">
+                <div class="track-player__label">
+                    <span>{{ 'trackplayer.selected' | t }}</span>
+                    @if (hasLimitedTracks()) {
+                        <span class="track-player__legend">
+                            <span class="track-player__legend-dot"></span>
+                            <span class="track-player__legend-text">{{ 'trackplayer.limited' | t }}</span>
+                        </span>
+                    }
+                </div>
                 <div>
-                    <div class="track-player__label">Selected track</div>
                     <div class="track-player__track-title">{{ selectedTrack()?.title }}</div>
                     <div class="track-player__track-file">{{ selectedTrack()?.file }}</div>
                 </div>
@@ -46,7 +52,7 @@
                 }
             </div>
 
-            <div class="track-player__list" role="list" aria-label="Available tracks">
+            <div class="track-player__list" role="list" [attr.aria-label]="'trackplayer.available' | t">
                 @for (track of tracks(); track track.file) {
                     <button
                         type="button"
@@ -55,14 +61,12 @@
                         [class.is-limited]="track.limited"
                         (click)="selectTrack(track)"
                     >
-                        <span class="track-player__track-name">{{ track.title }}</span>
+                        <span class="track-player__track-name">@if (track.limited) {<span class="track-player__track-dot"></span>}{{ track.title }}</span>
                         <span class="track-player__track-path">{{ track.file }}</span>
-                        @if (track.limited) {
-                            <span class="track-player__limited-badge">limited time only — available on inspiredbyhumans.org</span>
-                        }
                     </button>
                 }
             </div>
+
         }
     </div>
 </section>

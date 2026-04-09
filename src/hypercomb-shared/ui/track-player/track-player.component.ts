@@ -1,6 +1,8 @@
 import { DOCUMENT } from '@angular/common'
-import { Component, EventEmitter, OnDestroy, OnInit, Output, inject, signal } from '@angular/core'
+import { Component, EventEmitter, OnDestroy, OnInit, Output, computed, inject, signal } from '@angular/core'
+import type { I18nProvider } from '@hypercomb/core'
 import { AudioPlayerComponent } from '../audio-player/audio-player.component'
+import { TranslatePipe } from '../../core/i18n.pipe'
 
 interface TrackEntry {
   file: string
@@ -24,7 +26,7 @@ const NO_SIGNAL_DURATION_MS = 2500
 @Component({
   selector: 'hc-track-player',
   standalone: true,
-  imports: [AudioPlayerComponent],
+  imports: [AudioPlayerComponent, TranslatePipe],
   templateUrl: './track-player.component.html',
   styleUrl: './track-player.component.scss',
 })
@@ -37,6 +39,7 @@ export class TrackPlayerComponent implements OnInit, OnDestroy {
   readonly trackLoadError = signal('')
   readonly autoplaySelectedTrack = signal(false)
   readonly showNoSignal = signal(false)
+  readonly hasLimitedTracks = computed(() => this.tracks().some(t => t.limited))
 
   #document = inject(DOCUMENT)
   #noSignalTimer?: ReturnType<typeof setTimeout>
@@ -120,7 +123,8 @@ export class TrackPlayerComponent implements OnInit, OnDestroy {
       this.#restoreSequence(tracks)
     } catch (error) {
       console.error('[track-player] failed to load tracks', error)
-      this.trackLoadError.set('Tracks are unavailable right now.')
+      const i18n = window.ioc?.get<I18nProvider>('@hypercomb.social/I18n')
+      this.trackLoadError.set(i18n?.t('trackplayer.unavailable') ?? 'Tracks are unavailable right now.')
     } finally {
       this.loadingTracks.set(false)
     }

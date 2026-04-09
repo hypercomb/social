@@ -151,12 +151,13 @@
 
 	&__title {
 		margin: 0;
-		max-width: 16ch;
-		color: #f3f7ff;
+		width: 100%;
+		color: rgba(228, 237, 251, 0.7);
 		font-family: Georgia, 'Times New Roman', serif;
-		font-size: clamp(2.4rem, 7vw, 5.8rem);
-		line-height: 0.95;
-		font-weight: 600;
+		font-size: clamp(1.2rem, 3.5vw, 2.9rem);
+		line-height: 1.1;
+		font-weight: 400;
+		letter-spacing: 0.04em;
 	}
 
 	&__copy {
@@ -176,6 +177,10 @@
 	}
 
 	&__label {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		grid-column: 1 / -1;
 		color: rgba(193, 218, 255, 0.55);
 		font-size: 0.7rem;
 	}
@@ -257,24 +262,46 @@
 		}
 	}
 
-	&__limited-badge {
-		display: inline-block;
-		padding: 0.2rem 0.55rem;
-		border-radius: 999px;
-		background: rgba(255, 185, 80, 0.14);
-		border: 1px solid rgba(255, 185, 80, 0.3);
-		color: rgba(255, 210, 140, 0.9);
+	&__legend {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+	}
+
+	&__legend-dot {
+		width: 0.45rem;
+		height: 0.45rem;
+		border-radius: 50%;
+		background: rgba(255, 190, 100, 0.6);
+		border: 1px solid rgba(255, 185, 80, 0.4);
+		flex-shrink: 0;
+	}
+
+	&__legend-text {
+		color: rgba(255, 210, 140, 0.8);
 		font-family: var(--hc-font, system-ui, sans-serif);
-		font-size: 0.62rem;
+		font-size: inherit;
 		font-weight: 600;
-		letter-spacing: 0.1em;
+		letter-spacing: 0.08em;
 		text-transform: uppercase;
 	}
 
 	&__track-name {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
 		color: #f7fbff;
 		font-size: 1rem;
 		font-weight: 600;
+	}
+
+	&__track-dot {
+		width: 0.45rem;
+		height: 0.45rem;
+		border-radius: 50%;
+		background: rgba(255, 190, 100, 0.6);
+		border: 1px solid rgba(255, 185, 80, 0.4);
+		flex-shrink: 0;
 	}
 
 	&__track-path {
@@ -325,8 +352,12 @@
 		}
 
 		&__title {
-			max-width: 11ch;
-			font-size: clamp(2rem, 8vw, 3.5rem);
+			font-size: clamp(1rem, 4vw, 1.6rem);
+		}
+
+		&__label {
+			flex-wrap: wrap;
+			gap: 0.3rem;
 		}
 
 		&__list {

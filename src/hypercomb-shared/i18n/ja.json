@@ -175,6 +175,18 @@
   "instruction.dcp.layout-mode": "固定レイアウトと密集レイアウトの切替",
   "instruction.dcp.instructions-toggle": "すべてのコントロールのインストラクションラベルを表示・非表示",
 
+  "trackplayer.eyebrow": "ハイパーコム オーディオ",
+  "trackplayer.title": "Inspired by Humans - オーディオブック",
+  "trackplayer.description": "まもなく inspiredbyhumans.org で公開予定。",
+  "trackplayer.loading": "トラックを読み込み中...",
+  "trackplayer.empty": "トラックがまだありません。hypercomb-shared/tracksにファイルを追加してください。",
+  "trackplayer.selected": "選択中のトラック",
+  "trackplayer.available": "利用可能なトラック",
+  "trackplayer.limited": "期間限定 — inspiredbyhumans.orgで公開中",
+  "trackplayer.no-signal": "信号なし",
+  "trackplayer.play-prequel": "今すぐプリクエルを再生",
+  "trackplayer.unavailable": "現在トラックを利用できません。",
+
   "confirm.delete-title": "削除の確認",
   "confirm.delete-message": "「{name}」を削除してもよろしいですか？",
   "confirm.delete-children-warning": "この項目には子要素が含まれており、すべて完全に削除されます。",
