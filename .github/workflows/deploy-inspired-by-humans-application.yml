@@ -1,0 +1,68 @@
+name: Azure Static Web Apps CI/CD (Inspired by Humans)
+
+on:
+  push:
+    branches: [development, main]
+    paths:
+      - 'src/inspired-by-humans-org/**'
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    branches: [development, main]
+    paths:
+      - 'src/inspired-by-humans-org/**'
+
+jobs:
+  build_and_deploy_job:
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed')
+    runs-on: ubuntu-latest
+    name: Build and Deploy Job
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          lfs: false
+
+      - name: Verify required artifacts
+        run: |
+          set -euo pipefail
+          ROOT="src/inspired-by-humans-org"
+          REQUIRED=(
+            "index.html"
+            "styles.css"
+            "player.js"
+            "staticwebapp.config.json"
+            "tracks/manifest.json"
+          )
+          for f in "${REQUIRED[@]}"; do
+            if [ ! -f "$ROOT/$f" ]; then
+              echo "MISSING required artifact: $ROOT/$f"
+              exit 1
+            else
+              echo "OK: $ROOT/$f"
+            fi
+          done
+          echo ""
+          echo "All required artifacts present."
+
+      - name: Upload to Azure Static Web Apps
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.STATIC_WEBSITE_INSPIRED_BY_HUMANS_DEPLOYMENT_TOKEN }}
+          action: upload
+          skip_app_build: true
+          app_location: src/inspired-by-humans-org
+          output_location: ""
+          api_location: ""
+
+  close_pull_request_job:
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    name: Close Pull Request Job
+    steps:
+      - name: Close Pull Request
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.STATIC_WEBSITE_INSPIRED_BY_HUMANS_DEPLOYMENT_TOKEN }}
+          action: close
+          app_location: src/inspired-by-humans-org
