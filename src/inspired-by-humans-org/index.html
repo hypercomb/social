@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Inspired by Humans — audiobook</title>
+  <meta name="description" content="Listen to the &quot;Inspired by Humans&quot; audiobook — free, no sign-up required.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <section class="track-player">
+    <div class="track-player__backdrop"></div>
+
+    <div class="track-player__no-signal" id="noSignal" aria-live="polite" aria-label="no signal interlude" hidden>
+      <div class="track-player__no-signal-noise"></div>
+      <span class="track-player__no-signal-label">no signal</span>
+      <button type="button" class="track-player__skip" id="skipNoSignal">play prequel now</button>
+    </div>
+
+    <div class="track-player__panel">
+      <div class="track-player__header">
+        <div class="track-player__eyebrow">hypercomb audio</div>
+      </div>
+      <h1 class="track-player__title">&ldquo;Inspired by Humans&rdquo; audiobook</h1>
+      <p class="track-player__copy">Free to listen. No sign-up required.</p>
+
+      <div class="track-player__status" id="statusLoading">Loading tracks...</div>
+      <div class="track-player__status track-player__status--error" id="statusError" hidden></div>
+      <div class="track-player__status" id="statusEmpty" hidden>No tracks found.</div>
+
+      <div id="playerContent" hidden>
+        <div class="track-player__current">
+          <div class="track-player__label">
+            <span>Selected track</span>
+            <span class="track-player__legend" id="legend" hidden>
+              <span class="track-player__legend-dot"></span>
+              <span class="track-player__legend-text">limited time only</span>
+            </span>
+          </div>
+          <div>
+            <div class="track-player__track-title" id="selectedTitle"></div>
+            <div class="track-player__track-file" id="selectedFile"></div>
+          </div>
+
+          <div class="track-player__controls" id="audioPlayer" role="group" aria-label="audio player" tabindex="0">
+            <audio id="audio" preload="auto"></audio>
+            <button type="button" class="audio-player__play" id="playBtn" aria-label="play">
+              <svg class="icon-play" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M7.5 4.8v14.4c0 .6.66.97 1.18.66l11.2-6.9a.78.78 0 0 0 0-1.33L8.68 4.73A.78.78 0 0 0 7.5 4.8z"></path>
+              </svg>
+              <svg class="icon-pause" viewBox="0 0 24 24" aria-hidden="true" hidden>
+                <rect x="7" y="5" width="3.5" height="14" rx="0.8"></rect>
+                <rect x="13.5" y="5" width="3.5" height="14" rx="0.8"></rect>
+              </svg>
+            </button>
+            <span class="audio-player__separator" aria-hidden="true"></span>
+            <div class="audio-player__scrub" id="scrub" role="slider" aria-label="seek" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
+              <div class="audio-player__track">
+                <div class="audio-player__buffered" id="bufferedBar"></div>
+                <div class="audio-player__progress" id="progressBar"></div>
+                <div class="audio-player__thumb" id="thumb"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="track-player__list" id="trackList" role="list" aria-label="Available tracks"></div>
+      </div>
+    </div>
+  </section>
+
+  <script src="player.js"></script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+{
+  "navigationFallback": {
+    "rewrite": "/index.html"
+  },
+  "mimeTypes": {
+    ".m4a": "audio/mp4",
+    ".mp3": "audio/mpeg"
+  }
+}
