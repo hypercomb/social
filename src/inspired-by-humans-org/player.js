@@ -2,7 +2,7 @@
 // Mirrors the Angular TrackPlayerComponent + AudioPlayerComponent logic
 
 const TRACK_SEQUENCE_KEY = 'ibh:track-player:sequence'
-const NO_SIGNAL_DURATION_MS = 2500
+const NO_SIGNAL_DURATION_MS = 3000
 
 // ── DOM references ────────────────────────────────────────
 
@@ -25,7 +25,6 @@ const selectedTitle = $('selectedTitle')
 const selectedFile  = $('selectedFile')
 const noSignal      = $('noSignal')
 const skipNoSignal  = $('skipNoSignal')
-const legend        = $('legend')
 
 // ── state ─────────────────────────────────────────────────
 
@@ -60,9 +59,6 @@ async function loadTracks() {
       return
     }
 
-    const hasLimited = tracks.some(t => t.limited)
-    legend.hidden = !hasLimited
-
     renderTrackList()
     playerContent.hidden = false
     restoreSequence()
@@ -82,10 +78,9 @@ function renderTrackList() {
     const button = document.createElement('button')
     button.type = 'button'
     button.className = 'track-player__track'
-    if (track.limited) button.classList.add('is-limited')
     button.setAttribute('role', 'listitem')
     button.innerHTML = `
-      <span class="track-player__track-name">${track.limited ? '<span class="track-player__track-dot"></span>' : ''}${escapeHtml(track.title)}</span>
+      <span class="track-player__track-name">${escapeHtml(track.title)}</span>
       <span class="track-player__track-path">${escapeHtml(track.file)}</span>
     `
     button.addEventListener('click', () => selectTrack(track))
@@ -108,9 +103,18 @@ function escapeHtml(str) {
 
 // ── track selection ───────────────────────────────────────
 
-function selectTrack(track, autoplay = true) {
+function selectTrack(track, autoplay = true, bypassNoSignal = false) {
   cancelNoSignalTimer()
   noSignal.hidden = true
+
+  // Show 3-second no-signal intro whenever Prequel is about to play
+  if (!bypassNoSignal && track.title === 'Prequel') {
+    currentTrack = track
+    updateActiveTrack()
+    startNoSignalTransition(track)
+    return
+  }
+
   currentTrack = track
   shouldAutoplay = autoplay
   selectedTitle.textContent = track.title
@@ -136,8 +140,7 @@ function restoreSequence() {
   }
 
   if (prequel && !state.prequelCompleted) {
-    selectTrack(episodeOne, false)
-    startNoSignalTransition(prequel)
+    selectTrack(prequel, false)
     return
   }
 
@@ -153,13 +156,6 @@ function onTrackEnded() {
   if (episodeOne && currentTrack.file === episodeOne.file) {
     const nextState = { ...readSequenceState(), episodeOneCompleted: true }
     writeSequenceState(nextState)
-
-    if (prequel && !nextState.prequelCompleted) {
-      startNoSignalTransition(prequel)
-    } else {
-      shouldAutoplay = false
-    }
-    return
   }
 
   if (prequel && currentTrack.file === prequel.file) {
@@ -202,7 +198,7 @@ function startNoSignalTransition(nextTrack) {
 function beginTrackPlayback(track) {
   cancelNoSignalTimer()
   noSignal.hidden = true
-  selectTrack(track, true)
+  selectTrack(track, true, true)
 }
 
 function cancelNoSignalTimer() {
