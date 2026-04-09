@@ -177,12 +177,11 @@
 
   "trackplayer.eyebrow": "ハイパーコム オーディオ",
   "trackplayer.title": "\u201cInspired by Humans\u201d オーディオブック",
-  "trackplayer.description": "まもなく inspiredbyhumans.org で公開予定。",
+  "trackplayer.description": "hypercomb.io で無料公開中",
   "trackplayer.loading": "トラックを読み込み中...",
   "trackplayer.empty": "トラックがまだありません。hypercomb-shared/tracksにファイルを追加してください。",
   "trackplayer.selected": "選択中のトラック",
   "trackplayer.available": "利用可能なトラック",
-  "trackplayer.limited": "期間限定 — inspiredbyhumans.orgで公開中",
   "trackplayer.no-signal": "信号なし",
   "trackplayer.play-prequel": "今すぐプリクエルを再生",
   "trackplayer.unavailable": "現在トラックを利用できません。",

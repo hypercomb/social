@@ -177,12 +177,11 @@
 
   "trackplayer.eyebrow": "hypercomb audio",
   "trackplayer.title": "\u201cInspired by Humans\u201d audiobook",
-  "trackplayer.description": "Will be available on inspiredbyhumans.org shortly.",
+  "trackplayer.description": "Available free at hypercomb.io",
   "trackplayer.loading": "Loading tracks...",
   "trackplayer.empty": "No tracks found yet. Add files to hypercomb-shared/tracks.",
   "trackplayer.selected": "Selected track",
   "trackplayer.available": "Available tracks",
-  "trackplayer.limited": "limited time only — available on inspiredbyhumans.org",
   "trackplayer.no-signal": "no signal",
   "trackplayer.play-prequel": "play prequel now",
   "trackplayer.unavailable": "Tracks are unavailable right now.",
