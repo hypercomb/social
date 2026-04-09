@@ -1,7 +1,8 @@
 import { DOCUMENT } from '@angular/common'
-import { Component, EventEmitter, OnDestroy, OnInit, Output, inject, signal } from '@angular/core'
+import { Component, EventEmitter, OnDestroy, OnInit, Output, inject, signal, computed } from '@angular/core'
 import { AudioPlayerComponent } from '../audio-player/audio-player.component'
 import { TranslatePipe } from '../../core/i18n.pipe'
+import type { I18nProvider } from '@hypercomb/core'
 
 interface TrackEntry {
   file: string
@@ -20,15 +21,7 @@ interface TrackSequenceState {
 }
 
 const TRACK_SEQUENCE_STORAGE_KEY = 'hc:track-player:sequence'
-const NO_SIGNAL_DURATION_MS = 2500
-
-interface TrackSequenceState {
-  episodeOneCompleted: boolean
-  prequelCompleted: boolean
-}
-
-const TRACK_SEQUENCE_STORAGE_KEY = 'hc:track-player:sequence'
-const NO_SIGNAL_DURATION_MS = 2500
+const NO_SIGNAL_DURATION_MS = 3000
 
 @Component({
   selector: 'hc-track-player',
@@ -38,7 +31,6 @@ const NO_SIGNAL_DURATION_MS = 2500
   styleUrl: './track-player.component.scss',
 })
 export class TrackPlayerComponent implements OnInit, OnDestroy {
-export class TrackPlayerComponent implements OnInit, OnDestroy {
   @Output() closed = new EventEmitter<void>()
 
   readonly tracks = signal<TrackEntry[]>([])
@@ -47,13 +39,12 @@ export class TrackPlayerComponent implements OnInit, OnDestroy {
   readonly trackLoadError = signal('')
   readonly autoplaySelectedTrack = signal(false)
   readonly showNoSignal = signal(false)
+  readonly hasLimitedTracks = computed(() => this.tracks().some(t => t.limited))
 
   #document = inject(DOCUMENT)
   #noSignalTimer?: ReturnType<typeof setTimeout>
-  #noSignalTimer?: ReturnType<typeof setTimeout>
 
   dismiss(): void {
-    this.#cancelNoSignalTimer()
     this.#cancelNoSignalTimer()
     this.closed.emit()
   }
@@ -66,13 +57,7 @@ export class TrackPlayerComponent implements OnInit, OnDestroy {
     this.#cancelNoSignalTimer()
   }
 
-  ngOnDestroy(): void {
-    this.#cancelNoSignalTimer()
-  }
-
   selectTrack(track: TrackEntry): void {
-    this.#cancelNoSignalTimer()
-    this.showNoSignal.set(false)
     this.#cancelNoSignalTimer()
     this.showNoSignal.set(false)
     this.selectedTrack.set(track)
@@ -82,40 +67,20 @@ export class TrackPlayerComponent implements OnInit, OnDestroy {
   onTrackEnded(): void {
     const currentTrack = this.selectedTrack()
     const tracks = this.tracks()
-    const episodeOne = tracks[0] ?? null
-    const prequel = tracks[1] ?? null
-
     if (!currentTrack) return
 
-    if (episodeOne && currentTrack.file === episodeOne.file) {
-      const nextState = {
-        ...this.#readSequenceState(),
-        episodeOneCompleted: true,
-      }
-      this.#writeSequenceState(nextState)
-
-      if (prequel && !nextState.prequelCompleted) {
-        this.#startNoSignalTransition(prequel)
-      } else {
-        this.autoplaySelectedTrack.set(false)
-      }
-      return
-    }
-
-    if (prequel && currentTrack.file === prequel.file) {
-      this.#writeSequenceState({
-        ...this.#readSequenceState(),
-        episodeOneCompleted: true,
-        prequelCompleted: true,
-      })
+    const currentIndex = tracks.indexOf(currentTrack)
+    const nextTrack = tracks[currentIndex + 1]
+    if (nextTrack) {
+      this.selectTrack(nextTrack)
+    } else {
       this.autoplaySelectedTrack.set(false)
     }
   }
 
   skipNoSignal(): void {
-    const prequel = this.tracks()[1] ?? null
-    if (!prequel) return
-    this.#beginTrackPlayback(prequel)
+    const prequel = this.tracks().find(t => t.title === 'Prequel') ?? null
+    if (prequel) this.#beginTrackPlayback(prequel)
   }
 
   async #loadTracks(): Promise<void> {
@@ -136,7 +101,6 @@ export class TrackPlayerComponent implements OnInit, OnDestroy {
 
       this.tracks.set(tracks)
       this.#restoreSequence(tracks)
-      this.#restoreSequence(tracks)
     } catch (error) {
       console.error('[track-player] failed to load tracks', error)
       const i18n = window.ioc?.get<I18nProvider>('@hypercomb.social/I18n')
@@ -148,28 +112,14 @@ export class TrackPlayerComponent implements OnInit, OnDestroy {
 
   #restoreSequence(tracks: TrackEntry[]): void {
     const episodeOne = tracks[0] ?? null
-    const prequel = tracks[1] ?? null
-    const state = this.#readSequenceState()
-
     if (!episodeOne) {
       this.selectedTrack.set(null)
       this.autoplaySelectedTrack.set(false)
       return
     }
 
-    if (!state.episodeOneCompleted) {
-      this.selectedTrack.set(episodeOne)
-      this.autoplaySelectedTrack.set(true)
-      return
-    }
-
-    if (prequel && !state.prequelCompleted) {
-      this.#startNoSignalTransition(prequel)
-      return
-    }
-
-    this.selectedTrack.set(prequel ?? episodeOne)
-    this.autoplaySelectedTrack.set(false)
+    this.selectedTrack.set(episodeOne)
+    this.autoplaySelectedTrack.set(true)
   }
 
   #startNoSignalTransition(nextTrack: TrackEntry): void {
