@@ -65,7 +65,7 @@ export class TrackPlayerComponent implements OnInit, OnDestroy {
     const currentTrack = this.selectedTrack()
     const tracks = this.tracks()
     const episodeOne = tracks[0] ?? null
-    const prequel = tracks[1] ?? null
+    const prequel = tracks.at(-1) ?? null
 
     if (!currentTrack) return
 
@@ -95,7 +95,7 @@ export class TrackPlayerComponent implements OnInit, OnDestroy {
   }
 
   skipNoSignal(): void {
-    const prequel = this.tracks()[1] ?? null
+    const prequel = this.tracks().at(-1) ?? null
     if (!prequel) return
     this.#beginTrackPlayback(prequel)
   }
@@ -128,7 +128,7 @@ export class TrackPlayerComponent implements OnInit, OnDestroy {
 
   #restoreSequence(tracks: TrackEntry[]): void {
     const episodeOne = tracks[0] ?? null
-    const prequel = tracks[1] ?? null
+    const prequel = tracks.at(-1) ?? null
     const state = this.#readSequenceState()
 
     if (!episodeOne) {
