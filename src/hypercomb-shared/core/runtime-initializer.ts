@@ -138,12 +138,36 @@ export const initializeRuntime = async (
   const i18n = get('@hypercomb.social/I18n') as LocalizationService | undefined
   if (i18n) {
     try {
-      const [en, ja] = await Promise.all([
+      const [en, ja, zh, es, ar, pt, fr, de, ko, ru, hi, id, tr, it] = await Promise.all([
         import('../i18n/en.json', { with: { type: 'json' } }),
         import('../i18n/ja.json', { with: { type: 'json' } }),
+        import('../i18n/zh.json', { with: { type: 'json' } }),
+        import('../i18n/es.json', { with: { type: 'json' } }),
+        import('../i18n/ar.json', { with: { type: 'json' } }),
+        import('../i18n/pt.json', { with: { type: 'json' } }),
+        import('../i18n/fr.json', { with: { type: 'json' } }),
+        import('../i18n/de.json', { with: { type: 'json' } }),
+        import('../i18n/ko.json', { with: { type: 'json' } }),
+        import('../i18n/ru.json', { with: { type: 'json' } }),
+        import('../i18n/hi.json', { with: { type: 'json' } }),
+        import('../i18n/id.json', { with: { type: 'json' } }),
+        import('../i18n/tr.json', { with: { type: 'json' } }),
+        import('../i18n/it.json', { with: { type: 'json' } }),
       ])
       i18n.registerTranslations('app', 'en', en.default)
       i18n.registerTranslations('app', 'ja', ja.default)
+      i18n.registerTranslations('app', 'zh', zh.default)
+      i18n.registerTranslations('app', 'es', es.default)
+      i18n.registerTranslations('app', 'ar', ar.default)
+      i18n.registerTranslations('app', 'pt', pt.default)
+      i18n.registerTranslations('app', 'fr', fr.default)
+      i18n.registerTranslations('app', 'de', de.default)
+      i18n.registerTranslations('app', 'ko', ko.default)
+      i18n.registerTranslations('app', 'ru', ru.default)
+      i18n.registerTranslations('app', 'hi', hi.default)
+      i18n.registerTranslations('app', 'id', id.default)
+      i18n.registerTranslations('app', 'tr', tr.default)
+      i18n.registerTranslations('app', 'it', it.default)
     } catch { /* translations unavailable — graceful degradation */ }
   }
 

@@ -4,36 +4,6 @@
       "file": "01-episode-1.m4a",
       "title": "Episode 1",
       "src": "/tracks/01-episode-1.m4a"
-    },
-    {
-      "file": "02-episode-2.m4a",
-      "title": "Episode 2",
-      "src": "/tracks/02-episode-2.m4a",
-      "limited": true
-    },
-    {
-      "file": "03-episode-3.m4a",
-      "title": "Episode 3",
-      "src": "/tracks/03-episode-3.m4a",
-      "limited": true
-    },
-    {
-      "file": "04-episode-4.m4a",
-      "title": "Episode 4",
-      "src": "/tracks/04-episode-4.m4a",
-      "limited": true
-    },
-    {
-      "file": "05-ideas-on-the-frontline.mp3",
-      "title": "Ideas On The Frontline",
-      "src": "/tracks/05-ideas-on-the-frontline.mp3",
-      "limited": true
-    },
-    {
-      "file": "06-prequel.m4a",
-      "title": "Prequel",
-      "src": "/tracks/06-prequel.m4a",
-      "limited": true
     }
   ]
 }

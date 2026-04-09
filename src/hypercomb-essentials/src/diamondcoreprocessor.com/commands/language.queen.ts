@@ -7,9 +7,19 @@ import { QueenBee, type I18nProvider, I18N_IOC_KEY } from '@hypercomb/core'
  *
  * Syntax:
  *   /language en         — English
- *   /language en-us      — English (US)
  *   /language ja         — Japanese
- *   /language jp         — Japanese (alias)
+ *   /language zh         — Chinese (Simplified)
+ *   /language es         — Spanish
+ *   /language ar         — Arabic
+ *   /language pt         — Portuguese
+ *   /language fr         — French
+ *   /language de         — German
+ *   /language ko         — Korean
+ *   /language ru         — Russian
+ *   /language hi         — Hindi
+ *   /language id         — Indonesian
+ *   /language tr         — Turkish
+ *   /language it         — Italian
  *   /language            — print current locale
  *
  * When an AI API key is configured, TranslationService passively listens
@@ -20,7 +30,7 @@ export class LanguageQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'language'
   override readonly aliases = []
-  override description = 'Switch the UI language — /language en, /language ja'
+  override description = 'Switch the UI language (14 languages supported)'
 
   protected execute(args: string): void {
     const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined
@@ -45,6 +55,22 @@ export class LanguageQueenBee extends QueenBee {
 /** Map common aliases to canonical locale codes. */
 const LOCALE_ALIASES: Record<string, string> = {
   'jp': 'ja',
+  'japanese': 'ja',
+  'cn': 'zh',
+  'chinese': 'zh',
+  'spanish': 'es',
+  'arabic': 'ar',
+  'portuguese': 'pt',
+  'br': 'pt',
+  'french': 'fr',
+  'german': 'de',
+  'korean': 'ko',
+  'kr': 'ko',
+  'russian': 'ru',
+  'hindi': 'hi',
+  'indonesian': 'id',
+  'turkish': 'tr',
+  'italian': 'it',
   'en-us': 'en',
 }
 
