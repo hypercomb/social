@@ -4,8 +4,8 @@
     @if (showNoSignal()) {
         <div class="track-player__no-signal" aria-live="polite" aria-label="no signal interlude">
             <div class="track-player__no-signal-noise"></div>
-            <span class="track-player__no-signal-label">no signal</span>
-            <button type="button" class="track-player__skip" (click)="skipNoSignal()">play prequel now</button>
+            <span class="track-player__no-signal-label">{{ 'trackplayer.no-signal' | t }}</span>
+            <button type="button" class="track-player__skip" (click)="skipNoSignal()">{{ 'trackplayer.play-prequel' | t }}</button>
         </div>
     }
 
@@ -46,9 +46,7 @@
                         class="track-player__controls"
                         [src]="track.src"
                         [autoplay]="autoplaySelectedTrack()"
-                        [autoplay]="autoplaySelectedTrack()"
                         [ariaLabel]="track.title + ' audio player'"
-                        (ended)="onTrackEnded()"
                         (ended)="onTrackEnded()"
                     ></hc-audio-player>
                 }
