@@ -177,7 +177,7 @@
 
   "trackplayer.eyebrow": "audio hypercomb",
   "trackplayer.title": "Buku audio \u201cInspired by Humans\u201d",
-  "trackplayer.description": "Tersedia gratis di hypercomb.io",
+  "trackplayer.description": "Dengarkan e-book di <a href=\"https://inspiredbyhumans.org\" target=\"_blank\" rel=\"noopener\">inspiredbyhumans.org</a>",
   "trackplayer.loading": "Memuat trek...",
   "trackplayer.empty": "Tidak ada trek ditemukan. Tambahkan file ke hypercomb-shared/tracks.",
   "trackplayer.selected": "Trek terpilih",

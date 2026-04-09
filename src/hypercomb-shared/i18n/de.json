@@ -177,7 +177,7 @@
 
   "trackplayer.eyebrow": "hypercomb Audio",
   "trackplayer.title": "Hörbuch \u201cInspired by Humans\u201d",
-  "trackplayer.description": "Kostenlos verfügbar auf hypercomb.io",
+  "trackplayer.description": "Hör das E-Book auf <a href=\"https://inspiredbyhumans.org\" target=\"_blank\" rel=\"noopener\">inspiredbyhumans.org</a>",
   "trackplayer.loading": "Titel werden geladen...",
   "trackplayer.empty": "Keine Titel gefunden. Dateien in hypercomb-shared/tracks hinzufügen.",
   "trackplayer.selected": "Ausgewählter Titel",

@@ -17,7 +17,7 @@
             </button>
         </div>
         <h1 class="track-player__title">{{ 'trackplayer.title' | t }}</h1>
-        <p class="track-player__copy">{{ 'trackplayer.description' | t }}</p>
+        <p class="track-player__copy" [innerHTML]="'trackplayer.description' | t"></p>
 
         @if (loadingTracks()) {
             <div class="track-player__status">{{ 'trackplayer.loading' | t }}</div>

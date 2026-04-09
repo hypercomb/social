@@ -177,7 +177,7 @@
 
   "trackplayer.eyebrow": "hypercomb ses",
   "trackplayer.title": "\u201cInspired by Humans\u201d sesli kitap",
-  "trackplayer.description": "hypercomb.io'da ücretsiz mevcut",
+  "trackplayer.description": "E-kitabı <a href=\"https://inspiredbyhumans.org\" target=\"_blank\" rel=\"noopener\">inspiredbyhumans.org</a> adresinde dinleyin",
   "trackplayer.loading": "Parçalar yükleniyor...",
   "trackplayer.empty": "Parça bulunamadı. hypercomb-shared/tracks'e dosya ekleyin.",
   "trackplayer.selected": "Seçili parça",

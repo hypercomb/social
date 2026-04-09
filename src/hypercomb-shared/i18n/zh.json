@@ -177,7 +177,7 @@
 
   "trackplayer.eyebrow": "hypercomb 音频",
   "trackplayer.title": "《Inspired by Humans》有声书",
-  "trackplayer.description": "在 hypercomb.io 免费收听",
+  "trackplayer.description": "在 <a href=\"https://inspiredbyhumans.org\" target=\"_blank\" rel=\"noopener\">inspiredbyhumans.org</a> 收听电子书",
   "trackplayer.loading": "正在加载曲目...",
   "trackplayer.empty": "尚未找到曲目。请将文件添加到 hypercomb-shared/tracks。",
   "trackplayer.selected": "已选曲目",

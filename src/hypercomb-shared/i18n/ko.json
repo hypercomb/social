@@ -177,7 +177,7 @@
 
   "trackplayer.eyebrow": "hypercomb 오디오",
   "trackplayer.title": "\u201cInspired by Humans\u201d 오디오북",
-  "trackplayer.description": "hypercomb.io에서 무료 이용 가능",
+  "trackplayer.description": "<a href=\"https://inspiredbyhumans.org\" target=\"_blank\" rel=\"noopener\">inspiredbyhumans.org</a>에서 e-book 듣기",
   "trackplayer.loading": "트랙 로딩 중...",
   "trackplayer.empty": "트랙을 찾을 수 없습니다. hypercomb-shared/tracks에 파일을 추가하세요.",
   "trackplayer.selected": "선택된 트랙",
