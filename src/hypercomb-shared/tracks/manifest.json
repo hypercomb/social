@@ -1,9 +1,9 @@
 {
   "tracks": [
     {
-      "file": "01-episode-1.m4a",
+      "file": "episode-1.mp3",
       "title": "Episode 1",
-      "src": "/tracks/01-episode-1.m4a"
+      "src": "/tracks/episode-1.mp3"
     }
   ]
 }

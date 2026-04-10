@@ -1,29 +1,29 @@
 {
   "tracks": [
     {
-      "file": "01-episode-1.m4a",
+      "file": "episode-1.mp3",
       "title": "Episode 1",
-      "src": "tracks/01-episode-1.m4a"
+      "src": "tracks/episode-1.mp3"
     },
     {
-      "file": "02-episode-2.m4a",
+      "file": "episode-2.mp3",
       "title": "Episode 2",
-      "src": "tracks/02-episode-2.m4a"
+      "src": "tracks/episode-2.mp3"
     },
     {
-      "file": "03-episode-3.m4a",
+      "file": "episode-3.mp3",
       "title": "Episode 3",
-      "src": "tracks/03-episode-3.m4a"
+      "src": "tracks/episode-3.mp3"
     },
     {
-      "file": "05-ideas-on-the-frontline.mp3",
+      "file": "episode-5-ideas-on-the-frontline.mp3",
       "title": "Ideas On The Frontline",
-      "src": "tracks/05-ideas-on-the-frontline.mp3"
+      "src": "tracks/episode-5-ideas-on-the-frontline.mp3"
     },
     {
-      "file": "06-prequel.m4a",
+      "file": "episode-6-prequel.mp3",
       "title": "Prequel",
-      "src": "tracks/06-prequel.m4a"
+      "src": "tracks/episode-6-prequel.mp3"
     },
     {
       "file": "episode-7.mp3",
