@@ -117,7 +117,13 @@ jobs:
 
       - name: Build web app
         working-directory: src/hypercomb-web
-        run: node ../node_modules/@angular/cli/bin/ng.js build --configuration production
+        # npm run build invokes prebuild:web (scripts/prebuild.ts) which:
+        #   - generates public/substrate/manifest.json from the substrate folder
+        #   - rebuilds essentials modules and copies them into public/content/
+        #   - then runs `ng build --configuration production`
+        # Without this, ng build sees an empty public/content/ and the runtime
+        # module loader has no manifest to install from.
+        run: npm run build
 
       - name: Write env.js into build output
         env:
