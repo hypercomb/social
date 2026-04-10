@@ -53,6 +53,7 @@
   "controls.lock": "lock",
   "controls.fullscreen": "fullscreen",
   "controls.layout-mode": "layout mode",
+  "controls.toggle-input": "show command line",
   "controls.pinned-layout": "pinned layout",
   "controls.dense-layout": "dense layout",
   "controls.clipboard": "clipboard",

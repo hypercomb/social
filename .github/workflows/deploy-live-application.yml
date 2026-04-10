@@ -119,6 +119,11 @@ jobs:
         working-directory: src/hypercomb-web
         run: node ../node_modules/@angular/cli/bin/ng.js build --configuration production
 
+      - name: Write env.js into build output
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: node src/scripts/write-env-js.cjs src/hypercomb-web/dist/hypercomb-web/browser
+
       - name: Verify build output
         run: ls -al src/hypercomb-web/dist/hypercomb-web/browser || true
 

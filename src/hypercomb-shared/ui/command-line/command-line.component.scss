@@ -11,6 +11,14 @@
   overflow: hidden;
 }
 
+// Mobile collapsed state — the controls-bar's input toggle icon hides
+// the command line entirely so it stops eating screen real estate.
+// `display: none` removes it from the header flex layout, letting the
+// remaining items (mesh-header) reflow to fill the bar.
+:host(.mobile-hidden) {
+  display: none;
+}
+
 .command-line-wrapper {
   position: relative;
   display: flex;

@@ -83,10 +83,44 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   // ── power key state (ctrl / shift / alt held) ──────────
   readonly powerKey = signal<'ctrl' | 'shift' | 'alt' | null>(null)
 
-  /** True when viewport is phone-sized (≤599px). */
+  /** True when viewport is phone-shaped (small in either dimension). */
   readonly isMobile = signal(false)
+  /** True when device is in landscape orientation AND mobile-sized. */
+  readonly isLandscape = signal(false)
+  /** Whether the command-line input is currently revealed on mobile. */
+  readonly inputVisible = signal(false)
   #mobileQuery: MediaQueryList | null = null
-  #mobileHandler = (e: MediaQueryListEvent) => this.isMobile.set(e.matches)
+  #landscapeQuery: MediaQueryList | null = null
+  #mobileHandler = (e: MediaQueryListEvent) => {
+    this.isMobile.set(e.matches)
+    this.isLandscape.set((this.#landscapeQuery?.matches ?? false) && e.matches)
+    this.#syncInputVisibility()
+  }
+  #landscapeHandler = (e: MediaQueryListEvent) => {
+    this.isLandscape.set(e.matches && this.isMobile())
+    this.#syncInputVisibility()
+  }
+  #syncInputVisibility = (): void => {
+    // On mobile, the command-line input is hidden by default and only
+    // revealed via the toggle icon. On desktop it is always visible.
+    if (!this.isMobile()) {
+      this.inputVisible.set(true)
+      EffectBus.emit('mobile:input-visible', { visible: true, mobile: false })
+    } else {
+      this.inputVisible.set(false)
+      EffectBus.emit('mobile:input-visible', { visible: false, mobile: true })
+    }
+  }
+  readonly toggleInput = (): void => {
+    const next = !this.inputVisible()
+    this.inputVisible.set(next)
+    EffectBus.emit('mobile:input-visible', { visible: next, mobile: this.isMobile() })
+  }
+  readonly hideInput = (): void => {
+    if (!this.isMobile() || !this.inputVisible()) return
+    this.inputVisible.set(false)
+    EffectBus.emit('mobile:input-visible', { visible: false, mobile: true })
+  }
   #utility = signal(localStorage.getItem('hc:utility-expanded') !== 'false')
   #moveMode = signal(false)
   #mode = signal<'browsing' | 'clipboard' | 'atomize'>('browsing')
@@ -322,9 +356,18 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     // ── mobile detection via matchMedia ──
-    this.#mobileQuery = window.matchMedia('(max-width: 599px)')
+    // Phone-shaped in any orientation: short side ≤ 599px. In portrait the
+    // width is small; in landscape the height is small. We OR both queries
+    // so the mobile pill stays mobile when the device is rotated.
+    this.#mobileQuery = window.matchMedia('(max-width: 599px), (max-height: 599px)')
     this.isMobile.set(this.#mobileQuery.matches)
     this.#mobileQuery.addEventListener('change', this.#mobileHandler)
+
+    this.#landscapeQuery = window.matchMedia('(orientation: landscape)')
+    this.isLandscape.set(this.#landscapeQuery.matches && this.isMobile())
+    this.#landscapeQuery.addEventListener('change', this.#landscapeHandler)
+
+    this.#syncInputVisibility()
 
     // pre-fill room from store
     const stored = this.roomStore?.value ?? ''
@@ -471,6 +514,7 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.#mobileQuery?.removeEventListener('change', this.#mobileHandler)
+    this.#landscapeQuery?.removeEventListener('change', this.#landscapeHandler)
     window.removeEventListener('resize', this.#onResize)
     window.removeEventListener('pointermove', this.#onActivity)
     window.removeEventListener('pointerdown', this.#onActivity)

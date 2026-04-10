@@ -39,6 +39,10 @@ jobs:
       - name: Build diamond-core-processor
         working-directory: src/diamond-core-processor
         run: npx ng build --configuration production
+      - name: Write env.js into build output
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: node src/scripts/write-env-js.cjs src/diamond-core-processor/dist/diamond-core-processor/browser
       - name: Verify build output
         run: |
           set -euo pipefail

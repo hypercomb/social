@@ -97,6 +97,7 @@
   "settings": {
     "files.exclude": {
       "hypercomb-relay/**/*.js": false
-    }
+    },
+    "angular.enable-strict-mode-prompt": false
   },
 }

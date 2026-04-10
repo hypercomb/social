@@ -57,10 +57,12 @@
 <div
   class="pill-stage"
   [class.faded]="!visible()"
-  [class.positioned]="!!pillPos()"
+  [class.positioned]="!!pillPos() && !isMobile()"
   [class.dragging]="pillDragging()"
-  [style.left.px]="pillPos()?.x"
-  [style.top.px]="pillPos()?.y"
+  [class.landscape]="isLandscape()"
+  [class.mobile]="isMobile()"
+  [style.left.px]="!isMobile() ? pillPos()?.x : null"
+  [style.top.px]="!isMobile() ? pillPos()?.y : null"
   (mouseenter)="onBarEnter()"
   (mouseleave)="onBarLeave()"
 >
@@ -98,6 +100,9 @@
           </button>
           <button class="ctl-btn" [class.active]="fitLocked()" (click)="fitOrCenter($event)" [attr.aria-label]="'controls.fit-content' | t">
             <span class="hci">q</span>
+          </button>
+          <button class="ctl-btn" [class.active]="inputVisible()" (click)="toggleInput()" [attr.aria-label]="'controls.toggle-input' | t">
+            <span class="hci">></span>
           </button>
           <button class="ctl-btn" [class.active]="layoutPinned()" (click)="toggleLayout()" [attr.aria-label]="'controls.layout-mode' | t">
             <span class="hci">#</span>

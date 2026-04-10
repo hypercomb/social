@@ -100,7 +100,10 @@ const MOVE_ARROW_OFFSETS: Record<string, { dq: number; dr: number }> = {
   standalone: true,
   imports: [CommandShellComponent, HintBarComponent, TranslatePipe],
   templateUrl: './command-line.component.html',
-  styleUrls: ['./command-line.component.scss']
+  styleUrls: ['./command-line.component.scss'],
+  host: {
+    '[class.mobile-hidden]': 'mobileHidden()',
+  },
 })
 export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
@@ -867,6 +870,20 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       this.viewActive.set(active)
     })
 
+    // Mobile input visibility — controls-bar emits this; on mobile the
+    // command line is collapsed by default and only expanded when the
+    // user taps the toggle icon. On desktop, visible is always true.
+    this.#mobileVisibilityUnsub = EffectBus.on<{ visible: boolean; mobile: boolean }>(
+      'mobile:input-visible',
+      ({ visible, mobile }) => {
+        this.mobileHidden.set(mobile && !visible)
+        if (mobile && visible) {
+          // give focus to the shell so the keyboard pops up immediately
+          queueMicrotask(() => this.shell?.focus())
+        }
+      },
+    )
+
     // Bi-directional sync: external selection changes → update command line
     this.#selectionSyncUnsub = EffectBus.on<{ selected: string[]; active: string | null }>('selection:changed', (payload) => {
       if (this.#syncDirection === 'command') return // prevent feedback loop
@@ -917,6 +934,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   readonly touchDragging = signal(false)
   readonly viewActive = signal(false)
   readonly voiceActive = signal(false)
+  /** True when the command-line should be collapsed on mobile (toggle off). */
+  readonly mobileHidden = signal(false)
+  #mobileVisibilityUnsub?: () => void
   readonly voiceSupported = VoiceInputService.supported()
   readonly pushToTalkEnabled = signal(localStorage.getItem('hc:push-to-talk') === 'true')
   #voiceActiveUnsub?: () => void
@@ -952,6 +972,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.#commandLineToggleUnsub?.()
     this.#touchDraggingUnsub?.()
     this.#viewActiveUnsub?.()
+    this.#mobileVisibilityUnsub?.()
     this.#selectionSyncUnsub?.()
     this.#voiceInterimUnsub?.()
     this.#voiceSubmitUnsub?.()
