@@ -166,6 +166,17 @@
 		color: rgba(228, 237, 251, 0.8);
 		font-size: clamp(1rem, 2vw, 1.08rem);
 		line-height: 1.6;
+
+		a {
+			color: rgba(193, 218, 255, 0.9);
+			text-decoration: underline;
+			text-underline-offset: 0.15em;
+			transition: color 0.15s ease;
+
+			&:hover {
+				color: #f3f7ff;
+			}
+		}
 	}
 
 	&__current {

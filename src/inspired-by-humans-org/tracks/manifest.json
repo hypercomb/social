@@ -29,6 +29,11 @@
       "file": "06-prequel.m4a",
       "title": "Prequel",
       "src": "tracks/06-prequel.m4a"
+    },
+    {
+      "file": "episode-7.mp3",
+      "title": "Episode 7",
+      "src": "tracks/episode-7.mp3"
     }
   ]
 }
