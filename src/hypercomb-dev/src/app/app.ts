@@ -78,6 +78,7 @@ import { RemoveQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/c
 import { FormatQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/format/format.queen'
 import { FormatPainterDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/format/format-painter.drone'
 import { LanguageQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/language.queen'
+import { PlayerQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/player.queen'
 import { LayoutQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/move/layout.queen'
 import { ArrangeQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/arrange.queen'
 import { AccentQueenBee } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/accent.queen'
@@ -140,6 +141,7 @@ const _deps = [
   FormatQueenBee,
   FormatPainterDrone,
   LanguageQueenBee,
+  PlayerQueenBee,
   LayoutQueenBee,
   ArrangeQueenBee,
   AccentQueenBee,
@@ -167,10 +169,11 @@ export class App implements AfterViewInit {
   protected readonly title = signal('hypercomb-dev');
   readonly clipboardMode = signal(false);
   readonly moveMode = signal(false);
-  readonly playerOpen = signal(true);
+  readonly playerOpen = signal(localStorage.getItem('hc:player-dismissed') !== 'true');
 
   dismissPlayer(): void {
     this.playerOpen.set(false);
+    try { localStorage.setItem('hc:player-dismissed', 'true') } catch { /* storage unavailable */ }
   }
 
   @HostBinding('class.clipboard-mode')
@@ -204,6 +207,11 @@ export class App implements AfterViewInit {
 
     EffectBus.on<{ active: boolean }>('move:mode', ({ active }) => {
       this.moveMode.set(active)
+    })
+
+    // Re-open the track player when /player queen is invoked
+    EffectBus.on('player:open', () => {
+      this.playerOpen.set(true)
     })
 
     // Runtime already initialized by main.ts — go straight to bee startup

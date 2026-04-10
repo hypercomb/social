@@ -1186,27 +1186,35 @@ export class ShowCellDrone extends Drone {
     const allCells = this.buildCellsFromAxial(axial, cellNames, maxCells, localCellSet, branchSet)
 
     const cells: Cell[] = []
+    const BATCH = ShowCellDrone.STREAM_BATCH_SIZE
 
-    for (let i = 0; i < allCells.length; i++) {
+    for (let start = 0; start < allCells.length; start += BATCH) {
       if (this.cancelStreamFlag) break
 
-      const cell = allCells[i]
+      const batch = allCells.slice(start, start + BATCH)
 
-      await this.loadCellImages([cell], dir)
+      // load all cells in this batch in parallel — file reads + image decodes overlap
+      await this.loadCellImages(batch, dir)
       if (this.cancelStreamFlag) break
 
-      cells.push(cell)
-      this.renderedCells.set(cell.label, cell)
-
-      const isLast = i === allCells.length - 1
-      if (cells.length % ShowCellDrone.STREAM_BATCH_SIZE === 0 || isLast) {
-        await this.applyGeometry(cells, isLast)
+      for (const cell of batch) {
+        cells.push(cell)
+        this.renderedCells.set(cell.label, cell)
       }
 
-      await this.microDelay()
+      const isLast = start + BATCH >= allCells.length
+      await this.applyGeometry(cells, isLast)
+
+      // reveal the layer as soon as the first batch is on-screen so cold start
+      // shows tiles immediately and the rest stream in progressively
+      if (!this.cancelStreamFlag && this.layer && !this.layer.visible) {
+        this.layer.visible = true
+      }
+
+      if (!isLast) await this.microDelay()
     }
 
-    // only reveal the layer if this stream was not cancelled by a newer navigation
+    // safety: ensure layer is visible if loop exited without rendering anything
     if (!this.cancelStreamFlag && this.layer) this.layer.visible = true
 
     this.streamActive = false
@@ -2139,6 +2147,7 @@ export class ShowCellDrone extends Drone {
     const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as
       { getResource: (sig: string) => Promise<Blob | null> } | undefined
     if (!store || !this.imageAtlas) return
+    const imageAtlas = this.imageAtlas
 
     const livePropsIndex: Record<string, string> = JSON.parse(localStorage.getItem('hc:tile-props-index') ?? '{}')
     // When cursor is rewound and we have content-state overrides, use those
@@ -2146,9 +2155,27 @@ export class ShowCellDrone extends Drone {
       ? Object.fromEntries([...Object.entries(livePropsIndex), ...this.#cursorPropsOverride])
       : livePropsIndex
 
-    for (const cell of cells) {
+    // Per-batch dedup so cells sharing an image (e.g. substrate fills) only fetch + decode once
+    const inFlightImages = new Map<string, Promise<void>>()
+    const loadImageOnce = (sig: string): Promise<void> => {
+      if (imageAtlas.hasImage(sig) || imageAtlas.hasFailed(sig)) return Promise.resolve()
+      const existing = inFlightImages.get(sig)
+      if (existing) return existing
+      const promise = (async () => {
+        try {
+          const blob = await store.getResource(sig)
+          if (blob) await imageAtlas.loadImage(sig, blob)
+        } catch {
+          console.warn(`[ShowCell] failed to load image ${sig}`)
+        }
+      })()
+      inFlightImages.set(sig, promise)
+      return promise
+    }
+
+    const loadOne = async (cell: Cell): Promise<void> => {
       // external cells don't have local OPFS data
-      if (cell.external) continue
+      if (cell.external) return
 
       // load tags + link from OPFS if not cached (independent of image cache)
       if (!this.cellTagsCache.has(cell.label)) {
@@ -2171,7 +2198,7 @@ export class ShowCellDrone extends Drone {
         cell.borderColor = this.cellBorderColorCache.get(cell.label)
         cell.hasLink = this.cellLinkCache.get(cell.label) ?? false
         cell.hasSubstrate = this.cellSubstrateCache.get(cell.label) ?? false
-        continue
+        return
       }
 
       // read tile properties from content-addressed resource
@@ -2215,18 +2242,7 @@ export class ShowCellDrone extends Drone {
         if (smallSig && isSignature(smallSig)) {
           cell.imageSig = smallSig
           this.cellImageCache.set(cell.label, smallSig)
-
-          // load blob into image atlas if not already there
-          if (!this.imageAtlas.hasImage(smallSig) && !this.imageAtlas.hasFailed(smallSig)) {
-            try {
-              const blob = await store.getResource(smallSig)
-              if (blob) {
-                await this.imageAtlas.loadImage(smallSig, blob)
-              }
-            } catch {
-              console.warn(`[ShowCell] failed to load image for cell ${cell.label}`)
-            }
-          }
+          await loadImageOnce(smallSig)
         } else {
           this.cellImageCache.set(cell.label, null)
         }
@@ -2235,6 +2251,8 @@ export class ShowCellDrone extends Drone {
         this.cellImageCache.set(cell.label, null)
       }
     }
+
+    await Promise.all(cells.map(loadOne))
   }
 
   private buildCellsKey = (cells: Cell[]): string => {

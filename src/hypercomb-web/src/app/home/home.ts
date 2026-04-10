@@ -1,4 +1,5 @@
 import { Component, OnDestroy, signal } from '@angular/core';
+import { EffectBus } from '@hypercomb/core';
 import type { Lineage } from '@hypercomb/shared/core';
 import type { ResourceMessageHandler } from '@hypercomb/shared/core/resource-message-handler';
 import { fromRuntime } from '@hypercomb/shared/core/from-runtime';
@@ -12,7 +13,7 @@ import { TrackPlayerComponent } from '@hypercomb/shared/ui/track-player/track-pl
   styleUrl: './home.scss',
 })
 export class Home implements OnDestroy {
-  readonly playerOpen = signal(true)
+  readonly playerOpen = signal(localStorage.getItem('hc:player-dismissed') !== 'true')
 
   private get handler(): ResourceMessageHandler { return get('@hypercomb.social/ResourceMessageHandler') as ResourceMessageHandler }
   private get lineage(): Lineage { return get('@hypercomb.social/Lineage') as Lineage }
@@ -21,8 +22,16 @@ export class Home implements OnDestroy {
     () => this.lineage.ready
   )
 
+  constructor() {
+    // Re-open the track player when /player queen is invoked
+    EffectBus.on('player:open', () => {
+      this.playerOpen.set(true)
+    })
+  }
+
   dismissPlayer(): void {
     this.playerOpen.set(false)
+    try { localStorage.setItem('hc:player-dismissed', 'true') } catch { /* storage unavailable */ }
   }
 
   ngOnDestroy(): void {
