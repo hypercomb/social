@@ -90,7 +90,15 @@ function invoke-az-silent {
   )
 
   $cmdExe = if ([string]::IsNullOrWhiteSpace($env:ComSpec)) { 'cmd.exe' } else { $env:ComSpec }
-  $output = & $cmdExe '/d' '/s' '/c' 'az' @Arguments 2>&1
+  # Suppress stderr; ErrorActionPreference=Stop would otherwise turn native-command
+  # stderr lines into terminating exceptions on Windows PowerShell 5.1.
+  $previousEap = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    $output = & $cmdExe '/d' '/s' '/c' 'az' @Arguments 2>$null
+  } finally {
+    $ErrorActionPreference = $previousEap
+  }
   return @{ ExitCode = $LASTEXITCODE; Output = ($output -join "`n") }
 }
 
@@ -152,13 +160,13 @@ function test-blob-exists {
     [string[]]$AuthArguments
   )
 
-  $result = invoke-az-silent -Arguments @(
+  $result = invoke-az-silent -Arguments (@(
     'storage', 'blob', 'exists',
     '--container-name', $ContainerName,
     '--name', $BlobName,
     '--only-show-errors',
     '--output', 'tsv'
-  ) + $AuthArguments
+  ) + $AuthArguments)
 
   if ($result.ExitCode -ne 0) { return $false }
   return $result.Output.Trim().ToLower() -eq 'true'
@@ -232,14 +240,14 @@ if (Test-Path -LiteralPath $localManifestPath -PathType Leaf) {
   $tempManifestPath = Join-Path $env:TEMP 'hypercomb-remote-manifest.json'
 
   # download existing remote manifest (if any)
-  $downloadResult = invoke-az-silent -Arguments @(
+  $downloadResult = invoke-az-silent -Arguments (@(
     'storage', 'blob', 'download',
     '--container-name', $containerName,
     '--name', $manifestBlobName,
     '--file', $tempManifestPath,
     '--overwrite', 'true',
     '--only-show-errors'
-  ) + $authArguments
+  ) + $authArguments)
 
   if ($downloadResult.ExitCode -eq 0 -and (Test-Path -LiteralPath $tempManifestPath -PathType Leaf)) {
     write-step 'merging with existing remote manifest'
@@ -256,8 +264,9 @@ if (Test-Path -LiteralPath $localManifestPath -PathType Leaf) {
         }
       }
 
-      # write merged manifest back to local dist
-      $localManifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $localManifestPath -Encoding utf8NoBOM
+      # write merged manifest back to local dist (UTF-8 without BOM, cross-version)
+      $mergedJson = $localManifest | ConvertTo-Json -Depth 10
+      [System.IO.File]::WriteAllText($localManifestPath, $mergedJson, (New-Object System.Text.UTF8Encoding($false)))
       $packageCount = @($localManifest.packages.PSObject.Properties).Count
       write-step " manifest packages: $packageCount"
     }
@@ -286,14 +295,14 @@ foreach ($file in $files) {
     }
   }
 
-  $arguments = @(
+  $arguments = (@(
     'storage', 'blob', 'upload',
     '--container-name', $containerName,
     '--file', $file.FullName,
     '--name', $blobName,
     '--overwrite', 'true',
     '--only-show-errors'
-  ) + $authArguments
+  ) + $authArguments)
 
   invoke-az -Arguments $arguments
   $uploaded++

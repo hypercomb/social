@@ -23069,13 +23069,16 @@ var MOVE_ARROW_OFFSETS = {
   ArrowUp: { dq: 0, dr: -1 },
   ArrowDown: { dq: 0, dr: 1 }
 };
-var _shell_dec, _CommandLineComponent_decorators, _init4, _bracketCellTags, _bracketCellLabel, _slashMatches, _CommandLineComponent_instances, extractSlashCommandArgs_fn, _behaviors, validateBehaviors_fn, i18n_get, _indicators, _indicatorUnsubs, persistIndicators_fn, _voiceActiveUnsub, _pushToTalkUnsub, _prefillUnsub, _commandFocusUnsub, _commandLineToggleUnsub, _touchDraggingUnsub, _viewActiveUnsub, _selectionSyncUnsub, _voiceInterimUnsub, _voiceSubmitUnsub, _onNavigate, preprocessTagsThenExecute_fn, _executeSlashBehaviour, _executeSelectCommand, extractAndPersistTags_fn, persistTagOps_fn, buildSelectValue_fn, shouldTruncate_fn, autoPopulateMoveIndex_fn, isInMoveParen_fn, scrubMoveIndex_fn, handleMoveScrub_fn, collapseToSelect_fn, cancelSelectOperation_fn, setShellValue_fn, _selectOriginalSegments, _lastMoveLabels, _selectPhase, stripTagSuffix_fn, _selectLabels, _selectExcluded, deriveSelectPhase_fn, parseSelectContext_fn, _syncDirection, _lastSelectMode, handleSelectInputEffects_fn, _bracketPhase, _colonBracketMode, _bracketPendingTags, loadCellTags_fn, parseBracketTagItems_fn, parsePendingBracketTags_fn;
+var _shell_dec, _CommandLineComponent_decorators, _init4, _bracketCellTags, _bracketCellLabel, _slashMatches, _CommandLineComponent_instances, extractSlashCommandArgs_fn, _behaviors, validateBehaviors_fn, i18n_get, _indicators, _indicatorUnsubs, persistIndicators_fn, _mobileVisibilityUnsub, _voiceActiveUnsub, _pushToTalkUnsub, _prefillUnsub, _commandFocusUnsub, _commandLineToggleUnsub, _touchDraggingUnsub, _viewActiveUnsub, _selectionSyncUnsub, _voiceInterimUnsub, _voiceSubmitUnsub, _onNavigate, preprocessTagsThenExecute_fn, _executeSlashBehaviour, _executeSelectCommand, extractAndPersistTags_fn, persistTagOps_fn, buildSelectValue_fn, shouldTruncate_fn, autoPopulateMoveIndex_fn, isInMoveParen_fn, scrubMoveIndex_fn, handleMoveScrub_fn, collapseToSelect_fn, cancelSelectOperation_fn, setShellValue_fn, _selectOriginalSegments, _lastMoveLabels, _selectPhase, stripTagSuffix_fn, _selectLabels, _selectExcluded, deriveSelectPhase_fn, parseSelectContext_fn, _syncDirection, _lastSelectMode, handleSelectInputEffects_fn, _bracketPhase, _colonBracketMode, _bracketPendingTags, loadCellTags_fn, parseBracketTagItems_fn, parsePendingBracketTags_fn;
 _CommandLineComponent_decorators = [Component({
   selector: "hc-command-line",
   standalone: true,
   imports: [CommandShellComponent, HintBarComponent, TranslatePipe],
   templateUrl: "./command-line.component.html",
-  styleUrls: ["./command-line.component.scss"]
+  styleUrls: ["./command-line.component.scss"],
+  host: {
+    "[class.mobile-hidden]": "mobileHidden()"
+  }
 })], _shell_dec = [ViewChild("shell")];
 var _CommandLineComponent = class _CommandLineComponent {
   constructor() {
@@ -23475,6 +23478,9 @@ var _CommandLineComponent = class _CommandLineComponent {
     __publicField(this, "touchDragging", signal(false));
     __publicField(this, "viewActive", signal(false));
     __publicField(this, "voiceActive", signal(false));
+    /** True when the command-line should be collapsed on mobile (toggle off). */
+    __publicField(this, "mobileHidden", signal(false));
+    __privateAdd(this, _mobileVisibilityUnsub);
     __publicField(this, "voiceSupported", VoiceInputService.supported());
     __publicField(this, "pushToTalkEnabled", signal(localStorage.getItem("hc:push-to-talk") === "true"));
     __privateAdd(this, _voiceActiveUnsub);
@@ -24135,6 +24141,15 @@ var _CommandLineComponent = class _CommandLineComponent {
     __privateSet(this, _viewActiveUnsub, EffectBus8.on("view:active", ({ active }) => {
       this.viewActive.set(active);
     }));
+    __privateSet(this, _mobileVisibilityUnsub, EffectBus8.on(
+      "mobile:input-visible",
+      ({ visible, mobile }) => {
+        this.mobileHidden.set(mobile && !visible);
+        if (mobile && visible) {
+          queueMicrotask(() => this.shell?.focus());
+        }
+      }
+    ));
     __privateSet(this, _selectionSyncUnsub, EffectBus8.on("selection:changed", (payload) => {
       if (__privateGet(this, _syncDirection) === "command") return;
       if (!payload?.selected) return;
@@ -24175,17 +24190,18 @@ var _CommandLineComponent = class _CommandLineComponent {
     return get("@hypercomb.social/VoiceInputService");
   }
   ngOnDestroy() {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k;
     (_a = __privateGet(this, _prefillUnsub)) == null ? void 0 : _a.call(this);
     (_b = __privateGet(this, _commandFocusUnsub)) == null ? void 0 : _b.call(this);
     (_c = __privateGet(this, _commandLineToggleUnsub)) == null ? void 0 : _c.call(this);
     (_d = __privateGet(this, _touchDraggingUnsub)) == null ? void 0 : _d.call(this);
     (_e = __privateGet(this, _viewActiveUnsub)) == null ? void 0 : _e.call(this);
-    (_f = __privateGet(this, _selectionSyncUnsub)) == null ? void 0 : _f.call(this);
-    (_g = __privateGet(this, _voiceInterimUnsub)) == null ? void 0 : _g.call(this);
-    (_h = __privateGet(this, _voiceSubmitUnsub)) == null ? void 0 : _h.call(this);
-    (_i = __privateGet(this, _voiceActiveUnsub)) == null ? void 0 : _i.call(this);
-    (_j = __privateGet(this, _pushToTalkUnsub)) == null ? void 0 : _j.call(this);
+    (_f = __privateGet(this, _mobileVisibilityUnsub)) == null ? void 0 : _f.call(this);
+    (_g = __privateGet(this, _selectionSyncUnsub)) == null ? void 0 : _g.call(this);
+    (_h = __privateGet(this, _voiceInterimUnsub)) == null ? void 0 : _h.call(this);
+    (_i = __privateGet(this, _voiceSubmitUnsub)) == null ? void 0 : _i.call(this);
+    (_j = __privateGet(this, _voiceActiveUnsub)) == null ? void 0 : _j.call(this);
+    (_k = __privateGet(this, _pushToTalkUnsub)) == null ? void 0 : _k.call(this);
     for (const unsub of __privateGet(this, _indicatorUnsubs)) unsub();
     window.removeEventListener("navigate", __privateGet(this, _onNavigate));
     window.removeEventListener("popstate", __privateGet(this, _onNavigate));
@@ -24275,6 +24291,7 @@ persistIndicators_fn = function() {
     localStorage.removeItem("hc:indicators");
   }
 };
+_mobileVisibilityUnsub = new WeakMap();
 _voiceActiveUnsub = new WeakMap();
 _pushToTalkUnsub = new WeakMap();
 _prefillUnsub = new WeakMap();
@@ -26860,6 +26877,32 @@ var BUILTIN_DEFAULTS = {
   builtin: true
 };
 var get3 = (key) => window.ioc?.get?.(key);
+async function renderToHexBox(blob, w, h) {
+  const bitmap = await createImageBitmap(blob);
+  try {
+    const useOffscreen = typeof OffscreenCanvas !== "undefined";
+    const canvas = useOffscreen ? new OffscreenCanvas(w, h) : Object.assign(document.createElement("canvas"), { width: w, height: h });
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("2d context unavailable");
+    const scale = Math.max(w / bitmap.width, h / bitmap.height);
+    const scaledW = bitmap.width * scale;
+    const scaledH = bitmap.height * scale;
+    const x = (w - scaledW) / 2;
+    const y = (h - scaledH) / 2;
+    ctx.drawImage(bitmap, x, y, scaledW, scaledH);
+    if (useOffscreen && "convertToBlob" in canvas) {
+      return await canvas.convertToBlob({ type: "image/webp" });
+    }
+    return await new Promise(
+      (resolve, reject) => canvas.toBlob(
+        (b) => b ? resolve(b) : reject(new Error("toBlob failed")),
+        "image/webp"
+      )
+    );
+  } finally {
+    bitmap.close();
+  }
+}
 var SubstrateService = class extends EventTarget {
   #loaded = false;
   #registry = EMPTY_SUBSTRATE_REGISTRY;
@@ -27159,6 +27202,50 @@ var SubstrateService = class extends EventTarget {
     this.#resolved = { source, images };
     await this.#preloadAtlas(images);
     await this.#fillPropsPool(images);
+    void this.#migrateLegacySubstrateProps();
+  }
+  /**
+   * One-time cleanup: existing substrate-applied tiles in localStorage point
+   * to old-format props (no `flat.small.image`). Detect and remove those
+   * entries so the next render reports them as blank and applyToAllBlanks
+   * gives them a fresh pool entry containing both orientation variants.
+   */
+  async #migrateLegacySubstrateProps() {
+    const FLAG = "hc:substrate-flat-format-v1";
+    if (localStorage.getItem(FLAG) === "true") return;
+    const store2 = this.#store();
+    if (!store2) return;
+    try {
+      const indexKey = "hc:tile-props-index";
+      const index = JSON.parse(localStorage.getItem(indexKey) ?? "{}");
+      const seenSigs = /* @__PURE__ */ new Map();
+      let changed = false;
+      for (const [label, propsSig] of Object.entries(index)) {
+        if (typeof propsSig !== "string" || !propsSig) continue;
+        let legacy = seenSigs.get(propsSig);
+        if (legacy === void 0) {
+          try {
+            const blob = await store2.getResource(propsSig);
+            if (!blob) {
+              seenSigs.set(propsSig, false);
+              continue;
+            }
+            const parsed = JSON.parse(await blob.text());
+            legacy = parsed?.substrate === true && !parsed?.flat?.small?.image;
+          } catch {
+            legacy = false;
+          }
+          seenSigs.set(propsSig, !!legacy);
+        }
+        if (legacy) {
+          delete index[label];
+          changed = true;
+        }
+      }
+      if (changed) localStorage.setItem(indexKey, JSON.stringify(index));
+      localStorage.setItem(FLAG, "true");
+    } catch {
+    }
   }
   async #preloadAtlas(images) {
     if (images.length === 0) return;
@@ -27178,10 +27265,15 @@ var SubstrateService = class extends EventTarget {
   }
   async #fillPropsPool(images) {
     const store2 = this.#store();
-    if (!store2 || images.length === 0) {
+    const settings = get3("@diamondcoreprocessor.com/Settings");
+    if (!store2 || !settings || images.length === 0) {
       this.#propsPool = [];
       return;
     }
+    const pointW = Math.round(settings.hexWidth("point-top"));
+    const pointH = Math.round(settings.hexHeight("point-top"));
+    const flatW = Math.round(settings.hexWidth("flat-top"));
+    const flatH = Math.round(settings.hexHeight("flat-top"));
     const byImage = /* @__PURE__ */ new Map();
     const pool = [];
     for (const imageSig of images) {
@@ -27190,7 +27282,17 @@ var SubstrateService = class extends EventTarget {
         continue;
       }
       try {
-        const props = { small: { image: imageSig }, substrate: true };
+        const sourceBlob = await store2.getResource(imageSig);
+        if (!sourceBlob) continue;
+        const pointBlob = await renderToHexBox(sourceBlob, pointW, pointH);
+        const flatBlob = await renderToHexBox(sourceBlob, flatW, flatH);
+        const pointSig = await store2.putResource(pointBlob);
+        const flatSig = await store2.putResource(flatBlob);
+        const props = {
+          small: { image: pointSig },
+          flat: { small: { image: flatSig } },
+          substrate: true
+        };
         const blob = new Blob([JSON.stringify(props, null, 2)], { type: "application/json" });
         const propsSig = await store2.putResource(blob);
         byImage.set(imageSig, propsSig);

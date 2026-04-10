@@ -627,7 +627,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
     axial: "@diamondcoreprocessor.com/AxialService",
     layout: "@diamondcoreprocessor.com/LayoutService"
   };
-  listens = ["render:host-ready", "mesh:ready", "mesh:items-updated", "tile:saved", "search:filter", "render:set-orientation", "render:set-pivot", "mesh:room", "mesh:secret", "cell:place-at", "cell:reorder", "render:set-gap", "move:preview", "clipboard:captured", "layout:mode", "tags:changed", "tags:filter", "history:cursor-changed", "tile:toggle-text", "visibility:show-hidden", "overlay:neon-color", "translation:tile-start", "translation:tile-done", "substrate:changed"];
+  listens = ["render:host-ready", "mesh:ready", "mesh:items-updated", "tile:saved", "search:filter", "render:set-orientation", "render:set-pivot", "mesh:room", "mesh:secret", "cell:place-at", "cell:reorder", "render:set-gap", "move:preview", "clipboard:captured", "layout:mode", "tags:changed", "tags:filter", "history:cursor-changed", "tile:toggle-text", "visibility:show-hidden", "overlay:neon-color", "translation:tile-start", "translation:tile-done", "substrate:changed", "cell:added", "cell:removed"];
   emits = ["mesh:ensure-started", "mesh:subscribe", "mesh:publish", "render:mesh-offset", "render:cell-count", "render:geometry-changed", "render:tags", "tile:hover-tags"];
   geom = null;
   shader = null;
@@ -658,6 +658,10 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
   #heatByLabel = /* @__PURE__ */ new Map();
   #flashLabels = /* @__PURE__ */ new Set();
   #flashTimer = null;
+  // newly created tiles glow briefly so the user can spot them, then fade
+  #newCellFadeStart = /* @__PURE__ */ new Map();
+  #newCellFadeRaf = 0;
+  static #NEW_CELL_FADE_MS = 2500;
   #translatingLabels = /* @__PURE__ */ new Set();
   #translationPulseTimer = null;
   streamActive = false;
@@ -1694,7 +1698,10 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       this.#layerCellsCache.clear();
       this.renderedCellsKey = "";
       this.suppressMeshRecenter = true;
-      if (payload?.cell) this.#pendingRemoves.delete(payload.cell);
+      if (payload?.cell) {
+        this.#pendingRemoves.delete(payload.cell);
+        this.#startNewCellFade(payload.cell);
+      }
     });
     this.onEffect("cell:removed", (payload) => {
       this.#layerCellsCache.clear();
@@ -1956,11 +1963,45 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
   dispose = () => {
     window.removeEventListener("synchronize", this.requestRender);
     window.removeEventListener("navigate", this.requestRender);
+    if (this.#newCellFadeRaf) {
+      cancelAnimationFrame(this.#newCellFadeRaf);
+      this.#newCellFadeRaf = 0;
+    }
+    this.#newCellFadeStart.clear();
     if (this.lineageChangeListening) {
       const lineage = this.resolve("lineage");
       lineage?.removeEventListener("change", this.onLineageChange);
       this.lineageChangeListening = false;
     }
+  };
+  // Briefly glow a newly created tile so the user can spot it, then ease out
+  // to normal. Reuses the existing #heatByLabel pathway consumed by the SDF
+  // shader's heat ring.
+  #startNewCellFade = (label) => {
+    this.#newCellFadeStart.set(label, performance.now());
+    this.#heatByLabel.set(label, 1);
+    this.renderedCellsKey = "";
+    this.requestRender();
+    if (this.#newCellFadeRaf) return;
+    const tick = () => {
+      const now = performance.now();
+      let alive = false;
+      for (const [cell, start] of this.#newCellFadeStart) {
+        const elapsed = now - start;
+        if (elapsed >= _ShowCellDrone.#NEW_CELL_FADE_MS) {
+          this.#newCellFadeStart.delete(cell);
+          this.#heatByLabel.delete(cell);
+          continue;
+        }
+        const t = 1 - elapsed / _ShowCellDrone.#NEW_CELL_FADE_MS;
+        this.#heatByLabel.set(cell, t * t * t);
+        alive = true;
+      }
+      this.renderedCellsKey = "";
+      this.requestRender();
+      this.#newCellFadeRaf = alive ? requestAnimationFrame(tick) : 0;
+    };
+    this.#newCellFadeRaf = requestAnimationFrame(tick);
   };
   clearMesh = () => {
     if (this.hexMesh && this.layer) {

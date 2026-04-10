@@ -73,6 +73,43 @@ type ResolvedSource = {
 type DistributiveOmit<T, K extends keyof any> = T extends unknown ? Omit<T, K> : never
 type SourceInput = DistributiveOmit<SubstrateSource, 'id'> & { id?: string }
 
+/**
+ * Cover-fit a source image into a target box (w × h) and return a webp blob.
+ * Used by the substrate pool to pre-render both hex-orientation aspect ratios
+ * so the renderer can show a correctly-shaped tile per orientation without
+ * stretching a single source image into the wrong-shaped quad.
+ */
+async function renderToHexBox(blob: Blob, w: number, h: number): Promise<Blob> {
+  const bitmap = await createImageBitmap(blob)
+  try {
+    const useOffscreen = typeof OffscreenCanvas !== 'undefined'
+    const canvas: OffscreenCanvas | HTMLCanvasElement = useOffscreen
+      ? new OffscreenCanvas(w, h)
+      : Object.assign(document.createElement('canvas'), { width: w, height: h })
+    const ctx = (canvas as any).getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null
+    if (!ctx) throw new Error('2d context unavailable')
+
+    const scale = Math.max(w / bitmap.width, h / bitmap.height) // cover
+    const scaledW = bitmap.width * scale
+    const scaledH = bitmap.height * scale
+    const x = (w - scaledW) / 2
+    const y = (h - scaledH) / 2
+    ctx.drawImage(bitmap, x, y, scaledW, scaledH)
+
+    if (useOffscreen && 'convertToBlob' in canvas) {
+      return await (canvas as OffscreenCanvas).convertToBlob({ type: 'image/webp' })
+    }
+    return await new Promise<Blob>((resolve, reject) =>
+      (canvas as HTMLCanvasElement).toBlob(
+        b => b ? resolve(b) : reject(new Error('toBlob failed')),
+        'image/webp',
+      )
+    )
+  } finally {
+    bitmap.close()
+  }
+}
+
 export class SubstrateService extends EventTarget {
   #loaded = false
   #registry: SubstrateRegistry = EMPTY_SUBSTRATE_REGISTRY
@@ -401,6 +438,50 @@ export class SubstrateService extends EventTarget {
 
     await this.#preloadAtlas(images)
     await this.#fillPropsPool(images)
+    void this.#migrateLegacySubstrateProps()
+  }
+
+  /**
+   * One-time cleanup: existing substrate-applied tiles in localStorage point
+   * to old-format props (no `flat.small.image`). Detect and remove those
+   * entries so the next render reports them as blank and applyToAllBlanks
+   * gives them a fresh pool entry containing both orientation variants.
+   */
+  async #migrateLegacySubstrateProps(): Promise<void> {
+    const FLAG = 'hc:substrate-flat-format-v1'
+    if (localStorage.getItem(FLAG) === 'true') return
+    const store = this.#store()
+    if (!store) return
+
+    try {
+      const indexKey = 'hc:tile-props-index'
+      const index: Record<string, string> = JSON.parse(localStorage.getItem(indexKey) ?? '{}')
+      const seenSigs = new Map<string, boolean>() // propsSig → isLegacySubstrate
+      let changed = false
+
+      for (const [label, propsSig] of Object.entries(index)) {
+        if (typeof propsSig !== 'string' || !propsSig) continue
+        let legacy = seenSigs.get(propsSig)
+        if (legacy === undefined) {
+          try {
+            const blob = await store.getResource(propsSig)
+            if (!blob) { seenSigs.set(propsSig, false); continue }
+            const parsed = JSON.parse(await blob.text())
+            legacy = parsed?.substrate === true && !parsed?.flat?.small?.image
+          } catch {
+            legacy = false
+          }
+          seenSigs.set(propsSig, !!legacy)
+        }
+        if (legacy) {
+          delete index[label]
+          changed = true
+        }
+      }
+
+      if (changed) localStorage.setItem(indexKey, JSON.stringify(index))
+      localStorage.setItem(FLAG, 'true')
+    } catch { /* migration is best-effort */ }
   }
 
   async #preloadAtlas(images: string[]): Promise<void> {
@@ -422,7 +503,18 @@ export class SubstrateService extends EventTarget {
 
   async #fillPropsPool(images: string[]): Promise<void> {
     const store = this.#store()
-    if (!store || images.length === 0) { this.#propsPool = []; return }
+    const settings = get('@diamondcoreprocessor.com/Settings') as
+      { hexWidth(o: 'point-top' | 'flat-top'): number; hexHeight(o: 'point-top' | 'flat-top'): number } | undefined
+    if (!store || !settings || images.length === 0) { this.#propsPool = []; return }
+
+    // Pre-render every source image into both orientation aspect ratios so
+    // toggling between point-top and flat-top shows a correctly-shaped tile.
+    // Same two-images process the tile editor uses on save — just propagated
+    // via the substrate pool instead of the editor canvas.
+    const pointW = Math.round(settings.hexWidth('point-top'))
+    const pointH = Math.round(settings.hexHeight('point-top'))
+    const flatW = Math.round(settings.hexWidth('flat-top'))
+    const flatH = Math.round(settings.hexHeight('flat-top'))
 
     const byImage = new Map<string, string>()
     const pool: { imageSig: string; propsSig: string }[] = []
@@ -432,7 +524,19 @@ export class SubstrateService extends EventTarget {
         continue
       }
       try {
-        const props = { small: { image: imageSig }, substrate: true }
+        const sourceBlob = await store.getResource(imageSig)
+        if (!sourceBlob) continue
+
+        const pointBlob = await renderToHexBox(sourceBlob, pointW, pointH)
+        const flatBlob = await renderToHexBox(sourceBlob, flatW, flatH)
+        const pointSig = await store.putResource(pointBlob)
+        const flatSig = await store.putResource(flatBlob)
+
+        const props = {
+          small: { image: pointSig },
+          flat: { small: { image: flatSig } },
+          substrate: true,
+        }
         const blob = new Blob([JSON.stringify(props, null, 2)], { type: 'application/json' })
         const propsSig = await store.putResource(blob)
         byImage.set(imageSig, propsSig)
