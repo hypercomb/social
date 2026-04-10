@@ -397,7 +397,7 @@ var LanguageQueenBee = class extends QueenBee7 {
   namespace = "diamondcoreprocessor.com";
   command = "language";
   aliases = [];
-  description = "Switch the UI language \u2014 /language en, /language ja";
+  description = "Switch the UI language (14 languages supported)";
   execute(args) {
     const i18n = get(I18N_IOC_KEY);
     if (!i18n) {
@@ -416,14 +416,49 @@ var LanguageQueenBee = class extends QueenBee7 {
 };
 var LOCALE_ALIASES = {
   "jp": "ja",
+  "japanese": "ja",
+  "cn": "zh",
+  "chinese": "zh",
+  "spanish": "es",
+  "arabic": "ar",
+  "portuguese": "pt",
+  "br": "pt",
+  "french": "fr",
+  "german": "de",
+  "korean": "ko",
+  "kr": "ko",
+  "russian": "ru",
+  "hindi": "hi",
+  "indonesian": "id",
+  "turkish": "tr",
+  "italian": "it",
   "en-us": "en"
 };
 var _language = new LanguageQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/LanguageQueenBee", _language);
 
+// src/diamondcoreprocessor.com/commands/player.queen.ts
+import { QueenBee as QueenBee8, EffectBus as EffectBus6 } from "@hypercomb/core";
+var DISMISSED_KEY = "hc:player-dismissed";
+var PlayerQueenBee = class extends QueenBee8 {
+  namespace = "diamondcoreprocessor.com";
+  command = "player";
+  aliases = ["track", "audio"];
+  description = "Re-open the track player";
+  execute(_args) {
+    try {
+      localStorage.removeItem(DISMISSED_KEY);
+    } catch {
+    }
+    EffectBus6.emit("player:open", {});
+  }
+};
+var _player = new PlayerQueenBee();
+window.ioc.register("@diamondcoreprocessor.com/PlayerQueenBee", _player);
+
 // src/diamondcoreprocessor.com/commands/remove.queen.ts
-import { QueenBee as QueenBee8, EffectBus as EffectBus6, hypercomb as hypercomb3 } from "@hypercomb/core";
-var RemoveQueenBee = class extends QueenBee8 {
+import { QueenBee as QueenBee9, EffectBus as EffectBus7, hypercomb as hypercomb3 } from "@hypercomb/core";
+var RemoveQueenBee = class extends QueenBee9 {
   namespace = "diamondcoreprocessor.com";
   command = "remove";
   aliases = [];
@@ -446,7 +481,7 @@ var RemoveQueenBee = class extends QueenBee8 {
     for (const name of targets) {
       try {
         await dir.removeEntry(name, { recursive: true });
-        EffectBus6.emit("cell:removed", { cell: name, groupId });
+        EffectBus7.emit("cell:removed", { cell: name, groupId });
       } catch {
       }
     }
@@ -468,16 +503,16 @@ function normalizeName(s) {
 }
 var _remove = new RemoveQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/RemoveQueenBee", _remove);
-EffectBus6.on("controls:action", (payload) => {
+EffectBus7.on("controls:action", (payload) => {
   if (payload?.action === "remove") void _remove.invoke("");
 });
-EffectBus6.on("keymap:invoke", (payload) => {
+EffectBus7.on("keymap:invoke", (payload) => {
   if (payload?.cmd === "selection.remove") void _remove.invoke("");
 });
 
 // src/diamondcoreprocessor.com/commands/rename.queen.ts
-import { QueenBee as QueenBee9, EffectBus as EffectBus7, SignatureService, hypercomb as hypercomb4 } from "@hypercomb/core";
-var RenameQueenBee = class extends QueenBee9 {
+import { QueenBee as QueenBee10, EffectBus as EffectBus8, SignatureService, hypercomb as hypercomb4 } from "@hypercomb/core";
+var RenameQueenBee = class extends QueenBee10 {
   namespace = "diamondcoreprocessor.com";
   command = "rename";
   aliases = [];
@@ -505,9 +540,9 @@ var RenameQueenBee = class extends QueenBee9 {
       await dir.removeEntry(oldName, { recursive: true });
       await this.#recordRenameOp(oldName, newName);
       const groupId = `rename:${Date.now().toString(36)}`;
-      EffectBus7.emit("cell:removed", { cell: oldName, groupId });
-      EffectBus7.emit("cell:added", { cell: newName, groupId });
-      EffectBus7.emit("cell:renamed", { oldName, newName });
+      EffectBus8.emit("cell:removed", { cell: oldName, groupId });
+      EffectBus8.emit("cell:added", { cell: newName, groupId });
+      EffectBus8.emit("cell:renamed", { oldName, newName });
       selection.clear();
       void new hypercomb4().act();
     } catch {
@@ -561,7 +596,7 @@ var _rename = new RenameQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/RenameQueenBee", _rename);
 
 // src/diamondcoreprocessor.com/commands/translation.service.ts
-import { EffectBus as EffectBus8, SignatureService as SignatureService2 } from "@hypercomb/core";
+import { EffectBus as EffectBus9, SignatureService as SignatureService2 } from "@hypercomb/core";
 
 // src/diamondcoreprocessor.com/assistant/llm-api.ts
 var ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages";
@@ -609,7 +644,7 @@ var TranslationService = class extends EventTarget {
   constructor() {
     super();
     this.#cache = this.#loadCache();
-    EffectBus8.on("locale:changed", (payload) => {
+    EffectBus9.on("locale:changed", (payload) => {
       if (!this.#translating && getApiKey()) {
         void this.translateTiles(payload.locale);
       }
@@ -680,7 +715,7 @@ var TranslationService = class extends EventTarget {
     try {
       const apiKey = getApiKey();
       if (!apiKey) {
-        EffectBus8.emit("llm:api-key-required", {});
+        EffectBus9.emit("llm:api-key-required", {});
         return;
       }
       const store = get("@hypercomb.social/Store");
@@ -690,19 +725,19 @@ var TranslationService = class extends EventTarget {
       );
       const tileNames = Object.keys(propsIndex);
       if (!tileNames.length) return;
-      EffectBus8.emit("translation:tile-start", { labels: tileNames, locale: targetLocale });
+      EffectBus9.emit("translation:tile-start", { labels: tileNames, locale: targetLocale });
       let done = 0;
       for (const tileName of tileNames) {
         const propsSig = propsIndex[tileName];
         if (!propsSig) {
           done++;
-          EffectBus8.emit("translation:tile-done", { label: tileName });
+          EffectBus9.emit("translation:tile-done", { label: tileName });
           continue;
         }
         const propsBlob = await store.getResource(propsSig);
         if (!propsBlob) {
           done++;
-          EffectBus8.emit("translation:tile-done", { label: tileName });
+          EffectBus9.emit("translation:tile-done", { label: tileName });
           continue;
         }
         let props;
@@ -710,7 +745,7 @@ var TranslationService = class extends EventTarget {
           props = JSON.parse(await propsBlob.text());
         } catch {
           done++;
-          EffectBus8.emit("translation:tile-done", { label: tileName });
+          EffectBus9.emit("translation:tile-done", { label: tileName });
           continue;
         }
         let changed = false;
@@ -739,10 +774,10 @@ var TranslationService = class extends EventTarget {
           propsIndex[tileName] = newPropsSig;
         }
         done++;
-        EffectBus8.emit("translation:tile-done", { label: tileName });
+        EffectBus9.emit("translation:tile-done", { label: tileName });
       }
       localStorage.setItem(PROPS_INDEX_KEY, JSON.stringify(propsIndex));
-      EffectBus8.emit("translation:complete", { locale: targetLocale, translated: done });
+      EffectBus9.emit("translation:complete", { locale: targetLocale, translated: done });
       this.dispatchEvent(new CustomEvent("change"));
     } finally {
       this.#translating = false;
@@ -793,6 +828,7 @@ export {
   HelpQueenBee,
   KeywordQueenBee,
   LanguageQueenBee,
+  PlayerQueenBee,
   RemoveQueenBee,
   RenameQueenBee,
   TranslationService

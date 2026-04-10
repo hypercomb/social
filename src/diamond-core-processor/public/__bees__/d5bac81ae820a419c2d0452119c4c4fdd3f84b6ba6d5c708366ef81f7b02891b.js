@@ -1478,18 +1478,22 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
     const maxCells = Math.min(cellNames.length, axialMax);
     const allCells = this.buildCellsFromAxial(axial, cellNames, maxCells, localCellSet, branchSet);
     const cells = [];
-    for (let i = 0; i < allCells.length; i++) {
+    const BATCH = _ShowCellDrone.STREAM_BATCH_SIZE;
+    for (let start = 0; start < allCells.length; start += BATCH) {
       if (this.cancelStreamFlag) break;
-      const cell = allCells[i];
-      await this.loadCellImages([cell], dir);
+      const batch = allCells.slice(start, start + BATCH);
+      await this.loadCellImages(batch, dir);
       if (this.cancelStreamFlag) break;
-      cells.push(cell);
-      this.renderedCells.set(cell.label, cell);
-      const isLast = i === allCells.length - 1;
-      if (cells.length % _ShowCellDrone.STREAM_BATCH_SIZE === 0 || isLast) {
-        await this.applyGeometry(cells, isLast);
+      for (const cell of batch) {
+        cells.push(cell);
+        this.renderedCells.set(cell.label, cell);
       }
-      await this.microDelay();
+      const isLast = start + BATCH >= allCells.length;
+      await this.applyGeometry(cells, isLast);
+      if (!this.cancelStreamFlag && this.layer && !this.layer.visible) {
+        this.layer.visible = true;
+      }
+      if (!isLast) await this.microDelay();
     }
     if (!this.cancelStreamFlag && this.layer) this.layer.visible = true;
     this.streamActive = false;
@@ -2265,10 +2269,27 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
   loadCellImages = async (cells, _dir) => {
     const store = window.ioc?.get?.("@hypercomb.social/Store");
     if (!store || !this.imageAtlas) return;
+    const imageAtlas = this.imageAtlas;
     const livePropsIndex = JSON.parse(localStorage.getItem("hc:tile-props-index") ?? "{}");
     const propsIndex = this.#cursorPropsOverride ? Object.fromEntries([...Object.entries(livePropsIndex), ...this.#cursorPropsOverride]) : livePropsIndex;
-    for (const cell of cells) {
-      if (cell.external) continue;
+    const inFlightImages = /* @__PURE__ */ new Map();
+    const loadImageOnce = (sig) => {
+      if (imageAtlas.hasImage(sig) || imageAtlas.hasFailed(sig)) return Promise.resolve();
+      const existing = inFlightImages.get(sig);
+      if (existing) return existing;
+      const promise = (async () => {
+        try {
+          const blob = await store.getResource(sig);
+          if (blob) await imageAtlas.loadImage(sig, blob);
+        } catch {
+          console.warn(`[ShowCell] failed to load image ${sig}`);
+        }
+      })();
+      inFlightImages.set(sig, promise);
+      return promise;
+    };
+    const loadOne = async (cell) => {
+      if (cell.external) return;
       if (!this.cellTagsCache.has(cell.label)) {
         try {
           const cellDir = await _dir.getDirectoryHandle(cell.label);
@@ -2287,7 +2308,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
         cell.borderColor = this.cellBorderColorCache.get(cell.label);
         cell.hasLink = this.cellLinkCache.get(cell.label) ?? false;
         cell.hasSubstrate = this.cellSubstrateCache.get(cell.label) ?? false;
-        continue;
+        return;
       }
       try {
         const propsSig = propsIndex[cell.label];
@@ -2321,23 +2342,15 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
         if (smallSig && isSignature(smallSig)) {
           cell.imageSig = smallSig;
           this.cellImageCache.set(cell.label, smallSig);
-          if (!this.imageAtlas.hasImage(smallSig) && !this.imageAtlas.hasFailed(smallSig)) {
-            try {
-              const blob2 = await store.getResource(smallSig);
-              if (blob2) {
-                await this.imageAtlas.loadImage(smallSig, blob2);
-              }
-            } catch {
-              console.warn(`[ShowCell] failed to load image for cell ${cell.label}`);
-            }
-          }
+          await loadImageOnce(smallSig);
         } else {
           this.cellImageCache.set(cell.label, null);
         }
       } catch {
         this.cellImageCache.set(cell.label, null);
       }
-    }
+    };
+    await Promise.all(cells.map(loadOne));
   };
   buildCellsKey = (cells) => {
     const selectionService = window.ioc?.get?.("@diamondcoreprocessor.com/SelectionService");

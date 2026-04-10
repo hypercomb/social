@@ -1,0 +1,14 @@
+{
+  "tracks": [
+    {
+      "file": "episode-1.m4a",
+      "title": "Episode 1",
+      "src": "/episode-1.m4a"
+    },
+    {
+      "file": "hypercomb.m4a",
+      "title": "Hypercomb",
+      "src": "/hypercomb.m4a"
+    }
+  ]
+}
