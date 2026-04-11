@@ -14,7 +14,7 @@
 
 import { EffectBus, type SubstrateSource } from '@hypercomb/core'
 import type { SubstrateService } from './substrate.service.js'
-import { isFolderAccessSupported } from '@hypercomb/shared'
+import { isFolderAccessSupported } from './folder-handles.js'
 
 const get = (key: string) => (window as any).ioc?.get?.(key)
 

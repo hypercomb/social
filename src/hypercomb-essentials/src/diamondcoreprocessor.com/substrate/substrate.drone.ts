@@ -24,7 +24,7 @@ export class SubstrateDrone extends Drone {
     'editor:mode', 'render:cell-count',
     'indicator:click',
   ]
-  protected override emits = ['substrate:applied', 'indicator:set', 'indicator:clear', 'substrate-organizer:open', 'activity:log']
+  protected override emits = ['substrate:applied', 'substrate:ready', 'indicator:set', 'indicator:clear', 'substrate-organizer:open', 'activity:log']
 
   #initialized = false
   #dropPending = false
@@ -39,7 +39,15 @@ export class SubstrateDrone extends Drone {
 
     const service = this.#service()
     if (service) {
-      void service.warmUp().then(() => this.#syncIndicator())
+      void service.warmUp().then(() => {
+        this.#syncIndicator()
+        // Tell show-cell.drone that the props pool is ready so it triggers
+        // a fresh render. The render emits render:cell-count → this drone
+        // catches it and applies substrate to any still-blank cells. Without
+        // this kick, cells created before warmUp finishes never get filled
+        // until the user manually navigates or refreshes.
+        EffectBus.emit('substrate:ready', {})
+      })
     }
 
     this.onEffect<{ active: boolean }>('drop:pending', (p) => { this.#dropPending = p?.active ?? false })
@@ -74,7 +82,10 @@ export class SubstrateDrone extends Drone {
     this.onEffect('substrate:changed', () => {
       const svc = this.#service()
       if (!svc) return
-      void svc.warmUp().then(() => this.#syncIndicator())
+      void svc.warmUp().then(() => {
+        this.#syncIndicator()
+        EffectBus.emit('substrate:ready', {})
+      })
     })
 
     // Folder source needs a user-gesture re-grant. Show an indicator; clicking

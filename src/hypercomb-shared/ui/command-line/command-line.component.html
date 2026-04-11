@@ -28,6 +28,11 @@
         <span class="mic-dot">{{ voiceActive() ? '●' : '○' }}</span>
       </button>
     }
+    <!-- mobile-only "done" button: collapses the command-line back to hidden -->
+    <button class="mobile-done-btn" type="button" (click)="closeMobileInput()"
+      [attr.aria-label]="'editor.done' | t">
+      {{ 'editor.done' | t }}
+    </button>
   }
 </div>
 

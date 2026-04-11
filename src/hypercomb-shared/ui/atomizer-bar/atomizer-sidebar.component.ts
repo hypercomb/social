@@ -30,6 +30,21 @@ export class AtomizerSidebarComponent implements OnInit, OnDestroy {
   readonly target = signal<AtomizableTarget | null>(null)
   readonly properties = signal<AtomizerProperty[]>([])
 
+  // ── sidebar zoom (scales with viewport width) ─────────────
+  // Baseline 0.75 at 1920px wide (75% of the previous fixed size).
+  // Scales up linearly on larger monitors; clamped on small/huge screens.
+  readonly #sidebarZoom = signal(this.#computeSidebarZoom())
+  readonly sidebarZoom = this.#sidebarZoom.asReadonly()
+
+  #computeSidebarZoom(): number {
+    const ratio = window.innerWidth / 1920
+    return Math.max(0.675, Math.min(ratio * 0.75, 1.2))
+  }
+
+  #onResize = (): void => {
+    this.#sidebarZoom.set(this.#computeSidebarZoom())
+  }
+
   /** Group properties by their group name */
   readonly groupedProperties = computed(() => {
     const props = this.properties()
@@ -56,10 +71,13 @@ export class AtomizerSidebarComponent implements OnInit, OnDestroy {
       this.properties.set(properties)
       this.visible.set(true)
     })
+
+    window.addEventListener('resize', this.#onResize)
   }
 
   ngOnDestroy(): void {
     this.#propertiesUnsub?.()
+    window.removeEventListener('resize', this.#onResize)
   }
 
   readonly close = (): void => {

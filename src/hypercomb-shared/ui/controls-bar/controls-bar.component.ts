@@ -4,10 +4,13 @@
 import {
   Component,
   computed,
+  ElementRef,
   EventEmitter,
+  inject,
   Input,
   Output,
   signal,
+  type AfterViewInit,
   type OnInit,
   type OnDestroy,
 } from '@angular/core'
@@ -18,6 +21,7 @@ import type { MovementService } from '../../core/movement.service'
 import { EffectBus, SignatureService } from '@hypercomb/core'
 import type { RoomStore } from '../../core/room-store'
 import type { SecretStore } from '../../core/secret-store'
+import type { InstallMonitor } from '../../core/install-monitor'
 import { VoiceInputService } from '../../core/voice-input.service'
 import { secretTag } from './secret-words'
 
@@ -30,7 +34,9 @@ const PILL_POS_KEY = 'hc:controls-pill-pos'
   templateUrl: './controls-bar.component.html',
   styleUrls: ['./controls-bar.component.scss'],
 })
-export class ControlsBarComponent implements OnInit, OnDestroy {
+export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
+
+  #host = inject(ElementRef<HTMLElement>)
 
   // ── inputs ────────────────────────────────────────────────
 
@@ -74,6 +80,19 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #secret$ = fromRuntime(
     get('@hypercomb.social/SecretStore') as EventTarget,
     () => this.secretStore?.value ?? '',
+  )
+
+  // ── background sync indicator ──
+  private get installMonitor(): InstallMonitor | undefined {
+    return get('@hypercomb.social/InstallMonitor') as InstallMonitor | undefined
+  }
+  readonly installState = fromRuntime(
+    get('@hypercomb.social/InstallMonitor') as EventTarget,
+    () => this.installMonitor?.state ?? 'idle',
+  )
+  readonly installChangedFiles = fromRuntime(
+    get('@hypercomb.social/InstallMonitor') as EventTarget,
+    () => this.installMonitor?.changedFiles ?? 0,
   )
 
   #idle = signal(false)
@@ -145,8 +164,17 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   #atomizeStrategy = signal('')
   #atomizeAtomCount = signal(0)
 
-  // ── pill zoom (fixed at max size) ──────────────────────────
-  readonly pillZoom = signal(2).asReadonly()
+  // ── pill zoom (scales with viewport width) ────────────────
+  // Baseline 1.0 at 1920px wide (half the previous fixed 2× size).
+  // Scales up linearly on larger monitors; clamped on small/huge screens.
+  // Mobile uses a separate floating-icon layout that ignores this zoom.
+  readonly #pillZoom = signal(this.#computePillZoom())
+  readonly pillZoom = this.#pillZoom.asReadonly()
+
+  #computePillZoom(): number {
+    const ratio = window.innerWidth / 1920
+    return Math.max(0.9, Math.min(ratio, 1.6))
+  }
 
   // ── pill position (drag-to-move; no resize) ───────────────
   // null = use default CSS positioning (bottom-center). Once dragged,
@@ -356,10 +384,16 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     // ── mobile detection via matchMedia ──
-    // Phone-shaped in any orientation: short side ≤ 599px. In portrait the
-    // width is small; in landscape the height is small. We OR both queries
-    // so the mobile pill stays mobile when the device is rotated.
-    this.#mobileQuery = window.matchMedia('(max-width: 599px), (max-height: 599px)')
+    // Match real phones only — not tablets, not short laptop windows.
+    //   • Portrait phone: width ≤ 599px
+    //   • Landscape phone: width ≤ 1000px AND height ≤ 500px
+    //     (covers up to iPhone 16 Pro Max landscape ~932×430 without catching
+    //      iPad mini landscape 1133×744 or laptops with devtools open).
+    // The earlier `(max-height: 599px)` catch-all triggered the collapsed
+    // 5-icon view on iPads and laptops, which is why those need the full bar.
+    this.#mobileQuery = window.matchMedia(
+      '(max-width: 599px), ((max-width: 1000px) and (max-height: 500px))',
+    )
     this.isMobile.set(this.#mobileQuery.matches)
     this.#mobileQuery.addEventListener('change', this.#mobileHandler)
 
@@ -510,6 +544,16 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     const key = this.#fqdn()
     SignatureService.sign(new TextEncoder().encode(key).buffer as ArrayBuffer)
       .then(sig => this.signedAddress.set(sig))
+  }
+
+  ngAfterViewInit(): void {
+    // Cache the stage element now that it is in the DOM, and re-clamp
+    // any position restored from localStorage against the actual pill
+    // size. Guarantees the pill is always fully on-screen even if the
+    // viewport shrank since the last session.
+    this.#pillStageEl = this.#host.nativeElement.querySelector('.pill-stage')
+    const pos = this.#pillPos()
+    if (pos) this.#pillPos.set(this.#clampPillPos(pos.x, pos.y))
   }
 
   ngOnDestroy(): void {
@@ -707,6 +751,31 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     } else {
       void document.documentElement.requestFullscreen()
     }
+  }
+
+  /** Mobile center-button double-click: lock fit-to-window. */
+  readonly lockFit = (): void => {
+    if (!this.#fitLocked()) {
+      this.#toggleFitLocked()
+    }
+  }
+
+  // ── push-to-talk (mobile mic button) ─────────────────────
+
+  private get voiceService(): VoiceInputService | undefined {
+    return get('@hypercomb.social/VoiceInputService') as VoiceInputService | undefined
+  }
+
+  /** Pointerdown on mic: start recording. */
+  readonly startVoice = (event: PointerEvent): void => {
+    ;(event.target as HTMLElement)?.setPointerCapture?.(event.pointerId)
+    this.voiceService?.start()
+  }
+
+  /** Pointerup/leave on mic: stop. VoiceInputService emits voice:submit
+   * which the command-line listens for and turns into a tile. */
+  readonly stopVoice = (): void => {
+    this.voiceService?.stop()
   }
 
   // ── utility actions (emit effects for drones) ─────────
@@ -948,6 +1017,8 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
     // clamp persisted pill position to viewport on window resize
     const pos = this.#pillPos()
     if (pos) this.#pillPos.set(this.#clampPillPos(pos.x, pos.y))
+    // recompute pill zoom for new viewport width
+    this.#pillZoom.set(this.#computePillZoom())
   }
 
   // ── pill drag-to-move ─────────────────────────────────────
@@ -992,6 +1063,11 @@ export class ControlsBarComponent implements OnInit, OnDestroy {
   }
 
   #clampPillPos(x: number, y: number): { x: number; y: number } {
+    // Lazily resolve the stage element so clamping is accurate even
+    // before the first drag (window resize, localStorage restore).
+    if (!this.#pillStageEl) {
+      this.#pillStageEl = this.#host.nativeElement.querySelector('.pill-stage')
+    }
     const w = this.#pillStageEl?.offsetWidth ?? 0
     const h = this.#pillStageEl?.offsetHeight ?? 0
     const maxX = Math.max(0, window.innerWidth - w)

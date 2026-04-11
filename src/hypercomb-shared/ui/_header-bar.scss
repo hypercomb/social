@@ -193,7 +193,20 @@
 }
 
 // ── phone (≤599px) ────────────────────────────────────────
+// On phones the entire top header bar is hidden by default — the mobile
+// shell uses just the floating icons at the bottom (controls-bar) for
+// input. The command-line and mesh-header live inside the header-bar so
+// this hides them along with the bordered chrome.
+//
+// Long-pressing an empty area of the canvas adds .input-open to the
+// header-bar (driven by the App component listening for the
+// `mobile:input-visible` effect), which un-hides it so the user can
+// type a tile name. The "done" button inside the command-line emits the
+// reverse effect to hide it again.
 @include phone-only {
+
+  .header-bar { display: none; }
+  .header-bar.input-open { display: flex; }
 
   .secured-label,
   .mode-crumb {
@@ -203,4 +216,12 @@
   .header-secret-input {
     font-size: 16px;
   }
+}
+
+// Catch landscape phones too — phone-only is width-only.
+// Bound both dimensions so this only matches real landscape phones, not
+// short laptop windows or iPads in landscape.
+@media (max-width: 1000px) and (max-height: 500px) and (orientation: landscape) {
+  .header-bar { display: none; }
+  .header-bar.input-open { display: flex; }
 }

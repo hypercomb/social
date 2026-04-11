@@ -48,6 +48,7 @@ import { CommandPaletteDrone } from '@hypercomb/essentials/diamondcoreprocessor.
 import { ToastDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/commands/toast.drone'
 import { InstructionDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/instructions/instruction.drone'
 import '@hypercomb/essentials/diamondcoreprocessor.com/commands/slash-behaviour.drone'
+import '@hypercomb/essentials/diamondcoreprocessor.com/commands/empty-long-press.input'
 import { AvatarSwarmDrone } from '@hypercomb/essentials/diamondcoreprocessor.com/presentation/avatars/avatar-swarm.drone'
 import { ClipboardService } from '@hypercomb/essentials/diamondcoreprocessor.com/clipboard/clipboard.service'
 import { ClipboardWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/clipboard/clipboard.worker'
@@ -187,6 +188,7 @@ export class App implements AfterViewInit {
     : false // default: solo mode
   );
   public readonly secretOpen = signal(false);
+  public readonly inputOpen = signal(false);
   public readonly viewActive = signal(false);
   public readonly orientation = signal<HexOrientation>(
     (localStorage.getItem('hc:hex-orientation') as HexOrientation) || 'point-top'
@@ -207,6 +209,13 @@ export class App implements AfterViewInit {
 
     EffectBus.on<{ active: boolean }>('move:mode', ({ active }) => {
       this.moveMode.set(active)
+    })
+
+    // Mobile command-line reveal: long-press on empty canvas (or controls
+    // bar toggle) emits this; the header-bar must un-hide so the
+    // command-line inside it becomes visible.
+    EffectBus.on<{ visible: boolean; mobile: boolean }>('mobile:input-visible', ({ visible, mobile }) => {
+      this.inputOpen.set(mobile && visible)
     })
 
     // Re-open the track player when /player queen is invoked

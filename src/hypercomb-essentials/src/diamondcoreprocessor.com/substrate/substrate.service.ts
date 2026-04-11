@@ -21,6 +21,11 @@
 //   Per-hive 0000  → `substrate-inherit` = false (barrier)
 
 import { EffectBus, type SubstrateSource, type SubstrateRegistry, EMPTY_SUBSTRATE_REGISTRY } from '@hypercomb/core'
+// Folder helpers live in this namespace — see folder-handles.ts header for why
+// essentials must NOT import from @hypercomb/shared. Pulling shared into a
+// module bundle drags in Angular component code, which fails JIT in the
+// browser, which kills every bee in the namespace dep, which is exactly why
+// the default substrate images stopped showing on web.
 import {
   linkFolder as linkFolderHandle,
   getHandle as getFolderHandle,
@@ -29,7 +34,7 @@ import {
   requestPermission as requestFolderPermission,
   readImagesFromHandle,
   isFolderAccessSupported,
-} from '@hypercomb/shared'
+} from './folder-handles.js'
 
 const PROPS_FILE = '0000'
 const HIVE_KEY = 'substrate'                 // per-hive override (path string)

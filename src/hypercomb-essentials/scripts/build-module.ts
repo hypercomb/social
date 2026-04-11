@@ -966,18 +966,18 @@ const main = async (): Promise<void> => {
     beeDeps: Object.fromEntries(beeDepsMap),
   }
 
-  // beeline: merge with existing manifest, skip write if entry already matches
+  // Single-package manifest: always write only the current rootLayerSig.
+  // Merging with prior manifest entries is a footgun — stale package keys
+  // accumulate and the runtime loader picks Object.keys(packages)[0], which
+  // is the *first inserted* (chronologically oldest) entry. That stale entry
+  // then references signatures that no longer exist on disk, breaking install.
   const manifestPath = join(DIST_ROOT, MANIFEST_FILE)
-  let manifest: { version: number; packages: Record<string, unknown> } = { version: 1, packages: {} }
-  if (existsSync(manifestPath)) {
-    try { manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) } catch { /* start fresh */ }
-  }
-  const newManifestJson = JSON.stringify(packageEntry)
-  const existingEntryJson = manifest.packages[rootLayerSig] ? JSON.stringify(manifest.packages[rootLayerSig]) : ''
-  if (newManifestJson !== existingEntryJson) {
-    manifest.packages[rootLayerSig] = packageEntry
-    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n', 'utf8')
-    console.log(`[build-module] manifest updated`)
+  const manifest = { version: 1, packages: { [rootLayerSig]: packageEntry } }
+  const nextJson = JSON.stringify(manifest, null, 2) + '\n'
+  const prevJson = existsSync(manifestPath) ? readFileSync(manifestPath, 'utf8') : ''
+  if (nextJson !== prevJson) {
+    writeFileSync(manifestPath, nextJson, 'utf8')
+    console.log(`[build-module] manifest updated (root ${rootLayerSig.slice(0, 12)})`)
   } else {
     console.log(`[build-module] manifest unchanged — skipped write`)
   }

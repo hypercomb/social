@@ -4,8 +4,9 @@ import '@hypercomb/shared/core/ioc.web'
 
 import { ApplicationRef } from '@angular/core'
 import { bootstrapApplication } from '@angular/platform-browser'
-import { ensureInstall, resyncFromSentinel } from './setup/ensure-install'
-import { initSentinel } from './setup/sentinel-bridge'
+import { EffectBus } from '@hypercomb/core'
+import { ensureInstall, resyncFromSentinel, backgroundSync, type SyncState } from './setup/ensure-install'
+import { initSentinel, type SentinelBridge } from './setup/sentinel-bridge'
 import { resolveImportMap } from './setup/resolve-import-map'
 import { appConfig } from './app.config'
 import { App } from './app/app'
@@ -42,8 +43,7 @@ const attachImportMap = async (): Promise<void> => {
 
 const bootstrap = async (): Promise<void> => {
   await ensureSwControl()
-  const sentinel = await initSentinel()
-  await ensureInstall(sentinel)
+  await ensureInstall()
   await attachImportMap()
 
   // Load dependency namespaces so services self-register before Angular renders
@@ -52,40 +52,53 @@ const bootstrap = async (): Promise<void> => {
 
   const appRef = await bootstrapApplication(App, appConfig)
 
-  // Shared resync logic: resync with sentinel, reload if import map changed,
-  // otherwise let find() enforce the updated manifest (evicts disabled bees).
+  // ── Background sync: status check + lazy sentinel ──
+  // Runs after Angular has rendered so the user sees content immediately.
+  // Only loads the sentinel iframe if the cheap manifest.json status check
+  // detects that DCP has new content to install.
+  let cachedSentinel: SentinelBridge | null = null
+
+  // Forward-declared so lazyInitSentinel can wire it as the toggle callback
   const resyncAndEnforce = async () => {
+    const sentinel = await lazyInitSentinel()
     if (!sentinel) return
 
     const previousSyncSig = localStorage.getItem('sentinel.sync-signature') ?? ''
     await resyncFromSentinel(sentinel)
     const currentSyncSig = localStorage.getItem('sentinel.sync-signature') ?? ''
 
-    // Sync signature changed → new content was installed.
-    // A page reload is required because the browser import map is frozen.
     if (currentSyncSig && currentSyncSig !== previousSyncSig) {
       location.reload()
       return
     }
 
-    // No new content — just refresh bees in case manifest changed without
-    // new dependencies (e.g. toggling existing bees on/off).
-    // find() enforces the manifest: disabled bees are disposed and evicted.
     const preloader = get('@hypercomb.social/ScriptPreloader') as any
     if (preloader?.find) await preloader.find('')
     appRef.tick()
   }
 
-  // After DCP portal installs, resync with sentinel then reload so the
-  // browser picks up the new import-map entries (import maps are immutable
-  // once injected).  If nothing changed, skip the reload.
+  const lazyInitSentinel = async (): Promise<SentinelBridge | null> => {
+    if (cachedSentinel) return cachedSentinel
+    cachedSentinel = await initSentinel()
+    if (cachedSentinel) cachedSentinel.onToggleChanged = resyncAndEnforce
+    return cachedSentinel
+  }
+
+  const emitState = (state: SyncState, detail?: { changedFiles?: number; error?: string }) => {
+    EffectBus.emit('install:state', { state, ...(detail ?? {}) })
+  }
+
+  // After DCP portal installs, resync + reload (import map is frozen).
   window.addEventListener('actions:available', resyncAndEnforce)
 
-  // Live toggle enforcement: when DCP toggles a bee on/off, resync
-  // immediately so the bee stops (or starts) on the very next pulse.
-  if (sentinel) {
-    sentinel.onToggleChanged = resyncAndEnforce
-  }
+  // Defer the background status check so the UI thread isn't competing
+  // with Angular's first render.
+  setTimeout(() => {
+    void backgroundSync({
+      initSentinel: lazyInitSentinel,
+      onState: emitState,
+    })
+  }, 0)
 }
 
 bootstrap().catch(err => console.error(err))

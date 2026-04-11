@@ -966,6 +966,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.voiceService?.stop()
   }
 
+  /** Mobile "done" button: collapse the command-line back to hidden. */
+  readonly closeMobileInput = (): void => {
+    EffectBus.emit('mobile:input-visible', { visible: false, mobile: true })
+  }
+
   public ngOnDestroy(): void {
     this.#prefillUnsub?.()
     this.#commandFocusUnsub?.()

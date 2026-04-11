@@ -42,6 +42,7 @@
   "editor.search-google": "Search Google Images",
   "editor.cancel": "cancel",
   "editor.save": "save",
+  "editor.done": "done",
 
   "controls.go-back": "go back",
   "controls.back": "back",
@@ -111,6 +112,8 @@
 
   "mesh.secret-placeholder": "secure your location",
   "mesh.secured": "secured",
+  "mesh.solo": "solo mode",
+  "mesh.swarm": "swarm mode",
 
   "portal.title": "portal",
   "portal.close": "close portal",

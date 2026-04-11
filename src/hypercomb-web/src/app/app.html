@@ -1,5 +1,5 @@
 @if(showHeader){
-<div class="header-bar" [class.secret-open]="secretOpen()" [style.visibility]="viewActive() ? 'hidden' : null">
+<div class="header-bar" [class.secret-open]="secretOpen()" [class.input-open]="inputOpen()" [style.visibility]="viewActive() ? 'hidden' : null">
   <app-header></app-header>
   <hc-mesh-header [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()" (secretExpandedChange)="secretOpen.set($event)"></hc-mesh-header>
 </div>

@@ -17,15 +17,9 @@ export class MousewheelZoomInput {
   // fine-grained step used when Ctrl is held
   private readonly fineStep = 1.02
 
-  // tracks the target of any in-flight animated zoom so rapid scrolling
-  // chains from the destination rather than the mid-animation scale
-  private animTarget: number | null = null
-  private animClearTimer: ReturnType<typeof setTimeout> | null = null
-
   private zoom: {
     zoomByFactor: (factor: number, pivot: Point) => void
     zoomToScale: (scale: number, pivot: Point) => void
-    animateToScale: (scale: number, pivot: Point) => void
     currentScale: () => number
   } | null = null
 
@@ -35,7 +29,6 @@ export class MousewheelZoomInput {
     zoom: {
       zoomByFactor: (factor: number, pivot: Point) => void
       zoomToScale: (scale: number, pivot: Point) => void
-      animateToScale: (scale: number, pivot: Point) => void
       currentScale: () => number
     },
     canvas: HTMLCanvasElement
@@ -80,20 +73,14 @@ export class MousewheelZoomInput {
 
     if (event.ctrlKey || event.metaKey) {
       // fine-grained smooth zoom when Ctrl/Cmd is held
-      this.animTarget = null
       const factor = zoomIn ? this.fineStep : 1 / this.fineStep
       this.zoom.zoomByFactor(factor, pivot)
     } else {
-      // snap to next/previous level with smooth eased animation
-      // use the in-flight target so rapid scrolling chains predictably
-      const base = this.animTarget ?? this.zoom.currentScale()
-      const next = this.#nextSnapLevel(base, zoomIn)
-      if (next !== base) {
-        this.animTarget = next
-        // clear target after animation settles so stale targets don't linger
-        if (this.animClearTimer) clearTimeout(this.animClearTimer)
-        this.animClearTimer = setTimeout(() => { this.animTarget = null }, 200)
-        this.zoom.animateToScale(next, pivot)
+      // snap to next/previous level
+      const current = this.zoom.currentScale()
+      const next = this.#nextSnapLevel(current, zoomIn)
+      if (next !== current) {
+        this.zoom.zoomToScale(next, pivot)
       }
     }
 

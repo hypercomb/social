@@ -17,6 +17,7 @@
       <div
         class="instruction-label"
         [class]="'placement-' + a.anchor.placement"
+        [attr.data-selector]="a.anchor.selector"
         [style.left.px]="a.x"
         [style.top.px]="a.y"
       >

@@ -23,6 +23,7 @@ export class App implements AfterViewInit {
 
   protected readonly title = signal('hypercomb-web')
   protected readonly secretOpen = signal(false)
+  protected readonly inputOpen = signal(false)
   public showHeader = true
   public readonly viewActive = signal(false)
   readonly clipboardMode = signal(false)
@@ -61,6 +62,13 @@ export class App implements AfterViewInit {
 
     EffectBus.on<{ active: boolean }>('move:mode', ({ active }) => {
       this.moveMode.set(active)
+    })
+
+    // Mobile command-line reveal: when the user long-presses an empty area
+    // (or otherwise toggles via the controls bar), the header-bar must
+    // un-hide so the command-line inside it is visible.
+    EffectBus.on<{ visible: boolean; mobile: boolean }>('mobile:input-visible', ({ visible, mobile }) => {
+      this.inputOpen.set(mobile && visible)
     })
 
     console.log('[app] initialized')

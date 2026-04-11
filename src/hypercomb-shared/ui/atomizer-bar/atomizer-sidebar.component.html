@@ -1,7 +1,7 @@
 <!-- hypercomb-shared/ui/atomizer-bar/atomizer-sidebar.component.html -->
 
 @if (visible()) {
-  <div class="atomizer-sidebar">
+  <div class="atomizer-sidebar" [style.zoom]="sidebarZoom()">
     <div class="sidebar-header">
       <span class="sidebar-title">{{ atomizer()?.name }}</span>
       <div class="sidebar-actions">

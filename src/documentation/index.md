@@ -10,6 +10,7 @@ Central reference for all hypercomb documentation. Files are grouped by topic.
 - [architecture-critique.md](architecture-critique.md) — Review of core architecture through Martin Fowler's architectural principles
 - [core-processor-architecture.md](core-processor-architecture.md) — Purpose and paradigm of @hypercomb/core as zero-dependency foundation
 - [hive.md](hive.md) — How the hexagonal grid and live session presence model works
+- [meetings-and-quorum.md](meetings-and-quorum.md) — 1+6 Cascade meeting template, quorum gathering, WebRTC signaling over the mesh
 - [runtime.md](runtime.md) — Navigation primitives: hex grid, AxialCoordinate, AxialService
 - [recommendations.md](recommendations.md) — Ten architectural improvements to strengthen existing design
 

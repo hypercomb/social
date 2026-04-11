@@ -94,3 +94,30 @@
   0%, 100% { opacity: 0.6; transform: scale(1); }
   50% { opacity: 1; transform: scale(1.2); }
 }
+
+// ── mobile "done" button (collapse the command line) ──────
+// Hidden on desktop / tablet — only useful when the command line
+// has been temporarily revealed by long-press on the mobile canvas.
+.mobile-done-btn {
+  display: none;
+  flex-shrink: 0;
+  padding: 0 1rem;
+  background: transparent;
+  border: none;
+  border-left: 1.5px solid rgba(77, 166, 255, 0.4);
+  color: rgba(77, 166, 255, 0.9);
+  font-family: var(--hc-mono);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  user-select: none;
+
+  &:hover { color: rgba(77, 166, 255, 1); background: rgba(77, 166, 255, 0.06); }
+  &:active { background: rgba(77, 166, 255, 0.12); }
+}
+
+@media (max-width: 599px), (max-width: 1000px) and (max-height: 500px) and (orientation: landscape) {
+  .mobile-done-btn { display: flex; align-items: center; }
+}

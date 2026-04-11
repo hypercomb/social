@@ -78,7 +78,7 @@ export class ShowCellDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'substrate:changed', 'cell:added', 'cell:removed']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'cell:added', 'cell:removed']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -199,6 +199,13 @@ export class ShowCellDrone extends Drone {
   #cursorReconstructionKey = ''
   private suppressMeshRecenter = false
   #layoutMode: 'dense' | 'pinned' = 'dense'
+
+  // add/remove sequence: hide layer → rebuild geometry → fit-to-content → reveal
+  // Set when cell:added/removed fires; consumed at the end of the next render.
+  #fitOnNextRender = false
+  // Safety: if the synchronize that follows cell:added/removed never arrives,
+  // restore the layer alpha so the user isn't stuck with invisible tiles.
+  #fitFallbackTimer: ReturnType<typeof setTimeout> | null = null
 
   // cached render context for fast move:preview path (avoids full OPFS re-read)
   private cachedCellNames: string[] | null = null
@@ -661,6 +668,46 @@ export class ShowCellDrone extends Drone {
     return raw
   }
 
+  /**
+   * Step 1 of the add/remove sequence: arm the fit-on-next-render flag and
+   * make the tile layer invisible immediately so the user doesn't see the
+   * geometry rebuild flicker. The next renderFromSynchronize that completes
+   * applyGeometry will fit-to-content and reveal the layer.
+   *
+   * Uses alpha (not visible) so that getLocalBounds still includes the
+   * existing tiles — the new fit calculation needs them.
+   */
+  #beginFitOnNextRender = (): void => {
+    this.#fitOnNextRender = true
+    if (this.layer) this.layer.alpha = 0
+    if (this.#fitFallbackTimer) clearTimeout(this.#fitFallbackTimer)
+    // Safety net: if no synchronize follows within a second, reveal anyway.
+    this.#fitFallbackTimer = setTimeout(() => {
+      this.#fitFallbackTimer = null
+      if (this.#fitOnNextRender) {
+        this.#fitOnNextRender = false
+        if (this.layer) this.layer.alpha = 1
+      }
+    }, 1000)
+  }
+
+  /**
+   * Steps 3 and 4 of the add/remove sequence: zoom-to-fit (snap, no animation
+   * — the user is waiting on a hidden layer) then restore alpha so the tiles
+   * reappear at their fitted positions in a single frame.
+   */
+  #completeFitAndReveal = (): void => {
+    this.#fitOnNextRender = false
+    if (this.#fitFallbackTimer) {
+      clearTimeout(this.#fitFallbackTimer)
+      this.#fitFallbackTimer = null
+    }
+    const zoom = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ZoomDrone') as
+      { zoomToFit?: (snap?: boolean) => void } | undefined
+    zoom?.zoomToFit?.(true)
+    if (this.layer) this.layer.alpha = 1
+  }
+
   #renderScheduled = false
 
   private readonly requestRender = (): void => {
@@ -1094,6 +1141,17 @@ export class ShowCellDrone extends Drone {
       this.renderedCells.clear()
       this.#pendingRemoves.clear()
       this.suppressMeshRecenter = false  // allow recenter on page navigation
+      // Layer change supersedes any pending fit — the layer-change flow has
+      // its own visibility/viewport handling. Drop the flag and reveal so the
+      // streaming reveal logic isn't fighting alpha=0 from the previous page.
+      if (this.#fitOnNextRender) {
+        this.#fitOnNextRender = false
+        if (this.#fitFallbackTimer) {
+          clearTimeout(this.#fitFallbackTimer)
+          this.#fitFallbackTimer = null
+        }
+        if (this.layer) this.layer.alpha = 1
+      }
 
       // apply saved viewport (or defaults) so the container is correct before tiles render
       await this.#applyViewportForLayer(dir)
@@ -1122,6 +1180,17 @@ export class ShowCellDrone extends Drone {
     // note: same layer — incremental path (cell collection was fresh, images are cached)
     if (cellNames.length === 0) {
       this.clearMesh()
+      // If we hid the layer for an add/remove sequence and the result is an
+      // empty page, there's nothing to fit — just reveal so the user isn't
+      // staring at an invisible empty grid.
+      if (this.#fitOnNextRender) {
+        this.#fitOnNextRender = false
+        if (this.#fitFallbackTimer) {
+          clearTimeout(this.#fitFallbackTimer)
+          this.#fitFallbackTimer = null
+        }
+        if (this.layer) this.layer.alpha = 1
+      }
       return
     }
 
@@ -1157,8 +1226,13 @@ export class ShowCellDrone extends Drone {
 
     await this.applyGeometry(cells)
 
-    // first tile on empty screen → center viewport and zoom 2×
-    if (wasEmpty && cells.length > 0 && this.pixiApp && this.pixiContainer && this.pixiRenderer) {
+    // add/remove sequence step 3+4: fit-to-content, then reveal the layer.
+    // Step 1 (hide) happened in the cell:added/removed handler; step 2
+    // (geometry rebuild) is the applyGeometry call above.
+    if (this.#fitOnNextRender) {
+      this.#completeFitAndReveal()
+    } else if (wasEmpty && cells.length > 0 && this.pixiApp && this.pixiContainer && this.pixiRenderer) {
+      // first tile on empty screen → center viewport and zoom 2×
       const s = this.pixiRenderer.screen
       this.pixiApp.stage.position.set(s.width * 0.5, s.height * 0.5)
       this.pixiContainer.scale.set(2)
@@ -1462,7 +1536,7 @@ export class ShowCellDrone extends Drone {
 
     // cell:added / cell:removed — invalidate render cache so next synchronize picks up new tile set
     // suppress mesh recenter so existing tiles don't shift visually on add/remove
-    this.onEffect<{ cell: string }>('cell:added', (payload) => {
+    this.onEffect<{ cell: string; groupId?: string }>('cell:added', (payload) => {
       this.#layerCellsCache.clear()
       this.renderedCellsKey = ''
       this.suppressMeshRecenter = true
@@ -1470,9 +1544,14 @@ export class ShowCellDrone extends Drone {
         this.#pendingRemoves.delete(payload.cell)
         this.#startNewCellFade(payload.cell)
       }
+      // Rename emits removed+added with a 'rename:' groupId — cell count is
+      // unchanged so fit is unnecessary and the hide/show would just flicker.
+      if (!String(payload?.groupId ?? '').startsWith('rename:')) {
+        this.#beginFitOnNextRender()
+      }
     })
 
-    this.onEffect<{ cell: string }>('cell:removed', (payload) => {
+    this.onEffect<{ cell: string; groupId?: string }>('cell:removed', (payload) => {
       this.#layerCellsCache.clear()
       this.renderedCellsKey = ''
       this.suppressMeshRecenter = true
@@ -1482,6 +1561,9 @@ export class ShowCellDrone extends Drone {
         this.cellTagsCache.delete(payload.cell)
         this.cellLinkCache.delete(payload.cell)
         this.cellBorderColorCache.delete(payload.cell)
+      }
+      if (!String(payload?.groupId ?? '').startsWith('rename:')) {
+        this.#beginFitOnNextRender()
       }
     })
 
@@ -1692,6 +1774,33 @@ export class ShowCellDrone extends Drone {
     // substrate fade-in: when substrate config changes, animate images from 0 → 1
     this.onEffect('substrate:changed', () => {
       this.#startSubstrateFade()
+    })
+
+    // substrate:ready — substrate.service.warmUp() has finished and the props
+    // pool is populated. Force a render that re-emits render:cell-count with
+    // the current noImageLabels; substrate.drone listens for that and assigns
+    // images to every still-blank cell, then emits substrate:applied (below).
+    //
+    // Clearing renderedCellsKey is critical: without it, the next render
+    // would short-circuit at the cellsKey-equality check because no cell has
+    // gained an imageSig yet (chicken-and-egg with substrate apply), and
+    // render:cell-count would never re-fire.
+    this.onEffect('substrate:ready', () => {
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
+    // substrate:applied — substrate has just written a new propsSig into
+    // localStorage for this cell. Drop the cached image entry so the next
+    // loadCellImages pass re-reads the props from disk and picks up the new
+    // sig. requestRender is microtask-coalesced so a burst of N applies
+    // collapses to a single render pass.
+    this.onEffect<{ cell: string }>('substrate:applied', (payload) => {
+      if (!payload?.cell) return
+      this.cellImageCache.delete(payload.cell)
+      this.cellSubstrateCache.delete(payload.cell)
+      this.renderedCellsKey = ''
+      this.requestRender()
     })
 
     // toggle tile label text visibility via shader uniform

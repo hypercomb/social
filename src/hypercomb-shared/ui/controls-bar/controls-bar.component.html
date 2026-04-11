@@ -1,10 +1,3 @@
-<!-- mobile back button: top-left, always visible on mobile -->
-@if (isMobile()) {
-  <button class="mobile-back-btn" [class.disabled]="!canGoBack()" [disabled]="!canGoBack()" (click)="goBack()" [attr.aria-label]="'controls.go-back' | t">
-    <span class="hci">A</span>
-  </button>
-}
-
 <!-- swipe-back edge indicator -->
 <div class="swipe-back-indicator" [class.active]="swipeIndicatorActive()"></div>
 
@@ -30,6 +23,17 @@
     <span class="sep-crumb">◆</span><span class="secure-crumb" [style.color]="shieldColor()">secure</span>
   } @else {
     <span class="sep-crumb">◆</span><span class="unsecure-crumb">unsecured</span>
+  }
+  @if (installState() !== 'idle') {
+    <span class="sep-crumb">◆</span>
+    <span class="install-crumb" [attr.data-state]="installState()">
+      @switch (installState()) {
+        @case ('checking') { checking }
+        @case ('syncing') { installing }
+        @case ('complete') { installed{{ installChangedFiles() ? ' (' + installChangedFiles() + ')' : '' }} }
+        @case ('error') { sync error }
+      }
+    </span>
   }
 </div>
 
@@ -66,7 +70,16 @@
   (mouseenter)="onBarEnter()"
   (mouseleave)="onBarLeave()"
 >
-  <!-- drag handle (move only; no resize) — sits in unzoomed stage -->
+  <!-- zoomed wrapper keeps pill visuals 2× without scaling stage position -->
+  <div class="pill-scaled" [style.zoom]="pillZoom()">
+  <div
+    class="controls-pill"
+    [class.public-mode]="meshPublic"
+    [class.power-ctrl]="powerKey() === 'ctrl'"
+    [class.power-shift]="powerKey() === 'shift'"
+    [class.power-alt]="powerKey() === 'alt'"
+  >
+  <!-- drag handle (move only; no resize) — first child inside the pill -->
   @if (!isMobile()) {
     <div class="drag-handle vertical"
          (pointerdown)="onPillDragStart($event)"
@@ -77,41 +90,31 @@
       <span class="dot"></span><span class="dot"></span>
     </div>
   }
-  <!-- zoomed wrapper keeps pill visuals 2× without scaling stage position or grip -->
-  <div class="pill-scaled" [style.zoom]="pillZoom()">
-  <div
-    class="controls-pill"
-    [class.public-mode]="meshPublic"
-    [class.power-ctrl]="powerKey() === 'ctrl'"
-    [class.power-shift]="powerKey() === 'shift'"
-    [class.power-alt]="powerKey() === 'alt'"
-  >
   @switch (mode()) {
     @case ('browsing') {
 
       @if (isMobile()) {
-        <!-- ═══ MOBILE: streamlined button bar ═══ -->
+        <!-- ═══ MOBILE: 5 floating icons (no chrome) ═══ -->
+        <!-- back · talk · center · fullscreen · solo/swarm -->
         <div class="controls-section mobile-nav">
-          <button class="ctl-btn" [disabled]="!canGoBack()" (click)="goBack()" [attr.aria-label]="'controls.go-back' | t">
+          <button class="ctl-btn" [class.disabled]="!canGoBack()" [disabled]="!canGoBack()" (click)="goBack()" [attr.aria-label]="'controls.go-back' | t">
             <span class="hci">A</span>
           </button>
-          <button class="ctl-btn" (click)="openDcp()" [attr.aria-label]="'controls.dcp' | t">
-            <span class="hci dcp-icon">$</span>
-          </button>
-          <button class="ctl-btn" [class.active]="fitLocked()" (click)="fitOrCenter($event)" [attr.aria-label]="'controls.fit-content' | t">
+          @if (voiceSupported) {
+            <button class="ctl-btn mic-btn" [class.recording]="voiceActive()"
+              (pointerdown)="startVoice($event)" (pointerup)="stopVoice()" (pointercancel)="stopVoice()" (pointerleave)="stopVoice()"
+              [attr.aria-label]="'controls.voice-hold' | t">
+              <span class="mic-icon">{{ voiceActive() ? '🎙' : '🎤' }}</span>
+            </button>
+          }
+          <button class="ctl-btn" [class.active]="fitLocked()" (click)="fitOrCenter($event)" (dblclick)="lockFit()" [attr.aria-label]="'controls.fit-content' | t">
             <span class="hci">q</span>
-          </button>
-          <button class="ctl-btn" [class.active]="inputVisible()" (click)="toggleInput()" [attr.aria-label]="'controls.toggle-input' | t">
-            <span class="hci">></span>
-          </button>
-          <button class="ctl-btn" [class.active]="layoutPinned()" (click)="toggleLayout()" [attr.aria-label]="'controls.layout-mode' | t">
-            <span class="hci">#</span>
           </button>
           <button class="ctl-btn" (click)="toggleFullscreen()" [attr.aria-label]="'controls.fullscreen' | t">
             <span class="hci">'</span>
           </button>
-          <button class="ctl-btn" (click)="toggleInstructions($event)" [attr.aria-label]="'controls.instructions' | t">
-            <span class="hci">?</span>
+          <button class="ctl-btn mesh-mobile-btn" [class.shield-mode]="meshPublic" (click)="toggleMeshPublic()" [attr.aria-label]="(meshPublic ? 'mesh.swarm' : 'mesh.solo') | t">
+            <span class="hci">{{ meshPublic ? 'e' : 'i' }}</span>
           </button>
         </div>
       } @else {

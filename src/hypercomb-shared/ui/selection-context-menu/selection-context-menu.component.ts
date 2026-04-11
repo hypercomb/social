@@ -14,8 +14,8 @@ import { TranslatePipe } from '../../core/i18n.pipe'
 const STORAGE_KEY = 'hc:selection-menu-pos'
 const MENU_WIDTH = 44
 const MENU_HEIGHT_BASE = 160 // approximate height without paste
-// Fixed zoom at 80% of the former max (2.5) — not user-resizable
-const ZOOM_FIXED = 2.0
+// Fixed zoom at 80% of the former max (2.0) — not user-resizable
+const ZOOM_FIXED = 1.6
 
 @Component({
   selector: 'hc-selection-context-menu',

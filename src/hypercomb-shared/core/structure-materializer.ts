@@ -37,6 +37,19 @@ const MAX_DEPTH = 8
 
 export const materializeStructure = async (store: Store): Promise<void> => {
   try {
+    // Fast early exit: if __structure__/ already contains a non-empty domain dir,
+    // assume materialization is done and skip all layer parsing.
+    const opfsRoot = await navigator.storage.getDirectory()
+    try {
+      const existingRoot = await opfsRoot.getDirectoryHandle(STRUCTURE_DIRECTORY, { create: false })
+      for await (const [, handle] of existingRoot.entries()) {
+        if (handle.kind !== 'directory') continue
+        for await (const _ of (handle as FileSystemDirectoryHandle).entries()) {
+          return // found a non-empty domain dir → already materialized
+        }
+      }
+    } catch { /* __structure__/ doesn't exist — first install, proceed */ }
+
     const raw = localStorage.getItem('core-adapter.installed-manifest')
     if (!raw) return
 
@@ -79,20 +92,11 @@ export const materializeStructure = async (store: Store): Promise<void> => {
     if (!rootSig) return
 
     // Create __structure__/ root
-    const opfsRoot = await navigator.storage.getDirectory()
     const structureRoot = await opfsRoot.getDirectoryHandle(STRUCTURE_DIRECTORY, { create: true })
 
     // Determine domain name from root layer
     const rootNode = layerMap.get(rootSig)!
     const domainName = rootNode.name || domainKey
-
-    // Check if already materialized (skip if domain dir exists and is non-empty)
-    try {
-      const existing = await structureRoot.getDirectoryHandle(domainName, { create: false })
-      let hasEntries = false
-      for await (const _ of existing.entries()) { hasEntries = true; break }
-      if (hasEntries) return
-    } catch { /* doesn't exist yet — proceed */ }
 
     // Create domain directory and populate
     const domainDir = await structureRoot.getDirectoryHandle(domainName, { create: true })

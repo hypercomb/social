@@ -1,6 +1,6 @@
 // hypercomb-web/src/app/core/core-adapter.ts
 
-import { Injectable, isDevMode, signal } from "@angular/core"
+import { Injectable, signal } from "@angular/core"
 import { EffectBus } from "@hypercomb/core"
 import { Store, LayerInstaller, DependencyLoader, initializeRuntime } from "@hypercomb/shared/core"
 import { LayerService } from "./layer-service"
@@ -57,7 +57,7 @@ export class CoreAdapter {
     this.initialized = true
 
     await initializeRuntime({
-      logOpfs: isDevMode(),
+      logOpfs: false,
       onMeshStateChange: enabled => {
         // first visit: always start in solo mode, then sticky
         if (readMeshPublic() === null) {

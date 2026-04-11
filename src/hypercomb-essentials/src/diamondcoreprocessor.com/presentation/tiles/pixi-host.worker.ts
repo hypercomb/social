@@ -112,22 +112,49 @@ export class PixiHostWorker extends Worker {
 
     let fullscreenTransition = false
 
-    const center = (): void => {
-      // During fullscreen transitions, keep tiles exactly where they are.
-      // The canvas resizes (more/less visible area) but the stage stays put.
-      if (fullscreenTransition) return
-
-      const cx = window.innerWidth * 0.5
-      const cy = window.innerHeight * 0.5
+    // Pixel-perfect centering: read renderer.screen (the canonical canvas
+    // size in CSS pixels — same coordinate space stage children render in),
+    // round to integer pixels, and apply pan as an offset from that exact
+    // center. When pan is (0, 0), the centered grid lands on whole pixels
+    // with zero sub-pixel drift after rotation/resize/fullscreen.
+    const applyCenter = (): void => {
+      const screenSize = app.renderer.screen
+      const cx = Math.round(screenSize.width * 0.5)
+      const cy = Math.round(screenSize.height * 0.5)
       const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
       const pan = vp?.lastPan
       app.stage.position.set(cx + (pan?.dx ?? 0), cy + (pan?.dy ?? 0))
     }
 
+    // Pixi's ResizePlugin defers renderer.resize() via requestAnimationFrame
+    // in response to window 'resize'. If we recenter synchronously inside the
+    // resize event, renderer.screen is still STALE — we'd be centering against
+    // the previous frame's canvas dimensions and the grid would land off-centre
+    // after rotation. We must run AFTER Pixi's RAF so renderer.screen reflects
+    // the new canvas size. We chain two RAFs as belt-and-braces because some
+    // browsers (notably mobile Safari) settle layout a frame later than the
+    // resize event itself, especially on device orientation rotation.
+    const center = (): void => {
+      if (fullscreenTransition) return
+      requestAnimationFrame(() => {
+        if (fullscreenTransition) return
+        requestAnimationFrame(() => {
+          if (fullscreenTransition) return
+          applyCenter()
+        })
+      })
+    }
+
+    // Initial centering — also deferred so we wait for Pixi's first resize RAF.
     center()
+    // Window resize covers desktop resize and most device rotations.
     window.addEventListener('resize', center)
-    // orientation changes don't always fire 'resize'
-    window.addEventListener('orientationchange', () => { setTimeout(center, 50) })
+    // orientationchange + screen.orientation.change cover the cases where
+    // resize fires inconsistently or after a delay during device rotation.
+    window.addEventListener('orientationchange', center)
+    if (screen.orientation && typeof screen.orientation.addEventListener === 'function') {
+      screen.orientation.addEventListener('change', center)
+    }
     // Fullscreen: suppress recenter so tiles stay pixel-perfect.
     // Block recenter for the duration of the transition, then release.
     document.addEventListener('fullscreenchange', () => {
