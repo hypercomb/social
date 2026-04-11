@@ -1,5 +1,5 @@
 // @diamondcoreprocessor.com/substrate
-// hypercomb-essentials/src/diamondcoreprocessor.com/substrate/folder-handles.ts
+// src/diamondcoreprocessor.com/substrate/folder-handles.ts
 var DB_NAME = "hypercomb-folder-handles";
 var STORE_NAME = "handles";
 var DB_VERSION = 1;
@@ -106,7 +106,7 @@ async function readImagesFromHandle(handle) {
   return out;
 }
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/substrate/substrate.queen.ts
+// src/diamondcoreprocessor.com/substrate/substrate.queen.ts
 import { QueenBee, EffectBus, hypercomb } from "@hypercomb/core";
 var get = (key) => window.ioc?.get?.(key);
 var BUILTIN_DEFAULTS_ID = "builtin:defaults";
@@ -218,7 +218,7 @@ var SubstrateQueenBee = class extends QueenBee {
 var _substrate = new SubstrateQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/SubstrateQueenBee", _substrate);
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/substrate/substrate.service.ts
+// src/diamondcoreprocessor.com/substrate/substrate.service.ts
 import { EffectBus as EffectBus2, EMPTY_SUBSTRATE_REGISTRY } from "@hypercomb/core";
 var PROPS_FILE = "0000";
 var HIVE_KEY = "substrate";

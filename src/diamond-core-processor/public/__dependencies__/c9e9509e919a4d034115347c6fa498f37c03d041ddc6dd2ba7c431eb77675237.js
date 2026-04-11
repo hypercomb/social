@@ -1,5 +1,5 @@
 // @diamondcoreprocessor.com/navigation/zoom
-// hypercomb-essentials/src/diamondcoreprocessor.com/navigation/zoom/fit.queen.ts
+// src/diamondcoreprocessor.com/navigation/zoom/fit.queen.ts
 import { QueenBee } from "@hypercomb/core";
 var FitQueenBee = class extends QueenBee {
   namespace = "diamondcoreprocessor.com";
@@ -18,7 +18,7 @@ var FitQueenBee = class extends QueenBee {
 var _fit = new FitQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/FitQueenBee", _fit);
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/navigation/zoom/mousewheel-zoom.input.ts
+// src/diamondcoreprocessor.com/navigation/zoom/mousewheel-zoom.input.ts
 var SNAP_LEVELS = [
   0.05,
   0.08,
@@ -99,7 +99,7 @@ var MousewheelZoomInput = class {
 };
 window.ioc.register("@diamondcoreprocessor.com/MousewheelZoomInput", new MousewheelZoomInput());
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/navigation/zoom/pinch-zoom.input.ts
+// src/diamondcoreprocessor.com/navigation/zoom/pinch-zoom.input.ts
 var PinchZoomInput = class {
   #zoom = null;
   #minScale = 0.05;
@@ -129,7 +129,7 @@ var PinchZoomInput = class {
 };
 window.ioc.register("@diamondcoreprocessor.com/PinchZoomInput", new PinchZoomInput());
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/navigation/zoom/zoom-arbiter.ts
+// src/diamondcoreprocessor.com/navigation/zoom/zoom-arbiter.ts
 var ZoomArbiter = class {
   activeSource = null;
   acquire = (source, force = false) => {

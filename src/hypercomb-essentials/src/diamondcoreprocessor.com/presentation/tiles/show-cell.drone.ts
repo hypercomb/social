@@ -206,6 +206,12 @@ export class ShowCellDrone extends Drone {
   // Safety: if the synchronize that follows cell:added/removed never arrives,
   // restore the layer alpha so the user isn't stuck with invisible tiles.
   #fitFallbackTimer: ReturnType<typeof setTimeout> | null = null
+  // First-visit fit: when navigating to a layer that has no saved viewport
+  // snapshot, defer layer reveal until all cells have streamed in, then run
+  // zoom-to-fit so the page opens sized to its content. The fitted viewport
+  // is persisted, so subsequent visits restore it (or the user's later
+  // pan/zoom edits) instead of fitting again.
+  #fitAfterStream = false
 
   // cached render context for fast move:preview path (avoids full OPFS re-read)
   private cachedCellNames: string[] | null = null
@@ -1152,9 +1158,15 @@ export class ShowCellDrone extends Drone {
         }
         if (this.layer) this.layer.alpha = 1
       }
+      // Reset any pending first-visit fit from a superseded navigation.
+      this.#fitAfterStream = false
 
       // apply saved viewport (or defaults) so the container is correct before tiles render
-      await this.#applyViewportForLayer(dir)
+      const hasSavedViewport = await this.#applyViewportForLayer(dir)
+      // First visit to this layer (no persisted viewport) → fit-to-content
+      // after streaming completes. streamCells will delay layer reveal until
+      // the fit has been applied so the user doesn't see an unfitted flash.
+      this.#fitAfterStream = !hasSavedViewport
 
       // sync VP directory so subsequent pan/zoom writes persist to the correct layer
       const vp = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ViewportPersistence') as ViewportPersistence | undefined
@@ -1163,6 +1175,9 @@ export class ShowCellDrone extends Drone {
       if (cellNames.length === 0) {
         if (this.layer) this.layer.visible = true
         this.clearMesh()
+        // nothing to fit on an empty layer — drop the flag so a later render
+        // doesn't mis-fire with stale state
+        this.#fitAfterStream = false
         return
       }
 
@@ -1284,12 +1299,28 @@ export class ShowCellDrone extends Drone {
       await this.applyGeometry(cells, isLast)
 
       // reveal the layer as soon as the first batch is on-screen so cold start
-      // shows tiles immediately and the rest stream in progressively
-      if (!this.cancelStreamFlag && this.layer && !this.layer.visible) {
+      // shows tiles immediately and the rest stream in progressively — unless
+      // we're deferring reveal for a first-visit fit-to-content, in which case
+      // we wait for the full stream before fitting and revealing together.
+      if (!this.cancelStreamFlag && this.layer && !this.layer.visible && !this.#fitAfterStream) {
         this.layer.visible = true
       }
 
       if (!isLast) await this.microDelay()
+    }
+
+    // first-visit fit: content is fully streamed, bounds are stable — fit now,
+    // then reveal so the page opens already sized to its content. The fitted
+    // viewport is persisted by zoomToFit, so subsequent visits restore it.
+    if (!this.cancelStreamFlag && this.#fitAfterStream && cells.length > 0) {
+      this.#fitAfterStream = false
+      const zoom = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ZoomDrone') as
+        { zoomToFit?: (snap?: boolean) => void } | undefined
+      zoom?.zoomToFit?.(true)
+    } else if (this.#fitAfterStream) {
+      // stream cancelled or empty — clear the flag so a later render isn't
+      // mis-armed by stale state
+      this.#fitAfterStream = false
     }
 
     // safety: ensure layer is visible if loop exited without rendering anything
@@ -1307,11 +1338,11 @@ export class ShowCellDrone extends Drone {
     this.requestRender()
   }
 
-  readonly #applyViewportForLayer = async (dir: FileSystemDirectoryHandle): Promise<void> => {
+  readonly #applyViewportForLayer = async (dir: FileSystemDirectoryHandle): Promise<boolean> => {
     const container = this.pixiContainer
     const app = this.pixiApp
     const renderer = this.pixiRenderer
-    if (!container || !app || !renderer) return
+    if (!container || !app || !renderer) return false
 
     // read 0000 directly from the target dir — VP.#dir may still
     // point at the previous layer (navigate fires before store.change)
@@ -1342,6 +1373,10 @@ export class ShowCellDrone extends Drone {
     } else {
       app.stage.position.set(s.width * 0.5, s.height * 0.5)
     }
+
+    // true if this layer has a persisted viewport (zoom or pan). When false,
+    // the caller can trigger a first-visit fit-to-content after content renders.
+    return !!(snap.zoom || snap.pan)
   }
 
   private readonly applyGeometry = async (cells: Cell[], final = true): Promise<void> => {

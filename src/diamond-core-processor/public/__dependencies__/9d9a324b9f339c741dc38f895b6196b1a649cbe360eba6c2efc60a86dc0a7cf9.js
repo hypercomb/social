@@ -1,5 +1,5 @@
 // @diamondcoreprocessor.com/commands
-// hypercomb-essentials/src/diamondcoreprocessor.com/commands/accent.queen.ts
+// src/diamondcoreprocessor.com/commands/accent.queen.ts
 import { QueenBee, EffectBus, hypercomb } from "@hypercomb/core";
 var STORAGE_KEY = "hc:neon-color";
 var ACCENT_NAMES = {
@@ -124,7 +124,7 @@ function loadIndex() {
 var _accent = new AccentQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/AccentQueenBee", _accent);
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/commands/arrange.queen.ts
+// src/diamondcoreprocessor.com/commands/arrange.queen.ts
 import { QueenBee as QueenBee2, EffectBus as EffectBus2 } from "@hypercomb/core";
 var ArrangeQueenBee = class extends QueenBee2 {
   namespace = "diamondcoreprocessor.com";
@@ -139,7 +139,7 @@ var ArrangeQueenBee = class extends QueenBee2 {
 var _arrange = new ArrangeQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/ArrangeQueenBee", _arrange);
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/commands/debug.queen.ts
+// src/diamondcoreprocessor.com/commands/debug.queen.ts
 import { QueenBee as QueenBee3, EffectBus as EffectBus3 } from "@hypercomb/core";
 var DebugQueenBee = class extends QueenBee3 {
   namespace = "diamondcoreprocessor.com";
@@ -162,7 +162,7 @@ var DebugQueenBee = class extends QueenBee3 {
 var _debug = new DebugQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/DebugQueenBee", _debug);
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/commands/domain.queen.ts
+// src/diamondcoreprocessor.com/commands/domain.queen.ts
 import { QueenBee as QueenBee4 } from "@hypercomb/core";
 var DomainQueenBee = class extends QueenBee4 {
   namespace = "diamondcoreprocessor.com";
@@ -236,7 +236,7 @@ var DomainQueenBee = class extends QueenBee4 {
 var _domain = new DomainQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/DomainQueenBee", _domain);
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/commands/empty-long-press.input.ts
+// src/diamondcoreprocessor.com/commands/empty-long-press.input.ts
 import { Point } from "pixi.js";
 import { EffectBus as EffectBus4 } from "@hypercomb/core";
 var HOLD_MS = 500;
@@ -365,7 +365,7 @@ var EmptyLongPressInput = class {
 var _emptyLongPress = new EmptyLongPressInput();
 window.ioc.register("@diamondcoreprocessor.com/EmptyLongPressInput", _emptyLongPress);
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/commands/help.queen.ts
+// src/diamondcoreprocessor.com/commands/help.queen.ts
 import { QueenBee as QueenBee5, EffectBus as EffectBus5 } from "@hypercomb/core";
 var HelpQueenBee = class extends QueenBee5 {
   namespace = "diamondcoreprocessor.com";
@@ -407,7 +407,7 @@ var HelpQueenBee = class extends QueenBee5 {
 var _help = new HelpQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/HelpQueenBee", _help);
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/commands/keyword.queen.ts
+// src/diamondcoreprocessor.com/commands/keyword.queen.ts
 import { QueenBee as QueenBee6, EffectBus as EffectBus6, hypercomb as hypercomb2 } from "@hypercomb/core";
 var KeywordQueenBee = class extends QueenBee6 {
   namespace = "diamondcoreprocessor.com";
@@ -520,7 +520,7 @@ async function writeProps2(cellDir, updates) {
 var _keyword = new KeywordQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/KeywordQueenBee", _keyword);
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/commands/language.queen.ts
+// src/diamondcoreprocessor.com/commands/language.queen.ts
 import { QueenBee as QueenBee7, I18N_IOC_KEY } from "@hypercomb/core";
 var LanguageQueenBee = class extends QueenBee7 {
   namespace = "diamondcoreprocessor.com";
@@ -566,7 +566,7 @@ var LOCALE_ALIASES = {
 var _language = new LanguageQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/LanguageQueenBee", _language);
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/commands/player.queen.ts
+// src/diamondcoreprocessor.com/commands/player.queen.ts
 import { QueenBee as QueenBee8, EffectBus as EffectBus7 } from "@hypercomb/core";
 var DISMISSED_KEY = "hc:player-dismissed";
 var PlayerQueenBee = class extends QueenBee8 {
@@ -585,7 +585,7 @@ var PlayerQueenBee = class extends QueenBee8 {
 var _player = new PlayerQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/PlayerQueenBee", _player);
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/commands/remove.queen.ts
+// src/diamondcoreprocessor.com/commands/remove.queen.ts
 import { QueenBee as QueenBee9, EffectBus as EffectBus8, hypercomb as hypercomb3 } from "@hypercomb/core";
 var RemoveQueenBee = class extends QueenBee9 {
   namespace = "diamondcoreprocessor.com";
@@ -639,7 +639,7 @@ EffectBus8.on("keymap:invoke", (payload) => {
   if (payload?.cmd === "selection.remove") void _remove.invoke("");
 });
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/commands/rename.queen.ts
+// src/diamondcoreprocessor.com/commands/rename.queen.ts
 import { QueenBee as QueenBee10, EffectBus as EffectBus9, SignatureService, hypercomb as hypercomb4 } from "@hypercomb/core";
 var RenameQueenBee = class extends QueenBee10 {
   namespace = "diamondcoreprocessor.com";
@@ -724,10 +724,10 @@ function normalizeName2(s) {
 var _rename = new RenameQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/RenameQueenBee", _rename);
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/commands/translation.service.ts
+// src/diamondcoreprocessor.com/commands/translation.service.ts
 import { EffectBus as EffectBus10, SignatureService as SignatureService2 } from "@hypercomb/core";
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/assistant/llm-api.ts
+// src/diamondcoreprocessor.com/assistant/llm-api.ts
 var ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages";
 var ANTHROPIC_VERSION = "2023-06-01";
 var MODELS = {
@@ -764,7 +764,7 @@ var callAnthropic = async (model, systemPrompt, userMessage, apiKey, maxTokens =
   return json.content?.[0]?.text ?? "";
 };
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/commands/translation.service.ts
+// src/diamondcoreprocessor.com/commands/translation.service.ts
 var CACHE_KEY = "hc:translation-cache";
 var PROPS_INDEX_KEY = "hc:tile-props-index";
 var TranslationService = class extends EventTarget {

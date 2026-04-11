@@ -1,8 +1,8 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/show-cell.drone.ts
+// src/diamondcoreprocessor.com/presentation/tiles/show-cell.drone.ts
 import { Drone, SignatureService } from "@hypercomb/core";
 import { Container as Container3, Geometry, Mesh, Texture as Texture4 } from "pixi.js";
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/presentation/grid/hex-label.atlas.ts
+// src/diamondcoreprocessor.com/presentation/grid/hex-label.atlas.ts
 import { Container, RenderTexture, Text, TextStyle } from "pixi.js";
 var HexLabelAtlas = class {
   constructor(renderer, cellPx = 128, cols = 8, rows = 8) {
@@ -84,7 +84,7 @@ var HexLabelAtlasFactory = class {
 };
 window.ioc.register("@diamondcoreprocessor.com/HexLabelAtlasFactory", new HexLabelAtlasFactory());
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/presentation/grid/hex-image.atlas.ts
+// src/diamondcoreprocessor.com/presentation/grid/hex-image.atlas.ts
 import { Container as Container2, RenderTexture as RenderTexture2, Sprite, Texture as Texture2 } from "pixi.js";
 var HexImageAtlas = class _HexImageAtlas {
   #atlas;
@@ -183,7 +183,7 @@ var HexImageAtlas = class _HexImageAtlas {
   }
 };
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/presentation/grid/hex-sdf.shader.ts
+// src/diamondcoreprocessor.com/presentation/grid/hex-sdf.shader.ts
 import { Shader } from "pixi.js";
 var HexSdfTextureShader = class _HexSdfTextureShader {
   shader;
@@ -543,13 +543,13 @@ var HexSdfTextureShaderFactory = class {
 };
 window.ioc.register("@diamondcoreprocessor.com/HexSdfTextureShaderFactory", new HexSdfTextureShaderFactory());
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/presentation/grid/hex-geometry.ts
+// src/diamondcoreprocessor.com/presentation/grid/hex-geometry.ts
 function createHexGeometry(circumRadiusPx, gapPx, padPx = 10) {
   return { circumRadiusPx, gapPx, padPx, spacing: circumRadiusPx + gapPx };
 }
 var DEFAULT_HEX_GEOMETRY = createHexGeometry(32, 6);
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/editor/tile-properties.ts
+// src/diamondcoreprocessor.com/editor/tile-properties.ts
 var TILE_PROPERTIES_FILE = "0000";
 var isSignature = (value) => typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
 var readCellProperties = async (cellDir) => {
@@ -571,7 +571,7 @@ var writeCellProperties = async (cellDir, updates) => {
   await writable.close();
 };
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/show-cell.drone.ts
+// src/diamondcoreprocessor.com/presentation/tiles/show-cell.drone.ts
 function labelToRgb(label) {
   let hash = 5381;
   for (let i = 0; i < label.length; i++) hash = (hash << 5) + hash + label.charCodeAt(i) | 0;
@@ -736,6 +736,12 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
   // Safety: if the synchronize that follows cell:added/removed never arrives,
   // restore the layer alpha so the user isn't stuck with invisible tiles.
   #fitFallbackTimer = null;
+  // First-visit fit: when navigating to a layer that has no saved viewport
+  // snapshot, defer layer reveal until all cells have streamed in, then run
+  // zoom-to-fit so the page opens sized to its content. The fitted viewport
+  // is persisted, so subsequent visits restore it (or the user's later
+  // pan/zoom edits) instead of fitting again.
+  #fitAfterStream = false;
   // cached render context for fast move:preview path (avoids full OPFS re-read)
   cachedCellNames = null;
   cachedLocalCellSet = null;
@@ -1472,12 +1478,15 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
         }
         if (this.layer) this.layer.alpha = 1;
       }
-      await this.#applyViewportForLayer(dir);
+      this.#fitAfterStream = false;
+      const hasSavedViewport = await this.#applyViewportForLayer(dir);
+      this.#fitAfterStream = !hasSavedViewport;
       const vp = window.ioc?.get?.("@diamondcoreprocessor.com/ViewportPersistence");
       if (vp) vp.setDirSilent(dir);
       if (cellNames.length === 0) {
         if (this.layer) this.layer.visible = true;
         this.clearMesh();
+        this.#fitAfterStream = false;
         return;
       }
       if (this.layer) this.layer.visible = false;
@@ -1554,10 +1563,17 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       }
       const isLast = start + BATCH >= allCells.length;
       await this.applyGeometry(cells, isLast);
-      if (!this.cancelStreamFlag && this.layer && !this.layer.visible) {
+      if (!this.cancelStreamFlag && this.layer && !this.layer.visible && !this.#fitAfterStream) {
         this.layer.visible = true;
       }
       if (!isLast) await this.microDelay();
+    }
+    if (!this.cancelStreamFlag && this.#fitAfterStream && cells.length > 0) {
+      this.#fitAfterStream = false;
+      const zoom = window.ioc?.get?.("@diamondcoreprocessor.com/ZoomDrone");
+      zoom?.zoomToFit?.(true);
+    } else if (this.#fitAfterStream) {
+      this.#fitAfterStream = false;
     }
     if (!this.cancelStreamFlag && this.layer) this.layer.visible = true;
     this.streamActive = false;
@@ -1572,7 +1588,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
     const container = this.pixiContainer;
     const app = this.pixiApp;
     const renderer = this.pixiRenderer;
-    if (!container || !app || !renderer) return;
+    if (!container || !app || !renderer) return false;
     let snap = {};
     try {
       const fh = await dir.getFileHandle("0000");
@@ -1594,6 +1610,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
     } else {
       app.stage.position.set(s.width * 0.5, s.height * 0.5);
     }
+    return !!(snap.zoom || snap.pan);
   };
   applyGeometry = async (cells, final = true) => {
     if (cells.length === 0) {
