@@ -30,19 +30,24 @@ export class AtomizerSidebarComponent implements OnInit, OnDestroy {
   readonly target = signal<AtomizableTarget | null>(null)
   readonly properties = signal<AtomizerProperty[]>([])
 
-  // ── sidebar zoom (scales with viewport width) ─────────────
-  // Baseline 0.75 at 1920px wide (75% of the previous fixed size).
-  // Scales up linearly on larger monitors; clamped on small/huge screens.
-  readonly #sidebarZoom = signal(this.#computeSidebarZoom())
-  readonly sidebarZoom = this.#sidebarZoom.asReadonly()
+  // ── sidebar scale (scales with viewport width) ─────────────
+  // Baseline 1.0 at 1920px wide; scales up linearly on larger monitors,
+  // clamped at 1.2. Applied as a CSS custom property multiplier on
+  // font-size / dimensions rather than CSS `zoom`, because `zoom`
+  // combined with `backdrop-filter` promotes the sidebar to a
+  // compositing layer that rasterizes at CSS-pixel density, producing
+  // blurry text on high-DPI displays. Scaling via `calc()` lets the
+  // browser render each glyph at its true device-pixel size.
+  readonly #sidebarScale = signal(this.#computeSidebarScale())
+  readonly sidebarScale = this.#sidebarScale.asReadonly()
 
-  #computeSidebarZoom(): number {
+  #computeSidebarScale(): number {
     const ratio = window.innerWidth / 1920
-    return Math.max(0.675, Math.min(ratio * 0.75, 1.2))
+    return Math.max(1.0, Math.min(ratio, 1.2))
   }
 
   #onResize = (): void => {
-    this.#sidebarZoom.set(this.#computeSidebarZoom())
+    this.#sidebarScale.set(this.#computeSidebarScale())
   }
 
   /** Group properties by their group name */

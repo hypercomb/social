@@ -31,6 +31,9 @@
     <button class="ctx-btn" (click)="hide()" [attr.aria-label]="'selection.hide' | t">
       <span class="eye-icon" [class.struck]="!allHidden()"></span>
     </button>
+    <button class="ctx-btn" (click)="reroll()" [attr.aria-label]="'selection.reroll' | t">
+      <span class="reroll-icon"></span>
+    </button>
 
     @if (clipboardCount() > 0) {
       <div class="ctx-divider"></div>

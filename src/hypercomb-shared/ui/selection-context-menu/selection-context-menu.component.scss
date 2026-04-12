@@ -158,6 +158,32 @@
   background: whitesmoke;
 }
 
+// ── reroll icon (refresh arrows) ────────────────────────
+// Same glyph as the per-tile overlay reroll action so the affordance is
+// visually identical across entry points.
+
+.reroll-icon {
+  display: inline-block;
+  width: 0.9rem;
+  height: 0.9rem;
+
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 4v6h6'/%3E%3Cpath d='M23 20v-6h-6'/%3E%3Cpath d='M20.49 9A9 9 0 0 0 5.64 5.64L1 10'/%3E%3Cpath d='M3.51 15A9 9 0 0 0 18.36 18.36L23 14'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 4v6h6'/%3E%3Cpath d='M23 20v-6h-6'/%3E%3Cpath d='M20.49 9A9 9 0 0 0 5.64 5.64L1 10'/%3E%3Cpath d='M3.51 15A9 9 0 0 0 18.36 18.36L23 14'/%3E%3C/svg%3E");
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+
+  background: rgba(200, 200, 200, 0.8);
+  transition: background 200ms ease;
+}
+
+.ctx-btn:hover .reroll-icon {
+  background: whitesmoke;
+}
+
 // ── responsive ──────────────────────────────────────────
 
 @include touch {

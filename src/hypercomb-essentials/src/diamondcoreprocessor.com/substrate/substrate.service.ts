@@ -120,6 +120,9 @@ export class SubstrateService extends EventTarget {
   #registry: SubstrateRegistry = EMPTY_SUBSTRATE_REGISTRY
   #resolved: ResolvedSource | null = null
   #propsPool: { imageSig: string; propsSig: string }[] = []
+  // propsSig → times currently assigned across tiles. Drives balanced picking
+  // so every image gets used once before any gets used twice.
+  #usageCounts: Map<string, number> = new Map()
 
   // ───────────────────────── registry ─────────────────────────
 
@@ -549,13 +552,56 @@ export class SubstrateService extends EventTarget {
       } catch { /* skip */ }
     }
 
-    // Pad to minimum pool size by cycling.
-    const MIN_POOL = 50
-    if (pool.length > 0 && pool.length < MIN_POOL) {
-      const base = [...pool]
-      while (pool.length < MIN_POOL) pool.push(base[pool.length % base.length])
-    }
+    // Pool holds one entry per unique image. The balanced picker cycles
+    // through entries by least-used count, so padding to a minimum size is
+    // unnecessary — we'd just be adding duplicates the picker would then
+    // have to work around.
     this.#propsPool = pool
+    this.#seedUsageCounts()
+  }
+
+  /**
+   * Rebuild per-entry usage counts from the current tile-props-index. Keeps
+   * the balanced picker honest across reloads and source switches: tiles
+   * already assigned to an image count against that image so we don't hand
+   * the same one out again until every other image has caught up.
+   */
+  #seedUsageCounts(): void {
+    this.#usageCounts = new Map(this.#propsPool.map(entry => [entry.propsSig, 0]))
+    try {
+      const index: Record<string, string> = JSON.parse(localStorage.getItem('hc:tile-props-index') ?? '{}')
+      for (const propsSig of Object.values(index)) {
+        if (typeof propsSig !== 'string') continue
+        if (!this.#usageCounts.has(propsSig)) continue
+        this.#usageCounts.set(propsSig, (this.#usageCounts.get(propsSig) ?? 0) + 1)
+      }
+    } catch { /* index unreadable — start from zero */ }
+  }
+
+  /**
+   * Pick a pool entry from those with the lowest current usage count, then
+   * increment. Random tie-breaks among least-used entries keep output
+   * unpredictable without breaking the even distribution.
+   */
+  #pickBalanced(): { imageSig: string; propsSig: string } | null {
+    if (this.#propsPool.length === 0) return null
+    let min = Infinity
+    for (const entry of this.#propsPool) {
+      const count = this.#usageCounts.get(entry.propsSig) ?? 0
+      if (count < min) min = count
+    }
+    const candidates = this.#propsPool.filter(e => (this.#usageCounts.get(e.propsSig) ?? 0) === min)
+    const chosen = candidates[Math.floor(Math.random() * candidates.length)]
+    this.#usageCounts.set(chosen.propsSig, (this.#usageCounts.get(chosen.propsSig) ?? 0) + 1)
+    return chosen
+  }
+
+  /** Decrement the usage count for a propsSig being released from a tile. */
+  #releaseUsage(propsSig: string | undefined): void {
+    if (!propsSig) return
+    const current = this.#usageCounts.get(propsSig)
+    if (current === undefined) return
+    this.#usageCounts.set(propsSig, Math.max(0, current - 1))
   }
 
   pickRandomImageSync(): string | null {
@@ -570,7 +616,8 @@ export class SubstrateService extends EventTarget {
     const indexKey = 'hc:tile-props-index'
     const index: Record<string, string> = JSON.parse(localStorage.getItem(indexKey) ?? '{}')
     if (index[label]) return false
-    const entry = this.#propsPool[Math.floor(Math.random() * this.#propsPool.length)]
+    const entry = this.#pickBalanced()
+    if (!entry) return false
     index[label] = entry.propsSig
     localStorage.setItem(indexKey, JSON.stringify(index))
     return true
@@ -580,16 +627,46 @@ export class SubstrateService extends EventTarget {
     if (this.#propsPool.length === 0) return false
     const indexKey = 'hc:tile-props-index'
     const index: Record<string, string> = JSON.parse(localStorage.getItem(indexKey) ?? '{}')
+    this.#releaseUsage(index[label])
     delete index[label]
-    const entry = this.#propsPool[Math.floor(Math.random() * this.#propsPool.length)]
+    const entry = this.#pickBalanced()
+    if (!entry) return false
     index[label] = entry.propsSig
     localStorage.setItem(indexKey, JSON.stringify(index))
     return true
   }
 
+  /**
+   * Reroll every label that currently holds a substrate-pool propsSig.
+   * Labels whose current props are not from the substrate pool (e.g. a
+   * user-edited tile with its own image) are skipped so the bulk action can
+   * never clobber authored content. Returns the labels that were actually
+   * rerolled — callers should emit `substrate:rerolled` per returned label
+   * so show-cell can invalidate its caches.
+   */
+  rerollCells(labels: string[]): string[] {
+    if (this.#propsPool.length === 0 || labels.length === 0) return []
+    const indexKey = 'hc:tile-props-index'
+    const index: Record<string, string> = JSON.parse(localStorage.getItem(indexKey) ?? '{}')
+    const substrateSigs = new Set(this.#propsPool.map(p => p.propsSig))
+    const rerolled: string[] = []
+    for (const label of labels) {
+      const current = index[label]
+      if (!current || !substrateSigs.has(current)) continue
+      this.#releaseUsage(current)
+      const entry = this.#pickBalanced()
+      if (!entry) break
+      index[label] = entry.propsSig
+      rerolled.push(label)
+    }
+    if (rerolled.length > 0) localStorage.setItem(indexKey, JSON.stringify(index))
+    return rerolled
+  }
+
   clearCell(label: string): void {
     const indexKey = 'hc:tile-props-index'
     const index: Record<string, string> = JSON.parse(localStorage.getItem(indexKey) ?? '{}')
+    this.#releaseUsage(index[label])
     delete index[label]
     localStorage.setItem(indexKey, JSON.stringify(index))
   }
@@ -601,7 +678,8 @@ export class SubstrateService extends EventTarget {
     const applied: string[] = []
     for (const label of labels) {
       if (index[label]) continue
-      const entry = this.#propsPool[Math.floor(Math.random() * this.#propsPool.length)]
+      const entry = this.#pickBalanced()
+      if (!entry) break
       index[label] = entry.propsSig
       applied.push(label)
     }
@@ -623,7 +701,9 @@ export class SubstrateService extends EventTarget {
     const substrateSigs = new Set(this.#propsPool.map(p => p.propsSig))
     let cleared = 0
     for (const label of visibleLabels) {
-      if (index[label] && substrateSigs.has(index[label])) {
+      const current = index[label]
+      if (current && substrateSigs.has(current)) {
+        this.#releaseUsage(current)
         delete index[label]
         cleared++
       }

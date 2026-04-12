@@ -1,4 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/commands/slash-behaviour.drone.ts
+// src/diamondcoreprocessor.com/commands/slash-behaviour.drone.ts
 import { EffectBus, hypercomb, I18N_IOC_KEY } from "@hypercomb/core";
 var SlashBehaviourDrone = class extends EventTarget {
   #providers = [];
@@ -451,6 +451,38 @@ var SubstrateProvider = class {
     return ["here"].filter((s) => s.startsWith(q));
   }
 };
+var RerollProvider = class {
+  name = "reroll-provider";
+  priority = 100;
+  behaviours = [
+    { name: "reroll", description: "Reroll substrate background images on tiles", descriptionKey: "slash.reroll" }
+  ];
+  async execute(_behaviourName, args) {
+    const queen = get("@diamondcoreprocessor.com/RerollQueenBee");
+    if (queen?.invoke) await queen.invoke(args);
+  }
+  complete(_behaviourName, args) {
+    const cellProvider = get("@hypercomb.social/CellSuggestionProvider");
+    const cells = cellProvider?.suggestions() ?? [];
+    const bracketStart = args.indexOf("[");
+    if (bracketStart >= 0) {
+      const inner = args.slice(bracketStart + 1);
+      const lastComma = inner.lastIndexOf(",");
+      const fragment = (lastComma >= 0 ? inner.slice(lastComma + 1) : inner).trimStart().toLowerCase();
+      const already = /* @__PURE__ */ new Set();
+      for (const item of inner.split(",")) {
+        const n = item.trim().toLowerCase();
+        if (n && n !== fragment) already.add(n);
+      }
+      let filtered = cells.filter((n) => !already.has(n));
+      if (fragment) filtered = filtered.filter((n) => n.startsWith(fragment));
+      return filtered;
+    }
+    const q = args.toLowerCase().trim();
+    if (!q) return cells;
+    return cells.filter((n) => n.startsWith(q));
+  }
+};
 var RecordingProvider = class {
   name = "recording-provider";
   priority = 100;
@@ -493,6 +525,7 @@ _slashBehaviours.addProvider(new AtomizeUiProvider());
 _slashBehaviours.addProvider(new DocsProvider());
 _slashBehaviours.addProvider(new DomainProvider());
 _slashBehaviours.addProvider(new SubstrateProvider());
+_slashBehaviours.addProvider(new RerollProvider());
 _slashBehaviours.addProvider(new RecordingProvider());
 window.ioc.register("@diamondcoreprocessor.com/SlashBehaviourDrone", _slashBehaviours);
 export {

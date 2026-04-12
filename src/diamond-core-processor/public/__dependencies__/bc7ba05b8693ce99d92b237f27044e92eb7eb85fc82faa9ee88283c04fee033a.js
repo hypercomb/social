@@ -106,23 +106,99 @@ async function readImagesFromHandle(handle) {
   return out;
 }
 
-// src/diamondcoreprocessor.com/substrate/substrate.queen.ts
+// src/diamondcoreprocessor.com/substrate/reroll.queen.ts
 import { QueenBee, EffectBus, hypercomb } from "@hypercomb/core";
 var get = (key) => window.ioc?.get?.(key);
+var RerollQueenBee = class extends QueenBee {
+  namespace = "diamondcoreprocessor.com";
+  command = "reroll";
+  aliases = [];
+  description = "Reroll substrate background images on tiles";
+  async execute(args) {
+    const service = get("@diamondcoreprocessor.com/SubstrateService");
+    if (!service) return;
+    await service.ensureLoaded();
+    const targets = await this.#resolveTargets(args);
+    if (targets.length === 0) {
+      this.#toast("nothing to reroll");
+      return;
+    }
+    const rerolled = service.rerollCells(targets);
+    if (rerolled.length === 0) {
+      this.#toast("no substrate tiles in target");
+      return;
+    }
+    for (const cell of rerolled) {
+      EffectBus.emit("substrate:rerolled", { cell });
+    }
+    this.#toast(`rerolled ${rerolled.length} tile${rerolled.length === 1 ? "" : "s"}`);
+    void new hypercomb().act();
+  }
+  /**
+   * Resolution order:
+   *   1. explicit bracket batch    → those names
+   *   2. explicit single name arg  → [that name]
+   *   3. current selection         → selection contents
+   *   4. no target information     → every tile in the current hive
+   */
+  async #resolveTargets(args) {
+    const explicit = parseTargets(args);
+    if (explicit.length > 0) return explicit;
+    const selection = get("@diamondcoreprocessor.com/SelectionService");
+    if (selection && selection.selected.size > 0) {
+      return Array.from(selection.selected);
+    }
+    return this.#visibleHiveLabels();
+  }
+  async #visibleHiveLabels() {
+    const lineage = get("@hypercomb.social/Lineage");
+    const dir = await lineage?.explorerDir();
+    if (!dir) return [];
+    const labels = [];
+    for await (const [name, handle] of dir.entries()) {
+      if (handle.kind === "directory") labels.push(name);
+    }
+    return labels;
+  }
+  #toast(message) {
+    EffectBus.emit("activity:log", { message, icon: "\u25C8" });
+  }
+};
+function parseTargets(args) {
+  const trimmed = args.trim();
+  if (!trimmed) return [];
+  const bracketStart = trimmed.indexOf("[");
+  if (bracketStart >= 0) {
+    const bracketEnd = trimmed.lastIndexOf("]");
+    const inner = bracketEnd > bracketStart ? trimmed.slice(bracketStart + 1, bracketEnd) : trimmed.slice(bracketStart + 1);
+    return inner.split(",").map((s) => normalizeName(s.trim())).filter(Boolean);
+  }
+  const name = normalizeName(trimmed);
+  return name ? [name] : [];
+}
+function normalizeName(s) {
+  return s.trim().toLocaleLowerCase().replace(/[._\s]+/g, "-").replace(/[^\p{L}\p{N}\-]/gu, "").replace(/-{2,}/g, "-").replace(/^-|-$/g, "").slice(0, 64).replace(/-$/, "");
+}
+var _reroll = new RerollQueenBee();
+window.ioc.register("@diamondcoreprocessor.com/RerollQueenBee", _reroll);
+
+// src/diamondcoreprocessor.com/substrate/substrate.queen.ts
+import { QueenBee as QueenBee2, EffectBus as EffectBus2, hypercomb as hypercomb2 } from "@hypercomb/core";
+var get2 = (key) => window.ioc?.get?.(key);
 var BUILTIN_DEFAULTS_ID = "builtin:defaults";
-var SubstrateQueenBee = class extends QueenBee {
+var SubstrateQueenBee = class extends QueenBee2 {
   namespace = "diamondcoreprocessor.com";
   command = "substrate";
   aliases = [];
   description = "Manage substrate background image sources";
   async execute(args) {
-    const service = get("@diamondcoreprocessor.com/SubstrateService");
+    const service = get2("@diamondcoreprocessor.com/SubstrateService");
     if (!service) return;
     await service.ensureLoaded();
     const trimmed = args.trim().toLowerCase();
     switch (trimmed) {
       case "":
-        EffectBus.emit("substrate-organizer:open", {});
+        EffectBus2.emit("substrate-organizer:open", {});
         return;
       case "here": {
         const path = await this.#currentPath();
@@ -189,10 +265,10 @@ var SubstrateQueenBee = class extends QueenBee {
     }
   }
   #toast(message) {
-    EffectBus.emit("activity:log", { message, icon: "\u25C8" });
+    EffectBus2.emit("activity:log", { message, icon: "\u25C8" });
   }
   async #refreshVisible(service) {
-    const lineage = get("@hypercomb.social/Lineage");
+    const lineage = get2("@hypercomb.social/Lineage");
     const dir = await lineage?.explorerDir();
     if (!dir) {
       await service.warmUp();
@@ -205,11 +281,11 @@ var SubstrateQueenBee = class extends QueenBee {
     const count = await service.refresh(labels, true);
     if (count > 0) {
       this.#toast(`refreshed ${count} tile${count === 1 ? "" : "s"}`);
-      void new hypercomb().act();
+      void new hypercomb2().act();
     }
   }
   async #currentPath() {
-    const lineage = get("@hypercomb.social/Lineage");
+    const lineage = get2("@hypercomb.social/Lineage");
     if (!lineage) return null;
     const segments = lineage.explorerSegments();
     return segments.length > 0 ? segments.join("/") : null;
@@ -219,7 +295,7 @@ var _substrate = new SubstrateQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/SubstrateQueenBee", _substrate);
 
 // src/diamondcoreprocessor.com/substrate/substrate.service.ts
-import { EffectBus as EffectBus2, EMPTY_SUBSTRATE_REGISTRY } from "@hypercomb/core";
+import { EffectBus as EffectBus3, EMPTY_SUBSTRATE_REGISTRY } from "@hypercomb/core";
 var PROPS_FILE = "0000";
 var HIVE_KEY = "substrate";
 var INHERIT_KEY = "substrate-inherit";
@@ -233,7 +309,7 @@ var BUILTIN_DEFAULTS = {
   label: "Hypercomb defaults",
   builtin: true
 };
-var get2 = (key) => window.ioc?.get?.(key);
+var get3 = (key) => window.ioc?.get?.(key);
 async function renderToHexBox(blob, w, h) {
   const bitmap = await createImageBitmap(blob);
   try {
@@ -265,6 +341,9 @@ var SubstrateService = class extends EventTarget {
   #registry = EMPTY_SUBSTRATE_REGISTRY;
   #resolved = null;
   #propsPool = [];
+  // propsSig → times currently assigned across tiles. Drives balanced picking
+  // so every image gets used once before any gets used twice.
+  #usageCounts = /* @__PURE__ */ new Map();
   // ───────────────────────── registry ─────────────────────────
   get registry() {
     return this.#registry;
@@ -339,7 +418,7 @@ var SubstrateService = class extends EventTarget {
     const sources = [...this.#registry.sources, full];
     const activeId = setActive ? full.id : this.#registry.activeId;
     await this.#saveRegistry({ sources, activeId });
-    EffectBus2.emit("substrate:changed", { scope: "registry", sourceId: full.id });
+    EffectBus3.emit("substrate:changed", { scope: "registry", sourceId: full.id });
     return full;
   }
   async removeSource(id) {
@@ -352,7 +431,7 @@ var SubstrateService = class extends EventTarget {
     const sources = this.#registry.sources.filter((s) => s.id !== id);
     const activeId = this.#registry.activeId === id ? null : this.#registry.activeId;
     await this.#saveRegistry({ sources, activeId });
-    EffectBus2.emit("substrate:changed", { scope: "registry", sourceId: id });
+    EffectBus3.emit("substrate:changed", { scope: "registry", sourceId: id });
   }
   async setActive(id) {
     await this.ensureLoaded();
@@ -360,7 +439,7 @@ var SubstrateService = class extends EventTarget {
     await this.#saveRegistry({ sources: this.#registry.sources, activeId: id });
     this.#resolved = null;
     this.#propsPool = [];
-    EffectBus2.emit("substrate:changed", { scope: "active", sourceId: id });
+    EffectBus3.emit("substrate:changed", { scope: "active", sourceId: id });
   }
   async renameSource(id, label) {
     await this.ensureLoaded();
@@ -392,19 +471,19 @@ var SubstrateService = class extends EventTarget {
     const dir = await this.#explorerDir();
     if (!dir) return;
     await this.#writeProps(dir, { [HIVE_KEY]: path });
-    EffectBus2.emit("substrate:changed", { scope: "hive", path });
+    EffectBus3.emit("substrate:changed", { scope: "hive", path });
   }
   async clearHive() {
     const dir = await this.#explorerDir();
     if (!dir) return;
     await this.#writeProps(dir, { [HIVE_KEY]: null });
-    EffectBus2.emit("substrate:changed", { scope: "hive", path: null });
+    EffectBus3.emit("substrate:changed", { scope: "hive", path: null });
   }
   async setInherit(inherit) {
     const dir = await this.#explorerDir();
     if (!dir) return;
     await this.#writeProps(dir, { [INHERIT_KEY]: inherit });
-    EffectBus2.emit("substrate:changed", { scope: "inherit", inherit });
+    EffectBus3.emit("substrate:changed", { scope: "inherit", inherit });
   }
   // ───────────────────────── resolution ─────────────────────────
   /**
@@ -519,7 +598,7 @@ var SubstrateService = class extends EventTarget {
     if (!entry) return [];
     const permission = await queryPermission(entry.handle);
     if (permission !== "granted") {
-      EffectBus2.emit("substrate:folder-permission", { handleId, permission });
+      EffectBus3.emit("substrate:folder-permission", { handleId, permission });
       return [];
     }
     const files = await readImagesFromHandle(entry.handle);
@@ -608,7 +687,7 @@ var SubstrateService = class extends EventTarget {
     if (images.length === 0) return;
     const store = this.#store();
     if (!store) return;
-    const showCell = get2("@diamondcoreprocessor.com/ShowCellDrone");
+    const showCell = get3("@diamondcoreprocessor.com/ShowCellDrone");
     const atlas = showCell?.imageAtlas;
     if (!atlas) return;
     for (const sig of images) {
@@ -622,7 +701,7 @@ var SubstrateService = class extends EventTarget {
   }
   async #fillPropsPool(images) {
     const store = this.#store();
-    const settings = get2("@diamondcoreprocessor.com/Settings");
+    const settings = get3("@diamondcoreprocessor.com/Settings");
     if (!store || !settings || images.length === 0) {
       this.#propsPool = [];
       return;
@@ -657,12 +736,50 @@ var SubstrateService = class extends EventTarget {
       } catch {
       }
     }
-    const MIN_POOL = 50;
-    if (pool.length > 0 && pool.length < MIN_POOL) {
-      const base = [...pool];
-      while (pool.length < MIN_POOL) pool.push(base[pool.length % base.length]);
-    }
     this.#propsPool = pool;
+    this.#seedUsageCounts();
+  }
+  /**
+   * Rebuild per-entry usage counts from the current tile-props-index. Keeps
+   * the balanced picker honest across reloads and source switches: tiles
+   * already assigned to an image count against that image so we don't hand
+   * the same one out again until every other image has caught up.
+   */
+  #seedUsageCounts() {
+    this.#usageCounts = new Map(this.#propsPool.map((entry) => [entry.propsSig, 0]));
+    try {
+      const index = JSON.parse(localStorage.getItem("hc:tile-props-index") ?? "{}");
+      for (const propsSig of Object.values(index)) {
+        if (typeof propsSig !== "string") continue;
+        if (!this.#usageCounts.has(propsSig)) continue;
+        this.#usageCounts.set(propsSig, (this.#usageCounts.get(propsSig) ?? 0) + 1);
+      }
+    } catch {
+    }
+  }
+  /**
+   * Pick a pool entry from those with the lowest current usage count, then
+   * increment. Random tie-breaks among least-used entries keep output
+   * unpredictable without breaking the even distribution.
+   */
+  #pickBalanced() {
+    if (this.#propsPool.length === 0) return null;
+    let min = Infinity;
+    for (const entry of this.#propsPool) {
+      const count = this.#usageCounts.get(entry.propsSig) ?? 0;
+      if (count < min) min = count;
+    }
+    const candidates = this.#propsPool.filter((e) => (this.#usageCounts.get(e.propsSig) ?? 0) === min);
+    const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+    this.#usageCounts.set(chosen.propsSig, (this.#usageCounts.get(chosen.propsSig) ?? 0) + 1);
+    return chosen;
+  }
+  /** Decrement the usage count for a propsSig being released from a tile. */
+  #releaseUsage(propsSig) {
+    if (!propsSig) return;
+    const current = this.#usageCounts.get(propsSig);
+    if (current === void 0) return;
+    this.#usageCounts.set(propsSig, Math.max(0, current - 1));
   }
   pickRandomImageSync() {
     if (this.#propsPool.length === 0) return null;
@@ -674,7 +791,8 @@ var SubstrateService = class extends EventTarget {
     const indexKey = "hc:tile-props-index";
     const index = JSON.parse(localStorage.getItem(indexKey) ?? "{}");
     if (index[label]) return false;
-    const entry = this.#propsPool[Math.floor(Math.random() * this.#propsPool.length)];
+    const entry = this.#pickBalanced();
+    if (!entry) return false;
     index[label] = entry.propsSig;
     localStorage.setItem(indexKey, JSON.stringify(index));
     return true;
@@ -683,15 +801,44 @@ var SubstrateService = class extends EventTarget {
     if (this.#propsPool.length === 0) return false;
     const indexKey = "hc:tile-props-index";
     const index = JSON.parse(localStorage.getItem(indexKey) ?? "{}");
+    this.#releaseUsage(index[label]);
     delete index[label];
-    const entry = this.#propsPool[Math.floor(Math.random() * this.#propsPool.length)];
+    const entry = this.#pickBalanced();
+    if (!entry) return false;
     index[label] = entry.propsSig;
     localStorage.setItem(indexKey, JSON.stringify(index));
     return true;
   }
+  /**
+   * Reroll every label that currently holds a substrate-pool propsSig.
+   * Labels whose current props are not from the substrate pool (e.g. a
+   * user-edited tile with its own image) are skipped so the bulk action can
+   * never clobber authored content. Returns the labels that were actually
+   * rerolled — callers should emit `substrate:rerolled` per returned label
+   * so show-cell can invalidate its caches.
+   */
+  rerollCells(labels) {
+    if (this.#propsPool.length === 0 || labels.length === 0) return [];
+    const indexKey = "hc:tile-props-index";
+    const index = JSON.parse(localStorage.getItem(indexKey) ?? "{}");
+    const substrateSigs = new Set(this.#propsPool.map((p) => p.propsSig));
+    const rerolled = [];
+    for (const label of labels) {
+      const current = index[label];
+      if (!current || !substrateSigs.has(current)) continue;
+      this.#releaseUsage(current);
+      const entry = this.#pickBalanced();
+      if (!entry) break;
+      index[label] = entry.propsSig;
+      rerolled.push(label);
+    }
+    if (rerolled.length > 0) localStorage.setItem(indexKey, JSON.stringify(index));
+    return rerolled;
+  }
   clearCell(label) {
     const indexKey = "hc:tile-props-index";
     const index = JSON.parse(localStorage.getItem(indexKey) ?? "{}");
+    this.#releaseUsage(index[label]);
     delete index[label];
     localStorage.setItem(indexKey, JSON.stringify(index));
   }
@@ -702,7 +849,8 @@ var SubstrateService = class extends EventTarget {
     const applied = [];
     for (const label of labels) {
       if (index[label]) continue;
-      const entry = this.#propsPool[Math.floor(Math.random() * this.#propsPool.length)];
+      const entry = this.#pickBalanced();
+      if (!entry) break;
       index[label] = entry.propsSig;
       applied.push(label);
     }
@@ -722,7 +870,9 @@ var SubstrateService = class extends EventTarget {
     const substrateSigs = new Set(this.#propsPool.map((p) => p.propsSig));
     let cleared = 0;
     for (const label of visibleLabels) {
-      if (index[label] && substrateSigs.has(index[label])) {
+      const current = index[label];
+      if (current && substrateSigs.has(current)) {
+        this.#releaseUsage(current);
         delete index[label];
         cleared++;
       }
@@ -768,10 +918,10 @@ var SubstrateService = class extends EventTarget {
   }
   // ───────────────────────── IoC helpers ─────────────────────────
   #store() {
-    return get2("@hypercomb.social/Store");
+    return get3("@hypercomb.social/Store");
   }
   #lineage() {
-    return get2("@hypercomb.social/Lineage");
+    return get3("@hypercomb.social/Lineage");
   }
   async #explorerDir() {
     return this.#lineage()?.explorerDir() ?? null;
@@ -779,6 +929,7 @@ var SubstrateService = class extends EventTarget {
 };
 window.ioc.register("@diamondcoreprocessor.com/SubstrateService", new SubstrateService());
 export {
+  RerollQueenBee,
   SubstrateQueenBee,
   SubstrateService,
   getHandle,

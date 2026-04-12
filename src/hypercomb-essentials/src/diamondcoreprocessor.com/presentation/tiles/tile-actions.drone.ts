@@ -58,7 +58,7 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
 
 // Default active icons per profile (defines the fallback order)
 const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
-  'private': ['command', 'edit', 'remove', 'break-apart'],
+  'private': ['command', 'edit', 'reroll', 'remove', 'break-apart'],
   'public-own': ['hide', 'break-apart'],
   'public-external': ['adopt', 'block'],
 }
@@ -132,9 +132,10 @@ export class TileActionsDrone extends Drone {
         this.#handleAction(payload)
       })
 
-      // Handle hide from selection context menu (controls:action)
+      // Handle hide / reroll from selection context menu (controls:action)
       this.onEffect<{ action: string }>('controls:action', (payload) => {
         if (payload?.action === 'hide') this.#bulkHideSelected()
+        else if (payload?.action === 'reroll') this.#bulkRerollSelected()
       })
 
       // Handle icon reorder from arrange mode
@@ -336,14 +337,33 @@ export class TileActionsDrone extends Drone {
     const svc = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SubstrateService') as
       { rerollCell(label: string): boolean } | undefined
     if (svc?.rerollCell(label)) {
-      // Clear the show-cell image cache for this cell so it re-reads props
-      const showCell = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ShowCellDrone') as
-        { cellImageCache: Map<string, string | null>; cellSubstrateCache: Map<string, boolean> } | undefined
-      showCell?.cellImageCache.delete(label)
-      showCell?.cellSubstrateCache.delete(label)
+      // show-cell.drone listens for substrate:rerolled and clears its caches
+      // (cellImageCache, cellSubstrateCache, #layerCellsCache, renderedCellsKey)
+      // before requesting a render, so the new image shows up immediately.
       EffectBus.emit('substrate:rerolled', { cell: label })
       void new hypercomb().act()
     }
+  }
+
+  #bulkRerollSelected(): void {
+    const selection = window.ioc.get<{ selected: ReadonlySet<string>; count: number }>('@diamondcoreprocessor.com/SelectionService')
+    if (!selection || selection.count === 0) return
+
+    const svc = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SubstrateService') as
+      { rerollCells(labels: string[]): string[] } | undefined
+    if (!svc) return
+
+    const labels = [...selection.selected]
+    const rerolled = svc.rerollCells(labels)
+    if (rerolled.length === 0) return
+
+    // Emit per-cell so show-cell's substrate:rerolled handler invalidates
+    // caches for each affected tile. requestRender is microtask-coalesced
+    // so a burst of emits collapses to a single render pass.
+    for (const cell of rerolled) {
+      EffectBus.emit('substrate:rerolled', { cell })
+    }
+    void new hypercomb().act()
   }
 
   #unhide(label: string): void {

@@ -216,8 +216,16 @@ skipNoSignal.addEventListener('click', () => {
 
 function updatePlayButton() {
   const isPlaying = !audio.paused
-  iconPlay.hidden = isPlaying
-  iconPause.hidden = !isPlaying
+  // Use setAttribute/removeAttribute instead of the .hidden IDL property:
+  // SVGElement.hidden reflection is unreliable across browsers, so assigning
+  // .hidden = true would sometimes leave both icons visible.
+  if (isPlaying) {
+    iconPlay.setAttribute('hidden', '')
+    iconPause.removeAttribute('hidden')
+  } else {
+    iconPause.setAttribute('hidden', '')
+    iconPlay.removeAttribute('hidden')
+  }
   playBtn.setAttribute('aria-label', isPlaying ? 'pause' : 'play')
 }
 

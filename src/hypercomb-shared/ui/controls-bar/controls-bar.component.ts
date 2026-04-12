@@ -384,16 +384,12 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
   ngOnInit(): void {
     // ── mobile detection via matchMedia ──
-    // Match real phones only — not tablets, not short laptop windows.
-    //   • Portrait phone: width ≤ 599px
-    //   • Landscape phone: width ≤ 1000px AND height ≤ 500px
-    //     (covers up to iPhone 16 Pro Max landscape ~932×430 without catching
-    //      iPad mini landscape 1133×744 or laptops with devtools open).
-    // The earlier `(max-height: 599px)` catch-all triggered the collapsed
-    // 5-icon view on iPads and laptops, which is why those need the full bar.
-    this.#mobileQuery = window.matchMedia(
-      '(max-width: 599px), ((max-width: 1000px) and (max-height: 500px))',
-    )
+    // Only actual smartphones (viewport ≤599px wide) collapse the command
+    // line and show the mobile floating-icon strip. Anything larger —
+    // tablets, laptops, desktops, and phones rotated to landscape (≥600px
+    // wide) — gets the full desktop shell with the command line docked at
+    // the top of the screen.
+    this.#mobileQuery = window.matchMedia('(max-width: 599px)')
     this.isMobile.set(this.#mobileQuery.matches)
     this.#mobileQuery.addEventListener('change', this.#mobileHandler)
 

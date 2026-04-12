@@ -548,6 +548,46 @@ class SubstrateProvider implements SlashBehaviourProvider {
   }
 }
 
+class RerollProvider implements SlashBehaviourProvider {
+  readonly name = 'reroll-provider'
+  readonly priority = 100
+  readonly behaviours: SlashBehaviour[] = [
+    { name: 'reroll', description: 'Reroll substrate background images on tiles', descriptionKey: 'slash.reroll' }
+  ]
+
+  async execute(_behaviourName: string, args: string): Promise<void> {
+    const queen = get('@diamondcoreprocessor.com/RerollQueenBee') as any
+    if (queen?.invoke) await queen.invoke(args)
+  }
+
+  complete(_behaviourName: string, args: string): readonly string[] {
+    const cellProvider = get('@hypercomb.social/CellSuggestionProvider') as { suggestions(): string[] } | undefined
+    const cells = cellProvider?.suggestions() ?? []
+
+    // Bracket mode: /reroll[cell1,cell2,partial — same pattern as /remove and
+    // /accent so every batch-target command behaves identically.
+    const bracketStart = args.indexOf('[')
+    if (bracketStart >= 0) {
+      const inner = args.slice(bracketStart + 1)
+      const lastComma = inner.lastIndexOf(',')
+      const fragment = (lastComma >= 0 ? inner.slice(lastComma + 1) : inner).trimStart().toLowerCase()
+      const already = new Set<string>()
+      for (const item of inner.split(',')) {
+        const n = item.trim().toLowerCase()
+        if (n && n !== fragment) already.add(n)
+      }
+      let filtered = cells.filter(n => !already.has(n))
+      if (fragment) filtered = filtered.filter(n => n.startsWith(fragment))
+      return filtered
+    }
+
+    // Space mode — single tile name
+    const q = args.toLowerCase().trim()
+    if (!q) return cells
+    return cells.filter(n => n.startsWith(q))
+  }
+}
+
 class RecordingProvider implements SlashBehaviourProvider {
   readonly name = 'recording-provider'
   readonly priority = 100
@@ -595,5 +635,6 @@ _slashBehaviours.addProvider(new AtomizeUiProvider())
 _slashBehaviours.addProvider(new DocsProvider())
 _slashBehaviours.addProvider(new DomainProvider())
 _slashBehaviours.addProvider(new SubstrateProvider())
+_slashBehaviours.addProvider(new RerollProvider())
 _slashBehaviours.addProvider(new RecordingProvider())
 window.ioc.register('@diamondcoreprocessor.com/SlashBehaviourDrone', _slashBehaviours)

@@ -193,10 +193,11 @@
 }
 
 // ── phone (≤599px) ────────────────────────────────────────
-// On phones the entire top header bar is hidden by default — the mobile
-// shell uses just the floating icons at the bottom (controls-bar) for
-// input. The command-line and mesh-header live inside the header-bar so
-// this hides them along with the bordered chrome.
+// Only actual smartphones (≤599px wide) hide the top header bar by
+// default — the mobile shell uses just the floating icons at the bottom
+// (controls-bar) for input. Anything larger than a smartphone — including
+// phones rotated to landscape (≥600px wide) — keeps the command line
+// docked at the top of the screen.
 //
 // Long-pressing an empty area of the canvas adds .input-open to the
 // header-bar (driven by the App component listening for the
@@ -216,12 +217,4 @@
   .header-secret-input {
     font-size: 16px;
   }
-}
-
-// Catch landscape phones too — phone-only is width-only.
-// Bound both dimensions so this only matches real landscape phones, not
-// short laptop windows or iPads in landscape.
-@media (max-width: 1000px) and (max-height: 500px) and (orientation: landscape) {
-  .header-bar { display: none; }
-  .header-bar.input-open { display: flex; }
 }

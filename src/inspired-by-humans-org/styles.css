@@ -219,6 +219,10 @@ body {
   fill: currentColor;
 }
 
+/* SVG elements do not reliably honor the HTML [hidden] attribute via the
+   UA stylesheet, so both icons would otherwise render stacked. */
+.audio-player__play svg[hidden] { display: none; }
+
 .audio-player__play:hover { opacity: 1; }
 .audio-player__play:active { transform: scale(0.95); }
 

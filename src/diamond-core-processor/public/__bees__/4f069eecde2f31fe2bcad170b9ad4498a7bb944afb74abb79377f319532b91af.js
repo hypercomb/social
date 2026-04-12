@@ -1,7 +1,7 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/tile-actions.drone.ts
+// src/diamondcoreprocessor.com/presentation/tiles/tile-actions.drone.ts
 import { Drone, EffectBus, hypercomb, normalizeCell } from "@hypercomb/core";
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/editor/tile-properties.ts
+// src/diamondcoreprocessor.com/editor/tile-properties.ts
 var TILE_PROPERTIES_FILE = "0000";
 var readCellProperties = async (cellDir) => {
   try {
@@ -22,7 +22,7 @@ var writeCellProperties = async (cellDir, updates) => {
   await writable.close();
 };
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/tile-actions.drone.ts
+// src/diamondcoreprocessor.com/presentation/tiles/tile-actions.drone.ts
 var svg = (d) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 var ICONS = {
   // Terminal prompt >_
@@ -60,7 +60,7 @@ var ICON_REGISTRY = [
   { name: "block", svgMarkup: ICONS.block, hoverTint: 16763080, profile: "public-external" }
 ];
 var DEFAULT_ACTIVE = {
-  "private": ["command", "edit", "remove", "break-apart"],
+  "private": ["command", "edit", "reroll", "remove", "break-apart"],
   "public-own": ["hide", "break-apart"],
   "public-external": ["adopt", "block"]
 };
@@ -107,6 +107,7 @@ var TileActionsDrone = class extends Drone {
       });
       this.onEffect("controls:action", (payload) => {
         if (payload?.action === "hide") this.#bulkHideSelected();
+        else if (payload?.action === "reroll") this.#bulkRerollSelected();
       });
       this.onEffect("overlay:icons-reordered", (payload) => {
         this.#arrangement[payload.profile] = payload.order;
@@ -261,12 +262,22 @@ var TileActionsDrone = class extends Drone {
   async #rerollSubstrate(label) {
     const svc = window.ioc?.get?.("@diamondcoreprocessor.com/SubstrateService");
     if (svc?.rerollCell(label)) {
-      const showCell = window.ioc?.get?.("@diamondcoreprocessor.com/ShowCellDrone");
-      showCell?.cellImageCache.delete(label);
-      showCell?.cellSubstrateCache.delete(label);
       EffectBus.emit("substrate:rerolled", { cell: label });
       void new hypercomb().act();
     }
+  }
+  #bulkRerollSelected() {
+    const selection = window.ioc.get("@diamondcoreprocessor.com/SelectionService");
+    if (!selection || selection.count === 0) return;
+    const svc = window.ioc?.get?.("@diamondcoreprocessor.com/SubstrateService");
+    if (!svc) return;
+    const labels = [...selection.selected];
+    const rerolled = svc.rerollCells(labels);
+    if (rerolled.length === 0) return;
+    for (const cell of rerolled) {
+      EffectBus.emit("substrate:rerolled", { cell });
+    }
+    void new hypercomb().act();
   }
   #unhide(label) {
     const lineage = this.resolve("lineage");

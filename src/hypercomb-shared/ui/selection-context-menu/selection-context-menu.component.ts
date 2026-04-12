@@ -122,6 +122,10 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
     EffectBus.emit('controls:action', { action: 'hide' })
   }
 
+  readonly reroll = (): void => {
+    EffectBus.emit('controls:action', { action: 'reroll' })
+  }
+
   // ── hidden-state check ──────────────────────────────────
 
   #updateAllHidden(selected: string[]): void {

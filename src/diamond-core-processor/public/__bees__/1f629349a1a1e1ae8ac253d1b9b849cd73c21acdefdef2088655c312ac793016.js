@@ -627,7 +627,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
     axial: "@diamondcoreprocessor.com/AxialService",
     layout: "@diamondcoreprocessor.com/LayoutService"
   };
-  listens = ["render:host-ready", "mesh:ready", "mesh:items-updated", "tile:saved", "search:filter", "render:set-orientation", "render:set-pivot", "mesh:room", "mesh:secret", "cell:place-at", "cell:reorder", "render:set-gap", "move:preview", "clipboard:captured", "layout:mode", "tags:changed", "tags:filter", "history:cursor-changed", "tile:toggle-text", "visibility:show-hidden", "overlay:neon-color", "translation:tile-start", "translation:tile-done", "substrate:changed", "substrate:ready", "substrate:applied", "cell:added", "cell:removed"];
+  listens = ["render:host-ready", "mesh:ready", "mesh:items-updated", "tile:saved", "search:filter", "render:set-orientation", "render:set-pivot", "mesh:room", "mesh:secret", "cell:place-at", "cell:reorder", "render:set-gap", "move:preview", "clipboard:captured", "layout:mode", "tags:changed", "tags:filter", "history:cursor-changed", "tile:toggle-text", "visibility:show-hidden", "overlay:neon-color", "translation:tile-start", "translation:tile-done", "substrate:changed", "substrate:ready", "substrate:applied", "substrate:rerolled", "cell:added", "cell:removed"];
   emits = ["mesh:ensure-started", "mesh:subscribe", "mesh:publish", "render:mesh-offset", "render:cell-count", "render:geometry-changed", "render:tags", "tile:hover-tags"];
   geom = null;
   shader = null;
@@ -1971,6 +1971,18 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       if (!payload?.cell) return;
       this.cellImageCache.delete(payload.cell);
       this.cellSubstrateCache.delete(payload.cell);
+      this.renderedCellsKey = "";
+      this.requestRender();
+    });
+    this.onEffect("substrate:rerolled", (payload) => {
+      if (!payload?.cell) return;
+      const oldSig = this.cellImageCache.get(payload.cell);
+      this.cellImageCache.delete(payload.cell);
+      this.cellSubstrateCache.delete(payload.cell);
+      if (oldSig && this.imageAtlas) {
+        this.imageAtlas.invalidate(oldSig);
+      }
+      this.#layerCellsCache.delete(this.renderedLocationKey);
       this.renderedCellsKey = "";
       this.requestRender();
     });

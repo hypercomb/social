@@ -124,6 +124,7 @@
   "selection.copy": "copy",
   "selection.remove": "remove",
   "selection.paste": "paste",
+  "selection.reroll": "reroll",
 
   "history.title": "browser history",
   "history.back": "back",
@@ -158,6 +159,7 @@
   "slash.record": "Start AI-powered meeting recording with live hierarchy compilation",
   "slash.domain": "Add, remove, or list mesh relay domains",
   "slash.substrate": "Toggle default background images for new tiles",
+  "slash.reroll": "Reroll substrate background images on tiles",
 
   "substrate.on": "substrate on → {path}",
   "substrate.off": "substrate off",
