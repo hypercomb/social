@@ -14,6 +14,15 @@
     </div>
   }
 
+  <!-- Status icons: non-interactive mode indicators, hidden when secret input is active -->
+  @if (!showSecretInput() && statusIcons().length) {
+    <div class="status-icons">
+      @for (icon of statusIcons(); track icon.key) {
+        <span class="status-icon hci" [title]="icon.label">{{ icon.hci }}</span>
+      }
+    </div>
+  }
+
   <!-- Mode toggle: invisible tap/long-press target -->
   <button class="mode-toggle"
     [class.solo-mode]="!meshPublic"

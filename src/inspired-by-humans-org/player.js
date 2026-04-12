@@ -24,6 +24,7 @@ const statusEmpty   = $('statusEmpty')
 const selectedTitle = $('selectedTitle')
 const selectedFile  = $('selectedFile')
 const noSignal      = $('noSignal')
+const noSignalCanvas = $('noSignalCanvas')
 const skipNoSignal  = $('skipNoSignal')
 
 // ── state ─────────────────────────────────────────────────
@@ -33,6 +34,7 @@ let currentTrack = null
 let shouldAutoplay = false
 let dragging = false
 let noSignalTimer = null
+let noSignalRaf = null
 let gestureHandler = null
 
 // ── track loading ─────────────────────────────────────────
@@ -128,57 +130,26 @@ function selectTrack(track, autoplay = true, bypassNoSignal = false) {
 // ── autoplay sequence logic ───────────────────────────────
 
 function restoreSequence() {
-  const episodeOne = tracks[0] ?? null
-  const prequel = tracks.find(t => t.title === 'Prequel') ?? tracks[tracks.length - 1] ?? null
   const state = readSequenceState()
+  const resumeTrack = state.lastTrackFile
+    ? tracks.find(t => t.file === state.lastTrackFile)
+    : null
 
-  if (!episodeOne) return
-
-  if (!state.episodeOneCompleted) {
-    selectTrack(episodeOne, true)
-    return
+  if (resumeTrack) {
+    selectTrack(resumeTrack, false)
+  } else {
+    selectTrack(tracks[0], true)
   }
-
-  if (prequel && !state.prequelCompleted) {
-    selectTrack(prequel, false)
-    return
-  }
-
-  selectTrack(prequel ?? episodeOne, false)
 }
 
 function onTrackEnded() {
   if (!currentTrack) return
 
-  const episodeOne = tracks[0] ?? null
-  const prequel = tracks.find(t => t.title === 'Prequel') ?? tracks[tracks.length - 1] ?? null
-
-  if (episodeOne && currentTrack.file === episodeOne.file) {
-    const nextState = { ...readSequenceState(), episodeOneCompleted: true }
-    writeSequenceState(nextState)
-  }
-
-  if (prequel && currentTrack.file === prequel.file) {
-    writeSequenceState({
-      ...readSequenceState(),
-      episodeOneCompleted: true,
-      prequelCompleted: true,
-    })
-    shouldAutoplay = false
-
-    // Auto-advance to next track in list
-    const currentIndex = tracks.indexOf(currentTrack)
-    const nextTrack = tracks[currentIndex + 1]
-    if (nextTrack) {
-      selectTrack(nextTrack, true)
-      return
-    }
-  }
-
-  // Default: advance to next track
+  // Advance to next track in list
   const currentIndex = tracks.indexOf(currentTrack)
   const nextTrack = tracks[currentIndex + 1]
   if (nextTrack) {
+    writeSequenceState({ lastTrackFile: nextTrack.file })
     selectTrack(nextTrack, true)
   }
 }
@@ -189,6 +160,7 @@ function startNoSignalTransition(nextTrack) {
   cancelNoSignalTimer()
   shouldAutoplay = false
   noSignal.hidden = false
+  startStaticNoise()
   noSignalTimer = setTimeout(() => {
     noSignalTimer = null
     beginTrackPlayback(nextTrack)
@@ -197,6 +169,7 @@ function startNoSignalTransition(nextTrack) {
 
 function beginTrackPlayback(track) {
   cancelNoSignalTimer()
+  stopStaticNoise()
   noSignal.hidden = true
   selectTrack(track, true, true)
 }
@@ -205,6 +178,39 @@ function cancelNoSignalTimer() {
   if (!noSignalTimer) return
   clearTimeout(noSignalTimer)
   noSignalTimer = null
+}
+
+// ── canvas static noise ──────────────────────────────────
+
+function startStaticNoise() {
+  const w = 256
+  const h = 256
+  noSignalCanvas.width = w
+  noSignalCanvas.height = h
+  const ctx = noSignalCanvas.getContext('2d')
+  const imageData = ctx.createImageData(w, h)
+  const buf = imageData.data
+
+  function renderFrame() {
+    for (let i = 0; i < buf.length; i += 4) {
+      const v = (Math.random() * 255) | 0
+      buf[i] = v
+      buf[i + 1] = v
+      buf[i + 2] = v
+      buf[i + 3] = 255
+    }
+    ctx.putImageData(imageData, 0, 0)
+    noSignalRaf = requestAnimationFrame(renderFrame)
+  }
+
+  noSignalRaf = requestAnimationFrame(renderFrame)
+}
+
+function stopStaticNoise() {
+  if (noSignalRaf) {
+    cancelAnimationFrame(noSignalRaf)
+    noSignalRaf = null
+  }
 }
 
 skipNoSignal.addEventListener('click', () => {
@@ -344,14 +350,11 @@ function removeGestureFallback() {
 function readSequenceState() {
   try {
     const raw = localStorage.getItem(TRACK_SEQUENCE_KEY)
-    if (!raw) return { episodeOneCompleted: false, prequelCompleted: false }
+    if (!raw) return { lastTrackFile: null }
     const parsed = JSON.parse(raw)
-    return {
-      episodeOneCompleted: parsed.episodeOneCompleted === true,
-      prequelCompleted: parsed.prequelCompleted === true,
-    }
+    return { lastTrackFile: parsed.lastTrackFile ?? null }
   } catch {
-    return { episodeOneCompleted: false, prequelCompleted: false }
+    return { lastTrackFile: null }
   }
 }
 

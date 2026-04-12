@@ -50,6 +50,23 @@
   }
 }
 
+// ── status icons (non-interactive mode indicators) ───────
+
+.status-icons {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 0.6rem;
+  flex-shrink: 0;
+}
+
+.status-icon {
+  font-size: 0.95rem;
+  color: rgba(245, 245, 245, 0.3);
+  pointer-events: none;
+  user-select: none;
+}
+
 // ── mode-toggle (two-state icon button) ──────────────────
 
 .mode-toggle {
