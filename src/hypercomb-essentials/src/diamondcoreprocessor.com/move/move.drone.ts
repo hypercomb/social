@@ -184,7 +184,6 @@ export class MoveDrone extends Drone {
   // ── public API (called by input handlers) ────────────────
 
   beginMove = (anchorAxial: Axial, source: string): boolean => {
-    if (!this.#moveActive) return false
     if (!this.#begin(source)) return false
 
     const anchorKey = axialKey(anchorAxial.q, anchorAxial.r)

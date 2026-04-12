@@ -179,11 +179,9 @@ class TileSelectionDrone extends Drone {
 
     if (!this.#gate?.claim('tile-selection')) return
 
-    // move mode: start reorder drag when clicking a selected tile
-    if (this.#moveMode && !e.ctrlKey && !e.metaKey && selection.isSelected(label)) {
-      this.#activePointerId = e.pointerId
-      this.#reorderDragActive = true
-      this.#reorderSourceLabel = label
+    // plain click on selected tile — let DesktopMoveInput handle drag-to-move
+    if (!e.ctrlKey && !e.metaKey && selection.isSelected(label)) {
+      this.#gate?.release('tile-selection')
       return
     }
 
@@ -197,12 +195,8 @@ class TileSelectionDrone extends Drone {
       return
     }
 
-    // selection-mode drag: wait for movement threshold before committing to drag
-    this.#activePointerId = e.pointerId
-    this.#pendingDrag = true
-    this.#pendingStartLabel = label
-    this.#pendingStartX = e.clientX
-    this.#pendingStartY = e.clientY
+    // no ctrl/meta held — release gate and let tile:click handle it
+    this.#gate?.release('tile-selection')
   }
 
   #onPointerMove = (e: PointerEvent): void => {

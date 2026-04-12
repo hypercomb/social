@@ -435,8 +435,11 @@ export class ZoomDrone extends Drone {
 
     const target = this.renderContainer
 
-    // try to get mesh bounds from the container's children
-    const bounds = target.getLocalBounds()
+    // get bounds from the hex-mesh content layer only — the renderContainer
+    // also holds overlay, selection, and move-preview layers whose bounds
+    // can inflate the union and cause fit-to-window to zoom out too far
+    const contentLayer = this.#findContentLayer(target)
+    const bounds = (contentLayer ?? target).getLocalBounds()
     if (!bounds || bounds.width <= 0 || bounds.height <= 0) return
 
     // measure UI chrome to define the safe area
@@ -673,6 +676,22 @@ export class ZoomDrone extends Drone {
     const y = (p.y - rect.top) * (screen.height / rect.height)
 
     return { x, y }
+  }
+
+  /**
+   * Find the hex-mesh content layer among the renderContainer's children.
+   * The show-cell layer is the one whose subtree contains a child with a
+   * `.geometry` property (a Pixi Mesh). Returns null if not found, in which
+   * case the caller falls back to the full container bounds.
+   */
+  #findContentLayer = (container: Container): Container | null => {
+    for (const child of container.children) {
+      if (!child || !(child as any).children) continue
+      for (const grandchild of (child as Container).children) {
+        if ((grandchild as any).geometry) return child as Container
+      }
+    }
+    return null
   }
 
   private clamp = (v: number): number =>

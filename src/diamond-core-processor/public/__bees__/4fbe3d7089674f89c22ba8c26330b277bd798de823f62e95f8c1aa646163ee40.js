@@ -1,8 +1,8 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/navigation/zoom/zoom.drone.ts
+// src/diamondcoreprocessor.com/navigation/zoom/zoom.drone.ts
 import { Drone } from "@hypercomb/core";
 import { Point } from "pixi.js";
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/navigation/zoom/pinch-zoom.input.ts
+// src/diamondcoreprocessor.com/navigation/zoom/pinch-zoom.input.ts
 var PinchZoomInput = class {
   #zoom = null;
   #minScale = 0.05;
@@ -32,7 +32,7 @@ var PinchZoomInput = class {
 };
 window.ioc.register("@diamondcoreprocessor.com/PinchZoomInput", new PinchZoomInput());
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/navigation/touch/touch-gesture.coordinator.ts
+// src/diamondcoreprocessor.com/navigation/touch/touch-gesture.coordinator.ts
 import { EffectBus } from "@hypercomb/core";
 var DRAG_THRESHOLD = 12;
 var PINCH_THRESHOLD = 15;
@@ -443,7 +443,7 @@ var TouchGestureCoordinator = class {
 };
 window.ioc.register("@diamondcoreprocessor.com/TouchGestureCoordinator", new TouchGestureCoordinator());
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/navigation/zoom/zoom.drone.ts
+// src/diamondcoreprocessor.com/navigation/zoom/zoom.drone.ts
 var InputGate = class {
   #owner = null;
   #locked = false;
@@ -774,7 +774,8 @@ var ZoomDrone = class extends Drone {
       this.#animFrameId = null;
     }
     const target = this.renderContainer;
-    const bounds = target.getLocalBounds();
+    const contentLayer = this.#findContentLayer(target);
+    const bounds = (contentLayer ?? target).getLocalBounds();
     if (!bounds || bounds.width <= 0 || bounds.height <= 0) return;
     const padding = 5;
     const headerEl = document.querySelector(".header-bar");
@@ -939,6 +940,21 @@ var ZoomDrone = class extends Drone {
     const x = (p.x - rect.left) * (screen.width / rect.width);
     const y = (p.y - rect.top) * (screen.height / rect.height);
     return { x, y };
+  };
+  /**
+   * Find the hex-mesh content layer among the renderContainer's children.
+   * The show-cell layer is the one whose subtree contains a child with a
+   * `.geometry` property (a Pixi Mesh). Returns null if not found, in which
+   * case the caller falls back to the full container bounds.
+   */
+  #findContentLayer = (container) => {
+    for (const child of container.children) {
+      if (!child || !child.children) continue;
+      for (const grandchild of child.children) {
+        if (grandchild.geometry) return child;
+      }
+    }
+    return null;
   };
   clamp = (v) => Math.max(this.minScale, Math.min(this.maxScale, v));
 };

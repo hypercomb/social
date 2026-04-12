@@ -14,9 +14,9 @@
     </div>
 
     <!-- action buttons -->
-    <button class="ctx-btn" (click)="moveItem()" [class.active]="moveMode()" [attr.aria-label]="'selection.move' | t">
+    <span class="ctx-btn active" [attr.aria-label]="'selection.move' | t">
       <span class="hci">Z</span>
-    </button>
+    </span>
     <button class="ctx-btn" (click)="cut()" [attr.aria-label]="'selection.cut' | t">
       <span class="hci">F</span>
     </button>

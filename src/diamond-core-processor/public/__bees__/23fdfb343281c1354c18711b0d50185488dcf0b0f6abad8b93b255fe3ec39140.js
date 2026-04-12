@@ -1,4 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/selection/tile-selection.drone.ts
+// src/diamondcoreprocessor.com/selection/tile-selection.drone.ts
 import { Drone, hypercomb } from "@hypercomb/core";
 import { Point } from "pixi.js";
 var TileSelectionDrone = class _TileSelectionDrone extends Drone {
@@ -142,10 +142,8 @@ var TileSelectionDrone = class _TileSelectionDrone extends Drone {
     const selection = this.#selection();
     if (!selection) return;
     if (!this.#gate?.claim("tile-selection")) return;
-    if (this.#moveMode && !e.ctrlKey && !e.metaKey && selection.isSelected(label)) {
-      this.#activePointerId = e.pointerId;
-      this.#reorderDragActive = true;
-      this.#reorderSourceLabel = label;
+    if (!e.ctrlKey && !e.metaKey && selection.isSelected(label)) {
+      this.#gate?.release("tile-selection");
       return;
     }
     if (e.ctrlKey || e.metaKey) {
@@ -156,11 +154,7 @@ var TileSelectionDrone = class _TileSelectionDrone extends Drone {
       this.#applyOp(label);
       return;
     }
-    this.#activePointerId = e.pointerId;
-    this.#pendingDrag = true;
-    this.#pendingStartLabel = label;
-    this.#pendingStartX = e.clientX;
-    this.#pendingStartY = e.clientY;
+    this.#gate?.release("tile-selection");
   };
   #onPointerMove = (e) => {
     if (e.pointerId !== this.#activePointerId) return;

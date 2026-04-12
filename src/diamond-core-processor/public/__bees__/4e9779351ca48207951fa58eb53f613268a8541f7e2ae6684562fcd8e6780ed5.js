@@ -1,7 +1,7 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/move/move.drone.ts
+// src/diamondcoreprocessor.com/move/move.drone.ts
 import { Drone, EffectBus, hypercomb } from "@hypercomb/core";
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/editor/tile-properties.ts
+// src/diamondcoreprocessor.com/editor/tile-properties.ts
 var TILE_PROPERTIES_FILE = "0000";
 var readCellProperties = async (cellDir) => {
   try {
@@ -22,7 +22,7 @@ var writeCellProperties = async (cellDir, updates) => {
   await writable.close();
 };
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/move/move.drone.ts
+// src/diamondcoreprocessor.com/move/move.drone.ts
 function axialKey(q, r) {
   return `${q},${r}`;
 }
@@ -157,7 +157,6 @@ var MoveDrone = class extends Drone {
   };
   // ── public API (called by input handlers) ────────────────
   beginMove = (anchorAxial, source) => {
-    if (!this.#moveActive) return false;
     if (!this.#begin(source)) return false;
     const anchorKey = axialKey(anchorAxial.q, anchorAxial.r);
     const axialSvc = this.resolve("axial");
