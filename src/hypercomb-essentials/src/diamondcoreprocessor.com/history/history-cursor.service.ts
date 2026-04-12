@@ -230,6 +230,13 @@ export class HistoryCursorService extends EventTarget {
     await this.load(this.#locationSig)
     this.#position = this.#total
     this.#emit()
+
+    // Announce the branch — listeners reconcile UI (mode, selection, toast)
+    EffectBus.emit('history:promoted', {
+      locationSig: this.#locationSig,
+      reconciledOrder: cursorCells,
+      survivingCells: [...cursorCellSet],
+    })
   }
 
   /**

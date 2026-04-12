@@ -240,6 +240,11 @@ var HistoryCursorService = class _HistoryCursorService extends EventTarget {
     await this.load(this.#locationSig);
     this.#position = this.#total;
     this.#emit();
+    EffectBus2.emit("history:promoted", {
+      locationSig: this.#locationSig,
+      reconciledOrder: cursorCells,
+      survivingCells: [...cursorCellSet]
+    });
   }
   /**
    * Compute divergence info: which cells are current vs future.
@@ -417,6 +422,8 @@ window.ioc.register("@diamondcoreprocessor.com/HistoryCursorService", _historyCu
 // src/diamondcoreprocessor.com/history/history.service.ts
 import { SignatureService } from "@hypercomb/core";
 var HistoryService = class _HistoryService {
+  // Signatures currently being promoted — prevents recursion when promote() calls record()
+  #promoting = /* @__PURE__ */ new Set();
   get historyRoot() {
     const store = get("@hypercomb.social/Store");
     return store.history;
@@ -446,8 +453,24 @@ var HistoryService = class _HistoryService {
   /**
    * Record an operation into the history bag for the given signature.
    * Appends a sequential file (00000001, 00000002, ...) with JSON content.
+   *
+   * If the cursor for this location is rewound, promotes the cursor state to
+   * head first (creating a new branch from the rewound point) before recording.
    */
   record = async (signature, operation) => {
+    if (!this.#promoting.has(signature)) {
+      const cursorService = get(
+        "@diamondcoreprocessor.com/HistoryCursorService"
+      );
+      if (cursorService?.state.rewound && cursorService.state.locationSig === signature) {
+        this.#promoting.add(signature);
+        try {
+          await cursorService.promote();
+        } finally {
+          this.#promoting.delete(signature);
+        }
+      }
+    }
     const bag = await this.getBag(signature);
     const nextIndex = await this.nextIndex(bag);
     const fileName = String(nextIndex).padStart(8, "0");

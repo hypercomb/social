@@ -35,6 +35,9 @@ export type LayerState = {
 
 export class HistoryService {
 
+  // Signatures currently being promoted — prevents recursion when promote() calls record()
+  readonly #promoting = new Set<string>()
+
   private get historyRoot(): FileSystemDirectoryHandle {
     const store = get<{ history: FileSystemDirectoryHandle }>('@hypercomb.social/Store')
     return store!.history
@@ -78,8 +81,28 @@ export class HistoryService {
   /**
    * Record an operation into the history bag for the given signature.
    * Appends a sequential file (00000001, 00000002, ...) with JSON content.
+   *
+   * If the cursor for this location is rewound, promotes the cursor state to
+   * head first (creating a new branch from the rewound point) before recording.
    */
   public readonly record = async (signature: string, operation: HistoryOp): Promise<void> => {
+    // Promote-before-record: if user is editing from a rewound state on this
+    // location, collapse the cursor state into a new head so the new op extends
+    // from what the user sees rather than corrupting history order.
+    if (!this.#promoting.has(signature)) {
+      const cursorService = get<{ state: { rewound: boolean; locationSig: string }; promote(): Promise<void> }>(
+        '@diamondcoreprocessor.com/HistoryCursorService'
+      )
+      if (cursorService?.state.rewound && cursorService.state.locationSig === signature) {
+        this.#promoting.add(signature)
+        try {
+          await cursorService.promote()
+        } finally {
+          this.#promoting.delete(signature)
+        }
+      }
+    }
+
     const bag = await this.getBag(signature)
 
     const nextIndex = await this.nextIndex(bag)

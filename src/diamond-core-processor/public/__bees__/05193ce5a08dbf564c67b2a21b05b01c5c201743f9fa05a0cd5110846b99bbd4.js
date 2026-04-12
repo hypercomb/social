@@ -216,11 +216,12 @@ var TileActionsDrone = class extends Drone {
   deps = {
     lineage: "@hypercomb.social/Lineage"
   };
-  listens = ["render:host-ready", "tile:action", "controls:action", "overlay:icons-reordered", "overlay:arrange-mode"];
+  listens = ["render:host-ready", "render:cell-count", "tile:action", "controls:action", "overlay:icons-reordered", "overlay:arrange-mode"];
   emits = ["overlay:register-action", "overlay:pool-icons", "search:prefill", "command:focus", "tile:hidden", "tile:unhidden", "tile:blocked", "cell:removed", "visibility:show-hidden", "substrate:rerolled"];
   #registered = false;
   #effectsRegistered = false;
   #arrangement = {};
+  #substrateLabels = /* @__PURE__ */ new Set();
   heartbeat = async () => {
     if (!this.#effectsRegistered) {
       this.#effectsRegistered = true;
@@ -228,6 +229,9 @@ var TileActionsDrone = class extends Drone {
         if (this.#registered) return;
         this.#registered = true;
         void this.#loadArrangementAndRegister();
+      });
+      this.onEffect("render:cell-count", (payload) => {
+        this.#substrateLabels = new Set(payload.substrateLabels ?? []);
       });
       this.onEffect("tile:action", (payload) => {
         if (!HANDLED_ACTIONS.has(payload.action)) return;
@@ -403,7 +407,8 @@ var TileActionsDrone = class extends Drone {
     if (!selection || selection.count === 0) return;
     const svc = window.ioc?.get?.("@diamondcoreprocessor.com/SubstrateService");
     if (!svc) return;
-    const labels = [...selection.selected];
+    const labels = [...selection.selected].filter((l) => this.#substrateLabels.has(l));
+    if (labels.length === 0) return;
     const rerolled = svc.rerollCells(labels);
     if (rerolled.length === 0) return;
     for (const cell of rerolled) {
@@ -677,8 +682,8 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
         this.#rebuildOccupiedMap();
         if (this.#overlay && this.#currentAxial) {
           this.#currentIndex = this.#lookupIndex(this.#currentAxial.q, this.#currentAxial.r);
-          this.#updatePerTileVisibility();
           this.#updateVisibility();
+          this.#updatePerTileVisibility();
         }
       });
       this.onEffect("render:set-orientation", (payload) => {
@@ -737,6 +742,7 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
       this.onEffect("selection:changed", (payload) => {
         this.#hasSelection = (payload?.selected?.length ?? 0) > 0;
         this.#updateVisibility();
+        this.#updatePerTileVisibility();
       });
       this.onEffect("drop:dragging", ({ active }) => {
         this.#dropDragging = active;
@@ -1697,7 +1703,6 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
     if (this.#hasSelection) {
       this.#overlay.visible = occupied && !this.#editing && !this.#editCooldown;
       if (this.#hexBg) this.#hexBg.hide();
-      for (const action of this.#actions) action.button.visible = false;
       return;
     }
     this.#overlay.visible = shouldShow;
