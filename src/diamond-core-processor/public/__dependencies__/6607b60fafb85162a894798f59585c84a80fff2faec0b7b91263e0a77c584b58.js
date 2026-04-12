@@ -1,5 +1,5 @@
 // @diamondcoreprocessor.com/presentation/grid
-// hypercomb-essentials/src/diamondcoreprocessor.com/presentation/grid/axial-coordinate.ts
+// src/diamondcoreprocessor.com/presentation/grid/axial-coordinate.ts
 import { Point } from "pixi.js";
 var { get } = window.ioc;
 var AxialCoordinate = class _AxialCoordinate {
@@ -47,7 +47,7 @@ var AxialCoordinate = class _AxialCoordinate {
   }
 };
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/presentation/grid/axial-service.ts
+// src/diamondcoreprocessor.com/presentation/grid/axial-service.ts
 var distance = (a, b) => {
   const dx = a.x - b.x;
   const dy = a.y - b.y;
@@ -157,13 +157,13 @@ var AxialService = class {
 };
 window.ioc.register("@diamondcoreprocessor.com/AxialService", new AxialService());
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/presentation/grid/hex-geometry.ts
+// src/diamondcoreprocessor.com/presentation/grid/hex-geometry.ts
 function createHexGeometry(circumRadiusPx, gapPx, padPx = 10) {
   return { circumRadiusPx, gapPx, padPx, spacing: circumRadiusPx + gapPx };
 }
 var DEFAULT_HEX_GEOMETRY = createHexGeometry(32, 6);
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/presentation/grid/hex-image.atlas.ts
+// src/diamondcoreprocessor.com/presentation/grid/hex-image.atlas.ts
 import { Container, RenderTexture, Sprite, Texture } from "pixi.js";
 var HexImageAtlas = class _HexImageAtlas {
   #atlas;
@@ -262,7 +262,7 @@ var HexImageAtlas = class _HexImageAtlas {
   }
 };
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/presentation/grid/hex-label.atlas.ts
+// src/diamondcoreprocessor.com/presentation/grid/hex-label.atlas.ts
 import { Container as Container2, RenderTexture as RenderTexture2, Text, TextStyle } from "pixi.js";
 var HexLabelAtlas = class {
   constructor(renderer, cellPx = 128, cols = 8, rows = 8) {
@@ -296,12 +296,29 @@ var HexLabelAtlas = class {
   map = /* @__PURE__ */ new Map();
   nextIndex = 0;
   #pivot = false;
+  #labelResolver = null;
   cols;
   rows;
   style;
   setPivot = (pivot) => {
     if (this.#pivot === pivot) return;
     this.#pivot = pivot;
+    this.map.clear();
+    this.nextIndex = 0;
+    this.renderer.render({ container: new Container2(), target: this.atlas, clear: true });
+  };
+  /**
+   * Set a function that resolves directory names to display labels.
+   * When set, getLabelUV will render the resolved text instead of the raw directory name.
+   */
+  setLabelResolver = (resolver) => {
+    this.#labelResolver = resolver;
+  };
+  /**
+   * Flush the entire label cache — all labels will re-render on next getLabelUV call.
+   * Call this when the locale changes so labels re-resolve through the label resolver.
+   */
+  invalidateLabels = () => {
     this.map.clear();
     this.nextIndex = 0;
     this.renderer.render({ container: new Container2(), target: this.atlas, clear: true });
@@ -316,7 +333,8 @@ var HexLabelAtlas = class {
     this.nextIndex++;
     const col = slot % this.cols;
     const row = Math.floor(slot / this.cols);
-    const text = new Text({ text: label, style: this.style });
+    const displayText = this.#labelResolver ? this.#labelResolver(label) : label;
+    const text = new Text({ text: displayText, style: this.style });
     text.resolution = 8;
     text.anchor.set(0.5);
     text.position.set(
@@ -344,7 +362,7 @@ var HexLabelAtlasFactory = class {
 };
 window.ioc.register("@diamondcoreprocessor.com/HexLabelAtlasFactory", new HexLabelAtlasFactory());
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/presentation/grid/hex-sdf.shader.ts
+// src/diamondcoreprocessor.com/presentation/grid/hex-sdf.shader.ts
 import { Shader } from "pixi.js";
 var HexSdfTextureShader = class _HexSdfTextureShader {
   shader;
@@ -704,7 +722,7 @@ var HexSdfTextureShaderFactory = class {
 };
 window.ioc.register("@diamondcoreprocessor.com/HexSdfTextureShaderFactory", new HexSdfTextureShaderFactory());
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/presentation/grid/simplex-noise.ts
+// src/diamondcoreprocessor.com/presentation/grid/simplex-noise.ts
 var F2 = 0.5 * (Math.sqrt(3) - 1);
 var G2 = (3 - Math.sqrt(3)) / 6;
 var grad2 = [

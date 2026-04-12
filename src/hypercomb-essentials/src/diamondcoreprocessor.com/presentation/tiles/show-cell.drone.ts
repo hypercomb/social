@@ -1864,12 +1864,12 @@ export class ShowCellDrone extends Drone {
     // valid, and the tile only refreshes on a full page reload.
     this.onEffect<{ cell: string }>('substrate:rerolled', (payload) => {
       if (!payload?.cell) return
-      const oldSig = this.cellImageCache.get(payload.cell)
       this.cellImageCache.delete(payload.cell)
       this.cellSubstrateCache.delete(payload.cell)
-      if (oldSig && this.imageAtlas) {
-        this.imageAtlas.invalidate(oldSig)
-      }
+      // Don't invalidate the old image in the atlas — other tiles may share
+      // the same substrate image sig via the balanced picker. Invalidating
+      // removes the UV entry, causing those tiles to render blank. The new
+      // sig will load into a fresh atlas slot during the re-render.
       this.#layerCellsCache.delete(this.renderedLocationKey)
       this.renderedCellsKey = ''
       this.requestRender()

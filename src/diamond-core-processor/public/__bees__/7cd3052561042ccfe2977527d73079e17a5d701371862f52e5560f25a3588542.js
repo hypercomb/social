@@ -1,5 +1,5 @@
 // src/diamondcoreprocessor.com/presentation/tiles/show-cell.drone.ts
-import { Drone, SignatureService } from "@hypercomb/core";
+import { Drone, SignatureService, I18N_IOC_KEY } from "@hypercomb/core";
 import { Container as Container3, Geometry, Mesh, Texture as Texture4 } from "pixi.js";
 
 // src/diamondcoreprocessor.com/presentation/grid/hex-label.atlas.ts
@@ -36,12 +36,29 @@ var HexLabelAtlas = class {
   map = /* @__PURE__ */ new Map();
   nextIndex = 0;
   #pivot = false;
+  #labelResolver = null;
   cols;
   rows;
   style;
   setPivot = (pivot) => {
     if (this.#pivot === pivot) return;
     this.#pivot = pivot;
+    this.map.clear();
+    this.nextIndex = 0;
+    this.renderer.render({ container: new Container(), target: this.atlas, clear: true });
+  };
+  /**
+   * Set a function that resolves directory names to display labels.
+   * When set, getLabelUV will render the resolved text instead of the raw directory name.
+   */
+  setLabelResolver = (resolver) => {
+    this.#labelResolver = resolver;
+  };
+  /**
+   * Flush the entire label cache — all labels will re-render on next getLabelUV call.
+   * Call this when the locale changes so labels re-resolve through the label resolver.
+   */
+  invalidateLabels = () => {
     this.map.clear();
     this.nextIndex = 0;
     this.renderer.render({ container: new Container(), target: this.atlas, clear: true });
@@ -56,7 +73,8 @@ var HexLabelAtlas = class {
     this.nextIndex++;
     const col = slot % this.cols;
     const row = Math.floor(slot / this.cols);
-    const text = new Text({ text: label, style: this.style });
+    const displayText = this.#labelResolver ? this.#labelResolver(label) : label;
+    const text = new Text({ text: displayText, style: this.style });
     text.resolution = 8;
     text.anchor.set(0.5);
     text.position.set(
@@ -627,7 +645,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
     axial: "@diamondcoreprocessor.com/AxialService",
     layout: "@diamondcoreprocessor.com/LayoutService"
   };
-  listens = ["render:host-ready", "mesh:ready", "mesh:items-updated", "tile:saved", "search:filter", "render:set-orientation", "render:set-pivot", "mesh:room", "mesh:secret", "cell:place-at", "cell:reorder", "render:set-gap", "move:preview", "clipboard:captured", "layout:mode", "tags:changed", "tags:filter", "history:cursor-changed", "tile:toggle-text", "visibility:show-hidden", "overlay:neon-color", "translation:tile-start", "translation:tile-done", "substrate:changed", "substrate:ready", "substrate:applied", "substrate:rerolled", "cell:added", "cell:removed"];
+  listens = ["render:host-ready", "mesh:ready", "mesh:items-updated", "tile:saved", "search:filter", "render:set-orientation", "render:set-pivot", "mesh:room", "mesh:secret", "cell:place-at", "cell:reorder", "render:set-gap", "move:preview", "clipboard:captured", "layout:mode", "tags:changed", "tags:filter", "history:cursor-changed", "tile:toggle-text", "visibility:show-hidden", "overlay:neon-color", "translation:tile-start", "translation:tile-done", "locale:changed", "substrate:changed", "substrate:ready", "substrate:applied", "substrate:rerolled", "cell:added", "cell:removed"];
   emits = ["mesh:ensure-started", "mesh:subscribe", "mesh:publish", "render:mesh-offset", "render:cell-count", "render:geometry-changed", "render:tags", "tile:hover-tags"];
   geom = null;
   shader = null;
@@ -1205,6 +1223,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
         this.layer = new Container3();
         this.pixiContainer.addChild(this.layer);
         this.atlas = new HexLabelAtlas(this.pixiRenderer, 128, 8, 8);
+        this.attachLabelResolver(this.atlas);
         this.atlas.setPivot(this.#pivot);
         this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8);
         this.cellImageCache.clear();
@@ -1237,6 +1256,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       this.layer = new Container3();
       this.pixiContainer.addChild(this.layer);
       this.atlas = new HexLabelAtlas(this.pixiRenderer, 128, 8, 8);
+      this.attachLabelResolver(this.atlas);
       this.atlas.setPivot(this.#pivot);
       this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8);
       this.cellImageCache.clear();
@@ -1246,6 +1266,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       this.shader = null;
     } else if (!this.atlas || this.atlasRenderer !== this.pixiRenderer) {
       this.atlas = new HexLabelAtlas(this.pixiRenderer, 128, 8, 8);
+      this.attachLabelResolver(this.atlas);
       this.atlas.setPivot(this.#pivot);
       this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8);
       this.cellImageCache.clear();
@@ -1928,6 +1949,13 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       this.renderedCellsKey = "";
       this.requestRender();
     });
+    this.onEffect("locale:changed", () => {
+      if (this.atlas) {
+        this.atlas.invalidateLabels();
+      }
+      this.renderedCellsKey = "";
+      this.requestRender();
+    });
     const roomStore = get("@hypercomb.social/RoomStore");
     const secretStore = get("@hypercomb.social/SecretStore");
     if (roomStore?.value && this.#space !== roomStore.value) {
@@ -1980,12 +2008,8 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
     });
     this.onEffect("substrate:rerolled", (payload) => {
       if (!payload?.cell) return;
-      const oldSig = this.cellImageCache.get(payload.cell);
       this.cellImageCache.delete(payload.cell);
       this.cellSubstrateCache.delete(payload.cell);
-      if (oldSig && this.imageAtlas) {
-        this.imageAtlas.invalidate(oldSig);
-      }
       this.#layerCellsCache.delete(this.renderedLocationKey);
       this.renderedCellsKey = "";
       this.requestRender();
@@ -2140,10 +2164,21 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
     this.cachedBranchSet = null;
     this.emitEffect("render:cell-count", { count: 0, labels: [] });
   };
+  /**
+   * Attach the i18n label resolver to the label atlas so cell directory names
+   * are rendered as localized display text when a translation is registered.
+   */
+  attachLabelResolver = (atlas) => {
+    const i18n = get(I18N_IOC_KEY);
+    if (i18n) {
+      atlas.setLabelResolver((directoryName) => i18n.resolveCell(directoryName));
+    }
+  };
   rebuildRenderResources = (renderer) => {
     this.clearMesh();
     this.shader = null;
     this.atlas = new HexLabelAtlas(renderer, 128, 8, 8);
+    this.attachLabelResolver(this.atlas);
     this.imageAtlas = new HexImageAtlas(renderer, 256, 8, 8);
     this.cellImageCache.clear();
     this.atlasRenderer = renderer;
