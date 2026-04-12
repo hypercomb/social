@@ -21,6 +21,8 @@ export class LocalizationService extends EventTarget implements I18nProvider {
 
   // namespace → locale → flat-key → translated string
   #catalogs = new Map<string, Map<string, Record<string, string>>>()
+  // override layer — checked before #catalogs, lets users/community shadow bee translations
+  #overrides = new Map<string, Map<string, Record<string, string>>>()
   #locale: string
   #fallback = FALLBACK_LOCALE
 
@@ -69,6 +71,29 @@ export class LocalizationService extends EventTarget implements I18nProvider {
     this.dispatchEvent(new CustomEvent('change'))
   }
 
+  registerOverrides(namespace: string, locale: string, catalog: Record<string, string>): void {
+    let localeMap = this.#overrides.get(namespace)
+    if (!localeMap) {
+      localeMap = new Map()
+      this.#overrides.set(namespace, localeMap)
+    }
+
+    const existing = localeMap.get(locale)
+    if (existing) {
+      Object.assign(existing, catalog)
+    } else {
+      localeMap.set(locale, { ...catalog })
+    }
+
+    this.dispatchEvent(new CustomEvent('change'))
+  }
+
+  resolveCell(directoryName: string, namespace = 'app'): string {
+    const key = `cell.${directoryName}`
+    const resolved = this.#resolve(key, undefined, namespace)
+    return resolved !== undefined ? resolved : directoryName
+  }
+
   t(key: string, params?: Record<string, string | number>, namespace = 'app'): string {
     const resolved = this.#resolve(key, params, namespace)
     return resolved !== undefined ? resolved : key
@@ -79,6 +104,18 @@ export class LocalizationService extends EventTarget implements I18nProvider {
   // -----------------------------------------------
 
   #resolve(key: string, params: Record<string, string | number> | undefined, namespace: string): string | undefined {
+    // Check overrides first (user/community layer takes priority)
+    const overrideMap = this.#overrides.get(namespace)
+    if (overrideMap) {
+      const overrideTemplate =
+        this.#lookup(overrideMap, this.#locale, key, params) ??
+        this.#lookup(overrideMap, this.#fallback, key, params)
+      if (overrideTemplate !== undefined) {
+        return params ? this.#interpolate(overrideTemplate, params) : overrideTemplate
+      }
+    }
+
+    // Fall back to catalog translations
     const localeMap = this.#catalogs.get(namespace)
     if (!localeMap) return undefined
 

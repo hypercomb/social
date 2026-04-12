@@ -22,6 +22,7 @@ Central reference for all hypercomb documentation. Files are grouped by topic.
 - [signature-node-pattern.md](signature-node-pattern.md) — Copy-paste implementation guide for signature-addressed features
 - [collapsed-compute.md](collapsed-compute.md) — Signature caching eliminates redundant computation across the network
 - [deterministic-computation.md](deterministic-computation.md) — Deterministic computation memoization with authenticity layer
+- [genome-primitive.md](genome-primitive.md) — Recursive Merkle root over subtrees: universal short-circuit for derived computations
 
 ## Protocol & Wire Format
 

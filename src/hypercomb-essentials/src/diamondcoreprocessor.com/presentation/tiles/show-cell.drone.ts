@@ -1,5 +1,6 @@
 // diamondcoreprocessor.com/pixi/show-cell.drone.ts
-import { Drone, SignatureService, SignatureStore } from '@hypercomb/core'
+import { Drone, SignatureService, SignatureStore, I18N_IOC_KEY } from '@hypercomb/core'
+import type { I18nProvider } from '@hypercomb/core'
 import { Application, Container, Geometry, Mesh, Texture } from 'pixi.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
 import { HexLabelAtlas } from '../grid/hex-label.atlas.js'
@@ -78,7 +79,7 @@ export class ShowCellDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -817,6 +818,7 @@ export class ShowCellDrone extends Drone {
         this.layer = new Container()
         this.pixiContainer.addChild(this.layer)
         this.atlas = new HexLabelAtlas(this.pixiRenderer, 128, 8, 8)
+        this.attachLabelResolver(this.atlas)
         this.atlas.setPivot(this.#pivot)
         this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8)
         this.cellImageCache.clear()
@@ -856,6 +858,7 @@ export class ShowCellDrone extends Drone {
       this.pixiContainer.addChild(this.layer)
 
       this.atlas = new HexLabelAtlas(this.pixiRenderer, 128, 8, 8)
+      this.attachLabelResolver(this.atlas)
       this.atlas.setPivot(this.#pivot)
       this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8)
       this.cellImageCache.clear()
@@ -865,6 +868,7 @@ export class ShowCellDrone extends Drone {
       this.shader = null
     } else if (!this.atlas || this.atlasRenderer !== this.pixiRenderer) {
       this.atlas = new HexLabelAtlas(this.pixiRenderer, 128, 8, 8)
+      this.attachLabelResolver(this.atlas)
       this.atlas.setPivot(this.#pivot)
       this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8)
       this.cellImageCache.clear()
@@ -1767,6 +1771,15 @@ export class ShowCellDrone extends Drone {
       this.requestRender()
     })
 
+    // locale:changed — flush label atlas so all tile labels re-resolve through i18n
+    this.onEffect<{ locale: string }>('locale:changed', () => {
+      if (this.atlas) {
+        this.atlas.invalidateLabels()
+      }
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
     // cell from persisted stores so secret/room survive page reload
     const roomStore = get<any>('@hypercomb.social/RoomStore')
     const secretStore = get<any>('@hypercomb.social/SecretStore')
@@ -2024,10 +2037,22 @@ export class ShowCellDrone extends Drone {
     this.emitEffect('render:cell-count', { count: 0, labels: [] })
   }
 
+  /**
+   * Attach the i18n label resolver to the label atlas so cell directory names
+   * are rendered as localized display text when a translation is registered.
+   */
+  private readonly attachLabelResolver = (atlas: HexLabelAtlas): void => {
+    const i18n = get<I18nProvider>(I18N_IOC_KEY)
+    if (i18n) {
+      atlas.setLabelResolver((directoryName: string) => i18n.resolveCell(directoryName))
+    }
+  }
+
   private readonly rebuildRenderResources = (renderer: unknown): void => {
     this.clearMesh()
     this.shader = null
     this.atlas = new HexLabelAtlas(renderer, 128, 8, 8)
+    this.attachLabelResolver(this.atlas)
     this.imageAtlas = new HexImageAtlas(renderer, 256, 8, 8)
     this.cellImageCache.clear()
     this.atlasRenderer = renderer

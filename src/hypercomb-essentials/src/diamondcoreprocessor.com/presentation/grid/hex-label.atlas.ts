@@ -13,6 +13,7 @@ export class HexLabelAtlas {
   private readonly map = new Map<string, LabelUV>()
   private nextIndex = 0
   #pivot = false
+  #labelResolver: ((directoryName: string) => string) | null = null
 
   private readonly cols: number
   private readonly rows: number
@@ -63,6 +64,24 @@ export class HexLabelAtlas {
     this.renderer.render({ container: new Container(), target: this.atlas, clear: true })
   }
 
+  /**
+   * Set a function that resolves directory names to display labels.
+   * When set, getLabelUV will render the resolved text instead of the raw directory name.
+   */
+  public setLabelResolver = (resolver: ((directoryName: string) => string) | null): void => {
+    this.#labelResolver = resolver
+  }
+
+  /**
+   * Flush the entire label cache — all labels will re-render on next getLabelUV call.
+   * Call this when the locale changes so labels re-resolve through the label resolver.
+   */
+  public invalidateLabels = (): void => {
+    this.map.clear()
+    this.nextIndex = 0
+    this.renderer.render({ container: new Container(), target: this.atlas, clear: true })
+  }
+
   public getAtlasTexture = (): Texture => {
     return this.atlas
   }
@@ -78,7 +97,10 @@ export class HexLabelAtlas {
     const col = slot % this.cols
     const row = Math.floor(slot / this.cols)
 
-    const text = new Text({ text: label, style: this.style })
+    // Resolve display text: label resolver (i18n) → raw directory name
+    const displayText = this.#labelResolver ? this.#labelResolver(label) : label
+
+    const text = new Text({ text: displayText, style: this.style })
     text.resolution = 8
 
     text.anchor.set(0.5)
