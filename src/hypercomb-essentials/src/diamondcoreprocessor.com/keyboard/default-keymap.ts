@@ -135,6 +135,15 @@ export const defaultKeyMap: KeyMapLayer = {
       category: 'Clipboard',
     },
 
+    // Selection
+    {
+      cmd: 'selection.toggleLeader',
+      sequence: [[{ key: 'space', ctrl: false }]],
+      description: 'Toggle leader tile in selection',
+      descriptionKey: 'keymap.toggleLeader',
+      category: 'Selection',
+    },
+
     // Remove
     {
       cmd: 'selection.remove',

@@ -199,6 +199,15 @@ $bp-phone-max: 599px;
   font-size: 0.9em;
 }
 
+.indicator-pill.info {
+  cursor: default;
+  pointer-events: none;
+
+  .indicator-icon {
+    font-family: 'hci', sans-serif;
+  }
+}
+
 .indicator-x {
   opacity: 0.35;
   font-size: 0.85em;

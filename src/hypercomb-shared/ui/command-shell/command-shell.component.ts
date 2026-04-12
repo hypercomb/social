@@ -45,7 +45,7 @@ export class CommandShellComponent implements AfterViewInit {
   readonly colorMap = input<ReadonlyMap<string, string>>(new Map())
 
   /** Active status indicators shown as pills on the right side of the input. */
-  readonly indicators = input<readonly { key: string; icon: string; label: string }[]>([])
+  readonly indicators = input<readonly { key: string; icon: string; label: string; dismissable?: boolean }[]>([])
 
   // ── outputs to parent ───────────────────────────────────
 

@@ -176,8 +176,16 @@ export class TileSelectionDrone extends Drone {
       this.#redraw()
     })
 
-    this.onEffect<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
-      if (cmd in ARROW_OFFSETS) { this.#handleArrowNav(cmd); return }
+    this.onEffect<{ cmd: string; event?: KeyboardEvent }>('keymap:invoke', ({ cmd, event }) => {
+      if (cmd in ARROW_OFFSETS) {
+        const extend = !!(event && (event.ctrlKey || event.metaKey))
+        this.#handleArrowNav(cmd, extend)
+        return
+      }
+      if (cmd === 'selection.toggleLeader') {
+        this.#handleToggleLeader()
+        return
+      }
     })
 
     // Sync from SelectionService (e.g. command line command-driven selection)
@@ -312,7 +320,7 @@ export class TileSelectionDrone extends Drone {
 
   // ── keyboard navigation ──────────────────────────────────────
 
-  #handleArrowNav(cmd: string): void {
+  #handleArrowNav(cmd: string, extend = false): void {
     const offset = ARROW_OFFSETS[cmd]
     if (!offset) return
 
@@ -347,7 +355,12 @@ export class TileSelectionDrone extends Drone {
     while (TileSelectionDrone.#inBounds(tq, tr)) {
       const targetKey = axialKey(tq, tr)
       if (this.#occupiedByAxial.has(targetKey)) {
-        if (this.#selected.has(targetKey)) {
+        if (extend) {
+          // Ctrl+Arrow: extend selection — keep existing, add target, move leader
+          this.#leaderKey = targetKey
+          this.#selected.add(targetKey)
+          this.#syncSelectionService(targetKey)
+        } else if (this.#selected.has(targetKey)) {
           // target already in selection — promote to leader, keep selection
           this.#leaderKey = targetKey
         } else {
@@ -366,6 +379,29 @@ export class TileSelectionDrone extends Drone {
       tr += offset.dr
     }
     // no occupied tile found in this direction — do nothing
+  }
+
+  #handleToggleLeader(): void {
+    if (!this.#leaderKey) return
+
+    if (this.#selected.has(this.#leaderKey)) {
+      // Remove leader from selection
+      this.#selected.delete(this.#leaderKey)
+      if (this.#selected.size > 0) {
+        // Promote another selected tile to leader
+        this.#leaderKey = this.#selected.values().next().value!
+      } else {
+        this.#leaderKey = null
+        this.#stopAnimation()
+      }
+    } else {
+      // Add leader back into selection
+      this.#selected.add(this.#leaderKey)
+      this.#startAnimation()
+    }
+    this.#syncSelectionService(this.#leaderKey ?? undefined)
+    this.#redraw()
+    this.#emitChanged()
   }
 
   static #inBounds(q: number, r: number): boolean {

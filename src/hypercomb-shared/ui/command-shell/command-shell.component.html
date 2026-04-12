@@ -27,13 +27,19 @@
       @if (indicators().length) {
         <div class="indicators">
           @for (ind of indicators(); track ind.key) {
-            <button
-              class="indicator-pill"
-              [title]="ind.label"
-              (mousedown)="$event.preventDefault(); indicatorDismiss.emit(ind.key)">
-              <span class="indicator-icon">{{ ind.icon }}</span>
-              <span class="indicator-x">×</span>
-            </button>
+            @if (ind.dismissable !== false) {
+              <button
+                class="indicator-pill"
+                [title]="ind.label"
+                (mousedown)="$event.preventDefault(); indicatorDismiss.emit(ind.key)">
+                <span class="indicator-icon">{{ ind.icon }}</span>
+                <span class="indicator-x">×</span>
+              </button>
+            } @else {
+              <span class="indicator-pill info" [title]="ind.label">
+                <span class="indicator-icon">{{ ind.icon }}</span>
+              </span>
+            }
           }
         </div>
       }

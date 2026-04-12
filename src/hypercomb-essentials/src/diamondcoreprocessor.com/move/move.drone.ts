@@ -2,8 +2,8 @@
 import { Drone, EffectBus, hypercomb } from '@hypercomb/core'
 import type { HostReadyPayload } from '../presentation/tiles/pixi-host.worker.js'
 import type { Axial } from '../navigation/hex-detector.js'
-import type { LayoutService } from './layout.service.js'
 import type { LayerTransferService } from './layer-transfer.service.js'
+import type { OrderProjection } from '../history/order-projection.js'
 import { writeCellProperties } from '../editor/tile-properties.js'
 
 type CellCountPayload = { count: number; labels: string[]; coords?: Axial[]; branchLabels?: string[] }
@@ -83,7 +83,6 @@ export class MoveDrone extends Drone {
     touchMove: '@diamondcoreprocessor.com/TouchMoveInput',
     detector: '@diamondcoreprocessor.com/HexDetector',
     axial: '@diamondcoreprocessor.com/AxialService',
-    layout: '@diamondcoreprocessor.com/LayoutService',
     lineage: '@hypercomb.social/Lineage',
     selection: '@diamondcoreprocessor.com/SelectionService',
     transfer: '@diamondcoreprocessor.com/LayerTransferService',
@@ -289,15 +288,14 @@ export class MoveDrone extends Drone {
     if (this.#droppedThrough) {
       // insert-push commit: write dense order directly
       const insertOrder = this.#computeInsertPlacements(finalAxial).filter(n => n !== '')
-      this.emitEffect('cell:reorder', { labels: insertOrder })
 
-      const lineage = this.resolve<any>('lineage')
-      const layout = this.resolve<LayoutService>('layout')
-      if (layout && lineage?.explorerDir) {
-        const dir = await lineage.explorerDir()
-        if (dir) await layout.write(dir, insertOrder)
+      // Persist via OrderProjection (authoritative — records history op + updates cache)
+      const orderProjection = window.ioc.get<OrderProjection>('@diamondcoreprocessor.com/OrderProjection')
+      if (orderProjection) {
+        await orderProjection.reorder(insertOrder)
       }
 
+      this.emitEffect('cell:reorder', { labels: insertOrder })
       this.emitEffect('move:preview', null)
       this.emitEffect('move:committed', { order: insertOrder })
       this.#droppedThrough = false
@@ -767,13 +765,14 @@ export class MoveDrone extends Drone {
       }
     } else {
       const denseOrder = this.#reorderNames(placements).filter(n => n !== '')
-      this.emitEffect('cell:reorder', { labels: denseOrder })
 
-      const layout = this.resolve<LayoutService>('layout')
-      if (layout && lineage?.explorerDir) {
-        const dir = await lineage.explorerDir()
-        if (dir) await layout.write(dir, denseOrder)
+      // Persist via OrderProjection (authoritative — records history op + updates cache)
+      const orderProjection = window.ioc.get<OrderProjection>('@diamondcoreprocessor.com/OrderProjection')
+      if (orderProjection) {
+        await orderProjection.reorder(denseOrder)
       }
+
+      this.emitEffect('cell:reorder', { labels: denseOrder })
     }
 
     this.emitEffect('move:preview', null)

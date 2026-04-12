@@ -16,9 +16,14 @@
       "src": "tracks/episode-3.mp3"
     },
     {
-      "file": "episode-4-ideas-on-the-frontline.mp3",
-      "title": "Ideas On The Frontline",
-      "src": "tracks/episode-4-ideas-on-the-frontline.mp3"
+      "file": "episode-4.mp3",
+      "title": "Episode 4",
+      "src": "tracks/episode-4.mp3"
+    },
+    {
+      "file": "episode-5.mp3",
+      "title": "Episode 5",
+      "src": "tracks/episode-5.mp3"
     },
     {
       "file": "episode-6.mp3",
@@ -26,14 +31,9 @@
       "src": "tracks/episode-6.mp3"
     },
     {
-      "file": "banned-from-x.mp3",
-      "title": "Banned From X",
-      "src": "tracks/banned-from-x.mp3"
-    },
-    {
-      "file": "episode-5-prequel.mp3",
+      "file": "prequel.mp3",
       "title": "Prequel",
-      "src": "tracks/episode-5-prequel.mp3"
+      "src": "tracks/prequel.mp3"
     }
   ]
 }

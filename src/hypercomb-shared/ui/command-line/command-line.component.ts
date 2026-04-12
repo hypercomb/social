@@ -371,7 +371,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   // ── status indicators ─────────────────────────────────
 
-  readonly #indicators = signal<Map<string, { key: string; icon: string; label: string }>>(new Map())
+  readonly #indicators = signal<Map<string, { key: string; icon: string; label: string; dismissable?: boolean }>>(new Map())
   readonly activeIndicators = computed(() => [...this.#indicators().values()])
 
   #indicatorUnsubs: (() => void)[] = []
@@ -891,11 +891,19 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
       const selected = payload.selected
       if (selected.length === 0) {
+        this.#indicators.update(m => { const n = new Map(m); n.delete('move-hint'); return n })
         if (this.#selectPhase() !== 'none') {
           this.clear()
         }
         return
       }
+
+      // show move-hint indicator when tiles are selected
+      this.#indicators.update(m => {
+        const n = new Map(m)
+        n.set('move-hint', { key: 'move-hint', icon: 'Z', label: 'Drag selected tiles to move', dismissable: false })
+        return n
+      })
 
       const ctx = this.context()
       if (!ctx.active || ctx.mode === 'select' || this.value() === '') {
