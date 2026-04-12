@@ -12,7 +12,7 @@
           <div class="shortcut-list">
             @for (binding of group.bindings; track binding.cmd) {
               <div class="shortcut-row">
-                <span class="shortcut-desc">{{ binding.description }}</span>
+                <span class="shortcut-desc">{{ binding.descriptionKey ? (binding.descriptionKey | t) : binding.description }}</span>
                 <span class="shortcut-keys">
                   @for (step of formatSequence(binding); track $index) {
                     @if ($index > 0) {

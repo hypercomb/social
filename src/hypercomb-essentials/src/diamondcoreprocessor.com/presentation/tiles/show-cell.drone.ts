@@ -969,11 +969,16 @@ export class ShowCellDrone extends Drone {
       if (isRewound && cursorService) {
         // Rewound: use cursor's divergence computation
         const divergence = cursorService.computeDivergence()
-        // Remove cells not in current set
+        // Rebuild union from divergence: current set is authoritative at cursor time
+        // (cells physically removed from OPFS must reappear when cursor is before their removal)
         for (const cell of [...union]) {
           if (!divergence.current.has(cell) && !divergence.futureAdds.has(cell)) {
             union.delete(cell)
           }
+        }
+        for (const cell of divergence.current) {
+          union.add(cell)
+          localCellSet.add(cell)
         }
         // Add future-add cells back to union (they'll render as ghosts)
         for (const cell of divergence.futureAdds) union.add(cell)
@@ -2133,7 +2138,36 @@ export class ShowCellDrone extends Drone {
   ): Promise<string[]> {
     switch (mode) {
       case 'pinned': {
-        let cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet)
+        // When cursor is rewound, use cursor-aware ordering to avoid overlap
+        // from deleted cells losing their OPFS-stored slot positions
+        const pinnedCursor = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryCursorService') as
+          HistoryCursorService | undefined
+        const pinnedRewound = pinnedCursor?.state?.rewound ?? false
+
+        let cellNames: string[]
+        if (pinnedRewound && pinnedCursor) {
+          const order = await pinnedCursor.buildOrderAtCursor()
+          if (order.length > 0) {
+            const unionSet = new Set(union)
+            const filtered = order.filter(s => unionSet.has(s))
+            for (const s of union) {
+              if (!filtered.includes(s)) filtered.push(s)
+            }
+            // Build sparse array from cursor order — each cell keeps its relative slot
+            const axial = this.resolve<any>('axial')
+            const maxSlot = axial?.count ?? 60
+            const sparse: string[] = new Array(maxSlot + 1).fill('')
+            for (let i = 0; i < filtered.length && i <= maxSlot; i++) {
+              sparse[i] = filtered[i]
+            }
+            cellNames = sparse
+          } else {
+            cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet)
+          }
+        } else {
+          cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet)
+        }
+
         if (this.filterKeyword) {
           const kw = this.filterKeyword
           cellNames = cellNames.map(s => s && s.toLowerCase().includes(kw) ? s : '')
@@ -2146,11 +2180,14 @@ export class ShowCellDrone extends Drone {
         let cellNames: string[]
         let orderFromProjection = false
 
-        const orderProjection = (window as any).ioc?.get?.('@diamondcoreprocessor.com/OrderProjection') as
-          { hydrate(sig: string): Promise<string[]> } | undefined
-        if (orderProjection) {
-          const locSig = await this.computeSignatureLocation(lineage)
-          const order = await orderProjection.hydrate(locSig.sig)
+        // When cursor is rewound, derive order from history up to cursor position
+        // (OrderProjection's live cache reflects head state, not cursor state)
+        const cursorService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryCursorService') as
+          HistoryCursorService | undefined
+        const isRewound = cursorService?.state?.rewound ?? false
+
+        if (isRewound && cursorService) {
+          const order = await cursorService.buildOrderAtCursor()
           if (order.length > 0) {
             orderFromProjection = true
             const unionSet = new Set(union)
@@ -2162,7 +2199,24 @@ export class ShowCellDrone extends Drone {
             cellNames = await this.#orderByIndex(dir, Array.from(union), localCellSet)
           }
         } else {
-          cellNames = await this.#orderByIndex(dir, Array.from(union), localCellSet)
+          const orderProjection = (window as any).ioc?.get?.('@diamondcoreprocessor.com/OrderProjection') as
+            { hydrate(sig: string): Promise<string[]> } | undefined
+          if (orderProjection) {
+            const locSig = await this.computeSignatureLocation(lineage)
+            const order = await orderProjection.hydrate(locSig.sig)
+            if (order.length > 0) {
+              orderFromProjection = true
+              const unionSet = new Set(union)
+              cellNames = order.filter(s => unionSet.has(s))
+              for (const s of union) {
+                if (!cellNames.includes(s)) cellNames.push(s)
+              }
+            } else {
+              cellNames = await this.#orderByIndex(dir, Array.from(union), localCellSet)
+            }
+          } else {
+            cellNames = await this.#orderByIndex(dir, Array.from(union), localCellSet)
+          }
         }
 
         // apply __layout__ ONLY as initial fallback — OrderProjection is authoritative

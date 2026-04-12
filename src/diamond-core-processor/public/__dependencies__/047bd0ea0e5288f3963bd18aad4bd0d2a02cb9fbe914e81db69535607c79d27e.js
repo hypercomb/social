@@ -1,5 +1,5 @@
 // @diamondcoreprocessor.com/history
-// hypercomb-essentials/src/diamondcoreprocessor.com/history/global-time-clock.service.ts
+// src/diamondcoreprocessor.com/history/global-time-clock.service.ts
 import { EffectBus } from "@hypercomb/core";
 var GlobalTimeClock = class extends EventTarget {
   #timestamp = null;
@@ -76,9 +76,9 @@ var GlobalTimeClock = class extends EventTarget {
 var _globalTimeClock = new GlobalTimeClock();
 window.ioc.register("@diamondcoreprocessor.com/GlobalTimeClock", _globalTimeClock);
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/history/history-cursor.service.ts
+// src/diamondcoreprocessor.com/history/history-cursor.service.ts
 import { EffectBus as EffectBus2 } from "@hypercomb/core";
-var HistoryCursorService = class extends EventTarget {
+var HistoryCursorService = class _HistoryCursorService extends EventTarget {
   #locationSig = "";
   #position = 0;
   #total = 0;
@@ -95,7 +95,8 @@ var HistoryCursorService = class extends EventTarget {
   }
   /**
    * Load (or reload) history for a location.
-   * Resets cursor to latest unless it was already set for this sig.
+   * Restores persisted cursor position when entering a location,
+   * so undo/redo state survives page refresh.
    */
   async load(locationSig) {
     const historyService = get("@diamondcoreprocessor.com/HistoryService");
@@ -110,7 +111,12 @@ var HistoryCursorService = class extends EventTarget {
         this.seekToTime(clock.timestamp);
         return;
       }
-      this.#position = this.#total;
+      const saved = this.#loadPersistedPosition(locationSig);
+      if (saved !== null && saved < this.#total) {
+        this.#position = saved;
+      } else {
+        this.#position = this.#total;
+      }
     } else if (this.#position > this.#total) {
       this.#position = this.#total;
     }
@@ -317,6 +323,54 @@ var HistoryCursorService = class extends EventTarget {
     return lastSigPerCell;
   }
   /**
+   * Replay add/remove/reorder ops up to cursor position to derive
+   * the correct display order at cursor time.
+   * Reorder payloads are resolved from the content-addressed store.
+   */
+  async buildOrderAtCursor() {
+    const store = get("@hypercomb.social/Store");
+    let order = [];
+    for (let i = 0; i < this.#position; i++) {
+      const op = this.#allOps[i];
+      switch (op.op) {
+        case "add":
+          if (!order.includes(op.cell)) order.push(op.cell);
+          break;
+        case "remove":
+          order = order.filter((s) => s !== op.cell);
+          break;
+        case "reorder":
+          if (store) {
+            try {
+              const blob = await store.getResource(op.cell);
+              if (blob) {
+                const parsed = JSON.parse(await blob.text());
+                if (Array.isArray(parsed)) order = parsed;
+              }
+            } catch {
+            }
+          }
+          break;
+        case "rename":
+          if (store) {
+            try {
+              const blob = await store.getResource(op.cell);
+              if (blob) {
+                const parsed = JSON.parse(await blob.text());
+                if (parsed?.oldName && parsed?.newName) {
+                  const idx = order.indexOf(parsed.oldName);
+                  if (idx !== -1) order[idx] = parsed.newName;
+                }
+              }
+            } catch {
+            }
+          }
+          break;
+      }
+    }
+    return order;
+  }
+  /**
    * Get all ops up to cursor position, filtered by type.
    * Generic method for any op type that needs reconstruction.
    */
@@ -329,8 +383,26 @@ var HistoryCursorService = class extends EventTarget {
     return ops;
   }
   #emit() {
+    this.#persistPosition();
     this.dispatchEvent(new CustomEvent("change"));
     EffectBus2.emit("history:cursor-changed", this.state);
+  }
+  // ── Cursor persistence (localStorage) ─────────��───────────
+  static #STORAGE_PREFIX = "hc:history-cursor:";
+  #persistPosition() {
+    if (!this.#locationSig) return;
+    const key = _HistoryCursorService.#STORAGE_PREFIX + this.#locationSig;
+    if (this.#position >= this.#total) {
+      localStorage.removeItem(key);
+    } else {
+      localStorage.setItem(key, String(this.#position));
+    }
+  }
+  #loadPersistedPosition(locationSig) {
+    const raw = localStorage.getItem(_HistoryCursorService.#STORAGE_PREFIX + locationSig);
+    if (raw === null) return null;
+    const n = parseInt(raw, 10);
+    return isNaN(n) ? null : n;
   }
   #groupKeyForIndex(index) {
     const op = this.#allOps[index];
@@ -342,7 +414,7 @@ var HistoryCursorService = class extends EventTarget {
 var _historyCursorService = new HistoryCursorService();
 window.ioc.register("@diamondcoreprocessor.com/HistoryCursorService", _historyCursorService);
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/history/history.service.ts
+// src/diamondcoreprocessor.com/history/history.service.ts
 import { SignatureService } from "@hypercomb/core";
 var HistoryService = class _HistoryService {
   get historyRoot() {
@@ -533,7 +605,7 @@ var HistoryService = class _HistoryService {
 var _historyService = new HistoryService();
 window.ioc.register("@diamondcoreprocessor.com/HistoryService", _historyService);
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/history/order-projection.ts
+// src/diamondcoreprocessor.com/history/order-projection.ts
 import { EffectBus as EffectBus3 } from "@hypercomb/core";
 var OrderProjection = class {
   #cache = /* @__PURE__ */ new Map();
@@ -656,7 +728,7 @@ var OrderProjection = class {
 var _orderProjection = new OrderProjection();
 window.ioc.register("@diamondcoreprocessor.com/OrderProjection", _orderProjection);
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/history/revise.queen.ts
+// src/diamondcoreprocessor.com/history/revise.queen.ts
 import { QueenBee, EffectBus as EffectBus4 } from "@hypercomb/core";
 var ReviseQueenBee = class extends QueenBee {
   namespace = "diamondcoreprocessor.com";

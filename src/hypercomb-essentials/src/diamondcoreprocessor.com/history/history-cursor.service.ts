@@ -52,7 +52,8 @@ export class HistoryCursorService extends EventTarget {
 
   /**
    * Load (or reload) history for a location.
-   * Resets cursor to latest unless it was already set for this sig.
+   * Restores persisted cursor position when entering a location,
+   * so undo/redo state survives page refresh.
    */
   async load(locationSig: string): Promise<void> {
     const historyService = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
@@ -63,18 +64,21 @@ export class HistoryCursorService extends EventTarget {
     this.#total = ops.length
 
     if (this.#locationSig !== locationSig) {
-      // new location — check if global time clock is active
+      // new location
       this.#locationSig = locationSig
       const clock = get<GlobalTimeClock>('@diamondcoreprocessor.com/GlobalTimeClock')
       if (clock?.active && clock.timestamp !== null) {
-        // Global time mode: seek to the clock's timestamp
         this.seekToTime(clock.timestamp)
         return   // seekToTime calls #emit
       }
-      // Live mode: jump to latest
-      this.#position = this.#total
+      // Restore persisted cursor position (sticky undo across refresh)
+      const saved = this.#loadPersistedPosition(locationSig)
+      if (saved !== null && saved < this.#total) {
+        this.#position = saved
+      } else {
+        this.#position = this.#total
+      }
     } else if (this.#position > this.#total) {
-      // history grew shorter (shouldn't happen, but safety)
       this.#position = this.#total
     }
 
@@ -327,6 +331,55 @@ export class HistoryCursorService extends EventTarget {
   }
 
   /**
+   * Replay add/remove/reorder ops up to cursor position to derive
+   * the correct display order at cursor time.
+   * Reorder payloads are resolved from the content-addressed store.
+   */
+  async buildOrderAtCursor(): Promise<string[]> {
+    const store = get<any>('@hypercomb.social/Store')
+    let order: string[] = []
+
+    for (let i = 0; i < this.#position; i++) {
+      const op = this.#allOps[i]
+      switch (op.op) {
+        case 'add':
+          if (!order.includes(op.cell)) order.push(op.cell)
+          break
+        case 'remove':
+          order = order.filter(s => s !== op.cell)
+          break
+        case 'reorder':
+          if (store) {
+            try {
+              const blob: Blob | null = await store.getResource(op.cell)
+              if (blob) {
+                const parsed = JSON.parse(await blob.text())
+                if (Array.isArray(parsed)) order = parsed
+              }
+            } catch { /* skip corrupted payload */ }
+          }
+          break
+        case 'rename':
+          if (store) {
+            try {
+              const blob: Blob | null = await store.getResource(op.cell)
+              if (blob) {
+                const parsed = JSON.parse(await blob.text())
+                if (parsed?.oldName && parsed?.newName) {
+                  const idx = order.indexOf(parsed.oldName)
+                  if (idx !== -1) order[idx] = parsed.newName
+                }
+              }
+            } catch { /* skip corrupted payload */ }
+          }
+          break
+      }
+    }
+
+    return order
+  }
+
+  /**
    * Get all ops up to cursor position, filtered by type.
    * Generic method for any op type that needs reconstruction.
    */
@@ -340,8 +393,31 @@ export class HistoryCursorService extends EventTarget {
   }
 
   #emit(): void {
+    this.#persistPosition()
     this.dispatchEvent(new CustomEvent('change'))
     EffectBus.emit<CursorState>('history:cursor-changed', this.state)
+  }
+
+  // ── Cursor persistence (localStorage) ─────────��───────────
+
+  static readonly #STORAGE_PREFIX = 'hc:history-cursor:'
+
+  #persistPosition(): void {
+    if (!this.#locationSig) return
+    const key = HistoryCursorService.#STORAGE_PREFIX + this.#locationSig
+    if (this.#position >= this.#total) {
+      // At head — no need to persist, remove stale entry
+      localStorage.removeItem(key)
+    } else {
+      localStorage.setItem(key, String(this.#position))
+    }
+  }
+
+  #loadPersistedPosition(locationSig: string): number | null {
+    const raw = localStorage.getItem(HistoryCursorService.#STORAGE_PREFIX + locationSig)
+    if (raw === null) return null
+    const n = parseInt(raw, 10)
+    return isNaN(n) ? null : n
   }
 
   #groupKeyForIndex(index: number): string {

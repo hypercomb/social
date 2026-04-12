@@ -8,7 +8,7 @@
     <!-- drag handle (move only; no resize) -->
     <div class="drag-handle horizontal"
          (pointerdown)="onDragStart($event)"
-         aria-label="drag to move">
+         [attr.aria-label]="'selection.drag-to-move' | t">
       <span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span>
       <span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span>
     </div>

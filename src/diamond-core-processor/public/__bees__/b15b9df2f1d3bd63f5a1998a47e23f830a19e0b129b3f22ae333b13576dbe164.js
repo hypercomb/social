@@ -1333,6 +1333,10 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
             union.delete(cell);
           }
         }
+        for (const cell of divergence.current) {
+          union.add(cell);
+          localCellSet.add(cell);
+        }
         for (const cell of divergence.futureAdds) union.add(cell);
         this.#divergenceFutureAdds = divergence.futureAdds;
         this.#divergenceFutureRemoves = divergence.futureRemoves;
@@ -2229,7 +2233,30 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
   async #resolveCellOrder(mode, dir, union, localCellSet, lineage) {
     switch (mode) {
       case "pinned": {
-        let cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet);
+        const pinnedCursor = window.ioc?.get?.("@diamondcoreprocessor.com/HistoryCursorService");
+        const pinnedRewound = pinnedCursor?.state?.rewound ?? false;
+        let cellNames;
+        if (pinnedRewound && pinnedCursor) {
+          const order = await pinnedCursor.buildOrderAtCursor();
+          if (order.length > 0) {
+            const unionSet = new Set(union);
+            const filtered = order.filter((s) => unionSet.has(s));
+            for (const s of union) {
+              if (!filtered.includes(s)) filtered.push(s);
+            }
+            const axial = this.resolve("axial");
+            const maxSlot = axial?.count ?? 60;
+            const sparse = new Array(maxSlot + 1).fill("");
+            for (let i = 0; i < filtered.length && i <= maxSlot; i++) {
+              sparse[i] = filtered[i];
+            }
+            cellNames = sparse;
+          } else {
+            cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet);
+          }
+        } else {
+          cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet);
+        }
         if (this.filterKeyword) {
           const kw = this.filterKeyword;
           cellNames = cellNames.map((s) => s && s.toLowerCase().includes(kw) ? s : "");
@@ -2240,10 +2267,10 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       default: {
         let cellNames;
         let orderFromProjection = false;
-        const orderProjection = window.ioc?.get?.("@diamondcoreprocessor.com/OrderProjection");
-        if (orderProjection) {
-          const locSig = await this.computeSignatureLocation(lineage);
-          const order = await orderProjection.hydrate(locSig.sig);
+        const cursorService = window.ioc?.get?.("@diamondcoreprocessor.com/HistoryCursorService");
+        const isRewound = cursorService?.state?.rewound ?? false;
+        if (isRewound && cursorService) {
+          const order = await cursorService.buildOrderAtCursor();
           if (order.length > 0) {
             orderFromProjection = true;
             const unionSet = new Set(union);
@@ -2255,7 +2282,23 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
             cellNames = await this.#orderByIndex(dir, Array.from(union), localCellSet);
           }
         } else {
-          cellNames = await this.#orderByIndex(dir, Array.from(union), localCellSet);
+          const orderProjection = window.ioc?.get?.("@diamondcoreprocessor.com/OrderProjection");
+          if (orderProjection) {
+            const locSig = await this.computeSignatureLocation(lineage);
+            const order = await orderProjection.hydrate(locSig.sig);
+            if (order.length > 0) {
+              orderFromProjection = true;
+              const unionSet = new Set(union);
+              cellNames = order.filter((s) => unionSet.has(s));
+              for (const s of union) {
+                if (!cellNames.includes(s)) cellNames.push(s);
+              }
+            } else {
+              cellNames = await this.#orderByIndex(dir, Array.from(union), localCellSet);
+            }
+          } else {
+            cellNames = await this.#orderByIndex(dir, Array.from(union), localCellSet);
+          }
         }
         if (!orderFromProjection) {
           const layout = this.resolve("layout");

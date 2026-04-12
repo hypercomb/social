@@ -5,14 +5,14 @@
   <!-- sidebar / index -->
   <aside class="docs-sidebar" [class.open]="sidebarOpen()">
     <div class="sidebar-header">
-      <h2>Documentation</h2>
-      <button class="sidebar-toggle" (click)="toggleSidebar()" aria-label="close sidebar">&times;</button>
+      <h2>{{ 'docs.title' | t }}</h2>
+      <button class="sidebar-toggle" (click)="toggleSidebar()" [attr.aria-label]="'docs.close-sidebar' | t">&times;</button>
     </div>
 
     <div class="sidebar-filter">
       <input
         type="text"
-        placeholder="filter docs..."
+        [placeholder]="'docs.filter-placeholder' | t"
         [value]="filterText()"
         (input)="onFilter($event)"
         autocomplete="off"
@@ -40,25 +40,25 @@
   <main class="docs-content">
     <div class="content-header">
       @if (!sidebarOpen()) {
-        <button class="menu-btn" (click)="toggleSidebar()" aria-label="open sidebar">
+        <button class="menu-btn" (click)="toggleSidebar()" [attr.aria-label]="'docs.open-sidebar' | t">
           <span class="menu-icon"></span>
         </button>
       }
       @if (activePage()) {
-        <button class="back-btn" (click)="backToIndex()">Index</button>
+        <button class="back-btn" (click)="backToIndex()">{{ 'docs.index' | t }}</button>
       }
-      <button class="close-btn" (click)="close()" aria-label="close documentation">&times;</button>
+      <button class="close-btn" (click)="close()" [attr.aria-label]="'docs.close' | t">&times;</button>
     </div>
 
     @if (loading()) {
-      <div class="docs-loading">Loading...</div>
+      <div class="docs-loading">{{ 'docs.loading' | t }}</div>
     } @else if (renderedHtml()) {
       <article class="docs-article" [innerHTML]="renderedHtml()"></article>
     } @else {
       <!-- welcome / index view when no doc is selected -->
       <div class="docs-welcome">
-        <h1>Hypercomb Documentation</h1>
-        <p>Select a document from the sidebar or use <code>/docs glossary</code> to jump directly to a page.</p>
+        <h1>{{ 'docs.main-title' | t }}</h1>
+        <p>{{ 'docs.welcome-text' | t }}</p>
       </div>
     }
   </main>

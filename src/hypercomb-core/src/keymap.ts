@@ -26,6 +26,7 @@ export interface KeyBinding {
   cmd: string              // e.g. 'tile.branch', 'navigation.fullscreen'
   sequence: KeyChord[][]   // outer = sequence steps, inner = simultaneous keys per step
   description?: string
+  descriptionKey?: string   // i18n key for localized description (resolved at render time)
   category?: string
   risk?: 'none' | 'warning' | 'danger'
   pierce?: boolean         // if true, fires even when suppressed (escape, emergency commands)

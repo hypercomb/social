@@ -13,6 +13,7 @@ import { DiamondIconComponent } from '../tree-view/diamond-icon.component'
 import { PatchListComponent } from '../patch-list/patch-list.component'
 import { DcpCommandLineComponent } from '../command-line/dcp-command-line.component'
 import { LayerEditorComponent } from '../layer-editor/layer-editor.component'
+import { DcpTranslatePipe } from '../core/dcp-translate.pipe'
 import type { BatchPatchResult, PatchResult } from '../core/merkle-patch.service'
 import type { BeeDocEntry, TreeNode, TreeNodeKind } from '../core/tree-node'
 
@@ -42,7 +43,7 @@ export interface DomainGroup {
 @Component({
   selector: 'app-home',
   standalone: true,
-  imports: [TreeViewComponent, AuditorSettingsComponent, RelayPanelComponent, BeeInspectorComponent, DiamondIconComponent, PatchListComponent, DcpCommandLineComponent, LayerEditorComponent],
+  imports: [TreeViewComponent, AuditorSettingsComponent, RelayPanelComponent, BeeInspectorComponent, DiamondIconComponent, PatchListComponent, DcpCommandLineComponent, LayerEditorComponent, DcpTranslatePipe],
   templateUrl: './home.component.html',
   styleUrls: ['./home.component.scss']
 })

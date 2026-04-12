@@ -1,6 +1,7 @@
 // diamond-core-processor/src/app/code-viewer/code-viewer.component.ts
 
 import { Component, computed, effect, ElementRef, input, signal, viewChild } from '@angular/core'
+import { DcpTranslatePipe } from '../core/dcp-translate.pipe'
 import hljs from 'highlight.js/lib/core'
 import javascript from 'highlight.js/lib/languages/javascript'
 import typescript from 'highlight.js/lib/languages/typescript'
@@ -11,6 +12,7 @@ hljs.registerLanguage('typescript', typescript)
 @Component({
   selector: 'hc-code-viewer',
   standalone: true,
+  imports: [DcpTranslatePipe],
   templateUrl: './code-viewer.component.html',
   styleUrls: ['./code-viewer.component.scss']
 })

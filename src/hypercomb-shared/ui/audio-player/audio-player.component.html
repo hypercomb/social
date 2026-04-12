@@ -4,7 +4,7 @@
   <button
     type="button"
     class="hc-audio-player__play"
-    [attr.aria-label]="playing() ? 'pause' : 'play'"
+    [attr.aria-label]="playing() ? ('audio.pause' | t) : ('audio.play' | t)"
     (click)="togglePlay()"
   >
     @if (playing()) {
@@ -24,7 +24,7 @@
   <div
     class="hc-audio-player__scrub"
     role="slider"
-    aria-label="seek"
+    [attr.aria-label]="'audio.seek' | t"
     [attr.aria-valuemin]="0"
     [attr.aria-valuemax]="duration()"
     [attr.aria-valuenow]="currentTime()"

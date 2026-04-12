@@ -5,13 +5,14 @@ import { Component, computed, inject, signal } from '@angular/core'
 import { ActivatedRoute } from '@angular/router'
 import { SignatureService, type BeePayloadV1, type Effect } from '@hypercomb/core'
 import { CodeViewerComponent } from '../code-viewer/code-viewer.component'
+import { DcpTranslatePipe } from '../core/dcp-translate.pipe'
 import { DraftPayloadCacheService } from '../core/draft-payload-cache.service'
 import { compilePayload } from '../core/compile-payload'
 
 @Component({
   selector: 'app-intent-inspector-pro',
   standalone: true,
-  imports: [CommonModule, CodeViewerComponent],
+  imports: [CommonModule, CodeViewerComponent, DcpTranslatePipe],
   templateUrl: './intent-inspector-pro.component.html',
   styleUrls: ['./intent-inspector-pro.component.scss']
 })

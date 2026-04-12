@@ -1,19 +1,19 @@
 <!-- src/app/code-viewer/code-viewer.component.html -->
 <div class="code-viewer" [class.fullscreen]="fullscreen()">
   <div class="toolbar">
-    <div class="label">code</div>
+    <div class="label">{{ 'dcp.code' | t }}</div>
 
     <div class="actions">
       <button class="btn" type="button" (click)="copy()">
-        {{ copied() ? 'copied' : 'copy' }}
+        {{ copied() ? ('dcp.copied' | t) : ('dcp.copy' | t) }}
       </button>
       <button class="btn" type="button" (click)="toggleFullscreen()">
-        {{ fullscreen() ? 'exit' : 'expand' }}
+        {{ fullscreen() ? ('dcp.exit' | t) : ('dcp.expand' | t) }}
       </button>
     </div>
   </div>
 
-  <div class="scroller" role="region" aria-label="code payload">
+  <div class="scroller" role="region" [attr.aria-label]="'dcp.code-payload' | t">
     <pre class="pre"><code #codeRef class="code language-typescript"></code></pre>
   </div>
 </div>

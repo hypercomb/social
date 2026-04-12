@@ -1,7 +1,7 @@
 <!-- src/app/home/home.component.html -->
 <div class="tree-home">
     <header class="top-bar">
-      <h1 class="title">Diamond Core Processor</h1>
+      <h1 class="title">{{ 'dcp.title' | t }}</h1>
       <div class="top-bar-right">
         <button class="kind-toggle"
           [class.active]="layersCollapsed()"
@@ -38,11 +38,11 @@
     <div class="domain-input">
       <input
         type="text"
-        placeholder="https://example.com/content"
+        [placeholder]="'dcp.filter-placeholder' | t"
         [value]="domainInput()"
         (input)="domainInput.set($any($event.target).value)"
         (keydown.enter)="addDomain()" />
-      <button class="btn" (click)="addDomain()">Install</button>
+      <button class="btn" (click)="addDomain()">{{ 'dcp.install' | t }}</button>
     </div>
 
     @if (!domains().length) {
@@ -57,14 +57,14 @@
         <div class="domain-header">
           <span class="domain-url" [title]="group.domain">{{ group.domainName }}/</span>
           <span class="header-sig">{{ group.sections[0]?.rootSig }}</span>
-          <button class="domain-action" (click)="downloadPackage(group.sections[0])" title="Download package">&#8615;</button>
+          <button class="domain-action" (click)="downloadPackage(group.sections[0])" [title]="'dcp.download-package' | t">&#8615;</button>
           <button class="remove" (click)="removeDomain(group.domain)">&times;</button>
         </div>
 
         @for (section of group.sections; track section.rootSig) {
           <div class="package-row">
             @if (section.loading) {
-              <div class="section-status">{{ section.installStatus ?? 'Loading...' }}</div>
+              <div class="section-status">{{ section.installStatus ?? ('dcp.loading' | t) }}</div>
             }
 
             @if (section.error) {
@@ -95,7 +95,7 @@
     }
 
     @if (!domains().length) {
-      <p class="empty">Add a trusted domain to get started.</p>
+      <p class="empty">{{ 'dcp.add-domain-prompt' | t }}</p>
     }
 
     @if (inspectLayer() && inspectLayerSection()) {

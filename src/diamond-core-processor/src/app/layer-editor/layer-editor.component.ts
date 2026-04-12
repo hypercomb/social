@@ -4,6 +4,7 @@ import { Component, computed, effect, inject, input, output, signal, ChangeDetec
 import { SignatureService } from '@hypercomb/core'
 import { CodeViewerComponent } from '../code-viewer/code-viewer.component'
 import { CodeEditorComponent } from '../code-editor/code-editor.component'
+import { DcpTranslatePipe } from '../core/dcp-translate.pipe'
 import { DcpStore } from '../core/dcp-store'
 import { MerklePatchService, type BatchPatchResult } from '../core/merkle-patch.service'
 import { CommitLockService } from './commit-lock.service'
@@ -28,19 +29,19 @@ type AiMessage = {
 @Component({
   selector: 'dcp-layer-editor',
   standalone: true,
-  imports: [CodeViewerComponent, CodeEditorComponent],
+  imports: [CodeViewerComponent, CodeEditorComponent, DcpTranslatePipe],
   template: `
     @if (visible()) {
       <div class="layer-editor">
         <header class="header">
-          <button class="back-btn" (click)="close.emit()">&larr; Back</button>
+          <button class="back-btn" (click)="close.emit()">&larr; {{ 'dcp.editor-back' | t }}</button>
           <div class="header-info">
             <span class="header-lineage">{{ layerNode().lineage }}</span>
             <span class="header-name">{{ layerNode().name }}</span>
           </div>
           <div class="header-actions">
             @if (stagedChanges().size > 0) {
-              <button class="discard-btn" (click)="onDiscardAll()">Discard</button>
+              <button class="discard-btn" (click)="onDiscardAll()">{{ 'dcp.editor-discard' | t }}</button>
               @if (lockPromptVisible()) {
                 <input
                   class="lock-input"
@@ -51,7 +52,7 @@ type AiMessage = {
                   (keydown.enter)="onCommit()" />
               }
               <button class="commit-btn" [disabled]="committing()" (click)="onCommit()">
-                {{ committing() ? 'Committing...' : lockConfigured() ? 'Commit \u{1F512}' : 'Commit' }}
+                {{ committing() ? ('dcp.editor-committing' | t) : lockConfigured() ? ('dcp.editor-commit-locked' | t) : ('dcp.editor-commit' | t) }}
               </button>
             }
           </div>
@@ -61,13 +62,13 @@ type AiMessage = {
           <input
             class="ai-input"
             type="text"
-            placeholder="Ask AI to make changes..."
+            [placeholder]="'dcp.editor-ai-placeholder' | t"
             [value]="aiInput()"
             [disabled]="aiProcessing()"
             (input)="aiInput.set($any($event.target).value)"
             (keydown.enter)="onAiSubmit()" />
           @if (aiProcessing()) {
-            <span class="ai-spinner">working...</span>
+            <span class="ai-spinner">{{ 'dcp.editor-working' | t }}</span>
           }
         </div>
 
@@ -95,7 +96,7 @@ type AiMessage = {
 
         <div class="file-panels">
           @if (loading()) {
-            <div class="loading">Loading files...</div>
+            <div class="loading">{{ 'dcp.editor-loading-files' | t }}</div>
           }
 
           @for (file of files(); track file.signature) {
@@ -105,7 +106,7 @@ type AiMessage = {
                 <span class="file-name">{{ file.name }}</span>
                 <span class="file-sig">{{ file.signature.slice(0, 12) }}</span>
                 @if (stagedChanges().has(file.signature)) {
-                  <span class="file-modified">modified</span>
+                  <span class="file-modified">{{ 'dcp.editor-modified' | t }}</span>
                   <button class="file-discard" (click)="onDiscardChange(file.signature)">&times;</button>
                 }
               </div>
@@ -120,7 +121,7 @@ type AiMessage = {
           }
 
           @if (!loading() && files().length === 0) {
-            <div class="empty">No bees or dependencies in this layer.</div>
+            <div class="empty">{{ 'dcp.editor-empty' | t }}</div>
           }
         </div>
       </div>

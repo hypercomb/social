@@ -2,10 +2,12 @@
 
 import { Component, inject, signal } from '@angular/core'
 import { AuditorService } from '../core/auditor.service'
+import { DcpTranslatePipe } from '../core/dcp-translate.pipe'
 
 @Component({
   selector: 'dcp-auditor-settings',
   standalone: true,
+  imports: [DcpTranslatePipe],
   template: `
     <div class="trust-panel" [class.open]="open()">
       <button class="toggle" (click)="open.set(!open())" title="Community Trust">
@@ -15,13 +17,12 @@ import { AuditorService } from '../core/auditor.service'
       @if (open()) {
         <div class="panel">
           <header class="panel-header">
-            <h3>Community Trust</h3>
-            <span class="badge">{{ auditor.endpoints.length }} source{{ auditor.endpoints.length === 1 ? '' : 's' }}</span>
+            <h3>{{ 'dcp.trust-title' | t }}</h3>
+            <span class="badge">{{ auditor.endpoints.length }} {{ 'dcp.trust-sources' | t }}</span>
           </header>
 
           <p class="description">
-            Add trusted auditor endpoints that vouch for code signatures.
-            Content must meet the approval threshold before it is marked as trusted.
+            {{ 'dcp.trust-description' | t }}
           </p>
 
           <div class="add-row">
@@ -29,19 +30,19 @@ import { AuditorService } from '../core/auditor.service'
               <input
                 type="text"
                 class="field field-url"
-                placeholder="https://auditor.example.com/approvals"
+                [placeholder]="'dcp.trust-url-placeholder' | t"
                 [value]="urlInput()"
                 (input)="urlInput.set($any($event.target).value)"
                 (keydown.enter)="addAuditor()" />
               <input
                 type="text"
                 class="field field-name"
-                placeholder="Label"
+                [placeholder]="'dcp.trust-label-placeholder' | t"
                 [value]="nameInput()"
                 (input)="nameInput.set($any($event.target).value)"
                 (keydown.enter)="addAuditor()" />
             </div>
-            <button class="btn-add" (click)="addAuditor()" [disabled]="!urlInput().trim()">Add</button>
+            <button class="btn-add" (click)="addAuditor()" [disabled]="!urlInput().trim()">{{ 'dcp.trust-add' | t }}</button>
           </div>
 
           @if (auditor.endpoints.length) {
@@ -59,13 +60,13 @@ import { AuditorService } from '../core/auditor.service'
           } @else {
             <div class="empty-state">
               <span class="empty-icon">&#9737;</span>
-              <span class="empty-text">No trusted sources configured</span>
+              <span class="empty-text">{{ 'dcp.trust-empty' | t }}</span>
             </div>
           }
 
           <footer class="panel-footer">
             <div class="threshold">
-              <label>Approval threshold</label>
+              <label>{{ 'dcp.trust-threshold' | t }}</label>
               <div class="threshold-control">
                 <input
                   type="number"

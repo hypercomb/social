@@ -1,6 +1,6 @@
 // diamondcoreprocessor.com/pixi/tile-overlay.drone.ts
-import { Drone, EffectBus } from '@hypercomb/core'
-import { Application, Container, Graphics, Point } from 'pixi.js'
+import { Drone, EffectBus, type I18nProvider, I18N_IOC_KEY } from '@hypercomb/core'
+import { Application, Container, Graphics, Point, Text, TextStyle } from 'pixi.js'
 import { HexIconButton } from './hex-icon-button.js'
 import { HexOverlayMesh } from './hex-overlay.shader.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
@@ -19,6 +19,10 @@ type OverlayAction = {
   genotype?: string
   /** If provided, called to determine per-tile visibility */
   visibleWhen?: OverlayVisibilityFn
+  /** i18n key for the short hint label */
+  labelKey?: string
+  /** i18n key for the expanded description */
+  descriptionKey?: string
 }
 
 /** Descriptor emitted by provider bees via `overlay:register-action` */
@@ -34,6 +38,10 @@ export type OverlayActionDescriptor = {
   hoverTint?: number
   profile: OverlayProfileKey
   visibleWhen?: OverlayVisibilityFn
+  /** i18n key for the short hint label (shown on sustained hover) */
+  labelKey?: string
+  /** i18n key for the expanded description (shown on hint click) */
+  descriptionKey?: string
 }
 
 export type OverlayVisibilityFn = (ctx: OverlayTileContext) => boolean
@@ -67,6 +75,14 @@ const WIGGLE_SPEED = 4
 const WIGGLE_AMPLITUDE = 0.06
 const DRAG_ALPHA = 0.6
 const DROP_HIGHLIGHT_TINT = 0x88ffff
+
+// ── Action hint constants ────────────────────────────────────────
+const HINT_DELAY_MS = 1500       // show hint after 1.5s sustained hover
+const HINT_Y_OFFSET = 22        // below the icon row
+const HINT_FONT_SIZE = 6
+const HINT_COLOR = 0xb0c0e0
+const HINT_EXPANDED_FONT_SIZE = 5.5
+const HINT_MAX_WIDTH = 60
 
 // ── Pool icon wrapper (tracks identity for drag) ──────────────────
 
@@ -154,6 +170,13 @@ export class TileOverlayDrone extends Drone {
 
   /** Current active order per profile (mirrors tile-actions arrangement) */
   #activeOrder: Map<OverlayProfileKey, string[]> = new Map()
+
+  // ── Action hint state ──────────────────────────────────────────
+  #hintText: Text | null = null
+  #hintDescriptionText: Text | null = null
+  #hintTimer: ReturnType<typeof setTimeout> | null = null
+  #hintActionName: string | null = null
+  #hintExpanded = false
 
   protected override deps = {
     detector: '@diamondcoreprocessor.com/HexDetector',
@@ -377,6 +400,7 @@ export class TileOverlayDrone extends Drone {
   }
 
   protected override dispose(): void {
+    this.#clearHint()
     if (this.#arrangeMode) this.#exitArrangeMode()
     if (this.#listening) {
       document.removeEventListener('pointerdown', this.#onPointerDown)
@@ -489,6 +513,8 @@ export class TileOverlayDrone extends Drone {
         profile: desc.profile,
         genotype: desc.genotype,
         visibleWhen: desc.visibleWhen,
+        labelKey: desc.labelKey,
+        descriptionKey: desc.descriptionKey,
       })
     }
 
@@ -1197,6 +1223,7 @@ export class TileOverlayDrone extends Drone {
     if (hexChanged) {
       this.#currentAxial = axial
       this.#currentIndex = this.#lookupIndex(axial.q, axial.r)
+      this.#clearHint()
 
       const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(axial.q, axial.r))
       this.#currentTileExternal = !!(entry?.label && this.#externalLabels.has(entry.label))
@@ -1231,7 +1258,7 @@ export class TileOverlayDrone extends Drone {
   #updateIconHover(local: Point): void {
     if (!this.#overlay?.visible) {
       for (const a of this.#actions) a.button.hovered = false
-
+      this.#clearHint()
       return
     }
 
@@ -1255,6 +1282,100 @@ export class TileOverlayDrone extends Drone {
       } else {
         this.#crackOverlay.visible = false
       }
+    }
+
+    // ── Action hint timer ──────────────────────────────────────────
+    if (hoveredName !== this.#hintActionName) {
+      this.#clearHint()
+      if (hoveredName) {
+        this.#hintActionName = hoveredName
+        this.#hintTimer = setTimeout(() => this.#showHint(hoveredName!), HINT_DELAY_MS)
+      }
+    }
+  }
+
+  // ── Action hint display ─────────────────────────────────────────────
+
+  #resolveI18n(): I18nProvider | undefined {
+    return window.ioc.get<I18nProvider>(I18N_IOC_KEY) ?? undefined
+  }
+
+  #showHint(actionName: string): void {
+    if (!this.#overlay) return
+    const action = this.#actions.find(a => a.name === actionName && a.button.hovered)
+    if (!action?.labelKey) return
+
+    const i18n = this.#resolveI18n()
+    const label = i18n?.t(action.labelKey) ?? action.name
+
+    this.#clearHintText()
+
+    const hcFont = getComputedStyle(document.documentElement).getPropertyValue('--hc-font').trim()
+
+    this.#hintText = new Text({
+      text: label,
+      style: new TextStyle({
+        fontFamily: hcFont || "'Source Sans Pro Light', system-ui, sans-serif",
+        fontSize: HINT_FONT_SIZE,
+        fill: HINT_COLOR,
+        align: 'center',
+      }),
+    })
+    this.#hintText.anchor.set(0.5, 0)
+    this.#hintText.position.set(action.button.position.x, HINT_Y_OFFSET)
+    this.#hintText.alpha = 0.85
+    this.#overlay.addChild(this.#hintText)
+    this.#hintExpanded = false
+  }
+
+  #expandHint(): void {
+    if (!this.#overlay || !this.#hintActionName || this.#hintExpanded) return
+    const action = this.#actions.find(a => a.name === this.#hintActionName)
+    if (!action?.descriptionKey) return
+
+    const i18n = this.#resolveI18n()
+    const description = i18n?.t(action.descriptionKey) ?? ''
+    if (!description) return
+
+    const hcFont = getComputedStyle(document.documentElement).getPropertyValue('--hc-font').trim()
+
+    this.#hintDescriptionText = new Text({
+      text: description,
+      style: new TextStyle({
+        fontFamily: hcFont || "'Source Sans Pro Light', system-ui, sans-serif",
+        fontSize: HINT_EXPANDED_FONT_SIZE,
+        fill: HINT_COLOR,
+        align: 'center',
+        wordWrap: true,
+        wordWrapWidth: HINT_MAX_WIDTH,
+      }),
+    })
+    this.#hintDescriptionText.anchor.set(0.5, 0)
+    const yBelow = HINT_Y_OFFSET + (this.#hintText ? this.#hintText.height + 2 : HINT_FONT_SIZE + 2)
+    this.#hintDescriptionText.position.set(0, yBelow)
+    this.#hintDescriptionText.alpha = 0.7
+    this.#overlay.addChild(this.#hintDescriptionText)
+    this.#hintExpanded = true
+  }
+
+  #clearHint(): void {
+    if (this.#hintTimer) {
+      clearTimeout(this.#hintTimer)
+      this.#hintTimer = null
+    }
+    this.#hintActionName = null
+    this.#hintExpanded = false
+    this.#clearHintText()
+  }
+
+  #clearHintText(): void {
+    if (this.#hintText) {
+      this.#hintText.destroy()
+      this.#hintText = null
+    }
+    if (this.#hintDescriptionText) {
+      this.#hintDescriptionText.destroy()
+      this.#hintDescriptionText = null
     }
   }
 
@@ -1374,6 +1495,12 @@ export class TileOverlayDrone extends Drone {
         const by = local.y - oy - btn.position.y
 
         if (btn.containsPoint(bx, by)) {
+          // If hint is showing but not expanded, expand it on first click
+          if (this.#hintText && !this.#hintExpanded && this.#hintActionName === action.name) {
+            this.#expandHint()
+            return
+          }
+          this.#clearHint()
           // break-apart: play shatter animation first, then emit action
           if (action.name === 'break-apart') {
             this.playShatterAnimation(

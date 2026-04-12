@@ -8,7 +8,7 @@
             {{ name() }}
           </div>
         } @else {
-          <div class="intent-title">loading…</div>
+          <div class="intent-title">{{ 'dcp.loading' | t }}</div>
           @if (error()) {
             <div class="intent-subtitle">
               <span class="mono dim">{{ error() }}</span>
@@ -27,11 +27,11 @@
 
         <aside class="right">
           <div class="panel right-tabs">
-            <div class="panel-title">safety</div>
+            <div class="panel-title">{{ 'dcp.safety' | t }}</div>
             <ul class="list">
-              <li>review this code like it is untrusted input</li>
-              <li>focus on network calls, data exfiltration, and token/resource access</li>
-              <li>verify before confirming</li>
+              <li>{{ 'dcp.review-untrusted' | t }}</li>
+              <li>{{ 'dcp.focus-network' | t }}</li>
+              <li>{{ 'dcp.verify-before-confirm' | t }}</li>
             </ul>
           </div>
         </aside>
@@ -39,11 +39,11 @@
 
       <footer class="bottom-buttons">
         <button class="button primary" type="button" [disabled]="!canConfirm()" (click)="confirm()">
-          allow script
+          {{ 'dcp.allow-script' | t }}
         </button>
 
         <button class="button secondary" type="button" (click)="done()">
-          done
+          {{ 'dcp.done' | t }}
         </button>
       </footer>
     }

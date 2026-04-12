@@ -46,18 +46,18 @@ var ICONS = {
 };
 var ICON_REGISTRY = [
   // ── private profile ──
-  { name: "command", svgMarkup: ICONS.command, hoverTint: 11075544, profile: "private" },
-  { name: "edit", svgMarkup: ICONS.edit, hoverTint: 13162751, profile: "private" },
-  { name: "search", svgMarkup: ICONS.search, hoverTint: 13172680, profile: "private", visibleWhen: (ctx) => ctx.noImage },
-  { name: "reroll", svgMarkup: ICONS.reroll, hoverTint: 14207231, profile: "private", visibleWhen: (ctx) => ctx.hasSubstrate },
-  { name: "remove", svgMarkup: ICONS.remove, hoverTint: 16763080, profile: "private" },
-  { name: "break-apart", svgMarkup: ICONS.breakApart, hoverTint: 6737151, profile: "private", visibleWhen: (ctx) => ctx.isHidden },
+  { name: "command", svgMarkup: ICONS.command, hoverTint: 11075544, profile: "private", labelKey: "action.command", descriptionKey: "action.command.description" },
+  { name: "edit", svgMarkup: ICONS.edit, hoverTint: 13162751, profile: "private", labelKey: "action.edit", descriptionKey: "action.edit.description" },
+  { name: "search", svgMarkup: ICONS.search, hoverTint: 13172680, profile: "private", visibleWhen: (ctx) => ctx.noImage, labelKey: "action.search", descriptionKey: "action.search.description" },
+  { name: "reroll", svgMarkup: ICONS.reroll, hoverTint: 14207231, profile: "private", visibleWhen: (ctx) => ctx.hasSubstrate, labelKey: "action.reroll", descriptionKey: "action.reroll.description" },
+  { name: "remove", svgMarkup: ICONS.remove, hoverTint: 16763080, profile: "private", labelKey: "action.remove", descriptionKey: "action.remove.description" },
+  { name: "break-apart", svgMarkup: ICONS.breakApart, hoverTint: 6737151, profile: "private", visibleWhen: (ctx) => ctx.isHidden, labelKey: "action.break-apart", descriptionKey: "action.break-apart.description" },
   // ── public-own profile ──
-  { name: "hide", svgMarkup: ICONS.hide, hoverTint: 16767144, profile: "public-own", visibleWhen: (ctx) => !ctx.isHidden },
-  { name: "break-apart", svgMarkup: ICONS.breakApart, hoverTint: 6737151, profile: "public-own", visibleWhen: (ctx) => ctx.isHidden },
+  { name: "hide", svgMarkup: ICONS.hide, hoverTint: 16767144, profile: "public-own", visibleWhen: (ctx) => !ctx.isHidden, labelKey: "action.hide", descriptionKey: "action.hide.description" },
+  { name: "break-apart", svgMarkup: ICONS.breakApart, hoverTint: 6737151, profile: "public-own", visibleWhen: (ctx) => ctx.isHidden, labelKey: "action.break-apart", descriptionKey: "action.break-apart.description" },
   // ── public-external profile ──
-  { name: "adopt", svgMarkup: ICONS.adopt, hoverTint: 11075544, profile: "public-external" },
-  { name: "block", svgMarkup: ICONS.block, hoverTint: 16763080, profile: "public-external" }
+  { name: "adopt", svgMarkup: ICONS.adopt, hoverTint: 11075544, profile: "public-external", labelKey: "action.adopt", descriptionKey: "action.adopt.description" },
+  { name: "block", svgMarkup: ICONS.block, hoverTint: 16763080, profile: "public-external", labelKey: "action.block", descriptionKey: "action.block.description" }
 ];
 var DEFAULT_ACTIVE = {
   "private": ["command", "edit", "reroll", "remove", "break-apart"],
@@ -149,6 +149,8 @@ var TileActionsDrone = class extends Drone {
           hoverTint: entry.hoverTint,
           profile: entry.profile,
           visibleWhen: entry.visibleWhen,
+          labelKey: entry.labelKey,
+          descriptionKey: entry.descriptionKey,
           x: positions[i].x,
           y: positions[i].y
         });
@@ -174,6 +176,8 @@ var TileActionsDrone = class extends Drone {
         hoverTint: entry.hoverTint,
         profile: entry.profile,
         visibleWhen: entry.visibleWhen,
+        labelKey: entry.labelKey,
+        descriptionKey: entry.descriptionKey,
         x: positions[i].x,
         y: positions[i].y
       });

@@ -7,6 +7,7 @@
 
 import { Component, computed, ElementRef, input, output, signal, ViewChild, type AfterViewInit } from '@angular/core'
 import type { TreeNode, TreeNodeKind } from '../core/tree-node'
+import { DcpTranslatePipe } from '../core/dcp-translate.pipe'
 
 /** Kind prefixes recognized in the command line. */
 const KIND_PREFIXES: Record<string, TreeNodeKind[]> = {
@@ -20,6 +21,7 @@ const KIND_PREFIXES: Record<string, TreeNodeKind[]> = {
 @Component({
   selector: 'dcp-command-line',
   standalone: true,
+  imports: [DcpTranslatePipe],
   templateUrl: './dcp-command-line.component.html',
   styleUrls: ['./dcp-command-line.component.scss']
 })

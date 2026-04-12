@@ -4,9 +4,9 @@
 <!-- breadcrumb: below header, right-aligned -->
 <div class="breadcrumb-top" [class.faded]="isMobile()">
   @if (meshPublic) {
-    <span class="public-crumb" [style.color]="shieldColor()">public</span><span class="sep-crumb">◆</span>
+    <span class="public-crumb" [style.color]="shieldColor()">{{ 'breadcrumb.public' | t }}</span><span class="sep-crumb">◆</span>
   } @else {
-    <span class="private-crumb">private</span><span class="sep-crumb">◆</span>
+    <span class="private-crumb">{{ 'breadcrumb.private' | t }}</span><span class="sep-crumb">◆</span>
   }
   <span class="domain-crumb crumb-link" (click)="navigateTo([])">{{ activeDomain() }}</span>
   @for (seg of pathSegments(); track seg.target.length; let last = $last) {
@@ -20,18 +20,18 @@
     <span class="sep-crumb">◆</span><span class="secret-crumb">{{ secretWords() }}</span>
   }
   @if (secretWords()) {
-    <span class="sep-crumb">◆</span><span class="secure-crumb" [style.color]="shieldColor()">secure</span>
+    <span class="sep-crumb">◆</span><span class="secure-crumb" [style.color]="shieldColor()">{{ 'breadcrumb.secure' | t }}</span>
   } @else {
-    <span class="sep-crumb">◆</span><span class="unsecure-crumb">unsecured</span>
+    <span class="sep-crumb">◆</span><span class="unsecure-crumb">{{ 'breadcrumb.unsecured' | t }}</span>
   }
   @if (installState() !== 'idle') {
     <span class="sep-crumb">◆</span>
     <span class="install-crumb" [attr.data-state]="installState()">
       @switch (installState()) {
-        @case ('checking') { checking }
-        @case ('syncing') { installing }
-        @case ('complete') { installed{{ installChangedFiles() ? ' (' + installChangedFiles() + ')' : '' }} }
-        @case ('error') { sync error }
+        @case ('checking') { {{ 'breadcrumb.checking' | t }} }
+        @case ('syncing') { {{ 'breadcrumb.installing' | t }} }
+        @case ('complete') { {{ installChangedFiles() ? ('breadcrumb.installed-count' | t: { count: installChangedFiles() }) : ('breadcrumb.installed' | t) }} }
+        @case ('error') { {{ 'breadcrumb.sync-error' | t }} }
       }
     </span>
   }
@@ -83,7 +83,7 @@
   @if (!isMobile()) {
     <div class="drag-handle vertical"
          (pointerdown)="onPillDragStart($event)"
-         aria-label="drag to move">
+         [attr.aria-label]="'controls.drag-to-move' | t">
       <span class="dot"></span><span class="dot"></span>
       <span class="dot"></span><span class="dot"></span>
       <span class="dot"></span><span class="dot"></span>
@@ -118,90 +118,76 @@
           </button>
         </div>
       } @else {
-        <!-- ═══ DESKTOP: full controls ═══ -->
-        <!-- view section -->
-        <div class="controls-section view">
-          <button class="ctl-btn" [attr.aria-label]="'controls.back' | t">
-            <span class="hci">A</span>
-          </button>
-          
-          <button class="ctl-btn" (click)="openDcp()" [attr.aria-label]="'controls.dcp' | t" data-instruction="dcp.open-processor">
-            <span class="hci dcp-icon">$</span>
-          </button>
-          <button class="ctl-btn" [class.active]="fitLocked()" (click)="fitOrCenter($event)" [attr.aria-label]="'controls.fit-content' | t" data-instruction="dcp.fit-content">
-            <span class="hci">q</span>
-          </button>
-          <button class="ctl-btn" (click)="zoomOut()" [attr.aria-label]="'controls.zoom-out' | t" data-instruction="dcp.zoom-out">
-            <span class="hci">I</span>
-          </button>
-          <button class="ctl-btn" (click)="zoomIn()" [attr.aria-label]="'controls.zoom-in' | t" data-instruction="dcp.zoom-in">
-            <span class="hci">K</span>
-          </button>
-          <button class="ctl-btn" [class.active]="locked()" (click)="toggleLock()" [attr.aria-label]="'controls.lock' | t" data-instruction="dcp.lock">
-            <span class="hci">{{ locked() ? 'a' : 'b' }}</span>
-          </button>
-          <button class="ctl-btn" (click)="toggleFullscreen()" [attr.aria-label]="'controls.fullscreen' | t" data-instruction="dcp.fullscreen">
-            <span class="hci">'</span>
-          </button>
-          <button class="ctl-btn" [class.active]="layoutPinned()" (click)="toggleLayout()" [attr.aria-label]="'controls.layout-mode' | t" [title]="meshPublic ? null : ((layoutPinned() ? 'controls.pinned-layout' : 'controls.dense-layout') | t)" data-instruction="dcp.layout-mode">
-            <span class="hci">#</span>
-          </button>
-          <button class="ctl-btn" (click)="toggleInstructions($event)" [attr.aria-label]="'controls.instructions' | t" [title]="'controls.instructions' | t" data-instruction="dcp.instructions-toggle">
-            <span class="hci">?</span>
-          </button>
-        </div>
-
-        <!-- show hidden items toggle -->
-        <div class="controls-divider"></div>
-        <button class="ctl-btn eye-btn" [class.active]="showHidden()" (click)="toggleShowHidden()" [attr.aria-label]="'controls.show-hidden' | t">
-          <span class="eye-icon" [class.struck]="!showHidden()"></span>
-        </button>
-
-        <!-- text-only toggle (suppress images) -->
-        <button class="ctl-btn text-only-btn" [class.active]="textOnly()" (click)="toggleTextOnly()" [attr.aria-label]="'controls.text-only' | t">
-          <span class="text-only-icon" [class.struck]="!textOnly()"></span>
-        </button>
-
-        <!-- clipboard + voice buttons -->
-        @if (clipboardAvailable() && clipboardCount() > 0) {
-          <div class="controls-divider"></div>
-          <button class="ctl-btn clipboard-btn" (click)="openClipboard()" [attr.aria-label]="'controls.clipboard' | t">
-            <span class="hci">y</span>
-            <span class="badge">{{ clipboardCount() }}</span>
-          </button>
-        }
-        @if (voiceSupported) {
-          <button class="ctl-btn mic-btn" [class.active]="voiceActive()" (click)="toggleVoice()" [attr.aria-label]="'controls.voice' | t">
-            <span class="mic-icon">{{ voiceActive() ? '🎙' : '🎤' }}</span>
-          </button>
-        }
-
-        <!-- location section (public mode) -->
-        @if (meshPublic) {
-          <div class="controls-divider"></div>
-          <button class="ctl-btn" [class.active]="roomOpen()" (click)="toggleRoom()" [attr.aria-label]="'controls.location' | t">
-            <span class="hci">p</span>
-          </button>
-          @if (roomOpen()) {
-            <div class="room-shell">
-              <input
-                class="room-input"
-                type="text"
-                [placeholder]="'controls.room-placeholder' | t"
-                [value]="roomValue()"
-                (input)="onRoomInput($event)"
-                (keydown.enter)="submitRoom()"
-                (keydown.escape)="toggleRoom()"
-              />
-            </div>
+        <!-- ═══ DESKTOP: multi-row draggable controls ═══ -->
+        <div class="controls-rows">
+          @for (row of controlRows(); track row.key; let rowIdx = $index) {
+            @if (rowIdx === 0 || expanded()) {
+              <div class="controls-row"
+                   cdkDropList
+                   cdkDropListOrientation="horizontal"
+                   [cdkDropListData]="row.items"
+                   [cdkDropListConnectedTo]="getDropLists()"
+                   [attr.data-row-key]="row.key"
+                   (cdkDropListDropped)="onControlDrop($event)">
+                @for (ctrl of row.items; track ctrl.id) {
+                  <button class="ctl-btn"
+                          cdkDrag
+                          [cdkDragData]="ctrl"
+                          [class.active]="isActive(ctrl)"
+                          [class.eye-btn]="ctrl.id === 'show-hidden'"
+                          [class.text-only-btn]="ctrl.id === 'text-only'"
+                          [class.mic-btn]="ctrl.id === 'voice'"
+                          [class.bee-btn]="ctrl.id === 'bees'"
+                          [class.clipboard-btn]="ctrl.id === 'clipboard'"
+                          (click)="runAction(ctrl.action, $event)"
+                          [attr.aria-label]="ctrl.label | t"
+                          [attr.data-instruction]="ctrl.instruction ?? null">
+                    @switch (ctrl.icon) {
+                      @case ('hci') {
+                        <span class="hci" [class.dcp-icon]="ctrl.id === 'dcp'">{{ iconText(ctrl) }}</span>
+                      }
+                      @case ('eye') {
+                        <span class="eye-icon" [class.struck]="!showHidden()"></span>
+                      }
+                      @case ('text-only') {
+                        <span class="text-only-icon" [class.struck]="!textOnly()"></span>
+                      }
+                      @case ('mic') {
+                        <span class="mic-icon">{{ voiceActive() ? '🎙' : '🎤' }}</span>
+                      }
+                      @case ('bee') {
+                        <span class="bee-icon">🐝</span>
+                      }
+                    }
+                    @if (ctrl.id === 'clipboard' && badgeValue(ctrl) > 0) {
+                      <span class="badge">{{ badgeValue(ctrl) }}</span>
+                    }
+                  </button>
+                  <!-- room input inline after room button -->
+                  @if (ctrl.id === 'room' && roomOpen()) {
+                    <div class="room-shell">
+                      <input
+                        class="room-input"
+                        type="text"
+                        [placeholder]="'controls.room-placeholder' | t"
+                        [value]="roomValue()"
+                        (input)="onRoomInput($event)"
+                        (keydown.enter)="submitRoom()"
+                        (keydown.escape)="toggleRoom()"
+                      />
+                    </div>
+                  }
+                }
+              </div>
+            }
           }
-
-          <!-- bee mode toggle -->
-          <button class="ctl-btn bee-btn" [class.active]="beesVisible()" (click)="toggleBees()" [attr.aria-label]="'controls.toggle-bees' | t">
-            <span class="bee-icon">🐝</span>
+        </div>
+        <!-- expand/collapse toggle -->
+        @if (controlRows().length > 1) {
+          <button class="ctl-btn expand-toggle" (click)="toggleExpanded()" [attr.aria-label]="expanded() ? ('controls.collapse' | t) : ('controls.expand' | t)">
+            <span class="expand-chevron" [class.up]="expanded()">&#x25BE;</span>
           </button>
         }
-
       }
 
     }

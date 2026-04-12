@@ -1,8 +1,8 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/tile-overlay.drone.ts
-import { Drone as Drone2, EffectBus as EffectBus2 } from "@hypercomb/core";
-import { Container as Container3, Graphics as Graphics2, Point } from "pixi.js";
+// src/diamondcoreprocessor.com/presentation/tiles/tile-overlay.drone.ts
+import { Drone as Drone2, EffectBus as EffectBus2, I18N_IOC_KEY } from "@hypercomb/core";
+import { Container as Container3, Graphics as Graphics2, Point, Text, TextStyle } from "pixi.js";
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/hex-icon-button.ts
+// src/diamondcoreprocessor.com/presentation/tiles/hex-icon-button.ts
 import { Container, Graphics, Sprite, Texture } from "pixi.js";
 var BACKDROP_PAD = 2;
 var BACKDROP_RADIUS = 1.5;
@@ -101,7 +101,7 @@ var HexIconButton = class extends Container {
   }
 };
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/hex-overlay.shader.ts
+// src/diamondcoreprocessor.com/presentation/tiles/hex-overlay.shader.ts
 import { Container as Container2 } from "pixi.js";
 var HexOverlayMesh = class {
   mesh;
@@ -120,16 +120,16 @@ var HexOverlayMesh = class {
   }
 };
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/presentation/grid/hex-geometry.ts
+// src/diamondcoreprocessor.com/presentation/grid/hex-geometry.ts
 function createHexGeometry(circumRadiusPx, gapPx, padPx = 10) {
   return { circumRadiusPx, gapPx, padPx, spacing: circumRadiusPx + gapPx };
 }
 var DEFAULT_HEX_GEOMETRY = createHexGeometry(32, 6);
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/tile-actions.drone.ts
+// src/diamondcoreprocessor.com/presentation/tiles/tile-actions.drone.ts
 import { Drone, EffectBus, hypercomb, normalizeCell } from "@hypercomb/core";
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/editor/tile-properties.ts
+// src/diamondcoreprocessor.com/editor/tile-properties.ts
 var TILE_PROPERTIES_FILE = "0000";
 var readCellProperties = async (cellDir) => {
   try {
@@ -150,7 +150,7 @@ var writeCellProperties = async (cellDir, updates) => {
   await writable.close();
 };
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/tile-actions.drone.ts
+// src/diamondcoreprocessor.com/presentation/tiles/tile-actions.drone.ts
 var svg = (d) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 var ICONS = {
   // Terminal prompt >_
@@ -174,21 +174,21 @@ var ICONS = {
 };
 var ICON_REGISTRY = [
   // ── private profile ──
-  { name: "command", svgMarkup: ICONS.command, hoverTint: 11075544, profile: "private" },
-  { name: "edit", svgMarkup: ICONS.edit, hoverTint: 13162751, profile: "private" },
-  { name: "search", svgMarkup: ICONS.search, hoverTint: 13172680, profile: "private", visibleWhen: (ctx) => ctx.noImage },
-  { name: "reroll", svgMarkup: ICONS.reroll, hoverTint: 14207231, profile: "private", visibleWhen: (ctx) => ctx.hasSubstrate },
-  { name: "remove", svgMarkup: ICONS.remove, hoverTint: 16763080, profile: "private" },
-  { name: "break-apart", svgMarkup: ICONS.breakApart, hoverTint: 6737151, profile: "private", visibleWhen: (ctx) => ctx.isHidden },
+  { name: "command", svgMarkup: ICONS.command, hoverTint: 11075544, profile: "private", labelKey: "action.command", descriptionKey: "action.command.description" },
+  { name: "edit", svgMarkup: ICONS.edit, hoverTint: 13162751, profile: "private", labelKey: "action.edit", descriptionKey: "action.edit.description" },
+  { name: "search", svgMarkup: ICONS.search, hoverTint: 13172680, profile: "private", visibleWhen: (ctx) => ctx.noImage, labelKey: "action.search", descriptionKey: "action.search.description" },
+  { name: "reroll", svgMarkup: ICONS.reroll, hoverTint: 14207231, profile: "private", visibleWhen: (ctx) => ctx.hasSubstrate, labelKey: "action.reroll", descriptionKey: "action.reroll.description" },
+  { name: "remove", svgMarkup: ICONS.remove, hoverTint: 16763080, profile: "private", labelKey: "action.remove", descriptionKey: "action.remove.description" },
+  { name: "break-apart", svgMarkup: ICONS.breakApart, hoverTint: 6737151, profile: "private", visibleWhen: (ctx) => ctx.isHidden, labelKey: "action.break-apart", descriptionKey: "action.break-apart.description" },
   // ── public-own profile ──
-  { name: "hide", svgMarkup: ICONS.hide, hoverTint: 16767144, profile: "public-own", visibleWhen: (ctx) => !ctx.isHidden },
-  { name: "break-apart", svgMarkup: ICONS.breakApart, hoverTint: 6737151, profile: "public-own", visibleWhen: (ctx) => ctx.isHidden },
+  { name: "hide", svgMarkup: ICONS.hide, hoverTint: 16767144, profile: "public-own", visibleWhen: (ctx) => !ctx.isHidden, labelKey: "action.hide", descriptionKey: "action.hide.description" },
+  { name: "break-apart", svgMarkup: ICONS.breakApart, hoverTint: 6737151, profile: "public-own", visibleWhen: (ctx) => ctx.isHidden, labelKey: "action.break-apart", descriptionKey: "action.break-apart.description" },
   // ── public-external profile ──
-  { name: "adopt", svgMarkup: ICONS.adopt, hoverTint: 11075544, profile: "public-external" },
-  { name: "block", svgMarkup: ICONS.block, hoverTint: 16763080, profile: "public-external" }
+  { name: "adopt", svgMarkup: ICONS.adopt, hoverTint: 11075544, profile: "public-external", labelKey: "action.adopt", descriptionKey: "action.adopt.description" },
+  { name: "block", svgMarkup: ICONS.block, hoverTint: 16763080, profile: "public-external", labelKey: "action.block", descriptionKey: "action.block.description" }
 ];
 var DEFAULT_ACTIVE = {
-  "private": ["command", "edit", "remove", "break-apart"],
+  "private": ["command", "edit", "reroll", "remove", "break-apart"],
   "public-own": ["hide", "break-apart"],
   "public-external": ["adopt", "block"]
 };
@@ -235,6 +235,7 @@ var TileActionsDrone = class extends Drone {
       });
       this.onEffect("controls:action", (payload) => {
         if (payload?.action === "hide") this.#bulkHideSelected();
+        else if (payload?.action === "reroll") this.#bulkRerollSelected();
       });
       this.onEffect("overlay:icons-reordered", (payload) => {
         this.#arrangement[payload.profile] = payload.order;
@@ -276,6 +277,8 @@ var TileActionsDrone = class extends Drone {
           hoverTint: entry.hoverTint,
           profile: entry.profile,
           visibleWhen: entry.visibleWhen,
+          labelKey: entry.labelKey,
+          descriptionKey: entry.descriptionKey,
           x: positions[i].x,
           y: positions[i].y
         });
@@ -301,6 +304,8 @@ var TileActionsDrone = class extends Drone {
         hoverTint: entry.hoverTint,
         profile: entry.profile,
         visibleWhen: entry.visibleWhen,
+        labelKey: entry.labelKey,
+        descriptionKey: entry.descriptionKey,
         x: positions[i].x,
         y: positions[i].y
       });
@@ -389,12 +394,22 @@ var TileActionsDrone = class extends Drone {
   async #rerollSubstrate(label) {
     const svc = window.ioc?.get?.("@diamondcoreprocessor.com/SubstrateService");
     if (svc?.rerollCell(label)) {
-      const showCell = window.ioc?.get?.("@diamondcoreprocessor.com/ShowCellDrone");
-      showCell?.cellImageCache.delete(label);
-      showCell?.cellSubstrateCache.delete(label);
       EffectBus.emit("substrate:rerolled", { cell: label });
       void new hypercomb().act();
     }
+  }
+  #bulkRerollSelected() {
+    const selection = window.ioc.get("@diamondcoreprocessor.com/SelectionService");
+    if (!selection || selection.count === 0) return;
+    const svc = window.ioc?.get?.("@diamondcoreprocessor.com/SubstrateService");
+    if (!svc) return;
+    const labels = [...selection.selected];
+    const rerolled = svc.rerollCells(labels);
+    if (rerolled.length === 0) return;
+    for (const cell of rerolled) {
+      EffectBus.emit("substrate:rerolled", { cell });
+    }
+    void new hypercomb().act();
   }
   #unhide(label) {
     const lineage = this.resolve("lineage");
@@ -445,7 +460,7 @@ var TileActionsDrone = class extends Drone {
 var _tileActions = new TileActionsDrone();
 window.ioc.register("@diamondcoreprocessor.com/TileActionsDrone", _tileActions);
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/tile-overlay.drone.ts
+// src/diamondcoreprocessor.com/presentation/tiles/tile-overlay.drone.ts
 var DEFAULT_ICON_SIZE = 7;
 var POOL_Y_OFFSET = 16;
 var POOL_ICON_SIZE = 5;
@@ -456,6 +471,12 @@ var POOL_BG_ALPHA = 0.6;
 var WIGGLE_SPEED = 4;
 var WIGGLE_AMPLITUDE = 0.06;
 var DRAG_ALPHA = 0.6;
+var HINT_DELAY_MS = 1500;
+var HINT_Y_OFFSET = 22;
+var HINT_FONT_SIZE = 6;
+var HINT_COLOR = 11583712;
+var HINT_EXPANDED_FONT_SIZE = 5.5;
+var HINT_MAX_WIDTH = 60;
 var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
   namespace = "diamondcoreprocessor.com";
   description = "contextual action overlay host \u2014 icons registered externally via effects";
@@ -520,6 +541,12 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
   #dragStartClient = { x: 0, y: 0 };
   /** Current active order per profile (mirrors tile-actions arrangement) */
   #activeOrder = /* @__PURE__ */ new Map();
+  // ── Action hint state ──────────────────────────────────────────
+  #hintText = null;
+  #hintDescriptionText = null;
+  #hintTimer = null;
+  #hintActionName = null;
+  #hintExpanded = false;
   deps = {
     detector: "@diamondcoreprocessor.com/HexDetector",
     axial: "@diamondcoreprocessor.com/AxialService",
@@ -724,6 +751,7 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
     }
   };
   dispose() {
+    this.#clearHint();
     if (this.#arrangeMode) this.#exitArrangeMode();
     if (this.#listening) {
       document.removeEventListener("pointerdown", this.#onPointerDown);
@@ -808,7 +836,9 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
         button: btn,
         profile: desc.profile,
         genotype: desc.genotype,
-        visibleWhen: desc.visibleWhen
+        visibleWhen: desc.visibleWhen,
+        labelKey: desc.labelKey,
+        descriptionKey: desc.descriptionKey
       });
     }
     this.#layoutIconRow();
@@ -1325,6 +1355,7 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
     if (hexChanged) {
       this.#currentAxial = axial;
       this.#currentIndex = this.#lookupIndex(axial.q, axial.r);
+      this.#clearHint();
       const entry = this.#occupiedByAxial.get(_TileOverlayDrone.axialKey(axial.q, axial.r));
       this.#currentTileExternal = !!(entry?.label && this.#externalLabels.has(entry.label));
       if (this.#meshPublic) {
@@ -1350,6 +1381,7 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
   #updateIconHover(local) {
     if (!this.#overlay?.visible) {
       for (const a of this.#actions) a.button.hovered = false;
+      this.#clearHint();
       return;
     }
     const ox = this.#overlay.position.x;
@@ -1369,6 +1401,85 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
       } else {
         this.#crackOverlay.visible = false;
       }
+    }
+    if (hoveredName !== this.#hintActionName) {
+      this.#clearHint();
+      if (hoveredName) {
+        this.#hintActionName = hoveredName;
+        this.#hintTimer = setTimeout(() => this.#showHint(hoveredName), HINT_DELAY_MS);
+      }
+    }
+  }
+  // ── Action hint display ─────────────────────────────────────────────
+  #resolveI18n() {
+    return window.ioc.get(I18N_IOC_KEY) ?? void 0;
+  }
+  #showHint(actionName) {
+    if (!this.#overlay) return;
+    const action = this.#actions.find((a) => a.name === actionName && a.button.hovered);
+    if (!action?.labelKey) return;
+    const i18n = this.#resolveI18n();
+    const label = i18n?.t(action.labelKey) ?? action.name;
+    this.#clearHintText();
+    const hcFont = getComputedStyle(document.documentElement).getPropertyValue("--hc-font").trim();
+    this.#hintText = new Text({
+      text: label,
+      style: new TextStyle({
+        fontFamily: hcFont || "'Source Sans Pro Light', system-ui, sans-serif",
+        fontSize: HINT_FONT_SIZE,
+        fill: HINT_COLOR,
+        align: "center"
+      })
+    });
+    this.#hintText.anchor.set(0.5, 0);
+    this.#hintText.position.set(action.button.position.x, HINT_Y_OFFSET);
+    this.#hintText.alpha = 0.85;
+    this.#overlay.addChild(this.#hintText);
+    this.#hintExpanded = false;
+  }
+  #expandHint() {
+    if (!this.#overlay || !this.#hintActionName || this.#hintExpanded) return;
+    const action = this.#actions.find((a) => a.name === this.#hintActionName);
+    if (!action?.descriptionKey) return;
+    const i18n = this.#resolveI18n();
+    const description = i18n?.t(action.descriptionKey) ?? "";
+    if (!description) return;
+    const hcFont = getComputedStyle(document.documentElement).getPropertyValue("--hc-font").trim();
+    this.#hintDescriptionText = new Text({
+      text: description,
+      style: new TextStyle({
+        fontFamily: hcFont || "'Source Sans Pro Light', system-ui, sans-serif",
+        fontSize: HINT_EXPANDED_FONT_SIZE,
+        fill: HINT_COLOR,
+        align: "center",
+        wordWrap: true,
+        wordWrapWidth: HINT_MAX_WIDTH
+      })
+    });
+    this.#hintDescriptionText.anchor.set(0.5, 0);
+    const yBelow = HINT_Y_OFFSET + (this.#hintText ? this.#hintText.height + 2 : HINT_FONT_SIZE + 2);
+    this.#hintDescriptionText.position.set(0, yBelow);
+    this.#hintDescriptionText.alpha = 0.7;
+    this.#overlay.addChild(this.#hintDescriptionText);
+    this.#hintExpanded = true;
+  }
+  #clearHint() {
+    if (this.#hintTimer) {
+      clearTimeout(this.#hintTimer);
+      this.#hintTimer = null;
+    }
+    this.#hintActionName = null;
+    this.#hintExpanded = false;
+    this.#clearHintText();
+  }
+  #clearHintText() {
+    if (this.#hintText) {
+      this.#hintText.destroy();
+      this.#hintText = null;
+    }
+    if (this.#hintDescriptionText) {
+      this.#hintDescriptionText.destroy();
+      this.#hintDescriptionText = null;
     }
   }
   // ── Instant branch navigation on pointerdown ────────────────────────
@@ -1461,6 +1572,11 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
         const bx = local.x - ox - btn.position.x;
         const by = local.y - oy - btn.position.y;
         if (btn.containsPoint(bx, by)) {
+          if (this.#hintText && !this.#hintExpanded && this.#hintActionName === action.name) {
+            this.#expandHint();
+            return;
+          }
+          this.#clearHint();
           if (action.name === "break-apart") {
             this.playShatterAnimation(
               this.#currentAxial.q,

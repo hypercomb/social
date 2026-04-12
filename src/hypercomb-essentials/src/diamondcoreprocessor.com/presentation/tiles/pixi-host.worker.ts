@@ -155,11 +155,29 @@ export class PixiHostWorker extends Worker {
     if (screen.orientation && typeof screen.orientation.addEventListener === 'function') {
       screen.orientation.addEventListener('change', center)
     }
-    // Fullscreen: suppress recenter so tiles stay pixel-perfect.
-    // Block recenter for the duration of the transition, then release.
+    // Fullscreen: keep tiles perfectly still — never move the stage.
+    // Capture where the stage is right now (ground truth for tile
+    // positions), block all center() calls during the transition, then
+    // once the renderer has settled at the new viewport size, derive the
+    // pan offset that keeps stage.position unchanged:
+    //   new_pan = current_stage_pos - new_viewport_center
+    // The stage itself is never touched, so zero flicker.
     document.addEventListener('fullscreenchange', () => {
       fullscreenTransition = true
-      setTimeout(() => { fullscreenTransition = false }, 200)
+      const stageX = app.stage.position.x
+      const stageY = app.stage.position.y
+
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const newCx = Math.round(app.renderer.screen.width * 0.5)
+          const newCy = Math.round(app.renderer.screen.height * 0.5)
+          const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
+          if (vp) {
+            vp.setPan(stageX - newCx, stageY - newCy)
+          }
+          fullscreenTransition = false
+        })
+      })
     })
 
     // -------------------------------------------------

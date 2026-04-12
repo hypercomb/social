@@ -1,4 +1,4 @@
-// hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/pixi-host.worker.ts
+// src/diamondcoreprocessor.com/presentation/tiles/pixi-host.worker.ts
 import { Worker } from "@hypercomb/core";
 import { Application, Container } from "pixi.js";
 var PixiHostWorker = class extends Worker {
@@ -86,9 +86,19 @@ var PixiHostWorker = class extends Worker {
     }
     document.addEventListener("fullscreenchange", () => {
       fullscreenTransition = true;
-      setTimeout(() => {
-        fullscreenTransition = false;
-      }, 200);
+      const stageX = app.stage.position.x;
+      const stageY = app.stage.position.y;
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const newCx = Math.round(app.renderer.screen.width * 0.5);
+          const newCy = Math.round(app.renderer.screen.height * 0.5);
+          const vp = window.ioc?.get("@diamondcoreprocessor.com/ViewportPersistence");
+          if (vp) {
+            vp.setPan(stageX - newCx, stageY - newCy);
+          }
+          fullscreenTransition = false;
+        });
+      });
     });
     this.emitEffect("render:host-ready", {
       app: this.app,

@@ -16,11 +16,17 @@ export class HistorySliderDrone {
   #clock: HTMLElement | null = null
   #timeLabel: HTMLElement | null = null
   #restoreBtn: HTMLElement | null = null
+  #latestBtn: HTMLElement | null = null
   #posLabel: HTMLElement | null = null
   #scopeLabel: HTMLElement | null = null
   #activityLabel: HTMLElement | null = null
   #scrubber: HTMLInputElement | null = null
+  #notification: HTMLElement | null = null
+  #notifLabel: HTMLElement | null = null
+  #notifRestore: HTMLElement | null = null
+  #notifLatest: HTMLElement | null = null
   #visible = false
+  #notifVisible = false
   #reviseActive = false
   #globalTimeActive = false
   #scrubbing = false
@@ -241,7 +247,27 @@ export class HistorySliderDrone {
     `
     restoreBtn.addEventListener('click', () => this.#promote())
 
-    topRow.append(timeLabel, posLabel, activityLabel, scopeLabel, restoreBtn)
+    const latestBtn = document.createElement('span')
+    latestBtn.textContent = 'Jump to latest'
+    latestBtn.title = 'Discard undo and jump to current head'
+    latestBtn.style.cssText = `
+      display: none;
+      cursor: pointer;
+      padding: 1px 6px;
+      border: 1px solid rgba(200, 220, 240, 0.25);
+      border-radius: 3px;
+      background: rgba(200, 220, 240, 0.06);
+      color: rgba(200, 220, 240, 0.7);
+      font-weight: 600;
+      font-size: 10px;
+      letter-spacing: 0.3px;
+    `
+    latestBtn.addEventListener('click', () => {
+      const cursor = get<HistoryCursorService>('@diamondcoreprocessor.com/HistoryCursorService')
+      cursor?.jumpToLatest()
+    })
+
+    topRow.append(timeLabel, posLabel, activityLabel, scopeLabel, restoreBtn, latestBtn)
 
     // ── scrub slider ──
     const scrubber = document.createElement('input')
@@ -279,18 +305,90 @@ export class HistorySliderDrone {
     this.#activityLabel = activityLabel
     this.#scopeLabel = scopeLabel
     this.#restoreBtn = restoreBtn
+    this.#latestBtn = latestBtn
     this.#scrubber = scrubber
+
+    // ── compact notification bar (shows when rewound outside revision mode) ──
+    this.#buildNotification()
+  }
+
+  #buildNotification(): void {
+    const bar = document.createElement('div')
+    bar.id = 'hc-history-notification'
+    bar.style.cssText = `
+      position: fixed;
+      bottom: 8px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 9000;
+      display: none;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 14px;
+      background: rgba(10, 12, 18, 0.92);
+      border: 1px solid rgba(255, 170, 60, 0.3);
+      border-radius: 6px;
+      backdrop-filter: blur(8px);
+      font-family: var(--hc-mono);
+      font-size: 11px;
+      color: rgba(255, 200, 120, 0.85);
+      user-select: none;
+      pointer-events: auto;
+      white-space: nowrap;
+    `
+
+    const label = document.createElement('span')
+
+    const btnStyle = (accent: boolean) => `
+      cursor: pointer;
+      padding: 2px 8px;
+      border: 1px solid ${accent ? 'rgba(255, 170, 60, 0.4)' : 'rgba(200, 220, 240, 0.25)'};
+      border-radius: 3px;
+      background: ${accent ? 'rgba(255, 170, 60, 0.12)' : 'rgba(200, 220, 240, 0.06)'};
+      color: ${accent ? 'rgba(255, 200, 120, 0.9)' : 'rgba(200, 220, 240, 0.7)'};
+      font-weight: 600;
+      font-size: 10px;
+      letter-spacing: 0.3px;
+    `
+
+    const restore = document.createElement('span')
+    restore.textContent = 'Restore'
+    restore.title = 'Make this the current state'
+    restore.style.cssText = btnStyle(true)
+    restore.addEventListener('click', () => this.#promote())
+
+    const latest = document.createElement('span')
+    latest.textContent = 'Jump to latest'
+    latest.title = 'Discard undo position'
+    latest.style.cssText = btnStyle(false)
+    latest.addEventListener('click', () => {
+      const cursor = get<HistoryCursorService>('@diamondcoreprocessor.com/HistoryCursorService')
+      cursor?.jumpToLatest()
+    })
+
+    bar.append(label, restore, latest)
+    document.body.appendChild(bar)
+
+    this.#notification = bar
+    this.#notifLabel = label
+    this.#notifRestore = restore
+    this.#notifLatest = latest
   }
 
   // ── sync UI ────────────────────────────────────────────────
 
   #syncUI(): void {
-    if (!this.#clock || !this.#timeLabel || !this.#posLabel || !this.#restoreBtn || !this.#scopeLabel || !this.#activityLabel || !this.#scrubber) return
+    if (!this.#clock || !this.#timeLabel || !this.#posLabel || !this.#restoreBtn || !this.#latestBtn || !this.#scopeLabel || !this.#activityLabel || !this.#scrubber) return
 
     const { position, total, rewound, at } = this.#state
-    const shouldShow = this.#reviseActive && total > 0
 
-    if (!shouldShow) {
+    // ── Compact notification bar (rewound outside revision mode) ──
+    this.#syncNotification(rewound && !this.#reviseActive, position, total)
+
+    // ── Full revision clock (only in /revise mode) ──
+    const shouldShowClock = this.#reviseActive && total > 0
+
+    if (!shouldShowClock) {
       if (this.#visible) {
         this.#clock.style.display = 'none'
         this.#visible = false
@@ -344,6 +442,36 @@ export class HistorySliderDrone {
     }
 
     this.#restoreBtn.style.display = rewound ? 'inline-block' : 'none'
+    this.#latestBtn.style.display = rewound ? 'inline-block' : 'none'
+  }
+
+  #syncNotification(show: boolean, position: number, total: number): void {
+    if (!this.#notification || !this.#notifLabel) return
+
+    if (!show) {
+      if (this.#notifVisible) {
+        this.#notification.style.display = 'none'
+        this.#notifVisible = false
+      }
+      return
+    }
+
+    if (!this.#notifVisible) {
+      this.#notification.style.display = 'flex'
+      this.#notifVisible = true
+    }
+
+    const stepsBack = total - position
+    const cursor = get<HistoryCursorService>('@diamondcoreprocessor.com/HistoryCursorService')
+    if (cursor) {
+      const div = cursor.computeDivergence()
+      const changes = div.futureAdds.size + div.futureRemoves.size
+      this.#notifLabel.textContent = changes > 0
+        ? `${stepsBack} step${stepsBack === 1 ? '' : 's'} back \u00b7 ${changes} tile${changes === 1 ? '' : 's'} differ`
+        : `${stepsBack} step${stepsBack === 1 ? '' : 's'} back`
+    } else {
+      this.#notifLabel.textContent = `${stepsBack} step${stepsBack === 1 ? '' : 's'} back`
+    }
   }
 }
 

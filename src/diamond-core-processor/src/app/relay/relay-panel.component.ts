@@ -1,6 +1,7 @@
 // diamond-core-processor/src/app/relay/relay-panel.component.ts
 
 import { Component, signal, OnDestroy } from '@angular/core'
+import { DcpTranslatePipe } from '../core/dcp-translate.pipe'
 
 const RELAY_KEY = 'dcp.relay'
 const DEFAULT_RELAY = 'http://localhost:7777'
@@ -17,6 +18,7 @@ interface RelayInfo {
 @Component({
   selector: 'dcp-relay-panel',
   standalone: true,
+  imports: [DcpTranslatePipe],
   template: `
     <div class="relay-panel" [class.open]="open()">
       <button class="toggle" [class.connected]="status() === 'connected'" (click)="open.set(!open())" title="Nostr Relay">
@@ -26,45 +28,44 @@ interface RelayInfo {
       @if (open()) {
         <div class="panel">
           <header class="panel-header">
-            <h3>Nostr Relay</h3>
+            <h3>{{ 'dcp.relay-title' | t }}</h3>
             <span class="badge" [class.badge-ok]="status() === 'connected'" [class.badge-off]="status() !== 'connected'">
-              {{ status() === 'connected' ? 'connected' : status() === 'checking' ? 'checking' : 'offline' }}
+              {{ status() === 'connected' ? ('dcp.relay-connected' | t) : status() === 'checking' ? ('dcp.relay-checking' | t) : ('dcp.relay-offline' | t) }}
             </span>
           </header>
 
           <p class="description">
-            The relay handles mesh communication between peers.
-            Install it locally or point to a remote relay.
+            {{ 'dcp.relay-description' | t }}
           </p>
 
           <div class="url-row">
             <input
               type="text"
               class="field"
-              placeholder="http://localhost:7777"
+              [placeholder]="'dcp.relay-placeholder' | t"
               [value]="relayUrl()"
               (input)="relayUrl.set($any($event.target).value)"
               (keydown.enter)="saveAndProbe()" />
-            <button class="btn-probe" (click)="saveAndProbe()">Check</button>
+            <button class="btn-probe" (click)="saveAndProbe()">{{ 'dcp.relay-check' | t }}</button>
           </div>
 
           @if (status() === 'connected' && info()) {
             <div class="info-block">
               <div class="info-row">
-                <span class="info-label">Name</span>
+                <span class="info-label">{{ 'dcp.relay-name' | t }}</span>
                 <span class="info-value">{{ info()!.name }}</span>
               </div>
               <div class="info-row">
-                <span class="info-label">Version</span>
+                <span class="info-label">{{ 'dcp.relay-version' | t }}</span>
                 <span class="info-value">{{ info()!.version }}</span>
               </div>
               <div class="info-row">
-                <span class="info-label">NIPs</span>
+                <span class="info-label">{{ 'dcp.relay-nips' | t }}</span>
                 <span class="info-value">{{ info()!.supported_nips.join(', ') }}</span>
               </div>
               @if (info()!.limitation?.auth_required) {
                 <div class="info-row">
-                  <span class="info-label">Auth</span>
+                  <span class="info-label">{{ 'dcp.relay-auth' | t }}</span>
                   <span class="info-value">required</span>
                 </div>
               }
@@ -73,22 +74,21 @@ interface RelayInfo {
 
           @if (status() === 'offline') {
             <div class="install-block">
-              <div class="install-header">Install locally</div>
+              <div class="install-header">{{ 'dcp.relay-install-locally' | t }}</div>
               <p class="install-desc">
-                Download the installer, then double-click it to start the relay.
-                Requires Node.js 20+.
+                {{ 'dcp.relay-install-description' | t }}
               </p>
               <div class="install-actions">
-                <button class="btn-install" (click)="downloadInstaller()">Download installer</button>
+                <button class="btn-install" (click)="downloadInstaller()">{{ 'dcp.relay-download' | t }}</button>
                 <button class="btn-copy" (click)="copyCommand()" [title]="copied() ? 'Copied!' : 'Copy npx command'">
-                  {{ copied() ? 'Copied' : 'Copy command' }}
+                  {{ copied() ? ('dcp.relay-copied' | t) : ('dcp.relay-copy-command' | t) }}
                 </button>
               </div>
             </div>
           }
 
           <footer class="panel-footer">
-            <span class="footer-hint">Relay is polled every 10 s</span>
+            <span class="footer-hint">{{ 'dcp.relay-polled' | t }}</span>
           </footer>
         </div>
       }

@@ -2,7 +2,7 @@
     <div class="track-player__backdrop"></div>
 
     @if (showNoSignal()) {
-        <div class="track-player__no-signal" aria-live="polite" aria-label="no signal interlude">
+        <div class="track-player__no-signal" aria-live="polite" [attr.aria-label]="'trackplayer.no-signal-label' | t">
             <div class="track-player__no-signal-noise"></div>
             <span class="track-player__no-signal-label">{{ 'trackplayer.no-signal' | t }}</span>
             <button type="button" class="track-player__skip" (click)="skipNoSignal()">{{ 'trackplayer.play-prequel' | t }}</button>
@@ -12,7 +12,7 @@
     <div class="track-player__panel">
         <div class="track-player__header">
             <div class="track-player__eyebrow">{{ 'trackplayer.eyebrow' | t }}</div>
-            <button type="button" class="track-player__close" (click)="dismiss()" aria-label="close player">
+            <button type="button" class="track-player__close" (click)="dismiss()" [attr.aria-label]="'trackplayer.close-player' | t">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
             </button>
         </div>

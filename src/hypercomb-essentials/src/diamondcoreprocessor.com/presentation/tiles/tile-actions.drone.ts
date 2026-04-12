@@ -38,22 +38,26 @@ export type IconRegistryEntry = {
   hoverTint?: number
   profile: OverlayProfileKey
   visibleWhen?: (ctx: OverlayTileContext) => boolean
+  /** i18n key for the short hint label (shown on sustained hover) */
+  labelKey?: string
+  /** i18n key for the expanded description (shown on hint click) */
+  descriptionKey?: string
 }
 
 const ICON_REGISTRY: IconRegistryEntry[] = [
   // ── private profile ──
-  { name: 'command', svgMarkup: ICONS.command, hoverTint: 0xa8ffd8, profile: 'private' },
-  { name: 'edit', svgMarkup: ICONS.edit, hoverTint: 0xc8d8ff, profile: 'private' },
-  { name: 'search', svgMarkup: ICONS.search, hoverTint: 0xc8ffc8, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.noImage },
-  { name: 'reroll', svgMarkup: ICONS.reroll, hoverTint: 0xd8c8ff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.hasSubstrate },
-  { name: 'remove', svgMarkup: ICONS.remove, hoverTint: 0xffc8c8, profile: 'private' },
-  { name: 'break-apart', svgMarkup: ICONS.breakApart, hoverTint: 0x66ccff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden },
+  { name: 'command', svgMarkup: ICONS.command, hoverTint: 0xa8ffd8, profile: 'private', labelKey: 'action.command', descriptionKey: 'action.command.description' },
+  { name: 'edit', svgMarkup: ICONS.edit, hoverTint: 0xc8d8ff, profile: 'private', labelKey: 'action.edit', descriptionKey: 'action.edit.description' },
+  { name: 'search', svgMarkup: ICONS.search, hoverTint: 0xc8ffc8, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.noImage, labelKey: 'action.search', descriptionKey: 'action.search.description' },
+  { name: 'reroll', svgMarkup: ICONS.reroll, hoverTint: 0xd8c8ff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.hasSubstrate, labelKey: 'action.reroll', descriptionKey: 'action.reroll.description' },
+  { name: 'remove', svgMarkup: ICONS.remove, hoverTint: 0xffc8c8, profile: 'private', labelKey: 'action.remove', descriptionKey: 'action.remove.description' },
+  { name: 'break-apart', svgMarkup: ICONS.breakApart, hoverTint: 0x66ccff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden, labelKey: 'action.break-apart', descriptionKey: 'action.break-apart.description' },
   // ── public-own profile ──
-  { name: 'hide', svgMarkup: ICONS.hide, hoverTint: 0xffd8a8, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => !ctx.isHidden },
-  { name: 'break-apart', svgMarkup: ICONS.breakApart, hoverTint: 0x66ccff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden },
+  { name: 'hide', svgMarkup: ICONS.hide, hoverTint: 0xffd8a8, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => !ctx.isHidden, labelKey: 'action.hide', descriptionKey: 'action.hide.description' },
+  { name: 'break-apart', svgMarkup: ICONS.breakApart, hoverTint: 0x66ccff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden, labelKey: 'action.break-apart', descriptionKey: 'action.break-apart.description' },
   // ── public-external profile ──
-  { name: 'adopt', svgMarkup: ICONS.adopt, hoverTint: 0xa8ffd8, profile: 'public-external' },
-  { name: 'block', svgMarkup: ICONS.block, hoverTint: 0xffc8c8, profile: 'public-external' },
+  { name: 'adopt', svgMarkup: ICONS.adopt, hoverTint: 0xa8ffd8, profile: 'public-external', labelKey: 'action.adopt', descriptionKey: 'action.adopt.description' },
+  { name: 'block', svgMarkup: ICONS.block, hoverTint: 0xffc8c8, profile: 'public-external', labelKey: 'action.block', descriptionKey: 'action.block.description' },
 ]
 
 // Default active icons per profile (defines the fallback order)
@@ -191,6 +195,8 @@ export class TileActionsDrone extends Drone {
           hoverTint: entry.hoverTint,
           profile: entry.profile,
           visibleWhen: entry.visibleWhen,
+          labelKey: entry.labelKey,
+          descriptionKey: entry.descriptionKey,
           x: positions[i].x,
           y: positions[i].y,
         })
@@ -223,6 +229,8 @@ export class TileActionsDrone extends Drone {
         hoverTint: entry.hoverTint,
         profile: entry.profile,
         visibleWhen: entry.visibleWhen,
+        labelKey: entry.labelKey,
+        descriptionKey: entry.descriptionKey,
         x: positions[i].x,
         y: positions[i].y,
       })

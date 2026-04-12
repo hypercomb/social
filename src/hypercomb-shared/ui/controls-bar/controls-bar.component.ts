@@ -10,10 +10,13 @@ import {
   Input,
   Output,
   signal,
+  ViewChildren,
   type AfterViewInit,
   type OnInit,
   type OnDestroy,
+  type QueryList,
 } from '@angular/core'
+import { CdkDrag, CdkDragDrop, CdkDropList } from '@angular/cdk/drag-drop'
 import { fromRuntime } from '../../core/from-runtime'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import type { Navigation } from '../../core/navigation'
@@ -26,11 +29,48 @@ import { VoiceInputService } from '../../core/voice-input.service'
 import { secretTag } from './secret-words'
 
 const PILL_POS_KEY = 'hc:controls-pill-pos'
+const ROW_LAYOUT_KEY = 'hc:controls-row-layout'
+
+// ── control registry ──────────────────────────────────────
+
+interface ControlItem {
+  id: string
+  icon: 'hci' | 'eye' | 'text-only' | 'mic' | 'bee'
+  hci?: string
+  label: string
+  instruction?: string
+  action: string
+  visibleWhen: 'always' | 'clipboardHasItems' | 'voiceSupported' | 'public'
+}
+
+const CONTROL_REGISTRY: readonly ControlItem[] = [
+  { id: 'back',         icon: 'hci',       hci: 'A', label: 'controls.back',         action: 'goBack',             visibleWhen: 'always' },
+  { id: 'dcp',          icon: 'hci',       hci: '$', label: 'controls.dcp',          action: 'openDcp',            visibleWhen: 'always', instruction: 'dcp.open-processor' },
+  { id: 'fit',          icon: 'hci',       hci: 'q', label: 'controls.fit-content',  action: 'fitOrCenter',        visibleWhen: 'always', instruction: 'dcp.fit-content' },
+  { id: 'zoom-out',     icon: 'hci',       hci: 'I', label: 'controls.zoom-out',     action: 'zoomOut',            visibleWhen: 'always', instruction: 'dcp.zoom-out' },
+  { id: 'zoom-in',      icon: 'hci',       hci: 'K', label: 'controls.zoom-in',      action: 'zoomIn',             visibleWhen: 'always', instruction: 'dcp.zoom-in' },
+  { id: 'lock',         icon: 'hci',                  label: 'controls.lock',         action: 'toggleLock',         visibleWhen: 'always', instruction: 'dcp.lock' },
+  { id: 'fullscreen',   icon: 'hci',       hci: "'", label: 'controls.fullscreen',   action: 'toggleFullscreen',   visibleWhen: 'always', instruction: 'dcp.fullscreen' },
+  { id: 'layout',       icon: 'hci',       hci: '#', label: 'controls.layout-mode',  action: 'toggleLayout',       visibleWhen: 'always', instruction: 'dcp.layout-mode' },
+  { id: 'instructions', icon: 'hci',       hci: '?', label: 'controls.instructions', action: 'toggleInstructions', visibleWhen: 'always', instruction: 'dcp.instructions-toggle' },
+  { id: 'show-hidden',  icon: 'eye',                  label: 'controls.show-hidden',  action: 'toggleShowHidden',   visibleWhen: 'always' },
+  { id: 'text-only',    icon: 'text-only',             label: 'controls.text-only',    action: 'toggleTextOnly',     visibleWhen: 'always' },
+  { id: 'clipboard',    icon: 'hci',       hci: 'y', label: 'controls.clipboard',    action: 'openClipboard',      visibleWhen: 'clipboardHasItems' },
+  { id: 'voice',        icon: 'mic',                   label: 'controls.voice',        action: 'toggleVoice',        visibleWhen: 'voiceSupported' },
+  { id: 'room',         icon: 'hci',       hci: 'p', label: 'controls.location',     action: 'toggleRoom',         visibleWhen: 'public' },
+  { id: 'bees',         icon: 'bee',                   label: 'controls.toggle-bees',  action: 'toggleBees',         visibleWhen: 'public' },
+]
+
+const DEFAULT_ROW_LAYOUT: Record<string, number> = {
+  'back': 0, 'dcp': 0, 'fit': 0, 'zoom-out': 0, 'zoom-in': 0, 'lock': 0, 'fullscreen': 0,
+  'layout': 1, 'instructions': 1, 'show-hidden': 1, 'text-only': 1,
+  'clipboard': 1, 'voice': 1, 'room': 1, 'bees': 1,
+}
 
 @Component({
   selector: 'hc-controls-bar',
   standalone: true,
-  imports: [TranslatePipe],
+  imports: [TranslatePipe, CdkDrag, CdkDropList],
   templateUrl: './controls-bar.component.html',
   styleUrls: ['./controls-bar.component.scss'],
 })
@@ -163,6 +203,124 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #atomizeTarget = signal('')
   #atomizeStrategy = signal('')
   #atomizeAtomCount = signal(0)
+
+  // ── multi-row layout ──────────────────────────────────────
+  #rowLayout = signal<Record<string, number>>(this.#restoreRowLayout())
+  #expanded = signal(false)
+  @ViewChildren(CdkDropList) dropListRefs!: QueryList<CdkDropList>
+
+  /** Visible controls grouped by row. Row 0 is always first. Empty rows are pruned. */
+  readonly controlRows = computed((): { key: number; items: ControlItem[] }[] => {
+    const layout = this.#rowLayout()
+    // filter to visible controls
+    const visible = CONTROL_REGISTRY.filter(ctrl => this.#isControlVisible(ctrl))
+    // group by row
+    const rowMap = new Map<number, ControlItem[]>()
+    for (const ctrl of visible) {
+      const row = layout[ctrl.id] ?? 0
+      if (!rowMap.has(row)) rowMap.set(row, [])
+      rowMap.get(row)!.push(ctrl)
+    }
+    // sort by row key, preserve original keys for drop handler
+    return [...rowMap.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([key, items]) => ({ key, items }))
+  })
+
+  readonly toggleExpanded = (): void => {
+    this.#expanded.update(v => !v)
+  }
+  readonly expanded = this.#expanded.asReadonly()
+
+  readonly onControlDrop = (event: CdkDragDrop<ControlItem[]>): void => {
+    const ctrl = event.item.data as ControlItem
+    const targetRowKey = parseInt(
+      (event.container.element.nativeElement as HTMLElement).dataset['rowKey'] ?? '0', 10,
+    )
+    this.#rowLayout.update(l => ({ ...l, [ctrl.id]: targetRowKey }))
+    this.#persistRowLayout()
+  }
+
+  /** Action dispatch map — routes control actions to existing methods. */
+  readonly #actions: Record<string, (e?: MouseEvent) => void> = {
+    goBack: () => this.goBack(),
+    openDcp: () => this.openDcp(),
+    fitOrCenter: (e) => this.fitOrCenter(e!),
+    zoomOut: () => this.zoomOut(),
+    zoomIn: () => this.zoomIn(),
+    toggleLock: () => this.toggleLock(),
+    toggleFullscreen: () => this.toggleFullscreen(),
+    toggleLayout: () => this.toggleLayout(),
+    toggleInstructions: (e) => this.toggleInstructions(e!),
+    toggleShowHidden: () => this.toggleShowHidden(),
+    toggleTextOnly: () => this.toggleTextOnly(),
+    openClipboard: () => this.openClipboard(),
+    toggleVoice: () => this.toggleVoice(),
+    toggleRoom: () => this.toggleRoom(),
+    toggleBees: () => this.toggleBees(),
+  }
+
+  readonly runAction = (action: string, event: MouseEvent): void => {
+    this.#actions[action]?.(event)
+  }
+
+  readonly isActive = (ctrl: ControlItem): boolean => {
+    switch (ctrl.id) {
+      case 'lock': return this.#locked()
+      case 'fit': return this.#fitLocked()
+      case 'layout': return this.#layoutPinned()
+      case 'show-hidden': return this.#showHidden()
+      case 'text-only': return this.#textOnly()
+      case 'room': return this.#roomOpen()
+      case 'bees': return this.#beesVisible()
+      case 'voice': return this.voiceActive()
+      default: return false
+    }
+  }
+
+  readonly iconText = (ctrl: ControlItem): string => {
+    if (ctrl.id === 'lock') return this.#locked() ? 'a' : 'b'
+    return ctrl.hci ?? ''
+  }
+
+  readonly badgeValue = (ctrl: ControlItem): number => {
+    if (ctrl.id === 'clipboard') return this.clipboardCount()
+    return 0
+  }
+
+  /** Get the list of CdkDropList refs for cross-list connection. */
+  readonly getDropLists = (): CdkDropList[] => {
+    return this.dropListRefs?.toArray() ?? []
+  }
+
+  #isControlVisible(ctrl: ControlItem): boolean {
+    switch (ctrl.visibleWhen) {
+      case 'always': return true
+      case 'clipboardHasItems': return this.#clipboardAvailable() && this.clipboardCount() > 0
+      case 'voiceSupported': return this.voiceSupported
+      case 'public': return !!this.meshPublic
+      default: return true
+    }
+  }
+
+  #restoreRowLayout(): Record<string, number> {
+    try {
+      const raw = localStorage.getItem(ROW_LAYOUT_KEY)
+      if (!raw) return { ...DEFAULT_ROW_LAYOUT }
+      const parsed = JSON.parse(raw) as Record<string, number>
+      if (typeof parsed === 'object' && parsed !== null) {
+        // merge with defaults so new controls get a row
+        return { ...DEFAULT_ROW_LAYOUT, ...parsed }
+      }
+    } catch { /* ignore */ }
+    return { ...DEFAULT_ROW_LAYOUT }
+  }
+
+  #persistRowLayout(): void {
+    try {
+      localStorage.setItem(ROW_LAYOUT_KEY, JSON.stringify(this.#rowLayout()))
+    } catch { /* ignore */ }
+  }
 
   // ── pill zoom (scales with viewport width) ────────────────
   // Baseline 1.0 at 1920px wide (half the previous fixed 2× size).
@@ -742,10 +900,27 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   readonly toggleFullscreen = (): void => {
+    // Capture how far the pill sits from the viewport bottom so we can
+    // preserve that distance after the viewport height changes.
+    const pos = this.#pillPos()
+    const bottomGap = pos ? window.innerHeight - pos.y : null
+
     if (document.fullscreenElement) {
       void document.exitFullscreen()
     } else {
       void document.documentElement.requestFullscreen()
+    }
+
+    // After the viewport settles, slide the pill to the same distance
+    // from the new bottom edge — no visible jump.
+    if (bottomGap !== null) {
+      const adjust = (): void => {
+        document.removeEventListener('fullscreenchange', adjust)
+        const adjusted = this.#clampPillPos(pos!.x, window.innerHeight - bottomGap)
+        this.#pillPos.set(adjusted)
+        try { localStorage.setItem(PILL_POS_KEY, JSON.stringify(adjusted)) } catch { /* ignore */ }
+      }
+      document.addEventListener('fullscreenchange', adjust)
     }
   }
 

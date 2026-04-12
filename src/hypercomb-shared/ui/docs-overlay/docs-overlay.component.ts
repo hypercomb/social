@@ -6,6 +6,7 @@
 
 import { Component, signal, computed, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
+import { TranslatePipe } from '../../core/i18n.pipe.js'
 
 interface DocEntry {
   title: string
@@ -87,6 +88,7 @@ const DOC_INDEX: DocEntry[] = [
 @Component({
   selector: 'hc-docs-overlay',
   standalone: true,
+  imports: [TranslatePipe],
   templateUrl: './docs-overlay.component.html',
   styleUrls: ['./docs-overlay.component.scss'],
 })

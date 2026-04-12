@@ -20,10 +20,12 @@ import {
   computed,
   signal,
 } from '@angular/core'
+import { TranslatePipe } from '../../core/i18n.pipe.js'
 
 @Component({
   selector: 'hc-audio-player',
   standalone: true,
+  imports: [TranslatePipe],
   templateUrl: './audio-player.component.html',
   styleUrls: ['./audio-player.component.scss'],
 })

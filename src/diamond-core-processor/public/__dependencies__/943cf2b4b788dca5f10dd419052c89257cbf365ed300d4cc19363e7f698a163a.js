@@ -1,5 +1,5 @@
 // @diamondcoreprocessor.com/keyboard
-// hypercomb-essentials/src/diamondcoreprocessor.com/keyboard/default-keymap.ts
+// src/diamondcoreprocessor.com/keyboard/default-keymap.ts
 var globalKeyMap = {
   id: "global",
   priority: 0,
@@ -8,18 +8,21 @@ var globalKeyMap = {
       cmd: "global.escape",
       sequence: [[{ key: "escape" }]],
       description: "Cancel / dismiss",
+      descriptionKey: "keymap.escape",
       pierce: true
     },
     {
       cmd: "ui.shortcutSheet",
       sequence: [[{ key: "/" }]],
       description: "Show keyboard shortcuts",
+      descriptionKey: "keymap.shortcuts",
       category: "Navigation"
     },
     {
       cmd: "ui.commandPalette",
       sequence: [[{ key: "k", primary: true }]],
       description: "Open command palette",
+      descriptionKey: "keymap.palette",
       category: "Navigation",
       pierce: true
     },
@@ -27,6 +30,7 @@ var globalKeyMap = {
       cmd: "render.togglePivot",
       sequence: [[{ key: "8", code: "digit8", primary: true, shift: true }]],
       description: "Toggle hex orientation",
+      descriptionKey: "keymap.pivot",
       category: "View",
       pierce: true
     },
@@ -34,6 +38,7 @@ var globalKeyMap = {
       cmd: "ui.commandLineToggle",
       sequence: [[{ key: "space", ctrl: true }]],
       description: "Toggle command line focus",
+      descriptionKey: "keymap.command-line-toggle",
       category: "Navigation",
       pierce: true
     },
@@ -41,6 +46,7 @@ var globalKeyMap = {
       cmd: "mesh.togglePublic",
       sequence: [[{ key: "p", primary: true, shift: true }]],
       description: "Toggle public / private mode",
+      descriptionKey: "keymap.mesh-toggle",
       category: "Mesh",
       pierce: true
     },
@@ -48,6 +54,7 @@ var globalKeyMap = {
       cmd: "render.toggleBees",
       sequence: [[{ key: "b", ctrl: true, shift: true }]],
       description: "Toggle bee avatars",
+      descriptionKey: "keymap.bees",
       category: "View",
       pierce: true
     },
@@ -55,6 +62,7 @@ var globalKeyMap = {
       cmd: "navigation.fitToScreen",
       sequence: [[{ key: "0", primary: true }]],
       description: "Fit content to screen",
+      descriptionKey: "keymap.fit",
       category: "Navigation",
       pierce: true
     }
@@ -69,24 +77,28 @@ var defaultKeyMap = {
       cmd: "navigation.moveUp",
       sequence: [[{ key: "arrowup" }]],
       description: "Navigate up",
+      descriptionKey: "keymap.up",
       category: "Navigation"
     },
     {
       cmd: "navigation.moveDown",
       sequence: [[{ key: "arrowdown" }]],
       description: "Navigate down",
+      descriptionKey: "keymap.down",
       category: "Navigation"
     },
     {
       cmd: "navigation.moveLeft",
       sequence: [[{ key: "arrowleft" }]],
       description: "Navigate left",
+      descriptionKey: "keymap.left",
       category: "Navigation"
     },
     {
       cmd: "navigation.moveRight",
       sequence: [[{ key: "arrowright" }]],
       description: "Navigate right",
+      descriptionKey: "keymap.right",
       category: "Navigation"
     },
     // Clipboard
@@ -94,18 +106,21 @@ var defaultKeyMap = {
       cmd: "clipboard.copy",
       sequence: [[{ key: "c" }]],
       description: "Copy selected tiles",
+      descriptionKey: "keymap.copy",
       category: "Clipboard"
     },
     {
       cmd: "clipboard.paste",
       sequence: [[{ key: "enter" }]],
       description: "Paste from clipboard",
+      descriptionKey: "keymap.paste",
       category: "Clipboard"
     },
     {
       cmd: "layout.cutCells",
       sequence: [[{ key: "x" }]],
       description: "Cut selected tiles",
+      descriptionKey: "keymap.cut",
       category: "Clipboard"
     },
     // Remove
@@ -113,12 +128,13 @@ var defaultKeyMap = {
       cmd: "selection.remove",
       sequence: [[{ key: "delete" }], [{ key: "backspace" }]],
       description: "Remove selected tiles",
+      descriptionKey: "keymap.remove",
       category: "Editing"
     }
   ]
 };
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/keyboard/escape-cascade.ts
+// src/diamondcoreprocessor.com/keyboard/escape-cascade.ts
 import { EffectBus } from "@hypercomb/core";
 var editorActive = false;
 EffectBus.on("editor:mode", ({ active }) => {
@@ -143,7 +159,7 @@ EffectBus.on("keymap:invoke", ({ cmd }) => {
   EffectBus.emit("global:escape", void 0);
 });
 
-// hypercomb-essentials/src/diamondcoreprocessor.com/keyboard/keymap.service.ts
+// src/diamondcoreprocessor.com/keyboard/keymap.service.ts
 import { EffectBus as EffectBus2, isMac } from "@hypercomb/core";
 var SEQUENCE_TIMEOUT_MS = 500;
 var KeyMapService = class extends EventTarget {

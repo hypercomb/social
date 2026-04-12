@@ -14,7 +14,7 @@
         autocomplete="off"
         autocapitalize="off"
         spellcheck="false"
-        placeholder="Filter or [select]..."
+        [placeholder]="'dcp.filter-placeholder' | t"
         (keydown)="onKeyDown($event)"
         (input)="onInput()"
       />

@@ -4,6 +4,7 @@ import { Component, computed, effect, inject, input, output, signal } from '@ang
 import { SignatureService } from '@hypercomb/core'
 import { CodeViewerComponent } from '../code-viewer/code-viewer.component'
 import { CodeEditorComponent } from '../code-editor/code-editor.component'
+import { DcpTranslatePipe } from '../core/dcp-translate.pipe'
 import { DcpStore } from '../core/dcp-store'
 import { MerklePatchService, type PatchResult } from '../core/merkle-patch.service'
 import type { BeeDocEntry } from '../core/tree-node'
@@ -11,12 +12,12 @@ import type { BeeDocEntry } from '../core/tree-node'
 @Component({
   selector: 'dcp-bee-inspector',
   standalone: true,
-  imports: [CodeViewerComponent, CodeEditorComponent],
+  imports: [CodeViewerComponent, CodeEditorComponent, DcpTranslatePipe],
   template: `
     @if (visible()) {
       <div class="page">
         <header class="hdr">
-          <button class="hdr-back" (click)="onBack()">&larr; Back</button>
+          <button class="hdr-back" (click)="onBack()">&larr; {{ 'dcp.inspector-back' | t }}</button>
           <div class="hdr-title">
             <span class="hdr-kind" [class.dep]="kind() === 'dependency'" [class.worker]="kind() === 'worker'" [class.drone]="kind() === 'drone'" [class.queen]="doc()?.kind === 'queen'">{{ doc()?.kind ?? kind() }}</span>
             <span class="hdr-name">{{ displayName() }}</span>
@@ -27,9 +28,9 @@ import type { BeeDocEntry } from '../core/tree-node'
             <span>{{ loadedFrom() }}</span>
             <span class="hdr-sep">&middot;</span>
             <code class="hdr-sig">{{ signature().slice(0, 12) }}&hellip;</code>
-            <button class="hdr-copy" (click)="copySig()">{{ sigCopied() ? 'copied' : 'copy sig' }}</button>
+            <button class="hdr-copy" (click)="copySig()">{{ sigCopied() ? ('dcp.copied' | t) : ('dcp.inspector-copy-sig' | t) }}</button>
             @if (!editMode() && source() && !loading() && canPatch()) {
-              <button class="hdr-edit" (click)="enterEditMode()">edit</button>
+              <button class="hdr-edit" (click)="enterEditMode()">{{ 'dcp.inspector-edit' | t }}</button>
             }
           </div>
         </header>
@@ -43,29 +44,29 @@ import type { BeeDocEntry } from '../core/tree-node'
               }
               <table class="props">
                 @if (lineage()) {
-                  <tr><td class="prop-label">location</td><td><code>{{ lineage() }}</code></td></tr>
+                  <tr><td class="prop-label">{{ 'dcp.inspector-location' | t }}</td><td><code>{{ lineage() }}</code></td></tr>
                 }
                 @if (d.command) {
-                  <tr><td class="prop-label">command</td><td><code class="cmd">/{{ d.command }}</code>@for (alias of d.aliases; track alias) { <code class="alias">/{{ alias }}</code>}</td></tr>
+                  <tr><td class="prop-label">{{ 'dcp.inspector-command' | t }}</td><td><code class="cmd">/{{ d.command }}</code>@for (alias of d.aliases; track alias) { <code class="alias">/{{ alias }}</code>}</td></tr>
                 }
                 @if (d.listens.length) {
-                  <tr><td class="prop-label">listens</td><td>@for (e of d.listens; track e) {<code class="pill listen">{{ e }}</code> }</td></tr>
+                  <tr><td class="prop-label">{{ 'dcp.inspector-listens' | t }}</td><td>@for (e of d.listens; track e) {<code class="pill listen">{{ e }}</code> }</td></tr>
                 }
                 @if (d.emits.length) {
-                  <tr><td class="prop-label">emits</td><td>@for (e of d.emits; track e) {<code class="pill emit">{{ e }}</code> }</td></tr>
+                  <tr><td class="prop-label">{{ 'dcp.inspector-emits' | t }}</td><td>@for (e of d.emits; track e) {<code class="pill emit">{{ e }}</code> }</td></tr>
                 }
                 @if (d.effects.length) {
-                  <tr><td class="prop-label">effects</td><td>@for (e of d.effects; track e) {<code class="pill effect">{{ e }}</code> }</td></tr>
+                  <tr><td class="prop-label">{{ 'dcp.inspector-effects' | t }}</td><td>@for (e of d.effects; track e) {<code class="pill effect">{{ e }}</code> }</td></tr>
                 }
                 @if (depEntries().length) {
-                  <tr><td class="prop-label">deps</td><td>@for (dep of depEntries(); track dep.key) {<code class="pill dep dep-link" (click)="navigateDep.emit(dep.key)" [title]="dep.key">{{ dep.name }}</code> }</td></tr>
+                  <tr><td class="prop-label">{{ 'dcp.inspector-deps' | t }}</td><td>@for (dep of depEntries(); track dep.key) {<code class="pill dep dep-link" (click)="navigateDep.emit(dep.key)" [title]="dep.key">{{ dep.name }}</code> }</td></tr>
                 }
                 @if (d.links.length) {
-                  <tr><td class="prop-label">links</td><td>@for (link of d.links; track link.url) {<a class="link" [href]="link.url" target="_blank" rel="noopener">{{ link.label }}</a> }</td></tr>
+                  <tr><td class="prop-label">{{ 'dcp.inspector-links' | t }}</td><td>@for (link of d.links; track link.url) {<a class="link" [href]="link.url" target="_blank" rel="noopener">{{ link.label }}</a> }</td></tr>
                 }
               </table>
               @if (activeView() === 'detail') {
-                <button class="source-btn" (click)="activeView.set('code')">View Source</button>
+                <button class="source-btn" (click)="activeView.set('code')">{{ 'dcp.inspector-view-source' | t }}</button>
               }
             </div>
           }
@@ -73,7 +74,7 @@ import type { BeeDocEntry } from '../core/tree-node'
           @if (loading()) {
             <div class="status">
               <span class="loading-dot"></span>
-              Resolving {{ signature().slice(0, 12) }}...
+              {{ 'dcp.inspector-resolving' | t }} {{ signature().slice(0, 12) }}...
             </div>
           }
 
@@ -90,9 +91,9 @@ import type { BeeDocEntry } from '../core/tree-node'
                 }
                 <div class="edit-actions">
                   <button class="patch-btn" (click)="applyPatch()" [disabled]="patching()">
-                    {{ patching() ? 'Compiling...' : 'Apply Patch' }}
+                    {{ patching() ? ('dcp.inspector-compiling' | t) : ('dcp.inspector-apply-patch' | t) }}
                   </button>
-                  <button class="cancel-btn" (click)="cancelEdit()">Cancel</button>
+                  <button class="cancel-btn" (click)="cancelEdit()">{{ 'dcp.inspector-cancel' | t }}</button>
                 </div>
               </div>
             } @else {

@@ -2,7 +2,7 @@
 
 <div class="command-line-wrapper" [style.visibility]="touchDragging() || viewActive() ? 'hidden' : null">
   @if (locked()) {
-    <a class="install-prompt" (click)="openDcp()">Install Hypercomb</a>
+    <a class="install-prompt" (click)="openDcp()">{{ 'command-line.install-prompt' | t }}</a>
   } @else {
     <hc-command-shell
       #shell
