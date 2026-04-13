@@ -12,6 +12,7 @@ import { I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 class DcpLocalizationService extends EventTarget implements I18nProvider {
   #locale: string
   #catalogs = new Map<string, Map<string, Record<string, string>>>()
+  #overrides = new Map<string, Map<string, Record<string, string>>>()
 
   constructor() {
     super()
@@ -40,7 +41,33 @@ class DcpLocalizationService extends EventTarget implements I18nProvider {
     this.dispatchEvent(new CustomEvent('change'))
   }
 
+  registerOverrides(namespace: string, locale: string, catalog: Record<string, string>): void {
+    if (!this.#overrides.has(namespace)) this.#overrides.set(namespace, new Map())
+    const ns = this.#overrides.get(namespace)!
+    const existing = ns.get(locale)
+    ns.set(locale, existing ? Object.assign(existing, catalog) : catalog)
+    this.dispatchEvent(new CustomEvent('change'))
+  }
+
+  resolveCell(directoryName: string, namespace = 'app'): string {
+    return this.t(`cell.${directoryName}`, undefined, namespace) === `cell.${directoryName}`
+      ? directoryName
+      : this.t(`cell.${directoryName}`, undefined, namespace)
+  }
+
   t(key: string, params?: Record<string, string | number>, namespace = 'app'): string {
+    const override = this.#overrides.get(namespace)?.get(this.#locale)?.[key]
+      ?? this.#overrides.get(namespace)?.get('en')?.[key]
+    if (override) {
+      let out = override
+      if (params) {
+        for (const [k, v] of Object.entries(params)) {
+          out = out.replace(new RegExp(`\\{${k}\\}`, 'g'), String(v))
+        }
+      }
+      return out
+    }
+
     const ns = this.#catalogs.get(namespace)
     if (!ns) return key
     const catalog = ns.get(this.#locale) ?? ns.get('en')
