@@ -195,7 +195,6 @@ export const initSentinel = async (): Promise<SentinelBridge | null> => {
     iframe.src = `${DCP_ORIGIN}/sentinel`
     iframe.style.display = 'none'
     iframe.setAttribute('aria-hidden', 'true')
-    document.body.appendChild(iframe)
 
     const timeout = setTimeout(() => {
       window.removeEventListener('message', onAnnounce)
@@ -204,8 +203,8 @@ export const initSentinel = async (): Promise<SentinelBridge | null> => {
     }, HANDSHAKE_TIMEOUT)
 
     // Listen for the sentinel component to announce itself.
-    // The iframe 'load' event fires before Angular mounts the component,
-    // so we wait for the sentinel to say "I'm ready" via postMessage.
+    // Registered BEFORE appending the iframe to prevent a race where the
+    // DCP Angular app boots and posts 'sentinel-ready' before we listen.
     const onAnnounce = (e: MessageEvent) => {
       if (e.data?.scope !== 'dcp-sentinel' || e.data?.type !== 'sentinel-ready') return
       window.removeEventListener('message', onAnnounce)
@@ -236,5 +235,8 @@ export const initSentinel = async (): Promise<SentinelBridge | null> => {
       console.warn('[sentinel-bridge] DCP iframe failed to load — content will be fetched directly (unaudited)')
       resolve(null)
     })
+
+    // Append AFTER listeners are registered
+    document.body.appendChild(iframe)
   })
 }

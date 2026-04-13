@@ -200,10 +200,23 @@ export class SentinelHandler {
       const manifest = await this.#readCachedManifest(domain, rootSig)
       if (!manifest) continue
 
-      // Collect bees that are enabled
+      // Build bee → parent layer mapping from layer JSONs
+      // Layer JSONs list their bees — if a layer is toggled off, all its bees are disabled
+      const beeToLayer = new Map<string, string>()
+      for (const layerSig of (manifest.layers ?? [])) {
+        const layerJson = await this.#readLayerJson(domain, layerSig)
+        if (!layerJson?.bees) continue
+        for (const beeFile of layerJson.bees) {
+          const beeSig = beeFile.replace(/\.js$/, '')
+          beeToLayer.set(beeSig, layerSig)
+        }
+      }
+
+      // Collect bees that are enabled (check both bee toggle and parent layer toggle)
       for (const sig of (manifest.bees ?? [])) {
-        const nodeId = sig  // node IDs for bees use the signature
-        if (toggles[nodeId] === false) continue
+        if (toggles[sig] === false) continue
+        const parentLayer = beeToLayer.get(sig)
+        if (parentLayer && toggles[parentLayer] === false) continue
         enabledBees.push(sig)
 
         // Collect deps required by this bee
@@ -230,6 +243,14 @@ export class SentinelHandler {
     const syncSig = await SignatureService.sign(new TextEncoder().encode(allSigs.join(',')).buffer as ArrayBuffer)
 
     return { syncSig, bees: enabledBees, dependencies: depsList, layers: enabledLayers, beeDeps: allBeeDeps }
+  }
+
+  async #readLayerJson(domain: string, layerSig: string): Promise<any> {
+    try {
+      const res = await fetch(`${domain}/__layers__/${layerSig}.json`, { cache: 'no-store' })
+      if (res.ok) return await res.json()
+    } catch { /* ignore */ }
+    return null
   }
 
   async #readCachedManifest(domain: string, rootSig: string): Promise<any> {

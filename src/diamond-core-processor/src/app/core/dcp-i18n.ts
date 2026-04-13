@@ -99,8 +99,19 @@ export async function initDcpI18n(): Promise<void> {
   if (initialized) return
   initialized = true
 
+  const w = window as any
+  if (!w.ioc) {
+    const instances = new Map<string, unknown>()
+    w.ioc = {
+      register(key: any, value: any) { instances.set(typeof key === 'object' && 'key' in key ? key.key : key, value) },
+      get<T = unknown>(key: any): T | undefined { return instances.get(typeof key === 'object' && 'key' in key ? key.key : key) as T | undefined },
+      has(key: any): boolean { return instances.has(typeof key === 'object' && 'key' in key ? key.key : key) },
+      list(): string[] { return [...instances.keys()] },
+    }
+  }
+
   const i18n = new DcpLocalizationService()
-  ;(window as any).ioc.register(I18N_IOC_KEY, i18n)
+  w.ioc.register(I18N_IOC_KEY, i18n)
 
   try {
     const [

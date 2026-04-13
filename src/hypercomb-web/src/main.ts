@@ -84,6 +84,11 @@ const bootstrap = async (): Promise<void> => {
     return cachedSentinel
   }
 
+  // Always sync with sentinel on page load — toggle changes don't
+  // change the manifest, so backgroundSync won't detect them.
+  // resyncAndEnforce checks the sync sig and reloads if it changed.
+  void resyncAndEnforce()
+
   const emitState = (state: SyncState, detail?: { changedFiles?: number; error?: string }) => {
     EffectBus.emit('install:state', { state, ...(detail ?? {}) })
   }

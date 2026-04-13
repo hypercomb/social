@@ -270,7 +270,8 @@ const applySentinelSync = async (store: Store, sentinel: SentinelBridge): Promis
   }
 
   localStorage.setItem(SYNC_SIG_KEY, syncSig)
-  localStorage.setItem(INSTALLED_KEY, syncSig)
+  // Do NOT overwrite INSTALLED_KEY — it must stay as the root manifest sig
+  // so ensureInstall()'s fast-path check doesn't trigger a cold reinstall.
   localStorage.setItem(MANIFEST_KEY, JSON.stringify(syncManifest))
   if (beeDeps) (globalThis as any).__hypercombBeeDeps = beeDeps
 
@@ -329,7 +330,8 @@ export const resyncFromSentinel = async (sentinel: SentinelBridge): Promise<void
 
   const syncManifest = { version: 2, layers: enabledLayers, bees: enabledBees, dependencies: enabledDeps, beeDeps }
   localStorage.setItem(SYNC_SIG_KEY, syncSig)
-  localStorage.setItem(INSTALLED_KEY, syncSig)
+  // Do NOT overwrite INSTALLED_KEY — it must stay as the root manifest sig
+  // so ensureInstall()'s fast-path check doesn't trigger a cold reinstall.
   localStorage.setItem(MANIFEST_KEY, JSON.stringify(syncManifest))
   if (beeDeps) (globalThis as any).__hypercombBeeDeps = beeDeps
 
