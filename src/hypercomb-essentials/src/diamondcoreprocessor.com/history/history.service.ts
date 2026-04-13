@@ -38,6 +38,10 @@ export class HistoryService {
   // Signatures currently being promoted — prevents recursion when promote() calls record()
   readonly #promoting = new Set<string>()
 
+  // In-memory cache of full replay per signature. Keeps navigation instant —
+  // history is the same until the next record()/updateLayer() append.
+  readonly #replayCache = new Map<string, HistoryOp[]>()
+
   private get historyRoot(): FileSystemDirectoryHandle {
     const store = get<{ history: FileSystemDirectoryHandle }>('@hypercomb.social/Store')
     return store!.history
@@ -112,6 +116,10 @@ export class HistoryService {
     const writable = await fileHandle.createWritable()
     await writable.write(JSON.stringify(operation))
     await writable.close()
+
+    // keep the replay cache fresh so future navigations don't re-read OPFS
+    const cached = this.#replayCache.get(signature)
+    if (cached) cached.push(operation)
   }
 
   /**
@@ -119,12 +127,19 @@ export class HistoryService {
    * If upTo is provided, stop at that index (inclusive).
    */
   public readonly replay = async (signature: string, upTo?: number): Promise<HistoryOp[]> => {
+    // cache-only fast path: full replay is memoized by signature
+    if (upTo === undefined) {
+      const cached = this.#replayCache.get(signature)
+      if (cached) return cached
+    }
+
     const root = this.historyRoot
 
     let bag: FileSystemDirectoryHandle
     try {
       bag = await root.getDirectoryHandle(signature, { create: false })
     } catch {
+      if (upTo === undefined) this.#replayCache.set(signature, [])
       return []
     }
 
@@ -152,6 +167,7 @@ export class HistoryService {
       }
     }
 
+    if (upTo === undefined) this.#replayCache.set(signature, ops)
     return ops
   }
 
@@ -280,6 +296,10 @@ export class HistoryService {
       }
 
       await this.putLayer(signature, next)
+
+      // layer update writes a non-HistoryOp blob into the bag — invalidate so the
+      // next replay re-reads rather than returning a stale cache.
+      this.#replayCache.delete(signature)
     }
 
     return { added, removed }

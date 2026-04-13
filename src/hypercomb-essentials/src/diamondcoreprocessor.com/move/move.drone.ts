@@ -743,44 +743,19 @@ export class MoveDrone extends Drone {
     return result
   }
 
-  // ── shared commit logic (pinned vs dense) ────────────────
+  // ── shared commit logic (dense spiral) ────────────────
 
   async #commitPlacements(placements: Map<string, Axial>): Promise<void> {
-    const lineage = this.resolve<any>('lineage')
-    const locationKey = String(lineage?.explorerLabel?.() ?? '/')
-    const layoutMode = localStorage.getItem(`hc:layout-mode:${locationKey}`) === 'pinned' ? 'pinned' : 'dense'
+    const denseOrder = this.#reorderNames(placements).filter(n => n !== '')
 
-    if (layoutMode === 'pinned') {
-      const dir = lineage?.explorerDir ? await lineage.explorerDir() : null
-      if (dir) {
-        for (const [label, axial] of placements) {
-          const targetKey = axialKey(axial.q, axial.r)
-          const targetIndex = this.#keyToIndex.get(targetKey)
-          if (targetIndex === undefined) continue
-          try {
-            const cellDir = await dir.getDirectoryHandle(label, { create: false })
-            await writeCellProperties(cellDir, { index: targetIndex, offset: 0 })
-          } catch { /* cell dir missing */ }
-        }
-      }
-    } else {
-      const denseOrder = this.#reorderNames(placements).filter(n => n !== '')
-
-      // Persist via OrderProjection (authoritative — records history op + updates cache)
-      const orderProjection = window.ioc.get<OrderProjection>('@diamondcoreprocessor.com/OrderProjection')
-      if (orderProjection) {
-        await orderProjection.reorder(denseOrder)
-      }
-
-      this.emitEffect('cell:reorder', { labels: denseOrder })
+    const orderProjection = window.ioc.get<OrderProjection>('@diamondcoreprocessor.com/OrderProjection')
+    if (orderProjection) {
+      await orderProjection.reorder(denseOrder)
     }
 
+    this.emitEffect('cell:reorder', { labels: denseOrder })
     this.emitEffect('move:preview', null)
-    this.emitEffect('move:committed', {
-      order: layoutMode === 'pinned'
-        ? [...placements.keys()]
-        : this.#reorderNames(placements).filter(n => n !== ''),
-    })
+    this.emitEffect('move:committed', { order: denseOrder })
   }
 
   // ── reset ────────────────────────────────────────────────

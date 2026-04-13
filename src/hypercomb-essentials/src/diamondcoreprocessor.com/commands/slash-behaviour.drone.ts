@@ -397,23 +397,15 @@ class LlmProvider implements SlashBehaviourProvider {
   }
 }
 
-class LanguageProvider implements SlashBehaviourProvider {
-  readonly name = 'language-provider'
+class SwirlProvider implements SlashBehaviourProvider {
+  readonly name = 'swirl-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'language', description: 'Switch the UI language', descriptionKey: 'slash.language' }
+    { name: 'swirl', description: 'Arrange tiles into the index spiral', descriptionKey: 'slash.swirl' }
   ]
 
-  async execute(_behaviourName: string, args: string): Promise<void> {
-    const queen = get('@diamondcoreprocessor.com/LanguageQueenBee') as any
-    if (queen?.invoke) await queen.invoke(args)
-  }
-
-  complete(_behaviourName: string, args: string): readonly string[] {
-    const locales = ['en', 'ja']
-    const q = args.toLowerCase().trim()
-    if (!q) return locales
-    return locales.filter(l => l.startsWith(q))
+  async execute(): Promise<void> {
+    EffectBus.emit('layout:swirl', {})
   }
 }
 
@@ -625,7 +617,7 @@ _slashBehaviours.addProvider(new ReviseProvider())
 _slashBehaviours.addProvider(new ExpandProvider())
 _slashBehaviours.addProvider(new ChatProvider())
 _slashBehaviours.addProvider(new LlmProvider())
-_slashBehaviours.addProvider(new LanguageProvider())
+_slashBehaviours.addProvider(new SwirlProvider())
 _slashBehaviours.addProvider(new ArrangeProvider())
 _slashBehaviours.addProvider(new VoiceProvider())
 _slashBehaviours.addProvider(new PushToTalkProvider())
@@ -637,4 +629,67 @@ _slashBehaviours.addProvider(new DomainProvider())
 _slashBehaviours.addProvider(new SubstrateProvider())
 _slashBehaviours.addProvider(new RerollProvider())
 _slashBehaviours.addProvider(new RecordingProvider())
+
+// ── auto-discovery of QueenBees ─────────────────────────
+//
+// The queen class IS the source of truth. SlashBehaviourDrone auto-wraps
+// any registered QueenBee into a provider at call time, reading fields
+// live from the queen instance — so there is no way for a provider to
+// drift out of sync with its queen. New queens don't need a mirror class;
+// they just register in IoC.
+//
+// Precedence: manual providers (above) win if they declare the same command
+// name. This lets legacy queens keep their manual provider until migrated.
+
+const autoWrappedCommands = new Set<string>()
+
+const isQueen = (value: unknown): value is {
+  command: string
+  aliases?: readonly string[]
+  description?: string
+  descriptionKey?: string
+  invoke: (args: string) => Promise<void> | void
+  slashComplete?: (args: string) => readonly string[]
+} => {
+  return !!value
+    && typeof (value as any).command === 'string'
+    && typeof (value as any).invoke === 'function'
+}
+
+const alreadyDeclared = (command: string): boolean => {
+  return _slashBehaviours.all().some(b => b.name === command)
+}
+
+const wrapQueen = (queen: ReturnType<typeof isQueen> extends true ? never : any): SlashBehaviourProvider => ({
+  name: `auto-${queen.command}`,
+  priority: 50, // below manual providers — they win on command-name ties
+  behaviours: [{
+    name: queen.command,
+    description: queen.description ?? queen.command,
+    descriptionKey: queen.descriptionKey,
+    aliases: queen.aliases ?? [],
+  }],
+  execute(_behaviourName: string, args: string): Promise<void> | void {
+    return queen.invoke(args)
+  },
+  complete: typeof queen.slashComplete === 'function'
+    ? (_behaviourName: string, args: string) => queen.slashComplete(args)
+    : undefined,
+} as SlashBehaviourProvider)
+
+const considerQueen = (value: unknown): void => {
+  if (!isQueen(value)) return
+  if (autoWrappedCommands.has(value.command)) return
+  if (alreadyDeclared(value.command)) return
+  autoWrappedCommands.add(value.command)
+  _slashBehaviours.addProvider(wrapQueen(value))
+}
+
+// Scan queens that registered before the drone itself was set up.
+for (const key of window.ioc.list()) {
+  considerQueen(window.ioc.get(key))
+}
+
+// Subscribe to future registrations so dynamically-loaded queens auto-wire too.
+window.ioc.onRegister((_key, value) => considerQueen(value))
 window.ioc.register('@diamondcoreprocessor.com/SlashBehaviourDrone', _slashBehaviours)

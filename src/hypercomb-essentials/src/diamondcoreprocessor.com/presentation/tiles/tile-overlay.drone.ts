@@ -320,8 +320,11 @@ export class TileOverlayDrone extends Drone {
         this.#rebuildOccupiedMap()
         if (this.#overlay && this.#currentAxial) {
           this.#currentIndex = this.#lookupIndex(this.#currentAxial.q, this.#currentAxial.r)
-          this.#updatePerTileVisibility()
+          // Overlay-level visibility first, then per-icon visibility.
+          // #updatePerTileVisibility is the sole authority on individual button
+          // visibility �� #updateVisibility never touches buttons.
           this.#updateVisibility()
+          this.#updatePerTileVisibility()
         }
       })
 
@@ -383,6 +386,7 @@ export class TileOverlayDrone extends Drone {
       this.onEffect<{ selected: string[] }>('selection:changed', (payload) => {
         this.#hasSelection = (payload?.selected?.length ?? 0) > 0
         this.#updateVisibility()
+        this.#updatePerTileVisibility()
       })
 
       this.onEffect<{ active: boolean }>('drop:dragging', ({ active }) => {
@@ -1381,6 +1385,21 @@ export class TileOverlayDrone extends Drone {
 
   // ── Instant branch navigation on pointerdown ────────────────────────
   #onPointerDown = (e: PointerEvent): void => {
+    // Right-button down → instant back navigation (trailing pointerup + contextmenu suppressed)
+    if (e.button === 2) {
+      if (this.#arrangeMode) return
+      if (this.#navigationBlocked) return
+      if (this.#editing || this.#editCooldown) return
+      if (e.ctrlKey || e.metaKey) return
+      if (!this.#canvas || e.target !== this.#canvas) return
+      const selection = window.ioc.get<{ count: number }>('@diamondcoreprocessor.com/SelectionService')
+      if (selection && selection.count > 0) return
+      const gate = window.ioc.get<InputGate>('@diamondcoreprocessor.com/InputGate')
+      if (gate?.active) return
+      this.#consumedPointerId = e.pointerId
+      this.#navigateBack()
+      return
+    }
     if (e.button !== 0) return
     if (this.#arrangeMode) return
     if (this.#navigationBlocked) return
@@ -1389,6 +1408,7 @@ export class TileOverlayDrone extends Drone {
     if (this.#touchDragging) return
     if (e.ctrlKey || e.metaKey) return
     if (!this.#renderContainer || !this.#renderer || !this.#canvas) return
+    if (e.target !== this.#canvas) return
 
     const detector = this.resolve<{ pixelToAxial(px: number, py: number, flat?: boolean): Axial }>('detector')
     if (!detector) return
@@ -1430,6 +1450,7 @@ export class TileOverlayDrone extends Drone {
     if (this.#navigationBlocked) return
     if (this.#editing || this.#editCooldown) return
     if (!this.#renderContainer || !this.#renderer || !this.#canvas) return
+    if (e.target !== this.#canvas) return
 
     // For Ctrl/Meta clicks, resolve axial from click coordinates directly
     // rather than relying on pointermove having set #currentIndex
@@ -1550,8 +1571,8 @@ export class TileOverlayDrone extends Drone {
 
   // Cancel editor on right-click release (mirrors Escape cascade priority 1)
   #onPointerUp = (e: PointerEvent): void => {
-    // Suppress orphaned pointerup from navigation gesture (click event still pending)
-    if (this.#consumedPointerId === e.pointerId && e.button === 0) return
+    // Suppress orphaned pointerup from navigation gesture (click/contextmenu still pending)
+    if (this.#consumedPointerId === e.pointerId) return
     if (e.button !== 2) return
     if (!this.#editing) return
     const drone = window.ioc.get<{ cancelEditing(): void }>('@diamondcoreprocessor.com/TileEditorDrone')
@@ -1559,30 +1580,8 @@ export class TileOverlayDrone extends Drone {
   }
 
   #onContextMenu = (e: MouseEvent): void => {
-    if (this.#arrangeMode) { e.preventDefault(); return }
-    if (this.#navigationBlocked) return
-
-    // Suppress browser menu while editing (cancel handled by pointerup)
-    if (this.#editing) {
-      e.preventDefault()
-      return
-    }
-
-    if (e.ctrlKey || e.metaKey) {
-      e.preventDefault()
-      return
-    }
-    const selection = window.ioc.get<{ count: number }>('@diamondcoreprocessor.com/SelectionService')
-    if (selection && selection.count > 0) {
-      e.preventDefault()
-      return
-    }
-
-    const gate = window.ioc.get<InputGate>('@diamondcoreprocessor.com/InputGate')
-    if (gate?.active) return
-
-    e.preventDefault()
-    this.#navigateBack()
+    // Always suppress the native menu on our canvas; back-nav already fired on pointerdown.
+    if (e.target === this.#canvas) e.preventDefault()
   }
 
   // ── Navigation ─────────────────────────────────────────────────────
@@ -1645,12 +1644,13 @@ export class TileOverlayDrone extends Drone {
 
     const shouldShow = occupied && !this.#editing && !this.#editCooldown && !this.#touchDragging
 
-    // When tiles are selected, show only the cell label (no hex bg, icons, or hover label)
+    // When tiles are selected: overlay visible, hex bg hidden, per-tile icons still active
     if (this.#hasSelection) {
       this.#overlay.visible = occupied && !this.#editing && !this.#editCooldown
       if (this.#hexBg) this.#hexBg.hide()
-      for (const action of this.#actions) action.button.visible = false
-
+      // Individual icon visibility is managed solely by #updatePerTileVisibility —
+      // icons stay active during selection so per-tile actions (reroll, edit, etc.)
+      // still work. Clicking the tile body (not an icon) falls through to tile:click.
       return
     }
 

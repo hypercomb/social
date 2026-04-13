@@ -306,7 +306,6 @@ const BUILTIN_ANCHORS: readonly InstructionAnchor[] = [
   { selector: 'dcp.zoom-in', labelKey: 'instruction.dcp.zoom-in', shortcut: 'Scroll up', placement: 'top', category: 'navigation' },
   { selector: 'dcp.lock', labelKey: 'instruction.dcp.lock', placement: 'top', category: 'view' },
   { selector: 'dcp.fullscreen', labelKey: 'instruction.dcp.fullscreen', placement: 'top', category: 'view' },
-  { selector: 'dcp.layout-mode', labelKey: 'instruction.dcp.layout-mode', command: '/layout', placement: 'top', category: 'view' },
   { selector: 'dcp.instructions-toggle', labelKey: 'instruction.dcp.instructions-toggle', command: '/instructions', placement: 'top', category: 'help' },
 ]
 

@@ -56,6 +56,83 @@ type PixiHostApi = {
   container?: Container | null
 }
 
+type SlotsSnapshot = { names: string[]; localCells: Set<string>; branches: Set<string>; mode: 'dense' | 'pinned' }
+
+/**
+ * State machine for tile slot ordering — the single source of truth for
+ * "which label lives at which index" during incremental updates.
+ *
+ * Dense mode:  names is a packed array. Remove = splice out. Add = append.
+ * Pinned mode: names is sparse with '' gaps to hold slot positions. Remove
+ *              replaces with '' (slot preserved). Add returns false — the
+ *              LayoutService owns slot assignment, so callers must fall back
+ *              to the full render path.
+ *
+ * Callers never branch on mode — they call remove/add/snapshot and trust
+ * the result.
+ */
+class CellSlots {
+  #names: string[] = []
+  #local = new Set<string>()
+  #branches = new Set<string>()
+  #mode: 'dense' | 'pinned' = 'dense'
+  #seeded = false
+
+  get seeded(): boolean { return this.#seeded }
+  get mode(): 'dense' | 'pinned' { return this.#mode }
+
+  seed(snap: SlotsSnapshot): void {
+    this.#names = [...snap.names]
+    this.#local = new Set(snap.localCells)
+    this.#branches = new Set(snap.branches)
+    this.#mode = snap.mode
+    this.#seeded = true
+  }
+
+  clear(): void {
+    this.#seeded = false
+    this.#names = []
+    this.#local.clear()
+    this.#branches.clear()
+  }
+
+  snapshot(): SlotsSnapshot {
+    return {
+      names: [...this.#names],
+      localCells: new Set(this.#local),
+      branches: new Set(this.#branches),
+      mode: this.#mode,
+    }
+  }
+
+  remove(label: string): void {
+    // Preserve slot position in both modes — replacing with '' keeps every other
+    // tile's index stable so no tile ever shifts on a neighbouring remove.
+    for (let i = 0; i < this.#names.length; i++) {
+      if (this.#names[i] === label) this.#names[i] = ''
+    }
+    this.#local.delete(label)
+    this.#branches.delete(label)
+  }
+
+  /**
+   * Fill the first gap (''), or append at the end. Gaps exist because remove()
+   * preserves slot positions — reusing them keeps neighbours still.
+   * Pinned mode returns false so LayoutService owns slot assignment.
+   */
+  add(label: string, hasBranch: boolean): boolean {
+    if (this.#mode === 'pinned') return false
+    if (!this.#names.includes(label)) {
+      const gapIndex = this.#names.indexOf('')
+      if (gapIndex >= 0) this.#names[gapIndex] = label
+      else this.#names.push(label)
+    }
+    this.#local.add(label)
+    if (hasBranch) this.#branches.add(label)
+    return true
+  }
+}
+
 export class ShowCellDrone extends Drone {
   private static readonly STREAM_BATCH_SIZE = 8
 
@@ -209,23 +286,43 @@ export class ShowCellDrone extends Drone {
   private suppressMeshRecenter = false
   #layoutMode: 'dense' | 'pinned' = 'dense'
 
-  // add/remove sequence: hide layer → rebuild geometry → fit-to-content → reveal
-  // Set when cell:added/removed fires; consumed at the end of the next render.
-  #fitOnNextRender = false
-  // Safety: if the synchronize that follows cell:added/removed never arrives,
-  // restore the layer alpha so the user isn't stuck with invisible tiles.
-  #fitFallbackTimer: ReturnType<typeof setTimeout> | null = null
   // First-visit fit: when navigating to a layer that has no saved viewport
   // snapshot, defer layer reveal until all cells have streamed in, then run
   // zoom-to-fit so the page opens sized to its content. The fitted viewport
   // is persisted, so subsequent visits restore it (or the user's later
   // pan/zoom edits) instead of fitting again.
-  #fitAfterStream = false
 
   // cached render context for fast move:preview path (avoids full OPFS re-read)
   private cachedCellNames: string[] | null = null
   private cachedLocalCellSet: Set<string> | null = null
   private cachedBranchSet: Set<string> | null = null
+
+  // State machine for slot ordering — the authoritative source of cellNames
+  // during incremental updates. Seeded after every full render; mutated via
+  // add()/remove() by incremental paths. Encapsulates dense vs pinned logic.
+  readonly #slots = new CellSlots()
+
+  // Coalesce rapid cell:added / cell:removed events fired in the same JS turn.
+  // The handlers mutate #slots synchronously; a single microtask runs one
+  // applyGeometry at the end of the turn. Zero awaits in the click path.
+  #pendingAdds: string[] = []
+  #pendingRemovals: string[] = []
+  #incrementalScheduled = false
+
+  // Phase 2: buffer references + label→index map for in-place cell attribute updates
+  // (used by tile:saved fast path — mutate slices and push to GPU without rebuilding geometry)
+  #buf: {
+    pos?: Float32Array
+    labelUV?: Float32Array
+    imageUV?: Float32Array
+    hasImage?: Float32Array
+    heat?: Float32Array
+    identityColor?: Float32Array
+    branch?: Float32Array
+    borderColor?: Float32Array
+    divergence?: Float32Array
+  } = {}
+  #labelToIndex = new Map<string, number>()
 
   private readonly onSynchronize = (): void => {
     this.requestRender()
@@ -683,46 +780,6 @@ export class ShowCellDrone extends Drone {
     return raw
   }
 
-  /**
-   * Step 1 of the add/remove sequence: arm the fit-on-next-render flag and
-   * make the tile layer invisible immediately so the user doesn't see the
-   * geometry rebuild flicker. The next renderFromSynchronize that completes
-   * applyGeometry will fit-to-content and reveal the layer.
-   *
-   * Uses alpha (not visible) so that getLocalBounds still includes the
-   * existing tiles — the new fit calculation needs them.
-   */
-  #beginFitOnNextRender = (): void => {
-    this.#fitOnNextRender = true
-    if (this.layer) this.layer.alpha = 0
-    if (this.#fitFallbackTimer) clearTimeout(this.#fitFallbackTimer)
-    // Safety net: if no synchronize follows within a second, reveal anyway.
-    this.#fitFallbackTimer = setTimeout(() => {
-      this.#fitFallbackTimer = null
-      if (this.#fitOnNextRender) {
-        this.#fitOnNextRender = false
-        if (this.layer) this.layer.alpha = 1
-      }
-    }, 1000)
-  }
-
-  /**
-   * Steps 3 and 4 of the add/remove sequence: zoom-to-fit (snap, no animation
-   * — the user is waiting on a hidden layer) then restore alpha so the tiles
-   * reappear at their fitted positions in a single frame.
-   */
-  #completeFitAndReveal = (): void => {
-    this.#fitOnNextRender = false
-    if (this.#fitFallbackTimer) {
-      clearTimeout(this.#fitFallbackTimer)
-      this.#fitFallbackTimer = null
-    }
-    const zoom = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ZoomDrone') as
-      { zoomToFit?: (snap?: boolean) => void } | undefined
-    zoom?.zoomToFit?.(true)
-    if (this.layer) this.layer.alpha = 1
-  }
-
   #renderScheduled = false
 
   private readonly requestRender = (): void => {
@@ -788,6 +845,226 @@ export class ShowCellDrone extends Drone {
     void this.applyGeometry(cells).finally(() => { this.suppressMeshRecenter = false })
   }
 
+  /**
+   * Incremental render — same-layer tile changes without the full synchronize path.
+   * Follows renderMovePreview's pattern: reuse cached context, update only the
+   * affected tiles, rebuild geometry without hiding the layer.
+   *
+   * No OPFS directory scan, no history replay, no fit-to-content, no layer hide.
+   */
+  /**
+   * Queue a cell diff from a synchronous event handler. All mutations happen
+   * in one microtask per JS turn — rapid clicks in the same turn coalesce.
+   * Zero awaits; the click path is never blocked on OPFS.
+   */
+  readonly #queueIncremental = (change: { added?: string[]; removed?: string[] }): void => {
+    if (change.added) for (const n of change.added) this.#pendingAdds.push(n)
+    if (change.removed) for (const n of change.removed) this.#pendingRemovals.push(n)
+    if (this.#incrementalScheduled) return
+    this.#incrementalScheduled = true
+    queueMicrotask(() => {
+      this.#incrementalScheduled = false
+      const added = this.#pendingAdds
+      const removed = this.#pendingRemovals
+      this.#pendingAdds = []
+      this.#pendingRemovals = []
+      this.#runIncrementalSync({ added, removed })
+    })
+  }
+
+  /**
+   * Synchronous incremental render — uses only the slot state machine and
+   * cached image/tag data; no OPFS access. Images for newly-added cells
+   * are fetched fire-and-forget and pushed via in-place buffer update when
+   * ready.
+   */
+  readonly #runIncrementalSync = (change: { added: string[]; removed: string[] }): void => {
+    const axial = this.resolve<any>('axial')
+    if (!axial?.items || !this.#slots.seeded) {
+      this.#layerCellsCache.delete(this.renderedLocationKey)
+      this.renderedCellsKey = ''
+      this.requestRender()
+      return
+    }
+
+    for (const name of change.removed) {
+      this.#slots.remove(name)
+      this.renderedCells.delete(name)
+    }
+
+    for (const name of change.added) {
+      // hasBranch defaults to false for newly-added cells (no children yet).
+      // The async fill pass below will correct this if needed.
+      if (!this.#slots.add(name, false)) {
+        // pinned mode — LayoutService owns slot assignment, fall back to full render
+        this.#layerCellsCache.delete(this.renderedLocationKey)
+        this.renderedCellsKey = ''
+        this.requestRender()
+        return
+      }
+    }
+
+    const snap = this.#slots.snapshot()
+    const cellNames = snap.names
+    const localCellSet = snap.localCells
+    const branchSet = snap.branches
+
+    this.cachedCellNames = cellNames
+    this.cachedLocalCellSet = localCellSet
+    this.cachedBranchSet = branchSet
+
+    const axialMax = typeof axial.items.size === 'number' ? axial.items.size : cellNames.length
+    const maxCells = Math.min(cellNames.length, axialMax)
+    if (maxCells <= 0) { this.clearMesh(); return }
+
+    const cells = this.buildCellsFromAxial(axial, cellNames, maxCells, localCellSet, branchSet)
+    if (cells.length === 0) { this.clearMesh(); return }
+
+    // Populate cells from caches — newly-added cells have no cache entry and
+    // will render blank until the async fill completes.
+    for (const cell of cells) {
+      if (cell.external) continue
+      if (this.cellImageCache.has(cell.label)) cell.imageSig = this.cellImageCache.get(cell.label) ?? undefined
+      const bc = this.cellBorderColorCache.get(cell.label)
+      if (bc) cell.borderColor = bc
+      cell.hasLink = this.cellLinkCache.get(cell.label) ?? false
+      cell.hasSubstrate = this.cellSubstrateCache.get(cell.label) ?? false
+    }
+
+    this.renderedCells.clear()
+    for (const cell of cells) this.renderedCells.set(cell.label, cell)
+
+    this.#layerCellsCache.set(this.renderedLocationKey, {
+      cells: [...cells], cellNames, localCellSet, branchSet,
+    })
+
+    this.suppressMeshRecenter = true
+    // applyGeometry returns a promise but its body is synchronous for our
+    // purposes; don't await — the paint happens in the next frame anyway.
+    void this.applyGeometry(cells)
+
+    // Fire-and-forget: load images and branch flags for added cells, then
+    // push in-place buffer updates. Never blocks the click path.
+    if (change.added.length > 0) {
+      const added = change.added
+      const lineage = this.resolve<any>('lineage')
+      void Promise.resolve(lineage?.explorerDir?.()).then(async (dir) => {
+        if (!dir) return
+        // Branch flags (cheap, parallel)
+        await Promise.all(added.map(async name => {
+          const hasBranch = await this.checkCellHasBranch(dir, name)
+          if (hasBranch) this.#slots.add(name, true)  // idempotent
+        }))
+        // Images + props — pushed per-cell via in-place update
+        for (const name of added) {
+          await this.#tryInPlaceCellUpdate(name, { dir })
+        }
+      }).catch(() => { /* best effort */ })
+    }
+
+    this.emitEffect('render:cell-count', {
+      count: cells.length,
+      labels: cells.map(cell => cell.label),
+      coords: cells.map(cell => ({ q: cell.q, r: cell.r })),
+      branchLabels: cells.filter(cell => cell.hasBranch).map(cell => cell.label),
+      externalLabels: cells.filter(cell => cell.external).map(cell => cell.label),
+      noImageLabels: cells.filter(cell => !cell.imageSig).map(cell => cell.label),
+      substrateLabels: cells.filter(cell => cell.hasSubstrate).map(cell => cell.label),
+      linkLabels: cells.filter(cell => cell.hasLink).map(cell => cell.label),
+      hiddenLabels: this.#showHiddenItems ? [...this.#currentHiddenSet] : [],
+    })
+    this.#emitRenderTags(cells)
+  }
+
+  /**
+   * Async incremental render — kept for callers that legitimately need to
+   * update cached content (tile:saved fallback, tags:changed, substrate
+   * fallback). Never invoked for cell:added/removed.
+   */
+  private readonly renderIncremental = async (change: {
+    added?: string[]
+    removed?: string[]
+    changedContent?: string[]
+    changedTags?: string[]
+  }): Promise<void> => {
+    const axial = this.resolve<any>('axial')
+    const lineage = this.resolve<any>('lineage')
+    if (!axial?.items || !lineage || !this.#slots.seeded) {
+      this.requestRender()
+      return
+    }
+
+    const dir = await lineage.explorerDir?.()
+    if (!dir) { this.requestRender(); return }
+
+    if (change.removed?.length) {
+      for (const name of change.removed) { this.#slots.remove(name); this.renderedCells.delete(name) }
+    }
+    if (change.added?.length) {
+      for (const name of change.added) {
+        const hasBranch = await this.checkCellHasBranch(dir, name)
+        if (!this.#slots.add(name, hasBranch)) {
+          this.#layerCellsCache.delete(this.renderedLocationKey)
+          this.renderedCellsKey = ''
+          this.requestRender()
+          return
+        }
+      }
+    }
+
+    const snap = this.#slots.snapshot()
+    const cellNames = snap.names
+    const localCellSet = snap.localCells
+    const branchSet = snap.branches
+
+    this.cachedCellNames = cellNames
+    this.cachedLocalCellSet = localCellSet
+    this.cachedBranchSet = branchSet
+
+    const axialMax = typeof axial.items.size === 'number' ? axial.items.size : cellNames.length
+    const maxCells = Math.min(cellNames.length, axialMax)
+    if (maxCells <= 0) { this.clearMesh(); return }
+
+    const cells = this.buildCellsFromAxial(axial, cellNames, maxCells, localCellSet, branchSet)
+    if (cells.length === 0) { this.clearMesh(); return }
+
+    const touched = new Set<string>([...(change.added ?? []), ...(change.changedContent ?? [])])
+    const needLoad = cells.filter(c => touched.has(c.label) || !this.cellImageCache.has(c.label))
+    if (needLoad.length > 0) await this.loadCellImages(needLoad, dir)
+
+    for (const cell of cells) {
+      if (cell.external) continue
+      if (this.cellImageCache.has(cell.label)) cell.imageSig = this.cellImageCache.get(cell.label) ?? undefined
+      const bc = this.cellBorderColorCache.get(cell.label)
+      if (bc) cell.borderColor = bc
+      cell.hasLink = this.cellLinkCache.get(cell.label) ?? false
+      cell.hasSubstrate = this.cellSubstrateCache.get(cell.label) ?? false
+    }
+
+    this.renderedCells.clear()
+    for (const cell of cells) this.renderedCells.set(cell.label, cell)
+
+    this.#layerCellsCache.set(this.renderedLocationKey, {
+      cells: [...cells], cellNames, localCellSet, branchSet,
+    })
+
+    this.suppressMeshRecenter = true
+    await this.applyGeometry(cells)
+
+    this.emitEffect('render:cell-count', {
+      count: cells.length,
+      labels: cells.map(cell => cell.label),
+      coords: cells.map(cell => ({ q: cell.q, r: cell.r })),
+      branchLabels: cells.filter(cell => cell.hasBranch).map(cell => cell.label),
+      externalLabels: cells.filter(cell => cell.external).map(cell => cell.label),
+      noImageLabels: cells.filter(cell => !cell.imageSig).map(cell => cell.label),
+      substrateLabels: cells.filter(cell => cell.hasSubstrate).map(cell => cell.label),
+      linkLabels: cells.filter(cell => cell.hasLink).map(cell => cell.label),
+      hiddenLabels: this.#showHiddenItems ? [...this.#currentHiddenSet] : [],
+    })
+    this.#emitRenderTags(cells)
+  }
+
   private readonly renderFromSynchronize = async (): Promise<void> => {
     this.shader?.setHoveredIndex(-1)
     if (!this.pixiApp || !this.pixiContainer || !this.pixiRenderer) {
@@ -815,63 +1092,6 @@ export class ShowCellDrone extends Drone {
       return
     }
 
-
-    // instant back-navigation: if we have cached cells for this layer, apply them directly
-    // — skips ALL OPFS reads (explorerDir, listCellFolders, checkCellHasBranch, history, layout)
-    if (locationKey !== this.renderedLocationKey && this.#layerCellsCache.has(locationKey)) {
-      performance.mark('hypercomb:back:render-hit-start')
-      const cached = this.#layerCellsCache.get(locationKey)!
-
-      // ensure layer + atlases are initialized
-      if (!this.layer) {
-        this.layer = new Container()
-        this.pixiContainer.addChild(this.layer)
-        this.atlas = new HexLabelAtlas(this.pixiRenderer, 128, 8, 8)
-        this.attachLabelResolver(this.atlas)
-        this.atlas.setPivot(this.#pivot)
-        this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8)
-        this.cellImageCache.clear()
-        this.cellBorderColorCache.clear()
-        this.cellTagsCache.clear()
-        this.cellLinkCache.clear()
-        this.cellSubstrateCache.clear()
-        this.atlasRenderer = this.pixiRenderer
-        this.shader = null
-      }
-
-      this.cancelStreamFlag = true
-      this.renderedLocationKey = locationKey
-      this.renderedCellsKey = ''
-      this.renderedCells.clear()
-
-      // restore per-layer viewport + sync VP directory
-      // fast path: use cached dir + cached viewport snapshot (no OPFS I/O)
-      let cachedDir: FileSystemDirectoryHandle | null = this.#layerDirCache.get(locationKey) ?? null
-      const cachedSnap = this.#layerViewportCache.get(locationKey)
-      if (cachedDir && cachedSnap) {
-        this.#applyViewportFromSnapshot(cachedSnap)
-      } else {
-        cachedDir = await lineage.explorerDir()
-        if (cachedDir) {
-          this.#layerDirCache.set(locationKey, cachedDir)
-          await this.#applyViewportForLayer(cachedDir)
-        }
-      }
-      if (cachedDir) {
-        const vp = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ViewportPersistence') as ViewportPersistence | undefined
-        if (vp) vp.setDirSilent(cachedDir)
-      }
-
-      for (const cell of cached.cells) this.renderedCells.set(cell.label, cell)
-      this.cachedCellNames = cached.cellNames
-      this.cachedLocalCellSet = cached.localCellSet
-      this.cachedBranchSet = cached.branchSet
-      await this.applyGeometry(cached.cells)
-      if (this.layer) this.layer.visible = true
-      performance.mark('hypercomb:back:render-hit-end')
-      try { performance.measure('hypercomb:back:total', 'hypercomb:back:trigger', 'hypercomb:back:render-hit-end') } catch { /* no trigger mark */ }
-      return
-    }
 
     // note: init layer + atlases (and reset shader if renderer changes)
     if (!this.layer) {
@@ -1178,27 +1398,13 @@ export class ShowCellDrone extends Drone {
       this.renderedCellsKey = ''
       this.renderedCells.clear()
       this.#pendingRemoves.clear()
+      this.#slots.clear()  // layer change invalidates the slot state machine
       this.suppressMeshRecenter = false  // allow recenter on page navigation
-      // Layer change supersedes any pending fit — the layer-change flow has
-      // its own visibility/viewport handling. Drop the flag and reveal so the
-      // streaming reveal logic isn't fighting alpha=0 from the previous page.
-      if (this.#fitOnNextRender) {
-        this.#fitOnNextRender = false
-        if (this.#fitFallbackTimer) {
-          clearTimeout(this.#fitFallbackTimer)
-          this.#fitFallbackTimer = null
-        }
-        if (this.layer) this.layer.alpha = 1
-      }
-      // Reset any pending first-visit fit from a superseded navigation.
-      this.#fitAfterStream = false
 
-      // apply saved viewport (or defaults) so the container is correct before tiles render
-      const hasSavedViewport = await this.#applyViewportForLayer(dir)
-      // First visit to this layer (no persisted viewport) → fit-to-content
-      // after streaming completes. streamCells will delay layer reveal until
-      // the fit has been applied so the user doesn't see an unfitted flash.
-      this.#fitAfterStream = !hasSavedViewport
+      // apply saved viewport (or defaults) so the container is correct before tiles render.
+      // Auto fit-to-content is intentionally disabled — zoomToFit only runs on explicit
+      // user gesture. First-visit layers use the default/saved viewport as-is.
+      await this.#applyViewportForLayer(dir)
 
       // sync VP directory so subsequent pan/zoom writes persist to the correct layer
       const vp = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ViewportPersistence') as ViewportPersistence | undefined
@@ -1207,9 +1413,6 @@ export class ShowCellDrone extends Drone {
       if (cellNames.length === 0) {
         if (this.layer) this.layer.visible = true
         this.clearMesh()
-        // nothing to fit on an empty layer — drop the flag so a later render
-        // doesn't mis-fire with stale state
-        this.#fitAfterStream = false
         return
       }
 
@@ -1227,17 +1430,6 @@ export class ShowCellDrone extends Drone {
     // note: same layer — incremental path (cell collection was fresh, images are cached)
     if (cellNames.length === 0) {
       this.clearMesh()
-      // If we hid the layer for an add/remove sequence and the result is an
-      // empty page, there's nothing to fit — just reveal so the user isn't
-      // staring at an invisible empty grid.
-      if (this.#fitOnNextRender) {
-        this.#fitOnNextRender = false
-        if (this.#fitFallbackTimer) {
-          clearTimeout(this.#fitFallbackTimer)
-          this.#fitFallbackTimer = null
-        }
-        if (this.layer) this.layer.alpha = 1
-      }
       return
     }
 
@@ -1273,12 +1465,7 @@ export class ShowCellDrone extends Drone {
 
     await this.applyGeometry(cells)
 
-    // add/remove sequence step 3+4: fit-to-content, then reveal the layer.
-    // Step 1 (hide) happened in the cell:added/removed handler; step 2
-    // (geometry rebuild) is the applyGeometry call above.
-    if (this.#fitOnNextRender) {
-      this.#completeFitAndReveal()
-    } else if (wasEmpty && cells.length > 0 && this.pixiApp && this.pixiContainer && this.pixiRenderer) {
+    if (wasEmpty && cells.length > 0 && this.pixiApp && this.pixiContainer && this.pixiRenderer) {
       // first tile on empty screen → center viewport and zoom 2×
       const s = this.pixiRenderer.screen
       this.pixiApp.stage.position.set(s.width * 0.5, s.height * 0.5)
@@ -1293,6 +1480,8 @@ export class ShowCellDrone extends Drone {
 
     // cache for instant back-navigation
     this.#layerCellsCache.set(locationKey, { cells: [...cells], cellNames, localCellSet, branchSet })
+    // seed the slot state machine — incremental paths read from here after every full render
+    this.#slots.seed({ names: cellNames, localCells: localCellSet, branches: branchSet, mode: this.#layoutMode })
   }
 
   private readonly streamCells = async (
@@ -1331,28 +1520,12 @@ export class ShowCellDrone extends Drone {
       await this.applyGeometry(cells, isLast)
 
       // reveal the layer as soon as the first batch is on-screen so cold start
-      // shows tiles immediately and the rest stream in progressively — unless
-      // we're deferring reveal for a first-visit fit-to-content, in which case
-      // we wait for the full stream before fitting and revealing together.
-      if (!this.cancelStreamFlag && this.layer && !this.layer.visible && !this.#fitAfterStream) {
+      // shows tiles immediately and the rest stream in progressively.
+      if (!this.cancelStreamFlag && this.layer && !this.layer.visible) {
         this.layer.visible = true
       }
 
       if (!isLast) await this.microDelay()
-    }
-
-    // first-visit fit: content is fully streamed, bounds are stable — fit now,
-    // then reveal so the page opens already sized to its content. The fitted
-    // viewport is persisted by zoomToFit, so subsequent visits restore it.
-    if (!this.cancelStreamFlag && this.#fitAfterStream && cells.length > 0) {
-      this.#fitAfterStream = false
-      const zoom = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ZoomDrone') as
-        { zoomToFit?: (snap?: boolean) => void } | undefined
-      zoom?.zoomToFit?.(true)
-    } else if (this.#fitAfterStream) {
-      // stream cancelled or empty — clear the flag so a later render isn't
-      // mis-armed by stale state
-      this.#fitAfterStream = false
     }
 
     // safety: ensure layer is visible if loop exited without rendering anything
@@ -1364,7 +1537,9 @@ export class ShowCellDrone extends Drone {
     // cache for instant back-navigation
     if (!this.cancelStreamFlag && cells.length > 0) {
       const locKey = this.renderedLocationKey
-      this.#layerCellsCache.set(locKey, { cells: [...cells], cellNames, localCellSet, branchSet: branchSet ?? new Set() })
+      const bset = branchSet ?? new Set<string>()
+      this.#layerCellsCache.set(locKey, { cells: [...cells], cellNames, localCellSet, branchSet: bset })
+      this.#slots.seed({ names: cellNames, localCells: localCellSet, branches: bset, mode: this.#layoutMode })
     }
 
     this.requestRender()
@@ -1577,7 +1752,8 @@ export class ShowCellDrone extends Drone {
     window.addEventListener('synchronize', this.requestRender)
     window.addEventListener('navigate', this.requestRender)
 
-    // tile:saved effect — invalidate image cache for the specific cell so re-render picks up new image
+    // tile:saved effect — invalidate only the saved cell's caches and run an
+    // incremental render so the rest of the grid stays untouched.
     this.onEffect<{ cell: string }>('tile:saved', (payload) => {
       if (payload?.cell) {
         const oldSig = this.cellImageCache.get(payload.cell)
@@ -1585,56 +1761,77 @@ export class ShowCellDrone extends Drone {
         this.cellBorderColorCache.delete(payload.cell)
         this.cellTagsCache.delete(payload.cell)
         this.cellLinkCache.delete(payload.cell)
+        this.cellSubstrateCache.delete(payload.cell)
         if (oldSig && this.imageAtlas) {
           this.imageAtlas.invalidate(oldSig)
         }
       }
-      this.#layerCellsCache.delete(this.renderedLocationKey)
-      this.renderedCellsKey = ''
-      this.requestRender()
+      if (this.cachedCellNames && payload?.cell) {
+        // Phase 2: try an in-place buffer update when position/count are unchanged.
+        // If that bails (unknown cell index, missing buffers), fall through to
+        // the incremental render path which rebuilds geometry.
+        void this.#tryInPlaceCellUpdate(payload.cell, { dir: null }).then(done => {
+          if (!done) void this.renderIncremental({ changedContent: [payload.cell] })
+        })
+      } else {
+        this.#layerCellsCache.delete(this.renderedLocationKey)
+        this.renderedCellsKey = ''
+        this.requestRender()
+      }
     })
 
-    // tags:changed effect — invalidate tag cache for affected cells and re-emit render:tags
+    // tags:changed — invalidate only the affected cells' tag caches, then run
+    // an incremental render to re-emit tag state without touching geometry I/O.
     this.onEffect<{ updates: { cell: string }[] }>('tags:changed', (payload) => {
       if (!payload?.updates) return
+      const changedCells: string[] = []
       for (const { cell } of payload.updates) {
         this.cellTagsCache.delete(cell)
+        changedCells.push(cell)
       }
-      this.#layerCellsCache.delete(this.renderedLocationKey)
-      this.renderedCellsKey = ''
-      this.requestRender()
+      if (this.cachedCellNames && changedCells.length > 0) {
+        void this.renderIncremental({ changedTags: changedCells })
+      } else {
+        this.#layerCellsCache.delete(this.renderedLocationKey)
+        this.renderedCellsKey = ''
+        this.requestRender()
+      }
     })
 
-    // cell:added / cell:removed — invalidate render cache so next synchronize picks up new tile set
-    // suppress mesh recenter so existing tiles don't shift visually on add/remove
+    // cell:added / cell:removed — synchronous incremental path. Zero awaits
+    // in the click handler. The slot state machine mutates immediately, the
+    // next microtask runs one applyGeometry, and images for new cells are
+    // loaded fire-and-forget afterward. Rapid clicks in one JS turn coalesce
+    // into a single render.
     this.onEffect<{ cell: string; groupId?: string }>('cell:added', (payload) => {
-      this.#layerCellsCache.clear()
-      this.renderedCellsKey = ''
       this.suppressMeshRecenter = true
-      if (payload?.cell) {
-        this.#pendingRemoves.delete(payload.cell)
-        this.#startNewCellFade(payload.cell)
-      }
-      // Rename emits removed+added with a 'rename:' groupId — cell count is
-      // unchanged so fit is unnecessary and the hide/show would just flicker.
-      if (!String(payload?.groupId ?? '').startsWith('rename:')) {
-        this.#beginFitOnNextRender()
+      if (!payload?.cell) return
+      this.#pendingRemoves.delete(payload.cell)
+      this.#startNewCellFade(payload.cell)
+      if (this.#slots.seeded) {
+        this.#queueIncremental({ added: [payload.cell] })
+      } else {
+        this.#layerCellsCache.delete(this.renderedLocationKey)
+        this.renderedCellsKey = ''
+        this.requestRender()
       }
     })
 
     this.onEffect<{ cell: string; groupId?: string }>('cell:removed', (payload) => {
-      this.#layerCellsCache.clear()
-      this.renderedCellsKey = ''
       this.suppressMeshRecenter = true
-      if (payload?.cell) {
-        this.#pendingRemoves.add(payload.cell)
-        this.cellImageCache.delete(payload.cell)
-        this.cellTagsCache.delete(payload.cell)
-        this.cellLinkCache.delete(payload.cell)
-        this.cellBorderColorCache.delete(payload.cell)
-      }
-      if (!String(payload?.groupId ?? '').startsWith('rename:')) {
-        this.#beginFitOnNextRender()
+      if (!payload?.cell) return
+      this.#pendingRemoves.add(payload.cell)
+      this.cellImageCache.delete(payload.cell)
+      this.cellTagsCache.delete(payload.cell)
+      this.cellLinkCache.delete(payload.cell)
+      this.cellBorderColorCache.delete(payload.cell)
+      this.cellSubstrateCache.delete(payload.cell)
+      if (this.#slots.seeded) {
+        this.#queueIncremental({ removed: [payload.cell] })
+      } else {
+        this.#layerCellsCache.delete(this.renderedLocationKey)
+        this.renderedCellsKey = ''
+        this.requestRender()
       }
     })
 
@@ -1739,40 +1936,41 @@ export class ShowCellDrone extends Drone {
       this.requestRender()
     })
 
-    // clipboard:captured — brief visual flash on copied tiles
+    // clipboard:captured — brief visual flash on copied tiles. Heat-only
+    // change → in-place buffer update, no full re-render.
     this.onEffect<{ labels: string[]; op: string }>('clipboard:captured', (payload) => {
       if (!payload?.labels?.length) return
 
       if (payload.op === 'copy') {
-        // Flash copied tiles via heat override
         if (this.#flashTimer) clearTimeout(this.#flashTimer)
         this.#flashLabels = new Set(payload.labels)
-        for (const label of payload.labels) this.#heatByLabel.set(label, 1.0)
-        this.renderedCellsKey = '' // force geometry rebuild
-        this.requestRender()
+        for (const label of payload.labels) {
+          this.#heatByLabel.set(label, 1.0)
+          this.#updateCellHeat(label, 1.0)
+        }
 
         this.#flashTimer = setTimeout(() => {
-          for (const label of this.#flashLabels) this.#heatByLabel.delete(label)
+          for (const label of this.#flashLabels) {
+            this.#heatByLabel.delete(label)
+            this.#updateCellHeat(label, 0)
+          }
           this.#flashLabels.clear()
           this.#flashTimer = null
-          this.renderedCellsKey = ''
-          this.requestRender()
         }, 600)
       }
       // cut: tiles disappear via history remove ops + synchronize (handled by ClipboardWorker)
     })
 
-    // translation:tile-start — apply sustained heat glow on tiles being translated
+    // translation:tile-start — sustained heat glow while translating.
+    // Heat-only → in-place buffer update on each pulse, no geometry rebuild.
     this.onEffect<{ labels: string[]; locale: string }>('translation:tile-start', (payload) => {
       if (!payload?.labels?.length) return
       for (const label of payload.labels) {
         this.#translatingLabels.add(label)
         this.#heatByLabel.set(label, 0.5)
+        this.#updateCellHeat(label, 0.5)
       }
-      this.renderedCellsKey = ''
-      this.requestRender()
 
-      // Pulse the heat to show ongoing activity
       if (!this.#translationPulseTimer) {
         this.#translationPulseTimer = setInterval(() => {
           if (!this.#translatingLabels.size) {
@@ -1782,24 +1980,33 @@ export class ShowCellDrone extends Drone {
           }
           const t = Date.now() / 1000
           const pulse = 0.3 + 0.2 * Math.sin(t * 3)
-          for (const label of this.#translatingLabels) this.#heatByLabel.set(label, pulse)
-          this.renderedCellsKey = ''
-          this.requestRender()
+          for (const label of this.#translatingLabels) {
+            this.#heatByLabel.set(label, pulse)
+            this.#updateCellHeat(label, pulse)
+          }
         }, 100)
       }
     })
 
-    // translation:tile-done — clear heat on individual tile when its translation finishes
+    // translation:tile-done — clear heat on a single tile in place.
     this.onEffect<{ label: string }>('translation:tile-done', (payload) => {
       if (!payload?.label) return
       this.#translatingLabels.delete(payload.label)
       this.#heatByLabel.delete(payload.label)
-      this.renderedCellsKey = ''
-      this.requestRender()
+      this.#updateCellHeat(payload.label, 0)
     })
 
     // locale:changed — flush label atlas so all tile labels re-resolve through i18n
     this.onEffect<{ locale: string }>('locale:changed', () => {
+      if (this.atlas) {
+        this.atlas.invalidateLabels()
+      }
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
+    // labels:invalidated — fresh translations registered for current locale; re-resolve atlas.
+    this.onEffect<{ locale: string }>('labels:invalidated', () => {
       if (this.atlas) {
         this.atlas.invalidateLabels()
       }
@@ -1870,36 +2077,32 @@ export class ShowCellDrone extends Drone {
       this.requestRender()
     })
 
-    // substrate:applied — substrate has just written a new propsSig into
-    // localStorage for this cell. Drop the cached image entry so the next
-    // loadCellImages pass re-reads the props from disk and picks up the new
-    // sig. requestRender is microtask-coalesced so a burst of N applies
-    // collapses to a single render pass.
+    // substrate:applied — substrate has just written a new propsSig for this
+    // cell. Only this one cell's imageSig changed; route through the in-place
+    // buffer update so the rest of the grid never repaints. If the cell isn't
+    // currently indexed (e.g. first-render race), fall back to incremental.
     this.onEffect<{ cell: string }>('substrate:applied', (payload) => {
       if (!payload?.cell) return
       this.cellImageCache.delete(payload.cell)
       this.cellSubstrateCache.delete(payload.cell)
-      this.renderedCellsKey = ''
-      this.requestRender()
+      void this.#tryInPlaceCellUpdate(payload.cell, { dir: null }).then(done => {
+        if (!done && this.#slots.seeded) {
+          void this.renderIncremental({ changedContent: [payload.cell] })
+        }
+      })
     })
 
-    // substrate:rerolled — user clicked the reroll action on a tile. Substrate
-    // has written a fresh propsSig into localStorage; drop the cached image
-    // entry (and invalidate the old image atlas slot) so the next render pass
-    // reads the new sig from disk. Without this the fast-path at
-    // renderFromSynchronize short-circuits because renderedCellsKey is still
-    // valid, and the tile only refreshes on a full page reload.
+    // substrate:rerolled — user rerolled a single tile's substrate. Same
+    // per-cell change shape as substrate:applied; same routing.
     this.onEffect<{ cell: string }>('substrate:rerolled', (payload) => {
       if (!payload?.cell) return
       this.cellImageCache.delete(payload.cell)
       this.cellSubstrateCache.delete(payload.cell)
-      // Don't invalidate the old image in the atlas — other tiles may share
-      // the same substrate image sig via the balanced picker. Invalidating
-      // removes the UV entry, causing those tiles to render blank. The new
-      // sig will load into a fresh atlas slot during the re-render.
-      this.#layerCellsCache.delete(this.renderedLocationKey)
-      this.renderedCellsKey = ''
-      this.requestRender()
+      void this.#tryInPlaceCellUpdate(payload.cell, { dir: null }).then(done => {
+        if (!done && this.#slots.seeded) {
+          void this.renderIncremental({ changedContent: [payload.cell] })
+        }
+      })
     })
 
     // toggle tile label text visibility via shader uniform
@@ -1929,9 +2132,18 @@ export class ShowCellDrone extends Drone {
         this.#layoutMode = payload.mode
         this.#persistLayoutMode(payload.mode)
         this.#layerCellsCache.clear()
+        this.#slots.clear()  // mode change invalidates slot layout
         this.renderedCellsKey = ''
         this.requestRender()
       }
+    })
+
+    this.onEffect('layout:swirl', () => {
+      this.#layoutMode = 'dense'
+      this.#layerCellsCache.clear()
+      this.#slots.clear()
+      this.renderedCellsKey = ''
+      this.requestRender()
     })
 
     this.onEffect<{ gapPx: number }>('render:set-gap', (payload) => {
@@ -2017,8 +2229,11 @@ export class ShowCellDrone extends Drone {
   #startNewCellFade = (label: string): void => {
     this.#newCellFadeStart.set(label, performance.now())
     this.#heatByLabel.set(label, 1.0)
-    this.renderedCellsKey = ''
-    this.requestRender()
+    // Don't force a full render — the incremental render kicked off by
+    // cell:added will put the cell on screen; we just need to drive the heat
+    // attribute each frame. If the cell isn't indexed yet this frame, the
+    // next RAF will pick it up.
+    this.#updateCellHeat(label, 1.0)
     if (this.#newCellFadeRaf) return
 
     const tick = (): void => {
@@ -2029,15 +2244,15 @@ export class ShowCellDrone extends Drone {
         if (elapsed >= ShowCellDrone.#NEW_CELL_FADE_MS) {
           this.#newCellFadeStart.delete(cell)
           this.#heatByLabel.delete(cell)
+          this.#updateCellHeat(cell, 0)
           continue
         }
         const t = 1 - (elapsed / ShowCellDrone.#NEW_CELL_FADE_MS)
-        // ease-out cubic for a soft fade tail
-        this.#heatByLabel.set(cell, t * t * t)
+        const eased = t * t * t
+        this.#heatByLabel.set(cell, eased)
+        this.#updateCellHeat(cell, eased)
         alive = true
       }
-      this.renderedCellsKey = ''
-      this.requestRender()
       this.#newCellFadeRaf = alive ? requestAnimationFrame(tick) : 0
     }
     this.#newCellFadeRaf = requestAnimationFrame(tick)
@@ -2109,9 +2324,8 @@ export class ShowCellDrone extends Drone {
     return `hc:layout-mode:${locationKey}`
   }
 
-  #readLayoutMode(locationKey: string): 'dense' | 'pinned' {
-    const stored = localStorage.getItem(this.#layoutModeKey(locationKey))
-    return stored === 'pinned' ? 'pinned' : 'dense'
+  #readLayoutMode(_locationKey: string): 'dense' | 'pinned' {
+    return 'dense'
   }
 
   #persistLayoutMode(mode: 'dense' | 'pinned'): void {
@@ -2684,7 +2898,125 @@ export class ShowCellDrone extends Drone {
       ; (g as any).addAttribute('aDivergence', divergence, 1)
       ; (g as any).addIndex(idx)
 
+    // save buffer references + label→index map so tile:saved can push
+    // in-place attribute updates to the GPU without rebuilding geometry
+    this.#buf = { pos, labelUV, imageUV, hasImage, heat, identityColor, branch, borderColor, divergence }
+    this.#labelToIndex.clear()
+    for (let i = 0; i < cells.length; i++) this.#labelToIndex.set(cells[i].label, i)
+
     return g
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Per-cell buffer slice accessors — the standard way to write cell data
+  // into a geometry attribute buffer. All per-cell writes go through these
+  // helpers; the strides are not repeated anywhere else in this file.
+  //
+  // Each hex is a quad with 4 vertices. Attributes come in three shapes:
+  //   - scalar (1 float/vertex) → 4 floats per cell
+  //   - rgb    (3 floats/vertex) → 12 floats per cell
+  //   - vec4   (4 floats/vertex) → 16 floats per cell
+  // ─────────────────────────────────────────────────────────────────────
+
+  #writeCellScalar(buf: Float32Array | undefined, i: number, value: number): void {
+    if (!buf) return
+    const b = i * 4
+    buf[b] = value; buf[b + 1] = value; buf[b + 2] = value; buf[b + 3] = value
+  }
+
+  #writeCellRgb(buf: Float32Array | undefined, i: number, r: number, g: number, bl: number): void {
+    if (!buf) return
+    const b = i * 12
+    for (let v = 0; v < 4; v++) {
+      buf[b + v * 3] = r; buf[b + v * 3 + 1] = g; buf[b + v * 3 + 2] = bl
+    }
+  }
+
+  #writeCellVec4(buf: Float32Array | undefined, i: number, a: number, b: number, c: number, d: number): void {
+    if (!buf) return
+    const base = i * 16
+    for (let v = 0; v < 4; v++) {
+      buf[base + v * 4] = a; buf[base + v * 4 + 1] = b
+      buf[base + v * 4 + 2] = c; buf[base + v * 4 + 3] = d
+    }
+  }
+
+  /** Push a named attribute's CPU-side buffer to the GPU. Returns false if not available. */
+  #pushBuffer(attrName: string): boolean {
+    const g = this.geom as any
+    try {
+      g?.getAttribute?.(attrName)?.buffer?.update?.()
+      return true
+    } catch { return false }
+  }
+
+  /**
+   * Phase 2 fast path for tile:saved — mutate the single cell's attribute
+   * slices directly and push to GPU. Skips geometry rebuild entirely.
+   * Returns true on success; false if the caller should fall back to the
+   * incremental render path.
+   */
+  readonly #tryInPlaceCellUpdate = async (
+    label: string,
+    _ctx: { dir: FileSystemDirectoryHandle | null },
+  ): Promise<boolean> => {
+    const i = this.#labelToIndex.get(label)
+    if (i === undefined) return false
+    const { imageUV, hasImage, borderColor } = this.#buf
+    if (!imageUV || !hasImage || !borderColor) return false
+    if (!this.geom || !this.imageAtlas) return false
+
+    const lineage = this.resolve<any>('lineage')
+    const dir = _ctx.dir ?? (await lineage?.explorerDir?.())
+    if (!dir) return false
+
+    const probe: Cell = { q: 0, r: 0, label, external: false }
+    try { await this.loadCellImages([probe], dir) } catch { return false }
+
+    const sig = this.cellImageCache.get(label) ?? null
+    const imgUV = sig ? (this.imageAtlas.getImageUV(sig) ?? null) : null
+
+    if (imgUV) {
+      this.#writeCellVec4(imageUV, i, imgUV.u0, imgUV.v0, imgUV.u1, imgUV.v1)
+    } else {
+      this.#writeCellVec4(imageUV, i, 0, 0, 0, 0)
+    }
+    this.#writeCellScalar(hasImage, i, imgUV ? 1 : 0)
+
+    const [bcr, bcg, bcb] = this.cellBorderColorCache.get(label) ?? [0.784, 0.592, 0.353]
+    this.#writeCellRgb(borderColor, i, bcr, bcg, bcb)
+
+    if (!this.#pushBuffer('aImageUV') || !this.#pushBuffer('aHasImage') || !this.#pushBuffer('aBorderColor')) {
+      return false
+    }
+
+    const rec = this.renderedCells.get(label)
+    if (rec) {
+      rec.imageSig = sig ?? undefined
+      rec.borderColor = [bcr, bcg, bcb]
+      rec.hasLink = this.cellLinkCache.get(label) ?? false
+      rec.hasSubstrate = this.cellSubstrateCache.get(label) ?? false
+      const cellsSnapshot = [...this.renderedCells.values()]
+      this.renderedCellsKey = this.buildCellsKey(cellsSnapshot)
+    }
+
+    this.#emitRenderTags([...this.renderedCells.values()])
+    return true
+  }
+
+  /**
+   * Phase 2 fast path for heat — mutate just the heat slice for one cell
+   * and push the aHeat buffer. Used by the new-cell fade RAF loop so it
+   * never triggers a full render per frame.
+   * Returns true on success; false if the label isn't currently indexed
+   * (in which case the caller may skip or fall back to requestRender).
+   */
+  #updateCellHeat(label: string, heatValue: number): boolean {
+    const i = this.#labelToIndex.get(label)
+    if (i === undefined) return false
+    if (!this.#buf.heat || !this.geom) return false
+    this.#writeCellScalar(this.#buf.heat, i, heatValue)
+    return this.#pushBuffer('aHeat')
   }
 }
 

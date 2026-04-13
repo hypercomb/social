@@ -7,14 +7,13 @@ import {
   ElementRef,
   EventEmitter,
   inject,
-  Input,
+  input,
   Output,
   signal,
-  ViewChildren,
+  viewChildren,
   type AfterViewInit,
   type OnInit,
   type OnDestroy,
-  type QueryList,
 } from '@angular/core'
 import { CdkDrag, CdkDragDrop, CdkDropList } from '@angular/cdk/drag-drop'
 import { fromRuntime } from '../../core/from-runtime'
@@ -51,7 +50,6 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   { id: 'zoom-in',      icon: 'hci',       hci: 'K', label: 'controls.zoom-in',      action: 'zoomIn',             visibleWhen: 'always', instruction: 'dcp.zoom-in' },
   { id: 'lock',         icon: 'hci',                  label: 'controls.lock',         action: 'toggleLock',         visibleWhen: 'always', instruction: 'dcp.lock' },
   { id: 'fullscreen',   icon: 'hci',       hci: "'", label: 'controls.fullscreen',   action: 'toggleFullscreen',   visibleWhen: 'always', instruction: 'dcp.fullscreen' },
-  { id: 'layout',       icon: 'hci',       hci: '#', label: 'controls.layout-mode',  action: 'toggleLayout',       visibleWhen: 'always', instruction: 'dcp.layout-mode' },
   { id: 'instructions', icon: 'hci',       hci: '?', label: 'controls.instructions', action: 'toggleInstructions', visibleWhen: 'always', instruction: 'dcp.instructions-toggle' },
   { id: 'show-hidden',  icon: 'eye',                  label: 'controls.show-hidden',  action: 'toggleShowHidden',   visibleWhen: 'always' },
   { id: 'text-only',    icon: 'text-only',             label: 'controls.text-only',    action: 'toggleTextOnly',     visibleWhen: 'always' },
@@ -63,7 +61,7 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
 
 const DEFAULT_ROW_LAYOUT: Record<string, number> = {
   'back': 0, 'dcp': 0, 'fit': 0, 'zoom-out': 0, 'zoom-in': 0, 'lock': 0, 'fullscreen': 0,
-  'layout': 1, 'instructions': 1, 'show-hidden': 1, 'text-only': 1,
+  'instructions': 1, 'show-hidden': 1, 'text-only': 1,
   'clipboard': 1, 'voice': 1, 'room': 1, 'bees': 1,
 }
 
@@ -80,7 +78,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
   // ── inputs ────────────────────────────────────────────────
 
-  @Input() meshPublic: boolean | null = false
+  readonly meshPublic = input<boolean | null>(false)
   @Output() meshToggled = new EventEmitter<void>()
 
   // ── IoC resolution ──────────────────────────────────────
@@ -188,8 +186,57 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #roomOpen = signal(false)
   #beesVisible = signal(localStorage.getItem('hc:bees-visible') === 'true')
   #showHidden = signal(localStorage.getItem('hc:show-hidden') === '1')
-  #fitLocked = signal(localStorage.getItem('hc:fit-locked') === '1')
+  // Fit button has three states:
+  //  - 'off'    (white): regular click performs a one-shot fit; no pin
+  //  - 'global' (green): every layer auto-fits on navigation
+  //  - 'page'   (blue):  only the current page auto-fits; others untouched
+  // `#fitMode` is the global toggle; `#fitPinnedPages` stores the set of
+  // page keys (lineage path) that are page-pinned. The effective button
+  // state is derived from both signals + current navigation path.
+  #fitMode = signal<'off' | 'global'>(
+    localStorage.getItem('hc:fit-mode') === 'global' || localStorage.getItem('hc:fit-locked') === '1'
+      ? 'global'
+      : 'off',
+  )
+  #fitPinnedPages = signal<ReadonlySet<string>>(this.#restoreFitPinnedPages())
+  // Pages where global-fit is suppressed because the user manually adjusted
+  // the viewport there. Only meaningful while #fitMode === 'global'.
+  #fitDisabledPages = signal<ReadonlySet<string>>(this.#restoreFitDisabledPages())
   #fitLockedSnapshot: { scale: number; cx: number; cy: number; dx: number; dy: number } | null = null
+
+  #restoreFitPinnedPages(): ReadonlySet<string> {
+    try {
+      const raw = localStorage.getItem('hc:fit-pinned-pages')
+      if (!raw) return new Set()
+      const arr = JSON.parse(raw)
+      return Array.isArray(arr) ? new Set(arr) : new Set()
+    } catch {
+      return new Set()
+    }
+  }
+
+  #persistFitPinnedPages(set: ReadonlySet<string>): void {
+    localStorage.setItem('hc:fit-pinned-pages', JSON.stringify([...set]))
+  }
+
+  #restoreFitDisabledPages(): ReadonlySet<string> {
+    try {
+      const raw = localStorage.getItem('hc:fit-disabled-pages')
+      if (!raw) return new Set()
+      const arr = JSON.parse(raw)
+      return Array.isArray(arr) ? new Set(arr) : new Set()
+    } catch {
+      return new Set()
+    }
+  }
+
+  #persistFitDisabledPages(set: ReadonlySet<string>): void {
+    localStorage.setItem('hc:fit-disabled-pages', JSON.stringify([...set]))
+  }
+
+  #currentPageKey(): string {
+    return this.navigation.segmentsRaw().join('/')
+  }
   #clipboardAvailable = signal(false)
   #clipboardViewportSnapshot: { scale: number; px: number; py: number; sx: number; sy: number } | null = null
   #hasSelection = signal(false)
@@ -207,7 +254,8 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   // ── multi-row layout ──────────────────────────────────────
   #rowLayout = signal<Record<string, number>>(this.#restoreRowLayout())
   #expanded = signal(false)
-  @ViewChildren(CdkDropList) dropListRefs!: QueryList<CdkDropList>
+  protected readonly _dropListRefs = viewChildren(CdkDropList)
+  readonly dropListRefs = computed(() => [...this._dropListRefs()])
 
   /** Visible controls grouped by row. Row 0 is always first. Empty rows are pruned. */
   readonly controlRows = computed((): { key: number; items: ControlItem[] }[] => {
@@ -250,7 +298,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     zoomIn: () => this.zoomIn(),
     toggleLock: () => this.toggleLock(),
     toggleFullscreen: () => this.toggleFullscreen(),
-    toggleLayout: () => this.toggleLayout(),
     toggleInstructions: (e) => this.toggleInstructions(e!),
     toggleShowHidden: () => this.toggleShowHidden(),
     toggleTextOnly: () => this.toggleTextOnly(),
@@ -267,8 +314,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly isActive = (ctrl: ControlItem): boolean => {
     switch (ctrl.id) {
       case 'lock': return this.#locked()
-      case 'fit': return this.#fitLocked()
-      case 'layout': return this.#layoutPinned()
+      case 'fit': return this.fitLocked()
       case 'show-hidden': return this.#showHidden()
       case 'text-only': return this.#textOnly()
       case 'room': return this.#roomOpen()
@@ -288,17 +334,12 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     return 0
   }
 
-  /** Get the list of CdkDropList refs for cross-list connection. */
-  readonly getDropLists = (): CdkDropList[] => {
-    return this.dropListRefs?.toArray() ?? []
-  }
-
   #isControlVisible(ctrl: ControlItem): boolean {
     switch (ctrl.visibleWhen) {
       case 'always': return true
       case 'clipboardHasItems': return this.#clipboardAvailable() && this.clipboardCount() > 0
       case 'voiceSupported': return this.voiceSupported
-      case 'public': return !!this.meshPublic
+      case 'public': return !!this.meshPublic()
       default: return true
     }
   }
@@ -451,7 +492,17 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   })
 
   readonly locked = this.#locked.asReadonly()
-  readonly fitLocked = this.#fitLocked.asReadonly()
+  /** Effective button state — drives color: white/green/blue. */
+  readonly fitButtonState = computed<'off' | 'global' | 'page'>(() => {
+    // Track navigation so this recomputes when the user moves between layers.
+    this.#moved$()
+    const key = this.#currentPageKey()
+    if (this.#fitPinnedPages().has(key)) return 'page'
+    if (this.#fitMode() === 'global' && !this.#fitDisabledPages().has(key)) return 'global'
+    return 'off'
+  })
+  /** True when any fit lock is active for the current page (global or page-pinned). */
+  readonly fitLocked = computed(() => this.fitButtonState() !== 'off')
   readonly mode = this.#mode.asReadonly()
   readonly utility = this.#utility.asReadonly()
   readonly clipboardItems = this.#clipboardItems.asReadonly()
@@ -526,6 +577,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   // ── lifecycle ───────────────────────────────────────────
 
   #fitLockedUnsub: (() => void) | null = null
+  #zoomManualUnsub: (() => void) | null = null
   #clipboardUnsub: (() => void) | null = null
   #selectionUnsub: (() => void) | null = null
   #layoutModeUnsub: (() => void) | null = null
@@ -580,6 +632,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     window.addEventListener('touchmove', this.#onSwipeMove, { passive: true })
     window.addEventListener('touchend', this.#onSwipeEnd, { passive: true })
 
+    this.#zoomManualUnsub = EffectBus.on('viewport:manual', () => {
+      if (this.fitLocked()) this.#disableFitLockedPreservingCurrent()
+    })
+
     this.#clipboardAvailableUnsub = EffectBus.on<{ available: boolean }>('clipboard:available', (payload) => {
       const available = payload?.available ?? false
       this.#clipboardAvailable.set(available)
@@ -608,9 +664,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       this.#beesVisible.set(visible)
     })
 
-    // sync layout mode from localStorage (read current location's mode)
-    const locationKey = String(this.navigation.segmentsRaw().join('/') || '/')
-    this.#layoutPinned.set(localStorage.getItem(`hc:layout-mode:${locationKey}`) === 'pinned')
+    // layout mode is always dense on boot; /swirl re-applies the spiral
 
     this.#layoutModeUnsub = EffectBus.on<{ mode: string }>('layout:mode', ({ mode }) => {
       this.#layoutPinned.set(mode === 'pinned')
@@ -681,10 +735,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       EffectBus.emit('visibility:show-hidden', { active: true })
     }
 
-    // fit-locked: auto fit-to-screen on every navigation
-    if (this.#fitLocked()) {
-      const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
-      vp?.suspend?.()
+    // fit-locked: install the navigation listener if any fit pin exists.
+    // The listener handles suspend/resume per-page on each navigation.
+    if (this.#fitMode() === 'global' || this.#fitPinnedPages().size > 0) {
       this.#enableFitLocked()
     }
 
@@ -725,6 +778,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     window.removeEventListener('pointerup', this.#onPillDragEnd)
     if (this.#idleTimer) clearTimeout(this.#idleTimer)
     this.#fitLockedUnsub?.()
+    this.#zoomManualUnsub?.()
     this.#clipboardUnsub?.()
     this.#selectionUnsub?.()
     this.#moveModeUnsub?.()
@@ -810,12 +864,14 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     vp?.setPan?.(0, 0)
   }
 
+  /**
+   * Fit button click.
+   * - Plain click: one-shot zoom-to-fit, no state change.
+   * - Ctrl/Meta+click: cycle state off → global → page → off.
+   */
   readonly fitOrCenter = (event: MouseEvent): void => {
-    if (this.#fitLocked()) {
-      // any click turns off fit-lock once active
-      this.#toggleFitLocked()
-    } else if (event.ctrlKey || event.metaKey) {
-      this.#toggleFitLocked()
+    if (event.ctrlKey || event.metaKey) {
+      this.#cycleFitMode()
     } else {
       this.zoom?.zoomToFit?.()
     }
@@ -825,33 +881,135 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.zoom?.zoomToFit?.()
   }
 
-  #toggleFitLocked(): void {
-    const next = !this.#fitLocked()
-    this.#fitLocked.set(next)
-    localStorage.setItem('hc:fit-locked', next ? '1' : '0')
-    const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
-    if (next) {
-      // snapshot current viewport so we can restore on unlock
-      this.#fitLockedSnapshot = this.#captureViewport()
-      // suspend persistence so per-layer saved positions aren't overwritten
-      vp?.suspend?.()
-      this.zoom?.zoomToFit?.()
-      this.#enableFitLocked()
+  /** Advance the fit button through its three states. */
+  #cycleFitMode(): void {
+    const state = this.fitButtonState()
+    if (state === 'off') {
+      this.#enterGlobalFit()
+    } else if (state === 'global') {
+      this.#enterPageFit()
     } else {
-      this.#fitLockedUnsub?.()
-      this.#fitLockedUnsub = null
-      vp?.resume?.()
-      this.#restoreViewport()
+      this.#clearFit()
     }
   }
 
+  #enterGlobalFit(): void {
+    this.#fitLockedSnapshot = this.#captureViewport()
+    this.#fitMode.set('global')
+    localStorage.setItem('hc:fit-mode', 'global')
+    // Re-entering global fit clears any per-page exceptions.
+    if (this.#fitDisabledPages().size > 0) {
+      this.#fitDisabledPages.set(new Set())
+      this.#persistFitDisabledPages(new Set())
+    }
+    const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
+    vp?.suspend?.()
+    this.zoom?.zoomToFit?.()
+    this.#enableFitLocked()
+  }
+
+  #enterPageFit(): void {
+    // Leaving global: let per-layer persistence resume, then pin current page.
+    const wasGlobal = this.#fitMode() === 'global'
+    if (wasGlobal) {
+      this.#fitMode.set('off')
+      localStorage.setItem('hc:fit-mode', 'off')
+      // disabled-pages set is only meaningful under global — clear it.
+      if (this.#fitDisabledPages().size > 0) {
+        this.#fitDisabledPages.set(new Set())
+        this.#persistFitDisabledPages(new Set())
+      }
+      const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
+      vp?.resume?.()
+    }
+    const key = this.#currentPageKey()
+    const next = new Set(this.#fitPinnedPages())
+    next.add(key)
+    this.#fitPinnedPages.set(next)
+    this.#persistFitPinnedPages(next)
+    this.zoom?.zoomToFit?.()
+    // Keep the navigation:guard-end listener installed so return visits fit.
+    this.#enableFitLocked()
+  }
+
+  #clearFit(): void {
+    const wasGlobal = this.#fitMode() === 'global'
+    this.#fitMode.set('off')
+    localStorage.setItem('hc:fit-mode', 'off')
+    // disabled-pages set is only meaningful under global — clear it.
+    if (wasGlobal && this.#fitDisabledPages().size > 0) {
+      this.#fitDisabledPages.set(new Set())
+      this.#persistFitDisabledPages(new Set())
+    }
+    // Remove current page from pin set if present.
+    const key = this.#currentPageKey()
+    if (this.#fitPinnedPages().has(key)) {
+      const next = new Set(this.#fitPinnedPages())
+      next.delete(key)
+      this.#fitPinnedPages.set(next)
+      this.#persistFitPinnedPages(next)
+    }
+    const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
+    if (wasGlobal) vp?.resume?.()
+    // If no page pins remain anywhere, tear down the listener.
+    if (this.#fitPinnedPages().size === 0 && this.#fitMode() === 'off') {
+      this.#fitLockedUnsub?.()
+      this.#fitLockedUnsub = null
+    }
+    if (wasGlobal) this.#restoreViewport()
+  }
+
   #enableFitLocked(): void {
-    this.#fitLockedUnsub?.()
-    // navigation:guard-end fires after all tiles are positioned and layer is visible
+    if (this.#fitLockedUnsub) return
+    // navigation:guard-end fires after all tiles are positioned and layer is visible.
+    // Suspend persistence while auto-fitting so the fitted viewport doesn't
+    // overwrite the saved per-page viewport; resume on pages that are not
+    // auto-fitted so manual adjustments there persist normally.
     const unsub = EffectBus.on('navigation:guard-end', () => {
-      this.zoom?.zoomToFit?.(true)
+      const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
+      if (this.fitLocked()) {
+        vp?.suspend?.()
+        this.zoom?.zoomToFit?.(true)
+      } else {
+        vp?.resume?.()
+      }
     })
     this.#fitLockedUnsub = unsub
+  }
+
+  /**
+   * Manual zoom/pan on the current page turns off its fit-lock only.
+   * Other pages' pins (global or page-specific) stay intact.
+   */
+  #disableFitLockedPreservingCurrent(): void {
+    const state = this.fitButtonState()
+    if (state === 'off') return
+
+    const key = this.#currentPageKey()
+    if (state === 'page') {
+      const next = new Set(this.#fitPinnedPages())
+      next.delete(key)
+      this.#fitPinnedPages.set(next)
+      this.#persistFitPinnedPages(next)
+    } else if (state === 'global') {
+      // Keep global on for other pages; record this page as an exception.
+      const next = new Set(this.#fitDisabledPages())
+      next.add(key)
+      this.#fitDisabledPages.set(next)
+      this.#persistFitDisabledPages(next)
+    }
+
+    this.#fitLockedSnapshot = null
+
+    // Resume persistence so the user's manual adjustment saves for this page.
+    const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
+    vp?.resume?.()
+
+    // If nothing is pinned anywhere, tear down the navigation listener.
+    if (this.#fitMode() === 'off' && this.#fitPinnedPages().size === 0) {
+      this.#fitLockedUnsub?.()
+      this.#fitLockedUnsub = null
+    }
   }
 
   #captureViewport(): { scale: number; cx: number; cy: number; dx: number; dy: number } | null {
@@ -946,11 +1104,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     }
   }
 
-  /** Mobile center-button double-click: lock fit-to-window. */
+  /** Mobile center-button double-tap: cycle fit mode (same as ctrl+click). */
   readonly lockFit = (): void => {
-    if (!this.#fitLocked()) {
-      this.#toggleFitLocked()
-    }
+    this.#cycleFitMode()
   }
 
   // ── push-to-talk (mobile mic button) ─────────────────────
@@ -969,6 +1125,19 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
    * which the command-line listens for and turns into a tile. */
   readonly stopVoice = (): void => {
     this.voiceService?.stop()
+  }
+
+  /** Mobile mic button press — delegates to command-line state machine. */
+  readonly mobileMicDown = (event: PointerEvent): void => {
+    ;(event.target as HTMLElement)?.setPointerCapture?.(event.pointerId)
+    event.preventDefault()
+    // Transient — no replay; press/release are point-in-time events.
+    EffectBus.emitTransient('mobile:mic:press', {})
+  }
+
+  /** Mobile mic button release — delegates to command-line state machine. */
+  readonly mobileMicUp = (): void => {
+    EffectBus.emitTransient('mobile:mic:release', {})
   }
 
   // ── utility actions (emit effects for drones) ─────────

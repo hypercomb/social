@@ -164,6 +164,7 @@
   "slash.remove": "Remove tiles from the current directory",
   "slash.format": "Copy visual formatting from the active tile",
   "slash.layout": "Save, apply, list, or remove layout templates",
+  "slash.swirl": "Arrange tiles into the index spiral",
   "slash.move": "Toggle move mode for drag-reordering tiles",
   "slash.revise": "Toggle revision mode (history clock)",
   "slash.expand": "Expand selected tiles into constituent parts via Claude Haiku",
@@ -171,6 +172,8 @@
   "slash.sonnet": "Send context to Claude Sonnet",
   "slash.haiku": "Send context to Claude Haiku",
   "slash.language": "Switch the UI language",
+  "slash.translate-sweep": "Batch-translate all tiles (dry-run by default; add --go to execute)",
+  "slash.i18n-override": "Override any UI translation (savvy users)",
   "slash.accent": "Set the hover accent color by name",
   "slash.instructions": "Toggle instruction overlay",
   "slash.docs": "Browse project documentation",
@@ -232,6 +235,7 @@
   "command-line.create-nested": "Create nested folders, stay at current level with parent path retained",
   "command-line.navigate-folder": "Go to a folder, creating it if it doesn't exist",
   "command-line.filter-tiles": "Live-filter visible tiles by keyword",
+  "command-line.go": "GO",
 
   "audio.pause": "pause",
   "audio.play": "play",
@@ -373,5 +377,16 @@
   "cell.garden": "garden",
   "cell.books": "books",
   "cell.stories": "stories",
-  "cell.calendar": "calendar"
+  "cell.calendar": "calendar",
+  "cell.a-perfect-storm": "A Perfect Storm",
+  "cell.at-sea": "At Sea",
+  "cell.values": "Values",
+  "cell.copals": "Copals",
+  "cell.wing": "Wing",
+  "cell.who": "Who",
+  "cell.to-occur": "To Occur",
+  "cell.company": "Company",
+  "cell.meetings": "Meetings",
+  "cell.the-depths": "The Depths",
+  "cell.one-day": "One Day"
 }
