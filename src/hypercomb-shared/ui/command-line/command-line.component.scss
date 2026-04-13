@@ -95,29 +95,29 @@
   50% { opacity: 1; transform: scale(1.2); }
 }
 
-// ── mobile "done" button (collapse the command line) ──────
-// Hidden on desktop / tablet — only useful when the command line
-// has been temporarily revealed by long-press on the mobile canvas.
-.mobile-done-btn {
+// ── mobile GO / submit button (right of the text box on phone) ──
+// Hidden on desktop / tablet. On phone, it submits the current text
+// (creating a tile) or collapses the command line when empty.
+.mobile-go-btn {
   display: none;
   flex-shrink: 0;
-  padding: 0 1rem;
+  padding: 0 1.1rem;
   background: transparent;
   border: none;
-  border-left: 1.5px solid rgba(77, 166, 255, 0.4);
-  color: rgba(77, 166, 255, 0.9);
+  border-left: 1.5px solid rgba(77, 166, 255, 0.45);
+  color: rgba(120, 200, 255, 1);
   font-family: var(--hc-mono);
-  font-size: 0.78rem;
-  font-weight: 600;
-  letter-spacing: 0.12em;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   cursor: pointer;
   user-select: none;
 
-  &:hover { color: rgba(77, 166, 255, 1); background: rgba(77, 166, 255, 0.06); }
-  &:active { background: rgba(77, 166, 255, 0.12); }
+  &:hover { color: #fff; background: rgba(77, 166, 255, 0.1); }
+  &:active { background: rgba(77, 166, 255, 0.18); }
 }
 
 @media (max-width: 599px) {
-  .mobile-done-btn { display: flex; align-items: center; }
+  .mobile-go-btn { display: flex; align-items: center; }
 }

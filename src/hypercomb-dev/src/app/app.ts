@@ -54,6 +54,7 @@ import { ClipboardService } from '@hypercomb/essentials/diamondcoreprocessor.com
 import { ClipboardWorker } from '@hypercomb/essentials/diamondcoreprocessor.com/clipboard/clipboard.worker'
 import '@hypercomb/essentials/diamondcoreprocessor.com/clipboard/image-paste.worker'
 import '@hypercomb/essentials/diamondcoreprocessor.com/editor/image-drop.drone'
+import '@hypercomb/essentials/diamondcoreprocessor.com/editor/resource-attach.drone'
 import '@hypercomb/essentials/diamondcoreprocessor.com/assistant/claude-bridge.worker'
 import '@hypercomb/essentials/diamondcoreprocessor.com/assistant/atomize.drone'
 import '@hypercomb/essentials/diamondcoreprocessor.com/assistant/atomizer-drop.worker'

@@ -9,6 +9,7 @@ import type { TileEditorService } from '../editor/tile-editor.service.js'
 import type { ImageEditorService } from '../editor/image-editor.service.js'
 import type { SelectionService } from '../selection/selection.service.js'
 import type { LinkSafetyService, SafetyVerdict } from '../safety/link-safety.service.js'
+import { armImageBlob } from '../editor/arm-resource.js'
 
 export class LinkDropWorker extends Worker {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -17,7 +18,7 @@ export class LinkDropWorker extends Worker {
   public override description =
     'Intercepts browser drag-and-drop link events and routes URLs into the tile editor.'
 
-  protected override emits = ['cell:added', 'link:safety-blocked', 'link:safety-warning']
+  protected override emits = ['command:arm-resource', 'link:safety-blocked', 'link:safety-warning']
 
   #busy = false
 
@@ -144,21 +145,10 @@ export class LinkDropWorker extends Worker {
           await this.#loadImageWhenReady(thumbnailBlob)
         }
       }
-      // Path C: nothing selected — create new cell, open editor, set link + image
+      // Path C: nothing selected — arm the link in the command-line chevron slot.
+      // User types a cell name and presses Enter to commit.
       else {
-        const label = 'link-' + Date.now()
-        EffectBus.emit('cell:added', { cell: label })
-
-        // let history record the add before opening editor
-        await new Promise<void>(r => setTimeout(r, 100))
-
-        EffectBus.emit('tile:action', { action: 'edit', label, q: 0, r: 0, index: 0 })
-        await this.#waitForEditorMode()
-        this.#editorService?.setLink(url)
-        if (thumbnailBlob) {
-          this.#editorService?.setLargeBlob(thumbnailBlob)
-          await this.#loadImageWhenReady(thumbnailBlob)
-        }
+        await this.#armLink(url, videoId, thumbnailBlob)
       }
 
       // 4. emit warning if verdict was warn
@@ -171,6 +161,31 @@ export class LinkDropWorker extends Worker {
     } finally {
       this.#busy = false
     }
+  }
+
+  // ── arm resource ──────────────────────────────────────────────
+
+  /**
+   * Store the resolved thumbnail (if any) as a content-addressed resource
+   * and emit `command:arm-resource` so the command-line displays the preview
+   * in its chevron slot. The tile is created on Enter by CommandLineComponent.
+   */
+  async #armLink(url: string, videoId: string | null, thumbnailBlob: Blob | null): Promise<void> {
+    const type = videoId ? 'youtube' as const : 'link' as const
+    if (thumbnailBlob) {
+      await armImageBlob(thumbnailBlob, { url, type })
+      return
+    }
+    // No thumbnail available — emit a bare arm payload so the chevron shows a
+    // type badge and the cell gets the link attached on commit.
+    EffectBus.emit('command:arm-resource', {
+      previewUrl: '',
+      largeSig: '',
+      smallPointSig: null,
+      smallFlatSig: null,
+      url,
+      type,
+    })
   }
 
   // ── helpers ───────────────────────────────────────────────────

@@ -170,6 +170,7 @@ class TileSelectionDrone extends Drone {
     if (this.#navigationBlocked) return
     if (this.#dragActive || this.#reorderDragActive || this.#pendingDrag) return
     if (!this.#renderContainer || !this.#renderer || !this.#canvas) return
+    if (e.target !== this.#canvas) return
 
     const label = this.#labelAtClient(e.clientX, e.clientY)
     if (!label) return

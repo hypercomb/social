@@ -22,6 +22,7 @@ export class SubstrateDrone extends Drone {
     'substrate:changed', 'substrate:folder-permission',
     'drop:pending', 'clipboard:paste-start', 'clipboard:paste-done',
     'editor:mode', 'render:cell-count',
+    'cell:attach-pending',
     'indicator:click',
   ]
   protected override emits = ['substrate:applied', 'substrate:ready', 'indicator:set', 'indicator:clear', 'substrate-organizer:open', 'activity:log']
@@ -32,6 +33,8 @@ export class SubstrateDrone extends Drone {
   #editorActive = false
   #visibilityBound = false
   #pendingPermissionHandleId: string | null = null
+  /** Cells with a user-provided resource being attached — substrate must not touch these. */
+  #attachPending = new Set<string>()
 
   protected override heartbeat = async (): Promise<void> => {
     if (this.#initialized) return
@@ -55,10 +58,19 @@ export class SubstrateDrone extends Drone {
     this.onEffect('clipboard:paste-done',  () => { this.#pastePending = false })
     this.onEffect<{ active: boolean }>('editor:mode', (p) => { this.#editorActive = p?.active ?? false })
 
+    // A user-provided resource is being attached to this cell — lock substrate
+    // out so it can't race and overwrite the image or stamp a substrate flag.
+    this.onEffect<{ cell: string; pending: boolean }>('cell:attach-pending', ({ cell, pending }) => {
+      if (!cell) return
+      if (pending) this.#attachPending.add(cell)
+      else this.#attachPending.delete(cell)
+    })
+
     // Apply substrate to new cells synchronously.
     this.onEffect<{ cell: string }>('cell:added', ({ cell }) => {
       if (!cell) return
       if (this.#dropPending || this.#pastePending || this.#editorActive) return
+      if (this.#attachPending.has(cell)) return
       const svc = this.#service()
       if (svc?.applyToCell(cell)) EffectBus.emit('substrate:applied', { cell })
     })
@@ -68,13 +80,18 @@ export class SubstrateDrone extends Drone {
       this.#service()?.clearCell(cell)
     })
 
-    // Fill tiles the renderer reports as blank.
+    // Fill tiles the renderer reports as blank — skip any cell currently
+    // mid-attach (user-provided resource still being written to OPFS).
     this.onEffect<{ noImageLabels?: string[] }>('render:cell-count', (payload) => {
       const labels = payload?.noImageLabels
       if (!labels?.length) return
       const svc = this.#service()
       if (!svc) return
-      const applied = svc.applyToAllBlanks(labels)
+      const filtered = this.#attachPending.size
+        ? labels.filter(l => !this.#attachPending.has(l))
+        : labels
+      if (filtered.length === 0) return
+      const applied = svc.applyToAllBlanks(filtered)
       for (const cell of applied) EffectBus.emit('substrate:applied', { cell })
     })
 
@@ -138,13 +155,7 @@ export class SubstrateDrone extends Drone {
   }
 
   #syncIndicator(): void {
-    const svc = this.#service()
-    if (!svc) return
-    if (svc.pickRandomImageSync()) {
-      EffectBus.emit('indicator:set', { key: 'substrate', icon: '◈', label: 'Substrate — click to organize' })
-    } else {
-      EffectBus.emit('indicator:clear', { key: 'substrate' })
-    }
+    EffectBus.emit('indicator:clear', { key: 'substrate' })
   }
 
   #service(): SubstrateService | undefined {

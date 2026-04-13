@@ -14,11 +14,13 @@
       [descriptionMap]="slashDescriptionMap()"
       [colorMap]="accentColorMap()"
       [indicators]="activeIndicators()"
+      [armedResource]="armedResource()"
       (valueChange)="onShellValueChange($event)"
       (commit)="onShellCommit($event)"
       (completionAccepted)="onShellCompletionAccepted($event)"
       (shellKeydown)="onShellKeydown($event)"
       (indicatorDismiss)="onIndicatorDismiss($event)"
+      (armedResourceDismiss)="onArmedResourceDismiss()"
     />
 
     @if (voiceSupported && pushToTalkEnabled()) {
@@ -28,10 +30,11 @@
         <span class="mic-dot">{{ voiceActive() ? '●' : '○' }}</span>
       </button>
     }
-    <!-- mobile-only "done" button: collapses the command-line back to hidden -->
-    <button class="mobile-done-btn" type="button" (click)="closeMobileInput()"
-      [attr.aria-label]="'editor.done' | t">
-      {{ 'editor.done' | t }}
+    <!-- mobile-only GO/submit button: commits text (creating a tile) if any,
+         otherwise just collapses the command-line back to hidden. -->
+    <button class="mobile-go-btn" type="button" (click)="closeMobileInput()"
+      [attr.aria-label]="'command-line.go' | t">
+      {{ 'command-line.go' | t }}
     </button>
   }
 </div>

@@ -1,5 +1,5 @@
 // diamondcoreprocessor.com/input/zoom/zoom.drone.ts
-import { Drone } from '@hypercomb/core'
+import { Drone, EffectBus } from '@hypercomb/core'
 import { Application, Container, Point } from 'pixi.js'
 import type { HostReadyPayload } from '../../presentation/tiles/pixi-host.worker.js'
 
@@ -392,12 +392,15 @@ export class ZoomDrone extends Drone {
 
   public zoomToScale = (scale: number, pivotClient: Pt): void => {
     if (!this.renderContainer || !this.canvas) return
+    EffectBus.emitTransient('viewport:manual', {})
     const clamped = this.clamp(scale)
     this.adjustZoom(this.renderContainer, clamped, pivotClient)
   }
 
   public zoomByFactor = (factor: number, pivotClient: Pt): void => {
     if (!this.renderContainer || !this.canvas) return
+
+    EffectBus.emitTransient('viewport:manual', {})
 
     // cancel any in-flight smooth zoom animation
     if (this.#animFrameId !== null) {
@@ -529,6 +532,8 @@ export class ZoomDrone extends Drone {
 
   public animateToScale = (scale: number, pivotClient: Pt): void => {
     if (!this.renderContainer || !this.canvas || !this.renderer) return
+
+    EffectBus.emitTransient('viewport:manual', {})
 
     const target = this.renderContainer
     const clamped = this.clamp(scale)

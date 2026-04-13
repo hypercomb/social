@@ -166,6 +166,8 @@
   "slash.sonnet": "Claude Sonnet에 컨텍스트 보내기",
   "slash.haiku": "Claude Haiku에 컨텍스트 보내기",
   "slash.language": "UI 언어 변경",
+  "slash.translate-sweep": "모든 타일 일괄 번역(기본은 모의 실행, --go로 실행)",
+  "slash.i18n-override": "UI 번역 재정의(숙련 사용자용)",
   "slash.accent": "이름으로 호버 강조색 설정",
   "slash.instructions": "지침 오버레이 전환",
   "slash.docs": "프로젝트 문서 탐색",
@@ -374,5 +376,16 @@
   "cell.garden": "정원",
   "cell.books": "책",
   "cell.stories": "이야기",
-  "cell.calendar": "달력"
+  "cell.calendar": "달력",
+  "cell.a-perfect-storm": "완벽한 폭풍",
+  "cell.at-sea": "바다 위에",
+  "cell.values": "가치관",
+  "cell.copals": "코팔",
+  "cell.wing": "날개",
+  "cell.who": "누구",
+  "cell.to-occur": "일어나다",
+  "cell.company": "동료",
+  "cell.meetings": "회의",
+  "cell.the-depths": "심연",
+  "cell.one-day": "언젠가"
 }

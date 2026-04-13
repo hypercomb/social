@@ -166,6 +166,8 @@
   "slash.sonnet": "Claude Sonnetにコンテキストを送信",
   "slash.haiku": "Claude Haikuにコンテキストを送信",
   "slash.language": "UI言語を切り替え",
+  "slash.translate-sweep": "全タイルを一括翻訳（既定はドライラン、--goで実行）",
+  "slash.i18n-override": "UI翻訳を上書き（上級者向け）",
   "slash.accent": "ホバーアクセントカラーを名前で設定",
   "slash.instructions": "インストラクションオーバーレイの切替",
   "slash.docs": "プロジェクトドキュメントを閲覧",
@@ -374,5 +376,16 @@
   "cell.garden": "庭",
   "cell.books": "本",
   "cell.stories": "物語",
-  "cell.calendar": "カレンダー"
+  "cell.calendar": "カレンダー",
+  "cell.a-perfect-storm": "完璧な嵐",
+  "cell.at-sea": "漂流",
+  "cell.values": "価値観",
+  "cell.copals": "コパル",
+  "cell.wing": "翼",
+  "cell.who": "誰",
+  "cell.to-occur": "起こる",
+  "cell.company": "仲間",
+  "cell.meetings": "会議",
+  "cell.the-depths": "深淵",
+  "cell.one-day": "いつか"
 }

@@ -5,11 +5,13 @@
 // Three paths:
 //   Editor open  → replace image in current editor session.
 //   Occupied hex → open editor for that tile with the new image.
-//   Empty area   → auto-create cell from file name, open editor immediately.
+//   Empty area   → arm the image in the command-line chevron slot; the
+//                  user types a cell name and presses Enter to commit.
 
-import { Drone, EffectBus, hypercomb } from '@hypercomb/core'
+import { Drone, EffectBus } from '@hypercomb/core'
 import type { TileEditorService } from './tile-editor.service.js'
 import type { ImageEditorService } from './image-editor.service.js'
+import { armImageBlob } from './arm-resource.js'
 
 type DropTarget = {
   q: number
@@ -20,10 +22,6 @@ type DropTarget = {
   hasImage: boolean
 }
 
-type Lineage = {
-  explorerDir: () => Promise<FileSystemDirectoryHandle | null>
-}
-
 export class ImageDropDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'editor'
@@ -31,7 +29,7 @@ export class ImageDropDrone extends Drone {
   public override description =
     'Intercepts drag-and-drop image files from the desktop and routes them into the tile editor.'
 
-  protected override emits = ['drop:dragging']
+  protected override emits = ['drop:dragging', 'command:arm-resource']
   protected override listens = ['render:host-ready', 'drop:target', 'editor:mode']
 
   #canvas: HTMLCanvasElement | null = null
@@ -169,17 +167,18 @@ export class ImageDropDrone extends Drone {
       return
     }
 
-    // Path C: dropped on empty position — auto-create cell from file name, open editor immediately
-    const cellName = await this.#createCellFromFile(file.name)
-    if (!cellName) return
+    // Path C: dropped on empty position — arm the resource in the command-line
+    // chevron slot. The user types a cell name and presses Enter to commit.
+    await this.#armResource(blob)
+  }
 
-    // brief delay — let history record the cell:added op and processor pulse
-    await new Promise<void>(r => setTimeout(r, 150))
-
-    EffectBus.emit('tile:action', { action: 'edit', label: cellName, q: 0, r: 0, index: 0 })
-    await this.#waitForEditorMode()
-    this.#editorService?.setLargeBlob(blob)
-    await this.#loadImageWhenReady(blob)
+  /**
+   * Store the dropped image + a generated thumbnail as content-addressed
+   * resources, then emit `command:arm-resource` for the command-line to show
+   * the preview in its chevron slot. The actual tile creation happens on Enter.
+   */
+  async #armResource(blob: Blob): Promise<void> {
+    await armImageBlob(blob, { type: 'image' })
   }
 
   // ── preview extraction ────────────────────────────────────────
@@ -231,45 +230,6 @@ export class ImageDropDrone extends Drone {
     }
 
     this.emitEffect('drop:dragging', { active: false, previewUrl: null })
-  }
-
-  async #createCellFromFile(fileName: string): Promise<string | null> {
-    const lineage = get('@hypercomb.social/Lineage') as Lineage | undefined
-    if (!lineage) return null
-
-    const dir = await lineage.explorerDir()
-    if (!dir) return null
-
-    // derive cell name: strip extension, lowercase, replace non-alphanumeric with hyphens
-    const baseName = fileName.replace(/\.[^.]+$/, '')
-    let cellName = baseName
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-    if (!cellName) cellName = 'image'
-
-    // deduplicate: if cell already exists, append incrementing number
-    const existing = new Set<string>()
-    for await (const [name] of (dir as any).entries()) {
-      existing.add(name)
-    }
-    let finalName = cellName
-    if (existing.has(finalName)) {
-      let counter = 2
-      while (existing.has(`${cellName}-${counter}`)) counter++
-      finalName = `${cellName}-${counter}`
-    }
-
-    // create cell directory in OPFS
-    await dir.getDirectoryHandle(finalName, { create: true })
-
-    // emit cell:added — HistoryRecorder will record the op
-    EffectBus.emit('cell:added', { cell: finalName })
-
-    // trigger processor pulse
-    void new hypercomb().act()
-
-    return finalName
   }
 
   async #waitForEditorMode(): Promise<void> {

@@ -224,7 +224,20 @@
 @include phone-only {
 
   .header-bar { display: none; }
-  .header-bar.input-open { display: flex; }
+
+  // When the command line is revealed on mobile the header acts as a
+  // prominent prompt surface — size it to ~11% of the portrait viewport
+  // (clamped for small/large phones) and suppress every other item so
+  // only the text box + GO button remain.
+  .header-bar.input-open {
+    display: flex;
+    height: clamp(3.5rem, 11vh, 5.5rem);
+  }
+
+  .header-bar.input-open .mesh-header,
+  .header-bar.input-open hc-mesh-header {
+    display: none;
+  }
 
   .secured-label,
   .mode-crumb {

@@ -1,5 +1,5 @@
 // diamondcoreprocessor.com/input/pan/panning.drone.ts
-import { Drone } from '@hypercomb/core'
+import { Drone, EffectBus } from '@hypercomb/core'
 import type { HostReadyPayload } from '../../presentation/tiles/pixi-host.worker.js'
 import type { ViewportPersistence, ViewportSnapshot } from '../zoom/zoom.drone.js'
 
@@ -96,6 +96,8 @@ export class PanningDrone extends Drone {
 
   public panBy = (delta: Point): void => {
     if (!this.stage) return
+
+    EffectBus.emitTransient('viewport:manual', {})
 
     this.stage.position.x += delta.x
     this.stage.position.y += delta.y

@@ -4,6 +4,26 @@
   <div class="command-shell" (mousedown)="onShellMouseDown($event)">
     <div class="command-row">
 
+      <span
+        class="prompt-glyph"
+        [class.armed]="!!armedResource()"
+        [attr.aria-label]="armedResource() ? 'armed resource — click to dismiss' : null"
+        (mousedown)="onArmedGlyphMouseDown($event)"
+      >
+        @if (armedResource(); as armed) {
+          @if (armed.previewUrl) {
+            <img class="prompt-thumb" [src]="armed.previewUrl" alt="" draggable="false" />
+          } @else {
+            <span class="prompt-thumb prompt-thumb-fallback" aria-hidden="true">{{ armedBadge() || '>' }}</span>
+          }
+          @if (armed.previewUrl && armedBadge(); as b) {
+            <span class="prompt-badge">{{ b }}</span>
+          }
+        } @else {
+          <span class="prompt-chevron" aria-hidden="true">&gt;</span>
+        }
+      </span>
+
       <div class="input-wrap">
         <span
           class="ghost"

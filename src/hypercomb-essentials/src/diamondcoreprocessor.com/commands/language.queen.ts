@@ -31,6 +31,14 @@ export class LanguageQueenBee extends QueenBee {
   readonly command = 'language'
   override readonly aliases = []
   override description = 'Switch the UI language (14 languages supported)'
+  override descriptionKey = 'slash.language'
+
+  override slashComplete(args: string): readonly string[] {
+    const locales = ['en', 'ja', 'zh', 'es', 'ar', 'pt', 'fr', 'de', 'ko', 'ru', 'hi', 'id', 'tr', 'it']
+    const q = args.toLowerCase().trim()
+    if (!q) return locales
+    return locales.filter(l => l.startsWith(q))
+  }
 
   protected execute(args: string): void {
     const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined

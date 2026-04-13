@@ -112,12 +112,13 @@ export class TileActionsDrone extends Drone {
     lineage: '@hypercomb.social/Lineage',
   }
 
-  protected override listens = ['render:host-ready', 'tile:action', 'controls:action', 'overlay:icons-reordered', 'overlay:arrange-mode']
+  protected override listens = ['render:host-ready', 'render:cell-count', 'tile:action', 'controls:action', 'overlay:icons-reordered', 'overlay:arrange-mode']
   protected override emits = ['overlay:register-action', 'overlay:pool-icons', 'search:prefill', 'command:focus', 'tile:hidden', 'tile:unhidden', 'tile:blocked', 'cell:removed', 'visibility:show-hidden', 'substrate:rerolled']
 
   #registered = false
   #effectsRegistered = false
   #arrangement: IconArrangement = {}
+  #substrateLabels = new Set<string>()
 
   protected override heartbeat = async (): Promise<void> => {
     if (!this.#effectsRegistered) {
@@ -128,6 +129,11 @@ export class TileActionsDrone extends Drone {
         if (this.#registered) return
         this.#registered = true
         void this.#loadArrangementAndRegister()
+      })
+
+      // Track which tiles have substrate so bulk reroll can filter correctly
+      this.onEffect<{ substrateLabels?: string[] }>('render:cell-count', (payload) => {
+        this.#substrateLabels = new Set(payload.substrateLabels ?? [])
       })
 
       // Handle clicks on our own actions
@@ -361,7 +367,11 @@ export class TileActionsDrone extends Drone {
       { rerollCells(labels: string[]): string[] } | undefined
     if (!svc) return
 
-    const labels = [...selection.selected]
+    // Filter to only substrate tiles — non-substrate tiles (user-edited) are
+    // never clobbered by bulk reroll. The substrate flag comes from render:cell-count
+    // and is authoritative regardless of which substrate pool is currently active.
+    const labels = [...selection.selected].filter(l => this.#substrateLabels.has(l))
+    if (labels.length === 0) return
     const rerolled = svc.rerollCells(labels)
     if (rerolled.length === 0) return
 

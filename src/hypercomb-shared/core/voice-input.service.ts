@@ -10,6 +10,7 @@ export class VoiceInputService extends EventTarget {
   #recognition: any = null
   #active = false
   #finalText = ''
+  #interimText = ''
   #wantActive = false
 
   static supported(): boolean {
@@ -45,6 +46,7 @@ export class VoiceInputService extends EventTarget {
     this.#recognition.maxAlternatives = 1
 
     this.#finalText = ''
+    this.#interimText = ''
     this.#wantActive = true
 
     this.#recognition.onstart = () => {
@@ -69,6 +71,7 @@ export class VoiceInputService extends EventTarget {
       if (final) {
         this.#finalText = final
       }
+      this.#interimText = interim
 
       // emit interim for live preview (final + current interim)
       const preview = (this.#finalText + ' ' + interim).trim()
@@ -114,9 +117,11 @@ export class VoiceInputService extends EventTarget {
       // already stopped
     }
 
-    // emit final text immediately — don't wait for onend
-    // release = cue to submit, so emit voice:submit for auto-execution
-    const text = this.#finalText.trim()
+    // emit final text immediately — don't wait for onend.
+    // Web Speech API may not have promoted interim → final yet, so fall
+    // back to the current interim so the user's last utterance isn't lost.
+    // release = cue to submit, so emit voice:submit for auto-execution.
+    const text = (this.#finalText + ' ' + this.#interimText).trim()
     if (text) {
       EffectBus.emit('voice:final', { text })
       EffectBus.emit('voice:submit', { text })

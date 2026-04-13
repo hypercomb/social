@@ -166,6 +166,8 @@
   "slash.sonnet": "Invia contesto a Claude Sonnet",
   "slash.haiku": "Invia contesto a Claude Haiku",
   "slash.language": "Cambia la lingua dell'interfaccia",
+  "slash.translate-sweep": "Traduci tutte le tessere in batch (simulazione per impostazione predefinita; aggiungi --go per eseguire)",
+  "slash.i18n-override": "Sovrascrivi qualsiasi traduzione dell'interfaccia (utenti esperti)",
   "slash.accent": "Imposta colore accento per nome",
   "slash.instructions": "Alterna sovrapposizione istruzioni",
   "slash.docs": "Esplora documentazione del progetto",
@@ -374,5 +376,16 @@
   "cell.garden": "giardino",
   "cell.books": "libri",
   "cell.stories": "storie",
-  "cell.calendar": "calendario"
+  "cell.calendar": "calendario",
+  "cell.a-perfect-storm": "una tempesta perfetta",
+  "cell.at-sea": "in mare",
+  "cell.values": "valori",
+  "cell.copals": "copali",
+  "cell.wing": "ala",
+  "cell.who": "chi",
+  "cell.to-occur": "accadere",
+  "cell.company": "compagnia",
+  "cell.meetings": "riunioni",
+  "cell.the-depths": "le profondità",
+  "cell.one-day": "un giorno"
 }

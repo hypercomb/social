@@ -166,6 +166,8 @@
   "slash.sonnet": "Отправить контекст в Claude Sonnet",
   "slash.haiku": "Отправить контекст в Claude Haiku",
   "slash.language": "Сменить язык интерфейса",
+  "slash.translate-sweep": "Пакетный перевод всех плиток (по умолчанию пробный запуск; добавьте --go для выполнения)",
+  "slash.i18n-override": "Переопределить любой перевод интерфейса (для опытных пользователей)",
   "slash.accent": "Установить цвет акцента по имени",
   "slash.instructions": "Переключить наложение инструкций",
   "slash.docs": "Просмотреть документацию проекта",
@@ -374,5 +376,16 @@
   "cell.garden": "сад",
   "cell.books": "книги",
   "cell.stories": "истории",
-  "cell.calendar": "календарь"
+  "cell.calendar": "календарь",
+  "cell.a-perfect-storm": "идеальный шторм",
+  "cell.at-sea": "в море",
+  "cell.values": "ценности",
+  "cell.copals": "копалы",
+  "cell.wing": "крыло",
+  "cell.who": "кто",
+  "cell.to-occur": "произойти",
+  "cell.company": "компания",
+  "cell.meetings": "встречи",
+  "cell.the-depths": "глубины",
+  "cell.one-day": "однажды"
 }

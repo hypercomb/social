@@ -166,6 +166,8 @@
   "slash.sonnet": "إرسال السياق إلى Claude Sonnet",
   "slash.haiku": "إرسال السياق إلى Claude Haiku",
   "slash.language": "تغيير لغة الواجهة",
+  "slash.translate-sweep": "ترجمة جميع البطاقات دفعة واحدة (تشغيل تجريبي افتراضيًا؛ أضف ‎--go‎ للتنفيذ)",
+  "slash.i18n-override": "تجاوز أي ترجمة للواجهة (للمستخدمين المتقدمين)",
   "slash.accent": "تعيين لون التمييز حسب الاسم",
   "slash.instructions": "تبديل طبقة التعليمات",
   "slash.docs": "تصفح وثائق المشروع",
@@ -374,5 +376,16 @@
   "cell.garden": "حديقة",
   "cell.books": "كتب",
   "cell.stories": "قصص",
-  "cell.calendar": "تقويم"
+  "cell.calendar": "تقويم",
+  "cell.a-perfect-storm": "عاصفة مثالية",
+  "cell.at-sea": "في البحر",
+  "cell.values": "قيم",
+  "cell.copals": "كوبال",
+  "cell.wing": "جناح",
+  "cell.who": "من",
+  "cell.to-occur": "حدوث",
+  "cell.company": "رفقة",
+  "cell.meetings": "اجتماعات",
+  "cell.the-depths": "الأعماق",
+  "cell.one-day": "يوماً ما"
 }

@@ -166,6 +166,8 @@
   "slash.sonnet": "Enviar contexto a Claude Sonnet",
   "slash.haiku": "Enviar contexto a Claude Haiku",
   "slash.language": "Cambiar el idioma de la interfaz",
+  "slash.translate-sweep": "Traducir todas las tarjetas por lotes (simulación por defecto; añadir --go para ejecutar)",
+  "slash.i18n-override": "Anular cualquier traducción de la interfaz (usuarios avanzados)",
   "slash.accent": "Establecer color de acento por nombre",
   "slash.instructions": "Alternar superposición de instrucciones",
   "slash.docs": "Explorar documentación del proyecto",
@@ -374,5 +376,16 @@
   "cell.garden": "jardín",
   "cell.books": "libros",
   "cell.stories": "historias",
-  "cell.calendar": "calendario"
+  "cell.calendar": "calendario",
+  "cell.a-perfect-storm": "una tormenta perfecta",
+  "cell.at-sea": "en alta mar",
+  "cell.values": "valores",
+  "cell.copals": "copales",
+  "cell.wing": "ala",
+  "cell.who": "quién",
+  "cell.to-occur": "ocurrir",
+  "cell.company": "compañía",
+  "cell.meetings": "reuniones",
+  "cell.the-depths": "las profundidades",
+  "cell.one-day": "algún día"
 }

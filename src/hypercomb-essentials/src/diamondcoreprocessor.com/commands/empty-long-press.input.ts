@@ -14,6 +14,7 @@ import { Point } from 'pixi.js'
 import { EffectBus } from '@hypercomb/core'
 import type { Axial } from '../navigation/hex-detector.js'
 import type { HostReadyPayload } from '../presentation/tiles/pixi-host.worker.js'
+import { armFromClipboard } from '../editor/arm-resource.js'
 
 type CellCountPayload = { count: number; coords?: Axial[] }
 
@@ -110,6 +111,10 @@ export class EmptyLongPressInput {
       // haptic confirm
       try { navigator.vibrate?.(40) } catch { /* ignore */ }
       EffectBus.emit('mobile:input-visible', { visible: true, mobile: true })
+      // If the clipboard holds an image, arm it in the chevron slot. This is
+      // the mobile counterpart to desktop Ctrl+V on an empty spot: long-press
+      // opens the input AND pulls in any image the OS gave the clipboard.
+      void armFromClipboard()
       this.#reset()
     }, HOLD_MS)
   }

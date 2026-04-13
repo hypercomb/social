@@ -29,6 +29,9 @@ const BUILTIN_SLASH: { behaviour: { name: string; description: string; descripti
   { behaviour: { name: 'remove', description: 'remove selected tiles', descriptionKey: 'slash.remove-builtin' }, provider: null },
 ]
 
+/** Threshold between a tap and a long-press on the mobile mic button (ms). */
+const MIC_LONG_PRESS_MS = 300
+
 /** Matches label:tagName or label:tagName(#color) (plain colon syntax, no brackets). */
 const TAG_ASSIGN_RE = /^([^:]+):([^(]+)(?:\(([^)]+)\))?$/
 
@@ -384,10 +387,12 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       EffectBus.on<{ key: string; icon: string; label: string }>('indicator:set', (p) => {
         if (!p?.key) return
         this.#indicators.update(m => { const n = new Map(m); n.set(p.key, p); return n })
+        this.#persistIndicators()
       }),
       EffectBus.on<{ key: string }>('indicator:clear', (p) => {
         if (!p?.key) return
         this.#indicators.update(m => { const n = new Map(m); n.delete(p.key); return n })
+        this.#persistIndicators()
       }),
     )
 
@@ -937,11 +942,53 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       this.pushToTalkEnabled.set(enabled)
       localStorage.setItem('hc:push-to-talk', String(enabled))
     })
+
+    // mobile mic state machine (controls-bar emits press/release)
+    this.#micPressUnsub = EffectBus.on('mobile:mic:press', this.#onMobileMicPress)
+    this.#micReleaseUnsub = EffectBus.on('mobile:mic:release', this.#onMobileMicRelease)
+
+    // drop-to-arm: a drop on an empty hex arms a resource in the chevron slot
+    this.#armResourceUnsub = EffectBus.on<{
+      previewUrl: string
+      largeSig: string
+      smallPointSig: string | null
+      smallFlatSig: string | null
+      url: string | null
+      type: 'image' | 'youtube' | 'link' | 'document'
+    }>('command:arm-resource', (payload) => {
+      if (!payload || (!payload.largeSig && !payload.url)) return
+      const prev = this.armedResource()
+      if (prev?.previewUrl && prev.previewUrl !== payload.previewUrl) {
+        try { URL.revokeObjectURL(prev.previewUrl) } catch { /* ignore */ }
+      }
+      this.armedResource.set(payload)
+      this.shell?.focus()
+    })
+  }
+
+  /** Clear the armed resource (thumbnail click, Escape, or after successful commit). */
+  public onArmedResourceDismiss = (): void => {
+    const prev = this.armedResource()
+    if (prev?.previewUrl) {
+      try { URL.revokeObjectURL(prev.previewUrl) } catch { /* ignore */ }
+    }
+    this.armedResource.set(null)
   }
 
   readonly touchDragging = signal(false)
   readonly viewActive = signal(false)
   readonly voiceActive = signal(false)
+
+  /** Armed resource from a drop on an empty hex — preview shown in chevron slot until Enter or dismiss. */
+  readonly armedResource = signal<{
+    previewUrl: string
+    largeSig: string
+    smallPointSig: string | null
+    smallFlatSig: string | null
+    url: string | null
+    type: 'image' | 'youtube' | 'link' | 'document'
+  } | null>(null)
+  #armResourceUnsub?: () => void
   /** True when the command-line should be collapsed on mobile (toggle off). */
   readonly mobileHidden = signal(false)
   #mobileVisibilityUnsub?: () => void
@@ -974,8 +1021,83 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.voiceService?.stop()
   }
 
-  /** Mobile "done" button: collapse the command-line back to hidden. */
+  /** Mobile "done" / "GO" button: submit if text, otherwise collapse. */
   readonly closeMobileInput = (): void => {
+    const v = this.value().trim()
+    if (v) {
+      void this.#preprocessTagsThenExecute(this.value())
+    }
+    EffectBus.emit('mobile:input-visible', { visible: false, mobile: true })
+  }
+
+  // ── mobile mic state machine ──────────────────────────────
+  // Long-press (>300ms hold): record-and-release — stop emits voice:submit
+  //   which creates the tile and closes the command line.
+  // Tap on closed command line: open it + start listening + focus input.
+  // Tap on open command line while listening with no text: stop listening,
+  //   keep command line open with keyboard focus for typing.
+  // Tap on open command line with text (listening or typing): submit & close.
+  #micHoldTimer: ReturnType<typeof setTimeout> | null = null
+  #micLongPressFired = false
+  #micPressWhileOpen = false
+  #micPressUnsub?: () => void
+  #micReleaseUnsub?: () => void
+
+  #onMobileMicPress = (): void => {
+    this.#micLongPressFired = false
+    this.#micPressWhileOpen = !this.mobileHidden()
+
+    if (!this.#micPressWhileOpen) {
+      // First tap on a closed command line: open, focus, start listening
+      EffectBus.emit('mobile:input-visible', { visible: true, mobile: true })
+      queueMicrotask(() => this.shell?.focus())
+      this.voiceService?.start()
+    }
+    // Press while already open: wait — release handler decides tap vs long-press.
+    // Long-press starts a fresh dictation (see timer below).
+
+    this.#micHoldTimer = setTimeout(() => {
+      this.#micLongPressFired = true
+      this.#micHoldTimer = null
+      // Long-press while command line was already open (and voice idle) —
+      // user is initiating a new dictation. Start voice now.
+      if (this.#micPressWhileOpen && !this.voiceActive()) {
+        this.voiceService?.start()
+      }
+    }, MIC_LONG_PRESS_MS)
+  }
+
+  #onMobileMicRelease = (): void => {
+    const wasLongPress = this.#micLongPressFired
+    const wasPressWhileOpen = this.#micPressWhileOpen
+    if (this.#micHoldTimer) {
+      clearTimeout(this.#micHoldTimer)
+      this.#micHoldTimer = null
+    }
+    this.#micLongPressFired = false
+
+    if (wasLongPress) {
+      this.voiceService?.stop()
+      EffectBus.emit('mobile:input-visible', { visible: false, mobile: true })
+      return
+    }
+
+    if (!wasPressWhileOpen) return
+
+    const isListening = this.voiceActive()
+    const hasText = this.value().trim().length > 0
+
+    if (isListening && !hasText) {
+      this.voiceService?.stop()
+      queueMicrotask(() => this.shell?.focus())
+      return
+    }
+
+    if (isListening) {
+      this.voiceService?.stop()
+    } else {
+      void this.#preprocessTagsThenExecute(this.value())
+    }
     EffectBus.emit('mobile:input-visible', { visible: false, mobile: true })
   }
 
@@ -991,6 +1113,14 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.#voiceSubmitUnsub?.()
     this.#voiceActiveUnsub?.()
     this.#pushToTalkUnsub?.()
+    this.#micPressUnsub?.()
+    this.#micReleaseUnsub?.()
+    this.#armResourceUnsub?.()
+    this.onArmedResourceDismiss()
+    if (this.#micHoldTimer) {
+      clearTimeout(this.#micHoldTimer)
+      this.#micHoldTimer = null
+    }
     for (const unsub of this.#indicatorUnsubs) unsub()
     window.removeEventListener('navigate', this.#onNavigate)
     window.removeEventListener('popstate', this.#onNavigate)
@@ -1048,6 +1178,13 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (e.key === 'Escape' && this.#selectPhase() !== 'none') {
       e.preventDefault()
       this.#cancelSelectOperation()
+      return
+    }
+
+    // Escape with an armed resource — dismiss it (chevron restores)
+    if (e.key === 'Escape' && this.armedResource()) {
+      e.preventDefault()
+      this.onArmedResourceDismiss()
       return
     }
 
@@ -1160,8 +1297,30 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       }
     }
 
+    const armed = this.armedResource()
+
+    if (armed) {
+      // Lock substrate out of this cell until the resource is fully attached.
+      // The lock is released by ResourceAttachDrone once the props blob is
+      // written to OPFS and the tile-props-index is updated.
+      EffectBus.emit('cell:attach-pending', { cell: parts[0], pending: true })
+    }
+
     // emit cell:added — HistoryRecorder will record the op
     EffectBus.emit('cell:added', { cell: parts[0] })
+
+    if (armed) {
+      EffectBus.emit('cell:attach-resource', {
+        cell: parts[0],
+        largeSig: armed.largeSig,
+        smallPointSig: armed.smallPointSig,
+        smallFlatSig: armed.smallFlatSig,
+        url: armed.url,
+        type: armed.type,
+      })
+      this.onArmedResourceDismiss()
+    }
+
     this.requestSynchronize()
 
     if (navigateAfterCreate) {

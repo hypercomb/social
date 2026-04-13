@@ -166,6 +166,8 @@
   "slash.sonnet": "Kirim konteks ke Claude Sonnet",
   "slash.haiku": "Kirim konteks ke Claude Haiku",
   "slash.language": "Ganti bahasa antarmuka",
+  "slash.translate-sweep": "Terjemahkan semua ubin secara massal (uji coba secara default; tambahkan --go untuk menjalankan)",
+  "slash.i18n-override": "Timpa terjemahan UI mana pun (pengguna mahir)",
   "slash.accent": "Atur warna aksen hover berdasarkan nama",
   "slash.instructions": "Alihkan overlay instruksi",
   "slash.docs": "Jelajahi dokumentasi proyek",
@@ -374,5 +376,16 @@
   "cell.garden": "taman",
   "cell.books": "buku",
   "cell.stories": "cerita",
-  "cell.calendar": "kalender"
+  "cell.calendar": "kalender",
+  "cell.a-perfect-storm": "badai sempurna",
+  "cell.at-sea": "di laut",
+  "cell.values": "nilai",
+  "cell.copals": "kopal",
+  "cell.wing": "sayap",
+  "cell.who": "siapa",
+  "cell.to-occur": "terjadi",
+  "cell.company": "perusahaan",
+  "cell.meetings": "pertemuan",
+  "cell.the-depths": "kedalaman",
+  "cell.one-day": "suatu hari"
 }

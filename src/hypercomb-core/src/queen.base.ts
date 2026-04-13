@@ -12,6 +12,20 @@ export abstract class QueenBee extends Bee {
   /** Optional aliases — additional names that resolve to this queen bee */
   readonly aliases: string[] = []
 
+  /**
+   * Optional i18n key for a localized description. When set, the slash drone
+   * resolves it through the I18n service; otherwise it falls back to `description`.
+   * Pattern: `slash.<command>`.
+   */
+  public descriptionKey?: string
+
+  /**
+   * Optional autocomplete hook. Returns the list of completions for the current
+   * args string (everything typed after the command name). Implement on the queen
+   * itself — the slash drone reads it live, so there is no mirror class to drift.
+   */
+  public slashComplete?(args: string): readonly string[]
+
   /** Real-time execution — called immediately when `/behaviour` is invoked */
   protected abstract execute(args: string): void | Promise<void>
 

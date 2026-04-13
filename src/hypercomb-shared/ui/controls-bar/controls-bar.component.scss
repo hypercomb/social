@@ -405,6 +405,30 @@
     color: #00e5a0;
     background: rgba(0, 229, 160, 0.08);
   }
+
+  // ── fit button ──────────────────────────────────────────
+  // Three-state cycle (ctrl+click on desktop, double-tap on mobile):
+  //   off    (white) — plain click performs a one-shot fit; no pin
+  //   global (green) — every layer auto-fits on navigation
+  //   page   (blue)  — only the current page auto-fits; others untouched
+  // Plain click always performs a zoom-to-fit without changing state.
+  &.fit-btn {
+    color: rgba(245, 245, 245, 0.85);
+
+    &:hover { color: #ffffff; }
+
+    &.fit-global {
+      color: #00e5a0;
+      background: rgba(0, 229, 160, 0.10);
+    }
+    &.fit-global:hover { color: #36f2b4; }
+
+    &.fit-page {
+      color: #4da6ff;
+      background: rgba(77, 166, 255, 0.12);
+    }
+    &.fit-page:hover { color: #7ec0ff; }
+  }
 }
 
 // ── mesh (solo / swarm) toggle ──────────────────────────

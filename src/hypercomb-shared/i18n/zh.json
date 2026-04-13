@@ -166,6 +166,8 @@
   "slash.sonnet": "将上下文发送至 Claude Sonnet",
   "slash.haiku": "将上下文发送至 Claude Haiku",
   "slash.language": "切换界面语言",
+  "slash.translate-sweep": "批量翻译所有卡片（默认为模拟运行，加 --go 执行）",
+  "slash.i18n-override": "覆盖任意界面翻译（高级用户）",
   "slash.accent": "按名称设置悬停强调色",
   "slash.instructions": "切换说明覆盖层",
   "slash.docs": "浏览项目文档",
@@ -374,5 +376,16 @@
   "cell.garden": "花园",
   "cell.books": "书籍",
   "cell.stories": "故事",
-  "cell.calendar": "日历"
+  "cell.calendar": "日历",
+  "cell.a-perfect-storm": "完美风暴",
+  "cell.at-sea": "海上",
+  "cell.values": "价值观",
+  "cell.copals": "柯巴树脂",
+  "cell.wing": "翼",
+  "cell.who": "谁",
+  "cell.to-occur": "发生",
+  "cell.company": "同伴",
+  "cell.meetings": "会议",
+  "cell.the-depths": "深处",
+  "cell.one-day": "有朝一日"
 }

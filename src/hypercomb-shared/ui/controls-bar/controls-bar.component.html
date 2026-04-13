@@ -3,7 +3,7 @@
 
 <!-- breadcrumb: below header, right-aligned -->
 <div class="breadcrumb-top" [class.faded]="isMobile()">
-  @if (meshPublic) {
+  @if (meshPublic()) {
     <span class="public-crumb" [style.color]="shieldColor()">{{ 'breadcrumb.public' | t }}</span><span class="sep-crumb">◆</span>
   } @else {
     <span class="private-crumb">{{ 'breadcrumb.private' | t }}</span><span class="sep-crumb">◆</span>
@@ -74,7 +74,7 @@
   <div class="pill-scaled" [style.zoom]="pillZoom()">
   <div
     class="controls-pill"
-    [class.public-mode]="meshPublic"
+    [class.public-mode]="meshPublic()"
     [class.power-ctrl]="powerKey() === 'ctrl'"
     [class.power-shift]="powerKey() === 'shift'"
     [class.power-alt]="powerKey() === 'alt'"
@@ -104,19 +104,23 @@
           </button>
           @if (voiceSupported) {
             <button class="ctl-btn mic-btn" [class.recording]="voiceActive()"
-              (pointerdown)="startVoice($event)" (pointerup)="stopVoice()" (pointercancel)="stopVoice()" (pointerleave)="stopVoice()"
+              (pointerdown)="mobileMicDown($event)" (pointerup)="mobileMicUp()" (pointercancel)="mobileMicUp()" (pointerleave)="mobileMicUp()"
               [attr.aria-label]="'controls.voice-hold' | t">
               <span class="mic-icon">{{ voiceActive() ? '🎙' : '🎤' }}</span>
             </button>
           }
-          <button class="ctl-btn" [class.active]="fitLocked()" (click)="fitOrCenter($event)" (dblclick)="lockFit()" [attr.aria-label]="'controls.fit-content' | t">
+          <button class="ctl-btn fit-btn"
+                  [class.fit-global]="fitButtonState() === 'global'"
+                  [class.fit-page]="fitButtonState() === 'page'"
+                  (click)="fitOrCenter($event)" (dblclick)="lockFit()"
+                  [attr.aria-label]="'controls.fit-content' | t">
             <span class="hci">q</span>
           </button>
           <button class="ctl-btn" (click)="toggleFullscreen()" [attr.aria-label]="'controls.fullscreen' | t">
             <span class="hci">'</span>
           </button>
-          <button class="ctl-btn mesh-mobile-btn" [class.shield-mode]="meshPublic" (click)="toggleMeshPublic()" [attr.aria-label]="(meshPublic ? 'mesh.swarm' : 'mesh.solo') | t">
-            <span class="hci">{{ meshPublic ? 'e' : 'i' }}</span>
+          <button class="ctl-btn mesh-mobile-btn" [class.shield-mode]="meshPublic()" (click)="toggleMeshPublic()" [attr.aria-label]="(meshPublic() ? 'mesh.swarm' : 'mesh.solo') | t">
+            <span class="hci">{{ meshPublic() ? 'e' : 'i' }}</span>
           </button>
         </div>
       } @else {
@@ -128,19 +132,22 @@
                    cdkDropList
                    cdkDropListOrientation="horizontal"
                    [cdkDropListData]="row.items"
-                   [cdkDropListConnectedTo]="getDropLists()"
+                   [cdkDropListConnectedTo]="dropListRefs()"
                    [attr.data-row-key]="row.key"
                    (cdkDropListDropped)="onControlDrop($event)">
                 @for (ctrl of row.items; track ctrl.id) {
                   <button class="ctl-btn"
                           cdkDrag
                           [cdkDragData]="ctrl"
-                          [class.active]="isActive(ctrl)"
+                          [class.active]="ctrl.id !== 'fit' && isActive(ctrl)"
                           [class.eye-btn]="ctrl.id === 'show-hidden'"
                           [class.text-only-btn]="ctrl.id === 'text-only'"
                           [class.mic-btn]="ctrl.id === 'voice'"
                           [class.bee-btn]="ctrl.id === 'bees'"
                           [class.clipboard-btn]="ctrl.id === 'clipboard'"
+                          [class.fit-btn]="ctrl.id === 'fit'"
+                          [class.fit-global]="ctrl.id === 'fit' && fitButtonState() === 'global'"
+                          [class.fit-page]="ctrl.id === 'fit' && fitButtonState() === 'page'"
                           (click)="runAction(ctrl.action, $event)"
                           [attr.aria-label]="ctrl.label | t"
                           [attr.data-instruction]="ctrl.instruction ?? null">

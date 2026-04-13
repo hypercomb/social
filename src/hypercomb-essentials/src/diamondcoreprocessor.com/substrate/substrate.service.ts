@@ -637,23 +637,23 @@ export class SubstrateService extends EventTarget {
   }
 
   /**
-   * Reroll every label that currently holds a substrate-pool propsSig.
-   * Labels whose current props are not from the substrate pool (e.g. a
-   * user-edited tile with its own image) are skipped so the bulk action can
-   * never clobber authored content. Returns the labels that were actually
-   * rerolled — callers should emit `substrate:rerolled` per returned label
-   * so show-cell can invalidate its caches.
+   * Reroll every label passed in. Callers are responsible for filtering
+   * to substrate-only tiles (via the `hasSubstrate` flag from render data).
+   * Each label gets a fresh pick from the current pool. Labels with no
+   * existing entry in the props index are skipped (they were never assigned).
+   * Returns the labels that were actually rerolled — callers should emit
+   * `substrate:rerolled` per returned label so show-cell can invalidate caches.
    */
   rerollCells(labels: string[]): string[] {
     if (this.#propsPool.length === 0 || labels.length === 0) return []
     const indexKey = 'hc:tile-props-index'
     const index: Record<string, string> = JSON.parse(localStorage.getItem(indexKey) ?? '{}')
-    const substrateSigs = new Set(this.#propsPool.map(p => p.propsSig))
     const rerolled: string[] = []
     for (const label of labels) {
       const current = index[label]
-      if (!current || !substrateSigs.has(current)) continue
+      if (!current) continue
       this.#releaseUsage(current)
+      delete index[label]
       const entry = this.#pickBalanced()
       if (!entry) break
       index[label] = entry.propsSig

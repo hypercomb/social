@@ -166,6 +166,8 @@
   "slash.sonnet": "Claude Sonnet को संदर्भ भेजें",
   "slash.haiku": "Claude Haiku को संदर्भ भेजें",
   "slash.language": "UI भाषा बदलें",
+  "slash.translate-sweep": "सभी टाइलों का बैच अनुवाद (डिफ़ॉल्ट ड्राई-रन; --go जोड़ें चलाने के लिए)",
+  "slash.i18n-override": "किसी भी UI अनुवाद को ओवरराइड करें (विशेषज्ञ उपयोगकर्ता)",
   "slash.accent": "नाम से होवर एक्सेंट रंग सेट करें",
   "slash.instructions": "निर्देश ओवरले टॉगल करें",
   "slash.docs": "प्रोजेक्ट दस्तावेज़ ब्राउज़ करें",
@@ -374,5 +376,16 @@
   "cell.garden": "बगीचा",
   "cell.books": "किताबें",
   "cell.stories": "कहानियाँ",
-  "cell.calendar": "कैलेंडर"
+  "cell.calendar": "कैलेंडर",
+  "cell.a-perfect-storm": "परिपूर्ण तूफान",
+  "cell.at-sea": "समुद्र में",
+  "cell.values": "मूल्य",
+  "cell.copals": "कोपल",
+  "cell.wing": "पंख",
+  "cell.who": "कौन",
+  "cell.to-occur": "घटित होना",
+  "cell.company": "साथ",
+  "cell.meetings": "बैठकें",
+  "cell.the-depths": "गहराइयाँ",
+  "cell.one-day": "किसी दिन"
 }

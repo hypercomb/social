@@ -51,7 +51,7 @@ export class ImageEditorService extends EventTarget {
     await this.#app.init({
       width: size,
       height: size,
-      backgroundColor: 'transparent',
+      backgroundAlpha: 0,
       antialias: true,
       autoDensity: true,
     })

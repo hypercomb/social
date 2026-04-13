@@ -47,6 +47,12 @@ export class CommandShellComponent implements AfterViewInit {
   /** Active status indicators shown as pills on the right side of the input. */
   readonly indicators = input<readonly { key: string; icon: string; label: string; dismissable?: boolean }[]>([])
 
+  /**
+   * Optional armed-resource preview — when set, the chevron is replaced
+   * with this thumbnail (same box, no reflow). Clicking it dismisses the arm.
+   */
+  readonly armedResource = input<{ previewUrl: string; type: 'image' | 'youtube' | 'link' | 'document' } | null>(null)
+
   // ── outputs to parent ───────────────────────────────────
 
   /** Emitted on every input change (after leading-space strip). */
@@ -67,6 +73,25 @@ export class CommandShellComponent implements AfterViewInit {
 
   /** Emitted when an indicator pill is clicked (to turn it off). */
   readonly indicatorDismiss = output<string>()
+
+  /** Emitted when the user clicks the armed-resource thumbnail to dismiss it. */
+  readonly armedResourceDismiss = output<void>()
+
+  /** Template handler for clicks on the armed-resource thumbnail. */
+  onArmedGlyphMouseDown = (e: MouseEvent): void => {
+    if (!this.armedResource()) return
+    e.preventDefault()
+    this.armedResourceDismiss.emit()
+  }
+
+  /** Badge glyph for armed-resource type (shown as small corner overlay). */
+  armedBadge(): string {
+    const t = this.armedResource()?.type
+    if (t === 'youtube') return '▶'
+    if (t === 'link') return '↗'
+    if (t === 'document') return '📄'
+    return ''
+  }
 
   // ── internal state ────────────────────────────────���─────
 

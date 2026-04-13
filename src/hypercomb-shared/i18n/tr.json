@@ -166,6 +166,8 @@
   "slash.sonnet": "Bağlamı Claude Sonnet'e gönder",
   "slash.haiku": "Bağlamı Claude Haiku'ya gönder",
   "slash.language": "Arayüz dilini değiştir",
+  "slash.translate-sweep": "Tüm karoları toplu çevir (varsayılan prova; yürütmek için --go ekleyin)",
+  "slash.i18n-override": "Herhangi bir arayüz çevirisini geçersiz kıl (ileri düzey kullanıcı)",
   "slash.accent": "Fareyle vurgulama rengini ada göre ayarla",
   "slash.instructions": "Talimat katmanını değiştir",
   "slash.docs": "Proje belgelerine göz at",
@@ -374,5 +376,16 @@
   "cell.garden": "bahçe",
   "cell.books": "kitaplar",
   "cell.stories": "hikayeler",
-  "cell.calendar": "takvim"
+  "cell.calendar": "takvim",
+  "cell.a-perfect-storm": "mükemmel fırtına",
+  "cell.at-sea": "denizde",
+  "cell.values": "değerler",
+  "cell.copals": "kopaller",
+  "cell.wing": "kanat",
+  "cell.who": "kim",
+  "cell.to-occur": "meydana gelmek",
+  "cell.company": "şirket",
+  "cell.meetings": "toplantılar",
+  "cell.the-depths": "derinlikler",
+  "cell.one-day": "bir gün"
 }
