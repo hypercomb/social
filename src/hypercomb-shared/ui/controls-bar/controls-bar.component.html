@@ -97,7 +97,9 @@
         <!-- ═══ MOBILE: 5 floating icons (no chrome) ═══ -->
         <!-- back · talk · center · fullscreen · solo/swarm -->
         <div class="controls-section mobile-nav">
-          <button class="ctl-btn" [class.disabled]="!canGoBack()" [disabled]="!canGoBack()" (click)="goBack()" [attr.aria-label]="'controls.go-back' | t">
+          <button class="ctl-btn" [class.disabled]="!canGoBack()" [disabled]="!canGoBack()"
+                  (pointerdown)="onBackPointerDown($event)" (click)="onBackClick()"
+                  [attr.aria-label]="'controls.go-back' | t">
             <span class="hci">A</span>
           </button>
           @if (voiceSupported) {

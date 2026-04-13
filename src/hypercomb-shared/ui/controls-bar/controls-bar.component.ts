@@ -750,7 +750,29 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   // ── navigation actions ────────────────────────────────
 
   readonly goBack = (): void => {
+    performance.mark('hypercomb:back:trigger')
     void this.movement.back()
+  }
+
+  // Mobile back button fires on pointerdown to save the press duration (~50–150ms)
+  // over waiting for the synthesized click. `#backHandledOnDown` swallows the
+  // click that would otherwise double-back. Desktop keeps `(click)` because its
+  // back button is a cdkDrag target — firing early would race with the drag.
+  #backHandledOnDown = false
+
+  readonly onBackPointerDown = (event: PointerEvent): void => {
+    if (!this.canGoBack()) return
+    if (event.button !== undefined && event.button !== 0) return
+    this.#backHandledOnDown = true
+    this.goBack()
+  }
+
+  readonly onBackClick = (): void => {
+    if (this.#backHandledOnDown) {
+      this.#backHandledOnDown = false
+      return
+    }
+    this.goBack()
   }
 
   readonly navigateTo = (segments: string[]): void => {

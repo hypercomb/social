@@ -114,6 +114,14 @@ export class ShowCellDrone extends Drone {
   private readonly renderedCells = new Map<string, Cell>()
   // per-layer cache: location key → cells array (for instant back-navigation)
   #layerCellsCache = new Map<string, { cells: Cell[]; cellNames: string[]; localCellSet: Set<string>; branchSet: Set<string> }>()
+  // per-layer viewport snapshot cache — skips OPFS read of `0000` on back-nav fast path.
+  // Safe to keep across cell-content changes; only the persisted viewport of another
+  // layer can write here, and the SPA can't reach that layer without revisiting.
+  #layerViewportCache = new Map<string, ViewportSnapshot>()
+  // per-layer explorerDir cache — skips OPFS directory resolution on back-nav fast path.
+  // Entries are keyed by locationKey, so path renames produce a different key and the
+  // stale handle simply goes unreferenced.
+  #layerDirCache = new Map<string, FileSystemDirectoryHandle>()
   #heatByLabel = new Map<string, number>()
   #flashLabels = new Set<string>()
   #flashTimer: ReturnType<typeof setTimeout> | null = null
@@ -811,6 +819,7 @@ export class ShowCellDrone extends Drone {
     // instant back-navigation: if we have cached cells for this layer, apply them directly
     // — skips ALL OPFS reads (explorerDir, listCellFolders, checkCellHasBranch, history, layout)
     if (locationKey !== this.renderedLocationKey && this.#layerCellsCache.has(locationKey)) {
+      performance.mark('hypercomb:back:render-hit-start')
       const cached = this.#layerCellsCache.get(locationKey)!
 
       // ensure layer + atlases are initialized
@@ -836,9 +845,19 @@ export class ShowCellDrone extends Drone {
       this.renderedCells.clear()
 
       // restore per-layer viewport + sync VP directory
-      const cachedDir = await lineage.explorerDir()
+      // fast path: use cached dir + cached viewport snapshot (no OPFS I/O)
+      let cachedDir: FileSystemDirectoryHandle | null = this.#layerDirCache.get(locationKey) ?? null
+      const cachedSnap = this.#layerViewportCache.get(locationKey)
+      if (cachedDir && cachedSnap) {
+        this.#applyViewportFromSnapshot(cachedSnap)
+      } else {
+        cachedDir = await lineage.explorerDir()
+        if (cachedDir) {
+          this.#layerDirCache.set(locationKey, cachedDir)
+          await this.#applyViewportForLayer(cachedDir)
+        }
+      }
       if (cachedDir) {
-        await this.#applyViewportForLayer(cachedDir)
         const vp = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ViewportPersistence') as ViewportPersistence | undefined
         if (vp) vp.setDirSilent(cachedDir)
       }
@@ -849,6 +868,8 @@ export class ShowCellDrone extends Drone {
       this.cachedBranchSet = cached.branchSet
       await this.applyGeometry(cached.cells)
       if (this.layer) this.layer.visible = true
+      performance.mark('hypercomb:back:render-hit-end')
+      try { performance.measure('hypercomb:back:total', 'hypercomb:back:trigger', 'hypercomb:back:render-hit-end') } catch { /* no trigger mark */ }
       return
     }
 
@@ -898,6 +919,8 @@ export class ShowCellDrone extends Drone {
       this.clearMesh()
       return
     }
+    // populate back-nav fast-path dir cache
+    this.#layerDirCache.set(locationKey, dir)
 
     // ── tag flatten override ──────────────────────────────
     // When tag filter is active, use pre-scanned cross-page results instead of explorer
@@ -1348,11 +1371,6 @@ export class ShowCellDrone extends Drone {
   }
 
   readonly #applyViewportForLayer = async (dir: FileSystemDirectoryHandle): Promise<boolean> => {
-    const container = this.pixiContainer
-    const app = this.pixiApp
-    const renderer = this.pixiRenderer
-    if (!container || !app || !renderer) return false
-
     // read 0000 directly from the target dir — VP.#dir may still
     // point at the previous layer (navigate fires before store.change)
     let snap: ViewportSnapshot = {}
@@ -1365,9 +1383,21 @@ export class ShowCellDrone extends Drone {
       // no 0000 yet — defaults
     }
 
+    // populate back-nav fast-path cache
+    const locationKey = this.renderedLocationKey
+    if (locationKey) this.#layerViewportCache.set(locationKey, snap)
+
+    return this.#applyViewportFromSnapshot(snap)
+  }
+
+  #applyViewportFromSnapshot = (snap: ViewportSnapshot): boolean => {
+    const container = this.pixiContainer
+    const app = this.pixiApp
+    const renderer = this.pixiRenderer
+    if (!container || !app || !renderer) return false
+
     const s = renderer.screen
 
-    // zoom: set scale + position on the render container
     if (snap.zoom) {
       container.scale.set(snap.zoom.scale)
       container.position.set(snap.zoom.cx, snap.zoom.cy)
@@ -1376,15 +1406,12 @@ export class ShowCellDrone extends Drone {
       container.position.set(0, 0)
     }
 
-    // pan: set stage position
     if (snap.pan) {
       app.stage.position.set(s.width * 0.5 + snap.pan.dx, s.height * 0.5 + snap.pan.dy)
     } else {
       app.stage.position.set(s.width * 0.5, s.height * 0.5)
     }
 
-    // true if this layer has a persisted viewport (zoom or pan). When false,
-    // the caller can trigger a first-visit fit-to-content after content renders.
     return !!(snap.zoom || snap.pan)
   }
 

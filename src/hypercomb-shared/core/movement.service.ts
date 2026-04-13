@@ -49,9 +49,11 @@ export class MovementService extends EventTarget {
   // ----------------------------------
 
   public back = async (): Promise<void> => {
+    performance.mark('hypercomb:back:movement-start')
     const done = this.waitForNextCommit()
     window.history.back()
     await done
+    performance.mark('hypercomb:back:movement-end')
   }
 
   public forward = async (): Promise<void> => {
