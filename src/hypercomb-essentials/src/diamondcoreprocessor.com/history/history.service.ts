@@ -33,6 +33,42 @@ export type LayerState = {
   resources: string[]
 }
 
+/**
+ * A full, signature-addressed snapshot of everything a location's cells need.
+ * Layer content is what gets hashed — identical states produce identical
+ * signatures and dedupe automatically. Timestamps live on the *entry* that
+ * references the layer, never in the layer itself.
+ *
+ * Ordering contract:
+ * - `cells` is ordered (position in array = layout position).
+ * - All other string arrays (`hidden`, `bees`, `dependencies`) are
+ *   canonically sorted (lexicographic) so that set-equal states produce
+ *   byte-equal JSON and dedupe.
+ * - Object keys are sorted when serialized.
+ */
+export type LayerContent = {
+  version: 2
+  cells: string[]
+  hidden: string[]
+  contentByCell: Record<string, string>
+  tagsByCell: Record<string, string[]>
+  notesByCell: Record<string, string>
+  bees: string[]
+  dependencies: string[]
+  layoutSig: string
+  instructionsSig: string
+}
+
+/**
+ * One history entry. Just a pointer to a layer resource plus the timestamp
+ * at which this entry was appended. Entries live in
+ * `__history__/{locationSig}/layers/{NNNNNNNN}.json`.
+ */
+export type LayerEntry = {
+  layerSig: string
+  at: number
+}
+
 export class HistoryService {
 
   // Signatures currently being promoted — prevents recursion when promote() calls record()
@@ -303,6 +339,193 @@ export class HistoryService {
     }
 
     return { added, removed }
+  }
+
+  // -------------------------------------------------
+  // layer snapshots — signature-addressed history entries
+  // -------------------------------------------------
+
+  static readonly #LAYERS_DIR = 'layers'
+
+  /**
+   * Canonicalize a layer so byte-equal content produces byte-equal JSON.
+   * `cells` keeps its caller-supplied order (position is meaningful). All
+   * other string arrays are sorted lexicographically. Object keys are
+   * inserted in sorted order; V8 preserves insertion order for string
+   * keys, so plain `JSON.stringify` then produces stable output.
+   */
+  static readonly canonicalizeLayer = (layer: LayerContent): LayerContent => {
+    const contentKeys = Object.keys(layer.contentByCell).sort()
+    const contentByCell: Record<string, string> = {}
+    for (const k of contentKeys) contentByCell[k] = layer.contentByCell[k]
+
+    const tagKeys = Object.keys(layer.tagsByCell).sort()
+    const tagsByCell: Record<string, string[]> = {}
+    for (const k of tagKeys) tagsByCell[k] = [...layer.tagsByCell[k]].sort()
+
+    const notesKeys = Object.keys(layer.notesByCell).sort()
+    const notesByCell: Record<string, string> = {}
+    for (const k of notesKeys) notesByCell[k] = layer.notesByCell[k]
+
+    return {
+      version: 2,
+      cells: layer.cells.slice(),
+      hidden: [...layer.hidden].sort(),
+      contentByCell,
+      tagsByCell,
+      notesByCell,
+      bees: [...layer.bees].sort(),
+      dependencies: [...layer.dependencies].sort(),
+      layoutSig: layer.layoutSig,
+      instructionsSig: layer.instructionsSig,
+    }
+  }
+
+  /**
+   * Commit a layer snapshot for a location.
+   *
+   * Writes the canonical layer content as a signature-addressed resource
+   * (via Store.putResource) and appends an entry file pointing at it
+   * under `__history__/{locationSig}/layers/NNNNNNNN.json`. Skips the
+   * append if the new layer signature equals the current head (dedup).
+   *
+   * @returns the layer signature, or null if the commit was deduped.
+   */
+  public readonly commitLayer = async (
+    locationSig: string,
+    layer: LayerContent,
+  ): Promise<string | null> => {
+    const canonical = HistoryService.canonicalizeLayer(layer)
+    const json = JSON.stringify(canonical)
+    const bytes = new TextEncoder().encode(json).buffer as ArrayBuffer
+    const layerSig = await SignatureService.sign(bytes)
+
+    const head = await this.headLayer(locationSig)
+    if (head?.layerSig === layerSig) return null
+
+    const store = get<{ putResource: (blob: Blob) => Promise<void> }>('@hypercomb.social/Store')
+    if (store) {
+      await store.putResource(new Blob([json], { type: 'application/json' }))
+    }
+
+    const layersDir = await this.#getLayersDir(locationSig)
+    const nextIndex = await this.#nextLayerIndex(layersDir)
+    const fileName = String(nextIndex).padStart(8, '0') + '.json'
+
+    const handle = await layersDir.getFileHandle(fileName, { create: true })
+    const writable = await handle.createWritable()
+    try {
+      const entry: LayerEntry = { layerSig, at: Date.now() }
+      await writable.write(JSON.stringify(entry))
+    } finally {
+      await writable.close()
+    }
+
+    return layerSig
+  }
+
+  /**
+   * Read the highest-numbered layer entry for a location, or null if the
+   * location has no layer history yet.
+   */
+  public readonly headLayer = async (
+    locationSig: string,
+  ): Promise<(LayerEntry & { index: number }) | null> => {
+    const layersDir = await this.#tryGetLayersDir(locationSig)
+    if (!layersDir) return null
+
+    let maxName = ''
+    let maxHandle: FileSystemFileHandle | null = null
+    for await (const [name, handle] of layersDir.entries()) {
+      if (handle.kind !== 'file' || !name.endsWith('.json')) continue
+      if (name > maxName) {
+        maxName = name
+        maxHandle = handle as FileSystemFileHandle
+      }
+    }
+    if (!maxHandle) return null
+
+    try {
+      const file = await maxHandle.getFile()
+      const entry = JSON.parse(await file.text()) as LayerEntry
+      return { ...entry, index: parseInt(maxName, 10) }
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Read a specific layer entry by index. Returns null if missing.
+   */
+  public readonly getLayerAt = async (
+    locationSig: string,
+    index: number,
+  ): Promise<LayerEntry | null> => {
+    const layersDir = await this.#tryGetLayersDir(locationSig)
+    if (!layersDir) return null
+
+    const fileName = String(index).padStart(8, '0') + '.json'
+    try {
+      const handle = await layersDir.getFileHandle(fileName, { create: false })
+      const file = await handle.getFile()
+      return JSON.parse(await file.text()) as LayerEntry
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * List all layer entries for a location, sorted by index ascending.
+   */
+  public readonly listLayers = async (
+    locationSig: string,
+  ): Promise<Array<LayerEntry & { index: number }>> => {
+    const layersDir = await this.#tryGetLayersDir(locationSig)
+    if (!layersDir) return []
+
+    const out: Array<LayerEntry & { index: number }> = []
+    for await (const [name, handle] of layersDir.entries()) {
+      if (handle.kind !== 'file' || !name.endsWith('.json')) continue
+      try {
+        const file = await (handle as FileSystemFileHandle).getFile()
+        const entry = JSON.parse(await file.text()) as LayerEntry
+        out.push({ ...entry, index: parseInt(name, 10) })
+      } catch {
+        // skip corrupted entries
+      }
+    }
+    out.sort((a, b) => a.index - b.index)
+    return out
+  }
+
+  readonly #getLayersDir = async (
+    locationSig: string,
+  ): Promise<FileSystemDirectoryHandle> => {
+    const bag = await this.getBag(locationSig)
+    return await bag.getDirectoryHandle(HistoryService.#LAYERS_DIR, { create: true })
+  }
+
+  readonly #tryGetLayersDir = async (
+    locationSig: string,
+  ): Promise<FileSystemDirectoryHandle | null> => {
+    try {
+      const bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false })
+      return await bag.getDirectoryHandle(HistoryService.#LAYERS_DIR, { create: false })
+    } catch {
+      return null
+    }
+  }
+
+  readonly #nextLayerIndex = async (
+    layersDir: FileSystemDirectoryHandle,
+  ): Promise<number> => {
+    let max = 0
+    for await (const [name, handle] of layersDir.entries()) {
+      if (handle.kind !== 'file' || !name.endsWith('.json')) continue
+      const n = parseInt(name, 10)
+      if (!isNaN(n) && n > max) max = n
+    }
+    return max + 1
   }
 
   // -------------------------------------------------

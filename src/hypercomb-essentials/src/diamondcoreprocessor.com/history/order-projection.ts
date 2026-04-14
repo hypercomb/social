@@ -1,6 +1,6 @@
 // diamondcoreprocessor.com/core/order-projection.ts
 import { EffectBus } from '@hypercomb/core'
-import type { HistoryService, HistoryOp } from './history.service.js'
+import type { HistoryService, HistoryOp, LayerContent } from './history.service.js'
 
 export class OrderProjection {
 
@@ -32,8 +32,15 @@ export class OrderProjection {
   }
 
   /**
-   * Replay history for a location, build order, cache and return it.
-   * Sets this location as the "current" for effect-driven updates.
+   * Resolve the canonical cell order for a location.
+   *
+   * Preferred path: read the head layer and use its `cells` array —
+   * constant-time and always reflects whatever the LayerCommitter most
+   * recently snapshotted.
+   *
+   * Legacy fallback: for locations whose history predates the layer
+   * format (no `layers/` subdirectory), replay the sequential op files.
+   * This keeps existing user bags readable without a one-shot migration.
    */
   async hydrate(locationSig: string): Promise<string[]> {
     this.#currentSig = locationSig
@@ -44,11 +51,38 @@ export class OrderProjection {
     const historyService = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
     if (!historyService) return []
 
+    const fromLayer = await this.#orderFromHeadLayer(historyService, locationSig)
+    if (fromLayer) {
+      this.#cache.set(locationSig, fromLayer)
+      return fromLayer
+    }
+
     const ops = await historyService.replay(locationSig)
     const order = await this.#buildOrder(ops)
 
     this.#cache.set(locationSig, order)
     return order
+  }
+
+  async #orderFromHeadLayer(
+    history: HistoryService,
+    locationSig: string,
+  ): Promise<string[] | null> {
+    const head = await history.headLayer(locationSig)
+    if (!head) return null
+
+    const store = get<{ getResource: (sig: string) => Promise<Blob | null> }>('@hypercomb.social/Store')
+    if (!store) return null
+
+    const blob = await store.getResource(head.layerSig)
+    if (!blob) return null
+
+    try {
+      const content = JSON.parse(await blob.text()) as LayerContent
+      return Array.isArray(content.cells) ? [...content.cells] : null
+    } catch {
+      return null
+    }
   }
 
   /**
