@@ -20,10 +20,6 @@ window.ioc.register("@diamondcoreprocessor.com/FitQueenBee", _fit);
 
 // src/diamondcoreprocessor.com/navigation/zoom/mousewheel-zoom.input.ts
 var SNAP_LEVELS = [
-  0.05,
-  0.08,
-  0.1,
-  0.15,
   0.2,
   0.25,
   0.33,
@@ -102,7 +98,7 @@ window.ioc.register("@diamondcoreprocessor.com/MousewheelZoomInput", new Mousewh
 // src/diamondcoreprocessor.com/navigation/zoom/pinch-zoom.input.ts
 var PinchZoomInput = class {
   #zoom = null;
-  #minScale = 0.05;
+  #minScale = 0.2;
   attach = (zoom, minScale) => {
     this.#zoom = zoom;
     if (minScale != null) this.#minScale = minScale;

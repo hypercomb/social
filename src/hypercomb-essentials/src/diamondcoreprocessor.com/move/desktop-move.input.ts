@@ -75,7 +75,7 @@ export class DesktopMoveInput {
   #onPointerDown = (e: PointerEvent): void => {
     if (e.pointerType === 'touch') return
     if (e.button !== 0) return
-    if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return
+    if (e.shiftKey || e.altKey) return
     if (this.#spaceHeld) return
     if (!this.#canvas) return
     if (this.#isInteractiveTarget(e.target)) return
@@ -86,6 +86,15 @@ export class DesktopMoveInput {
     const axial = this.#clientToAxial(e.clientX, e.clientY)
     console.log('[desktop-move] pointerdown', { axial, moveActive: this.#drone?.moveActive, hasDrone: !!this.#drone })
     if (!axial) return
+
+    // gate: drag requires Ctrl/Cmd UNLESS the tile under the pointer is already selected
+    const ctrlHeld = e.ctrlKey || e.metaKey
+    if (!ctrlHeld) {
+      const label = this.#drone?.labelAtAxial(axial) ?? null
+      if (!label) return
+      const selection = window.ioc.get<{ selected: ReadonlySet<string> }>('@diamondcoreprocessor.com/SelectionService')
+      if (!selection?.selected.has(label)) return
+    }
 
     this.#downPos = { x: e.clientX, y: e.clientY }
     this.#downAxial = axial

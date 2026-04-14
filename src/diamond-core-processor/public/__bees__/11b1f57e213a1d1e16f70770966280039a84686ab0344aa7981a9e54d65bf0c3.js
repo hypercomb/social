@@ -1,5 +1,5 @@
 // src/diamondcoreprocessor.com/presentation/tiles/tile-overlay.drone.ts
-import { Drone as Drone2, EffectBus as EffectBus2, I18N_IOC_KEY } from "@hypercomb/core";
+import { Drone as Drone2, EffectBus as EffectBus2, consumePointerGesture, I18N_IOC_KEY } from "@hypercomb/core";
 import { Container as Container3, Graphics as Graphics2, Point, Text, TextStyle } from "pixi.js";
 
 // src/diamondcoreprocessor.com/presentation/tiles/hex-icon-button.ts
@@ -216,7 +216,7 @@ var TileActionsDrone = class extends Drone {
   deps = {
     lineage: "@hypercomb.social/Lineage"
   };
-  listens = ["render:host-ready", "render:cell-count", "tile:action", "controls:action", "overlay:icons-reordered", "overlay:arrange-mode"];
+  listens = ["render:host-ready", "render:cell-count", "tile:action", "controls:action", "overlay:icons-reordered", "overlay:arrange-mode", "substrate:applied", "substrate:rerolled", "cell:removed"];
   emits = ["overlay:register-action", "overlay:pool-icons", "search:prefill", "command:focus", "tile:hidden", "tile:unhidden", "tile:blocked", "cell:removed", "visibility:show-hidden", "substrate:rerolled"];
   #registered = false;
   #effectsRegistered = false;
@@ -232,6 +232,12 @@ var TileActionsDrone = class extends Drone {
       });
       this.onEffect("render:cell-count", (payload) => {
         this.#substrateLabels = new Set(payload.substrateLabels ?? []);
+      });
+      this.onEffect("substrate:applied", ({ cell }) => {
+        if (cell) this.#substrateLabels.add(cell);
+      });
+      this.onEffect("cell:removed", ({ cell }) => {
+        if (cell) this.#substrateLabels.delete(cell);
       });
       this.onEffect("tile:action", (payload) => {
         if (!HANDLED_ACTIONS.has(payload.action)) return;
@@ -576,7 +582,9 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
     "overlay:arrange-mode",
     "overlay:pool-icons",
     "bee:disposed",
-    "genotype:set-visible"
+    "genotype:set-visible",
+    "substrate:applied",
+    "cell:removed"
   ];
   emits = ["tile:hover", "tile:action", "tile:click", "tile:navigate-in", "tile:navigate-back", "drop:target", "overlay:icons-reordered"];
   #dropDragging = false;
@@ -685,6 +693,17 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
           this.#updateVisibility();
           this.#updatePerTileVisibility();
         }
+      });
+      this.onEffect("substrate:applied", ({ cell }) => {
+        if (!cell) return;
+        this.#substrateLabels.add(cell);
+        this.#noImageLabels.delete(cell);
+        if (this.#overlay && this.#currentAxial) this.#updatePerTileVisibility();
+      });
+      this.onEffect("cell:removed", ({ cell }) => {
+        if (!cell) return;
+        this.#substrateLabels.delete(cell);
+        this.#noImageLabels.delete(cell);
       });
       this.onEffect("render:set-orientation", (payload) => {
         this.#flat = payload.flat;
@@ -1501,6 +1520,7 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
       const gate = window.ioc.get("@diamondcoreprocessor.com/InputGate");
       if (gate?.active) return;
       this.#consumedPointerId = e.pointerId;
+      consumePointerGesture(e.pointerId);
       this.#navigateBack();
       return;
     }
@@ -1535,6 +1555,7 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
       }
     }
     this.#consumedPointerId = e.pointerId;
+    consumePointerGesture(e.pointerId);
     this.#navigateInto(entry.label);
   };
   #onClick = (e) => {

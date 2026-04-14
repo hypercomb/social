@@ -145,8 +145,12 @@ var defaultKeyMap = {
 // src/diamondcoreprocessor.com/keyboard/escape-cascade.ts
 import { EffectBus } from "@hypercomb/core";
 var editorActive = false;
+var clipboardActive = false;
 EffectBus.on("editor:mode", ({ active }) => {
   editorActive = active;
+});
+EffectBus.on("clipboard:view", ({ active }) => {
+  clipboardActive = active;
 });
 EffectBus.on("keymap:invoke", ({ cmd }) => {
   if (cmd !== "global.escape") return;
@@ -164,7 +168,16 @@ EffectBus.on("keymap:invoke", ({ cmd }) => {
     pixi?.clearSelection();
     return;
   }
+  if (clipboardActive) {
+    EffectBus.emit("clipboard:close", void 0);
+    return;
+  }
   EffectBus.emit("global:escape", void 0);
+});
+window.addEventListener("contextmenu", (event) => {
+  if (!clipboardActive) return;
+  event.preventDefault();
+  EffectBus.emit("clipboard:close", void 0);
 });
 
 // src/diamondcoreprocessor.com/keyboard/keymap.service.ts

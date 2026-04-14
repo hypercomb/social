@@ -20,7 +20,7 @@ import { fromRuntime } from '../../core/from-runtime'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import type { Navigation } from '../../core/navigation'
 import type { MovementService } from '../../core/movement.service'
-import { EffectBus, SignatureService } from '@hypercomb/core'
+import { EffectBus, SignatureService, consumePointerGesture } from '@hypercomb/core'
 import type { RoomStore } from '../../core/room-store'
 import type { SecretStore } from '../../core/secret-store'
 import type { InstallMonitor } from '../../core/install-monitor'
@@ -588,6 +588,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #showHiddenUnsub: (() => void) | null = null
   #textOnlyUnsub: (() => void) | null = null
   #clipboardAvailableUnsub: (() => void) | null = null
+  #clipboardCloseUnsub: (() => void) | null = null
   #atomizeModeUnsub: (() => void) | null = null
   #atomizeAtomsUnsub: (() => void) | null = null
   #atomizeStrategyUnsub: (() => void) | null = null
@@ -642,6 +643,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       if (!available && this.#mode() === 'clipboard') {
         this.closeClipboard()
       }
+    })
+
+    this.#clipboardCloseUnsub = EffectBus.on('clipboard:close', () => {
+      if (this.#mode() === 'clipboard') this.closeClipboard()
     })
 
     this.#selectionUnsub = EffectBus.on<{ selected?: string[] }>('selection:changed', (payload) => {
@@ -790,6 +795,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#showHiddenUnsub?.()
     this.#textOnlyUnsub?.()
     this.#clipboardAvailableUnsub?.()
+    this.#clipboardCloseUnsub?.()
     this.#tagsUnsub?.()
     this.#hoverTagsUnsub?.()
     this.#atomizeModeUnsub?.()
@@ -817,6 +823,11 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly onBackPointerDown = (event: PointerEvent): void => {
     if (!this.canGoBack()) return
     if (event.button !== undefined && event.button !== 0) return
+    event.stopPropagation()
+    event.preventDefault()
+    // Swallow the trailing pointermove / pointerup / click for this finger so
+    // a tile that lands under it after navigation can't be activated.
+    consumePointerGesture(event.pointerId)
     this.#backHandledOnDown = true
     this.goBack()
   }
@@ -1191,21 +1202,29 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
     this.#mode.set('clipboard')
     const clipSvc = get('@diamondcoreprocessor.com/ClipboardService') as
-      { items?: { label: string; sourceSegments: readonly string[] }[] } | undefined
+      { items?: { label: string; sourceSegments: readonly string[] }[]; operation?: 'cut' | 'copy' } | undefined
     const items = clipSvc?.items ?? []
     EffectBus.emit('clipboard:view', {
       active: true,
+      op: clipSvc?.operation ?? 'copy',
       labels: items.map(i => i.label),
       sourceSegments: [...(items[0]?.sourceSegments ?? [])],
     })
 
-    // fit-to-center after render completes (geometry must exist for bounds)
-    const unsub = EffectBus.on('render:cell-count', () => {
+    // fit-to-center after render completes (geometry must exist for bounds).
+    // EffectBus.on replays the last value synchronously — declare unsub
+    // before subscribing so it's in scope if the handler fires immediately.
+    let unsub: () => void = () => {}
+    let fired = false
+    const fit = (): void => {
+      if (fired) return
+      fired = true
       unsub()
       requestAnimationFrame(() => this.zoom?.zoomToFit?.())
-    })
+    }
+    unsub = EffectBus.on('render:cell-count', fit)
     // fallback if render:cell-count never fires (empty clipboard)
-    setTimeout(() => { unsub(); this.zoom?.zoomToFit?.() }, 500)
+    setTimeout(fit, 500)
   }
 
   readonly closeClipboard = (): void => {

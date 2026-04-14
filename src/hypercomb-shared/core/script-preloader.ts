@@ -139,11 +139,11 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
         return
       }
 
-      for (const b of (layer.bees as string[] | undefined) ?? []) bees.add(this.#stripExt(b))
-      for (const d of (layer.dependencies as string[] | undefined) ?? []) dependencies.add(this.#stripExt(d))
-      for (const r of (layer.resources as string[] | undefined) ?? []) resources.add(this.#stripExt(r))
+      for (const b of (layer['bees'] as string[] | undefined) ?? []) bees.add(this.#stripExt(b))
+      for (const d of (layer['dependencies'] as string[] | undefined) ?? []) dependencies.add(this.#stripExt(d))
+      for (const r of (layer['resources'] as string[] | undefined) ?? []) resources.add(this.#stripExt(r))
 
-      const children = (layer.layers as string[] | undefined) ?? []
+      const children = (layer['layers'] as string[] | undefined) ?? []
       await Promise.all(children.map(visit))
     }
 

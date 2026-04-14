@@ -112,7 +112,7 @@ export class TileActionsDrone extends Drone {
     lineage: '@hypercomb.social/Lineage',
   }
 
-  protected override listens = ['render:host-ready', 'render:cell-count', 'tile:action', 'controls:action', 'overlay:icons-reordered', 'overlay:arrange-mode']
+  protected override listens = ['render:host-ready', 'render:cell-count', 'tile:action', 'controls:action', 'overlay:icons-reordered', 'overlay:arrange-mode', 'substrate:applied', 'substrate:rerolled', 'cell:removed']
   protected override emits = ['overlay:register-action', 'overlay:pool-icons', 'search:prefill', 'command:focus', 'tile:hidden', 'tile:unhidden', 'tile:blocked', 'cell:removed', 'visibility:show-hidden', 'substrate:rerolled']
 
   #registered = false
@@ -131,9 +131,19 @@ export class TileActionsDrone extends Drone {
         void this.#loadArrangementAndRegister()
       })
 
-      // Track which tiles have substrate so bulk reroll can filter correctly
+      // Track which tiles have substrate so bulk reroll can filter correctly.
+      // render:cell-count reseeds the set on full renders, but substrate:applied
+      // runs via an in-place buffer path that doesn't re-emit render:cell-count —
+      // so we also track it incrementally to keep newly-added substrate tiles
+      // reachable by bulk reroll before the next full render.
       this.onEffect<{ substrateLabels?: string[] }>('render:cell-count', (payload) => {
         this.#substrateLabels = new Set(payload.substrateLabels ?? [])
+      })
+      this.onEffect<{ cell: string }>('substrate:applied', ({ cell }) => {
+        if (cell) this.#substrateLabels.add(cell)
+      })
+      this.onEffect<{ cell: string }>('cell:removed', ({ cell }) => {
+        if (cell) this.#substrateLabels.delete(cell)
       })
 
       // Handle clicks on our own actions

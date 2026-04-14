@@ -223,8 +223,9 @@ export class CommandShellComponent implements AfterViewInit {
     if (!list.length || this.suppressed()) return false
 
     if (e.key === 'Escape') {
-      e.preventDefault()
       this.suppressed.set(true)
+      // fall through so the parent can act (peel path, cancel select, etc.)
+      this.shellKeydown.emit(e)
       return true
     }
 

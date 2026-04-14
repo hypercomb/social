@@ -1,11 +1,9 @@
-import { Component, computed, EventEmitter, Input, type OnDestroy, Output, signal } from '@angular/core'
+import { Component, computed, EventEmitter, Input, Output, signal } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import type { SecretStore } from '../../core/secret-store'
 import type { SecretStrengthProvider } from '../../core/secret-strength'
 import { secretTag } from '../controls-bar/secret-words'
-
-interface StatusIcon { key: string; hci: string; label: string }
 
 @Component({
   selector: 'hc-mesh-header',
@@ -14,7 +12,7 @@ interface StatusIcon { key: string; hci: string; label: string }
   templateUrl: './mesh-header.component.html',
   styleUrls: ['./mesh-header.component.scss'],
 })
-export class MeshHeaderComponent implements OnDestroy {
+export class MeshHeaderComponent {
 
   @Input() meshPublic: boolean | null = false
   @Output() readonly meshToggled = new EventEmitter<void>()
@@ -22,20 +20,6 @@ export class MeshHeaderComponent implements OnDestroy {
 
   #secretValue = signal('')
   #secretExpanded = signal(false)
-
-  // ── status icons (non-interactive mode indicators) ──────
-  #moveMode = signal(false)
-  #hasSelection = signal(false)
-
-  readonly statusIcons = computed<StatusIcon[]>(() => {
-    const icons: StatusIcon[] = []
-    if (this.#hasSelection()) icons.push({ key: 'selection', hci: 'V', label: 'Selection active' })
-    if (this.#moveMode()) icons.push({ key: 'move', hci: 'Z', label: 'Move mode' })
-    return icons
-  })
-
-  #moveModeUnsub: (() => void) | null = null
-  #selectionUnsub: (() => void) | null = null
 
   readonly secretValue = this.#secretValue.asReadonly()
   readonly hasSecret = computed(() => this.#secretValue().trim().length > 0)
@@ -66,18 +50,6 @@ export class MeshHeaderComponent implements OnDestroy {
       this.#secretValue.set(store.value)
       this.#secretExpanded.set(false)
     }
-
-    this.#moveModeUnsub = EffectBus.on<{ active: boolean }>('move:mode', ({ active }) => {
-      this.#moveMode.set(active)
-    })
-    this.#selectionUnsub = EffectBus.on<{ selected?: string[] }>('selection:changed', (payload) => {
-      this.#hasSelection.set((payload?.selected ?? []).length > 0)
-    })
-  }
-
-  ngOnDestroy(): void {
-    this.#moveModeUnsub?.()
-    this.#selectionUnsub?.()
   }
 
   get #store(): SecretStore | undefined {

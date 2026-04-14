@@ -1174,17 +1174,28 @@ export class ShowCellDrone extends Drone {
       return currentKey !== locationKey || currentRev !== fsRev || currentMeshRev !== meshRev
     }
 
+    // Clipboard view renders from the clipboard surface, not the current
+    // explorer dir. Cut tiles live in store.clipboard; copy tiles are still
+    // at their sourceSegments. Fall back to explorer dir otherwise.
     let dir: FileSystemDirectoryHandle | null
     if (this.#clipboardView) {
       const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as
         { clipboard?: FileSystemDirectoryHandle; hypercombRoot?: FileSystemDirectoryHandle } | undefined
       if (this.#clipboardView.op === 'cut' && store?.clipboard) {
         dir = store.clipboard
-      } else if (this.#clipboardView.sourceSegments.length > 0 && store?.hypercombRoot && lineage.tryResolve) {
+      } else if (store?.hypercombRoot && lineage.tryResolve) {
         dir = await lineage.tryResolve(this.#clipboardView.sourceSegments, store.hypercombRoot)
+        if (!dir) dir = await lineage.explorerDir()
       } else {
         dir = await lineage.explorerDir()
       }
+      console.log('[clipboard-render] dir-resolution', {
+        op: this.#clipboardView.op,
+        sourceSegments: this.#clipboardView.sourceSegments,
+        labels: [...this.#clipboardView.labels],
+        hasClipboardStore: !!store?.clipboard,
+        dirResolved: !!dir,
+      })
     } else {
       dir = await lineage.explorerDir()
     }
@@ -1235,7 +1246,10 @@ export class ShowCellDrone extends Drone {
 
     // note: cell collection — always fresh, never cached
     const localCells = await this.listCellFolders(dir)
-    if (isStale()) {
+    if (this.#clipboardView) {
+      console.log('[clipboard-render] listCellFolders', { count: localCells.length, names: localCells })
+    }
+    if (!this.#clipboardView && isStale()) {
       this.renderQueued = true
       return
     }
@@ -1495,20 +1509,28 @@ export class ShowCellDrone extends Drone {
 
     const axialMax = typeof axial.items.size === 'number' ? axial.items.size : cellNames.length
     const maxCells = Math.min(cellNames.length, axialMax)
+    if (this.#clipboardView) {
+      console.log('[clipboard-render] pre-build', { cellNames, maxCells, axialMax, axialItemsSize: axial?.items?.size })
+    }
     if (maxCells <= 0) {
+      if (this.#clipboardView) console.log('[clipboard-render] BAIL maxCells<=0')
       this.clearMesh()
       return
     }
 
     const cells = this.buildCellsFromAxial(axial, cellNames, maxCells, localCellSet, branchSet)
+    if (this.#clipboardView) {
+      console.log('[clipboard-render] cells built', { count: cells.length, labels: cells.map(c => c.label) })
+    }
     if (cells.length === 0) {
+      if (this.#clipboardView) console.log('[clipboard-render] BAIL cells.length=0')
       this.clearMesh()
       return
     }
 
     // note: load cell images from 0000 properties → __resources__/
     await this.loadCellImages(cells, dir)
-    if (isStale()) {
+    if (!this.#clipboardView && isStale()) {
       this.renderQueued = true
       return
     }
@@ -1989,6 +2011,7 @@ export class ShowCellDrone extends Drone {
 
     // clipboard:view effect — filter visible cells to clipboard contents
     this.onEffect<{ active: boolean; labels?: string[]; sourceSegments?: string[]; op?: 'cut' | 'copy' }>('clipboard:view', (payload) => {
+      console.log('[clipboard-render] HANDLER FIRED', payload)
       const wasActive = this.#clipboardView
       if (payload?.active && payload.labels) {
         this.#clipboardView = {
@@ -1996,16 +2019,21 @@ export class ShowCellDrone extends Drone {
           sourceSegments: payload.sourceSegments ?? [],
           op: payload.op ?? 'copy',
         }
+        // Entering clipboard view: make sure the mesh layer is visible.
+        // A prior cancelled stream may have left it hidden — clipboard view
+        // doesn't go through the layer-change branch that normally restores
+        // visibility, so we do it explicitly here.
+        if (this.layer) this.layer.visible = true
       } else {
         this.#clipboardView = null
       }
       this.renderedCellsKey = '' // force full geometry rebuild on enter/exit
 
-      // Exiting clipboard view: only drop caches for the clipboard labels.
-      // Those entries were populated from store.clipboard / the source-segments
-      // dir and may not match the real explorer layer. Leave renderedLocationKey
-      // alone — the explorer layer itself didn't change, so forcing a
-      // layer-change rebuild hides the mesh layer until streamCells restores it.
+      // Exiting clipboard view: drop caches for the clipboard labels (they
+      // were populated from store.clipboard / sourceSegments and may not
+      // match the real explorer layer), and reset the transient slot + pending
+      // remove state so the next explorer render rebuilds cleanly without
+      // inheriting clipboard-era layout or ghost-remove entries.
       if (wasActive && !payload?.active) {
         for (const label of wasActive.labels) {
           this.cellImageCache.delete(label)
@@ -2014,6 +2042,8 @@ export class ShowCellDrone extends Drone {
           this.cellLinkCache.delete(label)
           this.cellSubstrateCache.delete(label)
         }
+        this.#slots.clear()
+        this.#pendingRemoves.clear()
         if (this.layer) this.layer.visible = true
       }
       this.requestRender()
@@ -2489,6 +2519,15 @@ export class ShowCellDrone extends Drone {
     localCellSet: Set<string>,
     lineage: any,
   ): Promise<string[]> {
+    // Clipboard view is a preview surface — pack cells contiguously from
+    // slot 0 so they render near the viewport origin regardless of whatever
+    // slot index they happened to hold in their source layer.
+    if (this.#clipboardView) {
+      const names = [...union].sort((a, b) => a.localeCompare(b))
+      console.log('[clipboard-render] resolveCellOrder short-circuit', { union: [...union], names })
+      return names
+    }
+
     switch (mode) {
       case 'pinned': {
         // When cursor is rewound, use cursor-aware ordering to avoid overlap
@@ -3107,5 +3146,6 @@ export class ShowCellDrone extends Drone {
   }
 }
 
+console.log('[clipboard-render] SHOW-CELL MODULE LOAD — build-marker-v7')
 const showCell = new ShowCellDrone()
 window.ioc.register('@diamondcoreprocessor.com/ShowCellDrone', showCell)

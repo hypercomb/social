@@ -66,6 +66,43 @@ var HexLabelAtlas = class {
   getAtlasTexture = () => {
     return this.atlas;
   };
+  /**
+   * Pre-rasterize a batch of labels into the atlas in a single render pass.
+   * Idempotent — labels already in the cache are skipped. Call after
+   * construction with the set of labels you know will appear on first paint,
+   * so `getLabelUV()` never rasterizes on the render-hot path.
+   */
+  seed = (labels) => {
+    if (!labels.length) return;
+    const batch = new Container();
+    const created = [];
+    for (const label of labels) {
+      if (!label || this.map.has(label)) continue;
+      const slot = this.nextIndex % (this.cols * this.rows);
+      this.nextIndex++;
+      const col = slot % this.cols;
+      const row = Math.floor(slot / this.cols);
+      const displayText = this.#labelResolver ? this.#labelResolver(label) : label;
+      const text = new Text({ text: displayText, style: this.style });
+      text.resolution = 8;
+      text.anchor.set(0.5);
+      text.position.set(
+        col * this.cellPx + this.cellPx * 0.5,
+        row * this.cellPx + this.cellPx * 0.5
+      );
+      if (this.#pivot) text.rotation = Math.PI / 2;
+      batch.addChild(text);
+      created.push(text);
+      const u0 = col * this.cellPx / this.atlas.width;
+      const v0 = row * this.cellPx / this.atlas.height;
+      const u1 = (col + 1) * this.cellPx / this.atlas.width;
+      const v1 = (row + 1) * this.cellPx / this.atlas.height;
+      this.map.set(label, { u0, v0, u1, v1 });
+    }
+    if (!created.length) return;
+    this.renderer.render({ container: batch, target: this.atlas, clear: false });
+    for (const text of created) text.destroy();
+  };
   getLabelUV = (label) => {
     const cached = this.map.get(label);
     if (cached) return cached;
@@ -774,6 +811,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
   meshCells = [];
   // clipboard view override — when set, render from this dir instead of explorer
   #clipboardView = null;
+  #lastCursorRewound = false;
   meshSub = null;
   publisherId = (() => {
     const key = "hc:show-honeycomb:publisher-id";
@@ -848,6 +886,41 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
     this.pixiRenderer = payload.renderer;
     this.requestRender();
   };
+  /** Pre-warm: preheat every known tile-props blob and its `small.image`
+   *  resource so first paint finds them hot in the Store cache. Runs once
+   *  after registration, before the first pulse. Best-effort. */
+  async warmup() {
+    try {
+      const raw = localStorage.getItem("hc:tile-props-index");
+      if (!raw) return;
+      const propsIndex = JSON.parse(raw);
+      const propsSigs = Object.values(propsIndex).filter((v) => typeof v === "string" && /^[a-f0-9]{64}$/i.test(v));
+      if (!propsSigs.length) return;
+      const store = window.ioc?.get?.("@hypercomb.social/Store");
+      if (!store?.preheatResource) return;
+      const propsBlobs = await Promise.all(
+        propsSigs.map((sig) => store.preheatResource(sig).catch(() => null))
+      );
+      const imageSigs = /* @__PURE__ */ new Set();
+      for (const blob of propsBlobs) {
+        if (!blob) continue;
+        try {
+          const props = JSON.parse(await blob.text());
+          const sig = props?.small?.image;
+          if (typeof sig === "string" && /^[a-f0-9]{64}$/i.test(sig)) imageSigs.add(sig);
+        } catch {
+        }
+      }
+      if (imageSigs.size) {
+        await Promise.allSettled(
+          [...imageSigs].map((sig) => store.preheatResource(sig).catch(() => null))
+        );
+      }
+      this.#warmLabels = Object.keys(propsIndex);
+    } catch {
+    }
+  }
+  #warmLabels = [];
   heartbeat = async (grammar = "") => {
     this.ensureListeners();
     if (!this.#heartbeatInitialized) {
@@ -1461,6 +1534,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       this.atlas = new HexLabelAtlas(this.pixiRenderer, 128, 8, 8);
       this.attachLabelResolver(this.atlas);
       this.atlas.setPivot(this.#pivot);
+      if (this.#warmLabels.length) this.atlas.seed(this.#warmLabels);
       this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8);
       this.cellImageCache.clear();
       this.cellBorderColorCache.clear();
@@ -1471,6 +1545,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       this.atlas = new HexLabelAtlas(this.pixiRenderer, 128, 8, 8);
       this.attachLabelResolver(this.atlas);
       this.atlas.setPivot(this.#pivot);
+      if (this.#warmLabels.length) this.atlas.seed(this.#warmLabels);
       this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8);
       this.cellImageCache.clear();
       this.cellBorderColorCache.clear();
@@ -1486,7 +1561,27 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       const currentMeshRev = this.meshCellsRev;
       return currentKey !== locationKey || currentRev !== fsRev || currentMeshRev !== meshRev;
     };
-    const dir = await lineage.explorerDir();
+    let dir;
+    if (this.#clipboardView) {
+      const store = window.ioc?.get?.("@hypercomb.social/Store");
+      if (this.#clipboardView.op === "cut" && store?.clipboard) {
+        dir = store.clipboard;
+      } else if (store?.hypercombRoot && lineage.tryResolve) {
+        dir = await lineage.tryResolve(this.#clipboardView.sourceSegments, store.hypercombRoot);
+        if (!dir) dir = await lineage.explorerDir();
+      } else {
+        dir = await lineage.explorerDir();
+      }
+      console.log("[clipboard-render] dir-resolution", {
+        op: this.#clipboardView.op,
+        sourceSegments: this.#clipboardView.sourceSegments,
+        labels: [...this.#clipboardView.labels],
+        hasClipboardStore: !!store?.clipboard,
+        dirResolved: !!dir
+      });
+    } else {
+      dir = await lineage.explorerDir();
+    }
     if (!this.#clipboardView && isStale()) {
       this.renderQueued = true;
       return;
@@ -1528,7 +1623,10 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       return;
     }
     const localCells = await this.listCellFolders(dir);
-    if (isStale()) {
+    if (this.#clipboardView) {
+      console.log("[clipboard-render] listCellFolders", { count: localCells.length, names: localCells });
+    }
+    if (!this.#clipboardView && isStale()) {
       this.renderQueued = true;
       return;
     }
@@ -1720,17 +1818,25 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
     const wasEmpty = this.renderedCount === 0;
     const axialMax = typeof axial.items.size === "number" ? axial.items.size : cellNames.length;
     const maxCells = Math.min(cellNames.length, axialMax);
+    if (this.#clipboardView) {
+      console.log("[clipboard-render] pre-build", { cellNames, maxCells, axialMax, axialItemsSize: axial?.items?.size });
+    }
     if (maxCells <= 0) {
+      if (this.#clipboardView) console.log("[clipboard-render] BAIL maxCells<=0");
       this.clearMesh();
       return;
     }
     const cells = this.buildCellsFromAxial(axial, cellNames, maxCells, localCellSet, branchSet);
+    if (this.#clipboardView) {
+      console.log("[clipboard-render] cells built", { count: cells.length, labels: cells.map((c) => c.label) });
+    }
     if (cells.length === 0) {
+      if (this.#clipboardView) console.log("[clipboard-render] BAIL cells.length=0");
       this.clearMesh();
       return;
     }
     await this.loadCellImages(cells, dir);
-    if (isStale()) {
+    if (!this.#clipboardView && isStale()) {
       this.renderQueued = true;
       return;
     }
@@ -2024,7 +2130,10 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
         this.requestRender();
       }
     });
-    this.onEffect("history:cursor-changed", () => {
+    this.onEffect("history:cursor-changed", (state) => {
+      const nowRewound = state?.rewound ?? false;
+      if (nowRewound === this.#lastCursorRewound) return;
+      this.#lastCursorRewound = nowRewound;
       this.#layerCellsCache.clear();
       this.renderedCellsKey = "";
       this.requestRender();
@@ -2092,15 +2201,31 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       }
     });
     this.onEffect("clipboard:view", (payload) => {
+      console.log("[clipboard-render] HANDLER FIRED", payload);
+      const wasActive = this.#clipboardView;
       if (payload?.active && payload.labels) {
         this.#clipboardView = {
           labels: new Set(payload.labels),
-          sourceSegments: payload.sourceSegments ?? []
+          sourceSegments: payload.sourceSegments ?? [],
+          op: payload.op ?? "copy"
         };
+        if (this.layer) this.layer.visible = true;
       } else {
         this.#clipboardView = null;
       }
       this.renderedCellsKey = "";
+      if (wasActive && !payload?.active) {
+        for (const label of wasActive.labels) {
+          this.cellImageCache.delete(label);
+          this.cellBorderColorCache.delete(label);
+          this.cellTagsCache.delete(label);
+          this.cellLinkCache.delete(label);
+          this.cellSubstrateCache.delete(label);
+        }
+        this.#slots.clear();
+        this.#pendingRemoves.clear();
+        if (this.layer) this.layer.visible = true;
+      }
       this.requestRender();
     });
     this.onEffect("clipboard:captured", (payload) => {
@@ -2424,7 +2549,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
     return `hc:layout-mode:${locationKey}`;
   }
   #readLayoutMode(_locationKey) {
-    return "dense";
+    return "pinned";
   }
   #persistLayoutMode(mode) {
     const lineage = this.resolve("lineage");
@@ -2487,6 +2612,11 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
    *   - pinned: sparse array with empty-string gaps (cellNames[i] → axial position i)
    */
   async #resolveCellOrder(mode, dir, union, localCellSet, lineage) {
+    if (this.#clipboardView) {
+      const names = [...union].sort((a, b) => a.localeCompare(b));
+      console.log("[clipboard-render] resolveCellOrder short-circuit", { union: [...union], names });
+      return names;
+    }
     switch (mode) {
       case "pinned": {
         const pinnedCursor = window.ioc?.get?.("@diamondcoreprocessor.com/HistoryCursorService");
@@ -3004,6 +3134,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
     return this.#pushBuffer("aHeat");
   }
 };
+console.log("[clipboard-render] SHOW-CELL MODULE LOAD \u2014 build-marker-v7");
 var showCell = new ShowCellDrone();
 window.ioc.register("@diamondcoreprocessor.com/ShowCellDrone", showCell);
 export {

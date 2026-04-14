@@ -5,7 +5,7 @@ type Point = { x: number; y: number }
 
 // Predefined snap levels for coarse zoom (no modifier key)
 const SNAP_LEVELS = [
-  0.05, 0.08, 0.1, 0.15, 0.2, 0.25, 0.33, 0.5,
+  0.2, 0.25, 0.33, 0.5,
   0.67, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0,
   6.0, 8.0, 12.0,
 ]

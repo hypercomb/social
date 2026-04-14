@@ -1,5 +1,28 @@
 // src/diamondcoreprocessor.com/move/move.drone.ts
 import { Drone, EffectBus, hypercomb } from "@hypercomb/core";
+
+// src/diamondcoreprocessor.com/editor/tile-properties.ts
+var TILE_PROPERTIES_FILE = "0000";
+var readCellProperties = async (cellDir) => {
+  try {
+    const fileHandle = await cellDir.getFileHandle(TILE_PROPERTIES_FILE);
+    const file = await fileHandle.getFile();
+    const text = await file.text();
+    return JSON.parse(text);
+  } catch {
+    return {};
+  }
+};
+var writeCellProperties = async (cellDir, updates) => {
+  const existing = await readCellProperties(cellDir);
+  const merged = { ...existing, ...updates };
+  const fileHandle = await cellDir.getFileHandle(TILE_PROPERTIES_FILE, { create: true });
+  const writable = await fileHandle.createWritable();
+  await writable.write(JSON.stringify(merged));
+  await writable.close();
+};
+
+// src/diamondcoreprocessor.com/move/move.drone.ts
 function axialKey(q, r) {
   return `${q},${r}`;
 }
@@ -222,6 +245,7 @@ var MoveDrone = class extends Drone {
       if (orderProjection) {
         await orderProjection.reorder(insertOrder);
       }
+      await this.#persistPinnedIndicesByOrder(insertOrder);
       this.emitEffect("cell:reorder", { labels: insertOrder });
       this.emitEffect("move:preview", null);
       this.emitEffect("move:committed", { order: insertOrder });
@@ -587,9 +611,38 @@ var MoveDrone = class extends Drone {
     if (orderProjection) {
       await orderProjection.reorder(denseOrder);
     }
+    await this.#persistPinnedIndices(placements);
     this.emitEffect("cell:reorder", { labels: denseOrder });
     this.emitEffect("move:preview", null);
     this.emitEffect("move:committed", { order: denseOrder });
+  }
+  async #persistPinnedIndices(placements) {
+    const lineage = this.resolve("lineage");
+    const dir = lineage?.explorerDir ? await lineage.explorerDir() : null;
+    if (!dir) return;
+    for (const [label, axial] of placements) {
+      const gridIndex = this.#keyToIndex.get(axialKey(axial.q, axial.r));
+      if (gridIndex === void 0) continue;
+      try {
+        const cellDir = await dir.getDirectoryHandle(label, { create: false });
+        await writeCellProperties(cellDir, { index: gridIndex, offset: 0 });
+      } catch {
+      }
+    }
+  }
+  async #persistPinnedIndicesByOrder(order) {
+    const lineage = this.resolve("lineage");
+    const dir = lineage?.explorerDir ? await lineage.explorerDir() : null;
+    if (!dir) return;
+    for (let i = 0; i < order.length; i++) {
+      const label = order[i];
+      if (!label) continue;
+      try {
+        const cellDir = await dir.getDirectoryHandle(label, { create: false });
+        await writeCellProperties(cellDir, { index: i, offset: 0 });
+      } catch {
+      }
+    }
   }
   // ── reset ────────────────────────────────────────────────
   #reset(source) {

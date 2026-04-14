@@ -12,7 +12,7 @@ export class PinchZoomInput {
     zoomToFit?: () => void
   } | null = null
 
-  #minScale = 0.05
+  #minScale = 0.2
 
   attach = (
     zoom: {

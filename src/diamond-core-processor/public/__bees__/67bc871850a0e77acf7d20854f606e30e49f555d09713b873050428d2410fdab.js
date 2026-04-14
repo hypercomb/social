@@ -88,7 +88,7 @@ var TileActionsDrone = class extends Drone {
   deps = {
     lineage: "@hypercomb.social/Lineage"
   };
-  listens = ["render:host-ready", "render:cell-count", "tile:action", "controls:action", "overlay:icons-reordered", "overlay:arrange-mode"];
+  listens = ["render:host-ready", "render:cell-count", "tile:action", "controls:action", "overlay:icons-reordered", "overlay:arrange-mode", "substrate:applied", "substrate:rerolled", "cell:removed"];
   emits = ["overlay:register-action", "overlay:pool-icons", "search:prefill", "command:focus", "tile:hidden", "tile:unhidden", "tile:blocked", "cell:removed", "visibility:show-hidden", "substrate:rerolled"];
   #registered = false;
   #effectsRegistered = false;
@@ -104,6 +104,12 @@ var TileActionsDrone = class extends Drone {
       });
       this.onEffect("render:cell-count", (payload) => {
         this.#substrateLabels = new Set(payload.substrateLabels ?? []);
+      });
+      this.onEffect("substrate:applied", ({ cell }) => {
+        if (cell) this.#substrateLabels.add(cell);
+      });
+      this.onEffect("cell:removed", ({ cell }) => {
+        if (cell) this.#substrateLabels.delete(cell);
       });
       this.onEffect("tile:action", (payload) => {
         if (!HANDLED_ACTIONS.has(payload.action)) return;
