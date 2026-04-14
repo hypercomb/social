@@ -54,16 +54,34 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     }
 
     const run = async (): Promise<Bee[]> => {
-      // Load bees from cached install manifest
-      const manifestBees = ScriptPreloader.readManifestBees()
-      if (manifestBees.length) {
-        await this.#loadBeesFromList(manifestBees)
+      // Layer-walk: layers are the source of truth. Union every signature
+      // array they declare (bees, dependencies, resources, nested layers).
+      // Falls back to the flat install-manifest bees list for legacy/dev.
+      const layerRoots = ScriptPreloader.readManifestLayers()
+      const walked = layerRoots.length
+        ? await this.#walkLayers(layerRoots)
+        : { bees: ScriptPreloader.readManifestBees(), dependencies: [], resources: [] }
+
+      // Prefetch __resources__ in parallel with bee loading — tiles and
+      // drones that need these blobs will find them hot in the Store cache.
+      const prefetch = walked.resources.length
+        ? Promise.allSettled(walked.resources.map(sig => this.store.preheatResource(sig)))
+        : Promise.resolve([])
+
+      if (walked.bees.length) {
+        await this.#loadBeesFromList(walked.bees)
       }
+
+      await prefetch
+
+      // Warmup hooks — every freshly-registered bee gets one shot to
+      // pre-rasterize glyphs, compile shaders, open connections, etc.
+      await this.#runWarmups()
 
       // Enforce manifest: dispose and evict bees that are no longer enabled.
       // This is the trust boundary — if DCP says a bee is off, it must not pulse.
-      if (manifestBees.length) {
-        const enabledSet = new Set(manifestBees)
+      if (walked.bees.length) {
+        const enabledSet = new Set(walked.bees)
         let evicted = false
         for (const [sig, bee] of this.#beeCache) {
           if (!enabledSet.has(sig)) {
@@ -73,6 +91,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
             window.ioc.unregister(key)
             this.#beeCache.delete(sig)
             this.#bySignature.delete(sig)
+            this.#warmedUp.delete(sig)
             this.#resourceCount = Math.max(0, this.#resourceCount - 1)
             evicted = true
           }
@@ -88,8 +107,90 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   }
 
   // -------------------------------------------------
+  // layer walk — layers are the source of truth
+  // -------------------------------------------------
+
+  readonly #warmedUp = new Set<string>()
+
+  #walkLayers = async (
+    roots: string[]
+  ): Promise<{ bees: string[]; dependencies: string[]; resources: string[] }> => {
+    const visited = new Set<string>()
+    const bees = new Set<string>()
+    const dependencies = new Set<string>()
+    const resources = new Set<string>()
+
+    const visit = async (sig: string): Promise<void> => {
+      const clean = this.#stripExt(sig)
+      if (!clean || visited.has(clean)) return
+      visited.add(clean)
+
+      const bytes = await this.store.getLayerBytes(clean)
+      if (!bytes) {
+        console.warn(`[script-preloader] layer ${clean} not found in OPFS`)
+        return
+      }
+
+      let layer: Record<string, unknown>
+      try {
+        layer = JSON.parse(new TextDecoder().decode(bytes))
+      } catch (err) {
+        console.warn(`[script-preloader] failed to parse layer ${clean}:`, err)
+        return
+      }
+
+      for (const b of (layer.bees as string[] | undefined) ?? []) bees.add(this.#stripExt(b))
+      for (const d of (layer.dependencies as string[] | undefined) ?? []) dependencies.add(this.#stripExt(d))
+      for (const r of (layer.resources as string[] | undefined) ?? []) resources.add(this.#stripExt(r))
+
+      const children = (layer.layers as string[] | undefined) ?? []
+      await Promise.all(children.map(visit))
+    }
+
+    await Promise.all(roots.map(visit))
+    return {
+      bees: [...bees].filter(Boolean),
+      dependencies: [...dependencies].filter(Boolean),
+      resources: [...resources].filter(Boolean),
+    }
+  }
+
+  #runWarmups = async (): Promise<void> => {
+    const pending: Promise<void>[] = []
+    for (const [sig, bee] of this.#beeCache) {
+      if (this.#warmedUp.has(sig)) continue
+      this.#warmedUp.add(sig)
+      if (typeof bee.warmup !== 'function') continue
+      const result = bee.warmup()
+      if (result instanceof Promise) {
+        pending.push(result.catch(err =>
+          console.warn(`[script-preloader] warmup failed for ${bee.iocKey}:`, err)))
+      }
+    }
+    if (pending.length) {
+      EffectBus.emit('loader:warmup-progress', { count: pending.length })
+      await Promise.allSettled(pending)
+      EffectBus.emit('loader:warmup-done', { count: pending.length })
+    }
+  }
+
+  #stripExt = (s: string): string =>
+    typeof s === 'string' ? s.replace(/\.(js|json)$/i, '') : ''
+
+  // -------------------------------------------------
   // manifest-driven loading (primary path)
   // -------------------------------------------------
+
+  private static readManifestLayers(): string[] {
+    try {
+      const raw = localStorage.getItem('core-adapter.installed-manifest')
+      if (!raw) return []
+      const manifest = JSON.parse(raw)
+      return Array.isArray(manifest?.layers) ? manifest.layers.filter(Boolean) : []
+    } catch {
+      return []
+    }
+  }
 
   private static readManifestBees(): string[] {
     try {
@@ -230,6 +331,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   public preload = async (): Promise<void> => {
     this.#bySignature.clear()
     this.#beeCache.clear()
+    this.#warmedUp.clear()
     this.#actions = []
     this.#actionNames = []
     this.#resourceCount = 0

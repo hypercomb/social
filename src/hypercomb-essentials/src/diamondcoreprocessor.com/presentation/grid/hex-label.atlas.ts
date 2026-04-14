@@ -86,6 +86,53 @@ export class HexLabelAtlas {
     return this.atlas
   }
 
+  /**
+   * Pre-rasterize a batch of labels into the atlas in a single render pass.
+   * Idempotent — labels already in the cache are skipped. Call after
+   * construction with the set of labels you know will appear on first paint,
+   * so `getLabelUV()` never rasterizes on the render-hot path.
+   */
+  public seed = (labels: readonly string[]): void => {
+    if (!labels.length) return
+
+    const batch = new Container()
+    const created: Text[] = []
+
+    for (const label of labels) {
+      if (!label || this.map.has(label)) continue
+
+      const slot = this.nextIndex % (this.cols * this.rows)
+      this.nextIndex++
+
+      const col = slot % this.cols
+      const row = Math.floor(slot / this.cols)
+
+      const displayText = this.#labelResolver ? this.#labelResolver(label) : label
+      const text = new Text({ text: displayText, style: this.style })
+      text.resolution = 8
+      text.anchor.set(0.5)
+      text.position.set(
+        col * this.cellPx + this.cellPx * 0.5,
+        row * this.cellPx + this.cellPx * 0.5
+      )
+      if (this.#pivot) text.rotation = Math.PI / 2
+
+      batch.addChild(text)
+      created.push(text)
+
+      const u0 = (col * this.cellPx) / this.atlas.width
+      const v0 = (row * this.cellPx) / this.atlas.height
+      const u1 = ((col + 1) * this.cellPx) / this.atlas.width
+      const v1 = ((row + 1) * this.cellPx) / this.atlas.height
+      this.map.set(label, { u0, v0, u1, v1 })
+    }
+
+    if (!created.length) return
+
+    this.renderer.render({ container: batch, target: this.atlas, clear: false })
+    for (const text of created) text.destroy()
+  }
+
   public getLabelUV = (label: string): LabelUV => {
     const cached = this.map.get(label)
     if (cached) return cached

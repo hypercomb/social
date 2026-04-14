@@ -239,7 +239,8 @@ export class ShowCellDrone extends Drone {
   private meshCells: string[] = []
 
   // clipboard view override — when set, render from this dir instead of explorer
-  #clipboardView: { labels: Set<string>; sourceSegments: string[] } | null = null
+  #clipboardView: { labels: Set<string>; sourceSegments: string[]; op: 'cut' | 'copy' } | null = null
+  #lastCursorRewound = false
   private meshSub: MeshSub | null = null
   private readonly publisherId: string = (() => {
     const key = 'hc:show-honeycomb:publisher-id'
@@ -339,9 +340,51 @@ export class ShowCellDrone extends Drone {
     this.requestRender()
   }
 
+  /** Pre-warm: preheat every known tile-props blob and its `small.image`
+   *  resource so first paint finds them hot in the Store cache. Runs once
+   *  after registration, before the first pulse. Best-effort. */
+  public override async warmup(): Promise<void> {
+    try {
+      const raw = localStorage.getItem('hc:tile-props-index')
+      if (!raw) return
+      const propsIndex = JSON.parse(raw) as Record<string, unknown>
+      const propsSigs = Object.values(propsIndex)
+        .filter((v): v is string => typeof v === 'string' && /^[a-f0-9]{64}$/i.test(v))
+      if (!propsSigs.length) return
+
+      const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as
+        { preheatResource?: (sig: string) => Promise<Blob | null> } | undefined
+      if (!store?.preheatResource) return
+
+      const propsBlobs = await Promise.all(
+        propsSigs.map(sig => store.preheatResource!(sig).catch(() => null))
+      )
+
+      const imageSigs = new Set<string>()
+      for (const blob of propsBlobs) {
+        if (!blob) continue
+        try {
+          const props = JSON.parse(await blob.text())
+          const sig = props?.small?.image
+          if (typeof sig === 'string' && /^[a-f0-9]{64}$/i.test(sig)) imageSigs.add(sig)
+        } catch { /* skip malformed */ }
+      }
+
+      if (imageSigs.size) {
+        await Promise.allSettled(
+          [...imageSigs].map(sig => store.preheatResource!(sig).catch(() => null))
+        )
+      }
+
+      this.#warmLabels = Object.keys(propsIndex)
+    } catch { /* best-effort */ }
+  }
+
+  #warmLabels: string[] = []
+
   protected override heartbeat = async (grammar: string = ''): Promise<void> => {
     this.ensureListeners()
-    
+
     // emit initial geometry so consumers start in sync (first pulse only)
     if (!this.#heartbeatInitialized) {
       this.#heartbeatInitialized = true
@@ -1101,6 +1144,7 @@ export class ShowCellDrone extends Drone {
       this.atlas = new HexLabelAtlas(this.pixiRenderer, 128, 8, 8)
       this.attachLabelResolver(this.atlas)
       this.atlas.setPivot(this.#pivot)
+      if (this.#warmLabels.length) this.atlas.seed(this.#warmLabels)
       this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8)
       this.cellImageCache.clear()
       this.cellBorderColorCache.clear()
@@ -1111,6 +1155,7 @@ export class ShowCellDrone extends Drone {
       this.atlas = new HexLabelAtlas(this.pixiRenderer, 128, 8, 8)
       this.attachLabelResolver(this.atlas)
       this.atlas.setPivot(this.#pivot)
+      if (this.#warmLabels.length) this.atlas.seed(this.#warmLabels)
       this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8)
       this.cellImageCache.clear()
       this.cellBorderColorCache.clear()
@@ -1129,7 +1174,20 @@ export class ShowCellDrone extends Drone {
       return currentKey !== locationKey || currentRev !== fsRev || currentMeshRev !== meshRev
     }
 
-    const dir = await lineage.explorerDir()
+    let dir: FileSystemDirectoryHandle | null
+    if (this.#clipboardView) {
+      const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as
+        { clipboard?: FileSystemDirectoryHandle; hypercombRoot?: FileSystemDirectoryHandle } | undefined
+      if (this.#clipboardView.op === 'cut' && store?.clipboard) {
+        dir = store.clipboard
+      } else if (this.#clipboardView.sourceSegments.length > 0 && store?.hypercombRoot && lineage.tryResolve) {
+        dir = await lineage.tryResolve(this.#clipboardView.sourceSegments, store.hypercombRoot)
+      } else {
+        dir = await lineage.explorerDir()
+      }
+    } else {
+      dir = await lineage.explorerDir()
+    }
     if (!this.#clipboardView && isStale()) {
       this.renderQueued = true
       return
@@ -1835,8 +1893,15 @@ export class ShowCellDrone extends Drone {
       }
     })
 
-    // history:cursor-changed — re-render with divergence when cursor moves
-    this.onEffect('history:cursor-changed', () => {
+    // history:cursor-changed — re-render with divergence when cursor MOVES
+    // (rewound ↔ latest). A brand-new op arriving while the cursor is at head
+    // just updates #total without a visual change — the incremental cell:added
+    // / cell:removed path has already reconciled the view, and forcing another
+    // full render here wipes in-flight work (e.g. just-pasted tiles).
+    this.onEffect<{ rewound?: boolean }>('history:cursor-changed', (state) => {
+      const nowRewound = state?.rewound ?? false
+      if (nowRewound === this.#lastCursorRewound) return
+      this.#lastCursorRewound = nowRewound
       this.#layerCellsCache.clear()
       this.renderedCellsKey = ''
       this.requestRender()
@@ -1923,16 +1988,34 @@ export class ShowCellDrone extends Drone {
     })
 
     // clipboard:view effect — filter visible cells to clipboard contents
-    this.onEffect<{ active: boolean; labels?: string[]; sourceSegments?: string[] }>('clipboard:view', (payload) => {
+    this.onEffect<{ active: boolean; labels?: string[]; sourceSegments?: string[]; op?: 'cut' | 'copy' }>('clipboard:view', (payload) => {
+      const wasActive = this.#clipboardView
       if (payload?.active && payload.labels) {
         this.#clipboardView = {
           labels: new Set(payload.labels),
           sourceSegments: payload.sourceSegments ?? [],
+          op: payload.op ?? 'copy',
         }
       } else {
         this.#clipboardView = null
       }
       this.renderedCellsKey = '' // force full geometry rebuild on enter/exit
+
+      // Exiting clipboard view: only drop caches for the clipboard labels.
+      // Those entries were populated from store.clipboard / the source-segments
+      // dir and may not match the real explorer layer. Leave renderedLocationKey
+      // alone — the explorer layer itself didn't change, so forcing a
+      // layer-change rebuild hides the mesh layer until streamCells restores it.
+      if (wasActive && !payload?.active) {
+        for (const label of wasActive.labels) {
+          this.cellImageCache.delete(label)
+          this.cellBorderColorCache.delete(label)
+          this.cellTagsCache.delete(label)
+          this.cellLinkCache.delete(label)
+          this.cellSubstrateCache.delete(label)
+        }
+        if (this.layer) this.layer.visible = true
+      }
       this.requestRender()
     })
 
@@ -2325,7 +2408,11 @@ export class ShowCellDrone extends Drone {
   }
 
   #readLayoutMode(_locationKey: string): 'dense' | 'pinned' {
-    return 'dense'
+    // Pinned is the canonical default: each cell keeps its slot index
+    // permanently (stored in its 0000 properties). The spiral/contiguous
+    // fill runs only once — to assign an index to a brand-new cell that
+    // has none yet. Removal leaves a gap, never shifts neighbours.
+    return 'pinned'
   }
 
   #persistLayoutMode(mode: 'dense' | 'pinned'): void {
