@@ -4,9 +4,14 @@ import { EffectBus } from '@hypercomb/core'
 // ── reactive state (tracked via effects already emitted by services) ──
 
 let editorActive = false
+let clipboardActive = false
 
 EffectBus.on<{ active: boolean }>('editor:mode', ({ active }) => {
   editorActive = active
+})
+
+EffectBus.on<{ active: boolean }>('clipboard:view', ({ active }) => {
+  clipboardActive = active
 })
 
 // ── cascade handler ───────────────────────────────────────────────────
@@ -35,6 +40,21 @@ EffectBus.on<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
     return
   }
 
-  // Priority 3: generic fallback for future consumers
+  // Priority 3: exit clipboard mode (parity with X button and right-click)
+  if (clipboardActive) {
+    EffectBus.emit('clipboard:close', undefined)
+    return
+  }
+
+  // Priority 4: generic fallback for future consumers
   EffectBus.emit('global:escape', undefined)
+})
+
+// ── right-click exits clipboard mode ──────────────────────────────────
+// Same parity as the X button: contextmenu anywhere closes the clipboard view.
+
+window.addEventListener('contextmenu', (event) => {
+  if (!clipboardActive) return
+  event.preventDefault()
+  EffectBus.emit('clipboard:close', undefined)
 })

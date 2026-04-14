@@ -2,6 +2,8 @@
 import { Drone, EffectBus } from '@hypercomb/core'
 import { Application, Container, Point } from 'pixi.js'
 import type { HostReadyPayload } from '../../presentation/tiles/pixi-host.worker.js'
+import type { HexGeometry } from '../../presentation/grid/hex-geometry.js'
+import { DEFAULT_HEX_GEOMETRY } from '../../presentation/grid/hex-geometry.js'
 
 type Pt = { x: number; y: number }
 
@@ -262,7 +264,7 @@ export class ZoomDrone extends Drone {
   private canvas: HTMLCanvasElement | null = null
   private renderer: Application['renderer'] | null = null
 
-  private readonly minScale = 0.05
+  private readonly minScale = 0.2
   private readonly maxScale = 12
 
   private vp: ViewportPersistence | null = null
@@ -283,9 +285,10 @@ export class ZoomDrone extends Drone {
     coordinator: '@diamondcoreprocessor.com/TouchGestureCoordinator',
     touchPan: '@diamondcoreprocessor.com/TouchPanInput',
   }
-  protected override listens = ['render:host-ready', 'editor:mode', 'keymap:invoke']
+  protected override listens = ['render:host-ready', 'editor:mode', 'keymap:invoke', 'render:geometry-changed']
 
   #effectsRegistered = false
+  #hexGeo: HexGeometry = DEFAULT_HEX_GEOMETRY
 
   protected override heartbeat = async (): Promise<void> => {
     if (this.#effectsRegistered) return
@@ -293,6 +296,10 @@ export class ZoomDrone extends Drone {
 
     this.onEffect<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
       if (cmd === 'navigation.fitToScreen') this.zoomToFit()
+    })
+
+    this.onEffect<HexGeometry>('render:geometry-changed', (geo) => {
+      this.#hexGeo = geo
     })
 
     // lock the input gate while the editor is open so wheel/pinch zoom
@@ -591,6 +598,8 @@ export class ZoomDrone extends Drone {
       )
     }
 
+    this.#clampContentPosition()
+
     if (t < 1) {
       this.#animFrameId = requestAnimationFrame(this.#animTick)
     } else {
@@ -637,6 +646,7 @@ export class ZoomDrone extends Drone {
         target.position.x + (pivotParent.x - postParent.x),
         target.position.y + (pivotParent.y - postParent.y)
       )
+      this.#clampContentPosition()
       this.#saveZoom(target)
       return
     }
@@ -646,11 +656,46 @@ export class ZoomDrone extends Drone {
       target.position.y + (pivotGlobal.y - postGlobal.y)
     )
 
+    this.#clampContentPosition()
     this.#saveZoom(target)
   }
 
   #saveZoom = (target: any): void => {
     this.vp?.setZoom(target.scale.x, target.position.x, target.position.y)
+  }
+
+  // After any zoom-induced position/scale change, ensure at least one tile
+  // remains fully on screen. Pivot zoom keeps the cursor pixel stable, which
+  // can drift the content off the viewport when zooming against a pivot
+  // outside the grid — this nudges the container back just enough to keep
+  // one tile in view, sacrificing the pivot invariant at the edge.
+  #clampContentPosition = (): void => {
+    if (!this.renderContainer || !this.renderer || !this.app) return
+    const layer = this.#findContentLayer(this.renderContainer)
+    const target: any = layer ?? this.renderContainer
+    if (!target.getBounds) return
+    const b = target.getBounds()
+    if (!b || b.width <= 0 || b.height <= 0) return
+
+    const scale = this.renderContainer.scale.x || 1
+    const ss = this.app.stage.scale.x || 1
+    const tile = 2 * this.#hexGeo.circumRadiusPx * scale * ss
+    const W = this.renderer.screen.width
+    const H = this.renderer.screen.height
+
+    let shiftX = 0
+    if (b.x > W - tile) shiftX = (W - tile) - b.x
+    else if (b.x + b.width < tile) shiftX = tile - (b.x + b.width)
+
+    let shiftY = 0
+    if (b.y > H - tile) shiftY = (H - tile) - b.y
+    else if (b.y + b.height < tile) shiftY = tile - (b.y + b.height)
+
+    if (shiftX === 0 && shiftY === 0) return
+
+    // Shift in renderContainer's local space (before stage scale).
+    this.renderContainer.position.x += shiftX / ss
+    this.renderContainer.position.y += shiftY / ss
   }
 
   // -------------------------------------------------

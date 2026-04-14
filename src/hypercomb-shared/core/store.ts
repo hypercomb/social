@@ -211,13 +211,58 @@ export class Store extends EventTarget {
     return signature
   }
 
+  readonly #resourceCache = new Map<string, Blob>()
+  readonly #resourcePending = new Map<string, Promise<Blob | null>>()
+
   public getResource = async (signature: string): Promise<Blob | null> => {
-    try {
-      const handle = await this.resources.getFileHandle(signature)
-      return await handle.getFile()
-    } catch {
-      return null
+    const cached = this.#resourceCache.get(signature)
+    if (cached) return cached
+    return this.#loadResource(signature)
+  }
+
+  /** Prefetch a resource into the in-memory cache. Safe to call concurrently
+   *  for the same signature — in-flight loads are deduped. */
+  public preheatResource = async (signature: string): Promise<Blob | null> =>
+    this.getResource(signature)
+
+  #loadResource = (signature: string): Promise<Blob | null> => {
+    const existing = this.#resourcePending.get(signature)
+    if (existing) return existing
+    const promise = (async () => {
+      try {
+        const handle = await this.resources.getFileHandle(signature)
+        const blob = await handle.getFile()
+        this.#resourceCache.set(signature, blob)
+        return blob
+      } catch {
+        return null
+      } finally {
+        this.#resourcePending.delete(signature)
+      }
+    })()
+    this.#resourcePending.set(signature, promise)
+    return promise
+  }
+
+  /** Read a layer JSON by signature, scanning per-domain subdirectories.
+   *  Layers live at __layers__/<domain>/<sig> or __layers__/<domain>/<sig>.json. */
+  public getLayerBytes = async (signature: string): Promise<Uint8Array | null> => {
+    const domainNames: string[] = []
+    for await (const [name, entry] of (this.layers as any).entries() as AsyncIterable<[string, FileSystemHandle]>) {
+      if (entry.kind === 'directory') domainNames.push(name)
     }
+    for (const name of domainNames) {
+      const domainDir = await this.layers.getDirectoryHandle(name).catch(() => null)
+      if (!domainDir) continue
+      for (const fileName of [signature, `${signature}.json`]) {
+        try {
+          const handle = await domainDir.getFileHandle(fileName)
+          const file = await handle.getFile()
+          return new Uint8Array(await file.arrayBuffer())
+        } catch { /* try next */ }
+      }
+    }
+    return null
   }
 
   // -------------------------------------------------

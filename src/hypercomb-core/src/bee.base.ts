@@ -57,6 +57,12 @@ export abstract class Bee {
     this._state = BeeState.Registered
   }
 
+  /** Optional one-time resource warmup — invoked by ScriptPreloader after
+   *  registration and before the bee participates in pulse cycles. Override
+   *  to pre-rasterize glyphs, precompile shaders, prefetch assets, open
+   *  long-lived connections, or hydrate caches. */
+  public warmup?(): Promise<void>
+
   /** Optional cleanup hook — override in subclasses */
   protected dispose?(): void
 

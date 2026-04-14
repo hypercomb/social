@@ -2,10 +2,16 @@
 import { Drone, EffectBus as EffectBus2 } from "@hypercomb/core";
 import { Point } from "pixi.js";
 
+// src/diamondcoreprocessor.com/presentation/grid/hex-geometry.ts
+function createHexGeometry(circumRadiusPx, gapPx, padPx = 10) {
+  return { circumRadiusPx, gapPx, padPx, spacing: circumRadiusPx + gapPx };
+}
+var DEFAULT_HEX_GEOMETRY = createHexGeometry(32, 6);
+
 // src/diamondcoreprocessor.com/navigation/zoom/pinch-zoom.input.ts
 var PinchZoomInput = class {
   #zoom = null;
-  #minScale = 0.05;
+  #minScale = 0.2;
   attach = (zoom, minScale) => {
     this.#zoom = zoom;
     if (minScale != null) this.#minScale = minScale;
@@ -640,7 +646,7 @@ var ZoomDrone = class extends Drone {
   renderContainer = null;
   canvas = null;
   renderer = null;
-  minScale = 0.05;
+  minScale = 0.2;
   maxScale = 12;
   vp = null;
   // ── smooth zoom animation state ──
@@ -659,13 +665,17 @@ var ZoomDrone = class extends Drone {
     coordinator: "@diamondcoreprocessor.com/TouchGestureCoordinator",
     touchPan: "@diamondcoreprocessor.com/TouchPanInput"
   };
-  listens = ["render:host-ready", "editor:mode", "keymap:invoke"];
+  listens = ["render:host-ready", "editor:mode", "keymap:invoke", "render:geometry-changed"];
   #effectsRegistered = false;
+  #hexGeo = DEFAULT_HEX_GEOMETRY;
   heartbeat = async () => {
     if (this.#effectsRegistered) return;
     this.#effectsRegistered = true;
     this.onEffect("keymap:invoke", ({ cmd }) => {
       if (cmd === "navigation.fitToScreen") this.zoomToFit();
+    });
+    this.onEffect("render:geometry-changed", (geo) => {
+      this.#hexGeo = geo;
     });
     const gate = window.ioc.get("@diamondcoreprocessor.com/InputGate");
     this.onEffect("editor:mode", ({ active }) => {
@@ -876,6 +886,7 @@ var ZoomDrone = class extends Drone {
         target.position.y + (pivotGlobal.y - postGlobal.y)
       );
     }
+    this.#clampContentPosition();
     if (t < 1) {
       this.#animFrameId = requestAnimationFrame(this.#animTick);
     } else {
@@ -910,6 +921,7 @@ var ZoomDrone = class extends Drone {
         target.position.x + (pivotParent.x - postParent.x),
         target.position.y + (pivotParent.y - postParent.y)
       );
+      this.#clampContentPosition();
       this.#saveZoom(target);
       return;
     }
@@ -917,10 +929,38 @@ var ZoomDrone = class extends Drone {
       target.position.x + (pivotGlobal.x - postGlobal.x),
       target.position.y + (pivotGlobal.y - postGlobal.y)
     );
+    this.#clampContentPosition();
     this.#saveZoom(target);
   };
   #saveZoom = (target) => {
     this.vp?.setZoom(target.scale.x, target.position.x, target.position.y);
+  };
+  // After any zoom-induced position/scale change, ensure at least one tile
+  // remains fully on screen. Pivot zoom keeps the cursor pixel stable, which
+  // can drift the content off the viewport when zooming against a pivot
+  // outside the grid — this nudges the container back just enough to keep
+  // one tile in view, sacrificing the pivot invariant at the edge.
+  #clampContentPosition = () => {
+    if (!this.renderContainer || !this.renderer || !this.app) return;
+    const layer = this.#findContentLayer(this.renderContainer);
+    const target = layer ?? this.renderContainer;
+    if (!target.getBounds) return;
+    const b = target.getBounds();
+    if (!b || b.width <= 0 || b.height <= 0) return;
+    const scale = this.renderContainer.scale.x || 1;
+    const ss = this.app.stage.scale.x || 1;
+    const tile = 2 * this.#hexGeo.circumRadiusPx * scale * ss;
+    const W = this.renderer.screen.width;
+    const H = this.renderer.screen.height;
+    let shiftX = 0;
+    if (b.x > W - tile) shiftX = W - tile - b.x;
+    else if (b.x + b.width < tile) shiftX = tile - (b.x + b.width);
+    let shiftY = 0;
+    if (b.y > H - tile) shiftY = H - tile - b.y;
+    else if (b.y + b.height < tile) shiftY = tile - (b.y + b.height);
+    if (shiftX === 0 && shiftY === 0) return;
+    this.renderContainer.position.x += shiftX / ss;
+    this.renderContainer.position.y += shiftY / ss;
   };
   // -------------------------------------------------
   // input mapping

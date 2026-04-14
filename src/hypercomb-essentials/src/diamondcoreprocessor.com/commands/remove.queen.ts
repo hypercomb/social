@@ -50,7 +50,9 @@ export class RemoveQueenBee extends QueenBee {
       try {
         await dir.removeEntry(name, { recursive: true })
         EffectBus.emit('cell:removed', { cell: name, groupId })
-      } catch { /* entry doesn't exist or can't be removed — skip */ }
+      } catch (e) {
+        console.error('[remove] removeEntry failed', name, e)
+      }
     }
 
     void new hypercomb().act()

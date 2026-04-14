@@ -295,6 +295,9 @@ export class MoveDrone extends Drone {
         await orderProjection.reorder(insertOrder)
       }
 
+      // Pinned mode: each tile's `index` property must reflect its new slot.
+      await this.#persistPinnedIndicesByOrder(insertOrder)
+
       this.emitEffect('cell:reorder', { labels: insertOrder })
       this.emitEffect('move:preview', null)
       this.emitEffect('move:committed', { order: insertOrder })
@@ -753,9 +756,44 @@ export class MoveDrone extends Drone {
       await orderProjection.reorder(denseOrder)
     }
 
+    // Pinned rendering reads each cell's `index` property; without this write
+    // the move would appear to snap back after release even though the history
+    // op was recorded. Update index for every placed tile (moved + displaced).
+    await this.#persistPinnedIndices(placements)
+
     this.emitEffect('cell:reorder', { labels: denseOrder })
     this.emitEffect('move:preview', null)
     this.emitEffect('move:committed', { order: denseOrder })
+  }
+
+  async #persistPinnedIndices(placements: Map<string, Axial>): Promise<void> {
+    const lineage = this.resolve<any>('lineage')
+    const dir: FileSystemDirectoryHandle | null = lineage?.explorerDir ? await lineage.explorerDir() : null
+    if (!dir) return
+
+    for (const [label, axial] of placements) {
+      const gridIndex = this.#keyToIndex.get(axialKey(axial.q, axial.r))
+      if (gridIndex === undefined) continue
+      try {
+        const cellDir = await dir.getDirectoryHandle(label, { create: false })
+        await writeCellProperties(cellDir, { index: gridIndex, offset: 0 })
+      } catch { /* skip missing cell dirs */ }
+    }
+  }
+
+  async #persistPinnedIndicesByOrder(order: string[]): Promise<void> {
+    const lineage = this.resolve<any>('lineage')
+    const dir: FileSystemDirectoryHandle | null = lineage?.explorerDir ? await lineage.explorerDir() : null
+    if (!dir) return
+
+    for (let i = 0; i < order.length; i++) {
+      const label = order[i]
+      if (!label) continue
+      try {
+        const cellDir = await dir.getDirectoryHandle(label, { create: false })
+        await writeCellProperties(cellDir, { index: i, offset: 0 })
+      } catch { /* skip missing cell dirs */ }
+    }
   }
 
   // ── reset ────────────────────────────────────────────────

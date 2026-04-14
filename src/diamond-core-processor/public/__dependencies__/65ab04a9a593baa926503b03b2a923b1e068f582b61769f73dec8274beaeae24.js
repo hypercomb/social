@@ -762,14 +762,15 @@ var SubstrateService = class extends EventTarget {
    * increment. Random tie-breaks among least-used entries keep output
    * unpredictable without breaking the even distribution.
    */
-  #pickBalanced() {
+  #pickBalanced(excludePropsSig) {
     if (this.#propsPool.length === 0) return null;
+    const pool = excludePropsSig && this.#propsPool.length > 1 ? this.#propsPool.filter((e) => e.propsSig !== excludePropsSig) : this.#propsPool;
     let min = Infinity;
-    for (const entry of this.#propsPool) {
+    for (const entry of pool) {
       const count = this.#usageCounts.get(entry.propsSig) ?? 0;
       if (count < min) min = count;
     }
-    const candidates = this.#propsPool.filter((e) => (this.#usageCounts.get(e.propsSig) ?? 0) === min);
+    const candidates = pool.filter((e) => (this.#usageCounts.get(e.propsSig) ?? 0) === min);
     const chosen = candidates[Math.floor(Math.random() * candidates.length)];
     this.#usageCounts.set(chosen.propsSig, (this.#usageCounts.get(chosen.propsSig) ?? 0) + 1);
     return chosen;
@@ -801,9 +802,10 @@ var SubstrateService = class extends EventTarget {
     if (this.#propsPool.length === 0) return false;
     const indexKey = "hc:tile-props-index";
     const index = JSON.parse(localStorage.getItem(indexKey) ?? "{}");
-    this.#releaseUsage(index[label]);
+    const previous = index[label];
+    this.#releaseUsage(previous);
     delete index[label];
-    const entry = this.#pickBalanced();
+    const entry = this.#pickBalanced(previous);
     if (!entry) return false;
     index[label] = entry.propsSig;
     localStorage.setItem(indexKey, JSON.stringify(index));
@@ -827,7 +829,7 @@ var SubstrateService = class extends EventTarget {
       if (!current) continue;
       this.#releaseUsage(current);
       delete index[label];
-      const entry = this.#pickBalanced();
+      const entry = this.#pickBalanced(current);
       if (!entry) break;
       index[label] = entry.propsSig;
       rerolled.push(label);

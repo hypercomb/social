@@ -69,7 +69,7 @@
 
   @if (effectiveShowCompletions()) {
     <ul class="command-results" role="listbox">
-      @for (s of suggestions(); track s; let i = $index) {
+      @for (s of suggestions(); track $index; let i = $index) {
         <li
           role="option"
           [class.active]="i === getActiveIndex()"

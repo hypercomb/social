@@ -139,9 +139,153 @@ var ArrangeQueenBee = class extends QueenBee2 {
 var _arrange = new ArrangeQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/ArrangeQueenBee", _arrange);
 
-// src/diamondcoreprocessor.com/commands/debug.queen.ts
+// src/diamondcoreprocessor.com/commands/branch.queen.ts
 import { QueenBee as QueenBee3, EffectBus as EffectBus3 } from "@hypercomb/core";
-var DebugQueenBee = class extends QueenBee3 {
+
+// src/diamondcoreprocessor.com/editor/tile-properties.ts
+var TILE_PROPERTIES_FILE = "0000";
+var isSignature = (value) => typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
+var readCellProperties = async (cellDir) => {
+  try {
+    const fileHandle = await cellDir.getFileHandle(TILE_PROPERTIES_FILE);
+    const file = await fileHandle.getFile();
+    const text = await file.text();
+    return JSON.parse(text);
+  } catch {
+    return {};
+  }
+};
+var writeCellProperties = async (cellDir, updates) => {
+  const existing = await readCellProperties(cellDir);
+  const merged = { ...existing, ...updates };
+  const fileHandle = await cellDir.getFileHandle(TILE_PROPERTIES_FILE, { create: true });
+  const writable = await fileHandle.createWritable();
+  await writable.write(JSON.stringify(merged));
+  await writable.close();
+};
+
+// src/diamondcoreprocessor.com/commands/branch.queen.ts
+var toast = (type, title, message) => {
+  try {
+    EffectBus3.emit("toast:show", { type, title, message });
+  } catch {
+  }
+};
+var NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
+var BranchQueenBee = class extends QueenBee3 {
+  namespace = "diamondcoreprocessor.com";
+  command = "branch";
+  aliases = ["mark", "label"];
+  description = "Give a lineage path or signature a named handle that other slash commands autocomplete against.";
+  descriptionKey = "slash.branch";
+  slashComplete(args) {
+    const tokens = args.split(/\s+/);
+    const registry = get("@hypercomb.social/NameRegistry");
+    const names = registry?.names ?? [];
+    if (tokens.length <= 1) {
+      const first = (tokens[0] ?? "").toLowerCase();
+      const matches = names.filter((n) => n.toLowerCase().startsWith(first));
+      const suggestions = [];
+      if (!first) suggestions.push("(name)", "list");
+      if ("list".startsWith(first)) suggestions.push("list");
+      return [.../* @__PURE__ */ new Set([...matches, ...suggestions])];
+    }
+    if (tokens.length === 2) {
+      const second = (tokens[1] ?? "").toLowerCase();
+      const ops = ["<64-hex signature>", "clear"];
+      if (!second) return ops;
+      return ops.filter((o) => o.toLowerCase().startsWith(second));
+    }
+    return [];
+  }
+  execute(args) {
+    const trimmed = args.trim();
+    if (!trimmed) {
+      console.warn("[/branch] usage: /branch <name> [signature | clear]  |  /branch list");
+      return;
+    }
+    const tokens = trimmed.split(/\s+/);
+    const first = tokens[0];
+    if (first.toLowerCase() === "list") {
+      void this.#list();
+      return;
+    }
+    if (!NAME_RE.test(first)) {
+      console.warn(`[/branch] invalid name "${first}" \u2014 use letters, digits, - . _ (max 64)`);
+      return;
+    }
+    const second = tokens[1]?.trim();
+    if (!second) {
+      void this.#setLineage(first);
+      return;
+    }
+    if (second.toLowerCase() === "clear" || second.toLowerCase() === "remove") {
+      void this.#remove(first);
+      return;
+    }
+    if (isSignature(second)) {
+      void this.#setSignature(first, second.toLowerCase());
+      return;
+    }
+    console.warn(`[/branch] second arg must be empty, "clear", or a 64-hex signature \u2014 got "${second.slice(0, 20)}\u2026"`);
+  }
+  async #setLineage(name) {
+    const lineage = get("@hypercomb.social/Lineage");
+    const registry = get("@hypercomb.social/NameRegistry");
+    if (!lineage?.explorerSegments || !registry?.setLineage) {
+      console.warn("[/branch] services not ready");
+      return;
+    }
+    const path = [...lineage.explorerSegments() ?? []];
+    await registry.setLineage(name, path);
+    const label = "/" + path.join("/");
+    console.log(`[/branch] ${name} \u2192 ${label}`);
+    toast("success", "Branch saved", `${name} \u2192 ${label}`);
+  }
+  async #setSignature(name, sig) {
+    const registry = get("@hypercomb.social/NameRegistry");
+    if (!registry?.setSignature) return;
+    await registry.setSignature(name, sig);
+    console.log(`[/branch] ${name} \u2192 signature ${sig}`);
+    toast("success", "Branch saved", `${name} \u2192 ${sig.slice(0, 12)}\u2026`);
+  }
+  async #remove(name) {
+    const registry = get("@hypercomb.social/NameRegistry");
+    if (!registry?.remove) return;
+    const removed = await registry.remove(name);
+    console.log(removed ? `[/branch] removed ${name}` : `[/branch] no such name: ${name}`);
+    if (removed) toast("info", "Branch removed", name);
+    else toast("warning", "No such branch", name);
+  }
+  async #list() {
+    const registry = get("@hypercomb.social/NameRegistry");
+    if (!registry?.ensureLoaded) {
+      console.warn("[/branch] registry not ready");
+      return;
+    }
+    await registry.ensureLoaded();
+    const all = registry.all;
+    const names = Object.keys(all).sort();
+    if (!names.length) {
+      console.log("[/branch] no branches");
+      return;
+    }
+    for (const name of names) {
+      const entry = all[name];
+      if (entry?.target?.kind === "lineage") {
+        console.log(`[/branch] ${name} \u2192 /${(entry.target.path ?? []).join("/")}`);
+      } else if (entry?.target?.kind === "signature") {
+        console.log(`[/branch] ${name} \u2192 signature ${entry.target.signature}`);
+      }
+    }
+  }
+};
+var _branch = new BranchQueenBee();
+window.ioc.register("@diamondcoreprocessor.com/BranchQueenBee", _branch);
+
+// src/diamondcoreprocessor.com/commands/debug.queen.ts
+import { QueenBee as QueenBee4, EffectBus as EffectBus4 } from "@hypercomb/core";
+var DebugQueenBee = class extends QueenBee4 {
   namespace = "diamondcoreprocessor.com";
   command = "debug";
   aliases = [];
@@ -152,10 +296,10 @@ var DebugQueenBee = class extends QueenBee3 {
       dbg.toggle();
       const state = dbg.active ? "ON" : "OFF";
       console.log(`%c[debug] Pixi inspector ${state}`, `color: ${dbg.active ? "#0f0" : "#f55"}; font-weight: bold`);
-      EffectBus3.emit("queen:debug", { active: dbg.active });
+      EffectBus4.emit("queen:debug", { active: dbg.active });
     } else {
       console.warn("[debug] PixiDebugDrone not loaded \u2014 no __pixiDebug on window");
-      EffectBus3.emit("queen:debug", { active: false, error: "not-loaded" });
+      EffectBus4.emit("queen:debug", { active: false, error: "not-loaded" });
     }
   }
 };
@@ -163,8 +307,8 @@ var _debug = new DebugQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/DebugQueenBee", _debug);
 
 // src/diamondcoreprocessor.com/commands/domain.queen.ts
-import { QueenBee as QueenBee4 } from "@hypercomb/core";
-var DomainQueenBee = class extends QueenBee4 {
+import { QueenBee as QueenBee5 } from "@hypercomb/core";
+var DomainQueenBee = class extends QueenBee5 {
   namespace = "diamondcoreprocessor.com";
   command = "domain";
   aliases = ["relay"];
@@ -238,10 +382,10 @@ window.ioc.register("@diamondcoreprocessor.com/DomainQueenBee", _domain);
 
 // src/diamondcoreprocessor.com/commands/empty-long-press.input.ts
 import { Point } from "pixi.js";
-import { EffectBus as EffectBus5 } from "@hypercomb/core";
+import { EffectBus as EffectBus6 } from "@hypercomb/core";
 
 // src/diamondcoreprocessor.com/editor/arm-resource.ts
-import { EffectBus as EffectBus4 } from "@hypercomb/core";
+import { EffectBus as EffectBus5 } from "@hypercomb/core";
 
 // src/diamondcoreprocessor.com/editor/resource-thumbnail.ts
 var generateHexThumbnails = async (source) => {
@@ -310,7 +454,7 @@ var armImageBlob = async (blob, opts = {}) => {
   const smallPointSig = hex.pointBlob ? await store.putResource(hex.pointBlob) : null;
   const smallFlatSig = hex.flatBlob ? await store.putResource(hex.flatBlob) : null;
   const previewUrl = URL.createObjectURL(preview ?? blob);
-  EffectBus4.emit("command:arm-resource", {
+  EffectBus5.emit("command:arm-resource", {
     previewUrl,
     largeSig,
     smallPointSig,
@@ -356,19 +500,19 @@ var EmptyLongPressInput = class {
   #activePointerId = null;
   #attached = false;
   constructor() {
-    EffectBus5.on("render:host-ready", (payload) => {
+    EffectBus6.on("render:host-ready", (payload) => {
       this.#canvas = payload.canvas;
       this.#container = payload.container;
       this.#renderer = payload.renderer;
       this.#attach();
     });
-    EffectBus5.on("render:mesh-offset", (offset) => {
+    EffectBus6.on("render:mesh-offset", (offset) => {
       this.#meshOffset = offset;
     });
-    EffectBus5.on("render:set-orientation", ({ flat }) => {
+    EffectBus6.on("render:set-orientation", ({ flat }) => {
       this.#flat = !!flat;
     });
-    EffectBus5.on("render:cell-count", ({ coords }) => {
+    EffectBus6.on("render:cell-count", ({ coords }) => {
       this.#occupied.clear();
       if (!coords) return;
       for (const c of coords) {
@@ -409,7 +553,7 @@ var EmptyLongPressInput = class {
         navigator.vibrate?.(40);
       } catch {
       }
-      EffectBus5.emit("mobile:input-visible", { visible: true, mobile: true });
+      EffectBus6.emit("mobile:input-visible", { visible: true, mobile: true });
       void armFromClipboard();
       this.#reset();
     }, HOLD_MS);
@@ -467,8 +611,8 @@ var _emptyLongPress = new EmptyLongPressInput();
 window.ioc.register("@diamondcoreprocessor.com/EmptyLongPressInput", _emptyLongPress);
 
 // src/diamondcoreprocessor.com/commands/help.queen.ts
-import { QueenBee as QueenBee5, EffectBus as EffectBus6 } from "@hypercomb/core";
-var HelpQueenBee = class extends QueenBee5 {
+import { QueenBee as QueenBee6, EffectBus as EffectBus7 } from "@hypercomb/core";
+var HelpQueenBee = class extends QueenBee6 {
   namespace = "diamondcoreprocessor.com";
   command = "help";
   aliases = [];
@@ -476,7 +620,7 @@ var HelpQueenBee = class extends QueenBee5 {
   execute(_args) {
     const queens = this.#findQueenBees();
     if (queens.length === 0) {
-      EffectBus6.emit("queen:help", { commands: [] });
+      EffectBus7.emit("queen:help", { commands: [] });
       console.log("[/help] No queen bees registered.");
       return;
     }
@@ -485,7 +629,7 @@ var HelpQueenBee = class extends QueenBee5 {
       aliases: q.aliases,
       description: q.description ?? ""
     }));
-    EffectBus6.emit("queen:help", { commands });
+    EffectBus7.emit("queen:help", { commands });
     console.group("[/help] Available commands:");
     for (const cmd of commands) {
       const aliasStr = cmd.aliases.length ? ` (aliases: ${cmd.aliases.join(", ")})` : "";
@@ -509,8 +653,8 @@ var _help = new HelpQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/HelpQueenBee", _help);
 
 // src/diamondcoreprocessor.com/commands/i18n-override.queen.ts
-import { QueenBee as QueenBee6, I18N_IOC_KEY } from "@hypercomb/core";
-var I18nOverrideQueenBee = class extends QueenBee6 {
+import { QueenBee as QueenBee7, I18N_IOC_KEY } from "@hypercomb/core";
+var I18nOverrideQueenBee = class extends QueenBee7 {
   namespace = "diamondcoreprocessor.com";
   command = "i18n-override";
   aliases = [];
@@ -606,8 +750,8 @@ var _i18nOverride = new I18nOverrideQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/I18nOverrideQueenBee", _i18nOverride);
 
 // src/diamondcoreprocessor.com/commands/keyword.queen.ts
-import { QueenBee as QueenBee7, EffectBus as EffectBus7, hypercomb as hypercomb2 } from "@hypercomb/core";
-var KeywordQueenBee = class extends QueenBee7 {
+import { QueenBee as QueenBee8, EffectBus as EffectBus8, hypercomb as hypercomb2 } from "@hypercomb/core";
+var KeywordQueenBee = class extends QueenBee8 {
   namespace = "diamondcoreprocessor.com";
   command = "keyword";
   aliases = [];
@@ -647,7 +791,7 @@ var KeywordQueenBee = class extends QueenBee7 {
           }
         }
         if (updates.length > 0) {
-          EffectBus7.emit("tags:changed", { updates });
+          EffectBus8.emit("tags:changed", { updates });
         }
       }
     }
@@ -719,8 +863,8 @@ var _keyword = new KeywordQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/KeywordQueenBee", _keyword);
 
 // src/diamondcoreprocessor.com/commands/language.queen.ts
-import { QueenBee as QueenBee8, I18N_IOC_KEY as I18N_IOC_KEY2 } from "@hypercomb/core";
-var LanguageQueenBee = class extends QueenBee8 {
+import { QueenBee as QueenBee9, I18N_IOC_KEY as I18N_IOC_KEY2 } from "@hypercomb/core";
+var LanguageQueenBee = class extends QueenBee9 {
   namespace = "diamondcoreprocessor.com";
   command = "language";
   aliases = [];
@@ -772,9 +916,9 @@ var _language = new LanguageQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/LanguageQueenBee", _language);
 
 // src/diamondcoreprocessor.com/commands/player.queen.ts
-import { QueenBee as QueenBee9, EffectBus as EffectBus8 } from "@hypercomb/core";
+import { QueenBee as QueenBee10, EffectBus as EffectBus9 } from "@hypercomb/core";
 var DISMISSED_KEY = "hc:player-dismissed";
-var PlayerQueenBee = class extends QueenBee9 {
+var PlayerQueenBee = class extends QueenBee10 {
   namespace = "diamondcoreprocessor.com";
   command = "player";
   aliases = ["track", "audio"];
@@ -784,15 +928,15 @@ var PlayerQueenBee = class extends QueenBee9 {
       localStorage.removeItem(DISMISSED_KEY);
     } catch {
     }
-    EffectBus8.emit("player:open", {});
+    EffectBus9.emit("player:open", {});
   }
 };
 var _player = new PlayerQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/PlayerQueenBee", _player);
 
 // src/diamondcoreprocessor.com/commands/remove.queen.ts
-import { QueenBee as QueenBee10, EffectBus as EffectBus9, hypercomb as hypercomb3 } from "@hypercomb/core";
-var RemoveQueenBee = class extends QueenBee10 {
+import { QueenBee as QueenBee11, EffectBus as EffectBus10, hypercomb as hypercomb3 } from "@hypercomb/core";
+var RemoveQueenBee = class extends QueenBee11 {
   namespace = "diamondcoreprocessor.com";
   command = "remove";
   aliases = [];
@@ -815,8 +959,9 @@ var RemoveQueenBee = class extends QueenBee10 {
     for (const name of targets) {
       try {
         await dir.removeEntry(name, { recursive: true });
-        EffectBus9.emit("cell:removed", { cell: name, groupId });
-      } catch {
+        EffectBus10.emit("cell:removed", { cell: name, groupId });
+      } catch (e) {
+        console.error("[remove] removeEntry failed", name, e);
       }
     }
     void new hypercomb3().act();
@@ -837,16 +982,16 @@ function normalizeName(s) {
 }
 var _remove = new RemoveQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/RemoveQueenBee", _remove);
-EffectBus9.on("controls:action", (payload) => {
+EffectBus10.on("controls:action", (payload) => {
   if (payload?.action === "remove") void _remove.invoke("");
 });
-EffectBus9.on("keymap:invoke", (payload) => {
+EffectBus10.on("keymap:invoke", (payload) => {
   if (payload?.cmd === "selection.remove") void _remove.invoke("");
 });
 
 // src/diamondcoreprocessor.com/commands/rename.queen.ts
-import { QueenBee as QueenBee11, EffectBus as EffectBus10, SignatureService, hypercomb as hypercomb4 } from "@hypercomb/core";
-var RenameQueenBee = class extends QueenBee11 {
+import { QueenBee as QueenBee12, EffectBus as EffectBus11, SignatureService, hypercomb as hypercomb4 } from "@hypercomb/core";
+var RenameQueenBee = class extends QueenBee12 {
   namespace = "diamondcoreprocessor.com";
   command = "rename";
   aliases = [];
@@ -874,9 +1019,9 @@ var RenameQueenBee = class extends QueenBee11 {
       await dir.removeEntry(oldName, { recursive: true });
       await this.#recordRenameOp(oldName, newName);
       const groupId = `rename:${Date.now().toString(36)}`;
-      EffectBus10.emit("cell:removed", { cell: oldName, groupId });
-      EffectBus10.emit("cell:added", { cell: newName, groupId });
-      EffectBus10.emit("cell:renamed", { oldName, newName });
+      EffectBus11.emit("cell:removed", { cell: oldName, groupId });
+      EffectBus11.emit("cell:added", { cell: newName, groupId });
+      EffectBus11.emit("cell:renamed", { oldName, newName });
       selection.clear();
       void new hypercomb4().act();
     } catch {
@@ -888,13 +1033,13 @@ var RenameQueenBee = class extends QueenBee11 {
     const store = get("@hypercomb.social/Store");
     if (!lineage || !historyService || !store) return;
     const locationSig = await historyService.sign(lineage);
-    const snapshot = {
+    const snapshot2 = {
       version: 1,
       oldName,
       newName,
       at: Date.now()
     };
-    const json = JSON.stringify(snapshot, Object.keys(snapshot).sort(), 0);
+    const json = JSON.stringify(snapshot2, Object.keys(snapshot2).sort(), 0);
     const blob = new Blob([json], { type: "application/json" });
     const bytes = await blob.arrayBuffer();
     const resourceSig = await SignatureService.sign(bytes);
@@ -902,7 +1047,7 @@ var RenameQueenBee = class extends QueenBee11 {
     await historyService.record(locationSig, {
       op: "rename",
       cell: resourceSig,
-      at: snapshot.at
+      at: snapshot2.at
     });
     const cursor = get("@diamondcoreprocessor.com/HistoryCursorService");
     if (cursor) await cursor.onNewOp();
@@ -930,8 +1075,8 @@ var _rename = new RenameQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/RenameQueenBee", _rename);
 
 // src/diamondcoreprocessor.com/commands/translate-sweep.queen.ts
-import { QueenBee as QueenBee12 } from "@hypercomb/core";
-var TranslateSweepQueenBee = class extends QueenBee12 {
+import { QueenBee as QueenBee13 } from "@hypercomb/core";
+var TranslateSweepQueenBee = class extends QueenBee13 {
   namespace = "diamondcoreprocessor.com";
   command = "translate-sweep";
   aliases = ["translate"];
@@ -999,7 +1144,7 @@ var _sweep = new TranslateSweepQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/TranslateSweepQueenBee", _sweep);
 
 // src/diamondcoreprocessor.com/commands/translation.service.ts
-import { EffectBus as EffectBus11, SignatureService as SignatureService2, I18N_IOC_KEY as I18N_IOC_KEY3 } from "@hypercomb/core";
+import { EffectBus as EffectBus12, SignatureService as SignatureService2, I18N_IOC_KEY as I18N_IOC_KEY3 } from "@hypercomb/core";
 
 // src/diamondcoreprocessor.com/assistant/llm-api.ts
 var ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages";
@@ -1101,7 +1246,7 @@ var TranslationService = class extends EventTarget {
   #translating = false;
   constructor() {
     super();
-    EffectBus11.on("locale:changed", (payload) => {
+    EffectBus12.on("locale:changed", (payload) => {
       void (async () => {
         await this.hydrateCatalog(payload.locale);
         if (!this.#translating && getApiKey()) {
@@ -1247,7 +1392,7 @@ var TranslationService = class extends EventTarget {
     if (Object.keys(catalog).length) {
       i18n.registerTranslations("app", targetLocale, catalog);
       if (i18n.locale === targetLocale) {
-        EffectBus11.emit("labels:invalidated", { locale: targetLocale });
+        EffectBus12.emit("labels:invalidated", { locale: targetLocale });
       }
     }
   }
@@ -1274,10 +1419,10 @@ var TranslationService = class extends EventTarget {
       }
       const apiKey = getApiKey();
       if (!apiKey && plan.toTranslate.length) {
-        EffectBus11.emit("llm:api-key-required", {});
+        EffectBus12.emit("llm:api-key-required", {});
         return;
       }
-      EffectBus11.emit("translation:tile-start", { labels: plan.tileNames, locale: targetLocale });
+      EffectBus12.emit("translation:tile-start", { labels: plan.tileNames, locale: targetLocale });
       const batchCount = Math.ceil(plan.toTranslate.length / BATCH_SIZE);
       if (plan.toTranslate.length) {
         console.log(
@@ -1342,19 +1487,19 @@ ${source}`,
       for (const tileName of plan.tileNames) {
         const propsSig = propsIndex[tileName];
         if (!propsSig) {
-          EffectBus11.emit("translation:tile-done", { label: tileName });
+          EffectBus12.emit("translation:tile-done", { label: tileName });
           continue;
         }
         const propsBlob = await store.getResource(propsSig);
         if (!propsBlob) {
-          EffectBus11.emit("translation:tile-done", { label: tileName });
+          EffectBus12.emit("translation:tile-done", { label: tileName });
           continue;
         }
         let props;
         try {
           props = JSON.parse(await propsBlob.text());
         } catch {
-          EffectBus11.emit("translation:tile-done", { label: tileName });
+          EffectBus12.emit("translation:tile-done", { label: tileName });
           continue;
         }
         let changed = false;
@@ -1388,16 +1533,16 @@ ${source}`,
           );
           propsIndex[tileName] = await store.putResource(updatedBlob);
         }
-        EffectBus11.emit("translation:tile-done", { label: tileName });
+        EffectBus12.emit("translation:tile-done", { label: tileName });
       }
       localStorage.setItem(PROPS_INDEX_KEY, JSON.stringify(propsIndex));
       if (i18n && Object.keys(catalog).length) {
         i18n.registerTranslations("app", targetLocale, catalog);
         if (i18n.locale === targetLocale) {
-          EffectBus11.emit("labels:invalidated", { locale: targetLocale });
+          EffectBus12.emit("labels:invalidated", { locale: targetLocale });
         }
       }
-      EffectBus11.emit("translation:complete", {
+      EffectBus12.emit("translation:complete", {
         locale: targetLocale,
         translated: plan.toTranslate.length
       });
@@ -1540,9 +1685,282 @@ function shouldSkipForTranslation(text, _targetLocale) {
   if (!HAS_LETTER.test(trimmed)) return true;
   return false;
 }
+
+// src/diamondcoreprocessor.com/commands/website.queen.ts
+import { QueenBee as QueenBee14, EffectBus as EffectBus13 } from "@hypercomb/core";
+import { CELL_WEBSITE_PROPERTY } from "@hypercomb/core";
+var toast2 = (type, title, message) => {
+  try {
+    EffectBus13.emit("toast:show", { type, title, message });
+  } catch {
+  }
+};
+var BRACKET_SIGS_RE = /\[([0-9a-f]{64})\]/gi;
+function parseArgs(raw) {
+  const trimmed = raw.trim();
+  if (!trimmed) return { kind: "export", target: null };
+  if (trimmed.toLowerCase() === "list") return { kind: "list" };
+  const tokens = splitTopLevel(trimmed);
+  if (tokens.length === 1) {
+    const tok = tokens[0];
+    if (tok.toLowerCase() === "clear" || tok.toLowerCase() === "remove") {
+      return { kind: "clear", target: null };
+    }
+    if (isSignature(tok)) return { kind: "stamp", target: null, sigs: [tok.toLowerCase()] };
+    const bracketed2 = extractBracketedSigs(tok);
+    if (bracketed2.length) return { kind: "stamp", target: null, sigs: bracketed2 };
+    return { kind: "export", target: tok };
+  }
+  const target = tokens[0];
+  const rest = tokens.slice(1).join(" ");
+  if (rest.toLowerCase() === "clear" || rest.toLowerCase() === "remove") {
+    return { kind: "clear", target };
+  }
+  if (isSignature(rest)) return { kind: "stamp", target, sigs: [rest.toLowerCase()] };
+  const bracketed = extractBracketedSigs(rest);
+  if (bracketed.length) return { kind: "stamp", target, sigs: bracketed };
+  return { kind: "error", message: `could not parse "${rest.slice(0, 40)}"` };
+}
+function splitTopLevel(s) {
+  const out = [];
+  let cur = "";
+  let inBracket = 0;
+  for (const ch of s) {
+    if (ch === "[") inBracket++;
+    else if (ch === "]") inBracket = Math.max(0, inBracket - 1);
+    if (!inBracket && /\s/.test(ch)) {
+      if (cur) {
+        out.push(cur);
+        cur = "";
+      }
+      continue;
+    }
+    cur += ch;
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+function extractBracketedSigs(s) {
+  const out = [];
+  let m;
+  const re = new RegExp(BRACKET_SIGS_RE.source, "gi");
+  while ((m = re.exec(s)) !== null) out.push(m[1].toLowerCase());
+  return out;
+}
+async function resolveTarget(spec) {
+  const lineage = get("@hypercomb.social/Lineage");
+  const store = get("@hypercomb.social/Store");
+  if (!lineage || !store?.hypercombRoot) return null;
+  if (spec === null) {
+    const dir = await lineage.explorerDir?.();
+    if (!dir) return null;
+    return {
+      dir,
+      path: [...lineage.explorerSegments?.() ?? []],
+      label: lineage.explorerLabel?.() ?? "/"
+    };
+  }
+  const registry = get("@hypercomb.social/NameRegistry");
+  if (registry?.ensureLoaded) await registry.ensureLoaded();
+  const entry = registry?.get?.(spec);
+  if (entry?.target?.kind === "lineage") {
+    return resolvePath(lineage, store, entry.target.path);
+  }
+  if (entry?.target?.kind === "signature") {
+    return null;
+  }
+  const parts = spec.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean);
+  if (parts.length > 0) return resolvePath(lineage, store, parts);
+  return null;
+}
+async function resolvePath(lineage, store, path) {
+  const dir = await lineage.tryResolve?.(path, store.hypercombRoot);
+  if (!dir) return null;
+  return { dir, path, label: "/" + path.join("/") };
+}
+function resolveSignatureFromName(spec) {
+  if (!spec) return null;
+  const registry = get("@hypercomb.social/NameRegistry");
+  const entry = registry?.get?.(spec);
+  if (entry?.target?.kind === "signature") return entry.target.signature;
+  return null;
+}
+async function snapshot(target) {
+  const nodes = [];
+  await walk(target.dir, [], nodes);
+  const rootProps = await readCellProperties(target.dir).catch(() => ({}));
+  const current = rootProps[CELL_WEBSITE_PROPERTY];
+  const currentWebsiteSig = isSignature(current) ? current : void 0;
+  return { rootPath: target.path, currentWebsiteSig, nodes };
+}
+async function walk(dir, path, out) {
+  const props = await readCellProperties(dir).catch(() => ({}));
+  const node = { path };
+  const sig = props[CELL_WEBSITE_PROPERTY];
+  if (isSignature(sig)) node.websiteSig = sig;
+  const label = props["label"] ?? props["title"];
+  if (typeof label === "string" && label.trim()) node.label = label;
+  out.push(node);
+  const children = [];
+  try {
+    for await (const [name, entry] of dir.entries()) {
+      if (entry.kind === "directory" && !name.startsWith("_")) children.push(name);
+    }
+  } catch {
+  }
+  children.sort();
+  for (const name of children) {
+    try {
+      const childDir = await dir.getDirectoryHandle(name);
+      await walk(childDir, [...path, name], out);
+    } catch {
+    }
+  }
+}
+async function sigsToBundleSig(sigs) {
+  const store = get("@hypercomb.social/Store");
+  if (!store?.putResource) return null;
+  const bundleText = sigs.map((s) => s.toLowerCase()).join("");
+  const blob = new Blob([bundleText], { type: "text/plain" });
+  return await store.putResource(blob);
+}
+var WebsiteQueenBee = class extends QueenBee14 {
+  namespace = "diamondcoreprocessor.com";
+  command = "website";
+  aliases = [];
+  description = "Export a subtree, stamp a bundleSig, or build a bundle from a list of sigs. Targets current cell or a named branch / lineage path.";
+  descriptionKey = "slash.website";
+  slashComplete(args) {
+    const registry = get("@hypercomb.social/NameRegistry");
+    const names = registry?.names ?? [];
+    const tokens = args.split(/\s+/);
+    const head = (tokens[0] ?? "").toLowerCase();
+    if (tokens.length <= 1) {
+      const matches = names.filter((n) => n.toLowerCase().startsWith(head));
+      const fixed = ["(export current)", "<64-hex sig>", "[sig][sig]\u2026", "clear", "list"].filter((s) => !head || s.toLowerCase().startsWith(head));
+      return [.../* @__PURE__ */ new Set([...matches, ...fixed])];
+    }
+    const second = (tokens[1] ?? "").toLowerCase();
+    const ops = ["<64-hex sig>", "[sig][sig]\u2026", "clear"];
+    if (!second) return ops;
+    return ops.filter((o) => o.toLowerCase().startsWith(second));
+  }
+  execute(args) {
+    const parsed = parseArgs(args);
+    switch (parsed.kind) {
+      case "list":
+        return void this.#list();
+      case "error":
+        console.warn(`[/website] ${parsed.message}`);
+        return;
+      case "export":
+        return void this.#export(parsed.target);
+      case "clear":
+        return void this.#clear(parsed.target);
+      case "stamp":
+        return void this.#stamp(parsed.target, parsed.sigs);
+    }
+  }
+  async #export(targetSpec) {
+    if (targetSpec !== null) {
+      const sig = resolveSignatureFromName(targetSpec);
+      if (sig) return this.#stamp(null, [sig]);
+    }
+    const target = await resolveTarget(targetSpec);
+    if (!target) {
+      console.warn(`[/website] could not resolve target: ${targetSpec ?? "(current)"}`);
+      return;
+    }
+    const spec = await snapshot(target);
+    const json = JSON.stringify(spec, null, 2);
+    console.log(`[/website] hierarchy export from ${target.label}:`);
+    console.log(json);
+    try {
+      await navigator.clipboard.writeText(json);
+      console.log(`[/website] copied ${json.length} bytes to clipboard \u2014 paste into Claude Code /website skill`);
+      toast2(
+        "success",
+        "Website exported",
+        `${spec.nodes.length} node${spec.nodes.length === 1 ? "" : "s"} from ${target.label} \u2014 ${json.length} bytes on clipboard`
+      );
+    } catch (err) {
+      console.warn("[/website] clipboard write failed \u2014 copy from console:", err);
+      toast2(
+        "warning",
+        "Export copy failed",
+        "Clipboard write blocked \u2014 copy the JSON from the browser console"
+      );
+    }
+  }
+  async #stamp(targetSpec, sigs) {
+    if (sigs.length === 0) {
+      console.warn("[/website] no signatures to stamp");
+      return;
+    }
+    const target = await resolveTarget(targetSpec);
+    if (!target) {
+      console.warn(`[/website] could not resolve target: ${targetSpec ?? "(current)"}`);
+      return;
+    }
+    let finalSig;
+    if (sigs.length === 1) {
+      finalSig = sigs[0];
+    } else {
+      const constructed = await sigsToBundleSig(sigs);
+      if (!constructed) {
+        console.warn("[/website] could not build bundle resource");
+        return;
+      }
+      finalSig = constructed;
+      console.log(`[/website] built bundle from ${sigs.length} sigs \u2192 ${finalSig}`);
+    }
+    await writeCellProperties(target.dir, { [CELL_WEBSITE_PROPERTY]: finalSig });
+    console.log(`[/website] ${CELL_WEBSITE_PROPERTY}=${finalSig} on ${target.label}`);
+    toast2("success", "Website stamped", `${target.label} \u2192 ${finalSig.slice(0, 12)}\u2026`);
+    const lineage = get("@hypercomb.social/Lineage");
+    lineage?.dispatchEvent?.(new CustomEvent("change"));
+  }
+  async #clear(targetSpec) {
+    const target = await resolveTarget(targetSpec);
+    if (!target) return;
+    const props = await readCellProperties(target.dir).catch(() => ({}));
+    if (!(CELL_WEBSITE_PROPERTY in props)) return;
+    delete props[CELL_WEBSITE_PROPERTY];
+    const file = await target.dir.getFileHandle("0000", { create: true });
+    const writable = await file.createWritable();
+    await writable.write(JSON.stringify(props));
+    await writable.close();
+    console.log(`[/website] cleared ${CELL_WEBSITE_PROPERTY} on ${target.label}`);
+    toast2("info", "Website cleared", target.label);
+    const lineage = get("@hypercomb.social/Lineage");
+    lineage?.dispatchEvent?.(new CustomEvent("change"));
+  }
+  async #list() {
+    const registry = get("@hypercomb.social/NameRegistry");
+    if (!registry?.ensureLoaded) {
+      console.warn("[/website] registry not ready");
+      return;
+    }
+    await registry.ensureLoaded();
+    const all = registry.all;
+    const names = Object.keys(all).sort();
+    console.log(`[/website] ${names.length} branch${names.length === 1 ? "" : "es"}:`);
+    for (const name of names) {
+      const entry = all[name];
+      if (entry?.target?.kind === "lineage") {
+        console.log(`  ${name} \u2192 /${(entry.target.path ?? []).join("/")}`);
+      } else if (entry?.target?.kind === "signature") {
+        console.log(`  ${name} \u2192 signature ${entry.target.signature}`);
+      }
+    }
+  }
+};
+var _website = new WebsiteQueenBee();
+window.ioc.register("@diamondcoreprocessor.com/WebsiteQueenBee", _website);
 export {
   AccentQueenBee,
   ArrangeQueenBee,
+  BranchQueenBee,
   DebugQueenBee,
   DomainQueenBee,
   EmptyLongPressInput,
@@ -1555,5 +1973,6 @@ export {
   RenameQueenBee,
   TranslateSweepQueenBee,
   TranslationService,
+  WebsiteQueenBee,
   shouldSkipForTranslation
 };

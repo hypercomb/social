@@ -50,11 +50,6 @@ jobs:
         # module loader has no manifest to install from.
         run: npm run build
 
-      - name: Write env.js into build output
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: node src/scripts/write-env-js.cjs src/hypercomb-web/dist/hypercomb-web/browser
-
       - name: Verify build output
         run: ls -al src/hypercomb-web/dist/hypercomb-web/browser || true
 

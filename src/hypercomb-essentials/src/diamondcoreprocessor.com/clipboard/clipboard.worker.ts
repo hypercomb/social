@@ -12,10 +12,15 @@ interface SelectionLike {
 interface LineageLike {
   explorerSegments(): readonly string[]
   explorerDir(): Promise<FileSystemDirectoryHandle | null>
+  tryResolve(
+    segments: readonly string[],
+    start?: FileSystemDirectoryHandle,
+  ): Promise<FileSystemDirectoryHandle | null>
 }
 
 interface StoreLike {
   readonly clipboard: FileSystemDirectoryHandle
+  readonly hypercombRoot: FileSystemDirectoryHandle
 }
 
 export class ClipboardWorker extends Worker {
@@ -44,8 +49,8 @@ export class ClipboardWorker extends Worker {
     EffectBus.on<{ action: string }>('controls:action', (payload) => {
       if (!payload?.action) return
       switch (payload.action) {
-        case 'copy': this.#capture('copy'); break
-        case 'cut': this.#capture('cut'); break
+        case 'copy': void this.#capture('copy'); break
+        case 'cut': void this.#capture('cut'); break
         case 'paste': void this.#paste(); break
         case 'place': void this.#place(); break
         case 'clear-clipboard': void this.#clearClipboard(); break
@@ -55,8 +60,8 @@ export class ClipboardWorker extends Worker {
     EffectBus.on<{ cmd: string }>('keymap:invoke', (payload) => {
       if (!payload?.cmd) return
       switch (payload.cmd) {
-        case 'clipboard.copy': this.#capture('copy'); break
-        case 'layout.cutCells': this.#capture('cut'); break
+        case 'clipboard.copy': void this.#capture('copy'); break
+        case 'layout.cutCells': void this.#capture('cut'); break
         case 'clipboard.paste': void this.#paste(); break
       }
     })
@@ -105,35 +110,56 @@ export class ClipboardWorker extends Worker {
     return tsd?.selectedLabels ?? []
   }
 
-  // ── capture (copy or cut) ─────────────────────────────
-  // Both record labels + source in clipboard service + persist meta.
-  // Cut additionally emits cell:removed → HistoryRecorder records remove ops.
-  // Folders stay in OPFS. History is the genome.
+  // ── capture ───────────────────────────────────────────
+  // copy: record labels + source segments, leave folders in place.
+  // cut:  move folders out of source into store.clipboard, then record
+  //       remove ops. After cut, the source no longer holds the cells —
+  //       refresh and history replay see them as truly gone.
 
-  #capture(op: ClipboardOp): void {
+  async #capture(op: ClipboardOp): Promise<void> {
     const labels = this.#selectedLabels()
     if (labels.length === 0) return
 
-    const segments = this.#lineage?.explorerSegments() ?? []
-    this.#clipboardSvc?.capture(labels, segments, op)
+    const lineage = this.#lineage
+    const store = this.#store
+    const segments = lineage?.explorerSegments() ?? []
 
     if (op === 'cut') {
+      if (!store || !lineage) return
+      const sourceDir = await lineage.explorerDir()
+      if (!sourceDir) return
+
+      // Move each cell folder out of source, into store.clipboard.
+      // Skip labels that fail (don't exist, name collision in clipboard).
+      const moved: string[] = []
+      // Clear any prior clipboard contents first so the new cut owns the dir.
+      await clearDirectory(store.clipboard)
       for (const label of labels) {
+        const ok = await moveCellFolder(sourceDir, store.clipboard, label)
+        if (ok) moved.push(label)
+      }
+      if (moved.length === 0) return
+
+      this.#clipboardSvc?.capture(moved, segments, 'cut')
+
+      for (const label of moved) {
         EffectBus.emit('cell:removed', { cell: label })
       }
       this.#selection?.clear()
-    }
 
-    // Visual feedback — renderer picks this up for flash (copy) or disappear (cut)
-    EffectBus.emit('clipboard:captured', { labels: [...labels], op })
+      EffectBus.emit('clipboard:captured', { labels: [...moved], op: 'cut' })
 
-    if (op === 'cut') {
       // Allow history remove ops to flush before triggering re-render
       setTimeout(() => void new hypercomb().act(), 80)
+
+      void this.#persistMeta('cut', moved, segments)
+      return
     }
 
-    // Persist metadata so clipboard survives reload
-    void this.#persistMeta(op, labels, segments)
+    // copy: leave folders in place
+    this.#clipboardSvc?.capture(labels, segments, 'copy')
+    EffectBus.emit('clipboard:captured', { labels: [...labels], op: 'copy' })
+    void this.#persistMeta('copy', labels, segments)
   }
 
   async #persistMeta(op: ClipboardOp, labels: string[], segments: readonly string[]): Promise<void> {
@@ -146,39 +172,81 @@ export class ClipboardWorker extends Worker {
   }
 
   // ── paste ─────────────────────────────────────────────
-  // Reads cell trees from original source location (folders are still there).
-  // Copies to current destination. Emits cell:added per label.
+  // cut:  move folders from store.clipboard back to current explorer dir.
+  // copy: copy folders from sourceSegments to current explorer dir.
 
   async #paste(): Promise<void> {
     const clipboardSvc = this.#clipboardSvc
-    if (!clipboardSvc) return
+    const lineage = this.#lineage
+    const store = this.#store
+    if (!clipboardSvc || !lineage || !store) return
 
-    const { items, op } = clipboardSvc.consume()
-    if (items.length === 0) return
+    if (clipboardSvc.isEmpty) return
+
+    const targetDir = await lineage.explorerDir()
+    if (!targetDir) return
+
+    const op = clipboardSvc.operation
+    const items = clipboardSvc.items
 
     EffectBus.emit('clipboard:paste-start', { count: items.length, op })
 
-    // Emit cell:added for each item — HistoryRecorder records the ops
-    for (const entry of items) {
-      EffectBus.emit('cell:added', { cell: entry.label })
-    }
-
-    EffectBus.emit('clipboard:paste-done', { count: items.length, op })
-
-    // Clean up persisted meta
+    const placed: string[] = []
+    const failed: string[] = []
     if (op === 'cut') {
-      const store = this.#store
-      if (store) await clearDirectory(store.clipboard)
+      for (const entry of items) {
+        const ok = await moveCellFolder(store.clipboard, targetDir, entry.label)
+        if (ok) placed.push(entry.label)
+        else failed.push(entry.label)
+      }
+    } else {
+      for (const entry of items) {
+        const sourceDir = await lineage.tryResolve(entry.sourceSegments, store.hypercombRoot)
+        if (!sourceDir) {
+          console.warn(`[clipboard] copy source missing for '${entry.label}': /${entry.sourceSegments.join('/')}`)
+          failed.push(entry.label)
+          continue
+        }
+        const ok = await copyCellFolder(sourceDir, targetDir, entry.label)
+        if (ok) placed.push(entry.label)
+        else failed.push(entry.label)
+      }
     }
+
+    for (const label of placed) {
+      EffectBus.emit('cell:added', { cell: label })
+    }
+
+    // cut: drop only the items that actually moved. Failed moves stay on
+    // the clipboard so the user doesn't lose data on a partial / stale paste.
+    // copy: leaves clipboard intact for repeat paste.
+    if (op === 'cut' && placed.length > 0) {
+      clipboardSvc.removeItems(new Set(placed))
+      if (clipboardSvc.isEmpty) {
+        await clearDirectory(store.clipboard)
+      } else {
+        await writeMeta(store.clipboard, {
+          op: clipboardSvc.operation,
+          items: clipboardSvc.items.map(i => ({
+            label: i.label,
+            sourceSegments: [...i.sourceSegments],
+          })),
+        })
+      }
+    }
+
+    EffectBus.emit('clipboard:paste-done', { count: placed.length, op, failed })
   }
 
   // ── place (selected clipboard items → current page) ──
 
   async #place(): Promise<void> {
     const clipboardSvc = this.#clipboardSvc
-    if (!clipboardSvc || clipboardSvc.isEmpty) return
+    const lineage = this.#lineage
+    const store = this.#store
+    if (!clipboardSvc || !lineage || !store) return
+    if (clipboardSvc.isEmpty) return
 
-    // Only place items that are currently selected
     const selectedLabels = this.#selectedLabels()
     if (selectedLabels.length === 0) return
 
@@ -186,23 +254,39 @@ export class ClipboardWorker extends Worker {
     const toPlace = clipboardSvc.items.filter(i => selectedSet.has(i.label))
     if (toPlace.length === 0) return
 
-    // Emit cell:added for each selected item — HistoryRecorder records the ops
-    for (const entry of toPlace) {
-      EffectBus.emit('cell:added', { cell: entry.label })
+    const targetDir = await lineage.explorerDir()
+    if (!targetDir) return
+
+    const op = clipboardSvc.operation
+    const placed: string[] = []
+    if (op === 'cut') {
+      for (const entry of toPlace) {
+        const ok = await moveCellFolder(store.clipboard, targetDir, entry.label)
+        if (ok) placed.push(entry.label)
+      }
+    } else {
+      for (const entry of toPlace) {
+        const sourceDir = await lineage.tryResolve(entry.sourceSegments, store.hypercombRoot)
+        if (!sourceDir) {
+          console.warn(`[clipboard] place: copy source missing for '${entry.label}': /${entry.sourceSegments.join('/')}`)
+          continue
+        }
+        const ok = await copyCellFolder(sourceDir, targetDir, entry.label)
+        if (ok) placed.push(entry.label)
+      }
     }
 
-    // Remove placed items from clipboard
-    clipboardSvc.removeItems(selectedSet)
+    for (const label of placed) {
+      EffectBus.emit('cell:added', { cell: label })
+    }
+
+    clipboardSvc.removeItems(new Set(placed))
     this.#selection?.clear()
 
-    const store = this.#store
-
-    // Update persisted meta or clear if empty
     if (clipboardSvc.isEmpty) {
-      if (store) await clearDirectory(store.clipboard)
-      // Auto-close clipboard mode
+      await clearDirectory(store.clipboard)
       EffectBus.emit('clipboard:view', { active: false })
-    } else if (store) {
+    } else {
       await writeMeta(store.clipboard, {
         op: clipboardSvc.operation,
         items: clipboardSvc.items.map(i => ({
@@ -210,9 +294,9 @@ export class ClipboardWorker extends Worker {
           sourceSegments: [...i.sourceSegments],
         })),
       })
-      // Update clipboard view with remaining items
       EffectBus.emit('clipboard:view', {
         active: true,
+        op: clipboardSvc.operation,
         labels: clipboardSvc.items.map(i => i.label),
         sourceSegments: [...(clipboardSvc.items[0]?.sourceSegments ?? [])],
       })
@@ -228,6 +312,8 @@ export class ClipboardWorker extends Worker {
   }
 
   // ── restore from OPFS on startup ──────────────────────
+  // Cut folders that were moved into store.clipboard before refresh
+  // are still there; the meta file tells us which labels and op.
 
   async #restoreFromOpfs(): Promise<void> {
     const store = this.#store
@@ -238,8 +324,28 @@ export class ClipboardWorker extends Worker {
     const meta = await readMeta(store.clipboard)
     if (!meta || meta.items.length === 0) return
 
+    // For cut: only restore labels whose folders actually exist in
+    // store.clipboard. Drops stale entries left behind by older clipboard
+    // formats where cut didn't move folders.
+    let labels = meta.items.map(i => i.label)
+    if (meta.op === 'cut') {
+      const present: string[] = []
+      for (const label of labels) {
+        try {
+          await store.clipboard.getDirectoryHandle(label, { create: false })
+          present.push(label)
+        } catch { /* missing — drop */ }
+      }
+      labels = present
+    }
+
+    if (labels.length === 0) {
+      await clearDirectory(store.clipboard)
+      return
+    }
+
     clipboardSvc.capture(
-      meta.items.map(i => i.label),
+      labels,
       meta.items[0]?.sourceSegments ?? [],
       meta.op,
     )
@@ -253,32 +359,62 @@ interface ClipboardMeta {
   items: { label: string; sourceSegments: string[] }[]
 }
 
+const META_TMP = '__meta__.tmp'
+
+// Two-phase write: serialise into __meta__.tmp first, verify it parses, then
+// swap into __meta__. If the process dies mid-write, the old __meta__ is
+// untouched. readMeta() prefers a valid __meta__.tmp over __meta__ so a
+// half-swapped state can still be recovered.
 async function writeMeta(
   clipDir: FileSystemDirectoryHandle,
   meta: ClipboardMeta,
 ): Promise<void> {
+  const json = JSON.stringify(meta)
   try {
+    const tmp = await clipDir.getFileHandle(META_TMP, { create: true })
+    const w = await tmp.createWritable()
+    try {
+      await w.write(json)
+    } finally {
+      await w.close()
+    }
+    // verify the temp can be parsed before swapping
+    try {
+      const file = await tmp.getFile()
+      JSON.parse(await file.text())
+    } catch {
+      await clipDir.removeEntry(META_TMP).catch(() => { /* ignore */ })
+      return
+    }
     const handle = await clipDir.getFileHandle(META_FILE, { create: true })
     const writable = await handle.createWritable()
     try {
-      await writable.write(JSON.stringify(meta))
+      await writable.write(json)
     } finally {
       await writable.close()
     }
-  } catch { /* ignore */ }
+    await clipDir.removeEntry(META_TMP).catch(() => { /* ignore */ })
+  } catch (err) {
+    console.warn('[clipboard] writeMeta failed:', err)
+  }
 }
 
 async function readMeta(
   clipDir: FileSystemDirectoryHandle,
 ): Promise<ClipboardMeta | null> {
-  try {
-    const handle = await clipDir.getFileHandle(META_FILE, { create: false })
-    const file = await handle.getFile()
-    const text = await file.text()
-    return JSON.parse(text) as ClipboardMeta
-  } catch {
-    return null
+  const tryParse = async (name: string): Promise<ClipboardMeta | null> => {
+    try {
+      const handle = await clipDir.getFileHandle(name, { create: false })
+      const file = await handle.getFile()
+      const text = await file.text()
+      return JSON.parse(text) as ClipboardMeta
+    } catch {
+      return null
+    }
   }
+  // Prefer the committed __meta__; fall back to the in-flight __meta__.tmp
+  // if the committed copy is missing or unreadable.
+  return (await tryParse(META_FILE)) ?? (await tryParse(META_TMP))
 }
 
 async function clearDirectory(dir: FileSystemDirectoryHandle): Promise<void> {
@@ -290,6 +426,86 @@ async function clearDirectory(dir: FileSystemDirectoryHandle): Promise<void> {
     try {
       await dir.removeEntry(name, { recursive: true })
     } catch { /* ignore */ }
+  }
+}
+
+// ── OPFS folder copy / move ──────────────────────────────
+
+async function copyDirectory(
+  src: FileSystemDirectoryHandle,
+  dest: FileSystemDirectoryHandle,
+): Promise<void> {
+  for await (const [name, handle] of (src as any).entries()) {
+    if (handle.kind === 'file') {
+      const srcFile = await (handle as FileSystemFileHandle).getFile()
+      const destFile = await dest.getFileHandle(name, { create: true })
+      const writable = await destFile.createWritable()
+      try {
+        await writable.write(await srcFile.arrayBuffer())
+      } finally {
+        await writable.close()
+      }
+    } else if (handle.kind === 'directory') {
+      const srcDir = handle as FileSystemDirectoryHandle
+      const destDir = await dest.getDirectoryHandle(name, { create: true })
+      await copyDirectory(srcDir, destDir)
+    }
+  }
+}
+
+// Returns true on success, false if source missing, destination collides,
+// or the copy fails partway. On copy failure the partial destination is
+// cleaned up so no orphan folders linger.
+async function copyCellFolder(
+  sourceParent: FileSystemDirectoryHandle,
+  destParent: FileSystemDirectoryHandle,
+  label: string,
+): Promise<boolean> {
+  let src: FileSystemDirectoryHandle
+  try {
+    src = await sourceParent.getDirectoryHandle(label, { create: false })
+  } catch {
+    return false
+  }
+  try {
+    await destParent.getDirectoryHandle(label, { create: false })
+    console.warn(`[clipboard] destination already has '${label}'; skipping`)
+    return false
+  } catch { /* good — name available */ }
+
+  let dest: FileSystemDirectoryHandle
+  try {
+    dest = await destParent.getDirectoryHandle(label, { create: true })
+    await copyDirectory(src, dest)
+    return true
+  } catch (err) {
+    console.warn(`[clipboard] copy failed for '${label}':`, err)
+    try {
+      await destParent.removeEntry(label, { recursive: true })
+    } catch { /* leave whatever's there — best effort cleanup */ }
+    return false
+  }
+}
+
+// Move = copy then delete source. If the source delete fails after a
+// successful copy, roll the destination back so the cell isn't left
+// duplicated in both places.
+async function moveCellFolder(
+  sourceParent: FileSystemDirectoryHandle,
+  destParent: FileSystemDirectoryHandle,
+  label: string,
+): Promise<boolean> {
+  const ok = await copyCellFolder(sourceParent, destParent, label)
+  if (!ok) return false
+  try {
+    await sourceParent.removeEntry(label, { recursive: true })
+    return true
+  } catch (err) {
+    console.warn(`[clipboard] source remove failed for '${label}', rolling back:`, err)
+    try {
+      await destParent.removeEntry(label, { recursive: true })
+    } catch { /* best effort */ }
+    return false
   }
 }
 

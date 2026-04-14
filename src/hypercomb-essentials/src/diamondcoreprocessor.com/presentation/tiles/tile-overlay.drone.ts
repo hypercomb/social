@@ -1,5 +1,5 @@
 // diamondcoreprocessor.com/pixi/tile-overlay.drone.ts
-import { Drone, EffectBus, type I18nProvider, I18N_IOC_KEY } from '@hypercomb/core'
+import { Drone, EffectBus, consumePointerGesture, type I18nProvider, I18N_IOC_KEY } from '@hypercomb/core'
 import { Application, Container, Graphics, Point, Text, TextStyle } from 'pixi.js'
 import { HexIconButton } from './hex-icon-button.js'
 import { HexOverlayMesh } from './hex-overlay.shader.js'
@@ -193,6 +193,7 @@ export class TileOverlayDrone extends Drone {
     'drop:dragging', 'drop:pending',
     'overlay:arrange-mode', 'overlay:pool-icons',
     'bee:disposed', 'genotype:set-visible',
+    'substrate:applied', 'cell:removed',
   ]
   protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'drop:target', 'overlay:icons-reordered']
 
@@ -326,6 +327,22 @@ export class TileOverlayDrone extends Drone {
           this.#updateVisibility()
           this.#updatePerTileVisibility()
         }
+      })
+
+      // substrate:applied runs via an in-place buffer path that doesn't re-emit
+      // render:cell-count, so the reroll icon's visibleWhen=hasSubstrate check
+      // would stay false until the next full render. Track it incrementally
+      // and refresh per-tile visibility so the reroll icon appears immediately.
+      this.onEffect<{ cell: string }>('substrate:applied', ({ cell }) => {
+        if (!cell) return
+        this.#substrateLabels.add(cell)
+        this.#noImageLabels.delete(cell)
+        if (this.#overlay && this.#currentAxial) this.#updatePerTileVisibility()
+      })
+      this.onEffect<{ cell: string }>('cell:removed', ({ cell }) => {
+        if (!cell) return
+        this.#substrateLabels.delete(cell)
+        this.#noImageLabels.delete(cell)
       })
 
       this.onEffect<{ flat: boolean }>('render:set-orientation', (payload) => {
@@ -1397,6 +1414,7 @@ export class TileOverlayDrone extends Drone {
       const gate = window.ioc.get<InputGate>('@diamondcoreprocessor.com/InputGate')
       if (gate?.active) return
       this.#consumedPointerId = e.pointerId
+      consumePointerGesture(e.pointerId)
       this.#navigateBack()
       return
     }
@@ -1437,6 +1455,7 @@ export class TileOverlayDrone extends Drone {
     }
 
     this.#consumedPointerId = e.pointerId
+    consumePointerGesture(e.pointerId)
     this.#navigateInto(entry.label)
   }
 

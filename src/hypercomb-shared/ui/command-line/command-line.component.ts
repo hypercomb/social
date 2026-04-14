@@ -906,7 +906,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       // show move-hint indicator when tiles are selected
       this.#indicators.update(m => {
         const n = new Map(m)
-        n.set('move-hint', { key: 'move-hint', icon: 'Z', label: 'Drag selected tiles to move', dismissable: false })
+        n.set('move-hint', { key: 'move-hint', icon: '\u2725', label: 'Move mode', dismissable: false })
         return n
       })
 
@@ -1185,6 +1185,17 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (e.key === 'Escape' && this.armedResource()) {
       e.preventDefault()
       this.onArmedResourceDismiss()
+      return
+    }
+
+    // Escape peels back one path segment so the user can drop back up a
+    // level and keep adding cells there. With no '/' left, it clears.
+    if (e.key === 'Escape' && v.length > 0) {
+      e.preventDefault()
+      const trimmed = v.endsWith('/') ? v.slice(0, -1) : v
+      const lastSlash = trimmed.lastIndexOf('/')
+      const next = lastSlash >= 0 ? trimmed.slice(0, lastSlash + 1) : ''
+      this.#setShellValue(next, true)
       return
     }
 
