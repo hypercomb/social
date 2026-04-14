@@ -10,6 +10,9 @@ const CACHE_NAME = 'hypercomb-modules-v2'
 const DEP_PREFIX = '/opfs/__dependencies__/'
 const RES_PREFIX = '/opfs/__bees__/'
 const LAYER_PREFIX = '/opfs/__layers__/'
+// Embedded-website resource lookups: /@resource/<sig> → __resources__/<sig>.
+// Any content-type — resolved from blob mime sniff / extension fallback.
+const SITE_RESOURCE_PREFIX = '/@resource/'
 
 self.addEventListener('install', (event) => {
   event.waitUntil(self.skipWaiting())
@@ -67,6 +70,11 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(handleLayerRequest(event.request))
     return
   }
+
+  if (url.pathname.startsWith(SITE_RESOURCE_PREFIX)) {
+    event.respondWith(handleSiteResourceRequest(event.request))
+    return
+  }
 })
 
 /* ----------------------------------------
@@ -119,6 +127,77 @@ async function handleLayerRequest(request) {
   }
 
   return new Response('layer not found', { status: 404 })
+}
+
+/* ----------------------------------------
+ * embedded-site resources: /@resource/<sig>
+ * ------------------------------------- */
+
+async function handleSiteResourceRequest(request) {
+  const url = new URL(request.url)
+  const rest = url.pathname.slice(SITE_RESOURCE_PREFIX.length)
+  // Allow resource URLs like /@resource/<sig> or /@resource/<sig>/extra.png
+  // Only the signature is meaningful — the tail is kept so sites can write
+  // readable relative URLs, but we serve the same blob for any tail.
+  const sig = rest.split('/')[0] ?? ''
+  if (!/^[a-f0-9]{64}$/i.test(sig)) {
+    return new Response('invalid signature', { status: 400 })
+  }
+
+  const cached = await tryCacheMatch(request)
+  if (cached) return toHeadIfNeeded(request, cached)
+
+  try {
+    const root = await self.navigator.storage.getDirectory()
+    const dir = await root.getDirectoryHandle('__resources__')
+    const fileHandle = await dir.getFileHandle(sig)
+    const file = await fileHandle.getFile()
+
+    const headers = new Headers()
+    headers.set('content-type', guessResourceContentType(rest, file))
+    headers.set('cache-control', 'public, max-age=31536000, immutable')
+    const response = new Response(file, { status: 200, headers })
+
+    // Cache immutable — signatures never change.
+    await cachePut(request, response)
+    return toHeadIfNeeded(request, response.clone())
+  } catch {
+    return new Response('resource not found', { status: 404 })
+  }
+}
+
+function guessResourceContentType(tail, file) {
+  // Prefer explicit extension in the URL tail; fall back to the Blob's
+  // mime type (set by File constructor when the browser sniffs it); last
+  // resort is octet-stream.
+  const ext = (tail.match(/\.([a-z0-9]+)$/i)?.[1] ?? '').toLowerCase()
+  const map = {
+    html: 'text/html; charset=utf-8',
+    htm: 'text/html; charset=utf-8',
+    css: 'text/css; charset=utf-8',
+    js: 'application/javascript; charset=utf-8',
+    mjs: 'application/javascript; charset=utf-8',
+    json: 'application/json; charset=utf-8',
+    svg: 'image/svg+xml',
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    avif: 'image/avif',
+    woff: 'font/woff',
+    woff2: 'font/woff2',
+    mp4: 'video/mp4',
+    webm: 'video/webm',
+    mp3: 'audio/mpeg',
+    m4a: 'audio/mp4',
+    wav: 'audio/wav',
+    txt: 'text/plain; charset=utf-8',
+    md: 'text/markdown; charset=utf-8',
+  }
+  if (ext && map[ext]) return map[ext]
+  if (file.type) return file.type
+  return 'application/octet-stream'
 }
 
 /* ----------------------------------------
