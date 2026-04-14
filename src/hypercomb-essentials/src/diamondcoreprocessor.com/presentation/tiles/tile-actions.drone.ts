@@ -47,7 +47,7 @@ export type IconRegistryEntry = {
 const ICON_REGISTRY: IconRegistryEntry[] = [
   // ── private profile ──
   { name: 'command', svgMarkup: ICONS.command, hoverTint: 0xa8ffd8, profile: 'private', labelKey: 'action.command', descriptionKey: 'action.command.description' },
-  { name: 'edit', svgMarkup: ICONS.edit, hoverTint: 0xc8d8ff, profile: 'private', labelKey: 'action.edit', descriptionKey: 'action.edit.description' },
+  // edit — self-registered by TileEditorDrone (editor layer)
   { name: 'search', svgMarkup: ICONS.search, hoverTint: 0xc8ffc8, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.noImage, labelKey: 'action.search', descriptionKey: 'action.search.description' },
   { name: 'reroll', svgMarkup: ICONS.reroll, hoverTint: 0xd8c8ff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.hasSubstrate, labelKey: 'action.reroll', descriptionKey: 'action.reroll.description' },
   { name: 'remove', svgMarkup: ICONS.remove, hoverTint: 0xffc8c8, profile: 'private', labelKey: 'action.remove', descriptionKey: 'action.remove.description' },
@@ -62,7 +62,7 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
 
 // Default active icons per profile (defines the fallback order)
 const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
-  'private': ['command', 'edit', 'reroll', 'remove', 'break-apart'],
+  'private': ['command', 'reroll', 'remove', 'break-apart'],
   'public-own': ['hide', 'break-apart'],
   'public-external': ['adopt', 'block'],
 }
@@ -100,7 +100,7 @@ const ARRANGEMENT_KEY = 'iconArrangement'
 type IconArrangement = Partial<Record<OverlayProfileKey, string[]>>
 
 // ── Action names this bee handles ─────────────────────────────────
-const HANDLED_ACTIONS = new Set(['edit', 'search', 'command', 'hide', 'break-apart', 'adopt', 'block', 'remove', 'reroll'])
+const HANDLED_ACTIONS = new Set(['search', 'command', 'hide', 'break-apart', 'adopt', 'block', 'remove', 'reroll'])
 
 type TileActionPayload = { action: string; label: string; q: number; r: number; index: number }
 
@@ -296,10 +296,6 @@ export class TileActionsDrone extends Drone {
     const label = normalizeCell(rawLabel) || rawLabel
 
     switch (action) {
-      case 'edit':
-        // tile:action already emitted by overlay — editor listens for it
-        break
-
       case 'search':
         EffectBus.emit('search:prefill', { value: label })
         break

@@ -1,5 +1,6 @@
 // diamondcoreprocessor.com/editor/tile-editor.drone.ts
 import { EffectBus } from '@hypercomb/core'
+import type { OverlayActionDescriptor } from '../presentation/tiles/tile-overlay.drone.js'
 import { TILE_PROPERTIES_FILE } from './tile-properties.js'
 import type { TileEditorService } from './tile-editor.service.js'
 import type { ImageEditorService } from './image-editor.service.js'
@@ -10,6 +11,19 @@ type TileActionPayload = {
   q: number
   r: number
   index: number
+}
+
+const EDIT_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3l4 4L7 21H3v-4L17 3z"/></svg>'
+
+const EDIT_ICON: OverlayActionDescriptor = {
+  name: 'edit',
+  owner: '@diamondcoreprocessor.com/TileEditorDrone',
+  svgMarkup: EDIT_SVG,
+  x: 0, y: 10,
+  hoverTint: 0xc8d8ff,
+  profile: 'private',
+  labelKey: 'action.edit',
+  descriptionKey: 'action.edit.description',
 }
 
 type Store = {
@@ -26,8 +40,20 @@ type Settings = {
 
 export class TileEditorDrone {
 
+  #iconRegistered = false
+
   constructor() {
     EffectBus.on<TileActionPayload>('tile:action', this.#onTileAction)
+    EffectBus.on('render:host-ready', this.#registerIcon)
+  }
+
+  #registerIcon = (): void => {
+    if (this.#iconRegistered) return
+    this.#iconRegistered = true
+    // Defer to next macrotask so the overlay drone's heartbeat has already
+    // subscribed. Direct emission here races with EffectBus single-slot
+    // lastValue replay — TileActionsDrone's batch overwrites ours.
+    setTimeout(() => EffectBus.emit('overlay:register-action', EDIT_ICON), 0)
   }
 
   // ── effect handler ─────────────────────────────────────────────
