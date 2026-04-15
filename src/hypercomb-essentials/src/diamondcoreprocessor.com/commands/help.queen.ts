@@ -12,6 +12,7 @@ export class HelpQueenBee extends QueenBee {
   override readonly aliases = []
 
   override description = 'List all available queen bee commands'
+  override descriptionKey = 'slash.help'
 
   protected execute(_args: string): void {
     const queens = this.#findQueenBees()

@@ -145,15 +145,15 @@ Drone subclasses avoid this because their `heartbeat()` runs in the same synchro
 
 ### Medium-term
 
-- [ ] Move feature-specific slash providers out of `slash-behaviour.drone.ts` into their own layer's bees
-  - Meeting provider → meeting layer
-  - Voice/PushToTalk providers → recording layer
-  - Chat/LLM providers → assistant layer
-  - Move provider → move layer
-  - Substrate/Reroll providers → substrate layer
-  - Atomize provider → assistant layer
-  - Recording provider → recording layer
-- [ ] Design a self-registration pattern for slash behaviours (likely `SlashBehaviourDrone.addProvider()` called from each feature bee at load time, mirroring `overlay:register-action`)
+- [x] Design a self-registration pattern for slash behaviours → QueenBee auto-wrap (see below)
+- [x] Meeting provider → meeting.queen.ts (auto-wrap)
+- [x] Recording provider → recording.queen.ts (auto-wrap + slashComplete)
+- [x] Substrate provider → substrate.queen.ts (auto-wrap + slashComplete)
+- [x] Reroll provider → reroll.queen.ts (auto-wrap + slashComplete)
+- [ ] Voice/PushToTalk providers → recording layer
+- [ ] Chat/LLM/Expand providers → assistant layer
+- [ ] Move provider → move layer
+- [ ] Atomize provider → assistant layer
 
 ### Long-term
 
@@ -163,6 +163,112 @@ Drone subclasses avoid this because their `heartbeat()` runs in the same synchro
 ## The Rule
 
 **If a feature can be toggled off, every piece of its UI must be registered by its own bee.** No shared registry, no hardcoded list, no conditional visibility check against IoC. The bee loads → it registers. The bee doesn't load → nothing to register. The toggle pipeline already guarantees the loading part. Self-registration guarantees the UI part.
+
+## Self-Registration Patterns
+
+Every bee that can be toggled off must own all its UI registrations. When the bee doesn't load, nothing registers. Two patterns cover the main surfaces:
+
+### Pattern 1: Tile Overlay Icons (`overlay:register-action`)
+
+For bees that need a tile action icon. The bee emits its descriptor on `render:host-ready`.
+
+**If your bee extends `Drone`** (canonical):
+
+```typescript
+export class MyFeatureDrone extends Drone {
+  readonly namespace = 'mydomain.com'
+  protected override emits = ['overlay:register-action']
+
+  protected override heartbeat = async (): Promise<void> => {
+    this.onEffect('render:host-ready', () => {
+      this.emitEffect('overlay:register-action', {
+        name: 'my-action',
+        owner: this.iocKey,
+        svgMarkup: MY_SVG,
+        x: 0, y: 10,
+        hoverTint: 0xc8d8ff,
+        profile: 'private',
+        labelKey: 'action.my-action',
+        descriptionKey: 'action.my-action.description',
+      })
+    })
+  }
+}
+```
+
+**If your bee is a plain class** (use `setTimeout(0)` to defer past EffectBus single-slot replay):
+
+```typescript
+export class MyFeatureBee {
+  #iconRegistered = false
+  constructor() {
+    EffectBus.on('render:host-ready', () => {
+      if (this.#iconRegistered) return
+      this.#iconRegistered = true
+      setTimeout(() => EffectBus.emit('overlay:register-action', MY_ICON), 0)
+    })
+  }
+}
+```
+
+### Pattern 2: Slash Commands (QueenBee auto-wrap)
+
+For bees that need a `/command` in the command line. Extend `QueenBee`, register in IoC, and the auto-discovery system in `SlashBehaviourDrone` handles the rest. No manual provider class needed.
+
+```typescript
+import { QueenBee } from '@hypercomb/core'
+
+export class MyFeatureQueenBee extends QueenBee {
+  readonly namespace = 'mydomain.com'
+  readonly command = 'mycommand'               // → /mycommand
+  override readonly aliases = ['mc']           // → /mc also works
+  override description = 'What this command does'
+  override descriptionKey = 'slash.mycommand'  // i18n key (optional)
+
+  // Optional: autocomplete suggestions for args
+  override slashComplete(args: string): readonly string[] {
+    const options = ['start', 'stop', 'list']
+    const q = args.toLowerCase().trim()
+    if (!q) return options
+    return options.filter(s => s.startsWith(q))
+  }
+
+  protected async execute(args: string): Promise<void> {
+    // Your command logic here
+  }
+}
+
+// Register in IoC — auto-discovery picks it up
+const _myFeature = new MyFeatureQueenBee()
+window.ioc.register('@mydomain.com/MyFeatureQueenBee', _myFeature)
+```
+
+**How it works:** `SlashBehaviourDrone` scans all IoC entries at startup and subscribes to `ioc.onRegister()` for future entries. Any object with `command` (string) and `invoke` (function) is auto-wrapped into a `SlashBehaviourProvider`. The wrapper reads `description`, `descriptionKey`, `aliases`, and `slashComplete` live from the instance.
+
+**Precedence:** Auto-wrapped queens have priority 50. The `addProvider()` API still exists for external providers (priority 100 wins on name collisions), but all built-in commands are now queens — no manual provider classes remain in `slash-behaviour.drone.ts`.
+
+**Multi-command queens:** Queens with `aliases` get individual autocomplete entries per name. The auto-wrap sets `queen.invokedAs` to the matched name before calling `invoke()`, so the queen can differentiate `/opus` from `/sonnet`.
+
+### Pattern 3: Keyboard Shortcuts (`KeyMapService.addLayer()`)
+
+Already runtime-based. If your bee needs shortcuts, call `addLayer()` at construction time:
+
+```typescript
+const keymap = window.ioc.get('@diamondcoreprocessor.com/KeyMapService')
+keymap?.addLayer('my-feature', {
+  'mod+shift+m': { cmd: 'myFeature.toggle', label: 'Toggle my feature' },
+})
+```
+
+If the bee doesn't load, `addLayer()` never runs, and the shortcuts don't exist.
+
+### Checklist for new toggleable features
+
+1. **Overlay icon?** → Use Pattern 1 (`overlay:register-action`)
+2. **Slash command?** → Use Pattern 2 (extend `QueenBee`, register in IoC)
+3. **Keyboard shortcut?** → Use Pattern 3 (`KeyMapService.addLayer()`)
+4. **Never** hardcode references in shared registries, `ICON_REGISTRY`, or manual provider lists
+5. **Test toggle:** disable the layer in DCP → verify the icon, slash command, and shortcut all disappear
 
 ## Build Cache
 

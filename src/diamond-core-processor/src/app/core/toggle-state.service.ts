@@ -11,20 +11,24 @@ export class ToggleStateService {
 
   #state: Map<string, boolean>
   #channel: BroadcastChannel | null = null
+  #dirty = false
 
   constructor() {
     this.#state = this.#load()
+    window.addEventListener('pagehide', () => this.flush())
   }
 
   toggle(nodeId: string): void {
     const current = this.isEnabled(nodeId)
     this.#state.set(nodeId, !current)
     this.#persist()
-    this.#broadcastChange()
+    this.#dirty = true
   }
 
-  /** Notify the sentinel iframe (and any same-origin listener) that toggles changed. */
-  #broadcastChange(): void {
+  /** Broadcast pending toggle changes to the sentinel. Call once when done toggling. */
+  flush(): void {
+    if (!this.#dirty) return
+    this.#dirty = false
     try {
       if (!this.#channel) this.#channel = new BroadcastChannel(TOGGLE_CHANNEL)
       this.#channel.postMessage({ type: 'toggle-changed' })

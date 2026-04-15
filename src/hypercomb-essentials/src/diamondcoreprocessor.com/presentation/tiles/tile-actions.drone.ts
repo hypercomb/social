@@ -49,7 +49,7 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   { name: 'command', svgMarkup: ICONS.command, hoverTint: 0xa8ffd8, profile: 'private', labelKey: 'action.command', descriptionKey: 'action.command.description' },
   // edit — self-registered by TileEditorDrone (editor layer)
   { name: 'search', svgMarkup: ICONS.search, hoverTint: 0xc8ffc8, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.noImage, labelKey: 'action.search', descriptionKey: 'action.search.description' },
-  { name: 'reroll', svgMarkup: ICONS.reroll, hoverTint: 0xd8c8ff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.hasSubstrate, labelKey: 'action.reroll', descriptionKey: 'action.reroll.description' },
+  // reroll — self-registered by SubstrateDrone (substrate layer)
   { name: 'remove', svgMarkup: ICONS.remove, hoverTint: 0xffc8c8, profile: 'private', labelKey: 'action.remove', descriptionKey: 'action.remove.description' },
   { name: 'break-apart', svgMarkup: ICONS.breakApart, hoverTint: 0x66ccff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden, labelKey: 'action.break-apart', descriptionKey: 'action.break-apart.description' },
   // ── public-own profile ──
@@ -62,7 +62,7 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
 
 // Default active icons per profile (defines the fallback order)
 const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
-  'private': ['command', 'reroll', 'remove', 'break-apart'],
+  'private': ['command', 'remove', 'break-apart'],
   'public-own': ['hide', 'break-apart'],
   'public-external': ['adopt', 'block'],
 }
@@ -100,7 +100,7 @@ const ARRANGEMENT_KEY = 'iconArrangement'
 type IconArrangement = Partial<Record<OverlayProfileKey, string[]>>
 
 // ── Action names this bee handles ─────────────────────────────────
-const HANDLED_ACTIONS = new Set(['search', 'command', 'hide', 'break-apart', 'adopt', 'block', 'remove', 'reroll'])
+const HANDLED_ACTIONS = new Set(['search', 'command', 'hide', 'break-apart', 'adopt', 'block', 'remove'])
 
 type TileActionPayload = { action: string; label: string; q: number; r: number; index: number }
 
@@ -112,13 +112,12 @@ export class TileActionsDrone extends Drone {
     lineage: '@hypercomb.social/Lineage',
   }
 
-  protected override listens = ['render:host-ready', 'render:cell-count', 'tile:action', 'controls:action', 'overlay:icons-reordered', 'overlay:arrange-mode', 'substrate:applied', 'substrate:rerolled', 'cell:removed']
-  protected override emits = ['overlay:register-action', 'overlay:pool-icons', 'search:prefill', 'command:focus', 'tile:hidden', 'tile:unhidden', 'tile:blocked', 'cell:removed', 'visibility:show-hidden', 'substrate:rerolled']
+  protected override listens = ['render:host-ready', 'tile:action', 'controls:action', 'overlay:icons-reordered', 'overlay:arrange-mode', 'cell:removed']
+  protected override emits = ['overlay:register-action', 'overlay:pool-icons', 'search:prefill', 'command:focus', 'tile:hidden', 'tile:unhidden', 'tile:blocked', 'cell:removed', 'visibility:show-hidden']
 
   #registered = false
   #effectsRegistered = false
   #arrangement: IconArrangement = {}
-  #substrateLabels = new Set<string>()
 
   protected override heartbeat = async (): Promise<void> => {
     if (!this.#effectsRegistered) {
@@ -131,31 +130,15 @@ export class TileActionsDrone extends Drone {
         void this.#loadArrangementAndRegister()
       })
 
-      // Track which tiles have substrate so bulk reroll can filter correctly.
-      // render:cell-count reseeds the set on full renders, but substrate:applied
-      // runs via an in-place buffer path that doesn't re-emit render:cell-count —
-      // so we also track it incrementally to keep newly-added substrate tiles
-      // reachable by bulk reroll before the next full render.
-      this.onEffect<{ substrateLabels?: string[] }>('render:cell-count', (payload) => {
-        this.#substrateLabels = new Set(payload.substrateLabels ?? [])
-      })
-      this.onEffect<{ cell: string }>('substrate:applied', ({ cell }) => {
-        if (cell) this.#substrateLabels.add(cell)
-      })
-      this.onEffect<{ cell: string }>('cell:removed', ({ cell }) => {
-        if (cell) this.#substrateLabels.delete(cell)
-      })
-
       // Handle clicks on our own actions
       this.onEffect<TileActionPayload>('tile:action', (payload) => {
         if (!HANDLED_ACTIONS.has(payload.action)) return
         this.#handleAction(payload)
       })
 
-      // Handle hide / reroll from selection context menu (controls:action)
+      // Handle hide from selection context menu (controls:action)
       this.onEffect<{ action: string }>('controls:action', (payload) => {
         if (payload?.action === 'hide') this.#bulkHideSelected()
-        else if (payload?.action === 'reroll') this.#bulkRerollSelected()
       })
 
       // Handle icon reorder from arrange mode
@@ -330,10 +313,6 @@ export class TileActionsDrone extends Drone {
         this.#hideOrBlock(label, 'hc:blocked-tiles', 'tile:blocked')
         break
 
-      case 'reroll':
-        void this.#rerollSubstrate(label)
-        break
-
       case 'remove':
         void this.#removeTile(label)
         break
@@ -350,43 +329,6 @@ export class TileActionsDrone extends Drone {
       await dir.removeEntry(label, { recursive: true })
       EffectBus.emit('cell:removed', { cell: label })
     } catch { /* entry doesn't exist or can't be removed */ }
-    void new hypercomb().act()
-  }
-
-  async #rerollSubstrate(label: string): Promise<void> {
-    const svc = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SubstrateService') as
-      { rerollCell(label: string): boolean } | undefined
-    if (svc?.rerollCell(label)) {
-      // show-cell.drone listens for substrate:rerolled and clears its caches
-      // (cellImageCache, cellSubstrateCache, #layerCellsCache, renderedCellsKey)
-      // before requesting a render, so the new image shows up immediately.
-      EffectBus.emit('substrate:rerolled', { cell: label })
-      void new hypercomb().act()
-    }
-  }
-
-  #bulkRerollSelected(): void {
-    const selection = window.ioc.get<{ selected: ReadonlySet<string>; count: number }>('@diamondcoreprocessor.com/SelectionService')
-    if (!selection || selection.count === 0) return
-
-    const svc = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SubstrateService') as
-      { rerollCells(labels: string[]): string[] } | undefined
-    if (!svc) return
-
-    // Filter to only substrate tiles — non-substrate tiles (user-edited) are
-    // never clobbered by bulk reroll. The substrate flag comes from render:cell-count
-    // and is authoritative regardless of which substrate pool is currently active.
-    const labels = [...selection.selected].filter(l => this.#substrateLabels.has(l))
-    if (labels.length === 0) return
-    const rerolled = svc.rerollCells(labels)
-    if (rerolled.length === 0) return
-
-    // Emit per-cell so show-cell's substrate:rerolled handler invalidates
-    // caches for each affected tile. requestRender is microtask-coalesced
-    // so a burst of emits collapses to a single render pass.
-    for (const cell of rerolled) {
-      EffectBus.emit('substrate:rerolled', { cell })
-    }
     void new hypercomb().act()
   }
 

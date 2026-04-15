@@ -18,6 +18,14 @@ export class RecordingQueenBee extends QueenBee {
   readonly command = 'record'
   override readonly aliases = []
   override description = 'Start AI-powered meeting recording with live hierarchy compilation'
+  override descriptionKey = 'slash.record'
+
+  override slashComplete(args: string): readonly string[] {
+    const q = args.toLowerCase().trim()
+    const options = ['start', 'stop', 'interval', 'model'] as const
+    if (!q) return options
+    return options.filter(s => s.startsWith(q))
+  }
 
   protected async execute(args: string): Promise<void> {
     const trimmed = args.trim().toLowerCase()

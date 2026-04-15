@@ -31,6 +31,7 @@ export class LayoutQueenBee extends QueenBee {
   readonly command = 'layout'
   override readonly aliases = []
   override description = 'Save, apply, list, or remove layout templates'
+  override descriptionKey = 'slash.layout'
 
   protected async execute(args: string): Promise<void> {
     const parsed = parseLayoutArgs(args)
@@ -192,6 +193,15 @@ function normalizeName(s: string): string {
     .replace(/^-|-$/g, '')
     .slice(0, 64)
     .replace(/-$/, '')
+}
+
+// ── slash completion ────────────────────────────────────
+
+LayoutQueenBee.prototype.slashComplete = function (args: string): readonly string[] {
+  const subcommands = ['save', 'apply', 'list', 'remove']
+  const q = args.toLowerCase().trim()
+  if (!q) return subcommands
+  return subcommands.filter(s => s.startsWith(q))
 }
 
 // ── registration ────────────────────────────────────────

@@ -23,11 +23,10 @@ export class LlmQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'assistant'
   readonly command = 'opus'
-  override readonly aliases = []
+  override readonly aliases = ['sonnet', 'haiku']
   override description = 'Send context to a Claude LLM and store the response as a resource'
-
-  /** Set by the provider before invoke() to select which model to use */
-  activeModel = 'opus'
+  override descriptionKey = 'slash.opus'
+  invokedAs = ''
 
   protected async execute(args: string): Promise<void> {
     const apiKey = getApiKey()
@@ -48,7 +47,7 @@ export class LlmQueenBee extends QueenBee {
       return
     }
 
-    const model = MODELS[this.activeModel.toLowerCase()] ?? MODELS['opus']
+    const model = MODELS[this.invokedAs.toLowerCase()] ?? MODELS['opus']
 
     EffectBus.emit('llm:request-start', { model, targets, contextRefs })
 
@@ -71,7 +70,7 @@ export class LlmQueenBee extends QueenBee {
       // Emit — downstream history recorder handles tile property attachment
       EffectBus.emit('llm:response', { model, targets, sig, contextRefs })
       EffectBus.emit('llm:request-done', { model, targets, success: true })
-      console.log(`[llm] ${this.activeModel} response stored: ${sig.slice(0, 12)}...`)
+      console.log(`[llm] ${this.invokedAs} response stored: ${sig.slice(0, 12)}...`)
     } catch (err: any) {
       EffectBus.emit('llm:error', { message: err?.message ?? 'Unknown error' })
       EffectBus.emit('llm:request-done', { model, targets, success: false })

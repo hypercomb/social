@@ -8,16 +8,34 @@
 //   • Prompts for folder re-grant when a linked folder needs permission
 //   • Re-scans linked folders on tab focus so new images appear live
 
-import { Drone, EffectBus } from '@hypercomb/core'
+import { Drone, EffectBus, hypercomb } from '@hypercomb/core'
+import type { OverlayActionDescriptor } from '../presentation/tiles/tile-overlay.drone.js'
 import type { SubstrateService } from './substrate.service.js'
 
 const get = (key: string) => (window as any).ioc?.get?.(key)
+
+const REROLL_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10"/><path d="M3.51 15A9 9 0 0 0 18.36 18.36L23 14"/></svg>'
+
+const REROLL_ICON: OverlayActionDescriptor = {
+  name: 'reroll',
+  owner: '@diamondcoreprocessor.com/SubstrateDrone',
+  svgMarkup: REROLL_SVG,
+  x: 0, y: 10,
+  hoverTint: 0xd8c8ff,
+  profile: 'private',
+  visibleWhen: (ctx) => ctx.hasSubstrate,
+  labelKey: 'action.reroll',
+  descriptionKey: 'action.reroll.description',
+}
+
+type TileActionPayload = { action: string; label: string; q: number; r: number; index: number }
 
 export class SubstrateDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override description = 'Auto-assign substrate background images to new cells'
 
   protected override listens = [
+    'render:host-ready', 'tile:action', 'controls:action',
     'cell:added', 'cell:removed',
     'substrate:changed', 'substrate:folder-permission',
     'drop:pending', 'clipboard:paste-start', 'clipboard:paste-done',
@@ -25,9 +43,11 @@ export class SubstrateDrone extends Drone {
     'cell:attach-pending',
     'indicator:click',
   ]
-  protected override emits = ['substrate:applied', 'substrate:ready', 'indicator:set', 'indicator:clear', 'substrate-organizer:open', 'activity:log']
+  protected override emits = ['overlay:register-action', 'substrate:applied', 'substrate:rerolled', 'substrate:ready', 'indicator:set', 'indicator:clear', 'substrate-organizer:open', 'activity:log']
 
   #initialized = false
+  #iconRegistered = false
+  #substrateLabels = new Set<string>()
   #dropPending = false
   #pastePending = false
   #editorActive = false
@@ -39,6 +59,35 @@ export class SubstrateDrone extends Drone {
   protected override heartbeat = async (): Promise<void> => {
     if (this.#initialized) return
     this.#initialized = true
+
+    // Self-register reroll overlay icon
+    this.onEffect('render:host-ready', () => {
+      if (this.#iconRegistered) return
+      this.#iconRegistered = true
+      this.emitEffect('overlay:register-action', REROLL_ICON)
+    })
+
+    // Handle single-tile reroll from overlay click
+    this.onEffect<TileActionPayload>('tile:action', (payload) => {
+      if (payload.action !== 'reroll') return
+      this.#rerollSingle(payload.label)
+    })
+
+    // Handle bulk reroll from selection context menu
+    this.onEffect<{ action: string }>('controls:action', (payload) => {
+      if (payload?.action === 'reroll') this.#bulkRerollSelected()
+    })
+
+    // Track which tiles have substrate so bulk reroll can filter correctly
+    this.onEffect<{ substrateLabels?: string[] }>('render:cell-count', (payload) => {
+      this.#substrateLabels = new Set(payload.substrateLabels ?? [])
+    })
+    this.onEffect<{ cell: string }>('substrate:applied', ({ cell }) => {
+      if (cell) this.#substrateLabels.add(cell)
+    })
+    this.onEffect<{ cell: string }>('cell:removed', ({ cell }) => {
+      if (cell) this.#substrateLabels.delete(cell)
+    })
 
     const service = this.#service()
     if (service) {
@@ -152,6 +201,32 @@ export class SubstrateDrone extends Drone {
         void s.warmUp()
       })
     }
+  }
+
+  #rerollSingle(label: string): void {
+    const svc = this.#service()
+    if (svc?.rerollCell(label)) {
+      EffectBus.emit('substrate:rerolled', { cell: label })
+      void new hypercomb().act()
+    }
+  }
+
+  #bulkRerollSelected(): void {
+    const selection = window.ioc.get<{ selected: ReadonlySet<string>; count: number }>('@diamondcoreprocessor.com/SelectionService')
+    if (!selection || selection.count === 0) return
+
+    const svc = this.#service()
+    if (!svc) return
+
+    const labels = [...selection.selected].filter(l => this.#substrateLabels.has(l))
+    if (labels.length === 0) return
+    const rerolled = svc.rerollCells(labels)
+    if (rerolled.length === 0) return
+
+    for (const cell of rerolled) {
+      EffectBus.emit('substrate:rerolled', { cell })
+    }
+    void new hypercomb().act()
   }
 
   #syncIndicator(): void {

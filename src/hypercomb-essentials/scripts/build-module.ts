@@ -220,7 +220,7 @@ const isKeysFile = (f: string): boolean => {
 }
 
 const isBee = (f: string): boolean =>
-  f.endsWith('.drone.ts') || f.endsWith('.drone.js') || f.endsWith('.worker.ts') || f.endsWith('.worker.js')
+  f.endsWith('.drone.ts') || f.endsWith('.drone.js') || f.endsWith('.worker.ts') || f.endsWith('.worker.js') || f.endsWith('.queen.ts') || f.endsWith('.queen.js')
 
 const isEntry = (f: string): boolean =>
   f.endsWith('.entry.ts') || f.endsWith('.entry.js')

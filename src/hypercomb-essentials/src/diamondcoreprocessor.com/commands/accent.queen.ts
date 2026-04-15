@@ -33,6 +33,7 @@ export class AccentQueenBee extends QueenBee {
   readonly command = 'accent'
   override readonly aliases = []
   override description = 'Set the hover accent color by name'
+  override descriptionKey = 'slash.accent'
 
   protected async execute(args: string): Promise<void> {
     const trimmed = args.trim().toLowerCase()
@@ -168,6 +169,39 @@ function loadIndex(): number {
   if (!stored) return 0
   const n = parseInt(stored, 10)
   return (n >= 0 && n < ACCENT_INDEX_TO_NAME.length) ? n : 0
+}
+
+// ── slash completion ────────────────────────────────────
+
+AccentQueenBee.prototype.slashComplete = function (args: string): readonly string[] {
+  const presets = Object.keys(ACCENT_NAMES)
+  const q = args.toLowerCase().trim()
+
+  // Remove mode: /accent ~tag
+  if (q.startsWith('~')) {
+    const tagQ = q.slice(1)
+    const registry = get('@hypercomb.social/TagRegistry') as { names: readonly string[] } | undefined
+    const names = registry?.names ?? []
+    if (!tagQ) return names.map(n => `~${n}`)
+    return names.filter(n => n.toLowerCase().startsWith(tagQ)).map(n => `~${n}`)
+  }
+
+  // Bracket mode: /accent [tag1, tag2] preset
+  if (q.startsWith('[')) return presets
+
+  // Two-arg: first word is a tag, complete preset for second
+  const parts = q.split(/\s+/)
+  if (parts.length >= 2) {
+    const presetQ = parts[parts.length - 1]
+    return presets.filter(p => p.startsWith(presetQ))
+  }
+
+  // Single arg: complete preset names + tag names
+  const registry = get('@hypercomb.social/TagRegistry') as { names: readonly string[] } | undefined
+  const tags = registry?.names ?? []
+  const all = [...presets, ...tags]
+  if (!q) return all
+  return all.filter(s => s.toLowerCase().startsWith(q))
 }
 
 // ── registration ────────────────────────────────────────

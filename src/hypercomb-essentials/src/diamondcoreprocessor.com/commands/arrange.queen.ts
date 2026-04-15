@@ -14,6 +14,7 @@ export class ArrangeQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'arrange'
   override description = 'Toggle icon arrangement mode on the tile overlay'
+  override descriptionKey = 'slash.arrange'
 
   #active = false
 

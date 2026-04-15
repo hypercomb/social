@@ -22,6 +22,7 @@ export class DomainQueenBee extends QueenBee {
   readonly command = 'domain'
   override readonly aliases = ['relay']
   override description = 'Add, remove, or list mesh relay domains'
+  override descriptionKey = 'slash.domain'
 
   protected execute(args: string): void {
     const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any
@@ -105,6 +106,15 @@ export class DomainQueenBee extends QueenBee {
     mesh.configureRelays(next, true)
     console.log(`[/domain] Removed: ${url}`)
   }
+}
+
+// ── slash completion ────────────────────────────────────
+
+DomainQueenBee.prototype.slashComplete = function (args: string): readonly string[] {
+  const subcommands = ['list', 'remove', 'clear']
+  const q = args.toLowerCase().trim()
+  if (!q) return subcommands
+  return subcommands.filter(s => s.startsWith(q))
 }
 
 const _domain = new DomainQueenBee()

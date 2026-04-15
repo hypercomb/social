@@ -19,6 +19,7 @@ export class RemoveQueenBee extends QueenBee {
   readonly command = 'remove'
   override readonly aliases = []
   override description = 'Remove tiles from the current directory'
+  override descriptionKey = 'slash.remove'
 
   protected async execute(args: string): Promise<void> {
     const targets = parseRemoveArgs(args)
@@ -90,6 +91,17 @@ function normalizeName(s: string): string {
     .replace(/^-|-$/g, '')
     .slice(0, 64)
     .replace(/-$/, '')
+}
+
+// ── slash completion ────────────────────────────────────
+
+RemoveQueenBee.prototype.slashComplete = function (args: string): readonly string[] {
+  const q = args.toLowerCase().trim()
+  const provider = get('@hypercomb.social/CellSuggestionProvider') as
+    { suggestions: () => readonly string[] } | undefined
+  const cells = provider?.suggestions() ?? []
+  if (!q) return cells
+  return cells.filter(c => c.toLowerCase().startsWith(q))
 }
 
 // ── registration ────────────────────────────────────────

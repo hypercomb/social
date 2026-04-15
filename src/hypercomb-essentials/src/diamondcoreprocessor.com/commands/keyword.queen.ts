@@ -17,6 +17,7 @@ export class KeywordQueenBee extends QueenBee {
   readonly command = 'keyword'
   override readonly aliases = []
   override description = 'Add or remove keywords (tags) on selected tiles'
+  override descriptionKey = 'slash.keyword'
 
   protected async execute(args: string): Promise<void> {
     const parsed = parseKeywordArgs(args)
@@ -147,6 +148,16 @@ async function writeProps(cellDir: FileSystemDirectoryHandle, updates: Record<st
   const writable = await fh.createWritable()
   await writable.write(JSON.stringify(merged))
   await writable.close()
+}
+
+// ── slash completion ────────────────────────────────────
+
+KeywordQueenBee.prototype.slashComplete = function (args: string): readonly string[] {
+  const q = args.replace(/^~/, '').toLowerCase().trim()
+  const registry = get('@hypercomb.social/TagRegistry') as { names: readonly string[] } | undefined
+  const names = registry?.names ?? []
+  if (!q) return names
+  return names.filter(n => n.toLowerCase().startsWith(q))
 }
 
 // ── registration ────────────────────────────────────────

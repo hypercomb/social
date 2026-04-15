@@ -15,6 +15,7 @@ export class DebugQueenBee extends QueenBee {
   override readonly aliases = []
 
   override description = 'Toggle the Pixi display-tree inspector'
+  override descriptionKey = 'slash.debug'
 
   protected execute(_args: string): void {
     const dbg = (window as any).__pixiDebug
