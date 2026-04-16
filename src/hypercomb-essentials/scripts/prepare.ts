@@ -82,7 +82,8 @@ const SIDE_EFFECT_SUFFIXES = [
 // Module-level side-effect patterns — files containing any of these at
 // module scope self-register or wire global listeners on first import.
 // `EffectBus.on<T>(` and `register<T>(` allow an optional TS type argument.
-const SIDE_EFFECT_PATTERN = /^[ \t]*(register(?:<[^>]*>)?\(|window\.ioc\.register\(|EffectBus\.on(?:<[^>]*>)?\()/m
+// Also matches the `(window as any).ioc.register(` cast pattern.
+const SIDE_EFFECT_PATTERN = /^[ \t]*;?\(?(register(?:<[^>]*>)?\(|window\.ioc\.register\(|\(window as any\)\.ioc\.register\(|EffectBus\.on(?:<[^>]*>)?\()/m
 
 const hasSideEffectBySuffix = (f: string): boolean =>
   SIDE_EFFECT_SUFFIXES.some(suffix => f.endsWith(suffix))
