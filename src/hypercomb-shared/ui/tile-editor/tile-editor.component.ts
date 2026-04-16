@@ -11,7 +11,7 @@ import {
   type OnDestroy,
 } from '@angular/core'
 import { FormsModule } from '@angular/forms'
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, type I18nProvider, I18N_IOC_KEY } from '@hypercomb/core'
 import { fromRuntime } from '../../core/from-runtime'
 import { TranslatePipe } from '../../core/i18n.pipe'
 
@@ -85,6 +85,11 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
 
   public readonly open = computed(() => this.mode$() === 'editing')
   public readonly cell = computed(() => this.cell$())
+  public readonly displayCell = computed(() => {
+    const raw = this.cell$()
+    const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined
+    return i18n?.resolveCell?.(raw) ?? raw
+  })
   public readonly hasImage = computed(() => this.hasImage$())
   public readonly hideText = computed(() => this.hideText$())
 
