@@ -175,6 +175,7 @@ var TileSelectionDrone = class _TileSelectionDrone extends Drone {
   dispose() {
     this.#stopAnimation();
     if (this.#layer) {
+      this.#layer.parent?.removeChild(this.#layer);
       this.#layer.destroy();
       this.#layer = null;
     }

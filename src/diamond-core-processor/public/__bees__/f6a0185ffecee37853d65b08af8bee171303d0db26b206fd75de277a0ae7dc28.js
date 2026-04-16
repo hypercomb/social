@@ -1542,10 +1542,12 @@ var TileOverlayDrone = class _TileOverlayDrone extends Drone2 {
   }
   #clearHintText() {
     if (this.#hintText) {
+      this.#hintText.parent?.removeChild(this.#hintText);
       this.#hintText.destroy();
       this.#hintText = null;
     }
     if (this.#hintDescriptionText) {
+      this.#hintDescriptionText.parent?.removeChild(this.#hintDescriptionText);
       this.#hintDescriptionText.destroy();
       this.#hintDescriptionText = null;
     }
