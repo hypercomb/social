@@ -1426,10 +1426,12 @@ export class TileOverlayDrone extends Drone {
 
   #clearHintText(): void {
     if (this.#hintText) {
+      this.#hintText.parent?.removeChild(this.#hintText)
       this.#hintText.destroy()
       this.#hintText = null
     }
     if (this.#hintDescriptionText) {
+      this.#hintDescriptionText.parent?.removeChild(this.#hintDescriptionText)
       this.#hintDescriptionText.destroy()
       this.#hintDescriptionText = null
     }
