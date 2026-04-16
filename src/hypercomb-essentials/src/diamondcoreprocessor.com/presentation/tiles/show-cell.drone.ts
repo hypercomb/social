@@ -1790,18 +1790,13 @@ export class ShowCellDrone extends Drone {
           this.imageAtlas.invalidate(oldSig)
         }
       }
-      if (this.cachedCellNames && payload?.cell) {
-        // Always take the incremental render path. The in-place fast path was
-        // leaving tiles blank after save because the caller's loadCellImages
-        // could resolve before the atlas re-populated the just-invalidated
-        // slot. renderIncremental rebuilds geometry after loads complete.
-        this.renderedCellsKey = ''
-        void this.renderIncremental({ changedContent: [payload.cell] })
-      } else {
-        this.#layerCellsCache.delete(this.renderedLocationKey)
-        this.renderedCellsKey = ''
-        this.requestRender()
-      }
+      // Fully invalidate cached state and trigger a locked full render.
+      // The incremental and in-place fast paths both raced with concurrent
+      // synchronize renders, leaving the tile blank. requestRender is
+      // serialized via the rendering lock and rebuilds from OPFS.
+      this.#layerCellsCache.delete(this.renderedLocationKey)
+      this.renderedCellsKey = ''
+      this.requestRender()
     })
 
     // tags:changed — invalidate only the affected cells' tag caches, then run
