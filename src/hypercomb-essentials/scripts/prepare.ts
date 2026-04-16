@@ -82,8 +82,7 @@ const SIDE_EFFECT_SUFFIXES = [
 // Module-level side-effect patterns — files containing any of these at
 // module scope self-register or wire global listeners on first import.
 // `EffectBus.on<T>(` and `register<T>(` allow an optional TS type argument.
-// Also matches the `(window as any).ioc.register(` cast pattern.
-const SIDE_EFFECT_PATTERN = /^[ \t]*;?\(?(register(?:<[^>]*>)?\(|window\.ioc\.register\(|\(window as any\)\.ioc\.register\(|EffectBus\.on(?:<[^>]*>)?\()/m
+const SIDE_EFFECT_PATTERN = /^[ \t]*(register(?:<[^>]*>)?\(|window\.ioc\.register\(|EffectBus\.on(?:<[^>]*>)?\()/m
 
 const hasSideEffectBySuffix = (f: string): boolean =>
   SIDE_EFFECT_SUFFIXES.some(suffix => f.endsWith(suffix))
@@ -97,7 +96,7 @@ const hasSideEffectByContent = (f: string): boolean => {
 const isSideEffectModule = (f: string): boolean =>
   hasSideEffectBySuffix(f) || hasSideEffectByContent(f)
 const isGenerated = (f: string) =>
-  f.endsWith('-keys.ts') || basename(f) === 'index.ts' || basename(f) === 'side-effects.ts'
+  f.endsWith('-keys.ts') || f.endsWith('.d.ts') || basename(f) === 'index.ts' || basename(f) === 'side-effects.ts'
 
 const relFrom = (root: string, full: string) =>
   full.replace(root, '').replace(/^[\\/]/, '').replace(/\\/g, '/')
