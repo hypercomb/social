@@ -69,6 +69,7 @@ export class BackgroundDrone extends Drone {
   protected override dispose(): void {
     for (const p of this.#providers) p.dispose?.()
     if (this.#graphics) {
+      this.#graphics.parent?.removeChild(this.#graphics)
       this.#graphics.destroy()
       this.#graphics = null
     }
