@@ -78,13 +78,15 @@ export class MovePreviewDrone extends Drone {
   }
 
   protected override dispose(): void {
-    if (this.#layer) {
-      this.#layer.destroy()
-      this.#layer = null
-    }
     if (this.#dwellLayer) {
+      this.#dwellLayer.parent?.removeChild(this.#dwellLayer)
       this.#dwellLayer.destroy()
       this.#dwellLayer = null
+    }
+    if (this.#layer) {
+      this.#layer.parent?.removeChild(this.#layer)
+      this.#layer.destroy()
+      this.#layer = null
     }
   }
 
