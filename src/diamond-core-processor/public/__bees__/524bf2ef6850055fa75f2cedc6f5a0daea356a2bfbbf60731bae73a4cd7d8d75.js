@@ -48,7 +48,11 @@ var LayerCommitter = class {
     if (!lineage || !history) return;
     const locationSig = await history.sign(lineage);
     const layer = await this.#assembleLayer(lineage, locationSig);
-    await history.commitLayer(locationSig, layer);
+    const layerSig = await history.commitLayer(locationSig, layer);
+    if (layerSig) {
+      const cursor = get("@diamondcoreprocessor.com/HistoryCursorService");
+      if (cursor) await cursor.onNewLayer();
+    }
   }
   /**
    * Build the full layer snapshot from live state sources.

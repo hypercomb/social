@@ -1790,12 +1790,12 @@ export class ShowCellDrone extends Drone {
         }
       }
       if (this.cachedCellNames && payload?.cell) {
-        // Phase 2: try an in-place buffer update when position/count are unchanged.
-        // If that bails (unknown cell index, missing buffers), fall through to
-        // the incremental render path which rebuilds geometry.
-        void this.#tryInPlaceCellUpdate(payload.cell, { dir: null }).then(done => {
-          if (!done) void this.renderIncremental({ changedContent: [payload.cell] })
-        })
+        // Always take the incremental render path. The in-place fast path was
+        // leaving tiles blank after save because the caller's loadCellImages
+        // could resolve before the atlas re-populated the just-invalidated
+        // slot. renderIncremental rebuilds geometry after loads complete.
+        this.renderedCellsKey = ''
+        void this.renderIncremental({ changedContent: [payload.cell] })
       } else {
         this.#layerCellsCache.delete(this.renderedLocationKey)
         this.renderedCellsKey = ''

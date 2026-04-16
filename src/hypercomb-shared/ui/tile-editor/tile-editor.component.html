@@ -27,6 +27,9 @@
             </div>
           }
           <div class="hex-frame"></div>
+          @if (!hideText()) {
+            <div class="editor-label">{{ cell() }}</div>
+          }
         </div>
 
         <div class="image-controls">

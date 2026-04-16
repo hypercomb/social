@@ -1622,14 +1622,6 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       return;
     }
     const localCells = await this.listCellFolders(dir);
-    if (this.#clipboardView) {
-      console.log("[clipboard-render]", {
-        op: this.#clipboardView.op,
-        wantedLabels: [...this.#clipboardView.labels],
-        sourceSegments: this.#clipboardView.sourceSegments,
-        dirHas: localCells
-      });
-    }
     if (!this.#clipboardView && isStale()) {
       this.renderQueued = true;
       return;
@@ -1654,107 +1646,51 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       const cursorState2 = cursorService?.state;
       const isRewound = cursorState2?.rewound ?? false;
       if (isRewound && cursorService) {
-        const divergence = cursorService.computeDivergence();
-        for (const cell of [...union]) {
-          if (!divergence.current.has(cell) && !divergence.futureAdds.has(cell)) {
-            union.delete(cell);
+        const content = await cursorService.layerContentAtCursor();
+        if (content) {
+          const cellsAtCursor = new Set(content.cells);
+          for (const cell of [...union]) {
+            if (!cellsAtCursor.has(cell)) union.delete(cell);
           }
-        }
-        for (const cell of divergence.current) {
-          union.add(cell);
-          localCellSet.add(cell);
-        }
-        for (const cell of divergence.futureAdds) union.add(cell);
-        this.#divergenceFutureAdds = divergence.futureAdds;
-        this.#divergenceFutureRemoves = divergence.futureRemoves;
-        const reconKey = `${cursorState2.locationSig}:${cursorState2.position}`;
-        const store = window.ioc?.get?.("@hypercomb.social/Store");
-        if (store && reconKey !== this.#cursorReconstructionKey) {
-          this.#cursorReconstructionKey = reconKey;
-          const tagSigs = cursorService.collectTagStateSignatures();
-          const cursorTagMap = /* @__PURE__ */ new Map();
-          for (const tagSig of tagSigs) {
-            try {
-              const blob = await store.getResource(tagSig);
-              if (!blob) continue;
-              const snapshot = JSON.parse(await blob.text());
-              if (snapshot?.cellTags) {
-                for (const [cellLabel, tags] of Object.entries(snapshot.cellTags)) {
-                  cursorTagMap.set(cellLabel, tags);
-                }
-              }
-            } catch {
+          for (const cell of content.cells) {
+            union.add(cell);
+            localCellSet.add(cell);
+          }
+          const reconKey = `${cursorState2.locationSig}:${cursorState2.position}`;
+          if (reconKey !== this.#cursorReconstructionKey) {
+            this.#cursorReconstructionKey = reconKey;
+            if (Object.keys(content.contentByCell).length > 0) {
+              this.#cursorPropsOverride = new Map(Object.entries(content.contentByCell));
             }
-          }
-          for (const [cellLabel, tags] of cursorTagMap) {
-            this.cellTagsCache.set(cellLabel, tags);
-          }
-          const contentOps = cursorService.opsAtCursor("content-state");
-          const cursorPropsOverride = /* @__PURE__ */ new Map();
-          for (const op of contentOps) {
-            try {
-              const blob = await store.getResource(op.cell);
-              if (!blob) continue;
-              const snapshot = JSON.parse(await blob.text());
-              if (snapshot?.cellLabel && snapshot?.propertiesSig) {
-                cursorPropsOverride.set(snapshot.cellLabel, snapshot.propertiesSig);
-              }
-            } catch {
+            for (const [cell, tags] of Object.entries(content.tagsByCell)) {
+              this.cellTagsCache.set(cell, tags);
             }
-          }
-          if (cursorPropsOverride.size > 0) {
-            this.#cursorPropsOverride = cursorPropsOverride;
-          }
-          const layoutOps = cursorService.opsAtCursor("layout-state");
-          for (const op of layoutOps) {
-            try {
-              const blob = await store.getResource(op.cell);
-              if (!blob) continue;
-              const snapshot = JSON.parse(await blob.text());
-              if (snapshot?.property && snapshot?.value !== void 0) {
-                switch (snapshot.property) {
-                  case "orientation": {
-                    const flat = snapshot.value === "flat-top";
-                    if (this.#flat !== flat) {
-                      this.#flat = flat;
-                      this.cellImageCache.clear();
-                    }
-                    break;
+            const store = window.ioc?.get?.("@hypercomb.social/Store");
+            if (store && content.layoutSig) {
+              try {
+                const blob = await store.getResource(content.layoutSig);
+                if (blob) {
+                  const layout = JSON.parse(await blob.text());
+                  const flat = layout.orientation === "flat-top";
+                  if (this.#flat !== flat) {
+                    this.#flat = flat;
+                    this.cellImageCache.clear();
                   }
-                  case "pivot": {
-                    const pivot = snapshot.value === "true";
-                    if (this.#pivot !== pivot) {
-                      this.#pivot = pivot;
-                      this.atlas?.setPivot(pivot);
-                    }
-                    break;
+                  if (typeof layout.pivot === "boolean" && this.#pivot !== layout.pivot) {
+                    this.#pivot = layout.pivot;
+                    this.atlas?.setPivot(this.#pivot);
                   }
-                  case "gap": {
-                    const gapPx = parseFloat(snapshot.value);
-                    if (!isNaN(gapPx) && this.#hexGeo.gapPx !== gapPx) {
-                      this.#hexGeo = createHexGeometry(this.#hexGeo.circumRadiusPx, gapPx, this.#hexGeo.padPx);
-                    }
-                    break;
+                  if (typeof layout.gapPx === "number" && this.#hexGeo.gapPx !== layout.gapPx) {
+                    this.#hexGeo = createHexGeometry(this.#hexGeo.circumRadiusPx, layout.gapPx, this.#hexGeo.padPx);
                   }
-                  case "mode": {
-                    const mode = snapshot.value;
-                    if (mode === "dense" || mode === "pinned") {
-                      this.#layoutMode = mode;
-                    }
-                    break;
+                  if (layout.mode === "dense" || layout.mode === "pinned") {
+                    this.#layoutMode = layout.mode;
                   }
                 }
+              } catch {
               }
-            } catch {
             }
           }
-        }
-      } else {
-        const ops = await historyService.replay(sig.sig);
-        const cellState = /* @__PURE__ */ new Map();
-        for (const op of ops) cellState.set(op.cell, op.op);
-        for (const [cell, lastOp] of cellState) {
-          if (lastOp === "remove" && !localCellSet.has(cell)) union.delete(cell);
         }
       }
     }
@@ -1776,7 +1712,8 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       if (!localCellSet.has(blocked)) union.delete(blocked);
     }
     const cursorState = cursorService?.state;
-    const hiddenSet = cursorState?.rewound && cursorService ? cursorService.computeDivergence().hiddenAtCursor : new Set(JSON.parse(localStorage.getItem(`hc:hidden-tiles:${locationKey}`) ?? "[]"));
+    const rewoundContent = cursorState?.rewound && cursorService ? cursorService.peekContent() : null;
+    const hiddenSet = rewoundContent ? new Set(rewoundContent.hidden) : new Set(JSON.parse(localStorage.getItem(`hc:hidden-tiles:${locationKey}`) ?? "[]"));
     this.#currentHiddenSet = hiddenSet;
     if (!this.#showHiddenItems) {
       for (const hidden of hiddenSet) {
@@ -1787,6 +1724,13 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       const clipLabels = this.#clipboardView.labels;
       for (const cell of union) {
         if (!clipLabels.has(cell)) union.delete(cell);
+      }
+      const missing = [];
+      for (const label of clipLabels) {
+        if (!union.has(label)) missing.push(label);
+      }
+      if (missing.length > 0) {
+        this.emitEffect("clipboard:ghost-detected", { labels: missing });
       }
     }
     this.#layoutMode = this.#readLayoutMode(locationKey);
@@ -2073,9 +2017,8 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
         }
       }
       if (this.cachedCellNames && payload?.cell) {
-        void this.#tryInPlaceCellUpdate(payload.cell, { dir: null }).then((done) => {
-          if (!done) void this.renderIncremental({ changedContent: [payload.cell] });
-        });
+        this.renderedCellsKey = "";
+        void this.renderIncremental({ changedContent: [payload.cell] });
       } else {
         this.#layerCellsCache.delete(this.renderedLocationKey);
         this.renderedCellsKey = "";
@@ -2619,7 +2562,8 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
         const pinnedRewound = pinnedCursor?.state?.rewound ?? false;
         let cellNames;
         if (pinnedRewound && pinnedCursor) {
-          const order = await pinnedCursor.buildOrderAtCursor();
+          const pinnedContent = await pinnedCursor.layerContentAtCursor();
+          const order = pinnedContent?.cells ?? [];
           if (order.length > 0) {
             const unionSet = new Set(union);
             const filtered = order.filter((s) => unionSet.has(s));
@@ -2652,7 +2596,8 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
         const cursorService = window.ioc?.get?.("@diamondcoreprocessor.com/HistoryCursorService");
         const isRewound = cursorService?.state?.rewound ?? false;
         if (isRewound && cursorService) {
-          const order = await cursorService.buildOrderAtCursor();
+          const rewoundContent = await cursorService.layerContentAtCursor();
+          const order = rewoundContent?.cells ?? [];
           if (order.length > 0) {
             orderFromProjection = true;
             const unionSet = new Set(union);

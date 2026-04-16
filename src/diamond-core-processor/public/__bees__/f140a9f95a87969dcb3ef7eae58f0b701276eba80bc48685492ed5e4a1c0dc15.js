@@ -52,6 +52,24 @@ var ClipboardWorker = class extends Worker {
           break;
       }
     });
+    EffectBus.on("clipboard:ghost-detected", (payload) => {
+      const svc = this.#clipboardSvc;
+      if (!svc || !payload?.labels?.length) return;
+      svc.removeItems(new Set(payload.labels));
+      const store = this.#store;
+      if (svc.isEmpty) {
+        if (store) void clearDirectory(store.clipboard);
+        EffectBus.emit("clipboard:view", { active: false });
+      } else if (store) {
+        void writeMeta(store.clipboard, {
+          op: svc.operation,
+          items: svc.items.map((i) => ({
+            label: i.label,
+            sourceSegments: [...i.sourceSegments]
+          }))
+        });
+      }
+    });
     const tryRestore = () => {
       const store = this.#store;
       const svc = this.#clipboardSvc;
@@ -280,12 +298,6 @@ var ClipboardWorker = class extends Worker {
         }
       }
     }
-    console.log("[clipboard-validate]", {
-      op,
-      labels: items.map((i) => i.label),
-      sourceSegments: items[0]?.sourceSegments ?? [],
-      invalid: [...invalid]
-    });
     if (invalid.size === 0) return;
     svc.removeItems(invalid);
     if (svc.isEmpty) {

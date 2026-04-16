@@ -147,6 +147,26 @@
 
 // ── hex frame mask ──────────────────────────────────────
 
+.editor-label {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 2;
+  color: #fff;
+  font-family: var(--hc-font);
+  font-size: 0.95em;
+  letter-spacing: 0.04em;
+  padding: 0.25em 0.7em;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  white-space: nowrap;
+  max-width: 80%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .hex-frame {
   position: absolute;
   inset: 0;

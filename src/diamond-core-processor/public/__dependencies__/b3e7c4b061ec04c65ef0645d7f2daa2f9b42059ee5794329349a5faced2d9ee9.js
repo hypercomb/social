@@ -81,323 +81,131 @@ import { EffectBus as EffectBus2 } from "@hypercomb/core";
 var HistoryCursorService = class _HistoryCursorService extends EventTarget {
   #locationSig = "";
   #position = 0;
-  #total = 0;
-  #allOps = [];
+  #layers = [];
+  // Last-fetched layer content, keyed by layer signature
+  #cachedLayerSig = null;
+  #cachedContent = null;
   get state() {
-    const op = this.#position > 0 ? this.#allOps[this.#position - 1] : null;
+    const entry = this.#position > 0 ? this.#layers[this.#position - 1] : null;
     return {
       locationSig: this.#locationSig,
       position: this.#position,
-      total: this.#total,
-      rewound: this.#total > 0 && this.#position < this.#total,
-      at: op?.at ?? 0
+      total: this.#layers.length,
+      rewound: this.#layers.length > 0 && this.#position < this.#layers.length,
+      at: entry?.at ?? 0
     };
   }
   /**
-   * Load (or reload) history for a location.
-   * Restores persisted cursor position when entering a location,
-   * so undo/redo state survives page refresh.
+   * Load (or reload) layer history for a location. Restores persisted
+   * cursor position so rewound state survives page refresh.
    */
   async load(locationSig) {
     const historyService = get("@diamondcoreprocessor.com/HistoryService");
     if (!historyService) return;
-    const ops = await historyService.replay(locationSig);
-    this.#allOps = ops;
-    this.#total = ops.length;
+    this.#layers = await historyService.listLayers(locationSig);
     if (this.#locationSig !== locationSig) {
       this.#locationSig = locationSig;
-      const clock = get("@diamondcoreprocessor.com/GlobalTimeClock");
-      if (clock?.active && clock.timestamp !== null) {
-        this.seekToTime(clock.timestamp);
-        return;
-      }
+      this.#cachedLayerSig = null;
+      this.#cachedContent = null;
       const saved = this.#loadPersistedPosition(locationSig);
-      if (saved !== null && saved < this.#total) {
-        this.#position = saved;
-      } else {
-        this.#position = this.#total;
-      }
-    } else if (this.#position > this.#total) {
-      this.#position = this.#total;
+      this.#position = saved !== null && saved < this.#layers.length ? saved : this.#layers.length;
+    } else if (this.#position > this.#layers.length) {
+      this.#position = this.#layers.length;
     }
     this.#emit();
   }
   /**
-   * Called when a new op is appended (e.g. by HistoryRecorder).
-   * If cursor was at the latest, keep it at the latest.
+   * Called after LayerCommitter appends a new layer. If cursor was at
+   * head, stay at head (absorb the new layer). Otherwise keep the
+   * rewound position — the user is viewing history.
    */
-  async onNewOp() {
-    const wasAtLatest = this.#position >= this.#total;
+  async onNewLayer() {
+    const wasAtLatest = this.#position >= this.#layers.length;
     await this.load(this.#locationSig);
     if (wasAtLatest) {
-      this.#position = this.#total;
+      this.#position = this.#layers.length;
       this.#emit();
     }
   }
   /** Move cursor to an absolute position (1-based, clamped). */
   seek(position) {
-    const clamped = Math.max(0, Math.min(position, this.#total));
+    const clamped = Math.max(0, Math.min(position, this.#layers.length));
     if (clamped === this.#position) return;
     this.#position = clamped;
     this.#emit();
   }
-  /** Step backward one op. */
+  /** Step backward one layer. */
   undo() {
-    if (this.#position <= 0) return;
-    let i = this.#position - 1;
-    const groupKey = this.#groupKeyForIndex(i);
-    while (i >= 0 && this.#groupKeyForIndex(i) === groupKey) i--;
-    this.seek(i + 1);
+    if (this.#position > 0) this.seek(this.#position - 1);
   }
-  /** Step forward one op. */
+  /** Step forward one layer. */
   redo() {
-    if (this.#position >= this.#total) return;
-    let i = this.#position;
-    const groupKey = this.#groupKeyForIndex(i);
-    while (i < this.#total && this.#groupKeyForIndex(i) === groupKey) i++;
-    this.seek(i);
+    if (this.#position < this.#layers.length) this.seek(this.#position + 1);
   }
   /** Jump to latest (exit rewind mode). */
   jumpToLatest() {
-    this.seek(this.#total);
+    this.seek(this.#layers.length);
   }
   /**
-   * Seek to the last op at or before the given timestamp.
-   * Returns the position it landed on (0 if no ops before timestamp).
+   * Seek to the last layer at or before the given timestamp.
+   * Returns the position it landed on (0 if no layers before timestamp).
    */
   seekToTime(timestamp) {
-    if (this.#allOps.length === 0) return 0;
+    if (this.#layers.length === 0) return 0;
     let pos = 0;
-    for (let i = 0; i < this.#allOps.length; i++) {
-      if (this.#allOps[i].at <= timestamp) {
-        pos = i + 1;
-      } else {
-        break;
-      }
+    for (let i = 0; i < this.#layers.length; i++) {
+      if (this.#layers[i].at <= timestamp) pos = i + 1;
+      else break;
     }
     this.seek(pos);
     return pos;
   }
   /**
-   * Get all operation timestamps for this location's bag.
+   * All layer timestamps for this location, in order.
    * Used by GlobalTimeClock for stepping across locations.
    */
   get allTimestamps() {
-    return this.#allOps.map((op) => op.at);
+    return this.#layers.map((entry) => entry.at);
   }
   /**
-   * Promote the state at the current cursor position to head.
-   * Computes the diff (cursor-state vs head-state), writes the
-   * necessary add / remove ops, then a reorder op to preserve
-   * the display order at cursor time. Cursor jumps to new head.
+   * Resolve the LayerContent for the entry at the cursor position.
+   * Cached by layer signature so repeated reads during a single render
+   * hit memory, not OPFS.
    */
-  async promote() {
-    if (!this.state.rewound) return;
-    if (this.#allOps.length === 0) return;
-    const historyService = get("@diamondcoreprocessor.com/HistoryService");
-    if (!historyService) return;
-    const cursorCells = [];
-    const cursorCellSet = /* @__PURE__ */ new Set();
-    for (let i = 0; i < this.#position; i++) {
-      const op = this.#allOps[i];
-      if (op.op === "add") {
-        if (!cursorCellSet.has(op.cell)) {
-          cursorCellSet.add(op.cell);
-          cursorCells.push(op.cell);
-        }
-      } else if (op.op === "remove") {
-        cursorCellSet.delete(op.cell);
-        const idx = cursorCells.indexOf(op.cell);
-        if (idx !== -1) cursorCells.splice(idx, 1);
-      }
+  async layerContentAtCursor() {
+    if (this.#position === 0) return null;
+    const entry = this.#layers[this.#position - 1];
+    if (this.#cachedLayerSig === entry.layerSig && this.#cachedContent) {
+      return this.#cachedContent;
     }
-    const headCellSet = /* @__PURE__ */ new Set();
-    for (const op of this.#allOps) {
-      if (op.op === "add") headCellSet.add(op.cell);
-      else if (op.op === "remove") headCellSet.delete(op.cell);
-    }
-    const now = Date.now();
-    for (const cell of headCellSet) {
-      if (!cursorCellSet.has(cell)) {
-        await historyService.record(this.#locationSig, { op: "remove", cell, at: now });
-      }
-    }
-    for (const cell of cursorCellSet) {
-      if (!headCellSet.has(cell)) {
-        await historyService.record(this.#locationSig, { op: "add", cell, at: now });
-      }
-    }
-    if (cursorCells.length > 0) {
-      const store = get("@hypercomb.social/Store");
-      if (store) {
-        const payload = JSON.stringify(cursorCells);
-        const payloadSig = await store.putResource(new Blob([payload]));
-        await historyService.record(this.#locationSig, { op: "reorder", cell: payloadSig, at: now });
-      }
-    }
-    const orderProjection = get("@diamondcoreprocessor.com/OrderProjection");
-    if (orderProjection?.evict) orderProjection.evict(this.#locationSig);
-    await this.load(this.#locationSig);
-    this.#position = this.#total;
-    this.#emit();
-    EffectBus2.emit("history:promoted", {
-      locationSig: this.#locationSig,
-      reconciledOrder: cursorCells,
-      survivingCells: [...cursorCellSet]
-    });
-  }
-  /**
-   * Compute divergence info: which cells are current vs future.
-   * Used by ShowCellDrone to decide ghost overlays.
-   */
-  computeDivergence() {
-    const current = /* @__PURE__ */ new Set();
-    const futureAdds = /* @__PURE__ */ new Set();
-    const futureRemoves = /* @__PURE__ */ new Set();
-    const hiddenAtCursor = /* @__PURE__ */ new Set();
-    if (this.#allOps.length === 0) {
-      return { current, futureAdds, futureRemoves, hiddenAtCursor };
-    }
-    const cellStateAtCursor = /* @__PURE__ */ new Map();
-    for (let i = 0; i < this.#position; i++) {
-      const op = this.#allOps[i];
-      if (op.op === "add" || op.op === "remove") {
-        cellStateAtCursor.set(op.cell, op.op);
-      } else if (op.op === "hide") {
-        hiddenAtCursor.add(op.cell);
-      } else if (op.op === "unhide") {
-        hiddenAtCursor.delete(op.cell);
-      }
-    }
-    for (const [cell, lastOp] of cellStateAtCursor) {
-      if (lastOp !== "remove") current.add(cell);
-    }
-    if (this.#position >= this.#total) {
-      return { current, futureAdds, futureRemoves, hiddenAtCursor };
-    }
-    const cellStateAtEnd = new Map(cellStateAtCursor);
-    for (let i = this.#position; i < this.#total; i++) {
-      const op = this.#allOps[i];
-      if (op.op === "add" || op.op === "remove") {
-        cellStateAtEnd.set(op.cell, op.op);
-      }
-    }
-    for (const [cell, lastOp] of cellStateAtEnd) {
-      const existsAtCursor = current.has(cell);
-      const existsAtEnd = lastOp !== "remove";
-      if (!existsAtCursor && existsAtEnd) {
-        futureAdds.add(cell);
-      } else if (existsAtCursor && !existsAtEnd) {
-        futureRemoves.add(cell);
-      }
-    }
-    return { current, futureAdds, futureRemoves, hiddenAtCursor };
-  }
-  /**
-   * Collect all tag-state resource signatures up to cursor position.
-   * Returns the signatures in order — the caller resolves them to get
-   * cumulative tag state at cursor time.
-   *
-   * Reconstruction: walk the returned sigs, each resolves to
-   * { version, cellTags: Record<cellLabel, string[]>, at }.
-   * Last write wins per cell — build a Map<cellLabel, string[]>.
-   */
-  collectTagStateSignatures() {
-    const sigs = [];
-    for (let i = 0; i < this.#position; i++) {
-      const op = this.#allOps[i];
-      if (op.op === "tag-state") sigs.push(op.cell);
-    }
-    return sigs;
-  }
-  /**
-   * Collect the last content-state resource signature per cell up to cursor position.
-   * Returns Map<cellLabel, resourceSig> — the caller resolves each sig to get
-   * { version, cellLabel, propertiesSig, at }.
-   *
-   * The propertiesSig points to the cell's properties resource at that moment.
-   */
-  collectContentStateSignatures() {
-    const lastSigPerCell = /* @__PURE__ */ new Map();
-    for (let i = 0; i < this.#position; i++) {
-      const op = this.#allOps[i];
-      if (op.op === "content-state") {
-        lastSigPerCell.set(`__idx_${i}`, op.cell);
-      }
-    }
-    return lastSigPerCell;
-  }
-  /**
-   * Replay add/remove/reorder ops up to cursor position to derive
-   * the correct display order at cursor time.
-   * Reorder payloads are resolved from the content-addressed store.
-   */
-  async buildOrderAtCursor() {
     const store = get("@hypercomb.social/Store");
-    let order = [];
-    for (let i = 0; i < this.#position; i++) {
-      const op = this.#allOps[i];
-      switch (op.op) {
-        case "add":
-          if (!order.includes(op.cell)) order.push(op.cell);
-          break;
-        case "remove":
-          order = order.filter((s) => s !== op.cell);
-          break;
-        case "reorder":
-          if (store) {
-            try {
-              const blob = await store.getResource(op.cell);
-              if (blob) {
-                const parsed = JSON.parse(await blob.text());
-                if (Array.isArray(parsed)) order = parsed;
-              }
-            } catch {
-            }
-          }
-          break;
-        case "rename":
-          if (store) {
-            try {
-              const blob = await store.getResource(op.cell);
-              if (blob) {
-                const parsed = JSON.parse(await blob.text());
-                if (parsed?.oldName && parsed?.newName) {
-                  const idx = order.indexOf(parsed.oldName);
-                  if (idx !== -1) order[idx] = parsed.newName;
-                }
-              }
-            } catch {
-            }
-          }
-          break;
-      }
+    if (!store) return null;
+    try {
+      const blob = await store.getResource(entry.layerSig);
+      if (!blob) return null;
+      const content = JSON.parse(await blob.text());
+      this.#cachedLayerSig = entry.layerSig;
+      this.#cachedContent = content;
+      return content;
+    } catch {
+      return null;
     }
-    return order;
   }
-  /**
-   * Get all ops up to cursor position, filtered by type.
-   * Generic method for any op type that needs reconstruction.
-   */
-  opsAtCursor(opType) {
-    const ops = [];
-    for (let i = 0; i < this.#position; i++) {
-      const op = this.#allOps[i];
-      if (!opType || op.op === opType) ops.push(op);
-    }
-    return ops;
+  /** Last-fetched layer content, for synchronous reads after a prior await. */
+  peekContent() {
+    return this.#cachedContent;
   }
   #emit() {
     this.#persistPosition();
     this.dispatchEvent(new CustomEvent("change"));
     EffectBus2.emit("history:cursor-changed", this.state);
   }
-  // ── Cursor persistence (localStorage) ─────────��───────────
+  // ── Cursor persistence (localStorage) ──────────────────────
   static #STORAGE_PREFIX = "hc:history-cursor:";
   #persistPosition() {
     if (!this.#locationSig) return;
     const key = _HistoryCursorService.#STORAGE_PREFIX + this.#locationSig;
-    if (this.#position >= this.#total) {
+    if (this.#position >= this.#layers.length) {
       localStorage.removeItem(key);
     } else {
       localStorage.setItem(key, String(this.#position));
@@ -409,12 +217,6 @@ var HistoryCursorService = class _HistoryCursorService extends EventTarget {
     const n = parseInt(raw, 10);
     return isNaN(n) ? null : n;
   }
-  #groupKeyForIndex(index) {
-    const op = this.#allOps[index];
-    const groupId = String(op?.groupId ?? "").trim();
-    if (groupId.length > 0) return `g:${groupId}`;
-    return `i:${index}`;
-  }
 };
 var _historyCursorService = new HistoryCursorService();
 window.ioc.register("@diamondcoreprocessor.com/HistoryCursorService", _historyCursorService);
@@ -422,8 +224,6 @@ window.ioc.register("@diamondcoreprocessor.com/HistoryCursorService", _historyCu
 // src/diamondcoreprocessor.com/history/history.service.ts
 import { SignatureService } from "@hypercomb/core";
 var HistoryService = class _HistoryService {
-  // Signatures currently being promoted — prevents recursion when promote() calls record()
-  #promoting = /* @__PURE__ */ new Set();
   // In-memory cache of full replay per signature. Keeps navigation instant —
   // history is the same until the next record()/updateLayer() append.
   #replayCache = /* @__PURE__ */ new Map();
@@ -457,23 +257,11 @@ var HistoryService = class _HistoryService {
    * Record an operation into the history bag for the given signature.
    * Appends a sequential file (00000001, 00000002, ...) with JSON content.
    *
-   * If the cursor for this location is rewound, promotes the cursor state to
-   * head first (creating a new branch from the rewound point) before recording.
+   * Ops are a legacy view — the primary history primitive is the layer
+   * snapshot (commitLayer). Any edit while rewound simply appends a new
+   * layer at head; previous layers remain immutable and addressable.
    */
   record = async (signature, operation) => {
-    if (!this.#promoting.has(signature)) {
-      const cursorService = get(
-        "@diamondcoreprocessor.com/HistoryCursorService"
-      );
-      if (cursorService?.state.rewound && cursorService.state.locationSig === signature) {
-        this.#promoting.add(signature);
-        try {
-          await cursorService.promote();
-        } finally {
-          this.#promoting.delete(signature);
-        }
-      }
-    }
     const bag = await this.getBag(signature);
     const nextIndex = await this.nextIndex(bag);
     const fileName = String(nextIndex).padStart(8, "0");

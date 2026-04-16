@@ -103,7 +103,7 @@ var HistorySliderDrone = class {
   }
   #promote() {
     const cursor = get("@diamondcoreprocessor.com/HistoryCursorService");
-    cursor?.promote();
+    cursor?.jumpToLatest();
   }
   #toggleScope() {
     const clock = get("@diamondcoreprocessor.com/GlobalTimeClock");
@@ -338,14 +338,7 @@ var HistorySliderDrone = class {
       this.#timeLabel.textContent = "--:--:--";
     }
     this.#posLabel.textContent = `${position}/${total}`;
-    const cursor = get("@diamondcoreprocessor.com/HistoryCursorService");
-    if (cursor && position > 0) {
-      const ops = cursor.opsAtCursor();
-      const op = ops[position - 1];
-      this.#activityLabel.textContent = op ? formatOpDescription(op.op, op.cell) : "";
-    } else {
-      this.#activityLabel.textContent = "";
-    }
+    this.#activityLabel.textContent = "";
     this.#scopeLabel.style.display = "inline-block";
     if (this.#globalTimeActive) {
       this.#scopeLabel.textContent = "global";
@@ -377,47 +370,9 @@ var HistorySliderDrone = class {
       this.#notifVisible = true;
     }
     const stepsBack = total - position;
-    const cursor = get("@diamondcoreprocessor.com/HistoryCursorService");
-    if (cursor) {
-      const div = cursor.computeDivergence();
-      const changes = div.futureAdds.size + div.futureRemoves.size;
-      this.#notifLabel.textContent = changes > 0 ? `${stepsBack} step${stepsBack === 1 ? "" : "s"} back \xB7 ${changes} tile${changes === 1 ? "" : "s"} differ` : `${stepsBack} step${stepsBack === 1 ? "" : "s"} back`;
-    } else {
-      this.#notifLabel.textContent = `${stepsBack} step${stepsBack === 1 ? "" : "s"} back`;
-    }
+    this.#notifLabel.textContent = `${stepsBack} step${stepsBack === 1 ? "" : "s"} back`;
   }
 };
-function formatOpDescription(op, cell) {
-  const label = cell.length === 64 && /^[0-9a-f]+$/.test(cell) ? "" : ` "${cell}"`;
-  switch (op) {
-    case "add":
-      return `added${label}`;
-    case "remove":
-      return `removed${label}`;
-    case "reorder":
-      return "reordered";
-    case "rename":
-      return "renamed";
-    case "add-drone":
-      return `drone added${label}`;
-    case "remove-drone":
-      return `drone removed${label}`;
-    case "instruction-state":
-      return "instructions changed";
-    case "tag-state":
-      return "tags changed";
-    case "content-state":
-      return "content saved";
-    case "layout-state":
-      return "layout changed";
-    case "hide":
-      return `hidden${label}`;
-    case "unhide":
-      return `unhidden${label}`;
-    default:
-      return op;
-  }
-}
 var _historySliderDrone = new HistorySliderDrone();
 window.ioc.register("@diamondcoreprocessor.com/HistorySliderDrone", _historySliderDrone);
 export {

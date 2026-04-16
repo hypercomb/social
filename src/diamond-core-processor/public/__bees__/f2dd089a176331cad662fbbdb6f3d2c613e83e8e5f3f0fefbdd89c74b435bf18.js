@@ -53,8 +53,6 @@ var HistoryRecorder = class {
     if (!lineage || !historyService) return;
     const sig = await historyService.sign(lineage);
     await historyService.record(sig, { op, cell, at: Date.now(), groupId });
-    const cursor = get("@diamondcoreprocessor.com/HistoryCursorService");
-    if (cursor) await cursor.onNewOp();
   }
   /**
    * Capture tag state as a signature-addressed resource.
@@ -99,8 +97,6 @@ var HistoryRecorder = class {
         cell: resourceSig,
         at: snapshot.at
       });
-      const cursor = get("@diamondcoreprocessor.com/HistoryCursorService");
-      if (cursor) await cursor.onNewOp();
     }).catch(() => {
     });
   }
@@ -126,8 +122,6 @@ var HistoryRecorder = class {
         cell: resourceSig,
         at: Date.now()
       });
-      const cursor = get("@diamondcoreprocessor.com/HistoryCursorService");
-      if (cursor) await cursor.onNewOp();
     }).catch(() => {
     });
   }
@@ -162,8 +156,6 @@ var HistoryRecorder = class {
         cell: resourceSig,
         at: snapshot.at
       });
-      const cursor = get("@diamondcoreprocessor.com/HistoryCursorService");
-      if (cursor) await cursor.onNewOp();
     }).catch(() => {
     });
   }
@@ -195,8 +187,6 @@ var HistoryRecorder = class {
         cell: resourceSig,
         at: snapshot.at
       });
-      const cursor = get("@diamondcoreprocessor.com/HistoryCursorService");
-      if (cursor) await cursor.onNewOp();
     }).catch(() => {
     });
   }

@@ -1049,8 +1049,6 @@ var RenameQueenBee = class extends QueenBee12 {
       cell: resourceSig,
       at: snapshot2.at
     });
-    const cursor = get("@diamondcoreprocessor.com/HistoryCursorService");
-    if (cursor) await cursor.onNewOp();
   }
 };
 async function copyDirectory(src, dest) {
