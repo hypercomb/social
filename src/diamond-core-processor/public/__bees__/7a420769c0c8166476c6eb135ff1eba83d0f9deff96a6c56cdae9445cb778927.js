@@ -813,6 +813,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
   meshCells = [];
   // clipboard view override — when set, render from this dir instead of explorer
   #clipboardView = null;
+  #lastCursorPosition = -1;
   #lastCursorRewound = false;
   meshSub = null;
   publisherId = (() => {
@@ -2073,7 +2074,13 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
     });
     this.onEffect("history:cursor-changed", (state) => {
       const nowRewound = state?.rewound ?? false;
-      if (nowRewound === this.#lastCursorRewound) return;
+      const nowPosition = state?.position ?? -1;
+      if (!nowRewound && !this.#lastCursorRewound && nowPosition > this.#lastCursorPosition) {
+        this.#lastCursorPosition = nowPosition;
+        return;
+      }
+      if (nowPosition === this.#lastCursorPosition && nowRewound === this.#lastCursorRewound) return;
+      this.#lastCursorPosition = nowPosition;
       this.#lastCursorRewound = nowRewound;
       this.#layerCellsCache.clear();
       this.renderedCellsKey = "";

@@ -64,6 +64,13 @@ export class LayerCommitter {
     })
 
     window.addEventListener('synchronize', () => this.#schedule())
+
+    // Capture a baseline layer on first render so there's always a
+    // "before" snapshot to undo to. render:cell-count fires after
+    // ShowCellDrone finishes painting — cells are fully resolved.
+    // commitLayer dedupes identical states, so this is cheap for
+    // subsequent renders.
+    EffectBus.on('render:cell-count', () => this.#schedule())
   }
 
   #schedule(): void {
@@ -80,6 +87,11 @@ export class LayerCommitter {
   }
 
   async #commit(): Promise<void> {
+    // Never commit while cursor is rewound — the assembled state reflects
+    // the past view, not a new user intent.
+    const cursor = get<HistoryCursorService>('@diamondcoreprocessor.com/HistoryCursorService')
+    if (cursor?.state?.rewound) return
+
     const lineage = get<Lineage>('@hypercomb.social/Lineage')
     const history = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
     if (!lineage || !history) return
@@ -100,7 +112,10 @@ export class LayerCommitter {
    */
   async #assembleLayer(lineage: Lineage, locationSig: string): Promise<LayerContent> {
     const order = get<OrderProjection>('@diamondcoreprocessor.com/OrderProjection')
-    const cells = order?.peek(locationSig) ?? []
+    // peek is synchronous; if the projection hasn't hydrated yet for this
+    // location, hydrate now so the first layer captures the real cell list
+    // instead of an empty array.
+    const cells = order?.peek(locationSig) ?? await order?.hydrate(locationSig) ?? []
 
     const { contentByCell, tagsByCell } = await this.#readCellState(lineage, cells)
 

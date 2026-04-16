@@ -30,6 +30,7 @@ var LayerCommitter = class {
       if (p?.gapPx != null) this.#layout = { ...this.#layout, gapPx: p.gapPx };
     });
     window.addEventListener("synchronize", () => this.#schedule());
+    EffectBus.on("render:cell-count", () => this.#schedule());
   }
   #schedule() {
     if (this.#scheduled) return;
@@ -43,6 +44,8 @@ var LayerCommitter = class {
     });
   }
   async #commit() {
+    const cursor = get("@diamondcoreprocessor.com/HistoryCursorService");
+    if (cursor?.state?.rewound) return;
     const lineage = get("@hypercomb.social/Lineage");
     const history = get("@diamondcoreprocessor.com/HistoryService");
     if (!lineage || !history) return;
@@ -50,8 +53,8 @@ var LayerCommitter = class {
     const layer = await this.#assembleLayer(lineage, locationSig);
     const layerSig = await history.commitLayer(locationSig, layer);
     if (layerSig) {
-      const cursor = get("@diamondcoreprocessor.com/HistoryCursorService");
-      if (cursor) await cursor.onNewLayer();
+      const cursor2 = get("@diamondcoreprocessor.com/HistoryCursorService");
+      if (cursor2) await cursor2.onNewLayer();
     }
   }
   /**
@@ -59,7 +62,7 @@ var LayerCommitter = class {
    */
   async #assembleLayer(lineage, locationSig) {
     const order = get("@diamondcoreprocessor.com/OrderProjection");
-    const cells = order?.peek(locationSig) ?? [];
+    const cells = order?.peek(locationSig) ?? await order?.hydrate(locationSig) ?? [];
     const { contentByCell, tagsByCell } = await this.#readCellState(lineage, cells);
     const bees = this.#readBees();
     const hidden = this.#readHidden(lineage);

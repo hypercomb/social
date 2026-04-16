@@ -72,14 +72,17 @@ export class HistoryCursorService extends EventTarget {
    * Called after LayerCommitter appends a new layer. If cursor was at
    * head, stay at head (absorb the new layer). Otherwise keep the
    * rewound position — the user is viewing history.
+   *
+   * Single emit — no intermediate rewound flash.
    */
   async onNewLayer(): Promise<void> {
     const wasAtLatest = this.#position >= this.#layers.length
-    await this.load(this.#locationSig)
-    if (wasAtLatest) {
-      this.#position = this.#layers.length
-      this.#emit()
-    }
+    const historyService = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
+    if (!historyService) return
+
+    this.#layers = await historyService.listLayers(this.#locationSig)
+    if (wasAtLatest) this.#position = this.#layers.length
+    this.#emit()
   }
 
   /** Move cursor to an absolute position (1-based, clamped). */

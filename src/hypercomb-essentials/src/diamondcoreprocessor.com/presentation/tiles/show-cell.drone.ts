@@ -8,8 +8,8 @@ import { HexImageAtlas } from '../grid/hex-image.atlas.js'
 import { HexSdfTextureShader } from '../grid/hex-sdf.shader.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from '../grid/hex-geometry.js'
 import { isSignature, readCellProperties, writeCellProperties } from '../../editor/tile-properties.js'
-import type { HistoryService, HistoryOp } from '../../history/history.service.js'
-import type { HistoryCursorService } from '../../history/history-cursor.service.js'
+import type { HistoryService } from '../../history/history.service.js'
+import type { HistoryCursorService, CursorState } from '../../history/history-cursor.service.js'
 import type { ViewportPersistence, ViewportSnapshot } from '../../navigation/zoom/zoom.drone.js'
 
 type Axial = { q: number; r: number }
@@ -242,6 +242,7 @@ export class ShowCellDrone extends Drone {
 
   // clipboard view override — when set, render from this dir instead of explorer
   #clipboardView: { labels: Set<string>; sourceSegments: string[]; op: 'cut' | 'copy' } | null = null
+  #lastCursorPosition = -1
   #lastCursorRewound = false
   private meshSub: MeshSub | null = null
   private readonly publisherId: string = (() => {
@@ -1859,14 +1860,25 @@ export class ShowCellDrone extends Drone {
       }
     })
 
-    // history:cursor-changed — re-render with divergence when cursor MOVES
-    // (rewound ↔ latest). A brand-new op arriving while the cursor is at head
-    // just updates #total without a visual change — the incremental cell:added
-    // / cell:removed path has already reconciled the view, and forcing another
-    // full render here wipes in-flight work (e.g. just-pasted tiles).
-    this.onEffect<{ rewound?: boolean }>('history:cursor-changed', (state) => {
+    // history:cursor-changed — re-render when cursor moves to a different
+    // layer. Every undo/redo step is a different layer, so we must re-render
+    // each time. When cursor is at head and a NEW layer arrives (not a cursor
+    // move), the incremental cell:added / cell:removed path has already
+    // reconciled the view, so we skip to avoid wiping in-flight work.
+    this.onEffect<CursorState>('history:cursor-changed', (state) => {
       const nowRewound = state?.rewound ?? false
-      if (nowRewound === this.#lastCursorRewound) return
+      const nowPosition = state?.position ?? -1
+
+      // At head and position just bumped = new layer arrived. The
+      // incremental path already handled it — skip full re-render.
+      if (!nowRewound && !this.#lastCursorRewound && nowPosition > this.#lastCursorPosition) {
+        this.#lastCursorPosition = nowPosition
+        return
+      }
+
+      // Any actual cursor movement (undo/redo/seek) or rewound↔head transition
+      if (nowPosition === this.#lastCursorPosition && nowRewound === this.#lastCursorRewound) return
+      this.#lastCursorPosition = nowPosition
       this.#lastCursorRewound = nowRewound
       this.#layerCellsCache.clear()
       this.renderedCellsKey = ''

@@ -33,7 +33,7 @@
 
   // 🚫 IMPORTANT: do NOT compile shared here
   // "include": ["src", "../hypercomb-shared/core/tree-logger.ts"]
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "src/**/*.d.ts"],
   "exclude": ["scripts/**/*", "dist/**/*", "node_modules/**/*"]
 
 }
