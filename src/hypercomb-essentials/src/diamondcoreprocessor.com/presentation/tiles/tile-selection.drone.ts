@@ -231,6 +231,7 @@ export class TileSelectionDrone extends Drone {
   protected override dispose(): void {
     this.#stopAnimation()
     if (this.#layer) {
+      this.#layer.parent?.removeChild(this.#layer)
       this.#layer.destroy()
       this.#layer = null
     }
