@@ -2017,14 +2017,9 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
           this.imageAtlas.invalidate(oldSig);
         }
       }
-      if (this.cachedCellNames && payload?.cell) {
-        this.renderedCellsKey = "";
-        void this.renderIncremental({ changedContent: [payload.cell] });
-      } else {
-        this.#layerCellsCache.delete(this.renderedLocationKey);
-        this.renderedCellsKey = "";
-        this.requestRender();
-      }
+      this.#layerCellsCache.delete(this.renderedLocationKey);
+      this.renderedCellsKey = "";
+      this.requestRender();
     });
     this.onEffect("tags:changed", (payload) => {
       if (!payload?.updates) return;
