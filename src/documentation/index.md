@@ -1,82 +1,84 @@
-# Documentation Index
+# Hypercomb Documentation
 
-Central reference for all hypercomb documentation. Files are grouped by topic.
+The complete reference. Every page is also reachable through `/help` in the app — each section below becomes a `/help <section>` drill target, each page a `/help <section> <name>`. Start with [getting-started.md](getting-started.md) if this is your first visit.
 
 ---
 
-## Architecture & Core Design
+## Start
 
-- [architecture-overview.md](architecture-overview.md) — Live presence architecture with drone lifecycle, effect bus, and stateless design
-- [architecture-critique.md](architecture-critique.md) — Review of core architecture through Martin Fowler's architectural principles
-- [core-processor-architecture.md](core-processor-architecture.md) — Purpose and paradigm of @hypercomb/core as zero-dependency foundation
-- [hive.md](hive.md) — How the hexagonal grid and live session presence model works
-- [meetings-and-quorum.md](meetings-and-quorum.md) — 1+6 Cascade meeting template, quorum gathering, WebRTC signaling over the mesh
-- [runtime.md](runtime.md) — Navigation primitives: hex grid, AxialCoordinate, AxialService
-- [recommendations.md](recommendations.md) — Ten architectural improvements to strengthen existing design
+- [getting-started.md](getting-started.md) — Orientation: what Hypercomb is and where to go first
+- [contributing.md](contributing.md) — Reading order, development setup, conventions
+- [glossary.md](glossary.md) — Canonical vocabulary — metaphor to mechanism
 
-## Cryptographic & Content Addressing
+## Concepts
 
-- [core-primitive.md](core-primitive.md) — Signature-payload pairs as foundational content-addressed identity
-- [signature-algebra.md](signature-algebra.md) — Algebraic operations over content-addressed signatures
-- [signature-expansion-doctrine.md](signature-expansion-doctrine.md) — Mandatory practice: every data structure must be signature-addressed
-- [signature-node-pattern.md](signature-node-pattern.md) — Copy-paste implementation guide for signature-addressed features
-- [collapsed-compute.md](collapsed-compute.md) — Signature caching eliminates redundant computation across the network
-- [deterministic-computation.md](deterministic-computation.md) — Deterministic computation memoization with authenticity layer
-- [genome-primitive.md](genome-primitive.md) — Recursive Merkle root over subtrees: universal short-circuit for derived computations
+- [dna.md](dna.md) — Path capsules: optional publishing with cryptographic commitment
+- [emergence.md](emergence.md) — Brooding and eclosion — the visual lifecycle of tiles
+- [simple-naming-initiative.md](simple-naming-initiative.md) — Verb-first, consistent, human-readable naming
 
-## Protocol & Wire Format
+## Primitives
 
-- [byte-protocol.md](byte-protocol.md) — One-byte navigation wire format for hex grid movement
-- [protocol-spec.md](protocol-spec.md) — Decentralized presence-based navigation protocol with Nostr relay transport
-- [dependency-signing.md](dependency-signing.md) — Single signature securing entire package hierarchy
-
-## Concepts & Domain Model
-
-- [glossary.md](glossary.md) — Quick reference from metaphor to mechanics (bee, hive, drone, worker, etc.)
-- [dna.md](dna.md) — Optional publishing mechanism for path capsules with cryptographic commitment
+- [signature-system.md](signature-system.md) — The primitive and its expansion doctrine — every fragment is signature-addressed
+- [signature-algebra.md](signature-algebra.md) — Formal algebra: set operations, projections, reactive pipelines over signatures
+- [signature-node-pattern.md](signature-node-pattern.md) — Plug-and-play implementation template for signature-addressed features
+- [genome-primitive.md](genome-primitive.md) — Recursive Merkle root over subtrees — universal short-circuit for derived computations
+- [collapsed-compute.md](collapsed-compute.md) — Network effect: memoized signatures eliminate redundant computation
+- [deterministic-computation.md](deterministic-computation.md) — Authenticity layer: script + resource → deterministic result
 - [layer-primitives.md](layer-primitives.md) — Layers as atomic snapshots of folders, content-addressed and signature-referenced
-- [data-primitive.md](data-primitive.md) — History primitive for shared AI system operation recording
+- [data-primitive.md](data-primitive.md) — History primitive: operation recording for shared AI systems
 - [llm-primitive.md](llm-primitive.md) — Hypergraph primitive connecting signatures through LLM command transforms
-- [emergence.md](emergence.md) — Visual rendering lifecycle: brooding and eclosion of tiles on honeycomb
 
-## UI & Rendering
+## Architecture
 
-- [cell-rendering.md](cell-rendering.md) — How OPFS cells become tiles rendered via Pixi.js on hex grid
-- [tile-overlay-architecture.md](tile-overlay-architecture.md) — Contextual action system with overlays and animated particles
+- [architecture-fundamentals.md](architecture-fundamentals.md) — The runtime: hive, drones, effect bus, hex grid, OPFS, mesh
+- [core-processor-architecture.md](core-processor-architecture.md) — `@hypercomb/core`: zero-dependency foundation and build pipeline
 
-## Developer Guides & References
+## Protocols
 
-- [contributing.md](contributing.md) — Onboarding guide: reading order for vocabulary, architecture, glossary, protocols
-- [command-line-reference.md](command-line-reference.md) — Pluggable command line behavior architecture
-- [command-line-operations.md](command-line-operations.md) — Comprehensive reference table of all command line operations
-- [slash-behaviour-reference.md](slash-behaviour-reference.md) — Complete reference of all `/slash` commands with aliases
-- [simple-naming-initiative.md](simple-naming-initiative.md) — Human-readable naming conventions (verb-first, consistency)
-
-## Dependency Management & Infrastructure
-
+- [protocol-spec.md](protocol-spec.md) — Decentralized presence-based navigation protocol with Nostr relay transport
+- [byte-protocol.md](byte-protocol.md) — One-byte wire format for hex grid movement
+- [pheromone-protocol.md](pheromone-protocol.md) — Ambient signal annotations on content, signature-addressed
+- [pollination-protocol.md](pollination-protocol.md) — Cross-domain contributions via signed pollen packets
+- [dependency-signing.md](dependency-signing.md) — A single signature securing an entire package hierarchy
 - [dependency-resolution.md](dependency-resolution.md) — How dependencies resolve across project types and layers
-- [infrastructure.md](infrastructure.md) — Decentralized design with two relay servers, no centralized hosting
-- [decentralized-angular-hosting.md](decentralized-angular-hosting.md) — Theoretical exploration of decentralized Angular app hosting
 
-## Deployment & Pipeline
+## Features
 
-- [lets-discover-meadowverse-pipeline.md](lets-discover-meadowverse-pipeline.md) — Authoring-runtime pipeline: hypercomb.io (builder) to meadowverse.ca (runtime)
+- [cell-rendering.md](cell-rendering.md) — How OPFS cells become hex tiles in Pixi.js
+- [cell-localization.md](cell-localization.md) — Tile label translation via the I18nProvider
+- [tile-overlay-architecture.md](tile-overlay-architecture.md) — Contextual actions, overlays, and particle animations
+- [embedded-sites.md](embedded-sites.md) — Website bundles as cell decoration
+- [revision-mode.md](revision-mode.md) — Undo, redo, and time-travel through the history clock
+- [universal-history-plan.md](universal-history-plan.md) — Full history architecture: every op type, cross-hierarchy clock
+
+## CLI & Commands
+
+- [command-line-reference.md](command-line-reference.md) — All command-line operations: create, navigate, filter, batch, cut-paste, markers
+- [slash-behaviour-reference.md](slash-behaviour-reference.md) — All `/slash` commands with aliases, grouped by category
+- [slash-command-authoring.md](slash-command-authoring.md) — How to add a new slash command
+
+## Operations
+
+- [infrastructure.md](infrastructure.md) — Decentralized design: two relays, no centralized hosting
+- [decentralized-angular-hosting.md](decentralized-angular-hosting.md) — Theoretical exploration of decentralized app hosting
+- [lets-discover-meadowverse-pipeline.md](lets-discover-meadowverse-pipeline.md) — Authoring-runtime split: hypercomb.io → meadowverse.ca
 
 ## Security & Governance
 
-- [security.md](security.md) — Presence-first security: no accounts, data expires when participants leave
+- [security.md](security.md) — Presence-first security model: no accounts, expiring data
 - [social-governance.md](social-governance.md) — Presence-based permission, consent, and content-addressed identity
 - [code-of-conduct.md](code-of-conduct.md) — Community expectations for presence, consent, and recognition
+- [meetings-and-quorum.md](meetings-and-quorum.md) — 1+6 Cascade template, quorum gathering, WebRTC signaling
 
-## Legal & Licensing
+## Legal
 
-- [license.md](license.md) — Source code: GNU AGPL v3.0
-- [license-docs.md](license-docs.md) — Documentation: Creative Commons Attribution-ShareAlike 4.0
-- [trademarks.md](trademarks.md) — Trademark guidelines for hypercomb marks and branding
-- [developer-certificate.md](developer-certificate.md) — Developer Certificate of Origin for contributions
-- [certificate-of-origin.md](certificate-of-origin.md) — Origin verification certificate structure
+- [licensing.md](licensing.md) — Source code (AGPL-3.0-only) and documentation (CC BY-SA 4.0)
+- [contributor-agreement.md](contributor-agreement.md) — Developer Certificate of Origin v1.1, sign-off format
+- [trademarks.md](trademarks.md) — Trademark guidelines for Hypercomb marks and branding
 
-## Bee Story (narrative series)
+## Narrative
+
+The Bee Story — a nine-part series on the metaphor and meaning behind the architecture.
 
 - [the-bee.md](bee-story/the-bee.md)
 - [the-colony.md](bee-story/the-colony.md)
@@ -87,3 +89,13 @@ Central reference for all hypercomb documentation. Files are grouped by topic.
 - [the-scent.md](bee-story/the-scent.md)
 - [the-seal.md](bee-story/the-seal.md)
 - [the-swarm.md](bee-story/the-swarm.md)
+
+---
+
+## Archive
+
+Historical or non-canonical documents. Retained for reference, not part of the current help tree.
+
+- [archive/architecture-critique.md](archive/architecture-critique.md) — Martin Fowler-lens critique of the architecture
+- [archive/recommendations.md](archive/recommendations.md) — Ten architectural improvements proposed
+- [archive/selection-as-history.md](archive/selection-as-history.md) — Incomplete sketch, superseded by universal-history-plan

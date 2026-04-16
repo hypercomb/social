@@ -5,9 +5,8 @@ a theoretical framework for performing algebraic operations over content-address
 this document defines the hypothesis, formalizes the theory, and explores ten high-value applications.
 
 **related critical documents:**
-- [signature-expansion-doctrine.md](signature-expansion-doctrine.md) — the mandatory practice that makes this algebra operational: every fragment must be signature-addressed
+- [signature-system.md](signature-system.md) — the signature-payload pair (atoms of the algebra) and the mandatory expansion doctrine that makes this algebra operational
 - [collapsed-compute.md](collapsed-compute.md) — the practical consequence: memoized algebra eliminates redundant computation
-- [core-primitive.md](core-primitive.md) — the signature-payload pair: atoms of the algebra
 - [signature-node-pattern.md](signature-node-pattern.md) — plug-and-play guide: copy the node template, your feature participates in the algebra
 - [deterministic-computation.md](deterministic-computation.md) — authenticity composition: the composition function `C(s₁, s₂)` implemented
 - [core-processor-architecture.md](core-processor-architecture.md) — the runtime that drives the algebra: `hypercomb.act()` → pulse → synchronize

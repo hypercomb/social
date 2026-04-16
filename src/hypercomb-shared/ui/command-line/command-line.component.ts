@@ -106,6 +106,7 @@ const MOVE_ARROW_OFFSETS: Record<string, { dq: number; dr: number }> = {
   styleUrls: ['./command-line.component.scss'],
   host: {
     '[class.mobile-hidden]': 'mobileHidden()',
+    '[class.note-intent]': 'noteIntent()',
   },
 })
 export class CommandLineComponent implements AfterViewInit, OnDestroy {
@@ -125,6 +126,27 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   private readonly value = signal('')
   private readonly cellSubPath = signal<readonly string[]>([])
   private readonly cellLeaf = signal('')
+  /**
+   * When set, the command line is in plain text-capture mode and ignores
+   * all normal parsing (slash, filter, tag, bracket, create). Enter emits
+   * the configured commit effect; Escape cancels.
+   *
+   * `extra` carries through whatever the requester needs to round-trip
+   * with the commit (e.g. an `editId` so the note service replaces in
+   * place rather than appending).
+   */
+  readonly #captureMode = signal<{
+    commitEffect: string
+    target: string
+    placeholderKey: string
+    extra: Record<string, unknown>
+  } | null>(null)
+
+  /** Public marker — the host binds `.note-intent` to this to glow gold while capturing a note. */
+  public readonly noteIntent = computed<boolean>(() => {
+    const cap = this.#captureMode()
+    return !!cap && cap.commitEffect === 'note:commit'
+  })
   /** Tags currently assigned to the cell in bracket-tag mode (for intellisense filtering). */
   readonly #bracketCellTags = signal<ReadonlySet<string>>(new Set())
   #bracketCellLabel = ''
@@ -366,6 +388,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   public readonly placeholder = computed<string>(() => {
     const t = this.#i18n
     if (this.locked()) return t?.t('command-line.placeholder.locked') ?? 'enter cell name...'
+    const capture = this.#captureMode()
+    if (capture) return t?.t(capture.placeholderKey) ?? 'type a note...'
     const ctx = this.context()
     if (ctx.active && ctx.mode === 'filter') return t?.t('command-line.placeholder.filter') ?? 'filter tiles...'
     if (ctx.active && ctx.mode === 'slash') return t?.t('command-line.placeholder.slash') ?? 'type a command...'
@@ -432,6 +456,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   // -------------------------------------------------
 
   private readonly context = computed<CompletionContext>(() => {
+    // Capture mode suspends all normal parsing — treat as inactive so slash,
+    // filter, tag, bracket, and action completions are all disabled. Enter
+    // and Escape are handled directly by the shell hooks.
+    if (this.#captureMode()) return { active: false }
+
     const v = this.value()
 
     // >? prefix enters filter mode
@@ -848,6 +877,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   public ngAfterViewInit(): void {
     this.shell?.focus()
 
+    window.ioc.register('@hypercomb.social/CommandLineBehaviors', this.behaviorReference)
+
     window.addEventListener('navigate', this.#onNavigate)
     window.addEventListener('popstate', this.#onNavigate)
     this.#commandLineToggleUnsub = EffectBus.on<{ cmd: string }>('keymap:invoke', (payload) => {
@@ -862,6 +893,38 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.#commandFocusUnsub = EffectBus.on<{ cell: string }>('command:focus', ({ cell }) => {
       this.#setShellValue(cell, false)
       this.shell?.focus()
+    })
+
+    // Enter a text-capture mode (e.g. notes). Suspends normal parsing and
+    // routes Enter to the configured commit effect with the target label.
+    // Explicit cancel from the notes strip close button — clears capture
+    // mode without committing. Idempotent when not capturing.
+    this.#notesCancelUnsub = EffectBus.on('notes:cancel', () => {
+      if (this.#captureMode()) this.clear()
+    })
+
+    type EnterModePayload = {
+      mode: string
+      target: string
+      prefill?: string
+      editId?: string
+    }
+    this.#enterModeUnsub = EffectBus.on<EnterModePayload>('command:enter-mode', (payload: EnterModePayload) => {
+      if (!payload?.mode || !payload?.target) return
+      if (payload.mode === 'note-capture') {
+        const extra: Record<string, unknown> = {}
+        if (payload.editId) extra['editId'] = payload.editId
+        this.#captureMode.set({
+          commitEffect: 'note:commit',
+          target: payload.target,
+          placeholderKey: 'notes.capturePlaceholder',
+          extra,
+        })
+        const prefill = payload.prefill ?? ''
+        this.#setShellValue(prefill, false)
+        this.shell?.focus()
+        if (prefill) this.shell?.selectAll()
+      }
     })
 
     this.#touchDraggingUnsub = EffectBus.on<{ active: boolean }>('touch:dragging', ({ active }) => {
@@ -892,6 +955,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // Bi-directional sync: external selection changes → update command line
     this.#selectionSyncUnsub = EffectBus.on<{ selected: string[]; active: string | null }>('selection:changed', (payload) => {
       if (this.#syncDirection === 'command') return // prevent feedback loop
+      if (this.#captureMode()) return // never clobber a note capture with /select[...]
       if (!payload?.selected) return
 
       const selected = payload.selected
@@ -998,6 +1062,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   #pushToTalkUnsub?: () => void
   #prefillUnsub?: () => void
   #commandFocusUnsub?: () => void
+  #enterModeUnsub?: () => void
+  #notesCancelUnsub?: () => void
   #commandLineToggleUnsub?: () => void
   #touchDraggingUnsub?: () => void
   #viewActiveUnsub?: () => void
@@ -1104,6 +1170,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   public ngOnDestroy(): void {
     this.#prefillUnsub?.()
     this.#commandFocusUnsub?.()
+    this.#enterModeUnsub?.()
+    this.#notesCancelUnsub?.()
     this.#commandLineToggleUnsub?.()
     this.#touchDraggingUnsub?.()
     this.#viewActiveUnsub?.()
@@ -1174,6 +1242,14 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   public onShellKeydown = (e: KeyboardEvent): void => {
     const v = this.value()
 
+    // Escape in capture mode: cancel without committing.
+    if (e.key === 'Escape' && this.#captureMode()) {
+      e.preventDefault()
+      this.#captureMode.set(null)
+      this.clear()
+      return
+    }
+
     // Escape in select mode: collapse back to /select[tiles] or clear
     if (e.key === 'Escape' && this.#selectPhase() !== 'none') {
       e.preventDefault()
@@ -1228,7 +1304,51 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   /** Bridge: shell Enter pressed — tag pre-process then execute. */
   public onShellCommit = (v: string): void => {
+    const capture = this.#captureMode()
+    if (capture) {
+      this.#commitCapture(capture, v)
+      return
+    }
     void this.#preprocessTagsThenExecute(v)
+  }
+
+  /**
+   * Shared commit path for both direct Enter and the tag-preprocessor route.
+   *
+   * - Non-empty text → emit the configured commit effect and *stay* in
+   *   capture mode so the user can immediately type another note. The
+   *   input is cleared and refocused.
+   * - Empty text → exit capture mode entirely (natural close gesture).
+   * - Edit (has `editId`) → always a one-shot; exit after commit.
+   */
+  #commitCapture(
+    capture: { commitEffect: string; target: string; extra: Record<string, unknown> },
+    raw: string,
+  ): void {
+    const text = raw.trim()
+
+    if (!text) {
+      this.#captureMode.set(null)
+      this.clear()
+      return
+    }
+
+    EffectBus.emit(capture.commitEffect, {
+      cellLabel: capture.target,
+      text,
+      ...capture.extra,
+    })
+
+    const isEdit = !!capture.extra['editId']
+    if (isEdit) {
+      this.#captureMode.set(null)
+      this.clear()
+      return
+    }
+
+    // Stay in capture mode — reset the input so the next note is ready.
+    this.#setShellValue('', false)
+    this.shell?.focus()
   }
 
   /**
@@ -1236,6 +1356,14 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    * with the cleaned input (tag syntax stripped).
    */
   async #preprocessTagsThenExecute(original: string): Promise<void> {
+    // In capture mode any incoming submission (voice, mobile "go", etc.) must
+    // still route to the configured commit effect rather than the normal parser.
+    const capture = this.#captureMode()
+    if (capture) {
+      this.#commitCapture(capture, original)
+      return
+    }
+
     const cleaned = await this.#extractAndPersistTags(original)
 
     // Update the shell value with cleaned value (tags stripped)
@@ -1989,8 +2117,13 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   }
 
   private readonly clear = (): void => {
+    const wasCapturing = this.#captureMode()
     this.shell?.clear()
     this.value.set('')
+    this.#captureMode.set(null)
+    if (wasCapturing) {
+      EffectBus.emit('command:exit-mode', { mode: 'note-capture', target: wasCapturing.target })
+    }
     this.cellSubPath.set([])
     this.cellLeaf.set('')
     this.cellProvider.query([])

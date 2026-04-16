@@ -5,7 +5,7 @@
 ## Related Documents
 
 - [pheromone-protocol.md](pheromone-protocol.md) — The signal counterpart: ambient annotations attached to content by signature
-- [signature-expansion-doctrine.md](signature-expansion-doctrine.md) — Every artifact in a pollen packet is a signature-addressed fragment
+- [signature-system.md](signature-system.md) — Every artifact in a pollen packet is a signature-addressed fragment
 - [dependency-signing.md](dependency-signing.md) — Bundles are signature-addressed modules; the same rules apply to pollen manifests
 - [core-processor-architecture.md](core-processor-architecture.md) — How markers and domains are structured inside DCP
 - [universal-history-plan.md](universal-history-plan.md) — Grafted pollen lands as history operations, not opaque merges

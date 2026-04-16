@@ -1,0 +1,182 @@
+// hypercomb-shared/ui/notes-viewer/notes-viewer.component.scss
+//
+// Centred modal that shows a single note in full. Backdrop dims the rest
+// of the surface so the focus stays on this note. Gold accent matches the
+// note icon and the command line capture state.
+
+$accent: #ffe14a;
+
+:host {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+}
+
+.viewer-backdrop {
+  pointer-events: auto;
+  position: absolute;
+  inset: 0;
+  background: rgba(2, 2, 8, 0.55);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  outline: none;
+}
+
+.viewer-card {
+  width: min(560px, calc(100vw - 2rem));
+  max-height: calc(100vh - 4rem);
+  display: flex;
+  flex-direction: column;
+  background: rgba(14, 14, 22, 0.96);
+  border: 1px solid rgba($accent, 0.55);
+  border-radius: 8px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba($accent, 0.08) inset;
+  font-family: var(--hc-mono, system-ui);
+  color: #f3f3f3;
+}
+
+.viewer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid rgba($accent, 0.25);
+}
+
+.viewer-cell {
+  font-size: 0.9rem;
+  letter-spacing: 0.05em;
+  color: rgba($accent, 0.95);
+}
+
+.viewer-close {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.25rem;
+
+  &:hover { color: $accent; }
+}
+
+.viewer-body {
+  padding: 1.25rem 1rem;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.viewer-text {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: #f3f3f3;
+}
+
+.viewer-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0 1rem 0.75rem;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.55rem;
+  background: rgba($accent, 0.1);
+  border: 1px solid rgba($accent, 0.4);
+  border-radius: 12px;
+  color: rgba($accent, 0.95);
+  font-family: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+
+  &:hover { background: rgba($accent, 0.22); color: #fff; }
+
+  &.add {
+    border-style: dashed;
+  }
+}
+
+.tag-x {
+  opacity: 0.65;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.tag-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0 1rem 0.75rem;
+}
+
+.tag-picker-empty {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.45);
+  padding: 0.25rem 0;
+}
+
+.tag-option {
+  padding: 0.2rem 0.55rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  color: rgba(255, 255, 255, 0.85);
+  font-family: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+
+  &:hover {
+    background: rgba($accent, 0.18);
+    border-color: rgba($accent, 0.6);
+    color: #fff;
+  }
+}
+
+.viewer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid rgba($accent, 0.25);
+}
+
+.viewer-meta {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.viewer-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.action {
+  padding: 0.4rem 0.85rem;
+  background: rgba($accent, 0.12);
+  border: 1px solid rgba($accent, 0.5);
+  border-radius: 4px;
+  color: $accent;
+  font-family: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+
+  &:hover {
+    background: rgba($accent, 0.25);
+    color: #fff;
+    border-color: $accent;
+  }
+}

@@ -1,0 +1,63 @@
+@if (visible()) {
+  <div class="notes-strip" [class.mode-chips]="mode() === 'chips'" [class.mode-rows]="mode() === 'rows'" role="list" [attr.aria-label]="'notes.strip.aria' | t">
+    @if (mode() === 'chips') {
+      <div class="chip-track">
+        @for (note of notes(); track trackById($index, note)) {
+          <div class="chip-wrap" role="listitem">
+            <button
+              class="note-chip"
+              type="button"
+              (click)="open(note.id)"
+              [title]="note.text"
+            >
+              <span class="chip-text">{{ preview(note.text) }}</span>
+              @if (note.tags && note.tags.length) {
+                <span class="chip-tags">
+                  @for (tag of note.tags; track tag) {
+                    <span class="chip-tag">#{{ tag }}</span>
+                  }
+                </span>
+              }
+            </button>
+            <button
+              class="note-delete"
+              type="button"
+              (click)="remove(note.id, $event)"
+              [attr.aria-label]="'notes.delete' | t"
+              [title]="'notes.delete' | t"
+            >×</button>
+          </div>
+        }
+      </div>
+    } @else {
+      <ul class="strip-list">
+        @for (note of notes(); track trackById($index, note)) {
+          <li class="note-row" role="listitem">
+            <button
+              class="note-open"
+              type="button"
+              (click)="open(note.id)"
+              [title]="note.text"
+            >
+              <span class="row-text">{{ note.text }}</span>
+              @if (note.tags && note.tags.length) {
+                <span class="row-tags">
+                  @for (tag of note.tags; track tag) {
+                    <span class="row-tag">#{{ tag }}</span>
+                  }
+                </span>
+              }
+            </button>
+            <button
+              class="note-delete"
+              type="button"
+              (click)="remove(note.id, $event)"
+              [attr.aria-label]="'notes.delete' | t"
+              [title]="'notes.delete' | t"
+            >×</button>
+          </li>
+        }
+      </ul>
+    }
+  </div>
+}

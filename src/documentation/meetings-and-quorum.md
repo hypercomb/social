@@ -197,7 +197,7 @@ A simpler design would let any two people with cameras on start talking the mome
 
 ## Related documentation
 
-- [hive.md](hive.md) — How the hex grid and live session presence model works
+- [architecture-fundamentals.md](architecture-fundamentals.md) — How the hex grid and live session presence model works
 - [security.md](security.md) — Presence-first security: why meetings leave no persistent trace
 - [protocol-spec.md](protocol-spec.md) — Nostr relay transport used by the mesh
 - [slash-behaviour-reference.md](slash-behaviour-reference.md) — Full `/meeting` command reference

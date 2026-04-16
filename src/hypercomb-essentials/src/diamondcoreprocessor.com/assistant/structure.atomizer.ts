@@ -41,9 +41,9 @@ export class StructureAtomizer implements Atomizer {
       return
     }
 
-    const lineage = String(props.lineage ?? '')
-    const signature = String(props.signature ?? '')
-    const kind = String(props.kind ?? '')
+    const lineage = String(props['lineage'] ?? '')
+    const signature = String(props['signature'] ?? '')
+    const kind = String(props['kind'] ?? '')
 
     if (!lineage) {
       console.warn('[StructureAtomizer] Missing lineage for target:', target.targetId)

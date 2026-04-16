@@ -142,6 +142,13 @@ export class CommandShellComponent implements AfterViewInit {
     queueMicrotask(() => el.setSelectionRange(el.value.length, el.value.length))
   }
 
+  /** Select the entire current value — used when entering capture mode with a prefill. */
+  selectAll(): void {
+    const el = this.inputElement
+    if (!el) return
+    queueMicrotask(() => el.setSelectionRange(0, el.value.length))
+  }
+
   /** Suppress the suggestion dropdown (e.g. after an explicit accept). */
   suppress(): void {
     this.suppressed.set(true)

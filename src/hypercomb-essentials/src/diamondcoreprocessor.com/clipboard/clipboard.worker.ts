@@ -66,6 +66,28 @@ export class ClipboardWorker extends Worker {
       }
     })
 
+    // Render-side ghost detection: the view couldn't resolve these labels
+    // to actual cells in the dir, so drop them from the service. Keeps the
+    // clipboard count honest end-to-end.
+    EffectBus.on<{ labels: string[] }>('clipboard:ghost-detected', (payload) => {
+      const svc = this.#clipboardSvc
+      if (!svc || !payload?.labels?.length) return
+      svc.removeItems(new Set(payload.labels))
+      const store = this.#store
+      if (svc.isEmpty) {
+        if (store) void clearDirectory(store.clipboard)
+        EffectBus.emit('clipboard:view', { active: false })
+      } else if (store) {
+        void writeMeta(store.clipboard, {
+          op: svc.operation,
+          items: svc.items.map(i => ({
+            label: i.label,
+            sourceSegments: [...i.sourceSegments],
+          })),
+        })
+      }
+    })
+
     // Restore clipboard from OPFS once Store is initialized
     const tryRestore = (): void => {
       const store = this.#store
@@ -311,6 +333,60 @@ export class ClipboardWorker extends Worker {
     if (store) await clearDirectory(store.clipboard)
   }
 
+  // ── validate ──────────────────────────────────────────
+  // Drop entries whose underlying folder can't be resolved, so the
+  // clipboard count never shows a tile the view can't actually render.
+  // Called from restore and from openClipboard before emitting view.
+
+  async validate(): Promise<void> {
+    const svc = this.#clipboardSvc
+    const store = this.#store
+    const lineage = this.#lineage
+    if (!svc || !store || svc.isEmpty) return
+
+    const op = svc.operation
+    const items = svc.items
+    const invalid = new Set<string>()
+
+    if (op === 'cut') {
+      for (const entry of items) {
+        try {
+          await store.clipboard.getDirectoryHandle(entry.label, { create: false })
+        } catch {
+          invalid.add(entry.label)
+        }
+      }
+    } else {
+      for (const entry of items) {
+        const srcDir = lineage
+          ? await lineage.tryResolve(entry.sourceSegments, store.hypercombRoot)
+          : null
+        if (!srcDir) { invalid.add(entry.label); continue }
+        try {
+          await srcDir.getDirectoryHandle(entry.label, { create: false })
+        } catch {
+          invalid.add(entry.label)
+        }
+      }
+    }
+
+    if (invalid.size === 0) return
+
+    svc.removeItems(invalid)
+
+    if (svc.isEmpty) {
+      await clearDirectory(store.clipboard)
+    } else {
+      await writeMeta(store.clipboard, {
+        op: svc.operation,
+        items: svc.items.map(i => ({
+          label: i.label,
+          sourceSegments: [...i.sourceSegments],
+        })),
+      })
+    }
+  }
+
   // ── restore from OPFS on startup ──────────────────────
   // Cut folders that were moved into store.clipboard before refresh
   // are still there; the meta file tells us which labels and op.
@@ -324,31 +400,13 @@ export class ClipboardWorker extends Worker {
     const meta = await readMeta(store.clipboard)
     if (!meta || meta.items.length === 0) return
 
-    // For cut: only restore labels whose folders actually exist in
-    // store.clipboard. Drops stale entries left behind by older clipboard
-    // formats where cut didn't move folders.
-    let labels = meta.items.map(i => i.label)
-    if (meta.op === 'cut') {
-      const present: string[] = []
-      for (const label of labels) {
-        try {
-          await store.clipboard.getDirectoryHandle(label, { create: false })
-          present.push(label)
-        } catch { /* missing — drop */ }
-      }
-      labels = present
-    }
-
-    if (labels.length === 0) {
-      await clearDirectory(store.clipboard)
-      return
-    }
-
     clipboardSvc.capture(
-      labels,
+      meta.items.map(i => i.label),
       meta.items[0]?.sourceSegments ?? [],
       meta.op,
     )
+
+    await this.validate()
   }
 }
 

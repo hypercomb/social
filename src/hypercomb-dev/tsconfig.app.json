@@ -5,6 +5,9 @@
     "types": [],
     "lib": ["ES2022", "DOM", "DOM.Iterable"]
   },
-  "include": ["src/**/*.ts", "../hypercomb-shared/**/*.ts"],
+  "include": [
+    "src/**/*.ts",
+    "../hypercomb-shared/**/*.ts"
+  ],
   "exclude": ["src/**/*.spec.ts"]
 }

@@ -520,8 +520,7 @@ These constraints are intentional and load-bearing:
 
 ## Related Critical Documents
 
-- [core-primitive.md](core-primitive.md) — The signature-payload pair that underpins all content addressing.
-- [signature-expansion-doctrine.md](signature-expansion-doctrine.md) — **Mandatory practice**: every data structure must use signature references, not inline data. Without this, composition and caching break.
+- [signature-system.md](signature-system.md) — The signature-payload pair that underpins all content addressing, and the mandatory expansion doctrine: every data structure must use signature references, not inline data. Without this, composition and caching break.
 - [collapsed-compute.md](collapsed-compute.md) — How signature-addressed fragments eliminate redundant computation. The processor's deterministic pulse cycle is what makes collapsed compute possible — same inputs, same pulse order, same outputs, same signatures.
 - [signature-algebra.md](signature-algebra.md) — The formal algebra over signatures. The processor's `synchronize` event is the commit point where algebraic operations materialize.
 - [signature-node-pattern.md](signature-node-pattern.md) — Plug-and-play guide for implementing signature-addressed features within the processor's pulse cycle.

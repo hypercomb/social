@@ -2,7 +2,6 @@
 
 import { QueenBee, EffectBus, SignatureService, hypercomb } from '@hypercomb/core'
 import type { HistoryService } from '../history/history.service.js'
-import type { HistoryCursorService } from '../history/history-cursor.service.js'
 
 /**
  * /rename — rename a tile (cell directory) at the current location.
@@ -101,9 +100,6 @@ export class RenameQueenBee extends QueenBee {
       cell: resourceSig,
       at: snapshot.at,
     })
-
-    const cursor = get<HistoryCursorService>('@diamondcoreprocessor.com/HistoryCursorService')
-    if (cursor) await cursor.onNewOp()
   }
 }
 

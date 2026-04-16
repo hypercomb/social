@@ -19,7 +19,13 @@
   "palette.placeholder": "명령 입력...",
   "palette.empty": "일치하는 명령 없음",
 
-  "shortcuts.title": "키보드 단축키",
+  "shortcuts.title": "참조",
+  "shortcuts.close": "닫기",
+  "shortcuts.filter-placeholder": "명령, 작업, 단축키 필터링…",
+  "shortcuts.section.slash": "슬래시 명령",
+  "shortcuts.section.command-line": "명령줄",
+  "shortcuts.section.keyboard": "키보드 단축키",
+  "shortcuts.empty": "일치 없음",
   "shortcuts.chord-sep": "그런 다음",
 
   "editor.title": "타일 편집기",
@@ -151,7 +157,7 @@
 
   "slash.select": "잘라내기/복사/이동할 타일 선택",
   "slash.remove-builtin": "선택한 타일 제거",
-  "slash.help": "키보드 단축키 표시",
+  "slash.help": "참조 표시",
   "slash.clear": "활성 필터 지우기",
   "slash.keyword": "선택한 타일에 키워드(태그) 추가 또는 제거",
   "slash.meeting": "선택한 타일에서 화상 회의 시작 또는 참여",

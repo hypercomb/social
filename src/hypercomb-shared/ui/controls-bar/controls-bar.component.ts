@@ -119,6 +119,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     get('@hypercomb.social/SecretStore') as EventTarget,
     () => this.secretStore?.value ?? '',
   )
+  #locale$ = fromRuntime(
+    get('@hypercomb.social/I18n') as EventTarget | undefined,
+    () => (get('@hypercomb.social/I18n') as { locale?: string } | undefined)?.locale ?? 'en',
+  )
 
   // ── background sync indicator ──
   private get installMonitor(): InstallMonitor | undefined {
@@ -453,7 +457,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
   readonly secretWords = computed(() => {
     const secret = this.#secret$()
-    return secret ? secretTag(secret) : ''
+    return secret ? secretTag(secret, this.#locale$()) : ''
   })
 
   readonly shieldColor = computed(() => {
@@ -1184,8 +1188,19 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.meshToggled.emit()
   }
 
-  readonly openClipboard = (): void => {
+  readonly openClipboard = async (): Promise<void> => {
     if (!this.#clipboardAvailable()) return
+
+    // Drop any ghost entries before opening — ensures the clipboard view
+    // never shows a tile that has no underlying folder, and the count
+    // indicator reflects what can actually be rendered.
+    const worker = get('@diamondcoreprocessor.com/ClipboardWorker') as
+      { validate?: () => Promise<void> } | undefined
+    await worker?.validate?.()
+
+    const clipSvc = get('@diamondcoreprocessor.com/ClipboardService') as
+      { items?: { label: string; sourceSegments: readonly string[] }[]; operation?: 'cut' | 'copy'; isEmpty?: boolean } | undefined
+    if (clipSvc?.isEmpty) return
 
     // save current viewport so we can restore it when exiting clipboard mode
     const container = this.pixiHost?.container
@@ -1201,8 +1216,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     }
 
     this.#mode.set('clipboard')
-    const clipSvc = get('@diamondcoreprocessor.com/ClipboardService') as
-      { items?: { label: string; sourceSegments: readonly string[] }[]; operation?: 'cut' | 'copy' } | undefined
     const items = clipSvc?.items ?? []
     EffectBus.emit('clipboard:view', {
       active: true,
@@ -1211,9 +1224,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       sourceSegments: [...(items[0]?.sourceSegments ?? [])],
     })
 
-    // fit-to-center after render completes (geometry must exist for bounds).
-    // EffectBus.on replays the last value synchronously — declare unsub
-    // before subscribing so it's in scope if the handler fires immediately.
+    // fit-to-center whenever clipboard opens. First trigger wins; retries
+    // catch cases where render:cell-count is late or the render pipeline
+    // is slow to settle.
     let unsub: () => void = () => {}
     let fired = false
     const fit = (): void => {
@@ -1223,8 +1236,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       requestAnimationFrame(() => this.zoom?.zoomToFit?.())
     }
     unsub = EffectBus.on('render:cell-count', fit)
-    // fallback if render:cell-count never fires (empty clipboard)
-    setTimeout(fit, 500)
+    setTimeout(fit, 120)
+    setTimeout(fit, 400)
+    setTimeout(fit, 800)
   }
 
   readonly closeClipboard = (): void => {

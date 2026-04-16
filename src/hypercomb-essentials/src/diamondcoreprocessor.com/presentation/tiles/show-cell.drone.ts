@@ -14,7 +14,7 @@ import type { ViewportPersistence, ViewportSnapshot } from '../../navigation/zoo
 
 type Axial = { q: number; r: number }
 /** divergence: 0 = current, 1 = future-add (ghost), 2 = future-remove (marked) */
-type Cell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; hasLink?: boolean; hasSubstrate?: boolean; borderColor?: [number, number, number]; divergence?: number }
+type Cell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; hasLink?: boolean; hasSubstrate?: boolean; borderColor?: [number, number, number]; divergence?: number; hideText?: boolean }
 
 /** Deterministic label → RGB via DJB2 hash → HSL → RGB. Returns [r, g, b] in 0–1 range. */
 function labelToRgb(label: string): [number, number, number] {
@@ -175,6 +175,8 @@ export class ShowCellDrone extends Drone {
   private readonly cellLinkCache = new Map<string, boolean>()
   // cache: cell label → is substrate-assigned image
   private readonly cellSubstrateCache = new Map<string, boolean>()
+  // cache: cell label → hideText property (hide label when image shown)
+  private readonly cellHideTextCache = new Map<string, boolean>()
 
   private lastKey = ''
 
@@ -972,6 +974,7 @@ export class ShowCellDrone extends Drone {
       if (bc) cell.borderColor = bc
       cell.hasLink = this.cellLinkCache.get(cell.label) ?? false
       cell.hasSubstrate = this.cellSubstrateCache.get(cell.label) ?? false
+      cell.hideText = this.cellHideTextCache.get(cell.label) ?? false
     }
 
     this.renderedCells.clear()
@@ -1082,6 +1085,7 @@ export class ShowCellDrone extends Drone {
       if (bc) cell.borderColor = bc
       cell.hasLink = this.cellLinkCache.get(cell.label) ?? false
       cell.hasSubstrate = this.cellSubstrateCache.get(cell.label) ?? false
+      cell.hideText = this.cellHideTextCache.get(cell.label) ?? false
     }
 
     this.renderedCells.clear()
@@ -1149,6 +1153,7 @@ export class ShowCellDrone extends Drone {
       this.cellImageCache.clear()
       this.cellBorderColorCache.clear()
       this.cellSubstrateCache.clear()
+      this.cellHideTextCache.clear()
       this.atlasRenderer = this.pixiRenderer
       this.shader = null
     } else if (!this.atlas || this.atlasRenderer !== this.pixiRenderer) {
@@ -1160,6 +1165,7 @@ export class ShowCellDrone extends Drone {
       this.cellImageCache.clear()
       this.cellBorderColorCache.clear()
       this.cellSubstrateCache.clear()
+      this.cellHideTextCache.clear()
       this.atlasRenderer = this.pixiRenderer
       this.shader = null
     }
@@ -1189,13 +1195,6 @@ export class ShowCellDrone extends Drone {
       } else {
         dir = await lineage.explorerDir()
       }
-      console.log('[clipboard-render] dir-resolution', {
-        op: this.#clipboardView.op,
-        sourceSegments: this.#clipboardView.sourceSegments,
-        labels: [...this.#clipboardView.labels],
-        hasClipboardStore: !!store?.clipboard,
-        dirResolved: !!dir,
-      })
     } else {
       dir = await lineage.explorerDir()
     }
@@ -1246,9 +1245,6 @@ export class ShowCellDrone extends Drone {
 
     // note: cell collection — always fresh, never cached
     const localCells = await this.listCellFolders(dir)
-    if (this.#clipboardView) {
-      console.log('[clipboard-render] listCellFolders', { count: localCells.length, names: localCells })
-    }
     if (!this.#clipboardView && isStale()) {
       this.renderQueued = true
       return
@@ -1286,120 +1282,62 @@ export class ShowCellDrone extends Drone {
       const isRewound = cursorState?.rewound ?? false
 
       if (isRewound && cursorService) {
-        // Rewound: use cursor's divergence computation
-        const divergence = cursorService.computeDivergence()
-        // Rebuild union from divergence: current set is authoritative at cursor time
-        // (cells physically removed from OPFS must reappear when cursor is before their removal)
-        for (const cell of [...union]) {
-          if (!divergence.current.has(cell) && !divergence.futureAdds.has(cell)) {
-            union.delete(cell)
+        // Rewound: read the layer content at cursor position. Layers are
+        // signature-addressed full snapshots — cells, contentByCell, tagsByCell,
+        // hidden, layoutSig are all we need to reconstruct the past view.
+        // No op replay, no divergence — just read the layer.
+        const content = await cursorService.layerContentAtCursor()
+        if (content) {
+          const cellsAtCursor = new Set(content.cells)
+          for (const cell of [...union]) {
+            if (!cellsAtCursor.has(cell)) union.delete(cell)
           }
-        }
-        for (const cell of divergence.current) {
-          union.add(cell)
-          localCellSet.add(cell)
-        }
-        // Add future-add cells back to union (they'll render as ghosts)
-        for (const cell of divergence.futureAdds) union.add(cell)
-        this.#divergenceFutureAdds = divergence.futureAdds
-        this.#divergenceFutureRemoves = divergence.futureRemoves
-
-        // ── Reconstruct tag/content/layout state at cursor time ──
-        const reconKey = `${cursorState!.locationSig}:${cursorState!.position}`
-        const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as
-          { getResource: (sig: string) => Promise<Blob | null> } | undefined
-        if (store && reconKey !== this.#cursorReconstructionKey) {
-          this.#cursorReconstructionKey = reconKey
-          const tagSigs = cursorService.collectTagStateSignatures()
-          const cursorTagMap = new Map<string, string[]>()
-          for (const tagSig of tagSigs) {
-            try {
-              const blob = await store.getResource(tagSig)
-              if (!blob) continue
-              const snapshot = JSON.parse(await blob.text())
-              if (snapshot?.cellTags) {
-                for (const [cellLabel, tags] of Object.entries(snapshot.cellTags)) {
-                  cursorTagMap.set(cellLabel, tags as string[])
-                }
-              }
-            } catch { /* skip corrupted */ }
-          }
-          // Override tag cache with cursor-time state
-          for (const [cellLabel, tags] of cursorTagMap) {
-            this.cellTagsCache.set(cellLabel, tags)
+          for (const cell of content.cells) {
+            union.add(cell)
+            localCellSet.add(cell)
           }
 
-          // ── Reconstruct content state at cursor time ──────────
-          const contentOps = cursorService.opsAtCursor('content-state')
-          const cursorPropsOverride = new Map<string, string>()
-          for (const op of contentOps) {
-            try {
-              const blob = await store.getResource(op.cell)
-              if (!blob) continue
-              const snapshot = JSON.parse(await blob.text())
-              if (snapshot?.cellLabel && snapshot?.propertiesSig) {
-                cursorPropsOverride.set(snapshot.cellLabel, snapshot.propertiesSig)
-              }
-            } catch { /* skip corrupted */ }
-          }
-          if (cursorPropsOverride.size > 0) {
-            this.#cursorPropsOverride = cursorPropsOverride
-          }
+          const reconKey = `${cursorState!.locationSig}:${cursorState!.position}`
+          if (reconKey !== this.#cursorReconstructionKey) {
+            this.#cursorReconstructionKey = reconKey
 
-          // ── Reconstruct layout state at cursor time ──────────
-          const layoutOps = cursorService.opsAtCursor('layout-state')
-          for (const op of layoutOps) {
-            try {
-              const blob = await store.getResource(op.cell)
-              if (!blob) continue
-              const snapshot = JSON.parse(await blob.text())
-              if (snapshot?.property && snapshot?.value !== undefined) {
-                switch (snapshot.property) {
-                  case 'orientation': {
-                    const flat = snapshot.value === 'flat-top'
-                    if (this.#flat !== flat) {
-                      this.#flat = flat
-                      this.cellImageCache.clear()
-                    }
-                    break
+            // contentByCell: cell label → properties signature at cursor time
+            if (Object.keys(content.contentByCell).length > 0) {
+              this.#cursorPropsOverride = new Map(Object.entries(content.contentByCell))
+            }
+
+            // tagsByCell: override the live tag cache with cursor-time tags
+            for (const [cell, tags] of Object.entries(content.tagsByCell)) {
+              this.cellTagsCache.set(cell, tags)
+            }
+
+            // layoutSig: resolve and apply orientation/pivot/gap/mode
+            const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as
+              { getResource: (sig: string) => Promise<Blob | null> } | undefined
+            if (store && content.layoutSig) {
+              try {
+                const blob = await store.getResource(content.layoutSig)
+                if (blob) {
+                  const layout = JSON.parse(await blob.text())
+                  const flat = layout.orientation === 'flat-top'
+                  if (this.#flat !== flat) {
+                    this.#flat = flat
+                    this.cellImageCache.clear()
                   }
-                  case 'pivot': {
-                    const pivot = snapshot.value === 'true'
-                    if (this.#pivot !== pivot) {
-                      this.#pivot = pivot
-                      this.atlas?.setPivot(pivot)
-                    }
-                    break
+                  if (typeof layout.pivot === 'boolean' && this.#pivot !== layout.pivot) {
+                    this.#pivot = layout.pivot
+                    this.atlas?.setPivot(this.#pivot)
                   }
-                  case 'gap': {
-                    const gapPx = parseFloat(snapshot.value)
-                    if (!isNaN(gapPx) && this.#hexGeo.gapPx !== gapPx) {
-                      this.#hexGeo = createHexGeometry(this.#hexGeo.circumRadiusPx, gapPx, this.#hexGeo.padPx)
-                    }
-                    break
+                  if (typeof layout.gapPx === 'number' && this.#hexGeo.gapPx !== layout.gapPx) {
+                    this.#hexGeo = createHexGeometry(this.#hexGeo.circumRadiusPx, layout.gapPx, this.#hexGeo.padPx)
                   }
-                  case 'mode': {
-                    const mode = snapshot.value as 'dense' | 'pinned'
-                    if (mode === 'dense' || mode === 'pinned') {
-                      this.#layoutMode = mode
-                    }
-                    break
+                  if (layout.mode === 'dense' || layout.mode === 'pinned') {
+                    this.#layoutMode = layout.mode
                   }
                 }
-              }
-            } catch { /* skip corrupted */ }
+              } catch { /* skip corrupted layout */ }
+            }
           }
-        }
-      } else {
-        // Not rewound: standard replay — filter out removed cells
-        // Only honor 'remove' when the cell's OPFS directory no longer exists.
-        // A directory that still (or again) exists means the cell was just
-        // recreated — the async HistoryRecorder hasn't written the 'add' op yet.
-        const ops = await historyService.replay(sig.sig)
-        const cellState = new Map<string, string>()
-        for (const op of ops) cellState.set(op.cell, op.op)
-        for (const [cell, lastOp] of cellState) {
-          if (lastOp === 'remove' && !localCellSet.has(cell)) union.delete(cell)
         }
       }
     }
@@ -1431,10 +1369,12 @@ export class ShowCellDrone extends Drone {
       if (!localCellSet.has(blocked)) union.delete(blocked)
     }
 
-    // When cursor is rewound, use history-reconstructed hidden set instead of localStorage
+    // When cursor is rewound, use the layer's `hidden` array (captured at
+    // commit time). Otherwise read the live localStorage key.
     const cursorState = cursorService?.state
-    const hiddenSet = (cursorState?.rewound && cursorService)
-      ? cursorService.computeDivergence().hiddenAtCursor
+    const rewoundContent = (cursorState?.rewound && cursorService) ? cursorService.peekContent() : null
+    const hiddenSet = rewoundContent
+      ? new Set<string>(rewoundContent.hidden)
       : new Set<string>(JSON.parse(localStorage.getItem(`hc:hidden-tiles:${locationKey}`) ?? '[]'))
     this.#currentHiddenSet = hiddenSet
     if (!this.#showHiddenItems) {
@@ -1448,6 +1388,16 @@ export class ShowCellDrone extends Drone {
       const clipLabels = this.#clipboardView.labels
       for (const cell of union) {
         if (!clipLabels.has(cell)) union.delete(cell)
+      }
+      // Any clipboard label that didn't show up in the resolved dir is a
+      // ghost — the service thinks it has a tile the filesystem can't back.
+      // Emit so the worker drops it; never let the count outlive reality.
+      const missing: string[] = []
+      for (const label of clipLabels) {
+        if (!union.has(label)) missing.push(label)
+      }
+      if (missing.length > 0) {
+        this.emitEffect('clipboard:ghost-detected', { labels: missing })
       }
     }
 
@@ -1509,21 +1459,13 @@ export class ShowCellDrone extends Drone {
 
     const axialMax = typeof axial.items.size === 'number' ? axial.items.size : cellNames.length
     const maxCells = Math.min(cellNames.length, axialMax)
-    if (this.#clipboardView) {
-      console.log('[clipboard-render] pre-build', { cellNames, maxCells, axialMax, axialItemsSize: axial?.items?.size })
-    }
     if (maxCells <= 0) {
-      if (this.#clipboardView) console.log('[clipboard-render] BAIL maxCells<=0')
       this.clearMesh()
       return
     }
 
     const cells = this.buildCellsFromAxial(axial, cellNames, maxCells, localCellSet, branchSet)
-    if (this.#clipboardView) {
-      console.log('[clipboard-render] cells built', { count: cells.length, labels: cells.map(c => c.label) })
-    }
     if (cells.length === 0) {
-      if (this.#clipboardView) console.log('[clipboard-render] BAIL cells.length=0')
       this.clearMesh()
       return
     }
@@ -1842,6 +1784,7 @@ export class ShowCellDrone extends Drone {
         this.cellTagsCache.delete(payload.cell)
         this.cellLinkCache.delete(payload.cell)
         this.cellSubstrateCache.delete(payload.cell)
+        this.cellHideTextCache.delete(payload.cell)
         if (oldSig && this.imageAtlas) {
           this.imageAtlas.invalidate(oldSig)
         }
@@ -1906,6 +1849,7 @@ export class ShowCellDrone extends Drone {
       this.cellLinkCache.delete(payload.cell)
       this.cellBorderColorCache.delete(payload.cell)
       this.cellSubstrateCache.delete(payload.cell)
+      this.cellHideTextCache.delete(payload.cell)
       if (this.#slots.seeded) {
         this.#queueIncremental({ removed: [payload.cell] })
       } else {
@@ -2011,7 +1955,6 @@ export class ShowCellDrone extends Drone {
 
     // clipboard:view effect — filter visible cells to clipboard contents
     this.onEffect<{ active: boolean; labels?: string[]; sourceSegments?: string[]; op?: 'cut' | 'copy' }>('clipboard:view', (payload) => {
-      console.log('[clipboard-render] HANDLER FIRED', payload)
       const wasActive = this.#clipboardView
       if (payload?.active && payload.labels) {
         this.#clipboardView = {
@@ -2041,6 +1984,7 @@ export class ShowCellDrone extends Drone {
           this.cellTagsCache.delete(label)
           this.cellLinkCache.delete(label)
           this.cellSubstrateCache.delete(label)
+          this.cellHideTextCache.delete(label)
         }
         this.#slots.clear()
         this.#pendingRemoves.clear()
@@ -2523,9 +2467,7 @@ export class ShowCellDrone extends Drone {
     // slot 0 so they render near the viewport origin regardless of whatever
     // slot index they happened to hold in their source layer.
     if (this.#clipboardView) {
-      const names = [...union].sort((a, b) => a.localeCompare(b))
-      console.log('[clipboard-render] resolveCellOrder short-circuit', { union: [...union], names })
-      return names
+      return [...union].sort((a, b) => a.localeCompare(b))
     }
 
     switch (mode) {
@@ -2538,7 +2480,8 @@ export class ShowCellDrone extends Drone {
 
         let cellNames: string[]
         if (pinnedRewound && pinnedCursor) {
-          const order = await pinnedCursor.buildOrderAtCursor()
+          const pinnedContent = await pinnedCursor.layerContentAtCursor()
+          const order = pinnedContent?.cells ?? []
           if (order.length > 0) {
             const unionSet = new Set(union)
             const filtered = order.filter(s => unionSet.has(s))
@@ -2579,7 +2522,8 @@ export class ShowCellDrone extends Drone {
         const isRewound = cursorService?.state?.rewound ?? false
 
         if (isRewound && cursorService) {
-          const order = await cursorService.buildOrderAtCursor()
+          const rewoundContent = await cursorService.layerContentAtCursor()
+          const order = rewoundContent?.cells ?? []
           if (order.length > 0) {
             orderFromProjection = true
             const unionSet = new Set(union)
@@ -2852,6 +2796,7 @@ export class ShowCellDrone extends Drone {
         cell.borderColor = this.cellBorderColorCache.get(cell.label)
         cell.hasLink = this.cellLinkCache.get(cell.label) ?? false
         cell.hasSubstrate = this.cellSubstrateCache.get(cell.label) ?? false
+        cell.hideText = this.cellHideTextCache.get(cell.label) ?? false
         return
       }
 
@@ -2892,6 +2837,10 @@ export class ShowCellDrone extends Drone {
         this.cellSubstrateCache.set(cell.label, isSubstrate)
         cell.hasSubstrate = isSubstrate
 
+        const hideText = props?.hideText === true
+        this.cellHideTextCache.set(cell.label, hideText)
+        cell.hideText = hideText
+
         const smallSig = (this.#flat && props?.flat?.small?.image) || props?.small?.image
         if (smallSig && isSignature(smallSig)) {
           cell.imageSig = smallSig
@@ -2913,7 +2862,7 @@ export class ShowCellDrone extends Drone {
     const selectionService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SelectionService') as
       { isSelected: (label: string) => boolean } | undefined
     let s = `p${this.#pivot ? 1 : 0}f${this.#flat ? 1 : 0}|`
-    for (const c of cells) s += `${c.q},${c.r}:${c.label}:${c.external ? 1 : 0}:${c.imageSig ?? ''}:${c.hasBranch ? 1 : 0}:${c.divergence ?? 0}|`
+    for (const c of cells) s += `${c.q},${c.r}:${c.label}:${c.external ? 1 : 0}:${c.imageSig ?? ''}:${c.hasBranch ? 1 : 0}:${c.divergence ?? 0}:${c.hideText ? 1 : 0}|`
     return s
   }
 
@@ -2955,14 +2904,16 @@ export class ShowCellDrone extends Drone {
       uv.set([0, 0, 1, 0, 1, 1, 0, 1], uvp)
       uvp += 8
 
-      const ruv = this.atlas!.getLabelUV(c.label)
+      const imgUV = c.imageSig ? this.imageAtlas?.getImageUV(c.imageSig) ?? null : null
+
+      // label UV: collapse to [0,0,0,0] when hideText + image present so the
+      // shader samples a transparent corner and the label is effectively hidden.
+      const ruv = (c.hideText && imgUV) ? { u0: 0, v0: 0, u1: 0, v1: 0 } : this.atlas!.getLabelUV(c.label)
       for (let i = 0; i < 4; i++) {
         labelUV.set([ruv.u0, ruv.v0, ruv.u1, ruv.v1], luvp)
         luvp += 4
       }
 
-      // cell image atlas UVs (text-only suppression handled by u_imageMix shader uniform)
-      const imgUV = c.imageSig ? this.imageAtlas?.getImageUV(c.imageSig) ?? null : null
       const hi = imgUV ? 1 : 0
       for (let i = 0; i < 4; i++) {
         imageUV.set(imgUV ? [imgUV.u0, imgUV.v0, imgUV.u1, imgUV.v1] : [0, 0, 0, 0], iuvp)
@@ -3088,9 +3039,9 @@ export class ShowCellDrone extends Drone {
   ): Promise<boolean> => {
     const i = this.#labelToIndex.get(label)
     if (i === undefined) return false
-    const { imageUV, hasImage, borderColor } = this.#buf
-    if (!imageUV || !hasImage || !borderColor) return false
-    if (!this.geom || !this.imageAtlas) return false
+    const { imageUV, hasImage, borderColor, labelUV } = this.#buf
+    if (!imageUV || !hasImage || !borderColor || !labelUV) return false
+    if (!this.geom || !this.imageAtlas || !this.atlas) return false
 
     const lineage = this.resolve<any>('lineage')
     const dir = _ctx.dir ?? (await lineage?.explorerDir?.())
@@ -3112,7 +3063,16 @@ export class ShowCellDrone extends Drone {
     const [bcr, bcg, bcb] = this.cellBorderColorCache.get(label) ?? [0.784, 0.592, 0.353]
     this.#writeCellRgb(borderColor, i, bcr, bcg, bcb)
 
-    if (!this.#pushBuffer('aImageUV') || !this.#pushBuffer('aHasImage') || !this.#pushBuffer('aBorderColor')) {
+    // labelUV: collapse to origin when hideText + image so the label is hidden
+    const ht = this.cellHideTextCache.get(label) ?? false
+    if (ht && imgUV) {
+      this.#writeCellVec4(labelUV, i, 0, 0, 0, 0)
+    } else {
+      const ruv = this.atlas.getLabelUV(label)
+      this.#writeCellVec4(labelUV, i, ruv.u0, ruv.v0, ruv.u1, ruv.v1)
+    }
+
+    if (!this.#pushBuffer('aImageUV') || !this.#pushBuffer('aHasImage') || !this.#pushBuffer('aBorderColor') || !this.#pushBuffer('aLabelUV')) {
       return false
     }
 
@@ -3122,6 +3082,7 @@ export class ShowCellDrone extends Drone {
       rec.borderColor = [bcr, bcg, bcb]
       rec.hasLink = this.cellLinkCache.get(label) ?? false
       rec.hasSubstrate = this.cellSubstrateCache.get(label) ?? false
+      rec.hideText = ht
       const cellsSnapshot = [...this.renderedCells.values()]
       this.renderedCellsKey = this.buildCellsKey(cellsSnapshot)
     }
@@ -3145,7 +3106,5 @@ export class ShowCellDrone extends Drone {
     return this.#pushBuffer('aHeat')
   }
 }
-
-console.log('[clipboard-render] SHOW-CELL MODULE LOAD — build-marker-v7')
 const showCell = new ShowCellDrone()
 window.ioc.register('@diamondcoreprocessor.com/ShowCellDrone', showCell)

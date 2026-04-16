@@ -19,7 +19,13 @@
   "palette.placeholder": "Введите команду...",
   "palette.empty": "Подходящих команд не найдено",
 
-  "shortcuts.title": "Сочетания клавиш",
+  "shortcuts.title": "Справочник",
+  "shortcuts.close": "Закрыть",
+  "shortcuts.filter-placeholder": "Фильтр команд, операций, сокращений…",
+  "shortcuts.section.slash": "Команды со слэшем",
+  "shortcuts.section.command-line": "Командная строка",
+  "shortcuts.section.keyboard": "Сочетания клавиш",
+  "shortcuts.empty": "Нет совпадений",
   "shortcuts.chord-sep": "затем",
 
   "editor.title": "редактор плитки",
@@ -151,7 +157,7 @@
 
   "slash.select": "выбрать плитки для вырезания/копирования/перемещения",
   "slash.remove-builtin": "удалить выбранные плитки",
-  "slash.help": "Показать сочетания клавиш",
+  "slash.help": "Показать справочник",
   "slash.clear": "Очистить активный фильтр",
   "slash.keyword": "Добавить или удалить ключевые слова (теги) на выбранных плитках",
   "slash.meeting": "Начать или присоединиться к видеовстрече на выбранной плитке",

@@ -19,6 +19,8 @@ type OverlayAction = {
   genotype?: string
   /** If provided, called to determine per-tile visibility */
   visibleWhen?: OverlayVisibilityFn
+  /** If provided, called to compute per-tile tint */
+  tintWhen?: OverlayTintFn
   /** i18n key for the short hint label */
   labelKey?: string
   /** i18n key for the expanded description */
@@ -38,6 +40,13 @@ export type OverlayActionDescriptor = {
   hoverTint?: number
   profile: OverlayProfileKey
   visibleWhen?: OverlayVisibilityFn
+  /**
+   * Per-tile dynamic tint. Returns the colour the icon should show when the
+   * tile is in a state worth advertising (e.g. "contains notes"). Returns
+   * null/undefined for the default (white). Evaluated alongside `visibleWhen`
+   * whenever the active tile changes.
+   */
+  tintWhen?: OverlayTintFn
   /** i18n key for the short hint label (shown on sustained hover) */
   labelKey?: string
   /** i18n key for the expanded description (shown on hint click) */
@@ -45,6 +54,7 @@ export type OverlayActionDescriptor = {
 }
 
 export type OverlayVisibilityFn = (ctx: OverlayTileContext) => boolean
+export type OverlayTintFn = (ctx: OverlayTileContext) => number | null | undefined
 
 export type OverlayTileContext = {
   label: string
@@ -56,6 +66,7 @@ export type OverlayTileContext = {
   isBranch: boolean
   hasLink: boolean
   isHidden: boolean
+  hasNotes: boolean
 }
 
 export type OverlayProfileKey = 'private' | 'public-own' | 'public-external'
@@ -129,6 +140,7 @@ export class TileOverlayDrone extends Drone {
   #substrateLabels = new Set<string>()
   #linkLabels = new Set<string>()
   #hiddenLabels = new Set<string>()
+  #labelsWithNotes = new Set<string>()
 
   // break-apart effect state
   #crackOverlay: Graphics | null = null
@@ -343,6 +355,18 @@ export class TileOverlayDrone extends Drone {
         if (!cell) return
         this.#substrateLabels.delete(cell)
         this.#noImageLabels.delete(cell)
+        this.#labelsWithNotes.delete(cell)
+      })
+
+      // Per-tile "contains notes" state. Seeded from NotesService on register
+      // and kept fresh via the notes:changed effect. Drives the active tint of
+      // the note icon via tintWhen.
+      this.#seedNotesLabels()
+      this.onEffect<{ cellLabel: string; count: number }>('notes:changed', ({ cellLabel, count }) => {
+        if (!cellLabel) return
+        if (count > 0) this.#labelsWithNotes.add(cellLabel)
+        else this.#labelsWithNotes.delete(cellLabel)
+        if (this.#overlay && this.#currentAxial) this.#updatePerTileVisibility()
       })
 
       this.onEffect<{ flat: boolean }>('render:set-orientation', (payload) => {
@@ -493,6 +517,23 @@ export class TileOverlayDrone extends Drone {
     this.#hexBg?.update(this.#geo.circumRadiusPx, this.#flat)
   }
 
+  /**
+   * Read the persisted notes index once at startup so the active-tint state
+   * is correct on first render. After this, `notes:changed` keeps it fresh.
+   */
+  #seedNotesLabels(): void {
+    try {
+      const raw = localStorage.getItem('hc:notes-index')
+      if (!raw) return
+      const index = JSON.parse(raw) as Record<string, string>
+      for (const cell of Object.keys(index)) {
+        if (index[cell]) this.#labelsWithNotes.add(cell)
+      }
+    } catch {
+      // corrupt index — ignore
+    }
+  }
+
   // ── Profile resolution (now from registered descriptors) ───────────
 
   #resolveProfileKey(): OverlayProfileKey {
@@ -534,6 +575,7 @@ export class TileOverlayDrone extends Drone {
         profile: desc.profile,
         genotype: desc.genotype,
         visibleWhen: desc.visibleWhen,
+        tintWhen: desc.tintWhen,
         labelKey: desc.labelKey,
         descriptionKey: desc.descriptionKey,
       })
@@ -615,6 +657,7 @@ export class TileOverlayDrone extends Drone {
       isBranch: this.#branchLabels.has(entry.label),
       hasLink: this.#linkLabels.has(entry.label),
       isHidden: this.#hiddenLabels.has(entry.label),
+      hasNotes: this.#labelsWithNotes.has(entry.label),
     }
 
     for (const action of this.#actions) {
@@ -623,6 +666,8 @@ export class TileOverlayDrone extends Drone {
       } else {
         action.button.visible = true
       }
+      const tint = action.tintWhen ? action.tintWhen(ctx) : null
+      action.button.setNormalTint(tint ?? null)
     }
 
     if (this.#buttonTray) {
@@ -758,19 +803,9 @@ export class TileOverlayDrone extends Drone {
 
   #destroyPoolContainer(): void {
     if (!this.#poolContainer) return
-
-    for (const poolIcon of this.#poolIcons) {
-      poolIcon.button.destroy({ children: true })
-    }
-    this.#poolIcons = []
-
-    this.#poolBackground?.destroy()
-    this.#poolBackground = null
-
     this.#poolContainer.destroy({ children: true })
-    if (this.#overlay) {
-      this.#overlay.removeChild(this.#poolContainer)
-    }
+    this.#poolIcons = []
+    this.#poolBackground = null
     this.#poolContainer = null
   }
 

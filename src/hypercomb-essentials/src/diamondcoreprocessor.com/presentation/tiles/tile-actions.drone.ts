@@ -1,7 +1,14 @@
 // diamondcoreprocessor.com/pixi/tile-actions.drone.ts
 import { Drone, EffectBus, hypercomb, normalizeCell } from '@hypercomb/core'
-import type { OverlayActionDescriptor, OverlayTileContext, OverlayProfileKey } from './tile-overlay.drone.js'
+import type { OverlayActionDescriptor, OverlayTileContext, OverlayProfileKey, OverlayTintFn } from './tile-overlay.drone.js'
 import { readCellProperties, writeCellProperties } from '../../editor/tile-properties.js'
+
+// ── Notes accent ──────────────────────────────────────────────────
+// Warm gold used as the canonical "note intent" colour: tints the note
+// icon when a tile contains notes, the command line when in capture
+// mode, and the notes UI surfaces. Bright but not saturated.
+export const NOTE_ACCENT = 0xffe14a
+export const NOTE_ACCENT_CSS = '#ffe14a'
 
 // ── SVG icons ─────────────────────────────────────────────────────
 // Clean line icons — 24×24 viewBox, 2px stroke, round caps/joins, white fill.
@@ -28,6 +35,8 @@ const ICONS = {
   remove: svg('<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>'),
   // Refresh / reroll — two curved arrows
   reroll: svg('<path d="M1 4v6h6"/><path d="M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10"/><path d="M3.51 15A9 9 0 0 0 18.36 18.36L23 14"/>'),
+  // Sticky note — small page with a folded corner
+  note: svg('<path d="M4 4h12l4 4v12H4z"/><polyline points="16 4 16 8 20 8"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="16" x2="14" y2="16"/>'),
 } as const
 
 // ── Icon registry ─────────────────────────────────────────────────
@@ -38,6 +47,7 @@ export type IconRegistryEntry = {
   hoverTint?: number
   profile: OverlayProfileKey
   visibleWhen?: (ctx: OverlayTileContext) => boolean
+  tintWhen?: OverlayTintFn
   /** i18n key for the short hint label (shown on sustained hover) */
   labelKey?: string
   /** i18n key for the expanded description (shown on hint click) */
@@ -48,6 +58,7 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   // ── private profile ──
   { name: 'command', svgMarkup: ICONS.command, hoverTint: 0xa8ffd8, profile: 'private', labelKey: 'action.command', descriptionKey: 'action.command.description' },
   { name: 'edit', svgMarkup: ICONS.edit, hoverTint: 0xc8d8ff, profile: 'private', labelKey: 'action.edit', descriptionKey: 'action.edit.description' },
+  { name: 'note', svgMarkup: ICONS.note, hoverTint: NOTE_ACCENT, profile: 'private', tintWhen: (ctx) => ctx.hasNotes ? NOTE_ACCENT : null, labelKey: 'action.note', descriptionKey: 'action.note.description' },
   { name: 'search', svgMarkup: ICONS.search, hoverTint: 0xc8ffc8, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.noImage, labelKey: 'action.search', descriptionKey: 'action.search.description' },
   { name: 'reroll', svgMarkup: ICONS.reroll, hoverTint: 0xd8c8ff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.hasSubstrate, labelKey: 'action.reroll', descriptionKey: 'action.reroll.description' },
   { name: 'remove', svgMarkup: ICONS.remove, hoverTint: 0xffc8c8, profile: 'private', labelKey: 'action.remove', descriptionKey: 'action.remove.description' },
@@ -62,7 +73,7 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
 
 // Default active icons per profile (defines the fallback order)
 const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
-  'private': ['command', 'edit', 'reroll', 'remove', 'break-apart'],
+  'private': ['command', 'edit', 'note', 'reroll', 'remove', 'break-apart'],
   'public-own': ['hide', 'break-apart'],
   'public-external': ['adopt', 'block'],
 }
@@ -100,7 +111,7 @@ const ARRANGEMENT_KEY = 'iconArrangement'
 type IconArrangement = Partial<Record<OverlayProfileKey, string[]>>
 
 // ── Action names this bee handles ─────────────────────────────────
-const HANDLED_ACTIONS = new Set(['edit', 'search', 'command', 'hide', 'break-apart', 'adopt', 'block', 'remove', 'reroll'])
+const HANDLED_ACTIONS = new Set(['edit', 'search', 'command', 'note', 'hide', 'break-apart', 'adopt', 'block', 'remove', 'reroll'])
 
 type TileActionPayload = { action: string; label: string; q: number; r: number; index: number }
 
@@ -113,7 +124,7 @@ export class TileActionsDrone extends Drone {
   }
 
   protected override listens = ['render:host-ready', 'render:cell-count', 'tile:action', 'controls:action', 'overlay:icons-reordered', 'overlay:arrange-mode', 'substrate:applied', 'substrate:rerolled', 'cell:removed']
-  protected override emits = ['overlay:register-action', 'overlay:pool-icons', 'search:prefill', 'command:focus', 'tile:hidden', 'tile:unhidden', 'tile:blocked', 'cell:removed', 'visibility:show-hidden', 'substrate:rerolled']
+  protected override emits = ['overlay:register-action', 'overlay:pool-icons', 'search:prefill', 'command:focus', 'note:capture', 'tile:hidden', 'tile:unhidden', 'tile:blocked', 'cell:removed', 'visibility:show-hidden', 'substrate:rerolled']
 
   #registered = false
   #effectsRegistered = false
@@ -211,6 +222,7 @@ export class TileActionsDrone extends Drone {
           hoverTint: entry.hoverTint,
           profile: entry.profile,
           visibleWhen: entry.visibleWhen,
+          tintWhen: entry.tintWhen,
           labelKey: entry.labelKey,
           descriptionKey: entry.descriptionKey,
           x: positions[i].x,
@@ -317,6 +329,16 @@ export class TileActionsDrone extends Drone {
       case 'command':
         EffectBus.emit('command:focus', { cell: label })
         break
+
+      case 'note': {
+        // Select the tile so the selection context menu (which owns the
+        // notes toggle) opens automatically. Then enter capture mode.
+        const selection = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SelectionService') as
+          { setActive?(label: string): void } | undefined
+        selection?.setActive?.(label)
+        EffectBus.emit('note:capture', { cellLabel: label })
+        break
+      }
 
       case 'hide':
         this.#hideOrBlock(label, 'hc:hidden-tiles', 'tile:hidden')

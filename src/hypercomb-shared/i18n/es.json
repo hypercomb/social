@@ -19,7 +19,13 @@
   "palette.placeholder": "Escribir un comando...",
   "palette.empty": "Sin comandos coincidentes",
 
-  "shortcuts.title": "Atajos de teclado",
+  "shortcuts.title": "Referencia",
+  "shortcuts.close": "Cerrar",
+  "shortcuts.filter-placeholder": "Filtrar comandos, operaciones, atajos…",
+  "shortcuts.section.slash": "Comandos de barra",
+  "shortcuts.section.command-line": "Línea de comandos",
+  "shortcuts.section.keyboard": "Atajos de teclado",
+  "shortcuts.empty": "Sin coincidencias",
   "shortcuts.chord-sep": "luego",
 
   "editor.title": "editor de mosaico",
@@ -151,7 +157,7 @@
 
   "slash.select": "seleccionar mosaicos para cortar/copiar/mover",
   "slash.remove-builtin": "eliminar mosaicos seleccionados",
-  "slash.help": "Mostrar atajos de teclado",
+  "slash.help": "Mostrar referencia",
   "slash.clear": "Limpiar filtro activo",
   "slash.keyword": "Añadir o quitar palabras clave (etiquetas) en mosaicos seleccionados",
   "slash.meeting": "Iniciar o unirse a una videollamada en el mosaico seleccionado",

@@ -19,7 +19,13 @@
   "palette.placeholder": "Digita un comando...",
   "palette.empty": "Nessun comando corrispondente",
 
-  "shortcuts.title": "Scorciatoie da tastiera",
+  "shortcuts.title": "Riferimento",
+  "shortcuts.close": "Chiudi",
+  "shortcuts.filter-placeholder": "Filtra comandi, operazioni, scorciatoie…",
+  "shortcuts.section.slash": "Comandi slash",
+  "shortcuts.section.command-line": "Riga di comando",
+  "shortcuts.section.keyboard": "Scorciatoie da tastiera",
+  "shortcuts.empty": "Nessun risultato",
   "shortcuts.chord-sep": "poi",
 
   "editor.title": "editor tessera",
@@ -151,7 +157,7 @@
 
   "slash.select": "seleziona tessere per taglio/copia/spostamento",
   "slash.remove-builtin": "rimuovi tessere selezionate",
-  "slash.help": "Mostra scorciatoie da tastiera",
+  "slash.help": "Mostra riferimento",
   "slash.clear": "Cancella filtro attivo",
   "slash.keyword": "Aggiungi o rimuovi parole chiave (tag) sulle tessere selezionate",
   "slash.meeting": "Avvia o unisciti a una videochiamata sulla tessera selezionata",

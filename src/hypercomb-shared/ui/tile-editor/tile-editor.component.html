@@ -116,6 +116,9 @@
         <button type="button" class="tool-btn" [title]="'editor.search-google' | t" (click)="searchGoogle()">
           <span class="hci">)</span>
         </button>
+        <button type="button" class="tool-btn" [class.active]="!hideText()" [title]="(hideText() ? 'editor.show-text' : 'editor.hide-text') | t" (click)="toggleHideText()">
+          <span class="hci">{{ hideText() ? 'T' : 't' }}</span>
+        </button>
       </div>
       <div class="footer-actions">
         <button type="button" (click)="cancel()">{{ 'editor.cancel' | t }}</button>

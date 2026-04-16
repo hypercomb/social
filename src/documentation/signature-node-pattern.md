@@ -4,9 +4,8 @@
 
 ## Related Critical Documents
 
-- [signature-expansion-doctrine.md](signature-expansion-doctrine.md) — Why every fragment must be signature-addressed
+- [signature-system.md](signature-system.md) — The signature-payload pair and the mandatory expansion doctrine: every fragment must be signature-addressed
 - [collapsed-compute.md](collapsed-compute.md) — Why this pattern makes compute collapse to zero at scale
-- [core-primitive.md](core-primitive.md) — The signature-payload pair
 - [deterministic-computation.md](deterministic-computation.md) — Authenticity composition
 - [revision-mode.md](revision-mode.md) — The interactive revision system: undo, redo, time clock, divergence, promote
 - [data-primitive.md](data-primitive.md) — The history bag storage model underlying undo/redo
@@ -224,7 +223,7 @@ const prevSettings = await node.resolve(previousSettingsSig)
 When implementing a new feature, copy the node template and check:
 
 - [ ] **Data shape defined** with `readonly` fields and `version: 1`
-- [ ] **Content referenced by signature**, never inline (use the litmus test from [signature-expansion-doctrine.md](signature-expansion-doctrine.md))
+- [ ] **Content referenced by signature**, never inline (use the litmus test from [signature-system.md](signature-system.md))
 - [ ] **Deterministic serialization** with sorted keys
 - [ ] **`capture()`** stores blob in OPFS and caches in memory
 - [ ] **`resolve()`** checks memory → OPFS → returns null

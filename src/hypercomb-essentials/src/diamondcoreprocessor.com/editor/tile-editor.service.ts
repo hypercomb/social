@@ -31,6 +31,10 @@ export class TileEditorService extends EventTarget {
     return String((this.#properties as any).background?.color ?? '')
   }
 
+  get hideText(): boolean {
+    return (this.#properties as any).hideText === true
+  }
+
   // ── state mutations ────────────────────────────────────────────
 
   readonly open = (
@@ -94,6 +98,15 @@ export class TileEditorService extends EventTarget {
           delete (this.#properties as any).background
         }
       }
+    }
+    this.#emit()
+  }
+
+  readonly setHideText = (value: boolean): void => {
+    if (value) {
+      (this.#properties as any).hideText = true
+    } else {
+      delete (this.#properties as any).hideText
     }
     this.#emit()
   }

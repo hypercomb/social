@@ -13,5 +13,7 @@ export * from './toast/toast.component'
 export * from './hint-bar/hint-bar.component'
 export * from './instruction-overlay/instruction-overlay.component'
 export * from './docs-overlay/docs-overlay.component'
+export * from './notes-strip/notes-strip.component'
+export * from './notes-viewer/notes-viewer.component'
 export * from './track-player/track-player.component'
 

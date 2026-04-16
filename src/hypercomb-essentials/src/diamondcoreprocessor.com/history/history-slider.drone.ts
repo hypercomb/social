@@ -132,8 +132,10 @@ export class HistorySliderDrone {
   }
 
   #promote(): void {
+    // History is linear append-only — no branching. "Restore" just exits
+    // the rewound view; editing from head auto-appends a new layer.
     const cursor = get<HistoryCursorService>('@diamondcoreprocessor.com/HistoryCursorService')
-    cursor?.promote()
+    cursor?.jumpToLatest()
   }
 
   #toggleScope(): void {
@@ -413,15 +415,9 @@ export class HistorySliderDrone {
 
     this.#posLabel.textContent = `${position}/${total}`
 
-    // Activity log — human-readable op summary at cursor
-    const cursor = get<HistoryCursorService>('@diamondcoreprocessor.com/HistoryCursorService')
-    if (cursor && position > 0) {
-      const ops = cursor.opsAtCursor()
-      const op = ops[position - 1]
-      this.#activityLabel.textContent = op ? formatOpDescription(op.op, op.cell) : ''
-    } else {
-      this.#activityLabel.textContent = ''
-    }
+    // Activity label — just show position; detailed diff per-layer is a
+    // future concern (would be derived from diffLayers, not stored ops).
+    this.#activityLabel.textContent = ''
 
     // Scope indicator: local vs global
     this.#scopeLabel.style.display = 'inline-block'
@@ -462,40 +458,7 @@ export class HistorySliderDrone {
     }
 
     const stepsBack = total - position
-    const cursor = get<HistoryCursorService>('@diamondcoreprocessor.com/HistoryCursorService')
-    if (cursor) {
-      const div = cursor.computeDivergence()
-      const changes = div.futureAdds.size + div.futureRemoves.size
-      this.#notifLabel.textContent = changes > 0
-        ? `${stepsBack} step${stepsBack === 1 ? '' : 's'} back \u00b7 ${changes} tile${changes === 1 ? '' : 's'} differ`
-        : `${stepsBack} step${stepsBack === 1 ? '' : 's'} back`
-    } else {
-      this.#notifLabel.textContent = `${stepsBack} step${stepsBack === 1 ? '' : 's'} back`
-    }
-  }
-}
-
-/** Human-readable op summary for the activity log. */
-function formatOpDescription(op: string, cell: string): string {
-  // For signature-addressed payloads, truncate the sig
-  const label = cell.length === 64 && /^[0-9a-f]+$/.test(cell)
-    ? ''
-    : ` "${cell}"`
-
-  switch (op) {
-    case 'add': return `added${label}`
-    case 'remove': return `removed${label}`
-    case 'reorder': return 'reordered'
-    case 'rename': return 'renamed'
-    case 'add-drone': return `drone added${label}`
-    case 'remove-drone': return `drone removed${label}`
-    case 'instruction-state': return 'instructions changed'
-    case 'tag-state': return 'tags changed'
-    case 'content-state': return 'content saved'
-    case 'layout-state': return 'layout changed'
-    case 'hide': return `hidden${label}`
-    case 'unhide': return `unhidden${label}`
-    default: return op
+    this.#notifLabel.textContent = `${stepsBack} step${stepsBack === 1 ? '' : 's'} back`
   }
 }
 

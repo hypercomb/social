@@ -6,7 +6,7 @@ hypercomb is built on presence, consent, and recognition. there are no feeds or 
 
 ## principles
 
-- **presence = permission** -- only bees here now receive steps. in the architecture, drones must be in the `Active` state to participate; disposed drones lose all effect subscriptions immediately (see [architecture-overview.md](./architecture-overview.md)).
+- **presence = permission** -- only bees here now receive steps. in the architecture, drones must be in the `Active` state to participate; disposed drones lose all effect subscriptions immediately (see [architecture-fundamentals.md](architecture-fundamentals.md)).
 - **consent to link** -- you choose who can follow you. linking is always mutual and revocable.
 - **recognition over accounts** -- unique avatars, not login reputations. identity is content-addressed via `SignatureService` (sha-256 hashes), not usernames or credentials.
 - **no storage by default** -- nothing is saved unless someone explicitly publishes dna. the effect bus is stateless (last-value replay, stores nothing permanently). the nostr mesh relays encrypted frames but keeps nothing locally beyond a ttl cache.
@@ -117,7 +117,7 @@ Created --> Registered --> Active --> Disposed
 
 a disposed drone cannot emit or receive effects. there is no "shadow presence" -- the effect bus auto-cleanup guarantees that ghost signals do not persist after disposal.
 
-for the full lifecycle and communication model, see [architecture-overview.md](./architecture-overview.md).
+for the full lifecycle and communication model, see [architecture-fundamentals.md](architecture-fundamentals.md).
 
 ---
 
@@ -131,7 +131,7 @@ identity in hypercomb is content-addressed, not credential-based.
 
 there are no usernames, passwords, profiles, follower counts, or reputation scores.
 
-for the full identity model, see [architecture-overview.md](./architecture-overview.md) and [glossary.md](./glossary.md).
+for the full identity model, see [architecture-fundamentals.md](architecture-fundamentals.md) and [glossary.md](./glossary.md).
 
 ---
 

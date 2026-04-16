@@ -19,7 +19,13 @@
   "palette.placeholder": "اكتب أمراً...",
   "palette.empty": "لا توجد أوامر مطابقة",
 
-  "shortcuts.title": "اختصارات لوحة المفاتيح",
+  "shortcuts.title": "المرجع",
+  "shortcuts.close": "إغلاق",
+  "shortcuts.filter-placeholder": "تصفية الأوامر والعمليات والاختصارات…",
+  "shortcuts.section.slash": "أوامر الشرطة المائلة",
+  "shortcuts.section.command-line": "سطر الأوامر",
+  "shortcuts.section.keyboard": "اختصارات لوحة المفاتيح",
+  "shortcuts.empty": "لا توجد تطابقات",
   "shortcuts.chord-sep": "ثم",
 
   "editor.title": "محرر البلاطة",
@@ -151,7 +157,7 @@
 
   "slash.select": "تحديد البلاطات للقص/النسخ/النقل",
   "slash.remove-builtin": "إزالة البلاطات المحددة",
-  "slash.help": "عرض اختصارات لوحة المفاتيح",
+  "slash.help": "عرض المرجع",
   "slash.clear": "مسح الفلتر النشط",
   "slash.keyword": "إضافة أو إزالة كلمات مفتاحية (وسوم) على البلاطات المحددة",
   "slash.meeting": "بدء أو الانضمام لمكالمة فيديو على البلاطة المحددة",

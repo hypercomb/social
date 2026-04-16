@@ -2,6 +2,8 @@
   <hc-command-line></hc-command-line>
   <hc-mesh-header [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()" (secretExpandedChange)="secretOpen.set($event)"></hc-mesh-header>
 </div>
+<hc-notes-strip></hc-notes-strip>
+<hc-notes-viewer></hc-notes-viewer>
 <hc-activity-log></hc-activity-log>
 <router-outlet />
 <div id="pixi-host" style="z-index: 0; position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></div>

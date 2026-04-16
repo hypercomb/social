@@ -19,7 +19,13 @@
   "palette.placeholder": "Digite um comando...",
   "palette.empty": "Nenhum comando encontrado",
 
-  "shortcuts.title": "Atalhos de teclado",
+  "shortcuts.title": "Referência",
+  "shortcuts.close": "Fechar",
+  "shortcuts.filter-placeholder": "Filtrar comandos, operações, atalhos…",
+  "shortcuts.section.slash": "Comandos slash",
+  "shortcuts.section.command-line": "Linha de comando",
+  "shortcuts.section.keyboard": "Atalhos de teclado",
+  "shortcuts.empty": "Sem resultados",
   "shortcuts.chord-sep": "depois",
 
   "editor.title": "editor de bloco",
@@ -151,7 +157,7 @@
 
   "slash.select": "selecionar blocos para cortar/copiar/mover",
   "slash.remove-builtin": "remover blocos selecionados",
-  "slash.help": "Mostrar atalhos de teclado",
+  "slash.help": "Mostrar referência",
   "slash.clear": "Limpar filtro ativo",
   "slash.keyword": "Adicionar ou remover palavras-chave (tags) nos blocos selecionados",
   "slash.meeting": "Iniciar ou entrar em videochamada no bloco selecionado",

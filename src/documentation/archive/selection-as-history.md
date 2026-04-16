@@ -5,7 +5,7 @@
 ## Related
 
 - [universal-history-plan.md](universal-history-plan.md) — Parent plan; adds `selection-state` to the op vocabulary
-- [signature-expansion-doctrine.md](signature-expansion-doctrine.md) — Why the selection payload must be signature-addressed
+- [signature-system.md](../signature-system.md) — Why the selection payload must be signature-addressed
 
 ## The Click-to-Add Gesture
 

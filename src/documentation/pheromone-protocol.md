@@ -5,7 +5,7 @@
 ## Related Documents
 
 - [pollination-protocol.md](pollination-protocol.md) — How content crosses between domains (matter). Pheromones are the signal counterpart
-- [signature-expansion-doctrine.md](signature-expansion-doctrine.md) — Pheromones reference targets by signature, never by path
+- [signature-system.md](signature-system.md) — Pheromones reference targets by signature, never by path
 - [universal-history-plan.md](universal-history-plan.md) — Pheromones are NOT history ops; they live in a parallel space
 - [core-processor-architecture.md](core-processor-architecture.md) — Where pheromones surface inside DCP
 

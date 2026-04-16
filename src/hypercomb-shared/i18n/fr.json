@@ -19,7 +19,13 @@
   "palette.placeholder": "Saisir une commande...",
   "palette.empty": "Aucune commande correspondante",
 
-  "shortcuts.title": "Raccourcis clavier",
+  "shortcuts.title": "Référence",
+  "shortcuts.close": "Fermer",
+  "shortcuts.filter-placeholder": "Filtrer commandes, opérations, raccourcis…",
+  "shortcuts.section.slash": "Commandes slash",
+  "shortcuts.section.command-line": "Ligne de commande",
+  "shortcuts.section.keyboard": "Raccourcis clavier",
+  "shortcuts.empty": "Aucune correspondance",
   "shortcuts.chord-sep": "puis",
 
   "editor.title": "éditeur de tuile",
@@ -151,7 +157,7 @@
 
   "slash.select": "sélectionner les tuiles pour couper/copier/déplacer",
   "slash.remove-builtin": "supprimer les tuiles sélectionnées",
-  "slash.help": "Afficher les raccourcis clavier",
+  "slash.help": "Afficher la référence",
   "slash.clear": "Effacer le filtre actif",
   "slash.keyword": "Ajouter ou supprimer des mots-clés (tags) sur les tuiles sélectionnées",
   "slash.meeting": "Démarrer ou rejoindre un appel vidéo sur la tuile sélectionnée",

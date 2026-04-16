@@ -11,6 +11,7 @@
 // derived by diffLayers, never storage.
 import { EffectBus, SignatureService } from '@hypercomb/core'
 import type { HistoryService, LayerContent } from './history.service.js'
+import type { HistoryCursorService } from './history-cursor.service.js'
 import type { OrderProjection } from './order-projection.js'
 
 type Lineage = {
@@ -85,7 +86,13 @@ export class LayerCommitter {
 
     const locationSig = await history.sign(lineage)
     const layer = await this.#assembleLayer(lineage, locationSig)
-    await history.commitLayer(locationSig, layer)
+    const layerSig = await history.commitLayer(locationSig, layer)
+
+    // Notify the cursor so the slider / activity log / ShowCell see the new head
+    if (layerSig) {
+      const cursor = get<HistoryCursorService>('@diamondcoreprocessor.com/HistoryCursorService')
+      if (cursor) await cursor.onNewLayer()
+    }
   }
 
   /**

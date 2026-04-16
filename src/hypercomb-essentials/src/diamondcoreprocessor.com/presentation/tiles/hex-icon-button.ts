@@ -83,6 +83,18 @@ export class HexIconButton extends Container {
     }
   }
 
+  /**
+   * Set the tint applied when the icon is not hovered. Used by per-tile
+   * `tintWhen` predicates so an icon can advertise per-cell state (e.g.
+   * "this tile contains notes") via colour. Pass null to reset to white.
+   */
+  setNormalTint(tint: number | null): void {
+    this.#normalTint = tint ?? 0xffffff
+    if (this.#sprite && !this.#hovered) {
+      this.#sprite.tint = this.#normalTint
+    }
+  }
+
   // ── Hit testing ────────────────────────────────────────────────────
 
   containsPoint(localX: number, localY: number): boolean {

@@ -74,7 +74,29 @@ const isSource = (f: string) => (f.endsWith('.ts') || f.endsWith('.js')) && !f.e
 const isBee = (f: string) =>
   f.endsWith('.drone.ts') || f.endsWith('.drone.js') ||
   f.endsWith('.worker.ts') || f.endsWith('.worker.js')
-const isGenerated = (f: string) => f.endsWith('-keys.ts') || basename(f) === 'index.ts'
+const SIDE_EFFECT_SUFFIXES = [
+  '.drone.ts', '.queen.ts', '.worker.ts',
+  '.input.ts', '.view.ts', '.atomizer.ts',
+] as const
+
+// Module-level side-effect patterns — files containing any of these at
+// module scope self-register or wire global listeners on first import.
+// `EffectBus.on<T>(` and `register<T>(` allow an optional TS type argument.
+const SIDE_EFFECT_PATTERN = /^[ \t]*(register(?:<[^>]*>)?\(|window\.ioc\.register\(|EffectBus\.on(?:<[^>]*>)?\()/m
+
+const hasSideEffectBySuffix = (f: string): boolean =>
+  SIDE_EFFECT_SUFFIXES.some(suffix => f.endsWith(suffix))
+
+const hasSideEffectByContent = (f: string): boolean => {
+  if (!f.endsWith('.ts')) return false
+  try { return SIDE_EFFECT_PATTERN.test(readFileSync(f, 'utf8')) }
+  catch { return false }
+}
+
+const isSideEffectModule = (f: string): boolean =>
+  hasSideEffectBySuffix(f) || hasSideEffectByContent(f)
+const isGenerated = (f: string) =>
+  f.endsWith('-keys.ts') || basename(f) === 'index.ts' || basename(f) === 'side-effects.ts'
 
 const relFrom = (root: string, full: string) =>
   full.replace(root, '').replace(/^[\\/]/, '').replace(/\\/g, '/')
@@ -140,7 +162,7 @@ const preClean = () => {
   let removed = 0
   for (const file of walkFiles(SRC_ROOT)) {
     const name = basename(file)
-    if (name === 'index.ts' || name.endsWith('-keys.ts')) {
+    if (name === 'index.ts' || name === 'side-effects.ts' || name.endsWith('-keys.ts')) {
       rmSync(file, { force: true })
       removed++
     }
@@ -431,7 +453,8 @@ if (prepareCache?.treeSignature === treeSignature) {
   // verify generated output still exists (not wiped externally)
   const masterKeysFile = join(SRC_ROOT, 'essentials-keys.ts')
   const rootIndexFile = join(SRC_ROOT, 'index.ts')
-  if (existsSync(masterKeysFile) && existsSync(rootIndexFile)) {
+  const sideEffectsFile = join(SRC_ROOT, 'side-effects.ts')
+  if (existsSync(masterKeysFile) && existsSync(rootIndexFile) && existsSync(sideEffectsFile)) {
     console.log('[prepare] tree signature unchanged — skipping (beeline)')
     process.exit(0)
   }
@@ -491,6 +514,35 @@ ${rootExports.sort().join('\n')}
 
 if (writeIfChanged(join(SRC_ROOT, 'index.ts'), rootIndex)) filesWritten++
 else filesSkipped++
+
+// -------------------------------------------------
+// side-effects barrel: bare-import every self-registering module so the
+// dev shell can opt in to the whole module graph with one import.
+// Drones, queens, workers, inputs, views, and atomizers all run
+// window.ioc.register(...) at module load — the barrel makes that implicit.
+// -------------------------------------------------
+{
+  const sideEffectFiles = walkFiles(SRC_ROOT)
+    .filter(f => isSideEffectModule(f) && !isGenerated(f))
+    .sort()
+
+  const lines = sideEffectFiles.map(f => {
+    const rel = relFrom(SRC_ROOT, f).replace(/\.ts$/, '')
+    return `import './${rel}'`
+  })
+
+  const sideEffectsContent = `// auto-generated
+// side-effect barrel — imports every self-registering module
+// (*.drone.ts, *.queen.ts, *.worker.ts, *.input.ts, *.view.ts, *.atomizer.ts)
+// so one \`import '@hypercomb/essentials/side-effects'\` boots the full graph.
+// do not edit manually
+
+${lines.join('\n')}
+`
+
+  if (writeIfChanged(join(SRC_ROOT, 'side-effects.ts'), sideEffectsContent)) filesWritten++
+  else filesSkipped++
+}
 
 // persist cache for next run
 savePrepareCache({ treeSignature, files: newFileCache })

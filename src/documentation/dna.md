@@ -144,7 +144,7 @@ no personal identifiers are required for any of the above.
 - no user identities embedded
 - `start_hash` can be public or opaque
 - `salt` defends against cell name reversal
-- attestation keys may be pseudonymous; reputation is social (see: [hive.md](./hive.md))
+- attestation keys may be pseudonymous; reputation is social (see: [architecture-fundamentals.md](architecture-fundamentals.md))
 
 ---
 

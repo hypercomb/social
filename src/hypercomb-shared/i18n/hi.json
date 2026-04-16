@@ -19,7 +19,13 @@
   "palette.placeholder": "कमांड टाइप करें...",
   "palette.empty": "कोई मेल खाता कमांड नहीं",
 
-  "shortcuts.title": "कीबोर्ड शॉर्टकट",
+  "shortcuts.title": "संदर्भ",
+  "shortcuts.close": "बंद करें",
+  "shortcuts.filter-placeholder": "कमांड, ऑपरेशन, शॉर्टकट फ़िल्टर करें…",
+  "shortcuts.section.slash": "स्लैश कमांड",
+  "shortcuts.section.command-line": "कमांड लाइन",
+  "shortcuts.section.keyboard": "कीबोर्ड शॉर्टकट",
+  "shortcuts.empty": "कोई मिलान नहीं",
   "shortcuts.chord-sep": "फिर",
 
   "editor.title": "टाइल संपादक",
@@ -151,7 +157,7 @@
 
   "slash.select": "काटने/कॉपी/स्थानांतरित करने के लिए टाइलें चुनें",
   "slash.remove-builtin": "चयनित टाइलें हटाएँ",
-  "slash.help": "कीबोर्ड शॉर्टकट दिखाएँ",
+  "slash.help": "संदर्भ दिखाएँ",
   "slash.clear": "सक्रिय फ़िल्टर साफ़ करें",
   "slash.keyword": "चयनित टाइलों पर कीवर्ड (टैग) जोड़ें या हटाएँ",
   "slash.meeting": "चयनित टाइल पर वीडियो मीटिंग शुरू करें या शामिल हों",

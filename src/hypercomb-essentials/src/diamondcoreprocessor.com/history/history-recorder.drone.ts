@@ -1,7 +1,6 @@
 // diamondcoreprocessor.com/core/history-recorder.drone.ts
 import { EffectBus, SignatureService } from '@hypercomb/core'
 import type { HistoryService, HistoryOpType } from './history.service.js'
-import type { HistoryCursorService } from './history-cursor.service.js'
 
 type TagUpdate = { cell: string; tag: string }
 
@@ -83,10 +82,6 @@ export class HistoryRecorder {
 
     const sig = await historyService.sign(lineage)
     await historyService.record(sig, { op, cell, at: Date.now(), groupId })
-
-    // Notify cursor service so slider stays in sync
-    const cursor = get<HistoryCursorService>('@diamondcoreprocessor.com/HistoryCursorService')
-    if (cursor) await cursor.onNewOp()
   }
 
   /**
@@ -143,8 +138,6 @@ export class HistoryRecorder {
           at: snapshot.at,
         })
 
-        const cursor = get<HistoryCursorService>('@diamondcoreprocessor.com/HistoryCursorService')
-        if (cursor) await cursor.onNewOp()
       })
       .catch(() => { })
   }
@@ -179,8 +172,6 @@ export class HistoryRecorder {
           at: Date.now(),
         })
 
-        const cursor = get<HistoryCursorService>('@diamondcoreprocessor.com/HistoryCursorService')
-        if (cursor) await cursor.onNewOp()
       })
       .catch(() => { })
   }
@@ -228,8 +219,6 @@ export class HistoryRecorder {
           at: snapshot.at,
         })
 
-        const cursor = get<HistoryCursorService>('@diamondcoreprocessor.com/HistoryCursorService')
-        if (cursor) await cursor.onNewOp()
       })
       .catch(() => { })
   }
@@ -267,8 +256,6 @@ export class HistoryRecorder {
           at: snapshot.at,
         })
 
-        const cursor = get<HistoryCursorService>('@diamondcoreprocessor.com/HistoryCursorService')
-        if (cursor) await cursor.onNewOp()
       })
       .catch(() => { })
   }

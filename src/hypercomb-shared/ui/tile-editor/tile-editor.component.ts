@@ -78,9 +78,15 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
     () => this.imageEditor?.hasImage ?? false,
   )
 
+  private readonly hideText$ = fromRuntime(
+    get('@diamondcoreprocessor.com/TileEditorService') as EventTarget,
+    () => this.editorService?.hideText ?? false,
+  )
+
   public readonly open = computed(() => this.mode$() === 'editing')
   public readonly cell = computed(() => this.cell$())
   public readonly hasImage = computed(() => this.hasImage$())
+  public readonly hideText = computed(() => this.hideText$())
 
   // bound form values (updated on open, pushed on change)
   public linkValue = ''
@@ -343,6 +349,10 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly searchGoogle = (): void => {
     const q = this.cell()
     if (q) window.open(`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(q)}`, '_blank')
+  }
+
+  readonly toggleHideText = (): void => {
+    this.editorService.setHideText(!this.editorService.hideText)
   }
 
   // ── save / cancel ──────────────────────────────────────────────

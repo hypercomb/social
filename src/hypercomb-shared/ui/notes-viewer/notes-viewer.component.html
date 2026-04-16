@@ -1,0 +1,62 @@
+@if (visible() && note(); as n) {
+  <div
+    class="viewer-backdrop"
+    (click)="onBackdrop($event)"
+    (keydown)="onKey($event)"
+    tabindex="-1"
+    role="dialog"
+    aria-modal="true"
+    [attr.aria-label]="'notes.viewer.aria' | t"
+  >
+    <div class="viewer-card">
+      <header class="viewer-header">
+        <span class="viewer-cell">{{ cellLabel() }}</span>
+        <button class="viewer-close" type="button" (click)="close()" [attr.aria-label]="'notes.close' | t">×</button>
+      </header>
+
+      <article class="viewer-body">
+        <p class="viewer-text">{{ n.text }}</p>
+      </article>
+
+      <section class="viewer-tags" [attr.aria-label]="'notes.tags' | t">
+        @for (tag of currentTags(); track trackTag($index, tag)) {
+          <button
+            class="tag-chip current"
+            type="button"
+            (click)="detachTag(tag)"
+            [attr.aria-label]="'notes.tag.detach' | t: { tag: tag }"
+            [title]="'notes.tag.detach' | t: { tag: tag }"
+          >#{{ tag }} <span class="tag-x">×</span></button>
+        }
+        <button
+          class="tag-chip add"
+          type="button"
+          (click)="toggleTagPicker()"
+          [attr.aria-expanded]="tagPickerOpen()"
+        >{{ 'notes.tag.attach' | t }}</button>
+      </section>
+
+      @if (tagPickerOpen()) {
+        <div class="tag-picker" role="listbox">
+          @if (availableTags().length === 0) {
+            <span class="tag-picker-empty">{{ 'notes.tag.none' | t }}</span>
+          } @else {
+            @for (tag of availableTags(); track trackTag($index, tag)) {
+              <button class="tag-option" type="button" role="option" (click)="attachTag(tag)">#{{ tag }}</button>
+            }
+          }
+        </div>
+      }
+
+      <footer class="viewer-footer">
+        <span class="viewer-meta">
+          {{ formatDate(n.updatedAt ?? n.createdAt) }}
+        </span>
+        <div class="viewer-actions">
+          <button class="action edit" type="button" (click)="edit()">{{ 'notes.edit' | t }}</button>
+          <button class="action add" type="button" (click)="addAnother()">{{ 'notes.add.another' | t }}</button>
+        </div>
+      </footer>
+    </div>
+  </div>
+}

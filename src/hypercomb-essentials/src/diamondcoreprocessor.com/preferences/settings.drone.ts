@@ -7,7 +7,7 @@ export class SettingsDrone extends Drone {
   public override description =
     'Registers user-configurable settings into IoC for other drones to resolve.'
 
-  public heartbeat = async (): Promise<void> => {
+  public override heartbeat = async (): Promise<void> => {
     // placeholder — settings registration will use global register() when enabled
   }
 }

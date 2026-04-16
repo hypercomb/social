@@ -1,149 +1,121 @@
-// diamondcoreprocessor.com/core/history-cursor.service.ts
+// diamondcoreprocessor.com/history/history-cursor.service.ts
+//
+// Layer-based history cursor. Every user-intent boundary produces a new
+// layer via LayerCommitter (synchronize → commitLayer). History is the
+// list of layer entries; undo/redo is just walking that list.
+//
+// Undo/redo is naturally safe: edits always append a new layer at head,
+// so previous layers are immutable and can be re-read any time. Nothing
+// rewrites history. Resources referenced by past layers are never GC'd,
+// so rewinding always resolves to real content.
 import { EffectBus } from '@hypercomb/core'
-import type { HistoryService, HistoryOp } from './history.service.js'
-import type { GlobalTimeClock } from './global-time-clock.service.js'
+import type { HistoryService, LayerContent, LayerEntry } from './history.service.js'
 
 export type CursorState = {
   /** History bag signature for the current location. */
   locationSig: string
-  /** Current cursor position (1-based index). 0 = no history. */
+  /** Current cursor position (1-based index into layers). 0 = no history. */
   position: number
-  /** Total number of history ops in this bag. */
+  /** Total number of layer entries in this bag. */
   total: number
-  /** true when cursor is not at the latest op. */
+  /** true when cursor is not at the latest layer. */
   rewound: boolean
-  /** Timestamp (ms epoch) of the op at cursor position. 0 = no history. */
+  /** Timestamp (ms epoch) of the layer entry at cursor position. 0 = no history. */
   at: number
 }
 
-export type DivergenceInfo = {
-  /** Cells that exist at cursor position (normal rendering). */
-  current: Set<string>
-  /** Cells that were added AFTER cursor position (ghost / future). */
-  futureAdds: Set<string>
-  /** Cells that exist at cursor but are removed later (marked for removal). */
-  futureRemoves: Set<string>
-  /** Cells hidden at cursor position (via hide/unhide ops). */
-  hiddenAtCursor: Set<string>
-}
-
-/**
- * Tracks a movable cursor within a location's history bag.
- * Moving the cursor does NOT mutate history — it only changes
- * what ShowCellDrone considers "visible" and what appears divergent.
- */
 export class HistoryCursorService extends EventTarget {
 
   #locationSig = ''
   #position = 0
-  #total = 0
-  #allOps: HistoryOp[] = []
+  #layers: Array<LayerEntry & { index: number }> = []
+
+  // Last-fetched layer content, keyed by layer signature
+  #cachedLayerSig: string | null = null
+  #cachedContent: LayerContent | null = null
 
   get state(): CursorState {
-    const op = this.#position > 0 ? this.#allOps[this.#position - 1] : null
+    const entry = this.#position > 0 ? this.#layers[this.#position - 1] : null
     return {
       locationSig: this.#locationSig,
       position: this.#position,
-      total: this.#total,
-      rewound: this.#total > 0 && this.#position < this.#total,
-      at: op?.at ?? 0,
+      total: this.#layers.length,
+      rewound: this.#layers.length > 0 && this.#position < this.#layers.length,
+      at: entry?.at ?? 0,
     }
   }
 
   /**
-   * Load (or reload) history for a location.
-   * Restores persisted cursor position when entering a location,
-   * so undo/redo state survives page refresh.
+   * Load (or reload) layer history for a location. Restores persisted
+   * cursor position so rewound state survives page refresh.
    */
   async load(locationSig: string): Promise<void> {
     const historyService = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
     if (!historyService) return
 
-    const ops = await historyService.replay(locationSig)
-    this.#allOps = ops
-    this.#total = ops.length
+    this.#layers = await historyService.listLayers(locationSig)
 
     if (this.#locationSig !== locationSig) {
-      // new location
       this.#locationSig = locationSig
-      const clock = get<GlobalTimeClock>('@diamondcoreprocessor.com/GlobalTimeClock')
-      if (clock?.active && clock.timestamp !== null) {
-        this.seekToTime(clock.timestamp)
-        return   // seekToTime calls #emit
-      }
-      // Restore persisted cursor position (sticky undo across refresh)
+      this.#cachedLayerSig = null
+      this.#cachedContent = null
       const saved = this.#loadPersistedPosition(locationSig)
-      if (saved !== null && saved < this.#total) {
-        this.#position = saved
-      } else {
-        this.#position = this.#total
-      }
-    } else if (this.#position > this.#total) {
-      this.#position = this.#total
+      this.#position = (saved !== null && saved < this.#layers.length) ? saved : this.#layers.length
+    } else if (this.#position > this.#layers.length) {
+      this.#position = this.#layers.length
     }
 
     this.#emit()
   }
 
   /**
-   * Called when a new op is appended (e.g. by HistoryRecorder).
-   * If cursor was at the latest, keep it at the latest.
+   * Called after LayerCommitter appends a new layer. If cursor was at
+   * head, stay at head (absorb the new layer). Otherwise keep the
+   * rewound position — the user is viewing history.
    */
-  async onNewOp(): Promise<void> {
-    const wasAtLatest = this.#position >= this.#total
+  async onNewLayer(): Promise<void> {
+    const wasAtLatest = this.#position >= this.#layers.length
     await this.load(this.#locationSig)
     if (wasAtLatest) {
-      this.#position = this.#total
+      this.#position = this.#layers.length
       this.#emit()
     }
   }
 
   /** Move cursor to an absolute position (1-based, clamped). */
   seek(position: number): void {
-    const clamped = Math.max(0, Math.min(position, this.#total))
+    const clamped = Math.max(0, Math.min(position, this.#layers.length))
     if (clamped === this.#position) return
     this.#position = clamped
     this.#emit()
   }
 
-  /** Step backward one op. */
+  /** Step backward one layer. */
   undo(): void {
-    if (this.#position <= 0) return
-    let i = this.#position - 1
-    const groupKey = this.#groupKeyForIndex(i)
-    while (i >= 0 && this.#groupKeyForIndex(i) === groupKey) i--
-    this.seek(i + 1)
+    if (this.#position > 0) this.seek(this.#position - 1)
   }
 
-  /** Step forward one op. */
+  /** Step forward one layer. */
   redo(): void {
-    if (this.#position >= this.#total) return
-    let i = this.#position
-    const groupKey = this.#groupKeyForIndex(i)
-    while (i < this.#total && this.#groupKeyForIndex(i) === groupKey) i++
-    this.seek(i)
+    if (this.#position < this.#layers.length) this.seek(this.#position + 1)
   }
 
   /** Jump to latest (exit rewind mode). */
   jumpToLatest(): void {
-    this.seek(this.#total)
+    this.seek(this.#layers.length)
   }
 
   /**
-   * Seek to the last op at or before the given timestamp.
-   * Returns the position it landed on (0 if no ops before timestamp).
+   * Seek to the last layer at or before the given timestamp.
+   * Returns the position it landed on (0 if no layers before timestamp).
    */
   seekToTime(timestamp: number): number {
-    if (this.#allOps.length === 0) return 0
+    if (this.#layers.length === 0) return 0
 
-    // Find last op whose `at` <= timestamp
     let pos = 0
-    for (let i = 0; i < this.#allOps.length; i++) {
-      if (this.#allOps[i].at <= timestamp) {
-        pos = i + 1   // 1-based position
-      } else {
-        break
-      }
+    for (let i = 0; i < this.#layers.length; i++) {
+      if (this.#layers[i].at <= timestamp) pos = i + 1
+      else break
     }
 
     this.seek(pos)
@@ -151,252 +123,44 @@ export class HistoryCursorService extends EventTarget {
   }
 
   /**
-   * Get all operation timestamps for this location's bag.
+   * All layer timestamps for this location, in order.
    * Used by GlobalTimeClock for stepping across locations.
    */
   get allTimestamps(): number[] {
-    return this.#allOps.map(op => op.at)
+    return this.#layers.map(entry => entry.at)
   }
 
   /**
-   * Promote the state at the current cursor position to head.
-   * Computes the diff (cursor-state vs head-state), writes the
-   * necessary add / remove ops, then a reorder op to preserve
-   * the display order at cursor time. Cursor jumps to new head.
+   * Resolve the LayerContent for the entry at the cursor position.
+   * Cached by layer signature so repeated reads during a single render
+   * hit memory, not OPFS.
    */
-  async promote(): Promise<void> {
-    if (!this.state.rewound) return          // nothing to promote
-    if (this.#allOps.length === 0) return
+  async layerContentAtCursor(): Promise<LayerContent | null> {
+    if (this.#position === 0) return null
+    const entry = this.#layers[this.#position - 1]
 
-    const historyService = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
-    if (!historyService) return
-
-    // ── Compute cell set at cursor position ─────────────────────
-    const cursorCells: string[] = []
-    const cursorCellSet = new Set<string>()
-    for (let i = 0; i < this.#position; i++) {
-      const op = this.#allOps[i]
-      if (op.op === 'add') {
-        if (!cursorCellSet.has(op.cell)) {
-          cursorCellSet.add(op.cell)
-          cursorCells.push(op.cell)
-        }
-      } else if (op.op === 'remove') {
-        cursorCellSet.delete(op.cell)
-        const idx = cursorCells.indexOf(op.cell)
-        if (idx !== -1) cursorCells.splice(idx, 1)
-      }
+    if (this.#cachedLayerSig === entry.layerSig && this.#cachedContent) {
+      return this.#cachedContent
     }
 
-    // ── Compute cell set at head ────────────────────────────────
-    const headCellSet = new Set<string>()
-    for (const op of this.#allOps) {
-      if (op.op === 'add') headCellSet.add(op.cell)
-      else if (op.op === 'remove') headCellSet.delete(op.cell)
+    const store = get<{ getResource: (sig: string) => Promise<Blob | null> }>('@hypercomb.social/Store')
+    if (!store) return null
+
+    try {
+      const blob = await store.getResource(entry.layerSig)
+      if (!blob) return null
+      const content = JSON.parse(await blob.text()) as LayerContent
+      this.#cachedLayerSig = entry.layerSig
+      this.#cachedContent = content
+      return content
+    } catch {
+      return null
     }
-
-    // ── Diff: write remove ops then add ops ─────────────────────
-    const now = Date.now()
-
-    // Cells at head but not at cursor → remove
-    for (const cell of headCellSet) {
-      if (!cursorCellSet.has(cell)) {
-        await historyService.record(this.#locationSig, { op: 'remove', cell, at: now })
-      }
-    }
-
-    // Cells at cursor but not at head → add
-    for (const cell of cursorCellSet) {
-      if (!headCellSet.has(cell)) {
-        await historyService.record(this.#locationSig, { op: 'add', cell, at: now })
-      }
-    }
-
-    // ── Preserve display order via reorder op ───────────────────
-    if (cursorCells.length > 0) {
-      const store = get<any>('@hypercomb.social/Store')
-      if (store) {
-        const payload = JSON.stringify(cursorCells)
-        const payloadSig: string = await store.putResource(new Blob([payload]))
-        await historyService.record(this.#locationSig, { op: 'reorder', cell: payloadSig, at: now })
-      }
-    }
-
-    // ── Invalidate order cache & reload ─────────────────────────
-    const orderProjection = get<any>('@diamondcoreprocessor.com/OrderProjection')
-    if (orderProjection?.evict) orderProjection.evict(this.#locationSig)
-
-    // Reload and jump to new head
-    await this.load(this.#locationSig)
-    this.#position = this.#total
-    this.#emit()
-
-    // Announce the branch — listeners reconcile UI (mode, selection, toast)
-    EffectBus.emit('history:promoted', {
-      locationSig: this.#locationSig,
-      reconciledOrder: cursorCells,
-      survivingCells: [...cursorCellSet],
-    })
   }
 
-  /**
-   * Compute divergence info: which cells are current vs future.
-   * Used by ShowCellDrone to decide ghost overlays.
-   */
-  computeDivergence(): DivergenceInfo {
-    const current = new Set<string>()
-    const futureAdds = new Set<string>()
-    const futureRemoves = new Set<string>()
-    const hiddenAtCursor = new Set<string>()
-
-    if (this.#allOps.length === 0) {
-      return { current, futureAdds, futureRemoves, hiddenAtCursor }
-    }
-
-    // Replay up to cursor position to get "current" cell set and hidden set
-    const cellStateAtCursor = new Map<string, string>()
-    for (let i = 0; i < this.#position; i++) {
-      const op = this.#allOps[i]
-      if (op.op === 'add' || op.op === 'remove') {
-        cellStateAtCursor.set(op.cell, op.op)
-      } else if (op.op === 'hide') {
-        hiddenAtCursor.add(op.cell)
-      } else if (op.op === 'unhide') {
-        hiddenAtCursor.delete(op.cell)
-      }
-    }
-
-    for (const [cell, lastOp] of cellStateAtCursor) {
-      if (lastOp !== 'remove') current.add(cell)
-    }
-
-    // If not rewound, no divergence
-    if (this.#position >= this.#total) {
-      return { current, futureAdds, futureRemoves, hiddenAtCursor }
-    }
-
-    // Replay ops AFTER cursor to find future changes
-    const cellStateAtEnd = new Map(cellStateAtCursor)
-    for (let i = this.#position; i < this.#total; i++) {
-      const op = this.#allOps[i]
-      if (op.op === 'add' || op.op === 'remove') {
-        cellStateAtEnd.set(op.cell, op.op)
-      }
-    }
-
-    for (const [cell, lastOp] of cellStateAtEnd) {
-      const existsAtCursor = current.has(cell)
-      const existsAtEnd = lastOp !== 'remove'
-
-      if (!existsAtCursor && existsAtEnd) {
-        // Added after cursor
-        futureAdds.add(cell)
-      } else if (existsAtCursor && !existsAtEnd) {
-        // Exists at cursor but removed later
-        futureRemoves.add(cell)
-      }
-    }
-
-    return { current, futureAdds, futureRemoves, hiddenAtCursor }
-  }
-
-  /**
-   * Collect all tag-state resource signatures up to cursor position.
-   * Returns the signatures in order — the caller resolves them to get
-   * cumulative tag state at cursor time.
-   *
-   * Reconstruction: walk the returned sigs, each resolves to
-   * { version, cellTags: Record<cellLabel, string[]>, at }.
-   * Last write wins per cell — build a Map<cellLabel, string[]>.
-   */
-  collectTagStateSignatures(): string[] {
-    const sigs: string[] = []
-    for (let i = 0; i < this.#position; i++) {
-      const op = this.#allOps[i]
-      if (op.op === 'tag-state') sigs.push(op.cell)
-    }
-    return sigs
-  }
-
-  /**
-   * Collect the last content-state resource signature per cell up to cursor position.
-   * Returns Map<cellLabel, resourceSig> — the caller resolves each sig to get
-   * { version, cellLabel, propertiesSig, at }.
-   *
-   * The propertiesSig points to the cell's properties resource at that moment.
-   */
-  collectContentStateSignatures(): Map<string, string> {
-    const lastSigPerCell = new Map<string, string>()
-    for (let i = 0; i < this.#position; i++) {
-      const op = this.#allOps[i]
-      if (op.op === 'content-state') {
-        // We don't know the cellLabel without resolving — store all and let caller handle
-        lastSigPerCell.set(`__idx_${i}`, op.cell)
-      }
-    }
-    return lastSigPerCell
-  }
-
-  /**
-   * Replay add/remove/reorder ops up to cursor position to derive
-   * the correct display order at cursor time.
-   * Reorder payloads are resolved from the content-addressed store.
-   */
-  async buildOrderAtCursor(): Promise<string[]> {
-    const store = get<any>('@hypercomb.social/Store')
-    let order: string[] = []
-
-    for (let i = 0; i < this.#position; i++) {
-      const op = this.#allOps[i]
-      switch (op.op) {
-        case 'add':
-          if (!order.includes(op.cell)) order.push(op.cell)
-          break
-        case 'remove':
-          order = order.filter(s => s !== op.cell)
-          break
-        case 'reorder':
-          if (store) {
-            try {
-              const blob: Blob | null = await store.getResource(op.cell)
-              if (blob) {
-                const parsed = JSON.parse(await blob.text())
-                if (Array.isArray(parsed)) order = parsed
-              }
-            } catch { /* skip corrupted payload */ }
-          }
-          break
-        case 'rename':
-          if (store) {
-            try {
-              const blob: Blob | null = await store.getResource(op.cell)
-              if (blob) {
-                const parsed = JSON.parse(await blob.text())
-                if (parsed?.oldName && parsed?.newName) {
-                  const idx = order.indexOf(parsed.oldName)
-                  if (idx !== -1) order[idx] = parsed.newName
-                }
-              }
-            } catch { /* skip corrupted payload */ }
-          }
-          break
-      }
-    }
-
-    return order
-  }
-
-  /**
-   * Get all ops up to cursor position, filtered by type.
-   * Generic method for any op type that needs reconstruction.
-   */
-  opsAtCursor(opType?: string): HistoryOp[] {
-    const ops: HistoryOp[] = []
-    for (let i = 0; i < this.#position; i++) {
-      const op = this.#allOps[i]
-      if (!opType || op.op === opType) ops.push(op)
-    }
-    return ops
+  /** Last-fetched layer content, for synchronous reads after a prior await. */
+  peekContent(): LayerContent | null {
+    return this.#cachedContent
   }
 
   #emit(): void {
@@ -405,15 +169,15 @@ export class HistoryCursorService extends EventTarget {
     EffectBus.emit<CursorState>('history:cursor-changed', this.state)
   }
 
-  // ── Cursor persistence (localStorage) ─────────��───────────
+  // ── Cursor persistence (localStorage) ──────────────────────
 
   static readonly #STORAGE_PREFIX = 'hc:history-cursor:'
 
   #persistPosition(): void {
     if (!this.#locationSig) return
     const key = HistoryCursorService.#STORAGE_PREFIX + this.#locationSig
-    if (this.#position >= this.#total) {
-      // At head — no need to persist, remove stale entry
+    if (this.#position >= this.#layers.length) {
+      // At head — drop the persisted entry
       localStorage.removeItem(key)
     } else {
       localStorage.setItem(key, String(this.#position))
@@ -425,13 +189,6 @@ export class HistoryCursorService extends EventTarget {
     if (raw === null) return null
     const n = parseInt(raw, 10)
     return isNaN(n) ? null : n
-  }
-
-  #groupKeyForIndex(index: number): string {
-    const op = this.#allOps[index]
-    const groupId = String(op?.groupId ?? '').trim()
-    if (groupId.length > 0) return `g:${groupId}`
-    return `i:${index}`
   }
 }
 

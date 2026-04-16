@@ -71,7 +71,7 @@ optional on-chain reference to prove when a dna commitment existed.
 these terms are the most fundamental concepts in the architecture. they appear across all documents and form the shared vocabulary between metaphor and implementation.
 
 ### signature
-sha-256 hash (64 hex chars) of canonical content. the universal reference primitive — signatures name drones, layers, dependencies, history entries, and resources. created via `SignatureService.sign(bytes)`. immutable identity: same content always produces the same signature. signatures are not just identifiers — they are the composition mechanism. see [core-primitive.md](core-primitive.md) and [signature-expansion-doctrine.md](signature-expansion-doctrine.md).
+sha-256 hash (64 hex chars) of canonical content. the universal reference primitive — signatures name drones, layers, dependencies, history entries, and resources. created via `SignatureService.sign(bytes)`. immutable identity: same content always produces the same signature. signatures are not just identifiers — they are the composition mechanism. see [signature-system.md](signature-system.md).
 
 ### cell
 the atomic unit of content in the hierarchy. a cell is an opfs folder under the user content tree (e.g., `hypercomb.io/path/cell`). cells contain a zero-signature properties file, optional resources, and child cells. developer-facing term — see **tile** for the user-facing equivalent.

@@ -19,7 +19,13 @@
   "palette.placeholder": "输入命令...",
   "palette.empty": "无匹配命令",
 
-  "shortcuts.title": "键盘快捷键",
+  "shortcuts.title": "参考",
+  "shortcuts.close": "关闭",
+  "shortcuts.filter-placeholder": "筛选命令、操作、快捷键…",
+  "shortcuts.section.slash": "斜杠命令",
+  "shortcuts.section.command-line": "命令行",
+  "shortcuts.section.keyboard": "键盘快捷键",
+  "shortcuts.empty": "无匹配",
   "shortcuts.chord-sep": "然后",
 
   "editor.title": "磁贴编辑器",
@@ -151,7 +157,7 @@
 
   "slash.select": "选择磁贴进行剪切/复制/移动",
   "slash.remove-builtin": "删除所选磁贴",
-  "slash.help": "显示键盘快捷键",
+  "slash.help": "显示参考",
   "slash.clear": "清除活动筛选",
   "slash.keyword": "为所选磁贴添加或删除关键词（标签）",
   "slash.meeting": "在所选磁贴上启动或加入视频会议",

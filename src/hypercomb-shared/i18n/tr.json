@@ -19,7 +19,13 @@
   "palette.placeholder": "Bir komut yazın...",
   "palette.empty": "Eşleşen komut yok",
 
-  "shortcuts.title": "Klavye Kısayolları",
+  "shortcuts.title": "Referans",
+  "shortcuts.close": "Kapat",
+  "shortcuts.filter-placeholder": "Komutlar, işlemler, kısayollar filtrele…",
+  "shortcuts.section.slash": "Slash komutları",
+  "shortcuts.section.command-line": "Komut satırı",
+  "shortcuts.section.keyboard": "Klavye kısayolları",
+  "shortcuts.empty": "Eşleşme yok",
   "shortcuts.chord-sep": "sonra",
 
   "editor.title": "döşeme düzenleyici",
@@ -151,7 +157,7 @@
 
   "slash.select": "kes/kopyala/taşı için döşemeleri seç",
   "slash.remove-builtin": "seçili döşemeleri kaldır",
-  "slash.help": "Klavye kısayollarını göster",
+  "slash.help": "Referansı göster",
   "slash.clear": "Etkin filtreyi temizle",
   "slash.keyword": "Seçili döşemelere anahtar kelime (etiket) ekle veya kaldır",
   "slash.meeting": "Seçili döşemede görüntülü toplantı başlat veya katıl",

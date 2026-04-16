@@ -71,9 +71,6 @@ export type LayerEntry = {
 
 export class HistoryService {
 
-  // Signatures currently being promoted — prevents recursion when promote() calls record()
-  readonly #promoting = new Set<string>()
-
   // In-memory cache of full replay per signature. Keeps navigation instant —
   // history is the same until the next record()/updateLayer() append.
   readonly #replayCache = new Map<string, HistoryOp[]>()
@@ -122,27 +119,11 @@ export class HistoryService {
    * Record an operation into the history bag for the given signature.
    * Appends a sequential file (00000001, 00000002, ...) with JSON content.
    *
-   * If the cursor for this location is rewound, promotes the cursor state to
-   * head first (creating a new branch from the rewound point) before recording.
+   * Ops are a legacy view — the primary history primitive is the layer
+   * snapshot (commitLayer). Any edit while rewound simply appends a new
+   * layer at head; previous layers remain immutable and addressable.
    */
   public readonly record = async (signature: string, operation: HistoryOp): Promise<void> => {
-    // Promote-before-record: if user is editing from a rewound state on this
-    // location, collapse the cursor state into a new head so the new op extends
-    // from what the user sees rather than corrupting history order.
-    if (!this.#promoting.has(signature)) {
-      const cursorService = get<{ state: { rewound: boolean; locationSig: string }; promote(): Promise<void> }>(
-        '@diamondcoreprocessor.com/HistoryCursorService'
-      )
-      if (cursorService?.state.rewound && cursorService.state.locationSig === signature) {
-        this.#promoting.add(signature)
-        try {
-          await cursorService.promote()
-        } finally {
-          this.#promoting.delete(signature)
-        }
-      }
-    }
-
     const bag = await this.getBag(signature)
 
     const nextIndex = await this.nextIndex(bag)

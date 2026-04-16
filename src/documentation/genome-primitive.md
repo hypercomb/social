@@ -6,8 +6,7 @@
 
 - [signature-algebra.md](signature-algebra.md) — the algebra: tag functions, set operations, lineage projections
 - [collapsed-compute.md](collapsed-compute.md) — the collapse hierarchy: genomes enable level 6 (subtree-level collapse)
-- [core-primitive.md](core-primitive.md) — the signature-payload pair: atoms of the genome tree
-- [signature-expansion-doctrine.md](signature-expansion-doctrine.md) — mandatory: every fragment must be signature-addressed for genomes to work
+- [signature-system.md](signature-system.md) — the signature-payload pair (atoms of the genome tree) and the mandatory expansion doctrine that makes genomes work
 
 ---
 

@@ -1,0 +1,203 @@
+// hypercomb-shared/ui/notes-strip/notes-strip.component.scss
+//
+// Two display modes sharing one component:
+//   * `rows`  — vertical stack, left-pinned, each note gets its own row
+//               and wraps naturally. Best for long sentence-style rules.
+//   * `chips` — horizontal scrolling chip row spanning the viewport,
+//               each note truncated to a single line. Compact and pretty
+//               when notes are short.
+// Mode is user-togglable and persisted to localStorage.
+
+$accent: #ffe14a;
+
+:host {
+  position: fixed;
+  top: var(--hc-header-height, 3rem);
+  left: 0;
+  right: 0;
+  z-index: 18;
+  display: flex;
+  pointer-events: none;
+  max-height: calc(100vh - var(--hc-header-height, 3rem) - 5rem);
+}
+
+.notes-strip {
+  pointer-events: auto;
+  background: rgba(12, 12, 26, 0.88);
+  backdrop-filter: blur(6px);
+  font-family: var(--hc-mono, system-ui);
+}
+
+// ── Header (shared) ────────────────────────────────────
+// ── Rows mode ──────────────────────────────────────────
+.notes-strip.mode-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  width: min(28rem, calc(100vw - 1rem));
+  padding: 0.5rem 0.75rem 0.6rem;
+  border-bottom-right-radius: 6px;
+  overflow: hidden;
+}
+
+.strip-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba($accent, 0.4) transparent;
+
+  &::-webkit-scrollbar { width: 4px; }
+  &::-webkit-scrollbar-thumb { background: rgba($accent, 0.4); border-radius: 2px; }
+}
+
+.note-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.3rem;
+}
+
+.note-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.25rem;
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  background: rgba(255, 255, 255, 0.035);
+  border: none;
+  border-radius: 4px;
+  color: rgba(240, 240, 240, 0.94);
+  font-family: inherit;
+  font-size: 0.85rem;
+  line-height: 1.35;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+  }
+
+  &:focus-visible {
+    outline: 1px solid $accent;
+    outline-offset: 2px;
+  }
+}
+
+.note-delete {
+  flex-shrink: 0;
+  width: 1.5rem;
+  align-self: stretch;
+  padding: 0;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.4);
+  font-family: inherit;
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+
+  &:hover {
+    background: rgba(255, 120, 120, 0.15);
+    color: #ff8080;
+    border-color: rgba(255, 120, 120, 0.6);
+  }
+}
+
+.row-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.row-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.row-tag {
+  font-size: 0.7rem;
+  color: rgba($accent, 0.9);
+}
+
+// ── Chips mode ─────────────────────────────────────────
+.notes-strip.mode-chips {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.4rem 0.75rem;
+}
+
+.chip-track {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba($accent, 0.4) transparent;
+
+  &::-webkit-scrollbar { height: 4px; }
+  &::-webkit-scrollbar-thumb { background: rgba($accent, 0.4); border-radius: 2px; }
+}
+
+.chip-wrap {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 0.2rem;
+  flex-shrink: 0;
+}
+
+.note-chip {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  max-width: 22rem;
+  padding: 0.3rem 0.65rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: none;
+  border-radius: 4px;
+  color: rgba(240, 240, 240, 0.92);
+  font-family: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+  }
+
+  &:focus-visible {
+    outline: 1px solid $accent;
+    outline-offset: 2px;
+  }
+}
+
+.chip-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chip-tags {
+  display: inline-flex;
+  gap: 0.25rem;
+}
+
+.chip-tag {
+  font-size: 0.7rem;
+  color: rgba($accent, 0.9);
+  opacity: 0.9;
+}

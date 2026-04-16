@@ -246,7 +246,7 @@ export class ConversationDrone extends Drone {
       if (name.startsWith('__')) continue
       try {
         const props = await this.#readProps(handle as FileSystemDirectoryHandle)
-        if (props.thread === threadId) return name
+        if (props['thread'] === threadId) return name
       } catch { /* skip */ }
     }
     return null

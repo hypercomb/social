@@ -1,33 +1,96 @@
 @if (open()) {
   <div class="sheet-backdrop" (click)="close()"></div>
   <div class="sheet-panel" role="dialog" [attr.aria-label]="'shortcuts.title' | t">
+
     <header class="sheet-header">
       <h3>{{ 'shortcuts.title' | t }}</h3>
-      <button class="sheet-close" (click)="close()">&times;</button>
+      <button class="sheet-close" (click)="close()" [attr.aria-label]="'shortcuts.close' | t">&times;</button>
     </header>
+
+    <div class="sheet-filter">
+      <input
+        #filterInput
+        type="text"
+        [placeholder]="'shortcuts.filter-placeholder' | t"
+        [value]="query()"
+        (input)="onFilter($event)"
+        autocomplete="off"
+        spellcheck="false"
+      >
+    </div>
+
     <div class="sheet-body">
-      @for (group of groups(); track group.category) {
-        <section class="shortcut-group">
-          <h4 class="group-title">{{ group.category }}</h4>
-          <div class="shortcut-list">
-            @for (binding of group.bindings; track binding.cmd) {
-              <div class="shortcut-row">
-                <span class="shortcut-desc">{{ binding.descriptionKey ? (binding.descriptionKey | t) : binding.description }}</span>
-                <span class="shortcut-keys">
-                  @for (step of formatSequence(binding); track $index) {
-                    @if ($index > 0) {
-                      <span class="chord-sep">{{ 'shortcuts.chord-sep' | t }}</span>
-                    }
-                    @for (part of step; track $index) {
-                      <kbd class="key-badge">{{ part }}</kbd>
-                    }
+
+      @if (slashCommands().length) {
+        <section class="sheet-section">
+          <h4 class="section-title">{{ 'shortcuts.section.slash' | t }}</h4>
+          <div class="section-list">
+            @for (entry of slashCommands(); track entry.name) {
+              <div class="sheet-row slash-row">
+                <span class="row-primary">
+                  <span class="slash-name">/{{ entry.name }}</span>
+                  @for (alias of entry.aliases; track alias) {
+                    <span class="slash-alias">/{{ alias }}</span>
                   }
                 </span>
+                <span class="row-desc">{{ entry.description }}</span>
               </div>
             }
           </div>
         </section>
       }
+
+      @if (commandLineOps().length) {
+        <section class="sheet-section">
+          <h4 class="section-title">{{ 'shortcuts.section.command-line' | t }}</h4>
+          <div class="section-list">
+            @for (entry of commandLineOps(); track $index) {
+              <div class="sheet-row cli-row">
+                <span class="row-primary">
+                  @if (entry.example) {
+                    <code class="cli-example">{{ entry.example.input }}</code>
+                  }
+                  <kbd class="trigger-badge">{{ entry.trigger }}</kbd>
+                </span>
+                <span class="row-desc">{{ entry.description }}</span>
+              </div>
+            }
+          </div>
+        </section>
+      }
+
+      @if (shortcutGroups().length) {
+        <section class="sheet-section">
+          <h4 class="section-title">{{ 'shortcuts.section.keyboard' | t }}</h4>
+          @for (group of shortcutGroups(); track group.category) {
+            <div class="shortcut-subgroup">
+              <h5 class="subgroup-title">{{ group.category }}</h5>
+              <div class="section-list">
+                @for (binding of group.bindings; track binding.cmd) {
+                  <div class="sheet-row kbd-row">
+                    <span class="row-desc">{{ binding.descriptionKey ? (binding.descriptionKey | t) : binding.description }}</span>
+                    <span class="shortcut-keys">
+                      @for (step of formatSequence(binding); track $index) {
+                        @if ($index > 0) {
+                          <span class="chord-sep">{{ 'shortcuts.chord-sep' | t }}</span>
+                        }
+                        @for (part of step; track $index) {
+                          <kbd class="key-badge">{{ part }}</kbd>
+                        }
+                      }
+                    </span>
+                  </div>
+                }
+              </div>
+            </div>
+          }
+        </section>
+      }
+
+      @if (!hasResults()) {
+        <div class="sheet-empty">{{ 'shortcuts.empty' | t }}</div>
+      }
+
     </div>
   </div>
 }

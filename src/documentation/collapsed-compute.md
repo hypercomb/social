@@ -4,8 +4,7 @@
 
 ## Related Critical Documents
 
-- [signature-expansion-doctrine.md](signature-expansion-doctrine.md) — The mandatory practice: every fragment must be signature-addressed
-- [core-primitive.md](core-primitive.md) — The signature-payload pair: content IS identity
+- [signature-system.md](signature-system.md) — The primitive and the mandatory expansion doctrine: content IS identity; every fragment must be signature-addressed
 - [signature-algebra.md](signature-algebra.md) — The algebra: composing, querying, and projecting over signatures
 - [deterministic-computation.md](deterministic-computation.md) — Authenticity: script + resource → deterministic result
 
@@ -184,7 +183,7 @@ This is a **positive feedback loop**. Unlike traditional systems where growth cr
 
 ## Implementation Requirements
 
-For collapsed compute to work, every part of the system must follow the [Signature Expansion Doctrine](signature-expansion-doctrine.md):
+For collapsed compute to work, every part of the system must follow the [Signature Expansion Doctrine](signature-system.md):
 
 1. **Every output must be signed.** If a computation produces a result, `sign()` it and store it as a resource.
 2. **Every input must be signature-referenced.** Compositions must reference parts by signature, not inline data. Otherwise the composition signature is meaningless.
@@ -251,4 +250,4 @@ The more people who participate:
 - More mesh peers gossip signatures → faster discovery of pre-computed results
 - **Cost per user approaches zero** as the signature space fills
 
-This is why the [Signature Expansion Doctrine](signature-expansion-doctrine.md) is non-negotiable. Every feature that uses inline data instead of signature references is a feature that can't participate in collapsed compute. It's a feature that forces every user to re-compute what could have been a cache hit. It's a feature that works against the community instead of with it.
+This is why the [Signature Expansion Doctrine](signature-system.md) is non-negotiable. Every feature that uses inline data instead of signature references is a feature that can't participate in collapsed compute. It's a feature that forces every user to re-compute what could have been a cache hit. It's a feature that works against the community instead of with it.

@@ -1,5 +1,6 @@
 import { Component, computed, EventEmitter, Input, Output, signal } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
+import { fromRuntime } from '../../core/from-runtime'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import type { SecretStore } from '../../core/secret-store'
 import type { SecretStrengthProvider } from '../../core/secret-strength'
@@ -20,6 +21,10 @@ export class MeshHeaderComponent {
 
   #secretValue = signal('')
   #secretExpanded = signal(false)
+  #locale$ = fromRuntime(
+    get('@hypercomb.social/I18n') as EventTarget | undefined,
+    () => (get('@hypercomb.social/I18n') as { locale?: string } | undefined)?.locale ?? 'en',
+  )
 
   readonly secretValue = this.#secretValue.asReadonly()
   readonly hasSecret = computed(() => this.#secretValue().trim().length > 0)
@@ -27,7 +32,7 @@ export class MeshHeaderComponent {
 
   readonly secretWords = computed(() => {
     const secret = this.#secretValue().trim()
-    return secret ? secretTag(secret) : ''
+    return secret ? secretTag(secret, this.#locale$()) : ''
   })
 
   readonly shieldTooltip = computed(() => {

@@ -72,11 +72,11 @@ Type `/` in the command line to access slash behaviours. These are pluggable com
 
 | Command | Aliases | Description |
 |---------|---------|-------------|
-| `/help` | | Show keyboard shortcuts |
+| `/help` | | Open the reference — all slash commands, command-line operations, and keyboard shortcuts, searchable |
+| `/docs` | `/documentation`, `/doc` | Open the documentation reader for long-form white-paper pages |
 | `/instructions` | `/instruct`, `/labels` | Toggle instruction overlay |
 | `/atomize-ui` | `/au`, `/atomizer` | Toggle the atomizer toolbar |
 | `/language` | `/lang`, `/locale` | Switch the UI language |
-| `/docs` | `/documentation`, `/doc` | Browse project documentation |
 
 ---
 

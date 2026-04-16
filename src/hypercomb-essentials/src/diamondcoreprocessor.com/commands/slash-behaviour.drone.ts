@@ -24,6 +24,11 @@ export class SlashBehaviourDrone extends EventTarget {
     return results
   }
 
+  /** Primary behaviours only (aliases preserved on each entry's `aliases` field). */
+  entries(): SlashBehaviour[] {
+    return this.#providers.flatMap(p => p.behaviours).map(b => this.#localize(b))
+  }
+
   match(query: string): SlashBehaviourMatch[] {
     const q = query.toLowerCase().trim()
     const results: SlashBehaviourMatch[] = []
@@ -94,7 +99,7 @@ class HelpProvider implements SlashBehaviourProvider {
   readonly name = 'help-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'help', description: 'Show keyboard shortcuts', descriptionKey: 'slash.help' }
+    { name: 'help', description: 'Show reference', descriptionKey: 'slash.help' }
   ]
 
   execute(): void {

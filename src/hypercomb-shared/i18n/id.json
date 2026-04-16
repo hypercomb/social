@@ -19,7 +19,13 @@
   "palette.placeholder": "Ketik perintah...",
   "palette.empty": "Tidak ada perintah yang cocok",
 
-  "shortcuts.title": "Pintasan Keyboard",
+  "shortcuts.title": "Referensi",
+  "shortcuts.close": "Tutup",
+  "shortcuts.filter-placeholder": "Filter perintah, operasi, pintasan…",
+  "shortcuts.section.slash": "Perintah Slash",
+  "shortcuts.section.command-line": "Baris Perintah",
+  "shortcuts.section.keyboard": "Pintasan Keyboard",
+  "shortcuts.empty": "Tidak ada kecocokan",
   "shortcuts.chord-sep": "lalu",
 
   "editor.title": "editor ubin",
@@ -151,7 +157,7 @@
 
   "slash.select": "pilih ubin untuk potong/salin/pindah",
   "slash.remove-builtin": "hapus ubin terpilih",
-  "slash.help": "Tampilkan pintasan keyboard",
+  "slash.help": "Tampilkan referensi",
   "slash.clear": "Hapus filter aktif",
   "slash.keyword": "Tambah atau hapus kata kunci (tag) pada ubin terpilih",
   "slash.meeting": "Mulai atau gabung panggilan video pada ubin terpilih",

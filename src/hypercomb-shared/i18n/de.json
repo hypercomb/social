@@ -19,7 +19,13 @@
   "palette.placeholder": "Befehl eingeben...",
   "palette.empty": "Keine passenden Befehle",
 
-  "shortcuts.title": "Tastenkürzel",
+  "shortcuts.title": "Referenz",
+  "shortcuts.close": "Schließen",
+  "shortcuts.filter-placeholder": "Befehle, Operationen, Shortcuts filtern…",
+  "shortcuts.section.slash": "Slash-Befehle",
+  "shortcuts.section.command-line": "Kommandozeile",
+  "shortcuts.section.keyboard": "Tastenkürzel",
+  "shortcuts.empty": "Keine Treffer",
   "shortcuts.chord-sep": "dann",
 
   "editor.title": "Kachel-Editor",
@@ -151,7 +157,7 @@
 
   "slash.select": "Kacheln zum Ausschneiden/Kopieren/Verschieben auswählen",
   "slash.remove-builtin": "Ausgewählte Kacheln entfernen",
-  "slash.help": "Tastenkürzel anzeigen",
+  "slash.help": "Referenz anzeigen",
   "slash.clear": "Aktiven Filter löschen",
   "slash.keyword": "Schlüsselwörter (Tags) auf ausgewählten Kacheln hinzufügen oder entfernen",
   "slash.meeting": "Videoanruf auf ausgewählter Kachel starten oder beitreten",

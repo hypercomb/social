@@ -19,6 +19,26 @@
   display: none;
 }
 
+// ── Note capture intent ──────────────────────────────────
+// When the user is composing or editing a note the typed text turns the
+// same bright yellow the note icon uses on tiles that contain notes.
+// No outline, no glow — just the text colour, so it reads as the
+// content itself becoming a note rather than a chrome state.
+$note-accent: #ffe14a;
+
+:host(.note-intent) ::ng-deep .command-input {
+  color: $note-accent;
+  caret-color: $note-accent;
+}
+
+:host(.note-intent) ::ng-deep .command-input::placeholder {
+  color: rgba($note-accent, 0.55);
+}
+
+:host(.note-intent) ::ng-deep .ghost {
+  color: rgba($note-accent, 0.35);
+}
+
 .command-line-wrapper {
   position: relative;
   display: flex;

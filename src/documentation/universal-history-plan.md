@@ -7,7 +7,7 @@
 - [data-primitive.md](data-primitive.md) — History bag storage model
 - [revision-mode.md](revision-mode.md) — Current undo/redo/clock/divergence implementation
 - [signature-node-pattern.md](signature-node-pattern.md) — Plug-and-play feature wiring
-- [signature-expansion-doctrine.md](signature-expansion-doctrine.md) — Why payloads must be signature-addressed
+- [signature-system.md](signature-system.md) — Why payloads must be signature-addressed
 
 ---
 

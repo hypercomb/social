@@ -29,10 +29,11 @@ export class LocalizationService extends EventTarget implements I18nProvider {
   constructor() {
     super()
 
-    // Detect initial locale: user preference → browser → fallback
+    // Detect initial locale: ?lang= URL param (session-only) → user preference → browser → fallback
+    const urlLang = new URLSearchParams(window.location.search).get('lang')?.split('-')[0]
     const stored = localStorage.getItem(STORAGE_KEY)
     const browser = navigator.language?.split('-')[0] ?? FALLBACK_LOCALE
-    this.#locale = stored ?? browser
+    this.#locale = urlLang ?? stored ?? browser
 
     document.documentElement.lang = this.#locale
   }
