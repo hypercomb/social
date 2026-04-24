@@ -11,7 +11,7 @@
 import './history.service.js'
 import './history-cursor.service.js'
 import { EffectBus, SignatureService } from '@hypercomb/core'
-import type { HistoryService, HistoryOpType } from './history.service.js'
+import type { HistoryService, HistoryOpType, DeltaRecord } from './history.service.js'
 
 type TagUpdate = { cell: string; tag: string }
 
@@ -93,6 +93,17 @@ export class HistoryRecorder {
 
     const sig = await historyService.sign(lineage)
     await historyService.record(sig, { op, cell, at: Date.now(), groupId })
+
+    // Phase 2 of the mechanical-delta migration: for cell-lifecycle
+    // ops, also emit the bare-record form into records/. Writers that
+    // eventually drop the legacy snapshot path will have a populated
+    // record log waiting. Non-cell-lifecycle ops (tag-state, content-
+    // state, layout-state, reorder, drone lifecycle) keep to the
+    // legacy path for now — their record shapes need resource-sig
+    // wiring that the richer enqueue methods below already do via
+    // putResource; a follow-up phase lifts those to writeRecord too.
+    const record = recordForCellLifecycle(op, cell)
+    if (record) await historyService.writeRecord(sig, record)
   }
 
   /**
@@ -269,6 +280,29 @@ export class HistoryRecorder {
 
       })
       .catch(() => { })
+  }
+}
+
+/**
+ * Translate a legacy cell-lifecycle op into the mechanical
+ * DeltaRecord form. Returns null for ops that don't map to a bare
+ * cell-scoped record (drone lifecycle, etc) — those stay on the
+ * legacy path until a later phase.
+ *
+ * Shape convention (see delta-record.ts):
+ *   `add`    → { name: cell }                (bare creation)
+ *   `remove` → { name: cell, remove: [] }    (op with empty sig list)
+ *   `hide`   → { name: cell, hide: [] }
+ *   `unhide` → { name: cell, show: [] }      (legacy says unhide,
+ *                                             canonical says show)
+ */
+function recordForCellLifecycle(op: HistoryOpType, cell: string): DeltaRecord | null {
+  switch (op) {
+    case 'add':    return { name: cell }
+    case 'remove': return { name: cell, remove: [] }
+    case 'hide':   return { name: cell, hide: [] }
+    case 'unhide': return { name: cell, show: [] }
+    default:       return null
   }
 }
 
