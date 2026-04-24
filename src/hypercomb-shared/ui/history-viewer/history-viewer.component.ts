@@ -272,6 +272,33 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
         active?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
       })
     })
+
+    // Keep the --hc-history-column-width CSS variable in lockstep
+    // with the panel's actual rendered width so #pixi-host narrows
+    // (and the canvas re-sizes via its ResizeObserver) to match the
+    // sidebar exactly. The aside lives inside `@if (visible())` —
+    // it's torn down and re-created on every show/hide — so the
+    // observer is reattached here every time visibility flips true.
+    // queueMicrotask defers past the DOM commit for this tick.
+    effect(() => {
+      if (!this.visible()) return
+      queueMicrotask(() => {
+        const host = this.#el.nativeElement as HTMLElement
+        const aside = host.querySelector('.history-viewer') as HTMLElement | null
+        if (!aside) return
+        this.#resizeObserver?.disconnect()
+        if ('ResizeObserver' in window) {
+          this.#resizeObserver = new ResizeObserver(() => {
+            const w = Math.max(aside.offsetWidth, 0)
+            document.body.style.setProperty('--hc-history-column-width', `${w}px`)
+          })
+          this.#resizeObserver.observe(aside)
+        }
+        // Prime the variable immediately so the canvas shift lands
+        // on the first paint, not one ResizeObserver tick later.
+        document.body.style.setProperty('--hc-history-column-width', `${aside.offsetWidth}px`)
+      })
+    })
   }
 
   ngAfterViewInit(): void {
@@ -290,19 +317,6 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
     // history mode is active. Everything stays fully interactive —
     // we're reshaping the layout, not intercepting events.
     installHistoryColumnStylesheet()
-
-    // Track the viewer's rendered width so row content (summary,
-    // timestamp) can display in full without wrapping — the column
-    // auto-grows to fit the widest row, and the canvas shift reads
-    // the same value via a CSS variable on body.
-    const aside = host.querySelector('.history-viewer') as HTMLElement | null
-    if (aside && 'ResizeObserver' in window) {
-      this.#resizeObserver = new ResizeObserver(() => {
-        const w = Math.max(aside.offsetWidth, 0)
-        document.body.style.setProperty('--hc-history-column-width', `${w}px`)
-      })
-      this.#resizeObserver.observe(aside)
-    }
   }
 
   ngOnInit(): void {
