@@ -1,5 +1,7 @@
 // diamondcoreprocessor.com/core/history.service.ts
 import { SignatureService, SignatureStore } from '@hypercomb/core'
+import { canonicalise, parse as parseRecord, type DeltaRecord } from './delta-record.js'
+export type { DeltaRecord } from './delta-record.js'
 
 export type HistoryOpType =
   // Cell lifecycle
@@ -705,6 +707,135 @@ export class HistoryService {
     }
     return pruned
   }
+
+  // -------------------------------------------------
+  // mechanical delta-record primitives (Phase 1: additive)
+  // -------------------------------------------------
+  //
+  // Records are the pure-differential form of history. A record is
+  // `{name, <op>: [sigs]}` serialised as raw line-oriented text (see
+  // delta-record.ts for the wire format). Records are immutable,
+  // content-addressed via Store.putResource, and hold zero metadata.
+  //
+  // Entry files in a location's `records/` subfolder are write-once,
+  // contain exactly one sig on one line (the record-sig), and have
+  // sequential zero-padded filenames for allocation only. Ordering
+  // and timestamps come from file.lastModified on the filesystem —
+  // nothing is embedded in the content.
+  //
+  // Nothing in the rest of the codebase reads these yet. Phase 1 is
+  // scaffolding: the primitives exist, they're correct, the wire
+  // format is locked. Phase 2 wires the LayerCommitter to dual-emit.
+  // Phase 3 switches readers. Phase 4 retires the snapshot path.
+
+  static readonly #RECORDS_DIR = 'records'
+
+  /**
+   * Canonicalise the record, sign it, write the raw bytes into the
+   * resource store, and append a new entry file containing only the
+   * record-sig (one line, no extension) into this location's
+   * records/ folder. Returns the record-sig, or null if the store
+   * isn't available yet.
+   */
+  public readonly writeRecord = async (
+    locationSig: string,
+    record: DeltaRecord,
+  ): Promise<string | null> => {
+    const store = get<{ putResource: (blob: Blob) => Promise<string> }>('@hypercomb.social/Store')
+    if (!store) return null
+
+    const canonical = canonicalise(record)
+    const bytes = new TextEncoder().encode(canonical)
+    const blob = new Blob([bytes as BlobPart], { type: 'text/plain' })
+    const recordSig = await store.putResource(blob)
+
+    const dir = await this.#getRecordsDir(locationSig)
+    const fileName = await this.#nextRecordEntry(dir)
+    const handle = await dir.getFileHandle(fileName, { create: true })
+    const writable = await handle.createWritable()
+    try {
+      await writable.write(recordSig)
+    } finally {
+      await writable.close()
+    }
+    return recordSig
+  }
+
+  /**
+   * Walk the records/ subfolder in chronological order (by
+   * file.lastModified — creation date under the immutable-files
+   * invariant), returning each entry's record-sig plus the raw
+   * timestamp. Opaque filenames are returned so callers that need
+   * to act on a specific entry have a handle.
+   */
+  public readonly listRecordSigs = async (
+    locationSig: string,
+  ): Promise<Array<{ sig: string; at: number; filename: string }>> => {
+    const dir = await this.#tryGetRecordsDir(locationSig)
+    if (!dir) return []
+    const out: Array<{ sig: string; at: number; filename: string }> = []
+    for await (const [name, handle] of (dir as any).entries()) {
+      if (handle.kind !== 'file') continue
+      try {
+        const file = await (handle as FileSystemFileHandle).getFile()
+        const sig = (await file.text()).trim()
+        if (sig) out.push({ sig, at: file.lastModified, filename: name })
+      } catch { /* skip unreadable entry */ }
+    }
+    out.sort((a, b) => (a.at - b.at) || a.filename.localeCompare(b.filename))
+    return out
+  }
+
+  /**
+   * Load + parse the DeltaRecord at the given signature. Returns null
+   * on missing resource or malformed content. The resource cache in
+   * the Store makes repeated lookups for the same sig O(1) in memory.
+   */
+  public readonly resolveDeltaRecord = async (
+    sig: string,
+  ): Promise<DeltaRecord | null> => {
+    const store = get<{ getResource: (sig: string) => Promise<Blob | null> }>('@hypercomb.social/Store')
+    if (!store) return null
+    try {
+      const blob = await store.getResource(sig)
+      if (!blob) return null
+      const text = await blob.text()
+      return parseRecord(text)
+    } catch {
+      return null
+    }
+  }
+
+  readonly #getRecordsDir = async (
+    locationSig: string,
+  ): Promise<FileSystemDirectoryHandle> => {
+    const bag = await this.getBag(locationSig)
+    return await bag.getDirectoryHandle(HistoryService.#RECORDS_DIR, { create: true })
+  }
+
+  readonly #tryGetRecordsDir = async (
+    locationSig: string,
+  ): Promise<FileSystemDirectoryHandle | null> => {
+    try {
+      const bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false })
+      return await bag.getDirectoryHandle(HistoryService.#RECORDS_DIR, { create: false })
+    } catch {
+      return null
+    }
+  }
+
+  readonly #nextRecordEntry = async (
+    dir: FileSystemDirectoryHandle,
+  ): Promise<string> => {
+    let max = 0
+    for await (const [name] of (dir as any).entries()) {
+      const n = parseInt(name, 10)
+      if (!isNaN(n) && n > max) max = n
+    }
+    return String(max + 1).padStart(8, '0')
+  }
+
+  // -------------------------------------------------
 
   readonly #getDeletedDir = async (
     locationSig: string,
