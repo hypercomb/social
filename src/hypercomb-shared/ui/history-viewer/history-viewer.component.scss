@@ -272,3 +272,27 @@
   font-size: 10px;
   font-variant-numeric: tabular-nums;
 }
+
+// Non-interactive bookends. They sit outside the seekable range so
+// the list's first and last real entries are never pinned to the
+// panel edge; clicking them does nothing (no `seek()` binding in the
+// template) and they dim themselves to signal that.
+.row.anchor {
+  cursor: default;
+  pointer-events: none;
+  opacity: 0.35;
+  color: rgba(180, 190, 210, 0.6);
+  border-left-color: transparent !important;
+  background: transparent !important;
+}
+
+.row.anchor .idx {
+  color: rgba(160, 170, 190, 0.45);
+}
+
+.row.anchor .summary {
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.4px;
+  color: rgba(170, 180, 200, 0.55);
+}
