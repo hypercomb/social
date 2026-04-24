@@ -11,6 +11,13 @@
       <span class="title">{{ 'history.viewer-title' | t }}</span>
       <span class="count">{{ total() }}</span>
       <button type="button"
+              class="group-step-toggle"
+              [class.active]="groupStepEnabled()"
+              [attr.aria-pressed]="groupStepEnabled()"
+              [attr.aria-label]="'history.group-step' | t"
+              [title]="'history.group-step' | t"
+              (click)="toggleGroupStep()">⁘</button>
+      <button type="button"
               class="close"
               [attr.aria-label]="'history.hide' | t"
               [title]="'history.hide' | t"
@@ -79,7 +86,9 @@
                   (click)="deleteRow(row.index, $event)">×</button>
         </li>
       }
-      <li class="row anchor anchor-start" aria-hidden="true">
+      <li class="row anchor anchor-start"
+          [class.active]="position() === 0"
+          (click)="seek(-1)">
         <span class="indicator"></span>
         <span class="idx">—</span>
         <span class="summary">{{ 'history.anchor-start' | t }}</span>

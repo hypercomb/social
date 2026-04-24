@@ -37,7 +37,7 @@ export class HistorySliderDrone {
   #reviseActive = false
   #globalTimeActive = false
   #scrubbing = false
-  #state: CursorState = { locationSig: '', position: 0, total: 0, rewound: false, at: 0 }
+  #state: CursorState = { locationSig: '', position: 0, total: 0, rewound: false, at: 0, groupStepEnabled: false }
 
   constructor() {
     EffectBus.on<CursorState>('history:cursor-changed', (state) => {

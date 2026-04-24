@@ -1345,6 +1345,17 @@ export class ShowCellDrone extends Drone {
         // hidden, layoutSig are all we need to reconstruct the past view.
         // No op replay, no divergence — just read the layer.
         const content = await cursorService.layerContentAtCursor()
+
+        // Soft landing for position 0 on legacy cursors that return null
+        // there: stepping past the first layer means "pre-history / empty
+        // default state". Clear the live cell set so the grid renders
+        // empty instead of falling through to live OPFS. No writes — the
+        // live state is untouched, we just don't display it.
+        if (!content && cursorState?.position === 0) {
+          union.clear()
+          localCellSet.clear()
+        }
+
         if (content) {
           const cellsAtCursor = new Set(content.cells)
           for (const cell of [...union]) {
