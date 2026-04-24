@@ -629,15 +629,13 @@ export class HistoryService {
       }
 
       try {
-        // Filename carries the original index up-front so
-        // #nextLayerIndex can scan __deleted__/ alongside layers/
-        // and derive a monotonic next-index across both. Without
-        // this the index allocator would happily reuse the number
-        // of a just-deleted entry, and if the user later restored
-        // the archive they'd collide with whatever new layer took
-        // that slot.
-        const paddedIndex = String(index).padStart(8, '0')
-        const archiveName = `${paddedIndex}-${deletedAt}-${entry.layerSig}.json`
+        // Archive keeps the original filename — same 8-digit padded
+        // index as the live entry used. Everything else (deletedAt,
+        // layer snapshot, the entry pointer) lives in the payload so
+        // the naming convention stays uniform across layers/ and
+        // __deleted__/ and #nextLayerIndex can parseInt both dirs
+        // identically.
+        const archiveName = String(index).padStart(8, '0') + '.json'
         const archiveHandle = await deletedDir.getFileHandle(archiveName, { create: true })
         const writable = await archiveHandle.createWritable()
         try { await writable.write(JSON.stringify(archivePayload)) } finally { await writable.close() }
@@ -703,14 +701,19 @@ export class HistoryService {
       names.push(name)
     }
     for (const name of names) {
-      // filename = `{paddedIndex}-{deletedAt}-{layerSig}.json` — the
-      // leading paddedIndex protects #nextLayerIndex from ever reusing
-      // a just-deleted slot; deletedAt is the second dash-separated
-      // segment and drives the TTL.
-      const parts = name.split('-')
-      if (parts.length < 3) continue
-      const deletedAt = parseInt(parts[1], 10)
-      if (!Number.isFinite(deletedAt) || deletedAt > cutoff) continue
+      // Filename is just the original NNNNNNNN.json; deletedAt lives
+      // in the payload. One file read per archived entry on a cold
+      // startup GC — cheap enough given the archive is capped at
+      // whatever the user soft-deleted over the last 30 days at this
+      // single location.
+      let deletedAt = 0
+      try {
+        const handle = await deletedDir.getFileHandle(name, { create: false })
+        const file = await handle.getFile()
+        const payload = JSON.parse(await file.text()) as { deletedAt?: number }
+        deletedAt = Number(payload?.deletedAt ?? 0)
+      } catch { continue }
+      if (!Number.isFinite(deletedAt) || deletedAt === 0 || deletedAt > cutoff) continue
       try { await deletedDir.removeEntry(name); pruned++ } catch { /* already gone */ }
     }
     return pruned
