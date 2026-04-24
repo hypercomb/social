@@ -95,9 +95,13 @@ class HistoryMenuPackImpl {
 
   /**
    * Initialise subscriptions. Called once at boot. Wires to the global
-   * history cursor state so the pack's buttons reflect the cursor
-   * position, and to key-invoke events so pressing Ctrl+Z / Ctrl+Y for
-   * the first time in a session pops the menu open.
+   * history cursor state so the pack's buttons always reflect the
+   * current position — but *opening* the menu now only happens in
+   * response to a user-initiated history action (undo / redo / seek),
+   * not on the initial cursor-load that fires at boot or on every
+   * page navigation. Previously the menu popped open the first time
+   * any cursor-changed arrived, which included the boot-time hydration
+   * emit, so the panel always appeared on load.
    */
   install(): void {
     EffectBus.on<CursorState>('history:cursor-changed', (state) => {
@@ -105,14 +109,19 @@ class HistoryMenuPackImpl {
       this.#cursorTotal.set(state.total)
       this.#cursorPosition.set(state.position)
       this.#cursorRewound.set(state.rewound)
-      // Any cursor change (undo, redo, seek) while we weren't visible
-      // pops the menu open. From then on it stays visible until the
-      // user explicitly hides it (per the design).
-      if (!this.#visible()) {
-        this.#visible.set(true)
-        MenuRegistry.activate(this.id)
-      }
     })
+
+    // Only a keyboard/menu-invoked history action (undo, redo,
+    // make-head, toggle-slider, etc.) opens the panel. That maps
+    // exactly to intentional history navigation — hydration events
+    // don't go through keymap.
+    EffectBus.on<{ cmd: string }>('keymap:invoke', (payload) => {
+      if (!payload?.cmd?.startsWith('history.')) return
+      if (this.#visible()) return
+      this.#visible.set(true)
+      MenuRegistry.activate(this.id)
+    })
+
     MenuRegistry.register(this as unknown as MenuPack)
   }
 }
