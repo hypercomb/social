@@ -211,7 +211,18 @@ export class ShowCellDrone extends Drone {
   #translatingLabels = new Set<string>()
   #translationPulseTimer: ReturnType<typeof setInterval> | null = null
   private streamActive = false
-  private cancelStreamFlag = false
+  // Monotonic stream token. Every call to streamCells captures the current
+  // value; if the renderer starts a new stream (layer switch) it increments
+  // the token, so any batch still awaiting in the old stream sees a
+  // mismatch on its next iteration and bails out. Using a number here
+  // instead of a boolean "cancel" flag is load-bearing: the old flag was
+  // reset to false by the incoming stream's synchronous prelude before
+  // the outgoing stream's next iteration ever observed it, so the
+  // outgoing stream kept running — wrote its (stale) cells into the
+  // shared mesh, and poisoned #layerCellsCache under the new layer's
+  // key. The counter cannot be clobbered: once bumped, it never goes
+  // back.
+  #streamToken = 0
   private renderedLocationKey = ''
   #axialToIndex = new Map<string, number>()
   #heartbeatInitialized = false
@@ -1459,9 +1470,12 @@ export class ShowCellDrone extends Drone {
     // note: if streaming is active for the same layer, let the stream finish
     if (this.streamActive && !layerChanged) return
 
-    // note: layer changed — cancel active stream, rebuild
+    // note: layer changed — supersede any active stream, rebuild
     if (layerChanged) {
-      this.cancelStreamFlag = true
+      // Bump the stream token FIRST, before any await. Any batch still
+      // running inside the old stream will check this on its next
+      // iteration boundary and bail out.
+      const myToken = ++this.#streamToken
       this.renderedLocationKey = locationKey
       this.renderedCellsKey = ''
       this.renderedCells.clear()
@@ -1473,6 +1487,11 @@ export class ShowCellDrone extends Drone {
       // Auto fit-to-content is intentionally disabled — zoomToFit only runs on explicit
       // user gesture. First-visit layers use the default/saved viewport as-is.
       await this.#applyViewportForLayer(dir)
+
+      // If another layer change landed while we were awaiting the
+      // viewport read, our token is already stale — abandon this path
+      // and let the newer renderFromSynchronize drive the stream.
+      if (myToken !== this.#streamToken) return
 
       // sync VP directory so subsequent pan/zoom writes persist to the correct layer
       const vp = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ViewportPersistence') as ViewportPersistence | undefined
@@ -1490,8 +1509,11 @@ export class ShowCellDrone extends Drone {
       // emit navigation guard so click handlers block during transition
       this.emitEffect('navigation:guard-start', { locationKey })
 
-      // stream cells progressively (async, non-blocking)
-      void this.streamCells(dir, cellNames, localCellSet, axial, branchSet)
+      // stream cells progressively (async, non-blocking). Pass our
+      // token + locationKey so the stream works against the snapshot
+      // that was authoritative when it started; if a newer stream
+      // preempts, we stop touching shared state instead of fighting it.
+      void this.streamCells(dir, cellNames, localCellSet, axial, branchSet, myToken, locationKey)
       return
     }
 
@@ -1557,10 +1579,15 @@ export class ShowCellDrone extends Drone {
     cellNames: string[],
     localCellSet: Set<string>,
     axial: any,
-    branchSet?: Set<string>,
+    branchSet: Set<string> | undefined,
+    myToken: number,
+    myLocationKey: string,
   ): Promise<void> => {
     this.streamActive = true
-    this.cancelStreamFlag = false
+
+    // Superseded before we even started (a newer renderFromSynchronize ran
+    // between our void-dispatch and here). Do nothing.
+    const superseded = (): boolean => myToken !== this.#streamToken
 
     // resolve all cell→axial positions through the single mapping function
     const axialMax = typeof axial.items.size === 'number' ? axial.items.size : cellNames.length
@@ -1571,13 +1598,13 @@ export class ShowCellDrone extends Drone {
     const BATCH = ShowCellDrone.STREAM_BATCH_SIZE
 
     for (let start = 0; start < allCells.length; start += BATCH) {
-      if (this.cancelStreamFlag) break
+      if (superseded()) return
 
       const batch = allCells.slice(start, start + BATCH)
 
       // load all cells in this batch in parallel — file reads + image decodes overlap
       await this.loadCellImages(batch, dir)
-      if (this.cancelStreamFlag) break
+      if (superseded()) return
 
       for (const cell of batch) {
         cells.push(cell)
@@ -1586,27 +1613,33 @@ export class ShowCellDrone extends Drone {
 
       const isLast = start + BATCH >= allCells.length
       await this.applyGeometry(cells, isLast)
+      if (superseded()) return
 
       // reveal the layer as soon as the first batch is on-screen so cold start
       // shows tiles immediately and the rest stream in progressively.
-      if (!this.cancelStreamFlag && this.layer && !this.layer.visible) {
+      if (this.layer && !this.layer.visible) {
         this.layer.visible = true
       }
 
       if (!isLast) await this.microDelay()
     }
 
+    if (superseded()) return
+
     // safety: ensure layer is visible if loop exited without rendering anything
-    if (!this.cancelStreamFlag && this.layer) this.layer.visible = true
+    if (this.layer) this.layer.visible = true
 
     this.streamActive = false
     this.emitEffect('navigation:guard-end', {})
 
-    // cache for instant back-navigation
-    if (!this.cancelStreamFlag && cells.length > 0) {
-      const locKey = this.renderedLocationKey
+    // cache for instant back-navigation. Use OUR locationKey — do not
+    // read this.renderedLocationKey here; a concurrent stream could
+    // have repointed it at a different layer, which would store our
+    // cells under the wrong cache key and make subsequent back-nav
+    // resurrect them on the wrong layer.
+    if (cells.length > 0) {
       const bset = branchSet ?? new Set<string>()
-      this.#layerCellsCache.set(locKey, { cells: [...cells], cellNames, localCellSet, branchSet: bset })
+      this.#layerCellsCache.set(myLocationKey, { cells: [...cells], cellNames, localCellSet, branchSet: bset })
       this.#slots.seed({ names: cellNames, localCells: localCellSet, branches: bset, mode: this.#layoutMode })
     }
 
@@ -1930,6 +1963,17 @@ export class ShowCellDrone extends Drone {
       // one propsSig-keyed derived-state cache.
       this.#invalidateAllLabelDerivedState()
       this.renderedCellsKey = ''
+      // Supersede any in-flight stream on this same layer. Cursor moves
+      // do not change locationKey, so the layer-change branch of
+      // renderFromSynchronize won't fire — but the streaming render
+      // that started before the undo still references the pre-undo
+      // cells / props. Bumping the token makes that stream bail out at
+      // its next iteration so it cannot overwrite the post-undo mesh
+      // with stale cells. Without this, undo/redo during a still-
+      // streaming layer leaves some tiles rendered from the old state
+      // (image missing, label from the other branch) until the next
+      // explicit layer change.
+      this.#streamToken++
       // Apply the layer's layout state (text-only, orientation, pivot,
       // gap, mode) so every cursor step restores the full visible
       // configuration. Fires on both rewound and head — at head the

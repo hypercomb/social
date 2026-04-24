@@ -201,6 +201,19 @@ export class Store extends EventTarget {
   public putResource = async (blob: Blob): Promise<string> => {
     const bytes = await blob.arrayBuffer()
     const signature = await SignatureService.sign(bytes)
+    // Content-addressed: same sig ⇒ same bytes, so if the file already
+    // exists we're done. This is not just an optimisation — creating a
+    // writable against an existing OPFS file and closing it atomically
+    // replaces the underlying file, which invalidates every Blob that
+    // was previously returned from handle.getFile() for that sig.
+    // Subsequent reads on those cached Blobs throw NotReadableError
+    // ("reference to a file acquired"), caches fall back to null, and
+    // the tile renders blank with no indication why. Skipping the
+    // rewrite keeps cached Blobs valid for their lifetime.
+    try {
+      await this.resources.getFileHandle(signature)
+      return signature
+    } catch { /* fall through and create */ }
     const handle = await this.resources.getFileHandle(signature, { create: true })
     const writable = await handle.createWritable()
     try {
@@ -349,7 +362,18 @@ export class Store extends EventTarget {
     const promise = (async () => {
       try {
         const handle = await this.resources.getFileHandle(signature)
-        const blob = await handle.getFile()
+        const file = await handle.getFile()
+        // Detach from the OPFS backing file by copying bytes into
+        // memory and wrapping a fresh Blob. A raw File returned from
+        // handle.getFile() keeps a live reference to the OPFS storage;
+        // if anything later writes to that sig (a re-put of identical
+        // content is enough) the File goes stale and every subsequent
+        // .text() / .arrayBuffer() on it throws NotReadableError.
+        // Readers then cache the error as a null image and the tile
+        // renders blank indefinitely. Caching the bytes themselves
+        // makes the cached Blob independent of the filesystem.
+        const bytes = await file.arrayBuffer()
+        const blob = new Blob([bytes], { type: file.type })
         this.#resourceCache.set(signature, blob)
         return blob
       } catch {
