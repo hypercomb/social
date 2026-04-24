@@ -176,6 +176,8 @@
   "history.close-slice": "レイヤー検査を閉じる",
   "history.anchor-head": "ヘッド",
   "history.anchor-start": "スタート",
+  "history.delete-entry": "この履歴項目を削除",
+  "history.make-head": "このレイヤーをヘッドに",
 
   "slash.select": "切り取り・コピー・移動するタイルを選択",
   "slash.remove-builtin": "選択したタイルを削除",

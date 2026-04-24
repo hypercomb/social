@@ -93,7 +93,8 @@
 
 .row {
   display: grid;
-  grid-template-columns: 14px auto 1fr auto;
+  // icon | idx | summary | make-head | when | delete
+  grid-template-columns: 14px auto 1fr auto auto auto;
   align-items: center;
   padding: 4px 10px 4px 6px;
   cursor: pointer;
@@ -101,6 +102,39 @@
   border-left: 2px solid transparent;
   transition: background 80ms linear;
   user-select: none;  // prevent text selection on dbl-click
+}
+
+// Per-row action icons — hidden by default, fade in on row hover so
+// they don't add visual noise to rows the user isn't targeting. The
+// make-head one sits just before the timestamp column, delete on the
+// row's right edge after the timestamp.
+.row .row-action {
+  background: transparent;
+  border: none;
+  color: rgba(200, 210, 230, 0.55);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity 80ms linear, color 80ms linear, background 80ms linear;
+}
+
+.row:hover .row-action {
+  opacity: 0.7;
+}
+
+.row .row-action:hover {
+  opacity: 1;
+  color: rgba(255, 255, 255, 1);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+// Anchor rows have no real entry behind them, so there's nothing to
+// promote or delete — hide the icons entirely.
+.row.anchor .row-action {
+  display: none;
 }
 
 .slice-backdrop {
@@ -265,6 +299,13 @@
 .row .summary {
   color: rgba(230, 235, 245, 0.92);
   white-space: nowrap;
+  // Let this column give up horizontal space so the make-head /
+  // timestamp / delete columns to its right stay visible even when
+  // the panel is narrow. Without min-width:0 the default grid min is
+  // the content size, which pushes the trailing columns off-panel.
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .row .when {
@@ -278,6 +319,10 @@
 // panel edge; clicking them does nothing (no `seek()` binding in the
 // template) and they dim themselves to signal that.
 .row.anchor {
+  // Anchors only have indicator + idx + summary — collapse back to
+  // the original 3-column layout so they don't grow tracks for the
+  // interactive row's action buttons.
+  grid-template-columns: 14px auto 1fr;
   cursor: default;
   pointer-events: none;
   opacity: 0.35;

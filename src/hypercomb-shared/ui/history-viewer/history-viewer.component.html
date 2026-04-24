@@ -46,7 +46,17 @@
           }
           <span class="idx">{{ row.label }}</span>
           <span class="summary">{{ row.summary }}</span>
+          <button type="button"
+                  class="row-action row-make-head"
+                  [attr.aria-label]="'history.make-head' | t"
+                  [title]="'history.make-head' | t"
+                  (click)="promoteRow(row.index, $event)">^</button>
           <span class="when">{{ row.when }}</span>
+          <button type="button"
+                  class="row-action row-delete"
+                  [attr.aria-label]="'history.delete-entry' | t"
+                  [title]="'history.delete-entry' | t"
+                  (click)="deleteRow(row.index, $event)">×</button>
         </li>
       }
       <li class="row anchor anchor-start" aria-hidden="true">
