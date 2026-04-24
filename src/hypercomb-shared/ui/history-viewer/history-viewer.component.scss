@@ -271,6 +271,24 @@
   color: rgba(255, 255, 255, 0.98);
 }
 
+// Selected (multi-select via Cmd/Ctrl-click or Shift-click).
+// Visually distinct from `active` (the cursor position) because the
+// two states are orthogonal — you can be selecting rows far from
+// the cursor. Accent-filled left rail, subtle tinted background.
+.row.selected {
+  background: rgba(180, 150, 255, 0.18);
+  border-left-color: rgba(180, 150, 255, 0.9);
+  color: rgba(255, 255, 255, 0.98);
+}
+
+.row.active.selected {
+  background: linear-gradient(
+    90deg,
+    rgba(180, 150, 255, 0.18),
+    rgba(100, 170, 255, 0.18)
+  );
+}
+
 .row .indicator {
   width: 8px;
   height: 8px;
@@ -346,6 +364,45 @@
 .filter-toggle[data-category="notes"]       { color: #b37dd4; }
 .filter-toggle[data-category="visibility"]  { color: #b1b7c2; }
 .filter-toggle[data-category="system"]      { color: #e08c4d; }
+
+// Selection-scoped actions appear on the right side of the filter
+// bar when any rows are selected. A flexible gap pushes them all
+// the way over and a faint count tag anchors them visually so the
+// user knows "this action applies to N rows".
+.filter-bar .selection-gap {
+  flex: 1;
+}
+
+.filter-bar .selection-count {
+  align-self: center;
+  font-size: 10px;
+  color: rgba(200, 210, 230, 0.65);
+  padding: 0 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.selection-action {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 3px 6px;
+  cursor: pointer;
+  color: rgba(210, 220, 240, 0.85);
+  font-size: 14px;
+  line-height: 1;
+  transition: opacity 80ms linear, background 80ms linear, border-color 80ms linear;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+}
+
+.selection-action:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 1);
+}
 
 .row .idx {
   font-variant-numeric: tabular-nums;

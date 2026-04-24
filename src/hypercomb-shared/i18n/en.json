@@ -184,6 +184,8 @@
   "history.delete-entry": "delete this history entry",
   "history.make-head": "make this layer head",
   "history.resize": "drag to resize history panel",
+  "history.selection-make-head": "make selected layers head (keep sources)",
+  "history.selection-merge": "merge selected layers into new head (delete sources)",
 
   "slash.select": "select tiles for cut/copy/move",
   "slash.remove-builtin": "remove selected tiles",

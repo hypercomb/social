@@ -64,6 +64,7 @@ type Row = {
   active: boolean
   summary: string
   category: Category
+  filename: string
 }
 
 // Category taxonomy, decorated with an optional IconRef. Adding a new
@@ -179,6 +180,21 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
   #sliceOpen = signal<{ label: string; json: string } | null>(null)
   readonly sliceOpen = this.#sliceOpen.asReadonly()
 
+  // Multi-select — set of entry filenames the user has checked via
+  // Cmd/Ctrl-click (toggle) or Shift-click (range). Non-empty set
+  // reveals the merge / make-head action buttons on the filter bar
+  // right side. Bare click still seeks the cursor; only modifier
+  // clicks participate in selection, so the default navigation flow
+  // is untouched.
+  #selected = signal<ReadonlySet<string>>(new Set())
+  readonly selected = this.#selected.asReadonly()
+  readonly selectedCount = computed(() => this.#selected().size)
+  readonly isRowSelected = (filename: string): boolean => this.#selected().has(filename)
+
+  // Last-clicked filename powers shift-click range selection — the
+  // selection extends from this anchor to the newly-clicked row.
+  #lastSelectionAnchor: string | null = null
+
   // All rows in the current layer, categorised. This is the authoritative
   // list; the visible rows (post-filter) and the filter bar entries are
   // both derived from it.
@@ -202,6 +218,7 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
         active: position - 1 === i,
         summary,
         category,
+        filename: entry.filename,
       })
     })
     return rows
@@ -346,10 +363,101 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
     }
   }
 
+  /**
+   * Row click: with no modifier the cursor seeks, as before. Cmd/Ctrl
+   * toggles the row's presence in the selection set. Shift selects
+   * the range between the last-anchored row and this one. Plain
+   * seek clears the selection so navigation after an accidental
+   * multi-select feels natural.
+   */
+  readonly onRowClick = (row: Row, event: MouseEvent): void => {
+    if (event.shiftKey && this.#lastSelectionAnchor !== null) {
+      this.#selectRange(this.#lastSelectionAnchor, row.filename)
+      return
+    }
+    if (event.metaKey || event.ctrlKey) {
+      this.#toggleSelection(row.filename)
+      this.#lastSelectionAnchor = row.filename
+      return
+    }
+    // bare click: navigate + reset selection
+    if (this.#selected().size > 0) this.#selected.set(new Set())
+    this.#lastSelectionAnchor = row.filename
+    this.seek(row.index)
+  }
+
   readonly seek = (index: number): void => {
     const cursor = this.#cursor()
     if (!cursor) return
     cursor.seek(index + 1) // cursor positions are 1-based
+  }
+
+  #toggleSelection(filename: string): void {
+    const next = new Set(this.#selected())
+    if (next.has(filename)) next.delete(filename)
+    else next.add(filename)
+    this.#selected.set(next)
+  }
+
+  #selectRange(fromFilename: string, toFilename: string): void {
+    // Use the current #allRows ordering (oldest → newest) so shift-click
+    // spans match the semantic order regardless of the display reverse.
+    const all = this.#allRows()
+    const a = all.findIndex(r => r.filename === fromFilename)
+    const b = all.findIndex(r => r.filename === toFilename)
+    if (a < 0 || b < 0) return
+    const [lo, hi] = a <= b ? [a, b] : [b, a]
+    const next = new Set(this.#selected())
+    for (let i = lo; i <= hi; i++) next.add(all[i].filename)
+    this.#selected.set(next)
+  }
+
+  /**
+   * Fold selected layers' content into a new head entry (the latest
+   * selected layer's content becomes the new head), leaving sources
+   * intact. No deletion. Clears selection on success.
+   */
+  readonly makeHeadSelection = async (): Promise<void> => {
+    const history = this.#history()
+    const cursor = this.#cursor()
+    if (!history?.promoteToHead || !cursor) return
+    const sel = this.#selected()
+    if (sel.size === 0) return
+    // pick the chronologically newest selected row's layerSig
+    const all = this.#allRows()
+    let newestFilename: string | null = null
+    let newestAt = -Infinity
+    for (const row of all) {
+      if (!sel.has(row.filename)) continue
+      if (row.at > newestAt) { newestAt = row.at; newestFilename = row.filename }
+    }
+    if (!newestFilename) return
+    const entry = this.#entries().find(e => e.filename === newestFilename)
+    if (!entry) return
+    await history.promoteToHead(cursor.state.locationSig, entry.layerSig)
+    this.#selected.set(new Set())
+    this.#lastSelectionAnchor = null
+    await this.#reload()
+    cursor.seek(this.#total())
+  }
+
+  /**
+   * Merge: same as makeHeadSelection, but also soft-deletes all the
+   * selected source entries. Net effect: one new row at top, selected
+   * sources disappear from the active list (still restorable from
+   * __deleted__ for 30 days).
+   */
+  readonly mergeSelection = async (): Promise<void> => {
+    const history = this.#history()
+    const cursor = this.#cursor()
+    if (!history?.mergeEntries || !cursor) return
+    const sel = this.#selected()
+    if (sel.size === 0) return
+    await history.mergeEntries(cursor.state.locationSig, [...sel])
+    this.#selected.set(new Set())
+    this.#lastSelectionAnchor = null
+    await this.#reload()
+    cursor.seek(this.#total())
   }
 
   readonly openSlice = (index: number, event: Event): void => {

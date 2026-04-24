@@ -179,6 +179,8 @@
   "history.delete-entry": "この履歴項目を削除",
   "history.make-head": "このレイヤーをヘッドに",
   "history.resize": "ドラッグで履歴パネルの幅を変更",
+  "history.selection-make-head": "選択したレイヤーをヘッドに（元を保持）",
+  "history.selection-merge": "選択レイヤーを新ヘッドにマージ（元を削除）",
 
   "slash.select": "切り取り・コピー・移動するタイルを選択",
   "slash.remove-builtin": "選択したタイルを削除",
