@@ -1,7 +1,11 @@
 @if (visible()) {
   <aside class="history-viewer"
          [attr.data-consumes-wheel]="''"
+         [style.width.px]="customWidth()"
          [attr.aria-label]="'history.viewer-title' | t">
+    <div class="history-viewer-resizer"
+         [attr.aria-label]="'history.resize' | t"
+         (pointerdown)="startResize($event)"></div>
     <header class="history-viewer-header">
       <span class="title">{{ 'history.viewer-title' | t }}</span>
       <span class="count">{{ total() }}</span>
