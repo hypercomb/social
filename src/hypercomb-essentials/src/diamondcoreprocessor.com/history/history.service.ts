@@ -398,7 +398,7 @@ export class HistoryService {
     await store.putResource(new Blob([json], { type: 'application/json' }))
 
     const layersDir = await this.#getLayersDir(locationSig)
-    const nextIndex = await this.#nextLayerIndex(layersDir)
+    const nextIndex = await this.#nextLayerIndex(locationSig, layersDir)
     const fileName = String(nextIndex).padStart(8, '0') + '.json'
 
     const handle = await layersDir.getFileHandle(fileName, { create: true })
@@ -570,7 +570,7 @@ export class HistoryService {
     if (!blob) return null
 
     const layersDir = await this.#getLayersDir(locationSig)
-    const nextIndex = await this.#nextLayerIndex(layersDir)
+    const nextIndex = await this.#nextLayerIndex(locationSig, layersDir)
     const fileName = String(nextIndex).padStart(8, '0') + '.json'
     const handle = await layersDir.getFileHandle(fileName, { create: true })
     const writable = await handle.createWritable()
@@ -629,7 +629,15 @@ export class HistoryService {
       }
 
       try {
-        const archiveName = `${deletedAt}-${entry.layerSig}.json`
+        // Filename carries the original index up-front so
+        // #nextLayerIndex can scan __deleted__/ alongside layers/
+        // and derive a monotonic next-index across both. Without
+        // this the index allocator would happily reuse the number
+        // of a just-deleted entry, and if the user later restored
+        // the archive they'd collide with whatever new layer took
+        // that slot.
+        const paddedIndex = String(index).padStart(8, '0')
+        const archiveName = `${paddedIndex}-${deletedAt}-${entry.layerSig}.json`
         const archiveHandle = await deletedDir.getFileHandle(archiveName, { create: true })
         const writable = await archiveHandle.createWritable()
         try { await writable.write(JSON.stringify(archivePayload)) } finally { await writable.close() }
@@ -695,10 +703,13 @@ export class HistoryService {
       names.push(name)
     }
     for (const name of names) {
-      // filename = `{deletedAt}-{layerSig}.json` — deletedAt is the prefix
-      const dashIndex = name.indexOf('-')
-      if (dashIndex < 0) continue
-      const deletedAt = parseInt(name.slice(0, dashIndex), 10)
+      // filename = `{paddedIndex}-{deletedAt}-{layerSig}.json` — the
+      // leading paddedIndex protects #nextLayerIndex from ever reusing
+      // a just-deleted slot; deletedAt is the second dash-separated
+      // segment and drives the TTL.
+      const parts = name.split('-')
+      if (parts.length < 3) continue
+      const deletedAt = parseInt(parts[1], 10)
       if (!Number.isFinite(deletedAt) || deletedAt > cutoff) continue
       try { await deletedDir.removeEntry(name); pruned++ } catch { /* already gone */ }
     }
@@ -741,7 +752,16 @@ export class HistoryService {
     }
   }
 
+  /**
+   * Next numeric index for a new entry at this location. Scans both the
+   * active layers dir and the soft-delete archive so a just-deleted
+   * highest index is never handed back out — that would reuse the
+   * filename of a still-archived entry and confuse restore. Callers
+   * derive this only ever at the moment of a fresh write, so scanning
+   * is O(entries-at-this-location) and happens once per commit.
+   */
   readonly #nextLayerIndex = async (
+    locationSig: string,
     layersDir: FileSystemDirectoryHandle,
   ): Promise<number> => {
     let max = 0
@@ -749,6 +769,16 @@ export class HistoryService {
       if (handle.kind !== 'file' || !name.endsWith('.json')) continue
       const n = parseInt(name, 10)
       if (!isNaN(n) && n > max) max = n
+    }
+    // The archive stores `{NNNNNNNN}-{deletedAt}-{sig}.json`, so
+    // parseInt picks up the leading index and we can compare.
+    const deletedDir = await this.#tryGetDeletedDir(locationSig)
+    if (deletedDir) {
+      for await (const [name, handle] of deletedDir.entries()) {
+        if (handle.kind !== 'file' || !name.endsWith('.json')) continue
+        const n = parseInt(name, 10)
+        if (!isNaN(n) && n > max) max = n
+      }
     }
     return max + 1
   }
