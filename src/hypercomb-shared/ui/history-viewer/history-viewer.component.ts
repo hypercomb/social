@@ -320,6 +320,10 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
     this.#sliceOpen.set(null)
   }
 
+  readonly hide = (): void => {
+    HistoryMenuPack.onHide()
+  }
+
   #cursor(): CursorService | null {
     return window.ioc.get<CursorService>('@diamondcoreprocessor.com/HistoryCursorService') ?? null
   }

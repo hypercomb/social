@@ -5,6 +5,11 @@
     <header class="history-viewer-header">
       <span class="title">{{ 'history.viewer-title' | t }}</span>
       <span class="count">{{ total() }}</span>
+      <button type="button"
+              class="close"
+              [attr.aria-label]="'history.hide' | t"
+              [title]="'history.hide' | t"
+              (click)="hide()">×</button>
     </header>
     @if (filterCategories().length > 0) {
       <div class="filter-bar" role="toolbar" (wheel)="$event.stopPropagation()">
