@@ -28,6 +28,11 @@
       </div>
     }
     <ul class="rows" (wheel)="$event.stopPropagation()">
+      <li class="row anchor anchor-head" aria-hidden="true">
+        <span class="indicator"></span>
+        <span class="idx">—</span>
+        <span class="summary">{{ 'history.anchor-head' | t }}</span>
+      </li>
       @for (row of rows(); track row.index) {
         <li class="row"
             [class.active]="row.active"
@@ -44,6 +49,11 @@
           <span class="when">{{ row.when }}</span>
         </li>
       }
+      <li class="row anchor anchor-start" aria-hidden="true">
+        <span class="indicator"></span>
+        <span class="idx">—</span>
+        <span class="summary">{{ 'history.anchor-start' | t }}</span>
+      </li>
     </ul>
   </aside>
 
