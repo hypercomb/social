@@ -74,8 +74,28 @@ export class LayerCommitter {
     // commitLayer dedupes identical states, so this is cheap for
     // subsequent renders.
     EffectBus.on('render:cell-count', () => this.#schedule())
+
+    // Per-event commits so undo is granular at a single cell add /
+    // remove / edit, instead of collapsing rapid bursts (e.g. a
+    // multi-select delete of 5 tiles) into one snapshot that a
+    // single undo would then fully reverse. Each event enqueues its
+    // own commit via #queueCommit; commitLayer's content-dedup
+    // means identical states are no-ops so double-firing (event +
+    // synchronize) stays cheap.
+    EffectBus.on('cell:added',   () => this.#queueCommit())
+    EffectBus.on('cell:removed', () => this.#queueCommit())
+    EffectBus.on('tile:saved',   () => this.#queueCommit())
+    EffectBus.on('tags:changed', () => this.#queueCommit())
+    EffectBus.on('tile:hidden',  () => this.#queueCommit())
+    EffectBus.on('tile:unhidden',() => this.#queueCommit())
   }
 
+  /**
+   * Microtask-coalesced schedule. Multiple callers in the same JS
+   * turn collapse to one commit. Used by layout settings changes and
+   * synchronize — the UX target here is "one commit after the whole
+   * batch settles", not "one commit per event".
+   */
   #schedule(): void {
     if (this.#scheduled) return
     this.#scheduled = true
@@ -87,6 +107,20 @@ export class LayerCommitter {
         // commit is best-effort; never let a snapshot failure break the UI
       }
     })
+  }
+
+  // Serialised per-event commit queue. Each call chains after the
+  // previous commit promise so events ordered in the real world
+  // produce snapshots in the same order. No coalescing here —
+  // the point is per-event granularity. commitLayer dedup silently
+  // absorbs any double-fire with an adjacent synchronize.
+  #commitQueue: Promise<void> = Promise.resolve()
+  #queueCommit(): void {
+    this.#commitQueue = this.#commitQueue
+      .catch(() => { /* ignore prior failure, still commit this one */ })
+      .then(async () => {
+        try { await this.#commit() } catch { /* best-effort */ }
+      })
   }
 
   async #commit(): Promise<void> {
