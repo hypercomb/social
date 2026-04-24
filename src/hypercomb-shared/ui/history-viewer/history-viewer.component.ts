@@ -22,7 +22,7 @@ type CursorState = {
   at: number
 }
 
-type LayerEntry = { layerSig: string; at: number; index: number }
+type LayerEntry = { layerSig: string; at: number; index: number; filename: string }
 
 // Loose shape for the layer content. We only read fields we care about
 // and tolerate missing ones — older layers may have been written with a
@@ -42,8 +42,8 @@ type Content = {
 type HistoryService = {
   listLayers(locationSig: string): Promise<LayerEntry[]>
   promoteToHead?(locationSig: string, layerSig: string): Promise<string | null>
-  removeEntries?(locationSig: string, entryIndexes: number[]): Promise<number>
-  mergeEntries?(locationSig: string, entryIndexes: number[]): Promise<string | null>
+  removeEntries?(locationSig: string, filenames: string[]): Promise<number>
+  mergeEntries?(locationSig: string, filenames: string[]): Promise<string | null>
   pruneExpiredDeletes?(locationSig: string): Promise<number>
 }
 type CursorService = {
@@ -444,7 +444,7 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
     if (!history?.removeEntries || !cursor) return
     const entry = this.#entries()[index]
     if (!entry) return
-    await history.removeEntries(cursor.state.locationSig, [entry.index])
+    await history.removeEntries(cursor.state.locationSig, [entry.filename])
     await this.#reload()
     const nextTotal = this.#total()
     if (cursor.state.position > nextTotal) cursor.seek(nextTotal)

@@ -62,7 +62,8 @@ export type LayerContent = {
 /**
  * One history entry. Just a pointer to a layer resource plus the timestamp
  * at which this entry was appended. Entries live in
- * `__history__/{locationSig}/layers/{NNNNNNNN}.json`.
+ * `__history__/{locationSig}/layers/{uuid}.json`. Filenames carry no
+ * semantic meaning — they're opaque handles. Ordering comes from `at`.
  */
 export type LayerEntry = {
   layerSig: string
@@ -398,9 +399,7 @@ export class HistoryService {
     await store.putResource(new Blob([json], { type: 'application/json' }))
 
     const layersDir = await this.#getLayersDir(locationSig)
-    const nextIndex = await this.#nextLayerIndex(locationSig, layersDir)
-    const fileName = String(nextIndex).padStart(8, '0') + '.json'
-
+    const fileName = HistoryService.#entryFilename()
     const handle = await layersDir.getFileHandle(fileName, { create: true })
     const writable = await handle.createWritable()
     try {
@@ -414,79 +413,66 @@ export class HistoryService {
   }
 
   /**
-   * Read the highest-numbered layer entry for a location, or null if the
-   * location has no layer history yet.
+   * Pick an entry filename. The filename itself carries no meaning —
+   * it's just a unique handle. Ordering, position, head-vs-past,
+   * everything chronological is derived from the `at` field inside
+   * each entry's payload. Reading the filename is a bug: if you
+   * need to know when something was written or where it sits in
+   * the history, load the file and look at `at`. The random UUID
+   * makes collisions effectively impossible even if two commits
+   * land in the same millisecond.
+   */
+  static readonly #entryFilename = (): string => {
+    const uuid = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+    return `${uuid}.json`
+  }
+
+  /**
+   * Head = the most recent entry. Found by scanning every entry, parsing
+   * its payload, and picking the one with the highest `at`. Filenames
+   * are opaque — never compared or parsed here. Returns null when the
+   * location has no history yet.
    */
   public readonly headLayer = async (
     locationSig: string,
-  ): Promise<(LayerEntry & { index: number }) | null> => {
-    const layersDir = await this.#tryGetLayersDir(locationSig)
-    if (!layersDir) return null
-
-    let maxName = ''
-    let maxHandle: FileSystemFileHandle | null = null
-    for await (const [name, handle] of layersDir.entries()) {
-      if (handle.kind !== 'file' || !name.endsWith('.json')) continue
-      if (name > maxName) {
-        maxName = name
-        maxHandle = handle as FileSystemFileHandle
-      }
-    }
-    if (!maxHandle) return null
-
-    try {
-      const file = await maxHandle.getFile()
-      const entry = JSON.parse(await file.text()) as LayerEntry
-      return { ...entry, index: parseInt(maxName, 10) }
-    } catch {
-      return null
-    }
+  ): Promise<(LayerEntry & { index: number; filename: string }) | null> => {
+    const all = await this.listLayers(locationSig)
+    if (all.length === 0) return null
+    return all[all.length - 1]
   }
 
   /**
-   * Read a specific layer entry by index. Returns null if missing.
-   */
-  public readonly getLayerAt = async (
-    locationSig: string,
-    index: number,
-  ): Promise<LayerEntry | null> => {
-    const layersDir = await this.#tryGetLayersDir(locationSig)
-    if (!layersDir) return null
-
-    const fileName = String(index).padStart(8, '0') + '.json'
-    try {
-      const handle = await layersDir.getFileHandle(fileName, { create: false })
-      const file = await handle.getFile()
-      return JSON.parse(await file.text()) as LayerEntry
-    } catch {
-      return null
-    }
-  }
-
-  /**
-   * List all layer entries for a location, sorted by index ascending.
-   * Entries whose referenced layer resource can no longer be resolved are
-   * filtered out — they are dead pointers that would otherwise render as
-   * "(loading)" forever in the history viewer.
+   * List all layer entries for a location, sorted chronologically by
+   * `at` (oldest first). `index` is the position in that sorted array,
+   * `filename` is the opaque on-disk handle — callers that need to
+   * delete or promote a specific entry pass `filename` back in. Entries
+   * whose backing resource can't be resolved are dropped so the viewer
+   * never renders "(loading)" rows forever.
    */
   public readonly listLayers = async (
     locationSig: string,
-  ): Promise<Array<LayerEntry & { index: number }>> => {
+  ): Promise<Array<LayerEntry & { index: number; filename: string }>> => {
     const layersDir = await this.#tryGetLayersDir(locationSig)
     if (!layersDir) return []
 
-    const raw: Array<LayerEntry & { index: number }> = []
+    const raw: Array<LayerEntry & { filename: string }> = []
     for await (const [name, handle] of layersDir.entries()) {
       if (handle.kind !== 'file' || !name.endsWith('.json')) continue
       try {
         const file = await (handle as FileSystemFileHandle).getFile()
         const entry = JSON.parse(await file.text()) as LayerEntry
-        raw.push({ ...entry, index: parseInt(name, 10) })
+        raw.push({ ...entry, filename: name })
       } catch {
         // skip corrupted entries
       }
     }
-    raw.sort((a, b) => a.index - b.index)
+    // Chronological order is the payload's `at`, not the filename.
+    // Ties break on filename so the order is deterministic even when
+    // two entries land on the same millisecond (rare but possible
+    // during rapid programmatic commits).
+    raw.sort((a, b) => (a.at - b.at) || a.filename.localeCompare(b.filename))
 
     const store = get<{ getResource: (sig: string) => Promise<Blob | null> }>('@hypercomb.social/Store')
     const resolved = new Set<string>()
@@ -502,17 +488,12 @@ export class HistoryService {
       }))
     }
 
-    // Drop entries whose backing resource can't be resolved — they'd
-    // render as "(loading)" forever. Consecutive-duplicate collapse
-    // previously lived here too, but promoteToHead legitimately
-    // produces consecutive-duplicate entries (that's the whole point:
-    // bring a past sig back to head), and silently hiding those
-    // looked like a broken button. Legacy bags that still contain
-    // runs can be cleaned up through the delete button now.
-    const filtered: Array<LayerEntry & { index: number }> = []
+    const filtered: Array<LayerEntry & { index: number; filename: string }> = []
+    let position = 0
     for (const entry of raw) {
       if (store && !resolved.has(entry.layerSig)) continue
-      filtered.push(entry)
+      filtered.push({ ...entry, index: position })
+      position++
     }
     return filtered
   }
@@ -570,8 +551,7 @@ export class HistoryService {
     if (!blob) return null
 
     const layersDir = await this.#getLayersDir(locationSig)
-    const nextIndex = await this.#nextLayerIndex(locationSig, layersDir)
-    const fileName = String(nextIndex).padStart(8, '0') + '.json'
+    const fileName = HistoryService.#entryFilename()
     const handle = await layersDir.getFileHandle(fileName, { create: true })
     const writable = await handle.createWritable()
     try {
@@ -584,17 +564,16 @@ export class HistoryService {
   }
 
   /**
-   * Soft-delete history entries. Each entry file's content is archived
-   * (entry pointer + full layer JSON snapshot, so we have everything we
-   * need to restore without depending on __resources__) into
-   * __deleted__/{locSig}/{deletedAt}-{layerSig}.json, then the original
-   * entry file is removed. 30-day TTL enforced by pruneExpiredDeletes.
+   * Soft-delete history entries by filename. Each entry's content is
+   * archived (entry pointer + full layer JSON snapshot) into
+   * __deleted__/{locSig}/{sameFilename}, then the original entry file
+   * is removed. 30-day TTL enforced by pruneExpiredDeletes.
    */
   public readonly removeEntries = async (
     locationSig: string,
-    entryIndexes: number[],
+    filenames: string[],
   ): Promise<number> => {
-    if (entryIndexes.length === 0) return 0
+    if (filenames.length === 0) return 0
     const layersDir = await this.#tryGetLayersDir(locationSig)
     if (!layersDir) return 0
     const store = get<{ getResource: (sig: string) => Promise<Blob | null> }>('@hypercomb.social/Store')
@@ -602,21 +581,20 @@ export class HistoryService {
     const deletedAt = Date.now()
 
     let removed = 0
-    for (const index of entryIndexes) {
-      const entryFile = String(index).padStart(8, '0') + '.json'
+    for (const filename of filenames) {
       let entry: LayerEntry | null = null
       try {
-        const handle = await layersDir.getFileHandle(entryFile, { create: false })
+        const handle = await layersDir.getFileHandle(filename, { create: false })
         const file = await handle.getFile()
         entry = JSON.parse(await file.text()) as LayerEntry
       } catch {
         continue
       }
 
-      // Archive: write deleted record that carries both the pointer
-      // and the snapshot content, so restore doesn't depend on the
-      // resource cache still being populated for this sig.
-      let archivePayload: { deletedAt: number; entry: LayerEntry; layer: unknown } = {
+      // Archive payload carries the pointer and the snapshot content so
+      // restore can re-verify the layer sig even if the resource cache
+      // has evicted the signature later.
+      const archivePayload: { deletedAt: number; entry: LayerEntry; layer: unknown } = {
         deletedAt,
         entry,
         layer: null,
@@ -625,23 +603,20 @@ export class HistoryService {
         try {
           const blob = await store.getResource(entry.layerSig)
           if (blob) archivePayload.layer = JSON.parse(await blob.text())
-        } catch { /* archive anyway with layer=null; restore will fall back to resource cache */ }
+        } catch { /* archive with layer=null */ }
       }
 
       try {
-        // Archive keeps the original filename — same 8-digit padded
-        // index as the live entry used. Everything else (deletedAt,
-        // layer snapshot, the entry pointer) lives in the payload so
-        // the naming convention stays uniform across layers/ and
-        // __deleted__/ and #nextLayerIndex can parseInt both dirs
-        // identically.
-        const archiveName = String(index).padStart(8, '0') + '.json'
-        const archiveHandle = await deletedDir.getFileHandle(archiveName, { create: true })
+        // Reuse the same opaque filename in __deleted__/ — nothing
+        // infers anything from it, so keeping it stable just means
+        // restore can write straight back into layers/ under the
+        // same handle if we ever wire a restore action.
+        const archiveHandle = await deletedDir.getFileHandle(filename, { create: true })
         const writable = await archiveHandle.createWritable()
         try { await writable.write(JSON.stringify(archivePayload)) } finally { await writable.close() }
-      } catch { /* if archive fails, skip the actual delete so the entry isn't lost */ continue }
+      } catch { continue }
 
-      try { await layersDir.removeEntry(entryFile) } catch { /* already gone */ }
+      try { await layersDir.removeEntry(filename) } catch { /* already gone */ }
       removed++
     }
     return removed
@@ -656,30 +631,30 @@ export class HistoryService {
    */
   public readonly mergeEntries = async (
     locationSig: string,
-    entryIndexes: number[],
+    filenames: string[],
   ): Promise<string | null> => {
-    if (entryIndexes.length === 0) return null
+    if (filenames.length === 0) return null
 
-    // Load the selected entries, ordered oldest → newest. The newest
-    // selected entry's sig becomes the new head content.
+    // Load the selected entries by filename and pick the chronologically
+    // newest one (highest `at`) — that entry's layer content becomes
+    // the new head. Filenames are opaque, so we MUST read payloads to
+    // decide order.
     const layersDir = await this.#tryGetLayersDir(locationSig)
     if (!layersDir) return null
-    const sorted = [...entryIndexes].sort((a, b) => a - b)
-    let newestSig: string | null = null
-    for (const index of sorted) {
-      const entryFile = String(index).padStart(8, '0') + '.json'
+    let newest: LayerEntry | null = null
+    for (const filename of filenames) {
       try {
-        const handle = await layersDir.getFileHandle(entryFile, { create: false })
+        const handle = await layersDir.getFileHandle(filename, { create: false })
         const file = await handle.getFile()
         const entry = JSON.parse(await file.text()) as LayerEntry
-        newestSig = entry.layerSig
+        if (!newest || entry.at > newest.at) newest = entry
       } catch { /* skip missing */ }
     }
-    if (!newestSig) return null
+    if (!newest) return null
 
-    const newSig = await this.promoteToHead(locationSig, newestSig)
+    const newSig = await this.promoteToHead(locationSig, newest.layerSig)
     if (!newSig) return null
-    await this.removeEntries(locationSig, sorted)
+    await this.removeEntries(locationSig, filenames)
     return newSig
   }
 
@@ -753,37 +728,6 @@ export class HistoryService {
     } catch {
       return null
     }
-  }
-
-  /**
-   * Next numeric index for a new entry at this location. Scans both the
-   * active layers dir and the soft-delete archive so a just-deleted
-   * highest index is never handed back out — that would reuse the
-   * filename of a still-archived entry and confuse restore. Callers
-   * derive this only ever at the moment of a fresh write, so scanning
-   * is O(entries-at-this-location) and happens once per commit.
-   */
-  readonly #nextLayerIndex = async (
-    locationSig: string,
-    layersDir: FileSystemDirectoryHandle,
-  ): Promise<number> => {
-    let max = 0
-    for await (const [name, handle] of layersDir.entries()) {
-      if (handle.kind !== 'file' || !name.endsWith('.json')) continue
-      const n = parseInt(name, 10)
-      if (!isNaN(n) && n > max) max = n
-    }
-    // The archive stores `{NNNNNNNN}-{deletedAt}-{sig}.json`, so
-    // parseInt picks up the leading index and we can compare.
-    const deletedDir = await this.#tryGetDeletedDir(locationSig)
-    if (deletedDir) {
-      for await (const [name, handle] of deletedDir.entries()) {
-        if (handle.kind !== 'file' || !name.endsWith('.json')) continue
-        const n = parseInt(name, 10)
-        if (!isNaN(n) && n > max) max = n
-      }
-    }
-    return max + 1
   }
 
   // -------------------------------------------------
