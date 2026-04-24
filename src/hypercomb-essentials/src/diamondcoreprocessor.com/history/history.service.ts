@@ -399,7 +399,7 @@ export class HistoryService {
     await store.putResource(new Blob([json], { type: 'application/json' }))
 
     const layersDir = await this.#getLayersDir(locationSig)
-    const fileName = HistoryService.#entryFilename()
+    const fileName = await this.#nextEntryFilename(locationSig, layersDir)
     const handle = await layersDir.getFileHandle(fileName, { create: true })
     const writable = await handle.createWritable()
     try {
@@ -413,20 +413,32 @@ export class HistoryService {
   }
 
   /**
-   * Pick an entry filename. The filename itself carries no meaning —
-   * it's just a unique handle. Ordering, position, head-vs-past,
-   * everything chronological is derived from the `at` field inside
-   * each entry's payload. Reading the filename is a bug: if you
-   * need to know when something was written or where it sits in
-   * the history, load the file and look at `at`. The random UUID
-   * makes collisions effectively impossible even if two commits
-   * land in the same millisecond.
+   * Allocate the next sequential filename for an entry at this location.
+   * Format is 8-digit zero-padded starting at 00000001. The filename is
+   * ONLY used to guarantee a unique handle — nothing reads it to infer
+   * order, head, or age (use the payload's `at` for that). Scans both
+   * layers/ and __deleted__/ so a just-deleted highest slot never gets
+   * handed back out and collide with an archived restore.
    */
-  static readonly #entryFilename = (): string => {
-    const uuid = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID()
-      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
-    return `${uuid}.json`
+  readonly #nextEntryFilename = async (
+    locationSig: string,
+    layersDir: FileSystemDirectoryHandle,
+  ): Promise<string> => {
+    let max = 0
+    for await (const [name, handle] of layersDir.entries()) {
+      if (handle.kind !== 'file' || !name.endsWith('.json')) continue
+      const n = parseInt(name, 10)
+      if (!isNaN(n) && n > max) max = n
+    }
+    const deletedDir = await this.#tryGetDeletedDir(locationSig)
+    if (deletedDir) {
+      for await (const [name, handle] of deletedDir.entries()) {
+        if (handle.kind !== 'file' || !name.endsWith('.json')) continue
+        const n = parseInt(name, 10)
+        if (!isNaN(n) && n > max) max = n
+      }
+    }
+    return String(max + 1).padStart(8, '0') + '.json'
   }
 
   /**
@@ -551,7 +563,7 @@ export class HistoryService {
     if (!blob) return null
 
     const layersDir = await this.#getLayersDir(locationSig)
-    const fileName = HistoryService.#entryFilename()
+    const fileName = await this.#nextEntryFilename(locationSig, layersDir)
     const handle = await layersDir.getFileHandle(fileName, { create: true })
     const writable = await handle.createWritable()
     try {
