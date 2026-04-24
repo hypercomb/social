@@ -176,8 +176,15 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
   }
 
   // Layer-slice inspector modal. When non-null, a centered overlay is
-  // rendered showing the raw JSON of the selected layer entry.
-  #sliceOpen = signal<{ label: string; json: string } | null>(null)
+  // rendered showing the selected layer entry. `lines` is the raw JSON
+  // split into line-level diff rows vs the previous entry's JSON:
+  // status=`same` lines render plain, `add` lines highlight green,
+  // `remove` lines red with a strikethrough. The very first entry has
+  // no previous so every line lands as `add`.
+  #sliceOpen = signal<{
+    label: string
+    lines: ReadonlyArray<{ text: string; status: 'same' | 'add' | 'remove' }>
+  } | null>(null)
   readonly sliceOpen = this.#sliceOpen.asReadonly()
 
   // Multi-select — set of entry filenames the user has checked via
@@ -468,10 +475,20 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
     const contents = this.#contents()
     const content = contents.get(entry.layerSig)
     if (!content) return
+
+    // Diff vs the previous entry (chronologically just before this one)
+    // so the inspector shows what actually changed at this step. The
+    // first entry has no predecessor — all lines highlight as `add`.
+    const prevEntry = index > 0 ? entries[index - 1] : null
+    const prevContent = prevEntry ? contents.get(prevEntry.layerSig) : null
+    const nextJson = JSON.stringify(content, Object.keys(content).sort(), 2)
+    const prevJson = prevContent ? JSON.stringify(prevContent, Object.keys(prevContent).sort(), 2) : ''
+    const lines = diffLines(prevJson.split('\n'), nextJson.split('\n'))
+
     const when = new Date(entry.at).toLocaleString()
     this.#sliceOpen.set({
       label: `#${index + 1} · ${when} · ${entry.layerSig.slice(0, 12)}…`,
-      json: JSON.stringify(content, Object.keys(content).sort(), 2),
+      lines,
     })
   }
 
@@ -648,6 +665,47 @@ function installHistoryColumnStylesheet(): void {
        getting pushed right by the sidebar column. */
   `
   document.head.appendChild(style)
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Line-level diff for the slice inspector.
+//
+// Classic LCS over the two line arrays — O(m*n) time and space. Layer
+// JSON is typically a few dozen lines so this is effectively free and
+// produces the readable visual expected for add/remove highlighting
+// (interleaved in original order, not added-then-removed).
+// ─────────────────────────────────────────────────────────────────────
+
+function diffLines(
+  a: readonly string[],
+  b: readonly string[],
+): Array<{ text: string; status: 'same' | 'add' | 'remove' }> {
+  const m = a.length, n = b.length
+  // dp[i][j] = LCS length of a[0..i] and b[0..j]
+  const dp: number[][] = new Array(m + 1)
+  for (let i = 0; i <= m; i++) dp[i] = new Array(n + 1).fill(0)
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1][j - 1] + 1
+        : Math.max(dp[i - 1][j], dp[i][j - 1])
+    }
+  }
+
+  const out: Array<{ text: string; status: 'same' | 'add' | 'remove' }> = []
+  let i = m, j = n
+  while (i > 0 && j > 0) {
+    if (a[i - 1] === b[j - 1]) {
+      out.unshift({ text: a[i - 1], status: 'same' }); i--; j--
+    } else if (dp[i - 1][j] >= dp[i][j - 1]) {
+      out.unshift({ text: a[i - 1], status: 'remove' }); i--
+    } else {
+      out.unshift({ text: b[j - 1], status: 'add' }); j--
+    }
+  }
+  while (i > 0) { out.unshift({ text: a[i - 1], status: 'remove' }); i-- }
+  while (j > 0) { out.unshift({ text: b[j - 1], status: 'add' }); j-- }
+  return out
 }
 
 // ─────────────────────────────────────────────────────────────────────

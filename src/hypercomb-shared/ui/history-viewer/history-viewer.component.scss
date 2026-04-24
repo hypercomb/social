@@ -261,6 +261,31 @@
   color: rgba(230, 235, 245, 0.92);
 }
 
+// Per-line diff highlight inside the slice inspector. `same` lines
+// render plain; `add` lines get a green wash with a subtle left
+// accent bar; `remove` lines get a red wash with strikethrough so
+// the "this is no longer here" semantic reads at a glance.
+.slice-line {
+  display: block;
+  border-left: 2px solid transparent;
+  padding-left: 6px;
+  margin-left: -8px;
+}
+
+.slice-line[data-status="add"] {
+  background: rgba(109, 192, 119, 0.12);
+  border-left-color: rgba(109, 192, 119, 0.75);
+  color: rgba(210, 240, 218, 0.98);
+}
+
+.slice-line[data-status="remove"] {
+  background: rgba(217, 98, 98, 0.12);
+  border-left-color: rgba(217, 98, 98, 0.75);
+  color: rgba(240, 210, 210, 0.85);
+  text-decoration: line-through;
+  text-decoration-color: rgba(217, 98, 98, 0.6);
+}
+
 .row:hover {
   background: rgba(255, 255, 255, 0.05);
 }
