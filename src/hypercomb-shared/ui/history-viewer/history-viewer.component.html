@@ -2,6 +2,7 @@
   <aside class="history-viewer"
          [attr.data-consumes-wheel]="''"
          [style.width.px]="customWidth()"
+         [style.max-width]="customWidth() !== null ? 'none' : null"
          [attr.aria-label]="'history.viewer-title' | t">
     <div class="history-viewer-resizer"
          [attr.aria-label]="'history.resize' | t"

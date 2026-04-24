@@ -15,10 +15,13 @@
   bottom: 0;
   width: max-content;
   min-width: 240px;
-  // No hard ceiling — the drag handler already clamps to
-  // (window.innerWidth - 60) so a runaway drag can't hide the canvas.
-  // Keeping 50vw here capped the user-chosen width at a fraction of
-  // the window and the inline width binding silently lost.
+  // Soft ceiling for the auto-grow (max-content) default: when the
+  // user hasn't dragged, long row summaries could blow the panel
+  // past the viewport on narrow screens. Cap at 80vw for this
+  // unconfigured case; the inline width binding (from a drag) wins
+  // when set since inline styles beat stylesheet max-width — this
+  // only affects the "never resized yet" default path.
+  max-width: 80vw;
   background: rgba(12, 14, 20, 0.92);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 6px;
