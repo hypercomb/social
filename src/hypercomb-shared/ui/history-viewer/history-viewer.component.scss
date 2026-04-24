@@ -33,7 +33,7 @@
 .history-viewer-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
   padding: 8px 10px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
@@ -46,6 +46,23 @@
 .history-viewer-header .count {
   font-variant-numeric: tabular-nums;
   color: rgba(180, 190, 210, 0.7);
+  margin-right: auto; // push the close button to the right edge
+}
+
+.history-viewer-header .close {
+  background: transparent;
+  border: none;
+  color: rgba(200, 210, 230, 0.65);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 3px;
+  transition: color 80ms linear, background 80ms linear;
+}
+.history-viewer-header .close:hover {
+  color: rgba(255, 255, 255, 1);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .rows {
