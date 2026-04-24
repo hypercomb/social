@@ -112,6 +112,30 @@ function saveDisabledFilters(disabled: ReadonlySet<Category>): void {
   } catch { /* storage unavailable */ }
 }
 
+// Panel width is global, not per-location: the user resizes once and
+// the same width applies everywhere. Null = untouched (CSS default
+// takes over — panel grows to fit content). A number = sticky pixel
+// width set by the user via drag.
+const WIDTH_STORAGE_KEY = 'hc:history-viewer-width'
+
+function loadCustomWidth(): number | null {
+  try {
+    const raw = localStorage.getItem(WIDTH_STORAGE_KEY)
+    if (!raw) return null
+    const n = parseInt(raw, 10)
+    return Number.isFinite(n) && n > 0 ? n : null
+  } catch {
+    return null
+  }
+}
+
+function saveCustomWidth(width: number | null): void {
+  try {
+    if (width == null) localStorage.removeItem(WIDTH_STORAGE_KEY)
+    else localStorage.setItem(WIDTH_STORAGE_KEY, String(width))
+  } catch { /* storage unavailable */ }
+}
+
 @Component({
   selector: 'hc-history-viewer',
   standalone: true,
@@ -207,6 +231,15 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
   #loadSeq = 0
   readonly #el: ElementRef<HTMLElement> = inject(ElementRef)
   #resizeObserver: ResizeObserver | null = null
+
+  // User-chosen width in px, sticky across locations. Null = auto (panel
+  // grows to fit content on first open). Persisted in localStorage so
+  // resizing once keeps the preference across reloads. Applied as an
+  // explicit inline style only when non-null so the CSS `width: max-content`
+  // default can still take over for users who've never resized.
+  #customWidth = signal<number | null>(loadCustomWidth())
+  readonly customWidth = this.#customWidth.asReadonly()
+  #resizing: { startX: number; startWidth: number } | null = null
 
   constructor() {
     // When the panel becomes visible, refresh entries + contents. Done
@@ -329,6 +362,45 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
   }
 
   /**
+   * Begin a drag-resize of the panel from its right edge. The handle
+   * captures the pointer so the drag follows even when the cursor
+   * leaves the handle bounds. Width is clamped to [MIN, viewport - 60]
+   * so a runaway drag can't hide the canvas entirely.
+   */
+  readonly startResize = (event: PointerEvent): void => {
+    event.preventDefault()
+    event.stopPropagation()
+    const aside = (event.currentTarget as HTMLElement).parentElement as HTMLElement | null
+    if (!aside) return
+    const startWidth = aside.offsetWidth
+    this.#resizing = { startX: event.clientX, startWidth }
+    const target = event.currentTarget as HTMLElement
+    try { target.setPointerCapture(event.pointerId) } catch { /* best effort */ }
+
+    const onMove = (e: PointerEvent): void => {
+      if (!this.#resizing) return
+      const dx = e.clientX - this.#resizing.startX
+      const next = Math.round(this.#resizing.startWidth + dx)
+      const max = Math.max(HISTORY_COLUMN_MIN, window.innerWidth - 60)
+      const clamped = Math.max(HISTORY_COLUMN_MIN, Math.min(max, next))
+      this.#customWidth.set(clamped)
+    }
+    const onUp = (e: PointerEvent): void => {
+      try { target.releasePointerCapture(e.pointerId) } catch { /* best effort */ }
+      target.removeEventListener('pointermove', onMove)
+      target.removeEventListener('pointerup', onUp)
+      target.removeEventListener('pointercancel', onUp)
+      // Persist only on release — not on every pixel of movement — so
+      // localStorage writes don't thrash during a drag.
+      saveCustomWidth(this.#customWidth())
+      this.#resizing = null
+    }
+    target.addEventListener('pointermove', onMove)
+    target.addEventListener('pointerup', onUp)
+    target.addEventListener('pointercancel', onUp)
+  }
+
+  /**
    * Per-row "make head" — append a new entry at the top that points at
    * this row's layer, without touching the rest of the list. The cursor
    * follows to the new head so the canvas reflects the promoted state.
@@ -448,9 +520,10 @@ function installHistoryColumnStylesheet(): void {
       left: var(--hc-history-column-width) !important;
       width: calc(100% - var(--hc-history-column-width)) !important;
     }
-    body.hc-history-mode .header-bar {
-      padding-left: var(--hc-history-column-width);
-    }
+    /* header-bar intentionally NOT shifted — it lives above the
+       sidebar (which starts below it via top: 3.2rem), so the
+       command line stays full-width at the top left instead of
+       getting pushed right by the sidebar column. */
   `
   document.head.appendChild(style)
 }

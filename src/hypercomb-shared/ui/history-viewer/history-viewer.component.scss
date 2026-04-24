@@ -15,7 +15,10 @@
   bottom: 0;
   width: max-content;
   min-width: 240px;
-  max-width: 50vw;
+  // No hard ceiling — the drag handler already clamps to
+  // (window.innerWidth - 60) so a runaway drag can't hide the canvas.
+  // Keeping 50vw here capped the user-chosen width at a fraction of
+  // the window and the inline width binding silently lost.
   background: rgba(12, 14, 20, 0.92);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 6px;
@@ -59,10 +62,58 @@
   padding: 0 4px;
   border-radius: 3px;
   transition: color 80ms linear, background 80ms linear;
+  // Header sits above the resizer so the close button is never
+  // shadowed by the drag-handle hit area when they both land in
+  // the top-right corner.
+  position: relative;
+  z-index: 2;
 }
 .history-viewer-header .close:hover {
   color: rgba(255, 255, 255, 1);
   background: rgba(255, 255, 255, 0.06);
+}
+
+// Drag-resize handle on the panel's right edge. 8px hit target —
+// wider than it looks so imprecise cursors still grab it — with a
+// 2px visible stripe centred. Always faintly visible so users
+// discover that the panel is resizable without a hover-to-reveal.
+.history-viewer-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -4px;
+  width: 8px;
+  cursor: col-resize;
+  // Sit under the header's close button but above the rest of the
+  // panel so a drag from the handle takes priority over row clicks.
+  z-index: 1;
+  touch-action: none;
+  // Use a gradient so the visible bar is 2px centred inside the
+  // 8px hit target — keeps the affordance discoverable without
+  // visually chunky.
+  background: linear-gradient(
+    to right,
+    transparent 0,
+    transparent 3px,
+    rgba(110, 180, 255, 0.28) 3px,
+    rgba(110, 180, 255, 0.28) 5px,
+    transparent 5px,
+    transparent 8px
+  );
+  transition: background 80ms linear;
+}
+
+.history-viewer-resizer:hover,
+.history-viewer-resizer:active {
+  background: linear-gradient(
+    to right,
+    transparent 0,
+    transparent 2px,
+    rgba(110, 180, 255, 0.85) 2px,
+    rgba(110, 180, 255, 0.85) 6px,
+    transparent 6px,
+    transparent 8px
+  );
 }
 
 .rows {
@@ -104,10 +155,13 @@
   user-select: none;  // prevent text selection on dbl-click
 }
 
-// Per-row action icons — hidden by default, fade in on row hover so
-// they don't add visual noise to rows the user isn't targeting. The
-// make-head one sits just before the timestamp column, delete on the
-// row's right edge after the timestamp.
+// Per-row action icons. Kept faintly visible at all times (0.35)
+// rather than fully hidden — hiding them until the row receives
+// :hover meant the user saw them appear while reading the summary,
+// then lose them the moment the cursor left the text to reach for
+// the icon (grid gap between summary and button edge fell outside
+// the text-hover region). A low baseline opacity sidesteps the flicker
+// and still reads as "secondary action" compared to the timestamp.
 .row .row-action {
   background: transparent;
   border: none;
@@ -117,12 +171,12 @@
   cursor: pointer;
   padding: 0 4px;
   border-radius: 3px;
-  opacity: 0;
+  opacity: 0.35;
   transition: opacity 80ms linear, color 80ms linear, background 80ms linear;
 }
 
 .row:hover .row-action {
-  opacity: 0.7;
+  opacity: 0.85;
 }
 
 .row .row-action:hover {
