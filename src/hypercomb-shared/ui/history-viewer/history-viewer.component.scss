@@ -76,6 +76,32 @@
   background: rgba(255, 255, 255, 0.06);
 }
 
+.history-viewer-header .group-step-toggle {
+  background: transparent;
+  border: 1px solid transparent;
+  color: rgba(200, 210, 230, 0.45);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 3px;
+  transition: color 80ms linear, background 80ms linear, border-color 80ms linear, opacity 80ms linear;
+  position: relative;
+  z-index: 2;
+  opacity: 0.6;
+}
+.history-viewer-header .group-step-toggle:hover {
+  color: rgba(255, 255, 255, 1);
+  background: rgba(255, 255, 255, 0.05);
+  opacity: 1;
+}
+.history-viewer-header .group-step-toggle.active {
+  color: rgba(110, 180, 255, 1);
+  background: rgba(110, 180, 255, 0.12);
+  border-color: rgba(110, 180, 255, 0.35);
+  opacity: 1;
+}
+
 // Drag-resize handle on the panel's right edge. 8px hit target —
 // wider than it looks so imprecise cursors still grab it — with a
 // 2px visible stripe centred. Always faintly visible so users
@@ -373,8 +399,10 @@
 
 // Non-interactive bookends. They sit outside the seekable range so
 // the list's first and last real entries are never pinned to the
-// panel edge; clicking them does nothing (no `seek()` binding in the
-// template) and they dim themselves to signal that.
+// panel edge. HEAD stays fully decorative. START is clickable — it
+// seeks to position 0 (pre-history / default empty state), which is
+// reachable via undo as well. We give START the interactive styling
+// back via overrides below.
 .row.anchor {
   // Anchors only have indicator + idx + summary — collapse back to
   // the original 3-column layout so they don't grow tracks for the
@@ -386,6 +414,24 @@
   color: rgba(180, 190, 210, 0.6);
   border-left-color: transparent !important;
   background: transparent !important;
+}
+
+// START anchor is seekable — restore pointer events and a subtle
+// hover/active treatment so it behaves like a real row.
+.row.anchor.anchor-start {
+  cursor: pointer;
+  pointer-events: auto;
+  opacity: 0.55;
+}
+.row.anchor.anchor-start:hover {
+  opacity: 0.9;
+  background: rgba(255, 255, 255, 0.04) !important;
+}
+.row.anchor.anchor-start.active {
+  opacity: 1;
+  background: rgba(100, 170, 255, 0.12) !important;
+  border-left-color: rgba(110, 180, 255, 0.9) !important;
+  color: rgba(235, 240, 250, 0.9);
 }
 
 .row.anchor .idx {

@@ -20,6 +20,7 @@ type CursorState = {
   total: number
   rewound: boolean
   at: number
+  groupStepEnabled?: boolean
 }
 
 type LayerEntry = { layerSig: string; at: number; index: number; filename: string }
@@ -49,6 +50,7 @@ type HistoryService = {
 type CursorService = {
   state: CursorState
   seek(position: number): void
+  setGroupStepEnabled?(on: boolean): void
 }
 type Store = {
   getResource(sig: string): Promise<Blob | null>
@@ -150,10 +152,19 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
   #position = signal(0)
   #total = signal(0)
   #locationSig = signal('')
+  #groupStepEnabled = signal(false)
 
   readonly visible = HistoryMenuPack.visible
   readonly total = this.#total.asReadonly()
   readonly position = this.#position.asReadonly()
+  readonly groupStepEnabled = this.#groupStepEnabled.asReadonly()
+
+  readonly toggleGroupStep = (): void => {
+    const cursor = this.#cursor()
+    if (!cursor?.setGroupStepEnabled) return
+    cursor.setGroupStepEnabled(!this.#groupStepEnabled())
+    // Cursor emits via EffectBus; the subscriber below picks it up.
+  }
 
   // Sticky category filter. Stores *disabled* categories so a new
   // category added to the taxonomy later defaults to visible for
@@ -329,9 +340,15 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
       const entriesGrew = s.total !== this.#entries().length
       this.#position.set(s.position)
       this.#total.set(s.total)
+      this.#groupStepEnabled.set(!!s.groupStepEnabled)
       if (locationChanged) this.#locationSig.set(s.locationSig)
       if ((locationChanged || entriesGrew) && this.visible()) void this.#reload()
     })
+    // Prime the signal from the cursor's current state — the EffectBus
+    // subscription above replays the last-emitted value, but only if
+    // the cursor has emitted at least once. On first open, read directly.
+    const cursor = this.#cursor()
+    if (cursor) this.#groupStepEnabled.set(!!cursor.state.groupStepEnabled)
   }
 
   ngOnDestroy(): void {

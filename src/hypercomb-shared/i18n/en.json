@@ -184,6 +184,7 @@
   "history.delete-entry": "delete this history entry",
   "history.make-head": "make this layer head",
   "history.resize": "drag to resize history panel",
+  "history.group-step": "group step — undo/redo skips edits and jumps to the earliest tile add/remove",
 
   "slash.select": "select tiles for cut/copy/move",
   "slash.remove-builtin": "remove selected tiles",
