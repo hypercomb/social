@@ -502,20 +502,225 @@ export class HistoryService {
       }))
     }
 
-    // Collapse legacy duplicates: any run of consecutive entries that
-    // share a signature is kept as its first entry only. New commits
-    // can't produce duplicates (commitLayer head-dedups) but older
-    // bags written before that gate still contain runs — without this
-    // pass they render as "(no change)" rows against themselves.
+    // Drop entries whose backing resource can't be resolved — they'd
+    // render as "(loading)" forever. Consecutive-duplicate collapse
+    // previously lived here too, but promoteToHead legitimately
+    // produces consecutive-duplicate entries (that's the whole point:
+    // bring a past sig back to head), and silently hiding those
+    // looked like a broken button. Legacy bags that still contain
+    // runs can be cleaned up through the delete button now.
     const filtered: Array<LayerEntry & { index: number }> = []
-    let previousSignature: string | null = null
     for (const entry of raw) {
       if (store && !resolved.has(entry.layerSig)) continue
-      if (entry.layerSig === previousSignature) continue
       filtered.push(entry)
-      previousSignature = entry.layerSig
     }
     return filtered
+  }
+
+  // -------------------------------------------------
+  // layer promotion / soft-delete / merge
+  // -------------------------------------------------
+  //
+  // Three primitives the viewer binds to its per-row and multi-select
+  // action buttons:
+  //
+  //   promoteToHead(sig)          → append a new entry at head that
+  //                                  points at the same layer content.
+  //                                  Same sig, new index, new timestamp.
+  //                                  The layer lives twice in the bag —
+  //                                  that's the whole point: bringing a
+  //                                  past state back to head without
+  //                                  touching the past.
+  //
+  //   removeEntries(indexes[])    → soft-delete: move entry files into
+  //                                  __deleted__/{locSig}/ with the full
+  //                                  layer JSON as content. 30 days from
+  //                                  `deletedAt` they are GC'd out by
+  //                                  pruneExpiredDeletes. Restorable
+  //                                  because the content is still
+  //                                  byte-equal under its original sig.
+  //
+  //   mergeEntries(indexes[])     → multi-select merge. Picks the newest
+  //                                  selected entry's content as the
+  //                                  combined state, appends it to head
+  //                                  via promoteToHead, then removes all
+  //                                  the selected entries so the bag
+  //                                  ends up with one fewer row instead
+  //                                  of one more. Deletion is soft.
+
+  static readonly #DELETED_DIR = '__deleted__'
+  static readonly #DELETE_TTL_MS = 30 * 24 * 60 * 60 * 1000
+
+  /**
+   * Force-append a new entry at head pointing at the given layer sig.
+   * Used to promote a historical layer back to current without touching
+   * the past. Skips the dedup gate commitLayer applies; the whole point
+   * is to re-use an existing sig as the new head.
+   */
+  public readonly promoteToHead = async (
+    locationSig: string,
+    layerSig: string,
+  ): Promise<string | null> => {
+    const store = get<{ getResource: (sig: string) => Promise<Blob | null> }>('@hypercomb.social/Store')
+    if (!store) return null
+    // Sanity check — refuse to promote a dead pointer. If the resource
+    // is missing the viewer would render "(loading)" forever, same as
+    // the filtered-out dead entries in listLayers.
+    const blob = await store.getResource(layerSig)
+    if (!blob) return null
+
+    const layersDir = await this.#getLayersDir(locationSig)
+    const nextIndex = await this.#nextLayerIndex(layersDir)
+    const fileName = String(nextIndex).padStart(8, '0') + '.json'
+    const handle = await layersDir.getFileHandle(fileName, { create: true })
+    const writable = await handle.createWritable()
+    try {
+      const entry: LayerEntry = { layerSig, at: Date.now() }
+      await writable.write(JSON.stringify(entry))
+    } finally {
+      await writable.close()
+    }
+    return layerSig
+  }
+
+  /**
+   * Soft-delete history entries. Each entry file's content is archived
+   * (entry pointer + full layer JSON snapshot, so we have everything we
+   * need to restore without depending on __resources__) into
+   * __deleted__/{locSig}/{deletedAt}-{layerSig}.json, then the original
+   * entry file is removed. 30-day TTL enforced by pruneExpiredDeletes.
+   */
+  public readonly removeEntries = async (
+    locationSig: string,
+    entryIndexes: number[],
+  ): Promise<number> => {
+    if (entryIndexes.length === 0) return 0
+    const layersDir = await this.#tryGetLayersDir(locationSig)
+    if (!layersDir) return 0
+    const store = get<{ getResource: (sig: string) => Promise<Blob | null> }>('@hypercomb.social/Store')
+    const deletedDir = await this.#getDeletedDir(locationSig)
+    const deletedAt = Date.now()
+
+    let removed = 0
+    for (const index of entryIndexes) {
+      const entryFile = String(index).padStart(8, '0') + '.json'
+      let entry: LayerEntry | null = null
+      try {
+        const handle = await layersDir.getFileHandle(entryFile, { create: false })
+        const file = await handle.getFile()
+        entry = JSON.parse(await file.text()) as LayerEntry
+      } catch {
+        continue
+      }
+
+      // Archive: write deleted record that carries both the pointer
+      // and the snapshot content, so restore doesn't depend on the
+      // resource cache still being populated for this sig.
+      let archivePayload: { deletedAt: number; entry: LayerEntry; layer: unknown } = {
+        deletedAt,
+        entry,
+        layer: null,
+      }
+      if (store) {
+        try {
+          const blob = await store.getResource(entry.layerSig)
+          if (blob) archivePayload.layer = JSON.parse(await blob.text())
+        } catch { /* archive anyway with layer=null; restore will fall back to resource cache */ }
+      }
+
+      try {
+        const archiveName = `${deletedAt}-${entry.layerSig}.json`
+        const archiveHandle = await deletedDir.getFileHandle(archiveName, { create: true })
+        const writable = await archiveHandle.createWritable()
+        try { await writable.write(JSON.stringify(archivePayload)) } finally { await writable.close() }
+      } catch { /* if archive fails, skip the actual delete so the entry isn't lost */ continue }
+
+      try { await layersDir.removeEntry(entryFile) } catch { /* already gone */ }
+      removed++
+    }
+    return removed
+  }
+
+  /**
+   * Multi-select "merge into head". Appends the newest selected layer's
+   * content as the new head (via promoteToHead), then soft-deletes all
+   * the selected source entries. Net effect: one new row at top, the
+   * sources disappear from the active list but remain restorable from
+   * __deleted__ for 30 days.
+   */
+  public readonly mergeEntries = async (
+    locationSig: string,
+    entryIndexes: number[],
+  ): Promise<string | null> => {
+    if (entryIndexes.length === 0) return null
+
+    // Load the selected entries, ordered oldest → newest. The newest
+    // selected entry's sig becomes the new head content.
+    const layersDir = await this.#tryGetLayersDir(locationSig)
+    if (!layersDir) return null
+    const sorted = [...entryIndexes].sort((a, b) => a - b)
+    let newestSig: string | null = null
+    for (const index of sorted) {
+      const entryFile = String(index).padStart(8, '0') + '.json'
+      try {
+        const handle = await layersDir.getFileHandle(entryFile, { create: false })
+        const file = await handle.getFile()
+        const entry = JSON.parse(await file.text()) as LayerEntry
+        newestSig = entry.layerSig
+      } catch { /* skip missing */ }
+    }
+    if (!newestSig) return null
+
+    const newSig = await this.promoteToHead(locationSig, newestSig)
+    if (!newSig) return null
+    await this.removeEntries(locationSig, sorted)
+    return newSig
+  }
+
+  /**
+   * GC pass: remove soft-deleted entries older than 30 days. Safe to
+   * call at startup and after any delete/merge. Idempotent and bounded
+   * by the number of deleted files at this location.
+   */
+  public readonly pruneExpiredDeletes = async (
+    locationSig: string,
+  ): Promise<number> => {
+    const deletedDir = await this.#tryGetDeletedDir(locationSig)
+    if (!deletedDir) return 0
+    const cutoff = Date.now() - HistoryService.#DELETE_TTL_MS
+    let pruned = 0
+    const names: string[] = []
+    for await (const [name, handle] of deletedDir.entries()) {
+      if (handle.kind !== 'file' || !name.endsWith('.json')) continue
+      names.push(name)
+    }
+    for (const name of names) {
+      // filename = `{deletedAt}-{layerSig}.json` — deletedAt is the prefix
+      const dashIndex = name.indexOf('-')
+      if (dashIndex < 0) continue
+      const deletedAt = parseInt(name.slice(0, dashIndex), 10)
+      if (!Number.isFinite(deletedAt) || deletedAt > cutoff) continue
+      try { await deletedDir.removeEntry(name); pruned++ } catch { /* already gone */ }
+    }
+    return pruned
+  }
+
+  readonly #getDeletedDir = async (
+    locationSig: string,
+  ): Promise<FileSystemDirectoryHandle> => {
+    const bag = await this.getBag(locationSig)
+    return await bag.getDirectoryHandle(HistoryService.#DELETED_DIR, { create: true })
+  }
+
+  readonly #tryGetDeletedDir = async (
+    locationSig: string,
+  ): Promise<FileSystemDirectoryHandle | null> => {
+    try {
+      const bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false })
+      return await bag.getDirectoryHandle(HistoryService.#DELETED_DIR, { create: false })
+    } catch {
+      return null
+    }
   }
 
   readonly #getLayersDir = async (

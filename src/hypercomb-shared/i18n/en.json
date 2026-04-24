@@ -181,6 +181,8 @@
   "history.close-slice": "close layer inspector",
   "history.anchor-head": "head",
   "history.anchor-start": "start",
+  "history.delete-entry": "delete this history entry",
+  "history.make-head": "make this layer head",
 
   "slash.select": "select tiles for cut/copy/move",
   "slash.remove-builtin": "remove selected tiles",

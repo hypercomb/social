@@ -41,6 +41,10 @@ type Content = {
 
 type HistoryService = {
   listLayers(locationSig: string): Promise<LayerEntry[]>
+  promoteToHead?(locationSig: string, layerSig: string): Promise<string | null>
+  removeEntries?(locationSig: string, entryIndexes: number[]): Promise<number>
+  mergeEntries?(locationSig: string, entryIndexes: number[]): Promise<string | null>
+  pruneExpiredDeletes?(locationSig: string): Promise<number>
 }
 type CursorService = {
   state: CursorState
@@ -322,6 +326,42 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
 
   readonly hide = (): void => {
     HistoryMenuPack.onHide()
+  }
+
+  /**
+   * Per-row "make head" — append a new entry at the top that points at
+   * this row's layer, without touching the rest of the list. The cursor
+   * follows to the new head so the canvas reflects the promoted state.
+   */
+  readonly promoteRow = async (index: number, event: Event): Promise<void> => {
+    event.stopPropagation()
+    const history = this.#history()
+    const cursor = this.#cursor()
+    if (!history?.promoteToHead || !cursor) return
+    const entry = this.#entries()[index]
+    if (!entry) return
+    await history.promoteToHead(cursor.state.locationSig, entry.layerSig)
+    await this.#reload()
+    cursor.seek(this.#total())
+  }
+
+  /**
+   * Per-row delete — soft-delete a single entry into __deleted__/. The
+   * entry is restorable from there for 30 days. If the cursor was
+   * pointing at the removed entry, we nudge it to the nearest neighbour
+   * so the canvas doesn't freeze on a dead position.
+   */
+  readonly deleteRow = async (index: number, event: Event): Promise<void> => {
+    event.stopPropagation()
+    const history = this.#history()
+    const cursor = this.#cursor()
+    if (!history?.removeEntries || !cursor) return
+    const entry = this.#entries()[index]
+    if (!entry) return
+    await history.removeEntries(cursor.state.locationSig, [entry.index])
+    await this.#reload()
+    const nextTotal = this.#total()
+    if (cursor.state.position > nextTotal) cursor.seek(nextTotal)
   }
 
   #cursor(): CursorService | null {
