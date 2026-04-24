@@ -735,35 +735,38 @@ export class HistoryService {
   // stable because both formats sort by filename consistently.
 
   /**
-   * Canonicalise the record, sign it, write the raw bytes into
-   * `__layers__/{sig}`, and append a new marker at the bag root
-   * containing only the record-sig. Returns the record-sig, or null
-   * if the Store isn't available yet.
+   * Canonicalise the record, sign it, write the raw bytes into the
+   * same history bag as `{sig}`, and append a numeric marker at the
+   * bag root whose content is that sig. Everything lives in one
+   * folder per location so publishing maps to "share this bag" —
+   * tar up `__history__/{locSig}/` and the peer gets the markers
+   * and the layer content they reference as one self-contained unit.
+   * Returns the record-sig, or null if the Store isn't available.
    */
   public readonly writeRecord = async (
     locationSig: string,
     record: DeltaRecord,
   ): Promise<string | null> => {
-    const store = get<{ layers: FileSystemDirectoryHandle }>('@hypercomb.social/Store')
-    if (!store?.layers) return null
-
     const canonical = canonicalise(record)
     const bytes = new TextEncoder().encode(canonical)
     const sig = await SignatureService.sign(bytes.buffer as ArrayBuffer)
 
-    // Write the layer content to __layers__/{sig}. Content-addressed,
-    // immutable — if the file already exists, skip the rewrite so we
-    // don't invalidate any live Blob handles that point at it.
+    const bag = await this.getBag(locationSig)
+
+    // Layer content at __history__/{locSig}/{sig}. Content-addressed,
+    // immutable — skip the rewrite if the file already exists so live
+    // Blob handles elsewhere can't be invalidated.
     let exists = true
-    try { await store.layers.getFileHandle(sig) } catch { exists = false }
+    try { await bag.getFileHandle(sig) } catch { exists = false }
     if (!exists) {
-      const handle = await store.layers.getFileHandle(sig, { create: true })
+      const handle = await bag.getFileHandle(sig, { create: true })
       const writable = await handle.createWritable()
       try { await writable.write(bytes) } finally { await writable.close() }
     }
 
-    // Append the marker at the bag root.
-    const bag = await this.getBag(locationSig)
+    // Numeric marker at the same bag root. Readers discriminate
+    // marker vs record vs legacy-op by filename shape (numeric vs
+    // 64-hex sig vs numeric-JSON legacy), not by subfolder.
     const fileName = await this.#nextBagMarker(bag)
     const mhandle = await bag.getFileHandle(fileName, { create: true })
     const mwrite = await mhandle.createWritable()
@@ -806,16 +809,19 @@ export class HistoryService {
   }
 
   /**
-   * Load + parse the DeltaRecord at the given signature from
-   * __layers__/{sig}. Returns null on missing or malformed content.
+   * Load + parse the DeltaRecord at the given signature. Records now
+   * live inside each history bag (`__history__/{locSig}/{sig}`), so
+   * resolution is scoped to the bag — callers pass the locationSig
+   * along with the record sig. Returns null on missing or malformed
+   * content.
    */
   public readonly resolveDeltaRecord = async (
+    locationSig: string,
     sig: string,
   ): Promise<DeltaRecord | null> => {
-    const store = get<{ layers: FileSystemDirectoryHandle }>('@hypercomb.social/Store')
-    if (!store?.layers) return null
     try {
-      const handle = await store.layers.getFileHandle(sig, { create: false })
+      const bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false })
+      const handle = await bag.getFileHandle(sig, { create: false })
       const file = await handle.getFile()
       const text = await file.text()
       return parseRecord(text)
@@ -851,7 +857,9 @@ export class HistoryService {
     const slice = typeof upTo === 'number'
       ? markers.slice(0, Math.max(0, upTo))
       : markers
-    const records = await Promise.all(slice.map(m => this.resolveDeltaRecord(m.sig)))
+    const records = await Promise.all(
+      slice.map(m => this.resolveDeltaRecord(locationSig, m.sig))
+    )
     return reduceRecords(records)
   }
 
