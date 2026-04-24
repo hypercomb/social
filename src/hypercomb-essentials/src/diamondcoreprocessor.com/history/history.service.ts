@@ -1,7 +1,9 @@
 // diamondcoreprocessor.com/core/history.service.ts
 import { SignatureService, SignatureStore } from '@hypercomb/core'
 import { canonicalise, parse as parseRecord, type DeltaRecord } from './delta-record.js'
+import { reduce as reduceRecords, type HydratedState } from './delta-reducer.js'
 export type { DeltaRecord } from './delta-record.js'
+export type { HydratedState } from './delta-reducer.js'
 
 export type HistoryOpType =
   // Cell lifecycle
@@ -831,6 +833,26 @@ export class HistoryService {
       if (!isNaN(n) && n > max) max = n
     }
     return String(max + 1).padStart(8, '0')
+  }
+
+  /**
+   * Resolve every marker at this location, fold the records into a
+   * HydratedState. Optional `upTo` slices the chain — used by the
+   * cursor to preview past positions without mutating live state.
+   * Empty chain (or `upTo = 0`) returns the identity state — this is
+   * the synthetic-seed render path: before any real entry, the grid
+   * is empty. No disk writes, no timestamp invention — a pure fold.
+   */
+  public readonly hydratedStateAt = async (
+    locationSig: string,
+    upTo?: number,
+  ): Promise<HydratedState> => {
+    const markers = await this.listRecordSigs(locationSig)
+    const slice = typeof upTo === 'number'
+      ? markers.slice(0, Math.max(0, upTo))
+      : markers
+    const records = await Promise.all(slice.map(m => this.resolveDeltaRecord(m.sig)))
+    return reduceRecords(records)
   }
 
   // -------------------------------------------------
