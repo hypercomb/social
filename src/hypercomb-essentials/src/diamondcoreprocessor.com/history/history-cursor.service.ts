@@ -145,17 +145,28 @@ export class HistoryCursorService extends EventTarget {
     this.#emit()
   }
 
-  /** Move cursor to an absolute position (1-based, clamped). */
+  /**
+   * Move cursor to an absolute position (1-based, clamped).
+   *
+   * When layers exist, the cursor never sits below position 1 — "fully
+   * rewound" reveals the oldest recorded state, not the pre-history
+   * empty state. The UI's START anchor row is the visual terminator for
+   * that floor; there is no reachable cursor position beyond it. If no
+   * layers exist at all, position 0 is allowed (there's nothing to
+   * show but empty).
+   */
   seek(position: number): void {
-    const clamped = Math.max(0, Math.min(position, this.#layers.length))
+    const floor = this.#layers.length > 0 ? 1 : 0
+    const clamped = Math.max(floor, Math.min(position, this.#layers.length))
     if (clamped === this.#position) return
     this.#position = clamped
     this.#emit()
   }
 
-  /** Step backward one layer. */
+  /** Step backward one layer, but never past the oldest recorded state. */
   undo(): void {
-    if (this.#position > 0) this.seek(this.#position - 1)
+    const floor = this.#layers.length > 0 ? 1 : 0
+    if (this.#position > floor) this.seek(this.#position - 1)
   }
 
   /** Step forward one layer. */
