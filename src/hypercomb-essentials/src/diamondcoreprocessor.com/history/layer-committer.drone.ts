@@ -30,9 +30,66 @@ type LayoutSnapshot = {
   textOnly: boolean
 }
 
-export class LayerCommitter {
+/**
+ * Tiny explicit state machine for commit serialisation.
+ *
+ * States:
+ *   idle        → no commit scheduled or running
+ *   pending     → one commit queued in a microtask
+ *   committing  → commit currently running
+ *
+ * Transitions:
+ *   request()  @ idle       → pending  (schedule a microtask)
+ *   request()  @ pending    → pending  (coalesce — nothing to do)
+ *   request()  @ committing → committing + needsFollowup = true
+ *   tick()     @ pending    → committing → idle
+ *                             if needsFollowup, loop to pending
+ *
+ * Guarantees:
+ *   - At most one #run() invocation is alive at any time.
+ *   - request() is synchronous and cheap; callers never await it.
+ *   - A late request arriving during an ongoing commit produces
+ *     exactly one follow-up commit (not N).
+ *   - Failures don't freeze the machine — #run's rejection is
+ *     absorbed; the state returns to idle and the follow-up
+ *     check still runs.
+ *
+ * This replaces the ad-hoc `#scheduled` flag + parallel promise
+ * chain that raced against itself. Two committers hitting head at
+ * the same time used to write duplicate entries with the same sig;
+ * the machine makes that structurally impossible.
+ */
+class CommitMachine {
+  #state: 'idle' | 'pending' | 'committing' = 'idle'
+  #needsFollowup = false
+  readonly #run: () => Promise<void>
 
-  #scheduled = false
+  constructor(run: () => Promise<void>) {
+    this.#run = run
+  }
+
+  request(): void {
+    if (this.#state === 'committing') {
+      this.#needsFollowup = true
+      return
+    }
+    if (this.#state === 'pending') return
+    this.#state = 'pending'
+    queueMicrotask(() => void this.#tick())
+  }
+
+  async #tick(): Promise<void> {
+    this.#state = 'committing'
+    try { await this.#run() } catch { /* best-effort */ }
+    this.#state = 'idle'
+    if (this.#needsFollowup) {
+      this.#needsFollowup = false
+      this.request()
+    }
+  }
+}
+
+export class LayerCommitter {
 
   // Layout state is scattered across EffectBus effects. We subscribe at
   // construction and keep the latest value locally. Late subscribers get
@@ -45,6 +102,18 @@ export class LayerCommitter {
     gapPx: 0,
     textOnly: false,
   }
+
+  // Single serialised commit machine for this committer. Every event
+  // source — per-event lifecycle, microtask-batched layout changes,
+  // synchronize — calls machine.request(). The machine collapses
+  // same-turn requests and serialises cross-turn ones; commitLayer
+  // dedup then absorbs any redundant identical content. Together
+  // they guarantee one commit per distinct state change, no more.
+  //
+  // Leaf + ancestors still commit as one atomic #commit() call
+  // inside the machine's #run — each ancestor is a merkle-chain
+  // update cascading up from the leaf.
+  readonly #machine = new CommitMachine(() => this.#commit())
 
   constructor() {
     // layout:mode subscription removed — dense/spiral mode is phased
@@ -90,38 +159,10 @@ export class LayerCommitter {
     EffectBus.on('tile:unhidden',() => this.#queueCommit())
   }
 
-  /**
-   * Microtask-coalesced schedule. Multiple callers in the same JS
-   * turn collapse to one commit. Used by layout settings changes and
-   * synchronize — the UX target here is "one commit after the whole
-   * batch settles", not "one commit per event".
-   */
-  #schedule(): void {
-    if (this.#scheduled) return
-    this.#scheduled = true
-    queueMicrotask(async () => {
-      this.#scheduled = false
-      try {
-        await this.#commit()
-      } catch {
-        // commit is best-effort; never let a snapshot failure break the UI
-      }
-    })
-  }
-
-  // Serialised per-event commit queue. Each call chains after the
-  // previous commit promise so events ordered in the real world
-  // produce snapshots in the same order. No coalescing here —
-  // the point is per-event granularity. commitLayer dedup silently
-  // absorbs any double-fire with an adjacent synchronize.
-  #commitQueue: Promise<void> = Promise.resolve()
-  #queueCommit(): void {
-    this.#commitQueue = this.#commitQueue
-      .catch(() => { /* ignore prior failure, still commit this one */ })
-      .then(async () => {
-        try { await this.#commit() } catch { /* best-effort */ }
-      })
-  }
+  // All commit requests — batched or per-event — route through the
+  // single CommitMachine. See the class above for the state transitions.
+  #schedule(): void { this.#machine.request() }
+  #queueCommit(): void { this.#machine.request() }
 
   async #commit(): Promise<void> {
     // Never commit while cursor is rewound — the assembled state reflects
