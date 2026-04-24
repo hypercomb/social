@@ -97,7 +97,8 @@
                 [attr.aria-label]="'history.close-slice' | t"
                 (click)="closeSlice()">×</button>
       </header>
-      <pre class="slice-json">{{ slice.json }}</pre>
+      <pre class="slice-json">@for (line of slice.lines; track $index) {<span class="slice-line" [attr.data-status]="line.status">{{ line.text }}</span>
+}</pre>
     </div>
   }
 }
