@@ -16,7 +16,7 @@
               [title]="'history.hide' | t"
               (click)="hide()">×</button>
     </header>
-    @if (filterCategories().length > 0) {
+    @if (filterCategories().length > 0 || selectedCount() > 0) {
       <div class="filter-bar" role="toolbar" (wheel)="$event.stopPropagation()">
         @for (def of filterCategories(); track def.id) {
           <button type="button"
@@ -30,6 +30,20 @@
             <hc-icon [ref]="def.icon ?? null"></hc-icon>
           </button>
         }
+        @if (selectedCount() > 0) {
+          <span class="selection-gap"></span>
+          <span class="selection-count">{{ selectedCount() }}</span>
+          <button type="button"
+                  class="selection-action make-head"
+                  [attr.aria-label]="'history.selection-make-head' | t"
+                  [title]="'history.selection-make-head' | t"
+                  (click)="makeHeadSelection()">^</button>
+          <button type="button"
+                  class="selection-action merge"
+                  [attr.aria-label]="'history.selection-merge' | t"
+                  [title]="'history.selection-merge' | t"
+                  (click)="mergeSelection()">&#8801;</button>
+        }
       </div>
     }
     <ul class="rows" (wheel)="$event.stopPropagation()">
@@ -41,8 +55,9 @@
       @for (row of rows(); track row.index) {
         <li class="row"
             [class.active]="row.active"
+            [class.selected]="isRowSelected(row.filename)"
             [attr.data-category]="row.category"
-            (click)="seek(row.index)"
+            (click)="onRowClick(row, $event)"
             (dblclick)="openSlice(row.index, $event)">
           @if (categoryDef(row.category).icon; as icon) {
             <hc-icon class="row-icon" [ref]="icon"></hc-icon>
