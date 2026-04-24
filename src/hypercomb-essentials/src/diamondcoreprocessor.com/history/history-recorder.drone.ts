@@ -1,4 +1,15 @@
 // diamondcoreprocessor.com/core/history-recorder.drone.ts
+//
+// Side-effect imports below trigger the self-registration blocks in
+// history.service.ts and history-cursor.service.ts. Every other
+// import of those classes in the codebase is `import type { ... }`,
+// which TypeScript erases, so without these bare imports the files
+// never evaluate and their `window.ioc.register(...)` calls at the
+// bottom never run. This drone is in the side-effects barrel, so
+// requiring the two services here ensures they are registered
+// before any consumer calls `ioc.get(...)` on them.
+import './history.service.js'
+import './history-cursor.service.js'
 import { EffectBus, SignatureService } from '@hypercomb/core'
 import type { HistoryService, HistoryOpType } from './history.service.js'
 
@@ -48,9 +59,9 @@ export class HistoryRecorder {
     })
 
     // ── Layout state ──────────────────────────────────────
-    EffectBus.on<{ mode: string }>('layout:mode', (payload) => {
-      if (payload?.mode) this.#enqueueLayoutState('mode', payload.mode)
-    })
+    // layout:mode intentionally not recorded — dense/spiral is phased
+    // out; the renderer only supports pinned mode and the layer's
+    // layout signature no longer carries a mode field.
 
     EffectBus.on<{ flat: boolean }>('render:set-orientation', (payload) => {
       if (payload != null) this.#enqueueLayoutState('orientation', payload.flat ? 'flat-top' : 'point-top')

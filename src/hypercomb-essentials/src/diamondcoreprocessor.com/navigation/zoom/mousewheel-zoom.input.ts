@@ -62,6 +62,14 @@ export class MousewheelZoomInput {
     // bail if another interaction owns the gate
     if (this.gate?.active) return
 
+    // bail if the event is aimed at a UI surface that wants to consume
+    // wheel itself (scrollable panels marked [data-consumes-wheel]).
+    // Canvas is full-screen so geometric rect checks alone wouldn't
+    // distinguish "over the history viewer overlay" from "over the
+    // canvas beneath it".
+    const target = event.target as Element | null
+    if (target?.closest?.('[data-consumes-wheel]')) return
+
     const rect = this.canvas.getBoundingClientRect()
     if (
       event.clientX < rect.left || event.clientX > rect.right ||

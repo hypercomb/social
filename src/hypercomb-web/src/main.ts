@@ -2,10 +2,8 @@
 /// <reference path="../../hypercomb-shared/global.d.ts" />
 import '@hypercomb/shared/core/ioc.web'
 
-import { ApplicationRef } from '@angular/core'
 import { bootstrapApplication } from '@angular/platform-browser'
-import { EffectBus } from '@hypercomb/core'
-import { ensureInstall, resyncFromSentinel, backgroundSync, type SyncState } from './setup/ensure-install'
+import { ensureInstall, resyncFromSentinel } from './setup/ensure-install'
 import { initSentinel, type SentinelBridge } from './setup/sentinel-bridge'
 import { resolveImportMap } from './setup/resolve-import-map'
 import { appConfig } from './app.config'
@@ -52,13 +50,11 @@ const bootstrap = async (): Promise<void> => {
 
   const appRef = await bootstrapApplication(App, appConfig)
 
-  // ── Background sync: status check + lazy sentinel ──
-  // Runs after Angular has rendered so the user sees content immediately.
-  // Only loads the sentinel iframe if the cheap manifest.json status check
-  // detects that DCP has new content to install.
+  // ── Push-only updates: sentinel is lazy, initialized on demand ──
+  // No per-load polling. Updates arrive via the `actions:available` event
+  // dispatched by the DCP portal after an explicit push.
   let cachedSentinel: SentinelBridge | null = null
 
-  // Forward-declared so lazyInitSentinel can wire it as the toggle callback
   const resyncAndEnforce = async () => {
     const sentinel = await lazyInitSentinel()
     if (!sentinel) return
@@ -84,21 +80,8 @@ const bootstrap = async (): Promise<void> => {
     return cachedSentinel
   }
 
-  const emitState = (state: SyncState, detail?: { changedFiles?: number; error?: string }) => {
-    EffectBus.emit('install:state', { state, ...(detail ?? {}) })
-  }
-
   // After DCP portal installs, resync + reload (import map is frozen).
   window.addEventListener('actions:available', resyncAndEnforce)
-
-  // Defer the background status check so the UI thread isn't competing
-  // with Angular's first render.
-  setTimeout(() => {
-    void backgroundSync({
-      initSentinel: lazyInitSentinel,
-      onState: emitState,
-    })
-  }, 0)
 }
 
 bootstrap().catch(err => console.error(err))

@@ -169,7 +169,23 @@ var HexImageAtlas = class _HexImageAtlas {
   #atlas;
   #map = /* @__PURE__ */ new Map();
   #failures = /* @__PURE__ */ new Map();
+  // Parallel array tracking which signature currently occupies each
+  // slot. When the monotonic allocator wraps, the slot's pixels are
+  // overwritten by a new image — we must evict the old signature's
+  // `#map` entry at the same moment, or `getImageUV(oldSig)` will
+  // return a UV pointing at the new content and the shader will
+  // render garbage. Keeping #map and #slotToSig in lockstep is the
+  // load-bearing invariant of this atlas.
+  #slotToSig;
   #nextSlot = 0;
+  // Monotonic counter incremented every time a slot is reused — that is,
+  // every time an existing sig's map entry is evicted because its slot
+  // is being overwritten with different content. Callers (the geometry
+  // builder) fold this into their cache key so they know to rebuild
+  // attribute buffers whose baked UVs might point at a slot that now
+  // holds a different image. New loads into fresh slots do NOT bump
+  // this — they can't invalidate any previously-issued UV.
+  #evictionGeneration = 0;
   #cols;
   #rows;
   #cellPx;
@@ -187,6 +203,7 @@ var HexImageAtlas = class _HexImageAtlas {
       scaleMode: "linear",
       antialias: true
     });
+    this.#slotToSig = new Array(this.#cols * this.#rows).fill(null);
     this.#renderer.render({ container: new Container(), target: this.#atlas, clear: true });
   }
   getAtlasTexture() {
@@ -197,6 +214,16 @@ var HexImageAtlas = class _HexImageAtlas {
   }
   getImageUV(sig) {
     return this.#map.get(sig) ?? null;
+  }
+  /**
+   * Monotonic counter of eviction events — how many times a slot has
+   * been reused with different content, invalidating previously-issued
+   * UVs for the displaced signature. Consumers that bake UVs into
+   * buffers should include this in their buffer-cache key so a
+   * generation change forces a rebuild.
+   */
+  get evictionGeneration() {
+    return this.#evictionGeneration;
   }
   /** Returns true if the signature has permanently failed loading (exceeded max retries). */
   hasFailed(sig) {
@@ -212,6 +239,11 @@ var HexImageAtlas = class _HexImageAtlas {
     if (this.hasFailed(sig)) return null;
     const slot = this.#nextSlot % (this.#cols * this.#rows);
     this.#nextSlot++;
+    const previous = this.#slotToSig[slot];
+    if (previous !== null && previous !== sig) {
+      this.#map.delete(previous);
+      this.#evictionGeneration++;
+    }
     const col = slot % this.#cols;
     const row = Math.floor(slot / this.#cols);
     let bitmap;
@@ -253,6 +285,7 @@ var HexImageAtlas = class _HexImageAtlas {
     const v1 = (row * this.#cellPx + padY + imgH) / this.#atlas.height;
     const uv = { u0, v0, u1, v1 };
     this.#map.set(sig, uv);
+    this.#slotToSig[slot] = sig;
     return uv;
   }
   /** Remove a specific entry (e.g. after re-save) so next load picks up the new image */
@@ -270,6 +303,7 @@ var HexLabelAtlas = class {
     this.cellPx = cellPx;
     this.cols = Math.max(1, cols);
     this.rows = Math.max(1, rows);
+    this.slotToLabel = new Array(this.cols * this.rows).fill(null);
     this.atlas = RenderTexture2.create({
       width: this.cols * this.cellPx,
       height: this.rows * this.cellPx,
@@ -294,6 +328,12 @@ var HexLabelAtlas = class {
   }
   atlas;
   map = /* @__PURE__ */ new Map();
+  // Parallel array tracking which label currently owns each slot.
+  // Same invariant as HexImageAtlas: when the allocator wraps, the
+  // slot's pixels are overwritten, so the previous label's UV entry
+  // must be evicted in the same step or `getLabelUV(oldLabel)` will
+  // return pixels belonging to a different label.
+  slotToLabel;
   nextIndex = 0;
   #pivot = false;
   #labelResolver = null;
@@ -304,6 +344,7 @@ var HexLabelAtlas = class {
     if (this.#pivot === pivot) return;
     this.#pivot = pivot;
     this.map.clear();
+    this.slotToLabel.fill(null);
     this.nextIndex = 0;
     this.renderer.render({ container: new Container2(), target: this.atlas, clear: true });
   };
@@ -320,6 +361,7 @@ var HexLabelAtlas = class {
    */
   invalidateLabels = () => {
     this.map.clear();
+    this.slotToLabel.fill(null);
     this.nextIndex = 0;
     this.renderer.render({ container: new Container2(), target: this.atlas, clear: true });
   };
@@ -340,6 +382,9 @@ var HexLabelAtlas = class {
       if (!label || this.map.has(label)) continue;
       const slot = this.nextIndex % (this.cols * this.rows);
       this.nextIndex++;
+      const previous = this.slotToLabel[slot];
+      if (previous !== null && previous !== label) this.map.delete(previous);
+      this.slotToLabel[slot] = label;
       const col = slot % this.cols;
       const row = Math.floor(slot / this.cols);
       const displayText = this.#labelResolver ? this.#labelResolver(label) : label;
@@ -368,6 +413,9 @@ var HexLabelAtlas = class {
     if (cached) return cached;
     const slot = this.nextIndex % (this.cols * this.rows);
     this.nextIndex++;
+    const previous = this.slotToLabel[slot];
+    if (previous !== null && previous !== label) this.map.delete(previous);
+    this.slotToLabel[slot] = label;
     const col = slot % this.cols;
     const row = Math.floor(slot / this.cols);
     const displayText = this.#labelResolver ? this.#labelResolver(label) : label;

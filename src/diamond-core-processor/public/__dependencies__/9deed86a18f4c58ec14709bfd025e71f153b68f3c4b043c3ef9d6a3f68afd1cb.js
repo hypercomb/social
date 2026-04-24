@@ -1,4 +1,60 @@
 // @diamondcoreprocessor.com/history
+// src/diamondcoreprocessor.com/history/collapse-history.queen.ts
+import { QueenBee } from "@hypercomb/core";
+var CollapseHistoryQueenBee = class extends QueenBee {
+  namespace = "diamondcoreprocessor.com";
+  genotype = "history";
+  command = "collapse-history";
+  aliases = ["collapse-histories", "squash-history"];
+  description = "Delete all non-head history entries across every location (dev utility)";
+  execute(_args) {
+    void this.#collapse();
+  }
+  async #collapse() {
+    const store = get("@hypercomb.social/Store");
+    if (!store?.history) {
+      console.warn("[/collapse-history] Store not available");
+      return;
+    }
+    let bags = 0;
+    let removed = 0;
+    for await (const [, bag] of store.history.entries()) {
+      if (bag.kind !== "directory") continue;
+      bags++;
+      try {
+        const layers = await bag.getDirectoryHandle("layers", { create: false });
+        const names = [];
+        for await (const [name, handle] of layers.entries()) {
+          if (handle.kind === "file" && name.endsWith(".json")) names.push(name);
+        }
+        if (names.length <= 1) continue;
+        names.sort();
+        const head = names[names.length - 1];
+        for (const name of names) {
+          if (name === head) continue;
+          await layers.removeEntry(name);
+          removed++;
+        }
+      } catch {
+      }
+    }
+    let cleared = 0;
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const key = localStorage.key(i);
+      if (key?.startsWith("hc:cursor-position:")) {
+        localStorage.removeItem(key);
+        cleared++;
+      }
+    }
+    console.log(
+      `[/collapse-history] ${bags} bag(s); removed ${removed} non-head layer entries; cleared ${cleared} cursor positions. Reloading\u2026`
+    );
+    setTimeout(() => location.reload(), 50);
+  }
+};
+var _collapseHistory = new CollapseHistoryQueenBee();
+window.ioc.register("@diamondcoreprocessor.com/CollapseHistoryQueenBee", _collapseHistory);
+
 // src/diamondcoreprocessor.com/history/global-time-clock.service.ts
 import { EffectBus } from "@hypercomb/core";
 var GlobalTimeClock = class extends EventTarget {
@@ -98,6 +154,11 @@ var HistoryCursorService = class _HistoryCursorService extends EventTarget {
   /**
    * Load (or reload) layer history for a location. Restores persisted
    * cursor position so rewound state survives page refresh.
+   *
+   * Warms the resource cache in the background for every signature
+   * referenced by any historical layer at this location. Undo/redo
+   * targets are in memory by the time the user presses the shortcut —
+   * no cold load, no empty-texture flash.
    */
   async load(locationSig) {
     const historyService = get("@diamondcoreprocessor.com/HistoryService");
@@ -107,12 +168,50 @@ var HistoryCursorService = class _HistoryCursorService extends EventTarget {
       this.#locationSig = locationSig;
       this.#cachedLayerSig = null;
       this.#cachedContent = null;
-      const saved = this.#loadPersistedPosition(locationSig);
-      this.#position = saved !== null && saved < this.#layers.length ? saved : this.#layers.length;
+      this.#position = this.#layers.length;
+      void this.#warmupHistoricalResources();
     } else if (this.#position > this.#layers.length) {
       this.#position = this.#layers.length;
     }
     this.#emit();
+  }
+  /**
+   * Walk every historical layer at the current location and warm every
+   * signature reachable through the layer graph — layer sigs, the
+   * propsSigs they reference, the image/layout sigs inside those
+   * propsSigs, and so on until fixed-point. Each resolve populates the
+   * Store's signature cache, so by the end every past state is in
+   * memory. Undo/redo never cold-loads.
+   *
+   * Traversal is iterative BFS over distinct signatures — a signature
+   * is resolved at most once even if it appears in many layers.
+   */
+  async #warmupHistoricalResources() {
+    const store = get("@hypercomb.social/Store");
+    if (!store?.resolve) return;
+    const visited = /* @__PURE__ */ new Set();
+    const frontier = this.#layers.map((entry) => entry.layerSig);
+    while (frontier.length > 0) {
+      const batch = frontier.splice(0, frontier.length);
+      const fresh = batch.filter((signature) => {
+        if (visited.has(signature)) return false;
+        visited.add(signature);
+        return true;
+      });
+      if (fresh.length === 0) continue;
+      const resolved = await Promise.all(
+        fresh.map((signature) => store.resolve(signature).catch(() => null))
+      );
+      const nextSignatures = /* @__PURE__ */ new Set();
+      for (const content of resolved) {
+        if (content && typeof content === "object") {
+          store.collectSignatures(content, nextSignatures);
+        }
+      }
+      for (const signature of nextSignatures) {
+        if (!visited.has(signature)) frontier.push(signature);
+      }
+    }
   }
   /**
    * Called after LayerCommitter appends a new layer. If cursor was at
@@ -185,7 +284,19 @@ var HistoryCursorService = class _HistoryCursorService extends EventTarget {
     try {
       const blob = await store.getResource(entry.layerSig);
       if (!blob) return null;
-      const content = JSON.parse(await blob.text());
+      const parsed = JSON.parse(await blob.text());
+      const content = {
+        version: 2,
+        cells: parsed.cells ?? [],
+        hidden: parsed.hidden ?? [],
+        contentByCell: parsed.contentByCell ?? {},
+        tagsByCell: parsed.tagsByCell ?? {},
+        notesByCell: parsed.notesByCell ?? {},
+        bees: parsed.bees ?? [],
+        dependencies: parsed.dependencies ?? [],
+        layoutSig: parsed.layoutSig ?? "",
+        instructionsSig: parsed.instructionsSig ?? ""
+      };
       this.#cachedLayerSig = entry.layerSig;
       this.#cachedContent = content;
       return content;
@@ -464,11 +575,10 @@ var HistoryService = class _HistoryService {
     const bytes = new TextEncoder().encode(json).buffer;
     const layerSig = await SignatureService.sign(bytes);
     const head = await this.headLayer(locationSig);
-    if (head?.layerSig === layerSig) return null;
+    if (head && head.layerSig === layerSig) return null;
     const store = get("@hypercomb.social/Store");
-    if (store) {
-      await store.putResource(new Blob([json], { type: "application/json" }));
-    }
+    if (!store) return null;
+    await store.putResource(new Blob([json], { type: "application/json" }));
     const layersDir = await this.#getLayersDir(locationSig);
     const nextIndex = await this.#nextLayerIndex(layersDir);
     const fileName = String(nextIndex).padStart(8, "0") + ".json";
@@ -524,22 +634,45 @@ var HistoryService = class _HistoryService {
   };
   /**
    * List all layer entries for a location, sorted by index ascending.
+   * Entries whose referenced layer resource can no longer be resolved are
+   * filtered out — they are dead pointers that would otherwise render as
+   * "(loading)" forever in the history viewer.
    */
   listLayers = async (locationSig) => {
     const layersDir = await this.#tryGetLayersDir(locationSig);
     if (!layersDir) return [];
-    const out = [];
+    const raw = [];
     for await (const [name, handle] of layersDir.entries()) {
       if (handle.kind !== "file" || !name.endsWith(".json")) continue;
       try {
         const file = await handle.getFile();
         const entry = JSON.parse(await file.text());
-        out.push({ ...entry, index: parseInt(name, 10) });
+        raw.push({ ...entry, index: parseInt(name, 10) });
       } catch {
       }
     }
-    out.sort((a, b) => a.index - b.index);
-    return out;
+    raw.sort((a, b) => a.index - b.index);
+    const store = get("@hypercomb.social/Store");
+    const resolved = /* @__PURE__ */ new Set();
+    if (store) {
+      const uniqueSignatures = Array.from(new Set(raw.map((e) => e.layerSig)));
+      await Promise.all(uniqueSignatures.map(async (signature) => {
+        try {
+          const blob = await store.getResource(signature);
+          if (blob) resolved.add(signature);
+        } catch {
+        }
+      }));
+    }
+    const filtered = [];
+    let previousSignature = null;
+    for (const entry of raw) {
+      if (store && !resolved.has(entry.layerSig)) continue;
+      if (entry.layerSig === previousSignature) continue;
+      filtered.push(entry);
+      previousSignature = entry.layerSig;
+    }
+    return filtered;
   };
   #getLayersDir = async (locationSig) => {
     const bag = await this.getBag(locationSig);
@@ -812,8 +945,8 @@ var _orderProjection = new OrderProjection();
 window.ioc.register("@diamondcoreprocessor.com/OrderProjection", _orderProjection);
 
 // src/diamondcoreprocessor.com/history/revise.queen.ts
-import { QueenBee, EffectBus as EffectBus4 } from "@hypercomb/core";
-var ReviseQueenBee = class extends QueenBee {
+import { QueenBee as QueenBee2, EffectBus as EffectBus4 } from "@hypercomb/core";
+var ReviseQueenBee = class extends QueenBee2 {
   namespace = "diamondcoreprocessor.com";
   genotype = "history";
   command = "revise";
@@ -850,6 +983,7 @@ var ReviseQueenBee = class extends QueenBee {
 var _revise = new ReviseQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/ReviseQueenBee", _revise);
 export {
+  CollapseHistoryQueenBee,
   GlobalTimeClock,
   HistoryCursorService,
   HistoryService,

@@ -6,7 +6,7 @@ import { CommandLineComponent } from '@hypercomb/shared';
 import { MeshHeaderComponent } from '@hypercomb/shared/ui';
 import { TileEditorComponent } from '@hypercomb/shared/ui/tile-editor/tile-editor.component'
 import { TrackPlayerComponent } from '@hypercomb/shared/ui/track-player/track-player.component'
-import { ControlsBarComponent, ShortcutSheetComponent, CommandPaletteComponent, ActivityLogComponent, SelectionContextMenuComponent, AtomizerBarComponent, AtomizerSidebarComponent, ConfirmDialogComponent, ToastComponent, InstructionOverlayComponent, DocsOverlayComponent, NotesStripComponent, NotesViewerComponent } from '@hypercomb/shared/ui';
+import { ControlsBarComponent, ShortcutSheetComponent, CommandPaletteComponent, ActivityLogComponent, SelectionContextMenuComponent, HistoryViewerComponent, AtomizerBarComponent, AtomizerSidebarComponent, ConfirmDialogComponent, ToastComponent, InstructionOverlayComponent, DocsOverlayComponent, NotesStripComponent, NotesViewerComponent } from '@hypercomb/shared/ui';
 import { FormatPainterComponent } from '@hypercomb/shared/ui/format-painter/format-painter.component'
 import { PortalOverlayComponent } from '@hypercomb/shared/ui/portal/portal-overlay.component'
 import { SensitivityBarComponent } from '@hypercomb/shared/ui/sensitivity-bar/sensitivity-bar.component'
@@ -21,7 +21,7 @@ import '@hypercomb/essentials/side-effects'
 
 @Component({
   selector: 'app-root',
-  imports: [ControlsBarComponent, MeshHeaderComponent, RouterOutlet, CommandLineComponent, TileEditorComponent, ShortcutSheetComponent, CommandPaletteComponent, PortalOverlayComponent, ActivityLogComponent, SensitivityBarComponent, SelectionContextMenuComponent, FormatPainterComponent, YoutubeViewerComponent, AtomizerBarComponent, AtomizerSidebarComponent, ConfirmDialogComponent, ToastComponent, InstructionOverlayComponent, DocsOverlayComponent, NotesStripComponent, NotesViewerComponent, TrackPlayerComponent],
+  imports: [ControlsBarComponent, MeshHeaderComponent, RouterOutlet, CommandLineComponent, TileEditorComponent, ShortcutSheetComponent, CommandPaletteComponent, PortalOverlayComponent, ActivityLogComponent, SensitivityBarComponent, SelectionContextMenuComponent, HistoryViewerComponent, FormatPainterComponent, YoutubeViewerComponent, AtomizerBarComponent, AtomizerSidebarComponent, ConfirmDialogComponent, ToastComponent, InstructionOverlayComponent, DocsOverlayComponent, NotesStripComponent, NotesViewerComponent, TrackPlayerComponent],
   styleUrls: ['./app.scss'] as any,
   templateUrl: './app.html'
 })

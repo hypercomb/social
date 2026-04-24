@@ -57,6 +57,14 @@
         <div class="domain-header">
           <span class="domain-url" [title]="group.domain">{{ group.domainName }}/</span>
           <span class="header-sig">{{ group.sections[0]?.rootSig }}</span>
+          @if (group.hiddenVersionCount > 0 || showAllVersions()) {
+            <button class="domain-action versions-toggle"
+              (click)="toggleShowAllVersions()"
+              [class.active]="showAllVersions()"
+              [title]="showAllVersions() ? 'Hide older versions' : 'Show older versions'">
+              @if (showAllVersions()) { &#x25BC; } @else { +{{ group.hiddenVersionCount }} }
+            </button>
+          }
           <button class="domain-action" (click)="downloadPackage(group.sections[0])" [title]="'dcp.download-package' | t">&#8615;</button>
           <button class="remove" (click)="removeDomain(group.domain)">&times;</button>
         </div>

@@ -1,0 +1,257 @@
+:host {
+  // Host is portaled to document.body at runtime, so it lives in the
+  // top-level stacking context. Keeping the host itself as a simple
+  // block with no positioning — the inner <aside> is fixed-positioned.
+  display: block;
+}
+
+.history-viewer {
+  position: fixed;
+  // Leave room for the command-line / header-bar above. The header-bar
+  // is 2.8rem on desktop and ~3.5rem on narrow viewports — bumping up
+  // a little further so the first row never kisses the header border.
+  top: 3.2rem;
+  left: 0;
+  bottom: 0;
+  width: max-content;
+  min-width: 240px;
+  max-width: 50vw;
+  background: rgba(12, 14, 20, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  color: rgba(235, 240, 250, 0.85);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  z-index: 50000;
+  backdrop-filter: blur(6px);
+  pointer-events: auto;
+  isolation: isolate;
+}
+
+.history-viewer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.history-viewer-header .title {
+  font-weight: 500;
+  letter-spacing: 0.3px;
+}
+
+.history-viewer-header .count {
+  font-variant-numeric: tabular-nums;
+  color: rgba(180, 190, 210, 0.7);
+}
+
+.rows {
+  list-style: none;
+  padding: 4px 0;
+  margin: 0;
+  overflow-y: scroll;
+  flex: 1;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(180, 190, 210, 0.45) rgba(255, 255, 255, 0.04);
+  scrollbar-gutter: stable;
+  pointer-events: auto;
+}
+
+.rows::-webkit-scrollbar {
+  width: 10px;
+}
+.rows::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.04);
+}
+.rows::-webkit-scrollbar-thumb {
+  background: rgba(180, 190, 210, 0.45);
+  border-radius: 4px;
+}
+.rows::-webkit-scrollbar-thumb:hover {
+  background: rgba(200, 210, 230, 0.65);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 14px auto 1fr auto;
+  align-items: center;
+  padding: 4px 10px 4px 6px;
+  cursor: pointer;
+  gap: 6px;
+  border-left: 2px solid transparent;
+  transition: background 80ms linear;
+  user-select: none;  // prevent text selection on dbl-click
+}
+
+.slice-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(3px);
+  z-index: 60000;
+}
+
+.slice-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  min-width: 480px;
+  max-width: 80vw;
+  max-height: 80vh;
+  background: rgba(16, 18, 26, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  color: rgba(240, 245, 255, 0.9);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  z-index: 60001;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+}
+
+.slice-modal header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 12px;
+  gap: 12px;
+}
+
+.slice-modal .slice-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(220, 230, 245, 0.85);
+}
+
+.slice-modal .slice-close {
+  background: transparent;
+  border: none;
+  color: rgba(200, 210, 230, 0.8);
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0 6px;
+  line-height: 1;
+}
+.slice-modal .slice-close:hover {
+  color: rgba(255, 255, 255, 1);
+}
+
+.slice-modal .slice-json {
+  margin: 0;
+  padding: 14px 16px;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow: auto;
+  white-space: pre;
+  color: rgba(230, 235, 245, 0.92);
+}
+
+.row:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.row.active {
+  background: rgba(100, 170, 255, 0.12);
+  border-left-color: rgba(110, 180, 255, 0.9);
+  color: rgba(255, 255, 255, 0.98);
+}
+
+.row .indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+  display: inline-block;
+}
+
+.row .row-icon {
+  width: 14px;
+  height: 14px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.row[data-category="cells"]       .indicator { background: #6dc077; }
+.row[data-category="cells"]       .row-icon  { color:      #6dc077; }
+.row[data-category="content"]     .indicator { background: #5f8bd9; }
+.row[data-category="content"]     .row-icon  { color:      #5f8bd9; }
+.row[data-category="tags"]        .indicator { background: #d9c25f; }
+.row[data-category="tags"]        .row-icon  { color:      #d9c25f; }
+.row[data-category="notes"]       .indicator { background: #b37dd4; }
+.row[data-category="notes"]       .row-icon  { color:      #b37dd4; }
+.row[data-category="visibility"]  .indicator { background: #b1b7c2; }
+.row[data-category="visibility"]  .row-icon  { color:      #b1b7c2; }
+.row[data-category="system"]      .indicator { background: #e08c4d; }
+.row[data-category="system"]      .row-icon  { color:      #e08c4d; }
+.row[data-category="none"]        .indicator { background: rgba(255, 255, 255, 0.10); }
+
+.filter-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 4px 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.filter-toggle {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 3px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  opacity: 0.35;
+  transition: opacity 80ms linear, background 80ms linear, border-color 80ms linear;
+}
+
+.filter-toggle hc-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.filter-toggle:hover {
+  opacity: 0.75;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.filter-toggle.active {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.filter-toggle[data-category="cells"]       { color: #6dc077; }
+.filter-toggle[data-category="content"]     { color: #5f8bd9; }
+.filter-toggle[data-category="tags"]        { color: #d9c25f; }
+.filter-toggle[data-category="notes"]       { color: #b37dd4; }
+.filter-toggle[data-category="visibility"]  { color: #b1b7c2; }
+.filter-toggle[data-category="system"]      { color: #e08c4d; }
+
+.row .idx {
+  font-variant-numeric: tabular-nums;
+  color: rgba(200, 210, 230, 0.85);
+  min-width: 28px;
+}
+
+.row .summary {
+  color: rgba(230, 235, 245, 0.92);
+  white-space: nowrap;
+}
+
+.row .when {
+  color: rgba(160, 170, 190, 0.7);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}

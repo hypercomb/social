@@ -13,30 +13,49 @@
       <span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span>
     </div>
 
-    <!-- action buttons -->
-    <button class="ctx-btn" (click)="cut()" [attr.aria-label]="'selection.cut' | t">
-      <span class="hci">F</span>
-    </button>
-    <button class="ctx-btn" (click)="copy()" [attr.aria-label]="'selection.copy' | t">
-      <span class="hci">%</span>
-    </button>
-    <button class="ctx-btn" (click)="remove()" [attr.aria-label]="'selection.remove' | t">
-      <span class="hci">Q</span>
-    </button>
-
-    <div class="ctx-divider"></div>
-    <button class="ctx-btn" (click)="hide()" [attr.aria-label]="'selection.hide' | t">
-      <span class="eye-icon" [class.struck]="!allHidden()"></span>
-    </button>
-    <button class="ctx-btn" (click)="reroll()" [attr.aria-label]="'selection.reroll' | t">
-      <span class="reroll-icon"></span>
-    </button>
-
-    @if (clipboardCount() > 0) {
-      <div class="ctx-divider"></div>
-      <button class="ctx-btn" (click)="paste()" [attr.aria-label]="'selection.paste' | t">
-        <span class="hci" style="color:#4caf50">G</span>
+    @if (selectionActive()) {
+      <!-- selection pack (hard-coded for parity with previous behaviour) -->
+      <button class="ctx-btn" (click)="cut()" [attr.aria-label]="'selection.cut' | t">
+        <span class="hci">F</span>
       </button>
+      <button class="ctx-btn" (click)="copy()" [attr.aria-label]="'selection.copy' | t">
+        <span class="hci">%</span>
+      </button>
+      <button class="ctx-btn" (click)="remove()" [attr.aria-label]="'selection.remove' | t">
+        <span class="hci">Q</span>
+      </button>
+
+      <div class="ctx-divider"></div>
+      <button class="ctx-btn" (click)="hide()" [attr.aria-label]="'selection.hide' | t">
+        <span class="eye-icon" [class.struck]="!allHidden()"></span>
+      </button>
+      <button class="ctx-btn" (click)="reroll()" [attr.aria-label]="'selection.reroll' | t">
+        <span class="reroll-icon"></span>
+      </button>
+
+      @if (clipboardCount() > 0) {
+        <div class="ctx-divider"></div>
+        <button class="ctx-btn" (click)="paste()" [attr.aria-label]="'selection.paste' | t">
+          <span class="hci" style="color:#4caf50">G</span>
+        </button>
+      }
+    } @else if (activePack(); as pack) {
+      <!-- active pack (history etc.) — rendered from MenuRegistry -->
+      @for (item of packItems(); track $index) {
+        @if (isDivider(item)) {
+          <div class="ctx-divider"></div>
+        } @else if (isButtonVisible($any(item))) {
+          <button class="ctx-btn"
+                  (click)="$any(item).onClick()"
+                  [attr.aria-label]="$any(item).labelKey | t">
+            @if ($any(item).hci) {
+              <span class="hci" [style.color]="$any(item).colour ?? null">{{ $any(item).hci }}</span>
+            } @else if ($any(item).cssClass) {
+              <span [class]="$any(item).cssClass"></span>
+            }
+          </button>
+        }
+      }
     }
   </div>
 }

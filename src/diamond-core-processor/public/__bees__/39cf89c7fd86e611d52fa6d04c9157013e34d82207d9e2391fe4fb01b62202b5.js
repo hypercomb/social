@@ -625,7 +625,7 @@ var MoveDrone = class extends Drone {
       if (gridIndex === void 0) continue;
       try {
         const cellDir = await dir.getDirectoryHandle(label, { create: false });
-        await writeCellProperties(cellDir, { index: gridIndex, offset: 0 });
+        await writeCellProperties(cellDir, { index: gridIndex });
       } catch {
       }
     }
@@ -639,7 +639,7 @@ var MoveDrone = class extends Drone {
       if (!label) continue;
       try {
         const cellDir = await dir.getDirectoryHandle(label, { create: false });
-        await writeCellProperties(cellDir, { index: i, offset: 0 });
+        await writeCellProperties(cellDir, { index: i });
       } catch {
       }
     }

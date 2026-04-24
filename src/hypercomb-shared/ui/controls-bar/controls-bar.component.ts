@@ -1180,8 +1180,8 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   readonly toggleLayout = (): void => {
-    this.#layoutPinned.update(v => !v)
-    EffectBus.emit('layout:mode', { mode: this.#layoutPinned() ? 'pinned' : 'dense' })
+    // Dense/spiral layout has been phased out — pinned is the only
+    // mode. Toggle is a no-op kept for action-map compatibility.
   }
 
   readonly toggleMeshPublic = (): void => {

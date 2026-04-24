@@ -169,6 +169,18 @@ dcp-command-line {
   color: #4a6fa5;
 }
 
+.versions-toggle {
+  font-family: var(--hc-mono);
+  font-size: 12px;
+  border-radius: 4px;
+  min-width: 28px;
+  text-align: center;
+
+  &.active {
+    color: #4a6fa5;
+  }
+}
+
 .remove {
   background: none;
   border: none;

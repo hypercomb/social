@@ -177,6 +177,8 @@
   "history.path": "path:",
   "history.depth": "depth:",
   "history.active": "active:",
+  "history.viewer-title": "history",
+  "history.close-slice": "close layer inspector",
 
   "slash.select": "select tiles for cut/copy/move",
   "slash.remove-builtin": "remove selected tiles",

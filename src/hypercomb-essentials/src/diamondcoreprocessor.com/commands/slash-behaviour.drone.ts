@@ -402,17 +402,9 @@ class LlmProvider implements SlashBehaviourProvider {
   }
 }
 
-class SwirlProvider implements SlashBehaviourProvider {
-  readonly name = 'swirl-provider'
-  readonly priority = 100
-  readonly behaviours: SlashBehaviour[] = [
-    { name: 'swirl', description: 'Arrange tiles into the index spiral', descriptionKey: 'slash.swirl' }
-  ]
-
-  async execute(): Promise<void> {
-    EffectBus.emit('layout:swirl', {})
-  }
-}
+// SwirlProvider removed — the index-spiral layout has been phased out.
+// Pinned is the only layout mode and cell positions are owned by
+// per-cell indices stored in 0000 properties.
 
 class ArrangeProvider implements SlashBehaviourProvider {
   readonly name = 'arrange-provider'
@@ -622,7 +614,6 @@ _slashBehaviours.addProvider(new ReviseProvider())
 _slashBehaviours.addProvider(new ExpandProvider())
 _slashBehaviours.addProvider(new ChatProvider())
 _slashBehaviours.addProvider(new LlmProvider())
-_slashBehaviours.addProvider(new SwirlProvider())
 _slashBehaviours.addProvider(new ArrangeProvider())
 _slashBehaviours.addProvider(new VoiceProvider())
 _slashBehaviours.addProvider(new PushToTalkProvider())

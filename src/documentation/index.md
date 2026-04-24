@@ -32,6 +32,7 @@ The complete reference. Every page is also reachable through `/help` in the app 
 
 - [architecture-fundamentals.md](architecture-fundamentals.md) — The runtime: hive, drones, effect bus, hex grid, OPFS, mesh
 - [core-processor-architecture.md](core-processor-architecture.md) — `@hypercomb/core`: zero-dependency foundation and build pipeline
+- [install-push-only.md](install-push-only.md) — Push-only install model: Hypercomb load is inert, DCP pushes updates, labels are branches
 
 ## Protocols
 

@@ -878,10 +878,29 @@ export class ShowCellDrone extends Drone {
     if (cells.length === 0) return
 
     // reuse cached image sigs (no OPFS read needed)
+    const atlas = this.imageAtlas
+    const needReload: Cell[] = []
     for (const cell of cells) {
       if (this.cellImageCache.has(cell.label)) {
-        cell.imageSig = this.cellImageCache.get(cell.label) ?? undefined
+        const cachedSig = this.cellImageCache.get(cell.label) ?? undefined
+        cell.imageSig = cachedSig
+        // If the atlas evicted this sig (wrap) we must re-queue a load
+        // or the shader falls back to label. Collect here, load after
+        // the loop so loadCellImages handles batching + dedup.
+        if (cachedSig && atlas && !atlas.hasImage(cachedSig) && !atlas.hasFailed(cachedSig)) {
+          needReload.push(cell)
+        }
       }
+    }
+
+    if (needReload.length > 0) {
+      void (async () => {
+        const lineage = this.resolve<any>('lineage')
+        const dir = await lineage?.explorerDir?.()
+        if (!dir) return
+        await this.loadCellImages(needReload, dir)
+        this.requestRender()
+      })()
     }
 
     this.renderedCells.clear()
@@ -968,14 +987,34 @@ export class ShowCellDrone extends Drone {
 
     // Populate cells from caches — newly-added cells have no cache entry and
     // will render blank until the async fill completes.
+    const atlas = this.imageAtlas
+    const needReload: Cell[] = []
     for (const cell of cells) {
       if (cell.external) continue
-      if (this.cellImageCache.has(cell.label)) cell.imageSig = this.cellImageCache.get(cell.label) ?? undefined
+      if (this.cellImageCache.has(cell.label)) {
+        const cachedSig = this.cellImageCache.get(cell.label) ?? undefined
+        cell.imageSig = cachedSig
+        // atlas eviction check — if the cached sig is no longer in the
+        // atlas (wrap displaced it) queue a reload. Same shape as the
+        // renderIncremental path above.
+        if (cachedSig && atlas && !atlas.hasImage(cachedSig) && !atlas.hasFailed(cachedSig)) {
+          needReload.push(cell)
+        }
+      }
       const bc = this.cellBorderColorCache.get(cell.label)
       if (bc) cell.borderColor = bc
       cell.hasLink = this.cellLinkCache.get(cell.label) ?? false
       cell.hasSubstrate = this.cellSubstrateCache.get(cell.label) ?? false
       cell.hideText = this.cellHideTextCache.get(cell.label) ?? false
+    }
+    if (needReload.length > 0) {
+      void (async () => {
+        const lineage = this.resolve<any>('lineage')
+        const dir = await lineage?.explorerDir?.()
+        if (!dir) return
+        await this.loadCellImages(needReload, dir)
+        this.requestRender()
+      })()
     }
 
     this.renderedCells.clear()
@@ -1076,7 +1115,20 @@ export class ShowCellDrone extends Drone {
     if (cells.length === 0) { this.clearMesh(); return }
 
     const touched = new Set<string>([...(change.added ?? []), ...(change.changedContent ?? [])])
-    const needLoad = cells.filter(c => touched.has(c.label) || !this.cellImageCache.has(c.label))
+    // Include cells whose cached sig is no longer in the atlas — the
+    // atlas may have evicted it since the last render (wrap around the
+    // slot allocator). Without this, the cell keeps its stale cached
+    // sig but the atlas can't resolve its UV, and the shader falls
+    // back to the label forever. loadOne's fast-path reload handles
+    // the actual re-fetch; here we just make sure loadOne is called.
+    const atlas = this.imageAtlas
+    const needLoad = cells.filter(c => {
+      if (touched.has(c.label)) return true
+      if (!this.cellImageCache.has(c.label)) return true
+      const cachedSig = this.cellImageCache.get(c.label)
+      if (cachedSig && atlas && !atlas.hasImage(cachedSig) && !atlas.hasFailed(cachedSig)) return true
+      return false
+    })
     if (needLoad.length > 0) await this.loadCellImages(needLoad, dir)
 
     for (const cell of cells) {
@@ -1150,11 +1202,8 @@ export class ShowCellDrone extends Drone {
       this.attachLabelResolver(this.atlas)
       this.atlas.setPivot(this.#pivot)
       if (this.#warmLabels.length) this.atlas.seed(this.#warmLabels)
-      this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8)
-      this.cellImageCache.clear()
-      this.cellBorderColorCache.clear()
-      this.cellSubstrateCache.clear()
-      this.cellHideTextCache.clear()
+      this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 16, 16)
+      this.#invalidateAllLabelDerivedState()
       this.atlasRenderer = this.pixiRenderer
       this.shader = null
     } else if (!this.atlas || this.atlasRenderer !== this.pixiRenderer) {
@@ -1162,11 +1211,8 @@ export class ShowCellDrone extends Drone {
       this.attachLabelResolver(this.atlas)
       this.atlas.setPivot(this.#pivot)
       if (this.#warmLabels.length) this.atlas.seed(this.#warmLabels)
-      this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8)
-      this.cellImageCache.clear()
-      this.cellBorderColorCache.clear()
-      this.cellSubstrateCache.clear()
-      this.cellHideTextCache.clear()
+      this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 16, 16)
+      this.#invalidateAllLabelDerivedState()
       this.atlasRenderer = this.pixiRenderer
       this.shader = null
     }
@@ -1298,46 +1344,45 @@ export class ShowCellDrone extends Drone {
             localCellSet.add(cell)
           }
 
+          // contentByCell must be set on every render while rewound, not just
+          // when reconKey changes. Line 1296 clears #cursorPropsOverride to
+          // null at the top of every render; without this repopulation, the
+          // second render at the same cursor position (triggered by
+          // synchronize / substrate / resize) leaves the override null, and
+          // loadCellImages falls back to livePropsIndex — which has no entry
+          // for historical cells whose content has since moved or whose
+          // tiles were deleted. Images vanish on the second rewound render.
+          if (Object.keys(content.contentByCell).length > 0) {
+            this.#cursorPropsOverride = new Map(Object.entries(content.contentByCell))
+          }
+
           const reconKey = `${cursorState!.locationSig}:${cursorState!.position}`
           if (reconKey !== this.#cursorReconstructionKey) {
             this.#cursorReconstructionKey = reconKey
-
-            // contentByCell: cell label → properties signature at cursor time
-            if (Object.keys(content.contentByCell).length > 0) {
-              this.#cursorPropsOverride = new Map(Object.entries(content.contentByCell))
-            }
 
             // tagsByCell: override the live tag cache with cursor-time tags
             for (const [cell, tags] of Object.entries(content.tagsByCell)) {
               this.cellTagsCache.set(cell, tags)
             }
 
-            // layoutSig: resolve and apply orientation/pivot/gap/mode
-            const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as
-              { getResource: (sig: string) => Promise<Blob | null> } | undefined
-            if (store && content.layoutSig) {
-              try {
-                const blob = await store.getResource(content.layoutSig)
-                if (blob) {
-                  const layout = JSON.parse(await blob.text())
-                  const flat = layout.orientation === 'flat-top'
-                  if (this.#flat !== flat) {
-                    this.#flat = flat
-                    this.cellImageCache.clear()
-                  }
-                  if (typeof layout.pivot === 'boolean' && this.#pivot !== layout.pivot) {
-                    this.#pivot = layout.pivot
-                    this.atlas?.setPivot(this.#pivot)
-                  }
-                  if (typeof layout.gapPx === 'number' && this.#hexGeo.gapPx !== layout.gapPx) {
-                    this.#hexGeo = createHexGeometry(this.#hexGeo.circumRadiusPx, layout.gapPx, this.#hexGeo.padPx)
-                  }
-                  if (layout.mode === 'dense' || layout.mode === 'pinned') {
-                    this.#layoutMode = layout.mode
-                  }
-                }
-              } catch { /* skip corrupted layout */ }
-            }
+            // NOTE: previously, rewound-render resolved `content.layoutSig`
+            // and applied orientation/pivot/gap/mode from the historical
+            // layer, mutating `this.#hexGeo`, `this.#flat`, `this.#pivot`,
+            // and `this.#layoutMode`. That mutation was one-way — when the
+            // cursor returned to head, nothing restored the live geometry,
+            // so a single Ctrl+Z followed by Ctrl+Y left the app with
+            // historical (often zero-gap) geometry applied to the current
+            // view until a full page refresh reset the defaults. This also
+            // produced the "crunched tiles after Ctrl+Z" regression when
+            // historical layers carried uninitialised layout resources.
+            //
+            // For now, historical layout is intentionally NOT applied.
+            // Cell set / contentByCell / tagsByCell reconstruction above
+            // still runs, so the set of cells and their content/tags match
+            // the past state, while dimensions stay on the user's live
+            // layout. Re-enable once (a) every historical layer is known
+            // to carry valid layout state, and (b) there is a symmetric
+            // "restore live layout" path when the cursor exits rewound.
           }
         }
       }
@@ -1876,7 +1921,21 @@ export class ShowCellDrone extends Drone {
       this.#lastCursorPosition = nowPosition
       this.#lastCursorRewound = nowRewound
       this.#layerCellsCache.clear()
+      // Every per-label cache is keyed by cell label, not by content
+      // signature. On a cursor move the effective propsSig for each
+      // label changes (historical while rewound, live at head), so the
+      // caches must be dropped or the view stays stuck on first-loaded
+      // state. Invalidating through a single helper keeps the six
+      // label-keyed maps in lock-step; longer term these collapse into
+      // one propsSig-keyed derived-state cache.
+      this.#invalidateAllLabelDerivedState()
       this.renderedCellsKey = ''
+      // Apply the layer's layout state (text-only, orientation, pivot,
+      // gap, mode) so every cursor step restores the full visible
+      // configuration. Fires on both rewound and head — at head the
+      // layer mirrors live state because every user intent commits, so
+      // applying head is a no-op modulo redundant emits.
+      void this.#applyCursorLayout()
       this.requestRender()
     })
 
@@ -2145,25 +2204,39 @@ export class ShowCellDrone extends Drone {
     // cell. Only this one cell's imageSig changed; route through the in-place
     // buffer update so the rest of the grid never repaints. If the cell isn't
     // currently indexed (e.g. first-render race), fall back to incremental.
+    //
+    // Cache invalidation must NOT precede the reload. Deleting
+    // cellImageCache[cell] up front and then awaiting loadCellImages
+    // leaves a window where any concurrent render (another effect
+    // fires, requestRender runs) reads an empty cache, produces
+    // `cell.imageSig = undefined`, and buildFillQuadGeometry bakes
+    // `hasImage = 0` into the buffer — permanently, because subsequent
+    // renders see the same cellsKey and skip the rebuild. Keep the old
+    // cache entry live until #tryInPlaceCellUpdate has re-read props
+    // and re-populated it; any concurrent render then sees the stale-
+    // but-valid sig and renders the previous image instead of an empty
+    // tile. When the update finishes, the buffer is patched in place
+    // with the new sig.
     this.onEffect<{ cell: string }>('substrate:applied', (payload) => {
       if (!payload?.cell) return
-      this.cellImageCache.delete(payload.cell)
-      this.cellSubstrateCache.delete(payload.cell)
       void this.#tryInPlaceCellUpdate(payload.cell, { dir: null }).then(done => {
+        this.cellSubstrateCache.delete(payload.cell)
         if (!done && this.#slots.seeded) {
+          this.cellImageCache.delete(payload.cell)
           void this.renderIncremental({ changedContent: [payload.cell] })
         }
       })
     })
 
     // substrate:rerolled — user rerolled a single tile's substrate. Same
-    // per-cell change shape as substrate:applied; same routing.
+    // per-cell change shape as substrate:applied; same routing and same
+    // deferred-invalidation discipline.
     this.onEffect<{ cell: string }>('substrate:rerolled', (payload) => {
       if (!payload?.cell) return
-      this.cellImageCache.delete(payload.cell)
-      this.cellSubstrateCache.delete(payload.cell)
       void this.#tryInPlaceCellUpdate(payload.cell, { dir: null }).then(done => {
+        this.cellSubstrateCache.delete(payload.cell)
         if (!done && this.#slots.seeded) {
+          this.cellImageCache.delete(payload.cell)
           void this.renderIncremental({ changedContent: [payload.cell] })
         }
       })
@@ -2191,24 +2264,10 @@ export class ShowCellDrone extends Drone {
       void this.#handleReorder(payload.labels)
     })
 
-    this.onEffect<{ mode: 'dense' | 'pinned' }>('layout:mode', (payload) => {
-      if (payload?.mode && payload.mode !== this.#layoutMode) {
-        this.#layoutMode = payload.mode
-        this.#persistLayoutMode(payload.mode)
-        this.#layerCellsCache.clear()
-        this.#slots.clear()  // mode change invalidates slot layout
-        this.renderedCellsKey = ''
-        this.requestRender()
-      }
-    })
-
-    this.onEffect('layout:swirl', () => {
-      this.#layoutMode = 'dense'
-      this.#layerCellsCache.clear()
-      this.#slots.clear()
-      this.renderedCellsKey = ''
-      this.requestRender()
-    })
+    // layout:mode and layout:swirl are legacy — the renderer now
+    // operates only in pinned mode. Any incoming event is a no-op so
+    // historical layers that still carry `mode: 'dense'` or a stray
+    // /swirl command don't resurrect the spiral layout.
 
     this.onEffect<{ gapPx: number }>('render:set-gap', (payload) => {
       if (this.#hexGeo.gapPx !== payload.gapPx) {
@@ -2268,6 +2327,85 @@ export class ShowCellDrone extends Drone {
         return await this.computeSignatureLocation(lineage)
       }
     }
+  }
+
+  /**
+   * Apply the layer's layout state to the live renderer. Called on every
+   * cursor move (undo/redo/seek) so the visible configuration always
+   * matches the layer at the current cursor position. At head this is a
+   * no-op because every user intent commits and the live state already
+   * matches — we still run it for symmetry so returning to head after a
+   * rewound view restores whatever the layout was at head.
+   *
+   * Emits absolute-value events so the rest of the system (LayerCommitter,
+   * atlases, shader subscribers) stays in lock-step. commitLayer dedupes
+   * identical layouts, so redundant emits do not grow history.
+   *
+   * Fields with default-equivalent values in older layers (empty string,
+   * zero gap) are skipped so legacy entries do not regress the live view
+   * — the "crunched tiles" regression happened when historical layers
+   * without populated layout were applied verbatim.
+   */
+  /**
+   * Drop every label-keyed derived-state cache in one call. These six
+   * maps are views of the same identity (facts derived from a
+   * propsSig), so invalidation always happens together. Centralising
+   * the clear keeps the cursor-change and explorer-ready paths from
+   * having to list each map individually.
+   */
+  #invalidateAllLabelDerivedState = (): void => {
+    this.cellImageCache.clear()
+    this.cellBorderColorCache.clear()
+    this.cellTagsCache.clear()
+    this.cellLinkCache.clear()
+    this.cellSubstrateCache.clear()
+    this.cellHideTextCache.clear()
+  }
+
+  #applyCursorLayout = async (): Promise<void> => {
+    const cursorService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryCursorService') as HistoryCursorService | undefined
+    if (!cursorService) return
+    const content = await cursorService.layerContentAtCursor()
+    if (!content?.layoutSig) return
+    const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as
+      { getResource: (sig: string) => Promise<Blob | null> } | undefined
+    if (!store) return
+    let layout: {
+      mode?: string
+      orientation?: 'flat-top' | 'point-top'
+      pivot?: boolean
+      accent?: string
+      gapPx?: number
+      textOnly?: boolean
+    } | null = null
+    try {
+      const blob = await store.getResource(content.layoutSig)
+      if (!blob) return
+      layout = JSON.parse(await blob.text())
+    } catch {
+      return
+    }
+    if (!layout) return
+
+    // text-only: newly captured field — apply unconditionally against the
+    // current live state so undo/redo of the controls-bar toggle works.
+    // Missing field implies default (false).
+    const nextTextOnly = !!layout.textOnly
+    if (this.#textOnly !== nextTextOnly) {
+      this.emitEffect<{ textOnly: boolean }>('render:set-text-only', { textOnly: nextTextOnly })
+    }
+    if (layout.orientation && layout.orientation !== (this.#flat ? 'flat-top' : 'point-top')) {
+      this.emitEffect<{ flat: boolean }>('render:set-orientation', { flat: layout.orientation === 'flat-top' })
+    }
+    if (typeof layout.pivot === 'boolean' && layout.pivot !== this.#pivot) {
+      this.emitEffect<{ pivot: boolean }>('render:set-pivot', { pivot: layout.pivot })
+    }
+    if (typeof layout.gapPx === 'number' && layout.gapPx > 0 && layout.gapPx !== this.#hexGeo.gapPx) {
+      this.emitEffect<{ gapPx: number }>('render:set-gap', { gapPx: layout.gapPx })
+    }
+    // layout.mode intentionally not restored — dense/spiral has been
+    // phased out and the renderer operates only in pinned mode. Historical
+    // layers that still carry `mode: 'dense'` stay inert on replay.
   }
 
   protected override dispose = (): void => {
@@ -2359,7 +2497,7 @@ export class ShowCellDrone extends Drone {
     this.shader = null
     this.atlas = new HexLabelAtlas(renderer, 128, 8, 8)
     this.attachLabelResolver(this.atlas)
-    this.imageAtlas = new HexImageAtlas(renderer, 256, 8, 8)
+    this.imageAtlas = new HexImageAtlas(renderer, 256, 16, 16)
     this.cellImageCache.clear()
     this.atlasRenderer = renderer
   }
@@ -2446,7 +2584,7 @@ export class ShowCellDrone extends Drone {
         if (localCellSet.has(name)) {
           try {
             const cellDir = await dir.getDirectoryHandle(name, { create: false })
-            await writeCellProperties(cellDir, { index: nextFree, offset: 0 })
+            await writeCellProperties(cellDir, { index: nextFree })
           } catch { /* skip */ }
         }
         nextFree++
@@ -2458,17 +2596,18 @@ export class ShowCellDrone extends Drone {
 
   /**
    * Central ordering strategy — all render paths route through here.
-   * Each layout mode implements its own ordering logic; new modes add a case.
-   * Returns a name array ready for buildCellsFromAxial:
-   *   - dense: packed array (cellNames[i] → axial position i)
-   *   - pinned: sparse array with empty-string gaps (cellNames[i] → axial position i)
+   * Pinned is the only mode: each cell sits at its persisted `index`
+   * slot, gaps are preserved, and collision is resolved by moving the
+   * loser to the next free slot (persisted on write). Returns a sparse
+   * array where cellNames[i] → axial position i, with empty-string
+   * entries marking unoccupied slots.
    */
   async #resolveCellOrder(
-    mode: string,
+    _mode: string,
     dir: FileSystemDirectoryHandle,
     union: Set<string>,
     localCellSet: Set<string>,
-    lineage: any,
+    _lineage: any,
   ): Promise<string[]> {
     // Clipboard view is a preview surface — pack cells contiguously from
     // slot 0 so they render near the viewport origin regardless of whatever
@@ -2477,169 +2616,47 @@ export class ShowCellDrone extends Drone {
       return [...union].sort((a, b) => a.localeCompare(b))
     }
 
-    switch (mode) {
-      case 'pinned': {
-        // When cursor is rewound, use cursor-aware ordering to avoid overlap
-        // from deleted cells losing their OPFS-stored slot positions
-        const pinnedCursor = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryCursorService') as
-          HistoryCursorService | undefined
-        const pinnedRewound = pinnedCursor?.state?.rewound ?? false
+    // When cursor is rewound, use cursor-aware ordering so deletions
+    // that happened later don't leave stale slot indices in OPFS
+    // overlapping the rewound cell set.
+    const cursor = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryCursorService') as
+      HistoryCursorService | undefined
+    const isRewound = cursor?.state?.rewound ?? false
 
-        let cellNames: string[]
-        if (pinnedRewound && pinnedCursor) {
-          const pinnedContent = await pinnedCursor.layerContentAtCursor()
-          const order = pinnedContent?.cells ?? []
-          if (order.length > 0) {
-            const unionSet = new Set(union)
-            const filtered = order.filter(s => unionSet.has(s))
-            for (const s of union) {
-              if (!filtered.includes(s)) filtered.push(s)
-            }
-            // Build sparse array from cursor order — each cell keeps its relative slot
-            const axial = this.resolve<any>('axial')
-            const maxSlot = axial?.count ?? 60
-            const sparse: string[] = new Array(maxSlot + 1).fill('')
-            for (let i = 0; i < filtered.length && i <= maxSlot; i++) {
-              sparse[i] = filtered[i]
-            }
-            cellNames = sparse
-          } else {
-            cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet)
-          }
-        } else {
-          cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet)
+    let cellNames: string[]
+    if (isRewound && cursor) {
+      const content = await cursor.layerContentAtCursor()
+      const order = content?.cells ?? []
+      if (order.length > 0) {
+        const unionSet = new Set(union)
+        const filtered = order.filter(s => unionSet.has(s))
+        for (const s of union) {
+          if (!filtered.includes(s)) filtered.push(s)
         }
-
-        if (this.filterKeyword) {
-          const kw = this.filterKeyword
-          cellNames = cellNames.map(s => s && s.toLowerCase().includes(kw) ? s : '')
+        const axial = this.resolve<any>('axial')
+        const maxSlot = axial?.count ?? 60
+        const sparse: string[] = new Array(maxSlot + 1).fill('')
+        for (let i = 0; i < filtered.length && i <= maxSlot; i++) {
+          sparse[i] = filtered[i]
         }
-        return cellNames
+        cellNames = sparse
+      } else {
+        cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet)
       }
-
-      // dense (default): pack tiles contiguously
-      default: {
-        let cellNames: string[]
-        let orderFromProjection = false
-
-        // When cursor is rewound, derive order from history up to cursor position
-        // (OrderProjection's live cache reflects head state, not cursor state)
-        const cursorService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryCursorService') as
-          HistoryCursorService | undefined
-        const isRewound = cursorService?.state?.rewound ?? false
-
-        if (isRewound && cursorService) {
-          const rewoundContent = await cursorService.layerContentAtCursor()
-          const order = rewoundContent?.cells ?? []
-          if (order.length > 0) {
-            orderFromProjection = true
-            const unionSet = new Set(union)
-            cellNames = order.filter(s => unionSet.has(s))
-            for (const s of union) {
-              if (!cellNames.includes(s)) cellNames.push(s)
-            }
-          } else {
-            cellNames = await this.#orderByIndex(dir, Array.from(union), localCellSet)
-          }
-        } else {
-          const orderProjection = (window as any).ioc?.get?.('@diamondcoreprocessor.com/OrderProjection') as
-            { hydrate(sig: string): Promise<string[]> } | undefined
-          if (orderProjection) {
-            const locSig = await this.computeSignatureLocation(lineage)
-            const order = await orderProjection.hydrate(locSig.sig)
-            if (order.length > 0) {
-              orderFromProjection = true
-              const unionSet = new Set(union)
-              cellNames = order.filter(s => unionSet.has(s))
-              for (const s of union) {
-                if (!cellNames.includes(s)) cellNames.push(s)
-              }
-            } else {
-              cellNames = await this.#orderByIndex(dir, Array.from(union), localCellSet)
-            }
-          } else {
-            cellNames = await this.#orderByIndex(dir, Array.from(union), localCellSet)
-          }
-        }
-
-        // apply __layout__ ONLY as initial fallback — OrderProjection is authoritative
-        // once it has data from add/remove/reorder history
-        if (!orderFromProjection) {
-          const layout = this.resolve<any>('layout')
-          if (layout) {
-            const order = await layout.read(dir)
-            if (order) cellNames = layout.merge(order, cellNames)
-          }
-        }
-
-        if (this.filterKeyword) {
-          const kw = this.filterKeyword
-          cellNames = cellNames.filter((s: string) => s.toLowerCase().includes(kw))
-        }
-        return cellNames
-      }
+    } else {
+      cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet)
     }
+
+    if (this.filterKeyword) {
+      const kw = this.filterKeyword
+      cellNames = cellNames.map(s => s && s.toLowerCase().includes(kw) ? s : '')
+    }
+    return cellNames
   }
 
-  /**
-   * Order cells by their persisted index in the 0000 properties file.
-   * Cells without an index get the next available index and are written back.
-   * External (mesh) cells are always re-indexed locally.
-   */
-  async #orderByIndex(dir: FileSystemDirectoryHandle, names: string[], localCellSet: Set<string>): Promise<string[]> {
-    const indexed: { name: string; position: number }[] = []
-    const unindexed: string[] = []
-    let maxIndex = -1
-
-    for (const name of names) {
-      if (!localCellSet.has(name)) {
-        unindexed.push(name)
-        continue
-      }
-      try {
-        const cellDir = await dir.getDirectoryHandle(name, { create: false })
-        const props = await readCellProperties(cellDir)
-        if (typeof props['index'] === 'number') {
-          const idx = props['index'] as number
-          const off = typeof props['offset'] === 'number' ? props['offset'] as number : 0
-          indexed.push({ name, position: idx + off })
-          if (idx > maxIndex) maxIndex = idx
-        } else {
-          unindexed.push(name)
-        }
-      } catch {
-        unindexed.push(name)
-      }
-    }
-
-    // sort by effective position (index + offset)
-    indexed.sort((a, b) => a.position - b.position)
-
-    // assign next available permanent index to unindexed cells
-    // offset must place new tiles AFTER all existing tiles so existing positions don't shift
-    let nextIndex = maxIndex + 1
-    const maxEffective = indexed.length > 0 ? indexed[indexed.length - 1].position : -1
-    let nextPosition = maxEffective + 1
-
-    if (indexed.length === 0) {
-      unindexed.sort((a, b) => a.localeCompare(b))
-    }
-
-    for (const name of unindexed) {
-      const assignedIndex = nextIndex++
-      const effectivePosition = nextPosition++
-      const offset = effectivePosition - assignedIndex
-      indexed.push({ name, position: effectivePosition })
-
-      if (localCellSet.has(name)) {
-        try {
-          const cellDir = await dir.getDirectoryHandle(name, { create: false })
-          await writeCellProperties(cellDir, { index: assignedIndex, offset })
-        } catch { /* cell dir missing — skip */ }
-      }
-    }
-    return indexed.map(s => s.name)
-  }
+  // #orderByIndex (dense-packed) removed — pinned is the only layout
+  // mode. #orderByIndexPinned handles index assignment, collision
+  // detection, and next-available-slot fallback in one pass.
 
   async #handlePlaceAt(cell: string, targetIndex: number): Promise<void> {
     const lineage = this.resolve<any>('lineage')
@@ -2686,30 +2703,14 @@ export class ShowCellDrone extends Drone {
   }
 
   async #writeIndices(dir: FileSystemDirectoryHandle, orderedNames: string[]): Promise<void> {
-    // read all existing permanent indices to find maxIndex for new tiles
-    let maxIndex = -1
-    const existingIndices = new Map<string, number>()
-    for (const name of orderedNames) {
-      try {
-        const cellDir = await dir.getDirectoryHandle(name, { create: false })
-        const props = await readCellProperties(cellDir)
-        if (typeof props['index'] === 'number') {
-          existingIndices.set(name, props['index'] as number)
-          if ((props['index'] as number) > maxIndex) maxIndex = props['index'] as number
-        }
-      } catch { /* skip */ }
-    }
-
+    // Rewrite each cell's index to match its position in orderedNames.
+    // With offset phased out, the index alone determines placement, so
+    // reorders just renumber indices starting at 0.
     for (let i = 0; i < orderedNames.length; i++) {
       const name = orderedNames[i]
-      let permanentIndex = existingIndices.get(name)
-      if (permanentIndex === undefined) {
-        permanentIndex = ++maxIndex
-      }
-      const offset = i - permanentIndex
       try {
         const cellDir = await dir.getDirectoryHandle(name, { create: false })
-        await writeCellProperties(cellDir, { index: permanentIndex, offset })
+        await writeCellProperties(cellDir, { index: i })
       } catch { /* skip missing cell dirs */ }
     }
   }
@@ -2748,7 +2749,11 @@ export class ShowCellDrone extends Drone {
    * Standard: any property value matching a 64-char hex signature
    * refers to a blob in __resources__/{signature}.
    */
-  private loadCellImages = async (cells: Cell[], _dir: FileSystemDirectoryHandle): Promise<void> => {
+  private loadCellImages = async (
+    cells: Cell[],
+    _dir: FileSystemDirectoryHandle,
+    forceReload?: Set<string>,
+  ): Promise<void> => {
     const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as
       { getResource: (sig: string) => Promise<Blob | null> } | undefined
     if (!store || !this.imageAtlas) return
@@ -2769,9 +2774,16 @@ export class ShowCellDrone extends Drone {
       const promise = (async () => {
         try {
           const blob = await store.getResource(sig)
-          if (blob) await imageAtlas.loadImage(sig, blob)
-        } catch {
-          console.warn(`[ShowCell] failed to load image ${sig}`)
+          if (!blob) {
+            console.warn(`[ShowCell] loadImageOnce: blob missing for ${sig.slice(0, 12)}…`)
+            return
+          }
+          await imageAtlas.loadImage(sig, blob)
+          if (!imageAtlas.hasImage(sig)) {
+            console.warn(`[ShowCell] loadImageOnce: atlas.loadImage completed but hasImage=false for ${sig.slice(0, 12)}…`)
+          }
+        } catch (err) {
+          console.warn(`[ShowCell] loadImageOnce: threw for ${sig.slice(0, 12)}…`, err)
         }
       })()
       inFlightImages.set(sig, promise)
@@ -2797,22 +2809,54 @@ export class ShowCellDrone extends Drone {
         } catch { this.cellTagsCache.set(cell.label, []) }
       }
 
-      // check cache first
-      if (this.cellImageCache.has(cell.label)) {
-        cell.imageSig = this.cellImageCache.get(cell.label) ?? undefined
+      // check cache first — unless the caller forced a reload for this
+      // label (substrate:applied / substrate:rerolled just wrote a new
+      // propsSig and we need to re-read props instead of serving the
+      // stale cached sig).
+      if (!forceReload?.has(cell.label) && this.cellImageCache.has(cell.label)) {
+        const cachedSig = this.cellImageCache.get(cell.label) ?? undefined
+        cell.imageSig = cachedSig
         cell.borderColor = this.cellBorderColorCache.get(cell.label)
         cell.hasLink = this.cellLinkCache.get(cell.label) ?? false
         cell.hasSubstrate = this.cellSubstrateCache.get(cell.label) ?? false
         cell.hideText = this.cellHideTextCache.get(cell.label) ?? false
-        return
+        // If the atlas has since evicted this signature (a later
+        // loadImage displaced its slot), re-queue a load so the
+        // render doesn't fall back to label. The blob is almost
+        // certainly in the resource cache, so this is cheap.
+        if (cachedSig) {
+          if (!imageAtlas.hasImage(cachedSig) && !imageAtlas.hasFailed(cachedSig)) {
+            console.log(`[ShowCell] fast-path reload ${cell.label} sig=${cachedSig.slice(0, 12)}…`)
+            await loadImageOnce(cachedSig)
+            if (!imageAtlas.hasImage(cachedSig)) {
+              console.warn(`[ShowCell] fast-path reload FAILED for ${cell.label} sig=${cachedSig.slice(0, 12)}…`)
+            }
+          }
+        } else {
+          // cache entry is null — first visit resolved no image. This is
+          // the commonest failure shape: substrate hadn't yet assigned
+          // a propsSig when loadOne first ran, null got cached, and no
+          // later path retries. Fall through to the slow path so we
+          // re-read propsIndex in case substrate has since populated
+          // it.
+          this.cellImageCache.delete(cell.label)
+          console.log(`[ShowCell] clearing stale null cache for ${cell.label}, retrying`)
+        }
+        if (this.cellImageCache.has(cell.label)) return
       }
 
       // read tile properties from content-addressed resource
       try {
         const propsSig = propsIndex[cell.label]
-        if (!propsSig) throw new Error('no props')
+        if (!propsSig) {
+          console.log(`[ShowCell] slow-path: no propsSig for ${cell.label} (propsIndex has ${Object.keys(propsIndex).length} entries, override=${this.#cursorPropsOverride?.size ?? 0})`)
+          throw new Error('no props')
+        }
         const blob = await store.getResource(propsSig)
-        if (!blob) throw new Error('no blob')
+        if (!blob) {
+          console.warn(`[ShowCell] slow-path: propsSig ${propsSig.slice(0, 12)}… resolved to null blob for ${cell.label}`)
+          throw new Error('no blob')
+        }
         const text = await blob.text()
         const props = JSON.parse(text)
 
@@ -2850,10 +2894,20 @@ export class ShowCellDrone extends Drone {
 
         const smallSig = (this.#flat && props?.flat?.small?.image) || props?.small?.image
         if (smallSig && isSignature(smallSig)) {
+          // Load atlas FIRST, then publish the new sig to the cache.
+          // Any concurrent render observing `cellImageCache` during the
+          // await sees the previous entry (stale-but-valid) rather than
+          // a missing one. The cache transitions from old → new
+          // atomically, and by the time it does, the atlas already
+          // holds the new image.
+          await loadImageOnce(smallSig)
           cell.imageSig = smallSig
           this.cellImageCache.set(cell.label, smallSig)
-          await loadImageOnce(smallSig)
+          if (!imageAtlas.hasImage(smallSig)) {
+            console.warn(`[ShowCell] slow-path loaded props for ${cell.label} but atlas has no image. propsSig=${propsSig.slice(0, 12)}… smallSig=${smallSig.slice(0, 12)}… flat=${this.#flat}`)
+          }
         } else {
+          console.log(`[ShowCell] slow-path: no image in props for ${cell.label} propsSig=${propsSig.slice(0, 12)}… flat=${this.#flat} props.small=${JSON.stringify(props?.small)} props.flat=${JSON.stringify(props?.flat)}`)
           this.cellImageCache.set(cell.label, null)
         }
       } catch {
@@ -2868,7 +2922,14 @@ export class ShowCellDrone extends Drone {
   private buildCellsKey = (cells: Cell[]): string => {
     const selectionService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SelectionService') as
       { isSelected: (label: string) => boolean } | undefined
-    let s = `p${this.#pivot ? 1 : 0}f${this.#flat ? 1 : 0}|`
+    // Fold the atlas's eviction generation into the key. Baked UVs
+    // in the geometry buffer become stale whenever an atlas slot is
+    // reused by a different sig — same imageSig on a cell does NOT
+    // imply the same UV if the atlas has evicted and re-loaded it.
+    // Including the generation forces a rebuild in exactly the cases
+    // where it's needed (and only those).
+    const atlasGen = this.imageAtlas?.evictionGeneration ?? 0
+    let s = `p${this.#pivot ? 1 : 0}f${this.#flat ? 1 : 0}g${atlasGen}|`
     for (const c of cells) s += `${c.q},${c.r}:${c.label}:${c.external ? 1 : 0}:${c.imageSig ?? ''}:${c.hasBranch ? 1 : 0}:${c.divergence ?? 0}:${c.hideText ? 1 : 0}|`
     return s
   }
@@ -3054,8 +3115,11 @@ export class ShowCellDrone extends Drone {
     const dir = _ctx.dir ?? (await lineage?.explorerDir?.())
     if (!dir) return false
 
+    // Force-reload this cell so the loader bypasses the fast path
+    // (which would otherwise serve the stale cached sig — substrate
+    // has just written a new propsSig for this label).
     const probe: Cell = { q: 0, r: 0, label, external: false }
-    try { await this.loadCellImages([probe], dir) } catch { return false }
+    try { await this.loadCellImages([probe], dir, new Set([label])) } catch { return false }
 
     const sig = this.cellImageCache.get(label) ?? null
     const imgUV = sig ? (this.imageAtlas.getImageUV(sig) ?? null) : null

@@ -62,6 +62,8 @@ var MousewheelZoomInput = class {
   onWheel = (event) => {
     if (!this.zoom || !this.canvas) return;
     if (this.gate?.active) return;
+    const target = event.target;
+    if (target?.closest?.("[data-consumes-wheel]")) return;
     const rect = this.canvas.getBoundingClientRect();
     if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) return;
     const pivot = { x: event.clientX, y: event.clientY };

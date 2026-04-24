@@ -776,7 +776,7 @@ export class MoveDrone extends Drone {
       if (gridIndex === undefined) continue
       try {
         const cellDir = await dir.getDirectoryHandle(label, { create: false })
-        await writeCellProperties(cellDir, { index: gridIndex, offset: 0 })
+        await writeCellProperties(cellDir, { index: gridIndex })
       } catch { /* skip missing cell dirs */ }
     }
   }
@@ -791,7 +791,7 @@ export class MoveDrone extends Drone {
       if (!label) continue
       try {
         const cellDir = await dir.getDirectoryHandle(label, { create: false })
-        await writeCellProperties(cellDir, { index: i, offset: 0 })
+        await writeCellProperties(cellDir, { index: i })
       } catch { /* skip missing cell dirs */ }
     }
   }

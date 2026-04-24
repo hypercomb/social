@@ -6,28 +6,43 @@ var LayerCommitter = class {
   // construction and keep the latest value locally. Late subscribers get
   // the last-emitted value automatically (EffectBus replay).
   #layout = {
-    version: 1,
-    mode: "",
+    version: 2,
     orientation: "point-top",
     pivot: false,
     accent: "",
-    gapPx: 0
+    gapPx: 0,
+    textOnly: false
   };
   constructor() {
-    EffectBus.on("layout:mode", (p) => {
-      if (p?.mode) this.#layout = { ...this.#layout, mode: p.mode };
-    });
     EffectBus.on("render:set-orientation", (p) => {
-      if (p) this.#layout = { ...this.#layout, orientation: p.flat ? "flat-top" : "point-top" };
+      if (p) {
+        this.#layout = { ...this.#layout, orientation: p.flat ? "flat-top" : "point-top" };
+        this.#schedule();
+      }
     });
     EffectBus.on("render:set-pivot", (p) => {
-      if (p != null) this.#layout = { ...this.#layout, pivot: !!p.pivot };
+      if (p != null) {
+        this.#layout = { ...this.#layout, pivot: !!p.pivot };
+        this.#schedule();
+      }
     });
     EffectBus.on("overlay:neon-color", (p) => {
-      if (p?.name) this.#layout = { ...this.#layout, accent: p.name };
+      if (p?.name) {
+        this.#layout = { ...this.#layout, accent: p.name };
+        this.#schedule();
+      }
     });
     EffectBus.on("render:set-gap", (p) => {
-      if (p?.gapPx != null) this.#layout = { ...this.#layout, gapPx: p.gapPx };
+      if (p?.gapPx != null) {
+        this.#layout = { ...this.#layout, gapPx: p.gapPx };
+        this.#schedule();
+      }
+    });
+    EffectBus.on("render:set-text-only", (p) => {
+      if (p?.textOnly != null) {
+        this.#layout = { ...this.#layout, textOnly: !!p.textOnly };
+        this.#schedule();
+      }
     });
     window.addEventListener("synchronize", () => this.#schedule());
     EffectBus.on("render:cell-count", () => this.#schedule());
@@ -45,17 +60,43 @@ var LayerCommitter = class {
   }
   async #commit() {
     const cursor = get("@diamondcoreprocessor.com/HistoryCursorService");
-    if (cursor?.state?.rewound) return;
+    if (cursor?.state?.rewound) {
+      console.log("[commit] skip: cursor rewound");
+      return;
+    }
     const lineage = get("@hypercomb.social/Lineage");
     const history = get("@diamondcoreprocessor.com/HistoryService");
-    if (!lineage || !history) return;
-    const locationSig = await history.sign(lineage);
-    const layer = await this.#assembleLayer(lineage, locationSig);
-    const layerSig = await history.commitLayer(locationSig, layer);
-    if (layerSig) {
-      const cursor2 = get("@diamondcoreprocessor.com/HistoryCursorService");
-      if (cursor2) await cursor2.onNewLayer();
+    if (!lineage || !history) {
+      console.log("[commit] skip: missing lineage or history", { lineage: !!lineage, history: !!history });
+      return;
     }
+    const segments = [...lineage.explorerSegments?.() ?? []];
+    const leafLocSig = await history.sign(lineage);
+    const leafLayer = await this.#assembleLayer(lineage, leafLocSig);
+    const leafSig = await history.commitLayer(leafLocSig, leafLayer);
+    console.log("[commit] leaf", {
+      segments,
+      cells: leafLayer.cells.length,
+      sig: leafSig?.slice(0, 8) ?? "(none)"
+    });
+    for (let i = segments.length - 1; i >= 0; i--) {
+      const ancestorSegments = segments.slice(0, i);
+      const ancestorLineage = {
+        domain: lineage.domain,
+        explorerDir: lineage.explorerDir,
+        explorerSegments: () => ancestorSegments
+      };
+      const ancestorLocSig = await history.sign(ancestorLineage);
+      const ancestorLayer = await this.#assembleLayer(ancestorLineage, ancestorLocSig);
+      const ancestorSig = await history.commitLayer(ancestorLocSig, ancestorLayer);
+      console.log("[commit] ancestor", {
+        segments: ancestorSegments,
+        cells: ancestorLayer.cells.length,
+        sig: ancestorSig?.slice(0, 8) ?? "(none)"
+      });
+    }
+    const cursorAfter = get("@diamondcoreprocessor.com/HistoryCursorService");
+    if (cursorAfter) await cursorAfter.onNewLayer();
   }
   /**
    * Build the full layer snapshot from live state sources.
@@ -129,17 +170,16 @@ var LayerCommitter = class {
     return { contentByCell, tagsByCell };
   }
   /**
-   * Capture the set of currently-registered IoC keys as the layer's bees.
-   * Today the IoC contains all services (not just drones), but the
-   * canonical sort in HistoryService.canonicalizeLayer keeps this stable.
-   *
-   * TODO(stage-3): narrow to drone-only keys when a formal drone registry
-   * exists.
+   * Drone set for the layer. Reading from `window.ioc.list()` is not
+   * stable during startup — drones self-register asynchronously, so
+   * every early commit sees a larger set than the one before. The diff
+   * then shows up as a cascade of "bees" entries on every refresh,
+   * which is pure noise. Until a formal drone registry exists (the
+   * stage-3 TODO), this returns an empty list so layer identity is
+   * driven by actual user-facing state.
    */
   #readBees() {
-    const ioc = window.ioc;
-    if (typeof ioc?.list !== "function") return [];
-    return [...ioc.list()];
+    return [];
   }
   /**
    * Read the set of hidden cells for the active location directly from
@@ -164,12 +204,12 @@ var LayerCommitter = class {
    */
   async #signLayout() {
     const canonical = {
-      version: 1,
-      mode: this.#layout.mode,
+      version: 2,
       orientation: this.#layout.orientation,
       pivot: this.#layout.pivot,
       accent: this.#layout.accent,
-      gapPx: this.#layout.gapPx
+      gapPx: this.#layout.gapPx,
+      textOnly: this.#layout.textOnly
     };
     const json = JSON.stringify(canonical);
     const bytes = new TextEncoder().encode(json).buffer;

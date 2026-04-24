@@ -1,7 +1,7 @@
 // hypercomb-shared/core/store.ts
 // hypercomb-web/src/app/core/store.ts
 
-import { Bee, SignatureService } from '@hypercomb/core'
+import { Bee, SignatureService, isSignature } from '@hypercomb/core'
 
 type BeeCtor = new () => Bee
 
@@ -224,6 +224,124 @@ export class Store extends EventTarget {
    *  for the same signature — in-flight loads are deduped. */
   public preheatResource = async (signature: string): Promise<Blob | null> =>
     this.getResource(signature)
+
+  // -------------------------------------------------
+  // universal signature resolver
+  // -------------------------------------------------
+  //
+  // Every content read in the platform bottlenecks through resolve /
+  // deepResolve / preload. The rule is: if a value is a signature,
+  // expand it to its resource; otherwise return as-is. Recursion
+  // through nested objects/arrays is free — one primitive handles the
+  // entire graph.
+  //
+  // Because resolution is identity-keyed and reuses the existing
+  // #resourceCache + in-flight dedup, visiting a historical layer a
+  // second time is a memory hit. Warmup, undo, and redo are all the
+  // same operation: walk the layer, resolve every signature inside,
+  // cache is populated, render is instant.
+
+  /** JSON type shape for parsed resource payloads. */
+  readonly #parsedResourceCache = new Map<string, unknown>()
+  readonly #parsedResourcePending = new Map<string, Promise<unknown>>()
+
+  /**
+   * If `value` is a signature, fetch the resource, parse as JSON, and
+   * return the parsed value. Otherwise return `value` unchanged.
+   *
+   * The parsed-JSON cache is separate from the raw-blob cache so
+   * consumers that want the Blob (images) keep getting it via
+   * getResource, while consumers that want the JSON pay the parse
+   * cost exactly once per signature.
+   */
+  public resolve = async <T = unknown>(value: unknown): Promise<T> => {
+    if (!isSignature(value)) return value as T
+    const cached = this.#parsedResourceCache.get(value)
+    if (cached !== undefined) return cached as T
+    const pending = this.#parsedResourcePending.get(value)
+    if (pending) return pending as Promise<T>
+    const promise = (async (): Promise<T> => {
+      try {
+        const blob = await this.getResource(value)
+        if (!blob) return value as T
+        const parsed = JSON.parse(await blob.text()) as T
+        this.#parsedResourceCache.set(value, parsed)
+        return parsed
+      } catch {
+        return value as T
+      } finally {
+        this.#parsedResourcePending.delete(value)
+      }
+    })()
+    this.#parsedResourcePending.set(value, promise)
+    return promise
+  }
+
+  /**
+   * Recursively resolve every signature in an arbitrary value. Objects
+   * and arrays are walked; scalar values and non-signature strings pass
+   * through unchanged. All signatures in the same call resolve in
+   * parallel — one deepResolve on a layer warms every field at once
+   * rather than serially.
+   */
+  public deepResolve = async <T = unknown>(value: unknown): Promise<T> => {
+    if (isSignature(value)) {
+      const resolved = await this.resolve<unknown>(value)
+      if (resolved === value) return resolved as T
+      return this.deepResolve<T>(resolved)
+    }
+    if (Array.isArray(value)) {
+      return (await Promise.all(value.map(v => this.deepResolve<unknown>(v)))) as T
+    }
+    if (value && typeof value === 'object') {
+      const entries = Object.entries(value as Record<string, unknown>)
+      const resolvedEntries = await Promise.all(
+        entries.map(async ([k, v]) => [k, await this.deepResolve<unknown>(v)] as const)
+      )
+      const out: Record<string, unknown> = {}
+      for (const [k, v] of resolvedEntries) out[k] = v
+      return out as T
+    }
+    return value as T
+  }
+
+  /**
+   * Warm the resource cache for a batch of signatures. Non-signature
+   * values are ignored. Safe to call concurrently — in-flight loads
+   * are deduped at the getResource layer. Returns when every
+   * signature has either loaded or failed; failures don't reject the
+   * batch so a single bad blob doesn't poison warmup.
+   */
+  public preload = async (values: readonly unknown[]): Promise<void> => {
+    const signatures = new Set<string>()
+    for (const value of values) if (isSignature(value)) signatures.add(value)
+    if (signatures.size === 0) return
+    await Promise.all(
+      [...signatures].map(signature =>
+        this.resolve(signature).catch(() => undefined)
+      )
+    )
+  }
+
+  /**
+   * Collect every signature referenced inside a value (recursively).
+   * Useful when a caller wants to inspect or preload dependencies
+   * without triggering resolution itself.
+   */
+  public collectSignatures = (value: unknown, out: Set<string> = new Set<string>()): Set<string> => {
+    if (isSignature(value)) {
+      out.add(value)
+      return out
+    }
+    if (Array.isArray(value)) {
+      for (const v of value) this.collectSignatures(v, out)
+      return out
+    }
+    if (value && typeof value === 'object') {
+      for (const v of Object.values(value as Record<string, unknown>)) this.collectSignatures(v, out)
+    }
+    return out
+  }
 
   #loadResource = (signature: string): Promise<Blob | null> => {
     const existing = this.#resourcePending.get(signature)

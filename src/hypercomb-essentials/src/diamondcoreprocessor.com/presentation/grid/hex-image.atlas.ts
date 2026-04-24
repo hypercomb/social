@@ -12,7 +12,23 @@ export class HexImageAtlas {
   #atlas: RenderTexture
   readonly #map = new Map<string, ImageUV>()
   readonly #failures = new Map<string, number>()
+  // Parallel array tracking which signature currently occupies each
+  // slot. When the monotonic allocator wraps, the slot's pixels are
+  // overwritten by a new image — we must evict the old signature's
+  // `#map` entry at the same moment, or `getImageUV(oldSig)` will
+  // return a UV pointing at the new content and the shader will
+  // render garbage. Keeping #map and #slotToSig in lockstep is the
+  // load-bearing invariant of this atlas.
+  readonly #slotToSig: (string | null)[]
   #nextSlot = 0
+  // Monotonic counter incremented every time a slot is reused — that is,
+  // every time an existing sig's map entry is evicted because its slot
+  // is being overwritten with different content. Callers (the geometry
+  // builder) fold this into their cache key so they know to rebuild
+  // attribute buffers whose baked UVs might point at a slot that now
+  // holds a different image. New loads into fresh slots do NOT bump
+  // this — they can't invalidate any previously-issued UV.
+  #evictionGeneration = 0
 
   readonly #cols: number
   readonly #rows: number
@@ -33,6 +49,7 @@ export class HexImageAtlas {
       scaleMode: 'linear',
       antialias: true,
     })
+    this.#slotToSig = new Array(this.#cols * this.#rows).fill(null)
 
     // clear so sampling starts transparent
     this.#renderer.render({ container: new Container(), target: this.#atlas, clear: true })
@@ -48,6 +65,17 @@ export class HexImageAtlas {
 
   getImageUV(sig: string): ImageUV | null {
     return this.#map.get(sig) ?? null
+  }
+
+  /**
+   * Monotonic counter of eviction events — how many times a slot has
+   * been reused with different content, invalidating previously-issued
+   * UVs for the displaced signature. Consumers that bake UVs into
+   * buffers should include this in their buffer-cache key so a
+   * generation change forces a rebuild.
+   */
+  get evictionGeneration(): number {
+    return this.#evictionGeneration
   }
 
   /** Returns true if the signature has permanently failed loading (exceeded max retries). */
@@ -68,6 +96,20 @@ export class HexImageAtlas {
 
     const slot = this.#nextSlot % (this.#cols * this.#rows)
     this.#nextSlot++
+
+    // Invariant maintenance: whatever sig was living in this slot is
+    // about to lose its pixels. Evict its map entry now so later
+    // `getImageUV(previousSig)` returns null (caller falls back to
+    // label) instead of resolving to a UV whose pixels now belong to
+    // a different image.
+    const previous = this.#slotToSig[slot]
+    if (previous !== null && previous !== sig) {
+      this.#map.delete(previous)
+      // Signal to consumers that a previously-issued UV is no longer
+      // valid. The geometry builder reads this counter to decide
+      // whether to rebuild its baked UV buffer.
+      this.#evictionGeneration++
+    }
 
     const col = slot % this.#cols
     const row = Math.floor(slot / this.#cols)
@@ -124,6 +166,7 @@ export class HexImageAtlas {
 
     const uv: ImageUV = { u0, v0, u1, v1 }
     this.#map.set(sig, uv)
+    this.#slotToSig[slot] = sig
     return uv
   }
 
@@ -131,5 +174,10 @@ export class HexImageAtlas {
   invalidate(sig: string): void {
     this.#map.delete(sig)
     this.#failures.delete(sig)
+    // slotToSig keeps the phantom — it's harmless: either the slot is
+    // reused (eviction is a no-op since #map already lacks the entry),
+    // or the slot is never touched again. The invariant "any sig in
+    // #map points at a slot whose current content is that sig" still
+    // holds.
   }
 }

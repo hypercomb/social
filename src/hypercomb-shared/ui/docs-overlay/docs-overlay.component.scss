@@ -276,9 +276,15 @@
   p { margin: 0 0 12px; }
 
   a {
-    color: rgba(200, 151, 90, 0.9);
-    text-decoration: none;
-    &:hover { text-decoration: underline; }
+    color: rgb(235, 195, 135);
+    text-decoration: underline;
+    text-decoration-color: rgba(235, 195, 135, 0.4);
+    text-underline-offset: 2px;
+    transition: color 100ms ease, text-decoration-color 100ms ease;
+    &:hover {
+      color: rgb(245, 215, 165);
+      text-decoration-color: rgba(245, 215, 165, 0.9);
+    }
   }
 
   strong { color: rgba(245, 245, 245, 0.95); }

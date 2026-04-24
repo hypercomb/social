@@ -328,16 +328,6 @@ var LlmProvider = class {
     }
   }
 };
-var SwirlProvider = class {
-  name = "swirl-provider";
-  priority = 100;
-  behaviours = [
-    { name: "swirl", description: "Arrange tiles into the index spiral", descriptionKey: "slash.swirl" }
-  ];
-  async execute() {
-    EffectBus.emit("layout:swirl", {});
-  }
-};
 var ArrangeProvider = class {
   name = "arrange-provider";
   priority = 100;
@@ -512,7 +502,6 @@ _slashBehaviours.addProvider(new ReviseProvider());
 _slashBehaviours.addProvider(new ExpandProvider());
 _slashBehaviours.addProvider(new ChatProvider());
 _slashBehaviours.addProvider(new LlmProvider());
-_slashBehaviours.addProvider(new SwirlProvider());
 _slashBehaviours.addProvider(new ArrangeProvider());
 _slashBehaviours.addProvider(new VoiceProvider());
 _slashBehaviours.addProvider(new PushToTalkProvider());

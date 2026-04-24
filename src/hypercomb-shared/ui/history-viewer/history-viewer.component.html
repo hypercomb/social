@@ -1,0 +1,58 @@
+@if (visible()) {
+  <aside class="history-viewer"
+         [attr.data-consumes-wheel]="''"
+         [attr.aria-label]="'history.viewer-title' | t">
+    <header class="history-viewer-header">
+      <span class="title">{{ 'history.viewer-title' | t }}</span>
+      <span class="count">{{ total() }}</span>
+    </header>
+    @if (filterCategories().length > 0) {
+      <div class="filter-bar" role="toolbar" (wheel)="$event.stopPropagation()">
+        @for (def of filterCategories(); track def.id) {
+          <button type="button"
+                  class="filter-toggle"
+                  [class.active]="isCategoryEnabled(def.id)"
+                  [attr.data-category]="def.id"
+                  [attr.aria-pressed]="isCategoryEnabled(def.id)"
+                  [attr.aria-label]="def.id"
+                  [title]="def.id"
+                  (click)="toggleCategory(def.id)">
+            <hc-icon [ref]="def.icon ?? null"></hc-icon>
+          </button>
+        }
+      </div>
+    }
+    <ul class="rows" (wheel)="$event.stopPropagation()">
+      @for (row of rows(); track row.index) {
+        <li class="row"
+            [class.active]="row.active"
+            [attr.data-category]="row.category"
+            (click)="seek(row.index)"
+            (dblclick)="openSlice(row.index, $event)">
+          @if (categoryDef(row.category).icon; as icon) {
+            <hc-icon class="row-icon" [ref]="icon"></hc-icon>
+          } @else {
+            <span class="indicator"></span>
+          }
+          <span class="idx">{{ row.label }}</span>
+          <span class="summary">{{ row.summary }}</span>
+          <span class="when">{{ row.when }}</span>
+        </li>
+      }
+    </ul>
+  </aside>
+
+  @if (sliceOpen(); as slice) {
+    <div class="slice-backdrop" (click)="closeSlice()"></div>
+    <div class="slice-modal" role="dialog" aria-modal="true">
+      <header>
+        <span class="slice-label">{{ slice.label }}</span>
+        <button type="button"
+                class="slice-close"
+                [attr.aria-label]="'history.close-slice' | t"
+                (click)="closeSlice()">×</button>
+      </header>
+      <pre class="slice-json">{{ slice.json }}</pre>
+    </div>
+  }
+}

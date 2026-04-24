@@ -16,17 +16,13 @@ interface DocEntry {
 
 const DOC_INDEX: DocEntry[] = [
   // Architecture & Core Design
-  { category: 'Architecture & Core Design', title: 'Architecture Overview', file: 'architecture-overview.md' },
-  { category: 'Architecture & Core Design', title: 'Architecture Critique', file: 'architecture-critique.md' },
+  { category: 'Architecture & Core Design', title: 'Architecture Fundamentals', file: 'architecture-fundamentals.md' },
   { category: 'Architecture & Core Design', title: 'Core Processor Architecture', file: 'core-processor-architecture.md' },
-  { category: 'Architecture & Core Design', title: 'Hive', file: 'hive.md' },
-  { category: 'Architecture & Core Design', title: 'Runtime', file: 'runtime.md' },
-  { category: 'Architecture & Core Design', title: 'Recommendations', file: 'recommendations.md' },
+  { category: 'Architecture & Core Design', title: 'Universal History Plan', file: 'universal-history-plan.md' },
 
   // Cryptographic & Content Addressing
-  { category: 'Cryptographic & Content Addressing', title: 'Core Primitive', file: 'core-primitive.md' },
+  { category: 'Cryptographic & Content Addressing', title: 'Signature System', file: 'signature-system.md' },
   { category: 'Cryptographic & Content Addressing', title: 'Signature Algebra', file: 'signature-algebra.md' },
-  { category: 'Cryptographic & Content Addressing', title: 'Signature Expansion Doctrine', file: 'signature-expansion-doctrine.md' },
   { category: 'Cryptographic & Content Addressing', title: 'Signature Node Pattern', file: 'signature-node-pattern.md' },
   { category: 'Cryptographic & Content Addressing', title: 'Collapsed Compute', file: 'collapsed-compute.md' },
   { category: 'Cryptographic & Content Addressing', title: 'Deterministic Computation', file: 'deterministic-computation.md' },
@@ -50,9 +46,11 @@ const DOC_INDEX: DocEntry[] = [
   { category: 'UI & Rendering', title: 'Tile Overlay Architecture', file: 'tile-overlay-architecture.md' },
 
   // Developer Guides
+  { category: 'Developer Guides', title: 'Getting Started', file: 'getting-started.md' },
   { category: 'Developer Guides', title: 'Contributing', file: 'contributing.md' },
   { category: 'Developer Guides', title: 'Command Line Reference', file: 'command-line-reference.md' },
-  { category: 'Developer Guides', title: 'Command Line Operations', file: 'command-line-operations.md' },
+  { category: 'Developer Guides', title: 'Slash Behaviour Reference', file: 'slash-behaviour-reference.md' },
+  { category: 'Developer Guides', title: 'Slash Command Authoring', file: 'slash-command-authoring.md' },
   { category: 'Developer Guides', title: 'Simple Naming Initiative', file: 'simple-naming-initiative.md' },
 
   // Infrastructure
@@ -64,14 +62,13 @@ const DOC_INDEX: DocEntry[] = [
   // Security & Governance
   { category: 'Security & Governance', title: 'Security', file: 'security.md' },
   { category: 'Security & Governance', title: 'Social Governance', file: 'social-governance.md' },
+  { category: 'Security & Governance', title: 'Meetings and Quorum', file: 'meetings-and-quorum.md' },
   { category: 'Security & Governance', title: 'Code of Conduct', file: 'code-of-conduct.md' },
 
   // Legal & Licensing
-  { category: 'Legal & Licensing', title: 'License (Source)', file: 'license.md' },
-  { category: 'Legal & Licensing', title: 'License (Docs)', file: 'license-docs.md' },
+  { category: 'Legal & Licensing', title: 'Licensing', file: 'licensing.md' },
+  { category: 'Legal & Licensing', title: 'Contributor Agreement', file: 'contributor-agreement.md' },
   { category: 'Legal & Licensing', title: 'Trademarks', file: 'trademarks.md' },
-  { category: 'Legal & Licensing', title: 'Developer Certificate', file: 'developer-certificate.md' },
-  { category: 'Legal & Licensing', title: 'Certificate of Origin', file: 'certificate-of-origin.md' },
 
   // Bee Story
   { category: 'Bee Story', title: 'The Bee', file: 'bee-story/the-bee.md' },

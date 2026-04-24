@@ -1,6 +1,13 @@
 // hypercomb-web/src/setup/ensure-install.ts
 // Runs BEFORE the import map is set, so that OPFS dependencies are written
 // before the browser freezes the import-map entries.
+//
+// Push-only install model: load performs no network manifest polling.
+// - Cached install + OPFS spot-check → boot from cache, zero network.
+// - Empty OPFS → one-shot cold install from local /content.
+// - Updates land via explicit DCP push (see resyncFromSentinel), triggered by
+//   the `actions:available` event, never by per-load polling.
+// See documentation/install-push-only.md for the full design.
 
 import { SignatureStore } from '@hypercomb/core'
 import { Store } from '@hypercomb/shared/core'
@@ -35,37 +42,21 @@ export const ensureInstall = async (): Promise<void> => {
 
   await store.initialize()
 
-  // ── Fast path: cached OPFS state present → boot instantly, no network ──
-  // We compare the cached install signature against the package signature in
-  // the local /content/manifest.json. If they match, the OPFS is up to date
-  // and we can boot from cache without re-downloading anything. If they differ
-  // (a new build was deployed since the last visit) we MUST reinstall — the
-  // cached bees still reference dep signatures that no longer exist on the
-  // server, and dynamic-importing them either 404s or (if the server returns
-  // an SPA HTML fallback) throws a parse error mid-bee.
-  //
-  // The cheap manifest fetch is one round-trip on warm start. The alternative
-  // — boot from cache and hope nothing changed — is what gave us the
-  // "Standard Angular field decorators are not supported in JIT mode" runtime
-  // error: an old substrate dep file in OPFS, compiled against an earlier
-  // shared-import-leaks-Angular bug, kept being loaded forever.
+  // ── Fast path: cached OPFS state present → boot from cache, no network ──
+  // Push-only model: we do not poll for upstream updates on load. If we have
+  // a cached install and the spot-check passes, trust it. New content lands
+  // via an explicit DCP push (see resyncFromSentinel on actions:available).
   const cachedManifest = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
   if (cachedManifest && cachedManifest.bees.length > 0) {
     const cachedInstallSig = (localStorage.getItem(INSTALLED_KEY) ?? '').trim()
-    const remotePackageSig = await fetchLocalPackageSignature()
-    const sigsMatch = !!remotePackageSig && !!cachedInstallSig && remotePackageSig === cachedInstallSig
-    const spotOk = sigsMatch && await fileExists(store.bees, `${cachedManifest.bees[0]}.js`)
+    const spotOk = !!cachedInstallSig && await fileExists(store.bees, `${cachedManifest.bees[0]}.js`)
     if (spotOk) {
       console.log(`[ensure-install] booting from cached state (sig ${cachedInstallSig.slice(0, 12)})`)
       restoreSignatureStore(sigStore)
       restoreCachedBeeDeps()
       return
     }
-    if (remotePackageSig && cachedInstallSig && remotePackageSig !== cachedInstallSig) {
-      console.warn(`[ensure-install] cached install (${cachedInstallSig.slice(0, 12)}) is older than deployed (${remotePackageSig.slice(0, 12)}) — reinstalling`)
-    } else {
-      console.warn('[ensure-install] cached state spot-check failed, reinstalling')
-    }
+    console.warn('[ensure-install] cached state spot-check failed — reinstalling from local content')
     localStorage.removeItem(MANIFEST_KEY)
     localStorage.removeItem(INSTALLED_KEY)
     localStorage.removeItem(SYNC_SIG_KEY)
@@ -75,26 +66,6 @@ export const ensureInstall = async (): Promise<void> => {
   // ── Cold start: OPFS empty → install directly from DCP's static files ──
   console.log('[ensure-install] OPFS empty — running cold install from DCP')
   await localInstall(store, sigStore)
-}
-
-/**
- * Read the package signature from the local /content/manifest.json. The
- * signature is the package key — see pickInstallablePackage for why we
- * prefer the package whose key appears in its own layers[] array (the
- * canonical convention used by build-module).
- *
- * Returns null if the manifest is unreachable, malformed, or empty. Callers
- * should treat null as "can't tell" — fall back to spot-check + reinstall.
- */
-const fetchLocalPackageSignature = async (): Promise<string | null> => {
-  try {
-    const res = await fetch(`${location.origin}/content/manifest.json`, { cache: 'no-store' })
-    if (!res.ok) return null
-    const json = await res.json()
-    return pickInstallablePackage(json?.packages)
-  } catch {
-    return null
-  }
 }
 
 /**
@@ -128,157 +99,7 @@ const purgeStaleOpfsArtifacts = async (store: Store): Promise<void> => {
 }
 
 // -------------------------------------------------
-// background sync — runs after Angular bootstraps
-// -------------------------------------------------
-// Fast HTTP status check first; only loads the sentinel iframe if the
-// remote root signature differs from what we have cached.
-
-export type SyncState = 'idle' | 'checking' | 'syncing' | 'complete' | 'error'
-
-export type BackgroundSyncOptions = {
-  initSentinel: () => Promise<SentinelBridge | null>
-  onState: (state: SyncState, detail?: { changedFiles?: number; error?: string }) => void
-}
-
-const DCP_ORIGIN =
-  globalThis.location?.hostname === 'localhost'
-    ? 'http://localhost:2400'
-    : 'https://diamondcoreprocessor.com'
-
-export const backgroundSync = async (options: BackgroundSyncOptions): Promise<void> => {
-  const { initSentinel, onState } = options
-
-  const store = get('@hypercomb.social/Store') as Store | undefined
-  if (!store) return
-
-  onState('checking')
-
-  // ── Step 1: cheap status check via HTTP fetch (no iframe) ──
-  let remoteRootSig: string | null = null
-  try {
-    const res = await fetch(`${DCP_ORIGIN}/manifest.json`, { cache: 'no-store' })
-    if (res.ok) {
-      const json = await res.json()
-      const sigs = Object.keys(json?.packages ?? {})
-      remoteRootSig = sigs[0]?.replace(/\uFEFF/g, '').trim().toLowerCase() ?? null
-      if (remoteRootSig && !/^[a-f0-9]{64}$/.test(remoteRootSig)) remoteRootSig = null
-    }
-  } catch (err) {
-    console.warn('[background-sync] status check failed:', err)
-    onState('error', { error: 'status check failed' })
-    return
-  }
-
-  if (!remoteRootSig) {
-    console.warn('[background-sync] no remote root signature — skipping')
-    onState('idle')
-    return
-  }
-
-  const cachedRootSig = (localStorage.getItem(REMOTE_ROOT_KEY) ?? '').trim()
-  if (cachedRootSig === remoteRootSig) {
-    console.log('[background-sync] status unchanged — no work needed')
-    onState('idle')
-    return
-  }
-
-  console.log(`[background-sync] status changed (${cachedRootSig.slice(0, 12) || 'none'} → ${remoteRootSig.slice(0, 12)}) — loading sentinel`)
-
-  // ── Step 2: status differs → load sentinel iframe and run full sync ──
-  onState('syncing')
-
-  let sentinel: SentinelBridge | null = null
-  try {
-    sentinel = await initSentinel()
-  } catch (err) {
-    console.warn('[background-sync] sentinel init failed:', err)
-    onState('error', { error: 'sentinel unreachable' })
-    return
-  }
-
-  if (!sentinel) {
-    onState('error', { error: 'sentinel unreachable' })
-    return
-  }
-
-  try {
-    const changed = await applySentinelSync(store, sentinel)
-    localStorage.setItem(REMOTE_ROOT_KEY, remoteRootSig)
-    onState('complete', { changedFiles: changed })
-    console.log(`[background-sync] complete: ${changed} file(s) updated`)
-  } catch (err) {
-    console.warn('[background-sync] sync apply failed:', err)
-    onState('error', { error: err instanceof Error ? err.message : 'sync failed' })
-  }
-}
-
-const REMOTE_ROOT_KEY = 'background-sync.remote-root'
-
-/** Run sentinel sync, apply diffs to OPFS, persist new manifest. Returns count of files written. */
-const applySentinelSync = async (store: Store, sentinel: SentinelBridge): Promise<number> => {
-  const sigStore = get('@hypercomb/SignatureStore') as SignatureStore | undefined
-
-  const currentSyncSig = (localStorage.getItem(SYNC_SIG_KEY) ?? '').trim() || undefined
-  const result = await sentinel.sync(currentSyncSig)
-  if (!result) return 0
-
-  const { syncSig, enabledBees, enabledDeps, enabledLayers, beeDeps, files } = result
-
-  if (!files.length && currentSyncSig === syncSig) return 0
-
-  const enabledBeeSet = new Set(enabledBees)
-  const enabledDepSet = new Set(enabledDeps)
-  const enabledLayerSet = new Set(enabledLayers)
-
-  // Remove disabled artifacts so the next reload doesn't passively load them
-  await removeDisabled(store.bees, enabledBeeSet, '.js')
-  await removeDisabled(store.dependencies, enabledDepSet, '.js')
-  const layerDir = await store.domainLayersDirectory('sentinel', true)
-  await removeDisabled(layerDir, enabledLayerSet, '')
-
-  await clearStaleCaches()
-
-  for (const file of files) {
-    switch (file.kind) {
-      case 'layer':
-        await writeBytes(layerDir, file.signature, file.bytes)
-        await seedCacheEntry(`/opfs/__layers__/${file.signature}.json`, file.bytes, 'application/json; charset=utf-8')
-        break
-      case 'bee':
-        await writeBytes(store.bees, `${file.signature}.js`, file.bytes)
-        await seedCacheEntry(`/opfs/__bees__/${file.signature}.js`, file.bytes, 'application/javascript; charset=utf-8')
-        break
-      case 'dependency':
-        await writeBytes(store.dependencies, `${file.signature}.js`, file.bytes)
-        await seedCacheEntry(`/opfs/__dependencies__/${file.signature}.js`, file.bytes, 'application/javascript; charset=utf-8')
-        break
-    }
-  }
-
-  if (sigStore) {
-    const allSigs = [...enabledBees, ...enabledDeps, ...enabledLayers]
-    sigStore.trustAll(allSigs)
-    localStorage.setItem(SIG_STORE_KEY, JSON.stringify(sigStore.toJSON()))
-  }
-
-  const syncManifest = {
-    version: 2,
-    layers: enabledLayers,
-    bees: enabledBees,
-    dependencies: enabledDeps,
-    beeDeps,
-  }
-
-  localStorage.setItem(SYNC_SIG_KEY, syncSig)
-  localStorage.setItem(INSTALLED_KEY, syncSig)
-  localStorage.setItem(MANIFEST_KEY, JSON.stringify(syncManifest))
-  if (beeDeps) (globalThis as any).__hypercombBeeDeps = beeDeps
-
-  return files.length
-}
-
-// -------------------------------------------------
-// resync — callable after DCP portal install
+// resync — push-triggered (actions:available event from DCP portal)
 // -------------------------------------------------
 
 export const resyncFromSentinel = async (sentinel: SentinelBridge): Promise<void> => {
@@ -582,11 +403,6 @@ const localInstall = async (store: Store, sigStore: SignatureStore): Promise<voi
   sigStore.trustAll(allSigs)
   localStorage.setItem(SIG_STORE_KEY, JSON.stringify(sigStore.toJSON()))
 
-  // INSTALLED_KEY MUST be the package signature, not a bee/layer sig. The
-  // fast-path on the next visit fetches /content/manifest.json, picks the
-  // current package sig, and compares it against this value. Storing a bee
-  // sig instead would always fail to match the deployed package sig and
-  // force a reinstall on every page load.
   const installSig = packageSig || (allSigs.length > 0 ? allSigs[0] : 'local')
   localStorage.setItem(SYNC_SIG_KEY, installSig)
   localStorage.setItem(INSTALLED_KEY, installSig)

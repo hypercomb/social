@@ -38,6 +38,7 @@ export interface DomainGroup {
   domain: string
   domainName: string
   sections: DomainSection[]
+  hiddenVersionCount: number
 }
 
 @Component({
@@ -64,6 +65,7 @@ export class HomeComponent {
   readonly inspectKind = signal<TreeNodeKind>('bee')
   readonly kindFilters = signal<Set<string>>(new Set())
   readonly layersCollapsed = signal(false)
+  readonly showAllVersions = signal(false)
   readonly #savedExpandStates = new Map<string, boolean>()
   readonly filterKinds: { key: string, diamond: TreeNodeKind }[] = [
     { key: 'bee', diamond: 'bee' },
@@ -125,10 +127,17 @@ export class HomeComponent {
       const key = s.displayDomain
       let group = groups.get(key)
       if (!group) {
-        group = { domain: s.domain, domainName: s.displayDomain, sections: [] }
+        group = { domain: s.domain, domainName: s.displayDomain, sections: [], hiddenVersionCount: 0 }
         groups.set(key, group)
       }
       group.sections.push(s)
+    }
+    const showAll = this.showAllVersions()
+    for (const group of groups.values()) {
+      if (!showAll && group.sections.length > 1) {
+        group.hiddenVersionCount = group.sections.length - 1
+        group.sections = group.sections.slice(0, 1)
+      }
     }
     return Array.from(groups.values())
   })
@@ -257,6 +266,10 @@ export class HomeComponent {
   togglePackage(section: DomainSection): void {
     section.enabled = !section.enabled
     this.#refreshSections()
+  }
+
+  toggleShowAllVersions(): void {
+    this.showAllVersions.set(!this.showAllVersions())
   }
 
 

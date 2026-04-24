@@ -25,8 +25,15 @@ export class HistorySliderDrone {
   #notifLabel: HTMLElement | null = null
   #notifRestore: HTMLElement | null = null
   #notifLatest: HTMLElement | null = null
+  #notifClose: HTMLElement | null = null
   #visible = false
   #notifVisible = false
+  // Sticky-open state: the bar opens on the first undo per-location and
+  // stays until the user explicitly closes it (×). Redo to head does not
+  // hide it on its own.
+  #notifOpen = false
+  #notifLastRewound = false
+  #notifLastLocationSig = ''
   #reviseActive = false
   #globalTimeActive = false
   #scrubbing = false
@@ -368,13 +375,31 @@ export class HistorySliderDrone {
       cursor?.jumpToLatest()
     })
 
-    bar.append(label, restore, latest)
+    const close = document.createElement('span')
+    close.textContent = '×'
+    close.title = 'Close'
+    close.style.cssText = `
+      cursor: pointer;
+      padding: 0 6px;
+      margin-left: 2px;
+      color: rgba(200, 220, 240, 0.5);
+      font-weight: 600;
+      font-size: 14px;
+      line-height: 1;
+    `
+    close.addEventListener('click', () => {
+      this.#notifOpen = false
+      this.#syncUI()
+    })
+
+    bar.append(label, restore, latest, close)
     document.body.appendChild(bar)
 
     this.#notification = bar
     this.#notifLabel = label
     this.#notifRestore = restore
     this.#notifLatest = latest
+    this.#notifClose = close
   }
 
   // ── sync UI ────────────────────────────────────────────────
@@ -384,8 +409,8 @@ export class HistorySliderDrone {
 
     const { position, total, rewound, at } = this.#state
 
-    // ── Compact notification bar (rewound outside revision mode) ──
-    this.#syncNotification(rewound && !this.#reviseActive, position, total)
+    // ── Compact notification bar (sticky after first undo) ──
+    this.#syncNotification(rewound, position, total)
 
     // ── Full revision clock (only in /revise mode) ──
     const shouldShowClock = this.#reviseActive && total > 0
@@ -441,10 +466,27 @@ export class HistorySliderDrone {
     this.#latestBtn.style.display = rewound ? 'inline-block' : 'none'
   }
 
-  #syncNotification(show: boolean, position: number, total: number): void {
-    if (!this.#notification || !this.#notifLabel) return
+  #syncNotification(rewound: boolean, position: number, total: number): void {
+    if (!this.#notification || !this.#notifLabel || !this.#notifRestore || !this.#notifLatest) return
 
-    if (!show) {
+    // "First undo" is tracked per-location — switching layers resets the
+    // sticky state so an unrelated layer doesn't open with a stale bar.
+    if (this.#state.locationSig !== this.#notifLastLocationSig) {
+      this.#notifLastLocationSig = this.#state.locationSig
+      this.#notifOpen = false
+      this.#notifLastRewound = false
+    }
+
+    // Open on the edge into rewound (the first undo), outside revision mode.
+    // Once open, stays open until the × close button fires.
+    if (rewound && !this.#notifLastRewound && !this.#reviseActive) {
+      this.#notifOpen = true
+    }
+    this.#notifLastRewound = rewound
+
+    const shouldDisplay = this.#notifOpen && !this.#reviseActive
+
+    if (!shouldDisplay) {
       if (this.#notifVisible) {
         this.#notification.style.display = 'none'
         this.#notifVisible = false
@@ -457,8 +499,18 @@ export class HistorySliderDrone {
       this.#notifVisible = true
     }
 
-    const stepsBack = total - position
-    this.#notifLabel.textContent = `${stepsBack} step${stepsBack === 1 ? '' : 's'} back`
+    // Restore / Jump-to-latest only apply while rewound; hide them at head
+    // so the sticky bar keeps just the status text + close affordance.
+    if (rewound) {
+      const stepsBack = total - position
+      this.#notifLabel.textContent = `${stepsBack} step${stepsBack === 1 ? '' : 's'} back`
+      this.#notifRestore.style.display = 'inline-block'
+      this.#notifLatest.style.display = 'inline-block'
+    } else {
+      this.#notifLabel.textContent = 'At latest'
+      this.#notifRestore.style.display = 'none'
+      this.#notifLatest.style.display = 'none'
+    }
   }
 }
 

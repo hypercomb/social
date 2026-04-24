@@ -10,6 +10,9 @@ import {
 } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
+import { isDivider, type MenuButton, type MenuItem } from './menu-pack'
+import { MenuRegistry } from './menu-registry'
+import './history-menu-pack'  // self-installs HistoryMenuPack into MenuRegistry
 
 const STORAGE_KEY = 'hc:selection-menu-pos'
 const MENU_WIDTH = 44
@@ -37,6 +40,24 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
   #dragging = signal(false)
 
   readonly visible = computed(() => this.#hasSelection())
+
+  /** True when tile selection drives visibility — render selection-specific buttons. */
+  readonly selectionActive = this.#hasSelection.asReadonly()
+
+  /** The currently-active pack (if any). Non-null when a non-selection pack took over. */
+  readonly activePack = MenuRegistry.activePack
+
+  /** Items of the active pack, or empty array when selection mode drives visibility. */
+  readonly packItems = computed<MenuItem[]>(() => this.activePack()?.items() ?? [])
+
+  /** Type-guard exposed for the template to distinguish dividers from buttons. */
+  readonly isDivider = isDivider
+
+  /** Resolve visibility for a single button (defaults to true). */
+  readonly isButtonVisible = (btn: MenuButton): boolean => btn.visible?.() ?? true
+
+  /** Called when the user clicks the "hide menu" affordance in a pack. */
+  readonly hidePack = (): void => MenuRegistry.hideActive()
   readonly allHidden = this.#allHidden.asReadonly()
   readonly moveMode = this.#moveMode.asReadonly()
   readonly clipboardCount = this.#clipboardCount.asReadonly()

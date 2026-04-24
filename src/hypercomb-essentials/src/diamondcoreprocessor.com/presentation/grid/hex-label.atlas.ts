@@ -11,6 +11,12 @@ export interface LabelUV {
 export class HexLabelAtlas {
   private readonly atlas: RenderTexture
   private readonly map = new Map<string, LabelUV>()
+  // Parallel array tracking which label currently owns each slot.
+  // Same invariant as HexImageAtlas: when the allocator wraps, the
+  // slot's pixels are overwritten, so the previous label's UV entry
+  // must be evicted in the same step or `getLabelUV(oldLabel)` will
+  // return pixels belonging to a different label.
+  private readonly slotToLabel: (string | null)[]
   private nextIndex = 0
   #pivot = false
   #labelResolver: ((directoryName: string) => string) | null = null
@@ -27,6 +33,7 @@ export class HexLabelAtlas {
   ) {
     this.cols = Math.max(1, cols)
     this.rows = Math.max(1, rows)
+    this.slotToLabel = new Array(this.cols * this.rows).fill(null)
 
     this.atlas = RenderTexture.create({
       width: this.cols * this.cellPx,
@@ -60,6 +67,7 @@ export class HexLabelAtlas {
     this.#pivot = pivot
     // clear cache so all labels re-render with new rotation
     this.map.clear()
+    this.slotToLabel.fill(null)
     this.nextIndex = 0
     this.renderer.render({ container: new Container(), target: this.atlas, clear: true })
   }
@@ -78,6 +86,7 @@ export class HexLabelAtlas {
    */
   public invalidateLabels = (): void => {
     this.map.clear()
+    this.slotToLabel.fill(null)
     this.nextIndex = 0
     this.renderer.render({ container: new Container(), target: this.atlas, clear: true })
   }
@@ -103,6 +112,12 @@ export class HexLabelAtlas {
 
       const slot = this.nextIndex % (this.cols * this.rows)
       this.nextIndex++
+
+      // Evict the previous occupant's map entry before overwriting
+      // its slot's pixels. Keeps map ⇔ slot content in lockstep.
+      const previous = this.slotToLabel[slot]
+      if (previous !== null && previous !== label) this.map.delete(previous)
+      this.slotToLabel[slot] = label
 
       const col = slot % this.cols
       const row = Math.floor(slot / this.cols)
@@ -140,6 +155,12 @@ export class HexLabelAtlas {
     // wrap if you exceed capacity (production-safe: no crash, just overwrites old slots)
     const slot = this.nextIndex % (this.cols * this.rows)
     this.nextIndex++
+
+    // Evict the previous occupant so its map entry stops pointing at
+    // a slot whose pixels are about to become a different label.
+    const previous = this.slotToLabel[slot]
+    if (previous !== null && previous !== label) this.map.delete(previous)
+    this.slotToLabel[slot] = label
 
     const col = slot % this.cols
     const row = Math.floor(slot / this.cols)

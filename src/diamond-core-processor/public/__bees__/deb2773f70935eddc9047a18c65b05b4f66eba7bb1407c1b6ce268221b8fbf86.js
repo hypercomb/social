@@ -10,6 +10,7 @@ var HexLabelAtlas = class {
     this.cellPx = cellPx;
     this.cols = Math.max(1, cols);
     this.rows = Math.max(1, rows);
+    this.slotToLabel = new Array(this.cols * this.rows).fill(null);
     this.atlas = RenderTexture.create({
       width: this.cols * this.cellPx,
       height: this.rows * this.cellPx,
@@ -34,6 +35,12 @@ var HexLabelAtlas = class {
   }
   atlas;
   map = /* @__PURE__ */ new Map();
+  // Parallel array tracking which label currently owns each slot.
+  // Same invariant as HexImageAtlas: when the allocator wraps, the
+  // slot's pixels are overwritten, so the previous label's UV entry
+  // must be evicted in the same step or `getLabelUV(oldLabel)` will
+  // return pixels belonging to a different label.
+  slotToLabel;
   nextIndex = 0;
   #pivot = false;
   #labelResolver = null;
@@ -44,6 +51,7 @@ var HexLabelAtlas = class {
     if (this.#pivot === pivot) return;
     this.#pivot = pivot;
     this.map.clear();
+    this.slotToLabel.fill(null);
     this.nextIndex = 0;
     this.renderer.render({ container: new Container(), target: this.atlas, clear: true });
   };
@@ -60,6 +68,7 @@ var HexLabelAtlas = class {
    */
   invalidateLabels = () => {
     this.map.clear();
+    this.slotToLabel.fill(null);
     this.nextIndex = 0;
     this.renderer.render({ container: new Container(), target: this.atlas, clear: true });
   };
@@ -80,6 +89,9 @@ var HexLabelAtlas = class {
       if (!label || this.map.has(label)) continue;
       const slot = this.nextIndex % (this.cols * this.rows);
       this.nextIndex++;
+      const previous = this.slotToLabel[slot];
+      if (previous !== null && previous !== label) this.map.delete(previous);
+      this.slotToLabel[slot] = label;
       const col = slot % this.cols;
       const row = Math.floor(slot / this.cols);
       const displayText = this.#labelResolver ? this.#labelResolver(label) : label;
@@ -108,6 +120,9 @@ var HexLabelAtlas = class {
     if (cached) return cached;
     const slot = this.nextIndex % (this.cols * this.rows);
     this.nextIndex++;
+    const previous = this.slotToLabel[slot];
+    if (previous !== null && previous !== label) this.map.delete(previous);
+    this.slotToLabel[slot] = label;
     const col = slot % this.cols;
     const row = Math.floor(slot / this.cols);
     const displayText = this.#labelResolver ? this.#labelResolver(label) : label;
@@ -145,7 +160,23 @@ var HexImageAtlas = class _HexImageAtlas {
   #atlas;
   #map = /* @__PURE__ */ new Map();
   #failures = /* @__PURE__ */ new Map();
+  // Parallel array tracking which signature currently occupies each
+  // slot. When the monotonic allocator wraps, the slot's pixels are
+  // overwritten by a new image — we must evict the old signature's
+  // `#map` entry at the same moment, or `getImageUV(oldSig)` will
+  // return a UV pointing at the new content and the shader will
+  // render garbage. Keeping #map and #slotToSig in lockstep is the
+  // load-bearing invariant of this atlas.
+  #slotToSig;
   #nextSlot = 0;
+  // Monotonic counter incremented every time a slot is reused — that is,
+  // every time an existing sig's map entry is evicted because its slot
+  // is being overwritten with different content. Callers (the geometry
+  // builder) fold this into their cache key so they know to rebuild
+  // attribute buffers whose baked UVs might point at a slot that now
+  // holds a different image. New loads into fresh slots do NOT bump
+  // this — they can't invalidate any previously-issued UV.
+  #evictionGeneration = 0;
   #cols;
   #rows;
   #cellPx;
@@ -163,6 +194,7 @@ var HexImageAtlas = class _HexImageAtlas {
       scaleMode: "linear",
       antialias: true
     });
+    this.#slotToSig = new Array(this.#cols * this.#rows).fill(null);
     this.#renderer.render({ container: new Container2(), target: this.#atlas, clear: true });
   }
   getAtlasTexture() {
@@ -173,6 +205,16 @@ var HexImageAtlas = class _HexImageAtlas {
   }
   getImageUV(sig) {
     return this.#map.get(sig) ?? null;
+  }
+  /**
+   * Monotonic counter of eviction events — how many times a slot has
+   * been reused with different content, invalidating previously-issued
+   * UVs for the displaced signature. Consumers that bake UVs into
+   * buffers should include this in their buffer-cache key so a
+   * generation change forces a rebuild.
+   */
+  get evictionGeneration() {
+    return this.#evictionGeneration;
   }
   /** Returns true if the signature has permanently failed loading (exceeded max retries). */
   hasFailed(sig) {
@@ -188,6 +230,11 @@ var HexImageAtlas = class _HexImageAtlas {
     if (this.hasFailed(sig)) return null;
     const slot = this.#nextSlot % (this.#cols * this.#rows);
     this.#nextSlot++;
+    const previous = this.#slotToSig[slot];
+    if (previous !== null && previous !== sig) {
+      this.#map.delete(previous);
+      this.#evictionGeneration++;
+    }
     const col = slot % this.#cols;
     const row = Math.floor(slot / this.#cols);
     let bitmap;
@@ -229,6 +276,7 @@ var HexImageAtlas = class _HexImageAtlas {
     const v1 = (row * this.#cellPx + padY + imgH) / this.#atlas.height;
     const uv = { u0, v0, u1, v1 };
     this.#map.set(sig, uv);
+    this.#slotToSig[slot] = sig;
     return uv;
   }
   /** Remove a specific entry (e.g. after re-save) so next load picks up the new image */
@@ -1297,10 +1345,25 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
     if (maxCells <= 0) return;
     const cells = this.buildCellsFromAxial(axial, cellNames, maxCells, localCellSet, branchSet);
     if (cells.length === 0) return;
+    const atlas = this.imageAtlas;
+    const needReload = [];
     for (const cell of cells) {
       if (this.cellImageCache.has(cell.label)) {
-        cell.imageSig = this.cellImageCache.get(cell.label) ?? void 0;
+        const cachedSig = this.cellImageCache.get(cell.label) ?? void 0;
+        cell.imageSig = cachedSig;
+        if (cachedSig && atlas && !atlas.hasImage(cachedSig) && !atlas.hasFailed(cachedSig)) {
+          needReload.push(cell);
+        }
       }
+    }
+    if (needReload.length > 0) {
+      void (async () => {
+        const lineage = this.resolve("lineage");
+        const dir = await lineage?.explorerDir?.();
+        if (!dir) return;
+        await this.loadCellImages(needReload, dir);
+        this.requestRender();
+      })();
     }
     this.renderedCells.clear();
     for (const cell of cells) this.renderedCells.set(cell.label, cell);
@@ -1379,14 +1442,31 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       this.clearMesh();
       return;
     }
+    const atlas = this.imageAtlas;
+    const needReload = [];
     for (const cell of cells) {
       if (cell.external) continue;
-      if (this.cellImageCache.has(cell.label)) cell.imageSig = this.cellImageCache.get(cell.label) ?? void 0;
+      if (this.cellImageCache.has(cell.label)) {
+        const cachedSig = this.cellImageCache.get(cell.label) ?? void 0;
+        cell.imageSig = cachedSig;
+        if (cachedSig && atlas && !atlas.hasImage(cachedSig) && !atlas.hasFailed(cachedSig)) {
+          needReload.push(cell);
+        }
+      }
       const bc = this.cellBorderColorCache.get(cell.label);
       if (bc) cell.borderColor = bc;
       cell.hasLink = this.cellLinkCache.get(cell.label) ?? false;
       cell.hasSubstrate = this.cellSubstrateCache.get(cell.label) ?? false;
       cell.hideText = this.cellHideTextCache.get(cell.label) ?? false;
+    }
+    if (needReload.length > 0) {
+      void (async () => {
+        const lineage = this.resolve("lineage");
+        const dir = await lineage?.explorerDir?.();
+        if (!dir) return;
+        await this.loadCellImages(needReload, dir);
+        this.requestRender();
+      })();
     }
     this.renderedCells.clear();
     for (const cell of cells) this.renderedCells.set(cell.label, cell);
@@ -1479,7 +1559,14 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       return;
     }
     const touched = /* @__PURE__ */ new Set([...change.added ?? [], ...change.changedContent ?? []]);
-    const needLoad = cells.filter((c) => touched.has(c.label) || !this.cellImageCache.has(c.label));
+    const atlas = this.imageAtlas;
+    const needLoad = cells.filter((c) => {
+      if (touched.has(c.label)) return true;
+      if (!this.cellImageCache.has(c.label)) return true;
+      const cachedSig = this.cellImageCache.get(c.label);
+      if (cachedSig && atlas && !atlas.hasImage(cachedSig) && !atlas.hasFailed(cachedSig)) return true;
+      return false;
+    });
     if (needLoad.length > 0) await this.loadCellImages(needLoad, dir);
     for (const cell of cells) {
       if (cell.external) continue;
@@ -1540,11 +1627,8 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       this.attachLabelResolver(this.atlas);
       this.atlas.setPivot(this.#pivot);
       if (this.#warmLabels.length) this.atlas.seed(this.#warmLabels);
-      this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8);
-      this.cellImageCache.clear();
-      this.cellBorderColorCache.clear();
-      this.cellSubstrateCache.clear();
-      this.cellHideTextCache.clear();
+      this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 16, 16);
+      this.#invalidateAllLabelDerivedState();
       this.atlasRenderer = this.pixiRenderer;
       this.shader = null;
     } else if (!this.atlas || this.atlasRenderer !== this.pixiRenderer) {
@@ -1552,11 +1636,8 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       this.attachLabelResolver(this.atlas);
       this.atlas.setPivot(this.#pivot);
       if (this.#warmLabels.length) this.atlas.seed(this.#warmLabels);
-      this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 8, 8);
-      this.cellImageCache.clear();
-      this.cellBorderColorCache.clear();
-      this.cellSubstrateCache.clear();
-      this.cellHideTextCache.clear();
+      this.imageAtlas = new HexImageAtlas(this.pixiRenderer, 256, 16, 16);
+      this.#invalidateAllLabelDerivedState();
       this.atlasRenderer = this.pixiRenderer;
       this.shader = null;
     }
@@ -1657,39 +1738,14 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
             union.add(cell);
             localCellSet.add(cell);
           }
+          if (Object.keys(content.contentByCell).length > 0) {
+            this.#cursorPropsOverride = new Map(Object.entries(content.contentByCell));
+          }
           const reconKey = `${cursorState2.locationSig}:${cursorState2.position}`;
           if (reconKey !== this.#cursorReconstructionKey) {
             this.#cursorReconstructionKey = reconKey;
-            if (Object.keys(content.contentByCell).length > 0) {
-              this.#cursorPropsOverride = new Map(Object.entries(content.contentByCell));
-            }
             for (const [cell, tags] of Object.entries(content.tagsByCell)) {
               this.cellTagsCache.set(cell, tags);
-            }
-            const store = window.ioc?.get?.("@hypercomb.social/Store");
-            if (store && content.layoutSig) {
-              try {
-                const blob = await store.getResource(content.layoutSig);
-                if (blob) {
-                  const layout = JSON.parse(await blob.text());
-                  const flat = layout.orientation === "flat-top";
-                  if (this.#flat !== flat) {
-                    this.#flat = flat;
-                    this.cellImageCache.clear();
-                  }
-                  if (typeof layout.pivot === "boolean" && this.#pivot !== layout.pivot) {
-                    this.#pivot = layout.pivot;
-                    this.atlas?.setPivot(this.#pivot);
-                  }
-                  if (typeof layout.gapPx === "number" && this.#hexGeo.gapPx !== layout.gapPx) {
-                    this.#hexGeo = createHexGeometry(this.#hexGeo.circumRadiusPx, layout.gapPx, this.#hexGeo.padPx);
-                  }
-                  if (layout.mode === "dense" || layout.mode === "pinned") {
-                    this.#layoutMode = layout.mode;
-                  }
-                }
-              } catch {
-              }
             }
           }
         }
@@ -2078,7 +2134,9 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       this.#lastCursorPosition = nowPosition;
       this.#lastCursorRewound = nowRewound;
       this.#layerCellsCache.clear();
+      this.#invalidateAllLabelDerivedState();
       this.renderedCellsKey = "";
+      void this.#applyCursorLayout();
       this.requestRender();
     });
     this.onEffect("search:filter", ({ keyword }) => {
@@ -2278,20 +2336,20 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
     });
     this.onEffect("substrate:applied", (payload) => {
       if (!payload?.cell) return;
-      this.cellImageCache.delete(payload.cell);
-      this.cellSubstrateCache.delete(payload.cell);
       void this.#tryInPlaceCellUpdate(payload.cell, { dir: null }).then((done) => {
+        this.cellSubstrateCache.delete(payload.cell);
         if (!done && this.#slots.seeded) {
+          this.cellImageCache.delete(payload.cell);
           void this.renderIncremental({ changedContent: [payload.cell] });
         }
       });
     });
     this.onEffect("substrate:rerolled", (payload) => {
       if (!payload?.cell) return;
-      this.cellImageCache.delete(payload.cell);
-      this.cellSubstrateCache.delete(payload.cell);
       void this.#tryInPlaceCellUpdate(payload.cell, { dir: null }).then((done) => {
+        this.cellSubstrateCache.delete(payload.cell);
         if (!done && this.#slots.seeded) {
+          this.cellImageCache.delete(payload.cell);
           void this.renderIncremental({ changedContent: [payload.cell] });
         }
       });
@@ -2311,23 +2369,6 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
     });
     this.onEffect("cell:reorder", (payload) => {
       void this.#handleReorder(payload.labels);
-    });
-    this.onEffect("layout:mode", (payload) => {
-      if (payload?.mode && payload.mode !== this.#layoutMode) {
-        this.#layoutMode = payload.mode;
-        this.#persistLayoutMode(payload.mode);
-        this.#layerCellsCache.clear();
-        this.#slots.clear();
-        this.renderedCellsKey = "";
-        this.requestRender();
-      }
-    });
-    this.onEffect("layout:swirl", () => {
-      this.#layoutMode = "dense";
-      this.#layerCellsCache.clear();
-      this.#slots.clear();
-      this.renderedCellsKey = "";
-      this.requestRender();
     });
     this.onEffect("render:set-gap", (payload) => {
       if (this.#hexGeo.gapPx !== payload.gapPx) {
@@ -2383,6 +2424,68 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
         return await this.computeSignatureLocation(lineage);
       }
     };
+  };
+  /**
+   * Apply the layer's layout state to the live renderer. Called on every
+   * cursor move (undo/redo/seek) so the visible configuration always
+   * matches the layer at the current cursor position. At head this is a
+   * no-op because every user intent commits and the live state already
+   * matches — we still run it for symmetry so returning to head after a
+   * rewound view restores whatever the layout was at head.
+   *
+   * Emits absolute-value events so the rest of the system (LayerCommitter,
+   * atlases, shader subscribers) stays in lock-step. commitLayer dedupes
+   * identical layouts, so redundant emits do not grow history.
+   *
+   * Fields with default-equivalent values in older layers (empty string,
+   * zero gap) are skipped so legacy entries do not regress the live view
+   * — the "crunched tiles" regression happened when historical layers
+   * without populated layout were applied verbatim.
+   */
+  /**
+   * Drop every label-keyed derived-state cache in one call. These six
+   * maps are views of the same identity (facts derived from a
+   * propsSig), so invalidation always happens together. Centralising
+   * the clear keeps the cursor-change and explorer-ready paths from
+   * having to list each map individually.
+   */
+  #invalidateAllLabelDerivedState = () => {
+    this.cellImageCache.clear();
+    this.cellBorderColorCache.clear();
+    this.cellTagsCache.clear();
+    this.cellLinkCache.clear();
+    this.cellSubstrateCache.clear();
+    this.cellHideTextCache.clear();
+  };
+  #applyCursorLayout = async () => {
+    const cursorService = window.ioc?.get?.("@diamondcoreprocessor.com/HistoryCursorService");
+    if (!cursorService) return;
+    const content = await cursorService.layerContentAtCursor();
+    if (!content?.layoutSig) return;
+    const store = window.ioc?.get?.("@hypercomb.social/Store");
+    if (!store) return;
+    let layout = null;
+    try {
+      const blob = await store.getResource(content.layoutSig);
+      if (!blob) return;
+      layout = JSON.parse(await blob.text());
+    } catch {
+      return;
+    }
+    if (!layout) return;
+    const nextTextOnly = !!layout.textOnly;
+    if (this.#textOnly !== nextTextOnly) {
+      this.emitEffect("render:set-text-only", { textOnly: nextTextOnly });
+    }
+    if (layout.orientation && layout.orientation !== (this.#flat ? "flat-top" : "point-top")) {
+      this.emitEffect("render:set-orientation", { flat: layout.orientation === "flat-top" });
+    }
+    if (typeof layout.pivot === "boolean" && layout.pivot !== this.#pivot) {
+      this.emitEffect("render:set-pivot", { pivot: layout.pivot });
+    }
+    if (typeof layout.gapPx === "number" && layout.gapPx > 0 && layout.gapPx !== this.#hexGeo.gapPx) {
+      this.emitEffect("render:set-gap", { gapPx: layout.gapPx });
+    }
   };
   dispose = () => {
     window.removeEventListener("synchronize", this.requestRender);
@@ -2469,7 +2572,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
     this.shader = null;
     this.atlas = new HexLabelAtlas(renderer, 128, 8, 8);
     this.attachLabelResolver(this.atlas);
-    this.imageAtlas = new HexImageAtlas(renderer, 256, 8, 8);
+    this.imageAtlas = new HexImageAtlas(renderer, 256, 16, 16);
     this.cellImageCache.clear();
     this.atlasRenderer = renderer;
   };
@@ -2538,7 +2641,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
         if (localCellSet.has(name)) {
           try {
             const cellDir = await dir.getDirectoryHandle(name, { create: false });
-            await writeCellProperties(cellDir, { index: nextFree, offset: 0 });
+            await writeCellProperties(cellDir, { index: nextFree });
           } catch {
           }
         }
@@ -2549,152 +2652,50 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
   }
   /**
    * Central ordering strategy — all render paths route through here.
-   * Each layout mode implements its own ordering logic; new modes add a case.
-   * Returns a name array ready for buildCellsFromAxial:
-   *   - dense: packed array (cellNames[i] → axial position i)
-   *   - pinned: sparse array with empty-string gaps (cellNames[i] → axial position i)
+   * Pinned is the only mode: each cell sits at its persisted `index`
+   * slot, gaps are preserved, and collision is resolved by moving the
+   * loser to the next free slot (persisted on write). Returns a sparse
+   * array where cellNames[i] → axial position i, with empty-string
+   * entries marking unoccupied slots.
    */
-  async #resolveCellOrder(mode, dir, union, localCellSet, lineage) {
+  async #resolveCellOrder(_mode, dir, union, localCellSet, _lineage) {
     if (this.#clipboardView) {
       return [...union].sort((a, b) => a.localeCompare(b));
     }
-    switch (mode) {
-      case "pinned": {
-        const pinnedCursor = window.ioc?.get?.("@diamondcoreprocessor.com/HistoryCursorService");
-        const pinnedRewound = pinnedCursor?.state?.rewound ?? false;
-        let cellNames;
-        if (pinnedRewound && pinnedCursor) {
-          const pinnedContent = await pinnedCursor.layerContentAtCursor();
-          const order = pinnedContent?.cells ?? [];
-          if (order.length > 0) {
-            const unionSet = new Set(union);
-            const filtered = order.filter((s) => unionSet.has(s));
-            for (const s of union) {
-              if (!filtered.includes(s)) filtered.push(s);
-            }
-            const axial = this.resolve("axial");
-            const maxSlot = axial?.count ?? 60;
-            const sparse = new Array(maxSlot + 1).fill("");
-            for (let i = 0; i < filtered.length && i <= maxSlot; i++) {
-              sparse[i] = filtered[i];
-            }
-            cellNames = sparse;
-          } else {
-            cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet);
-          }
-        } else {
-          cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet);
+    const cursor = window.ioc?.get?.("@diamondcoreprocessor.com/HistoryCursorService");
+    const isRewound = cursor?.state?.rewound ?? false;
+    let cellNames;
+    if (isRewound && cursor) {
+      const content = await cursor.layerContentAtCursor();
+      const order = content?.cells ?? [];
+      if (order.length > 0) {
+        const unionSet = new Set(union);
+        const filtered = order.filter((s) => unionSet.has(s));
+        for (const s of union) {
+          if (!filtered.includes(s)) filtered.push(s);
         }
-        if (this.filterKeyword) {
-          const kw = this.filterKeyword;
-          cellNames = cellNames.map((s) => s && s.toLowerCase().includes(kw) ? s : "");
+        const axial = this.resolve("axial");
+        const maxSlot = axial?.count ?? 60;
+        const sparse = new Array(maxSlot + 1).fill("");
+        for (let i = 0; i < filtered.length && i <= maxSlot; i++) {
+          sparse[i] = filtered[i];
         }
-        return cellNames;
+        cellNames = sparse;
+      } else {
+        cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet);
       }
-      // dense (default): pack tiles contiguously
-      default: {
-        let cellNames;
-        let orderFromProjection = false;
-        const cursorService = window.ioc?.get?.("@diamondcoreprocessor.com/HistoryCursorService");
-        const isRewound = cursorService?.state?.rewound ?? false;
-        if (isRewound && cursorService) {
-          const rewoundContent = await cursorService.layerContentAtCursor();
-          const order = rewoundContent?.cells ?? [];
-          if (order.length > 0) {
-            orderFromProjection = true;
-            const unionSet = new Set(union);
-            cellNames = order.filter((s) => unionSet.has(s));
-            for (const s of union) {
-              if (!cellNames.includes(s)) cellNames.push(s);
-            }
-          } else {
-            cellNames = await this.#orderByIndex(dir, Array.from(union), localCellSet);
-          }
-        } else {
-          const orderProjection = window.ioc?.get?.("@diamondcoreprocessor.com/OrderProjection");
-          if (orderProjection) {
-            const locSig = await this.computeSignatureLocation(lineage);
-            const order = await orderProjection.hydrate(locSig.sig);
-            if (order.length > 0) {
-              orderFromProjection = true;
-              const unionSet = new Set(union);
-              cellNames = order.filter((s) => unionSet.has(s));
-              for (const s of union) {
-                if (!cellNames.includes(s)) cellNames.push(s);
-              }
-            } else {
-              cellNames = await this.#orderByIndex(dir, Array.from(union), localCellSet);
-            }
-          } else {
-            cellNames = await this.#orderByIndex(dir, Array.from(union), localCellSet);
-          }
-        }
-        if (!orderFromProjection) {
-          const layout = this.resolve("layout");
-          if (layout) {
-            const order = await layout.read(dir);
-            if (order) cellNames = layout.merge(order, cellNames);
-          }
-        }
-        if (this.filterKeyword) {
-          const kw = this.filterKeyword;
-          cellNames = cellNames.filter((s) => s.toLowerCase().includes(kw));
-        }
-        return cellNames;
-      }
+    } else {
+      cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet);
     }
+    if (this.filterKeyword) {
+      const kw = this.filterKeyword;
+      cellNames = cellNames.map((s) => s && s.toLowerCase().includes(kw) ? s : "");
+    }
+    return cellNames;
   }
-  /**
-   * Order cells by their persisted index in the 0000 properties file.
-   * Cells without an index get the next available index and are written back.
-   * External (mesh) cells are always re-indexed locally.
-   */
-  async #orderByIndex(dir, names, localCellSet) {
-    const indexed = [];
-    const unindexed = [];
-    let maxIndex = -1;
-    for (const name of names) {
-      if (!localCellSet.has(name)) {
-        unindexed.push(name);
-        continue;
-      }
-      try {
-        const cellDir = await dir.getDirectoryHandle(name, { create: false });
-        const props = await readCellProperties(cellDir);
-        if (typeof props["index"] === "number") {
-          const idx = props["index"];
-          const off = typeof props["offset"] === "number" ? props["offset"] : 0;
-          indexed.push({ name, position: idx + off });
-          if (idx > maxIndex) maxIndex = idx;
-        } else {
-          unindexed.push(name);
-        }
-      } catch {
-        unindexed.push(name);
-      }
-    }
-    indexed.sort((a, b) => a.position - b.position);
-    let nextIndex = maxIndex + 1;
-    const maxEffective = indexed.length > 0 ? indexed[indexed.length - 1].position : -1;
-    let nextPosition = maxEffective + 1;
-    if (indexed.length === 0) {
-      unindexed.sort((a, b) => a.localeCompare(b));
-    }
-    for (const name of unindexed) {
-      const assignedIndex = nextIndex++;
-      const effectivePosition = nextPosition++;
-      const offset = effectivePosition - assignedIndex;
-      indexed.push({ name, position: effectivePosition });
-      if (localCellSet.has(name)) {
-        try {
-          const cellDir = await dir.getDirectoryHandle(name, { create: false });
-          await writeCellProperties(cellDir, { index: assignedIndex, offset });
-        } catch {
-        }
-      }
-    }
-    return indexed.map((s) => s.name);
-  }
+  // #orderByIndex (dense-packed) removed — pinned is the only layout
+  // mode. #orderByIndexPinned handles index assignment, collision
+  // detection, and next-available-slot fallback in one pass.
   async #handlePlaceAt(cell, targetIndex) {
     const lineage = this.resolve("lineage");
     if (!lineage) return;
@@ -2729,29 +2730,11 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
     this.requestRender();
   }
   async #writeIndices(dir, orderedNames) {
-    let maxIndex = -1;
-    const existingIndices = /* @__PURE__ */ new Map();
-    for (const name of orderedNames) {
-      try {
-        const cellDir = await dir.getDirectoryHandle(name, { create: false });
-        const props = await readCellProperties(cellDir);
-        if (typeof props["index"] === "number") {
-          existingIndices.set(name, props["index"]);
-          if (props["index"] > maxIndex) maxIndex = props["index"];
-        }
-      } catch {
-      }
-    }
     for (let i = 0; i < orderedNames.length; i++) {
       const name = orderedNames[i];
-      let permanentIndex = existingIndices.get(name);
-      if (permanentIndex === void 0) {
-        permanentIndex = ++maxIndex;
-      }
-      const offset = i - permanentIndex;
       try {
         const cellDir = await dir.getDirectoryHandle(name, { create: false });
-        await writeCellProperties(cellDir, { index: permanentIndex, offset });
+        await writeCellProperties(cellDir, { index: i });
       } catch {
       }
     }
@@ -2785,7 +2768,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
    * Standard: any property value matching a 64-char hex signature
    * refers to a blob in __resources__/{signature}.
    */
-  loadCellImages = async (cells, _dir) => {
+  loadCellImages = async (cells, _dir, forceReload) => {
     const store = window.ioc?.get?.("@hypercomb.social/Store");
     if (!store || !this.imageAtlas) return;
     const imageAtlas = this.imageAtlas;
@@ -2799,9 +2782,16 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       const promise = (async () => {
         try {
           const blob = await store.getResource(sig);
-          if (blob) await imageAtlas.loadImage(sig, blob);
-        } catch {
-          console.warn(`[ShowCell] failed to load image ${sig}`);
+          if (!blob) {
+            console.warn(`[ShowCell] loadImageOnce: blob missing for ${sig.slice(0, 12)}\u2026`);
+            return;
+          }
+          await imageAtlas.loadImage(sig, blob);
+          if (!imageAtlas.hasImage(sig)) {
+            console.warn(`[ShowCell] loadImageOnce: atlas.loadImage completed but hasImage=false for ${sig.slice(0, 12)}\u2026`);
+          }
+        } catch (err) {
+          console.warn(`[ShowCell] loadImageOnce: threw for ${sig.slice(0, 12)}\u2026`, err);
         }
       })();
       inFlightImages.set(sig, promise);
@@ -2822,19 +2812,38 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
           this.cellTagsCache.set(cell.label, []);
         }
       }
-      if (this.cellImageCache.has(cell.label)) {
-        cell.imageSig = this.cellImageCache.get(cell.label) ?? void 0;
+      if (!forceReload?.has(cell.label) && this.cellImageCache.has(cell.label)) {
+        const cachedSig = this.cellImageCache.get(cell.label) ?? void 0;
+        cell.imageSig = cachedSig;
         cell.borderColor = this.cellBorderColorCache.get(cell.label);
         cell.hasLink = this.cellLinkCache.get(cell.label) ?? false;
         cell.hasSubstrate = this.cellSubstrateCache.get(cell.label) ?? false;
         cell.hideText = this.cellHideTextCache.get(cell.label) ?? false;
-        return;
+        if (cachedSig) {
+          if (!imageAtlas.hasImage(cachedSig) && !imageAtlas.hasFailed(cachedSig)) {
+            console.log(`[ShowCell] fast-path reload ${cell.label} sig=${cachedSig.slice(0, 12)}\u2026`);
+            await loadImageOnce(cachedSig);
+            if (!imageAtlas.hasImage(cachedSig)) {
+              console.warn(`[ShowCell] fast-path reload FAILED for ${cell.label} sig=${cachedSig.slice(0, 12)}\u2026`);
+            }
+          }
+        } else {
+          this.cellImageCache.delete(cell.label);
+          console.log(`[ShowCell] clearing stale null cache for ${cell.label}, retrying`);
+        }
+        if (this.cellImageCache.has(cell.label)) return;
       }
       try {
         const propsSig = propsIndex[cell.label];
-        if (!propsSig) throw new Error("no props");
+        if (!propsSig) {
+          console.log(`[ShowCell] slow-path: no propsSig for ${cell.label} (propsIndex has ${Object.keys(propsIndex).length} entries, override=${this.#cursorPropsOverride?.size ?? 0})`);
+          throw new Error("no props");
+        }
         const blob = await store.getResource(propsSig);
-        if (!blob) throw new Error("no blob");
+        if (!blob) {
+          console.warn(`[ShowCell] slow-path: propsSig ${propsSig.slice(0, 12)}\u2026 resolved to null blob for ${cell.label}`);
+          throw new Error("no blob");
+        }
         const text = await blob.text();
         const props = JSON.parse(text);
         const bc = props?.border?.color;
@@ -2863,10 +2872,14 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
         cell.hideText = hideText;
         const smallSig = this.#flat && props?.flat?.small?.image || props?.small?.image;
         if (smallSig && isSignature(smallSig)) {
+          await loadImageOnce(smallSig);
           cell.imageSig = smallSig;
           this.cellImageCache.set(cell.label, smallSig);
-          await loadImageOnce(smallSig);
+          if (!imageAtlas.hasImage(smallSig)) {
+            console.warn(`[ShowCell] slow-path loaded props for ${cell.label} but atlas has no image. propsSig=${propsSig.slice(0, 12)}\u2026 smallSig=${smallSig.slice(0, 12)}\u2026 flat=${this.#flat}`);
+          }
         } else {
+          console.log(`[ShowCell] slow-path: no image in props for ${cell.label} propsSig=${propsSig.slice(0, 12)}\u2026 flat=${this.#flat} props.small=${JSON.stringify(props?.small)} props.flat=${JSON.stringify(props?.flat)}`);
           this.cellImageCache.set(cell.label, null);
         }
       } catch {
@@ -2877,7 +2890,8 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
   };
   buildCellsKey = (cells) => {
     const selectionService = window.ioc?.get?.("@diamondcoreprocessor.com/SelectionService");
-    let s = `p${this.#pivot ? 1 : 0}f${this.#flat ? 1 : 0}|`;
+    const atlasGen = this.imageAtlas?.evictionGeneration ?? 0;
+    let s = `p${this.#pivot ? 1 : 0}f${this.#flat ? 1 : 0}g${atlasGen}|`;
     for (const c of cells) s += `${c.q},${c.r}:${c.label}:${c.external ? 1 : 0}:${c.imageSig ?? ""}:${c.hasBranch ? 1 : 0}:${c.divergence ?? 0}:${c.hideText ? 1 : 0}|`;
     return s;
   };
@@ -3037,7 +3051,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
     if (!dir) return false;
     const probe = { q: 0, r: 0, label, external: false };
     try {
-      await this.loadCellImages([probe], dir);
+      await this.loadCellImages([probe], dir, /* @__PURE__ */ new Set([label]));
     } catch {
       return false;
     }

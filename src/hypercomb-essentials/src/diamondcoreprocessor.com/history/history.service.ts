@@ -381,13 +381,21 @@ export class HistoryService {
     const bytes = new TextEncoder().encode(json).buffer as ArrayBuffer
     const layerSig = await SignatureService.sign(bytes)
 
+    // Content dedup: a new entry is appended only when the layer actually
+    // differs from the current head. Identical canonical content produces
+    // identical signatures, so a signature match is a bytewise content
+    // match. Without this, repeated `synchronize` / `render:cell-count`
+    // ticks flood history with entries that show as "(no change)".
     const head = await this.headLayer(locationSig)
-    if (head?.layerSig === layerSig) return null
+    if (head && head.layerSig === layerSig) return null
 
+    // The entry file is a pointer to the resource — we must write the
+    // resource first. If the Store isn't registered yet, refuse the
+    // commit entirely rather than creating an orphan entry that would
+    // render as "(loading)" in the viewer forever.
     const store = get<{ putResource: (blob: Blob) => Promise<void> }>('@hypercomb.social/Store')
-    if (store) {
-      await store.putResource(new Blob([json], { type: 'application/json' }))
-    }
+    if (!store) return null
+    await store.putResource(new Blob([json], { type: 'application/json' }))
 
     const layersDir = await this.#getLayersDir(locationSig)
     const nextIndex = await this.#nextLayerIndex(layersDir)
@@ -457,6 +465,9 @@ export class HistoryService {
 
   /**
    * List all layer entries for a location, sorted by index ascending.
+   * Entries whose referenced layer resource can no longer be resolved are
+   * filtered out — they are dead pointers that would otherwise render as
+   * "(loading)" forever in the history viewer.
    */
   public readonly listLayers = async (
     locationSig: string,
@@ -464,19 +475,47 @@ export class HistoryService {
     const layersDir = await this.#tryGetLayersDir(locationSig)
     if (!layersDir) return []
 
-    const out: Array<LayerEntry & { index: number }> = []
+    const raw: Array<LayerEntry & { index: number }> = []
     for await (const [name, handle] of layersDir.entries()) {
       if (handle.kind !== 'file' || !name.endsWith('.json')) continue
       try {
         const file = await (handle as FileSystemFileHandle).getFile()
         const entry = JSON.parse(await file.text()) as LayerEntry
-        out.push({ ...entry, index: parseInt(name, 10) })
+        raw.push({ ...entry, index: parseInt(name, 10) })
       } catch {
         // skip corrupted entries
       }
     }
-    out.sort((a, b) => a.index - b.index)
-    return out
+    raw.sort((a, b) => a.index - b.index)
+
+    const store = get<{ getResource: (sig: string) => Promise<Blob | null> }>('@hypercomb.social/Store')
+    const resolved = new Set<string>()
+    if (store) {
+      const uniqueSignatures = Array.from(new Set(raw.map(e => e.layerSig)))
+      await Promise.all(uniqueSignatures.map(async (signature) => {
+        try {
+          const blob = await store.getResource(signature)
+          if (blob) resolved.add(signature)
+        } catch {
+          // leave unresolved — entry will be filtered out below
+        }
+      }))
+    }
+
+    // Collapse legacy duplicates: any run of consecutive entries that
+    // share a signature is kept as its first entry only. New commits
+    // can't produce duplicates (commitLayer head-dedups) but older
+    // bags written before that gate still contain runs — without this
+    // pass they render as "(no change)" rows against themselves.
+    const filtered: Array<LayerEntry & { index: number }> = []
+    let previousSignature: string | null = null
+    for (const entry of raw) {
+      if (store && !resolved.has(entry.layerSig)) continue
+      if (entry.layerSig === previousSignature) continue
+      filtered.push(entry)
+      previousSignature = entry.layerSig
+    }
+    return filtered
   }
 
   readonly #getLayersDir = async (
