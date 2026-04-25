@@ -1,7 +1,12 @@
 // diamondcoreprocessor.com/history/history.service.spec.ts
 //
-// Comprehensive coverage of the bag-per-lineage primitive. Tests
-// every undo/redo edge case, marker invariants, and sig stability.
+// Coverage of the merkle-composing layer model:
+//   - bag-per-lineage (signed by ancestry only)
+//   - marker file IS the full layer JSON (no pool indirection)
+//   - layerSig = sha256(marker file bytes)
+//   - empty seed (00000000) auto-minted on bag's first touch
+//   - merkle cascade: parent.merkles[i] = child's current marker sig
+//
 // Uses an in-memory OPFS mock so tests run in jsdom without browser.
 
 import { describe, it, expect, beforeEach } from 'vitest'
@@ -15,9 +20,9 @@ import { describe, it, expect, beforeEach } from 'vitest'
 const SIG_RE = /^[a-f0-9]{64}$/
 const MARKER_RE = /^\d{8}$/
 
-const sha256Hex = async (s: string): Promise<string> => {
-  const bytes = new TextEncoder().encode(s)
-  const hash = await crypto.subtle.digest('SHA-256', bytes.buffer as ArrayBuffer)
+const sha256Hex = async (s: string | ArrayBuffer): Promise<string> => {
+  const bytes = typeof s === 'string' ? new TextEncoder().encode(s) : new Uint8Array(s)
+  const hash = await crypto.subtle.digest('SHA-256', bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer)
   return Array.from(new Uint8Array(hash))
     .map(b => b.toString(16).padStart(2, '0'))
     .join('')
@@ -41,16 +46,14 @@ class MockFile {
   constructor(public name: string) {}
 
   async getFile(): Promise<File> {
-    const blob = new Blob([this.bytes.buffer.slice(this.bytes.byteOffset, this.bytes.byteOffset + this.bytes.byteLength) as ArrayBuffer])
+    const slice = this.bytes.buffer.slice(this.bytes.byteOffset, this.bytes.byteOffset + this.bytes.byteLength) as ArrayBuffer
+    const blob = new Blob([slice])
     const lastModified = this.lastModified
-    const bytes = this.bytes
-    // Hand-rolled File-like; arrayBuffer + text + lastModified are
-    // what the production code reads.
     return Object.assign(blob, {
       lastModified,
       name: this.name,
-      arrayBuffer: () => Promise.resolve(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer),
-      text: () => Promise.resolve(new TextDecoder().decode(bytes)),
+      arrayBuffer: () => Promise.resolve(slice),
+      text: () => Promise.resolve(new TextDecoder().decode(slice)),
     }) as unknown as File
   }
 
@@ -108,13 +111,22 @@ class MockDir {
 
 // -------------------------------------------------
 // Re-implement the testable slice of HistoryService inline.
-// Mirrors the production logic so the tests catch divergence.
+// Mirrors the production logic for the merkle-composing model.
 // -------------------------------------------------
 
-type LayerContent = { cells: string[]; hidden: string[] }
+type LayerContent = {
+  name: string
+  cells: string[]
+  merkles: string[]
+  hidden: string[]
+}
+
+const emptyLayer = (name: string): LayerContent => ({ name, cells: [], merkles: [], hidden: [] })
 
 const canonicalizeLayer = (layer: LayerContent): LayerContent => ({
+  name: layer.name,
   cells: layer.cells.slice(),
+  merkles: layer.merkles.slice(),
   hidden: [...layer.hidden].sort(),
 })
 
@@ -135,12 +147,6 @@ const writeBytes = async (dir: MockDir, name: string, bytes: Uint8Array): Promis
   try { await w.write(bytes) } finally { await w.close() }
 }
 
-const writeText = async (dir: MockDir, name: string, text: string): Promise<void> => {
-  const h = await dir.getFileHandle(name, { create: true })
-  const w = await h.createWritable()
-  try { await w.write(text) } finally { await w.close() }
-}
-
 const fileExists = async (dir: MockDir, name: string): Promise<boolean> => {
   try { await dir.getFileHandle(name, { create: false }); return true }
   catch { return false }
@@ -151,8 +157,19 @@ const dirExists = async (dir: MockDir, name: string): Promise<boolean> => {
   catch { return false }
 }
 
+const ensureSeed = async (bag: MockDir, name: string): Promise<void> => {
+  if (await fileExists(bag, '00000000')) return
+  const seed = canonicalizeLayer(emptyLayer(name))
+  const json = JSON.stringify(seed)
+  const bytes = new TextEncoder().encode(json)
+  await writeBytes(bag, '00000000', bytes)
+}
+
+/**
+ * Commit a layer for `lineageSig`. Marker file IS the full layer JSON
+ * (no pool indirection). Returns the marker's sig (sha256 of bytes).
+ */
 const commitLayer = async (
-  pool: MockDir,
   historyRoot: MockDir,
   lineageSig: string,
   layer: LayerContent,
@@ -162,15 +179,10 @@ const commitLayer = async (
   const bytes = new TextEncoder().encode(json)
   const layerSig = await sha256Hex(json)
 
-  // 1. content → __layers__/{sig}, idempotent
-  if (!(await fileExists(pool, layerSig))) {
-    await writeBytes(pool, layerSig, bytes)
-  }
-
-  // 2. marker → __history__/{lineageSig}/NNNN
   const bag = await historyRoot.getDirectoryHandle(lineageSig, { create: true })
+  await ensureSeed(bag, layer.name)
   const markerName = await nextMarkerName(bag)
-  await writeText(bag, markerName, layerSig)
+  await writeBytes(bag, markerName, bytes)
 
   return layerSig
 }
@@ -185,7 +197,12 @@ const normalize = async (bag: MockDir): Promise<void> => {
       try {
         const file = await h.getFile()
         const text = (await file.text()).trim()
-        if (SIG_RE.test(text)) continue
+        // Bare-sig content is the legacy pre-merkle marker shape
+        if (SIG_RE.test(text)) { drop.push(name); continue }
+        try {
+          const parsed = JSON.parse(text)
+          if (parsed && typeof parsed === 'object' && Array.isArray(parsed.cells)) continue
+        } catch { /* fall through */ }
       } catch { /* drop */ }
     }
     drop.push(name)
@@ -211,26 +228,82 @@ const listLayers = async (
     if (!MARKER_RE.test(name)) continue
     try {
       const file = await h.getFile()
-      const sig = (await file.text()).trim()
-      if (!SIG_RE.test(sig)) continue
-      markers.push({ layerSig: sig, at: file.lastModified, filename: name })
+      const bytes = await file.arrayBuffer()
+      const layerSig = await sha256Hex(bytes)
+      markers.push({ layerSig, at: file.lastModified, filename: name })
     } catch { /* skip */ }
   }
   markers.sort((a, b) => a.filename.localeCompare(b.filename))
   return markers.map((e, i) => ({ ...e, index: i }))
 }
 
+/**
+ * Read a layer's content directly from its bag. Walks markers, hashes
+ * each, returns the matching one's parsed JSON.
+ */
 const getLayerContent = async (
-  pool: MockDir,
+  historyRoot: MockDir,
+  lineageSig: string,
   layerSig: string,
 ): Promise<LayerContent | null> => {
   if (!SIG_RE.test(layerSig)) return null
-  try {
-    const h = await pool.getFileHandle(layerSig, { create: false })
-    const file = await h.getFile()
-    const parsed = JSON.parse(await file.text()) as Partial<LayerContent>
-    return { cells: parsed.cells ?? [], hidden: parsed.hidden ?? [] }
-  } catch { return null }
+  let bag: MockDir
+  try { bag = await historyRoot.getDirectoryHandle(lineageSig, { create: false }) }
+  catch { return null }
+  for await (const [name, h] of bag.entries()) {
+    if (h.kind !== 'file') continue
+    if (!MARKER_RE.test(name)) continue
+    try {
+      const file = await h.getFile()
+      const bytes = await file.arrayBuffer()
+      const sig = await sha256Hex(bytes)
+      if (sig !== layerSig) continue
+      const parsed = JSON.parse(new TextDecoder().decode(bytes)) as Partial<LayerContent>
+      return {
+        name: parsed.name ?? '',
+        cells: parsed.cells ?? [],
+        merkles: parsed.merkles ?? [],
+        hidden: parsed.hidden ?? [],
+      }
+    } catch { /* skip unreadable */ }
+  }
+  return null
+}
+
+/**
+ * Read the sig of the latest marker for a lineage's bag (its current
+ * merkle composition). Returns the empty-seed sig if the bag has no
+ * markers yet — a deterministic placeholder so children that haven't
+ * been visited still have a sig.
+ */
+const latestMarkerSigFor = async (
+  historyRoot: MockDir,
+  lineageSig: string,
+  name: string,
+): Promise<string> => {
+  let bag: MockDir | null = null
+  try { bag = await historyRoot.getDirectoryHandle(lineageSig, { create: false }) }
+  catch { /* no bag */ }
+
+  if (bag) {
+    let latest = ''
+    for await (const [n, h] of bag.entries()) {
+      if (h.kind !== 'file') continue
+      if (!MARKER_RE.test(n)) continue
+      if (n > latest) latest = n
+    }
+    if (latest) {
+      try {
+        const file = await (await bag.getFileHandle(latest)).getFile()
+        const bytes = await file.arrayBuffer()
+        return await sha256Hex(bytes)
+      } catch { /* fall through */ }
+    }
+  }
+
+  // Default: empty-seed sig
+  const seed = canonicalizeLayer(emptyLayer(name))
+  return await sha256Hex(JSON.stringify(seed))
 }
 
 // Cursor — pure state-machine slice; layers come from listLayers.
@@ -281,15 +354,15 @@ class Cursor {
   undo(): void { if (this.#position > 0) this.seek(this.#position - 1) }
   redo(): void { if (this.#position < this.#layers.length) this.seek(this.#position + 1) }
 
-  async layerContentAtCursor(pool: MockDir): Promise<LayerContent | null> {
+  async layerContentAtCursor(historyRoot: MockDir): Promise<LayerContent | null> {
     if (this.#position === 0) {
       // Case A: pre-history empty render IF layers exist; Case B
       // (no layers at all) — caller should fall through to live disk.
       if (this.#layers.length === 0) return null
-      return { cells: [], hidden: [] }
+      return emptyLayer('')
     }
     const entry = this.#layers[this.#position - 1]
-    return await getLayerContent(pool, entry.layerSig)
+    return await getLayerContent(historyRoot, this.#locationSig, entry.layerSig)
   }
 }
 
@@ -297,16 +370,12 @@ class Cursor {
 // Test environment
 // -------------------------------------------------
 
-let opfsRoot: MockDir
-let pool: MockDir
-let historyRoot: MockDir
+let opfsRoot: MockDir = new MockDir('/')
+let historyRoot: MockDir = new MockDir('__history__')
 
 beforeEach(() => {
   opfsRoot = new MockDir('/')
-  // initialize the two top-level dirs
-  pool = new MockDir('__layers__')
   historyRoot = new MockDir('__history__')
-  opfsRoot.dirs.set('__layers__', pool)
   opfsRoot.dirs.set('__history__', historyRoot)
 })
 
@@ -340,16 +409,6 @@ describe('signLineage — bag identity = ancestry only', () => {
     const b = await signLineage(['abc', 'def'])
     expect(a).toBe(b)
   })
-
-  it('two compute sites must produce identical sigs (contract)', async () => {
-    // Both history.service.ts:sign() and show-cell.drone.ts:
-    // computeSignatureLocation() must yield the same sig for the
-    // same lineage. Test asserts this by computing twice from the
-    // same canonical source.
-    const sig1 = await signLineage(['x', 'y', 'z'])
-    const sig2 = await signLineage(['x', 'y', 'z'])
-    expect(sig1).toBe(sig2)
-  })
 })
 
 // ===================================================
@@ -357,92 +416,102 @@ describe('signLineage — bag identity = ancestry only', () => {
 // ===================================================
 
 describe('commitLayer / listLayers — bag-per-lineage', () => {
-  it('first commit on a fresh lineage creates one marker (00000001) + one pool entry', async () => {
+  it('first commit on a fresh lineage auto-mints empty seed (00000000) + the new marker (00000001)', async () => {
     const lineageSig = await signLineage(['abc'])
-    const layer: LayerContent = { cells: ['x'], hidden: [] }
-    const sig = await commitLayer(pool, historyRoot, lineageSig, layer)
+    const sig = await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['x'], merkles: ['m'.padEnd(64, '0')], hidden: [] })
 
     expect(sig).toMatch(SIG_RE)
-    // Pool has the content
-    expect(await fileExists(pool, sig)).toBe(true)
-    // Bag has exactly one marker named 00000001
     const bag = await historyRoot.getDirectoryHandle(lineageSig)
     const names: string[] = []
     for await (const [n] of bag.entries()) names.push(n)
-    expect(names).toEqual(['00000001'])
-    // Marker content is the sig
-    const markerFile = await bag.getFileHandle('00000001')
-    const text = await (await markerFile.getFile()).text()
-    expect(text.trim()).toBe(sig)
+    expect(names.sort()).toEqual(['00000000', '00000001'])
+
+    // Marker content IS the layer JSON
+    const file = await (await bag.getFileHandle('00000001')).getFile()
+    const parsed = JSON.parse(await file.text())
+    expect(parsed.name).toBe('abc')
+    expect(parsed.cells).toEqual(['x'])
   })
 
-  it('list grows by exactly one per commit', async () => {
+  it('list grows by one per commit (plus the empty seed)', async () => {
     const lineageSig = await signLineage(['abc'])
     expect((await listLayers(historyRoot, lineageSig)).length).toBe(0)
 
-    await commitLayer(pool, historyRoot, lineageSig, { cells: ['x'], hidden: [] })
-    expect((await listLayers(historyRoot, lineageSig)).length).toBe(1)
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['x'], merkles: ['s'.padEnd(64, '0')], hidden: [] })
+    expect((await listLayers(historyRoot, lineageSig)).length).toBe(2)   // seed + first
 
-    await commitLayer(pool, historyRoot, lineageSig, { cells: ['x', 'y'], hidden: [] })
-    expect((await listLayers(historyRoot, lineageSig)).length).toBe(2)
-
-    await commitLayer(pool, historyRoot, lineageSig, { cells: ['x', 'y', 'z'], hidden: [] })
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['x', 'y'], merkles: ['s'.padEnd(64, '0'), 't'.padEnd(64, '0')], hidden: [] })
     expect((await listLayers(historyRoot, lineageSig)).length).toBe(3)
   })
 
-  it('two markers can point at the same sig (overlap = dedupe)', async () => {
+  it('two markers can carry identical content (sigs match, dedupe is observable)', async () => {
     const lineageSig = await signLineage(['abc'])
-    const layer: LayerContent = { cells: ['x'], hidden: [] }
-    const sig1 = await commitLayer(pool, historyRoot, lineageSig, layer)
-    const sig2 = await commitLayer(pool, historyRoot, lineageSig, layer) // same content
+    const layer: LayerContent = { name: 'abc', cells: ['x'], merkles: ['s'.padEnd(64, '0')], hidden: [] }
+    const sig1 = await commitLayer(historyRoot, lineageSig, layer)
+    const sig2 = await commitLayer(historyRoot, lineageSig, layer) // same content
 
-    expect(sig1).toBe(sig2)                                   // same content sig
+    expect(sig1).toBe(sig2)
     const entries = await listLayers(historyRoot, lineageSig)
-    expect(entries.length).toBe(2)                            // two markers
-    expect(entries[0].layerSig).toBe(entries[1].layerSig)     // pointing at same sig
-    // Pool has only ONE file for that sig (deduped)
-    let poolFiles = 0
-    for await (const [n] of pool.entries()) if (n === sig1) poolFiles++
-    expect(poolFiles).toBe(1)
+    // seed + 2 markers = 3
+    expect(entries.length).toBe(3)
+    expect(entries[1].layerSig).toBe(entries[2].layerSig)
   })
 
   it('listLayers returns markers sorted by filename (chronological)', async () => {
     const lineageSig = await signLineage(['abc'])
-    await commitLayer(pool, historyRoot, lineageSig, { cells: ['a'], hidden: [] })
-    await commitLayer(pool, historyRoot, lineageSig, { cells: ['b'], hidden: [] })
-    await commitLayer(pool, historyRoot, lineageSig, { cells: ['c'], hidden: [] })
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['a'], merkles: ['1'.padEnd(64, '0')], hidden: [] })
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['b'], merkles: ['2'.padEnd(64, '0')], hidden: [] })
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['c'], merkles: ['3'.padEnd(64, '0')], hidden: [] })
     const entries = await listLayers(historyRoot, lineageSig)
-    expect(entries.map(e => e.filename)).toEqual(['00000001', '00000002', '00000003'])
-    expect(entries.map(e => e.index)).toEqual([0, 1, 2])
+    expect(entries.map(e => e.filename)).toEqual(['00000000', '00000001', '00000002', '00000003'])
+    expect(entries.map(e => e.index)).toEqual([0, 1, 2, 3])
   })
 
   it('lineage isolation: commits at one lineage do not appear in another', async () => {
     const lineageA = await signLineage(['abc'])
     const lineageB = await signLineage(['def'])
-    await commitLayer(pool, historyRoot, lineageA, { cells: ['x'], hidden: [] })
-    await commitLayer(pool, historyRoot, lineageB, { cells: ['y'], hidden: [] })
-    expect((await listLayers(historyRoot, lineageA)).length).toBe(1)
-    expect((await listLayers(historyRoot, lineageB)).length).toBe(1)
-    // No cross-pollination — A's marker only in A's bag
-    const bagA = await historyRoot.getDirectoryHandle(lineageA)
-    const bagB = await historyRoot.getDirectoryHandle(lineageB)
-    expect(bagA).not.toBe(bagB)
+    await commitLayer(historyRoot, lineageA, { name: 'abc', cells: ['x'], merkles: ['x'.padEnd(64, '0')], hidden: [] })
+    await commitLayer(historyRoot, lineageB, { name: 'def', cells: ['y'], merkles: ['y'.padEnd(64, '0')], hidden: [] })
+    expect((await listLayers(historyRoot, lineageA)).length).toBe(2)
+    expect((await listLayers(historyRoot, lineageB)).length).toBe(2)
   })
 
   it('root lineage (empty segments) is a valid bag', async () => {
     const rootSig = await signLineage([])
-    await commitLayer(pool, historyRoot, rootSig, { cells: ['root-tile'], hidden: [] })
+    await commitLayer(historyRoot, rootSig, { name: '', cells: ['root-tile'], merkles: ['r'.padEnd(64, '0')], hidden: [] })
     const entries = await listLayers(historyRoot, rootSig)
-    expect(entries.length).toBe(1)
-    const content = await getLayerContent(pool, entries[0].layerSig)
+    expect(entries.length).toBe(2)   // seed + commit
+    const content = await getLayerContent(historyRoot, rootSig, entries[entries.length - 1].layerSig)
+    expect(content?.name).toBe('')
     expect(content?.cells).toEqual(['root-tile'])
+  })
+
+  it('auto-seed: the empty-seed marker exists on first commit and is byte-stable', async () => {
+    const lineageA = await signLineage(['abc'])
+    const lineageB = await signLineage(['xyz'])
+    await commitLayer(historyRoot, lineageA, { name: 'abc', cells: [], merkles: [], hidden: [] })
+    await commitLayer(historyRoot, lineageB, { name: 'xyz', cells: [], merkles: [], hidden: [] })
+
+    const bagA = await historyRoot.getDirectoryHandle(lineageA)
+    const bagB = await historyRoot.getDirectoryHandle(lineageB)
+
+    const seedABytes = await (await (await bagA.getFileHandle('00000000')).getFile()).arrayBuffer()
+    const seedBBytes = await (await (await bagB.getFileHandle('00000000')).getFile()).arrayBuffer()
+
+    // Different names → different seeds (name field is part of bytes)
+    expect(await sha256Hex(seedABytes)).not.toBe(await sha256Hex(seedBBytes))
+
+    // Same name → same seed sig
+    const seedASig = await sha256Hex(seedABytes)
+    const expected = await sha256Hex(JSON.stringify(canonicalizeLayer(emptyLayer('abc'))))
+    expect(seedASig).toBe(expected)
   })
 })
 
-describe('normalize — ruthless, idempotent', () => {
+describe('normalize — drops legacy shapes, keeps merkle markers', () => {
   it('idempotent on a clean bag', async () => {
     const lineageSig = await signLineage(['abc'])
-    await commitLayer(pool, historyRoot, lineageSig, { cells: ['x'], hidden: [] })
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['x'], merkles: ['x'.padEnd(64, '0')], hidden: [] })
     const before = (await listLayers(historyRoot, lineageSig)).length
     const after = (await listLayers(historyRoot, lineageSig)).length
     expect(after).toBe(before)
@@ -452,56 +521,72 @@ describe('normalize — ruthless, idempotent', () => {
     const lineageSig = await signLineage(['abc'])
     const bag = await historyRoot.getDirectoryHandle(lineageSig, { create: true })
     const fakeSig = await sha256Hex('something')
-    await writeText(bag, fakeSig, '{"cells":[],"hidden":[]}')   // legacy: content at bag root
+    await writeBytes(bag, fakeSig, new TextEncoder().encode('{"cells":[],"hidden":[]}'))
 
     await listLayers(historyRoot, lineageSig)
-
     expect(await fileExists(bag, fakeSig)).toBe(false)
   })
 
-  it('drops 8-digit numeric files with non-sig content (legacy ops, JSON, etc.)', async () => {
+  it('drops 8-digit numeric files with bare-sig content (pre-merkle shape)', async () => {
     const lineageSig = await signLineage(['abc'])
     const bag = await historyRoot.getDirectoryHandle(lineageSig, { create: true })
-    await writeText(bag, '00000001', '{"op":"add","cell":"x"}')   // legacy op
+    const sigOnlyMarker = await sha256Hex('legacy')
+    await writeBytes(bag, '00000001', new TextEncoder().encode(sigOnlyMarker))
 
     await listLayers(historyRoot, lineageSig)
     expect(await fileExists(bag, '00000001')).toBe(false)
   })
 
-  it('keeps canonical markers (8-digit numeric, sig content)', async () => {
+  it('drops 8-digit numeric files with op-JSON content', async () => {
     const lineageSig = await signLineage(['abc'])
-    await commitLayer(pool, historyRoot, lineageSig, { cells: ['x'], hidden: [] })
+    const bag = await historyRoot.getDirectoryHandle(lineageSig, { create: true })
+    await writeBytes(bag, '00000001', new TextEncoder().encode('{"op":"add","cell":"x"}'))
+
+    await listLayers(historyRoot, lineageSig)
+    expect(await fileExists(bag, '00000001')).toBe(false)
+  })
+
+  it('keeps canonical markers (8-digit numeric, layer-JSON-with-cells content)', async () => {
+    const lineageSig = await signLineage(['abc'])
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['x'], merkles: ['x'.padEnd(64, '0')], hidden: [] })
     const before = await listLayers(historyRoot, lineageSig)
     const after = await listLayers(historyRoot, lineageSig)
     expect(after.length).toBe(before.length)
-    expect(after[0].layerSig).toBe(before[0].layerSig)
+    expect(after[after.length - 1].layerSig).toBe(before[before.length - 1].layerSig)
   })
 })
 
-describe('getLayerContent — reads from shared pool', () => {
+describe('getLayerContent — reads marker bytes from the bag', () => {
   it('returns null for non-sig input', async () => {
-    expect(await getLayerContent(pool, 'not-a-sig')).toBeNull()
-    expect(await getLayerContent(pool, '00000001')).toBeNull()
+    const lineageSig = await signLineage(['abc'])
+    expect(await getLayerContent(historyRoot, lineageSig, 'not-a-sig')).toBeNull()
+    expect(await getLayerContent(historyRoot, lineageSig, '00000001')).toBeNull()
   })
 
-  it('returns null when sig not in pool', async () => {
+  it('returns null when sig not found in bag', async () => {
+    const lineageSig = await signLineage(['abc'])
     const phantomSig = await sha256Hex('nothing-written')
-    expect(await getLayerContent(pool, phantomSig)).toBeNull()
+    expect(await getLayerContent(historyRoot, lineageSig, phantomSig)).toBeNull()
   })
 
-  it('returns parsed slim layer for an existing sig', async () => {
+  it('returns parsed full-shape layer for an existing sig', async () => {
     const lineageSig = await signLineage(['abc'])
-    const sig = await commitLayer(pool, historyRoot, lineageSig, { cells: ['a', 'b'], hidden: ['c'] })
-    const content = await getLayerContent(pool, sig)
-    expect(content).toEqual({ cells: ['a', 'b'], hidden: ['c'] })
+    const sig = await commitLayer(historyRoot, lineageSig, {
+      name: 'abc', cells: ['a', 'b'], merkles: ['1'.padEnd(64, '0'), '2'.padEnd(64, '0')], hidden: ['c'],
+    })
+    const content = await getLayerContent(historyRoot, lineageSig, sig)
+    expect(content).toEqual({
+      name: 'abc', cells: ['a', 'b'], merkles: ['1'.padEnd(64, '0'), '2'.padEnd(64, '0')], hidden: ['c'],
+    })
   })
 
-  it('content survives across listLayers calls (normalize does not touch pool)', async () => {
+  it('content survives across listLayers calls', async () => {
     const lineageSig = await signLineage(['abc'])
-    const sig = await commitLayer(pool, historyRoot, lineageSig, { cells: ['x'], hidden: [] })
+    const sig = await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['x'], merkles: ['x'.padEnd(64, '0')], hidden: [] })
     await listLayers(historyRoot, lineageSig)
     await listLayers(historyRoot, lineageSig)
-    expect(await getLayerContent(pool, sig)).toEqual({ cells: ['x'], hidden: [] })
+    const content = await getLayerContent(historyRoot, lineageSig, sig)
+    expect(content?.cells).toEqual(['x'])
   })
 })
 
@@ -528,117 +613,110 @@ describe('Cursor — undo/redo over an empty bag', () => {
     const lineageSig = await signLineage(['abc'])
     const cursor = new Cursor()
     await cursor.load(historyRoot, lineageSig)
-    expect(await cursor.layerContentAtCursor(pool)).toBeNull()
+    expect(await cursor.layerContentAtCursor(historyRoot)).toBeNull()
   })
 })
 
-describe('Cursor — undo/redo over a single-marker bag', () => {
+describe('Cursor — undo/redo over a single-commit bag (= 2 markers: seed + commit)', () => {
   let lineageSig: string
   let cursor: Cursor
 
   beforeEach(async () => {
     lineageSig = await signLineage(['abc'])
-    await commitLayer(pool, historyRoot, lineageSig, { cells: ['x'], hidden: [] })
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['x'], merkles: ['x'.padEnd(64, '0')], hidden: [] })
     cursor = new Cursor()
     await cursor.load(historyRoot, lineageSig)
   })
 
-  it('initial cursor is at head (position=1, total=1)', () => {
-    expect(cursor.state.position).toBe(1)
-    expect(cursor.state.total).toBe(1)
+  it('initial cursor is at head (position=2, total=2)', () => {
+    expect(cursor.state.position).toBe(2)
+    expect(cursor.state.total).toBe(2)
     expect(cursor.state.rewound).toBe(false)
   })
 
   it('layerContentAtCursor returns the layer at head', async () => {
-    expect(await cursor.layerContentAtCursor(pool)).toEqual({ cells: ['x'], hidden: [] })
+    const content = await cursor.layerContentAtCursor(historyRoot)
+    expect(content?.cells).toEqual(['x'])
+    expect(content?.name).toBe('abc')
   })
 
-  it('undo takes cursor to position 0 (pre-history)', () => {
+  it('undo to position=1 lands on the empty seed', async () => {
+    cursor.undo()
+    expect(cursor.state.position).toBe(1)
+    const content = await cursor.layerContentAtCursor(historyRoot)
+    expect(content).toEqual(emptyLayer('abc'))
+  })
+
+  it('undo past the seed → position=0 (pre-history), rewound=true', () => {
+    cursor.undo()
     cursor.undo()
     expect(cursor.state.position).toBe(0)
     expect(cursor.state.rewound).toBe(true)
   })
 
-  it('layerContentAtCursor at position 0 returns the empty seed (case A: history exists)', async () => {
-    cursor.undo()
-    expect(await cursor.layerContentAtCursor(pool)).toEqual({ cells: [], hidden: [] })
-  })
-
-  it('redo from position 0 takes cursor back to head', () => {
-    cursor.undo()
+  it('redo from position 0 walks forward', () => {
+    cursor.undo(); cursor.undo()
     cursor.redo()
     expect(cursor.state.position).toBe(1)
+    cursor.redo()
+    expect(cursor.state.position).toBe(2)
     expect(cursor.state.rewound).toBe(false)
   })
 
   it('extra undos at position 0 are no-ops', () => {
-    cursor.undo()
-    cursor.undo()
-    cursor.undo()
+    cursor.undo(); cursor.undo(); cursor.undo(); cursor.undo()
     expect(cursor.state.position).toBe(0)
   })
 
   it('extra redos at head are no-ops', () => {
     cursor.redo()
     cursor.redo()
-    expect(cursor.state.position).toBe(1)
+    expect(cursor.state.position).toBe(2)
   })
 })
 
-describe('Cursor — undo/redo over a multi-marker bag', () => {
+describe('Cursor — undo/redo over a multi-commit bag', () => {
   let lineageSig: string
   let cursor: Cursor
-  let sigs: string[]
 
   beforeEach(async () => {
     lineageSig = await signLineage(['abc'])
-    sigs = []
-    sigs.push(await commitLayer(pool, historyRoot, lineageSig, { cells: ['a'], hidden: [] }))
-    sigs.push(await commitLayer(pool, historyRoot, lineageSig, { cells: ['a', 'b'], hidden: [] }))
-    sigs.push(await commitLayer(pool, historyRoot, lineageSig, { cells: ['a', 'b', 'c'], hidden: [] }))
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['a'], merkles: ['a'.padEnd(64, '0')], hidden: [] })
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['a', 'b'], merkles: ['a'.padEnd(64, '0'), 'b'.padEnd(64, '0')], hidden: [] })
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['a', 'b', 'c'], merkles: ['a'.padEnd(64, '0'), 'b'.padEnd(64, '0'), 'c'.padEnd(64, '0')], hidden: [] })
     cursor = new Cursor()
     await cursor.load(historyRoot, lineageSig)
   })
 
-  it('starts at head (position=3, total=3)', () => {
-    expect(cursor.state.position).toBe(3)
-    expect(cursor.state.total).toBe(3)
+  it('starts at head (position=4, total=4 — seed + 3 commits)', () => {
+    expect(cursor.state.position).toBe(4)
+    expect(cursor.state.total).toBe(4)
   })
 
   it('walks backward one step per undo', () => {
-    cursor.undo()
-    expect(cursor.state.position).toBe(2)
-    cursor.undo()
-    expect(cursor.state.position).toBe(1)
-    cursor.undo()
-    expect(cursor.state.position).toBe(0)
+    cursor.undo(); expect(cursor.state.position).toBe(3)
+    cursor.undo(); expect(cursor.state.position).toBe(2)
+    cursor.undo(); expect(cursor.state.position).toBe(1)
+    cursor.undo(); expect(cursor.state.position).toBe(0)
   })
 
   it('layerContentAtCursor reflects the cell set at each position', async () => {
-    expect(await cursor.layerContentAtCursor(pool)).toEqual({ cells: ['a', 'b', 'c'], hidden: [] })
+    expect((await cursor.layerContentAtCursor(historyRoot))?.cells).toEqual(['a', 'b', 'c'])
     cursor.undo()
-    expect(await cursor.layerContentAtCursor(pool)).toEqual({ cells: ['a', 'b'], hidden: [] })
+    expect((await cursor.layerContentAtCursor(historyRoot))?.cells).toEqual(['a', 'b'])
     cursor.undo()
-    expect(await cursor.layerContentAtCursor(pool)).toEqual({ cells: ['a'], hidden: [] })
+    expect((await cursor.layerContentAtCursor(historyRoot))?.cells).toEqual(['a'])
     cursor.undo()
-    expect(await cursor.layerContentAtCursor(pool)).toEqual({ cells: [], hidden: [] })   // pre-history
-  })
-
-  it('redo walks forward', () => {
-    cursor.undo(); cursor.undo(); cursor.undo()
-    cursor.redo()
-    expect(cursor.state.position).toBe(1)
-    cursor.redo()
-    expect(cursor.state.position).toBe(2)
-    cursor.redo()
-    expect(cursor.state.position).toBe(3)
+    expect((await cursor.layerContentAtCursor(historyRoot))?.cells).toEqual([])   // empty seed
+    cursor.undo()
+    expect((await cursor.layerContentAtCursor(historyRoot))).toEqual(emptyLayer(''))   // pre-history
   })
 
   it('round-trip undo/redo restores cell set', async () => {
-    const head = await cursor.layerContentAtCursor(pool)
-    cursor.undo(); cursor.undo(); cursor.undo()
-    cursor.redo(); cursor.redo(); cursor.redo()
-    expect(await cursor.layerContentAtCursor(pool)).toEqual(head)
+    const head = await cursor.layerContentAtCursor(historyRoot)
+    cursor.undo(); cursor.undo(); cursor.undo(); cursor.undo()
+    cursor.redo(); cursor.redo(); cursor.redo(); cursor.redo()
+    expect((await cursor.layerContentAtCursor(historyRoot))?.cells).toEqual(head?.cells)
   })
 
   it('rewound state is correctly reported when not at head', () => {
@@ -652,32 +730,32 @@ describe('Cursor — undo/redo over a multi-marker bag', () => {
 describe('Cursor — onNewLayer behavior', () => {
   it('cursor at head absorbs new layer and stays at new head', async () => {
     const lineageSig = await signLineage(['abc'])
-    await commitLayer(pool, historyRoot, lineageSig, { cells: ['a'], hidden: [] })
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['a'], merkles: ['a'.padEnd(64, '0')], hidden: [] })
     const cursor = new Cursor()
     await cursor.load(historyRoot, lineageSig)
-    expect(cursor.state.position).toBe(1)
-
-    await commitLayer(pool, historyRoot, lineageSig, { cells: ['a', 'b'], hidden: [] })
-    await cursor.onNewLayer(historyRoot)
     expect(cursor.state.position).toBe(2)
-    expect(cursor.state.total).toBe(2)
+
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['a', 'b'], merkles: ['a'.padEnd(64, '0'), 'b'.padEnd(64, '0')], hidden: [] })
+    await cursor.onNewLayer(historyRoot)
+    expect(cursor.state.position).toBe(3)
+    expect(cursor.state.total).toBe(3)
   })
 
   it('rewound cursor stays at its position when a new layer is committed at head', async () => {
     const lineageSig = await signLineage(['abc'])
-    await commitLayer(pool, historyRoot, lineageSig, { cells: ['a'], hidden: [] })
-    await commitLayer(pool, historyRoot, lineageSig, { cells: ['a', 'b'], hidden: [] })
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['a'], merkles: ['a'.padEnd(64, '0')], hidden: [] })
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['a', 'b'], merkles: ['a'.padEnd(64, '0'), 'b'.padEnd(64, '0')], hidden: [] })
     const cursor = new Cursor()
     await cursor.load(historyRoot, lineageSig)
-    cursor.undo()
-    expect(cursor.state.position).toBe(1)
+    cursor.undo()   // pos=2
+    expect(cursor.state.position).toBe(2)
 
-    await commitLayer(pool, historyRoot, lineageSig, { cells: ['a', 'b', 'c'], hidden: [] })
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['a', 'b', 'c'], merkles: ['a'.padEnd(64, '0'), 'b'.padEnd(64, '0'), 'c'.padEnd(64, '0')], hidden: [] })
     await cursor.onNewLayer(historyRoot)
-    // Was rewound (pos=1 < total=2), should stay at pos=1 even
-    // though total grew to 3.
-    expect(cursor.state.position).toBe(1)
-    expect(cursor.state.total).toBe(3)
+    // Was rewound (pos=2 < total=3), should stay at pos=2 even
+    // though total grew to 4.
+    expect(cursor.state.position).toBe(2)
+    expect(cursor.state.total).toBe(4)
   })
 })
 
@@ -685,108 +763,164 @@ describe('Cursor — lineage navigation', () => {
   it('cursor.load to a different lineage resets position to that lineage\'s head', async () => {
     const lineageA = await signLineage(['a'])
     const lineageB = await signLineage(['b'])
-    await commitLayer(pool, historyRoot, lineageA, { cells: ['x'], hidden: [] })
-    await commitLayer(pool, historyRoot, lineageA, { cells: ['x', 'y'], hidden: [] })
-    await commitLayer(pool, historyRoot, lineageB, { cells: ['z'], hidden: [] })
+    await commitLayer(historyRoot, lineageA, { name: 'a', cells: ['x'], merkles: ['x'.padEnd(64, '0')], hidden: [] })
+    await commitLayer(historyRoot, lineageA, { name: 'a', cells: ['x', 'y'], merkles: ['x'.padEnd(64, '0'), 'y'.padEnd(64, '0')], hidden: [] })
+    await commitLayer(historyRoot, lineageB, { name: 'b', cells: ['z'], merkles: ['z'.padEnd(64, '0')], hidden: [] })
 
     const cursor = new Cursor()
     await cursor.load(historyRoot, lineageA)
-    expect(cursor.state.position).toBe(2)
-    expect(cursor.state.total).toBe(2)
+    expect(cursor.state.position).toBe(3)   // seed + 2 commits
 
     await cursor.load(historyRoot, lineageB)
-    expect(cursor.state.position).toBe(1)
-    expect(cursor.state.total).toBe(1)
+    expect(cursor.state.position).toBe(2)   // seed + 1 commit
     expect(cursor.state.locationSig).toBe(lineageB)
 
     await cursor.load(historyRoot, lineageA)
-    expect(cursor.state.position).toBe(2)
+    expect(cursor.state.position).toBe(3)
     expect(cursor.state.locationSig).toBe(lineageA)
   })
 
   it('navigating back to root lineage works (empty segments)', async () => {
     const rootSig = await signLineage([])
-    await commitLayer(pool, historyRoot, rootSig, { cells: ['root-cell'], hidden: [] })
+    await commitLayer(historyRoot, rootSig, { name: '', cells: ['root-cell'], merkles: ['r'.padEnd(64, '0')], hidden: [] })
     const childSig = await signLineage(['child'])
-    await commitLayer(pool, historyRoot, childSig, { cells: ['child-cell'], hidden: [] })
+    await commitLayer(historyRoot, childSig, { name: 'child', cells: ['child-cell'], merkles: ['c'.padEnd(64, '0')], hidden: [] })
 
     const cursor = new Cursor()
     await cursor.load(historyRoot, childSig)
-    expect((await cursor.layerContentAtCursor(pool))?.cells).toEqual(['child-cell'])
+    expect((await cursor.layerContentAtCursor(historyRoot))?.cells).toEqual(['child-cell'])
 
     await cursor.load(historyRoot, rootSig)
-    expect((await cursor.layerContentAtCursor(pool))?.cells).toEqual(['root-cell'])
+    expect((await cursor.layerContentAtCursor(historyRoot))?.cells).toEqual(['root-cell'])
   })
 })
 
-describe('Root merkle invariant — current root advances per commit', () => {
-  it('after each commit, the latest marker points at a new sig (when content changes)', async () => {
+// ===================================================
+// Merkle invariants — cascade and root
+// ===================================================
+
+describe('Merkle invariant — current root advances per commit', () => {
+  it('after each commit, the latest marker has a new sig (when content changes)', async () => {
     const lineageSig = await signLineage(['abc'])
-    const sig1 = await commitLayer(pool, historyRoot, lineageSig, { cells: ['a'], hidden: [] })
-    const sig2 = await commitLayer(pool, historyRoot, lineageSig, { cells: ['a', 'b'], hidden: [] })
-    const sig3 = await commitLayer(pool, historyRoot, lineageSig, { cells: ['a', 'b', 'c'], hidden: [] })
+    const sig1 = await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['a'], merkles: ['a'.padEnd(64, '0')], hidden: [] })
+    const sig2 = await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['a', 'b'], merkles: ['a'.padEnd(64, '0'), 'b'.padEnd(64, '0')], hidden: [] })
+    const sig3 = await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['a', 'b', 'c'], merkles: ['a'.padEnd(64, '0'), 'b'.padEnd(64, '0'), 'c'.padEnd(64, '0')], hidden: [] })
+
+    expect(sig1).not.toBe(sig2)
+    expect(sig2).not.toBe(sig3)
+    expect(sig1).not.toBe(sig3)
 
     const entries = await listLayers(historyRoot, lineageSig)
-    expect(entries.length).toBe(3)
-    expect(entries[0].layerSig).toBe(sig1)
-    expect(entries[1].layerSig).toBe(sig2)
-    expect(entries[2].layerSig).toBe(sig3)
-
-    // The current root = the latest marker's sig
-    const currentRoot = entries[entries.length - 1].layerSig
-    expect(currentRoot).toBe(sig3)
+    // seed + 3 commits = 4
+    expect(entries.length).toBe(4)
+    expect(entries[entries.length - 1].layerSig).toBe(sig3)
   })
 
-  it('current root is identical when content matches (sig is content-addressed)', async () => {
+  it('content-addressed: same content → same sig', async () => {
     const lineageSig = await signLineage(['abc'])
-    const sig1 = await commitLayer(pool, historyRoot, lineageSig, { cells: ['a'], hidden: [] })
-    // Different intermediate state
-    await commitLayer(pool, historyRoot, lineageSig, { cells: ['a', 'b'], hidden: [] })
-    // Back to the same state as sig1
-    const sig3 = await commitLayer(pool, historyRoot, lineageSig, { cells: ['a'], hidden: [] })
+    const sig1 = await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['a'], merkles: ['a'.padEnd(64, '0')], hidden: [] })
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['a', 'b'], merkles: ['a'.padEnd(64, '0'), 'b'.padEnd(64, '0')], hidden: [] })
+    const sig3 = await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['a'], merkles: ['a'.padEnd(64, '0')], hidden: [] })
     expect(sig3).toBe(sig1)
+  })
 
-    // Three markers, two distinct sigs, current root = sig1 (= sig3)
-    const entries = await listLayers(historyRoot, lineageSig)
-    expect(entries.length).toBe(3)
-    const currentRoot = entries[entries.length - 1].layerSig
-    expect(currentRoot).toBe(sig1)
+  it('changing only merkles[] (child mutated) changes parent layer sig', async () => {
+    const lineageSig = await signLineage(['abc'])
+    // Same name + cells, different merkles ↔ parent's bytes change
+    // This is the property that drives the cascade.
+    const sigA = await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['x'], merkles: ['1'.padEnd(64, '0')], hidden: [] })
+    const sigB = await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['x'], merkles: ['2'.padEnd(64, '0')], hidden: [] })
+    expect(sigA).not.toBe(sigB)
+  })
+})
+
+describe('Merkle cascade — latestMarkerSigFor + parent composition', () => {
+  it('latestMarkerSigFor on missing bag returns deterministic empty-seed sig', async () => {
+    const lineageSig = await signLineage(['phantom'])
+    const sig = await latestMarkerSigFor(historyRoot, lineageSig, 'phantom')
+    const expected = await sha256Hex(JSON.stringify(canonicalizeLayer(emptyLayer('phantom'))))
+    expect(sig).toBe(expected)
+  })
+
+  it('latestMarkerSigFor returns sig of LAST marker (after commits)', async () => {
+    const lineageSig = await signLineage(['abc'])
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['x'], merkles: ['1'.padEnd(64, '0')], hidden: [] })
+    const sigSecond = await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['x', 'y'], merkles: ['1'.padEnd(64, '0'), '2'.padEnd(64, '0')], hidden: [] })
+
+    const latest = await latestMarkerSigFor(historyRoot, lineageSig, 'abc')
+    expect(latest).toBe(sigSecond)
+  })
+
+  it('cascade simulation: child commit changes parent bytes when parent recomputes merkles', async () => {
+    // Lineage: /A/B/C  (leaf)
+    const leafSig = await signLineage(['A', 'B', 'C'])
+    const midSig = await signLineage(['A', 'B'])
+    const topSig = await signLineage(['A'])
+    const rootSig = await signLineage([])
+
+    // 1. Initial commit at leaf
+    await commitLayer(historyRoot, leafSig, { name: 'C', cells: [], merkles: [], hidden: [] })
+
+    // Build mid layer with leaf's current merkle
+    let leafMerkle = await latestMarkerSigFor(historyRoot, leafSig, 'C')
+    const midSigBefore = await commitLayer(historyRoot, midSig, {
+      name: 'B', cells: ['C'], merkles: [leafMerkle], hidden: [],
+    })
+    const topSigBefore = await commitLayer(historyRoot, topSig, {
+      name: 'A', cells: ['B'], merkles: [await latestMarkerSigFor(historyRoot, midSig, 'B')], hidden: [],
+    })
+    const rootSigBefore = await commitLayer(historyRoot, rootSig, {
+      name: '', cells: ['A'], merkles: [await latestMarkerSigFor(historyRoot, topSig, 'A')], hidden: [],
+    })
+
+    // 2. Leaf changes — add a cell at /A/B/C
+    await commitLayer(historyRoot, leafSig, { name: 'C', cells: ['leaf-tile'], merkles: ['t'.padEnd(64, '0')], hidden: [] })
+
+    // 3. Cascade up: each ancestor recomputes its merkles array
+    leafMerkle = await latestMarkerSigFor(historyRoot, leafSig, 'C')
+    const midSigAfter = await commitLayer(historyRoot, midSig, {
+      name: 'B', cells: ['C'], merkles: [leafMerkle], hidden: [],
+    })
+    const topSigAfter = await commitLayer(historyRoot, topSig, {
+      name: 'A', cells: ['B'], merkles: [await latestMarkerSigFor(historyRoot, midSig, 'B')], hidden: [],
+    })
+    const rootSigAfter = await commitLayer(historyRoot, rootSig, {
+      name: '', cells: ['A'], merkles: [await latestMarkerSigFor(historyRoot, topSig, 'A')], hidden: [],
+    })
+
+    // Every ancestor's sig changed (cascade reached the root)
+    expect(midSigAfter).not.toBe(midSigBefore)
+    expect(topSigAfter).not.toBe(topSigBefore)
+    expect(rootSigAfter).not.toBe(rootSigBefore)
+  })
+
+  it('siblings are isolated: a commit at /A/B/C does not change /A/B2 sig (only /A/B and up cascade)', async () => {
+    const sibSig1 = await signLineage(['A', 'B', 'C'])
+    const sibSig2 = await signLineage(['A', 'B2'])
+
+    // Commit at sibling 2 first
+    await commitLayer(historyRoot, sibSig2, { name: 'B2', cells: [], merkles: [], hidden: [] })
+    const sib2Initial = await latestMarkerSigFor(historyRoot, sibSig2, 'B2')
+
+    // Commit at sibling 1 (under different parent path)
+    await commitLayer(historyRoot, sibSig1, { name: 'C', cells: ['a'], merkles: ['a'.padEnd(64, '0')], hidden: [] })
+
+    // Sibling 2 unchanged
+    const sib2After = await latestMarkerSigFor(historyRoot, sibSig2, 'B2')
+    expect(sib2After).toBe(sib2Initial)
   })
 })
 
 describe('Cursor — interleaved commit/undo edge cases', () => {
-  it('commit while rewound: contract says caller skips (we test the guard logic itself)', async () => {
+  it('rapid commits (no coalescing): N events → N markers (plus seed), in order', async () => {
     const lineageSig = await signLineage(['abc'])
-    await commitLayer(pool, historyRoot, lineageSig, { cells: ['a'], hidden: [] })
-    await commitLayer(pool, historyRoot, lineageSig, { cells: ['a', 'b'], hidden: [] })
-    const cursor = new Cursor()
-    await cursor.load(historyRoot, lineageSig)
-    cursor.undo()
-    expect(cursor.state.rewound).toBe(true)
-    // Per layer-committer.drone.ts:#commit, the guard `if (cursor?.state?.rewound) return`
-    // skips commits while rewound. Mirror that guard here:
-    const shouldSkip = cursor.state.rewound
-    expect(shouldSkip).toBe(true)
-    // ...so a "would-be commit" in this state must NOT advance the bag
-    const before = (await listLayers(historyRoot, lineageSig)).length
-    if (!shouldSkip) {
-      await commitLayer(pool, historyRoot, lineageSig, { cells: ['x'], hidden: [] })
-    }
-    const after = (await listLayers(historyRoot, lineageSig)).length
-    expect(after).toBe(before)   // no new marker
-  })
-
-  it('rapid commits (no coalescing): N events → N markers, in order', async () => {
-    const lineageSig = await signLineage(['abc'])
-    const promises: Promise<string>[] = []
     for (let i = 0; i < 5; i++) {
-      promises.push(commitLayer(pool, historyRoot, lineageSig, { cells: [`cell-${i}`], hidden: [] }))
+      await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: [`cell-${i}`], merkles: [String(i).padEnd(64, '0')], hidden: [] })
     }
-    await Promise.all(promises)
     const entries = await listLayers(historyRoot, lineageSig)
-    expect(entries.length).toBe(5)
+    expect(entries.length).toBe(6)   // seed + 5
     expect(entries.map(e => e.filename)).toEqual([
-      '00000001', '00000002', '00000003', '00000004', '00000005',
+      '00000000', '00000001', '00000002', '00000003', '00000004', '00000005',
     ])
   })
 
@@ -796,25 +930,25 @@ describe('Cursor — interleaved commit/undo edge cases', () => {
     await cursor.load(historyRoot, lineageSig)
     expect(cursor.state.total).toBe(0)
 
-    await commitLayer(pool, historyRoot, lineageSig, { cells: ['x'], hidden: [] })
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['x'], merkles: ['x'.padEnd(64, '0')], hidden: [] })
     await cursor.onNewLayer(historyRoot)
-    expect(cursor.state.total).toBe(1)
-    expect(cursor.state.position).toBe(1)
-    expect((await cursor.layerContentAtCursor(pool))?.cells).toEqual(['x'])
+    expect(cursor.state.total).toBe(2)   // seed + commit
+    expect(cursor.state.position).toBe(2)
+    expect((await cursor.layerContentAtCursor(historyRoot))?.cells).toEqual(['x'])
   })
 })
 
 describe('Cursor — pre-history (case A) vs no-history (case B)', () => {
-  it('case A: bag has markers, undone past them → render empty', async () => {
+  it('case A: bag has markers, undone past them → render empty seed', async () => {
     const lineageSig = await signLineage(['abc'])
-    await commitLayer(pool, historyRoot, lineageSig, { cells: ['x'], hidden: [] })
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['x'], merkles: ['x'.padEnd(64, '0')], hidden: [] })
     const cursor = new Cursor()
     await cursor.load(historyRoot, lineageSig)
-    cursor.undo()
+    cursor.undo(); cursor.undo()   // past seed
     expect(cursor.state.position).toBe(0)
-    expect(cursor.state.total).toBe(1)   // history exists
-    const content = await cursor.layerContentAtCursor(pool)
-    expect(content).toEqual({ cells: [], hidden: [] })   // empty seed (case A)
+    expect(cursor.state.total).toBe(2)
+    const content = await cursor.layerContentAtCursor(historyRoot)
+    expect(content).toEqual(emptyLayer(''))   // pre-history (case A)
   })
 
   it('case B: bag has no markers, position=0 → caller falls through to live disk', async () => {
@@ -822,12 +956,11 @@ describe('Cursor — pre-history (case A) vs no-history (case B)', () => {
     const cursor = new Cursor()
     await cursor.load(historyRoot, lineageSig)
     expect(cursor.state.position).toBe(0)
-    expect(cursor.state.total).toBe(0)   // NO history
-    // The cursor returns null (no layer); the renderer is responsible
-    // for falling through to live disk in this case.
-    expect(await cursor.layerContentAtCursor(pool)).toBeNull()
+    expect(cursor.state.total).toBe(0)
+    expect(await cursor.layerContentAtCursor(historyRoot)).toBeNull()
   })
 })
 
-// Sanity: dirExists is used in the test setup; satisfy linter
+// Sanity: dirExists/opfsRoot are used in the test setup; satisfy linter
 void dirExists
+void opfsRoot

@@ -44,7 +44,12 @@ export class CompactQueenBee extends QueenBee {
     // 1. Snapshot current on-disk state.
     const fresh = await this.#assembleFromDisk(lineage)
 
-    // 2. Wipe existing markers. Pool content is untouched (may still
+    // 2. Purge any pre-merkle / op-JSON / sig-named pollution. This
+    //    is the only path that destroys history files and ONLY runs
+    //    when the user explicitly invokes /compact.
+    await history.purgeNonLayerFiles(locationSig)
+
+    // 3. Wipe existing markers. Pool content is untouched (may still
     //    be referenced by other lineages or branches).
     const entries = await history.listLayers(locationSig)
     if (entries.length > 0) {
@@ -86,7 +91,16 @@ export class CompactQueenBee extends QueenBee {
       hidden = Array.isArray(parsed) ? parsed.map(String) : []
     } catch { /* default to none */ }
 
-    return { cells, hidden }
+    // /compact wipes history, so we don't try to wire merkles for
+    // children — leave the array empty. The next user event will
+    // cascade up and rebuild the merkle composition.
+    const name = (() => {
+      const label = String(lineage.explorerLabel?.() ?? '/')
+      if (label === '/' || label === '') return ''
+      const parts = label.split('/').filter(Boolean)
+      return parts[parts.length - 1] ?? ''
+    })()
+    return { name, cells, merkles: [], hidden }
   }
 }
 

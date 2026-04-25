@@ -1,6 +1,6 @@
 // diamondcoreprocessor.com/core/order-projection.ts
 import { EffectBus } from '@hypercomb/core'
-import type { HistoryService, HistoryOp, LayerContent } from './history.service.js'
+import type { HistoryService, HistoryOp } from './history.service.js'
 
 export class OrderProjection {
 
@@ -71,18 +71,10 @@ export class OrderProjection {
     const head = await history.headLayer(locationSig)
     if (!head) return null
 
-    const store = get<{ getResource: (sig: string) => Promise<Blob | null> }>('@hypercomb.social/Store')
-    if (!store) return null
-
-    const blob = await store.getResource(head.layerSig)
-    if (!blob) return null
-
-    try {
-      const content = JSON.parse(await blob.text()) as LayerContent
-      return Array.isArray(content.cells) ? [...content.cells] : null
-    } catch {
-      return null
-    }
+    // Marker file IS the layer JSON — read directly from the bag.
+    const content = await history.getLayerContent(locationSig, head.layerSig)
+    if (!content) return null
+    return Array.isArray(content.cells) ? [...content.cells] : null
   }
 
   /**

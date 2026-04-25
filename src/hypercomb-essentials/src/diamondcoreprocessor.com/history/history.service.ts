@@ -38,24 +38,43 @@ export type LayerState = {
 }
 
 /**
- * A signature-addressed snapshot of a lineage's cell state.
+ * A lineage's complete state at one moment. The marker file IS this
+ * JSON (no separate pool indirection on hypercomb).
  *
- * Two named arrays, nothing else. Per the architectural rule, a primitive
- * resource is an array of one useful type with a name — no heterogeneous
- * records. Tags, content, notes, bees, dependencies, layout, instructions
- * all live as their own primitives elsewhere (live OPFS reads, per-service
- * resources). Stuffing them into the layer made the layer a coupled bag
- * that drifted out of sync; primitives are decoupled by construction.
+ *   {
+ *     name:   "<this layer's segment name>",  // "" at root, "abc" at /abc, etc.
+ *     cells:  ["<sig>", "<sig>", ...],        // each child's CURRENT marker sig
+ *     hidden: ["<sig>", ...]                   // child marker sigs that are hidden
+ *   }
  *
- * Ordering contract:
- * - `cells` is ordered (position in array = layout position).
- * - `hidden` is canonically sorted (lexicographic) so set-equal states
- *   produce byte-equal JSON and dedupe.
+ * Marker sig = sha256 of the marker file's bytes. Parent layer's
+ * `cells` array carries each child's current marker sig — when a
+ * child commits a new marker, its sig changes, parent's cells
+ * changes, parent's bytes change, parent's sig changes. Cascade
+ * propagates that all the way up to the root lineage's bag, where
+ * the latest marker IS the current global merkle root.
+ *
+ * Names live INSIDE each child's layer (its own `name` field). To
+ * display children, fetch each cell sig's marker file and read its
+ * name. To navigate, append the name to the current path → resolve
+ * the target lineage sig → open its bag.
  */
 export type LayerContent = {
+  /** This layer's segment name. "" at root, "abc" at /abc, "def" at /abc/def. */
+  name: string
+  /** Ordered list of child names (subdirectories of this layer's explorer dir). */
   cells: string[]
+  /** Parallel to `cells` — each entry is the sig of that child's CURRENT marker
+   *  file (its merkle composition). When a child's marker changes, its sig
+   *  changes, this array changes, this layer's bytes change, this layer's sig
+   *  changes — cascading the update up to the root. */
+  merkles: string[]
+  /** Subset of `cells` (by name) that are hidden from rendering. */
   hidden: string[]
 }
+
+/** Empty seed layer — content of `00000000` minted on bag's first touch. */
+export const emptyLayer = (name: string): LayerContent => ({ name, cells: [], merkles: [], hidden: [] })
 
 /**
  * One history entry. Just a pointer to a layer resource plus the timestamp
@@ -354,70 +373,70 @@ export class HistoryService {
 
   /**
    * Canonicalize a layer so byte-equal content produces byte-equal JSON.
-   * `cells` keeps its caller-supplied order (position is meaningful).
-   * `hidden` is sorted lexicographically so set-equal states dedupe.
+   * `cells` keeps its caller-supplied order (position is meaningful;
+   * children are listed in directory enumeration order). `merkles` is
+   * parallel to `cells` and so keeps its order too — entry i is the
+   * merkle sig of cell i. `hidden` is sorted lexicographically so
+   * set-equal states dedupe.
    */
   static readonly canonicalizeLayer = (layer: LayerContent): LayerContent => ({
+    name: layer.name,
     cells: layer.cells.slice(),
+    merkles: layer.merkles.slice(),
     hidden: [...layer.hidden].sort(),
   })
 
   /**
-   * Commit a layer snapshot for a location.
+   * Commit a complete layer snapshot for a lineage.
    *
-   * Writes the canonical layer content directly into the lineage bag
-   * as `__history__/{lineageSig}/{layerSig}` — the file IS the layer
-   * content, named by the hash of its bytes. Same content → same sig
-   * → same file (natural dedupe, no separate dedup table). Skips the
-   * write if a file with that sig already exists so any cached Blob
-   * handle elsewhere can't be invalidated by an idempotent rewrite.
+   * The marker file IS the full layer JSON — no pool indirection on
+   * hypercomb. Bag layout:
    *
-   * Also seeds Store.putResource so cross-bag resolvers (cursor warmup,
-   * renderer) keep finding the content under the same sig — but the
-   * source of truth for this lineage's history is the bag file itself.
+   *   __history__/{lineageSig}/00000000  ← empty seed (auto-minted on first touch)
+   *   __history__/{lineageSig}/00000001  ← first user-event commit
+   *   __history__/{lineageSig}/00000002
+   *   ...
    *
-   * @returns the layer signature, or null if the layer was a no-op
-   *          rewrite of the current head.
+   * Each file's content is the full layer JSON; sha256(file bytes) is
+   * the marker's "sig" (the layer's identity). Parent layers reference
+   * each child's current marker sig in their `cells` array — the
+   * cascade walk that ancestors do upstream of every commit produces
+   * a new marker at every level, so the root lineage's bag's latest
+   * marker IS the global merkle root.
+   *
+   * commitLayer here writes ONE marker for ONE lineage. Cascade is
+   * orchestrated by the caller (LayerCommitter): walk leaf → root,
+   * call commitLayer at each level with that level's freshly-assembled
+   * layer (which references its children's just-committed marker sigs).
+   *
+   * @returns the new marker's sig (sha256 of the file bytes).
    */
   public readonly commitLayer = async (
     locationSig: string,
     layer: LayerContent,
-  ): Promise<string | null> => {
+  ): Promise<string> => {
     const canonical = HistoryService.canonicalizeLayer(layer)
     const json = JSON.stringify(canonical)
     const bytes = new TextEncoder().encode(json)
     const layerSig = await SignatureService.sign(bytes.buffer as ArrayBuffer)
 
-    // 1. Content lives in the SHARED pool at __layers__/{sig}, not in
-    //    the bag. Same shape as DCP — both sides have a flat content
-    //    pool keyed by sig + a per-lineage __history__/ holding only
-    //    markers. Sync convergence (matching merkle roots) requires
-    //    identical structure on both sides.
-    await this.#writeLayerToPool(layerSig, bytes)
-
-    // 2. Append a marker at __history__/{lineage}/{NNNN} containing
-    //    the sig. ALWAYS appended, even when the sig matches an
-    //    existing pool entry — markers carry the per-event timeline,
-    //    content lives once in the pool. Two markers may point at
-    //    the same sig (overlap = dedupe).
     const bag = await this.getBag(locationSig)
+    await this.#ensureSeed(bag, layer.name)
+
     const markerName = await this.#nextMarkerName(bag)
     const markerHandle = await bag.getFileHandle(markerName, { create: true })
     const markerWritable = await markerHandle.createWritable()
-    try { await markerWritable.write(layerSig) } finally { await markerWritable.close() }
+    try { await markerWritable.write(bytes.buffer as ArrayBuffer) } finally { await markerWritable.close() }
 
-    // Seed Store cache for cross-bag resolvers (warmup, diff inspector)
-    // even though the bag-direct read path is the source of truth.
-    const store = get<{ putResource: (blob: Blob) => Promise<void> }>('@hypercomb.social/Store')
-    if (store) {
-      try { await store.putResource(new Blob([json], { type: 'application/json' })) } catch { /* best-effort */ }
-    }
+    // Hot-cache the just-written bytes so the cursor's next read does not
+    // round-trip OPFS / re-hash — getLayerContent picks it up directly.
+    const cacheMap = this.#markerBytesCache.get(locationSig)
+      ?? (this.#markerBytesCache.set(locationSig, new Map()), this.#markerBytesCache.get(locationSig)!)
+    cacheMap.set(layerSig, bytes.buffer as ArrayBuffer)
 
-    // Enqueue the new sig for DCP push. Fire-and-forget — the queue
-    // is OPFS-backed, so survives reload; drain runs in the
-    // background until DCP returns receipts. Until the real DCP
-    // intake transport is wired the drain stubs receipts locally so
-    // the gate logic (hasReceipt → branch save) is exercisable.
+    // Push queue is informational — fires for backup but doesn't gate
+    // anything. Stub receipts arrive immediately (real DCP transport
+    // is forthcoming).
     const pushQueue = get<{ enqueue: (sig: string) => Promise<void> }>('@diamondcoreprocessor.com/PushQueueService')
     if (pushQueue) {
       void pushQueue.enqueue(layerSig).catch(() => { /* best-effort */ })
@@ -427,25 +446,71 @@ export class HistoryService {
   }
 
   /**
-   * Write layer bytes into the shared content pool at __layers__/{sig}.
-   * Idempotent — if the file already exists with the same name, we
-   * skip the write to keep any cached Blob handles valid. The pool
-   * is the SAME shape and role as DCP's __layers__/{sig}, so sigs
-   * are interchangeable across the push boundary.
+   * Ensure `00000000` exists in the bag with the empty seed for this
+   * lineage's name. Bag's first touch always plants this seed so undo
+   * has a concrete pre-history landing spot and the bag is never empty
+   * once visited.
+   *
+   * The seed sig is also cached so callers that look it up by sig
+   * (e.g., `latestMarkerSigFor` for a freshly-visited child) hit
+   * warm without an extra OPFS round-trip.
    */
-  readonly #writeLayerToPool = async (
-    layerSig: string,
-    bytes: Uint8Array,
+  readonly #ensureSeed = async (
+    bag: FileSystemDirectoryHandle,
+    name: string,
   ): Promise<void> => {
-    const store = get<{ layers: FileSystemDirectoryHandle }>('@hypercomb.social/Store')
-    if (!store?.layers) return
     let exists = true
-    try { await store.layers.getFileHandle(layerSig, { create: false }) } catch { exists = false }
+    try { await bag.getFileHandle('00000000', { create: false }) } catch { exists = false }
     if (exists) return
-    const handle = await store.layers.getFileHandle(layerSig, { create: true })
+    const seed = HistoryService.canonicalizeLayer(emptyLayer(name))
+    const seedJson = JSON.stringify(seed)
+    const seedBytes = new TextEncoder().encode(seedJson)
+    const handle = await bag.getFileHandle('00000000', { create: true })
     const writable = await handle.createWritable()
-    // Cast to ArrayBuffer for strict-mode FileSystemWriteChunkType.
-    try { await writable.write(bytes.buffer as ArrayBuffer) } finally { await writable.close() }
+    try { await writable.write(seedBytes.buffer as ArrayBuffer) } finally { await writable.close() }
+  }
+
+  /**
+   * Read the latest marker file from a lineage's bag and compute its
+   * sig (sha256 of its bytes). Used by the cascade: an ancestor
+   * commit needs each child's CURRENT marker sig to populate its
+   * own `cells` array.
+   *
+   * If the bag doesn't exist or is empty, returns the sig of the
+   * empty seed for that name (so children that haven't been visited
+   * yet still have a deterministic placeholder sig).
+   */
+  public readonly latestMarkerSigFor = async (
+    lineageSig: string,
+    name: string,
+  ): Promise<string> => {
+    let bag: FileSystemDirectoryHandle | null = null
+    try {
+      bag = await this.historyRoot.getDirectoryHandle(lineageSig, { create: false })
+    } catch { /* no bag */ }
+
+    if (bag) {
+      // Find latest NNNN marker
+      let latestName = ''
+      for await (const [n, h] of (bag as any).entries()) {
+        if (h.kind !== 'file') continue
+        if (!HistoryService.#MARKER_RE.test(n)) continue
+        if (n > latestName) latestName = n
+      }
+      if (latestName) {
+        try {
+          const handle = await bag.getFileHandle(latestName, { create: false })
+          const file = await handle.getFile()
+          const bytes = await file.arrayBuffer()
+          return await SignatureService.sign(bytes)
+        } catch { /* fall through to empty seed */ }
+      }
+    }
+
+    // Default: empty seed sig for this name
+    const seed = HistoryService.canonicalizeLayer(emptyLayer(name))
+    const seedBytes = new TextEncoder().encode(JSON.stringify(seed))
+    return await SignatureService.sign(seedBytes.buffer as ArrayBuffer)
   }
 
   /**
@@ -461,33 +526,34 @@ export class HistoryService {
   }
 
   /**
-   * Filename conventions at the bag root:
-   *   - 64-hex sig file → layer content (one per unique state)
-   *   - 8-digit numeric → marker file (one per user event), content = a sig
+   * Filename convention at the bag root:
+   *   - 8-digit numeric (NNNNNNNN) → marker file
    *
-   * Two named shapes, two roles. The convention is mechanical — names
-   * carry meaning, no inspection of content needed for routing. Markers
-   * give us per-event history with overlap (multiple markers can point
-   * at the same sig); sig files give us content dedupe.
+   * The marker file's content IS the full layer JSON. The marker's
+   * "sig" is sha256 of its bytes. Anything else in the bag is foreign
+   * and gets quarantined.
    */
   static readonly #SIG_RE = /^[a-f0-9]{64}$/
   static readonly #MARKER_RE = /^\d{8}$/
 
   /**
-   * List all marker entries for a location, sorted chronologically by
-   * marker filename (numeric ascending, so the last element is the
-   * latest commit). Each entry's `filename` is the MARKER name (used
-   * for delete/promote ops); `layerSig` is the content sig the marker
-   * points at; `at` is the marker file's lastModified.
+   * List all marker entries for a lineage's bag, sorted by filename
+   * (numeric ascending). The first element is the empty seed
+   * (`00000000`); the last element is the current head.
    *
-   * Multiple markers may share the same `layerSig` (overlap is the
-   * whole point of markers — per-event history with content dedupe).
+   * `layerSig` for each entry is sha256 of the marker file's bytes —
+   * computed at read time from the file content (not stored anywhere).
+   * Two markers with identical content have the same `layerSig`; the
+   * filenames stay distinct (they're the per-event timeline).
    */
   public readonly listLayers = async (
     locationSig: string,
   ): Promise<Array<LayerEntry & { index: number; filename: string }>> => {
-    await this.#quarantineNonLayerFiles(locationSig)
-
+    // SKIP non-canonical entries; do NOT delete them. Auto-delete on
+    // every read is destructive and not user-driven — a single bad
+    // detection rule could erase real markers and lose history. To
+    // explicitly purge non-canonical files, the user can run /compact
+    // which calls #quarantineNonLayerFiles via a dedicated path.
     let bag: FileSystemDirectoryHandle
     try {
       bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false })
@@ -495,22 +561,34 @@ export class HistoryService {
       return []
     }
 
+    const cacheMap = this.#markerBytesCache.get(locationSig)
+      ?? (this.#markerBytesCache.set(locationSig, new Map()), this.#markerBytesCache.get(locationSig)!)
+
     const markers: Array<LayerEntry & { filename: string }> = []
     for await (const [name, handle] of (bag as any).entries()) {
       if (handle.kind !== 'file') continue
       if (!HistoryService.#MARKER_RE.test(name)) continue
       try {
         const file = await (handle as FileSystemFileHandle).getFile()
-        const sig = (await file.text()).trim()
-        if (!HistoryService.#SIG_RE.test(sig)) continue   // malformed marker, skip
-        markers.push({ layerSig: sig, at: file.lastModified, filename: name })
+        const bytes = await file.arrayBuffer()
+        // Read-time filter: only include canonical merkle markers
+        // (JSON object with cells[]). Pre-merkle bare-sig markers
+        // and op-JSON entries are skipped from the active list but
+        // are NOT deleted — the file stays on disk until the user
+        // explicitly compacts.
+        const text = new TextDecoder().decode(bytes)
+        const trimmed = text.trim()
+        if (HistoryService.#SIG_RE.test(trimmed)) continue   // legacy bare-sig marker
+        try {
+          const parsed = JSON.parse(text)
+          if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.cells)) continue
+        } catch { continue }
+        const layerSig = await SignatureService.sign(bytes)
+        cacheMap.set(layerSig, bytes)
+        markers.push({ layerSig, at: file.lastModified, filename: name })
       } catch { /* skip unreadable */ }
     }
-    // Numeric ascending — markers are minted by #nextMarkerName as
-    // monotonically increasing zero-padded integers. Tie-break on
-    // filename for determinism when two markers share a millisecond.
     markers.sort((a, b) => a.filename.localeCompare(b.filename))
-
     return markers.map((entry, position) => ({ ...entry, index: position }))
   }
 
@@ -534,47 +612,49 @@ export class HistoryService {
   }
 
   /**
-   * Read a layer's content from the SHARED pool at __layers__/{sig}.
-   * The pool is the source of truth — same shape on hypercomb and
-   * DCP, sigs are interchangeable across the push boundary. The bag
-   * holds only markers (per-event NNNN files containing a sig); the
-   * content lives once in the pool no matter how many markers point
-   * at it.
+   * Read a layer's content directly from the lineage's bag.
    *
-   * Falls back to Store.getResource for legacy paths that may have
-   * cached the bytes earlier. `locationSig` is unused but kept on
-   * the signature for callers that haven't been updated yet.
+   * On hypercomb the marker file IS the full layer JSON — no pool
+   * indirection. Each NNNN marker in the bag holds one full
+   * `LayerContent`; its sha256 is the marker's "sig" (its merkle
+   * identity).
+   *
+   * To resolve `layerSig` → content, we walk the bag's markers,
+   * hash each, and return the matching one. Bags are small (one
+   * marker per user event for that lineage) so the scan is cheap.
+   * For repeated reads we cache (lineageSig, layerSig) → bytes
+   * via `#markerBytesCache`.
    */
   public readonly getLayerContent = async (
-    _locationSig: string,
+    locationSig: string,
     layerSig: string,
   ): Promise<LayerContent | null> => {
     if (!HistoryService.#SIG_RE.test(layerSig)) return null
 
-    let bytes: ArrayBuffer | null = null
-    let blob: Blob | null = null
+    // 1. Hot cache — populated by listLayers and previous getLayerContent calls
+    const cache = this.#markerBytesCache.get(locationSig)
+    let bytes: ArrayBuffer | undefined = cache?.get(layerSig)
 
-    // 1. Primary: read from the shared pool.
-    const store = get<{
-      layers: FileSystemDirectoryHandle
-      getResource?: (sig: string) => Promise<Blob | null>
-      putResource?: (blob: Blob) => Promise<void>
-    }>('@hypercomb.social/Store')
-    if (store?.layers) {
+    // 2. Cold scan — walk markers, hash, match
+    if (!bytes) {
+      let bag: FileSystemDirectoryHandle
       try {
-        const handle = await store.layers.getFileHandle(layerSig, { create: false })
-        const file = await handle.getFile()
-        bytes = await file.arrayBuffer()
-        blob = file
-      } catch { /* not in pool — try resource fallback */ }
-    }
+        bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false })
+      } catch { return null }
 
-    // 2. Fallback: legacy resource cache.
-    if (!bytes && store?.getResource) {
-      const cached = await store.getResource(layerSig).catch(() => null)
-      if (cached) {
-        bytes = await cached.arrayBuffer()
-        blob = cached
+      const cacheMap = this.#markerBytesCache.get(locationSig)
+        ?? (this.#markerBytesCache.set(locationSig, new Map()), this.#markerBytesCache.get(locationSig)!)
+
+      for await (const [name, handle] of (bag as any).entries()) {
+        if (handle.kind !== 'file') continue
+        if (!HistoryService.#MARKER_RE.test(name)) continue
+        try {
+          const file = await (handle as FileSystemFileHandle).getFile()
+          const fileBytes = await file.arrayBuffer()
+          const sig = await SignatureService.sign(fileBytes)
+          cacheMap.set(sig, fileBytes)
+          if (sig === layerSig) { bytes = fileBytes; break }
+        } catch { /* skip unreadable */ }
       }
     }
 
@@ -584,20 +664,18 @@ export class HistoryService {
     try { parsed = JSON.parse(new TextDecoder().decode(bytes)) as Partial<LayerContent> }
     catch { return null }
 
-    // Slim layer — only cells and hidden. Anything else in the file
-    // (legacy fat-layer fields) is ignored at read.
-    const content: LayerContent = {
+    return {
+      name: parsed.name ?? '',
       cells: parsed.cells ?? [],
+      merkles: parsed.merkles ?? [],
       hidden: parsed.hidden ?? [],
     }
-
-    // Warm the resource cache so other resolvers stay hot.
-    if (blob && store?.putResource) {
-      try { await store.putResource(blob) } catch { /* best-effort */ }
-    }
-
-    return content
   }
+
+  // (lineageSig → layerSig → bytes) cache, populated by listLayers
+  // and getLayerContent. Keeps undo/redo navigation off OPFS for
+  // markers we've already touched in this session.
+  readonly #markerBytesCache = new Map<string, Map<string, ArrayBuffer>>()
 
   /**
    * One-time bag-pollution cleanup. The pre-refactor history-recorder
@@ -621,22 +699,23 @@ export class HistoryService {
    * manual triage.
    */
   /**
-   * Normalize a bag on every read: keep canonical markers ONLY, drop
-   * everything else.
+   * Purge non-canonical files from a bag.
    *
-   * Canonical = NNNN file with content that's exactly a 64-hex sig.
-   * Anything else (legacy sig-named bag entries, JSON pointer markers,
-   * direct-content markers, op logs, oddly-named files) is removed.
-   * No migration — pre-canonical bags lose their history.
+   * Canonical = NNNN file whose content is a JSON object with at least
+   * the slim-layer fields (`cells` array). Pre-merkle bags (containing
+   * legacy sig-named pool pointers, op-JSON entries, etc.) are dropped.
    *
-   * Acceptable trade-off (per the explicit "old users lose history,
-   * we have no users really" call): the renderer falls through to live
-   * disk when a bag has no markers, so tiles still display; only the
-   * undo/redo timeline is reset. New events going forward mint
-   * canonical markers and the timeline rebuilds from there.
+   * USER-DRIVEN ONLY. listLayers no longer calls this — silently
+   * deleting markers from a passive read path is destructive (a single
+   * detection bug could erase real history). The only call site is
+   * /compact, which the user invokes deliberately.
    *
    * Idempotent: a clean bag is unchanged.
    */
+  public readonly purgeNonLayerFiles = async (
+    locationSig: string,
+  ): Promise<void> => this.#quarantineNonLayerFiles(locationSig)
+
   readonly #quarantineNonLayerFiles = async (
     locationSig: string,
   ): Promise<void> => {
@@ -649,12 +728,19 @@ export class HistoryService {
     for await (const [name, handle] of (bag as any).entries()) {
       if (handle.kind !== 'file') continue
 
-      // Canonical marker: NNNN name + sig content. Anything else dies.
+      // Canonical marker: NNNN name + JSON-with-cells[] content.
       if (HistoryService.#MARKER_RE.test(name)) {
         try {
           const file = await (handle as FileSystemFileHandle).getFile()
           const text = (await file.text()).trim()
-          if (HistoryService.#SIG_RE.test(text)) continue   // canonical, keep
+          // Bare-sig content is the pre-merkle marker shape; drop it.
+          if (HistoryService.#SIG_RE.test(text)) { drop.push(name); continue }
+          // Layer-JSON content — keep if it parses to an object with a
+          // `cells` array.
+          try {
+            const parsed = JSON.parse(text)
+            if (parsed && typeof parsed === 'object' && Array.isArray(parsed.cells)) continue
+          } catch { /* unparseable — drop */ }
         } catch { /* unreadable — drop */ }
       }
       drop.push(name)

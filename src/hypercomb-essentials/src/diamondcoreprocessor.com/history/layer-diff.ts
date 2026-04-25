@@ -22,7 +22,7 @@ export type LayerDiff =
   | { kind: 'cell-hidden'; cell: string }
   | { kind: 'cell-unhidden'; cell: string }
 
-const EMPTY: LayerContent = { cells: [], hidden: [] }
+const EMPTY: LayerContent = { name: '', cells: [], merkles: [], hidden: [] }
 
 export const diffLayers = (
   prev: LayerContent | null,

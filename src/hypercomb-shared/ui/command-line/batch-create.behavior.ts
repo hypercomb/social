@@ -53,23 +53,55 @@ export class BatchCreateBehavior implements CommandLineBehavior {
     const expanded = this.#expand(input, completions)
     if (!expanded.length) return
 
-    const topCells = new Set<string>()
+    // Track every distinct (parent-lineage → leaf-cell-name) created
+    // in this batch. Each unique parent emits one cell:added event
+    // carrying the parent's segments — that lineage gets a layer
+    // commit, and the cascade walks up to the root.
+    //
+    // For "abc/[123,456]" typed from /A: parents = { ["A","abc"] }
+    // → one event with segments=["A","abc"]. Cascade: /A/abc, /A, /.
+    //
+    // For "[a,b,c]" typed from /A: parents = { ["A"] }
+    // → one event with segments=["A"]. Cascade: /A, /.
+    //
+    // For "[abc/x, def/y]" typed from /A: parents = { ["A","abc"], ["A","def"] }
+    // → two events, each cascading independently.
+    const baseSegments = (lineage as unknown as { explorerSegments?: () => string[] })?.explorerSegments?.() ?? []
+    const parentsAdded = new Map<string, { segments: string[]; firstCell: string }>()
     const tagOps: TagOp[] = []
+    let removedFiredFor: string[] | null = null
+
+    const recordParent = (parentSegments: string[], leafCell: string) => {
+      const key = parentSegments.join('/')
+      if (!parentsAdded.has(key)) {
+        parentsAdded.set(key, { segments: parentSegments.slice(), firstCell: leafCell })
+      }
+    }
 
     for (const item of expanded) {
       if (item.op === 'delete') {
         await this.#deleteTarget(dir, item.segments)
         if (item.segments[0]) {
-          EffectBus.emit('cell:removed', { cell: item.segments[0] })
+          // The deleted tile lived at baseSegments + item.segments[0..-1]
+          const parentSegs = [...baseSegments, ...item.segments.slice(0, -1)]
+          EffectBus.emit('cell:removed', {
+            cell: item.segments[item.segments.length - 1],
+            segments: parentSegs,
+          })
+          removedFiredFor = parentSegs
         }
       } else if (item.op === 'tag-add' || item.op === 'tag-remove') {
         // ensure the cell exists for tag-add
         if (item.op === 'tag-add') {
           let parent = dir
+          const accumulated: string[] = [...baseSegments]
           for (const part of item.segments) {
             parent = await parent.getDirectoryHandle(part, { create: true })
+            accumulated.push(part)
           }
-          if (item.segments[0]) topCells.add(item.segments[0])
+          // record the parent of the leaf
+          const parentSegs = accumulated.slice(0, -1)
+          recordParent(parentSegs, item.segments[item.segments.length - 1])
         }
         if (item.tag) {
           tagOps.push({
@@ -80,12 +112,17 @@ export class BatchCreateBehavior implements CommandLineBehavior {
           })
         }
       } else {
-        // create
+        // create — walk every level (creates dirs along the way),
+        // record the deepest parent so the cascade reaches every new
+        // lineage.
         let parent = dir
+        const accumulated: string[] = [...baseSegments]
         for (const part of item.segments) {
           parent = await parent.getDirectoryHandle(part, { create: true })
+          accumulated.push(part)
         }
-        if (item.segments[0]) topCells.add(item.segments[0])
+        const parentSegs = accumulated.slice(0, -1)
+        recordParent(parentSegs, item.segments[item.segments.length - 1])
       }
     }
 
@@ -94,9 +131,11 @@ export class BatchCreateBehavior implements CommandLineBehavior {
       await persistTagOps(tagOps, dir)
     }
 
-    for (const cell of topCells) {
-      EffectBus.emit('cell:added', { cell })
+    // One event per UNIQUE parent lineage. Each cascades independently.
+    for (const { segments, firstCell } of parentsAdded.values()) {
+      EffectBus.emit('cell:added', { cell: firstCell, segments })
     }
+    void removedFiredFor   // satisfies linter; reserved for future per-removal logging
     await new hypercomb().act()
   }
 

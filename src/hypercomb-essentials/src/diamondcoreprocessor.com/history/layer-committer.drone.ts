@@ -21,7 +21,16 @@ type Lineage = {
   // handle (or null when not available yet).
   explorerDir?: () => Promise<FileSystemDirectoryHandle | null> | FileSystemDirectoryHandle | null | undefined
   explorerSegments?: () => string[]
+  // Walk to an arbitrary ancestor — used by the cascade to pull each
+  // ancestor's directory handle. Lineage exposes this for the file
+  // explorer and we reuse it here.
+  tryResolve?: (
+    segments: readonly string[],
+    start?: FileSystemDirectoryHandle | null,
+  ) => Promise<FileSystemDirectoryHandle | null>
 }
+
+type LineageStore = { hypercombRoot?: FileSystemDirectoryHandle }
 
 type LayoutSnapshot = {
   orientation: 'flat-top' | 'point-top'
@@ -34,8 +43,8 @@ type LayoutSnapshot = {
 /**
  * Strict FIFO commit chain. One event = one commit slot, no
  * coalescing. Every `request()` appends to the tail of a Promise
- * chain that runs `#run()` in order. Layer count grows by exactly
- * one per event — that's the contract.
+ * chain that runs `#run(payload)` in order. Layer count grows by
+ * exactly one per event — that's the contract.
  *
  * Why no coalescing: the user's mental model is "every action is
  * one undo step." A multi-select delete of 5 cells emits 5
@@ -46,17 +55,35 @@ type LayoutSnapshot = {
  * Serialisation is still required because each commit allocates a
  * numeric marker name (max+1 of existing markers). Two parallel
  * commits would race on that allocation.
+ *
+ * `payload` carries the lineage segments where the event happened,
+ * letting the cascade start at the correct depth (so `abc/123`
+ * created from root cascades through /abc and /, not just /).
  */
+type CommitRequest = { segments: string[] | null }
+
 class CommitMachine {
   #chain: Promise<void> = Promise.resolve()
-  readonly #run: () => Promise<void>
+  readonly #run: (req: CommitRequest) => Promise<void>
 
-  constructor(run: () => Promise<void>) {
+  constructor(run: (req: CommitRequest) => Promise<void>) {
     this.#run = run
   }
 
-  request(): void {
-    this.#chain = this.#chain.then(() => this.#run()).catch(() => { /* failures don't break the chain */ })
+  /** Fire-and-forget enqueue. Returned chain failures are swallowed. */
+  request(req: CommitRequest = { segments: null }): void {
+    this.#chain = this.#chain.then(() => this.#run(req)).catch(() => { /* failures don't break the chain */ })
+  }
+
+  /**
+   * Same as `request` but returns a promise that resolves when this
+   * specific request finishes (success or failure). Used by bootstrap
+   * paths that need to read back the bag right after the commit lands.
+   */
+  requestAndWait(req: CommitRequest = { segments: null }): Promise<void> {
+    const ran = this.#chain.then(() => this.#run(req))
+    this.#chain = ran.catch(() => { /* don't break the chain */ })
+    return ran.catch(() => { /* don't reject the awaiter either */ })
   }
 }
 
@@ -83,7 +110,7 @@ export class LayerCommitter {
   // Leaf + ancestors still commit as one atomic #commit() call
   // inside the machine's #run — each ancestor is a merkle-chain
   // update cascading up from the leaf.
-  readonly #machine = new CommitMachine(() => this.#commit())
+  readonly #machine = new CommitMachine(req => this.#commit(req))
 
   constructor() {
     // layout:mode subscription removed — dense/spiral mode is phased
@@ -111,20 +138,138 @@ export class LayerCommitter {
     // no batched "wait until things settle" commits. One event = one
     // commit attempt. The bag's per-event timeline IS the user's
     // actions; nothing speculative is allowed in.
-    EffectBus.on('cell:added',   () => this.#queueCommit())
-    EffectBus.on('cell:removed', () => this.#queueCommit())
-    EffectBus.on('tile:saved',   () => this.#queueCommit())
-    EffectBus.on('tags:changed', () => this.#queueCommit())
-    EffectBus.on('tile:hidden',  () => this.#queueCommit())
-    EffectBus.on('tile:unhidden',() => this.#queueCommit())
+    //
+    // Payload may carry `segments` — the lineage where the event
+    // happened. When present, cascade starts at THAT depth so a tile
+    // created at /abc cascades through /abc → / regardless of which
+    // page the user is currently looking at.
+    EffectBus.on<{ cell?: string; segments?: string[] }>('cell:added',   p => this.#queueCommit(p?.segments))
+    EffectBus.on<{ cell?: string; segments?: string[] }>('cell:removed', p => this.#queueCommit(p?.segments))
+    EffectBus.on<{ cell?: string; segments?: string[] }>('tile:saved',   p => this.#queueCommit(p?.segments))
+    EffectBus.on<{ cell?: string; segments?: string[] }>('tags:changed', p => this.#queueCommit(p?.segments))
+    EffectBus.on<{ cell?: string; segments?: string[] }>('tile:hidden',  p => this.#queueCommit(p?.segments))
+    EffectBus.on<{ cell?: string; segments?: string[] }>('tile:unhidden',p => this.#queueCommit(p?.segments))
+
+    // Self-heal trigger: poll for both Lineage and a fully-initialised
+    // Store to be available, then subscribe to Lineage 'change' so every
+    // navigation re-triggers a bootstrap check. Polling is needed because
+    // the Store registers synchronously but populates its OPFS handles
+    // (store.history, store.hypercombRoot) async via Store.initialize() —
+    // there's no event signal for that completion. Capped at ~10s; if
+    // services never appear, the explicit cursor.load path still triggers
+    // bootstrap on the next user interaction.
+    void this.#waitForServicesAndStartBootstrap()
+  }
+
+  async #waitForServicesAndStartBootstrap(): Promise<void> {
+    console.log('[bootstrap] polling for Lineage + Store init...')
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const lineage = get<Lineage & EventTarget>('@hypercomb.social/Lineage')
+      const store = get<{ history?: FileSystemDirectoryHandle; hypercombRoot?: FileSystemDirectoryHandle }>(
+        '@hypercomb.social/Store'
+      )
+      if (lineage && store?.history && store?.hypercombRoot) {
+        console.log('[bootstrap] services ready, subscribing to Lineage changes', { attempt })
+        const tryBootstrap = () => { void this.bootstrapIfEmpty().catch(err => console.warn('[bootstrap] failed', err)) }
+        try { lineage.addEventListener?.('change', tryBootstrap) } catch { /* not an EventTarget */ }
+        tryBootstrap()   // fire once for current state immediately
+        return
+      }
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+    console.warn('[bootstrap] gave up waiting for services after ~10s')
   }
 
   // All commit requests — batched or per-event — route through the
   // single CommitMachine. See the class above for the state transitions.
-  #schedule(): void { this.#machine.request() }
-  #queueCommit(): void { this.#machine.request() }
+  #schedule(): void { this.#machine.request({ segments: null }) }
+  #queueCommit(segments?: string[] | null): void {
+    const cleaned = Array.isArray(segments)
+      ? segments.map(s => String(s ?? '').trim()).filter(Boolean)
+      : null
+    this.#machine.request({ segments: cleaned })
+  }
 
-  async #commit(): Promise<void> {
+  /**
+   * Self-heal: ensure the lineage at `segments` has a marker reflecting
+   * the current on-disk state. Inspects the bag first — only commits
+   * when the bag has no canonical markers yet. Idempotent: a populated
+   * bag yields a no-op, no redundant markers.
+   *
+   * Called from HistoryCursorService.load() so that any lineage with
+   * tiles on disk but no recorded history (e.g. data created before
+   * the merkle commits existed) gets its first marker captured the
+   * moment it's first viewed. NON-DESTRUCTIVE: only ever appends.
+   */
+  // Per-locSig in-flight bootstrap promise. Coalesces concurrent
+  // bootstrap calls for the same lineage so cursor.load and the
+  // Lineage 'change' subscription don't both fire commits.
+  readonly #bootstrapInFlight = new Map<string, Promise<void>>()
+
+  public async bootstrapIfEmpty(segments?: string[] | null): Promise<void> {
+    const history = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
+    const lineage = get<Lineage>('@hypercomb.social/Lineage')
+    if (!history || !lineage) {
+      console.log('[bootstrap] skip: missing services', { history: !!history, lineage: !!lineage })
+      return
+    }
+
+    // Store registers synchronously but its OPFS handles populate async
+    // via Store.initialize(). If `store.history` is still undefined, we
+    // can't read the bag yet — back off and let a later Lineage 'change'
+    // (or a manual cursor.load) re-trigger us.
+    const store = get<{ history?: FileSystemDirectoryHandle; hypercombRoot?: FileSystemDirectoryHandle }>(
+      '@hypercomb.social/Store'
+    )
+    if (!store?.history || !store?.hypercombRoot) {
+      console.log('[bootstrap] skip: store not initialized yet')
+      return
+    }
+
+    const cleaned = Array.isArray(segments)
+      ? segments.map(s => String(s ?? '').trim()).filter(Boolean)
+      : null
+    const fallback = (lineage.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+    const segs = cleaned ?? fallback
+
+    const locSig = await history.sign({
+      domain: lineage.domain,
+      explorerSegments: () => segs,
+    } as Lineage)
+
+    // Coalesce concurrent calls for the same lineage.
+    const existing = this.#bootstrapInFlight.get(locSig)
+    if (existing) return existing
+
+    const run = (async () => {
+      const markers = await history.listLayers(locSig)
+      if (markers.length > 0) {
+        console.log('[bootstrap] skip: bag has', markers.length, 'markers', { segments: segs })
+        return
+      }
+      // Empty bag → request a commit and await it. The cascade mints
+      // the auto-seed and one marker reflecting current on-disk state,
+      // then walks up to root (which also bootstraps any ancestor
+      // bags along the way).
+      console.log('[bootstrap] running cascade', { segments: segs })
+      await this.#machine.requestAndWait({ segments: segs })
+      const after = await history.listLayers(locSig)
+      console.log('[bootstrap] done, bag now has', after.length, 'markers')
+
+      // Nudge any cursor that's currently viewing this lineage so it
+      // re-reads and updates the slider/activity log immediately.
+      // (For an auto-bootstrap from Lineage 'change', the cursor may
+      // not have been load()-ed yet — onNewLayer is keyed by the
+      // cursor's own #locationSig and is a no-op in that case, which
+      // is fine: the next cursor.load will see the new markers.)
+      const cursor = get<{ onNewLayer?: () => Promise<void> }>('@diamondcoreprocessor.com/HistoryCursorService')
+      if (cursor?.onNewLayer) await cursor.onNewLayer()
+    })()
+    this.#bootstrapInFlight.set(locSig, run)
+    try { await run } finally { this.#bootstrapInFlight.delete(locSig) }
+  }
+
+  async #commit(req: CommitRequest = { segments: null }): Promise<void> {
     // Never commit while cursor is rewound — the assembled state reflects
     // the past view, not a new user intent.
     const cursor = get<HistoryCursorService>('@diamondcoreprocessor.com/HistoryCursorService')
@@ -140,30 +285,69 @@ export class LayerCommitter {
       return
     }
 
-    // Leaf commit ONLY. No ancestor walk.
+    // Cascade: leaf → root.
     //
-    // Per the slim-layer model, each lineage's `cells` array is the
-    // set of subdirectories at THAT lineage's explorer path —
-    // independent of children. A cell:added at leaf /A/B/C does not
-    // change /A/B's subdirectory set, so /A/B doesn't need a fresh
-    // commit just because a leaf changed.
+    // Each lineage has its own bag. A cell:added at /A/B/C produces a
+    // new marker in /A/B/C's bag. Because /A/B's `merkles` array
+    // captures /A/B/C's CURRENT marker sig, /A/B's marker bytes change
+    // and /A/B needs a fresh marker too. Same up to the root.
     //
-    // The previous ancestor-commit loop reused `lineage.explorerDir`
-    // (the leaf's directory) when assembling each ancestor's layer.
-    // The marker landed in the ancestor's correct bag, but the layer
-    // CONTENT was leaf-cell-shaped — so navigating up showed leaf
-    // cells in ancestor view ("layers mixed up / wrong lineage"
-    // symptom). Removing the loop entirely fixes it cleanly: each
-    // event commits to exactly one bag, the lineage where it
-    // happened.
-    const leafLocSig = await history.sign(lineage)
-    const leafLayer = await this.#assembleLayer(lineage, leafLocSig)
-    const leafSig = await history.commitLayer(leafLocSig, leafLayer)
-    console.log('[commit]', {
-      segments: lineage.explorerSegments?.() ?? [],
-      cells: leafLayer.cells.length,
-      sig: leafSig?.slice(0, 8) ?? '(none)',
-    })
+    // The new marker for each ancestor is computed by re-assembling
+    // that ancestor's layer with its OWN explorer dir (its OPFS
+    // children listing) and its OWN merkles array (re-pulled per
+    // child). That fixes the previous "layers mixed up / wrong
+    // lineage" symptom: each ancestor is shaped by its own state, not
+    // the leaf's.
+    //
+    // Segments source: the event payload (when supplied — e.g. by
+    // batch-create which fires per created lineage), else the global
+    // Lineage (current explorer view). The payload form is what makes
+    // `abc/123` typed from root cascade through /abc and /, not just /.
+    const fallbackSegments = (lineage.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+    const segments = req.segments ?? fallbackSegments
+
+    // Walk every ancestor INCLUDING the leaf and INCLUDING root ("").
+    // For depth d in [segments.length, ..., 0]:
+    //   sub = segments.slice(0, d)  → that lineage's segments
+    for (let depth = segments.length; depth >= 0; depth--) {
+      const sub = segments.slice(0, depth)
+      const ancestorName = depth === 0 ? '' : sub[sub.length - 1]
+      const ancestorLocSig = await history.sign({
+        domain: lineage.domain,
+        explorerSegments: () => sub,
+      } as Lineage)
+
+      // Resolve OPFS dir for this ancestor. If not available
+      // (e.g., user hasn't visited that path yet) we still write a
+      // marker — the layer carries `name` so the ancestor's bag
+      // gets a proper seed and the cascade chain stays intact.
+      let ancestorDir: FileSystemDirectoryHandle | null = null
+      const store = get<LineageStore>('@hypercomb.social/Store')
+      const root = store?.hypercombRoot
+      if (root && lineage.tryResolve) {
+        ancestorDir = await lineage.tryResolve(sub, root).catch(() => null) as FileSystemDirectoryHandle | null
+      } else if (depth === segments.length) {
+        // Leaf: the lineage already has its own dir handle resolver
+        const dirOrPromise = lineage.explorerDir?.()
+        ancestorDir = await Promise.resolve(dirOrPromise ?? null)
+      }
+
+      const ancestorLayer = await this.#assembleLayerFor(
+        history,
+        sub,
+        ancestorName,
+        ancestorLocSig,
+        ancestorDir,
+      )
+      const sig = await history.commitLayer(ancestorLocSig, ancestorLayer)
+      console.log('[commit]', {
+        depth,
+        segments: sub,
+        name: ancestorName || '(root)',
+        cells: ancestorLayer.cells.length,
+        sig: sig?.slice(0, 8) ?? '(none)',
+      })
+    }
 
     // Notify the cursor so the slider / activity log / ShowCell see the new head
     const cursorAfter = get<HistoryCursorService>('@diamondcoreprocessor.com/HistoryCursorService')
@@ -171,35 +355,39 @@ export class LayerCommitter {
   }
 
   /**
-   * Build the slim layer snapshot — `cells` (ordered) + `hidden` (set).
+   * Build a complete layer snapshot for the lineage at `segments`.
    *
-   * Source of truth = what is actually on screen. Cells = the OPFS cell
-   * directory listing (the same set the renderer at head walks). Order
-   * comes from OrderProjection but is INTERSECTED with the directory
-   * listing so the layer can never claim cells that don't exist on disk.
-   * Any directory cell that the projection doesn't have an order for is
-   * appended at the end.
+   * - `name`     = last segment ("" for root)
+   * - `cells`    = on-disk subdirectory names (intersected w/ projection
+   *                order if this is the leaf and we have one)
+   * - `merkles`  = parallel to cells; each entry is the CURRENT marker
+   *                sig of that child's bag (its merkle composition)
+   * - `hidden`   = subset of cells (by name) hidden from rendering
+   *
+   * The marker file IS this layer JSON; its sha256 is the layer's
+   * merkle sig. When any child commits a new marker, the parent's
+   * `merkles` entry for that child changes → parent's bytes change
+   * → parent's sig changes — that's the cascade.
    */
-  async #assembleLayer(lineage: Lineage, locationSig: string): Promise<LayerContent> {
-    // explorerDir is async in the live lineage — await before iterating.
-    // Calling it sync returned a Promise that we then iterated as if it
-    // were a directory, producing zero cells and a phantom-empty layer
-    // even when the disk had cells. The committer's "what's on disk"
-    // reading was silently broken.
-    const explorerDir = await (lineage.explorerDir?.() as Promise<FileSystemDirectoryHandle | null> | FileSystemDirectoryHandle | undefined)
+  async #assembleLayerFor(
+    history: HistoryService,
+    segments: string[],
+    name: string,
+    locationSig: string,
+    explorerDir: FileSystemDirectoryHandle | null,
+  ): Promise<LayerContent> {
     const onDisk = new Set<string>()
     if (explorerDir) {
-      for await (const [name, handle] of (explorerDir as any).entries()) {
-        if (handle.kind === 'directory') onDisk.add(name)
+      for await (const [n, handle] of (explorerDir as any).entries()) {
+        if (handle.kind === 'directory') onDisk.add(n)
       }
     }
 
+    // Order: only meaningful for the lineage that actually has a
+    // projection. For ancestors we just take directory enumeration order.
     const order = get<OrderProjection>('@diamondcoreprocessor.com/OrderProjection')
     const ordered = order?.peek(locationSig) ?? await order?.hydrate(locationSig) ?? []
 
-    // Intersect order with on-disk: drop ordered entries that have no
-    // directory (stale projection), and append any on-disk cells the
-    // projection didn't know about.
     const cells: string[] = []
     const seen = new Set<string>()
     for (const cell of ordered) {
@@ -209,17 +397,33 @@ export class LayerCommitter {
       if (!seen.has(cell)) { cells.push(cell); seen.add(cell) }
     }
 
-    const hidden = this.#readHidden(lineage)
-    return { cells, hidden }
+    // Merkle composition: pull each child's CURRENT marker sig.
+    // Children that have no bag yet get the empty-seed sig for their
+    // own name (latestMarkerSigFor handles this).
+    const merkles: string[] = []
+    for (const childName of cells) {
+      const childSegments = [...segments, childName]
+      const childLocSig = await history.sign({
+        explorerSegments: () => childSegments,
+      } as Lineage)
+      const childMerkle = await history.latestMarkerSigFor(childLocSig, childName)
+      merkles.push(childMerkle)
+    }
+
+    // Hidden is location-keyed in localStorage; only meaningful at the
+    // visible lineage. For ancestors, no hides apply.
+    const hidden = this.#readHiddenFor(segments)
+    return { name, cells, merkles, hidden }
   }
 
   /**
-   * Read the set of hidden cells for the active location directly from
-   * localStorage. ShowCellDrone writes this key on `tile:hidden` /
-   * `tile:unhidden`, so it is always up-to-date when `synchronize` fires.
+   * Read the set of hidden cells for the lineage at `segments`. The
+   * key matches what ShowCellDrone writes on `tile:hidden` /
+   * `tile:unhidden`. Only the visible lineage will have a non-empty
+   * value — ancestors return [].
    */
-  #readHidden(lineage: Lineage): string[] {
-    const locationKey = String(lineage.explorerLabel?.() ?? '/')
+  #readHiddenFor(segments: string[]): string[] {
+    const locationKey = segments.length === 0 ? '/' : '/' + segments.join('/')
     try {
       const raw = localStorage.getItem(`hc:hidden-tiles:${locationKey}`)
       if (!raw) return []
@@ -238,5 +442,7 @@ export class LayerCommitter {
   // tracking its own per-state primitive. Removed from the committer.
 }
 
+console.log('[LayerCommitter] module loaded — instantiating')
 const _layerCommitter = new LayerCommitter()
 window.ioc.register('@diamondcoreprocessor.com/LayerCommitter', _layerCommitter)
+console.log('[LayerCommitter] registered in IoC')

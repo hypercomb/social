@@ -86,6 +86,35 @@ export class HistoryCursorService extends EventTarget {
 
     this.#layers = await historyService.listLayers(locationSig)
 
+    // Self-heal: lineages with on-disk tiles but no recorded history
+    // (e.g. data created before the merkle commits existed) get their
+    // first marker captured on first view. The committer's
+    // bootstrapIfEmpty inspects the bag and only commits when it's
+    // truly empty — non-destructive, idempotent, and silently a no-op
+    // on subsequent loads.
+    //
+    // Synchronous attempt first (covers the typical case where Store
+    // is already initialised). If that doesn't populate the bag (e.g.
+    // Store.initialize() hasn't completed yet), kick off a background
+    // poll-and-retry that wakes the cursor up the moment markers exist.
+    if (this.#layers.length === 0) {
+      const committer = get<{ bootstrapIfEmpty: (segments?: string[]) => Promise<void> }>(
+        '@diamondcoreprocessor.com/LayerCommitter'
+      )
+      if (committer?.bootstrapIfEmpty) {
+        try {
+          await committer.bootstrapIfEmpty()
+          this.#layers = await historyService.listLayers(locationSig)
+        } catch { /* best-effort — never block navigation on bootstrap */ }
+      }
+      // Background retry loop: store may not be initialised yet, or
+      // an earlier auto-bootstrap may still be in flight. Poll up to
+      // ~10s; the moment markers appear, refresh the cursor.
+      if (this.#layers.length === 0) {
+        void this.#retryUntilMarkersAppear(locationSig)
+      }
+    }
+
     if (this.#locationSig !== locationSig) {
       this.#locationSig = locationSig
       this.#cachedLayerSig = null
@@ -150,6 +179,41 @@ export class HistoryCursorService extends EventTarget {
       }
       for (const signature of nextSignatures) {
         if (!visited.has(signature)) frontier.push(signature)
+      }
+    }
+  }
+
+  /**
+   * Background retry: poll listLayers every 250 ms (capped at ~10 s).
+   * The moment markers appear (e.g. an auto-bootstrap landed slightly
+   * after this cursor.load returned), refresh the cursor and emit so
+   * the history viewer updates without requiring further user action.
+   *
+   * Idempotent and capped — no leaked timers.
+   */
+  async #retryUntilMarkersAppear(locationSig: string): Promise<void> {
+    const historyService = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
+    if (!historyService) return
+    for (let attempt = 0; attempt < 40; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 250))
+      // Bail if cursor moved to a different lineage — the new
+      // load() will run its own retry if needed.
+      if (this.#locationSig !== locationSig) return
+      // Re-trigger a bootstrap attempt: harmless if bag is now
+      // populated (no-op), critical if Store just became ready.
+      const committer = get<{ bootstrapIfEmpty: (segments?: string[]) => Promise<void> }>(
+        '@diamondcoreprocessor.com/LayerCommitter'
+      )
+      if (committer?.bootstrapIfEmpty) {
+        try { await committer.bootstrapIfEmpty() } catch { /* */ }
+      }
+      const fresh = await historyService.listLayers(locationSig)
+      if (fresh.length > 0) {
+        const wasAtLatest = this.#position >= this.#layers.length
+        this.#layers = fresh
+        if (wasAtLatest) this.#position = this.#layers.length
+        this.#emit()
+        return
       }
     }
   }
@@ -307,22 +371,34 @@ export class HistoryCursorService extends EventTarget {
   }
 
   /**
-   * Resolve layer content by signature, memoized per-instance. The
-   * background warmup seeds the Store cache, so this usually hits
-   * in-memory data.
+   * Resolve layer content by signature, memoized per-instance.
+   *
+   * Routes through HistoryService.getLayerContent which reads marker
+   * files directly from the lineage's bag. Falls back to the legacy
+   * Store.getResource pool only if the bag lookup misses (covers
+   * pre-merkle layers that are still pool-resident).
    */
   async #loadContentForSig(signature: string): Promise<LayerContent | null> {
     if (this.#contentBySig.has(signature)) return this.#contentBySig.get(signature) ?? null
+    const historyService = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
+    if (historyService && this.#locationSig) {
+      const fromBag = await historyService.getLayerContent(this.#locationSig, signature)
+      if (fromBag) {
+        this.#contentBySig.set(signature, fromBag)
+        return fromBag
+      }
+    }
+    // Legacy fallback: Store pool
     const store = get<{ getResource: (sig: string) => Promise<Blob | null> }>('@hypercomb.social/Store')
-    if (!store) return null
+    if (!store) { this.#contentBySig.set(signature, null); return null }
     try {
       const blob = await store.getResource(signature)
       if (!blob) { this.#contentBySig.set(signature, null); return null }
       const parsed = JSON.parse(await blob.text()) as Partial<LayerContent>
-      // Slim layer — only cells and hidden. Anything else in the file
-      // (legacy fat-layer fields) is ignored at read.
       const content: LayerContent = {
+        name: parsed.name ?? '',
         cells: parsed.cells ?? [],
+        merkles: parsed.merkles ?? [],
         hidden: parsed.hidden ?? [],
       }
       this.#contentBySig.set(signature, content)
@@ -377,7 +453,7 @@ export class HistoryCursorService extends EventTarget {
     // clears the grid instead of falling through to live-state tiles.
     if (this.#position === 0) {
       if (this.#layers.length === 0) return null
-      const empty: LayerContent = { cells: [], hidden: [] }
+      const empty: LayerContent = { name: '', cells: [], merkles: [], hidden: [] }
       this.#cachedLayerSig = null
       this.#cachedContent = empty
       return empty
