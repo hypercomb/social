@@ -82,9 +82,13 @@ export class HistoryCursorService extends EventTarget {
    */
   async load(locationSig: string): Promise<void> {
     const historyService = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
-    if (!historyService) return
+    if (!historyService) {
+      console.log('[cursor.load] skip: no HistoryService', { locationSig: locationSig?.slice(0, 8) })
+      return
+    }
 
     this.#layers = await historyService.listLayers(locationSig)
+    console.log('[cursor.load] read', this.#layers.length, 'markers', { locationSig: locationSig?.slice(0, 8), prevSig: this.#locationSig?.slice(0, 8), prevPos: this.#position })
 
     // Self-heal: lineages with on-disk tiles but no recorded history
     // (e.g. data created before the merkle commits existed) get their
@@ -136,6 +140,7 @@ export class HistoryCursorService extends EventTarget {
       this.#position = this.#layers.length
     }
 
+    console.log('[cursor.load] done', { total: this.#layers.length, position: this.#position, locationSig: locationSig?.slice(0, 8) })
     this.#emit()
   }
 
