@@ -371,8 +371,10 @@ export class HistoryCursorService extends EventTarget {
 
   /**
    * Resolve the LayerContent for the entry at the cursor position.
-   * Cached by layer signature so repeated reads during a single render
-   * hit memory, not OPFS.
+   * Reads directly from the bag (the source of truth in the new
+   * layout) so undo/redo never blanks out on a cold Store cache.
+   * Cached by layer signature so repeated reads during a single
+   * render hit memory, not OPFS.
    */
   async layerContentAtCursor(): Promise<LayerContent | null> {
     // Position 0 with existing layers = pre-history / "default empty"
@@ -403,34 +405,15 @@ export class HistoryCursorService extends EventTarget {
       return this.#cachedContent
     }
 
-    const store = get<{ getResource: (sig: string) => Promise<Blob | null> }>('@hypercomb.social/Store')
-    if (!store) return null
+    const historyService = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
+    if (!historyService) return null
 
-    try {
-      const blob = await store.getResource(entry.layerSig)
-      if (!blob) return null
-      // Stored layer resources may be sparse (missing fields that were
-      // empty at commit time). Normalise with defaults so every consumer
-      // can iterate Object.entries / Object.keys without null guards.
-      const parsed = JSON.parse(await blob.text()) as Partial<LayerContent>
-      const content: LayerContent = {
-        version: 2,
-        cells: parsed.cells ?? [],
-        hidden: parsed.hidden ?? [],
-        contentByCell: parsed.contentByCell ?? {},
-        tagsByCell: parsed.tagsByCell ?? {},
-        notesByCell: parsed.notesByCell ?? {},
-        bees: parsed.bees ?? [],
-        dependencies: parsed.dependencies ?? [],
-        layoutSig: parsed.layoutSig ?? '',
-        instructionsSig: parsed.instructionsSig ?? '',
-      }
-      this.#cachedLayerSig = entry.layerSig
-      this.#cachedContent = content
-      return content
-    } catch {
-      return null
-    }
+    const content = await historyService.getLayerContent(this.#locationSig, entry.layerSig)
+    if (!content) return null
+
+    this.#cachedLayerSig = entry.layerSig
+    this.#cachedContent = content
+    return content
   }
 
   /** Last-fetched layer content, for synchronous reads after a prior await. */

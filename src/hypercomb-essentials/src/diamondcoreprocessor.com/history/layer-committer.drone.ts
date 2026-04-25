@@ -17,7 +17,9 @@ import type { OrderProjection } from './order-projection.js'
 type Lineage = {
   domain?: () => string
   explorerLabel?: () => string
-  explorerDir?: () => FileSystemDirectoryHandle | undefined
+  // Async in the live lineage; resolves to the explorer's directory
+  // handle (or null when not available yet).
+  explorerDir?: () => Promise<FileSystemDirectoryHandle | null> | FileSystemDirectoryHandle | null | undefined
   explorerSegments?: () => string[]
 }
 
@@ -31,37 +33,23 @@ type LayoutSnapshot = {
 }
 
 /**
- * Tiny explicit state machine for commit serialisation.
+ * Strict FIFO commit chain. One event = one commit slot, no
+ * coalescing. Every `request()` appends to the tail of a Promise
+ * chain that runs `#run()` in order. Layer count grows by exactly
+ * one per event — that's the contract.
  *
- * States:
- *   idle        → no commit scheduled or running
- *   pending     → one commit queued in a microtask
- *   committing  → commit currently running
+ * Why no coalescing: the user's mental model is "every action is
+ * one undo step." A multi-select delete of 5 cells emits 5
+ * `cell:removed` events; each must produce its own marker so the
+ * user can undo cell-by-cell. Coalescing collapses the burst into
+ * one marker that undoes all 5 at once — wrong granularity.
  *
- * Transitions:
- *   request()  @ idle       → pending  (schedule a microtask)
- *   request()  @ pending    → pending  (coalesce — nothing to do)
- *   request()  @ committing → committing + needsFollowup = true
- *   tick()     @ pending    → committing → idle
- *                             if needsFollowup, loop to pending
- *
- * Guarantees:
- *   - At most one #run() invocation is alive at any time.
- *   - request() is synchronous and cheap; callers never await it.
- *   - A late request arriving during an ongoing commit produces
- *     exactly one follow-up commit (not N).
- *   - Failures don't freeze the machine — #run's rejection is
- *     absorbed; the state returns to idle and the follow-up
- *     check still runs.
- *
- * This replaces the ad-hoc `#scheduled` flag + parallel promise
- * chain that raced against itself. Two committers hitting head at
- * the same time used to write duplicate entries with the same sig;
- * the machine makes that structurally impossible.
+ * Serialisation is still required because each commit allocates a
+ * numeric marker name (max+1 of existing markers). Two parallel
+ * commits would race on that allocation.
  */
 class CommitMachine {
-  #state: 'idle' | 'pending' | 'committing' = 'idle'
-  #needsFollowup = false
+  #chain: Promise<void> = Promise.resolve()
   readonly #run: () => Promise<void>
 
   constructor(run: () => Promise<void>) {
@@ -69,23 +57,7 @@ class CommitMachine {
   }
 
   request(): void {
-    if (this.#state === 'committing') {
-      this.#needsFollowup = true
-      return
-    }
-    if (this.#state === 'pending') return
-    this.#state = 'pending'
-    queueMicrotask(() => void this.#tick())
-  }
-
-  async #tick(): Promise<void> {
-    this.#state = 'committing'
-    try { await this.#run() } catch { /* best-effort */ }
-    this.#state = 'idle'
-    if (this.#needsFollowup) {
-      this.#needsFollowup = false
-      this.request()
-    }
+    this.#chain = this.#chain.then(() => this.#run()).catch(() => { /* failures don't break the chain */ })
   }
 }
 
@@ -135,22 +107,12 @@ export class LayerCommitter {
       if (p?.textOnly != null) { this.#layout = { ...this.#layout, textOnly: !!p.textOnly }; this.#schedule() }
     })
 
-    window.addEventListener('synchronize', () => this.#schedule())
-
-    // Capture a baseline layer on first render so there's always a
-    // "before" snapshot to undo to. render:cell-count fires after
-    // ShowCellDrone finishes painting — cells are fully resolved.
-    // commitLayer dedupes identical states, so this is cheap for
-    // subsequent renders.
-    EffectBus.on('render:cell-count', () => this.#schedule())
-
-    // Per-event commits so undo is granular at a single cell add /
-    // remove / edit, instead of collapsing rapid bursts (e.g. a
-    // multi-select delete of 5 tiles) into one snapshot that a
-    // single undo would then fully reverse. Each event enqueues its
-    // own commit via #queueCommit; commitLayer's content-dedup
-    // means identical states are no-ops so double-firing (event +
-    // synchronize) stays cheap.
+    // Layers are minted ONLY when a real thing happens — a cell is
+    // added/removed/edited/hidden/unhidden, or a tag/saved event.
+    // No `synchronize` subscription, no `render:cell-count` baseline,
+    // no batched "wait until things settle" commits. One event = one
+    // commit attempt. The bag's per-event timeline IS the user's
+    // actions; nothing speculative is allowed in.
     EffectBus.on('cell:added',   () => this.#queueCommit())
     EffectBus.on('cell:removed', () => this.#queueCommit())
     EffectBus.on('tile:saved',   () => this.#queueCommit())
@@ -221,110 +183,46 @@ export class LayerCommitter {
   }
 
   /**
-   * Build the full layer snapshot from live state sources.
+   * Build the slim layer snapshot — `cells` (ordered) + `hidden` (set).
+   *
+   * Source of truth = what is actually on screen. Cells = the OPFS cell
+   * directory listing (the same set the renderer at head walks). Order
+   * comes from OrderProjection but is INTERSECTED with the directory
+   * listing so the layer can never claim cells that don't exist on disk.
+   * Any directory cell that the projection doesn't have an order for is
+   * appended at the end.
    */
   async #assembleLayer(lineage: Lineage, locationSig: string): Promise<LayerContent> {
-    const order = get<OrderProjection>('@diamondcoreprocessor.com/OrderProjection')
-    // peek is synchronous; if the projection hasn't hydrated yet for this
-    // location, hydrate now so the first layer captures the real cell list
-    // instead of an empty array.
-    const cells = order?.peek(locationSig) ?? await order?.hydrate(locationSig) ?? []
-
-    const { contentByCell, tagsByCell } = await this.#readCellState(lineage, cells)
-
-    const bees = this.#readBees()
-    const hidden = this.#readHidden(lineage)
-    const notesByCell = this.#readNotesIndex(cells)
-    const layoutSig = await this.#signLayout()
-    const instructionsSig = this.#readInstructionsSig()
-
-    // TODO(stage-3): wire to DependencyLoader for loaded deps sigs
-    const dependencies: string[] = []
-
-    return {
-      version: 2,
-      cells,
-      hidden,
-      contentByCell,
-      tagsByCell,
-      notesByCell,
-      bees,
-      dependencies,
-      layoutSig,
-      instructionsSig,
-    }
-  }
-
-  /**
-   * Read the per-cell `noteSetSig` index that NotesService maintains.
-   * Filtered to the cells present in this snapshot so dangling pointers
-   * for removed cells are not folded into the layer.
-   */
-  #readNotesIndex(cells: string[]): Record<string, string> {
-    const notes = get<{ readIndex(): Record<string, string> }>('@diamondcoreprocessor.com/NotesService')
-    if (!notes?.readIndex) return {}
-    const all = notes.readIndex()
-    const present = new Set(cells)
-    const out: Record<string, string> = {}
-    for (const cell of Object.keys(all)) {
-      if (!present.has(cell)) continue
-      const sig = all[cell]
-      if (sig) out[cell] = sig
-    }
-    return out
-  }
-
-  async #readCellState(
-    lineage: Lineage,
-    cells: string[],
-  ): Promise<{ contentByCell: Record<string, string>; tagsByCell: Record<string, string[]> }> {
-    const contentByCell: Record<string, string> = {}
-    const tagsByCell: Record<string, string[]> = {}
-
-    let tilePropsIndex: Record<string, string> = {}
-    try {
-      tilePropsIndex = JSON.parse(localStorage.getItem('hc:tile-props-index') ?? '{}')
-    } catch {
-      tilePropsIndex = {}
-    }
-
-    const explorerDir = lineage.explorerDir?.()
-    if (!explorerDir) return { contentByCell, tagsByCell }
-
-    // TODO(stage-3): replace per-cell OPFS reads with an in-memory cache
-    // invalidated on tile:saved / tags:changed. For now we pay the read
-    // cost once per user-intent boundary, which is rare.
-    for (const cell of cells) {
-      const contentSig = tilePropsIndex[cell]
-      if (contentSig) contentByCell[cell] = contentSig
-
-      try {
-        const cellDir = await explorerDir.getDirectoryHandle(cell, { create: false })
-        const propsHandle = await cellDir.getFileHandle('0000')
-        const file = await propsHandle.getFile()
-        const props = JSON.parse(await file.text())
-        if (Array.isArray(props.tags) && props.tags.length > 0) {
-          tagsByCell[cell] = props.tags.map((t: unknown) => String(t))
-        }
-      } catch {
-        // cell has no props file yet — that's fine, just omit
+    // explorerDir is async in the live lineage — await before iterating.
+    // Calling it sync returned a Promise that we then iterated as if it
+    // were a directory, producing zero cells and a phantom-empty layer
+    // even when the disk had cells. The committer's "what's on disk"
+    // reading was silently broken.
+    const explorerDir = await (lineage.explorerDir?.() as Promise<FileSystemDirectoryHandle | null> | FileSystemDirectoryHandle | undefined)
+    const onDisk = new Set<string>()
+    if (explorerDir) {
+      for await (const [name, handle] of (explorerDir as any).entries()) {
+        if (handle.kind === 'directory') onDisk.add(name)
       }
     }
 
-    return { contentByCell, tagsByCell }
-  }
+    const order = get<OrderProjection>('@diamondcoreprocessor.com/OrderProjection')
+    const ordered = order?.peek(locationSig) ?? await order?.hydrate(locationSig) ?? []
 
-  /**
-   * Drone set for the layer. Reading from `window.ioc.list()` is not
-   * stable during startup — drones self-register asynchronously, so
-   * every early commit sees a larger set than the one before. The diff
-   * then shows up as a cascade of "bees" entries on every refresh,
-   * which is pure noise. Until a formal drone registry exists (the
-   * stage-3 TODO), this returns an empty list so layer identity is
-   * driven by actual user-facing state.
-   */
-  #readBees(): string[] {
-    return []
+    // Intersect order with on-disk: drop ordered entries that have no
+    // directory (stale projection), and append any on-disk cells the
+    // projection didn't know about.
+    const cells: string[] = []
+    const seen = new Set<string>()
+    for (const cell of ordered) {
+      if (onDisk.has(cell) && !seen.has(cell)) { cells.push(cell); seen.add(cell) }
+    }
+    for (const cell of onDisk) {
+      if (!seen.has(cell)) { cells.push(cell); seen.add(cell) }
+    }
+
+    const hidden = this.#readHidden(lineage)
+    return { cells, hidden }
   }
 
   /**
@@ -344,41 +242,12 @@ export class LayerCommitter {
     }
   }
 
-  /**
-   * Sign the current layout snapshot and store it as a resource. The
-   * returned signature is referenced by the layer; identical layouts
-   * dedupe to the same resource.
-   */
-  async #signLayout(): Promise<string> {
-    // canonical key order — stable signatures regardless of field mutation order
-    const canonical = {
-      version: 2 as const,
-      orientation: this.#layout.orientation,
-      pivot: this.#layout.pivot,
-      accent: this.#layout.accent,
-      gapPx: this.#layout.gapPx,
-      textOnly: this.#layout.textOnly,
-    }
-    const json = JSON.stringify(canonical)
-    const bytes = new TextEncoder().encode(json).buffer as ArrayBuffer
-    const sig = await SignatureService.sign(bytes)
-
-    const store = get<{ putResource: (blob: Blob) => Promise<void> }>('@hypercomb.social/Store')
-    if (store) {
-      await store.putResource(new Blob([json], { type: 'application/json' }))
-    }
-    return sig
-  }
-
-  /**
-   * Read the current instruction settings signature from the
-   * InstructionDrone. Returns "" when no instructions are configured for
-   * this location.
-   */
-  #readInstructionsSig(): string {
-    const drone = get<{ state?: { settingsSig?: string } }>('@diamondcoreprocessor.com/InstructionDrone')
-    return drone?.state?.settingsSig ?? ''
-  }
+  // Layout signing / instruction-sig reading were both layer-driven —
+  // the layer captured a `layoutSig` and `instructionsSig`. The slim
+  // layer doesn't carry either; layout and instructions are bee-owned
+  // primitives, and any per-position playback (e.g., undo of a layout
+  // gap change) is the responsibility of the layout/instruction bee
+  // tracking its own per-state primitive. Removed from the committer.
 }
 
 const _layerCommitter = new LayerCommitter()

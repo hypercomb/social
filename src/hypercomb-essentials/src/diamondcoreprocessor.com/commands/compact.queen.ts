@@ -1,141 +1,96 @@
 // diamondcoreprocessor.com/commands/compact.queen.ts
 //
-// /compact — collapse every history entry at the current location
-// into a single head entry, soft-deleting all the sources. The newest
-// entry's content becomes the new head (consistent with multi-select
-// merge), which is what "compact" means here: all past states fall
-// into the 30-day soft-delete archive, the visible list shrinks to
-// one row representing the current state.
+// /compact — rebase this location's history to two layers:
 //
-// Scope is this location only — unlike /collapse-history which is a
-// dev utility that prunes across every location in the bag. Use /compact
-// when a location's history has grown noisy from frequent edits and
-// you want to keep only "where it ended up".
+//   #1 (oldest)  empty seed     {cells: [], hidden: []}
+//   #2 (newest)  what's showing  the kept current state
+//
+// The empty seed is a real layer file (no longer a virtual anchor),
+// so undo from the current state always lands on a concrete empty
+// position. The kept layer mirrors what the user has on screen at
+// the moment of /compact — that IS the slim layer's job.
+//
+// Direct CRUD: every other layer file in the bag is removed outright.
+// No archive, no TTL — DCP push is the backup story.
 
-import { QueenBee, hypercomb } from '@hypercomb/core'
-import type { HistoryService } from '../history/history.service.js'
+import { QueenBee } from '@hypercomb/core'
+import type { HistoryService, LayerContent } from '../history/history.service.js'
 import type { HistoryCursorService } from '../history/history-cursor.service.js'
+
+const EMPTY_LAYER: LayerContent = { cells: [], hidden: [] }
+
+type Lineage = {
+  // explorerDir is async in the live lineage implementation — it
+  // resolves to the FileSystemDirectoryHandle for the current
+  // explorer location (or null if not available).
+  explorerDir?: () => Promise<FileSystemDirectoryHandle | null> | FileSystemDirectoryHandle | null | undefined
+  explorerLabel?: () => string
+}
 
 export class CompactQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'compact'
   override readonly aliases = []
-  override description = 'Collapse this location\'s history into one head entry'
+  override description = 'Rebase this location\'s history to an empty seed + current state'
 
   protected async execute(_args: string): Promise<void> {
     const history = get('@diamondcoreprocessor.com/HistoryService') as HistoryService | undefined
     const cursor = get('@diamondcoreprocessor.com/HistoryCursorService') as HistoryCursorService | undefined
-    if (!history || !cursor) return
+    const lineage = get('@hypercomb.social/Lineage') as Lineage | undefined
+    if (!history || !cursor || !lineage) return
 
     const locationSig = cursor.state.locationSig
     if (!locationSig) return
 
+    // 1. Delete every existing marker. Sig content files are
+    //    untouched (they may still be live elsewhere; orphan-sig GC
+    //    is a separate concern).
     const entries = await history.listLayers(locationSig)
-    if (entries.length <= 1) return
-
-    // Compact-to-cursor semantic: the entry CURRENTLY AT THE CURSOR
-    // becomes the surviving state. Everything else — older AND
-    // newer — gets soft-deleted. Previously this used mergeEntries
-    // which always picked the chronologically newest, ignoring the
-    // user's cursor position, so collapsing while rewound would
-    // resurrect whatever happened to be newest on disk instead of
-    // the past state the user intentionally scrolled to.
-    //
-    // Result on disk: one real entry (the promoted target) at the
-    // head of the bag. Position 0 is the synthetic empty seed
-    // (render-only, no file — the reducer identity). User sees:
-    //   0000 — emptyish
-    //   0001 — the state I collapsed to
-    //
-    // Lossy by design: the discarded entries land in __deleted__/
-    // and stay restorable for 30 days; the content-addressed
-    // layers they referenced remain in __layers__/.
-    const pos = cursor.state.position
-    const targetIndex = Math.max(0, Math.min(pos - 1, entries.length - 1))
-    const target = entries[targetIndex]
-    if (!target) return
-
-    // Promote the target's layer to a fresh head entry (same sig —
-    // content-addressed, so no re-write of the layer itself, just a
-    // new marker pointing at it).
-    // Resolve the target layer's content so we can apply it to OPFS
-    // below. Without this step /compact would produce two entries
-    // whenever the cursor is rewound: one for the target layer, and
-    // a second one that LayerCommitter emits right after cursor.seek
-    // captures the live OPFS state (which still holds cells the user
-    // added AFTER the rewound position).
-    const store = get('@hypercomb.social/Store') as {
-      getResource: (sig: string) => Promise<Blob | null>
-      hypercombRoot: FileSystemDirectoryHandle
-    } | undefined
-    if (!store) return
-    let targetContent: { cells?: string[] } | null = null
-    try {
-      const blob = await store.getResource(target.layerSig)
-      if (blob) targetContent = JSON.parse(await blob.text())
-    } catch { /* no content — leave live OPFS alone, commit may still dedup */ }
-
-    const promotedSig = await history.promoteToHead(locationSig, target.layerSig)
-    if (!promotedSig) return
-
-    // Soft-delete everything except the entry we just wrote. Re-list
-    // AFTER promoting so the new head is present in the list and we
-    // can exclude its filename correctly.
-    const afterPromote = await history.listLayers(locationSig)
-    const newHead = afterPromote[afterPromote.length - 1]
-    if (!newHead) return
-    const toDelete = afterPromote
-      .filter(e => e.filename !== newHead.filename)
-      .map(e => e.filename)
-    if (toDelete.length > 0) {
-      await history.removeEntries(locationSig, toDelete)
+    if (entries.length > 0) {
+      await history.removeEntries(locationSig, entries.map(e => e.filename))
     }
 
-    // "Git checkout" the target state into OPFS: delete any cell dir
-    // at this location that ISN'T in the target layer's cells array.
-    // Forward cells (added after the rewound position) disappear so
-    // the live state matches the collapsed head; LayerCommitter's
-    // next commit then dedupes against the head we just wrote and
-    // we end up with exactly one entry, not two.
-    //
-    // Cells that were in the target but aren't on disk today (a
-    // rare edge case — target references a cell the user later
-    // deleted from OPFS directly) are left absent. Restoring them
-    // would require re-materialising content resources, which is a
-    // separate operation.
-    if (targetContent?.cells) {
-      const lineage = get('@hypercomb.social/Lineage') as {
-        explorerDir: () => Promise<FileSystemDirectoryHandle | null>
-      } | undefined
-      const dir = await lineage?.explorerDir?.()
-      if (dir) {
-        const keep = new Set(targetContent.cells)
-        const toRemove: string[] = []
-        for await (const [name, handle] of (dir as any).entries()) {
-          if (handle.kind !== 'directory') continue
-          if (name.startsWith('__')) continue
-          if (!keep.has(name)) toRemove.push(name)
-        }
-        for (const name of toRemove) {
-          try { await dir.removeEntry(name, { recursive: true }) } catch { /* best-effort */ }
-        }
+    // 2. Write empty seed first (mints marker #1), then write the
+    //    fresh on-disk state (mints marker #2). commitLayer always
+    //    appends a new marker, so the two writes are guaranteed to
+    //    produce two distinct entries even if their sigs collide
+    //    with existing sig content files.
+    const fresh = await this.#assembleFromDisk(lineage)
+    await history.commitLayer(locationSig, EMPTY_LAYER)
+    await history.commitLayer(locationSig, fresh)
+
+    // 3. Re-hydrate cursor from disk; land on the top (the fresh
+    //    layer — this IS what's showing now).
+    await cursor.load(locationSig)
+    cursor.seek(cursor.state.total)
+  }
+
+  /**
+   * Read cells from the OPFS directory listing — same source the
+   * renderer at head walks. Hidden comes from localStorage
+   * (`hc:hidden-tiles:{loc}`). explorerDir() is async in the live
+   * lineage; await it before iterating.
+   */
+  async #assembleFromDisk(lineage: Lineage): Promise<LayerContent> {
+    const explorerDir = await lineage.explorerDir?.()
+    const cells: string[] = []
+    if (explorerDir) {
+      for await (const [name, handle] of (explorerDir as any).entries()) {
+        if (handle.kind === 'directory') cells.push(name)
       }
     }
 
-    // Pin the cursor to the surviving head so the canvas snaps to
-    // the collapsed state instead of leaving the user on a now-
-    // invalid rewound position.
-    const final = await history.listLayers(locationSig)
-    cursor.seek(final.length)
+    const locationKey = String(lineage.explorerLabel?.() ?? '/')
+    let hidden: string[] = []
+    try {
+      const raw = localStorage.getItem(`hc:hidden-tiles:${locationKey}`)
+      const parsed = raw ? JSON.parse(raw) : []
+      hidden = Array.isArray(parsed) ? parsed.map(String) : []
+    } catch { /* default to none */ }
 
-    // Nudge the processor so the render path catches up to the
-    // trimmed OPFS state; LayerCommitter's next commit (if any)
-    // will then dedup against the head we just wrote.
-    void new hypercomb().act()
+    return { cells, hidden }
   }
 }
-
-// ── registration ────────────────────────────────────────
 
 const _compact = new CompactQueenBee()
 ;(window as any).ioc?.register?.('@diamondcoreprocessor.com/CompactQueenBee', _compact)

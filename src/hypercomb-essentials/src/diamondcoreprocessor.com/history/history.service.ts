@@ -38,29 +38,23 @@ export type LayerState = {
 }
 
 /**
- * A full, signature-addressed snapshot of everything a location's cells need.
- * Layer content is what gets hashed — identical states produce identical
- * signatures and dedupe automatically. Timestamps live on the *entry* that
- * references the layer, never in the layer itself.
+ * A signature-addressed snapshot of a lineage's cell state.
+ *
+ * Two named arrays, nothing else. Per the architectural rule, a primitive
+ * resource is an array of one useful type with a name — no heterogeneous
+ * records. Tags, content, notes, bees, dependencies, layout, instructions
+ * all live as their own primitives elsewhere (live OPFS reads, per-service
+ * resources). Stuffing them into the layer made the layer a coupled bag
+ * that drifted out of sync; primitives are decoupled by construction.
  *
  * Ordering contract:
  * - `cells` is ordered (position in array = layout position).
- * - All other string arrays (`hidden`, `bees`, `dependencies`) are
- *   canonically sorted (lexicographic) so that set-equal states produce
- *   byte-equal JSON and dedupe.
- * - Object keys are sorted when serialized.
+ * - `hidden` is canonically sorted (lexicographic) so set-equal states
+ *   produce byte-equal JSON and dedupe.
  */
 export type LayerContent = {
-  version: 2
   cells: string[]
   hidden: string[]
-  contentByCell: Record<string, string>
-  tagsByCell: Record<string, string[]>
-  notesByCell: Record<string, string>
-  bees: string[]
-  dependencies: string[]
-  layoutSig: string
-  instructionsSig: string
 }
 
 /**
@@ -330,52 +324,55 @@ export class HistoryService {
   // -------------------------------------------------
   // layer snapshots — signature-addressed history entries
   // -------------------------------------------------
-
-  static readonly #LAYERS_DIR = 'layers'
+  //
+  // On hypercomb.io a lineage's history bag is self-contained:
+  //
+  //   __history__/{sign(lineage)}/
+  //     {sig}              ← layer content, named by its own content sig
+  //     {sig}              ← another layer content
+  //     ...
+  //     __temporary__/     ← soft-deleted layers (30-day TTL)
+  //       {sig}
+  //
+  // No inner `layers/` subfolder. No marker indirection. No entry
+  // wrapper JSON. The bag file IS the LayerContent JSON, named by the
+  // hash of its bytes — same state collapses to the same file (natural
+  // dedupe). Ordering comes from `file.lastModified`. Promotion ("make
+  // head") rewrites the file to bump its lastModified; soft-delete
+  // moves it into `__temporary__/{sig}` keeping the same name so a
+  // restore can move it straight back without rewriting bytes.
+  //
+  // DCP, by contrast, splits the model: `__layers__/{sig}` holds layer
+  // content shared across lineages, and `__history__/{lineageSig}/NNNNNNNN`
+  // markers (each containing a single sig line) point into that pool.
+  // Markers are a DCP-only indirection — they do not appear here.
 
   /**
    * Canonicalize a layer so byte-equal content produces byte-equal JSON.
-   * `cells` keeps its caller-supplied order (position is meaningful). All
-   * other string arrays are sorted lexicographically. Object keys are
-   * inserted in sorted order; V8 preserves insertion order for string
-   * keys, so plain `JSON.stringify` then produces stable output.
+   * `cells` keeps its caller-supplied order (position is meaningful).
+   * `hidden` is sorted lexicographically so set-equal states dedupe.
    */
-  static readonly canonicalizeLayer = (layer: LayerContent): LayerContent => {
-    const contentKeys = Object.keys(layer.contentByCell).sort()
-    const contentByCell: Record<string, string> = {}
-    for (const k of contentKeys) contentByCell[k] = layer.contentByCell[k]
-
-    const tagKeys = Object.keys(layer.tagsByCell).sort()
-    const tagsByCell: Record<string, string[]> = {}
-    for (const k of tagKeys) tagsByCell[k] = [...layer.tagsByCell[k]].sort()
-
-    const notesKeys = Object.keys(layer.notesByCell).sort()
-    const notesByCell: Record<string, string> = {}
-    for (const k of notesKeys) notesByCell[k] = layer.notesByCell[k]
-
-    return {
-      version: 2,
-      cells: layer.cells.slice(),
-      hidden: [...layer.hidden].sort(),
-      contentByCell,
-      tagsByCell,
-      notesByCell,
-      bees: [...layer.bees].sort(),
-      dependencies: [...layer.dependencies].sort(),
-      layoutSig: layer.layoutSig,
-      instructionsSig: layer.instructionsSig,
-    }
-  }
+  static readonly canonicalizeLayer = (layer: LayerContent): LayerContent => ({
+    cells: layer.cells.slice(),
+    hidden: [...layer.hidden].sort(),
+  })
 
   /**
    * Commit a layer snapshot for a location.
    *
-   * Writes the canonical layer content as a signature-addressed resource
-   * (via Store.putResource) and appends an entry file pointing at it
-   * under `__history__/{locationSig}/layers/NNNNNNNN.json`. Skips the
-   * append if the new layer signature equals the current head (dedup).
+   * Writes the canonical layer content directly into the lineage bag
+   * as `__history__/{lineageSig}/{layerSig}` — the file IS the layer
+   * content, named by the hash of its bytes. Same content → same sig
+   * → same file (natural dedupe, no separate dedup table). Skips the
+   * write if a file with that sig already exists so any cached Blob
+   * handle elsewhere can't be invalidated by an idempotent rewrite.
    *
-   * @returns the layer signature, or null if the commit was deduped.
+   * Also seeds Store.putResource so cross-bag resolvers (cursor warmup,
+   * renderer) keep finding the content under the same sig — but the
+   * source of truth for this lineage's history is the bag file itself.
+   *
+   * @returns the layer signature, or null if the layer was a no-op
+   *          rewrite of the current head.
    */
   public readonly commitLayer = async (
     locationSig: string,
@@ -383,73 +380,43 @@ export class HistoryService {
   ): Promise<string | null> => {
     const canonical = HistoryService.canonicalizeLayer(layer)
     const json = JSON.stringify(canonical)
-    const bytes = new TextEncoder().encode(json).buffer as ArrayBuffer
-    const layerSig = await SignatureService.sign(bytes)
+    const bytes = new TextEncoder().encode(json)
+    const layerSig = await SignatureService.sign(bytes.buffer as ArrayBuffer)
 
-    // Content dedup: a new entry is appended only when the layer actually
-    // differs from the current head. Identical canonical content produces
-    // identical signatures, so a signature match is a bytewise content
-    // match. Without this, repeated `synchronize` / `render:cell-count`
-    // ticks flood history with entries that show as "(no change)".
-    const head = await this.headLayer(locationSig)
-    if (head && head.layerSig === layerSig) return null
+    const bag = await this.getBag(locationSig)
 
-    // The entry file is a pointer to the resource — we must write the
-    // resource first. If the Store isn't registered yet, refuse the
-    // commit entirely rather than creating an orphan entry that would
-    // render as "(loading)" in the viewer forever.
+    // 1. Sig file = the layer content. Content-addressed, immutable,
+    //    deduped. If the file already exists we don't rewrite — keeps
+    //    cached Blob handles valid.
+    let sigExists = true
+    try { await bag.getFileHandle(layerSig, { create: false }) } catch { sigExists = false }
+    if (!sigExists) {
+      const handle = await bag.getFileHandle(layerSig, { create: true })
+      const writable = await handle.createWritable()
+      try { await writable.write(bytes) } finally { await writable.close() }
+    }
+
+    // 2. Marker file = a numeric per-event entry pointing at the sig.
+    //    ALWAYS appended, even when the sig matches an existing one —
+    //    that's the whole point of markers: history grows per user
+    //    action, content stays one file per unique state.
+    const markerName = await this.#nextMarkerName(bag)
+    const markerHandle = await bag.getFileHandle(markerName, { create: true })
+    const markerWritable = await markerHandle.createWritable()
+    try { await markerWritable.write(layerSig) } finally { await markerWritable.close() }
+
+    // Seed Store cache for cross-bag resolvers (warmup, diff inspector).
     const store = get<{ putResource: (blob: Blob) => Promise<void> }>('@hypercomb.social/Store')
-    if (!store) return null
-    await store.putResource(new Blob([json], { type: 'application/json' }))
-
-    const layersDir = await this.#getLayersDir(locationSig)
-    const fileName = await this.#nextEntryFilename(locationSig, layersDir)
-    const handle = await layersDir.getFileHandle(fileName, { create: true })
-    const writable = await handle.createWritable()
-    try {
-      const entry: LayerEntry = { layerSig, at: Date.now() }
-      await writable.write(JSON.stringify(entry))
-    } finally {
-      await writable.close()
+    if (store) {
+      try { await store.putResource(new Blob([json], { type: 'application/json' })) } catch { /* best-effort */ }
     }
 
     return layerSig
   }
 
   /**
-   * Allocate the next sequential filename for an entry at this location.
-   * Format is 8-digit zero-padded starting at 00000001. The filename is
-   * ONLY used to guarantee a unique handle — nothing reads it to infer
-   * order, head, or age (use the payload's `at` for that). Scans both
-   * layers/ and __deleted__/ so a just-deleted highest slot never gets
-   * handed back out and collide with an archived restore.
-   */
-  readonly #nextEntryFilename = async (
-    locationSig: string,
-    layersDir: FileSystemDirectoryHandle,
-  ): Promise<string> => {
-    let max = 0
-    for await (const [name, handle] of layersDir.entries()) {
-      if (handle.kind !== 'file' || !name.endsWith('.json')) continue
-      const n = parseInt(name, 10)
-      if (!isNaN(n) && n > max) max = n
-    }
-    const deletedDir = await this.#tryGetDeletedDir(locationSig)
-    if (deletedDir) {
-      for await (const [name, handle] of deletedDir.entries()) {
-        if (handle.kind !== 'file' || !name.endsWith('.json')) continue
-        const n = parseInt(name, 10)
-        if (!isNaN(n) && n > max) max = n
-      }
-    }
-    return String(max + 1).padStart(8, '0') + '.json'
-  }
-
-  /**
-   * Head = the most recent entry. Found by scanning every entry, parsing
-   * its payload, and picking the one with the highest `at`. Filenames
-   * are opaque — never compared or parsed here. Returns null when the
-   * location has no history yet.
+   * Head = the chronologically latest marker. Returns null when the
+   * location has no markers yet.
    */
   public readonly headLayer = async (
     locationSig: string,
@@ -460,254 +427,315 @@ export class HistoryService {
   }
 
   /**
-   * List all layer entries for a location, sorted chronologically by
-   * `at` (oldest first). `index` is the position in that sorted array,
-   * `filename` is the opaque on-disk handle — callers that need to
-   * delete or promote a specific entry pass `filename` back in. Entries
-   * whose backing resource can't be resolved are dropped so the viewer
-   * never renders "(loading)" rows forever.
+   * Filename conventions at the bag root:
+   *   - 64-hex sig file → layer content (one per unique state)
+   *   - 8-digit numeric → marker file (one per user event), content = a sig
+   *
+   * Two named shapes, two roles. The convention is mechanical — names
+   * carry meaning, no inspection of content needed for routing. Markers
+   * give us per-event history with overlap (multiple markers can point
+   * at the same sig); sig files give us content dedupe.
+   */
+  static readonly #SIG_RE = /^[a-f0-9]{64}$/
+  static readonly #MARKER_RE = /^\d{8}$/
+
+  /**
+   * List all marker entries for a location, sorted chronologically by
+   * marker filename (numeric ascending, so the last element is the
+   * latest commit). Each entry's `filename` is the MARKER name (used
+   * for delete/promote ops); `layerSig` is the content sig the marker
+   * points at; `at` is the marker file's lastModified.
+   *
+   * Multiple markers may share the same `layerSig` (overlap is the
+   * whole point of markers — per-event history with content dedupe).
    */
   public readonly listLayers = async (
     locationSig: string,
   ): Promise<Array<LayerEntry & { index: number; filename: string }>> => {
-    const layersDir = await this.#tryGetLayersDir(locationSig)
-    if (!layersDir) return []
+    await this.#quarantineNonLayerFiles(locationSig)
 
-    const raw: Array<LayerEntry & { filename: string }> = []
-    for await (const [name, handle] of layersDir.entries()) {
-      if (handle.kind !== 'file' || !name.endsWith('.json')) continue
+    let bag: FileSystemDirectoryHandle
+    try {
+      bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false })
+    } catch {
+      return []
+    }
+
+    const markers: Array<LayerEntry & { filename: string }> = []
+    for await (const [name, handle] of (bag as any).entries()) {
+      if (handle.kind !== 'file') continue
+      if (!HistoryService.#MARKER_RE.test(name)) continue
       try {
         const file = await (handle as FileSystemFileHandle).getFile()
-        const entry = JSON.parse(await file.text()) as LayerEntry
-        raw.push({ ...entry, filename: name })
-      } catch {
-        // skip corrupted entries
-      }
+        const sig = (await file.text()).trim()
+        if (!HistoryService.#SIG_RE.test(sig)) continue   // malformed marker, skip
+        markers.push({ layerSig: sig, at: file.lastModified, filename: name })
+      } catch { /* skip unreadable */ }
     }
-    // Chronological order is the payload's `at`, not the filename.
-    // Ties break on filename so the order is deterministic even when
-    // two entries land on the same millisecond (rare but possible
-    // during rapid programmatic commits).
-    raw.sort((a, b) => (a.at - b.at) || a.filename.localeCompare(b.filename))
+    // Numeric ascending — markers are minted by #nextMarkerName as
+    // monotonically increasing zero-padded integers. Tie-break on
+    // filename for determinism when two markers share a millisecond.
+    markers.sort((a, b) => a.filename.localeCompare(b.filename))
 
-    const store = get<{ getResource: (sig: string) => Promise<Blob | null> }>('@hypercomb.social/Store')
-    const resolved = new Set<string>()
-    if (store) {
-      const uniqueSignatures = Array.from(new Set(raw.map(e => e.layerSig)))
-      await Promise.all(uniqueSignatures.map(async (signature) => {
+    return markers.map((entry, position) => ({ ...entry, index: position }))
+  }
+
+  /**
+   * Allocate the next sequential marker name for this bag. Format is
+   * 8-digit zero-padded starting at 00000001. Scans existing markers
+   * (and the __temporary__ archive if present) for the current max so
+   * a re-issued name can never collide with an archived entry.
+   */
+  readonly #nextMarkerName = async (
+    bag: FileSystemDirectoryHandle,
+  ): Promise<string> => {
+    let max = 0
+    for await (const [name, handle] of (bag as any).entries()) {
+      if (handle.kind !== 'file') continue
+      if (!HistoryService.#MARKER_RE.test(name)) continue
+      const n = parseInt(name, 10)
+      if (!isNaN(n) && n > max) max = n
+    }
+    return String(max + 1).padStart(8, '0')
+  }
+
+  /**
+   * Read a layer's JSON content directly from the bag, by sig. The
+   * bag is the source of truth in the new layout — `__resources__/`
+   * is only a (possibly cold) cache. Going through Store.getResource
+   * for undo/redo means a missed cache renders an empty grid even
+   * though the bytes are right there in the bag. This bypasses that
+   * indirection entirely.
+   *
+   * Returns the parsed (and field-defaulted) LayerContent, or null
+   * when the bag/sig file isn't there. Also seeds Store.putResource
+   * on a successful read so any other consumer that still resolves
+   * by sig stays warm. No content sniffing — the file is at the
+   * canonical path or it isn't.
+   */
+  public readonly getLayerContent = async (
+    locationSig: string,
+    layerSig: string,
+  ): Promise<LayerContent | null> => {
+    if (!HistoryService.#SIG_RE.test(layerSig)) return null
+    let bag: FileSystemDirectoryHandle
+    try {
+      bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false })
+    } catch { return null }
+
+    let bytes: ArrayBuffer
+    let blob: Blob
+    try {
+      const handle = await bag.getFileHandle(layerSig, { create: false })
+      const file = await handle.getFile()
+      bytes = await file.arrayBuffer()
+      blob = file
+    } catch { return null }
+
+    let parsed: Partial<LayerContent>
+    try { parsed = JSON.parse(new TextDecoder().decode(bytes)) as Partial<LayerContent> }
+    catch { return null }
+
+    // Slim layer — only cells and hidden. Anything else in the file
+    // (legacy fat-layer fields from the dual-emit era) is ignored
+    // here. Tags, content, notes, bees, deps, layout, instructions
+    // all come from live primitives, not from this snapshot.
+    const content: LayerContent = {
+      cells: parsed.cells ?? [],
+      hidden: parsed.hidden ?? [],
+    }
+
+    // Warm the resource cache so other resolvers (layer-diff inspector,
+    // background warmup) keep working under the same sig.
+    const store = get<{ putResource: (b: Blob) => Promise<void> }>('@hypercomb.social/Store')
+    if (store) { try { await store.putResource(blob) } catch { /* best-effort */ } }
+
+    return content
+  }
+
+  /**
+   * One-time bag-pollution cleanup. The pre-refactor history-recorder
+   * dual-emitted delta records into the bag root (sig-named files
+   * with non-layer content) and numeric markers (legacy ops + DCP-
+   * style markers). Both shapes live alongside legitimate layer
+   * snapshots and would surface as fake rows in listLayers.
+   *
+   * Sniffing is the price of cleaning a polluted disk. Going forward,
+   * the recorder no longer writes records into hypercomb.io bags, so
+   * subsequent runs of this pass find nothing to do — the bag stays
+   * well-formed and listLayers can keep its mechanical "filename
+   * shape IS the type" rule.
+   *
+   * What gets removed:
+   *   - 64-hex sig file whose content is NOT a v2 layer JSON
+   *   - 8-digit numeric file (legacy op or DCP marker — doesn't
+   *     belong in a hypercomb.io bag)
+   *
+   * Files whose names don't match either shape are left alone for
+   * manual triage.
+   */
+  readonly #quarantineNonLayerFiles = async (
+    locationSig: string,
+  ): Promise<void> => {
+    let bag: FileSystemDirectoryHandle
+    try {
+      bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false })
+    } catch { return }
+
+    const numericRe = /^\d{1,16}$/
+    const moves: string[] = []
+
+    for await (const [name, handle] of (bag as any).entries()) {
+      if (handle.kind !== 'file') continue
+
+      if (HistoryService.#SIG_RE.test(name)) {
+        // Sig file = layer content. Must be slim-layer JSON (object
+        // with `cells` array) to stay. Old fat-layer entries from
+        // before the slim shape land here too — they have a `cells`
+        // array, so they pass; the extra fields are ignored at read.
         try {
-          const blob = await store.getResource(signature)
-          if (blob) resolved.add(signature)
-        } catch {
-          // leave unresolved — entry will be filtered out below
-        }
-      }))
+          const file = await (handle as FileSystemFileHandle).getFile()
+          const text = await file.text()
+          const parsed = JSON.parse(text) as { cells?: unknown }
+          if (Array.isArray(parsed?.cells)) continue
+        } catch { /* not JSON or unreadable — quarantine */ }
+        moves.push(name)
+      } else if (HistoryService.#MARKER_RE.test(name)) {
+        // Marker file = a single sig pointing at a content file.
+        // Must be exactly 64 hex chars; anything else is corrupt.
+        try {
+          const file = await (handle as FileSystemFileHandle).getFile()
+          const text = (await file.text()).trim()
+          if (HistoryService.#SIG_RE.test(text)) continue
+        } catch { /* unreadable — quarantine */ }
+        moves.push(name)
+      } else if (numericRe.test(name)) {
+        // Numeric but non-marker length (e.g., legacy 1-7 digit ops).
+        // Doesn't belong here.
+        moves.push(name)
+      }
+      // Anything else (oddly named files) — leave alone for triage.
     }
 
-    const filtered: Array<LayerEntry & { index: number; filename: string }> = []
-    let position = 0
-    for (const entry of raw) {
-      if (store && !resolved.has(entry.layerSig)) continue
-      filtered.push({ ...entry, index: position })
-      position++
+    for (const name of moves) {
+      try { await bag.removeEntry(name) } catch { /* already gone */ }
     }
-    return filtered
   }
 
   // -------------------------------------------------
-  // layer promotion / soft-delete / merge
+  // marker promotion / delete / merge
   // -------------------------------------------------
   //
-  // Three primitives the viewer binds to its per-row and multi-select
-  // action buttons:
+  // Direct CRUD on markers — append, delete. Sig content files are
+  // touched only by commitLayer (writes a new sig file when content
+  // is novel). promoteToHead appends a fresh marker pointing at the
+  // existing sig (no content rewrite). removeEntries deletes markers,
+  // not sig files (orphan sig files can be GC'd later).
   //
-  //   promoteToHead(sig)          → append a new entry at head that
-  //                                  points at the same layer content.
-  //                                  Same sig, new index, new timestamp.
-  //                                  The layer lives twice in the bag —
-  //                                  that's the whole point: bringing a
-  //                                  past state back to head without
-  //                                  touching the past.
+  //   promoteToHead(sig)        → append a new marker pointing at sig.
+  //                                Result: that sig appears at head
+  //                                without re-writing the content file.
   //
-  //   removeEntries(indexes[])    → soft-delete: move entry files into
-  //                                  __deleted__/{locSig}/ with the full
-  //                                  layer JSON as content. 30 days from
-  //                                  `deletedAt` they are GC'd out by
-  //                                  pruneExpiredDeletes. Restorable
-  //                                  because the content is still
-  //                                  byte-equal under its original sig.
+  //   removeEntries(markers[])  → bag.removeEntry(markerName) per item.
   //
-  //   mergeEntries(indexes[])     → multi-select merge. Picks the newest
-  //                                  selected entry's content as the
-  //                                  combined state, appends it to head
-  //                                  via promoteToHead, then removes all
-  //                                  the selected entries so the bag
-  //                                  ends up with one fewer row instead
-  //                                  of one more. Deletion is soft.
-
-  static readonly #DELETED_DIR = '__deleted__'
-  static readonly #DELETE_TTL_MS = 30 * 24 * 60 * 60 * 1000
+  //   mergeEntries(markers[])   → take newest selected marker's sig,
+  //                                promote to head, delete the rest.
 
   /**
-   * Force-append a new entry at head pointing at the given layer sig.
-   * Used to promote a historical layer back to current without touching
-   * the past. Skips the dedup gate commitLayer applies; the whole point
-   * is to re-use an existing sig as the new head.
+   * Bring a layer sig back to head by appending a fresh marker that
+   * points at it. The sig content file is NOT touched — its mtime
+   * stays put, no Blob handles invalidated. Markers, not content,
+   * carry the per-event timeline.
    */
   public readonly promoteToHead = async (
     locationSig: string,
     layerSig: string,
   ): Promise<string | null> => {
-    const store = get<{ getResource: (sig: string) => Promise<Blob | null> }>('@hypercomb.social/Store')
-    if (!store) return null
-    // Sanity check — refuse to promote a dead pointer. If the resource
-    // is missing the viewer would render "(loading)" forever, same as
-    // the filtered-out dead entries in listLayers.
-    const blob = await store.getResource(layerSig)
-    if (!blob) return null
+    if (!HistoryService.#SIG_RE.test(layerSig)) return null
+    const bag = await this.getBag(locationSig)
 
-    const layersDir = await this.#getLayersDir(locationSig)
-    const fileName = await this.#nextEntryFilename(locationSig, layersDir)
-    const handle = await layersDir.getFileHandle(fileName, { create: true })
-    const writable = await handle.createWritable()
-    try {
-      const entry: LayerEntry = { layerSig, at: Date.now() }
-      await writable.write(JSON.stringify(entry))
-    } finally {
-      await writable.close()
+    // Sanity: the sig file should exist in the bag (or be hydrate-able
+    // from the Store). If neither, the marker would be a dead pointer.
+    let sigExists = true
+    try { await bag.getFileHandle(layerSig, { create: false }) } catch { sigExists = false }
+    if (!sigExists) {
+      const store = get<{ getResource: (sig: string) => Promise<Blob | null> }>('@hypercomb.social/Store')
+      const blob = store ? await store.getResource(layerSig).catch(() => null) : null
+      if (!blob) return null
+      // Materialise the sig file in the bag so the marker resolves.
+      const bytes = await blob.arrayBuffer()
+      const handle = await bag.getFileHandle(layerSig, { create: true })
+      const writable = await handle.createWritable()
+      try { await writable.write(bytes) } finally { await writable.close() }
     }
+
+    const markerName = await this.#nextMarkerName(bag)
+    const markerHandle = await bag.getFileHandle(markerName, { create: true })
+    const markerWritable = await markerHandle.createWritable()
+    try { await markerWritable.write(layerSig) } finally { await markerWritable.close() }
     return layerSig
   }
 
   /**
-   * Soft-delete history entries by filename. Each entry's content is
-   * archived (entry pointer + full layer JSON snapshot) into
-   * __deleted__/{locSig}/{sameFilename}, then the original entry file
-   * is removed. 30-day TTL enforced by pruneExpiredDeletes.
+   * Direct delete of marker files. Sig content files are NOT deleted
+   * here (a sig may still be referenced by other markers); orphan-sig
+   * GC is a separate sweep if/when needed.
    */
   public readonly removeEntries = async (
     locationSig: string,
     filenames: string[],
   ): Promise<number> => {
     if (filenames.length === 0) return 0
-    const layersDir = await this.#tryGetLayersDir(locationSig)
-    if (!layersDir) return 0
-    const store = get<{ getResource: (sig: string) => Promise<Blob | null> }>('@hypercomb.social/Store')
-    const deletedDir = await this.#getDeletedDir(locationSig)
-    const deletedAt = Date.now()
+    let bag: FileSystemDirectoryHandle
+    try {
+      bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false })
+    } catch { return 0 }
 
     let removed = 0
     for (const filename of filenames) {
-      let entry: LayerEntry | null = null
       try {
-        const handle = await layersDir.getFileHandle(filename, { create: false })
-        const file = await handle.getFile()
-        entry = JSON.parse(await file.text()) as LayerEntry
-      } catch {
-        continue
-      }
-
-      // Archive payload carries the pointer and the snapshot content so
-      // restore can re-verify the layer sig even if the resource cache
-      // has evicted the signature later.
-      const archivePayload: { deletedAt: number; entry: LayerEntry; layer: unknown } = {
-        deletedAt,
-        entry,
-        layer: null,
-      }
-      if (store) {
-        try {
-          const blob = await store.getResource(entry.layerSig)
-          if (blob) archivePayload.layer = JSON.parse(await blob.text())
-        } catch { /* archive with layer=null */ }
-      }
-
-      try {
-        // Reuse the same opaque filename in __deleted__/ — nothing
-        // infers anything from it, so keeping it stable just means
-        // restore can write straight back into layers/ under the
-        // same handle if we ever wire a restore action.
-        const archiveHandle = await deletedDir.getFileHandle(filename, { create: true })
-        const writable = await archiveHandle.createWritable()
-        try { await writable.write(JSON.stringify(archivePayload)) } finally { await writable.close() }
-      } catch { continue }
-
-      try { await layersDir.removeEntry(filename) } catch { /* already gone */ }
-      removed++
+        await bag.removeEntry(filename)
+        removed++
+      } catch { /* already gone */ }
     }
     return removed
   }
 
   /**
-   * Multi-select "merge into head". Appends the newest selected layer's
-   * content as the new head (via promoteToHead), then soft-deletes all
-   * the selected source entries. Net effect: one new row at top, the
-   * sources disappear from the active list but remain restorable from
-   * __deleted__ for 30 days.
+   * Multi-select "merge into head". Pick the newest selected marker's
+   * sig, promote it (append a fresh marker), then delete every other
+   * selected marker. Net effect: one new marker at head, the merged-
+   * source markers are gone from the active list.
    */
   public readonly mergeEntries = async (
     locationSig: string,
     filenames: string[],
   ): Promise<string | null> => {
     if (filenames.length === 0) return null
+    let bag: FileSystemDirectoryHandle
+    try {
+      bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false })
+    } catch { return null }
 
-    // Load the selected entries by filename and pick the chronologically
-    // newest one (highest `at`) — that entry's layer content becomes
-    // the new head. Filenames are opaque, so we MUST read payloads to
-    // decide order.
-    const layersDir = await this.#tryGetLayersDir(locationSig)
-    if (!layersDir) return null
-    let newest: LayerEntry | null = null
+    let newestMarker: string | null = null
+    let newestSig: string | null = null
     for (const filename of filenames) {
+      if (!HistoryService.#MARKER_RE.test(filename)) continue
       try {
-        const handle = await layersDir.getFileHandle(filename, { create: false })
+        const handle = await bag.getFileHandle(filename, { create: false })
         const file = await handle.getFile()
-        const entry = JSON.parse(await file.text()) as LayerEntry
-        if (!newest || entry.at > newest.at) newest = entry
+        if (newestMarker === null || filename.localeCompare(newestMarker) > 0) {
+          newestMarker = filename
+          newestSig = (await file.text()).trim()
+        }
       } catch { /* skip missing */ }
     }
-    if (!newest) return null
+    if (!newestSig) return null
 
-    const newSig = await this.promoteToHead(locationSig, newest.layerSig)
-    if (!newSig) return null
-    await this.removeEntries(locationSig, filenames)
-    return newSig
-  }
-
-  /**
-   * GC pass: remove soft-deleted entries older than 30 days. Safe to
-   * call at startup and after any delete/merge. Idempotent and bounded
-   * by the number of deleted files at this location.
-   */
-  public readonly pruneExpiredDeletes = async (
-    locationSig: string,
-  ): Promise<number> => {
-    const deletedDir = await this.#tryGetDeletedDir(locationSig)
-    if (!deletedDir) return 0
-    const cutoff = Date.now() - HistoryService.#DELETE_TTL_MS
-    let pruned = 0
-    const names: string[] = []
-    for await (const [name, handle] of deletedDir.entries()) {
-      if (handle.kind !== 'file' || !name.endsWith('.json')) continue
-      names.push(name)
-    }
-    for (const name of names) {
-      // Filename is just the original NNNNNNNN.json; deletedAt lives
-      // in the payload. One file read per archived entry on a cold
-      // startup GC — cheap enough given the archive is capped at
-      // whatever the user soft-deleted over the last 30 days at this
-      // single location.
-      let deletedAt = 0
-      try {
-        const handle = await deletedDir.getFileHandle(name, { create: false })
-        const file = await handle.getFile()
-        const payload = JSON.parse(await file.text()) as { deletedAt?: number }
-        deletedAt = Number(payload?.deletedAt ?? 0)
-      } catch { continue }
-      if (!Number.isFinite(deletedAt) || deletedAt === 0 || deletedAt > cutoff) continue
-      try { await deletedDir.removeEntry(name); pruned++ } catch { /* already gone */ }
-    }
-    return pruned
+    const promoted = await this.promoteToHead(locationSig, newestSig)
+    if (!promoted) return null
+    await this.removeEntries(locationSig, filenames.filter(f => f !== newestMarker))
+    return promoted
   }
 
   // -------------------------------------------------
@@ -861,44 +889,6 @@ export class HistoryService {
       slice.map(m => this.resolveDeltaRecord(locationSig, m.sig))
     )
     return reduceRecords(records)
-  }
-
-  // -------------------------------------------------
-
-  readonly #getDeletedDir = async (
-    locationSig: string,
-  ): Promise<FileSystemDirectoryHandle> => {
-    const bag = await this.getBag(locationSig)
-    return await bag.getDirectoryHandle(HistoryService.#DELETED_DIR, { create: true })
-  }
-
-  readonly #tryGetDeletedDir = async (
-    locationSig: string,
-  ): Promise<FileSystemDirectoryHandle | null> => {
-    try {
-      const bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false })
-      return await bag.getDirectoryHandle(HistoryService.#DELETED_DIR, { create: false })
-    } catch {
-      return null
-    }
-  }
-
-  readonly #getLayersDir = async (
-    locationSig: string,
-  ): Promise<FileSystemDirectoryHandle> => {
-    const bag = await this.getBag(locationSig)
-    return await bag.getDirectoryHandle(HistoryService.#LAYERS_DIR, { create: true })
-  }
-
-  readonly #tryGetLayersDir = async (
-    locationSig: string,
-  ): Promise<FileSystemDirectoryHandle | null> => {
-    try {
-      const bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false })
-      return await bag.getDirectoryHandle(HistoryService.#LAYERS_DIR, { create: false })
-    } catch {
-      return null
-    }
   }
 
   // -------------------------------------------------

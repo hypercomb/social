@@ -12,31 +12,21 @@ var CollapseHistoryQueenBee = class extends QueenBee {
   }
   async #collapse() {
     const store = get("@hypercomb.social/Store");
-    if (!store?.history) {
-      console.warn("[/collapse-history] Store not available");
+    const history = get("@diamondcoreprocessor.com/HistoryService");
+    if (!store?.history || !history) {
+      console.warn("[/collapse-history] Store or HistoryService not available");
       return;
     }
     let bags = 0;
     let removed = 0;
-    for await (const [, bag] of store.history.entries()) {
+    for await (const [lineageSig, bag] of store.history.entries()) {
       if (bag.kind !== "directory") continue;
       bags++;
-      try {
-        const layers = await bag.getDirectoryHandle("layers", { create: false });
-        const names = [];
-        for await (const [name, handle] of layers.entries()) {
-          if (handle.kind === "file" && name.endsWith(".json")) names.push(name);
-        }
-        if (names.length <= 1) continue;
-        names.sort();
-        const head = names[names.length - 1];
-        for (const name of names) {
-          if (name === head) continue;
-          await layers.removeEntry(name);
-          removed++;
-        }
-      } catch {
-      }
+      const entries = await history.listLayers(lineageSig);
+      if (entries.length <= 1) continue;
+      const keep = entries[entries.length - 1];
+      const toDelete = entries.filter((e) => e.filename !== keep.filename).map((e) => e.filename);
+      removed += await history.removeEntries(lineageSig, toDelete);
     }
     let cleared = 0;
     for (let i = localStorage.length - 1; i >= 0; i--) {
@@ -54,6 +44,94 @@ var CollapseHistoryQueenBee = class extends QueenBee {
 };
 var _collapseHistory = new CollapseHistoryQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/CollapseHistoryQueenBee", _collapseHistory);
+
+// src/diamondcoreprocessor.com/history/delta-record.ts
+var NAME_MAX_LEN = 256;
+var SIG_RE = /^[a-f0-9]{64}$/;
+function canonicalise(record) {
+  if (typeof record?.name !== "string" || record.name.length === 0) {
+    throw new Error("DeltaRecord: name is required");
+  }
+  if (record.name.length > NAME_MAX_LEN) {
+    throw new Error(`DeltaRecord: name exceeds ${NAME_MAX_LEN} chars`);
+  }
+  const opKeys = Object.keys(record).filter((k) => k !== "name").sort();
+  const lines = [record.name];
+  for (const op of opKeys) {
+    const value = record[op];
+    const sigs = extractSigs(value);
+    if (sigs.length === 0) {
+      lines.push(op);
+    } else {
+      const sortedSigs = [...sigs].sort();
+      lines.push(`${op} ${sortedSigs.join(" ")}`);
+    }
+  }
+  return lines.join("\n");
+}
+function parse(text) {
+  if (typeof text !== "string" || text.length === 0) return null;
+  const lines = text.split("\n");
+  const name = lines[0]?.trim();
+  if (!name || name.length > NAME_MAX_LEN) return null;
+  const out = { name };
+  for (let i = 1; i < lines.length; i++) {
+    const raw = lines[i];
+    if (!raw) continue;
+    const tokens = raw.split(" ").filter((t) => t.length > 0);
+    if (tokens.length === 0) continue;
+    const op = tokens[0];
+    if (op === "name") continue;
+    const sigs = tokens.slice(1).filter((t) => SIG_RE.test(t));
+    out[op] = sigs;
+  }
+  return out;
+}
+function canonicalBytes(record) {
+  return new TextEncoder().encode(canonicalise(record));
+}
+function extractSigs(value) {
+  if (value == null) return [];
+  if (Array.isArray(value)) {
+    return value.filter((s) => typeof s === "string" && SIG_RE.test(s));
+  }
+  if (typeof value === "string") {
+    return SIG_RE.test(value) ? [value] : [];
+  }
+  return [];
+}
+function isSig(value) {
+  return typeof value === "string" && SIG_RE.test(value);
+}
+
+// src/diamondcoreprocessor.com/history/delta-reducer.ts
+function reduce(records) {
+  const cells = /* @__PURE__ */ new Set();
+  const hidden = /* @__PURE__ */ new Set();
+  for (const record of records) {
+    if (!record) continue;
+    const opKeys = Object.keys(record).filter((k) => k !== "name");
+    if (opKeys.length === 0) {
+      cells.add(record.name);
+      continue;
+    }
+    for (const op of opKeys) {
+      switch (op) {
+        case "remove":
+          cells.delete(record.name);
+          hidden.delete(record.name);
+          break;
+        case "hide":
+          hidden.add(record.name);
+          break;
+        case "show":
+          hidden.delete(record.name);
+          break;
+      }
+    }
+  }
+  return { cells, hidden };
+}
 
 // src/diamondcoreprocessor.com/history/global-time-clock.service.ts
 import { EffectBus } from "@hypercomb/core";
@@ -228,16 +306,27 @@ var HistoryCursorService = class _HistoryCursorService extends EventTarget {
     if (wasAtLatest) this.#position = this.#layers.length;
     this.#emit();
   }
-  /** Move cursor to an absolute position (1-based, clamped). */
+  /**
+   * Move cursor to an absolute position (1-based, clamped).
+   *
+   * When layers exist, the cursor never sits below position 1 — "fully
+   * rewound" reveals the oldest recorded state, not the pre-history
+   * empty state. The UI's START anchor row is the visual terminator for
+   * that floor; there is no reachable cursor position beyond it. If no
+   * layers exist at all, position 0 is allowed (there's nothing to
+   * show but empty).
+   */
   seek(position) {
-    const clamped = Math.max(0, Math.min(position, this.#layers.length));
+    const floor = this.#layers.length > 0 ? 1 : 0;
+    const clamped = Math.max(floor, Math.min(position, this.#layers.length));
     if (clamped === this.#position) return;
     this.#position = clamped;
     this.#emit();
   }
-  /** Step backward one layer. */
+  /** Step backward one layer, but never past the oldest recorded state. */
   undo() {
-    if (this.#position > 0) this.seek(this.#position - 1);
+    const floor = this.#layers.length > 0 ? 1 : 0;
+    if (this.#position > floor) this.seek(this.#position - 1);
   }
   /** Step forward one layer. */
   redo() {
@@ -270,8 +359,10 @@ var HistoryCursorService = class _HistoryCursorService extends EventTarget {
   }
   /**
    * Resolve the LayerContent for the entry at the cursor position.
-   * Cached by layer signature so repeated reads during a single render
-   * hit memory, not OPFS.
+   * Reads directly from the bag (the source of truth in the new
+   * layout) so undo/redo never blanks out on a cold Store cache.
+   * Cached by layer signature so repeated reads during a single
+   * render hit memory, not OPFS.
    */
   async layerContentAtCursor() {
     if (this.#position === 0) return null;
@@ -279,30 +370,13 @@ var HistoryCursorService = class _HistoryCursorService extends EventTarget {
     if (this.#cachedLayerSig === entry.layerSig && this.#cachedContent) {
       return this.#cachedContent;
     }
-    const store = get("@hypercomb.social/Store");
-    if (!store) return null;
-    try {
-      const blob = await store.getResource(entry.layerSig);
-      if (!blob) return null;
-      const parsed = JSON.parse(await blob.text());
-      const content = {
-        version: 2,
-        cells: parsed.cells ?? [],
-        hidden: parsed.hidden ?? [],
-        contentByCell: parsed.contentByCell ?? {},
-        tagsByCell: parsed.tagsByCell ?? {},
-        notesByCell: parsed.notesByCell ?? {},
-        bees: parsed.bees ?? [],
-        dependencies: parsed.dependencies ?? [],
-        layoutSig: parsed.layoutSig ?? "",
-        instructionsSig: parsed.instructionsSig ?? ""
-      };
-      this.#cachedLayerSig = entry.layerSig;
-      this.#cachedContent = content;
-      return content;
-    } catch {
-      return null;
-    }
+    const historyService = get("@diamondcoreprocessor.com/HistoryService");
+    if (!historyService) return null;
+    const content = await historyService.getLayerContent(this.#locationSig, entry.layerSig);
+    if (!content) return null;
+    this.#cachedLayerSig = entry.layerSig;
+    this.#cachedContent = content;
+    return content;
   }
   /** Last-fetched layer content, for synchronous reads after a prior await. */
   peekContent() {
@@ -528,172 +602,517 @@ var HistoryService = class _HistoryService {
   // -------------------------------------------------
   // layer snapshots — signature-addressed history entries
   // -------------------------------------------------
-  static #LAYERS_DIR = "layers";
+  //
+  // On hypercomb.io a lineage's history bag is self-contained:
+  //
+  //   __history__/{sign(lineage)}/
+  //     {sig}              ← layer content, named by its own content sig
+  //     {sig}              ← another layer content
+  //     ...
+  //     __temporary__/     ← soft-deleted layers (30-day TTL)
+  //       {sig}
+  //
+  // No inner `layers/` subfolder. No marker indirection. No entry
+  // wrapper JSON. The bag file IS the LayerContent JSON, named by the
+  // hash of its bytes — same state collapses to the same file (natural
+  // dedupe). Ordering comes from `file.lastModified`. Promotion ("make
+  // head") rewrites the file to bump its lastModified; soft-delete
+  // moves it into `__temporary__/{sig}` keeping the same name so a
+  // restore can move it straight back without rewriting bytes.
+  //
+  // DCP, by contrast, splits the model: `__layers__/{sig}` holds layer
+  // content shared across lineages, and `__history__/{lineageSig}/NNNNNNNN`
+  // markers (each containing a single sig line) point into that pool.
+  // Markers are a DCP-only indirection — they do not appear here.
   /**
    * Canonicalize a layer so byte-equal content produces byte-equal JSON.
-   * `cells` keeps its caller-supplied order (position is meaningful). All
-   * other string arrays are sorted lexicographically. Object keys are
-   * inserted in sorted order; V8 preserves insertion order for string
-   * keys, so plain `JSON.stringify` then produces stable output.
+   * `cells` keeps its caller-supplied order (position is meaningful).
+   * `hidden` is sorted lexicographically so set-equal states dedupe.
    */
-  static canonicalizeLayer = (layer) => {
-    const contentKeys = Object.keys(layer.contentByCell).sort();
-    const contentByCell = {};
-    for (const k of contentKeys) contentByCell[k] = layer.contentByCell[k];
-    const tagKeys = Object.keys(layer.tagsByCell).sort();
-    const tagsByCell = {};
-    for (const k of tagKeys) tagsByCell[k] = [...layer.tagsByCell[k]].sort();
-    const notesKeys = Object.keys(layer.notesByCell).sort();
-    const notesByCell = {};
-    for (const k of notesKeys) notesByCell[k] = layer.notesByCell[k];
-    return {
-      version: 2,
-      cells: layer.cells.slice(),
-      hidden: [...layer.hidden].sort(),
-      contentByCell,
-      tagsByCell,
-      notesByCell,
-      bees: [...layer.bees].sort(),
-      dependencies: [...layer.dependencies].sort(),
-      layoutSig: layer.layoutSig,
-      instructionsSig: layer.instructionsSig
-    };
-  };
+  static canonicalizeLayer = (layer) => ({
+    cells: layer.cells.slice(),
+    hidden: [...layer.hidden].sort()
+  });
   /**
    * Commit a layer snapshot for a location.
    *
-   * Writes the canonical layer content as a signature-addressed resource
-   * (via Store.putResource) and appends an entry file pointing at it
-   * under `__history__/{locationSig}/layers/NNNNNNNN.json`. Skips the
-   * append if the new layer signature equals the current head (dedup).
+   * Writes the canonical layer content directly into the lineage bag
+   * as `__history__/{lineageSig}/{layerSig}` — the file IS the layer
+   * content, named by the hash of its bytes. Same content → same sig
+   * → same file (natural dedupe, no separate dedup table). Skips the
+   * write if a file with that sig already exists so any cached Blob
+   * handle elsewhere can't be invalidated by an idempotent rewrite.
    *
-   * @returns the layer signature, or null if the commit was deduped.
+   * Also seeds Store.putResource so cross-bag resolvers (cursor warmup,
+   * renderer) keep finding the content under the same sig — but the
+   * source of truth for this lineage's history is the bag file itself.
+   *
+   * @returns the layer signature, or null if the layer was a no-op
+   *          rewrite of the current head.
    */
   commitLayer = async (locationSig, layer) => {
     const canonical = _HistoryService.canonicalizeLayer(layer);
     const json = JSON.stringify(canonical);
-    const bytes = new TextEncoder().encode(json).buffer;
-    const layerSig = await SignatureService.sign(bytes);
-    const head = await this.headLayer(locationSig);
-    if (head && head.layerSig === layerSig) return null;
-    const store = get("@hypercomb.social/Store");
-    if (!store) return null;
-    await store.putResource(new Blob([json], { type: "application/json" }));
-    const layersDir = await this.#getLayersDir(locationSig);
-    const nextIndex = await this.#nextLayerIndex(layersDir);
-    const fileName = String(nextIndex).padStart(8, "0") + ".json";
-    const handle = await layersDir.getFileHandle(fileName, { create: true });
-    const writable = await handle.createWritable();
+    const bytes = new TextEncoder().encode(json);
+    const layerSig = await SignatureService.sign(bytes.buffer);
+    const bag = await this.getBag(locationSig);
+    let sigExists = true;
     try {
-      const entry = { layerSig, at: Date.now() };
-      await writable.write(JSON.stringify(entry));
+      await bag.getFileHandle(layerSig, { create: false });
+    } catch {
+      sigExists = false;
+    }
+    if (!sigExists) {
+      const handle = await bag.getFileHandle(layerSig, { create: true });
+      const writable = await handle.createWritable();
+      try {
+        await writable.write(bytes);
+      } finally {
+        await writable.close();
+      }
+    }
+    const markerName = await this.#nextMarkerName(bag);
+    const markerHandle = await bag.getFileHandle(markerName, { create: true });
+    const markerWritable = await markerHandle.createWritable();
+    try {
+      await markerWritable.write(layerSig);
     } finally {
-      await writable.close();
+      await markerWritable.close();
+    }
+    const store = get("@hypercomb.social/Store");
+    if (store) {
+      try {
+        await store.putResource(new Blob([json], { type: "application/json" }));
+      } catch {
+      }
     }
     return layerSig;
   };
   /**
-   * Read the highest-numbered layer entry for a location, or null if the
-   * location has no layer history yet.
+   * Head = the chronologically latest marker. Returns null when the
+   * location has no markers yet.
    */
   headLayer = async (locationSig) => {
-    const layersDir = await this.#tryGetLayersDir(locationSig);
-    if (!layersDir) return null;
-    let maxName = "";
-    let maxHandle = null;
-    for await (const [name, handle] of layersDir.entries()) {
-      if (handle.kind !== "file" || !name.endsWith(".json")) continue;
-      if (name > maxName) {
-        maxName = name;
-        maxHandle = handle;
-      }
-    }
-    if (!maxHandle) return null;
-    try {
-      const file = await maxHandle.getFile();
-      const entry = JSON.parse(await file.text());
-      return { ...entry, index: parseInt(maxName, 10) };
-    } catch {
-      return null;
-    }
+    const all = await this.listLayers(locationSig);
+    if (all.length === 0) return null;
+    return all[all.length - 1];
   };
   /**
-   * Read a specific layer entry by index. Returns null if missing.
+   * Filename conventions at the bag root:
+   *   - 64-hex sig file → layer content (one per unique state)
+   *   - 8-digit numeric → marker file (one per user event), content = a sig
+   *
+   * Two named shapes, two roles. The convention is mechanical — names
+   * carry meaning, no inspection of content needed for routing. Markers
+   * give us per-event history with overlap (multiple markers can point
+   * at the same sig); sig files give us content dedupe.
    */
-  getLayerAt = async (locationSig, index) => {
-    const layersDir = await this.#tryGetLayersDir(locationSig);
-    if (!layersDir) return null;
-    const fileName = String(index).padStart(8, "0") + ".json";
-    try {
-      const handle = await layersDir.getFileHandle(fileName, { create: false });
-      const file = await handle.getFile();
-      return JSON.parse(await file.text());
-    } catch {
-      return null;
-    }
-  };
+  static #SIG_RE = /^[a-f0-9]{64}$/;
+  static #MARKER_RE = /^\d{8}$/;
   /**
-   * List all layer entries for a location, sorted by index ascending.
-   * Entries whose referenced layer resource can no longer be resolved are
-   * filtered out — they are dead pointers that would otherwise render as
-   * "(loading)" forever in the history viewer.
+   * List all marker entries for a location, sorted chronologically by
+   * marker filename (numeric ascending, so the last element is the
+   * latest commit). Each entry's `filename` is the MARKER name (used
+   * for delete/promote ops); `layerSig` is the content sig the marker
+   * points at; `at` is the marker file's lastModified.
+   *
+   * Multiple markers may share the same `layerSig` (overlap is the
+   * whole point of markers — per-event history with content dedupe).
    */
   listLayers = async (locationSig) => {
-    const layersDir = await this.#tryGetLayersDir(locationSig);
-    if (!layersDir) return [];
-    const raw = [];
-    for await (const [name, handle] of layersDir.entries()) {
-      if (handle.kind !== "file" || !name.endsWith(".json")) continue;
+    await this.#quarantineNonLayerFiles(locationSig);
+    let bag;
+    try {
+      bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false });
+    } catch {
+      return [];
+    }
+    const markers = [];
+    for await (const [name, handle] of bag.entries()) {
+      if (handle.kind !== "file") continue;
+      if (!_HistoryService.#MARKER_RE.test(name)) continue;
       try {
         const file = await handle.getFile();
-        const entry = JSON.parse(await file.text());
-        raw.push({ ...entry, index: parseInt(name, 10) });
+        const sig = (await file.text()).trim();
+        if (!_HistoryService.#SIG_RE.test(sig)) continue;
+        markers.push({ layerSig: sig, at: file.lastModified, filename: name });
       } catch {
       }
     }
-    raw.sort((a, b) => a.index - b.index);
+    markers.sort((a, b) => a.filename.localeCompare(b.filename));
+    return markers.map((entry, position) => ({ ...entry, index: position }));
+  };
+  /**
+   * Allocate the next sequential marker name for this bag. Format is
+   * 8-digit zero-padded starting at 00000001. Scans existing markers
+   * (and the __temporary__ archive if present) for the current max so
+   * a re-issued name can never collide with an archived entry.
+   */
+  #nextMarkerName = async (bag) => {
+    let max = 0;
+    for await (const [name, handle] of bag.entries()) {
+      if (handle.kind !== "file") continue;
+      if (!_HistoryService.#MARKER_RE.test(name)) continue;
+      const n = parseInt(name, 10);
+      if (!isNaN(n) && n > max) max = n;
+    }
+    return String(max + 1).padStart(8, "0");
+  };
+  /**
+   * Read a layer's JSON content directly from the bag, by sig. The
+   * bag is the source of truth in the new layout — `__resources__/`
+   * is only a (possibly cold) cache. Going through Store.getResource
+   * for undo/redo means a missed cache renders an empty grid even
+   * though the bytes are right there in the bag. This bypasses that
+   * indirection entirely.
+   *
+   * Returns the parsed (and field-defaulted) LayerContent, or null
+   * when the bag/sig file isn't there. Also seeds Store.putResource
+   * on a successful read so any other consumer that still resolves
+   * by sig stays warm. No content sniffing — the file is at the
+   * canonical path or it isn't.
+   */
+  getLayerContent = async (locationSig, layerSig) => {
+    if (!_HistoryService.#SIG_RE.test(layerSig)) return null;
+    let bag;
+    try {
+      bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false });
+    } catch {
+      return null;
+    }
+    let bytes;
+    let blob;
+    try {
+      const handle = await bag.getFileHandle(layerSig, { create: false });
+      const file = await handle.getFile();
+      bytes = await file.arrayBuffer();
+      blob = file;
+    } catch {
+      return null;
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(new TextDecoder().decode(bytes));
+    } catch {
+      return null;
+    }
+    const content = {
+      cells: parsed.cells ?? [],
+      hidden: parsed.hidden ?? []
+    };
     const store = get("@hypercomb.social/Store");
-    const resolved = /* @__PURE__ */ new Set();
     if (store) {
-      const uniqueSignatures = Array.from(new Set(raw.map((e) => e.layerSig)));
-      await Promise.all(uniqueSignatures.map(async (signature) => {
+      try {
+        await store.putResource(blob);
+      } catch {
+      }
+    }
+    return content;
+  };
+  /**
+   * One-time bag-pollution cleanup. The pre-refactor history-recorder
+   * dual-emitted delta records into the bag root (sig-named files
+   * with non-layer content) and numeric markers (legacy ops + DCP-
+   * style markers). Both shapes live alongside legitimate layer
+   * snapshots and would surface as fake rows in listLayers.
+   *
+   * Sniffing is the price of cleaning a polluted disk. Going forward,
+   * the recorder no longer writes records into hypercomb.io bags, so
+   * subsequent runs of this pass find nothing to do — the bag stays
+   * well-formed and listLayers can keep its mechanical "filename
+   * shape IS the type" rule.
+   *
+   * What gets removed:
+   *   - 64-hex sig file whose content is NOT a v2 layer JSON
+   *   - 8-digit numeric file (legacy op or DCP marker — doesn't
+   *     belong in a hypercomb.io bag)
+   *
+   * Files whose names don't match either shape are left alone for
+   * manual triage.
+   */
+  #quarantineNonLayerFiles = async (locationSig) => {
+    let bag;
+    try {
+      bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false });
+    } catch {
+      return;
+    }
+    const numericRe = /^\d{1,16}$/;
+    const moves = [];
+    for await (const [name, handle] of bag.entries()) {
+      if (handle.kind !== "file") continue;
+      if (_HistoryService.#SIG_RE.test(name)) {
         try {
-          const blob = await store.getResource(signature);
-          if (blob) resolved.add(signature);
+          const file = await handle.getFile();
+          const text = await file.text();
+          const parsed = JSON.parse(text);
+          if (Array.isArray(parsed?.cells)) continue;
         } catch {
         }
-      }));
+        moves.push(name);
+      } else if (_HistoryService.#MARKER_RE.test(name)) {
+        try {
+          const file = await handle.getFile();
+          const text = (await file.text()).trim();
+          if (_HistoryService.#SIG_RE.test(text)) continue;
+        } catch {
+        }
+        moves.push(name);
+      } else if (numericRe.test(name)) {
+        moves.push(name);
+      }
     }
-    const filtered = [];
-    let previousSignature = null;
-    for (const entry of raw) {
-      if (store && !resolved.has(entry.layerSig)) continue;
-      if (entry.layerSig === previousSignature) continue;
-      filtered.push(entry);
-      previousSignature = entry.layerSig;
+    for (const name of moves) {
+      try {
+        await bag.removeEntry(name);
+      } catch {
+      }
     }
-    return filtered;
   };
-  #getLayersDir = async (locationSig) => {
+  // -------------------------------------------------
+  // marker promotion / delete / merge
+  // -------------------------------------------------
+  //
+  // Direct CRUD on markers — append, delete. Sig content files are
+  // touched only by commitLayer (writes a new sig file when content
+  // is novel). promoteToHead appends a fresh marker pointing at the
+  // existing sig (no content rewrite). removeEntries deletes markers,
+  // not sig files (orphan sig files can be GC'd later).
+  //
+  //   promoteToHead(sig)        → append a new marker pointing at sig.
+  //                                Result: that sig appears at head
+  //                                without re-writing the content file.
+  //
+  //   removeEntries(markers[])  → bag.removeEntry(markerName) per item.
+  //
+  //   mergeEntries(markers[])   → take newest selected marker's sig,
+  //                                promote to head, delete the rest.
+  /**
+   * Bring a layer sig back to head by appending a fresh marker that
+   * points at it. The sig content file is NOT touched — its mtime
+   * stays put, no Blob handles invalidated. Markers, not content,
+   * carry the per-event timeline.
+   */
+  promoteToHead = async (locationSig, layerSig) => {
+    if (!_HistoryService.#SIG_RE.test(layerSig)) return null;
     const bag = await this.getBag(locationSig);
-    return await bag.getDirectoryHandle(_HistoryService.#LAYERS_DIR, { create: true });
+    let sigExists = true;
+    try {
+      await bag.getFileHandle(layerSig, { create: false });
+    } catch {
+      sigExists = false;
+    }
+    if (!sigExists) {
+      const store = get("@hypercomb.social/Store");
+      const blob = store ? await store.getResource(layerSig).catch(() => null) : null;
+      if (!blob) return null;
+      const bytes = await blob.arrayBuffer();
+      const handle = await bag.getFileHandle(layerSig, { create: true });
+      const writable = await handle.createWritable();
+      try {
+        await writable.write(bytes);
+      } finally {
+        await writable.close();
+      }
+    }
+    const markerName = await this.#nextMarkerName(bag);
+    const markerHandle = await bag.getFileHandle(markerName, { create: true });
+    const markerWritable = await markerHandle.createWritable();
+    try {
+      await markerWritable.write(layerSig);
+    } finally {
+      await markerWritable.close();
+    }
+    return layerSig;
   };
-  #tryGetLayersDir = async (locationSig) => {
+  /**
+   * Direct delete of marker files. Sig content files are NOT deleted
+   * here (a sig may still be referenced by other markers); orphan-sig
+   * GC is a separate sweep if/when needed.
+   */
+  removeEntries = async (locationSig, filenames) => {
+    if (filenames.length === 0) return 0;
+    let bag;
+    try {
+      bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false });
+    } catch {
+      return 0;
+    }
+    let removed = 0;
+    for (const filename of filenames) {
+      try {
+        await bag.removeEntry(filename);
+        removed++;
+      } catch {
+      }
+    }
+    return removed;
+  };
+  /**
+   * Multi-select "merge into head". Pick the newest selected marker's
+   * sig, promote it (append a fresh marker), then delete every other
+   * selected marker. Net effect: one new marker at head, the merged-
+   * source markers are gone from the active list.
+   */
+  mergeEntries = async (locationSig, filenames) => {
+    if (filenames.length === 0) return null;
+    let bag;
+    try {
+      bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false });
+    } catch {
+      return null;
+    }
+    let newestMarker = null;
+    let newestSig = null;
+    for (const filename of filenames) {
+      if (!_HistoryService.#MARKER_RE.test(filename)) continue;
+      try {
+        const handle = await bag.getFileHandle(filename, { create: false });
+        const file = await handle.getFile();
+        if (newestMarker === null || filename.localeCompare(newestMarker) > 0) {
+          newestMarker = filename;
+          newestSig = (await file.text()).trim();
+        }
+      } catch {
+      }
+    }
+    if (!newestSig) return null;
+    const promoted = await this.promoteToHead(locationSig, newestSig);
+    if (!promoted) return null;
+    await this.removeEntries(locationSig, filenames.filter((f) => f !== newestMarker));
+    return promoted;
+  };
+  // -------------------------------------------------
+  // mechanical delta-record primitives
+  // -------------------------------------------------
+  //
+  // Records are the pure-differential form of history. A record is
+  // `{name, <op>: [sigs]}` serialised as raw line-oriented text (see
+  // delta-record.ts). Records are immutable and content-addressed:
+  // the record bytes live at `__layers__/{sig}` (flat, not in a
+  // domain subfolder — LayerInstaller's domain-scoped package reads
+  // iterate only directories, so flat sig files coexist cleanly).
+  //
+  // Per-location markers live at the bag root as opaque zero-padded
+  // entry files (`__history__/{locSig}/NNNNNNNN`, no extension).
+  // Each marker contains exactly one sig on one line. Ordering and
+  // timestamps come from file.lastModified on the filesystem; under
+  // the immutable-files invariant that IS the creation time. Nothing
+  // is embedded in the content.
+  //
+  // Legacy op files that predate the layer system also live at the
+  // bag root with the same NNNNNNNN naming. The reader discriminates
+  // by content: a new marker file holds a 64-hex sig; a legacy op
+  // file holds JSON with `{op, cell, at, ...}`. Coexistence is
+  // stable because both formats sort by filename consistently.
+  /**
+   * Canonicalise the record, sign it, write the raw bytes into the
+   * same history bag as `{sig}`, and append a numeric marker at the
+   * bag root whose content is that sig. Everything lives in one
+   * folder per location so publishing maps to "share this bag" —
+   * tar up `__history__/{locSig}/` and the peer gets the markers
+   * and the layer content they reference as one self-contained unit.
+   * Returns the record-sig, or null if the Store isn't available.
+   */
+  writeRecord = async (locationSig, record) => {
+    const canonical = canonicalise(record);
+    const bytes = new TextEncoder().encode(canonical);
+    const sig = await SignatureService.sign(bytes.buffer);
+    const bag = await this.getBag(locationSig);
+    let exists = true;
+    try {
+      await bag.getFileHandle(sig);
+    } catch {
+      exists = false;
+    }
+    if (!exists) {
+      const handle = await bag.getFileHandle(sig, { create: true });
+      const writable = await handle.createWritable();
+      try {
+        await writable.write(bytes);
+      } finally {
+        await writable.close();
+      }
+    }
+    const fileName = await this.#nextBagMarker(bag);
+    const mhandle = await bag.getFileHandle(fileName, { create: true });
+    const mwrite = await mhandle.createWritable();
+    try {
+      await mwrite.write(sig);
+    } finally {
+      await mwrite.close();
+    }
+    return sig;
+  };
+  /**
+   * Walk the bag root in chronological order, returning each marker
+   * entry's record-sig plus its timestamp. Files whose content is
+   * not a sig (legacy op files) are skipped — those readers have
+   * their own replay path.
+   */
+  listRecordSigs = async (locationSig) => {
+    let bag;
+    try {
+      bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false });
+    } catch {
+      return [];
+    }
+    const out = [];
+    for await (const [name, handle] of bag.entries()) {
+      if (handle.kind !== "file") continue;
+      try {
+        const file = await handle.getFile();
+        const text = (await file.text()).trim();
+        if (/^[a-f0-9]{64}$/.test(text)) {
+          out.push({ sig: text, at: file.lastModified, filename: name });
+        }
+      } catch {
+      }
+    }
+    out.sort((a, b) => a.at - b.at || a.filename.localeCompare(b.filename));
+    return out;
+  };
+  /**
+   * Load + parse the DeltaRecord at the given signature. Records now
+   * live inside each history bag (`__history__/{locSig}/{sig}`), so
+   * resolution is scoped to the bag — callers pass the locationSig
+   * along with the record sig. Returns null on missing or malformed
+   * content.
+   */
+  resolveDeltaRecord = async (locationSig, sig) => {
     try {
       const bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false });
-      return await bag.getDirectoryHandle(_HistoryService.#LAYERS_DIR, { create: false });
+      const handle = await bag.getFileHandle(sig, { create: false });
+      const file = await handle.getFile();
+      const text = await file.text();
+      return parse(text);
     } catch {
       return null;
     }
   };
-  #nextLayerIndex = async (layersDir) => {
+  #nextBagMarker = async (bag) => {
     let max = 0;
-    for await (const [name, handle] of layersDir.entries()) {
-      if (handle.kind !== "file" || !name.endsWith(".json")) continue;
+    for await (const [name] of bag.entries()) {
       const n = parseInt(name, 10);
       if (!isNaN(n) && n > max) max = n;
     }
-    return max + 1;
+    return String(max + 1).padStart(8, "0");
+  };
+  /**
+   * Resolve every marker at this location, fold the records into a
+   * HydratedState. Optional `upTo` slices the chain — used by the
+   * cursor to preview past positions without mutating live state.
+   * Empty chain (or `upTo = 0`) returns the identity state — this is
+   * the synthetic-seed render path: before any real entry, the grid
+   * is empty. No disk writes, no timestamp invention — a pure fold.
+   */
+  hydratedStateAt = async (locationSig, upTo) => {
+    const markers = await this.listRecordSigs(locationSig);
+    const slice = typeof upTo === "number" ? markers.slice(0, Math.max(0, upTo)) : markers;
+    const records = await Promise.all(
+      slice.map((m) => this.resolveDeltaRecord(locationSig, m.sig))
+    );
+    return reduce(records);
   };
   // -------------------------------------------------
   // internal
@@ -712,18 +1131,7 @@ var _historyService = new HistoryService();
 window.ioc.register("@diamondcoreprocessor.com/HistoryService", _historyService);
 
 // src/diamondcoreprocessor.com/history/layer-diff.ts
-var EMPTY = {
-  version: 2,
-  cells: [],
-  hidden: [],
-  contentByCell: {},
-  tagsByCell: {},
-  notesByCell: {},
-  bees: [],
-  dependencies: [],
-  layoutSig: "",
-  instructionsSig: ""
-};
+var EMPTY = { cells: [], hidden: [] };
 var diffLayers = (prev, next) => {
   const p = prev ?? EMPTY;
   const diffs = [];
@@ -738,45 +1146,6 @@ var diffLayers = (prev, next) => {
   const nextHidden = new Set(next.hidden);
   for (const c of next.hidden) if (!prevHidden.has(c)) diffs.push({ kind: "cell-hidden", cell: c });
   for (const c of p.hidden) if (!nextHidden.has(c)) diffs.push({ kind: "cell-unhidden", cell: c });
-  const contentKeys = union(Object.keys(p.contentByCell), Object.keys(next.contentByCell));
-  for (const cell of contentKeys) {
-    const a = p.contentByCell[cell] ?? "";
-    const b = next.contentByCell[cell] ?? "";
-    if (a === b) continue;
-    if (!a) diffs.push({ kind: "content-added", cell, sig: b });
-    else if (!b) diffs.push({ kind: "content-removed", cell, sig: a });
-    else diffs.push({ kind: "content-changed", cell, prevSig: a, nextSig: b });
-  }
-  const tagKeys = union(Object.keys(p.tagsByCell), Object.keys(next.tagsByCell));
-  for (const cell of tagKeys) {
-    const a = p.tagsByCell[cell] ?? [];
-    const b = next.tagsByCell[cell] ?? [];
-    if (sequenceEquals(a, b)) continue;
-    diffs.push({ kind: "tags-changed", cell, prev: [...a], next: [...b] });
-  }
-  const notesKeys = union(Object.keys(p.notesByCell), Object.keys(next.notesByCell));
-  for (const cell of notesKeys) {
-    const a = p.notesByCell[cell] ?? "";
-    const b = next.notesByCell[cell] ?? "";
-    if (a === b) continue;
-    if (!a) diffs.push({ kind: "notes-added", cell, sig: b });
-    else if (!b) diffs.push({ kind: "notes-removed", cell, sig: a });
-    else diffs.push({ kind: "notes-changed", cell, prevSig: a, nextSig: b });
-  }
-  const prevBees = new Set(p.bees);
-  const nextBees = new Set(next.bees);
-  for (const k of next.bees) if (!prevBees.has(k)) diffs.push({ kind: "bee-registered", key: k });
-  for (const k of p.bees) if (!nextBees.has(k)) diffs.push({ kind: "bee-unregistered", key: k });
-  const prevDeps = new Set(p.dependencies);
-  const nextDeps = new Set(next.dependencies);
-  for (const s of next.dependencies) if (!prevDeps.has(s)) diffs.push({ kind: "dependency-added", sig: s });
-  for (const s of p.dependencies) if (!nextDeps.has(s)) diffs.push({ kind: "dependency-removed", sig: s });
-  if (p.layoutSig !== next.layoutSig) {
-    diffs.push({ kind: "layout-changed", prevSig: p.layoutSig, nextSig: next.layoutSig });
-  }
-  if (p.instructionsSig !== next.instructionsSig) {
-    diffs.push({ kind: "instructions-changed", prevSig: p.instructionsSig, nextSig: next.instructionsSig });
-  }
   return diffs;
 };
 var setEquals = (a, b) => {
@@ -788,11 +1157,6 @@ var sequenceEquals = (a, b) => {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
   return true;
-};
-var union = (a, b) => {
-  const set = new Set(a);
-  for (const k of b) set.add(k);
-  return [...set];
 };
 
 // src/diamondcoreprocessor.com/history/order-projection.ts
@@ -989,5 +1353,10 @@ export {
   HistoryService,
   OrderProjection,
   ReviseQueenBee,
-  diffLayers
+  canonicalBytes,
+  canonicalise,
+  diffLayers,
+  isSig,
+  parse,
+  reduce
 };

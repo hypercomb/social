@@ -1,5 +1,5 @@
 // @diamondcoreprocessor.com/sharing
-// ../node_modules/@noble/curves/node_modules/@noble/hashes/utils.js
+// ../../../../../node_modules/@noble/curves/node_modules/@noble/hashes/utils.js
 function isBytes(a) {
   return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array";
 }
@@ -131,7 +131,7 @@ var oidNist = (suffix) => ({
   oid: Uint8Array.from([6, 9, 96, 134, 72, 1, 101, 3, 4, 2, suffix])
 });
 
-// ../node_modules/@noble/curves/node_modules/@noble/hashes/_md.js
+// ../../../../../node_modules/@noble/curves/node_modules/@noble/hashes/_md.js
 function Chi(a, b, c) {
   return a & b ^ ~a & c;
 }
@@ -244,7 +244,7 @@ var SHA256_IV = /* @__PURE__ */ Uint32Array.from([
   1541459225
 ]);
 
-// ../node_modules/@noble/curves/node_modules/@noble/hashes/sha2.js
+// ../../../../../node_modules/@noble/curves/node_modules/@noble/hashes/sha2.js
 var SHA256_K = /* @__PURE__ */ Uint32Array.from([
   1116352408,
   1899447441,
@@ -394,7 +394,7 @@ var sha256 = /* @__PURE__ */ createHasher(
   /* @__PURE__ */ oidNist(1)
 );
 
-// ../node_modules/@noble/curves/utils.js
+// ../../../../../node_modules/@noble/curves/utils.js
 var _0n = /* @__PURE__ */ BigInt(0);
 var _1n = /* @__PURE__ */ BigInt(1);
 function abool(value, title = "") {
@@ -543,7 +543,7 @@ function memoized(fn) {
   };
 }
 
-// ../node_modules/@noble/curves/abstract/modular.js
+// ../../../../../node_modules/@noble/curves/abstract/modular.js
 var _0n2 = /* @__PURE__ */ BigInt(0);
 var _1n2 = /* @__PURE__ */ BigInt(1);
 var _2n = /* @__PURE__ */ BigInt(2);
@@ -929,7 +929,7 @@ function mapHashToField(key, fieldOrder, isLE2 = false) {
   return isLE2 ? numberToBytesLE(reduced, fieldLen) : numberToBytesBE(reduced, fieldLen);
 }
 
-// ../node_modules/@noble/curves/abstract/curve.js
+// ../../../../../node_modules/@noble/curves/abstract/curve.js
 var _0n3 = /* @__PURE__ */ BigInt(0);
 var _1n3 = /* @__PURE__ */ BigInt(1);
 function negateCt(condition, item) {
@@ -1162,7 +1162,7 @@ function createKeygen(randomSecretKey, getPublicKey2) {
   };
 }
 
-// ../node_modules/@noble/curves/node_modules/@noble/hashes/hmac.js
+// ../../../../../node_modules/@noble/curves/node_modules/@noble/hashes/hmac.js
 var _HMAC = class {
   oHash;
   iHash;
@@ -1233,7 +1233,7 @@ var _HMAC = class {
 var hmac = (hash, key, message) => new _HMAC(hash, key).update(message).digest();
 hmac.create = (hash, key) => new _HMAC(hash, key);
 
-// ../node_modules/@noble/curves/abstract/weierstrass.js
+// ../../../../../node_modules/@noble/curves/abstract/weierstrass.js
 var divNearest = (num2, den) => (num2 + (num2 >= 0 ? den : -den) / _2n2) / den;
 function _splitEndoScalar(k, basis, n) {
   const [[a1, b1], [a2, b2]] = basis;
@@ -2105,7 +2105,7 @@ function ecdsa(Point, hash, ecdsaOpts = {}) {
   });
 }
 
-// ../node_modules/@noble/curves/secp256k1.js
+// ../../../../../node_modules/@noble/curves/secp256k1.js
 var secp256k1_CURVE = {
   p: BigInt("0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f"),
   n: BigInt("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141"),
@@ -2258,7 +2258,7 @@ var schnorr = /* @__PURE__ */ (() => {
   };
 })();
 
-// ../node_modules/nostr-tools/node_modules/@noble/hashes/utils.js
+// ../../../../../node_modules/nostr-tools/node_modules/@noble/hashes/utils.js
 function isBytes2(a) {
   return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array";
 }
@@ -2390,7 +2390,7 @@ var oidNist2 = (suffix) => ({
   oid: Uint8Array.from([6, 9, 96, 134, 72, 1, 101, 3, 4, 2, suffix])
 });
 
-// ../node_modules/nostr-tools/node_modules/@noble/hashes/_md.js
+// ../../../../../node_modules/nostr-tools/node_modules/@noble/hashes/_md.js
 function Chi2(a, b, c) {
   return a & b ^ ~a & c;
 }
@@ -2503,7 +2503,7 @@ var SHA256_IV2 = /* @__PURE__ */ Uint32Array.from([
   1541459225
 ]);
 
-// ../node_modules/nostr-tools/node_modules/@noble/hashes/sha2.js
+// ../../../../../node_modules/nostr-tools/node_modules/@noble/hashes/sha2.js
 var SHA256_K2 = /* @__PURE__ */ Uint32Array.from([
   1116352408,
   1899447441,
@@ -2653,7 +2653,7 @@ var sha2562 = /* @__PURE__ */ createHasher2(
   /* @__PURE__ */ oidNist2(1)
 );
 
-// ../node_modules/@scure/base/index.js
+// ../../../../../node_modules/@scure/base/index.js
 function isBytes3(a) {
   return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array";
 }
@@ -2959,7 +2959,7 @@ function genBech32(encoding) {
 }
 var bech32 = /* @__PURE__ */ genBech32("bech32");
 
-// ../node_modules/@noble/ciphers/utils.js
+// ../../../../../node_modules/@noble/ciphers/utils.js
 function isBytes4(a) {
   return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array";
 }
@@ -3098,7 +3098,7 @@ function copyBytes2(bytes) {
   return Uint8Array.from(bytes);
 }
 
-// ../node_modules/@noble/ciphers/aes.js
+// ../../../../../node_modules/@noble/ciphers/aes.js
 var BLOCK_SIZE = 16;
 var POLY = 283;
 function validateKeyLength(key) {
@@ -3455,7 +3455,7 @@ var _CMAC = class {
 var cmac = (key, message) => new _CMAC(key).update(message).digest();
 cmac.create = (key) => new _CMAC(key);
 
-// ../node_modules/@noble/ciphers/_arx.js
+// ../../../../../node_modules/@noble/ciphers/_arx.js
 var encodeStr = (str) => Uint8Array.from(str.split(""), (c) => c.charCodeAt(0));
 var sigma16 = encodeStr("expand 16-byte k");
 var sigma32 = encodeStr("expand 32-byte k");
@@ -3564,7 +3564,7 @@ function createCipher(core, opts) {
   };
 }
 
-// ../node_modules/@noble/ciphers/_poly1305.js
+// ../../../../../node_modules/@noble/ciphers/_poly1305.js
 function u8to16(a, i2) {
   return a[i2++] & 255 | (a[i2++] & 255) << 8;
 }
@@ -3822,7 +3822,7 @@ function wrapConstructorWithKey(hashCons) {
 }
 var poly1305 = /* @__PURE__ */ (() => wrapConstructorWithKey((key) => new Poly1305(key)))();
 
-// ../node_modules/@noble/ciphers/chacha.js
+// ../../../../../node_modules/@noble/ciphers/chacha.js
 function chachaCore(s, k, n, out, cnt, rounds = 20) {
   let y00 = s[0], y01 = s[1], y02 = s[2], y03 = s[3], y04 = k[0], y05 = k[1], y06 = k[2], y07 = k[3], y08 = k[4], y09 = k[5], y10 = k[6], y11 = k[7], y12 = cnt, y13 = n[0], y14 = n[1], y15 = n[2];
   let x00 = y00, x01 = y01, x02 = y02, x03 = y03, x04 = y04, x05 = y05, x06 = y06, x07 = y07, x08 = y08, x09 = y09, x10 = y10, x11 = y11, x12 = y12, x13 = y13, x14 = y14, x15 = y15;
@@ -4052,7 +4052,7 @@ var _poly1305_aead = (xorStream) => (key, nonce, AAD) => {
 var chacha20poly1305 = /* @__PURE__ */ wrapCipher({ blockSize: 64, nonceLength: 12, tagLength: 16 }, _poly1305_aead(chacha20));
 var xchacha20poly1305 = /* @__PURE__ */ wrapCipher({ blockSize: 64, nonceLength: 24, tagLength: 16 }, _poly1305_aead(xchacha20));
 
-// ../node_modules/nostr-tools/node_modules/@noble/hashes/hmac.js
+// ../../../../../node_modules/nostr-tools/node_modules/@noble/hashes/hmac.js
 var _HMAC2 = class {
   oHash;
   iHash;
@@ -4123,7 +4123,7 @@ var _HMAC2 = class {
 var hmac2 = (hash, key, message) => new _HMAC2(hash, key).update(message).digest();
 hmac2.create = (hash, key) => new _HMAC2(hash, key);
 
-// ../node_modules/nostr-tools/node_modules/@noble/hashes/hkdf.js
+// ../../../../../node_modules/nostr-tools/node_modules/@noble/hashes/hkdf.js
 function extract(hash, ikm, salt) {
   ahash2(hash);
   if (salt === void 0)
@@ -4159,7 +4159,7 @@ function expand(hash, prk, info, length = 32) {
   return okm.slice(0, length);
 }
 
-// ../node_modules/nostr-tools/lib/esm/index.js
+// ../../../../../node_modules/nostr-tools/lib/esm/index.js
 var __defProp = Object.defineProperty;
 var __export = (target, all) => {
   for (var name in all)
@@ -6607,8 +6607,186 @@ var NostrSigner = class {
   };
 };
 window.ioc.register("@diamondcoreprocessor.com/NostrSigner", new NostrSigner());
+
+// src/diamondcoreprocessor.com/sharing/push-queue.service.ts
+import { EffectBus } from "@hypercomb/core";
+var PushQueueService = class _PushQueueService extends EventTarget {
+  static #PUSH_DIR = "__push__";
+  static #QUEUE_SUBDIR = "queue";
+  static #RECEIPTS_DIR = "__receipts__";
+  static #SIG_RE = /^[a-f0-9]{64}$/;
+  #draining = false;
+  // -------------------------------------------------
+  // public API
+  // -------------------------------------------------
+  /**
+   * Mark a sig as needing to land in DCP. Idempotent — the queue is
+   * keyed by sig, so repeat calls collapse into one entry. Skips the
+   * enqueue entirely if a receipt already exists (nothing to push).
+   * Fires drain() in the background; callers don't await the network.
+   */
+  enqueue = async (sig) => {
+    if (!_PushQueueService.#SIG_RE.test(sig)) return;
+    if (await this.hasReceipt(sig)) return;
+    const queueDir = await this.#getQueueDir();
+    try {
+      const handle = await queueDir.getFileHandle(sig, { create: true });
+      const writable = await handle.createWritable();
+      try {
+        await writable.write(new Uint8Array(0));
+      } finally {
+        await writable.close();
+      }
+    } catch {
+    }
+    void this.drain();
+  };
+  /**
+   * Process the queue. Single-flight via #draining; a concurrent
+   * drain() returns immediately. The in-flight drain re-lists the
+   * queue every loop, so anything enqueued during the run is picked
+   * up without a separate drain() call.
+   */
+  drain = async () => {
+    if (this.#draining) return;
+    this.#draining = true;
+    try {
+      for (; ; ) {
+        const sigs = await this.#listQueue();
+        if (sigs.length === 0) break;
+        for (const sig of sigs) {
+          if (await this.hasReceipt(sig)) {
+            await this.#removeQueueEntry(sig);
+            continue;
+          }
+          const ok = await this.#stubPushAndReceipt(sig);
+          if (!ok) continue;
+          await this.#removeQueueEntry(sig);
+          this.dispatchEvent(new CustomEvent("receipt", { detail: { sig } }));
+          EffectBus.emit("push:receipt", { sig });
+        }
+      }
+    } finally {
+      this.#draining = false;
+    }
+  };
+  /**
+   * True iff a receipt file exists for this sig. Branch creation
+   * gates on this for every leaf in the merkle root.
+   */
+  hasReceipt = async (sig) => {
+    if (!_PushQueueService.#SIG_RE.test(sig)) return false;
+    try {
+      const dir = await this.#getReceiptsDir();
+      await dir.getFileHandle(sig, { create: false });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  /**
+   * True iff the sig is queued and not yet receipted.
+   */
+  isPending = async (sig) => {
+    if (!_PushQueueService.#SIG_RE.test(sig)) return false;
+    if (await this.hasReceipt(sig)) return false;
+    try {
+      const dir = await this.#getQueueDir();
+      await dir.getFileHandle(sig, { create: false });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  /**
+   * All currently pending sigs (queued, no receipt yet), ordered by
+   * enqueue time. /save can call this to wait until pending() is
+   * empty before stamping the branch.
+   */
+  pending = async () => {
+    const queue = await this.#listQueue();
+    const out = [];
+    for (const sig of queue) {
+      if (!await this.hasReceipt(sig)) out.push(sig);
+    }
+    return out;
+  };
+  // -------------------------------------------------
+  // internal — directory resolution
+  // -------------------------------------------------
+  #getQueueDir = async () => {
+    const root = await this.#getOpfsRoot();
+    const push = await root.getDirectoryHandle(_PushQueueService.#PUSH_DIR, { create: true });
+    return await push.getDirectoryHandle(_PushQueueService.#QUEUE_SUBDIR, { create: true });
+  };
+  #getReceiptsDir = async () => {
+    const root = await this.#getOpfsRoot();
+    return await root.getDirectoryHandle(_PushQueueService.#RECEIPTS_DIR, { create: true });
+  };
+  #getOpfsRoot = async () => {
+    const store = get("@hypercomb.social/Store");
+    if (!store?.opfsRoot) throw new Error("PushQueueService: Store not initialized");
+    return store.opfsRoot;
+  };
+  // -------------------------------------------------
+  // internal — queue ops
+  // -------------------------------------------------
+  #listQueue = async () => {
+    const dir = await this.#getQueueDir();
+    const items = [];
+    for await (const [name, handle] of dir.entries()) {
+      if (handle.kind !== "file") continue;
+      if (!_PushQueueService.#SIG_RE.test(name)) continue;
+      try {
+        const file = await handle.getFile();
+        items.push({ sig: name, mtime: file.lastModified });
+      } catch {
+      }
+    }
+    items.sort((a, b) => a.mtime - b.mtime);
+    return items.map((i2) => i2.sig);
+  };
+  #removeQueueEntry = async (sig) => {
+    try {
+      const dir = await this.#getQueueDir();
+      await dir.removeEntry(sig);
+    } catch {
+    }
+  };
+  /**
+   * Scaffolding stub. Real implementation:
+   *   - Resolve sig bytes (Store.getResource — bag file or __layers__/)
+   *   - POST to DCP intake endpoint
+   *   - Await DCP-signed receipt blob
+   *   - Write receipt bytes to __receipts__/{sig}
+   *
+   * Until the transport exists, write an empty receipt locally so the
+   * gate logic (hasReceipt → branch readiness) is exercisable end to
+   * end. Swapping the stub for a real push is a single-method change;
+   * the public API and on-disk shape are stable.
+   */
+  #stubPushAndReceipt = async (sig) => {
+    try {
+      const dir = await this.#getReceiptsDir();
+      const handle = await dir.getFileHandle(sig, { create: true });
+      const writable = await handle.createWritable();
+      try {
+        await writable.write(new Uint8Array(0));
+      } finally {
+        await writable.close();
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  };
+};
+var _pushQueueService = new PushQueueService();
+window.ioc?.register?.("@diamondcoreprocessor.com/PushQueueService", _pushQueueService);
+void _pushQueueService.drain();
 export {
-  NostrSigner
+  NostrSigner,
+  PushQueueService
 };
 /*! Bundled license information:
 
