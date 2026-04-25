@@ -189,6 +189,35 @@ export class HistoryCursorService extends EventTarget {
   }
 
   /**
+   * Externally-triggered refresh for a given lineage. Called by
+   * LayerCommitter immediately after every bootstrap (whether the
+   * bootstrap committed or skipped because the bag was already
+   * populated). Solves the race where the cursor was loaded BEFORE
+   * markers existed and never re-read after they appeared.
+   *
+   * Adoption: if cursor has no locationSig yet, we adopt the one we
+   * were called with — this lets the committer's auto-bootstrap
+   * (which runs from Lineage 'change' before any cursor.load) seed
+   * the cursor with the right lineage immediately.
+   *
+   * If cursor is currently bound to a different lineage, this is a
+   * no-op — the user navigated away.
+   */
+  async refreshForLocation(locSig: string): Promise<void> {
+    const historyService = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
+    if (!historyService) return
+    if (this.#locationSig && this.#locationSig !== locSig) return
+    const fresh = await historyService.listLayers(locSig)
+    const wasAtLatest = this.#position >= this.#layers.length
+    const adopted = !this.#locationSig
+    if (adopted) this.#locationSig = locSig
+    this.#layers = fresh
+    if (wasAtLatest || adopted) this.#position = this.#layers.length
+    console.log('[cursor.refreshForLocation]', { locSig: locSig.slice(0, 8), total: fresh.length, position: this.#position, adopted })
+    this.#emit()
+  }
+
+  /**
    * Background retry: poll listLayers every 250 ms (capped at ~10 s).
    * The moment markers appear (e.g. an auto-bootstrap landed slightly
    * after this cursor.load returned), refresh the cursor and emit so

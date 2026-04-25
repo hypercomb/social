@@ -243,8 +243,20 @@ export class LayerCommitter {
 
     const run = (async () => {
       const markers = await history.listLayers(locSig)
+      const cursor = get<{
+        onNewLayer?: () => Promise<void>
+        refreshForLocation?: (locSig: string) => Promise<void>
+      }>('@diamondcoreprocessor.com/HistoryCursorService')
+
       if (markers.length > 0) {
         console.log('[bootstrap] skip: bag has', markers.length, 'markers', { segments: segs })
+        // CRITICAL: even on skip, push the bag's state into the cursor.
+        // Without this, a cursor that loaded BEFORE the bag was visible
+        // (e.g. before Store.initialize() finished) stays stuck at 0
+        // markers despite the bag being populated. refreshForLocation
+        // adopts the locSig if cursor hasn't been bound yet, so the
+        // slider/history viewer wake up immediately on first bootstrap.
+        if (cursor?.refreshForLocation) await cursor.refreshForLocation(locSig)
         return
       }
       // Empty bag → request a commit and await it. The cascade mints
@@ -256,14 +268,11 @@ export class LayerCommitter {
       const after = await history.listLayers(locSig)
       console.log('[bootstrap] done, bag now has', after.length, 'markers')
 
-      // Nudge any cursor that's currently viewing this lineage so it
-      // re-reads and updates the slider/activity log immediately.
-      // (For an auto-bootstrap from Lineage 'change', the cursor may
-      // not have been load()-ed yet — onNewLayer is keyed by the
-      // cursor's own #locationSig and is a no-op in that case, which
-      // is fine: the next cursor.load will see the new markers.)
-      const cursor = get<{ onNewLayer?: () => Promise<void> }>('@diamondcoreprocessor.com/HistoryCursorService')
-      if (cursor?.onNewLayer) await cursor.onNewLayer()
+      // Push the new state into the cursor (same call as the skip
+      // branch). refreshForLocation handles both adoption and
+      // existing-cursor refresh in one method.
+      if (cursor?.refreshForLocation) await cursor.refreshForLocation(locSig)
+      else if (cursor?.onNewLayer) await cursor.onNewLayer()
     })()
     this.#bootstrapInFlight.set(locSig, run)
     try { await run } finally { this.#bootstrapInFlight.delete(locSig) }
