@@ -90,7 +90,7 @@ interface BeeDepCacheEntry {
 }
 
 interface BuildCache {
-  version: 2
+  version: 3
   rootHash: string                            // Merkle root of all unit hashes
   rootLayerSig: string                        // last output root signature
   namespaces: Record<string, UnitCache>
@@ -106,7 +106,7 @@ const OUTPUT_CACHE_DIR = join(DIST_ROOT, '.cache')
 const loadCache = (): BuildCache | null => {
   try {
     const raw = JSON.parse(readFileSync(CACHE_FILE, 'utf8'))
-    if (raw?.version === 2) return raw
+    if (raw?.version === 3) return raw
   } catch {}
   return null
 }
@@ -495,7 +495,16 @@ const buildLayersFromTree = async (
     }
   }
 
+  // shapeDescriptor: enumerates the field names this build emits in
+  // the layer JSON. When a writer renames or adds/removes a field,
+  // change this string so every cached layer's inputSig differs from
+  // prior runs and the cache misses. Without this, a field rename
+  // (e.g. `layers` → `cells`) is invisible to the input hash and the
+  // cache happily returns the OLD JSON under the OLD sig.
+  const shapeDescriptor = 'cells:name:bees:dependencies'
+
   const layerInputParts = [
+    shapeDescriptor,
     node.rel,
     beeSigs.join(':'),
     depSigs.join(':'),
@@ -526,13 +535,15 @@ const buildLayersFromTree = async (
       }
     : undefined
 
+  // Layer = `{name, cells, bees, dependencies}`. `cells` is the array
+  // of child layer sigs — same primitive name as the slim hypercomb.io
+  // layer's cells (an array of one useful type with a name). No
+  // version, no `rel` ceremony — just the meaningful fields.
   const layer: Record<string, unknown> = {
-    version: 1,
     name: node.rel.split('/').pop() || 'root',
-    rel: node.rel,
+    cells: layers,
     bees: beeSigs,
     dependencies: depSigs,
-    layers,
   }
 
   if (docs) layer.docs = docs
@@ -957,9 +968,12 @@ const main = async (): Promise<void> => {
   for (const [sig, bytes] of dependencyBytes) writeSigJsFile(depDir, sig, bytes)
   for (const [sig, bytes] of resourceBytes) writeSigJsFile(resDir, sig, bytes)
 
-  // content manifest — package entry keyed by root signature
+  // content manifest — package entry keyed by root signature.
+  // No version field; the package's identity is its rootLayerSig and
+  // its meaning is its sig arrays. Adding a version pollutes the
+  // canonical bytes with ceremony that doesn't affect what the
+  // package IS.
   const packageEntry = {
-    version: 2,
     layers: Array.from(layers.keys()).sort((a, b) => a.localeCompare(b)),
     bees: Array.from(resourceBytes.keys()).sort((a, b) => a.localeCompare(b)),
     dependencies: dependencySigs,
@@ -972,7 +986,7 @@ const main = async (): Promise<void> => {
   // is the *first inserted* (chronologically oldest) entry. That stale entry
   // then references signatures that no longer exist on disk, breaking install.
   const manifestPath = join(DIST_ROOT, MANIFEST_FILE)
-  const manifest = { version: 1, packages: { [rootLayerSig]: packageEntry } }
+  const manifest = { packages: { [rootLayerSig]: packageEntry } }
   const nextJson = JSON.stringify(manifest, null, 2) + '\n'
   const prevJson = existsSync(manifestPath) ? readFileSync(manifestPath, 'utf8') : ''
   if (nextJson !== prevJson) {
@@ -986,7 +1000,7 @@ const main = async (): Promise<void> => {
 
   const rootHash = await computeRootHash(allUnitSigs)
   saveCache({
-    version: 2,
+    version: 3,
     rootHash,
     rootLayerSig,
     namespaces: newNamespaces,

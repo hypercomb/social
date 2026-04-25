@@ -115,10 +115,17 @@ export class LayerGraphResolver {
     const name = String(parsed.name || '').trim()
     if (!name) throw new Error(`layer ${signature} missing name`)
 
-    const children =
-      (Array.isArray(parsed.children) ? parsed.children : [])
-        .map((c: unknown) => String(c).trim())
-        .filter((c: string) => this.isSignature(c))
+    // Child layer sigs live under `cells`. Universal rule: a 64-hex
+    // string in this slot would be a sig pointer to a JSON array
+    // resource (forward-compat). Legacy `layers`/`children` accepted.
+    const rawChildren =
+      Array.isArray(parsed.cells) ? parsed.cells
+      : Array.isArray(parsed.layers) ? parsed.layers
+      : Array.isArray(parsed.children) ? parsed.children
+      : []
+    const children = rawChildren
+      .map((c: unknown) => String(c).trim())
+      .filter((c: string) => this.isSignature(c))
 
     const bees =
       (Array.isArray(parsed.bees) ? parsed.bees : [])

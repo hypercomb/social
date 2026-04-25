@@ -25,9 +25,16 @@ const readLayerNode = async (
     const file = await handle.getFile()
     const parsed = JSON.parse(await file.text())
     const name = String(parsed?.name ?? '').trim()
-    const children = Array.isArray(parsed?.children)
-      ? (parsed.children as unknown[]).map(c => String(c).trim()).filter(c => /^[a-f0-9]{64}$/i.test(c))
+    // Child layer sigs live under `cells` — same primitive name as
+    // the slim hypercomb.io layer. Accept legacy `layers`/`children`
+    // as fallbacks during the transition.
+    const rawChildren = Array.isArray(parsed?.cells) ? parsed.cells
+      : Array.isArray(parsed?.layers) ? parsed.layers
+      : Array.isArray(parsed?.children) ? parsed.children
       : []
+    const children = (rawChildren as unknown[])
+      .map(c => String(c).trim())
+      .filter(c => /^[a-f0-9]{64}$/i.test(c))
     if (!name) return null
     return { name, children }
   } catch {

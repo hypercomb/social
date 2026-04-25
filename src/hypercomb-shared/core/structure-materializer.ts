@@ -127,9 +127,11 @@ const readStructureLayerNode = async (
     const name = String(parsed?.name ?? '').trim()
     if (!name) return null
 
-    // Layer JSON uses "layers" for child sigs in build output,
-    // "children" in some cached forms — accept both
-    const rawChildren = Array.isArray(parsed?.layers) ? parsed.layers
+    // Child layer sigs live under `cells` (the canonical name —
+    // same primitive used by the slim hypercomb.io layer). Legacy
+    // `layers`/`children` accepted during the transition.
+    const rawChildren = Array.isArray(parsed?.cells) ? parsed.cells
+      : Array.isArray(parsed?.layers) ? parsed.layers
       : Array.isArray(parsed?.children) ? parsed.children
       : []
     const childLayerSigs = (rawChildren as unknown[])
