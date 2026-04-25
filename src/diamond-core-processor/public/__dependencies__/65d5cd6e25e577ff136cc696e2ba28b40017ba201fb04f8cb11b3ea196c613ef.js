@@ -874,6 +874,11 @@ var HistoryService = class _HistoryService {
       } catch {
       }
     }
+    const pushQueue = get("@diamondcoreprocessor.com/PushQueueService");
+    if (pushQueue) {
+      void pushQueue.enqueue(layerSig).catch(() => {
+      });
+    }
     return layerSig;
   };
   /**

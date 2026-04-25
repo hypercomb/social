@@ -408,6 +408,16 @@ export class HistoryService {
       try { await store.putResource(new Blob([json], { type: 'application/json' })) } catch { /* best-effort */ }
     }
 
+    // Enqueue the new sig for DCP push. Fire-and-forget — the queue
+    // is OPFS-backed, so survives reload; drain runs in the
+    // background until DCP returns receipts. Until the real DCP
+    // intake transport is wired the drain stubs receipts locally so
+    // the gate logic (hasReceipt → branch save) is exercisable.
+    const pushQueue = get<{ enqueue: (sig: string) => Promise<void> }>('@diamondcoreprocessor.com/PushQueueService')
+    if (pushQueue) {
+      void pushQueue.enqueue(layerSig).catch(() => { /* best-effort */ })
+    }
+
     return layerSig
   }
 

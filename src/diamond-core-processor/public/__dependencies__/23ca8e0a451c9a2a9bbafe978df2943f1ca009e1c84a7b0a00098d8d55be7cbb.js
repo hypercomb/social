@@ -6782,7 +6782,7 @@ var PushQueueService = class _PushQueueService extends EventTarget {
   };
 };
 var _pushQueueService = new PushQueueService();
-window.ioc?.register?.("@diamondcoreprocessor.com/PushQueueService", _pushQueueService);
+window.ioc.register("@diamondcoreprocessor.com/PushQueueService", _pushQueueService);
 void _pushQueueService.drain();
 export {
   NostrSigner,

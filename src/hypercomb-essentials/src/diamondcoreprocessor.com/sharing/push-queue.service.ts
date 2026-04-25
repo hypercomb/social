@@ -236,7 +236,7 @@ export class PushQueueService extends EventTarget {
 }
 
 const _pushQueueService = new PushQueueService()
-;(window as any).ioc?.register?.('@diamondcoreprocessor.com/PushQueueService', _pushQueueService)
+window.ioc.register('@diamondcoreprocessor.com/PushQueueService', _pushQueueService)
 
 // On boot, drain any queue entries left from a prior session. Safe
 // because drain() is single-flight and idempotent under crash recovery.
