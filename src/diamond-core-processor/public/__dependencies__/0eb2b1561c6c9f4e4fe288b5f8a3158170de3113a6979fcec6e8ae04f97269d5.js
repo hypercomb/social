@@ -632,13 +632,8 @@ var HistoryService = class _HistoryService {
     const domain = String(lineage?.domain?.() ?? "hypercomb.io");
     const explorerSegmentsRaw = lineage?.explorerSegments?.();
     const explorerSegments = Array.isArray(explorerSegmentsRaw) ? explorerSegmentsRaw.map((x) => String(x ?? "").trim()).filter((x) => x.length > 0) : [];
-    const lineagePath = explorerSegments.join("/");
-    const roomStore = get("@hypercomb.social/RoomStore");
-    const secretStore = get("@hypercomb.social/SecretStore");
-    const space = roomStore?.value ?? "";
-    const secret = secretStore?.value ?? "";
-    const parts = [space, domain, lineagePath, secret, "cell"].filter(Boolean);
-    const key = parts.join("/");
+    void domain;
+    const key = explorerSegments.join("/");
     const sigStore = get("@hypercomb/SignatureStore");
     return sigStore ? await sigStore.signText(key) : await SignatureService.sign(new TextEncoder().encode(key).buffer);
   };

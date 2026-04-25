@@ -590,7 +590,6 @@ export class ShowCellDrone extends Drone {
   #cachedSigLocation: { key: string; sig: string } = { key: '', sig: '' }
 
   private computeSignatureLocation = async (lineage: any): Promise<{ key: string; sig: string }> => {
-    const domain = String(lineage?.domain?.() ?? lineage?.domainLabel?.() ?? 'hypercomb.io')
     const explorerSegmentsRaw = lineage?.explorerSegments?.()
     const explorerSegments = Array.isArray(explorerSegmentsRaw)
       ? explorerSegmentsRaw
@@ -598,10 +597,11 @@ export class ShowCellDrone extends Drone {
         .filter((x: string) => x.length > 0)
       : []
 
-    const lineagePath = explorerSegments.join('/')
-    // key = space/domain/path/secret/cell (empty segments omitted)
-    const parts = [this.#space, domain, lineagePath, this.#secret, 'cell'].filter(Boolean)
-    const key = parts.join('/')
+    // Bag identity = ancestry only. No domain (display namespace, not
+    // identity). No room/secret (mesh-layer concerns; they shift with
+    // peer credentials but the local bag is the location, you're
+    // already there). Must match HistoryService.sign().
+    const key = explorerSegments.join('/')
 
     // fast path: return cached result if key hasn't changed
     if (key === this.#cachedSigLocationKey) return this.#cachedSigLocation

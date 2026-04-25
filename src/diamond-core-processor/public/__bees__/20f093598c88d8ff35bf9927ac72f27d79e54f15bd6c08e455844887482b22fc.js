@@ -1133,12 +1133,9 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
   #cachedSigLocationKey = "";
   #cachedSigLocation = { key: "", sig: "" };
   computeSignatureLocation = async (lineage) => {
-    const domain = String(lineage?.domain?.() ?? lineage?.domainLabel?.() ?? "hypercomb.io");
     const explorerSegmentsRaw = lineage?.explorerSegments?.();
     const explorerSegments = Array.isArray(explorerSegmentsRaw) ? explorerSegmentsRaw.map((x) => String(x ?? "").trim()).filter((x) => x.length > 0) : [];
-    const lineagePath = explorerSegments.join("/");
-    const parts = [this.#space, domain, lineagePath, this.#secret, "cell"].filter(Boolean);
-    const key = parts.join("/");
+    const key = explorerSegments.join("/");
     if (key === this.#cachedSigLocationKey) return this.#cachedSigLocation;
     const sigStore = get("@hypercomb/SignatureStore");
     const sig = sigStore ? await sigStore.signText(key) : await SignatureService.sign(new TextEncoder().encode(key).buffer);

@@ -97,15 +97,20 @@ export class HistoryService {
         .filter((x: string) => x.length > 0)
       : []
 
-    const lineagePath = explorerSegments.join('/')
-
-    // include space (room) and secret — must match ShowHoneycomb.computeSignatureLocation()
-    const roomStore = get<any>('@hypercomb.social/RoomStore')
-    const secretStore = get<any>('@hypercomb.social/SecretStore')
-    const space = roomStore?.value ?? ''
-    const secret = secretStore?.value ?? ''
-    const parts = [space, domain, lineagePath, secret, 'cell'].filter(Boolean)
-    const key = parts.join('/')
+    // The bag's identity = the lineage's ancestry, nothing else.
+    //
+    // Bag IS the location: you're already there. Domain is a display
+    // namespace (not part of identity). Room (space) and secret are
+    // mesh-layer concerns — they apply when sharing identity to peers,
+    // not when naming the local bag. Including any of those here would
+    // mean "the bag for this lineage moves when you switch room or
+    // secret," which is wrong: the bag is the data, the data doesn't
+    // move because you changed your mesh credentials.
+    //
+    // Discard `domain` parameter (still extracted for backward-compat
+    // of the call surface) — sig is purely path-derived.
+    void domain
+    const key = explorerSegments.join('/')
 
     // use SignatureStore.signText() for memoization — same lineage = same sig
     const sigStore = get<SignatureStore>('@hypercomb/SignatureStore')
