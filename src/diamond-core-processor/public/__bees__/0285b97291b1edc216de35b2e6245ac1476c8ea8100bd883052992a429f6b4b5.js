@@ -1736,7 +1736,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       if (cursorService) {
         const content = await cursorService.layerContentAtCursor();
         const cursorState2 = cursorService.state;
-        if (!content && cursorState2?.position === 0) {
+        if (!content && cursorState2?.position === 0 && (cursorState2?.total ?? 0) > 0) {
           union.clear();
           localCellSet.clear();
         }

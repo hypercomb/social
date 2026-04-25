@@ -1350,12 +1350,19 @@ export class ShowCellDrone extends Drone {
         const content = await cursorService.layerContentAtCursor()
         const cursorState = cursorService.state
 
-        // Soft landing for position 0 on legacy cursors that return null
-        // there: stepping past the first layer means "pre-history / empty
-        // default state". Clear the live cell set so the grid renders
-        // empty instead of falling through to live OPFS. No writes — the
-        // live state is untouched, we just don't display it.
-        if (!content && cursorState?.position === 0) {
+        // Two distinct null-content cases:
+        //
+        //   (A) Bag has markers, user undone past them → position 0,
+        //       cursor.layerContentAtCursor returns null. Render empty
+        //       (synthetic "pre-history" view).
+        //
+        //   (B) Bag has no markers at all (fresh lineage, sig migration
+        //       orphaned old bags, etc.) → also position 0, also null.
+        //       Fall through to live OPFS so tiles display from disk.
+        //
+        // Distinguish by total: total > 0 means "history exists, you're
+        // before it" (case A). total === 0 means "no history" (case B).
+        if (!content && cursorState?.position === 0 && (cursorState?.total ?? 0) > 0) {
           union.clear()
           localCellSet.clear()
         }
