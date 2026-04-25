@@ -91,31 +91,14 @@ var LayerCommitter = class {
       console.log("[commit] skip: missing lineage or history", { lineage: !!lineage, history: !!history });
       return;
     }
-    const segments = [...lineage.explorerSegments?.() ?? []];
     const leafLocSig = await history.sign(lineage);
     const leafLayer = await this.#assembleLayer(lineage, leafLocSig);
     const leafSig = await history.commitLayer(leafLocSig, leafLayer);
-    console.log("[commit] leaf", {
-      segments,
+    console.log("[commit]", {
+      segments: lineage.explorerSegments?.() ?? [],
       cells: leafLayer.cells.length,
       sig: leafSig?.slice(0, 8) ?? "(none)"
     });
-    for (let i = segments.length - 1; i >= 0; i--) {
-      const ancestorSegments = segments.slice(0, i);
-      const ancestorLineage = {
-        domain: lineage.domain,
-        explorerDir: lineage.explorerDir,
-        explorerSegments: () => ancestorSegments
-      };
-      const ancestorLocSig = await history.sign(ancestorLineage);
-      const ancestorLayer = await this.#assembleLayer(ancestorLineage, ancestorLocSig);
-      const ancestorSig = await history.commitLayer(ancestorLocSig, ancestorLayer);
-      console.log("[commit] ancestor", {
-        segments: ancestorSegments,
-        cells: ancestorLayer.cells.length,
-        sig: ancestorSig?.slice(0, 8) ?? "(none)"
-      });
-    }
     const cursorAfter = get("@diamondcoreprocessor.com/HistoryCursorService");
     if (cursorAfter) await cursorAfter.onNewLayer();
   }

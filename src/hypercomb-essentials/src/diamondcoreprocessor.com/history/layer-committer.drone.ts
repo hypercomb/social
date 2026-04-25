@@ -140,40 +140,30 @@ export class LayerCommitter {
       return
     }
 
-    const segments = [...(lineage.explorerSegments?.() ?? [])]
-
-    // Leaf commit.
+    // Leaf commit ONLY. No ancestor walk.
+    //
+    // Per the slim-layer model, each lineage's `cells` array is the
+    // set of subdirectories at THAT lineage's explorer path —
+    // independent of children. A cell:added at leaf /A/B/C does not
+    // change /A/B's subdirectory set, so /A/B doesn't need a fresh
+    // commit just because a leaf changed.
+    //
+    // The previous ancestor-commit loop reused `lineage.explorerDir`
+    // (the leaf's directory) when assembling each ancestor's layer.
+    // The marker landed in the ancestor's correct bag, but the layer
+    // CONTENT was leaf-cell-shaped — so navigating up showed leaf
+    // cells in ancestor view ("layers mixed up / wrong lineage"
+    // symptom). Removing the loop entirely fixes it cleanly: each
+    // event commits to exactly one bag, the lineage where it
+    // happened.
     const leafLocSig = await history.sign(lineage)
     const leafLayer = await this.#assembleLayer(lineage, leafLocSig)
     const leafSig = await history.commitLayer(leafLocSig, leafLayer)
-    console.log('[commit] leaf', {
-      segments,
+    console.log('[commit]', {
+      segments: lineage.explorerSegments?.() ?? [],
       cells: leafLayer.cells.length,
       sig: leafSig?.slice(0, 8) ?? '(none)',
     })
-
-    // Ancestor commits — each ancestor's bag gets its own entry per
-    // user-intent mutation. Content-dedup is disabled in commitLayer,
-    // so even identical ancestor content across mutations yields new
-    // time-stamped entries (with a shared resource blob under the hood).
-    // The ancestor layer is assembled from the ancestor's own lineage;
-    // for unvisited ancestors this is mostly-empty but still legitimate.
-    for (let i = segments.length - 1; i >= 0; i--) {
-      const ancestorSegments = segments.slice(0, i)
-      const ancestorLineage: Lineage = {
-        domain: lineage.domain,
-        explorerDir: lineage.explorerDir,
-        explorerSegments: () => ancestorSegments,
-      }
-      const ancestorLocSig = await history.sign(ancestorLineage)
-      const ancestorLayer = await this.#assembleLayer(ancestorLineage, ancestorLocSig)
-      const ancestorSig = await history.commitLayer(ancestorLocSig, ancestorLayer)
-      console.log('[commit] ancestor', {
-        segments: ancestorSegments,
-        cells: ancestorLayer.cells.length,
-        sig: ancestorSig?.slice(0, 8) ?? '(none)',
-      })
-    }
 
     // Notify the cursor so the slider / activity log / ShowCell see the new head
     const cursorAfter = get<HistoryCursorService>('@diamondcoreprocessor.com/HistoryCursorService')
