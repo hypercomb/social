@@ -835,7 +835,18 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
   #translatingLabels = /* @__PURE__ */ new Set();
   #translationPulseTimer = null;
   streamActive = false;
-  cancelStreamFlag = false;
+  // Monotonic stream token. Every call to streamCells captures the current
+  // value; if the renderer starts a new stream (layer switch) it increments
+  // the token, so any batch still awaiting in the old stream sees a
+  // mismatch on its next iteration and bails out. Using a number here
+  // instead of a boolean "cancel" flag is load-bearing: the old flag was
+  // reset to false by the incoming stream's synchronous prelude before
+  // the outgoing stream's next iteration ever observed it, so the
+  // outgoing stream kept running — wrote its (stale) cells into the
+  // shared mesh, and poisoned #layerCellsCache under the new layer's
+  // key. The counter cannot be clobbered: once bumped, it never goes
+  // back.
+  #streamToken = 0;
   renderedLocationKey = "";
   #axialToIndex = /* @__PURE__ */ new Map();
   #heartbeatInitialized = false;
@@ -1729,6 +1740,10 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       const isRewound = cursorState2?.rewound ?? false;
       if (isRewound && cursorService) {
         const content = await cursorService.layerContentAtCursor();
+        if (!content && cursorState2?.position === 0) {
+          union.clear();
+          localCellSet.clear();
+        }
         if (content) {
           const cellsAtCursor = new Set(content.cells);
           for (const cell of [...union]) {
@@ -1796,7 +1811,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
     const layerChanged = locationKey !== previousLocationKey;
     if (this.streamActive && !layerChanged) return;
     if (layerChanged) {
-      this.cancelStreamFlag = true;
+      const myToken = ++this.#streamToken;
       this.renderedLocationKey = locationKey;
       this.renderedCellsKey = "";
       this.renderedCells.clear();
@@ -1804,6 +1819,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       this.#slots.clear();
       this.suppressMeshRecenter = false;
       await this.#applyViewportForLayer(dir);
+      if (myToken !== this.#streamToken) return;
       const vp = window.ioc?.get?.("@diamondcoreprocessor.com/ViewportPersistence");
       if (vp) vp.setDirSilent(dir);
       if (cellNames.length === 0) {
@@ -1813,7 +1829,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       }
       if (this.layer) this.layer.visible = false;
       this.emitEffect("navigation:guard-start", { locationKey });
-      void this.streamCells(dir, cellNames, localCellSet, axial, branchSet);
+      void this.streamCells(dir, cellNames, localCellSet, axial, branchSet, myToken, locationKey);
       return;
     }
     if (cellNames.length === 0) {
@@ -1857,37 +1873,38 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
     this.#layerCellsCache.set(locationKey, { cells: [...cells], cellNames, localCellSet, branchSet });
     this.#slots.seed({ names: cellNames, localCells: localCellSet, branches: branchSet, mode: this.#layoutMode });
   };
-  streamCells = async (dir, cellNames, localCellSet, axial, branchSet) => {
+  streamCells = async (dir, cellNames, localCellSet, axial, branchSet, myToken, myLocationKey) => {
     this.streamActive = true;
-    this.cancelStreamFlag = false;
+    const superseded = () => myToken !== this.#streamToken;
     const axialMax = typeof axial.items.size === "number" ? axial.items.size : cellNames.length;
     const maxCells = Math.min(cellNames.length, axialMax);
     const allCells = this.buildCellsFromAxial(axial, cellNames, maxCells, localCellSet, branchSet);
     const cells = [];
     const BATCH = _ShowCellDrone.STREAM_BATCH_SIZE;
     for (let start = 0; start < allCells.length; start += BATCH) {
-      if (this.cancelStreamFlag) break;
+      if (superseded()) return;
       const batch = allCells.slice(start, start + BATCH);
       await this.loadCellImages(batch, dir);
-      if (this.cancelStreamFlag) break;
+      if (superseded()) return;
       for (const cell of batch) {
         cells.push(cell);
         this.renderedCells.set(cell.label, cell);
       }
       const isLast = start + BATCH >= allCells.length;
       await this.applyGeometry(cells, isLast);
-      if (!this.cancelStreamFlag && this.layer && !this.layer.visible) {
+      if (superseded()) return;
+      if (this.layer && !this.layer.visible) {
         this.layer.visible = true;
       }
       if (!isLast) await this.microDelay();
     }
-    if (!this.cancelStreamFlag && this.layer) this.layer.visible = true;
+    if (superseded()) return;
+    if (this.layer) this.layer.visible = true;
     this.streamActive = false;
     this.emitEffect("navigation:guard-end", {});
-    if (!this.cancelStreamFlag && cells.length > 0) {
-      const locKey = this.renderedLocationKey;
+    if (cells.length > 0) {
       const bset = branchSet ?? /* @__PURE__ */ new Set();
-      this.#layerCellsCache.set(locKey, { cells: [...cells], cellNames, localCellSet, branchSet: bset });
+      this.#layerCellsCache.set(myLocationKey, { cells: [...cells], cellNames, localCellSet, branchSet: bset });
       this.#slots.seed({ names: cellNames, localCells: localCellSet, branches: bset, mode: this.#layoutMode });
     }
     this.requestRender();
@@ -2136,6 +2153,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       this.#layerCellsCache.clear();
       this.#invalidateAllLabelDerivedState();
       this.renderedCellsKey = "";
+      this.#streamToken++;
       void this.#applyCursorLayout();
       this.requestRender();
     });

@@ -46,7 +46,13 @@ var PixiHostWorker = class extends Worker {
     document.body.appendChild(host);
     const app = this.app = new Application();
     await app.init({
-      resizeTo: window,
+      // Size to the host element, not the window, so anything that
+      // narrows the host (the history sidebar taking a column on the
+      // left via its injected CSS) also narrows the canvas. Without
+      // this, resizeTo: window would keep the canvas at full viewport
+      // width and the sidebar ended up painted on top of live tile
+      // pixels, with hit-testing still firing through the overlay.
+      resizeTo: host,
       backgroundAlpha: 0,
       resolution: devicePixelRatio || 1,
       autoDensity: true,
@@ -55,6 +61,15 @@ var PixiHostWorker = class extends Worker {
     app.stage.scale.set(1.8, 1.8);
     app.stage.interactiveChildren = false;
     host.appendChild(app.canvas);
+    if ("ResizeObserver" in globalThis) {
+      const ro = new ResizeObserver(() => {
+        try {
+          app.resize();
+        } catch {
+        }
+      });
+      ro.observe(host);
+    }
     app.canvas.style.pointerEvents = "auto";
     app.canvas.style.touchAction = "none";
     this.container = new Container();

@@ -283,9 +283,72 @@ var BranchQueenBee = class extends QueenBee3 {
 var _branch = new BranchQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/BranchQueenBee", _branch);
 
+// src/diamondcoreprocessor.com/commands/compact.queen.ts
+import { QueenBee as QueenBee4, hypercomb as hypercomb2 } from "@hypercomb/core";
+var CompactQueenBee = class extends QueenBee4 {
+  namespace = "diamondcoreprocessor.com";
+  command = "compact";
+  aliases = [];
+  description = "Collapse this location's history into one head entry";
+  async execute(_args) {
+    const history = get("@diamondcoreprocessor.com/HistoryService");
+    const cursor = get("@diamondcoreprocessor.com/HistoryCursorService");
+    if (!history || !cursor) return;
+    const locationSig = cursor.state.locationSig;
+    if (!locationSig) return;
+    const entries = await history.listLayers(locationSig);
+    if (entries.length <= 1) return;
+    const pos = cursor.state.position;
+    const targetIndex = Math.max(0, Math.min(pos - 1, entries.length - 1));
+    const target = entries[targetIndex];
+    if (!target) return;
+    const store = get("@hypercomb.social/Store");
+    if (!store) return;
+    let targetContent = null;
+    try {
+      const blob = await store.getResource(target.layerSig);
+      if (blob) targetContent = JSON.parse(await blob.text());
+    } catch {
+    }
+    const promotedSig = await history.promoteToHead(locationSig, target.layerSig);
+    if (!promotedSig) return;
+    const afterPromote = await history.listLayers(locationSig);
+    const newHead = afterPromote[afterPromote.length - 1];
+    if (!newHead) return;
+    const toDelete = afterPromote.filter((e) => e.filename !== newHead.filename).map((e) => e.filename);
+    if (toDelete.length > 0) {
+      await history.removeEntries(locationSig, toDelete);
+    }
+    if (targetContent?.cells) {
+      const lineage = get("@hypercomb.social/Lineage");
+      const dir = await lineage?.explorerDir?.();
+      if (dir) {
+        const keep = new Set(targetContent.cells);
+        const toRemove = [];
+        for await (const [name, handle] of dir.entries()) {
+          if (handle.kind !== "directory") continue;
+          if (name.startsWith("__")) continue;
+          if (!keep.has(name)) toRemove.push(name);
+        }
+        for (const name of toRemove) {
+          try {
+            await dir.removeEntry(name, { recursive: true });
+          } catch {
+          }
+        }
+      }
+    }
+    const final = await history.listLayers(locationSig);
+    cursor.seek(final.length);
+    void new hypercomb2().act();
+  }
+};
+var _compact = new CompactQueenBee();
+window.ioc?.register?.("@diamondcoreprocessor.com/CompactQueenBee", _compact);
+
 // src/diamondcoreprocessor.com/commands/debug.queen.ts
-import { QueenBee as QueenBee4, EffectBus as EffectBus4 } from "@hypercomb/core";
-var DebugQueenBee = class extends QueenBee4 {
+import { QueenBee as QueenBee5, EffectBus as EffectBus4 } from "@hypercomb/core";
+var DebugQueenBee = class extends QueenBee5 {
   namespace = "diamondcoreprocessor.com";
   command = "debug";
   aliases = [];
@@ -307,8 +370,8 @@ var _debug = new DebugQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/DebugQueenBee", _debug);
 
 // src/diamondcoreprocessor.com/commands/domain.queen.ts
-import { QueenBee as QueenBee5 } from "@hypercomb/core";
-var DomainQueenBee = class extends QueenBee5 {
+import { QueenBee as QueenBee6 } from "@hypercomb/core";
+var DomainQueenBee = class extends QueenBee6 {
   namespace = "diamondcoreprocessor.com";
   command = "domain";
   aliases = ["relay"];
@@ -379,6 +442,145 @@ var DomainQueenBee = class extends QueenBee5 {
 };
 var _domain = new DomainQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/DomainQueenBee", _domain);
+
+// src/diamondcoreprocessor.com/commands/download.queen.ts
+import { QueenBee as QueenBee7 } from "@hypercomb/core";
+var DownloadQueenBee = class extends QueenBee7 {
+  namespace = "diamondcoreprocessor.com";
+  command = "download";
+  aliases = ["export"];
+  description = "Download an OPFS zip snapshot of the full client state";
+  async execute(_args) {
+    const opfsRoot = await navigator.storage?.getDirectory?.();
+    if (!opfsRoot) return;
+    const files = [];
+    await walkDir(opfsRoot, "", files);
+    if (files.length === 0) return;
+    const zip = buildStoreZip(files);
+    const blob = new Blob([zip], { type: "application/zip" });
+    const url = URL.createObjectURL(blob);
+    try {
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `hypercomb-opfs-${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-")}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } finally {
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+    }
+  }
+};
+async function walkDir(dir, prefix, out) {
+  for await (const [name, handle] of dir.entries()) {
+    const path = prefix ? `${prefix}/${name}` : name;
+    if (handle.kind === "file") {
+      try {
+        const file = await handle.getFile();
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        out.push({ path, bytes });
+      } catch {
+      }
+    } else if (handle.kind === "directory") {
+      await walkDir(handle, path, out);
+    }
+  }
+}
+function buildStoreZip(files) {
+  const encoder = new TextEncoder();
+  const crcTable = getCrcTable();
+  const encoded = [];
+  let cursor = 0;
+  for (const f of files) {
+    const nameBytes = encoder.encode(f.path);
+    const crc = crc32(f.bytes, crcTable);
+    encoded.push({ nameBytes, data: f.bytes, crc, localOffset: cursor });
+    cursor += 30 + nameBytes.length + f.bytes.length;
+  }
+  const cdStart = cursor;
+  for (const e of encoded) {
+    cursor += 46 + e.nameBytes.length;
+  }
+  const cdEnd = cursor;
+  cursor += 22;
+  const total = cursor;
+  const out = new Uint8Array(total);
+  const dv = new DataView(out.buffer);
+  let p = 0;
+  for (const e of encoded) {
+    dv.setUint32(p, 67324752, true);
+    dv.setUint16(p + 4, 20, true);
+    dv.setUint16(p + 6, 0, true);
+    dv.setUint16(p + 8, 0, true);
+    dv.setUint16(p + 10, 0, true);
+    dv.setUint16(p + 12, 0, true);
+    dv.setUint32(p + 14, e.crc, true);
+    dv.setUint32(p + 18, e.data.length, true);
+    dv.setUint32(p + 22, e.data.length, true);
+    dv.setUint16(p + 26, e.nameBytes.length, true);
+    dv.setUint16(p + 28, 0, true);
+    p += 30;
+    out.set(e.nameBytes, p);
+    p += e.nameBytes.length;
+    out.set(e.data, p);
+    p += e.data.length;
+  }
+  for (const e of encoded) {
+    dv.setUint32(p, 33639248, true);
+    dv.setUint16(p + 4, 20, true);
+    dv.setUint16(p + 6, 20, true);
+    dv.setUint16(p + 8, 0, true);
+    dv.setUint16(p + 10, 0, true);
+    dv.setUint16(p + 12, 0, true);
+    dv.setUint16(p + 14, 0, true);
+    dv.setUint32(p + 16, e.crc, true);
+    dv.setUint32(p + 20, e.data.length, true);
+    dv.setUint32(p + 24, e.data.length, true);
+    dv.setUint16(p + 28, e.nameBytes.length, true);
+    dv.setUint16(p + 30, 0, true);
+    dv.setUint16(p + 32, 0, true);
+    dv.setUint16(p + 34, 0, true);
+    dv.setUint16(p + 36, 0, true);
+    dv.setUint32(p + 38, 0, true);
+    dv.setUint32(p + 42, e.localOffset, true);
+    p += 46;
+    out.set(e.nameBytes, p);
+    p += e.nameBytes.length;
+  }
+  dv.setUint32(p, 101010256, true);
+  dv.setUint16(p + 4, 0, true);
+  dv.setUint16(p + 6, 0, true);
+  dv.setUint16(p + 8, encoded.length, true);
+  dv.setUint16(p + 10, encoded.length, true);
+  dv.setUint32(p + 12, cdEnd - cdStart, true);
+  dv.setUint32(p + 16, cdStart, true);
+  dv.setUint16(p + 20, 0, true);
+  p += 22;
+  return out;
+}
+var cachedCrcTable = null;
+function getCrcTable() {
+  if (cachedCrcTable) return cachedCrcTable;
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) {
+      c = c & 1 ? 3988292384 ^ c >>> 1 : c >>> 1;
+    }
+    table[n] = c >>> 0;
+  }
+  cachedCrcTable = table;
+  return table;
+}
+function crc32(bytes, table) {
+  let c = 4294967295;
+  for (let i = 0; i < bytes.length; i++) {
+    c = c >>> 8 ^ table[(c ^ bytes[i]) & 255];
+  }
+  return (c ^ 4294967295) >>> 0;
+}
+var _download = new DownloadQueenBee();
+window.ioc?.register?.("@diamondcoreprocessor.com/DownloadQueenBee", _download);
 
 // src/diamondcoreprocessor.com/commands/empty-long-press.input.ts
 import { Point } from "pixi.js";
@@ -611,8 +813,8 @@ var _emptyLongPress = new EmptyLongPressInput();
 window.ioc.register("@diamondcoreprocessor.com/EmptyLongPressInput", _emptyLongPress);
 
 // src/diamondcoreprocessor.com/commands/help.queen.ts
-import { QueenBee as QueenBee6, EffectBus as EffectBus7 } from "@hypercomb/core";
-var HelpQueenBee = class extends QueenBee6 {
+import { QueenBee as QueenBee8, EffectBus as EffectBus7 } from "@hypercomb/core";
+var HelpQueenBee = class extends QueenBee8 {
   namespace = "diamondcoreprocessor.com";
   command = "help";
   aliases = [];
@@ -653,8 +855,8 @@ var _help = new HelpQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/HelpQueenBee", _help);
 
 // src/diamondcoreprocessor.com/commands/i18n-override.queen.ts
-import { QueenBee as QueenBee7, I18N_IOC_KEY } from "@hypercomb/core";
-var I18nOverrideQueenBee = class extends QueenBee7 {
+import { QueenBee as QueenBee9, I18N_IOC_KEY } from "@hypercomb/core";
+var I18nOverrideQueenBee = class extends QueenBee9 {
   namespace = "diamondcoreprocessor.com";
   command = "i18n-override";
   aliases = [];
@@ -750,8 +952,8 @@ var _i18nOverride = new I18nOverrideQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/I18nOverrideQueenBee", _i18nOverride);
 
 // src/diamondcoreprocessor.com/commands/keyword.queen.ts
-import { QueenBee as QueenBee8, EffectBus as EffectBus8, hypercomb as hypercomb2 } from "@hypercomb/core";
-var KeywordQueenBee = class extends QueenBee8 {
+import { QueenBee as QueenBee10, EffectBus as EffectBus8, hypercomb as hypercomb3 } from "@hypercomb/core";
+var KeywordQueenBee = class extends QueenBee10 {
   namespace = "diamondcoreprocessor.com";
   command = "keyword";
   aliases = [];
@@ -803,7 +1005,7 @@ var KeywordQueenBee = class extends QueenBee8 {
         }
       }
     }
-    void new hypercomb2().act();
+    void new hypercomb3().act();
   }
 };
 function parseKeywordArgs(args) {
@@ -863,8 +1065,8 @@ var _keyword = new KeywordQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/KeywordQueenBee", _keyword);
 
 // src/diamondcoreprocessor.com/commands/language.queen.ts
-import { QueenBee as QueenBee9, I18N_IOC_KEY as I18N_IOC_KEY2 } from "@hypercomb/core";
-var LanguageQueenBee = class extends QueenBee9 {
+import { QueenBee as QueenBee11, I18N_IOC_KEY as I18N_IOC_KEY2 } from "@hypercomb/core";
+var LanguageQueenBee = class extends QueenBee11 {
   namespace = "diamondcoreprocessor.com";
   command = "language";
   aliases = [];
@@ -916,9 +1118,9 @@ var _language = new LanguageQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/LanguageQueenBee", _language);
 
 // src/diamondcoreprocessor.com/commands/player.queen.ts
-import { QueenBee as QueenBee10, EffectBus as EffectBus9 } from "@hypercomb/core";
+import { QueenBee as QueenBee12, EffectBus as EffectBus9 } from "@hypercomb/core";
 var DISMISSED_KEY = "hc:player-dismissed";
-var PlayerQueenBee = class extends QueenBee10 {
+var PlayerQueenBee = class extends QueenBee12 {
   namespace = "diamondcoreprocessor.com";
   command = "player";
   aliases = ["track", "audio"];
@@ -935,8 +1137,8 @@ var _player = new PlayerQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/PlayerQueenBee", _player);
 
 // src/diamondcoreprocessor.com/commands/remove.queen.ts
-import { QueenBee as QueenBee11, EffectBus as EffectBus10, hypercomb as hypercomb3 } from "@hypercomb/core";
-var RemoveQueenBee = class extends QueenBee11 {
+import { QueenBee as QueenBee13, EffectBus as EffectBus10, hypercomb as hypercomb4 } from "@hypercomb/core";
+var RemoveQueenBee = class extends QueenBee13 {
   namespace = "diamondcoreprocessor.com";
   command = "remove";
   aliases = [];
@@ -964,7 +1166,7 @@ var RemoveQueenBee = class extends QueenBee11 {
         console.error("[remove] removeEntry failed", name, e);
       }
     }
-    void new hypercomb3().act();
+    void new hypercomb4().act();
   }
 };
 function parseRemoveArgs(args) {
@@ -990,8 +1192,8 @@ EffectBus10.on("keymap:invoke", (payload) => {
 });
 
 // src/diamondcoreprocessor.com/commands/rename.queen.ts
-import { QueenBee as QueenBee12, EffectBus as EffectBus11, SignatureService, hypercomb as hypercomb4 } from "@hypercomb/core";
-var RenameQueenBee = class extends QueenBee12 {
+import { QueenBee as QueenBee14, EffectBus as EffectBus11, SignatureService, hypercomb as hypercomb5 } from "@hypercomb/core";
+var RenameQueenBee = class extends QueenBee14 {
   namespace = "diamondcoreprocessor.com";
   command = "rename";
   aliases = [];
@@ -1023,7 +1225,7 @@ var RenameQueenBee = class extends QueenBee12 {
       EffectBus11.emit("cell:added", { cell: newName, groupId });
       EffectBus11.emit("cell:renamed", { oldName, newName });
       selection.clear();
-      void new hypercomb4().act();
+      void new hypercomb5().act();
     } catch {
     }
   }
@@ -1072,9 +1274,55 @@ function normalizeName2(s) {
 var _rename = new RenameQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/RenameQueenBee", _rename);
 
+// src/diamondcoreprocessor.com/commands/save-session.queen.ts
+import { QueenBee as QueenBee15, EffectBus as EffectBus12 } from "@hypercomb/core";
+var SESSION_START = Date.now();
+var AUTO_SAVE_KEY = "hc:auto-save-session-on-leave";
+var SaveSessionQueenBee = class extends QueenBee15 {
+  namespace = "diamondcoreprocessor.com";
+  command = "save-session";
+  aliases = ["session-save", "save"];
+  description = "Collapse this session's history entries at the current location into one head";
+  async execute(args) {
+    const trimmed = args.trim().toLowerCase();
+    if (trimmed === "auto on" || trimmed === "auto") {
+      localStorage.setItem(AUTO_SAVE_KEY, "true");
+      EffectBus12.emit("activity:log", { message: "auto-save session on leave: ON", icon: "\u{1F4BE}" });
+      return;
+    }
+    if (trimmed === "auto off") {
+      localStorage.removeItem(AUTO_SAVE_KEY);
+      EffectBus12.emit("activity:log", { message: "auto-save session on leave: OFF", icon: "\u{1F4BE}" });
+      return;
+    }
+    await collapseSessionAtCurrentLocation();
+  }
+};
+async function collapseSessionAtCurrentLocation() {
+  const history = get("@diamondcoreprocessor.com/HistoryService");
+  const cursor = get("@diamondcoreprocessor.com/HistoryCursorService");
+  if (!history || !cursor) return;
+  const locationSig = cursor.state.locationSig;
+  if (!locationSig) return;
+  const entries = await history.listLayers(locationSig);
+  const sessionEntries = entries.filter((e) => e.at >= SESSION_START);
+  if (sessionEntries.length < 2) return;
+  await history.mergeEntries(locationSig, sessionEntries.map((e) => e.filename));
+  const after = await history.listLayers(locationSig);
+  cursor.seek(after.length);
+}
+if (typeof window !== "undefined") {
+  window.addEventListener("pagehide", () => {
+    if (localStorage.getItem(AUTO_SAVE_KEY) !== "true") return;
+    void collapseSessionAtCurrentLocation();
+  });
+}
+var _save = new SaveSessionQueenBee();
+window.ioc?.register?.("@diamondcoreprocessor.com/SaveSessionQueenBee", _save);
+
 // src/diamondcoreprocessor.com/commands/translate-sweep.queen.ts
-import { QueenBee as QueenBee13 } from "@hypercomb/core";
-var TranslateSweepQueenBee = class extends QueenBee13 {
+import { QueenBee as QueenBee16 } from "@hypercomb/core";
+var TranslateSweepQueenBee = class extends QueenBee16 {
   namespace = "diamondcoreprocessor.com";
   command = "translate-sweep";
   aliases = ["translate"];
@@ -1142,7 +1390,7 @@ var _sweep = new TranslateSweepQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/TranslateSweepQueenBee", _sweep);
 
 // src/diamondcoreprocessor.com/commands/translation.service.ts
-import { EffectBus as EffectBus12, SignatureService as SignatureService2, I18N_IOC_KEY as I18N_IOC_KEY3 } from "@hypercomb/core";
+import { EffectBus as EffectBus13, SignatureService as SignatureService2, I18N_IOC_KEY as I18N_IOC_KEY3 } from "@hypercomb/core";
 
 // src/diamondcoreprocessor.com/assistant/llm-api.ts
 var ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages";
@@ -1244,7 +1492,7 @@ var TranslationService = class extends EventTarget {
   #translating = false;
   constructor() {
     super();
-    EffectBus12.on("locale:changed", (payload) => {
+    EffectBus13.on("locale:changed", (payload) => {
       void (async () => {
         await this.hydrateCatalog(payload.locale);
         if (!this.#translating && getApiKey()) {
@@ -1390,7 +1638,7 @@ var TranslationService = class extends EventTarget {
     if (Object.keys(catalog).length) {
       i18n.registerTranslations("app", targetLocale, catalog);
       if (i18n.locale === targetLocale) {
-        EffectBus12.emit("labels:invalidated", { locale: targetLocale });
+        EffectBus13.emit("labels:invalidated", { locale: targetLocale });
       }
     }
   }
@@ -1417,10 +1665,10 @@ var TranslationService = class extends EventTarget {
       }
       const apiKey = getApiKey();
       if (!apiKey && plan.toTranslate.length) {
-        EffectBus12.emit("llm:api-key-required", {});
+        EffectBus13.emit("llm:api-key-required", {});
         return;
       }
-      EffectBus12.emit("translation:tile-start", { labels: plan.tileNames, locale: targetLocale });
+      EffectBus13.emit("translation:tile-start", { labels: plan.tileNames, locale: targetLocale });
       const batchCount = Math.ceil(plan.toTranslate.length / BATCH_SIZE);
       if (plan.toTranslate.length) {
         console.log(
@@ -1485,19 +1733,19 @@ ${source}`,
       for (const tileName of plan.tileNames) {
         const propsSig = propsIndex[tileName];
         if (!propsSig) {
-          EffectBus12.emit("translation:tile-done", { label: tileName });
+          EffectBus13.emit("translation:tile-done", { label: tileName });
           continue;
         }
         const propsBlob = await store.getResource(propsSig);
         if (!propsBlob) {
-          EffectBus12.emit("translation:tile-done", { label: tileName });
+          EffectBus13.emit("translation:tile-done", { label: tileName });
           continue;
         }
         let props;
         try {
           props = JSON.parse(await propsBlob.text());
         } catch {
-          EffectBus12.emit("translation:tile-done", { label: tileName });
+          EffectBus13.emit("translation:tile-done", { label: tileName });
           continue;
         }
         let changed = false;
@@ -1531,16 +1779,16 @@ ${source}`,
           );
           propsIndex[tileName] = await store.putResource(updatedBlob);
         }
-        EffectBus12.emit("translation:tile-done", { label: tileName });
+        EffectBus13.emit("translation:tile-done", { label: tileName });
       }
       localStorage.setItem(PROPS_INDEX_KEY, JSON.stringify(propsIndex));
       if (i18n && Object.keys(catalog).length) {
         i18n.registerTranslations("app", targetLocale, catalog);
         if (i18n.locale === targetLocale) {
-          EffectBus12.emit("labels:invalidated", { locale: targetLocale });
+          EffectBus13.emit("labels:invalidated", { locale: targetLocale });
         }
       }
-      EffectBus12.emit("translation:complete", {
+      EffectBus13.emit("translation:complete", {
         locale: targetLocale,
         translated: plan.toTranslate.length
       });
@@ -1685,11 +1933,11 @@ function shouldSkipForTranslation(text, _targetLocale) {
 }
 
 // src/diamondcoreprocessor.com/commands/website.queen.ts
-import { QueenBee as QueenBee14, EffectBus as EffectBus13 } from "@hypercomb/core";
+import { QueenBee as QueenBee17, EffectBus as EffectBus14 } from "@hypercomb/core";
 import { CELL_WEBSITE_PROPERTY } from "@hypercomb/core";
 var toast2 = (type, title, message) => {
   try {
-    EffectBus13.emit("toast:show", { type, title, message });
+    EffectBus14.emit("toast:show", { type, title, message });
   } catch {
   }
 };
@@ -1822,7 +2070,7 @@ async function sigsToBundleSig(sigs) {
   const blob = new Blob([bundleText], { type: "text/plain" });
   return await store.putResource(blob);
 }
-var WebsiteQueenBee = class extends QueenBee14 {
+var WebsiteQueenBee = class extends QueenBee17 {
   namespace = "diamondcoreprocessor.com";
   command = "website";
   aliases = [];
@@ -1959,8 +2207,10 @@ export {
   AccentQueenBee,
   ArrangeQueenBee,
   BranchQueenBee,
+  CompactQueenBee,
   DebugQueenBee,
   DomainQueenBee,
+  DownloadQueenBee,
   EmptyLongPressInput,
   HelpQueenBee,
   I18nOverrideQueenBee,
@@ -1969,6 +2219,7 @@ export {
   PlayerQueenBee,
   RemoveQueenBee,
   RenameQueenBee,
+  SaveSessionQueenBee,
   TranslateSweepQueenBee,
   TranslationService,
   WebsiteQueenBee,

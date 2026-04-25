@@ -1,7 +1,35 @@
 // src/diamondcoreprocessor.com/history/layer-committer.drone.ts
 import { EffectBus, SignatureService } from "@hypercomb/core";
+var CommitMachine = class {
+  #state = "idle";
+  #needsFollowup = false;
+  #run;
+  constructor(run) {
+    this.#run = run;
+  }
+  request() {
+    if (this.#state === "committing") {
+      this.#needsFollowup = true;
+      return;
+    }
+    if (this.#state === "pending") return;
+    this.#state = "pending";
+    queueMicrotask(() => void this.#tick());
+  }
+  async #tick() {
+    this.#state = "committing";
+    try {
+      await this.#run();
+    } catch {
+    }
+    this.#state = "idle";
+    if (this.#needsFollowup) {
+      this.#needsFollowup = false;
+      this.request();
+    }
+  }
+};
 var LayerCommitter = class {
-  #scheduled = false;
   // Layout state is scattered across EffectBus effects. We subscribe at
   // construction and keep the latest value locally. Late subscribers get
   // the last-emitted value automatically (EffectBus replay).
@@ -13,6 +41,17 @@ var LayerCommitter = class {
     gapPx: 0,
     textOnly: false
   };
+  // Single serialised commit machine for this committer. Every event
+  // source — per-event lifecycle, microtask-batched layout changes,
+  // synchronize — calls machine.request(). The machine collapses
+  // same-turn requests and serialises cross-turn ones; commitLayer
+  // dedup then absorbs any redundant identical content. Together
+  // they guarantee one commit per distinct state change, no more.
+  //
+  // Leaf + ancestors still commit as one atomic #commit() call
+  // inside the machine's #run — each ancestor is a merkle-chain
+  // update cascading up from the leaf.
+  #machine = new CommitMachine(() => this.#commit());
   constructor() {
     EffectBus.on("render:set-orientation", (p) => {
       if (p) {
@@ -46,17 +85,20 @@ var LayerCommitter = class {
     });
     window.addEventListener("synchronize", () => this.#schedule());
     EffectBus.on("render:cell-count", () => this.#schedule());
+    EffectBus.on("cell:added", () => this.#queueCommit());
+    EffectBus.on("cell:removed", () => this.#queueCommit());
+    EffectBus.on("tile:saved", () => this.#queueCommit());
+    EffectBus.on("tags:changed", () => this.#queueCommit());
+    EffectBus.on("tile:hidden", () => this.#queueCommit());
+    EffectBus.on("tile:unhidden", () => this.#queueCommit());
   }
+  // All commit requests — batched or per-event — route through the
+  // single CommitMachine. See the class above for the state transitions.
   #schedule() {
-    if (this.#scheduled) return;
-    this.#scheduled = true;
-    queueMicrotask(async () => {
-      this.#scheduled = false;
-      try {
-        await this.#commit();
-      } catch {
-      }
-    });
+    this.#machine.request();
+  }
+  #queueCommit() {
+    this.#machine.request();
   }
   async #commit() {
     const cursor = get("@diamondcoreprocessor.com/HistoryCursorService");

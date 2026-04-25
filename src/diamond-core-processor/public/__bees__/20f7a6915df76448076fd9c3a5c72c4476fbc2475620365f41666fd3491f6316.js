@@ -25,7 +25,7 @@ var HistorySliderDrone = class {
   #reviseActive = false;
   #globalTimeActive = false;
   #scrubbing = false;
-  #state = { locationSig: "", position: 0, total: 0, rewound: false, at: 0 };
+  #state = { locationSig: "", position: 0, total: 0, rewound: false, at: 0, groupStepEnabled: false };
   constructor() {
     EffectBus.on("history:cursor-changed", (state) => {
       this.#state = state;
