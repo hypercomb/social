@@ -857,22 +857,8 @@ var HistoryService = class _HistoryService {
     const json = JSON.stringify(canonical);
     const bytes = new TextEncoder().encode(json);
     const layerSig = await SignatureService.sign(bytes.buffer);
+    await this.#writeLayerToPool(layerSig, bytes);
     const bag = await this.getBag(locationSig);
-    let sigExists = true;
-    try {
-      await bag.getFileHandle(layerSig, { create: false });
-    } catch {
-      sigExists = false;
-    }
-    if (!sigExists) {
-      const handle = await bag.getFileHandle(layerSig, { create: true });
-      const writable = await handle.createWritable();
-      try {
-        await writable.write(bytes);
-      } finally {
-        await writable.close();
-      }
-    }
     const markerName = await this.#nextMarkerName(bag);
     const markerHandle = await bag.getFileHandle(markerName, { create: true });
     const markerWritable = await markerHandle.createWritable();
@@ -889,6 +875,31 @@ var HistoryService = class _HistoryService {
       }
     }
     return layerSig;
+  };
+  /**
+   * Write layer bytes into the shared content pool at __layers__/{sig}.
+   * Idempotent — if the file already exists with the same name, we
+   * skip the write to keep any cached Blob handles valid. The pool
+   * is the SAME shape and role as DCP's __layers__/{sig}, so sigs
+   * are interchangeable across the push boundary.
+   */
+  #writeLayerToPool = async (layerSig, bytes) => {
+    const store = get("@hypercomb.social/Store");
+    if (!store?.layers) return;
+    let exists = true;
+    try {
+      await store.layers.getFileHandle(layerSig, { create: false });
+    } catch {
+      exists = false;
+    }
+    if (exists) return;
+    const handle = await store.layers.getFileHandle(layerSig, { create: true });
+    const writable = await handle.createWritable();
+    try {
+      await writable.write(bytes.buffer);
+    } finally {
+      await writable.close();
+    }
   };
   /**
    * Head = the chronologically latest marker. Returns null when the
@@ -961,37 +972,39 @@ var HistoryService = class _HistoryService {
     return String(max + 1).padStart(8, "0");
   };
   /**
-   * Read a layer's JSON content directly from the bag, by sig. The
-   * bag is the source of truth in the new layout — `__resources__/`
-   * is only a (possibly cold) cache. Going through Store.getResource
-   * for undo/redo means a missed cache renders an empty grid even
-   * though the bytes are right there in the bag. This bypasses that
-   * indirection entirely.
+   * Read a layer's content from the SHARED pool at __layers__/{sig}.
+   * The pool is the source of truth — same shape on hypercomb and
+   * DCP, sigs are interchangeable across the push boundary. The bag
+   * holds only markers (per-event NNNN files containing a sig); the
+   * content lives once in the pool no matter how many markers point
+   * at it.
    *
-   * Returns the parsed (and field-defaulted) LayerContent, or null
-   * when the bag/sig file isn't there. Also seeds Store.putResource
-   * on a successful read so any other consumer that still resolves
-   * by sig stays warm. No content sniffing — the file is at the
-   * canonical path or it isn't.
+   * Falls back to Store.getResource for legacy paths that may have
+   * cached the bytes earlier. `locationSig` is unused but kept on
+   * the signature for callers that haven't been updated yet.
    */
-  getLayerContent = async (locationSig, layerSig) => {
+  getLayerContent = async (_locationSig, layerSig) => {
     if (!_HistoryService.#SIG_RE.test(layerSig)) return null;
-    let bag;
-    try {
-      bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false });
-    } catch {
-      return null;
+    let bytes = null;
+    let blob = null;
+    const store = get("@hypercomb.social/Store");
+    if (store?.layers) {
+      try {
+        const handle = await store.layers.getFileHandle(layerSig, { create: false });
+        const file = await handle.getFile();
+        bytes = await file.arrayBuffer();
+        blob = file;
+      } catch {
+      }
     }
-    let bytes;
-    let blob;
-    try {
-      const handle = await bag.getFileHandle(layerSig, { create: false });
-      const file = await handle.getFile();
-      bytes = await file.arrayBuffer();
-      blob = file;
-    } catch {
-      return null;
+    if (!bytes && store?.getResource) {
+      const cached = await store.getResource(layerSig).catch(() => null);
+      if (cached) {
+        bytes = await cached.arrayBuffer();
+        blob = cached;
+      }
     }
+    if (!bytes) return null;
     let parsed;
     try {
       parsed = JSON.parse(new TextDecoder().decode(bytes));
@@ -1002,8 +1015,7 @@ var HistoryService = class _HistoryService {
       cells: parsed.cells ?? [],
       hidden: parsed.hidden ?? []
     };
-    const store = get("@hypercomb.social/Store");
-    if (store) {
+    if (blob && store?.putResource) {
       try {
         await store.putResource(blob);
       } catch {
@@ -1032,6 +1044,34 @@ var HistoryService = class _HistoryService {
    * Files whose names don't match either shape are left alone for
    * manual triage.
    */
+  /**
+   * Normalize a bag to the canonical shape on every read:
+   *   __history__/{lineage}/00000001  → marker (sig content only)
+   *   __history__/{lineage}/00000002  → marker
+   *   ...
+   *   __layers__/{sig}                → content (in shared pool)
+   *
+   * Walks every file in the bag, classifies it, and converts to the
+   * canonical shape WITHOUT losing history. Order is preserved via
+   * mtime sort; creation dates are renumbered (acceptable — order is
+   * what matters for undo/redo).
+   *
+   * Idempotent: a well-formed bag is unchanged.
+   *
+   * Cases handled:
+   *   - 64-hex sig file at bag root  → move bytes to __layers__/{sig},
+   *                                    mint a marker pointing at it
+   *   - 8-digit numeric (sig content)→ canonical, keep
+   *   - 8-digit numeric ({layerSig,at} JSON) → legacy pointer; rewrite
+   *                                    as canonical sig content
+   *   - 8-digit numeric (cells JSON) → legacy direct content; sign,
+   *                                    move to pool, mint marker
+   *   - 8-digit numeric (other JSON) → legacy op log; drop
+   *   - any other shape              → drop
+   *
+   * "Start broken, complete safely on the fly" — boot can be entered
+   * with any legacy state and the next listLayers leaves the bag clean.
+   */
   #quarantineNonLayerFiles = async (locationSig) => {
     let bag;
     try {
@@ -1039,34 +1079,117 @@ var HistoryService = class _HistoryService {
     } catch {
       return;
     }
-    const numericRe = /^\d{1,16}$/;
-    const moves = [];
+    const store = get("@hypercomb.social/Store");
+    if (!store?.layers) return;
+    const entries = [];
     for await (const [name, handle] of bag.entries()) {
       if (handle.kind !== "file") continue;
+      let file;
+      try {
+        file = await handle.getFile();
+      } catch {
+        continue;
+      }
+      const mtime = file.lastModified;
       if (_HistoryService.#SIG_RE.test(name)) {
+        const bytes = await file.arrayBuffer().catch(() => null);
+        if (bytes) entries.push({ name, mtime, kind: "legacy-sig-file", bytes });
+        continue;
+      }
+      if (_HistoryService.#MARKER_RE.test(name)) {
+        const text = await file.text().catch(() => "");
+        const trimmed = text.trim();
+        if (_HistoryService.#SIG_RE.test(trimmed)) {
+          entries.push({ name, mtime, kind: "canonical" });
+          continue;
+        }
         try {
-          const file = await handle.getFile();
-          const text = await file.text();
           const parsed = JSON.parse(text);
-          if (Array.isArray(parsed?.cells)) continue;
+          if (typeof parsed?.layerSig === "string" && _HistoryService.#SIG_RE.test(parsed.layerSig)) {
+            entries.push({ name, mtime, kind: "legacy-pointer", pointerSig: parsed.layerSig });
+            continue;
+          }
+          if (Array.isArray(parsed?.cells)) {
+            const bytes = await file.arrayBuffer().catch(() => null);
+            if (bytes) entries.push({ name, mtime, kind: "legacy-content", bytes });
+            continue;
+          }
         } catch {
         }
-        moves.push(name);
-      } else if (_HistoryService.#MARKER_RE.test(name)) {
-        try {
-          const file = await handle.getFile();
-          const text = (await file.text()).trim();
-          if (_HistoryService.#SIG_RE.test(text)) continue;
-        } catch {
-        }
-        moves.push(name);
-      } else if (numericRe.test(name)) {
-        moves.push(name);
+        entries.push({ name, mtime, kind: "drop" });
+        continue;
       }
     }
-    for (const name of moves) {
+    entries.sort((a, b) => a.mtime - b.mtime || a.name.localeCompare(b.name));
+    let nextMarker = 0;
+    for (const e of entries) {
+      if (e.kind !== "canonical") continue;
+      const n = parseInt(e.name, 10);
+      if (!isNaN(n) && n > nextMarker) nextMarker = n;
+    }
+    const writePool = async (sig, bytes) => {
+      let exists = true;
       try {
-        await bag.removeEntry(name);
+        await store.layers.getFileHandle(sig, { create: false });
+      } catch {
+        exists = false;
+      }
+      if (exists) return;
+      const h = await store.layers.getFileHandle(sig, { create: true });
+      const w = await h.createWritable();
+      try {
+        await w.write(bytes);
+      } finally {
+        await w.close();
+      }
+    };
+    const writeMarker = async (sig) => {
+      nextMarker++;
+      const name = String(nextMarker).padStart(8, "0");
+      const h = await bag.getFileHandle(name, { create: true });
+      const w = await h.createWritable();
+      try {
+        await w.write(sig);
+      } finally {
+        await w.close();
+      }
+    };
+    for (const e of entries) {
+      try {
+        switch (e.kind) {
+          case "canonical":
+            break;
+          case "legacy-sig-file":
+            if (!e.bytes) break;
+            await writePool(e.name, e.bytes);
+            await writeMarker(e.name);
+            await bag.removeEntry(e.name);
+            break;
+          case "legacy-pointer":
+            if (!e.pointerSig) break;
+            {
+              const h = await bag.getFileHandle(e.name, { create: true });
+              const w = await h.createWritable();
+              try {
+                await w.write(e.pointerSig);
+              } finally {
+                await w.close();
+              }
+            }
+            break;
+          case "legacy-content":
+            if (!e.bytes) break;
+            {
+              const sig = await SignatureService.sign(e.bytes);
+              await writePool(sig, e.bytes);
+              await bag.removeEntry(e.name);
+              await writeMarker(sig);
+            }
+            break;
+          case "drop":
+            await bag.removeEntry(e.name);
+            break;
+        }
       } catch {
       }
     }

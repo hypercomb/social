@@ -285,12 +285,11 @@ window.ioc.register("@diamondcoreprocessor.com/BranchQueenBee", _branch);
 
 // src/diamondcoreprocessor.com/commands/compact.queen.ts
 import { QueenBee as QueenBee4 } from "@hypercomb/core";
-var EMPTY_LAYER = { cells: [], hidden: [] };
 var CompactQueenBee = class extends QueenBee4 {
   namespace = "diamondcoreprocessor.com";
   command = "compact";
   aliases = [];
-  description = "Rebase this location's history to an empty seed + current state";
+  description = "Rebase this location's history to a single live marker (history is lost)";
   async execute(_args) {
     const history = get("@diamondcoreprocessor.com/HistoryService");
     const cursor = get("@diamondcoreprocessor.com/HistoryCursorService");
@@ -298,13 +297,14 @@ var CompactQueenBee = class extends QueenBee4 {
     if (!history || !cursor || !lineage) return;
     const locationSig = cursor.state.locationSig;
     if (!locationSig) return;
+    const fresh = await this.#assembleFromDisk(lineage);
     const entries = await history.listLayers(locationSig);
     if (entries.length > 0) {
       await history.removeEntries(locationSig, entries.map((e) => e.filename));
     }
-    const fresh = await this.#assembleFromDisk(lineage);
-    await history.commitLayer(locationSig, EMPTY_LAYER);
-    await history.commitLayer(locationSig, fresh);
+    if (fresh.cells.length > 0 || fresh.hidden.length > 0) {
+      await history.commitLayer(locationSig, fresh);
+    }
     await cursor.load(locationSig);
     cursor.seek(cursor.state.total);
   }

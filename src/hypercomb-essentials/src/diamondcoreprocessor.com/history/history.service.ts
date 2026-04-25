@@ -383,35 +383,54 @@ export class HistoryService {
     const bytes = new TextEncoder().encode(json)
     const layerSig = await SignatureService.sign(bytes.buffer as ArrayBuffer)
 
+    // 1. Content lives in the SHARED pool at __layers__/{sig}, not in
+    //    the bag. Same shape as DCP — both sides have a flat content
+    //    pool keyed by sig + a per-lineage __history__/ holding only
+    //    markers. Sync convergence (matching merkle roots) requires
+    //    identical structure on both sides.
+    await this.#writeLayerToPool(layerSig, bytes)
+
+    // 2. Append a marker at __history__/{lineage}/{NNNN} containing
+    //    the sig. ALWAYS appended, even when the sig matches an
+    //    existing pool entry — markers carry the per-event timeline,
+    //    content lives once in the pool. Two markers may point at
+    //    the same sig (overlap = dedupe).
     const bag = await this.getBag(locationSig)
-
-    // 1. Sig file = the layer content. Content-addressed, immutable,
-    //    deduped. If the file already exists we don't rewrite — keeps
-    //    cached Blob handles valid.
-    let sigExists = true
-    try { await bag.getFileHandle(layerSig, { create: false }) } catch { sigExists = false }
-    if (!sigExists) {
-      const handle = await bag.getFileHandle(layerSig, { create: true })
-      const writable = await handle.createWritable()
-      try { await writable.write(bytes) } finally { await writable.close() }
-    }
-
-    // 2. Marker file = a numeric per-event entry pointing at the sig.
-    //    ALWAYS appended, even when the sig matches an existing one —
-    //    that's the whole point of markers: history grows per user
-    //    action, content stays one file per unique state.
     const markerName = await this.#nextMarkerName(bag)
     const markerHandle = await bag.getFileHandle(markerName, { create: true })
     const markerWritable = await markerHandle.createWritable()
     try { await markerWritable.write(layerSig) } finally { await markerWritable.close() }
 
-    // Seed Store cache for cross-bag resolvers (warmup, diff inspector).
+    // Seed Store cache for cross-bag resolvers (warmup, diff inspector)
+    // even though the bag-direct read path is the source of truth.
     const store = get<{ putResource: (blob: Blob) => Promise<void> }>('@hypercomb.social/Store')
     if (store) {
       try { await store.putResource(new Blob([json], { type: 'application/json' })) } catch { /* best-effort */ }
     }
 
     return layerSig
+  }
+
+  /**
+   * Write layer bytes into the shared content pool at __layers__/{sig}.
+   * Idempotent — if the file already exists with the same name, we
+   * skip the write to keep any cached Blob handles valid. The pool
+   * is the SAME shape and role as DCP's __layers__/{sig}, so sigs
+   * are interchangeable across the push boundary.
+   */
+  readonly #writeLayerToPool = async (
+    layerSig: string,
+    bytes: Uint8Array,
+  ): Promise<void> => {
+    const store = get<{ layers: FileSystemDirectoryHandle }>('@hypercomb.social/Store')
+    if (!store?.layers) return
+    let exists = true
+    try { await store.layers.getFileHandle(layerSig, { create: false }) } catch { exists = false }
+    if (exists) return
+    const handle = await store.layers.getFileHandle(layerSig, { create: true })
+    const writable = await handle.createWritable()
+    // Cast to ArrayBuffer for strict-mode FileSystemWriteChunkType.
+    try { await writable.write(bytes.buffer as ArrayBuffer) } finally { await writable.close() }
   }
 
   /**
@@ -500,55 +519,67 @@ export class HistoryService {
   }
 
   /**
-   * Read a layer's JSON content directly from the bag, by sig. The
-   * bag is the source of truth in the new layout — `__resources__/`
-   * is only a (possibly cold) cache. Going through Store.getResource
-   * for undo/redo means a missed cache renders an empty grid even
-   * though the bytes are right there in the bag. This bypasses that
-   * indirection entirely.
+   * Read a layer's content from the SHARED pool at __layers__/{sig}.
+   * The pool is the source of truth — same shape on hypercomb and
+   * DCP, sigs are interchangeable across the push boundary. The bag
+   * holds only markers (per-event NNNN files containing a sig); the
+   * content lives once in the pool no matter how many markers point
+   * at it.
    *
-   * Returns the parsed (and field-defaulted) LayerContent, or null
-   * when the bag/sig file isn't there. Also seeds Store.putResource
-   * on a successful read so any other consumer that still resolves
-   * by sig stays warm. No content sniffing — the file is at the
-   * canonical path or it isn't.
+   * Falls back to Store.getResource for legacy paths that may have
+   * cached the bytes earlier. `locationSig` is unused but kept on
+   * the signature for callers that haven't been updated yet.
    */
   public readonly getLayerContent = async (
-    locationSig: string,
+    _locationSig: string,
     layerSig: string,
   ): Promise<LayerContent | null> => {
     if (!HistoryService.#SIG_RE.test(layerSig)) return null
-    let bag: FileSystemDirectoryHandle
-    try {
-      bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false })
-    } catch { return null }
 
-    let bytes: ArrayBuffer
-    let blob: Blob
-    try {
-      const handle = await bag.getFileHandle(layerSig, { create: false })
-      const file = await handle.getFile()
-      bytes = await file.arrayBuffer()
-      blob = file
-    } catch { return null }
+    let bytes: ArrayBuffer | null = null
+    let blob: Blob | null = null
+
+    // 1. Primary: read from the shared pool.
+    const store = get<{
+      layers: FileSystemDirectoryHandle
+      getResource?: (sig: string) => Promise<Blob | null>
+      putResource?: (blob: Blob) => Promise<void>
+    }>('@hypercomb.social/Store')
+    if (store?.layers) {
+      try {
+        const handle = await store.layers.getFileHandle(layerSig, { create: false })
+        const file = await handle.getFile()
+        bytes = await file.arrayBuffer()
+        blob = file
+      } catch { /* not in pool — try resource fallback */ }
+    }
+
+    // 2. Fallback: legacy resource cache.
+    if (!bytes && store?.getResource) {
+      const cached = await store.getResource(layerSig).catch(() => null)
+      if (cached) {
+        bytes = await cached.arrayBuffer()
+        blob = cached
+      }
+    }
+
+    if (!bytes) return null
 
     let parsed: Partial<LayerContent>
     try { parsed = JSON.parse(new TextDecoder().decode(bytes)) as Partial<LayerContent> }
     catch { return null }
 
     // Slim layer — only cells and hidden. Anything else in the file
-    // (legacy fat-layer fields from the dual-emit era) is ignored
-    // here. Tags, content, notes, bees, deps, layout, instructions
-    // all come from live primitives, not from this snapshot.
+    // (legacy fat-layer fields) is ignored at read.
     const content: LayerContent = {
       cells: parsed.cells ?? [],
       hidden: parsed.hidden ?? [],
     }
 
-    // Warm the resource cache so other resolvers (layer-diff inspector,
-    // background warmup) keep working under the same sig.
-    const store = get<{ putResource: (b: Blob) => Promise<void> }>('@hypercomb.social/Store')
-    if (store) { try { await store.putResource(blob) } catch { /* best-effort */ } }
+    // Warm the resource cache so other resolvers stay hot.
+    if (blob && store?.putResource) {
+      try { await store.putResource(blob) } catch { /* best-effort */ }
+    }
 
     return content
   }
@@ -574,6 +605,34 @@ export class HistoryService {
    * Files whose names don't match either shape are left alone for
    * manual triage.
    */
+  /**
+   * Normalize a bag to the canonical shape on every read:
+   *   __history__/{lineage}/00000001  → marker (sig content only)
+   *   __history__/{lineage}/00000002  → marker
+   *   ...
+   *   __layers__/{sig}                → content (in shared pool)
+   *
+   * Walks every file in the bag, classifies it, and converts to the
+   * canonical shape WITHOUT losing history. Order is preserved via
+   * mtime sort; creation dates are renumbered (acceptable — order is
+   * what matters for undo/redo).
+   *
+   * Idempotent: a well-formed bag is unchanged.
+   *
+   * Cases handled:
+   *   - 64-hex sig file at bag root  → move bytes to __layers__/{sig},
+   *                                    mint a marker pointing at it
+   *   - 8-digit numeric (sig content)→ canonical, keep
+   *   - 8-digit numeric ({layerSig,at} JSON) → legacy pointer; rewrite
+   *                                    as canonical sig content
+   *   - 8-digit numeric (cells JSON) → legacy direct content; sign,
+   *                                    move to pool, mint marker
+   *   - 8-digit numeric (other JSON) → legacy op log; drop
+   *   - any other shape              → drop
+   *
+   * "Start broken, complete safely on the fly" — boot can be entered
+   * with any legacy state and the next listLayers leaves the bag clean.
+   */
   readonly #quarantineNonLayerFiles = async (
     locationSig: string,
   ): Promise<void> => {
@@ -582,43 +641,122 @@ export class HistoryService {
       bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false })
     } catch { return }
 
-    const numericRe = /^\d{1,16}$/
-    const moves: string[] = []
+    const store = get<{ layers: FileSystemDirectoryHandle }>('@hypercomb.social/Store')
+    if (!store?.layers) return
+
+    type Entry = {
+      name: string
+      mtime: number
+      kind: 'canonical' | 'legacy-sig-file' | 'legacy-pointer' | 'legacy-content' | 'drop'
+      bytes?: ArrayBuffer
+      pointerSig?: string
+    }
+    const entries: Entry[] = []
 
     for await (const [name, handle] of (bag as any).entries()) {
       if (handle.kind !== 'file') continue
+      let file: File
+      try { file = await (handle as FileSystemFileHandle).getFile() } catch { continue }
+      const mtime = file.lastModified
 
       if (HistoryService.#SIG_RE.test(name)) {
-        // Sig file = layer content. Must be slim-layer JSON (object
-        // with `cells` array) to stay. Old fat-layer entries from
-        // before the slim shape land here too — they have a `cells`
-        // array, so they pass; the extra fields are ignored at read.
-        try {
-          const file = await (handle as FileSystemFileHandle).getFile()
-          const text = await file.text()
-          const parsed = JSON.parse(text) as { cells?: unknown }
-          if (Array.isArray(parsed?.cells)) continue
-        } catch { /* not JSON or unreadable — quarantine */ }
-        moves.push(name)
-      } else if (HistoryService.#MARKER_RE.test(name)) {
-        // Marker file = a single sig pointing at a content file.
-        // Must be exactly 64 hex chars; anything else is corrupt.
-        try {
-          const file = await (handle as FileSystemFileHandle).getFile()
-          const text = (await file.text()).trim()
-          if (HistoryService.#SIG_RE.test(text)) continue
-        } catch { /* unreadable — quarantine */ }
-        moves.push(name)
-      } else if (numericRe.test(name)) {
-        // Numeric but non-marker length (e.g., legacy 1-7 digit ops).
-        // Doesn't belong here.
-        moves.push(name)
+        const bytes = await file.arrayBuffer().catch(() => null)
+        if (bytes) entries.push({ name, mtime, kind: 'legacy-sig-file', bytes })
+        continue
       }
-      // Anything else (oddly named files) — leave alone for triage.
+
+      if (HistoryService.#MARKER_RE.test(name)) {
+        const text = await file.text().catch(() => '')
+        const trimmed = text.trim()
+        if (HistoryService.#SIG_RE.test(trimmed)) {
+          entries.push({ name, mtime, kind: 'canonical' })
+          continue
+        }
+        try {
+          const parsed = JSON.parse(text) as { layerSig?: string; cells?: unknown }
+          if (typeof parsed?.layerSig === 'string' && HistoryService.#SIG_RE.test(parsed.layerSig)) {
+            entries.push({ name, mtime, kind: 'legacy-pointer', pointerSig: parsed.layerSig })
+            continue
+          }
+          if (Array.isArray(parsed?.cells)) {
+            const bytes = await file.arrayBuffer().catch(() => null)
+            if (bytes) entries.push({ name, mtime, kind: 'legacy-content', bytes })
+            continue
+          }
+        } catch { /* not JSON */ }
+        entries.push({ name, mtime, kind: 'drop' })
+        continue
+      }
+
+      // Other names — leave alone (out-of-band; not our turf)
     }
 
-    for (const name of moves) {
-      try { await bag.removeEntry(name) } catch { /* already gone */ }
+    // Order-preserving normalize. Sort by (mtime, name) — chronological
+    // edit order. Re-emit canonical markers in 00000001..N starting at
+    // the existing max+1 to avoid colliding with other markers we keep.
+    entries.sort((a, b) => a.mtime - b.mtime || a.name.localeCompare(b.name))
+
+    let nextMarker = 0
+    for (const e of entries) {
+      if (e.kind !== 'canonical') continue
+      const n = parseInt(e.name, 10)
+      if (!isNaN(n) && n > nextMarker) nextMarker = n
+    }
+
+    const writePool = async (sig: string, bytes: ArrayBuffer): Promise<void> => {
+      let exists = true
+      try { await store.layers.getFileHandle(sig, { create: false }) } catch { exists = false }
+      if (exists) return
+      const h = await store.layers.getFileHandle(sig, { create: true })
+      const w = await h.createWritable()
+      try { await w.write(bytes) } finally { await w.close() }
+    }
+
+    const writeMarker = async (sig: string): Promise<void> => {
+      nextMarker++
+      const name = String(nextMarker).padStart(8, '0')
+      const h = await bag.getFileHandle(name, { create: true })
+      const w = await h.createWritable()
+      try { await w.write(sig) } finally { await w.close() }
+    }
+
+    for (const e of entries) {
+      try {
+        switch (e.kind) {
+          case 'canonical':
+            // Already in shape; nothing to do.
+            break
+          case 'legacy-sig-file':
+            if (!e.bytes) break
+            await writePool(e.name, e.bytes)
+            await writeMarker(e.name)
+            await bag.removeEntry(e.name)
+            break
+          case 'legacy-pointer':
+            if (!e.pointerSig) break
+            // Rewrite the same numeric file with just the sig (drop
+            // the JSON wrapper). Numeric position stays, content
+            // becomes canonical.
+            {
+              const h = await bag.getFileHandle(e.name, { create: true })
+              const w = await h.createWritable()
+              try { await w.write(e.pointerSig) } finally { await w.close() }
+            }
+            break
+          case 'legacy-content':
+            if (!e.bytes) break
+            {
+              const sig = await SignatureService.sign(e.bytes)
+              await writePool(sig, e.bytes)
+              await bag.removeEntry(e.name)
+              await writeMarker(sig)
+            }
+            break
+          case 'drop':
+            await bag.removeEntry(e.name)
+            break
+        }
+      } catch { /* best-effort per entry */ }
     }
   }
 

@@ -1,23 +1,22 @@
 // diamondcoreprocessor.com/commands/compact.queen.ts
 //
-// /compact — rebase this location's history to two layers:
+// /compact — manual fallback for "rebase to one marker for current state".
 //
-//   #1 (oldest)  empty seed     {cells: [], hidden: []}
-//   #2 (newest)  what's showing  the kept current state
+// With auto-normalization in listLayers, this command is rarely needed —
+// every read path now self-corrects bag shape. /compact remains as the
+// explicit "wipe and rebase" trigger for cases where the user wants a
+// clean slate, or when normalization can't recover (e.g., orphaned
+// markers pointing at sigs the pool no longer has).
 //
-// The empty seed is a real layer file (no longer a virtual anchor),
-// so undo from the current state always lands on a concrete empty
-// position. The kept layer mirrors what the user has on screen at
-// the moment of /compact — that IS the slim layer's job.
-//
-// Direct CRUD: every other layer file in the bag is removed outright.
-// No archive, no TTL — DCP push is the backup story.
+// Rules (per the slim/no-meta model):
+//   - No synthetic empty seed prepended
+//   - One marker if disk has cells, zero markers if not
+//   - History before the rebase IS lost; that's the explicit bargain
+//     of /compact (vs. the non-destructive normalize on every read)
 
 import { QueenBee } from '@hypercomb/core'
 import type { HistoryService, LayerContent } from '../history/history.service.js'
 import type { HistoryCursorService } from '../history/history-cursor.service.js'
-
-const EMPTY_LAYER: LayerContent = { cells: [], hidden: [] }
 
 type Lineage = {
   // explorerDir is async in the live lineage implementation — it
@@ -31,7 +30,7 @@ export class CompactQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'compact'
   override readonly aliases = []
-  override description = 'Rebase this location\'s history to an empty seed + current state'
+  override description = 'Rebase this location\'s history to a single live marker (history is lost)'
 
   protected async execute(_args: string): Promise<void> {
     const history = get('@diamondcoreprocessor.com/HistoryService') as HistoryService | undefined
@@ -42,25 +41,24 @@ export class CompactQueenBee extends QueenBee {
     const locationSig = cursor.state.locationSig
     if (!locationSig) return
 
-    // 1. Delete every existing marker. Sig content files are
-    //    untouched (they may still be live elsewhere; orphan-sig GC
-    //    is a separate concern).
+    // 1. Snapshot current on-disk state.
+    const fresh = await this.#assembleFromDisk(lineage)
+
+    // 2. Wipe existing markers. Pool content is untouched (may still
+    //    be referenced by other lineages or branches).
     const entries = await history.listLayers(locationSig)
     if (entries.length > 0) {
       await history.removeEntries(locationSig, entries.map(e => e.filename))
     }
 
-    // 2. Write empty seed first (mints marker #1), then write the
-    //    fresh on-disk state (mints marker #2). commitLayer always
-    //    appends a new marker, so the two writes are guaranteed to
-    //    produce two distinct entries even if their sigs collide
-    //    with existing sig content files.
-    const fresh = await this.#assembleFromDisk(lineage)
-    await history.commitLayer(locationSig, EMPTY_LAYER)
-    await history.commitLayer(locationSig, fresh)
+    // 3. Mint exactly one marker for the current state — only if
+    //    there's actually something on disk. No synthetic empty seed.
+    if (fresh.cells.length > 0 || fresh.hidden.length > 0) {
+      await history.commitLayer(locationSig, fresh)
+    }
 
-    // 3. Re-hydrate cursor from disk; land on the top (the fresh
-    //    layer — this IS what's showing now).
+    // 4. Re-hydrate cursor; land on the top (single marker, or
+    //    nothing if disk was empty).
     await cursor.load(locationSig)
     cursor.seek(cursor.state.total)
   }
