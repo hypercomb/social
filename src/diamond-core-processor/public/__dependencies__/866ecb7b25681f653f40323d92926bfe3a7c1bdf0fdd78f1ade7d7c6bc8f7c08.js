@@ -1045,32 +1045,21 @@ var HistoryService = class _HistoryService {
    * manual triage.
    */
   /**
-   * Normalize a bag to the canonical shape on every read:
-   *   __history__/{lineage}/00000001  → marker (sig content only)
-   *   __history__/{lineage}/00000002  → marker
-   *   ...
-   *   __layers__/{sig}                → content (in shared pool)
+   * Normalize a bag on every read: keep canonical markers ONLY, drop
+   * everything else.
    *
-   * Walks every file in the bag, classifies it, and converts to the
-   * canonical shape WITHOUT losing history. Order is preserved via
-   * mtime sort; creation dates are renumbered (acceptable — order is
-   * what matters for undo/redo).
+   * Canonical = NNNN file with content that's exactly a 64-hex sig.
+   * Anything else (legacy sig-named bag entries, JSON pointer markers,
+   * direct-content markers, op logs, oddly-named files) is removed.
+   * No migration — pre-canonical bags lose their history.
    *
-   * Idempotent: a well-formed bag is unchanged.
+   * Acceptable trade-off (per the explicit "old users lose history,
+   * we have no users really" call): the renderer falls through to live
+   * disk when a bag has no markers, so tiles still display; only the
+   * undo/redo timeline is reset. New events going forward mint
+   * canonical markers and the timeline rebuilds from there.
    *
-   * Cases handled:
-   *   - 64-hex sig file at bag root  → move bytes to __layers__/{sig},
-   *                                    mint a marker pointing at it
-   *   - 8-digit numeric (sig content)→ canonical, keep
-   *   - 8-digit numeric ({layerSig,at} JSON) → legacy pointer; rewrite
-   *                                    as canonical sig content
-   *   - 8-digit numeric (cells JSON) → legacy direct content; sign,
-   *                                    move to pool, mint marker
-   *   - 8-digit numeric (other JSON) → legacy op log; drop
-   *   - any other shape              → drop
-   *
-   * "Start broken, complete safely on the fly" — boot can be entered
-   * with any legacy state and the next listLayers leaves the bag clean.
+   * Idempotent: a clean bag is unchanged.
    */
   #quarantineNonLayerFiles = async (locationSig) => {
     let bag;
@@ -1079,117 +1068,22 @@ var HistoryService = class _HistoryService {
     } catch {
       return;
     }
-    const store = get("@hypercomb.social/Store");
-    if (!store?.layers) return;
-    const entries = [];
+    const drop = [];
     for await (const [name, handle] of bag.entries()) {
       if (handle.kind !== "file") continue;
-      let file;
-      try {
-        file = await handle.getFile();
-      } catch {
-        continue;
-      }
-      const mtime = file.lastModified;
-      if (_HistoryService.#SIG_RE.test(name)) {
-        const bytes = await file.arrayBuffer().catch(() => null);
-        if (bytes) entries.push({ name, mtime, kind: "legacy-sig-file", bytes });
-        continue;
-      }
       if (_HistoryService.#MARKER_RE.test(name)) {
-        const text = await file.text().catch(() => "");
-        const trimmed = text.trim();
-        if (_HistoryService.#SIG_RE.test(trimmed)) {
-          entries.push({ name, mtime, kind: "canonical" });
-          continue;
-        }
         try {
-          const parsed = JSON.parse(text);
-          if (typeof parsed?.layerSig === "string" && _HistoryService.#SIG_RE.test(parsed.layerSig)) {
-            entries.push({ name, mtime, kind: "legacy-pointer", pointerSig: parsed.layerSig });
-            continue;
-          }
-          if (Array.isArray(parsed?.cells)) {
-            const bytes = await file.arrayBuffer().catch(() => null);
-            if (bytes) entries.push({ name, mtime, kind: "legacy-content", bytes });
-            continue;
-          }
+          const file = await handle.getFile();
+          const text = (await file.text()).trim();
+          if (_HistoryService.#SIG_RE.test(text)) continue;
         } catch {
         }
-        entries.push({ name, mtime, kind: "drop" });
-        continue;
       }
+      drop.push(name);
     }
-    entries.sort((a, b) => a.mtime - b.mtime || a.name.localeCompare(b.name));
-    let nextMarker = 0;
-    for (const e of entries) {
-      if (e.kind !== "canonical") continue;
-      const n = parseInt(e.name, 10);
-      if (!isNaN(n) && n > nextMarker) nextMarker = n;
-    }
-    const writePool = async (sig, bytes) => {
-      let exists = true;
+    for (const name of drop) {
       try {
-        await store.layers.getFileHandle(sig, { create: false });
-      } catch {
-        exists = false;
-      }
-      if (exists) return;
-      const h = await store.layers.getFileHandle(sig, { create: true });
-      const w = await h.createWritable();
-      try {
-        await w.write(bytes);
-      } finally {
-        await w.close();
-      }
-    };
-    const writeMarker = async (sig) => {
-      nextMarker++;
-      const name = String(nextMarker).padStart(8, "0");
-      const h = await bag.getFileHandle(name, { create: true });
-      const w = await h.createWritable();
-      try {
-        await w.write(sig);
-      } finally {
-        await w.close();
-      }
-    };
-    for (const e of entries) {
-      try {
-        switch (e.kind) {
-          case "canonical":
-            break;
-          case "legacy-sig-file":
-            if (!e.bytes) break;
-            await writePool(e.name, e.bytes);
-            await writeMarker(e.name);
-            await bag.removeEntry(e.name);
-            break;
-          case "legacy-pointer":
-            if (!e.pointerSig) break;
-            {
-              const h = await bag.getFileHandle(e.name, { create: true });
-              const w = await h.createWritable();
-              try {
-                await w.write(e.pointerSig);
-              } finally {
-                await w.close();
-              }
-            }
-            break;
-          case "legacy-content":
-            if (!e.bytes) break;
-            {
-              const sig = await SignatureService.sign(e.bytes);
-              await writePool(sig, e.bytes);
-              await bag.removeEntry(e.name);
-              await writeMarker(sig);
-            }
-            break;
-          case "drop":
-            await bag.removeEntry(e.name);
-            break;
-        }
+        await bag.removeEntry(name);
       } catch {
       }
     }

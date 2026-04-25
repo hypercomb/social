@@ -1848,7 +1848,7 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
     this.renderedCells.clear();
     for (const cell of cells) this.renderedCells.set(cell.label, cell);
     await this.applyGeometry(cells);
-    if (wasEmpty && cells.length > 0 && this.pixiApp && this.pixiContainer && this.pixiRenderer) {
+    if (wasEmpty && cells.length > 0 && this.pixiApp && this.pixiContainer && this.pixiRenderer && !this.suppressMeshRecenter) {
       const s = this.pixiRenderer.screen;
       this.pixiApp.stage.position.set(s.width * 0.5, s.height * 0.5);
       this.pixiContainer.scale.set(2);

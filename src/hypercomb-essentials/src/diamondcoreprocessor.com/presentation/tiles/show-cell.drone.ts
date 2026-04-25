@@ -1529,8 +1529,14 @@ export class ShowCellDrone extends Drone {
 
     await this.applyGeometry(cells)
 
-    if (wasEmpty && cells.length > 0 && this.pixiApp && this.pixiContainer && this.pixiRenderer) {
-      // first tile on empty screen → center viewport and zoom 2×
+    if (wasEmpty && cells.length > 0 && this.pixiApp && this.pixiContainer && this.pixiRenderer && !this.suppressMeshRecenter) {
+      // first tile on empty screen → center viewport and zoom 2×.
+      // Gated on !suppressMeshRecenter: during undo/redo the cursor-
+      // change handler sets that flag, and we MUST NOT touch the
+      // viewport — the user expects to keep their current scale/pan
+      // across history navigation. The empty→populated transition
+      // (e.g. redo bringing cells back after undoing them all away)
+      // would otherwise zoom them out of context.
       const s = this.pixiRenderer.screen
       this.pixiApp.stage.position.set(s.width * 0.5, s.height * 0.5)
       this.pixiContainer.scale.set(2)
