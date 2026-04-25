@@ -1,13 +1,18 @@
 // diamondcoreprocessor.com/history/collapse-history.queen.ts
 //
-// /collapse-history — dev utility that walks every location bag under
-// __history__/ and deletes all layer entries except the highest-numbered
-// one (the current head). Also clears persisted cursor positions so
-// every bag snaps to head on the next load. Useful for wiping
-// accumulated noise (empty-state commits, duplicates) without losing
-// the current state.
+// /collapse-history — dev utility that walks every lineage bag under
+// __history__/ and keeps only the chronologically newest layer entry,
+// soft-deleting the rest into __temporary__/. Also clears persisted
+// cursor positions so every bag snaps to head on the next load.
+//
+// Operates on the current bag-root layout: layer files live directly
+// at __history__/{lineageSig}/{sig}, ordered by file.lastModified.
+// No inner `layers/` subdir — that path was removed in the bag-root
+// refactor; the migrator in HistoryService cleans up legacy bags
+// lazily on first listLayers call.
 
 import { QueenBee } from '@hypercomb/core'
+import type { HistoryService } from './history.service.js'
 
 type HistoryStore = {
   history: FileSystemDirectoryHandle
@@ -27,34 +32,28 @@ export class CollapseHistoryQueenBee extends QueenBee {
 
   async #collapse(): Promise<void> {
     const store = get<HistoryStore>('@hypercomb.social/Store')
-    if (!store?.history) {
-      console.warn('[/collapse-history] Store not available')
+    const history = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
+    if (!store?.history || !history) {
+      console.warn('[/collapse-history] Store or HistoryService not available')
       return
     }
 
     let bags = 0
     let removed = 0
 
-    for await (const [, bag] of store.history.entries()) {
+    for await (const [lineageSig, bag] of store.history.entries()) {
       if (bag.kind !== 'directory') continue
       bags++
-      try {
-        const layers = await (bag as FileSystemDirectoryHandle).getDirectoryHandle('layers', { create: false })
-        const names: string[] = []
-        for await (const [name, handle] of layers.entries()) {
-          if (handle.kind === 'file' && name.endsWith('.json')) names.push(name)
-        }
-        if (names.length <= 1) continue
-        names.sort()
-        const head = names[names.length - 1]
-        for (const name of names) {
-          if (name === head) continue
-          await layers.removeEntry(name)
-          removed++
-        }
-      } catch {
-        // no layers/ dir in this bag — nothing to collapse
-      }
+      // listLayers handles the legacy-`layers/` migrator and the
+      // bag-pollution cleanup before returning, so by the time we
+      // see the rows the bag is well-formed.
+      const entries = await history.listLayers(lineageSig)
+      if (entries.length <= 1) continue
+      const keep = entries[entries.length - 1]   // newest by mtime
+      const toDelete = entries
+        .filter(e => e.filename !== keep.filename)
+        .map(e => e.filename)
+      removed += await history.removeEntries(lineageSig, toDelete)
     }
 
     // Clear persisted cursor positions so each bag snaps to head next load

@@ -590,7 +590,6 @@ export class ShowCellDrone extends Drone {
   #cachedSigLocation: { key: string; sig: string } = { key: '', sig: '' }
 
   private computeSignatureLocation = async (lineage: any): Promise<{ key: string; sig: string }> => {
-    const domain = String(lineage?.domain?.() ?? lineage?.domainLabel?.() ?? 'hypercomb.io')
     const explorerSegmentsRaw = lineage?.explorerSegments?.()
     const explorerSegments = Array.isArray(explorerSegmentsRaw)
       ? explorerSegmentsRaw
@@ -598,10 +597,11 @@ export class ShowCellDrone extends Drone {
         .filter((x: string) => x.length > 0)
       : []
 
-    const lineagePath = explorerSegments.join('/')
-    // key = space/domain/path/secret/cell (empty segments omitted)
-    const parts = [this.#space, domain, lineagePath, this.#secret, 'cell'].filter(Boolean)
-    const key = parts.join('/')
+    // Bag identity = ancestry only. No domain (display namespace, not
+    // identity). No room/secret (mesh-layer concerns; they shift with
+    // peer credentials but the local bag is the location, you're
+    // already there). Must match HistoryService.sign().
+    const key = explorerSegments.join('/')
 
     // fast path: return cached result if key hasn't changed
     if (key === this.#cachedSigLocationKey) return this.#cachedSigLocation
@@ -1336,75 +1336,45 @@ export class ShowCellDrone extends Drone {
       // Load cursor for this location (keeps cursor position if already set)
       if (cursorService) await cursorService.load(sig.sig)
 
-      const cursorState = cursorService?.state
-      const isRewound = cursorState?.rewound ?? false
-
-      if (isRewound && cursorService) {
-        // Rewound: read the layer content at cursor position. Layers are
-        // signature-addressed full snapshots — cells, contentByCell, tagsByCell,
-        // hidden, layoutSig are all we need to reconstruct the past view.
-        // No op replay, no divergence — just read the layer.
+      // Layer drives the cell set. When the cursor has a layer at this
+      // position, intersect union with it AND import any layer cells
+      // missing from disk (so historical cells render even after their
+      // OPFS dirs are gone).
+      //
+      // When there is NO layer at all (fresh lineage, no commits yet),
+      // fall through with `union` = live disk cells. The committer
+      // mints a baseline on the first user event; until then live
+      // disk is the sensible default — refusing to render leaves the
+      // user with a blank canvas and no obvious recovery path.
+      if (cursorService) {
         const content = await cursorService.layerContentAtCursor()
+        const cursorState = cursorService.state
 
-        // Soft landing for position 0 on legacy cursors that return null
-        // there: stepping past the first layer means "pre-history / empty
-        // default state". Clear the live cell set so the grid renders
-        // empty instead of falling through to live OPFS. No writes — the
-        // live state is untouched, we just don't display it.
-        if (!content && cursorState?.position === 0) {
+        // Two distinct null-content cases:
+        //
+        //   (A) Bag has markers, user undone past them → position 0,
+        //       cursor.layerContentAtCursor returns null. Render empty
+        //       (synthetic "pre-history" view).
+        //
+        //   (B) Bag has no markers at all (fresh lineage, sig migration
+        //       orphaned old bags, etc.) → also position 0, also null.
+        //       Fall through to live OPFS so tiles display from disk.
+        //
+        // Distinguish by total: total > 0 means "history exists, you're
+        // before it" (case A). total === 0 means "no history" (case B).
+        if (!content && cursorState?.position === 0 && (cursorState?.total ?? 0) > 0) {
           union.clear()
           localCellSet.clear()
         }
 
         if (content) {
-          const cellsAtCursor = new Set(content.cells)
+          const allowed = new Set(content.cells)
           for (const cell of [...union]) {
-            if (!cellsAtCursor.has(cell)) union.delete(cell)
+            if (!allowed.has(cell)) union.delete(cell)
           }
           for (const cell of content.cells) {
             union.add(cell)
             localCellSet.add(cell)
-          }
-
-          // contentByCell must be set on every render while rewound, not just
-          // when reconKey changes. Line 1296 clears #cursorPropsOverride to
-          // null at the top of every render; without this repopulation, the
-          // second render at the same cursor position (triggered by
-          // synchronize / substrate / resize) leaves the override null, and
-          // loadCellImages falls back to livePropsIndex — which has no entry
-          // for historical cells whose content has since moved or whose
-          // tiles were deleted. Images vanish on the second rewound render.
-          if (Object.keys(content.contentByCell).length > 0) {
-            this.#cursorPropsOverride = new Map(Object.entries(content.contentByCell))
-          }
-
-          const reconKey = `${cursorState!.locationSig}:${cursorState!.position}`
-          if (reconKey !== this.#cursorReconstructionKey) {
-            this.#cursorReconstructionKey = reconKey
-
-            // tagsByCell: override the live tag cache with cursor-time tags
-            for (const [cell, tags] of Object.entries(content.tagsByCell)) {
-              this.cellTagsCache.set(cell, tags)
-            }
-
-            // NOTE: previously, rewound-render resolved `content.layoutSig`
-            // and applied orientation/pivot/gap/mode from the historical
-            // layer, mutating `this.#hexGeo`, `this.#flat`, `this.#pivot`,
-            // and `this.#layoutMode`. That mutation was one-way — when the
-            // cursor returned to head, nothing restored the live geometry,
-            // so a single Ctrl+Z followed by Ctrl+Y left the app with
-            // historical (often zero-gap) geometry applied to the current
-            // view until a full page refresh reset the defaults. This also
-            // produced the "crunched tiles after Ctrl+Z" regression when
-            // historical layers carried uninitialised layout resources.
-            //
-            // For now, historical layout is intentionally NOT applied.
-            // Cell set / contentByCell / tagsByCell reconstruction above
-            // still runs, so the set of cells and their content/tags match
-            // the past state, while dimensions stay on the user's live
-            // layout. Re-enable once (a) every historical layer is known
-            // to carry valid layout state, and (b) there is a symmetric
-            // "restore live layout" path when the cursor exits rewound.
           }
         }
       }
@@ -1566,8 +1536,14 @@ export class ShowCellDrone extends Drone {
 
     await this.applyGeometry(cells)
 
-    if (wasEmpty && cells.length > 0 && this.pixiApp && this.pixiContainer && this.pixiRenderer) {
-      // first tile on empty screen → center viewport and zoom 2×
+    if (wasEmpty && cells.length > 0 && this.pixiApp && this.pixiContainer && this.pixiRenderer && !this.suppressMeshRecenter) {
+      // first tile on empty screen → center viewport and zoom 2×.
+      // Gated on !suppressMeshRecenter: during undo/redo the cursor-
+      // change handler sets that flag, and we MUST NOT touch the
+      // viewport — the user expects to keep their current scale/pan
+      // across history navigation. The empty→populated transition
+      // (e.g. redo bringing cells back after undoing them all away)
+      // would otherwise zoom them out of context.
       const s = this.pixiRenderer.screen
       this.pixiApp.stage.position.set(s.width * 0.5, s.height * 0.5)
       this.pixiContainer.scale.set(2)
@@ -1953,12 +1929,14 @@ export class ShowCellDrone extends Drone {
       const nowRewound = state?.rewound ?? false
       const nowPosition = state?.position ?? -1
 
-      // At head and position just bumped = new layer arrived. The
-      // incremental path already handled it — skip full re-render.
-      if (!nowRewound && !this.#lastCursorRewound && nowPosition > this.#lastCursorPosition) {
-        this.#lastCursorPosition = nowPosition
-        return
-      }
+      // No early-return for "new layer at head" anymore. The previous
+      // optimisation assumed an incremental cell:added/removed path
+      // had already updated the view — but in the layer-driven model
+      // the LAYER is the source of truth for what cells exist. A
+      // newly-committed layer at head IS the only signal the
+      // renderer has to learn that a cell was added; skipping the
+      // re-render here was why the added tile didn't appear until
+      // refresh or undo/redo.
 
       // Any actual cursor movement (undo/redo/seek) or rewound↔head transition
       if (nowPosition === this.#lastCursorPosition && nowRewound === this.#lastCursorRewound) return
@@ -1991,7 +1969,35 @@ export class ShowCellDrone extends Drone {
       // layer mirrors live state because every user intent commits, so
       // applying head is a no-op modulo redundant emits.
       void this.#applyCursorLayout()
+
+      // Preserve viewport (scale + pan) across the undo/redo re-render.
+      // Without this, applyGeometry's mesh-recenter (line ~1720) shifts
+      // the canvas every time the cell set changes — every step jerks
+      // the camera and the user loses spatial context. Two-part guard:
+      //   1. Suppress the mesh recenter for this re-render (the flag
+      //      gets cleared again on the next genuine layer change).
+      //   2. Snapshot stage / container transforms before requestRender
+      //      and restore after, in case any other path nudges them.
+      this.suppressMeshRecenter = true
+      const app = this.pixiApp as any
+      const cont = this.pixiContainer as any
+      const snap = (app && cont) ? {
+        stagePos: { x: app.stage.position.x, y: app.stage.position.y },
+        contPos:  { x: cont.position.x,      y: cont.position.y      },
+        contScale:{ x: cont.scale.x,         y: cont.scale.y         },
+      } : null
       this.requestRender()
+      if (snap && app && cont) {
+        // Restore on the next microtask so requestRender's queued
+        // render runs against the original transforms. The render
+        // itself will read the snapshot values; nothing in the
+        // render path mutates them under the suppress flag.
+        queueMicrotask(() => {
+          app.stage.position.set(snap.stagePos.x, snap.stagePos.y)
+          cont.position.set(snap.contPos.x, snap.contPos.y)
+          cont.scale.set(snap.contScale.x, snap.contScale.y)
+        })
+      }
     })
 
     // search:filter effect — live-filter visible tiles by keyword
@@ -2417,51 +2423,14 @@ export class ShowCellDrone extends Drone {
     this.cellHideTextCache.clear()
   }
 
-  #applyCursorLayout = async (): Promise<void> => {
-    const cursorService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryCursorService') as HistoryCursorService | undefined
-    if (!cursorService) return
-    const content = await cursorService.layerContentAtCursor()
-    if (!content?.layoutSig) return
-    const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as
-      { getResource: (sig: string) => Promise<Blob | null> } | undefined
-    if (!store) return
-    let layout: {
-      mode?: string
-      orientation?: 'flat-top' | 'point-top'
-      pivot?: boolean
-      accent?: string
-      gapPx?: number
-      textOnly?: boolean
-    } | null = null
-    try {
-      const blob = await store.getResource(content.layoutSig)
-      if (!blob) return
-      layout = JSON.parse(await blob.text())
-    } catch {
-      return
-    }
-    if (!layout) return
-
-    // text-only: newly captured field — apply unconditionally against the
-    // current live state so undo/redo of the controls-bar toggle works.
-    // Missing field implies default (false).
-    const nextTextOnly = !!layout.textOnly
-    if (this.#textOnly !== nextTextOnly) {
-      this.emitEffect<{ textOnly: boolean }>('render:set-text-only', { textOnly: nextTextOnly })
-    }
-    if (layout.orientation && layout.orientation !== (this.#flat ? 'flat-top' : 'point-top')) {
-      this.emitEffect<{ flat: boolean }>('render:set-orientation', { flat: layout.orientation === 'flat-top' })
-    }
-    if (typeof layout.pivot === 'boolean' && layout.pivot !== this.#pivot) {
-      this.emitEffect<{ pivot: boolean }>('render:set-pivot', { pivot: layout.pivot })
-    }
-    if (typeof layout.gapPx === 'number' && layout.gapPx > 0 && layout.gapPx !== this.#hexGeo.gapPx) {
-      this.emitEffect<{ gapPx: number }>('render:set-gap', { gapPx: layout.gapPx })
-    }
-    // layout.mode intentionally not restored — dense/spiral has been
-    // phased out and the renderer operates only in pinned mode. Historical
-    // layers that still carry `mode: 'dense'` stay inert on replay.
-  }
+  // Layout reconstruction was layer-driven via `content.layoutSig`.
+  // The slim layer doesn't carry that field — layout is the live
+  // bee's own state, owned by the layout drone, not embedded in
+  // the lineage's history snapshot. If past-layout playback is
+  // wanted, the layout bee should commit its own per-state
+  // primitive (its own array of properties) and a reader should
+  // ask THAT primitive at the cursor's position.
+  #applyCursorLayout = async (): Promise<void> => { /* no-op under slim layer */ }
 
   protected override dispose = (): void => {
     window.removeEventListener('synchronize', this.requestRender)

@@ -42,10 +42,16 @@ export const ensureInstall = async (): Promise<void> => {
 
   await store.initialize()
 
-  // ── Fast path: cached OPFS state present → boot from cache, no network ──
-  // Push-only model: we do not poll for upstream updates on load. If we have
-  // a cached install and the spot-check passes, trust it. New content lands
-  // via an explicit DCP push (see resyncFromSentinel on actions:available).
+  // ── Push-only: cached OPFS state is trusted; no boot-time pull ──
+  // DCP push is the ONLY legitimate source of update (sentinel/portal
+  // delivers new state via resyncFromSentinel). The runtime never
+  // peeks upstream on boot to decide whether to reinstall — that
+  // would be a pull, contradicting the push-only contract and racing
+  // with in-flight session state.
+  //
+  // Spot-check the cached install for integrity (first bee file
+  // exists in OPFS). If yes, boot from cache. If not, fall through
+  // to a cold install from local content.
   const cachedManifest = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
   if (cachedManifest && cachedManifest.bees.length > 0) {
     const cachedInstallSig = (localStorage.getItem(INSTALLED_KEY) ?? '').trim()

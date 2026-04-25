@@ -49,10 +49,18 @@ export class DomainLayerSource implements LayerInstallSource {
         ? parsed.bees.map((x: unknown) => String(x ?? '').trim().toLowerCase()).filter((x: string) => /^[a-f0-9]{64}$/i.test(x))
         : []
 
-    const children =
-      Array.isArray(parsed.children)
-        ? parsed.children.map((x: unknown) => String(x ?? '').trim().toLowerCase()).filter((x: string) => /^[a-f0-9]{64}$/i.test(x))
-        : []
+    // Child layer sigs live under `cells`. Universal rule: a 64-hex
+    // string in this slot would be a sig pointer to a JSON array
+    // resource (forward-compat — TODO resolve when first used).
+    // Legacy `layers`/`children` accepted during the transition.
+    const rawChildren =
+      Array.isArray(parsed.cells) ? parsed.cells
+      : Array.isArray(parsed.layers) ? parsed.layers
+      : Array.isArray(parsed.children) ? parsed.children
+      : []
+    const children = rawChildren
+      .map((x: unknown) => String(x ?? '').trim().toLowerCase())
+      .filter((x: string) => /^[a-f0-9]{64}$/i.test(x))
 
     const name = String(parsed.name ?? '').trim()
 

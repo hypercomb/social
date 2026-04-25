@@ -31,10 +31,20 @@ export class OpfsInstallFileSource implements LayerInstallSource {
           ? parsed.bees.map((x: unknown) => String(x ?? '').trim().toLowerCase()).filter((x: string) => x.length)
           : []
 
-      const children =
-        Array.isArray(parsed.children)
-          ? parsed.children.map((x: unknown) => String(x ?? '').trim().toLowerCase()).filter((x: string) => x.length)
-          : []
+      // Child layer sigs live under `cells` — same primitive name as
+      // the slim hypercomb.io layer. The field is normally an inline
+      // `[sig, sig]` array; future writers may use a single sig that
+      // points at a JSON resource holding the array (merkle
+      // composition). Inline-array path here; sig-pointer resolution
+      // is a TODO when a writer first emits one.
+      const rawChildren =
+        Array.isArray(parsed.cells) ? parsed.cells
+        : Array.isArray(parsed.layers) ? parsed.layers
+        : Array.isArray(parsed.children) ? parsed.children
+        : []
+      const children = rawChildren
+        .map((x: unknown) => String(x ?? '').trim().toLowerCase())
+        .filter((x: string) => x.length)
 
       const layerName = String(parsed.name ?? '').trim()
 
