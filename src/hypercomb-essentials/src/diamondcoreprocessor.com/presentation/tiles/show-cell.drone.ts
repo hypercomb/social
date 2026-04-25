@@ -586,7 +586,12 @@ export class ShowCellDrone extends Drone {
     return !!ok
   }
 
-  #cachedSigLocationKey = ''
+  // Use null sentinel (not '') so the very first call for the root
+  // lineage (key === '') doesn't false-hit the cache and return
+  // the placeholder { sig: '' }. That bug surfaced as a render loop:
+  // cursor.load('') reset cursor state to empty → emit → re-render →
+  // cursor.load('') again, indefinitely.
+  #cachedSigLocationKey: string | null = null
   #cachedSigLocation: { key: string; sig: string } = { key: '', sig: '' }
 
   private computeSignatureLocation = async (lineage: any): Promise<{ key: string; sig: string }> => {
@@ -603,8 +608,10 @@ export class ShowCellDrone extends Drone {
     // already there). Must match HistoryService.sign().
     const key = explorerSegments.join('/')
 
-    // fast path: return cached result if key hasn't changed
-    if (key === this.#cachedSigLocationKey) return this.#cachedSigLocation
+    // fast path: return cached result if key hasn't changed (and we've
+    // actually computed at least once — null sentinel above guards the
+    // first call from a placeholder hit).
+    if (this.#cachedSigLocationKey !== null && key === this.#cachedSigLocationKey) return this.#cachedSigLocation
 
     // use SignatureStore.signText() for memoization — same lineage path = same sig
     const sigStore = get<SignatureStore>('@hypercomb/SignatureStore')

@@ -81,6 +81,16 @@ export class HistoryCursorService extends EventTarget {
    * no cold load, no empty-texture flash.
    */
   async load(locationSig: string): Promise<void> {
+    // Guard: never accept a falsy/empty/short sig. A real lineage sig is
+    // 64 hex chars (sha256). Anything else is upstream garbage (e.g. a
+    // stale cache returning { sig: '' }). Silently overwriting a valid
+    // cursor state with an empty bag's [] from listLayers('') was the
+    // source of an infinite render loop. Bail out without touching state.
+    if (!locationSig || typeof locationSig !== 'string' || locationSig.length < 8) {
+      console.warn('[cursor.load] reject: invalid locationSig', { locationSig })
+      return
+    }
+
     const historyService = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
     if (!historyService) {
       console.log('[cursor.load] skip: no HistoryService', { locationSig: locationSig?.slice(0, 8) })
