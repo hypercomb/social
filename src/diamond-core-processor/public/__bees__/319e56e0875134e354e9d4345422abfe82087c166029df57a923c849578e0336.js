@@ -16,7 +16,6 @@ var LayerCommitter = class {
   // construction and keep the latest value locally. Late subscribers get
   // the last-emitted value automatically (EffectBus replay).
   #layout = {
-    version: 2,
     orientation: "point-top",
     pivot: false,
     accent: "",

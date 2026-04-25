@@ -1738,6 +1738,11 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
       if (cursorService) await cursorService.load(sig.sig);
       if (cursorService) {
         const content = await cursorService.layerContentAtCursor();
+        const cursorState2 = cursorService.state;
+        if (!content && cursorState2?.position === 0) {
+          union.clear();
+          localCellSet.clear();
+        }
         if (content) {
           const allowed = new Set(content.cells);
           for (const cell of [...union]) {

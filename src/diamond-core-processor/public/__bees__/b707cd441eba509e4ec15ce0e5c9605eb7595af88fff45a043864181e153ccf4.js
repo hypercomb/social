@@ -806,6 +806,37 @@ window.ioc.register("@diamondcoreprocessor.com/HistoryService", _historyService)
 
 // src/diamondcoreprocessor.com/history/history-cursor.service.ts
 import { EffectBus } from "@hypercomb/core";
+
+// src/diamondcoreprocessor.com/history/layer-diff.ts
+var EMPTY = { cells: [], hidden: [] };
+var diffLayers = (prev, next) => {
+  const p = prev ?? EMPTY;
+  const diffs = [];
+  const prevCellSet = new Set(p.cells);
+  const nextCellSet = new Set(next.cells);
+  for (const c of next.cells) if (!prevCellSet.has(c)) diffs.push({ kind: "cell-added", cell: c });
+  for (const c of p.cells) if (!nextCellSet.has(c)) diffs.push({ kind: "cell-removed", cell: c });
+  if (setEquals(prevCellSet, nextCellSet) && !sequenceEquals(p.cells, next.cells)) {
+    diffs.push({ kind: "cells-reordered", from: [...p.cells], to: [...next.cells] });
+  }
+  const prevHidden = new Set(p.hidden);
+  const nextHidden = new Set(next.hidden);
+  for (const c of next.hidden) if (!prevHidden.has(c)) diffs.push({ kind: "cell-hidden", cell: c });
+  for (const c of p.hidden) if (!nextHidden.has(c)) diffs.push({ kind: "cell-unhidden", cell: c });
+  return diffs;
+};
+var setEquals = (a, b) => {
+  if (a.size !== b.size) return false;
+  for (const v of a) if (!b.has(v)) return false;
+  return true;
+};
+var sequenceEquals = (a, b) => {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+};
+
+// src/diamondcoreprocessor.com/history/history-cursor.service.ts
 var HistoryCursorService = class _HistoryCursorService extends EventTarget {
   #locationSig = "";
   #position = 0;
@@ -813,6 +844,10 @@ var HistoryCursorService = class _HistoryCursorService extends EventTarget {
   // Last-fetched layer content, keyed by layer signature
   #cachedLayerSig = null;
   #cachedContent = null;
+  // Per-signature content cache used by group-step walking so repeated
+  // undo/redo presses never re-read OPFS for the same layer.
+  #contentBySig = /* @__PURE__ */ new Map();
+  #groupStepEnabled = _HistoryCursorService.#loadGroupStep();
   get state() {
     const entry = this.#position > 0 ? this.#layers[this.#position - 1] : null;
     return {
@@ -820,8 +855,19 @@ var HistoryCursorService = class _HistoryCursorService extends EventTarget {
       position: this.#position,
       total: this.#layers.length,
       rewound: this.#layers.length > 0 && this.#position < this.#layers.length,
-      at: entry?.at ?? 0
+      at: entry?.at ?? 0,
+      groupStepEnabled: this.#groupStepEnabled
     };
+  }
+  get groupStepEnabled() {
+    return this.#groupStepEnabled;
+  }
+  setGroupStepEnabled(on) {
+    const next = !!on;
+    if (next === this.#groupStepEnabled) return;
+    this.#groupStepEnabled = next;
+    _HistoryCursorService.#saveGroupStep(next);
+    this.#emit();
   }
   /**
    * Load (or reload) layer history for a location. Restores persisted
@@ -903,28 +949,151 @@ var HistoryCursorService = class _HistoryCursorService extends EventTarget {
   /**
    * Move cursor to an absolute position (1-based, clamped).
    *
-   * When layers exist, the cursor never sits below position 1 — "fully
-   * rewound" reveals the oldest recorded state, not the pre-history
-   * empty state. The UI's START anchor row is the visual terminator for
-   * that floor; there is no reachable cursor position beyond it. If no
-   * layers exist at all, position 0 is allowed (there's nothing to
-   * show but empty).
+   * Position 0 is the pre-history / empty state. Layers exist above it;
+   * undo can walk all the way back to 0 so the user returns to the
+   * default. At 0, layerContentAtCursor() returns an empty snapshot and
+   * the renderer clears the grid.
    */
   seek(position) {
-    const floor = this.#layers.length > 0 ? 1 : 0;
-    const clamped = Math.max(floor, Math.min(position, this.#layers.length));
+    const clamped = Math.max(0, Math.min(position, this.#layers.length));
     if (clamped === this.#position) return;
     this.#position = clamped;
     this.#emit();
   }
-  /** Step backward one layer, but never past the oldest recorded state. */
+  /**
+   * Step backward. Minimal step (one layer) by default; when group-step is
+   * on, skip edit-only layers and land on the earliest cell add/remove in
+   * the preceding group. Walks all the way down to position 0 (empty
+   * pre-history state).
+   */
   undo() {
-    const floor = this.#layers.length > 0 ? 1 : 0;
-    if (this.#position > floor) this.seek(this.#position - 1);
+    if (this.#groupStepEnabled) {
+      void this.#undoGroupStep();
+      return;
+    }
+    if (this.#position > 0) this.seek(this.#position - 1);
   }
-  /** Step forward one layer. */
+  /**
+   * Step forward. Minimal step by default; when group-step is on, skip
+   * edit-only layers and land on the earliest cell add/remove of the next
+   * group.
+   */
   redo() {
+    if (this.#groupStepEnabled) {
+      void this.#redoGroupStep();
+      return;
+    }
     if (this.#position < this.#layers.length) this.seek(this.#position + 1);
+  }
+  /**
+   * Group-step undo. Walk backward from the current position skipping
+   * edit-only layers (content, tags, notes, layout). When a cell
+   * add/remove is hit, land there — then continue walking back while
+   * the preceding layer is ALSO a cell-op AND its timestamp is within
+   * GROUP_TIME_WINDOW_MS. That coalesces a multi-select burst (N tiles
+   * added in one gesture = N adjacent cell-op layers ~microseconds
+   * apart) into a single jump, but keeps separate gestures on separate
+   * groups even when they're both cell ops.
+   */
+  async #undoGroupStep() {
+    if (this.#position <= 0) return;
+    let target = this.#position - 1;
+    while (target >= 1 && !await this.#isCellsAtPosition(target)) {
+      target -= 1;
+    }
+    if (target < 1) {
+      this.seek(0);
+      return;
+    }
+    while (target > 1 && await this.#inSameCellsBurst(target)) {
+      target -= 1;
+    }
+    this.seek(target);
+  }
+  /**
+   * Group-step redo. Walk forward skipping edit-only layers until we hit
+   * a cell add/remove. That position IS the earliest of the next burst
+   * (we just crossed the boundary into it); further redoes step past the
+   * rest of the burst.
+   */
+  async #redoGroupStep() {
+    const total = this.#layers.length;
+    if (this.#position >= total) return;
+    let target = this.#position + 1;
+    while (target <= total && !await this.#isCellsAtPosition(target)) {
+      target += 1;
+    }
+    if (target > total) {
+      this.seek(total);
+      return;
+    }
+    this.seek(target);
+  }
+  /**
+   * True when both the layer at `position` and the layer at `position-1`
+   * are cell add/remove layers AND their timestamps are within the group
+   * burst window. This is how we distinguish "multi-select added 3 tiles
+   * in one gesture" (all adjacent in time) from "user added a tile
+   * earlier, then added another one ten seconds later" (same kind of op,
+   * different gestures).
+   */
+  async #inSameCellsBurst(position) {
+    if (position < 2) return false;
+    const current = this.#layers[position - 1];
+    const previous = this.#layers[position - 2];
+    if (!current || !previous) return false;
+    if (Math.abs(current.at - previous.at) > _HistoryCursorService.#GROUP_BURST_WINDOW_MS) return false;
+    if (!await this.#isCellsAtPosition(position)) return false;
+    if (!await this.#isCellsAtPosition(position - 1)) return false;
+    return true;
+  }
+  /**
+   * True when the layer at the given 1-based cursor position introduces
+   * or removes a cell relative to the preceding layer (or relative to
+   * empty, for the first-ever layer).
+   */
+  async #isCellsAtPosition(position) {
+    if (position < 1 || position > this.#layers.length) return false;
+    const currentSig = this.#layers[position - 1].layerSig;
+    const currentContent = await this.#loadContentForSig(currentSig);
+    if (!currentContent) return false;
+    let previousContent = null;
+    if (position > 1) {
+      const prevSig = this.#layers[position - 2].layerSig;
+      previousContent = await this.#loadContentForSig(prevSig);
+    }
+    const diffs = diffLayers(previousContent, currentContent);
+    for (const diff of diffs) {
+      if (diff.kind === "cell-added" || diff.kind === "cell-removed") return true;
+    }
+    return false;
+  }
+  /**
+   * Resolve layer content by signature, memoized per-instance. The
+   * background warmup seeds the Store cache, so this usually hits
+   * in-memory data.
+   */
+  async #loadContentForSig(signature) {
+    if (this.#contentBySig.has(signature)) return this.#contentBySig.get(signature) ?? null;
+    const store = get("@hypercomb.social/Store");
+    if (!store) return null;
+    try {
+      const blob = await store.getResource(signature);
+      if (!blob) {
+        this.#contentBySig.set(signature, null);
+        return null;
+      }
+      const parsed = JSON.parse(await blob.text());
+      const content = {
+        cells: parsed.cells ?? [],
+        hidden: parsed.hidden ?? []
+      };
+      this.#contentBySig.set(signature, content);
+      return content;
+    } catch {
+      this.#contentBySig.set(signature, null);
+      return null;
+    }
   }
   /** Jump to latest (exit rewind mode). */
   jumpToLatest() {
@@ -959,7 +1128,13 @@ var HistoryCursorService = class _HistoryCursorService extends EventTarget {
    * render hit memory, not OPFS.
    */
   async layerContentAtCursor() {
-    if (this.#position === 0) return null;
+    if (this.#position === 0) {
+      if (this.#layers.length === 0) return null;
+      const empty = { cells: [], hidden: [] };
+      this.#cachedLayerSig = null;
+      this.#cachedContent = empty;
+      return empty;
+    }
     const entry = this.#layers[this.#position - 1];
     if (this.#cachedLayerSig === entry.layerSig && this.#cachedContent) {
       return this.#cachedContent;
@@ -997,6 +1172,33 @@ var HistoryCursorService = class _HistoryCursorService extends EventTarget {
     if (raw === null) return null;
     const n = parseInt(raw, 10);
     return isNaN(n) ? null : n;
+  }
+  // ── Group-step toggle persistence (localStorage) ───────────
+  //
+  // Setting is global (not per-location). Off by default — the minimal
+  // per-layer step is the canonical behaviour; group-step is an opt-in
+  // coarser walk layered on top.
+  static #GROUP_STEP_KEY = "hc:history-group-step";
+  // Two cell-op layers whose timestamps are within this window are
+  // treated as the same multi-select burst (one group). Anything beyond
+  // this is a separate user gesture — a new group boundary. 500ms is
+  // comfortably wider than the microtask-scheduled commit path used by
+  // LayerCommitter but narrow enough that two independent clicks seconds
+  // apart stay distinct.
+  static #GROUP_BURST_WINDOW_MS = 500;
+  static #loadGroupStep() {
+    try {
+      return localStorage.getItem(_HistoryCursorService.#GROUP_STEP_KEY) === "1";
+    } catch {
+      return false;
+    }
+  }
+  static #saveGroupStep(on) {
+    try {
+      if (on) localStorage.setItem(_HistoryCursorService.#GROUP_STEP_KEY, "1");
+      else localStorage.removeItem(_HistoryCursorService.#GROUP_STEP_KEY);
+    } catch {
+    }
   }
 };
 var _historyCursorService = new HistoryCursorService();

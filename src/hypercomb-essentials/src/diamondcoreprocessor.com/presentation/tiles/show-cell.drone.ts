@@ -1348,6 +1348,7 @@ export class ShowCellDrone extends Drone {
       // user with a blank canvas and no obvious recovery path.
       if (cursorService) {
         const content = await cursorService.layerContentAtCursor()
+        const cursorState = cursorService.state
 
         // Soft landing for position 0 on legacy cursors that return null
         // there: stepping past the first layer means "pre-history / empty

@@ -319,17 +319,11 @@ export class HistoryCursorService extends EventTarget {
       const blob = await store.getResource(signature)
       if (!blob) { this.#contentBySig.set(signature, null); return null }
       const parsed = JSON.parse(await blob.text()) as Partial<LayerContent>
+      // Slim layer — only cells and hidden. Anything else in the file
+      // (legacy fat-layer fields) is ignored at read.
       const content: LayerContent = {
-        version: 2,
         cells: parsed.cells ?? [],
         hidden: parsed.hidden ?? [],
-        contentByCell: parsed.contentByCell ?? {},
-        tagsByCell: parsed.tagsByCell ?? {},
-        notesByCell: parsed.notesByCell ?? {},
-        bees: parsed.bees ?? [],
-        dependencies: parsed.dependencies ?? [],
-        layoutSig: parsed.layoutSig ?? '',
-        instructionsSig: parsed.instructionsSig ?? '',
       }
       this.#contentBySig.set(signature, content)
       return content
@@ -383,18 +377,7 @@ export class HistoryCursorService extends EventTarget {
     // clears the grid instead of falling through to live-state tiles.
     if (this.#position === 0) {
       if (this.#layers.length === 0) return null
-      const empty: LayerContent = {
-        version: 2,
-        cells: [],
-        hidden: [],
-        contentByCell: {},
-        tagsByCell: {},
-        notesByCell: {},
-        bees: [],
-        dependencies: [],
-        layoutSig: '',
-        instructionsSig: '',
-      }
+      const empty: LayerContent = { cells: [], hidden: [] }
       this.#cachedLayerSig = null
       this.#cachedContent = empty
       return empty

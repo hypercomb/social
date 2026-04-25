@@ -24,7 +24,6 @@ type Lineage = {
 }
 
 type LayoutSnapshot = {
-  version: 2
   orientation: 'flat-top' | 'point-top'
   pivot: boolean
   accent: string
@@ -67,7 +66,6 @@ export class LayerCommitter {
   // construction and keep the latest value locally. Late subscribers get
   // the last-emitted value automatically (EffectBus replay).
   #layout: LayoutSnapshot = {
-    version: 2,
     orientation: 'point-top',
     pivot: false,
     accent: '',
