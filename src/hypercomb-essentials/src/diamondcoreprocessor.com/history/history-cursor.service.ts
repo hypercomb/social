@@ -207,7 +207,22 @@ export class HistoryCursorService extends EventTarget {
     const historyService = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
     if (!historyService) return
     if (this.#locationSig && this.#locationSig !== locSig) return
+
     const fresh = await historyService.listLayers(locSig)
+
+    // Cheap no-op check: same lineage, same marker count, same head sig →
+    // nothing changed since last refresh, skip the emit. Critical for
+    // avoiding an emit storm when bootstrap fires for every one of the
+    // ~20 Lineage 'change' events that cascade through boot.
+    const sameSig = this.#locationSig === locSig
+    const sameLength = this.#layers.length === fresh.length
+    const sameHead = sameLength && fresh.length > 0
+      && this.#layers[fresh.length - 1].layerSig === fresh[fresh.length - 1].layerSig
+    if (sameSig && sameLength && (fresh.length === 0 || sameHead)) {
+      // No state change — return silently, no emit, no log noise.
+      return
+    }
+
     const wasAtLatest = this.#position >= this.#layers.length
     const adopted = !this.#locationSig
     if (adopted) this.#locationSig = locSig

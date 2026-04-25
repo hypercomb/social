@@ -170,9 +170,20 @@ export class LayerCommitter {
       )
       if (lineage && store?.history && store?.hypercombRoot) {
         console.log('[bootstrap] services ready, subscribing to Lineage changes', { attempt })
+        // Throttle: Lineage emits 'change' many times during boot/nav
+        // (followLocation + materialization + URL syncs). Without a
+        // throttle each one fires a bootstrap which fires a cursor
+        // refresh — emit storm + redundant OPFS reads. Coalesce to one
+        // bootstrap per ~150 ms tail, which is faster than any human
+        // navigation but cheap compared to per-event firing.
+        let throttleTimer: ReturnType<typeof setTimeout> | null = null
         const tryBootstrap = () => { void this.bootstrapIfEmpty().catch(err => console.warn('[bootstrap] failed', err)) }
-        try { lineage.addEventListener?.('change', tryBootstrap) } catch { /* not an EventTarget */ }
-        tryBootstrap()   // fire once for current state immediately
+        const throttledBootstrap = () => {
+          if (throttleTimer) clearTimeout(throttleTimer)
+          throttleTimer = setTimeout(() => { throttleTimer = null; tryBootstrap() }, 150)
+        }
+        try { lineage.addEventListener?.('change', throttledBootstrap) } catch { /* not an EventTarget */ }
+        tryBootstrap()   // fire once for current state immediately (no throttle)
         return
       }
       await new Promise(resolve => setTimeout(resolve, 100))
