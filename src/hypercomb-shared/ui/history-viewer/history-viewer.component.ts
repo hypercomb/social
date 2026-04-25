@@ -42,6 +42,9 @@ type Content = {
 
 type HistoryService = {
   listLayers(locationSig: string): Promise<LayerEntry[]>
+  /** Reads the layer JSON directly from the lineage's bag (merkle model).
+   *  Returns the parsed content or null if the sig isn't found in the bag. */
+  getLayerContent?(locationSig: string, layerSig: string): Promise<Content | null>
   promoteToHead?(locationSig: string, layerSig: string): Promise<string | null>
   removeEntries?(locationSig: string, filenames: string[]): Promise<number>
   mergeEntries?(locationSig: string, filenames: string[]): Promise<string | null>
@@ -625,7 +628,15 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
     let nextContents: ReadonlyMap<string, Content> = existing
     if (unknown.length > 0) {
       const pairs = await Promise.all(unknown.map(async (sig) => {
+        // Merkle model: marker file at __history__/{locSig}/NNNN IS the
+        // layer JSON. Try the bag-aware history-service path first; fall
+        // back to the legacy resource pool for pre-merkle layers that
+        // may still be pool-resident.
         try {
+          if (history.getLayerContent) {
+            const fromBag = await history.getLayerContent(locationSig, sig)
+            if (fromBag) return [sig, fromBag] as const
+          }
           const blob = await store.getResource(sig)
           if (!blob) return [sig, null] as const
           const parsed = JSON.parse(await blob.text()) as Content
