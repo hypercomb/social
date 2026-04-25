@@ -42,29 +42,50 @@ export const ensureInstall = async (): Promise<void> => {
 
   await store.initialize()
 
-  // ── Fast path: cached OPFS state present → boot from cache, no network ──
-  // Push-only model: we do not poll for upstream updates on load. If we have
-  // a cached install and the spot-check passes, trust it. New content lands
-  // via an explicit DCP push (see resyncFromSentinel on actions:available).
+  // ── Manifest sig check: peek upstream BEFORE trusting the cache ──
+  // Deployed code can change at any time (new build, new sigs); without
+  // this check the runtime would happily boot the previous install
+  // forever. The cost is one tiny manifest.json fetch on every boot —
+  // worth it for "deployed files self-correct, no user action."
+  //
+  // If the upstream is unreachable AND we have a cached install, we
+  // still boot from cache (offline-tolerant). If the upstream sig
+  // matches the cached install sig AND the OPFS spot-check passes,
+  // boot from cache (fast path). Otherwise reinstall.
   const cachedManifest = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
-  if (cachedManifest && cachedManifest.bees.length > 0) {
-    const cachedInstallSig = (localStorage.getItem(INSTALLED_KEY) ?? '').trim()
-    const spotOk = !!cachedInstallSig && await fileExists(store.bees, `${cachedManifest.bees[0]}.js`)
-    if (spotOk) {
-      console.log(`[ensure-install] booting from cached state (sig ${cachedInstallSig.slice(0, 12)})`)
+  const cachedInstallSig = (localStorage.getItem(INSTALLED_KEY) ?? '').trim()
+
+  let upstreamSig: string | null = null
+  for (const source of CONTENT_SOURCES) {
+    try {
+      const res = await fetch(`${source}/manifest.json`, { cache: 'no-store' })
+      if (!res.ok) continue
+      const content = await res.json()
+      upstreamSig = pickInstallablePackage(content?.packages)
+      if (upstreamSig) break
+    } catch { /* try next source */ }
+  }
+
+  if (cachedManifest && cachedManifest.bees.length > 0 && cachedInstallSig) {
+    const spotOk = await fileExists(store.bees, `${cachedManifest.bees[0]}.js`)
+    const sigMatches = !upstreamSig || upstreamSig === cachedInstallSig
+    if (spotOk && sigMatches) {
+      const reason = upstreamSig ? 'sig match' : 'upstream unreachable, using cache'
+      console.log(`[ensure-install] booting from cached state (sig ${cachedInstallSig.slice(0, 12)}, ${reason})`)
       restoreSignatureStore(sigStore)
       restoreCachedBeeDeps()
       return
     }
-    console.warn('[ensure-install] cached state spot-check failed — reinstalling from local content')
+    if (!spotOk) console.warn('[ensure-install] cached state spot-check failed — reinstalling')
+    else console.warn(`[ensure-install] upstream sig differs (${upstreamSig?.slice(0, 12)} vs cached ${cachedInstallSig.slice(0, 12)}) — reinstalling`)
     localStorage.removeItem(MANIFEST_KEY)
     localStorage.removeItem(INSTALLED_KEY)
     localStorage.removeItem(SYNC_SIG_KEY)
     await purgeStaleOpfsArtifacts(store)
   }
 
-  // ── Cold start: OPFS empty → install directly from DCP's static files ──
-  console.log('[ensure-install] OPFS empty — running cold install from DCP')
+  // ── Cold start: OPFS empty OR sig mismatch → install from DCP ──
+  console.log('[ensure-install] running install from DCP')
   await localInstall(store, sigStore)
 }
 
