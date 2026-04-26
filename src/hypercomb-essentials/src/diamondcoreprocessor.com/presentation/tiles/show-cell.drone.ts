@@ -168,13 +168,10 @@ async function resolveChildNames(
 ): Promise<Set<string>> {
   const out = new Set<string>()
   if (!content?.children?.length) return out
-  const trace: Array<{ sig: string; resolved: string | null }> = []
   for (const childSig of content.children) {
     const child = await history.getLayerBySig(childSig)
-    trace.push({ sig: childSig.slice(0, 10), resolved: child?.name ?? null })
     if (child?.name) out.add(child.name)
   }
-  console.log('[resolveChildNames]', { trace, allowed: [...out] })
   return out
 }
 
@@ -1401,16 +1398,6 @@ export class ShowCellDrone extends Drone {
       if (cursorService) {
         const content = await cursorService.layerContentAtCursor()
         const cursorState = cursorService.state
-        console.log('[render]', {
-          locationSig: sig.sig.slice(0, 10),
-          position: cursorState.position,
-          total: cursorState.total,
-          rewound: cursorState.rewound,
-          contentName: content?.name,
-          contentChildrenCount: content?.children?.length ?? 0,
-          contentChildren: (content?.children ?? []).map(c => c.slice(0, 10)),
-          onDisk: [...union],
-        })
 
         // Two distinct null-content cases:
         //
@@ -1437,10 +1424,6 @@ export class ShowCellDrone extends Drone {
           // layer says.
           const parentSegments = (lineage as { explorerSegments?: () => readonly string[] })?.explorerSegments?.() ?? []
           const allowed = await resolveChildNames(historyService, parentSegments, dir, content)
-          console.log('[render] load-by-sig', {
-            childCount: content.children?.length ?? 0,
-            loaded: [...allowed],
-          })
           // Replace union entirely with what the layer says.
           union.clear()
           localCellSet.clear()

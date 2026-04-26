@@ -150,45 +150,10 @@ export class LayerCommitter {
     EffectBus.on<{ cell?: string; segments?: string[] }>('tile:hidden',  p => this.#queueCommit(p?.segments))
     EffectBus.on<{ cell?: string; segments?: string[] }>('tile:unhidden',p => this.#queueCommit(p?.segments))
 
-    // Self-heal trigger: poll for both Lineage and a fully-initialised
-    // Store to be available, then subscribe to Lineage 'change' so every
-    // navigation re-triggers a bootstrap check. Polling is needed because
-    // the Store registers synchronously but populates its OPFS handles
-    // (store.history, store.hypercombRoot) async via Store.initialize() —
-    // there's no event signal for that completion. Capped at ~10s; if
-    // services never appear, the explicit cursor.load path still triggers
-    // bootstrap on the next user interaction.
-    void this.#waitForServicesAndStartBootstrap()
-  }
-
-  async #waitForServicesAndStartBootstrap(): Promise<void> {
-    console.log('[bootstrap] polling for Lineage + Store init...')
-    for (let attempt = 0; attempt < 100; attempt++) {
-      const lineage = get<Lineage & EventTarget>('@hypercomb.social/Lineage')
-      const store = get<{ history?: FileSystemDirectoryHandle; hypercombRoot?: FileSystemDirectoryHandle }>(
-        '@hypercomb.social/Store'
-      )
-      if (lineage && store?.history && store?.hypercombRoot) {
-        console.log('[bootstrap] services ready, subscribing to Lineage changes', { attempt })
-        // Throttle: Lineage emits 'change' many times during boot/nav
-        // (followLocation + materialization + URL syncs). Without a
-        // throttle each one fires a bootstrap which fires a cursor
-        // refresh — emit storm + redundant OPFS reads. Coalesce to one
-        // bootstrap per ~150 ms tail, which is faster than any human
-        // navigation but cheap compared to per-event firing.
-        let throttleTimer: ReturnType<typeof setTimeout> | null = null
-        const tryBootstrap = () => { void this.bootstrapIfEmpty().catch(err => console.warn('[bootstrap] failed', err)) }
-        const throttledBootstrap = () => {
-          if (throttleTimer) clearTimeout(throttleTimer)
-          throttleTimer = setTimeout(() => { throttleTimer = null; tryBootstrap() }, 150)
-        }
-        try { lineage.addEventListener?.('change', throttledBootstrap) } catch { /* not an EventTarget */ }
-        tryBootstrap()   // fire once for current state immediately (no throttle)
-        return
-      }
-      await new Promise(resolve => setTimeout(resolve, 100))
-    }
-    console.warn('[bootstrap] gave up waiting for services after ~10s')
+    // No preemptive bootstrap. cursor.load (called from show-cell on
+    // first render) handles bootstrapping the visible lineage when
+    // its bag is empty. Boot stays fast — all OPFS work is deferred
+    // until the moment a lineage is actually viewed.
   }
 
   // All commit requests — batched or per-event — route through the
@@ -221,7 +186,6 @@ export class LayerCommitter {
     const history = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
     const lineage = get<Lineage>('@hypercomb.social/Lineage')
     if (!history || !lineage) {
-      console.log('[bootstrap] skip: missing services', { history: !!history, lineage: !!lineage })
       return
     }
 
@@ -232,10 +196,7 @@ export class LayerCommitter {
     const store = get<{ history?: FileSystemDirectoryHandle; hypercombRoot?: FileSystemDirectoryHandle }>(
       '@hypercomb.social/Store'
     )
-    if (!store?.history || !store?.hypercombRoot) {
-      console.log('[bootstrap] skip: store not initialized yet')
-      return
-    }
+    if (!store?.history || !store?.hypercombRoot) return
 
     const cleaned = Array.isArray(segments)
       ? segments.map(s => String(s ?? '').trim()).filter(Boolean)
@@ -260,28 +221,12 @@ export class LayerCommitter {
       }>('@diamondcoreprocessor.com/HistoryCursorService')
 
       if (markers.length > 0) {
-        console.log('[bootstrap] skip: bag has', markers.length, 'markers', { segments: segs })
-        // CRITICAL: even on skip, push the bag's state into the cursor.
-        // Without this, a cursor that loaded BEFORE the bag was visible
-        // (e.g. before Store.initialize() finished) stays stuck at 0
-        // markers despite the bag being populated. refreshForLocation
-        // adopts the locSig if cursor hasn't been bound yet, so the
-        // slider/history viewer wake up immediately on first bootstrap.
+        // Even on skip, push the bag's state into the cursor.
         if (cursor?.refreshForLocation) await cursor.refreshForLocation(locSig)
         return
       }
-      // Empty bag → request a commit and await it. The cascade mints
-      // the auto-seed and one marker reflecting current on-disk state,
-      // then walks up to root (which also bootstraps any ancestor
-      // bags along the way).
-      console.log('[bootstrap] running cascade', { segments: segs })
+      // Empty bag → cascade the auto-seed + one marker for current state.
       await this.#machine.requestAndWait({ segments: segs })
-      const after = await history.listLayers(locSig)
-      console.log('[bootstrap] done, bag now has', after.length, 'markers')
-
-      // Push the new state into the cursor (same call as the skip
-      // branch). refreshForLocation handles both adoption and
-      // existing-cursor refresh in one method.
       if (cursor?.refreshForLocation) await cursor.refreshForLocation(locSig)
       else if (cursor?.onNewLayer) await cursor.onNewLayer()
     })()
@@ -293,17 +238,11 @@ export class LayerCommitter {
     // Never commit while cursor is rewound — the assembled state reflects
     // the past view, not a new user intent.
     const cursor = get<HistoryCursorService>('@diamondcoreprocessor.com/HistoryCursorService')
-    if (cursor?.state?.rewound) {
-      console.log('[commit] skip: cursor rewound')
-      return
-    }
+    if (cursor?.state?.rewound) return
 
     const lineage = get<Lineage>('@hypercomb.social/Lineage')
     const history = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
-    if (!lineage || !history) {
-      console.log('[commit] skip: missing lineage or history', { lineage: !!lineage, history: !!history })
-      return
-    }
+    if (!lineage || !history) return
 
     // Cascade: leaf → root.
     //
@@ -351,14 +290,7 @@ export class LayerCommitter {
       }
 
       const ancestorLayer = await this.#assembleLayerFor(history, sub, ancestorName, ancestorDir)
-      const sig = await history.commitLayer(ancestorLocSig, ancestorLayer)
-      console.log('[commit]', {
-        depth,
-        segments: sub,
-        name: ancestorName,
-        children: ancestorLayer.children?.length ?? 0,
-        sig: sig?.slice(0, 8) ?? '(none)',
-      })
+      await history.commitLayer(ancestorLocSig, ancestorLayer)
     }
 
     // Notify the cursor so the slider / activity log / ShowCell see the new head
@@ -419,7 +351,5 @@ export class LayerCommitter {
   // tracking its own per-state primitive. Removed from the committer.
 }
 
-console.log('[LayerCommitter] module loaded — instantiating')
 const _layerCommitter = new LayerCommitter()
 window.ioc.register('@diamondcoreprocessor.com/LayerCommitter', _layerCommitter)
-console.log('[LayerCommitter] registered in IoC')

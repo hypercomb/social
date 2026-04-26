@@ -87,36 +87,20 @@ export class HistoryCursorService extends EventTarget {
    * no cold load, no empty-texture flash.
    */
   async load(locationSig: string): Promise<void> {
-    // Guard: never accept a falsy/empty/short sig. A real lineage sig is
-    // 64 hex chars (sha256). Anything else is upstream garbage (e.g. a
-    // stale cache returning { sig: '' }). Silently overwriting a valid
-    // cursor state with an empty bag's [] from listLayers('') was the
-    // source of an infinite render loop. Bail out without touching state.
-    if (!locationSig || typeof locationSig !== 'string' || locationSig.length < 8) {
-      console.warn('[cursor.load] reject: invalid locationSig', { locationSig })
-      return
-    }
+    // Guard: a real lineage sig is 64 hex chars. Bail on anything
+    // shorter — silently. Without this, an upstream returning '' would
+    // overwrite a valid cursor with an empty bag's [] (caused a render
+    // loop earlier).
+    if (!locationSig || typeof locationSig !== 'string' || locationSig.length < 8) return
 
     const historyService = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
-    if (!historyService) {
-      console.log('[cursor.load] skip: no HistoryService', { locationSig: locationSig?.slice(0, 8) })
-      return
-    }
+    if (!historyService) return
 
     this.#layers = await historyService.listLayers(locationSig)
-    console.log('[cursor.load] read', this.#layers.length, 'markers', { locationSig: locationSig?.slice(0, 8), prevSig: this.#locationSig?.slice(0, 8), prevPos: this.#position })
 
-    // Self-heal: lineages with on-disk tiles but no recorded history
-    // (e.g. data created before the merkle commits existed) get their
-    // first marker captured on first view. The committer's
-    // bootstrapIfEmpty inspects the bag and only commits when it's
-    // truly empty — non-destructive, idempotent, and silently a no-op
-    // on subsequent loads.
-    //
-    // Synchronous attempt first (covers the typical case where Store
-    // is already initialised). If that doesn't populate the bag (e.g.
-    // Store.initialize() hasn't completed yet), kick off a background
-    // poll-and-retry that wakes the cursor up the moment markers exist.
+    // Self-heal: bagless lineage with on-disk tiles → ask the committer
+    // to mint the seed + first marker. Single sync attempt; if it fails
+    // (Store not ready yet) the next render will try again.
     if (this.#layers.length === 0) {
       const committer = get<{ bootstrapIfEmpty: (segments?: string[]) => Promise<void> }>(
         '@diamondcoreprocessor.com/LayerCommitter'
@@ -125,13 +109,7 @@ export class HistoryCursorService extends EventTarget {
         try {
           await committer.bootstrapIfEmpty()
           this.#layers = await historyService.listLayers(locationSig)
-        } catch { /* best-effort — never block navigation on bootstrap */ }
-      }
-      // Background retry loop: store may not be initialised yet, or
-      // an earlier auto-bootstrap may still be in flight. Poll up to
-      // ~10s; the moment markers appear, refresh the cursor.
-      if (this.#layers.length === 0) {
-        void this.#retryUntilMarkersAppear(locationSig)
+        } catch { /* best-effort */ }
       }
     }
 
@@ -156,7 +134,6 @@ export class HistoryCursorService extends EventTarget {
       this.#position = this.#layers.length
     }
 
-    console.log('[cursor.load] done', { total: this.#layers.length, position: this.#position, locationSig: locationSig?.slice(0, 8) })
     this.#emit()
   }
 
@@ -244,43 +221,7 @@ export class HistoryCursorService extends EventTarget {
     if (adopted) this.#locationSig = locSig
     this.#layers = fresh
     if (wasAtLatest || adopted) this.#position = this.#layers.length
-    console.log('[cursor.refreshForLocation]', { locSig: locSig.slice(0, 8), total: fresh.length, position: this.#position, adopted })
     this.#emit()
-  }
-
-  /**
-   * Background retry: poll listLayers every 250 ms (capped at ~10 s).
-   * The moment markers appear (e.g. an auto-bootstrap landed slightly
-   * after this cursor.load returned), refresh the cursor and emit so
-   * the history viewer updates without requiring further user action.
-   *
-   * Idempotent and capped — no leaked timers.
-   */
-  async #retryUntilMarkersAppear(locationSig: string): Promise<void> {
-    const historyService = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
-    if (!historyService) return
-    for (let attempt = 0; attempt < 40; attempt++) {
-      await new Promise(resolve => setTimeout(resolve, 250))
-      // Bail if cursor moved to a different lineage — the new
-      // load() will run its own retry if needed.
-      if (this.#locationSig !== locationSig) return
-      // Re-trigger a bootstrap attempt: harmless if bag is now
-      // populated (no-op), critical if Store just became ready.
-      const committer = get<{ bootstrapIfEmpty: (segments?: string[]) => Promise<void> }>(
-        '@diamondcoreprocessor.com/LayerCommitter'
-      )
-      if (committer?.bootstrapIfEmpty) {
-        try { await committer.bootstrapIfEmpty() } catch { /* */ }
-      }
-      const fresh = await historyService.listLayers(locationSig)
-      if (fresh.length > 0) {
-        const wasAtLatest = this.#position >= this.#layers.length
-        this.#layers = fresh
-        if (wasAtLatest) this.#position = this.#layers.length
-        this.#emit()
-        return
-      }
-    }
   }
 
   /**
