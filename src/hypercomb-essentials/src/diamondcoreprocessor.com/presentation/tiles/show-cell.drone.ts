@@ -158,32 +158,37 @@ async function resolveChildNames(
   if (!content || !Array.isArray(content.children) || content.children.length === 0) return out
   if (!parentDir) return out
   const wanted = new Set(content.children)
+  const wantedShort = content.children.map(s => s.slice(0, 10))
+  const trace: Array<{ name: string; currentSig: string; matched: 'fast' | 'slow' | 'none'; markerSigs?: string[] }> = []
 
   for await (const [childName, handle] of (parentDir as any).entries()) {
     if (handle.kind !== 'directory') continue
     const childSegments = [...parentSegments, childName]
     const childLocSig = await history.sign({ explorerSegments: () => childSegments })
 
-    // Fast path: each child's CURRENT marker sig (or, when the child
-    // has no bag yet, the deterministic empty-seed sig for that name).
-    // Critical: parent's cascade stored exactly this value in its
-    // children array, so matching here covers freshly-added tiles
-    // whose bag hasn't been minted yet.
+    let currentSig = ''
     try {
-      const currentSig = await history.latestMarkerSigFor(childLocSig, childName)
-      if (wanted.has(currentSig)) { out.add(childName); continue }
-    } catch { /* fall through to listLayers */ }
+      currentSig = await history.latestMarkerSigFor(childLocSig, childName)
+      if (wanted.has(currentSig)) {
+        out.add(childName)
+        trace.push({ name: childName, currentSig: currentSig.slice(0, 10), matched: 'fast' })
+        continue
+      }
+    } catch { /* fall through */ }
 
-    // Slow path: walk every marker the child has had (past sigs that
-    // were stored when this layer was committed but are no longer the
-    // child's latest).
+    let markerSigs: string[] = []
+    let matched: 'slow' | 'none' = 'none'
     try {
       const childMarkers = await history.listLayers(childLocSig)
+      markerSigs = childMarkers.map(m => m.layerSig.slice(0, 10))
       for (const marker of childMarkers) {
-        if (wanted.has(marker.layerSig)) { out.add(childName); break }
+        if (wanted.has(marker.layerSig)) { out.add(childName); matched = 'slow'; break }
       }
     } catch { /* unresolvable — skip */ }
+    trace.push({ name: childName, currentSig: currentSig.slice(0, 10), matched, markerSigs })
   }
+
+  console.log('[resolveChildNames]', { wanted: wantedShort, trace, allowed: [...out] })
   return out
 }
 
