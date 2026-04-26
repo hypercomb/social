@@ -1434,19 +1434,24 @@ export class ShowCellDrone extends Drone {
         }
 
         if (content) {
-          // LOAD-BY-SIGNATURE (not filter): the cursor's layer is the
-          // authoritative source of what's visible. Look up each child
-          // sig via the preloader; the resolved set IS the cell set.
-          // No on-disk merge, no filter fallback — just load what the
-          // layer says.
-          const parentSegments = (lineage as { explorerSegments?: () => readonly string[] })?.explorerSegments?.() ?? []
-          const allowed = await resolveChildNames(historyService, parentSegments, dir, content)
-          // Replace union entirely with what the layer says.
-          union.clear()
-          localCellSet.clear()
-          for (const cell of allowed) {
-            union.add(cell)
-            localCellSet.add(cell)
+          // At HEAD: on-disk listing IS the truth (just-committed layer
+          // matches it by construction). Don't touch union — preserve
+          // every tile and its slot index. This keeps "no auto-arrange":
+          // typing a new tile never displaces an existing one.
+          //
+          // REWOUND: load by signature. The past layer's children sigs
+          // are the authoritative cell set; resolve each via preloader
+          // and replace union so live-disk tiles that didn't exist at
+          // that step don't bleed into the historical view.
+          if (cursorState?.rewound) {
+            const parentSegments = (lineage as { explorerSegments?: () => readonly string[] })?.explorerSegments?.() ?? []
+            const allowed = await resolveChildNames(historyService, parentSegments, dir, content)
+            union.clear()
+            localCellSet.clear()
+            for (const cell of allowed) {
+              union.add(cell)
+              localCellSet.add(cell)
+            }
           }
         }
       }
