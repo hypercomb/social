@@ -38,33 +38,32 @@ export type LayerState = {
 }
 
 /**
- * Canonical minimal layer. Only two fields:
+ * Canonical minimal layer. Always has a `name` (required, non-empty).
+ * `children` is optional — present only when the layer has children.
+ * An empty layer (the seed at `00000000`) is just `{ name }`.
  *
- *   name      — this layer's name (e.g. "" at root, "abc" at /abc).
- *   children  — ordered child layer sigs. Each sig points to a child
- *               layer; to get a child's display name, load the layer
- *               at that sig and read its own `name`.
+ * Marker sig = sha256 of the marker file's bytes. When a child
+ * commits a new marker its sig changes, parent's `children` entry
+ * for that child changes, parent's bytes change, parent's sig
+ * changes. Cascade propagates to the root.
  *
- * Marker sig = sha256 of the marker file's bytes. Parent layer's
- * `children` array carries each child's current marker sig — when a
- * child commits a new marker, its sig changes, parent's children
- * array changes, parent's bytes change, parent's sig changes. The
- * cascade propagates that all the way up to the root lineage's bag,
- * where the latest marker IS the current global merkle root.
- *
- * SOURCE OF TRUTH for child names = the child layer's `name` field,
- * not anything stored at the parent. To display children, fetch each
- * child sig's marker file and read its name. To navigate, append the
- * name to the current path → resolve the target lineage sig → open
- * its bag.
+ * SOURCE OF TRUTH for child names = the child layer's own `name`
+ * field. To display children, fetch each child sig's marker file
+ * and read its name. To navigate, append the name to the current
+ * path → resolve the target lineage sig → open its bag.
  */
 export type LayerContent = {
   name: string
-  children: string[]
+  children?: string[]
 }
 
-/** Empty seed — content of `00000000` minted on bag's first touch. */
-export const emptyLayer = (name: string): LayerContent => ({ name, children: [] })
+/** Root's display name. Used when the layer has no path segments. */
+export const ROOT_NAME = '/'
+
+/** Empty seed — content of `00000000` minted on bag's first touch.
+ *  Only `name`; no `children` field at all (matches the user's
+ *  "empty should only have a name" rule). */
+export const emptyLayer = (name: string): LayerContent => ({ name })
 
 /**
  * One history entry. Just a pointer to a layer resource plus the timestamp
@@ -363,12 +362,12 @@ export class HistoryService {
 
   /**
    * Canonicalize a layer so byte-equal content produces byte-equal JSON.
-   * `children` keeps its caller-supplied order (position is meaningful).
+   * `children` is omitted entirely when empty (seed shape: just `{name}`).
    */
-  static readonly canonicalizeLayer = (layer: LayerContent): LayerContent => ({
-    name: layer.name,
-    children: layer.children.slice(),
-  })
+  static readonly canonicalizeLayer = (layer: LayerContent): LayerContent => {
+    if (!layer.children || layer.children.length === 0) return { name: layer.name }
+    return { name: layer.name, children: layer.children.slice() }
+  }
 
   /**
    * Commit a complete layer snapshot for a lineage.
@@ -565,7 +564,9 @@ export class HistoryService {
         if (HistoryService.#SIG_RE.test(trimmed)) continue   // legacy bare-sig marker
         try {
           const parsed = JSON.parse(text)
-          if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.children)) continue
+          // Canonical layer: must have a non-empty name. children is
+          // optional (seed-shape `{name}` is valid).
+          if (!parsed || typeof parsed !== 'object' || typeof parsed.name !== 'string' || parsed.name.length === 0) continue
         } catch { continue }
         const layerSig = await SignatureService.sign(bytes)
         cacheMap.set(layerSig, bytes)
@@ -648,10 +649,11 @@ export class HistoryService {
     try { parsed = JSON.parse(new TextDecoder().decode(bytes)) as Partial<LayerContent> }
     catch { return null }
 
-    return {
-      name: parsed.name ?? '',
-      children: parsed.children ?? [],
-    }
+    // name is required; children is optional (omitted when empty).
+    if (!parsed.name) return null
+    const out: LayerContent = { name: parsed.name }
+    if (Array.isArray(parsed.children) && parsed.children.length > 0) out.children = parsed.children
+    return out
   }
 
   // (lineageSig → layerSig → bytes) cache, populated by listLayers
@@ -710,7 +712,7 @@ export class HistoryService {
     for await (const [name, handle] of (bag as any).entries()) {
       if (handle.kind !== 'file') continue
 
-      // Canonical marker: NNNN name + JSON-with-children[] content.
+      // Canonical marker: NNNN name + JSON-with-name content.
       if (HistoryService.#MARKER_RE.test(name)) {
         try {
           const file = await (handle as FileSystemFileHandle).getFile()
@@ -718,10 +720,10 @@ export class HistoryService {
           // Bare-sig content is the pre-merkle marker shape; drop it.
           if (HistoryService.#SIG_RE.test(text)) { drop.push(name); continue }
           // Layer-JSON content — keep if it parses to an object with a
-          // `children` array.
+          // non-empty `name`. children is optional (seed shape `{name}`).
           try {
             const parsed = JSON.parse(text)
-            if (parsed && typeof parsed === 'object' && Array.isArray(parsed.children)) continue
+            if (parsed && typeof parsed === 'object' && typeof parsed.name === 'string' && parsed.name.length > 0) continue
           } catch { /* unparseable — drop */ }
         } catch { /* unreadable — drop */ }
       }

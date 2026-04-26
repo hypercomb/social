@@ -11,6 +11,7 @@
 // derived by diffLayers, never storage.
 import { EffectBus } from '@hypercomb/core'
 import type { HistoryService, LayerContent } from './history.service.js'
+import { ROOT_NAME } from './history.service.js'
 import type { HistoryCursorService } from './history-cursor.service.js'
 
 type Lineage = {
@@ -328,7 +329,10 @@ export class LayerCommitter {
     // reflects whatever the on-disk layout is right now.
     for (let depth = segments.length; depth >= 0; depth--) {
       const sub = segments.slice(0, depth)
-      const ancestorName = depth === 0 ? '' : sub[sub.length - 1]
+      // Every layer in a bag has the SAME name — the lineage's last
+      // segment. Root has no segment, so use ROOT_NAME ('/') —
+      // `name` is required and must be non-empty.
+      const ancestorName = depth === 0 ? ROOT_NAME : sub[sub.length - 1]
       const ancestorLocSig = await history.sign({
         domain: lineage.domain,
         explorerSegments: () => sub,
@@ -351,8 +355,8 @@ export class LayerCommitter {
       console.log('[commit]', {
         depth,
         segments: sub,
-        name: ancestorName || '(root)',
-        children: ancestorLayer.children.length,
+        name: ancestorName,
+        children: ancestorLayer.children?.length ?? 0,
         sig: sig?.slice(0, 8) ?? '(none)',
       })
     }
@@ -365,10 +369,11 @@ export class LayerCommitter {
   /**
    * Build a complete layer snapshot for the lineage at `segments`.
    *
-   * - `name`     = last segment ("" for root)
-   * - `children` = each on-disk child's CURRENT marker sig (its merkle
-   *                composition). Order follows the projection (when
-   *                this is the leaf) else directory enumeration order.
+   * - `name`     = the lineage's name (always present, never empty —
+   *                ROOT_NAME for root, the last segment otherwise)
+   * - `children` = each on-disk child's CURRENT marker sig. Omitted
+   *                entirely when there are no children — same shape
+   *                as the seed.
    *
    * The marker file IS this layer JSON; its sha256 is the layer's
    * merkle sig. When any child commits a new marker, the parent's
@@ -388,10 +393,11 @@ export class LayerCommitter {
       }
     }
 
+    // No children → seed shape: just `{ name }`, no children field.
+    if (onDiskNames.length === 0) return { name }
+
     // Children are sigs (sha256 hex). For each on-disk child name,
-    // pull the child lineage's CURRENT marker sig. Children with no
-    // bag yet get the empty-seed sig for their own name
-    // (latestMarkerSigFor handles this).
+    // pull the child lineage's CURRENT marker sig.
     const children: string[] = []
     for (const childName of onDiskNames) {
       const childSegments = [...segments, childName]

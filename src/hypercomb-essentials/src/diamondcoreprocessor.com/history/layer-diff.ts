@@ -22,22 +22,21 @@ export type LayerDiff =
   | { kind: 'cell-removed'; cell: string }
   | { kind: 'cells-reordered'; from: string[]; to: string[] }
 
-const EMPTY: LayerContent = { name: '', children: [] }
-
 export const diffLayers = (
   prev: LayerContent | null,
   next: LayerContent,
 ): LayerDiff[] => {
-  const p = prev ?? EMPTY
+  const prevChildren = prev?.children ?? []
+  const nextChildren = next.children ?? []
   const diffs: LayerDiff[] = []
 
   // ── children: membership + order ─────────────────────────
-  const prevSet = new Set(p.children)
-  const nextSet = new Set(next.children)
-  for (const c of next.children) if (!prevSet.has(c)) diffs.push({ kind: 'cell-added', cell: c })
-  for (const c of p.children) if (!nextSet.has(c)) diffs.push({ kind: 'cell-removed', cell: c })
-  if (setEquals(prevSet, nextSet) && !sequenceEquals(p.children, next.children)) {
-    diffs.push({ kind: 'cells-reordered', from: [...p.children], to: [...next.children] })
+  const prevSet = new Set(prevChildren)
+  const nextSet = new Set(nextChildren)
+  for (const c of nextChildren) if (!prevSet.has(c)) diffs.push({ kind: 'cell-added', cell: c })
+  for (const c of prevChildren) if (!nextSet.has(c)) diffs.push({ kind: 'cell-removed', cell: c })
+  if (setEquals(prevSet, nextSet) && !sequenceEquals(prevChildren, nextChildren)) {
+    diffs.push({ kind: 'cells-reordered', from: [...prevChildren], to: [...nextChildren] })
   }
 
   return diffs
