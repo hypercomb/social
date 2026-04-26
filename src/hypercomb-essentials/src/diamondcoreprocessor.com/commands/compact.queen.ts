@@ -1,30 +1,21 @@
 // diamondcoreprocessor.com/commands/compact.queen.ts
 //
-// /compact — manual fallback for "rebase to one marker for current state".
+// /compact — wipe this lineage's history bag and rebase to a single
+// marker reflecting the current on-disk state. After running, the
+// bag has exactly one marker whose `children` array holds each
+// on-disk child's CURRENT marker sig (the merkle composition).
 //
-// With auto-normalization in listLayers, this command is rarely needed —
-// every read path now self-corrects bag shape. /compact remains as the
-// explicit "wipe and rebase" trigger for cases where the user wants a
-// clean slate, or when normalization can't recover (e.g., orphaned
-// markers pointing at sigs the pool no longer has).
-//
-// Rules (per the slim/no-meta model):
-//   - No synthetic empty seed prepended
-//   - Always commit one marker reflecting current name; cascade
-//     rebuilds the children array from disk on the next user event
-//   - History before the rebase IS lost; that's the explicit bargain
-//     of /compact (vs. the non-destructive normalize on every read)
+// History before the rebase IS lost; that's the explicit bargain.
 
 import { QueenBee } from '@hypercomb/core'
 import type { HistoryService, LayerContent } from '../history/history.service.js'
+import { ROOT_NAME } from '../history/history.service.js'
 import type { HistoryCursorService } from '../history/history-cursor.service.js'
 
 type Lineage = {
-  // explorerDir is async in the live lineage implementation — it
-  // resolves to the FileSystemDirectoryHandle for the current
-  // explorer location (or null if not available).
   explorerDir?: () => Promise<FileSystemDirectoryHandle | null> | FileSystemDirectoryHandle | null | undefined
   explorerLabel?: () => string
+  explorerSegments?: () => readonly string[]
 }
 
 export class CompactQueenBee extends QueenBee {
@@ -42,45 +33,60 @@ export class CompactQueenBee extends QueenBee {
     const locationSig = cursor.state.locationSig
     if (!locationSig) return
 
-    // 1. Snapshot current on-disk state.
-    const fresh = await this.#assembleFromDisk(lineage)
+    // 1. Snapshot current on-disk state — name + actual child sigs.
+    const fresh = await this.#assembleFromDisk(history, lineage)
 
     // 2. Purge any pre-merkle / op-JSON / sig-named pollution. This
     //    is the only path that destroys history files and ONLY runs
     //    when the user explicitly invokes /compact.
     await history.purgeNonLayerFiles(locationSig)
 
-    // 3. Wipe existing markers. Pool content is untouched (may still
-    //    be referenced by other lineages or branches).
+    // 3. Wipe existing markers.
     const entries = await history.listLayers(locationSig)
     if (entries.length > 0) {
       await history.removeEntries(locationSig, entries.map(e => e.filename))
     }
 
-    // 3. Mint exactly one marker for the current state. The fresh
-    //    snapshot's `children` is always empty — the next user event
-    //    cascades and rebuilds child sigs from disk.
+    // 4. Commit one marker reflecting current state. commitLayer
+    //    auto-mints the seed at 00000000, then this commit lands at
+    //    00000001 with the actual children array.
     await history.commitLayer(locationSig, fresh)
 
-    // 4. Re-hydrate cursor; land on the top (single marker).
+    // 5. Re-hydrate cursor; land on the top.
     await cursor.load(locationSig)
     cursor.seek(cursor.state.total)
   }
 
   /**
-   * Build the layer name from the explorer label. /compact wipes
-   * history, so we don't try to wire children sigs — leave the array
-   * empty. The next user event will cascade up and rebuild the merkle
-   * composition by re-reading on-disk children.
+   * Build a complete layer for the current lineage:
+   *   name     = ROOT_NAME for root, else the last explorer segment
+   *   children = each on-disk child's CURRENT marker sig (or omitted
+   *              when there are no children — seed shape)
    */
-  async #assembleFromDisk(lineage: Lineage): Promise<LayerContent> {
-    const name = (() => {
-      const label = String(lineage.explorerLabel?.() ?? '/')
-      if (label === '/' || label === '') return ''
-      const parts = label.split('/').filter(Boolean)
-      return parts[parts.length - 1] ?? ''
-    })()
-    return { name, children: [] }
+  async #assembleFromDisk(history: HistoryService, lineage: Lineage): Promise<LayerContent> {
+    const segments = (lineage.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+    const name = segments.length === 0 ? ROOT_NAME : segments[segments.length - 1]
+
+    const explorerDir = await Promise.resolve(lineage.explorerDir?.() ?? null)
+    const onDiskNames: string[] = []
+    if (explorerDir) {
+      for await (const [n, handle] of (explorerDir as any).entries()) {
+        if (handle.kind === 'directory') onDiskNames.push(n)
+      }
+    }
+
+    if (onDiskNames.length === 0) return { name }
+
+    const children: string[] = []
+    for (const childName of onDiskNames) {
+      const childSegments = [...segments, childName]
+      const childLocSig = await history.sign({
+        explorerSegments: () => childSegments,
+      } as Lineage)
+      const childSig = await history.latestMarkerSigFor(childLocSig, childName)
+      children.push(childSig)
+    }
+    return { name, children }
   }
 }
 
