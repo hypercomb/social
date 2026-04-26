@@ -1145,6 +1145,52 @@ describe('resolveChildNames — past sigs map back to current on-disk names', ()
     expect(names.size).toBe(0)
   })
 
+  it("user's scenario: 1 tile already there, add hello → step back to 1-child layer", async () => {
+    // Initial state: root has child "original" with its own bag + first commit.
+    await cascade(historyRoot, ['original'], { 1: [], 0: ['original'] })
+    // Snapshot root's first commit
+    const rootSig = await signLineage([])
+    const stepOneEntries = await listLayers(historyRoot, rootSig)
+    expect(stepOneEntries.length).toBe(2)   // seed + 1 commit
+    const stepOneContent = await getLayerContent(historyRoot, rootSig, stepOneEntries[1].layerSig)
+    const stepOneChildren = stepOneContent?.children ?? []
+    expect(stepOneChildren.length).toBe(1)
+
+    // User adds "hello" at root: root cascade picks it up + builds children
+    // = [original_sig, hello_seed_sig]. hello has NO bag yet.
+    await cascade(historyRoot, [], { 0: ['original', 'hello'] })
+
+    const stepTwoEntries = await listLayers(historyRoot, rootSig)
+    expect(stepTwoEntries.length).toBe(3)   // seed + 2 commits
+    const stepTwoContent = await getLayerContent(historyRoot, rootSig, stepTwoEntries[2].layerSig)
+    expect(stepTwoContent?.children?.length).toBe(2)   // 2 sigs ✓ (matches user's observation)
+
+    // Render at HEAD (step 2): on-disk = [original, hello]. Resolve.
+    // - 'original' has a bag → its current marker sig is in step 2's children.
+    // - 'hello' has no bag → no markers to match → not in allowed.
+    const allowedAtHead = await resolveChildNamesFromBag(historyRoot, [], stepTwoContent?.children ?? [], ['original', 'hello'])
+    expect([...allowedAtHead]).toEqual(['original'])
+    // BUG SURFACE: allowed=[original], live disk=[original, hello].
+    // The renderer's `if (allowed.size > 0)` branch filters disk down
+    // to {original} → renders 1 tile when user expected 2. This is
+    // because hello has no bag yet (we don't bootstrap child bags
+    // when their parent commits).
+
+    // Render at STEP 1 (after undo): step 1's children = [original_sig_old].
+    // - 'original' has a bag matching original_sig_old → allowed.
+    // - 'hello' still no bag → not in allowed.
+    const allowedAtStepOne = await resolveChildNamesFromBag(historyRoot, [], stepOneChildren, ['original', 'hello'])
+    expect([...allowedAtStepOne]).toEqual(['original'])
+    // Both renders should show {original} via the filter, but live
+    // disk has [original, hello]. So both show 1 tile.
+    //
+    // The user observed 1 at head but 2 after undo. That mismatch
+    // is the actual bug — diagnostic test added so we can prove
+    // the filter is consistent at each position. If it diverges
+    // from this expectation in production, the cursor / renderer
+    // is the culprit, not the storage.
+  })
+
   it('past child is no longer on disk → cannot resolve (known limitation)', async () => {
     // /A had child B
     await cascade(historyRoot, ['A', 'B'], { 2: [], 1: ['B'], 0: ['A'] })

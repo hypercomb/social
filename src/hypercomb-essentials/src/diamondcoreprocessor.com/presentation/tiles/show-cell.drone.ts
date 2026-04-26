@@ -1398,6 +1398,16 @@ export class ShowCellDrone extends Drone {
       if (cursorService) {
         const content = await cursorService.layerContentAtCursor()
         const cursorState = cursorService.state
+        console.log('[render]', {
+          locationSig: sig.sig.slice(0, 10),
+          position: cursorState.position,
+          total: cursorState.total,
+          rewound: cursorState.rewound,
+          contentName: content?.name,
+          contentChildrenCount: content?.children?.length ?? 0,
+          contentChildren: (content?.children ?? []).map(c => c.slice(0, 10)),
+          onDisk: [...union],
+        })
 
         // Two distinct null-content cases:
         //
@@ -1430,6 +1440,14 @@ export class ShowCellDrone extends Drone {
           const parentSegments = (lineage as { explorerSegments?: () => readonly string[] })?.explorerSegments?.() ?? []
           const allowed = await resolveChildNames(historyService, parentSegments, dir, content)
           const childCount = Array.isArray(content.children) ? content.children.length : 0
+          console.log('[render] resolve', {
+            childCount,
+            allowedSize: allowed.size,
+            allowedNames: [...allowed],
+            decision: childCount === 0 ? 'clear-union (seed)'
+              : allowed.size > 0 ? 'filter-by-allowed'
+              : 'skip-filter (no resolution)',
+          })
           if (childCount === 0) {
             // Past state was empty → render nothing.
             union.clear()
