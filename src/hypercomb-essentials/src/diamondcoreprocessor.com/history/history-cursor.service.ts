@@ -96,10 +96,18 @@ export class HistoryCursorService extends EventTarget {
     const historyService = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
     if (!historyService) return
 
+    // Housekeeping: one-shot session preload. Walks every bag once,
+    // populates HistoryService's preloader so every sig anywhere in
+    // any layer is resolvable in O(1) for the rest of the session —
+    // no cold walks during render or undo/redo. Subsequent calls are
+    // free (the in-flight promise is cached).
+    const preloadable = historyService as unknown as { preloadAllBags?: () => Promise<void> }
+    if (preloadable.preloadAllBags) await preloadable.preloadAllBags()
+
     this.#layers = await historyService.listLayers(locationSig)
 
     // Self-heal: bagless lineage with on-disk tiles → ask the committer
-    // to mint the seed + first marker. Single sync attempt; if it fails
+    // to mint 00000000 + first marker. Single sync attempt; if it fails
     // (Store not ready yet) the next render will try again.
     if (this.#layers.length === 0) {
       const committer = get<{ bootstrapIfEmpty: (segments?: string[]) => Promise<void> }>(
@@ -190,7 +198,7 @@ export class HistoryCursorService extends EventTarget {
    *
    * Adoption: if cursor has no locationSig yet, we adopt the one we
    * were called with — this lets the committer's auto-bootstrap
-   * (which runs from Lineage 'change' before any cursor.load) seed
+   * (which runs from Lineage 'change' before any cursor.load) prime
    * the cursor with the right lineage immediately.
    *
    * If cursor is currently bound to a different lineage, this is a

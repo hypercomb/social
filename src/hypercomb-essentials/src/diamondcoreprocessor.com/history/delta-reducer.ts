@@ -22,7 +22,7 @@
 //
 // Edge cases:
 //   - An empty record list → identity state (empty sets). This is
-//     the "synthetic seed" behaviour: rendering at cursor 0 or
+//     the "synthetic empty" behaviour: rendering at cursor 0 or
 //     before any real entry produces an empty grid.
 //   - An `unknown op` is silently ignored. Forward-compat: older
 //     code reducing newer records doesn't crash, it just skips.

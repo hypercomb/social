@@ -4,7 +4,7 @@
 //   - bag-per-lineage (signed by ancestry only)
 //   - marker file IS the full layer JSON (no pool indirection)
 //   - layerSig = sha256(marker file bytes)
-//   - empty seed (00000000) auto-minted on bag's first touch
+//   - empty layer (00000000) auto-minted on bag's first touch
 //   - merkle cascade: parent.children[i] = child's current marker sig
 //
 // Uses an in-memory OPFS mock so tests run in jsdom without browser.
@@ -153,17 +153,16 @@ const dirExists = async (dir: MockDir, name: string): Promise<boolean> => {
   catch { return false }
 }
 
-const ensureSeed = async (bag: MockDir, name: string): Promise<void> => {
+const ensureEmptyMarker = async (bag: MockDir, name: string): Promise<void> => {
   if (await fileExists(bag, '00000000')) return
-  const seed = canonicalizeLayer(emptyLayer(name))
-  const json = JSON.stringify(seed)
+  const empty = canonicalizeLayer(emptyLayer(name))
+  const json = JSON.stringify(empty)
   const bytes = new TextEncoder().encode(json)
   await writeBytes(bag, '00000000', bytes)
-  // Pre-warm preloader with the seed bytes too.
+  // Pre-warm preloader with the empty-marker bytes too.
   const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
-  const seedSig = await sha256Hex(buf)
-  preloaderCache.set(seedSig, buf)
-  seedSigByName.set(name, seedSig)
+  const sig = await sha256Hex(buf)
+  preloaderCache.set(sig, buf)
 }
 
 /**
@@ -182,7 +181,7 @@ const commitLayer = async (
   const layerSig = await sha256Hex(json)
 
   const bag = await historyRoot.getDirectoryHandle(lineageSig, { create: true })
-  await ensureSeed(bag, layer.name)
+  await ensureEmptyMarker(bag, layer.name)
   const markerName = await nextMarkerName(bag)
   await writeBytes(bag, markerName, bytes)
 
@@ -207,7 +206,7 @@ const normalize = async (bag: MockDir): Promise<void> => {
         try {
           const parsed = JSON.parse(text)
           // Canonical: must have non-empty name. children is optional
-          // (seed shape `{name}` is valid).
+          // (empty-layer shape `{name}` is valid).
           if (parsed && typeof parsed === 'object' && typeof parsed.name === 'string' && parsed.name.length > 0) continue
         } catch { /* fall through */ }
       } catch { /* drop */ }
@@ -277,54 +276,37 @@ const getLayerContent = async (
 
 /**
  * Return the sig of the lineage's CURRENT layer (last marker in bag).
- * Pure compute when bag missing or empty (deterministic seed sig).
- * No I/O materialization — fast.
+ * Source of truth: the bag's last NNNNNNNN file. If the bag is empty
+ * (or doesn't exist yet), MATERIALIZE 00000000 on disk for `name` and
+ * return the sig of those real bytes. No virtual / name-derived sigs.
  */
 const latestMarkerSigFor = async (
   historyRoot: MockDir,
   lineageSig: string,
   name: string,
 ): Promise<string> => {
-  let bag: MockDir | null = null
-  try { bag = await historyRoot.getDirectoryHandle(lineageSig, { create: false }) }
-  catch { /* no bag — fall through to deterministic */ }
+  const bag = await historyRoot.getDirectoryHandle(lineageSig, { create: true })
 
-  if (bag) {
-    let latest = ''
-    for await (const [n, h] of bag.entries()) {
-      if (h.kind !== 'file') continue
-      if (!MARKER_RE.test(n)) continue
-      if (n > latest) latest = n
-    }
-    if (latest) {
-      try {
-        const file = await (await bag.getFileHandle(latest)).getFile()
-        const bytes = await file.arrayBuffer()
-        const sig = await sha256Hex(bytes)
-        preloaderCache.set(sig, bytes)   // pre-warm
-        return sig
-      } catch { /* fall through */ }
-    }
+  let latest = ''
+  for await (const [n, h] of bag.entries()) {
+    if (h.kind !== 'file') continue
+    if (!MARKER_RE.test(n)) continue
+    if (n > latest) latest = n
   }
-  // Deterministic empty-seed sig (also pre-warms the preloader cache).
-  return await seedSigFor(name)
-}
 
-/** Pure compute of the deterministic seed sig for a name. Pre-warms the
- *  preloader cache with the seed bytes so getLayerBySig is O(1) after. */
-const preloaderCache = new Map<string, ArrayBuffer>()
-const seedSigByName = new Map<string, string>()
-const seedSigFor = async (name: string): Promise<string> => {
-  const cached = seedSigByName.get(name)
-  if (cached) return cached
-  const json = JSON.stringify(canonicalizeLayer(emptyLayer(name)))
-  const bytes = new TextEncoder().encode(json)
-  const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
-  const sig = await sha256Hex(buf)
-  seedSigByName.set(name, sig)
-  preloaderCache.set(sig, buf)
+  if (!latest) {
+    await ensureEmptyMarker(bag, name)
+    latest = '00000000'
+  }
+
+  const file = await (await bag.getFileHandle(latest)).getFile()
+  const bytes = await file.arrayBuffer()
+  const sig = await sha256Hex(bytes)
+  preloaderCache.set(sig, bytes)
   return sig
 }
+
+const preloaderCache = new Map<string, ArrayBuffer>()
 
 /**
  * Preloader: walk every bag, find the marker whose bytes hash to the
@@ -337,7 +319,7 @@ const getLayerBySig = async (
   layerSig: string,
 ): Promise<LayerContent | null> => {
   if (!SIG_RE.test(layerSig)) return null
-  // Hot cache: preloader hit (warmed by seedSigFor + commitLayer).
+  // Hot cache: preloader hit (warmed by latestMarkerSigFor + commitLayer).
   const cached = preloaderCache.get(layerSig)
   if (cached) {
     try {
@@ -372,32 +354,26 @@ const getLayerBySig = async (
 
 /**
  * Mechanical resolver mirroring show-cell.drone.ts:resolveChildNames.
- *   1. Bagless deterministic match: any on-disk child whose seed sig
- *      matches a wanted sig (covers unnavigated children — pure compute).
- *   2. Preloader lookup: covers children that have committed bags.
  *
- * Spec helper takes the on-disk names directly (production iterates
- * the parent's OPFS dir to produce the same list).
+ * Pure signature lookup. For each child sig in `content.children`,
+ * fetch that child's LayerContent — its `name` field is the child's
+ * display name. NO folder-name lookups, NO name-derived sig
+ * computation. Names live inside the signed bytes.
+ *
+ * Spec helper retains a backwards-compatible signature so older
+ * tests that pass an `onDiskNames` argument still type-check; the
+ * argument is now ignored.
  */
 const resolveChildNames = async (
   historyRoot: MockDir,
   onDiskNamesOrContent: readonly string[] | LayerContent | null,
   contentArg?: LayerContent | null,
 ): Promise<Set<string>> => {
-  // Backwards-compatible signature: callers pass (root, content) or
-  // (root, onDiskNames, content). The on-disk pass pre-warms the
-  // preloader for bagless children before the lookup.
-  const onDiskNames: readonly string[] = Array.isArray(onDiskNamesOrContent) ? onDiskNamesOrContent : []
   const content: LayerContent | null = Array.isArray(onDiskNamesOrContent)
     ? (contentArg ?? null)
     : ((onDiskNamesOrContent as LayerContent | null) ?? null)
   const out = new Set<string>()
   if (!content?.children?.length) return out
-  const wanted = new Set(content.children)
-
-  for (const childName of onDiskNames) {
-    await seedSigFor(childName)   // pre-warms preloader cache
-  }
 
   for (const childSig of content.children) {
     const child = await getLayerBySig(historyRoot, childSig)
@@ -475,7 +451,6 @@ let historyRoot: MockDir = new MockDir('__history__')
 
 beforeEach(() => {
   preloaderCache.clear()
-  seedSigByName.clear()
   opfsRoot = new MockDir('/')
   historyRoot = new MockDir('__history__')
   opfsRoot.dirs.set('__history__', historyRoot)
@@ -521,7 +496,7 @@ describe('signLineage — bag identity = ancestry only', () => {
 // ===================================================
 
 describe('commitLayer / listLayers — bag-per-lineage', () => {
-  it('first commit on a fresh lineage auto-mints empty seed (00000000) + the new marker (00000001)', async () => {
+  it('first commit on a fresh lineage auto-mints empty layer (00000000) + the new marker (00000001)', async () => {
     const lineageSig = await signLineage(['abc'])
     const sig = await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig('m')] })
 
@@ -538,12 +513,12 @@ describe('commitLayer / listLayers — bag-per-lineage', () => {
     expect(parsed.children).toEqual([fakeSig('m')])
   })
 
-  it('list grows by one per commit (plus the empty seed)', async () => {
+  it('list grows by one per commit (plus the empty layer)', async () => {
     const lineageSig = await signLineage(['abc'])
     expect((await listLayers(historyRoot, lineageSig)).length).toBe(0)
 
     await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig('s')] })
-    expect((await listLayers(historyRoot, lineageSig)).length).toBe(2)   // seed + first
+    expect((await listLayers(historyRoot, lineageSig)).length).toBe(2)   // 00000000 +first
 
     await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig('s'), fakeSig('t')] })
     expect((await listLayers(historyRoot, lineageSig)).length).toBe(3)
@@ -557,7 +532,7 @@ describe('commitLayer / listLayers — bag-per-lineage', () => {
 
     expect(sig1).toBe(sig2)
     const entries = await listLayers(historyRoot, lineageSig)
-    // seed + 2 markers = 3
+    // 00000000 +2 markers = 3
     expect(entries.length).toBe(3)
     expect(entries[1].layerSig).toBe(entries[2].layerSig)
   })
@@ -585,13 +560,13 @@ describe('commitLayer / listLayers — bag-per-lineage', () => {
     const rootSig = await signLineage([])
     await commitLayer(historyRoot, rootSig, { name: '/', children: [fakeSig('r')] })
     const entries = await listLayers(historyRoot, rootSig)
-    expect(entries.length).toBe(2)   // seed + commit
+    expect(entries.length).toBe(2)   // 00000000 +commit
     const content = await getLayerContent(historyRoot, rootSig, entries[entries.length - 1].layerSig)
     expect(content?.name).toBe('/')
     expect(content?.children).toEqual([fakeSig('r')])
   })
 
-  it('auto-seed: the empty-seed marker exists on first commit and is byte-stable', async () => {
+  it('auto-mint: the empty-layer marker exists on first commit and is byte-stable', async () => {
     const lineageA = await signLineage(['abc'])
     const lineageB = await signLineage(['xyz'])
     await commitLayer(historyRoot, lineageA, { name: 'abc', children: [] })
@@ -600,16 +575,16 @@ describe('commitLayer / listLayers — bag-per-lineage', () => {
     const bagA = await historyRoot.getDirectoryHandle(lineageA)
     const bagB = await historyRoot.getDirectoryHandle(lineageB)
 
-    const seedABytes = await (await (await bagA.getFileHandle('00000000')).getFile()).arrayBuffer()
-    const seedBBytes = await (await (await bagB.getFileHandle('00000000')).getFile()).arrayBuffer()
+    const aBytes = await (await (await bagA.getFileHandle('00000000')).getFile()).arrayBuffer()
+    const bBytes = await (await (await bagB.getFileHandle('00000000')).getFile()).arrayBuffer()
 
-    // Different names → different seeds (name field is part of bytes)
-    expect(await sha256Hex(seedABytes)).not.toBe(await sha256Hex(seedBBytes))
+    // Different names → different empty markers (name field is part of bytes)
+    expect(await sha256Hex(aBytes)).not.toBe(await sha256Hex(bBytes))
 
-    // Same name → same seed sig
-    const seedASig = await sha256Hex(seedABytes)
+    // Same name → same empty-marker sig
+    const aSig = await sha256Hex(aBytes)
     const expected = await sha256Hex(JSON.stringify(canonicalizeLayer(emptyLayer('abc'))))
-    expect(seedASig).toBe(expected)
+    expect(aSig).toBe(expected)
   })
 })
 
@@ -722,7 +697,7 @@ describe('Cursor — undo/redo over an empty bag', () => {
   })
 })
 
-describe('Cursor — undo/redo over a single-commit bag (= 2 markers: seed + commit)', () => {
+describe('Cursor — undo/redo over a single-commit bag (= 2 markers: 00000000 + commit)', () => {
   let lineageSig: string
   let cursor: Cursor
 
@@ -745,14 +720,14 @@ describe('Cursor — undo/redo over a single-commit bag (= 2 markers: seed + com
     expect(content?.name).toBe('abc')
   })
 
-  it('undo to position=1 lands on the empty seed', async () => {
+  it('undo to position=1 lands on the empty layer', async () => {
     cursor.undo()
     expect(cursor.state.position).toBe(1)
     const content = await cursor.layerContentAtCursor(historyRoot)
     expect(content).toEqual(emptyLayer('abc'))
   })
 
-  it('undo past the seed → position=0 (pre-history), rewound=true', () => {
+  it('undo past 00000000 → position=0 (pre-history), rewound=true', () => {
     cursor.undo()
     cursor.undo()
     expect(cursor.state.position).toBe(0)
@@ -793,7 +768,7 @@ describe('Cursor — undo/redo over a multi-commit bag', () => {
     await cursor.load(historyRoot, lineageSig)
   })
 
-  it('starts at head (position=4, total=4 — seed + 3 commits)', () => {
+  it('starts at head (position=4, total=4 — 00000000 + 3 commits)', () => {
     expect(cursor.state.position).toBe(4)
     expect(cursor.state.total).toBe(4)
   })
@@ -812,7 +787,7 @@ describe('Cursor — undo/redo over a multi-commit bag', () => {
     cursor.undo()
     expect((await cursor.layerContentAtCursor(historyRoot))?.children).toEqual([fakeSig('a')])
     cursor.undo()
-    expect((await cursor.layerContentAtCursor(historyRoot))?.children).toBeUndefined()   // empty seed (no children field)
+    expect((await cursor.layerContentAtCursor(historyRoot))?.children).toBeUndefined()   // empty layer (no children field)
     cursor.undo()
     expect((await cursor.layerContentAtCursor(historyRoot))).toEqual(emptyLayer(''))   // pre-history
   })
@@ -874,10 +849,10 @@ describe('Cursor — lineage navigation', () => {
 
     const cursor = new Cursor()
     await cursor.load(historyRoot, lineageA)
-    expect(cursor.state.position).toBe(3)   // seed + 2 commits
+    expect(cursor.state.position).toBe(3)   // 00000000 +2 commits
 
     await cursor.load(historyRoot, lineageB)
-    expect(cursor.state.position).toBe(2)   // seed + 1 commit
+    expect(cursor.state.position).toBe(2)   // 00000000 +1 commit
     expect(cursor.state.locationSig).toBe(lineageB)
 
     await cursor.load(historyRoot, lineageA)
@@ -916,7 +891,7 @@ describe('Merkle invariant — current root advances per commit', () => {
     expect(sig1).not.toBe(sig3)
 
     const entries = await listLayers(historyRoot, lineageSig)
-    // seed + 3 commits = 4
+    // 00000000 +3 commits = 4
     expect(entries.length).toBe(4)
     expect(entries[entries.length - 1].layerSig).toBe(sig3)
   })
@@ -940,7 +915,7 @@ describe('Merkle invariant — current root advances per commit', () => {
 })
 
 describe('Merkle cascade — latestMarkerSigFor + parent composition', () => {
-  it('latestMarkerSigFor on missing bag returns deterministic empty-seed sig', async () => {
+  it('latestMarkerSigFor on missing bag returns deterministic empty-layer sig', async () => {
     const lineageSig = await signLineage(['phantom'])
     const sig = await latestMarkerSigFor(historyRoot, lineageSig, 'phantom')
     const expected = await sha256Hex(JSON.stringify(canonicalizeLayer(emptyLayer('phantom'))))
@@ -1017,13 +992,13 @@ describe('Merkle cascade — latestMarkerSigFor + parent composition', () => {
 })
 
 describe('Cursor — interleaved commit/undo edge cases', () => {
-  it('rapid commits (no coalescing): N events → N markers (plus seed), in order', async () => {
+  it('rapid commits (no coalescing): N events → N markers (plus 00000000), in order', async () => {
     const lineageSig = await signLineage(['abc'])
     for (let i = 0; i < 5; i++) {
       await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig(String(i))] })
     }
     const entries = await listLayers(historyRoot, lineageSig)
-    expect(entries.length).toBe(6)   // seed + 5
+    expect(entries.length).toBe(6)   // 00000000 +5
     expect(entries.map(e => e.filename)).toEqual([
       '00000000', '00000001', '00000002', '00000003', '00000004', '00000005',
     ])
@@ -1037,19 +1012,19 @@ describe('Cursor — interleaved commit/undo edge cases', () => {
 
     await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig('x')] })
     await cursor.onNewLayer(historyRoot)
-    expect(cursor.state.total).toBe(2)   // seed + commit
+    expect(cursor.state.total).toBe(2)   // 00000000 +commit
     expect(cursor.state.position).toBe(2)
     expect((await cursor.layerContentAtCursor(historyRoot))?.children).toEqual([fakeSig('x')])
   })
 })
 
 describe('Cursor — pre-history (case A) vs no-history (case B)', () => {
-  it('case A: bag has markers, undone past them → render empty seed', async () => {
+  it('case A: bag has markers, undone past them → render empty layer', async () => {
     const lineageSig = await signLineage(['abc'])
     await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig('x')] })
     const cursor = new Cursor()
     await cursor.load(historyRoot, lineageSig)
-    cursor.undo(); cursor.undo()   // past seed
+    cursor.undo(); cursor.undo()   // past 00000000
     expect(cursor.state.position).toBe(0)
     expect(cursor.state.total).toBe(2)
     const content = await cursor.layerContentAtCursor(historyRoot)
@@ -1117,7 +1092,7 @@ describe('Cascade — every ancestor commits when a leaf changes', () => {
       listLayers(historyRoot, await signLineage(['A', 'B'])),
       listLayers(historyRoot, await signLineage(['A', 'B', 'C'])),
     ])
-    // each bag = seed + first commit
+    // each bag = 00000000 + first commit
     expect(before.map(b => b.length)).toEqual([2, 2, 2, 2])
 
     // Leaf adds a child "D"
@@ -1169,7 +1144,7 @@ describe('Cascade — every ancestor commits when a leaf changes', () => {
     await cascade(historyRoot, ['A', 'B'], { 2: [], 1: ['B'], 0: ['A'] })  // /A/B + /A + root
 
     const rootEntries = await listLayers(historyRoot, rootSig)
-    // seed + 3 cascades = 4 markers
+    // 00000000 +3 cascades = 4 markers
     expect(rootEntries.length).toBe(4)
   })
 })
@@ -1192,7 +1167,7 @@ const resolveChildNamesFromBag = async (
   const out = new Set<string>()
   for (const name of onDiskChildNames) {
     const childLocSig = await signLineage([...parentSegments, name])
-    // Fast path: latest marker sig (or seed sig for bagless child).
+    // Fast path: latest marker sig (or empty-marker sig for bagless child).
     const currentSig = await latestMarkerSigFor(historyRoot, childLocSig, name)
     if (wanted.has(currentSig)) { out.add(name); continue }
     // Slow path: walk all markers (covers historical sigs).
@@ -1239,19 +1214,19 @@ describe('resolveChildNames — past sigs map back to current on-disk names', ()
     expect([...names]).toEqual(['B'])   // past state had only B; user steps back, sees B only
   })
 
-  it('past children = empty (seed) → resolves to no names; renderer clears union', async () => {
-    // Parent /A starts as seed (no children)
+  it('past children = empty layer → resolves to no names; renderer clears union', async () => {
+    // Parent /A starts as the empty layer (no children)
     await cascade(historyRoot, ['A'], { 1: [], 0: ['A'] })
     const aSig = await signLineage(['A'])
-    const seedEntries = await listLayers(historyRoot, aSig)
-    const seedContent = await getLayerContent(historyRoot, aSig, seedEntries[0].layerSig)
-    expect(seedContent?.children).toBeUndefined()
+    const initialEntries = await listLayers(historyRoot, aSig)
+    const initialContent = await getLayerContent(historyRoot, aSig, initialEntries[0].layerSig)
+    expect(initialContent?.children).toBeUndefined()
 
     // Later A gains a child B
     await cascade(historyRoot, ['A', 'B'], { 2: [], 1: ['B'], 0: ['A'] })
 
-    // Step back to seed: resolve `undefined` children against disk → empty
-    const names = await resolveChildNamesFromBag(historyRoot, ['A'], seedContent?.children ?? [], ['B'])
+    // Step back to the empty layer: resolve `undefined` children against disk → empty
+    const names = await resolveChildNamesFromBag(historyRoot, ['A'], initialContent?.children ?? [], ['B'])
     expect(names.size).toBe(0)
   })
 
@@ -1261,23 +1236,23 @@ describe('resolveChildNames — past sigs map back to current on-disk names', ()
     // Snapshot root's first commit
     const rootSig = await signLineage([])
     const stepOneEntries = await listLayers(historyRoot, rootSig)
-    expect(stepOneEntries.length).toBe(2)   // seed + 1 commit
+    expect(stepOneEntries.length).toBe(2)   // 00000000 +1 commit
     const stepOneContent = await getLayerContent(historyRoot, rootSig, stepOneEntries[1].layerSig)
     const stepOneChildren = stepOneContent?.children ?? []
     expect(stepOneChildren.length).toBe(1)
 
     // User adds "hello" at root: root cascade picks it up + builds children
-    // = [original_sig, hello_seed_sig]. hello has NO bag yet.
+    // = [original_sig, hello_empty_sig]. hello has NO bag yet.
     await cascade(historyRoot, [], { 0: ['original', 'hello'] })
 
     const stepTwoEntries = await listLayers(historyRoot, rootSig)
-    expect(stepTwoEntries.length).toBe(3)   // seed + 2 commits
+    expect(stepTwoEntries.length).toBe(3)   // 00000000 +2 commits
     const stepTwoContent = await getLayerContent(historyRoot, rootSig, stepTwoEntries[2].layerSig)
     expect(stepTwoContent?.children?.length).toBe(2)   // 2 sigs ✓ (matches user's observation)
 
     // Render at HEAD (step 2): on-disk = [original, hello].
     // - 'original' has a bag → currentSig matches step 2's children.
-    // - 'hello' has NO bag → currentSig = deterministic empty-seed
+    // - 'hello' has NO bag → currentSig = deterministic empty-layer
     //   sig for "hello", which is EXACTLY what parent's cascade
     //   stored in children (latestMarkerSigFor returns the same
     //   value during commit AND during render). Match!
@@ -1288,7 +1263,7 @@ describe('resolveChildNames — past sigs map back to current on-disk names', ()
 
     // Render at STEP 1 (after undo): step 1's children = [original_sig_old].
     // - 'original' has a bag with markers including the old sig → allowed.
-    // - 'hello' has no bag → its seed sig is NOT in step 1's children
+    // - 'hello' has no bag → its empty-marker sig is NOT in step 1's children
     //   (step 1 was committed before hello existed) → not allowed.
     // Result: allowed = {original} → user sees 1 tile ✓
     const allowedAtStepOne = await resolveChildNamesFromBag(historyRoot, [], stepOneChildren, ['original', 'hello'])
@@ -1357,15 +1332,15 @@ describe('end-to-end: sig→content lookup is mechanical', () => {
     expect([...allowedAtStepOne]).toEqual(['original'])
   })
 
-  it("scenario B: stepping back to seed renders empty (no children = render nothing)", async () => {
+  it("scenario B: stepping back to empty layer renders empty (no children = render nothing)", async () => {
     await cascade(historyRoot, [], { 0: ['x', 'y', 'z'] })
     const rootSig = await signLineage([])
     const entries = await listLayers(historyRoot, rootSig)
 
-    // Seed (00000000) has no children.
-    const seedContent = await getLayerContent(historyRoot, rootSig, entries[0].layerSig)
-    expect(seedContent?.children).toBeUndefined()
-    const allowed = await resolveChildNames(historyRoot, seedContent)
+    // Empty layer (00000000) has no children.
+    const initialContent = await getLayerContent(historyRoot, rootSig, entries[0].layerSig)
+    expect(initialContent?.children).toBeUndefined()
+    const allowed = await resolveChildNames(historyRoot, initialContent)
     expect(allowed.size).toBe(0)
   })
 
@@ -1516,7 +1491,7 @@ describe('layer ↔ tiles invariant: every layer\'s children resolve to real til
     await cascade(historyRoot, [], { 0: ['original'] })
     await cascade(historyRoot, [], { 0: ['original', 'hello'] })
     const result = await verifyLayerInvariant(historyRoot, await signLineage([]))
-    // seed (no children) + commit1 (1 child) + commit2 (2 children) = 3 markers, 3 child resolutions
+    // 00000000 (no children) + commit1 (1 child) + commit2 (2 children) = 3 markers, 3 child resolutions
     expect(result.markersChecked).toBe(3)
     expect(result.childrenChecked).toBe(3)
   })
@@ -1572,11 +1547,11 @@ describe('layer ↔ tiles invariant: every layer\'s children resolve to real til
     // Simulate the user's pre-fix data: a parent layer whose children
     // array contains a sig that has no backing bytes anywhere on disk
     // (this is what happened when latestMarkerSigFor returned a
-    // deterministic seed sig WITHOUT writing the seed bytes).
+    // deterministic empty-marker sig WITHOUT writing the 00000000 bytes).
     const rootSig = await signLineage([])
     const ghostSig = await sha256Hex('{"name":"phantom","cells":[],"hidden":[]}')   // legacy schema, never written
     const root = await historyRoot.getDirectoryHandle(rootSig, { create: true })
-    await ensureSeed(root, '/')
+    await ensureEmptyMarker(root, '/')
     const layerJson = JSON.stringify({ name: '/', children: [ghostSig] })
     await writeBytes(root, '00000001', new TextEncoder().encode(layerJson))
 
@@ -1602,7 +1577,7 @@ describe('layer ↔ tiles invariant: every layer\'s children resolve to real til
     const rootSig = await signLineage([])
     const ghostSig = await sha256Hex('{"name":"phantom-x","cells":[]}')
     const root = await historyRoot.getDirectoryHandle(rootSig, { create: true })
-    await ensureSeed(root, '/')
+    await ensureEmptyMarker(root, '/')
     await writeBytes(root, '00000001', new TextEncoder().encode(JSON.stringify({ name: '/', children: [ghostSig] })))
 
     // /compact wipe-and-rebuild: drop all markers, re-cascade with
@@ -1636,6 +1611,268 @@ describe('layer ↔ tiles invariant: every layer\'s children resolve to real til
     // The resolver takes ONLY a sig. Nothing else.
     const child = await getLayerBySig(historyRoot, childSig!)
     expect(child?.name).toBe('solo')
+  })
+})
+
+// ===================================================
+// Delta-driven cascade — the user's invariant:
+// "every increment is one item change. If it had three it'll be 4 or 2.
+//  end of story. you don't change anything on the current layer ever
+//  except the add or remove. parent and each ancestor swaps the one
+//  changed-child sig — sibling sigs stay verbatim."
+// ===================================================
+//
+// Mirrors LayerCommitter.#commit's delta path. For each cascade step
+// the new layer is the previous head's children with EXACTLY ONE entry
+// changed:
+//   - leaf (where the cell was added/removed): +1 cell sig (add) or
+//     -1 cell sig (remove)
+//   - ancestor: swap the child-below's old sig for its new sig
+//
+// Sibling sigs at every level are PRESERVED VERBATIM from the previous
+// head. No re-pulling from latestMarkerSigFor for siblings — that's
+// what produces spurious "+1 -1 same-name" diffs.
+
+const deltaCascade = async (
+  historyRoot: MockDir,
+  segments: string[],
+  op: 'add' | 'remove',
+  cell: string,
+): Promise<{ depth: number; oldSig: string; newSig: string }[]> => {
+  const out: { depth: number; oldSig: string; newSig: string }[] = []
+  let belowOldSig: string | null = null
+  let belowNewSig: string | null = null
+  let belowName: string = cell
+
+  for (let depth = segments.length; depth >= 0; depth--) {
+    const sub = segments.slice(0, depth)
+    const ancestorName = depth === 0 ? '/' : sub[sub.length - 1]
+    const ancestorLocSig = await signLineage(sub)
+
+    const prevSig = await latestMarkerSigFor(historyRoot, ancestorLocSig, ancestorName)
+    const prevLayer = await getLayerBySig(historyRoot, prevSig)
+    const prevChildren: string[] = prevLayer?.children?.slice() ?? []
+
+    let nextChildren: string[] = prevChildren
+
+    if (depth === segments.length) {
+      // LEAF
+      if (op === 'add') {
+        const cellLocSig = await signLineage([...sub, cell])
+        const cellSig = await latestMarkerSigFor(historyRoot, cellLocSig, cell)
+        if (!prevChildren.includes(cellSig)) nextChildren = [...prevChildren, cellSig]
+        belowOldSig = null
+        belowNewSig = cellSig
+        belowName = cell
+      } else {
+        const filtered: string[] = []
+        let foundOld: string | null = null
+        for (const sig of prevChildren) {
+          const child = await getLayerBySig(historyRoot, sig)
+          if (child?.name === cell) { foundOld = sig; continue }
+          filtered.push(sig)
+        }
+        nextChildren = filtered
+        belowOldSig = foundOld
+        belowNewSig = null
+        belowName = cell
+      }
+    } else {
+      // ANCESTOR — sig swap
+      let swapped = false
+      const work: string[] = []
+      for (const sig of prevChildren) {
+        if (!swapped && belowOldSig !== null && sig === belowOldSig) {
+          if (belowNewSig !== null) work.push(belowNewSig)
+          swapped = true
+          continue
+        }
+        work.push(sig)
+      }
+      if (!swapped) {
+        for (let i = 0; i < prevChildren.length; i++) {
+          const child = await getLayerBySig(historyRoot, prevChildren[i])
+          if (child?.name === belowName) {
+            if (belowNewSig !== null) work[i] = belowNewSig
+            else work.splice(i, 1)
+            swapped = true
+            break
+          }
+        }
+        if (!swapped && belowNewSig !== null) {
+          work.push(belowNewSig)
+          swapped = true
+        }
+      }
+      nextChildren = work
+      belowName = ancestorName
+    }
+
+    const newLayer: LayerContent = nextChildren.length === 0
+      ? { name: ancestorName }
+      : { name: ancestorName, children: nextChildren }
+    const newSig = await commitLayer(historyRoot, ancestorLocSig, newLayer)
+    out.push({ depth, oldSig: prevSig, newSig })
+
+    belowOldSig = prevSig
+    belowNewSig = newSig
+  }
+  return out
+}
+
+describe('Delta cascade — every increment is one item change', () => {
+  it('add: leaf children grows by exactly +1 entry', async () => {
+    const segments = ['A']
+    const aSig = await signLineage(segments)
+
+    // Touch /A's bag (so prev head exists with no children).
+    await latestMarkerSigFor(historyRoot, aSig, 'A')
+    const before = await getLayerBySig(historyRoot, await latestMarkerSigFor(historyRoot, aSig, 'A'))
+    expect(before?.children).toBeUndefined()
+
+    // Add cell X.
+    await deltaCascade(historyRoot, segments, 'add', 'X')
+
+    const aHeadSig = await latestMarkerSigFor(historyRoot, aSig, 'A')
+    const aHead = await getLayerBySig(historyRoot, aHeadSig)
+    expect(aHead?.children?.length).toBe(1)
+
+    // Add cell Y.
+    await deltaCascade(historyRoot, segments, 'add', 'Y')
+
+    const aHead2Sig = await latestMarkerSigFor(historyRoot, aSig, 'A')
+    const aHead2 = await getLayerBySig(historyRoot, aHead2Sig)
+    expect(aHead2?.children?.length).toBe(2)
+
+    // The first entry must be byte-identical to the previous head's first
+    // entry — sibling sig is preserved verbatim, no churn.
+    expect(aHead2!.children![0]).toBe(aHead!.children![0])
+
+    // Add cell Z.
+    await deltaCascade(historyRoot, segments, 'add', 'Z')
+
+    const aHead3Sig = await latestMarkerSigFor(historyRoot, aSig, 'A')
+    const aHead3 = await getLayerBySig(historyRoot, aHead3Sig)
+    expect(aHead3?.children?.length).toBe(3)
+
+    // First two entries verbatim from previous head — no spurious changes.
+    expect(aHead3!.children!.slice(0, 2)).toEqual(aHead2!.children!)
+  })
+
+  it('remove: leaf children shrinks by exactly -1 entry; siblings verbatim', async () => {
+    const segments = ['A']
+    const aSig = await signLineage(segments)
+
+    // Build [X, Y, Z]
+    await deltaCascade(historyRoot, segments, 'add', 'X')
+    await deltaCascade(historyRoot, segments, 'add', 'Y')
+    await deltaCascade(historyRoot, segments, 'add', 'Z')
+
+    const before = await getLayerBySig(historyRoot, await latestMarkerSigFor(historyRoot, aSig, 'A'))
+    expect(before?.children?.length).toBe(3)
+    const [xSig, ySig, zSig] = before!.children!
+
+    // Remove Y.
+    await deltaCascade(historyRoot, segments, 'remove', 'Y')
+
+    const after = await getLayerBySig(historyRoot, await latestMarkerSigFor(historyRoot, aSig, 'A'))
+    expect(after?.children?.length).toBe(2)
+    // Surviving sigs are byte-identical to the original — X and Z untouched.
+    expect(after!.children).toEqual([xSig, zSig])
+    void ySig
+  })
+
+  it('ancestor: child-below sig swaps; sibling sigs at the parent stay verbatim', async () => {
+    // Set up: parent /A has children B and C (each with their own bag).
+    // Then add X under /A/B. Result must be:
+    //   /A/B's bag: +1 marker (children grew by X)
+    //   /A's bag:   +1 marker (children swapped B_old → B_new); C's sig
+    //               must be verbatim from previous head
+    await deltaCascade(historyRoot, ['A'], 'add', 'B')
+    await deltaCascade(historyRoot, ['A'], 'add', 'C')
+
+    const aSig = await signLineage(['A'])
+    const aBefore = await getLayerBySig(historyRoot, await latestMarkerSigFor(historyRoot, aSig, 'A'))
+    expect(aBefore?.children?.length).toBe(2)
+    const [bOldSig, cSigBefore] = aBefore!.children!
+
+    // Add X under /A/B
+    await deltaCascade(historyRoot, ['A', 'B'], 'add', 'X')
+
+    const aAfter = await getLayerBySig(historyRoot, await latestMarkerSigFor(historyRoot, aSig, 'A'))
+    expect(aAfter?.children?.length).toBe(2)
+    const [bNewSig, cSigAfter] = aAfter!.children!
+
+    // B's sig changed (because /A/B got a new marker)
+    expect(bNewSig).not.toBe(bOldSig)
+    // C's sig is byte-identical — verbatim, no churn for unrelated sibling
+    expect(cSigAfter).toBe(cSigBefore)
+  })
+
+  it('cascade reaches root with one-entry diff at every level', async () => {
+    // Setup: root has children [A, A2]. /A has children [B, B2]. /A/B has [C].
+    await deltaCascade(historyRoot, [], 'add', 'A')
+    await deltaCascade(historyRoot, [], 'add', 'A2')
+    await deltaCascade(historyRoot, ['A'], 'add', 'B')
+    await deltaCascade(historyRoot, ['A'], 'add', 'B2')
+    await deltaCascade(historyRoot, ['A', 'B'], 'add', 'C')
+
+    // Snapshot every level's head children before the new add.
+    const rootSig = await signLineage([])
+    const aSig = await signLineage(['A'])
+    const abSig = await signLineage(['A', 'B'])
+    const abcSig = await signLineage(['A', 'B', 'C'])
+
+    const rootBefore = await getLayerBySig(historyRoot, await latestMarkerSigFor(historyRoot, rootSig, '/'))
+    const aBefore = await getLayerBySig(historyRoot, await latestMarkerSigFor(historyRoot, aSig, 'A'))
+    const abBefore = await getLayerBySig(historyRoot, await latestMarkerSigFor(historyRoot, abSig, 'B'))
+    const abcBefore = await getLayerBySig(historyRoot, await latestMarkerSigFor(historyRoot, abcSig, 'C'))
+
+    // Add D under /A/B/C
+    await deltaCascade(historyRoot, ['A', 'B', 'C'], 'add', 'D')
+
+    const rootAfter = await getLayerBySig(historyRoot, await latestMarkerSigFor(historyRoot, rootSig, '/'))
+    const aAfter = await getLayerBySig(historyRoot, await latestMarkerSigFor(historyRoot, aSig, 'A'))
+    const abAfter = await getLayerBySig(historyRoot, await latestMarkerSigFor(historyRoot, abSig, 'B'))
+    const abcAfter = await getLayerBySig(historyRoot, await latestMarkerSigFor(historyRoot, abcSig, 'C'))
+
+    // ROOT: children length unchanged (sig swap), siblings of A unchanged
+    expect(rootAfter?.children?.length).toBe(rootBefore?.children?.length)
+    // The A2 sibling sig (index 1) must be verbatim
+    expect(rootAfter?.children?.[1]).toBe(rootBefore?.children?.[1])
+
+    // /A: children length unchanged, B2 sibling verbatim
+    expect(aAfter?.children?.length).toBe(aBefore?.children?.length)
+    expect(aAfter?.children?.[1]).toBe(aBefore?.children?.[1])
+
+    // /A/B: children length unchanged (one sig-swap for C), no other entries to compare
+    expect(abAfter?.children?.length).toBe(abBefore?.children?.length)
+
+    // /A/B/C: children grew by exactly +1 (the new D)
+    expect((abcAfter?.children?.length ?? 0)).toBe((abcBefore?.children?.length ?? 0) + 1)
+  })
+
+  it('add does not produce phantom remove: diff vs previous head is exactly +1 sig at the leaf', async () => {
+    // The user's bug report: "added two tile and remove one" for a single add.
+    // Root cause was the snapshot cascade producing sig swaps for unrelated
+    // siblings via stale-cache flips. The delta cascade must produce exactly
+    // ONE new entry and ZERO removed entries at the leaf.
+    await deltaCascade(historyRoot, ['A'], 'add', 'X')
+    await deltaCascade(historyRoot, ['A'], 'add', 'Y')
+
+    const aSig = await signLineage(['A'])
+    const before = await getLayerBySig(historyRoot, await latestMarkerSigFor(historyRoot, aSig, 'A'))
+    const beforeSet = new Set(before?.children ?? [])
+
+    await deltaCascade(historyRoot, ['A'], 'add', 'Z')
+    const after = await getLayerBySig(historyRoot, await latestMarkerSigFor(historyRoot, aSig, 'A'))
+    const afterSet = new Set(after?.children ?? [])
+
+    // Diff: exactly one added sig, zero removed sigs.
+    const added: string[] = [...afterSet].filter(s => !beforeSet.has(s))
+    const removed: string[] = [...beforeSet].filter(s => !afterSet.has(s))
+    expect(added.length).toBe(1)
+    expect(removed.length).toBe(0)
   })
 })
 

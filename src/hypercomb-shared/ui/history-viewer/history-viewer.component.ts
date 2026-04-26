@@ -192,8 +192,12 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
   #sliceOpen = signal<{
     label: string
     lines: ReadonlyArray<{ text: string; status: 'same' | 'add' | 'remove' }>
+    /** Raw JSON of the layer at this slice — copy button source. */
+    json: string
   } | null>(null)
   readonly sliceOpen = this.#sliceOpen.asReadonly()
+  /** Briefly true after a successful copy so the button can flash feedback. */
+  readonly sliceCopied = signal(false)
 
   // Multi-select — set of entry filenames the user has checked via
   // Cmd/Ctrl-click (toggle) or Shift-click (range). Non-empty set
@@ -493,21 +497,50 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
     // Diff vs the previous entry (chronologically just before this one)
     // so the inspector shows what actually changed at this step. The
     // first entry has no predecessor — all lines highlight as `add`.
+    //
+    // Critical: the diff is SET-BASED for children, not position-based.
+    // When a sibling moves from last to middle in the array its JSON
+    // line text changes (`"sig"` → `"sig",`) under naive line-diff,
+    // making a verbatim-preserved sibling look like a remove+add. We
+    // serialise to a normalised format where each sig is its own
+    // sortable line with no trailing-comma artefacts, so unchanged
+    // siblings always align as `same` regardless of position changes.
     const prevEntry = index > 0 ? entries[index - 1] : null
     const prevContent = prevEntry ? contents.get(prevEntry.layerSig) : null
     const nextJson = JSON.stringify(content, Object.keys(content).sort(), 2)
-    const prevJson = prevContent ? JSON.stringify(prevContent, Object.keys(prevContent).sort(), 2) : ''
-    const lines = diffLines(prevJson.split('\n'), nextJson.split('\n'))
+    const prevLines = prevContent ? layerToDiffableLines(prevContent) : []
+    const nextLines = layerToDiffableLines(content)
+    const lines = diffLines(prevLines, nextLines)
 
     const when = new Date(entry.at).toLocaleString()
     this.#sliceOpen.set({
       label: `#${index + 1} · ${when} · ${entry.layerSig.slice(0, 12)}…`,
       lines,
+      json: nextJson,
     })
+    this.sliceCopied.set(false)
   }
 
   readonly closeSlice = (): void => {
     this.#sliceOpen.set(null)
+    this.sliceCopied.set(false)
+  }
+
+  /**
+   * Copy the open slice's raw JSON to the clipboard. Flashes a brief
+   * "copied" state on the button so the user knows it worked. Falls
+   * back silently if the Clipboard API isn't available.
+   */
+  readonly copySliceJson = async (): Promise<void> => {
+    const slice = this.#sliceOpen()
+    if (!slice) return
+    try {
+      await navigator.clipboard.writeText(slice.json)
+      this.sliceCopied.set(true)
+      setTimeout(() => this.sliceCopied.set(false), 1200)
+    } catch {
+      /* Clipboard unavailable (no user gesture, no permission, etc.) */
+    }
   }
 
   readonly hide = (): void => {
@@ -697,6 +730,43 @@ function installHistoryColumnStylesheet(): void {
 // produces the readable visual expected for add/remove highlighting
 // (interleaved in original order, not added-then-removed).
 // ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Serialise a layer to a stable, set-aware line representation for
+ * diffing. Children are sorted alphabetically by sig and each appears
+ * on its own line with NO trailing-comma artefacts — so a sibling sig
+ * that just changed position (and would gain/lose a JSON comma) still
+ * matches its previous-layer counterpart as `same` in the line diff.
+ *
+ * Format (NOT valid JSON — diff/display only):
+ *   {
+ *     "name": "<name>",
+ *     "children": [
+ *       <sig1>
+ *       <sig2>
+ *       ...
+ *     ]
+ *   }
+ *
+ * Empty children render as `"children": []` on a single line.
+ */
+function layerToDiffableLines(content: Content): string[] {
+  const lines: string[] = ['{']
+  lines.push(`  "name": ${JSON.stringify(content.name ?? '')},`)
+  const children = content.children ?? []
+  if (children.length === 0) {
+    lines.push(`  "children": []`)
+  } else {
+    lines.push(`  "children": [`)
+    // Sort to make set-membership the only thing that matters in the
+    // diff. Original order is irrelevant for the "what changed" view.
+    const sorted = children.slice().sort((a, b) => a.localeCompare(b))
+    for (const sig of sorted) lines.push(`    ${sig}`)
+    lines.push(`  ]`)
+  }
+  lines.push('}')
+  return lines
+}
 
 function diffLines(
   a: readonly string[],

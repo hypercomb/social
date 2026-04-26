@@ -102,6 +102,11 @@
       <header>
         <span class="slice-label">{{ slice.label }}</span>
         <button type="button"
+                class="slice-copy"
+                [class.copied]="sliceCopied()"
+                [attr.aria-label]="'history.copy-slice' | t"
+                (click)="copySliceJson()">{{ sliceCopied() ? '✓' : 'copy' }}</button>
+        <button type="button"
                 class="slice-close"
                 [attr.aria-label]="'history.close-slice' | t"
                 (click)="closeSlice()">×</button>

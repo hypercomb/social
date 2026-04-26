@@ -286,17 +286,33 @@ export class MoveDrone extends Drone {
     if (!this.#anchorAxial) { this.#reset(source); return }
 
     if (this.#droppedThrough) {
-      // insert-push commit: write dense order directly
-      const insertOrder = this.#computeInsertPlacements(finalAxial).filter(n => n !== '')
+      // Index is the source of truth: write only the moved tiles'
+      // indices to the dropped grid slot(s). Other tiles keep whatever
+      // index they have. Render-time collision heal demotes any prior
+      // occupant to the next free slot. No dense renumber.
+      const movedLabels = [...this.#movedGroup.keys()]
+      const targetGridIndex = this.#keyToIndex.get(axialKey(finalAxial.q, finalAxial.r))
+      if (targetGridIndex !== undefined) {
+        const lineage = this.resolve<any>('lineage')
+        const dir: FileSystemDirectoryHandle | null = lineage?.explorerDir ? await lineage.explorerDir() : null
+        if (dir) {
+          for (let i = 0; i < movedLabels.length; i++) {
+            try {
+              const cellDir = await dir.getDirectoryHandle(movedLabels[i], { create: false })
+              await writeCellProperties(cellDir, { index: targetGridIndex + i })
+            } catch { /* skip missing cell dirs */ }
+          }
+        }
+      }
 
-      // Persist via OrderProjection (authoritative — records history op + updates cache)
+      // Record reorder op for history (post-state). The cell:reorder
+      // emit is now just a cache-invalidation signal — show-cell no
+      // longer renumbers indices on receipt.
+      const insertOrder = this.#computeInsertPlacements(finalAxial).filter(n => n !== '')
       const orderProjection = window.ioc.get<OrderProjection>('@diamondcoreprocessor.com/OrderProjection')
       if (orderProjection) {
         await orderProjection.reorder(insertOrder)
       }
-
-      // Pinned mode: each tile's `index` property must reflect its new slot.
-      await this.#persistPinnedIndicesByOrder(insertOrder)
 
       this.emitEffect('cell:reorder', { labels: insertOrder })
       this.emitEffect('move:preview', null)
@@ -746,7 +762,14 @@ export class MoveDrone extends Drone {
     return result
   }
 
-  // ── shared commit logic (dense spiral) ────────────────
+  // ── shared commit logic ────────────────────────────────
+  //
+  // The renderer reads each cell's `index` property to place it via
+  // `axial.items.get(index)`. So the only authoritative write is the
+  // per-cell index in #persistPinnedIndices below. The OrderProjection
+  // call records a snapshot of the post-state for history/diff use; the
+  // cell:reorder emit is a cache-invalidation signal only — show-cell's
+  // handler MUST NOT renumber indices on receipt.
 
   async #commitPlacements(placements: Map<string, Axial>): Promise<void> {
     const denseOrder = this.#reorderNames(placements).filter(n => n !== '')
@@ -756,9 +779,9 @@ export class MoveDrone extends Drone {
       await orderProjection.reorder(denseOrder)
     }
 
-    // Pinned rendering reads each cell's `index` property; without this write
-    // the move would appear to snap back after release even though the history
-    // op was recorded. Update index for every placed tile (moved + displaced).
+    // Authoritative write: each placed tile's `index` property = its
+    // grid index. Gaps are preserved. Render-time collision heal in
+    // #orderByIndexPinned demotes any duplicate to the next free slot.
     await this.#persistPinnedIndices(placements)
 
     this.emitEffect('cell:reorder', { labels: denseOrder })
@@ -777,21 +800,6 @@ export class MoveDrone extends Drone {
       try {
         const cellDir = await dir.getDirectoryHandle(label, { create: false })
         await writeCellProperties(cellDir, { index: gridIndex })
-      } catch { /* skip missing cell dirs */ }
-    }
-  }
-
-  async #persistPinnedIndicesByOrder(order: string[]): Promise<void> {
-    const lineage = this.resolve<any>('lineage')
-    const dir: FileSystemDirectoryHandle | null = lineage?.explorerDir ? await lineage.explorerDir() : null
-    if (!dir) return
-
-    for (let i = 0; i < order.length; i++) {
-      const label = order[i]
-      if (!label) continue
-      try {
-        const cellDir = await dir.getDirectoryHandle(label, { create: false })
-        await writeCellProperties(cellDir, { index: i })
       } catch { /* skip missing cell dirs */ }
     }
   }

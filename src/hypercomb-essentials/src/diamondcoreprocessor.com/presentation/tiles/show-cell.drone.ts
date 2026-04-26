@@ -163,29 +163,19 @@ class CellSlots {
 async function resolveChildNames(
   history: HistoryService,
   _parentSegments: readonly string[],
-  parentDir: FileSystemDirectoryHandle | null,
+  _parentDir: FileSystemDirectoryHandle | null,
   content: { children?: string[] } | null,
 ): Promise<Set<string>> {
   const out = new Set<string>()
   if (!content?.children?.length) return out
-  const wanted = new Set(content.children)
 
-  // Pre-warm preloader for every on-disk child name. seedSigFor caches
-  // the sig→bytes mapping so getLayerBySig becomes O(1) below. This is
-  // the "load by signature" path: every parent.children sig is now
-  // resolvable from memory without any further OPFS work.
-  if (parentDir) {
-    for await (const [childName, handle] of (parentDir as any).entries()) {
-      if (handle.kind !== 'directory') continue
-      await history.seedSigFor(childName)
-    }
-  }
-
-  // One mechanical pass: lookup each parent.children sig via preloader.
-  // Hot cache for bagless children (warmed above) and for committed
-  // children (warmed at commit time). No cold-walk in the steady state.
+  // Pure signature resolution. For each child sig in the parent's
+  // layer, fetch that child's LayerContent — its `name` field is the
+  // child's display name. NO folder-name lookups, NO seed-by-name
+  // pre-warming. Names live inside the signed bytes, not on the
+  // filesystem. getLayerBySig is content-addressed: hot from the
+  // preloader cache after warmup, cold-walks bags by sig if missed.
   for (const childSig of content.children) {
-    if (!wanted.has(childSig)) continue
     const child = await history.getLayerBySig(childSig)
     if (child?.name) out.add(child.name)
   }
@@ -357,7 +347,13 @@ export class ShowCellDrone extends Drone {
   #cursorPropsOverride: Map<string, string> | null = null
   /** Cache key for cursor-time reconstruction: `{locationSig}:{position}` — avoids redundant OPFS reads */
   #cursorReconstructionKey = ''
-  private suppressMeshRecenter = false
+  // One-shot recenter flag. Default false — data operations (move,
+  // add, remove, reorder) NEVER autocenter. The page-nav path sets
+  // this to true when it wants the next applyGeometry pass to recenter
+  // the mesh on its bounds; applyGeometry consumes it (clears it back
+  // to false after firing). The empty→populated viewport-zoom branch
+  // gates on the same flag.
+  #pendingRecenter = false
   #layoutMode: 'dense' | 'pinned' = 'dense'
 
   // First-visit fit: when navigating to a layer that has no saved viewport
@@ -983,8 +979,7 @@ export class ShowCellDrone extends Drone {
     this.renderedCells.clear()
     for (const cell of cells) this.renderedCells.set(cell.label, cell)
 
-    this.suppressMeshRecenter = true
-    void this.applyGeometry(cells).finally(() => { this.suppressMeshRecenter = false })
+    void this.applyGeometry(cells)
   }
 
   /**
@@ -1101,7 +1096,6 @@ export class ShowCellDrone extends Drone {
       cells: [...cells], cellNames, localCellSet, branchSet,
     })
 
-    this.suppressMeshRecenter = true
     // applyGeometry returns a promise but its body is synchronous for our
     // purposes; don't await — the paint happens in the next frame anyway.
     void this.applyGeometry(cells)
@@ -1225,7 +1219,6 @@ export class ShowCellDrone extends Drone {
       cells: [...cells], cellNames, localCellSet, branchSet,
     })
 
-    this.suppressMeshRecenter = true
     await this.applyGeometry(cells)
 
     this.emitEffect('render:cell-count', {
@@ -1434,24 +1427,22 @@ export class ShowCellDrone extends Drone {
         }
 
         if (content) {
-          // At HEAD: on-disk listing IS the truth (just-committed layer
-          // matches it by construction). Don't touch union — preserve
-          // every tile and its slot index. This keeps "no auto-arrange":
-          // typing a new tile never displaces an existing one.
-          //
-          // REWOUND: load by signature. The past layer's children sigs
-          // are the authoritative cell set; resolve each via preloader
-          // and replace union so live-disk tiles that didn't exist at
-          // that step don't bleed into the historical view.
-          if (cursorState?.rewound) {
-            const parentSegments = (lineage as { explorerSegments?: () => readonly string[] })?.explorerSegments?.() ?? []
-            const allowed = await resolveChildNames(historyService, parentSegments, dir, content)
-            union.clear()
-            localCellSet.clear()
-            for (const cell of allowed) {
-              union.add(cell)
-              localCellSet.add(cell)
-            }
+          // The layer at the cursor's current position is the SOLE
+          // source of truth for which cells render — at HEAD and when
+          // REWOUND. Disk folders may exist that the layer doesn't know
+          // about (a layer marker was deleted, an OPFS write happened
+          // outside the cascade, etc.); those tiles are "garbage" by
+          // the layer's reckoning and must not appear. Children sigs
+          // are resolved by walking the merkle hierarchy down each
+          // candidate child's bag — pure signature lookup, never a
+          // name-based disk listing.
+          const parentSegments = (lineage as { explorerSegments?: () => readonly string[] })?.explorerSegments?.() ?? []
+          const allowed = await resolveChildNames(historyService, parentSegments, dir, content)
+          union.clear()
+          localCellSet.clear()
+          for (const cell of allowed) {
+            union.add(cell)
+            localCellSet.add(cell)
           }
         }
       }
@@ -1537,7 +1528,7 @@ export class ShowCellDrone extends Drone {
       this.renderedCells.clear()
       this.#pendingRemoves.clear()
       this.#slots.clear()  // layer change invalidates the slot state machine
-      this.suppressMeshRecenter = false  // allow recenter on page navigation
+      this.#pendingRecenter = true  // page nav requests one recenter
 
       // apply saved viewport (or defaults) so the container is correct before tiles render.
       // Auto fit-to-content is intentionally disabled — zoomToFit only runs on explicit
@@ -1611,14 +1602,11 @@ export class ShowCellDrone extends Drone {
 
     await this.applyGeometry(cells)
 
-    if (wasEmpty && cells.length > 0 && this.pixiApp && this.pixiContainer && this.pixiRenderer && !this.suppressMeshRecenter) {
+    if (wasEmpty && cells.length > 0 && this.pixiApp && this.pixiContainer && this.pixiRenderer && this.#pendingRecenter) {
       // first tile on empty screen → center viewport and zoom 2×.
-      // Gated on !suppressMeshRecenter: during undo/redo the cursor-
-      // change handler sets that flag, and we MUST NOT touch the
-      // viewport — the user expects to keep their current scale/pan
-      // across history navigation. The empty→populated transition
-      // (e.g. redo bringing cells back after undoing them all away)
-      // would otherwise zoom them out of context.
+      // Gated on #pendingRecenter: only the page-nav path opts in.
+      // Data ops (move, add, remove, undo/redo, reorder) never touch
+      // the viewport — user keeps their current scale/pan.
       const s = this.pixiRenderer.screen
       this.pixiApp.stage.position.set(s.width * 0.5, s.height * 0.5)
       this.pixiContainer.scale.set(2)
@@ -1817,11 +1805,12 @@ export class ShowCellDrone extends Drone {
       this.hexMesh.shader = (this.shader as any).shader
     }
 
-    if (this.hexMesh?.getLocalBounds && !this.suppressMeshRecenter) {
+    if (this.hexMesh?.getLocalBounds && this.#pendingRecenter) {
       this.hexMesh.position.set(0, 0)
       const bounds = this.hexMesh.getLocalBounds()
       this.hexMesh.position.set(-(bounds.x + bounds.width * 0.5), -(bounds.y + bounds.height * 0.5))
       this.emitEffect('render:mesh-offset', { x: this.hexMesh.position.x, y: this.hexMesh.position.y })
+      this.#pendingRecenter = false  // one-shot consumed
     }
 
     this.geom = geom
@@ -1963,7 +1952,6 @@ export class ShowCellDrone extends Drone {
     // loaded fire-and-forget afterward. Rapid clicks in one JS turn coalesce
     // into a single render.
     this.onEffect<{ cell: string; groupId?: string }>('cell:added', (payload) => {
-      this.suppressMeshRecenter = true
       if (!payload?.cell) return
       this.#pendingRemoves.delete(payload.cell)
       this.#startNewCellFade(payload.cell)
@@ -1977,7 +1965,6 @@ export class ShowCellDrone extends Drone {
     })
 
     this.onEffect<{ cell: string; groupId?: string }>('cell:removed', (payload) => {
-      this.suppressMeshRecenter = true
       if (!payload?.cell) return
       this.#pendingRemoves.add(payload.cell)
       this.cellImageCache.delete(payload.cell)
@@ -2052,14 +2039,10 @@ export class ShowCellDrone extends Drone {
       void this.renderFromSynchronize()
 
       // Preserve viewport (scale + pan) across the undo/redo re-render.
-      // Without this, applyGeometry's mesh-recenter (line ~1720) shifts
-      // the canvas every time the cell set changes — every step jerks
-      // the camera and the user loses spatial context. Two-part guard:
-      //   1. Suppress the mesh recenter for this re-render (the flag
-      //      gets cleared again on the next genuine layer change).
-      //   2. Snapshot stage / container transforms before requestRender
-      //      and restore after, in case any other path nudges them.
-      this.suppressMeshRecenter = true
+      // Snapshot stage / container transforms before requestRender and
+      // restore after, in case any other path nudges them. Mesh recenter
+      // is off by default now (one-shot opt-in via #pendingRecenter), so
+      // no flag set is needed here.
       const app = this.pixiApp as any
       const cont = this.pixiContainer as any
       const snap = (app && cont) ? {
@@ -2771,60 +2754,33 @@ export class ShowCellDrone extends Drone {
   // detection, and next-available-slot fallback in one pass.
 
   async #handlePlaceAt(cell: string, targetIndex: number): Promise<void> {
+    // Index is the source of truth. Place this one cell at the target
+    // index — do not renumber anyone else. Render-time collision heal
+    // (in #orderByIndexPinned) demotes any prior occupant to the next
+    // free slot.
     const lineage = this.resolve<any>('lineage')
     if (!lineage) return
     const dir = await lineage.explorerDir() as FileSystemDirectoryHandle | null
     if (!dir) return
 
-    // read all local cells and their current indices
-    const localSeeds = await this.listCellFolders(dir)
-    const entries: { name: string; index: number }[] = []
+    try {
+      const cellDir = await dir.getDirectoryHandle(cell, { create: false })
+      await writeCellProperties(cellDir, { index: targetIndex })
+    } catch { /* missing cell dir */ }
 
-    for (const name of localSeeds) {
-      try {
-        const cellDir = await dir.getDirectoryHandle(name, { create: false })
-        const props = await readCellProperties(cellDir)
-        entries.push({ name, index: typeof props['index'] === 'number' ? props['index'] as number : entries.length })
-      } catch {
-        entries.push({ name, index: entries.length })
-      }
-    }
-
-    entries.sort((a, b) => a.index - b.index)
-
-    // remove cell if already present, then insert at target
-    const names = entries.map(e => e.name).filter(n => n !== cell)
-    const clamped = Math.max(0, Math.min(targetIndex, names.length))
-    names.splice(clamped, 0, cell)
-
-    // write updated indices
-    await this.#writeIndices(dir, names)
+    this.renderedCellsKey = ''
+    this.#layerCellsCache.clear()
     this.requestRender()
   }
 
-  async #handleReorder(labels: string[]): Promise<void> {
-    const lineage = this.resolve<any>('lineage')
-    if (!lineage) return
-    const dir = await lineage.explorerDir() as FileSystemDirectoryHandle | null
-    if (!dir) return
-
-    await this.#writeIndices(dir, labels)
-    this.renderedCellsKey = ''          // invalidate so renderFromSynchronize re-reads order
-    this.#layerCellsCache.clear()       // clear stale cached cells for this layer
+  async #handleReorder(_labels: string[]): Promise<void> {
+    // Cell index is the source of truth — written per-cell by the move
+    // drone (and similar). This handler only invalidates the renderer's
+    // caches so the next pass re-reads the persisted indices. It MUST
+    // NOT renumber indices densely — that was the snap-back bug.
+    this.renderedCellsKey = ''
+    this.#layerCellsCache.clear()
     this.requestRender()
-  }
-
-  async #writeIndices(dir: FileSystemDirectoryHandle, orderedNames: string[]): Promise<void> {
-    // Rewrite each cell's index to match its position in orderedNames.
-    // With offset phased out, the index alone determines placement, so
-    // reorders just renumber indices starting at 0.
-    for (let i = 0; i < orderedNames.length; i++) {
-      const name = orderedNames[i]
-      try {
-        const cellDir = await dir.getDirectoryHandle(name, { create: false })
-        await writeCellProperties(cellDir, { index: i })
-      } catch { /* skip missing cell dirs */ }
-    }
   }
 
   private checkCellHasBranch = async (parentDir: FileSystemDirectoryHandle, cellName: string): Promise<boolean> => {

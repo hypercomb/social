@@ -264,6 +264,31 @@
   color: rgba(220, 230, 245, 0.85);
 }
 
+.slice-modal .slice-copy {
+  background: rgba(60, 80, 110, 0.45);
+  border: 1px solid rgba(120, 140, 170, 0.4);
+  color: rgba(220, 230, 245, 0.9);
+  border-radius: 4px;
+  font: inherit;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 4px 10px;
+  cursor: pointer;
+  margin-left: auto;
+  margin-right: 4px;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.slice-modal .slice-copy:hover {
+  background: rgba(80, 105, 140, 0.6);
+  color: rgba(255, 255, 255, 1);
+}
+.slice-modal .slice-copy.copied {
+  background: rgba(60, 140, 90, 0.55);
+  border-color: rgba(120, 200, 150, 0.6);
+  color: rgba(230, 255, 235, 1);
+}
+
 .slice-modal .slice-close {
   background: transparent;
   border: none;

@@ -48,8 +48,8 @@ export class CompactQueenBee extends QueenBee {
     }
 
     // 4. Commit one marker reflecting current state. commitLayer
-    //    auto-mints the seed at 00000000, then this commit lands at
-    //    00000001 with the actual children array.
+    //    auto-mints the empty layer at 00000000, then this commit
+    //    lands at 00000001 with the actual children array.
     await history.commitLayer(locationSig, fresh)
 
     // 5. Re-hydrate cursor; land on the top.
@@ -61,7 +61,7 @@ export class CompactQueenBee extends QueenBee {
    * Build a complete layer for the current lineage:
    *   name     = ROOT_NAME for root, else the last explorer segment
    *   children = each on-disk child's CURRENT marker sig (or omitted
-   *              when there are no children — seed shape)
+   *              when there are no children — empty-layer shape)
    */
   async #assembleFromDisk(history: HistoryService, lineage: Lineage): Promise<LayerContent> {
     const segments = (lineage.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)

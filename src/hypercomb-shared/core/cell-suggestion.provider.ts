@@ -1,16 +1,35 @@
 // hypercomb-shared/core/cell-suggestion.provider.ts
-// Lists subdirectory names at the current explorer level as autocomplete suggestions.
-// Supports sub-path queries: when the user types "abc/" the command line calls
-// query(['abc']) to show children of "abc" instead of siblings.
+//
+// Lists cell names at the current explorer level as autocomplete suggestions.
+// Source of truth: the layer at the current cursor position in
+// `__history__/<sign(lineage)>/`. Resolution is purely signature-based —
+// we read each child sig in the head layer's `children` array and resolve
+// it to a display name via the LayerContent's `name` field. NO OPFS
+// directory enumeration; the on-disk cell folders are not the source of
+// truth, the layer is.
+//
+// Supports sub-path queries: when the user types "abc/" the command line
+// calls query(['abc']) and we resolve from the layer for `parentSegments
+// + ['abc']` instead of the current level.
 
 import type { Lineage } from './lineage'
 import type { SuggestionProvider } from './suggestion-provider'
+
+type LayerContent = { name: string; children?: string[] }
+type HistoryLike = {
+  sign: (lineage: { explorerSegments: () => string[] }) => Promise<string>
+  latestMarkerSigFor: (lineageSig: string, name: string) => Promise<string>
+  getLayerBySig: (sig: string) => Promise<LayerContent | null>
+}
 
 export class CellSuggestionProvider extends EventTarget implements SuggestionProvider {
 
   readonly providerName = 'cells'
 
   private get lineage(): Lineage { return get('@hypercomb.social/Lineage') as Lineage }
+  private get history(): HistoryLike | undefined {
+    return get('@diamondcoreprocessor.com/HistoryService') as HistoryLike | undefined
+  }
 
   #names: readonly string[] = []
   #subPath: readonly string[] = []
@@ -52,8 +71,8 @@ export class CellSuggestionProvider extends EventTarget implements SuggestionPro
   }
 
   #doRefresh = async (): Promise<void> => {
-    let dir = await this.lineage.explorerDir()
-    if (!dir) {
+    const history = this.history
+    if (!history) {
       if (this.#names.length) {
         this.#names = []
         this.dispatchEvent(new CustomEvent('change'))
@@ -61,27 +80,32 @@ export class CellSuggestionProvider extends EventTarget implements SuggestionPro
       return
     }
 
-    // resolve sub-path if any
-    for (const seg of this.#subPath) {
-      try {
-        dir = await dir.getDirectoryHandle(seg, { create: false })
-      } catch {
-        // sub-path doesn't exist yet — no suggestions
-        if (this.#names.length) {
-          this.#names = []
-          this.dispatchEvent(new CustomEvent('change'))
-        }
-        return
-      }
+    // The lineage we're suggesting under = current explorer segments + subPath.
+    const parentSegmentsRaw = (this.lineage as unknown as { explorerSegments?: () => string[] })?.explorerSegments?.() ?? []
+    const parentSegments = [
+      ...parentSegmentsRaw.map(s => String(s ?? '').trim()).filter(Boolean),
+      ...this.#subPath.map(s => String(s ?? '').trim()).filter(Boolean),
+    ]
+    const parentName = parentSegments.length === 0 ? '/' : parentSegments[parentSegments.length - 1]
+
+    // Resolve the parent's head layer purely by signature.
+    let parentLayer: LayerContent | null = null
+    try {
+      const parentLineageSig = await history.sign({ explorerSegments: () => parentSegments })
+      const headSig = await history.latestMarkerSigFor(parentLineageSig, parentName)
+      parentLayer = await history.getLayerBySig(headSig)
+    } catch {
+      // parent has no resolvable layer (yet) — empty suggestions
     }
 
     const names: string[] = []
-    try {
-      for await (const [name, entry] of dir.entries()) {
-        if (entry.kind === 'directory') names.push(name)
+    if (parentLayer?.children?.length) {
+      // For each child sig in the parent's layer, fetch its LayerContent
+      // and read the `name` field. Pure signature lookup.
+      for (const childSig of parentLayer.children) {
+        const child = await history.getLayerBySig(childSig)
+        if (child?.name) names.push(child.name)
       }
-    } catch {
-      // OPFS unavailable
     }
 
     names.sort((a, b) => a.localeCompare(b))

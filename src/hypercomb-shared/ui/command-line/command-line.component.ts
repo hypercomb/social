@@ -1427,30 +1427,55 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       return
     }
 
-    // create the cell directory in OPFS so listCellFolders() can find it
+    // Create the cell directory in OPFS at every level so listCellFolders
+    // sees them, AND record each (parent_segments, leaf_cell) pair so we
+    // can emit one cell:added event per gained child. This is critical
+    // for nested paths like "meals/breakfast": the leaf "breakfast"
+    // needs its own cell:added with segments=[..., "meals"], otherwise
+    // /meals's bag never learns "breakfast" was added and the cascade
+    // chain breaks above the first level.
+    //
+    // Idempotent: if a directory already existed before we walked into
+    // it, the layer-committer's delta path no-ops (sig already in
+    // children, dedup at commitLayer). So redundant events for
+    // already-existing intermediates do no harm — but we still emit
+    // them, because the directory might have been created externally
+    // and the bag has no history for it yet, in which case the event
+    // bootstraps it.
     const dir = await this.lineage.explorerDir()
+    const baseSegments = (this.lineage as unknown as { explorerSegments?: () => string[] })?.explorerSegments?.() ?? []
+    const events: { cell: string; segments: string[] }[] = []
     if (dir) {
       let parent = dir
+      const accumulated: string[] = [...baseSegments]
       for (const part of parts) {
+        events.push({ cell: part, segments: accumulated.slice() })
         parent = await parent.getDirectoryHandle(part, { create: true })
+        accumulated.push(part)
       }
     }
 
+    const leafCell = parts[parts.length - 1]
     const armed = this.armedResource()
 
     if (armed) {
       // Lock substrate out of this cell until the resource is fully attached.
       // The lock is released by ResourceAttachDrone once the props blob is
       // written to OPFS and the tile-props-index is updated.
-      EffectBus.emit('cell:attach-pending', { cell: parts[0], pending: true })
+      EffectBus.emit('cell:attach-pending', { cell: leafCell, pending: true })
     }
 
-    // emit cell:added — HistoryRecorder will record the op
-    EffectBus.emit('cell:added', { cell: parts[0] })
+    // Emit one cell:added per level in DOWN order — root level first,
+    // then leaf last. Each event triggers its own delta cascade. The
+    // delta cascade is idempotent for already-existing children, so
+    // emitting redundantly for unchanged intermediates is safe.
+    for (const evt of events) {
+      EffectBus.emit('cell:added', evt)
+    }
 
     if (armed) {
       EffectBus.emit('cell:attach-resource', {
-        cell: parts[0],
+        cell: leafCell,
         largeSig: armed.largeSig,
         smallPointSig: armed.smallPointSig,
         smallFlatSig: armed.smallFlatSig,
