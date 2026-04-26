@@ -5,7 +5,7 @@
 //   - marker file IS the full layer JSON (no pool indirection)
 //   - layerSig = sha256(marker file bytes)
 //   - empty seed (00000000) auto-minted on bag's first touch
-//   - merkle cascade: parent.merkles[i] = child's current marker sig
+//   - merkle cascade: parent.children[i] = child's current marker sig
 //
 // Uses an in-memory OPFS mock so tests run in jsdom without browser.
 
@@ -116,18 +116,14 @@ class MockDir {
 
 type LayerContent = {
   name: string
-  cells: string[]
-  merkles: string[]
-  hidden: string[]
+  children: string[]
 }
 
-const emptyLayer = (name: string): LayerContent => ({ name, cells: [], merkles: [], hidden: [] })
+const emptyLayer = (name: string): LayerContent => ({ name, children: [] })
 
 const canonicalizeLayer = (layer: LayerContent): LayerContent => ({
   name: layer.name,
-  cells: layer.cells.slice(),
-  merkles: layer.merkles.slice(),
-  hidden: [...layer.hidden].sort(),
+  children: layer.children.slice(),
 })
 
 const nextMarkerName = async (bag: MockDir): Promise<string> => {
@@ -201,7 +197,7 @@ const normalize = async (bag: MockDir): Promise<void> => {
         if (SIG_RE.test(text)) { drop.push(name); continue }
         try {
           const parsed = JSON.parse(text)
-          if (parsed && typeof parsed === 'object' && Array.isArray(parsed.cells)) continue
+          if (parsed && typeof parsed === 'object' && Array.isArray(parsed.children)) continue
         } catch { /* fall through */ }
       } catch { /* drop */ }
     }
@@ -261,9 +257,7 @@ const getLayerContent = async (
       const parsed = JSON.parse(new TextDecoder().decode(bytes)) as Partial<LayerContent>
       return {
         name: parsed.name ?? '',
-        cells: parsed.cells ?? [],
-        merkles: parsed.merkles ?? [],
-        hidden: parsed.hidden ?? [],
+        children: parsed.children ?? [],
       }
     } catch { /* skip unreadable */ }
   }
@@ -379,6 +373,9 @@ beforeEach(() => {
   opfsRoot.dirs.set('__history__', historyRoot)
 })
 
+// Helper: build a fake child sig string of a given length (pads to 64).
+const fakeSig = (s: string): string => s.padEnd(64, '0').slice(0, 64)
+
 // ===================================================
 // sign() — bag identity contract
 // ===================================================
@@ -418,7 +415,7 @@ describe('signLineage — bag identity = ancestry only', () => {
 describe('commitLayer / listLayers — bag-per-lineage', () => {
   it('first commit on a fresh lineage auto-mints empty seed (00000000) + the new marker (00000001)', async () => {
     const lineageSig = await signLineage(['abc'])
-    const sig = await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['x'], merkles: ['m'.padEnd(64, '0')], hidden: [] })
+    const sig = await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig('m')] })
 
     expect(sig).toMatch(SIG_RE)
     const bag = await historyRoot.getDirectoryHandle(lineageSig)
@@ -430,23 +427,23 @@ describe('commitLayer / listLayers — bag-per-lineage', () => {
     const file = await (await bag.getFileHandle('00000001')).getFile()
     const parsed = JSON.parse(await file.text())
     expect(parsed.name).toBe('abc')
-    expect(parsed.cells).toEqual(['x'])
+    expect(parsed.children).toEqual([fakeSig('m')])
   })
 
   it('list grows by one per commit (plus the empty seed)', async () => {
     const lineageSig = await signLineage(['abc'])
     expect((await listLayers(historyRoot, lineageSig)).length).toBe(0)
 
-    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['x'], merkles: ['s'.padEnd(64, '0')], hidden: [] })
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig('s')] })
     expect((await listLayers(historyRoot, lineageSig)).length).toBe(2)   // seed + first
 
-    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['x', 'y'], merkles: ['s'.padEnd(64, '0'), 't'.padEnd(64, '0')], hidden: [] })
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig('s'), fakeSig('t')] })
     expect((await listLayers(historyRoot, lineageSig)).length).toBe(3)
   })
 
   it('two markers can carry identical content (sigs match, dedupe is observable)', async () => {
     const lineageSig = await signLineage(['abc'])
-    const layer: LayerContent = { name: 'abc', cells: ['x'], merkles: ['s'.padEnd(64, '0')], hidden: [] }
+    const layer: LayerContent = { name: 'abc', children: [fakeSig('s')] }
     const sig1 = await commitLayer(historyRoot, lineageSig, layer)
     const sig2 = await commitLayer(historyRoot, lineageSig, layer) // same content
 
@@ -459,9 +456,9 @@ describe('commitLayer / listLayers — bag-per-lineage', () => {
 
   it('listLayers returns markers sorted by filename (chronological)', async () => {
     const lineageSig = await signLineage(['abc'])
-    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['a'], merkles: ['1'.padEnd(64, '0')], hidden: [] })
-    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['b'], merkles: ['2'.padEnd(64, '0')], hidden: [] })
-    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['c'], merkles: ['3'.padEnd(64, '0')], hidden: [] })
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig('1')] })
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig('2')] })
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig('3')] })
     const entries = await listLayers(historyRoot, lineageSig)
     expect(entries.map(e => e.filename)).toEqual(['00000000', '00000001', '00000002', '00000003'])
     expect(entries.map(e => e.index)).toEqual([0, 1, 2, 3])
@@ -470,27 +467,27 @@ describe('commitLayer / listLayers — bag-per-lineage', () => {
   it('lineage isolation: commits at one lineage do not appear in another', async () => {
     const lineageA = await signLineage(['abc'])
     const lineageB = await signLineage(['def'])
-    await commitLayer(historyRoot, lineageA, { name: 'abc', cells: ['x'], merkles: ['x'.padEnd(64, '0')], hidden: [] })
-    await commitLayer(historyRoot, lineageB, { name: 'def', cells: ['y'], merkles: ['y'.padEnd(64, '0')], hidden: [] })
+    await commitLayer(historyRoot, lineageA, { name: 'abc', children: [fakeSig('x')] })
+    await commitLayer(historyRoot, lineageB, { name: 'def', children: [fakeSig('y')] })
     expect((await listLayers(historyRoot, lineageA)).length).toBe(2)
     expect((await listLayers(historyRoot, lineageB)).length).toBe(2)
   })
 
   it('root lineage (empty segments) is a valid bag', async () => {
     const rootSig = await signLineage([])
-    await commitLayer(historyRoot, rootSig, { name: '', cells: ['root-tile'], merkles: ['r'.padEnd(64, '0')], hidden: [] })
+    await commitLayer(historyRoot, rootSig, { name: '', children: [fakeSig('r')] })
     const entries = await listLayers(historyRoot, rootSig)
     expect(entries.length).toBe(2)   // seed + commit
     const content = await getLayerContent(historyRoot, rootSig, entries[entries.length - 1].layerSig)
     expect(content?.name).toBe('')
-    expect(content?.cells).toEqual(['root-tile'])
+    expect(content?.children).toEqual([fakeSig('r')])
   })
 
   it('auto-seed: the empty-seed marker exists on first commit and is byte-stable', async () => {
     const lineageA = await signLineage(['abc'])
     const lineageB = await signLineage(['xyz'])
-    await commitLayer(historyRoot, lineageA, { name: 'abc', cells: [], merkles: [], hidden: [] })
-    await commitLayer(historyRoot, lineageB, { name: 'xyz', cells: [], merkles: [], hidden: [] })
+    await commitLayer(historyRoot, lineageA, { name: 'abc', children: [] })
+    await commitLayer(historyRoot, lineageB, { name: 'xyz', children: [] })
 
     const bagA = await historyRoot.getDirectoryHandle(lineageA)
     const bagB = await historyRoot.getDirectoryHandle(lineageB)
@@ -511,7 +508,7 @@ describe('commitLayer / listLayers — bag-per-lineage', () => {
 describe('normalize — drops legacy shapes, keeps merkle markers', () => {
   it('idempotent on a clean bag', async () => {
     const lineageSig = await signLineage(['abc'])
-    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['x'], merkles: ['x'.padEnd(64, '0')], hidden: [] })
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig('x')] })
     const before = (await listLayers(historyRoot, lineageSig)).length
     const after = (await listLayers(historyRoot, lineageSig)).length
     expect(after).toBe(before)
@@ -520,11 +517,11 @@ describe('normalize — drops legacy shapes, keeps merkle markers', () => {
   it('drops sig-named files at bag root (legacy content storage)', async () => {
     const lineageSig = await signLineage(['abc'])
     const bag = await historyRoot.getDirectoryHandle(lineageSig, { create: true })
-    const fakeSig = await sha256Hex('something')
-    await writeBytes(bag, fakeSig, new TextEncoder().encode('{"cells":[],"hidden":[]}'))
+    const fakeNamedSig = await sha256Hex('something')
+    await writeBytes(bag, fakeNamedSig, new TextEncoder().encode('{"children":[]}'))
 
     await listLayers(historyRoot, lineageSig)
-    expect(await fileExists(bag, fakeSig)).toBe(false)
+    expect(await fileExists(bag, fakeNamedSig)).toBe(false)
   })
 
   it('drops 8-digit numeric files with bare-sig content (pre-merkle shape)', async () => {
@@ -546,9 +543,9 @@ describe('normalize — drops legacy shapes, keeps merkle markers', () => {
     expect(await fileExists(bag, '00000001')).toBe(false)
   })
 
-  it('keeps canonical markers (8-digit numeric, layer-JSON-with-cells content)', async () => {
+  it('keeps canonical markers (8-digit numeric, layer-JSON-with-children content)', async () => {
     const lineageSig = await signLineage(['abc'])
-    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['x'], merkles: ['x'.padEnd(64, '0')], hidden: [] })
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig('x')] })
     const before = await listLayers(historyRoot, lineageSig)
     const after = await listLayers(historyRoot, lineageSig)
     expect(after.length).toBe(before.length)
@@ -572,21 +569,21 @@ describe('getLayerContent — reads marker bytes from the bag', () => {
   it('returns parsed full-shape layer for an existing sig', async () => {
     const lineageSig = await signLineage(['abc'])
     const sig = await commitLayer(historyRoot, lineageSig, {
-      name: 'abc', cells: ['a', 'b'], merkles: ['1'.padEnd(64, '0'), '2'.padEnd(64, '0')], hidden: ['c'],
+      name: 'abc', children: [fakeSig('1'), fakeSig('2')],
     })
     const content = await getLayerContent(historyRoot, lineageSig, sig)
     expect(content).toEqual({
-      name: 'abc', cells: ['a', 'b'], merkles: ['1'.padEnd(64, '0'), '2'.padEnd(64, '0')], hidden: ['c'],
+      name: 'abc', children: [fakeSig('1'), fakeSig('2')],
     })
   })
 
   it('content survives across listLayers calls', async () => {
     const lineageSig = await signLineage(['abc'])
-    const sig = await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['x'], merkles: ['x'.padEnd(64, '0')], hidden: [] })
+    const sig = await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig('x')] })
     await listLayers(historyRoot, lineageSig)
     await listLayers(historyRoot, lineageSig)
     const content = await getLayerContent(historyRoot, lineageSig, sig)
-    expect(content?.cells).toEqual(['x'])
+    expect(content?.children).toEqual([fakeSig('x')])
   })
 })
 
@@ -623,7 +620,7 @@ describe('Cursor — undo/redo over a single-commit bag (= 2 markers: seed + com
 
   beforeEach(async () => {
     lineageSig = await signLineage(['abc'])
-    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['x'], merkles: ['x'.padEnd(64, '0')], hidden: [] })
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig('x')] })
     cursor = new Cursor()
     await cursor.load(historyRoot, lineageSig)
   })
@@ -636,7 +633,7 @@ describe('Cursor — undo/redo over a single-commit bag (= 2 markers: seed + com
 
   it('layerContentAtCursor returns the layer at head', async () => {
     const content = await cursor.layerContentAtCursor(historyRoot)
-    expect(content?.cells).toEqual(['x'])
+    expect(content?.children).toEqual([fakeSig('x')])
     expect(content?.name).toBe('abc')
   })
 
@@ -681,9 +678,9 @@ describe('Cursor — undo/redo over a multi-commit bag', () => {
 
   beforeEach(async () => {
     lineageSig = await signLineage(['abc'])
-    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['a'], merkles: ['a'.padEnd(64, '0')], hidden: [] })
-    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['a', 'b'], merkles: ['a'.padEnd(64, '0'), 'b'.padEnd(64, '0')], hidden: [] })
-    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['a', 'b', 'c'], merkles: ['a'.padEnd(64, '0'), 'b'.padEnd(64, '0'), 'c'.padEnd(64, '0')], hidden: [] })
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig('a')] })
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig('a'), fakeSig('b')] })
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig('a'), fakeSig('b'), fakeSig('c')] })
     cursor = new Cursor()
     await cursor.load(historyRoot, lineageSig)
   })
@@ -700,23 +697,23 @@ describe('Cursor — undo/redo over a multi-commit bag', () => {
     cursor.undo(); expect(cursor.state.position).toBe(0)
   })
 
-  it('layerContentAtCursor reflects the cell set at each position', async () => {
-    expect((await cursor.layerContentAtCursor(historyRoot))?.cells).toEqual(['a', 'b', 'c'])
+  it('layerContentAtCursor reflects the children set at each position', async () => {
+    expect((await cursor.layerContentAtCursor(historyRoot))?.children).toEqual([fakeSig('a'), fakeSig('b'), fakeSig('c')])
     cursor.undo()
-    expect((await cursor.layerContentAtCursor(historyRoot))?.cells).toEqual(['a', 'b'])
+    expect((await cursor.layerContentAtCursor(historyRoot))?.children).toEqual([fakeSig('a'), fakeSig('b')])
     cursor.undo()
-    expect((await cursor.layerContentAtCursor(historyRoot))?.cells).toEqual(['a'])
+    expect((await cursor.layerContentAtCursor(historyRoot))?.children).toEqual([fakeSig('a')])
     cursor.undo()
-    expect((await cursor.layerContentAtCursor(historyRoot))?.cells).toEqual([])   // empty seed
+    expect((await cursor.layerContentAtCursor(historyRoot))?.children).toEqual([])   // empty seed
     cursor.undo()
     expect((await cursor.layerContentAtCursor(historyRoot))).toEqual(emptyLayer(''))   // pre-history
   })
 
-  it('round-trip undo/redo restores cell set', async () => {
+  it('round-trip undo/redo restores children set', async () => {
     const head = await cursor.layerContentAtCursor(historyRoot)
     cursor.undo(); cursor.undo(); cursor.undo(); cursor.undo()
     cursor.redo(); cursor.redo(); cursor.redo(); cursor.redo()
-    expect((await cursor.layerContentAtCursor(historyRoot))?.cells).toEqual(head?.cells)
+    expect((await cursor.layerContentAtCursor(historyRoot))?.children).toEqual(head?.children)
   })
 
   it('rewound state is correctly reported when not at head', () => {
@@ -730,12 +727,12 @@ describe('Cursor — undo/redo over a multi-commit bag', () => {
 describe('Cursor — onNewLayer behavior', () => {
   it('cursor at head absorbs new layer and stays at new head', async () => {
     const lineageSig = await signLineage(['abc'])
-    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['a'], merkles: ['a'.padEnd(64, '0')], hidden: [] })
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig('a')] })
     const cursor = new Cursor()
     await cursor.load(historyRoot, lineageSig)
     expect(cursor.state.position).toBe(2)
 
-    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['a', 'b'], merkles: ['a'.padEnd(64, '0'), 'b'.padEnd(64, '0')], hidden: [] })
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig('a'), fakeSig('b')] })
     await cursor.onNewLayer(historyRoot)
     expect(cursor.state.position).toBe(3)
     expect(cursor.state.total).toBe(3)
@@ -743,14 +740,14 @@ describe('Cursor — onNewLayer behavior', () => {
 
   it('rewound cursor stays at its position when a new layer is committed at head', async () => {
     const lineageSig = await signLineage(['abc'])
-    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['a'], merkles: ['a'.padEnd(64, '0')], hidden: [] })
-    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['a', 'b'], merkles: ['a'.padEnd(64, '0'), 'b'.padEnd(64, '0')], hidden: [] })
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig('a')] })
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig('a'), fakeSig('b')] })
     const cursor = new Cursor()
     await cursor.load(historyRoot, lineageSig)
     cursor.undo()   // pos=2
     expect(cursor.state.position).toBe(2)
 
-    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['a', 'b', 'c'], merkles: ['a'.padEnd(64, '0'), 'b'.padEnd(64, '0'), 'c'.padEnd(64, '0')], hidden: [] })
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig('a'), fakeSig('b'), fakeSig('c')] })
     await cursor.onNewLayer(historyRoot)
     // Was rewound (pos=2 < total=3), should stay at pos=2 even
     // though total grew to 4.
@@ -763,9 +760,9 @@ describe('Cursor — lineage navigation', () => {
   it('cursor.load to a different lineage resets position to that lineage\'s head', async () => {
     const lineageA = await signLineage(['a'])
     const lineageB = await signLineage(['b'])
-    await commitLayer(historyRoot, lineageA, { name: 'a', cells: ['x'], merkles: ['x'.padEnd(64, '0')], hidden: [] })
-    await commitLayer(historyRoot, lineageA, { name: 'a', cells: ['x', 'y'], merkles: ['x'.padEnd(64, '0'), 'y'.padEnd(64, '0')], hidden: [] })
-    await commitLayer(historyRoot, lineageB, { name: 'b', cells: ['z'], merkles: ['z'.padEnd(64, '0')], hidden: [] })
+    await commitLayer(historyRoot, lineageA, { name: 'a', children: [fakeSig('x')] })
+    await commitLayer(historyRoot, lineageA, { name: 'a', children: [fakeSig('x'), fakeSig('y')] })
+    await commitLayer(historyRoot, lineageB, { name: 'b', children: [fakeSig('z')] })
 
     const cursor = new Cursor()
     await cursor.load(historyRoot, lineageA)
@@ -782,16 +779,16 @@ describe('Cursor — lineage navigation', () => {
 
   it('navigating back to root lineage works (empty segments)', async () => {
     const rootSig = await signLineage([])
-    await commitLayer(historyRoot, rootSig, { name: '', cells: ['root-cell'], merkles: ['r'.padEnd(64, '0')], hidden: [] })
+    await commitLayer(historyRoot, rootSig, { name: '', children: [fakeSig('r')] })
     const childSig = await signLineage(['child'])
-    await commitLayer(historyRoot, childSig, { name: 'child', cells: ['child-cell'], merkles: ['c'.padEnd(64, '0')], hidden: [] })
+    await commitLayer(historyRoot, childSig, { name: 'child', children: [fakeSig('c')] })
 
     const cursor = new Cursor()
     await cursor.load(historyRoot, childSig)
-    expect((await cursor.layerContentAtCursor(historyRoot))?.cells).toEqual(['child-cell'])
+    expect((await cursor.layerContentAtCursor(historyRoot))?.children).toEqual([fakeSig('c')])
 
     await cursor.load(historyRoot, rootSig)
-    expect((await cursor.layerContentAtCursor(historyRoot))?.cells).toEqual(['root-cell'])
+    expect((await cursor.layerContentAtCursor(historyRoot))?.children).toEqual([fakeSig('r')])
   })
 })
 
@@ -802,9 +799,9 @@ describe('Cursor — lineage navigation', () => {
 describe('Merkle invariant — current root advances per commit', () => {
   it('after each commit, the latest marker has a new sig (when content changes)', async () => {
     const lineageSig = await signLineage(['abc'])
-    const sig1 = await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['a'], merkles: ['a'.padEnd(64, '0')], hidden: [] })
-    const sig2 = await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['a', 'b'], merkles: ['a'.padEnd(64, '0'), 'b'.padEnd(64, '0')], hidden: [] })
-    const sig3 = await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['a', 'b', 'c'], merkles: ['a'.padEnd(64, '0'), 'b'.padEnd(64, '0'), 'c'.padEnd(64, '0')], hidden: [] })
+    const sig1 = await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig('a')] })
+    const sig2 = await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig('a'), fakeSig('b')] })
+    const sig3 = await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig('a'), fakeSig('b'), fakeSig('c')] })
 
     expect(sig1).not.toBe(sig2)
     expect(sig2).not.toBe(sig3)
@@ -818,18 +815,18 @@ describe('Merkle invariant — current root advances per commit', () => {
 
   it('content-addressed: same content → same sig', async () => {
     const lineageSig = await signLineage(['abc'])
-    const sig1 = await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['a'], merkles: ['a'.padEnd(64, '0')], hidden: [] })
-    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['a', 'b'], merkles: ['a'.padEnd(64, '0'), 'b'.padEnd(64, '0')], hidden: [] })
-    const sig3 = await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['a'], merkles: ['a'.padEnd(64, '0')], hidden: [] })
+    const sig1 = await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig('a')] })
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig('a'), fakeSig('b')] })
+    const sig3 = await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig('a')] })
     expect(sig3).toBe(sig1)
   })
 
-  it('changing only merkles[] (child mutated) changes parent layer sig', async () => {
+  it('changing only a child sig (child mutated) changes parent layer sig', async () => {
     const lineageSig = await signLineage(['abc'])
-    // Same name + cells, different merkles ↔ parent's bytes change
+    // Same name, different child sig ↔ parent's bytes change.
     // This is the property that drives the cascade.
-    const sigA = await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['x'], merkles: ['1'.padEnd(64, '0')], hidden: [] })
-    const sigB = await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['x'], merkles: ['2'.padEnd(64, '0')], hidden: [] })
+    const sigA = await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig('1')] })
+    const sigB = await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig('2')] })
     expect(sigA).not.toBe(sigB)
   })
 })
@@ -844,14 +841,14 @@ describe('Merkle cascade — latestMarkerSigFor + parent composition', () => {
 
   it('latestMarkerSigFor returns sig of LAST marker (after commits)', async () => {
     const lineageSig = await signLineage(['abc'])
-    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['x'], merkles: ['1'.padEnd(64, '0')], hidden: [] })
-    const sigSecond = await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['x', 'y'], merkles: ['1'.padEnd(64, '0'), '2'.padEnd(64, '0')], hidden: [] })
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig('1')] })
+    const sigSecond = await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig('1'), fakeSig('2')] })
 
     const latest = await latestMarkerSigFor(historyRoot, lineageSig, 'abc')
     expect(latest).toBe(sigSecond)
   })
 
-  it('cascade simulation: child commit changes parent bytes when parent recomputes merkles', async () => {
+  it('cascade simulation: child commit changes parent bytes when parent recomputes children', async () => {
     // Lineage: /A/B/C  (leaf)
     const leafSig = await signLineage(['A', 'B', 'C'])
     const midSig = await signLineage(['A', 'B'])
@@ -859,33 +856,33 @@ describe('Merkle cascade — latestMarkerSigFor + parent composition', () => {
     const rootSig = await signLineage([])
 
     // 1. Initial commit at leaf
-    await commitLayer(historyRoot, leafSig, { name: 'C', cells: [], merkles: [], hidden: [] })
+    await commitLayer(historyRoot, leafSig, { name: 'C', children: [] })
 
-    // Build mid layer with leaf's current merkle
+    // Build mid layer with leaf's current marker sig as a child
     let leafMerkle = await latestMarkerSigFor(historyRoot, leafSig, 'C')
     const midSigBefore = await commitLayer(historyRoot, midSig, {
-      name: 'B', cells: ['C'], merkles: [leafMerkle], hidden: [],
+      name: 'B', children: [leafMerkle],
     })
     const topSigBefore = await commitLayer(historyRoot, topSig, {
-      name: 'A', cells: ['B'], merkles: [await latestMarkerSigFor(historyRoot, midSig, 'B')], hidden: [],
+      name: 'A', children: [await latestMarkerSigFor(historyRoot, midSig, 'B')],
     })
     const rootSigBefore = await commitLayer(historyRoot, rootSig, {
-      name: '', cells: ['A'], merkles: [await latestMarkerSigFor(historyRoot, topSig, 'A')], hidden: [],
+      name: '', children: [await latestMarkerSigFor(historyRoot, topSig, 'A')],
     })
 
-    // 2. Leaf changes — add a cell at /A/B/C
-    await commitLayer(historyRoot, leafSig, { name: 'C', cells: ['leaf-tile'], merkles: ['t'.padEnd(64, '0')], hidden: [] })
+    // 2. Leaf changes — add a child sig at /A/B/C
+    await commitLayer(historyRoot, leafSig, { name: 'C', children: [fakeSig('t')] })
 
-    // 3. Cascade up: each ancestor recomputes its merkles array
+    // 3. Cascade up: each ancestor recomputes its children array
     leafMerkle = await latestMarkerSigFor(historyRoot, leafSig, 'C')
     const midSigAfter = await commitLayer(historyRoot, midSig, {
-      name: 'B', cells: ['C'], merkles: [leafMerkle], hidden: [],
+      name: 'B', children: [leafMerkle],
     })
     const topSigAfter = await commitLayer(historyRoot, topSig, {
-      name: 'A', cells: ['B'], merkles: [await latestMarkerSigFor(historyRoot, midSig, 'B')], hidden: [],
+      name: 'A', children: [await latestMarkerSigFor(historyRoot, midSig, 'B')],
     })
     const rootSigAfter = await commitLayer(historyRoot, rootSig, {
-      name: '', cells: ['A'], merkles: [await latestMarkerSigFor(historyRoot, topSig, 'A')], hidden: [],
+      name: '', children: [await latestMarkerSigFor(historyRoot, topSig, 'A')],
     })
 
     // Every ancestor's sig changed (cascade reached the root)
@@ -899,11 +896,11 @@ describe('Merkle cascade — latestMarkerSigFor + parent composition', () => {
     const sibSig2 = await signLineage(['A', 'B2'])
 
     // Commit at sibling 2 first
-    await commitLayer(historyRoot, sibSig2, { name: 'B2', cells: [], merkles: [], hidden: [] })
+    await commitLayer(historyRoot, sibSig2, { name: 'B2', children: [] })
     const sib2Initial = await latestMarkerSigFor(historyRoot, sibSig2, 'B2')
 
     // Commit at sibling 1 (under different parent path)
-    await commitLayer(historyRoot, sibSig1, { name: 'C', cells: ['a'], merkles: ['a'.padEnd(64, '0')], hidden: [] })
+    await commitLayer(historyRoot, sibSig1, { name: 'C', children: [fakeSig('a')] })
 
     // Sibling 2 unchanged
     const sib2After = await latestMarkerSigFor(historyRoot, sibSig2, 'B2')
@@ -915,7 +912,7 @@ describe('Cursor — interleaved commit/undo edge cases', () => {
   it('rapid commits (no coalescing): N events → N markers (plus seed), in order', async () => {
     const lineageSig = await signLineage(['abc'])
     for (let i = 0; i < 5; i++) {
-      await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: [`cell-${i}`], merkles: [String(i).padEnd(64, '0')], hidden: [] })
+      await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig(String(i))] })
     }
     const entries = await listLayers(historyRoot, lineageSig)
     expect(entries.length).toBe(6)   // seed + 5
@@ -930,18 +927,18 @@ describe('Cursor — interleaved commit/undo edge cases', () => {
     await cursor.load(historyRoot, lineageSig)
     expect(cursor.state.total).toBe(0)
 
-    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['x'], merkles: ['x'.padEnd(64, '0')], hidden: [] })
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig('x')] })
     await cursor.onNewLayer(historyRoot)
     expect(cursor.state.total).toBe(2)   // seed + commit
     expect(cursor.state.position).toBe(2)
-    expect((await cursor.layerContentAtCursor(historyRoot))?.cells).toEqual(['x'])
+    expect((await cursor.layerContentAtCursor(historyRoot))?.children).toEqual([fakeSig('x')])
   })
 })
 
 describe('Cursor — pre-history (case A) vs no-history (case B)', () => {
   it('case A: bag has markers, undone past them → render empty seed', async () => {
     const lineageSig = await signLineage(['abc'])
-    await commitLayer(historyRoot, lineageSig, { name: 'abc', cells: ['x'], merkles: ['x'.padEnd(64, '0')], hidden: [] })
+    await commitLayer(historyRoot, lineageSig, { name: 'abc', children: [fakeSig('x')] })
     const cursor = new Cursor()
     await cursor.load(historyRoot, lineageSig)
     cursor.undo(); cursor.undo()   // past seed

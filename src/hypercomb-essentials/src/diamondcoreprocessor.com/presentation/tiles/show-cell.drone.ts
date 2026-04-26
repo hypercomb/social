@@ -133,6 +133,30 @@ class CellSlots {
   }
 }
 
+/**
+ * Resolve a parent layer's `children` (sigs) into a Set of child
+ * display names by loading each child's marker via the bag and reading
+ * its `name` field. Children whose sig can't be resolved (no bag yet,
+ * or bag missing the sig) are silently dropped — they won't filter the
+ * union, which means a freshly-created child still renders from live
+ * disk until its first marker exists.
+ */
+async function resolveChildNames(
+  history: HistoryService,
+  parentLocSig: string,
+  content: { children?: string[] } | null,
+): Promise<Set<string>> {
+  const out = new Set<string>()
+  if (!content || !Array.isArray(content.children)) return out
+  for (const childSig of content.children) {
+    try {
+      const childContent = await history.getLayerContent(parentLocSig, childSig)
+      if (childContent?.name) out.add(childContent.name)
+    } catch { /* unresolvable — skip */ }
+  }
+  return out
+}
+
 export class ShowCellDrone extends Drone {
   private static readonly STREAM_BATCH_SIZE = 8
 
@@ -1375,13 +1399,21 @@ export class ShowCellDrone extends Drone {
         }
 
         if (content) {
-          const allowed = new Set(content.cells)
-          for (const cell of [...union]) {
-            if (!allowed.has(cell)) union.delete(cell)
-          }
-          for (const cell of content.cells) {
-            union.add(cell)
-            localCellSet.add(cell)
+          // content.children is now an array of child layer sigs
+          // (not display names). Resolve to names so we can keep
+          // filtering by name. Children whose sig can't be resolved
+          // (e.g. no bag yet) drop out of `allowed` — when the set
+          // is empty we skip filtering entirely so we don't blank
+          // a live disk-driven render on a stale historical layer.
+          const allowed = await resolveChildNames(historyService, sig.sig, content)
+          if (allowed.size > 0) {
+            for (const cell of [...union]) {
+              if (!allowed.has(cell)) union.delete(cell)
+            }
+            for (const cell of allowed) {
+              union.add(cell)
+              localCellSet.add(cell)
+            }
           }
         }
       }
@@ -1414,13 +1446,11 @@ export class ShowCellDrone extends Drone {
       if (!localCellSet.has(blocked)) union.delete(blocked)
     }
 
-    // When cursor is rewound, use the layer's `hidden` array (captured at
-    // commit time). Otherwise read the live localStorage key.
-    const cursorState = cursorService?.state
-    const rewoundContent = (cursorState?.rewound && cursorService) ? cursorService.peekContent() : null
-    const hiddenSet = rewoundContent
-      ? new Set<string>(rewoundContent.hidden)
-      : new Set<string>(JSON.parse(localStorage.getItem(`hc:hidden-tiles:${locationKey}`) ?? '[]'))
+    // Layer no longer carries a `hidden` array — visibility is a
+    // bee-owned primitive. Read live localStorage in both rewound and
+    // head positions. (Per-position playback of visibility is the
+    // visibility bee's responsibility, not the renderer's.)
+    const hiddenSet = new Set<string>(JSON.parse(localStorage.getItem(`hc:hidden-tiles:${locationKey}`) ?? '[]'))
     this.#currentHiddenSet = hiddenSet
     if (!this.#showHiddenItems) {
       for (const hidden of hiddenSet) {
@@ -2657,10 +2687,18 @@ export class ShowCellDrone extends Drone {
     let cellNames: string[]
     if (isRewound && cursor) {
       const content = await cursor.layerContentAtCursor()
-      const order = content?.cells ?? []
-      if (order.length > 0) {
+      // Resolve child sigs → names so we can preserve historical
+      // ordering by name. If resolution gives nothing (children sigs
+      // unavailable in this bag — they live in child bags), fall
+      // through to live disk ordering.
+      const historyService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as HistoryService | undefined
+      const sig = await this.computeSignatureLocation(_lineage)
+      const orderedNames = (content && historyService)
+        ? [...await resolveChildNames(historyService, sig.sig, content)]
+        : []
+      if (orderedNames.length > 0) {
         const unionSet = new Set(union)
-        const filtered = order.filter(s => unionSet.has(s))
+        const filtered = orderedNames.filter(s => unionSet.has(s))
         for (const s of union) {
           if (!filtered.includes(s)) filtered.push(s)
         }

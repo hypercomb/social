@@ -38,43 +38,33 @@ export type LayerState = {
 }
 
 /**
- * A lineage's complete state at one moment. The marker file IS this
- * JSON (no separate pool indirection on hypercomb).
+ * Canonical minimal layer. Only two fields:
  *
- *   {
- *     name:   "<this layer's segment name>",  // "" at root, "abc" at /abc, etc.
- *     cells:  ["<sig>", "<sig>", ...],        // each child's CURRENT marker sig
- *     hidden: ["<sig>", ...]                   // child marker sigs that are hidden
- *   }
+ *   name      — this layer's name (e.g. "" at root, "abc" at /abc).
+ *   children  — ordered child layer sigs. Each sig points to a child
+ *               layer; to get a child's display name, load the layer
+ *               at that sig and read its own `name`.
  *
  * Marker sig = sha256 of the marker file's bytes. Parent layer's
- * `cells` array carries each child's current marker sig — when a
- * child commits a new marker, its sig changes, parent's cells
- * changes, parent's bytes change, parent's sig changes. Cascade
- * propagates that all the way up to the root lineage's bag, where
- * the latest marker IS the current global merkle root.
+ * `children` array carries each child's current marker sig — when a
+ * child commits a new marker, its sig changes, parent's children
+ * array changes, parent's bytes change, parent's sig changes. The
+ * cascade propagates that all the way up to the root lineage's bag,
+ * where the latest marker IS the current global merkle root.
  *
- * Names live INSIDE each child's layer (its own `name` field). To
- * display children, fetch each cell sig's marker file and read its
- * name. To navigate, append the name to the current path → resolve
- * the target lineage sig → open its bag.
+ * SOURCE OF TRUTH for child names = the child layer's `name` field,
+ * not anything stored at the parent. To display children, fetch each
+ * child sig's marker file and read its name. To navigate, append the
+ * name to the current path → resolve the target lineage sig → open
+ * its bag.
  */
 export type LayerContent = {
-  /** This layer's segment name. "" at root, "abc" at /abc, "def" at /abc/def. */
   name: string
-  /** Ordered list of child names (subdirectories of this layer's explorer dir). */
-  cells: string[]
-  /** Parallel to `cells` — each entry is the sig of that child's CURRENT marker
-   *  file (its merkle composition). When a child's marker changes, its sig
-   *  changes, this array changes, this layer's bytes change, this layer's sig
-   *  changes — cascading the update up to the root. */
-  merkles: string[]
-  /** Subset of `cells` (by name) that are hidden from rendering. */
-  hidden: string[]
+  children: string[]
 }
 
-/** Empty seed layer — content of `00000000` minted on bag's first touch. */
-export const emptyLayer = (name: string): LayerContent => ({ name, cells: [], merkles: [], hidden: [] })
+/** Empty seed — content of `00000000` minted on bag's first touch. */
+export const emptyLayer = (name: string): LayerContent => ({ name, children: [] })
 
 /**
  * One history entry. Just a pointer to a layer resource plus the timestamp
@@ -373,17 +363,11 @@ export class HistoryService {
 
   /**
    * Canonicalize a layer so byte-equal content produces byte-equal JSON.
-   * `cells` keeps its caller-supplied order (position is meaningful;
-   * children are listed in directory enumeration order). `merkles` is
-   * parallel to `cells` and so keeps its order too — entry i is the
-   * merkle sig of cell i. `hidden` is sorted lexicographically so
-   * set-equal states dedupe.
+   * `children` keeps its caller-supplied order (position is meaningful).
    */
   static readonly canonicalizeLayer = (layer: LayerContent): LayerContent => ({
     name: layer.name,
-    cells: layer.cells.slice(),
-    merkles: layer.merkles.slice(),
-    hidden: [...layer.hidden].sort(),
+    children: layer.children.slice(),
   })
 
   /**
@@ -572,7 +556,7 @@ export class HistoryService {
         const file = await (handle as FileSystemFileHandle).getFile()
         const bytes = await file.arrayBuffer()
         // Read-time filter: only include canonical merkle markers
-        // (JSON object with cells[]). Pre-merkle bare-sig markers
+        // (JSON object with children[]). Pre-merkle bare-sig markers
         // and op-JSON entries are skipped from the active list but
         // are NOT deleted — the file stays on disk until the user
         // explicitly compacts.
@@ -581,7 +565,7 @@ export class HistoryService {
         if (HistoryService.#SIG_RE.test(trimmed)) continue   // legacy bare-sig marker
         try {
           const parsed = JSON.parse(text)
-          if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.cells)) continue
+          if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.children)) continue
         } catch { continue }
         const layerSig = await SignatureService.sign(bytes)
         cacheMap.set(layerSig, bytes)
@@ -666,9 +650,7 @@ export class HistoryService {
 
     return {
       name: parsed.name ?? '',
-      cells: parsed.cells ?? [],
-      merkles: parsed.merkles ?? [],
-      hidden: parsed.hidden ?? [],
+      children: parsed.children ?? [],
     }
   }
 
@@ -702,7 +684,7 @@ export class HistoryService {
    * Purge non-canonical files from a bag.
    *
    * Canonical = NNNN file whose content is a JSON object with at least
-   * the slim-layer fields (`cells` array). Pre-merkle bags (containing
+   * the slim-layer fields (`children` array). Pre-merkle bags (containing
    * legacy sig-named pool pointers, op-JSON entries, etc.) are dropped.
    *
    * USER-DRIVEN ONLY. listLayers no longer calls this — silently
@@ -728,7 +710,7 @@ export class HistoryService {
     for await (const [name, handle] of (bag as any).entries()) {
       if (handle.kind !== 'file') continue
 
-      // Canonical marker: NNNN name + JSON-with-cells[] content.
+      // Canonical marker: NNNN name + JSON-with-children[] content.
       if (HistoryService.#MARKER_RE.test(name)) {
         try {
           const file = await (handle as FileSystemFileHandle).getFile()
@@ -736,10 +718,10 @@ export class HistoryService {
           // Bare-sig content is the pre-merkle marker shape; drop it.
           if (HistoryService.#SIG_RE.test(text)) { drop.push(name); continue }
           // Layer-JSON content — keep if it parses to an object with a
-          // `cells` array.
+          // `children` array.
           try {
             const parsed = JSON.parse(text)
-            if (parsed && typeof parsed === 'object' && Array.isArray(parsed.cells)) continue
+            if (parsed && typeof parsed === 'object' && Array.isArray(parsed.children)) continue
           } catch { /* unparseable — drop */ }
         } catch { /* unreadable — drop */ }
       }

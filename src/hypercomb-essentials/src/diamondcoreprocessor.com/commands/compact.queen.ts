@@ -10,7 +10,8 @@
 //
 // Rules (per the slim/no-meta model):
 //   - No synthetic empty seed prepended
-//   - One marker if disk has cells, zero markers if not
+//   - Always commit one marker reflecting current name; cascade
+//     rebuilds the children array from disk on the next user event
 //   - History before the rebase IS lost; that's the explicit bargain
 //     of /compact (vs. the non-destructive normalize on every read)
 
@@ -56,51 +57,30 @@ export class CompactQueenBee extends QueenBee {
       await history.removeEntries(locationSig, entries.map(e => e.filename))
     }
 
-    // 3. Mint exactly one marker for the current state — only if
-    //    there's actually something on disk. No synthetic empty seed.
-    if (fresh.cells.length > 0 || fresh.hidden.length > 0) {
-      await history.commitLayer(locationSig, fresh)
-    }
+    // 3. Mint exactly one marker for the current state. The fresh
+    //    snapshot's `children` is always empty — the next user event
+    //    cascades and rebuilds child sigs from disk.
+    await history.commitLayer(locationSig, fresh)
 
-    // 4. Re-hydrate cursor; land on the top (single marker, or
-    //    nothing if disk was empty).
+    // 4. Re-hydrate cursor; land on the top (single marker).
     await cursor.load(locationSig)
     cursor.seek(cursor.state.total)
   }
 
   /**
-   * Read cells from the OPFS directory listing — same source the
-   * renderer at head walks. Hidden comes from localStorage
-   * (`hc:hidden-tiles:{loc}`). explorerDir() is async in the live
-   * lineage; await it before iterating.
+   * Build the layer name from the explorer label. /compact wipes
+   * history, so we don't try to wire children sigs — leave the array
+   * empty. The next user event will cascade up and rebuild the merkle
+   * composition by re-reading on-disk children.
    */
   async #assembleFromDisk(lineage: Lineage): Promise<LayerContent> {
-    const explorerDir = await lineage.explorerDir?.()
-    const cells: string[] = []
-    if (explorerDir) {
-      for await (const [name, handle] of (explorerDir as any).entries()) {
-        if (handle.kind === 'directory') cells.push(name)
-      }
-    }
-
-    const locationKey = String(lineage.explorerLabel?.() ?? '/')
-    let hidden: string[] = []
-    try {
-      const raw = localStorage.getItem(`hc:hidden-tiles:${locationKey}`)
-      const parsed = raw ? JSON.parse(raw) : []
-      hidden = Array.isArray(parsed) ? parsed.map(String) : []
-    } catch { /* default to none */ }
-
-    // /compact wipes history, so we don't try to wire merkles for
-    // children — leave the array empty. The next user event will
-    // cascade up and rebuild the merkle composition.
     const name = (() => {
       const label = String(lineage.explorerLabel?.() ?? '/')
       if (label === '/' || label === '') return ''
       const parts = label.split('/').filter(Boolean)
       return parts[parts.length - 1] ?? ''
     })()
-    return { name, cells, merkles: [], hidden }
+    return { name, children: [] }
   }
 }
 

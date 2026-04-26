@@ -25,19 +25,13 @@ type CursorState = {
 
 type LayerEntry = { layerSig: string; at: number; index: number; filename: string }
 
-// Loose shape for the layer content. We only read fields we care about
-// and tolerate missing ones — older layers may have been written with a
-// sparse canonicaliser.
+// Slim layer shape: just `name` (this layer's segment name) and
+// `children` (ordered child layer sigs). Display-name resolution
+// for individual children requires loading each child sig — too
+// heavy for a row summary, so the diff stays at the sig level.
 type Content = {
-  cells?: string[]
-  hidden?: string[]
-  contentByCell?: Record<string, string>
-  tagsByCell?: Record<string, string[]>
-  notesByCell?: Record<string, string>
-  bees?: string[]
-  dependencies?: string[]
-  layoutSig?: string
-  instructionsSig?: string
+  name?: string
+  children?: string[]
 }
 
 type HistoryService = {
@@ -744,123 +738,38 @@ function diffLines(
 
 function summarise(prev: Content | undefined, next: Content | undefined): { summary: string; category: Category } {
   if (!next) return { summary: '(loading)', category: 'none' }
-  const p: Required<Content> = normalise(prev)
-  const n: Required<Content> = normalise(next)
+  const pChildren = prev?.children ?? []
+  const nChildren = next.children ?? []
 
-  // cells: track set diff and reorder (same set, different order)
-  const cellAdded = difference(n.cells, p.cells)
-  const cellRemoved = difference(p.cells, n.cells)
-  const cellReordered =
-    cellAdded.length === 0 &&
-    cellRemoved.length === 0 &&
-    !sequenceEqual(n.cells, p.cells)
-  const hiddenChanged = xorSet(n.hidden, p.hidden).size > 0
-  const contentChanged = !recordEqual(n.contentByCell, p.contentByCell)
-  const tagsChanged = !recordArrayEqual(n.tagsByCell, p.tagsByCell)
-  const notesChanged = !recordEqual(n.notesByCell, p.notesByCell)
-  const beesChanged = xorSet(new Set(n.bees), new Set(p.bees)).size > 0
-  const depsChanged = xorSet(new Set(n.dependencies), new Set(p.dependencies)).size > 0
-  const layoutChanged = n.layoutSig !== p.layoutSig
-  const instructionsChanged = n.instructionsSig !== p.instructionsSig
+  // children are sigs (sha256 hex), not display names. The diff is over
+  // the sig list. Resolving to names would require loading each child
+  // sig's marker — too heavy for a row summary, so we describe deltas
+  // generically by count and flag reorders.
+  const added = difference(nChildren, pChildren)
+  const removed = difference(pChildren, nChildren)
+  const reordered =
+    added.length === 0 &&
+    removed.length === 0 &&
+    !sequenceEqual(nChildren, pChildren)
 
   const parts: string[] = []
   let category: Category = 'none'
 
-  if (cellAdded.length) {
-    parts.push(cellAdded.length === 1 ? `+${cellAdded[0]}` : `+${cellAdded.length} tiles`)
+  if (added.length) {
+    parts.push(added.length === 1 ? '+1 tile' : `+${added.length} tiles`)
     category = 'cells'
   }
-  if (cellRemoved.length) {
-    parts.push(cellRemoved.length === 1 ? `-${cellRemoved[0]}` : `-${cellRemoved.length} tiles`)
+  if (removed.length) {
+    parts.push(removed.length === 1 ? '-1 tile' : `-${removed.length} tiles`)
     category = 'cells'
   }
-  if (cellReordered) {
-    parts.push(describeReorder(p.cells, n.cells))
+  if (reordered) {
+    parts.push(`reorder (${nChildren.length} tiles)`)
     if (category === 'none') category = 'cells'
   }
-  if (contentChanged) {
-    parts.push(describeRecordChange('edit', p.contentByCell, n.contentByCell))
-    if (category === 'none') category = 'content'
-  }
-  if (tagsChanged) {
-    parts.push(describeRecordChange('tags', p.tagsByCell, n.tagsByCell))
-    if (category === 'none') category = 'tags'
-  }
-  if (notesChanged) {
-    parts.push(describeRecordChange('notes', p.notesByCell, n.notesByCell))
-    if (category === 'none') category = 'notes'
-  }
-  if (hiddenChanged) {
-    parts.push(describeHiddenChange(p.hidden, n.hidden))
-    if (category === 'none') category = 'visibility'
-  }
-  if (layoutChanged) { parts.push('layout'); if (category === 'none') category = 'system' }
-  if (instructionsChanged) { parts.push('instructions'); if (category === 'none') category = 'system' }
-  if (beesChanged || depsChanged) { parts.push(beesChanged && depsChanged ? 'bees+deps' : beesChanged ? 'bees' : 'deps'); if (category === 'none') category = 'system' }
 
   if (parts.length === 0) return { summary: '(no change)', category: 'none' }
   return { summary: parts.join(' · '), category }
-}
-
-function describeRecordChange(
-  verb: string,
-  previous: Record<string, unknown>,
-  next: Record<string, unknown>,
-): string {
-  const changed = new Set<string>()
-  for (const key of Object.keys(next)) {
-    if (!recordValueEqual(previous[key], next[key])) changed.add(key)
-  }
-  for (const key of Object.keys(previous)) {
-    if (!(key in next)) changed.add(key)
-  }
-  const labels = [...changed]
-  if (labels.length === 0) return verb
-  if (labels.length === 1) return `${verb} ${labels[0]}`
-  if (labels.length <= 3) return `${verb} ${labels.join(', ')}`
-  return `${verb} ${labels.slice(0, 2).join(', ')} +${labels.length - 2}`
-}
-
-function describeHiddenChange(previous: readonly string[], next: readonly string[]): string {
-  const added = difference(next, previous)
-  const removed = difference(previous, next)
-  if (added.length && !removed.length) return added.length === 1 ? `hide ${added[0]}` : `hide ${added.length} tiles`
-  if (removed.length && !added.length) return removed.length === 1 ? `show ${removed[0]}` : `show ${removed.length} tiles`
-  return 'visibility'
-}
-
-function describeReorder(previous: readonly string[], next: readonly string[]): string {
-  const moved: string[] = []
-  for (let i = 0; i < next.length; i++) {
-    if (previous[i] !== next[i]) moved.push(next[i])
-  }
-  if (moved.length === 0) return 'reorder'
-  if (moved.length === 1) return `move ${moved[0]}`
-  return `reorder (${moved.length} tiles)`
-}
-
-function recordValueEqual(a: unknown, b: unknown): boolean {
-  if (a === b) return true
-  if (Array.isArray(a) && Array.isArray(b)) {
-    if (a.length !== b.length) return false
-    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
-    return true
-  }
-  return false
-}
-
-function normalise(c: Content | undefined): Required<Content> {
-  return {
-    cells: c?.cells ?? [],
-    hidden: c?.hidden ?? [],
-    contentByCell: c?.contentByCell ?? {},
-    tagsByCell: c?.tagsByCell ?? {},
-    notesByCell: c?.notesByCell ?? {},
-    bees: c?.bees ?? [],
-    dependencies: c?.dependencies ?? [],
-    layoutSig: c?.layoutSig ?? '',
-    instructionsSig: c?.instructionsSig ?? '',
-  }
 }
 
 function difference<T>(a: readonly T[], b: readonly T[]): T[] {
@@ -871,35 +780,5 @@ function difference<T>(a: readonly T[], b: readonly T[]): T[] {
 function sequenceEqual<T>(a: readonly T[], b: readonly T[]): boolean {
   if (a.length !== b.length) return false
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
-  return true
-}
-
-function xorSet<T>(a: ReadonlySet<T> | readonly T[], b: ReadonlySet<T> | readonly T[]): Set<T> {
-  const aSet = a instanceof Set ? a : new Set(a)
-  const bSet = b instanceof Set ? b : new Set(b)
-  const out = new Set<T>()
-  for (const v of aSet) if (!bSet.has(v)) out.add(v)
-  for (const v of bSet) if (!aSet.has(v)) out.add(v)
-  return out
-}
-
-function recordEqual(a: Record<string, string>, b: Record<string, string>): boolean {
-  const ak = Object.keys(a)
-  const bk = Object.keys(b)
-  if (ak.length !== bk.length) return false
-  for (const k of ak) if (a[k] !== b[k]) return false
-  return true
-}
-
-function recordArrayEqual(a: Record<string, string[]>, b: Record<string, string[]>): boolean {
-  const ak = Object.keys(a)
-  const bk = Object.keys(b)
-  if (ak.length !== bk.length) return false
-  for (const k of ak) {
-    const av = a[k]
-    const bv = b[k]
-    if (!bv || av.length !== bv.length) return false
-    for (let i = 0; i < av.length; i++) if (av[i] !== bv[i]) return false
-  }
   return true
 }

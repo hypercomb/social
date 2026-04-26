@@ -1,9 +1,11 @@
 // diamondcoreprocessor.com/history/layer-diff.ts
 //
 // Pure, stateless diff between two slim layer snapshots. The slim
-// layer is two named arrays — `cells` (ordered) and `hidden` (set) —
-// so the diff has only three possible shapes: cell added, cell removed,
-// cells reordered, plus visibility flips.
+// layer is a single ordered array — `children` (child layer sigs) —
+// so the diff has only three possible shapes: child added, child
+// removed, children reordered. The kind names retain `cell-*` for
+// continuity with the renderer/UI, which translates sig deltas to
+// display names.
 //
 // All other previously-reported diff kinds (content/tags/notes/bees/
 // dependencies/layout/instructions) belonged to fields that are no
@@ -19,10 +21,8 @@ export type LayerDiff =
   | { kind: 'cell-added'; cell: string }
   | { kind: 'cell-removed'; cell: string }
   | { kind: 'cells-reordered'; from: string[]; to: string[] }
-  | { kind: 'cell-hidden'; cell: string }
-  | { kind: 'cell-unhidden'; cell: string }
 
-const EMPTY: LayerContent = { name: '', cells: [], merkles: [], hidden: [] }
+const EMPTY: LayerContent = { name: '', children: [] }
 
 export const diffLayers = (
   prev: LayerContent | null,
@@ -31,20 +31,14 @@ export const diffLayers = (
   const p = prev ?? EMPTY
   const diffs: LayerDiff[] = []
 
-  // ── cells: membership + order ────────────────────────────
-  const prevCellSet = new Set(p.cells)
-  const nextCellSet = new Set(next.cells)
-  for (const c of next.cells) if (!prevCellSet.has(c)) diffs.push({ kind: 'cell-added', cell: c })
-  for (const c of p.cells) if (!nextCellSet.has(c)) diffs.push({ kind: 'cell-removed', cell: c })
-  if (setEquals(prevCellSet, nextCellSet) && !sequenceEquals(p.cells, next.cells)) {
-    diffs.push({ kind: 'cells-reordered', from: [...p.cells], to: [...next.cells] })
+  // ── children: membership + order ─────────────────────────
+  const prevSet = new Set(p.children)
+  const nextSet = new Set(next.children)
+  for (const c of next.children) if (!prevSet.has(c)) diffs.push({ kind: 'cell-added', cell: c })
+  for (const c of p.children) if (!nextSet.has(c)) diffs.push({ kind: 'cell-removed', cell: c })
+  if (setEquals(prevSet, nextSet) && !sequenceEquals(p.children, next.children)) {
+    diffs.push({ kind: 'cells-reordered', from: [...p.children], to: [...next.children] })
   }
-
-  // ── hidden: set diff ─────────────────────────────────────
-  const prevHidden = new Set(p.hidden)
-  const nextHidden = new Set(next.hidden)
-  for (const c of next.hidden) if (!prevHidden.has(c)) diffs.push({ kind: 'cell-hidden', cell: c })
-  for (const c of p.hidden) if (!nextHidden.has(c)) diffs.push({ kind: 'cell-unhidden', cell: c })
 
   return diffs
 }

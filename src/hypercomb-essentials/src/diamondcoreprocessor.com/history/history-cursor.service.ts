@@ -456,9 +456,7 @@ export class HistoryCursorService extends EventTarget {
       const parsed = JSON.parse(await blob.text()) as Partial<LayerContent>
       const content: LayerContent = {
         name: parsed.name ?? '',
-        cells: parsed.cells ?? [],
-        merkles: parsed.merkles ?? [],
-        hidden: parsed.hidden ?? [],
+        children: parsed.children ?? [],
       }
       this.#contentBySig.set(signature, content)
       return content
@@ -512,7 +510,7 @@ export class HistoryCursorService extends EventTarget {
     // clears the grid instead of falling through to live-state tiles.
     if (this.#position === 0) {
       if (this.#layers.length === 0) return null
-      const empty: LayerContent = { name: '', cells: [], merkles: [], hidden: [] }
+      const empty: LayerContent = { name: '', children: [] }
       this.#cachedLayerSig = null
       this.#cachedContent = empty
       return empty

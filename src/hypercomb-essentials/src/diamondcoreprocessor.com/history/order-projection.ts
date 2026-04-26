@@ -34,9 +34,12 @@ export class OrderProjection {
   /**
    * Resolve the canonical cell order for a location.
    *
-   * Preferred path: read the head layer and use its `cells` array —
+   * Preferred path: read the head layer and use its `children` array —
    * constant-time and always reflects whatever the LayerCommitter most
-   * recently snapshotted.
+   * recently snapshotted. NOTE: `children` now contains child layer
+   * sigs (not display names). Display-name resolution is the consumer's
+   * responsibility — callers that need names must load each child sig
+   * via HistoryService.getLayerContent and read its `name` field.
    *
    * Legacy fallback: for locations whose history predates the layer
    * format (no `layers/` subdirectory), replay the sequential op files.
@@ -72,9 +75,11 @@ export class OrderProjection {
     if (!head) return null
 
     // Marker file IS the layer JSON — read directly from the bag.
+    // `children` carries child layer sigs (not display names); the
+    // consumer must resolve those sigs to names if it needs them.
     const content = await history.getLayerContent(locationSig, head.layerSig)
     if (!content) return null
-    return Array.isArray(content.cells) ? [...content.cells] : null
+    return Array.isArray(content.children) ? [...content.children] : null
   }
 
   /**
