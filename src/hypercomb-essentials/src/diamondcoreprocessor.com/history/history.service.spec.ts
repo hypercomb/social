@@ -267,39 +267,80 @@ const getLayerContent = async (
 }
 
 /**
- * Read the sig of the latest marker for a lineage's bag (its current
- * merkle composition). Returns the empty-seed sig if the bag has no
- * markers yet — a deterministic placeholder so children that haven't
- * been visited still have a sig.
+ * Return the sig of the lineage's CURRENT layer (last marker in bag).
+ * Materializes the bag + seed if missing — every sig this returns
+ * MUST point to real on-disk bytes. That's the invariant: a sig
+ * landing in a parent's children array is always resolvable later
+ * via the preloader cache or a bag scan.
  */
 const latestMarkerSigFor = async (
   historyRoot: MockDir,
   lineageSig: string,
   name: string,
 ): Promise<string> => {
-  let bag: MockDir | null = null
-  try { bag = await historyRoot.getDirectoryHandle(lineageSig, { create: false }) }
-  catch { /* no bag */ }
+  // Materialize bag + seed if missing
+  const bag = await historyRoot.getDirectoryHandle(lineageSig, { create: true })
+  await ensureSeed(bag, name)
+  // Find latest marker (00000000 at minimum)
+  let latest = '00000000'
+  for await (const [n, h] of bag.entries()) {
+    if (h.kind !== 'file') continue
+    if (!MARKER_RE.test(n)) continue
+    if (n > latest) latest = n
+  }
+  const file = await (await bag.getFileHandle(latest)).getFile()
+  const bytes = await file.arrayBuffer()
+  return await sha256Hex(bytes)
+}
 
-  if (bag) {
-    let latest = ''
-    for await (const [n, h] of bag.entries()) {
-      if (h.kind !== 'file') continue
-      if (!MARKER_RE.test(n)) continue
-      if (n > latest) latest = n
-    }
-    if (latest) {
+/**
+ * Preloader: walk every bag, find the marker whose bytes hash to the
+ * given sig, return its parsed content. Mirrors production's
+ * HistoryService.getLayerBySig (cold-miss path; the cache is implicit
+ * since all sigs we mint also write bytes to disk).
+ */
+const getLayerBySig = async (
+  historyRoot: MockDir,
+  layerSig: string,
+): Promise<LayerContent | null> => {
+  if (!SIG_RE.test(layerSig)) return null
+  for await (const [, dirHandle] of historyRoot.entries()) {
+    if (dirHandle.kind !== 'directory') continue
+    const bag = dirHandle as MockDir
+    for await (const [name, fileHandle] of bag.entries()) {
+      if (fileHandle.kind !== 'file') continue
+      if (!MARKER_RE.test(name)) continue
+      const file = await (fileHandle as MockFile).getFile()
+      const bytes = await file.arrayBuffer()
+      const sig = await sha256Hex(bytes)
+      if (sig !== layerSig) continue
       try {
-        const file = await (await bag.getFileHandle(latest)).getFile()
-        const bytes = await file.arrayBuffer()
-        return await sha256Hex(bytes)
-      } catch { /* fall through */ }
+        const parsed = JSON.parse(new TextDecoder().decode(bytes)) as Partial<LayerContent>
+        if (!parsed.name) return null
+        const out: LayerContent = { name: parsed.name }
+        if (Array.isArray(parsed.children) && parsed.children.length > 0) out.children = parsed.children
+        return out
+      } catch { return null }
     }
   }
+  return null
+}
 
-  // Default: empty-seed sig
-  const seed = canonicalizeLayer(emptyLayer(name))
-  return await sha256Hex(JSON.stringify(seed))
+/**
+ * Mechanical resolver mirroring show-cell.drone.ts:resolveChildNames.
+ * Iterates parent's child sigs, looks each up via the preloader, collects names.
+ */
+const resolveChildNames = async (
+  historyRoot: MockDir,
+  content: LayerContent | null,
+): Promise<Set<string>> => {
+  const out = new Set<string>()
+  if (!content?.children?.length) return out
+  for (const childSig of content.children) {
+    const child = await getLayerBySig(historyRoot, childSig)
+    if (child?.name) out.add(child.name)
+  }
+  return out
 }
 
 // Cursor — pure state-machine slice; layers come from listLayers.
@@ -1202,6 +1243,148 @@ describe('resolveChildNames — past sigs map back to current on-disk names', ()
     // Renderer falls back to live disk in this case — Y is shown,
     // not B. Documented limitation; needs a sig→name index for full
     // historical fidelity.
+  })
+})
+
+// ===================================================
+// END-TO-END SCENARIOS — preloader + cascade + resolve
+// ===================================================
+//
+// "this is the whole point of the exercise" — every sig that lands
+// in a parent's children array must resolve via getLayerBySig.
+// The renderer uses the resolved name; sigs are content-addressed
+// so there's no possibility of getting out of sync.
+
+describe('end-to-end: sig→content lookup is mechanical', () => {
+  it('every child sig in a parent layer resolves via getLayerBySig', async () => {
+    // Add 3 tiles at root: a, b, c. Cascade once, captures all 3 child sigs.
+    await cascade(historyRoot, [], { 0: ['a', 'b', 'c'] })
+    const rootSig = await signLineage([])
+    const rootEntries = await listLayers(historyRoot, rootSig)
+    const rootContent = await getLayerContent(historyRoot, rootSig, rootEntries.slice(-1)[0].layerSig)
+    expect(rootContent?.children?.length).toBe(3)
+
+    // Every sig must resolve via the preloader to a layer with the right name.
+    const names = await resolveChildNames(historyRoot, rootContent)
+    expect([...names].sort()).toEqual(['a', 'b', 'c'])
+  })
+
+  it("scenario A: 'add hello → step back to 1-tile' shows just the original tile", async () => {
+    // Initial: just `original` exists. Cascade captures 1 child.
+    await cascade(historyRoot, [], { 0: ['original'] })
+    const rootSig = await signLineage([])
+    const stepOne = await listLayers(historyRoot, rootSig)
+    const stepOneContent = await getLayerContent(historyRoot, rootSig, stepOne.slice(-1)[0].layerSig)
+    expect(stepOneContent?.children?.length).toBe(1)
+
+    // User adds `hello`. Cascade re-fires with both children.
+    await cascade(historyRoot, [], { 0: ['original', 'hello'] })
+    const stepTwo = await listLayers(historyRoot, rootSig)
+    const stepTwoContent = await getLayerContent(historyRoot, rootSig, stepTwo.slice(-1)[0].layerSig)
+    expect(stepTwoContent?.children?.length).toBe(2)
+
+    // Render at HEAD (step 2): should resolve to {original, hello}.
+    const allowedAtHead = await resolveChildNames(historyRoot, stepTwoContent)
+    expect([...allowedAtHead].sort()).toEqual(['hello', 'original'])
+
+    // Render at STEP 1 (one undo): should resolve to {original} only.
+    const allowedAtStepOne = await resolveChildNames(historyRoot, stepOneContent)
+    expect([...allowedAtStepOne]).toEqual(['original'])
+  })
+
+  it("scenario B: stepping back to seed renders empty (no children = render nothing)", async () => {
+    await cascade(historyRoot, [], { 0: ['x', 'y', 'z'] })
+    const rootSig = await signLineage([])
+    const entries = await listLayers(historyRoot, rootSig)
+
+    // Seed (00000000) has no children.
+    const seedContent = await getLayerContent(historyRoot, rootSig, entries[0].layerSig)
+    expect(seedContent?.children).toBeUndefined()
+    const allowed = await resolveChildNames(historyRoot, seedContent)
+    expect(allowed.size).toBe(0)
+  })
+
+  it('scenario C: multi-level abc/123 — each level resolves independently', async () => {
+    // Type abc/123 from root: cascade fires for both /abc (gains '123') and / (gains 'abc').
+    await cascade(historyRoot, ['abc'], { 1: ['123'], 0: ['abc'] })
+
+    // Root layer should resolve children to ['abc'].
+    const rootSig = await signLineage([])
+    const rootContent = await getLayerContent(historyRoot, rootSig, (await listLayers(historyRoot, rootSig)).slice(-1)[0].layerSig)
+    const rootNames = await resolveChildNames(historyRoot, rootContent)
+    expect([...rootNames]).toEqual(['abc'])
+
+    // /abc layer should resolve to ['123'].
+    const abcSig = await signLineage(['abc'])
+    const abcContent = await getLayerContent(historyRoot, abcSig, (await listLayers(historyRoot, abcSig)).slice(-1)[0].layerSig)
+    const abcNames = await resolveChildNames(historyRoot, abcContent)
+    expect([...abcNames]).toEqual(['123'])
+  })
+
+  it('scenario D: sig invariant — parent stores child sig that resolves to child layer with that exact sig', async () => {
+    await cascade(historyRoot, [], { 0: ['alpha', 'beta'] })
+    const rootSig = await signLineage([])
+    const rootContent = await getLayerContent(historyRoot, rootSig, (await listLayers(historyRoot, rootSig)).slice(-1)[0].layerSig)
+    expect(rootContent?.children?.length).toBe(2)
+
+    // Each stored sig MUST be the actual hash of the child's bytes
+    // (no ghost sigs — the preloader can find every one).
+    for (const childSig of rootContent?.children ?? []) {
+      const childLayer = await getLayerBySig(historyRoot, childSig)
+      expect(childLayer).not.toBeNull()
+      // Round-trip: re-canonicalize child layer + sha256 → same sig.
+      const canonical = canonicalizeLayer(childLayer!)
+      const reSig = await sha256Hex(JSON.stringify(canonical))
+      expect(reSig).toBe(childSig)
+    }
+  })
+
+  it('scenario E: cascade preserves cells stable, only changed-child sig swaps', async () => {
+    // /A with children B, C. Both have own bags.
+    await cascade(historyRoot, ['A', 'B'], { 2: [], 1: ['B', 'C'], 0: ['A'] })
+    await cascade(historyRoot, ['A', 'C'], { 2: [], 1: ['B', 'C'], 0: ['A'] })
+    const aSig = await signLineage(['A'])
+    const aBefore = await getLayerContent(historyRoot, aSig, (await listLayers(historyRoot, aSig)).slice(-1)[0].layerSig)
+    const aBeforeChildren = aBefore?.children ?? []
+    expect(aBeforeChildren.length).toBe(2)
+    const aBeforeNames = await resolveChildNames(historyRoot, aBefore)
+    expect([...aBeforeNames].sort()).toEqual(['B', 'C'])
+
+    // B mutates: cascade updates B + /A + root
+    await cascade(historyRoot, ['A', 'B'], { 2: ['x'], 1: ['B', 'C'], 0: ['A'] })
+    const aAfter = await getLayerContent(historyRoot, aSig, (await listLayers(historyRoot, aSig)).slice(-1)[0].layerSig)
+    const aAfterChildren = aAfter?.children ?? []
+
+    // Same length, same names, but ONE sig differs (B's).
+    expect(aAfterChildren.length).toBe(2)
+    const aAfterNames = await resolveChildNames(historyRoot, aAfter)
+    expect([...aAfterNames].sort()).toEqual(['B', 'C'])
+
+    let differingCount = 0
+    for (let i = 0; i < aBeforeChildren.length; i++) {
+      if (aBeforeChildren[i] !== aAfterChildren[i]) differingCount++
+    }
+    expect(differingCount).toBe(1)   // exactly one merkle entry changed
+  })
+
+  it('scenario F: cold preloader — getLayerBySig walks bags when cache empty', async () => {
+    // Build a tree, then ask for a child sig directly (no parent context).
+    await cascade(historyRoot, [], { 0: ['gamma', 'delta'] })
+    const rootSig = await signLineage([])
+    const rootContent = await getLayerContent(historyRoot, rootSig, (await listLayers(historyRoot, rootSig)).slice(-1)[0].layerSig)
+    const childSigs = rootContent?.children ?? []
+    expect(childSigs.length).toBe(2)
+
+    // Each child sig resolves through the preloader (cold-walks bags).
+    for (const sig of childSigs) {
+      const found = await getLayerBySig(historyRoot, sig)
+      expect(found).not.toBeNull()
+      expect(['gamma', 'delta']).toContain(found!.name)
+    }
+
+    // Garbage sig: returns null.
+    const garbage = await sha256Hex('not-a-real-layer')
+    expect(await getLayerBySig(historyRoot, garbage)).toBeNull()
   })
 })
 
