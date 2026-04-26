@@ -163,9 +163,21 @@ async function resolveChildNames(
     if (handle.kind !== 'directory') continue
     const childSegments = [...parentSegments, childName]
     const childLocSig = await history.sign({ explorerSegments: () => childSegments })
+
+    // Fast path: each child's CURRENT marker sig (or, when the child
+    // has no bag yet, the deterministic empty-seed sig for that name).
+    // Critical: parent's cascade stored exactly this value in its
+    // children array, so matching here covers freshly-added tiles
+    // whose bag hasn't been minted yet.
     try {
-      // Match against any marker the child has had (its current sig
-      // OR a past sig that's still on disk).
+      const currentSig = await history.latestMarkerSigFor(childLocSig, childName)
+      if (wanted.has(currentSig)) { out.add(childName); continue }
+    } catch { /* fall through to listLayers */ }
+
+    // Slow path: walk every marker the child has had (past sigs that
+    // were stored when this layer was committed but are no longer the
+    // child's latest).
+    try {
       const childMarkers = await history.listLayers(childLocSig)
       for (const marker of childMarkers) {
         if (wanted.has(marker.layerSig)) { out.add(childName); break }
