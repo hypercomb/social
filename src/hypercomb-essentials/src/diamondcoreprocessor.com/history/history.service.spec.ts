@@ -116,15 +116,15 @@ class MockDir {
 
 type LayerContent = {
   name: string
-  children: string[]
+  children?: string[]
 }
 
-const emptyLayer = (name: string): LayerContent => ({ name, children: [] })
+const emptyLayer = (name: string): LayerContent => ({ name })
 
-const canonicalizeLayer = (layer: LayerContent): LayerContent => ({
-  name: layer.name,
-  children: layer.children.slice(),
-})
+const canonicalizeLayer = (layer: LayerContent): LayerContent => {
+  if (!layer.children || layer.children.length === 0) return { name: layer.name }
+  return { name: layer.name, children: layer.children.slice() }
+}
 
 const nextMarkerName = async (bag: MockDir): Promise<string> => {
   let max = 0
@@ -197,7 +197,9 @@ const normalize = async (bag: MockDir): Promise<void> => {
         if (SIG_RE.test(text)) { drop.push(name); continue }
         try {
           const parsed = JSON.parse(text)
-          if (parsed && typeof parsed === 'object' && Array.isArray(parsed.children)) continue
+          // Canonical: must have non-empty name. children is optional
+          // (seed shape `{name}` is valid).
+          if (parsed && typeof parsed === 'object' && typeof parsed.name === 'string' && parsed.name.length > 0) continue
         } catch { /* fall through */ }
       } catch { /* drop */ }
     }
@@ -255,10 +257,10 @@ const getLayerContent = async (
       const sig = await sha256Hex(bytes)
       if (sig !== layerSig) continue
       const parsed = JSON.parse(new TextDecoder().decode(bytes)) as Partial<LayerContent>
-      return {
-        name: parsed.name ?? '',
-        children: parsed.children ?? [],
-      }
+      if (!parsed.name) continue
+      const out: LayerContent = { name: parsed.name }
+      if (Array.isArray(parsed.children) && parsed.children.length > 0) out.children = parsed.children
+      return out
     } catch { /* skip unreadable */ }
   }
   return null
@@ -473,13 +475,13 @@ describe('commitLayer / listLayers — bag-per-lineage', () => {
     expect((await listLayers(historyRoot, lineageB)).length).toBe(2)
   })
 
-  it('root lineage (empty segments) is a valid bag', async () => {
+  it('root lineage (empty segments) is a valid bag, name = "/" (ROOT_NAME)', async () => {
     const rootSig = await signLineage([])
-    await commitLayer(historyRoot, rootSig, { name: '', children: [fakeSig('r')] })
+    await commitLayer(historyRoot, rootSig, { name: '/', children: [fakeSig('r')] })
     const entries = await listLayers(historyRoot, rootSig)
     expect(entries.length).toBe(2)   // seed + commit
     const content = await getLayerContent(historyRoot, rootSig, entries[entries.length - 1].layerSig)
-    expect(content?.name).toBe('')
+    expect(content?.name).toBe('/')
     expect(content?.children).toEqual([fakeSig('r')])
   })
 
@@ -704,7 +706,7 @@ describe('Cursor — undo/redo over a multi-commit bag', () => {
     cursor.undo()
     expect((await cursor.layerContentAtCursor(historyRoot))?.children).toEqual([fakeSig('a')])
     cursor.undo()
-    expect((await cursor.layerContentAtCursor(historyRoot))?.children).toEqual([])   // empty seed
+    expect((await cursor.layerContentAtCursor(historyRoot))?.children).toBeUndefined()   // empty seed (no children field)
     cursor.undo()
     expect((await cursor.layerContentAtCursor(historyRoot))).toEqual(emptyLayer(''))   // pre-history
   })
@@ -779,7 +781,7 @@ describe('Cursor — lineage navigation', () => {
 
   it('navigating back to root lineage works (empty segments)', async () => {
     const rootSig = await signLineage([])
-    await commitLayer(historyRoot, rootSig, { name: '', children: [fakeSig('r')] })
+    await commitLayer(historyRoot, rootSig, { name: '/', children: [fakeSig('r')] })
     const childSig = await signLineage(['child'])
     await commitLayer(historyRoot, childSig, { name: 'child', children: [fakeSig('c')] })
 
@@ -955,6 +957,207 @@ describe('Cursor — pre-history (case A) vs no-history (case B)', () => {
     expect(cursor.state.position).toBe(0)
     expect(cursor.state.total).toBe(0)
     expect(await cursor.layerContentAtCursor(historyRoot)).toBeNull()
+  })
+})
+
+// ===================================================
+// Full cascade: leaf → root, every ancestor commits a new marker
+// ===================================================
+//
+// These tests model the user's directive:
+//   "remember the ancestor cascade"
+//   "the parent tiles should never be affected, only pointing to
+//    the new sig changing from the old. all the way to the root"
+//
+// We simulate the commit pipeline (LayerCommitter.#commit's loop)
+// using the spec's commitLayer + latestMarkerSigFor helpers.
+
+const cascade = async (
+  historyRoot: MockDir,
+  segments: string[],
+  childNamesByDepth: Record<number, string[]>,
+): Promise<{ depth: number; sig: string }[]> => {
+  const out: { depth: number; sig: string }[] = []
+  for (let depth = segments.length; depth >= 0; depth--) {
+    const sub = segments.slice(0, depth)
+    const ancestorName = depth === 0 ? '/' : sub[sub.length - 1]
+    const ancestorLocSig = await signLineage(sub)
+    const childNames = childNamesByDepth[depth] ?? []
+    const children: string[] = []
+    for (const cn of childNames) {
+      const childLocSig = await signLineage([...sub, cn])
+      const childSig = await latestMarkerSigFor(historyRoot, childLocSig, cn)
+      children.push(childSig)
+    }
+    const layer: LayerContent = childNames.length === 0
+      ? { name: ancestorName }
+      : { name: ancestorName, children }
+    const sig = await commitLayer(historyRoot, ancestorLocSig, layer)
+    out.push({ depth, sig })
+  }
+  return out
+}
+
+describe('Cascade — every ancestor commits when a leaf changes', () => {
+  it('cell:added at /A/B/C produces a new marker at /A/B/C, /A/B, /A, and /', async () => {
+    const segments = ['A', 'B', 'C']
+
+    // Initial cascade with leaf having no children.
+    await cascade(historyRoot, segments, { 3: [], 2: ['C'], 1: ['B'], 0: ['A'] })
+
+    const before = await Promise.all([
+      listLayers(historyRoot, await signLineage([])),
+      listLayers(historyRoot, await signLineage(['A'])),
+      listLayers(historyRoot, await signLineage(['A', 'B'])),
+      listLayers(historyRoot, await signLineage(['A', 'B', 'C'])),
+    ])
+    // each bag = seed + first commit
+    expect(before.map(b => b.length)).toEqual([2, 2, 2, 2])
+
+    // Leaf adds a child "D"
+    await cascade(historyRoot, segments, { 3: ['D'], 2: ['C'], 1: ['B'], 0: ['A'] })
+
+    const after = await Promise.all([
+      listLayers(historyRoot, await signLineage([])),
+      listLayers(historyRoot, await signLineage(['A'])),
+      listLayers(historyRoot, await signLineage(['A', 'B'])),
+      listLayers(historyRoot, await signLineage(['A', 'B', 'C'])),
+    ])
+    // every bag picked up exactly one more marker
+    expect(after.map(b => b.length)).toEqual([3, 3, 3, 3])
+  })
+
+  it('parent name stays the same; only the merkle entry for the changed child swaps', async () => {
+    const segments = ['A']
+
+    // Two children at /A: B and C, both with their own bags.
+    await cascade(historyRoot, ['A', 'B'], { 2: [], 1: ['B', 'C'], 0: ['A'] })
+    await cascade(historyRoot, ['A', 'C'], { 2: [], 1: ['B', 'C'], 0: ['A'] })
+
+    // Snapshot /A's layer
+    const aSig = await signLineage(['A'])
+    const aBefore = await listLayers(historyRoot, aSig)
+    const aBeforeContent = await getLayerContent(historyRoot, aSig, aBefore[aBefore.length - 1].layerSig)
+    expect(aBeforeContent?.name).toBe('A')
+    expect(aBeforeContent?.children?.length).toBe(2)
+    const [bSigBefore, cSigBefore] = aBeforeContent!.children!
+
+    // B mutates: cascade through /A, /
+    await cascade(historyRoot, ['A', 'B'], { 2: ['x'], 1: ['B', 'C'], 0: ['A'] })
+
+    const aAfter = await listLayers(historyRoot, aSig)
+    const aAfterContent = await getLayerContent(historyRoot, aSig, aAfter[aAfter.length - 1].layerSig)
+    expect(aAfterContent?.name).toBe('A')   // name unchanged
+    expect(aAfterContent?.children?.length).toBe(2)   // child count unchanged
+    const [bSigAfter, cSigAfter] = aAfterContent!.children!
+    expect(bSigAfter).not.toBe(bSigBefore)   // B's merkle changed
+    expect(cSigAfter).toBe(cSigBefore)       // C's merkle stable
+  })
+
+  it('cascade reaches the root: root marker count grows for every commit', async () => {
+    const rootSig = await signLineage([])
+
+    // 3 cascades, each at a different depth. All should mint a root marker.
+    await cascade(historyRoot, [], { 0: [] })                       // root only
+    await cascade(historyRoot, ['A'], { 1: [], 0: ['A'] })           // /A + root
+    await cascade(historyRoot, ['A', 'B'], { 2: [], 1: ['B'], 0: ['A'] })  // /A/B + /A + root
+
+    const rootEntries = await listLayers(historyRoot, rootSig)
+    // seed + 3 cascades = 4 markers
+    expect(rootEntries.length).toBe(4)
+  })
+})
+
+// ===================================================
+// Step-back render: parent's past `children` sigs resolve to
+// on-disk child names by enumerating parent dir + matching against
+// each child's bag markers. (Mirrors the renderer's resolveChildNames
+// helper in show-cell.drone.ts so the bug "step back shows live disk
+// state" can't regress.)
+// ===================================================
+
+const resolveChildNamesFromBag = async (
+  historyRoot: MockDir,
+  parentSegments: string[],
+  parentChildSigsWanted: string[],
+  onDiskChildNames: string[],
+): Promise<Set<string>> => {
+  const wanted = new Set(parentChildSigsWanted)
+  const out = new Set<string>()
+  for (const name of onDiskChildNames) {
+    const childLocSig = await signLineage([...parentSegments, name])
+    const markers = await listLayers(historyRoot, childLocSig)
+    for (const m of markers) {
+      if (wanted.has(m.layerSig)) { out.add(name); break }
+    }
+  }
+  return out
+}
+
+describe('resolveChildNames — past sigs map back to current on-disk names', () => {
+  it('all past children still on disk → all resolve', async () => {
+    // Parent /A with children B, C. Both have bags with at least one marker.
+    await cascade(historyRoot, ['A', 'B'], { 2: [], 1: ['B', 'C'], 0: ['A'] })
+    await cascade(historyRoot, ['A', 'C'], { 2: [], 1: ['B', 'C'], 0: ['A'] })
+
+    // Get /A's current children sigs
+    const aContent = await getLayerContent(
+      historyRoot,
+      await signLineage(['A']),
+      (await listLayers(historyRoot, await signLineage(['A']))).slice(-1)[0].layerSig,
+    )
+    const wanted = aContent?.children ?? []
+
+    const names = await resolveChildNamesFromBag(historyRoot, ['A'], wanted, ['B', 'C'])
+    expect([...names].sort()).toEqual(['B', 'C'])
+  })
+
+  it('past layer had 1 child; current disk has 2 — only the past one resolves', async () => {
+    // Initial: /A has child B
+    await cascade(historyRoot, ['A', 'B'], { 2: [], 1: ['B'], 0: ['A'] })
+    const aSig = await signLineage(['A'])
+    const aPastEntries = await listLayers(historyRoot, aSig)
+    const aPastContent = await getLayerContent(historyRoot, aSig, aPastEntries.slice(-1)[0].layerSig)
+    const pastChildSigs = aPastContent?.children ?? []
+    expect(pastChildSigs.length).toBe(1)
+
+    // Now C is added: /A has B + C
+    await cascade(historyRoot, ['A', 'C'], { 2: [], 1: ['B', 'C'], 0: ['A'] })
+
+    // Resolve PAST children sigs against CURRENT disk listing [B, C]
+    const names = await resolveChildNamesFromBag(historyRoot, ['A'], pastChildSigs, ['B', 'C'])
+    expect([...names]).toEqual(['B'])   // past state had only B; user steps back, sees B only
+  })
+
+  it('past children = empty (seed) → resolves to no names; renderer clears union', async () => {
+    // Parent /A starts as seed (no children)
+    await cascade(historyRoot, ['A'], { 1: [], 0: ['A'] })
+    const aSig = await signLineage(['A'])
+    const seedEntries = await listLayers(historyRoot, aSig)
+    const seedContent = await getLayerContent(historyRoot, aSig, seedEntries[0].layerSig)
+    expect(seedContent?.children).toBeUndefined()
+
+    // Later A gains a child B
+    await cascade(historyRoot, ['A', 'B'], { 2: [], 1: ['B'], 0: ['A'] })
+
+    // Step back to seed: resolve `undefined` children against disk → empty
+    const names = await resolveChildNamesFromBag(historyRoot, ['A'], seedContent?.children ?? [], ['B'])
+    expect(names.size).toBe(0)
+  })
+
+  it('past child is no longer on disk → cannot resolve (known limitation)', async () => {
+    // /A had child B
+    await cascade(historyRoot, ['A', 'B'], { 2: [], 1: ['B'], 0: ['A'] })
+    const aSig = await signLineage(['A'])
+    const pastContent = await getLayerContent(historyRoot, aSig, (await listLayers(historyRoot, aSig)).slice(-1)[0].layerSig)
+    const pastChildSigs = pastContent?.children ?? []
+
+    // B is removed from disk (simulate: only Y on disk now)
+    const names = await resolveChildNamesFromBag(historyRoot, ['A'], pastChildSigs, ['Y'])
+    expect(names.size).toBe(0)
+    // Renderer falls back to live disk in this case — Y is shown,
+    // not B. Documented limitation; needs a sig→name index for full
+    // historical fidelity.
   })
 })
 
