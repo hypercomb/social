@@ -1430,43 +1430,23 @@ export class ShowCellDrone extends Drone {
         }
 
         if (content) {
-          // content.children is an array of child layer sigs. Resolve
-          // each sig to a display name by enumerating the parent dir
-          // and matching against each child's bag markers (see
-          // resolveChildNames). When the past layer's children list is
-          // narrower than disk (e.g. stepping back to before a tile
-          // was added), `allowed` filters union down to just those
-          // historical members. Critical: when the past layer's
-          // children IS empty (a seed), we MUST clear union, not skip
-          // — otherwise live-disk wins and the user sees the current
-          // state instead of the empty seed.
+          // LOAD-BY-SIGNATURE (not filter): the cursor's layer is the
+          // authoritative source of what's visible. Look up each child
+          // sig via the preloader; the resolved set IS the cell set.
+          // No on-disk merge, no filter fallback — just load what the
+          // layer says.
           const parentSegments = (lineage as { explorerSegments?: () => readonly string[] })?.explorerSegments?.() ?? []
           const allowed = await resolveChildNames(historyService, parentSegments, dir, content)
-          const childCount = Array.isArray(content.children) ? content.children.length : 0
-          console.log('[render] resolve', {
-            childCount,
-            allowedSize: allowed.size,
-            allowedNames: [...allowed],
-            decision: childCount === 0 ? 'clear-union (seed)'
-              : 'filter-by-allowed (always)',
+          console.log('[render] load-by-sig', {
+            childCount: content.children?.length ?? 0,
+            loaded: [...allowed],
           })
-          // ALWAYS filter union to `allowed`. Past state's child set
-          // is the authoritative truth — even when resolveChildNames
-          // can't match all sigs (cross-schema, missing bags, deleted
-          // children), the live disk is NOT the right fallback.
-          // Showing the wrong tiles ("step 1 has 1 child but I see
-          // 2 live-disk tiles") is worse than showing fewer.
-          if (childCount === 0) {
-            union.clear()
-            localCellSet.clear()
-          } else {
-            for (const cell of [...union]) {
-              if (!allowed.has(cell)) union.delete(cell)
-            }
-            for (const cell of allowed) {
-              union.add(cell)
-              localCellSet.add(cell)
-            }
+          // Replace union entirely with what the layer says.
+          union.clear()
+          localCellSet.clear()
+          for (const cell of allowed) {
+            union.add(cell)
+            localCellSet.add(cell)
           }
         }
       }
