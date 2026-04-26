@@ -135,23 +135,41 @@ class CellSlots {
 
 /**
  * Resolve a parent layer's `children` (sigs) into a Set of child
- * display names by loading each child's marker via the bag and reading
- * its `name` field. Children whose sig can't be resolved (no bag yet,
- * or bag missing the sig) are silently dropped — they won't filter the
- * union, which means a freshly-created child still renders from live
- * disk until its first marker exists.
+ * display names.
+ *
+ * Each child layer lives in the CHILD's bag (`__history__/<childLocSig>`),
+ * not the parent's. We don't have a sig→name index, so the only way
+ * to map a sig back to a name is to enumerate the parent's on-disk
+ * children, compute each child's lineage sig, list that bag's markers,
+ * and check if any marker sig matches the parent's `children` entry.
+ *
+ * Names whose sig matches → "allowed" in this historical layer.
+ * Children that have been deleted from disk can't be resolved (no
+ * lineage to query) and silently drop out — known limitation of the
+ * current design (no global sig→name lookup).
  */
 async function resolveChildNames(
   history: HistoryService,
-  parentLocSig: string,
+  parentSegments: readonly string[],
+  parentDir: FileSystemDirectoryHandle | null,
   content: { children?: string[] } | null,
 ): Promise<Set<string>> {
   const out = new Set<string>()
-  if (!content || !Array.isArray(content.children)) return out
-  for (const childSig of content.children) {
+  if (!content || !Array.isArray(content.children) || content.children.length === 0) return out
+  if (!parentDir) return out
+  const wanted = new Set(content.children)
+
+  for await (const [childName, handle] of (parentDir as any).entries()) {
+    if (handle.kind !== 'directory') continue
+    const childSegments = [...parentSegments, childName]
+    const childLocSig = await history.sign({ explorerSegments: () => childSegments })
     try {
-      const childContent = await history.getLayerContent(parentLocSig, childSig)
-      if (childContent?.name) out.add(childContent.name)
+      // Match against any marker the child has had (its current sig
+      // OR a past sig that's still on disk).
+      const childMarkers = await history.listLayers(childLocSig)
+      for (const marker of childMarkers) {
+        if (wanted.has(marker.layerSig)) { out.add(childName); break }
+      }
     } catch { /* unresolvable — skip */ }
   }
   return out
@@ -1399,14 +1417,24 @@ export class ShowCellDrone extends Drone {
         }
 
         if (content) {
-          // content.children is now an array of child layer sigs
-          // (not display names). Resolve to names so we can keep
-          // filtering by name. Children whose sig can't be resolved
-          // (e.g. no bag yet) drop out of `allowed` — when the set
-          // is empty we skip filtering entirely so we don't blank
-          // a live disk-driven render on a stale historical layer.
-          const allowed = await resolveChildNames(historyService, sig.sig, content)
-          if (allowed.size > 0) {
+          // content.children is an array of child layer sigs. Resolve
+          // each sig to a display name by enumerating the parent dir
+          // and matching against each child's bag markers (see
+          // resolveChildNames). When the past layer's children list is
+          // narrower than disk (e.g. stepping back to before a tile
+          // was added), `allowed` filters union down to just those
+          // historical members. Critical: when the past layer's
+          // children IS empty (a seed), we MUST clear union, not skip
+          // — otherwise live-disk wins and the user sees the current
+          // state instead of the empty seed.
+          const parentSegments = (lineage as { explorerSegments?: () => readonly string[] })?.explorerSegments?.() ?? []
+          const allowed = await resolveChildNames(historyService, parentSegments, dir, content)
+          const childCount = Array.isArray(content.children) ? content.children.length : 0
+          if (childCount === 0) {
+            // Past state was empty → render nothing.
+            union.clear()
+            localCellSet.clear()
+          } else if (allowed.size > 0) {
             for (const cell of [...union]) {
               if (!allowed.has(cell)) union.delete(cell)
             }
@@ -2693,14 +2721,13 @@ export class ShowCellDrone extends Drone {
     let cellNames: string[]
     if (isRewound && cursor) {
       const content = await cursor.layerContentAtCursor()
-      // Resolve child sigs → names so we can preserve historical
-      // ordering by name. If resolution gives nothing (children sigs
-      // unavailable in this bag — they live in child bags), fall
-      // through to live disk ordering.
+      // Resolve child sigs → names by enumerating parent dir +
+      // matching against each child's bag markers. Falls back to
+      // live disk ordering when the past layer can't be resolved.
       const historyService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as HistoryService | undefined
-      const sig = await this.computeSignatureLocation(_lineage)
+      const parentSegments = (_lineage as { explorerSegments?: () => readonly string[] })?.explorerSegments?.() ?? []
       const orderedNames = (content && historyService)
-        ? [...await resolveChildNames(historyService, sig.sig, content)]
+        ? [...await resolveChildNames(historyService, parentSegments, dir, content)]
         : []
       if (orderedNames.length > 0) {
         const unionSet = new Set(union)
