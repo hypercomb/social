@@ -163,12 +163,29 @@ class CellSlots {
 async function resolveChildNames(
   history: HistoryService,
   _parentSegments: readonly string[],
-  _parentDir: FileSystemDirectoryHandle | null,
+  parentDir: FileSystemDirectoryHandle | null,
   content: { children?: string[] } | null,
 ): Promise<Set<string>> {
   const out = new Set<string>()
   if (!content?.children?.length) return out
+  const wanted = new Set(content.children)
+
+  // Pre-warm preloader for every on-disk child name. seedSigFor caches
+  // the sig→bytes mapping so getLayerBySig becomes O(1) below. This is
+  // the "load by signature" path: every parent.children sig is now
+  // resolvable from memory without any further OPFS work.
+  if (parentDir) {
+    for await (const [childName, handle] of (parentDir as any).entries()) {
+      if (handle.kind !== 'directory') continue
+      await history.seedSigFor(childName)
+    }
+  }
+
+  // One mechanical pass: lookup each parent.children sig via preloader.
+  // Hot cache for bagless children (warmed above) and for committed
+  // children (warmed at commit time). No cold-walk in the steady state.
   for (const childSig of content.children) {
+    if (!wanted.has(childSig)) continue
     const child = await history.getLayerBySig(childSig)
     if (child?.name) out.add(child.name)
   }

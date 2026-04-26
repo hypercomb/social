@@ -403,6 +403,11 @@ export class HistoryService {
     const bytes = new TextEncoder().encode(json)
     const layerSig = await SignatureService.sign(bytes.buffer as ArrayBuffer)
 
+    // Dedup: if this sig matches the bag's current latest, the layer
+    // is unchanged. Skip the write — no meaningless markers.
+    const lastSig = this.#latestSigByLineage.get(locationSig)
+    if (lastSig === layerSig) return layerSig
+
     const bag = await this.getBag(locationSig)
     await this.#ensureSeed(bag, layer.name)
 
@@ -467,40 +472,73 @@ export class HistoryService {
   }
 
   /**
-   * Return the sig of the lineage's CURRENT layer bytes. Used by the
-   * cascade so a parent's `children` array carries real, addressable
-   * sigs (every sig points to actual bytes a reader can fetch).
+   * Return the sig of the lineage's CURRENT layer bytes. Pure compute:
+   * never writes, never creates a bag. If the bag exists with markers,
+   * returns the sig of the last marker. Otherwise returns the
+   * deterministic empty-seed sig for `name` (sha256 of canonicalize+
+   * stringify of the empty layer for that name).
    *
-   * IMPORTANT: this is the only function that mints child sigs for
-   * the parent to store. To guarantee the sig→bytes invariant, we
-   * ALWAYS materialize the bag with at least a seed marker before
-   * computing the sig. The sig is then read from real on-disk bytes.
-   * If we returned a deterministic-but-unwritten seed sig instead,
-   * the parent could store a sig that no reader (resolveChildNames,
-   * preloader, anything) can ever look up.
+   * The parent stores this value in its children array. Renderer
+   * resolves it via:
+   *   - preloader cache hit (covers children that have committed at
+   *     least once — bytes were registered then)
+   *   - bag scan (cold-walk for any sig with on-disk bytes)
+   *   - on-disk deterministic match (bagless children: the parent's
+   *     stored sig matches the seed sig computed from the child's
+   *     directory name on disk — no I/O needed)
    *
-   * Non-destructive: only creates a bag if missing, only writes the
-   * seed (00000000) if missing. A populated bag is unchanged.
+   * Schema is locked at { name, children? }. Sigs are stable forever
+   * because canonicalization never changes.
    */
   public readonly latestMarkerSigFor = async (
     lineageSig: string,
     name: string,
   ): Promise<string> => {
-    // Materialize the bag + seed if missing.
-    const bag = await this.getBag(lineageSig)
-    await this.#ensureSeed(bag, name)
+    let bag: FileSystemDirectoryHandle | null = null
+    try {
+      bag = await this.historyRoot.getDirectoryHandle(lineageSig, { create: false })
+    } catch { /* no bag */ }
 
-    // Now find latest NNNN marker (00000000 at minimum).
-    let latestName = '00000000'
-    for await (const [n, h] of (bag as any).entries()) {
-      if (h.kind !== 'file') continue
-      if (!HistoryService.#MARKER_RE.test(n)) continue
-      if (n > latestName) latestName = n
+    if (bag) {
+      let latestName = ''
+      for await (const [n, h] of (bag as any).entries()) {
+        if (h.kind !== 'file') continue
+        if (!HistoryService.#MARKER_RE.test(n)) continue
+        if (n > latestName) latestName = n
+      }
+      if (latestName) {
+        try {
+          const handle = await bag.getFileHandle(latestName, { create: false })
+          const file = await handle.getFile()
+          const bytes = await file.arrayBuffer()
+          return await SignatureService.sign(bytes)
+        } catch { /* fall through to deterministic */ }
+      }
     }
-    const handle = await bag.getFileHandle(latestName, { create: false })
-    const file = await handle.getFile()
-    const bytes = await file.arrayBuffer()
-    return await SignatureService.sign(bytes)
+
+    // Deterministic empty-seed sig + preloader pre-warm. Pure compute,
+    // no I/O. After this call, getLayerBySig(returnedSig) is an O(1)
+    // cache hit — no cold-walk needed.
+    return await this.seedSigFor(name)
+  }
+
+  /**
+   * Pure compute of the deterministic empty-seed sig for a name. Also
+   * pre-warms the preloader cache with the seed bytes so getLayerBySig
+   * is an O(1) hit when this sig is later looked up. Cached by name to
+   * avoid re-hashing the same name every render.
+   */
+  readonly #seedSigByName = new Map<string, string>()
+  public readonly seedSigFor = async (name: string): Promise<string> => {
+    const cached = this.#seedSigByName.get(name)
+    if (cached) return cached
+    const seed = HistoryService.canonicalizeLayer(emptyLayer(name))
+    const seedBytes = new TextEncoder().encode(JSON.stringify(seed))
+    const buf = seedBytes.buffer as ArrayBuffer
+    const sig = await SignatureService.sign(buf)
+    this.#seedSigByName.set(name, sig)
+    this.#preloaderCache.set(sig, buf)   // pre-warm: now getLayerBySig hits cache
+    return sig
   }
 
   /**

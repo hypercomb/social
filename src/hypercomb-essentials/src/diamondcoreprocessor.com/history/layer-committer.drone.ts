@@ -328,16 +328,15 @@ export class LayerCommitter {
     // No children → seed shape: just `{ name }`, no children field.
     if (onDiskNames.length === 0) return { name }
 
-    // Children are sigs (sha256 hex). For each on-disk child name,
-    // pull the child lineage's CURRENT marker sig.
+    // latestMarkerSigFor is now pure compute when child has no bag
+    // (returns the deterministic empty-seed sig). No I/O cascade.
     const children: string[] = []
     for (const childName of onDiskNames) {
       const childSegments = [...segments, childName]
       const childLocSig = await history.sign({
         explorerSegments: () => childSegments,
       } as Lineage)
-      const childSig = await history.latestMarkerSigFor(childLocSig, childName)
-      children.push(childSig)
+      children.push(await history.latestMarkerSigFor(childLocSig, childName))
     }
 
     return { name, children }
