@@ -148,6 +148,39 @@ class CellSlots {
  * lineage to query) and silently drop out — known limitation of the
  * current design (no global sig→name lookup).
  */
+/**
+ * Compute every known historical seed-sig variant for a child name.
+ * The layer schema went through several iterations during development:
+ *
+ *   v4 (current):  {"name":"X"}
+ *   v3:            {"name":"X","children":[],"hidden":[]}
+ *   v2-with-merkles: {"name":"X","cells":[],"merkles":[],"hidden":[]}
+ *   v2-cells-only: {"name":"X","cells":[],"hidden":[]}
+ *
+ * A parent committed under an older schema stored child seed sigs
+ * computed from THAT schema's canonicalization. After the simplification,
+ * latestMarkerSigFor returns the v4 sig — which doesn't match v2/v3
+ * sigs the parent stored, so resolveChildNames misses the match and
+ * the renderer falls through to live-disk.
+ *
+ * This helper returns all variants so the resolver can match any of them.
+ * Cheap (handful of sha256 calls per child); only used as a final fallback.
+ */
+async function legacySeedSigVariants(name: string): Promise<string[]> {
+  const variants = [
+    `{"name":${JSON.stringify(name)}}`,
+    `{"name":${JSON.stringify(name)},"children":[],"hidden":[]}`,
+    `{"name":${JSON.stringify(name)},"cells":[],"merkles":[],"hidden":[]}`,
+    `{"name":${JSON.stringify(name)},"cells":[],"hidden":[]}`,
+  ]
+  const sigs = await Promise.all(variants.map(async (v) => {
+    const bytes = new TextEncoder().encode(v)
+    const hash = await crypto.subtle.digest('SHA-256', bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer)
+    return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('')
+  }))
+  return sigs
+}
+
 async function resolveChildNames(
   history: HistoryService,
   parentSegments: readonly string[],
@@ -159,7 +192,7 @@ async function resolveChildNames(
   if (!parentDir) return out
   const wanted = new Set(content.children)
   const wantedShort = content.children.map(s => s.slice(0, 10))
-  const trace: Array<{ name: string; currentSig: string; matched: 'fast' | 'slow' | 'none'; markerSigs?: string[] }> = []
+  const trace: Array<{ name: string; currentSig: string; matched: 'fast' | 'slow' | 'legacy' | 'none'; markerSigs?: string[]; legacySigs?: string[] }> = []
 
   for await (const [childName, handle] of (parentDir as any).entries()) {
     if (handle.kind !== 'directory') continue
@@ -177,15 +210,34 @@ async function resolveChildNames(
     } catch { /* fall through */ }
 
     let markerSigs: string[] = []
-    let matched: 'slow' | 'none' = 'none'
+    let slowMatched = false
     try {
       const childMarkers = await history.listLayers(childLocSig)
       markerSigs = childMarkers.map(m => m.layerSig.slice(0, 10))
       for (const marker of childMarkers) {
-        if (wanted.has(marker.layerSig)) { out.add(childName); matched = 'slow'; break }
+        if (wanted.has(marker.layerSig)) { out.add(childName); slowMatched = true; break }
       }
-    } catch { /* unresolvable — skip */ }
-    trace.push({ name: childName, currentSig: currentSig.slice(0, 10), matched, markerSigs })
+    } catch { /* */ }
+    if (slowMatched) {
+      trace.push({ name: childName, currentSig: currentSig.slice(0, 10), matched: 'slow', markerSigs })
+      continue
+    }
+
+    // Last-resort: legacy schema seed-sig variants. Covers parents
+    // committed before the {name, children?} simplification, whose
+    // stored child sigs were canonicalized differently.
+    const legacy = await legacySeedSigVariants(childName)
+    let legacyMatched = false
+    for (const sig of legacy) {
+      if (wanted.has(sig)) { out.add(childName); legacyMatched = true; break }
+    }
+    trace.push({
+      name: childName,
+      currentSig: currentSig.slice(0, 10),
+      matched: legacyMatched ? 'legacy' : 'none',
+      markerSigs,
+      legacySigs: legacy.map(s => s.slice(0, 10)),
+    })
   }
 
   console.log('[resolveChildNames]', { wanted: wantedShort, trace, allowed: [...out] })
