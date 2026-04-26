@@ -26,6 +26,7 @@ import type { SecretStore } from '../../core/secret-store'
 import type { InstallMonitor } from '../../core/install-monitor'
 import { VoiceInputService } from '../../core/voice-input.service'
 import { secretTag } from './secret-words'
+import { environment } from '../../environments/environment'
 
 const PILL_POS_KEY = 'hc:controls-pill-pos'
 const ROW_LAYOUT_KEY = 'hc:controls-row-layout'
@@ -444,6 +445,17 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     return segs.length > 0 ? segs[segs.length - 1].name : ''
   })
 
+  // Dev-only: 10-char prefix of the current layer marker sig, shown
+  // in front of the leaf breadcrumb so we can verify which historical
+  // layer the renderer is on. Updates on every cursor change.
+  readonly isDev = !environment.production
+  readonly #currentLayerSig$ = signal<string>('')
+  readonly currentLayerSigShort = computed(() => {
+    if (!this.isDev) return ''
+    const sig = this.#currentLayerSig$()
+    return sig ? sig.slice(0, 10) : ''
+  })
+
   readonly prefixPath = computed(() => {
     const parts: string[] = []
     const space = this.spaceName()
@@ -590,6 +602,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #hoverTagsUnsub: (() => void) | null = null
   #voiceActiveUnsub: (() => void) | null = null
   #showHiddenUnsub: (() => void) | null = null
+  #cursorSigUnsub: (() => void) | null = null
   #textOnlyUnsub: (() => void) | null = null
   #clipboardAvailableUnsub: (() => void) | null = null
   #clipboardCloseUnsub: (() => void) | null = null
@@ -705,6 +718,15 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       this.#showHidden.set(active)
     })
 
+    // Dev-only: keep currentLayerSig in sync with the cursor's current
+    // marker sig so the breadcrumb shows which layer is rendered.
+    if (this.isDev) {
+      this.#cursorSigUnsub = EffectBus.on('history:cursor-changed', () => {
+        const cursor = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc?.get<{ currentLayerSig: string }>('@diamondcoreprocessor.com/HistoryCursorService')
+        this.#currentLayerSig$.set(cursor?.currentLayerSig ?? '')
+      })
+    }
+
     this.#textOnlyUnsub = EffectBus.on<{ textOnly: boolean }>('render:set-text-only', ({ textOnly }) => {
       this.#textOnly.set(textOnly)
     })
@@ -797,6 +819,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#beesUnsub?.()
     this.#voiceActiveUnsub?.()
     this.#showHiddenUnsub?.()
+    this.#cursorSigUnsub?.()
     this.#textOnlyUnsub?.()
     this.#clipboardAvailableUnsub?.()
     this.#clipboardCloseUnsub?.()

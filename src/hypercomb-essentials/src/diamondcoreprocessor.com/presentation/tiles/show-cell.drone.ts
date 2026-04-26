@@ -2006,6 +2006,12 @@ export class ShowCellDrone extends Drone {
       // layer mirrors live state because every user intent commits, so
       // applying head is a no-op modulo redundant emits.
       void this.#applyCursorLayout()
+      // Actually trigger the re-render. Without this, clicking a row
+      // in the history viewer (which calls cursor.seek → emits
+      // history:cursor-changed) clears the caches but doesn't paint
+      // the new state. renderFromSynchronize re-reads the cursor and
+      // produces the historical view at the new position.
+      void this.renderFromSynchronize()
 
       // Preserve viewport (scale + pan) across the undo/redo re-render.
       // Without this, applyGeometry's mesh-recenter (line ~1720) shifts

@@ -59,6 +59,12 @@ export class HistoryCursorService extends EventTarget {
     }
   }
 
+  /** Sig of the marker file at the current cursor position, or '' when none. */
+  get currentLayerSig(): string {
+    const entry = this.#position > 0 ? this.#layers[this.#position - 1] : null
+    return entry?.layerSig ?? ''
+  }
+
   get groupStepEnabled(): boolean {
     return this.#groupStepEnabled
   }
