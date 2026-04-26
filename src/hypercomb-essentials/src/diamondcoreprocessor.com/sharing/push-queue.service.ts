@@ -84,6 +84,7 @@ export class PushQueueService extends EventTarget {
     if (!PushQueueService.#SIG_RE.test(sig)) return
     if (await this.hasReceipt(sig)) return
     const queueDir = await this.#getQueueDir()
+    if (!queueDir) return   // store not initialized yet — silent no-op
     try {
       const handle = await queueDir.getFileHandle(sig, { create: true })
       const writable = await handle.createWritable()
@@ -133,6 +134,7 @@ export class PushQueueService extends EventTarget {
     if (!PushQueueService.#SIG_RE.test(sig)) return false
     try {
       const dir = await this.#getReceiptsDir()
+      if (!dir) return false
       await dir.getFileHandle(sig, { create: false })
       return true
     } catch { return false }
@@ -146,6 +148,7 @@ export class PushQueueService extends EventTarget {
     if (await this.hasReceipt(sig)) return false
     try {
       const dir = await this.#getQueueDir()
+      if (!dir) return false
       await dir.getFileHandle(sig, { create: false })
       return true
     } catch { return false }
@@ -169,21 +172,22 @@ export class PushQueueService extends EventTarget {
   // internal — directory resolution
   // -------------------------------------------------
 
-  readonly #getQueueDir = async (): Promise<FileSystemDirectoryHandle> => {
+  readonly #getQueueDir = async (): Promise<FileSystemDirectoryHandle | null> => {
     const root = await this.#getOpfsRoot()
+    if (!root) return null
     const push = await root.getDirectoryHandle(PushQueueService.#PUSH_DIR, { create: true })
     return await push.getDirectoryHandle(PushQueueService.#QUEUE_SUBDIR, { create: true })
   }
 
-  readonly #getReceiptsDir = async (): Promise<FileSystemDirectoryHandle> => {
+  readonly #getReceiptsDir = async (): Promise<FileSystemDirectoryHandle | null> => {
     const root = await this.#getOpfsRoot()
+    if (!root) return null
     return await root.getDirectoryHandle(PushQueueService.#RECEIPTS_DIR, { create: true })
   }
 
-  readonly #getOpfsRoot = async (): Promise<FileSystemDirectoryHandle> => {
-    const store = get<{ opfsRoot: FileSystemDirectoryHandle }>('@hypercomb.social/Store')
-    if (!store?.opfsRoot) throw new Error('PushQueueService: Store not initialized')
-    return store.opfsRoot
+  readonly #getOpfsRoot = async (): Promise<FileSystemDirectoryHandle | null> => {
+    const store = get<{ opfsRoot?: FileSystemDirectoryHandle }>('@hypercomb.social/Store')
+    return store?.opfsRoot ?? null
   }
 
   // -------------------------------------------------
@@ -192,6 +196,7 @@ export class PushQueueService extends EventTarget {
 
   readonly #listQueue = async (): Promise<string[]> => {
     const dir = await this.#getQueueDir()
+    if (!dir) return []
     const items: Array<{ sig: string; mtime: number }> = []
     for await (const [name, handle] of (dir as any).entries()) {
       if (handle.kind !== 'file') continue
@@ -208,6 +213,7 @@ export class PushQueueService extends EventTarget {
   readonly #removeQueueEntry = async (sig: string): Promise<void> => {
     try {
       const dir = await this.#getQueueDir()
+      if (!dir) return
       await dir.removeEntry(sig)
     } catch { /* already gone */ }
   }
@@ -227,6 +233,7 @@ export class PushQueueService extends EventTarget {
   readonly #stubPushAndReceipt = async (sig: string): Promise<boolean> => {
     try {
       const dir = await this.#getReceiptsDir()
+      if (!dir) return false
       const handle = await dir.getFileHandle(sig, { create: true })
       const writable = await handle.createWritable()
       try { await writable.write(new Uint8Array(0)) } finally { await writable.close() }
