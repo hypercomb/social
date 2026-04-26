@@ -91,17 +91,19 @@ export class BatchCreateBehavior implements CommandLineBehavior {
           removedFiredFor = parentSegs
         }
       } else if (item.op === 'tag-add' || item.op === 'tag-remove') {
-        // ensure the cell exists for tag-add
+        // ensure the cell exists for tag-add — record EVERY level
+        // along the way (each level may have gained a child).
         if (item.op === 'tag-add') {
           let parent = dir
           const accumulated: string[] = [...baseSegments]
           for (const part of item.segments) {
+            // Before walking deeper, the lineage at `accumulated`
+            // gains `part` as a child. Record one event per gained
+            // child so each affected lineage commits its own marker.
+            recordParent([...accumulated], part)
             parent = await parent.getDirectoryHandle(part, { create: true })
             accumulated.push(part)
           }
-          // record the parent of the leaf
-          const parentSegs = accumulated.slice(0, -1)
-          recordParent(parentSegs, item.segments[item.segments.length - 1])
         }
         if (item.tag) {
           tagOps.push({
@@ -112,17 +114,19 @@ export class BatchCreateBehavior implements CommandLineBehavior {
           })
         }
       } else {
-        // create — walk every level (creates dirs along the way),
-        // record the deepest parent so the cascade reaches every new
-        // lineage.
+        // create — walk every level. Each level along the path may
+        // be a freshly-created lineage, so each one needs its own
+        // commit. Without a per-level event, intermediate lineages
+        // (e.g. /abc when typing `abc/123` from root) would be
+        // visible-but-historyless until something else triggered
+        // their bag.
         let parent = dir
         const accumulated: string[] = [...baseSegments]
         for (const part of item.segments) {
+          recordParent([...accumulated], part)
           parent = await parent.getDirectoryHandle(part, { create: true })
           accumulated.push(part)
         }
-        const parentSegs = accumulated.slice(0, -1)
-        recordParent(parentSegs, item.segments[item.segments.length - 1])
       }
     }
 

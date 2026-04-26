@@ -327,8 +327,21 @@ export class LayerCommitter {
     const segments = req.segments ?? fallbackSegments
 
     // Walk every ancestor INCLUDING the leaf and INCLUDING root ("").
-    // For depth d in [segments.length, ..., 0]:
-    //   sub = segments.slice(0, d)  → that lineage's segments
+    //
+    // The TARGET LINEAGE (depth === segments.length) is where the
+    // event happened — re-read its disk listing so cells reflects
+    // the add/remove. ANCESTORS preserve their previous cells list
+    // and only swap the merkle for the immediate child that just
+    // changed. That keeps the cascade strictly merkle-only at each
+    // ancestor: same cells, same hidden, only one merkles entry
+    // differs (pointing at the new child sig). Critical so a child
+    // change doesn't drop sibling tiles from ancestor layers.
+    //
+    // Track the just-committed child's name + sig so each next-up
+    // ancestor knows which entry to swap.
+    let lastCommittedName: string | null = null
+    let lastCommittedSig: string | null = null
+
     for (let depth = segments.length; depth >= 0; depth--) {
       const sub = segments.slice(0, depth)
       const ancestorName = depth === 0 ? '' : sub[sub.length - 1]
@@ -337,28 +350,25 @@ export class LayerCommitter {
         explorerSegments: () => sub,
       } as Lineage)
 
-      // Resolve OPFS dir for this ancestor. If not available
-      // (e.g., user hasn't visited that path yet) we still write a
-      // marker — the layer carries `name` so the ancestor's bag
-      // gets a proper seed and the cascade chain stays intact.
+      // Resolve OPFS dir for this ancestor. Only the leaf truly
+      // needs it (to re-read its child listing). Ancestors preserve
+      // their previous cells list, so the dir is informational only
+      // (used as a fallback when no previous head exists).
       let ancestorDir: FileSystemDirectoryHandle | null = null
       const store = get<LineageStore>('@hypercomb.social/Store')
       const root = store?.hypercombRoot
       if (root && lineage.tryResolve) {
         ancestorDir = await lineage.tryResolve(sub, root).catch(() => null) as FileSystemDirectoryHandle | null
       } else if (depth === segments.length) {
-        // Leaf: the lineage already has its own dir handle resolver
         const dirOrPromise = lineage.explorerDir?.()
         ancestorDir = await Promise.resolve(dirOrPromise ?? null)
       }
 
-      const ancestorLayer = await this.#assembleLayerFor(
-        history,
-        sub,
-        ancestorName,
-        ancestorLocSig,
-        ancestorDir,
-      )
+      const isTargetLineage = depth === segments.length
+      const ancestorLayer = isTargetLineage
+        ? await this.#assembleLayerFor(history, sub, ancestorName, ancestorLocSig, ancestorDir)
+        : await this.#cascadeMerkleSwap(history, sub, ancestorName, ancestorLocSig, ancestorDir, lastCommittedName, lastCommittedSig)
+
       const sig = await history.commitLayer(ancestorLocSig, ancestorLayer)
       console.log('[commit]', {
         depth,
@@ -366,7 +376,13 @@ export class LayerCommitter {
         name: ancestorName || '(root)',
         cells: ancestorLayer.cells.length,
         sig: sig?.slice(0, 8) ?? '(none)',
+        mode: isTargetLineage ? 'target (re-read disk)' : 'cascade (merkle swap)',
       })
+
+      // Advance the cascade: the next ancestor up needs to know that
+      // THIS ancestor's name now points at THIS new sig.
+      lastCommittedName = ancestorName
+      lastCommittedSig = sig
     }
 
     // Notify the cursor so the slider / activity log / ShowCell see the new head
@@ -434,6 +450,68 @@ export class LayerCommitter {
     // visible lineage. For ancestors, no hides apply.
     const hidden = this.#readHiddenFor(segments)
     return { name, cells, merkles, hidden }
+  }
+
+  /**
+   * Cascade-only assembly: keep this ancestor's previous cells +
+   * hidden EXACTLY as they were, only swap the merkle entry for
+   * the child whose sig just changed.
+   *
+   * This is the key invariant the user asked for:
+   * "the parent tiles should never be affected, only pointing to
+   *  the new sig changing from the old. This happens all the way
+   *  to the root."
+   *
+   * If `childName` isn't in the previous cells (e.g. the child
+   * is a freshly-created lineage from the same batch — root just
+   * gained `abc` via `abc/123`), append it. We don't drop existing
+   * cells just because a new child appeared.
+   *
+   * Falls back to a fresh disk-read assembly if there's no previous
+   * head — first commit ever for this ancestor.
+   */
+  async #cascadeMerkleSwap(
+    history: HistoryService,
+    segments: string[],
+    name: string,
+    locationSig: string,
+    explorerDir: FileSystemDirectoryHandle | null,
+    childName: string | null,
+    childSig: string | null,
+  ): Promise<LayerContent> {
+    const existing = await history.listLayers(locationSig)
+    const headEntry = existing.length > 0 ? existing[existing.length - 1] : null
+    const prev = headEntry
+      ? await history.getLayerContent(locationSig, headEntry.layerSig)
+      : null
+
+    // No previous head → fall back to a fresh disk-read assembly.
+    // This happens on first-ever commit for this ancestor (e.g.,
+    // ancestor's bag was just auto-seeded by ensureSeed and we're
+    // about to append commit #1).
+    if (!prev || prev.cells.length === 0) {
+      return await this.#assembleLayerFor(history, segments, name, locationSig, explorerDir)
+    }
+
+    const cells = prev.cells.slice()
+    const merkles = prev.merkles.slice()
+
+    if (childName && childSig) {
+      const idx = cells.indexOf(childName)
+      if (idx === -1) {
+        // Child wasn't in previous cells — append it.
+        cells.push(childName)
+        merkles.push(childSig)
+      } else {
+        // Child was already there — only swap its merkle.
+        // Pad merkles[] if it's somehow shorter than cells[]
+        // (older bags with only the cells field).
+        while (merkles.length < cells.length) merkles.push('')
+        merkles[idx] = childSig
+      }
+    }
+
+    return { name, cells, merkles, hidden: prev.hidden }
   }
 
   /**
