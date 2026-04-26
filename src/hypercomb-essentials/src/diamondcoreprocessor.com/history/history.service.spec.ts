@@ -1508,6 +1508,58 @@ describe('layer ↔ tiles invariant: every layer\'s children resolve to real til
     }
   })
 
+  it('STALE SIG: parent stored a sig whose bytes were never written → preloader returns null → 0 tiles', async () => {
+    // Simulate the user's pre-fix data: a parent layer whose children
+    // array contains a sig that has no backing bytes anywhere on disk
+    // (this is what happened when latestMarkerSigFor returned a
+    // deterministic seed sig WITHOUT writing the seed bytes).
+    const rootSig = await signLineage([])
+    const ghostSig = await sha256Hex('{"name":"phantom","cells":[],"hidden":[]}')   // legacy schema, never written
+    const root = await historyRoot.getDirectoryHandle(rootSig, { create: true })
+    await ensureSeed(root, '/')
+    const layerJson = JSON.stringify({ name: '/', children: [ghostSig] })
+    await writeBytes(root, '00000001', new TextEncoder().encode(layerJson))
+
+    // Open the layer: it parses fine.
+    const entries = await listLayers(historyRoot, rootSig)
+    const headContent = await getLayerContent(historyRoot, rootSig, entries.slice(-1)[0].layerSig)
+    expect(headContent?.children).toEqual([ghostSig])
+
+    // But the ghost sig has no bytes anywhere. Preloader returns null.
+    expect(await getLayerBySig(historyRoot, ghostSig)).toBeNull()
+
+    // resolveChildNames returns 0 — exactly what the user observed
+    // ("click #1 → nothing" with the old data).
+    const names = await resolveChildNames(historyRoot, headContent)
+    expect(names.size).toBe(0)
+    // FIX: the user must /compact to rebuild children sigs against
+    // freshly-materialized child bags (latestMarkerSigFor now writes
+    // real bytes). After /compact, the sig→content invariant holds.
+  })
+
+  it('AFTER /compact: stale sigs are replaced with materialized ones, all resolve', async () => {
+    // Start with a stale layer like above
+    const rootSig = await signLineage([])
+    const ghostSig = await sha256Hex('{"name":"phantom-x","cells":[]}')
+    const root = await historyRoot.getDirectoryHandle(rootSig, { create: true })
+    await ensureSeed(root, '/')
+    await writeBytes(root, '00000001', new TextEncoder().encode(JSON.stringify({ name: '/', children: [ghostSig] })))
+
+    // /compact wipe-and-rebuild: drop all markers, re-cascade with
+    // CURRENT on-disk children. Since the spec mock doesn't model
+    // hypercomb.io tile dirs, we just simulate the rebuild step:
+    // remove everything, cascade fresh.
+    for await (const [name] of root.entries()) {
+      try { await root.removeEntry(name) } catch { /* */ }
+    }
+    await cascade(historyRoot, [], { 0: ['real-tile'] })
+
+    // Now every sig in the rebuilt root layer must resolve.
+    const result = await verifyLayerInvariant(historyRoot, rootSig)
+    expect(result.markersChecked).toBeGreaterThan(0)
+    expect(result.childrenChecked).toBeGreaterThan(0)
+  })
+
   it('NEVER load by name or disk: getLayerBySig is the ONLY resolution path', async () => {
     // Build a parent with a child, then DELETE the child's on-disk
     // bag. The preloader's cold-walk should still find the child
