@@ -417,6 +417,14 @@ export class HistoryService {
       ?? (this.#markerBytesCache.set(locationSig, new Map()), this.#markerBytesCache.get(locationSig)!)
     cacheMap.set(layerSig, bytes.buffer as ArrayBuffer)
 
+    // Preloader cache: map every sig we've touched to its bytes,
+    // globally (not per-lineage). Lookup by sig anywhere in the
+    // app: instant. Also remember the lineage's CURRENT sig so a
+    // resolver can ask "what's the latest sig for /A/B?" without
+    // re-reading the bag.
+    this.#preloaderCache.set(layerSig, bytes.buffer as ArrayBuffer)
+    this.#latestSigByLineage.set(locationSig, layerSig)
+
     // Push queue is informational — fires for backup but doesn't gate
     // anything. Stub receipts arrive immediately (real DCP transport
     // is forthcoming).
@@ -451,49 +459,48 @@ export class HistoryService {
     const handle = await bag.getFileHandle('00000000', { create: true })
     const writable = await handle.createWritable()
     try { await writable.write(seedBytes.buffer as ArrayBuffer) } finally { await writable.close() }
+    // Preloader cache: every sig must be addressable. The seed bytes
+    // are now on disk; mirror them in memory so a sig→content lookup
+    // anywhere in the app hits without a re-read.
+    const seedSig = await SignatureService.sign(seedBytes.buffer as ArrayBuffer)
+    this.#preloaderCache.set(seedSig, seedBytes.buffer as ArrayBuffer)
   }
 
   /**
-   * Read the latest marker file from a lineage's bag and compute its
-   * sig (sha256 of its bytes). Used by the cascade: an ancestor
-   * commit needs each child's CURRENT marker sig to populate its
-   * own `cells` array.
+   * Return the sig of the lineage's CURRENT layer bytes. Used by the
+   * cascade so a parent's `children` array carries real, addressable
+   * sigs (every sig points to actual bytes a reader can fetch).
    *
-   * If the bag doesn't exist or is empty, returns the sig of the
-   * empty seed for that name (so children that haven't been visited
-   * yet still have a deterministic placeholder sig).
+   * IMPORTANT: this is the only function that mints child sigs for
+   * the parent to store. To guarantee the sig→bytes invariant, we
+   * ALWAYS materialize the bag with at least a seed marker before
+   * computing the sig. The sig is then read from real on-disk bytes.
+   * If we returned a deterministic-but-unwritten seed sig instead,
+   * the parent could store a sig that no reader (resolveChildNames,
+   * preloader, anything) can ever look up.
+   *
+   * Non-destructive: only creates a bag if missing, only writes the
+   * seed (00000000) if missing. A populated bag is unchanged.
    */
   public readonly latestMarkerSigFor = async (
     lineageSig: string,
     name: string,
   ): Promise<string> => {
-    let bag: FileSystemDirectoryHandle | null = null
-    try {
-      bag = await this.historyRoot.getDirectoryHandle(lineageSig, { create: false })
-    } catch { /* no bag */ }
+    // Materialize the bag + seed if missing.
+    const bag = await this.getBag(lineageSig)
+    await this.#ensureSeed(bag, name)
 
-    if (bag) {
-      // Find latest NNNN marker
-      let latestName = ''
-      for await (const [n, h] of (bag as any).entries()) {
-        if (h.kind !== 'file') continue
-        if (!HistoryService.#MARKER_RE.test(n)) continue
-        if (n > latestName) latestName = n
-      }
-      if (latestName) {
-        try {
-          const handle = await bag.getFileHandle(latestName, { create: false })
-          const file = await handle.getFile()
-          const bytes = await file.arrayBuffer()
-          return await SignatureService.sign(bytes)
-        } catch { /* fall through to empty seed */ }
-      }
+    // Now find latest NNNN marker (00000000 at minimum).
+    let latestName = '00000000'
+    for await (const [n, h] of (bag as any).entries()) {
+      if (h.kind !== 'file') continue
+      if (!HistoryService.#MARKER_RE.test(n)) continue
+      if (n > latestName) latestName = n
     }
-
-    // Default: empty seed sig for this name
-    const seed = HistoryService.canonicalizeLayer(emptyLayer(name))
-    const seedBytes = new TextEncoder().encode(JSON.stringify(seed))
-    return await SignatureService.sign(seedBytes.buffer as ArrayBuffer)
+    const handle = await bag.getFileHandle(latestName, { create: false })
+    const file = await handle.getFile()
+    const bytes = await file.arrayBuffer()
+    return await SignatureService.sign(bytes)
   }
 
   /**
@@ -570,6 +577,8 @@ export class HistoryService {
         } catch { continue }
         const layerSig = await SignatureService.sign(bytes)
         cacheMap.set(layerSig, bytes)
+        // Mechanical: every marker we read warms the preloader cache.
+        this.#preloaderCache.set(layerSig, bytes)
         markers.push({ layerSig, at: file.lastModified, filename: name })
       } catch { /* skip unreadable */ }
     }
@@ -660,6 +669,68 @@ export class HistoryService {
   // and getLayerContent. Keeps undo/redo navigation off OPFS for
   // markers we've already touched in this session.
   readonly #markerBytesCache = new Map<string, Map<string, ArrayBuffer>>()
+
+  /**
+   * Preloader cache: every layer sig the system has minted, mapped
+   * to its bytes. Populated by:
+   *   - commitLayer (every cascade step writes here)
+   *   - #ensureSeed (every freshly-minted seed)
+   *   - listLayers (every marker we read while walking a bag)
+   * Lookup is O(1) by sig anywhere in the app — the renderer's
+   * resolver, the cursor, anything that has a sig.
+   */
+  readonly #preloaderCache = new Map<string, ArrayBuffer>()
+
+  /**
+   * Per-lineage current-sig cache. Updated on every commit so
+   * "what's the latest sig for /A/B?" doesn't have to re-walk the bag.
+   */
+  readonly #latestSigByLineage = new Map<string, string>()
+
+  /**
+   * Preloader API: get a layer's parsed content by its sig, from
+   * anywhere. Cache hit is O(1); cache miss falls back to a bag scan.
+   */
+  public readonly getLayerBySig = async (
+    layerSig: string,
+  ): Promise<LayerContent | null> => {
+    if (!HistoryService.#SIG_RE.test(layerSig)) return null
+    const cached = this.#preloaderCache.get(layerSig)
+    if (cached) {
+      try {
+        const parsed = JSON.parse(new TextDecoder().decode(cached)) as Partial<LayerContent>
+        if (!parsed.name) return null
+        const out: LayerContent = { name: parsed.name }
+        if (Array.isArray(parsed.children) && parsed.children.length > 0) out.children = parsed.children
+        return out
+      } catch { /* fall through to disk */ }
+    }
+    // Cold miss: walk all bags. Expensive but rare in practice — once
+    // the cache warms (commits + reads populate it), this is unused.
+    const root = this.historyRoot
+    for await (const [, dirHandle] of (root as any).entries()) {
+      if (dirHandle.kind !== 'directory') continue
+      try {
+        const bag = dirHandle as FileSystemDirectoryHandle
+        for await (const [name, fileHandle] of (bag as any).entries()) {
+          if (fileHandle.kind !== 'file') continue
+          if (!HistoryService.#MARKER_RE.test(name)) continue
+          const file = await (fileHandle as FileSystemFileHandle).getFile()
+          const bytes = await file.arrayBuffer()
+          const sig = await SignatureService.sign(bytes)
+          if (sig === layerSig) {
+            this.#preloaderCache.set(sig, bytes)
+            const parsed = JSON.parse(new TextDecoder().decode(bytes)) as Partial<LayerContent>
+            if (!parsed.name) return null
+            const out: LayerContent = { name: parsed.name }
+            if (Array.isArray(parsed.children) && parsed.children.length > 0) out.children = parsed.children
+            return out
+          }
+        }
+      } catch { /* skip unreadable */ }
+    }
+    return null
+  }
 
   /**
    * One-time bag-pollution cleanup. The pre-refactor history-recorder

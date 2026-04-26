@@ -149,98 +149,32 @@ class CellSlots {
  * current design (no global sig→name lookup).
  */
 /**
- * Compute every known historical seed-sig variant for a child name.
- * The layer schema went through several iterations during development:
+ * Resolve a parent layer's `children` (sigs) to display names.
  *
- *   v4 (current):  {"name":"X"}
- *   v3:            {"name":"X","children":[],"hidden":[]}
- *   v2-with-merkles: {"name":"X","cells":[],"merkles":[],"hidden":[]}
- *   v2-cells-only: {"name":"X","cells":[],"hidden":[]}
+ * Mechanical: each sig in `content.children` is a content-addressed
+ * pointer to a child layer's bytes. The preloader (HistoryService.
+ * getLayerBySig) returns the layer for that sig; its `name` field
+ * is the child's display name. No bag scanning, no schema variants,
+ * no name-based fallbacks — just sig→content lookup.
  *
- * A parent committed under an older schema stored child seed sigs
- * computed from THAT schema's canonicalization. After the simplification,
- * latestMarkerSigFor returns the v4 sig — which doesn't match v2/v3
- * sigs the parent stored, so resolveChildNames misses the match and
- * the renderer falls through to live-disk.
- *
- * This helper returns all variants so the resolver can match any of them.
- * Cheap (handful of sha256 calls per child); only used as a final fallback.
+ * Sigs that don't resolve are dropped silently (the layer was never
+ * registered in the cache and isn't on disk anywhere).
  */
-async function legacySeedSigVariants(name: string): Promise<string[]> {
-  const variants = [
-    `{"name":${JSON.stringify(name)}}`,
-    `{"name":${JSON.stringify(name)},"children":[],"hidden":[]}`,
-    `{"name":${JSON.stringify(name)},"cells":[],"merkles":[],"hidden":[]}`,
-    `{"name":${JSON.stringify(name)},"cells":[],"hidden":[]}`,
-  ]
-  const sigs = await Promise.all(variants.map(async (v) => {
-    const bytes = new TextEncoder().encode(v)
-    const hash = await crypto.subtle.digest('SHA-256', bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer)
-    return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('')
-  }))
-  return sigs
-}
-
 async function resolveChildNames(
   history: HistoryService,
-  parentSegments: readonly string[],
-  parentDir: FileSystemDirectoryHandle | null,
+  _parentSegments: readonly string[],
+  _parentDir: FileSystemDirectoryHandle | null,
   content: { children?: string[] } | null,
 ): Promise<Set<string>> {
   const out = new Set<string>()
-  if (!content || !Array.isArray(content.children) || content.children.length === 0) return out
-  if (!parentDir) return out
-  const wanted = new Set(content.children)
-  const wantedShort = content.children.map(s => s.slice(0, 10))
-  const trace: Array<{ name: string; currentSig: string; matched: 'fast' | 'slow' | 'legacy' | 'none'; markerSigs?: string[]; legacySigs?: string[] }> = []
-
-  for await (const [childName, handle] of (parentDir as any).entries()) {
-    if (handle.kind !== 'directory') continue
-    const childSegments = [...parentSegments, childName]
-    const childLocSig = await history.sign({ explorerSegments: () => childSegments })
-
-    let currentSig = ''
-    try {
-      currentSig = await history.latestMarkerSigFor(childLocSig, childName)
-      if (wanted.has(currentSig)) {
-        out.add(childName)
-        trace.push({ name: childName, currentSig: currentSig.slice(0, 10), matched: 'fast' })
-        continue
-      }
-    } catch { /* fall through */ }
-
-    let markerSigs: string[] = []
-    let slowMatched = false
-    try {
-      const childMarkers = await history.listLayers(childLocSig)
-      markerSigs = childMarkers.map(m => m.layerSig.slice(0, 10))
-      for (const marker of childMarkers) {
-        if (wanted.has(marker.layerSig)) { out.add(childName); slowMatched = true; break }
-      }
-    } catch { /* */ }
-    if (slowMatched) {
-      trace.push({ name: childName, currentSig: currentSig.slice(0, 10), matched: 'slow', markerSigs })
-      continue
-    }
-
-    // Last-resort: legacy schema seed-sig variants. Covers parents
-    // committed before the {name, children?} simplification, whose
-    // stored child sigs were canonicalized differently.
-    const legacy = await legacySeedSigVariants(childName)
-    let legacyMatched = false
-    for (const sig of legacy) {
-      if (wanted.has(sig)) { out.add(childName); legacyMatched = true; break }
-    }
-    trace.push({
-      name: childName,
-      currentSig: currentSig.slice(0, 10),
-      matched: legacyMatched ? 'legacy' : 'none',
-      markerSigs,
-      legacySigs: legacy.map(s => s.slice(0, 10)),
-    })
+  if (!content?.children?.length) return out
+  const trace: Array<{ sig: string; resolved: string | null }> = []
+  for (const childSig of content.children) {
+    const child = await history.getLayerBySig(childSig)
+    trace.push({ sig: childSig.slice(0, 10), resolved: child?.name ?? null })
+    if (child?.name) out.add(child.name)
   }
-
-  console.log('[resolveChildNames]', { wanted: wantedShort, trace, allowed: [...out] })
+  console.log('[resolveChildNames]', { trace, allowed: [...out] })
   return out
 }
 
@@ -1514,14 +1448,18 @@ export class ShowCellDrone extends Drone {
             allowedSize: allowed.size,
             allowedNames: [...allowed],
             decision: childCount === 0 ? 'clear-union (seed)'
-              : allowed.size > 0 ? 'filter-by-allowed'
-              : 'skip-filter (no resolution)',
+              : 'filter-by-allowed (always)',
           })
+          // ALWAYS filter union to `allowed`. Past state's child set
+          // is the authoritative truth — even when resolveChildNames
+          // can't match all sigs (cross-schema, missing bags, deleted
+          // children), the live disk is NOT the right fallback.
+          // Showing the wrong tiles ("step 1 has 1 child but I see
+          // 2 live-disk tiles") is worse than showing fewer.
           if (childCount === 0) {
-            // Past state was empty → render nothing.
             union.clear()
             localCellSet.clear()
-          } else if (allowed.size > 0) {
+          } else {
             for (const cell of [...union]) {
               if (!allowed.has(cell)) union.delete(cell)
             }
