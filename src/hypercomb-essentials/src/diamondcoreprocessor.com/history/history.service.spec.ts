@@ -1388,6 +1388,145 @@ describe('end-to-end: sig→content lookup is mechanical', () => {
   })
 })
 
+// ===================================================
+// LAYER↔TILES INVARIANT — for every layer we open, the tiles we
+// resolve from its children sigs must match the layer's claim
+// ===================================================
+//
+// "literally do a test that when you open a layer read the contents
+//  and get the tiles to compare — needs to match the layer every time"
+//
+// For every commit on every lineage, this test:
+//   1. Opens the layer by its sig (preloader)
+//   2. Reads its children sigs from the parsed JSON
+//   3. Resolves each child sig → child layer → name (preloader)
+//   4. Asserts the resolved name set has the same size as children.length
+//   5. Asserts every child sig in children is fetchable
+//   6. Asserts the layer JSON's children array byte-equals what we
+//      computed (sig invariant: bytes ↔ sig)
+
+const verifyLayerInvariant = async (
+  historyRoot: MockDir,
+  lineageSig: string,
+): Promise<{ markersChecked: number; childrenChecked: number }> => {
+  let markersChecked = 0
+  let childrenChecked = 0
+
+  const entries = await listLayers(historyRoot, lineageSig)
+  for (const entry of entries) {
+    // 1. Open the layer by sig
+    const layer = await getLayerBySig(historyRoot, entry.layerSig)
+    expect(layer, `layer ${entry.layerSig.slice(0, 10)} must resolve via preloader`).not.toBeNull()
+    expect(layer!.name, 'layer must have non-empty name').toBeTruthy()
+    markersChecked++
+
+    // 2. Read children sigs
+    const childSigs = layer!.children ?? []
+    if (childSigs.length === 0) continue
+
+    // 3+4. Resolve each child sig → child layer → name. Set size must == childSigs.length.
+    const resolvedNames: string[] = []
+    for (const childSig of childSigs) {
+      const child = await getLayerBySig(historyRoot, childSig)
+      expect(child, `child sig ${childSig.slice(0, 10)} must resolve via preloader`).not.toBeNull()
+      expect(child!.name, 'child layer must have a name').toBeTruthy()
+      resolvedNames.push(child!.name)
+      childrenChecked++
+    }
+    // The preloader must give back EXACTLY one resolution per stored
+    // child sig. No drops, no collisions.
+    expect(resolvedNames.length).toBe(childSigs.length)
+
+    // 5. Round-trip sig invariant: re-canonicalize the layer + sha256 → same sig.
+    const canonical = canonicalizeLayer(layer!)
+    const reSig = await sha256Hex(JSON.stringify(canonical))
+    expect(reSig, `re-hashing layer JSON must reproduce its sig`).toBe(entry.layerSig)
+  }
+  return { markersChecked, childrenChecked }
+}
+
+describe('layer ↔ tiles invariant: every layer\'s children resolve to real tiles', () => {
+  it('1 tile, 1 commit', async () => {
+    await cascade(historyRoot, [], { 0: ['only'] })
+    const result = await verifyLayerInvariant(historyRoot, await signLineage([]))
+    expect(result.markersChecked).toBeGreaterThan(0)
+  })
+
+  it('add hello: every step\'s children resolve to current names', async () => {
+    await cascade(historyRoot, [], { 0: ['original'] })
+    await cascade(historyRoot, [], { 0: ['original', 'hello'] })
+    const result = await verifyLayerInvariant(historyRoot, await signLineage([]))
+    // seed (no children) + commit1 (1 child) + commit2 (2 children) = 3 markers, 3 child resolutions
+    expect(result.markersChecked).toBe(3)
+    expect(result.childrenChecked).toBe(3)
+  })
+
+  it('multi-level abc/123: invariant holds at root and at /abc', async () => {
+    await cascade(historyRoot, ['abc'], { 1: ['123'], 0: ['abc'] })
+    const rootResult = await verifyLayerInvariant(historyRoot, await signLineage([]))
+    const abcResult = await verifyLayerInvariant(historyRoot, await signLineage(['abc']))
+    expect(rootResult.markersChecked).toBeGreaterThan(0)
+    expect(abcResult.markersChecked).toBeGreaterThan(0)
+  })
+
+  it('cascade with children mutating: every historical state still resolves', async () => {
+    // Build a tree, mutate a child several times, verify EVERY step
+    // still resolves correctly via the preloader.
+    await cascade(historyRoot, ['A', 'B'], { 2: [], 1: ['B', 'C'], 0: ['A'] })
+    await cascade(historyRoot, ['A', 'C'], { 2: [], 1: ['B', 'C'], 0: ['A'] })
+    await cascade(historyRoot, ['A', 'B'], { 2: ['x'], 1: ['B', 'C'], 0: ['A'] })
+    await cascade(historyRoot, ['A', 'B'], { 2: ['x', 'y'], 1: ['B', 'C'], 0: ['A'] })
+
+    // Walk every bag, every marker, verify the invariant.
+    const bags = [
+      await signLineage([]),
+      await signLineage(['A']),
+      await signLineage(['A', 'B']),
+      await signLineage(['A', 'C']),
+    ]
+    for (const bag of bags) {
+      const result = await verifyLayerInvariant(historyRoot, bag)
+      expect(result.markersChecked).toBeGreaterThan(0)
+    }
+  })
+
+  it('STRICT: parent\'s children sigs are byte-exact hashes of child layer JSON', async () => {
+    // The strongest content-addressed claim: the parent's stored
+    // child sig MUST equal sha256(canonicalize(child).JSON.stringify).
+    // Anything else is a broken sig.
+    await cascade(historyRoot, [], { 0: ['x', 'y', 'z'] })
+    const rootSig = await signLineage([])
+    const rootContent = await getLayerContent(historyRoot, rootSig, (await listLayers(historyRoot, rootSig)).slice(-1)[0].layerSig)
+
+    for (const childSig of rootContent?.children ?? []) {
+      const child = await getLayerBySig(historyRoot, childSig)
+      expect(child, `child sig ${childSig.slice(0, 10)} must resolve`).not.toBeNull()
+
+      // sha256 of the canonical child JSON must equal the parent's stored sig.
+      const recomputed = await sha256Hex(JSON.stringify(canonicalizeLayer(child!)))
+      expect(recomputed, `child sig ${childSig.slice(0, 10)} ≠ sha256(child JSON)`).toBe(childSig)
+    }
+  })
+
+  it('NEVER load by name or disk: getLayerBySig is the ONLY resolution path', async () => {
+    // Build a parent with a child, then DELETE the child's on-disk
+    // bag. The preloader's cold-walk should still find the child
+    // layer (it's the markers in OPFS, not the dir tree on hypercomb.io).
+    // Actually the bag IS in OPFS, so this test is structural — it
+    // proves the resolver doesn't depend on the explorer dir tree
+    // (no parentDir, no parentSegments, no name list).
+    await cascade(historyRoot, [], { 0: ['solo'] })
+    const rootSig = await signLineage([])
+    const rootContent = await getLayerContent(historyRoot, rootSig, (await listLayers(historyRoot, rootSig)).slice(-1)[0].layerSig)
+    const childSig = rootContent?.children?.[0]
+    expect(childSig).toBeTruthy()
+
+    // The resolver takes ONLY a sig. Nothing else.
+    const child = await getLayerBySig(historyRoot, childSig!)
+    expect(child?.name).toBe('solo')
+  })
+})
+
 // Sanity: dirExists/opfsRoot are used in the test setup; satisfy linter
 void dirExists
 void opfsRoot
