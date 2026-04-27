@@ -67,6 +67,30 @@
 //
 //     EffectBus.emit('notes:changed', { cellLabel, segments: [...] })
 //
+// ── CRITICAL: how to import this file ────────────────────────────────
+//
+// Always import via the namespace specifier:
+//
+//     import { LayerSlotRegistry } from '@diamondcoreprocessor.com/history'
+//
+// NEVER via a relative path:
+//
+//     import { LayerSlotRegistry } from '../history/layer-slot-registry.js'  // ❌
+//     import { LayerSlotRegistry } from './layer-slot-registry.js'           // ❌
+//
+// Why: bees are built by esbuild with the namespace specifiers marked
+// EXTERNAL. A relative import doesn't match the external pattern, so
+// esbuild bundles the registry's class definition INSIDE the bee.
+// Every bee that does this gets its own LayerSlotRegistry class with
+// its own static state — registrations on one don't reach listeners
+// on another. The singleton dies silently and slots vanish.
+//
+// Importing via `@diamondcoreprocessor.com/history` makes esbuild
+// emit a real `import` statement that the runtime import map resolves
+// to the single shared namespace-dep file. All consumers — every bee,
+// every other namespace — get the same class identity and the same
+// static state.
+//
 // ── Why not just edit LayerContent every time a feature lands ────────
 //
 // Two reasons:

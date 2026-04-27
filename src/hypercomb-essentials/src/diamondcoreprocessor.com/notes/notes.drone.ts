@@ -21,7 +21,14 @@
 // scrub-back replays past note sets losslessly. Compaction is a
 // separate, explicit transaction and out of scope here.
 import { EffectBus, SignatureService, hypercomb } from '@hypercomb/core'
-import { LayerSlotRegistry } from '../history/layer-slot-registry.js'
+// IMPORTANT: import LayerSlotRegistry via the namespace specifier, NOT
+// the relative path. esbuild treats namespace specifiers as externals
+// at bee build time, so the import resolves at runtime via the import
+// map to the single shared namespace-dep instance. A relative import
+// (`'../history/layer-slot-registry.js'`) would get bundled into this
+// bee's local bytes — every bee that imports it would end up with its
+// OWN class, defeating the singleton and silently dropping registrations.
+import { LayerSlotRegistry } from '@diamondcoreprocessor.com/history'
 
 export type Note = {
   id: string

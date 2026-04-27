@@ -13,7 +13,13 @@ import { EffectBus } from '@hypercomb/core'
 import type { HistoryService, LayerContent } from './history.service.js'
 import { ROOT_NAME } from './history.service.js'
 import type { HistoryCursorService } from './history-cursor.service.js'
-import { LayerSlotRegistry } from './layer-slot-registry.js'
+// Same-namespace import via the namespace specifier (NOT a relative
+// path). At bee build time, `@diamondcoreprocessor.com/history` is
+// marked external, so the import resolves at runtime to the single
+// shared namespace-dep instance. A relative import would bundle a
+// LOCAL copy of LayerSlotRegistry into this bee — different identity
+// from the copy other bees see, breaking the singleton.
+import { LayerSlotRegistry } from '@diamondcoreprocessor.com/history'
 
 type Lineage = {
   domain?: () => string
