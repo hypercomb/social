@@ -49,30 +49,36 @@ export const ensureInstall = async (): Promise<void> => {
   // would be a pull, contradicting the push-only contract and racing
   // with in-flight session state.
   //
-  // Spot-check the cached install for integrity (first bee file
-  // exists in OPFS). If yes, boot from cache. If not, fall through
-  // to a cold install from local content.
+  // Spot-check the cached install for integrity. Three checks, each
+  // strong enough on its own to force a fresh install:
+  //   (1) The first cached bee file still exists in OPFS.
+  //   (2) Every dep sig referenced by cached beeDeps exists in OPFS
+  //       (catches stale beeDeps from prior build-cache bugs).
+  //   (3) The locally-served manifest's rootSig matches the cached
+  //       installedSig (catches "we deployed/rebuilt new code, the user
+  //       reloaded, but cache says everything's fine").
+  // (1)+(2) are O(n) OPFS lookups. (3) is one same-origin static fetch
+  // — minimal violation of "zero network" boot, in exchange for refresh
+  // actually delivering new code without requiring a portal push.
   const cachedManifest = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
   if (cachedManifest && cachedManifest.bees.length > 0) {
     const cachedInstallSig = (localStorage.getItem(INSTALLED_KEY) ?? '').trim()
-    // Spot-check both the first bee AND every dep sig referenced by
-    // beeDeps. The bee file alone isn't enough: a previous build-cache
-    // bug could leave beeDeps pointing at phantom dep sigs that never
-    // existed on disk. If any cached beeDep value isn't in OPFS, the
-    // runtime will 404 on every module load — force a clean reinstall
-    // instead of booting into a known-broken state.
     const beeOk = !!cachedInstallSig && await fileExists(store.bees, `${cachedManifest.bees[0]}.js`)
     const beeDepsOk = beeOk && await beeDepValuesPresent(store.dependencies, cachedManifest.beeDeps)
-    if (beeOk && beeDepsOk) {
+    const liveRootSig = beeOk && beeDepsOk ? await fetchLiveRootSig() : null
+    const sigMatchesLive = !liveRootSig || liveRootSig === cachedInstallSig
+    if (beeOk && beeDepsOk && sigMatchesLive) {
       console.log(`[ensure-install] booting from cached state (sig ${cachedInstallSig.slice(0, 12)})`)
       restoreSignatureStore(sigStore)
       restoreCachedBeeDeps()
       return
     }
-    if (beeOk && !beeDepsOk) {
+    if (!beeOk) {
+      console.warn('[ensure-install] cached state spot-check failed — reinstalling from local content')
+    } else if (!beeDepsOk) {
       console.warn('[ensure-install] cached beeDeps reference missing files — reinstalling from local content')
     } else {
-      console.warn('[ensure-install] cached state spot-check failed — reinstalling from local content')
+      console.warn(`[ensure-install] live manifest rootSig changed (${cachedInstallSig.slice(0, 12)} → ${liveRootSig?.slice(0, 12)}) — reinstalling from local content`)
     }
     localStorage.removeItem(MANIFEST_KEY)
     localStorage.removeItem(INSTALLED_KEY)
@@ -313,6 +319,25 @@ const fileExists = async (dir: FileSystemDirectoryHandle, name: string): Promise
     return true
   } catch {
     return false
+  }
+}
+
+/**
+ * Fetch the same-origin /content/manifest.json and return the rootSig
+ * (the package key). Used by the boot spot-check to detect
+ * "developer/CI deployed new bytes, please reinstall on next reload."
+ * Returns null on any failure (offline, malformed JSON, network error)
+ * — caller treats null as "trust whatever's cached", preserving offline
+ * functionality.
+ */
+const fetchLiveRootSig = async (): Promise<string | null> => {
+  try {
+    const r = await fetch(`${location.origin}/content/manifest.json`, { cache: 'no-store' })
+    if (!r.ok) return null
+    const json = await r.json()
+    return pickInstallablePackage(json?.packages) ?? null
+  } catch {
+    return null
   }
 }
 

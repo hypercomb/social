@@ -212,6 +212,14 @@ const walkFiles = (dir: string): string[] => {
 const isSource = (f: string): boolean =>
   (f.endsWith('.ts') || f.endsWith('.js')) && !f.endsWith('.d.ts')
 
+// exclude test files from artifact pipeline. spec files import vitest;
+// when bundled into a namespace dep and loaded in the browser, vitest
+// throws "failed to find the runner" at the first beforeEach call,
+// crashing every consumer of that namespace.
+const isSpecFile = (f: string): boolean =>
+  f.endsWith('.spec.ts') || f.endsWith('.spec.js') ||
+  f.endsWith('.test.ts') || f.endsWith('.test.js')
+
 // exclude key-only files from artifact pipeline
 const isKeysFile = (f: string): boolean => {
   if (f.endsWith('.keys.ts') || f.endsWith('.keys.js') || f.endsWith('-keys.ts') || f.endsWith('-keys.js')) return true
@@ -412,6 +420,7 @@ type SourceFile = {
 const discoverSources = (): SourceFile[] =>
   walkFiles(SRC_ROOT)
     .filter(isSource)
+    .filter(f => !isSpecFile(f))
     .filter(f => !isKeysFile(f))
     .filter(f => !isIndexFile(f))
     .filter(f => {
