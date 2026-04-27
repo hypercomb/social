@@ -5,6 +5,18 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, closed]
     branches: [development, main]
+# Both `development` and `main` push to the same Azure Static Web App
+# resource (STATIC_WEBSITE_DCP_DEPLOYMENT_TOKEN). When ff-merging
+# development → main, two pushes hit GitHub seconds apart, both kick off
+# DCP deploys, both target the same SWA, Azure cancels the older one and
+# marks it red ("Deployment Canceled"). Net bytes deployed are identical
+# either way (ff-merge means same commit), but the failure pollutes the
+# run list and triggers spurious notifications. A single concurrency
+# group cancels the in-flight older run *before* it ever calls Azure,
+# so it shows as "cancelled" (gray) and exits clean.
+concurrency:
+  group: dcp-deploy
+  cancel-in-progress: true
 jobs:
   build_and_deploy_job:
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed')
