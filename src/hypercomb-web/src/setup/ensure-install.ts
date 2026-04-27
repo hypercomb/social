@@ -55,14 +55,25 @@ export const ensureInstall = async (): Promise<void> => {
   const cachedManifest = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
   if (cachedManifest && cachedManifest.bees.length > 0) {
     const cachedInstallSig = (localStorage.getItem(INSTALLED_KEY) ?? '').trim()
-    const spotOk = !!cachedInstallSig && await fileExists(store.bees, `${cachedManifest.bees[0]}.js`)
-    if (spotOk) {
+    // Spot-check both the first bee AND every dep sig referenced by
+    // beeDeps. The bee file alone isn't enough: a previous build-cache
+    // bug could leave beeDeps pointing at phantom dep sigs that never
+    // existed on disk. If any cached beeDep value isn't in OPFS, the
+    // runtime will 404 on every module load — force a clean reinstall
+    // instead of booting into a known-broken state.
+    const beeOk = !!cachedInstallSig && await fileExists(store.bees, `${cachedManifest.bees[0]}.js`)
+    const beeDepsOk = beeOk && await beeDepValuesPresent(store.dependencies, cachedManifest.beeDeps)
+    if (beeOk && beeDepsOk) {
       console.log(`[ensure-install] booting from cached state (sig ${cachedInstallSig.slice(0, 12)})`)
       restoreSignatureStore(sigStore)
       restoreCachedBeeDeps()
       return
     }
-    console.warn('[ensure-install] cached state spot-check failed — reinstalling from local content')
+    if (beeOk && !beeDepsOk) {
+      console.warn('[ensure-install] cached beeDeps reference missing files — reinstalling from local content')
+    } else {
+      console.warn('[ensure-install] cached state spot-check failed — reinstalling from local content')
+    }
     localStorage.removeItem(MANIFEST_KEY)
     localStorage.removeItem(INSTALLED_KEY)
     localStorage.removeItem(SYNC_SIG_KEY)
@@ -303,6 +314,26 @@ const fileExists = async (dir: FileSystemDirectoryHandle, name: string): Promise
   } catch {
     return false
   }
+}
+
+/**
+ * Return true when every signature listed across the beeDeps map values
+ * is present in the dependencies directory. Empty/absent map → true
+ * (nothing to verify). A single missing sig → false (reinstall).
+ */
+const beeDepValuesPresent = async (
+  depsDir: FileSystemDirectoryHandle,
+  beeDeps: Record<string, string[]> | undefined,
+): Promise<boolean> => {
+  if (!beeDeps) return true
+  const seen = new Set<string>()
+  for (const list of Object.values(beeDeps)) {
+    for (const sig of list ?? []) seen.add(sig)
+  }
+  for (const sig of seen) {
+    if (!await fileExists(depsDir, `${sig}.js`)) return false
+  }
+  return true
 }
 
 // ----- local install fallback -----

@@ -47,15 +47,34 @@ export const ensureInstall = async (): Promise<void> => {
     return
   }
   console.log(`[meadowverse:install] active signature: ${signature} (source: ${resolveSignatureFromUrl() ? 'url' : 'manifest.json'})`)
-  const shouldInstall = await needsInstall(store, signature)
+
+  // Always fetch the live manifest first — it's the source of truth for
+  // what should be in OPFS. The localStorage cache is only used as a
+  // fallback when offline.
+  const contentBase = await resolveContentBase(signature)
+  const newManifest = await fetchManifest(contentBase, signature)
+
+  const shouldInstall = await needsInstall(store, signature, newManifest)
 
   if (!shouldInstall) {
     console.log('[meadowverse:install] already installed:', signature)
     restoreSignatureStore(sigStore)
-    const cached = localStorage.getItem(MANIFEST_KEY)
-    if (cached) {
-      const m = tryParseManifest(cached)
-      if (m?.beeDeps) (globalThis as any).__hypercombBeeDeps = m.beeDeps
+
+    // Refresh beeDeps + cached manifest from the live fetch so any
+    // stale beeDeps in localStorage (from prior build-cache bugs) gets
+    // overwritten. The rootLayerSig only encodes layers' bees +
+    // dependencies arrays, not the beeDeps map, so a same-sig manifest
+    // CAN have a different beeDeps and we must trust the live one.
+    if (newManifest) {
+      if (newManifest.beeDeps) (globalThis as any).__hypercombBeeDeps = newManifest.beeDeps
+      localStorage.setItem(MANIFEST_KEY, JSON.stringify(newManifest))
+    } else {
+      // Live fetch failed (offline) — fall back to cache.
+      const cached = localStorage.getItem(MANIFEST_KEY)
+      if (cached) {
+        const m = tryParseManifest(cached)
+        if (m?.beeDeps) (globalThis as any).__hypercombBeeDeps = m.beeDeps
+      }
     }
     return
   }
@@ -65,10 +84,6 @@ export const ensureInstall = async (): Promise<void> => {
     console.warn('[meadowverse:install] LayerInstaller not registered')
     return
   }
-
-  const contentBase = await resolveContentBase(signature)
-
-  const newManifest = await fetchManifest(contentBase, signature)
 
   const oldManifestJson = localStorage.getItem(MANIFEST_KEY)
   const oldManifest = oldManifestJson ? tryParseManifest(oldManifestJson) : null
@@ -110,14 +125,45 @@ export const ensureInstall = async (): Promise<void> => {
 
 // ----- helpers -----
 
-const needsInstall = async (store: Store, signature: string): Promise<boolean> => {
+const needsInstall = async (
+  store: Store,
+  signature: string,
+  liveManifest: InstallManifest | null,
+): Promise<boolean> => {
   const installed = (localStorage.getItem(INSTALLED_KEY) ?? '').trim().toLowerCase()
   if (installed !== signature) return true
 
   const hasLayers = await hasAny(store.layers)
   const hasBees = await hasAny(store.bees)
   const hasDeps = await hasAny(store.dependencies)
-  return !(hasLayers && hasBees && hasDeps)
+  if (!(hasLayers && hasBees && hasDeps)) return true
+
+  // CRITICAL: also verify every dep + bee + layer sig referenced by the
+  // LIVE manifest exists in OPFS. A previous build-cache bug (or
+  // mid-build interruption) could leave OPFS with a stale dep set even
+  // though the rootSig matches. We use the live manifest (not the
+  // localStorage cache) so that any beeDeps fixed mid-rebuild forces a
+  // re-install when the new dep file isn't in OPFS.
+  if (!liveManifest) return false  // offline — trust whatever's in OPFS
+  if (!(await allPresent(store.bees, liveManifest.bees, '.js'))) return true
+  if (!(await allPresent(store.dependencies, liveManifest.dependencies, '.js'))) return true
+  if (!(await allPresent(store.layers, liveManifest.layers, '.json'))) return true
+  return false
+}
+
+const allPresent = async (
+  dir: FileSystemDirectoryHandle,
+  sigs: string[],
+  ext: string,
+): Promise<boolean> => {
+  for (const sig of sigs) {
+    try {
+      await dir.getFileHandle(`${sig}${ext}`)
+    } catch {
+      return false
+    }
+  }
+  return true
 }
 
 const hasAny = async (dir: FileSystemDirectoryHandle): Promise<boolean> => {
