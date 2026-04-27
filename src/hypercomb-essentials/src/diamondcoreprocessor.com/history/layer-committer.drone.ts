@@ -13,13 +13,13 @@ import { EffectBus } from '@hypercomb/core'
 import type { HistoryService, LayerContent } from './history.service.js'
 import { ROOT_NAME } from './history.service.js'
 import type { HistoryCursorService } from './history-cursor.service.js'
-// Same-namespace import via the namespace specifier (NOT a relative
-// path). At bee build time, `@diamondcoreprocessor.com/history` is
-// marked external, so the import resolves at runtime to the single
-// shared namespace-dep instance. A relative import would bundle a
-// LOCAL copy of LayerSlotRegistry into this bee — different identity
-// from the copy other bees see, breaking the singleton.
-import { LayerSlotRegistry } from '@diamondcoreprocessor.com/history'
+// TYPE-ONLY import. The runtime instance is the single shared
+// singleton registered with window.ioc by layer-slot-registry.ts —
+// obtained below via get(). Importing the class symbol non-type-only
+// would bundle the class definition into THIS bee's bytes (esbuild
+// inlines relative imports), giving a different class identity from
+// the shared instance and silently breaking the singleton.
+import type { LayerSlotRegistry } from './layer-slot-registry.js'
 
 type Lineage = {
   domain?: () => string
@@ -139,6 +139,14 @@ export class LayerCommitter {
   // update cascading up from the leaf.
   readonly #machine = new CommitMachine(req => this.#commit(req))
 
+  /** Lazy accessor: the registry instance lives on window.ioc and is
+   *  registered by layer-slot-registry.ts at module-load. We always
+   *  fetch via get() so a never-registered registry just yields
+   *  undefined and the slot-pipeline becomes a no-op. */
+  get #slotRegistry(): LayerSlotRegistry | undefined {
+    return get<LayerSlotRegistry>('@diamondcoreprocessor.com/LayerSlotRegistry')
+  }
+
   constructor() {
     // layout:mode subscription removed — dense/spiral mode is phased
     // out. The layer's layout signature no longer carries a mode field;
@@ -189,7 +197,7 @@ export class LayerCommitter {
     // Each subscribed event is dedup'd (Set in the registry), so a
     // slot listing the same trigger twice or two slots sharing one
     // trigger only result in a single EffectBus subscription here.
-    LayerSlotRegistry.onTrigger((trigger) => {
+    this.#slotRegistry?.onTrigger((trigger: string) => {
       EffectBus.on<{ cell?: string; segments?: string[] }>(trigger, p => this.#queueCommit(p?.segments))
     })
 
@@ -416,7 +424,7 @@ export class LayerCommitter {
           belowName = ancestorName
         }
 
-        const slotValues = await LayerSlotRegistry.readAll(ancestorLocSig, sub)
+        const slotValues = (await this.#slotRegistry?.readAll(ancestorLocSig, sub)) ?? {}
         const newLayer: LayerContent = nextChildren.length === 0
           ? { name: ancestorName, ...slotValues }
           : { name: ancestorName, children: nextChildren, ...slotValues }
@@ -494,7 +502,7 @@ export class LayerCommitter {
     const locationSig = await history.sign({
       explorerSegments: () => segments,
     } as Lineage)
-    const slotValues = await LayerSlotRegistry.readAll(locationSig, segments)
+    const slotValues = (await this.#slotRegistry?.readAll(locationSig, segments)) ?? {}
 
     // No children → just `{ name, ...slots }`. Slots returning undefined
     // were already filtered by readAll, so empty slot bag = `{ name }`.

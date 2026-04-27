@@ -67,29 +67,27 @@
 //
 //     EffectBus.emit('notes:changed', { cellLabel, segments: [...] })
 //
-// ── CRITICAL: how to import this file ────────────────────────────────
+// ── CRITICAL: how to obtain the registry at runtime ──────────────────
 //
-// Always import via the namespace specifier:
+// ALWAYS use the IoC singleton:
 //
-//     import { LayerSlotRegistry } from '@diamondcoreprocessor.com/history'
+//     const registry = get<LayerSlotRegistry>(
+//       '@diamondcoreprocessor.com/LayerSlotRegistry'
+//     )
+//     registry?.register({ slot: '...', triggers: [...], read: ... })
 //
-// NEVER via a relative path:
+// You may import the TYPE relatively for typing only — type imports
+// are stripped at compile time and don't get bundled:
 //
-//     import { LayerSlotRegistry } from '../history/layer-slot-registry.js'  // ❌
-//     import { LayerSlotRegistry } from './layer-slot-registry.js'           // ❌
+//     import type { LayerSlotRegistry } from '../history/layer-slot-registry.js'
 //
-// Why: bees are built by esbuild with the namespace specifiers marked
-// EXTERNAL. A relative import doesn't match the external pattern, so
-// esbuild bundles the registry's class definition INSIDE the bee.
-// Every bee that does this gets its own LayerSlotRegistry class with
-// its own static state — registrations on one don't reach listeners
-// on another. The singleton dies silently and slots vanish.
-//
-// Importing via `@diamondcoreprocessor.com/history` makes esbuild
-// emit a real `import` statement that the runtime import map resolves
-// to the single shared namespace-dep file. All consumers — every bee,
-// every other namespace — get the same class identity and the same
-// static state.
+// NEVER instantiate LayerSlotRegistry yourself or reach for the class
+// constructor — there is exactly one instance, registered by the
+// `@diamondcoreprocessor.com/history` namespace dep at module load.
+// Importing the class symbol relatively (not type-only) bundles the
+// definition into your bee, gives you a different identity from the
+// shared instance, and silently breaks the singleton — registrations
+// on the bundled-in copy don't reach listeners on the shared copy.
 //
 // ── Why not just edit LayerContent every time a feature lands ────────
 //
@@ -157,23 +155,23 @@ const RESERVED_NAMES = new Set(['name', 'children'])
 export type TriggerListener = (trigger: string) => void
 
 /**
- * Singleton registry. Slots register at module load time (typically
- * at the bottom of a `.drone.ts` file alongside the
- * `window.ioc.register(...)` call).
+ * Singleton registry instance — registered with window.ioc at module
+ * load (see the bottom of this file). Consumers obtain it via
+ * `get<LayerSlotRegistry>('@diamondcoreprocessor.com/LayerSlotRegistry')`.
  *
  * Load-order independence: LayerCommitter calls `onTrigger()` to
  * subscribe to trigger announcements. The registry replays every
  * already-known trigger to the new listener immediately, then
- * delivers any future triggers as slots register. This means slot
- * owners and the committer can load in any order.
+ * delivers any future triggers as slots register. Slot owners and
+ * the committer can load in any order.
  */
 export class LayerSlotRegistry {
 
-  static readonly #slots = new Map<string, LayerSlot>()
+  readonly #slots = new Map<string, LayerSlot>()
   /** Triggers we've already announced to listeners — for replay. */
-  static readonly #announcedTriggers = new Set<string>()
+  readonly #announcedTriggers = new Set<string>()
   /** Active listeners. Fired on every NEW trigger as it becomes known. */
-  static readonly #triggerListeners = new Set<TriggerListener>()
+  readonly #triggerListeners = new Set<TriggerListener>()
 
   /**
    * Register a slot. Idempotent for the same slot name + same
@@ -188,7 +186,7 @@ export class LayerSlotRegistry {
    * via `onTrigger()` ensures listeners that subscribe LATER also
    * see triggers that were registered earlier.
    */
-  static register<T>(slot: LayerSlot<T>): void {
+  register<T>(slot: LayerSlot<T>): void {
     if (!slot?.slot || typeof slot.slot !== 'string') {
       throw new Error('[LayerSlotRegistry] slot.slot must be a non-empty string')
     }
@@ -224,7 +222,7 @@ export class LayerSlotRegistry {
    *
    * Returns an unsubscribe function.
    */
-  static onTrigger(listener: TriggerListener): () => void {
+  onTrigger(listener: TriggerListener): () => void {
     this.#triggerListeners.add(listener)
     // Replay already-announced triggers so subscribe-after-register
     // works the same as subscribe-before-register.
@@ -238,17 +236,17 @@ export class LayerSlotRegistry {
    * Iterate registered slots in insertion order. LayerCommitter walks
    * this on every commit (to read slot values into the layer).
    */
-  static slots(): IterableIterator<LayerSlot> {
+  slots(): IterableIterator<LayerSlot> {
     return this.#slots.values()
   }
 
   /** Look up a single slot by name (mostly for diff/debug tools). */
-  static get(name: string): LayerSlot | undefined {
+  get(name: string): LayerSlot | undefined {
     return this.#slots.get(name)
   }
 
   /** Read every slot's value for a location. Omits slots returning undefined. */
-  static async readAll(
+  async readAll(
     locationSig: string,
     segments: readonly string[],
   ): Promise<Record<string, unknown>> {
@@ -261,7 +259,12 @@ export class LayerSlotRegistry {
   }
 
   /** Union of every slot's trigger events known so far. */
-  static allTriggers(): readonly string[] {
+  allTriggers(): readonly string[] {
     return [...this.#announcedTriggers]
   }
 }
+
+// Singleton: one instance per app, registered with window.ioc so
+// every consumer (across bees, namespaces) shares it.
+const _layerSlotRegistry = new LayerSlotRegistry()
+window.ioc.register('@diamondcoreprocessor.com/LayerSlotRegistry', _layerSlotRegistry)

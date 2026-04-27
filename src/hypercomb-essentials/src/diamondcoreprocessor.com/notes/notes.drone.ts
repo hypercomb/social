@@ -2,33 +2,61 @@
 //
 // Notes on tiles. Each tile's notes are stored as a single signature-
 // addressed resource containing the full array; replacing the set
-// writes a new resource and emits `notes:changed`.
+// writes a new resource and emits `notes:changed` with the cell's
+// FULL segments so the cascade triggers at the right place.
 //
-// Integration with history is mechanical via LayerSlotRegistry:
-//   - This file registers a `notesByCell` slot with trigger
-//     `notes:changed` (see bottom of file).
+// ── Where notes live in the layer hierarchy ─────────────────────────
+//
+// Notes belong to the LAYER OF THE CLICKED CELL — i.e. the layer at
+// `sign({ explorerSegments: parentSegments + [cellLabel] })` — not to
+// the parent's `notesByCell` map. Reasoning: the cell IS a layer (cells
+// and layers are the same merkle primitive at different zoom levels),
+// and the notes are data ABOUT that cell, not data about its parent's
+// view of it. Putting notes on the parent would mean the parent's
+// signature owns all its children's note state — wrong invariant, and
+// it bloats the parent's layer with metadata for every child.
+//
+// With notes on the child layer:
+//   - cell's own layer carries `notes: '<noteSetSig>'` (a single field)
+//   - parent's `children` array references the child's now-updated sig
+//   - merkle cascade walks up automatically via LayerCommitter's
+//     existing fallback path (re-snapshot every ancestor)
+//   - notes for cell X at /a are unique from notes for cell X at /b
+//     because the locationSig differs — no cross-lineage contamination
+//
+// ── Integration with history is mechanical via LayerSlotRegistry ────
+//
+//   - This file registers a `notes` slot with trigger `notes:changed`
+//     (see bottom of file).
 //   - LayerCommitter auto-subscribes the trigger and folds the slot's
-//     `read()` result into every layer it commits.
-//   - The slot value is `{ [cellLabel]: noteSetSig }` — only cells
-//     with notes appear, so empty locations contribute no slot bytes.
+//     `read(locationSig, segments)` result into every layer it commits.
+//   - At the cell's location, `read` returns the noteSetSig stored
+//     under that locationSig (or undefined → slot omitted from layer).
+//   - Ancestors get re-snapshotted via the fallback path; their layers
+//     get a new `children` array with the cell's new sig — no notes
+//     bytes on ancestors, just sig propagation.
 //
 // Result: notes are part of the canonical layer signature for free.
-// Layer changes when any cell's notes change → new sig → new marker
-// → undoable. Cross-browser: the layer JSON IS the truth; the local
-// `hc:notes-index` is just a hot cache.
+// Cell layer changes when notes change → new cell sig → parent's
+// children array changes → cascade to root. Undo at any depth restores
+// the entire merkle subtree including notes.
+//
+// Cross-browser: the layer JSON IS the truth (notes refer to a sig-
+// addressed NoteSet resource). The local `hc:notes-index` is just a
+// hot cache — same setSig deterministically yields same content.
 //
 // History is never rewritten — every committed layer remains, so
 // scrub-back replays past note sets losslessly. Compaction is a
 // separate, explicit transaction and out of scope here.
 import { EffectBus, SignatureService, hypercomb } from '@hypercomb/core'
-// IMPORTANT: import LayerSlotRegistry via the namespace specifier, NOT
-// the relative path. esbuild treats namespace specifiers as externals
-// at bee build time, so the import resolves at runtime via the import
-// map to the single shared namespace-dep instance. A relative import
-// (`'../history/layer-slot-registry.js'`) would get bundled into this
-// bee's local bytes — every bee that imports it would end up with its
-// OWN class, defeating the singleton and silently dropping registrations.
-import { LayerSlotRegistry } from '@diamondcoreprocessor.com/history'
+// TYPE-ONLY import — the runtime instance is the single shared singleton
+// registered with window.ioc by layer-slot-registry.ts. We obtain it
+// via get() at module-load. Importing the class symbol non-type-only
+// would bundle its definition into this bee, giving a different class
+// identity from the shared instance and silently breaking the singleton
+// (registrations on the bundled-in copy would be invisible to listeners
+// on the shared copy — the exact bug we just fixed).
+import type { LayerSlotRegistry } from '../history/layer-slot-registry.js'
 
 export type Note = {
   id: string
@@ -49,8 +77,30 @@ export type NoteSet = {
 
 const CAPTURE_MODE = 'note-capture' as const
 
-/** localStorage key holding `{ [cellLabel]: noteSetSig }` for the active session. */
+/**
+ * localStorage key holding `{ [locationSig]: noteSetSig }` — keyed
+ * by the cell's own merkle layer location, NOT by cellLabel. This
+ * means cells with identical labels at different lineages have
+ * independent notes (which is correct: notes are about THIS cell at
+ * THIS path in the hierarchy, not about every cell sharing a name).
+ *
+ * The previous shape was `{ [cellLabel]: noteSetSig }` — a flat
+ * global index where /a/x and /b/x shared notes. Migrating users:
+ * old entries with non-64-hex keys are ignored on read; the next
+ * write rebuilds the index in the new shape. Old NoteSet resources
+ * remain readable (they're sig-addressed, content unchanged).
+ */
 const NOTES_INDEX_KEY = 'hc:notes-index'
+
+const SIG_REGEX = /^[a-f0-9]{64}$/
+
+type Lineage = {
+  explorerSegments?: () => string[]
+}
+
+type HistoryServiceLike = {
+  sign: (lineage: Lineage) => Promise<string>
+}
 
 export class NotesService extends EventTarget {
 
@@ -59,8 +109,19 @@ export class NotesService extends EventTarget {
   /** In-memory cache of decoded note sets keyed by setSig. Populated on warmup. */
   readonly #setCache = new Map<string, NoteSet>()
 
+  /** Cache of computed cell locationSigs keyed by `parent/cellLabel` so we
+   *  don't re-sign the same lineage on every UI tick. Cleared when Lineage
+   *  changes (subscribed in constructor). */
+  readonly #cellLocSigCache = new Map<string, string>()
+
   constructor() {
     super()
+    // Lineage navigation invalidates the per-cell locationSig cache —
+    // the same cellLabel resolves to a different location depending on
+    // which folder the user is currently inside.
+    const lineage = get<EventTarget>('@hypercomb.social/Lineage') as unknown as EventTarget | undefined
+    lineage?.addEventListener?.('change', () => this.#cellLocSigCache.clear())
+
     // `note:capture` accepts:
     //   - { cellLabel }                              → start a fresh note
     //   - { cellLabel, prefill, editId }             → edit an existing note;
@@ -138,25 +199,40 @@ export class NotesService extends EventTarget {
   }
 
   /**
-   * Read the current note set signature for a cell from the index.
-   * Returns "" if the cell has no notes.
+   * Read the current note set signature for a cell at the user's
+   * current location. Returns "" if the cell has no notes. Resolves
+   * the cell's full layer location internally — callers don't pass
+   * segments; the lineage is implicit (same UI assumption as before).
    */
   public readonly setSigFor = (cellLabel: string): string => {
+    const locSig = this.#cellLocationSigSync(cellLabel)
+    if (!locSig) return ''
     const index = this.#readIndex()
-    return index[cellLabel] ?? ''
+    return index[locSig] ?? ''
   }
 
   /**
-   * Read the entire `cell -> setSig` index — what LayerCommitter folds into
-   * `notesByCell` on the next snapshot.
+   * Slot-side read: given a layer's location sig, return the note set
+   * sig stored under it (or "" / undefined). LayerSlotRegistry calls
+   * this during snapshot assembly. Pure lookup — no lineage needed.
+   */
+  public readonly setSigForLocation = (locationSig: string): string => {
+    const index = this.#readIndex()
+    return index[locationSig] ?? ''
+  }
+
+  /**
+   * Read the entire `locationSig -> setSig` index. For diagnostics
+   * and potential bulk operations; the per-slot read goes through
+   * setSigForLocation directly.
    */
   public readonly readIndex = (): Record<string, string> => {
     return { ...this.#readIndex() }
   }
 
   /**
-   * Resolve the current notes for a cell. Hits the warm in-memory cache when
-   * possible; otherwise loads the resource and caches it.
+   * Resolve the current notes for a cell at the user's current
+   * location. Async — waits for the resource to load if not cached.
    */
   public readonly getNotes = async (cellLabel: string): Promise<Note[]> => {
     const sig = this.setSigFor(cellLabel)
@@ -166,10 +242,10 @@ export class NotesService extends EventTarget {
   }
 
   /**
-   * Synchronous read from the warm cache. Returns an empty array if the
-   * cell has no notes or its set has not been decoded yet (call warmup()
-   * first or `getNotes` async to populate). UI code that needs to render
-   * without async should rely on `notes:changed` to re-read after writes.
+   * Synchronous read from the warm cache. Returns an empty array if
+   * the cell has no notes or its set has not been decoded yet (call
+   * warmup() first or getNotes() async to populate). UI code re-reads
+   * after `notes:changed`.
    */
   public readonly notesFor = (cellLabel: string): Note[] => {
     const sig = this.setSigFor(cellLabel)
@@ -179,8 +255,8 @@ export class NotesService extends EventTarget {
   }
 
   /**
-   * Pre-decode every note set referenced by the current layer head so the UI
-   * can read synchronously from the cache. Called by the warmup lifecycle.
+   * Pre-decode every note set referenced by the index so the UI can
+   * read synchronously from the cache. Called by the warmup lifecycle.
    */
   public readonly warmup = async (): Promise<void> => {
     const sigs = new Set(Object.values(this.#readIndex()).filter(Boolean))
@@ -221,7 +297,18 @@ export class NotesService extends EventTarget {
     }>('@hypercomb.social/Store')
     if (!store) return
 
-    const priorSig = this.setSigFor(cellLabel)
+    // Resolve the cell's full layer location. Notes belong to the
+    // CLICKED cell's own layer at sign(parentSegments + [cellLabel]).
+    // If we can't resolve (no lineage / no history service), bail —
+    // we can't safely write notes against an unknown layer.
+    const resolved = await this.#resolveCellLocation(cellLabel)
+    if (!resolved) {
+      console.warn('[notes] cannot resolve cell location for', cellLabel, '— skipping write')
+      return
+    }
+    const { locationSig, segments } = resolved
+
+    const priorSig = this.setSigForLocation(locationSig)
     const prior = priorSig ? (await this.#loadSet(priorSig))?.notes ?? [] : []
     const next = transform(prior)
     if (next === prior) return
@@ -241,19 +328,78 @@ export class NotesService extends EventTarget {
     // before the index update only leaves an orphan (safe).
     await store.putResource(blob)
 
-    // Update the per-cell pointer. LayerCommitter reads this on `synchronize`
-    // and the new sig appears in the next layer's `notesByCell`.
+    // Update the per-LOCATION pointer (NOT per-cellLabel — different
+    // lineages with same-named cells must have independent notes).
+    // LayerSlotRegistry's read fires during the next snapshot and the
+    // setSig under this locationSig becomes the layer's `notes` field.
     const index = this.#readIndex()
-    index[cellLabel] = resourceSig
+    index[locationSig] = resourceSig
     this.#writeIndex(index)
 
     // Cache the decoded set so subsequent reads are synchronous.
     this.#setCache.set(resourceSig, snapshot)
 
     this.dispatchEvent(new CustomEvent('change', { detail: { cellLabel, count: snapshot.notes.length } }))
-    EffectBus.emit('notes:changed', { cellLabel, count: snapshot.notes.length })
+
+    // CRITICAL: emit with the CELL's full segments (parent + cellLabel),
+    // not the parent's. LayerCommitter cascades from `segments` upward,
+    // so emitting parent segments would commit the parent layer with
+    // (slot.read at parent → undefined since the index is keyed by the
+    // child's locationSig). The cell's layer would never be touched.
+    // Emitting the cell's segments commits the cell's layer (where
+    // notes:string lands), then ancestors get the cascade for free.
+    EffectBus.emit('notes:changed', {
+      cellLabel,
+      segments,
+      count: snapshot.notes.length,
+    })
 
     void new hypercomb().act()
+  }
+
+  /**
+   * Resolve the layer location of a cell clicked at the current
+   * lineage. Returns segments = [...parent, cellLabel] and the sig.
+   * Memoized per `parent/cellLabel` until the lineage changes.
+   */
+  async #resolveCellLocation(cellLabel: string): Promise<{ locationSig: string; segments: string[] } | null> {
+    const lineage = get<Lineage>('@hypercomb.social/Lineage')
+    const history = get<HistoryServiceLike>('@diamondcoreprocessor.com/HistoryService')
+    if (!lineage || !history) return null
+
+    const parentSegments = (lineage.explorerSegments?.() ?? [])
+      .map(s => String(s ?? '').trim())
+      .filter(Boolean)
+    const segments = [...parentSegments, String(cellLabel ?? '').trim()].filter(Boolean)
+    if (segments.length === 0) return null
+
+    const cacheKey = segments.join('/')
+    const cached = this.#cellLocSigCache.get(cacheKey)
+    if (cached) return { locationSig: cached, segments }
+
+    const locationSig = await history.sign({ explorerSegments: () => segments })
+    this.#cellLocSigCache.set(cacheKey, locationSig)
+    return { locationSig, segments }
+  }
+
+  /**
+   * Synchronous best-effort sigFor — used by UI reads via setSigFor
+   * and notesFor. Returns "" when the locationSig hasn't been computed
+   * yet (e.g. first visit to a cell). The async getNotes path computes
+   * and caches; subsequent sync calls hit the cache.
+   *
+   * Worst case: the UI shows "no notes" for one frame after navigation,
+   * then re-renders on the next `notes:changed` or once getNotes() lands.
+   */
+  #cellLocationSigSync(cellLabel: string): string {
+    const lineage = get<Lineage>('@hypercomb.social/Lineage')
+    if (!lineage) return ''
+    const parentSegments = (lineage.explorerSegments?.() ?? [])
+      .map(s => String(s ?? '').trim())
+      .filter(Boolean)
+    const segments = [...parentSegments, String(cellLabel ?? '').trim()].filter(Boolean)
+    if (segments.length === 0) return ''
+    return this.#cellLocSigCache.get(segments.join('/')) ?? ''
   }
 
   async #loadSet(resourceSig: string): Promise<NoteSet | null> {
@@ -313,31 +459,35 @@ function canonicalJSON(value: unknown): string {
 const _notesService = new NotesService()
 window.ioc.register('@diamondcoreprocessor.com/NotesService', _notesService)
 
-// Mechanical history integration: the notesByCell slot. LayerCommitter
-// subscribes to `notes:changed` automatically (via the registry's
-// trigger union) and folds the slot value into every committed layer.
+// Mechanical history integration: the `notes` slot. LayerCommitter
+// auto-subscribes to `notes:changed` via the registry's trigger
+// callback and folds this slot's read result into the layer at the
+// trigger's location.
 //
-// Currently the index is whole-app rather than per-location. The
-// per-location filter happens here when the registry asks: only cells
-// whose label appears in the current location's children should be
-// included. Anything else is stale-noise and would pollute the layer
-// signature with unrelated locations' notes. We don't have a cheap
-// "cells at this location" lookup right now, so as a first cut return
-// the whole index — the LayerCommitter cascade only commits at
-// locations that are actually receiving updates, so the practical
-// over-inclusion is bounded. Tighten when the per-location filter is
-// available without a round-trip.
-LayerSlotRegistry.register({
-  slot: 'notesByCell',
-  triggers: ['notes:changed'],
-  read: () => {
-    const idx = _notesService.readIndex()
-    const keys = Object.keys(idx).filter(k => idx[k]).sort()
-    if (keys.length === 0) return undefined
-    // Canonical: sorted keys + filtered empties. Byte-stable across
-    // browsers regardless of insertion order in the localStorage cache.
-    const sorted: Record<string, string> = {}
-    for (const k of keys) sorted[k] = idx[k]
-    return sorted
-  },
-})
+// Slot value: a single string — the noteSetSig for THIS location.
+// Undefined when no notes exist at this location (slot omitted from
+// the layer JSON, sparse-layer invariant preserved).
+//
+// The locationSig passed in IS the cell's own layer location (set by
+// the trigger's `segments` payload in NotesService.#write). Per-cell
+// scoping is therefore automatic: notes for /a/X live at sign(/a/X);
+// notes for /b/X live at sign(/b/X); they cannot collide.
+// Get the shared registry instance from ioc (registered at
+// `@diamondcoreprocessor.com/LayerSlotRegistry` by layer-slot-registry.ts).
+// If the registry hasn't loaded yet — extremely unlikely since the
+// history namespace dep loads before the notes bee — we skip the
+// registration; the slot would be invisible to history but writes
+// still work. Defensive only.
+const _slotRegistry = get<LayerSlotRegistry>('@diamondcoreprocessor.com/LayerSlotRegistry')
+if (_slotRegistry) {
+  _slotRegistry.register({
+    slot: 'notes',
+    triggers: ['notes:changed'],
+    read: (locationSig) => {
+      const setSig = _notesService.setSigForLocation(locationSig)
+      return setSig || undefined
+    },
+  })
+} else {
+  console.warn('[notes] LayerSlotRegistry not available at module-load — notes will not be captured in history')
+}
