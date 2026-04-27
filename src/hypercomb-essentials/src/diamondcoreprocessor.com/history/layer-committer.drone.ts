@@ -13,6 +13,7 @@ import { EffectBus } from '@hypercomb/core'
 import type { HistoryService, LayerContent } from './history.service.js'
 import { ROOT_NAME } from './history.service.js'
 import type { HistoryCursorService } from './history-cursor.service.js'
+import { LayerSlotRegistry } from './layer-slot-registry.js'
 
 type Lineage = {
   domain?: () => string
@@ -166,9 +167,25 @@ export class LayerCommitter {
     EffectBus.on<{ cell?: string; segments?: string[] }>('cell:added',   p => this.#queueCommit(p?.segments, 'add', p?.cell))
     EffectBus.on<{ cell?: string; segments?: string[] }>('cell:removed', p => this.#queueCommit(p?.segments, 'remove', p?.cell))
     EffectBus.on<{ cell?: string; segments?: string[] }>('tile:saved',   p => this.#queueCommit(p?.segments))
-    EffectBus.on<{ cell?: string; segments?: string[] }>('tags:changed', p => this.#queueCommit(p?.segments))
     EffectBus.on<{ cell?: string; segments?: string[] }>('tile:hidden',  p => this.#queueCommit(p?.segments))
     EffectBus.on<{ cell?: string; segments?: string[] }>('tile:unhidden',p => this.#queueCommit(p?.segments))
+
+    // ── Slot-driven re-commit triggers ───────────────────────────────
+    // Every registered LayerSlot declares the EffectBus events that
+    // should cause a re-snapshot. Subscribe via the registry's
+    // onTrigger callback so load order doesn't matter — slots that
+    // register AFTER this committer instantiates still get their
+    // trigger wired up the moment they call register(). A new
+    // subsystem only has to register a slot; it does NOT also have
+    // to teach LayerCommitter about its trigger event or worry about
+    // import order in side-effects.ts.
+    //
+    // Each subscribed event is dedup'd (Set in the registry), so a
+    // slot listing the same trigger twice or two slots sharing one
+    // trigger only result in a single EffectBus subscription here.
+    LayerSlotRegistry.onTrigger((trigger) => {
+      EffectBus.on<{ cell?: string; segments?: string[] }>(trigger, p => this.#queueCommit(p?.segments))
+    })
 
     // No preemptive bootstrap. cursor.load (called from show-cell on
     // first render) handles bootstrapping the visible lineage when
@@ -393,9 +410,10 @@ export class LayerCommitter {
           belowName = ancestorName
         }
 
+        const slotValues = await LayerSlotRegistry.readAll(ancestorLocSig, sub)
         const newLayer: LayerContent = nextChildren.length === 0
-          ? { name: ancestorName }
-          : { name: ancestorName, children: nextChildren }
+          ? { name: ancestorName, ...slotValues }
+          : { name: ancestorName, children: nextChildren, ...slotValues }
         const newSig = await history.commitLayer(ancestorLocSig, newLayer)
 
         // For the next iteration up: this ancestor's old sig becomes
@@ -447,9 +465,10 @@ export class LayerCommitter {
 
   /**
    * Build a complete layer snapshot for the lineage at `segments` by
-   * enumerating its on-disk children. Used only by the fallback path
-   * in `#commit` (events without op+cell delta info). The delta path
-   * never calls this — it preserves sibling sigs verbatim.
+   * enumerating its on-disk children AND folding in every registered
+   * LayerSlot's current value. Used only by the fallback path in
+   * `#commit` (events without op+cell delta info). The delta path
+   * preserves sibling sigs verbatim and folds slots inline there.
    */
   async #assembleLayerFor(
     history: HistoryService,
@@ -466,8 +485,14 @@ export class LayerCommitter {
       }
     }
 
-    // No children → empty-layer shape: just `{ name }`, no children field.
-    if (onDiskNames.length === 0) return { name }
+    const locationSig = await history.sign({
+      explorerSegments: () => segments,
+    } as Lineage)
+    const slotValues = await LayerSlotRegistry.readAll(locationSig, segments)
+
+    // No children → just `{ name, ...slots }`. Slots returning undefined
+    // were already filtered by readAll, so empty slot bag = `{ name }`.
+    if (onDiskNames.length === 0) return { name, ...slotValues }
 
     const children: string[] = []
     for (const childName of onDiskNames) {
@@ -478,7 +503,7 @@ export class LayerCommitter {
       children.push(await history.latestMarkerSigFor(childLocSig, childName))
     }
 
-    return { name, children }
+    return { name, children, ...slotValues }
   }
 
   // Layout signing / instruction-sig reading were both layer-driven —

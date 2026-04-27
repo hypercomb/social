@@ -38,14 +38,21 @@ export type LayerState = {
 }
 
 /**
- * Canonical minimal layer. Always has a `name` (required, non-empty).
+ * Canonical layer. Always has a `name` (required, non-empty).
  * `children` is optional — present only when the layer has children.
  * The empty layer at `00000000` is just `{ name }`.
  *
- * Marker sig = sha256 of the marker file's bytes. When a child
- * commits a new marker its sig changes, parent's `children` entry
- * for that child changes, parent's bytes change, parent's sig
- * changes. Cascade propagates to the root.
+ * Beyond `name` and `children`, the layer carries an OPEN SET of
+ * slots contributed by registered subsystems (notes, tags,
+ * instructions, future features) via LayerSlotRegistry. Each slot is
+ * a single field at the top level of the layer JSON, keyed by the
+ * slot's `slot` name. Slots returning undefined at read time are
+ * omitted entirely (sparse layer shape — empty fields cost nothing).
+ *
+ * Marker sig = sha256 of the marker file's bytes. When ANY field
+ * changes (children, notes, tags, ...), bytes change, sig changes,
+ * cascade propagates to the root. Undo restores the layer's bytes →
+ * restores every slot at once.
  *
  * SOURCE OF TRUTH for child names = the child layer's own `name`
  * field. To display children, fetch each child sig's marker file
@@ -55,6 +62,10 @@ export type LayerState = {
 export type LayerContent = {
   name: string
   children?: string[]
+  /** Open slot bag — registered subsystems contribute fields here.
+   *  See LayerSlotRegistry. Reads/writes use bracket access so this
+   *  signature doesn't have to enumerate every possible slot. */
+  [slot: string]: unknown
 }
 
 /** Root's display name. Used when the layer has no path segments. */
@@ -361,11 +372,29 @@ export class HistoryService {
 
   /**
    * Canonicalize a layer so byte-equal content produces byte-equal JSON.
-   * `children` is omitted entirely when empty (empty-layer shape: just `{name}`).
+   *
+   * Rules:
+   *   - `name` always present, always first.
+   *   - `children` second when non-empty; omitted entirely when empty.
+   *   - All other slot fields follow, sorted alphabetically by key for
+   *     stable byte output regardless of registration / mutation order.
+   *   - Slot values are kept as-is (each slot is responsible for its
+   *     own internal canonical form — sorted arrays, sorted nested
+   *     keys, etc.). Empty arrays / empty objects / undefined are
+   *     dropped to keep the sparse-layer invariant.
    */
   static readonly canonicalizeLayer = (layer: LayerContent): LayerContent => {
-    if (!layer.children || layer.children.length === 0) return { name: layer.name }
-    return { name: layer.name, children: layer.children.slice() }
+    const out: LayerContent = { name: layer.name }
+    if (layer.children && layer.children.length > 0) out.children = layer.children.slice()
+    const slotKeys = Object.keys(layer).filter(k => k !== 'name' && k !== 'children').sort()
+    for (const key of slotKeys) {
+      const v = layer[key]
+      if (v === undefined || v === null) continue
+      if (Array.isArray(v) && v.length === 0) continue
+      if (typeof v === 'object' && !Array.isArray(v) && Object.keys(v as object).length === 0) continue
+      out[key] = v
+    }
+    return out
   }
 
   /**

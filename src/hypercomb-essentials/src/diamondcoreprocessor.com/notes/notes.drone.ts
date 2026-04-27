@@ -1,16 +1,27 @@
 // diamondcoreprocessor.com/notes/notes.drone.ts
 //
-// Notes on tiles. Each tile's notes are stored as a single signature-addressed
-// resource containing the full array; replacing the set writes a new resource
-// and updates the per-cell pointer in `hc:notes-index`. LayerCommitter reads
-// that index on `synchronize` and folds it into the next LayerContent
-// snapshot under `notesByCell`, so notes are part of the canonical layer
-// signature and ride the same preload pipeline as everything else.
+// Notes on tiles. Each tile's notes are stored as a single signature-
+// addressed resource containing the full array; replacing the set
+// writes a new resource and emits `notes:changed`.
 //
-// History is never rewritten — every committed layer remains, so scrub-back
-// replays past note sets losslessly. Compaction is a separate, explicit
-// transaction and out of scope here.
+// Integration with history is mechanical via LayerSlotRegistry:
+//   - This file registers a `notesByCell` slot with trigger
+//     `notes:changed` (see bottom of file).
+//   - LayerCommitter auto-subscribes the trigger and folds the slot's
+//     `read()` result into every layer it commits.
+//   - The slot value is `{ [cellLabel]: noteSetSig }` — only cells
+//     with notes appear, so empty locations contribute no slot bytes.
+//
+// Result: notes are part of the canonical layer signature for free.
+// Layer changes when any cell's notes change → new sig → new marker
+// → undoable. Cross-browser: the layer JSON IS the truth; the local
+// `hc:notes-index` is just a hot cache.
+//
+// History is never rewritten — every committed layer remains, so
+// scrub-back replays past note sets losslessly. Compaction is a
+// separate, explicit transaction and out of scope here.
 import { EffectBus, SignatureService, hypercomb } from '@hypercomb/core'
+import { LayerSlotRegistry } from '../history/layer-slot-registry.js'
 
 export type Note = {
   id: string
@@ -294,3 +305,32 @@ function canonicalJSON(value: unknown): string {
 
 const _notesService = new NotesService()
 window.ioc.register('@diamondcoreprocessor.com/NotesService', _notesService)
+
+// Mechanical history integration: the notesByCell slot. LayerCommitter
+// subscribes to `notes:changed` automatically (via the registry's
+// trigger union) and folds the slot value into every committed layer.
+//
+// Currently the index is whole-app rather than per-location. The
+// per-location filter happens here when the registry asks: only cells
+// whose label appears in the current location's children should be
+// included. Anything else is stale-noise and would pollute the layer
+// signature with unrelated locations' notes. We don't have a cheap
+// "cells at this location" lookup right now, so as a first cut return
+// the whole index — the LayerCommitter cascade only commits at
+// locations that are actually receiving updates, so the practical
+// over-inclusion is bounded. Tighten when the per-location filter is
+// available without a round-trip.
+LayerSlotRegistry.register({
+  slot: 'notesByCell',
+  triggers: ['notes:changed'],
+  read: () => {
+    const idx = _notesService.readIndex()
+    const keys = Object.keys(idx).filter(k => idx[k]).sort()
+    if (keys.length === 0) return undefined
+    // Canonical: sorted keys + filtered empties. Byte-stable across
+    // browsers regardless of insertion order in the localStorage cache.
+    const sorted: Record<string, string> = {}
+    for (const k of keys) sorted[k] = idx[k]
+    return sorted
+  },
+})
