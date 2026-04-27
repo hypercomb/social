@@ -709,10 +709,34 @@ export class HistoryService {
     try { parsed = JSON.parse(new TextDecoder().decode(bytes)) as Partial<LayerContent> }
     catch { return null }
 
-    // name is required; children is optional (omitted when empty).
     if (!parsed.name) return null
-    const out: LayerContent = { name: parsed.name }
-    if (Array.isArray(parsed.children) && parsed.children.length > 0) out.children = parsed.children
+    return HistoryService.#hydrateLayer(parsed)
+  }
+
+  /**
+   * Pure projection from raw parsed JSON to a LayerContent. Preserves
+   * every field as-is — including all registered slot values (notes,
+   * tags, future features). Previously only `name` and `children` were
+   * surfaced, which silently dropped slot fields on read so cells
+   * looked empty even when the bytes-on-disk had notes; that broke the
+   * whole LayerSlotRegistry pipeline.
+   *
+   * Empty `children` is normalised to omitted so reader output matches
+   * canonicalizeLayer output (sparse-layer invariant).
+   */
+  static readonly #hydrateLayer = (parsed: Partial<LayerContent>): LayerContent => {
+    const out: LayerContent = { name: parsed.name as string }
+    for (const key of Object.keys(parsed)) {
+      if (key === 'name') continue
+      if (key === 'children') {
+        if (Array.isArray(parsed.children) && parsed.children.length > 0) out.children = parsed.children
+        continue
+      }
+      const v = (parsed as Record<string, unknown>)[key]
+      if (v === undefined || v === null) continue
+      if (Array.isArray(v) && v.length === 0) continue
+      out[key] = v
+    }
     return out
   }
 
@@ -778,9 +802,7 @@ export class HistoryService {
       try {
         const parsed = JSON.parse(new TextDecoder().decode(cached)) as Partial<LayerContent>
         if (!parsed.name) return null
-        const out: LayerContent = { name: parsed.name }
-        if (Array.isArray(parsed.children) && parsed.children.length > 0) out.children = parsed.children
-        return out
+        return HistoryService.#hydrateLayer(parsed)
       } catch { /* fall through to disk */ }
     }
     // Cold miss: trigger the global preload (idempotent — runs once per
@@ -791,9 +813,7 @@ export class HistoryService {
     try {
       const parsed = JSON.parse(new TextDecoder().decode(refreshed)) as Partial<LayerContent>
       if (!parsed.name) return null
-      const out: LayerContent = { name: parsed.name }
-      if (Array.isArray(parsed.children) && parsed.children.length > 0) out.children = parsed.children
-      return out
+      return HistoryService.#hydrateLayer(parsed)
     } catch { return null }
   }
 
