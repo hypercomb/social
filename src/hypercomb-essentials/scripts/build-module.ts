@@ -904,10 +904,19 @@ const main = async (): Promise<void> => {
       docsByDir.set(src.relDir, dirDocs)
     }
 
-    // beeline: cache bee dependency mapping by outputSig
+    // beeline: cache bee dependency mapping by outputSig.
+    // CRITICAL: also verify every cached dep sig still exists as a live
+    // dependency in this build. If a dep namespace was rebuilt with new
+    // contents (its sig changed), the bee's output sig stays the same
+    // (deps are externals during bee compile), but the cached dep sigs
+    // are now phantom — they reference files that no longer exist on
+    // disk. Re-extract from the compiled output in that case.
     const prevBeeDep = cache?.beeDepCache?.[src.relPath]
-    if (prevBeeDep && prevBeeDep.outputSig === sig) {
-      // beeline hit: same compiled output → same deps
+    const cachedDepsStillLive = prevBeeDep
+      ? prevBeeDep.depSigs.every(s => dependencyBytes.has(s))
+      : false
+    if (prevBeeDep && prevBeeDep.outputSig === sig && cachedDepsStillLive) {
+      // beeline hit: same compiled output AND every dep sig still on disk
       if (prevBeeDep.depSigs.length) {
         beeDepsMap.set(sig, prevBeeDep.depSigs)
       }
