@@ -214,6 +214,7 @@ export class SentinelHandler {
 
       await this.#walkEnabled(
         rootSig,
+        domain,
         domainName,
         toggles,
         beeDeps,
@@ -240,6 +241,7 @@ export class SentinelHandler {
    */
   async #walkEnabled(
     layerSig: string,
+    domain: string,
     domainName: string,
     toggles: Record<string, boolean>,
     beeDeps: Record<string, string[]>,
@@ -254,7 +256,7 @@ export class SentinelHandler {
 
     if (toggles[layerSig] === false) return
 
-    const layer = await this.#readLayerJson(domainName, layerSig)
+    const layer = await this.#readLayerJson(domain, domainName, layerSig)
     if (!layer) return
 
     enabledLayers.push(layerSig)
@@ -282,6 +284,7 @@ export class SentinelHandler {
     for (const childSig of children) {
       await this.#walkEnabled(
         childSig,
+        domain,
         domainName,
         toggles,
         beeDeps,
@@ -295,20 +298,28 @@ export class SentinelHandler {
   }
 
   /**
-   * Read a single layer JSON from DCP's OPFS cache. Used by the
-   * tree-walk to traverse parent-child layer relationships at sync
-   * time without re-fetching from the network.
+   * Read a single layer JSON for the tree-walk. Tries DCP's OPFS cache
+   * first; on miss, fetches from the domain's `__layers__/<sig>.json`,
+   * verifies the hash, and writes it back to OPFS so the next walk hits
+   * the cache. This is the path that lets a freshly-deployed essentials
+   * (new rootSig, new layer signatures) propagate through sync without
+   * needing DCP to re-run a full install first.
    */
   async #readLayerJson(
+    domain: string,
     domainName: string,
     layerSig: string,
   ): Promise<{ bees?: string[]; dependencies?: string[]; cells?: string[]; layers?: string[]; children?: string[] } | null> {
     try {
       const dir = await this.#store.domainLayersDir(domainName)
-      const bytes =
+      let bytes =
         await this.#store.readFile(dir, layerSig)
         ?? await this.#store.readFile(dir, `${layerSig}.json`)
-      if (!bytes) return null
+      if (!bytes) {
+        bytes = await this.#fetchAndVerify(domain, '', layerSig, 'layer')
+        if (!bytes) return null
+        try { await this.#store.writeFile(dir, layerSig, bytes) } catch { /* non-fatal */ }
+      }
       return JSON.parse(new TextDecoder().decode(bytes))
     } catch {
       return null
