@@ -33,7 +33,7 @@ type InstallManifest = {
   beeDeps?: Record<string, string[]>
 }
 
-export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<void> => {
+export const ensureInstall = async (sentinelPromise: Promise<SentinelBridge | null>): Promise<void> => {
   // register the central signature allowlist — scripts in the store skip re-verification
   const sigStore = new SignatureStore()
   register('@hypercomb/SignatureStore', sigStore)
@@ -53,23 +53,14 @@ export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<vo
   }
 
   // Fast path: cached install present and intact → boot from cache.
-  // Before short-circuiting we ask the sentinel to apply any pending
-  // diff so a fresh deploy lands on the next reload instead of waiting
-  // for a DCP toggle. Push-only contract is preserved: this calls
-  // sentinel.sync(), not an HTTP manifest fetch, and is a no-op when
-  // the cached sync signature matches what DCP holds.
+  // The sentinel resync is not awaited here — it runs post-bootstrap so
+  // DCP latency never gates initial render. Drift is reconciled by the
+  // resyncAndEnforce / reloadIfDrifted handlers wired in main.ts.
   const cachedManifest = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
   if (cachedManifest && cachedManifest.bees.length > 0) {
     const beeOk = await fileExists(store.bees, `${cachedManifest.bees[0]}.js`)
     const beeDepsOk = beeOk && await beeDepValuesPresent(store.dependencies, cachedManifest.beeDeps)
     if (beeOk && beeDepsOk) {
-      if (sentinel) {
-        try {
-          await resyncFromSentinel(sentinel)
-        } catch (err) {
-          console.warn('[ensure-install] boot resync failed; continuing with cached state', err)
-        }
-      }
       console.log('[ensure-install] booting from cached state')
       restoreSignatureStore(sigStore)
       restoreCachedBeeDeps()
@@ -92,6 +83,7 @@ export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<vo
   // content under the push-only contract — there is no HTTP fallback.
   // If the sentinel never came up, the shell shows an "Install via DCP"
   // prompt; resyncAndEnforce will pick up content once DCP comes online.
+  const sentinel = await sentinelPromise
   if (!sentinel) {
     console.warn('[ensure-install] no sentinel — cold boot has no content; waiting for DCP to come online')
     EffectBus.emit('boot:status', { kind: 'install-needed', reason: 'no-sentinel' } as BootStatus)

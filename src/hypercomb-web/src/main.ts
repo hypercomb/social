@@ -42,51 +42,33 @@ const attachImportMap = async (): Promise<void> => {
 const bootstrap = async (): Promise<void> => {
   await ensureSwControl()
 
-  // Capture install state BEFORE ensureInstall so the cold-install path
-  // is detectable. ensureInstall flips this flag when the first sync
-  // produces content; the subsequent resyncAndEnforce branch reloads
-  // immediately so the user doesn't sit on an empty shell.
   const wasInstalledAtBoot = localStorage.getItem('hypercomb.installed') === 'true'
 
-  // Bring up the sentinel bridge before anything else runs. Push-only
-  // install: sentinel is the SOLE source of content. Web→DCP intake
-  // requires it; cold install requires it. If unreachable, boot
-  // continues with whatever is cached (or empty if nothing is cached);
-  // resyncAndEnforce will pick up content once DCP is online.
-  const sentinel = await initSentinel()
-
-  await ensureInstall(sentinel)
+  // Push-only contract: no DCP iframe is mounted at boot. Boot reads OPFS
+  // only. The sentinel bridge is created lazily when DCP-driven events
+  // (actions:available / dcp:embed-closed) signal the user has finished
+  // a portal session and pushed changes back.
+  await ensureInstall(Promise.resolve(null))
   await attachImportMap()
 
-  // Snapshot the sync signature applied at boot. Anything that drifts
-  // from this (toggles in DCP, intake from web→DCP, etc.) means the
-  // running shell is showing stale state — when the user leaves DCP
-  // we reload to commit the new state.
   const bootSyncSig = localStorage.getItem('sentinel.sync-signature') ?? ''
 
-  // Load dependency namespaces so services self-register before Angular renders
   const loader = get('@hypercomb.social/DependencyLoader') as DependencyLoader | undefined
   await loader?.load?.()
 
   const appRef = await bootstrapApplication(App, appConfig)
 
-  if (!sentinel) {
-    // No DCP — nothing to resync against. App still boots from cached state.
-    return
+  let sentinelPromise: Promise<SentinelBridge | null> | null = null
+  const getSentinel = (): Promise<SentinelBridge | null> => {
+    if (!sentinelPromise) sentinelPromise = initSentinel()
+    return sentinelPromise
   }
 
-  // Toggle-changed: keep OPFS in sync silently. Do NOT reload while
-  // hypercomb is foregrounded — the running shell continues with its
-  // currently loaded drones. Reload happens when the user leaves DCP
-  // (embed close, or standalone tab close) and we detect drift from
-  // bootSyncSig.
   const resyncAndEnforce = async () => {
+    const sentinel = await getSentinel()
+    if (!sentinel) return
     await resyncFromSentinel(sentinel)
 
-    // Cold-install reload: we booted into install-needed state. The first
-    // resync that produces content flips hypercomb.installed → true. Reload
-    // immediately so the user sees the populated shell rather than the
-    // install prompt.
     if (!wasInstalledAtBoot && localStorage.getItem('hypercomb.installed') === 'true') {
       console.log('[main] cold install completed — reloading')
       location.reload()
@@ -99,6 +81,8 @@ const bootstrap = async (): Promise<void> => {
   }
 
   const reloadIfDrifted = async (source: string) => {
+    const sentinel = await getSentinel()
+    if (!sentinel) return
     await resyncFromSentinel(sentinel)
     const currentSyncSig = localStorage.getItem('sentinel.sync-signature') ?? ''
     if (currentSyncSig && currentSyncSig !== bootSyncSig) {
@@ -107,8 +91,6 @@ const bootstrap = async (): Promise<void> => {
     }
   }
 
-  sentinel.onToggleChanged = resyncAndEnforce
-  sentinel.onDcpClosed = () => reloadIfDrifted('dcp tab closed')
   window.addEventListener('actions:available', resyncAndEnforce)
   window.addEventListener('dcp:embed-closed', () => reloadIfDrifted('dcp embed closed'))
 }
