@@ -4,6 +4,27 @@ import { TILE_PROPERTIES_FILE } from './tile-properties.js'
 import type { TileEditorService } from './tile-editor.service.js'
 import type { ImageEditorService } from './image-editor.service.js'
 
+// SVG markup for the pencil "edit" icon. Owned by this drone so that
+// when the editor is toggled off in DCP the icon never reaches the
+// tile overlay arranger and never appears on the hex.
+const EDIT_ICON_SVG =
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3l4 4L7 21H3v-4L17 3z"/></svg>`
+
+type IconProvider = {
+  name: string
+  owner?: string
+  svgMarkup: string
+  profile: string
+  hoverTint?: number
+  labelKey?: string
+  descriptionKey?: string
+}
+
+type IconProviderRegistry = {
+  add(p: IconProvider): void
+  remove(name: string): void
+}
+
 type TileActionPayload = {
   action: string
   label: string
@@ -28,6 +49,22 @@ export class TileEditorDrone {
 
   constructor() {
     EffectBus.on<TileActionPayload>('tile:action', this.#onTileAction)
+
+    // Self-register the 'edit' tile icon. The arranger (tile-actions)
+    // merges this with its own catalog, computes positions, and emits
+    // the final overlay descriptors. Toggling this drone off in DCP
+    // skips construction → registry never receives the entry → icon
+    // never appears.
+    const registry = window.ioc.get<IconProviderRegistry>('@hypercomb.social/IconProviderRegistry')
+    registry?.add({
+      name: 'edit',
+      owner: '@diamondcoreprocessor.com/TileEditorDrone',
+      svgMarkup: EDIT_ICON_SVG,
+      profile: 'private',
+      hoverTint: 0xc8d8ff,
+      labelKey: 'action.edit',
+      descriptionKey: 'action.edit.description',
+    })
   }
 
   // ── effect handler ─────────────────────────────────────────────

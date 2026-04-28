@@ -22,6 +22,13 @@ export type SentinelFile = {
   bytes: ArrayBuffer
 }
 
+/**
+ * Kinds that the web app can push up to DCP.
+ * "resource" maps to __resources__/{sig} (no extension);
+ * other kinds mirror the canonical bag layout.
+ */
+export type IntakeKind = 'layer' | 'bee' | 'dependency' | 'resource'
+
 export type SentinelInstallResult = {
   manifest: any
   rootSig: string
@@ -46,6 +53,7 @@ export class SentinelBridge {
   #progressListeners = new Map<string, (p: { phase: string; current: number; total: number }) => void>()
   #ridCounter = 0
   #onToggleChanged: (() => void) | null = null
+  #onDcpClosed: (() => void) | null = null
 
   constructor(port: MessagePort) {
     this.#port = port
@@ -55,6 +63,11 @@ export class SentinelBridge {
   /** Register a callback for when DCP toggles a bee on/off. */
   set onToggleChanged(fn: (() => void) | null) {
     this.#onToggleChanged = fn
+  }
+
+  /** Register a callback for when the DCP tab closes. */
+  set onDcpClosed(fn: (() => void) | null) {
+    this.#onDcpClosed = fn
   }
 
   /**
@@ -91,6 +104,32 @@ export class SentinelBridge {
   }
 
   /**
+   * Push a single sig + bytes up to DCP. DCP verifies SHA-256, writes
+   * to its `__from-hypercomb__/{kind}/` namespace, and replies with an
+   * ack. Resolves true on ack, false on nack/timeout. Caller is
+   * responsible for preserving the queue entry on a false return.
+   */
+  async intake(signature: string, kind: IntakeKind, bytes: ArrayBuffer): Promise<boolean> {
+    const rid = this.#nextRid()
+
+    return new Promise((resolve) => {
+      // DCP replies with { type: 'intake-ack', rid, ok: true | false }.
+      // Bridge resolve/reject are wired so 'intake-ack' ok=true → resolve(true),
+      // ok=false → resolve(false). Caller leaves the queue entry on false.
+      this.#pending.set(rid, {
+        resolve: (v: boolean) => resolve(v === true),
+        reject: () => resolve(false)
+      })
+      try {
+        this.#port.postMessage({ type: 'intake', rid, signature, kind, bytes }, [bytes])
+      } catch {
+        this.#pending.delete(rid)
+        resolve(false)
+      }
+    })
+  }
+
+  /**
    * Fetch a single content file through DCP.
    */
   async fetchContent(
@@ -113,6 +152,13 @@ export class SentinelBridge {
     if (msg.type === 'toggle-changed') {
       console.log('[sentinel-bridge] received toggle-changed from DCP')
       this.#onToggleChanged?.()
+      return
+    }
+
+    // DCP tab closed — commit deferred state via reload
+    if (msg.type === 'dcp-closed') {
+      console.log('[sentinel-bridge] received dcp-closed from DCP')
+      this.#onDcpClosed?.()
       return
     }
 
@@ -174,6 +220,13 @@ export class SentinelBridge {
           console.warn(`[sentinel-bridge] ${msg.error}`)
           pending?.resolve(null)
         }
+        break
+      }
+
+      case 'intake-ack': {
+        const pending = this.#pending.get(rid)
+        this.#pending.delete(rid)
+        pending?.resolve(msg.ok === true)
         break
       }
     }

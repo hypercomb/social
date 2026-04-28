@@ -39,6 +39,7 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
   isOpen = false
   portalSrc: SafeResourceUrl | null = null
   #activeUrl: string | null = null
+  #activeTarget: string | null = null
 
   // -------------------------------------------------
   // open portal
@@ -49,6 +50,7 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     if (!url) return
 
     this.#activeUrl = url
+    this.#activeTarget = detail?.target ?? null
     this.portalSrc = this.#sanitizer.bypassSecurityTrustResourceUrl(url)
     this.isOpen = true
     this.#cdr.detectChanges()
@@ -112,9 +114,12 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
   // close portal
   // -------------------------------------------------
   public close = (): void => {
+    const wasDcp = this.#activeTarget === 'dcp'
     this.isOpen = false
     this.portalSrc = null
     this.#activeUrl = null
+    this.#activeTarget = null
     this.#cdr.detectChanges()
+    if (wasDcp) window.dispatchEvent(new CustomEvent('dcp:embed-closed'))
   }
 }

@@ -49,6 +49,30 @@
 // scrub-back replays past note sets losslessly. Compaction is a
 // separate, explicit transaction and out of scope here.
 import { EffectBus, SignatureService, hypercomb } from '@hypercomb/core'
+
+// SVG markup for the sticky-note tile icon. Owned by this drone so that
+// when notes is toggled off in DCP the icon never reaches the tile
+// overlay arranger and never appears on the hex.
+const NOTE_ICON_SVG =
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h12l4 4v12H4z"/><polyline points="16 4 16 8 20 8"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="16" x2="14" y2="16"/></svg>`
+
+const NOTE_ACCENT = 0xffe14a
+
+type IconProvider = {
+  name: string
+  owner?: string
+  svgMarkup: string
+  profile: string
+  hoverTint?: number
+  tintWhen?: (ctx: any) => number | null | undefined
+  labelKey?: string
+  descriptionKey?: string
+}
+
+type IconProviderRegistry = {
+  add(p: IconProvider): void
+  remove(name: string): void
+}
 // TYPE-ONLY import — the runtime instance is the single shared singleton
 // registered with window.ioc by layer-slot-registry.ts. We obtain it
 // via get() at module-load. Importing the class symbol non-type-only
@@ -121,6 +145,21 @@ export class NotesService extends EventTarget {
     // which folder the user is currently inside.
     const lineage = get<EventTarget>('@hypercomb.social/Lineage') as unknown as EventTarget | undefined
     lineage?.addEventListener?.('change', () => this.#cellLocSigCache.clear())
+
+    // Self-register the 'note' tile icon. Toggle this drone off in DCP
+    // → constructor never runs → icon never reaches the arranger →
+    // never appears on the hex. Mirror of the editor pattern.
+    const iconRegistry = get<IconProviderRegistry>('@hypercomb.social/IconProviderRegistry')
+    iconRegistry?.add({
+      name: 'note',
+      owner: '@diamondcoreprocessor.com/NotesService',
+      svgMarkup: NOTE_ICON_SVG,
+      profile: 'private',
+      hoverTint: NOTE_ACCENT,
+      tintWhen: (ctx) => ctx.hasNotes ? NOTE_ACCENT : null,
+      labelKey: 'action.note',
+      descriptionKey: 'action.note.description',
+    })
 
     // `note:capture` accepts:
     //   - { cellLabel }                              → start a fresh note

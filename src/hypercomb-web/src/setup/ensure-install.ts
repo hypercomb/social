@@ -2,21 +2,25 @@
 // Runs BEFORE the import map is set, so that OPFS dependencies are written
 // before the browser freezes the import-map entries.
 //
-// Push-only install model: load performs no network manifest polling.
-// - Cached install + OPFS spot-check → boot from cache, zero network.
-// - Empty OPFS → one-shot cold install from local /content.
-// - Updates land via explicit DCP push (see resyncFromSentinel), triggered by
-//   the `actions:available` event, never by per-load polling.
-// See documentation/install-push-only.md for the full design.
+// Push-only install: the sentinel is the SOLE source of content. Cold
+// boot does not pull any HTTP manifest or content; it awaits a sync
+// from DCP. Subsequent loads boot from the cached OPFS state and let
+// resyncFromSentinel apply incremental updates.
 
-import { SignatureStore } from '@hypercomb/core'
+import { EffectBus, SignatureStore } from '@hypercomb/core'
 import { Store } from '@hypercomb/shared/core'
 import type { SentinelBridge } from './sentinel-bridge'
 
-const INSTALLED_KEY = 'core-adapter.installed-signature'
+export type BootStatus =
+  | { kind: 'cached' }
+  | { kind: 'installing' }
+  | { kind: 'installed' }
+  | { kind: 'install-needed'; reason: 'no-sentinel' | 'sentinel-empty' }
+
 const MANIFEST_KEY = 'core-adapter.installed-manifest'
 const SIG_STORE_KEY = 'hypercomb.signature-store'
 const SYNC_SIG_KEY = 'sentinel.sync-signature'
+const INSTALLED_FLAG_KEY = 'hypercomb.installed'
 
 // ensure side-effect registrations
 const _deps = [Store]
@@ -29,7 +33,7 @@ type InstallManifest = {
   beeDeps?: Record<string, string[]>
 }
 
-export const ensureInstall = async (): Promise<void> => {
+export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<void> => {
   // register the central signature allowlist — scripts in the store skip re-verification
   const sigStore = new SignatureStore()
   register('@hypercomb/SignatureStore', sigStore)
@@ -42,62 +46,80 @@ export const ensureInstall = async (): Promise<void> => {
 
   await store.initialize()
 
-  // ── Push-only: cached OPFS state is trusted; no boot-time pull ──
-  // DCP push is the ONLY legitimate source of update (sentinel/portal
-  // delivers new state via resyncFromSentinel). The runtime never
-  // peeks upstream on boot to decide whether to reinstall — that
-  // would be a pull, contradicting the push-only contract and racing
-  // with in-flight session state.
-  //
-  // Spot-check the cached install for integrity. Three checks, each
-  // strong enough on its own to force a fresh install:
-  //   (1) The first cached bee file still exists in OPFS.
-  //   (2) Every dep sig referenced by cached beeDeps exists in OPFS
-  //       (catches stale beeDeps from prior build-cache bugs).
-  //   (3) The locally-served manifest's rootSig matches the cached
-  //       installedSig (catches "we deployed/rebuilt new code, the user
-  //       reloaded, but cache says everything's fine").
-  // (1)+(2) are O(n) OPFS lookups. (3) is one same-origin static fetch
-  // — minimal violation of "zero network" boot, in exchange for refresh
-  // actually delivering new code without requiring a portal push.
+  if (!store.opfsAvailable) {
+    console.warn('[ensure-install] OPFS unavailable — skipping install; app will boot without persistence')
+    EffectBus.emit('boot:status', { kind: 'install-needed', reason: 'no-sentinel' } as BootStatus)
+    return
+  }
+
+  // Fast path: cached install present and intact → boot from cache.
+  // resyncFromSentinel runs after Angular bootstraps and applies any
+  // diff DCP wants to push. No HTTP manifest poll on the boot path.
   const cachedManifest = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
   if (cachedManifest && cachedManifest.bees.length > 0) {
-    const cachedInstallSig = (localStorage.getItem(INSTALLED_KEY) ?? '').trim()
-    const beeOk = !!cachedInstallSig && await fileExists(store.bees, `${cachedManifest.bees[0]}.js`)
+    const beeOk = await fileExists(store.bees, `${cachedManifest.bees[0]}.js`)
     const beeDepsOk = beeOk && await beeDepValuesPresent(store.dependencies, cachedManifest.beeDeps)
-    const liveRootSig = beeOk && beeDepsOk ? await fetchLiveRootSig() : null
-    const sigMatchesLive = !liveRootSig || liveRootSig === cachedInstallSig
-    if (beeOk && beeDepsOk && sigMatchesLive) {
-      console.log(`[ensure-install] booting from cached state (sig ${cachedInstallSig.slice(0, 12)})`)
+    if (beeOk && beeDepsOk) {
+      console.log('[ensure-install] booting from cached state')
       restoreSignatureStore(sigStore)
       restoreCachedBeeDeps()
+      // Existing installs predate the flag — adopt them on first cached
+      // boot so they don't get punted to the install prompt if the
+      // cache is ever invalidated.
+      if (localStorage.getItem(INSTALLED_FLAG_KEY) !== 'true') {
+        localStorage.setItem(INSTALLED_FLAG_KEY, 'true')
+      }
+      EffectBus.emit('boot:status', { kind: 'cached' } as BootStatus)
       return
     }
-    if (!beeOk) {
-      console.warn('[ensure-install] cached state spot-check failed — reinstalling from local content')
-    } else if (!beeDepsOk) {
-      console.warn('[ensure-install] cached beeDeps reference missing files — reinstalling from local content')
-    } else {
-      console.warn(`[ensure-install] live manifest rootSig changed (${cachedInstallSig.slice(0, 12)} → ${liveRootSig?.slice(0, 12)}) — reinstalling from local content`)
-    }
+    console.warn('[ensure-install] cached state spot-check failed — wiping and awaiting DCP push')
     localStorage.removeItem(MANIFEST_KEY)
-    localStorage.removeItem(INSTALLED_KEY)
     localStorage.removeItem(SYNC_SIG_KEY)
     await purgeStaleOpfsArtifacts(store)
   }
 
-  // ── Cold start: OPFS empty → install directly from DCP's static files ──
-  console.log('[ensure-install] OPFS empty — running cold install from DCP')
-  await localInstall(store, sigStore)
+  // Cold start: OPFS empty. Sentinel is the only legitimate source of
+  // content under the push-only contract — there is no HTTP fallback.
+  // If the sentinel never came up, the shell shows an "Install via DCP"
+  // prompt; resyncAndEnforce will pick up content once DCP comes online.
+  if (!sentinel) {
+    console.warn('[ensure-install] no sentinel — cold boot has no content; waiting for DCP to come online')
+    EffectBus.emit('boot:status', { kind: 'install-needed', reason: 'no-sentinel' } as BootStatus)
+    return
+  }
+
+  // Cold-boot consent gate: don't auto-pull on a fresh install. The
+  // user installs by going to DCP and adding a domain — that fires
+  // toggle-changed, the post-bootstrap resync flips the flag, and the
+  // subsequent reload boots from cache through the fast path above.
+  if (localStorage.getItem(INSTALLED_FLAG_KEY) !== 'true') {
+    console.log('[ensure-install] cold boot — install prompt; waiting for DCP install')
+    EffectBus.emit('boot:status', { kind: 'install-needed', reason: 'no-sentinel' } as BootStatus)
+    return
+  }
+
+  console.log('[ensure-install] cold boot — awaiting sentinel sync')
+  EffectBus.emit('boot:status', { kind: 'installing' } as BootStatus)
+  await resyncFromSentinel(sentinel)
+
+  // After sync: if nothing landed in OPFS, DCP is reachable but has no
+  // content for us. Surface as install-needed so the shell prompts the
+  // user to install at DCP rather than rendering an empty hex grid.
+  const postSyncManifest = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
+  if (!postSyncManifest || postSyncManifest.bees.length === 0) {
+    EffectBus.emit('boot:status', { kind: 'install-needed', reason: 'sentinel-empty' } as BootStatus)
+    return
+  }
+  EffectBus.emit('boot:status', { kind: 'installed' } as BootStatus)
 }
 
 /**
- * Wipe stale bees, deps, and layer files from OPFS so the next reinstall
- * starts from a clean slate. Without this, old artifacts linger in OPFS
- * forever — even after a successful reinstall — because localInstall only
- * writes the new files; it never removes signatures that fell out of the
- * manifest. The script-preloader can then still find and load a stale dep
- * with broken Angular code in it.
+ * Wipe stale bees, deps, and layer files from OPFS so the next sync
+ * starts from a clean slate. Without this, old artifacts linger in
+ * OPFS forever — even after a successful resync — because resync only
+ * writes the new files; it never removes signatures that fell out of
+ * the manifest. The script-preloader can then still find and load a
+ * stale dep with broken Angular code in it.
  */
 const purgeStaleOpfsArtifacts = async (store: Store): Promise<void> => {
   const purgeDir = async (dir: FileSystemDirectoryHandle) => {
@@ -122,12 +144,12 @@ const purgeStaleOpfsArtifacts = async (store: Store): Promise<void> => {
 }
 
 // -------------------------------------------------
-// resync — push-triggered (actions:available event from DCP portal)
+// resync — the SOLE install/update path
 // -------------------------------------------------
 
 export const resyncFromSentinel = async (sentinel: SentinelBridge): Promise<void> => {
   const store = get('@hypercomb.social/Store') as Store | undefined
-  if (!store) return
+  if (!store || !store.opfsAvailable) return
 
   const currentSyncSig = (localStorage.getItem(SYNC_SIG_KEY) ?? '').trim() || undefined
   const result = await sentinel.sync(currentSyncSig)
@@ -173,9 +195,16 @@ export const resyncFromSentinel = async (sentinel: SentinelBridge): Promise<void
 
   const syncManifest = { version: 2, layers: enabledLayers, bees: enabledBees, dependencies: enabledDeps, beeDeps }
   localStorage.setItem(SYNC_SIG_KEY, syncSig)
-  localStorage.setItem(INSTALLED_KEY, syncSig)
   localStorage.setItem(MANIFEST_KEY, JSON.stringify(syncManifest))
   if (beeDeps) (globalThis as any).__hypercombBeeDeps = beeDeps
+
+  // First successful resync that produced a non-empty install satisfies
+  // the cold-boot consent gate. Adding a domain in DCP fires
+  // toggle-changed, which lands content here and flips the flag so the
+  // post-resync reload boots through the cached fast path.
+  if (enabledBees.length > 0 && localStorage.getItem(INSTALLED_FLAG_KEY) !== 'true') {
+    localStorage.setItem(INSTALLED_FLAG_KEY, 'true')
+  }
 
   console.log(`[ensure-install] resync complete: ${syncSig.slice(0, 12)} (${enabledBees.length} bees, ${enabledDeps.length} deps, ${enabledLayers.length} layers)`)
 }
@@ -183,12 +212,12 @@ export const resyncFromSentinel = async (sentinel: SentinelBridge): Promise<void
 // ----- helpers -----
 
 const clearStaleCaches = async (): Promise<void> => {
-  // Clear Service Worker Cache API — old signature entries are stale after reinstall
+  // Clear Service Worker Cache API — old signature entries are stale after resync
   if ('caches' in self) {
     const deleted = await caches.delete('hypercomb-modules-v2')
     if (deleted) console.log('[ensure-install] cleared SW module cache')
   }
-  // Prune signature store — old trusted sigs are irrelevant after reinstall
+  // Prune signature store — old trusted sigs are irrelevant after resync
   localStorage.removeItem(SIG_STORE_KEY)
 }
 
@@ -269,50 +298,6 @@ const restoreSignatureStore = (sigStore: SignatureStore): void => {
   }
 }
 
-// ----- install verification -----
-// Blocks bootstrap until EVERY artifact in the manifest is confirmed present in OPFS.
-
-type VerificationResult = { ok: boolean; missing: string[] }
-
-const verifyInstall = async (store: Store, manifest: InstallManifest | null): Promise<VerificationResult> => {
-  if (!manifest) return { ok: true, missing: [] }
-
-  // Collect all domain layer directories upfront
-  const layerDirs: FileSystemDirectoryHandle[] = []
-  for await (const [, handle] of store.layers.entries()) {
-    if (handle.kind === 'directory') layerDirs.push(handle as FileSystemDirectoryHandle)
-  }
-
-  // Verify all artifacts in parallel
-  const checks = [
-    ...manifest.bees.filter(Boolean).map(async sig => {
-      const found = await fileExists(store.bees, `${sig}.js`) || await fileExists(store.bees, sig)
-      return found ? null : `bee:${sig}`
-    }),
-    ...manifest.dependencies.filter(Boolean).map(async sig => {
-      const found = await fileExists(store.dependencies, `${sig}.js`) || await fileExists(store.dependencies, sig)
-      return found ? null : `dependency:${sig}`
-    }),
-    ...manifest.layers.filter(Boolean).map(async sig => {
-      for (const dir of layerDirs) {
-        if (await fileExists(dir, sig) || await fileExists(dir, `${sig}.json`)) return null
-      }
-      return `layer:${sig}`
-    }),
-  ]
-
-  const results = await Promise.all(checks)
-  const missing = results.filter((r): r is string => r !== null)
-
-  if (missing.length) {
-    console.error(`[ensure-install] verification failed — ${missing.length} missing artifact(s):`, missing)
-  } else {
-    console.log(`[ensure-install] verification passed (${manifest.bees.length} bees, ${manifest.dependencies.length} deps, ${manifest.layers.length} layers)`)
-  }
-
-  return { ok: missing.length === 0, missing }
-}
-
 const fileExists = async (dir: FileSystemDirectoryHandle, name: string): Promise<boolean> => {
   try {
     await dir.getFileHandle(name)
@@ -323,28 +308,9 @@ const fileExists = async (dir: FileSystemDirectoryHandle, name: string): Promise
 }
 
 /**
- * Fetch the same-origin /content/manifest.json and return the rootSig
- * (the package key). Used by the boot spot-check to detect
- * "developer/CI deployed new bytes, please reinstall on next reload."
- * Returns null on any failure (offline, malformed JSON, network error)
- * — caller treats null as "trust whatever's cached", preserving offline
- * functionality.
- */
-const fetchLiveRootSig = async (): Promise<string | null> => {
-  try {
-    const r = await fetch(`${location.origin}/content/manifest.json`, { cache: 'no-store' })
-    if (!r.ok) return null
-    const json = await r.json()
-    return pickInstallablePackage(json?.packages) ?? null
-  } catch {
-    return null
-  }
-}
-
-/**
  * Return true when every signature listed across the beeDeps map values
  * is present in the dependencies directory. Empty/absent map → true
- * (nothing to verify). A single missing sig → false (reinstall).
+ * (nothing to verify). A single missing sig → false (resync).
  */
 const beeDepValuesPresent = async (
   depsDir: FileSystemDirectoryHandle,
@@ -359,117 +325,4 @@ const beeDepValuesPresent = async (
     if (!await fileExists(depsDir, `${sig}.js`)) return false
   }
   return true
-}
-
-// ----- local install fallback -----
-// Content loads exclusively through the DCP proxy.
-
-const CONTENT_SOURCES = [
-  `${location.origin}/content`,
-  'https://diamondcoreprocessor.com',
-]
-
-/**
- * Pick an installable package signature from a (possibly multi-package) manifest.
- *
- * Historical bug: build-module merged successive build outputs into one
- * manifest.json. The runtime then chose Object.keys(packages)[0], which is the
- * *first inserted* (chronologically oldest) entry — a stale signature whose
- * layer/dependency files no longer exist on disk. Result: install fails with
- * "missing artifact" 404s and the substrate (and everything else) never loads.
- *
- * The build now writes a single-package manifest, but users may already have
- * a stale multi-package manifest in their browser cache or behind a CDN, so
- * the loader has to defend itself. Strategy:
- *
- *   1. If only one package — use it.
- *   2. Otherwise prefer a package whose key appears inside its own layers[]
- *      array (the canonical "rootLayerSig is also a layer" convention used by
- *      build-module).
- *   3. Fall back to the LAST inserted entry — the most recently appended
- *      package is the one the latest build wrote.
- */
-const pickInstallablePackage = (packages: unknown): string | null => {
-  if (!packages || typeof packages !== 'object') return null
-  const keys = Object.keys(packages as Record<string, unknown>)
-  if (keys.length === 0) return null
-  if (keys.length === 1) return keys[0]
-  const pkgs = packages as Record<string, { layers?: string[] }>
-  for (let i = keys.length - 1; i >= 0; i--) {
-    const key = keys[i]
-    const pkg = pkgs[key]
-    if (Array.isArray(pkg?.layers) && pkg.layers.includes(key)) return key
-  }
-  return keys[keys.length - 1]
-}
-
-const localInstall = async (store: Store, sigStore: SignatureStore): Promise<void> => {
-  let baseUrl = ''
-  let manifest: InstallManifest | null = null
-  let packageSig = ''
-
-  for (const source of CONTENT_SOURCES) {
-    try {
-      const res = await fetch(`${source}/manifest.json`, { cache: 'no-store' })
-      if (!res.ok) continue
-      const content = await res.json()
-      const sig = pickInstallablePackage(content?.packages)
-      if (!sig) continue
-      manifest = content.packages[sig] as InstallManifest
-      baseUrl = source
-      packageSig = sig
-      console.log(`[ensure-install] using content source: ${source} (package ${sig.slice(0, 12)})`)
-      break
-    } catch {
-      console.warn(`[ensure-install] source unreachable: ${source}`)
-    }
-  }
-
-  if (!manifest || !baseUrl) {
-    console.warn('[ensure-install] no content source available')
-    return
-  }
-
-  const layerDir = await store.domainLayersDirectory('local', true)
-
-  // Install layers, dependencies, and bees in parallel
-  await Promise.all([
-    ...manifest.layers.map(async sig => {
-      try {
-        const res = await fetch(`${baseUrl}/__layers__/${sig}.json`, { cache: 'no-store' })
-        if (res.ok) await writeBytes(layerDir, sig, await res.arrayBuffer())
-      } catch { /* skip */ }
-    }),
-    ...manifest.dependencies.map(async sig => {
-      try {
-        const res = await fetch(`${baseUrl}/__dependencies__/${sig}.js`, { cache: 'no-store' })
-        if (res.ok) await writeBytes(store.dependencies, `${sig}.js`, await res.arrayBuffer())
-      } catch { /* skip */ }
-    }),
-    ...manifest.bees.map(async sig => {
-      try {
-        const res = await fetch(`${baseUrl}/__bees__/${sig}.js`, { cache: 'no-store' })
-        if (res.ok) await writeBytes(store.bees, `${sig}.js`, await res.arrayBuffer())
-      } catch { /* skip */ }
-    }),
-  ])
-
-  // Verify all artifacts landed in OPFS before committing
-  const verification = await verifyInstall(store, manifest)
-  if (!verification.ok) {
-    throw new Error(`[ensure-install] local install incomplete — ${verification.missing.length} artifact(s) missing: ${verification.missing.join(', ')}`)
-  }
-
-  // Trust all signatures and persist manifest
-  const allSigs = [...manifest.bees, ...manifest.dependencies, ...manifest.layers]
-  sigStore.trustAll(allSigs)
-  localStorage.setItem(SIG_STORE_KEY, JSON.stringify(sigStore.toJSON()))
-
-  const installSig = packageSig || (allSigs.length > 0 ? allSigs[0] : 'local')
-  localStorage.setItem(SYNC_SIG_KEY, installSig)
-  localStorage.setItem(INSTALLED_KEY, installSig)
-  localStorage.setItem(MANIFEST_KEY, JSON.stringify(manifest))
-  if (manifest.beeDeps) (globalThis as any).__hypercombBeeDeps = manifest.beeDeps
-
-  console.log(`[ensure-install] local install complete: package ${installSig.slice(0, 12)} (${manifest.bees.length} bees, ${manifest.dependencies.length} deps, ${manifest.layers.length} layers)`)
 }

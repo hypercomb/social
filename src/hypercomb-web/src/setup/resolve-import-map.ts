@@ -13,7 +13,18 @@ export const resolveImportMap = async (): Promise<ResolvedImports> => {
   imports['pixi.js'] = '/vendor/pixi.runtime.js'
 
 
-  const root = await navigator.storage.getDirectory()
+  let root: FileSystemDirectoryHandle
+  try {
+    root = await Promise.race([
+      navigator.storage.getDirectory(),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('OPFS timed out')), 3_000)
+      )
+    ])
+  } catch (err) {
+    console.warn('[resolveImportMap] OPFS unavailable — returning core imports only', err)
+    return imports
+  }
 
   let depsDir: FileSystemDirectoryHandle | null = null
   try {

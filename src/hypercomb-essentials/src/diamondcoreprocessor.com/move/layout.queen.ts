@@ -31,6 +31,14 @@ export class LayoutQueenBee extends QueenBee {
   readonly command = 'layout'
   override readonly aliases = []
   override description = 'Save, apply, list, or remove layout templates'
+  override descriptionKey = 'slash.layout'
+
+  override slashComplete(args: string): readonly string[] {
+    const subcommands = ['save', 'apply', 'list', 'remove']
+    const q = args.toLowerCase().trim()
+    if (!q) return subcommands
+    return subcommands.filter(s => s.startsWith(q))
+  }
 
   protected async execute(args: string): Promise<void> {
     const parsed = parseLayoutArgs(args)

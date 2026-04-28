@@ -21,10 +21,13 @@ export type SyncManifest = {
   beeDeps?: Record<string, string[]>
 }
 
+export type IntakeKind = 'layer' | 'bee' | 'dependency' | 'resource'
+
 export type SentinelRequest =
   | { type: 'install'; rid: string; installedSig?: string }
   | { type: 'sync'; rid: string; currentSyncSig?: string }
   | { type: 'fetch-content'; rid: string; signature: string; kind: 'layer' | 'bee' | 'dependency'; rootSig: string }
+  | { type: 'intake'; rid: string; signature: string; kind: IntakeKind; bytes: ArrayBuffer }
 
 export type SentinelResponse =
   | { type: 'result'; rid: string; ok: true; data: ArrayBuffer | string | object }
@@ -33,6 +36,7 @@ export type SentinelResponse =
   | { type: 'file'; rid: string; signature: string; kind: string; bytes: ArrayBuffer }
   | { type: 'install-done'; rid: string; manifest: object; rootSig: string; beeDeps?: Record<string, string[]> }
   | { type: 'sync-result'; rid: string; syncSig: string; add: { signature: string; kind: string; bytes: ArrayBuffer }[]; remove: { signature: string; kind: string }[] }
+  | { type: 'intake-ack'; rid: string; ok: boolean; error?: string }
 
 @Injectable({ providedIn: 'root' })
 export class SentinelHandler {
@@ -46,6 +50,7 @@ export class SentinelHandler {
       case 'install': return this.#handleInstall(msg, port)
       case 'sync': return this.#handleSync(msg, port)
       case 'fetch-content': return this.#handleFetchContent(msg, port)
+      case 'intake': return this.#handleIntake(msg, port)
     }
   }
 
@@ -179,6 +184,11 @@ export class SentinelHandler {
   /**
    * Walk all installed manifests, filter by toggle state,
    * and produce the set of enabled signatures + a sync signature.
+   *
+   * Tree-aware: walks each domain's layer tree from root, skipping
+   * whole subtrees whose layer signature is toggled off. Per-bee and
+   * per-dep toggles are independent gates applied within enabled
+   * layers. Both must pass for a bee/dep to be included.
    */
   async #computeSyncManifest(): Promise<SyncManifest> {
     const enabledBees: string[] = []
@@ -191,7 +201,6 @@ export class SentinelHandler {
 
     for (const domain of domains) {
       const domainName = new URL(domain).hostname
-      // Check if this domain is toggled off
       if (toggles[domain] === false || toggles[domainName] === false) continue
 
       const rootSig = await this.#fetchRootSignature(domain)
@@ -200,29 +209,20 @@ export class SentinelHandler {
       const manifest = await this.#readCachedManifest(domain, rootSig)
       if (!manifest) continue
 
-      // Collect bees that are enabled
-      for (const sig of (manifest.bees ?? [])) {
-        const nodeId = sig  // node IDs for bees use the signature
-        if (toggles[nodeId] === false) continue
-        enabledBees.push(sig)
+      const beeDeps: Record<string, string[]> = manifest.beeDeps ?? {}
+      const visited = new Set<string>()
 
-        // Collect deps required by this bee
-        const deps = (manifest.beeDeps ?? {})[sig] ?? []
-        for (const dep of deps) enabledDeps.add(dep)
-        if (deps.length) allBeeDeps[sig] = deps
-      }
-
-      // All deps of enabled bees, plus any standalone deps that are toggled on
-      for (const sig of (manifest.dependencies ?? [])) {
-        if (enabledDeps.has(sig)) continue  // already included via beeDeps
-        if (toggles[sig] === false) continue
-        enabledDeps.add(sig)
-      }
-
-      for (const sig of (manifest.layers ?? [])) {
-        if (toggles[sig] === false) continue
-        enabledLayers.push(sig)
-      }
+      await this.#walkEnabled(
+        rootSig,
+        domainName,
+        toggles,
+        beeDeps,
+        enabledBees,
+        enabledDeps,
+        enabledLayers,
+        allBeeDeps,
+        visited,
+      )
     }
 
     const depsList = [...enabledDeps].sort()
@@ -230,6 +230,89 @@ export class SentinelHandler {
     const syncSig = await SignatureService.sign(new TextEncoder().encode(allSigs.join(',')).buffer as ArrayBuffer)
 
     return { syncSig, bees: enabledBees, dependencies: depsList, layers: enabledLayers, beeDeps: allBeeDeps }
+  }
+
+  /**
+   * Recursive walk: descend the layer tree, skip subtrees whose layer
+   * is toggled off. Bees and deps inside a disabled layer never get
+   * added; bees/deps inside an enabled layer pass their own toggle
+   * gate before being collected.
+   */
+  async #walkEnabled(
+    layerSig: string,
+    domainName: string,
+    toggles: Record<string, boolean>,
+    beeDeps: Record<string, string[]>,
+    enabledBees: string[],
+    enabledDeps: Set<string>,
+    enabledLayers: string[],
+    allBeeDeps: Record<string, string[]>,
+    visited: Set<string>,
+  ): Promise<void> {
+    if (visited.has(layerSig)) return
+    visited.add(layerSig)
+
+    if (toggles[layerSig] === false) return
+
+    const layer = await this.#readLayerJson(domainName, layerSig)
+    if (!layer) return
+
+    enabledLayers.push(layerSig)
+
+    for (const raw of (layer.bees ?? [])) {
+      const sig = raw.replace(/\.js$/i, '')
+      if (toggles[sig] === false) continue
+      enabledBees.push(sig)
+      const deps = beeDeps[sig] ?? []
+      for (const dep of deps) {
+        if (toggles[dep] === false) continue
+        enabledDeps.add(dep)
+      }
+      if (deps.length) allBeeDeps[sig] = deps
+    }
+
+    for (const raw of (layer.dependencies ?? [])) {
+      const sig = raw.replace(/\.js$/i, '')
+      if (enabledDeps.has(sig)) continue
+      if (toggles[sig] === false) continue
+      enabledDeps.add(sig)
+    }
+
+    const children: string[] = layer.cells ?? layer.layers ?? layer.children ?? []
+    for (const childSig of children) {
+      await this.#walkEnabled(
+        childSig,
+        domainName,
+        toggles,
+        beeDeps,
+        enabledBees,
+        enabledDeps,
+        enabledLayers,
+        allBeeDeps,
+        visited,
+      )
+    }
+  }
+
+  /**
+   * Read a single layer JSON from DCP's OPFS cache. Used by the
+   * tree-walk to traverse parent-child layer relationships at sync
+   * time without re-fetching from the network.
+   */
+  async #readLayerJson(
+    domainName: string,
+    layerSig: string,
+  ): Promise<{ bees?: string[]; dependencies?: string[]; cells?: string[]; layers?: string[]; children?: string[] } | null> {
+    try {
+      const dir = await this.#store.domainLayersDir(domainName)
+      const bytes =
+        await this.#store.readFile(dir, layerSig)
+        ?? await this.#store.readFile(dir, `${layerSig}.json`)
+      if (!bytes) return null
+      return JSON.parse(new TextDecoder().decode(bytes))
+    } catch {
+      return null
+    }
   }
 
   async #readCachedManifest(domain: string, rootSig: string): Promise<any> {
@@ -259,6 +342,78 @@ export class SentinelHandler {
     } catch {
       return {}
     }
+  }
+
+  /**
+   * Receive a sig + bytes from hypercomb-web. Verify the hash, write
+   * to __from-hypercomb__/{kind}/, append to the provenance manifest,
+   * broadcast on `dcp-from-hypercomb` so any DCP main tab refreshes
+   * its tree, and ack.
+   *
+   * On ack=false the web side leaves the queue entry in place; next
+   * drain will retry. So this method is conservative: any failure
+   * returns ok=false rather than swallowing.
+   */
+  async #handleIntake(msg: SentinelRequest & { type: 'intake' }, port: MessagePort): Promise<void> {
+    const { rid, signature, kind, bytes } = msg
+
+    if (!/^[a-f0-9]{64}$/.test(signature)) {
+      port.postMessage({ type: 'intake-ack', rid, ok: false, error: 'invalid signature format' })
+      return
+    }
+
+    const actual = await SignatureService.sign(bytes)
+    if (actual !== signature) {
+      console.warn(`[sentinel] intake hash mismatch: expected ${signature}, got ${actual}`)
+      port.postMessage({ type: 'intake-ack', rid, ok: false, error: 'hash mismatch' })
+      return
+    }
+
+    try {
+      await this.#store.initialize()
+      const dir = await this.#store.fromHypercombKindDir(kind)
+      const fileName = this.#intakeFileName(signature, kind)
+      await this.#store.writeFile(dir, fileName, bytes)
+      await this.#appendIntakeIndex(signature, kind)
+    } catch (e) {
+      console.warn(`[sentinel] intake write failed for ${signature.slice(0, 12)}`, e)
+      port.postMessage({ type: 'intake-ack', rid, ok: false, error: 'write failed' })
+      return
+    }
+
+    port.postMessage({ type: 'intake-ack', rid, ok: true })
+
+    try {
+      const channel = new BroadcastChannel('dcp-from-hypercomb')
+      channel.postMessage({ signature, kind, at: Date.now() })
+      channel.close()
+    } catch { /* BroadcastChannel unavailable — UI will pick up on next reload */ }
+  }
+
+  #intakeFileName(signature: string, kind: IntakeKind): string {
+    if (kind === 'layer') return signature
+    if (kind === 'resource') return signature
+    return `${signature}.js`
+  }
+
+  /**
+   * Append-only provenance index. Each line is a JSON record. Cheap to
+   * write (no read-modify-write parsing), trivially recoverable, and
+   * tolerant of partial writes — a corrupt last line just gets
+   * skipped on read.
+   */
+  async #appendIntakeIndex(signature: string, kind: IntakeKind): Promise<void> {
+    const dir = await this.#store.fromHypercombDir()
+    const handle = await dir.getFileHandle('index.jsonl', { create: true })
+    const file = await handle.getFile()
+    const existing = await file.arrayBuffer()
+    const record = JSON.stringify({ signature, kind, at: Date.now() }) + '\n'
+    const recordBytes = new TextEncoder().encode(record)
+    const merged = new Uint8Array(existing.byteLength + recordBytes.byteLength)
+    merged.set(new Uint8Array(existing), 0)
+    merged.set(recordBytes, existing.byteLength)
+    const writable = await handle.createWritable()
+    try { await writable.write(merged) } finally { await writable.close() }
   }
 
   async #handleFetchContent(msg: SentinelRequest & { type: 'fetch-content' }, port: MessagePort): Promise<void> {

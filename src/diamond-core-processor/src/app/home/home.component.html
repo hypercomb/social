@@ -1,4 +1,13 @@
 <!-- src/app/home/home.component.html -->
+@if (installToastVisible()) {
+  <div class="install-toast" role="status" aria-live="polite">
+    <div class="install-toast-body">
+      <strong>Pushed to Hypercomb</strong>
+      <span>Switch back to your Hypercomb tab — it will reload with the new modules.</span>
+    </div>
+    <button class="install-toast-close" type="button" (click)="dismissInstallToast()" aria-label="Dismiss">&times;</button>
+  </div>
+}
 <div class="tree-home">
     <header class="top-bar">
       <h1 class="title">{{ 'dcp.title' | t }}</h1>

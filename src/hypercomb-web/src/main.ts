@@ -41,8 +41,28 @@ const attachImportMap = async (): Promise<void> => {
 
 const bootstrap = async (): Promise<void> => {
   await ensureSwControl()
-  await ensureInstall()
+
+  // Capture install state BEFORE ensureInstall so the cold-install path
+  // is detectable. ensureInstall flips this flag when the first sync
+  // produces content; the subsequent resyncAndEnforce branch reloads
+  // immediately so the user doesn't sit on an empty shell.
+  const wasInstalledAtBoot = localStorage.getItem('hypercomb.installed') === 'true'
+
+  // Bring up the sentinel bridge before anything else runs. Push-only
+  // install: sentinel is the SOLE source of content. Web→DCP intake
+  // requires it; cold install requires it. If unreachable, boot
+  // continues with whatever is cached (or empty if nothing is cached);
+  // resyncAndEnforce will pick up content once DCP is online.
+  const sentinel = await initSentinel()
+
+  await ensureInstall(sentinel)
   await attachImportMap()
+
+  // Snapshot the sync signature applied at boot. Anything that drifts
+  // from this (toggles in DCP, intake from web→DCP, etc.) means the
+  // running shell is showing stale state — when the user leaves DCP
+  // we reload to commit the new state.
+  const bootSyncSig = localStorage.getItem('sentinel.sync-signature') ?? ''
 
   // Load dependency namespaces so services self-register before Angular renders
   const loader = get('@hypercomb.social/DependencyLoader') as DependencyLoader | undefined
@@ -50,20 +70,25 @@ const bootstrap = async (): Promise<void> => {
 
   const appRef = await bootstrapApplication(App, appConfig)
 
-  // ── Push-only updates: sentinel is lazy, initialized on demand ──
-  // No per-load polling. Updates arrive via the `actions:available` event
-  // dispatched by the DCP portal after an explicit push.
-  let cachedSentinel: SentinelBridge | null = null
+  if (!sentinel) {
+    // No DCP — nothing to resync against. App still boots from cached state.
+    return
+  }
 
+  // Toggle-changed: keep OPFS in sync silently. Do NOT reload while
+  // hypercomb is foregrounded — the running shell continues with its
+  // currently loaded drones. Reload happens when the user leaves DCP
+  // (embed close, or standalone tab close) and we detect drift from
+  // bootSyncSig.
   const resyncAndEnforce = async () => {
-    const sentinel = await lazyInitSentinel()
-    if (!sentinel) return
-
-    const previousSyncSig = localStorage.getItem('sentinel.sync-signature') ?? ''
     await resyncFromSentinel(sentinel)
-    const currentSyncSig = localStorage.getItem('sentinel.sync-signature') ?? ''
 
-    if (currentSyncSig && currentSyncSig !== previousSyncSig) {
+    // Cold-install reload: we booted into install-needed state. The first
+    // resync that produces content flips hypercomb.installed → true. Reload
+    // immediately so the user sees the populated shell rather than the
+    // install prompt.
+    if (!wasInstalledAtBoot && localStorage.getItem('hypercomb.installed') === 'true') {
+      console.log('[main] cold install completed — reloading')
       location.reload()
       return
     }
@@ -73,15 +98,19 @@ const bootstrap = async (): Promise<void> => {
     appRef.tick()
   }
 
-  const lazyInitSentinel = async (): Promise<SentinelBridge | null> => {
-    if (cachedSentinel) return cachedSentinel
-    cachedSentinel = await initSentinel()
-    if (cachedSentinel) cachedSentinel.onToggleChanged = resyncAndEnforce
-    return cachedSentinel
+  const reloadIfDrifted = async (source: string) => {
+    await resyncFromSentinel(sentinel)
+    const currentSyncSig = localStorage.getItem('sentinel.sync-signature') ?? ''
+    if (currentSyncSig && currentSyncSig !== bootSyncSig) {
+      console.log(`[main] ${source} with drift — reloading`)
+      location.reload()
+    }
   }
 
-  // After DCP portal installs, resync + reload (import map is frozen).
+  sentinel.onToggleChanged = resyncAndEnforce
+  sentinel.onDcpClosed = () => reloadIfDrifted('dcp tab closed')
   window.addEventListener('actions:available', resyncAndEnforce)
+  window.addEventListener('dcp:embed-closed', () => reloadIfDrifted('dcp embed closed'))
 }
 
 bootstrap().catch(err => console.error(err))

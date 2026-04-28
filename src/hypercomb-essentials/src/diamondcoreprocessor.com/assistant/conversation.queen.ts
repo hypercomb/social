@@ -16,6 +16,7 @@ export class ConversationQueenBee extends QueenBee {
   readonly command = 'chat'
   override readonly aliases = []
   override description = 'Multi-turn conversation with Claude — creates thread tiles with Q&A children'
+  override descriptionKey = 'slash.chat'
 
   protected async execute(args: string): Promise<void> {
     const parsed = parseChatArgs(args)

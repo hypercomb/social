@@ -1,6 +1,65 @@
 @use '../../../hypercomb-shared/ui/header-bar';
 @use '../../../hypercomb-shared/ui/breakpoints' as *;
 
+.install-prompt {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483646;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 8, 12, 0.92);
+  backdrop-filter: blur(8px);
+  font-family: var(--hc-font, system-ui, sans-serif);
+  color: rgba(255, 255, 255, 0.92);
+
+  .install-card {
+    max-width: 28rem;
+    width: calc(100vw - 3rem);
+    padding: 2rem 2.2rem;
+    background: rgba(20, 20, 26, 0.96);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 14px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+    text-align: center;
+  }
+
+  h2 {
+    margin: 0 0 0.8rem;
+    font-size: 1.4rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+
+  p {
+    margin: 0 0 1.2rem;
+    font-size: 0.98rem;
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.78);
+  }
+
+  .install-cta {
+    display: inline-block;
+    padding: 0.75rem 1.6rem;
+    margin: 0.4rem 0 0.8rem;
+    font-size: 0.98rem;
+    font-weight: 600;
+    color: #0a0a0a;
+    background: rgba(255, 255, 255, 0.92);
+    border-radius: 999px;
+    text-decoration: none;
+    transition: background 0.15s ease;
+
+    &:hover { background: rgba(255, 255, 255, 1); }
+  }
+
+  .install-hint {
+    margin: 0;
+    font-size: 0.82rem;
+    color: rgba(255, 255, 255, 0.5);
+  }
+}
+
 .intro-lock {
   position: fixed;
   inset: 0;

@@ -1,5 +1,6 @@
-import { AfterViewInit, Component, HostBinding, inject, signal } from '@angular/core'
+import { AfterViewInit, Component, computed, HostBinding, inject, signal } from '@angular/core'
 import { type Bee, EffectBus } from '@hypercomb/core'
+import type { BootStatus } from '../setup/ensure-install'
 import { RouterOutlet } from '@angular/router'
 import { Header } from './header/header'
 import { CoreAdapter } from './core-adapter'
@@ -29,6 +30,16 @@ export class App implements AfterViewInit {
   public readonly viewActive = signal(false)
   readonly clipboardMode = signal(false)
   readonly moveMode = signal(false)
+  protected readonly bootStatus = signal<BootStatus | null>(null)
+  protected readonly installNeeded = computed(() => this.bootStatus()?.kind === 'install-needed')
+  protected readonly installReason = computed(() => {
+    const s = this.bootStatus()
+    return s?.kind === 'install-needed' ? s.reason : null
+  })
+  protected readonly dcpOrigin =
+    typeof location !== 'undefined' && location.hostname === 'localhost'
+      ? 'http://localhost:2400'
+      : 'https://diamondcoreprocessor.com'
 
   @HostBinding('class.clipboard-mode')
   get clipboardModeClass() { return this.clipboardMode(); }
@@ -52,6 +63,10 @@ export class App implements AfterViewInit {
     })
 
     this.runtimeReady = this.core.initialize()
+
+    EffectBus.on<BootStatus>('boot:status', (status) => {
+      this.bootStatus.set(status)
+    })
 
     EffectBus.on<{ active: boolean }>('view:active', ({ active }) => {
       this.viewActive.set(active)

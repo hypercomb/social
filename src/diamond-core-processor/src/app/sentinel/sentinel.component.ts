@@ -43,11 +43,16 @@ export class SentinelComponent implements OnInit, OnDestroy {
     // so it can resync and stop/start the affected bee.
     try {
       this.#toggleChannel = new BroadcastChannel('dcp-toggle-state')
-      this.#toggleChannel.onmessage = () => {
-        if (this.#port) {
-          this.#port.postMessage({ type: 'toggle-changed' })
-          console.log('[sentinel] relayed toggle-changed to web')
+      this.#toggleChannel.onmessage = (e) => {
+        if (!this.#port) return
+        if (e.data?.type === 'dcp-closing') {
+          this.#port.postMessage({ type: 'dcp-closed' })
+          console.log('[sentinel] relayed dcp-closed to web')
+          return
         }
+        // default: toggle-changed (back-compat with un-typed messages)
+        this.#port.postMessage({ type: 'toggle-changed' })
+        console.log('[sentinel] relayed toggle-changed to web')
       }
     } catch { /* BroadcastChannel unavailable */ }
 

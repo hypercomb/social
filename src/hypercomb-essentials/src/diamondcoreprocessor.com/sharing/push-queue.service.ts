@@ -12,9 +12,14 @@
 //
 // On-disk shape (top-level OPFS):
 //
-//   __push__/queue/{sig}    ← intent file. Empty content; sig is the
-//                             filename. mtime is enqueue time, so the
-//                             queue is naturally FIFO without an index.
+//   __push__/queue/{sig}.{kind}  ← queued bytes. Filename encodes both
+//                                  the sig and the kind (layer | bee |
+//                                  dependency | resource), matching the
+//                                  canonical bag convention. Content is
+//                                  the actual bytes — drain reads the
+//                                  file, posts to sentinel, no separate
+//                                  byte lookup needed. mtime is enqueue
+//                                  time, so the queue is naturally FIFO.
 //
 //   __receipts__/{sig}      ← receipt. File existence = "DCP has
 //                             confirmed this sig." Empty for the
@@ -53,13 +58,16 @@
 //     doesn't; no half-states. Branch readiness is a directory probe.
 //
 // What is intentionally NOT here yet:
-//   - Real DCP intake transport. The stub writes the receipt locally
-//     so the gate logic is end-to-end exercisable; swapping it for
-//     a real POST + signed receipt is a single private method change.
 //   - BranchService / Save. That layer reads hasReceipt(); building
-//     it next is straightforward once a transport exists.
+//     it next is straightforward now that the transport exists.
 
 import { EffectBus } from '@hypercomb/core'
+
+export type IntakeKind = 'layer' | 'bee' | 'dependency' | 'resource'
+
+type SentinelBridgeLike = {
+  intake?: (sig: string, kind: IntakeKind, bytes: ArrayBuffer) => Promise<boolean>
+}
 
 export class PushQueueService extends EventTarget {
 
@@ -67,8 +75,22 @@ export class PushQueueService extends EventTarget {
   static readonly #QUEUE_SUBDIR = 'queue'
   static readonly #RECEIPTS_DIR = '__receipts__'
   static readonly #SIG_RE = /^[a-f0-9]{64}$/
+  static readonly #ENTRY_RE = /^([a-f0-9]{64})\.(layer|bee|dependency|resource)$/
 
   #draining = false
+
+  constructor() {
+    super()
+    // Auto-enqueue any content written to OPFS. Store (in shared) and
+    // HistoryService (in essentials) both emit `content:wrote` after a
+    // successful write. Going through EffectBus keeps shared from
+    // having to import this service, respecting the
+    // shared-cannot-import-essentials boundary.
+    EffectBus.on<{ sig: string; kind: IntakeKind; bytes: ArrayBuffer }>(
+      'content:wrote',
+      ({ sig, kind, bytes }) => { void this.enqueue(sig, kind, bytes) }
+    )
+  }
 
   // -------------------------------------------------
   // public API
@@ -76,19 +98,22 @@ export class PushQueueService extends EventTarget {
 
   /**
    * Mark a sig as needing to land in DCP. Idempotent — the queue is
-   * keyed by sig, so repeat calls collapse into one entry. Skips the
-   * enqueue entirely if a receipt already exists (nothing to push).
-   * Fires drain() in the background; callers don't await the network.
+   * keyed by `{sig}.{kind}`, so repeat calls for the same sig+kind
+   * collapse into one entry. Skips the enqueue entirely if a receipt
+   * already exists (nothing to push). Writes the actual bytes to the
+   * queue file so drain has everything it needs without a separate
+   * byte lookup. Fires drain() in the background; callers don't await
+   * the network.
    */
-  public readonly enqueue = async (sig: string): Promise<void> => {
+  public readonly enqueue = async (sig: string, kind: IntakeKind, bytes: ArrayBuffer): Promise<void> => {
     if (!PushQueueService.#SIG_RE.test(sig)) return
     if (await this.hasReceipt(sig)) return
     const queueDir = await this.#getQueueDir()
     if (!queueDir) return   // store not initialized yet — silent no-op
     try {
-      const handle = await queueDir.getFileHandle(sig, { create: true })
+      const handle = await queueDir.getFileHandle(`${sig}.${kind}`, { create: true })
       const writable = await handle.createWritable()
-      try { await writable.write(new Uint8Array(0)) } finally { await writable.close() }
+      try { await writable.write(bytes) } finally { await writable.close() }
     } catch { /* best-effort — next enqueue or drain will retry */ }
     void this.drain()
   }
@@ -104,21 +129,21 @@ export class PushQueueService extends EventTarget {
     this.#draining = true
     try {
       for (;;) {
-        const sigs = await this.#listQueue()
-        if (sigs.length === 0) break
+        const entries = await this.#listQueue()
+        if (entries.length === 0) break
 
-        for (const sig of sigs) {
-          if (await this.hasReceipt(sig)) {
+        for (const entry of entries) {
+          if (await this.hasReceipt(entry.sig)) {
             // Already pushed in a prior session — drop the stale
             // queue entry without re-pushing.
-            await this.#removeQueueEntry(sig)
+            await this.#removeQueueEntry(entry.fileName)
             continue
           }
-          const ok = await this.#stubPushAndReceipt(sig)
+          const ok = await this.#pushAndReceipt(entry)
           if (!ok) continue   // leave the entry; retry on next drain
-          await this.#removeQueueEntry(sig)
-          this.dispatchEvent(new CustomEvent('receipt', { detail: { sig } }))
-          EffectBus.emit('push:receipt', { sig })
+          await this.#removeQueueEntry(entry.fileName)
+          this.dispatchEvent(new CustomEvent('receipt', { detail: { sig: entry.sig } }))
+          EffectBus.emit('push:receipt', { sig: entry.sig })
         }
       }
     } finally {
@@ -141,17 +166,16 @@ export class PushQueueService extends EventTarget {
   }
 
   /**
-   * True iff the sig is queued and not yet receipted.
+   * True iff the sig is queued and not yet receipted. A queued entry
+   * lives at `{sig}.{kind}` for some kind, so probe by listing the
+   * queue rather than building the filename — kind is not part of
+   * the public sig identity.
    */
   public readonly isPending = async (sig: string): Promise<boolean> => {
     if (!PushQueueService.#SIG_RE.test(sig)) return false
     if (await this.hasReceipt(sig)) return false
-    try {
-      const dir = await this.#getQueueDir()
-      if (!dir) return false
-      await dir.getFileHandle(sig, { create: false })
-      return true
-    } catch { return false }
+    const entries = await this.#listQueue()
+    return entries.some(e => e.sig === sig)
   }
 
   /**
@@ -162,8 +186,8 @@ export class PushQueueService extends EventTarget {
   public readonly pending = async (): Promise<string[]> => {
     const queue = await this.#listQueue()
     const out: string[] = []
-    for (const sig of queue) {
-      if (!(await this.hasReceipt(sig))) out.push(sig)
+    for (const entry of queue) {
+      if (!(await this.hasReceipt(entry.sig))) out.push(entry.sig)
     }
     return out
   }
@@ -194,47 +218,57 @@ export class PushQueueService extends EventTarget {
   // internal — queue ops
   // -------------------------------------------------
 
-  readonly #listQueue = async (): Promise<string[]> => {
+  readonly #listQueue = async (): Promise<Array<{ sig: string; kind: IntakeKind; fileName: string; mtime: number }>> => {
     const dir = await this.#getQueueDir()
     if (!dir) return []
-    const items: Array<{ sig: string; mtime: number }> = []
+    const items: Array<{ sig: string; kind: IntakeKind; fileName: string; mtime: number }> = []
     for await (const [name, handle] of (dir as any).entries()) {
       if (handle.kind !== 'file') continue
-      if (!PushQueueService.#SIG_RE.test(name)) continue
+      const m = name.match(PushQueueService.#ENTRY_RE)
+      if (!m) continue
       try {
         const file = await (handle as FileSystemFileHandle).getFile()
-        items.push({ sig: name, mtime: file.lastModified })
+        items.push({ sig: m[1], kind: m[2] as IntakeKind, fileName: name, mtime: file.lastModified })
       } catch { /* skip unreadable */ }
     }
     items.sort((a, b) => a.mtime - b.mtime)
-    return items.map(i => i.sig)
+    return items
   }
 
-  readonly #removeQueueEntry = async (sig: string): Promise<void> => {
+  readonly #removeQueueEntry = async (fileName: string): Promise<void> => {
     try {
       const dir = await this.#getQueueDir()
       if (!dir) return
-      await dir.removeEntry(sig)
+      await dir.removeEntry(fileName)
     } catch { /* already gone */ }
   }
 
   /**
-   * Scaffolding stub. Real implementation:
-   *   - Resolve sig bytes (Store.getResource — bag file or __layers__/)
-   *   - POST to DCP intake endpoint
-   *   - Await DCP-signed receipt blob
-   *   - Write receipt bytes to __receipts__/{sig}
-   *
-   * Until the transport exists, write an empty receipt locally so the
-   * gate logic (hasReceipt → branch readiness) is exercisable end to
-   * end. Swapping the stub for a real push is a single-method change;
-   * the public API and on-disk shape are stable.
+   * Read the queued bytes, post to the DCP sentinel intake. On ack
+   * write the receipt and return true so the queue entry can be
+   * dropped. On nack/timeout/missing-bridge return false — drain
+   * leaves the queue entry in place for the next run.
    */
-  readonly #stubPushAndReceipt = async (sig: string): Promise<boolean> => {
+  readonly #pushAndReceipt = async (entry: { sig: string; kind: IntakeKind; fileName: string }): Promise<boolean> => {
+    const bridge = (globalThis as any).__sentinelBridge as SentinelBridgeLike | undefined
+    if (!bridge?.intake) return false   // sentinel not up yet; retry later
+
+    let bytes: ArrayBuffer
     try {
-      const dir = await this.#getReceiptsDir()
+      const dir = await this.#getQueueDir()
       if (!dir) return false
-      const handle = await dir.getFileHandle(sig, { create: true })
+      const handle = await dir.getFileHandle(entry.fileName, { create: false })
+      const file = await handle.getFile()
+      bytes = await file.arrayBuffer()
+    } catch { return false }
+
+    const ok = await bridge.intake(entry.sig, entry.kind, bytes)
+    if (!ok) return false
+
+    try {
+      const receiptsDir = await this.#getReceiptsDir()
+      if (!receiptsDir) return false
+      const handle = await receiptsDir.getFileHandle(entry.sig, { create: true })
       const writable = await handle.createWritable()
       try { await writable.write(new Uint8Array(0)) } finally { await writable.close() }
       return true

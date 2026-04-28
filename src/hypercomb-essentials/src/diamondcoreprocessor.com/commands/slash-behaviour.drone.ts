@@ -145,21 +145,6 @@ class KeywordProvider implements SlashBehaviourProvider {
   }
 }
 
-class MeetingProvider implements SlashBehaviourProvider {
-  readonly name = 'meeting-provider'
-  readonly priority = 100
-  readonly behaviours: SlashBehaviour[] = [
-    { name: 'meeting', description: 'Start or join a video meeting on the selected tile', descriptionKey: 'slash.meeting' }
-  ]
-
-  async execute(_behaviourName: string, args: string): Promise<void> {
-    const queen = get('@diamondcoreprocessor.com/MeetingQueenBee') as any
-    if (queen?.invoke) {
-      await queen.invoke(args)
-    }
-  }
-}
-
 class DebugProvider implements SlashBehaviourProvider {
   readonly name = 'debug-provider'
   readonly priority = 100
@@ -213,39 +198,6 @@ class RemoveProvider implements SlashBehaviourProvider {
     const q = args.toLowerCase().trim()
     if (!q) return cells
     return cells.filter(n => n.startsWith(q))
-  }
-}
-
-class FormatSlashProvider implements SlashBehaviourProvider {
-  readonly name = 'format-provider'
-  readonly priority = 100
-  readonly behaviours: SlashBehaviour[] = [
-    { name: 'format', description: 'Copy visual formatting from the active tile', descriptionKey: 'slash.format' }
-  ]
-
-  async execute(_behaviourName: string, args: string): Promise<void> {
-    const queen = get('@diamondcoreprocessor.com/FormatQueenBee') as any
-    if (queen?.invoke) await queen.invoke(args)
-  }
-}
-
-class LayoutProvider implements SlashBehaviourProvider {
-  readonly name = 'layout-provider'
-  readonly priority = 100
-  readonly behaviours: SlashBehaviour[] = [
-    { name: 'layout', description: 'Save, apply, list, or remove layout templates', descriptionKey: 'slash.layout' }
-  ]
-
-  async execute(_behaviourName: string, args: string): Promise<void> {
-    const queen = get('@diamondcoreprocessor.com/LayoutQueenBee') as any
-    if (queen?.invoke) await queen.invoke(args)
-  }
-
-  complete(_behaviourName: string, args: string): readonly string[] {
-    const subcommands = ['save', 'apply', 'list', 'remove']
-    const q = args.toLowerCase().trim()
-    if (!q) return subcommands
-    return subcommands.filter(s => s.startsWith(q))
   }
 }
 
@@ -338,19 +290,6 @@ class MoveProvider implements SlashBehaviourProvider {
   }
 }
 
-class ReviseProvider implements SlashBehaviourProvider {
-  readonly name = 'revise-provider'
-  readonly priority = 100
-  readonly behaviours: SlashBehaviour[] = [
-    { name: 'revise', description: 'Toggle revision mode (history clock)', descriptionKey: 'slash.revise' }
-  ]
-
-  async execute(_behaviourName: string, args: string): Promise<void> {
-    const queen = get('@diamondcoreprocessor.com/ReviseQueenBee') as any
-    if (queen?.invoke) await queen.invoke(args)
-  }
-}
-
 class ExpandProvider implements SlashBehaviourProvider {
   readonly name = 'expand-provider'
   readonly priority = 100
@@ -367,37 +306,6 @@ class ExpandProvider implements SlashBehaviourProvider {
 
     for (const label of targets) {
       EffectBus.emit('tile:action', { action: 'expand', label, q: 0, r: 0, index: 0 })
-    }
-  }
-}
-
-class ChatProvider implements SlashBehaviourProvider {
-  readonly name = 'chat-provider'
-  readonly priority = 100
-  readonly behaviours: SlashBehaviour[] = [
-    { name: 'chat', description: 'Multi-turn conversation with Claude' }
-  ]
-
-  async execute(_behaviourName: string, args: string): Promise<void> {
-    const queen = get('@diamondcoreprocessor.com/ConversationQueenBee') as any
-    if (queen?.invoke) await queen.invoke(args)
-  }
-}
-
-class LlmProvider implements SlashBehaviourProvider {
-  readonly name = 'llm-provider'
-  readonly priority = 100
-  readonly behaviours: SlashBehaviour[] = [
-    { name: 'opus', description: 'Send context to Claude Opus 4.6', descriptionKey: 'slash.opus' },
-    { name: 'sonnet', description: 'Send context to Claude Sonnet', descriptionKey: 'slash.sonnet' },
-    { name: 'haiku', description: 'Send context to Claude Haiku', descriptionKey: 'slash.haiku' },
-  ]
-
-  async execute(behaviourName: string, args: string): Promise<void> {
-    const queen = get('@diamondcoreprocessor.com/LlmQueenBee') as any
-    if (queen) {
-      queen.activeModel = behaviourName
-      await queen.invoke(args)
     }
   }
 }
@@ -518,102 +426,17 @@ class DomainProvider implements SlashBehaviourProvider {
   }
 }
 
-class SubstrateProvider implements SlashBehaviourProvider {
-  readonly name = 'substrate-provider'
-  readonly priority = 100
-  readonly behaviours: SlashBehaviour[] = [
-    { name: 'substrate', description: 'Toggle default background images for new tiles', descriptionKey: 'slash.substrate' }
-  ]
-
-  async execute(_behaviourName: string, args: string): Promise<void> {
-    const queen = get('@diamondcoreprocessor.com/SubstrateQueenBee') as any
-    if (queen?.invoke) await queen.invoke(args)
-  }
-
-  complete(_behaviourName: string, args: string): readonly string[] {
-    const q = args.toLowerCase().trim()
-    if (!q) return ['here']
-    return ['here'].filter(s => s.startsWith(q))
-  }
-}
-
-class RerollProvider implements SlashBehaviourProvider {
-  readonly name = 'reroll-provider'
-  readonly priority = 100
-  readonly behaviours: SlashBehaviour[] = [
-    { name: 'reroll', description: 'Reroll substrate background images on tiles', descriptionKey: 'slash.reroll' }
-  ]
-
-  async execute(_behaviourName: string, args: string): Promise<void> {
-    const queen = get('@diamondcoreprocessor.com/RerollQueenBee') as any
-    if (queen?.invoke) await queen.invoke(args)
-  }
-
-  complete(_behaviourName: string, args: string): readonly string[] {
-    const cellProvider = get('@hypercomb.social/CellSuggestionProvider') as { suggestions(): string[] } | undefined
-    const cells = cellProvider?.suggestions() ?? []
-
-    // Bracket mode: /reroll[cell1,cell2,partial — same pattern as /remove and
-    // /accent so every batch-target command behaves identically.
-    const bracketStart = args.indexOf('[')
-    if (bracketStart >= 0) {
-      const inner = args.slice(bracketStart + 1)
-      const lastComma = inner.lastIndexOf(',')
-      const fragment = (lastComma >= 0 ? inner.slice(lastComma + 1) : inner).trimStart().toLowerCase()
-      const already = new Set<string>()
-      for (const item of inner.split(',')) {
-        const n = item.trim().toLowerCase()
-        if (n && n !== fragment) already.add(n)
-      }
-      let filtered = cells.filter(n => !already.has(n))
-      if (fragment) filtered = filtered.filter(n => n.startsWith(fragment))
-      return filtered
-    }
-
-    // Space mode — single tile name
-    const q = args.toLowerCase().trim()
-    if (!q) return cells
-    return cells.filter(n => n.startsWith(q))
-  }
-}
-
-class RecordingProvider implements SlashBehaviourProvider {
-  readonly name = 'recording-provider'
-  readonly priority = 100
-  readonly behaviours: SlashBehaviour[] = [
-    { name: 'record', description: 'Start AI-powered meeting recording with live hierarchy compilation', descriptionKey: 'slash.record' }
-  ]
-
-  async execute(_behaviourName: string, args: string): Promise<void> {
-    const queen = get('@diamondcoreprocessor.com/RecordingQueenBee') as any
-    if (queen?.invoke) await queen.invoke(args)
-  }
-
-  complete(_behaviourName: string, args: string): readonly string[] {
-    const q = args.toLowerCase().trim()
-    const options = ['start', 'stop', 'interval', 'model']
-    if (!q) return options
-    return options.filter(s => s.startsWith(q))
-  }
-}
-
 // ── registration ────────────────────────────────────────
 
 const _slashBehaviours = new SlashBehaviourDrone()
 _slashBehaviours.addProvider(new HelpProvider())
 _slashBehaviours.addProvider(new ClearProvider())
 _slashBehaviours.addProvider(new KeywordProvider())
-_slashBehaviours.addProvider(new MeetingProvider())
 _slashBehaviours.addProvider(new DebugProvider())
 _slashBehaviours.addProvider(new RemoveProvider())
-_slashBehaviours.addProvider(new FormatSlashProvider())
-_slashBehaviours.addProvider(new LayoutProvider())
 _slashBehaviours.addProvider(new AccentProvider())
 _slashBehaviours.addProvider(new MoveProvider())
-_slashBehaviours.addProvider(new ReviseProvider())
 _slashBehaviours.addProvider(new ExpandProvider())
-_slashBehaviours.addProvider(new ChatProvider())
-_slashBehaviours.addProvider(new LlmProvider())
 _slashBehaviours.addProvider(new ArrangeProvider())
 _slashBehaviours.addProvider(new VoiceProvider())
 _slashBehaviours.addProvider(new PushToTalkProvider())
@@ -622,9 +445,6 @@ _slashBehaviours.addProvider(new InstructionsProvider())
 _slashBehaviours.addProvider(new AtomizeUiProvider())
 _slashBehaviours.addProvider(new DocsProvider())
 _slashBehaviours.addProvider(new DomainProvider())
-_slashBehaviours.addProvider(new SubstrateProvider())
-_slashBehaviours.addProvider(new RerollProvider())
-_slashBehaviours.addProvider(new RecordingProvider())
 
 // ── auto-discovery of QueenBees ─────────────────────────
 //
@@ -675,6 +495,7 @@ const wrapQueen = (queen: ReturnType<typeof isQueen> extends true ? never : any)
 
 const considerQueen = (value: unknown): void => {
   if (!isQueen(value)) return
+  if ((value as any).slashSkipAutoWrap === true) return
   if (autoWrappedCommands.has(value.command)) return
   if (alreadyDeclared(value.command)) return
   autoWrappedCommands.add(value.command)
