@@ -53,7 +53,7 @@ export class CollapseHistoryQueenBee extends QueenBee {
       const toDelete = entries
         .filter(e => e.filename !== keep.filename)
         .map(e => e.filename)
-      removed += await history.removeEntries(lineageSig, toDelete)
+      removed += await history.archiveEntries(lineageSig, toDelete)
     }
 
     // Clear persisted cursor positions so each bag snaps to head next load

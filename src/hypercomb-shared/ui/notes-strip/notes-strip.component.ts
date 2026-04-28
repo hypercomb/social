@@ -88,10 +88,15 @@ export class NotesStripComponent implements OnDestroy {
       this.#selectionListener = () => selection.removeEventListener('change', handler)
     }
 
-    this.#cleanups.push(EffectBus.on<{ cellLabel: string }>('notes:changed', async (p) => {
-      // ensure the warm cache is populated before bumping the version signal
+    this.#cleanups.push(EffectBus.on<{ segments?: readonly string[] }>('notes:changed', async (p) => {
+      // HiveParticipant emits with `segments` only — derive the cell
+      // label from the last segment. Warmup is already done by
+      // NotesService at boot; no async pre-warm needed here.
+      const cellLabel = Array.isArray(p?.segments) && p!.segments!.length > 0
+        ? String(p!.segments![p!.segments!.length - 1] ?? '').trim()
+        : ''
       const svc = this.#notes
-      if (svc && p?.cellLabel) await svc.getNotes(p.cellLabel)
+      if (svc && cellLabel) await svc.getNotes(cellLabel)
       this.#version.update(v => v + 1)
     }))
 

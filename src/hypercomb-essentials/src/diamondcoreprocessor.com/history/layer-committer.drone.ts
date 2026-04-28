@@ -1,14 +1,16 @@
 // diamondcoreprocessor.com/history/layer-committer.drone.ts
 //
-// Single commit site for history. Listens to one event — `synchronize` —
-// assembles a full layer snapshot of the current location, and commits it
-// via HistoryService.commitLayer(). Deduplication is automatic: if the
-// assembled layer signature matches the current head, commitLayer returns
-// null and nothing is written.
+// Single commit site for history. Listens to user-event triggers
+// (cell:added, cell:removed, slot triggers via LayerSlotRegistry) and
+// runs the unified cascade: per ancestor depth, read the previous
+// head's children, apply a child delta if any, fold every registered
+// slot's value, commit a new marker, propagate the prevSig→newSig
+// swap up to root.
 //
-// Drones never name an op. They mutate state, the processor dispatches
-// `synchronize`, and a new numbered layer falls out. Ops are a *view*
-// derived by diffLayers, never storage.
+// One commit path. No disk enumeration. The merkle tree is the source
+// of truth; folders on disk are incidental. Deduplication is automatic
+// — commitLayer short-circuits when assembled bytes match the bag's
+// current head.
 import { EffectBus } from '@hypercomb/core'
 import type { HistoryService, LayerContent } from './history.service.js'
 import { ROOT_NAME } from './history.service.js'
@@ -24,20 +26,8 @@ import type { LayerSlotRegistry } from './layer-slot-registry.js'
 type Lineage = {
   domain?: () => string
   explorerLabel?: () => string
-  // Async in the live lineage; resolves to the explorer's directory
-  // handle (or null when not available yet).
-  explorerDir?: () => Promise<FileSystemDirectoryHandle | null> | FileSystemDirectoryHandle | null | undefined
   explorerSegments?: () => string[]
-  // Walk to an arbitrary ancestor — used by the cascade to pull each
-  // ancestor's directory handle. Lineage exposes this for the file
-  // explorer and we reuse it here.
-  tryResolve?: (
-    segments: readonly string[],
-    start?: FileSystemDirectoryHandle | null,
-  ) => Promise<FileSystemDirectoryHandle | null>
 }
-
-type LineageStore = { hypercombRoot?: FileSystemDirectoryHandle }
 
 type LayoutSnapshot = {
   orientation: 'flat-top' | 'point-top'
@@ -227,36 +217,27 @@ export class LayerCommitter {
   }
 
   /**
-   * Self-heal: ensure the lineage at `segments` has a marker reflecting
-   * the current on-disk state. Inspects the bag first — only commits
-   * when the bag has no canonical markers yet. Idempotent: a populated
-   * bag yields a no-op, no redundant markers.
+   * Ensure the bag at `segments` has at least 00000000 (the empty
+   * layer `{name}`) materialized on disk. `latestMarkerSigFor` auto-
+   * mints on first touch, so this reduces to a single call —
+   * deterministic, idempotent, no commit cascade required for empty
+   * lineages.
    *
-   * Called from HistoryCursorService.load() so that any lineage with
-   * tiles on disk but no recorded history (e.g. data created before
-   * the merkle commits existed) gets its first marker captured the
-   * moment it's first viewed. NON-DESTRUCTIVE: only ever appends.
+   * Real markers grow only through canonical cascades (cell:added,
+   * slot triggers). No disk-enumeration synthesis: if a cell exists,
+   * it got there by riding through cell:added at some point. Legacy
+   * on-disk-only data is intentionally not surfaced — the merkle tree
+   * is the source of truth.
    */
-  // Per-locSig in-flight bootstrap promise. Coalesces concurrent
-  // bootstrap calls for the same lineage so cursor.load and the
-  // Lineage 'change' subscription don't both fire commits.
   readonly #bootstrapInFlight = new Map<string, Promise<void>>()
 
   public async bootstrapIfEmpty(segments?: string[] | null): Promise<void> {
     const history = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
     const lineage = get<Lineage>('@hypercomb.social/Lineage')
-    if (!history || !lineage) {
-      return
-    }
+    if (!history || !lineage) return
 
-    // Store registers synchronously but its OPFS handles populate async
-    // via Store.initialize(). If `store.history` is still undefined, we
-    // can't read the bag yet — back off and let a later Lineage 'change'
-    // (or a manual cursor.load) re-trigger us.
-    const store = get<{ history?: FileSystemDirectoryHandle; hypercombRoot?: FileSystemDirectoryHandle }>(
-      '@hypercomb.social/Store'
-    )
-    if (!store?.history || !store?.hypercombRoot) return
+    const store = get<{ history?: FileSystemDirectoryHandle }>('@hypercomb.social/Store')
+    if (!store?.history) return
 
     const cleaned = Array.isArray(segments)
       ? segments.map(s => String(s ?? '').trim()).filter(Boolean)
@@ -269,24 +250,18 @@ export class LayerCommitter {
       explorerSegments: () => segs,
     } as Lineage)
 
-    // Coalesce concurrent calls for the same lineage.
     const existing = this.#bootstrapInFlight.get(locSig)
     if (existing) return existing
 
+    const ancestorName = segs.length === 0 ? ROOT_NAME : segs[segs.length - 1]
     const run = (async () => {
-      const markers = await history.listLayers(locSig)
+      // latestMarkerSigFor auto-mints 00000000 if the bag is empty.
+      // No commit, no cascade — just ensure the empty layer exists.
+      await history.latestMarkerSigFor(locSig, ancestorName)
       const cursor = get<{
         onNewLayer?: () => Promise<void>
         refreshForLocation?: (locSig: string) => Promise<void>
       }>('@diamondcoreprocessor.com/HistoryCursorService')
-
-      if (markers.length > 0) {
-        // Even on skip, push the bag's state into the cursor.
-        if (cursor?.refreshForLocation) await cursor.refreshForLocation(locSig)
-        return
-      }
-      // Empty bag → cascade the auto-mint of 00000000 + one marker for current state.
-      await this.#machine.requestAndWait({ segments: segs })
       if (cursor?.refreshForLocation) await cursor.refreshForLocation(locSig)
       else if (cursor?.onNewLayer) await cursor.onNewLayer()
     })()
@@ -308,149 +283,37 @@ export class LayerCommitter {
     const segments = req.segments ?? fallbackSegments
 
     // ───────────────────────────────────────────────────────────
-    // Delta-driven cascade — the canonical path.
+    // Unified cascade — ONE path for every commit type.
     //
-    // Invariant: every commit produces a new marker that differs
-    // from the previous head by EXACTLY ONE entry.
+    // Per ancestor depth (leaf → root):
+    //   1. Read the previous head's bytes → prev children verbatim.
+    //   2. LEAF only: apply child delta if present:
+    //         op='add'    → append cell sig if not already present
+    //         op='remove' → drop the entry whose layer.name matches
+    //         no op       → preserve children (slot-driven re-commit;
+    //                       only slot values change → new bytes → new sig)
+    //   3. ANCESTORS: swap (belowOldSig → belowNewSig) in children.
+    //      If sig swap misses (legacy / first cascade through), match
+    //      by name; if neither matches, append (orphan auto-attach —
+    //      the child clearly exists, we just committed its layer).
+    //   4. Fold every registered slot's value via LayerSlotRegistry.
+    //   5. Commit. commitLayer dedups identical bytes against the bag's
+    //      current head, so no-op cascades don't churn markers.
+    //   6. Track this ancestor's prevSig→newSig for the next iteration's
+    //      swap.
     //
-    //   - LEAF (depth = segments.length, the lineage where the
-    //     change happened): previous.children +/- the one cell sig.
-    //   - ANCESTORS (depth = segments.length-1 down to 0): swap the
-    //     just-committed-below sig in for the previous-head-below sig.
-    //     Same logical child, different sig pointer — exactly one
-    //     entry differs.
-    //
-    // Sibling sigs are PRESERVED VERBATIM at every level — no
-    // re-pulling from latestMarkerSigFor (which would surface stale-
-    // vs-current sig flips and produce spurious "+1 -1" diffs for
-    // unrelated cells).
+    // Source of truth: the bag's previous head + slot reads. NEVER
+    // disk enumeration — folders are incidental, layers are canonical.
+    // First-time-touched bags auto-mint 00000000 (the empty layer)
+    // via latestMarkerSigFor; their children start [] and grow only
+    // through cell:added events. No disk-derived "what should be here"
+    // — it either rode through the cascade, or it doesn't exist.
     // ───────────────────────────────────────────────────────────
-    if (req.op && req.cell) {
-      let belowOldSig: string | null = null    // sig of child-below in PREVIOUS ancestor's children
-      let belowNewSig: string | null = null    // sig of child-below in NEW ancestor's children
-      let belowName: string = req.cell         // child-below's display name
 
-      for (let depth = segments.length; depth >= 0; depth--) {
-        const sub = segments.slice(0, depth)
-        const ancestorName = depth === 0 ? ROOT_NAME : sub[sub.length - 1]
-        const ancestorLocSig = await history.sign({
-          domain: lineage.domain,
-          explorerSegments: () => sub,
-        } as Lineage)
+    let belowOldSig: string | null = null
+    let belowNewSig: string | null = null
+    let belowName: string | null = null
 
-        // Read THIS ancestor's previous head bytes. We need its
-        // children array so we can apply the one delta and otherwise
-        // preserve order + sibling sigs verbatim.
-        const prevSig = await history.latestMarkerSigFor(ancestorLocSig, ancestorName)
-        const prevLayer = await history.getLayerBySig(prevSig)
-        const prevChildren: string[] = prevLayer?.children?.slice() ?? []
-
-        let nextChildren: string[] = prevChildren
-
-        if (depth === segments.length) {
-          // LEAF: append for 'add', remove for 'remove'.
-          if (req.op === 'add') {
-            // Compute the cell's current head sig (materializes its
-            // bag's 00000000 if brand new).
-            const cellLocSig = await history.sign({
-              domain: lineage.domain,
-              explorerSegments: () => [...sub, req.cell!],
-            } as Lineage)
-            const cellSig = await history.latestMarkerSigFor(cellLocSig, req.cell!)
-            // Idempotent: if the cell sig is already in children, no-op.
-            if (!prevChildren.includes(cellSig)) {
-              nextChildren = [...prevChildren, cellSig]
-            } else {
-              nextChildren = prevChildren
-            }
-            belowOldSig = null
-            belowNewSig = cellSig
-            belowName = req.cell!
-          } else {
-            // remove: find the entry whose layer.name matches req.cell
-            const filtered: string[] = []
-            let foundOldSig: string | null = null
-            for (const sig of prevChildren) {
-              const child = await history.getLayerBySig(sig)
-              if (child?.name === req.cell) {
-                foundOldSig = sig
-                continue
-              }
-              filtered.push(sig)
-            }
-            nextChildren = filtered
-            belowOldSig = foundOldSig
-            belowNewSig = null   // removed: nothing to swap in at the next level up
-            belowName = req.cell!
-          }
-        } else {
-          // ANCESTOR: swap belowOldSig → belowNewSig in children.
-          // The "below" child is segments[depth] (the next segment
-          // toward the leaf). Find its sig in prevChildren — prefer
-          // matching belowOldSig if known, else fall back to a
-          // name-based scan (covers the first-time-seen case).
-          let swapped = false
-          const out: string[] = []
-          for (const sig of prevChildren) {
-            if (!swapped && belowOldSig !== null && sig === belowOldSig) {
-              if (belowNewSig !== null) out.push(belowNewSig)
-              swapped = true
-              continue
-            }
-            out.push(sig)
-          }
-          if (!swapped) {
-            // Couldn't match by sig (parent layer was committed before
-            // child's bag existed, or first cascade after a fresh boot).
-            // Find by name.
-            for (let i = 0; i < prevChildren.length; i++) {
-              const child = await history.getLayerBySig(prevChildren[i])
-              if (child?.name === belowName) {
-                if (belowNewSig !== null) out[i] = belowNewSig
-                else out.splice(i, 1)
-                swapped = true
-                break
-              }
-            }
-            if (!swapped && belowNewSig !== null) {
-              // Wasn't there at all (cascade reaches a parent that
-              // didn't know about this child yet). Append.
-              out.push(belowNewSig)
-              swapped = true
-            }
-          }
-          nextChildren = out
-          // Track for the next-level-up swap.
-          belowName = ancestorName
-        }
-
-        const slotValues = (await this.#slotRegistry?.readAll(ancestorLocSig, sub)) ?? {}
-        const newLayer: LayerContent = nextChildren.length === 0
-          ? { name: ancestorName, ...slotValues }
-          : { name: ancestorName, children: nextChildren, ...slotValues }
-        const newSig = await history.commitLayer(ancestorLocSig, newLayer)
-
-        // For the next iteration up: this ancestor's old sig becomes
-        // belowOldSig, its new sig becomes belowNewSig.
-        belowOldSig = prevSig
-        belowNewSig = newSig
-      }
-
-      const cursorAfter = get<HistoryCursorService>('@diamondcoreprocessor.com/HistoryCursorService')
-      if (cursorAfter) await cursorAfter.onNewLayer()
-      return
-    }
-
-    // ───────────────────────────────────────────────────────────
-    // Fallback (no op+cell delta available): re-snapshot from disk
-    // at every level. Used by non-cell events (layout-change, etc.)
-    // and by bootstrapIfEmpty to mint the initial baseline.
-    //
-    // This path can produce spurious sig swaps for unrelated children
-    // — it's a known correctness gap, kept ONLY for events that don't
-    // carry delta info. Ideally those events grow op+cell payloads
-    // too and this fallback dies.
-    // ───────────────────────────────────────────────────────────
     for (let depth = segments.length; depth >= 0; depth--) {
       const sub = segments.slice(0, depth)
       const ancestorName = depth === 0 ? ROOT_NAME : sub[sub.length - 1]
@@ -459,65 +322,76 @@ export class LayerCommitter {
         explorerSegments: () => sub,
       } as Lineage)
 
-      let ancestorDir: FileSystemDirectoryHandle | null = null
-      const store = get<LineageStore>('@hypercomb.social/Store')
-      const root = store?.hypercombRoot
-      if (root && lineage.tryResolve) {
-        ancestorDir = await lineage.tryResolve(sub, root).catch(() => null) as FileSystemDirectoryHandle | null
-      } else if (depth === segments.length) {
-        const dirOrPromise = lineage.explorerDir?.()
-        ancestorDir = await Promise.resolve(dirOrPromise ?? null)
+      const prevSig = await history.latestMarkerSigFor(ancestorLocSig, ancestorName)
+      const prevLayer = await history.getLayerBySig(prevSig)
+      const prevChildren: string[] = prevLayer?.children?.slice() ?? []
+
+      let nextChildren: string[] = prevChildren
+
+      if (depth === segments.length) {
+        // LEAF: apply delta if present, else preserve.
+        if (req.op === 'add' && req.cell) {
+          const cellLocSig = await history.sign({
+            domain: lineage.domain,
+            explorerSegments: () => [...sub, req.cell!],
+          } as Lineage)
+          const cellSig = await history.latestMarkerSigFor(cellLocSig, req.cell!)
+          if (!prevChildren.includes(cellSig)) nextChildren = [...prevChildren, cellSig]
+        } else if (req.op === 'remove' && req.cell) {
+          const filtered: string[] = []
+          for (const sig of prevChildren) {
+            const child = await history.getLayerBySig(sig)
+            if (child?.name === req.cell) continue
+            filtered.push(sig)
+          }
+          nextChildren = filtered
+        }
+      } else if (belowOldSig !== null) {
+        // ANCESTOR: swap (belowOldSig → belowNewSig) in children.
+        let swapped = false
+        const out: string[] = []
+        for (const sig of prevChildren) {
+          if (!swapped && sig === belowOldSig) {
+            if (belowNewSig !== null) out.push(belowNewSig)
+            swapped = true
+            continue
+          }
+          out.push(sig)
+        }
+        if (!swapped && belowName) {
+          for (let i = 0; i < prevChildren.length; i++) {
+            const child = await history.getLayerBySig(prevChildren[i])
+            if (child?.name === belowName) {
+              if (belowNewSig !== null) out[i] = belowNewSig
+              else out.splice(i, 1)
+              swapped = true
+              break
+            }
+          }
+          if (!swapped && belowNewSig !== null) {
+            // Auto-attach: ancestor never knew this child existed
+            // (legacy cascade gap or first commit through this lineage).
+            // Since we just committed the child's layer, append.
+            out.push(belowNewSig)
+            swapped = true
+          }
+        }
+        nextChildren = out
       }
 
-      const ancestorLayer = await this.#assembleLayerFor(history, sub, ancestorName, ancestorDir)
-      await history.commitLayer(ancestorLocSig, ancestorLayer)
+      const slotValues = (await this.#slotRegistry?.readAll(ancestorLocSig, sub)) ?? {}
+      const newLayer: LayerContent = nextChildren.length === 0
+        ? { name: ancestorName, ...slotValues }
+        : { name: ancestorName, children: nextChildren, ...slotValues }
+      const newSig = await history.commitLayer(ancestorLocSig, newLayer)
+
+      belowOldSig = prevSig
+      belowNewSig = newSig
+      belowName = ancestorName
     }
 
     const cursorAfter = get<HistoryCursorService>('@diamondcoreprocessor.com/HistoryCursorService')
     if (cursorAfter) await cursorAfter.onNewLayer()
-  }
-
-  /**
-   * Build a complete layer snapshot for the lineage at `segments` by
-   * enumerating its on-disk children AND folding in every registered
-   * LayerSlot's current value. Used only by the fallback path in
-   * `#commit` (events without op+cell delta info). The delta path
-   * preserves sibling sigs verbatim and folds slots inline there.
-   */
-  async #assembleLayerFor(
-    history: HistoryService,
-    segments: string[],
-    name: string,
-    explorerDir: FileSystemDirectoryHandle | null,
-  ): Promise<LayerContent> {
-    const onDiskNames: string[] = []
-    if (explorerDir) {
-      for await (const [n, handle] of (explorerDir as any).entries()) {
-        if (handle.kind !== 'directory') continue
-        if (n.startsWith('__')) continue
-        onDiskNames.push(n)
-      }
-    }
-
-    const locationSig = await history.sign({
-      explorerSegments: () => segments,
-    } as Lineage)
-    const slotValues = (await this.#slotRegistry?.readAll(locationSig, segments)) ?? {}
-
-    // No children → just `{ name, ...slots }`. Slots returning undefined
-    // were already filtered by readAll, so empty slot bag = `{ name }`.
-    if (onDiskNames.length === 0) return { name, ...slotValues }
-
-    const children: string[] = []
-    for (const childName of onDiskNames) {
-      const childSegments = [...segments, childName]
-      const childLocSig = await history.sign({
-        explorerSegments: () => childSegments,
-      } as Lineage)
-      children.push(await history.latestMarkerSigFor(childLocSig, childName))
-    }
-
-    return { name, children, ...slotValues }
   }
 
   // Layout signing / instruction-sig reading were both layer-driven —

@@ -72,9 +72,12 @@ export class NotesViewerComponent implements OnDestroy {
       this.visible.set(true)
     }))
 
-    this.#cleanups.push(EffectBus.on<{ cellLabel: string }>('notes:changed', async (p) => {
+    this.#cleanups.push(EffectBus.on<{ segments?: readonly string[] }>('notes:changed', async (p) => {
+      const cellLabel = Array.isArray(p?.segments) && p!.segments!.length > 0
+        ? String(p!.segments![p!.segments!.length - 1] ?? '').trim()
+        : ''
       const svc = this.#notes
-      if (svc && p?.cellLabel) await svc.getNotes(p.cellLabel)
+      if (svc && cellLabel) await svc.getNotes(cellLabel)
       this.#version.update(v => v + 1)
       // close if the open note was deleted by an external write
       if (this.visible() && !this.note()) this.close()

@@ -63,14 +63,6 @@ export const globalKeyMap: KeyMapLayer = {
       category: 'View',
       pierce: true,
     },
-    {
-      cmd: 'navigation.fitToScreen',
-      sequence: [[{ key: '0', primary: true }]],
-      description: 'Fit content to screen',
-      descriptionKey: 'keymap.fit',
-      category: 'Navigation',
-      pierce: true,
-    },
   ],
 }
 

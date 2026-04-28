@@ -41,10 +41,14 @@ export class CompactQueenBee extends QueenBee {
     //    when the user explicitly invokes /compact.
     await history.purgeNonLayerFiles(locationSig)
 
-    // 3. Wipe existing markers.
+    // 3. Archive existing markers into __temporary__/ inside the bag.
+    //    Soft-delete, not hard — the bag mirrors deleted history so
+    //    /compact can be undone manually if needed. The empty marker
+    //    re-mint and fresh commit below land on names that don't
+    //    collide because #nextMarkerName scans the archive too.
     const entries = await history.listLayers(locationSig)
     if (entries.length > 0) {
-      await history.removeEntries(locationSig, entries.map(e => e.filename))
+      await history.archiveEntries(locationSig, entries.map(e => e.filename))
     }
 
     // 4. Commit one marker reflecting current state. commitLayer

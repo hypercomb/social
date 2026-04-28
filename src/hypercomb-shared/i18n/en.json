@@ -303,6 +303,7 @@
   "keymap.mesh-toggle": "Toggle public / private mode",
   "keymap.bees": "Toggle bee avatars",
   "keymap.fit": "Fit content to screen",
+  "keymap.recenter": "Center content on screen",
   "keymap.up": "Navigate up",
   "keymap.down": "Navigate down",
   "keymap.left": "Navigate left",

@@ -456,6 +456,7 @@ export class HistoryService {
     // resolver can ask "what's the latest sig for /A/B?" without
     // re-reading the bag.
     this.#preloaderCache.set(layerSig, bytes.buffer as ArrayBuffer)
+    this.#parsedLayerCache.set(layerSig, canonical)
     this.#latestSigByLineage.set(locationSig, layerSig)
 
     // Mirror up to DCP. PushQueueService listens on EffectBus and
@@ -494,6 +495,7 @@ export class HistoryService {
     // anywhere in the app hits without a re-read.
     const sig = await SignatureService.sign(bytes.buffer as ArrayBuffer)
     this.#preloaderCache.set(sig, bytes.buffer as ArrayBuffer)
+    this.#parsedLayerCache.set(sig, empty)
   }
 
   /**
@@ -637,8 +639,11 @@ export class HistoryService {
   /**
    * Allocate the next sequential marker name for this bag. Format is
    * 8-digit zero-padded starting at 00000001. Scans existing markers
-   * (and the __temporary__ archive if present) for the current max so
-   * a re-issued name can never collide with an archived entry.
+   * AND the __temporary__ archive (if present) for the current max so
+   * a re-issued name can never collide with an archived entry — that
+   * matters after /compact, which archives every existing marker and
+   * then commits a fresh one. Without this scan the new marker would
+   * be named 00000001 and shadow the archived 00000001.
    */
   readonly #nextMarkerName = async (
     bag: FileSystemDirectoryHandle,
@@ -650,6 +655,15 @@ export class HistoryService {
       const n = parseInt(name, 10)
       if (!isNaN(n) && n > max) max = n
     }
+    try {
+      const archive = await bag.getDirectoryHandle('__temporary__', { create: false })
+      for await (const [name, handle] of (archive as any).entries()) {
+        if (handle.kind !== 'file') continue
+        if (!HistoryService.#MARKER_RE.test(name)) continue
+        const n = parseInt(name, 10)
+        if (!isNaN(n) && n > max) max = n
+      }
+    } catch { /* no archive yet — nothing to merge */ }
     return String(max + 1).padStart(8, '0')
   }
 
@@ -672,6 +686,12 @@ export class HistoryService {
     layerSig: string,
   ): Promise<LayerContent | null> => {
     if (!HistoryService.#SIG_RE.test(layerSig)) return null
+
+    // 0. Parsed-cache hit — bypass JSON.parse + #hydrateLayer entirely.
+    //    Layers are content-addressed, so the parsed object is valid
+    //    regardless of which bag the caller asked through.
+    const parsedHit = this.#parsedLayerCache.get(layerSig)
+    if (parsedHit) return parsedHit
 
     // 1. Hot cache — populated by listLayers and previous getLayerContent calls
     const cache = this.#markerBytesCache.get(locationSig)
@@ -707,7 +727,9 @@ export class HistoryService {
     catch { return null }
 
     if (!parsed.name) return null
-    return HistoryService.#hydrateLayer(parsed)
+    const hydrated = HistoryService.#hydrateLayer(parsed)
+    this.#parsedLayerCache.set(layerSig, hydrated)
+    return hydrated
   }
 
   /**
@@ -754,6 +776,17 @@ export class HistoryService {
   readonly #preloaderCache = new Map<string, ArrayBuffer>()
 
   /**
+   * Parsed-layer cache: sig → already-decoded LayerContent. Layer bytes
+   * are content-addressed and immutable, so once parsed the result is
+   * valid forever. Without this, every getLayerBySig / getLayerContent
+   * call re-runs JSON.parse + #hydrateLayer over the same bytes — hot
+   * during render (resolveChildNames touches every child's layer per
+   * frame) and cascade (layer-committer reads prev layers for every
+   * ancestor on every commit).
+   */
+  readonly #parsedLayerCache = new Map<string, LayerContent>()
+
+  /**
    * Per-lineage current-sig cache. Updated on every commit so
    * "what's the latest sig for /A/B?" doesn't have to re-walk the bag.
    */
@@ -794,12 +827,16 @@ export class HistoryService {
     layerSig: string,
   ): Promise<LayerContent | null> => {
     if (!HistoryService.#SIG_RE.test(layerSig)) return null
+    const parsedHit = this.#parsedLayerCache.get(layerSig)
+    if (parsedHit) return parsedHit
     const cached = this.#preloaderCache.get(layerSig)
     if (cached) {
       try {
         const parsed = JSON.parse(new TextDecoder().decode(cached)) as Partial<LayerContent>
         if (!parsed.name) return null
-        return HistoryService.#hydrateLayer(parsed)
+        const hydrated = HistoryService.#hydrateLayer(parsed)
+        this.#parsedLayerCache.set(layerSig, hydrated)
+        return hydrated
       } catch { /* fall through to disk */ }
     }
     // Cold miss: trigger the global preload (idempotent — runs once per
@@ -810,7 +847,9 @@ export class HistoryService {
     try {
       const parsed = JSON.parse(new TextDecoder().decode(refreshed)) as Partial<LayerContent>
       if (!parsed.name) return null
-      return HistoryService.#hydrateLayer(parsed)
+      const hydrated = HistoryService.#hydrateLayer(parsed)
+      this.#parsedLayerCache.set(layerSig, hydrated)
+      return hydrated
     } catch { return null }
   }
 
@@ -1047,6 +1086,48 @@ export class HistoryService {
     // last NNNNNNNN.
     if (removed > 0) this.#latestSigByLineage.delete(locationSig)
     return removed
+  }
+
+  /**
+   * Soft-delete: copy each marker file into `__temporary__/{filename}`
+   * inside the same bag, then remove the original from the bag root.
+   * Bytes are preserved; restoration is a flat move back. Same filename
+   * is reused so a future restore lands on the original index — and
+   * `#nextMarkerName` scans the archive too, so newly committed markers
+   * cannot collide with an archived one.
+   *
+   * USED ONLY BY /collapse-history AND /compact. These are the rare
+   * paths that wipe non-head markers in bulk; everywhere else
+   * (single-entry UI delete, mergeEntries) stays on the hard-delete
+   * primitive `removeEntries`.
+   */
+  public readonly archiveEntries = async (
+    locationSig: string,
+    filenames: string[],
+  ): Promise<number> => {
+    if (filenames.length === 0) return 0
+    let bag: FileSystemDirectoryHandle
+    try {
+      bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false })
+    } catch { return 0 }
+
+    const archive = await bag.getDirectoryHandle('__temporary__', { create: true })
+
+    let archived = 0
+    for (const filename of filenames) {
+      try {
+        const srcHandle = await bag.getFileHandle(filename, { create: false })
+        const file = await srcHandle.getFile()
+        const bytes = await file.arrayBuffer()
+        const dstHandle = await archive.getFileHandle(filename, { create: true })
+        const writable = await dstHandle.createWritable()
+        try { await writable.write(bytes) } finally { await writable.close() }
+        await bag.removeEntry(filename)
+        archived++
+      } catch { /* already gone or unreadable — skip */ }
+    }
+    if (archived > 0) this.#latestSigByLineage.delete(locationSig)
+    return archived
   }
 
   /**

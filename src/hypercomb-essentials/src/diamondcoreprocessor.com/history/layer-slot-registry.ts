@@ -16,11 +16,11 @@
 // load time:
 //
 //     LayerSlotRegistry.register({
-//       slot: 'notesByCell',                      // field name on the layer JSON
-//       triggers: ['notes:changed'],              // re-commit on these EffectBus events
-//       read: async (locationSig, segments) => { // current value at this location
-//         const v = ...                          //   undefined → omit slot from layer
-//         return v
+//       slot: 'notes',                                // field name on the layer JSON
+//       triggers: ['notes:changed'],                  // re-commit on these EffectBus events
+//       read: (locationSig, segments) => {           // current value at this location
+//         const sigs = myService.sigsFor(locationSig) //   string[] of sigs OR mixed
+//         return sigs.length ? sigs : undefined       //   undefined → omit slot
 //       },
 //     })
 //
@@ -50,7 +50,25 @@
 //
 // ── Slot value contract ───────────────────────────────────────────────
 //
-// - JSON-serializable. Goes into the layer file's bytes.
+// - ALWAYS an array (`unknown[] | undefined`). The bracket is the type
+//   tag: "this is a list of references or payloads." Bare scalars are
+//   forbidden — `name` is the only bare-string slot in a layer, and
+//   it's intrinsic, not subsystem-contributed.
+// - Each array element is either:
+//     (a) a 64-hex signature string — a POINTER. Resolved by walkers
+//         from `__history__/` (layer sig) or `__resources__/` (resource
+//         sig) depending on context. Default form: enables dedup,
+//         lazy-load, sharing across cells.
+//     (b) any other JSON value — an INLINE PAYLOAD. The data lives
+//         directly in the layer JSON; no extra fetch needed.
+//   A single slot can mix forms. A subsystem can flip an entry between
+//   sig and inline-payload at any time as an optimization — same
+//   merkle invariant either way, since canonicalizeLayer hashes the
+//   layer's full bytes.
+// - Empty array → return `undefined` instead. Empty arrays would force
+//   the slot into the layer JSON and break the sparse-layer invariant
+//   (and the signature). No defaults.
+// - JSON-serializable end-to-end.
 // - Deterministic by location. Same lineage = same slot value (no
 //   `Date.now()` snuck in or the signature drifts every commit).
 // - Canonical. The committer canonicalizes the layer with sorted keys
@@ -105,7 +123,7 @@
 //    history.service.ts + layer-committer.drone.ts + layer-diff.ts +
 //    the subsystem itself.
 
-export interface LayerSlot<T = unknown> {
+export interface LayerSlot {
   /**
    * The field name on the layer JSON. Must be a non-empty string,
    * lowercase, no whitespace. Cannot be `name` or `children`.
@@ -126,13 +144,18 @@ export interface LayerSlot<T = unknown> {
 
   /**
    * Return the slot's current value at the given location. Called
-   * during layer assembly. Return `undefined` to omit the slot from
-   * the layer entirely (keeps the JSON sparse — empty slots cost
-   * nothing in bytes or signature surface).
+   * during layer assembly.
    *
-   * Must be deterministic (same location → same value, modulo
-   * intervening user mutations) and JSON-serializable (the value goes
-   * into the layer file's bytes verbatim after canonicalization).
+   * Contract:
+   *   - Returns `unknown[] | undefined`. The bracket is the type tag.
+   *   - `undefined` → slot omitted from the layer (sparse-layer invariant).
+   *   - Each array element is EITHER a 64-hex signature string (pointer)
+   *     OR an inline JSON payload (any other shape). Walkers decide per
+   *     element by `string && /^[a-f0-9]{64}$/`.
+   *   - No `null`/`undefined` elements. No empty arrays — return
+   *     `undefined` instead. No defaults conjured by the host.
+   *   - Must be deterministic (same location → same value, modulo
+   *     intervening user mutations) and JSON-serializable.
    *
    * `segments` is the lineage path; `locationSig` is its canonical
    * signature (already computed by HistoryService.sign — passed in so
@@ -141,7 +164,7 @@ export interface LayerSlot<T = unknown> {
   read: (
     locationSig: string,
     segments: readonly string[],
-  ) => Promise<T | undefined> | T | undefined
+  ) => Promise<unknown[] | undefined> | unknown[] | undefined
 }
 
 const RESERVED_NAMES = new Set(['name', 'children'])
@@ -186,7 +209,7 @@ export class LayerSlotRegistry {
    * via `onTrigger()` ensures listeners that subscribe LATER also
    * see triggers that were registered earlier.
    */
-  register<T>(slot: LayerSlot<T>): void {
+  register(slot: LayerSlot): void {
     if (!slot?.slot || typeof slot.slot !== 'string') {
       throw new Error('[LayerSlotRegistry] slot.slot must be a non-empty string')
     }
@@ -203,7 +226,7 @@ export class LayerSlotRegistry {
     if (existing && existing !== slot) {
       throw new Error(`[LayerSlotRegistry] slot "${slot.slot}" already registered by a different provider`)
     }
-    this.#slots.set(slot.slot, slot as LayerSlot)
+    this.#slots.set(slot.slot, slot)
 
     // Announce any triggers we haven't seen before to active listeners.
     for (const t of slot.triggers) {
@@ -245,15 +268,37 @@ export class LayerSlotRegistry {
     return this.#slots.get(name)
   }
 
-  /** Read every slot's value for a location. Omits slots returning undefined. */
+  /**
+   * Read every slot's value for a location and return the bag to fold
+   * into the layer JSON. Enforces the slot contract:
+   *
+   *   - `undefined` from a slot → omitted from the bag.
+   *   - non-array return → contract violation, slot dropped + warned.
+   *   - empty array → treated as `undefined`, slot omitted (sparse-
+   *     layer invariant; empty fields cannot land in layer JSON or
+   *     they'd corrupt the signature surface).
+   *   - non-empty array → folded in as-is; canonicalizeLayer handles
+   *     byte-stable ordering of nested keys at write time.
+   *
+   * No defaults are conjured. A slot that returns nothing contributes
+   * nothing.
+   */
   async readAll(
     locationSig: string,
     segments: readonly string[],
-  ): Promise<Record<string, unknown>> {
-    const out: Record<string, unknown> = {}
+  ): Promise<Record<string, unknown[]>> {
+    const out: Record<string, unknown[]> = {}
     for (const slot of this.#slots.values()) {
       const value = await slot.read(locationSig, segments)
-      if (value !== undefined) out[slot.slot] = value
+      if (value === undefined) continue
+      if (!Array.isArray(value)) {
+        console.warn(
+          `[LayerSlotRegistry] slot "${slot.slot}" returned non-array value; omitting (slots must return unknown[] | undefined)`,
+        )
+        continue
+      }
+      if (value.length === 0) continue
+      out[slot.slot] = value
     }
     return out
   }

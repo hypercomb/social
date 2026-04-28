@@ -1,5 +1,5 @@
 // diamondcoreprocessor.com/input/zoom/zoom.drone.ts
-import { Drone, EffectBus } from '@hypercomb/core'
+import { Drone, EffectBus, type KeyMapLayer } from '@hypercomb/core'
 import { Application, Container, Point } from 'pixi.js'
 import type { HostReadyPayload } from '../../presentation/tiles/pixi-host.worker.js'
 import type { HexGeometry } from '../../presentation/grid/hex-geometry.js'
@@ -294,8 +294,10 @@ export class ZoomDrone extends Drone {
     if (this.#effectsRegistered) return
     this.#effectsRegistered = true
 
+    this.#registerKeybindings()
+
     this.onEffect<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
-      if (cmd === 'navigation.fitToScreen') this.zoomToFit()
+      if (cmd === 'navigation.fitToScreen' || cmd === 'navigation.recenter') this.zoomToFit()
     })
 
     this.onEffect<HexGeometry>('render:geometry-changed', (geo) => {
@@ -352,6 +354,32 @@ export class ZoomDrone extends Drone {
         }) as EventListener)
       }
     })
+  }
+
+  #registerKeybindings(): void {
+    const layer: KeyMapLayer = {
+      id: 'zoom',
+      priority: 5,
+      bindings: [
+        {
+          cmd: 'navigation.fitToScreen',
+          sequence: [[{ key: '0', primary: true }]],
+          description: 'Fit content to screen',
+          descriptionKey: 'keymap.fit',
+          category: 'Navigation',
+          pierce: true,
+        },
+        {
+          cmd: 'navigation.recenter',
+          sequence: [[{ key: 'r' }]],
+          description: 'Center content on screen',
+          descriptionKey: 'keymap.recenter',
+          category: 'Navigation',
+        },
+      ],
+    }
+
+    EffectBus.emit('keymap:add-layer', { layer })
   }
 
   #applyZoomSnapshot = (snap: ViewportSnapshot): void => {

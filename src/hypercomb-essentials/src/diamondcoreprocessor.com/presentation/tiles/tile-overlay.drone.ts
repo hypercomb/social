@@ -140,7 +140,6 @@ export class TileOverlayDrone extends Drone {
   #substrateLabels = new Set<string>()
   #linkLabels = new Set<string>()
   #hiddenLabels = new Set<string>()
-  #labelsWithNotes = new Set<string>()
 
   // break-apart effect state
   #crackOverlay: Graphics | null = null
@@ -355,17 +354,12 @@ export class TileOverlayDrone extends Drone {
         if (!cell) return
         this.#substrateLabels.delete(cell)
         this.#noImageLabels.delete(cell)
-        this.#labelsWithNotes.delete(cell)
       })
 
-      // Per-tile "contains notes" state. Seeded from NotesService on register
-      // and kept fresh via the notes:changed effect. Drives the active tint of
-      // the note icon via tintWhen.
-      this.#seedNotesLabels()
-      this.onEffect<{ cellLabel: string; count: number }>('notes:changed', ({ cellLabel, count }) => {
-        if (!cellLabel) return
-        if (count > 0) this.#labelsWithNotes.add(cellLabel)
-        else this.#labelsWithNotes.delete(cellLabel)
+      // notes:changed triggers a per-tile visibility refresh. The icon's
+      // active tint is derived inline at render time (#hasNotesFor) —
+      // single source of truth is NotesService, no cached set to drift.
+      this.onEffect<{ segments?: readonly string[] }>('notes:changed', () => {
         if (this.#overlay && this.#currentAxial) this.#updatePerTileVisibility()
       })
 
@@ -517,22 +511,15 @@ export class TileOverlayDrone extends Drone {
     this.#hexBg?.update(this.#geo.circumRadiusPx, this.#flat)
   }
 
-  /**
-   * Read the persisted notes index once at startup so the active-tint state
-   * is correct on first render. After this, `notes:changed` keeps it fresh.
-   */
-  #seedNotesLabels(): void {
-    try {
-      const raw = localStorage.getItem('hc:notes-index')
-      if (!raw) return
-      const index = JSON.parse(raw) as Record<string, string>
-      for (const cell of Object.keys(index)) {
-        if (index[cell]) this.#labelsWithNotes.add(cell)
-      }
-    } catch {
-      // corrupt index — ignore
-    }
+  /** Sync read of "does this cell have notes at the current lineage?"
+   *  Hits NotesService's warm cache — no localStorage parse, no async.
+   *  Returns false until NotesService is loaded; the next notes:changed
+   *  re-runs #updatePerTileVisibility which re-derives. */
+  #hasNotesFor(cellLabel: string): boolean {
+    const notesService = get<{ notesFor: (label: string) => unknown[] }>('@diamondcoreprocessor.com/NotesService')
+    return (notesService?.notesFor(cellLabel)?.length ?? 0) > 0
   }
+
 
   // ── Profile resolution (now from registered descriptors) ───────────
 
@@ -657,7 +644,7 @@ export class TileOverlayDrone extends Drone {
       isBranch: this.#branchLabels.has(entry.label),
       hasLink: this.#linkLabels.has(entry.label),
       isHidden: this.#hiddenLabels.has(entry.label),
-      hasNotes: this.#labelsWithNotes.has(entry.label),
+      hasNotes: this.#hasNotesFor(entry.label),
     }
 
     for (const action of this.#actions) {

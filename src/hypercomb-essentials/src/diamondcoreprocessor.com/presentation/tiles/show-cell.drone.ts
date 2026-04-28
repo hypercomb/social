@@ -175,8 +175,12 @@ async function resolveChildNames(
   // pre-warming. Names live inside the signed bytes, not on the
   // filesystem. getLayerBySig is content-addressed: hot from the
   // preloader cache after warmup, cold-walks bags by sig if missed.
-  for (const childSig of content.children) {
-    const child = await history.getLayerBySig(childSig)
+  // Fired in parallel — every call is independent, and a single cold
+  // miss serializing the whole list was the dominant per-frame cost.
+  const children = await Promise.all(
+    content.children.map(sig => history.getLayerBySig(sig)),
+  )
+  for (const child of children) {
     if (child?.name) out.add(child.name)
   }
   return out
