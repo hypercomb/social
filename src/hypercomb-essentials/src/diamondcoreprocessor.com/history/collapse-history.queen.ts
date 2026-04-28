@@ -25,6 +25,10 @@ export class CollapseHistoryQueenBee extends QueenBee {
   override readonly aliases = ['collapse-histories', 'squash-history']
 
   override description = 'Delete all non-head history entries across every location (dev utility)'
+  // Destructive dev utility — keep it out of autocomplete so it can't
+  // be triggered by an accidental tab-complete on `/co…`. Still
+  // invokable when typed in full.
+  override slashHidden = true
 
   protected execute(_args: string): void {
     void this.#collapse()

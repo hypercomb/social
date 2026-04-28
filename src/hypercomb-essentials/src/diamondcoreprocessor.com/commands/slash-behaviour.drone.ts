@@ -35,6 +35,10 @@ export class SlashBehaviourDrone extends EventTarget {
 
     for (const provider of this.#providers) {
       for (const behaviour of provider.behaviours) {
+        // Behaviours flagged hidden are still invokable via execute()
+        // but never surface in autocomplete suggestions. Used for
+        // destructive / dev-only commands the user must type in full.
+        if (behaviour.hidden) continue
         const localized = this.#localize(behaviour)
         const names = [behaviour.name, ...(behaviour.aliases ?? [])]
 
@@ -464,6 +468,7 @@ const isQueen = (value: unknown): value is {
   aliases?: readonly string[]
   description?: string
   descriptionKey?: string
+  slashHidden?: boolean
   invoke: (args: string) => Promise<void> | void
   slashComplete?: (args: string) => readonly string[]
 } => {
@@ -484,6 +489,7 @@ const wrapQueen = (queen: ReturnType<typeof isQueen> extends true ? never : any)
     description: queen.description ?? queen.command,
     descriptionKey: queen.descriptionKey,
     aliases: queen.aliases ?? [],
+    hidden: queen.slashHidden === true,
   }],
   execute(_behaviourName: string, args: string): Promise<void> | void {
     return queen.invoke(args)

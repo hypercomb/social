@@ -64,6 +64,13 @@ type Row = {
   summary: string
   category: Category
   filename: string
+  // A cascade row is a layer entry whose only delta is a 1-for-1 child
+  // sig swap on a single slot — the structural fingerprint of lineage
+  // pull-up (a downstream change rippling into this layer). User-
+  // originated entries are pure adds, removes, or content edits and so
+  // never produce this shape on a parent layer. Used to collapse
+  // contiguous cascade runs in the viewer.
+  isCascade: boolean
 }
 
 // Category taxonomy, decorated with an optional IconRef. Adding a new
@@ -227,7 +234,7 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
     entries.forEach((entry, i) => {
       const content = contents.get(entry.layerSig)
       if (!content) return
-      const { summary, category } = summarise(previousContent, content)
+      const { summary, category, isCascade } = summarise(previousContent, content)
       previousContent = content
       rows.push({
         index: i,
@@ -238,6 +245,7 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
         summary,
         category,
         filename: entry.filename,
+        isCascade,
       })
     })
     return rows
@@ -246,9 +254,19 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
   readonly rows = computed<readonly Row[]>(() => {
     const all = this.#allRows()
     const disabled = this.#disabledFilters()
+    // Cascade collapse: in any contiguous run of cascade rows, keep only
+    // the chronologically newest — it represents the user-visible result
+    // of the change that rippled in. Hide a cascade row when the next
+    // entry is also a cascade; show it when the next is non-cascade or
+    // when it's the head entry.
+    const collapsed = all.filter((row, i) => {
+      if (!row.isCascade) return true
+      const next = all[i + 1]
+      return !next || !next.isCascade
+    })
     const filtered = disabled.size === 0
-      ? all.slice()
-      : all.filter(row => !disabled.has(row.category))
+      ? collapsed.slice()
+      : collapsed.filter(row => !disabled.has(row.category))
     return filtered.reverse() // newest first
   })
 
@@ -818,8 +836,8 @@ function diffLines(
 // of change between two layers so the viewer can color-code the row.
 // ─────────────────────────────────────────────────────────────────────
 
-function summarise(prev: Content | undefined, next: Content | undefined): { summary: string; category: Category } {
-  if (!next) return { summary: '(loading)', category: 'none' }
+function summarise(prev: Content | undefined, next: Content | undefined): { summary: string; category: Category; isCascade: boolean } {
+  if (!next) return { summary: '(loading)', category: 'none', isCascade: false }
 
   // Slot-agnostic diff: union of every slot present in either layer.
   // Deltas are reported per-slot. Categories use the first slot whose
@@ -832,6 +850,10 @@ function summarise(prev: Content | undefined, next: Content | undefined): { summ
 
   const parts: string[] = []
   let category: Category = 'none'
+  let slotsChanged = 0
+  let totalAdded = 0
+  let totalRemoved = 0
+  let reorderCount = 0
 
   for (const key of [...slotKeys].sort()) {
     const pArr = (prev && Array.isArray((prev as Record<string, unknown>)[key]))
@@ -845,6 +867,11 @@ function summarise(prev: Content | undefined, next: Content | undefined): { summ
     const reordered = added.length === 0 && removed.length === 0 && !sequenceEqual(nArr, pArr)
     if (added.length === 0 && removed.length === 0 && !reordered) continue
 
+    slotsChanged++
+    totalAdded += added.length
+    totalRemoved += removed.length
+    if (reordered) reorderCount++
+
     const noun = slotNoun(key, nArr.length || pArr.length)
     if (added.length) parts.push(`+${added.length} ${noun}`)
     if (removed.length) parts.push(`-${removed.length} ${noun}`)
@@ -852,8 +879,17 @@ function summarise(prev: Content | undefined, next: Content | undefined): { summ
     if (category === 'none') category = slotCategory(key)
   }
 
-  if (parts.length === 0) return { summary: '(no change)', category: 'none' }
-  return { summary: parts.join(' · '), category }
+  // Cascade fingerprint: exactly one slot changed by a 1-for-1 sig swap,
+  // no reorders, no other slot deltas. That shape only emerges from
+  // lineage pull-up (a child layer's sig changed downstream); any user-
+  // initiated edit produces a different shape on this layer.
+  const isCascade = slotsChanged === 1
+    && totalAdded === 1
+    && totalRemoved === 1
+    && reorderCount === 0
+
+  if (parts.length === 0) return { summary: '(no change)', category: 'none', isCascade: false }
+  return { summary: parts.join(' · '), category, isCascade }
 }
 
 /** Map a slot name to a human-readable noun. Falls back to the raw

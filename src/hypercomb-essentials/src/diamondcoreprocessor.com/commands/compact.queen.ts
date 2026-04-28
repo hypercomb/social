@@ -23,6 +23,10 @@ export class CompactQueenBee extends QueenBee {
   readonly command = 'compact'
   override readonly aliases = []
   override description = 'Rebase this location\'s history to a single live marker (history is lost)'
+  // Destructive — keep it out of autocomplete so the user has to type
+  // the full name. They can still invoke it; tab-complete just won't
+  // surface it.
+  override slashHidden = true
 
   protected async execute(_args: string): Promise<void> {
     const history = get('@diamondcoreprocessor.com/HistoryService') as HistoryService | undefined

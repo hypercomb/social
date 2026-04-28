@@ -12,9 +12,9 @@ $accent: #ffe14a;
 
 :host {
   position: fixed;
-  top: var(--hc-header-height, 3rem);
-  left: 0;
-  right: 0;
+  top: calc(var(--hc-header-height, 3rem) + 5px);
+  left: 5px;
+  right: 5px;
   z-index: 60001;
   display: flex;
   pointer-events: none;

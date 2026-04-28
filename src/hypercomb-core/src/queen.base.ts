@@ -26,6 +26,14 @@ export abstract class QueenBee extends Bee {
    */
   public slashComplete?(args: string): readonly string[]
 
+  /**
+   * When true, the slash drone still invokes this queen normally but
+   * omits it from autocomplete suggestions. Use for destructive / dev-
+   * only commands (e.g. /compact, /collapse-history) the user must
+   * type in full so they can't be triggered by accidental tab-complete.
+   */
+  public slashHidden: boolean = false
+
   /** Real-time execution — called immediately when `/behaviour` is invoked */
   protected abstract execute(args: string): void | Promise<void>
 

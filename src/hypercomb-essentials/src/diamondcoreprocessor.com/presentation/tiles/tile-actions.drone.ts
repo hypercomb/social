@@ -378,17 +378,11 @@ export class TileActionsDrone extends Drone {
         break
 
       case 'note': {
-        // Notes are scoped to a single tile: clicking the icon must
-        // select THAT tile exclusively (clear any prior multi-select)
-        // so the capture interface always corresponds to the tile the
-        // user just clicked. `setActive` alone is a no-op when the
-        // tile isn't already selected — it silently fails — so we
-        // clear+add to make the selection unambiguous.
-        const selection = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SelectionService') as
-          { clear?(): void; add?(label: string): void; setActive?(label: string): void } | undefined
-        selection?.clear?.()
-        selection?.add?.(label)
-        selection?.setActive?.(label)
+        // Note targeting is resolved by lineage in NotesService — the
+        // cellLabel rides on the event and is enough on its own. Don't
+        // drive SelectionService here: a full selection highlight is
+        // too loud for capture intent. The command-line `note-intent`
+        // glow plus the icon's `hasNotes` tint are the subtle cues.
         EffectBus.emit('note:capture', { cellLabel: label })
         break
       }
