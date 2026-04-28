@@ -13,7 +13,7 @@ import { TrackPlayerComponent } from '@hypercomb/shared/ui/track-player/track-pl
   styleUrl: './home.scss',
 })
 export class Home implements OnDestroy {
-  readonly playerOpen = signal(localStorage.getItem('hc:player-dismissed') !== 'true')
+  readonly playerOpen = signal(false)
 
   private get handler(): ResourceMessageHandler { return get('@hypercomb.social/ResourceMessageHandler') as ResourceMessageHandler }
   private get lineage(): Lineage { return get('@hypercomb.social/Lineage') as Lineage }

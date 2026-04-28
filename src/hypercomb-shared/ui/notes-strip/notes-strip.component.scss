@@ -15,7 +15,7 @@ $accent: #ffe14a;
   top: var(--hc-header-height, 3rem);
   left: 0;
   right: 0;
-  z-index: 18;
+  z-index: 60001;
   display: flex;
   pointer-events: none;
   max-height: calc(100vh - var(--hc-header-height, 3rem) - 5rem);

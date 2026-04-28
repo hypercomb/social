@@ -29,7 +29,7 @@ export class App implements AfterViewInit {
   protected readonly title = signal('hypercomb-dev');
   readonly clipboardMode = signal(false);
   readonly moveMode = signal(false);
-  readonly playerOpen = signal(localStorage.getItem('hc:player-dismissed') !== 'true');
+  readonly playerOpen = signal(false);
 
   dismissPlayer(): void {
     this.playerOpen.set(false);

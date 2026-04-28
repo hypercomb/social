@@ -25,13 +25,13 @@ type CursorState = {
 
 type LayerEntry = { layerSig: string; at: number; index: number; filename: string }
 
-// Slim layer shape: just `name` (this layer's segment name) and
-// `children` (ordered child layer sigs). Display-name resolution
-// for individual children requires loading each child sig — too
-// heavy for a row summary, so the diff stays at the sig level.
+// Layer shape: `name` (intrinsic) plus an open bag of slots, each
+// holding an array of sigs or inline payloads. The viewer is slot-
+// agnostic — it renders every non-empty slot the layer carries
+// (children, notes, tags, future participants).
 type Content = {
   name?: string
-  children?: string[]
+  [slot: string]: unknown
 }
 
 type HistoryService = {
@@ -733,10 +733,15 @@ function installHistoryColumnStylesheet(): void {
 
 /**
  * Serialise a layer to a stable, set-aware line representation for
- * diffing. Children are sorted alphabetically by sig and each appears
- * on its own line with NO trailing-comma artefacts — so a sibling sig
- * that just changed position (and would gain/lose a JSON comma) still
- * matches its previous-layer counterpart as `same` in the line diff.
+ * diffing. The viewer is SLOT-AGNOSTIC: every non-empty slot the layer
+ * carries (children, notes, tags, ...) renders alphabetically. Empty
+ * slots are omitted entirely — sparse-layer invariant — so an empty
+ * `children: []` never appears as garbage in the display.
+ *
+ * Each sig in a slot's array appears on its own line with no
+ * trailing-comma artefacts so a sibling sig that just changed position
+ * still matches its previous-layer counterpart as `same` in the diff.
+ * Inline (non-sig) values are JSON-stringified per line.
  *
  * Format (NOT valid JSON — diff/display only):
  *   {
@@ -744,24 +749,31 @@ function installHistoryColumnStylesheet(): void {
  *     "children": [
  *       <sig1>
  *       <sig2>
- *       ...
+ *     ],
+ *     "notes": [
+ *       <noteSig1>
  *     ]
  *   }
- *
- * Empty children render as `"children": []` on a single line.
  */
 function layerToDiffableLines(content: Content): string[] {
   const lines: string[] = ['{']
-  lines.push(`  "name": ${JSON.stringify(content.name ?? '')},`)
-  const children = content.children ?? []
-  if (children.length === 0) {
-    lines.push(`  "children": []`)
-  } else {
-    lines.push(`  "children": [`)
-    // Sort to make set-membership the only thing that matters in the
-    // diff. Original order is irrelevant for the "what changed" view.
-    const sorted = children.slice().sort((a, b) => a.localeCompare(b))
-    for (const sig of sorted) lines.push(`    ${sig}`)
+  lines.push(`  "name": ${JSON.stringify(content.name ?? '')}`)
+  const slotKeys = Object.keys(content)
+    .filter(k => k !== 'name')
+    .sort((a, b) => a.localeCompare(b))
+  for (const key of slotKeys) {
+    const v = (content as Record<string, unknown>)[key]
+    if (!Array.isArray(v) || v.length === 0) continue
+    // Sort sigs/values to make set-membership the only thing that
+    // matters in the diff. Original order is irrelevant for "what
+    // changed" rendering.
+    const entries = v.map(x => typeof x === 'string' ? x : JSON.stringify(x))
+    entries.sort((a, b) => a.localeCompare(b))
+    // Append a trailing comma to the previous line for valid-ish JSON
+    // shape (last line of previous slot or `name`).
+    lines[lines.length - 1] = lines[lines.length - 1] + ','
+    lines.push(`  ${JSON.stringify(key)}: [`)
+    for (const e of entries) lines.push(`    ${e}`)
     lines.push(`  ]`)
   }
   lines.push('}')
@@ -808,38 +820,56 @@ function diffLines(
 
 function summarise(prev: Content | undefined, next: Content | undefined): { summary: string; category: Category } {
   if (!next) return { summary: '(loading)', category: 'none' }
-  const pChildren = prev?.children ?? []
-  const nChildren = next.children ?? []
 
-  // children are sigs (sha256 hex), not display names. The diff is over
-  // the sig list. Resolving to names would require loading each child
-  // sig's marker — too heavy for a row summary, so we describe deltas
-  // generically by count and flag reorders.
-  const added = difference(nChildren, pChildren)
-  const removed = difference(pChildren, nChildren)
-  const reordered =
-    added.length === 0 &&
-    removed.length === 0 &&
-    !sequenceEqual(nChildren, pChildren)
+  // Slot-agnostic diff: union of every slot present in either layer.
+  // Deltas are reported per-slot. Categories use the first slot whose
+  // values changed to colour the row (children → 'cells', notes →
+  // 'notes', etc.; unknown slots fall through to 'system').
+  const slotKeys = new Set<string>([
+    ...Object.keys(prev ?? {}).filter(k => k !== 'name'),
+    ...Object.keys(next).filter(k => k !== 'name'),
+  ])
 
   const parts: string[] = []
   let category: Category = 'none'
 
-  if (added.length) {
-    parts.push(added.length === 1 ? '+1 tile' : `+${added.length} tiles`)
-    category = 'cells'
-  }
-  if (removed.length) {
-    parts.push(removed.length === 1 ? '-1 tile' : `-${removed.length} tiles`)
-    category = 'cells'
-  }
-  if (reordered) {
-    parts.push(`reorder (${nChildren.length} tiles)`)
-    if (category === 'none') category = 'cells'
+  for (const key of [...slotKeys].sort()) {
+    const pArr = (prev && Array.isArray((prev as Record<string, unknown>)[key]))
+      ? ((prev as Record<string, unknown>)[key] as unknown[])
+      : []
+    const nArr = Array.isArray((next as Record<string, unknown>)[key])
+      ? ((next as Record<string, unknown>)[key] as unknown[])
+      : []
+    const added = difference(nArr, pArr)
+    const removed = difference(pArr, nArr)
+    const reordered = added.length === 0 && removed.length === 0 && !sequenceEqual(nArr, pArr)
+    if (added.length === 0 && removed.length === 0 && !reordered) continue
+
+    const noun = slotNoun(key, nArr.length || pArr.length)
+    if (added.length) parts.push(`+${added.length} ${noun}`)
+    if (removed.length) parts.push(`-${removed.length} ${noun}`)
+    if (reordered) parts.push(`reorder ${noun} (${nArr.length})`)
+    if (category === 'none') category = slotCategory(key)
   }
 
   if (parts.length === 0) return { summary: '(no change)', category: 'none' }
   return { summary: parts.join(' · '), category }
+}
+
+/** Map a slot name to a human-readable noun. Falls back to the raw
+ *  slot name so unknown / future slots still render coherently. */
+function slotNoun(slot: string, count: number): string {
+  if (slot === 'children') return count === 1 ? 'tile' : 'tiles'
+  if (slot === 'notes')    return count === 1 ? 'note' : 'notes'
+  if (slot === 'tags')     return count === 1 ? 'tag'  : 'tags'
+  return slot
+}
+
+function slotCategory(slot: string): Category {
+  if (slot === 'children') return 'cells'
+  if (slot === 'notes')    return 'notes'
+  if (slot === 'tags')     return 'tags'
+  return 'system'
 }
 
 function difference<T>(a: readonly T[], b: readonly T[]): T[] {

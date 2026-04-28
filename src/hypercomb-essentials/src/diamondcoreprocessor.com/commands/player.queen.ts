@@ -5,18 +5,15 @@ import { QueenBee, EffectBus } from '@hypercomb/core'
 const DISMISSED_KEY = 'hc:player-dismissed'
 
 /**
- * /player — re-open the track player after it has been dismissed.
+ * /ebook — open the track player.
  *
- * The track player is shown by default on first visit. Once the user
- * dismisses it, that decision is persisted in localStorage and the
- * player never auto-opens again. Invoking this queen clears the
- * dismissal flag and re-opens the player.
+ * The track player no longer auto-opens. Invoking this queen clears
+ * any persisted dismissal flag and opens the player.
  */
 export class PlayerQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
-  readonly command = 'player'
-  override readonly aliases = ['track', 'audio']
-  override description = 'Re-open the track player'
+  readonly command = 'ebook'
+  override description = 'Open the track player'
 
   protected execute(_args: string): void {
     try { localStorage.removeItem(DISMISSED_KEY) } catch { /* storage unavailable */ }

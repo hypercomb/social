@@ -12,7 +12,7 @@
 // — commitLayer short-circuits when assembled bytes match the bag's
 // current head.
 import { EffectBus } from '@hypercomb/core'
-import type { HistoryService, LayerContent } from './history.service.js'
+import type { HistoryService } from './history.service.js'
 import { ROOT_NAME } from './history.service.js'
 import type { HistoryCursorService } from './history-cursor.service.js'
 // TYPE-ONLY import. The runtime instance is the single shared
@@ -22,6 +22,7 @@ import type { HistoryCursorService } from './history-cursor.service.js'
 // inlines relative imports), giving a different class identity from
 // the shared instance and silently breaking the singleton.
 import type { LayerSlotRegistry } from './layer-slot-registry.js'
+import { LayerMachine } from './layer-machine.js'
 
 type Lineage = {
   domain?: () => string
@@ -63,20 +64,34 @@ type LayoutSnapshot = {
  *
  * - `segments` — the lineage where the change happened (the LEAF). The
  *   cascade walks from this depth up to root.
- * - `op` + `cell` — the delta (add or remove of one named cell at the
- *   leaf level). When present, the cascade is DELTA-DRIVEN: each new
- *   marker differs from the previous head by exactly one entry. The
- *   leaf gets +/- one cell sig; each ancestor gets ONE child-sig
- *   swapped for the just-committed-below sig. Sibling sigs at every
- *   level are preserved verbatim — no spurious churn.
- * - When `op` is absent (layout-mode change, etc.), fall back to a
- *   disk-snapshot rebuild of the leaf (no add/remove semantics to
- *   apply).
+ * - `delta` — an OPTIONAL single-slot mutation applied at the leaf:
+ *     • `kind: 'sig'` — pure sig delta. The slot machinery already has
+ *       the resource/layer signature in hand (e.g. NotesService just
+ *       committed its participant layer and emits `notes:append/sig`).
+ *     • `kind: 'name'` — name-keyed delta resolved to a sig at commit
+ *       time. Used by `cell:added`/`cell:removed` which carry a cell
+ *       label; the leaf step looks up / signs the cell's lineage to
+ *       produce the children sig.
+ *
+ *   When `delta` is absent the leaf does a bare re-snapshot (machine
+ *   hydrate → output → commitLayer). If nothing changed,
+ *   commitLayer's byte dedup makes it a no-op — no spurious markers.
+ *
+ *   The cascade is DELTA-DRIVEN at every level: leaf applies its slot
+ *   delta to its hydrated machine; each ancestor swaps the prevSig of
+ *   the level below for the freshly-committed sig in its `children`
+ *   slot. Sibling sigs at every level are preserved verbatim — no
+ *   spurious churn.
  */
+type CommitDelta =
+  | { kind: 'sig'; slot: string; op: 'append' | 'removeSig'; sig: string }
+  | { kind: 'sig-swap'; slot: string; from: string; to: string }
+  | { kind: 'set'; slot: string; sigs: readonly string[] }
+  | { kind: 'name'; slot: 'children'; op: 'add' | 'remove'; cell: string }
+
 type CommitRequest = {
   segments: string[] | null
-  op?: 'add' | 'remove'
-  cell?: string
+  delta?: CommitDelta
 }
 
 class CommitMachine {
@@ -87,20 +102,27 @@ class CommitMachine {
     this.#run = run
   }
 
-  /** Fire-and-forget enqueue. Returned chain failures are swallowed. */
+  /** Fire-and-forget enqueue. Errors are logged (so they're visible
+   *  in the console) but do not break the chain — the next request
+   *  still runs. */
   request(req: CommitRequest = { segments: null }): void {
-    this.#chain = this.#chain.then(() => this.#run(req)).catch(() => { /* failures don't break the chain */ })
+    this.#chain = this.#chain.then(() => this.#run(req)).catch(err => {
+      console.error('[LayerCommitter] cascade failed (request):', err, req)
+    })
   }
 
   /**
-   * Same as `request` but returns a promise that resolves when this
-   * specific request finishes (success or failure). Used by bootstrap
-   * paths that need to read back the bag right after the commit lands.
+   * Same as `request` but returns a promise that REJECTS when this
+   * specific commit fails — so awaiting callers (HiveParticipant et
+   * al.) see the failure and can react. The chain itself absorbs the
+   * error so subsequent requests still proceed.
    */
   requestAndWait(req: CommitRequest = { segments: null }): Promise<void> {
     const ran = this.#chain.then(() => this.#run(req))
-    this.#chain = ran.catch(() => { /* don't break the chain */ })
-    return ran.catch(() => { /* don't reject the awaiter either */ })
+    this.#chain = ran.catch(err => {
+      console.error('[LayerCommitter] cascade failed (requestAndWait):', err, req)
+    })
+    return ran
   }
 }
 
@@ -128,14 +150,6 @@ export class LayerCommitter {
   // inside the machine's #run — each ancestor is a merkle-chain
   // update cascading up from the leaf.
   readonly #machine = new CommitMachine(req => this.#commit(req))
-
-  /** Lazy accessor: the registry instance lives on window.ioc and is
-   *  registered by layer-slot-registry.ts at module-load. We always
-   *  fetch via get() so a never-registered registry just yields
-   *  undefined and the slot-pipeline becomes a no-op. */
-  get #slotRegistry(): LayerSlotRegistry | undefined {
-    return get<LayerSlotRegistry>('@diamondcoreprocessor.com/LayerSlotRegistry')
-  }
 
   constructor() {
     // layout:mode subscription removed — dense/spiral mode is phased
@@ -168,11 +182,11 @@ export class LayerCommitter {
     // happened. When present, cascade starts at THAT depth so a tile
     // created at /abc cascades through /abc → / regardless of which
     // page the user is currently looking at.
-    EffectBus.on<{ cell?: string; segments?: string[] }>('cell:added',   p => this.#queueCommit(p?.segments, 'add', p?.cell))
-    EffectBus.on<{ cell?: string; segments?: string[] }>('cell:removed', p => this.#queueCommit(p?.segments, 'remove', p?.cell))
-    EffectBus.on<{ cell?: string; segments?: string[] }>('tile:saved',   p => this.#queueCommit(p?.segments))
-    EffectBus.on<{ cell?: string; segments?: string[] }>('tile:hidden',  p => this.#queueCommit(p?.segments))
-    EffectBus.on<{ cell?: string; segments?: string[] }>('tile:unhidden',p => this.#queueCommit(p?.segments))
+    EffectBus.on<{ cell?: string; segments?: string[] }>('cell:added',   p => this.#queueChildName(p?.segments, 'add', p?.cell))
+    EffectBus.on<{ cell?: string; segments?: string[] }>('cell:removed', p => this.#queueChildName(p?.segments, 'remove', p?.cell))
+    EffectBus.on<{ cell?: string; segments?: string[] }>('tile:saved',   p => this.#queueBare(p?.segments))
+    EffectBus.on<{ cell?: string; segments?: string[] }>('tile:hidden',  p => this.#queueBare(p?.segments))
+    EffectBus.on<{ cell?: string; segments?: string[] }>('tile:unhidden',p => this.#queueBare(p?.segments))
 
     // ── Slot-driven re-commit triggers ───────────────────────────────
     // Every registered LayerSlot declares the EffectBus events that
@@ -187,9 +201,44 @@ export class LayerCommitter {
     // Each subscribed event is dedup'd (Set in the registry), so a
     // slot listing the same trigger twice or two slots sharing one
     // trigger only result in a single EffectBus subscription here.
-    this.#slotRegistry?.onTrigger((trigger: string) => {
-      EffectBus.on<{ cell?: string; segments?: string[] }>(trigger, p => this.#queueCommit(p?.segments))
-    })
+    //
+    // whenReady — bee load order is not deterministic across
+    // hypercomb-dev (direct import) and hypercomb-web (OPFS bee load).
+    // If LayerCommitter constructs before LayerSlotRegistry is on ioc,
+    // a `this.#slotRegistry?.onTrigger` call at construction silently
+    // no-ops (optional chaining), and slot triggers (notes:changed,
+    // tags:changed, ...) never reach the committer — slots stop
+    // appearing in cell layers. Defer until the registry exists.
+    window.ioc.whenReady<LayerSlotRegistry>(
+      '@diamondcoreprocessor.com/LayerSlotRegistry',
+      (registry) => {
+        registry.onTrigger((trigger: string, slotName: string) => {
+          // Trigger payload contract:
+          //   { segments, op?: 'append'|'removeSig', sig? }
+          // op + sig present  → leaf applies a sig delta to the named slot
+          // op + sig absent   → bare re-snapshot at segments (idempotent
+          //                     via commitLayer dedup)
+          EffectBus.on<{
+            segments?: string[]
+            op?: 'append' | 'removeSig' | 'swap' | 'set'
+            sig?: string
+            from?: string
+            to?: string
+            sigs?: readonly string[]
+          }>(trigger, p => {
+            if (p?.op === 'set' && Array.isArray(p?.sigs)) {
+              this.#queueSlotSet(p?.segments, slotName, p.sigs)
+            } else if (p?.op === 'swap' && typeof p?.from === 'string' && typeof p?.to === 'string') {
+              this.#queueSlotSwap(p?.segments, slotName, p.from, p.to)
+            } else if ((p?.op === 'append' || p?.op === 'removeSig') && typeof p?.sig === 'string' && p.sig.length > 0) {
+              this.#queueSlotSig(p?.segments, slotName, p.op, p.sig)
+            } else {
+              this.#queueBare(p?.segments)
+            }
+          })
+        })
+      },
+    )
 
     // No preemptive bootstrap. cursor.load (called from show-cell on
     // first render) handles bootstrapping the visible lineage when
@@ -200,20 +249,79 @@ export class LayerCommitter {
   // All commit requests — batched or per-event — route through the
   // single CommitMachine. See the class above for the state transitions.
   #schedule(): void { this.#machine.request({ segments: null }) }
-  #queueCommit(
-    segments?: string[] | null,
-    op?: 'add' | 'remove',
+
+  /** Bare re-snapshot at `segments`. The leaf hydrates from prev,
+   *  applies no delta, outputs identical bytes — commitLayer dedup
+   *  drops the marker. Used as an idempotent ping for events that
+   *  signal "something changed" without a structural delta. */
+  #queueBare(segments?: string[] | null): void {
+    this.#machine.request({ segments: this.#cleanSegments(segments) })
+  }
+
+  /** Legacy by-name child delta: `cell:added` / `cell:removed`. The
+   *  leaf step resolves the cell's lineage to a sig at commit time
+   *  before applying to the children slot. */
+  #queueChildName(
+    segments: string[] | null | undefined,
+    op: 'add' | 'remove',
     cell?: string,
   ): void {
-    const cleaned = Array.isArray(segments)
+    const trimmed = cell ? String(cell).trim() : ''
+    if (!trimmed) {
+      this.#machine.request({ segments: this.#cleanSegments(segments) })
+      return
+    }
+    this.#machine.request({
+      segments: this.#cleanSegments(segments),
+      delta: { kind: 'name', slot: 'children', op, cell: trimmed },
+    })
+  }
+
+  /** Sig delta against an arbitrary slot. Wired up by every registered
+   *  slot's trigger event when the payload carries `{ op, sig }`. */
+  #queueSlotSig(
+    segments: string[] | null | undefined,
+    slot: string,
+    op: 'append' | 'removeSig',
+    sig: string,
+  ): void {
+    this.#machine.request({
+      segments: this.#cleanSegments(segments),
+      delta: { kind: 'sig', slot, op, sig },
+    })
+  }
+
+  /** Strict sig swap on an arbitrary slot. */
+  #queueSlotSwap(
+    segments: string[] | null | undefined,
+    slot: string,
+    from: string,
+    to: string,
+  ): void {
+    this.#machine.request({
+      segments: this.#cleanSegments(segments),
+      delta: { kind: 'sig-swap', slot, from, to },
+    })
+  }
+
+  /** Full-replace of a slot's sigs. Used by HiveParticipant when the
+   *  subsystem holds the canonical sorted list and just needs the layer
+   *  to mirror it (idempotent — commitLayer dedups identical bytes). */
+  #queueSlotSet(
+    segments: string[] | null | undefined,
+    slot: string,
+    sigs: readonly string[],
+  ): void {
+    this.#machine.request({
+      segments: this.#cleanSegments(segments),
+      delta: { kind: 'set', slot, sigs: sigs.slice() },
+    })
+  }
+
+  #cleanSegments(segments?: readonly string[] | null): string[] | null {
+    return Array.isArray(segments)
       ? segments.map(s => String(s ?? '').trim()).filter(Boolean)
       : null
-    const trimmedCell = cell ? String(cell).trim() : undefined
-    this.#machine.request({
-      segments: cleaned,
-      op: op && trimmedCell ? op : undefined,
-      cell: op && trimmedCell ? trimmedCell : undefined,
-    })
   }
 
   /**
@@ -230,6 +338,42 @@ export class LayerCommitter {
    * is the source of truth.
    */
   readonly #bootstrapInFlight = new Map<string, Promise<void>>()
+
+  /**
+   * Public API for slot-aware drones (HiveParticipant et al.) that
+   * want to drive the cascade WITHOUT going through EffectBus and want
+   * an awaitable promise that resolves only when every ancestor up to
+   * root has committed.
+   *
+   * Use these instead of emitting a trigger event when the caller
+   * needs strict "after-commit" sequencing — emitting a trigger is
+   * fire-and-forget and races with subscribers that read back the
+   * layer state immediately.
+   */
+  public commitSlotSet(segments: readonly string[], slot: string, sigs: readonly string[]): Promise<void> {
+    return this.#machine.requestAndWait({
+      segments: this.#cleanSegments(segments) ?? [],
+      delta: { kind: 'set', slot, sigs: sigs.slice() },
+    })
+  }
+  public commitSlotAppend(segments: readonly string[], slot: string, sig: string): Promise<void> {
+    return this.#machine.requestAndWait({
+      segments: this.#cleanSegments(segments) ?? [],
+      delta: { kind: 'sig', slot, op: 'append', sig },
+    })
+  }
+  public commitSlotRemove(segments: readonly string[], slot: string, sig: string): Promise<void> {
+    return this.#machine.requestAndWait({
+      segments: this.#cleanSegments(segments) ?? [],
+      delta: { kind: 'sig', slot, op: 'removeSig', sig },
+    })
+  }
+  public commitSlotSwap(segments: readonly string[], slot: string, from: string, to: string): Promise<void> {
+    return this.#machine.requestAndWait({
+      segments: this.#cleanSegments(segments) ?? [],
+      delta: { kind: 'sig-swap', slot, from, to },
+    })
+  }
 
   public async bootstrapIfEmpty(segments?: string[] | null): Promise<void> {
     const history = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
@@ -285,29 +429,21 @@ export class LayerCommitter {
     // ───────────────────────────────────────────────────────────
     // Unified cascade — ONE path for every commit type.
     //
-    // Per ancestor depth (leaf → root):
-    //   1. Read the previous head's bytes → prev children verbatim.
-    //   2. LEAF only: apply child delta if present:
-    //         op='add'    → append cell sig if not already present
-    //         op='remove' → drop the entry whose layer.name matches
-    //         no op       → preserve children (slot-driven re-commit;
-    //                       only slot values change → new bytes → new sig)
-    //   3. ANCESTORS: swap (belowOldSig → belowNewSig) in children.
-    //      If sig swap misses (legacy / first cascade through), match
-    //      by name; if neither matches, append (orphan auto-attach —
-    //      the child clearly exists, we just committed its layer).
-    //   4. Fold every registered slot's value via LayerSlotRegistry.
-    //   5. Commit. commitLayer dedups identical bytes against the bag's
-    //      current head, so no-op cascades don't churn markers.
-    //   6. Track this ancestor's prevSig→newSig for the next iteration's
-    //      swap.
+    // The layer is the source of truth. At each ancestor depth we:
+    //   1. Hydrate a LayerMachine from the bag's current head.
+    //   2. Apply ONE delta:
+    //         LEAF:    the request's slot delta (sig or name-resolved)
+    //         ANCESTOR: swap children sig of the level below (prev →
+    //                   freshly-committed). If the sig isn't found,
+    //                   resolve by name; if still not found, append
+    //                   (orphan auto-attach for legacy cascade gaps).
+    //   3. Output the layer JSON and commit. commitLayer dedups
+    //      identical bytes against the bag's current head — bare
+    //      re-snapshots that change nothing produce no marker.
+    //   4. Track prevSig → newSig for the next ancestor's swap.
     //
-    // Source of truth: the bag's previous head + slot reads. NEVER
-    // disk enumeration — folders are incidental, layers are canonical.
-    // First-time-touched bags auto-mint 00000000 (the empty layer)
-    // via latestMarkerSigFor; their children start [] and grow only
-    // through cell:added events. No disk-derived "what should be here"
-    // — it either rode through the cascade, or it doesn't exist.
+    // The cascade is slot-agnostic. `children` is just the slot used to
+    // hold the merkle backbone; LayerMachine doesn't know its name.
     // ───────────────────────────────────────────────────────────
 
     let belowOldSig: string | null = null
@@ -324,66 +460,69 @@ export class LayerCommitter {
 
       const prevSig = await history.latestMarkerSigFor(ancestorLocSig, ancestorName)
       const prevLayer = await history.getLayerBySig(prevSig)
-      const prevChildren: string[] = prevLayer?.children?.slice() ?? []
+      const machine = LayerMachine.fromLayer(prevLayer, ancestorName, sub)
 
-      let nextChildren: string[] = prevChildren
-
-      if (depth === segments.length) {
-        // LEAF: apply delta if present, else preserve.
-        if (req.op === 'add' && req.cell) {
-          const cellLocSig = await history.sign({
-            domain: lineage.domain,
-            explorerSegments: () => [...sub, req.cell!],
-          } as Lineage)
-          const cellSig = await history.latestMarkerSigFor(cellLocSig, req.cell!)
-          if (!prevChildren.includes(cellSig)) nextChildren = [...prevChildren, cellSig]
-        } else if (req.op === 'remove' && req.cell) {
-          const filtered: string[] = []
+      if (depth === segments.length && req.delta) {
+        // LEAF: apply the request's delta.
+        const d = req.delta
+        if (d.kind === 'sig') {
+          if (d.op === 'append') {
+            machine.apply({ slot: d.slot, op: 'append', sig: d.sig })
+          } else if (d.op === 'removeSig') {
+            machine.apply({ slot: d.slot, op: 'removeSig', sig: d.sig })
+          }
+        } else if (d.kind === 'sig-swap') {
+          machine.apply({ slot: d.slot, op: 'swap', from: d.from, to: d.to })
+        } else if (d.kind === 'set') {
+          machine.apply({ slot: d.slot, op: 'set', sigs: d.sigs })
+        } else if (d.kind === 'name') {
+          // Legacy children name → sig resolution at commit time.
+          if (d.op === 'add') {
+            const cellLocSig = await history.sign({
+              domain: lineage.domain,
+              explorerSegments: () => [...sub, d.cell],
+            } as Lineage)
+            const cellSig = await history.latestMarkerSigFor(cellLocSig, d.cell)
+            machine.apply({ slot: 'children', op: 'append', sig: cellSig })
+          } else if (d.op === 'remove') {
+            const prevChildren = machine.getSlot('children') as readonly string[]
+            for (const sig of prevChildren) {
+              const child = await history.getLayerBySig(sig)
+              if (child?.name === d.cell) {
+                machine.apply({ slot: 'children', op: 'removeSig', sig })
+                break
+              }
+            }
+          }
+        }
+      } else if (belowOldSig !== null && belowNewSig !== null) {
+        // ANCESTOR: swap children sig of the level below.
+        const swapResult = machine.apply({
+          slot: 'children',
+          op: 'swap',
+          from: belowOldSig,
+          to: belowNewSig,
+        })
+        if (!swapResult.changed && belowName) {
+          // sig miss — resolve by name, then retry. If still absent,
+          // auto-attach (the child layer exists, we just committed it).
+          const prevChildren = machine.getSlot('children') as readonly string[]
+          let resolved = false
           for (const sig of prevChildren) {
             const child = await history.getLayerBySig(sig)
-            if (child?.name === req.cell) continue
-            filtered.push(sig)
-          }
-          nextChildren = filtered
-        }
-      } else if (belowOldSig !== null) {
-        // ANCESTOR: swap (belowOldSig → belowNewSig) in children.
-        let swapped = false
-        const out: string[] = []
-        for (const sig of prevChildren) {
-          if (!swapped && sig === belowOldSig) {
-            if (belowNewSig !== null) out.push(belowNewSig)
-            swapped = true
-            continue
-          }
-          out.push(sig)
-        }
-        if (!swapped && belowName) {
-          for (let i = 0; i < prevChildren.length; i++) {
-            const child = await history.getLayerBySig(prevChildren[i])
             if (child?.name === belowName) {
-              if (belowNewSig !== null) out[i] = belowNewSig
-              else out.splice(i, 1)
-              swapped = true
+              machine.apply({ slot: 'children', op: 'swap', from: sig, to: belowNewSig })
+              resolved = true
               break
             }
           }
-          if (!swapped && belowNewSig !== null) {
-            // Auto-attach: ancestor never knew this child existed
-            // (legacy cascade gap or first commit through this lineage).
-            // Since we just committed the child's layer, append.
-            out.push(belowNewSig)
-            swapped = true
+          if (!resolved) {
+            machine.apply({ slot: 'children', op: 'append', sig: belowNewSig })
           }
         }
-        nextChildren = out
       }
 
-      const slotValues = (await this.#slotRegistry?.readAll(ancestorLocSig, sub)) ?? {}
-      const newLayer: LayerContent = nextChildren.length === 0
-        ? { name: ancestorName, ...slotValues }
-        : { name: ancestorName, children: nextChildren, ...slotValues }
-      const newSig = await history.commitLayer(ancestorLocSig, newLayer)
+      const newSig = await history.commitLayer(ancestorLocSig, machine.output())
 
       belowOldSig = prevSig
       belowNewSig = newSig

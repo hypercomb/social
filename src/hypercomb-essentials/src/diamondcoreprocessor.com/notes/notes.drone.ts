@@ -78,7 +78,6 @@ export class NotesService extends HiveParticipant<Note> {
 
   readonly slot = 'notes'
   readonly triggerName = 'notes:changed'
-  readonly version = 1
 
   // Memoized cell-locationSig keyed by `parent/cellLabel`. Cleared
   // when Lineage changes (the same cellLabel resolves to a different

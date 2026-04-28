@@ -374,19 +374,20 @@ export class HistoryService {
    * Canonicalize a layer so byte-equal content produces byte-equal JSON.
    *
    * Rules:
-   *   - `name` always present, always first.
-   *   - `children` second when non-empty; omitted entirely when empty.
-   *   - All other slot fields follow, sorted alphabetically by key for
-   *     stable byte output regardless of registration / mutation order.
-   *   - Slot values are kept as-is (each slot is responsible for its
-   *     own internal canonical form — sorted arrays, sorted nested
-   *     keys, etc.). Empty arrays / empty objects / undefined are
-   *     dropped to keep the sparse-layer invariant.
+   *   - `name` always present, always first. Layer's only intrinsic.
+   *   - All other fields are SLOTS (open set; drones plug in via
+   *     LayerSlotRegistry). They follow `name` in alphabetical order
+   *     by key for stable byte output regardless of registration /
+   *     mutation order. Slot-agnostic: `children` is just one slot
+   *     among many — no special positioning.
+   *   - Slot values kept as-is (each slot is responsible for its own
+   *     internal canonical form — sorted arrays, sorted nested keys).
+   *     Empty arrays / empty objects / undefined are dropped to keep
+   *     the sparse-layer invariant.
    */
   static readonly canonicalizeLayer = (layer: LayerContent): LayerContent => {
     const out: LayerContent = { name: layer.name }
-    if (layer.children && layer.children.length > 0) out.children = layer.children.slice()
-    const slotKeys = Object.keys(layer).filter(k => k !== 'name' && k !== 'children').sort()
+    const slotKeys = Object.keys(layer).filter(k => k !== 'name').sort()
     for (const key of slotKeys) {
       const v = layer[key]
       if (v === undefined || v === null) continue
@@ -851,6 +852,69 @@ export class HistoryService {
       this.#parsedLayerCache.set(layerSig, hydrated)
       return hydrated
     } catch { return null }
+  }
+
+  /**
+   * Read the current head layer at a location WITHOUT auto-minting an
+   * empty marker if the bag doesn't exist. Used by readers that just
+   * want the present state — UI consumers, slot-cache warmers, the
+   * notes strip — and must NOT side-effect the disk for cells that were
+   * never touched.
+   *
+   * Strategy: consult `#latestSigByLineage` first (kept current by every
+   * commitLayer / latestMarkerSigFor path). On miss, trigger
+   * `preloadAllBags` (idempotent, completes once per session) which fills
+   * the lineage cache for every existing bag. Returns null when the
+   * location truly has no committed marker.
+   */
+  public readonly currentLayerAt = async (
+    locationSig: string,
+  ): Promise<LayerContent | null> => {
+    if (!HistoryService.#SIG_RE.test(locationSig)) return null
+    const cached = this.#latestSigByLineage.get(locationSig)
+    if (cached) return this.getLayerBySig(cached)
+    await this.preloadAllBags()
+    const refreshed = this.#latestSigByLineage.get(locationSig)
+    if (!refreshed) return null
+    return this.getLayerBySig(refreshed)
+  }
+
+  /**
+   * Synchronous peek at the current head layer at a location. Returns
+   * null on cache miss — caller must have already awaited
+   * `preloadAllBags` (or some path that warmed `#latestSigByLineage` and
+   * `#parsedLayerCache` for this location). For UI reads on hot paths
+   * (notes strip per render), this avoids the round-trip through
+   * Promise.then while the data is already in memory.
+   */
+  public readonly peekCurrentLayer = (
+    locationSig: string,
+  ): LayerContent | null => {
+    if (!HistoryService.#SIG_RE.test(locationSig)) return null
+    const sig = this.#latestSigByLineage.get(locationSig)
+    if (!sig) return null
+    return this.#parsedLayerCache.get(sig) ?? null
+  }
+
+  /**
+   * Synchronous peek at a layer by its content sig. Returns null on
+   * cache miss. Mirror of `getLayerBySig` for the parsed-cache hot path.
+   */
+  public readonly peekLayerBySig = (
+    layerSig: string,
+  ): LayerContent | null => {
+    if (!HistoryService.#SIG_RE.test(layerSig)) return null
+    return this.#parsedLayerCache.get(layerSig) ?? null
+  }
+
+  /**
+   * Every layer sig the preloader has touched in this session. Used by
+   * slot-aware subsystems (HiveParticipant.warmup) to walk the layer
+   * universe looking for slot occurrences. After `preloadAllBags`, the
+   * returned set covers every marker in every bag on disk.
+   */
+  public readonly allKnownLayerSigs = (): readonly string[] => {
+    return [...this.#preloaderCache.keys()]
   }
 
   /**
