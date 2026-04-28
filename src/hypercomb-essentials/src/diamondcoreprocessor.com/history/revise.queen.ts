@@ -21,6 +21,7 @@ export class ReviseQueenBee extends QueenBee {
   override readonly aliases = []
 
   override description = 'Toggle revision mode (history clock)'
+  override descriptionKey = 'slash.revise'
 
   #active = false
 

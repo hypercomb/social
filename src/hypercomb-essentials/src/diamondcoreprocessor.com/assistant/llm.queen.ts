@@ -2,6 +2,7 @@
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
 import { MODELS, API_KEY_STORAGE, getApiKey, callAnthropic } from './llm-api.js'
+import type { SlashBehaviour, SlashBehaviourProvider } from '../commands/slash-behaviour.provider.js'
 
 const SYSTEM_PROMPT = `You are an assistant integrated into a spatial knowledge graph called Hypercomb.
 You receive context gathered from content-addressed lineages (folder paths) and signatures (SHA-256 hashes).
@@ -25,6 +26,9 @@ export class LlmQueenBee extends QueenBee {
   readonly command = 'opus'
   override readonly aliases = []
   override description = 'Send context to a Claude LLM and store the response as a resource'
+
+  /** LlmProvider declares opus/sonnet/haiku manually — skip auto-wrap to avoid duplicate /opus */
+  readonly slashSkipAutoWrap = true
 
   /** Set by the provider before invoke() to select which model to use */
   activeModel = 'opus'
@@ -142,7 +146,32 @@ async function readLineageContext(_lineagePath: string): Promise<string | null> 
   return null
 }
 
+// ── slash provider ──────────────────────────────────────
+
+class LlmProvider implements SlashBehaviourProvider {
+  readonly name = 'llm-provider'
+  readonly priority = 100
+  readonly behaviours: SlashBehaviour[] = [
+    { name: 'opus', description: 'Send context to Claude Opus 4.6', descriptionKey: 'slash.opus' },
+    { name: 'sonnet', description: 'Send context to Claude Sonnet', descriptionKey: 'slash.sonnet' },
+    { name: 'haiku', description: 'Send context to Claude Haiku', descriptionKey: 'slash.haiku' },
+  ]
+
+  async execute(behaviourName: string, args: string): Promise<void> {
+    const queen = get('@diamondcoreprocessor.com/LlmQueenBee') as any
+    if (queen) {
+      queen.activeModel = behaviourName
+      await queen.invoke(args)
+    }
+  }
+}
+
 // ── registration ────────────────────────────────────────
 
 const _llm = new LlmQueenBee()
 window.ioc.register('@diamondcoreprocessor.com/LlmQueenBee', _llm)
+
+const _llmProvider = new LlmProvider()
+window.ioc.whenReady?.('@diamondcoreprocessor.com/SlashBehaviourDrone', (slashDrone: any) => {
+  slashDrone?.addProvider?.(_llmProvider)
+})

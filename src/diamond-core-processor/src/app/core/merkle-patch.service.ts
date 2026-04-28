@@ -26,6 +26,7 @@ type LayerJson = {
   rel?: string
   bees?: string[]
   dependencies?: string[]
+  cells?: string[]
   layers?: string[]
   children?: string[]
   docs?: Record<string, unknown>
@@ -228,7 +229,7 @@ export class MerklePatchService {
     }
 
     // child layers → parent is this layer, then recurse
-    for (const childSig of layer.layers ?? layer.children ?? []) {
+    for (const childSig of layer.cells ?? layer.layers ?? layer.children ?? []) {
       index.set(childSig, layerSig)
       await this.#walkTree(childSig, domain, index)
     }
@@ -279,7 +280,11 @@ export class MerklePatchService {
       }
     }
 
-    // also check layers[]/children[] for cascaded layer sig replacements
+    // also check cells[]/layers[]/children[] for cascaded layer sig replacements
+    if (layer.cells) {
+      const idx = layer.cells.indexOf(oldSig)
+      if (idx >= 0) { layer.cells[idx] = newSig; return }
+    }
     if (layer.layers) {
       const idx = layer.layers.indexOf(oldSig)
       if (idx >= 0) { layer.layers[idx] = newSig; return }

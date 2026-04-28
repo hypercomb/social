@@ -1,5 +1,5 @@
 // diamondcoreprocessor.com/core/history.service.ts
-import { SignatureService, SignatureStore } from '@hypercomb/core'
+import { EffectBus, SignatureService, SignatureStore } from '@hypercomb/core'
 import { canonicalise, parse as parseRecord, type DeltaRecord } from './delta-record.js'
 import { reduce as reduceRecords, type HydratedState } from './delta-reducer.js'
 export type { DeltaRecord } from './delta-record.js'
@@ -458,13 +458,10 @@ export class HistoryService {
     this.#preloaderCache.set(layerSig, bytes.buffer as ArrayBuffer)
     this.#latestSigByLineage.set(locationSig, layerSig)
 
-    // Push queue is informational — fires for backup but doesn't gate
-    // anything. Stub receipts arrive immediately (real DCP transport
-    // is forthcoming).
-    const pushQueue = get<{ enqueue: (sig: string) => Promise<void> }>('@diamondcoreprocessor.com/PushQueueService')
-    if (pushQueue) {
-      void pushQueue.enqueue(layerSig).catch(() => { /* best-effort */ })
-    }
+    // Mirror up to DCP. PushQueueService listens on EffectBus and
+    // enqueues the bytes for sentinel intake; the queue survives
+    // page reloads and retries until DCP acks.
+    EffectBus.emit('content:wrote', { sig: layerSig, kind: 'layer' as const, bytes: bytes.buffer as ArrayBuffer })
 
     return layerSig
   }

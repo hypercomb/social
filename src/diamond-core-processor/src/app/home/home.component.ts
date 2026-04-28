@@ -1,6 +1,6 @@
 // diamond-core-processor/src/app/home/home.component.ts
 
-import { Component, computed, effect, inject, signal } from '@angular/core'
+import { Component, computed, effect, inject, OnDestroy, signal } from '@angular/core'
 import { TreeResolverService } from '../core/tree-resolver.service'
 import { ToggleStateService } from '../core/toggle-state.service'
 import { PatchStore, type PatchRecord } from '../core/patch-store'
@@ -48,12 +48,21 @@ export interface DomainGroup {
   templateUrl: './home.component.html',
   styleUrls: ['./home.component.scss']
 })
-export class HomeComponent {
+export class HomeComponent implements OnDestroy {
 
   readonly #resolver = inject(TreeResolverService)
   readonly #toggleState = inject(ToggleStateService)
   readonly #patchStore = inject(PatchStore)
   readonly #exporter = inject(PackageExportService)
+
+  readonly receivedLayerSigs = signal<string[]>([])
+  #fromHcChannel: BroadcastChannel | null = null
+
+  // "Pushed to Hypercomb" toast — shown after the user installs a new
+  // domain so they know the cross-origin push happened and to switch
+  // back to their Hypercomb tab.
+  readonly installToastVisible = signal(false)
+  #installToastTimer: ReturnType<typeof setTimeout> | null = null
 
   // state
   readonly selfOrigin = location.origin
@@ -172,6 +181,48 @@ export class HomeComponent {
       const doms = this.domains()
       if (doms.length) this.#loadAllDomains(doms)
     })
+
+    // Surface anything the user has authored in hypercomb-web — every
+    // sentinel intake broadcasts here, so this list reflects all the
+    // changes the user has made up to this point in time.
+    void this.#refreshReceivedLayers()
+    try {
+      this.#fromHcChannel = new BroadcastChannel('dcp-from-hypercomb')
+      this.#fromHcChannel.onmessage = () => {
+        void this.#refreshReceivedLayers()
+        // Existing sections might depend on a layer that just arrived
+        // (e.g. resolving a freshly received subtree). Bumping the
+        // sections signal forces re-renders to pick up new bytes.
+        this.#refreshSections()
+      }
+    } catch { /* BroadcastChannel unavailable */ }
+  }
+
+  ngOnDestroy(): void {
+    this.#fromHcChannel?.close()
+    if (this.#installToastTimer) clearTimeout(this.#installToastTimer)
+  }
+
+  showInstallToast(): void {
+    if (this.#installToastTimer) clearTimeout(this.#installToastTimer)
+    this.installToastVisible.set(true)
+    this.#installToastTimer = setTimeout(() => {
+      this.installToastVisible.set(false)
+      this.#installToastTimer = null
+    }, 8_000)
+  }
+
+  dismissInstallToast(): void {
+    if (this.#installToastTimer) {
+      clearTimeout(this.#installToastTimer)
+      this.#installToastTimer = null
+    }
+    this.installToastVisible.set(false)
+  }
+
+  async #refreshReceivedLayers(): Promise<void> {
+    const sigs = await this.#resolver.listReceivedLayers()
+    this.receivedLayerSigs.set(sigs)
   }
 
   // kind filter toggles
@@ -243,6 +294,7 @@ export class HomeComponent {
       this.domains.set(next)
       localStorage.setItem(DOMAINS_KEY, JSON.stringify(next))
       this.domainInput.set('')
+      this.showInstallToast()
     } catch {
       // ignore invalid urls
     }
@@ -261,6 +313,11 @@ export class HomeComponent {
       this.kindFilters.set(new Set())
       this.layersCollapsed.set(false)
     }
+
+    // Drop the domain's content from any connected web tab — the next
+    // sync sig will exclude these sigs and resyncFromSentinel removes
+    // disabled files.
+    this.#toggleState.notifyChanged()
   }
 
   togglePackage(section: DomainSection): void {
@@ -580,6 +637,14 @@ export class HomeComponent {
       }
       this.sections.set([...results])
     }
+
+    // Tell the sentinel that DCP's content set has changed so any
+    // connected hypercomb-web tab resyncs against our latest OPFS
+    // state. Without this, installing a new domain leaves web frozen
+    // on its previous sync until the user toggles something or
+    // reloads. We broadcast unconditionally — sync-sig short-circuits
+    // a no-op resync on the web side.
+    this.#toggleState.notifyChanged()
 
     // Check for navigate query param (from structure atomizer drop in Hypercomb.io)
     this.#handleNavigateQueryParam()

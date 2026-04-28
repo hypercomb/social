@@ -1,0 +1,11 @@
+# Signature-addressed content — bytes must be exact.
+# File names are SHA-256 hashes of file content; any line-ending
+# conversion (notably Windows core.autocrlf=true) breaks integrity
+# because the working-tree bytes no longer hash to the filename.
+# Marking these paths `binary` disables eol normalization, diff,
+# and merge for them.
+**/__bees__/** binary
+**/__dependencies__/** binary
+**/__layers__/** binary
+**/__resources__/** binary
+**/__from-hypercomb__/** binary

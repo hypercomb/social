@@ -23,6 +23,16 @@ export class ToggleStateService {
     this.#broadcastChange()
   }
 
+  /**
+   * Public hook for non-toggle events that should still trigger a web
+   * resync — e.g. a freshly installed domain on DCP. The sentinel
+   * relays `dcp-toggle-state` to web, which runs resyncAndEnforce. We
+   * reuse that channel so callers don't need to know about transport.
+   */
+  notifyChanged(): void {
+    this.#broadcastChange()
+  }
+
   /** Notify the sentinel iframe (and any same-origin listener) that toggles changed. */
   #broadcastChange(): void {
     try {

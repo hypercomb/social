@@ -107,6 +107,14 @@ const materializeInstalledLayers = async (store: Store): Promise<void> => {
     const rootSig = layerSigs.find(sig => layerMap.has(sig) && !allChildSigs.has(sig))
     if (!rootSig) return
 
+    // The slim meta-root (built with name `"root"` when the layer has no
+    // rel path of its own) groups domain wrappers — its children are
+    // namespaces like `miro.com` and `diamondcoreprocessor.com`, not
+    // user-content tiles. Iterating it would write one tile dir per
+    // domain into hypercomb.io/. User content tiles only live under a
+    // real domain root, so bail when the root is the meta-root.
+    if (layerMap.get(rootSig)!.name === 'root') return
+
     await applyLayerToDir(store.hypercombRoot, layerMap.get(rootSig)!, layerMap)
     console.log('[runtime-initializer] materialized layer tree into hypercomb.io/')
   } catch (err) {

@@ -18,6 +18,7 @@ export class DcpStore {
   static readonly LAYERS_DIRECTORY = '__layers__'
   static readonly RESOURCES_DIRECTORY = '__resources__'
   static readonly PATCHES_DIRECTORY = '__patches__'
+  static readonly FROM_HYPERCOMB_DIRECTORY = '__from-hypercomb__'
 
   #root!: FileSystemDirectoryHandle
   #bees!: FileSystemDirectoryHandle
@@ -25,7 +26,7 @@ export class DcpStore {
   #layers!: FileSystemDirectoryHandle
   #resources!: FileSystemDirectoryHandle
   #patches!: FileSystemDirectoryHandle
-  #initialized = false
+  #initPromise: Promise<void> | null = null
 
   get root(): FileSystemDirectoryHandle { return this.#root }
   get bees(): FileSystemDirectoryHandle { return this.#bees }
@@ -34,10 +35,11 @@ export class DcpStore {
   get resources(): FileSystemDirectoryHandle { return this.#resources }
   get patches(): FileSystemDirectoryHandle { return this.#patches }
 
-  async initialize(): Promise<void> {
-    if (this.#initialized) return
-    this.#initialized = true
+  initialize(): Promise<void> {
+    return this.#initPromise ??= this.#doInit()
+  }
 
+  async #doInit(): Promise<void> {
     this.#root = await navigator.storage.getDirectory()
     this.#bees = await this.#root.getDirectoryHandle(DcpStore.BEES_DIRECTORY, { create: true })
     this.#dependencies = await this.#root.getDirectoryHandle(DcpStore.DEPENDENCIES_DIRECTORY, { create: true })
@@ -79,6 +81,32 @@ export class DcpStore {
   async patchedDepsDir(domain: string): Promise<FileSystemDirectoryHandle> {
     const patchDir = await this.domainPatchesDir(domain)
     return await patchDir.getDirectoryHandle('__dependencies__', { create: true })
+  }
+
+  /**
+   * Root of the "received from hypercomb-web" namespace — content the
+   * web app pushed up via sentinel intake. Kept separate from authored
+   * (__layers__/{domain}) and patched (__patches__/{domain}) bags so
+   * received bytes never collide with anything DCP itself produced.
+   */
+  async fromHypercombDir(): Promise<FileSystemDirectoryHandle> {
+    return await this.#root.getDirectoryHandle(DcpStore.FROM_HYPERCOMB_DIRECTORY, { create: true })
+  }
+
+  /**
+   * Returns __from-hypercomb__/{kind}/ — one of `__layers__`,
+   * `__bees__`, `__dependencies__`, or `__resources__`. Mirrors the
+   * canonical bag layout so received content is structurally
+   * identical to authored content; only the parent namespace differs.
+   */
+  async fromHypercombKindDir(kind: 'layer' | 'bee' | 'dependency' | 'resource'): Promise<FileSystemDirectoryHandle> {
+    const dir = await this.fromHypercombDir()
+    const sub =
+      kind === 'layer' ? DcpStore.LAYERS_DIRECTORY :
+      kind === 'bee' ? DcpStore.BEES_DIRECTORY :
+      kind === 'dependency' ? DcpStore.DEPENDENCIES_DIRECTORY :
+      DcpStore.RESOURCES_DIRECTORY
+    return await dir.getDirectoryHandle(sub, { create: true })
   }
 
   async writeFile(dir: FileSystemDirectoryHandle, name: string, bytes: ArrayBuffer): Promise<void> {

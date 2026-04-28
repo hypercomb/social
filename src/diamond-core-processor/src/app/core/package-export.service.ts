@@ -9,6 +9,7 @@ type LayerJson = {
   rel?: string
   bees?: string[]
   dependencies?: string[]
+  cells?: string[]
   layers?: string[]
   children?: string[]
 }
@@ -183,7 +184,7 @@ export class PackageExportService {
       if (!deps.includes(sig)) deps.push(sig)
     }
 
-    for (const childSig of layer.layers ?? layer.children ?? []) {
+    for (const childSig of layer.cells ?? layer.layers ?? layer.children ?? []) {
       await this.#collectSigs(childSig, domain, layers, bees, deps)
     }
   }

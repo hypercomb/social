@@ -1,7 +1,7 @@
 // hypercomb-shared/core/store.ts
 // hypercomb-web/src/app/core/store.ts
 
-import { Bee, SignatureService, isSignature } from '@hypercomb/core'
+import { Bee, EffectBus, SignatureService, isSignature } from '@hypercomb/core'
 
 type BeeCtor = new () => Bee
 
@@ -37,42 +37,65 @@ export class Store extends EventTarget {
   public threads!: FileSystemDirectoryHandle
   public computation!: FileSystemDirectoryHandle
 
-  #initialized = false
+  #initPromise: Promise<void> | null = null
+  #opfsAvailable = true
+
+  /** False when Chrome's OPFS state is wedged (timeout or InvalidStateError
+   *  during init). Boot continues without persistence so the app doesn't
+   *  go blank — user can fix by restarting the browser. */
+  get opfsAvailable(): boolean { return this.#opfsAvailable }
 
   // -------------------------------------------------
   // init
   // -------------------------------------------------
 
-  public initialize = async (): Promise<void> => {
-    if (this.#initialized) return
-    this.#initialized = true
+  public initialize = (): Promise<void> => {
+    return this.#initPromise ??= this.#doInit()
+  }
 
-    this.opfsRoot = await navigator.storage.getDirectory()
+  #doInit = async (): Promise<void> => {
+    try {
+      this.opfsRoot = await Promise.race([
+        navigator.storage.getDirectory(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('OPFS timed out')), 3_000)
+        )
+      ])
+    } catch (err) {
+      console.warn('[store] OPFS root unavailable — running without persistent storage', err)
+      this.#opfsAvailable = false
+      return
+    }
 
     const dir = (name: string) =>
       this.opfsRoot.getDirectoryHandle(name, { create: true })
 
-    ;[
-      this.hypercombRoot,
-      this.bees,
-      this.dependencies,
-      this.layers,
-      this.resources,
-      this.clipboard,
-      this.history,
-      this.threads,
-      this.computation,
-    ] = await Promise.all([
-      dir('hypercomb.io'),
-      dir(Store.BEES_DIRECTORY),
-      dir(Store.DEPENDENCIES_DIRECTORY),
-      dir(Store.LAYERS_DIRECTORY),
-      dir(Store.RESOURCES_DIRECTORY),
-      dir(Store.CLIPBOARD_DIRECTORY),
-      dir(Store.HISTORY_DIRECTORY),
-      dir(Store.THREADS_DIRECTORY),
-      dir(Store.COMPUTATION_DIRECTORY),
-    ])
+    try {
+      ;[
+        this.hypercombRoot,
+        this.bees,
+        this.dependencies,
+        this.layers,
+        this.resources,
+        this.clipboard,
+        this.history,
+        this.threads,
+        this.computation,
+      ] = await Promise.all([
+        dir('hypercomb.io'),
+        dir(Store.BEES_DIRECTORY),
+        dir(Store.DEPENDENCIES_DIRECTORY),
+        dir(Store.LAYERS_DIRECTORY),
+        dir(Store.RESOURCES_DIRECTORY),
+        dir(Store.CLIPBOARD_DIRECTORY),
+        dir(Store.HISTORY_DIRECTORY),
+        dir(Store.THREADS_DIRECTORY),
+        dir(Store.COMPUTATION_DIRECTORY),
+      ])
+    } catch (err) {
+      console.warn('[store] OPFS subdirectory init failed — running without persistent storage', err)
+      this.#opfsAvailable = false
+    }
   }
 
   public domainLayersDirectory = async (
@@ -221,6 +244,10 @@ export class Store extends EventTarget {
     } finally {
       await writable.close()
     }
+    // Mirror up to DCP. PushQueueService (in essentials) subscribes to
+    // `content:wrote` and queues the bytes for sentinel intake. Going
+    // through EffectBus avoids a shared→essentials import.
+    EffectBus.emit('content:wrote', { sig: signature, kind: 'resource' as const, bytes })
     return signature
   }
 

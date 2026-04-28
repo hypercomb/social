@@ -23,6 +23,13 @@ export class SubstrateQueenBee extends QueenBee {
   readonly command = 'substrate'
   override readonly aliases = []
   override description = 'Manage substrate background image sources'
+  override descriptionKey = 'slash.substrate'
+
+  override slashComplete(args: string): readonly string[] {
+    const q = args.toLowerCase().trim()
+    if (!q) return ['here']
+    return ['here'].filter(s => s.startsWith(q))
+  }
 
   protected async execute(args: string): Promise<void> {
     const service = get('@diamondcoreprocessor.com/SubstrateService') as SubstrateService | undefined

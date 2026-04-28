@@ -23,6 +23,31 @@ export class RerollQueenBee extends QueenBee {
   readonly command = 'reroll'
   override readonly aliases = []
   override description = 'Reroll substrate background images on tiles'
+  override descriptionKey = 'slash.reroll'
+
+  override slashComplete(args: string): readonly string[] {
+    const cellProvider = get('@hypercomb.social/CellSuggestionProvider') as { suggestions(): string[] } | undefined
+    const cells = cellProvider?.suggestions() ?? []
+
+    const bracketStart = args.indexOf('[')
+    if (bracketStart >= 0) {
+      const inner = args.slice(bracketStart + 1)
+      const lastComma = inner.lastIndexOf(',')
+      const fragment = (lastComma >= 0 ? inner.slice(lastComma + 1) : inner).trimStart().toLowerCase()
+      const already = new Set<string>()
+      for (const item of inner.split(',')) {
+        const n = item.trim().toLowerCase()
+        if (n && n !== fragment) already.add(n)
+      }
+      let filtered = cells.filter(n => !already.has(n))
+      if (fragment) filtered = filtered.filter(n => n.startsWith(fragment))
+      return filtered
+    }
+
+    const q = args.toLowerCase().trim()
+    if (!q) return cells
+    return cells.filter(n => n.startsWith(q))
+  }
 
   protected async execute(args: string): Promise<void> {
     const service = get('@diamondcoreprocessor.com/SubstrateService') as SubstrateService | undefined

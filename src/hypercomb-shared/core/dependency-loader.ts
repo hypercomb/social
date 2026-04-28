@@ -105,12 +105,9 @@ export class DependencyLoader extends EventTarget {
     }
 
     // Fallback: scan OPFS dependencies directory (dev mode or no cached map)
-    let depDir: FileSystemDirectoryHandle
-    try {
-      depDir = this.store.dependencies
-    } catch {
-      return []
-    }
+    if (!this.store.opfsAvailable) return []
+    const depDir = this.store.dependencies
+    if (!depDir) return []
 
     const pending: { sig: string; alias: string }[] = []
 

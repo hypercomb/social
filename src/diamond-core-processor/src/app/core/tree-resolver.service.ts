@@ -22,6 +22,7 @@ type LayerJson = {
   rel?: string
   bees?: string[]
   dependencies?: string[]
+  cells?: string[]
   layers?: string[]
   children?: string[]
   docs?: LayerDocs
@@ -137,7 +138,7 @@ export class TreeResolverService {
     const layer = this.#cache.get(parent.signature ?? parent.id)
     if (!layer) return
 
-    const childSigs = layer.layers ?? layer.children ?? []
+    const childSigs = layer.cells ?? layer.layers ?? layer.children ?? []
     const beeSigs = (layer.bees ?? []).map(s => s.replace(/\.js$/i, ''))
 
     for (const childSig of childSigs) {
@@ -386,7 +387,36 @@ export class TreeResolverService {
       return parsed
     }
 
+    // check layers received from hypercomb-web
+    const fromHcDir = await this.#store.fromHypercombKindDir('layer')
+    const receivedBytes = await this.#store.readFile(fromHcDir, layerSig)
+    if (receivedBytes) {
+      const parsed = JSON.parse(new TextDecoder().decode(receivedBytes)) as LayerJson
+      this.#cache.set(layerSig, parsed)
+      return parsed
+    }
+
     return null
+  }
+
+  /**
+   * Layer signatures received from hypercomb-web via sentinel intake.
+   * Each one is a complete content-addressed layer the user authored
+   * in the web app. UI surfaces these as a top-level "Received" list
+   * so the user can navigate any prior state of their work after
+   * switching over to DCP.
+   */
+  async listReceivedLayers(): Promise<string[]> {
+    await this.#store.initialize()
+    const dir = await this.#store.fromHypercombKindDir('layer')
+    const sigs: string[] = []
+    try {
+      for await (const [name, handle] of (dir as any).entries()) {
+        if (handle.kind !== 'file') continue
+        if (/^[a-f0-9]{64}$/.test(name)) sigs.push(name)
+      }
+    } catch { /* dir might not exist yet */ }
+    return sigs
   }
 
   async #expandChildrenLocal(parent: TreeNode, domain: string): Promise<void> {
@@ -395,7 +425,7 @@ export class TreeResolverService {
     const layer = this.#cache.get(parent.signature ?? parent.id)
     if (!layer) return
 
-    const childSigs = layer.layers ?? layer.children ?? []
+    const childSigs = layer.cells ?? layer.layers ?? layer.children ?? []
     const beeSigs = (layer.bees ?? []).map(s => s.replace(/\.js$/i, ''))
 
     for (const childSig of childSigs) {
@@ -482,10 +512,11 @@ export class TreeResolverService {
   }
 
   async #resolveDepLineagesFromLocal(domain: string): Promise<void> {
-    // scan both patched and original dependency directories
+    // scan patched, original, and received dependency directories
     const dirs = [
       await this.#store.patchedDepsDir(domain),
-      this.#store.dependencies
+      this.#store.dependencies,
+      await this.#store.fromHypercombKindDir('dependency')
     ]
     for (const dir of dirs) {
       try {
@@ -516,6 +547,16 @@ export class TreeResolverService {
         if (m) return { kind: (m[3].toLowerCase() === 'bee' ? 'bee' : m[3].toLowerCase()) as TreeNodeKind, className: m[1] || m[2] }
       }
     } catch { /* fallback */ }
+    // check received bees
+    try {
+      const fromHcDir = await this.#store.fromHypercombKindDir('bee')
+      const bytes = await this.#store.readFile(fromHcDir, `${sig}.js`)
+      if (bytes) {
+        const text = new TextDecoder().decode(bytes)
+        const m = text.match(/(?:var\s+(\w+)\s*=\s*class|class\s+(\w+))\s+extends\s+(Worker|Drone|Bee)\b/)
+        if (m) return { kind: (m[3].toLowerCase() === 'bee' ? 'bee' : m[3].toLowerCase()) as TreeNodeKind, className: m[1] || m[2] }
+      }
+    } catch { /* fallback */ }
     return this.#detectBeeInfo(sig)
   }
 
@@ -523,6 +564,15 @@ export class TreeResolverService {
     try {
       const patchedDir = await this.#store.patchedDepsDir(domain)
       const bytes = await this.#store.readFile(patchedDir, `${sig}.js`)
+      if (bytes) {
+        const text = new TextDecoder().decode(bytes)
+        const m = text.match(/(?:var\s+(\w+)\s*=\s*class|class\s+(\w+))/)
+        if (m) return m[1] || m[2]
+      }
+    } catch { /* fallback */ }
+    try {
+      const fromHcDir = await this.#store.fromHypercombKindDir('dependency')
+      const bytes = await this.#store.readFile(fromHcDir, `${sig}.js`)
       if (bytes) {
         const text = new TextDecoder().decode(bytes)
         const m = text.match(/(?:var\s+(\w+)\s*=\s*class|class\s+(\w+))/)

@@ -3,6 +3,22 @@ import { Drone, EffectBus, hypercomb, normalizeCell } from '@hypercomb/core'
 import type { OverlayActionDescriptor, OverlayTileContext, OverlayProfileKey, OverlayTintFn } from './tile-overlay.drone.js'
 import { readCellProperties, writeCellProperties } from '../../editor/tile-properties.js'
 
+type IconProviderEntry = {
+  name: string
+  owner?: string
+  svgMarkup: string
+  profile: string
+  hoverTint?: number
+  visibleWhen?: (ctx: OverlayTileContext) => boolean
+  tintWhen?: OverlayTintFn
+  labelKey?: string
+  descriptionKey?: string
+}
+
+type IconProviderRegistryShape = EventTarget & {
+  all(): IconProviderEntry[]
+}
+
 // ── Notes accent ──────────────────────────────────────────────────
 // Warm gold used as the canonical "note intent" colour: tints the note
 // icon when a tile contains notes, the command line when in capture
@@ -19,8 +35,6 @@ const svg = (d: string) =>
 const ICONS = {
   // Terminal prompt >_
   command: svg('<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>'),
-  // Pencil
-  edit: svg('<path d="M17 3l4 4L7 21H3v-4L17 3z"/>'),
   // Magnifying glass
   search: svg('<circle cx="11" cy="11" r="7"/><line x1="16" y1="16" x2="21" y2="21"/>'),
   // Eye with slash
@@ -57,10 +71,12 @@ export type IconRegistryEntry = {
 const ICON_REGISTRY: IconRegistryEntry[] = [
   // ── private profile ──
   { name: 'command', svgMarkup: ICONS.command, hoverTint: 0xa8ffd8, profile: 'private', labelKey: 'action.command', descriptionKey: 'action.command.description' },
-  { name: 'edit', svgMarkup: ICONS.edit, hoverTint: 0xc8d8ff, profile: 'private', labelKey: 'action.edit', descriptionKey: 'action.edit.description' },
-  { name: 'note', svgMarkup: ICONS.note, hoverTint: NOTE_ACCENT, profile: 'private', tintWhen: (ctx) => ctx.hasNotes ? NOTE_ACCENT : null, labelKey: 'action.note', descriptionKey: 'action.note.description' },
+  // 'edit' icon is provided by TileEditorDrone via IconProviderRegistry —
+  // when the editor drone is toggled off it never registers, the icon
+  // never appears, and the merged-available filter strips it from default
+  // arrangements. Same pattern for 'note' (NotesService) and 'reroll'
+  // (SubstrateDrone) — both registered by their owning drones.
   { name: 'search', svgMarkup: ICONS.search, hoverTint: 0xc8ffc8, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.noImage, labelKey: 'action.search', descriptionKey: 'action.search.description' },
-  { name: 'reroll', svgMarkup: ICONS.reroll, hoverTint: 0xd8c8ff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.hasSubstrate, labelKey: 'action.reroll', descriptionKey: 'action.reroll.description' },
   { name: 'remove', svgMarkup: ICONS.remove, hoverTint: 0xffc8c8, profile: 'private', labelKey: 'action.remove', descriptionKey: 'action.remove.description' },
   { name: 'break-apart', svgMarkup: ICONS.breakApart, hoverTint: 0x66ccff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden, labelKey: 'action.break-apart', descriptionKey: 'action.break-apart.description' },
   // ── public-own profile ──
@@ -130,6 +146,7 @@ export class TileActionsDrone extends Drone {
   #effectsRegistered = false
   #arrangement: IconArrangement = {}
   #substrateLabels = new Set<string>()
+  #onRegistryChange = (): void => { this.#reregisterAll() }
 
   protected override heartbeat = async (): Promise<void> => {
     if (!this.#effectsRegistered) {
@@ -175,6 +192,31 @@ export class TileActionsDrone extends Drone {
         void this.#persistArrangement()
         this.#registerProfileIcons(payload.profile)
       })
+
+      // Re-emit descriptors whenever a drone-owned icon provider is added
+      // or removed at runtime (e.g. installer toggles a drone, or a hot
+      // arrange-mode change). Provider-contributed icons are merged with
+      // the local catalog before positioning.
+      const registry = window.ioc.get<IconProviderRegistryShape>('@hypercomb.social/IconProviderRegistry')
+      registry?.addEventListener('change', this.#onRegistryChange)
+    }
+  }
+
+  // ── Merged icon catalog ─────────────────────────────────────────
+  // Local ICON_REGISTRY entries plus any IconProviderRegistry entries
+  // contributed by individual drones. Source of truth for "available"
+  // icons used by descriptor build, pool computation, and arrangement
+  // filtering.
+  #mergedEntries(): IconRegistryEntry[] {
+    const registry = window.ioc.get<IconProviderRegistryShape>('@hypercomb.social/IconProviderRegistry')
+    const provided = registry?.all() ?? []
+    return [...ICON_REGISTRY, ...provided as IconRegistryEntry[]]
+  }
+
+  #reregisterAll(): void {
+    if (!this.#registered) return
+    for (const profile of ['private', 'public-own', 'public-external'] as OverlayProfileKey[]) {
+      this.#registerProfileIcons(profile)
     }
   }
 
@@ -206,13 +248,14 @@ export class TileActionsDrone extends Drone {
 
   #buildAllDescriptors(): OverlayActionDescriptor[] {
     const descriptors: OverlayActionDescriptor[] = []
+    const merged = this.#mergedEntries()
 
     for (const profile of ['private', 'public-own', 'public-external'] as OverlayProfileKey[]) {
       const activeNames = this.#getActiveNames(profile)
       const positions = computeIconPositions(activeNames)
 
       for (let i = 0; i < activeNames.length; i++) {
-        const entry = ICON_REGISTRY.find(e => e.name === activeNames[i] && e.profile === profile)
+        const entry = merged.find(e => e.name === activeNames[i] && e.profile === profile)
         if (!entry) continue
 
         descriptors.push({
@@ -235,8 +278,10 @@ export class TileActionsDrone extends Drone {
   }
 
   #registerProfileIcons(profile: OverlayProfileKey): void {
+    const merged = this.#mergedEntries()
+
     // Unregister existing icons for this profile
-    const profileEntries = ICON_REGISTRY.filter(e => e.profile === profile)
+    const profileEntries = merged.filter(e => e.profile === profile)
     for (const entry of profileEntries) {
       EffectBus.emit('overlay:unregister-action', { name: entry.name })
     }
@@ -247,7 +292,7 @@ export class TileActionsDrone extends Drone {
     const descriptors: OverlayActionDescriptor[] = []
 
     for (let i = 0; i < activeNames.length; i++) {
-      const entry = ICON_REGISTRY.find(e => e.name === activeNames[i] && e.profile === profile)
+      const entry = merged.find(e => e.name === activeNames[i] && e.profile === profile)
       if (!entry) continue
 
       descriptors.push({
@@ -273,24 +318,26 @@ export class TileActionsDrone extends Drone {
   }
 
   #getActiveNames(profile: OverlayProfileKey): string[] {
+    const merged = this.#mergedEntries()
+    const available = new Set(merged.filter(e => e.profile === profile).map(e => e.name))
     const saved = this.#arrangement[profile]
-    if (saved && saved.length > 0) {
-      // Filter out names that no longer exist in the registry for this profile
-      const available = new Set(ICON_REGISTRY.filter(e => e.profile === profile).map(e => e.name))
-      return saved.filter(n => available.has(n))
-    }
-    return [...DEFAULT_ACTIVE[profile]]
+    const desired = (saved && saved.length > 0) ? saved : DEFAULT_ACTIVE[profile]
+    // Filter out names whose providing drone is missing — covers both
+    // saved arrangements with a now-uninstalled icon and defaults that
+    // reference a toggled-off drone.
+    return desired.filter(n => available.has(n))
   }
 
   #emitPoolIcons(): void {
+    const merged = this.#mergedEntries()
     // For each profile, compute which icons are NOT active (the pool)
     const pool: Record<string, IconRegistryEntry[]> = {}
     for (const profile of ['private', 'public-own', 'public-external'] as OverlayProfileKey[]) {
       const activeNames = new Set(this.#getActiveNames(profile))
-      pool[profile] = ICON_REGISTRY
+      pool[profile] = merged
         .filter(e => e.profile === profile && !activeNames.has(e.name))
     }
-    EffectBus.emit('overlay:pool-icons', { pool, registry: ICON_REGISTRY })
+    EffectBus.emit('overlay:pool-icons', { pool, registry: merged })
   }
 
   // ── Persistence ─────────────────────────────────────────────────

@@ -13,3 +13,17 @@
 <hc-confirm-dialog></hc-confirm-dialog>
 <hc-sensitivity-bar></hc-sensitivity-bar>
 <hc-docs-overlay></hc-docs-overlay>
+@if (installNeeded()) {
+<div class="install-prompt" role="dialog" aria-modal="true" aria-labelledby="install-title">
+  <div class="install-card">
+    <h2 id="install-title">Install Hypercomb</h2>
+    @if (installReason() === 'no-sentinel') {
+    <p>This Hypercomb shell needs content from your Diamond Core Processor. Open DCP, install the modules you want, and they'll stream here automatically.</p>
+    } @else {
+    <p>Connected to DCP, but no modules are enabled there yet. Open DCP and install or enable modules to populate this view.</p>
+    }
+    <a class="install-cta" [href]="dcpOrigin" target="_blank" rel="noopener">Open Diamond Core Processor</a>
+    <p class="install-hint">This page will pick up content automatically once DCP pushes it.</p>
+  </div>
+</div>
+}

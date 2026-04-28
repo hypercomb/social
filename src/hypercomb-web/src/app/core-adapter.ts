@@ -2,10 +2,10 @@
 
 import { Injectable, signal } from "@angular/core"
 import { EffectBus } from "@hypercomb/core"
-import { Store, LayerInstaller, DependencyLoader, initializeRuntime } from "@hypercomb/shared/core"
+import { Store, LayerInstaller, DependencyLoader, DroneRegistry, IconProviderRegistry, initializeRuntime } from "@hypercomb/shared/core"
 import { LayerService } from "./layer-service"
 
-const _ = [DependencyLoader, LayerInstaller, LayerService, Store]
+const _ = [DependencyLoader, DroneRegistry, IconProviderRegistry, LayerInstaller, LayerService, Store]
 
 const MESH_PUBLIC_KEY = 'hc:mesh-public'
 

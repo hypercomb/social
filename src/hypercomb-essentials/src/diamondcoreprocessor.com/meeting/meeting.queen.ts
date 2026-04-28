@@ -19,6 +19,7 @@ export class MeetingQueenBee extends QueenBee {
   readonly command = 'meeting'
   override readonly aliases = []
   override description = 'Start or join a video meeting on the selected tile'
+  override descriptionKey = 'slash.meeting'
 
   protected async execute(args: string): Promise<void> {
     const trimmed = args.trim().toLowerCase()
