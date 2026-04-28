@@ -1,10 +1,10 @@
 name: Azure Static Web Apps CI/CD (Diamond Core Processor)
 on:
   push:
-    branches: [development, main]
+    branches: [development, main, playground-dylan]
   pull_request:
     types: [opened, synchronize, reopened, closed]
-    branches: [development, main]
+    branches: [development, main, playground-dylan]
 # Both `development` and `main` push to the same Azure Static Web App
 # resource (STATIC_WEBSITE_DCP_DEPLOYMENT_TOKEN). When ff-merging
 # development → main, two pushes hit GitHub seconds apart, both kick off
