@@ -22,7 +22,7 @@
     } @else {
     <p>Connected to DCP, but no modules are enabled there yet. Open DCP and install or enable modules to populate this view.</p>
     }
-    <a class="install-cta" [href]="dcpOrigin" target="_blank" rel="noopener">Open Diamond Core Processor</a>
+    <button class="install-cta" type="button" (click)="openDcpPortal()">Open Diamond Core Processor</button>
     <p class="install-hint">This page will pick up content automatically once DCP pushes it.</p>
   </div>
 </div>

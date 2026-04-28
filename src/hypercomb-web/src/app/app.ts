@@ -31,15 +31,17 @@ export class App implements AfterViewInit {
   readonly clipboardMode = signal(false)
   readonly moveMode = signal(false)
   protected readonly bootStatus = signal<BootStatus | null>(null)
-  protected readonly installNeeded = computed(() => this.bootStatus()?.kind === 'install-needed')
+  protected readonly dcpPortalOpen = signal(false)
+  protected readonly installNeeded = computed(() =>
+    this.bootStatus()?.kind === 'install-needed' && !this.dcpPortalOpen()
+  )
   protected readonly installReason = computed(() => {
     const s = this.bootStatus()
     return s?.kind === 'install-needed' ? s.reason : null
   })
-  protected readonly dcpOrigin =
-    typeof location !== 'undefined' && location.hostname === 'localhost'
-      ? 'http://localhost:2400'
-      : 'https://diamondcoreprocessor.com'
+  protected openDcpPortal(): void {
+    window.dispatchEvent(new CustomEvent('portal:open', { detail: { target: 'dcp' } }))
+  }
 
   @HostBinding('class.clipboard-mode')
   get clipboardModeClass() { return this.clipboardMode(); }
@@ -86,6 +88,11 @@ export class App implements AfterViewInit {
     EffectBus.on<{ visible: boolean; mobile: boolean }>('mobile:input-visible', ({ visible, mobile }) => {
       this.inputOpen.set(mobile && visible)
     })
+
+    window.addEventListener('portal:open', (e) => {
+      if ((e as CustomEvent).detail?.target === 'dcp') this.dcpPortalOpen.set(true)
+    })
+    window.addEventListener('dcp:embed-closed', () => this.dcpPortalOpen.set(false))
 
     console.log('[app] initialized')
   }

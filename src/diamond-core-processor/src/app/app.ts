@@ -17,7 +17,9 @@ export class App implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
-    if (window.parent !== window) return
+    // Sentinel iframe is also framed but isn't the user-facing DCP — its
+    // lifecycle isn't meaningful to hypercomb's reload-on-close logic.
+    if (window.location.pathname.startsWith('/sentinel')) return
     try { this.#channel = new BroadcastChannel(LIFECYCLE_CHANNEL) } catch { return }
     window.addEventListener('beforeunload', this.#onUnload)
     window.addEventListener('pagehide', this.#onUnload)
