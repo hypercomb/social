@@ -354,6 +354,12 @@ export class ShowCellDrone extends Drone {
   // to false after firing). The empty→populated viewport-zoom branch
   // gates on the same flag.
   #pendingRecenter = false
+  // Last mesh offset captured when clearMesh destroyed the previous
+  // hexMesh. The fresh mesh created by applyGeometry restores this
+  // offset (when no recenter is pending) so the empty→non-empty
+  // transition during a cursor-driven undo/redo doesn't snap content
+  // back to (0,0) — tiles render at the same world position as before.
+  #lastMeshOffset: { x: number; y: number } | null = null
   #layoutMode: 'dense' | 'pinned' = 'dense'
 
   // First-visit fit: when navigating to a layer that has no saved viewport
@@ -1799,6 +1805,15 @@ export class ShowCellDrone extends Drone {
       this.hexMesh = new Mesh({ geometry: geom as any, shader: (this.shader as any).shader, texture: Texture.WHITE as any } as any)
       ;(this.hexMesh as any).blendMode = 'pre-multiply'
       this.layer!.addChild(this.hexMesh as any)
+      // Restore the offset captured by the previous clearMesh so an
+      // empty→non-empty transition (undo all the way back, then redo)
+      // doesn't snap tiles to (0,0). Recenter — when pending — runs
+      // below and overwrites this with bounds-based centering.
+      if (this.#lastMeshOffset && !this.#pendingRecenter) {
+        this.hexMesh.position.set(this.#lastMeshOffset.x, this.#lastMeshOffset.y)
+        this.emitEffect('render:mesh-offset', { x: this.#lastMeshOffset.x, y: this.#lastMeshOffset.y })
+      }
+      this.#lastMeshOffset = null
     } else {
       if (this.geom) this.geom.destroy(true)
       this.hexMesh.geometry = geom
@@ -2550,6 +2565,10 @@ export class ShowCellDrone extends Drone {
 
   private clearMesh = (): void => {
     if (this.hexMesh && this.layer) {
+      // Capture the centering offset before destroying the mesh so the
+      // next mesh (e.g. when redo brings tiles back from empty) can
+      // restore it instead of starting at (0,0).
+      this.#lastMeshOffset = { x: this.hexMesh.position.x, y: this.hexMesh.position.y }
       try { this.layer.removeChild(this.hexMesh as any) } catch { /* ignore */ }
       try { this.hexMesh.destroy?.(true) } catch { /* ignore */ }
     }
@@ -2628,7 +2647,7 @@ export class ShowCellDrone extends Drone {
     localStorage.setItem(this.#layoutModeKey(locationKey), mode)
   }
 
-  async #orderByIndexPinned(dir: FileSystemDirectoryHandle, names: string[], localCellSet: Set<string>): Promise<string[]> {
+  async #orderByIndexPinned(dir: FileSystemDirectoryHandle, names: string[], localCellSet: Set<string>, readOnly = false): Promise<string[]> {
     const axial = this.resolve<any>('axial')
     const maxSlot = axial?.count ?? 60
     const sparse: string[] = new Array(maxSlot + 1).fill('')
@@ -2669,7 +2688,7 @@ export class ShowCellDrone extends Drone {
       while (nextFree <= maxSlot && sparse[nextFree] !== '') nextFree++
       if (nextFree <= maxSlot) {
         sparse[nextFree] = name
-        if (localCellSet.has(name)) {
+        if (!readOnly && localCellSet.has(name)) {
           try {
             const cellDir = await dir.getDirectoryHandle(name, { create: false })
             await writeCellProperties(cellDir, { index: nextFree })
@@ -2728,13 +2747,12 @@ export class ShowCellDrone extends Drone {
         for (const s of union) {
           if (!filtered.includes(s)) filtered.push(s)
         }
-        const axial = this.resolve<any>('axial')
-        const maxSlot = axial?.count ?? 60
-        const sparse: string[] = new Array(maxSlot + 1).fill('')
-        for (let i = 0; i < filtered.length && i <= maxSlot; i++) {
-          sparse[i] = filtered[i]
-        }
-        cellNames = sparse
+        // Slot index is the cell's stable visual position. Even when
+        // rewound, place each cell at its persisted `index` so x/y/scale
+        // don't shift across undo — only membership (which slots are
+        // occupied) changes between history points. readOnly: rewound
+        // viewing must not mutate disk indices.
+        cellNames = await this.#orderByIndexPinned(dir, filtered, localCellSet, true)
       } else {
         cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet)
       }
