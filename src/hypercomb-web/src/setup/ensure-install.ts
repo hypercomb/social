@@ -53,13 +53,23 @@ export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<vo
   }
 
   // Fast path: cached install present and intact → boot from cache.
-  // resyncFromSentinel runs after Angular bootstraps and applies any
-  // diff DCP wants to push. No HTTP manifest poll on the boot path.
+  // Before short-circuiting we ask the sentinel to apply any pending
+  // diff so a fresh deploy lands on the next reload instead of waiting
+  // for a DCP toggle. Push-only contract is preserved: this calls
+  // sentinel.sync(), not an HTTP manifest fetch, and is a no-op when
+  // the cached sync signature matches what DCP holds.
   const cachedManifest = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
   if (cachedManifest && cachedManifest.bees.length > 0) {
     const beeOk = await fileExists(store.bees, `${cachedManifest.bees[0]}.js`)
     const beeDepsOk = beeOk && await beeDepValuesPresent(store.dependencies, cachedManifest.beeDeps)
     if (beeOk && beeDepsOk) {
+      if (sentinel) {
+        try {
+          await resyncFromSentinel(sentinel)
+        } catch (err) {
+          console.warn('[ensure-install] boot resync failed; continuing with cached state', err)
+        }
+      }
       console.log('[ensure-install] booting from cached state')
       restoreSignatureStore(sigStore)
       restoreCachedBeeDeps()
