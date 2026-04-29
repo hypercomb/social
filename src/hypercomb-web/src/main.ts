@@ -13,37 +13,6 @@ import { DependencyLoader } from '@hypercomb/shared/core'
 // Ensure side-effect registration
 const _deps = [DependencyLoader]
 
-// ── Boot trace ──────────────────────────────────────────────────────
-// PURE DIAGNOSTIC. No behaviour change — just per-phase timing logs
-// and a summary printed after first paint. Disable with
-// localStorage.setItem('hc:boot-trace', '0'). window.__hcBootPhases
-// holds the parsed array; window.__hcPrintBootSummary() reprints it.
-const BOOT_T0 = performance.now()
-const BOOT_PHASES: Array<{ name: string; t: number; dt: number }> = []
-const traceEnabled = (): boolean => {
-  try { return localStorage.getItem('hc:boot-trace') !== '0' } catch { return true }
-}
-const tracePhase = (name: string): void => {
-  const t = performance.now() - BOOT_T0
-  const prev = BOOT_PHASES.length > 0 ? BOOT_PHASES[BOOT_PHASES.length - 1].t : 0
-  const dt = t - prev
-  BOOT_PHASES.push({ name, t, dt })
-  if (traceEnabled()) {
-    console.log(`[boot] +${dt.toFixed(0).padStart(5)}ms  total ${t.toFixed(0).padStart(5)}ms  ${name}`)
-  }
-}
-;(globalThis as any).__hcBootPhases = BOOT_PHASES
-const printBootSummary = (): void => {
-  if (!traceEnabled()) return
-  const total = performance.now() - BOOT_T0
-  console.log(`[boot] ───────── summary (total ${total.toFixed(0)}ms) ─────────`)
-  for (const p of BOOT_PHASES) {
-    const bar = '█'.repeat(Math.min(40, Math.round(p.dt / Math.max(1, total) * 40)))
-    console.log(`[boot] ${p.dt.toFixed(0).padStart(5)}ms ${bar} ${p.name}`)
-  }
-}
-;(globalThis as any).__hcPrintBootSummary = printBootSummary
-
 const ensureSwControl = async (): Promise<void> => {
   if (!('serviceWorker' in navigator)) return
 
@@ -71,9 +40,7 @@ const attachImportMap = async (): Promise<void> => {
 }
 
 const bootstrap = async (): Promise<void> => {
-  tracePhase('bootstrap:enter')
   await ensureSwControl()
-  tracePhase('ensureSwControl')
 
   // Capture install state BEFORE ensureInstall so the cold-install path
   // is detectable. ensureInstall flips this flag when the first sync
@@ -86,9 +53,7 @@ const bootstrap = async (): Promise<void> => {
   // explicit user action that needs DCP — opening the installer from
   // the menu, the install-needed prompt, or the in-app DCP portal.
   await ensureInstall(null)
-  tracePhase('ensureInstall')
   await attachImportMap()
-  tracePhase('attachImportMap')
 
   // Snapshot the sync signature applied at boot. Anything that drifts
   // from this (toggles in DCP, intake from web→DCP, etc.) means the
@@ -99,18 +64,8 @@ const bootstrap = async (): Promise<void> => {
   // Load dependency namespaces so services self-register before Angular renders
   const loader = get('@hypercomb.social/DependencyLoader') as DependencyLoader | undefined
   await loader?.load?.()
-  tracePhase('DependencyLoader.load')
 
   const appRef = await bootstrapApplication(App, appConfig)
-  tracePhase('bootstrapApplication')
-
-  // Print summary after the next two animation frames so the timeline
-  // captures initial render too. Available on demand at
-  // window.__hcPrintBootSummary().
-  requestAnimationFrame(() => requestAnimationFrame(() => {
-    tracePhase('first-paint')
-    printBootSummary()
-  }))
 
   // Lazy sentinel: no iframe until the user explicitly opens DCP. The
   // first call to getSentinel() mounts the hidden iframe at /sentinel
