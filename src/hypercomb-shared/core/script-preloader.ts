@@ -35,12 +35,6 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   readonly #loadedDeps = new Set<string>()
   // In-flight dedup: prevents two callers from loading the same bee concurrently
   readonly #inFlight = new Map<string, Promise<Bee | null>>()
-  // Dynamic slot names from LayerSlotRegistry. Populated lazily — on first
-  // walk we ask the registry which slot fields exist on layers and treat
-  // any 64-hex value in those fields as a prewarmable resource. Falls
-  // back to a static set if the registry isn't reachable yet (boot
-  // ordering).
-  #dynamicSlots: readonly string[] | null = null
 
   public resolveBySignature = (signature: string): ActionDescriptor | undefined =>
     this.#bySignature.get(signature)
@@ -149,32 +143,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       for (const d of (layer['dependencies'] as string[] | undefined) ?? []) dependencies.add(this.#stripExt(d))
       for (const r of (layer['resources'] as string[] | undefined) ?? []) resources.add(this.#stripExt(r))
 
-      // Dynamic slot pre-warm: every slot registered with
-      // LayerSlotRegistry that holds 64-hex signature pointers gets its
-      // values added to the resource set so Store.getResource is hot
-      // when the slot's UI consumer (notes-viewer, tag chips, body
-      // renderer, future slots) reads it. Slots holding inline JSON
-      // payloads are skipped naturally because their values are not
-      // 64-hex strings.
-      const slotNames = this.#getSlotNames()
-      for (const slot of slotNames) {
-        const value = layer[slot]
-        if (!Array.isArray(value)) continue
-        for (const v of value) {
-          if (typeof v !== 'string') continue
-          const clean = this.#stripExt(v)
-          if (this.#isSignature(clean)) resources.add(clean)
-        }
-      }
-
-      // Child layer sigs: build-module emits them under `cells`; legacy/
-      // user-content layers may use `layers` or `children`. Walk all three
-      // so the layer-tree union is complete regardless of producer.
-      const children: string[] = [
-        ...(((layer['cells'] as string[] | undefined) ?? []) as string[]),
-        ...(((layer['layers'] as string[] | undefined) ?? []) as string[]),
-        ...(((layer['children'] as string[] | undefined) ?? []) as string[]),
-      ]
+      const children = (layer['layers'] as string[] | undefined) ?? []
       await Promise.all(children.map(visit))
     }
 
@@ -207,30 +176,6 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
 
   #stripExt = (s: string): string =>
     typeof s === 'string' ? s.replace(/\.(js|json)$/i, '') : ''
-
-  // Pull the list of slot names registered with LayerSlotRegistry. The
-  // registry is owned by essentials and only present after that bee
-  // loads; until then we fall back to a static safety net of slot names
-  // known at the time of writing. Cached on first successful read so the
-  // hot path stays a single Set lookup.
-  #getSlotNames = (): readonly string[] => {
-    if (this.#dynamicSlots) return this.#dynamicSlots
-    try {
-      const reg = (window as any).ioc?.get?.('@diamondcoreprocessor.com/LayerSlotRegistry')
-      if (reg && typeof reg.slots === 'function') {
-        const names: string[] = []
-        for (const s of reg.slots()) names.push(s.slot)
-        if (names.length > 0) {
-          this.#dynamicSlots = names
-          return names
-        }
-      }
-    } catch { /* registry not ready */ }
-    // Static fallback used until the registry is up. Mirrors the slots
-    // known at the time of writing — adding a slot here is fine but the
-    // registry path is the long-term source of truth.
-    return ['notes', 'tags', 'body']
-  }
 
   // -------------------------------------------------
   // manifest-driven loading (primary path)

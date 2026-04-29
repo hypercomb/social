@@ -181,7 +181,6 @@
   "history.resize": "ドラッグで履歴パネルの幅を変更",
   "history.selection-make-head": "選択したレイヤーをヘッドに（元を保持）",
   "history.selection-merge": "選択レイヤーを新ヘッドにマージ（元を削除）",
-  "history.group-step": "グループステップ — 元に戻す/やり直しは編集をスキップして最初のタイル追加・削除にジャンプ",
 
   "slash.select": "切り取り・コピー・移動するタイルを選択",
   "slash.remove-builtin": "選択したタイルを削除",
@@ -254,7 +253,6 @@
   "selection.hide": "非表示",
   "controls.toggle-input": "コマンドラインを表示",
   "slash.reroll": "タイルのサブストレート背景画像をリロール",
-  "slash.swirl": "タイルをインデックススパイラルに配置",
 
   "docs.title": "ドキュメント",
   "docs.close-sidebar": "サイドバーを閉じる",
@@ -271,7 +269,6 @@
   "command-line.create-nested": "ネストフォルダを作成し、親パスを保持して現在のレベルに留まる",
   "command-line.navigate-folder": "フォルダに移動（存在しない場合は作成）",
   "command-line.filter-tiles": "キーワードでタイルをリアルタイム絞り込み",
-  "command-line.go": "実行",
 
   "audio.pause": "一時停止",
   "audio.play": "再生",
@@ -304,7 +301,6 @@
   "keymap.mesh-toggle": "パブリック・プライベートモードの切替",
   "keymap.bees": "ビーアバターの表示切替",
   "keymap.fit": "コンテンツを画面に合わせる",
-  "keymap.recenter": "コンテンツを中央に配置",
   "keymap.up": "上に移動",
   "keymap.down": "下に移動",
   "keymap.left": "左に移動",
