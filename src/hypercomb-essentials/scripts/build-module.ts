@@ -859,17 +859,6 @@ const main = async (): Promise<void> => {
   const beeExternals = [...PLATFORM_EXTERNALS, ...allSpecifiers]
   let beeCacheHits = 0
   let beeCacheMisses = 0
-  // Boot-priority bees: drones whose existing `effects` declaration
-  // includes 'render'. Render is the only effect that gates first
-  // paint, so any drone that produces it is by definition first-paint-
-  // critical. ScriptPreloader loads + warmups + pulses these BEFORE
-  // any non-priority bee on every cold boot. No new annotation, no
-  // new regex — the doc extractor already parses effects, and we just
-  // ask whether 'render' is in the list. Toggle a render drone off in
-  // DCP → it falls out of the manifest → it falls out of bootPriority,
-  // exactly like every other capability.
-  const bootPrioritySigs: string[] = []
-  const RENDER_EFFECT = 'render'
 
   for (const src of beeSources) {
     const { leaves, inputSig } = await resolveUnitInputs(
@@ -916,13 +905,6 @@ const main = async (): Promise<void> => {
         newDocCache[src.entry] = { contentSignature: beeFileLeaf.sig, doc: beeDoc }
       }
       docCacheMisses++
-    }
-
-    // The bee's own effects array IS its priority self-declaration.
-    // A drone that says it produces RENDER_EFFECT is by definition
-    // first-paint-critical and gets surfaced in manifest.bootPriority.
-    if (beeDoc?.effects?.includes(RENDER_EFFECT)) {
-      bootPrioritySigs.push(sig)
     }
 
     if (beeDoc) {
@@ -1009,21 +991,11 @@ const main = async (): Promise<void> => {
   // its meaning is its sig arrays. Adding a version pollutes the
   // canonical bytes with ceremony that doesn't affect what the
   // package IS.
-  // Boot priority: a sorted, deduped subset of `bees` whose sources
-  // declared `static readonly bootPriority = true`. ScriptPreloader
-  // loads + warms + pulses these BEFORE any non-priority bee on cold
-  // boot, so render-critical drones (show-cell, pixi host) never sit
-  // behind unrelated bees in the parallel load. Empty array (or omitted
-  // field on older manifests) means "no priority — load all bees in
-  // parallel as before."
-  const bootPriority = Array.from(new Set(bootPrioritySigs)).sort((a, b) => a.localeCompare(b))
-
   const packageEntry = {
     layers: Array.from(layers.keys()).sort((a, b) => a.localeCompare(b)),
     bees: Array.from(resourceBytes.keys()).sort((a, b) => a.localeCompare(b)),
     dependencies: dependencySigs,
     beeDeps: Object.fromEntries(beeDepsMap),
-    ...(bootPriority.length ? { bootPriority } : {}),
   }
 
   // Single-package manifest: always write only the current rootLayerSig.
