@@ -70,12 +70,56 @@ export class Lineage extends EventTarget {
     return '/' + this.explorerPath.join('/')
   }
 
+  // Per-revision memoization for explorerDir. Many subscribers call this
+  // synchronously across a single nav turn — each call walks OPFS via
+  // getDirectoryHandle once per path segment, which on a slow disk eats
+  // tens of ms per call. Profile of one nav showed ~2,700 lineage method
+  // calls dominated by repeated explorerDir / tryResolveFrom against the
+  // same path. With the cache: first caller in a turn does the OPFS walk;
+  // every other caller (until invalidate() bumps fsRevision) returns the
+  // cached handle synchronously. In-flight dedup is keyed on revision so
+  // a stale walk that finishes after a new invalidation can't poison the
+  // cache.
+  #cachedExplorerDir: { revision: number; dir: FileSystemDirectoryHandle | null } | null = null
+  #pendingExplorerDir: { revision: number; promise: Promise<FileSystemDirectoryHandle | null> } | null = null
+
   public explorerDir = async (): Promise<FileSystemDirectoryHandle | null> => {
-    try {
-      return await this.tryResolveFrom(this.store.hypercombRoot, this.explorerPath)
-    } catch {
-      return null
+    const revision = this.#fsRevision
+
+    // Cache hit for this revision — synchronous return.
+    if (this.#cachedExplorerDir?.revision === revision) {
+      return this.#cachedExplorerDir.dir
     }
+
+    // In-flight for the SAME revision — share the promise.
+    if (this.#pendingExplorerDir?.revision === revision) {
+      return this.#pendingExplorerDir.promise
+    }
+
+    // Start a fresh walk for this revision.
+    const promise = (async (): Promise<FileSystemDirectoryHandle | null> => {
+      let dir: FileSystemDirectoryHandle | null = null
+      try {
+        dir = await this.tryResolveFrom(this.store.hypercombRoot, this.explorerPath)
+      } catch {
+        dir = null
+      }
+      // Only commit to cache if the revision is still current — otherwise
+      // an invalidate() ran during the walk and the result is stale.
+      if (this.#fsRevision === revision) {
+        this.#cachedExplorerDir = { revision, dir }
+      }
+      return dir
+    })()
+
+    this.#pendingExplorerDir = { revision, promise }
+    promise.finally(() => {
+      if (this.#pendingExplorerDir?.promise === promise) {
+        this.#pendingExplorerDir = null
+      }
+    })
+
+    return promise
   }
 
   // -------------------------------------------------
