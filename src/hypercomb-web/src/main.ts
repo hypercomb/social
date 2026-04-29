@@ -48,14 +48,11 @@ const bootstrap = async (): Promise<void> => {
   // immediately so the user doesn't sit on an empty shell.
   const wasInstalledAtBoot = localStorage.getItem('hypercomb.installed') === 'true'
 
-  // Bring up the sentinel bridge before anything else runs. Push-only
-  // install: sentinel is the SOLE source of content. Web→DCP intake
-  // requires it; cold install requires it. If unreachable, boot
-  // continues with whatever is cached (or empty if nothing is cached);
-  // resyncAndEnforce will pick up content once DCP is online.
-  const sentinel = await initSentinel()
-
-  await ensureInstall(sentinel)
+  // Push-only contract: NO DCP iframe is mounted at boot. Boot reads
+  // OPFS only. The sentinel bridge is created lazily on the first
+  // explicit user action that needs DCP — opening the installer from
+  // the menu, the install-needed prompt, or the in-app DCP portal.
+  await ensureInstall(null)
   await attachImportMap()
 
   // Snapshot the sync signature applied at boot. Anything that drifts
@@ -70,9 +67,21 @@ const bootstrap = async (): Promise<void> => {
 
   const appRef = await bootstrapApplication(App, appConfig)
 
-  if (!sentinel) {
-    // No DCP — nothing to resync against. App still boots from cached state.
-    return
+  // Lazy sentinel: no iframe until the user explicitly opens DCP. The
+  // first call to getSentinel() mounts the hidden iframe at /sentinel
+  // and performs the handshake; subsequent calls reuse the same bridge.
+  let sentinelPromise: Promise<SentinelBridge | null> | null = null
+  const getSentinel = (): Promise<SentinelBridge | null> => {
+    if (!sentinelPromise) {
+      sentinelPromise = initSentinel().then(bridge => {
+        if (bridge) {
+          bridge.onToggleChanged = resyncAndEnforce
+          bridge.onDcpClosed = () => reloadIfDrifted('dcp tab closed')
+        }
+        return bridge
+      })
+    }
+    return sentinelPromise
   }
 
   // Toggle-changed: keep OPFS in sync silently. Do NOT reload while
@@ -81,6 +90,8 @@ const bootstrap = async (): Promise<void> => {
   // (embed close, or standalone tab close) and we detect drift from
   // bootSyncSig.
   const resyncAndEnforce = async () => {
+    const sentinel = await getSentinel()
+    if (!sentinel) return
     await resyncFromSentinel(sentinel)
 
     // Cold-install reload: we booted into install-needed state. The first
@@ -99,6 +110,8 @@ const bootstrap = async (): Promise<void> => {
   }
 
   const reloadIfDrifted = async (source: string) => {
+    const sentinel = await getSentinel()
+    if (!sentinel) return
     await resyncFromSentinel(sentinel)
     const currentSyncSig = localStorage.getItem('sentinel.sync-signature') ?? ''
     if (currentSyncSig && currentSyncSig !== bootSyncSig) {
@@ -107,8 +120,14 @@ const bootstrap = async (): Promise<void> => {
     }
   }
 
-  sentinel.onToggleChanged = resyncAndEnforce
-  sentinel.onDcpClosed = () => reloadIfDrifted('dcp tab closed')
+  // Mount the sentinel iframe ONLY on explicit user actions that
+  // signal DCP is in use: opening the installer / portal from a menu,
+  // or DCP-driven events that imply the user is actively engaging with
+  // the installer surface. Until one of these fires, no cross-origin
+  // request goes out at all.
+  window.addEventListener('portal:open', (e) => {
+    if ((e as CustomEvent).detail?.target === 'dcp') void getSentinel()
+  })
   window.addEventListener('actions:available', resyncAndEnforce)
   window.addEventListener('dcp:embed-closed', () => reloadIfDrifted('dcp embed closed'))
 }
