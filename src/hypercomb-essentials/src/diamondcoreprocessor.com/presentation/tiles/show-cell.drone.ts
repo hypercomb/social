@@ -1297,6 +1297,76 @@ export class ShowCellDrone extends Drone {
       this.shader = null
     }
 
+    // ── back-nav fast path ─────────────────────────────────
+    // If we've rendered this layer before and nothing has invalidated the
+    // snapshot, restore in a single geometry pass: no OPFS listing, no
+    // history walk, no branch detection, no progressive streaming, no
+    // hide/reveal flicker. The ~9 invalidation sites each delete the
+    // cache + clear renderedCellsKey, so a cache hit means the snapshot
+    // is still authoritative for the current lineage state.
+    if (
+      locationKey !== this.renderedLocationKey
+      && !this.#clipboardView
+      && !(this.#tagFlattenResults && this.#tagFlattenResults.length > 0)
+    ) {
+      const cached = this.#layerCellsCache.get(locationKey)
+      const cachedDir = this.#layerDirCache.get(locationKey)
+      if (cached && cached.cells.length > 0 && cachedDir) {
+        // abort any stream still running for the previous layer
+        ++this.#streamToken
+
+        // restore viewport before geometry upload so the first frame
+        // is already at the user's saved scale/pan for this layer
+        const vpSnap = this.#layerViewportCache.get(locationKey)
+        if (vpSnap) this.#applyViewportFromSnapshot(vpSnap)
+        else await this.#applyViewportForLayer(cachedDir)
+
+        const vp = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ViewportPersistence') as ViewportPersistence | undefined
+        if (vp) vp.setDirSilent(cachedDir)
+
+        this.renderedLocationKey = locationKey
+        this.cachedCellNames = cached.cellNames
+        this.cachedLocalCellSet = cached.localCellSet
+        this.cachedBranchSet = cached.branchSet
+        this.#layoutMode = this.#readLayoutMode(locationKey)
+        this.#pendingRemoves.clear()
+        this.renderedCells.clear()
+        for (const cell of cached.cells) this.renderedCells.set(cell.label, cell)
+
+        if (this.layer) this.layer.visible = true
+
+        // defensive: re-load any cell whose atlas slot was evicted while
+        // away. Warm cells are a dict check; cold cells decode from the
+        // (still hot) Store resource cache. No OPFS round-trip.
+        await this.loadCellImages(cached.cells, cachedDir)
+
+        await this.applyGeometry(cached.cells)
+        this.renderedCellsKey = this.buildCellsKey(cached.cells)
+        this.#slots.seed({
+          names: cached.cellNames,
+          localCells: cached.localCellSet,
+          branches: cached.branchSet,
+          mode: this.#layoutMode,
+        })
+
+        this.#emitRenderTags(cached.cells)
+        this.emitEffect('render:cell-count', { count: cached.cells.length, labels: cached.cellNames })
+
+        // background: refresh cursor for undo/redo readiness. Renderer
+        // doesn't need it to draw — cells are already filtered.
+        void (async () => {
+          try {
+            const cursorService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryCursorService') as HistoryCursorService | undefined
+            if (!cursorService) return
+            const sigLoc = await this.computeSignatureLocation(lineage)
+            if (sigLoc.sig) await cursorService.load(sigLoc.sig)
+          } catch { /* best-effort */ }
+        })()
+
+        return
+      }
+    }
+
     const fsRev = Number(lineage.changed?.() ?? 0)
     const meshRev = this.meshCellsRev
 
