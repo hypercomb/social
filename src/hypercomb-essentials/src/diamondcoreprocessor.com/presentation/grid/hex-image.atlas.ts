@@ -116,23 +116,47 @@ export class HexImageAtlas {
 
     let bitmap: ImageBitmap
     try {
-      // Decode AT atlas-cell resolution rather than at the source image's
-      // full size. A 2000×2000 photo previously decoded as a ~16MB
-      // ImageBitmap, only to be scaled down to fit a single 256px atlas
-      // cell. Resizing during decode (browser-side, optimised) drops
-      // the work to roughly target² pixels instead of source². On
-      // integrated graphics / Surface UHD this is the difference
-      // between "instant" and "couple-hundred-ms each tile".
+      // Two-phase load:
+      //   1. Native decode (no resize options). Cheap on small source
+      //      images — the common case for avatars/icons/thumbnails.
+      //   2. If the decoded bitmap is bigger than 2× the atlas cell,
+      //      downscale ourselves on an OffscreenCanvas with
+      //      imageSmoothingQuality='low'. Fast bilinear on the iGPU,
+      //      and we never upscale — small images pass straight through.
       //
-      // Passing only resizeWidth lets the browser compute the matching
-      // height to preserve aspect ratio, which the contain-fill scaling
-      // below depends on. 2× the cell size keeps headroom for retina
-      // sampling without paying for full source resolution.
+      // Earlier this path used createImageBitmap's `resizeWidth` with
+      // `resizeQuality: 'medium'`, which always engaged a high-quality
+      // resize step regardless of source size. On integrated graphics
+      // (Surface UHD etc.) the medium-quality resize is expensive
+      // enough that small avatars — which would otherwise need no
+      // resize at all — were paying the cost AND being upscaled to
+      // the target before the sprite scale step downscaled them
+      // again. Doing the downscale ourselves makes the small case
+      // free and the big case still fast.
+      const raw = await createImageBitmap(blob)
       const targetMax = this.#cellPx * 2
-      bitmap = await createImageBitmap(blob, {
-        resizeWidth: targetMax,
-        resizeQuality: 'medium',
-      })
+      if (raw.width > targetMax || raw.height > targetMax) {
+        const aspect = raw.width / raw.height
+        const w = aspect >= 1 ? targetMax : Math.max(1, Math.round(targetMax * aspect))
+        const h = aspect >= 1 ? Math.max(1, Math.round(targetMax / aspect)) : targetMax
+        const canvas = new OffscreenCanvas(w, h)
+        const ctx = canvas.getContext('2d')
+        if (!ctx) {
+          // Defensive: if 2D context isn't available, fall back to the
+          // unscaled bitmap rather than failing the whole load. The
+          // sprite scale step below still fits it into the cell — only
+          // the GPU memory cost regresses for that one image.
+          bitmap = raw
+        } else {
+          ctx.imageSmoothingEnabled = true
+          ctx.imageSmoothingQuality = 'low'
+          ctx.drawImage(raw, 0, 0, w, h)
+          raw.close()
+          bitmap = canvas.transferToImageBitmap()
+        }
+      } else {
+        bitmap = raw
+      }
     } catch {
       this.#failures.set(sig, (this.#failures.get(sig) ?? 0) + 1)
       console.warn(`[HexImageAtlas] createImageBitmap failed for ${sig.slice(0, 12)}… (attempt ${this.#failures.get(sig)}/${HexImageAtlas.MAX_RETRIES})`)
