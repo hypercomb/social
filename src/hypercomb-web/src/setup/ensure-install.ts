@@ -31,6 +31,11 @@ type InstallManifest = {
   bees: string[]
   dependencies: string[]
   beeDeps?: Record<string, string[]>
+  /** Subset of `bees` flagged as boot-priority via build-module's
+   *  `static readonly bootPriority = true` extraction. ScriptPreloader
+   *  awaits these before non-priority bees on cold boot so first paint
+   *  isn't gated on the full bee set. */
+  bootPriority?: string[]
 }
 
 export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<void> => {
@@ -165,7 +170,7 @@ export const resyncFromSentinel = async (sentinel: SentinelBridge): Promise<void
   const result = await sentinel.sync(currentSyncSig)
   if (!result) return
 
-  const { syncSig, enabledBees, enabledDeps, enabledLayers, beeDeps, files } = result
+  const { syncSig, enabledBees, enabledDeps, enabledLayers, beeDeps, bootPriority, files } = result
 
   if (!files.length && currentSyncSig === syncSig) return
 
@@ -203,7 +208,14 @@ export const resyncFromSentinel = async (sentinel: SentinelBridge): Promise<void
     localStorage.setItem(SIG_STORE_KEY, JSON.stringify(sigStore.toJSON()))
   }
 
-  const syncManifest = { version: 2, layers: enabledLayers, bees: enabledBees, dependencies: enabledDeps, beeDeps }
+  const syncManifest = {
+    version: 2,
+    layers: enabledLayers,
+    bees: enabledBees,
+    dependencies: enabledDeps,
+    beeDeps,
+    ...(bootPriority?.length ? { bootPriority } : {}),
+  }
   localStorage.setItem(SYNC_SIG_KEY, syncSig)
   localStorage.setItem(MANIFEST_KEY, JSON.stringify(syncManifest))
   if (beeDeps) (globalThis as any).__hypercombBeeDeps = beeDeps
@@ -241,6 +253,7 @@ const tryParseManifest = (json: string): InstallManifest | null => {
       bees: Array.isArray(parsed.bees) ? parsed.bees : [],
       dependencies: Array.isArray(parsed.dependencies) ? parsed.dependencies : [],
       beeDeps: parsed.beeDeps && typeof parsed.beeDeps === 'object' ? parsed.beeDeps : undefined,
+      bootPriority: Array.isArray(parsed.bootPriority) ? parsed.bootPriority.filter((s: unknown) => typeof s === 'string') : undefined,
     }
   } catch {
     return null

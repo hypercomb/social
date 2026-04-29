@@ -162,7 +162,16 @@
         "8b0ff61d9c45735700e505465ddba298c84a9aa749690134dfaf3ec1973fb5c0": [
           "04dcace98a24d23b163c70e863844c4a07379cc71adc341b7741387c30383d9a"
         ]
-      }
+      },
+      "bootPriority": [
+        "0ef9500644a6644e3c85d311a6116bbd27b690abb596b0cee3fa68da826c5a25",
+        "226a561e846ff856c29283dfa97d6a1307dd60ffa61d71e40818a9c201e2bf9d",
+        "7f9f9097bb7fa2552ae3cfac6f69a45e77696d97ed1aadbeb744ac868c29e712",
+        "b4fe052d64193c3b60fcc2fdec1322074594f3ea50fc21aab48b370a9740b9bd",
+        "ea39e5559f4374d1b02fe4cd7cda4eb987c65395f7fc718ae06e1d50834dfc15",
+        "f8ffe22de1a6d428f7f4fd9c26e580902f20c1f9b64da6071e17dfae241028a8",
+        "fb2daf50a9da4af8010e462a6ff07d0e9d985caa98df9a08bcad446ac4996c4f"
+      ]
     }
   }
 }

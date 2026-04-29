@@ -42,6 +42,7 @@ export type SentinelSyncResult = {
   enabledDeps: string[]
   enabledLayers: string[]
   beeDeps?: Record<string, string[]>
+  bootPriority?: string[]
   files: SentinelFile[]
 }
 
@@ -204,6 +205,7 @@ export class SentinelBridge {
           enabledDeps: msg.enabledDeps ?? [],
           enabledLayers: msg.enabledLayers ?? [],
           beeDeps: msg.beeDeps,
+          bootPriority: msg.bootPriority,
           files
         } as SentinelSyncResult)
         break

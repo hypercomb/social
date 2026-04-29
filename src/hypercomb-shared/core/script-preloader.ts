@@ -73,23 +73,48 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
         ? Promise.allSettled(walked.resources.map(sig => this.store.preheatResource(sig)))
         : Promise.resolve([])
 
+      // Split walked.bees into priority and rest. Priority bees declared
+      // `static readonly bootPriority = true` in source; build-module
+      // collected them into manifest.bootPriority. Render-critical
+      // drones (show-cell, pixi host) belong here so first paint isn't
+      // gated on unrelated bees finishing their load + warmup.
+      const prioritySet = new Set(ScriptPreloader.readManifestBootPriority())
+      const priorityBees = walked.bees.filter(s => prioritySet.has(s))
+      const restBees = walked.bees.filter(s => !prioritySet.has(s))
+
+      // Phase 1: priority bees — load + warmup + return. Caller awaits
+      // this before the first render so the canvas drone is ready.
       const beeLoadStart = performance.now()
-      if (walked.bees.length) {
-        await this.#loadBeesFromList(walked.bees)
+      if (priorityBees.length) {
+        await this.#loadBeesFromList(priorityBees)
+        const priorityMs = (performance.now() - beeLoadStart).toFixed(0)
+        console.log(`[script-preloader] loaded ${priorityBees.length} priority bees in ${priorityMs}ms`)
+        // Warmup priority bees right away so first pulse is hot
+        const priorityWarmStart = performance.now()
+        await this.#runWarmups()
+        const priorityWarmMs = (performance.now() - priorityWarmStart).toFixed(0)
+        console.log(`[script-preloader] warmed up priority bees in ${priorityWarmMs}ms`)
       }
-      const beeLoadMs = (performance.now() - beeLoadStart).toFixed(0)
-      console.log(`[script-preloader] loaded ${walked.bees.length} bees in ${beeLoadMs}ms`)
+
+      // Phase 2: rest of the bees — fire-and-forget. find() returns;
+      // these bees light up interactivity in the background after the
+      // canvas is already painted. Render speed is king.
+      if (restBees.length) {
+        const bgStart = performance.now()
+        void (async () => {
+          await this.#loadBeesFromList(restBees)
+          const restMs = (performance.now() - bgStart).toFixed(0)
+          console.log(`[script-preloader] loaded ${restBees.length} background bees in ${restMs}ms`)
+          const bgWarmStart = performance.now()
+          await this.#runWarmups()
+          const bgWarmMs = (performance.now() - bgWarmStart).toFixed(0)
+          console.log(`[script-preloader] warmed up background bees in ${bgWarmMs}ms`)
+        })().catch(err => console.warn('[script-preloader] background bee load failed:', err))
+      }
 
       await prefetch
       const prefetchMs = (performance.now() - prefetchStart).toFixed(0)
       console.log(`[script-preloader] prefetched ${walked.resources.length} resources in ${prefetchMs}ms`)
-
-      // Warmup hooks — every freshly-registered bee gets one shot to
-      // pre-rasterize glyphs, compile shaders, open connections, etc.
-      const warmStart = performance.now()
-      await this.#runWarmups()
-      const warmMs = (performance.now() - warmStart).toFixed(0)
-      console.log(`[script-preloader] warmups completed in ${warmMs}ms`)
 
       // Enforce manifest: dispose and evict bees that are no longer enabled.
       // This is the trust boundary — if DCP says a bee is off, it must not pulse.
@@ -211,6 +236,21 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       if (!raw) return []
       const manifest = JSON.parse(raw)
       return Array.isArray(manifest?.bees) ? manifest.bees.filter(Boolean) : []
+    } catch {
+      return []
+    }
+  }
+
+  /** Read `manifest.bootPriority` — sigs of drones that build-module
+   *  detected as `static readonly bootPriority = true`. Empty when no
+   *  bee declared priority (older manifests, or modules that haven't
+   *  opted in). */
+  private static readManifestBootPriority(): string[] {
+    try {
+      const raw = localStorage.getItem('core-adapter.installed-manifest')
+      if (!raw) return []
+      const manifest = JSON.parse(raw)
+      return Array.isArray(manifest?.bootPriority) ? manifest.bootPriority.filter(Boolean) : []
     } catch {
       return []
     }
