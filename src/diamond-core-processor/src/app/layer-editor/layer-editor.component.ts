@@ -470,25 +470,17 @@ export class LayerEditorComponent {
   async onCommit(): Promise<void> {
     if (this.committing() || this.stagedChanges().size === 0) return
 
-    // First click: surface the passphrase prompt so the user can set it (first commit)
-    // or enter it (verify). The hash is stored in localStorage via CommitLockService —
-    // it never enters the layer tree.
-    if (!this.lockPromptVisible()) {
-      this.lockPromptVisible.set(true)
-      this.commitError.set(null)
-      return
-    }
-
-    const passphrase = this.lockInput()
-
+    // lock gate
     if (this.#lockService.isConfigured()) {
-      const valid = await this.#lockService.verify(passphrase)
+      if (!this.lockPromptVisible()) {
+        this.lockPromptVisible.set(true)
+        return
+      }
+      const valid = await this.#lockService.verify(this.lockInput())
       if (!valid) {
         this.commitError.set('Invalid passphrase')
         return
       }
-    } else if (passphrase) {
-      await this.#lockService.configure(passphrase)
     }
 
     this.committing.set(true)
