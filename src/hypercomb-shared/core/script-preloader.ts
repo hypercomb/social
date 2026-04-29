@@ -54,29 +54,42 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     }
 
     const run = async (): Promise<Bee[]> => {
+      const t0 = performance.now()
       // Layer-walk: layers are the source of truth. Union every signature
       // array they declare (bees, dependencies, resources, nested layers).
       // Falls back to the flat install-manifest bees list for legacy/dev.
       const layerRoots = ScriptPreloader.readManifestLayers()
+      const walkStart = performance.now()
       const walked = layerRoots.length
         ? await this.#walkLayers(layerRoots)
         : { bees: ScriptPreloader.readManifestBees(), dependencies: [], resources: [] }
+      const walkMs = (performance.now() - walkStart).toFixed(0)
+      console.log(`[script-preloader] walked ${layerRoots.length} root(s) in ${walkMs}ms → ${walked.bees.length} bees, ${walked.dependencies.length} deps, ${walked.resources.length} resources`)
 
       // Prefetch __resources__ in parallel with bee loading — tiles and
       // drones that need these blobs will find them hot in the Store cache.
+      const prefetchStart = performance.now()
       const prefetch = walked.resources.length
         ? Promise.allSettled(walked.resources.map(sig => this.store.preheatResource(sig)))
         : Promise.resolve([])
 
+      const beeLoadStart = performance.now()
       if (walked.bees.length) {
         await this.#loadBeesFromList(walked.bees)
       }
+      const beeLoadMs = (performance.now() - beeLoadStart).toFixed(0)
+      console.log(`[script-preloader] loaded ${walked.bees.length} bees in ${beeLoadMs}ms`)
 
       await prefetch
+      const prefetchMs = (performance.now() - prefetchStart).toFixed(0)
+      console.log(`[script-preloader] prefetched ${walked.resources.length} resources in ${prefetchMs}ms`)
 
       // Warmup hooks — every freshly-registered bee gets one shot to
       // pre-rasterize glyphs, compile shaders, open connections, etc.
+      const warmStart = performance.now()
       await this.#runWarmups()
+      const warmMs = (performance.now() - warmStart).toFixed(0)
+      console.log(`[script-preloader] warmups completed in ${warmMs}ms`)
 
       // Enforce manifest: dispose and evict bees that are no longer enabled.
       // This is the trust boundary — if DCP says a bee is off, it must not pulse.
