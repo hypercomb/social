@@ -922,11 +922,20 @@ export class NostrMeshDrone extends Drone {
 
   private loadNetworkEnabled(): boolean {
   try {
+    // Master privacy switch. Private mode (`hc:mesh-public` not set
+    // to 'true') means zero mesh network — no relay subscriptions,
+    // no publishes, no boot-time WebSocket bootstrap. The local
+    // `hc:nostrmesh:network` key is a finer-grained override but
+    // can never override the master to enable network when private.
+    if (localStorage.getItem('hc:mesh-public') !== 'true') return false
     const v = localStorage.getItem('hc:nostrmesh:network')
     if (v === '0') return false
     if (v === '1') return true
   } catch {}
-  return true
+  // Default to OFF (private). Users opt INTO mesh networking via
+  // the mesh-public toggle; they should never get surprise outbound
+  // connections to public Nostr relays on first launch.
+  return false
 }
 
 
