@@ -143,35 +143,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       for (const d of (layer['dependencies'] as string[] | undefined) ?? []) dependencies.add(this.#stripExt(d))
       for (const r of (layer['resources'] as string[] | undefined) ?? []) resources.add(this.#stripExt(r))
 
-      // Slot-aware passive prefetch: pull every 64-hex string from
-      // every other field on the layer JSON into the resources set.
-      // build-module emits install layers without a `resources` array,
-      // so without this the preheat loop downstream has nothing to
-      // chew on. With this, every body / notes / tags / future-slot
-      // signature gets fired at preheatResource() at boot — non-
-      // blocking parallel reads that land in Store.#resourceCache
-      // before the renderer asks for any of them. Reserved fields
-      // (already handled above or non-sig-array) are skipped.
-      const RESERVED = new Set(['name', 'bees', 'dependencies', 'resources', 'cells', 'layers', 'children', 'docs'])
-      for (const [key, value] of Object.entries(layer)) {
-        if (RESERVED.has(key)) continue
-        if (!Array.isArray(value)) continue
-        for (const v of value) {
-          if (typeof v !== 'string') continue
-          const clean = this.#stripExt(v)
-          if (this.#isSignature(clean)) resources.add(clean)
-        }
-      }
-
-      // Child layer sigs: build-module emits them under `cells`;
-      // legacy / user-content layers may use `layers` or `children`.
-      // Walk all three so the layer-tree union is complete regardless
-      // of which producer wrote the layer.
-      const children: string[] = [
-        ...(((layer['cells'] as string[] | undefined) ?? []) as string[]),
-        ...(((layer['layers'] as string[] | undefined) ?? []) as string[]),
-        ...(((layer['children'] as string[] | undefined) ?? []) as string[]),
-      ]
+      const children = (layer['layers'] as string[] | undefined) ?? []
       await Promise.all(children.map(visit))
     }
 
