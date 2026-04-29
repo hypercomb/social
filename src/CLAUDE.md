@@ -304,6 +304,33 @@ Or via slash behaviour: `/language ja`, `/language en`, `/lang jp`
 - Over-engineering or premature abstraction
 - Hardcoding features into the web shell — if it can be a drone module, it should be
 
+## OPFS: user data vs install cache (READ BEFORE TOUCHING)
+
+The web shell's OPFS root is split into two zones with different ownership:
+
+**User data — NEVER wipe, NEVER `removeEntry` on these in scripts, console snippets, or "let me cold-boot test" experiments:**
+- `hypercomb.io/` — the user's content tree (tiles, folders, body resources)
+- `__history__/` — per-lineage layer commit chains (every undo/redo entry the user has ever made)
+- `__resources__/` — signature-addressed content blobs the user has authored or pulled
+- `__receipts__/` — receipt log
+- `__structure__/` — structure cache
+- `__threads__/` — thread state
+
+**Install/sync cache — owned by `ensureInstall` / `resyncFromSentinel`, safe to clear if you're inside that code path:**
+- `__bees__/` — drone bundles by signature
+- `__dependencies__/` — namespace deps by signature
+- `__layers__/sentinel/` — sentinel-scoped layer cache (NOT `__layers__/` root, which may hold domain-scoped user-installed data)
+
+**Verification rule:** to prove an essentials change reaches the web shell, do NOT clear OPFS. Use signature comparison instead — make a source change, rebuild, reload, and check that the new bee signatures appear in the manifest and the new bytes are in `__bees__/`. The user's data dirs should be unchanged across the test. If you find yourself reaching for `localStorage.clear()` or `navigator.storage.getDirectory()` removal, stop — there is a non-destructive way to verify.
+
+## Web/Dev shell parity
+
+`hypercomb-web/src/app/app.html` and `hypercomb-dev/src/app/app.html` must mount the same set of shell-level UI components from `@hypercomb/shared/ui/`. Drift between them is a class of bug where data flows correctly (drones register, layers commit) but the relevant panel never renders in production because web's shell template is missing the selector.
+
+When adding a new shell-level UI component (overlay, panel, strip, viewer):
+1. Add the import + selector to BOTH `hypercomb-web/src/app/app.{ts,html}` and `hypercomb-dev/src/app/app.{ts,html}`.
+2. Long-term direction: move shell-level UI into a registry-fed component the way drones contribute icons via `IconProviderRegistry` (see `drone-installer-contract.md`) so drift becomes structurally impossible.
+
 ## Agent Coordination (Multi-Worktree)
 
 When working in a worktree alongside other agents:
