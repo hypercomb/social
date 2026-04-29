@@ -116,7 +116,23 @@ export class HexImageAtlas {
 
     let bitmap: ImageBitmap
     try {
-      bitmap = await createImageBitmap(blob)
+      // Decode AT atlas-cell resolution rather than at the source image's
+      // full size. A 2000×2000 photo previously decoded as a ~16MB
+      // ImageBitmap, only to be scaled down to fit a single 256px atlas
+      // cell. Resizing during decode (browser-side, optimised) drops
+      // the work to roughly target² pixels instead of source². On
+      // integrated graphics / Surface UHD this is the difference
+      // between "instant" and "couple-hundred-ms each tile".
+      //
+      // Passing only resizeWidth lets the browser compute the matching
+      // height to preserve aspect ratio, which the contain-fill scaling
+      // below depends on. 2× the cell size keeps headroom for retina
+      // sampling without paying for full source resolution.
+      const targetMax = this.#cellPx * 2
+      bitmap = await createImageBitmap(blob, {
+        resizeWidth: targetMax,
+        resizeQuality: 'medium',
+      })
     } catch {
       this.#failures.set(sig, (this.#failures.get(sig) ?? 0) + 1)
       console.warn(`[HexImageAtlas] createImageBitmap failed for ${sig.slice(0, 12)}… (attempt ${this.#failures.get(sig)}/${HexImageAtlas.MAX_RETRIES})`)
