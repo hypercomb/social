@@ -73,43 +73,65 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
         ? Promise.allSettled(walked.resources.map(sig => this.store.preheatResource(sig)))
         : Promise.resolve([])
 
-      // Split walked.bees into priority and rest. Priority bees declared
-      // `static readonly bootPriority = true` in source; build-module
-      // collected them into manifest.bootPriority. Render-critical
-      // drones (show-cell, pixi host) belong here so first paint isn't
-      // gated on unrelated bees finishing their load + warmup.
+      // Split walked.bees into priority and rest. Priority bees are the
+      // drones whose effects array includes 'render' — build-module
+      // surfaces them in manifest.bootPriority. Render-critical drones
+      // (show-cell, pixi host) belong here so first paint isn't gated
+      // on unrelated bees finishing their load + warmup.
+      //
+      // Critical: if the cached manifest has no bootPriority (any
+      // browser that synced before this code shipped), we MUST fall
+      // back to the legacy "await every bee" path. Otherwise find()
+      // returns immediately with an empty beeCache,
+      // bootstrap-history's encounter pulses nothing, and the canvas
+      // stays black.
       const prioritySet = new Set(ScriptPreloader.readManifestBootPriority())
-      const priorityBees = walked.bees.filter(s => prioritySet.has(s))
-      const restBees = walked.bees.filter(s => !prioritySet.has(s))
+      const priorityBees = prioritySet.size > 0
+        ? walked.bees.filter(s => prioritySet.has(s))
+        : []
+      const restBees = prioritySet.size > 0
+        ? walked.bees.filter(s => !prioritySet.has(s))
+        : walked.bees
 
-      // Phase 1: priority bees — load + warmup + return. Caller awaits
-      // this before the first render so the canvas drone is ready.
+      // Phase 1: priority bees — load + warmup. Caller awaits this so
+      // the canvas drone is ready when find() returns.
       const beeLoadStart = performance.now()
       if (priorityBees.length) {
         await this.#loadBeesFromList(priorityBees)
         const priorityMs = (performance.now() - beeLoadStart).toFixed(0)
         console.log(`[script-preloader] loaded ${priorityBees.length} priority bees in ${priorityMs}ms`)
-        // Warmup priority bees right away so first pulse is hot
         const priorityWarmStart = performance.now()
         await this.#runWarmups()
         const priorityWarmMs = (performance.now() - priorityWarmStart).toFixed(0)
         console.log(`[script-preloader] warmed up priority bees in ${priorityWarmMs}ms`)
       }
 
-      // Phase 2: rest of the bees — fire-and-forget. find() returns;
-      // these bees light up interactivity in the background after the
-      // canvas is already painted. Render speed is king.
+      // Phase 2: rest of the bees. With a priority partition, defer
+      // them in the background — render speed is king. Without one,
+      // await them so find() returns a populated beeCache (legacy
+      // behaviour preserved for browsers whose cached manifest
+      // predates manifest.bootPriority).
       if (restBees.length) {
-        const bgStart = performance.now()
-        void (async () => {
+        const restStart = performance.now()
+        if (priorityBees.length > 0) {
+          void (async () => {
+            await this.#loadBeesFromList(restBees)
+            const restMs = (performance.now() - restStart).toFixed(0)
+            console.log(`[script-preloader] loaded ${restBees.length} background bees in ${restMs}ms`)
+            const bgWarmStart = performance.now()
+            await this.#runWarmups()
+            const bgWarmMs = (performance.now() - bgWarmStart).toFixed(0)
+            console.log(`[script-preloader] warmed up background bees in ${bgWarmMs}ms`)
+          })().catch(err => console.warn('[script-preloader] background bee load failed:', err))
+        } else {
           await this.#loadBeesFromList(restBees)
-          const restMs = (performance.now() - bgStart).toFixed(0)
-          console.log(`[script-preloader] loaded ${restBees.length} background bees in ${restMs}ms`)
-          const bgWarmStart = performance.now()
+          const restMs = (performance.now() - restStart).toFixed(0)
+          console.log(`[script-preloader] loaded ${restBees.length} bees in ${restMs}ms (legacy)`)
+          const legacyWarmStart = performance.now()
           await this.#runWarmups()
-          const bgWarmMs = (performance.now() - bgWarmStart).toFixed(0)
-          console.log(`[script-preloader] warmed up background bees in ${bgWarmMs}ms`)
-        })().catch(err => console.warn('[script-preloader] background bee load failed:', err))
+          const legacyWarmMs = (performance.now() - legacyWarmStart).toFixed(0)
+          console.log(`[script-preloader] warmed up bees in ${legacyWarmMs}ms (legacy)`)
+        }
       }
 
       await prefetch
