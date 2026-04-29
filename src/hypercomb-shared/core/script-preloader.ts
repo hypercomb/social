@@ -54,89 +54,29 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     }
 
     const run = async (): Promise<Bee[]> => {
-      const t0 = performance.now()
       // Layer-walk: layers are the source of truth. Union every signature
       // array they declare (bees, dependencies, resources, nested layers).
       // Falls back to the flat install-manifest bees list for legacy/dev.
       const layerRoots = ScriptPreloader.readManifestLayers()
-      const walkStart = performance.now()
       const walked = layerRoots.length
         ? await this.#walkLayers(layerRoots)
         : { bees: ScriptPreloader.readManifestBees(), dependencies: [], resources: [] }
-      const walkMs = (performance.now() - walkStart).toFixed(0)
-      console.log(`[script-preloader] walked ${layerRoots.length} root(s) in ${walkMs}ms → ${walked.bees.length} bees, ${walked.dependencies.length} deps, ${walked.resources.length} resources`)
 
       // Prefetch __resources__ in parallel with bee loading — tiles and
       // drones that need these blobs will find them hot in the Store cache.
-      const prefetchStart = performance.now()
       const prefetch = walked.resources.length
         ? Promise.allSettled(walked.resources.map(sig => this.store.preheatResource(sig)))
         : Promise.resolve([])
 
-      // Split walked.bees into priority and rest. Priority bees are the
-      // drones whose effects array includes 'render' — build-module
-      // surfaces them in manifest.bootPriority. Render-critical drones
-      // (show-cell, pixi host) belong here so first paint isn't gated
-      // on unrelated bees finishing their load + warmup.
-      //
-      // Critical: if the cached manifest has no bootPriority (any
-      // browser that synced before this code shipped), we MUST fall
-      // back to the legacy "await every bee" path. Otherwise find()
-      // returns immediately with an empty beeCache,
-      // bootstrap-history's encounter pulses nothing, and the canvas
-      // stays black.
-      const prioritySet = new Set(ScriptPreloader.readManifestBootPriority())
-      const priorityBees = prioritySet.size > 0
-        ? walked.bees.filter(s => prioritySet.has(s))
-        : []
-      const restBees = prioritySet.size > 0
-        ? walked.bees.filter(s => !prioritySet.has(s))
-        : walked.bees
-
-      // Phase 1: priority bees — load + warmup. Caller awaits this so
-      // the canvas drone is ready when find() returns.
-      const beeLoadStart = performance.now()
-      if (priorityBees.length) {
-        await this.#loadBeesFromList(priorityBees)
-        const priorityMs = (performance.now() - beeLoadStart).toFixed(0)
-        console.log(`[script-preloader] loaded ${priorityBees.length} priority bees in ${priorityMs}ms`)
-        const priorityWarmStart = performance.now()
-        await this.#runWarmups()
-        const priorityWarmMs = (performance.now() - priorityWarmStart).toFixed(0)
-        console.log(`[script-preloader] warmed up priority bees in ${priorityWarmMs}ms`)
-      }
-
-      // Phase 2: rest of the bees. With a priority partition, defer
-      // them in the background — render speed is king. Without one,
-      // await them so find() returns a populated beeCache (legacy
-      // behaviour preserved for browsers whose cached manifest
-      // predates manifest.bootPriority).
-      if (restBees.length) {
-        const restStart = performance.now()
-        if (priorityBees.length > 0) {
-          void (async () => {
-            await this.#loadBeesFromList(restBees)
-            const restMs = (performance.now() - restStart).toFixed(0)
-            console.log(`[script-preloader] loaded ${restBees.length} background bees in ${restMs}ms`)
-            const bgWarmStart = performance.now()
-            await this.#runWarmups()
-            const bgWarmMs = (performance.now() - bgWarmStart).toFixed(0)
-            console.log(`[script-preloader] warmed up background bees in ${bgWarmMs}ms`)
-          })().catch(err => console.warn('[script-preloader] background bee load failed:', err))
-        } else {
-          await this.#loadBeesFromList(restBees)
-          const restMs = (performance.now() - restStart).toFixed(0)
-          console.log(`[script-preloader] loaded ${restBees.length} bees in ${restMs}ms (legacy)`)
-          const legacyWarmStart = performance.now()
-          await this.#runWarmups()
-          const legacyWarmMs = (performance.now() - legacyWarmStart).toFixed(0)
-          console.log(`[script-preloader] warmed up bees in ${legacyWarmMs}ms (legacy)`)
-        }
+      if (walked.bees.length) {
+        await this.#loadBeesFromList(walked.bees)
       }
 
       await prefetch
-      const prefetchMs = (performance.now() - prefetchStart).toFixed(0)
-      console.log(`[script-preloader] prefetched ${walked.resources.length} resources in ${prefetchMs}ms`)
+
+      // Warmup hooks — every freshly-registered bee gets one shot to
+      // pre-rasterize glyphs, compile shaders, open connections, etc.
+      await this.#runWarmups()
 
       // Enforce manifest: dispose and evict bees that are no longer enabled.
       // This is the trust boundary — if DCP says a bee is off, it must not pulse.
@@ -258,21 +198,6 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       if (!raw) return []
       const manifest = JSON.parse(raw)
       return Array.isArray(manifest?.bees) ? manifest.bees.filter(Boolean) : []
-    } catch {
-      return []
-    }
-  }
-
-  /** Read `manifest.bootPriority` — sigs of drones that build-module
-   *  detected as `static readonly bootPriority = true`. Empty when no
-   *  bee declared priority (older manifests, or modules that haven't
-   *  opted in). */
-  private static readManifestBootPriority(): string[] {
-    try {
-      const raw = localStorage.getItem('core-adapter.installed-manifest')
-      if (!raw) return []
-      const manifest = JSON.parse(raw)
-      return Array.isArray(manifest?.bootPriority) ? manifest.bootPriority.filter(Boolean) : []
     } catch {
       return []
     }

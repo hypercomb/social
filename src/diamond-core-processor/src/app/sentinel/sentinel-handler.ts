@@ -19,11 +19,6 @@ export type SyncManifest = {
   dependencies: string[]
   layers: string[]
   beeDeps?: Record<string, string[]>
-  /** Bee sigs whose source declared `static readonly bootPriority = true`.
-   *  Carried through the sync so ScriptPreloader can prioritise them on
-   *  the web side. Always intersected with enabled bees so a disabled
-   *  drone never appears here. */
-  bootPriority?: string[]
 }
 
 export type IntakeKind = 'layer' | 'bee' | 'dependency' | 'resource'
@@ -182,8 +177,7 @@ export class SentinelHandler {
       enabledBees: syncManifest.bees,
       enabledDeps: syncManifest.dependencies,
       enabledLayers: syncManifest.layers,
-      beeDeps: syncManifest.beeDeps,
-      bootPriority: syncManifest.bootPriority,
+      beeDeps: syncManifest.beeDeps
     })
   }
 
@@ -201,7 +195,6 @@ export class SentinelHandler {
     const enabledDeps = new Set<string>()
     const enabledLayers: string[] = []
     const allBeeDeps: Record<string, string[]> = {}
-    const bootPriorityCollected = new Set<string>()
 
     const domains = this.#loadDomains()
     const toggles = this.#loadToggles()
@@ -217,7 +210,6 @@ export class SentinelHandler {
       if (!manifest) continue
 
       const beeDeps: Record<string, string[]> = manifest.beeDeps ?? {}
-      const packagePriority: string[] = Array.isArray(manifest.bootPriority) ? manifest.bootPriority : []
       const visited = new Set<string>()
 
       await this.#walkEnabled(
@@ -232,29 +224,13 @@ export class SentinelHandler {
         allBeeDeps,
         visited,
       )
-
-      // Intersect this package's declared bootPriority with what is
-      // actually enabled (toggle gates). A disabled drone must not
-      // surface as priority — that would force it to load on the web
-      // side regardless of the user's toggle.
-      const enabledBeesSet = new Set(enabledBees)
-      for (const sig of packagePriority) {
-        if (enabledBeesSet.has(sig)) bootPriorityCollected.add(sig)
-      }
     }
 
     const depsList = [...enabledDeps].sort()
     const allSigs = [...enabledBees.sort(), ...depsList, ...enabledLayers.sort()]
     const syncSig = await SignatureService.sign(new TextEncoder().encode(allSigs.join(',')).buffer as ArrayBuffer)
 
-    return {
-      syncSig,
-      bees: enabledBees,
-      dependencies: depsList,
-      layers: enabledLayers,
-      beeDeps: allBeeDeps,
-      bootPriority: [...bootPriorityCollected].sort(),
-    }
+    return { syncSig, bees: enabledBees, dependencies: depsList, layers: enabledLayers, beeDeps: allBeeDeps }
   }
 
   /**

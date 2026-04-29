@@ -7,8 +7,6 @@ export type ResolvedImports = Record<string, string>
 const OPFS_DEPENDENCY_BASE_PATH = '/opfs/__dependencies__'
 
 export const resolveImportMap = async (): Promise<ResolvedImports> => {
-  const traceEnabled = (() => { try { return localStorage.getItem('hc:boot-trace') !== '0' } catch { return true } })()
-  const t0 = performance.now()
   const imports: ResolvedImports = {}
   const aliasSource = new Map<string, string>()
   imports['@hypercomb/core'] = '/hypercomb-core.runtime.js'
@@ -36,10 +34,8 @@ export const resolveImportMap = async (): Promise<ResolvedImports> => {
   }
   if (!depsDir) return imports
 
-  let scanned = 0
   for await (const [signature, handle] of depsDir.entries()) {
     if (handle.kind !== 'file') continue
-    scanned++
 
     const file = await (handle as FileSystemFileHandle).getFile()
 
@@ -62,10 +58,6 @@ export const resolveImportMap = async (): Promise<ResolvedImports> => {
 
   // Cache alias map so DependencyLoader can skip redundant OPFS scan
   ;(globalThis as any).__hypercombAliasMap = aliasSource
-
-  if (traceEnabled) {
-    console.log(`[resolveImportMap] scanned ${scanned} __dependencies__ entries, registered ${Object.keys(imports).length} aliases in ${(performance.now() - t0).toFixed(0)}ms`)
-  }
 
   return imports
 }

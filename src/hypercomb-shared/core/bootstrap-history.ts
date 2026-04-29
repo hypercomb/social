@@ -36,14 +36,13 @@ export class BootstrapHistory {
 
     const finalUrl = inputPath + inputSuffix
 
-    // Phase 1 — synchronous URL restoration. Touch the history stack
-    // FIRST, return control to the caller as soon as the URL is right,
-    // and then fire bee loading in the background so the shell never
-    // waits on `preloader.find()` for first paint. Hypercomb waits on
-    // nothing.
-    const segments: string[] = []
+    // rebuild history stack
+    // important: always restore finalUrl even if something fails, so the url never gets stuck at '/'
     try {
       window.history.replaceState({ i: 0, steps: [] as BootstrapStep[] }, '', '/')
+
+      // Always encounter root markers (global bees that load at every location)
+      await this.encounter(preloader, '')
 
       let path = ''
       let index = 0
@@ -58,42 +57,39 @@ export class BootstrapHistory {
 
         window.history.pushState({ i: index }, '', path)
         steps.push({ index, segment: seg, path })
-        segments.push(seg)
+
+        // replay: encounter this segment
+        await this.encounter(preloader, seg)
       }
 
+      // stash steps for debugging, but keep the current url correct
       try {
         const state = window.history.state as any
         window.history.replaceState({ ...state, i: index, steps }, '', finalUrl)
       } catch {
         // ignore
       }
+
     } catch {
-      try { window.history.replaceState(window.history.state, '', finalUrl) } catch { /* ignore */ }
+
+      // if anything blows up after we touched '/', restore the url immediately
+      try {
+        window.history.replaceState(window.history.state, '', finalUrl)
+      } catch {
+        // ignore
+      }
+
     } finally {
-      try { window.history.replaceState(window.history.state, '', finalUrl) } catch { /* ignore */ }
+
+      // hard guarantee: end on finalUrl no matter what
+      try {
+        window.history.replaceState(window.history.state, '', finalUrl)
+      } catch {
+        // ignore
+      }
     }
 
     this.dispatchPopState()
-
-    // Phase 2 — background bee loading. Encounter() calls find() →
-    // reads markers → loads bees → pulses them, in URL order. The
-    // shell renders without waiting on this; bees light up the canvas
-    // as they come up. Errors are swallowed per level so a single
-    // failure can't strand the chain. Per-level timing logs (gated by
-    // localStorage 'hc:boot-trace') let us see exactly how long each
-    // depth takes when something is slow.
-    const traceEnabled = (() => { try { return localStorage.getItem('hc:boot-trace') !== '0' } catch { return true } })()
-    void (async () => {
-      const t0 = performance.now()
-      await this.encounter(preloader, '').catch(() => {})
-      if (traceEnabled) console.log(`[bootstrap-history] encounter('') in ${(performance.now() - t0).toFixed(0)}ms`)
-      for (const seg of segments) {
-        const ts = performance.now()
-        await this.encounter(preloader, seg).catch(() => {})
-        if (traceEnabled) console.log(`[bootstrap-history] encounter(${JSON.stringify(seg)}) in ${(performance.now() - ts).toFixed(0)}ms`)
-      }
-      if (traceEnabled) console.log(`[bootstrap-history] all encounters complete in ${(performance.now() - t0).toFixed(0)}ms`)
-    })()
   }
 
   private parsePath = (path: string, completions: CompletionUtility | null): string[] => {
