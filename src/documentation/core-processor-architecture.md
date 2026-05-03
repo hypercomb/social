@@ -23,12 +23,14 @@ primitives. Core itself imports nothing and depends on nothing.
 ### Bee
 
 The fundamental unit of behavior. `Bee` is the abstract base class for all
-autonomous behavior units. It comes in two specializations:
+autonomous behavior units. It comes in three specializations:
 
 - **Drone** — reactive bee. Overrides `sense()` + `heartbeat()`. Pulses every
   processor cycle.
 - **Worker** — bootstrap-once bee. Overrides `ready()` + `act()`. Acts once when
   ready, then goes dormant.
+- **QueenBee** — real-time command bee. Overrides `execute(args)`. Invoked
+  directly via `/command` in the command line — `pulse()` is a no-op.
 
 ```
 BeeState:  Created -> Registered -> Active -> Disposed

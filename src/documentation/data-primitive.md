@@ -67,7 +67,9 @@ Because operations are sequenced and self-contained, the state of any lineage ca
 - **Revisit** any point in time by reading operations up to a given index
 - **Cycle** through states by stepping forward and backward through the sequence
 - **Explore** what happened at any lineage by walking its bag in order
-- **Branch** by forking the operation sequence at any point
+- **Promote** any past state to the present by appending compensating operations that make the head match the desired past state (see [revision-mode.md](revision-mode.md))
+
+History is always linear and append-only. There are no branches, no forks, no detached-head state. Scrubbing backward is a view-only operation — the cursor moves, but the bag is unchanged. To bring a past state forward, "Make HEAD" appends new operations so the top of the bag reproduces the viewed state. Past operations are never rewritten or removed.
 
 The history bag is not a log you append to and forget. It is a navigable structure — a timeline you can walk.
 

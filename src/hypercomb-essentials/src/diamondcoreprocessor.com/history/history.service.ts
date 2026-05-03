@@ -734,31 +734,16 @@ export class HistoryService {
   }
 
   /**
-   * Pure projection from raw parsed JSON to a LayerContent. Preserves
-   * every field as-is — including all registered slot values (notes,
-   * tags, future features). Previously only `name` and `children` were
-   * surfaced, which silently dropped slot fields on read so cells
-   * looked empty even when the bytes-on-disk had notes; that broke the
-   * whole LayerSlotRegistry pipeline.
-   *
-   * Empty `children` is normalised to omitted so reader output matches
-   * canonicalizeLayer output (sparse-layer invariant).
+   * Pure projection from raw parsed JSON to a LayerContent. Defers to
+   * `canonicalizeLayer` so the read-side filter (drop empty arrays /
+   * empty objects / null / undefined) is mechanically identical to the
+   * write-side filter — single source of truth, slot-agnostic, no
+   * per-slot special cases. Reader output bytes are now also key-
+   * sorted, which is harmless for readers and preserves the round-trip
+   * invariant for any caller that re-signs the result.
    */
-  static readonly #hydrateLayer = (parsed: Partial<LayerContent>): LayerContent => {
-    const out: LayerContent = { name: parsed.name as string }
-    for (const key of Object.keys(parsed)) {
-      if (key === 'name') continue
-      if (key === 'children') {
-        if (Array.isArray(parsed.children) && parsed.children.length > 0) out.children = parsed.children
-        continue
-      }
-      const v = (parsed as Record<string, unknown>)[key]
-      if (v === undefined || v === null) continue
-      if (Array.isArray(v) && v.length === 0) continue
-      out[key] = v
-    }
-    return out
-  }
+  static readonly #hydrateLayer = (parsed: Partial<LayerContent>): LayerContent =>
+    HistoryService.canonicalizeLayer(parsed as LayerContent)
 
   // (lineageSig → layerSig → bytes) cache, populated by listLayers
   // and getLayerContent. Keeps undo/redo navigation off OPFS for

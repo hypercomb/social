@@ -392,18 +392,13 @@ Lineage drives:
 
 ### 12.4 Synchronization Event
 
-State changes fire a DOM `CustomEvent` named `synchronize`:
+The `synchronize` event is a plain DOM `Event` (not a `CustomEvent`) dispatched solely by the processor (`hypercomb.act()`) in its `finally` block after all bees have pulsed. It carries no detail payload — no source tagging, no revision data, no path segments. Its sole purpose is to coalesce visual updates into a single render pass.
 
 ```typescript
-{
-  source:   "lineage:explorer" | "lineage:url" | "lineage:fs",
-  rev:      number,     // monotonic revision counter
-  path:     string,     // e.g. "/chemistry/organic"
-  segments: string[]    // e.g. ["chemistry", "organic"]
-}
+window.dispatchEvent(new Event('synchronize'))
 ```
 
-All UI and rendering systems listen for this event to refresh.
+All UI and rendering systems listen for this event to refresh. Because the processor is the sole dispatcher, no additional coordination or payload is needed — the event is a pure "render now" signal.
 
 ---
 

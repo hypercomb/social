@@ -274,12 +274,20 @@
   gap: 0.1rem;
 }
 
-// ── multi-row layout ─────────────────────────────────────
+// ── single-row layout with edit-mode toggling ──────────────
 
 .controls-rows {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  // Subtle border while editing so the user knows clicks are toggling
+  // state rather than running actions. Kept low-key per the project's
+  // no-flashy-effects rule.
+  &.editing {
+    outline: 1px dashed rgba(200, 200, 200, 0.25);
+    outline-offset: 2px;
+    border-radius: 3px;
+  }
 }
 
 .controls-row {
@@ -288,27 +296,26 @@
   gap: 0.15rem;
   min-height: 2rem;
   border-radius: 3px;
-  transition: background 150ms ease;
+}
 
-  &.cdk-drop-list-dragging {
-    background: rgba(255, 255, 255, 0.03);
+// Muted (user-disabled) controls: grayed but still in the row so the
+// user can see them and toggle them on via edit mode. In normal mode
+// they're click-no-op (handled in the click router); the visual cue
+// is just a low opacity. No animation, no glow.
+.ctl-btn.muted {
+  opacity: 0.32;
+}
+
+// In edit mode, every button gets a subtle hover hint so the user
+// knows clicking will toggle rather than run.
+.ctl-btn.editing {
+  cursor: cell;
+  &:hover {
+    opacity: 0.85;
   }
-}
-
-// CDK drag placeholder (ghost left behind in source position)
-.cdk-drag-placeholder {
-  opacity: 0.25;
-}
-
-// CDK drag preview (element floating under cursor)
-.cdk-drag-preview {
-  border-radius: 3px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
-}
-
-// Hide the drag animating element
-.cdk-drag-animating {
-  transition: transform 200ms cubic-bezier(0, 0, 0.2, 1);
+  &.muted:hover {
+    opacity: 0.65;
+  }
 }
 
 // expand/collapse toggle

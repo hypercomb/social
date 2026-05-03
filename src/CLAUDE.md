@@ -182,7 +182,7 @@ SHA-256 hash (64 hex chars) of canonical content. Created via `SignatureService.
 - Instruction manifests and instruction settings (signature-addressed resources)
 - Any new feature that stores structured data
 
-**Rule**: When designing a new feature, data structure, or JSON format — if a field contains content that could be shared, cached, versioned, or composed, it must be a signature reference to a resource. Never store expandable content inline when it can be content-addressed. See `src/documentation/signature-algebra.md` for the formal theory and `src/documentation/signature-expansion-doctrine.md` for the practical guide.
+**Rule**: When designing a new feature, data structure, or JSON format — if a field contains content that could be shared, cached, versioned, or composed, it must be a signature reference to a resource. Never store expandable content inline when it can be content-addressed. See `src/documentation/signature-algebra.md` for the formal theory and `src/documentation/signature-system.md` for the expansion doctrine and practical guide.
 
 ### IoC (Service Locator)
 ```typescript

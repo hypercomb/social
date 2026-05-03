@@ -1,6 +1,7 @@
 import { runBuild } from './commands/build.js'
 import { runInspect } from './commands/inspect.js'
 import { runTile } from './commands/tile.js'
+import { runDo } from './commands/do.js'
 import { runBridge } from './bridge/server.js'
 
 const USAGE = `Usage: hypercomb <command> [options]
@@ -10,6 +11,7 @@ Commands:
   inspect [--keys|--registry]  Show IoC keys or live registry contents
   bridge                       Start WebSocket relay (port 2401)
   tile <subcommand>            Manage tiles via bridge (add/remove/list/inspect/history)
+  do "<text>" | do --stdin     Submit text through the in-app command line
   help                         Show this message
 `
 
@@ -27,6 +29,8 @@ async function main(): Promise<void> {
       return runBridge()
     case 'tile':
       return runTile(rest)
+    case 'do':
+      return runDo(rest)
     case 'help':
     case '--help':
     case '-h':

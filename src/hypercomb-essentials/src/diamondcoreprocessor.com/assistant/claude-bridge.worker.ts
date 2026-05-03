@@ -7,7 +7,7 @@ import type { HistoryService } from '../history/history.service.js'
 const BRIDGE_PORT = 2401
 const BRIDGE_ENABLED_QUERY_KEY = 'claudeBridge'
 const BRIDGE_ENABLED_STORAGE_KEY = 'hypercomb.claudeBridge.enabled'
-type BridgeRequest = { id: string; op: string; cells?: string[]; all?: boolean; cell?: string }
+type BridgeRequest = { id: string; op: string; cells?: string[]; all?: boolean; cell?: string; text?: string }
 type BridgeResponse = { id: string; ok: boolean; data?: unknown; error?: string }
 
 const RECONNECT_MS = 3_000
@@ -130,8 +130,21 @@ export class ClaudeBridgeWorker extends Worker {
       case 'list':    return this.#list(req)
       case 'inspect': return this.#inspect(req)
       case 'history': return this.#history(req)
+      case 'submit':  return this.#submit(req)
       default:        return { id: req.id, ok: false, error: `unknown op: ${req.op}` }
     }
+  }
+
+  // Mirrors a human keystroke into the in-app command line. Emits the same
+  // EffectBus channel a future remote caller would use; the command-line
+  // component subscribes and runs the existing submit pipeline. Text is
+  // forwarded verbatim so anything the keyboard accepts (slash behaviours,
+  // bracket selects, multi-token grammar, plain cell names) just works.
+  async #submit(req: BridgeRequest): Promise<BridgeResponse> {
+    const text = req.text
+    if (typeof text !== 'string') return { id: req.id, ok: false, error: 'no text provided' }
+    EffectBus.emit('command-line:remote-submit', { text })
+    return { id: req.id, ok: true }
   }
 
   // ------- operations -------

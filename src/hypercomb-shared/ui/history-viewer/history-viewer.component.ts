@@ -48,6 +48,13 @@ type CursorService = {
   state: CursorState
   seek(position: number): void
   setGroupStepEnabled?(on: boolean): void
+  // Bag-mutating ops in this viewer (promote / merge / remove) bypass
+  // LayerCommitter, so the cursor never hears about the new/dropped
+  // marker on its own. Without a refresh, cursor.state.total stays
+  // stale and a follow-up seek(total) is a no-op (same position →
+  // early return → no synchronize → canvas doesn't repaint).
+  refreshForLocation?(locationSig: string): Promise<void>
+  onNewLayer?(): Promise<void>
 }
 type Store = {
   getResource(sig: string): Promise<Blob | null>
@@ -478,6 +485,7 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
     const entry = this.#entries().find(e => e.filename === newestFilename)
     if (!entry) return
     await history.promoteToHead(cursor.state.locationSig, entry.layerSig)
+    await this.#refreshCursor(cursor)
     this.#selected.set(new Set())
     this.#lastSelectionAnchor = null
     await this.#reload()
@@ -497,6 +505,7 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
     const sel = this.#selected()
     if (sel.size === 0) return
     await history.mergeEntries(cursor.state.locationSig, [...sel])
+    await this.#refreshCursor(cursor)
     this.#selected.set(new Set())
     this.#lastSelectionAnchor = null
     await this.#reload()
@@ -617,6 +626,7 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
     const entry = this.#entries()[index]
     if (!entry) return
     await history.promoteToHead(cursor.state.locationSig, entry.layerSig)
+    await this.#refreshCursor(cursor)
     await this.#reload()
     cursor.seek(this.#total())
   }
@@ -635,6 +645,7 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
     const entry = this.#entries()[index]
     if (!entry) return
     await history.removeEntries(cursor.state.locationSig, [entry.filename])
+    await this.#refreshCursor(cursor)
     await this.#reload()
     const nextTotal = this.#total()
     if (cursor.state.position > nextTotal) cursor.seek(nextTotal)
@@ -642,6 +653,15 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
 
   #cursor(): CursorService | null {
     return window.ioc.get<CursorService>('@diamondcoreprocessor.com/HistoryCursorService') ?? null
+  }
+
+  // After a bag-mutating op (promote/merge/remove) the cursor's
+  // internal #layers is stale. Pull it back in sync with disk before
+  // reading state.total or seeking, otherwise seek() short-circuits
+  // on equal position and the canvas never repaints.
+  async #refreshCursor(cursor: CursorService): Promise<void> {
+    if (cursor.refreshForLocation) await cursor.refreshForLocation(cursor.state.locationSig)
+    else if (cursor.onNewLayer) await cursor.onNewLayer()
   }
   #history(): HistoryService | null {
     return window.ioc.get<HistoryService>('@diamondcoreprocessor.com/HistoryService') ?? null

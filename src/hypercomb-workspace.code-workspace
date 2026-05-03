@@ -29,6 +29,9 @@
     },
     {
       "path": "hypercomb-relay"
+    },
+    {
+      "path": "hypercomb-cli"
     }
   ],
   "launch": {

@@ -24,10 +24,10 @@ export class DesktopMoveInput {
 
   #downPos: { x: number; y: number } | null = null
   #downAxial: Axial | null = null
+  #lastAxial: Axial | null = null
   #dragging = false
   #spaceHeld = false
   #ctrlHeld = false
-  #lastDwellLabel: string | null = null
 
   attach = (drone: MoveDroneApi, refs: MoveRefs): void => {
     if (this.#enabled) return
@@ -119,12 +119,14 @@ export class DesktopMoveInput {
       }
       this.#dragging = true
       this.#setCursor('grabbing')
+      // propagate any Ctrl state already held when the drag started
+      if (this.#ctrlHeld) this.#drone.setDropIntoActive(true)
     }
 
     const axial = this.#clientToAxial(e.clientX, e.clientY)
     if (axial) {
+      this.#lastAxial = axial
       this.#drone.updateMove(axial, this.#source)
-      this.#updateDwell(axial)
     }
   }
 
@@ -133,9 +135,13 @@ export class DesktopMoveInput {
     if (e.pointerType === 'touch') return
 
     if (this.#dragging && this.#drone) {
-      const axial = this.#clientToAxial(e.clientX, e.clientY)
+      const axial = this.#clientToAxial(e.clientX, e.clientY) ?? this.#lastAxial
       if (axial) {
-        void this.#drone.commitMoveAt(axial, this.#source)
+        if (this.#ctrlHeld) {
+          void this.#drone.commitDropInto(axial, this.#source)
+        } else {
+          void this.#drone.commitMoveAt(axial, this.#source)
+        }
       } else {
         this.#drone.cancelMove(this.#source)
       }
@@ -147,8 +153,13 @@ export class DesktopMoveInput {
   #onKeyDown = (e: KeyboardEvent): void => {
     if (e.key === ' ') this.#spaceHeld = true
     if (e.key === 'Control') {
-      this.#ctrlHeld = true
-      // if already dragging, re-evaluate dwell at current position
+      if (!this.#ctrlHeld) {
+        this.#ctrlHeld = true
+        // mid-drag: flip the drone into drop-into preview mode
+        if (this.#dragging && this.#drone) {
+          this.#drone.setDropIntoActive(true)
+        }
+      }
     }
     if (e.key === 'Escape' && this.#dragging) {
       this.#drone?.cancelMove(this.#source)
@@ -159,11 +170,12 @@ export class DesktopMoveInput {
   #onKeyUp = (e: KeyboardEvent): void => {
     if (e.key === ' ') this.#spaceHeld = false
     if (e.key === 'Control') {
-      this.#ctrlHeld = false
-      // cancel any active dwell when Ctrl is released
-      if (this.#drone?.isDwelling) {
-        this.#drone.cancelDwell()
-        this.#lastDwellLabel = null
+      if (this.#ctrlHeld) {
+        this.#ctrlHeld = false
+        // mid-drag: revert to normal swap preview
+        if (this.#dragging && this.#drone) {
+          this.#drone.setDropIntoActive(false)
+        }
       }
     }
   }
@@ -174,8 +186,8 @@ export class DesktopMoveInput {
     }
     this.#resetDrag()
     this.#spaceHeld = false
+    if (this.#ctrlHeld && this.#drone) this.#drone.setDropIntoActive(false)
     this.#ctrlHeld = false
-    this.#lastDwellLabel = null
   }
 
   // ── helpers ───────────────────────────────────────────────
@@ -188,38 +200,9 @@ export class DesktopMoveInput {
   #resetDrag(): void {
     this.#downPos = null
     this.#downAxial = null
+    this.#lastAxial = null
     this.#dragging = false
-    this.#lastDwellLabel = null
     this.#setCursor('')
-  }
-
-  #updateDwell(axial: { q: number; r: number }): void {
-    if (!this.#drone || !this.#dragging) return
-
-    if (!this.#ctrlHeld) {
-      if (this.#lastDwellLabel) {
-        this.#drone.cancelDwell()
-        this.#lastDwellLabel = null
-      }
-      return
-    }
-
-    // Ctrl held — resolve label at this axial position via MoveDrone
-    const hoverLabel = this.#drone.labelAtAxial(axial)
-
-    if (!hoverLabel || !this.#drone.branchLabels.has(hoverLabel)) {
-      if (this.#lastDwellLabel) {
-        this.#drone.cancelDwell()
-        this.#lastDwellLabel = null
-      }
-      return
-    }
-
-    // hovering on a branch tile with Ctrl held
-    if (this.#lastDwellLabel !== hoverLabel) {
-      this.#lastDwellLabel = hoverLabel
-      this.#drone.startDwell(hoverLabel)
-    }
   }
 
   #clientToAxial(cx: number, cy: number): Axial | null {

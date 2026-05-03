@@ -127,79 +127,74 @@
           </button>
         </div>
       } @else {
-        <!-- ═══ DESKTOP: multi-row draggable controls ═══ -->
-        <div class="controls-rows">
-          @for (row of controlRows(); track row.key; let rowIdx = $index) {
-            @if (rowIdx === 0 || expanded()) {
-              <div class="controls-row"
-                   cdkDropList
-                   cdkDropListOrientation="horizontal"
-                   [cdkDropListData]="row.items"
-                   [cdkDropListConnectedTo]="dropListRefs()"
-                   [attr.data-row-key]="row.key"
-                   (cdkDropListDropped)="onControlDrop($event)">
-                @for (ctrl of row.items; track ctrl.id) {
-                  <button class="ctl-btn"
-                          cdkDrag
-                          [cdkDragData]="ctrl"
-                          [class.active]="ctrl.id !== 'fit' && isActive(ctrl)"
-                          [class.eye-btn]="ctrl.id === 'show-hidden'"
-                          [class.text-only-btn]="ctrl.id === 'text-only'"
-                          [class.mic-btn]="ctrl.id === 'voice'"
-                          [class.bee-btn]="ctrl.id === 'bees'"
-                          [class.clipboard-btn]="ctrl.id === 'clipboard'"
-                          [class.fit-btn]="ctrl.id === 'fit'"
-                          [class.fit-global]="ctrl.id === 'fit' && fitButtonState() === 'global'"
-                          [class.fit-page]="ctrl.id === 'fit' && fitButtonState() === 'page'"
-                          (click)="runAction(ctrl.action, $event)"
-                          [attr.aria-label]="ctrl.label | t"
-                          [attr.data-instruction]="ctrl.instruction ?? null">
-                    @switch (ctrl.icon) {
-                      @case ('hci') {
-                        <span class="hci" [class.dcp-icon]="ctrl.id === 'dcp'">{{ iconText(ctrl) }}</span>
-                      }
-                      @case ('eye') {
-                        <span class="eye-icon" [class.struck]="!showHidden()"></span>
-                      }
-                      @case ('text-only') {
-                        <span class="text-only-icon" [class.struck]="!textOnly()"></span>
-                      }
-                      @case ('mic') {
-                        <span class="mic-icon">{{ voiceActive() ? '🎙' : '🎤' }}</span>
-                      }
-                      @case ('bee') {
-                        <span class="bee-icon">🐝</span>
-                      }
-                    }
-                    @if (ctrl.id === 'clipboard' && badgeValue(ctrl) > 0) {
-                      <span class="badge">{{ badgeValue(ctrl) }}</span>
-                    }
-                  </button>
-                  <!-- room input inline after room button -->
-                  @if (ctrl.id === 'room' && roomOpen()) {
-                    <div class="room-shell">
-                      <input
-                        class="room-input"
-                        type="text"
-                        [placeholder]="'controls.room-placeholder' | t"
-                        [value]="roomValue()"
-                        (input)="onRoomInput($event)"
-                        (keydown.enter)="submitRoom()"
-                        (keydown.escape)="toggleRoom()"
-                      />
-                    </div>
+        <!-- ═══ DESKTOP: single-row controls with edit-mode toggle ═══ -->
+        <!-- One flat row of every visible control. Items the user has muted
+             render grayed and click-no-op in normal mode. The chevron at the
+             end of the row toggles edit mode — while editing, every click
+             flips an item's enabled state instead of running its action. -->
+        <div class="controls-rows" [class.editing]="editMode()">
+          <div class="controls-row">
+            @for (ctrl of visibleControls(); track ctrl.id) {
+              <button class="ctl-btn"
+                      [class.active]="ctrl.id !== 'fit' && isActive(ctrl)"
+                      [class.muted]="!isEnabled(ctrl)"
+                      [class.editing]="editMode()"
+                      [class.eye-btn]="ctrl.id === 'show-hidden'"
+                      [class.text-only-btn]="ctrl.id === 'text-only'"
+                      [class.mic-btn]="ctrl.id === 'voice'"
+                      [class.bee-btn]="ctrl.id === 'bees'"
+                      [class.clipboard-btn]="ctrl.id === 'clipboard'"
+                      [class.fit-btn]="ctrl.id === 'fit'"
+                      [class.fit-global]="ctrl.id === 'fit' && fitButtonState() === 'global'"
+                      [class.fit-page]="ctrl.id === 'fit' && fitButtonState() === 'page'"
+                      (click)="onCtrlClick(ctrl, $event)"
+                      [attr.aria-label]="ctrl.label | t"
+                      [attr.data-instruction]="ctrl.instruction ?? null">
+                @switch (ctrl.icon) {
+                  @case ('hci') {
+                    <span class="hci" [class.dcp-icon]="ctrl.id === 'dcp'">{{ iconText(ctrl) }}</span>
+                  }
+                  @case ('eye') {
+                    <span class="eye-icon" [class.struck]="!showHidden()"></span>
+                  }
+                  @case ('text-only') {
+                    <span class="text-only-icon" [class.struck]="!textOnly()"></span>
+                  }
+                  @case ('mic') {
+                    <span class="mic-icon">{{ voiceActive() ? '🎙' : '🎤' }}</span>
+                  }
+                  @case ('bee') {
+                    <span class="bee-icon">🐝</span>
                   }
                 }
-              </div>
+                @if (ctrl.id === 'clipboard' && badgeValue(ctrl) > 0) {
+                  <span class="badge">{{ badgeValue(ctrl) }}</span>
+                }
+              </button>
+              <!-- room input inline after room button (only shown when room is enabled & open) -->
+              @if (ctrl.id === 'room' && roomOpen() && isEnabled(ctrl) && !editMode()) {
+                <div class="room-shell">
+                  <input
+                    class="room-input"
+                    type="text"
+                    [placeholder]="'controls.room-placeholder' | t"
+                    [value]="roomValue()"
+                    (input)="onRoomInput($event)"
+                    (keydown.enter)="submitRoom()"
+                    (keydown.escape)="toggleRoom()"
+                  />
+                </div>
+              }
             }
-          }
+          </div>
         </div>
-        <!-- expand/collapse toggle -->
-        @if (controlRows().length > 1) {
-          <button class="ctl-btn expand-toggle" (click)="toggleExpanded()" [attr.aria-label]="expanded() ? ('controls.collapse' | t) : ('controls.expand' | t)">
-            <span class="expand-chevron" [class.up]="expanded()">&#x25BE;</span>
-          </button>
-        }
+        <!-- edit-mode toggle (chevron) -->
+        <button class="ctl-btn expand-toggle"
+                [class.editing]="editMode()"
+                (click)="toggleEditMode()"
+                [attr.aria-label]="editMode() ? ('controls.collapse' | t) : ('controls.expand' | t)">
+          <span class="expand-chevron" [class.up]="editMode()">&#x25BE;</span>
+        </button>
       }
 
     }

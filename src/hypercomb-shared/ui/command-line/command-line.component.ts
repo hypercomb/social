@@ -996,6 +996,14 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       void this.#preprocessTagsThenExecute(text)
     })
 
+    // remote bridge submit (Claude CLI, future /transcript) — same path as a
+    // human keystroke or a voice release. Single state machine, three input
+    // sources. See claude-bridge.worker.ts.
+    this.#remoteSubmitUnsub = EffectBus.on<{ text: string }>('command-line:remote-submit', ({ text }) => {
+      this.#setShellValue(text, false)
+      void this.#preprocessTagsThenExecute(text)
+    })
+
     // voice active state sync (for mic button visual)
     this.#voiceActiveUnsub = EffectBus.on<{ active: boolean }>('voice:active', ({ active }) => {
       this.voiceActive.set(active)
@@ -1070,6 +1078,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   #selectionSyncUnsub?: () => void
   #voiceInterimUnsub?: () => void
   #voiceSubmitUnsub?: () => void
+  #remoteSubmitUnsub?: () => void
   readonly #onNavigate = (): void => { this.clear() }
 
   // ── voice input (push-to-hold mic button) ────────────
@@ -1179,6 +1188,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.#selectionSyncUnsub?.()
     this.#voiceInterimUnsub?.()
     this.#voiceSubmitUnsub?.()
+    this.#remoteSubmitUnsub?.()
     this.#voiceActiveUnsub?.()
     this.#pushToTalkUnsub?.()
     this.#micPressUnsub?.()

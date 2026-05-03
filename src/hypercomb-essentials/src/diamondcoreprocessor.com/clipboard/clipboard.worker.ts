@@ -16,6 +16,13 @@ interface LineageLike {
     segments: readonly string[],
     start?: FileSystemDirectoryHandle,
   ): Promise<FileSystemDirectoryHandle | null>
+  readonly domain?: unknown
+}
+
+interface HistoryServiceLike {
+  sign(lineage: { domain?: unknown; explorerSegments: () => readonly string[] }): Promise<string>
+  currentLayerAt(locationSig: string): Promise<unknown>
+  commitLayer(locationSig: string, layer: unknown): Promise<string>
 }
 
 interface StoreLike {
@@ -117,6 +124,10 @@ export class ClipboardWorker extends Worker {
     return get('@hypercomb.social/Store') as StoreLike | undefined
   }
 
+  get #history(): HistoryServiceLike | undefined {
+    return get('@diamondcoreprocessor.com/HistoryService') as HistoryServiceLike | undefined
+  }
+
   get #selection(): SelectionLike | undefined {
     const svc = get('@diamondcoreprocessor.com/SelectionService') as SelectionLike | undefined
     if (svc && svc.selected.size > 0) return svc
@@ -165,7 +176,7 @@ export class ClipboardWorker extends Worker {
       this.#clipboardSvc?.capture(moved, segments, 'cut')
 
       for (const label of moved) {
-        EffectBus.emit('cell:removed', { cell: label })
+        EffectBus.emit('cell:removed', { cell: label, segments: [...segments] })
       }
       this.#selection?.clear()
 
@@ -210,15 +221,17 @@ export class ClipboardWorker extends Worker {
 
     const op = clipboardSvc.operation
     const items = clipboardSvc.items
+    const targetSegments = [...lineage.explorerSegments()]
+    const history = this.#history
 
     EffectBus.emit('clipboard:paste-start', { count: items.length, op })
 
-    const placed: string[] = []
+    const placed: { label: string; sourceSegments: readonly string[] }[] = []
     const failed: string[] = []
     if (op === 'cut') {
       for (const entry of items) {
         const ok = await moveCellFolder(store.clipboard, targetDir, entry.label)
-        if (ok) placed.push(entry.label)
+        if (ok) placed.push({ label: entry.label, sourceSegments: entry.sourceSegments })
         else failed.push(entry.label)
       }
     } else {
@@ -230,20 +243,34 @@ export class ClipboardWorker extends Worker {
           continue
         }
         const ok = await copyCellFolder(sourceDir, targetDir, entry.label)
-        if (ok) placed.push(entry.label)
+        if (ok) placed.push({ label: entry.label, sourceSegments: entry.sourceSegments })
         else failed.push(entry.label)
       }
     }
 
-    for (const label of placed) {
-      EffectBus.emit('cell:added', { cell: label })
+    if (history) {
+      for (const entry of placed) {
+        await cloneSubtreeLayers(
+          history,
+          lineage,
+          targetDir,
+          entry.sourceSegments,
+          targetSegments,
+          entry.label,
+        )
+      }
     }
 
+    for (const entry of placed) {
+      EffectBus.emit('cell:added', { cell: entry.label, segments: [...targetSegments] })
+    }
+
+    const placedLabels = placed.map(p => p.label)
     // cut: drop only the items that actually moved. Failed moves stay on
     // the clipboard so the user doesn't lose data on a partial / stale paste.
     // copy: leaves clipboard intact for repeat paste.
-    if (op === 'cut' && placed.length > 0) {
-      clipboardSvc.removeItems(new Set(placed))
+    if (op === 'cut' && placedLabels.length > 0) {
+      clipboardSvc.removeItems(new Set(placedLabels))
       if (clipboardSvc.isEmpty) {
         await clearDirectory(store.clipboard)
       } else {
@@ -257,7 +284,7 @@ export class ClipboardWorker extends Worker {
       }
     }
 
-    EffectBus.emit('clipboard:paste-done', { count: placed.length, op, failed })
+    EffectBus.emit('clipboard:paste-done', { count: placedLabels.length, op, failed })
   }
 
   // ── place (selected clipboard items → current page) ──
@@ -280,11 +307,13 @@ export class ClipboardWorker extends Worker {
     if (!targetDir) return
 
     const op = clipboardSvc.operation
-    const placed: string[] = []
+    const targetSegments = [...lineage.explorerSegments()]
+    const history = this.#history
+    const placed: { label: string; sourceSegments: readonly string[] }[] = []
     if (op === 'cut') {
       for (const entry of toPlace) {
         const ok = await moveCellFolder(store.clipboard, targetDir, entry.label)
-        if (ok) placed.push(entry.label)
+        if (ok) placed.push({ label: entry.label, sourceSegments: entry.sourceSegments })
       }
     } else {
       for (const entry of toPlace) {
@@ -294,15 +323,29 @@ export class ClipboardWorker extends Worker {
           continue
         }
         const ok = await copyCellFolder(sourceDir, targetDir, entry.label)
-        if (ok) placed.push(entry.label)
+        if (ok) placed.push({ label: entry.label, sourceSegments: entry.sourceSegments })
       }
     }
 
-    for (const label of placed) {
-      EffectBus.emit('cell:added', { cell: label })
+    if (history) {
+      for (const entry of placed) {
+        await cloneSubtreeLayers(
+          history,
+          lineage,
+          targetDir,
+          entry.sourceSegments,
+          targetSegments,
+          entry.label,
+        )
+      }
     }
 
-    clipboardSvc.removeItems(new Set(placed))
+    for (const entry of placed) {
+      EffectBus.emit('cell:added', { cell: entry.label, segments: [...targetSegments] })
+    }
+
+    const placedLabels = placed.map(p => p.label)
+    clipboardSvc.removeItems(new Set(placedLabels))
     this.#selection?.clear()
 
     if (clipboardSvc.isEmpty) {
@@ -484,6 +527,86 @@ async function clearDirectory(dir: FileSystemDirectoryHandle): Promise<void> {
     try {
       await dir.removeEntry(name, { recursive: true })
     } catch { /* ignore */ }
+  }
+}
+
+// ── merkle layer cloning ─────────────────────────────────
+// Folder copy/move only touches OPFS bytes under hypercomb.io/. The
+// merkle layer for each cell — which holds children, body, tags, notes,
+// and any other slot data — lives in __history__/{locationSig}/, where
+// locationSig hashes the lineage path. Moving the folder changes the
+// lineage path, so the destination's bag is empty and the cell appears
+// to have lost its hierarchy (and any other slot state).
+//
+// This walks the destination subtree (now in OPFS at its new location)
+// and, for each cell, copies the source bag's head layer into the
+// destination bag's first marker. Layer content is content-addressed,
+// so children sigs inside the copied layer still resolve via the global
+// preloader cache regardless of which bag physically stores them.
+
+async function cloneSubtreeLayers(
+  history: HistoryServiceLike,
+  lineage: LineageLike,
+  destParentDir: FileSystemDirectoryHandle,
+  sourceParentSegments: readonly string[],
+  destParentSegments: readonly string[],
+  label: string,
+): Promise<void> {
+  let cellDir: FileSystemDirectoryHandle
+  try {
+    cellDir = await destParentDir.getDirectoryHandle(label, { create: false })
+  } catch {
+    return
+  }
+  await cloneLayerRecursive(
+    history,
+    lineage,
+    cellDir,
+    [...sourceParentSegments, label],
+    [...destParentSegments, label],
+  )
+}
+
+async function cloneLayerRecursive(
+  history: HistoryServiceLike,
+  lineage: LineageLike,
+  cellDir: FileSystemDirectoryHandle,
+  sourceCellSegments: readonly string[],
+  destCellSegments: readonly string[],
+): Promise<void> {
+  try {
+    const oldLocSig = await history.sign({
+      domain: lineage.domain,
+      explorerSegments: () => sourceCellSegments,
+    })
+    const newLocSig = await history.sign({
+      domain: lineage.domain,
+      explorerSegments: () => destCellSegments,
+    })
+    if (oldLocSig !== newLocSig) {
+      const layer = await history.currentLayerAt(oldLocSig)
+      if (layer) {
+        await history.commitLayer(newLocSig, layer)
+      }
+    }
+  } catch (err) {
+    console.warn(`[clipboard] layer clone failed for /${destCellSegments.join('/')}:`, err)
+  }
+
+  const subdirs: { name: string; handle: FileSystemDirectoryHandle }[] = []
+  for await (const [name, handle] of (cellDir as any).entries()) {
+    if (handle.kind === 'directory') {
+      subdirs.push({ name, handle: handle as FileSystemDirectoryHandle })
+    }
+  }
+  for (const sub of subdirs) {
+    await cloneLayerRecursive(
+      history,
+      lineage,
+      sub.handle,
+      [...sourceCellSegments, sub.name],
+      [...destCellSegments, sub.name],
+    )
   }
 }
 

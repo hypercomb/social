@@ -8,9 +8,8 @@ type MovePreviewPayload = {
   movedLabels: Set<string>
 } | null
 
-type LayerDwellPayload = {
+type DropIntoPayload = {
   label: string
-  progress: number
 } | null
 
 // swap target indicators
@@ -20,12 +19,15 @@ const SWAP_STROKE = 0xff8844
 const SWAP_STROKE_ALPHA = 0.5
 const STROKE_WIDTH = 0.5
 
-// layer dwell hourglass indicators
-const DWELL_FILL = 0x2299aa
-const DWELL_FILL_ALPHA = 0.45
-const DWELL_STROKE = 0x33bbcc
-const DWELL_STROKE_ALPHA = 0.7
-const DWELL_STROKE_WIDTH = 1.5
+// drop-into indicators (Ctrl held — tile becomes a parent of the dragged set)
+const DROP_FILL = 0x2299aa
+const DROP_FILL_ALPHA = 0.35
+const DROP_STROKE = 0x33bbcc
+const DROP_STROKE_ALPHA = 0.85
+const DROP_STROKE_WIDTH = 2
+const DROP_INSET_FACTOR = 0.55     // inner hex radius as fraction of outer
+const DROP_INSET_FILL_ALPHA = 0.55
+const DROP_CHEVRON_WIDTH = 2.5
 
 export class MovePreviewDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -35,7 +37,7 @@ export class MovePreviewDrone extends Drone {
 
   #renderContainer: Container | null = null
   #layer: Graphics | null = null
-  #dwellLayer: Graphics | null = null
+  #dropIntoLayer: Graphics | null = null
   #meshOffset = { x: 0, y: 0 }
   #originalNames: string[] = []
   #cellCoords: { q: number; r: number }[] = []
@@ -44,7 +46,7 @@ export class MovePreviewDrone extends Drone {
   protected override deps = {
     axial: '@diamondcoreprocessor.com/AxialService',
   }
-  protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count', 'move:preview', 'move:layer-dwell']
+  protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count', 'move:preview', 'move:drop-into']
   protected override emits: string[] = []
 
   #effectsRegistered = false
@@ -72,16 +74,16 @@ export class MovePreviewDrone extends Drone {
       this.#redraw(payload)
     })
 
-    this.onEffect<LayerDwellPayload>('move:layer-dwell', (payload) => {
-      this.#redrawDwell(payload)
+    this.onEffect<DropIntoPayload>('move:drop-into', (payload) => {
+      this.#redrawDropInto(payload)
     })
   }
 
   protected override dispose(): void {
-    if (this.#dwellLayer) {
-      this.#dwellLayer.parent?.removeChild(this.#dwellLayer)
-      this.#dwellLayer.destroy()
-      this.#dwellLayer = null
+    if (this.#dropIntoLayer) {
+      this.#dropIntoLayer.parent?.removeChild(this.#dropIntoLayer)
+      this.#dropIntoLayer.destroy()
+      this.#dropIntoLayer = null
     }
     if (this.#layer) {
       this.#layer.parent?.removeChild(this.#layer)
@@ -94,10 +96,10 @@ export class MovePreviewDrone extends Drone {
     if (!this.#renderContainer || this.#layer) return
     this.#layer = new Graphics()
     this.#layer.zIndex = 7000
-    this.#dwellLayer = new Graphics()
-    this.#dwellLayer.zIndex = 7001
+    this.#dropIntoLayer = new Graphics()
+    this.#dropIntoLayer.zIndex = 7001
     this.#renderContainer.addChild(this.#layer)
-    this.#renderContainer.addChild(this.#dwellLayer)
+    this.#renderContainer.addChild(this.#dropIntoLayer)
     this.#renderContainer.sortableChildren = true
   }
 
@@ -148,17 +150,16 @@ export class MovePreviewDrone extends Drone {
     this.#layer.stroke({ color: SWAP_STROKE, alpha: SWAP_STROKE_ALPHA, width: STROKE_WIDTH })
   }
 
-  // ── layer dwell hourglass ─────────────────────────────────
+  // ── drop-into hex (Ctrl-modifier preview) ─────────────────
 
-  #redrawDwell(payload: LayerDwellPayload): void {
-    if (!this.#dwellLayer) return
-    this.#dwellLayer.clear()
+  #redrawDropInto(payload: DropIntoPayload): void {
+    if (!this.#dropIntoLayer) return
+    this.#dropIntoLayer.clear()
 
     if (!payload) return
 
-    const { label, progress } = payload
+    const { label } = payload
 
-    // find the axial coord for this label
     const idx = this.#originalNames.indexOf(label)
     if (idx < 0) return
 
@@ -168,7 +169,6 @@ export class MovePreviewDrone extends Drone {
     const coord = this.#cellCoords[idx]
     if (!coord) return
 
-    // look up pixel position from axial service by finding matching coord
     let px = 0
     let py = 0
     for (const [, item] of axialSvc.items) {
@@ -181,72 +181,52 @@ export class MovePreviewDrone extends Drone {
 
     const ox = this.#meshOffset.x
     const oy = this.#meshOffset.y
-    this.#drawHourglassHex(px + ox, py + oy, progress)
+    this.#drawDropIntoHex(px + ox, py + oy)
   }
 
   /**
-   * Draw a point-top hex that fills from bottom vertex to top vertex.
-   * progress 0 = empty, progress 1 = full hex.
+   * Visualise "drop these tiles into this tile's children": a thick outer
+   * hex highlighting the target, an inset hex suggesting nesting/depth, and
+   * a downward chevron at center reading as "going in".
    */
-  #drawHourglassHex(cx: number, cy: number, progress: number): void {
-    if (!this.#dwellLayer) return
+  #drawDropIntoHex(cx: number, cy: number): void {
+    if (!this.#dropIntoLayer) return
 
     const settings = window.ioc.get<any>('@diamondcoreprocessor.com/Settings')
     const r = settings?.hexagonDimensions?.circumRadius ?? 32
 
-    // point-top hex vertices (vertex 0 = top, going clockwise)
-    // angle starts at -π/2 (top) for point-top orientation
-    const verts: { x: number; y: number }[] = []
-    for (let i = 0; i < 6; i++) {
-      const angle = (Math.PI / 3) * i - Math.PI / 2
-      verts.push({
-        x: cx + r * Math.cos(angle),
-        y: cy + r * Math.sin(angle),
-      })
-    }
-
-    // hex bounds: top vertex at cy - r, bottom vertex at cy + r
-    const topY = cy - r
-    const bottomY = cy + r
-    const totalHeight = bottomY - topY
-
-    // clip line rises from bottom to top as progress goes 0 → 1
-    const clipY = bottomY - progress * totalHeight
-
-    // draw the outline (always visible)
-    const outlineVerts: number[] = []
-    for (const v of verts) {
-      outlineVerts.push(v.x, v.y)
-    }
-    this.#dwellLayer.poly(outlineVerts, true)
-    this.#dwellLayer.stroke({ color: DWELL_STROKE, alpha: DWELL_STROKE_ALPHA, width: DWELL_STROKE_WIDTH })
-
-    if (progress <= 0) return
-
-    // build clipped polygon: hex intersected with half-plane y >= clipY
-    // walk hex edges, collect vertices below clipY, interpolate at crossings
-    const clipped: number[] = []
-    for (let i = 0; i < 6; i++) {
-      const a = verts[i]
-      const b = verts[(i + 1) % 6]
-      const aBelow = a.y >= clipY
-      const bBelow = b.y >= clipY
-
-      if (aBelow) {
-        clipped.push(a.x, a.y)
+    const buildHexVerts = (radius: number): number[] => {
+      const verts: number[] = []
+      for (let i = 0; i < 6; i++) {
+        const angle = (Math.PI / 3) * i - Math.PI / 2
+        verts.push(cx + radius * Math.cos(angle))
+        verts.push(cy + radius * Math.sin(angle))
       }
-
-      if (aBelow !== bBelow) {
-        // edge crosses clipY — interpolate
-        const t = (clipY - a.y) / (b.y - a.y)
-        clipped.push(a.x + t * (b.x - a.x), clipY)
-      }
+      return verts
     }
 
-    if (clipped.length >= 6) {
-      this.#dwellLayer.poly(clipped, true)
-      this.#dwellLayer.fill({ color: DWELL_FILL, alpha: DWELL_FILL_ALPHA })
-    }
+    // outer hex — fill + stroke
+    const outer = buildHexVerts(r)
+    this.#dropIntoLayer.poly(outer, true)
+    this.#dropIntoLayer.fill({ color: DROP_FILL, alpha: DROP_FILL_ALPHA })
+    this.#dropIntoLayer.poly(outer, true)
+    this.#dropIntoLayer.stroke({ color: DROP_STROKE, alpha: DROP_STROKE_ALPHA, width: DROP_STROKE_WIDTH })
+
+    // inset hex — suggests "interior" / children container
+    const inset = buildHexVerts(r * DROP_INSET_FACTOR)
+    this.#dropIntoLayer.poly(inset, true)
+    this.#dropIntoLayer.fill({ color: DROP_FILL, alpha: DROP_INSET_FILL_ALPHA })
+    this.#dropIntoLayer.poly(inset, true)
+    this.#dropIntoLayer.stroke({ color: DROP_STROKE, alpha: DROP_STROKE_ALPHA, width: 1 })
+
+    // downward chevron — reads as "going in"
+    const cw = r * 0.32  // half-width of chevron
+    const ch = r * 0.18  // chevron vertical extent
+    const cyOffset = r * 0.05
+    this.#dropIntoLayer.moveTo(cx - cw, cy - ch + cyOffset)
+    this.#dropIntoLayer.lineTo(cx, cy + ch + cyOffset)
+    this.#dropIntoLayer.lineTo(cx + cw, cy - ch + cyOffset)
+    this.#dropIntoLayer.stroke({ color: DROP_STROKE, alpha: 1, width: DROP_CHEVRON_WIDTH })
   }
 }
 

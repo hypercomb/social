@@ -10,12 +10,10 @@ import {
   input,
   Output,
   signal,
-  viewChildren,
   type AfterViewInit,
   type OnInit,
   type OnDestroy,
 } from '@angular/core'
-import { CdkDrag, CdkDragDrop, CdkDropList } from '@angular/cdk/drag-drop'
 import { fromRuntime } from '../../core/from-runtime'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import type { Navigation } from '../../core/navigation'
@@ -29,7 +27,7 @@ import { secretTag } from './secret-words'
 import { environment } from '../../environments/environment'
 
 const PILL_POS_KEY = 'hc:controls-pill-pos'
-const ROW_LAYOUT_KEY = 'hc:controls-row-layout'
+const ENABLED_MAP_KEY = 'hc:controls-enabled-map'
 
 // ── control registry ──────────────────────────────────────
 
@@ -40,7 +38,7 @@ interface ControlItem {
   label: string
   instruction?: string
   action: string
-  visibleWhen: 'always' | 'clipboardHasItems' | 'voiceSupported' | 'public'
+  visibleWhen: 'always' | 'clipboardHasItems' | 'voiceSupported' | 'public' | 'hasSelection'
 }
 
 const CONTROL_REGISTRY: readonly ControlItem[] = [
@@ -54,22 +52,28 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   { id: 'instructions', icon: 'hci',       hci: '?', label: 'controls.instructions', action: 'toggleInstructions', visibleWhen: 'always', instruction: 'dcp.instructions-toggle' },
   { id: 'show-hidden',  icon: 'eye',                  label: 'controls.show-hidden',  action: 'toggleShowHidden',   visibleWhen: 'always' },
   { id: 'text-only',    icon: 'text-only',             label: 'controls.text-only',    action: 'toggleTextOnly',     visibleWhen: 'always' },
+  { id: 'cut',          icon: 'hci',       hci: 'F', label: 'selection.cut',         action: 'cut',                visibleWhen: 'hasSelection' },
+  { id: 'copy',         icon: 'hci',       hci: '%', label: 'selection.copy',        action: 'copy',               visibleWhen: 'hasSelection' },
   { id: 'clipboard',    icon: 'hci',       hci: 'y', label: 'controls.clipboard',    action: 'openClipboard',      visibleWhen: 'clipboardHasItems' },
   { id: 'voice',        icon: 'mic',                   label: 'controls.voice',        action: 'toggleVoice',        visibleWhen: 'voiceSupported' },
   { id: 'room',         icon: 'hci',       hci: 'p', label: 'controls.location',     action: 'toggleRoom',         visibleWhen: 'public' },
   { id: 'bees',         icon: 'bee',                   label: 'controls.toggle-bees',  action: 'toggleBees',         visibleWhen: 'public' },
 ]
 
-const DEFAULT_ROW_LAYOUT: Record<string, number> = {
-  'back': 0, 'dcp': 0, 'fit': 0, 'zoom-out': 0, 'zoom-in': 0, 'lock': 0, 'fullscreen': 0,
-  'instructions': 1, 'show-hidden': 1, 'text-only': 1,
-  'clipboard': 1, 'voice': 1, 'room': 1, 'bees': 1,
+// First-time defaults: items the previous primary-row had on stay enabled,
+// items the previous expand-row had become muted (grayed). Once a user toggles
+// anything in edit mode the persisted map takes over.
+const DEFAULT_ENABLED_MAP: Record<string, boolean> = {
+  'back': true, 'dcp': true, 'fit': true, 'zoom-out': true, 'zoom-in': true, 'lock': true, 'fullscreen': true,
+  'instructions': false, 'show-hidden': false, 'text-only': false,
+  'cut': false, 'copy': false,
+  'clipboard': false, 'voice': false, 'room': false, 'bees': false,
 }
 
 @Component({
   selector: 'hc-controls-bar',
   standalone: true,
-  imports: [TranslatePipe, CdkDrag, CdkDropList],
+  imports: [TranslatePipe],
   templateUrl: './controls-bar.component.html',
   styleUrls: ['./controls-bar.component.scss'],
 })
@@ -256,42 +260,42 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #atomizeStrategy = signal('')
   #atomizeAtomCount = signal(0)
 
-  // ── multi-row layout ──────────────────────────────────────
-  #rowLayout = signal<Record<string, number>>(this.#restoreRowLayout())
-  #expanded = signal(false)
-  protected readonly _dropListRefs = viewChildren(CdkDropList)
-  readonly dropListRefs = computed(() => [...this._dropListRefs()])
+  // ── single-row layout with edit-mode toggling ──────────────
+  // Replaces the previous multi-row + expand/collapse split. All items
+  // render on one line in CONTROL_REGISTRY order; muted (disabled-by-user)
+  // items appear grayed and are no-ops in normal mode. The chevron at
+  // the end of the row toggles edit mode — while editing, every click
+  // flips an item's enabled state instead of running its action.
+  #enabledMap = signal<Record<string, boolean>>(this.#restoreEnabledMap())
+  #editMode = signal(false)
 
-  /** Visible controls grouped by row. Row 0 is always first. Empty rows are pruned. */
-  readonly controlRows = computed((): { key: number; items: ControlItem[] }[] => {
-    const layout = this.#rowLayout()
-    // filter to visible controls
-    const visible = CONTROL_REGISTRY.filter(ctrl => this.#isControlVisible(ctrl))
-    // group by row
-    const rowMap = new Map<number, ControlItem[]>()
-    for (const ctrl of visible) {
-      const row = layout[ctrl.id] ?? 0
-      if (!rowMap.has(row)) rowMap.set(row, [])
-      rowMap.get(row)!.push(ctrl)
-    }
-    // sort by row key, preserve original keys for drop handler
-    return [...rowMap.entries()]
-      .sort((a, b) => a[0] - b[0])
-      .map(([key, items]) => ({ key, items }))
-  })
+  /** Flat list of every visible control, in registry order. */
+  readonly visibleControls = computed((): ControlItem[] =>
+    CONTROL_REGISTRY.filter(ctrl => this.#isControlVisible(ctrl))
+  )
 
-  readonly toggleExpanded = (): void => {
-    this.#expanded.update(v => !v)
+  readonly editMode = this.#editMode.asReadonly()
+
+  readonly toggleEditMode = (): void => {
+    this.#editMode.update(v => !v)
   }
-  readonly expanded = this.#expanded.asReadonly()
 
-  readonly onControlDrop = (event: CdkDragDrop<ControlItem[]>): void => {
-    const ctrl = event.item.data as ControlItem
-    const targetRowKey = parseInt(
-      (event.container.element.nativeElement as HTMLElement).dataset['rowKey'] ?? '0', 10,
-    )
-    this.#rowLayout.update(l => ({ ...l, [ctrl.id]: targetRowKey }))
-    this.#persistRowLayout()
+  readonly isEnabled = (ctrl: ControlItem): boolean => {
+    const map = this.#enabledMap()
+    return map[ctrl.id] ?? DEFAULT_ENABLED_MAP[ctrl.id] ?? true
+  }
+
+  /** Mode-aware click router. Edit mode toggles enabled state; normal
+   *  mode runs the action only if the item is enabled — muted items
+   *  no-op so the user has to enter edit mode to activate them. */
+  readonly onCtrlClick = (ctrl: ControlItem, event: MouseEvent): void => {
+    if (this.#editMode()) {
+      this.#enabledMap.update(m => ({ ...m, [ctrl.id]: !this.isEnabled(ctrl) }))
+      this.#persistEnabledMap()
+      return
+    }
+    if (!this.isEnabled(ctrl)) return
+    this.#actions[ctrl.action]?.(event)
   }
 
   /** Action dispatch map — routes control actions to existing methods. */
@@ -306,6 +310,8 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     toggleInstructions: (e) => this.toggleInstructions(e!),
     toggleShowHidden: () => this.toggleShowHidden(),
     toggleTextOnly: () => this.toggleTextOnly(),
+    cut: () => this.cut(),
+    copy: () => this.copy(),
     openClipboard: () => this.openClipboard(),
     toggleVoice: () => this.toggleVoice(),
     toggleRoom: () => this.toggleRoom(),
@@ -345,26 +351,27 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       case 'clipboardHasItems': return this.#clipboardAvailable() && this.clipboardCount() > 0
       case 'voiceSupported': return this.voiceSupported
       case 'public': return !!this.meshPublic()
+      case 'hasSelection': return this.#hasSelection()
       default: return true
     }
   }
 
-  #restoreRowLayout(): Record<string, number> {
+  #restoreEnabledMap(): Record<string, boolean> {
     try {
-      const raw = localStorage.getItem(ROW_LAYOUT_KEY)
-      if (!raw) return { ...DEFAULT_ROW_LAYOUT }
-      const parsed = JSON.parse(raw) as Record<string, number>
+      const raw = localStorage.getItem(ENABLED_MAP_KEY)
+      if (!raw) return { ...DEFAULT_ENABLED_MAP }
+      const parsed = JSON.parse(raw) as Record<string, boolean>
       if (typeof parsed === 'object' && parsed !== null) {
-        // merge with defaults so new controls get a row
-        return { ...DEFAULT_ROW_LAYOUT, ...parsed }
+        // merge with defaults so newly-added controls inherit a sane initial state
+        return { ...DEFAULT_ENABLED_MAP, ...parsed }
       }
     } catch { /* ignore */ }
-    return { ...DEFAULT_ROW_LAYOUT }
+    return { ...DEFAULT_ENABLED_MAP }
   }
 
-  #persistRowLayout(): void {
+  #persistEnabledMap(): void {
     try {
-      localStorage.setItem(ROW_LAYOUT_KEY, JSON.stringify(this.#rowLayout()))
+      localStorage.setItem(ENABLED_MAP_KEY, JSON.stringify(this.#enabledMap()))
     } catch { /* ignore */ }
   }
 

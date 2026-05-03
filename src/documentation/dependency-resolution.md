@@ -33,8 +33,9 @@ constraints on what it may reference.
 ## 1. Core (`@hypercomb/core`)
 
 **What it is:** A zero-dependency TypeScript package that defines the framework
-primitives: `Drone`, `ServiceToken`, `SignatureService`, IoC (`register`/`get`/
-`has`/`list`), `Effect`, `GrammarHint`, `ProviderLink`, `PayloadCanonical`,
+primitives: `Bee`, `Drone`, `Worker`, `QueenBee`, `ServiceToken`,
+`SignatureService`, `SignatureStore`, IoC (`register`/`get`/`has`/`list`),
+`EffectBus`, `Effect`, `GrammarHint`, `ProviderLink`, `PayloadCanonical`,
 `BeeResolver`, and `DcpResourceMessage`.
 
 **Build tool:** tsup (ESM + CJS + `.d.ts`)

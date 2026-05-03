@@ -37,7 +37,7 @@ this policy covers the following components of the hypercomb system:
 
 - **ioc container** -- `ServiceToken<T>`-based registration and resolution.
   holds ephemeral in-memory references only. no serialization, no persistence.
-- **bee base class** -- `Bee` (specialized as `Drone` or `Worker`) with `BeeState` lifecycle
+- **bee base class** -- `Bee` (specialized as `Drone`, `Worker`, or `QueenBee`) with `BeeState` lifecycle
   (`created -> registered -> active -> disposed`). auto-cleanup of effect
   subscriptions on dispose.
 - **effectbus** -- typed pub/sub for drone-to-drone communication. in-memory

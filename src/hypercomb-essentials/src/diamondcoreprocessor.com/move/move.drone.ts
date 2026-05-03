@@ -4,7 +4,7 @@ import type { HostReadyPayload } from '../presentation/tiles/pixi-host.worker.js
 import type { Axial } from '../navigation/hex-detector.js'
 import type { LayerTransferService } from './layer-transfer.service.js'
 import type { OrderProjection } from '../history/order-projection.js'
-import { writeCellProperties } from '../editor/tile-properties.js'
+import { readCellProperties, writeCellProperties } from '../editor/tile-properties.js'
 
 type CellCountPayload = { count: number; labels: string[]; coords?: Axial[]; branchLabels?: string[] }
 type MoveRefs = {
@@ -20,10 +20,9 @@ export type MoveDroneApi = {
   updateMove: (hoverAxial: Axial, source: string) => void
   commitMoveAt: (finalAxial: Axial, source: string) => Promise<void>
   cancelMove: (source: string) => void
-  startDwell: (label: string) => void
-  cancelDwell: () => void
-  readonly isDwelling: boolean
-  readonly branchLabels: ReadonlySet<string>
+  setDropIntoActive: (active: boolean) => void
+  commitDropInto: (axial: Axial, source: string) => Promise<void>
+  readonly dropIntoActive: boolean
   labelAtAxial: (axial: Axial) => string | null
 }
 
@@ -54,19 +53,13 @@ export class MoveDrone extends Drone {
   #cellCoords: Axial[] = []
   #cellCount = 0
 
-  // ── layer dwell state ────────────────────────────────────
-  #branchLabels = new Set<string>()
-  #dwellLabel: string | null = null
-  #dwellTimer: ReturnType<typeof setTimeout> | null = null
-  #dwellStart = 0
-  #dwellRaf = 0
-  #droppedThrough = false
-  #pendingDragLabel: string | null = null
-  #pendingSource: string | null = null
+  // ── drop-into modifier state (Ctrl held during drag) ─────
+  #dropIntoActive = false
+  #dropIntoLabel: string | null = null
+  #lastHoverAxial: Axial | null = null
 
   get moveActive(): boolean { return this.#moveActive }
-  get isDwelling(): boolean { return this.#dwellLabel !== null }
-  get branchLabels(): ReadonlySet<string> { return this.#branchLabels }
+  get dropIntoActive(): boolean { return this.#dropIntoActive }
 
   labelAtAxial = (axial: Axial): string | null => {
     for (let i = 0; i < this.#cellLabels.length; i++) {
@@ -89,7 +82,7 @@ export class MoveDrone extends Drone {
   }
 
   protected override listens = ['render:host-ready', 'render:cell-count', 'render:mesh-offset', 'controls:action']
-  protected override emits = ['move:preview', 'move:committed', 'move:mode', 'cell:reorder', 'move:layer-dwell']
+  protected override emits = ['move:preview', 'move:committed', 'move:mode', 'cell:reorder', 'move:drop-into']
 
   #effectsRegistered = false
 
@@ -117,18 +110,6 @@ export class MoveDrone extends Drone {
     })
 
     this.onEffect<CellCountPayload>('render:cell-count', (payload) => {
-      // always update branch labels (needed for dwell detection)
-      this.#branchLabels = new Set(payload.branchLabels ?? [])
-
-      // auto-resume drag after drop-through navigation
-      if (this.#pendingDragLabel && payload.labels.includes(this.#pendingDragLabel)) {
-        this.#cellCount = payload.count
-        this.#cellLabels = payload.labels
-        this.#cellCoords = payload.coords ?? []
-        this.#autoResumeDrag()
-        return
-      }
-
       // freeze snapshot only during pointer drags — command moves rebuild on label changes
       if (this.#activeSource && this.#activeSource !== 'command') return
       this.#cellCount = payload.count
@@ -163,6 +144,12 @@ export class MoveDrone extends Drone {
     if (!this.#moveActive && this.#activeSource) {
       // exiting move mode while dragging — cancel
       this.emitEffect('move:preview', null)
+      if (this.#dropIntoLabel !== null) {
+        this.#dropIntoLabel = null
+        this.emitEffect('move:drop-into', null)
+      }
+      this.#dropIntoActive = false
+      this.#lastHoverAxial = null
       this.#reset(this.#activeSource)
     }
     this.emitEffect('move:mode', { active: this.#moveActive })
@@ -253,19 +240,25 @@ export class MoveDrone extends Drone {
     if (this.#activeSource !== source) return
     if (!this.#anchorAxial) return
 
-    if (this.#droppedThrough) {
-      // insert-push mode: tiles shift to make room
-      const insertOrder = this.#computeInsertPlacements(hoverAxial)
-      const movedLabels = new Set(this.#movedGroup.keys())
-      // build sparse array indexed by grid position for the preview
-      const axialSvc = this.resolve<any>('axial')
-      const gridSize = axialSvc?.count ?? 0
-      const names: string[] = new Array(Math.max(gridSize, insertOrder.length)).fill('')
-      for (let i = 0; i < insertOrder.length; i++) {
-        if (insertOrder[i]) names[i] = insertOrder[i]
+    this.#lastHoverAxial = hoverAxial
+
+    if (this.#dropIntoActive) {
+      const label = this.labelAtAxial(hoverAxial)
+      const valid = !!label && !this.#movedGroup.has(label)
+      const next = valid ? label : null
+      if (this.#dropIntoLabel !== next) {
+        this.#dropIntoLabel = next
+        this.emitEffect('move:drop-into', next ? { label: next } : null)
       }
-      this.emitEffect('move:preview', { names, movedLabels })
+      // suppress swap preview while drop-into is the active intent
+      this.emitEffect('move:preview', null)
       return
+    }
+
+    // Ctrl released — clear any lingering drop-into overlay
+    if (this.#dropIntoLabel !== null) {
+      this.#dropIntoLabel = null
+      this.emitEffect('move:drop-into', null)
     }
 
     const diff: Axial = {
@@ -280,48 +273,24 @@ export class MoveDrone extends Drone {
     this.emitEffect('move:preview', { names: reordered, movedLabels })
   }
 
+  setDropIntoActive = (active: boolean): void => {
+    if (!this.#activeSource) return
+    if (this.#dropIntoActive === active) return
+    this.#dropIntoActive = active
+    if (this.#lastHoverAxial && this.#anchorAxial) {
+      // re-pump preview based on cached hover so the overlay flips immediately
+      this.updateMove(this.#lastHoverAxial, this.#activeSource)
+    } else if (!active) {
+      if (this.#dropIntoLabel !== null) {
+        this.#dropIntoLabel = null
+        this.emitEffect('move:drop-into', null)
+      }
+    }
+  }
+
   commitMoveAt = async (finalAxial: Axial, source: string): Promise<void> => {
     if (this.#activeSource !== source) return
-    this.cancelDwell()
     if (!this.#anchorAxial) { this.#reset(source); return }
-
-    if (this.#droppedThrough) {
-      // Index is the source of truth: write only the moved tiles'
-      // indices to the dropped grid slot(s). Other tiles keep whatever
-      // index they have. Render-time collision heal demotes any prior
-      // occupant to the next free slot. No dense renumber.
-      const movedLabels = [...this.#movedGroup.keys()]
-      const targetGridIndex = this.#keyToIndex.get(axialKey(finalAxial.q, finalAxial.r))
-      if (targetGridIndex !== undefined) {
-        const lineage = this.resolve<any>('lineage')
-        const dir: FileSystemDirectoryHandle | null = lineage?.explorerDir ? await lineage.explorerDir() : null
-        if (dir) {
-          for (let i = 0; i < movedLabels.length; i++) {
-            try {
-              const cellDir = await dir.getDirectoryHandle(movedLabels[i], { create: false })
-              await writeCellProperties(cellDir, { index: targetGridIndex + i })
-            } catch { /* skip missing cell dirs */ }
-          }
-        }
-      }
-
-      // Record reorder op for history (post-state). The cell:reorder
-      // emit is now just a cache-invalidation signal — show-cell no
-      // longer renumbers indices on receipt.
-      const insertOrder = this.#computeInsertPlacements(finalAxial).filter(n => n !== '')
-      const orderProjection = window.ioc.get<OrderProjection>('@diamondcoreprocessor.com/OrderProjection')
-      if (orderProjection) {
-        await orderProjection.reorder(insertOrder)
-      }
-
-      this.emitEffect('cell:reorder', { labels: insertOrder })
-      this.emitEffect('move:preview', null)
-      this.emitEffect('move:committed', { order: insertOrder })
-      this.#droppedThrough = false
-      this.#reset(source)
-      void new hypercomb().act()
-      return
-    }
 
     const diff: Axial = {
       q: finalAxial.q - this.#anchorAxial.q,
@@ -337,11 +306,108 @@ export class MoveDrone extends Drone {
     void new hypercomb().act()
   }
 
+  /**
+   * Commit a Ctrl-modifier drop: move the selected tiles into the hovered
+   * tile's children directory, navigate down into that level, and re-seed
+   * the selection with the moved tiles. Indexes start at maxExistingIndex+1
+   * so they cannot collide with the target's existing children.
+   */
+  commitDropInto = async (axial: Axial, source: string): Promise<void> => {
+    if (this.#activeSource !== source) { return }
+    if (!this.#anchorAxial) { this.#reset(source); return }
+
+    const targetLabel = this.labelAtAxial(axial)
+    if (!targetLabel || this.#movedGroup.has(targetLabel)) {
+      this.cancelMove(source)
+      return
+    }
+
+    const movedLabels = [...this.#movedGroup.keys()]
+    if (movedLabels.length === 0) { this.cancelMove(source); return }
+
+    const lineage = this.resolve<any>('lineage')
+    const transfer = this.resolve<LayerTransferService>('transfer')
+    const sourceDir: FileSystemDirectoryHandle | null = lineage?.explorerDir ? await lineage.explorerDir() : null
+
+    if (!sourceDir || !transfer) { this.cancelMove(source); return }
+
+    // ensure target cell directory exists (create on demand so a leaf
+    // becomes a branch when something is dropped into it)
+    let targetDir: FileSystemDirectoryHandle
+    try {
+      targetDir = await sourceDir.getDirectoryHandle(targetLabel, { create: true })
+    } catch {
+      this.cancelMove(source)
+      return
+    }
+
+    // determine the smallest non-colliding starting index
+    let nextIndex = 0
+    try {
+      for await (const [, handle] of (targetDir as any).entries()) {
+        if (handle.kind !== 'directory') continue
+        if (movedLabels.includes((handle as FileSystemDirectoryHandle).name)) continue
+        try {
+          const props = await readCellProperties(handle as FileSystemDirectoryHandle)
+          const idx = typeof props.index === 'number' ? props.index : -1
+          if (idx >= nextIndex) nextIndex = idx + 1
+        } catch { /* skip unreadable */ }
+      }
+    } catch { /* no existing children */ }
+
+    // transfer each moved cell into the target's children, assigning
+    // monotonically increasing indexes so order is stable and unique
+    for (const label of movedLabels) {
+      try {
+        await transfer.transfer(sourceDir, targetDir, label)
+        const cellDir = await targetDir.getDirectoryHandle(label, { create: false })
+        await writeCellProperties(cellDir, { index: nextIndex })
+        nextIndex++
+      } catch (err) {
+        console.warn('[move] drop-into transfer failed for', label, err)
+      }
+    }
+
+    // moved cells are gone from the current layer
+    for (const label of movedLabels) {
+      EffectBus.emit('cell:removed', { cell: label })
+    }
+
+    // clear all overlays
+    this.emitEffect('move:preview', null)
+    this.emitEffect('move:drop-into', null)
+    this.emitEffect('move:committed', { order: [] })
+
+    // reset move state
+    this.#dropIntoActive = false
+    this.#dropIntoLabel = null
+    this.#lastHoverAxial = null
+    this.#reset(source)
+
+    // re-seed selection at the next level — the labels exist in the
+    // target's children dir now, so when the new layer renders they
+    // will be drawn as already selected
+    const selection = this.resolve<any>('selection')
+    if (selection?.clear && selection?.add) {
+      selection.clear()
+      for (const label of movedLabels) selection.add(label)
+    }
+
+    // navigate into the target — its children now include the moved tiles
+    lineage?.explorerEnter?.(targetLabel)
+
+    void new hypercomb().act()
+  }
+
   cancelMove = (source: string): void => {
     if (this.#activeSource !== source) return
-    this.cancelDwell()
-    this.#droppedThrough = false
     this.emitEffect('move:preview', null)
+    if (this.#dropIntoLabel !== null) {
+      this.#dropIntoLabel = null
+      this.emitEffect('move:drop-into', null)
+    }
+    this.#dropIntoActive = false
+    this.#lastHoverAxial = null
     this.#reset(source)
   }
 
@@ -571,197 +637,6 @@ export class MoveDrone extends Drone {
     this.#commandActive = false
   }
 
-  // ── layer dwell (Ctrl + hover on branch tile) ─────────────
-
-  readonly #dwellMs = 750
-
-  startDwell = (label: string): void => {
-    if (!this.#activeSource) return
-    if (!this.#branchLabels.has(label)) return
-    if (this.#movedGroup.has(label)) return // can't drop into yourself
-    if (this.#dwellLabel === label) return  // already dwelling on this tile
-
-    this.cancelDwell()
-    this.#dwellLabel = label
-    this.#dwellStart = performance.now()
-
-    // smooth progress updates via rAF
-    const tick = (): void => {
-      if (!this.#dwellLabel) return
-      const elapsed = performance.now() - this.#dwellStart
-      const progress = Math.min(elapsed / this.#dwellMs, 1)
-      this.emitEffect('move:layer-dwell', { label: this.#dwellLabel, progress })
-      if (progress < 1) {
-        this.#dwellRaf = requestAnimationFrame(tick)
-      }
-    }
-    this.#dwellRaf = requestAnimationFrame(tick)
-
-    this.#dwellTimer = setTimeout(() => {
-      this.#dwellTimer = null
-      cancelAnimationFrame(this.#dwellRaf)
-      this.#dwellRaf = 0
-      // emit final 100% before drop
-      this.emitEffect('move:layer-dwell', { label: this.#dwellLabel!, progress: 1 })
-      void this.#dropThrough()
-    }, this.#dwellMs)
-  }
-
-  cancelDwell = (): void => {
-    if (this.#dwellTimer) {
-      clearTimeout(this.#dwellTimer)
-      this.#dwellTimer = null
-    }
-    if (this.#dwellRaf) {
-      cancelAnimationFrame(this.#dwellRaf)
-      this.#dwellRaf = 0
-    }
-    if (this.#dwellLabel) {
-      this.#dwellLabel = null
-      this.emitEffect('move:layer-dwell', null)
-    }
-  }
-
-  // ── drop through into child layer ────────────────────────
-
-  async #dropThrough(): Promise<void> {
-    const targetLabel = this.#dwellLabel
-    if (!targetLabel) return
-
-    const source = this.#activeSource
-    if (!source) return
-
-    const lineage = this.resolve<any>('lineage')
-    const transfer = this.resolve<LayerTransferService>('transfer')
-    if (!lineage || !transfer) return
-
-    const sourceDir = lineage.explorerDir ? await lineage.explorerDir() : null
-    if (!sourceDir) return
-
-    // get target layer directory
-    let targetLayerDir: FileSystemDirectoryHandle
-    try {
-      targetLayerDir = await sourceDir.getDirectoryHandle(targetLabel, { create: false })
-    } catch { return }
-
-    // transfer each moved tile into the target layer
-    const movedLabels = [...this.#movedGroup.keys()]
-    for (const label of movedLabels) {
-      try {
-        await transfer.transfer(sourceDir, targetLayerDir, label)
-      } catch (err) {
-        console.warn('[move] drop-through transfer failed for', label, err)
-      }
-    }
-
-    // emit cell:removed for each tile leaving the current layer
-    for (const label of movedLabels) {
-      EffectBus.emit('cell:removed', { cell: label })
-    }
-
-    // clear dwell and preview state
-    this.#dwellLabel = null
-    this.emitEffect('move:layer-dwell', null)
-    this.emitEffect('move:preview', null)
-
-    // set up pending drag for auto-resume after navigation
-    this.#pendingDragLabel = movedLabels[0] ?? null
-    this.#pendingSource = source
-    this.#droppedThrough = true
-
-    // reset current drag state (will be rebuilt in new layer)
-    this.#anchorAxial = null
-    this.#movedGroup.clear()
-    this.#occupancy.clear()
-    this.#labelToKey.clear()
-    this.#keyToIndex.clear()
-
-    // navigate into the target layer
-    lineage.explorerEnter(targetLabel)
-
-    // processor will pulse from lineage change → render:cell-count fires → #autoResumeDrag
-  }
-
-  // ── auto-resume drag after navigation ─────────────────────
-
-  #autoResumeDrag(): void {
-    const label = this.#pendingDragLabel
-    const source = this.#pendingSource
-    this.#pendingDragLabel = null
-    this.#pendingSource = null
-
-    if (!label || !source) return
-
-    // find the transferred tile in the new layout
-    const idx = this.#cellLabels.indexOf(label)
-    if (idx < 0) return
-    const coord = this.#cellCoords[idx]
-    if (!coord) return
-
-    // ensure move mode stays active and source is set
-    this.#moveActive = true
-    this.#activeSource = source
-
-    // rebuild occupancy maps for the new layer
-    const axialSvc = this.resolve<any>('axial')
-    if (!axialSvc?.items) return
-
-    this.#occupancy.clear()
-    this.#labelToKey.clear()
-    this.#keyToIndex.clear()
-
-    for (const [i, c] of axialSvc.items) {
-      this.#keyToIndex.set(axialKey(c.q, c.r), i)
-    }
-
-    for (let i = 0; i < this.#cellLabels.length; i++) {
-      const l = this.#cellLabels[i]
-      if (!l) continue
-      const c = this.#cellCoords[i] as Axial | undefined
-      if (!c) continue
-      const key = axialKey(c.q, c.r)
-      this.#occupancy.set(key, l)
-      this.#labelToKey.set(l, key)
-    }
-
-    // set up the moved group with the transferred tile
-    this.#movedGroup.clear()
-    this.#movedGroup.set(label, { q: coord.q, r: coord.r })
-    this.#anchorAxial = { q: coord.q, r: coord.r }
-
-    // emit cell:added for the new layer's history
-    EffectBus.emit('cell:added', { cell: label })
-
-    this.emitEffect('move:mode', { active: true })
-  }
-
-  // ── insert-push reorder (used after drop-through) ─────────
-
-  #computeInsertPlacements(hoverAxial: Axial): string[] {
-    if (this.#movedGroup.size === 0) return [...this.#cellLabels]
-
-    const movedLabels = new Set(this.#movedGroup.keys())
-
-    // dense order without the moved tiles
-    const denseWithout = this.#cellLabels.filter(l => l && !movedLabels.has(l))
-
-    // find insertion index: position of the tile currently at hoverAxial
-    const hoverKey = axialKey(hoverAxial.q, hoverAxial.r)
-    const hoverLabel = this.#occupancy.get(hoverKey)
-    let insertIdx = denseWithout.length // default: append at end
-    if (hoverLabel) {
-      const pos = denseWithout.indexOf(hoverLabel)
-      if (pos >= 0) insertIdx = pos
-    }
-
-    // insert moved tiles at position
-    const movedList = [...movedLabels]
-    const result = [...denseWithout]
-    result.splice(insertIdx, 0, ...movedList)
-
-    return result
-  }
-
   // ── shared commit logic ────────────────────────────────
   //
   // The renderer reads each cell's `index` property to place it via
@@ -807,14 +682,11 @@ export class MoveDrone extends Drone {
   // ── reset ────────────────────────────────────────────────
 
   #reset(source: string): void {
-    this.cancelDwell()
     this.#anchorAxial = null
     this.#movedGroup.clear()
     this.#occupancy.clear()
     this.#labelToKey.clear()
     this.#keyToIndex.clear()
-    this.#pendingDragLabel = null
-    this.#pendingSource = null
     this.#end(source)
   }
 }
