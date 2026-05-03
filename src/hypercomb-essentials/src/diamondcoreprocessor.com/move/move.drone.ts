@@ -349,7 +349,7 @@ export class MoveDrone extends Drone {
         if (movedLabels.includes((handle as FileSystemDirectoryHandle).name)) continue
         try {
           const props = await readCellProperties(handle as FileSystemDirectoryHandle)
-          const idx = typeof props.index === 'number' ? props.index : -1
+          const idx = typeof props['index'] === 'number' ? props['index'] : -1
           if (idx >= nextIndex) nextIndex = idx + 1
         } catch { /* skip unreadable */ }
       }

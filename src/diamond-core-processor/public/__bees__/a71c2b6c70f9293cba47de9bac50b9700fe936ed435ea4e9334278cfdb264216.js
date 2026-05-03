@@ -1,0 +1,593 @@
+// src/diamondcoreprocessor.com/move/move.drone.ts
+import { Drone, EffectBus, hypercomb } from "@hypercomb/core";
+
+// src/diamondcoreprocessor.com/editor/tile-properties.ts
+var TILE_PROPERTIES_FILE = "0000";
+var readCellProperties = async (cellDir) => {
+  try {
+    const fileHandle = await cellDir.getFileHandle(TILE_PROPERTIES_FILE);
+    const file = await fileHandle.getFile();
+    const text = await file.text();
+    return JSON.parse(text);
+  } catch {
+    return {};
+  }
+};
+var writeCellProperties = async (cellDir, updates) => {
+  const existing = await readCellProperties(cellDir);
+  const merged = { ...existing, ...updates };
+  const fileHandle = await cellDir.getFileHandle(TILE_PROPERTIES_FILE, { create: true });
+  const writable = await fileHandle.createWritable();
+  await writable.write(JSON.stringify(merged));
+  await writable.close();
+};
+
+// src/diamondcoreprocessor.com/move/move.drone.ts
+function axialKey(q, r) {
+  return `${q},${r}`;
+}
+var MoveDrone = class extends Drone {
+  namespace = "diamondcoreprocessor.com";
+  genotype = "movement";
+  description = "Coordinates multi-tile drag-and-drop \u2014 tracks move state, computes reorder, and commits placement.";
+  effects = ["render"];
+  #canvas = null;
+  #container = null;
+  #renderer = null;
+  #meshOffset = { x: 0, y: 0 };
+  #moveActive = false;
+  #activeSource = null;
+  #anchorAxial = null;
+  #movedGroup = /* @__PURE__ */ new Map();
+  // label → original axial
+  #occupancy = /* @__PURE__ */ new Map();
+  // axialKey → label
+  #labelToKey = /* @__PURE__ */ new Map();
+  // label → axialKey (reverse map)
+  #keyToIndex = /* @__PURE__ */ new Map();
+  // axialKey → index (for reordering)
+  #cellLabels = [];
+  #cellCoords = [];
+  #cellCount = 0;
+  // ── drop-into modifier state (Ctrl held during drag) ─────
+  #dropIntoActive = false;
+  #dropIntoLabel = null;
+  #lastHoverAxial = null;
+  get moveActive() {
+    return this.#moveActive;
+  }
+  get dropIntoActive() {
+    return this.#dropIntoActive;
+  }
+  labelAtAxial = (axial) => {
+    for (let i = 0; i < this.#cellLabels.length; i++) {
+      const coord = this.#cellCoords[i];
+      if (coord && coord.q === axial.q && coord.r === axial.r) {
+        return this.#cellLabels[i] ?? null;
+      }
+    }
+    return null;
+  };
+  deps = {
+    desktopMove: "@diamondcoreprocessor.com/DesktopMoveInput",
+    touchMove: "@diamondcoreprocessor.com/TouchMoveInput",
+    detector: "@diamondcoreprocessor.com/HexDetector",
+    axial: "@diamondcoreprocessor.com/AxialService",
+    lineage: "@hypercomb.social/Lineage",
+    selection: "@diamondcoreprocessor.com/SelectionService",
+    transfer: "@diamondcoreprocessor.com/LayerTransferService"
+  };
+  listens = ["render:host-ready", "render:cell-count", "render:mesh-offset", "controls:action"];
+  emits = ["move:preview", "move:committed", "move:mode", "cell:reorder", "move:drop-into"];
+  #effectsRegistered = false;
+  heartbeat = async () => {
+    if (this.#effectsRegistered) return;
+    this.#effectsRegistered = true;
+    this.onEffect("render:host-ready", (payload) => {
+      this.#canvas = payload.canvas;
+      this.#container = payload.container;
+      this.#renderer = payload.renderer;
+      const refs = {
+        canvas: this.#canvas,
+        container: this.#container,
+        renderer: this.#renderer,
+        getMeshOffset: () => this.#meshOffset
+      };
+      const desktopMove = this.resolve("desktopMove");
+      desktopMove?.attach(this, refs);
+      const touchMove = this.resolve("touchMove");
+      touchMove?.attach(this, refs);
+    });
+    this.onEffect("render:cell-count", (payload) => {
+      if (this.#activeSource && this.#activeSource !== "command") return;
+      this.#cellCount = payload.count;
+      this.#cellLabels = payload.labels;
+      this.#cellCoords = payload.coords ?? [];
+    });
+    this.onEffect("render:mesh-offset", (offset) => {
+      this.#meshOffset = offset;
+    });
+    let ready = false;
+    this.onEffect("controls:action", (payload) => {
+      if (!ready) return;
+      if (payload.action === "move") this.#toggleMode();
+    });
+    ready = true;
+  };
+  stop = async () => {
+    const desktopMove = this.resolve("desktopMove");
+    desktopMove?.detach();
+    const touchMove = this.resolve("touchMove");
+    touchMove?.detach();
+  };
+  // ── move mode toggle ──────────────────────────────────
+  #toggleMode() {
+    this.#moveActive = !this.#moveActive;
+    if (!this.#moveActive && this.#activeSource) {
+      this.emitEffect("move:preview", null);
+      if (this.#dropIntoLabel !== null) {
+        this.#dropIntoLabel = null;
+        this.emitEffect("move:drop-into", null);
+      }
+      this.#dropIntoActive = false;
+      this.#lastHoverAxial = null;
+      this.#reset(this.#activeSource);
+    }
+    this.emitEffect("move:mode", { active: this.#moveActive });
+  }
+  // ── exclusivity ──────────────────────────────────────────
+  #begin = (source) => {
+    if (this.#activeSource && this.#activeSource !== source) return false;
+    this.#activeSource = source;
+    return true;
+  };
+  #end = (source) => {
+    if (this.#activeSource === source) this.#activeSource = null;
+  };
+  // ── public API (called by input handlers) ────────────────
+  beginMove = (anchorAxial, source) => {
+    if (!this.#begin(source)) return false;
+    const anchorKey = axialKey(anchorAxial.q, anchorAxial.r);
+    const axialSvc = this.resolve("axial");
+    if (!axialSvc?.items) {
+      this.#end(source);
+      return false;
+    }
+    this.#occupancy.clear();
+    this.#labelToKey.clear();
+    this.#keyToIndex.clear();
+    for (const [i, coord] of axialSvc.items) {
+      const key = axialKey(coord.q, coord.r);
+      this.#keyToIndex.set(key, i);
+    }
+    for (let i = 0; i < this.#cellLabels.length; i++) {
+      const label = this.#cellLabels[i];
+      if (!label) continue;
+      const coord = this.#cellCoords[i];
+      if (!coord) continue;
+      const key = axialKey(coord.q, coord.r);
+      this.#occupancy.set(key, label);
+      this.#labelToKey.set(label, key);
+    }
+    const anchorLabel = this.#occupancy.get(anchorKey);
+    if (!anchorLabel) {
+      this.#end(source);
+      return false;
+    }
+    const selection = this.resolve("selection");
+    const selected = selection?.selected;
+    this.#movedGroup.clear();
+    if (selected && selected.size > 0) {
+      if (!selected.has(anchorLabel)) {
+        this.#end(source);
+        return false;
+      }
+      for (let i = 0; i < this.#cellLabels.length; i++) {
+        const label = this.#cellLabels[i];
+        if (!label) continue;
+        const coord = this.#cellCoords[i];
+        if (!coord) continue;
+        if (selected.has(label)) {
+          this.#movedGroup.set(label, { q: coord.q, r: coord.r });
+        }
+      }
+    } else {
+      this.#movedGroup.set(anchorLabel, { q: anchorAxial.q, r: anchorAxial.r });
+    }
+    console.log("[move] beginMove", { anchorLabel, selectedLabels: selected ? [...selected] : [], movedGroupSize: this.#movedGroup.size, movedLabels: [...this.#movedGroup.keys()], cellCount: this.#cellCount, cellLabelsLen: this.#cellLabels.length, cellLabels: [...this.#cellLabels] });
+    this.#anchorAxial = anchorAxial;
+    return true;
+  };
+  updateMove = (hoverAxial, source) => {
+    if (this.#activeSource !== source) return;
+    if (!this.#anchorAxial) return;
+    this.#lastHoverAxial = hoverAxial;
+    if (this.#dropIntoActive) {
+      const label = this.labelAtAxial(hoverAxial);
+      const valid = !!label && !this.#movedGroup.has(label);
+      const next = valid ? label : null;
+      if (this.#dropIntoLabel !== next) {
+        this.#dropIntoLabel = next;
+        this.emitEffect("move:drop-into", next ? { label: next } : null);
+      }
+      this.emitEffect("move:preview", null);
+      return;
+    }
+    if (this.#dropIntoLabel !== null) {
+      this.#dropIntoLabel = null;
+      this.emitEffect("move:drop-into", null);
+    }
+    const diff = {
+      q: hoverAxial.q - this.#anchorAxial.q,
+      r: hoverAxial.r - this.#anchorAxial.r
+    };
+    const placements = this.#computePlacements(diff);
+    const reordered = this.#reorderNames(placements);
+    const movedLabels = new Set(this.#movedGroup.keys());
+    this.emitEffect("move:preview", { names: reordered, movedLabels });
+  };
+  setDropIntoActive = (active) => {
+    if (!this.#activeSource) return;
+    if (this.#dropIntoActive === active) return;
+    this.#dropIntoActive = active;
+    if (this.#lastHoverAxial && this.#anchorAxial) {
+      this.updateMove(this.#lastHoverAxial, this.#activeSource);
+    } else if (!active) {
+      if (this.#dropIntoLabel !== null) {
+        this.#dropIntoLabel = null;
+        this.emitEffect("move:drop-into", null);
+      }
+    }
+  };
+  commitMoveAt = async (finalAxial, source) => {
+    if (this.#activeSource !== source) return;
+    if (!this.#anchorAxial) {
+      this.#reset(source);
+      return;
+    }
+    const diff = {
+      q: finalAxial.q - this.#anchorAxial.q,
+      r: finalAxial.r - this.#anchorAxial.r
+    };
+    if (diff.q === 0 && diff.r === 0) {
+      this.#reset(source);
+      return;
+    }
+    const placements = this.#computePlacements(diff);
+    await this.#commitPlacements(placements);
+    this.#reset(source);
+    void new hypercomb().act();
+  };
+  /**
+   * Commit a Ctrl-modifier drop: move the selected tiles into the hovered
+   * tile's children directory, navigate down into that level, and re-seed
+   * the selection with the moved tiles. Indexes start at maxExistingIndex+1
+   * so they cannot collide with the target's existing children.
+   */
+  commitDropInto = async (axial, source) => {
+    if (this.#activeSource !== source) {
+      return;
+    }
+    if (!this.#anchorAxial) {
+      this.#reset(source);
+      return;
+    }
+    const targetLabel = this.labelAtAxial(axial);
+    if (!targetLabel || this.#movedGroup.has(targetLabel)) {
+      this.cancelMove(source);
+      return;
+    }
+    const movedLabels = [...this.#movedGroup.keys()];
+    if (movedLabels.length === 0) {
+      this.cancelMove(source);
+      return;
+    }
+    const lineage = this.resolve("lineage");
+    const transfer = this.resolve("transfer");
+    const sourceDir = lineage?.explorerDir ? await lineage.explorerDir() : null;
+    if (!sourceDir || !transfer) {
+      this.cancelMove(source);
+      return;
+    }
+    let targetDir;
+    try {
+      targetDir = await sourceDir.getDirectoryHandle(targetLabel, { create: true });
+    } catch {
+      this.cancelMove(source);
+      return;
+    }
+    let nextIndex = 0;
+    try {
+      for await (const [, handle] of targetDir.entries()) {
+        if (handle.kind !== "directory") continue;
+        if (movedLabels.includes(handle.name)) continue;
+        try {
+          const props = await readCellProperties(handle);
+          const idx = typeof props["index"] === "number" ? props["index"] : -1;
+          if (idx >= nextIndex) nextIndex = idx + 1;
+        } catch {
+        }
+      }
+    } catch {
+    }
+    for (const label of movedLabels) {
+      try {
+        await transfer.transfer(sourceDir, targetDir, label);
+        const cellDir = await targetDir.getDirectoryHandle(label, { create: false });
+        await writeCellProperties(cellDir, { index: nextIndex });
+        nextIndex++;
+      } catch (err) {
+        console.warn("[move] drop-into transfer failed for", label, err);
+      }
+    }
+    for (const label of movedLabels) {
+      EffectBus.emit("cell:removed", { cell: label });
+    }
+    this.emitEffect("move:preview", null);
+    this.emitEffect("move:drop-into", null);
+    this.emitEffect("move:committed", { order: [] });
+    this.#dropIntoActive = false;
+    this.#dropIntoLabel = null;
+    this.#lastHoverAxial = null;
+    this.#reset(source);
+    const selection = this.resolve("selection");
+    if (selection?.clear && selection?.add) {
+      selection.clear();
+      for (const label of movedLabels) selection.add(label);
+    }
+    lineage?.explorerEnter?.(targetLabel);
+    void new hypercomb().act();
+  };
+  cancelMove = (source) => {
+    if (this.#activeSource !== source) return;
+    this.emitEffect("move:preview", null);
+    if (this.#dropIntoLabel !== null) {
+      this.#dropIntoLabel = null;
+      this.emitEffect("move:drop-into", null);
+    }
+    this.#dropIntoActive = false;
+    this.#lastHoverAxial = null;
+    this.#reset(source);
+  };
+  // ── reorder names by index ──────────────────────────────
+  #reorderNames(placements) {
+    const axialSvc = this.resolve("axial");
+    const gridSize = axialSvc?.count ?? 0;
+    const names = new Array(Math.max(gridSize, this.#cellLabels.length)).fill("");
+    for (let i = 0; i < this.#cellLabels.length; i++) {
+      const label = this.#cellLabels[i];
+      if (!label) continue;
+      const coord = this.#cellCoords[i];
+      if (!coord) continue;
+      const gridIndex = this.#keyToIndex.get(axialKey(coord.q, coord.r));
+      if (gridIndex !== void 0) names[gridIndex] = label;
+    }
+    let maxIdx = names.length - 1;
+    for (const [, axial] of placements) {
+      const targetKey = axialKey(axial.q, axial.r);
+      const targetIndex = this.#keyToIndex.get(targetKey);
+      if (targetIndex !== void 0 && targetIndex > maxIdx) maxIdx = targetIndex;
+    }
+    while (names.length <= maxIdx) names.push("");
+    const placedLabels = new Set(placements.keys());
+    for (let i = 0; i < names.length; i++) {
+      if (placedLabels.has(names[i])) names[i] = "";
+    }
+    for (const [label, axial] of placements) {
+      const targetKey = axialKey(axial.q, axial.r);
+      const targetIndex = this.#keyToIndex.get(targetKey);
+      if (targetIndex !== void 0) {
+        names[targetIndex] = label;
+      }
+    }
+    return names;
+  }
+  // ── swap algorithm (from legacy computePlacements) ───────
+  #computePlacements(diff) {
+    const placements = /* @__PURE__ */ new Map();
+    if (this.#movedGroup.size === 0) return placements;
+    for (const [label, fromAxial] of this.#movedGroup) {
+      placements.set(label, {
+        q: fromAxial.q + diff.q,
+        r: fromAxial.r + diff.r
+      });
+    }
+    const groupDestToSource = /* @__PURE__ */ new Map();
+    for (const [label, fromAxial] of this.#movedGroup) {
+      const toAxial = placements.get(label);
+      groupDestToSource.set(axialKey(toAxial.q, toAxial.r), fromAxial);
+    }
+    for (const [label] of this.#movedGroup) {
+      const toAxial = placements.get(label);
+      const toKey = axialKey(toAxial.q, toAxial.r);
+      const occupant = this.#occupancy.get(toKey);
+      if (!occupant) continue;
+      if (this.#movedGroup.has(occupant)) continue;
+      let target = this.#movedGroup.get(label);
+      let targetKey = axialKey(target.q, target.r);
+      while (groupDestToSource.has(targetKey)) {
+        target = groupDestToSource.get(targetKey);
+        targetKey = axialKey(target.q, target.r);
+      }
+      placements.set(occupant, { q: target.q, r: target.r });
+    }
+    return placements;
+  }
+  // ── command-driven move API (for command line /select[...]/move) ──
+  #commandActive = false;
+  get moveCommandActive() {
+    return this.#commandActive;
+  }
+  /**
+   * Begin a command-driven move with explicit labels (no pointer).
+   * First label is the anchor.
+   */
+  beginCommandMove = (labels) => {
+    if (labels.length === 0) return;
+    if (this.#activeSource) return;
+    this.#activeSource = "command";
+    this.#commandActive = true;
+    const axialSvc = this.resolve("axial");
+    if (!axialSvc?.items) {
+      this.#end("command");
+      this.#commandActive = false;
+      return;
+    }
+    this.#occupancy.clear();
+    this.#labelToKey.clear();
+    this.#keyToIndex.clear();
+    for (const [i, coord] of axialSvc.items) {
+      const key = axialKey(coord.q, coord.r);
+      this.#keyToIndex.set(key, i);
+    }
+    for (let i = 0; i < this.#cellLabels.length; i++) {
+      const label = this.#cellLabels[i];
+      if (!label) continue;
+      const coord = this.#cellCoords[i];
+      if (!coord) continue;
+      const key = axialKey(coord.q, coord.r);
+      this.#occupancy.set(key, label);
+      this.#labelToKey.set(label, key);
+    }
+    this.#movedGroup.clear();
+    const anchorLabel = labels[0];
+    let anchorSet = false;
+    for (const label of labels) {
+      const key = this.#labelToKey.get(label);
+      if (!key) continue;
+      const parts = key.split(",");
+      const q = parseInt(parts[0], 10);
+      const r = parseInt(parts[1], 10);
+      this.#movedGroup.set(label, { q, r });
+      if (label === anchorLabel && !anchorSet) {
+        this.#anchorAxial = { q, r };
+        anchorSet = true;
+      }
+    }
+    if (!anchorSet) {
+      this.#reset("command");
+      this.#commandActive = false;
+    }
+  };
+  /**
+   * Update preview for a target axial index (from command line input).
+   */
+  updateCommandMove = (targetIndex) => {
+    if (this.#activeSource !== "command") return;
+    if (!this.#anchorAxial) return;
+    const axialSvc = this.resolve("axial");
+    const targetCoord = axialSvc?.items?.get(targetIndex);
+    if (!targetCoord) return;
+    const diff = {
+      q: targetCoord.q - this.#anchorAxial.q,
+      r: targetCoord.r - this.#anchorAxial.r
+    };
+    const placements = this.#computePlacements(diff);
+    const reordered = this.#reorderNames(placements);
+    const movedLabels = new Set(this.#movedGroup.keys());
+    this.emitEffect("move:preview", { names: reordered, movedLabels });
+  };
+  /**
+   * Commit the command move at a specific target index.
+   */
+  commitCommandMoveAt = async (targetIndex) => {
+    if (this.#activeSource !== "command") return;
+    if (!this.#anchorAxial) {
+      this.#resetCommand();
+      return;
+    }
+    const axialSvc = this.resolve("axial");
+    const targetCoord = axialSvc?.items?.get(targetIndex);
+    if (!targetCoord) {
+      this.#resetCommand();
+      return;
+    }
+    const diff = {
+      q: targetCoord.q - this.#anchorAxial.q,
+      r: targetCoord.r - this.#anchorAxial.r
+    };
+    if (diff.q === 0 && diff.r === 0) {
+      this.#resetCommand();
+      return;
+    }
+    const placements = this.#computePlacements(diff);
+    await this.#commitPlacements(placements);
+    this.#resetCommand();
+    void new hypercomb().act();
+  };
+  /**
+   * Commit the command move to a specific label's position.
+   */
+  commitCommandMoveToLabel = async (targetLabel) => {
+    const key = this.#labelToKey.get(targetLabel);
+    if (!key) {
+      this.#resetCommand();
+      return;
+    }
+    const idx = this.#keyToIndex.get(key);
+    if (idx === void 0) {
+      this.#resetCommand();
+      return;
+    }
+    await this.commitCommandMoveAt(idx);
+  };
+  /**
+   * Cancel command move — clear preview and reset.
+   */
+  cancelCommandMove = () => {
+    if (this.#activeSource !== "command") return;
+    this.emitEffect("move:preview", null);
+    this.#resetCommand();
+  };
+  #resetCommand() {
+    this.#reset("command");
+    this.#commandActive = false;
+  }
+  // ── shared commit logic ────────────────────────────────
+  //
+  // The renderer reads each cell's `index` property to place it via
+  // `axial.items.get(index)`. So the only authoritative write is the
+  // per-cell index in #persistPinnedIndices below. The OrderProjection
+  // call records a snapshot of the post-state for history/diff use; the
+  // cell:reorder emit is a cache-invalidation signal only — show-cell's
+  // handler MUST NOT renumber indices on receipt.
+  async #commitPlacements(placements) {
+    const denseOrder = this.#reorderNames(placements).filter((n) => n !== "");
+    const orderProjection = window.ioc.get("@diamondcoreprocessor.com/OrderProjection");
+    if (orderProjection) {
+      await orderProjection.reorder(denseOrder);
+    }
+    await this.#persistPinnedIndices(placements);
+    this.emitEffect("cell:reorder", { labels: denseOrder });
+    this.emitEffect("move:preview", null);
+    this.emitEffect("move:committed", { order: denseOrder });
+  }
+  async #persistPinnedIndices(placements) {
+    const lineage = this.resolve("lineage");
+    const dir = lineage?.explorerDir ? await lineage.explorerDir() : null;
+    if (!dir) return;
+    for (const [label, axial] of placements) {
+      const gridIndex = this.#keyToIndex.get(axialKey(axial.q, axial.r));
+      if (gridIndex === void 0) continue;
+      try {
+        const cellDir = await dir.getDirectoryHandle(label, { create: false });
+        await writeCellProperties(cellDir, { index: gridIndex });
+      } catch {
+      }
+    }
+  }
+  // ── reset ────────────────────────────────────────────────
+  #reset(source) {
+    this.#anchorAxial = null;
+    this.#movedGroup.clear();
+    this.#occupancy.clear();
+    this.#labelToKey.clear();
+    this.#keyToIndex.clear();
+    this.#end(source);
+  }
+};
+var _move = new MoveDrone();
+window.ioc.register("@diamondcoreprocessor.com/MoveDrone", _move);
+export {
+  MoveDrone
+};
