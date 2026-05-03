@@ -9,8 +9,7 @@
 // even when the sentinel hasn't pushed yet.
 
 import { EffectBus, SignatureStore } from '@hypercomb/core'
-import { LayerInstaller, Store } from '@hypercomb/shared/core'
-import { LocationParser } from '@hypercomb/shared/core/initializers/location-parser.js'
+import { Store } from '@hypercomb/shared/core'
 import type { SentinelBridge } from './sentinel-bridge'
 
 export type BootStatus =
@@ -167,20 +166,47 @@ const bundledDiffersFromCached = (bundled: BundledPackage, cached: InstallManife
 }
 
 const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureStore): Promise<void> => {
-  const installer = get('@hypercomb.social/LayerInstaller') as LayerInstaller | undefined
-  if (!installer) {
-    console.warn('[ensure-install] LayerInstaller not registered — cannot fall back to bundled install')
-    return
+  const store = get('@hypercomb.social/Store') as Store | undefined
+  if (!store) return
+
+  // Mirror resyncFromSentinel's layout exactly: bees/deps in flat dirs,
+  // layers under __layers__/sentinel/. This way the boot fast path and
+  // script-preloader find content at the same paths regardless of source.
+  const layerDir = await store.domainLayersDirectory('sentinel', true)
+
+  const fetchBytes = async (path: string): Promise<ArrayBuffer | null> => {
+    try {
+      const res = await fetch(path, { cache: 'no-store' })
+      if (!res.ok) return null
+      return await res.arrayBuffer()
+    } catch {
+      return null
+    }
   }
-  // Build a parsed location pointing at the bundled content. Domain is
-  // the current origin's hostname; baseUrl is `<origin>/content`.
-  const baseUrl = `${location.origin}/content`
-  const parsed = LocationParser.parse(`${baseUrl}/${bundled.packageSig}`)
-  const ok = await installer.install(parsed)
-  if (!ok) {
-    console.warn('[ensure-install] bundled install reported incomplete')
-    return
+
+  const writeAll = async (
+    sigs: string[],
+    urlFor: (sig: string) => string,
+    dir: FileSystemDirectoryHandle,
+    nameFor: (sig: string) => string,
+  ): Promise<number> => {
+    let written = 0
+    await Promise.all(sigs.map(async (sig) => {
+      const bytes = await fetchBytes(urlFor(sig))
+      if (!bytes) return
+      const handle = await dir.getFileHandle(nameFor(sig), { create: true })
+      const writable = await handle.createWritable()
+      await writable.write(bytes)
+      await writable.close()
+      written++
+    }))
+    return written
   }
+
+  const beeCount = await writeAll(bundled.bees, (s) => `/content/__bees__/${s}.js`, store.bees, (s) => `${s}.js`)
+  const depCount = await writeAll(bundled.dependencies, (s) => `/content/__dependencies__/${s}.js`, store.dependencies, (s) => `${s}.js`)
+  const layerCount = await writeAll(bundled.layers, (s) => `/content/__layers__/${s}.json`, layerDir, (s) => s)
+
   // Mirror the manifest + sync state that resyncFromSentinel would write
   // so the next reload boots through the cached fast path.
   const manifest = { version: 2, layers: bundled.layers, bees: bundled.bees, dependencies: bundled.dependencies, beeDeps: bundled.beeDeps }
@@ -190,7 +216,7 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   if (bundled.beeDeps) (globalThis as any).__hypercombBeeDeps = bundled.beeDeps
   sigStore.trustAll([...bundled.bees, ...bundled.dependencies, ...bundled.layers])
   localStorage.setItem(SIG_STORE_KEY, JSON.stringify(sigStore.toJSON()))
-  console.log(`[ensure-install] bundled install complete: ${bundled.packageSig.slice(0, 12)} (${bundled.bees.length} bees, ${bundled.dependencies.length} deps, ${bundled.layers.length} layers)`)
+  console.log(`[ensure-install] bundled install complete: ${bundled.packageSig.slice(0, 12)} (${beeCount}/${bundled.bees.length} bees, ${depCount}/${bundled.dependencies.length} deps, ${layerCount}/${bundled.layers.length} layers)`)
 }
 
 /**
