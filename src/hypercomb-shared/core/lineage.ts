@@ -70,12 +70,44 @@ export class Lineage extends EventTarget {
     return '/' + this.explorerPath.join('/')
   }
 
+  // Per-revision memoization. invalidate() bumps #fsRevision on any FS change,
+  // so the cache is auto-invalidated. In-flight dedup is keyed on revision so
+  // a stale walk that resolves after a new invalidate() can't poison the cache.
+  #cachedExplorerDir: { revision: number; dir: FileSystemDirectoryHandle | null } | null = null
+  #pendingExplorerDir: { revision: number; promise: Promise<FileSystemDirectoryHandle | null> } | null = null
+
   public explorerDir = async (): Promise<FileSystemDirectoryHandle | null> => {
-    try {
-      return await this.tryResolveFrom(this.store.hypercombRoot, this.explorerPath)
-    } catch {
-      return null
+    const revision = this.#fsRevision
+
+    if (this.#cachedExplorerDir?.revision === revision) {
+      return this.#cachedExplorerDir.dir
     }
+
+    if (this.#pendingExplorerDir?.revision === revision) {
+      return this.#pendingExplorerDir.promise
+    }
+
+    const promise = (async (): Promise<FileSystemDirectoryHandle | null> => {
+      let dir: FileSystemDirectoryHandle | null = null
+      try {
+        dir = await this.tryResolveFrom(this.store.hypercombRoot, this.explorerPath)
+      } catch {
+        dir = null
+      }
+      if (this.#fsRevision === revision) {
+        this.#cachedExplorerDir = { revision, dir }
+      }
+      return dir
+    })()
+
+    this.#pendingExplorerDir = { revision, promise }
+    promise.finally(() => {
+      if (this.#pendingExplorerDir?.promise === promise) {
+        this.#pendingExplorerDir = null
+      }
+    })
+
+    return promise
   }
 
   // -------------------------------------------------
@@ -205,3 +237,4 @@ export class Lineage extends EventTarget {
 }
 
 register('@hypercomb.social/Lineage', new Lineage())
+console.log('[hypercomb] lineage: explorerDir memoized per fsRevision (2026-05-01)')

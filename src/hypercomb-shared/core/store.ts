@@ -413,9 +413,29 @@ export class Store extends EventTarget {
     return promise
   }
 
+  // Sig-addressed bytes are immutable, so this cache is safe across the session.
+  readonly #layerBytesCache = new Map<string, Uint8Array>()
+  readonly #layerBytesPending = new Map<string, Promise<Uint8Array | null>>()
+
   /** Read a layer JSON by signature, scanning per-domain subdirectories.
    *  Layers live at __layers__/<domain>/<sig> or __layers__/<domain>/<sig>.json. */
   public getLayerBytes = async (signature: string): Promise<Uint8Array | null> => {
+    const cached = this.#layerBytesCache.get(signature)
+    if (cached) return cached
+    const pending = this.#layerBytesPending.get(signature)
+    if (pending) return pending
+    const promise = this.#loadLayerBytes(signature)
+    this.#layerBytesPending.set(signature, promise)
+    try {
+      const bytes = await promise
+      if (bytes) this.#layerBytesCache.set(signature, bytes)
+      return bytes
+    } finally {
+      this.#layerBytesPending.delete(signature)
+    }
+  }
+
+  #loadLayerBytes = async (signature: string): Promise<Uint8Array | null> => {
     const domainNames: string[] = []
     for await (const [name, entry] of (this.layers as any).entries() as AsyncIterable<[string, FileSystemHandle]>) {
       if (entry.kind === 'directory') domainNames.push(name)
@@ -455,3 +475,4 @@ export class Store extends EventTarget {
 }
 
 register('@hypercomb.social/Store', new Store())
+console.log('[hypercomb] store: layer-bytes cache active (2026-05-01)')

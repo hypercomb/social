@@ -36,13 +36,12 @@ export class BootstrapHistory {
 
     const finalUrl = inputPath + inputSuffix
 
-    // rebuild history stack
-    // important: always restore finalUrl even if something fails, so the url never gets stuck at '/'
+    // Phase 1: synchronous URL restoration. Return control as soon as
+    // the URL is right; bee loading runs in Phase 2 so first paint
+    // never waits on preloader.find().
+    const segments: string[] = []
     try {
       window.history.replaceState({ i: 0, steps: [] as BootstrapStep[] }, '', '/')
-
-      // Always encounter root markers (global bees that load at every location)
-      await this.encounter(preloader, '')
 
       let path = ''
       let index = 0
@@ -57,39 +56,29 @@ export class BootstrapHistory {
 
         window.history.pushState({ i: index }, '', path)
         steps.push({ index, segment: seg, path })
-
-        // replay: encounter this segment
-        await this.encounter(preloader, seg)
+        segments.push(seg)
       }
 
-      // stash steps for debugging, but keep the current url correct
       try {
         const state = window.history.state as any
         window.history.replaceState({ ...state, i: index, steps }, '', finalUrl)
-      } catch {
-        // ignore
-      }
-
+      } catch { /* ignore */ }
     } catch {
-
-      // if anything blows up after we touched '/', restore the url immediately
-      try {
-        window.history.replaceState(window.history.state, '', finalUrl)
-      } catch {
-        // ignore
-      }
-
+      try { window.history.replaceState(window.history.state, '', finalUrl) } catch { /* ignore */ }
     } finally {
-
-      // hard guarantee: end on finalUrl no matter what
-      try {
-        window.history.replaceState(window.history.state, '', finalUrl)
-      } catch {
-        // ignore
-      }
+      try { window.history.replaceState(window.history.state, '', finalUrl) } catch { /* ignore */ }
     }
 
     this.dispatchPopState()
+
+    // Phase 2: background bee loading in URL order. Errors are
+    // swallowed per level so one failure can't strand the chain.
+    void (async () => {
+      await this.encounter(preloader, '').catch(() => {})
+      for (const seg of segments) {
+        await this.encounter(preloader, seg).catch(() => {})
+      }
+    })()
   }
 
   private parsePath = (path: string, completions: CompletionUtility | null): string[] => {
@@ -164,3 +153,4 @@ export class BootstrapHistory {
 
 
 register('@hypercomb.social/BootstrapHistory', new BootstrapHistory())
+console.log('[hypercomb] bootstrap-history: non-blocking URL restore (2026-05-01)')

@@ -47,11 +47,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   // -------------------------------------------------
 
   public find = async (_grammar: string): Promise<Bee[]> => {
-    // In-flight dedup: if find() is already running, wait for it
-    if (this.#finding) {
-      console.log('[script-preloader] find() already in progress, waiting')
-      return this.#finding
-    }
+    if (this.#finding) return this.#finding
 
     const run = async (): Promise<Bee[]> => {
       // Layer-walk: layers are the source of truth. Union every signature
@@ -221,18 +217,9 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   }
 
   #loadBeeBySignature = async (signature: string): Promise<Bee | null> => {
-    // Already loaded — skip
-    if (this.#beeCache.has(signature)) {
-      console.log(`[script-preloader] bee ${signature} already loaded, skipping`)
-      return this.#beeCache.get(signature)!
-    }
-
-    // In-flight dedup — if another caller is loading this bee, wait for it
+    if (this.#beeCache.has(signature)) return this.#beeCache.get(signature)!
     const existing = this.#inFlight.get(signature)
-    if (existing) {
-      console.log(`[script-preloader] bee ${signature} already loading, waiting`)
-      return existing
-    }
+    if (existing) return existing
 
     const promise = this.#tryLoadBee(signature)
     this.#inFlight.set(signature, promise)
@@ -297,10 +284,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     if (!aliasMap) return
 
     for (const depSig of needed) {
-      if (this.#loadedDeps.has(depSig)) {
-        console.log(`[script-preloader] dep ${depSig} already loaded for bee ${beeSig}, skipping`)
-        continue
-      }
+      if (this.#loadedDeps.has(depSig)) continue
 
       // Reverse lookup: find alias for this dep signature
       // aliasMap values may have .js suffix (stored as filenames); strip when comparing
@@ -358,3 +342,4 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
 }
 
 register('@hypercomb.social/ScriptPreloader', new ScriptPreloader())
+console.log('[hypercomb] script-preloader: cache-hit-quiet (2026-05-01)')

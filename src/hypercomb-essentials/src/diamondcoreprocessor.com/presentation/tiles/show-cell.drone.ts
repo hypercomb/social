@@ -2683,24 +2683,50 @@ export class ShowCellDrone extends Drone {
     this.atlasRenderer = renderer
   }
 
+  // Per-revision cache. Multiple callers per nav ask for the same dir's
+  // children; the OPFS scan is the same answer until lineage's #fsRevision
+  // bumps. WeakMap so handles can be GC'd; revision in the value handles
+  // invalidation. In-flight dedup keyed on revision keeps a stale walk
+  // from poisoning cache after invalidation.
+  readonly #listCellFoldersCache = new WeakMap<FileSystemDirectoryHandle, { revision: number; result: string[] }>()
+  readonly #listCellFoldersPending = new WeakMap<FileSystemDirectoryHandle, { revision: number; promise: Promise<string[]> }>()
+
   private listCellFolders = async (dir: FileSystemDirectoryHandle): Promise<string[]> => {
-    const out: string[] = []
+    const lineage = this.resolve<any>('lineage')
+    const revision = Number(lineage?.changed?.() ?? 0)
 
-    for await (const [name, handle] of dir.entries()) {
-      if (handle.kind !== 'directory') continue
-      if (!name) continue
+    const cached = this.#listCellFoldersCache.get(dir)
+    if (cached?.revision === revision) return cached.result
 
-      if (name === '__dependencies__') continue
-      if (name === '__bees__') continue
-      if (name === '__layers__') continue
-      if (name === '__location__') continue
-      if (name.startsWith('__') && name.endsWith('__')) continue
+    const pending = this.#listCellFoldersPending.get(dir)
+    if (pending?.revision === revision) return pending.promise
 
-      out.push(name)
-    }
+    const promise = (async (): Promise<string[]> => {
+      const out: string[] = []
+      for await (const [name, handle] of dir.entries()) {
+        if (handle.kind !== 'directory') continue
+        if (!name) continue
+        if (name === '__dependencies__') continue
+        if (name === '__bees__') continue
+        if (name === '__layers__') continue
+        if (name === '__location__') continue
+        if (name.startsWith('__') && name.endsWith('__')) continue
+        out.push(name)
+      }
+      out.sort((a, b) => a.localeCompare(b))
+      if (Number(lineage?.changed?.() ?? 0) === revision) {
+        this.#listCellFoldersCache.set(dir, { revision, result: out })
+      }
+      return out
+    })()
 
-    out.sort((a, b) => a.localeCompare(b))
-    return out
+    this.#listCellFoldersPending.set(dir, { revision, promise })
+    promise.finally(() => {
+      const p = this.#listCellFoldersPending.get(dir)
+      if (p?.promise === promise) this.#listCellFoldersPending.delete(dir)
+    })
+
+    return promise
   }
 
   #layoutModeKey(locationKey: string): string {
@@ -3339,3 +3365,4 @@ export class ShowCellDrone extends Drone {
 }
 const showCell = new ShowCellDrone()
 window.ioc.register('@diamondcoreprocessor.com/ShowCellDrone', showCell)
+console.log('[hypercomb] show-cell: listCellFolders memoized per fsRevision (2026-05-01)')
