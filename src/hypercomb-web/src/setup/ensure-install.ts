@@ -2,13 +2,15 @@
 // Runs BEFORE the import map is set, so that OPFS dependencies are written
 // before the browser freezes the import-map entries.
 //
-// Push-only install: the sentinel is the SOLE source of content. Cold
-// boot does not pull any HTTP manifest or content; it awaits a sync
-// from DCP. Subsequent loads boot from the cached OPFS state and let
-// resyncFromSentinel apply incremental updates.
+// Two-source install: the sentinel is the preferred source (DCP audits
+// content, can push deltas). The bundled `/content/` shipped with the
+// web shell is the fallback — used when DCP is unreachable, and as a
+// reference for stale-cache detection so a new deploy is picked up
+// even when the sentinel hasn't pushed yet.
 
 import { EffectBus, SignatureStore } from '@hypercomb/core'
-import { Store } from '@hypercomb/shared/core'
+import { LayerInstaller, Store } from '@hypercomb/shared/core'
+import { LocationParser } from '@hypercomb/shared/core/initializers/location-parser.js'
 import type { SentinelBridge } from './sentinel-bridge'
 
 export type BootStatus =
@@ -52,14 +54,26 @@ export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<vo
     return
   }
 
+  // Read the bundled manifest sig shipped with this build of the web shell.
+  // Used to detect a stale OPFS cache when the deployed shell carries
+  // newer content than what's installed (e.g., user reloads after a
+  // deploy but before DCP has had a chance to push).
+  const bundled = await fetchBundledPackage()
+
   // Fast path: cached install present and intact → boot from cache.
   // Before short-circuiting we ask the sentinel to apply any pending
   // diff so a fresh deploy lands on the next reload instead of waiting
-  // for a DCP toggle. Push-only contract is preserved: this calls
-  // sentinel.sync(), not an HTTP manifest fetch, and is a no-op when
-  // the cached sync signature matches what DCP holds.
+  // for a DCP toggle.
   const cachedManifest = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
-  if (cachedManifest && cachedManifest.bees.length > 0) {
+  const stale = cachedManifest && bundled && bundledDiffersFromCached(bundled, cachedManifest)
+  if (stale) {
+    console.warn('[ensure-install] bundled package sig differs from cached install — invalidating cache')
+    localStorage.removeItem(MANIFEST_KEY)
+    localStorage.removeItem(SYNC_SIG_KEY)
+    await purgeStaleOpfsArtifacts(store)
+  }
+  const usableCache = !stale && cachedManifest && cachedManifest.bees.length > 0
+  if (usableCache) {
     const beeOk = await fileExists(store.bees, `${cachedManifest.bees[0]}.js`)
     const beeDepsOk = beeOk && await beeDepValuesPresent(store.dependencies, cachedManifest.beeDeps)
     if (beeOk && beeDepsOk) {
@@ -82,35 +96,27 @@ export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<vo
       EffectBus.emit('boot:status', { kind: 'cached' } as BootStatus)
       return
     }
-    console.warn('[ensure-install] cached state spot-check failed — wiping and awaiting DCP push')
+    console.warn('[ensure-install] cached state spot-check failed — wiping and awaiting fresh install')
     localStorage.removeItem(MANIFEST_KEY)
     localStorage.removeItem(SYNC_SIG_KEY)
     await purgeStaleOpfsArtifacts(store)
   }
 
-  // Cold start: OPFS empty. Sentinel is the only legitimate source of
-  // content under the push-only contract — there is no HTTP fallback.
-  // If the sentinel never came up, the shell shows an "Install via DCP"
-  // prompt; resyncAndEnforce will pick up content once DCP comes online.
-  if (!sentinel) {
-    console.warn('[ensure-install] no sentinel — cold boot has no content; waiting for DCP to come online')
+  // Sentinel preferred. If unavailable, fall back to installing from the
+  // bundled `/content/` shipped with the shell so dev/offline still works.
+  if (sentinel) {
+    console.log('[ensure-install] cold/refresh boot — awaiting sentinel sync')
+    EffectBus.emit('boot:status', { kind: 'installing' } as BootStatus)
+    await resyncFromSentinel(sentinel)
+  } else if (bundled) {
+    console.log('[ensure-install] no sentinel — installing from bundled /content/')
+    EffectBus.emit('boot:status', { kind: 'installing' } as BootStatus)
+    await installFromBundled(bundled, sigStore)
+  } else {
+    console.warn('[ensure-install] no sentinel and no bundled content — install needed')
     EffectBus.emit('boot:status', { kind: 'install-needed', reason: 'no-sentinel' } as BootStatus)
     return
   }
-
-  // Cold-boot consent gate: don't auto-pull on a fresh install. The
-  // user installs by going to DCP and adding a domain — that fires
-  // toggle-changed, the post-bootstrap resync flips the flag, and the
-  // subsequent reload boots from cache through the fast path above.
-  if (localStorage.getItem(INSTALLED_FLAG_KEY) !== 'true') {
-    console.log('[ensure-install] cold boot — install prompt; waiting for DCP install')
-    EffectBus.emit('boot:status', { kind: 'install-needed', reason: 'no-sentinel' } as BootStatus)
-    return
-  }
-
-  console.log('[ensure-install] cold boot — awaiting sentinel sync')
-  EffectBus.emit('boot:status', { kind: 'installing' } as BootStatus)
-  await resyncFromSentinel(sentinel)
 
   // After sync: if nothing landed in OPFS, DCP is reachable but has no
   // content for us. Surface as install-needed so the shell prompts the
@@ -121,6 +127,70 @@ export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<vo
     return
   }
   EffectBus.emit('boot:status', { kind: 'installed' } as BootStatus)
+}
+
+// -------------------------------------------------
+// bundled-content fallback — used when sentinel is unreachable, and
+// also to detect stale OPFS cache when a new shell deploy lands but
+// DCP hasn't pushed yet.
+// -------------------------------------------------
+
+type BundledPackage = { packageSig: string; bees: string[]; dependencies: string[]; layers: string[]; beeDeps?: Record<string, string[]> }
+
+const fetchBundledPackage = async (): Promise<BundledPackage | null> => {
+  try {
+    const res = await fetch('/content/manifest.json', { cache: 'no-store' })
+    if (!res.ok) return null
+    const content = await res.json() as { packages?: Record<string, { bees?: string[]; dependencies?: string[]; layers?: string[]; beeDeps?: Record<string, string[]> }> }
+    const sig = Object.keys(content.packages ?? {})[0]
+    if (!sig) return null
+    const pkg = content.packages![sig]
+    return {
+      packageSig: sig,
+      bees: pkg.bees ?? [],
+      dependencies: pkg.dependencies ?? [],
+      layers: pkg.layers ?? [],
+      beeDeps: pkg.beeDeps,
+    }
+  } catch {
+    return null
+  }
+}
+
+const bundledDiffersFromCached = (bundled: BundledPackage, cached: InstallManifest): boolean => {
+  if (bundled.bees.length !== cached.bees.length) return true
+  const cachedSet = new Set(cached.bees)
+  for (const sig of bundled.bees) {
+    if (!cachedSet.has(sig)) return true
+  }
+  return false
+}
+
+const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureStore): Promise<void> => {
+  const installer = get('@hypercomb.social/LayerInstaller') as LayerInstaller | undefined
+  if (!installer) {
+    console.warn('[ensure-install] LayerInstaller not registered — cannot fall back to bundled install')
+    return
+  }
+  // Build a parsed location pointing at the bundled content. Domain is
+  // the current origin's hostname; baseUrl is `<origin>/content`.
+  const baseUrl = `${location.origin}/content`
+  const parsed = LocationParser.parse(`${baseUrl}/${bundled.packageSig}`)
+  const ok = await installer.install(parsed)
+  if (!ok) {
+    console.warn('[ensure-install] bundled install reported incomplete')
+    return
+  }
+  // Mirror the manifest + sync state that resyncFromSentinel would write
+  // so the next reload boots through the cached fast path.
+  const manifest = { version: 2, layers: bundled.layers, bees: bundled.bees, dependencies: bundled.dependencies, beeDeps: bundled.beeDeps }
+  localStorage.setItem(MANIFEST_KEY, JSON.stringify(manifest))
+  localStorage.setItem(SYNC_SIG_KEY, bundled.packageSig)
+  localStorage.setItem(INSTALLED_FLAG_KEY, 'true')
+  if (bundled.beeDeps) (globalThis as any).__hypercombBeeDeps = bundled.beeDeps
+  sigStore.trustAll([...bundled.bees, ...bundled.dependencies, ...bundled.layers])
+  localStorage.setItem(SIG_STORE_KEY, JSON.stringify(sigStore.toJSON()))
+  console.log(`[ensure-install] bundled install complete: ${bundled.packageSig.slice(0, 12)} (${bundled.bees.length} bees, ${bundled.dependencies.length} deps, ${bundled.layers.length} layers)`)
 }
 
 /**
