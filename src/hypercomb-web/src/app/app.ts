@@ -105,16 +105,33 @@ export class App implements AfterViewInit {
     })
   }
 
+  private readonly pulseBee = (bee: Bee): void => {
+    void bee.pulse('').catch(error =>
+      console.warn('[app] failed to start bee', bee.constructor?.name, error)
+    )
+  }
+
   private readonly startRegisteredBees = async (): Promise<void> => {
+    // Bees may register over time (BootstrapHistory's Phase 2 loads them
+    // from OPFS in the background, after runtimeReady has resolved), so
+    // subscribe to future registrations BEFORE pulsing the current ones.
+    // Without this, late-registered workers like PixiHostWorker never
+    // get their first pulse and the canvas never mounts.
+    window.ioc.onRegister((_key, value) => {
+      if (value && typeof (value as Bee).pulse === 'function') {
+        this.pulseBee(value as Bee)
+      }
+    })
+
     const values = list()
       .map(key => get(key))
       .filter((value): value is Bee => !!value && typeof (value as Bee).pulse === 'function')
 
-    await Promise.allSettled(
-      values.map(bee => bee.pulse('').catch(error =>
+    await Promise.allSettled(values.map(bee =>
+      bee.pulse('').catch(error =>
         console.warn('[app] failed to start bee', bee.constructor?.name, error)
-      ))
-    )
+      )
+    ))
 
     window.dispatchEvent(new Event('synchronize'))
 

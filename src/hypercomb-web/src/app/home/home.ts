@@ -1,8 +1,6 @@
 import { Component, OnDestroy, signal } from '@angular/core';
 import { EffectBus } from '@hypercomb/core';
-import type { Lineage } from '@hypercomb/shared/core';
 import type { ResourceMessageHandler } from '@hypercomb/shared/core/resource-message-handler';
-import { fromRuntime } from '@hypercomb/shared/core/from-runtime';
 import { TrackPlayerComponent } from '@hypercomb/shared/ui/track-player/track-player.component';
 
 @Component({
@@ -16,11 +14,6 @@ export class Home implements OnDestroy {
   readonly playerOpen = signal(false)
 
   private get handler(): ResourceMessageHandler { return get('@hypercomb.social/ResourceMessageHandler') as ResourceMessageHandler }
-  private get lineage(): Lineage { return get('@hypercomb.social/Lineage') as Lineage }
-  public ready = fromRuntime(
-    get('@hypercomb.social/Lineage') as EventTarget,
-    () => this.lineage.ready
-  )
 
   constructor() {
     // Re-open the track player when /player queen is invoked
