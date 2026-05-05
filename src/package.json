@@ -45,7 +45,14 @@
     "start:dev": "npm --prefix hypercomb-dev start",
     "start:dcp": "npm --prefix diamond-core-processor start",
     "start:relay": "node hypercomb-relay/setup.js",
-    "sync:angular": "tsx scripts/sync-angular.ts"
+    "sync:angular": "tsx scripts/sync-angular.ts",
+    "intel:extract": "tsx scripts/intel-extract.ts",
+    "intel:add": "tsx scripts/intel-add.ts",
+    "intel:remove": "tsx scripts/intel-remove.ts",
+    "intel:publish": "tsx scripts/intel-publish.ts",
+    "intel:context": "tsx scripts/intel-context.ts",
+    "intel:emit-leaves": "tsx scripts/intel-emit-leaves.ts",
+    "intel:build-tree": "tsx scripts/intel-build-tree.ts"
   },
   "dependencies": {
     "@angular/animations": "21.2.4",

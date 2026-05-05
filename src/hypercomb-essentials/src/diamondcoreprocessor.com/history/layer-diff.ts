@@ -15,7 +15,7 @@
 //
 // diffLayers(null, layer) treats the whole layer as additions — useful
 // for rendering the first-ever layer in a location's history.
-import type { LayerContent } from './history.service.js'
+import { EMPTY_LAYER_CONTENT, type LayerContent } from './history.service.js'
 
 export type LayerDiff =
   | { kind: 'cell-added'; cell: string }
@@ -27,8 +27,8 @@ export const diffLayers = (
   prev: LayerContent | null,
   next: LayerContent,
 ): LayerDiff[] => {
-  const prevChildren = (prev?.children ?? []) as string[]
-  const nextChildren = (next.children ?? []) as string[]
+  const prevChildren = (prev?.children ?? EMPTY_LAYER_CONTENT.children) as string[]
+  const nextChildren = (next.children ?? EMPTY_LAYER_CONTENT.children) as string[]
   const diffs: LayerDiff[] = []
 
   // ── children: membership + order ─────────────────────────

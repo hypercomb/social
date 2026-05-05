@@ -37,6 +37,10 @@ export type LayerState = {
   resources: string[]
 }
 
+// SHA-256 of canonical JSON: {"bees":[],"dependencies":[],"layers":[],"resources":[]}
+export const EMPTY_LAYER_STATE_SIG = '892748ce914b902feb21d612f4652cc231b4455786683b23f9d82304ce061be1'
+export const EMPTY_LAYER_STATE: Readonly<LayerState> = Object.freeze({ bees: [], layers: [], dependencies: [], resources: [] })
+
 /**
  * Canonical layer. Always has a `name` (required, non-empty).
  * `children` is optional — present only when the layer has children.
@@ -67,6 +71,10 @@ export type LayerContent = {
    *  signature doesn't have to enumerate every possible slot. */
   [slot: string]: unknown
 }
+
+// SHA-256 of canonical JSON: {"children":[],"name":""}
+export const EMPTY_LAYER_CONTENT_SIG = 'a8a9aaacd1d7631b9d1b66a6b0e4b14fdd2f1052ffd5dfac2e92c0740020ee8d'
+export const EMPTY_LAYER_CONTENT: Readonly<LayerContent> = Object.freeze({ name: '', children: [] })
 
 /** Root's display name. Used when the layer has no path segments. */
 export const ROOT_NAME = '/'
@@ -273,8 +281,6 @@ export class HistoryService {
 
   static readonly #LAYER_FILE = 'layer.json'
 
-  static readonly #emptyLayer: LayerState = { bees: [], layers: [], dependencies: [], resources: [] }
-
   public readonly getLayer = async (signature: string): Promise<LayerState> => {
     try {
       const bag = await this.historyRoot.getDirectoryHandle(signature, { create: false })
@@ -283,7 +289,7 @@ export class HistoryService {
       const text = await file.text()
       return JSON.parse(text) as LayerState
     } catch {
-      return { ...HistoryService.#emptyLayer }
+      return EMPTY_LAYER_STATE
     }
   }
 

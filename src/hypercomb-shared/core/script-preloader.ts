@@ -13,6 +13,9 @@ export interface ActionDescriptor {
 
 export class ScriptPreloader extends EventTarget implements BeeResolver {
 
+  // SHA-256 of canonical JSON: [] → 4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945
+  static readonly #EMPTY_SIGS: readonly string[] = Object.freeze([])
+
   private get store(): Store { return <Store>get("@hypercomb.social/Store") }
 
   #actions: readonly ActionDescriptor[] = []
@@ -56,7 +59,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       const layerRoots = ScriptPreloader.readManifestLayers()
       const walked = layerRoots.length
         ? await this.#walkLayers(layerRoots)
-        : { bees: ScriptPreloader.readManifestBees(), dependencies: [], resources: [] }
+        : { bees: ScriptPreloader.readManifestBees(), dependencies: ScriptPreloader.#EMPTY_SIGS, resources: ScriptPreloader.#EMPTY_SIGS }
 
       // Prefetch __resources__ in parallel with bee loading — tiles and
       // drones that need these blobs will find them hot in the Store cache.

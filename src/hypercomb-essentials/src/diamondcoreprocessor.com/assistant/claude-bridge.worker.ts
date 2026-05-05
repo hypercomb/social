@@ -7,7 +7,7 @@ import type { HistoryService } from '../history/history.service.js'
 const BRIDGE_PORT = 2401
 const BRIDGE_ENABLED_QUERY_KEY = 'claudeBridge'
 const BRIDGE_ENABLED_STORAGE_KEY = 'hypercomb.claudeBridge.enabled'
-type BridgeRequest = { id: string; op: string; cells?: string[]; all?: boolean; cell?: string; text?: string }
+type BridgeRequest = { id: string; op: string; cells?: string[]; all?: boolean; cell?: string; text?: string; segments?: string[] }
 type BridgeResponse = { id: string; ok: boolean; data?: unknown; error?: string }
 
 const RECONNECT_MS = 3_000
@@ -153,15 +153,28 @@ export class ClaudeBridgeWorker extends Worker {
     const cells = req.cells
     if (!cells?.length) return { id: req.id, ok: false, error: 'no cells provided' }
 
-    const dir = await this.#explorerDir()
+    let dir = await this.#explorerDir()
     if (!dir) return { id: req.id, ok: false, error: 'no explorer directory' }
+
+    // Walk to optional parent path. Children are added there with segments-aware
+    // cell:added events so the cascade starts at the correct depth regardless of
+    // the user's current navigation. One awaited cascade for the whole batch.
+    const parentSegments: string[] = []
+    if (req.segments?.length) {
+      for (const raw of req.segments) {
+        const seg = normalizeCell(raw)
+        if (!seg) continue
+        dir = await dir.getDirectoryHandle(seg, { create: true })
+        parentSegments.push(seg)
+      }
+    }
 
     let count = 0
     for (const name of cells) {
       const normalized = normalizeCell(name)
       if (!normalized) continue
       await dir.getDirectoryHandle(normalized, { create: true })
-      EffectBus.emit('cell:added', { cell: normalized })
+      EffectBus.emit('cell:added', { cell: normalized, segments: parentSegments.slice() })
       count++
     }
 

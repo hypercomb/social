@@ -9,7 +9,7 @@
 // rewrites history. Resources referenced by past layers are never GC'd,
 // so rewinding always resolves to real content.
 import { EffectBus } from '@hypercomb/core'
-import type { HistoryService, LayerContent, LayerEntry } from './history.service.js'
+import { EMPTY_LAYER_CONTENT, type HistoryService, type LayerContent, type LayerEntry } from './history.service.js'
 import { diffLayers } from './layer-diff.js'
 
 export type CursorState = {
@@ -409,10 +409,9 @@ export class HistoryCursorService extends EventTarget {
       const blob = await store.getResource(signature)
       if (!blob) { this.#contentBySig.set(signature, null); return null }
       const parsed = JSON.parse(await blob.text()) as Partial<LayerContent>
-      const content: LayerContent = {
-        name: parsed.name ?? '',
-        children: parsed.children ?? [],
-      }
+      const content: LayerContent = !parsed.name && !parsed.children
+        ? EMPTY_LAYER_CONTENT
+        : { name: parsed.name ?? '', children: parsed.children }
       this.#contentBySig.set(signature, content)
       return content
     } catch {
@@ -465,10 +464,9 @@ export class HistoryCursorService extends EventTarget {
     // clears the grid instead of falling through to live-state tiles.
     if (this.#position === 0) {
       if (this.#layers.length === 0) return null
-      const empty: LayerContent = { name: '', children: [] }
       this.#cachedLayerSig = null
-      this.#cachedContent = empty
-      return empty
+      this.#cachedContent = EMPTY_LAYER_CONTENT
+      return EMPTY_LAYER_CONTENT
     }
     const entry = this.#layers[this.#position - 1]
 

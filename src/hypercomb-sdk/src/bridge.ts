@@ -11,6 +11,11 @@ export type BridgeRequest = {
   all?: boolean
   cell?: string
   text?: string
+  /** Optional parent path for `add`. Worker walks/creates segments, then adds
+   *  the children at that depth with segments-aware cell:added emits so the
+   *  cascade starts at the correct ancestor. Lets the CLI bulk-import without
+   *  needing to navigate the renderer between each batch. */
+  segments?: string[]
 }
 
 export type BridgeResponse = {
