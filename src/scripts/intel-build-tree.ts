@@ -1,13 +1,9 @@
-// Walks the relational-intelligence skeleton tree and issues one batched
-// `tile add` per parent (with that parent's children) over the bridge.
-// Each call goes through the bridge's awaited #add path with a segments
-// parameter, so the cascade for each parent is one consistent merkle update.
-//
-// This is the tactical bulk-import path while the proper layer-import primitive
-// is still pending in the layer-as-primitive refactor (see memory:
-// project_layer_is_primitive.md). Better than 367 racy `do --stdin` submits
-// because each call is awaited end-to-end and the worker emits cell:added
-// with proper segments so the cascade starts at the correct depth.
+// Walks the relational-intelligence skeleton tree and issues one bridge
+// `update` per parent. Each update carries the full layer state at that
+// position — `{ name, children: [...] }` — and goes through
+// `LayerCommitter.update` (the layer-as-primitive entry). One awaited
+// cascade per parent. No item-level synthesis, no fire-and-forget, no
+// race window between batches.
 
 import { send } from '../hypercomb-cli/src/bridge/client.js'
 import { promises as fs } from 'node:fs'
@@ -17,6 +13,7 @@ type Tree = Record<string, Tree | null>
 
 interface Batch {
   segments: string[]
+  name: string
   children: string[]
 }
 
@@ -25,9 +22,9 @@ async function main(): Promise<void> {
   const tree = JSON.parse(text) as Tree
 
   const batches: Batch[] = []
-  collectBatches(tree, [], batches)
+  collectBatches(tree, [], 'root', batches)
 
-  console.log(`[build-tree] ${batches.length} parent batches to commit`)
+  console.log(`[build-tree] ${batches.length} parent updates to commit`)
   console.log(`[build-tree] total children across all batches: ${batches.reduce((n, b) => n + b.children.length, 0)}`)
 
   let okCount = 0
@@ -40,9 +37,9 @@ async function main(): Promise<void> {
     process.stdout.write(`[${i + 1}/${batches.length}] ${path} ← ${batch.children.length} children ... `)
 
     const res = await send({
-      op: 'add',
-      cells: batch.children,
+      op: 'update',
       segments: batch.segments,
+      layer: { name: batch.name, children: batch.children },
     })
 
     if (res.ok) {
@@ -57,21 +54,20 @@ async function main(): Promise<void> {
 
   console.log('')
   console.log(`[build-tree] complete`)
-  console.log(`  batches:  ${okCount} ok, ${failCount} failed`)
-  console.log(`  cells committed: ${cellCount}`)
+  console.log(`  updates: ${okCount} ok, ${failCount} failed`)
+  console.log(`  children committed: ${cellCount}`)
 }
 
-function collectBatches(node: Tree, segments: string[], out: Batch[]): void {
-  // Children of this node = direct keys whose values are object or null.
-  // Any key in this node is a child cell at THIS depth (segments).
+function collectBatches(node: Tree, segments: string[], name: string, out: Batch[]): void {
+  // Each level produces one update: this node's layer = its name + its children list.
   const children = Object.keys(node)
   if (children.length > 0) {
-    out.push({ segments: segments.slice(), children })
+    out.push({ segments: segments.slice(), name, children })
   }
-  // Recurse into each non-null child to collect its own batch.
-  for (const [name, sub] of Object.entries(node)) {
+  // Recurse into each non-null child to collect its own update.
+  for (const [childName, sub] of Object.entries(node)) {
     if (sub !== null && typeof sub === 'object') {
-      collectBatches(sub as Tree, [...segments, name], out)
+      collectBatches(sub as Tree, [...segments, childName], childName, out)
     }
   }
 }

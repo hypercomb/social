@@ -102,10 +102,14 @@ var ClaudeBridgeWorker = class extends Worker {
   }
   async #dispatch(req) {
     switch (req.op) {
+      case "update":
+        return this.#update(req);
       case "add":
         return this.#add(req);
+      // legacy: delegates to update
       case "remove":
         return this.#remove(req);
+      // legacy: delegates to update
       case "list":
         return this.#list(req);
       case "inspect":
@@ -117,6 +121,39 @@ var ClaudeBridgeWorker = class extends Worker {
       default:
         return { id: req.id, ok: false, error: `unknown op: ${req.op}` };
     }
+  }
+  // Layer-as-primitive update. Caller passes `{ segments, layer }` where
+  // layer is `{ name, ...slots }`. Slot names are conventional (children,
+  // tags, notes, etc.). Empty arrays wipe the slot. One awaited cascade
+  // per parent. The receiver mirrors `children` to OPFS folders so the
+  // file tree stays in sync with the merkle layer.
+  async #update(req) {
+    const layer = req.layer;
+    if (!layer || typeof layer !== "object") {
+      return { id: req.id, ok: false, error: "no layer provided" };
+    }
+    let dir = await this.#explorerDir();
+    if (!dir) return { id: req.id, ok: false, error: "no explorer directory" };
+    const parentSegments = [];
+    if (req.segments?.length) {
+      for (const raw of req.segments) {
+        const seg = normalizeCell(raw);
+        if (!seg) continue;
+        dir = await dir.getDirectoryHandle(seg, { create: true });
+        parentSegments.push(seg);
+      }
+    }
+    const childrenRaw = layer.children;
+    const children = Array.isArray(childrenRaw) ? childrenRaw.map((c) => normalizeCell(String(c))).filter(Boolean) : [];
+    for (const name of children) {
+      await dir.getDirectoryHandle(name, { create: true });
+    }
+    const committer = get("@diamondcoreprocessor.com/LayerCommitter");
+    if (!committer?.update) {
+      return { id: req.id, ok: false, error: "committer.update not available" };
+    }
+    await committer.update(parentSegments, layer);
+    return { id: req.id, ok: true, data: { count: children.length, segments: parentSegments } };
   }
   // Mirrors a human keystroke into the in-app command line. Emits the same
   // EffectBus channel a future remote caller would use; the command-line
@@ -133,14 +170,23 @@ var ClaudeBridgeWorker = class extends Worker {
   async #add(req) {
     const cells = req.cells;
     if (!cells?.length) return { id: req.id, ok: false, error: "no cells provided" };
-    const dir = await this.#explorerDir();
+    let dir = await this.#explorerDir();
     if (!dir) return { id: req.id, ok: false, error: "no explorer directory" };
+    const parentSegments = [];
+    if (req.segments?.length) {
+      for (const raw of req.segments) {
+        const seg = normalizeCell(raw);
+        if (!seg) continue;
+        dir = await dir.getDirectoryHandle(seg, { create: true });
+        parentSegments.push(seg);
+      }
+    }
     let count = 0;
     for (const name of cells) {
       const normalized = normalizeCell(name);
       if (!normalized) continue;
       await dir.getDirectoryHandle(normalized, { create: true });
-      EffectBus.emit("cell:added", { cell: normalized });
+      EffectBus.emit("cell:added", { cell: normalized, segments: parentSegments.slice() });
       count++;
     }
     await new hypercomb().act();

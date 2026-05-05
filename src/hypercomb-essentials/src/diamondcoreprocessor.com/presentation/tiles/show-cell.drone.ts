@@ -483,6 +483,13 @@ export class ShowCellDrone extends Drone {
   }
 
   private refreshMeshCells = async (grammar: string = ''): Promise<void> => {
+    // Mesh is opt-in. Default: dormant. Joining a public session sets the
+    // flag below. Without it, no relay connections, no event subscriptions,
+    // no per-event secp256k1 verifications. Local-only operation.
+    const meshEnabled = (() => {
+      try { return localStorage.getItem('hc:mesh-enabled') === 'true' } catch { return false }
+    })()
+    if (!meshEnabled) return
 
     const lineage = this.resolve<any>('lineage')
     const mesh = this.tryGetMesh()

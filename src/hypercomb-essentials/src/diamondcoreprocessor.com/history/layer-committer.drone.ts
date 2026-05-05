@@ -88,6 +88,19 @@ type CommitDelta =
   | { kind: 'sig-swap'; slot: string; from: string; to: string }
   | { kind: 'set'; slot: string; sigs: readonly string[] }
   | { kind: 'name'; slot: 'children'; op: 'add' | 'remove'; cell: string }
+  // layer: the layer-as-primitive update. The caller passes the full new
+  // layer state — `{ name, ...slots }` where each slot value is an array
+  // of sigs (or, for `children`, names that resolve at commit time). Empty
+  // arrays cause the slot to be wiped (absent ≡ empty). One cascade per
+  // parent. Conventional: no hardcoded slot names — the caller's keys are
+  // the slot names. Name-resolution is opt-in via the `nameSlots` set.
+  | {
+      kind: 'layer'
+      layer: { [slot: string]: readonly string[] }
+      /** Keys in this set are interpreted as cell-NAME arrays and resolved
+       *  to sigs at commit time. All other keys are treated as sig arrays. */
+      nameSlots?: ReadonlySet<string>
+    }
 
 type CommitRequest = {
   segments: string[] | null
@@ -375,6 +388,201 @@ export class LayerCommitter {
     })
   }
 
+  /**
+   * Layer-as-primitive update. Pass the full new layer state at this position
+   * — `{ name, ...slots }` — and the committer applies every slot in one
+   * cascade. Empty arrays wipe the slot (absent ≡ empty). Slot names are the
+   * caller's convention; the committer adds no special handling beyond
+   * optional name→sig resolution for slots listed in `nameSlots` (typically
+   * just `'children'`).
+   *
+   * This is the canonical write surface — single API, single cascade per
+   * parent, no fire-and-forget paths, no item-level synthesis. Add and
+   * remove are special cases of "the new children list is X".
+   */
+  public async update(
+    segments: readonly string[],
+    layer: { name?: string; [slot: string]: unknown },
+    nameSlots: ReadonlySet<string> = new Set(['children']),
+  ): Promise<string> {
+    // Strip the `name` key — it identifies the cell, not a slot.
+    // Coerce every other entry to a string array (drop non-array values
+    // since the convention is "lists in, lists out").
+    const slots: { [slot: string]: readonly string[] } = {}
+    for (const [key, value] of Object.entries(layer)) {
+      if (key === 'name') continue
+      if (Array.isArray(value)) {
+        slots[key] = value.map(v => String(v))
+      }
+    }
+    const cleaned = this.#cleanSegments(segments) ?? []
+    await this.#machine.requestAndWait({
+      segments: cleaned,
+      delta: { kind: 'layer', layer: slots, nameSlots },
+    })
+
+    // Return the new layer sig so callers can use it to compose the merkle
+    // graph. After the cascade, `#latestSigByLineage` holds the head; we
+    // resolve through the same primitive renderers use.
+    const history = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
+    const lineageInst = get<Lineage>('@hypercomb.social/Lineage')
+    if (!history || !lineageInst) return ''
+    const ancestorName = layer.name
+      ? String(layer.name)
+      : (cleaned.length === 0 ? ROOT_NAME : cleaned[cleaned.length - 1])
+    const locSig = await history.sign({
+      domain: lineageInst.domain,
+      explorerSegments: () => cleaned,
+    } as Lineage)
+    return history.latestMarkerSigFor(locSig, ancestorName)
+  }
+
+  /**
+   * Multi-position layer-tree commit. Takes many `(segments, layer)` updates
+   * and applies them with a SINGLE shared up-cascade — each affected ancestor
+   * is committed exactly once with the union of changes from its descendants.
+   *
+   * Compared to N individual `update()` calls (each with its own cascade-up-
+   * to-root):
+   *   - root commits once, not N times
+   *   - every shared ancestor commits once
+   *   - total layer files written = |affected paths|, not |updates × depth|
+   *
+   * This is the bulk-import / compaction primitive. The boot-time preloader
+   * walk scales with this count, so collapsing it is the perf-critical fix.
+   */
+  public importTree = async (
+    updates: { segments: readonly string[]; layer: { name?: string } & { [slot: string]: unknown } }[],
+    nameSlots: ReadonlySet<string> = new Set(['children']),
+  ): Promise<void> => {
+    if (updates.length === 0) return
+
+    const cursor = get<HistoryCursorService>('@diamondcoreprocessor.com/HistoryCursorService')
+    if (cursor?.state?.rewound) return
+
+    const lineage = get<Lineage>('@hypercomb.social/Lineage')
+    const history = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
+    if (!lineage || !history) return
+
+    // Path encoding: segments joined by ' ' (NUL), or '' for root.
+    const encode = (segs: readonly string[]) => segs.join(' ')
+    const decode = (key: string) => key === '' ? [] : key.split(' ')
+
+    // Index updates by path.
+    const updateByPath = new Map<string, { segments: string[]; layer: { name?: string } & { [slot: string]: unknown } }>()
+    for (const u of updates) {
+      const segs = (this.#cleanSegments(u.segments) ?? [])
+      updateByPath.set(encode(segs), { segments: segs, layer: u.layer })
+    }
+
+    // Affected paths = every update path AND every ancestor up to root.
+    const affected = new Set<string>()
+    for (const u of updateByPath.values()) {
+      for (let d = u.segments.length; d >= 0; d--) {
+        affected.add(encode(u.segments.slice(0, d)))
+      }
+    }
+
+    // Build parent → direct-child paths index for ancestor swap pass.
+    const childrenOf = new Map<string, string[]>()
+    for (const pathKey of affected) {
+      const segs = decode(pathKey)
+      if (segs.length === 0) continue
+      const parentKey = encode(segs.slice(0, -1))
+      const list = childrenOf.get(parentKey) ?? []
+      list.push(pathKey)
+      childrenOf.set(parentKey, list)
+    }
+
+    // Sort affected paths by depth descending (deepest first).
+    const ordered = [...affected].sort((a, b) => decode(b).length - decode(a).length)
+
+    // transitions: pathKey → { prevSig, newSig, name } produced by this commit.
+    const transitions = new Map<string, { prevSig: string; newSig: string; name: string }>()
+
+    for (const pathKey of ordered) {
+      const segments = decode(pathKey)
+      const ancestorName = segments.length === 0 ? ROOT_NAME : segments[segments.length - 1]
+      const ancestorLocSig = await history.sign({
+        domain: lineage.domain,
+        explorerSegments: () => segments,
+      } as Lineage)
+
+      const prevSig = await history.latestMarkerSigFor(ancestorLocSig, ancestorName)
+      const prevLayer = await history.getLayerBySig(prevSig)
+      const machine = LayerMachine.fromLayer(prevLayer, ancestorName, segments)
+
+      // Apply this path's leaf update, if it has one.
+      const update = updateByPath.get(pathKey)
+      if (update) {
+        for (const [slot, raw] of Object.entries(update.layer)) {
+          if (slot === 'name') continue
+          if (!Array.isArray(raw)) continue
+          let sigs: string[]
+          if (nameSlots.has(slot)) {
+            sigs = []
+            for (const cell of raw) {
+              const trimmed = String(cell ?? '').trim()
+              if (!trimmed) continue
+              const cellLocSig = await history.sign({
+                domain: lineage.domain,
+                explorerSegments: () => [...segments, trimmed],
+              } as Lineage)
+              const cellSig = await history.latestMarkerSigFor(cellLocSig, trimmed)
+              if (cellSig) sigs.push(cellSig)
+            }
+          } else {
+            sigs = (raw as unknown[]).map(v => String(v)).filter(Boolean)
+          }
+          machine.apply({ slot, op: 'set', sigs })
+        }
+      }
+
+      // Apply child sig swaps for any direct children that just transitioned.
+      // After the layer-update above sets the children list (resolved from
+      // names), the children sigs ARE the descendants' prevSig values; we
+      // swap them to newSig values. If a child wasn't named in the update
+      // (incremental import preserving existing children), its sig in the
+      // current children list still needs swapping.
+      for (const childPathKey of childrenOf.get(pathKey) ?? []) {
+        const transition = transitions.get(childPathKey)
+        if (!transition) continue
+        if (transition.prevSig === transition.newSig) continue
+        const swapResult = machine.apply({
+          slot: 'children',
+          op: 'swap',
+          from: transition.prevSig,
+          to: transition.newSig,
+        })
+        if (!swapResult.changed) {
+          // Sig miss — the children list (post layer-update) doesn't have
+          // the descendant's prevSig. Try by name; else append.
+          const childSegs = decode(childPathKey)
+          const childName = childSegs[childSegs.length - 1]
+          const prevChildren = machine.getSlot('children') as readonly string[]
+          let resolved = false
+          for (const sig of prevChildren) {
+            const child = await history.getLayerBySig(sig)
+            if (child?.name === childName) {
+              machine.apply({ slot: 'children', op: 'swap', from: sig, to: transition.newSig })
+              resolved = true
+              break
+            }
+          }
+          if (!resolved) {
+            machine.apply({ slot: 'children', op: 'append', sig: transition.newSig })
+          }
+        }
+      }
+
+      const newSig = await history.commitLayer(ancestorLocSig, machine.output())
+      transitions.set(pathKey, { prevSig, newSig, name: ancestorName })
+    }
+
+    const cursorAfter = get<HistoryCursorService>('@diamondcoreprocessor.com/HistoryCursorService')
+    if (cursorAfter) await cursorAfter.onNewLayer()
+  }
+
   public async bootstrapIfEmpty(segments?: string[] | null): Promise<void> {
     const history = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
     const lineage = get<Lineage>('@hypercomb.social/Lineage')
@@ -493,6 +701,34 @@ export class LayerCommitter {
                 break
               }
             }
+          }
+        } else if (d.kind === 'layer') {
+          // Layer-as-primitive: apply every slot in the supplied layer state
+          // in one machine, all baked into one commit. Empty arrays write
+          // empty slots — commitLayer's serialization strips them, so absent
+          // ≡ empty. No hardcoded slot semantics here; the caller's keys are
+          // the slot names by convention. Optional `nameSlots` opts a slot
+          // into name→sig resolution (used for `children`).
+          const nameSlots = d.nameSlots ?? new Set<string>()
+          for (const [slot, raw] of Object.entries(d.layer)) {
+            const values = Array.isArray(raw) ? raw : []
+            let sigs: string[]
+            if (nameSlots.has(slot)) {
+              sigs = []
+              for (const cell of values) {
+                const trimmed = String(cell ?? '').trim()
+                if (!trimmed) continue
+                const cellLocSig = await history.sign({
+                  domain: lineage.domain,
+                  explorerSegments: () => [...sub, trimmed],
+                } as Lineage)
+                const cellSig = await history.latestMarkerSigFor(cellLocSig, trimmed)
+                if (cellSig) sigs.push(cellSig)
+              }
+            } else {
+              sigs = values.map(v => String(v)).filter(Boolean)
+            }
+            machine.apply({ slot, op: 'set', sigs })
           }
         }
       } else if (belowOldSig !== null && belowNewSig !== null) {

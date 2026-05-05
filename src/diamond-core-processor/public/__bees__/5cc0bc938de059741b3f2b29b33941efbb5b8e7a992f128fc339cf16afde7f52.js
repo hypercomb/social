@@ -87,6 +87,8 @@ function reduce(records) {
 }
 
 // src/diamondcoreprocessor.com/history/history.service.ts
+var EMPTY_LAYER_STATE = Object.freeze({ bees: [], layers: [], dependencies: [], resources: [] });
+var EMPTY_LAYER_CONTENT = Object.freeze({ name: "", children: [] });
 var ROOT_NAME = "/";
 var emptyLayer = (name) => ({ name });
 var HistoryService = class _HistoryService {
@@ -222,7 +224,6 @@ var HistoryService = class _HistoryService {
   // layer.json — materialized layer state
   // -------------------------------------------------
   static #LAYER_FILE = "layer.json";
-  static #emptyLayer = { bees: [], layers: [], dependencies: [], resources: [] };
   getLayer = async (signature) => {
     try {
       const bag = await this.historyRoot.getDirectoryHandle(signature, { create: false });
@@ -231,7 +232,7 @@ var HistoryService = class _HistoryService {
       const text = await file.text();
       return JSON.parse(text);
     } catch {
-      return { ..._HistoryService.#emptyLayer };
+      return EMPTY_LAYER_STATE;
     }
   };
   putLayer = async (signature, state) => {
@@ -1588,6 +1589,144 @@ var LayerCommitter = class {
       delta: { kind: "sig-swap", slot, from, to }
     });
   }
+  /**
+   * Layer-as-primitive update. Pass the full new layer state at this position
+   * — `{ name, ...slots }` — and the committer applies every slot in one
+   * cascade. Empty arrays wipe the slot (absent ≡ empty). Slot names are the
+   * caller's convention; the committer adds no special handling beyond
+   * optional name→sig resolution for slots listed in `nameSlots` (typically
+   * just `'children'`).
+   *
+   * This is the canonical write surface — single API, single cascade per
+   * parent, no fire-and-forget paths, no item-level synthesis. Add and
+   * remove are special cases of "the new children list is X".
+   */
+  update(segments, layer, nameSlots = /* @__PURE__ */ new Set(["children"])) {
+    const slots = {};
+    for (const [key, value] of Object.entries(layer)) {
+      if (key === "name") continue;
+      if (Array.isArray(value)) {
+        slots[key] = value.map((v) => String(v));
+      }
+    }
+    return this.#machine.requestAndWait({
+      segments: this.#cleanSegments(segments) ?? [],
+      delta: { kind: "layer", layer: slots, nameSlots }
+    });
+  }
+  /**
+   * Multi-position layer-tree commit. Takes many `(segments, layer)` updates
+   * and applies them with a SINGLE shared up-cascade — each affected ancestor
+   * is committed exactly once with the union of changes from its descendants.
+   *
+   * Compared to N individual `update()` calls (each with its own cascade-up-
+   * to-root):
+   *   - root commits once, not N times
+   *   - every shared ancestor commits once
+   *   - total layer files written = |affected paths|, not |updates × depth|
+   *
+   * This is the bulk-import / compaction primitive. The boot-time preloader
+   * walk scales with this count, so collapsing it is the perf-critical fix.
+   */
+  importTree = async (updates, nameSlots = /* @__PURE__ */ new Set(["children"])) => {
+    if (updates.length === 0) return;
+    const cursor = get("@diamondcoreprocessor.com/HistoryCursorService");
+    if (cursor?.state?.rewound) return;
+    const lineage = get("@hypercomb.social/Lineage");
+    const history = get("@diamondcoreprocessor.com/HistoryService");
+    if (!lineage || !history) return;
+    const encode = (segs) => segs.join("\0");
+    const decode = (key) => key === "" ? [] : key.split("\0");
+    const updateByPath = /* @__PURE__ */ new Map();
+    for (const u of updates) {
+      const segs = this.#cleanSegments(u.segments) ?? [];
+      updateByPath.set(encode(segs), { segments: segs, layer: u.layer });
+    }
+    const affected = /* @__PURE__ */ new Set();
+    for (const u of updateByPath.values()) {
+      for (let d = u.segments.length; d >= 0; d--) {
+        affected.add(encode(u.segments.slice(0, d)));
+      }
+    }
+    const childrenOf = /* @__PURE__ */ new Map();
+    for (const pathKey of affected) {
+      const segs = decode(pathKey);
+      if (segs.length === 0) continue;
+      const parentKey = encode(segs.slice(0, -1));
+      const list = childrenOf.get(parentKey) ?? [];
+      list.push(pathKey);
+      childrenOf.set(parentKey, list);
+    }
+    const ordered = [...affected].sort((a, b) => decode(b).length - decode(a).length);
+    const transitions = /* @__PURE__ */ new Map();
+    for (const pathKey of ordered) {
+      const segments = decode(pathKey);
+      const ancestorName = segments.length === 0 ? ROOT_NAME : segments[segments.length - 1];
+      const ancestorLocSig = await history.sign({
+        domain: lineage.domain,
+        explorerSegments: () => segments
+      });
+      const prevSig = await history.latestMarkerSigFor(ancestorLocSig, ancestorName);
+      const prevLayer = await history.getLayerBySig(prevSig);
+      const machine = LayerMachine.fromLayer(prevLayer, ancestorName, segments);
+      const update = updateByPath.get(pathKey);
+      if (update) {
+        for (const [slot, raw] of Object.entries(update.layer)) {
+          if (slot === "name") continue;
+          if (!Array.isArray(raw)) continue;
+          let sigs;
+          if (nameSlots.has(slot)) {
+            sigs = [];
+            for (const cell of raw) {
+              const trimmed = String(cell ?? "").trim();
+              if (!trimmed) continue;
+              const cellLocSig = await history.sign({
+                domain: lineage.domain,
+                explorerSegments: () => [...segments, trimmed]
+              });
+              const cellSig = await history.latestMarkerSigFor(cellLocSig, trimmed);
+              if (cellSig) sigs.push(cellSig);
+            }
+          } else {
+            sigs = raw.map((v) => String(v)).filter(Boolean);
+          }
+          machine.apply({ slot, op: "set", sigs });
+        }
+      }
+      for (const childPathKey of childrenOf.get(pathKey) ?? []) {
+        const transition = transitions.get(childPathKey);
+        if (!transition) continue;
+        if (transition.prevSig === transition.newSig) continue;
+        const swapResult = machine.apply({
+          slot: "children",
+          op: "swap",
+          from: transition.prevSig,
+          to: transition.newSig
+        });
+        if (!swapResult.changed) {
+          const childSegs = decode(childPathKey);
+          const childName = childSegs[childSegs.length - 1];
+          const prevChildren = machine.getSlot("children");
+          let resolved = false;
+          for (const sig of prevChildren) {
+            const child = await history.getLayerBySig(sig);
+            if (child?.name === childName) {
+              machine.apply({ slot: "children", op: "swap", from: sig, to: transition.newSig });
+              resolved = true;
+              break;
+            }
+          }
+          if (!resolved) {
+            machine.apply({ slot: "children", op: "append", sig: transition.newSig });
+          }
+        }
+      }
+      const newSig = await history.commitLayer(ancestorLocSig, machine.output());
+      transitions.set(pathKey, { prevSig, newSig, name: ancestorName });
+    }
+    const cursorAfter = get("@diamondcoreprocessor.com/HistoryCursorService");
+    if (cursorAfter) await cursorAfter.onNewLayer();
+  };
   async bootstrapIfEmpty(segments) {
     const history = get("@diamondcoreprocessor.com/HistoryService");
     const lineage = get("@hypercomb.social/Lineage");
@@ -1667,6 +1806,28 @@ var LayerCommitter = class {
                 break;
               }
             }
+          }
+        } else if (d.kind === "layer") {
+          const nameSlots = d.nameSlots ?? /* @__PURE__ */ new Set();
+          for (const [slot, raw] of Object.entries(d.layer)) {
+            const values = Array.isArray(raw) ? raw : [];
+            let sigs;
+            if (nameSlots.has(slot)) {
+              sigs = [];
+              for (const cell of values) {
+                const trimmed = String(cell ?? "").trim();
+                if (!trimmed) continue;
+                const cellLocSig = await history.sign({
+                  domain: lineage.domain,
+                  explorerSegments: () => [...sub, trimmed]
+                });
+                const cellSig = await history.latestMarkerSigFor(cellLocSig, trimmed);
+                if (cellSig) sigs.push(cellSig);
+              }
+            } else {
+              sigs = values.map((v) => String(v)).filter(Boolean);
+            }
+            machine.apply({ slot, op: "set", sigs });
           }
         }
       } else if (belowOldSig !== null && belowNewSig !== null) {

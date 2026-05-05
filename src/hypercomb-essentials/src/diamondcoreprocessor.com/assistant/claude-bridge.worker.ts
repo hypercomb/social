@@ -7,7 +7,19 @@ import type { HistoryService } from '../history/history.service.js'
 const BRIDGE_PORT = 2401
 const BRIDGE_ENABLED_QUERY_KEY = 'claudeBridge'
 const BRIDGE_ENABLED_STORAGE_KEY = 'hypercomb.claudeBridge.enabled'
-type BridgeRequest = { id: string; op: string; cells?: string[]; all?: boolean; cell?: string; text?: string; segments?: string[] }
+type BridgeRequest = {
+  id: string
+  op: string
+  cells?: string[]
+  all?: boolean
+  cell?: string
+  text?: string
+  segments?: string[]
+  /** Layer-as-primitive update payload. Caller passes `{ name, ...slots }`
+   *  where each slot value is an array of strings. The receiver creates OPFS
+   *  folders for any names in `children`, then calls `committer.update`. */
+  layer?: { name?: string } & { [slot: string]: unknown }
+}
 type BridgeResponse = { id: string; ok: boolean; data?: unknown; error?: string }
 
 const RECONNECT_MS = 3_000
@@ -125,14 +137,62 @@ export class ClaudeBridgeWorker extends Worker {
 
   async #dispatch(req: BridgeRequest): Promise<BridgeResponse> {
     switch (req.op) {
-      case 'add':     return this.#add(req)
-      case 'remove':  return this.#remove(req)
+      case 'update':  return this.#update(req)
+      case 'add':     return this.#add(req)        // legacy: delegates to update
+      case 'remove':  return this.#remove(req)     // legacy: delegates to update
       case 'list':    return this.#list(req)
       case 'inspect': return this.#inspect(req)
       case 'history': return this.#history(req)
       case 'submit':  return this.#submit(req)
       default:        return { id: req.id, ok: false, error: `unknown op: ${req.op}` }
     }
+  }
+
+  // Layer-as-primitive update. Caller passes `{ segments, layer }` where
+  // layer is `{ name, ...slots }`. Slot names are conventional (children,
+  // tags, notes, etc.). Empty arrays wipe the slot. One awaited cascade
+  // per parent. The receiver mirrors `children` to OPFS folders so the
+  // file tree stays in sync with the merkle layer.
+  async #update(req: BridgeRequest): Promise<BridgeResponse> {
+    const layer = req.layer
+    if (!layer || typeof layer !== 'object') {
+      return { id: req.id, ok: false, error: 'no layer provided' }
+    }
+
+    let dir = await this.#explorerDir()
+    if (!dir) return { id: req.id, ok: false, error: 'no explorer directory' }
+
+    // Walk to / create the parent path so OPFS reflects the segments.
+    const parentSegments: string[] = []
+    if (req.segments?.length) {
+      for (const raw of req.segments) {
+        const seg = normalizeCell(raw)
+        if (!seg) continue
+        dir = await dir.getDirectoryHandle(seg, { create: true })
+        parentSegments.push(seg)
+      }
+    }
+
+    // Mirror children list to OPFS folders. Create any named child that
+    // isn't already a directory; existing folders not in children remain
+    // (orphan removal is a separate sweep, out of scope here).
+    const childrenRaw = (layer as { children?: unknown }).children
+    const children = Array.isArray(childrenRaw) ? childrenRaw.map(c => normalizeCell(String(c))).filter(Boolean) : []
+    for (const name of children) {
+      await dir.getDirectoryHandle(name, { create: true })
+    }
+
+    // Hand the whole layer to the committer's awaited update path.
+    const committer = get<{
+      update?: (segments: readonly string[], layer: object) => Promise<void>
+    }>('@diamondcoreprocessor.com/LayerCommitter')
+
+    if (!committer?.update) {
+      return { id: req.id, ok: false, error: 'committer.update not available' }
+    }
+
+    await committer.update(parentSegments, layer)
+    return { id: req.id, ok: true, data: { count: children.length, segments: parentSegments } }
   }
 
   // Mirrors a human keystroke into the in-app command line. Emits the same

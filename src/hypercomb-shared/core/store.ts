@@ -23,6 +23,12 @@ export class Store extends EventTarget {
   public static readonly HISTORY_DIRECTORY = '__history__'
   public static readonly THREADS_DIRECTORY = '__threads__'
   public static readonly COMPUTATION_DIRECTORY = '__computation__'
+  /** Render-cache decorations: pre-expanded, sig-keyed snapshots produced
+   *  passively after first render. Lookups for a sig check this directory
+   *  first — single file read, content already inlined — before falling
+   *  back to walking history bags. Pure derived state; can be deleted and
+   *  regenerated from the merkle truth in `__history__/`. */
+  public static readonly OPTIMIZED_DIRECTORY = '__optimized__'
 
   private static readonly CACHE_NAME = 'hypercomb-modules-v2'
 
@@ -36,6 +42,7 @@ export class Store extends EventTarget {
   public history!: FileSystemDirectoryHandle
   public threads!: FileSystemDirectoryHandle
   public computation!: FileSystemDirectoryHandle
+  public optimized!: FileSystemDirectoryHandle
 
   #initPromise: Promise<void> | null = null
   #opfsAvailable = true
@@ -81,6 +88,7 @@ export class Store extends EventTarget {
         this.history,
         this.threads,
         this.computation,
+        this.optimized,
       ] = await Promise.all([
         dir('hypercomb.io'),
         dir(Store.BEES_DIRECTORY),
@@ -91,6 +99,7 @@ export class Store extends EventTarget {
         dir(Store.HISTORY_DIRECTORY),
         dir(Store.THREADS_DIRECTORY),
         dir(Store.COMPUTATION_DIRECTORY),
+        dir(Store.OPTIMIZED_DIRECTORY),
       ])
     } catch (err) {
       console.warn('[store] OPFS subdirectory init failed — running without persistent storage', err)
@@ -417,13 +426,42 @@ export class Store extends EventTarget {
   readonly #layerBytesCache = new Map<string, Uint8Array>()
   readonly #layerBytesPending = new Map<string, Promise<Uint8Array | null>>()
 
-  /** Read a layer JSON by signature, scanning per-domain subdirectories.
-   *  Layers live at __layers__/<domain>/<sig> or __layers__/<domain>/<sig>.json. */
+  // Sig → "<domain>/<filename>" index, built on first lookup miss by scanning
+  // every domain dir once. After that, getFileHandle goes directly to the right
+  // place — no per-fetch domain scan, no exception loop.
+  // The index covers what's on disk at build time; new commits add entries.
+  #layerIndex = new Map<string, { domain: string; filename: string }>()
+  #layerIndexBuilt = false
+  #layerIndexBuilding: Promise<void> | null = null
+
+  // PERF INSTRUMENTATION (temporary — remove after diagnosis)
+  #perfStats = {
+    cacheHits: 0,
+    cacheMisses: 0,
+    pendingHits: 0,
+    loadCalls: 0,
+    totalLoadMs: 0,
+    indexHits: 0,
+    indexBuildMs: 0,
+    indexEntries: 0,
+  }
+  public dumpPerfStats(): void {
+    const s = this.#perfStats
+    console.log('[store-perf]', JSON.stringify(s, null, 2))
+    console.log(`[store-perf] avg load ms: ${s.loadCalls ? (s.totalLoadMs / s.loadCalls).toFixed(2) : 0}`)
+  }
+
+  /** Read a layer JSON by signature. Tiered lookup:
+   *    1. In-memory layerBytesCache (hot, instant)
+   *    2. `__optimized__/<sig>` (single file read, pre-expanded — fast)
+   *    3. `__layers__/<domain>/<sig>` history fallback (slow)
+   *  Once read, cached in memory for subsequent calls. */
   public getLayerBytes = async (signature: string): Promise<Uint8Array | null> => {
     const cached = this.#layerBytesCache.get(signature)
-    if (cached) return cached
+    if (cached) { this.#perfStats.cacheHits++; return cached }
     const pending = this.#layerBytesPending.get(signature)
-    if (pending) return pending
+    if (pending) { this.#perfStats.pendingHits++; return pending }
+    this.#perfStats.cacheMisses++
     const promise = this.#loadLayerBytes(signature)
     this.#layerBytesPending.set(signature, promise)
     try {
@@ -435,23 +473,92 @@ export class Store extends EventTarget {
     }
   }
 
-  #loadLayerBytes = async (signature: string): Promise<Uint8Array | null> => {
-    const domainNames: string[] = []
-    for await (const [name, entry] of (this.layers as any).entries() as AsyncIterable<[string, FileSystemHandle]>) {
-      if (entry.kind === 'directory') domainNames.push(name)
-    }
-    for (const name of domainNames) {
-      const domainDir = await this.layers.getDirectoryHandle(name).catch(() => null)
-      if (!domainDir) continue
-      for (const fileName of [signature, `${signature}.json`]) {
-        try {
-          const handle = await domainDir.getFileHandle(fileName)
-          const file = await handle.getFile()
-          return new Uint8Array(await file.arrayBuffer())
-        } catch { /* try next */ }
+  /** Read the pre-expanded render-cache decoration for a sig from
+   *  `__optimized__/<sig>`. Returns null if absent. Single file read,
+   *  no domain scan. Decorations are written passively after first render
+   *  / commitLayer; safe to delete and regenerate from history. */
+  public getOptimizedBytes = async (signature: string): Promise<Uint8Array | null> => {
+    if (!this.optimized) return null
+    try {
+      const handle = await this.optimized.getFileHandle(signature, { create: false })
+      const file = await handle.getFile()
+      return new Uint8Array(await file.arrayBuffer())
+    } catch { return null }
+  }
+
+  /** Write a pre-expanded layer decoration to `__optimized__/<sig>`.
+   *  Idempotent — same content overwrites same file. Best-effort; any
+   *  error is silent because the decoration is pure cache. */
+  public writeOptimizedBytes = async (signature: string, bytes: ArrayBuffer): Promise<void> => {
+    if (!this.optimized) return
+    try {
+      const handle = await this.optimized.getFileHandle(signature, { create: true })
+      const writable = await handle.createWritable()
+      try { await writable.write(bytes) } finally { await writable.close() }
+    } catch { /* cache miss on next read is fine */ }
+  }
+
+  /** Scans every domain dir once and indexes every layer file by signature.
+   *  Idempotent and lazy — only runs on first cache miss after construction. */
+  #ensureLayerIndex = async (): Promise<void> => {
+    if (this.#layerIndexBuilt) return
+    if (this.#layerIndexBuilding) return this.#layerIndexBuilding
+    this.#layerIndexBuilding = (async () => {
+      const t0 = performance.now()
+      const domainNames: string[] = []
+      for await (const [name, entry] of (this.layers as any).entries() as AsyncIterable<[string, FileSystemHandle]>) {
+        if (entry.kind === 'directory') domainNames.push(name)
       }
+      for (const domain of domainNames) {
+        const domainDir = await this.layers.getDirectoryHandle(domain).catch(() => null)
+        if (!domainDir) continue
+        for await (const [filename, entry] of (domainDir as any).entries() as AsyncIterable<[string, FileSystemHandle]>) {
+          if (entry.kind !== 'file') continue
+          const sig = filename.replace(/\.json$/i, '')
+          if (!this.#layerIndex.has(sig)) {
+            this.#layerIndex.set(sig, { domain, filename })
+          }
+        }
+      }
+      this.#layerIndexBuilt = true
+      this.#perfStats.indexBuildMs = performance.now() - t0
+      this.#perfStats.indexEntries = this.#layerIndex.size
+      console.log(`[store-perf] layer index built: ${this.#layerIndex.size} entries in ${this.#perfStats.indexBuildMs.toFixed(2)}ms`)
+    })()
+    try { await this.#layerIndexBuilding } finally { this.#layerIndexBuilding = null }
+  }
+
+  #loadLayerBytes = async (signature: string): Promise<Uint8Array | null> => {
+    const t0 = performance.now()
+    this.#perfStats.loadCalls++
+    try {
+      // Tier 1: pre-expanded render decoration (single file, no scan).
+      const optimized = await this.getOptimizedBytes(signature)
+      if (optimized) return optimized
+
+      // Tier 2: indexed history layer file (one direct file read).
+      await this.#ensureLayerIndex()
+      const hit = this.#layerIndex.get(signature)
+      if (!hit) return null
+      this.#perfStats.indexHits++
+      const domainDir = await this.layers.getDirectoryHandle(hit.domain).catch(() => null)
+      if (!domainDir) return null
+      const handle = await domainDir.getFileHandle(hit.filename).catch(() => null)
+      if (!handle) return null
+      const file = await handle.getFile()
+      return new Uint8Array(await file.arrayBuffer())
+    } finally {
+      this.#perfStats.totalLoadMs += performance.now() - t0
     }
-    return null
+  }
+
+  /** Update the layer index when a new layer is committed to OPFS. Callers that
+   *  write layer files should invoke this so subsequent reads find them via the
+   *  index rather than triggering a rebuild. */
+  public registerLayer(signature: string, domain: string, filename = signature): void {
+    if (!this.#layerIndex.has(signature)) {
+      this.#layerIndex.set(signature, { domain, filename })
+    }
   }
 
   // -------------------------------------------------

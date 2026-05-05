@@ -451,6 +451,24 @@ export class HistoryService {
     const markerWritable = await markerHandle.createWritable()
     try { await markerWritable.write(bytes.buffer as ArrayBuffer) } finally { await markerWritable.close() }
 
+    // Mirror to __optimized__/<sig> as a sig-addressed cache. Deferred to
+    // idle time so it doesn't compete with renders or flood the microtask
+    // queue. Each commit's write runs when the main thread is free; if a
+    // burst of commits queues many writes, they drain in idle order. Pure
+    // derived state — losing one is fine, the optimized lookup just falls
+    // back to the bag scan for that sig until the next commit re-mirrors.
+    const store = get<{
+      writeOptimizedBytes?: (sig: string, b: ArrayBuffer) => Promise<void>
+    }>('@hypercomb.social/Store')
+    if (store?.writeOptimizedBytes) {
+      const buf = bytes.buffer as ArrayBuffer
+      const schedule: (cb: () => void) => void =
+        typeof (window as any).requestIdleCallback === 'function'
+          ? (cb) => (window as any).requestIdleCallback(cb, { timeout: 5_000 })
+          : (cb) => setTimeout(cb, 0)
+      schedule(() => { void store.writeOptimizedBytes!(layerSig, buf) })
+    }
+
     // Hot-cache the just-written bytes so the cursor's next read does not
     // round-trip OPFS / re-hash — getLayerContent picks it up directly.
     const cacheMap = this.#markerBytesCache.get(locationSig)
@@ -831,6 +849,29 @@ export class HistoryService {
         return hydrated
       } catch { /* fall through to disk */ }
     }
+
+    // Sig-direct optimized lookup. Every commit mirrors layer bytes to
+    // `__optimized__/<sig>` so renders can find them in O(1) — one direct
+    // file read, no bag scan, no per-bag enumeration. This is the path
+    // the user-content render hits for everything previously committed.
+    const store = get<{
+      getOptimizedBytes?: (sig: string) => Promise<Uint8Array | null>
+    }>('@hypercomb.social/Store')
+    if (store?.getOptimizedBytes) {
+      const optimized = await store.getOptimizedBytes(layerSig)
+      if (optimized) {
+        try {
+          const parsed = JSON.parse(new TextDecoder().decode(optimized)) as Partial<LayerContent>
+          if (parsed.name) {
+            const hydrated = HistoryService.#hydrateLayer(parsed)
+            this.#parsedLayerCache.set(layerSig, hydrated)
+            this.#preloaderCache.set(layerSig, optimized.buffer as ArrayBuffer)
+            return hydrated
+          }
+        } catch { /* malformed optimized file — fall through to bag scan */ }
+      }
+    }
+
     // Cold miss: trigger the global preload (idempotent — runs once per
     // session) so this and every future getLayerBySig hits the cache.
     await this.preloadAllBags()
@@ -927,6 +968,22 @@ export class HistoryService {
    * preload finishes.
    */
   #preloadAllBagsPromise: Promise<void> | null = null
+  /**
+   * Boot-time index: for every existing bag, identify the LATEST marker
+   * (by filename, no byte read) and only read+sign THAT one. The cache
+   * holds head sigs only — sufficient for rendering the current layer
+   * tree. Historical sigs (undo / time-travel) are lazy on demand.
+   *
+   * Before this change, this method read+signed every marker in every
+   * bag — for a tree with N bags × M markers each, that's N×M file reads
+   * + SHA-256 ops on the main thread per session. Cold boot for a tree
+   * of moderate size measured in tens of seconds; the page presented
+   * "Install Hypercomb" but was wedged on this scan.
+   *
+   * After: one filename-enumeration per bag (no byte reads) + one
+   * file read + sign per bag. O(bags + total markers stat-only)
+   * vs the old O(bags × markers byte+sign).
+   */
   public readonly preloadAllBags = async (): Promise<void> => {
     if (this.#preloadAllBagsPromise) return this.#preloadAllBagsPromise
     this.#preloadAllBagsPromise = (async () => {
@@ -935,20 +992,26 @@ export class HistoryService {
         if (dirHandle.kind !== 'directory') continue
         if (!HistoryService.#SIG_RE.test(lineageSig)) continue
         const bag = dirHandle as FileSystemDirectoryHandle
+
+        // Pass 1: filename-only enumeration to find the latest marker.
+        // No bytes read, no signing.
         let latestName = ''
-        let latestSig = ''
         for await (const [name, fileHandle] of (bag as any).entries()) {
           if (fileHandle.kind !== 'file') continue
           if (!HistoryService.#MARKER_RE.test(name)) continue
-          try {
-            const file = await (fileHandle as FileSystemFileHandle).getFile()
-            const bytes = await file.arrayBuffer()
-            const sig = await SignatureService.sign(bytes)
-            this.#preloaderCache.set(sig, bytes)
-            if (name > latestName) { latestName = name; latestSig = sig }
-          } catch { /* skip unreadable */ }
+          if (name > latestName) latestName = name
         }
-        if (latestSig) this.#latestSigByLineage.set(lineageSig, latestSig)
+        if (!latestName) continue
+
+        // Pass 2: read + sign ONLY the latest marker. Cache the head.
+        try {
+          const fileHandle = await bag.getFileHandle(latestName, { create: false })
+          const file = await fileHandle.getFile()
+          const bytes = await file.arrayBuffer()
+          const sig = await SignatureService.sign(bytes)
+          this.#preloaderCache.set(sig, bytes)
+          this.#latestSigByLineage.set(lineageSig, sig)
+        } catch { /* skip unreadable */ }
       }
     })()
     return this.#preloadAllBagsPromise
