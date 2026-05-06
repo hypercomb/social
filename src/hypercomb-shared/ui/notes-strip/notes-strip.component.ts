@@ -73,6 +73,18 @@ export class NotesStripComponent implements OnDestroy {
   // getNotes (which goes through the OPFS-direct path), the strip always
   // shows what the write side would see.
   readonly #notesByCell = signal<ReadonlyMap<string, readonly Note[]>>(new Map())
+  // NotesService availability tracked as a signal so the warmup effect
+  // re-runs when the bee bundle finally registers. Without this, the
+  // effect runs ONCE at construction with `this.#notes` returning
+  // undefined (bee not loaded yet on hypercomb-web), early-exits, and
+  // never fires again because window.ioc registration isn't a signal —
+  // the effect has nothing to react to. cell() changes WOULD cause a
+  // re-run, but on web the timing is: constructor → effect runs (svc=undef)
+  // → bee loads → user clicks tile → cell() changes → effect re-runs
+  // (svc now ok). The re-run path works in theory, but only fires once
+  // per selection change. The signal version closes the gap by firing
+  // the effect AS SOON AS the service registers, regardless of selection.
+  readonly #notesServiceReady = signal<boolean>(false)
 
   /**
    * Display mode — `chips` is the horizontal scrolling chip row, `rows` is
@@ -254,6 +266,16 @@ export class NotesStripComponent implements OnDestroy {
       )
     }
 
+    // Track NotesService availability so the warmup effect re-runs the
+    // moment the bee registers — see comment on #notesServiceReady.
+    if (this.#notes) {
+      this.#notesServiceReady.set(true)
+    } else {
+      window.ioc.whenReady('@diamondcoreprocessor.com/NotesService', () => {
+        this.#notesServiceReady.set(true)
+      })
+    }
+
     this.#cleanups.push(EffectBus.on<{ segments?: readonly string[] }>('notes:changed', async (p) => {
       // HiveParticipant emits with `segments` only — derive the cell
       // label from the last segment. Refresh the per-cell notes cache so
@@ -306,6 +328,11 @@ export class NotesStripComponent implements OnDestroy {
     // Per-cell promise tracking (vs Promise.all) so each cell flips into
     // #warmed independently — fast cells don't have to wait on slow ones.
     effect(() => {
+      // Read the readiness signal so the effect re-runs the moment
+      // NotesService registers. Without this, an effect that runs once
+      // before the bee loads (svc undefined → early return) won't auto-
+      // re-fire when the service later arrives.
+      this.#notesServiceReady()
       const svc = this.#notes
       if (!svc) return
       const targets = new Set<string>()
