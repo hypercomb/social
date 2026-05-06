@@ -24,6 +24,7 @@ $muted: rgba(240, 240, 240, 0.55);
   display: flex;
   flex-direction: column;
   overflow: auto;
+  scroll-behavior: smooth;
 }
 
 .website-header {
@@ -89,19 +90,76 @@ $muted: rgba(240, 240, 240, 0.55);
   }
 }
 
+.website-section[data-depth="0"] { display: none; } // root header is in <header>
+
+.website-section[data-depth="1"] { padding-left: 0; }
+.website-section[data-depth="2"] { padding-left: 1.5rem; border-left: 1px solid rgba($accent, 0.12); }
+.website-section[data-depth="3"] { padding-left: 3rem; border-left: 1px solid rgba($accent, 0.10); }
+.website-section[data-depth="4"] { padding-left: 4.5rem; border-left: 1px solid rgba($accent, 0.08); }
+.website-section[data-depth="5"] { padding-left: 6rem; border-left: 1px solid rgba($accent, 0.06); }
+
 .website-section-title {
   margin: 0 0 1rem;
-  font-size: 1.65rem;
   font-weight: 600;
   letter-spacing: 0.01em;
   text-transform: lowercase;
   color: $ink;
+  scroll-margin-top: 1rem;
 
   &::before {
     content: '#';
     margin-right: 0.4rem;
     color: rgba($accent, 0.6);
     font-weight: 400;
+  }
+
+  &.depth-1 { font-size: 1.65rem; }
+  &.depth-2 { font-size: 1.3rem;  color: rgba($ink, 0.95); &::before { content: '##'; } }
+  &.depth-3 { font-size: 1.1rem;  color: rgba($ink, 0.85); &::before { content: '###'; } }
+  &.depth-4 { font-size: 1rem;    color: rgba($ink, 0.78); &::before { content: '####'; } }
+  &.depth-5 { font-size: 0.95rem; color: rgba($ink, 0.7);  &::before { content: '#####'; } }
+}
+
+.website-breadcrumb {
+  margin: -0.5rem 0 0.75rem;
+  font-size: 0.78rem;
+
+  a {
+    color: $muted;
+    text-decoration: none;
+    border-bottom: 1px dotted rgba($accent, 0.3);
+    cursor: pointer;
+    transition: color 150ms ease, border-color 150ms ease;
+
+    &:hover {
+      color: rgba($accent, 0.95);
+      border-bottom-color: rgba($accent, 0.7);
+    }
+  }
+}
+
+.website-loading {
+  position: absolute;
+  top: 4rem;
+  right: 2rem;
+  font-size: 0.8rem;
+  color: rgba($accent, 0.5);
+  pointer-events: none;
+}
+
+// Inline cross-links: when a note mentions another cell name, that
+// word becomes a link that scrolls to that cell. Subtle — should not
+// dominate the prose visually.
+::ng-deep .website-inline-link {
+  color: rgba($accent, 0.95);
+  text-decoration: none;
+  border-bottom: 1px dotted rgba($accent, 0.4);
+  cursor: pointer;
+  transition: border-bottom-color 120ms ease, background 120ms ease;
+
+  &:hover {
+    background: rgba($accent, 0.1);
+    border-bottom-color: rgba($accent, 0.95);
   }
 }
 
