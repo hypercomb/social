@@ -30,6 +30,18 @@ import {
   isSignature,
 } from '../editor/tile-properties.js'
 
+// View-mode toggle constants. These are the args /website accepts as
+// "I want to switch rendering surface" instead of "stamp / export."
+type ViewModeShape = EventTarget & {
+  mode: string
+  setMode(next: string): void
+  toggle(a?: string, b?: string): string
+}
+
+const HEXAGON_KEYWORDS = new Set(['hex', 'hexagons', 'hexagon', 'off'])
+const WEBSITE_KEYWORDS = new Set(['web', 'site', 'page', 'on', 'view'])
+const VIEW_TOGGLE_KEYWORDS = new Set([...HEXAGON_KEYWORDS, ...WEBSITE_KEYWORDS])
+
 const toast = (type: 'info' | 'success' | 'warning' | 'tip', title: string, message: string): void => {
   try { EffectBus.emit('toast:show', { type, title, message }) } catch { /* noop */ }
 }
@@ -279,6 +291,32 @@ export class WebsiteQueenBee extends QueenBee {
   }
 
   protected execute(args: string): void {
+    const trimmed = args.trim().toLowerCase()
+
+    // Elegant view-mode toggle. /website with no arg, or with one of
+    // the mode keywords, switches the rendering surface. The original
+    // no-args behavior (subtree snapshot dump) moves to `/website export`
+    // — power-user action; the toggle is the common case.
+    if (!trimmed || VIEW_TOGGLE_KEYWORDS.has(trimmed)) {
+      const vm = get('@hypercomb.social/ViewMode') as ViewModeShape | undefined
+      if (vm) {
+        if (!trimmed) {
+          const next = vm.toggle('hexagons', 'website')
+          console.log(`[/website] view → ${next}`)
+          return
+        }
+        const target = HEXAGON_KEYWORDS.has(trimmed) ? 'hexagons' : 'website'
+        vm.setMode(target)
+        console.log(`[/website] view → ${target}`)
+        return
+      }
+      // ViewMode service not registered — fall through to legacy parsing.
+    }
+
+    if (trimmed === 'export') {
+      return void this.#export(null)
+    }
+
     const parsed = parseArgs(args)
 
     switch (parsed.kind) {

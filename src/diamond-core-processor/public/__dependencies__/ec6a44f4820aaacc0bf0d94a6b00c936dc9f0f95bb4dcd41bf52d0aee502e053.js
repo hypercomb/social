@@ -3201,9 +3201,56 @@ var ViewCurrentQueenBee = class extends QueenBee17 {
 var _viewCurrent = new ViewCurrentQueenBee();
 window.ioc.register("@diamondcoreprocessor.com/ViewCurrentQueenBee", _viewCurrent);
 
+// src/diamondcoreprocessor.com/commands/view.queen.ts
+import { QueenBee as QueenBee18 } from "@hypercomb/core";
+var VIEW_MODE_KEY = "@hypercomb.social/ViewMode";
+var ViewQueenBee = class extends QueenBee18 {
+  namespace = "diamondcoreprocessor.com";
+  command = "view";
+  aliases = ["mode", "surface"];
+  description = "Toggle between hexagons and website rendering of the layer tree";
+  descriptionKey = "slash.view";
+  slashComplete(args) {
+    const modes = ["hexagons", "website", "hex"];
+    const q = args.toLowerCase().trim();
+    if (!q) return modes;
+    return modes.filter((m) => m.startsWith(q));
+  }
+  execute(args) {
+    const svc = get(VIEW_MODE_KEY);
+    if (!svc) {
+      console.warn("[/view] ViewModeService not available");
+      return;
+    }
+    const requested = args.trim().toLowerCase();
+    if (!requested) {
+      const next = svc.toggle("hexagons", "website");
+      console.log(`[/view] mode \u2192 ${next}`);
+      return;
+    }
+    const target = ALIASES[requested] ?? requested;
+    svc.setMode(target);
+    console.log(`[/view] mode \u2192 ${target}`);
+  }
+};
+var ALIASES = {
+  "hex": "hexagons",
+  "hexagon": "hexagons",
+  "site": "website",
+  "page": "website",
+  "web": "website",
+  "on": "website",
+  "off": "hexagons"
+};
+var _view = new ViewQueenBee();
+window.ioc.register("@diamondcoreprocessor.com/ViewQueenBee", _view);
+
 // src/diamondcoreprocessor.com/commands/website.queen.ts
-import { QueenBee as QueenBee18, EffectBus as EffectBus16 } from "@hypercomb/core";
+import { QueenBee as QueenBee19, EffectBus as EffectBus16 } from "@hypercomb/core";
 import { CELL_WEBSITE_PROPERTY } from "@hypercomb/core";
+var HEXAGON_KEYWORDS = /* @__PURE__ */ new Set(["hex", "hexagons", "hexagon", "off"]);
+var WEBSITE_KEYWORDS = /* @__PURE__ */ new Set(["web", "site", "page", "on", "view"]);
+var VIEW_TOGGLE_KEYWORDS = /* @__PURE__ */ new Set([...HEXAGON_KEYWORDS, ...WEBSITE_KEYWORDS]);
 var toast2 = (type, title, message) => {
   try {
     EffectBus16.emit("toast:show", { type, title, message });
@@ -3339,7 +3386,7 @@ async function sigsToBundleSig(sigs) {
   const blob = new Blob([bundleText], { type: "text/plain" });
   return await store.putResource(blob);
 }
-var WebsiteQueenBee = class extends QueenBee18 {
+var WebsiteQueenBee = class extends QueenBee19 {
   namespace = "diamondcoreprocessor.com";
   command = "website";
   aliases = [];
@@ -3361,6 +3408,24 @@ var WebsiteQueenBee = class extends QueenBee18 {
     return ops.filter((o) => o.toLowerCase().startsWith(second));
   }
   execute(args) {
+    const trimmed = args.trim().toLowerCase();
+    if (!trimmed || VIEW_TOGGLE_KEYWORDS.has(trimmed)) {
+      const vm = get("@hypercomb.social/ViewMode");
+      if (vm) {
+        if (!trimmed) {
+          const next = vm.toggle("hexagons", "website");
+          console.log(`[/website] view \u2192 ${next}`);
+          return;
+        }
+        const target = HEXAGON_KEYWORDS.has(trimmed) ? "hexagons" : "website";
+        vm.setMode(target);
+        console.log(`[/website] view \u2192 ${target}`);
+        return;
+      }
+    }
+    if (trimmed === "export") {
+      return void this.#export(null);
+    }
     const parsed = parseArgs(args);
     switch (parsed.kind) {
       case "list":
@@ -3492,6 +3557,7 @@ export {
   TranslateSweepQueenBee,
   TranslationService,
   ViewCurrentQueenBee,
+  ViewQueenBee,
   WebsiteQueenBee,
   shouldSkipForTranslation
 };

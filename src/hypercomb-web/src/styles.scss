@@ -31,3 +31,26 @@ body {
 @media (pointer: coarse) {
   :root { --hc-touch: 1; }
 }
+
+// ── view-mode: website (global rules) ────────────────────────
+// App component sets `body.hc-view-website` when ViewMode is 'website'.
+// These global rules hide hex-mode artifacts that portal to document.body
+// at runtime (history-viewer, mesh-header, others) and so escape the
+// component-scoped selectors in app.scss.
+body.hc-view-website {
+  hc-history-viewer,
+  hc-mesh-header,
+  hc-tile-editor,
+  hc-portal-overlay,
+  hc-confirm-dialog,
+  hc-sensitivity-bar,
+  hc-docs-overlay,
+  hc-controls-bar,
+  hc-selection-context-menu,
+  hc-notes-strip,
+  hc-notes-viewer,
+  hc-atomizer-bar,
+  hc-hint-bar {
+    display: none !important;
+  }
+}

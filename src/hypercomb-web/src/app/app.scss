@@ -1,6 +1,48 @@
 @use '../../../hypercomb-shared/ui/header-bar';
 @use '../../../hypercomb-shared/ui/breakpoints' as *;
 
+// ── view-mode: website ──────────────────────────────────────
+// When ViewMode is 'website' the host has class .view-website. The
+// rendering surface fully replaces the hex UI — every hex-mode artifact
+// hides; the header-bar (with command-line) docks to the bottom so the
+// user can type /website to toggle back without moving their cursor.
+//
+// Hiding is done by attribute selectors with high specificity to win
+// against each component's own `:host { display: block }` rule.
+:host.view-website {
+  & > hc-controls-bar,
+  & > hc-selection-context-menu,
+  & > hc-history-viewer,
+  & > hc-notes-strip,
+  & > hc-notes-viewer,
+  & > hc-tile-editor,
+  & > hc-portal-overlay,
+  & > hc-confirm-dialog,
+  & > hc-sensitivity-bar,
+  & > hc-docs-overlay,
+  & > hc-mesh-header,
+  & > hc-atomizer-bar,
+  & > hc-hint-bar,
+  & > #pixi-host {
+    display: none !important;
+  }
+
+  .header-bar {
+    position: fixed !important;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    top: auto !important;
+    z-index: 60000;
+  }
+
+  // Leave room at the bottom of the website-shell so content doesn't
+  // sit under the now-bottom-docked header-bar.
+  hc-website-view .website-shell {
+    padding-bottom: 4rem;
+  }
+}
+
 .install-prompt {
   position: fixed;
   inset: 0;

@@ -84,6 +84,8 @@ function reduce(records) {
 }
 
 // src/diamondcoreprocessor.com/history/history.service.ts
+var EMPTY_LAYER_STATE = Object.freeze({ bees: [], layers: [], dependencies: [], resources: [] });
+var EMPTY_LAYER_CONTENT = Object.freeze({ name: "", children: [] });
 var emptyLayer = (name) => ({ name });
 var HistoryService = class _HistoryService {
   // In-memory cache of full replay per signature. Keeps navigation instant —
@@ -218,7 +220,6 @@ var HistoryService = class _HistoryService {
   // layer.json — materialized layer state
   // -------------------------------------------------
   static #LAYER_FILE = "layer.json";
-  static #emptyLayer = { bees: [], layers: [], dependencies: [], resources: [] };
   getLayer = async (signature) => {
     try {
       const bag = await this.historyRoot.getDirectoryHandle(signature, { create: false });
@@ -227,7 +228,7 @@ var HistoryService = class _HistoryService {
       const text = await file.text();
       return JSON.parse(text);
     } catch {
-      return { ..._HistoryService.#emptyLayer };
+      return EMPTY_LAYER_STATE;
     }
   };
   putLayer = async (signature, state) => {
@@ -362,6 +363,14 @@ var HistoryService = class _HistoryService {
       await markerWritable.write(bytes.buffer);
     } finally {
       await markerWritable.close();
+    }
+    const store = get("@hypercomb.social/Store");
+    if (store?.writeOptimizedBytes) {
+      const buf = bytes.buffer;
+      const schedule = typeof window.requestIdleCallback === "function" ? (cb) => window.requestIdleCallback(cb, { timeout: 5e3 }) : (cb) => setTimeout(cb, 0);
+      schedule(() => {
+        void store.writeOptimizedBytes(layerSig, buf);
+      });
     }
     const cacheMap = this.#markerBytesCache.get(locationSig) ?? (this.#markerBytesCache.set(locationSig, /* @__PURE__ */ new Map()), this.#markerBytesCache.get(locationSig));
     cacheMap.set(layerSig, bytes.buffer);
@@ -589,31 +598,15 @@ var HistoryService = class _HistoryService {
     return hydrated;
   };
   /**
-   * Pure projection from raw parsed JSON to a LayerContent. Preserves
-   * every field as-is — including all registered slot values (notes,
-   * tags, future features). Previously only `name` and `children` were
-   * surfaced, which silently dropped slot fields on read so cells
-   * looked empty even when the bytes-on-disk had notes; that broke the
-   * whole LayerSlotRegistry pipeline.
-   *
-   * Empty `children` is normalised to omitted so reader output matches
-   * canonicalizeLayer output (sparse-layer invariant).
+   * Pure projection from raw parsed JSON to a LayerContent. Defers to
+   * `canonicalizeLayer` so the read-side filter (drop empty arrays /
+   * empty objects / null / undefined) is mechanically identical to the
+   * write-side filter — single source of truth, slot-agnostic, no
+   * per-slot special cases. Reader output bytes are now also key-
+   * sorted, which is harmless for readers and preserves the round-trip
+   * invariant for any caller that re-signs the result.
    */
-  static #hydrateLayer = (parsed) => {
-    const out = { name: parsed.name };
-    for (const key of Object.keys(parsed)) {
-      if (key === "name") continue;
-      if (key === "children") {
-        if (Array.isArray(parsed.children) && parsed.children.length > 0) out.children = parsed.children;
-        continue;
-      }
-      const v = parsed[key];
-      if (v === void 0 || v === null) continue;
-      if (Array.isArray(v) && v.length === 0) continue;
-      out[key] = v;
-    }
-    return out;
-  };
+  static #hydrateLayer = (parsed) => _HistoryService.canonicalizeLayer(parsed);
   // (lineageSig → layerSig → bytes) cache, populated by listLayers
   // and getLayerContent. Keeps undo/redo navigation off OPFS for
   // markers we've already touched in this session.
@@ -684,6 +677,22 @@ var HistoryService = class _HistoryService {
         this.#parsedLayerCache.set(layerSig, hydrated);
         return hydrated;
       } catch {
+      }
+    }
+    const store = get("@hypercomb.social/Store");
+    if (store?.getOptimizedBytes) {
+      const optimized = await store.getOptimizedBytes(layerSig);
+      if (optimized) {
+        try {
+          const parsed = JSON.parse(new TextDecoder().decode(optimized));
+          if (parsed.name) {
+            const hydrated = _HistoryService.#hydrateLayer(parsed);
+            this.#parsedLayerCache.set(layerSig, hydrated);
+            this.#preloaderCache.set(layerSig, optimized.buffer);
+            return hydrated;
+          }
+        } catch {
+        }
       }
     }
     await this.preloadAllBags();
@@ -771,6 +780,22 @@ var HistoryService = class _HistoryService {
    * preload finishes.
    */
   #preloadAllBagsPromise = null;
+  /**
+   * Boot-time index: for every existing bag, identify the LATEST marker
+   * (by filename, no byte read) and only read+sign THAT one. The cache
+   * holds head sigs only — sufficient for rendering the current layer
+   * tree. Historical sigs (undo / time-travel) are lazy on demand.
+   *
+   * Before this change, this method read+signed every marker in every
+   * bag — for a tree with N bags × M markers each, that's N×M file reads
+   * + SHA-256 ops on the main thread per session. Cold boot for a tree
+   * of moderate size measured in tens of seconds; the page presented
+   * "Install Hypercomb" but was wedged on this scan.
+   *
+   * After: one filename-enumeration per bag (no byte reads) + one
+   * file read + sign per bag. O(bags + total markers stat-only)
+   * vs the old O(bags × markers byte+sign).
+   */
   preloadAllBags = async () => {
     if (this.#preloadAllBagsPromise) return this.#preloadAllBagsPromise;
     this.#preloadAllBagsPromise = (async () => {
@@ -780,23 +805,21 @@ var HistoryService = class _HistoryService {
         if (!_HistoryService.#SIG_RE.test(lineageSig)) continue;
         const bag = dirHandle;
         let latestName = "";
-        let latestSig = "";
         for await (const [name, fileHandle] of bag.entries()) {
           if (fileHandle.kind !== "file") continue;
           if (!_HistoryService.#MARKER_RE.test(name)) continue;
-          try {
-            const file = await fileHandle.getFile();
-            const bytes = await file.arrayBuffer();
-            const sig = await SignatureService.sign(bytes);
-            this.#preloaderCache.set(sig, bytes);
-            if (name > latestName) {
-              latestName = name;
-              latestSig = sig;
-            }
-          } catch {
-          }
+          if (name > latestName) latestName = name;
         }
-        if (latestSig) this.#latestSigByLineage.set(lineageSig, latestSig);
+        if (!latestName) continue;
+        try {
+          const fileHandle = await bag.getFileHandle(latestName, { create: false });
+          const file = await fileHandle.getFile();
+          const bytes = await file.arrayBuffer();
+          const sig = await SignatureService.sign(bytes);
+          this.#preloaderCache.set(sig, bytes);
+          this.#latestSigByLineage.set(lineageSig, sig);
+        } catch {
+        }
       }
     })();
     return this.#preloadAllBagsPromise;
@@ -1216,8 +1239,8 @@ import { EffectBus as EffectBus2 } from "@hypercomb/core";
 
 // src/diamondcoreprocessor.com/history/layer-diff.ts
 var diffLayers = (prev, next) => {
-  const prevChildren = prev?.children ?? [];
-  const nextChildren = next.children ?? [];
+  const prevChildren = prev?.children ?? EMPTY_LAYER_CONTENT.children;
+  const nextChildren = next.children ?? EMPTY_LAYER_CONTENT.children;
   const diffs = [];
   const prevSet = new Set(prevChildren);
   const nextSet = new Set(nextChildren);
@@ -1564,10 +1587,7 @@ var HistoryCursorService = class _HistoryCursorService extends EventTarget {
         return null;
       }
       const parsed = JSON.parse(await blob.text());
-      const content = {
-        name: parsed.name ?? "",
-        children: parsed.children ?? []
-      };
+      const content = !parsed.name && !parsed.children ? EMPTY_LAYER_CONTENT : { name: parsed.name ?? "", children: parsed.children };
       this.#contentBySig.set(signature, content);
       return content;
     } catch {
@@ -1610,10 +1630,9 @@ var HistoryCursorService = class _HistoryCursorService extends EventTarget {
   async layerContentAtCursor() {
     if (this.#position === 0) {
       if (this.#layers.length === 0) return null;
-      const empty = { name: "", children: [] };
       this.#cachedLayerSig = null;
-      this.#cachedContent = empty;
-      return empty;
+      this.#cachedContent = EMPTY_LAYER_CONTENT;
+      return EMPTY_LAYER_CONTENT;
     }
     const entry = this.#layers[this.#position - 1];
     if (this.#cachedLayerSig === entry.layerSig && this.#cachedContent) {

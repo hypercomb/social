@@ -1,4 +1,4 @@
-import { AfterViewInit, Component, computed, HostBinding, inject, signal } from '@angular/core'
+import { AfterViewInit, Component, computed, effect, HostBinding, inject, signal } from '@angular/core'
 import { type Bee, EffectBus } from '@hypercomb/core'
 import type { BootStatus } from '../setup/ensure-install'
 import { RouterOutlet } from '@angular/router'
@@ -57,6 +57,13 @@ export class App implements AfterViewInit {
 
   @HostBinding('class.move-mode')
   get moveModeClass() { return this.moveMode(); }
+
+  // View-mode CSS hook. When 'website', the header-bar (and its
+  // command-line) docks to the bottom of the viewport, the website-view
+  // takes the upper area, and you can type /view (or future aliases) to
+  // toggle back without moving your cursor.
+  @HostBinding('class.view-website')
+  get viewWebsiteClass() { return this.viewMode() === 'website'; }
   private runtimeReady: Promise<void> = Promise.resolve()
 
   protected readonly core = inject(CoreAdapter)
@@ -115,6 +122,15 @@ export class App implements AfterViewInit {
       if (now) wireViewMode(now)
       else modeSvc.whenReady<{ mode: string } & EventTarget>('@hypercomb.social/ViewMode', wireViewMode)
     }
+
+    // Mirror the active mode to <body> as a class so global stylesheets
+    // can hide DOM that portals out of app-root (history-viewer, others
+    // that move themselves to document.body at runtime).
+    effect(() => {
+      const m = this.viewMode()
+      document.body.classList.remove('hc-view-hexagons', 'hc-view-website')
+      document.body.classList.add(`hc-view-${m}`)
+    })
 
     console.log('[app] initialized')
   }
