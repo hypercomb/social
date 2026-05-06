@@ -237,7 +237,13 @@ write-step ''
 $localManifestPath = Join-Path $resolvedSource 'manifest.json'
 if (Test-Path -LiteralPath $localManifestPath -PathType Leaf) {
   $manifestBlobName = if ($resolvedDestination) { "$resolvedDestination/manifest.json" } else { 'manifest.json' }
-  $tempManifestPath = Join-Path $env:TEMP 'hypercomb-remote-manifest.json'
+  # Cross-platform temp dir: Windows uses $env:TEMP, Linux/macOS use
+  # $env:TMPDIR (or /tmp as fallback). Without this, CI runs on Ubuntu
+  # crash with "Cannot bind argument to parameter 'Path' because it is null".
+  $tempDir = if (-not [string]::IsNullOrWhiteSpace($env:TEMP)) { $env:TEMP } `
+            elseif (-not [string]::IsNullOrWhiteSpace($env:TMPDIR)) { $env:TMPDIR } `
+            else { '/tmp' }
+  $tempManifestPath = Join-Path $tempDir 'hypercomb-remote-manifest.json'
 
   # download existing remote manifest (if any)
   $downloadResult = invoke-az-silent -Arguments (@(
