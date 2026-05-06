@@ -89,7 +89,9 @@ const SIG_REGEX = /^[a-f0-9]{64}$/
                      [class.is-current]="isCurrent(n.segments)"
                      [attr.data-path]="n.segments.join('/')"
                      [attr.data-depth]="n.segments.length">
-              <h1 class="website-page-title">{{ n.name }}</h1>
+              @if (n.segments.length > 0 && n.name && n.name !== '/') {
+                <h1 class="website-page-title">{{ n.name }}</h1>
+              }
 
               @if (n.notes.length === 0 && n.segments.length > 0) {
                 <p class="website-empty-notes">No notes on this cell yet.</p>
