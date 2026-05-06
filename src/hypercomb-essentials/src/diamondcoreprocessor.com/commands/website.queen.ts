@@ -85,35 +85,34 @@ type HistoryServiceLike = {
   sign(lineage: { explorerSegments?: () => readonly string[] }): Promise<string>
 }
 
-type LayerCommitterLike = {
-  update(
-    segments: readonly string[],
-    layer: { name?: string; [k: string]: unknown },
-    nameSlots?: ReadonlySet<string>,
-  ): Promise<string>
-}
-
 type NotesServiceLike = {
   addAtSegments(parentSegments: readonly string[], cellLabel: string, text: string): Promise<void>
   getNotesAtSegments(segments: readonly string[]): Promise<readonly { id: string; text: string }[]>
+}
+
+type StoreLike = {
+  hypercombRoot: FileSystemDirectoryHandle | null
 }
 
 const SIG_REGEX = /^[a-f0-9]{64}$/
 
 /**
  * Idempotently bootstrap the `instructions/` tree at root if missing.
- * Cheap: reads root layer, scans children for an `instructions` name,
- * returns early if present. On first invocation, commits the
- * instructions cell + each default sub-cell + a starter note in each.
+ * Reads root, returns early if `instructions` is already a child.
+ *
+ * NEVER WIPES. Goes through `cell:added` events instead of
+ * `committer.update` — the cell:added path uses the additive name-delta
+ * (kind: 'name', op: 'add') which preserves all existing siblings. The
+ * same path normal user-typed cell creation goes through, so the new
+ * tiles also get layout-queen indices and drag-reorder for free.
  *
  * Always uses literal root segments — instructions is grammar at root,
  * regardless of the user's current navigation lineage.
  */
 async function ensureInstructionsBootstrap(): Promise<void> {
   const history = get<HistoryServiceLike>('@diamondcoreprocessor.com/HistoryService')
-  const committer = get<LayerCommitterLike>('@diamondcoreprocessor.com/LayerCommitter')
   const notes = get<NotesServiceLike>('@diamondcoreprocessor.com/NotesService')
-  if (!history || !committer || !notes) return
+  if (!history || !notes) return
 
   // Check if instructions already exists at root (by name).
   const rootSig = await history.sign({ explorerSegments: () => [] })
@@ -129,22 +128,38 @@ async function ensureInstructionsBootstrap(): Promise<void> {
     }
   }
 
-  console.log('[/website] bootstrapping instructions/ tree at root')
+  // Need OPFS dirs created BEFORE cell:added — the layout queen and
+  // move drone read/write per-cell `index` properties via OPFS dir
+  // handles. No dir → no index → "tile hops back to original position"
+  // because the move write silently fails.
+  const store = get<StoreLike>('@hypercomb.social/Store')
+  const userRoot = store?.hypercombRoot
+  if (!userRoot) {
+    console.warn('[/website] Store.hypercombRoot unavailable — skipping bootstrap')
+    return
+  }
 
-  // 1) Commit instructions parent layer with the default child names.
-  const childNames = INSTRUCTIONS_DEFAULTS.map(d => d.name)
-  await committer.update(['instructions'], { name: 'instructions', children: childNames })
+  console.log('[/website] bootstrapping instructions/ tree at root (additive)')
 
-  // 2) Add the root-level guidance note.
+  // 1) Create the `instructions/` OPFS dir under hypercomb.io/.
+  const instructionsDir = await userRoot.getDirectoryHandle('instructions', { create: true })
+
+  // 2) Emit cell:added so the layout queen assigns its index, history
+  //    records the addition, and the renderer picks it up.
+  EffectBus.emit('cell:added', { cell: 'instructions', segments: [] })
   await notes.addAtSegments([], 'instructions', INSTRUCTIONS_ROOT_STARTER)
 
-  // 3) For each default, commit its layer + add its starter note.
+  // 3) For each default: create OPFS subdir under instructions/, then
+  //    emit cell:added with the parent segments. Order matters — dir
+  //    creation must complete before the index-assignment listener
+  //    runs, otherwise the listener sees no dir and skips.
   for (const d of INSTRUCTIONS_DEFAULTS) {
-    await committer.update(['instructions', d.name], { name: d.name })
+    await instructionsDir.getDirectoryHandle(d.name, { create: true })
+    EffectBus.emit('cell:added', { cell: d.name, segments: ['instructions'] })
     await notes.addAtSegments(['instructions'], d.name, d.starter)
   }
 
-  console.log(`[/website] instructions/ bootstrapped with ${INSTRUCTIONS_DEFAULTS.length} default sub-cells`)
+  console.log(`[/website] instructions/ bootstrapped with ${INSTRUCTIONS_DEFAULTS.length} default sub-cells (with OPFS dirs)`)
 }
 
 const toast = (type: 'info' | 'success' | 'warning' | 'tip', title: string, message: string): void => {
@@ -398,14 +413,23 @@ export class WebsiteQueenBee extends QueenBee {
   protected execute(args: string): void {
     const trimmed = args.trim().toLowerCase()
 
-    // Idempotent bootstrap — first /website ever creates the
-    // instructions/ tree at root with default sub-cells (styles, voice,
-    // tech, audience, examples). Cheap on subsequent calls; skips if
-    // already present. Runs in parallel with the rest of dispatch so
-    // the toggle / upgrade emit doesn't wait on it.
-    void ensureInstructionsBootstrap().catch(err =>
-      console.warn('[/website] instructions bootstrap failed', err)
-    )
+    // Bootstrap fires only when the website surface is about to be ON —
+    // a no-args toggle from hexagons → website, an explicit website
+    // keyword (on/web/site/page/view), or a build/upgrade trigger.
+    // Toggling explicitly OFF (hex/off/hexagons) or running read-only
+    // ops (export/list/stamp) does NOT touch the tree.
+    const vmCurrent = (get('@hypercomb.social/ViewMode') as ViewModeShape | undefined)?.mode
+    const isToggleOn = !trimmed && vmCurrent === 'hexagons'
+    const isExplicitOn = WEBSITE_KEYWORDS.has(trimmed)
+    const isBuildTrigger =
+      trimmed === 'upgrade' || trimmed.startsWith('upgrade ') ||
+      trimmed === 'new' || trimmed === 'build'
+
+    if (isToggleOn || isExplicitOn || isBuildTrigger) {
+      void ensureInstructionsBootstrap().catch(err =>
+        console.warn('[/website] instructions bootstrap failed', err)
+      )
+    }
 
     // Elegant view-mode toggle. /website with no arg, or with one of
     // the mode keywords, switches the rendering surface. The original

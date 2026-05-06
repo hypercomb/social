@@ -3282,9 +3282,8 @@ var INSTRUCTIONS_ROOT_STARTER = "Always-on context for every codegen request. Su
 var SIG_REGEX = /^[a-f0-9]{64}$/;
 async function ensureInstructionsBootstrap() {
   const history = get("@diamondcoreprocessor.com/HistoryService");
-  const committer = get("@diamondcoreprocessor.com/LayerCommitter");
   const notes = get("@diamondcoreprocessor.com/NotesService");
-  if (!history || !committer || !notes) return;
+  if (!history || !notes) return;
   const rootSig = await history.sign({ explorerSegments: () => [] });
   const root = await history.currentLayerAt(rootSig);
   if (root?.children) {
@@ -3297,15 +3296,22 @@ async function ensureInstructionsBootstrap() {
       }
     }
   }
-  console.log("[/website] bootstrapping instructions/ tree at root");
-  const childNames = INSTRUCTIONS_DEFAULTS.map((d) => d.name);
-  await committer.update(["instructions"], { name: "instructions", children: childNames });
+  const store = get("@hypercomb.social/Store");
+  const userRoot = store?.hypercombRoot;
+  if (!userRoot) {
+    console.warn("[/website] Store.hypercombRoot unavailable \u2014 skipping bootstrap");
+    return;
+  }
+  console.log("[/website] bootstrapping instructions/ tree at root (additive)");
+  const instructionsDir = await userRoot.getDirectoryHandle("instructions", { create: true });
+  EffectBus16.emit("cell:added", { cell: "instructions", segments: [] });
   await notes.addAtSegments([], "instructions", INSTRUCTIONS_ROOT_STARTER);
   for (const d of INSTRUCTIONS_DEFAULTS) {
-    await committer.update(["instructions", d.name], { name: d.name });
+    await instructionsDir.getDirectoryHandle(d.name, { create: true });
+    EffectBus16.emit("cell:added", { cell: d.name, segments: ["instructions"] });
     await notes.addAtSegments(["instructions"], d.name, d.starter);
   }
-  console.log(`[/website] instructions/ bootstrapped with ${INSTRUCTIONS_DEFAULTS.length} default sub-cells`);
+  console.log(`[/website] instructions/ bootstrapped with ${INSTRUCTIONS_DEFAULTS.length} default sub-cells (with OPFS dirs)`);
 }
 var toast2 = (type, title, message) => {
   try {
@@ -3465,9 +3471,15 @@ var WebsiteQueenBee = class extends QueenBee19 {
   }
   execute(args) {
     const trimmed = args.trim().toLowerCase();
-    void ensureInstructionsBootstrap().catch(
-      (err) => console.warn("[/website] instructions bootstrap failed", err)
-    );
+    const vmCurrent = get("@hypercomb.social/ViewMode")?.mode;
+    const isToggleOn = !trimmed && vmCurrent === "hexagons";
+    const isExplicitOn = WEBSITE_KEYWORDS.has(trimmed);
+    const isBuildTrigger = trimmed === "upgrade" || trimmed.startsWith("upgrade ") || trimmed === "new" || trimmed === "build";
+    if (isToggleOn || isExplicitOn || isBuildTrigger) {
+      void ensureInstructionsBootstrap().catch(
+        (err) => console.warn("[/website] instructions bootstrap failed", err)
+      );
+    }
     if (!trimmed || VIEW_TOGGLE_KEYWORDS.has(trimmed)) {
       const vm = get("@hypercomb.social/ViewMode");
       if (vm) {
