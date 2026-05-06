@@ -32,6 +32,24 @@ var HiveParticipant = class {
     return out;
   }
   /**
+   * Async sibling of itemsAt() that hydrates the participant layer +
+   * body cache for cells whose layers haven't been loaded into the peek
+   * cache yet. Uses the same code path the write side uses, so reads
+   * after a fresh selection match what writes see.
+   *
+   * Why this exists: itemsAt() reads from the SYNC peek cache, but the
+   * boot warmup only fills that cache for layers it has already seen.
+   * A first-touch cell whose participant layers exist in OPFS but
+   * weren't preloaded would return [] from itemsAt() until a write
+   * triggered the async hydrator. This method closes that gap so
+   * selection reads behave like write reads.
+   */
+  async itemsAtSegmentsAsync(parentSegments) {
+    const history = get("@diamondcoreprocessor.com/HistoryService");
+    if (!history) return [];
+    return this.#priorItemsAt(history, parentSegments);
+  }
+  /**
    * Walk every layer in HistoryService's preloader cache, decode every
    * item carried in this slot. After this resolves, every itemsAt() at
    * every parent in the universe is synchronous.
@@ -94,7 +112,8 @@ var HiveParticipant = class {
       const sig = await this.#commitParticipant(item, segs, history, store);
       layerSigs.push(sig);
     }
-    await committer.commitSlotSet(segs, this.slot, layerSigs);
+    const nextLayer = await this.#nextLayerWithSlot(history, segs, layerSigs);
+    await committer.update(segs, nextLayer, /* @__PURE__ */ new Set());
     EffectBus.emit(this.triggerName, {
       segments: [...segs],
       op: "set",
@@ -130,7 +149,8 @@ var HiveParticipant = class {
       const sig = await this.#commitParticipant(item, segs, history, store);
       layerSigs.push(sig);
     }
-    await committer.commitSlotSet(segs, this.slot, layerSigs);
+    const nextLayer = await this.#nextLayerWithSlot(history, segs, layerSigs);
+    await committer.update(segs, nextLayer, /* @__PURE__ */ new Set());
     EffectBus.emit(this.triggerName, {
       segments: [...segs],
       op: "set",
@@ -168,6 +188,21 @@ var HiveParticipant = class {
    *  decode-once cache. */
   #itemCache = /* @__PURE__ */ new Map();
   // ── Internal: read prior items via the layer ───────────────────────
+  /**
+   * Compose the parent's next-layer state for a layer-as-primitive
+   * `update()` call: take the parent's current layer (or an empty
+   * skeleton if the cell hasn't been committed yet) and replace this
+   * participant's slot with the new sig list. All other slots
+   * (children, tags, etc.) are preserved verbatim — `update()` would
+   * wipe any slot we omit.
+   */
+  async #nextLayerWithSlot(history, parentSegments, sigs) {
+    const parentLocSig = await this.#signSegments(parentSegments);
+    const parent = await history.currentLayerAt(parentLocSig);
+    const base = parent ? { ...parent } : { name: parentSegments[parentSegments.length - 1] ?? "" };
+    base[this.slot] = sigs.slice();
+    return base;
+  }
   async #priorItemsAt(history, parentSegments) {
     const parentLocSig = await this.#signSegments(parentSegments);
     const parent = await history.currentLayerAt(parentLocSig);
@@ -356,13 +391,16 @@ var NotesService = class extends HiveParticipant {
     if (!locSig) return [];
     return this.itemsAt(locSig).slice().sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   };
-  /** Async-resolving notes for a cell. Awaits cell-loc resolution AND
-   *  any cold cache loads. After this, notesFor() reads sync. */
+  /** Async-resolving notes for a cell. Hydrates the participant-body
+   *  cache from OPFS via the same async path the write side uses, so
+   *  the strip's first-selection read returns the same items the user
+   *  would see after committing a new note. After this, notesFor() reads
+   *  sync from the now-populated cache. */
   getNotes = async (cellLabel) => {
-    await this.warmup();
     const resolved = await this.#resolveCellLocation(cellLabel);
     if (!resolved) return [];
-    return this.itemsAt(resolved.locationSig).slice().sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    const items = await this.itemsAtSegmentsAsync(resolved.segments);
+    return items.slice().sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   };
   // ── Internal: cell-location resolution + transform plumbing ───────
   /**

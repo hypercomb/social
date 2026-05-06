@@ -154,6 +154,25 @@ export abstract class HiveParticipant<T> {
   }
 
   /**
+   * Async sibling of itemsAt() that hydrates the participant layer +
+   * body cache for cells whose layers haven't been loaded into the peek
+   * cache yet. Uses the same code path the write side uses, so reads
+   * after a fresh selection match what writes see.
+   *
+   * Why this exists: itemsAt() reads from the SYNC peek cache, but the
+   * boot warmup only fills that cache for layers it has already seen.
+   * A first-touch cell whose participant layers exist in OPFS but
+   * weren't preloaded would return [] from itemsAt() until a write
+   * triggered the async hydrator. This method closes that gap so
+   * selection reads behave like write reads.
+   */
+  protected async itemsAtSegmentsAsync(parentSegments: readonly string[]): Promise<T[]> {
+    const history = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
+    if (!history) return []
+    return this.#priorItemsAt(history, parentSegments)
+  }
+
+  /**
    * Walk every layer in HistoryService's preloader cache, decode every
    * item carried in this slot. After this resolves, every itemsAt() at
    * every parent in the universe is synchronous.

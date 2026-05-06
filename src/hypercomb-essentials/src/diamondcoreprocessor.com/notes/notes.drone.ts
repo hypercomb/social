@@ -204,14 +204,22 @@ export class NotesService extends HiveParticipant<Note> {
       .sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   }
 
-  /** Async-resolving notes for a cell. Awaits cell-loc resolution AND
-   *  any cold cache loads. After this, notesFor() reads sync. */
+  /** Async-resolving notes for a cell. Hydrates the participant-body
+   *  cache from OPFS via the same async path the write side uses, so
+   *  the strip's first-selection read returns the same items the user
+   *  would see after committing a new note. After this, notesFor() reads
+   *  sync from the now-populated cache. */
   public readonly getNotes = async (cellLabel: string): Promise<Note[]> => {
-    await this.warmup()
     const resolved = await this.#resolveCellLocation(cellLabel)
     if (!resolved) return []
-    return this.itemsAt(resolved.locationSig)
-      .slice()
+    // Use the async hydrator (HiveParticipant.itemsAtSegmentsAsync) instead
+    // of itemsAt(). itemsAt reads from the SYNC peek cache which the boot
+    // warmup may not have populated for first-touch cells, so it would
+    // return [] even when notes exist on disk. The async path goes through
+    // currentLayerAt + getLayerBySig + store.getResource — same as upsert's
+    // #priorItemsAt — guaranteeing the read sees what the write would.
+    const items = await this.itemsAtSegmentsAsync(resolved.segments)
+    return items.slice()
       .sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   }
 
