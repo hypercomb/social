@@ -208,10 +208,16 @@ export class NotesStripComponent implements OnDestroy {
       this.#cleanups.push(() => lineage.removeEventListener('change', onLineage))
     }
 
-    const selection = this.#selection
-    if (selection) {
+    // SelectionService lives in a bee bundle that loads AFTER this Angular
+    // component's constructor on hypercomb-web. Synchronous get() returns
+    // undefined at construction time, so we'd silently never register the
+    // change listener and #activeCell would remain null forever — that's
+    // the actual cause of "notes don't show on selection on web". Use
+    // window.ioc.whenReady so the wire-up happens whenever the service
+    // arrives, before-or-after construction.
+    const wireSelection = (selection: SelectionService): void => {
+      console.log('[notes-strip] wiring SelectionService, active=', selection.active)
       const sync = (): void => {
-        console.log('[notes-strip] selection sync active=', selection.active, 'selected.size=', selection.selected.size)
         // String signal: primitive equality dedups automatically.
         this.#activeCell.set(selection.active)
 
@@ -233,6 +239,19 @@ export class NotesStripComponent implements OnDestroy {
       sync()
       selection.addEventListener('change', sync)
       this.#selectionListener = () => selection.removeEventListener('change', sync)
+    }
+
+    const synchronouslyResolved = this.#selection
+    if (synchronouslyResolved) {
+      wireSelection(synchronouslyResolved)
+    } else {
+      // Wait for the bee to register. whenReady fires synchronously if the
+      // service is already there (covers a race where the bee registers
+      // between our constructor's two reads), else queues the callback.
+      window.ioc.whenReady<SelectionService>(
+        '@diamondcoreprocessor.com/SelectionService',
+        wireSelection,
+      )
     }
 
     this.#cleanups.push(EffectBus.on<{ segments?: readonly string[] }>('notes:changed', async (p) => {
