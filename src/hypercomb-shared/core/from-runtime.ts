@@ -22,7 +22,15 @@ export function fromRuntime<T>(
   const initial = target ? getter() : undefined as T
   const s: WritableSignal<T> = signal(initial)
   if (target) {
-    target.addEventListener(event, () => s.set(getter()))
+    // Defer the signal update to a microtask so it lands AFTER any
+    // in-flight Angular change-detection pass completes. Without this,
+    // in zoneless mode a synchronous signal update during a runtime event
+    // can flip a downstream impure-pipe value mid-pass (e.g. the i18n
+    // `| t` pipe returning a key first then a translation) and trigger
+    // NG0100 ExpressionChangedAfterItHasBeenChecked.
+    target.addEventListener(event, () => {
+      queueMicrotask(() => s.set(getter()))
+    })
   }
   return s.asReadonly()
 }

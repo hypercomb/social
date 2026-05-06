@@ -210,6 +210,7 @@ export class NotesStripComponent implements OnDestroy {
     const selection = this.#selection
     if (selection) {
       const sync = (): void => {
+        console.log('[notes-strip] selection sync active=', selection.active, 'selected.size=', selection.selected.size)
         // String signal: primitive equality dedups automatically.
         this.#activeCell.set(selection.active)
 
