@@ -66,6 +66,13 @@ export class NotesStripComponent implements OnDestroy {
   // warmup promise resolves. Tracking confirmed-warmed cells lets the
   // empty classifier wait for actual evidence instead of guessing.
   readonly #warmed = signal<ReadonlySet<string>>(new Set())
+  // Resolved notes per cell, stored directly from getNotes() so reads
+  // don't depend on the sync peek cache. On hypercomb-web the peek cache
+  // is populated lazily and may not contain participant layers — sync
+  // notesFor() returns [] in that state. By caching the async result of
+  // getNotes (which goes through the OPFS-direct path), the strip always
+  // shows what the write side would see.
+  readonly #notesByCell = signal<ReadonlyMap<string, readonly Note[]>>(new Map())
 
   /**
    * Display mode — `chips` is the horizontal scrolling chip row, `rows` is
@@ -77,12 +84,9 @@ export class NotesStripComponent implements OnDestroy {
   )
 
   readonly notes = computed<readonly Note[]>(() => {
-    this.#version()
     const cell = this.cell()
     if (!cell) return []
-    const svc = this.#notes
-    if (!svc) return []
-    return svc.notesFor(cell)
+    return this.#notesByCell().get(cell) ?? []
   })
 
   /**
@@ -101,16 +105,14 @@ export class NotesStripComponent implements OnDestroy {
    * bumps via the notes:changed effect.
    */
   readonly groups = computed<readonly { cell: string; notes: readonly Note[]; expanded: boolean }[]>(() => {
-    this.#version()
     const cells = this.#selectedCells()
     if (cells.length <= 1) return []
-    const svc = this.#notes
-    if (!svc) return []
+    const byCell = this.#notesByCell()
     // Only the most-recent N selections show in the menu — large
     // selections would otherwise flood the strip and bury the cells the
     // user is actually working with.
     const recent = cells.slice(-MAX_VISIBLE_SELECTIONS)
-    const withNotes = recent.filter(c => svc.notesFor(c).length > 0)
+    const withNotes = recent.filter(c => (byCell.get(c)?.length ?? 0) > 0)
     const open = this.#openGroup()
     const closed = this.#userClosed()
     // Resolution order:
@@ -125,7 +127,7 @@ export class NotesStripComponent implements OnDestroy {
         : withNotes[0] ?? null
     return withNotes.map(c => ({
       cell: c,
-      notes: svc.notesFor(c),
+      notes: byCell.get(c) ?? [],
       expanded: c === expanded,
     }))
   })
@@ -138,14 +140,12 @@ export class NotesStripComponent implements OnDestroy {
    * cell as empty during the initial warmup window.
    */
   readonly emptyCells = computed<readonly string[]>(() => {
-    this.#version()
     const cells = this.#selectedCells()
     if (cells.length <= 1) return []
-    const svc = this.#notes
-    if (!svc) return []
     const warmed = this.#warmed()
+    const byCell = this.#notesByCell()
     const recent = cells.slice(-MAX_VISIBLE_SELECTIONS)
-    return recent.filter(c => warmed.has(c) && svc.notesFor(c).length === 0)
+    return recent.filter(c => warmed.has(c) && (byCell.get(c)?.length ?? 0) === 0)
   })
 
   /**
@@ -201,6 +201,7 @@ export class NotesStripComponent implements OnDestroy {
     if (lineage?.addEventListener) {
       const onLineage = (): void => {
         this.#warmed.set(new Set())
+        this.#notesByCell.set(new Map())
         this.#version.update(v => v + 1)
       }
       lineage.addEventListener('change', onLineage)
@@ -236,13 +237,26 @@ export class NotesStripComponent implements OnDestroy {
 
     this.#cleanups.push(EffectBus.on<{ segments?: readonly string[] }>('notes:changed', async (p) => {
       // HiveParticipant emits with `segments` only — derive the cell
-      // label from the last segment. Warmup is already done by
-      // NotesService at boot; no async pre-warm needed here.
+      // label from the last segment. Refresh the per-cell notes cache so
+      // the strip immediately reflects the write.
       const cellLabel = Array.isArray(p?.segments) && p!.segments!.length > 0
         ? String(p!.segments![p!.segments!.length - 1] ?? '').trim()
         : ''
       const svc = this.#notes
-      if (svc && cellLabel) await svc.getNotes(cellLabel)
+      if (svc && cellLabel) {
+        const fresh = await svc.getNotes(cellLabel)
+        this.#notesByCell.update(prev => {
+          const next = new Map(prev)
+          next.set(cellLabel, fresh.slice())
+          return next
+        })
+        this.#warmed.update(prev => {
+          if (prev.has(cellLabel)) return prev
+          const next = new Set(prev)
+          next.add(cellLabel)
+          return next
+        })
+      }
       this.#version.update(v => v + 1)
     }))
 
@@ -287,6 +301,14 @@ export class NotesStripComponent implements OnDestroy {
         console.log('[notes-strip] warmup start', target)
         void svc.getNotes(target).then((notes) => {
           console.log('[notes-strip] warmup done', target, 'notes.length=', notes.length)
+          // Store the resolved notes directly. notes() / groups() /
+          // emptyCells() read from this map — no sync notesFor() that
+          // would hit the empty peek cache and lose data.
+          this.#notesByCell.update(prev => {
+            const next = new Map(prev)
+            next.set(target, notes.slice())
+            return next
+          })
           this.#warmed.update(prev => {
             if (prev.has(target)) return prev
             const next = new Set(prev)
