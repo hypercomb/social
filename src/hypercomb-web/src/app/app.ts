@@ -15,17 +15,24 @@ import { DocsOverlayComponent } from "@hypercomb/shared/ui/docs-overlay/docs-ove
 import { HistoryViewerComponent } from "@hypercomb/shared/ui/history-viewer/history-viewer.component"
 import { NotesStripComponent } from "@hypercomb/shared/ui/notes-strip/notes-strip.component"
 import { NotesViewerComponent } from "@hypercomb/shared/ui/notes-viewer/notes-viewer.component"
+import { WebsiteViewComponent } from "@hypercomb/shared/ui/website-view/website-view.component"
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, Header, MeshHeaderComponent, TileEditorComponent, ControlsBarComponent, PortalOverlayComponent, SensitivityBarComponent, SelectionContextMenuComponent, ConfirmDialogComponent, DocsOverlayComponent, HistoryViewerComponent, NotesStripComponent, NotesViewerComponent],
+  imports: [RouterOutlet, Header, MeshHeaderComponent, TileEditorComponent, ControlsBarComponent, PortalOverlayComponent, SensitivityBarComponent, SelectionContextMenuComponent, ConfirmDialogComponent, DocsOverlayComponent, HistoryViewerComponent, NotesStripComponent, NotesViewerComponent, WebsiteViewComponent],
   templateUrl: './app.html',
   styleUrl: './app.scss'
 })
 export class App implements AfterViewInit {
 
   protected readonly title = signal('hypercomb-web')
+
+  // ViewMode bridge — when 'website', the Pixi canvas hides and the
+  // website-view overlay activates. Mutually exclusive surfaces; new
+  // modes plug in via additional Angular components or drones that
+  // gate on the same signal.
+  protected readonly viewMode = signal<string>('hexagons')
   protected readonly secretOpen = signal(false)
   protected readonly inputOpen = signal(false)
   public showHeader = true
@@ -95,6 +102,19 @@ export class App implements AfterViewInit {
       if ((e as CustomEvent).detail?.target === 'dcp') this.dcpPortalOpen.set(true)
     })
     window.addEventListener('dcp:embed-closed', () => this.dcpPortalOpen.set(false))
+
+    // ViewMode subscription — drives Pixi-canvas visibility via app.html.
+    // Self-registered in shared/core/view-mode.service.ts at module load.
+    const wireViewMode = (svc: { mode: string } & EventTarget): void => {
+      this.viewMode.set(svc.mode)
+      svc.addEventListener('change', () => this.viewMode.set(svc.mode))
+    }
+    const modeSvc = (window as unknown as { ioc?: { get: <T>(k: string) => T | undefined; whenReady: <T>(k: string, cb: (v: T) => void) => void } }).ioc
+    if (modeSvc) {
+      const now = modeSvc.get<{ mode: string } & EventTarget>('@hypercomb.social/ViewMode')
+      if (now) wireViewMode(now)
+      else modeSvc.whenReady<{ mode: string } & EventTarget>('@hypercomb.social/ViewMode', wireViewMode)
+    }
 
     console.log('[app] initialized')
   }

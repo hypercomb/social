@@ -1,0 +1,151 @@
+// Full-screen overlay rendering the layer tree as a web page. Sits above
+// the Pixi canvas; the canvas hides via app.html when ViewMode is 'website'.
+
+$accent: #ffe14a;
+$paper: #0c0c1a;
+$ink: rgba(240, 240, 240, 0.94);
+$muted: rgba(240, 240, 240, 0.55);
+
+:host {
+  position: fixed;
+  inset: 0;
+  z-index: 50000;
+  pointer-events: none;
+  display: contents;
+}
+
+.website-shell {
+  pointer-events: auto;
+  position: absolute;
+  inset: 0;
+  background: $paper;
+  color: $ink;
+  font-family: var(--hc-font, system-ui);
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+
+.website-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 2rem;
+  background: linear-gradient(180deg, rgba(12, 12, 26, 1), rgba(12, 12, 26, 0.7));
+  border-bottom: 1px solid rgba($accent, 0.2);
+}
+
+.website-title {
+  margin: 0;
+  font-size: 1.4rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: rgba($accent, 0.95);
+  text-transform: lowercase;
+}
+
+.website-exit {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  color: $muted;
+  padding: 0.4rem 0.7rem;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: border-color 150ms ease, color 150ms ease, background 150ms ease;
+
+  &:hover {
+    background: rgba($accent, 0.1);
+    border-color: rgba($accent, 0.5);
+    color: rgba($accent, 1);
+  }
+}
+
+.website-main {
+  flex: 1;
+  max-width: 56rem;
+  width: 100%;
+  margin: 0 auto;
+  padding: 2.5rem 2rem 6rem;
+}
+
+.website-empty {
+  color: $muted;
+  font-style: italic;
+  text-align: center;
+  padding: 3rem 0;
+}
+
+.website-section {
+  margin: 0 0 3rem;
+  padding-bottom: 2rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+
+  &:last-child {
+    border-bottom: 0;
+  }
+}
+
+.website-section-title {
+  margin: 0 0 1rem;
+  font-size: 1.65rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-transform: lowercase;
+  color: $ink;
+
+  &::before {
+    content: '#';
+    margin-right: 0.4rem;
+    color: rgba($accent, 0.6);
+    font-weight: 400;
+  }
+}
+
+.website-note {
+  margin: 0 0 0.85rem;
+  line-height: 1.65;
+  font-size: 1rem;
+  color: rgba($ink, 0.92);
+}
+
+.website-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 1.25rem;
+}
+
+.website-nav-link {
+  display: inline-block;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  color: $muted;
+  font-size: 0.8rem;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+
+  &:hover {
+    background: rgba($accent, 0.1);
+    color: rgba($accent, 0.95);
+    border-color: rgba($accent, 0.4);
+  }
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

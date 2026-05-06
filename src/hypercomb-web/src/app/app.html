@@ -5,7 +5,12 @@
 </div>
 }
 <router-outlet></router-outlet>
-<div id="pixi-host" style="z-index: 0; position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></div>
+<!-- Pixi canvas hosts the hexagon surface. Hidden when ViewMode != 'hexagons'
+     so other rendering surfaces (website, future modes) take over without
+     fighting it for input. The Pixi runtime keeps running so a toggle
+     back is instant — no rebuild of textures / atlases. -->
+<div id="pixi-host" [style.display]="viewMode() === 'hexagons' ? 'block' : 'none'" style="z-index: 0; position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></div>
+<hc-website-view></hc-website-view>
 <hc-controls-bar [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()" [style.visibility]="viewActive() ? 'hidden' : null"></hc-controls-bar>
 <hc-selection-context-menu></hc-selection-context-menu>
 <hc-history-viewer></hc-history-viewer>
