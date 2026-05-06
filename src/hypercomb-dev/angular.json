@@ -85,7 +85,8 @@
           "options": {
             "port": 4200,
             "open": false,
-            "proxyConfig": "proxy.conf.json"
+            "proxyConfig": "proxy.conf.json",
+            "allowedHosts": ["all"]
           },
           "configurations": {
             "development": {

@@ -121,23 +121,34 @@ $note-accent: #ffe14a;
 .mobile-go-btn {
   display: none;
   flex-shrink: 0;
-  padding: 0 1.1rem;
-  background: transparent;
-  border: none;
-  border-left: 1.5px solid rgba(77, 166, 255, 0.45);
+  align-self: center;
+  padding: 0.5rem 1rem;
+  margin: 0 0.6rem;
+  background: rgba(120, 200, 255, 0.1);
+  border: 1px solid rgba(120, 200, 255, 0.4);
+  border-radius: 0.4rem;
   color: rgba(120, 200, 255, 1);
   font-family: var(--hc-mono);
-  font-size: 1rem;
+  font-size: 0.95rem;
   font-weight: 700;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
   cursor: pointer;
   user-select: none;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 
-  &:hover { color: #fff; background: rgba(77, 166, 255, 0.1); }
-  &:active { background: rgba(77, 166, 255, 0.18); }
+  &:hover {
+    color: #fff;
+    background: rgba(120, 200, 255, 0.2);
+    border-color: rgba(120, 200, 255, 0.7);
+  }
+  &:active {
+    background: rgba(120, 200, 255, 0.28);
+    border-color: rgba(120, 200, 255, 0.85);
+  }
 }
 
 @media (max-width: 599px) {
   .mobile-go-btn { display: flex; align-items: center; }
+  .command-line-wrapper { padding-right: clamp(3.5rem, 11vh, 5.5rem); }
 }

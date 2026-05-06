@@ -891,9 +891,9 @@
   // Each icon gets its own subtle floating disc so it reads as a tappable
   // affordance against the canvas — but the bar that holds them is invisible.
   .ctl-btn {
-    min-width: 2.75rem;
-    min-height: 2.75rem;
-    padding: 0.45rem;
+    min-width: 2.875rem;
+    min-height: 2.875rem;
+    padding: 0.5rem;
     border-radius: 50%;
     background: rgba(14, 18, 24, 0.72);
     backdrop-filter: blur(10px);
@@ -908,7 +908,7 @@
 
     &.disabled,
     &:disabled {
-      opacity: 0;
+      opacity: 0.25;
       pointer-events: none;
     }
   }
@@ -946,11 +946,55 @@
   }
 }
 
-// Solo / swarm mode indicator on mobile
-.pill-stage.mobile .mesh-mobile-btn {
-  color: rgba(255, 45, 138, 0.85); // solo
+// Camera shutter button — larger white-ring style like iPhone
+.pill-stage.mobile .camera-btn {
+  min-width: 3.75rem !important;
+  min-height: 3.75rem !important;
+  padding: 0 !important;
+  background: transparent !important;
+  border: 2.5px solid rgba(255, 255, 255, 0.9) !important;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5) !important;
+  position: relative;
 
-  &.shield-mode { color: rgba(120, 200, 255, 0.9); } // swarm
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 5px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.88);
+    transition: opacity 100ms ease;
+  }
+
+  &:active:not(:disabled) {
+    transform: scale(0.88) !important;
+    &::before { opacity: 0.6; }
+  }
+}
+
+// Swarm toggle rendered inside the mobile command-line header bar
+.mobile-mesh-header-btn {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 60001;
+  width: clamp(3.5rem, 11vh, 5.5rem);
+  height: clamp(3.5rem, 11vh, 5.5rem);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: rgba(255, 45, 138, 0.85);
+  font-family: 'hypercomb-icons';
+  font-size: 1.3rem;
+  line-height: 1;
+  padding: 0;
+  touch-action: manipulation;
+
+  &.shield-mode { color: rgba(120, 200, 255, 0.9); }
+
+  &:active { opacity: 0.7; }
 }
 
 // ── phone (≤599px) — non-mobile-pill phone-specific tweaks ───
@@ -968,7 +1012,36 @@
   .room-shell { height: 2.4rem; }
   .room-input { width: 8rem; }
   .room-display { font-size: 0.8rem; }
-  .tag-float { right: 0.8rem; }
+  // Lift tag float clear of the floating pill (pill bottom 1.1rem + ~2.75rem disc + safe area)
+  .tag-float {
+    right: 0.8rem;
+    bottom: 6.25rem;
+  }
+
+  // Mobile-only: breadcrumb is the on-screen entry point for slash commands.
+  // Expand the hit target to ~44pt without moving the visible text.
+  // Scoped with :not(.faded) so the open input behind it stays tappable.
+  .breadcrumb-top.tappable:not(.faded) {
+    pointer-events: auto;
+    cursor: pointer;
+    padding: 0.4rem 0.6rem;
+    margin: -0.4rem -0.6rem;
+  }
+
+  // First-run nudge: persists until the input has been opened once.
+  .mobile-onboarding-hint {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-style: italic;
+    font-size: 0.85rem;
+    color: rgba(245, 245, 245, 0.4);
+    text-align: center;
+    letter-spacing: 0.02em;
+    pointer-events: none;
+    z-index: 10;
+  }
 }
 
 // ── phone landscape ───────────────────────────────────────

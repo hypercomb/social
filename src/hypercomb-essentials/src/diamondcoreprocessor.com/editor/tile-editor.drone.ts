@@ -49,22 +49,26 @@ export class TileEditorDrone {
 
   constructor() {
     EffectBus.on<TileActionPayload>('tile:action', this.#onTileAction)
+    EffectBus.on('controls:camera-open', this.#onCameraOpen)
 
     // Self-register the 'edit' tile icon. The arranger (tile-actions)
     // merges this with its own catalog, computes positions, and emits
     // the final overlay descriptors. Toggling this drone off in DCP
     // skips construction → registry never receives the entry → icon
     // never appears.
-    const registry = window.ioc.get<IconProviderRegistry>('@hypercomb.social/IconProviderRegistry')
-    registry?.add({
-      name: 'edit',
-      owner: '@diamondcoreprocessor.com/TileEditorDrone',
-      svgMarkup: EDIT_ICON_SVG,
-      profile: 'private',
-      hoverTint: 0xc8d8ff,
-      labelKey: 'action.edit',
-      descriptionKey: 'action.edit.description',
-    })
+    const isMobile = window.matchMedia('(max-width: 599px)').matches || 'ontouchstart' in window
+    if (!isMobile) {
+      const registry = window.ioc.get<IconProviderRegistry>('@hypercomb.social/IconProviderRegistry')
+      registry?.add({
+        name: 'edit',
+        owner: '@diamondcoreprocessor.com/TileEditorDrone',
+        svgMarkup: EDIT_ICON_SVG,
+        profile: 'private',
+        hoverTint: 0xc8d8ff,
+        labelKey: 'action.edit',
+        descriptionKey: 'action.edit.description',
+      })
+    }
   }
 
   // ── effect handler ─────────────────────────────────────────────
@@ -72,6 +76,31 @@ export class TileEditorDrone {
   #onTileAction = (payload: TileActionPayload): void => {
     if (payload.action !== 'edit') return
     void this.#openEditing(payload.label)
+  }
+
+  #onCameraOpen = (): void => {
+    const selection = window.ioc.get<{ active: string | null }>('@diamondcoreprocessor.com/SelectionService')
+    const activeCell = selection?.active
+
+    if (activeCell) {
+      void this.#openEditingWithCamera(activeCell)
+    } else {
+      const newCell = `photo-${Date.now()}`
+      EffectBus.emit('cell:added', { cell: newCell })
+      const hc = (window as any).hypercomb
+      if (hc) {
+        void new hc().act().then(() => this.#openEditingWithCamera(newCell))
+      } else {
+        void this.#openEditingWithCamera(newCell)
+      }
+    }
+  }
+
+  async #openEditingWithCamera(cell: string): Promise<void> {
+    const service = window.ioc.get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
+    if (!service) return
+    service.autoCamera = true
+    await this.#openEditing(cell)
   }
 
   // ── open editor ────────────────────────────────────────────────

@@ -187,6 +187,12 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.inputVisible.set(false)
     EffectBus.emit('mobile:input-visible', { visible: false, mobile: true })
   }
+  readonly openSlashCommand = (): void => {
+    if (!this.isMobile()) return
+    this.inputVisible.set(true)
+    EffectBus.emit('mobile:input-visible', { visible: true, mobile: true })
+    EffectBus.emit('search:prefill', { value: '/' })
+  }
   #utility = signal(localStorage.getItem('hc:utility-expanded') !== 'false')
   #moveMode = signal(false)
   #mode = signal<'browsing' | 'clipboard' | 'atomize'>('browsing')
@@ -383,10 +389,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   // Baseline 1.0 at 1920px wide (half the previous fixed 2× size).
   // Scales up linearly on larger monitors; clamped on small/huge screens.
   // Mobile uses a separate floating-icon layout that ignores this zoom.
-  readonly #pillZoom = signal(this.#computePillZoom())
-  readonly pillZoom = this.#pillZoom.asReadonly()
+  readonly #pillZoom = signal(this.#computePillZoomRaw())
+  readonly pillZoom = computed(() => this.isMobile() ? 1 : this.#pillZoom())
 
-  #computePillZoom(): number {
+  #computePillZoomRaw(): number {
     const ratio = window.innerWidth / 1920
     return Math.max(0.9, Math.min(ratio, 1.6))
   }
@@ -620,6 +626,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #atomizeModeUnsub: (() => void) | null = null
   #atomizeAtomsUnsub: (() => void) | null = null
   #atomizeStrategyUnsub: (() => void) | null = null
+  #inputVisibleUnsub: (() => void) | null = null
 
   ngOnInit(): void {
     // ── mobile detection via matchMedia ──
@@ -772,6 +779,16 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       },
     )
 
+    // Mirror mobile:input-visible into the local signal so foreign emitters
+    // (long-press input drone, command-line GO button, mic flow) keep the
+    // breadcrumb fade and onboarding hint in sync with the real input state.
+    this.#inputVisibleUnsub = EffectBus.on<{ visible: boolean; mobile: boolean }>(
+      'mobile:input-visible',
+      ({ visible }) => {
+        this.inputVisible.set(!!visible)
+      },
+    )
+
     // emit initial show-hidden state so drones pick it up
     if (this.#showHidden()) {
       EffectBus.emit('visibility:show-hidden', { active: true })
@@ -839,6 +856,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#atomizeModeUnsub?.()
     this.#atomizeAtomsUnsub?.()
     this.#atomizeStrategyUnsub?.()
+    this.#inputVisibleUnsub?.()
     window.removeEventListener('keydown', this.#onPowerKeyDown)
     window.removeEventListener('keyup', this.#onPowerKeyUp)
     window.removeEventListener('blur', this.#onPowerKeyReset)
@@ -1222,6 +1240,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.meshToggled.emit()
   }
 
+  readonly openCameraCapture = (): void => {
+    EffectBus.emit('controls:camera-open', {})
+  }
+
   readonly openClipboard = async (): Promise<void> => {
     if (!this.#clipboardAvailable()) return
 
@@ -1447,7 +1469,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     const pos = this.#pillPos()
     if (pos) this.#pillPos.set(this.#clampPillPos(pos.x, pos.y))
     // recompute pill zoom for new viewport width
-    this.#pillZoom.set(this.#computePillZoom())
+    this.#pillZoom.set(this.#computePillZoomRaw())
   }
 
   // ── pill drag-to-move ─────────────────────────────────────

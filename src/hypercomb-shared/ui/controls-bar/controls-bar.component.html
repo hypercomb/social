@@ -1,8 +1,20 @@
 <!-- swipe-back edge indicator -->
 <div class="swipe-back-indicator" [class.active]="swipeIndicatorActive()"></div>
 
+<!-- swarm toggle in command-line header (mobile only, when input is open) -->
+@if (isMobile() && inputVisible()) {
+  <button class="mobile-mesh-header-btn" [class.shield-mode]="meshPublic()"
+          (click)="toggleMeshPublic()"
+          [attr.aria-label]="(meshPublic() ? 'mesh.swarm' : 'mesh.solo') | t">
+    <span class="hci">{{ meshPublic() ? 'e' : 'i' }}</span>
+  </button>
+}
+
 <!-- breadcrumb: below header, right-aligned -->
-<div class="breadcrumb-top" [class.faded]="isMobile()">
+<div class="breadcrumb-top"
+     [class.faded]="isMobile() && inputVisible()"
+     [class.tappable]="isMobile()"
+     (click)="isMobile() ? openSlashCommand() : null">
   @if (currentLayerSigShort()) {
     <span class="layer-sig-crumb" title="current layer marker sig (dev only)">"{{ currentLayerSigShort() }}"</span><span class="sep-crumb">◆</span>
   }
@@ -61,6 +73,10 @@
   </div>
 }
 
+@if (isMobile() && !inputVisible()) {
+  <div class="mobile-onboarding-hint">long-press to type · tap breadcrumb for /</div>
+}
+
 <div
   class="pill-stage"
   [class.faded]="!visible()"
@@ -98,7 +114,7 @@
 
       @if (isMobile()) {
         <!-- ═══ MOBILE: 5 floating icons (no chrome) ═══ -->
-        <!-- back · talk · center · fullscreen · solo/swarm -->
+        <!-- back · talk · camera · center · fullscreen -->
         <div class="controls-section mobile-nav">
           <button class="ctl-btn" [class.disabled]="!canGoBack()" [disabled]="!canGoBack()"
                   (pointerdown)="onBackPointerDown($event)" (click)="onBackClick()"
@@ -112,6 +128,7 @@
               <span class="mic-icon">{{ voiceActive() ? '🎙' : '🎤' }}</span>
             </button>
           }
+          <button class="ctl-btn camera-btn" (click)="openCameraCapture()" [attr.aria-label]="'controls.camera' | t"></button>
           <button class="ctl-btn fit-btn"
                   [class.fit-global]="fitButtonState() === 'global'"
                   [class.fit-page]="fitButtonState() === 'page'"
@@ -121,9 +138,6 @@
           </button>
           <button class="ctl-btn" (click)="toggleFullscreen()" [attr.aria-label]="'controls.fullscreen' | t">
             <span class="hci">'</span>
-          </button>
-          <button class="ctl-btn mesh-mobile-btn" [class.shield-mode]="meshPublic()" (click)="toggleMeshPublic()" [attr.aria-label]="(meshPublic() ? 'mesh.swarm' : 'mesh.solo') | t">
-            <span class="hci">{{ meshPublic() ? 'e' : 'i' }}</span>
           </button>
         </div>
       } @else {

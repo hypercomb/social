@@ -9,6 +9,7 @@ export class TileEditorService extends EventTarget {
   #cell = ''
   #properties: Record<string, unknown> = {}
   #largeBlob: Blob | null = null
+  autoCamera = false
 
   // ── getters ────────────────────────────────────────────────────
 
@@ -55,6 +56,7 @@ export class TileEditorService extends EventTarget {
     this.#cell = ''
     this.#properties = {}
     this.#largeBlob = null
+    this.autoCamera = false
     this.#emit()
     EffectBus.emit<EditorModePayload>('editor:mode', { active: false })
   }
