@@ -317,6 +317,67 @@ export class WebsiteQueenBee extends QueenBee {
       return void this.#export(null)
     }
 
+    // Upgrade pipeline trigger. /website upgrade emits a build event the
+    // bridge worker forwards to Claude with [skeleton, notes, prior code]
+    // as context. Returned ops cascade through the normal merkle update
+    // path. Three forms:
+    //   /website upgrade        — current lineage outward to leaves
+    //   /website upgrade *      — whole tree from root
+    //   /website upgrade <name> — named branch (resolved via NameRegistry)
+    if (trimmed === 'upgrade' || trimmed.startsWith('upgrade ') || trimmed.startsWith('upgrade\t')) {
+      const rest = trimmed === 'upgrade' ? '' : trimmed.slice('upgrade'.length).trim()
+      const lineage = get('@hypercomb.social/Lineage') as { explorerSegments?: () => readonly string[] } | undefined
+      const currentSegments = (lineage?.explorerSegments?.() ?? [])
+        .map(s => String(s ?? '').trim()).filter(Boolean)
+
+      let scope: 'root' | 'subtree' | 'named'
+      let scopeSegments: readonly string[]
+      let scopeName: string | null = null
+
+      if (rest === '*' || rest === '/' || rest === 'root' || rest === 'all') {
+        scope = 'root'
+        scopeSegments = []
+      } else if (rest) {
+        scope = 'named'
+        scopeName = rest
+        scopeSegments = currentSegments
+      } else {
+        scope = 'subtree'
+        scopeSegments = currentSegments
+      }
+
+      EffectBus.emit('website:build', {
+        mode: 'upgrade',
+        scope,
+        scopeName,
+        scopeSegments: [...scopeSegments],
+        priorRootMarker: localStorage.getItem('hc:website:last-root-sig') ?? null,
+      })
+
+      console.log(`[/website upgrade] emitted website:build scope=${scope}` +
+        (scopeName ? ` name=${scopeName}` : '') +
+        (scopeSegments.length ? ` lineage=${scopeSegments.join('/')}` : ' lineage=(root)'))
+
+      toast('info', 'website upgrade', `queued ${scope}${scopeName ? `: ${scopeName}` : ''}`)
+      return
+    }
+
+    // /website new — explicit greenfield build (no prior code in context).
+    if (trimmed === 'new' || trimmed === 'build') {
+      const lineage = get('@hypercomb.social/Lineage') as { explorerSegments?: () => readonly string[] } | undefined
+      const currentSegments = (lineage?.explorerSegments?.() ?? [])
+        .map(s => String(s ?? '').trim()).filter(Boolean)
+      EffectBus.emit('website:build', {
+        mode: 'new',
+        scope: currentSegments.length === 0 ? 'root' : 'subtree',
+        scopeSegments: [...currentSegments],
+        priorRootMarker: null,
+      })
+      console.log(`[/website ${trimmed}] emitted website:build mode=new lineage=${currentSegments.join('/') || '(root)'}`)
+      toast('info', 'website build', 'queued — bridge worker will pick up')
+      return
+    }
+
     const parsed = parseArgs(args)
 
     switch (parsed.kind) {

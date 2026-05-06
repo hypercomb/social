@@ -3426,6 +3426,48 @@ var WebsiteQueenBee = class extends QueenBee19 {
     if (trimmed === "export") {
       return void this.#export(null);
     }
+    if (trimmed === "upgrade" || trimmed.startsWith("upgrade ") || trimmed.startsWith("upgrade	")) {
+      const rest = trimmed === "upgrade" ? "" : trimmed.slice("upgrade".length).trim();
+      const lineage = get("@hypercomb.social/Lineage");
+      const currentSegments = (lineage?.explorerSegments?.() ?? []).map((s) => String(s ?? "").trim()).filter(Boolean);
+      let scope;
+      let scopeSegments;
+      let scopeName = null;
+      if (rest === "*" || rest === "/" || rest === "root" || rest === "all") {
+        scope = "root";
+        scopeSegments = [];
+      } else if (rest) {
+        scope = "named";
+        scopeName = rest;
+        scopeSegments = currentSegments;
+      } else {
+        scope = "subtree";
+        scopeSegments = currentSegments;
+      }
+      EffectBus16.emit("website:build", {
+        mode: "upgrade",
+        scope,
+        scopeName,
+        scopeSegments: [...scopeSegments],
+        priorRootMarker: localStorage.getItem("hc:website:last-root-sig") ?? null
+      });
+      console.log(`[/website upgrade] emitted website:build scope=${scope}` + (scopeName ? ` name=${scopeName}` : "") + (scopeSegments.length ? ` lineage=${scopeSegments.join("/")}` : " lineage=(root)"));
+      toast2("info", "website upgrade", `queued ${scope}${scopeName ? `: ${scopeName}` : ""}`);
+      return;
+    }
+    if (trimmed === "new" || trimmed === "build") {
+      const lineage = get("@hypercomb.social/Lineage");
+      const currentSegments = (lineage?.explorerSegments?.() ?? []).map((s) => String(s ?? "").trim()).filter(Boolean);
+      EffectBus16.emit("website:build", {
+        mode: "new",
+        scope: currentSegments.length === 0 ? "root" : "subtree",
+        scopeSegments: [...currentSegments],
+        priorRootMarker: null
+      });
+      console.log(`[/website ${trimmed}] emitted website:build mode=new lineage=${currentSegments.join("/") || "(root)"}`);
+      toast2("info", "website build", "queued \u2014 bridge worker will pick up");
+      return;
+    }
     const parsed = parseArgs(args);
     switch (parsed.kind) {
       case "list":
