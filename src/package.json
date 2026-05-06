@@ -52,7 +52,8 @@
     "intel:publish": "tsx scripts/intel-publish.ts",
     "intel:context": "tsx scripts/intel-context.ts",
     "intel:emit-leaves": "tsx scripts/intel-emit-leaves.ts",
-    "intel:build-tree": "tsx scripts/intel-build-tree.ts"
+    "intel:build-tree": "tsx scripts/intel-build-tree.ts",
+    "intel:build-hive": "tsx scripts/intel-build-hive.ts"
   },
   "dependencies": {
     "@angular/animations": "21.2.4",

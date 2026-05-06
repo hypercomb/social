@@ -1042,6 +1042,14 @@ var ShowCellDrone = class _ShowCellDrone extends Drone {
     }
   };
   refreshMeshCells = async (grammar = "") => {
+    const meshEnabled = (() => {
+      try {
+        return localStorage.getItem("hc:mesh-enabled") === "true";
+      } catch {
+        return false;
+      }
+    })();
+    if (!meshEnabled) return;
     const lineage = this.resolve("lineage");
     const mesh = this.tryGetMesh();
     if (!lineage || !mesh) return;

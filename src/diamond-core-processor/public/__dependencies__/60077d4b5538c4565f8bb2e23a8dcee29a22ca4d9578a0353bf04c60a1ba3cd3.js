@@ -502,6 +502,14 @@ var HistoryService = class _HistoryService {
     } finally {
       await markerWritable.close();
     }
+    const store = get("@hypercomb.social/Store");
+    if (store?.writeOptimizedBytes) {
+      const buf = bytes.buffer;
+      const schedule = typeof window.requestIdleCallback === "function" ? (cb) => window.requestIdleCallback(cb, { timeout: 5e3 }) : (cb) => setTimeout(cb, 0);
+      schedule(() => {
+        void store.writeOptimizedBytes(layerSig, buf);
+      });
+    }
     const cacheMap = this.#markerBytesCache.get(locationSig) ?? (this.#markerBytesCache.set(locationSig, /* @__PURE__ */ new Map()), this.#markerBytesCache.get(locationSig));
     cacheMap.set(layerSig, bytes.buffer);
     this.#preloaderCache.set(layerSig, bytes.buffer);
@@ -809,6 +817,22 @@ var HistoryService = class _HistoryService {
       } catch {
       }
     }
+    const store = get("@hypercomb.social/Store");
+    if (store?.getOptimizedBytes) {
+      const optimized = await store.getOptimizedBytes(layerSig);
+      if (optimized) {
+        try {
+          const parsed = JSON.parse(new TextDecoder().decode(optimized));
+          if (parsed.name) {
+            const hydrated = _HistoryService.#hydrateLayer(parsed);
+            this.#parsedLayerCache.set(layerSig, hydrated);
+            this.#preloaderCache.set(layerSig, optimized.buffer);
+            return hydrated;
+          }
+        } catch {
+        }
+      }
+    }
     await this.preloadAllBags();
     const refreshed = this.#preloaderCache.get(layerSig);
     if (!refreshed) return null;
@@ -894,6 +918,22 @@ var HistoryService = class _HistoryService {
    * preload finishes.
    */
   #preloadAllBagsPromise = null;
+  /**
+   * Boot-time index: for every existing bag, identify the LATEST marker
+   * (by filename, no byte read) and only read+sign THAT one. The cache
+   * holds head sigs only — sufficient for rendering the current layer
+   * tree. Historical sigs (undo / time-travel) are lazy on demand.
+   *
+   * Before this change, this method read+signed every marker in every
+   * bag — for a tree with N bags × M markers each, that's N×M file reads
+   * + SHA-256 ops on the main thread per session. Cold boot for a tree
+   * of moderate size measured in tens of seconds; the page presented
+   * "Install Hypercomb" but was wedged on this scan.
+   *
+   * After: one filename-enumeration per bag (no byte reads) + one
+   * file read + sign per bag. O(bags + total markers stat-only)
+   * vs the old O(bags × markers byte+sign).
+   */
   preloadAllBags = async () => {
     if (this.#preloadAllBagsPromise) return this.#preloadAllBagsPromise;
     this.#preloadAllBagsPromise = (async () => {
@@ -903,23 +943,21 @@ var HistoryService = class _HistoryService {
         if (!_HistoryService.#SIG_RE.test(lineageSig)) continue;
         const bag = dirHandle;
         let latestName = "";
-        let latestSig = "";
         for await (const [name, fileHandle] of bag.entries()) {
           if (fileHandle.kind !== "file") continue;
           if (!_HistoryService.#MARKER_RE.test(name)) continue;
-          try {
-            const file = await fileHandle.getFile();
-            const bytes = await file.arrayBuffer();
-            const sig = await SignatureService.sign(bytes);
-            this.#preloaderCache.set(sig, bytes);
-            if (name > latestName) {
-              latestName = name;
-              latestSig = sig;
-            }
-          } catch {
-          }
+          if (name > latestName) latestName = name;
         }
-        if (latestSig) this.#latestSigByLineage.set(lineageSig, latestSig);
+        if (!latestName) continue;
+        try {
+          const fileHandle = await bag.getFileHandle(latestName, { create: false });
+          const file = await fileHandle.getFile();
+          const bytes = await file.arrayBuffer();
+          const sig = await SignatureService.sign(bytes);
+          this.#preloaderCache.set(sig, bytes);
+          this.#latestSigByLineage.set(lineageSig, sig);
+        } catch {
+        }
       }
     })();
     return this.#preloadAllBagsPromise;
