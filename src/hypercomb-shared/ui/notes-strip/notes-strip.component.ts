@@ -161,7 +161,17 @@ export class NotesStripComponent implements OnDestroy {
       // shown alongside a populated accordion, never on its own.
       return this.groups().length > 0
     }
-    return !!this.cell() && (this.notes().length > 0 || !!this.#capturingFor())
+    // Single-cell mode: show as soon as the cell has either confirmed-loaded
+    // notes OR is still loading (warmup hasn't resolved yet). Without this
+    // mid-warmup gate the strip flashes hidden→visible the instant the user
+    // clicks a tile that does have notes, because notesFor() returns [] sync
+    // before getNotes() completes. Only hide once we've confirmed the cell
+    // truly has zero notes.
+    const c = this.cell()
+    if (!c) return false
+    const warmed = this.#warmed().has(c)
+    if (!warmed) return true   // give warmup a chance — strip stays open
+    return this.notes().length > 0 || !!this.#capturingFor()
   })
 
   /** True when the strip is shown specifically because a note is being authored. */
@@ -171,6 +181,11 @@ export class NotesStripComponent implements OnDestroy {
   #selectionListener: (() => void) | null = null
 
   constructor() {
+    // Build identification log — if you don't see this in the console after
+    // a hard reload, the new bundle isn't running. Bumping the tag below
+    // forces a visible signal on every meaningful change to this component.
+    console.log('[notes-strip] build=2026-05-05-accordion-update boot')
+
     // Folder navigation invalidates NotesService's cell-locationSig cache
     // (the same label resolves differently per folder), so notesFor() will
     // start returning [] for previously-warmed cells until getNotes runs
@@ -263,7 +278,9 @@ export class NotesStripComponent implements OnDestroy {
       if (targets.size === 0) return
       for (const target of targets) {
         if (this.#warmed().has(target)) continue
-        void svc.getNotes(target).then(() => {
+        console.log('[notes-strip] warmup start', target)
+        void svc.getNotes(target).then((notes) => {
+          console.log('[notes-strip] warmup done', target, 'notes.length=', notes.length)
           this.#warmed.update(prev => {
             if (prev.has(target)) return prev
             const next = new Set(prev)
@@ -271,6 +288,8 @@ export class NotesStripComponent implements OnDestroy {
             return next
           })
           this.#version.update(v => v + 1)
+        }).catch(err => {
+          console.error('[notes-strip] warmup failed', target, err)
         })
       }
     })
