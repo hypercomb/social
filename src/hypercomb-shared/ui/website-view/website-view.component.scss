@@ -27,39 +27,37 @@ $muted: rgba(240, 240, 240, 0.55);
   scroll-behavior: smooth;
 }
 
-.website-header {
-  position: sticky;
-  top: 0;
-  z-index: 1;
+// The close icon sits visually INSIDE the bottom-docked command-line
+// bar — right-aligned, vertically centered to the bar's height. Sits
+// above the .header-bar (z-index higher) so the click reaches us.
+.website-footer {
+  position: fixed;
+  bottom: 0;
+  right: 0;
+  height: 2.8rem;   // matches .header-bar shared-styles height
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 1rem 2rem;
-  background: linear-gradient(180deg, rgba(12, 12, 26, 1), rgba(12, 12, 26, 0.7));
-  border-bottom: 1px solid rgba($accent, 0.2);
-}
-
-.website-title {
-  margin: 0;
-  font-size: 1.4rem;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  color: rgba($accent, 0.95);
-  text-transform: lowercase;
+  padding: 0 0.4rem;
+  z-index: 60002;
+  pointer-events: auto;
 }
 
 .website-exit {
   background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
   color: $muted;
-  padding: 0.4rem 0.7rem;
+  width: 2rem;
+  height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-size: 1rem;
   cursor: pointer;
   transition: border-color 150ms ease, color 150ms ease, background 150ms ease;
 
   &:hover {
-    background: rgba($accent, 0.1);
+    background: rgba($accent, 0.12);
     border-color: rgba($accent, 0.5);
     color: rgba($accent, 1);
   }

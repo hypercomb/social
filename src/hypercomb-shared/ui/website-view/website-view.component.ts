@@ -70,20 +70,6 @@ const SIG_REGEX = /^[a-f0-9]{64}$/
   template: `
     @if (active()) {
       <div class="website-shell" (contextmenu)="onContextMenu($event)">
-        <header class="website-header">
-          <nav class="website-breadcrumb" aria-label="breadcrumb">
-            <a class="website-crumb" (click)="goRoot($event)" href="#/">{{ rootName() || '/' }}</a>
-            @for (crumb of breadcrumbs(); track crumb.path.join('/')) {
-              <span class="website-crumb-sep" aria-hidden="true">›</span>
-              <a class="website-crumb" (click)="goTo(crumb.path, $event)" [href]="hashOf(crumb.path)">{{ crumb.name }}</a>
-            }
-          </nav>
-          <button class="website-exit" type="button" (click)="exit()" title="Back to hexagons">
-            <span aria-hidden="true">⬡</span>
-            <span class="visually-hidden">Switch to hexagons</span>
-          </button>
-        </header>
-
         @if (loading() && !node()) {
           <p class="website-loading">Loading…</p>
         }
@@ -134,6 +120,13 @@ const SIG_REGEX = /^[a-f0-9]{64}$/
             </article>
           }
         </main>
+
+        <footer class="website-footer">
+          <button class="website-exit" type="button" (click)="exit()" title="Back to hexagons">
+            <span aria-hidden="true">⬡</span>
+            <span class="visually-hidden">Switch to hexagons</span>
+          </button>
+        </footer>
       </div>
     }
   `,
