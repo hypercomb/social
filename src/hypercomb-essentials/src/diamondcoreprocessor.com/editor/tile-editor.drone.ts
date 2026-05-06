@@ -81,19 +81,8 @@ export class TileEditorDrone {
   #onCameraOpen = (): void => {
     const selection = window.ioc.get<{ active: string | null }>('@diamondcoreprocessor.com/SelectionService')
     const activeCell = selection?.active
-
-    if (activeCell) {
-      void this.#openEditingWithCamera(activeCell)
-    } else {
-      const newCell = `photo-${Date.now()}`
-      EffectBus.emit('cell:added', { cell: newCell })
-      const hc = (window as any).hypercomb
-      if (hc) {
-        void new hc().act().then(() => this.#openEditingWithCamera(newCell))
-      } else {
-        void this.#openEditingWithCamera(newCell)
-      }
-    }
+    if (!activeCell) return
+    void this.#openEditingWithCamera(activeCell)
   }
 
   async #openEditingWithCamera(cell: string): Promise<void> {
