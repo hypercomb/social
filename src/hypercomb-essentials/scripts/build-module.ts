@@ -184,9 +184,17 @@ const deployToAzure = (): void => {
   const ps1 = resolve(__dirname, 'deploy-azure.ps1')
   if (!existsSync(ps1)) return
 
+  // PowerShell binary name differs by platform: Windows ships `powershell`
+  // (Windows PowerShell 5.1) and may also have `pwsh` (PowerShell 7+);
+  // Linux/macOS only have `pwsh`. Pick the one that exists so the same
+  // script works in CI (Ubuntu runners) and on developer Windows boxes.
+  // `-NonInteractive` suppresses console-title operations that fail when
+  // running under npm/tsx without a real TTY.
+  const psBinary = process.platform === 'win32' ? 'powershell' : 'pwsh'
+
   const result = spawnSync(
-    'powershell',
-    ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1],
+    psBinary,
+    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', ps1],
     { stdio: 'inherit' }
   )
 
