@@ -69,7 +69,7 @@ const SIG_REGEX = /^[a-f0-9]{64}$/
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (active()) {
-      <div class="website-shell">
+      <div class="website-shell" (contextmenu)="onContextMenu($event)">
         <header class="website-header">
           <nav class="website-breadcrumb" aria-label="breadcrumb">
             <a class="website-crumb" (click)="goRoot($event)" href="#/">{{ rootName() || '/' }}</a>
@@ -316,6 +316,17 @@ export class WebsiteViewComponent implements OnDestroy {
   exit(): void {
     const mode = get<ViewModeServiceShape>('@hypercomb.social/ViewMode')
     mode?.setMode('hexagons')
+  }
+
+  /** Right-click anywhere in the website-shell → navigate UP one level
+   *  in the ancestry chain. Mirrors Hypercomb's hex back-click. At root,
+   *  no-op (don't show the browser context menu either — keep the
+   *  navigation surface consistent). */
+  onContextMenu(event: MouseEvent): void {
+    event.preventDefault()
+    const path = this.#currentPath()
+    if (path.length === 0) return
+    this.#navigate(path.slice(0, -1))
   }
 
   /** Build child-card data with a preview snippet from each child's
