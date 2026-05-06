@@ -273,13 +273,22 @@ export class WebsiteViewComponent implements OnDestroy {
     })
 
     // When website mode activates, restore path from URL hash.
+    // CRITICAL: compare contents before setting — array signals fire on
+    // reference inequality, and `[...fromHash]` creates a new array
+    // every run. Without the content compare this effect retriggers
+    // itself in an infinite loop and the page hangs.
     effect(() => {
-      if (this.active()) {
-        const fromHash = this.#parseHash()
-        if (fromHash.length > 0 || this.#currentPath().length === 0) {
-          this.#currentPath.set(fromHash)
+      if (!this.active()) return
+      const fromHash = this.#parseHash()
+      const current = this.#currentPath()
+      if (fromHash.length === current.length) {
+        let same = true
+        for (let i = 0; i < fromHash.length; i++) {
+          if (fromHash[i] !== current[i]) { same = false; break }
         }
+        if (same) return
       }
+      this.#currentPath.set(fromHash)
     })
   }
 
@@ -398,7 +407,16 @@ export class WebsiteViewComponent implements OnDestroy {
     out: Node[],
     knownNames: Set<string>,
     nameIndex: Map<string, readonly string[]>,
+    visited: Set<string> = new Set(),
   ): Promise<void> {
+    // Cycle protection — a malformed tree where a cell appears under
+    // itself would otherwise spin forever. Bound depth as well for
+    // safety on hostile inputs.
+    if (segments.length > 32) return
+    const key = segments.join('/')
+    if (visited.has(key)) return
+    visited.add(key)
+
     const locSig = await history.sign({ explorerSegments: () => segments })
     const layer = await history.currentLayerAt(locSig)
     const childNames = layer ? await this.#resolveChildNames(history, layer) : []
@@ -406,7 +424,7 @@ export class WebsiteViewComponent implements OnDestroy {
     if (!nameIndex.has(name)) nameIndex.set(name, [...segments])
     out.push({ segments: [...segments], name, childNames, notes: [] })
     for (const childName of childNames) {
-      await this.#walk(history, childName, [...segments, childName], out, knownNames, nameIndex)
+      await this.#walk(history, childName, [...segments, childName], out, knownNames, nameIndex, visited)
     }
   }
 
