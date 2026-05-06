@@ -75,8 +75,14 @@ function invoke-az {
     [string[]]$Arguments
   )
 
-  $cmdExe = if ([string]::IsNullOrWhiteSpace($env:ComSpec)) { 'cmd.exe' } else { $env:ComSpec }
-  & $cmdExe '/d' '/s' '/c' 'az' @Arguments
+  # Windows: az is `az.cmd`, must go through cmd.exe to resolve.
+  # Linux/macOS: az is a script directly callable, no shell wrapper needed.
+  if ($IsWindows -or ($PSVersionTable.PSEdition -eq 'Desktop')) {
+    $cmdExe = if ([string]::IsNullOrWhiteSpace($env:ComSpec)) { 'cmd.exe' } else { $env:ComSpec }
+    & $cmdExe '/d' '/s' '/c' 'az' @Arguments
+  } else {
+    & az @Arguments
+  }
 
   if ($LASTEXITCODE -ne 0) {
     fail "azure cli command failed: az $($Arguments -join ' ')"
@@ -89,13 +95,17 @@ function invoke-az-silent {
     [string[]]$Arguments
   )
 
-  $cmdExe = if ([string]::IsNullOrWhiteSpace($env:ComSpec)) { 'cmd.exe' } else { $env:ComSpec }
   # Suppress stderr; ErrorActionPreference=Stop would otherwise turn native-command
   # stderr lines into terminating exceptions on Windows PowerShell 5.1.
   $previousEap = $ErrorActionPreference
   $ErrorActionPreference = 'Continue'
   try {
-    $output = & $cmdExe '/d' '/s' '/c' 'az' @Arguments 2>$null
+    if ($IsWindows -or ($PSVersionTable.PSEdition -eq 'Desktop')) {
+      $cmdExe = if ([string]::IsNullOrWhiteSpace($env:ComSpec)) { 'cmd.exe' } else { $env:ComSpec }
+      $output = & $cmdExe '/d' '/s' '/c' 'az' @Arguments 2>$null
+    } else {
+      $output = & az @Arguments 2>$null
+    }
   } finally {
     $ErrorActionPreference = $previousEap
   }
