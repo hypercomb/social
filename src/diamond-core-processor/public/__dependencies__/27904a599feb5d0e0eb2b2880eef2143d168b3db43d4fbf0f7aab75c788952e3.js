@@ -3251,6 +3251,62 @@ import { CELL_WEBSITE_PROPERTY } from "@hypercomb/core";
 var HEXAGON_KEYWORDS = /* @__PURE__ */ new Set(["hex", "hexagons", "hexagon", "off"]);
 var WEBSITE_KEYWORDS = /* @__PURE__ */ new Set(["web", "site", "page", "on", "view"]);
 var VIEW_TOGGLE_KEYWORDS = /* @__PURE__ */ new Set([...HEXAGON_KEYWORDS, ...WEBSITE_KEYWORDS]);
+var INSTRUCTIONS_DEFAULTS = [
+  {
+    name: "styles",
+    description: "Design language and visual rules",
+    starter: "Design language for the generated website. Typography (font family, sizes, weights), color palette (accent, background, text), spacing scale, layout grid, border / radius / shadow conventions. Codegen reads this on every regen so the chrome and per-cell deps converge on one aesthetic. Edit freely; new instructions take effect on the next /website upgrade."
+  },
+  {
+    name: "voice",
+    description: "Tone, audience, vocabulary",
+    starter: "Voice and tone the generated copy should adopt. Formal vs casual, terse vs expansive, technical vs everyday vocabulary. Audience expectations. Voice rules become hard constraints in codegen \u2014 say what you mean here so the site sounds like you."
+  },
+  {
+    name: "tech",
+    description: "Tech stack, browser targets, performance",
+    starter: "Technology constraints for codegen. Framework choice (vanilla HTML/CSS, vue, react, svelte). Browser targets, performance budgets, accessibility level (WCAG AA?), bundle size limits. Set hard rules here so codegen does not invent dependencies you do not want."
+  },
+  {
+    name: "audience",
+    description: "Who this is for",
+    starter: "The reader of the generated site \u2014 their context, what they already know, what they are trying to learn or accomplish. Codegen calibrates depth, jargon, and section pacing to this audience description."
+  },
+  {
+    name: "examples",
+    description: "Reference sites, code samples, patterns",
+    starter: "Reference exemplars \u2014 sites whose style or structure should inspire the generation. Drop signatures of resources, links to real sites, or notes describing patterns to emulate. Codegen ingests these as positive examples."
+  }
+];
+var INSTRUCTIONS_ROOT_STARTER = "Always-on context for every codegen request. Sub-cells under here divide concerns \u2014 styles, voice, tech, audience, examples. Edit any sub-cell to refine what Claude considers when generating chrome and per-cell deps. Never rendered as website pages; always read as the prompt envelope. Codegen also writes its own design decisions back here so the implicit choices stay visible to you.";
+var SIG_REGEX = /^[a-f0-9]{64}$/;
+async function ensureInstructionsBootstrap() {
+  const history = get("@diamondcoreprocessor.com/HistoryService");
+  const committer = get("@diamondcoreprocessor.com/LayerCommitter");
+  const notes = get("@diamondcoreprocessor.com/NotesService");
+  if (!history || !committer || !notes) return;
+  const rootSig = await history.sign({ explorerSegments: () => [] });
+  const root = await history.currentLayerAt(rootSig);
+  if (root?.children) {
+    for (const entry of root.children) {
+      const s = String(entry ?? "").trim();
+      if (s === "instructions") return;
+      if (SIG_REGEX.test(s)) {
+        const child = await history.getLayerBySig(s);
+        if (child?.name === "instructions") return;
+      }
+    }
+  }
+  console.log("[/website] bootstrapping instructions/ tree at root");
+  const childNames = INSTRUCTIONS_DEFAULTS.map((d) => d.name);
+  await committer.update(["instructions"], { name: "instructions", children: childNames });
+  await notes.addAtSegments([], "instructions", INSTRUCTIONS_ROOT_STARTER);
+  for (const d of INSTRUCTIONS_DEFAULTS) {
+    await committer.update(["instructions", d.name], { name: d.name });
+    await notes.addAtSegments(["instructions"], d.name, d.starter);
+  }
+  console.log(`[/website] instructions/ bootstrapped with ${INSTRUCTIONS_DEFAULTS.length} default sub-cells`);
+}
 var toast2 = (type, title, message) => {
   try {
     EffectBus16.emit("toast:show", { type, title, message });
@@ -3409,6 +3465,9 @@ var WebsiteQueenBee = class extends QueenBee19 {
   }
   execute(args) {
     const trimmed = args.trim().toLowerCase();
+    void ensureInstructionsBootstrap().catch(
+      (err) => console.warn("[/website] instructions bootstrap failed", err)
+    );
     if (!trimmed || VIEW_TOGGLE_KEYWORDS.has(trimmed)) {
       const vm = get("@hypercomb.social/ViewMode");
       if (vm) {

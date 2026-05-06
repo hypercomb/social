@@ -42,6 +42,111 @@ const HEXAGON_KEYWORDS = new Set(['hex', 'hexagons', 'hexagon', 'off'])
 const WEBSITE_KEYWORDS = new Set(['web', 'site', 'page', 'on', 'view'])
 const VIEW_TOGGLE_KEYWORDS = new Set([...HEXAGON_KEYWORDS, ...WEBSITE_KEYWORDS])
 
+// Instructions-folder grammar. Always at root. Default sub-cells cover
+// the dimensions Claude needs to converge on a single design language —
+// styles, voice, tech, audience, examples. Each starter note teaches
+// the user what to write there.
+const INSTRUCTIONS_DEFAULTS: { name: string; description: string; starter: string }[] = [
+  {
+    name: 'styles',
+    description: 'Design language and visual rules',
+    starter: 'Design language for the generated website. Typography (font family, sizes, weights), color palette (accent, background, text), spacing scale, layout grid, border / radius / shadow conventions. Codegen reads this on every regen so the chrome and per-cell deps converge on one aesthetic. Edit freely; new instructions take effect on the next /website upgrade.',
+  },
+  {
+    name: 'voice',
+    description: 'Tone, audience, vocabulary',
+    starter: 'Voice and tone the generated copy should adopt. Formal vs casual, terse vs expansive, technical vs everyday vocabulary. Audience expectations. Voice rules become hard constraints in codegen — say what you mean here so the site sounds like you.',
+  },
+  {
+    name: 'tech',
+    description: 'Tech stack, browser targets, performance',
+    starter: 'Technology constraints for codegen. Framework choice (vanilla HTML/CSS, vue, react, svelte). Browser targets, performance budgets, accessibility level (WCAG AA?), bundle size limits. Set hard rules here so codegen does not invent dependencies you do not want.',
+  },
+  {
+    name: 'audience',
+    description: 'Who this is for',
+    starter: 'The reader of the generated site — their context, what they already know, what they are trying to learn or accomplish. Codegen calibrates depth, jargon, and section pacing to this audience description.',
+  },
+  {
+    name: 'examples',
+    description: 'Reference sites, code samples, patterns',
+    starter: 'Reference exemplars — sites whose style or structure should inspire the generation. Drop signatures of resources, links to real sites, or notes describing patterns to emulate. Codegen ingests these as positive examples.',
+  },
+]
+
+const INSTRUCTIONS_ROOT_STARTER =
+  'Always-on context for every codegen request. Sub-cells under here divide concerns — styles, voice, tech, audience, examples. Edit any sub-cell to refine what Claude considers when generating chrome and per-cell deps. Never rendered as website pages; always read as the prompt envelope. Codegen also writes its own design decisions back here so the implicit choices stay visible to you.'
+
+type LayerLike = { name?: string; children?: readonly string[]; [k: string]: unknown }
+
+type HistoryServiceLike = {
+  currentLayerAt(locationSig: string): Promise<LayerLike | null>
+  getLayerBySig(sig: string): Promise<LayerLike | null>
+  sign(lineage: { explorerSegments?: () => readonly string[] }): Promise<string>
+}
+
+type LayerCommitterLike = {
+  update(
+    segments: readonly string[],
+    layer: { name?: string; [k: string]: unknown },
+    nameSlots?: ReadonlySet<string>,
+  ): Promise<string>
+}
+
+type NotesServiceLike = {
+  addAtSegments(parentSegments: readonly string[], cellLabel: string, text: string): Promise<void>
+  getNotesAtSegments(segments: readonly string[]): Promise<readonly { id: string; text: string }[]>
+}
+
+const SIG_REGEX = /^[a-f0-9]{64}$/
+
+/**
+ * Idempotently bootstrap the `instructions/` tree at root if missing.
+ * Cheap: reads root layer, scans children for an `instructions` name,
+ * returns early if present. On first invocation, commits the
+ * instructions cell + each default sub-cell + a starter note in each.
+ *
+ * Always uses literal root segments — instructions is grammar at root,
+ * regardless of the user's current navigation lineage.
+ */
+async function ensureInstructionsBootstrap(): Promise<void> {
+  const history = get<HistoryServiceLike>('@diamondcoreprocessor.com/HistoryService')
+  const committer = get<LayerCommitterLike>('@diamondcoreprocessor.com/LayerCommitter')
+  const notes = get<NotesServiceLike>('@diamondcoreprocessor.com/NotesService')
+  if (!history || !committer || !notes) return
+
+  // Check if instructions already exists at root (by name).
+  const rootSig = await history.sign({ explorerSegments: () => [] })
+  const root = await history.currentLayerAt(rootSig)
+  if (root?.children) {
+    for (const entry of root.children) {
+      const s = String(entry ?? '').trim()
+      if (s === 'instructions') return
+      if (SIG_REGEX.test(s)) {
+        const child = await history.getLayerBySig(s)
+        if (child?.name === 'instructions') return
+      }
+    }
+  }
+
+  console.log('[/website] bootstrapping instructions/ tree at root')
+
+  // 1) Commit instructions parent layer with the default child names.
+  const childNames = INSTRUCTIONS_DEFAULTS.map(d => d.name)
+  await committer.update(['instructions'], { name: 'instructions', children: childNames })
+
+  // 2) Add the root-level guidance note.
+  await notes.addAtSegments([], 'instructions', INSTRUCTIONS_ROOT_STARTER)
+
+  // 3) For each default, commit its layer + add its starter note.
+  for (const d of INSTRUCTIONS_DEFAULTS) {
+    await committer.update(['instructions', d.name], { name: d.name })
+    await notes.addAtSegments(['instructions'], d.name, d.starter)
+  }
+
+  console.log(`[/website] instructions/ bootstrapped with ${INSTRUCTIONS_DEFAULTS.length} default sub-cells`)
+}
+
 const toast = (type: 'info' | 'success' | 'warning' | 'tip', title: string, message: string): void => {
   try { EffectBus.emit('toast:show', { type, title, message }) } catch { /* noop */ }
 }
@@ -292,6 +397,15 @@ export class WebsiteQueenBee extends QueenBee {
 
   protected execute(args: string): void {
     const trimmed = args.trim().toLowerCase()
+
+    // Idempotent bootstrap — first /website ever creates the
+    // instructions/ tree at root with default sub-cells (styles, voice,
+    // tech, audience, examples). Cheap on subsequent calls; skips if
+    // already present. Runs in parallel with the rest of dispatch so
+    // the toggle / upgrade emit doesn't wait on it.
+    void ensureInstructionsBootstrap().catch(err =>
+      console.warn('[/website] instructions bootstrap failed', err)
+    )
 
     // Elegant view-mode toggle. /website with no arg, or with one of
     // the mode keywords, switches the rendering surface. The original
