@@ -1,4 +1,4 @@
-import { AfterViewInit, Component, HostBinding, signal } from '@angular/core';
+import { AfterViewInit, Component, effect, HostBinding, signal } from '@angular/core';
 import { type Bee, EffectBus } from '@hypercomb/core';
 import type { HexOrientation } from '@hypercomb/essentials/diamondcoreprocessor.com/preferences/settings';
 import { RouterOutlet } from '@angular/router';
@@ -11,6 +11,7 @@ import { FormatPainterComponent } from '@hypercomb/shared/ui/format-painter/form
 import { PortalOverlayComponent } from '@hypercomb/shared/ui/portal/portal-overlay.component'
 import { SensitivityBarComponent } from '@hypercomb/shared/ui/sensitivity-bar/sensitivity-bar.component'
 import { YoutubeViewerComponent } from '@hypercomb/shared/ui/youtube-viewer/youtube-viewer.component'
+import { WebsiteViewComponent } from '@hypercomb/shared/ui/website-view/website-view.component'
 import '@hypercomb/shared/ui/command-line/command-line.atomizer'
 
 // One import boots the full essentials module graph — every drone, queen,
@@ -21,7 +22,7 @@ import '@hypercomb/essentials/side-effects'
 
 @Component({
   selector: 'app-root',
-  imports: [ControlsBarComponent, MeshHeaderComponent, RouterOutlet, CommandLineComponent, TileEditorComponent, ShortcutSheetComponent, CommandPaletteComponent, PortalOverlayComponent, ActivityLogComponent, SensitivityBarComponent, SelectionContextMenuComponent, HistoryViewerComponent, FormatPainterComponent, YoutubeViewerComponent, AtomizerBarComponent, AtomizerSidebarComponent, ConfirmDialogComponent, ToastComponent, InstructionOverlayComponent, DocsOverlayComponent, NotesStripComponent, NotesViewerComponent, TrackPlayerComponent],
+  imports: [ControlsBarComponent, MeshHeaderComponent, RouterOutlet, CommandLineComponent, TileEditorComponent, ShortcutSheetComponent, CommandPaletteComponent, PortalOverlayComponent, ActivityLogComponent, SensitivityBarComponent, SelectionContextMenuComponent, HistoryViewerComponent, FormatPainterComponent, YoutubeViewerComponent, AtomizerBarComponent, AtomizerSidebarComponent, ConfirmDialogComponent, ToastComponent, InstructionOverlayComponent, DocsOverlayComponent, NotesStripComponent, NotesViewerComponent, TrackPlayerComponent, WebsiteViewComponent],
   styleUrls: ['./app.scss'] as any,
   templateUrl: './app.html'
 })
@@ -41,6 +42,14 @@ export class App implements AfterViewInit {
 
   @HostBinding('class.move-mode')
   get moveModeClass() { return this.moveMode(); }
+
+  // ViewMode: 'hexagons' | 'website' | (any string). Mutually exclusive
+  // rendering surface — drones gate on viewMode.is(name). Pixi canvas
+  // hides via app.html [style.display] when not 'hexagons'.
+  protected readonly viewMode = signal<string>('hexagons')
+
+  @HostBinding('class.view-website')
+  get viewWebsiteClass() { return this.viewMode() === 'website'; }
 
   public readonly meshPublic = signal(
     localStorage.getItem('hc:mesh-public') === 'true' ? true
@@ -80,6 +89,25 @@ export class App implements AfterViewInit {
     // Re-open the track player when /player queen is invoked
     EffectBus.on('player:open', () => {
       this.playerOpen.set(true)
+    })
+
+    // ViewMode subscription — drives Pixi-canvas visibility via app.html
+    // and the body class for global CSS. Self-registered in shared/core.
+    const wireViewMode = (svc: { mode: string } & EventTarget): void => {
+      this.viewMode.set(svc.mode)
+      svc.addEventListener('change', () => this.viewMode.set(svc.mode))
+    }
+    const ioc = (window as unknown as { ioc?: { get: <T>(k: string) => T | undefined; whenReady: <T>(k: string, cb: (v: T) => void) => void } }).ioc
+    if (ioc) {
+      const now = ioc.get<{ mode: string } & EventTarget>('@hypercomb.social/ViewMode')
+      if (now) wireViewMode(now)
+      else ioc.whenReady<{ mode: string } & EventTarget>('@hypercomb.social/ViewMode', wireViewMode)
+    }
+
+    effect(() => {
+      const m = this.viewMode()
+      document.body.classList.remove('hc-view-hexagons', 'hc-view-website')
+      document.body.classList.add(`hc-view-${m}`)
     })
 
     // Runtime already initialized by main.ts — go straight to bee startup

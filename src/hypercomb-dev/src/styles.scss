@@ -25,3 +25,31 @@ body {
   :root { --hc-touch: 1; }
 }
 
+// ── view-mode: website (global rules) ────────────────────────
+// Hide every hex-mode artifact (including those that portal to body
+// at runtime — history-viewer etc) when ViewMode is 'website'.
+body.hc-view-website {
+  hc-history-viewer,
+  hc-mesh-header,
+  hc-tile-editor,
+  hc-portal-overlay,
+  hc-confirm-dialog,
+  hc-sensitivity-bar,
+  hc-docs-overlay,
+  hc-controls-bar,
+  hc-selection-context-menu,
+  hc-notes-strip,
+  hc-notes-viewer,
+  hc-atomizer-bar,
+  hc-atomizer-sidebar,
+  hc-format-painter,
+  hc-youtube-viewer,
+  hc-instruction-overlay,
+  hc-shortcut-sheet,
+  hc-command-palette,
+  hc-toast,
+  hc-activity-log {
+    display: none !important;
+  }
+}
+

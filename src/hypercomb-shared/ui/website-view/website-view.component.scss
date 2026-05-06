@@ -90,6 +90,159 @@ $muted: rgba(240, 240, 240, 0.55);
   }
 }
 
+// ── ancestry-chain rendering ────────────────────────────
+// Render every page once. Visibility is based on whether the page is
+// on the current ancestry chain (root → ... → current). All ancestors
+// stay visible; deeper sections of the tree stay hidden until you
+// drill in. Same as Hypercomb's hex navigation — you always see your
+// lineage above you, the deepest is your focus.
+.website-page { display: none; }
+.website-page.is-visible { display: block; }
+
+// Ancestor pages (visible but not current focus) render compact —
+// their content acts as context, not the main content.
+.website-page.is-visible:not(.is-current) {
+  padding: 0.5rem 0;
+  margin-bottom: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+
+  .website-page-title {
+    font-size: 1.1rem;
+    margin-bottom: 0.4rem;
+    color: rgba($accent, 0.7);
+    font-weight: 500;
+  }
+
+  .website-note {
+    font-size: 0.85rem !important;
+    line-height: 1.5 !important;
+    color: $muted !important;
+    margin-bottom: 0.4rem !important;
+    padding-bottom: 0 !important;
+    border-bottom: 0 !important;
+  }
+
+  .website-children { display: none; }
+}
+
+// Current page (deepest in the chain) gets the full hero treatment.
+.website-page.is-current {
+  padding-top: 1.5rem;
+}
+
+.website-page-title {
+  margin: 0 0 0.5rem;
+  font-size: 2.8rem;
+  font-weight: 300;
+  letter-spacing: -0.02em;
+  text-transform: capitalize;
+  color: rgba($accent, 1);
+  line-height: 1.1;
+}
+
+// First note is the lead — bigger, dimmer, sits below the title.
+.website-page > .website-note:first-of-type {
+  font-size: 1.15rem;
+  line-height: 1.6;
+  color: rgba($ink, 0.85);
+  margin: 0 0 1.5rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid rgba($accent, 0.15);
+  font-weight: 300;
+}
+
+// Subsequent notes — body prose.
+.website-page .website-note ~ .website-note {
+  font-size: 1rem;
+  line-height: 1.7;
+  color: rgba($ink, 0.92);
+  margin: 0 0 1.1rem;
+}
+
+.website-empty-notes {
+  margin: 0 0 1rem;
+  color: $muted;
+  font-style: italic;
+}
+
+.website-children {
+  margin-top: 2.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.website-children-title {
+  margin: 0 0 1rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba($accent, 0.6);
+}
+
+.website-children-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: 0.75rem;
+}
+
+.website-child-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.9rem 1rem;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba($accent, 0.12);
+  border-radius: 6px;
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease, transform 150ms ease;
+
+  &:hover {
+    background: rgba($accent, 0.06);
+    border-color: rgba($accent, 0.4);
+    transform: translateY(-1px);
+  }
+}
+
+.website-child-name {
+  font-weight: 500;
+  font-size: 1rem;
+  color: rgba($accent, 0.95);
+  text-transform: lowercase;
+}
+
+.website-child-preview {
+  font-size: 0.85rem;
+  line-height: 1.4;
+  color: $muted;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.website-child-count {
+  font-size: 0.72rem;
+  color: rgba($accent, 0.7);
+  margin-top: auto;
+}
+
+.website-crumb {
+  color: $muted;
+  text-decoration: none;
+  cursor: pointer;
+  text-transform: lowercase;
+
+  &:hover { color: rgba($accent, 0.95); }
+}
+
+.website-crumb-sep {
+  color: rgba($accent, 0.3);
+  margin: 0 0.4rem;
+}
+
 .website-section[data-depth="0"] { display: none; } // root header is in <header>
 
 .website-section[data-depth="1"] { padding-left: 0; }

@@ -1,22 +1,25 @@
 // hypercomb-shared/ui/website-view/website-view.component.ts
 //
-// Website surface — when ViewMode is 'website', the layer tree is
-// rendered as HTML instead of Pixi hexagons. The cell tree IS the page
-// outline, walked recursively to leaves. Every note becomes its own
-// addressable subsection. Cross-references between notes that mention
-// other cell names become inline links — fast in-page navigation.
+// Website surface — when ViewMode is 'website', the same merkle layer
+// tree is rendered as a navigable site. ONE PAGE PER CELL. Navigation
+// mirrors the hierarchy: click a child link → drill into that cell's
+// page. Click parent in breadcrumb → back up. Same model as Hypercomb's
+// hex navigation, just different rendering of each "level."
 //
-// Per-node worker model (v1 — uses notes for content): each cell asks
-// NotesService for its notes, the renderer composes them into nested
-// sections. Adding richer per-cell rendering later = a dedicated
-// `website` participant slot (HiveParticipant pattern, like notes).
+// The page for a cell shows:
+//   - breadcrumb back to root
+//   - the cell's name as h1
+//   - its notes as paragraphs (with inline links auto-detected to other
+//     cells anywhere in the tree — links cross-cut the hierarchy
+//     creatively, you can jump from a leaf to a sibling subtree)
+//   - its children as a navigation grid (each card → that child's page)
 //
-// Preload strategy: when the user enters website mode, the renderer
-// walks the entire subtree in parallel and fetches every cell's notes
-// concurrently — Promise.all with bounded concurrency. By the time the
-// user clicks any anchor, every page-section is already in the DOM.
-// No spinners on link click. Toggle back to hexagons preserves the
-// preload cache so re-entry is instant.
+// Preloader: at mode entry the entire subtree is walked + every cell's
+// notes fetched in parallel. Subsequent in-page nav clicks just swap
+// which cell the renderer reads from the in-memory map — instant.
+//
+// URL hash reflects the path: #/architecture/layer. Browser back/forward
+// works. Reload preserves position.
 
 import { ChangeDetectionStrategy, Component, computed, signal, effect, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
@@ -50,15 +53,12 @@ type HistoryService = {
   sign(lineage: { explorerSegments?: () => readonly string[] }): Promise<string>
 }
 
-/** A page is one cell, with its notes and recursive children. The tree
- *  flattens to a list of these for rendering. */
-type Page = {
-  segments: readonly string[]   // full path from root, e.g. ['architecture', 'layer']
-  name: string                  // cell name (last segment)
-  depth: number                 // 0 = root, 1 = top-level child, etc.
-  notes: readonly Note[]
+/** A node in the cached tree — one per cell, addressable by its segments. */
+type Node = {
+  segments: readonly string[]   // absolute path from website root
+  name: string                  // display name (last segment, or root name)
   childNames: readonly string[]
-  parentName: string | null
+  notes: readonly Note[]
 }
 
 const SIG_REGEX = /^[a-f0-9]{64}$/
@@ -71,45 +71,67 @@ const SIG_REGEX = /^[a-f0-9]{64}$/
     @if (active()) {
       <div class="website-shell">
         <header class="website-header">
-          <h1 class="website-title">{{ rootTitle() }}</h1>
+          <nav class="website-breadcrumb" aria-label="breadcrumb">
+            <a class="website-crumb" (click)="goRoot($event)" href="#/">{{ rootName() || '/' }}</a>
+            @for (crumb of breadcrumbs(); track crumb.path.join('/')) {
+              <span class="website-crumb-sep" aria-hidden="true">›</span>
+              <a class="website-crumb" (click)="goTo(crumb.path, $event)" [href]="hashOf(crumb.path)">{{ crumb.name }}</a>
+            }
+          </nav>
           <button class="website-exit" type="button" (click)="exit()" title="Back to hexagons">
             <span aria-hidden="true">⬡</span>
             <span class="visually-hidden">Switch to hexagons</span>
           </button>
         </header>
 
-        @if (loading()) {
+        @if (loading() && !node()) {
           <p class="website-loading">Loading…</p>
         }
 
         <main class="website-main">
-          @if (pages().length === 0 && !loading()) {
-            <p class="website-empty">No content yet.</p>
+          <!-- Render every page in the tree once; toggle visibility via
+               [class.is-current] on the current path. Zero re-render
+               cost on nav — just a CSS class flip on already-mounted
+               DOM. The static structural parts (header, breadcrumb,
+               main wrapper) never re-render at all. -->
+          @if (allPages().length === 0 && !loading()) {
+            <p class="website-empty">No content here.</p>
           }
-          @for (page of pages(); track page.segments.join('/')) {
-            <section class="website-section" [attr.id]="anchorOf(page)" [attr.data-depth]="page.depth">
-              <h2 class="website-section-title" [class]="'depth-' + page.depth">
-                {{ page.name }}
-              </h2>
+          @for (n of allPages(); track n.segments.join('/')) {
+            <article class="website-page"
+                     [class.is-visible]="isVisible(n.segments)"
+                     [class.is-current]="isCurrent(n.segments)"
+                     [attr.data-path]="n.segments.join('/')"
+                     [attr.data-depth]="n.segments.length">
+              <h1 class="website-page-title">{{ n.name }}</h1>
 
-              @if (page.parentName && page.depth > 1) {
-                <p class="website-breadcrumb">
-                  <a (click)="goTo(page.parentName!, $event)" [attr.href]="'#' + anchorOfName(page.parentName!)">↑ {{ page.parentName }}</a>
-                </p>
+              @if (n.notes.length === 0 && n.segments.length > 0) {
+                <p class="website-empty-notes">No notes on this cell yet.</p>
               }
 
-              @for (note of page.notes; track note.id) {
-                <p class="website-note" [attr.id]="anchorOfNote(page, note)" [innerHTML]="linkified(note.text)"></p>
+              @for (note of n.notes; track note.id) {
+                <p class="website-note" [innerHTML]="linkified(note.text)"></p>
               }
 
-              @if (page.childNames.length > 0) {
-                <nav class="website-nav" aria-label="children of {{ page.name }}">
-                  @for (child of page.childNames; track child) {
-                    <a class="website-nav-link" (click)="goTo(child, $event)" [attr.href]="'#' + anchorOfName(child)">{{ child }} →</a>
-                  }
-                </nav>
+              @if (n.childNames.length > 0) {
+                <section class="website-children">
+                  <h2 class="website-children-title">{{ n.childNames.length }} {{ n.childNames.length === 1 ? 'subsection' : 'subsections' }}</h2>
+                  <div class="website-children-grid">
+                    @for (child of childCards(n); track child.name) {
+                      <a class="website-child-card" (click)="goTo(child.path, $event)" [href]="hashOf(child.path)">
+                        <span class="website-child-name">{{ child.name }}</span>
+                        @if (child.preview) {
+                          <span class="website-child-preview">{{ child.preview }}</span>
+                        }
+                        @if (child.childCount > 0) {
+                          <span class="website-child-count">{{ child.childCount }} →</span>
+                        }
+                      </a>
+                    }
+                  </div>
+                </section>
               }
-            </section>
+            </article>
           }
         </main>
       </div>
@@ -120,21 +142,79 @@ const SIG_REGEX = /^[a-f0-9]{64}$/
 export class WebsiteViewComponent implements OnDestroy {
   readonly #mode = signal<string>('hexagons')
   readonly #version = signal(0)
-  readonly #pages = signal<readonly Page[]>([])
+  /** Map of cell-path → Node, populated by the preloader walk. */
+  readonly #tree = signal<ReadonlyMap<string, Node>>(new Map())
   readonly #rootName = signal<string>('')
   readonly #loading = signal<boolean>(false)
+  /** Current page within the website — independent of Hypercomb's
+   *  lineage navigation. Starts at root, advances via in-page link
+   *  clicks. URL hash reflects this. */
+  readonly #currentPath = signal<readonly string[]>([])
   readonly #notesServiceReady = signal<boolean>(false)
   readonly #historyServiceReady = signal<boolean>(false)
-  /** Set of cell names that exist in the loaded tree — used by the
-   *  link-detector to decide which words in note text become anchors. */
   readonly #knownNames = signal<ReadonlySet<string>>(new Set())
+  /** name → segments map for cross-link resolution. The first node
+   *  encountered for a given name wins (closer-to-root preference). */
+  readonly #nameIndex = signal<ReadonlyMap<string, readonly string[]>>(new Map())
 
   readonly active = computed(() => this.#mode() === 'website')
-  readonly pages = computed<readonly Page[]>(() => this.#pages())
   readonly loading = computed<boolean>(() => this.#loading())
-  readonly rootTitle = computed<string>(() => this.#rootName() || '/')
+  readonly rootName = computed<string>(() => this.#rootName())
+
+  readonly node = computed<Node | null>(() => {
+    const tree = this.#tree()
+    const key = this.#currentPath().join('/')
+    return tree.get(key) ?? null
+  })
+
+  /** Flat list of all loaded pages, sorted by depth then name so the
+   *  rendered DOM is in stable, walkable order. The whole tree is
+   *  rendered once; navigation flips which one is `is-current`. */
+  readonly allPages = computed<readonly Node[]>(() => {
+    const tree = this.#tree()
+    return [...tree.values()].sort((a, b) => {
+      if (a.segments.length !== b.segments.length) return a.segments.length - b.segments.length
+      const aKey = a.segments.join('/')
+      const bKey = b.segments.join('/')
+      return aKey < bKey ? -1 : aKey > bKey ? 1 : 0
+    })
+  })
+
+  /** Whether the page at `segments` is on the current ancestry chain
+   *  (root → ... → currentPath). All ancestors stay visible; the
+   *  deepest is the focus. Children of the current path stay hidden
+   *  until you drill into them. Mirrors Hypercomb's hex navigation:
+   *  you always see your lineage. */
+  isVisible(segments: readonly string[]): boolean {
+    const path = this.#currentPath()
+    if (segments.length > path.length) return false
+    for (let i = 0; i < segments.length; i++) {
+      if (segments[i] !== path[i]) return false
+    }
+    return true
+  }
+
+  /** Exact-match check — the deepest visible page, the user's actual
+   *  focus. Used for emphasis styling on the current page. */
+  isCurrent(segments: readonly string[]): boolean {
+    const path = this.#currentPath()
+    if (path.length !== segments.length) return false
+    for (let i = 0; i < path.length; i++) if (path[i] !== segments[i]) return false
+    return true
+  }
+
+  readonly breadcrumbs = computed<readonly { name: string; path: readonly string[] }[]>(() => {
+    const path = this.#currentPath()
+    const out: { name: string; path: readonly string[] }[] = []
+    for (let i = 0; i < path.length; i++) {
+      const sub = path.slice(0, i + 1)
+      out.push({ name: path[i], path: sub })
+    }
+    return out
+  })
 
   #cleanups: (() => void)[] = []
+  #hashListener: (() => void) | null = null
 
   constructor() {
     // ViewMode bridge.
@@ -148,10 +228,13 @@ export class WebsiteViewComponent implements OnDestroy {
     if (modeNow) wireMode(modeNow)
     else window.ioc.whenReady<ViewModeServiceShape>('@hypercomb.social/ViewMode', wireMode)
 
-    // Lineage change → reload tree from the new root.
+    // Lineage change → re-preload from the new root.
     const lineage = get<Lineage>('@hypercomb.social/Lineage')
     if (lineage?.addEventListener) {
-      const onLineage = (): void => this.#version.update(v => v + 1)
+      const onLineage = (): void => {
+        this.#currentPath.set([])
+        this.#version.update(v => v + 1)
+      }
       lineage.addEventListener('change', onLineage)
       this.#cleanups.push(() => lineage.removeEventListener('change', onLineage))
     }
@@ -168,9 +251,15 @@ export class WebsiteViewComponent implements OnDestroy {
     this.#cleanups.push(EffectBus.on('cell:removed', () => this.#version.update(v => v + 1)))
     this.#cleanups.push(EffectBus.on('notes:changed', () => this.#version.update(v => v + 1)))
 
-    // The preloader — only runs when website mode is on. Walks the tree
-    // recursively and fetches every cell's notes in parallel. Bounded
-    // concurrency keeps OPFS read pressure manageable on deep trees.
+    // URL hash → currentPath sync. Hash format: #/segment1/segment2/...
+    const onHash = (): void => {
+      if (!this.active()) return
+      this.#currentPath.set(this.#parseHash())
+    }
+    window.addEventListener('hashchange', onHash)
+    this.#hashListener = () => window.removeEventListener('hashchange', onHash)
+
+    // Preloader: walks tree + fetches every cell's notes in parallel.
     effect(() => {
       this.#version()
       if (!this.active()) return
@@ -182,6 +271,37 @@ export class WebsiteViewComponent implements OnDestroy {
 
       void this.#preloadTree(history, notes)
     })
+
+    // When website mode activates, restore path from URL hash.
+    effect(() => {
+      if (this.active()) {
+        const fromHash = this.#parseHash()
+        if (fromHash.length > 0 || this.#currentPath().length === 0) {
+          this.#currentPath.set(fromHash)
+        }
+      }
+    })
+  }
+
+  ngOnDestroy(): void {
+    for (const c of this.#cleanups) c()
+    this.#hashListener?.()
+  }
+
+  // ── render helpers ────────────────────────────────────
+
+  hashOf(segments: readonly string[]): string {
+    return '#/' + segments.map(s => encodeURIComponent(s)).join('/')
+  }
+
+  goRoot(event: MouseEvent): void {
+    event.preventDefault()
+    this.#navigate([])
+  }
+
+  goTo(path: readonly string[], event: MouseEvent): void {
+    event.preventDefault()
+    this.#navigate([...path])
   }
 
   exit(): void {
@@ -189,104 +309,81 @@ export class WebsiteViewComponent implements OnDestroy {
     mode?.setMode('hexagons')
   }
 
-  ngOnDestroy(): void {
-    for (const c of this.#cleanups) c()
+  /** Build child-card data with a preview snippet from each child's
+   *  first note (if cached). */
+  childCards(n: Node): readonly { name: string; path: readonly string[]; preview: string; childCount: number }[] {
+    const tree = this.#tree()
+    return n.childNames.map(name => {
+      const path = [...n.segments, name]
+      const child = tree.get(path.join('/'))
+      const firstNote = child?.notes[0]?.text ?? ''
+      const preview = firstNote.length > 110 ? firstNote.slice(0, 107) + '…' : firstNote
+      const childCount = child?.childNames.length ?? 0
+      return { name, path, preview, childCount }
+    })
   }
 
-  // ── render helpers ────────────────────────────────────
-
-  /** DOM-safe anchor id for a page (one section per cell). */
-  anchorOf(page: Page): string {
-    return 'cell-' + this.#sanitize(page.segments.join('-'))
-  }
-
-  /** Anchor for a name-only reference (cross-link). Resolves to whichever
-   *  page in the loaded set has that name — used when a note mentions a
-   *  cell by name. */
-  anchorOfName(name: string): string {
-    const page = this.#pages().find(p => p.name === name)
-    return page ? this.anchorOf(page) : 'cell-' + this.#sanitize(name)
-  }
-
-  /** Per-note anchor — one URL per note for deep-linking. */
-  anchorOfNote(page: Page, note: Note): string {
-    return this.anchorOf(page) + '__note-' + this.#sanitize(note.id.slice(0, 8))
-  }
-
-  /** Smooth-scroll to a cell by name, intercepting the link click. */
-  goTo(name: string, event: MouseEvent): void {
-    event.preventDefault()
-    const id = this.anchorOfName(name)
-    const target = document.getElementById(id)
-    if (target) {
-      target.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      history.replaceState(null, '', '#' + id)
-    }
-  }
-
-  /** Wraps any occurrence of a known cell name in note text with a
-   *  link that scrolls to that cell. Whole-word match, case-insensitive,
-   *  punctuation-tolerant. */
+  /** Inline-link any cell-name mention in note text to that cell's page.
+   *  Cross-tree links — from any leaf to any other cell — fall out of
+   *  the same global name index. */
   linkified(text: string): string {
     const escaped = this.#escapeHtml(text)
     const names = [...this.#knownNames()].sort((a, b) => b.length - a.length)
     if (names.length === 0) return escaped
+    const idx = this.#nameIndex()
     let out = escaped
     for (const name of names) {
+      const path = idx.get(name)
+      if (!path) continue
       const re = new RegExp(`\\b(${this.#escapeRegex(name)})\\b`, 'gi')
-      out = out.replace(re, `<a class="website-inline-link" href="#${this.anchorOfName(name)}" data-cell="${name}">$1</a>`)
+      out = out.replace(re, `<a class="website-inline-link" href="${this.hashOf(path)}" data-cell="${name}">$1</a>`)
     }
     return out
   }
 
-  // ── preloader: walk tree + fetch notes in parallel ────
+  // ── preloader ─────────────────────────────────────────
 
   async #preloadTree(history: HistoryService, notes: NotesService): Promise<void> {
     if (this.#loading()) return
     this.#loading.set(true)
     try {
       const lineage = get<Lineage>('@hypercomb.social/Lineage')
-      const segs = (lineage?.explorerSegments?.() ?? [])
+      const baseSegs = (lineage?.explorerSegments?.() ?? [])
         .map(s => String(s ?? '').trim()).filter(Boolean)
 
-      const rootSig = await history.sign({ explorerSegments: () => segs })
+      const rootSig = await history.sign({ explorerSegments: () => baseSegs })
       const root = await history.currentLayerAt(rootSig)
       if (!root) {
-        this.#pages.set([])
+        this.#tree.set(new Map())
         this.#rootName.set('')
         return
       }
 
-      this.#rootName.set(typeof root.name === 'string' ? root.name : '/')
-
-      // Recursive walk → flat list of pages in DFS order.
-      const pages: Page[] = []
-      const knownNames = new Set<string>()
-
-      // Root page (depth 0).
-      const rootChildren = await this.#resolveChildNames(history, root)
       const rootName = (typeof root.name === 'string' && root.name) ? root.name : '/'
-      pages.push({
-        segments: [],
-        name: rootName,
-        depth: 0,
-        notes: [],   // root notes filled in below
-        childNames: rootChildren,
-        parentName: null,
-      })
-      knownNames.add(rootName)
-      for (const c of rootChildren) knownNames.add(c)
+      this.#rootName.set(rootName)
 
-      // Recurse into each child.
+      // Walk tree → flat node list.
+      const nodes: Node[] = []
+      const knownNames = new Set<string>()
+      const nameIndex = new Map<string, readonly string[]>()
+
+      const rootChildren = await this.#resolveChildNames(history, root)
+      nodes.push({ segments: [], name: rootName, childNames: rootChildren, notes: [] })
+      knownNames.add(rootName)
+      nameIndex.set(rootName, [])
+
       for (const childName of rootChildren) {
-        await this.#walk(history, childName, [childName], 1, rootName, pages, knownNames)
+        await this.#walk(history, childName, [childName], nodes, knownNames, nameIndex)
       }
 
-      // Parallel notes fetch — preloader pattern. Bounded to 8 concurrent
-      // reads to avoid swamping OPFS on deep trees.
+      // Hydrate notes in parallel.
       this.#knownNames.set(knownNames)
-      this.#pages.set(pages)   // first paint with structure; notes hydrate next
-      await this.#hydrateAllNotes(notes, pages)
+      this.#nameIndex.set(nameIndex)
+      const tree = new Map<string, Node>()
+      for (const n of nodes) tree.set(n.segments.join('/'), n)
+      this.#tree.set(tree)
+
+      await this.#hydrateAllNotes(notes, nodes, baseSegs, tree)
     } catch (err) {
       console.error('[website-view] preload failed', err)
     } finally {
@@ -298,26 +395,18 @@ export class WebsiteViewComponent implements OnDestroy {
     history: HistoryService,
     name: string,
     segments: readonly string[],
-    depth: number,
-    parentName: string,
-    out: Page[],
+    out: Node[],
     knownNames: Set<string>,
+    nameIndex: Map<string, readonly string[]>,
   ): Promise<void> {
     const locSig = await history.sign({ explorerSegments: () => segments })
     const layer = await history.currentLayerAt(locSig)
     const childNames = layer ? await this.#resolveChildNames(history, layer) : []
     knownNames.add(name)
-    for (const c of childNames) knownNames.add(c)
-    out.push({
-      segments: [...segments],
-      name,
-      depth,
-      notes: [],
-      childNames,
-      parentName,
-    })
+    if (!nameIndex.has(name)) nameIndex.set(name, [...segments])
+    out.push({ segments: [...segments], name, childNames, notes: [] })
     for (const childName of childNames) {
-      await this.#walk(history, childName, [...segments, childName], depth + 1, name, out, knownNames)
+      await this.#walk(history, childName, [...segments, childName], out, knownNames, nameIndex)
     }
   }
 
@@ -341,39 +430,56 @@ export class WebsiteViewComponent implements OnDestroy {
     return names
   }
 
-  /** Fetch notes for every page in parallel with a small concurrency cap.
-   *  Each completion updates the page in-place via signal swap so the
-   *  user sees content fill in progressively. Uses getNotesAtSegments so
-   *  arbitrary depths work — the website surface walks the FULL tree,
-   *  not just direct children of the current lineage. */
-  async #hydrateAllNotes(notes: NotesService, pages: Page[]): Promise<void> {
+  async #hydrateAllNotes(
+    notes: NotesService,
+    nodes: readonly Node[],
+    baseSegs: readonly string[],
+    tree: Map<string, Node>,
+  ): Promise<void> {
     const POOL = 8
     let cursor = 0
-    const lineage = get<Lineage>('@hypercomb.social/Lineage')
-    const baseSegs = (lineage?.explorerSegments?.() ?? [])
-      .map(s => String(s ?? '').trim()).filter(Boolean)
 
     const next = async (): Promise<void> => {
-      while (cursor < pages.length) {
+      while (cursor < nodes.length) {
         const i = cursor++
-        const page = pages[i]
-        if (page.depth === 0) continue   // root has no notes slot at this version
-
+        const n = nodes[i]
+        if (n.segments.length === 0) continue   // root has no notes slot
         try {
-          // Every page: read notes at its absolute path (basesegs + page).
-          const fullSegments = [...baseSegs, ...page.segments]
+          const fullSegments = [...baseSegs, ...n.segments]
           const items = await notes.getNotesAtSegments(fullSegments)
           if (items.length > 0) {
-            const updated = { ...page, notes: items.slice() }
-            this.#pages.update(prev => prev.map((p, idx) => idx === i ? updated : p))
+            const updated: Node = { ...n, notes: items.slice() }
+            tree.set(n.segments.join('/'), updated)
+            this.#tree.set(new Map(tree))
           }
         } catch (err) {
-          console.warn('[website-view] notes fetch failed for', page.name, err)
+          console.warn('[website-view] notes fetch failed for', n.name, err)
         }
       }
     }
 
     await Promise.all(Array.from({ length: POOL }, next))
+  }
+
+  // ── navigation ────────────────────────────────────────
+
+  #navigate(segments: readonly string[]): void {
+    this.#currentPath.set([...segments])
+    const hash = this.hashOf(segments)
+    if (location.hash !== hash) history.pushState(null, '', hash)
+    // Scroll the shell to top on nav.
+    queueMicrotask(() => {
+      const shell = document.querySelector('.website-shell') as HTMLElement | null
+      shell?.scrollTo({ top: 0, behavior: 'auto' })
+    })
+  }
+
+  #parseHash(): readonly string[] {
+    const h = location.hash || ''
+    if (!h.startsWith('#/')) return []
+    const path = h.slice(2)
+    if (!path) return []
+    return path.split('/').map(s => decodeURIComponent(s)).filter(Boolean)
   }
 
   // ── micro helpers ─────────────────────────────────────
@@ -389,9 +495,5 @@ export class WebsiteViewComponent implements OnDestroy {
 
   #escapeRegex(s: string): string {
     return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  }
-
-  #sanitize(s: string): string {
-    return s.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')
   }
 }
