@@ -51,6 +51,7 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
 
   @ViewChild('imageCanvas', { static: false }) imageCanvas!: ElementRef<HTMLDivElement>
   @ViewChild('cameraVideo', { static: false }) cameraVideo!: ElementRef<HTMLVideoElement>
+  @ViewChild('cameraFallbackInput', { static: false }) cameraFallbackInput!: ElementRef<HTMLInputElement>
 
   private get editorService(): TileEditorService {
     return get('@diamondcoreprocessor.com/TileEditorService') as TileEditorService
@@ -258,6 +259,11 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
         transform ? { x: transform.x ?? 0, y: transform.y ?? 0, scale: transform.scale ?? 1 } : undefined,
       )
     }
+
+    if (service.autoCamera) {
+      service.autoCamera = false
+      void this.openCamera()
+    }
   }
 
   // ── image upload ───────────────────────────────────────────────
@@ -385,6 +391,10 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
   // ── camera ───────────────────────────────────────────────────
 
   readonly openCamera = async (): Promise<void> => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      this.cameraFallbackInput?.nativeElement?.click()
+      return
+    }
     try {
       this.#stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'environment' },
@@ -396,7 +406,7 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
         if (video) video.srcObject = this.#stream
       }, 0)
     } catch {
-      // permission denied or no camera
+      this.cameraFallbackInput?.nativeElement?.click()
     }
   }
 

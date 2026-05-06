@@ -46,6 +46,7 @@
             <span class="mat-sym">crop_rotate</span> {{ (isFlat ? 'editor.flat-top' : 'editor.point-top') | t }}
           </button>
           <input #fileInput type="file" name="tile-image" accept="image/*" hidden (change)="onFileSelect($event)" />
+          <input #cameraFallbackInput type="file" accept="image/*" capture="environment" hidden (change)="onFileSelect($event)" />
         </div>
       </div>
 

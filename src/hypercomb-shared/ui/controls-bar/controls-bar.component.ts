@@ -201,6 +201,12 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.inputVisible.set(false)
     EffectBus.emit('mobile:input-visible', { visible: false, mobile: true })
   }
+  readonly openSlashCommand = (): void => {
+    if (!this.isMobile()) return
+    this.inputVisible.set(true)
+    EffectBus.emit('mobile:input-visible', { visible: true, mobile: true })
+    EffectBus.emit('search:prefill', { value: '/' })
+  }
   #utility = signal(localStorage.getItem('hc:utility-expanded') !== 'false')
   #moveMode = signal(false)
   #mode = signal<'browsing' | 'clipboard' | 'atomize'>('browsing')
@@ -680,6 +686,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #atomizeStrategyUnsub: (() => void) | null = null
   #meshModalUnsub: (() => void) | null = null
   #meshJoinUnsub: (() => void) | null = null
+  #inputVisibleUnsub: (() => void) | null = null
 
   ngOnInit(): void {
     this.#meshModalUnsub = EffectBus.on<{ open: boolean }>('mesh:modal-open', ({ open }) => {
@@ -832,6 +839,16 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       },
     )
 
+    // Mirror mobile:input-visible into the local signal so foreign emitters
+    // (long-press input drone, command-line GO button, mic flow) keep the
+    // breadcrumb fade and onboarding hint in sync with the real input state.
+    this.#inputVisibleUnsub = EffectBus.on<{ visible: boolean; mobile: boolean }>(
+      'mobile:input-visible',
+      ({ visible }) => {
+        this.inputVisible.set(!!visible)
+      },
+    )
+
     // emit initial show-hidden state so drones pick it up
     if (this.#showHidden()) {
       EffectBus.emit('visibility:show-hidden', { active: true })
@@ -900,6 +917,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#atomizeStrategyUnsub?.()
     this.#meshModalUnsub?.()
     this.#meshJoinUnsub?.()
+    this.#inputVisibleUnsub?.()
     window.removeEventListener('keydown', this.#onPowerKeyDown)
     window.removeEventListener('keyup', this.#onPowerKeyUp)
     window.removeEventListener('blur', this.#onPowerKeyReset)
@@ -1294,6 +1312,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       return
     }
     this.meshToggled.emit()
+  }
+
+  readonly openCameraCapture = (): void => {
+    EffectBus.emit('controls:camera-open', {})
   }
 
   readonly openClipboard = async (): Promise<void> => {

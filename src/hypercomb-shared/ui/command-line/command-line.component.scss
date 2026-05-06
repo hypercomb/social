@@ -219,12 +219,13 @@
   border-left: 1.5px solid color-mix(in srgb, var(--md-primary) 45%, transparent);
   color: var(--md-primary);
   font-family: var(--hc-mono);
-  font-size: 1rem;
+  font-size: 0.95rem;
   font-weight: 700;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
   cursor: pointer;
   user-select: none;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 
   &:hover {
     color: var(--md-on-surface-strong);
@@ -237,4 +238,5 @@
 
 @media (max-width: 599px) {
   .mobile-go-btn { display: flex; align-items: center; }
+  .command-line-wrapper { padding-right: clamp(3.5rem, 11vh, 5.5rem); }
 }
