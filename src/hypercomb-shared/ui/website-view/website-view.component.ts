@@ -370,20 +370,41 @@ export class WebsiteViewComponent implements OnDestroy {
 
   /** Inline-link any cell-name mention in note text to that cell's page.
    *  Cross-tree links — from any leaf to any other cell — fall out of
-   *  the same global name index. */
+   *  the same global name index.
+   *
+   *  Pure single-pass replacement: build ONE alternation regex over
+   *  every cell name, run `.replace(re, callback)` once. The callback
+   *  emits link HTML for each match. Because each character of the
+   *  source text is consumed at most once, replacements can NEVER be
+   *  re-matched inside the HTML they produced — no injection of tags
+   *  into href values, no broken attributes, no escaping holes. The
+   *  earlier multi-pass loop had exactly this bug: the second pass for
+   *  'model' would match inside an href="#/model/..." injected by the
+   *  first pass. Now structurally impossible. */
   linkified(text: string): string {
     const escaped = this.#escapeHtml(text)
     const names = [...this.#knownNames()].sort((a, b) => b.length - a.length)
     if (names.length === 0) return escaped
     const idx = this.#nameIndex()
-    let out = escaped
-    for (const name of names) {
+
+    // Map lowercase → canonical name so the case-insensitive match can
+    // resolve back to the original-cased path entry.
+    const lcToName = new Map<string, string>()
+    for (const n of names) lcToName.set(n.toLowerCase(), n)
+
+    const alternation = names.map(n => this.#escapeRegex(n)).join('|')
+    if (!alternation) return escaped
+    const re = new RegExp(`\\b(${alternation})\\b`, 'gi')
+
+    return escaped.replace(re, (match) => {
+      const name = lcToName.get(match.toLowerCase())
+      if (!name) return match
       const path = idx.get(name)
-      if (!path) continue
-      const re = new RegExp(`\\b(${this.#escapeRegex(name)})\\b`, 'gi')
-      out = out.replace(re, `<a class="website-inline-link" href="${this.hashOf(path)}" data-cell="${name}">$1</a>`)
-    }
-    return out
+      if (!path) return match
+      const href = this.#escapeHtml(this.hashOf(path))
+      const dataCell = this.#escapeHtml(name)
+      return `<a class="website-inline-link" href="${href}" data-cell="${dataCell}">${match}</a>`
+    })
   }
 
   // ── preloader ─────────────────────────────────────────
