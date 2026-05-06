@@ -9,6 +9,13 @@ import { Component, computed, effect, signal, type OnDestroy } from '@angular/co
 import { EffectBus, type I18nProvider } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 
+/**
+ * Cap on how many selected tiles the multi-select accordion will surface
+ * at once. Large selections would otherwise flood the strip; the user's
+ * most recent N picks are always the most relevant to current work.
+ */
+const MAX_VISIBLE_SELECTIONS = 10
+
 type Note = {
   id: string
   text: string
@@ -24,6 +31,8 @@ type NotesService = {
 
 type SelectionService = EventTarget & {
   active: string | null
+  selected: ReadonlySet<string>
+  count: number
 }
 
 @Component({
@@ -36,8 +45,22 @@ type SelectionService = EventTarget & {
 export class NotesStripComponent implements OnDestroy {
 
   readonly #activeCell = signal<string | null>(null)
+  readonly #selectedCells = signal<readonly string[]>([])
   readonly #capturingFor = signal<string | null>(null)
   readonly #version = signal(0)
+  // Which group's section is currently expanded. The two-signal split lets
+  // us distinguish three states cleanly: untouched (auto-open the first
+  // group with notes on first multi-select), explicitly opened (#openGroup
+  // holds the cell name), and explicitly closed (#userClosed = true,
+  // suppresses the auto-fallback so all sections stay collapsed).
+  readonly #openGroup = signal<string | null>(null)
+  readonly #userClosed = signal<boolean>(false)
+  // Cells whose decoded-set cache has been confirmed populated. Without
+  // this, cells whose set resource hasn't been parsed yet return [] from
+  // notesFor() and would race into the empty-cells footer before their
+  // warmup promise resolves. Tracking confirmed-warmed cells lets the
+  // empty classifier wait for actual evidence instead of guessing.
+  readonly #warmed = signal<ReadonlySet<string>>(new Set())
 
   /**
    * Display mode — `chips` is the horizontal scrolling chip row, `rows` is
@@ -58,20 +81,88 @@ export class NotesStripComponent implements OnDestroy {
   })
 
   /**
-   * The cell whose notes the strip is showing — capture target wins so the
-   * user always sees the strip for the tile they're authoring against, even
-   * if they navigate selection away mid-capture.
+   * Multi-selection mode: more than one tile is selected. Switches the
+   * strip into accordion layout — one expandable section per selected
+   * cell with its own notes. Stays active even while authoring (capture
+   * mode) so the user can click a tab, drop the cursor into the command
+   * line, and type a new note without losing the multi-cell view.
+   */
+  readonly multi = computed<boolean>(() => this.#selectedCells().length > 1)
+
+  /**
+   * Per-cell note groups for the accordion — ONLY cells that actually have
+   * notes. Reads notes synchronously from NotesService — getNotes warmup at
+   * boot already populated the cache; selection signals trigger #version
+   * bumps via the notes:changed effect.
+   */
+  readonly groups = computed<readonly { cell: string; notes: readonly Note[]; expanded: boolean }[]>(() => {
+    this.#version()
+    const cells = this.#selectedCells()
+    if (cells.length <= 1) return []
+    const svc = this.#notes
+    if (!svc) return []
+    // Only the most-recent N selections show in the menu — large
+    // selections would otherwise flood the strip and bury the cells the
+    // user is actually working with.
+    const recent = cells.slice(-MAX_VISIBLE_SELECTIONS)
+    const withNotes = recent.filter(c => svc.notesFor(c).length > 0)
+    const open = this.#openGroup()
+    const closed = this.#userClosed()
+    // Resolution order:
+    //   1. If user explicitly collapsed everything, honour that — none open.
+    //   2. If a specific group was opened and is still in the list, use it.
+    //   3. Otherwise auto-pick the first group with notes so first-time
+    //      multi-select shows something instead of an all-closed wall.
+    const expanded = closed
+      ? null
+      : (open && withNotes.includes(open))
+        ? open
+        : withNotes[0] ?? null
+    return withNotes.map(c => ({
+      cell: c,
+      notes: svc.notesFor(c),
+      expanded: c === expanded,
+    }))
+  })
+
+  /**
+   * Selected cells that DON'T have any notes — surfaced as a small bottom
+   * list so the user can see at a glance which tiles in their selection
+   * still need context. Only includes cells we've confirmed warmed (via
+   * #warmed) so an unparsed cache doesn't briefly mis-classify a populated
+   * cell as empty during the initial warmup window.
+   */
+  readonly emptyCells = computed<readonly string[]>(() => {
+    this.#version()
+    const cells = this.#selectedCells()
+    if (cells.length <= 1) return []
+    const svc = this.#notes
+    if (!svc) return []
+    const warmed = this.#warmed()
+    const recent = cells.slice(-MAX_VISIBLE_SELECTIONS)
+    return recent.filter(c => warmed.has(c) && svc.notesFor(c).length === 0)
+  })
+
+  /**
+   * The cell whose notes the strip is showing in single-tile mode — capture
+   * target wins so the user always sees the strip for the tile they're
+   * authoring against, even if they navigate selection away mid-capture.
    */
   readonly cell = computed<string | null>(() => this.#capturingFor() ?? this.#activeCell())
 
   /**
    * Visible whenever the active cell has notes, or the user is actively
-   * authoring one against that cell. An empty list with no capture in
-   * progress stays hidden — nothing useful to show yet.
+   * authoring one, OR multi-selection has any cells with notes.
    */
-  readonly visible = computed<boolean>(() =>
-    !!this.cell() && (this.notes().length > 0 || !!this.#capturingFor())
-  )
+  readonly visible = computed<boolean>(() => {
+    if (this.#capturingFor()) return true
+    if (this.multi()) {
+      // Show whenever any selected cell has notes — emptyCells is only ever
+      // shown alongside a populated accordion, never on its own.
+      return this.groups().length > 0
+    }
+    return !!this.cell() && (this.notes().length > 0 || !!this.#capturingFor())
+  })
 
   /** True when the strip is shown specifically because a note is being authored. */
   readonly capturing = computed<boolean>(() => !!this.#capturingFor())
@@ -80,12 +171,46 @@ export class NotesStripComponent implements OnDestroy {
   #selectionListener: (() => void) | null = null
 
   constructor() {
+    // Folder navigation invalidates NotesService's cell-locationSig cache
+    // (the same label resolves differently per folder), so notesFor() will
+    // start returning [] for previously-warmed cells until getNotes runs
+    // again. Clear our #warmed set in lockstep so empty-cells classification
+    // doesn't treat the now-cold cache as authoritative, and bump #version
+    // so dependent computeds re-read.
+    const lineage = get<EventTarget>('@hypercomb.social/Lineage') as unknown as EventTarget | undefined
+    if (lineage?.addEventListener) {
+      const onLineage = (): void => {
+        this.#warmed.set(new Set())
+        this.#version.update(v => v + 1)
+      }
+      lineage.addEventListener('change', onLineage)
+      this.#cleanups.push(() => lineage.removeEventListener('change', onLineage))
+    }
+
     const selection = this.#selection
     if (selection) {
-      this.#activeCell.set(selection.active)
-      const handler = (): void => this.#activeCell.set(selection.active)
-      selection.addEventListener('change', handler)
-      this.#selectionListener = () => selection.removeEventListener('change', handler)
+      const sync = (): void => {
+        // String signal: primitive equality dedups automatically.
+        this.#activeCell.set(selection.active)
+
+        // Array signal: reference equality, so spread-on-every-event would
+        // count as a change even when contents are identical, re-triggering
+        // every dependent signal/effect on every selection event. Compare
+        // contents and only set when actually different.
+        //
+        // Insertion order is preserved (no sort) so the last-N slice in
+        // groups() / emptyCells() reflects the most recently selected
+        // tiles — Set iteration follows insertion order in JS.
+        const next = [...selection.selected]
+        const prev = this.#selectedCells()
+        const changed =
+          prev.length !== next.length ||
+          prev.some((v, i) => v !== next[i])
+        if (changed) this.#selectedCells.set(next)
+      }
+      sync()
+      selection.addEventListener('change', sync)
+      this.#selectionListener = () => selection.removeEventListener('change', sync)
     }
 
     this.#cleanups.push(EffectBus.on<{ segments?: readonly string[] }>('notes:changed', async (p) => {
@@ -109,15 +234,45 @@ export class NotesStripComponent implements OnDestroy {
       if (p?.mode === 'note-capture') this.#capturingFor.set(null)
     }))
 
-    // Warm the decoded-set cache whenever the tracked cell changes so the
-    // list shows its existing notes on first open (cache is empty until the
-    // set resource is actually parsed).
+    // Warm the decoded-set cache for every cell the strip might display
+    // (active/capture cell in single mode, AND every selected cell in
+    // multi mode) so groups() / emptyCells() / notes() classify accurately
+    // on first paint.
+    //
+    // Why this matters: NotesService.notesFor() is synchronous and reads
+    // through #cellLocSigCache, which is only populated by the ASYNC
+    // #resolveCellLocation() that runs inside getNotes(). Until getNotes
+    // completes for a given cellLabel, notesFor() returns [] regardless
+    // of how many notes actually exist. This warmup eagerly resolves the
+    // cell-loc cache for every cell we're about to display, then bumps
+    // #version so the strip's computed signals re-read with the now-warm
+    // sync cache and add the cell to #warmed so emptyCells() can trust
+    // its empty classification.
+    //
+    // Per-cell promise tracking (vs Promise.all) so each cell flips into
+    // #warmed independently — fast cells don't have to wait on slow ones.
     effect(() => {
-      const c = this.cell()
-      if (!c) return
       const svc = this.#notes
       if (!svc) return
-      void svc.getNotes(c).then(() => this.#version.update(v => v + 1))
+      const targets = new Set<string>()
+      const c = this.cell()
+      if (c) targets.add(c)
+      // Match the last-N cap that groups() / emptyCells() apply — no
+      // point pre-warming cells the strip will never display.
+      for (const cell of this.#selectedCells().slice(-MAX_VISIBLE_SELECTIONS)) targets.add(cell)
+      if (targets.size === 0) return
+      for (const target of targets) {
+        if (this.#warmed().has(target)) continue
+        void svc.getNotes(target).then(() => {
+          this.#warmed.update(prev => {
+            if (prev.has(target)) return prev
+            const next = new Set(prev)
+            next.add(target)
+            return next
+          })
+          this.#version.update(v => v + 1)
+        })
+      }
     })
   }
 
@@ -168,6 +323,47 @@ export class NotesStripComponent implements OnDestroy {
   }
 
   trackById = (_i: number, n: Note): string => n.id
+  trackByGroup = (_i: number, g: { cell: string }): string => g.cell
+
+  /**
+   * Click an accordion tab → open that cell's section (closing any other)
+   * and drop the cursor into the command line in note-capture mode for
+   * that cell, so the user can immediately type a new note. Click the
+   * already-open tab again to collapse all sections (no capture).
+   */
+  toggleGroup(cell: string): void {
+    const isCurrentlyOpen = this.groups().find(g => g.cell === cell)?.expanded ?? false
+    if (isCurrentlyOpen) {
+      // Explicit collapse — suppress the auto-fallback so the closed state
+      // sticks until the user opens something.
+      this.#userClosed.set(true)
+      this.#openGroup.set(null)
+      return
+    }
+    this.#userClosed.set(false)
+    this.#openGroup.set(cell)
+    EffectBus.emit('note:capture', { cellLabel: cell })
+  }
+
+  /**
+   * Click an empty-cell pill → start capture for that cell so the user can
+   * author the first note. The cell will appear as a tab once the note is
+   * committed.
+   */
+  captureForEmpty(cell: string): void {
+    EffectBus.emit('note:capture', { cellLabel: cell })
+  }
+
+  /** Open a specific note from within an accordion group. */
+  openInGroup(cell: string, noteId: string): void {
+    EffectBus.emit('notes:open', { cellLabel: cell, noteId })
+  }
+
+  /** Delete a note from within an accordion group. */
+  removeInGroup(cell: string, noteId: string, event: Event): void {
+    event.stopPropagation()
+    EffectBus.emit('note:delete', { cellLabel: cell, noteId })
+  }
 
   // ── service resolution ──────────────────────────────────
 

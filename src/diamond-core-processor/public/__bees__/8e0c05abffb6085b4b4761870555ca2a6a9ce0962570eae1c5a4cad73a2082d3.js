@@ -104,6 +104,8 @@ var ClaudeBridgeWorker = class extends Worker {
     switch (req.op) {
       case "update":
         return this.#update(req);
+      case "note-add":
+        return this.#noteAdd(req);
       case "add":
         return this.#add(req);
       // legacy: delegates to update
@@ -121,6 +123,26 @@ var ClaudeBridgeWorker = class extends Worker {
       default:
         return { id: req.id, ok: false, error: `unknown op: ${req.op}` };
     }
+  }
+  // Append a note to a cell at explicit segments. Calls
+  // NotesService.addAtSegments — same upsert path as user-typed notes.
+  // Headless: no dependency on the current navigation lineage.
+  async #noteAdd(req) {
+    const cell = req.cell;
+    const text = req.text;
+    const segments = req.segments ?? [];
+    if (typeof cell !== "string" || !cell) {
+      return { id: req.id, ok: false, error: "missing cell label" };
+    }
+    if (typeof text !== "string" || !text) {
+      return { id: req.id, ok: false, error: "missing note text" };
+    }
+    const notes = get("@diamondcoreprocessor.com/NotesService");
+    if (!notes?.addAtSegments) {
+      return { id: req.id, ok: false, error: "NotesService.addAtSegments not available" };
+    }
+    await notes.addAtSegments(segments, cell, text);
+    return { id: req.id, ok: true };
   }
   // Layer-as-primitive update. Caller passes `{ segments, layer }` where
   // layer is `{ name, ...slots }`. Slot names are conventional (children,

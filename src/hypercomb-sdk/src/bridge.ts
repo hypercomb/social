@@ -2,7 +2,7 @@
 
 export const BRIDGE_PORT = 2401
 
-export type BridgeOp = 'update' | 'add' | 'remove' | 'list' | 'inspect' | 'history' | 'submit'
+export type BridgeOp = 'update' | 'note-add' | 'add' | 'remove' | 'list' | 'inspect' | 'history' | 'submit'
 
 export type BridgeRequest = {
   id: string

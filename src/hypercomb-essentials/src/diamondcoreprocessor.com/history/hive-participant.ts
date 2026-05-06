@@ -75,7 +75,11 @@ import type { HistoryService, LayerContent } from './history.service.js'
 import type { LayerSlotRegistry } from './layer-slot-registry.js'
 
 type LayerCommitterLike = {
-  commitSlotSet: (segments: readonly string[], slot: string, sigs: readonly string[]) => Promise<void>
+  update: (
+    segments: readonly string[],
+    layer: { name?: string; [slot: string]: unknown },
+    nameSlots?: ReadonlySet<string>,
+  ) => Promise<string>
 }
 
 type LineageLike = { explorerSegments?: () => readonly string[] }
@@ -220,12 +224,16 @@ export abstract class HiveParticipant<T> {
       layerSigs.push(sig)
     }
 
-    // Drive the cascade DIRECTLY and await it. Subscribers reading
-    // the parent layer back must see the new slot value, so the
-    // emit-then-subscribe race that EffectBus would create is
-    // unacceptable here. After the cascade lands, fire the trigger
-    // event so UI consumers refresh.
-    await committer.commitSlotSet(segs, this.slot, layerSigs)
+    // Layer-as-primitive: read the parent's full current layer state and
+    // write the merged version with our slot replaced. This is the same
+    // write surface every other type uses — `update(segments, layer)` —
+    // so notes / tags / future participants all share one canonical path.
+    // No slot-specific delta API.
+    const nextLayer = await this.#nextLayerWithSlot(history, segs, layerSigs)
+    // Empty nameSlots — every slot we pass is a pre-resolved sig array
+    // (children carried over from currentLayerAt(), our slot just built
+    // by #commitParticipant). No name→sig resolution needed.
+    await committer.update(segs, nextLayer, new Set())
 
     EffectBus.emit(this.triggerName, {
       segments: [...segs],
@@ -269,7 +277,14 @@ export abstract class HiveParticipant<T> {
       layerSigs.push(sig)
     }
 
-    await committer.commitSlotSet(segs, this.slot, layerSigs)
+    // Layer-as-primitive: same write surface as upsert. Empty layerSigs
+    // (last item removed) is fine — the committer treats empty arrays as
+    // wiped slots, which is exactly what we want.
+    const nextLayer = await this.#nextLayerWithSlot(history, segs, layerSigs)
+    // Empty nameSlots — every slot we pass is a pre-resolved sig array
+    // (children carried over from currentLayerAt(), our slot just built
+    // by #commitParticipant). No name→sig resolution needed.
+    await committer.update(segs, nextLayer, new Set())
 
     EffectBus.emit(this.triggerName, {
       segments: [...segs],
@@ -323,6 +338,30 @@ export abstract class HiveParticipant<T> {
   readonly #itemCache = new Map<string, T>()
 
   // ── Internal: read prior items via the layer ───────────────────────
+
+  /**
+   * Compose the parent's next-layer state for a layer-as-primitive
+   * `update()` call: take the parent's current layer (or an empty
+   * skeleton if the cell hasn't been committed yet) and replace this
+   * participant's slot with the new sig list. All other slots
+   * (children, tags, etc.) are preserved verbatim — `update()` would
+   * wipe any slot we omit.
+   */
+  async #nextLayerWithSlot(
+    history: HistoryService,
+    parentSegments: readonly string[],
+    sigs: readonly string[],
+  ): Promise<{ name?: string; [slot: string]: unknown }> {
+    const parentLocSig = await this.#signSegments(parentSegments)
+    const parent = (await history.currentLayerAt(parentLocSig)) as
+      | { name?: string; [k: string]: unknown }
+      | null
+    const base: { name?: string; [k: string]: unknown } = parent
+      ? { ...parent }
+      : { name: parentSegments[parentSegments.length - 1] ?? '' }
+    base[this.slot] = sigs.slice()
+    return base
+  }
 
   async #priorItemsAt(
     history: HistoryService,

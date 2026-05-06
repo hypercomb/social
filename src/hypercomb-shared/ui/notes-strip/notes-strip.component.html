@@ -1,63 +1,136 @@
 @if (visible()) {
-  <div class="notes-strip" [class.mode-chips]="mode() === 'chips'" [class.mode-rows]="mode() === 'rows'" role="list" [attr.aria-label]="'notes.strip.aria' | t">
-    @if (mode() === 'chips') {
-      <div class="chip-track">
-        @for (note of notes(); track trackById($index, note)) {
-          <div class="chip-wrap" role="listitem">
-            <button
-              class="note-chip"
-              type="button"
-              (click)="open(note.id)"
-              [title]="note.text"
-            >
-              <span class="chip-text">{{ preview(note.text) }}</span>
-              @if (note.tags && note.tags.length) {
-                <span class="chip-tags">
-                  @for (tag of note.tags; track tag) {
-                    <span class="chip-tag">#{{ tag }}</span>
-                  }
-                </span>
-              }
-            </button>
-            <button
-              class="note-delete"
-              type="button"
-              (click)="remove(note.id, $event)"
-              [attr.aria-label]="'notes.delete' | t"
-              [title]="'notes.delete' | t"
-            >×</button>
+  @if (multi()) {
+    <!-- Multi-selection: accordion of per-cell note lists.
+         Custom accordion (not <details>) so we can animate the panel smoothly
+         via the grid-template-rows 0fr→1fr trick and own the aria semantics. -->
+    <div class="notes-strip notes-strip-accordion mode-rows" role="region" [attr.aria-label]="'notes.strip.aria' | t">
+      @for (group of groups(); track trackByGroup($index, group)) {
+        <div class="accordion-group" [class.is-open]="group.expanded">
+          <button
+            type="button"
+            class="accordion-head"
+            [attr.aria-expanded]="group.expanded"
+            [attr.aria-controls]="'notes-panel-' + group.cell"
+            (click)="toggleGroup(group.cell)"
+          >
+            <span class="accordion-chevron" aria-hidden="true">
+              <svg viewBox="0 0 12 12" width="10" height="10" focusable="false">
+                <path d="M3 4.5 L6 7.5 L9 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </span>
+            <span class="accordion-cell">{{ group.cell }}</span>
+            <span class="accordion-count" aria-hidden="true">{{ group.notes.length }}</span>
+            <span class="visually-hidden">{{ group.notes.length }} notes</span>
+          </button>
+          <div class="accordion-panel" [id]="'notes-panel-' + group.cell" role="region" [attr.aria-hidden]="!group.expanded">
+            <div class="accordion-panel-inner">
+              <ul class="strip-list strip-list-nested" role="list">
+                @for (note of group.notes; track trackById($index, note)) {
+                  <li class="note-row" role="listitem">
+                    <button class="note-open" type="button" (click)="openInGroup(group.cell, note.id)" [title]="note.text">
+                      <span class="row-text">{{ note.text }}</span>
+                      @if (note.tags && note.tags.length) {
+                        <span class="row-tags">
+                          @for (tag of note.tags; track tag) {
+                            <span class="row-tag">#{{ tag }}</span>
+                          }
+                        </span>
+                      }
+                    </button>
+                    <button class="note-delete" type="button"
+                            (click)="removeInGroup(group.cell, note.id, $event)"
+                            [attr.aria-label]="'notes.delete' | t" [title]="'notes.delete' | t">×</button>
+                  </li>
+                }
+              </ul>
+            </div>
           </div>
-        }
-      </div>
-    } @else {
-      <ul class="strip-list">
-        @for (note of notes(); track trackById($index, note)) {
-          <li class="note-row" role="listitem">
-            <button
-              class="note-open"
-              type="button"
-              (click)="open(note.id)"
-              [title]="note.text"
-            >
-              <span class="row-text">{{ note.text }}</span>
-              @if (note.tags && note.tags.length) {
-                <span class="row-tags">
-                  @for (tag of note.tags; track tag) {
-                    <span class="row-tag">#{{ tag }}</span>
-                  }
-                </span>
-              }
-            </button>
-            <button
-              class="note-delete"
-              type="button"
-              (click)="remove(note.id, $event)"
-              [attr.aria-label]="'notes.delete' | t"
-              [title]="'notes.delete' | t"
-            >×</button>
-          </li>
-        }
-      </ul>
-    }
-  </div>
+        </div>
+      }
+      @if (emptyCells().length > 0) {
+        <!-- Empty cells: selected tiles that don't have notes yet. Surfaced
+             as a flat list at the bottom so the user can see what's still
+             missing context. Clicking a pill drops the cursor into the
+             command line in capture mode for that cell. -->
+        <div class="accordion-empty">
+          <div class="accordion-empty-label">No notes</div>
+          <ul class="accordion-empty-list" role="list">
+            @for (cell of emptyCells(); track cell) {
+              <li class="accordion-empty-item-wrap" role="listitem">
+                <button
+                  type="button"
+                  class="accordion-empty-item"
+                  (click)="captureForEmpty(cell)"
+                  [title]="'Add a note to ' + cell"
+                >{{ cell }}</button>
+              </li>
+            }
+          </ul>
+        </div>
+      }
+    </div>
+  } @else {
+    <!-- Single-selection: existing flat list / chip layout -->
+    <div class="notes-strip" [class.mode-chips]="mode() === 'chips'" [class.mode-rows]="mode() === 'rows'" role="list" [attr.aria-label]="'notes.strip.aria' | t">
+      @if (mode() === 'chips') {
+        <div class="chip-track">
+          @for (note of notes(); track trackById($index, note)) {
+            <div class="chip-wrap" role="listitem">
+              <button
+                class="note-chip"
+                type="button"
+                (click)="open(note.id)"
+                [title]="note.text"
+              >
+                <span class="chip-text">{{ preview(note.text) }}</span>
+                @if (note.tags && note.tags.length) {
+                  <span class="chip-tags">
+                    @for (tag of note.tags; track tag) {
+                      <span class="chip-tag">#{{ tag }}</span>
+                    }
+                  </span>
+                }
+              </button>
+              <button
+                class="note-delete"
+                type="button"
+                (click)="remove(note.id, $event)"
+                [attr.aria-label]="'notes.delete' | t"
+                [title]="'notes.delete' | t"
+              >×</button>
+            </div>
+          }
+        </div>
+      } @else {
+        <ul class="strip-list">
+          @for (note of notes(); track trackById($index, note)) {
+            <li class="note-row" role="listitem">
+              <button
+                class="note-open"
+                type="button"
+                (click)="open(note.id)"
+                [title]="note.text"
+              >
+                <span class="row-text">{{ note.text }}</span>
+                @if (note.tags && note.tags.length) {
+                  <span class="row-tags">
+                    @for (tag of note.tags; track tag) {
+                      <span class="row-tag">#{{ tag }}</span>
+                    }
+                  </span>
+                }
+              </button>
+              <button
+                class="note-delete"
+                type="button"
+                (click)="remove(note.id, $event)"
+                [attr.aria-label]="'notes.delete' | t"
+                [title]="'notes.delete' | t"
+              >×</button>
+            </li>
+          }
+        </ul>
+      }
+    </div>
+  }
 }

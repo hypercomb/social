@@ -11,6 +11,11 @@ body {
   margin: 0;
   padding: 0;
   height: 100%;
+  // Lock page scrolling. The Pixi canvas owns wheel events for zoom;
+  // any document scrollbar would steal them and prevent zoom-in/-out.
+  // Fixed-positioned UI (command line, controls bar, overlays) stays
+  // on-screen regardless of inner content height.
+  overflow: hidden;
   background-color: #050f17;
   touch-action: manipulation;
   font-family: var(--hc-font);

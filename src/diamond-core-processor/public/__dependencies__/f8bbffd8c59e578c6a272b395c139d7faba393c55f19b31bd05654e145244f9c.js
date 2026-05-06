@@ -1931,7 +1931,8 @@ var HiveParticipant = class {
       const sig = await this.#commitParticipant(item, segs, history, store);
       layerSigs.push(sig);
     }
-    await committer.commitSlotSet(segs, this.slot, layerSigs);
+    const nextLayer = await this.#nextLayerWithSlot(history, segs, layerSigs);
+    await committer.update(segs, nextLayer, /* @__PURE__ */ new Set());
     EffectBus4.emit(this.triggerName, {
       segments: [...segs],
       op: "set",
@@ -1967,7 +1968,8 @@ var HiveParticipant = class {
       const sig = await this.#commitParticipant(item, segs, history, store);
       layerSigs.push(sig);
     }
-    await committer.commitSlotSet(segs, this.slot, layerSigs);
+    const nextLayer = await this.#nextLayerWithSlot(history, segs, layerSigs);
+    await committer.update(segs, nextLayer, /* @__PURE__ */ new Set());
     EffectBus4.emit(this.triggerName, {
       segments: [...segs],
       op: "set",
@@ -2005,6 +2007,21 @@ var HiveParticipant = class {
    *  decode-once cache. */
   #itemCache = /* @__PURE__ */ new Map();
   // ── Internal: read prior items via the layer ───────────────────────
+  /**
+   * Compose the parent's next-layer state for a layer-as-primitive
+   * `update()` call: take the parent's current layer (or an empty
+   * skeleton if the cell hasn't been committed yet) and replace this
+   * participant's slot with the new sig list. All other slots
+   * (children, tags, etc.) are preserved verbatim — `update()` would
+   * wipe any slot we omit.
+   */
+  async #nextLayerWithSlot(history, parentSegments, sigs) {
+    const parentLocSig = await this.#signSegments(parentSegments);
+    const parent = await history.currentLayerAt(parentLocSig);
+    const base = parent ? { ...parent } : { name: parentSegments[parentSegments.length - 1] ?? "" };
+    base[this.slot] = sigs.slice();
+    return base;
+  }
   async #priorItemsAt(history, parentSegments) {
     const parentLocSig = await this.#signSegments(parentSegments);
     const parent = await history.currentLayerAt(parentLocSig);

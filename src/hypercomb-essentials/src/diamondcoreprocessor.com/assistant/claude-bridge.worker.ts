@@ -137,15 +137,39 @@ export class ClaudeBridgeWorker extends Worker {
 
   async #dispatch(req: BridgeRequest): Promise<BridgeResponse> {
     switch (req.op) {
-      case 'update':  return this.#update(req)
-      case 'add':     return this.#add(req)        // legacy: delegates to update
-      case 'remove':  return this.#remove(req)     // legacy: delegates to update
-      case 'list':    return this.#list(req)
-      case 'inspect': return this.#inspect(req)
-      case 'history': return this.#history(req)
-      case 'submit':  return this.#submit(req)
-      default:        return { id: req.id, ok: false, error: `unknown op: ${req.op}` }
+      case 'update':   return this.#update(req)
+      case 'note-add': return this.#noteAdd(req)
+      case 'add':      return this.#add(req)        // legacy: delegates to update
+      case 'remove':   return this.#remove(req)     // legacy: delegates to update
+      case 'list':     return this.#list(req)
+      case 'inspect':  return this.#inspect(req)
+      case 'history':  return this.#history(req)
+      case 'submit':   return this.#submit(req)
+      default:         return { id: req.id, ok: false, error: `unknown op: ${req.op}` }
     }
+  }
+
+  // Append a note to a cell at explicit segments. Calls
+  // NotesService.addAtSegments — same upsert path as user-typed notes.
+  // Headless: no dependency on the current navigation lineage.
+  async #noteAdd(req: BridgeRequest): Promise<BridgeResponse> {
+    const cell = req.cell
+    const text = req.text
+    const segments = req.segments ?? []
+    if (typeof cell !== 'string' || !cell) {
+      return { id: req.id, ok: false, error: 'missing cell label' }
+    }
+    if (typeof text !== 'string' || !text) {
+      return { id: req.id, ok: false, error: 'missing note text' }
+    }
+    const notes = get<{
+      addAtSegments?: (s: readonly string[], c: string, t: string) => Promise<void>
+    }>('@diamondcoreprocessor.com/NotesService')
+    if (!notes?.addAtSegments) {
+      return { id: req.id, ok: false, error: 'NotesService.addAtSegments not available' }
+    }
+    await notes.addAtSegments(segments, cell, text)
+    return { id: req.id, ok: true }
   }
 
   // Layer-as-primitive update. Caller passes `{ segments, layer }` where

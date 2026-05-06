@@ -273,6 +273,33 @@ export class NotesService extends HiveParticipant<Note> {
     if (segments.length === 0) return ''
     return this.#cellLocSigCache.get(segments.join('/')) ?? ''
   }
+
+  /**
+   * Append a note at an EXPLICIT cell location (parentSegments + cellLabel)
+   * without depending on the user's current navigation. Used by the bridge
+   * for headless note authoring during imports / scripted hive builds.
+   * Goes through the same `upsert` path as user-typed notes — same merkle
+   * commit, same trigger event, same render pipeline.
+   */
+  public async addAtSegments(
+    parentSegments: readonly string[],
+    cellLabel: string,
+    text: string,
+  ): Promise<void> {
+    const cleanedParents = (parentSegments ?? [])
+      .map(s => String(s ?? '').trim())
+      .filter(Boolean)
+    const cleanedLabel = String(cellLabel ?? '').trim()
+    const cleanedText = String(text ?? '').trim()
+    if (!cleanedLabel || !cleanedText) return
+    const segments = [...cleanedParents, cleanedLabel]
+    const note: Note = {
+      id: cryptoRandomId(),
+      text: cleanedText,
+      createdAt: Date.now(),
+    }
+    await this.upsert(segments, [note])
+  }
 }
 
 function cryptoRandomId(): string {

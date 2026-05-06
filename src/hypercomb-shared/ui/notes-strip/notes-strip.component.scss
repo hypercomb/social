@@ -201,3 +201,227 @@ $accent: #ffe14a;
   color: rgba($accent, 0.9);
   opacity: 0.9;
 }
+
+// ── multi-selection accordion ─────────────────────────────
+// Custom accordion (not <details>) so we can animate the panel smoothly
+// via the grid-template-rows 0fr→1fr trick and own all interaction state.
+// One expandable section per selected cell; closed sections collapse to
+// a compact header so the user can compare context across selected tiles
+// without losing track of the set.
+.notes-strip-accordion {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.accordion-group {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+  transition: border-color 180ms ease, background 180ms ease;
+
+  &.is-open {
+    border-color: rgba($accent, 0.32);
+    background: rgba($accent, 0.045);
+  }
+}
+
+.accordion-head {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0.45rem 0.65rem;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font-family: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+  user-select: none;
+  transition: background 150ms ease;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  &:active {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  &:focus-visible {
+    outline: 1px solid $accent;
+    outline-offset: -1px;
+  }
+}
+
+.accordion-chevron {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  color: rgba(255, 255, 255, 0.45);
+  transform: rotate(-90deg);
+  transition: transform 200ms cubic-bezier(0.4, 0, 0.2, 1), color 180ms ease;
+}
+
+.accordion-group.is-open .accordion-chevron {
+  transform: rotate(0);
+  color: rgba($accent, 0.85);
+}
+
+.accordion-cell {
+  flex: 1;
+  min-width: 0;
+  color: rgba(240, 240, 240, 0.92);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color 150ms ease;
+}
+
+.accordion-group.is-open .accordion-cell {
+  color: rgba($accent, 1);
+}
+
+.accordion-count {
+  flex-shrink: 0;
+  min-width: 1.5rem;
+  padding: 0.05rem 0.45rem;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  line-height: 1.4;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.accordion-group.is-open .accordion-count {
+  background: rgba($accent, 0.15);
+  color: rgba($accent, 0.95);
+}
+
+// ── animated panel ─────────────────────────────────────
+// The grid-template-rows trick lets us animate from collapsed (0fr) to
+// natural content height (1fr) without measuring or using JS. The inner
+// wrapper carries overflow:hidden and min-height:0 so children clip cleanly.
+.accordion-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 220ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.accordion-group.is-open .accordion-panel {
+  grid-template-rows: 1fr;
+}
+
+.accordion-panel-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.accordion-group.is-open .accordion-panel-inner {
+  border-top: 1px solid rgba($accent, 0.14);
+}
+
+.strip-list-nested {
+  margin: 0;
+  padding: 0.4rem 0.5rem 0.5rem;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+// ── empty-cells footer ─────────────────────────────────
+// Selected cells with no notes yet — shown as a compact, dimmed list at
+// the bottom so the user knows what's still missing context.
+.accordion-empty {
+  margin-top: 0.15rem;
+  padding: 0.45rem 0.65rem 0.5rem;
+  border: 1px dashed rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  background: transparent;
+}
+
+.accordion-empty-label {
+  margin-bottom: 0.3rem;
+  font-size: 0.65rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.accordion-empty-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.accordion-empty-item-wrap {
+  display: inline-flex;
+}
+
+.accordion-empty-item {
+  padding: 0.15rem 0.55rem;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(220, 220, 220, 0.6);
+  font-family: inherit;
+  font-size: 0.72rem;
+  line-height: 1.3;
+  white-space: nowrap;
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+
+  &:hover {
+    background: rgba($accent, 0.1);
+    color: rgba($accent, 0.95);
+    border-color: rgba($accent, 0.3);
+  }
+
+  &:focus-visible {
+    outline: 1px solid $accent;
+    outline-offset: 2px;
+  }
+}
+
+// ── accessibility helpers ──────────────────────────────
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .accordion-group,
+  .accordion-head,
+  .accordion-chevron,
+  .accordion-cell,
+  .accordion-count,
+  .accordion-panel {
+    transition: none;
+  }
+}
