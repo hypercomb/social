@@ -9,6 +9,11 @@ import { Component, computed, effect, signal, type OnDestroy } from '@angular/co
 import { EffectBus, type I18nProvider } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 
+// MODULE-LOAD LOG — fires the moment this file is parsed, regardless of
+// whether the component is ever rendered. If you don't see this in the
+// console after a hard reload, the new bundle isn't being served.
+console.log('[notes-strip] MODULE LOADED build=2026-05-05-accordion-update')
+
 /**
  * Cap on how many selected tiles the multi-select accordion will surface
  * at once. Large selections would otherwise flood the strip; the user's
