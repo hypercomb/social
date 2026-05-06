@@ -63,6 +63,18 @@ type Node = {
 
 const SIG_REGEX = /^[a-f0-9]{64}$/
 
+/** Convention: a top-level cell named `instructions` (and its entire
+ *  subtree) is treated as codegen context, never rendered as website
+ *  pages. Sub-cells under `instructions` divide concerns — `styles`,
+ *  `voice`, `tech`, `audience`, `examples`, etc. Their notes are the
+ *  prose Claude reads on every codegen request, so the generated chrome
+ *  and per-cell deps converge on a single design language without you
+ *  re-stating constraints in every prompt. */
+const INSTRUCTIONS_FOLDER = 'instructions'
+
+const isInstructionsSegments = (segments: readonly string[]): boolean =>
+  segments.length > 0 && segments[0] === INSTRUCTIONS_FOLDER
+
 @Component({
   selector: 'hc-website-view',
   standalone: true,
@@ -162,17 +174,31 @@ export class WebsiteViewComponent implements OnDestroy {
     return tree.get(key) ?? null
   })
 
-  /** Flat list of all loaded pages, sorted by depth then name so the
-   *  rendered DOM is in stable, walkable order. The whole tree is
-   *  rendered once; navigation flips which one is `is-current`. */
+  /** Flat list of all loaded pages — excludes the `instructions/`
+   *  subtree, which is codegen context, not visible content. Sorted by
+   *  depth then name for stable DOM order; navigation flips visibility
+   *  via `is-current` / `is-visible`. */
   readonly allPages = computed<readonly Node[]>(() => {
     const tree = this.#tree()
-    return [...tree.values()].sort((a, b) => {
-      if (a.segments.length !== b.segments.length) return a.segments.length - b.segments.length
-      const aKey = a.segments.join('/')
-      const bKey = b.segments.join('/')
-      return aKey < bKey ? -1 : aKey > bKey ? 1 : 0
-    })
+    return [...tree.values()]
+      .filter(n => !isInstructionsSegments(n.segments))
+      .sort((a, b) => {
+        if (a.segments.length !== b.segments.length) return a.segments.length - b.segments.length
+        const aKey = a.segments.join('/')
+        const bKey = b.segments.join('/')
+        return aKey < bKey ? -1 : aKey > bKey ? 1 : 0
+      })
+  })
+
+  /** All cells under `instructions/` — the codegen context bundle.
+   *  Public so future codegen invocations can pull the whole
+   *  instructions subtree as the prompt envelope's "rules / style /
+   *  voice / tech" section without duplicating the walk. */
+  readonly instructions = computed<readonly Node[]>(() => {
+    const tree = this.#tree()
+    return [...tree.values()]
+      .filter(n => isInstructionsSegments(n.segments))
+      .sort((a, b) => a.segments.join('/').localeCompare(b.segments.join('/')))
   })
 
   /** Whether the page at `segments` is on the current ancestry chain
@@ -325,17 +351,21 @@ export class WebsiteViewComponent implements OnDestroy {
   }
 
   /** Build child-card data with a preview snippet from each child's
-   *  first note (if cached). */
+   *  first note (if cached). The `instructions/` subtree is filtered
+   *  out at the root level — it's codegen context, not navigable
+   *  content. */
   childCards(n: Node): readonly { name: string; path: readonly string[]; preview: string; childCount: number }[] {
     const tree = this.#tree()
-    return n.childNames.map(name => {
-      const path = [...n.segments, name]
-      const child = tree.get(path.join('/'))
-      const firstNote = child?.notes[0]?.text ?? ''
-      const preview = firstNote.length > 110 ? firstNote.slice(0, 107) + '…' : firstNote
-      const childCount = child?.childNames.length ?? 0
-      return { name, path, preview, childCount }
-    })
+    return n.childNames
+      .filter(name => !(n.segments.length === 0 && name === INSTRUCTIONS_FOLDER))
+      .map(name => {
+        const path = [...n.segments, name]
+        const child = tree.get(path.join('/'))
+        const firstNote = child?.notes[0]?.text ?? ''
+        const preview = firstNote.length > 110 ? firstNote.slice(0, 107) + '…' : firstNote
+        const childCount = child?.childNames.length ?? 0
+        return { name, path, preview, childCount }
+      })
   }
 
   /** Inline-link any cell-name mention in note text to that cell's page.
