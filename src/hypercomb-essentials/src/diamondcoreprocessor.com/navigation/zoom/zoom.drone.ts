@@ -62,7 +62,8 @@ const readProperties = async (
 
 export type ZoomSnapshot = { scale: number; cx: number; cy: number }
 export type PanSnapshot = { dx: number; dy: number }
-export type ViewportSnapshot = { zoom?: ZoomSnapshot; pan?: PanSnapshot }
+export type MeshOffsetSnapshot = { x: number; y: number }
+export type ViewportSnapshot = { zoom?: ZoomSnapshot; pan?: PanSnapshot; meshOffset?: MeshOffsetSnapshot }
 
 export class ViewportPersistence extends EventTarget {
 
@@ -108,7 +109,7 @@ export class ViewportPersistence extends EventTarget {
     }
     const flushDir = this.#dir
     const flushPending = this.#pending
-    if (flushDir && (flushPending.zoom || flushPending.pan)) {
+    if (flushDir && (flushPending.zoom || flushPending.pan || flushPending.meshOffset)) {
       void this.#persistTo(flushDir, flushPending)
     }
 
@@ -128,7 +129,7 @@ export class ViewportPersistence extends EventTarget {
     }
     const flushDir = this.#dir
     const flushPending = this.#pending
-    if (flushDir && (flushPending.zoom || flushPending.pan)) {
+    if (flushDir && (flushPending.zoom || flushPending.pan || flushPending.meshOffset)) {
       void this.#persistTo(flushDir, flushPending)
     }
 
@@ -161,12 +162,27 @@ export class ViewportPersistence extends EventTarget {
     if (this.#dir) this.#schedulePersist()
   }
 
+  /** Persist the renderer's mesh offset (its position inside the layer
+   *  container). Saved per-layer so the position stays fixed across
+   *  navigation; never auto-changed by the renderer. Only updated when
+   *  the user explicitly recenters via the navigation command. */
+  setMeshOffset = (x: number, y: number): void => {
+    if (this.#suspended) return
+    if (!this.#dir) this.#syncWithStore()
+    this.#pending.meshOffset = { x, y }
+    if (this.#dir) this.#schedulePersist()
+  }
+
   get lastPan(): PanSnapshot | undefined {
     return this.#pending.pan ?? this.#lastRead.pan
   }
 
   get lastZoom(): ZoomSnapshot | undefined {
     return this.#pending.zoom ?? this.#lastRead.zoom
+  }
+
+  get lastMeshOffset(): MeshOffsetSnapshot | undefined {
+    return this.#pending.meshOffset ?? this.#lastRead.meshOffset
   }
 
   read = (): Promise<ViewportSnapshot> => {
@@ -238,7 +254,11 @@ export class ViewportPersistence extends EventTarget {
 
     // snapshot pending before any await — setDir() may clear it mid-flight
     const pending = { ...this.#pending }
-    if (!pending.zoom && !pending.pan) return
+    // Bail when nothing is pending. Must include meshOffset — otherwise
+    // setMeshOffset writes never reach 0000 (mesh-offset would not
+    // round-trip through OPFS, and "position should never be forgotten"
+    // would be violated on every reload).
+    if (!pending.zoom && !pending.pan && !pending.meshOffset) return
 
     this.#writing = true
     try {

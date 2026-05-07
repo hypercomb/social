@@ -276,6 +276,12 @@ export class ShowCellDrone extends Drone {
   // key. The counter cannot be clobbered: once bumped, it never goes
   // back.
   #streamToken = 0
+  // Set at the top of renderFromSynchronize, cleared at the end. Catches
+  // duplicate calls for the same target while the first one is still
+  // running. The fast path doesn't set streamActive, so the streamActive
+  // check alone misses these — back-nav was running its body twice per
+  // click because of the popstate→navigate→lineage-change cascade.
+  #activeRenderTarget: string | null = null
   private renderedLocationKey = ''
   #axialToIndex = new Map<string, number>()
   #heartbeatInitialized = false
@@ -308,6 +314,7 @@ export class ShowCellDrone extends Drone {
   #clipboardView: { labels: Set<string>; sourceSegments: string[]; op: 'cut' | 'copy' } | null = null
   #lastCursorPosition = -1
   #lastCursorRewound = false
+  #lastCursorLocationSig = ''
   private meshSub: MeshSub | null = null
   private readonly publisherId: string = (() => {
     const key = 'hc:show-honeycomb:publisher-id'
@@ -364,6 +371,11 @@ export class ShowCellDrone extends Drone {
   // transition during a cursor-driven undo/redo doesn't snap content
   // back to (0,0) — tiles render at the same world position as before.
   #lastMeshOffset: { x: number; y: number } | null = null
+  // Saved mesh offset awaiting hexMesh creation (set by
+  // #applyViewportFromSnapshot when called before applyGeometry has
+  // built the mesh — first render after refresh, deep-link load,
+  // post-clearMesh rebuild). Consumed once when the new mesh is created.
+  #pendingMeshOffsetRestore: { x: number; y: number } | null = null
   #layoutMode: 'dense' | 'pinned' = 'dense'
 
   // First-visit fit: when navigating to a layer that has no saved viewport
@@ -503,8 +515,7 @@ export class ShowCellDrone extends Drone {
       const nakPayload = '{"cells":["external.alpha","Street Fighter"]}'
       const nakCmd = `nak event ${NOSTR} --kind 29010 --tag "x=${sig}" --content '${nakPayload}'`
       ; (window as any).__showHoneycombNakCommand = nakCmd
-      console.log('[show-honeycomb] signature location', signatureLocation.key)
-      console.log('[show-honeycomb] nak command (copy from window.__showHoneycombNakCommand):', nakCmd)
+      // (debug logs removed — fired on every nav and slowed render with DevTools open)
     }
 
     if (!sig) return
@@ -1136,17 +1147,7 @@ export class ShowCellDrone extends Drone {
       }).catch(() => { /* best effort */ })
     }
 
-    this.emitEffect('render:cell-count', {
-      count: cells.length,
-      labels: cells.map(cell => cell.label),
-      coords: cells.map(cell => ({ q: cell.q, r: cell.r })),
-      branchLabels: cells.filter(cell => cell.hasBranch).map(cell => cell.label),
-      externalLabels: cells.filter(cell => cell.external).map(cell => cell.label),
-      noImageLabels: cells.filter(cell => !cell.imageSig).map(cell => cell.label),
-      substrateLabels: cells.filter(cell => cell.hasSubstrate).map(cell => cell.label),
-      linkLabels: cells.filter(cell => cell.hasLink).map(cell => cell.label),
-      hiddenLabels: this.#showHiddenItems ? [...this.#currentHiddenSet] : [],
-    })
+    this.emitEffect('render:cell-count', this.#buildCellCountPayload(cells))
     this.#emitRenderTags(cells)
   }
 
@@ -1238,17 +1239,7 @@ export class ShowCellDrone extends Drone {
 
     await this.applyGeometry(cells)
 
-    this.emitEffect('render:cell-count', {
-      count: cells.length,
-      labels: cells.map(cell => cell.label),
-      coords: cells.map(cell => ({ q: cell.q, r: cell.r })),
-      branchLabels: cells.filter(cell => cell.hasBranch).map(cell => cell.label),
-      externalLabels: cells.filter(cell => cell.external).map(cell => cell.label),
-      noImageLabels: cells.filter(cell => !cell.imageSig).map(cell => cell.label),
-      substrateLabels: cells.filter(cell => cell.hasSubstrate).map(cell => cell.label),
-      linkLabels: cells.filter(cell => cell.hasLink).map(cell => cell.label),
-      hiddenLabels: this.#showHiddenItems ? [...this.#currentHiddenSet] : [],
-    })
+    this.emitEffect('render:cell-count', this.#buildCellCountPayload(cells))
     this.#emitRenderTags(cells)
   }
 
@@ -1279,6 +1270,54 @@ export class ShowCellDrone extends Drone {
       return
     }
 
+    // ── coalesce duplicate renders for the same target ───────────────
+    // One user nav gesture fires 3–5 events: popstate, navigate,
+    // sometimes synchronize, plus lineage 'change' (from invalidate).
+    // Each schedules a requestRender. Two cases of duplicates we must
+    // catch before any work runs:
+    //
+    //   (A) #activeRenderTarget — set at the top of THIS function,
+    //       cleared in finally. Catches duplicates while ANY part of
+    //       renderFromSynchronize body is still running for this target,
+    //       including the back-nav fast path (which doesn't set
+    //       streamActive). Without this, the IIFE's do-while was running
+    //       the back-nav fast path twice per click.
+    //
+    //   (B) streamActive — set when streamCells starts, cleared when it
+    //       ends. Catches duplicates that arrive AFTER the slow path's
+    //       outer renderFromSynchronize returns but while streamCells is
+    //       still running async.
+    if (
+      !this.#clipboardView && (
+        this.#activeRenderTarget === locationKey ||
+        (this.streamActive && locationKey === this.renderedLocationKey)
+      )
+    ) {
+      return
+    }
+
+    // From here on we own the render for this target. Wrap the rest in
+    // try/finally so the flag is reliably cleared even on early return
+    // or throw. (The return statements throughout the body below will
+    // run finally; the implicit `return` at function end too.)
+    this.#activeRenderTarget = locationKey
+    try {
+      return await this.#renderFromSynchronizeInner(lineage, locationKey, axial)
+    } finally {
+      if (this.#activeRenderTarget === locationKey) this.#activeRenderTarget = null
+    }
+  }
+
+  // The body of renderFromSynchronize, factored out so the dedup wrapper
+  // above stays readable. All the existing logic lives here unchanged.
+  readonly #renderFromSynchronizeInner = async (lineage: any, locationKey: string, axial: any): Promise<void> => {
+    // Re-narrow pixi handles. The outer renderFromSynchronize already
+    // guarded these but TS can't carry the narrowing across the function
+    // boundary. Cheap re-check.
+    if (!this.pixiApp || !this.pixiContainer || !this.pixiRenderer) {
+      this.clearMesh()
+      return
+    }
 
     // note: init layer + atlases (and reset shader if renderer changes)
     if (!this.layer) {
@@ -1305,12 +1344,13 @@ export class ShowCellDrone extends Drone {
     }
 
     // ── back-nav fast path ─────────────────────────────────
-    // If we've rendered this layer before and nothing has invalidated the
-    // snapshot, restore in a single geometry pass: no OPFS listing, no
-    // history walk, no branch detection, no progressive streaming, no
-    // hide/reveal flicker. The ~9 invalidation sites each delete the
-    // cache + clear renderedCellsKey, so a cache hit means the snapshot
-    // is still authoritative for the current lineage state.
+    // SYNCHRONOUS restore. We have everything in memory; awaiting OPFS
+    // reads or atlas decodes for cells whose data we already cached
+    // turns "show 3 tiles you saw 2 seconds ago" into 400ms of latency.
+    // Every step here MUST be sync. Anything that needs async work (atlas
+    // refill if a slot was evicted, viewport read if no snapshot) is
+    // kicked off in the background and only triggers a re-render if it
+    // produced new state.
     if (
       locationKey !== this.renderedLocationKey
       && !this.#clipboardView
@@ -1319,14 +1359,33 @@ export class ShowCellDrone extends Drone {
       const cached = this.#layerCellsCache.get(locationKey)
       const cachedDir = this.#layerDirCache.get(locationKey)
       if (cached && cached.cells.length > 0 && cachedDir) {
+        // Capture the OUTGOING layer's live VP state into our cache so
+        // a future return to that layer restores where the user actually
+        // left it (pan/zoom/meshOffset they applied this session). VP's
+        // OPFS write is debounced; the in-memory cache stays stale until
+        // we explicitly sync it.
+        this.#syncCacheFromVP(this.renderedLocationKey)
         // abort any stream still running for the previous layer
         ++this.#streamToken
 
-        // restore viewport before geometry upload so the first frame
-        // is already at the user's saved scale/pan for this layer
+        // Viewport: prefer cached snapshot (sync). If none cached, MUST
+        // await the OPFS read — otherwise mesh renders at the previous
+        // layer's pan/zoom, then snaps to the saved viewport once the
+        // read completes, which the user perceives as drift. Position
+        // accuracy outweighs the one-time OPFS round-trip on cold load.
+        let appliedSnap: ViewportSnapshot | null = null
         const vpSnap = this.#layerViewportCache.get(locationKey)
-        if (vpSnap) this.#applyViewportFromSnapshot(vpSnap)
-        else await this.#applyViewportForLayer(cachedDir)
+        if (vpSnap) {
+          this.#applyViewportFromSnapshot(vpSnap)
+          appliedSnap = vpSnap
+        } else {
+          appliedSnap = await this.#applyViewportForLayerReadSnapshot(cachedDir)
+        }
+        // Explicit set — never inherit from prior render. The back-nav
+        // fast path's mesh ALREADY exists, so we only need to mark
+        // recenter pending; the mesh.position was already set by
+        // #applyViewportFromSnapshot when snap had a meshOffset.
+        this.#pendingRecenter = !appliedSnap?.meshOffset
 
         const vp = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ViewportPersistence') as ViewportPersistence | undefined
         if (vp) vp.setDirSilent(cachedDir)
@@ -1337,17 +1396,42 @@ export class ShowCellDrone extends Drone {
         this.cachedBranchSet = cached.branchSet
         this.#layoutMode = this.#readLayoutMode(locationKey)
         this.#pendingRemoves.clear()
+        // No auto-recenter. The mesh offset was saved alongside pan/zoom
+        // when the user first loaded this layer (or when they explicitly
+        // ran navigation.recenter). #applyViewportFromSnapshot above
+        // restored snap.meshOffset onto hexMesh.position — that's the
+        // single source of truth for where the mesh sits. Only the
+        // explicit recenter command (#applyCursorLayout / fitToScreen)
+        // sets pendingRecenter; layer change alone does not.
         this.renderedCells.clear()
-        for (const cell of cached.cells) this.renderedCells.set(cell.label, cell)
+
+        // SYNC restore per-cell properties from per-label caches. No
+        // OPFS, no atlas decode. If a cell's atlas slot was evicted
+        // while we were away, mark it for background top-up.
+        const atlas = this.imageAtlas
+        const evictedSigs: string[] = []
+        for (const cell of cached.cells) {
+          const label = cell.label
+          if (this.cellImageCache.has(label)) {
+            const sig = this.cellImageCache.get(label) ?? undefined
+            cell.imageSig = sig
+            cell.borderColor = this.cellBorderColorCache.get(label)
+            cell.hasLink = this.cellLinkCache.get(label) ?? false
+            cell.hasSubstrate = this.cellSubstrateCache.get(label) ?? false
+            cell.hideText = this.cellHideTextCache.get(label) ?? false
+            if (sig && atlas && !atlas.hasImage(sig) && !atlas.hasFailed(sig)) {
+              evictedSigs.push(sig)
+            }
+          }
+          this.renderedCells.set(label, cell)
+        }
 
         if (this.layer) this.layer.visible = true
 
-        // defensive: re-load any cell whose atlas slot was evicted while
-        // away. Warm cells are a dict check; cold cells decode from the
-        // (still hot) Store resource cache. No OPFS round-trip.
-        await this.loadCellImages(cached.cells, cachedDir)
-
-        await this.applyGeometry(cached.cells)
+        // applyGeometry has no internal awaits; the `async` modifier
+        // just wraps the return — the body runs synchronously. Don't
+        // await it; one less microtask hop.
+        void this.applyGeometry(cached.cells)
         this.renderedCellsKey = this.buildCellsKey(cached.cells)
         this.#slots.seed({
           names: cached.cellNames,
@@ -1357,7 +1441,16 @@ export class ShowCellDrone extends Drone {
         })
 
         this.#emitRenderTags(cached.cells)
-        this.emitEffect('render:cell-count', { count: cached.cells.length, labels: cached.cellNames })
+        this.emitEffect('render:cell-count', this.#buildCellCountPayload(cached.cells))
+
+        // Background: if any atlas slots were evicted, refill from the
+        // (still-hot) Store resource cache. When new images land, the
+        // shader picks them up by sig — no rerender needed. If a sig
+        // was missing (substrate gap), do nothing (a future render can
+        // resolve it).
+        if (evictedSigs.length > 0) {
+          void this.loadCellImages(cached.cells, cachedDir)
+        }
 
         // background: refresh cursor for undo/redo readiness. Renderer
         // doesn't need it to draw — cells are already filtered.
@@ -1407,7 +1500,6 @@ export class ShowCellDrone extends Drone {
       return
     }
     if (!dir) {
-      console.warn('[show-honeycomb] BAIL: explorerDir returned null')
       this.clearMesh()
       return
     }
@@ -1442,7 +1534,9 @@ export class ShowCellDrone extends Drone {
       await this.applyGeometry(cells)
 
       this.#emitRenderTags(cells)
-      this.emitEffect('render:cell-count', { count: cells.length, labels: cellNames })
+      // Listeners (TileSelection, TileOverlay) crash on undefined coords
+      // when payload omits them. Send the full shape via the helper.
+      this.emitEffect('render:cell-count', this.#buildCellCountPayload(cells))
       this.rendering = false
       return
     }
@@ -1461,11 +1555,9 @@ export class ShowCellDrone extends Drone {
 
     const localCellSet = new Set(localCells)
 
-    // detect which local cells have children (branches)
-    const branchSet = new Set<string>()
-    await Promise.all(localCells.map(async (name) => {
-      if (await this.checkCellHasBranch(dir, name)) branchSet.add(name)
-    }))
+    // detect which local cells have children (branches) — memoized per
+    // (dir, lineage.fsRevision); see #computeBranchSet for rationale
+    const branchSet = await this.#computeBranchSet(dir, localCells)
 
     // note: apply history — filter out cells whose last operation is "remove"
     // When a cursor is rewound, also compute divergence (future adds/removes)
@@ -1612,6 +1704,13 @@ export class ShowCellDrone extends Drone {
 
     // note: layer changed — supersede any active stream, rebuild
     if (layerChanged) {
+      // Capture the OUTGOING layer's live VP state into our cache so
+      // a future return to that layer restores where the user actually
+      // left it (pan/zoom/meshOffset they applied this session). VP's
+      // OPFS write is debounced; the in-memory cache stays stale until
+      // we explicitly sync it. Without this sync the user reports
+      // "drag is lost when I nav back, only refresh shows it."
+      this.#syncCacheFromVP(this.renderedLocationKey)
       // Bump the stream token FIRST, before any await. Any batch still
       // running inside the old stream will check this on its next
       // iteration boundary and bail out.
@@ -1621,16 +1720,40 @@ export class ShowCellDrone extends Drone {
       this.renderedCells.clear()
       this.#pendingRemoves.clear()
       this.#slots.clear()  // layer change invalidates the slot state machine
-      this.#pendingRecenter = true  // page nav requests one recenter
 
-      // apply saved viewport (or defaults) so the container is correct before tiles render.
-      // Auto fit-to-content is intentionally disabled — zoomToFit only runs on explicit
-      // user gesture. First-visit layers use the default/saved viewport as-is.
-      await this.#applyViewportForLayer(dir)
+      // Viewport: prefer the in-memory snapshot (sync). MUST await the
+      // OPFS read on first visit — backgrounding it caused mesh to render
+      // at the previous layer's pan/zoom, then snap to the saved viewport
+      // when the read landed. User saw "drift to the right/left after
+      // refresh" especially on deep-link boot where the very first render
+      // is the slow path.
+      const vpSnap = this.#layerViewportCache.get(locationKey)
+      let appliedSnap: ViewportSnapshot | null = null
+      if (vpSnap) {
+        this.#applyViewportFromSnapshot(vpSnap)
+        appliedSnap = vpSnap
+      } else {
+        appliedSnap = await this.#applyViewportForLayerReadSnapshot(dir)
+      }
 
-      // If another layer change landed while we were awaiting the
-      // viewport read, our token is already stale — abandon this path
-      // and let the newer renderFromSynchronize drive the stream.
+      // Set pendingRecenter EXPLICITLY based on the new layer's saved
+      // state — never inherit from a previous render. A previous layer
+      // that bailed via clearMesh (e.g. empty branch) used to leak
+      // pendingRecenter=true, which then ignored the new layer's saved
+      // meshOffset and recentered instead — tiles + overlay misaligned
+      // for everything except the layer that just ran a clean recenter.
+      this.#pendingRecenter = !appliedSnap?.meshOffset
+      if (this.#pendingRecenter && this.hexMesh) {
+        // No saved offset → reset mesh to (0,0) and emit so the
+        // overlay's click->axial math uses the right offset between
+        // now and the recenter applyGeometry will run momentarily.
+        this.hexMesh.position.set(0, 0)
+        this.emitEffect('render:mesh-offset', { x: 0, y: 0 })
+      }
+
+      // If the stream token bumped while we were awaiting the viewport
+      // read, abandon — newer renderFromSynchronize is now the source
+      // of truth for this layer's render.
       if (myToken !== this.#streamToken) return
 
       // sync VP directory so subsequent pan/zoom writes persist to the correct layer
@@ -1641,6 +1764,25 @@ export class ShowCellDrone extends Drone {
         if (this.layer) this.layer.visible = true
         this.clearMesh()
         return
+      }
+
+      // ── EAGER CACHE ─────────────────────────────────────────────
+      // Build cells now and populate the back-nav cache BEFORE
+      // streamCells kicks off. If user navigates away and back fast
+      // (or this stream gets superseded), the back-nav fast path will
+      // still find populated caches and restore in <1ms instead of
+      // dropping to the full slow path again. Image sigs may be
+      // missing on this initial cache write — streamCells fills them
+      // in as it loads — but the cells are correct and the back-nav
+      // fast path's own loop will pick up imageSigs from the
+      // per-label cellImageCache as they land.
+      const axialMax = typeof axial.items.size === 'number' ? axial.items.size : cellNames.length
+      const maxCells = Math.min(cellNames.length, axialMax)
+      const eagerCells = this.buildCellsFromAxial(axial, cellNames, maxCells, localCellSet, branchSet)
+      if (eagerCells.length > 0) {
+        this.#layerCellsCache.set(locationKey, {
+          cells: [...eagerCells], cellNames, localCellSet, branchSet,
+        })
       }
 
       // hide layer until streaming completes — prevents flash/jump during progressive render
@@ -1789,7 +1931,33 @@ export class ShowCellDrone extends Drone {
     this.requestRender()
   }
 
+  // Pull ViewportPersistence's live state (pan/zoom/meshOffset — pending
+   // OR last-read) into our in-memory snapshot cache for the given layer
+   // BEFORE navigating away. Without this, the cache only ever reflects
+   // the values at first visit. User pans → VP saves to OPFS via debounce
+   // → user navigates away → comes back → cache hit on stale snapshot →
+   // mesh restored to OLD pan instead of where the user dragged it. Real
+   // refresh worked because that re-read OPFS; in-session nav didn't.
+   #syncCacheFromVP = (locationKey: string): void => {
+     if (!locationKey) return
+     const vp = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ViewportPersistence') as ViewportPersistence | undefined
+     if (!vp) return
+     const existing = this.#layerViewportCache.get(locationKey) ?? {} as ViewportSnapshot
+     const lp = vp.lastPan; if (lp) existing.pan = { dx: lp.dx, dy: lp.dy }
+     const lz = vp.lastZoom; if (lz) existing.zoom = { scale: lz.scale, cx: lz.cx, cy: lz.cy }
+     const lm = vp.lastMeshOffset; if (lm) existing.meshOffset = { x: lm.x, y: lm.y }
+     this.#layerViewportCache.set(locationKey, existing)
+   }
+
   readonly #applyViewportForLayer = async (dir: FileSystemDirectoryHandle): Promise<boolean> => {
+    const snap = await this.#applyViewportForLayerReadSnapshot(dir)
+    return !!(snap?.zoom || snap?.pan || snap?.meshOffset)
+  }
+
+  // Same as #applyViewportForLayer but returns the snapshot itself so
+  // the caller can decide whether to recenter (when there's no saved
+  // meshOffset for the layer) or keep the mesh where it was last left.
+  readonly #applyViewportForLayerReadSnapshot = async (dir: FileSystemDirectoryHandle): Promise<ViewportSnapshot> => {
     // read 0000 directly from the target dir — VP.#dir may still
     // point at the previous layer (navigate fires before store.change)
     let snap: ViewportSnapshot = {}
@@ -1806,7 +1974,8 @@ export class ShowCellDrone extends Drone {
     const locationKey = this.renderedLocationKey
     if (locationKey) this.#layerViewportCache.set(locationKey, snap)
 
-    return this.#applyViewportFromSnapshot(snap)
+    this.#applyViewportFromSnapshot(snap)
+    return snap
   }
 
   #applyViewportFromSnapshot = (snap: ViewportSnapshot): boolean => {
@@ -1831,7 +2000,26 @@ export class ShowCellDrone extends Drone {
       app.stage.position.set(s.width * 0.5, s.height * 0.5)
     }
 
-    return !!(snap.zoom || snap.pan)
+    // Restore the saved mesh offset. If the mesh exists, apply now AND
+    // emit render:mesh-offset so listeners (TileOverlayDrone uses this
+    // to convert click coords → axial; without the emit clicks miss
+    // because the overlay still has the previous layer's offset).
+    // Otherwise stash the value so applyGeometry can apply + emit it
+    // as soon as the mesh is created (first-time render and
+    // post-clearMesh re-create both fall into the latter case).
+    if (snap.meshOffset) {
+      if (this.hexMesh) {
+        this.hexMesh.position.set(snap.meshOffset.x, snap.meshOffset.y)
+        this.emitEffect('render:mesh-offset', { x: snap.meshOffset.x, y: snap.meshOffset.y })
+        this.#pendingMeshOffsetRestore = null
+      } else {
+        this.#pendingMeshOffsetRestore = { x: snap.meshOffset.x, y: snap.meshOffset.y }
+      }
+    } else {
+      this.#pendingMeshOffsetRestore = null
+    }
+
+    return !!(snap.zoom || snap.pan || snap.meshOffset)
   }
 
   private readonly applyGeometry = async (cells: Cell[], final = true): Promise<void> => {
@@ -1892,27 +2080,73 @@ export class ShowCellDrone extends Drone {
       this.hexMesh = new Mesh({ geometry: geom as any, shader: (this.shader as any).shader, texture: Texture.WHITE as any } as any)
       ;(this.hexMesh as any).blendMode = 'pre-multiply'
       this.layer!.addChild(this.hexMesh as any)
-      // Restore the offset captured by the previous clearMesh so an
-      // empty→non-empty transition (undo all the way back, then redo)
-      // doesn't snap tiles to (0,0). Recenter — when pending — runs
-      // below and overwrites this with bounds-based centering.
-      if (this.#lastMeshOffset && !this.#pendingRecenter) {
+      // Mesh-offset restore priority:
+      //   1. Saved snapshot from OPFS (#pendingMeshOffsetRestore) —
+      //      authoritative, survives reload, NEVER changes unless the
+      //      user explicitly recenters.
+      //   2. Last-known position from previous clearMesh — only used
+      //      when the snapshot has no saved offset (e.g. brand-new
+      //      layer that was empty when first visited). Keeps a redo
+      //      after "undo to empty" from snapping tiles to (0,0).
+      //   3. Recenter (when pendingRecenter is set, runs below).
+      if (this.#pendingMeshOffsetRestore && !this.#pendingRecenter) {
+        this.hexMesh.position.set(this.#pendingMeshOffsetRestore.x, this.#pendingMeshOffsetRestore.y)
+        this.emitEffect('render:mesh-offset', { x: this.#pendingMeshOffsetRestore.x, y: this.#pendingMeshOffsetRestore.y })
+      } else if (this.#lastMeshOffset && !this.#pendingRecenter) {
         this.hexMesh.position.set(this.#lastMeshOffset.x, this.#lastMeshOffset.y)
         this.emitEffect('render:mesh-offset', { x: this.#lastMeshOffset.x, y: this.#lastMeshOffset.y })
       }
+      this.#pendingMeshOffsetRestore = null
       this.#lastMeshOffset = null
     } else {
+      // Mesh already exists. If a snapshot restore is pending (e.g.
+      // applyViewportFromSnapshot ran before applyGeometry on a layer
+      // change without mesh re-creation), apply it now, before any
+      // potential recenter. Without this, the saved offset would be
+      // dropped on layer-change-without-mesh-recreate paths.
+      if (this.#pendingMeshOffsetRestore && !this.#pendingRecenter) {
+        this.hexMesh.position.set(this.#pendingMeshOffsetRestore.x, this.#pendingMeshOffsetRestore.y)
+        this.emitEffect('render:mesh-offset', { x: this.#pendingMeshOffsetRestore.x, y: this.#pendingMeshOffsetRestore.y })
+        this.#pendingMeshOffsetRestore = null
+      }
       if (this.geom) this.geom.destroy(true)
       this.hexMesh.geometry = geom
       this.hexMesh.shader = (this.shader as any).shader
     }
 
+    // Recenter mesh on its bounds — but ONLY when pendingRecenter is
+    // set, which now happens only for the explicit recenter path
+    // (navigation.recenter / fitToScreen command, or first-time render
+    // of a layer that has no saved meshOffset). Auto-recentering on
+    // every layer change was the source of the "drift after refresh /
+    // re-centers on back-nav" feedback: each layer was getting a fresh
+    // bounds-based offset every visit, and the user's saved pan/zoom
+    // landed on a different reference frame. Now the mesh position is
+    // saved with the viewport (snap.meshOffset) and restored on load —
+    // it never moves unless the user asks it to.
+    //
+    // When recenter does run, persist the result so the next visit
+    // restores the same offset via #applyViewportFromSnapshot above.
     if (this.hexMesh?.getLocalBounds && this.#pendingRecenter) {
       this.hexMesh.position.set(0, 0)
       const bounds = this.hexMesh.getLocalBounds()
-      this.hexMesh.position.set(-(bounds.x + bounds.width * 0.5), -(bounds.y + bounds.height * 0.5))
-      this.emitEffect('render:mesh-offset', { x: this.hexMesh.position.x, y: this.hexMesh.position.y })
-      this.#pendingRecenter = false  // one-shot consumed
+      const newX = -(bounds.x + bounds.width * 0.5)
+      const newY = -(bounds.y + bounds.height * 0.5)
+      this.hexMesh.position.set(newX, newY)
+      this.emitEffect('render:mesh-offset', { x: newX, y: newY })
+      // Persist so subsequent navs restore this offset rather than
+      // recomputing from current bounds (which would drift if cells
+      // change shape — undo/redo, add/remove, etc.).
+      const vp = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ViewportPersistence') as ViewportPersistence | undefined
+      vp?.setMeshOffset?.(newX, newY)
+      // Also patch the in-memory snapshot cache. Without this update,
+      // next back-nav reads the old (empty) cached snap, sees no
+      // meshOffset, and recomputes from bounds again — defeating the
+      // whole point of saving it.
+      const cached = this.#layerViewportCache.get(this.renderedLocationKey)
+      if (cached) cached.meshOffset = { x: newX, y: newY }
+      else this.#layerViewportCache.set(this.renderedLocationKey, { meshOffset: { x: newX, y: newY } })
+      if (final) this.#pendingRecenter = false  // consumed only on final batch
     }
 
     this.geom = geom
@@ -1924,17 +2158,7 @@ export class ShowCellDrone extends Drone {
     for (let i = 0; i < cells.length; i++) {
       this.#axialToIndex.set(`${cells[i].q},${cells[i].r}`, i)
     }
-    this.emitEffect('render:cell-count', {
-      count: cells.length,
-      labels: cells.map(cell => cell.label),
-      coords: cells.map(cell => ({ q: cell.q, r: cell.r })),
-      branchLabels: cells.filter(cell => cell.hasBranch).map(cell => cell.label),
-      externalLabels: cells.filter(cell => cell.external).map(cell => cell.label),
-      noImageLabels: cells.filter(cell => !cell.imageSig).map(cell => cell.label),
-      substrateLabels: cells.filter(cell => cell.hasSubstrate).map(cell => cell.label),
-      linkLabels: cells.filter(cell => cell.hasLink).map(cell => cell.label),
-      hiddenLabels: this.#showHiddenItems ? [...this.#currentHiddenSet] : [],
-    })
+    this.emitEffect('render:cell-count', this.#buildCellCountPayload(cells))
     this.#emitRenderTags(cells)
   }
 
@@ -2092,17 +2316,28 @@ export class ShowCellDrone extends Drone {
     this.onEffect<CursorState>('history:cursor-changed', (state) => {
       const nowRewound = state?.rewound ?? false
       const nowPosition = state?.position ?? -1
+      const nowLocationSig = state?.locationSig ?? ''
 
-      // No early-return for "new layer at head" anymore. The previous
-      // optimisation assumed an incremental cell:added/removed path
-      // had already updated the view — but in the layer-driven model
-      // the LAYER is the source of truth for what cells exist. A
-      // newly-committed layer at head IS the only signal the
-      // renderer has to learn that a cell was added; skipping the
-      // re-render here was why the added tile didn't appear until
-      // refresh or undo/redo.
+      // CRITICAL: cursor.load() resets position to layers.length for each
+      // new location, so cursor-changed fires on EVERY navigation with a
+      // "new" position relative to the previous location. Without this
+      // location-aware guard, every back-nav (from /alpha to /) would
+      // wipe #layerCellsCache via clear() below — and the eager-cache
+      // fix would be defeated immediately. We only treat this as an
+      // actual cursor move (which legitimately invalidates per-label
+      // derived state) when locationSig is unchanged: same layer, real
+      // undo/redo or seek. A different locationSig means navigation —
+      // ShowCellDrone's own back-nav fast path / slow path handles the
+      // layer switch; cursor-changed must keep its hands off the cache.
+      if (nowLocationSig !== this.#lastCursorLocationSig) {
+        // Adopt the new location's cursor state silently, no cache wipe.
+        this.#lastCursorLocationSig = nowLocationSig
+        this.#lastCursorPosition = nowPosition
+        this.#lastCursorRewound = nowRewound
+        return
+      }
 
-      // Any actual cursor movement (undo/redo/seek) or rewound↔head transition
+      // Same location — was this an actual scrub?
       if (nowPosition === this.#lastCursorPosition && nowRewound === this.#lastCursorRewound) return
       this.#lastCursorPosition = nowPosition
       this.#lastCursorRewound = nowRewound
@@ -2672,7 +2907,14 @@ export class ShowCellDrone extends Drone {
     this.cachedCellNames = null
     this.cachedLocalCellSet = null
     this.cachedBranchSet = null
-    this.emitEffect('render:cell-count', { count: 0, labels: [] })
+    // Clear any pending position-restore flags. The mesh is gone; whoever
+    // creates the next one is responsible for setting fresh values. Without
+    // this, a layer that bailed via clearMesh (empty branch) used to leak
+    // pendingRecenter=true into the NEXT layer change, which then ignored
+    // the saved meshOffset and recentered → tiles + overlay misaligned.
+    this.#pendingRecenter = false
+    this.#pendingMeshOffsetRestore = null
+    this.emitEffect('render:cell-count', this.#buildCellCountPayload([]))
   }
 
   /**
@@ -2740,6 +2982,76 @@ export class ShowCellDrone extends Drone {
     })
 
     return promise
+  }
+
+  // Per-revision branch detection cache. checkCellHasBranch is one OPFS
+  // getDirectoryHandle + entries() iteration per cell — for an N-tile
+  // layer (root often has the most), every full render redid N+ OPFS
+  // calls even though nothing in the dir changed. WeakMap on the dir
+  // handle, keyed by lineage revision so any user FS mutation (which
+  // calls lineage.invalidate) busts the cache automatically. In-flight
+  // dedup mirrors listCellFolders so concurrent renders share one walk.
+  readonly #branchSetCache = new WeakMap<FileSystemDirectoryHandle, { revision: number; result: Set<string> }>()
+  readonly #branchSetPending = new WeakMap<FileSystemDirectoryHandle, { revision: number; promise: Promise<Set<string>> }>()
+
+  #computeBranchSet = async (dir: FileSystemDirectoryHandle, localCells: readonly string[]): Promise<Set<string>> => {
+    const lineage = this.resolve<any>('lineage')
+    const revision = Number(lineage?.changed?.() ?? 0)
+
+    const cached = this.#branchSetCache.get(dir)
+    if (cached?.revision === revision) return cached.result
+
+    const pending = this.#branchSetPending.get(dir)
+    if (pending?.revision === revision) return pending.promise
+
+    const promise = (async (): Promise<Set<string>> => {
+      const out = new Set<string>()
+      await Promise.all(localCells.map(async (name) => {
+        if (await this.checkCellHasBranch(dir, name)) out.add(name)
+      }))
+      if (Number(lineage?.changed?.() ?? 0) === revision) {
+        this.#branchSetCache.set(dir, { revision, result: out })
+      }
+      return out
+    })()
+
+    this.#branchSetPending.set(dir, { revision, promise })
+    promise.finally(() => {
+      const p = this.#branchSetPending.get(dir)
+      if (p?.promise === promise) this.#branchSetPending.delete(dir)
+    })
+
+    return promise
+  }
+
+  // Single source of truth for the render:cell-count payload. Listeners
+  // (TileSelectionDrone, TileOverlayDrone, etc.) read coords[i],
+  // branchLabels, externalLabels, etc. — emitting a stripped payload
+  // makes them store undefined and throw on the next access. Keep every
+  // emit going through this helper so back-nav fast path, tag-flatten,
+  // streaming, and incremental paths all send identical shapes.
+  #buildCellCountPayload(cells: readonly Cell[]): {
+    count: number
+    labels: string[]
+    coords: { q: number; r: number }[]
+    branchLabels: string[]
+    externalLabels: string[]
+    noImageLabels: string[]
+    substrateLabels: string[]
+    linkLabels: string[]
+    hiddenLabels: string[]
+  } {
+    return {
+      count: cells.length,
+      labels: cells.map(c => c.label),
+      coords: cells.map(c => ({ q: c.q, r: c.r })),
+      branchLabels: cells.filter(c => c.hasBranch).map(c => c.label),
+      externalLabels: cells.filter(c => c.external).map(c => c.label),
+      noImageLabels: cells.filter(c => !c.imageSig).map(c => c.label),
+      substrateLabels: cells.filter(c => c.hasSubstrate).map(c => c.label),
+      linkLabels: cells.filter(c => c.hasLink).map(c => c.label),
+      hiddenLabels: this.#showHiddenItems ? [...this.#currentHiddenSet] : [],
+    }
   }
 
   #layoutModeKey(locationKey: string): string {
@@ -2985,17 +3297,9 @@ export class ShowCellDrone extends Drone {
       const promise = (async () => {
         try {
           const blob = await store.getResource(sig)
-          if (!blob) {
-            console.warn(`[ShowCell] loadImageOnce: blob missing for ${sig.slice(0, 12)}…`)
-            return
-          }
+          if (!blob) return
           await imageAtlas.loadImage(sig, blob)
-          if (!imageAtlas.hasImage(sig)) {
-            console.warn(`[ShowCell] loadImageOnce: atlas.loadImage completed but hasImage=false for ${sig.slice(0, 12)}…`)
-          }
-        } catch (err) {
-          console.warn(`[ShowCell] loadImageOnce: threw for ${sig.slice(0, 12)}…`, err)
-        }
+        } catch { /* per-cell warnings removed — fired on every nav */ }
       })()
       inFlightImages.set(sig, promise)
       return promise
@@ -3037,11 +3341,7 @@ export class ShowCellDrone extends Drone {
         // certainly in the resource cache, so this is cheap.
         if (cachedSig) {
           if (!imageAtlas.hasImage(cachedSig) && !imageAtlas.hasFailed(cachedSig)) {
-            console.log(`[ShowCell] fast-path reload ${cell.label} sig=${cachedSig.slice(0, 12)}…`)
             await loadImageOnce(cachedSig)
-            if (!imageAtlas.hasImage(cachedSig)) {
-              console.warn(`[ShowCell] fast-path reload FAILED for ${cell.label} sig=${cachedSig.slice(0, 12)}…`)
-            }
           }
         } else {
           // cache entry is null — first visit resolved no image. This is
@@ -3051,7 +3351,6 @@ export class ShowCellDrone extends Drone {
           // re-read propsIndex in case substrate has since populated
           // it.
           this.cellImageCache.delete(cell.label)
-          console.log(`[ShowCell] clearing stale null cache for ${cell.label}, retrying`)
         }
         if (this.cellImageCache.has(cell.label)) return
       }
@@ -3059,15 +3358,9 @@ export class ShowCellDrone extends Drone {
       // read tile properties from content-addressed resource
       try {
         const propsSig = propsIndex[cell.label]
-        if (!propsSig) {
-          console.log(`[ShowCell] slow-path: no propsSig for ${cell.label} (propsIndex has ${Object.keys(propsIndex).length} entries, override=${this.#cursorPropsOverride?.size ?? 0})`)
-          throw new Error('no props')
-        }
+        if (!propsSig) throw new Error('no props')
         const blob = await store.getResource(propsSig)
-        if (!blob) {
-          console.warn(`[ShowCell] slow-path: propsSig ${propsSig.slice(0, 12)}… resolved to null blob for ${cell.label}`)
-          throw new Error('no blob')
-        }
+        if (!blob) throw new Error('no blob')
         const text = await blob.text()
         const props = JSON.parse(text)
 
@@ -3114,11 +3407,7 @@ export class ShowCellDrone extends Drone {
           await loadImageOnce(smallSig)
           cell.imageSig = smallSig
           this.cellImageCache.set(cell.label, smallSig)
-          if (!imageAtlas.hasImage(smallSig)) {
-            console.warn(`[ShowCell] slow-path loaded props for ${cell.label} but atlas has no image. propsSig=${propsSig.slice(0, 12)}… smallSig=${smallSig.slice(0, 12)}… flat=${this.#flat}`)
-          }
         } else {
-          console.log(`[ShowCell] slow-path: no image in props for ${cell.label} propsSig=${propsSig.slice(0, 12)}… flat=${this.#flat} props.small=${JSON.stringify(props?.small)} props.flat=${JSON.stringify(props?.flat)}`)
           this.cellImageCache.set(cell.label, null)
         }
       } catch {
@@ -3390,4 +3679,4 @@ export class ShowCellDrone extends Drone {
 }
 const showCell = new ShowCellDrone()
 window.ioc.register('@diamondcoreprocessor.com/ShowCellDrone', showCell)
-console.log('[hypercomb] show-cell: listCellFolders memoized per fsRevision (2026-05-01)')
+console.log('[hypercomb] show-cell: pendingRecenter no longer leaks across layer changes; mesh.position and overlay #meshOffset stay in sync (2026-05-07n)')

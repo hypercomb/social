@@ -15,7 +15,16 @@ class EffectBusImpl {
     this.lastValue.set(effect, payload)
     const set = this.handlers.get(effect)
     if (!set) return
-    for (const fn of set) fn(payload)
+    // One handler throwing must not skip the rest. Without this guard a
+    // single bad listener (e.g. selection drone reading payload.coords[0]
+    // when emitter omitted coords) cancels every later subscriber AND
+    // unwinds back through emit() into the renderer's pulse cycle, which
+    // then leaves the page in a half-rendered state. Surface the error so
+    // we don't hide bugs, but keep the bus alive.
+    for (const fn of set) {
+      try { fn(payload) }
+      catch (err) { console.error(`[EffectBus] handler for "${effect}" threw:`, err) }
+    }
   }
 
   /** Emit without storing in last-value — for point-in-time events that
@@ -23,7 +32,10 @@ class EffectBusImpl {
   emitTransient<T = unknown>(effect: string, payload: T): void {
     const set = this.handlers.get(effect)
     if (!set) return
-    for (const fn of set) fn(payload)
+    for (const fn of set) {
+      try { fn(payload) }
+      catch (err) { console.error(`[EffectBus] handler for "${effect}" threw:`, err) }
+    }
   }
 
   on<T = unknown>(effect: string, handler: EffectHandler<T>): () => void {
