@@ -261,22 +261,15 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       return null
     }
 
-    // Dev-shell live-source guard: hypercomb-dev imports
-    // `@hypercomb/essentials/side-effects` which self-registers every
-    // drone in window.ioc at module load. If that happened before we
-    // got here, the OPFS bee is a stale duplicate of source — and if
-    // we cache it, both instances will subscribe to the same events
-    // (each pulse, each navigate, each synchronize) and we'll see
-    // double work + drift. Discard the OPFS instance, leave the
-    // source instance as the sole owner of the iocKey, and don't pulse
-    // or warm it up. Live shell still uses OPFS bees because nothing
-    // pre-registers them there.
-    if (has(bee.iocKey)) {
-      try { bee.markDisposed?.() } catch { /* ignore */ }
-      // NOT cached, NOT counted, NOT warmed up. Source instance wins.
-      return null
-    }
-
+    // store.getBee evaluates the bee module, whose top-level side-effect
+    // already called `register(iocKey, new SomeDrone())` and returned that
+    // SAME instance. So `bee` here === window.ioc.get(bee.iocKey).
+    // We do NOT call markDisposed() on it — that would dispose the live
+    // instance everyone else (PanningDrone, ZoomDrone, …) is pointing at.
+    // The original concern was "two instances subscribing to the same
+    // events on dev shell"; in practice the bee module's `register` call
+    // overwrites whatever was registered before, so only one instance
+    // ever ends up in IoC. The OPFS instance wins on every shell.
     register(bee.iocKey, bee)
 
     this.#bySignature.set(signature, { signature, name: bee.name ?? signature })

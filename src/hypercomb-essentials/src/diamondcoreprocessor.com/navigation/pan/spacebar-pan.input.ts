@@ -26,7 +26,16 @@ export class SpacebarPanInput {
     panBy: (delta: Point) => void
   } | null = null
 
-  private gate: InputGate | null = null
+  // Lazy gate resolution: InputGate may be in a different bee (zoom.drone)
+  // that hasn't loaded yet at the moment we attach. Caching a null
+  // reference here meant onMove's `gate?.claim()` returned undefined,
+  // !undefined was truthy, and the handler bailed before setting `last`
+  // — pan looked totally dead even though spaceHeld and mouseOverCanvas
+  // were both true. Resolve every call so we pick the gate up the
+  // instant zoom bee finishes loading.
+  private get gate(): InputGate | null {
+    return window.ioc.get<InputGate>('@diamondcoreprocessor.com/InputGate') ?? null
+  }
 
   public attach = (
     pan: {
@@ -38,7 +47,6 @@ export class SpacebarPanInput {
 
     this.pan = pan
     this.canvas = canvas
-    this.gate = window.ioc.get<InputGate>('@diamondcoreprocessor.com/InputGate') ?? null
 
     document.addEventListener('keydown', this.onKeyDown)
     document.addEventListener('keyup', this.onKeyUp)
@@ -75,7 +83,6 @@ export class SpacebarPanInput {
 
     this.pan = null
     this.canvas = null
-    this.gate = null
     this.enabled = false
     this.mouseOverCanvas = false
   }
