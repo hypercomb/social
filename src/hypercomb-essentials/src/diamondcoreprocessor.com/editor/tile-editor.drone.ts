@@ -91,15 +91,17 @@ export class TileEditorDrone {
   #createCellAndOpenCamera = async (): Promise<void> => {
     const newCell = `photo-${Date.now()}`
 
-    // Create a directory so the tile:saved fallback path (which re-scans OPFS
-    // directories to rebuild the layer) finds this cell and doesn't drop it.
+    // Create directory so tile:saved's full OPFS rescan finds this cell.
+    // Do NOT emit cell:added here — that would show a blank tile while the
+    // camera is open. Defer it to saveAndComplete so the tile first appears
+    // with its image already in the resource store.
     const lineage = window.ioc.get<{ explorerDir?: () => Promise<FileSystemDirectoryHandle | null> | FileSystemDirectoryHandle | null }>('@hypercomb.social/Lineage')
     const dir = lineage?.explorerDir ? await Promise.resolve(lineage.explorerDir()) : null
     if (dir) await dir.getDirectoryHandle(newCell, { create: true })
 
-    EffectBus.emit('cell:added', { cell: newCell })
-    const hc = (window as any).hypercomb
-    if (hc) await new hc().act()
+    const service = window.ioc.get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
+    if (service) service.isNewCell = true
+
     await this.#openEditingWithCamera(newCell)
   }
 
@@ -241,17 +243,28 @@ export class TileEditorDrone {
     // 5. rename if the user changed the name
     const pendingName = service.pendingName
     let savedCell = service.cell
+    let renamed = false
     if (pendingName && pendingName !== savedCell) {
-      const renamed = await this.#renameCell(savedCell, pendingName, store, index, propsSig)
-      if (renamed) savedCell = pendingName
+      const result = await this.#renameCell(savedCell, pendingName, store, index, propsSig)
+      if (result) { savedCell = pendingName; renamed = true }
     }
+
+    const wasNewCell = service.isNewCell
 
     // 6. cleanup
     imageEditor.destroy()
     service.close()
 
-    // 7. notify via effect bus (processor owns synchronize; drones use effects)
-    EffectBus.emit<{ cell: string }>('tile:saved', { cell: savedCell })
+    // 7. notify — new cells use the fast incremental path (cell:added), which
+    // renders the tile immediately and fire-and-forget loads the image from
+    // OPFS (already written above). tile:saved's full directory rescan is only
+    // needed for existing cells whose cached image needs to be replaced.
+    // Skip cell:added for new cells that were renamed — #renameCell already emitted it.
+    if (wasNewCell && !renamed) {
+      EffectBus.emit<{ cell: string }>('cell:added', { cell: savedCell })
+    } else if (!wasNewCell) {
+      EffectBus.emit<{ cell: string }>('tile:saved', { cell: savedCell })
+    }
   }
 
   // ── rename helpers ─────────────────────────────────────────────
@@ -314,9 +327,17 @@ export class TileEditorDrone {
 
   // ── cancel ─────────────────────────────────────────────────────
 
-  readonly cancelEditing = (): void => {
+  readonly cancelEditing = async (): Promise<void> => {
     const imageEditor = window.ioc.get<ImageEditorService>('@diamondcoreprocessor.com/ImageEditorService')
     const service = window.ioc.get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
+    if (service?.isNewCell) {
+      const cell = service.cell
+      const lineage = window.ioc.get<{ explorerDir?: () => Promise<FileSystemDirectoryHandle | null> | FileSystemDirectoryHandle | null }>('@hypercomb.social/Lineage')
+      const dir = lineage?.explorerDir ? await Promise.resolve(lineage.explorerDir()) : null
+      if (dir && cell) {
+        try { await dir.removeEntry(cell, { recursive: true }) } catch { /* ok if missing */ }
+      }
+    }
     imageEditor?.destroy()
     service?.close()
   }

@@ -11,6 +11,7 @@ export class TileEditorService extends EventTarget {
   #largeBlob: Blob | null = null
   #pendingName: string | null = null
   autoCamera = false
+  isNewCell = false
 
   // ── getters ────────────────────────────────────────────────────
 
@@ -60,6 +61,7 @@ export class TileEditorService extends EventTarget {
     this.#largeBlob = null
     this.#pendingName = null
     this.autoCamera = false
+    this.isNewCell = false
     this.#emit()
     EffectBus.emit<EditorModePayload>('editor:mode', { active: false })
   }

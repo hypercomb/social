@@ -41,6 +41,7 @@ export class ImageEditorService extends EventTarget {
     orientation: HexOrientation = 'point-top'
   ): Promise<void> => {
     if (this.#initialized) return
+    this.#initialized = true  // set before first await so concurrent calls are rejected
 
     this.#hostElement = hostElement
     this.#orientation = orientation
@@ -78,7 +79,6 @@ export class ImageEditorService extends EventTarget {
 
     this.#drawHexFrame()
 
-    this.#initialized = true
     this.#emit()
   }
 

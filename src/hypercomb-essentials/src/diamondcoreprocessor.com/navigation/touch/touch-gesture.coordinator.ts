@@ -78,6 +78,8 @@ export class TouchGestureCoordinator {
   // track whether gesture was active (for poisoning)
   #gestureWasActive = false
 
+  #navigationUnsub: (() => void) | null = null
+
   // momentum / inertia state
   #velocitySamples: { dx: number; dy: number; t: number }[] = []
   #momentumRaf: number | null = null
@@ -118,6 +120,10 @@ export class TouchGestureCoordinator {
     window.addEventListener('pointerup', this.#onPointerUp, { passive: false })
     window.addEventListener('pointercancel', this.#onPointerUp, { passive: false })
 
+    // Navigation can suppress pointerup via consumePointerGesture, leaving stale
+    // tracked pointers that misclassify the next single-finger pan as a pinch.
+    this.#navigationUnsub = EffectBus.on('navigation:guard-start', () => this.#reset())
+
     this.#enabled = true
   }
 
@@ -129,6 +135,9 @@ export class TouchGestureCoordinator {
     window.removeEventListener('pointermove', this.#onPointerMove)
     window.removeEventListener('pointerup', this.#onPointerUp)
     window.removeEventListener('pointercancel', this.#onPointerUp)
+
+    this.#navigationUnsub?.()
+    this.#navigationUnsub = null
 
     this.#reset()
 

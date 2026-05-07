@@ -34,6 +34,7 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
   @ViewChild('imageCanvas', { static: false }) imageCanvas!: ElementRef<HTMLDivElement>
   @ViewChild('cameraVideo', { static: false }) cameraVideo!: ElementRef<HTMLVideoElement>
   @ViewChild('cameraFallbackInput', { static: false }) cameraFallbackInput!: ElementRef<HTMLInputElement>
+  @ViewChild('nameInput', { static: false }) nameInput!: ElementRef<HTMLInputElement>
 
   private get editorService(): TileEditorService {
     return get('@diamondcoreprocessor.com/TileEditorService') as TileEditorService
@@ -115,7 +116,8 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
   #onEditorChange = (): void => {
     const isOpen = this.editorService?.mode === 'editing'
     if (isOpen && !this.#wasOpen) {
-      this.nameValue = this.editorService?.cell ?? ''
+      this.#wasOpen = true  // guard before any setter calls that re-dispatch 'change'
+      this.nameValue = this.editorService?.isNewCell ? '' : (this.editorService?.cell ?? '')
       this.linkValue = this.editorService?.link ?? ''
       this.borderColorValue = this.editorService?.borderColor || '#c8975a'
       this.backgroundColorValue = this.editorService?.backgroundColor || '#1e1e1e'
@@ -213,6 +215,15 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
     const blob = new Blob([await file.arrayBuffer()], { type: file.type })
     this.editorService.setLargeBlob(blob)
     await this.imageEditor.loadImage(blob)
+    this.#focusNameIfNew()
+  }
+
+  #focusNameIfNew(): void {
+    if (!this.editorService?.isNewCell) return
+    setTimeout(() => {
+      const el = this.nameInput?.nativeElement
+      if (el) { el.focus(); el.select() }
+    }, 0)
   }
 
   // ── property changes ───────────────────────────────────────────
@@ -322,6 +333,7 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
   // ── camera ───────────────────────────────────────────────────
 
   readonly openCamera = async (): Promise<void> => {
+    if (this.cameraActive || this.#stream) return
     if (!navigator.mediaDevices?.getUserMedia) {
       this.cameraFallbackInput?.nativeElement?.click()
       return
@@ -352,16 +364,19 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
     const canvas = document.createElement('canvas')
     canvas.width = size
     canvas.height = size
-    const ctx = canvas.getContext('2d')!
+    const ctx = canvas.getContext('2d')
+    if (!ctx) { this.closeCamera(); return }
     ctx.drawImage(video, sx, sy, size, size, 0, 0, size, size)
 
-    const blob = await new Promise<Blob>((resolve) =>
-      canvas.toBlob((b) => resolve(b!), 'image/webp', 0.9),
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob((b) => resolve(b), 'image/webp', 0.9),
     )
+    if (!blob) { this.closeCamera(); return }
 
     this.closeCamera()
     this.editorService.setLargeBlob(blob)
     await this.imageEditor.loadImage(blob)
+    this.#focusNameIfNew()
   }
 
   readonly closeCamera = (): void => {
@@ -403,7 +418,7 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   readonly cancel = (): void => {
-    this.editorDrone?.cancelEditing?.()
+    void this.editorDrone?.cancelEditing?.()
   }
 
   // ── lifecycle ──────────────────────────────────────────────────

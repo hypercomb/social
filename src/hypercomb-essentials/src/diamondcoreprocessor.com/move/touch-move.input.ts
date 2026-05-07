@@ -100,13 +100,14 @@ export class TouchMoveInput {
 
       // if the touch gesture coordinator already claimed the gate (e.g., pan started),
       // don't start a move — the gate owner has priority
-      if (this.#gate?.active) {
+      if (!this.#gate?.claim(this.#source)) {
         this.#resetDrag()
         return
       }
 
       const ok = this.#drone.beginMove(this.#downAxial, this.#source)
       if (!ok) {
+        this.#gate?.release(this.#source)
         this.#resetDrag()
         return
       }
@@ -182,6 +183,7 @@ export class TouchMoveInput {
   }
 
   #resetDrag(): void {
+    if (this.#dragging) this.#gate?.release(this.#source)
     this.#downPos = null
     this.#downAxial = null
     this.#activePointerId = null

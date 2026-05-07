@@ -29,6 +29,7 @@
   "shortcuts.chord-sep": "then",
 
   "editor.title": "tile editor",
+  "editor.name-placeholder": "tile name",
   "editor.drop-image": "drop image here",
   "editor.unlink-transforms": "unlink transforms",
   "editor.link-transforms": "link transforms",

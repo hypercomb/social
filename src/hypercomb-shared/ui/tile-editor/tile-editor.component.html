@@ -4,7 +4,7 @@
   <div class="editor-panel" role="dialog" [attr.aria-label]="'editor.title' | t">
     <header class="editor-header">
       <span class="hci header-icon">k</span>
-      <input class="editor-name-input" type="text" name="tile-name" [ngModel]="nameValue" (ngModelChange)="nameValue = $event" (blur)="onNameBlur()" />
+      <input #nameInput class="editor-name-input" type="text" name="tile-name" [ngModel]="nameValue" (ngModelChange)="nameValue = $event" (blur)="onNameBlur()" [placeholder]="'editor.name-placeholder' | t" />
       <button class="editor-close" type="button" (click)="save()">
         <span class="hci">Q</span>
       </button>

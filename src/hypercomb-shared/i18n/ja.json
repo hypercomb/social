@@ -29,6 +29,7 @@
   "shortcuts.chord-sep": "→",
 
   "editor.title": "タイルエディタ",
+  "editor.name-placeholder": "タイル名",
   "editor.drop-image": "ここに画像をドロップ",
   "editor.unlink-transforms": "変換のリンクを解除",
   "editor.link-transforms": "変換をリンク",
