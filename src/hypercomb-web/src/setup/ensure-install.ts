@@ -73,9 +73,16 @@ export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<vo
   }
   const usableCache = !stale && cachedManifest && cachedManifest.bees.length > 0
   if (usableCache) {
-    const beeOk = await fileExists(store.bees, `${cachedManifest.bees[0]}.js`)
+    // Verify EVERY bee + EVERY dep + EVERY layer file is in OPFS. Partial
+    // installs (e.g. Edge cold-load with SW race, network glitch mid-fetch)
+    // used to leave some files on disk and others missing, then the next
+    // reload trusted the cached manifest and the dependency-loader threw
+    // "Failed to fetch dynamically imported module" for the missing ones.
+    // One missing file → wipe + reinstall.
+    const beeOk = await allFilesPresent(store.bees, cachedManifest.bees, '.js')
     const beeDepsOk = beeOk && await beeDepValuesPresent(store.dependencies, cachedManifest.beeDeps)
-    if (beeOk && beeDepsOk) {
+    const allDepsOk = beeDepsOk && await allFilesPresent(store.dependencies, cachedManifest.dependencies, '.js')
+    if (beeOk && beeDepsOk && allDepsOk) {
       if (sentinel) {
         try {
           await resyncFromSentinel(sentinel)
@@ -206,6 +213,15 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   const beeCount = await writeAll(bundled.bees, (s) => `/content/__bees__/${s}.js`, store.bees, (s) => `${s}.js`)
   const depCount = await writeAll(bundled.dependencies, (s) => `/content/__dependencies__/${s}.js`, store.dependencies, (s) => `${s}.js`)
   const layerCount = await writeAll(bundled.layers, (s) => `/content/__layers__/${s}.json`, layerDir, (s) => s)
+
+  // Loud failure mode. If any file failed to land, surface it now —
+  // otherwise the next boot's spot-check will silently wipe and retry,
+  // and the user just sees a flash of the install prompt.
+  if (beeCount !== bundled.bees.length || depCount !== bundled.dependencies.length || layerCount !== bundled.layers.length) {
+    console.warn(
+      `[ensure-install] partial bundled install: bees ${beeCount}/${bundled.bees.length}, deps ${depCount}/${bundled.dependencies.length}, layers ${layerCount}/${bundled.layers.length} — next reload will retry`,
+    )
+  }
 
   // Mirror the manifest + sync state that resyncFromSentinel would write
   // so the next reload boots through the cached fast path.
@@ -429,6 +445,26 @@ const beeDepValuesPresent = async (
   }
   for (const sig of seen) {
     if (!await fileExists(depsDir, `${sig}.js`)) return false
+  }
+  return true
+}
+
+/**
+ * Check every signature in `signatures` has a file `<sig><suffix>` in `dir`.
+ * Catches partial installs where installFromBundled silently dropped some
+ * fetches (network glitch / SW race on cold load) and the next boot would
+ * otherwise resolve aliases via the importmap to URLs that 404 — or where
+ * a bee referenced from the manifest just isn't on disk so the bee never
+ * loads.
+ */
+const allFilesPresent = async (
+  dir: FileSystemDirectoryHandle,
+  signatures: readonly string[] | undefined,
+  suffix: string,
+): Promise<boolean> => {
+  if (!signatures?.length) return true
+  for (const sig of signatures) {
+    if (!await fileExists(dir, `${sig}${suffix}`)) return false
   }
   return true
 }
