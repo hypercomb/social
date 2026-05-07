@@ -1,4 +1,6 @@
 // diamondcoreprocessor.com/editor/tile-properties.ts
+import { EffectBus } from '@hypercomb/core'
+
 export const TILE_PROPERTIES_FILE = '0000'
 
 export const isSignature = (value: unknown): boolean =>
@@ -24,10 +26,23 @@ export const readCellProperties = async (
 /**
  * Write properties JSON to a cell's 0000 file.
  * Merges with existing properties — pass only the fields to update.
+ *
+ * Broadcasts `cell:0000-changed` with the cell's cache key and the
+ * names of the keys it touched. NurseBee subclasses (IndexNurse, etc.)
+ * subscribe and invalidate their caches when their attribute is in
+ * the changed set. This is the canonical write path — there are no
+ * other writers — so the nurse cache stays coherent without anyone
+ * else having to remember to invalidate.
+ *
+ * `cacheKey` defaults to `cellDir.name` (the immediate folder name).
+ * Callers that key by a fully-qualified lineage path can pass it
+ * explicitly so cross-folder cells with the same leaf name don't
+ * collide.
  */
 export const writeCellProperties = async (
   cellDir: FileSystemDirectoryHandle,
-  updates: Record<string, unknown>
+  updates: Record<string, unknown>,
+  cacheKey?: string,
 ): Promise<void> => {
   const existing = await readCellProperties(cellDir)
   const merged = { ...existing, ...updates }
@@ -35,6 +50,10 @@ export const writeCellProperties = async (
   const writable = await fileHandle.createWritable()
   await writable.write(JSON.stringify(merged))
   await writable.close()
+  EffectBus.emit('cell:0000-changed', {
+    cacheKey: cacheKey ?? cellDir.name,
+    keys: Object.keys(updates),
+  })
 }
 
 /**

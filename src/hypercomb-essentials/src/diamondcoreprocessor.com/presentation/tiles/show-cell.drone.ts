@@ -1513,16 +1513,22 @@ export class ShowCellDrone extends Drone {
           localCellSet.clear()
         }
 
-        if (content) {
-          // The layer at the cursor's current position is the SOLE
-          // source of truth for which cells render — at HEAD and when
-          // REWOUND. Disk folders may exist that the layer doesn't know
-          // about (a layer marker was deleted, an OPFS write happened
-          // outside the cascade, etc.); those tiles are "garbage" by
-          // the layer's reckoning and must not appear. Children sigs
-          // are resolved by walking the merkle hierarchy down each
-          // candidate child's bag — pure signature lookup, never a
-          // name-based disk listing.
+        if (content && cursorState?.rewound) {
+          // REWOUND ONLY: the past layer is the source of truth for
+          // which cells render at this historical position. Children
+          // sigs are resolved by walking the merkle so the rewound
+          // view reflects what existed THEN, not what's on disk now.
+          //
+          // At HEAD, by contrast, OPFS folders are the source of
+          // truth (membership). This was the snap-back source: when
+          // OPFS held a cell the layer didn't yet know about (a fresh
+          // create racing with the cascade, or a paste mid-flight),
+          // resolveChildNames excluded it, #orderByIndexPinned saw
+          // it as unindexed, and the auto-assignment rewrote its
+          // 0000.index to nextFree (= 0). Tile snaps back. With the
+          // HEAD path now leaving `localCellSet` as the OPFS-built
+          // set, the auto-assignment never fires for cells that
+          // genuinely have a valid index.
           const parentSegments = (lineage as { explorerSegments?: () => readonly string[] })?.explorerSegments?.() ?? []
           const allowed = await resolveChildNames(historyService, parentSegments, dir, content)
           union.clear()
@@ -2762,6 +2768,15 @@ export class ShowCellDrone extends Drone {
     let nextFree = 0
     const unindexed: string[] = []
 
+    // IndexNurse owns the 0000.index read path — caches the value
+    // per cell and invalidates whenever writeCellProperties touches
+    // `index`. Cold misses fall through to disk; warm reads are
+    // constant-time. The nurse is registered eagerly in side-effects
+    // so it's always present by the time render runs.
+    const indexNurse = (window as any).ioc?.get?.('@diamondcoreprocessor.com/IndexNurse') as
+      | { read: (dir: FileSystemDirectoryHandle, key: string) => Promise<number | undefined> }
+      | undefined
+
     for (const name of names) {
       if (!localCellSet.has(name)) {
         unindexed.push(name)
@@ -2769,9 +2784,12 @@ export class ShowCellDrone extends Drone {
       }
       try {
         const cellDir = await dir.getDirectoryHandle(name, { create: false })
-        const props = await readCellProperties(cellDir)
-        if (typeof props['index'] === 'number') {
-          const idx = props['index'] as number
+        const idx = indexNurse
+          ? await indexNurse.read(cellDir, name)
+          : await readCellProperties(cellDir).then(p =>
+              typeof p['index'] === 'number' ? (p['index'] as number) : undefined,
+            )
+        if (typeof idx === 'number') {
           if (idx >= 0 && idx <= maxSlot) {
             // collision detection: if slot is already occupied, demote to unindexed
             if (sparse[idx] !== '') {

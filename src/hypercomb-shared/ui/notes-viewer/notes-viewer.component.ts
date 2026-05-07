@@ -70,6 +70,17 @@ export class NotesViewerComponent implements OnDestroy {
       this.noteId.set(p.noteId)
       this.tagPickerOpen.set(false)
       this.visible.set(true)
+      // Announce visibility so the global escape cascade can close us
+      // ahead of clearing selection. Without this, Escape falls through
+      // to Priority 2 in escape-cascade.ts and the modal stays open.
+      EffectBus.emit('notes:viewer', { active: true })
+    }))
+
+    // Cascade calls this when Escape lands while the viewer is the
+    // top-most dismissable surface. Guarded on visible() so a stray
+    // emit doesn't reset state when the viewer is already closed.
+    this.#cleanups.push(EffectBus.on('notes:viewer-close', () => {
+      if (this.visible()) this.close()
     }))
 
     this.#cleanups.push(EffectBus.on<{ segments?: readonly string[] }>('notes:changed', async (p) => {
@@ -93,6 +104,7 @@ export class NotesViewerComponent implements OnDestroy {
     this.tagPickerOpen.set(false)
     this.cellLabel.set(null)
     this.noteId.set(null)
+    EffectBus.emit('notes:viewer', { active: false })
   }
 
   /** Edit the open note — routes to command line in capture mode with a prefill. */

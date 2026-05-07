@@ -77,6 +77,7 @@ const isBee = (f: string) =>
 const SIDE_EFFECT_SUFFIXES = [
   '.drone.ts', '.queen.ts', '.worker.ts',
   '.input.ts', '.view.ts', '.atomizer.ts',
+  '.nurse.ts',
 ] as const
 
 // Module-level side-effect patterns — files containing any of these at
@@ -533,7 +534,7 @@ else filesSkipped++
 
   const sideEffectsContent = `// auto-generated
 // side-effect barrel — imports every self-registering module
-// (*.drone.ts, *.queen.ts, *.worker.ts, *.input.ts, *.view.ts, *.atomizer.ts)
+// (*.drone.ts, *.queen.ts, *.worker.ts, *.input.ts, *.view.ts, *.atomizer.ts, *.nurse.ts)
 // so one \`import '@hypercomb/essentials/side-effects'\` boots the full graph.
 // do not edit manually
 

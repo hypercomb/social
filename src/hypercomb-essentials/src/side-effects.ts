@@ -1,6 +1,6 @@
 // auto-generated
 // side-effect barrel — imports every self-registering module
-// (*.drone.ts, *.queen.ts, *.worker.ts, *.input.ts, *.view.ts, *.atomizer.ts)
+// (*.drone.ts, *.queen.ts, *.worker.ts, *.input.ts, *.view.ts, *.atomizer.ts, *.nurse.ts)
 // so one `import '@hypercomb/essentials/side-effects'` boots the full graph.
 // do not edit manually
 
@@ -95,6 +95,7 @@ import './diamondcoreprocessor.com/presentation/background/move-background.provi
 import './diamondcoreprocessor.com/presentation/grid/axial-service'
 import './diamondcoreprocessor.com/presentation/grid/hex-label.atlas'
 import './diamondcoreprocessor.com/presentation/grid/hex-sdf.shader'
+import './diamondcoreprocessor.com/presentation/tiles/index.nurse'
 import './diamondcoreprocessor.com/presentation/tiles/move-preview.drone'
 import './diamondcoreprocessor.com/presentation/tiles/pixi-debug.drone'
 import './diamondcoreprocessor.com/presentation/tiles/pixi-host.worker'

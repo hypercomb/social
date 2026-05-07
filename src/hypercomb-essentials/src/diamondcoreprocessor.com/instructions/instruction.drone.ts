@@ -202,7 +202,7 @@ export class InstructionDrone extends EventTarget {
     return sig
   }
 
-  // ─── settings update + history recording ─────────────
+  // ─── settings update ─────────────
 
   async #updateSettings(hidden: string[]): Promise<void> {
     if (!this.#manifestSig) return
@@ -212,10 +212,7 @@ export class InstructionDrone extends EventTarget {
       hidden,
       at: Date.now(),
     }
-    const sig = await this.#captureSettings(settings)
-
-    // record history op
-    this.#recordHistory(sig)
+    await this.#captureSettings(settings)
     this.#emit()
   }
 
@@ -274,27 +271,6 @@ export class InstructionDrone extends EventTarget {
     } catch { return null }
   }
 
-  #recordHistory(settingsSig: string): void {
-    try {
-      const historyService = (globalThis as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService')
-      if (!historyService?.record) return
-
-      // get current location signature from lineage
-      const lineage = (globalThis as any).ioc?.get?.('@hypercomb.social/Lineage')
-      if (!lineage) return
-
-      // use the location signature from lineage
-      const locSig = lineage.locationSignature?.()
-      if (!locSig) return
-
-      historyService.record(locSig, {
-        op: 'instruction-state',
-        cell: settingsSig,
-        at: Date.now(),
-        groupId: 'instruction',
-      })
-    } catch { /* history may not be available */ }
-  }
 }
 
 // ─── built-in instruction anchors (controls bar + command line) ──

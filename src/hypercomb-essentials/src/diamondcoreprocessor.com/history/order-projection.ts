@@ -83,28 +83,23 @@ export class OrderProjection {
   }
 
   /**
-   * Write a reorder op to history and update the in-memory cache.
-   * Stores the ordered cell list as a content-addressed resource.
+   * Cache the current display order at this location.
+   *
+   * Position is NOT layer state. Each cell carries its slot index
+   * permanently in its own `0000` properties (see show-cell's
+   * `#orderByIndexPinned`). Reordering the parent's `children` sig
+   * array would have no semantic effect on placement, so we deliberately
+   * do NOT call `committer.update` here — that would mint layer
+   * markers for non-changes and pollute the merkle backbone.
+   *
+   * The legacy `historyService.record('reorder', ...)` path that lived
+   * here was a dead write (see history-recorder.drone.ts) and is gone.
+   * The authoritative save for a move is `writeCellProperties(cell,
+   * { index })` in MoveDrone — that's already happening alongside this
+   * cache update.
    */
   async reorder(cells: string[]): Promise<string[]> {
     if (!this.#currentSig) return cells
-
-    const historyService = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
-    const store = get<any>('@hypercomb.social/Store')
-    if (!historyService || !store) return cells
-
-    // Store ordered list as content-addressed resource
-    const payload = JSON.stringify(cells)
-    const payloadSig: string = await store.putResource(new Blob([payload]))
-
-    // Record reorder op — cell field holds the resource signature
-    await historyService.record(this.#currentSig, {
-      op: 'reorder',
-      cell: payloadSig,
-      at: Date.now(),
-    })
-
-    // Update in-memory cache
     const copy = [...cells]
     this.#cache.set(this.#currentSig, copy)
     return copy

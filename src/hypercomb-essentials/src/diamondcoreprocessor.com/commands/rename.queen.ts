@@ -1,7 +1,6 @@
 // diamondcoreprocessor.com/commands/rename.queen.ts
 
-import { QueenBee, EffectBus, SignatureService, hypercomb } from '@hypercomb/core'
-import type { HistoryService } from '../history/history.service.js'
+import { QueenBee, EffectBus, hypercomb } from '@hypercomb/core'
 
 /**
  * /rename — rename a tile (cell directory) at the current location.
@@ -14,8 +13,10 @@ import type { HistoryService } from '../history/history.service.js'
  * 1. Reads all content from the old directory
  * 2. Writes it to a new directory with the new name
  * 3. Removes the old directory
- * 4. Records a `rename` history op with signature-addressed payload
- * 5. Emits `cell:renamed` effect for reactive UI
+ * 4. Emits cell:removed + cell:added so LayerCommitter rewrites the
+ *    parent's `children` slot (oldName sig → newName sig) and cascades
+ *    to root. The rename is captured in the layer marker chain itself.
+ * 5. Emits `cell:renamed` for reactive UI consumers.
  */
 export class RenameQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -59,10 +60,12 @@ export class RenameQueenBee extends QueenBee {
       // Remove old directory
       await dir.removeEntry(oldName, { recursive: true })
 
-      // Record rename in history (signature-addressed payload)
-      await this.#recordRenameOp(oldName, newName)
-
-      // Emit effects: remove old, add new
+      // The cell:removed + cell:added pair below routes through
+      // LayerCommitter's #queueChildName, which rewrites the parent's
+      // children slot (oldName sig → newName sig) and cascades to root.
+      // The rename is captured in the layer marker chain — no parallel
+      // history-op log is needed (and the legacy historyService.record
+      // path is dead; see history-recorder.drone.ts).
       const groupId = `rename:${Date.now().toString(36)}`
       EffectBus.emit('cell:removed', { cell: oldName, groupId })
       EffectBus.emit('cell:added', { cell: newName, groupId })
@@ -71,35 +74,6 @@ export class RenameQueenBee extends QueenBee {
       selection.clear()
       void new hypercomb().act()
     } catch { /* old directory doesn't exist or can't be renamed */ }
-  }
-
-  async #recordRenameOp(oldName: string, newName: string): Promise<void> {
-    const lineage = get<any>('@hypercomb.social/Lineage')
-    const historyService = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
-    const store = get<any>('@hypercomb.social/Store')
-    if (!lineage || !historyService || !store) return
-
-    const locationSig = await historyService.sign(lineage)
-
-    // Capture: signature-addressed rename payload
-    const snapshot = {
-      version: 1 as const,
-      oldName,
-      newName,
-      at: Date.now(),
-    }
-    const json = JSON.stringify(snapshot, Object.keys(snapshot).sort(), 0)
-    const blob = new Blob([json], { type: 'application/json' })
-
-    const bytes = await blob.arrayBuffer()
-    const resourceSig = await SignatureService.sign(bytes)
-    await store.putResource(blob)
-
-    await historyService.record(locationSig, {
-      op: 'rename',
-      cell: resourceSig,
-      at: snapshot.at,
-    })
   }
 }
 

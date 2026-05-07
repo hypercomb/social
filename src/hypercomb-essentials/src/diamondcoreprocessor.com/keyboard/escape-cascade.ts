@@ -5,6 +5,7 @@ import { EffectBus } from '@hypercomb/core'
 
 let editorActive = false
 let clipboardActive = false
+let notesViewerActive = false
 
 EffectBus.on<{ active: boolean }>('editor:mode', ({ active }) => {
   editorActive = active
@@ -12,6 +13,10 @@ EffectBus.on<{ active: boolean }>('editor:mode', ({ active }) => {
 
 EffectBus.on<{ active: boolean }>('clipboard:view', ({ active }) => {
   clipboardActive = active
+})
+
+EffectBus.on<{ active: boolean }>('notes:viewer', ({ active }) => {
+  notesViewerActive = active
 })
 
 // ── cascade handler ───────────────────────────────────────────────────
@@ -30,7 +35,15 @@ EffectBus.on<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
     return
   }
 
-  // Priority 2: clear selection (both service state and pixi overlays)
+  // Priority 2: close the notes viewer modal — must run before selection
+  // clear, otherwise Escape would clear the underlying selection while
+  // leaving the modal sitting on top of the canvas.
+  if (notesViewerActive) {
+    EffectBus.emit('notes:viewer-close', undefined)
+    return
+  }
+
+  // Priority 3: clear selection (both service state and pixi overlays)
   const selection = window.ioc.get<{ count: number; clear(): void }>('@diamondcoreprocessor.com/SelectionService')
   const pixi = window.ioc.get<{ selectedAxialKeys: ReadonlySet<string>; clearSelection(): void }>('@diamondcoreprocessor.com/TileSelectionDrone')
 
@@ -40,13 +53,13 @@ EffectBus.on<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
     return
   }
 
-  // Priority 3: exit clipboard mode (parity with X button and right-click)
+  // Priority 4: exit clipboard mode (parity with X button and right-click)
   if (clipboardActive) {
     EffectBus.emit('clipboard:close', undefined)
     return
   }
 
-  // Priority 4: generic fallback for future consumers
+  // Priority 5: generic fallback for future consumers
   EffectBus.emit('global:escape', undefined)
 })
 
