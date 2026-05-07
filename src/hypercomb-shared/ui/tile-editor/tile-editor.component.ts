@@ -95,6 +95,7 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
   public readonly hideText = computed(() => this.hideText$())
 
   // bound form values (updated on open, pushed on change)
+  public nameValue = ''
   public linkValue = ''
   public linkDenied = false
   public linkWarned = false
@@ -114,6 +115,7 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
   #onEditorChange = (): void => {
     const isOpen = this.editorService?.mode === 'editing'
     if (isOpen && !this.#wasOpen) {
+      this.nameValue = this.editorService?.cell ?? ''
       this.linkValue = this.editorService?.link ?? ''
       this.borderColorValue = this.editorService?.borderColor || '#c8975a'
       this.backgroundColorValue = this.editorService?.backgroundColor || '#1e1e1e'
@@ -127,6 +129,7 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
     if (!isOpen && this.#wasOpen) {
       document.removeEventListener('keydown', this.#onKeyDown)
       if (this.cameraActive) this.closeCamera()
+      this.nameValue = ''
       this.linkValue = ''
       this.borderColorValue = ''
       this.backgroundColorValue = ''
@@ -213,6 +216,18 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   // ── property changes ───────────────────────────────────────────
+
+  readonly onNameBlur = (): void => {
+    const normalized = normalizeName(this.nameValue)
+    if (normalized) {
+      this.nameValue = normalized
+      if (normalized !== this.editorService?.cell) {
+        this.editorService.setPendingName(normalized)
+      }
+    } else {
+      this.nameValue = this.editorService?.cell ?? ''
+    }
+  }
 
   /** Safety-checked link update — runs on blur so we don't call LLM on every keystroke. */
   readonly onLinkBlur = (): void => {
@@ -373,8 +388,13 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
   // ── save / cancel ──────────────────────────────────────────────
 
   readonly save = (): void => {
-    // Commit the current link input value in case blur hasn't fired yet
-    // (e.g. user pastes a URL and clicks save directly)
+    // commit name if blur hasn't fired yet
+    const normalized = normalizeName(this.nameValue)
+    if (normalized && normalized !== this.editorService?.cell) {
+      this.nameValue = normalized
+      this.editorService.setPendingName(normalized)
+    }
+    // commit link if blur hasn't fired yet
     const link = this.linkValue?.trim()
     if (link !== undefined) {
       this.editorService.setLink(link ?? '')
@@ -408,3 +428,14 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
 
 // ── helpers ──────────────────────────────────────────────────
 
+function normalizeName(s: string): string {
+  return s
+    .trim()
+    .toLocaleLowerCase()
+    .replace(/[._\s]+/g, '-')
+    .replace(/[^\p{L}\p{N}\-]/gu, '')
+    .replace(/-{2,}/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 64)
+    .replace(/-$/, '')
+}

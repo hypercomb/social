@@ -9,12 +9,14 @@ export class TileEditorService extends EventTarget {
   #cell = ''
   #properties: Record<string, unknown> = {}
   #largeBlob: Blob | null = null
+  #pendingName: string | null = null
   autoCamera = false
 
   // ── getters ────────────────────────────────────────────────────
 
   get mode(): 'idle' | 'editing' { return this.#mode }
   get cell(): string { return this.#cell }
+  get pendingName(): string | null { return this.#pendingName }
   get properties(): Record<string, unknown> { return this.#properties }
   get largeBlob(): Blob | null { return this.#largeBlob }
 
@@ -56,6 +58,7 @@ export class TileEditorService extends EventTarget {
     this.#cell = ''
     this.#properties = {}
     this.#largeBlob = null
+    this.#pendingName = null
     this.autoCamera = false
     this.#emit()
     EffectBus.emit<EditorModePayload>('editor:mode', { active: false })
@@ -110,6 +113,11 @@ export class TileEditorService extends EventTarget {
     } else {
       delete (this.#properties as any).hideText
     }
+    this.#emit()
+  }
+
+  readonly setPendingName = (name: string): void => {
+    this.#pendingName = name
     this.#emit()
   }
 

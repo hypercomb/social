@@ -1,5 +1,5 @@
 // diamondcoreprocessor.com/editor/tile-editor.drone.ts
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, SignatureService } from '@hypercomb/core'
 import { TILE_PROPERTIES_FILE } from './tile-properties.js'
 import type { TileEditorService } from './tile-editor.service.js'
 import type { ImageEditorService } from './image-editor.service.js'
@@ -81,8 +81,26 @@ export class TileEditorDrone {
   #onCameraOpen = (): void => {
     const selection = window.ioc.get<{ active: string | null }>('@diamondcoreprocessor.com/SelectionService')
     const activeCell = selection?.active
-    if (!activeCell) return
-    void this.#openEditingWithCamera(activeCell)
+    if (activeCell) {
+      void this.#openEditingWithCamera(activeCell)
+    } else {
+      void this.#createCellAndOpenCamera()
+    }
+  }
+
+  #createCellAndOpenCamera = async (): Promise<void> => {
+    const newCell = `photo-${Date.now()}`
+
+    // Create a directory so the tile:saved fallback path (which re-scans OPFS
+    // directories to rebuild the layer) finds this cell and doesn't drop it.
+    const lineage = window.ioc.get<{ explorerDir?: () => Promise<FileSystemDirectoryHandle | null> | FileSystemDirectoryHandle | null }>('@hypercomb.social/Lineage')
+    const dir = lineage?.explorerDir ? await Promise.resolve(lineage.explorerDir()) : null
+    if (dir) await dir.getDirectoryHandle(newCell, { create: true })
+
+    EffectBus.emit('cell:added', { cell: newCell })
+    const hc = (window as any).hypercomb
+    if (hc) await new hc().act()
+    await this.#openEditingWithCamera(newCell)
   }
 
   async #openEditingWithCamera(cell: string): Promise<void> {
@@ -220,8 +238,13 @@ export class TileEditorDrone {
     index[service.cell] = propsSig
     localStorage.setItem(indexKey, JSON.stringify(index))
 
-    // 5. capture cell name before closing
-    const savedCell = service.cell
+    // 5. rename if the user changed the name
+    const pendingName = service.pendingName
+    let savedCell = service.cell
+    if (pendingName && pendingName !== savedCell) {
+      const renamed = await this.#renameCell(savedCell, pendingName, store, index, propsSig)
+      if (renamed) savedCell = pendingName
+    }
 
     // 6. cleanup
     imageEditor.destroy()
@@ -229,6 +252,64 @@ export class TileEditorDrone {
 
     // 7. notify via effect bus (processor owns synchronize; drones use effects)
     EffectBus.emit<{ cell: string }>('tile:saved', { cell: savedCell })
+  }
+
+  // ── rename helpers ─────────────────────────────────────────────
+
+  async #renameCell(
+    oldName: string,
+    newName: string,
+    store: Store,
+    index: Record<string, string>,
+    propsSig: string,
+  ): Promise<boolean> {
+    const lineage = window.ioc.get<{ explorerDir?: () => Promise<FileSystemDirectoryHandle | null> | FileSystemDirectoryHandle | null }>('@hypercomb.social/Lineage')
+    const dir = lineage?.explorerDir ? await Promise.resolve(lineage.explorerDir()) : null
+    if (!dir) return false
+
+    try {
+      const oldDir = await dir.getDirectoryHandle(oldName, { create: false })
+      try {
+        await dir.getDirectoryHandle(newName, { create: false })
+        return false // name already taken
+      } catch { /* available */ }
+
+      const newDir = await dir.getDirectoryHandle(newName, { create: true })
+      await copyDirectory(oldDir, newDir)
+      await dir.removeEntry(oldName, { recursive: true })
+
+      // update tile-props-index: remap old → new
+      delete index[oldName]
+      index[newName] = propsSig
+      localStorage.setItem('hc:tile-props-index', JSON.stringify(index))
+
+      await this.#recordRenameOp(oldName, newName, store)
+
+      const groupId = `rename:${Date.now().toString(36)}`
+      EffectBus.emit('cell:removed', { cell: oldName, groupId })
+      EffectBus.emit('cell:added', { cell: newName, groupId })
+      EffectBus.emit('cell:renamed', { oldName, newName })
+
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  async #recordRenameOp(oldName: string, newName: string, store: Store): Promise<void> {
+    const lineage = window.ioc.get<any>('@hypercomb.social/Lineage')
+    const historyService = window.ioc.get<any>('@diamondcoreprocessor.com/HistoryService')
+    if (!lineage || !historyService) return
+
+    const locationSig = await historyService.sign(lineage)
+
+    const snapshot = { version: 1 as const, oldName, newName, at: Date.now() }
+    const json = JSON.stringify(snapshot, Object.keys(snapshot).sort(), 0)
+    const blob = new Blob([json], { type: 'application/json' })
+    const resourceSig = await SignatureService.sign(await blob.arrayBuffer())
+    await store.putResource(blob)
+
+    await historyService.record(locationSig, { op: 'rename', cell: resourceSig, at: snapshot.at })
   }
 
   // ── cancel ─────────────────────────────────────────────────────
@@ -245,3 +326,21 @@ window.ioc.register(
   '@diamondcoreprocessor.com/TileEditorDrone',
   new TileEditorDrone(),
 )
+
+async function copyDirectory(
+  src: FileSystemDirectoryHandle,
+  dest: FileSystemDirectoryHandle,
+): Promise<void> {
+  for await (const [name, handle] of src.entries()) {
+    if (handle.kind === 'file') {
+      const srcFile = await (handle as FileSystemFileHandle).getFile()
+      const destFile = await dest.getFileHandle(name, { create: true })
+      const writable = await destFile.createWritable()
+      await writable.write(await srcFile.arrayBuffer())
+      await writable.close()
+    } else if (handle.kind === 'directory') {
+      const destSubDir = await dest.getDirectoryHandle(name, { create: true })
+      await copyDirectory(handle as FileSystemDirectoryHandle, destSubDir)
+    }
+  }
+}
