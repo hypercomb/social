@@ -95,26 +95,35 @@ export class SpacebarPanInput {
     if (e.key !== ' ') return
     if (e.repeat) return
 
-    // Pan when the cursor is over the canvas, regardless of where the
-    // browser focus currently is. The command-line auto-focuses on many
-    // boot/nav paths, so the previous "bail if focus is in any input"
-    // check made spacebar pan look broken on every other refresh — user
-    // saw "sometimes works, sometimes not" depending on whether focus
-    // had migrated yet. Cursor-over-canvas is the right signal: it
-    // tracks user intent (they're pointing at the grid, they want to
-    // pan it). Focus-elsewhere typing still works because we only
-    // intercept when cursor is over the canvas.
-    if (!this.mouseOverCanvas) {
-      // Cursor isn't over the canvas — let the space key behave normally
-      // (type into inputs, scroll page, whatever).
-      return
-    }
+    // Two conditions must BOTH hold to intercept space for panning:
+    //   1. Cursor is over the canvas (user is pointing at the grid)
+    //   2. Browser focus is NOT in a text input (user isn't typing)
+    //
+    // Cursor-over-canvas alone (without #2) made the command-line
+    // unable to type spaces — the canvas covers the whole viewport so
+    // mouseOverCanvas is true while the user is in any UI overlay.
+    // Focus-not-in-input alone (without #1) made pan flaky because the
+    // command-line auto-focuses on every nav, so spacebar was rarely
+    // available unless the user clicked away from it first. Both
+    // checks together: typing in inputs always types, pan only when
+    // the user has clicked on the canvas (or otherwise blurred any
+    // text input) AND has the cursor over the grid.
+    if (!this.mouseOverCanvas) return
+    if (this.isInteractiveFocus()) return
 
     // prevent page scroll AND prevent the focused element from receiving the space
     e.preventDefault()
 
     this.spaceHeld = true
     this.setCursor('grab')
+  }
+
+  private isInteractiveFocus = (): boolean => {
+    const el = document.activeElement
+    if (!el) return false
+    return !!el.closest(
+      'input, textarea, select, [contenteditable="true"], [contenteditable=""], [role="textbox"]'
+    )
   }
 
   private onCanvasEnter = (): void => {
