@@ -39,6 +39,12 @@ type HistoryService = {
   /** Reads the layer JSON directly from the lineage's bag (merkle model).
    *  Returns the parsed content or null if the sig isn't found in the bag. */
   getLayerContent?(locationSig: string, layerSig: string): Promise<Content | null>
+  /** Cross-bag layer lookup by content sig. Hits the parsed-/preloader-/
+   *  optimized-bytes caches in O(1); falls back to preloadAllBags on a
+   *  cold miss. The drill-down click uses this so the user can walk into
+   *  any layer the system has minted, not just same-bag siblings of the
+   *  origin slice. */
+  getLayerBySig?(layerSig: string): Promise<Content | null>
   promoteToHead?(locationSig: string, layerSig: string): Promise<string | null>
   removeEntries?(locationSig: string, filenames: string[]): Promise<number>
   mergeEntries?(locationSig: string, filenames: string[]): Promise<string | null>
@@ -61,6 +67,13 @@ type Store = {
 }
 
 type Category = 'cells' | 'content' | 'tags' | 'notes' | 'visibility' | 'system' | 'none'
+
+type Slice = {
+  label: string
+  lines: ReadonlyArray<{ text: string; status: 'same' | 'add' | 'remove' }>
+  /** Raw JSON of the layer at this slice — copy button source. */
+  json: string
+}
 
 type Row = {
   index: number
@@ -197,19 +210,26 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
     saveDisabledFilters(next)
   }
 
-  // Layer-slice inspector modal. When non-null, a centered overlay is
-  // rendered showing the selected layer entry. `lines` is the raw JSON
-  // split into line-level diff rows vs the previous entry's JSON:
-  // status=`same` lines render plain, `add` lines highlight green,
-  // `remove` lines red with a strikethrough. The very first entry has
-  // no previous so every line lands as `add`.
-  #sliceOpen = signal<{
-    label: string
-    lines: ReadonlyArray<{ text: string; status: 'same' | 'add' | 'remove' }>
-    /** Raw JSON of the layer at this slice — copy button source. */
-    json: string
-  } | null>(null)
-  readonly sliceOpen = this.#sliceOpen.asReadonly()
+  // Layer-slice inspector modal. The stack lets the user drill into
+  // sig references found inside a layer's JSON without losing the
+  // history-row context they came from. The TOP of the stack is what
+  // renders; a back button (visible when length > 1) pops one level.
+  // Closing the modal clears the stack entirely.
+  //
+  // Each slice carries:
+  //  - label: short header text identifying the layer or resource
+  //  - lines: line-level diff rows (vs the prior entry for the root
+  //           slice, all `add` for drilled-in slices since there's no
+  //           prior to compare against in the new lineage)
+  //  - json:  raw JSON at this slice — copy-button source
+  //
+  // The stack-based design fixes the user-visible disconnect where an
+  // undo's effect lived in a child layer the row didn't reflect: now
+  // they can click any sig in the diff and walk into it.
+  #sliceStack = signal<readonly Slice[]>([])
+  readonly sliceStack = this.#sliceStack.asReadonly()
+  readonly sliceCurrent = computed(() => this.#sliceStack().at(-1) ?? null)
+  readonly canSliceBack = computed(() => this.#sliceStack().length > 1)
   /** Briefly true after a successful copy so the button can flash feedback. */
   readonly sliceCopied = signal(false)
 
@@ -540,16 +560,134 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
     const lines = diffLines(prevLines, nextLines)
 
     const when = new Date(entry.at).toLocaleString()
-    this.#sliceOpen.set({
+    this.#sliceStack.set([{
       label: `#${index + 1} · ${when} · ${entry.layerSig.slice(0, 12)}…`,
       lines,
       json: nextJson,
-    })
+    }])
     this.sliceCopied.set(false)
   }
 
   readonly closeSlice = (): void => {
-    this.#sliceOpen.set(null)
+    this.#sliceStack.set([])
+    this.sliceCopied.set(false)
+  }
+
+  /**
+   * Pop the top slice off the stack so the previous one re-appears.
+   * No-op when the stack has 0 or 1 entries (back is hidden in that
+   * state anyway, but we guard here too in case the call comes via
+   * keyboard or programmatic source).
+   */
+  readonly sliceBack = (): void => {
+    const stack = this.#sliceStack()
+    if (stack.length <= 1) return
+    this.#sliceStack.set(stack.slice(0, -1))
+    this.sliceCopied.set(false)
+  }
+
+  /**
+   * Detect whether a diff line is a clickable sig reference. A sig is
+   * a 64-char lowercase hex string; the line may have leading spaces
+   * (the layerToDiffableLines indents children sigs with 4 spaces) and
+   * an optional trailing comma. Returns the bare sig if the line
+   * matches the shape, null otherwise. Template uses this to decide
+   * whether to render the line as an interactive `<span>`.
+   */
+  readonly lineSig = (text: string): string | null => {
+    const trimmed = text.trim().replace(/,$/, '')
+    return /^[0-9a-f]{64}$/.test(trimmed) ? trimmed : null
+  }
+
+  /**
+   * Resolve a sig and push a new slice for it onto the stack. The
+   * drilled slice has no diff context (there's no adjacent-entry
+   * comparison to make), so every line renders as `add` — visually
+   * "this is what's in here".
+   *
+   * Resolution chain:
+   *  1. history.getLayerContent(currentLocationSig, sig) — covers
+   *     child-cell sigs that live in the current lineage's bag.
+   *     This is the typical case: a layer's `children` array holds
+   *     sibling-layer sigs in the same bag, and that's what users
+   *     want to walk into. Tried first because pure resource lookup
+   *     wouldn't find them — they're inside __history__/{loc}/, not
+   *     __resources__/.
+   *  2. store.getResource(sig) — covers content-addressed resources
+   *     like notes, tags, or any blob referenced by sig that isn't a
+   *     bag layer.
+   *  3. Fall through silently — sig is unresolvable in this client's
+   *     OPFS state. (May exist remotely, may have been pruned, etc.)
+   *
+   * The label uses the resolved layer's `name` when present so the
+   * breadcrumb reads "↳ instructions" instead of an opaque hash.
+   */
+  readonly drillIntoSig = async (sig: string): Promise<void> => {
+    const history = this.#history()
+    const store = this.#store()
+
+    let parsed: Content | null = null
+    let json: string | null = null
+
+    // 1. cross-bag layer lookup — covers same-bag siblings AND child
+    //    cells whose layers live in their own lineage bags. This is the
+    //    primary path for drill-down because layer references in any
+    //    layer's `children` array can target either case interchangeably.
+    if (history?.getLayerBySig) {
+      try {
+        const fromAny = await history.getLayerBySig(sig)
+        if (fromAny) {
+          parsed = fromAny
+          json = JSON.stringify(fromAny, Object.keys(fromAny).sort(), 2)
+        }
+      } catch { /* fall through */ }
+    }
+
+    // 2. fallback: same-bag layer content (older builds without
+    //    getLayerBySig still get the simple case working)
+    if (!parsed && history?.getLayerContent) {
+      try {
+        const fromBag = await history.getLayerContent(this.#locationSig(), sig)
+        if (fromBag) {
+          parsed = fromBag
+          json = JSON.stringify(fromBag, Object.keys(fromBag).sort(), 2)
+        }
+      } catch { /* fall through */ }
+    }
+
+    // 3. content-addressed resource lookup — for non-layer sigs (notes,
+    //    tags, anything stored under __resources__/<sig>)
+    if (!parsed && store) {
+      try {
+        const blob = await store.getResource(sig)
+        if (blob) {
+          const text = await blob.text()
+          try { parsed = JSON.parse(text) as Content } catch { /* not JSON */ }
+          json = text
+        }
+      } catch { /* fall through */ }
+    }
+
+    // 4. nothing resolved — bail. Future: surface a transient toast.
+    if (!parsed && json === null) return
+
+    let lines: ReadonlyArray<{ text: string; status: 'add' }>
+    if (parsed && typeof parsed === 'object') {
+      const layerLines = layerToDiffableLines(parsed)
+      lines = layerLines.map(t => ({ text: t, status: 'add' as const }))
+    } else if (json !== null) {
+      lines = json.split('\n').map(t => ({ text: t, status: 'add' as const }))
+    } else {
+      return
+    }
+
+    const niceName = (parsed && typeof parsed.name === 'string' && parsed.name) ? parsed.name : sig.slice(0, 12) + '…'
+    const slice: Slice = {
+      label: `↳ ${niceName}`,
+      lines,
+      json: json ?? '',
+    }
+    this.#sliceStack.update(s => [...s, slice])
     this.sliceCopied.set(false)
   }
 
@@ -559,7 +697,7 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
    * back silently if the Clipboard API isn't available.
    */
   readonly copySliceJson = async (): Promise<void> => {
-    const slice = this.#sliceOpen()
+    const slice = this.sliceCurrent()
     if (!slice) return
     try {
       await navigator.clipboard.writeText(slice.json)

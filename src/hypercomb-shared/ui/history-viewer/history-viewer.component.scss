@@ -302,6 +302,27 @@
   color: rgba(255, 255, 255, 1);
 }
 
+// Drill-down back button — only present when the user has navigated
+// into a nested layer via a sig click. Sits left of the label so
+// "←  current-layer-label" reads as a breadcrumb.
+.slice-modal .slice-back {
+  background: transparent;
+  border: 1px solid rgba(120, 140, 170, 0.35);
+  color: rgba(220, 230, 245, 0.85);
+  border-radius: 4px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.slice-modal .slice-back:hover {
+  background: rgba(80, 105, 140, 0.5);
+  border-color: rgba(140, 170, 200, 0.6);
+  color: rgba(255, 255, 255, 1);
+}
+
 .slice-modal .slice-json {
   margin: 0;
   padding: 14px 16px;
@@ -335,6 +356,26 @@
   color: rgba(240, 210, 210, 0.85);
   text-decoration: line-through;
   text-decoration-color: rgba(217, 98, 98, 0.6);
+}
+
+// Sig lines render as clickable affordances — cursor indicates the
+// drill-down, hover lifts the line subtly so it's clear before the
+// click. Strikethrough on remove lines is preserved (a removed sig
+// can still be drilled, since the resource is content-addressed and
+// remains in the bag for the session).
+.slice-line.slice-sig {
+  cursor: pointer;
+  border-bottom: 1px dashed transparent;
+  transition: background 80ms linear, border-color 80ms linear, color 80ms linear;
+}
+.slice-line.slice-sig:hover {
+  background: rgba(110, 180, 255, 0.16);
+  border-bottom-color: rgba(110, 180, 255, 0.55);
+  color: rgba(245, 250, 255, 1);
+}
+.slice-line.slice-sig:focus-visible {
+  outline: 1px solid rgba(110, 180, 255, 0.7);
+  outline-offset: -1px;
 }
 
 .row:hover {
