@@ -15,6 +15,10 @@ export class SpacebarPanInput {
   private spaceHeld = false
   private last: Point | null = null
   private canvas: HTMLCanvasElement | null = null
+  // Updated by mousemove. We use this at keydown time to decide whether
+  // the user is targeting the canvas (so spacebar should pan, not type
+  // a space into whatever has focus).
+  private mouseOverCanvas = false
 
   private readonly source = 'spacebar-pan'
 
@@ -39,6 +43,8 @@ export class SpacebarPanInput {
     document.addEventListener('keydown', this.onKeyDown)
     document.addEventListener('keyup', this.onKeyUp)
     document.addEventListener('mousemove', this.onMove)
+    canvas.addEventListener('mouseenter', this.onCanvasEnter)
+    canvas.addEventListener('mouseleave', this.onCanvasLeave)
     window.addEventListener('blur', this.onBlur)
 
     this.enabled = true
@@ -50,6 +56,10 @@ export class SpacebarPanInput {
     document.removeEventListener('keydown', this.onKeyDown)
     document.removeEventListener('keyup', this.onKeyUp)
     document.removeEventListener('mousemove', this.onMove)
+    if (this.canvas) {
+      this.canvas.removeEventListener('mouseenter', this.onCanvasEnter)
+      this.canvas.removeEventListener('mouseleave', this.onCanvasLeave)
+    }
     window.removeEventListener('blur', this.onBlur)
 
     this.endPan()
@@ -58,6 +68,7 @@ export class SpacebarPanInput {
     this.canvas = null
     this.gate = null
     this.enabled = false
+    this.mouseOverCanvas = false
   }
 
   // -------------------------------------------------
@@ -67,13 +78,39 @@ export class SpacebarPanInput {
   private onKeyDown = (e: KeyboardEvent): void => {
     if (e.key !== ' ') return
     if (e.repeat) return
-    if (this.isInteractiveFocus()) return
 
-    // prevent page scroll
+    // Pan when the cursor is over the canvas, regardless of where the
+    // browser focus currently is. The command-line auto-focuses on many
+    // boot/nav paths, so the previous "bail if focus is in any input"
+    // check made spacebar pan look broken on every other refresh — user
+    // saw "sometimes works, sometimes not" depending on whether focus
+    // had migrated yet. Cursor-over-canvas is the right signal: it
+    // tracks user intent (they're pointing at the grid, they want to
+    // pan it). Focus-elsewhere typing still works because we only
+    // intercept when cursor is over the canvas.
+    if (!this.mouseOverCanvas) {
+      // Cursor isn't over the canvas — let the space key behave normally
+      // (type into inputs, scroll page, whatever).
+      return
+    }
+
+    // prevent page scroll AND prevent the focused element from receiving the space
     e.preventDefault()
 
     this.spaceHeld = true
     this.setCursor('grab')
+  }
+
+  private onCanvasEnter = (): void => {
+    this.mouseOverCanvas = true
+  }
+
+  private onCanvasLeave = (): void => {
+    this.mouseOverCanvas = false
+    // If user releases the cursor from the canvas mid-pan, end the pan
+    // gesture so we don't accumulate pan deltas across an off-canvas
+    // re-entry.
+    if (this.spaceHeld) this.endPan()
   }
 
   private onKeyUp = (e: KeyboardEvent): void => {
@@ -139,13 +176,5 @@ export class SpacebarPanInput {
 
   private isInsideRect = (x: number, y: number, rect: DOMRect): boolean => {
     return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
-  }
-
-  private isInteractiveFocus = (): boolean => {
-    const el = document.activeElement
-    if (!el) return false
-    return !!el.closest(
-      'input, textarea, select, [contenteditable="true"], [contenteditable=""], [role="textbox"]'
-    )
   }
 }

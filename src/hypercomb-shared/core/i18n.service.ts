@@ -52,7 +52,7 @@ export class LocalizationService extends EventTarget implements I18nProvider {
     localStorage.setItem(STORAGE_KEY, locale)
     document.documentElement.lang = locale
     EffectBus.emit('locale:changed', { locale })
-    this.dispatchEvent(new CustomEvent('change'))
+    this.#emitChange()
   }
 
   registerTranslations(namespace: string, locale: string, catalog: Record<string, string>): void {
@@ -69,7 +69,7 @@ export class LocalizationService extends EventTarget implements I18nProvider {
       localeMap.set(locale, { ...catalog })
     }
 
-    this.dispatchEvent(new CustomEvent('change'))
+    this.#emitChange()
   }
 
   registerOverrides(namespace: string, locale: string, catalog: Record<string, string>): void {
@@ -86,7 +86,25 @@ export class LocalizationService extends EventTarget implements I18nProvider {
       localeMap.set(locale, { ...catalog })
     }
 
-    this.dispatchEvent(new CustomEvent('change'))
+    this.#emitChange()
+  }
+
+  // Defer dispatch to a microtask so the impure `t` pipe's value flip
+  // (key → translated string) lands in a NEW change-detection tick rather
+  // than within the same tick as the registration. Without this, Angular's
+  // dev-mode "ExpressionChangedAfterItHasBeenCheckedError" fires on every
+  // boot for every i18n binding because translations register synchronously
+  // during the first render. The user-visible behavior is identical; we
+  // just stop spamming the console with the dev-only error. Multiple
+  // sync registrations coalesce into one dispatch via the scheduled flag.
+  #pendingDispatch = false
+  #emitChange = (): void => {
+    if (this.#pendingDispatch) return
+    this.#pendingDispatch = true
+    queueMicrotask(() => {
+      this.#pendingDispatch = false
+      this.dispatchEvent(new CustomEvent('change'))
+    })
   }
 
   resolveCell(directoryName: string, namespace = 'app'): string {
