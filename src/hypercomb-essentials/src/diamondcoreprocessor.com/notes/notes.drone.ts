@@ -223,6 +223,19 @@ export class NotesService extends HiveParticipant<Note> {
       .sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   }
 
+  /** Async-resolving notes for an EXPLICIT segments path — bypasses the
+   *  user's current lineage. Used by renderers that need to traverse a
+   *  whole tree (e.g. the website surface walking children → grandchildren
+   *  → leaves) without temporarily re-navigating the user. Same async
+   *  hydration as getNotes(), so reads match what a write would commit. */
+  public readonly getNotesAtSegments = async (segments: readonly string[]): Promise<Note[]> => {
+    const cleaned = (segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+    if (cleaned.length === 0) return []
+    const items = await this.itemsAtSegmentsAsync(cleaned)
+    return items.slice()
+      .sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  }
+
   // ── Internal: cell-location resolution + transform plumbing ───────
 
   /**

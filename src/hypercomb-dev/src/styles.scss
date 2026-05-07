@@ -25,3 +25,42 @@ body {
   :root { --hc-touch: 1; }
 }
 
+// ── view-mode: website (global rules) ────────────────────────
+// Hide every hex-mode artifact (including those that portal to body
+// at runtime — history-viewer etc) when ViewMode is 'website'.
+body.hc-view-website {
+  // Hide every hex-mode chrome component. Keep only:
+  //   hc-website-view  — the website surface itself
+  //   hc-command-line  — the slash interface (lives in bottom bar)
+  //   hc-command-shell — internal of command-line
+  //   hc-icon          — generic inline icon, used by command-line
+  hc-activity-log,
+  hc-atomizer-bar,
+  hc-atomizer-sidebar,
+  hc-audio-player,
+  hc-command-palette,
+  hc-confirm-dialog,
+  hc-controls-bar,
+  hc-docs-overlay,
+  hc-file-explorer,
+  hc-format-painter,
+  hc-hint-bar,
+  hc-history,
+  hc-history-viewer,
+  hc-instruction-overlay,
+  hc-mesh-header,
+  hc-notes-strip,
+  hc-notes-viewer,
+  hc-opfs-explorer,
+  hc-portal-overlay,
+  hc-selection-context-menu,
+  hc-sensitivity-bar,
+  hc-shortcut-sheet,
+  hc-tile-editor,
+  hc-toast,
+  hc-track-player,
+  hc-youtube-viewer {
+    display: none !important;
+  }
+}
+
