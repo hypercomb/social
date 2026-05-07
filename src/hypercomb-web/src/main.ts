@@ -8,7 +8,7 @@ import { initSentinel, type SentinelBridge } from './setup/sentinel-bridge'
 import { resolveImportMap } from './setup/resolve-import-map'
 import { appConfig } from './app.config'
 import { App } from './app/app'
-import { DependencyLoader } from '@hypercomb/shared/core'
+import { DependencyLoader, initializeRuntime } from '@hypercomb/shared/core'
 
 // Ensure side-effect registration
 const _deps = [DependencyLoader]
@@ -64,6 +64,16 @@ const bootstrap = async (): Promise<void> => {
   // Load dependency namespaces so services self-register before Angular renders
   const loader = get('@hypercomb.social/DependencyLoader') as DependencyLoader | undefined
   await loader?.load?.()
+
+  // Run runtime init (i18n catalogs, layer materialization, etc.) BEFORE
+  // bootstrapApplication. Without this, bootstrap fires Angular's first
+  // change-detection pass while CoreAdapter.initialize() is still loading
+  // i18n catalogs in parallel — translations land mid-CD and the impure
+  // `t` pipe's value flips from key to translated string within the same
+  // tick, triggering ExpressionChangedAfterItHasBeenCheckedError on every
+  // boot. Dev shell already does this (see hypercomb-dev/src/main.ts);
+  // web didn't, which is why the error showed on 4200 but not 4250.
+  await initializeRuntime({ logOpfs: false })
 
   const appRef = await bootstrapApplication(App, appConfig)
 

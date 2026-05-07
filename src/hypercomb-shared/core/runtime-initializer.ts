@@ -128,7 +128,22 @@ export type RuntimeInitializerOptions = {
   onMeshStateChange?: (enabled: boolean) => void
 }
 
+// Idempotent: callers in different parts of the boot sequence (web's
+// main.ts, then App constructor → CoreAdapter.initialize) used to each
+// call initializeRuntime, double-registering EffectBus listeners and
+// double-loading translations. Cache the in-flight / completed promise
+// and return it to subsequent callers.
+let _initializeRuntimePromise: Promise<void> | null = null
+
 export const initializeRuntime = async (
+  options: RuntimeInitializerOptions = {},
+): Promise<void> => {
+  if (_initializeRuntimePromise) return _initializeRuntimePromise
+  _initializeRuntimePromise = _runInitializeRuntime(options)
+  return _initializeRuntimePromise
+}
+
+const _runInitializeRuntime = async (
   options: RuntimeInitializerOptions = {},
 ): Promise<void> => {
   const {
