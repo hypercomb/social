@@ -43,6 +43,14 @@ export class SpacebarPanInput {
     document.addEventListener('keydown', this.onKeyDown)
     document.addEventListener('keyup', this.onKeyUp)
     document.addEventListener('mousemove', this.onMove)
+    // Track cursor position via mousemove on document — mouseenter alone
+    // misses the case where the cursor was already over the canvas when
+    // attach() ran (extremely common: pixi creates the canvas after page
+    // load, cursor is often already pointing at the area). The dedicated
+    // tracker fires on every mousemove regardless of whether spaceHeld
+    // is set, so the flag is always accurate by the time the user
+    // presses space.
+    document.addEventListener('mousemove', this.onTrackCursor)
     canvas.addEventListener('mouseenter', this.onCanvasEnter)
     canvas.addEventListener('mouseleave', this.onCanvasLeave)
     window.addEventListener('blur', this.onBlur)
@@ -56,6 +64,7 @@ export class SpacebarPanInput {
     document.removeEventListener('keydown', this.onKeyDown)
     document.removeEventListener('keyup', this.onKeyUp)
     document.removeEventListener('mousemove', this.onMove)
+    document.removeEventListener('mousemove', this.onTrackCursor)
     if (this.canvas) {
       this.canvas.removeEventListener('mouseenter', this.onCanvasEnter)
       this.canvas.removeEventListener('mouseleave', this.onCanvasLeave)
@@ -111,6 +120,19 @@ export class SpacebarPanInput {
     // gesture so we don't accumulate pan deltas across an off-canvas
     // re-entry.
     if (this.spaceHeld) this.endPan()
+  }
+
+  // Always-on cursor tracker — keeps mouseOverCanvas in sync regardless
+  // of whether the user has triggered mouseenter/leave yet (those don't
+  // fire if the cursor was already inside the canvas at attach time).
+  private onTrackCursor = (e: MouseEvent): void => {
+    if (!this.canvas) return
+    const rect = this.canvas.getBoundingClientRect()
+    const inside = this.isInsideRect(e.clientX, e.clientY, rect)
+    if (inside !== this.mouseOverCanvas) {
+      this.mouseOverCanvas = inside
+      if (!inside && this.spaceHeld) this.endPan()
+    }
   }
 
   private onKeyUp = (e: KeyboardEvent): void => {
