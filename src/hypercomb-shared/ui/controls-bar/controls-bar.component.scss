@@ -266,6 +266,13 @@
   border-color: rgba(180, 100, 255, 0.25);
 }
 
+// Edit mode: user is selecting which icons should be active in the control bar.
+// Distinct amber border so they know clicks are toggling state, not running actions.
+// Wins over power-key tints (more specific) so the editing signal isn't masked.
+.controls-pill:has(.controls-rows.editing) {
+  border-color: rgba(255, 200, 100, 0.65);
+}
+
 // ── sections ──────────────────────────────────────────────
 
 .controls-section {
@@ -327,16 +334,14 @@
 }
 
 .expand-chevron {
-  font-size: 0.8rem;
   display: inline-block;
   transition: transform 200ms ease;
   color: rgba(200, 200, 200, 0.5);
   line-height: 1;
-  scale: 1.2;
-  padding: 0.5em;
 
+  // edit mode rotates the right-pointing chevron to point down
   &.up {
-    transform: rotate(180deg);
+    transform: rotate(90deg);
   }
 }
 
@@ -366,7 +371,28 @@
   cursor: pointer;
   transition: color 200ms ease, background 200ms ease;
 
-  .hci { font-size: 1.52rem; }
+  // Unified icon sizing — every icon-marker child scales off --icon-size,
+  // and mask-SVG icons size their square off 1em so they track the same scale.
+  // Breakpoints redefine --icon-size; the chevron renders at 2× to read as a
+  // distinct UI control rather than an in-row icon.
+  --icon-size: 1.52rem;
+
+  .hci, .mic-icon, .bee-icon {
+    font-size: var(--icon-size);
+    line-height: 1;
+  }
+  // Mask-SVG icons read ~15% bigger than the rest at every breakpoint —
+  // their paths leave more empty viewBox margin than the hci glyphs.
+  .eye-icon, .text-only-icon {
+    width: 1em;
+    height: 1em;
+    font-size: calc(var(--icon-size) * 1.15);
+    line-height: 1;
+  }
+  .expand-chevron {
+    font-size: calc(var(--icon-size) * 2);
+    line-height: 1;
+  }
 
   &:hover {
     color: whitesmoke;
@@ -456,8 +482,6 @@
 // ── bee toggle ──────────────────────────────────────────
 
 .bee-icon {
-  font-size: 14px;
-  line-height: 1;
   filter: grayscale(1);
   opacity: 0.75;
 
@@ -478,8 +502,6 @@
 
 .eye-icon {
   display: inline-block;
-  width: 0.86rem;
-  height: 0.86rem;
   position: relative;
 
   // eye shape via mask
@@ -526,11 +548,7 @@
 
 .text-only-icon {
   display: inline-block;
-  width: 1.52rem;
-  height: 1.52rem;
   position: relative;
-  scale: 1.2;
-  padding: 0.5em;
 
   // image icon via mask (mountain + sun)
   -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='2' ry='2'/%3E%3Ccircle cx='8.5' cy='8.5' r='1.5'/%3E%3Cpolyline points='21 15 16 10 5 21'/%3E%3C/svg%3E");
@@ -568,11 +586,7 @@
 // ── voice input mic button ────────────────────────────
 
 .mic-icon {
-  font-size: 1.52rem;
-  line-height: 1;
   opacity: 0.85;
-  scale: 1.2;
-  padding: 0.5em;
 }
 
 .mic-btn {
@@ -816,7 +830,7 @@
     min-height: 2.75rem;
     padding: 0.4rem;
     border-radius: 4px;
-    .hci { font-size: 0.95rem; }
+    --icon-size: 0.95rem;
     .dcp-icon { font-size: 1.2rem; }
   }
 
@@ -847,7 +861,7 @@
     min-width: 2.5rem;
     min-height: 2.5rem;
     padding: 0.35rem;
-    .hci { font-size: 0.85rem; }
+    --icon-size: 0.85rem;
     .dcp-icon { font-size: 1.1rem; }
   }
 
@@ -887,7 +901,7 @@
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
     color: rgba(245, 245, 245, 0.85);
 
-    .hci { font-size: 1.1rem; }
+    --icon-size: 1.1rem;
 
     &:hover { background: rgba(14, 18, 24, 0.88); }
     &:active:not(:disabled) { transform: scale(0.92); }
@@ -912,8 +926,6 @@
 .pill-stage.mobile .mic-btn {
   user-select: none;
   touch-action: none;
-
-  .mic-icon { font-size: 1.05rem; line-height: 1; }
 
   &.recording {
     color: #ff4444;
@@ -946,7 +958,6 @@
 
   .clipboard-empty { font-size: 0.72rem; }
   .close-x { font-size: 1.3rem; }
-  .bee-icon { font-size: 16px; }
 
   .tag-crumb {
     font-size: 0.8rem;
@@ -988,7 +999,7 @@
   .ctl-btn {
     min-width: 3.2rem;
     padding: 0.64rem 0.84rem;
-    .hci { font-size: 1.64rem; }
+    --icon-size: 1.64rem;
     .dcp-icon { font-size: 2.2rem; }
   }
 
@@ -1008,7 +1019,7 @@
   .ctl-btn {
     min-width: 3.44rem;
     padding: 0.72rem 0.96rem;
-    .hci { font-size: 1.76rem; }
+    --icon-size: 1.76rem;
     .dcp-icon { font-size: 2.32rem; }
   }
 

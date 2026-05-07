@@ -1,6 +1,7 @@
 // hypercomb-shared/core/lineage.ts
 // synchronize is dispatched only by the processor — lineage fires 'change' on itself
 
+import { EffectBus } from '@hypercomb/core'
 import type { Navigation } from './navigation'
 import type { Store } from './store'
 
@@ -134,6 +135,16 @@ export class Lineage extends EventTarget {
     // follow url changes (programmatic + back/forward)
     window.addEventListener('navigate', this.followLocation)
     window.addEventListener('popstate', this.followLocation)
+
+    // OPFS mutations — bump fsRevision so per-revision caches
+    // (listCellFolders, branchSet, explorerDir) see fresh disk state.
+    // `fs:changed` is the bulk-emit signal: workers fire it BEFORE
+    // committing layer state so renders triggered by the cascade
+    // (cursor.onNewLayer) see post-mutation OPFS without triggering
+    // additional per-cell layer commits.
+    EffectBus.on('fs:changed', this.invalidate)
+    EffectBus.on('cell:added', this.invalidate)
+    EffectBus.on('cell:removed', this.invalidate)
 
     // best-effort initial sync (safe if nav/store aren't ready yet)
     this.followLocation()

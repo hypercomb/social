@@ -2272,6 +2272,19 @@ export class ShowCellDrone extends Drone {
       }
     })
 
+    // fs:changed — bulk OPFS mutation marker. Workers fire this BEFORE
+    // committing layer state so that any render triggered by the cascade
+    // (cursor.onNewLayer) sees post-mutation OPFS. We use it here to
+    // unconditionally drop our caches and re-render — the mutation is a
+    // signal that listCellFolders must refetch and the slot machine state
+    // is stale (positions may shift, new tiles may have appeared).
+    this.onEffect('fs:changed', () => {
+      this.#layerCellsCache.delete(this.renderedLocationKey)
+      this.renderedCellsKey = ''
+      this.#slots.clear()
+      this.requestRender()
+    })
+
     // cell:added / cell:removed — synchronous incremental path. Zero awaits
     // in the click handler. The slot state machine mutates immediately, the
     // next microtask runs one applyGeometry, and images for new cells are

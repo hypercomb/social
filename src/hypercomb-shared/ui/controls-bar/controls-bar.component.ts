@@ -346,6 +346,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   #isControlVisible(ctrl: ControlItem): boolean {
+    // In edit mode the user is picking which icons should be active — show
+    // candidates that are normally state-gated so they can be toggled even
+    // when their state isn't currently met (empty clipboard, no selection).
+    if (this.#editMode() && ctrl.visibleWhen === 'clipboardHasItems') return true
     switch (ctrl.visibleWhen) {
       case 'always': return true
       case 'clipboardHasItems': return this.#clipboardAvailable() && this.clipboardCount() > 0

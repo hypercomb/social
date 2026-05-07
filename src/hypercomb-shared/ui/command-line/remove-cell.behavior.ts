@@ -65,6 +65,11 @@ export class RemoveCellBehavior implements CommandLineBehavior {
 
     const tagOps: TagOp[] = []
 
+    // Track removals per parent lineage so we can fire ONE layer commit
+    // per affected parent (vs N per cell). Map<parent-key, { segments, removedNames[] }>.
+    const baseSegments = (lineage.explorerSegments?.() ?? []).map(s => String(s ?? ''))
+    const removalsByParent = new Map<string, { segments: string[]; names: string[] }>()
+
     for (const item of items) {
       if (item.op === 'tag-add' || item.op === 'tag-remove') {
         // tag operations within remove context
@@ -78,12 +83,47 @@ export class RemoveCellBehavior implements CommandLineBehavior {
         }
       } else {
         // in ~ context, treat plain names as removes
-        await this.#removeTarget(dir, item.segments)
+        const ok = await this.#removeTarget(dir, item.segments)
+        if (ok) {
+          const parentSegs = [...baseSegments, ...item.segments.slice(0, -1)]
+          const leafName = item.segments[item.segments.length - 1]
+          const key = parentSegs.join('/')
+          const entry = removalsByParent.get(key) ?? { segments: parentSegs, names: [] }
+          entry.names.push(leafName)
+          removalsByParent.set(key, entry)
+        }
       }
     }
 
     if (tagOps.length > 0) {
       await persistTagOps(tagOps, dir)
+    }
+
+    // Bump FS-change marker so renders during the cascade see fresh OPFS.
+    if (removalsByParent.size > 0) EffectBus.emit('fs:changed', { segments: baseSegments })
+
+    // ONE layer commit per affected parent — full new children list.
+    const committer = get('@diamondcoreprocessor.com/LayerCommitter') as
+      { update(segments: readonly string[], layer: { [slot: string]: unknown }, nameSlots?: ReadonlySet<string>): Promise<string> }
+      | undefined
+    if (committer) {
+      for (const { segments } of removalsByParent.values()) {
+        const parentDir = await lineage.tryResolve(segments)
+        if (!parentDir) continue
+        const newChildren: string[] = []
+        for await (const [name, h] of (parentDir as any).entries()) {
+          if (h.kind !== 'directory') continue
+          if (!name || (name.startsWith('__') && name.endsWith('__'))) continue
+          newChildren.push(name)
+        }
+        await committer.update(segments, { children: newChildren })
+      }
+    }
+
+    for (const { segments, names } of removalsByParent.values()) {
+      for (const name of names) {
+        EffectBus.emit('cell:removed', { cell: name, segments })
+      }
     }
 
     await new hypercomb().act()
@@ -105,22 +145,22 @@ export class RemoveCellBehavior implements CommandLineBehavior {
     return true
   }
 
-  async #removeTarget(root: FileSystemDirectoryHandle, segments: string[]): Promise<void> {
-    if (!segments.length) return
+  async #removeTarget(root: FileSystemDirectoryHandle, segments: string[]): Promise<boolean> {
+    if (!segments.length) return false
 
     let parent = root
     for (let i = 0; i < segments.length - 1; i++) {
       try {
         parent = await parent.getDirectoryHandle(segments[i], { create: false })
       } catch {
-        return
+        return false
       }
     }
 
     const name = segments[segments.length - 1]
     try {
       await parent.removeEntry(name, { recursive: true })
-      EffectBus.emit('cell:removed', { cell: name })
-    } catch { /* skip */ }
+      return true
+    } catch { return false }
   }
 }

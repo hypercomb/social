@@ -25,9 +25,28 @@ interface HistoryServiceLike {
   commitLayer(locationSig: string, layer: unknown): Promise<string>
 }
 
+interface LayerCommitterLike {
+  update(
+    segments: readonly string[],
+    layer: { name?: string; [slot: string]: unknown },
+    nameSlots?: ReadonlySet<string>,
+  ): Promise<string>
+}
+
 interface StoreLike {
   readonly clipboard: FileSystemDirectoryHandle
   readonly hypercombRoot: FileSystemDirectoryHandle
+}
+
+async function listChildNames(dir: FileSystemDirectoryHandle): Promise<string[]> {
+  const out: string[] = []
+  for await (const [name, handle] of (dir as any).entries()) {
+    if (handle.kind !== 'directory') continue
+    if (!name) continue
+    if (name.startsWith('__') && name.endsWith('__')) continue
+    out.push(name)
+  }
+  return out
 }
 
 export class ClipboardWorker extends Worker {
@@ -128,6 +147,10 @@ export class ClipboardWorker extends Worker {
     return get('@diamondcoreprocessor.com/HistoryService') as HistoryServiceLike | undefined
   }
 
+  get #committer(): LayerCommitterLike | undefined {
+    return get('@diamondcoreprocessor.com/LayerCommitter') as LayerCommitterLike | undefined
+  }
+
   get #selection(): SelectionLike | undefined {
     const svc = get('@diamondcoreprocessor.com/SelectionService') as SelectionLike | undefined
     if (svc && svc.selected.size > 0) return svc
@@ -175,6 +198,19 @@ export class ClipboardWorker extends Worker {
 
       this.#clipboardSvc?.capture(moved, segments, 'cut')
 
+      // Bump the FS-change marker so renders triggered by the cascade
+      // below (cursor.onNewLayer) see the post-mutation OPFS state.
+      EffectBus.emit('fs:changed', { segments: [...segments] })
+
+      // ONE layer commit reflecting the new children list. Per-cell
+      // cell:removed events fire AFTER so LayerCommitter's per-event
+      // commits dedup against the already-committed bulk state.
+      const committer = this.#committer
+      if (committer) {
+        const newChildren = await listChildNames(sourceDir)
+        await committer.update(segments, { children: newChildren })
+      }
+
       for (const label of moved) {
         EffectBus.emit('cell:removed', { cell: label, segments: [...segments] })
       }
@@ -182,8 +218,7 @@ export class ClipboardWorker extends Worker {
 
       EffectBus.emit('clipboard:captured', { labels: [...moved], op: 'cut' })
 
-      // Allow history remove ops to flush before triggering re-render
-      setTimeout(() => void new hypercomb().act(), 80)
+      await new hypercomb().act()
 
       void this.#persistMeta('cut', moved, segments)
       return
@@ -261,9 +296,21 @@ export class ClipboardWorker extends Worker {
       }
     }
 
+    // Bump FS-change marker so renders triggered by the cascade below
+    // see the post-mutation OPFS state.
+    if (placed.length > 0) EffectBus.emit('fs:changed', { segments: [...targetSegments] })
+
+    // ONE layer commit reflecting the new children list at the target.
+    const committer = this.#committer
+    if (committer && placed.length > 0) {
+      const newChildren = await listChildNames(targetDir)
+      await committer.update(targetSegments, { children: newChildren })
+    }
+
     for (const entry of placed) {
       EffectBus.emit('cell:added', { cell: entry.label, segments: [...targetSegments] })
     }
+    if (placed.length > 0) await new hypercomb().act()
 
     const placedLabels = placed.map(p => p.label)
     // cut: drop only the items that actually moved. Failed moves stay on
@@ -340,9 +387,20 @@ export class ClipboardWorker extends Worker {
       }
     }
 
+    // Bump FS-change marker so renders during the cascade see fresh OPFS.
+    if (placed.length > 0) EffectBus.emit('fs:changed', { segments: [...targetSegments] })
+
+    // ONE layer commit reflecting the new children list at the target.
+    const committer = this.#committer
+    if (committer && placed.length > 0) {
+      const newChildren = await listChildNames(targetDir)
+      await committer.update(targetSegments, { children: newChildren })
+    }
+
     for (const entry of placed) {
       EffectBus.emit('cell:added', { cell: entry.label, segments: [...targetSegments] })
     }
+    if (placed.length > 0) await new hypercomb().act()
 
     const placedLabels = placed.map(p => p.label)
     clipboardSvc.removeItems(new Set(placedLabels))

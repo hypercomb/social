@@ -53,54 +53,40 @@ export class BatchCreateBehavior implements CommandLineBehavior {
     const expanded = this.#expand(input, completions)
     if (!expanded.length) return
 
-    // Track every distinct (parent-lineage → leaf-cell-name) created
-    // in this batch. Each unique parent emits one cell:added event
-    // carrying the parent's segments — that lineage gets a layer
-    // commit, and the cascade walks up to the root.
-    //
-    // For "abc/[123,456]" typed from /A: parents = { ["A","abc"] }
-    // → one event with segments=["A","abc"]. Cascade: /A/abc, /A, /.
-    //
-    // For "[a,b,c]" typed from /A: parents = { ["A"] }
-    // → one event with segments=["A"]. Cascade: /A, /.
-    //
-    // For "[abc/x, def/y]" typed from /A: parents = { ["A","abc"], ["A","def"] }
-    // → two events, each cascading independently.
+    // Track all (parent-lineage → added-cell-names) and (parent-lineage →
+    // removed-cell-names) so we can fire ONE layer commit per affected
+    // parent (vs N per cell).
     const baseSegments = (lineage as unknown as { explorerSegments?: () => string[] })?.explorerSegments?.() ?? []
-    const parentsAdded = new Map<string, { segments: string[]; firstCell: string }>()
+    const addsByParent = new Map<string, { segments: string[]; names: string[] }>()
+    const removesByParent = new Map<string, { segments: string[]; names: string[] }>()
     const tagOps: TagOp[] = []
-    let removedFiredFor: string[] | null = null
 
-    const recordParent = (parentSegments: string[], leafCell: string) => {
+    const recordAdd = (parentSegments: string[], leafCell: string) => {
       const key = parentSegments.join('/')
-      if (!parentsAdded.has(key)) {
-        parentsAdded.set(key, { segments: parentSegments.slice(), firstCell: leafCell })
-      }
+      const entry = addsByParent.get(key) ?? { segments: parentSegments.slice(), names: [] }
+      if (!entry.names.includes(leafCell)) entry.names.push(leafCell)
+      addsByParent.set(key, entry)
+    }
+    const recordRemove = (parentSegments: string[], leafCell: string) => {
+      const key = parentSegments.join('/')
+      const entry = removesByParent.get(key) ?? { segments: parentSegments.slice(), names: [] }
+      entry.names.push(leafCell)
+      removesByParent.set(key, entry)
     }
 
     for (const item of expanded) {
       if (item.op === 'delete') {
-        await this.#deleteTarget(dir, item.segments)
-        if (item.segments[0]) {
-          // The deleted tile lived at baseSegments + item.segments[0..-1]
+        const ok = await this.#deleteTarget(dir, item.segments)
+        if (ok && item.segments[0]) {
           const parentSegs = [...baseSegments, ...item.segments.slice(0, -1)]
-          EffectBus.emit('cell:removed', {
-            cell: item.segments[item.segments.length - 1],
-            segments: parentSegs,
-          })
-          removedFiredFor = parentSegs
+          recordRemove(parentSegs, item.segments[item.segments.length - 1])
         }
       } else if (item.op === 'tag-add' || item.op === 'tag-remove') {
-        // ensure the cell exists for tag-add — record EVERY level
-        // along the way (each level may have gained a child).
         if (item.op === 'tag-add') {
           let parent = dir
           const accumulated: string[] = [...baseSegments]
           for (const part of item.segments) {
-            // Before walking deeper, the lineage at `accumulated`
-            // gains `part` as a child. Record one event per gained
-            // child so each affected lineage commits its own marker.
-            recordParent([...accumulated], part)
+            recordAdd([...accumulated], part)
             parent = await parent.getDirectoryHandle(part, { create: true })
             accumulated.push(part)
           }
@@ -114,16 +100,10 @@ export class BatchCreateBehavior implements CommandLineBehavior {
           })
         }
       } else {
-        // create — walk every level. Each level along the path may
-        // be a freshly-created lineage, so each one needs its own
-        // commit. Without a per-level event, intermediate lineages
-        // (e.g. /abc when typing `abc/123` from root) would be
-        // visible-but-historyless until something else triggered
-        // their bag.
         let parent = dir
         const accumulated: string[] = [...baseSegments]
         for (const part of item.segments) {
-          recordParent([...accumulated], part)
+          recordAdd([...accumulated], part)
           parent = await parent.getDirectoryHandle(part, { create: true })
           accumulated.push(part)
         }
@@ -135,11 +115,37 @@ export class BatchCreateBehavior implements CommandLineBehavior {
       await persistTagOps(tagOps, dir)
     }
 
-    // One event per UNIQUE parent lineage. Each cascades independently.
-    for (const { segments, firstCell } of parentsAdded.values()) {
-      EffectBus.emit('cell:added', { cell: firstCell, segments })
+    // Bump FS-change marker so renders during the cascade see fresh OPFS.
+    const allParents = new Map<string, string[]>()
+    for (const { segments } of addsByParent.values()) allParents.set(segments.join('/'), segments)
+    for (const { segments } of removesByParent.values()) allParents.set(segments.join('/'), segments)
+    if (allParents.size > 0) EffectBus.emit('fs:changed', { segments: baseSegments })
+
+    // ONE layer commit per affected parent.
+    const committer = get('@diamondcoreprocessor.com/LayerCommitter') as
+      { update(segments: readonly string[], layer: { [slot: string]: unknown }, nameSlots?: ReadonlySet<string>): Promise<string> }
+      | undefined
+    if (committer) {
+      for (const segments of allParents.values()) {
+        const parentDir = await (lineage as unknown as { tryResolve: (s: readonly string[]) => Promise<FileSystemDirectoryHandle | null> }).tryResolve(segments)
+        if (!parentDir) continue
+        const newChildren: string[] = []
+        for await (const [name, h] of (parentDir as any).entries()) {
+          if (h.kind !== 'directory') continue
+          if (!name || (name.startsWith('__') && name.endsWith('__'))) continue
+          newChildren.push(name)
+        }
+        await committer.update(segments, { children: newChildren })
+      }
     }
-    void removedFiredFor   // satisfies linter; reserved for future per-removal logging
+
+    for (const { segments, names } of addsByParent.values()) {
+      for (const name of names) EffectBus.emit('cell:added', { cell: name, segments })
+    }
+    for (const { segments, names } of removesByParent.values()) {
+      for (const name of names) EffectBus.emit('cell:removed', { cell: name, segments })
+    }
+
     await new hypercomb().act()
   }
 
@@ -210,21 +216,22 @@ export class BatchCreateBehavior implements CommandLineBehavior {
     return results
   }
 
-  async #deleteTarget(root: FileSystemDirectoryHandle, segments: string[]): Promise<void> {
-    if (!segments.length) return
+  async #deleteTarget(root: FileSystemDirectoryHandle, segments: string[]): Promise<boolean> {
+    if (!segments.length) return false
 
     let parent = root
     for (let i = 0; i < segments.length - 1; i++) {
       try {
         parent = await parent.getDirectoryHandle(segments[i], { create: false })
       } catch {
-        return
+        return false
       }
     }
 
     const name = segments[segments.length - 1]
     try {
       await parent.removeEntry(name, { recursive: true })
-    } catch { /* skip */ }
+      return true
+    } catch { return false }
   }
 }
