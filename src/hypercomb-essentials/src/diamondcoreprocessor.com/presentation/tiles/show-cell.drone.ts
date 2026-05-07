@@ -7,7 +7,7 @@ import { HexLabelAtlas } from '../grid/hex-label.atlas.js'
 import { HexImageAtlas } from '../grid/hex-image.atlas.js'
 import { HexSdfTextureShader } from '../grid/hex-sdf.shader.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from '../grid/hex-geometry.js'
-import { isSignature, readCellProperties, writeCellProperties } from '../../editor/tile-properties.js'
+import { isSignature, readCellProperties, writeCellProperties, tilePropertiesCacheKey } from '../../editor/tile-properties.js'
 import type { HistoryService } from '../../history/history.service.js'
 import type { HistoryCursorService, CursorState } from '../../history/history-cursor.service.js'
 import type { ViewportPersistence, ViewportSnapshot } from '../../navigation/zoom/zoom.drone.js'
@@ -56,36 +56,30 @@ type PixiHostApi = {
   container?: Container | null
 }
 
-type SlotsSnapshot = { names: string[]; localCells: Set<string>; branches: Set<string>; mode: 'dense' | 'pinned' }
+type SlotsSnapshot = { names: string[]; localCells: Set<string>; branches: Set<string> }
 
 /**
  * State machine for tile slot ordering — the single source of truth for
  * "which label lives at which index" during incremental updates.
  *
- * Dense mode:  names is a packed array. Remove = splice out. Add = append.
- * Pinned mode: names is sparse with '' gaps to hold slot positions. Remove
- *              replaces with '' (slot preserved). Add returns false — the
- *              LayoutService owns slot assignment, so callers must fall back
- *              to the full render path.
- *
- * Callers never branch on mode — they call remove/add/snapshot and trust
- * the result.
+ * `names` is a sparse array indexed by slot. Remove replaces the entry
+ * with '' so every other tile's index stays stable. Adds always require
+ * a full render pass: slot assignment is owned by the index ordering in
+ * #orderByIndex (which reads/writes each cell's `index` property in
+ * 0000) — there is no in-place append.
  */
 class CellSlots {
   #names: string[] = []
   #local = new Set<string>()
   #branches = new Set<string>()
-  #mode: 'dense' | 'pinned' = 'dense'
   #seeded = false
 
   get seeded(): boolean { return this.#seeded }
-  get mode(): 'dense' | 'pinned' { return this.#mode }
 
   seed(snap: SlotsSnapshot): void {
     this.#names = [...snap.names]
     this.#local = new Set(snap.localCells)
     this.#branches = new Set(snap.branches)
-    this.#mode = snap.mode
     this.#seeded = true
   }
 
@@ -101,13 +95,12 @@ class CellSlots {
       names: [...this.#names],
       localCells: new Set(this.#local),
       branches: new Set(this.#branches),
-      mode: this.#mode,
     }
   }
 
   remove(label: string): void {
-    // Preserve slot position in both modes — replacing with '' keeps every other
-    // tile's index stable so no tile ever shifts on a neighbouring remove.
+    // Replace with '' — keeps every other tile's index stable so no tile
+    // ever shifts on a neighbouring remove.
     for (let i = 0; i < this.#names.length; i++) {
       if (this.#names[i] === label) this.#names[i] = ''
     }
@@ -116,20 +109,12 @@ class CellSlots {
   }
 
   /**
-   * Fill the first gap (''), or append at the end. Gaps exist because remove()
-   * preserves slot positions — reusing them keeps neighbours still.
-   * Pinned mode returns false so LayoutService owns slot assignment.
+   * Adds always return false — slot assignment lives in 0000 (#orderByIndex
+   * persists `index` per cell). Callers fall back to the full render path
+   * which re-reads indices from disk.
    */
-  add(label: string, hasBranch: boolean): boolean {
-    if (this.#mode === 'pinned') return false
-    if (!this.#names.includes(label)) {
-      const gapIndex = this.#names.indexOf('')
-      if (gapIndex >= 0) this.#names[gapIndex] = label
-      else this.#names.push(label)
-    }
-    this.#local.add(label)
-    if (hasBranch) this.#branches.add(label)
-    return true
+  add(_label: string, _hasBranch: boolean): boolean {
+    return false
   }
 }
 
@@ -209,7 +194,7 @@ export class ShowCellDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'tags:changed', 'tags:filter', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -364,7 +349,6 @@ export class ShowCellDrone extends Drone {
   // transition during a cursor-driven undo/redo doesn't snap content
   // back to (0,0) — tiles render at the same world position as before.
   #lastMeshOffset: { x: number; y: number } | null = null
-  #layoutMode: 'dense' | 'pinned' = 'dense'
 
   // First-visit fit: when navigating to a layer that has no saved viewport
   // snapshot, defer layer reveal until all cells have streamed in, then run
@@ -1335,7 +1319,6 @@ export class ShowCellDrone extends Drone {
         this.cachedCellNames = cached.cellNames
         this.cachedLocalCellSet = cached.localCellSet
         this.cachedBranchSet = cached.branchSet
-        this.#layoutMode = this.#readLayoutMode(locationKey)
         this.#pendingRemoves.clear()
         this.renderedCells.clear()
         for (const cell of cached.cells) this.renderedCells.set(cell.label, cell)
@@ -1353,7 +1336,6 @@ export class ShowCellDrone extends Drone {
           names: cached.cellNames,
           localCells: cached.localCellSet,
           branches: cached.branchSet,
-          mode: this.#layoutMode,
         })
 
         this.#emitRenderTags(cached.cells)
@@ -1592,11 +1574,8 @@ export class ShowCellDrone extends Drone {
       }
     }
 
-    // read layout mode for this location
-    this.#layoutMode = this.#readLayoutMode(locationKey)
-
-    // resolve cell ordering through the layout mode strategy
-    const cellNames = await this.#resolveCellOrder(this.#layoutMode, dir, union, localCellSet, lineage)
+    // resolve cell ordering — every cell sits at its persisted `index`
+    const cellNames = await this.#resolveCellOrder(dir, union, localCellSet, lineage)
 
     const previousLocationKey = this.renderedLocationKey
     const layerChanged = locationKey !== previousLocationKey
@@ -1708,7 +1687,7 @@ export class ShowCellDrone extends Drone {
     // cache for instant back-navigation
     this.#layerCellsCache.set(locationKey, { cells: [...cells], cellNames, localCellSet, branchSet })
     // seed the slot state machine — incremental paths read from here after every full render
-    this.#slots.seed({ names: cellNames, localCells: localCellSet, branches: branchSet, mode: this.#layoutMode })
+    this.#slots.seed({ names: cellNames, localCells: localCellSet, branches: branchSet })
   }
 
   private readonly streamCells = async (
@@ -1777,7 +1756,7 @@ export class ShowCellDrone extends Drone {
     if (cells.length > 0) {
       const bset = branchSet ?? new Set<string>()
       this.#layerCellsCache.set(myLocationKey, { cells: [...cells], cellNames, localCellSet, branchSet: bset })
-      this.#slots.seed({ names: cellNames, localCells: localCellSet, branches: bset, mode: this.#layoutMode })
+      this.#slots.seed({ names: cellNames, localCells: localCellSet, branches: bset })
     }
 
     this.requestRender()
@@ -2485,11 +2464,6 @@ export class ShowCellDrone extends Drone {
       void this.#handleReorder(payload.labels)
     })
 
-    // layout:mode and layout:swirl are legacy — the renderer now
-    // operates only in pinned mode. Any incoming event is a no-op so
-    // historical layers that still carry `mode: 'dense'` or a stray
-    // /swirl command don't resurrect the spiral layout.
-
     this.onEffect<{ gapPx: number }>('render:set-gap', (payload) => {
       if (this.#hexGeo.gapPx !== payload.gapPx) {
         this.#hexGeo = createHexGeometry(this.#hexGeo.circumRadiusPx, payload.gapPx, this.#hexGeo.padPx)
@@ -2736,25 +2710,24 @@ export class ShowCellDrone extends Drone {
     return promise
   }
 
-  #layoutModeKey(locationKey: string): string {
-    return `hc:layout-mode:${locationKey}`
-  }
-
-  #readLayoutMode(_locationKey: string): 'dense' | 'pinned' {
-    // Pinned is the canonical default: each cell keeps its slot index
-    // permanently (stored in its 0000 properties). The spiral/contiguous
-    // fill runs only once — to assign an index to a brand-new cell that
-    // has none yet. Removal leaves a gap, never shifts neighbours.
-    return 'pinned'
-  }
-
-  #persistLayoutMode(mode: 'dense' | 'pinned'): void {
-    const lineage = this.resolve<any>('lineage')
-    const locationKey = String(lineage?.explorerLabel?.() ?? '/')
-    localStorage.setItem(this.#layoutModeKey(locationKey), mode)
-  }
-
-  async #orderByIndexPinned(dir: FileSystemDirectoryHandle, names: string[], localCellSet: Set<string>, readOnly = false): Promise<string[]> {
+  /**
+   * Place each cell at its persisted `index` slot. Returns a sparse
+   * array: `cellNames[i]` → axial slot i, '' for unoccupied slots.
+   *
+   * Missing or out-of-range index → push the cell to `unindexed`.
+   * Collision (two cells claiming the same slot) → loser to `unindexed`.
+   * Unindexed cells are then assigned the next free slot and persisted
+   * back to 0000 so the patch sticks across passes. The write-through
+   * cache in tile-properties.ts ensures concurrent reads in the same
+   * pass see the assignment immediately, even before OPFS settles.
+   */
+  async #orderByIndex(
+    dir: FileSystemDirectoryHandle,
+    names: string[],
+    localCellSet: Set<string>,
+    parentSegments: readonly string[],
+    readOnly = false,
+  ): Promise<string[]> {
     const axial = this.resolve<any>('axial')
     const maxSlot = axial?.count ?? 60
     const sparse: string[] = new Array(maxSlot + 1).fill('')
@@ -2769,9 +2742,9 @@ export class ShowCellDrone extends Drone {
       }
       try {
         const cellDir = await dir.getDirectoryHandle(name, { create: false })
-        const props = await readCellProperties(cellDir)
-        if (typeof props['index'] === 'number') {
-          const idx = props['index'] as number
+        const props = await readCellProperties(cellDir, tilePropertiesCacheKey(parentSegments, name))
+        if (typeof props.index === 'number') {
+          const idx = props.index
           if (idx >= 0 && idx <= maxSlot) {
             // collision detection: if slot is already occupied, demote to unindexed
             if (sparse[idx] !== '') {
@@ -2790,7 +2763,9 @@ export class ShowCellDrone extends Drone {
       }
     }
 
-    // place unindexed cells in the first available empty slots and persist their index
+    // Lazy patch: assign next-free slots to unindexed cells and persist
+    // the index back to 0000. The cache update is synchronous so any
+    // concurrent or follow-up read in this pass sees the new index.
     for (const name of unindexed) {
       while (nextFree <= maxSlot && sparse[nextFree] !== '') nextFree++
       if (nextFree <= maxSlot) {
@@ -2798,8 +2773,10 @@ export class ShowCellDrone extends Drone {
         if (!readOnly && localCellSet.has(name)) {
           try {
             const cellDir = await dir.getDirectoryHandle(name, { create: false })
-            await writeCellProperties(cellDir, { index: nextFree })
-          } catch { /* skip */ }
+            await writeCellProperties(cellDir, { index: nextFree }, tilePropertiesCacheKey(parentSegments, name))
+          } catch (err) {
+            console.warn('[show-cell] failed to persist index for', name, err)
+          }
         }
         nextFree++
       }
@@ -2810,14 +2787,12 @@ export class ShowCellDrone extends Drone {
 
   /**
    * Central ordering strategy — all render paths route through here.
-   * Pinned is the only mode: each cell sits at its persisted `index`
-   * slot, gaps are preserved, and collision is resolved by moving the
-   * loser to the next free slot (persisted on write). Returns a sparse
-   * array where cellNames[i] → axial position i, with empty-string
-   * entries marking unoccupied slots.
+   * Each cell sits at its persisted `index` slot, gaps are preserved,
+   * and collisions are resolved by moving the loser to the next free
+   * slot (persisted on write). Returns a sparse array where
+   * `cellNames[i]` → axial position i, with '' for unoccupied slots.
    */
   async #resolveCellOrder(
-    _mode: string,
     dir: FileSystemDirectoryHandle,
     union: Set<string>,
     localCellSet: Set<string>,
@@ -2829,6 +2804,8 @@ export class ShowCellDrone extends Drone {
     if (this.#clipboardView) {
       return [...union].sort((a, b) => a.localeCompare(b))
     }
+
+    const parentSegments = (_lineage as { explorerSegments?: () => readonly string[] })?.explorerSegments?.() ?? []
 
     // When cursor is rewound, use cursor-aware ordering so deletions
     // that happened later don't leave stale slot indices in OPFS
@@ -2844,7 +2821,6 @@ export class ShowCellDrone extends Drone {
       // matching against each child's bag markers. Falls back to
       // live disk ordering when the past layer can't be resolved.
       const historyService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as HistoryService | undefined
-      const parentSegments = (_lineage as { explorerSegments?: () => readonly string[] })?.explorerSegments?.() ?? []
       const orderedNames = (content && historyService)
         ? [...await resolveChildNames(historyService, parentSegments, dir, content)]
         : []
@@ -2859,12 +2835,12 @@ export class ShowCellDrone extends Drone {
         // don't shift across undo — only membership (which slots are
         // occupied) changes between history points. readOnly: rewound
         // viewing must not mutate disk indices.
-        cellNames = await this.#orderByIndexPinned(dir, filtered, localCellSet, true)
+        cellNames = await this.#orderByIndex(dir, filtered, localCellSet, parentSegments, true)
       } else {
-        cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet)
+        cellNames = await this.#orderByIndex(dir, Array.from(union), localCellSet, parentSegments)
       }
     } else {
-      cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet)
+      cellNames = await this.#orderByIndex(dir, Array.from(union), localCellSet, parentSegments)
     }
 
     if (this.filterKeyword) {
@@ -2874,23 +2850,21 @@ export class ShowCellDrone extends Drone {
     return cellNames
   }
 
-  // #orderByIndex (dense-packed) removed — pinned is the only layout
-  // mode. #orderByIndexPinned handles index assignment, collision
-  // detection, and next-available-slot fallback in one pass.
-
   async #handlePlaceAt(cell: string, targetIndex: number): Promise<void> {
     // Index is the source of truth. Place this one cell at the target
     // index — do not renumber anyone else. Render-time collision heal
-    // (in #orderByIndexPinned) demotes any prior occupant to the next
-    // free slot.
+    // (in #orderByIndex) demotes any prior occupant to the next free
+    // slot.
     const lineage = this.resolve<any>('lineage')
     if (!lineage) return
     const dir = await lineage.explorerDir() as FileSystemDirectoryHandle | null
     if (!dir) return
 
+    const parentSegments = (lineage as { explorerSegments?: () => readonly string[] })?.explorerSegments?.() ?? []
+
     try {
       const cellDir = await dir.getDirectoryHandle(cell, { create: false })
-      await writeCellProperties(cellDir, { index: targetIndex })
+      await writeCellProperties(cellDir, { index: targetIndex }, tilePropertiesCacheKey(parentSegments, cell))
     } catch { /* missing cell dir */ }
 
     this.renderedCellsKey = ''
