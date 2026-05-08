@@ -3,6 +3,8 @@ import { DomSanitizer, type SafeResourceUrl } from "@angular/platform-browser"
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 
+declare const __DCP_ORIGIN__: string
+
 const DEFAULT_PORTALS: Record<string, string> = {
   dcp: 'https://diamondcoreprocessor.com',
   meadowverse: 'https://meadowverse.com',
@@ -12,6 +14,7 @@ const DEFAULT_PORTALS: Record<string, string> = {
 const DCP_LOCAL_URL = 'http://localhost:2400'
 
 function resolveDcpUrl(): string {
+  if (typeof __DCP_ORIGIN__ !== 'undefined') return __DCP_ORIGIN__
   const host = window.location.hostname
   const isLocalHost = host === 'localhost' || host === '127.0.0.1'
   return isLocalHost ? DCP_LOCAL_URL : DEFAULT_PORTALS['dcp']

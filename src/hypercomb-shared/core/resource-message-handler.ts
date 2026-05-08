@@ -2,6 +2,8 @@
 
 import { ScriptPreloader, Store } from '@hypercomb/shared/core'
 
+declare const __DCP_ORIGIN__: string
+
 export class ResourceMessageHandler {
 
   private get store(): Store { return <Store>get("@hypercomb.social/Store") }
@@ -10,7 +12,7 @@ export class ResourceMessageHandler {
   // whitelist for allowed postmessage origins
   private readonly allowedOrigins = new Set<string>([
     window.origin,
-    'https://diamondcoreprocessor.com',
+    typeof __DCP_ORIGIN__ !== 'undefined' ? __DCP_ORIGIN__ : 'https://diamondcoreprocessor.com',
     ...(window.location.hostname === 'localhost' ? ['http://localhost:2400'] : []),
   ])
 
