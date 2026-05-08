@@ -371,16 +371,18 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
     const video = this.cameraVideo?.nativeElement
     if (!video || !video.videoWidth) return
 
-    const size = Math.min(video.videoWidth, video.videoHeight)
-    const sx = (video.videoWidth - size) / 2
-    const sy = (video.videoHeight - size) / 2
+    const MAX_PHOTO_PX = 1024
+    const rawSize = Math.min(video.videoWidth, video.videoHeight)
+    const size = Math.min(rawSize, MAX_PHOTO_PX)
+    const sx = (video.videoWidth - rawSize) / 2
+    const sy = (video.videoHeight - rawSize) / 2
 
     const canvas = document.createElement('canvas')
     canvas.width = size
     canvas.height = size
     const ctx = canvas.getContext('2d')
     if (!ctx) { this.closeCamera(); return }
-    ctx.drawImage(video, sx, sy, size, size, 0, 0, size, size)
+    ctx.drawImage(video, sx, sy, rawSize, rawSize, 0, 0, size, size)
 
     const webp = await new Promise<Blob | null>((resolve) =>
       canvas.toBlob((b) => resolve(b), 'image/webp', 0.9),

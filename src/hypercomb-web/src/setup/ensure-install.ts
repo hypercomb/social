@@ -253,7 +253,7 @@ const purgeStaleOpfsArtifacts = async (store: Store): Promise<void> => {
       try { await dir.removeEntry(name, { recursive: true }) } catch { /* skip */ }
     }
   }
-  await Promise.all([purgeDir(store.bees), purgeDir(store.dependencies)])
+  await Promise.all([purgeDir(store.bees), purgeDir(store.dependencies), purgeDir(store.resources)])
   try {
     for await (const [, handle] of store.layers.entries()) {
       if (handle.kind === 'directory') await purgeDir(handle as FileSystemDirectoryHandle)
