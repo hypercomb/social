@@ -2,9 +2,11 @@
 // Tile editor with image manager, link, and border color fields.
 
 import {
+  ChangeDetectorRef,
   Component,
   computed,
   ElementRef,
+  inject,
   ViewChild,
   type AfterViewInit,
   type OnInit,
@@ -30,6 +32,8 @@ import type { LinkSafetyService } from
   styleUrls: ['./tile-editor.component.scss'],
 })
 export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
+
+  readonly #cdr = inject(ChangeDetectorRef)
 
   @ViewChild('imageCanvas', { static: false }) imageCanvas!: ElementRef<HTMLDivElement>
   @ViewChild('cameraVideo', { static: false }) cameraVideo!: ElementRef<HTMLVideoElement>
@@ -106,8 +110,9 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
   public isFlat = false
   public isLinked = true
   public cameraActive = false
-  public cameraFlat = false
+  public hasMultipleCameras = false
   #stream: MediaStream | null = null
+  #facingMode: 'environment' | 'user' = 'environment'
   // track previous open state for init/teardown
   #wasOpen = false
 
@@ -126,6 +131,10 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
       if (!this.editorService?.backgroundColor) this.editorService.setBackgroundColor(this.backgroundColorValue)
 
       document.addEventListener('keydown', this.#onKeyDown)
+      if (this.editorService.autoCamera) {
+        this.editorService.autoCamera = false
+        void this.openCamera()
+      }
       setTimeout(() => this.#initCanvas(), 0)
     }
     if (!isOpen && this.#wasOpen) {
@@ -340,17 +349,22 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
     }
     try {
       this.#stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' },
+        video: { facingMode: { ideal: this.#facingMode } },
       })
-      this.cameraActive = true
-      this.cameraFlat = this.isFlat
-      setTimeout(() => {
-        const video = this.cameraVideo?.nativeElement
-        if (video) video.srcObject = this.#stream
-      }, 0)
     } catch {
       this.cameraFallbackInput?.nativeElement?.click()
+      return
     }
+    this.cameraActive = true
+    this.#cdr.detectChanges()
+    const video = this.cameraVideo?.nativeElement
+    if (video) {
+      video.srcObject = this.#stream
+      video.play().catch(() => {})
+    }
+    navigator.mediaDevices.enumerateDevices()
+      .then(devices => { this.hasMultipleCameras = devices.filter(d => d.kind === 'videoinput').length > 1 })
+      .catch(() => {})
   }
 
   readonly capturePhoto = async (): Promise<void> => {
@@ -368,8 +382,11 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
     if (!ctx) { this.closeCamera(); return }
     ctx.drawImage(video, sx, sy, size, size, 0, 0, size, size)
 
-    const blob = await new Promise<Blob | null>((resolve) =>
+    const webp = await new Promise<Blob | null>((resolve) =>
       canvas.toBlob((b) => resolve(b), 'image/webp', 0.9),
+    )
+    const blob = webp ?? await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob((b) => resolve(b), 'image/jpeg', 0.9),
     )
     if (!blob) { this.closeCamera(); return }
 
@@ -383,10 +400,26 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#stream?.getTracks().forEach(t => t.stop())
     this.#stream = null
     this.cameraActive = false
+    this.hasMultipleCameras = false
   }
 
-  readonly toggleCameraOrientation = (): void => {
-    this.cameraFlat = !this.cameraFlat
+  readonly switchCamera = async (): Promise<void> => {
+    if (!this.#stream) return
+    this.#stream.getTracks().forEach(t => t.stop())
+    this.#stream = null
+    this.#facingMode = this.#facingMode === 'environment' ? 'user' : 'environment'
+    try {
+      this.#stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: this.#facingMode } },
+      })
+      const video = this.cameraVideo?.nativeElement
+      if (video) {
+        video.srcObject = this.#stream
+        video.play().catch(() => {})
+      }
+    } catch {
+      this.cameraActive = false
+    }
   }
 
   // ── search ────────────────────────────────────────────────────

@@ -9,8 +9,11 @@
 // runs inside web's origin, it cannot tamper with DCP's verification
 // logic, trusted domain list, or auditor endpoints.
 
+declare const __DCP_ORIGIN__: string
 const DCP_ORIGIN =
-  globalThis.location?.hostname === 'localhost'
+  typeof __DCP_ORIGIN__ !== 'undefined'
+    ? __DCP_ORIGIN__
+    : globalThis.location?.hostname === 'localhost'
     ? 'http://localhost:2400'
     : 'https://diamondcoreprocessor.com'
 

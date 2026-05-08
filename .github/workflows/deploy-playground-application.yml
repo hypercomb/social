@@ -40,9 +40,15 @@ jobs:
           node ./scripts/build-core-vendor.cjs
           node ../node_modules/tsx/dist/cli.mjs ./scripts/build-pixi-vendor.ts
 
+      - name: Build essentials modules (local bundle)
+        working-directory: src/hypercomb-essentials
+        run: |
+          npm run build
+          node ../node_modules/tsx/dist/cli.mjs ./scripts/build-module.ts --local
+
       - name: Build web app
         working-directory: src/hypercomb-web
-        run: node ../node_modules/@angular/cli/bin/ng.js build --configuration production
+        run: node ../node_modules/@angular/cli/bin/ng.js build --configuration playground
 
       - name: Verify build output
         run: ls -al src/hypercomb-web/dist/hypercomb-web/browser || true

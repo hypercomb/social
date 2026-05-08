@@ -133,16 +133,19 @@
 
   @if (cameraActive) {
     <div class="camera-overlay">
-      <video #cameraVideo autoplay playsinline></video>
-      <div class="camera-hex-frame" [class.flat-top]="cameraFlat"></div>
+      <div class="camera-hex-container" [class.flat-top]="isFlat">
+        <video #cameraVideo autoplay playsinline muted></video>
+      </div>
       <div class="camera-controls">
         <button type="button" class="camera-control-btn" (click)="closeCamera()">
           <span class="hci">Q</span>
         </button>
         <button type="button" class="camera-shutter" (click)="capturePhoto()"></button>
-        <button type="button" class="camera-control-btn" (click)="toggleCameraOrientation()">
-          <span class="hci">r</span>
-        </button>
+        @if (hasMultipleCameras) {
+          <button type="button" class="camera-control-btn" (click)="switchCamera()">
+            <span class="hci" style="display:inline-block;transform:scaleX(-1)">r</span>
+          </button>
+        }
       </div>
     </div>
   }
