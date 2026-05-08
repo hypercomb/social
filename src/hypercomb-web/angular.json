@@ -65,8 +65,8 @@
                 },
                 {
                   "type": "anyComponentStyle",
-                  "maximumWarning": "14kB",
-                  "maximumError": "16kB"
+                  "maximumWarning": "15kB",
+                  "maximumError": "18kB"
                 }
               ],
               "outputHashing": "all"
@@ -81,7 +81,7 @@
               "outputHashing": "all",
               "budgets": [
                 { "type": "initial", "maximumWarning": "650kB", "maximumError": "1MB" },
-                { "type": "anyComponentStyle", "maximumWarning": "14kB", "maximumError": "16kB" }
+                { "type": "anyComponentStyle", "maximumWarning": "15kB", "maximumError": "18kB" }
               ],
               "define": {
                 "__DCP_ORIGIN__": "\"https://dcp.dylanpchiu.com\""
