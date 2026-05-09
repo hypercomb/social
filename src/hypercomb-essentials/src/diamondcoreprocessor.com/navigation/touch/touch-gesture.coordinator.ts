@@ -145,12 +145,9 @@ export class TouchGestureCoordinator {
     if (e.pointerType !== 'touch') return
     if (!this.#canvas) return
 
-    // cancel any active momentum immediately
-    if (this.#momentumRaf !== null) {
-      this.#cancelMomentum()
-      this.#gate?.release(this.#source)
-      this.#emitDragging(false)
-    }
+    // cancel any active momentum immediately (#cancelMomentum releases the
+    // gate and clears the dragging effect when momentum was running)
+    this.#cancelMomentum()
 
     const rect = this.#canvas.getBoundingClientRect()
     if (!this.#isInsideRect(e.clientX, e.clientY, rect)) return
@@ -484,6 +481,11 @@ export class TouchGestureCoordinator {
     if (this.#momentumRaf !== null) {
       cancelAnimationFrame(this.#momentumRaf)
       this.#momentumRaf = null
+      // Momentum holds the gate across the coast. Release it here so any
+      // path that aborts momentum (detach, new pointerdown, hot reload)
+      // doesn't leave the gate permanently claimed.
+      this.#gate?.release(this.#source)
+      this.#emitDragging(false)
     }
     this.#momentumVx = 0
     this.#momentumVy = 0

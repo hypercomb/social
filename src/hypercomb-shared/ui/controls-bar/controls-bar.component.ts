@@ -144,7 +144,15 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
   #idle = signal(false)
   #hovered = signal(false)
-  #locked = signal(false)
+  // Derive lock state from the gate itself rather than maintaining a local
+  // copy. The gate is shared with the editor (which lock/unlocks across
+  // open/close), so a local signal would silently desync — leaving the
+  // visual button stuck in the wrong state and making toggle clicks behave
+  // inversely after the editor cycles.
+  #locked = fromRuntime(
+    get('@diamondcoreprocessor.com/InputGate') as EventTarget | undefined,
+    () => (get('@diamondcoreprocessor.com/InputGate') as { locked?: boolean } | undefined)?.locked ?? false,
+  )
 
   // ── power key state (ctrl / shift / alt held) ──────────
   readonly powerKey = signal<'ctrl' | 'shift' | 'alt' | null>(null)
@@ -518,7 +526,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     return this.navigation.segmentsRaw().length > 0
   })
 
-  readonly locked = this.#locked.asReadonly()
+  readonly locked = this.#locked
   /** Effective button state — drives color: white/green/blue. */
   readonly fitButtonState = computed<'off' | 'global' | 'page'>(() => {
     // Track navigation so this recomputes when the user moves between layers.
@@ -1098,12 +1106,8 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   readonly toggleLock = (): void => {
-    this.#locked.update(v => !v)
-    if (this.#locked()) {
-      this.gate?.lock()
-    } else {
-      this.gate?.unlock()
-    }
+    if (this.gate?.locked) this.gate.unlock()
+    else this.gate?.lock()
   }
 
   readonly zoomIn = (): void => {

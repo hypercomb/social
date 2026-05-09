@@ -9,16 +9,13 @@
   "activity.mesh-private": "maillage → privé",
   "activity.undo": "Annuler",
   "activity.dismiss": "Fermer",
-
   "command-line.placeholder.locked": "nom de cellule...",
   "command-line.placeholder.filter": "filtrer les tuiles...",
   "command-line.placeholder.slash": "saisir un comportement...",
   "command-line.placeholder.default": "partager une intention...",
-
   "palette.title": "Palette de commandes",
   "palette.placeholder": "Saisir une commande...",
   "palette.empty": "Aucune commande correspondante",
-
   "shortcuts.title": "Référence",
   "shortcuts.close": "Fermer",
   "shortcuts.filter-placeholder": "Filtrer commandes, opérations, raccourcis…",
@@ -27,7 +24,6 @@
   "shortcuts.section.keyboard": "Raccourcis clavier",
   "shortcuts.empty": "Aucune correspondance",
   "shortcuts.chord-sep": "puis",
-
   "editor.title": "éditeur de tuile",
   "editor.drop-image": "déposer l'image ici",
   "editor.unlink-transforms": "dissocier les transformations",
@@ -48,7 +44,6 @@
   "editor.search-google": "Rechercher dans Google Images",
   "editor.cancel": "annuler",
   "editor.save": "enregistrer",
-
   "controls.go-back": "retour",
   "controls.back": "retour",
   "controls.dcp": "processeur à noyau diamant",
@@ -86,15 +81,12 @@
   "controls.atomize-particle": "désassemblage de particules",
   "controls.atomize-reassemble": "réassembler",
   "controls.atomize-close": "fermer l'atomiseur",
-
   "slash.atomize-ui": "basculer la barre de l'atomiseur",
-
   "atomizer.spacing-placeholder": "ex. 8px 12px",
   "atomizer.title": "atomiseurs",
   "atomizer.close": "fermer la barre de l'atomiseur",
   "atomizer.empty": "aucun atomiseur",
   "atomizer.reset": "réinitialiser les propriétés",
-
   "explorer.title": "Explorateur OPFS",
   "explorer.entries-label": "entrées OPFS",
   "explorer.copy-package": "Copier le paquet",
@@ -109,18 +101,14 @@
   "explorer.copy": "copier",
   "explorer.remove": "supprimer",
   "explorer.no-entries": "aucune entrée",
-
   "format-painter.title": "Reproduire la mise en forme",
   "format-painter.empty": "Aucune propriété visuelle sur cette tuile",
   "format-painter.apply": "Appliquer à la sélection",
-
   "mesh.secret-placeholder": "sécuriser votre emplacement",
   "mesh.secured": "sécurisé",
-
   "portal.title": "portail",
   "portal.close": "fermer le portail",
   "portal.back": "retour",
-
   "action.command": "commande",
   "action.command.description": "Ouvrir la palette de commandes pour ce tile",
   "action.edit": "modifier",
@@ -139,13 +127,11 @@
   "action.adopt.description": "Ajouter ce tile à votre collection",
   "action.block": "bloquer",
   "action.block.description": "Bloquer ce tile pour qu'il n'apparaisse plus",
-
   "selection.move": "déplacer",
   "selection.cut": "couper",
   "selection.copy": "copier",
   "selection.remove": "supprimer",
   "selection.paste": "coller",
-
   "history.title": "historique de navigation",
   "history.back": "retour",
   "history.forward": "avancer",
@@ -154,8 +140,6 @@
   "history.path": "chemin :",
   "history.depth": "profondeur :",
   "history.active": "actif :",
-
-  "slash.select": "sélectionner les tuiles pour couper/copier/déplacer",
   "slash.remove-builtin": "supprimer les tuiles sélectionnées",
   "slash.help": "Afficher la référence",
   "slash.clear": "Effacer le filtre actif",
@@ -181,18 +165,14 @@
   "slash.record": "Démarrer l'enregistrement de réunion IA avec compilation hiérarchique en direct",
   "slash.domain": "Ajouter, supprimer ou lister les domaines de relais du maillage",
   "slash.substrate": "Basculer les images de fond par défaut pour les nouvelles tuiles",
-
   "substrate.on": "substrat activé → {path}",
   "substrate.off": "substrat désactivé",
   "substrate.here": "substrat → {path}",
-
   "toast.dismiss": "Fermer",
-
   "instruction.click-to-restore": "cliquer pour restaurer",
   "instruction.catalog-title": "Toutes les instructions",
   "instruction.no-instructions": "Aucune instruction disponible. Les drones peuvent déclarer des instructions pour qu'elles apparaissent ici.",
   "controls.instructions": "Basculer les instructions (Ctrl+Clic pour le catalogue)",
-
   "instruction.dcp.open-processor": "Ouvrir le processeur à noyau diamant",
   "instruction.dcp.fit-content": "Ajuster toutes les tuiles à la vue",
   "instruction.dcp.zoom-out": "Dézoomer le canevas",
@@ -201,24 +181,11 @@
   "instruction.dcp.fullscreen": "Basculer le mode plein écran",
   "instruction.dcp.layout-mode": "Basculer entre disposition épinglée et compacte",
   "instruction.dcp.instructions-toggle": "Afficher ou masquer les étiquettes d'instructions sur tous les contrôles",
-
-  "trackplayer.eyebrow": "audio hypercomb",
-  "trackplayer.title": "Livre audio \u201cInspired by Humans\u201d",
-  "trackplayer.description": "Écouter le e-book sur <a href=\"https://inspiredbyhumans.org\" target=\"_blank\" rel=\"noopener\">inspiredbyhumans.org</a>",
-  "trackplayer.loading": "Chargement des pistes...",
-  "trackplayer.empty": "Aucune piste trouvée. Ajoutez des fichiers dans hypercomb-shared/tracks.",
-  "trackplayer.selected": "Piste sélectionnée",
-  "trackplayer.available": "Pistes disponibles",
-  "trackplayer.no-signal": "pas de signal",
-  "trackplayer.play-prequel": "lire le préquel maintenant",
-  "trackplayer.unavailable": "Les pistes sont indisponibles pour le moment.",
-
   "confirm.delete-title": "Confirmer la suppression",
   "confirm.delete-message": "Êtes-vous sûr de vouloir supprimer \"{name}\" ?",
   "confirm.delete-children-warning": "Cet élément contient des enfants qui seront également supprimés définitivement.",
   "confirm.delete": "Supprimer",
   "confirm.cancel": "Annuler",
-
   "editor.done": "terminé",
   "mesh.solo": "mode solo",
   "mesh.swarm": "mode essaim",
@@ -226,7 +193,6 @@
   "selection.hide": "masquer",
   "controls.toggle-input": "afficher la ligne de commande",
   "slash.reroll": "Regénérer les images de fond du substrat sur les tuiles",
-
   "docs.title": "Documentation",
   "docs.close-sidebar": "fermer le panneau latéral",
   "docs.open-sidebar": "ouvrir le panneau latéral",
@@ -236,26 +202,18 @@
   "docs.loading": "Chargement...",
   "docs.main-title": "Documentation Hypercomb",
   "docs.welcome-text": "Sélectionnez un document dans le panneau latéral ou utilisez /docs glossary pour accéder directement à une page.",
-
   "command-line.install-prompt": "Installer Hypercomb",
   "command-line.create-cell": "Créer une nouvelle cellule au niveau actuel",
   "command-line.create-nested": "Créer des dossiers imbriqués, rester au niveau actuel avec le chemin parent conservé",
   "command-line.navigate-folder": "Aller dans un dossier, le créer s'il n'existe pas",
   "command-line.filter-tiles": "Filtrer les tuiles en direct par mot-clé",
-
   "audio.pause": "pause",
   "audio.play": "lecture",
   "audio.seek": "rechercher",
-
-  "trackplayer.close-player": "fermer le lecteur",
-  "trackplayer.no-signal-label": "interlude sans signal",
-
   "controls.drag-to-move": "glisser pour déplacer",
   "controls.collapse": "réduire",
   "controls.expand": "développer",
-
   "selection.drag-to-move": "glisser pour déplacer",
-
   "breadcrumb.public": "public",
   "breadcrumb.private": "privé",
   "breadcrumb.secure": "sécurisé",
@@ -265,7 +223,6 @@
   "breadcrumb.installed": "installé",
   "breadcrumb.installed-count": "installé ({count})",
   "breadcrumb.sync-error": "erreur de synchronisation",
-
   "keymap.escape": "Annuler / fermer",
   "keymap.shortcuts": "Afficher les raccourcis clavier",
   "keymap.palette": "Ouvrir la palette de commandes",
@@ -282,7 +239,6 @@
   "keymap.paste": "Coller depuis le presse-papiers",
   "keymap.cut": "Couper les tuiles sélectionnées",
   "keymap.remove": "Supprimer les tuiles sélectionnées",
-
   "dcp.title": "Processeur de Noyau Diamant",
   "dcp.install": "Installer",
   "dcp.download-package": "Télécharger le paquet",
@@ -351,7 +307,6 @@
   "dcp.editor-modified": "modifié",
   "dcp.editor-loading-files": "Chargement des fichiers...",
   "dcp.editor-empty": "Aucune abeille ni dépendance dans cette couche.",
-
   "cell.welcome": "bienvenue",
   "cell.home": "accueil",
   "cell.settings": "paramètres",
@@ -394,7 +349,6 @@
   "cell.meetings": "réunions",
   "cell.the-depths": "les profondeurs",
   "cell.one-day": "un jour",
-
   "cell.assistant": "assistant",
   "cell.avatars": "avatars",
   "cell.background": "arrière-plan",

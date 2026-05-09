@@ -59,7 +59,17 @@ EffectBus.on<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
     return
   }
 
-  // Priority 5: generic fallback for future consumers
+  // Priority 5: force-clear the InputGate as last-resort recovery. Any
+  // leaked claim (touch momentum aborted mid-coast, drag canceled outside
+  // a release path) or unmatched lock would otherwise permanently block
+  // wheel zoom with no user-visible recovery. Escape clears the slate.
+  const gate = window.ioc.get<{ active: boolean; clear?(): void }>('@diamondcoreprocessor.com/InputGate')
+  if (gate?.active) {
+    gate.clear?.()
+    return
+  }
+
+  // Priority 6: generic fallback for future consumers
   EffectBus.emit('global:escape', undefined)
 })
 

@@ -1,23 +1,30 @@
 // diamondcoreprocessor.com/commands/player.queen.ts
 
-import { QueenBee, EffectBus } from '@hypercomb/core'
+import { QueenBee } from '@hypercomb/core'
 
-const DISMISSED_KEY = 'hc:player-dismissed'
+const EBOOK_URL = 'https://inspiredbyhumans.org'
 
 /**
- * /ebook — open the track player.
+ * /ebook — open the standalone audiobook in a new tab.
  *
- * The track player no longer auto-opens. Invoking this queen clears
- * any persisted dismissal flag and opens the player.
+ * The in-app track player has been retired from hypercomb.io. The
+ * audiobook lives at its own domain so this queen just opens that
+ * URL in a fresh tab and gets out of the way. No assets, no overlay,
+ * no audio elements in the main app — keeping the surface lean.
  */
 export class PlayerQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'ebook'
-  override description = 'Open the track player'
+  override description = 'Open the audiobook (inspiredbyhumans.org) in a new tab'
 
   protected execute(_args: string): void {
-    try { localStorage.removeItem(DISMISSED_KEY) } catch { /* storage unavailable */ }
-    EffectBus.emit('player:open', {})
+    try {
+      window.open(EBOOK_URL, '_blank', 'noopener,noreferrer')
+    } catch {
+      // Pop-up blocked or window.open unavailable — fall back to
+      // a same-tab navigation so the user still reaches the page.
+      window.location.href = EBOOK_URL
+    }
   }
 }
 

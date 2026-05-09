@@ -9,16 +9,13 @@
   "activity.mesh-private": "ağ → özel",
   "activity.undo": "Geri Al",
   "activity.dismiss": "Kapat",
-
   "command-line.placeholder.locked": "hücre adı girin...",
   "command-line.placeholder.filter": "döşemeleri filtrele...",
   "command-line.placeholder.slash": "bir davranış yazın...",
   "command-line.placeholder.default": "niyet paylaş...",
-
   "palette.title": "Komut Paleti",
   "palette.placeholder": "Bir komut yazın...",
   "palette.empty": "Eşleşen komut yok",
-
   "shortcuts.title": "Referans",
   "shortcuts.close": "Kapat",
   "shortcuts.filter-placeholder": "Komutlar, işlemler, kısayollar filtrele…",
@@ -27,7 +24,6 @@
   "shortcuts.section.keyboard": "Klavye kısayolları",
   "shortcuts.empty": "Eşleşme yok",
   "shortcuts.chord-sep": "sonra",
-
   "editor.title": "döşeme düzenleyici",
   "editor.drop-image": "resmi buraya bırakın",
   "editor.unlink-transforms": "dönüşümlerin bağlantısını kaldır",
@@ -48,7 +44,6 @@
   "editor.search-google": "Google Görseller'de Ara",
   "editor.cancel": "iptal",
   "editor.save": "kaydet",
-
   "controls.go-back": "geri dön",
   "controls.back": "geri",
   "controls.dcp": "elmas çekirdek işlemci",
@@ -86,15 +81,12 @@
   "controls.atomize-particle": "parçacık ayrıştırma",
   "controls.atomize-reassemble": "yeniden birleştir",
   "controls.atomize-close": "atomizer'ı kapat",
-
   "slash.atomize-ui": "atomizer araç çubuğunu değiştir",
-
   "atomizer.spacing-placeholder": "ör. 8px 12px",
   "atomizer.title": "atomizer'lar",
   "atomizer.close": "atomizer çubuğunu kapat",
   "atomizer.empty": "atomizer yok",
   "atomizer.reset": "özellikleri sıfırla",
-
   "explorer.title": "OPFS Gezgini",
   "explorer.entries-label": "OPFS girişleri",
   "explorer.copy-package": "Paketi kopyala",
@@ -109,18 +101,14 @@
   "explorer.copy": "kopyala",
   "explorer.remove": "kaldır",
   "explorer.no-entries": "giriş yok",
-
   "format-painter.title": "Biçim Boyacısı",
   "format-painter.empty": "Bu döşemede görsel özellik yok",
   "format-painter.apply": "Seçime uygula",
-
   "mesh.secret-placeholder": "konumunuzu güvenli hale getirin",
   "mesh.secured": "güvenli",
-
   "portal.title": "portal",
   "portal.close": "portalı kapat",
   "portal.back": "geri",
-
   "action.command": "komut",
   "action.command.description": "Bu kutucuk için komut paletini aç",
   "action.edit": "düzenle",
@@ -139,13 +127,11 @@
   "action.adopt.description": "Bu kutucuğu koleksiyonuna ekle",
   "action.block": "engelle",
   "action.block.description": "Bu kutucuğu görünmemesi için engelle",
-
   "selection.move": "taşı",
   "selection.cut": "kes",
   "selection.copy": "kopyala",
   "selection.remove": "kaldır",
   "selection.paste": "yapıştır",
-
   "history.title": "tarayıcı geçmişi",
   "history.back": "geri",
   "history.forward": "ileri",
@@ -154,8 +140,6 @@
   "history.path": "yol:",
   "history.depth": "derinlik:",
   "history.active": "etkin:",
-
-  "slash.select": "kes/kopyala/taşı için döşemeleri seç",
   "slash.remove-builtin": "seçili döşemeleri kaldır",
   "slash.help": "Referansı göster",
   "slash.clear": "Etkin filtreyi temizle",
@@ -181,18 +165,14 @@
   "slash.record": "Canlı hiyerarşi derlemeli AI toplantı kaydını başlat",
   "slash.domain": "Ağ aktarma alan adlarını ekle, kaldır veya listele",
   "slash.substrate": "Yeni döşemeler için varsayılan arka plan resimlerini değiştir",
-
   "substrate.on": "altkatman açık → {path}",
   "substrate.off": "altkatman kapalı",
   "substrate.here": "altkatman → {path}",
-
   "toast.dismiss": "Kapat",
-
   "instruction.click-to-restore": "geri yüklemek için tıklayın",
   "instruction.catalog-title": "Tüm Talimatlar",
   "instruction.no-instructions": "Talimat mevcut değil. Drone'lar burada görünmek üzere talimat bildirebilir.",
   "controls.instructions": "Talimatları değiştir (Katalog için Ctrl+Tıkla)",
-
   "instruction.dcp.open-processor": "Elmas çekirdek işlemciyi aç",
   "instruction.dcp.fit-content": "Tüm döşemeleri görünüme sığdır",
   "instruction.dcp.zoom-out": "Tuvali uzaklaştır",
@@ -201,24 +181,11 @@
   "instruction.dcp.fullscreen": "Tam ekran modunu değiştir",
   "instruction.dcp.layout-mode": "Sabitlenmiş ve yoğun düzen arasında geçiş yap",
   "instruction.dcp.instructions-toggle": "Tüm kontrollerdeki talimat etiketlerini göster veya gizle",
-
-  "trackplayer.eyebrow": "hypercomb ses",
-  "trackplayer.title": "\u201cInspired by Humans\u201d sesli kitap",
-  "trackplayer.description": "E-kitabı <a href=\"https://inspiredbyhumans.org\" target=\"_blank\" rel=\"noopener\">inspiredbyhumans.org</a> adresinde dinleyin",
-  "trackplayer.loading": "Parçalar yükleniyor...",
-  "trackplayer.empty": "Parça bulunamadı. hypercomb-shared/tracks'e dosya ekleyin.",
-  "trackplayer.selected": "Seçili parça",
-  "trackplayer.available": "Mevcut parçalar",
-  "trackplayer.no-signal": "sinyal yok",
-  "trackplayer.play-prequel": "ön bölümü şimdi oynat",
-  "trackplayer.unavailable": "Parçalar şu anda kullanılamıyor.",
-
   "confirm.delete-title": "Silmeyi Onayla",
   "confirm.delete-message": "\"{name}\" öğesini silmek istediğinizden emin misiniz?",
   "confirm.delete-children-warning": "Bu öğe, kalıcı olarak silinecek alt öğeler içermektedir.",
   "confirm.delete": "Sil",
   "confirm.cancel": "İptal",
-
   "editor.done": "tamam",
   "mesh.solo": "solo mod",
   "mesh.swarm": "sürü modu",
@@ -226,7 +193,6 @@
   "selection.hide": "gizle",
   "controls.toggle-input": "komut satırını göster",
   "slash.reroll": "Karolardaki altlık arka plan görüntülerini yeniden oluştur",
-
   "docs.title": "Belgeler",
   "docs.close-sidebar": "yan paneli kapat",
   "docs.open-sidebar": "yan paneli aç",
@@ -236,26 +202,18 @@
   "docs.loading": "Yükleniyor...",
   "docs.main-title": "Hypercomb Belgeleri",
   "docs.welcome-text": "Yan panelden bir belge seçin veya doğrudan sayfaya gitmek için /docs glossary kullanın.",
-
   "command-line.install-prompt": "Hypercomb'u Kur",
   "command-line.create-cell": "Mevcut seviyede yeni bir hücre oluştur",
   "command-line.create-nested": "İç içe klasörler oluştur, üst yol korunarak mevcut seviyede kal",
   "command-line.navigate-folder": "Bir klasöre git, yoksa oluştur",
   "command-line.filter-tiles": "Anahtar kelimeye göre karoları canlı filtrele",
-
   "audio.pause": "duraklat",
   "audio.play": "oynat",
   "audio.seek": "ara",
-
-  "trackplayer.close-player": "oynatıcıyı kapat",
-  "trackplayer.no-signal-label": "sinyal yok arası",
-
   "controls.drag-to-move": "taşımak için sürükle",
   "controls.collapse": "daralt",
   "controls.expand": "genişlet",
-
   "selection.drag-to-move": "taşımak için sürükle",
-
   "breadcrumb.public": "genel",
   "breadcrumb.private": "özel",
   "breadcrumb.secure": "güvenli",
@@ -265,7 +223,6 @@
   "breadcrumb.installed": "kuruldu",
   "breadcrumb.installed-count": "kuruldu ({count})",
   "breadcrumb.sync-error": "senkronizasyon hatası",
-
   "keymap.escape": "İptal / kapat",
   "keymap.shortcuts": "Klavye kısayollarını göster",
   "keymap.palette": "Komut paletini aç",
@@ -282,7 +239,6 @@
   "keymap.paste": "Panodan yapıştır",
   "keymap.cut": "Seçili karoları kes",
   "keymap.remove": "Seçili karoları kaldır",
-
   "dcp.title": "Elmas Çekirdek İşlemcisi",
   "dcp.install": "Kur",
   "dcp.download-package": "Paketi indir",
@@ -351,7 +307,6 @@
   "dcp.editor-modified": "değiştirildi",
   "dcp.editor-loading-files": "Dosyalar yükleniyor...",
   "dcp.editor-empty": "Bu katmanda arı veya bağımlılık yok.",
-
   "cell.welcome": "hoş geldiniz",
   "cell.home": "ana sayfa",
   "cell.settings": "ayarlar",
@@ -394,7 +349,6 @@
   "cell.meetings": "toplantılar",
   "cell.the-depths": "derinlikler",
   "cell.one-day": "bir gün",
-
   "cell.assistant": "asistan",
   "cell.avatars": "avatarlar",
   "cell.background": "arka plan",

@@ -9,16 +9,13 @@
   "activity.mesh-private": "मेश → निजी",
   "activity.undo": "पूर्ववत करें",
   "activity.dismiss": "बंद करें",
-
   "command-line.placeholder.locked": "सेल का नाम दर्ज करें...",
   "command-line.placeholder.filter": "टाइलें फ़िल्टर करें...",
   "command-line.placeholder.slash": "व्यवहार टाइप करें...",
   "command-line.placeholder.default": "इरादा साझा करें...",
-
   "palette.title": "कमांड पैलेट",
   "palette.placeholder": "कमांड टाइप करें...",
   "palette.empty": "कोई मेल खाता कमांड नहीं",
-
   "shortcuts.title": "संदर्भ",
   "shortcuts.close": "बंद करें",
   "shortcuts.filter-placeholder": "कमांड, ऑपरेशन, शॉर्टकट फ़िल्टर करें…",
@@ -27,7 +24,6 @@
   "shortcuts.section.keyboard": "कीबोर्ड शॉर्टकट",
   "shortcuts.empty": "कोई मिलान नहीं",
   "shortcuts.chord-sep": "फिर",
-
   "editor.title": "टाइल संपादक",
   "editor.drop-image": "छवि यहाँ छोड़ें",
   "editor.unlink-transforms": "रूपांतरण अनलिंक करें",
@@ -48,7 +44,6 @@
   "editor.search-google": "Google छवियों में खोजें",
   "editor.cancel": "रद्द करें",
   "editor.save": "सहेजें",
-
   "controls.go-back": "वापस जाएँ",
   "controls.back": "पीछे",
   "controls.dcp": "डायमंड कोर प्रोसेसर",
@@ -86,15 +81,12 @@
   "controls.atomize-particle": "कण विघटन",
   "controls.atomize-reassemble": "पुनः संयोजन",
   "controls.atomize-close": "ऐटमाइज़र बंद करें",
-
   "slash.atomize-ui": "ऐटमाइज़र टूलबार टॉगल करें",
-
   "atomizer.spacing-placeholder": "जैसे 8px 12px",
   "atomizer.title": "ऐटमाइज़र",
   "atomizer.close": "ऐटमाइज़र बार बंद करें",
   "atomizer.empty": "कोई ऐटमाइज़र नहीं",
   "atomizer.reset": "गुण रीसेट करें",
-
   "explorer.title": "OPFS एक्सप्लोरर",
   "explorer.entries-label": "OPFS प्रविष्टियाँ",
   "explorer.copy-package": "पैकेज कॉपी करें",
@@ -109,18 +101,14 @@
   "explorer.copy": "कॉपी",
   "explorer.remove": "हटाएँ",
   "explorer.no-entries": "कोई प्रविष्टि नहीं",
-
   "format-painter.title": "फ़ॉर्मेट पेंटर",
   "format-painter.empty": "इस टाइल पर कोई दृश्य गुण नहीं",
   "format-painter.apply": "चयन पर लागू करें",
-
   "mesh.secret-placeholder": "अपना स्थान सुरक्षित करें",
   "mesh.secured": "सुरक्षित",
-
   "portal.title": "पोर्टल",
   "portal.close": "पोर्टल बंद करें",
   "portal.back": "पीछे",
-
   "action.command": "कमांड",
   "action.command.description": "इस टाइल के लिए कमांड पैलेट खोलें",
   "action.edit": "संपादित करें",
@@ -139,13 +127,11 @@
   "action.adopt.description": "इस टाइल को अपने संग्रह में जोड़ें",
   "action.block": "ब्लॉक करें",
   "action.block.description": "इस टाइल को अपने दृश्य में दिखने से रोकें",
-
   "selection.move": "ले जाएँ",
   "selection.cut": "काटें",
   "selection.copy": "कॉपी",
   "selection.remove": "हटाएँ",
   "selection.paste": "चिपकाएँ",
-
   "history.title": "ब्राउज़र इतिहास",
   "history.back": "पीछे",
   "history.forward": "आगे",
@@ -154,8 +140,6 @@
   "history.path": "पथ:",
   "history.depth": "गहराई:",
   "history.active": "सक्रिय:",
-
-  "slash.select": "काटने/कॉपी/स्थानांतरित करने के लिए टाइलें चुनें",
   "slash.remove-builtin": "चयनित टाइलें हटाएँ",
   "slash.help": "संदर्भ दिखाएँ",
   "slash.clear": "सक्रिय फ़िल्टर साफ़ करें",
@@ -181,18 +165,14 @@
   "slash.record": "AI मीटिंग रिकॉर्डिंग और लाइव पदानुक्रम संकलन शुरू करें",
   "slash.domain": "मेश रिले डोमेन जोड़ें, हटाएँ या सूचीबद्ध करें",
   "slash.substrate": "नई टाइलों के लिए डिफ़ॉल्ट पृष्ठभूमि छवियाँ टॉगल करें",
-
   "substrate.on": "सबस्ट्रेट चालू → {path}",
   "substrate.off": "सबस्ट्रेट बंद",
   "substrate.here": "सबस्ट्रेट → {path}",
-
   "toast.dismiss": "बंद करें",
-
   "instruction.click-to-restore": "पुनर्स्थापित करने के लिए क्लिक करें",
   "instruction.catalog-title": "सभी निर्देश",
   "instruction.no-instructions": "कोई निर्देश उपलब्ध नहीं। ड्रोन यहाँ दिखाई देने के लिए निर्देश घोषित कर सकते हैं।",
   "controls.instructions": "निर्देश टॉगल करें (Ctrl+क्लिक कैटलॉग के लिए)",
-
   "instruction.dcp.open-processor": "डायमंड कोर प्रोसेसर खोलें",
   "instruction.dcp.fit-content": "सभी टाइलों को दृश्य में फ़िट करें",
   "instruction.dcp.zoom-out": "कैनवास ज़ूम आउट करें",
@@ -201,24 +181,11 @@
   "instruction.dcp.fullscreen": "पूर्ण स्क्रीन मोड टॉगल करें",
   "instruction.dcp.layout-mode": "पिन किए गए और सघन लेआउट के बीच स्विच करें",
   "instruction.dcp.instructions-toggle": "सभी नियंत्रणों पर निर्देश लेबल दिखाएँ या छिपाएँ",
-
-  "trackplayer.eyebrow": "hypercomb ऑडियो",
-  "trackplayer.title": "\u201cInspired by Humans\u201d ऑडियोबुक",
-  "trackplayer.description": "ई-बुक सुनें <a href=\"https://inspiredbyhumans.org\" target=\"_blank\" rel=\"noopener\">inspiredbyhumans.org</a> पर",
-  "trackplayer.loading": "ट्रैक लोड हो रहे हैं...",
-  "trackplayer.empty": "कोई ट्रैक नहीं मिला। hypercomb-shared/tracks में फ़ाइलें जोड़ें।",
-  "trackplayer.selected": "चयनित ट्रैक",
-  "trackplayer.available": "उपलब्ध ट्रैक",
-  "trackplayer.no-signal": "कोई सिग्नल नहीं",
-  "trackplayer.play-prequel": "अभी प्रीक्वल चलाएँ",
-  "trackplayer.unavailable": "ट्रैक अभी उपलब्ध नहीं हैं।",
-
   "confirm.delete-title": "हटाने की पुष्टि करें",
   "confirm.delete-message": "क्या आप वाकई \"{name}\" को हटाना चाहते हैं?",
   "confirm.delete-children-warning": "इस आइटम में बच्चे हैं जो स्थायी रूप से हटा दिए जाएँगे।",
   "confirm.delete": "हटाएं",
   "confirm.cancel": "रद्द करें",
-
   "editor.done": "पूर्ण",
   "mesh.solo": "सोलो मोड",
   "mesh.swarm": "स्वार्म मोड",
@@ -226,7 +193,6 @@
   "selection.hide": "छुपाएं",
   "controls.toggle-input": "कमांड लाइन दिखाएं",
   "slash.reroll": "टाइलों पर सब्सट्रेट पृष्ठभूमि छवियां फिर से जनरेट करें",
-
   "docs.title": "दस्तावेज़ीकरण",
   "docs.close-sidebar": "साइडबार बंद करें",
   "docs.open-sidebar": "साइडबार खोलें",
@@ -236,26 +202,18 @@
   "docs.loading": "लोड हो रहा है...",
   "docs.main-title": "Hypercomb दस्तावेज़ीकरण",
   "docs.welcome-text": "साइडबार से दस्तावेज़ चुनें या /docs glossary का उपयोग करके सीधे पेज पर जाएं।",
-
   "command-line.install-prompt": "Hypercomb इंस्टॉल करें",
   "command-line.create-cell": "वर्तमान स्तर पर नया सेल बनाएं",
   "command-line.create-nested": "नेस्टेड फ़ोल्डर बनाएं, पैरेंट पथ बनाए रखते हुए वर्तमान स्तर पर रहें",
   "command-line.navigate-folder": "फ़ोल्डर में जाएं, न होने पर बनाएं",
   "command-line.filter-tiles": "कीवर्ड से टाइलों को लाइव फ़िल्टर करें",
-
   "audio.pause": "रोकें",
   "audio.play": "चलाएं",
   "audio.seek": "खोजें",
-
-  "trackplayer.close-player": "प्लेयर बंद करें",
-  "trackplayer.no-signal-label": "सिग्नल रहित इंटरल्यूड",
-
   "controls.drag-to-move": "स्थानांतरित करने के लिए खींचें",
   "controls.collapse": "संक्षिप्त करें",
   "controls.expand": "विस्तृत करें",
-
   "selection.drag-to-move": "स्थानांतरित करने के लिए खींचें",
-
   "breadcrumb.public": "सार्वजनिक",
   "breadcrumb.private": "निजी",
   "breadcrumb.secure": "सुरक्षित",
@@ -265,7 +223,6 @@
   "breadcrumb.installed": "इंस्टॉल हो गया",
   "breadcrumb.installed-count": "इंस्टॉल हो गया ({count})",
   "breadcrumb.sync-error": "सिंक त्रुटि",
-
   "keymap.escape": "रद्द करें / बंद करें",
   "keymap.shortcuts": "कीबोर्ड शॉर्टकट दिखाएं",
   "keymap.palette": "कमांड पैलेट खोलें",
@@ -282,7 +239,6 @@
   "keymap.paste": "क्लिपबोर्ड से पेस्ट करें",
   "keymap.cut": "चयनित टाइलें काटें",
   "keymap.remove": "चयनित टाइलें हटाएं",
-
   "dcp.title": "डायमंड कोर प्रोसेसर",
   "dcp.install": "इंस्टॉल करें",
   "dcp.download-package": "पैकेज डाउनलोड करें",
@@ -351,7 +307,6 @@
   "dcp.editor-modified": "संशोधित",
   "dcp.editor-loading-files": "फ़ाइलें लोड हो रही हैं...",
   "dcp.editor-empty": "इस लेयर में कोई बी या निर्भरता नहीं है।",
-
   "cell.welcome": "स्वागत",
   "cell.home": "होम",
   "cell.settings": "सेटिंग्स",
@@ -394,7 +349,6 @@
   "cell.meetings": "बैठकें",
   "cell.the-depths": "गहराइयाँ",
   "cell.one-day": "किसी दिन",
-
   "cell.assistant": "सहायक",
   "cell.avatars": "अवतार",
   "cell.background": "पृष्ठभूमि",

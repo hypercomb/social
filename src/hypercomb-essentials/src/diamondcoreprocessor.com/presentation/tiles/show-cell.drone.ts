@@ -3142,7 +3142,9 @@ export class ShowCellDrone extends Drone {
           try {
             const cellDir = await dir.getDirectoryHandle(name, { create: false })
             await writeCellProperties(cellDir, { index: nextFree })
-          } catch { /* skip */ }
+          } catch (err) {
+            console.warn('[show-cell] failed to persist 0000.index for', name, err)
+          }
         }
         nextFree++
       }

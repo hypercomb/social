@@ -1,0 +1,426 @@
+// diamondcoreprocessor.com/sharing/paired-channel.drone.ts
+//
+// Orchestrator for paired-channel sync. Holds one PairedChannelMachine
+// per joined channel and pipes incoming events through it. Translates
+// machine transitions into EffectBus events for UI consumers, and
+// exposes a small API for actions originated by the user (request a
+// share, approve a request, pull an approved share).
+//
+// In-memory only. Protocol events themselves never touch history —
+// they're ephemeral, they live on the relay until expiration. The
+// only history op produced by sync is the layer-commit that lands
+// when a participant accepts an approved share, and that's emitted
+// through the same `cell:added` channel everything else uses, not
+// through any special protocol-aware path.
+
+import { Drone, EffectBus } from '@hypercomb/core'
+import {
+  channelIdForLineage,
+  type ChannelEvent,
+  type ChannelSubscription,
+  type ChannelVerb,
+  type LineageLike,
+  type PairedChannelService,
+} from './paired-channel.service.js'
+import {
+  PairedChannelMachine,
+  canonicaliseLayerContent,
+  type PairedLayerContent,
+  type ShareState,
+  type Transition,
+} from './paired-channel.machine.js'
+
+const SECRET_STORAGE_KEY = 'hypercomb.paired-channel.secret'
+const LOCATION_STORAGE_KEY = 'hypercomb.paired-channel.location'
+
+// EffectBus events emitted to UI consumers.
+export const PAIRED_CHANNEL_EFFECTS = {
+  joined: 'paired-channel:joined',
+  left: 'paired-channel:left',
+  hostElected: 'paired-channel:host-elected',
+  joinRequestReceived: 'paired-channel:join-request-received',
+  memberAdmitted: 'paired-channel:member-admitted',
+  shareRequestReceived: 'paired-channel:share-request-received',
+  shareApproved: 'paired-channel:share-approved',
+  shareRevoked: 'paired-channel:share-revoked',
+  sharePulled: 'paired-channel:share-pulled',
+  layerReceived: 'paired-channel:layer-received',
+  auditApproval: 'paired-channel:audit-approval',
+  auditRejection: 'paired-channel:audit-rejection',
+} as const
+
+interface JoinedChannel {
+  channelId: string
+  location: string
+  secret: string
+  machine: PairedChannelMachine
+  subscription: ChannelSubscription
+}
+
+export class PairedChannelDrone extends Drone {
+
+  readonly namespace = 'diamondcoreprocessor.com'
+  override genotype = 'sharing'
+
+  public override description =
+    'Orchestrator for paired-channel sync. One state machine per joined channel; ephemeral protocol state, only materialised layers reach history.'
+
+  public override grammar = [{ example: 'paired-channel join' }]
+
+  public override effects = [] as const
+
+  // No special listens — the drone subscribes to the mesh directly via
+  // PairedChannelService, not via the EffectBus.
+  protected override listens: string[] = []
+
+  protected override emits: string[] = Object.values(PAIRED_CHANNEL_EFFECTS)
+
+  // ── state ─────────────────────────────────────────────────────────
+
+  readonly #channels = new Map<string, JoinedChannel>()
+
+  // ── lifecycle ─────────────────────────────────────────────────────
+
+  /**
+   * Drone heartbeat — runs on every pulse. v0: reads a single
+   * (location, secret) from localStorage and auto-joins. The location
+   * is parsed into segments and signed identically to how
+   * HistoryService.sign would sign it, so the channelId aligns with
+   * the canonical lineage signature. Settings UI lands later.
+   * Idempotent: re-joining is a no-op once the channel is in
+   * #channels.
+   */
+  public override heartbeat = async (): Promise<void> => {
+    if (this.#channels.size > 0) return
+    const location = readLocalStorage(LOCATION_STORAGE_KEY)
+    const secret = readLocalStorage(SECRET_STORAGE_KEY)
+    if (!location || !secret) return
+    await this.join(location, secret)
+  }
+
+  /**
+   * Join a channel by `(location, secret)`. The location is a path
+   * string like `/howard/team` — parsed into segments, then signed
+   * via HistoryService.sign (or the equivalent fallback) and combined
+   * with the secret to produce the channelId.
+   *
+   * Idempotent: re-joining the same pair is a no-op. Returns the
+   * channelId on success, null on failure.
+   */
+  async join(location: string, secret: string): Promise<string | null> {
+    const lineage: LineageLike = {
+      explorerSegments: () => parseLocationSegments(location),
+    }
+    let channelId: string
+    try { channelId = await channelIdForLineage(lineage, secret) }
+    catch (err) { console.warn('[paired-channel] join: derivation failed', err); return null }
+
+    if (this.#channels.has(channelId)) return channelId
+
+    const service = this.#service()
+    if (!service) {
+      console.warn('[paired-channel] join: PairedChannelService not available')
+      return null
+    }
+
+    const machine = new PairedChannelMachine(channelId)
+    const subscription = service.subscribe(channelId, (event) => {
+      this.#onChannelEvent(channelId, event)
+    })
+
+    const joined: JoinedChannel = { channelId, location, secret, machine, subscription }
+    this.#channels.set(channelId, joined)
+    EffectBus.emit(PAIRED_CHANNEL_EFFECTS.joined, { channelId, location })
+    return channelId
+  }
+
+  /**
+   * Join a channel using a fully-formed Lineage object (typically
+   * `@hypercomb.social/Lineage`). Use this in code paths that already
+   * hold the live lineage so the channelId aligns exactly with the
+   * lineage's canonical signature.
+   */
+  async joinLineage(lineage: LineageLike, secret: string): Promise<string | null> {
+    let channelId: string
+    try { channelId = await channelIdForLineage(lineage, secret) }
+    catch (err) { console.warn('[paired-channel] joinLineage: derivation failed', err); return null }
+    if (this.#channels.has(channelId)) return channelId
+    const service = this.#service()
+    if (!service) return null
+    const machine = new PairedChannelMachine(channelId)
+    const subscription = service.subscribe(channelId, (event) => this.#onChannelEvent(channelId, event))
+    const segments = lineage.explorerSegments?.() ?? []
+    const location = '/' + segments.join('/')
+    this.#channels.set(channelId, { channelId, location, secret, machine, subscription })
+    EffectBus.emit(PAIRED_CHANNEL_EFFECTS.joined, { channelId, location })
+    return channelId
+  }
+
+  /** Leave a channel. Closes the subscription and drops in-memory state. */
+  leave(channelId: string): void {
+    const joined = this.#channels.get(channelId)
+    if (!joined) return
+    try { joined.subscription.close() } catch { /* best-effort */ }
+    this.#channels.delete(channelId)
+    EffectBus.emit(PAIRED_CHANNEL_EFFECTS.left, { channelId })
+  }
+
+  /** All currently-joined channelIds. */
+  joinedChannels(): readonly string[] {
+    return [...this.#channels.keys()]
+  }
+
+  /** Read-only view of a joined channel's machine state. */
+  stateOf(channelId: string): PairedChannelMachine | null {
+    return this.#channels.get(channelId)?.machine ?? null
+  }
+
+  // ── public API for callers (expose drone, accept toast, etc.) ─────
+
+  /**
+   * Publish a `share-request` for the given branch on a joined channel.
+   * The host's machine sees it, decides per its rules, and (in v0)
+   * auto-publishes a `share` event. Other participants see the
+   * approved share and can pull.
+   *
+   * `body` is the inline payload for v0 (a tile's properties + name).
+   * Real subtree sharing uses separate `layer` events keyed by sig;
+   * this drone delegates that lookup to the consumer.
+   */
+  async requestShare(
+    channelId: string,
+    payload: {
+      branchSig: string
+      branchName: string
+      tileCount?: number | null
+      byteEstimate?: number | null
+      preview?: unknown
+      body?: Record<string, unknown> | null
+    },
+  ): Promise<boolean> {
+    const service = this.#service()
+    if (!service) return false
+    const tags = [['layer', payload.branchSig]]
+    return service.publish(channelId, 'share-request', payload, tags)
+  }
+
+  /**
+   * Approve a pending share-request as the host. Caller looks up the
+   * `requestId` from `stateOf(channelId).visibleShares()` and (optionally)
+   * sets a `cap.maxDownloads`. Publishes the `share` event the
+   * participants are waiting for.
+   */
+  async approveShare(
+    channelId: string,
+    requestId: string,
+    cap: number | null = null,
+  ): Promise<boolean> {
+    const machine = this.#channels.get(channelId)?.machine
+    if (!machine) return false
+    const share = machine.state.shares.get(requestId)
+    if (!share || share.state !== 'pending') return false
+    const service = this.#service()
+    if (!service) return false
+    const payload: Record<string, unknown> = {}
+    if (cap !== null && cap > 0) payload['cap'] = { maxDownloads: cap }
+    return service.publish(
+      channelId,
+      'share',
+      payload,
+      [['e', requestId], ['layer', share.branchSig], ['p', share.requesterPubkey]],
+    )
+  }
+
+  /**
+   * Mark an approved share as pulled. Publishes the `pulled` event
+   * for the host's cap counter. Callers materialise the actual content
+   * separately — usually by reading the inline `body` from the
+   * matching ShareState, or fetching `layer` events keyed by branchSig.
+   */
+  async markPulled(channelId: string, approvalId: string): Promise<boolean> {
+    const service = this.#service()
+    if (!service) return false
+    return service.publish(channelId, 'pulled', {}, [['e', approvalId]])
+  }
+
+  /**
+   * Publish one cell's canonical layer content. Caller pre-computed
+   * `sig` via `computeLayerSig(content)`; this method just sends it.
+   * Idempotent on the relay side (event id uniqueness), so re-publishes
+   * are safe.
+   */
+  async publishLayer(
+    channelId: string,
+    sig: string,
+    content: PairedLayerContent,
+  ): Promise<boolean> {
+    const service = this.#service()
+    if (!service) return false
+    // Send the canonical content as a string so the receiver hashes
+    // exactly the bytes we hashed. Receivers will re-canonicalise on
+    // parse, but sending bytes that already match the sig keeps the
+    // wire form auditable (sig === sha256(content)).
+    const json = canonicaliseLayerContent(content)
+    return service.publish(channelId, 'layer', JSON.parse(json), [['layer', sig]])
+  }
+
+  /** Look up a buffered layer by sig (returns null if not yet seen). */
+  layerOf(channelId: string, sig: string): PairedLayerContent | null {
+    return this.#channels.get(channelId)?.machine.layer(sig) ?? null
+  }
+
+  /**
+   * Walk a share's branchSig recursively from the layer buffer and
+   * materialise each layer at the matching path under `parentDir`.
+   * Returns `{ written, missing }` so the caller can decide whether
+   * to surface "incomplete" or wait for more `layer` events.
+   *
+   * Cell content lands in 0000 (via writeCellProperties); folder names
+   * come from the layer's `name` field. Cycles are guarded by a
+   * visited-set keyed by sig.
+   */
+  async materialiseFromSig(
+    channelId: string,
+    sig: string,
+    parentDir: FileSystemDirectoryHandle,
+  ): Promise<{ written: number; missing: string[] }> {
+    const machine = this.#channels.get(channelId)?.machine
+    if (!machine) return { written: 0, missing: [sig] }
+    const visited = new Set<string>()
+    const missing: string[] = []
+    let written = 0
+
+    const walk = async (s: string, dir: FileSystemDirectoryHandle): Promise<void> => {
+      if (visited.has(s)) return
+      visited.add(s)
+      const content = machine.layer(s)
+      if (!content) { missing.push(s); return }
+      // Ensure the cell folder exists under `dir` and write 0000.
+      let cellDir: FileSystemDirectoryHandle
+      try { cellDir = await dir.getDirectoryHandle(content.name, { create: true }) }
+      catch (err) { console.warn('[paired-channel] materialise: getDirectoryHandle failed', content.name, err); return }
+      try {
+        await this.#writeProperties(cellDir, content.properties)
+      } catch (err) {
+        console.warn('[paired-channel] materialise: write 0000 failed', content.name, err)
+      }
+      written++
+      // Recurse into children. Each child has its own sig in the buffer.
+      for (const child of content.children) {
+        await walk(child.sig, cellDir)
+      }
+    }
+
+    await walk(sig, parentDir)
+    return { written, missing }
+  }
+
+  // Lazy-imported to avoid a hard dependency cycle from the drone into
+  // the editor module — and so this drone can be used from a node test
+  // harness without an editor present.
+  async #writeProperties(
+    cellDir: FileSystemDirectoryHandle,
+    properties: Record<string, unknown>,
+  ): Promise<void> {
+    const { writeCellProperties } = await import('../editor/tile-properties.js')
+    await writeCellProperties(cellDir, properties)
+  }
+
+  // ── internal: event routing & rules ───────────────────────────────
+
+  #onChannelEvent(channelId: string, event: ChannelEvent): void {
+    const joined = this.#channels.get(channelId)
+    if (!joined) return
+    const transitions = joined.machine.apply(event)
+    for (const t of transitions) this.#onTransition(channelId, t)
+  }
+
+  #onTransition(channelId: string, t: Transition): void {
+    switch (t.kind) {
+      case 'host-elected':
+        EffectBus.emit(PAIRED_CHANNEL_EFFECTS.hostElected, { channelId, pubkey: t.pubkey })
+        break
+      case 'join-request-received':
+        EffectBus.emit(PAIRED_CHANNEL_EFFECTS.joinRequestReceived, { channelId, id: t.id, pubkey: t.pubkey })
+        break
+      case 'member-admitted':
+        EffectBus.emit(PAIRED_CHANNEL_EFFECTS.memberAdmitted, { channelId, pubkey: t.pubkey })
+        break
+      case 'member-revoked':
+        // We don't currently advertise an effect for revoke — re-uses memberAdmitted with a kind tag if needed.
+        break
+      case 'share-request-received':
+        // Surface the request to UI consumers. Approval is a deliberate
+        // act — the host clicks an "approve" toast in expose.drone.
+        // This replaces the earlier v0 auto-approval. Non-host clients
+        // may also see the prompt; their approval is a no-op because
+        // the state machine only honours `share` events signed by the
+        // hostPubkey, so an approval click from a non-host produces a
+        // published event that every receiver ignores.
+        EffectBus.emit(PAIRED_CHANNEL_EFFECTS.shareRequestReceived, { channelId, share: t.share })
+        break
+      case 'share-approved':
+        EffectBus.emit(PAIRED_CHANNEL_EFFECTS.shareApproved, { channelId, share: t.share })
+        break
+      case 'share-revoked':
+        EffectBus.emit(PAIRED_CHANNEL_EFFECTS.shareRevoked, { channelId, share: t.share })
+        break
+      case 'share-pulled':
+        EffectBus.emit(PAIRED_CHANNEL_EFFECTS.sharePulled, { channelId, share: t.share, by: t.bypubkey })
+        break
+      case 'layer-received':
+        EffectBus.emit(PAIRED_CHANNEL_EFFECTS.layerReceived, { channelId, sig: t.sig, content: t.content })
+        break
+      case 'audit-approval':
+        EffectBus.emit(PAIRED_CHANNEL_EFFECTS.auditApproval, { channelId, layerSig: t.layerSig, auditor: t.auditor })
+        break
+      case 'audit-rejection':
+        EffectBus.emit(PAIRED_CHANNEL_EFFECTS.auditRejection, { channelId, layerSig: t.layerSig, auditor: t.auditor, danger: t.danger })
+        break
+      case 'unknown-verb':
+        // Silently ignore unknown verbs — forward-compatible by design.
+        break
+    }
+  }
+
+
+  #service(): PairedChannelService | null {
+    const svc = window.ioc.get(
+      '@diamondcoreprocessor.com/PairedChannelService',
+    ) as PairedChannelService | undefined
+    return svc ?? null
+  }
+}
+
+// ── helpers ──────────────────────────────────────────────────────────
+
+function readLocalStorage(key: string): string | null {
+  try {
+    const v = window.localStorage.getItem(key)
+    return v && v.length > 0 ? v : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Mirror HistoryService.sign's segment-extraction step so the location
+ * we feed into channelIdForLineage produces the same lineage sig that
+ * the rest of the system would derive for this path.
+ */
+function parseLocationSegments(location: string): string[] {
+  return String(location ?? '')
+    .split('/')
+    .map(s => s.trim())
+    .filter(s => s.length > 0)
+}
+
+// ── registration ─────────────────────────────────────────────────────
+
+const _pairedChannelDrone = new PairedChannelDrone()
+window.ioc.register('@diamondcoreprocessor.com/PairedChannelDrone', _pairedChannelDrone)
+
+// Suppress unused warnings for verbs that callers will use elsewhere.
+const _verbs: ChannelVerb[] = ['announce', 'join', 'admit', 'revoke', 'share-request', 'share', 'share-revoked', 'pulled', 'layer', 'node', 'audit-needed', 'approve', 'reject', 'auditors']
+void _verbs
+void ({} as ShareState)

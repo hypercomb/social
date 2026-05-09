@@ -9,16 +9,13 @@
   "activity.mesh-private": "rete → privato",
   "activity.undo": "Annulla",
   "activity.dismiss": "Chiudi",
-
   "command-line.placeholder.locked": "nome cella...",
   "command-line.placeholder.filter": "filtra tessere...",
   "command-line.placeholder.slash": "digita un comportamento...",
   "command-line.placeholder.default": "condividi intenzione...",
-
   "palette.title": "Tavolozza comandi",
   "palette.placeholder": "Digita un comando...",
   "palette.empty": "Nessun comando corrispondente",
-
   "shortcuts.title": "Riferimento",
   "shortcuts.close": "Chiudi",
   "shortcuts.filter-placeholder": "Filtra comandi, operazioni, scorciatoie…",
@@ -27,7 +24,6 @@
   "shortcuts.section.keyboard": "Scorciatoie da tastiera",
   "shortcuts.empty": "Nessun risultato",
   "shortcuts.chord-sep": "poi",
-
   "editor.title": "editor tessera",
   "editor.drop-image": "rilascia l'immagine qui",
   "editor.unlink-transforms": "scollega trasformazioni",
@@ -48,7 +44,6 @@
   "editor.search-google": "Cerca su Google Immagini",
   "editor.cancel": "annulla",
   "editor.save": "salva",
-
   "controls.go-back": "torna indietro",
   "controls.back": "indietro",
   "controls.dcp": "processore a nucleo diamante",
@@ -86,15 +81,12 @@
   "controls.atomize-particle": "smontaggio particelle",
   "controls.atomize-reassemble": "riassembla",
   "controls.atomize-close": "chiudi atomizzatore",
-
   "slash.atomize-ui": "alterna barra atomizzatore",
-
   "atomizer.spacing-placeholder": "es. 8px 12px",
   "atomizer.title": "atomizzatori",
   "atomizer.close": "chiudi barra atomizzatore",
   "atomizer.empty": "nessun atomizzatore",
   "atomizer.reset": "ripristina proprietà",
-
   "explorer.title": "Esploratore OPFS",
   "explorer.entries-label": "voci OPFS",
   "explorer.copy-package": "Copia pacchetto",
@@ -109,18 +101,14 @@
   "explorer.copy": "copia",
   "explorer.remove": "rimuovi",
   "explorer.no-entries": "nessuna voce",
-
   "format-painter.title": "Copia formato",
   "format-painter.empty": "Nessuna proprietà visiva su questa tessera",
   "format-painter.apply": "Applica alla selezione",
-
   "mesh.secret-placeholder": "proteggi la tua posizione",
   "mesh.secured": "protetto",
-
   "portal.title": "portale",
   "portal.close": "chiudi portale",
   "portal.back": "indietro",
-
   "action.command": "comando",
   "action.command.description": "Apri la tavolozza dei comandi per questa tessera",
   "action.edit": "modifica",
@@ -139,13 +127,11 @@
   "action.adopt.description": "Aggiungi questa tessera alla tua collezione",
   "action.block": "blocca",
   "action.block.description": "Blocca questa tessera per non farla più apparire",
-
   "selection.move": "sposta",
   "selection.cut": "taglia",
   "selection.copy": "copia",
   "selection.remove": "rimuovi",
   "selection.paste": "incolla",
-
   "history.title": "cronologia del browser",
   "history.back": "indietro",
   "history.forward": "avanti",
@@ -154,8 +140,6 @@
   "history.path": "percorso:",
   "history.depth": "profondità:",
   "history.active": "attivo:",
-
-  "slash.select": "seleziona tessere per taglio/copia/spostamento",
   "slash.remove-builtin": "rimuovi tessere selezionate",
   "slash.help": "Mostra riferimento",
   "slash.clear": "Cancella filtro attivo",
@@ -181,18 +165,14 @@
   "slash.record": "Avvia registrazione riunione AI con compilazione gerarchica in diretta",
   "slash.domain": "Aggiungi, rimuovi o elenca domini di inoltro rete",
   "slash.substrate": "Alterna immagini di sfondo predefinite per nuove tessere",
-
   "substrate.on": "substrato attivo → {path}",
   "substrate.off": "substrato disattivo",
   "substrate.here": "substrato → {path}",
-
   "toast.dismiss": "Chiudi",
-
   "instruction.click-to-restore": "clicca per ripristinare",
   "instruction.catalog-title": "Tutte le istruzioni",
   "instruction.no-instructions": "Nessuna istruzione disponibile. I droni possono dichiarare istruzioni che appariranno qui.",
   "controls.instructions": "Alterna istruzioni (Ctrl+Clic per catalogo)",
-
   "instruction.dcp.open-processor": "Apri il processore a nucleo diamante",
   "instruction.dcp.fit-content": "Adatta tutte le tessere alla vista",
   "instruction.dcp.zoom-out": "Rimpicciolisci la tela",
@@ -201,24 +181,11 @@
   "instruction.dcp.fullscreen": "Alterna modalità schermo intero",
   "instruction.dcp.layout-mode": "Passa tra layout fissato e compatto",
   "instruction.dcp.instructions-toggle": "Mostra o nascondi le etichette istruzioni su tutti i controlli",
-
-  "trackplayer.eyebrow": "audio hypercomb",
-  "trackplayer.title": "Audiolibro \u201cInspired by Humans\u201d",
-  "trackplayer.description": "Ascolta l'e-book su <a href=\"https://inspiredbyhumans.org\" target=\"_blank\" rel=\"noopener\">inspiredbyhumans.org</a>",
-  "trackplayer.loading": "Caricamento tracce...",
-  "trackplayer.empty": "Nessuna traccia trovata. Aggiungi file in hypercomb-shared/tracks.",
-  "trackplayer.selected": "Traccia selezionata",
-  "trackplayer.available": "Tracce disponibili",
-  "trackplayer.no-signal": "nessun segnale",
-  "trackplayer.play-prequel": "riproduci il prequel ora",
-  "trackplayer.unavailable": "Le tracce non sono disponibili al momento.",
-
   "confirm.delete-title": "Conferma eliminazione",
   "confirm.delete-message": "Sei sicuro di voler eliminare \"{name}\"?",
   "confirm.delete-children-warning": "Questo elemento contiene figli che verranno anch'essi eliminati permanentemente.",
   "confirm.delete": "Elimina",
   "confirm.cancel": "Annulla",
-
   "editor.done": "fatto",
   "mesh.solo": "modalità solo",
   "mesh.swarm": "modalità sciame",
@@ -226,7 +193,6 @@
   "selection.hide": "nascondi",
   "controls.toggle-input": "mostra riga di comando",
   "slash.reroll": "Rigenerare le immagini di sfondo del substrato sulle tessere",
-
   "docs.title": "Documentazione",
   "docs.close-sidebar": "chiudi barra laterale",
   "docs.open-sidebar": "apri barra laterale",
@@ -236,26 +202,18 @@
   "docs.loading": "Caricamento...",
   "docs.main-title": "Documentazione Hypercomb",
   "docs.welcome-text": "Seleziona un documento dalla barra laterale o usa /docs glossary per andare direttamente a una pagina.",
-
   "command-line.install-prompt": "Installa Hypercomb",
   "command-line.create-cell": "Crea una nuova cella al livello attuale",
   "command-line.create-nested": "Crea cartelle annidate, resta al livello attuale con percorso genitore mantenuto",
   "command-line.navigate-folder": "Vai a una cartella, creandola se non esiste",
   "command-line.filter-tiles": "Filtra le tessere in tempo reale per parola chiave",
-
   "audio.pause": "pausa",
   "audio.play": "riproduci",
   "audio.seek": "cerca",
-
-  "trackplayer.close-player": "chiudi lettore",
-  "trackplayer.no-signal-label": "interludio senza segnale",
-
   "controls.drag-to-move": "trascina per spostare",
   "controls.collapse": "comprimi",
   "controls.expand": "espandi",
-
   "selection.drag-to-move": "trascina per spostare",
-
   "breadcrumb.public": "pubblico",
   "breadcrumb.private": "privato",
   "breadcrumb.secure": "sicuro",
@@ -265,7 +223,6 @@
   "breadcrumb.installed": "installato",
   "breadcrumb.installed-count": "installato ({count})",
   "breadcrumb.sync-error": "errore di sincronizzazione",
-
   "keymap.escape": "Annulla / chiudi",
   "keymap.shortcuts": "Mostra scorciatoie da tastiera",
   "keymap.palette": "Apri tavolozza comandi",
@@ -282,7 +239,6 @@
   "keymap.paste": "Incolla dagli appunti",
   "keymap.cut": "Taglia tessere selezionate",
   "keymap.remove": "Rimuovi tessere selezionate",
-
   "dcp.title": "Processore a Nucleo Diamante",
   "dcp.install": "Installa",
   "dcp.download-package": "Scarica pacchetto",
@@ -351,7 +307,6 @@
   "dcp.editor-modified": "modificato",
   "dcp.editor-loading-files": "Caricamento file...",
   "dcp.editor-empty": "Nessuna ape o dipendenza in questo livello.",
-
   "cell.welcome": "benvenuto",
   "cell.home": "home",
   "cell.settings": "impostazioni",
@@ -394,7 +349,6 @@
   "cell.meetings": "riunioni",
   "cell.the-depths": "le profondità",
   "cell.one-day": "un giorno",
-
   "cell.assistant": "assistente",
   "cell.avatars": "avatar",
   "cell.background": "sfondo",

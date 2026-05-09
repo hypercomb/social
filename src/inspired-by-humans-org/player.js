@@ -2,6 +2,7 @@
 // Mirrors the Angular TrackPlayerComponent + AudioPlayerComponent logic
 
 const TRACK_SEQUENCE_KEY = 'ibh:track-player:sequence'
+const THEME_KEY = 'ibh:theme'
 const NO_SIGNAL_DURATION_MS = 3000
 
 // ── DOM references ────────────────────────────────────────
@@ -26,6 +27,26 @@ const selectedFile  = $('selectedFile')
 const noSignal      = $('noSignal')
 const noSignalCanvas = $('noSignalCanvas')
 const skipNoSignal  = $('skipNoSignal')
+const themeToggle   = $('themeToggle')
+
+// ── theme toggle ──────────────────────────────────────────
+
+function currentTheme() {
+  const explicit = document.documentElement.getAttribute('data-theme')
+  if (explicit === 'light' || explicit === 'dark') return explicit
+  return matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
+}
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme)
+  try { localStorage.setItem(THEME_KEY, theme) } catch (_) { /* ignore */ }
+}
+
+if (themeToggle) {
+  themeToggle.addEventListener('click', () => {
+    applyTheme(currentTheme() === 'light' ? 'dark' : 'light')
+  })
+}
 
 // ── state ─────────────────────────────────────────────────
 

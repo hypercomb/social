@@ -11,28 +11,52 @@ type Pt = { x: number; y: number }
 // Inlined here so Angular's esbuild cannot tree-shake the IoC registration.
 // One source at a time. Context menu auto-suppressed while claimed.
 
-export class InputGate {
+export class InputGate extends EventTarget {
   #owner: string | null = null
   #locked = false
 
   get active(): boolean { return this.#locked || this.#owner !== null }
   get locked(): boolean { return this.#locked }
+  get owner(): string | null { return this.#owner }
 
-  lock = (): void => { this.#locked = true }
-  unlock = (): void => { this.#locked = false }
+  lock = (): void => {
+    if (this.#locked) return
+    this.#locked = true
+    this.dispatchEvent(new CustomEvent('change'))
+  }
+  unlock = (): void => {
+    if (!this.#locked) return
+    this.#locked = false
+    this.dispatchEvent(new CustomEvent('change'))
+  }
 
   claim = (source: string): boolean => {
     if (this.#locked) return false
     if (this.#owner && this.#owner !== source) return false
+    if (this.#owner === source) return true
     this.#owner = source
+    this.dispatchEvent(new CustomEvent('change'))
     return true
   }
 
   release = (source: string): void => {
-    if (this.#owner === source) this.#owner = null
+    if (this.#owner !== source) return
+    this.#owner = null
+    this.dispatchEvent(new CustomEvent('change'))
+  }
+
+  /** Emergency reset — drops all locks and ownership.
+   *  Wired to the Escape cascade as a last-resort recovery so a leaked
+   *  claim or unmatched lock can never permanently block input. */
+  clear = (): void => {
+    if (!this.#locked && this.#owner === null) return
+    this.#locked = false
+    this.#owner = null
+    this.dispatchEvent(new CustomEvent('change'))
   }
 
   constructor() {
+    super()
     document.addEventListener('contextmenu', (e) => {
       if (this.#owner || e.ctrlKey || e.metaKey) e.preventDefault()
     }, true)

@@ -6,6 +6,19 @@
   <title>Inspired by Humans — audiobook</title>
   <meta name="description" content="Listen to the &quot;Inspired by Humans&quot; audiobook — free, no sign-up required.">
   <link rel="stylesheet" href="styles.css">
+  <script>
+    // Apply persisted theme before paint to avoid flash. Falls
+    // through to the prefers-color-scheme rule in styles.css when
+    // no choice has been made yet.
+    (function () {
+      try {
+        var stored = localStorage.getItem('ibh:theme');
+        if (stored === 'light' || stored === 'dark') {
+          document.documentElement.setAttribute('data-theme', stored);
+        }
+      } catch (_) { /* private mode — fall back to OS preference */ }
+    })();
+  </script>
 </head>
 <body>
 
@@ -21,8 +34,26 @@
     <div class="track-player__panel">
       <div class="track-player__header">
         <div class="track-player__eyebrow">hypercomb audio</div>
+        <button type="button" class="theme-toggle" id="themeToggle" aria-label="toggle theme">
+          <svg class="theme-icon-moon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M20.7 14.5a8 8 0 0 1-11.2-11.2 8 8 0 1 0 11.2 11.2z"></path>
+          </svg>
+          <svg class="theme-icon-sun" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="3.6"></circle>
+            <path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.6 5.6l1.6 1.6M16.8 16.8l1.6 1.6M5.6 18.4l1.6-1.6M16.8 7.2l1.6-1.6"></path>
+          </svg>
+        </button>
       </div>
-      <h1 class="track-player__title">&ldquo;Inspired by Humans&rdquo; audiobook</h1>
+      <h1 class="track-player__title">
+        <span class="track-player__title-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24">
+            <path d="M4 12v-1.5a8 8 0 0 1 16 0V12"></path>
+            <rect x="3.5" y="12" width="4" height="7" rx="1.2"></rect>
+            <rect x="16.5" y="12" width="4" height="7" rx="1.2"></rect>
+          </svg>
+        </span>
+        <span class="track-player__title-text">&ldquo;Inspired by Humans&rdquo; audiobook</span>
+      </h1>
       <p class="track-player__copy">Free to listen. No sign-up required.</p>
 
       <div class="track-player__status" id="statusLoading">Loading tracks...</div>

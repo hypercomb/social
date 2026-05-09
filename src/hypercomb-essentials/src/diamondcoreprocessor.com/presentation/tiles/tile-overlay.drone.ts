@@ -153,6 +153,7 @@ export class TileOverlayDrone extends Drone {
   #meshPublic = false
   #editing = false
   #editCooldown = false
+  #editCooldownTimer: ReturnType<typeof setTimeout> | null = null
   #hasSelection = false
   #touchDragging = false
 
@@ -204,7 +205,7 @@ export class TileOverlayDrone extends Drone {
     'drop:dragging', 'drop:pending',
     'overlay:arrange-mode', 'overlay:pool-icons',
     'bee:disposed', 'genotype:set-visible',
-    'substrate:applied', 'cell:removed',
+    'substrate:applied', 'cell:removed', 'tile:saved',
   ]
   protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'drop:target', 'overlay:icons-reordered']
 
@@ -408,14 +409,37 @@ export class TileOverlayDrone extends Drone {
 
       this.onEffect<{ active: boolean }>('editor:mode', (payload) => {
         this.#editing = payload.active
+        // A stale timer from a prior close cycle would clear cooldown
+        // mid-cycle. Cancel it before scheduling a new one.
+        if (this.#editCooldownTimer) {
+          clearTimeout(this.#editCooldownTimer)
+          this.#editCooldownTimer = null
+        }
         if (payload.active) {
           this.#editCooldown = false
           this.#updateVisibility()
         } else {
           this.#editCooldown = true
           this.#updateVisibility()
-          setTimeout(() => { this.#editCooldown = false; this.#updateVisibility() }, 300)
+          this.#editCooldownTimer = setTimeout(() => {
+            this.#editCooldownTimer = null
+            this.#editCooldown = false
+            this.#updateVisibility()
+            // Per-tile visibility derives from properties that may have just
+            // changed (link, hideText, noImage). Refresh icon state so a
+            // stationary cursor still sees the post-save icon set.
+            this.#updatePerTileVisibility()
+          }, 300)
         }
+      })
+
+      // tile:saved fires on every save/cancel of the tile editor. The
+      // tile's properties may have changed (link, hideText, image, border)
+      // — properties that gate per-icon visibility. Refresh per-tile state
+      // so the overlay reflects the post-save tile without waiting for the
+      // next pointer move.
+      this.onEffect<{ cell: string }>('tile:saved', () => {
+        if (this.#overlay && this.#currentAxial) this.#updatePerTileVisibility()
       })
 
       this.onEffect<{ selected: string[] }>('selection:changed', (payload) => {
@@ -441,6 +465,10 @@ export class TileOverlayDrone extends Drone {
   protected override dispose(): void {
     this.#clearHint()
     if (this.#arrangeMode) this.#exitArrangeMode()
+    if (this.#editCooldownTimer) {
+      clearTimeout(this.#editCooldownTimer)
+      this.#editCooldownTimer = null
+    }
     if (this.#listening) {
       document.removeEventListener('pointerdown', this.#onPointerDown)
       document.removeEventListener('pointermove', this.#onPointerMove)

@@ -9,16 +9,27 @@ export const isSignature = (value: unknown): boolean =>
 /**
  * Read and parse the 0000 properties JSON from a cell directory.
  * Returns empty object if file doesn't exist or can't be parsed.
+ *
+ * Missing file is silent (legitimate state for a freshly-created cell).
+ * Corrupt or unreadable file logs a warning so the failure surfaces
+ * instead of being indistinguishable from "no properties yet."
  */
 export const readCellProperties = async (
   cellDir: FileSystemDirectoryHandle
 ): Promise<Record<string, unknown>> => {
+  let fileHandle: FileSystemFileHandle
   try {
-    const fileHandle = await cellDir.getFileHandle(TILE_PROPERTIES_FILE)
+    fileHandle = await cellDir.getFileHandle(TILE_PROPERTIES_FILE)
+  } catch {
+    // file doesn't exist yet — legitimate state
+    return {}
+  }
+  try {
     const file = await fileHandle.getFile()
     const text = await file.text()
     return JSON.parse(text)
-  } catch {
+  } catch (err) {
+    console.warn('[tile-properties] failed to read/parse 0000 in', cellDir.name, err)
     return {}
   }
 }

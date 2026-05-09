@@ -1,12 +1,23 @@
 // diamondcoreprocessor.com/bridge/claude-bridge.worker.ts
-import { Worker, EffectBus, normalizeCell, hypercomb } from '@hypercomb/core'
-import { readCellProperties } from '../editor/tile-properties.js'
+import { Worker, EffectBus, normalizeCell, hypercomb, isSignature } from '@hypercomb/core'
+import { readCellProperties, writeCellProperties } from '../editor/tile-properties.js'
 import type { HistoryService } from '../history/history.service.js'
+import type { LayerSlotRegistry } from '../history/layer-slot-registry.js'
+import { inflate } from '../history/inflate.js'
 
 // Bridge protocol — matches @hypercomb/sdk/bridge
 const BRIDGE_PORT = 2401
 const BRIDGE_ENABLED_QUERY_KEY = 'claudeBridge'
 const BRIDGE_ENABLED_STORAGE_KEY = 'hypercomb.claudeBridge.enabled'
+
+/** Per-cell context bag slot — value is a sig array. Each entry is a
+ *  resource sig in __resources__/ that the LLM should see when working
+ *  on this cell (prior impls, chrome refs, examples, etc). Add/remove
+ *  rewrites the array, the new bag sig replaces the old slot value, one
+ *  cascade carries it up. Passive — no triggers; bridge `update` and
+ *  `bag-add`/`bag-remove` are the writers. */
+const CONTEXT_SLOT = 'context'
+
 type BridgeRequest = {
   id: string
   op: string
@@ -19,6 +30,12 @@ type BridgeRequest = {
    *  where each slot value is an array of strings. The receiver creates OPFS
    *  folders for any names in `children`, then calls `committer.update`. */
   layer?: { name?: string } & { [slot: string]: unknown }
+  /** Resource bytes for `put-resource`. One of `text` / `base64` is required. */
+  base64?: string
+  /** Resource sig for `get-resource`. */
+  sig?: string
+  /** Bag manipulation. */
+  slot?: string
 }
 type BridgeResponse = { id: string; ok: boolean; data?: unknown; error?: string }
 
@@ -137,16 +154,272 @@ export class ClaudeBridgeWorker extends Worker {
 
   async #dispatch(req: BridgeRequest): Promise<BridgeResponse> {
     switch (req.op) {
-      case 'update':   return this.#update(req)
-      case 'note-add': return this.#noteAdd(req)
-      case 'add':      return this.#add(req)        // legacy: delegates to update
-      case 'remove':   return this.#remove(req)     // legacy: delegates to update
-      case 'list':     return this.#list(req)
-      case 'inspect':  return this.#inspect(req)
-      case 'history':  return this.#history(req)
-      case 'submit':   return this.#submit(req)
-      default:         return { id: req.id, ok: false, error: `unknown op: ${req.op}` }
+      case 'update':       return this.#update(req)
+      case 'note-add':     return this.#noteAdd(req)
+      case 'note-list':    return this.#noteList(req)
+      case 'list-at':      return this.#listAt(req)
+      case 'inflate':      return this.#inflate(req)
+      case 'put-resource': return this.#putResource(req)
+      case 'get-resource': return this.#getResource(req)
+      case 'bag-add':      return this.#bagMutate(req, 'add')
+      case 'bag-remove':   return this.#bagMutate(req, 'remove')
+      case 'bag-set':      return this.#bagSet(req)
+      case 'stamp':        return this.#stamp(req)
+      case 'add':          return this.#add(req)        // legacy: delegates to update
+      case 'remove':       return this.#remove(req)     // legacy: delegates to update
+      case 'list':         return this.#list(req)
+      case 'inspect':      return this.#inspect(req)
+      case 'history':      return this.#history(req)
+      case 'submit':       return this.#submit(req)
+      default:             return { id: req.id, ok: false, error: `unknown op: ${req.op}` }
     }
+  }
+
+  // ─── resource I/O ──────────────────────────────────────────────────
+  //
+  // Content-addressed put: bytes in (text or base64), sig out. Mints a
+  // resource in __resources__/ via Store.putResource — same path the rest
+  // of the system uses, so dedup, OPFS write, and the content:wrote
+  // sentinel mirror all happen.
+  async #putResource(req: BridgeRequest): Promise<BridgeResponse> {
+    const store = get<{ putResource?: (blob: Blob) => Promise<string> }>('@hypercomb.social/Store')
+    if (!store?.putResource) return { id: req.id, ok: false, error: 'Store.putResource not available' }
+
+    let bytes: Uint8Array | null = null
+    if (typeof req.base64 === 'string' && req.base64.length > 0) {
+      try { bytes = base64ToBytes(req.base64) } catch (e: any) {
+        return { id: req.id, ok: false, error: `bad base64: ${e?.message ?? 'decode failed'}` }
+      }
+    } else if (typeof req.text === 'string') {
+      bytes = new TextEncoder().encode(req.text)
+    } else {
+      return { id: req.id, ok: false, error: 'put-resource needs `text` or `base64`' }
+    }
+
+    const blob = new Blob([bytes as BlobPart])
+    const sig = await store.putResource(blob)
+    return { id: req.id, ok: true, data: { sig, bytes: bytes.byteLength } }
+  }
+
+  // Content-addressed get: sig in, bytes out. Returns text when the
+  // resource is valid UTF-8, otherwise base64. Caller can request a
+  // specific encoding via req.text='base64' if it wants raw bytes.
+  async #getResource(req: BridgeRequest): Promise<BridgeResponse> {
+    const sig = typeof req.sig === 'string' ? req.sig.trim() : ''
+    if (!isSignature(sig)) return { id: req.id, ok: false, error: 'get-resource requires `sig` (64-hex)' }
+
+    const store = get<{ getResource?: (sig: string) => Promise<Blob | null> }>('@hypercomb.social/Store')
+    if (!store?.getResource) return { id: req.id, ok: false, error: 'Store.getResource not available' }
+
+    const blob = await store.getResource(sig)
+    if (!blob) return { id: req.id, ok: false, error: `resource not found: ${sig.slice(0, 12)}…` }
+
+    const buffer = await blob.arrayBuffer()
+    const bytes = new Uint8Array(buffer)
+    const force64 = req.text === 'base64'
+    if (!force64) {
+      try {
+        const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+        return { id: req.id, ok: true, data: { sig, encoding: 'text' as const, text, bytes: bytes.byteLength } }
+      } catch { /* fall through to base64 for non-UTF-8 */ }
+    }
+    return {
+      id: req.id,
+      ok: true,
+      data: { sig, encoding: 'base64' as const, base64: bytesToBase64(bytes), bytes: bytes.byteLength },
+    }
+  }
+
+  // ─── context-bag helpers ───────────────────────────────────────────
+  //
+  // Mutate a sig-array slot at `segments`. The slot defaults to
+  // `context` (the LLM's per-cell bag) but the same machinery handles
+  // any slot whose value is an array of resource sigs — pass req.slot
+  // to override.
+  //
+  // Flow: read current layer at segments → splice the slot's sig array
+  // → committer.update commits the new layer (one cascade up to root).
+  async #bagMutate(req: BridgeRequest, mode: 'add' | 'remove'): Promise<BridgeResponse> {
+    const sig = typeof req.sig === 'string' ? req.sig.trim() : ''
+    if (!isSignature(sig)) return { id: req.id, ok: false, error: `bag-${mode} requires \`sig\` (64-hex)` }
+
+    const segments = (req.segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+    if (segments.length === 0) return { id: req.id, ok: false, error: `bag-${mode} requires \`segments\`` }
+
+    const slot = (typeof req.slot === 'string' && req.slot.trim()) || CONTEXT_SLOT
+
+    const history = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
+    if (!history) return { id: req.id, ok: false, error: 'HistoryService not available' }
+
+    const locationSig = await history.sign({ explorerSegments: () => segments })
+    const layer = await history.currentLayerAt(locationSig)
+    const cellName = layer?.name ?? segments[segments.length - 1] ?? ''
+    const priorRaw = (layer as Record<string, unknown> | null)?.[slot]
+    const prior: string[] = Array.isArray(priorRaw) ? priorRaw.map(s => String(s)) : []
+
+    let next: string[]
+    if (mode === 'add') {
+      if (prior.includes(sig)) return { id: req.id, ok: true, data: { unchanged: true, slot, count: prior.length } }
+      next = [...prior, sig]
+    } else {
+      if (!prior.includes(sig)) return { id: req.id, ok: true, data: { unchanged: true, slot, count: prior.length } }
+      next = prior.filter(s => s !== sig)
+    }
+
+    const committer = get<{
+      update?: (segments: readonly string[], layer: object) => Promise<string>
+    }>('@diamondcoreprocessor.com/LayerCommitter')
+    if (!committer?.update) return { id: req.id, ok: false, error: 'LayerCommitter.update not available' }
+
+    const nextLayer: { name: string; [slot: string]: unknown } = { name: cellName, [slot]: next }
+    await committer.update(segments, nextLayer)
+    return { id: req.id, ok: true, data: { slot, count: next.length, mode } }
+  }
+
+  /** Replace a slot's sig array atomically. Caller passes
+   *  `segments`, optional `slot` (default `context`), and `cells` —
+   *  the array of sigs the slot should hold AFTER the call. Other
+   *  slots on the cell layer are untouched. Use this when a single
+   *  resource per cell is the intent (e.g. one rendered page per
+   *  cell): `{ op: 'bag-set', segments, cells: [pageSig] }`. */
+  async #bagSet(req: BridgeRequest): Promise<BridgeResponse> {
+    const segments = (req.segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+    if (segments.length === 0) return { id: req.id, ok: false, error: 'bag-set requires `segments`' }
+
+    const cells = req.cells
+    if (!Array.isArray(cells)) return { id: req.id, ok: false, error: 'bag-set requires `cells` (array of sigs)' }
+    const next = cells.map(s => String(s ?? '').trim()).filter(s => /^[0-9a-f]{64}$/.test(s))
+    if (next.length !== cells.length) {
+      return { id: req.id, ok: false, error: 'bag-set: every cell must be a 64-hex sig' }
+    }
+
+    const slot = (typeof req.slot === 'string' && req.slot.trim()) || CONTEXT_SLOT
+
+    const history = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
+    if (!history) return { id: req.id, ok: false, error: 'HistoryService not available' }
+
+    const locationSig = await history.sign({ explorerSegments: () => segments })
+    const layer = await history.currentLayerAt(locationSig)
+    const cellName = layer?.name ?? segments[segments.length - 1] ?? ''
+
+    const committer = get<{
+      update?: (segments: readonly string[], layer: object) => Promise<string>
+    }>('@diamondcoreprocessor.com/LayerCommitter')
+    if (!committer?.update) return { id: req.id, ok: false, error: 'LayerCommitter.update not available' }
+
+    const nextLayer: { name: string; [slot: string]: unknown } = { name: cellName, [slot]: next }
+    await committer.update(segments, nextLayer)
+    return { id: req.id, ok: true, data: { slot, count: next.length } }
+  }
+
+  // ─── property stamp ────────────────────────────────────────────────
+  //
+  // Write a key=value into the cell's 0000 properties JSON. Used for
+  // legacy paths still living on cell properties (websiteSig, custom
+  // renderer overrides). Slot-based authors should prefer `update` /
+  // `bag-add`. Property writes go through `writeCellProperties` so the
+  // nurse cache invalidation event fires correctly.
+  async #stamp(req: BridgeRequest): Promise<BridgeResponse> {
+    const segments = (req.segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+    if (segments.length === 0) return { id: req.id, ok: false, error: 'stamp requires `segments`' }
+
+    const layer = req.layer
+    if (!layer || typeof layer !== 'object') {
+      return { id: req.id, ok: false, error: 'stamp requires `layer` with property key→value pairs' }
+    }
+
+    const store = get<{ hypercombRoot?: FileSystemDirectoryHandle | null }>('@hypercomb.social/Store')
+    let dir = store?.hypercombRoot ?? null
+    if (!dir) return { id: req.id, ok: false, error: 'no hypercombRoot' }
+
+    for (const seg of segments) {
+      const clean = normalizeCell(seg)
+      if (!clean) continue
+      try {
+        dir = await dir.getDirectoryHandle(clean, { create: false })
+      } catch {
+        return { id: req.id, ok: false, error: `path not found: ${segments.join('/')}` }
+      }
+    }
+
+    // Strip non-scalar values so callers can't accidentally smuggle a
+    // nested object that would round-trip through JSON.stringify but
+    // confuse downstream readers expecting flat property scalars.
+    const updates: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(layer)) {
+      if (v === null || ['string', 'number', 'boolean'].includes(typeof v)) updates[k] = v
+    }
+    await writeCellProperties(dir, updates)
+    return { id: req.id, ok: true, data: { keys: Object.keys(updates) } }
+  }
+
+  // Recursive sig → JSON inflater. Caller hands a 64-hex sig (or a
+  // segments path that resolves to the current layer sig at that
+  // location) and receives the fully-inflated merkle subtree as a
+  // self-contained JSON value. Mechanical primitive — the LLM
+  // composes by passing sigs around, this returns the content.
+  async #inflate(req: BridgeRequest): Promise<BridgeResponse> {
+    let sig = typeof req.cell === 'string' ? req.cell.trim() : ''
+
+    // No sig → resolve segments to the current layer at that location.
+    if (!sig && req.segments) {
+      const segments = req.segments.map(s => String(s ?? '').trim()).filter(Boolean)
+      const history = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
+      if (!history) return { id: req.id, ok: false, error: 'HistoryService not available' }
+      const locationSig = await history.sign({ explorerSegments: () => segments })
+      const layer = await history.currentLayerAt(locationSig)
+      if (!layer) return { id: req.id, ok: false, error: `no layer at /${segments.join('/')}` }
+      const inflated = await inflate(layer)
+      return { id: req.id, ok: true, data: inflated }
+    }
+
+    if (!isSignature(sig)) {
+      return { id: req.id, ok: false, error: 'inflate requires a 64-hex sig (in `cell`) or `segments`' }
+    }
+
+    const inflated = await inflate(sig)
+    return { id: req.id, ok: true, data: inflated }
+  }
+
+  // Read notes at an EXPLICIT cell location (parentSegments + cellLabel).
+  // Headless mirror of `note-add` — uses NotesService.getNotesAtSegments
+  // so the bridge can read instructions without temporarily navigating.
+  async #noteList(req: BridgeRequest): Promise<BridgeResponse> {
+    const segments = (req.segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+    if (segments.length === 0) {
+      return { id: req.id, ok: false, error: 'no segments provided' }
+    }
+    const notes = get<{
+      getNotesAtSegments?: (s: readonly string[]) => Promise<unknown[]>
+    }>('@diamondcoreprocessor.com/NotesService')
+    if (!notes?.getNotesAtSegments) {
+      return { id: req.id, ok: false, error: 'NotesService.getNotesAtSegments not available' }
+    }
+    const items = await notes.getNotesAtSegments(segments)
+    return { id: req.id, ok: true, data: items }
+  }
+
+  // List child cell folders at EXPLICIT segments — bypasses the user's
+  // current navigation. Walks from the absolute hypercombRoot (NOT the
+  // lineage's current explorerDir) so segments are interpreted as a
+  // path from root, identical regardless of where the user is.
+  async #listAt(req: BridgeRequest): Promise<BridgeResponse> {
+    const store = get<{ hypercombRoot?: FileSystemDirectoryHandle | null }>('@hypercomb.social/Store')
+    let dir = store?.hypercombRoot ?? null
+    if (!dir) return { id: req.id, ok: false, error: 'no hypercombRoot' }
+
+    const segments = (req.segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+    for (const seg of segments) {
+      const clean = normalizeCell(seg)
+      if (!clean) continue
+      try {
+        dir = await dir.getDirectoryHandle(clean, { create: false })
+      } catch {
+        return { id: req.id, ok: false, error: `path not found: ${segments.join('/')}` }
+      }
+    }
+    const cells = await this.#listCellFolders(dir)
+    return { id: req.id, ok: true, data: cells }
   }
 
   // Append a note to a cell at explicit segments. Calls
@@ -183,8 +456,14 @@ export class ClaudeBridgeWorker extends Worker {
       return { id: req.id, ok: false, error: 'no layer provided' }
     }
 
-    let dir = await this.#explorerDir()
-    if (!dir) return { id: req.id, ok: false, error: 'no explorer directory' }
+    // Walk from the absolute hypercombRoot, NOT lineage.explorerDir.
+    // The bridge is headless — segments must be interpreted as a path
+    // from root, identical regardless of where the user is currently
+    // navigated. Same fix as #listAt; the legacy explorerDir-relative
+    // semantics broke any caller that didn't first navigate the user.
+    const store = get<{ hypercombRoot?: FileSystemDirectoryHandle | null }>('@hypercomb.social/Store')
+    let dir: FileSystemDirectoryHandle | null = store?.hypercombRoot ?? null
+    if (!dir) return { id: req.id, ok: false, error: 'no hypercombRoot' }
 
     // Walk to / create the parent path so OPFS reflects the segments.
     const parentSegments: string[] = []
@@ -369,5 +648,42 @@ export class ClaudeBridgeWorker extends Worker {
   }
 }
 
+// ─── base64 helpers ────────────────────────────────────────────────
+//
+// Browser-native base64 round-trip. `btoa`/`atob` only handle binary
+// strings (each char 0-255), so we map Uint8Array bytes to such a
+// string before encoding and back after decoding.
+
+const base64ToBytes = (b64: string): Uint8Array => {
+  // strip whitespace + url-safe variants so callers can paste loosely
+  const clean = b64.replace(/[\s]/g, '').replace(/-/g, '+').replace(/_/g, '/')
+  const binary = atob(clean)
+  const out = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i)
+  return out
+}
+
+const bytesToBase64 = (bytes: Uint8Array): string => {
+  // Chunk to keep String.fromCharCode happy with large buffers.
+  const CHUNK = 0x8000
+  let binary = ''
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    const slice = bytes.subarray(i, Math.min(i + CHUNK, bytes.length))
+    binary += String.fromCharCode.apply(null, slice as unknown as number[])
+  }
+  return btoa(binary)
+}
+
 const _claudeBridgeWorker = new ClaudeBridgeWorker()
 window.ioc.register('@diamondcoreprocessor.com/ClaudeBridgeWorker', _claudeBridgeWorker)
+
+// Register the per-cell `context` slot (LLM context bag). Passive —
+// no triggers; the bridge `update`, `bag-add`, and `bag-remove` ops
+// are the writers. Subscribed via whenReady so this module loads
+// independently of LayerSlotRegistry's own load order.
+;(window as { ioc?: { whenReady?: <T>(k: string, cb: (v: T) => void) => void } }).ioc?.whenReady?.<LayerSlotRegistry>(
+  '@diamondcoreprocessor.com/LayerSlotRegistry',
+  (slotRegistry) => {
+    slotRegistry.register({ slot: CONTEXT_SLOT, triggers: [] })
+  },
+)

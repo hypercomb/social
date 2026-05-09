@@ -118,6 +118,14 @@ export class TileEditorDrone {
     if (!store || !service || !imageEditor || !settings) return
     if (service.mode !== 'editing') return
 
+    // capture cell name up front so we can emit tile:saved if save succeeds.
+    // The whole save body runs inside try/finally — without this guarantee
+    // a thrown step (image capture, OPFS write, etc.) would leave the
+    // editor open and the InputGate locked, permanently blocking zoom.
+    const savedCell = service.cell
+    let saveSucceeded = false
+
+    try {
     const props: Record<string, unknown> = { ...service.properties }
     const currentOrientation = imageEditor.orientation ?? 'point-top'
 
@@ -202,15 +210,18 @@ export class TileEditorDrone {
     index[service.cell] = propsSig
     localStorage.setItem(indexKey, JSON.stringify(index))
 
-    // 5. capture cell name before closing
-    const savedCell = service.cell
-
-    // 6. cleanup
-    imageEditor.destroy()
-    service.close()
+    saveSucceeded = true
+    } finally {
+      // 6. cleanup — always runs so editor:mode {active:false} is emitted
+      // and InputGate.unlock() fires even if any step above threw.
+      imageEditor.destroy()
+      service.close()
+    }
 
     // 7. notify via effect bus (processor owns synchronize; drones use effects)
-    EffectBus.emit<{ cell: string }>('tile:saved', { cell: savedCell })
+    if (saveSucceeded) {
+      EffectBus.emit<{ cell: string }>('tile:saved', { cell: savedCell })
+    }
   }
 
   // ── cancel ─────────────────────────────────────────────────────

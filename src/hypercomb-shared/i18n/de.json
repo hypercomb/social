@@ -9,16 +9,13 @@
   "activity.mesh-private": "Netz → privat",
   "activity.undo": "Rückgängig",
   "activity.dismiss": "Schließen",
-
   "command-line.placeholder.locked": "Zellenname eingeben...",
   "command-line.placeholder.filter": "Kacheln filtern...",
   "command-line.placeholder.slash": "Verhalten eingeben...",
   "command-line.placeholder.default": "Absicht teilen...",
-
   "palette.title": "Befehlspalette",
   "palette.placeholder": "Befehl eingeben...",
   "palette.empty": "Keine passenden Befehle",
-
   "shortcuts.title": "Referenz",
   "shortcuts.close": "Schließen",
   "shortcuts.filter-placeholder": "Befehle, Operationen, Shortcuts filtern…",
@@ -27,7 +24,6 @@
   "shortcuts.section.keyboard": "Tastenkürzel",
   "shortcuts.empty": "Keine Treffer",
   "shortcuts.chord-sep": "dann",
-
   "editor.title": "Kachel-Editor",
   "editor.drop-image": "Bild hier ablegen",
   "editor.unlink-transforms": "Transformationen trennen",
@@ -48,7 +44,6 @@
   "editor.search-google": "In Google Bilder suchen",
   "editor.cancel": "abbrechen",
   "editor.save": "speichern",
-
   "controls.go-back": "zurück",
   "controls.back": "zurück",
   "controls.dcp": "Diamantkernprozessor",
@@ -86,15 +81,12 @@
   "controls.atomize-particle": "Partikelzerlegung",
   "controls.atomize-reassemble": "wieder zusammensetzen",
   "controls.atomize-close": "Atomisierer schließen",
-
   "slash.atomize-ui": "Atomisierer-Leiste umschalten",
-
   "atomizer.spacing-placeholder": "z.B. 8px 12px",
   "atomizer.title": "Atomisierer",
   "atomizer.close": "Atomisierer-Leiste schließen",
   "atomizer.empty": "keine Atomisierer",
   "atomizer.reset": "Eigenschaften zurücksetzen",
-
   "explorer.title": "OPFS-Explorer",
   "explorer.entries-label": "OPFS-Einträge",
   "explorer.copy-package": "Paket kopieren",
@@ -109,18 +101,14 @@
   "explorer.copy": "kopieren",
   "explorer.remove": "entfernen",
   "explorer.no-entries": "keine Einträge",
-
   "format-painter.title": "Format übertragen",
   "format-painter.empty": "Keine visuellen Eigenschaften auf dieser Kachel",
   "format-painter.apply": "Auf Auswahl anwenden",
-
   "mesh.secret-placeholder": "Standort sichern",
   "mesh.secured": "gesichert",
-
   "portal.title": "Portal",
   "portal.close": "Portal schließen",
   "portal.back": "zurück",
-
   "action.command": "Befehl",
   "action.command.description": "Befehlspalette für diese Kachel öffnen",
   "action.edit": "bearbeiten",
@@ -139,13 +127,11 @@
   "action.adopt.description": "Diese Kachel zur eigenen Sammlung hinzufügen",
   "action.block": "blockieren",
   "action.block.description": "Diese Kachel blockieren damit sie nicht mehr erscheint",
-
   "selection.move": "verschieben",
   "selection.cut": "ausschneiden",
   "selection.copy": "kopieren",
   "selection.remove": "entfernen",
   "selection.paste": "einfügen",
-
   "history.title": "Browserverlauf",
   "history.back": "zurück",
   "history.forward": "vorwärts",
@@ -154,8 +140,6 @@
   "history.path": "Pfad:",
   "history.depth": "Tiefe:",
   "history.active": "aktiv:",
-
-  "slash.select": "Kacheln zum Ausschneiden/Kopieren/Verschieben auswählen",
   "slash.remove-builtin": "Ausgewählte Kacheln entfernen",
   "slash.help": "Referenz anzeigen",
   "slash.clear": "Aktiven Filter löschen",
@@ -181,18 +165,14 @@
   "slash.record": "KI-Meeting-Aufnahme mit Live-Hierarchie-Kompilierung starten",
   "slash.domain": "Netz-Relay-Domänen hinzufügen, entfernen oder auflisten",
   "slash.substrate": "Standard-Hintergrundbilder für neue Kacheln umschalten",
-
   "substrate.on": "Substrat aktiviert → {path}",
   "substrate.off": "Substrat deaktiviert",
   "substrate.here": "Substrat → {path}",
-
   "toast.dismiss": "Schließen",
-
   "instruction.click-to-restore": "Klicken zum Wiederherstellen",
   "instruction.catalog-title": "Alle Anweisungen",
   "instruction.no-instructions": "Keine Anweisungen verfügbar. Drohnen können Anweisungen deklarieren, die hier erscheinen.",
   "controls.instructions": "Anweisungen umschalten (Strg+Klick für Katalog)",
-
   "instruction.dcp.open-processor": "Diamantkernprozessor öffnen",
   "instruction.dcp.fit-content": "Alle Kacheln an die Ansicht anpassen",
   "instruction.dcp.zoom-out": "Leinwand herauszoomen",
@@ -201,24 +181,11 @@
   "instruction.dcp.fullscreen": "Vollbildmodus umschalten",
   "instruction.dcp.layout-mode": "Zwischen fixiertem und kompaktem Layout wechseln",
   "instruction.dcp.instructions-toggle": "Anweisungsbeschriftungen auf allen Steuerelementen ein-/ausblenden",
-
-  "trackplayer.eyebrow": "hypercomb Audio",
-  "trackplayer.title": "Hörbuch \u201cInspired by Humans\u201d",
-  "trackplayer.description": "Hör das E-Book auf <a href=\"https://inspiredbyhumans.org\" target=\"_blank\" rel=\"noopener\">inspiredbyhumans.org</a>",
-  "trackplayer.loading": "Titel werden geladen...",
-  "trackplayer.empty": "Keine Titel gefunden. Dateien in hypercomb-shared/tracks hinzufügen.",
-  "trackplayer.selected": "Ausgewählter Titel",
-  "trackplayer.available": "Verfügbare Titel",
-  "trackplayer.no-signal": "kein Signal",
-  "trackplayer.play-prequel": "Prequel jetzt abspielen",
-  "trackplayer.unavailable": "Titel sind derzeit nicht verfügbar.",
-
   "confirm.delete-title": "Löschen bestätigen",
   "confirm.delete-message": "Sind Sie sicher, dass Sie \"{name}\" löschen möchten?",
   "confirm.delete-children-warning": "Dieses Element enthält untergeordnete Elemente, die ebenfalls dauerhaft gelöscht werden.",
   "confirm.delete": "Löschen",
   "confirm.cancel": "Abbrechen",
-
   "editor.done": "fertig",
   "mesh.solo": "Einzelmodus",
   "mesh.swarm": "Schwarmmodus",
@@ -226,7 +193,6 @@
   "selection.hide": "ausblenden",
   "controls.toggle-input": "Befehlszeile anzeigen",
   "slash.reroll": "Substrat-Hintergrundbilder auf Kacheln neu generieren",
-
   "docs.title": "Dokumentation",
   "docs.close-sidebar": "Seitenleiste schließen",
   "docs.open-sidebar": "Seitenleiste öffnen",
@@ -236,26 +202,18 @@
   "docs.loading": "Laden...",
   "docs.main-title": "Hypercomb-Dokumentation",
   "docs.welcome-text": "Wählen Sie ein Dokument in der Seitenleiste oder verwenden Sie /docs glossary, um direkt zu einer Seite zu springen.",
-
   "command-line.install-prompt": "Hypercomb installieren",
   "command-line.create-cell": "Neue Zelle auf der aktuellen Ebene erstellen",
   "command-line.create-nested": "Verschachtelte Ordner erstellen, auf aktueller Ebene mit übergeordnetem Pfad bleiben",
   "command-line.navigate-folder": "Zu einem Ordner wechseln, bei Bedarf erstellen",
   "command-line.filter-tiles": "Kacheln live nach Schlüsselwort filtern",
-
   "audio.pause": "Pause",
   "audio.play": "Abspielen",
   "audio.seek": "Suchen",
-
-  "trackplayer.close-player": "Player schließen",
-  "trackplayer.no-signal-label": "Kein-Signal-Zwischenspiel",
-
   "controls.drag-to-move": "zum Verschieben ziehen",
   "controls.collapse": "einklappen",
   "controls.expand": "ausklappen",
-
   "selection.drag-to-move": "zum Verschieben ziehen",
-
   "breadcrumb.public": "öffentlich",
   "breadcrumb.private": "privat",
   "breadcrumb.secure": "sicher",
@@ -265,7 +223,6 @@
   "breadcrumb.installed": "installiert",
   "breadcrumb.installed-count": "installiert ({count})",
   "breadcrumb.sync-error": "Synchronisierungsfehler",
-
   "keymap.escape": "Abbrechen / schließen",
   "keymap.shortcuts": "Tastenkürzel anzeigen",
   "keymap.palette": "Befehlspalette öffnen",
@@ -282,7 +239,6 @@
   "keymap.paste": "Aus Zwischenablage einfügen",
   "keymap.cut": "Ausgewählte Kacheln ausschneiden",
   "keymap.remove": "Ausgewählte Kacheln entfernen",
-
   "dcp.title": "Diamantkernprozessor",
   "dcp.install": "Installieren",
   "dcp.download-package": "Paket herunterladen",
@@ -351,7 +307,6 @@
   "dcp.editor-modified": "geändert",
   "dcp.editor-loading-files": "Dateien werden geladen...",
   "dcp.editor-empty": "Keine Bienen oder Abhängigkeiten in dieser Schicht.",
-
   "cell.welcome": "willkommen",
   "cell.home": "Startseite",
   "cell.settings": "Einstellungen",
@@ -394,7 +349,6 @@
   "cell.meetings": "Treffen",
   "cell.the-depths": "Die Tiefen",
   "cell.one-day": "Eines Tages",
-
   "cell.assistant": "Assistent",
   "cell.avatars": "Avatare",
   "cell.background": "Hintergrund",

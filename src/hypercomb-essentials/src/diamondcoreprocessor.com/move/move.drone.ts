@@ -501,7 +501,7 @@ export class MoveDrone extends Drone {
     return placements
   }
 
-  // ── command-driven move API (for command line /select[...]/move) ──
+  // ── command-driven move API (for command line [...]/move) ──
 
   #commandActive = false
   get moveCommandActive(): boolean { return this.#commandActive }
@@ -675,7 +675,9 @@ export class MoveDrone extends Drone {
       try {
         const cellDir = await dir.getDirectoryHandle(label, { create: false })
         await writeCellProperties(cellDir, { index: gridIndex })
-      } catch { /* skip missing cell dirs */ }
+      } catch (err) {
+        console.warn('[move] failed to persist 0000.index for', label, err)
+      }
     }
   }
 

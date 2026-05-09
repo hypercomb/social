@@ -12,7 +12,7 @@ import { QueenBee, EffectBus, hypercomb } from '@hypercomb/core'
  *   /remove                         — remove currently selected tiles
  *   /remove tileName                — remove a single tile
  *   /remove [tile1, tile2, tile3]   — remove multiple tiles
- *   /select[a,b]/remove             — chained: select then remove
+ *   [a,b]/remove                    — chained: select then remove
  */
 export class RemoveQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
