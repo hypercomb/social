@@ -80,10 +80,12 @@ export class PixiHostWorker extends Worker {
 
     const app = this.app = new Application()
 
-    // Cap at DPR=2: iPhone Pro has DPR=3 which creates a 3M-pixel framebuffer at 60fps,
-    // pushing the iOS GPU process over its memory limit → repeated crash → Safari error.
-    // At DPR=2 the pixel density is already imperceptible; MSAA is redundant at DPR≥2.
-    const dpr = Math.min(devicePixelRatio || 1, 2)
+    // Mobile: cap DPR at 1.5. iPhone Pro has DPR=3 → 3M-pixel framebuffer at 60fps which
+    // pushes the iOS GPU process over its memory limit → repeated WKWebView crash → Safari
+    // "A problem repeatedly occurred". DPR=1.5 is imperceptible at mobile viewing distance.
+    // Desktop caps at 2 — above that MSAA is redundant and the gain is invisible.
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+    const dpr = Math.min(devicePixelRatio || 1, isMobile ? 1.5 : 2)
 
     await app.init({
       // Size to the host element, not the window, so anything that
@@ -97,11 +99,25 @@ export class PixiHostWorker extends Worker {
       resolution: dpr,
       autoDensity: true,
       antialias: dpr < 2,
+      // Hint to iOS to use the efficiency GPU core — it has a larger
+      // memory headroom relative to workload than the performance core.
+      powerPreference: 'low-power',
     })
+
+    // On mobile, cap at 30fps. The shaders are complex and running all
+    // tickers at 60fps on a small screen is pure GPU waste.
+    if (isMobile) app.ticker.maxFPS = 30
 
     app.stage.scale.set(1.8, 1.8)
     app.stage.interactiveChildren = false
     host.appendChild(app.canvas)
+
+    // Pause the ticker when the tab is hidden — a backgrounded page
+    // burning GPU cycles at 30-60fps is a leading cause of iOS GPU
+    // process kills that trigger "A problem repeatedly occurred".
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) { app.ticker.stop() } else { app.ticker.start() }
+    })
 
     // Pixi's built-in resizeTo polling did not reliably react to CSS
     // changes that narrowed the host (the history sidebar's injected
