@@ -80,6 +80,11 @@ export class PixiHostWorker extends Worker {
 
     const app = this.app = new Application()
 
+    // Cap at DPR=2: iPhone Pro has DPR=3 which creates a 3M-pixel framebuffer at 60fps,
+    // pushing the iOS GPU process over its memory limit → repeated crash → Safari error.
+    // At DPR=2 the pixel density is already imperceptible; MSAA is redundant at DPR≥2.
+    const dpr = Math.min(devicePixelRatio || 1, 2)
+
     await app.init({
       // Size to the host element, not the window, so anything that
       // narrows the host (the history sidebar taking a column on the
@@ -89,9 +94,9 @@ export class PixiHostWorker extends Worker {
       // pixels, with hit-testing still firing through the overlay.
       resizeTo: host,
       backgroundAlpha: 0,
-      resolution: devicePixelRatio || 1,
+      resolution: dpr,
       autoDensity: true,
-      antialias: true,
+      antialias: dpr < 2,
     })
 
     app.stage.scale.set(1.8, 1.8)
