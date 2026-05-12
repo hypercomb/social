@@ -283,11 +283,10 @@ export class BracketBehavior implements CommandLineBehavior {
     return true
   }
 
-  /** Push a `/parent?[a,b,c]` URL for the selection. SelectionService
-   *  syncs from the navigate event natively; the auto-open drone
-   *  surfaces the editor for the first selected. Pushing the URL
-   *  directly (not Navigation.go) avoids segment normalisation
-   *  stripping the brackets. */
+  /** Push a `/parent/[a,b,c]` URL for the selection — path-tail form
+   *  is the spec. SelectionService syncs from the navigate event
+   *  natively. Pushing the URL directly (not Navigation.go) avoids
+   *  segment normalisation stripping the brackets. */
   #navigateAndSelect(
     expanded: ParsedArrayItem[],
     baseSegments: readonly string[],
@@ -298,9 +297,9 @@ export class BracketBehavior implements CommandLineBehavior {
       item.segments[item.segments.length - 1]
     )
     const parentPath = [...baseSegments, ...parentInInput]
-    const pathname = parentPath.length > 0 ? '/' + parentPath.join('/') : '/'
-    const search = '?[' + selectedNames.join(',') + ']'
-    window.history.pushState({}, '', pathname + search)
+    const base = parentPath.length > 0 ? '/' + parentPath.join('/') : ''
+    const url = base + '/[' + selectedNames.join(',') + ']'
+    window.history.pushState({}, '', url)
     window.dispatchEvent(new Event('navigate'))
   }
 
