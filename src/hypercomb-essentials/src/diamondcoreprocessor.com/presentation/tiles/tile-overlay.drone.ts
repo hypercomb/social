@@ -469,6 +469,17 @@ export class TileOverlayDrone extends Drone {
           this.#editCooldownTimer = setTimeout(() => {
             this.#editCooldownTimer = null
             this.#editCooldown = false
+            // Safety refresh after cooldown ends. The image-drop save
+            // cascade (cell:added → render:cell-count → cell list
+            // rebuild) can clear #currentAxial/#currentIndex between
+            // the editor:mode emit and the final settle. The immediate
+            // #updateVisibility below runs while occupied may still be
+            // false; this deferred refresh re-derives once the cascade
+            // is settled so the overlay reappears on the (still-
+            // hovered) tile without requiring the cursor to cross a
+            // hex boundary.
+            this.#updateVisibility()
+            this.#updatePerTileVisibility()
           }, 300)
           // Refresh per-tile visibility now — properties (link, hideText,
           // noImage, image) may have just changed. The cursor may already
@@ -481,11 +492,16 @@ export class TileOverlayDrone extends Drone {
 
       // tile:saved fires on every save/cancel of the tile editor. The
       // tile's properties may have changed (link, hideText, image, border)
-      // — properties that gate per-icon visibility. Refresh per-tile state
-      // so the overlay reflects the post-save tile without waiting for the
-      // next pointer move.
+      // — properties that gate per-icon visibility. Refresh both the
+      // overlay-level visibility (image drops can leave it hidden when
+      // the save cascade clears #currentAxial mid-flight) and per-tile
+      // state so the overlay reflects the post-save tile without
+      // waiting for the next pointer move.
       this.onEffect<{ cell: string }>('tile:saved', () => {
-        if (this.#overlay && this.#currentAxial) this.#updatePerTileVisibility()
+        if (this.#overlay && this.#currentAxial) {
+          this.#updateVisibility()
+          this.#updatePerTileVisibility()
+        }
       })
 
       this.onEffect<{ selected: string[] }>('selection:changed', (payload) => {

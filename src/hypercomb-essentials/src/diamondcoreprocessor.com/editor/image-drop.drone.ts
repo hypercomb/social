@@ -46,6 +46,16 @@ export class ImageDropDrone extends Drone {
     document.addEventListener('dragleave', this.#onDragLeave)
     document.addEventListener('drop', this.#onDrop)
     document.addEventListener('dragend', this.#onDragEnd)
+    // Capture-phase safety: a child handler (e.g. the editor panel) may
+    // call event.stopPropagation() in the bubble phase, preventing our
+    // bubble-phase `drop` listener from seeing the event. Without this,
+    // `drop:dragging` stays `true` forever, and the overlay renders as a
+    // drop target (hex visible, icons hidden) after the editor closes.
+    // The capture-phase listener runs BEFORE child handlers, so it
+    // always sees the drop and can clear the flag. It does NOT
+    // stopPropagation — the editor's own drop handler still runs.
+    document.addEventListener('drop', this.#onDropCapture, true)
+    document.addEventListener('dragend', this.#onDragEnd, true)
   }
 
   protected override heartbeat = async (): Promise<void> => {
@@ -59,6 +69,17 @@ export class ImageDropDrone extends Drone {
       // cache the latest drop target emitted by TileOverlayDrone during drag
       this.onEffect<DropTarget>('drop:target', (target) => {
         this.#lastTarget = target
+      })
+
+      // When the editor opens, any in-flight drag is now the editor's
+      // responsibility — its drop handler calls stopPropagation(), so a
+      // drop landing on the editor panel never reaches our document-level
+      // listener, and #clearDragging() never fires. The `drop:dragging`
+      // flag would stick at `true`, leaving the overlay in drop-target
+      // mode after save (hex visible, icons hidden). Clear it preemptively
+      // when the editor takes ownership of drops.
+      this.onEffect<{ active: boolean }>('editor:mode', ({ active }) => {
+        if (active && this.#dragging) this.#clearDragging()
       })
     }
   }
@@ -95,6 +116,15 @@ export class ImageDropDrone extends Drone {
 
   #onDragEnd = (): void => {
     this.#clearDragging()
+  }
+
+  /** Capture-phase drop listener. Always clears the dragging flag so a
+   *  child handler that calls stopPropagation() can't strand `drop:dragging`
+   *  at `true`. Does NOT preventDefault / stopPropagation — the bubble-
+   *  phase #onDrop (which routes the file) and any child handlers still
+   *  run normally. */
+  #onDropCapture = (_e: DragEvent): void => {
+    if (this.#dragging) this.#clearDragging()
   }
 
   #onDrop = (e: DragEvent): void => {
