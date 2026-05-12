@@ -13,6 +13,7 @@ import { TranslatePipe } from '../../core/i18n.pipe'
 import { isDivider, type MenuButton, type MenuItem } from './menu-pack'
 import { MenuRegistry } from './menu-registry'
 import './history-menu-pack'  // self-installs HistoryMenuPack into MenuRegistry
+import './egg-menu-pack'      // self-installs EggMenuPack (unlock for synced facade tiles)
 
 const STORAGE_KEY = 'hc:selection-menu-pos'
 const MENU_WIDTH = 44

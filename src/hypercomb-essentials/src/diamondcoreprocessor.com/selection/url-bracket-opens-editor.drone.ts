@@ -72,7 +72,11 @@ export class UrlBracketOpensEditorDrone extends Drone {
     const selection = ioc.get<SelectionServiceLike>('@diamondcoreprocessor.com/SelectionService')
     if (!navigation || !selection) return
 
-    const url = window.location.pathname + window.location.hash
+    // URL fingerprint includes pathname + search + hash so changes in
+    // any of them count as "new URL." Without `search`, switching from
+    // `/dolphin?[model]` to `/dolphin?[practice]` wouldn't re-open the
+    // editor on the new selection — same pathname, same hash.
+    const url = window.location.pathname + window.location.search + window.location.hash
     const urlChanged = url !== this.#lastUrl
     this.#lastUrl = url
 

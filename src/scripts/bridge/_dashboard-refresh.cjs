@@ -118,14 +118,18 @@ const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 })[c])
 
-// Builds the path-bracket URL: `/parent/.../parent/[childName]`. The
-// final path segment is the bracket so the SelectionFromUrlDrone picks
-// it up and auto-opens the editor for `childName` (Phase 2).
+// Builds the canonical bracket-selection URL: `/parent/path?[childName]`.
+// Brackets live in the query string (RFC-safe; routers / proxies don't
+// mangle them). Navigation's parseQueryBracket() recognises this form
+// and SelectionService syncs natively. Path-tail form (`/parent/[name]`)
+// is still recognised on the reader side for backward compat with
+// older shared links — but new emissions use query form.
 function bracketUrl(path) {
   if (path.length === 0) return '/'
   const parent = path.slice(0, -1).join('/')
   const child = path[path.length - 1]
-  return (parent ? '/' + parent : '') + '/[' + child + ']'
+  const base = parent ? '/' + parent : '/'
+  return base + '?[' + child + ']'
 }
 
 function renderDashboard({ openItems, answeredCount, totalCount, manifestSigPreview }) {

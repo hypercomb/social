@@ -19,22 +19,50 @@ export class Navigation extends hypercomb {
   // ----------------------------------
 
   // ----------------------------------
-  // bracket-segment selection
-  //   Path syntax `/path/to/parent/[a,b,c]` carries a selection list
-  //   as its trailing segment. The bracket segment is NOT part of the
-  //   navigation target — it pre-selects child cells under the parent.
-  //   On parse: strip from `segments()` / `segmentsRaw()`, expose via
-  //   `getSelections()` so SelectionService can sync. Hash-based
-  //   selections (`#name` or `#(a,b,c)`) remain supported as a fallback
-  //   for back-compat with existing in-flight links.
+  // bracket selection grammar (canonical = query-string form)
+  //
+  //   /parent?[a,b,c]     — preferred: brackets in the query string,
+  //                         pathname stays clean, never mangled by
+  //                         routers / proxies / URL encoders.
+  //   /parent/[a,b,c]     — legacy path-tail form, kept as a fallback
+  //                         reader so older shared links still resolve.
+  //   #name / #(a,b,c)    — legacy hash form, fallback below.
+  //
+  // All three are recognised by `getSelections()`. The bracket content
+  // is stripped from `segments()` / `segmentsRaw()` so callers walking
+  // the path don't see the selection markup. The writer side
+  // (replaceSelections) still uses the hash form for now — migrating
+  // to query is a follow-up so dashboard / paste-URL flows can be
+  // tested against the query form first.
   // ----------------------------------
 
-  // Match `[a, b, c]` or `[a,b,c]` (last segment, brackets included).
+  // Match `[a, b, c]` or `[a,b,c]` exactly (brackets included).
   private readonly bracketRe = /^\[(.+)\]$/
 
+  // Parse the query string for the `?[a,b,c]` bracket form. Returns
+  // the parsed name list (possibly empty) or null when the search
+  // doesn't carry a bracket. URL-encoded brackets are accepted via
+  // safeDecode so paste from any encoder works.
+  private readonly parseQueryBracket = (): string[] | null => {
+    const raw = window.location.search ?? ''
+    if (!raw) return null
+    const trimmed = raw.startsWith('?') ? raw.slice(1) : raw
+    const decoded = this.safeDecode(trimmed).trim()
+    const m = this.bracketRe.exec(decoded)
+    if (!m) return null
+    return m[1].split(',').map(s => this.cleanSegment(s)).filter(Boolean)
+  }
+
   // Parse current pathname into { pathSegments (no bracket), bracket (names or null) }.
+  // Query-string form wins; falls back to legacy path-tail form.
   private readonly parsePath = (): { pathSegments: string[]; bracket: string[] | null } => {
     const raw = window.location.pathname.split('/').filter(Boolean)
+
+    // Query-string form: pathname stays as-is, bracket comes from `?[...]`.
+    const queryBracket = this.parseQueryBracket()
+    if (queryBracket) return { pathSegments: raw, bracket: queryBracket }
+
+    // Legacy path-tail form: last segment is `[a,b,c]`.
     if (raw.length === 0) return { pathSegments: [], bracket: null }
     const last = this.safeDecode(raw[raw.length - 1] ?? '')
     const m = this.bracketRe.exec(last.trim())
