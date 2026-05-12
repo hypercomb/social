@@ -17,6 +17,7 @@ import { VoiceInputService } from '../../core/voice-input.service'
 import type { CommandLineBehavior, CommandLineBehaviorMeta, CommandLineOperation } from './command-line-behavior'
 import { ShiftEnterNavigateBehavior } from './shift-enter-navigate.behavior'
 import { BatchCreateBehavior } from './batch-create.behavior'
+import { PasteUrlNavigateBehavior } from './paste-url-navigate.behavior'
 import { RemoveCellBehavior } from './remove-cell.behavior'
 import { GoParentBehavior } from './go-parent.behavior'
 import { CutPasteBehavior } from './cut-paste.behavior'
@@ -285,13 +286,20 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     () => this.cellProvider.suggestions()
   )
 
-  // pluggable behaviors — validated at construction, no overlapping operations
+  // pluggable behaviors — validated at construction, no overlapping operations.
+  //
+  // Order matters: the first behavior whose `match()` returns true claims
+  // the input. PasteUrlNavigateBehavior MUST come before BatchCreate
+  // because both can match bracket-bearing input — but a URL-shaped paste
+  // (`/dolphin/[model]`, `http://host/dolphin/[model]`) should navigate
+  // and select rather than create cells named `dolphin` and `model`.
   #behaviors: CommandLineBehavior[] = this.#validateBehaviors([
     new GoParentBehavior(),
     new SlashBehaviourBehavior(),
     new RemoveCellBehavior(),
     new CutPasteBehavior(),
     new HashMarkerBehavior(),
+    new PasteUrlNavigateBehavior(),
     new BatchCreateBehavior(),
     new ShiftEnterNavigateBehavior()
   ])
