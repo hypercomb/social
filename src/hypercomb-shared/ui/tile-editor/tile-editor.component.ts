@@ -21,6 +21,24 @@ import type { ImageEditorService } from
   '@hypercomb/essentials/diamondcoreprocessor.com/editor/image-editor.service'
 import type { LinkSafetyService } from
   '@hypercomb/essentials/diamondcoreprocessor.com/safety/link-safety.service'
+import type { NotesService, Note } from
+  '@hypercomb/essentials/diamondcoreprocessor.com/notes'
+
+/** Q&A item view-model — pairs a `[Q]`-prefixed note with the
+ *  matching `[A:<qId>]` answer note when one exists. The qId is the
+ *  question note's `id`, used as the join key in the `[A:<qId>]`
+ *  answer-note text format. */
+type QaViewItem = {
+  readonly qId: string
+  readonly question: string
+  readonly answer: string | null
+}
+
+// Match `[Q]`, `[Q v2]`, `[Q something]` at the start of a note —
+// captures the rest of the line as the question text.
+const Q_NOTE_RE = /^\[Q(?:\s+[^\]]*)?\]\s*([\s\S]+)$/
+// Match `[A:<qId>] <answer>` — captures the qId and the answer text.
+const A_NOTE_RE = /^\[A:([a-zA-Z0-9_-]+)\]\s*([\s\S]+)$/
 
 @Component({
   selector: 'hc-tile-editor',
@@ -108,6 +126,13 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
   // track previous open state for init/teardown
   #wasOpen = false
 
+  // ── Q&A panel state ────────────────────────────────────────────
+  // qaItems is the derived list of (question, answer) pairs for the
+  // current cell, refreshed on open and after each answer submission.
+  // qaAnswerDraft holds the in-flight typed text per question id.
+  public qaItems: QaViewItem[] = []
+  public qaAnswerDraft: Record<string, string> = {}
+
   // ── open/close side effects (EventTarget listener, no inject) ──
 
   #onEditorChange = (): void => {
@@ -122,6 +147,12 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
 
       document.addEventListener('keydown', this.#onKeyDown)
       setTimeout(() => this.#initCanvas(), 0)
+
+      // Refresh Q&A list for the opened cell. Notes are read
+      // synchronously from NotesService — if the cache hasn't warmed
+      // yet (first selection after page load), the list will be empty
+      // and fill in after the next notes:changed.
+      this.#refreshQaItems()
     }
     if (!isOpen && this.#wasOpen) {
       document.removeEventListener('keydown', this.#onKeyDown)
@@ -129,8 +160,61 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
       this.linkValue = ''
       this.borderColorValue = ''
       this.backgroundColorValue = ''
+      this.qaItems = []
+      this.qaAnswerDraft = {}
     }
     this.#wasOpen = isOpen
+  }
+
+  // ── Q&A panel logic ────────────────────────────────────────────
+
+  /** Re-derive `qaItems` from the cell's current notes. Pairs each
+   *  `[Q ...]`-prefixed note with the matching `[A:<qId>] ...`
+   *  answer note (when present). Called on editor open and after
+   *  every successful answer submission. */
+  #refreshQaItems(): void {
+    const notesService = get('@diamondcoreprocessor.com/NotesService') as NotesService | undefined
+    const cell = this.editorService?.cell ?? ''
+    if (!notesService || !cell) { this.qaItems = []; return }
+
+    const notes: Note[] = notesService.notesFor(cell)
+    const questions = new Map<string, string>()   // q-note id → question text
+    const answers = new Map<string, string>()      // q-note id → answer text
+
+    for (const note of notes) {
+      const text = (note.text ?? '').trim()
+      const q = Q_NOTE_RE.exec(text)
+      if (q) {
+        questions.set(note.id, q[1].trim())
+        continue
+      }
+      const a = A_NOTE_RE.exec(text)
+      if (a) {
+        answers.set(a[1], a[2].trim())
+      }
+    }
+
+    const items: QaViewItem[] = []
+    for (const [qId, question] of questions) {
+      items.push({ qId, question, answer: answers.get(qId) ?? null })
+    }
+    this.qaItems = items
+  }
+
+  /** Submit an inline answer for a Q&A item. Posts a note of the form
+   *  `[A:<qId>] <text>` on the same cell — `notes:changed` will fire
+   *  shortly after; we also refresh on a short delay so the panel
+   *  reflects the new answer without a manual reload. */
+  readonly submitAnswer = (qId: string): void => {
+    const text = (this.qaAnswerDraft[qId] ?? '').trim()
+    if (!text) return
+    const cell = this.editorService?.cell ?? ''
+    if (!cell) return
+    EffectBus.emit('note:commit', { cellLabel: cell, text: `[A:${qId}] ${text}` })
+    this.qaAnswerDraft[qId] = ''
+    // Notes commit is async (resource put + layer cascade). Refresh on
+    // a short delay so the new [A:…] note shows up in the panel.
+    setTimeout(() => this.#refreshQaItems(), 300)
   }
 
   #onKeyDown = (e: KeyboardEvent): void => {
@@ -378,9 +462,20 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
 
   // ── lifecycle ──────────────────────────────────────────────────
 
+  #offNotesChanged: (() => void) | null = null
+
   ngOnInit(): void {
     const target = get('@diamondcoreprocessor.com/TileEditorService') as EventTarget | undefined
     target?.addEventListener('change', this.#onEditorChange)
+
+    // Keep the Q&A panel in sync with notes changes — covers async
+    // hydration on first open (warm cache wasn't ready yet), and
+    // reflects newly-submitted answers without polling.
+    const handler = (): void => {
+      if (this.#wasOpen) this.#refreshQaItems()
+    }
+    const off = EffectBus.on('notes:changed', handler) as unknown
+    this.#offNotesChanged = typeof off === 'function' ? off as () => void : null
   }
 
   ngAfterViewInit(): void {
@@ -392,6 +487,7 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
     this.closeCamera()
     const target = get('@diamondcoreprocessor.com/TileEditorService') as EventTarget | undefined
     target?.removeEventListener('change', this.#onEditorChange)
+    this.#offNotesChanged?.()
     this.imageEditor?.destroy()
   }
 }

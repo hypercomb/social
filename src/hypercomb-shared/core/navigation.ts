@@ -62,6 +62,15 @@ export class Navigation extends hypercomb {
   //   Hash form remains supported for back-compat.
   // ----------------------------------
 
+  /** True iff the current URL path carries a `[...]` selection segment.
+   *  Lets URL-driven consumers (auto-open popup on dashboard click)
+   *  distinguish "user navigated here with a selection intent" from
+   *  "user is just here and might have prior hash-form selection." */
+  public readonly hasBracketSelection = (): boolean => {
+    const { bracket } = this.parsePath()
+    return !!(bracket && bracket.length > 0)
+  }
+
   public readonly getSelections = (): string[] => {
     // Path-bracket form takes precedence — it's the canonical / shareable
     // representation. Hash form survives as a back-compat reader.

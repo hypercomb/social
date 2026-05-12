@@ -1,10 +1,42 @@
 // diamondcoreprocessor.com/editor/tile-properties.ts
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, SignatureService, type Signature } from '@hypercomb/core'
 
 export const TILE_PROPERTIES_FILE = '0000'
 
 export const isSignature = (value: unknown): boolean =>
   typeof value === 'string' && /^[0-9a-f]{64}$/.test(value)
+
+type SignatureStoreLike = {
+  signText: (text: string) => Promise<Signature>
+}
+
+/**
+ * Lineage-signature cache key for a single cell.
+ *
+ * Every NurseBee read AND every writeCellProperties call must address
+ * a cell by this key — never by the bare folder name. The leaf name
+ * is not unique across the tree (e.g. a "Notes" tile can exist in
+ * every folder), so a name-keyed cache returns the wrong value the
+ * moment two cells with the same leaf name are touched in one
+ * session, and writeCellProperties' invalidation broadcast misses
+ * the actual collider. The lineage signature is unique per location
+ * and stable as long as the cell stays put — exactly the address the
+ * inflate primitive uses to compose layer state into a single
+ * consumable JSON view. Same key here means the in-memory cache, the
+ * disk-side broadcast, and the inflate tree all agree on identity.
+ *
+ * Memoised inside SignatureStore.signText, so repeat calls per render
+ * are a Map lookup.
+ */
+export const cellLocationSig = async (
+  parentSegments: readonly string[],
+  cellName: string,
+): Promise<string> => {
+  const path = [...parentSegments, cellName].join('/')
+  const sigStore = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc?.get<SignatureStoreLike>('@hypercomb/SignatureStore')
+  if (sigStore?.signText) return sigStore.signText(path)
+  return SignatureService.sign(new TextEncoder().encode(path).buffer as ArrayBuffer)
+}
 
 /**
  * Read and parse the 0000 properties JSON from a cell directory.
@@ -45,10 +77,13 @@ export const readCellProperties = async (
  * other writers — so the nurse cache stays coherent without anyone
  * else having to remember to invalidate.
  *
- * `cacheKey` defaults to `cellDir.name` (the immediate folder name).
- * Callers that key by a fully-qualified lineage path can pass it
- * explicitly so cross-folder cells with the same leaf name don't
- * collide.
+ * `cacheKey` MUST be the cell's lineage signature (see
+ * `cellLocationSig`) — the same key the nurses are read with. The
+ * legacy default (cellDir.name) collides across folders that share a
+ * leaf name; any writer relying on the default is opting in to a
+ * silent corruption of cross-folder cache state. Defaulted only so
+ * the function stays callable from contexts that don't touch any
+ * nurse-tended key.
  */
 export const writeCellProperties = async (
   cellDir: FileSystemDirectoryHandle,

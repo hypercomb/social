@@ -4,7 +4,7 @@ import type { HostReadyPayload } from '../presentation/tiles/pixi-host.worker.js
 import type { Axial } from '../navigation/hex-detector.js'
 import type { LayerTransferService } from './layer-transfer.service.js'
 import type { OrderProjection } from '../history/order-projection.js'
-import { readCellProperties, writeCellProperties } from '../editor/tile-properties.js'
+import { readCellProperties, writeCellProperties, cellLocationSig } from '../editor/tile-properties.js'
 
 type CellCountPayload = { count: number; labels: string[]; coords?: Axial[]; branchLabels?: string[] }
 type MoveRefs = {
@@ -429,12 +429,18 @@ export class MoveDrone extends Drone {
     } catch { /* no existing children */ }
 
     // transfer each moved cell into the target's children, assigning
-    // monotonically increasing indexes so order is stable and unique
+    // monotonically increasing indexes so order is stable and unique.
+    // Cache key tracks the cell's NEW lineage (under targetLabel), not
+    // its old one — so IndexNurse's broadcast invalidation hits the
+    // address the cell will be read at next render.
+    const sourceSegments: readonly string[] = lineage?.explorerSegments?.() ?? []
+    const targetParentSegments = [...sourceSegments, targetLabel]
     for (const label of movedLabels) {
       try {
         await transfer.transfer(sourceDir, targetDir, label)
         const cellDir = await targetDir.getDirectoryHandle(label, { create: false })
-        await writeCellProperties(cellDir, { index: nextIndex })
+        const cacheKey = await cellLocationSig(targetParentSegments, label)
+        await writeCellProperties(cellDir, { index: nextIndex }, cacheKey)
         nextIndex++
       } catch (err) {
         console.warn('[move] drop-into transfer failed for', label, err)
@@ -770,12 +776,15 @@ export class MoveDrone extends Drone {
     const dir: FileSystemDirectoryHandle | null = lineage?.explorerDir ? await lineage.explorerDir() : null
     if (!dir) return
 
+    const parentSegments: readonly string[] = lineage?.explorerSegments?.() ?? []
+
     for (const [label, axial] of placements) {
       const gridIndex = this.#keyToIndex.get(axialKey(axial.q, axial.r))
       if (gridIndex === undefined) continue
       try {
         const cellDir = await dir.getDirectoryHandle(label, { create: false })
-        await writeCellProperties(cellDir, { index: gridIndex })
+        const cacheKey = await cellLocationSig(parentSegments, label)
+        await writeCellProperties(cellDir, { index: gridIndex }, cacheKey)
       } catch (err) {
         console.warn('[move] failed to persist 0000.index for', label, err)
       }

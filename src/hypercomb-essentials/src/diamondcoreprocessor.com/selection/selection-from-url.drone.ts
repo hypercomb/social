@@ -14,7 +14,7 @@
 // Reverse direction (clicks → URL) is owned by the existing
 // tile-selection / hash-writing path; this drone only reads.
 
-import { Drone } from '@hypercomb/core'
+import { Drone, EffectBus } from '@hypercomb/core'
 
 interface SelectionServiceLike {
   readonly selected: ReadonlySet<string>
@@ -24,6 +24,7 @@ interface SelectionServiceLike {
 
 interface NavigationLike {
   getSelections(): string[]
+  hasBracketSelection(): boolean
 }
 
 interface IocLike {
@@ -37,6 +38,11 @@ export class SelectionFromUrlDrone extends Drone {
 
   #bound = false
   #syncing = false
+  /** Last URL we synced from. New URL + non-empty bracket → auto-open
+   *  the editor for the first selected. Tracking the URL prevents
+   *  re-opening the editor when other events (save → tile:saved →
+   *  cascade → navigate-without-URL-change) fire repeatedly. */
+  #lastSyncedUrl: string | null = null
   readonly #sync = (): void => { this.#syncFromUrl() }
 
   protected override heartbeat = async (): Promise<void> => {
@@ -76,25 +82,54 @@ export class SelectionFromUrlDrone extends Drone {
     const selection = ioc.get<SelectionServiceLike>('@diamondcoreprocessor.com/SelectionService')
     if (!navigation || !selection) return
 
+    // URL fingerprint — pathname + hash so we can detect genuinely-new
+    // URLs and only auto-open the editor once per arrival at a
+    // bracket-bearing URL.
+    const url = window.location.pathname + window.location.hash
+    const urlChanged = url !== this.#lastSyncedUrl
+    this.#lastSyncedUrl = url
+
     const desired = new Set(navigation.getSelections())
     const current = selection.selected
+    const hasBracket = navigation.hasBracketSelection()
 
-    // Same set? Skip — avoids redundant notifications and any chance
-    // of feedback with the SelectionService → URL writer.
-    if (desired.size === current.size) {
-      let same = true
+    // Same set? Skip the SelectionService mutation — avoids redundant
+    // notifications and any chance of feedback with the existing
+    // SelectionService → URL writer. We still consider the auto-open
+    // edit-trigger below: a deep link could land on a URL whose
+    // bracket already matches SelectionService, but the editor still
+    // needs to open because that's the URL's intent.
+    let setsMatch = desired.size === current.size
+    if (setsMatch) {
       for (const x of desired) {
-        if (!current.has(x)) { same = false; break }
+        if (!current.has(x)) { setsMatch = false; break }
       }
-      if (same) return
     }
 
-    this.#syncing = true
-    try {
-      selection.clear()
-      for (const name of desired) selection.add(name)
-    } finally {
-      this.#syncing = false
+    if (!setsMatch) {
+      this.#syncing = true
+      try {
+        selection.clear()
+        for (const name of desired) selection.add(name)
+      } finally {
+        this.#syncing = false
+      }
+    }
+
+    // Phase 2: auto-open the editor when a NEW URL arrives carrying a
+    // path-bracket selection. The dashboard's links use this form, and
+    // the user's intent on clicking such a link is "open this tile and
+    // let me answer / read its notes." Hash-form selections (from tile
+    // clicks) don't trigger this path — they don't have a bracket.
+    if (urlChanged && hasBracket && desired.size > 0) {
+      const first = [...desired][0]
+      EffectBus.emit('tile:action', {
+        action: 'edit',
+        label: first,
+        q: 0,
+        r: 0,
+        index: 0,
+      })
     }
   }
 }

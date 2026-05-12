@@ -7,7 +7,7 @@ import { HexLabelAtlas } from '../grid/hex-label.atlas.js'
 import { HexImageAtlas } from '../grid/hex-image.atlas.js'
 import { HexSdfTextureShader } from '../grid/hex-sdf.shader.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from '../grid/hex-geometry.js'
-import { isSignature, readCellProperties, writeCellProperties } from '../../editor/tile-properties.js'
+import { isSignature, readCellProperties, writeCellProperties, cellLocationSig } from '../../editor/tile-properties.js'
 import type { HistoryService } from '../../history/history.service.js'
 import type { HistoryCursorService, CursorState } from '../../history/history-cursor.service.js'
 import type { ViewportPersistence, ViewportSnapshot } from '../../navigation/zoom/zoom.drone.js'
@@ -3176,6 +3176,20 @@ export class ShowCellDrone extends Drone {
       | { read: (dir: FileSystemDirectoryHandle, key: string) => Promise<number | undefined> }
       | undefined
 
+    // Cache key is the cell's lineage signature, never its bare folder
+    // name. Two cells in different parent folders can share a leaf
+    // name (a "Notes" tile is common at many depths) and a name-keyed
+    // cache returns the first-seen index for every subsequent read of
+    // the same leaf — which on cold-load-at-subfolder + nav-back
+    // resolves to the SUBFOLDER's index, collides with the parent's
+    // real occupant, demotes the loser to unindexed, and persists it
+    // to slot 0. The lineage signature is unique per location and the
+    // same address inflate uses, so the in-memory cache, the on-disk
+    // 0000.index, and the inflate tree all agree on which cell is
+    // which.
+    const lineage = this.resolve<any>('lineage')
+    const parentSegments: readonly string[] = lineage?.explorerSegments?.() ?? []
+
     for (const name of names) {
       if (!localCellSet.has(name)) {
         unindexed.push(name)
@@ -3183,8 +3197,9 @@ export class ShowCellDrone extends Drone {
       }
       try {
         const cellDir = await dir.getDirectoryHandle(name, { create: false })
+        const cacheKey = await cellLocationSig(parentSegments, name)
         const idx = indexNurse
-          ? await indexNurse.read(cellDir, name)
+          ? await indexNurse.read(cellDir, cacheKey)
           : await readCellProperties(cellDir).then(p =>
               typeof p['index'] === 'number' ? (p['index'] as number) : undefined,
             )
@@ -3215,7 +3230,8 @@ export class ShowCellDrone extends Drone {
         if (!readOnly && localCellSet.has(name)) {
           try {
             const cellDir = await dir.getDirectoryHandle(name, { create: false })
-            await writeCellProperties(cellDir, { index: nextFree })
+            const cacheKey = await cellLocationSig(parentSegments, name)
+            await writeCellProperties(cellDir, { index: nextFree }, cacheKey)
           } catch (err) {
             console.warn('[show-cell] failed to persist 0000.index for', name, err)
           }
@@ -3309,7 +3325,9 @@ export class ShowCellDrone extends Drone {
 
     try {
       const cellDir = await dir.getDirectoryHandle(cell, { create: false })
-      await writeCellProperties(cellDir, { index: targetIndex })
+      const parentSegments: readonly string[] = lineage?.explorerSegments?.() ?? []
+      const cacheKey = await cellLocationSig(parentSegments, cell)
+      await writeCellProperties(cellDir, { index: targetIndex }, cacheKey)
     } catch { /* missing cell dir */ }
 
     this.renderedCellsKey = ''
