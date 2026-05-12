@@ -131,6 +131,14 @@ export class PairedChannelDrone extends Drone {
     const joined: JoinedChannel = { channelId, location, secret, machine, subscription }
     this.#channels.set(channelId, joined)
     EffectBus.emit(PAIRED_CHANNEL_EFFECTS.joined, { channelId, location })
+    // Publish announce so this client's pubkey becomes a candidate
+    // host. The state machine's #announce handler accepts only the
+    // first announce it observes; later announces are no-ops. In
+    // single-user multi-tab scenarios both tabs publish the same
+    // pubkey, so whoever lands first claims the host slot and both
+    // tabs treat themselves as the host (auto-approve their own
+    // share-requests).
+    void this.#announceIfNeeded(channelId)
     return channelId
   }
 
@@ -153,7 +161,25 @@ export class PairedChannelDrone extends Drone {
     const location = '/' + segments.join('/')
     this.#channels.set(channelId, { channelId, location, secret, machine, subscription })
     EffectBus.emit(PAIRED_CHANNEL_EFFECTS.joined, { channelId, location })
+    void this.#announceIfNeeded(channelId)
     return channelId
+  }
+
+  /**
+   * Publish a `type=announce` event after a short delay if no host
+   * has been observed yet. The delay lets late-arriving announces
+   * from existing peers be processed first — if someone else already
+   * claimed the host slot, we don't fight them for it.
+   */
+  async #announceIfNeeded(channelId: string): Promise<void> {
+    // Tiny delay so any retained announces from the relay arrive first.
+    await new Promise(r => setTimeout(r, 300))
+    const machine = this.#channels.get(channelId)?.machine
+    if (!machine) return
+    if (machine.state.hostPubkey) return // someone announced already
+    const service = this.#service()
+    if (!service) return
+    await service.publish(channelId, 'announce', { auditPolicy: { threshold: 1, trustedSet: [] } })
   }
 
   /** Leave a channel. Closes the subscription and drops in-memory state. */
@@ -242,6 +268,38 @@ export class PairedChannelDrone extends Drone {
     if (!service) return false
     return service.publish(channelId, 'pulled', {}, [['e', approvalId]])
   }
+
+  /**
+   * If we are the host of `channelId` AND the share was requested by
+   * the host (us), auto-approve it without waiting for a UI prompt.
+   * Member-initiated requests fall through and surface the prompt.
+   *
+   * Host identity is determined by comparing our NostrSigner pubkey
+   * to the channel's `hostPubkey` (set by whoever published the first
+   * `announce`).
+   */
+  async #maybeAutoApprove(channelId: string, share: ShareState): Promise<void> {
+    const machine = this.#channels.get(channelId)?.machine
+    if (!machine) return
+    const hostPubkey = machine.state.hostPubkey
+    if (!hostPubkey) return // no announce yet
+    if (share.requesterPubkey !== hostPubkey) return // member request → need manual allow
+    const myPubkey = await this.#myPubkey()
+    if (!myPubkey) return
+    if (myPubkey !== hostPubkey) return // someone else is host
+    void this.approveShare(channelId, share.requestId, null)
+  }
+
+  async #myPubkey(): Promise<string | null> {
+    if (this.#cachedMyPubkey) return this.#cachedMyPubkey
+    const signer = window.ioc.get('@diamondcoreprocessor.com/NostrSigner') as
+      { getPublicKeyHex?: () => Promise<string | null> } | undefined
+    if (!signer?.getPublicKeyHex) return null
+    const pk = await signer.getPublicKeyHex()
+    if (pk) this.#cachedMyPubkey = pk
+    return pk
+  }
+  #cachedMyPubkey: string | null = null
 
   /**
    * Publish one cell's canonical layer content. Caller pre-computed
@@ -350,14 +408,17 @@ export class PairedChannelDrone extends Drone {
         // We don't currently advertise an effect for revoke — re-uses memberAdmitted with a kind tag if needed.
         break
       case 'share-request-received':
-        // Surface the request to UI consumers. Approval is a deliberate
-        // act — the host clicks an "approve" toast in expose.drone.
-        // This replaces the earlier v0 auto-approval. Non-host clients
-        // may also see the prompt; their approval is a no-op because
-        // the state machine only honours `share` events signed by the
-        // hostPubkey, so an approval click from a non-host produces a
-        // published event that every receiver ignores.
+        // Asymmetric approval. If the requester IS the host (sharing
+        // their own node), auto-approve — no UI prompt, the share
+        // event goes out immediately. If the requester is a member,
+        // surface a prompt; only host's published `share` event takes
+        // effect, so non-host clicks would be no-ops anyway.
+        //
+        // We still emit the UI effect for the host-self case so any
+        // surface that wants to "exposed → toast" feedback can hook
+        // it; auto-approve simply also fires.
         EffectBus.emit(PAIRED_CHANNEL_EFFECTS.shareRequestReceived, { channelId, share: t.share })
+        void this.#maybeAutoApprove(channelId, t.share)
         break
       case 'share-approved':
         EffectBus.emit(PAIRED_CHANNEL_EFFECTS.shareApproved, { channelId, share: t.share })

@@ -33,12 +33,10 @@ import {
 } from './paired-channel.machine.js'
 
 const EXPOSE_ICON_NAME = 'expose'
-const SYNC_ICON_NAME = 'sync'
 const TILE_ACTION_EXPOSE = 'expose'
-const TILE_ACTION_SYNC = 'sync'
-const SHARE_ACCEPT_EFFECT = 'paired-channel:accept-share'
 const SHARE_APPROVE_EFFECT = 'paired-channel:approve-share'
 const SHARE_REJECT_EFFECT = 'paired-channel:reject-share'
+const EGG_UNLOCK_EFFECT = 'egg:unlock-selected'
 
 /**
  * Keys written into 0000 when a share is materialised as a facade.
@@ -63,15 +61,6 @@ const EXPOSE_ICON_SVG = `
   <path d="M5 14h14v6H5z"/>
 </svg>`.trim()
 
-// Same icon, mirror direction — used for the sync (incoming) action.
-const SYNC_ICON_SVG = `
-<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-     stroke-linecap="round" stroke-linejoin="round" width="20" height="20">
-  <path d="M12 20v-9"/>
-  <path d="M16 16l-4 4-4-4"/>
-  <path d="M5 4h14v6H5z"/>
-</svg>`.trim()
-
 interface IconProviderRegistry {
   add(p: { name: string; owner: string; svgMarkup: string; profile?: string; hoverTint?: number; labelKey?: string; descriptionKey?: string }): void
   remove(name: string): void
@@ -83,11 +72,6 @@ interface TileActionPayload {
   q: number
   r: number
   index: number
-}
-
-interface AcceptSharePayload {
-  channelId: string
-  share: ShareState
 }
 
 interface ApproveSharePayload {
@@ -115,7 +99,7 @@ export class ExposeDrone extends Drone {
     PAIRED_CHANNEL_EFFECTS.shareRequestReceived,
     PAIRED_CHANNEL_EFFECTS.shareApproved,
     PAIRED_CHANNEL_EFFECTS.layerReceived,
-    SHARE_ACCEPT_EFFECT,
+    EGG_UNLOCK_EFFECT,
     SHARE_APPROVE_EFFECT,
     SHARE_REJECT_EFFECT,
   ]
@@ -131,7 +115,15 @@ export class ExposeDrone extends Drone {
     this.onEffect<TileActionPayload>('tile:action', (payload) => {
       if (!payload?.action) return
       if (payload.action === TILE_ACTION_EXPOSE) { void this.#onExpose(payload.label); return }
-      if (payload.action === TILE_ACTION_SYNC) { void this.#onSync(payload.label); return }
+    })
+
+    // EggMenuPack's "unlock" button fires this. Iterate the supplied
+    // labels; non-facade tiles are no-ops inside #onUnlockTile.
+    this.onEffect<{ labels: readonly string[] }>(EGG_UNLOCK_EFFECT, (payload) => {
+      const labels = Array.isArray(payload?.labels) ? payload.labels : []
+      for (const label of labels) {
+        if (typeof label === 'string' && label) void this.#onUnlockTile(label)
+      }
     })
 
     this.onEffect<{ channelId: string; share: ShareState }>(
@@ -153,11 +145,6 @@ export class ExposeDrone extends Drone {
       },
     )
 
-    this.onEffect<AcceptSharePayload>(SHARE_ACCEPT_EFFECT, (payload) => {
-      if (!payload?.share) return
-      void this.#acceptShare(payload.channelId, payload.share)
-    })
-
     this.onEffect<ApproveSharePayload>(SHARE_APPROVE_EFFECT, (payload) => {
       if (!payload?.requestId) return
       void this.#approveShare(payload.channelId, payload.requestId)
@@ -178,6 +165,11 @@ export class ExposeDrone extends Drone {
 
   #registerIcon(): void {
     const registry = window.ioc.get('@hypercomb.social/IconProviderRegistry') as IconProviderRegistry | undefined
+    // Only the expose icon goes on tiles. Unlock is a selection-menu
+    // action (EggMenuPack) — putting a sync icon on every tile would
+    // clutter the overlay; the selection vertical menu is the right
+    // surface because "unlock the eggs I've selected" is inherently a
+    // multi-tile gesture.
     registry?.add({
       name: EXPOSE_ICON_NAME,
       owner: '@diamondcoreprocessor.com/ExposeDrone',
@@ -186,15 +178,6 @@ export class ExposeDrone extends Drone {
       hoverTint: 0xa6e3a1,
       labelKey: 'action.expose',
       descriptionKey: 'action.expose.description',
-    })
-    registry?.add({
-      name: SYNC_ICON_NAME,
-      owner: '@diamondcoreprocessor.com/ExposeDrone',
-      svgMarkup: SYNC_ICON_SVG,
-      profile: 'public',
-      hoverTint: 0x80c8ff,
-      labelKey: 'action.sync',
-      descriptionKey: 'action.sync.description',
     })
   }
 
@@ -327,9 +310,10 @@ export class ExposeDrone extends Drone {
   /**
    * Auto-create a facade tile for an approved share at the receiver's
    * current location. The folder + 0000 land immediately so the user
-   * sees a visible tile (with empty children) and a sync icon. Clicking
-   * the sync icon resolves to #onSync, which fills the full subtree
-   * and drops the facade flag.
+   * sees a visible tile (an "egg") with empty children. Selecting the
+   * tile and clicking "Unlock" in the vertical menu fires the
+   * `egg:unlock-selected` effect, which routes to #onUnlockTile and
+   * fills in the full subtree from the buffered layer events.
    *
    * Skips if a tile with the same name already exists at this location
    * (the source side: host's auto-approval echoes back to itself, but
@@ -379,17 +363,17 @@ export class ExposeDrone extends Drone {
   }
 
   /**
-   * Sync icon click handler. Reads the tile's facade metadata from
-   * 0000, calls drone.materialiseFromSig to recursively fill the
+   * Unlock handler for one tile. Reads the tile's facade metadata
+   * from 0000, calls drone.materialiseFromSig to recursively fill the
    * subtree, then drops `facade: true` from 0000 so the tile becomes
    * a normal cell.
    *
-   * No-op if the tile isn't a facade — the sync icon is registered
-   * for every tile in v0 (no per-tile filtering until shader-side
-   * facade rendering lands), so clicks on plain tiles fall through
-   * silently rather than misbehaving.
+   * No-op if the tile isn't a facade. EggMenuPack surfaces the
+   * unlock button for any selection, so plain tiles can also have
+   * the unlock invoked — they fall through silently here rather
+   * than misbehaving.
    */
-  async #onSync(tileLabel: string): Promise<void> {
+  async #onUnlockTile(tileLabel: string): Promise<void> {
     const lineage = window.ioc.get('@hypercomb.social/Lineage') as LineageLike | undefined
     const dir = await lineage?.explorerDir?.()
     if (!dir) {
@@ -457,60 +441,6 @@ export class ExposeDrone extends Drone {
     const approvalId = typeof props['approvalId'] === 'string' ? props['approvalId'] : ''
     if (approvalId) {
       void drone.markPulled(channelId, approvalId)
-    }
-  }
-
-  async #acceptShare(channelId: string, share: ShareState): Promise<void> {
-    const drone = this.#pairedChannelDrone()
-    if (!drone) {
-      this.#toast('warning', 'Sync failed', 'PairedChannelDrone is not available.')
-      return
-    }
-    const lineage = window.ioc.get('@hypercomb.social/Lineage') as LineageLike | undefined
-    const dir = await lineage?.explorerDir?.()
-    if (!dir) {
-      this.#toast('warning', 'Sync failed', 'No explorer directory for the current lineage.')
-      return
-    }
-
-    // Verify root layer is in the buffer. If it's not, we can't
-    // materialise — surface and stop. Recoverable: re-fire expose
-    // on the source side, or wait for late `layer` events.
-    if (!drone.layerOf(channelId, share.branchSig)) {
-      this.#toast('warning', 'Sync failed',
-        `Root layer ${share.branchSig.slice(0, 8)} hasn't arrived yet. Wait a moment and try again.`)
-      return
-    }
-
-    let result: { written: number; missing: string[] }
-    try {
-      result = await drone.materialiseFromSig(channelId, share.branchSig, dir)
-    } catch (err) {
-      this.#toast('warning', 'Sync failed', String((err as Error)?.message ?? err))
-      return
-    }
-
-    if (result.written === 0) {
-      this.#toast('warning', 'Sync failed',
-        `Wrote zero layers — ${result.missing.length} sig(s) missing from the buffer.`)
-      return
-    }
-
-    // Notify the rest of the renderer that the root cell now exists at
-    // the current location so it picks up + renders the new tile.
-    EffectBus.emit('cell:added', { cell: share.branchName })
-
-    if (result.missing.length > 0) {
-      this.#toast('tip', 'Synced (partial)',
-        `Wrote ${result.written} layer(s). ${result.missing.length} sig(s) still missing — they may arrive later.`)
-    } else {
-      this.#toast('success', 'Synced',
-        `"${share.branchName}" + ${result.written - 1} descendant(s) landed at the current location.`)
-    }
-
-    // Decrement the host's cap counter — best-effort.
-    if (share.approvalId) {
-      void drone.markPulled(channelId, share.approvalId)
     }
   }
 
@@ -597,11 +527,6 @@ function formatBytes(n: number): string {
   if (n < 1024 * 1024) return `${Math.round(n / 1024)}KB`
   return `${(n / (1024 * 1024)).toFixed(1)}MB`
 }
-
-// Quiet TS over unused exports for v0 — sync icon is staged for later
-// when the sync icon attaches to receiver-side ghost tiles instead of
-// the toast surface.
-void SYNC_ICON_SVG
 
 // ── registration ─────────────────────────────────────────────────────
 
