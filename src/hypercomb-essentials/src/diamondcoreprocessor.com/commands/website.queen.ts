@@ -1,32 +1,40 @@
 // diamondcoreprocessor.com/commands/website.queen.ts
 //
-// Design-time authoring and stamping for embedded sites.
+// View-mode toggling, subtree export, and Claude codegen triggers for
+// embedded sites. Pages live in each cell's `context` slot; this queen
+// no longer stamps `websiteSig` decorations or builds bundles — the
+// renderer (site-view.drone) reads `context` directly.
 //
-// Syntax (positional; optional target + optional payload):
+// Syntax:
 //
-//   /website                         — export CURRENT subtree
-//   /website clear                   — clear websiteSig on current cell
-//   /website <sig>                   — stamp <sig> onto current cell
-//   /website [sig1][sig2]…           — build bundle by concatenating sigs,
-//                                      stamp resulting sig onto current cell
-//
-//   /website <name-or-path>          — export that subtree
-//   /website <name-or-path> <sig>    — stamp <sig> onto that cell
-//   /website <name-or-path> [sigs…]  — build + stamp onto that cell
-//   /website <name-or-path> clear    — clear websiteSig on that cell
+//   /website                         — toggle hexagons ↔ website view
+//   /website on | web | site | view  — switch to website view
+//   /website off | hex | hexagons    — switch to hexagons view
+//   /website export                  — dump current subtree as JSON
+//                                      (copies to clipboard for Claude
+//                                      Code's /website skill)
+//   /website <name-or-path>          — export that subtree as JSON
+//   /website upgrade [* | <name>]    — emit website:build (mode=upgrade)
+//   /website new | build             — emit website:build (mode=new)
+//   /website list                    — list registered branch names
 //
 // <name-or-path> is one of:
 //   - a registered branch name (from /branch)
 //   - a lineage path (contains `/` or starts with `/`)
 //
-// Autocomplete offers branch names from NameRegistry, plus the operator
-// shortcuts (clear, list).
+// Bundle stamping (`/website <sig>`, `/website [sig][sig]…`, `/website
+// clear`) was removed alongside the bundle path in site-view; the
+// errors in #parseArgs surface the removal if older muscle memory
+// invokes them.
+//
+// `CELL_WEBSITE_PROPERTY` still imported solely for the read side of
+// `snapshot()` — existing user data with vestigial `websiteSig`
+// values surfaces in the export JSON for archaeology.
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
 import { CELL_WEBSITE_PROPERTY } from '@hypercomb/core'
 import {
   readCellProperties,
-  writeCellProperties,
   isSignature,
 } from '../editor/tile-properties.js'
 
@@ -192,8 +200,6 @@ const BRACKET_SIGS_RE = /\[([0-9a-f]{64})\]/gi
  */
 type Parsed =
   | { kind: 'export'; target: string | null }
-  | { kind: 'clear'; target: string | null }
-  | { kind: 'stamp'; target: string | null; sigs: readonly string[] }
   | { kind: 'list' }
   | { kind: 'error'; message: string }
 
@@ -206,26 +212,39 @@ function parseArgs(raw: string): Parsed {
   const tokens = splitTopLevel(trimmed)
   if (tokens.length === 1) {
     const tok = tokens[0]
+    // The bundle-stamping ops (`clear`, `<sig>`, `[sig][sig]…`) are
+    // gone — site rendering is per-cell `context` slot, no
+    // `websiteSig` decoration to stamp or clear.
     if (tok.toLowerCase() === 'clear' || tok.toLowerCase() === 'remove') {
-      return { kind: 'clear', target: null }
+      return { kind: 'error', message: `clear/remove no longer applies — the bundle path was removed; per-cell pages are managed in the cell's context slot` }
     }
-    if (isSignature(tok)) return { kind: 'stamp', target: null, sigs: [tok.toLowerCase()] }
+    if (isSignature(tok)) {
+      return { kind: 'error', message: `stamping a websiteSig is no longer supported; pages live on each cell's context slot` }
+    }
     const bracketed = extractBracketedSigs(tok)
-    if (bracketed.length) return { kind: 'stamp', target: null, sigs: bracketed }
+    if (bracketed.length) {
+      return { kind: 'error', message: `bundle assembly is no longer supported; per-cell pages don't use bundles` }
+    }
     // Otherwise treat as target → export
     return { kind: 'export', target: tok }
   }
 
-  // Two+ tokens: first is target, rest is op/payload.
+  // Two+ tokens: first is target, rest is op. Bundle ops are rejected
+  // for the same reason as above; only `<target> export` (implicit) is
+  // honored.
   const target = tokens[0]
   const rest = tokens.slice(1).join(' ')
 
   if (rest.toLowerCase() === 'clear' || rest.toLowerCase() === 'remove') {
-    return { kind: 'clear', target }
+    return { kind: 'error', message: `clear/remove no longer applies — the bundle path was removed` }
   }
-  if (isSignature(rest)) return { kind: 'stamp', target, sigs: [rest.toLowerCase()] }
+  if (isSignature(rest)) {
+    return { kind: 'error', message: `stamping a websiteSig on "${target}" is no longer supported` }
+  }
   const bracketed = extractBracketedSigs(rest)
-  if (bracketed.length) return { kind: 'stamp', target, sigs: bracketed }
+  if (bracketed.length) {
+    return { kind: 'error', message: `bundle assembly for "${target}" is no longer supported` }
+  }
 
   return { kind: 'error', message: `could not parse "${rest.slice(0, 40)}"` }
 }
@@ -366,18 +385,6 @@ async function walk(
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// Bundle construction from bracketed sig lists
-// ──────────────────────────────────────────────────────────────────────────
-
-async function sigsToBundleSig(sigs: readonly string[]): Promise<string | null> {
-  const store = get('@hypercomb.social/Store') as any
-  if (!store?.putResource) return null
-  const bundleText = sigs.map(s => s.toLowerCase()).join('')
-  const blob = new Blob([bundleText], { type: 'text/plain' })
-  return await store.putResource(blob)
-}
-
-// ──────────────────────────────────────────────────────────────────────────
 // Queen
 // ──────────────────────────────────────────────────────────────────────────
 
@@ -386,7 +393,7 @@ export class WebsiteQueenBee extends QueenBee {
   readonly command = 'website'
   override readonly aliases = []
   override description =
-    'Export a subtree, stamp a bundleSig, or build a bundle from a list of sigs. Targets current cell or a named branch / lineage path.'
+    'Toggle the website view, export the current subtree as JSON, or trigger a Claude codegen build. Bundle stamping was removed; per-cell pages live on each cell\'s `context` slot.'
   override descriptionKey = 'slash.website'
 
   override slashComplete(args: string): readonly string[] {
@@ -398,16 +405,17 @@ export class WebsiteQueenBee extends QueenBee {
 
     if (tokens.length <= 1) {
       const matches = names.filter(n => n.toLowerCase().startsWith(head))
-      const fixed = ['(export current)', '<64-hex sig>', '[sig][sig]…', 'clear', 'list']
+      // Bundle ops (`<sig>`, `[sig][sig]…`, `clear`) removed.
+      const fixed = ['(toggle view)', 'export', 'upgrade', 'new', 'build', 'list']
         .filter(s => !head || s.toLowerCase().startsWith(head))
       return [...new Set([...matches, ...fixed])]
     }
 
-    // Second token — after a target — suggest operators
-    const second = (tokens[1] ?? '').toLowerCase()
-    const ops = ['<64-hex sig>', '[sig][sig]…', 'clear']
-    if (!second) return ops
-    return ops.filter(o => o.toLowerCase().startsWith(second))
+    // Second-token completions for the bundle ops (`<sig>`,
+    // `[sig][sig]…`, `clear`) were dropped along with the bundle
+    // path. After a target, there's nothing meaningful to complete —
+    // export is implicit when the target stands alone.
+    return []
   }
 
   protected execute(args: string): void {
@@ -522,17 +530,18 @@ export class WebsiteQueenBee extends QueenBee {
       case 'list': return void this.#list()
       case 'error': console.warn(`[/website] ${parsed.message}`); return
       case 'export': return void this.#export(parsed.target)
-      case 'clear':  return void this.#clear(parsed.target)
-      case 'stamp':  return void this.#stamp(parsed.target, parsed.sigs)
     }
   }
 
   async #export(targetSpec: string | null): Promise<void> {
     // Special case: if the lone arg resolves to a signature-typed branch,
     // reinterpret as a stamp on CURRENT cell.
+    // Note: bundle stamping was removed (see class header) — this branch
+    // is unreachable per #execute's gating, kept here as a no-op so the
+    // method's TypeScript narrowing stays unchanged.
     if (targetSpec !== null) {
       const sig = resolveSignatureFromName(targetSpec)
-      if (sig) return this.#stamp(null, [sig])
+      if (sig) return
     }
 
     const target = await resolveTarget(targetSpec)
@@ -556,51 +565,6 @@ export class WebsiteQueenBee extends QueenBee {
       toast('warning', 'Export copy failed',
         'Clipboard write blocked — copy the JSON from the browser console')
     }
-  }
-
-  async #stamp(targetSpec: string | null, sigs: readonly string[]): Promise<void> {
-    if (sigs.length === 0) { console.warn('[/website] no signatures to stamp'); return }
-
-    const target = await resolveTarget(targetSpec)
-    if (!target) {
-      console.warn(`[/website] could not resolve target: ${targetSpec ?? '(current)'}`)
-      return
-    }
-
-    let finalSig: string
-    if (sigs.length === 1) {
-      finalSig = sigs[0]
-    } else {
-      const constructed = await sigsToBundleSig(sigs)
-      if (!constructed) { console.warn('[/website] could not build bundle resource'); return }
-      finalSig = constructed
-      console.log(`[/website] built bundle from ${sigs.length} sigs → ${finalSig}`)
-    }
-
-    await writeCellProperties(target.dir, { [CELL_WEBSITE_PROPERTY]: finalSig })
-    console.log(`[/website] ${CELL_WEBSITE_PROPERTY}=${finalSig} on ${target.label}`)
-    toast('success', 'Website stamped', `${target.label} → ${finalSig.slice(0, 12)}…`)
-
-    const lineage = get('@hypercomb.social/Lineage') as any
-    lineage?.dispatchEvent?.(new CustomEvent('change'))
-  }
-
-  async #clear(targetSpec: string | null): Promise<void> {
-    const target = await resolveTarget(targetSpec)
-    if (!target) return
-
-    const props: Record<string, unknown> = await readCellProperties(target.dir).catch(() => ({} as Record<string, unknown>))
-    if (!(CELL_WEBSITE_PROPERTY in props)) return
-    delete props[CELL_WEBSITE_PROPERTY]
-    const file = await target.dir.getFileHandle('0000', { create: true })
-    const writable = await file.createWritable()
-    await writable.write(JSON.stringify(props))
-    await writable.close()
-
-    console.log(`[/website] cleared ${CELL_WEBSITE_PROPERTY} on ${target.label}`)
-    toast('info', 'Website cleared', target.label)
-    const lineage = get('@hypercomb.social/Lineage') as any
-    lineage?.dispatchEvent?.(new CustomEvent('change'))
   }
 
   async #list(): Promise<void> {

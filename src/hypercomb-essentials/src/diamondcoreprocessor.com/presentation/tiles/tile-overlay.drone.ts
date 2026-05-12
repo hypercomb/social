@@ -1,5 +1,5 @@
 // diamondcoreprocessor.com/pixi/tile-overlay.drone.ts
-import { Drone, EffectBus, consumePointerGesture, type I18nProvider, I18N_IOC_KEY } from '@hypercomb/core'
+import { Drone, EffectBus, consumePointerGesture, type I18nProvider, I18N_IOC_KEY, type KeyMapLayer } from '@hypercomb/core'
 import { Application, Container, Graphics, Point, Text, TextStyle } from 'pixi.js'
 import { HexIconButton } from './hex-icon-button.js'
 import { HexOverlayMesh } from './hex-overlay.shader.js'
@@ -206,6 +206,7 @@ export class TileOverlayDrone extends Drone {
     'overlay:arrange-mode', 'overlay:pool-icons',
     'bee:disposed', 'genotype:set-visible',
     'substrate:applied', 'cell:removed', 'tile:saved',
+    'keymap:invoke',
   ]
   protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'drop:target', 'overlay:icons-reordered']
 
@@ -217,6 +218,50 @@ export class TileOverlayDrone extends Drone {
   protected override heartbeat = async (): Promise<void> => {
     if (!this.#effectsRegistered) {
       this.#effectsRegistered = true
+
+      // ── Tile-aware keybindings ──────────────────────────────────
+      // `e` opens the editor for the tile under the cursor — paired with
+      // `r` (recenter): both are pointer-anchored gestures expressed as
+      // single-key keystrokes. The keybinding fires globally; the handler
+      // gates on hover state so pressing `e` when not on a tile is a
+      // no-op (instead of opening a random editor).
+      const editLayer: KeyMapLayer = {
+        id: 'tile-edit',
+        priority: 5,
+        bindings: [
+          {
+            cmd: 'tile.editHovered',
+            sequence: [[{ key: 'e' }]],
+            description: 'Edit the tile under the cursor',
+            descriptionKey: 'keymap.tileEdit',
+            category: 'Tiles',
+          },
+        ],
+      }
+      EffectBus.emit('keymap:add-layer', { layer: editLayer })
+
+      this.onEffect<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
+        if (cmd !== 'tile.editHovered') return
+        // Gate: must be on a tile, not editing, not in arrange/public/drag
+        if (this.#editing || this.#editCooldown) return
+        if (this.#arrangeMode) return
+        if (this.#meshPublic && !this.#hasSelection) return
+        if (this.#dropDragging || this.#dropPending) return
+        if (!this.#currentAxial) return
+        const entry = this.#occupiedByAxial.get(
+          TileOverlayDrone.axialKey(this.#currentAxial.q, this.#currentAxial.r),
+        )
+        if (!entry?.label) return
+        // Same payload shape as a click on the edit icon — same downstream
+        // path (TileEditorDrone listens, opens the editor for entry.label).
+        this.emitEffect('tile:action', {
+          action: 'edit',
+          q: this.#currentAxial.q,
+          r: this.#currentAxial.r,
+          index: entry.index,
+          label: entry.label,
+        })
+      })
 
       // ── External action registration ─────────────────────────────
       this.onEffect<OverlayActionDescriptor | OverlayActionDescriptor[]>('overlay:register-action', (payload) => {
@@ -409,28 +454,29 @@ export class TileOverlayDrone extends Drone {
 
       this.onEffect<{ active: boolean }>('editor:mode', (payload) => {
         this.#editing = payload.active
-        // A stale timer from a prior close cycle would clear cooldown
-        // mid-cycle. Cancel it before scheduling a new one.
+        // editing flips control of overlay visibility. Cooldown is a separate
+        // 300ms click-suppression window: it only stops the trailing click
+        // from save/cancel reaching the overlay's onClick / pointerdown
+        // handlers. It does NOT hide the overlay (see #updateVisibility).
         if (this.#editCooldownTimer) {
           clearTimeout(this.#editCooldownTimer)
           this.#editCooldownTimer = null
         }
         if (payload.active) {
           this.#editCooldown = false
-          this.#updateVisibility()
         } else {
           this.#editCooldown = true
-          this.#updateVisibility()
           this.#editCooldownTimer = setTimeout(() => {
             this.#editCooldownTimer = null
             this.#editCooldown = false
-            this.#updateVisibility()
-            // Per-tile visibility derives from properties that may have just
-            // changed (link, hideText, noImage). Refresh icon state so a
-            // stationary cursor still sees the post-save icon set.
-            this.#updatePerTileVisibility()
           }, 300)
+          // Refresh per-tile visibility now — properties (link, hideText,
+          // noImage, image) may have just changed. The cursor may already
+          // be over the tile, so without this the post-save icon set
+          // doesn't appear until the next pointer move.
+          this.#updatePerTileVisibility()
         }
+        this.#updateVisibility()
       })
 
       // tile:saved fires on every save/cancel of the tile editor. The
@@ -1713,11 +1759,19 @@ export class TileOverlayDrone extends Drone {
       return
     }
 
-    const shouldShow = occupied && !this.#editing && !this.#editCooldown && !this.#touchDragging
+    // Visibility depends only on whether the user is hovering an occupied
+    // tile and the editor isn't open. `#editCooldown` is a click-suppression
+    // window — it prevents the trailing click from save/cancel from being
+    // re-processed by the overlay — but it must NOT hide the overlay itself,
+    // otherwise the menu disappears for 300ms after every save and the user
+    // sees "icons gone after edit." `#editing` already covers the
+    // editor-is-open case (overlay must stay hidden); cooldown only matters
+    // to onClick / onPointerDown, which still gate on it directly.
+    const shouldShow = occupied && !this.#editing && !this.#touchDragging
 
     // When tiles are selected: overlay visible, hex bg hidden, per-tile icons still active
     if (this.#hasSelection) {
-      this.#overlay.visible = occupied && !this.#editing && !this.#editCooldown
+      this.#overlay.visible = occupied && !this.#editing
       if (this.#hexBg) this.#hexBg.hide()
       // Individual icon visibility is managed solely by #updatePerTileVisibility —
       // icons stay active during selection so per-tile actions (reroll, edit, etc.)

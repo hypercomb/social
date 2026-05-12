@@ -376,6 +376,12 @@ export class ShowCellDrone extends Drone {
   // built the mesh — first render after refresh, deep-link load,
   // post-clearMesh rebuild). Consumed once when the new mesh is created.
   #pendingMeshOffsetRestore: { x: number; y: number } | null = null
+  // When the saved zoom is a fit (snap.zoom.fit), we can't apply its
+  // (cx, cy) directly — those were derived from the safe area at save
+  // time and would leave content shrunk in the new viewport. Set this
+  // flag in #applyViewportFromSnapshot and consume it after
+  // applyGeometry, so the refit runs against valid mesh bounds.
+  #pendingFitRestore = false
   #layoutMode: 'dense' | 'pinned' = 'dense'
 
   // First-visit fit: when navigating to a layer that has no saved viewport
@@ -1633,21 +1639,24 @@ export class ShowCellDrone extends Drone {
       }
     }
 
-    // filter out cells removed via effect — only honor for active clipboard cut
-    // or confirmed OPFS deletion. Stale #pendingRemoves entries must not hide
-    // tiles that still exist in OPFS (prevents ghost removal after add/rename).
+    // Filter out cells whose OPFS dir is genuinely gone. Disk is the
+    // authority — `cutLabels` is NOT consulted here. The previous logic
+    // treated "still on the clipboard service" as proof of removal, but
+    // ClipboardService.removeItems doesn't fire until the very end of
+    // ClipboardWorker.#paste (after `await hypercomb.act()`), well after
+    // the render that follows fs:changed. That meant the just-pasted
+    // cell was on disk yet still in cutLabels, so we pruned it from the
+    // union — render:cell-count emitted without it, and the move drone's
+    // snapshot was missing the pasted tile, blocking the next drag.
     if (!this.#clipboardView) {
-      const clipSvc = get<any>('@diamondcoreprocessor.com/ClipboardService')
-      const cutLabels = clipSvc?.operation === 'cut'
-        ? new Set<string>((clipSvc.items as { label: string }[]).map((i: { label: string }) => i.label))
-        : new Set<string>()
       const reconciled: string[] = []
       for (const cell of this.#pendingRemoves) {
-        if (cutLabels.has(cell) || !localCellSet.has(cell)) {
-          // active cut OR OPFS directory already deleted — honor the remove
+        if (!localCellSet.has(cell)) {
+          // cell genuinely not on disk — honor the remove
           union.delete(cell)
         } else {
-          // cell exists in OPFS but is not a cut item — stale pendingRemove, clear it
+          // cell exists on disk (paste landed, undo of remove, etc.) —
+          // pendingRemove is stale, drop it
           reconciled.push(cell)
         }
       }
@@ -1838,18 +1847,27 @@ export class ShowCellDrone extends Drone {
     await this.applyGeometry(cells)
 
     if (wasEmpty && cells.length > 0 && this.pixiApp && this.pixiContainer && this.pixiRenderer && this.#pendingRecenter) {
-      // first tile on empty screen → center viewport and zoom 2×.
-      // Gated on #pendingRecenter: only the page-nav path opts in.
-      // Data ops (move, add, remove, undo/redo, reorder) never touch
-      // the viewport — user keeps their current scale/pan.
-      const s = this.pixiRenderer.screen
-      this.pixiApp.stage.position.set(s.width * 0.5, s.height * 0.5)
-      this.pixiContainer.scale.set(2)
-      this.pixiContainer.position.set(0, 0)
+      // first tile on empty screen → apply 2× default ONLY when the
+      // user has no saved zoom/pan for this layer. A layer with saved
+      // viewport state (mousewheel zoom, spacebar pan, fit-to-screen)
+      // but missing meshOffset used to land here and have its zoom+pan
+      // wiped to (2, 0, 0) — destroying the user's last position.
+      // Read VP's live state to decide; #applyViewportFromSnapshot has
+      // already restored saved zoom/pan to the container/stage if
+      // present, so we only need to apply the 2× default when VP has
+      // nothing to restore.
       const vp = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ViewportPersistence') as ViewportPersistence | undefined
-      if (vp) {
-        vp.setZoom(2, 0, 0)
-        vp.setPan(0, 0)
+      const hasSavedZoom = !!vp?.lastZoom
+      const hasSavedPan = !!vp?.lastPan
+      if (!hasSavedZoom && !hasSavedPan) {
+        const s = this.pixiRenderer.screen
+        this.pixiApp.stage.position.set(s.width * 0.5, s.height * 0.5)
+        this.pixiContainer.scale.set(2)
+        this.pixiContainer.position.set(0, 0)
+        if (vp) {
+          vp.setZoom(2, 0, 0)
+          vp.setPan(0, 0)
+        }
       }
     }
 
@@ -1944,7 +1962,14 @@ export class ShowCellDrone extends Drone {
      if (!vp) return
      const existing = this.#layerViewportCache.get(locationKey) ?? {} as ViewportSnapshot
      const lp = vp.lastPan; if (lp) existing.pan = { dx: lp.dx, dy: lp.dy }
-     const lz = vp.lastZoom; if (lz) existing.zoom = { scale: lz.scale, cx: lz.cx, cy: lz.cy }
+     // Preserve the fit flag — without it, back-navigation cache loses
+     // the marker that tells #applyViewportFromSnapshot to refit on the
+     // new viewport, and the user's `r` fit silently degrades to a
+     // raw (cx, cy) restore that drifts off-center after any resize.
+     const lz = vp.lastZoom
+     if (lz) existing.zoom = lz.fit
+       ? { scale: lz.scale, cx: lz.cx, cy: lz.cy, fit: true }
+       : { scale: lz.scale, cx: lz.cx, cy: lz.cy }
      const lm = vp.lastMeshOffset; if (lm) existing.meshOffset = { x: lm.x, y: lm.y }
      this.#layerViewportCache.set(locationKey, existing)
    }
@@ -1987,11 +2012,18 @@ export class ShowCellDrone extends Drone {
     const s = renderer.screen
 
     if (snap.zoom) {
+      // Apply the saved scale + (cx, cy) as an approximation so the
+      // initial paint isn't blank, but flag the snapshot for a refit
+      // once mesh bounds are available (handled in applyGeometry).
+      // Without this, a fit saved at one viewport size renders shrunk
+      // and off-center after reload at a different size.
       container.scale.set(snap.zoom.scale)
       container.position.set(snap.zoom.cx, snap.zoom.cy)
+      this.#pendingFitRestore = !!snap.zoom.fit
     } else {
       container.scale.set(1)
       container.position.set(0, 0)
+      this.#pendingFitRestore = false
     }
 
     if (snap.pan) {
@@ -2149,6 +2181,19 @@ export class ShowCellDrone extends Drone {
       if (final) this.#pendingRecenter = false  // consumed only on final batch
     }
 
+    // After mesh + recenter have settled on the final batch, refit if
+    // the restored snapshot was a fit (snap.zoom.fit). The applied
+    // (cx, cy) was an approximation derived from the previous
+    // viewport's safe area — refitting against the new viewport keeps
+    // content centered and not "shrunk" after a resize-then-reload.
+    // Gated on `final` so partial-batch bounds don't produce a fit
+    // that's too tight (would zoom in then out as more cells stream).
+    if (final && this.#pendingFitRestore && this.hexMesh?.getLocalBounds) {
+      this.#pendingFitRestore = false
+      const zoom = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ZoomDrone') as { zoomToFit?: (snap?: boolean) => void } | undefined
+      zoom?.zoomToFit?.(true)
+    }
+
     this.geom = geom
     this.renderedCellsKey = nextCellsKey
     this.renderedCount = cells.length
@@ -2229,6 +2274,35 @@ export class ShowCellDrone extends Drone {
     // respond to processor-emitted synchronize and URL navigation
     window.addEventListener('synchronize', this.requestRender)
     window.addEventListener('navigate', this.requestRender)
+
+    // viewport:persisted — VP just wrote pan/zoom/meshOffset for some
+    // directory. Mirror it into our back-nav cache so navigating-out-and-
+    // back sees the latest values WITHOUT a race against an in-flight
+    // OPFS write. Without this, the back-nav fast path (line 1383)
+    // applies the snapshot from the FIRST visit's OPFS read, undoing any
+    // pan/zoom/recenter the user did this session. Symptom: press R,
+    // back, in → viewport resets to pre-R; refresh fixes once but
+    // back/forth resets again.
+    this.onEffect<{ dir: FileSystemDirectoryHandle; snapshot: ViewportSnapshot }>('viewport:persisted', ({ dir, snapshot }) => {
+      // Match the dir to a known location key. The current rendered
+      // layer is the most common case, but a flush from setDir can
+      // also fire for the OUTGOING layer — handle both via the
+      // dir→locationKey index.
+      let locationKey: string | null = null
+      if (this.#layerDirCache.get(this.renderedLocationKey) === dir) {
+        locationKey = this.renderedLocationKey
+      } else {
+        for (const [key, cachedDir] of this.#layerDirCache) {
+          if (cachedDir === dir) { locationKey = key; break }
+        }
+      }
+      if (locationKey) {
+        // Snapshot is the post-write OPFS state — set it as the cached
+        // snap so back-nav fast path reads what's on disk, not a stale
+        // first-visit read.
+        this.#layerViewportCache.set(locationKey, { ...snapshot })
+      }
+    })
 
     // tile:saved effect — invalidate only the saved cell's caches and run an
     // incremental render so the rest of the grid stays untouched.

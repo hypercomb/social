@@ -23,7 +23,7 @@
 //     subtree sharing.
 
 import { Drone, EffectBus } from '@hypercomb/core'
-import { readCellProperties } from '../editor/tile-properties.js'
+import { readCellProperties, writeCellProperties } from '../editor/tile-properties.js'
 import { PAIRED_CHANNEL_EFFECTS } from './paired-channel.drone.js'
 import type { PairedChannelDrone } from './paired-channel.drone.js'
 import {
@@ -33,10 +33,25 @@ import {
 } from './paired-channel.machine.js'
 
 const EXPOSE_ICON_NAME = 'expose'
+const SYNC_ICON_NAME = 'sync'
 const TILE_ACTION_EXPOSE = 'expose'
+const TILE_ACTION_SYNC = 'sync'
 const SHARE_ACCEPT_EFFECT = 'paired-channel:accept-share'
 const SHARE_APPROVE_EFFECT = 'paired-channel:approve-share'
 const SHARE_REJECT_EFFECT = 'paired-channel:reject-share'
+
+/**
+ * Keys written into 0000 when a share is materialised as a facade.
+ * The sync icon click handler reads these to resolve which channel +
+ * which sig to fill. Surface stays minimal: facade flag + the three
+ * fields we need to recurse later.
+ */
+interface FacadeMetadata {
+  facade: true
+  channelId: string
+  branchSig: string
+  approvalId?: string | null
+}
 
 // Inline SVG — outline arrow leaving a hex cell, neutral stroke.
 // Matches the existing icon size/profile used by tile-actions.drone.
@@ -99,6 +114,7 @@ export class ExposeDrone extends Drone {
     'tile:action',
     PAIRED_CHANNEL_EFFECTS.shareRequestReceived,
     PAIRED_CHANNEL_EFFECTS.shareApproved,
+    PAIRED_CHANNEL_EFFECTS.layerReceived,
     SHARE_ACCEPT_EFFECT,
     SHARE_APPROVE_EFFECT,
     SHARE_REJECT_EFFECT,
@@ -113,8 +129,9 @@ export class ExposeDrone extends Drone {
     this.#registerIcon()
 
     this.onEffect<TileActionPayload>('tile:action', (payload) => {
-      if (payload?.action !== TILE_ACTION_EXPOSE) return
-      void this.#onExpose(payload.label)
+      if (!payload?.action) return
+      if (payload.action === TILE_ACTION_EXPOSE) { void this.#onExpose(payload.label); return }
+      if (payload.action === TILE_ACTION_SYNC) { void this.#onSync(payload.label); return }
     })
 
     this.onEffect<{ channelId: string; share: ShareState }>(
@@ -129,7 +146,10 @@ export class ExposeDrone extends Drone {
       PAIRED_CHANNEL_EFFECTS.shareApproved,
       (payload) => {
         if (!payload?.share) return
-        this.#offerSync(payload.channelId, payload.share)
+        // Auto-materialise the facade. The receiver gets a tile (with
+        // empty children) at the current location immediately; clicking
+        // the sync icon on it later fills the full subtree.
+        void this.#materialiseFacade(payload.channelId, payload.share)
       },
     )
 
@@ -166,6 +186,15 @@ export class ExposeDrone extends Drone {
       hoverTint: 0xa6e3a1,
       labelKey: 'action.expose',
       descriptionKey: 'action.expose.description',
+    })
+    registry?.add({
+      name: SYNC_ICON_NAME,
+      owner: '@diamondcoreprocessor.com/ExposeDrone',
+      svgMarkup: SYNC_ICON_SVG,
+      profile: 'public',
+      hoverTint: 0x80c8ff,
+      labelKey: 'action.sync',
+      descriptionKey: 'action.sync.description',
     })
   }
 
@@ -295,23 +324,140 @@ export class ExposeDrone extends Drone {
 
   // ── receive path ───────────────────────────────────────────────────
 
-  #offerSync(channelId: string, share: ShareState): void {
-    // Surfaces the offer as an actionable toast. Toast action emits
-    // SHARE_ACCEPT_EFFECT, which #acceptShare picks up. We don't filter
-    // out shares whose requester is ourself in v0 — host auto-approval
-    // means the toast appears for self-published shares too. That's
-    // expected; clicking sync is idempotent (folder already exists).
-    EffectBus.emit('toast:show', {
-      type: 'tip',
-      title: `Share available: ${share.branchName}`,
-      message: share.byteEstimate
-        ? `${share.tileCount ?? 1} tile · ~${formatBytes(share.byteEstimate)}`
-        : `${share.tileCount ?? 1} tile available to sync.`,
-      duration: 0,                              // sticky — user has to act
-      actionLabel: 'Sync',
-      actionEffect: SHARE_ACCEPT_EFFECT,
-      actionPayload: { channelId, share } satisfies AcceptSharePayload,
-    })
+  /**
+   * Auto-create a facade tile for an approved share at the receiver's
+   * current location. The folder + 0000 land immediately so the user
+   * sees a visible tile (with empty children) and a sync icon. Clicking
+   * the sync icon resolves to #onSync, which fills the full subtree
+   * and drops the facade flag.
+   *
+   * Skips if a tile with the same name already exists at this location
+   * (the source side: host's auto-approval echoes back to itself, but
+   * we don't need to overwrite the source tile).
+   *
+   * The facade write goes through writeCellProperties, so FacadeNurse +
+   * IndexNurse pick up the change automatically.
+   */
+  async #materialiseFacade(channelId: string, share: ShareState): Promise<void> {
+    const lineage = window.ioc.get('@hypercomb.social/Lineage') as LineageLike | undefined
+    const dir = await lineage?.explorerDir?.()
+    if (!dir) return
+
+    const targetName = share.branchName
+    if (!targetName) return
+
+    // Skip if the tile already exists locally (source-side echo).
+    try {
+      await dir.getDirectoryHandle(targetName, { create: false })
+      return // already present — do nothing
+    } catch { /* not present, proceed */ }
+
+    let cellDir: FileSystemDirectoryHandle
+    try {
+      cellDir = await dir.getDirectoryHandle(targetName, { create: true })
+    } catch (err) {
+      console.warn('[expose] facade: getDirectoryHandle failed', targetName, err)
+      return
+    }
+
+    const meta: FacadeMetadata = {
+      facade: true,
+      channelId,
+      branchSig: share.branchSig,
+      approvalId: share.approvalId,
+    }
+
+    try {
+      await writeCellProperties(cellDir, meta as unknown as Record<string, unknown>)
+    } catch (err) {
+      console.warn('[expose] facade: writeCellProperties failed', targetName, err)
+      return
+    }
+
+    // Trigger render of the new tile.
+    EffectBus.emit('cell:added', { cell: targetName })
+  }
+
+  /**
+   * Sync icon click handler. Reads the tile's facade metadata from
+   * 0000, calls drone.materialiseFromSig to recursively fill the
+   * subtree, then drops `facade: true` from 0000 so the tile becomes
+   * a normal cell.
+   *
+   * No-op if the tile isn't a facade — the sync icon is registered
+   * for every tile in v0 (no per-tile filtering until shader-side
+   * facade rendering lands), so clicks on plain tiles fall through
+   * silently rather than misbehaving.
+   */
+  async #onSync(tileLabel: string): Promise<void> {
+    const lineage = window.ioc.get('@hypercomb.social/Lineage') as LineageLike | undefined
+    const dir = await lineage?.explorerDir?.()
+    if (!dir) {
+      this.#toast('warning', 'Sync failed', 'No explorer directory.')
+      return
+    }
+
+    let cellDir: FileSystemDirectoryHandle
+    try {
+      cellDir = await dir.getDirectoryHandle(tileLabel, { create: false })
+    } catch {
+      this.#toast('warning', 'Sync failed', `Tile "${tileLabel}" not found.`)
+      return
+    }
+
+    const props = await readCellProperties(cellDir)
+    if (props['facade'] !== true) {
+      // Plain tile, not a facade — sync icon is a no-op here.
+      return
+    }
+    const channelId = typeof props['channelId'] === 'string' ? props['channelId'] : ''
+    const branchSig = typeof props['branchSig'] === 'string' ? props['branchSig'] : ''
+    if (!channelId || !branchSig) {
+      this.#toast('warning', 'Sync failed', 'Facade metadata is incomplete.')
+      return
+    }
+
+    const drone = this.#pairedChannelDrone()
+    if (!drone) {
+      this.#toast('warning', 'Sync failed', 'PairedChannelDrone is not available.')
+      return
+    }
+
+    if (!drone.layerOf(channelId, branchSig)) {
+      this.#toast('warning', 'Sync failed',
+        `Root layer ${branchSig.slice(0, 8)} hasn't arrived yet. Wait a moment and try again.`)
+      return
+    }
+
+    // Materialise into the parent directory (so the tile's content
+    // overwrites its own folder rather than nesting another copy).
+    let result: { written: number; missing: string[] }
+    try {
+      result = await drone.materialiseFromSig(channelId, branchSig, dir)
+    } catch (err) {
+      this.#toast('warning', 'Sync failed', String((err as Error)?.message ?? err))
+      return
+    }
+
+    // Drop the facade flag so the tile becomes a normal cell.
+    try {
+      await writeCellProperties(cellDir, { facade: false })
+    } catch (err) {
+      console.warn('[expose] sync: failed to drop facade flag', err)
+    }
+
+    if (result.missing.length > 0) {
+      this.#toast('tip', 'Synced (partial)',
+        `Wrote ${result.written} layer(s). ${result.missing.length} sig(s) still missing — they may arrive later.`)
+    } else {
+      this.#toast('success', 'Synced',
+        `"${tileLabel}" + ${result.written - 1} descendant(s) filled in.`)
+    }
+
+    const approvalId = typeof props['approvalId'] === 'string' ? props['approvalId'] : ''
+    if (approvalId) {
+      void drone.markPulled(channelId, approvalId)
+    }
   }
 
   async #acceptShare(channelId: string, share: ShareState): Promise<void> {
