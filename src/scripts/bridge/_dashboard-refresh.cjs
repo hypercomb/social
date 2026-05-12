@@ -193,10 +193,29 @@ function renderDashboard({ openItems, answeredCount, totalCount, manifestSigPrev
     totalAnswered += answered
   }
 
-  const openItems = allItems.filter(item => !item.answer)
-  const answeredCount = allItems.length - openItems.length
+  // Dedupe: same path + same question text counts as one row even if
+  // there are multiple [Q] notes (we double-seeded some earlier). The
+  // group resolves to answered if ANY member has an [A] — answering
+  // one auto-clears the duplicate's row, but the other underlying
+  // notes still exist and can be cleaned up via a follow-up sweep.
+  const groupMap = new Map()
+  for (const item of allItems) {
+    const key = item.path.join('/') + ' ' + item.question
+    let g = groupMap.get(key)
+    if (!g) {
+      g = { question: item.question, path: item.path, qIds: [], answers: [] }
+      groupMap.set(key, g)
+    }
+    g.qIds.push(item.qId)
+    if (item.answer) g.answers.push(item.answer)
+  }
+  const allGroups = [...groupMap.values()]
+  const openItems = allGroups
+    .filter(g => g.answers.length === 0)
+    .map(g => ({ qId: g.qIds[0], question: g.question, path: g.path, dupCount: g.qIds.length }))
+  const answeredCount = allGroups.length - openItems.length
 
-  console.log(`3) Total: ${allItems.length} Q across all branches, ${answeredCount} answered, ${openItems.length} open.`)
+  console.log(`3) Raw: ${allItems.length} Q notes → deduped: ${allGroups.length} unique (${answeredCount} answered, ${openItems.length} open).`)
 
   // 4) Build intel manifest first so we know its sig before rendering
   //    the dashboard footer.
@@ -207,9 +226,16 @@ function renderDashboard({ openItems, answeredCount, totalCount, manifestSigPrev
     generatedAt: new Date().toISOString(),
     chromeSig: CHROME_SIG,
     branchesWalked: topCells,
-    totals: { all: allItems.length, answered: answeredCount, open: openItems.length },
-    open: openItems.map(({ qId, question, path }) => ({ qId, path, question })),
-    answered: allItems.filter(i => i.answer).map(({ qId, question, answer, path }) => ({ qId, path, question, answer })),
+    totals: {
+      rawNotes: allItems.length,
+      uniqueGroups: allGroups.length,
+      answered: answeredCount,
+      open: openItems.length,
+    },
+    open: openItems.map(({ qId, question, path, dupCount }) => ({ qId, path, question, dupCount })),
+    answered: allGroups
+      .filter(g => g.answers.length > 0)
+      .map(g => ({ qIds: g.qIds, path: g.path, question: g.question, answers: g.answers })),
     note: 'Carry-forward context for the next dashboard refresh. The reverse-name storage primitive is not yet wired through the bridge; for now this manifest sits as a sibling in /dashboard\'s context slot (after the HTML render).',
   }
   const manifestJson = JSON.stringify(manifest, null, 2)
