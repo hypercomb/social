@@ -33,7 +33,11 @@ import {
 } from './paired-channel.machine.js'
 
 const EXPOSE_ICON_NAME = 'expose'
+const SYNC_ICON_NAME = 'sync'
+const MERGE_ICON_NAME = 'merge'
 const TILE_ACTION_EXPOSE = 'expose'
+const TILE_ACTION_SYNC = 'sync'
+const TILE_ACTION_MERGE = 'merge'
 const SHARE_APPROVE_EFFECT = 'paired-channel:approve-share'
 const SHARE_REJECT_EFFECT = 'paired-channel:reject-share'
 const EGG_UNLOCK_EFFECT = 'egg:unlock-selected'
@@ -51,15 +55,26 @@ interface FacadeMetadata {
   approvalId?: string | null
 }
 
-// Inline SVG — outline arrow leaving a hex cell, neutral stroke.
-// Matches the existing icon size/profile used by tile-actions.drone.
-const EXPOSE_ICON_SVG = `
-<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-     stroke-linecap="round" stroke-linejoin="round" width="20" height="20">
-  <path d="M12 4v9"/>
-  <path d="M8 8l4-4 4 4"/>
-  <path d="M5 14h14v6H5z"/>
-</svg>`.trim()
+// Inline SVG — upward arrow exiting a tray ("share / upload"). Uses
+// the same conventions as the rest of the icon catalog: explicit
+// xmlns, white stroke (Pixi's icon-button context doesn't resolve
+// currentColor), 24×24 viewBox, round caps/joins.
+const EXPOSE_ICON_SVG =
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v10"/><path d="M8 8l4-4 4 4"/><path d="M5 14v6h14v-6"/></svg>`
+
+// Mirror of EXPOSE_ICON_SVG — downward arrow into a tray. Conceptually
+// "pull / sync down." No visibility filter at the catalog level (the
+// IconProvider shape doesn't expose visibleWhen); click handler is a
+// silent no-op on non-facade tiles.
+const SYNC_ICON_SVG =
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20v-10"/><path d="M16 16l-4 4-4-4"/><path d="M5 4v6h14V4"/></svg>`
+
+// Merge — two arrows converging into a single trunk. Conveys "pull
+// the offered subtree and integrate it with my existing tile of the
+// same name" (rather than replacing it). Silent no-op on a tile that
+// has no incoming offer to merge.
+const MERGE_ICON_SVG =
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4l4 6"/><path d="M19 4l-4 6"/><path d="M12 10v10"/><path d="M8 16l4 4 4-4"/></svg>`
 
 interface IconProviderRegistry {
   add(p: { name: string; owner: string; svgMarkup: string; profile?: string; hoverTint?: number; labelKey?: string; descriptionKey?: string }): void
@@ -115,6 +130,8 @@ export class ExposeDrone extends Drone {
     this.onEffect<TileActionPayload>('tile:action', (payload) => {
       if (!payload?.action) return
       if (payload.action === TILE_ACTION_EXPOSE) { void this.#onExpose(payload.label); return }
+      if (payload.action === TILE_ACTION_SYNC) { void this.#onUnlockTile(payload.label, 'create'); return }
+      if (payload.action === TILE_ACTION_MERGE) { void this.#onUnlockTile(payload.label, 'merge'); return }
     })
 
     // EggMenuPack's "unlock" button fires this. Iterate the supplied
@@ -165,19 +182,36 @@ export class ExposeDrone extends Drone {
 
   #registerIcon(): void {
     const registry = window.ioc.get('@hypercomb.social/IconProviderRegistry') as IconProviderRegistry | undefined
-    // Only the expose icon goes on tiles. Unlock is a selection-menu
-    // action (EggMenuPack) — putting a sync icon on every tile would
-    // clutter the overlay; the selection vertical menu is the right
-    // surface because "unlock the eggs I've selected" is inherently a
-    // multi-tile gesture.
+    // Both go on `public-own` (tiles the user owns in public mode).
+    // EggMenuPack also surfaces unlock for multi-select, but the
+    // per-tile sync icon is the discoverable button users will reach
+    // for first. Click handlers are inert on non-facade tiles.
     registry?.add({
       name: EXPOSE_ICON_NAME,
       owner: '@diamondcoreprocessor.com/ExposeDrone',
       svgMarkup: EXPOSE_ICON_SVG,
-      profile: 'public',
+      profile: 'public-own',
       hoverTint: 0xa6e3a1,
       labelKey: 'action.expose',
       descriptionKey: 'action.expose.description',
+    })
+    registry?.add({
+      name: SYNC_ICON_NAME,
+      owner: '@diamondcoreprocessor.com/ExposeDrone',
+      svgMarkup: SYNC_ICON_SVG,
+      profile: 'public-own',
+      hoverTint: 0x80c8ff,
+      labelKey: 'action.sync',
+      descriptionKey: 'action.sync.description',
+    })
+    registry?.add({
+      name: MERGE_ICON_NAME,
+      owner: '@diamondcoreprocessor.com/ExposeDrone',
+      svgMarkup: MERGE_ICON_SVG,
+      profile: 'public-own',
+      hoverTint: 0xc8a8ff,
+      labelKey: 'action.merge',
+      descriptionKey: 'action.merge.description',
     })
   }
 
@@ -373,11 +407,11 @@ export class ExposeDrone extends Drone {
    * the unlock invoked — they fall through silently here rather
    * than misbehaving.
    */
-  async #onUnlockTile(tileLabel: string): Promise<void> {
+  async #onUnlockTile(tileLabel: string, mode: 'create' | 'merge' = 'create'): Promise<void> {
     const lineage = window.ioc.get('@hypercomb.social/Lineage') as LineageLike | undefined
     const dir = await lineage?.explorerDir?.()
     if (!dir) {
-      this.#toast('warning', 'Sync failed', 'No explorer directory.')
+      this.#toast('warning', `${mode === 'merge' ? 'Merge' : 'Sync'} failed`, 'No explorer directory.')
       return
     }
 
@@ -385,41 +419,44 @@ export class ExposeDrone extends Drone {
     try {
       cellDir = await dir.getDirectoryHandle(tileLabel, { create: false })
     } catch {
-      this.#toast('warning', 'Sync failed', `Tile "${tileLabel}" not found.`)
+      this.#toast('warning', `${mode === 'merge' ? 'Merge' : 'Sync'} failed`, `Tile "${tileLabel}" not found.`)
       return
     }
 
     const props = await readCellProperties(cellDir)
     if (props['facade'] !== true) {
-      // Plain tile, not a facade — sync icon is a no-op here.
+      // Plain tile, not a facade — both sync and merge are no-ops.
       return
     }
     const channelId = typeof props['channelId'] === 'string' ? props['channelId'] : ''
     const branchSig = typeof props['branchSig'] === 'string' ? props['branchSig'] : ''
     if (!channelId || !branchSig) {
-      this.#toast('warning', 'Sync failed', 'Facade metadata is incomplete.')
+      this.#toast('warning', `${mode === 'merge' ? 'Merge' : 'Sync'} failed`, 'Facade metadata is incomplete.')
       return
     }
 
     const drone = this.#pairedChannelDrone()
     if (!drone) {
-      this.#toast('warning', 'Sync failed', 'PairedChannelDrone is not available.')
+      this.#toast('warning', `${mode === 'merge' ? 'Merge' : 'Sync'} failed`, 'PairedChannelDrone is not available.')
       return
     }
 
     if (!drone.layerOf(channelId, branchSig)) {
-      this.#toast('warning', 'Sync failed',
+      this.#toast('warning', `${mode === 'merge' ? 'Merge' : 'Sync'} failed`,
         `Root layer ${branchSig.slice(0, 8)} hasn't arrived yet. Wait a moment and try again.`)
       return
     }
 
     // Materialise into the parent directory (so the tile's content
     // overwrites its own folder rather than nesting another copy).
+    // `mode` controls whether existing cells get overwritten (create)
+    // or merged (incoming-wins for property conflicts, children
+    // unioned via recursion).
     let result: { written: number; missing: string[] }
     try {
-      result = await drone.materialiseFromSig(channelId, branchSig, dir)
+      result = await drone.materialiseFromSig(channelId, branchSig, dir, { mode })
     } catch (err) {
-      this.#toast('warning', 'Sync failed', String((err as Error)?.message ?? err))
+      this.#toast('warning', `${mode === 'merge' ? 'Merge' : 'Sync'} failed`, String((err as Error)?.message ?? err))
       return
     }
 
@@ -430,12 +467,13 @@ export class ExposeDrone extends Drone {
       console.warn('[expose] sync: failed to drop facade flag', err)
     }
 
+    const verb = mode === 'merge' ? 'Merged' : 'Synced'
     if (result.missing.length > 0) {
-      this.#toast('tip', 'Synced (partial)',
+      this.#toast('tip', `${verb} (partial)`,
         `Wrote ${result.written} layer(s). ${result.missing.length} sig(s) still missing — they may arrive later.`)
     } else {
-      this.#toast('success', 'Synced',
-        `"${tileLabel}" + ${result.written - 1} descendant(s) filled in.`)
+      this.#toast('success', verb,
+        `"${tileLabel}" + ${result.written - 1} descendant(s) ${mode === 'merge' ? 'integrated' : 'filled in'}.`)
     }
 
     const approvalId = typeof props['approvalId'] === 'string' ? props['approvalId'] : ''

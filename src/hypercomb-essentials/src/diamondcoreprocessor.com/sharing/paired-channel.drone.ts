@@ -336,40 +336,92 @@ export class PairedChannelDrone extends Drone {
    * Cell content lands in 0000 (via writeCellProperties); folder names
    * come from the layer's `name` field. Cycles are guarded by a
    * visited-set keyed by sig.
+   *
+   * Two modes:
+   *   `mode: 'create'` (default — `sync` semantics)
+   *     - Cell didn't exist  → create, write 0000, emit cell:added
+   *     - Cell already exists → overwrite 0000 with incoming properties
+   *
+   *   `mode: 'merge'` (— `merge` semantics)
+   *     - Cell didn't exist  → create, write 0000, emit cell:added
+   *     - Cell already exists → shallow-merge: existing ← incoming,
+   *                             incoming wins on key conflicts.
+   *                             Children are unioned via recursion
+   *                             (no destructive overwrite of locals
+   *                             that aren't in the incoming set).
+   *
+   * In both modes, brand-new cells emit `cell:added` so the receiver's
+   * HistoryRecorder logs the addition. Existing-and-merged cells emit
+   * no add (they were already present).
    */
   async materialiseFromSig(
     channelId: string,
     sig: string,
     parentDir: FileSystemDirectoryHandle,
+    opts: { mode?: 'create' | 'merge' } = {},
   ): Promise<{ written: number; missing: string[] }> {
+    const mode = opts.mode ?? 'create'
     const machine = this.#channels.get(channelId)?.machine
     if (!machine) return { written: 0, missing: [sig] }
     const visited = new Set<string>()
     const missing: string[] = []
     let written = 0
 
-    const walk = async (s: string, dir: FileSystemDirectoryHandle): Promise<void> => {
+    const walk = async (s: string, dir: FileSystemDirectoryHandle, parentSegments: readonly string[]): Promise<void> => {
       if (visited.has(s)) return
       visited.add(s)
       const content = machine.layer(s)
       if (!content) { missing.push(s); return }
-      // Ensure the cell folder exists under `dir` and write 0000.
+
+      // Probe for existence first so we can distinguish "new" (emit
+      // cell:added) from "existing" (don't double-record).
+      let existed = true
+      try { await dir.getDirectoryHandle(content.name, { create: false }) }
+      catch { existed = false }
+
       let cellDir: FileSystemDirectoryHandle
       try { cellDir = await dir.getDirectoryHandle(content.name, { create: true }) }
       catch (err) { console.warn('[paired-channel] materialise: getDirectoryHandle failed', content.name, err); return }
+
+      // Resolve the properties to write based on mode.
+      let propsToWrite: Record<string, unknown>
+      if (!existed) {
+        // New cell — incoming props are the full body.
+        propsToWrite = { ...content.properties }
+      } else if (mode === 'merge') {
+        // Shallow merge — incoming wins on key conflicts, but local
+        // keys not present in incoming survive.
+        const { readCellProperties } = await import('../editor/tile-properties.js')
+        const existing = await readCellProperties(cellDir).catch(() => ({} as Record<string, unknown>))
+        propsToWrite = { ...existing, ...content.properties }
+      } else {
+        // Create mode against an existing cell — overwrite.
+        propsToWrite = { ...content.properties }
+      }
+
       try {
-        await this.#writeProperties(cellDir, content.properties)
+        await this.#writeProperties(cellDir, propsToWrite)
       } catch (err) {
         console.warn('[paired-channel] materialise: write 0000 failed', content.name, err)
       }
       written++
-      // Recurse into children. Each child has its own sig in the buffer.
+
+      // Emit cell:added so HistoryRecorder logs the add. Only on truly
+      // new cells — re-emitting for existing cells would create
+      // bogus history entries.
+      if (!existed) {
+        EffectBus.emit('cell:added', { cell: content.name, segments: [...parentSegments] })
+      }
+
+      // Recurse into children. Pass the current segments + this cell's
+      // name for nested cell:added emissions.
+      const childSegments = [...parentSegments, content.name]
       for (const child of content.children) {
-        await walk(child.sig, cellDir)
+        await walk(child.sig, cellDir, childSegments)
       }
     }
 
-    await walk(sig, parentDir)
+    await walk(sig, parentDir, [])
     return { written, missing }
   }
 

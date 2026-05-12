@@ -165,9 +165,35 @@ async function resolveChildNames(
   _parentSegments: readonly string[],
   _parentDir: FileSystemDirectoryHandle | null,
   content: { children?: string[] } | null,
+  parentLayerSig?: string,
 ): Promise<Set<string>> {
   const out = new Set<string>()
   if (!content?.children?.length) return out
+
+  // Children manifest fast-path. When the parent's sig is known, try
+  // __manifests__/<parentSig> — a single file read returns the resolved
+  // child layer objects with names already inlined. Skips the per-child
+  // getLayerBySig walk entirely on cold load. Falls through to the
+  // signature-resolution path on miss; commitLayer writes a fresh
+  // manifest after every commit so subsequent reads stay hot.
+  const store = parentLayerSig
+    ? (window as any).ioc?.get?.('@hypercomb.social/Store') as {
+        readChildrenManifest?: (sig: string) => Promise<Array<{ sig: string; layer: { name?: string } }> | null>
+        writeChildrenManifest?: (sig: string, m: Array<{ sig: string; layer: { name?: string } }>) => Promise<void>
+      } | undefined
+    : undefined
+
+  if (parentLayerSig && store?.readChildrenManifest) {
+    const manifest = await store.readChildrenManifest(parentLayerSig)
+    if (manifest && manifest.length === content.children.length) {
+      // Manifest is current iff it covers every child sig in the parent.
+      // Trust it: extract names directly, no bag walk.
+      for (const entry of manifest) {
+        if (entry?.layer?.name) out.add(entry.layer.name)
+      }
+      return out
+    }
+  }
 
   // Pure signature resolution. For each child sig in the parent's
   // layer, fetch that child's LayerContent — its `name` field is the
@@ -183,6 +209,25 @@ async function resolveChildNames(
   for (const child of children) {
     if (child?.name) out.add(child.name)
   }
+
+  // Backfill the manifest for pre-existing layers committed before the
+  // decoration shipped (or after a manifest GC). Idle-scheduled so the
+  // current render path doesn't pay the write latency.
+  if (parentLayerSig && store?.writeChildrenManifest && content.children.length === children.length) {
+    const manifest: Array<{ sig: string; layer: { name?: string; [k: string]: unknown } }> = []
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i]
+      if (!child) continue
+      manifest.push({ sig: content.children[i], layer: child })
+    }
+    if (manifest.length > 0) {
+      const schedule = typeof (window as any).requestIdleCallback === 'function'
+        ? (cb: () => void) => (window as any).requestIdleCallback(cb, { timeout: 5_000 })
+        : (cb: () => void) => setTimeout(cb, 0)
+      schedule(() => { void store.writeChildrenManifest!(parentLayerSig, manifest) })
+    }
+  }
+
   return out
 }
 
@@ -1574,22 +1619,18 @@ export class ShowCellDrone extends Drone {
     this.#divergenceFutureRemoves = new Set<string>()
     this.#cursorPropsOverride = null
     this.#cursorReconstructionKey = ''
+    // Names listed in the cursor's current layer's `children` slot. When
+    // available, this is the authoritative membership for the location —
+    // both at REWOUND (replace union outright) and at HEAD (used to
+    // reconcile pendingRemoves against layer truth, so layer-only deletes
+    // honored and layer-restoring undos drop stale pending entries).
+    let layerAllowed: Set<string> | null = null
     if (!this.#clipboardView && historyService) {
       const sig = await this.computeSignatureLocation(lineage)
 
       // Load cursor for this location (keeps cursor position if already set)
       if (cursorService) await cursorService.load(sig.sig)
 
-      // Layer drives the cell set. When the cursor has a layer at this
-      // position, intersect union with it AND import any layer cells
-      // missing from disk (so historical cells render even after their
-      // OPFS dirs are gone).
-      //
-      // When there is NO layer at all (fresh lineage, no commits yet),
-      // fall through with `union` = live disk cells. The committer
-      // mints a baseline on the first user event; until then live
-      // disk is the sensible default — refusing to render leaves the
-      // user with a blank canvas and no obvious recovery path.
       if (cursorService) {
         const content = await cursorService.layerContentAtCursor()
         const cursorState = cursorService.state
@@ -1611,27 +1652,23 @@ export class ShowCellDrone extends Drone {
           localCellSet.clear()
         }
 
-        if (content && cursorState?.rewound) {
-          // REWOUND ONLY: the past layer is the source of truth for
-          // which cells render at this historical position. Children
-          // sigs are resolved by walking the merkle so the rewound
-          // view reflects what existed THEN, not what's on disk now.
+        if (content) {
+          // Layer-as-primitive: the layer's children list is the truth at
+          // every position (HEAD and REWOUND alike). Cells in OPFS but not
+          // in the layer are layer-removed (e.g. /remove just landed) and
+          // must not render; cells in the layer but not in OPFS are still
+          // imported so the merkle-stored content is recoverable.
           //
-          // At HEAD, by contrast, OPFS folders are the source of
-          // truth (membership). This was the snap-back source: when
-          // OPFS held a cell the layer didn't yet know about (a fresh
-          // create racing with the cascade, or a paste mid-flight),
-          // resolveChildNames excluded it, #orderByIndexPinned saw
-          // it as unindexed, and the auto-assignment rewrote its
-          // 0000.index to nextFree (= 0). Tile snaps back. With the
-          // HEAD path now leaving `localCellSet` as the OPFS-built
-          // set, the auto-assignment never fires for cells that
-          // genuinely have a valid index.
+          // The cell:added incremental path (#queueIncremental) handles
+          // the brief window between user-action and cascade-landing — new
+          // cells render immediately via the slot machine before the next
+          // computeRender re-fires from cursor.onNewLayer.
           const parentSegments = (lineage as { explorerSegments?: () => readonly string[] })?.explorerSegments?.() ?? []
-          const allowed = await resolveChildNames(historyService, parentSegments, dir, content)
+          const parentLayerSig = cursorService.currentLayerSig || ''
+          layerAllowed = await resolveChildNames(historyService, parentSegments, dir, content, parentLayerSig)
           union.clear()
           localCellSet.clear()
-          for (const cell of allowed) {
+          for (const cell of layerAllowed) {
             union.add(cell)
             localCellSet.add(cell)
           }
@@ -1639,25 +1676,25 @@ export class ShowCellDrone extends Drone {
       }
     }
 
-    // Filter out cells whose OPFS dir is genuinely gone. Disk is the
-    // authority — `cutLabels` is NOT consulted here. The previous logic
-    // treated "still on the clipboard service" as proof of removal, but
-    // ClipboardService.removeItems doesn't fire until the very end of
-    // ClipboardWorker.#paste (after `await hypercomb.act()`), well after
-    // the render that follows fs:changed. That meant the just-pasted
-    // cell was on disk yet still in cutLabels, so we pruned it from the
-    // union — render:cell-count emitted without it, and the move drone's
-    // snapshot was missing the pasted tile, blocking the next drag.
+    // Reconcile pendingRemoves against the layer's children list. Under
+    // layer-as-primitive, the LAYER decides membership: a /remove drops
+    // the cell from layer.children but leaves OPFS bytes intact (so
+    // undo can restore by deleting the head history row). The check is:
+    //   - in layer.children ⇒ pendingRemove is stale (undo restored it,
+    //     paste landed, etc.) → drop the entry, let cell render
+    //   - not in layer.children ⇒ honor the remove
+    // When no layer is available (fresh lineage, clipboard view), fall
+    // back to OPFS-truth — the same semantics this code shipped with.
     if (!this.#clipboardView) {
       const reconciled: string[] = []
       for (const cell of this.#pendingRemoves) {
-        if (!localCellSet.has(cell)) {
-          // cell genuinely not on disk — honor the remove
-          union.delete(cell)
-        } else {
-          // cell exists on disk (paste landed, undo of remove, etc.) —
-          // pendingRemove is stale, drop it
+        const presentInTruth = layerAllowed
+          ? layerAllowed.has(cell)
+          : localCellSet.has(cell)
+        if (presentInTruth) {
           reconciled.push(cell)
+        } else {
+          union.delete(cell)
         }
       }
       for (const cell of reconciled) this.#pendingRemoves.delete(cell)

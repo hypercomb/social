@@ -708,12 +708,11 @@ export class TileOverlayDrone extends Drone {
       return
     }
 
-    // Public mode: no icons
-    if (this.#meshPublic && !this.#hasSelection) {
-      for (const action of this.#actions) action.button.visible = false
-      if (this.#buttonTray) this.#buttonTray.visible = false
-      return
-    }
+    // Public mode used to hide every icon here, on the theory that
+    // public was a "clean view" surface. With paired-channel sync we
+    // need actionable public-own icons (expose, hide, break-apart),
+    // so the per-icon `visibleWhen` + profile filtering downstream
+    // decide what shows. No early suppression.
 
     // In arrange mode, all icons are always visible
     if (this.#arrangeMode) {
@@ -1766,14 +1765,12 @@ export class TileOverlayDrone extends Drone {
 
     const occupied = this.#currentIndex !== undefined && this.#currentIndex < this.#cellCount
 
-    // Public mode: no overlay at all — text renders identically whether hovering or not
-    if (this.#meshPublic && !this.#hasSelection) {
-      this.#overlay.visible = false
-      if (this.#hexBg) this.#hexBg.hide()
-      for (const action of this.#actions) action.button.visible = false
-      if (this.#crackOverlay) this.#crackOverlay.visible = false
-      return
-    }
+    // Public mode used to hide the whole overlay here. With paired-
+    // channel sync we want hover-to-expose to work in public mode, so
+    // the overlay follows the normal hover-on-occupied logic and the
+    // profile filter (public-own vs public-external) handles which
+    // icons are surfaced. If you want a truly clean public view,
+    // hover-disabled is a future setting, not an enforcement here.
 
     // Visibility depends only on whether the user is hovering an occupied
     // tile and the editor isn't open. `#editCooldown` is a click-suppression

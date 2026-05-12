@@ -29,6 +29,12 @@ export class Store extends EventTarget {
    *  back to walking history bags. Pure derived state; can be deleted and
    *  regenerated from the merkle truth in `__history__/`. */
   public static readonly OPTIMIZED_DIRECTORY = '__optimized__'
+  /** Children manifests: per-parent decoration that inlines the resolved
+   *  child layer objects. Keyed by parent layer sig. Lets show-cell skip
+   *  the per-child sig-→-layer lookup on cold load. Written passively
+   *  after every commitLayer that has children; orphaned when the parent
+   *  is superseded — pure derived state, safe to GC. */
+  public static readonly MANIFESTS_DIRECTORY = '__manifests__'
 
   private static readonly CACHE_NAME = 'hypercomb-modules-v2'
 
@@ -43,6 +49,7 @@ export class Store extends EventTarget {
   public threads!: FileSystemDirectoryHandle
   public computation!: FileSystemDirectoryHandle
   public optimized!: FileSystemDirectoryHandle
+  public manifests!: FileSystemDirectoryHandle
 
   #initPromise: Promise<void> | null = null
   #opfsAvailable = true
@@ -89,6 +96,7 @@ export class Store extends EventTarget {
         this.threads,
         this.computation,
         this.optimized,
+        this.manifests,
       ] = await Promise.all([
         dir('hypercomb.io'),
         dir(Store.BEES_DIRECTORY),
@@ -100,6 +108,7 @@ export class Store extends EventTarget {
         dir(Store.THREADS_DIRECTORY),
         dir(Store.COMPUTATION_DIRECTORY),
         dir(Store.OPTIMIZED_DIRECTORY),
+        dir(Store.MANIFESTS_DIRECTORY),
       ])
     } catch (err) {
       console.warn('[store] OPFS subdirectory init failed — running without persistent storage', err)
@@ -495,6 +504,39 @@ export class Store extends EventTarget {
       const handle = await this.optimized.getFileHandle(signature, { create: true })
       const writable = await handle.createWritable()
       try { await writable.write(bytes) } finally { await writable.close() }
+    } catch { /* cache miss on next read is fine */ }
+  }
+
+  /** Read the children manifest for a parent layer sig. Returns the
+   *  parsed array of resolved child layer objects, or null if absent.
+   *  Hot path on cold load — single file read, no per-child sig→layer
+   *  walks against the bag. */
+  public readChildrenManifest = async (
+    parentLayerSig: string,
+  ): Promise<Array<{ sig: string; layer: { name?: string; [k: string]: unknown } }> | null> => {
+    if (!this.manifests) return null
+    try {
+      const handle = await this.manifests.getFileHandle(parentLayerSig, { create: false })
+      const file = await handle.getFile()
+      const text = await file.text()
+      const parsed = JSON.parse(text)
+      if (!Array.isArray(parsed)) return null
+      return parsed
+    } catch { return null }
+  }
+
+  /** Write the children manifest for a parent layer sig. Best-effort;
+   *  errors are swallowed because the manifest is pure cache (next read
+   *  will fall back to the per-sig lookup and re-write). */
+  public writeChildrenManifest = async (
+    parentLayerSig: string,
+    manifest: Array<{ sig: string; layer: { name?: string; [k: string]: unknown } }>,
+  ): Promise<void> => {
+    if (!this.manifests) return
+    try {
+      const handle = await this.manifests.getFileHandle(parentLayerSig, { create: true })
+      const writable = await handle.createWritable()
+      try { await writable.write(JSON.stringify(manifest)) } finally { await writable.close() }
     } catch { /* cache miss on next read is fine */ }
   }
 
