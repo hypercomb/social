@@ -53,10 +53,24 @@ export class BatchCreateBehavior implements CommandLineBehavior {
     const expanded = this.#expand(input, completions)
     if (!expanded.length) return
 
+    const baseSegments = (lineage as unknown as { explorerSegments?: () => string[] })?.explorerSegments?.() ?? []
+
+    // FILTER: if every expanded item is a `create` op AND all of them
+    // already exist on disk AND they all share the same parent path,
+    // re-interpret the bracket as a selection rather than a creation.
+    // Same surface syntax — `dolphin/[model]` typed at root works
+    // whether `model` exists (→ navigate + select) or not (→ create).
+    // The dashboard / paste-URL flow's canonical query form
+    // (`/dolphin?[model]`) goes through a different behavior; this is
+    // the "I typed it directly into the command line" entry point.
+    if (await this.#shouldTreatAsSelection(dir, expanded)) {
+      this.#navigateAndSelect(expanded, baseSegments)
+      return
+    }
+
     // Track all (parent-lineage → added-cell-names) and (parent-lineage →
     // removed-cell-names) so we can fire ONE layer commit per affected
     // parent (vs N per cell).
-    const baseSegments = (lineage as unknown as { explorerSegments?: () => string[] })?.explorerSegments?.() ?? []
     const addsByParent = new Map<string, { segments: string[]; names: string[] }>()
     const removesByParent = new Map<string, { segments: string[]; names: string[] }>()
     const tagOps: TagOp[] = []
@@ -214,6 +228,69 @@ export class BatchCreateBehavior implements CommandLineBehavior {
     }
 
     return results
+  }
+
+  // ── selection vs create disambiguation ────────────────────────────
+  //
+  // The bracket grammar (`[a,b]`, `path/[a,b]`) means create. When
+  // every expanded item refers to an EXISTING cell sharing one common
+  // parent, the same input is treated as a selection — same syntax,
+  // behaviour switches based on what's on disk.
+
+  /** True iff every expanded item is a plain `create` op (no delete /
+   *  tag), all items share the same parent path within the input, and
+   *  every item already exists on disk under that parent. When any of
+   *  those is false, fall through to the create flow. */
+  async #shouldTreatAsSelection(
+    root: FileSystemDirectoryHandle,
+    expanded: ParsedArrayItem[],
+  ): Promise<boolean> {
+    if (expanded.length === 0) return false
+    if (!expanded.every(item => item.op === 'create')) return false
+    if (!expanded.every(item => item.segments.length > 0)) return false
+
+    // All items must share the same parent path (segments minus leaf).
+    const firstParent = expanded[0].segments.slice(0, -1).join('/')
+    for (const item of expanded) {
+      if (item.segments.slice(0, -1).join('/') !== firstParent) return false
+    }
+
+    // Every item's full segment path must resolve on disk.
+    for (const item of expanded) {
+      let parent: FileSystemDirectoryHandle = root
+      let ok = true
+      for (const part of item.segments) {
+        try {
+          parent = await parent.getDirectoryHandle(part, { create: false })
+        } catch {
+          ok = false
+          break
+        }
+      }
+      if (!ok) return false
+    }
+    return true
+  }
+
+  /** Push a `/parent?[a,b,c]` URL for the selection. SelectionService
+   *  syncs from the navigate event natively; the auto-open drone
+   *  surfaces the editor for the first selected. Pushing the URL
+   *  directly (not Navigation.go) avoids segment normalisation
+   *  stripping the brackets. */
+  #navigateAndSelect(
+    expanded: ParsedArrayItem[],
+    baseSegments: readonly string[],
+  ): void {
+    if (expanded.length === 0) return
+    const parentInInput = expanded[0].segments.slice(0, -1)
+    const selectedNames = expanded.map(item =>
+      item.segments[item.segments.length - 1]
+    )
+    const parentPath = [...baseSegments, ...parentInInput]
+    const pathname = parentPath.length > 0 ? '/' + parentPath.join('/') : '/'
+    const search = '?[' + selectedNames.join(',') + ']'
+    window.history.pushState({}, '', pathname + search)
+    window.dispatchEvent(new Event('navigate'))
   }
 
   async #deleteTarget(root: FileSystemDirectoryHandle, segments: string[]): Promise<boolean> {
