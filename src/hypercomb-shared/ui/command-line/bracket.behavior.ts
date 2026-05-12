@@ -1,4 +1,4 @@
-// hypercomb-shared/ui/command-line/batch-create.behavior.ts
+// hypercomb-shared/ui/command-line/bracket.behavior.ts
 
 import type { CommandLineBehavior } from './command-line-behavior'
 import type { CompletionUtility } from '@hypercomb/shared/core/completion-utility'
@@ -8,27 +8,38 @@ import { parseArrayItems, type ParsedArrayItem } from '../../core/array-parser'
 import { persistTagOps, type TagOp } from '../../core/tag-ops'
 
 /**
- * Enter with bracket syntax → create, delete, and tag multiple children at once.
+ * Enter with bracket syntax → one behavior, four sub-cases dispatched
+ * internally by what the parser finds and what's already on disk:
+ *
+ *   - SELECT: every item is a plain-`create` op AND each named child
+ *             already exists under one common parent → re-interpret
+ *             as a selection; push `/parent?[a,b]` URL.
+ *   - CREATE: any item is `create` and the path doesn't exist yet →
+ *             create the cell(s) (cartesian expansion supported).
+ *   - DELETE: item prefixed with `~` → remove the cell.
+ *   - TAG:    item carries `:tag` suffix → add/remove the tag.
  *
  * Examples:
- *   "abc/[123,456]"                   → creates abc/123 and abc/456
- *   "[foo,bar,baz]"                   → creates foo, bar, baz at current level
- *   "parent/[a,b]/child"              → creates parent/a/child and parent/b/child
- *   "[new-thing, ~old-thing]"         → creates new-thing and deletes old-thing
- *   "[beer:craft, ~whiskey, new]"     → tags beer, deletes whiskey, creates new
+ *   "dolphin/[model]"               (model exists)    → navigate + select
+ *   "abc/[123,456]"                 (new)             → creates abc/123, abc/456
+ *   "[foo,bar,baz]"                 (new, current)    → creates 3 children here
+ *   "parent/[a,b]/child"            (cartesian)       → parent/a/child + parent/b/child
+ *   "[new, ~old, beer:craft]"       (mixed)           → creates / deletes / tags
  *
- * Brackets expand into all comma-separated variants. Items prefixed with ~ are
- * deleted instead of created. Items with :tag are tagged.
+ * One behavior, one concern (bracket-grammar handling), internal
+ * dispatch by op type + existence. Adding new sub-cases (e.g.
+ * `[a:link=url]`) lives here.
  */
-export class BatchCreateBehavior implements CommandLineBehavior {
+export class BracketBehavior implements CommandLineBehavior {
 
-  readonly name = 'batch-create'
+  readonly name = 'bracket'
   readonly operations = [
     {
       trigger: 'Enter',
       pattern: /\[.+]/,
-      description: 'Create, delete, or tag multiple cells using bracket expansion',
+      description: 'Bracket grammar: select existing, create new, delete (~), tag (:tag)',
       examples: [
+        { input: 'dolphin/[model]', key: 'Enter', result: 'If model exists: navigate + select. If not: create.' },
         { input: 'abc/[123,456]', key: 'Enter', result: 'Creates abc/123 and abc/456' },
         { input: '[foo,bar,baz]', key: 'Enter', result: 'Creates foo, bar, baz at current level' },
         { input: 'parent/[a,b]/child', key: 'Enter', result: 'Creates parent/a/child and parent/b/child' },

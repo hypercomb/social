@@ -16,7 +16,7 @@ import { TranslatePipe } from '../../core/i18n.pipe'
 import { VoiceInputService } from '../../core/voice-input.service'
 import type { CommandLineBehavior, CommandLineBehaviorMeta, CommandLineOperation } from './command-line-behavior'
 import { ShiftEnterNavigateBehavior } from './shift-enter-navigate.behavior'
-import { BatchCreateBehavior } from './batch-create.behavior'
+import { BracketBehavior } from './bracket.behavior'
 import { PasteUrlNavigateBehavior } from './paste-url-navigate.behavior'
 import { RemoveCellBehavior } from './remove-cell.behavior'
 import { GoParentBehavior } from './go-parent.behavior'
@@ -41,7 +41,7 @@ const BRACKET_TAG_RE = /^([^\[\/!#~]+):\[(.+?)\](.*)$/
 /**
  * Brackets `[...]` are the selection grouping primitive. `[a,b]/cut` selects
  * the group then cuts. Bare `[a,b]` (no op) is interpreted by
- * `BatchCreateBehavior` as create/delete/tag at the current level — so the
+ * `BracketBehavior` as create/delete/tag at the current level — so the
  * Enter handler routes that case through to the behavior rather than calling
  * `executeSelectCommand`. `/format[abc]` is a legacy shorthand for
  * `[abc]/format`, and `/select[...]` is preserved for backward compat — both
@@ -69,7 +69,7 @@ function normalizeSelectInput(v: string): string {
       return '/select[' + items + ']' + tail
     }
 
-    // Closed bracket, no op — bare grouping (BatchCreateBehavior will
+    // Closed bracket, no op — bare grouping (BracketBehavior will
     // act on Enter, but the live context still gets select treatment so
     // existing tile names highlight as the user types).
     return '/select' + v
@@ -99,12 +99,12 @@ function isSelectInput(v: string): boolean {
 }
 
 /** True when the input is a bracket-primitive that should EXECUTE on Enter
- *  through `executeSelectCommand` (vs. being routed to BatchCreateBehavior). */
+ *  through `executeSelectCommand` (vs. being routed to BracketBehavior). */
 function isSelectExecution(v: string): boolean {
   if (/^\/select\[/.test(v)) return true
   if (!v.startsWith('[')) return BRACKET_CMD_RE.test(v)
   const close = v.indexOf(']')
-  // Bare `[a,b]` (closed, no op) — BatchCreateBehavior owns the Enter
+  // Bare `[a,b]` (closed, no op) — BracketBehavior owns the Enter
   return close > 1 && v[close + 1] === '/'
 }
 
@@ -289,10 +289,12 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   // pluggable behaviors — validated at construction, no overlapping operations.
   //
   // Order matters: the first behavior whose `match()` returns true claims
-  // the input. PasteUrlNavigateBehavior MUST come before BatchCreate
-  // because both can match bracket-bearing input — but a URL-shaped paste
-  // (`/dolphin/[model]`, `http://host/dolphin/[model]`) should navigate
-  // and select rather than create cells named `dolphin` and `model`.
+  // the input. PasteUrlNavigateBehavior MUST come before BracketBehavior
+  // because both can match bracket-bearing input — URL-shaped pastes
+  // (`/dolphin?[model]`, `http://host/dolphin?[model]`) go through the
+  // URL behavior; bare typed brackets go through BracketBehavior, which
+  // internally dispatches between select (items exist) and create /
+  // delete / tag based on the parse.
   #behaviors: CommandLineBehavior[] = this.#validateBehaviors([
     new GoParentBehavior(),
     new SlashBehaviourBehavior(),
@@ -300,7 +302,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     new CutPasteBehavior(),
     new HashMarkerBehavior(),
     new PasteUrlNavigateBehavior(),
-    new BatchCreateBehavior(),
+    new BracketBehavior(),
     new ShiftEnterNavigateBehavior()
   ])
 
@@ -1415,7 +1417,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     }
 
     // bracket-primitive execution: `[a,b]/op`, `/select[…]`, or `/format[…]`.
-    // Bare `[a,b]` (no op) is left for BatchCreateBehavior below.
+    // Bare `[a,b]` (no op) is left for BracketBehavior below.
     if (isSelectExecution(v)) {
       this.shell?.setValue(normalizeSelectInput(v))
       this.value.set(this.shell?.value() ?? '')
