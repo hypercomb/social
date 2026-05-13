@@ -71,40 +71,46 @@ function uniqueNotes(notes) {
   return out
 }
 
-// ─── Q&A parsing ─────────────────────────────────────────────────────
+// ─── Q&A as a dedicated `qa` slot (decoration, not notes) ────────────
 //
-// Pulls `[Q ...]` questions and `[A:<qId>] ...` answers out of a cell's
-// notes, pairs them by the question note's id, returns
-// [{ qId, question, answer | null }] in source order. Rendered inline
-// on the cell's page so the dashboard's link lands the user where
-// the question actually is.
+// Each question is its own content-addressed JSON resource:
+//   { qId, question, askedAt }
+// The cell's `qa` slot holds an array of those sigs — the same
+// participant pattern notes use, just on a different slot. When the
+// user answers a Q, the answer text becomes a regular note (user
+// content) and the Q's sig is bag-remove'd from the qa slot; the Q
+// disappears from "open questions" everywhere automatically.
+//
+// Reading: bridge `inflate` returns the slot as `qa: [...resource stubs]`
+// where each stub has $sig, $contentType, $preview. The full Q JSON is
+// fetchable by sig if needed.
 
-const Q_NOTE_RE = /^\[Q(?:\s+[^\]]*)?\]\s*([\s\S]+)$/
-const A_NOTE_RE = /^\[A:([a-zA-Z0-9_-]+)\]\s*([\s\S]+)$/
-
-function parseQa(cellNotes) {
-  const questions = []
-  const answers = new Map()
-  for (const note of cellNotes || []) {
-    const text = noteText(note).trim()
-    if (!text) continue
-    const q = Q_NOTE_RE.exec(text)
-    if (q) {
-      questions.push({ qId: note.id || note.name, question: q[1].trim() })
-      continue
-    }
-    const a = A_NOTE_RE.exec(text)
-    if (a) answers.set(a[1], a[2].trim())
-  }
-  // Dedupe by question text + answered state.
-  const seen = new Set()
+function parseQaSlot(cell) {
+  // The inflated layer expands the qa slot's resource sigs into the
+  // JSON they point at — items arrive as resolved `{ qId, question }`
+  // objects directly (no $preview/$sig wrapping). Defensive against
+  // both shapes in case inflate's behavior shifts.
+  const raw = cell?.qa
+  if (!Array.isArray(raw)) return []
   const out = []
-  for (const q of questions) {
-    const answer = answers.get(q.qId) ?? null
-    const key = q.question + '\n' + (answer ?? '')
-    if (seen.has(key)) continue
-    seen.add(key)
-    out.push({ qId: q.qId, question: q.question, answer })
+  const seen = new Set()
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    // Resolved JSON form (current inflate behavior).
+    let q = (typeof item.question === 'string') ? item : null
+    // Stub form fallback.
+    if (!q) {
+      try { q = JSON.parse(item.$preview ?? '') } catch { /* ignore */ }
+    }
+    if (!q || typeof q.question !== 'string') continue
+    const question = q.question.trim()
+    if (!question || seen.has(question)) continue
+    seen.add(question)
+    out.push({
+      qId: q.qId || item.$sig?.slice(0, 16) || String(out.length),
+      question,
+      sig: item.$sig,
+    })
   }
   return out
 }
@@ -578,7 +584,7 @@ function renderRoot(tree, chromeSig) {
     titleIconName: 'root',
     lede: 'A field, not a feeling — the model, the practice, the evidence, and the people building it together.',
     body,
-    qaItems: parseQa(tree.notes),
+    qaItems: parseQaSlot(tree),
     indexHeadingTitle: 'The eight branches',
     indexHeadingIconName: 'leaf',
     indexLinks,
@@ -615,7 +621,7 @@ function renderBranch(branch, chromeSig) {
     titleIconName: branch.name,
     lede: meta.lede,
     body,
-    qaItems: parseQa(branch.notes),
+    qaItems: parseQaSlot(branch),
     indexHeadingTitle: branch.children?.length ? 'In this branch' : '',
     indexHeadingIconName: 'leaf',
     indexLinks,
@@ -650,7 +656,7 @@ function renderLeaf(leaf, branchName, chromeSig) {
     titleIconName: 'leaf',
     lede: `Part of ${branchTitle}.`,
     body,
-    qaItems: parseQa(leaf.notes),
+    qaItems: parseQaSlot(leaf),
     indexLinks: [],
   })
 }
@@ -774,19 +780,26 @@ async function pinStyleDecisions() {
     }
   }
 
-  console.log('6) Attaching Q&A notes...')
+  console.log('6) Pushing Q&A items into the `qa` slot (decorations, not notes)...')
   const qaItems = [
     { path: ['dolphin'], question: 'Primary CTA — book a session, podcast subscribe, register for next event, or something else? This determines the root page’s call-to-action.' },
     { path: ['dolphin', 'practice', 'certification'], question: 'Is the certification program live and accepting applicants, or is this aspirational structure for the site to communicate the long-term plan?' },
     { path: ['dolphin', 'business', 'sales'], question: 'Same question — is sales an active operation, or is this section roadmap-stage for now?' },
   ]
+  // Each Q is its own content-addressed resource; the cell's `qa`
+  // slot collects their sigs. bag-set replaces the slot wholesale so
+  // re-runs don't duplicate (same Q content → same sig → same array).
   for (const { path, question } of qaItems) {
-    const cellName = path[path.length - 1]
-    const parentSegments = path.slice(0, -1)
-    const text = `[Q] ${question}`
-    const r = await withRenderer({ op: 'note-add', cell: cellName, segments: parentSegments, text })
-    if (r.ok) console.log(`   Q on /${path.join('/')}`)
-    else console.log(`   FAILED Q on /${path.join('/')}: ${r.error}`)
+    const qId = require('crypto').createHash('sha256').update(path.join('/') + ':' + question).digest('hex').slice(0, 16)
+    // No askedAt in the payload — keeps the resource content stable
+    // across runs so bag-set is idempotent (same content → same sig).
+    const payload = JSON.stringify({ qId, question })
+    const put = await withRenderer({ op: 'put-resource', text: payload })
+    if (!put.ok) { console.log(`   FAILED mint Q for /${path.join('/')}: ${put.error}`); continue }
+    const qSig = put.data.sig
+    const r = await withRenderer({ op: 'bag-set', segments: path, slot: 'qa', cells: [qSig] })
+    if (r.ok) console.log(`   /${path.join('/')} ← Q ${qSig.slice(0, 12)}`)
+    else console.log(`   FAILED bag-set qa on /${path.join('/')}: ${r.error}`)
   }
 
   console.log('7) Creating /dashboard cell...')

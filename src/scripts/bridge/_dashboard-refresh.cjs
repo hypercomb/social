@@ -53,53 +53,43 @@ async function withRenderer(req, attempts = 4) {
   return { ok: false, error: 'renderer never connected' }
 }
 
-// ─── note parsing ───────────────────────────────────────────────────
+// ─── Q&A walk (reads the `qa` slot, not notes) ─────────────────────
+//
+// Q&A items live in a dedicated `qa` slot on each cell layer. The
+// inflated layer surfaces it as an array of resource stubs (same shape
+// as `context`). Each Q resource carries `{ qId, question, askedAt }`.
+// Walks the tree, parses each cell's qa stubs, returns the open
+// questions with their lineage path. "Open" is implicit: when a Q is
+// answered, it's bag-removed from the qa slot, so anything still here
+// is open.
 
-// `[Q]`, `[Q v2]`, `[Q whatever]` — captures the rest as the question text.
-const Q_RE = /^\[Q(?:\s+[^\]]*)?\]\s*([\s\S]+)$/
-// `[A:<qId>] <answer>` — captures the qId and answer text.
-const A_RE = /^\[A:([a-zA-Z0-9_-]+)\]\s*([\s\S]+)$/
-
-function noteText(note) {
-  if (!note || typeof note !== 'object') return ''
-  if (Array.isArray(note.body) && note.body.length) {
-    return String(note.body[0]?.text ?? '')
-  }
-  if (typeof note.body === 'string') return note.body
-  if (typeof note.text === 'string') return note.text
-  return ''
-}
-
-// Walks a cell tree (inflated) and returns { items: [...], answered: number }
-// where each item is { qId, question, answer, path[] } and `path` is the
-// lineage from the root of the walked tree to the Q-bearing cell.
 function walkForQa(rootCell, basePath = []) {
   const items = []
-  let answered = 0
   const visit = (cell, path) => {
     const here = cell.name ? [...path, cell.name] : path
-    const questions = new Map() // qId → { question, noteId }
-    const answers = new Map()   // qId → answer text
-    for (const note of cell.notes || []) {
-      const text = noteText(note).trim()
-      if (!text) continue
-      const q = Q_RE.exec(text)
-      if (q) {
-        questions.set(note.id || note.name, { question: q[1].trim(), noteId: note.id || note.name })
-        continue
+    const slot = Array.isArray(cell.qa) ? cell.qa : []
+    for (const item of slot) {
+      if (!item || typeof item !== 'object') continue
+      // inflate resolves the qa slot's resource sigs into JSON, so
+      // entries arrive as `{ qId, question, ... }` objects directly.
+      // Fallback to stub form for resilience.
+      let q = (typeof item.question === 'string') ? item : null
+      if (!q) {
+        try { q = JSON.parse(item.$preview ?? '') } catch { /* ignore */ }
       }
-      const a = A_RE.exec(text)
-      if (a) answers.set(a[1], a[2].trim())
-    }
-    for (const [qId, { question }] of questions) {
-      const answer = answers.get(qId) ?? null
-      items.push({ qId, question, answer, path: here })
-      if (answer) answered++
+      if (!q || typeof q.question !== 'string') continue
+      items.push({
+        qId: q.qId || item.$sig?.slice(0, 16) || String(items.length),
+        question: q.question.trim(),
+        answer: null,  // qa slot only carries OPEN Qs by design
+        path: here,
+        sig: item.$sig,
+      })
     }
     for (const child of cell.children || []) visit(child, here)
   }
   visit(rootCell, basePath)
-  return { items, answered }
+  return { items, answered: 0 }
 }
 
 // ─── chrome — reuse the existing Field Notes stylesheet ─────────────
@@ -182,19 +172,17 @@ function renderDashboard({ openItems, answeredCount, totalCount, manifestSigPrev
   const topCells = (root.data || []).filter(name => name !== 'dashboard')
   console.log(`   ${topCells.join(', ')}`)
 
-  console.log('2) Walking each tree, collecting Q&A state...')
+  console.log('2) Walking each tree, collecting open Q items from `qa` slots...')
   const allItems = []
-  let totalAnswered = 0
   for (const name of topCells) {
     const inf = await withRenderer({ op: 'inflate', segments: [name] })
     if (!inf.ok) {
       console.log(`   skipping /${name}: ${inf.error}`)
       continue
     }
-    const { items, answered } = walkForQa(inf.data, [])
-    if (items.length > 0) console.log(`   /${name}: ${items.length} Q (${answered} answered, ${items.length - answered} open)`)
+    const { items } = walkForQa(inf.data, [])
+    if (items.length > 0) console.log(`   /${name}: ${items.length} open Q`)
     allItems.push(...items)
-    totalAnswered += answered
   }
 
   // Dedupe: same path + same question text counts as one row even if
@@ -202,24 +190,16 @@ function renderDashboard({ openItems, answeredCount, totalCount, manifestSigPrev
   // group resolves to answered if ANY member has an [A] — answering
   // one auto-clears the duplicate's row, but the other underlying
   // notes still exist and can be cleaned up via a follow-up sweep.
-  const groupMap = new Map()
+  const seen = new Set()
+  const openItems = []
   for (const item of allItems) {
-    const key = item.path.join('/') + ' ' + item.question
-    let g = groupMap.get(key)
-    if (!g) {
-      g = { question: item.question, path: item.path, qIds: [], answers: [] }
-      groupMap.set(key, g)
-    }
-    g.qIds.push(item.qId)
-    if (item.answer) g.answers.push(item.answer)
+    const key = item.path.join('/') + '\n' + item.question
+    if (seen.has(key)) continue
+    seen.add(key)
+    openItems.push(item)
   }
-  const allGroups = [...groupMap.values()]
-  const openItems = allGroups
-    .filter(g => g.answers.length === 0)
-    .map(g => ({ qId: g.qIds[0], question: g.question, path: g.path, dupCount: g.qIds.length }))
-  const answeredCount = allGroups.length - openItems.length
-
-  console.log(`3) Raw: ${allItems.length} Q notes → deduped: ${allGroups.length} unique (${answeredCount} answered, ${openItems.length} open).`)
+  const answeredCount = 0  // qa slot is open-only; answered → bag-removed.
+  console.log(`3) ${openItems.length} open Q${openItems.length === 1 ? '' : 's'} (qa slot is open-only — answered Qs are bag-removed).`)
 
   // 4) Build intel manifest first so we know its sig before rendering
   //    the dashboard footer.
@@ -230,16 +210,9 @@ function renderDashboard({ openItems, answeredCount, totalCount, manifestSigPrev
     generatedAt: new Date().toISOString(),
     chromeSig: CHROME_SIG,
     branchesWalked: topCells,
-    totals: {
-      rawNotes: allItems.length,
-      uniqueGroups: allGroups.length,
-      answered: answeredCount,
-      open: openItems.length,
-    },
-    open: openItems.map(({ qId, question, path, dupCount }) => ({ qId, path, question, dupCount })),
-    answered: allGroups
-      .filter(g => g.answers.length > 0)
-      .map(g => ({ qIds: g.qIds, path: g.path, question: g.question, answers: g.answers })),
+    totals: { open: openItems.length, answered: 0 },
+    open: openItems.map(({ qId, question, path }) => ({ qId, path, question })),
+    answered: [],
     note: 'Carry-forward context for the next dashboard refresh. The reverse-name storage primitive is not yet wired through the bridge; for now this manifest sits as a sibling in /dashboard\'s context slot (after the HTML render).',
   }
   const manifestJson = JSON.stringify(manifest, null, 2)
