@@ -104,7 +104,10 @@ function walkForQa(rootCell, basePath = []) {
 
 // ─── chrome — reuse the existing Field Notes stylesheet ─────────────
 
-const CHROME_SIG = 'f3c6961382d77d68aaa56b6cc3ca5ce46abff31c9d4ff60a30d63eb37b91dc01'
+// Kept in sync with the chrome minted by `_dolphin-revision.cjs`. Same
+// content → same content-addressed sig, so when the dolphin generator
+// runs, the chrome sig only changes if its CSS actually changed.
+const CHROME_SIG = '456591794068ebfc7feb0f365da87ad197ca545369eb04ffe4d08f7ec2479751'
 
 const PAINT_SCRIPT = `
 (function(){try{var t=localStorage.getItem('hc:dolphin:theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(_){};})();
