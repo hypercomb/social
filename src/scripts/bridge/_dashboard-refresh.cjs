@@ -107,7 +107,7 @@ function walkForQa(rootCell, basePath = []) {
 // Kept in sync with the chrome minted by `_dolphin-revision.cjs`. Same
 // content → same content-addressed sig, so when the dolphin generator
 // runs, the chrome sig only changes if its CSS actually changed.
-const CHROME_SIG = 'fbdca8f2805a3c4cbea157715272c2d2bcbf4b4aa74baa048850a95f883c8ee7'
+const CHROME_SIG = 'e15672dd997e9ba08cdea5af847a6c5e0fad06551e223d34f6353e90c2498c7d'
 
 const PAINT_SCRIPT = `
 (function(){try{var t=localStorage.getItem('hc:dolphin:theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(_){};})();
@@ -121,29 +121,27 @@ const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 })[c])
 
-// Builds the canonical selection URL: `/parent/path/[childName]`.
-// Path-tail form is the spec — selection grammar lives in the path,
-// the bracket segment is the selection marker. Navigation's
-// parsePath() recognises this and SelectionService syncs natively
-// on the `navigate` event.
-function bracketUrl(path) {
+// Builds a direct link to the cell that owns the question, with a
+// `#q-<qId>` anchor so the page scrolls to that specific Q&A item on
+// load. Each cell page now renders its [Q]-prefixed notes inline (via
+// the dolphin generator's renderQaSection), so the user sees the
+// question directly on the page they land on — no selection / popup
+// juggling. Falls back to a plain `#qa` anchor if no qId.
+function cellUrl(path, qId) {
   if (path.length === 0) return '/'
-  const parent = path.slice(0, -1).join('/')
-  const child = path[path.length - 1]
-  const base = parent ? '/' + parent : ''
-  return base + '/[' + child + ']'
+  return '/' + path.join('/') + (qId ? `#q-${qId}` : '#qa')
 }
 
 function renderDashboard({ openItems, answeredCount, totalCount, manifestSigPreview }) {
   const lis = openItems.map(({ path, question, qId }) => `
-    <li><a class="fn-index-link" href="${escapeHtml(bracketUrl(path))}">
+    <li><a class="fn-index-link" href="${escapeHtml(cellUrl(path, qId))}">
       <span class="fn-index-name">/${escapeHtml(path.join('/'))}</span>
       <span class="fn-index-blurb">${escapeHtml(question.length > 200 ? question.slice(0, 197) + '…' : question)}</span>
     </a></li>`).join('')
 
   const body = openItems.length === 0
     ? `<p>No open questions right now. ${answeredCount} of ${totalCount} answered. As Claude needs input, items will surface here.</p>`
-    : `<p>${openItems.length} open question${openItems.length === 1 ? '' : 's'} across the revision — ${answeredCount}/${totalCount} answered. Each row links to its cell via the path-bracket URL form (<code>/parent/[name]</code>); the dev shell opens the editor for that tile so you can answer in its notes section.</p>`
+    : `<p>${openItems.length} open question${openItems.length === 1 ? '' : 's'} across the revision — ${answeredCount}/${totalCount} answered. Each row links straight to the cell page where the question is shown inline. To answer, open the editor on that tile and use its Q&A panel.</p>`
 
   return `<!doctype html>
 <html lang="en">
@@ -276,8 +274,8 @@ function renderDashboard({ openItems, answeredCount, totalCount, manifestSigPrev
   console.log(`  Refresh the dev shell to load the new context.`)
   if (openItems.length > 0) {
     console.log('\nOpen Qs (click any to open in the editor):')
-    for (const { path, question } of openItems) {
-      const url = bracketUrl(path)
+    for (const { path, question, qId } of openItems) {
+      const url = cellUrl(path, qId)
       const preview = question.length > 70 ? question.slice(0, 67) + '…' : question
       console.log(`  ${url}\n    ${preview}`)
     }

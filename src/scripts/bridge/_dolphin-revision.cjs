@@ -71,6 +71,44 @@ function uniqueNotes(notes) {
   return out
 }
 
+// ─── Q&A parsing ─────────────────────────────────────────────────────
+//
+// Pulls `[Q ...]` questions and `[A:<qId>] ...` answers out of a cell's
+// notes, pairs them by the question note's id, returns
+// [{ qId, question, answer | null }] in source order. Rendered inline
+// on the cell's page so the dashboard's link lands the user where
+// the question actually is.
+
+const Q_NOTE_RE = /^\[Q(?:\s+[^\]]*)?\]\s*([\s\S]+)$/
+const A_NOTE_RE = /^\[A:([a-zA-Z0-9_-]+)\]\s*([\s\S]+)$/
+
+function parseQa(cellNotes) {
+  const questions = []
+  const answers = new Map()
+  for (const note of cellNotes || []) {
+    const text = noteText(note).trim()
+    if (!text) continue
+    const q = Q_NOTE_RE.exec(text)
+    if (q) {
+      questions.push({ qId: note.id || note.name, question: q[1].trim() })
+      continue
+    }
+    const a = A_NOTE_RE.exec(text)
+    if (a) answers.set(a[1], a[2].trim())
+  }
+  // Dedupe by question text + answered state.
+  const seen = new Set()
+  const out = []
+  for (const q of questions) {
+    const answer = answers.get(q.qId) ?? null
+    const key = q.question + '\n' + (answer ?? '')
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push({ qId: q.qId, question: q.question, answer })
+  }
+  return out
+}
+
 // ─── per-branch heading icons (stroke-only line SVGs, 1em-sized) ────
 //
 // Per /instructions/styles: "Heading-icon shape — every heading splits
@@ -244,6 +282,54 @@ h1.fn-title .fn-title-text { flex: 1; }
 }
 .fn-body a:hover { color: var(--accent); text-decoration-color: var(--paper); }
 
+/* Q&A section — inline questions on cell pages. Visible directly on
+ * the page the dashboard links to, so the user sees what's being
+ * asked without having to open the editor. */
+.fn-qa {
+  display: grid;
+  gap: 1rem;
+  padding: 1.1rem 1.3rem;
+  background: var(--accent-soft);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+}
+.fn-qa h2 {
+  margin: 0 0 0.25rem;
+  font-family: var(--serif); font-weight: 500;
+  font-size: 1.05rem; letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--paper-muted);
+  display: flex; align-items: center; gap: 0.55em;
+}
+.fn-qa h2 .fn-title-icon { flex-shrink: 0; width: 1em; height: 1em; color: var(--accent); }
+.fn-qa h2 .fn-title-icon svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.fn-qa-item {
+  display: grid; gap: 0.45rem;
+  padding-bottom: 0.85rem;
+  border-bottom: 1px solid var(--rule);
+}
+.fn-qa-item:last-child { padding-bottom: 0; border-bottom: 0; }
+.fn-qa-question {
+  font-family: var(--serif); margin: 0;
+  color: var(--paper-strong); font-size: 1.02rem; line-height: 1.55;
+}
+.fn-qa-answer {
+  margin: 0; padding: 0.4rem 0 0.4rem 0.85rem;
+  border-left: 2px solid var(--accent);
+  color: var(--paper-muted); font-size: 0.95rem; line-height: 1.5;
+}
+.fn-qa-open .fn-qa-question::before {
+  content: '?'; display: inline-block; width: 1.1em;
+  text-align: center; margin-right: 0.4em;
+  color: var(--accent); font-weight: 600;
+}
+.fn-qa-foot {
+  font-family: var(--sans); font-size: 0.74rem;
+  letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--paper-faint);
+  margin-top: 0.3rem;
+}
+
 .fn-index {
   display: grid; gap: 1.1rem; list-style: none;
   counter-reset: fn-children; padding: 0; margin: 0;
@@ -342,8 +428,29 @@ function breadcrumbHtml(segments) {
 
 // ─── shared shell ───────────────────────────────────────────────────
 
-function shellHtml({ chromeSig, segments, title, titleIconName, lede, body, indexHeadingTitle, indexHeadingIconName, indexLinks }) {
+function renderQaSection(qaItems) {
+  if (!qaItems || qaItems.length === 0) return ''
+  const items = qaItems.map(({ qId, question, answer }) => `
+    <div id="q-${escapeHtml(qId)}" class="fn-qa-item ${answer ? 'fn-qa-answered' : 'fn-qa-open'}">
+      <p class="fn-qa-question">${escapeHtml(question)}</p>
+      ${answer
+        ? `<p class="fn-qa-answer">${escapeHtml(answer)}</p>`
+        : `<p class="fn-qa-foot">Open in editor to answer</p>`}
+    </div>`).join('')
+  const openCount = qaItems.filter(i => !i.answer).length
+  const heading = openCount > 0
+    ? `${openCount} open question${openCount === 1 ? '' : 's'}`
+    : `${qaItems.length} question${qaItems.length === 1 ? '' : 's'}`
+  return `
+    <section class="fn-qa" id="qa">
+      <h2><span class="fn-title-icon">${iconSvg('leaf')}</span><span class="fn-title-text">${heading}</span></h2>
+      ${items}
+    </section>`
+}
+
+function shellHtml({ chromeSig, segments, title, titleIconName, lede, body, qaItems, indexHeadingTitle, indexHeadingIconName, indexLinks }) {
   const breadcrumb = breadcrumbHtml(segments)
+  const qaHtml = renderQaSection(qaItems)
   const indexHtml = indexLinks && indexLinks.length
     ? `<ol class="fn-index">${indexLinks.map(({ name, href, blurb }) => `
       <li><a class="fn-index-link" href="${escapeHtml(href)}">
@@ -388,6 +495,8 @@ function shellHtml({ chromeSig, segments, title, titleIconName, lede, body, inde
   <hr class="fn-rule">
 
   <div class="fn-body">${body}${indexHeading ? '<hr class="fn-rule">' + indexHeading : ''}</div>
+
+  ${qaHtml}
 
   ${indexHtml}
 
@@ -469,6 +578,7 @@ function renderRoot(tree, chromeSig) {
     titleIconName: 'root',
     lede: 'A field, not a feeling — the model, the practice, the evidence, and the people building it together.',
     body,
+    qaItems: parseQa(tree.notes),
     indexHeadingTitle: 'The eight branches',
     indexHeadingIconName: 'leaf',
     indexLinks,
@@ -505,6 +615,7 @@ function renderBranch(branch, chromeSig) {
     titleIconName: branch.name,
     lede: meta.lede,
     body,
+    qaItems: parseQa(branch.notes),
     indexHeadingTitle: branch.children?.length ? 'In this branch' : '',
     indexHeadingIconName: 'leaf',
     indexLinks,
@@ -539,6 +650,7 @@ function renderLeaf(leaf, branchName, chromeSig) {
     titleIconName: 'leaf',
     lede: `Part of ${branchTitle}.`,
     body,
+    qaItems: parseQa(leaf.notes),
     indexLinks: [],
   })
 }
