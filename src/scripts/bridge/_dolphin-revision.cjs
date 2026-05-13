@@ -71,6 +71,39 @@ function uniqueNotes(notes) {
   return out
 }
 
+// ─── per-branch heading icons (stroke-only line SVGs, 1em-sized) ────
+//
+// Per /instructions/styles: "Heading-icon shape — every heading splits
+// into __title-icon + __title-text spans; flex wrapper; align-center;
+// small gap; inline SVG sized via heading font-size (1em square);
+// stroke-only line icons keep weight light against display type."
+// One icon per branch, plus a root icon, a default for leaves with no
+// specific symbol, and one for the dashboard cell.
+
+const BRANCH_ICONS = {
+  root:     '<circle cx="12" cy="12" r="9"/><path d="M3 12c4 0 4-4 9-4s5 4 9 4M3 12c4 0 4 4 9 4s5-4 9-4"/>',
+  model:    '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/>',
+  practice: '<circle cx="12" cy="8" r="3"/><path d="M4 19c4-6 12-6 16 0"/>',
+  evidence: '<path d="M6 3h9l4 4v14H6z"/><path d="M9 12h7M9 16h5M9 8h5"/>',
+  audience: '<circle cx="9" cy="9" r="3.2"/><circle cx="17" cy="11" r="2.4"/><path d="M2 19c1-3 4-5 7-5s6 2 7 5M14 19c.5-2 2.5-3 4.5-3s3 1 3.5 3"/>',
+  voice:    '<path d="M12 4v11"/><path d="M8 11a4 4 0 0 0 8 0"/><path d="M12 19v2M9 21h6"/>',
+  network:  '<circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="12" cy="18" r="2"/><path d="M6.5 7.3 11 16.3M17.5 7.3 13 16.3"/>',
+  platform: '<path d="M12 3 21 8l-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>',
+  business: '<path d="M3 21h18"/><path d="M5 21V9l7-5 7 5v12"/><path d="M10 21v-7h4v7"/>',
+  // generic fallback for leaves
+  leaf:     '<circle cx="12" cy="12" r="3"/>',
+  // dashboard cell
+  dashboard:'<rect x="3" y="3" width="8" height="8" rx="1.2"/><rect x="13" y="3" width="8" height="5" rx="1.2"/><rect x="13" y="10" width="8" height="11" rx="1.2"/><rect x="3" y="13" width="8" height="8" rx="1.2"/>',
+}
+
+// Section heading icon — a quiet "list of items" mark for `<h2>`s.
+const SECTION_ICON = '<path d="M4 7h12M4 12h16M4 17h10"/>'
+
+function iconSvg(name) {
+  const path = BRANCH_ICONS[name] ?? BRANCH_ICONS.leaf
+  return `<svg viewBox="0 0 24 24" aria-hidden="true">${path}</svg>`
+}
+
 // ─── chrome stylesheet (one resource, every page links it) ──────────
 
 const CHROME_CSS = `
@@ -121,7 +154,7 @@ html {
 }
 body {
   display: flex; justify-content: center;
-  padding: clamp(1.5rem, 4vw, 3rem) clamp(1rem, 4vw, 2rem) 5rem;
+  padding: clamp(2.5rem, 6vw, 5rem) clamp(1rem, 4vw, 2rem) 5rem;
 }
 main { width: 100%; max-width: 38rem; display: grid; gap: 2.6rem; }
 
@@ -150,12 +183,26 @@ main { width: 100%; max-width: 38rem; display: grid; gap: 2.6rem; }
 [data-theme="light"] .theme-toggle .sun { display: block; }
 [data-theme="light"] .theme-toggle .moon { display: none; }
 
+/* Heading-icon shape (per /instructions/styles note #6):
+ * h1.fn-title contains a .fn-title-icon span (inline SVG, 1em square)
+ * and a .fn-title-text span. Flex wrapper, align-center, small gap.
+ * Icon scales with the heading's font-size. Stroke-only line icons
+ * keep visual weight light against the display type. */
 h1.fn-title {
+  display: flex; align-items: center; gap: 0.55em;
   font-family: var(--serif); font-weight: 400;
   font-size: clamp(1.75rem, 4.6vw, 2.85rem); line-height: 1.08;
   letter-spacing: -0.01em; color: var(--paper-strong);
   margin: -0.2rem 0 0;
 }
+h1.fn-title .fn-title-icon {
+  flex-shrink: 0; width: 1em; height: 1em; color: var(--accent);
+}
+h1.fn-title .fn-title-icon svg {
+  width: 100%; height: 100%; fill: none; stroke: currentColor;
+  stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round;
+}
+h1.fn-title .fn-title-text { flex: 1; }
 
 .fn-lede {
   font-family: var(--serif);
@@ -167,10 +214,19 @@ h1.fn-title {
 
 .fn-body { display: grid; gap: 1.4rem; font-size: 1.04rem; line-height: 1.7; color: var(--paper); }
 .fn-body h2 {
+  display: flex; align-items: center; gap: 0.55em;
   font-family: var(--serif); font-weight: 500;
   font-size: 1.3rem; line-height: 1.25; letter-spacing: -0.005em;
   color: var(--paper-strong); margin-top: 0.6rem;
 }
+.fn-body h2 .fn-title-icon {
+  flex-shrink: 0; width: 1em; height: 1em; color: var(--accent);
+}
+.fn-body h2 .fn-title-icon svg {
+  width: 100%; height: 100%; fill: none; stroke: currentColor;
+  stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round;
+}
+.fn-body h2 .fn-title-text { flex: 1; }
 .fn-body p { font-family: var(--serif); }
 .fn-body a {
   color: var(--paper-strong); text-decoration: underline;
@@ -278,7 +334,7 @@ function breadcrumbHtml(segments) {
 
 // ─── shared shell ───────────────────────────────────────────────────
 
-function shellHtml({ chromeSig, segments, title, lede, body, indexLinks }) {
+function shellHtml({ chromeSig, segments, title, titleIconName, lede, body, indexHeadingTitle, indexHeadingIconName, indexLinks }) {
   const breadcrumb = breadcrumbHtml(segments)
   const indexHtml = indexLinks && indexLinks.length
     ? `<ol class="fn-index">${indexLinks.map(({ name, href, blurb }) => `
@@ -286,6 +342,10 @@ function shellHtml({ chromeSig, segments, title, lede, body, indexLinks }) {
         <span class="fn-index-name">${escapeHtml(name)}</span>
         ${blurb ? `<span class="fn-index-blurb">${escapeHtml(blurb)}</span>` : ''}
       </a></li>`).join('')}</ol>`
+    : ''
+
+  const indexHeading = indexLinks && indexLinks.length && indexHeadingTitle
+    ? `<h2><span class="fn-title-icon">${iconSvg(indexHeadingIconName ?? 'leaf')}</span><span class="fn-title-text">${escapeHtml(indexHeadingTitle)}</span></h2>`
     : ''
 
   const footerLabel = segments.length
@@ -311,14 +371,17 @@ function shellHtml({ chromeSig, segments, title, lede, body, indexLinks }) {
     </button>
   </header>
 
-  <h1 class="fn-title">${escapeHtml(title)}</h1>
+  <h1 class="fn-title">
+    <span class="fn-title-icon">${iconSvg(titleIconName ?? 'leaf')}</span>
+    <span class="fn-title-text">${escapeHtml(title)}</span>
+  </h1>
   ${lede ? `<p class="fn-lede">${escapeHtml(lede)}</p>` : ''}
 
   <hr class="fn-rule">
 
-  <div class="fn-body">${body}</div>
+  <div class="fn-body">${body}${indexHeading ? '<hr class="fn-rule">' + indexHeading : ''}</div>
 
-  ${indexHtml ? `<hr class="fn-rule">${indexHtml}` : ''}
+  ${indexHtml}
 
   <footer class="fn-foot">${escapeHtml(footerLabel)}</footer>
 </main>
@@ -389,16 +452,17 @@ function renderRoot(tree, chromeSig) {
   const body = `
     <p>Relational Intelligence isn’t a personality trait or a soft skill. It’s a learnable capacity that shows up in how individuals, couples, professionals, organizations, and communities meet each other.</p>
     <p>This is the field — its model, its practice, its evidence, and the people building it together. Each branch below is its own self-contained area of the work; together they hold the whole.</p>
-    <h2>The eight branches</h2>
-    <p>Each branch grows on its own and composes with the others. Click through to enter.</p>
   `
 
   return shellHtml({
     chromeSig,
     segments: ['dolphin'],
     title: 'Relating well is an intelligence — name it, train it, live it.',
+    titleIconName: 'root',
     lede: 'A field, not a feeling — the model, the practice, the evidence, and the people building it together.',
     body,
+    indexHeadingTitle: 'The eight branches',
+    indexHeadingIconName: 'leaf',
     indexLinks,
   })
 }
@@ -430,8 +494,11 @@ function renderBranch(branch, chromeSig) {
     chromeSig,
     segments,
     title: meta.title,
+    titleIconName: branch.name,
     lede: meta.lede,
     body,
+    indexHeadingTitle: branch.children?.length ? 'In this branch' : '',
+    indexHeadingIconName: 'leaf',
     indexLinks,
   })
 }
@@ -461,6 +528,7 @@ function renderLeaf(leaf, branchName, chromeSig) {
     chromeSig,
     segments,
     title,
+    titleIconName: 'leaf',
     lede: `Part of ${branchTitle}.`,
     body,
     indexLinks: [],
@@ -483,15 +551,59 @@ function renderDashboard({ chromeSig, qaItems }) {
     chromeSig,
     segments,
     title: 'Dashboard',
+    titleIconName: 'dashboard',
     lede: 'Open questions across the revision. One place to navigate the work that’s waiting on you.',
     body,
+    indexHeadingTitle: qaItems.length > 0 ? 'Open questions' : '',
+    indexHeadingIconName: 'leaf',
     indexLinks,
   })
 }
 
 // ─── main ───────────────────────────────────────────────────────────
 
+// ─── instructions/styles decisions (committed each run so they persist) ─
+
+// Pin the concrete design decisions back to /instructions/styles as
+// notes so any future regen reads them as rules. Idempotent-by-text:
+// the script checks existing notes and skips identical ones.
+const STYLE_DECISIONS = [
+  '[design] Color palette — dark mode: ink #0c1622, paper #e8e2d6, accent #7eb6d6 (ocean light), rule rgba(232,226,214,0.14). Light mode: cream #f5ede0, ink #1a1f2c, accent #1f4376 (deep ocean), rule rgba(26,31,44,0.16). Codegen reads these via CSS custom properties on :root + [data-theme="light"] override.',
+  '[design] Typography — display + body: serif (Source Serif 4 → Iowan Old Style → Georgia → Times New Roman). UI sans only for the eyebrow tag and the index numbering. Headline scale: clamp(1.75rem, 4.6vw, 2.85rem). Body 1.04rem at line-height 1.7. Lede clamp(1.1rem, 1.6vw, 1.22rem).',
+  '[design] Layout — single-column, max-width 38rem, centered. Body padding: clamp(2.5rem, 6vw, 5rem) top / clamp(1rem, 4vw, 2rem) sides / 5rem bottom. Main grid gap 2.6rem between major sections.',
+  '[design] Branch icons — Model=concentric-circle, Practice=figure-with-arc, Evidence=document-with-lines, Audience=people-grouped, Voice=microphone, Network=connected-nodes, Platform=stacked-layers, Business=building. Root=field-disk-with-rings. Leaf default=small-disk. Dashboard=four-rect-grid. All stroke-only line SVGs, 1.4-1.5 stroke-width, rendered at 1em square in heading.',
+  '[design] Numbered index — children listed as `<ol class="fn-index">` with decimal-leading-zero counters. Each item: name (serif, 1.18rem) + one-line blurb (serif, 0.99rem, muted). Underline-on-hover via text-decoration-color accent. Slight translateX(2px) on hover for kinetic affordance.',
+]
+
+async function pinStyleDecisions() {
+  console.log('0) Pinning style decisions to /instructions/styles...')
+  // Read existing notes; skip texts that already exist verbatim.
+  const inf = await withRenderer({ op: 'inflate', segments: ['instructions', 'styles'] })
+  const existingTexts = new Set()
+  if (inf.ok) {
+    for (const n of inf.data?.notes || []) {
+      const t = noteText(n).trim()
+      if (t) existingTexts.add(t)
+    }
+  }
+  let added = 0
+  for (const text of STYLE_DECISIONS) {
+    if (existingTexts.has(text)) continue
+    const r = await withRenderer({
+      op: 'note-add',
+      cell: 'styles',
+      segments: ['instructions'],
+      text,
+    })
+    if (r.ok) added++
+    else console.log(`   FAILED to add: ${r.error}`)
+  }
+  console.log(`   ${added} new note(s) added (${existingTexts.size} already present, skipped)`)
+}
+
 ;(async () => {
+  await pinStyleDecisions()
+
   console.log('1) Reading dolphin tree...')
   const tree = await withRenderer({ op: 'inflate', segments: ['dolphin'] })
   if (!tree.ok) { console.log('   FAILED:', tree.error); process.exit(1) }
