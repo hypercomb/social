@@ -107,7 +107,7 @@ function walkForQa(rootCell, basePath = []) {
 // Kept in sync with the chrome minted by `_dolphin-revision.cjs`. Same
 // content → same content-addressed sig, so when the dolphin generator
 // runs, the chrome sig only changes if its CSS actually changed.
-const CHROME_SIG = '456591794068ebfc7feb0f365da87ad197ca545369eb04ffe4d08f7ec2479751'
+const CHROME_SIG = 'fbdca8f2805a3c4cbea157715272c2d2bcbf4b4aa74baa048850a95f883c8ee7'
 
 const PAINT_SCRIPT = `
 (function(){try{var t=localStorage.getItem('hc:dolphin:theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(_){};})();
