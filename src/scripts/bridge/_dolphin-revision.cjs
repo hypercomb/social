@@ -152,11 +152,19 @@ html {
   -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
   transition: background-color .25s var(--easing), color .25s var(--easing);
 }
-body {
-  display: flex; justify-content: center;
+/* Centering: site-view mounts pages inside a position:fixed host div,
+ * which takes them out of the body flex flow. Center via main with
+ * margin auto and put the padding on main so it works regardless of
+ * where the page is mounted. */
+body { margin: 0; }
+main {
+  width: 100%;
+  max-width: 38rem;
+  margin: 0 auto;
   padding: clamp(2.5rem, 6vw, 5rem) clamp(1rem, 4vw, 2rem) 5rem;
+  display: grid;
+  gap: 2.6rem;
 }
-main { width: 100%; max-width: 38rem; display: grid; gap: 2.6rem; }
 
 .fn-eyebrow {
   display: flex; align-items: center; justify-content: space-between; gap: 1rem;
